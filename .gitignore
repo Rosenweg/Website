@@ -1,0 +1,31 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editor directories and files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.bak
+*.log
+
+# Node modules (falls später JavaScript-Build-Tools verwendet werden)
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Build directories (falls später verwendet)
+dist/
+build/
