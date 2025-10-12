@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stockwerkeigentümerschaft Rosenweg - Kaiseraugst</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-lg sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <svg class="h-8 w-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
+                    </svg>
+                    <span class="ml-2 text-xl font-semibold text-gray-800">StWE Rosenweg</span>
+                </div>
+                <div class="hidden md:flex items-center space-x-8">
+                    <a href="#home" class="text-gray-700 hover:text-blue-600 transition">Start</a>
+                    <a href="#about" class="text-gray-700 hover:text-blue-600 transition">Über uns</a>
+                    <a href="#verwaltung" class="text-gray-700 hover:text-blue-600 transition">Verwaltung</a>
+                    <a href="#infos" class="text-gray-700 hover:text-blue-600 transition">Informationen</a>
+                    <a href="#dokumente" class="text-gray-700 hover:text-blue-600 transition">Dokumente</a>
+                    <a href="#kontakt" class="text-gray-700 hover:text-blue-600 transition">Kontakt</a>
+                </div>
+                <div class="md:hidden flex items-center">
+                    <button id="mobile-menu-button" class="text-gray-700 hover:text-blue-600">
+                        <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+        <!-- Mobile Menu -->
+        <div id="mobile-menu" class="hidden md:hidden bg-white border-t">
+            <div class="px-2 pt-2 pb-3 space-y-1">
+                <a href="#home" class="block px-3 py-2 text-gray-700 hover:bg-gray-100">Start</a>
+                <a href="#about" class="block px-3 py-2 text-gray-700 hover:bg-gray-100">Über uns</a>
+                <a href="#verwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100">Verwaltung</a>
+                <a href="#infos" class="block px-3 py-2 text-gray-700 hover:bg-gray-100">Informationen</a>
+                <a href="#dokumente" class="block px-3 py-2 text-gray-700 hover:bg-gray-100">Dokumente</a>
+                <a href="#kontakt" class="block px-3 py-2 text-gray-700 hover:bg-gray-100">Kontakt</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section id="home" class="bg-gradient-to-r from-blue-600 to-blue-800 text-white py-20">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center">
+                <h1 class="text-4xl md:text-5xl font-bold mb-4">Willkommen</h1>
+                <h2 class="text-2xl md:text-3xl mb-6">Stockwerkeigentümerschaft Rosenweg</h2>
+                <p class="text-xl mb-8">4303 Kaiseraugst, Aargau</p>
+                <div class="flex flex-col sm:flex-row gap-4 justify-center">
+                    <a href="#kontakt" class="bg-white text-blue-600 px-8 py-3 rounded-lg font-semibold hover:bg-gray-100 transition">Kontakt aufnehmen</a>
+                    <a href="#dokumente" class="border-2 border-white px-8 py-3 rounded-lg font-semibold hover:bg-white hover:text-blue-600 transition">Dokumente</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Aktuelle Mitteilungen -->
+    <section class="py-12 bg-yellow-50 border-l-4 border-yellow-400">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-start">
+                <svg class="h-6 w-6 text-yellow-600 mr-3 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <div>
+                    <h3 class="text-xl font-semibold text-gray-800 mb-2">Aktuelle Mitteilungen</h3>
+                    <p class="text-gray-700">Bitte beachten Sie die aktuellen Informationen zur Eigentümerversammlung und anstehenden Wartungsarbeiten.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Über die Liegenschaft -->
+    <section id="about" class="py-16 bg-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">Über unsere Liegenschaft</h2>
+            <div class="grid md:grid-cols-2 gap-8">
+                <div class="bg-gray-50 p-6 rounded-lg">
+                    <h3 class="text-xl font-semibold mb-4 text-blue-600">Standort</h3>
+                    <p class="text-gray-700 mb-4">
+                        <strong>Adresse:</strong><br>
+                        Rosenweg<br>
+                        4303 Kaiseraugst<br>
+                        Kanton Aargau, Schweiz
+                    </p>
+                    <div class="mt-4">
+                        <p class="text-sm text-gray-600">
+                            <strong>Lage:</strong> Ruhige Wohnstraße in Kaiseraugst, nahe Schulen, Einkaufsmöglichkeiten und öffentlichem Verkehr
+                        </p>
+                    </div>
+                </div>
+                <div class="bg-gray-50 p-6 rounded-lg">
+                    <h3 class="text-xl font-semibold mb-4 text-blue-600">Objektinformationen</h3>
+                    <div class="space-y-2 text-gray-700">
+                        <p><strong>Anzahl Wohnungen:</strong> [Anzahl eintragen]</p>
+                        <p><strong>Baujahr:</strong> [Jahr eintragen]</p>
+                        <p><strong>Stockwerke:</strong> [Anzahl eintragen]</p>
+                        <p><strong>Heizung:</strong> [System eintragen]</p>
+                        <p><strong>Parkplätze:</strong> [Anzahl eintragen]</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Verwaltung & Kontakte -->
+    <section id="verwaltung" class="py-16 bg-gray-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">Verwaltung & Kontakte</h2>
+            <div class="grid md:grid-cols-3 gap-6">
+                <!-- Hausverwaltung -->
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <div class="flex items-center mb-4">
+                        <svg class="h-8 w-8 text-blue-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
+                        </svg>
+                        <h3 class="text-xl font-semibold">Hausverwaltung</h3>
+                    </div>
+                    <p class="text-gray-700 mb-2"><strong>[Name der Verwaltung]</strong></p>
+                    <p class="text-gray-600 text-sm mb-2">[Adresse]</p>
+                    <p class="text-gray-600 text-sm mb-2">Tel: [Telefonnummer]</p>
+                    <p class="text-gray-600 text-sm mb-2">E-Mail: [E-Mail]</p>
+                    <p class="text-gray-600 text-sm">Erreichbar: Mo-Fr 8:00-17:00 Uhr</p>
+                </div>
+
+                <!-- Verwaltungsrat -->
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <div class="flex items-center mb-4">
+                        <svg class="h-8 w-8 text-blue-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                        </svg>
+                        <h3 class="text-xl font-semibold">Verwaltungsrat</h3>
+                    </div>
+                    <p class="text-gray-700 mb-2"><strong>Präsident/in:</strong> [Name]</p>
+                    <p class="text-gray-600 text-sm mb-3">[E-Mail]</p>
+                    <p class="text-gray-700 mb-2"><strong>Mitglied:</strong> [Name]</p>
+                    <p class="text-gray-600 text-sm mb-3">[E-Mail]</p>
+                    <p class="text-gray-700 mb-2"><strong>Mitglied:</strong> [Name]</p>
+                    <p class="text-gray-600 text-sm">[E-Mail]</p>
+                </div>
+
+                <!-- Hauswart -->
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <div class="flex items-center mb-4">
+                        <svg class="h-8 w-8 text-blue-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                        </svg>
+                        <h3 class="text-xl font-semibold">Hauswart</h3>
+                    </div>
+                    <p class="text-gray-700 mb-2"><strong>[Name]</strong></p>
+                    <p class="text-gray-600 text-sm mb-2">Tel: [Telefonnummer]</p>
+                    <p class="text-gray-600 text-sm mb-2">Mobile: [Mobile]</p>
+                    <p class="text-gray-600 text-sm">Erreichbar: [Zeiten]</p>
+                </div>
+            </div>
+
+            <!-- Notfallkontakte -->
+            <div class="mt-8 bg-red-50 border-l-4 border-red-500 p-6 rounded-lg">
+                <h3 class="text-xl font-semibold text-red-800 mb-4 flex items-center">
+                    <svg class="h-6 w-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                    </svg>
+                    Notfallkontakte
+                </h3>
+                <div class="grid md:grid-cols-2 gap-4 text-gray-700">
+                    <div>
+                        <p class="font-semibold">Polizei:</p>
+                        <p class="text-2xl font-bold text-red-600">117</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold">Feuerwehr:</p>
+                        <p class="text-2xl font-bold text-red-600">118</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold">Sanität:</p>
+                        <p class="text-2xl font-bold text-red-600">144</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold">Störungsdienst Heizung:</p>
+                        <p>[Telefonnummer eintragen]</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Wichtige Informationen -->
+    <section id="infos" class="py-16 bg-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">Wichtige Informationen</h2>
+            
+            <!-- Abfallentsorgung -->
+            <div class="bg-green-50 p-6 rounded-lg mb-6">
+                <h3 class="text-2xl font-semibold text-green-800 mb-4 flex items-center">
+                    <svg class="h-6 w-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                    </svg>
+                    Abfallentsorgung
+                </h3>
+                <div class="grid md:grid-cols-2 gap-6 text-gray-700">
+                    <div>
+                        <p class="font-semibold mb-2">Kehrichtabfuhr:</p>
+                        <ul class="list-disc list-inside space-y-1 text-sm">
+                            <li>Freitags (außer Feiertage)</li>
+                            <li>Montags (außer Feiertage)</li>
+                            <li>Bereitstellung bis 07:00 Uhr</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <p class="font-semibold mb-2">Grüntour:</p>
+                        <ul class="list-disc list-inside space-y-1 text-sm">
+                            <li>Grünabfälle, Äste und Zweige</li>
+                            <li>Nach Abfallkalender</li>
+                            <li>Kostenlose Entsorgung</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <p class="font-semibold mb-2">Wertstoffsammlung:</p>
+                        <ul class="list-disc list-inside space-y-1 text-sm">
+                            <li>Papier/Karton</li>
+                            <li>Glas (nach Farben getrennt)</li>
+                            <li>PET, Alu, Weissblech</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <p class="font-semibold mb-2">Entsorgungsstelle:</p>
+                        <p class="text-sm mb-1">REWAG Entsorgung AG</p>
+                        <p class="text-sm mb-1">Rinaustrasse 633</p>
+                        <p class="text-sm mb-1">4303 Kaiseraugst</p>
+                        <p class="text-sm">Tel: 061 816 99 70</p>
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <a href="https://www.abfall-gaf.ch" target="_blank" class="text-blue-600 hover:underline text-sm">
+                        → Aktueller Abfallkalender auf abfall-gaf.ch
+                    </a>
+                </div>
+            </div>
+
+            <!-- Weitere Infos -->
+            <div class="grid md:grid-cols-3 gap-6">
+                <div class="bg-gray-50 p-6 rounded-lg">
+                    <h3 class="text-xl font-semibold mb-3 text-blue-600">Hausordnung</h3>
+                    <ul class="text-sm text-gray-700 space-y-2">
+                        <li>• Nachtruhe: 22:00 - 06:00 Uhr</li>
+                        <li>• Mittagsruhe: 12:00 - 13:00 Uhr</li>
+                        <li>• Sonntags ganztägig</li>
+                        <li>• Rücksicht auf Nachbarn</li>
+                    </ul>
+                </div>
+                <div class="bg-gray-50 p-6 rounded-lg">
+                    <h3 class="text-xl font-semibold mb-3 text-blue-600">Waschküche</h3>
+                    <ul class="text-sm text-gray-700 space-y-2">
+                        <li>• Reservierung erforderlich</li>
+                        <li>• Nach Benutzung reinigen</li>
+                        <li>• [Öffnungszeiten]</li>
+                        <li>• [Reservationssystem]</li>
+                    </ul>
+                </div>
+                <div class="bg-gray-50 p-6 rounded-lg">
+                    <h3 class="text-xl font-semibold mb-3 text-blue-600">Parkplätze</h3>
+                    <ul class="text-sm text-gray-700 space-y-2">
+                        <li>• Nummerierte Plätze</li>
+                        <li>• Besucherparkplätze vorhanden</li>
+                        <li>• Keine Dauerbesetzung</li>
+                        <li>• [Weitere Regelungen]</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Termine & Kalender -->
+    <section class="py-16 bg-gray-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">Termine & Veranstaltungen</h2>
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <div class="space-y-4">
+                    <div class="border-l-4 border-blue-600 pl-4 py-2">
+                        <p class="font-semibold text-gray-800">Nächste Eigentümerversammlung</p>
+                        <p class="text-gray-600 text-sm">[Datum und Uhrzeit eintragen]</p>
+                        <p class="text-gray-600 text-sm">[Ort eintragen]</p>
+                    </div>
+                    <div class="border-l-4 border-green-600 pl-4 py-2">
+                        <p class="font-semibold text-gray-800">Geplante Wartungsarbeiten</p>
+                        <p class="text-gray-600 text-sm">[Datum eintragen]</p>
+                        <p class="text-gray-600 text-sm">[Beschreibung der Arbeiten]</p>
+                    </div>
+                    <div class="border-l-4 border-yellow-600 pl-4 py-2">
+                        <p class="font-semibold text-gray-800">Hausreinigung</p>
+                        <p class="text-gray-600 text-sm">Jeden [Wochentag]</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Dokumente -->
+    <section id="dokumente" class="py-16 bg-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">Dokumente</h2>
+            <div class="bg-blue-50 border-l-4 border-blue-500 p-6 rounded-lg mb-6">
+                <p class="text-gray-700">
+                    <svg class="h-5 w-5 inline mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                    </svg>
+                    <strong>Hinweis:</strong> Die meisten Dokumente sind passwortgeschützt und nur für Eigentümer zugänglich. 
+                    Bei Fragen wenden Sie sich bitte an die Hausverwaltung.
+                </p>
+            </div>
+            <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div class="bg-gray-50 p-4 rounded-lg hover:shadow-md transition">
+                    <div class="flex items-center mb-2">
+                        <svg class="h-6 w-6 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <h3 class="font-semibold">Hausordnung</h3>
+                    </div>
+                    <p class="text-sm text-gray-600 mb-2">Reglement für alle Bewohner</p>
+                    <a href="#" class="text-blue-600 hover:underline text-sm">Download (PDF)</a>
+                </div>
+                <div class="bg-gray-50 p-4 rounded-lg hover:shadow-md transition">
+                    <div class="flex items-center mb-2">
+                        <svg class="h-6 w-6 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <h3 class="font-semibold">Protokolle</h3>
+                    </div>
+                    <p class="text-sm text-gray-600 mb-2">Versammlungsprotokolle</p>
+                    <a href="#" class="text-blue-600 hover:underline text-sm">🔒 Geschützter Bereich</a>
+                </div>
+                <div class="bg-gray-50 p-4 rounded-lg hover:shadow-md transition">
+                    <div class="flex items-center mb-2">
+                        <svg class="h-6 w-6 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <h3 class="font-semibold">Jahresabrechnung</h3>
+                    </div>
+                    <p class="text-sm text-gray-600 mb-2">Finanzübersicht</p>
+                    <a href="#" class="text-blue-600 hover:underline text-sm">🔒 Geschützter Bereich</a>
+                </div>
+                <div class="bg-gray-50 p-4 rounded-lg hover:shadow-md transition">
+                    <div class="flex items-center mb-2">
+                        <svg class="h-6 w-6 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <h3 class="font-semibold">Versicherungen</h3>
+                    </div>
+                    <p class="text-sm text-gray-600 mb-2">Versicherungsübersicht</p>
+                    <a href="#" class="text-blue-600 hover:underline text-sm">🔒 Geschützter Bereich</a>
+                </div>
+                <div class="bg-gray-50 p-4 rounded-lg hover:shadow-md transition">
+                    <div class="flex items-center mb-2">
+                        <svg class="h-6 w-6 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <h3 class="font-semibold">Wartungsplan</h3>
+                    </div>
+                    <p class="text-sm text-gray-600 mb-2">Geplante Unterhaltsarbeiten</p>
+                    <a href="#" class="text-blue-600 hover:underline text-sm">🔒 Geschützter Bereich</a>
+                </div>
+                <div class="bg-gray-50 p-4 rounded-lg hover:shadow-md transition">
+                    <div class="flex items-center mb-2">
+                        <svg class="h-6 w-6 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <h3 class="font-semibold">Formulare</h3>
+                    </div>
+                    <p class="text-sm text-gray-600 mb-2">Nützliche Formulare</p>
+                    <a href="#" class="text-blue-600 hover:underline text-sm">Download</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Kontakt -->
+    <section id="kontakt" class="py-16 bg-gray-50">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">Kontakt</h2>
+            <div class="bg-white rounded-lg shadow-md p-8">
+                <form class="space-y-6">
+                    <div class="grid md:grid-cols-2 gap-6">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Name</label>
+                            <input type="text" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="Ihr Name">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">E-Mail</label>
+                            <input type="email" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="ihre@email.ch">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Betreff</label>
+                        <input type="text" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="Betreff">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Nachricht</label>
+                        <textarea rows="5" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="Ihre Nachricht..."></textarea>
+                    </div>
+                    <button type="submit" class="w-full bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition">
+                        Nachricht senden
+                    </button>
+                </form>
+                <div class="mt-6 pt-6 border-t border-gray-200">
+                    <p class="text-sm text-gray-600 text-center">
+                        Für dringende Anfragen kontaktieren Sie bitte direkt die Hausverwaltung
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-gray-800 text-white py-8">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid md:grid-cols-3 gap-8">
+                <div>
+                    <h3 class="text-lg font-semibold mb-4">Stockwerkeigentümerschaft Rosenweg</h3>
+                    <p class="text-gray-300 text-sm">
+                        Rosenweg<br>
+                        4303 Kaiseraugst<br>
+                        Kanton Aargau, Schweiz
+                    </p>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold mb-4">Schnelllinks</h3>
+                    <ul class="space-y-2 text-sm">
+                        <li><a href="#home" class="text-gray-300 hover:text-white transition">Start</a></li>
+                        <li><a href="#verwaltung" class="text-gray-300 hover:text-white transition">Verwaltung</a></li>
+                        <li><a href="#dokumente" class="text-gray-300 hover:text-white transition">Dokumente</a></li>
+                        <li><a href="#kontakt" class="text-gray-300 hover:text-white transition">Kontakt</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold mb-4">Nützliche Links</h3>
+                    <ul class="space-y-2 text-sm">
+                        <li><a href="https://www.kaiseraugst.ch" target="_blank" class="text-gray-300 hover:text-white transition">Gemeinde Kaiseraugst</a></li>
+                        <li><a href="https://www.abfall-gaf.ch" target="_blank" class="text-gray-300 hover:text-white transition">Abfallkalender GAF</a></li>
+                        <li><a href="https://www.ag.ch" target="_blank" class="text-gray-300 hover:text-white transition">Kanton Aargau</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="mt-8 pt-8 border-t border-gray-700 text-center text-sm text-gray-400">
+                <p>&copy; 2025 Stockwerkeigentümerschaft Rosenweg. Alle Rechte vorbehalten.</p>
+                <p class="mt-2">Letzte Aktualisierung: Oktober 2025</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Mobile Menu Script -->
+    <script>
+        const mobileMenuButton = document.getElementById('mobile-menu-button');
+        const mobileMenu = document.getElementById('mobile-menu');
+        
+        mobileMenuButton.addEventListener('click', () => {
+            mobileMenu.classList.toggle('hidden');
+        });
+
+        // Smooth scrolling für Anker-Links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                    // Mobile Menu schließen nach Klick
+                    mobileMenu.classList.add('hidden');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
