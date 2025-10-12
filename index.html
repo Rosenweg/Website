@@ -324,44 +324,62 @@
                     <svg class="h-6 w-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
                     </svg>
-                    Abfallentsorgung
+                    Abfallentsorgung & Recycling
                 </h3>
-                <div class="grid md:grid-cols-2 gap-6 text-gray-700">
-                    <div>
-                        <p class="font-semibold mb-2">Kehrichtabfuhr:</p>
-                        <ul class="list-disc list-inside space-y-1 text-sm">
-                            <li>Freitags (außer Feiertage)</li>
-                            <li>Montags (außer Feiertage)</li>
-                            <li>Bereitstellung bis 07:00 Uhr</li>
-                        </ul>
+                
+                <!-- Wichtigste Infos -->
+                <div class="grid md:grid-cols-3 gap-4 mb-4">
+                    <div class="bg-white p-4 rounded-lg">
+                        <p class="font-semibold mb-2 text-green-700">📅 Kehrichtabfuhr:</p>
+                        <p class="text-sm"><strong>Freitags & Montags</strong></p>
+                        <p class="text-xs text-gray-600">Bereitstellung bis 07:00 Uhr</p>
                     </div>
-                    <div>
-                        <p class="font-semibold mb-2">Grüntour:</p>
-                        <ul class="list-disc list-inside space-y-1 text-sm">
-                            <li>Grünabfälle, Äste und Zweige</li>
-                            <li>Nach Abfallkalender</li>
-                            <li>Kostenlose Entsorgung</li>
-                        </ul>
+                    <div class="bg-white p-4 rounded-lg">
+                        <p class="font-semibold mb-2 text-green-700">🌿 Grüngut & Bioabfall:</p>
+                        <p class="text-sm">Grüngutmulden, Bioklappe</p>
+                        <p class="text-xs text-gray-600">Chipkarte auf Gemeinde abholen</p>
                     </div>
-                    <div>
-                        <p class="font-semibold mb-2">Wertstoffsammlung:</p>
-                        <ul class="list-disc list-inside space-y-1 text-sm">
-                            <li>Papier/Karton</li>
-                            <li>Glas (nach Farben getrennt)</li>
-                            <li>PET, Alu, Weissblech</li>
-                        </ul>
-                    </div>
-                    <div>
-                        <p class="font-semibold mb-2">Entsorgungsstelle:</p>
-                        <p class="text-sm mb-1">REWAG Entsorgung AG</p>
-                        <p class="text-sm mb-1">Rinaustrasse 633</p>
-                        <p class="text-sm mb-1">4303 Kaiseraugst</p>
-                        <p class="text-sm">Tel: 061 816 99 70</p>
+                    <div class="bg-white p-4 rounded-lg">
+                        <p class="font-semibold mb-2 text-green-700">📍 Sammelstellen:</p>
+                        <p class="text-sm">8 Standorte in Fußnähe</p>
+                        <p class="text-xs text-gray-600">Glas, PET, Alu, Textilien</p>
                     </div>
                 </div>
-                <div class="mt-4">
-                    <a href="https://www.abfall-gaf.ch" target="_blank" class="text-blue-600 hover:underline text-sm">
-                        → Aktueller Abfallkalender auf abfall-gaf.ch
+
+                <!-- REWAG -->
+                <div class="bg-white p-4 rounded-lg mb-4">
+                    <div class="flex items-start justify-between">
+                        <div>
+                            <p class="font-semibold text-gray-800 mb-1">🏢 REWAG Entsorgung AG</p>
+                            <p class="text-sm text-gray-600 mb-1">Rinaustrasse 633, 4303 Kaiseraugst</p>
+                            <p class="text-xs text-gray-600">Recyclinghof: Mo–Sa 06:00–20:00</p>
+                        </div>
+                        <a href="tel:+41618169970" class="text-blue-600 hover:underline text-sm whitespace-nowrap ml-4">061 816 99 70</a>
+                    </div>
+                </div>
+
+                <!-- Call to Action -->
+                <div class="bg-gradient-to-r from-green-600 to-green-700 p-5 rounded-lg text-white">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="font-semibold text-lg mb-1">📋 Detaillierte Entsorgungsinformationen</p>
+                            <p class="text-sm opacity-90">Sammelstellen, Karte, Öffnungszeiten & Was gehört wohin?</p>
+                        </div>
+                        <a href="entsorgung.html" class="bg-white text-green-700 px-6 py-3 rounded-lg font-semibold hover:bg-gray-100 transition whitespace-nowrap ml-4">
+                            Mehr Info →
+                        </a>
+                    </div>
+                </div>
+
+                <div class="mt-4 flex flex-wrap gap-3">
+                    <a href="https://www.abfall-gaf.ch" target="_blank" class="text-xs bg-white px-3 py-2 rounded border border-green-400 hover:bg-green-50 transition">
+                        📅 Abfallkalender GAF
+                    </a>
+                    <a href="https://www.kaiseraugst.ch/abfallorte" target="_blank" class="text-xs bg-white px-3 py-2 rounded border border-green-400 hover:bg-green-50 transition">
+                        📍 Alle Sammelstellen
+                    </a>
+                    <a href="https://www.rewag-entsorgung.ch" target="_blank" class="text-xs bg-white px-3 py-2 rounded border border-green-400 hover:bg-green-50 transition">
+                        🏢 REWAG Webseite
                     </a>
                 </div>
             </div>
