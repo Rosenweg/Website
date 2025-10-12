@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STWEG 3 - Rosenweg 9 - STWEG-Kooperation Rosenweg</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-lg sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <a href="index.html" class="flex items-center">
+                        <svg class="h-8 w-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
+                        </svg>
+                        <span class="ml-2 text-xl font-semibold text-gray-800">STWEG Rosenweg</span>
+                    </a>
+                </div>
+                <div class="flex items-center">
+                    <a href="index.html" class="text-gray-700 hover:text-blue-600 transition">← Zurück zur Startseite</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Header -->
+    <section class="bg-gradient-to-r from-blue-600 to-blue-800 text-white py-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-4xl font-bold mb-2">STWEG 3</h1>
+                    <p class="text-xl opacity-90 mb-1">Rosenweg 9, 4303 Kaiseraugst</p>
+                    <p class="text-lg opacity-80">9 Wohnungen • 1 Hobbyraum</p>
+                </div>
+                <div class="hidden md:block">
+                    <div class="bg-white bg-opacity-20 rounded-lg p-4 text-center">
+                        <div class="text-5xl font-bold">3</div>
+                        <div class="text-sm uppercase tracking-wide">STWEG</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Übersicht -->
+    <section class="py-12 bg-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid md:grid-cols-3 gap-6 mb-8">
+                <div class="bg-gradient-to-br from-blue-50 to-blue-100 p-6 rounded-lg border-2 border-blue-200">
+                    <div class="flex items-center mb-3">
+                        <svg class="h-10 w-10 text-blue-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
+                        </svg>
+                        <div>
+                            <div class="text-3xl font-bold text-blue-600">9</div>
+                            <div class="text-sm text-gray-600">Wohnungen</div>
+                        </div>
+                    </div>
+                    <p class="text-sm text-gray-700">Von 2.5 bis 4.5 Zimmer</p>
+                </div>
+
+                <div class="bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-lg border-2 border-green-200">
+                    <div class="flex items-center mb-3">
+                        <svg class="h-10 w-10 text-green-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <div>
+                            <div class="text-3xl font-bold text-green-600">1</div>
+                            <div class="text-sm text-gray-600">Hobbyraum</div>
+                        </div>
+                    </div>
+                    <p class="text-sm text-gray-700">Gemeinschaftlicher Hobbyraum</p>
+                </div>
+
+                <div class="bg-gradient-to-br from-purple-50 to-purple-100 p-6 rounded-lg border-2 border-purple-200">
+                    <div class="flex items-center mb-3">
+                        <svg class="h-10 w-10 text-purple-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                        </svg>
+                        <div>
+                            <div class="text-3xl font-bold text-purple-600">2</div>
+                            <div class="text-sm text-gray-600">Ausschuss</div>
+                        </div>
+                    </div>
+                    <p class="text-sm text-gray-700">Vertreter in der Kooperation</p>
+                </div>
+            </div>
+
+            <!-- Standort Info -->
+            <div class="bg-blue-50 border-l-4 border-blue-500 p-6 rounded-lg">
+                <h3 class="text-xl font-semibold text-blue-800 mb-3 flex items-center">
+                    <svg class="h-6 w-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                    </svg>
+                    Standort
+                </h3>
+                <div class="grid md:grid-cols-2 gap-4 text-gray-700">
+                    <div>
+                        <p class="font-semibold mb-1">Adresse:</p>
+                        <p>Rosenweg 9</p>
+                        <p>4303 Kaiseraugst</p>
+                        <p>Kanton Aargau, Schweiz</p>
+                    </div>
+                    <div>
+                        <p class="font-semibold mb-1">Teil der Kooperation:</p>
+                        <p>STWEG-Kooperation Rosenweg (STWEG 1-8)</p>
+                        <p class="text-sm text-gray-600 mt-2">STWEG 3 ist eines von 7 Wohngebäuden der Kooperation</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Wohnungsübersicht -->
+    <section class="py-12 bg-gray-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">Die 9 Wohnungen im Überblick</h2>
+            
+            <div class="grid md:grid-cols-3 gap-6">
+                <!-- Wohnung 1 -->
+                <div class="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-xl font-semibold text-gray-800">Wohnung 1</h3>
+                        <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">[Zimmer]</span>
+                    </div>
+                    <div class="space-y-2 text-sm text-gray-600">
+                        <p><strong>Etage:</strong> [z.B. Erdgeschoss]</p>
+                        <p><strong>Fläche:</strong> [z.B. ca. 75 m²]</p>
+                        <p><strong>Besonderheiten:</strong> [z.B. Balkon, Garten]</p>
+                    </div>
+                </div>
+
+                <!-- Wohnung 2 -->
+                <div class="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-xl font-semibold text-gray-800">Wohnung 2</h3>
+                        <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">[Zimmer]</span>
+                    </div>
+                    <div class="space-y-2 text-sm text-gray-600">
+                        <p><strong>Etage:</strong> [z.B. Erdgeschoss]</p>
+                        <p><strong>Fläche:</strong> [z.B. ca. 90 m²]</p>
+                        <p><strong>Besonderheiten:</strong> [z.B. Balkon]</p>
+                    </div>
+                </div>
+
+                <!-- Wohnung 3 -->
+                <div class="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-xl font-semibold text-gray-800">Wohnung 3</h3>
+                        <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">[Zimmer]</span>
+                    </div>
+                    <div class="space-y-2 text-sm text-gray-600">
+                        <p><strong>Etage:</strong> [z.B. 1. OG]</p>
+                        <p><strong>Fläche:</strong> [z.B. ca. 75 m²]</p>
+                        <p><strong>Besonderheiten:</strong> [z.B. Balkon]</p>
+                    </div>
+                </div>
+
+                <!-- Wohnung 4 -->
+                <div class="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-xl font-semibold text-gray-800">Wohnung 4</h3>
+                        <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">[Zimmer]</span>
+                    </div>
+                    <div class="space-y-2 text-sm text-gray-600">
+                        <p><strong>Etage:</strong> [z.B. 1. OG]</p>
+                        <p><strong>Fläche:</strong> [z.B. ca. 90 m²]</p>
+                        <p><strong>Besonderheiten:</strong> [z.B. Balkon]</p>
+                    </div>
+                </div>
+
+                <!-- Wohnung 5 -->
+                <div class="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-xl font-semibold text-gray-800">Wohnung 5</h3>
+                        <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">[Zimmer]</span>
+                    </div>
+                    <div class="space-y-2 text-sm text-gray-600">
+                        <p><strong>Etage:</strong> [z.B. 2. OG]</p>
+                        <p><strong>Fläche:</strong> [z.B. ca. 75 m²]</p>
+                        <p><strong>Besonderheiten:</strong> [z.B. Balkon]</p>
+                    </div>
+                </div>
+
+                <!-- Wohnung 6 -->
+                <div class="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-xl font-semibold text-gray-800">Wohnung 6</h3>
+                        <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">[Zimmer]</span>
+                    </div>
+                    <div class="space-y-2 text-sm text-gray-600">
+                        <p><strong>Etage:</strong> [z.B. 2. OG]</p>
+                        <p><strong>Fläche:</strong> [z.B. ca. 90 m²]</p>
+                        <p><strong>Besonderheiten:</strong> [z.B. Balkon]</p>
+                    </div>
+                </div>
+
+                <!-- Wohnung 7 -->
+                <div class="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-xl font-semibold text-gray-800">Wohnung 7</h3>
+                        <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">[Zimmer]</span>
+                    </div>
+                    <div class="space-y-2 text-sm text-gray-600">
+                        <p><strong>Etage:</strong> [z.B. 3. OG]</p>
+                        <p><strong>Fläche:</strong> [z.B. ca. 75 m²]</p>
+                        <p><strong>Besonderheiten:</strong> [z.B. Balkon]</p>
+                    </div>
+                </div>
+
+                <!-- Wohnung 8 -->
+                <div class="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-xl font-semibold text-gray-800">Wohnung 8</h3>
+                        <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">[Zimmer]</span>
+                    </div>
+                    <div class="space-y-2 text-sm text-gray-600">
+                        <p><strong>Etage:</strong> [z.B. 3. OG]</p>
+                        <p><strong>Fläche:</strong> [z.B. ca. 90 m²]</p>
+                        <p><strong>Besonderheiten:</strong> [z.B. Balkon]</p>
+                    </div>
+                </div>
+
+                <!-- Wohnung 9 -->
+                <div class="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-xl font-semibold text-gray-800">Wohnung 9</h3>
+                        <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-semibold">[Zimmer]</span>
+                    </div>
+                    <div class="space-y-2 text-sm text-gray-600">
+                        <p><strong>Etage:</strong> [z.B. Dachgeschoss]</p>
+                        <p><strong>Fläche:</strong> [z.B. ca. 100 m²]</p>
+                        <p><strong>Besonderheiten:</strong> [z.B. Dachterrasse]</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-6 bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
+                <p class="text-sm text-gray-700">
+                    <strong>Hinweis:</strong> Die genauen Angaben zu Zimmerzahl, Fläche und Etage bitte entsprechend anpassen und ergänzen.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Hobbyraum -->
+    <section class="py-12 bg-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">Hobbyraum</h2>
+            
+            <div class="bg-gradient-to-br from-green-50 to-green-100 border-2 border-green-300 rounded-lg p-8">
+                <div class="flex items-start mb-6">
+                    <svg class="h-12 w-12 text-green-600 mr-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <div class="flex-1">
+                        <h3 class="text-2xl font-semibold text-green-800 mb-3">Gemeinschaftlicher Hobbyraum</h3>
+                        <p class="text-gray-700 mb-4">
+                            Der Hobbyraum steht allen Eigentümern und Mietern der STWEG 3 zur Verfügung und kann für verschiedene Aktivitäten genutzt werden.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="grid md:grid-cols-2 gap-6">
+                    <div class="bg-white p-5 rounded-lg">
+                        <h4 class="font-semibold text-green-700 mb-3 flex items-center">
+                            <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            Nutzungsmöglichkeiten
+                        </h4>
+                        <ul class="space-y-2 text-sm text-gray-700">
+                            <li>• Werkstatt & Heimwerken</li>
+                            <li>• Bastelarbeiten</li>
+                            <li>• Lagerung von Werkzeugen</li>
+                            <li>• Gemeinschaftliche Projekte</li>
+                            <li>• [Weitere Nutzungen eintragen]</li>
+                        </ul>
+                    </div>
+
+                    <div class="bg-white p-5 rounded-lg">
+                        <h4 class="font-semibold text-green-700 mb-3 flex items-center">
+                            <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            Nutzungsregelung
+                        </h4>
+                        <ul class="space-y-2 text-sm text-gray-700">
+                            <li>• <strong>Zugang:</strong> [z.B. Mit Schlüssel]</li>
+                            <li>• <strong>Reservierung:</strong> [z.B. Nicht erforderlich / Liste]</li>
+                            <li>• <strong>Öffnungszeiten:</strong> [z.B. 08:00 - 20:00 Uhr]</li>
+                            <li>• <strong>Reinigung:</strong> Nach Benutzung durch Nutzer</li>
+                            <li>• <strong>Ruhezeiten:</strong> Bitte beachten</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="mt-6 bg-white p-5 rounded-lg">
+                    <h4 class="font-semibold text-green-700 mb-3">Ausstattung</h4>
+                    <p class="text-sm text-gray-700 mb-2">[Hier die vorhandene Ausstattung auflisten, z.B.:]</p>
+                    <div class="flex flex-wrap gap-2">
+                        <span class="bg-green-100 text-green-800 text-xs px-3 py-1 rounded-full">Werkbank</span>
+                        <span class="bg-green-100 text-green-800 text-xs px-3 py-1 rounded-full">Regale</span>
+                        <span class="bg-green-100 text-green-800 text-xs px-3 py-1 rounded-full">Stromanschlüsse</span>
+                        <span class="bg-green-100 text-green-800 text-xs px-3 py-1 rounded-full">[Weitere Ausstattung]</span>
+                    </div>
+                </div>
+
+                <div class="mt-4 bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
+                    <p class="text-sm text-gray-700">
+                        <strong>Wichtig:</strong> Der Hobbyraum ist nach jeder Nutzung zu reinigen und in ordentlichem Zustand zu hinterlassen. 
+                        Bitte Rücksicht auf andere Bewohner nehmen.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Verwaltung & Kontakte -->
+    <section class="py-12 bg-gray-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">Verwaltung & Kontakte</h2>
+            
+            <div class="grid md:grid-cols-2 gap-6">
+                <!-- Hausverwaltung -->
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <div class="flex items-center mb-4">
+                        <svg class="h-8 w-8 text-blue-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
+                        </svg>
+                        <h3 class="text-xl font-semibold">Hausverwaltung</h3>
+                    </div>
+                    <p class="text-gray-700 mb-2 font-semibold text-lg">LangPartners Immobilien AG</p>
+                    <p class="text-gray-600 text-sm mb-2">Kirchplatz 18</p>
+                    <p class="text-gray-600 text-sm mb-3">4132 Muttenz</p>
+                    <p class="text-gray-600 text-sm mb-2">
+                        <strong>Tel:</strong> <a href="tel:+41612281818" class="text-blue-600 hover:underline">+41 61 228 18 18</a>
+                    </p>
+                    <p class="text-gray-600 text-sm mb-2">
+                        <strong>E-Mail:</strong> <a href="mailto:hello@langpartners.ch" class="text-blue-600 hover:underline">hello@langpartners.ch</a>
+                    </p>
+                    <p class="text-gray-600 text-sm mb-3">
+                        <strong>Web:</strong> <a href="https://langpartners.ch" target="_blank" class="text-blue-600 hover:underline">langpartners.ch</a>
+                    </p>
+                    <p class="text-gray-600 text-sm">
+                        <strong>Öffnungszeiten:</strong><br>
+                        Montag – Freitag, 09:00-12:00 Uhr
+                    </p>
+                </div>
+
+                <!-- Ausschuss-Vertreter -->
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <div class="flex items-center mb-4">
+                        <svg class="h-8 w-8 text-blue-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                        </svg>
+                        <h3 class="text-xl font-semibold">Ausschuss-Vertreter STWEG 3</h3>
+                    </div>
+                    <p class="text-sm text-gray-600 mb-4">STWEG 3 entsendet 2 Vertreter in den Ausschuss der STWEG-Kooperation</p>
+                    
+                    <div class="space-y-4">
+                        <div class="border-l-4 border-blue-500 pl-4 py-2 bg-blue-50 rounded">
+                            <p class="font-semibold text-gray-800">Vertreter 1</p>
+                            <p class="text-sm text-gray-600">[Name]</p>
+                            <p class="text-sm text-gray-600">[E-Mail]</p>
+                            <p class="text-sm text-gray-600">[Telefon]</p>
+                        </div>
+                        
+                        <div class="border-l-4 border-blue-500 pl-4 py-2 bg-blue-50 rounded">
+                            <p class="font-semibold text-gray-800">Vertreter 2</p>
+                            <p class="text-sm text-gray-600">[Name]</p>
+                            <p class="text-sm text-gray-600">[E-Mail]</p>
+                            <p class="text-sm text-gray-600">[Telefon]</p>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 pt-4 border-t border-gray-200">
+                        <p class="text-xs text-gray-600">
+                            Die Ausschussvertreter sind Ihre erste Anlaufstelle für Fragen zur STWEG-Kooperation und vertreten STWEG 3 in Ausschusssitzungen.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Wichtige Infos für Bewohner -->
+    <section class="py-12 bg-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">Wichtige Informationen für Bewohner</h2>
+            
+            <div class="grid md:grid-cols-3 gap-6">
+                <div class="bg-gray-50 p-6 rounded-lg">
+                    <h3 class="text-xl font-semibold mb-3 text-blue-600 flex items-center">
+                        <svg class="h-6 w-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        Hausordnung
+                    </h3>
+                    <ul class="text-sm text-gray-700 space-y-2">
+                        <li>• Nachtruhe: 22:00 - 06:00 Uhr</li>
+                        <li>• Mittagsruhe: 12:00 - 13:00 Uhr</li>
+                        <li>• Sonntags ganztägig</li>
+                        <li>• Rücksicht auf Nachbarn</li>
+                    </ul>
+                </div>
+
+                <div class="bg-gray-50 p-6 rounded-lg">
+                    <h3 class="text-xl font-semibold mb-3 text-blue-600 flex items-center">
+                        <svg class="h-6 w-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                        </svg>
+                        Abfallentsorgung
+                    </h3>
+                    <ul class="text-sm text-gray-700 space-y-2">
+                        <li>• Container östlich der Tiefgarage</li>
+                        <li>• Kehricht: Fr & Mo bis 07:00 Uhr</li>
+                        <li>• Altpapier & Karton vor Ort</li>
+                    </ul>
+                    <a href="entsorgung.html" class="inline-block mt-3 text-sm text-blue-600 hover:underline">
+                        → Detaillierte Infos
+                    </a>
+                </div>
+
+                <div class="bg-gray-50 p-6 rounded-lg">
+                    <h3 class="text-xl font-semibold mb-3 text-blue-600 flex items-center">
+                        <svg class="h-6 w-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path>
+                        </svg>
+                        Tiefgarage
+                    </h3>
+                    <ul class="text-sm text-gray-700 space-y-2">
+                        <li>• Gemeinsame Tiefgarage (STWEG 8)</li>
+                        <li>• Nummerierte Parkplätze</li>
+                        <li>• Besucherparkplätze vorhanden</li>
+                        <li>• Zugang mit Fernbedienung</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="mt-8 bg-blue-50 border-l-4 border-blue-500 p-6 rounded-lg">
+                <h3 class="text-lg font-semibold text-blue-800 mb-3">📋 Teil der STWEG-Kooperation Rosenweg</h3>
+                <p class="text-gray-700 mb-3">
+                    STWEG 3 ist Teil der Kooperation von 8 eigenständigen STWEGs am Rosenweg. Für übergreifende Themen (wie die Tiefgarage) 
+                    gibt es gemeinsame Hauptversammlungen und einen Ausschuss mit Vertretern aus allen 8 STWEGs.
+                </p>
+                <a href="index.html#about" class="text-blue-600 hover:underline text-sm font-semibold">
+                    → Mehr über die STWEG-Kooperation erfahren
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Dokumente -->
+    <section class="py-12 bg-gray-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">Dokumente STWEG 3</h2>
+            
+            <div class="bg-blue-50 border-l-4 border-blue-500 p-6 rounded-lg mb-6">
+                <p class="text-gray-700">
+                    <svg class="h-5 w-5 inline mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                    </svg>
+                    <strong>Hinweis:</strong> Die meisten Dokumente sind passwortgeschützt und nur für Eigentümer der STWEG 3 zugänglich.
+                </p>
+            </div>
+
+            <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div class="bg-white p-4 rounded-lg hover:shadow-md transition">
+                    <div class="flex items-center mb-2">
+                        <svg class="h-6 w-6 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <h3 class="font-semibold">Hausordnung</h3>
+                    </div>
+                    <p class="text-sm text-gray-600 mb-2">Reglement für STWEG 3</p>
+                    <a href="#" class="text-blue-600 hover:underline text-sm">Download (PDF)</a>
+                </div>
+
+                <div class="bg-white p-4 rounded-lg hover:shadow-md transition">
+                    <div class="flex items-center mb-2">
+                        <svg class="h-6 w-6 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <h3 class="font-semibold">Protokolle</h3>
+                    </div>
+                    <p class="text-sm text-gray-600 mb-2">Versammlungsprotokolle STWEG 3</p>
+                    <a href="#" class="text-blue-600 hover:underline text-sm">🔒 Geschützter Bereich</a>
+                </div>
+
+                <div class="bg-white p-4 rounded-lg hover:shadow-md transition">
+                    <div class="flex items-center mb-2">
+                        <svg class="h-6 w-6 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <h3 class="font-semibold">Hobbyraum-Regeln</h3>
+                    </div>
+                    <p class="text-sm text-gray-600 mb-2">Nutzungsordnung Hobbyraum</p>
+                    <a href="#" class="text-blue-600 hover:underline text-sm">Download (PDF)</a>
+                </div>
+
+                <div class="bg-white p-4 rounded-lg hover:shadow-md transition">
+                    <div class="flex items-center mb-2">
+                        <svg class="h-6 w-6 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <h3 class="font-semibold">Jahresabrechnung</h3>
+                    </div>
+                    <p class="text-sm text-gray-600 mb-2">Finanzübersicht STWEG 3</p>
+                    <a href="#" class="text-blue-600 hover:underline text-sm">🔒 Geschützter Bereich</a>
+                </div>
+
+                <div class="bg-white p-4 rounded-lg hover:shadow-md transition">
+                    <div class="flex items-center mb-2">
+                        <svg class="h-6 w-6 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <h3 class="font-semibold">Wartungsplan</h3>
+                    </div>
+                    <p class="text-sm text-gray-600 mb-2">Geplante Unterhaltsarbeiten</p>
+                    <a href="#" class="text-blue-600 hover:underline text-sm">🔒 Geschützter Bereich</a>
+                </div>
+
+                <div class="bg-white p-4 rounded-lg hover:shadow-md transition">
+                    <div class="flex items-center mb-2">
+                        <svg class="h-6 w-6 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <h3 class="font-semibold">Formulare</h3>
+                    </div>
+                    <p class="text-sm text-gray-600 mb-2">Nützliche Formulare</p>
+                    <a href="#" class="text-blue-600 hover:underline text-sm">Download</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-gray-800 text-white py-8">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid md:grid-cols-2 gap-8">
+                <div>
+                    <h3 class="text-lg font-semibold mb-4">STWEG 3 - Rosenweg 9</h3>
+                    <p class="text-gray-300 text-sm mb-2">
+                        Teil der STWEG-Kooperation Rosenweg<br>
+                        4303 Kaiseraugst, Aargau
+                    </p>
+                    <p class="text-gray-400 text-xs mt-3">
+                        9 Wohnungen • 1 Hobbyraum
+                    </p>
+                </div>
+                <div>
+                    <h3 class="text-lg font-semibold mb-4">Schnelllinks</h3>
+                    <ul class="space-y-2 text-sm">
+                        <li><a href="index.html" class="text-gray-300 hover:text-white transition">← Zurück zur Hauptseite</a></li>
+                        <li><a href="index.html#verwaltung" class="text-gray-300 hover:text-white transition">Verwaltung & Kontakte</a></li>
+                        <li><a href="entsorgung.html" class="text-gray-300 hover:text-white transition">Entsorgung & Recycling</a></li>
+                        <li><a href="https://langpartners.ch" target="_blank" class="text-gray-300 hover:text-white transition">LangPartners Immobilien</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="mt-8 pt-8 border-t border-gray-700 text-center text-sm text-gray-400">
+                <p>&copy; 2025 STWEG 3 - Teil der STWEG-Kooperation Rosenweg</p>
+                <p class="mt-2">Verwaltung: LangPartners Immobilien AG, Muttenz</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Smooth Scrolling Script -->
+    <script>
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+        });
+    </script>
+</body>
+</html>
