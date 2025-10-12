@@ -39,7 +39,7 @@
                 <div>
                     <h1 class="text-4xl font-bold mb-2">STWEG 3</h1>
                     <p class="text-xl opacity-90 mb-1">Rosenweg 9, 4303 Kaiseraugst</p>
-                    <p class="text-lg opacity-80">9 Wohnungen • 1 Hobbyraum</p>
+                    <p class="text-lg opacity-80">9 Wohnungen • 1 Hobbyraum • 2 Waschküchen</p>
                 </div>
                 <div class="hidden md:block">
                     <div class="bg-white bg-opacity-20 rounded-lg p-4 text-center">
@@ -79,6 +79,19 @@
                         </div>
                     </div>
                     <p class="text-sm text-gray-700">Privater Hobbyraum</p>
+                </div>
+
+                <div class="bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-lg border-2 border-green-200">
+                    <div class="flex items-center mb-3">
+                        <svg class="h-10 w-10 text-green-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path>
+                        </svg>
+                        <div>
+                            <div class="text-3xl font-bold text-green-600">2</div>
+                            <div class="text-sm text-gray-600">Waschküchen</div>
+                        </div>
+                    </div>
+                    <p class="text-sm text-gray-700">Gemeinschaftliche Nutzung mit Reservation</p>
                 </div>
 
                 <div class="bg-gradient-to-br from-purple-50 to-purple-100 p-6 rounded-lg border-2 border-purple-200">
@@ -124,8 +137,8 @@
     <!-- Wohnungsübersicht -->
     <section class="py-12 bg-gray-50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">Die 9 Wohnungen im Überblick</h2>
-            <p class="text-center text-gray-600 mb-6">Offizielle Bezeichnungen gemäß Plänen: EG.1-3 • 1OG.1-3 • 2OG.1-3</p>
+            <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">9 Wohnungen & 1 Hobbyraum im Überblick</h2>
+            <p class="text-center text-gray-600 mb-6">Wohnungen gemäß Plänen: EG.1-3 • 1OG.1-3 • 2OG.1-3 • Hobbyraum (UG)</p>
             
             <div class="grid md:grid-cols-3 gap-6">
                 <!-- EG.1 -->
@@ -244,82 +257,127 @@
                         <p><strong>Besonderheiten:</strong> Balkon unter dem Dach</p>
                     </div>
                 </div>
+
+                <!-- Hobbyraum -->
+                <div class="bg-gradient-to-br from-orange-50 to-orange-100 p-6 rounded-lg shadow-md hover:shadow-lg transition border-2 border-orange-300">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="flex items-center">
+                            <svg class="h-6 w-6 text-orange-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                            </svg>
+                            <h3 class="text-xl font-semibold text-gray-800">Hobbyraum</h3>
+                        </div>
+                        <span class="bg-orange-100 text-orange-800 px-3 py-1 rounded-full text-sm font-semibold">Privat</span>
+                    </div>
+                    <div class="space-y-2 text-sm text-gray-600">
+                        <p><strong>Etage:</strong> Untergeschoss</p>
+                        <p><strong>Typ:</strong> Privater Hobbyraum</p>
+                        <p><strong>Nutzung:</strong> Dem jeweiligen Eigentümer/Mieter zugeordnet</p>
+                    </div>
+                </div>
             </div>
 
             <div class="mt-6 bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
                 <p class="text-sm text-gray-700">
-                    <strong>Hinweis:</strong> Die offiziellen Wohnungsbezeichnungen gemäß Plänen sind: EG.1, EG.2, EG.3 (mit Garten), 1OG.1, 1OG.2, 1OG.3 (mit Balkon) und 2OG.1, 2OG.2, 2OG.3 (mit Balkon unter dem Dach). Bitte Zimmerzahl und genaue Fläche für jede Wohnung ergänzen.
+                    <strong>Hinweis:</strong> Die offiziellen Wohnungsbezeichnungen gemäß Plänen sind: EG.1, EG.2, EG.3 (mit Garten), 1OG.1, 1OG.2, 1OG.3 (mit Balkon) und 2OG.1, 2OG.2, 2OG.3 (mit Balkon unter dem Dach). Der Hobbyraum befindet sich im Untergeschoss. Bitte Zimmerzahl und genaue Fläche für jede Wohnung ergänzen.
                 </p>
             </div>
         </div>
     </section>
 
-    <!-- Hobbyraum -->
+    <!-- Waschküchen -->
     <section class="py-12 bg-white">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">Hobbyraum</h2>
+            <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">Waschküchen</h2>
             
-            <div class="bg-gradient-to-br from-orange-50 to-orange-100 border-2 border-orange-300 rounded-lg p-8">
+            <div class="bg-gradient-to-br from-green-50 to-green-100 border-2 border-green-300 rounded-lg p-8">
                 <div class="flex items-start mb-6">
-                    <svg class="h-12 w-12 text-orange-600 mr-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                    <svg class="h-12 w-12 text-green-600 mr-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path>
                     </svg>
                     <div class="flex-1">
-                        <h3 class="text-2xl font-semibold text-orange-800 mb-3">Privater Hobbyraum</h3>
+                        <h3 class="text-2xl font-semibold text-green-800 mb-3">2 Gemeinschaftliche Waschküchen</h3>
                         <p class="text-gray-700 mb-4">
-                            Der Hobbyraum ist privat und steht dem jeweiligen Eigentümer/Mieter zur Verfügung.
+                            Die beiden Waschküchen im Untergeschoss stehen allen Bewohnern der STWEG 3 zur Verfügung. Eine Reservation ist erforderlich.
                         </p>
                     </div>
                 </div>
 
-                <div class="grid md:grid-cols-2 gap-6">
-                    <div class="bg-white p-5 rounded-lg">
-                        <h4 class="font-semibold text-orange-700 mb-3 flex items-center">
-                            <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
-                            Nutzungsmöglichkeiten
+                <div class="grid md:grid-cols-2 gap-6 mb-6">
+                    <div class="bg-white p-5 rounded-lg border-2 border-green-400">
+                        <h4 class="font-semibold text-lg text-green-700 mb-3 flex items-center">
+                            <span class="bg-green-100 text-green-800 w-8 h-8 rounded-full flex items-center justify-center mr-2 font-bold">1</span>
+                            Waschküche 1
                         </h4>
-                        <ul class="space-y-2 text-sm text-gray-700">
-                            <li>• Werkstatt & Heimwerken</li>
-                            <li>• Bastelarbeiten</li>
-                            <li>• Lagerung von Werkzeugen</li>
-                            <li>• Private Projekte</li>
-                            <li>• [Weitere Nutzungen eintragen]</li>
-                        </ul>
+                        <div class="space-y-2 text-sm text-gray-700">
+                            <p><strong>Standort:</strong> Untergeschoss</p>
+                            <p><strong>Ausstattung:</strong> [z.B. Waschmaschine, Tumbler, Waschbecken]</p>
+                            <p><strong>Reservation:</strong> Erforderlich - in Liste eintragen</p>
+                        </div>
                     </div>
 
-                    <div class="bg-white p-5 rounded-lg">
-                        <h4 class="font-semibold text-orange-700 mb-3 flex items-center">
-                            <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                            </svg>
-                            Nutzungsregelung
+                    <div class="bg-white p-5 rounded-lg border-2 border-green-400">
+                        <h4 class="font-semibold text-lg text-green-700 mb-3 flex items-center">
+                            <span class="bg-green-100 text-green-800 w-8 h-8 rounded-full flex items-center justify-center mr-2 font-bold">2</span>
+                            Waschküche 2
                         </h4>
-                        <ul class="space-y-2 text-sm text-gray-700">
-                            <li>• <strong>Zugang:</strong> [z.B. Mit Schlüssel]</li>
-                            <li>• <strong>Reservierung:</strong> [z.B. Nicht erforderlich / Liste]</li>
-                            <li>• <strong>Öffnungszeiten:</strong> [z.B. 08:00 - 20:00 Uhr]</li>
-                            <li>• <strong>Reinigung:</strong> Nach Benutzung durch Nutzer</li>
-                            <li>• <strong>Ruhezeiten:</strong> Bitte beachten</li>
-                        </ul>
+                        <div class="space-y-2 text-sm text-gray-700">
+                            <p><strong>Standort:</strong> Untergeschoss</p>
+                            <p><strong>Ausstattung:</strong> [z.B. Waschmaschine, Tumbler, Waschbecken]</p>
+                            <p><strong>Reservation:</strong> Erforderlich - in Liste eintragen</p>
+                        </div>
                     </div>
                 </div>
 
-                <div class="mt-6 bg-white p-5 rounded-lg">
-                    <h4 class="font-semibold text-orange-700 mb-3">Ausstattung</h4>
-                    <p class="text-sm text-gray-700 mb-2">[Hier die vorhandene Ausstattung auflisten, z.B.:]</p>
-                    <div class="flex flex-wrap gap-2">
-                        <span class="bg-orange-100 text-orange-800 text-xs px-3 py-1 rounded-full">Werkbank</span>
-                        <span class="bg-orange-100 text-orange-800 text-xs px-3 py-1 rounded-full">Regale</span>
-                        <span class="bg-orange-100 text-orange-800 text-xs px-3 py-1 rounded-full">Stromanschlüsse</span>
-                        <span class="bg-orange-100 text-orange-800 text-xs px-3 py-1 rounded-full">[Weitere Ausstattung]</span>
+                <div class="bg-white p-5 rounded-lg mb-4">
+                    <h4 class="font-semibold text-green-700 mb-3 flex items-center">
+                        <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        Reservationssystem
+                    </h4>
+                    <ul class="space-y-2 text-sm text-gray-700">
+                        <li>• <strong>Eintragung erforderlich:</strong> Tragen Sie sich in die Reservationsliste vor Ort ein</li>
+                        <li>• <strong>Waschzeiten:</strong> [z.B. Montag - Samstag, 07:00 - 20:00 Uhr]</li>
+                        <li>• <strong>Zeitfenster:</strong> [z.B. 2-3 Stunden pro Reservation]</li>
+                        <li>• <strong>Reinigung:</strong> Nach jeder Nutzung Waschküche reinigen und aufräumen</li>
+                        <li>• <strong>Ruhezeiten beachten:</strong> Sonntags und nachts (22:00-07:00 Uhr) keine Nutzung</li>
+                    </ul>
+                </div>
+
+                <div class="bg-white p-5 rounded-lg">
+                    <h4 class="font-semibold text-green-700 mb-3">Nutzungsregeln</h4>
+                    <div class="grid md:grid-cols-2 gap-4 text-sm text-gray-700">
+                        <div>
+                            <p class="font-semibold text-green-600 mb-2">✓ Erlaubt:</p>
+                            <ul class="space-y-1 list-disc list-inside">
+                                <li>Waschen für den Haushalt</li>
+                                <li>Nutzung der Trocknungsräume</li>
+                                <li>Reinigung nach Gebrauch</li>
+                            </ul>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-red-600 mb-2">✗ Nicht erlaubt:</p>
+                            <ul class="space-y-1 list-disc list-inside">
+                                <li>Nutzung ohne Reservation</li>
+                                <li>Überschreitung der Zeitfenster</li>
+                                <li>Gewerbliche Nutzung</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
 
                 <div class="mt-4 bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
                     <p class="text-sm text-gray-700">
-                        <strong>Wichtig:</strong> Der Hobbyraum ist nach jeder Nutzung zu reinigen und in ordentlichem Zustand zu hinterlassen.
+                        <strong>Wichtig:</strong> Die Waschküchen sind nach jeder Nutzung zu reinigen und in ordentlichem Zustand zu hinterlassen. 
+                        Bitte Rücksicht auf andere Bewohner nehmen und die reservierten Zeiten einhalten.
+                    </p>
+                </div>
+
+                <div class="mt-4 bg-blue-50 border-l-4 border-blue-400 p-4 rounded">
+                    <p class="text-sm text-gray-700">
+                        <strong>Reservationsliste:</strong> Die Reservationsliste befindet sich vor Ort in jeder Waschküche. 
+                        Bitte tragen Sie Ihren Namen, Wohnung und die gewünschte Zeit ein.
                     </p>
                 </div>
             </div>
@@ -418,6 +476,21 @@
                 <div class="bg-gray-50 p-6 rounded-lg">
                     <h3 class="text-xl font-semibold mb-3 text-blue-600 flex items-center">
                         <svg class="h-6 w-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path>
+                        </svg>
+                        Waschküchen
+                    </h3>
+                    <ul class="text-sm text-gray-700 space-y-2">
+                        <li>• 2 Waschküchen im UG</li>
+                        <li>• Reservation erforderlich</li>
+                        <li>• In Liste vor Ort eintragen</li>
+                        <li>• Nach Nutzung reinigen</li>
+                    </ul>
+                </div>
+
+                <div class="bg-gray-50 p-6 rounded-lg">
+                    <h3 class="text-xl font-semibold mb-3 text-blue-600 flex items-center">
+                        <svg class="h-6 w-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
                         </svg>
                         Abfallentsorgung
@@ -430,21 +503,6 @@
                     <a href="entsorgung.html" class="inline-block mt-3 text-sm text-blue-600 hover:underline">
                         → Detaillierte Infos
                     </a>
-                </div>
-
-                <div class="bg-gray-50 p-6 rounded-lg">
-                    <h3 class="text-xl font-semibold mb-3 text-blue-600 flex items-center">
-                        <svg class="h-6 w-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path>
-                        </svg>
-                        Tiefgarage
-                    </h3>
-                    <ul class="text-sm text-gray-700 space-y-2">
-                        <li>• Gemeinsame Tiefgarage (STWEG 8)</li>
-                        <li>• Nummerierte Parkplätze</li>
-                        <li>• Besucherparkplätze vorhanden</li>
-                        <li>• Zugang mit Fernbedienung</li>
-                    </ul>
                 </div>
             </div>
 
