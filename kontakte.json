@@ -71,7 +71,7 @@
         "flaeche_m2": 75,
         "besonderheiten": ["Garten"],
         "eigentümer": {
-          "name": "[Name Eigentümer]",
+          "name": "Elisabeth Müller",
           "email": "elisabeth.mueller@teleport.ch",
           "telefon": "+41 79 456 78 90",
           "typ": "eigentümer"
@@ -86,8 +86,8 @@
         "flaeche_m2": 90,
         "besonderheiten": ["Balkon"],
         "eigentümer": {
-          "name": "[Name Eigentümer]",
-          "email": "eigentümer4@beispiel.ch",
+          "name": "Yves Wyss",
+          "email": "wyss.y@gmx.ch",
           "telefon": "+41 79 567 89 01",
           "typ": "eigentümer"
         },
@@ -113,7 +113,7 @@
         "besonderheiten": ["Balkon"],
         "eigentümer": {
           "name": "[Name Eigentümer]",
-          "email": "eigentümer6@beispiel.ch",
+          "email": "n.sofi@hotmail.com",
           "telefon": "+41 79 789 01 23",
           "typ": "eigentümer"
         },
@@ -132,8 +132,8 @@
         "flaeche_m2": 75,
         "besonderheiten": ["Balkon", "Dachgeschoss"],
         "eigentümer": {
-          "name": "[Name Eigentümer]",
-          "email": "eigentümer7@beispiel.ch",
+          "name": "Slavica Ilic",
+          "email": "s.ilic@sunrise.ch",
           "telefon": "+41 79 901 23 45",
           "typ": "eigentümer"
         },
@@ -159,7 +159,7 @@
         "besonderheiten": ["Balkon", "Dachgeschoss"],
         "eigentümer": {
           "name": "[Name Eigentümer]",
-          "email": "eigentümer9@beispiel.ch",
+          "email": "stefan+rosenweg@juroct.ch",
           "telefon": "+41 79 123 45 67",
           "typ": "eigentümer"
         },
