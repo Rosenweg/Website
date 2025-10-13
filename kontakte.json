@@ -40,8 +40,8 @@
         "flaeche_m2": 75,
         "besonderheiten": ["Garten"],
         "eigentümer": {
-          "name": "[Name Eigentümer]",
-          "email": "eigentümer1@beispiel.ch",
+          "name": "Basil Fersztand",
+          "email": "fersztand.basil@teleport.ch",
           "telefon": "+41 79 123 45 67",
           "typ": "eigentümer"
         },
@@ -53,8 +53,8 @@
         "flaeche_m2": 90,
         "besonderheiten": ["Garten"],
         "eigentümer": {
-          "name": "[Name Eigentümer]",
-          "email": "eigentümer2@beispiel.ch",
+          "name": "Besim Neziri",
+          "email": "besim.neziri@icloud.com",
           "telefon": "+41 79 234 56 78",
           "typ": "eigentümer"
         },
@@ -72,7 +72,7 @@
         "besonderheiten": ["Garten"],
         "eigentümer": {
           "name": "[Name Eigentümer]",
-          "email": "eigentümer3@beispiel.ch",
+          "email": "elisabeth.mueller@teleport.ch",
           "telefon": "+41 79 456 78 90",
           "typ": "eigentümer"
         },
