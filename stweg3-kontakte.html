@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Geschützte Kontaktliste - STWEG 3</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-lg sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <a href="stweg3.html" class="flex items-center">
+                        <svg class="h-8 w-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
+                        </svg>
+                        <span class="ml-2 text-xl font-semibold text-gray-800">STWEG 3</span>
+                    </a>
+                </div>
+                <div class="flex items-center">
+                    <a href="stweg3.html" class="text-gray-700 hover:text-blue-600 transition">← Zurück zu STWEG 3</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Header -->
+    <section class="bg-gradient-to-r from-purple-600 to-purple-800 text-white py-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h1 class="text-4xl font-bold mb-2">🔒 Geschützte Kontaktliste</h1>
+            <p class="text-xl opacity-90">STWEG 3 - Nur für berechtigte Bewohner</p>
+        </div>
+    </section>
+
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <!-- Loading -->
+        <div id="loading" class="bg-white rounded-lg shadow-lg p-8 text-center">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+            <p class="text-gray-600">Lade Kontaktdaten...</p>
+        </div>
+
+        <!-- Schritt 1: E-Mail-Eingabe -->
+        <div id="step1" class="hidden bg-white rounded-lg shadow-lg p-8">
+            <div class="flex items-center mb-6">
+                <div class="bg-purple-100 rounded-full p-3 mr-4">
+                    <svg class="h-8 w-8 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                    </svg>
+                </div>
+                <div>
+                    <h2 class="text-2xl font-bold text-gray-800">Zugang zur Kontaktliste</h2>
+                    <p class="text-sm text-gray-600">Schritt 1: Identifikation</p>
+                </div>
+            </div>
+
+            <div class="bg-blue-50 border-l-4 border-blue-500 p-4 mb-6">
+                <p class="text-sm text-gray-700">
+                    <strong>Datenschutz:</strong> Diese Kontaktliste enthält persönliche Daten aller Bewohner der STWEG 3 
+                    und ist nur für berechtigte Eigentümer und Mieter zugänglich.
+                </p>
+            </div>
+
+            <form id="emailForm" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        Ihre E-Mail-Adresse *
+                    </label>
+                    <input 
+                        type="email" 
+                        id="userEmail"
+                        required
+                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent" 
+                        placeholder="ihre@email.ch">
+                    <p class="text-xs text-gray-500 mt-2">
+                        Bitte geben Sie die E-Mail-Adresse ein, die bei der Hausverwaltung hinterlegt ist.
+                    </p>
+                </div>
+
+                <div id="errorMessage" class="hidden bg-red-50 border-l-4 border-red-500 p-4 rounded">
+                    <p class="text-sm text-red-700"></p>
+                </div>
+
+                <button 
+                    type="submit"
+                    class="w-full bg-purple-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-purple-700 transition flex items-center justify-center">
+                    <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                    </svg>
+                    Zugangscode per E-Mail senden
+                </button>
+            </form>
+
+            <div class="mt-6 pt-6 border-t border-gray-200">
+                <p class="text-sm text-gray-600">
+                    <strong>Kein Zugriff?</strong> Wenden Sie sich an die Ausschussvertreter oder die Hausverwaltung.
+                </p>
+            </div>
+        </div>
+
+        <!-- Schritt 2: OTP-Eingabe -->
+        <div id="step2" class="hidden bg-white rounded-lg shadow-lg p-8">
+            <div class="flex items-center mb-6">
+                <div class="bg-green-100 rounded-full p-3 mr-4">
+                    <svg class="h-8 w-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                </div>
+                <div>
+                    <h2 class="text-2xl font-bold text-gray-800">Code eingeben</h2>
+                    <p class="text-sm text-gray-600">Schritt 2: Verifizierung</p>
+                </div>
+            </div>
+
+            <div class="bg-green-50 border-l-4 border-green-500 p-4 mb-6">
+                <p class="text-sm text-gray-700">
+                    ✓ Ein Zugangscode wurde an <strong id="sentToEmail"></strong> gesendet.
+                </p>
+                <p class="text-xs text-gray-600 mt-2">
+                    Überprüfen Sie auch Ihren Spam-Ordner, falls die E-Mail nicht ankommt.
+                </p>
+            </div>
+
+            <form id="otpForm" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        6-stelliger Zugangscode *
+                    </label>
+                    <input 
+                        type="text" 
+                        id="otpInput"
+                        required
+                        maxlength="6"
+                        pattern="[0-9]{6}"
+                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-center text-2xl font-mono tracking-widest" 
+                        placeholder="000000">
+                    <p class="text-xs text-gray-500 mt-2">
+                        Der Code ist 10 Minuten gültig.
+                    </p>
+                </div>
+
+                <div id="otpErrorMessage" class="hidden bg-red-50 border-l-4 border-red-500 p-4 rounded">
+                    <p class="text-sm text-red-700"></p>
+                </div>
+
+                <button 
+                    type="submit"
+                    class="w-full bg-green-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-700 transition flex items-center justify-center">
+                    <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"></path>
+                    </svg>
+                    Zugriff freischalten
+                </button>
+            </form>
+
+            <div class="mt-4 text-center">
+                <button 
+                    onclick="resendOTP()"
+                    class="text-sm text-purple-600 hover:text-purple-800 font-semibold">
+                    Code erneut senden
+                </button>
+            </div>
+
+            <div class="mt-6 pt-6 border-t border-gray-200 text-center">
+                <button 
+                    onclick="backToStep1()"
+                    class="text-sm text-gray-600 hover:text-gray-800">
+                    ← Andere E-Mail-Adresse verwenden
+                </button>
+            </div>
+        </div>
+
+        <!-- Schritt 3: Kontaktliste -->
+        <div id="step3" class="hidden bg-white rounded-lg shadow-lg p-8">
+            <div class="flex items-center justify-between mb-6">
+                <div class="flex items-center">
+                    <div class="bg-blue-100 rounded-full p-3 mr-4">
+                        <svg class="h-8 w-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-800">Kontaktliste STWEG 3</h2>
+                        <p class="text-sm text-gray-600" id="subtitle"></p>
+                    </div>
+                </div>
+                <button 
+                    onclick="printContacts()"
+                    class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition text-sm flex items-center">
+                    <svg class="h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path>
+                    </svg>
+                    Drucken
+                </button>
+            </div>
+
+            <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
+                <p class="text-sm text-gray-700">
+                    <strong>⚠️ Vertraulich:</strong> Diese Kontaktdaten sind ausschließlich für den internen Gebrauch bestimmt 
+                    und dürfen nicht an Dritte weitergegeben werden.
+                </p>
+            </div>
+
+            <div id="contactsList" class="space-y-4">
+                <!-- Wird dynamisch aus JSON gefüllt -->
+            </div>
+
+            <div class="mt-8 pt-6 border-t border-gray-200 text-center">
+                <p class="text-sm text-gray-600 mb-2">
+                    <strong>Letzte Aktualisierung:</strong> <span id="lastUpdate"></span>
+                </p>
+                <p class="text-xs text-gray-500">
+                    Bei Änderungen wenden Sie sich bitte an die Ausschussvertreter oder die Hausverwaltung.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="bg-gray-800 text-white py-8 mt-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <p class="text-sm text-gray-400">
+                © 2025 STWEG 3 - Teil der STWEG-Kooperation Rosenweg
+            </p>
+        </div>
+    </footer>
+
+    <script>
+        // ============================================
+        // KONFIGURATION - HIER ANPASSEN
+        // ============================================
+        
+        // EmailJS Konfiguration
+        const EMAILJS_SERVICE_ID = 'YOUR_SERVICE_ID';
+        const EMAILJS_TEMPLATE_ID = 'YOUR_TEMPLATE_ID';
+        const EMAILJS_PUBLIC_KEY = 'YOUR_PUBLIC_KEY';
+
+        // Pfad zur JSON-Datei (im gleichen Verzeichnis)
+        const KONTAKTE_JSON_URL = 'kontakte.json';
+
+        // ============================================
+        // GLOBALE VARIABLEN
+        // ============================================
+        
+        let kontakteData = null;
+        let authorizedEmails = [];
+        let currentEmail = '';
+        let currentOTP = '';
+        let otpTimestamp = 0;
+
+        // ============================================
+        // INITIALISIERUNG
+        // ============================================
+
+        // EmailJS initialisieren
+        emailjs.init(EMAILJS_PUBLIC_KEY);
+
+        // Kontakte laden beim Seitenaufruf
+        window.addEventListener('DOMContentLoaded', async function() {
+            try {
+                const response = await fetch(KONTAKTE_JSON_URL);
+                if (!response.ok) {
+                    throw new Error('Kontakte konnten nicht geladen werden');
+                }
+                
+                kontakteData = await response.json();
+                
+                // Berechtigte E-Mails aus JSON extrahieren
+                authorizedEmails = kontakteData.berechtigte_emails.map(email => email.toLowerCase());
+                
+                // Loading verstecken, Step 1 anzeigen
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('step1').classList.remove('hidden');
+                
+            } catch (error) {
+                console.error('Fehler beim Laden der Kontakte:', error);
+                document.getElementById('loading').innerHTML = `
+                    <div class="text-red-600">
+                        <svg class="h-12 w-12 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <p class="font-semibold mb-2">Fehler beim Laden der Kontaktdaten</p>
+                        <p class="text-sm">Bitte versuchen Sie es später erneut oder kontaktieren Sie die Hausverwaltung.</p>
+                    </div>
+                `;
+            }
+        });
+
+        // ============================================
+        // SCHRITT 1: E-MAIL EINGABE
+        // ============================================
+
+        document.getElementById('emailForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const email = document.getElementById('userEmail').value.trim().toLowerCase();
+            const errorDiv = document.getElementById('errorMessage');
+            
+            // Prüfe, ob E-Mail berechtigt ist
+            if (!authorizedEmails.includes(email)) {
+                errorDiv.classList.remove('hidden');
+                errorDiv.querySelector('p').textContent = 
+                    'Diese E-Mail-Adresse ist nicht berechtigt. Bitte verwenden Sie die bei der Hausverwaltung hinterlegte Adresse.';
+                return;
+            }
+
+            // Generiere 6-stelligen OTP
+            currentOTP = Math.floor(100000 + Math.random() * 900000).toString();
+            currentEmail = email;
+            otpTimestamp = Date.now();
+
+            // Sende OTP per E-Mail via EmailJS
+            try {
+                const templateParams = {
+                    to_email: email,
+                    otp_code: currentOTP,
+                    valid_minutes: 10
+                };
+
+                await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, templateParams);
+                
+                // Wechsel zu Schritt 2
+                document.getElementById('sentToEmail').textContent = email;
+                document.getElementById('step1').classList.add('hidden');
+                document.getElementById('step2').classList.remove('hidden');
+                
+            } catch (error) {
+                console.error('Fehler beim E-Mail-Versand:', error);
+                errorDiv.classList.remove('hidden');
+                errorDiv.querySelector('p').textContent = 
+                    'Fehler beim Versand der E-Mail. Bitte versuchen Sie es erneut oder kontaktieren Sie die Hausverwaltung.';
+            }
+        });
+
+        // ============================================
+        // SCHRITT 2: OTP EINGABE
+        // ============================================
+
+        document.getElementById('otpForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const enteredOTP = document.getElementById('otpInput').value;
+            const errorDiv = document.getElementById('otpErrorMessage');
+            
+            // Prüfe OTP-Gültigkeit (10 Minuten)
+            const timeDiff = Date.now() - otpTimestamp;
+            if (timeDiff > 10 * 60 * 1000) {
+                errorDiv.classList.remove('hidden');
+                errorDiv.querySelector('p').textContent = 
+                    'Der Zugangscode ist abgelaufen. Bitte fordern Sie einen neuen Code an.';
+                return;
+            }
+
+            // Prüfe OTP
+            if (enteredOTP === currentOTP) {
+                // Zugriff gewährt - Kontaktliste anzeigen
+                renderKontaktliste();
+                document.getElementById('step2').classList.add('hidden');
+                document.getElementById('step3').classList.remove('hidden');
+                window.scrollTo(0, 0);
+            } else {
+                errorDiv.classList.remove('hidden');
+                errorDiv.querySelector('p').textContent = 
+                    'Falscher Code. Bitte überprüfen Sie Ihre Eingabe.';
+            }
+        });
+
+        // ============================================
+        // SCHRITT 3: KONTAKTLISTE RENDERN
+        // ============================================
+
+        function renderKontaktliste() {
+            const container = document.getElementById('contactsList');
+            const data = kontakteData;
+            
+            // Subtitle aktualisieren
+            document.getElementById('subtitle').textContent = 
+                `${data.stweg.anzahl_wohnungen} Wohnungen • ${data.stweg.anzahl_hobbyräume} Hobbyraum`;
+            
+            // Letzte Aktualisierung
+            document.getElementById('lastUpdate').textContent = 
+                formatDate(data.stweg.letzte_aktualisierung);
+            
+            let html = '';
+            
+            // Erdgeschoss
+            html += renderEtage('Erdgeschoss', data.wohnungen.erdgeschoss, 'blue');
+            
+            // 1. Obergeschoss
+            html += renderEtage('1. Obergeschoss', data.wohnungen.obergeschoss_1, 'green');
+            
+            // 2. Obergeschoss
+            html += renderEtage('2. Obergeschoss (unter dem Dach)', data.wohnungen.obergeschoss_2, 'purple');
+            
+            // Sonstiges (Hobbyraum)
+            html += renderSonstiges(data.sonstiges);
+            
+            // Ausschussvertreter
+            html += renderAusschuss(data.ausschuss);
+            
+            container.innerHTML = html;
+        }
+
+        function renderEtage(etageTitle, wohnungen, color) {
+            let html = `
+                <div class="border-l-4 border-${color}-500 bg-${color}-50 p-4 rounded-lg">
+                    <h3 class="font-semibold text-lg text-${color}-800 mb-3">${etageTitle}</h3>
+            `;
+            
+            wohnungen.forEach((wohnung, index) => {
+                const isLast = index === wohnungen.length - 1;
+                html += `
+                    <div class="bg-white p-4 rounded-lg ${!isLast ? 'mb-3' : ''}">
+                        <div class="flex items-start justify-between mb-2">
+                            <div>
+                                <span class="bg-${color}-100 text-${color}-800 px-2 py-1 rounded text-sm font-semibold">${wohnung.bezeichnung}</span>
+                                <span class="ml-2 text-sm text-gray-600">${wohnung.zimmer}-Zimmer${wohnung.besonderheiten.length > 0 ? ' mit ' + wohnung.besonderheiten.join(', ') : ''}</span>
+                            </div>
+                        </div>
+                        <div class="space-y-2">
+                `;
+                
+                // Eigentümer
+                if (wohnung.eigentümer) {
+                    html += renderPerson(wohnung.eigentümer, 'Eigentümer');
+                }
+                
+                // Mieter (falls vorhanden)
+                if (wohnung.mieter) {
+                    html += '<div class="mt-2 pt-2 border-t border-gray-200"></div>';
+                    html += renderPerson(wohnung.mieter, 'Mieter');
+                }
+                
+                html += `
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            return html;
+        }
+
+        function renderSonstiges(sonstiges) {
+            if (!sonstiges || sonstiges.length === 0) return '';
+            
+            let html = `
+                <div class="border-l-4 border-orange-500 bg-orange-50 p-4 rounded-lg">
+                    <h3 class="font-semibold text-lg text-orange-800 mb-3">Untergeschoss</h3>
+            `;
+            
+            sonstiges.forEach(item => {
+                html += `
+                    <div class="bg-white p-4 rounded-lg">
+                        <div class="flex items-start justify-between mb-2">
+                            <div>
+                                <span class="bg-orange-100 text-orange-800 px-2 py-1 rounded text-sm font-semibold">${item.bezeichnung}</span>
+                                <span class="ml-2 text-sm text-gray-600">${item.typ}</span>
+                            </div>
+                        </div>
+                        <div class="space-y-2">
+                `;
+                
+                if (item.eigentümer) {
+                    html += renderPerson(item.eigentümer, 'Eigentümer');
+                }
+                
+                if (item.mieter) {
+                    html += '<div class="mt-2 pt-2 border-t border-gray-200"></div>';
+                    html += renderPerson(item.mieter, 'Mieter');
+                }
+                
+                html += `
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            return html;
+        }
+
+        function renderAusschuss(ausschuss) {
+            let html = `
+                <div class="border-l-4 border-indigo-500 bg-indigo-50 p-4 rounded-lg">
+                    <h3 class="font-semibold text-lg text-indigo-800 mb-3">Ausschuss-Vertreter STWEG 3</h3>
+            `;
+            
+            ausschuss.forEach((vertreter, index) => {
+                const isLast = index === ausschuss.length - 1;
+                html += `
+                    <div class="bg-white p-4 rounded-lg ${!isLast ? 'mb-3' : ''}">
+                        <div class="flex items-start justify-between mb-2">
+                            <div>
+                                <span class="bg-indigo-100 text-indigo-800 px-2 py-1 rounded text-sm font-semibold">${vertreter.funktion}</span>
+                            </div>
+                        </div>
+                        <div class="space-y-2">
+                            <div>
+                                <p class="font-semibold text-gray-800">${vertreter.name}</p>
+                                <p class="text-sm text-gray-600">📧 ${vertreter.email}</p>
+                                <p class="text-sm text-gray-600">📱 ${vertreter.telefon}</p>
+                                <p class="text-sm text-gray-600">🏠 Wohnung: ${vertreter.wohnung}</p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            return html;
+        }
+
+        function renderPerson(person, rolle) {
+            return `
+                <div>
+                    <p class="font-semibold text-gray-800">${person.name}</p>
+                    <p class="text-sm text-gray-600">📧 ${person.email}</p>
+                    <p class="text-sm text-gray-600">📱 ${person.telefon}</p>
+                    <p class="text-xs text-gray-500 mt-1">${rolle}</p>
+                </div>
+            `;
+        }
+
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleDateString('de-CH', { 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+            });
+        }
+
+        // ============================================
+        // HILFSFUNKTIONEN
+        // ============================================
+
+        function resendOTP() {
+            currentOTP = Math.floor(100000 + Math.random() * 900000).toString();
+            otpTimestamp = Date.now();
+
+            const templateParams = {
+                to_email: currentEmail,
+                otp_code: currentOTP,
+                valid_minutes: 10
+            };
+
+            emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, templateParams)
+                .then(function() {
+                    alert('Ein neuer Zugangscode wurde an ' + currentEmail + ' gesendet.');
+                })
+                .catch(function(error) {
+                    console.error('Fehler beim E-Mail-Versand:', error);
+                    alert('Fehler beim Versand. Bitte versuchen Sie es erneut.');
+                });
+        }
+
+        function backToStep1() {
+            document.getElementById('step2').classList.add('hidden');
+            document.getElementById('step1').classList.remove('hidden');
+            document.getElementById('userEmail').value = '';
+            document.getElementById('otpInput').value = '';
+            document.getElementById('errorMessage').classList.add('hidden');
+            document.getElementById('otpErrorMessage').classList.add('hidden');
+        }
+
+        function printContacts() {
+            window.print();
+        }
+
+        // Nur Zahlen im OTP-Feld
+        document.getElementById('otpInput').addEventListener('input', function(e) {
+            this.value = this.value.replace(/[^0-9]/g, '');
+        });
+    </script>
+
+    <style>
+        @media print {
+            nav, footer, .bg-yellow-50, button {
+                display: none;
+            }
+            .max-w-3xl {
+                max-width: 100%;
+            }
+        }
+    </style>
+</body>
+</html>
