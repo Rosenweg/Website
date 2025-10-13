@@ -112,7 +112,7 @@
         "flaeche_m2": 90,
         "besonderheiten": ["Balkon"],
         "eigentümer": {
-          "name": "[Name Eigentümer]",
+          "name": "Bülent Aytac",
           "email": "n.sofi@hotmail.com",
           "telefon": "+41 79 789 01 23",
           "typ": "eigentümer"
@@ -145,8 +145,8 @@
         "flaeche_m2": 90,
         "besonderheiten": ["Balkon", "Dachgeschoss"],
         "eigentümer": {
-          "name": "[Name Eigentümer]",
-          "email": "eigentümer8@beispiel.ch",
+          "name": "Ajradin Emini",
+          "email": "s4dinka@hotmail.de",
           "telefon": "+41 79 012 34 56",
           "typ": "eigentümer"
         },
@@ -158,8 +158,8 @@
         "flaeche_m2": 100,
         "besonderheiten": ["Balkon", "Dachgeschoss"],
         "eigentümer": {
-          "name": "[Name Eigentümer]",
-          "email": "stefan+rosenweg@juroct.ch",
+          "name": "Rolf & Stefan Müller",
+          "email": "stefan+rosenweg@juroct.ch,rolf@juroct.net",
           "telefon": "+41 79 123 45 67",
           "typ": "eigentümer"
         },
