@@ -84,7 +84,7 @@
                         class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent" 
                         placeholder="ihre@email.ch">
                     <p class="text-xs text-gray-500 mt-2">
-                        Bitte geben Sie die E-Mail-Adresse ein, die bei der Hausverwaltung hinterlegt ist.
+                        Bitte geben Sie die E-Mail-Adresse ein, die bei den Ausschussvertretern hinterlegt ist.
                     </p>
                 </div>
 
@@ -104,7 +104,7 @@
 
             <div class="mt-6 pt-6 border-t border-gray-200">
                 <p class="text-sm text-gray-600">
-                    <strong>Kein Zugriff?</strong> Wenden Sie sich an die Ausschussvertreter oder die Hausverwaltung.
+                    <strong>Kein Zugriff?</strong> Wenden Sie sich an die Ausschussvertreter.
                 </p>
             </div>
         </div>
@@ -221,7 +221,7 @@
                     <strong>Letzte Aktualisierung:</strong> <span id="lastUpdate"></span>
                 </p>
                 <p class="text-xs text-gray-500">
-                    Bei Änderungen wenden Sie sich bitte an die Ausschussvertreter oder die Hausverwaltung.
+                    Bei Änderungen wenden Sie sich bitte an die Ausschussvertreter.
                 </p>
             </div>
         </div>
@@ -291,7 +291,7 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                         </svg>
                         <p class="font-semibold mb-2">Fehler beim Laden der Kontaktdaten</p>
-                        <p class="text-sm">Bitte versuchen Sie es später erneut oder kontaktieren Sie die Hausverwaltung.</p>
+                        <p class="text-sm">Bitte versuchen Sie es später erneut oder kontaktieren Sie die Ausschussvertreter.</p>
                     </div>
                 `;
             }
@@ -311,7 +311,7 @@
             if (!authorizedEmails.includes(email)) {
                 errorDiv.classList.remove('hidden');
                 errorDiv.querySelector('p').textContent = 
-                    'Diese E-Mail-Adresse ist nicht berechtigt. Bitte verwenden Sie die bei der Hausverwaltung hinterlegte Adresse.';
+                    'Diese E-Mail-Adresse ist nicht berechtigt. Bitte verwenden Sie die bei den Ausschussvertretern hinterlegte Adresse.';
                 return;
             }
 
