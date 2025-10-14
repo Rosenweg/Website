@@ -1,0 +1,319 @@
+{
+  "stweg_kooperation": {
+    "name": "STWEG-Kooperation Rosenweg",
+    "standort": "Rosenweg, 4303 Kaiseraugst",
+    "kanton": "Aargau",
+    "anzahl_stwegen": 8,
+    "letzte_aktualisierung": "2025-10-01",
+    "quelle": "Liste Ausschussmitglieder vom 01. Oktober 2025",
+    "änderungen_seit_letzter_version": [
+      "STWEG 3: Basil Fersztand ersetzt Yves Wyss als Vertreter 2",
+      "Verwaltung: Herr Lang übernimmt ab 1. Oktober 2025",
+      "Neue Mailingliste: ausschuss@rosenweg4303.ch"
+    ]
+  },
+  "ausschuss": {
+    "beschreibung": "15 Ausschussmitglieder (2 Vertreter pro STWEG 1-7, 1 Vertreter für STWEG 8)",
+    "mailingliste": "ausschuss@rosenweg4303.ch",
+    "mailingliste_alt": "ausschuss-rosenweg-kaiseraugst@googlegroups.com",
+    "vertreter": [
+      {
+        "stweg_nummer": 1,
+        "stweg_typ": "Wohngebäude",
+        "adressen": "Rosenweg 17/18",
+        "vertreter": [
+          {
+            "funktion": "Vertreter 1",
+            "anrede": "Herr",
+            "vorname": "Maurice",
+            "nachname": "Pretzel",
+            "name_vollständig": "Maurice Pretzel",
+            "haus_nr": "18",
+            "telefon": "+41 79 349 16 97",
+            "email": "silvia.muenzer@teleport.ch"
+          },
+          {
+            "funktion": "Vertreter 2",
+            "anrede": "Herr",
+            "vorname": "Urs",
+            "nachname": "Speiser",
+            "name_vollständig": "Urs Speiser",
+            "haus_nr": "18",
+            "telefon": "+41 79 279 42 30",
+            "email": "urs.speiser@gmail.com"
+          }
+        ]
+      },
+      {
+        "stweg_nummer": 2,
+        "stweg_typ": "Wohngebäude",
+        "adressen": "Rosenweg 13/14/16",
+        "vertreter": [
+          {
+            "funktion": "Vertreter 1",
+            "anrede": "Herr",
+            "vorname": "Dario",
+            "nachname": "Gamboni",
+            "name_vollständig": "Dario Gamboni",
+            "haus_nr": "16",
+            "telefon": "+41 79 602 03 05",
+            "email": "dariogamboni@hotmail.ch"
+          },
+          {
+            "funktion": "Vertreter 2",
+            "anrede": "Herr",
+            "vorname": "Jörg",
+            "nachname": "Herrmann",
+            "name_vollständig": "Jörg Herrmann",
+            "haus_nr": "14",
+            "telefon": "+41 79 727 13 78",
+            "email": "jherrmann@gmx.ch"
+          }
+        ]
+      },
+      {
+        "stweg_nummer": 3,
+        "stweg_typ": "Wohngebäude",
+        "adressen": "Rosenweg 9",
+        "vertreter": [
+          {
+            "funktion": "Vertreter 1 & Technischer Dienst",
+            "anrede": "Herr",
+            "vorname": "Stefan",
+            "nachname": "Müller",
+            "name_vollständig": "Stefan Müller",
+            "haus_nr": "9",
+            "telefon": "+41 76 519 99 70",
+            "email": "stefan@juroct.net",
+            "email_alternativ": "stefan+rosenweg@juroct.ch",
+            "bemerkung": "St. Müller im Original-PDF"
+          },
+          {
+            "funktion": "Vertreter 2",
+            "anrede": "Herr",
+            "vorname": "Basil",
+            "nachname": "Fersztand",
+            "name_vollständig": "Basil Fersztand",
+            "haus_nr": "9",
+            "telefon": "+41 78 899 79 38",
+            "email": "fersztand.basil@teleport.ch",
+            "bemerkung": "Seit Oktober 2025, ersetzt Yves Wyss"
+          }
+        ]
+      },
+      {
+        "stweg_nummer": 4,
+        "stweg_typ": "Wohngebäude",
+        "adressen": "Rosenweg 10/12",
+        "vertreter": [
+          {
+            "funktion": "Vertreter 1",
+            "anrede": "Herr",
+            "vorname": "François",
+            "nachname": "Goy",
+            "name_vollständig": "François Goy",
+            "haus_nr": "10",
+            "telefon": "+41 79 524 17 47",
+            "email": "francoisgoy@teleport.ch"
+          },
+          {
+            "funktion": "Vertreter 2",
+            "anrede": "Herr",
+            "vorname": "Thomas",
+            "nachname": "Siegrist",
+            "name_vollständig": "Thomas Siegrist",
+            "haus_nr": "10",
+            "telefon": "+41 79 453 83 92",
+            "email": "thymi@gmx.ch"
+          }
+        ]
+      },
+      {
+        "stweg_nummer": 5,
+        "stweg_typ": "Wohngebäude",
+        "adressen": "Rosenweg 5/6/8",
+        "vertreter": [
+          {
+            "funktion": "Vertreter 1",
+            "anrede": "Herr",
+            "vorname": "Michel",
+            "nachname": "Probst",
+            "name_vollständig": "Michel Probst",
+            "haus_nr": "6",
+            "telefon": "+41 76 423 39 43",
+            "email": "m.probst@maneca.ch"
+          },
+          {
+            "funktion": "Vertreter 2",
+            "anrede": "Herr",
+            "vorname": "Christian",
+            "nachname": "Bucher",
+            "name_vollständig": "Christian Bucher",
+            "haus_nr": "6",
+            "telefon": "+41 76 344 75 83",
+            "email": "christian.christopher.bucher@gmail.com",
+            "bemerkung": "Chris'an im Original-PDF"
+          }
+        ]
+      },
+      {
+        "stweg_nummer": 6,
+        "stweg_typ": "Wohngebäude",
+        "adressen": "Rosenweg 1",
+        "vertreter": [
+          {
+            "funktion": "Vertreter 1",
+            "anrede": "Herr",
+            "vorname": "Mehmet",
+            "nachname": "Peker",
+            "name_vollständig": "Mehmet Peker",
+            "haus_nr": "1",
+            "telefon": "+41 79 209 36 25",
+            "email": "mehmet.peker@pekerholding.ag"
+          },
+          {
+            "funktion": "Vertreter 2",
+            "anrede": "Herr",
+            "vorname": "Jürgen",
+            "nachname": "Wirz",
+            "name_vollständig": "Jürgen Wirz",
+            "haus_nr": "1",
+            "telefon": "+41 79 898 86 85",
+            "email": "wirzj@me.com"
+          }
+        ]
+      },
+      {
+        "stweg_nummer": 7,
+        "stweg_typ": "Wohngebäude",
+        "adressen": "Rosenweg 2/4",
+        "vertreter": [
+          {
+            "funktion": "Vertreterin 1",
+            "anrede": "Frau",
+            "vorname": "Gisela",
+            "nachname": "Studer",
+            "name_vollständig": "Gisela Studer",
+            "haus_nr": "2",
+            "telefon": "+41 79 206 46 89",
+            "email": "gisela.studer@hotmail.com"
+          },
+          {
+            "funktion": "Vertreter 2",
+            "anrede": "Herr",
+            "vorname": "Andreas",
+            "nachname": "De Bona",
+            "name_vollständig": "Andreas De Bona",
+            "haus_nr": "2",
+            "telefon": "+41 79 555 08 56",
+            "email": "redbon@bluewin.ch"
+          }
+        ]
+      },
+      {
+        "stweg_nummer": 8,
+        "stweg_typ": "Tiefgarage",
+        "adressen": "Einstellhalle (gemeinsame Tiefgarage)",
+        "besonderheit": "Nur 1 Vertreter im PDF genannt",
+        "vertreter": [
+          {
+            "funktion": "Vertreter",
+            "anrede": "Herr",
+            "vorname": "Andreas",
+            "nachname": "De Bona",
+            "name_vollständig": "Andreas De Bona",
+            "haus_nr": "2",
+            "telefon": "+41 79 555 08 56",
+            "email": "redbon@bluewin.ch",
+            "bemerkung": "Auch Vertreter für STWEG 7"
+          }
+        ]
+      }
+    ]
+  },
+  "hausverwaltung": {
+    "firma": "LangPartners Immobilien AG",
+    "ansprechperson": "Herr Lang",
+    "ansprechperson_vorherig": "Frau Piaia (bis September 2025)",
+    "adresse": "Kirchplatz 16",
+    "plz": "4132",
+    "ort": "Muttenz",
+    "land": "Schweiz",
+    "telefon": "+41 61 228 18 18",
+    "email": "hello@langpartners.ch",
+    "website": "https://langpartners.ch",
+    "öffnungszeiten": "Montag – Freitag, 09:00-12:00 Uhr",
+    "gültig_ab": "2025-10-01"
+  },
+  "statistiken": {
+    "total_ausschussmitglieder": 15,
+    "davon_männlich": 14,
+    "davon_weiblich": 1,
+    "stwegs_mit_2_vertretern": 7,
+    "stwegs_mit_1_vertreter": 1
+  },
+  "api_info": {
+    "version": "2.0",
+    "erstellt_am": "2025-10-14",
+    "datenstand": "2025-10-01",
+    "verwendung": "Für n8n Workflows und Automatisierungen",
+    "changelog": [
+      {
+        "version": "2.0",
+        "datum": "2025-10-14",
+        "änderungen": [
+          "STWEG 3: Basil Fersztand ersetzt Yves Wyss",
+          "Verwaltung: Herr Lang ersetzt Frau Piaia",
+          "Neue Mailingliste: ausschuss@rosenweg4303.ch"
+        ]
+      },
+      {
+        "version": "1.0",
+        "datum": "2025-10-13",
+        "änderungen": [
+          "Initiale Erstellung aus PDF vom 05. April 2024"
+        ]
+      }
+    ],
+    "hinweise": [
+      "Diese Datei enthält alle Ausschussmitglieder der STWEG-Kooperation Rosenweg",
+      "Die Daten stammen aus dem offiziellen PDF vom 01. Oktober 2025",
+      "Bei Änderungen diese Datei aktualisieren und neues Datum setzen",
+      "Für n8n: JSON direkt als HTTP Request abrufbar oder als lokale Datei",
+      "STWEG 8 (Tiefgarage) hat nur einen Vertreter im Original-PDF"
+    ]
+  },
+  "n8n_beispiele": {
+    "beschreibung": "JSONPath-Beispiele für n8n Workflows",
+    "queries": {
+      "alle_vertreter": {
+        "path": "$.ausschuss.vertreter[*].vertreter[*]",
+        "beschreibung": "Gibt alle Ausschussvertreter zurück"
+      },
+      "alle_emails": {
+        "path": "$.ausschuss.vertreter[*].vertreter[*].email",
+        "beschreibung": "Gibt alle E-Mail-Adressen zurück"
+      },
+      "alle_telefonnummern": {
+        "path": "$.ausschuss.vertreter[*].vertreter[*].telefon",
+        "beschreibung": "Gibt alle Telefonnummern zurück"
+      },
+      "nur_stweg_3": {
+        "path": "$.ausschuss.vertreter[?(@.stweg_nummer == 3)].vertreter[*]",
+        "beschreibung": "Gibt nur Vertreter von STWEG 3 zurück"
+      },
+      "tiefgarage_vertreter": {
+        "path": "$.ausschuss.vertreter[?(@.stweg_nummer == 8)].vertreter[*]",
+        "beschreibung": "Gibt Vertreter der Tiefgarage (STWEG 8) zurück"
+      },
+      "nach_nachname": {
+        "path": "$.ausschuss.vertreter[*].vertreter[?(@.nachname == 'Müller')]",
+        "beschreibung": "Suche nach spezifischem Nachnamen"
+      },
+      "alle_wohngebäude": {
+        "path": "$.ausschuss.vertreter[?(@.stweg_typ == 'Wohngebäude')].vertreter[*]",
+        "beschreibung": "Nur Vertreter von Wohngebäuden (STWEG 1-7)"
+      }
+    }
+  }
+}
