@@ -9,6 +9,12 @@
   "ausschuss": {
     "beschreibung": "15 Ausschussmitglieder (2 Vertreter pro STWEG 1-7, 1 Vertreter für STWEG 8)",
     "mailingliste": "ausschuss@rosenweg4303.ch",
+    "präsident": {
+      "name_vollständig": "Jörg Herrmann",
+      "telefon": "+41 79 727 13 78",
+      "email": "jherrmann@gmx.ch",
+      "stweg_nummer": 2
+    },
     "vertreter": [
       {
         "stweg_nummer": 1,
