@@ -38,6 +38,30 @@ function renderAusschuss(data) {
 
     let html = '';
     
+    // Präsident anzeigen (falls vorhanden)
+    if (data.ausschuss.präsident) {
+        html += `
+            <div class="border-l-4 border-yellow-500 pl-3 py-3 bg-yellow-50 rounded mb-3">
+                <p class="text-sm font-semibold text-yellow-800 mb-1">🏆 Präsident des Ausschusses</p>
+                <p class="text-sm font-bold text-gray-700">${data.ausschuss.präsident.name_vollständig}</p>
+                <p class="text-xs text-gray-600">STWEG ${data.ausschuss.präsident.stweg_nummer} • Tel: ${data.ausschuss.präsident.telefon}</p>
+            </div>
+        `;
+    }
+
+    // Technischer Dienst anzeigen (falls vorhanden)
+    if (data.ausschuss.technischer_dienst) {
+        const techDienst = data.ausschuss.technischer_dienst;
+        const mitgliederNames = techDienst.mitglieder.map(m => m.name_vollständig).join(' • ');
+        html += `
+            <div class="border-l-4 border-purple-500 pl-3 py-3 bg-purple-50 rounded mb-3">
+                <p class="text-sm font-semibold text-purple-800 mb-1">🔧 Technischer Dienst</p>
+                <p class="text-sm font-bold text-gray-700">${mitgliederNames}</p>
+                <p class="text-xs text-gray-600">E-Mail: ${techDienst.email}</p>
+            </div>
+        `;
+    }
+    
     // Durch alle STWEGs iterieren (1-8)
     data.ausschuss.vertreter.forEach(stweg => {
         const borderColor = stweg.stweg_nummer === 8 ? 'green-500' : 'blue-400';
