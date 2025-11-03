@@ -28,6 +28,11 @@
             {
               "value1": "={{ $json.body.otp_code }}",
               "operation": "isNotEmpty"
+            },
+            {
+              "value1": "={{ $json.body.email }}",
+              "operation": "notContains",
+              "value2": ".invalid"
             }
           ]
         }
@@ -73,7 +78,7 @@
       "parameters": {
         "respondWith": "json",
         "responseCode": 400,
-        "responseBody": "={{ { \"success\": false, \"error\": \"Ungültige Anfrage. Email und OTP-Code sind erforderlich.\" } }}"
+        "responseBody": "={{ { \"success\": false, \"error\": \"Ungültige Anfrage. Email und OTP-Code sind erforderlich, oder E-Mail-Adresse ist ein Platzhalter (.invalid).\" } }}"
       },
       "id": "error-response-validation",
       "name": "Error Response - Validation",

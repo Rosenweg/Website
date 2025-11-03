@@ -67,6 +67,7 @@ Der Workflow besteht aus folgenden Komponenten:
 
 ### 2. Validate Input (Validation)
 - Prüft, ob `email` und `otp_code` vorhanden sind
+- **Filtert `.invalid` E-Mails aus** (Platzhalter-Adressen)
 - Bei Fehler: 400 Bad Request Response
 
 ### 3. Send Email (E-Mail-Versand)
@@ -109,7 +110,7 @@ Content-Type: application/json
 ```json
 {
   "success": false,
-  "error": "Ungültige Anfrage. Email und OTP-Code sind erforderlich."
+  "error": "Ungültige Anfrage. Email und OTP-Code sind erforderlich, oder E-Mail-Adresse ist ein Platzhalter (.invalid)."
 }
 ```
 
@@ -191,13 +192,29 @@ curl -X POST https://n8n.juroct.net/webhook/stweg3-otp \
 - Der Webhook ist öffentlich zugänglich (POST-Requests)
 - Die Sicherheit basiert auf:
   1. E-Mail-Validierung im Frontend (nur berechtigte E-Mails)
-  2. OTP-Codes sind nur 10 Minuten gültig
-  3. OTP-Codes werden im Frontend generiert und validiert
+  2. **Backend-Filter**: `.invalid` E-Mail-Adressen werden automatisch abgewiesen
+  3. OTP-Codes sind nur 10 Minuten gültig
+  4. OTP-Codes werden im Frontend generiert und validiert
+
+### Platzhalter-E-Mails
+
+Alle Platzhalter-E-Mails in `kontakte.json` verwenden die Domain `.invalid`:
+- `eigentuemer5@beispiel.invalid`
+- `mieter2@beispiel.invalid`
+- `mieter6@beispiel.invalid`
+- `eigentuemer-hobby@beispiel.invalid`
+
+Diese E-Mails werden vom n8n Workflow automatisch abgelehnt und es werden keine OTP-Codes an sie versendet.
+
+**Warum `.invalid`?**
+- `.invalid` ist eine reservierte Top-Level-Domain (RFC 2606)
+- Garantiert nicht routbar und kann nie als echte Domain existieren
+- Verhindert versehentlichen E-Mail-Versand an Platzhalter
 
 ### Empfohlene Verbesserungen (optional)
 
 1. **Rate Limiting**: Implementiere ein Rate Limit im Workflow
-2. **E-Mail-Whitelist**: Validiere E-Mails auch im n8n Workflow
+2. **E-Mail-Whitelist**: Validiere E-Mails auch im n8n Workflow gegen die berechtigten E-Mails
 3. **Logging**: Logge alle Anfragen für Audit-Zwecke
 
 ## Support
