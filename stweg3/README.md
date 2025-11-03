@@ -15,8 +15,8 @@ Dieser Ordner enthält alle Dateien für die STWEG 3 (Stockwerkeigentümergemein
 ## Zugriff
 
 ### Öffentliche Seite
-Die Hauptseite von STWEG 3 ist im Root-Verzeichnis:
-- `../stweg3.html`
+Die Hauptseite von STWEG 3:
+- `index.html` (in diesem Ordner)
 
 ### Geschützte Kontaktliste
 Die geschützte Kontaktliste ist nur nach E-Mail-Verifizierung zugänglich:
@@ -27,6 +27,7 @@ Die geschützte Kontaktliste ist nur nach E-Mail-Verifizierung zugänglich:
 ```
 stweg3/
 ├── README.md                    # Diese Datei
+├── index.html                  # Hauptseite STWEG 3
 ├── stweg3-kontakte.html        # Geschützte Kontaktseite
 ├── kontakte.json               # Kontaktdaten (berechtigte Nutzer)
 ├── n8n-otp-workflow.json       # n8n Workflow
