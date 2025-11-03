@@ -40,6 +40,7 @@ Zugriff auf die Kontaktliste haben:
 - Alle Eigentümer (automatisch)
 - Mieter mit expliziter Berechtigung (`"berechtigt": true` in kontakte.json)
 - Ausschussvertreter (automatisch)
+- Hausverwaltung: Alle E-Mails der Domain aus `hausverwaltung.email` (wird dynamisch extrahiert - z.B. @langpartners.ch)
 
 ## Technische Details
 
@@ -49,6 +50,7 @@ Zugriff auf die Kontaktliste haben:
 - Versand via n8n Webhook
 - Frontend-Validierung
 - **Backend-Filter**: `.invalid` E-Mails werden automatisch abgelehnt
+- **Dynamische Hausverwaltungs-Berechtigung**: E-Mail-Domain wird automatisch aus `kontakte.json` extrahiert
 
 ### n8n Webhook
 - URL: `https://n8n.juroct.net/webhook/stweg3-otp`
