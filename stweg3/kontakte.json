@@ -38,7 +38,13 @@
           "telefon": "+41 78 899 79 38",
           "typ": "eigentümer"
         },
-        "mieter": null
+        "mieter": {
+          "name": "[Name Mieter]",
+          "email": "mieter-eg1@beispiel.invalid",
+          "telefon": "+41 79 XXX XX XX",
+          "typ": "mieter",
+          "berechtigt": false
+        }
       },
       {
         "bezeichnung": "EG.2",
@@ -85,7 +91,13 @@
           "telefon": "+41 79 567 89 01",
           "typ": "eigentümer"
         },
-        "mieter": null
+        "mieter": {
+          "name": "[Name Mieter]",
+          "email": "mieter-1og1@beispiel.invalid",
+          "telefon": "+41 79 XXX XX XX",
+          "typ": "mieter",
+          "berechtigt": false
+        }
       },
       {
         "bezeichnung": "1OG.2",
@@ -111,13 +123,7 @@
           "telefon": "+41 79 789 01 23",
           "typ": "eigentümer"
         },
-        "mieter": {
-          "name": "[Name Mieter]",
-          "email": "mieter6@beispiel.invalid",
-          "telefon": "+41 79 890 12 34",
-          "typ": "mieter",
-          "berechtigt": true
-        }
+        "mieter": null
       }
     ],
     "obergeschoss_2": [
@@ -145,7 +151,13 @@
           "telefon": "+41 79 012 34 56",
           "typ": "eigentümer"
         },
-        "mieter": null
+        "mieter": {
+          "name": "[Name Mieter]",
+          "email": "mieter-2og2@beispiel.invalid",
+          "telefon": "+41 79 XXX XX XX",
+          "typ": "mieter",
+          "berechtigt": false
+        }
       },
       {
         "bezeichnung": "2OG.3",
