@@ -68,6 +68,7 @@ Der Workflow besteht aus folgenden Komponenten:
 ### 2. Validate Input (Validation)
 - Prüft, ob `email` und `otp_code` vorhanden sind
 - **Filtert `.invalid` E-Mails aus** (Platzhalter-Adressen)
+- **Erlaubt alle E-Mails der Hausverwaltung** (@langpartners.ch)
 - Bei Fehler: 400 Bad Request Response
 
 ### 3. Send Email (E-Mail-Versand)
@@ -110,7 +111,7 @@ Content-Type: application/json
 ```json
 {
   "success": false,
-  "error": "Ungültige Anfrage. Email und OTP-Code sind erforderlich, oder E-Mail-Adresse ist ein Platzhalter (.invalid)."
+  "error": "Ungültige Anfrage. Email und OTP-Code sind erforderlich. Platzhalter-E-Mails (.invalid) werden nicht akzeptiert."
 }
 ```
 
@@ -193,8 +194,17 @@ curl -X POST https://n8n.juroct.net/webhook/stweg3-otp \
 - Die Sicherheit basiert auf:
   1. E-Mail-Validierung im Frontend (nur berechtigte E-Mails)
   2. **Backend-Filter**: `.invalid` E-Mail-Adressen werden automatisch abgewiesen
-  3. OTP-Codes sind nur 10 Minuten gültig
-  4. OTP-Codes werden im Frontend generiert und validiert
+  3. **Dynamischer Hausverwaltungs-Zugang**: E-Mail-Domain wird automatisch aus `kontakte.json` > `hausverwaltung.email` extrahiert (z.B. @langpartners.ch)
+  4. OTP-Codes sind nur 10 Minuten gültig
+  5. OTP-Codes werden im Frontend generiert und validiert
+
+### Hausverwaltungs-Domain (Dynamisch)
+
+Die Hausverwaltungs-Domain wird beim Laden der Seite automatisch aus der JSON-Datei extrahiert:
+- Quelle: `kontakte.json` → `hausverwaltung.email`
+- Beispiel: Wenn `hausverwaltung.email` = `hello@langpartners.ch`, dann wird die Domain `langpartners.ch` extrahiert
+- Alle E-Mails mit dieser Domain erhalten automatisch Zugang (z.B. `info@langpartners.ch`, `service@langpartners.ch`, etc.)
+- **Vorteil**: Bei Wechsel der Hausverwaltung muss nur die E-Mail in `kontakte.json` geändert werden - kein Code-Update erforderlich!
 
 ### Platzhalter-E-Mails
 

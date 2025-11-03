@@ -28,19 +28,21 @@
             {
               "value1": "={{ $json.body.otp_code }}",
               "operation": "isNotEmpty"
-            },
+            }
+          ],
+          "boolean": [
             {
-              "value1": "={{ $json.body.email }}",
-              "operation": "notContains",
-              "value2": ".invalid"
+              "value1": "={{ $json.body.email.includes('.invalid') ? false : true }}",
+              "value2": true
             }
           ]
-        }
+        },
+        "combineOperation": "all"
       },
       "id": "validate-input",
       "name": "Validate Input",
       "type": "n8n-nodes-base.if",
-      "typeVersion": 1,
+      "typeVersion": 2,
       "position": [450, 300]
     },
     {
@@ -78,7 +80,7 @@
       "parameters": {
         "respondWith": "json",
         "responseCode": 400,
-        "responseBody": "={{ { \"success\": false, \"error\": \"Ungültige Anfrage. Email und OTP-Code sind erforderlich, oder E-Mail-Adresse ist ein Platzhalter (.invalid).\" } }}"
+        "responseBody": "={{ { \"success\": false, \"error\": \"Ungültige Anfrage. Email und OTP-Code sind erforderlich. Platzhalter-E-Mails (.invalid) werden nicht akzeptiert.\" } }}"
       },
       "id": "error-response-validation",
       "name": "Error Response - Validation",

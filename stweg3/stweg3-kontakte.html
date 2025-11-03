@@ -251,17 +251,36 @@
         // ============================================
         // GLOBALE VARIABLEN
         // ============================================
-        
+
         let kontakteData = null;
         let authorizedEmails = [];
+        let hausverwaltungDomain = null;
         let currentEmail = '';
         let currentOTP = '';
         let otpTimestamp = 0;
 
         // ============================================
+        // HILFSFUNKTION: HAUSVERWALTUNGS-DOMAIN EXTRAHIEREN
+        // ============================================
+
+        function extractHausverwaltungDomain(data) {
+            if (data.hausverwaltung && data.hausverwaltung.email) {
+                const email = data.hausverwaltung.email.trim().toLowerCase();
+                const atIndex = email.indexOf('@');
+                if (atIndex !== -1) {
+                    const domain = email.substring(atIndex + 1);
+                    console.log('Hausverwaltungs-Domain extrahiert:', domain);
+                    return domain;
+                }
+            }
+            console.log('Keine Hausverwaltungs-Domain gefunden');
+            return null;
+        }
+
+        // ============================================
         // HILFSFUNKTION: E-MAILS AUS KONTAKTEN EXTRAHIEREN
         // ============================================
-        
+
         function extractAllEmailsFromKontakte(data) {
             const emails = new Set();
             
@@ -349,10 +368,13 @@
                 }
                 
                 kontakteData = await response.json();
-                
+
                 // Berechtigte E-Mails AUTOMATISCH aus allen Wohnungen extrahieren
                 authorizedEmails = extractAllEmailsFromKontakte(kontakteData);
-                
+
+                // Hausverwaltungs-Domain AUTOMATISCH aus kontakte.json extrahieren
+                hausverwaltungDomain = extractHausverwaltungDomain(kontakteData);
+
                 // Loading verstecken, Step 1 anzeigen
                 document.getElementById('loading').classList.add('hidden');
                 document.getElementById('step1').classList.remove('hidden');
@@ -387,10 +409,11 @@
             submitButton.disabled = true;
             submitButton.innerHTML = '<span class="animate-spin inline-block mr-2">⏳</span> Wird gesendet...';
             
-            // Prüfe, ob E-Mail berechtigt ist
-            if (!authorizedEmails.includes(email)) {
+            // Prüfe, ob E-Mail berechtigt ist (Eigentümer/Mieter ODER Hausverwaltung)
+            const isHausverwaltung = hausverwaltungDomain && email.endsWith('@' + hausverwaltungDomain);
+            if (!authorizedEmails.includes(email) && !isHausverwaltung) {
                 errorDiv.classList.remove('hidden');
-                errorDiv.querySelector('p').innerHTML = 
+                errorDiv.querySelector('p').innerHTML =
                     'Diese E-Mail-Adresse ist nicht berechtigt.<br><br>' +
                     '<strong>Hinweis:</strong> Alle Eigentümer haben automatisch Zugriff. ' +
                     'Mieter benötigen eine explizite Berechtigung vom Ausschuss.<br><br>' +
