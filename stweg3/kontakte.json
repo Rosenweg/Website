@@ -53,7 +53,7 @@
         },
         "mieter": {
           "name": "[Name Mieter]",
-          "email": "mieter2@beispiel.ch",
+          "email": "mieter2@beispiel.invalid",
           "telefon": "+41 79 345 67 89",
           "typ": "mieter",
           "berechtigt": false
@@ -94,7 +94,7 @@
         "besonderheiten": ["Balkon"],
         "eigentümer": {
           "name": "[Name Eigentümer]",
-          "email": "eigentümer5@beispiel.ch",
+          "email": "eigentuemer5@beispiel.invalid",
           "telefon": "+41 79 678 90 12",
           "typ": "eigentümer"
         },
@@ -113,7 +113,7 @@
         },
         "mieter": {
           "name": "[Name Mieter]",
-          "email": "mieter6@beispiel.ch",
+          "email": "mieter6@beispiel.invalid",
           "telefon": "+41 79 890 12 34",
           "typ": "mieter",
           "berechtigt": true
@@ -169,7 +169,7 @@
       "etage": "Untergeschoss",
       "eigentümer": {
         "name": "[Name Eigentümer]",
-        "email": "eigentümer-hobby@beispiel.ch",
+        "email": "eigentuemer-hobby@beispiel.invalid",
         "telefon": "+41 79 234 56 78",
         "typ": "eigentümer"
       },

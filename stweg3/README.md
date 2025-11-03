@@ -47,11 +47,20 @@ Zugriff auf die Kontaktliste haben:
 - Gültig für 10 Minuten
 - Versand via n8n Webhook
 - Frontend-Validierung
+- **Backend-Filter**: `.invalid` E-Mails werden automatisch abgelehnt
 
 ### n8n Webhook
 - URL: `https://n8n.juroct.net/webhook/stweg3-otp`
 - Method: POST
 - Body: `{"email": "...", "otp_code": "..."}`
+- Filtert Platzhalter-E-Mails (`.invalid`) automatisch aus
+
+### Platzhalter-E-Mails
+Alle Platzhalter in `kontakte.json` verwenden `.invalid`:
+- `eigentuemer5@beispiel.invalid`
+- `mieter2@beispiel.invalid`
+- `mieter6@beispiel.invalid`
+- `eigentuemer-hobby@beispiel.invalid`
 
 ## Support
 
