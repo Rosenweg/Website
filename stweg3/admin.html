@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Kontakte bearbeiten - STWEG 3</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .hidden {
+            display: none;
+        }
+        textarea {
+            font-family: 'Monaco', 'Courier New', monospace;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-lg sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <a href="index.html" class="flex items-center">
+                        <svg class="h-8 w-8 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                        </svg>
+                        <span class="ml-2 text-xl font-semibold text-gray-800">STWEG 3 Admin</span>
+                    </a>
+                </div>
+                <div class="flex items-center">
+                    <a href="index.html" class="text-gray-700 hover:text-orange-600 transition">← Zurück zu STWEG 3</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Header -->
+    <section class="bg-gradient-to-r from-orange-600 to-orange-800 text-white py-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h1 class="text-4xl font-bold mb-2">🔧 Admin-Bereich</h1>
+            <p class="text-xl opacity-90">Kontaktdaten verwalten - Nur für Ausschussvertreter</p>
+        </div>
+    </section>
+
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <!-- Loading -->
+        <div id="loading" class="bg-white rounded-lg shadow-lg p-8 text-center">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600 mx-auto mb-4"></div>
+            <p class="text-gray-600">Lade Daten...</p>
+        </div>
+
+        <!-- Schritt 1: OTP-Authentifizierung -->
+        <div id="step1" class="hidden bg-white rounded-lg shadow-lg p-8">
+            <div class="flex items-center mb-6">
+                <div class="bg-orange-100 rounded-full p-3 mr-4">
+                    <svg class="h-8 w-8 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                    </svg>
+                </div>
+                <div>
+                    <h2 class="text-2xl font-bold text-gray-800">Admin-Zugang</h2>
+                    <p class="text-sm text-gray-600">Schritt 1: Authentifizierung</p>
+                </div>
+            </div>
+
+            <div class="bg-red-50 border-l-4 border-red-500 p-4 mb-6">
+                <p class="text-sm text-gray-700">
+                    <strong>⚠️ Achtung:</strong> Der Admin-Bereich ist ausschließlich für Ausschussvertreter zugänglich.
+                    Nur berechtigte E-Mails können OTP-Codes anfordern.
+                </p>
+            </div>
+
+            <form id="emailForm" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        Ihre E-Mail-Adresse (Ausschuss) *
+                    </label>
+                    <input
+                        type="email"
+                        id="userEmail"
+                        required
+                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                        placeholder="ihre@email.ch">
+                </div>
+
+                <div id="errorMessage" class="hidden bg-red-50 border-l-4 border-red-500 p-4 rounded">
+                    <p class="text-sm text-red-700"></p>
+                </div>
+
+                <button
+                    type="submit"
+                    class="w-full bg-orange-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-orange-700 transition flex items-center justify-center">
+                    <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                    </svg>
+                    Zugangscode per E-Mail senden
+                </button>
+            </form>
+        </div>
+
+        <!-- Schritt 2: OTP-Eingabe -->
+        <div id="step2" class="hidden bg-white rounded-lg shadow-lg p-8">
+            <div class="flex items-center mb-6">
+                <div class="bg-orange-100 rounded-full p-3 mr-4">
+                    <svg class="h-8 w-8 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path>
+                    </svg>
+                </div>
+                <div>
+                    <h2 class="text-2xl font-bold text-gray-800">Code eingeben</h2>
+                    <p class="text-sm text-gray-600">Schritt 2: Verifizierung</p>
+                </div>
+            </div>
+
+            <div class="bg-blue-50 border-l-4 border-blue-500 p-4 mb-6">
+                <p class="text-sm text-gray-700">
+                    Wir haben Ihnen einen 6-stelligen Code an <strong id="displayEmail"></strong> gesendet.
+                    Der Code ist 10 Minuten gültig.
+                </p>
+            </div>
+
+            <form id="otpForm" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        Zugangscode *
+                    </label>
+                    <input
+                        type="text"
+                        id="otpInput"
+                        required
+                        maxlength="6"
+                        pattern="[0-9]{6}"
+                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent text-center text-2xl tracking-widest font-mono"
+                        placeholder="123456">
+                </div>
+
+                <div id="otpErrorMessage" class="hidden bg-red-50 border-l-4 border-red-500 p-4 rounded">
+                    <p class="text-sm text-red-700"></p>
+                </div>
+
+                <button
+                    type="submit"
+                    class="w-full bg-orange-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-orange-700 transition">
+                    Code bestätigen
+                </button>
+
+                <button
+                    type="button"
+                    onclick="backToStep1()"
+                    class="w-full bg-gray-100 text-gray-700 px-6 py-3 rounded-lg font-semibold hover:bg-gray-200 transition">
+                    Zurück
+                </button>
+            </form>
+        </div>
+
+        <!-- Schritt 3: Editor -->
+        <div id="step3" class="hidden">
+            <div class="bg-white rounded-lg shadow-lg p-8 mb-6">
+                <div class="flex items-center justify-between mb-6">
+                    <div class="flex items-center">
+                        <div class="bg-green-100 rounded-full p-3 mr-4">
+                            <svg class="h-8 w-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                        </div>
+                        <div>
+                            <h2 class="text-2xl font-bold text-gray-800">Zugriff gewährt</h2>
+                            <p class="text-sm text-gray-600">Angemeldet als: <strong id="loggedInEmail"></strong></p>
+                        </div>
+                    </div>
+                    <button
+                        onclick="logout()"
+                        class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition text-sm">
+                        Abmelden
+                    </button>
+                </div>
+
+                <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
+                    <p class="text-sm text-gray-700">
+                        <strong>⚠️ Wichtig:</strong> Änderungen werden sofort gespeichert und sind für alle Nutzer sichtbar.
+                        Stellen Sie sicher, dass das JSON-Format korrekt ist!
+                    </p>
+                </div>
+
+                <div class="mb-6">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-4">Benutzerfreundlicher Editor</h3>
+                    <p class="text-sm text-gray-600 mb-4">Wählen Sie eine Wohnung aus, um deren Daten zu bearbeiten:</p>
+
+                    <!-- Wohnungsauswahl -->
+                    <div class="grid md:grid-cols-3 gap-4 mb-6" id="wohnungList">
+                        <!-- Wird dynamisch gefüllt -->
+                    </div>
+
+                    <!-- Bearbeitungsformular -->
+                    <div id="editForm" class="hidden">
+                        <div class="bg-gray-50 rounded-lg p-6 mb-4">
+                            <h4 class="font-semibold text-gray-800 mb-4" id="editFormTitle"></h4>
+                            <div id="formFields" class="space-y-4">
+                                <!-- Wird dynamisch gefüllt -->
+                            </div>
+                            <div class="flex gap-2 mt-6">
+                                <button
+                                    onclick="saveChanges()"
+                                    class="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition">
+                                    Änderungen speichern
+                                </button>
+                                <button
+                                    onclick="cancelEdit()"
+                                    class="bg-gray-100 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-200 transition">
+                                    Abbrechen
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <details class="mb-6">
+                    <summary class="cursor-pointer text-lg font-semibold text-gray-800 mb-2 hover:text-orange-600">
+                        🔧 Erweitert: JSON direkt bearbeiten
+                    </summary>
+                    <div class="mt-4">
+                        <div class="flex justify-between items-center mb-2">
+                            <label class="block text-sm font-medium text-gray-700">
+                                kontakte.json
+                            </label>
+                            <div class="flex gap-2">
+                                <button
+                                    onclick="formatJSON()"
+                                    class="bg-blue-100 text-blue-700 px-3 py-1 rounded text-sm hover:bg-blue-200 transition">
+                                    Formatieren
+                                </button>
+                                <button
+                                    onclick="validateJSON()"
+                                    class="bg-purple-100 text-purple-700 px-3 py-1 rounded text-sm hover:bg-purple-200 transition">
+                                    Validieren
+                                </button>
+                            </div>
+                        </div>
+                        <textarea
+                            id="jsonEditor"
+                            class="w-full h-96 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent text-sm"
+                            spellcheck="false"></textarea>
+
+                        <div id="jsonError" class="hidden bg-red-50 border-l-4 border-red-500 p-4 rounded mt-4">
+                            <p class="text-sm text-red-700"></p>
+                        </div>
+
+                        <div id="jsonSuccess" class="hidden bg-green-50 border-l-4 border-green-500 p-4 rounded mt-4">
+                            <p class="text-sm text-green-700">JSON ist gültig! ✓</p>
+                        </div>
+
+                        <button
+                            onclick="saveJSON()"
+                            class="mt-4 w-full bg-orange-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-orange-700 transition flex items-center justify-center">
+                            <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path>
+                            </svg>
+                            JSON speichern
+                        </button>
+                    </div>
+                </details>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="bg-gray-800 text-white py-8 mt-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <p class="text-sm text-gray-400">
+                © 2025 STWEG 3 - Teil der STWEG-Kooperation Rosenweg
+            </p>
+        </div>
+    </footer>
+
+    <script>
+        // ============================================
+        // KONFIGURATION
+        // ============================================
+
+        // n8n Webhook URL für OTP-Versand
+        const N8N_WEBHOOK_URL = 'https://n8n.juroct.net/webhook/stweg3-otp';
+
+        // n8n Webhook URL zum Speichern (muss noch erstellt werden)
+        const N8N_SAVE_WEBHOOK_URL = 'https://n8n.juroct.net/webhook/stweg3-save-json';
+
+        // Pfad zur JSON-Datei
+        const KONTAKTE_JSON_URL = 'kontakte.json';
+
+        // ============================================
+        // GLOBALE VARIABLEN
+        // ============================================
+
+        let kontakteData = null;
+        let ausschussEmails = [];
+        let currentEmail = '';
+        let currentOTP = '';
+        let otpTimestamp = 0;
+        let currentEditingWohnung = null;
+
+        // ============================================
+        // HILFSFUNKTION: AUSSCHUSS-E-MAILS EXTRAHIEREN
+        // ============================================
+
+        function extractAusschussEmails(data) {
+            const emails = new Set();
+
+            if (data.ausschuss) {
+                data.ausschuss.forEach(vertreter => {
+                    if (vertreter.email) {
+                        const emailArray = vertreter.email.split(',');
+                        emailArray.forEach(email => {
+                            const trimmed = email.trim().toLowerCase();
+                            if (trimmed && trimmed.includes('@')) {
+                                emails.add(trimmed);
+                            }
+                        });
+                    }
+                });
+            }
+
+            console.log('Berechtigte Admin-E-Mails:', Array.from(emails));
+            return Array.from(emails);
+        }
+
+        // ============================================
+        // INITIALISIERUNG
+        // ============================================
+
+        window.addEventListener('DOMContentLoaded', async function() {
+            try {
+                const response = await fetch(KONTAKTE_JSON_URL);
+                if (!response.ok) {
+                    throw new Error('Kontakte konnten nicht geladen werden');
+                }
+
+                kontakteData = await response.json();
+                ausschussEmails = extractAusschussEmails(kontakteData);
+
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('step1').classList.remove('hidden');
+
+            } catch (error) {
+                console.error('Fehler beim Laden der Kontakte:', error);
+                document.getElementById('loading').innerHTML = `
+                    <div class="text-red-600">
+                        <svg class="h-12 w-12 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <p class="font-semibold mb-2">Fehler beim Laden der Daten</p>
+                        <p class="text-sm">Bitte versuchen Sie es später erneut.</p>
+                    </div>
+                `;
+            }
+        });
+
+        // ============================================
+        // SCHRITT 1: E-MAIL EINGABE
+        // ============================================
+
+        document.getElementById('emailForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const email = document.getElementById('userEmail').value.trim().toLowerCase();
+            const errorDiv = document.getElementById('errorMessage');
+            const submitButton = e.target.querySelector('button[type="submit"]');
+
+            submitButton.disabled = true;
+            submitButton.innerHTML = '<span class="animate-spin inline-block mr-2">⏳</span> Wird gesendet...';
+
+            // Prüfe, ob E-Mail ein Ausschussvertreter ist
+            if (!ausschussEmails.includes(email)) {
+                errorDiv.classList.remove('hidden');
+                errorDiv.querySelector('p').textContent =
+                    'Diese E-Mail-Adresse ist nicht als Ausschussvertreter berechtigt. Der Admin-Zugang ist nur für Ausschussvertreter zugänglich.';
+                submitButton.disabled = false;
+                submitButton.innerHTML = `
+                    <svg class="h-5 w-5 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                    </svg>
+                    Zugangscode per E-Mail senden
+                `;
+                return;
+            }
+
+            // OTP generieren
+            currentOTP = Math.floor(100000 + Math.random() * 900000).toString();
+            otpTimestamp = Date.now();
+            currentEmail = email;
+
+            try {
+                // OTP per n8n versenden
+                const response = await fetch(N8N_WEBHOOK_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: email,
+                        otp_code: currentOTP
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('E-Mail konnte nicht gesendet werden');
+                }
+
+                // Zu Schritt 2 wechseln
+                errorDiv.classList.add('hidden');
+                document.getElementById('step1').classList.add('hidden');
+                document.getElementById('step2').classList.remove('hidden');
+                document.getElementById('displayEmail').textContent = email;
+
+            } catch (error) {
+                console.error('Fehler beim Senden:', error);
+                errorDiv.classList.remove('hidden');
+                errorDiv.querySelector('p').textContent =
+                    'Fehler beim Versenden des Codes. Bitte versuchen Sie es erneut.';
+            }
+
+            submitButton.disabled = false;
+            submitButton.innerHTML = `
+                <svg class="h-5 w-5 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                </svg>
+                Zugangscode per E-Mail senden
+            `;
+        });
+
+        // ============================================
+        // SCHRITT 2: OTP VALIDIERUNG
+        // ============================================
+
+        document.getElementById('otpForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const enteredOTP = document.getElementById('otpInput').value;
+            const errorDiv = document.getElementById('otpErrorMessage');
+
+            // Prüfe OTP-Gültigkeit (10 Minuten)
+            const now = Date.now();
+            const tenMinutes = 10 * 60 * 1000;
+
+            if (now - otpTimestamp > tenMinutes) {
+                errorDiv.classList.remove('hidden');
+                errorDiv.querySelector('p').textContent =
+                    'Der Code ist abgelaufen. Bitte fordern Sie einen neuen Code an.';
+                return;
+            }
+
+            // Prüfe OTP
+            if (enteredOTP !== currentOTP) {
+                errorDiv.classList.remove('hidden');
+                errorDiv.querySelector('p').textContent =
+                    'Ungültiger Code. Bitte überprüfen Sie Ihre Eingabe.';
+                return;
+            }
+
+            // Erfolgreich authentifiziert
+            errorDiv.classList.add('hidden');
+            document.getElementById('step2').classList.add('hidden');
+            document.getElementById('step3').classList.remove('hidden');
+            document.getElementById('loggedInEmail').textContent = currentEmail;
+
+            // JSON-Editor befüllen
+            loadEditor();
+        });
+
+        function backToStep1() {
+            document.getElementById('step2').classList.add('hidden');
+            document.getElementById('step1').classList.remove('hidden');
+            document.getElementById('otpInput').value = '';
+            document.getElementById('otpErrorMessage').classList.add('hidden');
+        }
+
+        // ============================================
+        // EDITOR-FUNKTIONEN
+        // ============================================
+
+        function loadEditor() {
+            // JSON in Editor laden
+            document.getElementById('jsonEditor').value = JSON.stringify(kontakteData, null, 2);
+
+            // Wohnungsliste generieren
+            loadWohnungList();
+        }
+
+        function loadWohnungList() {
+            const wohnungList = document.getElementById('wohnungList');
+            wohnungList.innerHTML = '';
+
+            // Erdgeschoss
+            if (kontakteData.wohnungen.erdgeschoss) {
+                kontakteData.wohnungen.erdgeschoss.forEach((wohnung, idx) => {
+                    wohnungList.innerHTML += createWohnungCard(wohnung, 'erdgeschoss', idx);
+                });
+            }
+
+            // 1. OG
+            if (kontakteData.wohnungen.obergeschoss_1) {
+                kontakteData.wohnungen.obergeschoss_1.forEach((wohnung, idx) => {
+                    wohnungList.innerHTML += createWohnungCard(wohnung, 'obergeschoss_1', idx);
+                });
+            }
+
+            // 2. OG
+            if (kontakteData.wohnungen.obergeschoss_2) {
+                kontakteData.wohnungen.obergeschoss_2.forEach((wohnung, idx) => {
+                    wohnungList.innerHTML += createWohnungCard(wohnung, 'obergeschoss_2', idx);
+                });
+            }
+        }
+
+        function createWohnungCard(wohnung, etage, idx) {
+            return `
+                <div class="bg-white border-2 border-gray-200 rounded-lg p-4 hover:border-orange-400 cursor-pointer transition"
+                     onclick="editWohnung('${etage}', ${idx})">
+                    <div class="font-semibold text-gray-800 mb-1">${wohnung.bezeichnung}</div>
+                    <div class="text-sm text-gray-600">${wohnung.eigentümer.name}</div>
+                    <div class="text-xs text-gray-500 mt-2">${wohnung.zimmer} Zi. • ${wohnung.flaeche_m2}m²</div>
+                </div>
+            `;
+        }
+
+        function editWohnung(etage, idx) {
+            currentEditingWohnung = { etage, idx };
+            const wohnung = kontakteData.wohnungen[etage][idx];
+
+            document.getElementById('editFormTitle').textContent = `Wohnung ${wohnung.bezeichnung} bearbeiten`;
+
+            const formFields = document.getElementById('formFields');
+            formFields.innerHTML = `
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Eigentümer Name</label>
+                    <input type="text" id="edit_eigentuemer_name" value="${wohnung.eigentümer.name}"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Eigentümer E-Mail</label>
+                    <input type="email" id="edit_eigentuemer_email" value="${wohnung.eigentümer.email}"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Eigentümer Telefon</label>
+                    <input type="tel" id="edit_eigentuemer_telefon" value="${wohnung.eigentümer.telefon}"
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+                </div>
+                ${wohnung.mieter ? `
+                    <div class="pt-4 border-t border-gray-200">
+                        <h5 class="font-semibold text-gray-800 mb-2">Mieter</h5>
+                        <div class="space-y-3">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Mieter Name</label>
+                                <input type="text" id="edit_mieter_name" value="${wohnung.mieter.name}"
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Mieter E-Mail</label>
+                                <input type="email" id="edit_mieter_email" value="${wohnung.mieter.email}"
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Mieter Telefon</label>
+                                <input type="tel" id="edit_mieter_telefon" value="${wohnung.mieter.telefon}"
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+                            </div>
+                            <div>
+                                <label class="flex items-center">
+                                    <input type="checkbox" id="edit_mieter_berechtigt" ${wohnung.mieter.berechtigt ? 'checked' : ''}
+                                           class="mr-2 h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
+                                    <span class="text-sm text-gray-700">Mieter hat Zugriff auf Kontaktliste</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                ` : ''}
+            `;
+
+            document.getElementById('editForm').classList.remove('hidden');
+        }
+
+        function saveChanges() {
+            if (!currentEditingWohnung) return;
+
+            const { etage, idx } = currentEditingWohnung;
+            const wohnung = kontakteData.wohnungen[etage][idx];
+
+            // Eigentümer aktualisieren
+            wohnung.eigentümer.name = document.getElementById('edit_eigentuemer_name').value;
+            wohnung.eigentümer.email = document.getElementById('edit_eigentuemer_email').value;
+            wohnung.eigentümer.telefon = document.getElementById('edit_eigentuemer_telefon').value;
+
+            // Mieter aktualisieren (falls vorhanden)
+            if (wohnung.mieter) {
+                wohnung.mieter.name = document.getElementById('edit_mieter_name').value;
+                wohnung.mieter.email = document.getElementById('edit_mieter_email').value;
+                wohnung.mieter.telefon = document.getElementById('edit_mieter_telefon').value;
+                wohnung.mieter.berechtigt = document.getElementById('edit_mieter_berechtigt').checked;
+            }
+
+            // Metadaten aktualisieren
+            kontakteData.metadaten.letzte_änderung = new Date().toISOString().split('T')[0];
+
+            // JSON-Editor aktualisieren
+            document.getElementById('jsonEditor').value = JSON.stringify(kontakteData, null, 2);
+
+            // Formular schließen
+            cancelEdit();
+
+            // Wohnungsliste neu laden
+            loadWohnungList();
+
+            // Speichern-Aufforderung
+            alert('Änderungen wurden im Editor übernommen. Klicken Sie auf "JSON speichern", um die Änderungen dauerhaft zu speichern.');
+        }
+
+        function cancelEdit() {
+            document.getElementById('editForm').classList.add('hidden');
+            currentEditingWohnung = null;
+        }
+
+        function formatJSON() {
+            try {
+                const jsonText = document.getElementById('jsonEditor').value;
+                const parsed = JSON.parse(jsonText);
+                document.getElementById('jsonEditor').value = JSON.stringify(parsed, null, 2);
+                document.getElementById('jsonError').classList.add('hidden');
+                document.getElementById('jsonSuccess').classList.remove('hidden');
+                setTimeout(() => {
+                    document.getElementById('jsonSuccess').classList.add('hidden');
+                }, 3000);
+            } catch (error) {
+                document.getElementById('jsonError').classList.remove('hidden');
+                document.getElementById('jsonError').querySelector('p').textContent =
+                    'Fehler beim Formatieren: ' + error.message;
+            }
+        }
+
+        function validateJSON() {
+            try {
+                const jsonText = document.getElementById('jsonEditor').value;
+                JSON.parse(jsonText);
+                document.getElementById('jsonError').classList.add('hidden');
+                document.getElementById('jsonSuccess').classList.remove('hidden');
+                setTimeout(() => {
+                    document.getElementById('jsonSuccess').classList.add('hidden');
+                }, 3000);
+            } catch (error) {
+                document.getElementById('jsonError').classList.remove('hidden');
+                document.getElementById('jsonError').querySelector('p').textContent =
+                    'JSON-Fehler: ' + error.message;
+            }
+        }
+
+        async function saveJSON() {
+            const jsonText = document.getElementById('jsonEditor').value;
+
+            // Validierung
+            try {
+                const parsed = JSON.parse(jsonText);
+                kontakteData = parsed;
+            } catch (error) {
+                document.getElementById('jsonError').classList.remove('hidden');
+                document.getElementById('jsonError').querySelector('p').textContent =
+                    'JSON-Fehler: ' + error.message + '. Bitte korrigieren Sie den Fehler vor dem Speichern.';
+                return;
+            }
+
+            // Sicherheitsabfrage
+            if (!confirm('Möchten Sie die Änderungen wirklich speichern? Diese werden sofort für alle Nutzer sichtbar.')) {
+                return;
+            }
+
+            try {
+                // HINWEIS: Dies erfordert einen Backend-Endpunkt!
+                // Da GitHub Pages statisch ist, müsste dies über n8n oder einen anderen Service laufen
+                const response = await fetch(N8N_SAVE_WEBHOOK_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: currentEmail,
+                        data: kontakteData
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Speichern fehlgeschlagen');
+                }
+
+                document.getElementById('jsonError').classList.add('hidden');
+                document.getElementById('jsonSuccess').classList.remove('hidden');
+                document.getElementById('jsonSuccess').querySelector('p').textContent =
+                    'JSON erfolgreich gespeichert! ✓';
+
+                // Wohnungsliste neu laden
+                loadWohnungList();
+
+            } catch (error) {
+                console.error('Fehler beim Speichern:', error);
+                document.getElementById('jsonError').classList.remove('hidden');
+                document.getElementById('jsonError').querySelector('p').textContent =
+                    'Fehler beim Speichern: ' + error.message +
+                    '. Hinweis: Das Speichern erfordert einen Backend-Endpunkt (n8n Workflow).';
+            }
+        }
+
+        function logout() {
+            if (confirm('Möchten Sie sich wirklich abmelden?')) {
+                location.reload();
+            }
+        }
+    </script>
+</body>
+</html>
