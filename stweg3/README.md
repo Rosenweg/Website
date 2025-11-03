@@ -2,72 +2,60 @@
 
 Dieser Ordner enthält alle Dateien für die STWEG 3 (Stockwerkeigentümergemeinschaft 3) am Rosenweg 9 in Kaiseraugst.
 
-## Dateien
-
-### HTML & Daten
-- **stweg3-kontakte.html** - Geschützte Kontaktliste mit OTP-Authentifizierung
-- **kontakte.json** - JSON-Datenbank mit allen Bewohnern, Kontakten und berechtigten E-Mails
-
-### n8n Integration
-- **n8n-otp-workflow.json** - n8n Workflow für den E-Mail-Versand von OTP-Codes
-- **N8N_SETUP.md** - Detaillierte Anleitung zur Einrichtung des n8n Workflows
-
-## Zugriff
-
-### Öffentliche Seite
-Die Hauptseite von STWEG 3:
-- `index.html` (in diesem Ordner)
-
-### Geschützte Kontaktliste
-Die geschützte Kontaktliste ist nur nach E-Mail-Verifizierung zugänglich:
-- `stweg3-kontakte.html`
-
-## Struktur
+## 📁 Dateien
 
 ```
 stweg3/
-├── README.md                    # Diese Datei
 ├── index.html                  # Hauptseite STWEG 3
-├── stweg3-kontakte.html        # Geschützte Kontaktseite
-├── kontakte.json               # Kontaktdaten (berechtigte Nutzer)
-├── n8n-otp-workflow.json       # n8n Workflow
-└── N8N_SETUP.md                # Setup-Anleitung
+├── stweg3-kontakte.html        # Geschützte Kontaktliste (OTP)
+├── admin.html                  # Admin-Bereich (nur Ausschuss)
+├── kontakte.json               # Kontaktdaten
+├── n8n-otp-workflow.json       # n8n Workflow: OTP senden
+├── n8n-save-workflow.json      # n8n Workflow: JSON speichern
+└── README.md                   # Diese Datei
 ```
 
-## Berechtigungen
+## 🚀 Quick Start
+
+### Für Bewohner
+- **Kontaktliste**: [stweg3-kontakte.html](stweg3-kontakte.html)
+- **Anleitung**: Siehe [Wiki - STWEG3 Kontaktliste](../../../wiki/STWEG3-Kontaktliste)
+
+### Für Ausschuss
+- **Admin-Bereich**: [admin.html](admin.html)
+- **Anleitung**: Siehe [Wiki - STWEG3 Admin](../../../wiki/STWEG3-Admin)
+
+### Für Entwickler
+- **n8n Setup**: Siehe [Wiki - n8n OTP-Setup](../../../wiki/n8n-OTP-Setup)
+- **Architektur**: Siehe [Wiki - Architektur](../../../wiki/Architektur)
+
+## 🔐 Berechtigungen
 
 Zugriff auf die Kontaktliste haben:
-- Alle Eigentümer (automatisch)
-- Mieter mit expliziter Berechtigung (`"berechtigt": true` in kontakte.json)
-- Ausschussvertreter (automatisch)
-- Hausverwaltung: Alle E-Mails der Domain aus `hausverwaltung.email` (wird dynamisch extrahiert - z.B. @langpartners.ch)
+- ✅ Alle Eigentümer (automatisch)
+- ✅ Mieter mit `"berechtigt": true` in kontakte.json
+- ✅ Ausschussvertreter (automatisch)
+- ✅ Hausverwaltung: Alle E-Mails von @langpartners.ch (dynamisch)
 
-## Technische Details
+## 🛠️ Technologie
 
-### OTP-System
-- 6-stelliger Code
-- Gültig für 10 Minuten
-- Versand via n8n Webhook
-- Frontend-Validierung
-- **Backend-Filter**: `.invalid` E-Mails werden automatisch abgelehnt
-- **Dynamische Hausverwaltungs-Berechtigung**: E-Mail-Domain wird automatisch aus `kontakte.json` extrahiert
+- **Frontend**: HTML, Tailwind CSS, Vanilla JS
+- **Backend**: n8n Workflows
+- **Daten**: JSON (Git-versioniert)
+- **Sicherheit**: OTP-Authentifizierung (6-stellig, 10 Min.)
 
-### n8n Webhook
-- URL: `https://n8n.juroct.net/webhook/stweg3-otp`
-- Method: POST
-- Body: `{"email": "...", "otp_code": "..."}`
-- Filtert Platzhalter-E-Mails (`.invalid`) automatisch aus
+## 📚 Dokumentation
 
-### Platzhalter-E-Mails
-Alle Platzhalter in `kontakte.json` verwenden `.invalid`:
-- `eigentuemer5@beispiel.invalid`
-- `mieter2@beispiel.invalid`
-- `mieter6@beispiel.invalid`
-- `eigentuemer-hobby@beispiel.invalid`
+Die vollständige Dokumentation findest du im **[GitHub Wiki](../../../wiki)**:
 
-## Support
+- [STWEG3 Kontaktliste](../../../wiki/STWEG3-Kontaktliste) - Für Bewohner
+- [STWEG3 Admin](../../../wiki/STWEG3-Admin) - Für Ausschuss
+- [n8n OTP-Setup](../../../wiki/n8n-OTP-Setup) - Für Entwickler
+- [n8n Save-Setup](../../../wiki/n8n-Save-Setup) - Für Entwickler
 
-Bei Problemen wende dich an:
+## 📞 Support
+
+Bei Problemen:
 
 **Technischer Dienst Rosenweg**
 - Stefan Müller
