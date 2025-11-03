@@ -1,0 +1,148 @@
+{
+  "name": "STWEG3 OTP Email Sender",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "stweg3-otp",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "webhook-node",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "stweg3-otp"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.body.email }}",
+              "operation": "isNotEmpty"
+            },
+            {
+              "value1": "={{ $json.body.otp_code }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "validate-input",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@juroct.net",
+        "toEmail": "={{ $json.body.email }}",
+        "subject": "🔒 Ihr Zugangscode für STWEG 3 Kontaktliste",
+        "emailType": "html",
+        "text": "=<html>\n<head>\n  <style>\n    body { font-family: 'Arial', sans-serif; background-color: #f4f4f4; margin: 0; padding: 20px; }\n    .container { max-width: 600px; margin: 0 auto; background-color: white; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }\n    .header { background: linear-gradient(135deg, #9333ea 0%, #7e22ce 100%); color: white; padding: 30px; text-align: center; }\n    .header h1 { margin: 0; font-size: 24px; }\n    .content { padding: 30px; }\n    .otp-box { background-color: #f3e8ff; border: 2px dashed #9333ea; border-radius: 8px; padding: 20px; text-align: center; margin: 20px 0; }\n    .otp-code { font-size: 32px; font-weight: bold; color: #7e22ce; letter-spacing: 8px; font-family: 'Courier New', monospace; }\n    .info { background-color: #dbeafe; border-left: 4px solid #3b82f6; padding: 15px; margin: 20px 0; border-radius: 4px; }\n    .footer { background-color: #f9fafb; padding: 20px; text-align: center; color: #6b7280; font-size: 12px; }\n    .warning { color: #dc2626; font-weight: bold; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>🔒 STWEG 3 Kontaktliste</h1>\n      <p>Ihr Zugangscode ist bereit</p>\n    </div>\n    <div class=\"content\">\n      <p>Sehr geehrte Damen und Herren,</p>\n      <p>Sie haben Zugriff auf die geschützte Kontaktliste der STWEG 3 angefordert.</p>\n      \n      <div class=\"otp-box\">\n        <p style=\"margin: 0 0 10px 0; color: #6b7280; font-size: 14px;\">Ihr Zugangscode:</p>\n        <div class=\"otp-code\">{{ $json.body.otp_code }}</div>\n      </div>\n      \n      <div class=\"info\">\n        <p style=\"margin: 0;\"><strong>⏱️ Wichtig:</strong> Dieser Code ist <strong>10 Minuten</strong> gültig.</p>\n      </div>\n      \n      <p>Geben Sie diesen Code auf der Webseite ein, um Zugriff auf die Kontaktliste zu erhalten.</p>\n      \n      <p class=\"warning\">⚠️ Falls Sie diese E-Mail nicht angefordert haben, ignorieren Sie sie bitte. Der Code verfällt automatisch.</p>\n      \n      <hr style=\"border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;\">\n      \n      <p style=\"font-size: 12px; color: #6b7280;\">\n        <strong>Datenschutz:</strong> Die Kontaktliste enthält persönliche Daten und ist nur für berechtigte Eigentümer und Mieter der STWEG 3 zugänglich.\n      </p>\n    </div>\n    <div class=\"footer\">\n      <p>© 2025 STWEG 3 - Rosenweg 9, 4303 Kaiseraugst</p>\n      <p>Teil der STWEG-Kooperation Rosenweg</p>\n    </div>\n  </div>\n</body>\n</html>"
+      },
+      "id": "send-email",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [650, 200],
+      "credentials": {
+        "smtp": {
+          "id": "1",
+          "name": "SMTP Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"success\": true, \"message\": \"OTP wurde erfolgreich gesendet\" } }}"
+      },
+      "id": "success-response",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 400,
+        "responseBody": "={{ { \"success\": false, \"error\": \"Ungültige Anfrage. Email und OTP-Code sind erforderlich.\" } }}"
+      },
+      "id": "error-response-validation",
+      "name": "Error Response - Validation",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [650, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 500,
+        "responseBody": "={{ { \"success\": false, \"error\": \"Fehler beim E-Mail-Versand. Bitte versuchen Sie es später erneut.\" } }}"
+      },
+      "id": "error-response-email",
+      "name": "Error Response - Email Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [850, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Response - Validation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-11-03T00:00:00.000Z",
+  "versionId": "1"
+}
