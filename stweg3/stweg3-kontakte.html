@@ -21,7 +21,7 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between h-16">
                 <div class="flex items-center">
-                    <a href="stweg3.html" class="flex items-center">
+                    <a href="../stweg3.html" class="flex items-center">
                         <svg class="h-8 w-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
                         </svg>
@@ -29,7 +29,7 @@
                     </a>
                 </div>
                 <div class="flex items-center">
-                    <a href="stweg3.html" class="text-gray-700 hover:text-blue-600 transition">← Zurück zu STWEG 3</a>
+                    <a href="../stweg3.html" class="text-gray-700 hover:text-blue-600 transition">← Zurück zu STWEG 3</a>
                 </div>
             </div>
         </div>
@@ -241,11 +241,9 @@
         // ============================================
         // KONFIGURATION - HIER ANPASSEN
         // ============================================
-        
-        // EmailJS Konfiguration
-        const EMAILJS_SERVICE_ID = 'service_qevit9e';
-        const EMAILJS_TEMPLATE_ID = 'template_uc5u3gi';
-        const EMAILJS_PUBLIC_KEY = 'DnHPrkTT61uco4ro4';
+
+        // n8n Webhook URL für OTP-Versand
+        const N8N_WEBHOOK_URL = 'https://n8n.juroct.net/webhook/stweg3-otp';
 
         // Pfad zur JSON-Datei (im gleichen Verzeichnis)
         const KONTAKTE_JSON_URL = 'kontakte.json';
@@ -342,9 +340,6 @@
         // INITIALISIERUNG
         // ============================================
 
-        // EmailJS initialisieren
-        emailjs.init(EMAILJS_PUBLIC_KEY);
-
         // Kontakte laden beim Seitenaufruf
         window.addEventListener('DOMContentLoaded', async function() {
             try {
@@ -417,41 +412,43 @@
             currentEmail = email;
             otpTimestamp = Date.now();
 
-            // Sende OTP per E-Mail via EmailJS
+            // Sende OTP per E-Mail via n8n Webhook
             try {
-                const templateParams = {
-                    to_email: email,
-                    otp_code: currentOTP,
-                    valid_minutes: 10,
-                    stweg: 'STWEG 3 - Rosenweg 9'
-                };
+                const response = await fetch(N8N_WEBHOOK_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: email,
+                        otp_code: currentOTP
+                    })
+                });
 
-                const response = await emailjs.send(
-                    EMAILJS_SERVICE_ID, 
-                    EMAILJS_TEMPLATE_ID, 
-                    templateParams
-                );
-                
-                console.log('EmailJS Response:', response);
-                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'E-Mail-Versand fehlgeschlagen');
+                }
+
+                const result = await response.json();
+                console.log('n8n Response:', result);
+
                 // Wechsel zu Schritt 2
                 document.getElementById('sentToEmail').textContent = email;
                 document.getElementById('step1').classList.add('hidden');
                 document.getElementById('step2').classList.remove('hidden');
                 errorDiv.classList.add('hidden');
-                
+
             } catch (error) {
                 console.error('Fehler beim E-Mail-Versand:', error);
                 errorDiv.classList.remove('hidden');
-                
+
                 // Detailliertere Fehlermeldung
                 let errorMessage = 'Fehler beim Versand der E-Mail. ';
-                if (error.text) {
-                    errorMessage += error.text + ' ';
-                }
-                errorMessage += 'Bitte versuchen Sie es erneut oder kontaktieren Sie den technischen Dienst Rosenweg.';
-                
-                errorDiv.querySelector('p').innerHTML = errorMessage + 
+                errorMessage += error.message || 'Unbekannter Fehler';
+                errorMessage += '<br><br>Bitte versuchen Sie es erneut oder kontaktieren Sie den technischen Dienst Rosenweg.';
+
+                errorDiv.querySelector('p').innerHTML = errorMessage +
                     '<br><br>Stefan Müller: <a href="mailto:stefan+rosenweg@juroct.ch" class="text-blue-600 hover:underline">stefan+rosenweg@juroct.ch</a> | ' +
                     '<a href="tel:+41765199970" class="text-blue-600 hover:underline">+41 76 519 99 70</a>';
             } finally {
@@ -669,25 +666,31 @@
         // HILFSFUNKTIONEN
         // ============================================
 
-        function resendOTP() {
+        async function resendOTP() {
             currentOTP = Math.floor(100000 + Math.random() * 900000).toString();
             otpTimestamp = Date.now();
 
-            const templateParams = {
-                to_email: currentEmail,
-                otp_code: currentOTP,
-                valid_minutes: 10,
-                stweg: 'STWEG 3 - Rosenweg 9'
-            };
-
-            emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, templateParams)
-                .then(function() {
-                    alert('Ein neuer Zugangscode wurde an ' + currentEmail + ' gesendet.');
-                })
-                .catch(function(error) {
-                    console.error('Fehler beim E-Mail-Versand:', error);
-                    alert('Fehler beim Versand. Bitte kontaktieren Sie den technischen Dienst Rosenweg.\n\nStefan Müller: stefan+rosenweg@juroct.ch | +41 76 519 99 70');
+            try {
+                const response = await fetch(N8N_WEBHOOK_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: currentEmail,
+                        otp_code: currentOTP
+                    })
                 });
+
+                if (!response.ok) {
+                    throw new Error('E-Mail-Versand fehlgeschlagen');
+                }
+
+                alert('Ein neuer Zugangscode wurde an ' + currentEmail + ' gesendet.');
+            } catch (error) {
+                console.error('Fehler beim E-Mail-Versand:', error);
+                alert('Fehler beim Versand. Bitte kontaktieren Sie den technischen Dienst Rosenweg.\n\nStefan Müller: stefan+rosenweg@juroct.ch | +41 76 519 99 70');
+            }
         }
 
         function backToStep1() {
