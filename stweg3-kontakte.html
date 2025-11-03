@@ -84,7 +84,7 @@
                         class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent" 
                         placeholder="ihre@email.ch">
                     <p class="text-xs text-gray-500 mt-2">
-                        Bitte geben Sie die E-Mail-Adresse ein, die bei den Ausschussvertretern hinterlegt ist.
+                        Bitte geben Sie die E-Mail-Adresse ein, die in der Kontaktliste hinterlegt ist.
                     </p>
                 </div>
 
@@ -104,7 +104,9 @@
 
             <div class="mt-6 pt-6 border-t border-gray-200">
                 <p class="text-sm text-gray-600">
-                    <strong>Kein Zugriff?</strong> Wenden Sie sich an die Ausschussvertreter.
+                    <strong>Kein Zugriff?</strong> Wenden Sie sich an den technischen Dienst Rosenweg:<br>
+                    Stefan Müller: <a href="mailto:stefan+rosenweg@juroct.ch" class="text-blue-600 hover:underline">stefan+rosenweg@juroct.ch</a> | 
+                    <a href="tel:+41765199970" class="text-blue-600 hover:underline">+41 76 519 99 70</a>
                 </p>
             </div>
         </div>
@@ -221,7 +223,7 @@
                     <strong>Letzte Aktualisierung:</strong> <span id="lastUpdate"></span>
                 </p>
                 <p class="text-xs text-gray-500">
-                    Bei Änderungen wenden Sie sich bitte an die Ausschussvertreter.
+                    Bei Änderungen wenden Sie sich bitte an den technischen Dienst Rosenweg.
                 </p>
             </div>
         </div>
@@ -260,6 +262,84 @@
         let otpTimestamp = 0;
 
         // ============================================
+        // HILFSFUNKTION: E-MAILS AUS KONTAKTEN EXTRAHIEREN
+        // ============================================
+        
+        function extractAllEmailsFromKontakte(data) {
+            const emails = new Set();
+            
+            // Funktion um E-Mail zu extrahieren (kann mehrere E-Mails kommagetrennt enthalten)
+            function addEmails(emailString) {
+                if (!emailString) return;
+                // Split bei Komma, falls mehrere E-Mails
+                const emailArray = emailString.split(',');
+                emailArray.forEach(email => {
+                    const trimmed = email.trim().toLowerCase();
+                    if (trimmed && trimmed.includes('@')) {
+                        emails.add(trimmed);
+                    }
+                });
+            }
+            
+            // Funktion um Person zu prüfen und E-Mail hinzuzufügen
+            function addPersonIfAuthorized(person) {
+                if (!person) return;
+                
+                // Eigentümer sind IMMER berechtigt
+                if (person.typ === 'eigentümer') {
+                    addEmails(person.email);
+                }
+                // Mieter sind nur berechtigt, wenn explizit berechtigt=true gesetzt ist
+                else if (person.typ === 'mieter' && person.berechtigt === true) {
+                    addEmails(person.email);
+                }
+            }
+            
+            // Ausschuss-Vertreter (sind immer berechtigt)
+            if (data.ausschuss) {
+                data.ausschuss.forEach(vertreter => {
+                    addEmails(vertreter.email);
+                });
+            }
+            
+            // Alle Wohnungen durchgehen
+            if (data.wohnungen) {
+                // Erdgeschoss
+                if (data.wohnungen.erdgeschoss) {
+                    data.wohnungen.erdgeschoss.forEach(wohnung => {
+                        addPersonIfAuthorized(wohnung.eigentümer);
+                        addPersonIfAuthorized(wohnung.mieter);
+                    });
+                }
+                // 1. OG
+                if (data.wohnungen.obergeschoss_1) {
+                    data.wohnungen.obergeschoss_1.forEach(wohnung => {
+                        addPersonIfAuthorized(wohnung.eigentümer);
+                        addPersonIfAuthorized(wohnung.mieter);
+                    });
+                }
+                // 2. OG
+                if (data.wohnungen.obergeschoss_2) {
+                    data.wohnungen.obergeschoss_2.forEach(wohnung => {
+                        addPersonIfAuthorized(wohnung.eigentümer);
+                        addPersonIfAuthorized(wohnung.mieter);
+                    });
+                }
+            }
+            
+            // Sonstiges (Hobbyraum)
+            if (data.sonstiges) {
+                data.sonstiges.forEach(item => {
+                    addPersonIfAuthorized(item.eigentümer);
+                    addPersonIfAuthorized(item.mieter);
+                });
+            }
+            
+            console.log('Berechtigte E-Mails:', Array.from(emails));
+            return Array.from(emails);
+        }
+
+        // ============================================
         // INITIALISIERUNG
         // ============================================
 
@@ -276,8 +356,8 @@
                 
                 kontakteData = await response.json();
                 
-                // Berechtigte E-Mails aus JSON extrahieren
-                authorizedEmails = kontakteData.berechtigte_emails.map(email => email.toLowerCase());
+                // Berechtigte E-Mails AUTOMATISCH aus allen Wohnungen extrahieren
+                authorizedEmails = extractAllEmailsFromKontakte(kontakteData);
                 
                 // Loading verstecken, Step 1 anzeigen
                 document.getElementById('loading').classList.add('hidden');
@@ -291,7 +371,8 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                         </svg>
                         <p class="font-semibold mb-2">Fehler beim Laden der Kontaktdaten</p>
-                        <p class="text-sm">Bitte versuchen Sie es später erneut oder kontaktieren Sie die Ausschussvertreter.</p>
+                        <p class="text-sm">Bitte versuchen Sie es später erneut oder kontaktieren Sie den technischen Dienst Rosenweg.</p>
+                        <p class="text-sm mt-2">Stefan Müller: <a href="mailto:stefan+rosenweg@juroct.ch" class="text-blue-600 hover:underline">stefan+rosenweg@juroct.ch</a></p>
                     </div>
                 `;
             }
@@ -306,12 +387,29 @@
             
             const email = document.getElementById('userEmail').value.trim().toLowerCase();
             const errorDiv = document.getElementById('errorMessage');
+            const submitButton = e.target.querySelector('button[type="submit"]');
+            
+            // Button deaktivieren während des Versands
+            submitButton.disabled = true;
+            submitButton.innerHTML = '<span class="animate-spin inline-block mr-2">⏳</span> Wird gesendet...';
             
             // Prüfe, ob E-Mail berechtigt ist
             if (!authorizedEmails.includes(email)) {
                 errorDiv.classList.remove('hidden');
-                errorDiv.querySelector('p').textContent = 
-                    'Diese E-Mail-Adresse ist nicht berechtigt. Bitte verwenden Sie die bei den Ausschussvertretern hinterlegte Adresse.';
+                errorDiv.querySelector('p').innerHTML = 
+                    'Diese E-Mail-Adresse ist nicht berechtigt.<br><br>' +
+                    '<strong>Hinweis:</strong> Alle Eigentümer haben automatisch Zugriff. ' +
+                    'Mieter benötigen eine explizite Berechtigung vom Ausschuss.<br><br>' +
+                    'Wenden Sie sich an den technischen Dienst Rosenweg:<br>' +
+                    'Stefan Müller: <a href="mailto:stefan+rosenweg@juroct.ch" class="text-blue-600 hover:underline">stefan+rosenweg@juroct.ch</a> | ' +
+                    '<a href="tel:+41765199970" class="text-blue-600 hover:underline">+41 76 519 99 70</a>';
+                submitButton.disabled = false;
+                submitButton.innerHTML = `
+                    <svg class="h-5 w-5 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                    </svg>
+                    Zugangscode per E-Mail senden
+                `;
                 return;
             }
 
@@ -325,21 +423,47 @@
                 const templateParams = {
                     to_email: email,
                     otp_code: currentOTP,
-                    valid_minutes: 10
+                    valid_minutes: 10,
+                    stweg: 'STWEG 3 - Rosenweg 9'
                 };
 
-                await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, templateParams);
+                const response = await emailjs.send(
+                    EMAILJS_SERVICE_ID, 
+                    EMAILJS_TEMPLATE_ID, 
+                    templateParams
+                );
+                
+                console.log('EmailJS Response:', response);
                 
                 // Wechsel zu Schritt 2
                 document.getElementById('sentToEmail').textContent = email;
                 document.getElementById('step1').classList.add('hidden');
                 document.getElementById('step2').classList.remove('hidden');
+                errorDiv.classList.add('hidden');
                 
             } catch (error) {
                 console.error('Fehler beim E-Mail-Versand:', error);
                 errorDiv.classList.remove('hidden');
-                errorDiv.querySelector('p').textContent = 
-                    'Fehler beim Versand der E-Mail. Bitte versuchen Sie es erneut oder kontaktieren Sie die Hausverwaltung.';
+                
+                // Detailliertere Fehlermeldung
+                let errorMessage = 'Fehler beim Versand der E-Mail. ';
+                if (error.text) {
+                    errorMessage += error.text + ' ';
+                }
+                errorMessage += 'Bitte versuchen Sie es erneut oder kontaktieren Sie den technischen Dienst Rosenweg.';
+                
+                errorDiv.querySelector('p').innerHTML = errorMessage + 
+                    '<br><br>Stefan Müller: <a href="mailto:stefan+rosenweg@juroct.ch" class="text-blue-600 hover:underline">stefan+rosenweg@juroct.ch</a> | ' +
+                    '<a href="tel:+41765199970" class="text-blue-600 hover:underline">+41 76 519 99 70</a>';
+            } finally {
+                // Button wieder aktivieren
+                submitButton.disabled = false;
+                submitButton.innerHTML = `
+                    <svg class="h-5 w-5 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                    </svg>
+                    Zugangscode per E-Mail senden
+                `;
             }
         });
 
@@ -553,7 +677,8 @@
             const templateParams = {
                 to_email: currentEmail,
                 otp_code: currentOTP,
-                valid_minutes: 10
+                valid_minutes: 10,
+                stweg: 'STWEG 3 - Rosenweg 9'
             };
 
             emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, templateParams)
@@ -562,7 +687,7 @@
                 })
                 .catch(function(error) {
                     console.error('Fehler beim E-Mail-Versand:', error);
-                    alert('Fehler beim Versand. Bitte versuchen Sie es erneut.');
+                    alert('Fehler beim Versand. Bitte kontaktieren Sie den technischen Dienst Rosenweg.\n\nStefan Müller: stefan+rosenweg@juroct.ch | +41 76 519 99 70');
                 });
         }
 
