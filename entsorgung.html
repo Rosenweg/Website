@@ -103,37 +103,73 @@
         </div>
     </section>
 
-    <!-- Google Maps -->
+    <!-- OpenStreetMap -->
     <section class="py-8 bg-white">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <h2 class="text-2xl font-bold text-gray-800 mb-4">📍 Sammelstellen in Ihrer Nähe</h2>
             <div class="bg-gray-100 rounded-lg overflow-hidden shadow-lg mb-4">
-                <iframe 
-                    src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d2693.2!2d7.7223!3d47.5423!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x4791b7c5a5a5a5a5%3A0x5a5a5a5a5a5a5a5a!2sRosenweg%2C%204303%20Kaiseraugst!5e0!3m2!1sde!2sch!4v1697000000000!5m2!1sde!2sch" 
-                    width="100%" 
-                    height="500" 
-                    style="border:0;" 
-                    allowfullscreen="" 
-                    loading="lazy" 
-                    referrerpolicy="no-referrer-when-downgrade">
-                </iframe>
+                <div id="map" style="height: 500px; width: 100%;"></div>
             </div>
             <p class="text-sm text-gray-600 mb-2">
-                💡 <strong>Tipp:</strong> Die Karte zeigt Sammelstellen südlich der Landstraße in Fußreichweite
+                💡 <strong>Tipp:</strong> Die Karte zeigt Sammelstellen südlich der Landstraße in Fußreichweite. Klicken Sie auf die Marker für Details.
             </p>
             <div class="flex flex-wrap gap-2">
-                <a href="https://www.google.com/maps/search/Violahof+Parkplatz+Kaiseraugst" target="_blank" class="text-xs bg-green-100 text-green-800 px-3 py-1 rounded hover:bg-green-200 transition">
+                <button onclick="map.setView([47.5425, 7.722], 17)" class="text-xs bg-green-100 text-green-800 px-3 py-1 rounded hover:bg-green-200 transition">
                     📍 Violahof-Parkplatz (6 Min.)
-                </a>
-                <a href="https://www.google.com/maps/search/REWAG+Kaiseraugst" target="_blank" class="text-xs bg-blue-100 text-blue-800 px-3 py-1 rounded hover:bg-blue-200 transition">
+                </button>
+                <a href="https://www.openstreetmap.org/search?query=REWAG%20Kaiseraugst" target="_blank" class="text-xs bg-blue-100 text-blue-800 px-3 py-1 rounded hover:bg-blue-200 transition">
                     🏢 REWAG (Recyclinghof)
                 </a>
-                <a href="https://www.google.com/maps/search/Thommen+AG+Kaiseraugst" target="_blank" class="text-xs bg-gray-100 text-gray-800 px-3 py-1 rounded hover:bg-gray-200 transition">
+                <a href="https://www.openstreetmap.org/search?query=Thommen%20AG%20Kaiseraugst" target="_blank" class="text-xs bg-gray-100 text-gray-800 px-3 py-1 rounded hover:bg-gray-200 transition">
                     🏢 Thommen AG
                 </a>
             </div>
         </div>
     </section>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        // OpenStreetMap initialisieren
+        var map = L.map('map').setView([47.5423, 7.7223], 14);
+
+        // OpenStreetMap Tile Layer
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            maxZoom: 19
+        }).addTo(map);
+
+        // Rosenweg Marker (Start)
+        var rosenwegIcon = L.divIcon({
+            className: 'custom-icon',
+            html: '<div style="background-color:#3b82f6;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;border:3px solid white;box-shadow:0 2px 5px rgba(0,0,0,0.3);">🏠</div>',
+            iconSize: [30, 30],
+            iconAnchor: [15, 15]
+        });
+
+        L.marker([47.5423, 7.7223], {icon: rosenwegIcon}).addTo(map)
+            .bindPopup('<b>Rosenweg</b><br>Ihr Standort');
+
+        // Sammelstelle Marker
+        var sammelstellenIcon = L.divIcon({
+            className: 'custom-icon',
+            html: '<div style="background-color:#16a34a;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;border:2px solid white;box-shadow:0 2px 5px rgba(0,0,0,0.3);">♻️</div>',
+            iconSize: [28, 28],
+            iconAnchor: [14, 14]
+        });
+
+        // Violahof-Parkplatz Sammelstelle (ca. 6 Min zu Fuß)
+        L.marker([47.5425, 7.722], {icon: sammelstellenIcon}).addTo(map)
+            .bindPopup('<b>Sammelstelle Violahof-Parkplatz</b><br>🚶 ca. 6 Min. zu Fuß<br>Glas, Alu, PET, Textilien');
+
+        // Sammelstelle Coop Kaiseraugst
+        L.marker([47.537851, 7.731470], {icon: sammelstellenIcon}).addTo(map)
+            .bindPopup('<b>Sammelstelle Coop Kaiseraugst</b><br>🚶 ca. 10 Min. zu Fuß<br>Glas, Alu, Weissblech');
+    </script>
 
     <!-- Sammelstellen Liste -->
     <section class="py-8 bg-gray-50">
