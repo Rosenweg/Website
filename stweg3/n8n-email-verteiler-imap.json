@@ -1,0 +1,186 @@
+{
+  "name": "STWEG3 - E-Mail Verteiler (IMAP)",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {
+          "customEmailConfig": "[\"UNSEEN\", [\"OR\", [\"TO\", \"eigentuemer@rosenweg9.ch\"], [\"TO\", \"ausschuss@rosenweg9.ch\"], [\"TO\", \"alle@rosenweg9.ch\"]]]"
+        }
+      },
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2.1,
+      "position": [240, 300],
+      "id": "email-trigger-imap",
+      "name": "Email Trigger (IMAP)",
+      "credentials": {
+        "imap": {
+          "id": "DEINE_IMAP_CREDENTIAL_ID",
+          "name": "rosenweg9@example.com"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://rosenweg.github.io/Website/stweg3/kontakte.json",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "id": "fetch-kontakte",
+      "name": "Fetch kontakte.json"
+    },
+    {
+      "parameters": {
+        "jsCode": "// E-Mail von IMAP Trigger\nconst emailData = $('Email Trigger (IMAP)').first().json;\nconst toAddress = emailData.to?.toLowerCase() || '';\nconst deliveredTo = emailData.metadata?.['delivered-to']?.toLowerCase() || '';\n\n// Kontakte-Daten\nconst kontakteData = $input.first().json;\n\n// Bestimme den Verteiler basierend auf TO-Adresse\nlet verteilerId = '';\nlet verteilerName = '';\n\nif (toAddress.includes('eigentuemer@rosenweg9.ch') || deliveredTo.includes('eigentuemer@rosenweg9.ch')) {\n  verteilerId = 'eigentuemer';\n  verteilerName = 'Eigentümer-Verteiler';\n} else if (toAddress.includes('ausschuss@rosenweg9.ch') || deliveredTo.includes('ausschuss@rosenweg9.ch')) {\n  verteilerId = 'ausschuss';\n  verteilerName = 'Ausschuss-Verteiler';\n} else if (toAddress.includes('alle@rosenweg9.ch') || deliveredTo.includes('alle@rosenweg9.ch')) {\n  verteilerId = 'alle';\n  verteilerName = 'Alle Bewohner';\n} else {\n  throw new Error('Unbekannter Verteiler: ' + toAddress);\n}\n\n// Funktion: E-Mail-Adressen sammeln\nfunction getRecipients(verteilerId, kontakteData) {\n  const emails = [];\n  \n  if (verteilerId === 'eigentuemer') {\n    // Alle Eigentümer\n    ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {\n      if (kontakteData.wohnungen && kontakteData.wohnungen[etage]) {\n        kontakteData.wohnungen[etage].forEach(wohnung => {\n          if (wohnung.eigentümer && wohnung.eigentümer.email) {\n            emails.push(wohnung.eigentümer.email);\n          }\n        });\n      }\n    });\n    \n    // Sonstige Eigentümer (z.B. Hobbyraum)\n    if (kontakteData.sonstiges) {\n      kontakteData.sonstiges.forEach(raum => {\n        if (raum.eigentümer && raum.eigentümer.email) {\n          emails.push(raum.eigentümer.email);\n        }\n      });\n    }\n  } else if (verteilerId === 'ausschuss') {\n    // Alle Ausschussmitglieder\n    if (kontakteData.ausschuss) {\n      kontakteData.ausschuss.forEach(mitglied => {\n        if (mitglied.email) {\n          // E-Mails können kommagetrennt sein\n          const emailArray = mitglied.email.split(',');\n          emailArray.forEach(email => {\n            const trimmed = email.trim();\n            if (trimmed && trimmed.includes('@')) {\n              emails.push(trimmed);\n            }\n          });\n        }\n      });\n    }\n  } else if (verteilerId === 'alle') {\n    // Alle Eigentümer + berechtigte Mieter\n    ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {\n      if (kontakteData.wohnungen && kontakteData.wohnungen[etage]) {\n        kontakteData.wohnungen[etage].forEach(wohnung => {\n          // Eigentümer\n          if (wohnung.eigentümer && wohnung.eigentümer.email) {\n            emails.push(wohnung.eigentümer.email);\n          }\n          // Berechtigte Mieter\n          if (wohnung.mieter && wohnung.mieter.berechtigt && wohnung.mieter.email) {\n            emails.push(wohnung.mieter.email);\n          }\n        });\n      }\n    });\n    \n    // Sonstige\n    if (kontakteData.sonstiges) {\n      kontakteData.sonstiges.forEach(raum => {\n        if (raum.eigentümer && raum.eigentümer.email) {\n          emails.push(raum.eigentümer.email);\n        }\n      });\n    }\n  }\n  \n  // Duplikate entfernen\n  return [...new Set(emails)];\n}\n\nconst recipients = getRecipients(verteilerId, kontakteData);\n\nif (recipients.length === 0) {\n  throw new Error('Keine Empfänger für Verteiler ' + verteilerId + ' gefunden');\n}\n\n// Als kommagetrennte Liste für E-Mail-Node\nconst recipientList = recipients.join(',');\n\nreturn {\n  json: {\n    verteilerId: verteilerId,\n    verteilerName: verteilerName,\n    recipients: recipientList,\n    recipientCount: recipients.length,\n    originalFrom: emailData.from,\n    originalTo: toAddress || deliveredTo,\n    subject: emailData.subject,\n    textPlain: emailData.textPlain,\n    textHtml: emailData.textHtml\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300],
+      "id": "determine-recipients",
+      "name": "Determine Recipients"
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $('Email Trigger (IMAP)').item.json.metadata['delivered-to'] || 'noreply@rosenweg9.ch' }}",
+        "toEmail": "={{ $json.recipients }}",
+        "subject": "={{ '[' + $json.verteilerName + '] ' + $json.subject }}",
+        "emailFormat": "both",
+        "text": "=──────────────────────────────────\n📧 Weitergeleitet über: {{ $json.verteilerName }}\nVon: {{ $json.originalFrom }}\nAn: {{ $json.originalTo }}\n──────────────────────────────────\n\n{{ $json.textPlain }}",
+        "html": "=<div style=\"background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin-bottom: 20px; border-radius: 4px; font-family: Arial, sans-serif;\">\n  <p style=\"margin: 0; font-size: 14px;\"><strong>📧 Weitergeleitet über:</strong> {{ $json.verteilerName }}</p>\n  <p style=\"margin: 5px 0 0 0; font-size: 12px; color: #6b7280;\"><strong>Von:</strong> {{ $json.originalFrom }}</p>\n  <p style=\"margin: 5px 0 0 0; font-size: 12px; color: #6b7280;\"><strong>An:</strong> {{ $json.originalTo }}</p>\n</div>\n<div style=\"font-family: Arial, sans-serif;\">\n{{ $json.textHtml }}\n</div>",
+        "options": {
+          "replyTo": "={{ $json.originalFrom }}"
+        }
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [900, 300],
+      "id": "send-email",
+      "name": "Send Email to Recipients",
+      "credentials": {
+        "smtp": {
+          "id": "DEINE_SMTP_CREDENTIAL_ID",
+          "name": "rosenweg9@example.com"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@rosenweg9.ch",
+        "toEmail": "={{ $('Email Trigger (IMAP)').item.json.from }}",
+        "subject": "✅ E-Mail erfolgreich verteilt",
+        "html": "=<html>\n<head>\n  <style>\n    body { font-family: 'Arial', sans-serif; background-color: #f4f4f4; margin: 0; padding: 20px; }\n    .container { max-width: 600px; margin: 0 auto; background-color: white; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }\n    .header { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 30px; text-align: center; }\n    .content { padding: 30px; }\n    .info-box { background-color: #d1fae5; border-left: 4px solid #10b981; padding: 15px; margin: 20px 0; border-radius: 4px; }\n    .footer { background-color: #f9fafb; padding: 20px; text-align: center; color: #6b7280; font-size: 12px; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>✅ E-Mail erfolgreich verteilt</h1>\n    </div>\n    <div class=\"content\">\n      <p>Ihre E-Mail wurde erfolgreich über das Verteiler-System versendet.</p>\n      \n      <div class=\"info-box\">\n        <p style=\"margin: 0;\"><strong>📋 Verteiler:</strong> {{ $json.verteilerName }}</p>\n        <p style=\"margin: 5px 0 0 0;\"><strong>👥 Empfänger:</strong> {{ $json.recipientCount }} Personen</p>\n        <p style=\"margin: 5px 0 0 0;\"><strong>📧 Betreff:</strong> {{ $json.subject }}</p>\n      </div>\n      \n      <p style=\"font-size: 12px; color: #6b7280; margin-top: 20px;\">\n        Falls es Probleme bei der Zustellung gab, wurden Sie bereits separat benachrichtigt.\n      </p>\n    </div>\n    <div class=\"footer\">\n      <p>© 2025 STWEG 3 - Rosenweg 9, 4303 Kaiseraugst</p>\n      <p>Teil der STWEG-Kooperation Rosenweg</p>\n    </div>\n  </div>\n</body>\n</html>",
+        "options": {
+          "replyTo": "technik@rosenweg4303.ch"
+        }
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1120, 200],
+      "id": "send-confirmation",
+      "name": "Send Confirmation",
+      "credentials": {
+        "smtp": {
+          "id": "DEINE_SMTP_CREDENTIAL_ID",
+          "name": "rosenweg9@example.com"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@rosenweg9.ch",
+        "toEmail": "={{ $('Email Trigger (IMAP)').item.json.from }}",
+        "subject": "⚠️ E-Mail teilweise nicht zugestellt",
+        "html": "=<html>\n<head>\n  <style>\n    body { font-family: 'Arial', sans-serif; background-color: #f4f4f4; margin: 0; padding: 20px; }\n    .container { max-width: 600px; margin: 0 auto; background-color: white; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }\n    .header { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; padding: 30px; text-align: center; }\n    .content { padding: 30px; }\n    .warning-box { background-color: #fee2e2; border-left: 4px solid #ef4444; padding: 15px; margin: 20px 0; border-radius: 4px; }\n    .footer { background-color: #f9fafb; padding: 20px; text-align: center; color: #6b7280; font-size: 12px; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>⚠️ Zustellungsprobleme</h1>\n    </div>\n    <div class=\"content\">\n      <p>Ihre E-Mail konnte nicht an alle Empfänger zugestellt werden.</p>\n      \n      <div class=\"warning-box\">\n        <p style=\"margin: 0;\"><strong>❌ Nicht zugestellt an:</strong></p>\n        <ul style=\"margin: 10px 0 0 0; padding-left: 20px;\">\n          <li>{{ $json.rejected[0] || 'Keine Fehler' }}</li>\n          <li>{{ $json.rejected[1] }}</li>\n          <li>{{ $json.rejected[2] }}</li>\n          <li>{{ $json.rejected[3] }}</li>\n          <li>{{ $json.rejected[4] }}</li>\n          <li>{{ $json.rejected[5] }}</li>\n          <li>{{ $json.rejected[6] }}</li>\n          <li>{{ $json.rejected[7] }}</li>\n          <li>{{ $json.rejected[8] }}</li>\n          <li>{{ $json.rejected[9] }}</li>\n        </ul>\n      </div>\n      \n      <p><strong>📋 Verteiler:</strong> {{ $('Determine Recipients').item.json.verteilerName }}</p>\n      <p><strong>📧 Betreff:</strong> {{ $('Determine Recipients').item.json.subject }}</p>\n      \n      <hr style=\"border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;\">\n      \n      <p style=\"font-size: 12px; color: #6b7280;\">\n        <strong>Hinweis:</strong> Bitte wenden Sie sich an <a href=\"mailto:technik@rosenweg4303.ch\">technik@rosenweg4303.ch</a> für weitere Unterstützung.\n      </p>\n    </div>\n    <div class=\"footer\">\n      <p>© 2025 STWEG 3 - Rosenweg 9, 4303 Kaiseraugst</p>\n      <p>Diese E-Mail wurde automatisch generiert.</p>\n    </div>\n  </div>\n</body>\n</html>",
+        "options": {
+          "replyTo": "technik@rosenweg4303.ch"
+        }
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [1120, 400],
+      "id": "send-error-report",
+      "name": "Send Error Report",
+      "credentials": {
+        "smtp": {
+          "id": "DEINE_SMTP_CREDENTIAL_ID",
+          "name": "rosenweg9@example.com"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Email Trigger (IMAP)": {
+      "main": [
+        [
+          {
+            "node": "Fetch kontakte.json",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch kontakte.json": {
+      "main": [
+        [
+          {
+            "node": "Determine Recipients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Determine Recipients": {
+      "main": [
+        [
+          {
+            "node": "Send Email to Recipients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email to Recipients": {
+      "main": [
+        [
+          {
+            "node": "Send Confirmation",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Error Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "STWEG3",
+      "id": "1"
+    },
+    {
+      "name": "Email",
+      "id": "2"
+    },
+    {
+      "name": "IMAP",
+      "id": "3"
+    }
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2025-11-04T14:00:00.000Z",
+  "versionId": "1"
+}
