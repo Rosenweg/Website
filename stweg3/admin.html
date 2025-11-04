@@ -328,12 +328,13 @@
         let currentEditingWohnung = null;
 
         // ============================================
-        // HILFSFUNKTION: AUSSCHUSS-E-MAILS EXTRAHIEREN
+        // HILFSFUNKTION: BERECHTIGTE E-MAILS EXTRAHIEREN
         // ============================================
 
-        function extractAusschussEmails(data) {
+        function extractBerechtigteEmails(data) {
             const emails = new Set();
 
+            // 1. Ausschuss-Mitglieder (können alles bearbeiten)
             if (data.ausschuss) {
                 data.ausschuss.forEach(vertreter => {
                     if (vertreter.email) {
@@ -348,7 +349,30 @@
                 });
             }
 
-            console.log('Berechtigte Admin-E-Mails:', Array.from(emails));
+            // 2. Alle Eigentümer (können ihre eigenen Daten bearbeiten)
+            if (data.wohnungen) {
+                ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {
+                    if (data.wohnungen[etage]) {
+                        data.wohnungen[etage].forEach(wohnung => {
+                            if (wohnung.eigentümer && wohnung.eigentümer.email) {
+                                const trimmed = wohnung.eigentümer.email.trim().toLowerCase();
+                                if (trimmed && trimmed.includes('@')) {
+                                    emails.add(trimmed);
+                                }
+                            }
+                            // 3. Berechtigte Mieter (können ihre eigenen Daten bearbeiten)
+                            if (wohnung.mieter && wohnung.mieter.berechtigt && wohnung.mieter.email) {
+                                const trimmed = wohnung.mieter.email.trim().toLowerCase();
+                                if (trimmed && trimmed.includes('@')) {
+                                    emails.add(trimmed);
+                                }
+                            }
+                        });
+                    }
+                });
+            }
+
+            console.log('Berechtigte E-Mails für Admin-Zugang:', Array.from(emails));
             return Array.from(emails);
         }
 
@@ -364,7 +388,7 @@
                 }
 
                 kontakteData = await response.json();
-                ausschussEmails = extractAusschussEmails(kontakteData);
+                ausschussEmails = extractBerechtigteEmails(kontakteData);
 
                 document.getElementById('loading').classList.add('hidden');
                 document.getElementById('step1').classList.remove('hidden');
@@ -397,11 +421,11 @@
             submitButton.disabled = true;
             submitButton.innerHTML = '<span class="animate-spin inline-block mr-2">⏳</span> Wird gesendet...';
 
-            // Prüfe, ob E-Mail ein Ausschussvertreter ist
+            // Prüfe, ob E-Mail berechtigt ist (Ausschuss, Eigentümer oder berechtigter Mieter)
             if (!ausschussEmails.includes(email)) {
                 errorDiv.classList.remove('hidden');
                 errorDiv.querySelector('p').textContent =
-                    'Diese E-Mail-Adresse ist nicht als Ausschussvertreter berechtigt. Der Admin-Zugang ist nur für Ausschussvertreter zugänglich.';
+                    'Diese E-Mail-Adresse ist nicht berechtigt. Zugang haben: Ausschussmitglieder, Eigentümer und berechtigte Mieter.';
                 submitButton.disabled = false;
                 submitButton.innerHTML = `
                     <svg class="h-5 w-5 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
