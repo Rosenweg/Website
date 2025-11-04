@@ -18,6 +18,7 @@ Der Admin-Bereich ermöglicht es Ausschussvertretern der STWEG 3, Kontaktdaten d
 2. Gib deine **Ausschuss-E-Mail-Adresse** ein
 3. Klicke auf "Zugangscode per E-Mail senden"
 4. Prüfe dein E-Mail-Postfach (auch Spam-Ordner!)
+5. Du erhältst eine E-Mail mit dem Betreff "🔒 Ihr Zugangscode für STWEG 3 - Admin-Bereich"
 
 ### Schritt 2: OTP eingeben
 
