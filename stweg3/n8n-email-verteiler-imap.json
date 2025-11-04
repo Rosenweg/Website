@@ -9,7 +9,10 @@
       },
       "type": "n8n-nodes-base.emailReadImap",
       "typeVersion": 2.1,
-      "position": [240, 300],
+      "position": [
+        240,
+        300
+      ],
       "id": "email-trigger-imap",
       "name": "Email Trigger (IMAP)",
       "credentials": {
@@ -26,17 +29,23 @@
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [460, 300],
+      "position": [
+        460,
+        300
+      ],
       "id": "fetch-kontakte",
       "name": "Fetch kontakte.json"
     },
     {
       "parameters": {
-        "jsCode": "// E-Mail von IMAP Trigger\nconst emailData = $('Email Trigger (IMAP)').first().json;\nconst toAddress = emailData.to?.toLowerCase() || '';\nconst deliveredTo = emailData.metadata?.['delivered-to']?.toLowerCase() || '';\n\n// Kontakte-Daten\nconst kontakteData = $input.first().json;\n\n// Bestimme den Verteiler basierend auf TO-Adresse\nlet verteilerId = '';\nlet verteilerName = '';\n\nif (toAddress.includes('eigentuemer@rosenweg9.ch') || deliveredTo.includes('eigentuemer@rosenweg9.ch')) {\n  verteilerId = 'eigentuemer';\n  verteilerName = 'Eigentümer-Verteiler';\n} else if (toAddress.includes('ausschuss@rosenweg9.ch') || deliveredTo.includes('ausschuss@rosenweg9.ch')) {\n  verteilerId = 'ausschuss';\n  verteilerName = 'Ausschuss-Verteiler';\n} else if (toAddress.includes('bewohner@rosenweg9.ch') || deliveredTo.includes('bewohner@rosenweg9.ch')) {\n  verteilerId = 'bewohner';\n  verteilerName = 'Berechtigte Bewohner';\n} else if (toAddress.includes('alle@rosenweg9.ch') || deliveredTo.includes('alle@rosenweg9.ch')) {\n  verteilerId = 'alle';\n  verteilerName = 'Alle (inkl. nicht berechtigte Mieter)';\n} else {\n  throw new Error('Unbekannter Verteiler: ' + toAddress);\n}\n\n// Funktion: E-Mail-Adressen sammeln\nfunction getRecipients(verteilerId, kontakteData) {\n  const emails = [];\n  \n  if (verteilerId === 'eigentuemer') {\n    // Alle Eigentümer\n    ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {\n      if (kontakteData.wohnungen && kontakteData.wohnungen[etage]) {\n        kontakteData.wohnungen[etage].forEach(wohnung => {\n          if (wohnung.eigentümer && wohnung.eigentümer.email) {\n            emails.push(wohnung.eigentümer.email);\n          }\n        });\n      }\n    });\n    \n    // Sonstige Eigentümer (z.B. Hobbyraum)\n    if (kontakteData.sonstiges) {\n      kontakteData.sonstiges.forEach(raum => {\n        if (raum.eigentümer && raum.eigentümer.email) {\n          emails.push(raum.eigentümer.email);\n        }\n      });\n    }\n  } else if (verteilerId === 'ausschuss') {\n    // Alle Ausschussmitglieder\n    if (kontakteData.ausschuss) {\n      kontakteData.ausschuss.forEach(mitglied => {\n        if (mitglied.email) {\n          // E-Mails können kommagetrennt sein\n          const emailArray = mitglied.email.split(',');\n          emailArray.forEach(email => {\n            const trimmed = email.trim();\n            if (trimmed && trimmed.includes('@')) {\n              emails.push(trimmed);\n            }\n          });\n        }\n      });\n    }\n  } else if (verteilerId === 'bewohner') {\n    // Alle Mieter + Eigentümer von Wohnungen ohne Mieter\n    ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {\n      if (kontakteData.wohnungen && kontakteData.wohnungen[etage]) {\n        kontakteData.wohnungen[etage].forEach(wohnung => {\n          if (wohnung.mieter && wohnung.mieter.email) {\n            // Wenn Mieter vorhanden: Nur Mieter hinzufügen\n            emails.push(wohnung.mieter.email);\n          } else if (wohnung.eigentümer && wohnung.eigentümer.email) {\n            // Wenn KEIN Mieter: Eigentümer hinzufügen\n            emails.push(wohnung.eigentümer.email);\n          }\n        });\n      }\n    });\n    \n    // Sonstige (haben normalerweise keine Mieter)\n    if (kontakteData.sonstiges) {\n      kontakteData.sonstiges.forEach(raum => {\n        if (raum.eigentümer && raum.eigentümer.email) {\n          emails.push(raum.eigentümer.email);\n        }\n      });\n    }\n  } else if (verteilerId === 'alle') {\n    // Alle Eigentümer + ALLE Mieter (egal ob berechtigt oder nicht)\n    ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {\n      if (kontakteData.wohnungen && kontakteData.wohnungen[etage]) {\n        kontakteData.wohnungen[etage].forEach(wohnung => {\n          // Eigentümer\n          if (wohnung.eigentümer && wohnung.eigentümer.email) {\n            emails.push(wohnung.eigentümer.email);\n          }\n          // ALLE Mieter (egal ob berechtigt oder nicht)\n          if (wohnung.mieter && wohnung.mieter.email) {\n            emails.push(wohnung.mieter.email);\n          }\n        });\n      }\n    });\n    \n    // Sonstige\n    if (kontakteData.sonstiges) {\n      kontakteData.sonstiges.forEach(raum => {\n        if (raum.eigentümer && raum.eigentümer.email) {\n          emails.push(raum.eigentümer.email);\n        }\n      });\n    }\n  }\n  \n  // Duplikate entfernen\n  return [...new Set(emails)];\n}\n\nconst recipients = getRecipients(verteilerId, kontakteData);\n\nif (recipients.length === 0) {\n  throw new Error('Keine Empfänger für Verteiler ' + verteilerId + ' gefunden');\n}\n\n// Als kommagetrennte Liste für E-Mail-Node\nconst recipientList = recipients.join(',');\n\nreturn {\n  json: {\n    verteilerId: verteilerId,\n    verteilerName: verteilerName,\n    recipients: recipientList,\n    recipientCount: recipients.length,\n    originalFrom: emailData.from,\n    originalTo: toAddress || deliveredTo,\n    subject: emailData.subject,\n    textPlain: emailData.textPlain,\n    textHtml: emailData.textHtml\n  }\n};"
+        "jsCode": "// E-Mail von IMAP Trigger\nconst emailData = $('Email Trigger (IMAP)').first().json;\nconst toAddress = emailData.to?.toLowerCase() || '';\nconst deliveredTo = emailData.metadata?.['delivered-to']?.toLowerCase() || '';\n\n// Kontakte-Daten\nconst kontakteData = $input.first().json;\n\n// Bestimme den Verteiler basierend auf TO-Adresse\nlet verteilerId = '';\nlet verteilerName = '';\n\nif (toAddress.includes('eigentuemer@rosenweg9.ch') || deliveredTo.includes('eigentuemer@rosenweg9.ch')) {\n  verteilerId = 'eigentuemer';\n  verteilerName = 'Eigentümer-Verteiler';\n} else if (toAddress.includes('ausschuss@rosenweg9.ch') || deliveredTo.includes('ausschuss@rosenweg9.ch')) {\n  verteilerId = 'ausschuss';\n  verteilerName = 'Ausschuss-Verteiler';\n} else if (toAddress.includes('bewohner@rosenweg9.ch') || deliveredTo.includes('bewohner@rosenweg9.ch')) {\n  verteilerId = 'bewohner';\n  verteilerName = 'Berechtigte Bewohner';\n} else if (toAddress.includes('alle@rosenweg9.ch') || deliveredTo.includes('alle@rosenweg9.ch')) {\n  verteilerId = 'alle';\n  verteilerName = 'Alle (inkl. nicht berechtigte Mieter)';\n} else {\n  throw new Error('Unbekannter Verteiler: ' + toAddress);\n}\n\n\n// Helper-Funktion: E-Mail-Adressen splitten und validieren\nfunction processEmails(emailString) {\n  if (!emailString) return [];\n\n  const emails = [];\n  const emailArray = emailString.split(',');\n\n  emailArray.forEach(email => {\n    const trimmed = email.trim();\n    if (trimmed && trimmed.includes('@') && !trimmed.includes('.invalid')) {\n      emails.push(trimmed);\n    }\n  });\n\n  return emails;\n}\n\n// Funktion: E-Mail-Adressen sammeln\nfunction getRecipients(verteilerId, kontakteData) {\n  const emails = [];\n  \n  if (verteilerId === 'eigentuemer') {\n    // Alle Eigentümer\n    ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {\n      if (kontakteData.wohnungen && kontakteData.wohnungen[etage]) {\n        kontakteData.wohnungen[etage].forEach(wohnung => {\n          if (wohnung.eigentümer && wohnung.eigentümer.email) {\n            emails.push(...processEmails(wohnung.eigentümer.email));\n          }\n        });\n      }\n    });\n    \n    // Sonstige Eigentümer (z.B. Hobbyraum)\n    if (kontakteData.sonstiges) {\n      kontakteData.sonstiges.forEach(raum => {\n        if (raum.eigentümer && raum.eigentümer.email) {\n          emails.push(...processEmails(raum.eigentümer.email));\n        }\n      });\n    }\n  } else if (verteilerId === 'ausschuss') {\n    // Alle Ausschussmitglieder\n    if (kontakteData.ausschuss) {\n      kontakteData.ausschuss.forEach(mitglied => {\n        if (mitglied.email) {\n          // E-Mails können kommagetrennt sein\n          const emailArray = mitglied.email.split(',');\n          emailArray.forEach(email => {\n            const trimmed = email.trim();\n            if (trimmed && trimmed.includes('@')) {\n              emails.push(trimmed);\n            }\n          });\n        }\n      });\n    }\n  } else if (verteilerId === 'bewohner') {\n    // Alle Mieter + Eigentümer von Wohnungen ohne Mieter\n    ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {\n      if (kontakteData.wohnungen && kontakteData.wohnungen[etage]) {\n        kontakteData.wohnungen[etage].forEach(wohnung => {\n          if (wohnung.mieter && wohnung.mieter.email) {\n            // Wenn Mieter vorhanden: Nur Mieter hinzufügen\n            emails.push(...processEmails(wohnung.mieter.email));\n          } else if (wohnung.eigentümer && wohnung.eigentümer.email) {\n            // Wenn KEIN Mieter: Eigentümer hinzufügen\n            emails.push(...processEmails(wohnung.eigentümer.email));\n          }\n        });\n      }\n    });\n    \n    // Sonstige (haben normalerweise keine Mieter)\n    if (kontakteData.sonstiges) {\n      kontakteData.sonstiges.forEach(raum => {\n        if (raum.eigentümer && raum.eigentümer.email) {\n          emails.push(...processEmails(raum.eigentümer.email));\n        }\n      });\n    }\n  } else if (verteilerId === 'alle') {\n    // Alle Eigentümer + ALLE Mieter (egal ob berechtigt oder nicht)\n    ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {\n      if (kontakteData.wohnungen && kontakteData.wohnungen[etage]) {\n        kontakteData.wohnungen[etage].forEach(wohnung => {\n          // Eigentümer\n          if (wohnung.eigentümer && wohnung.eigentümer.email) {\n            emails.push(...processEmails(wohnung.eigentümer.email));\n          }\n          // ALLE Mieter (egal ob berechtigt oder nicht)\n          if (wohnung.mieter && wohnung.mieter.email) {\n            emails.push(...processEmails(wohnung.mieter.email));\n          }\n        });\n      }\n    });\n    \n    // Sonstige\n    if (kontakteData.sonstiges) {\n      kontakteData.sonstiges.forEach(raum => {\n        if (raum.eigentümer && raum.eigentümer.email) {\n          emails.push(...processEmails(raum.eigentümer.email));\n        }\n      });\n    }\n  }\n  \n  // Duplikate entfernen\n  return [...new Set(emails)];\n}\n\nconst recipients = getRecipients(verteilerId, kontakteData);\n\nif (recipients.length === 0) {\n  throw new Error('Keine Empfänger für Verteiler ' + verteilerId + ' gefunden');\n}\n\n// Als kommagetrennte Liste für E-Mail-Node\nconst recipientList = recipients.join(',');\n\nreturn {\n  json: {\n    verteilerId: verteilerId,\n    verteilerName: verteilerName,\n    recipients: recipientList,\n    recipientCount: recipients.length,\n    originalFrom: emailData.from,\n    originalTo: toAddress || deliveredTo,\n    subject: emailData.subject,\n    textPlain: emailData.textPlain,\n    textHtml: emailData.textHtml\n  }\n};"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [680, 300],
+      "position": [
+        680,
+        300
+      ],
       "id": "determine-recipients",
       "name": "Determine Recipients"
     },
@@ -54,7 +63,10 @@
       },
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
-      "position": [900, 300],
+      "position": [
+        900,
+        300
+      ],
       "id": "send-email",
       "name": "Send Email to Recipients",
       "credentials": {
@@ -76,7 +88,10 @@
       },
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
-      "position": [1120, 200],
+      "position": [
+        1120,
+        200
+      ],
       "id": "send-confirmation",
       "name": "Send Confirmation",
       "credentials": {
@@ -98,7 +113,10 @@
       },
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
-      "position": [1120, 400],
+      "position": [
+        1120,
+        400
+      ],
       "id": "send-error-report",
       "name": "Send Error Report",
       "credentials": {
