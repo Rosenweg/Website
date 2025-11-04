@@ -1,5 +1,5 @@
 {
-  "name": "STWEG3 Save JSON",
+  "name": "STWEG3 Save JSON (GitHub Nodes)",
   "nodes": [
     {
       "parameters": {
@@ -15,7 +15,8 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
       "position": [250, 300],
-      "webhookId": "stweg3-save-json"
+      "webhookId": "stweg3-save-json",
+      "notes": "Empfängt Speicher-Anfragen vom Admin-Tool"
     },
     {
       "parameters": {
@@ -36,110 +37,107 @@
       "name": "Validate Input",
       "type": "n8n-nodes-base.if",
       "typeVersion": 1,
-      "position": [450, 300]
+      "position": [450, 300],
+      "notes": "Prüft ob E-Mail und Daten vorhanden sind"
     },
     {
       "parameters": {
-        "authentication": "none",
-        "url": "={{ $env.GITHUB_API_URL || 'https://api.github.com/repos/YOUR_USERNAME/YOUR_REPO/contents/stweg3/kontakte.json' }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "={{ 'Bearer ' + $env.GITHUB_TOKEN }}"
-            },
-            {
-              "name": "Accept",
-              "value": "application/vnd.github+json"
-            }
-          ]
-        },
-        "options": {}
+        "jsCode": "// Konfiguration\nconst REPO_OWNER = 'Rosenweg';\nconst REPO_NAME = 'Website';\nconst FILE_PATH = 'stweg3/kontakte.json';\nconst BRANCH = 'main';\n\n// Daten aus Webhook\nconst webhookData = $input.item.json.body;\nconst email = webhookData.email;\nconst jsonData = webhookData.data;\n\n// Formatiere JSON schön mit 2 Spaces Einrückung\nconst formattedContent = JSON.stringify(jsonData, null, 2);\n\n// Commit-Message\nconst commitMessage = `📝 Update kontakte.json via Admin\\n\\nBearbeitet von: ${email}\\nZeitpunkt: ${new Date().toISOString()}`;\n\nreturn {\n  json: {\n    repoOwner: REPO_OWNER,\n    repoName: REPO_NAME,\n    filePath: FILE_PATH,\n    branch: BRANCH,\n    fileContent: formattedContent,\n    commitMessage: commitMessage,\n    email: email\n  }\n};"
+      },
+      "id": "prepare-data",
+      "name": "Prepare Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 200],
+      "notes": "Bereitet Daten für GitHub vor (ohne Variablen)"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "file",
+        "operation": "get",
+        "owner": "={{ $json.repoOwner }}",
+        "repository": "={{ $json.repoName }}",
+        "filePath": "={{ $json.filePath }}",
+        "additionalParameters": {
+          "branch": "={{ $json.branch }}"
+        }
       },
       "id": "get-current-file",
-      "name": "Get Current File (GitHub)",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 3,
-      "position": [650, 200]
+      "name": "Get Current File SHA",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [850, 200],
+      "notes": "Holt die aktuelle Datei-SHA von GitHub"
     },
     {
       "parameters": {
-        "authentication": "none",
-        "method": "PUT",
-        "url": "={{ $env.GITHUB_API_URL || 'https://api.github.com/repos/YOUR_USERNAME/YOUR_REPO/contents/stweg3/kontakte.json' }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "={{ 'Bearer ' + $env.GITHUB_TOKEN }}"
-            },
-            {
-              "name": "Accept",
-              "value": "application/vnd.github+json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "message",
-              "value": "={{ 'Update kontakte.json via Admin (by ' + $('Webhook Save').item.json.body.email + ')' }}"
-            },
-            {
-              "name": "content",
-              "value": "={{ Buffer.from(JSON.stringify($('Webhook Save').item.json.body.data, null, 2)).toString('base64') }}"
-            },
-            {
-              "name": "sha",
-              "value": "={{ $json.sha }}"
-            }
-          ]
-        },
-        "options": {}
+        "jsCode": "// Hole die SHA aus dem GitHub Response\nconst githubData = $input.first().json;\nconst previousData = $input.all()[1].json;\n\n// GitHub gibt die SHA im sha Feld zurück\nconst fileSha = githubData.sha;\n\nreturn {\n  json: {\n    ...previousData,\n    fileSha: fileSha\n  }\n};"
+      },
+      "id": "merge-sha",
+      "name": "Merge SHA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 200],
+      "notes": "Kombiniert SHA mit den vorherigen Daten"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "file",
+        "operation": "edit",
+        "owner": "={{ $json.repoOwner }}",
+        "repository": "={{ $json.repoName }}",
+        "filePath": "={{ $json.filePath }}",
+        "fileContent": "={{ $json.fileContent }}",
+        "commitMessage": "={{ $json.commitMessage }}",
+        "additionalParameters": {
+          "branch": "={{ $json.branch }}",
+          "sha": "={{ $json.fileSha }}"
+        }
       },
       "id": "update-file-github",
-      "name": "Update File (GitHub)",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 3,
-      "position": [850, 200]
+      "name": "Update File on GitHub",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [1250, 200],
+      "notes": "Schreibt die aktualisierte Datei zurück nach GitHub"
     },
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ { \"success\": true, \"message\": \"Datei erfolgreich gespeichert\", \"commit\": $json.commit.sha } }}"
+        "responseBody": "={{ { \n  success: true, \n  message: 'Datei erfolgreich gespeichert', \n  commit: $json.commit.sha,\n  url: $json.commit.html_url,\n  timestamp: new Date().toISOString()\n} }}"
       },
       "id": "success-response-save",
       "name": "Success Response",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [1050, 200]
+      "position": [1450, 200],
+      "notes": "Erfolgsbestätigung mit Commit-Details"
     },
     {
       "parameters": {
         "respondWith": "json",
         "responseCode": 400,
-        "responseBody": "={{ { \"success\": false, \"error\": \"Ungültige Anfrage. Email und Daten sind erforderlich.\" } }}"
+        "responseBody": "={{ { success: false, error: 'Ungültige Anfrage. Email und Daten sind erforderlich.' } }}"
       },
       "id": "error-response-validation-save",
       "name": "Error Response - Validation",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [650, 400]
+      "position": [650, 400],
+      "notes": "Fehler bei ungültiger Eingabe"
     },
     {
       "parameters": {
-        "respondWith": "json",
-        "responseCode": 500,
-        "responseBody": "={{ { \"success\": false, \"error\": \"Fehler beim Speichern: \" + $json.error } }}"
+        "jsCode": "// Hole Prepare Data vom anderen Branch\nconst prepareNode = $('Prepare Data');\nif (prepareNode && prepareNode.item) {\n  return { json: prepareNode.item.json };\n}\nreturn { json: $input.item.json };"
       },
-      "id": "error-response-save-failed",
-      "name": "Error Response - Save Failed",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1,
-      "position": [1050, 300]
+      "id": "pass-prepare-data",
+      "name": "Pass Prepare Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 300],
+      "notes": "Gibt Daten von Prepare Data weiter für Merge"
     }
   ],
   "connections": {
@@ -158,7 +156,7 @@
       "main": [
         [
           {
-            "node": "Get Current File (GitHub)",
+            "node": "Prepare Data",
             "type": "main",
             "index": 0
           }
@@ -172,18 +170,56 @@
         ]
       ]
     },
-    "Get Current File (GitHub)": {
+    "Prepare Data": {
       "main": [
         [
           {
-            "node": "Update File (GitHub)",
+            "node": "Get Current File SHA",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Pass Prepare Data",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Update File (GitHub)": {
+    "Get Current File SHA": {
+      "main": [
+        [
+          {
+            "node": "Merge SHA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass Prepare Data": {
+      "main": [
+        [
+          {
+            "node": "Merge SHA",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge SHA": {
+      "main": [
+        [
+          {
+            "node": "Update File on GitHub",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update File on GitHub": {
       "main": [
         [
           {
@@ -200,8 +236,17 @@
     "executionOrder": "v1"
   },
   "staticData": null,
-  "tags": [],
+  "tags": [
+    {
+      "name": "STWEG3",
+      "id": "1"
+    },
+    {
+      "name": "Admin",
+      "id": "2"
+    }
+  ],
   "triggerCount": 0,
-  "updatedAt": "2025-11-04T00:00:00.000Z",
-  "versionId": "1"
+  "updatedAt": "2025-01-15T13:00:00.000Z",
+  "versionId": "3"
 }
