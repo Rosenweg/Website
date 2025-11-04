@@ -31,7 +31,9 @@
         "bezeichnung": "EG.1",
         "zimmer": "3.5",
         "flaeche_m2": 75,
-        "besonderheiten": ["Garten"],
+        "besonderheiten": [
+          "Garten"
+        ],
         "eigentümer": {
           "name": "Basil Fersztand",
           "email": "fersztand.basil@teleport.ch",
@@ -39,9 +41,9 @@
           "typ": "eigentümer"
         },
         "mieter": {
-          "name": "[Name Mieter]",
-          "email": "mieter-eg1@beispiel.invalid",
-          "telefon": "+41 79 XXX XX XX",
+          "name": "Marija Rustoli",
+          "email": "marija584@icloud.com",
+          "telefon": "+41 76 823 15 55",
           "typ": "mieter",
           "berechtigt": false
         }
@@ -50,7 +52,9 @@
         "bezeichnung": "EG.2",
         "zimmer": "4.5",
         "flaeche_m2": 90,
-        "besonderheiten": ["Garten"],
+        "besonderheiten": [
+          "Garten"
+        ],
         "eigentümer": {
           "name": "Besim Neziri",
           "email": "besim.neziri@icloud.com",
@@ -58,7 +62,7 @@
           "typ": "eigentümer"
         },
         "mieter": {
-          "name": "[Name Mieter]",
+          "name": "Rexhep Neziri",
           "email": "mieter2@beispiel.invalid",
           "telefon": "+41 79 345 67 89",
           "typ": "mieter",
@@ -69,11 +73,13 @@
         "bezeichnung": "EG.3",
         "zimmer": "3.5",
         "flaeche_m2": 75,
-        "besonderheiten": ["Garten"],
+        "besonderheiten": [
+          "Garten"
+        ],
         "eigentümer": {
           "name": "Elisabeth Müller",
           "email": "elisabeth.mueller@teleport.ch",
-          "telefon": "+41 79 456 78 90",
+          "telefon": "+41 61 811 26 90",
           "typ": "eigentümer"
         },
         "mieter": null
@@ -84,7 +90,9 @@
         "bezeichnung": "1OG.1",
         "zimmer": "4.5",
         "flaeche_m2": 90,
-        "besonderheiten": ["Balkon"],
+        "besonderheiten": [
+          "Balkon"
+        ],
         "eigentümer": {
           "name": "Yves Wyss",
           "email": "wyss.y@gmx.ch",
@@ -103,7 +111,9 @@
         "bezeichnung": "1OG.2",
         "zimmer": "3.5",
         "flaeche_m2": 75,
-        "besonderheiten": ["Balkon"],
+        "besonderheiten": [
+          "Balkon"
+        ],
         "eigentümer": {
           "name": "[Name Eigentümer]",
           "email": "eigentuemer5@beispiel.invalid",
@@ -116,7 +126,9 @@
         "bezeichnung": "1OG.3",
         "zimmer": "4.5",
         "flaeche_m2": 90,
-        "besonderheiten": ["Balkon"],
+        "besonderheiten": [
+          "Balkon"
+        ],
         "eigentümer": {
           "name": "Bülent Aytac",
           "email": "n.sofi@hotmail.com",
@@ -131,7 +143,10 @@
         "bezeichnung": "2OG.1",
         "zimmer": "3.5",
         "flaeche_m2": 75,
-        "besonderheiten": ["Balkon", "Dachgeschoss"],
+        "besonderheiten": [
+          "Balkon",
+          "Dachgeschoss"
+        ],
         "eigentümer": {
           "name": "Slavica Ilic",
           "email": "s.ilic@sunrise.ch",
@@ -144,7 +159,10 @@
         "bezeichnung": "2OG.2",
         "zimmer": "4.5",
         "flaeche_m2": 90,
-        "besonderheiten": ["Balkon", "Dachgeschoss"],
+        "besonderheiten": [
+          "Balkon",
+          "Dachgeschoss"
+        ],
         "eigentümer": {
           "name": "Ajradin Emini",
           "email": "s4dinka@hotmail.de",
@@ -163,7 +181,10 @@
         "bezeichnung": "2OG.3",
         "zimmer": "5.5",
         "flaeche_m2": 100,
-        "besonderheiten": ["Balkon", "Dachgeschoss"],
+        "besonderheiten": [
+          "Balkon",
+          "Dachgeschoss"
+        ],
         "eigentümer": {
           "name": "Rolf & Stefan Müller",
           "email": "stefan+rosenweg@juroct.ch,rolf@juroct.net",
@@ -201,7 +222,7 @@
   "metadaten": {
     "version": "2.0",
     "erstellt_am": "2025-10-13",
-    "letzte_änderung": "2025-11-03",
+    "letzte_änderung": "2025-11-04",
     "geändert_von": "Ausschuss STWEG 3",
     "hinweise": [
       "Alle Eigentümer haben automatisch Zugriff auf die geschützte Kontaktliste",
