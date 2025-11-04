@@ -1,3 +1,233 @@
 {
-  "test": "data"
+  "stweg": {
+    "nummer": 3,
+    "adresse": "Rosenweg 9",
+    "plz": "4303",
+    "ort": "Kaiseraugst",
+    "kanton": "Aargau",
+    "anzahl_wohnungen": 9,
+    "anzahl_hobbyräume": 1,
+    "letzte_aktualisierung": "2025-10-13"
+  },
+  "ausschuss": [
+    {
+      "funktion": "Vertreter 1 & Technischer Dienst",
+      "name": "Stefan Müller",
+      "email": "stefan+rosenweg@juroct.ch",
+      "telefon": "+41 76 519 99 70",
+      "wohnung": "2OG.3"
+    },
+    {
+      "funktion": "Vertreter 2",
+      "name": "Basil Fersztand",
+      "email": "fersztand.basil@teleport.ch",
+      "telefon": "+41 78 899 79 38",
+      "wohnung": "EG.1"
+    }
+  ],
+  "wohnungen": {
+    "erdgeschoss": [
+      {
+        "bezeichnung": "EG.1",
+        "zimmer": "3.5",
+        "flaeche_m2": 75,
+        "besonderheiten": [
+          "Garten"
+        ],
+        "eigentümer": {
+          "name": "Basil Fersztand",
+          "email": "fersztand.basil@teleport.ch",
+          "telefon": "+41 78 899 79 38",
+          "typ": "eigentümer"
+        },
+        "mieter": {
+          "name": "Marija Rustoli",
+          "email": "marija584@icloud.com",
+          "telefon": "+41 76 823 15 55",
+          "typ": "mieter",
+          "berechtigt": false
+        }
+      },
+      {
+        "bezeichnung": "EG.2",
+        "zimmer": "4.5",
+        "flaeche_m2": 90,
+        "besonderheiten": [
+          "Garten"
+        ],
+        "eigentümer": {
+          "name": "Besim Neziri",
+          "email": "besim.neziri@icloud.com",
+          "telefon": "+41 79 234 56 78",
+          "typ": "eigentümer"
+        },
+        "mieter": {
+          "name": "Rexhep Neziri",
+          "email": "rexhep_n@hotmail.com",
+          "telefon": "+41 79 747 68 44",
+          "typ": "mieter",
+          "berechtigt": false
+        }
+      },
+      {
+        "bezeichnung": "EG.3",
+        "zimmer": "3.5",
+        "flaeche_m2": 75,
+        "besonderheiten": [
+          "Garten"
+        ],
+        "eigentümer": {
+          "name": "Elisabeth Müller",
+          "email": "elisabeth.mueller@teleport.ch",
+          "telefon": "+41 61 811 26 90",
+          "typ": "eigentümer"
+        },
+        "mieter": null
+      }
+    ],
+    "obergeschoss_1": [
+      {
+        "bezeichnung": "1OG.1",
+        "zimmer": "4.5",
+        "flaeche_m2": 90,
+        "besonderheiten": [
+          "Balkon"
+        ],
+        "eigentümer": {
+          "name": "Yves Wyss",
+          "email": "wyss.y@gmx.ch",
+          "telefon": "+41 79 567 89 01",
+          "typ": "eigentümer"
+        },
+        "mieter": {
+          "name": "Kirsten Dautel",
+          "email": "mieter-1og1@beispiel.invalid",
+          "telefon": "+XX XX XXX XX XX",
+          "typ": "mieter",
+          "berechtigt": false
+        }
+      },
+      {
+        "bezeichnung": "1OG.2",
+        "zimmer": "3.5",
+        "flaeche_m2": 75,
+        "besonderheiten": [
+          "Balkon"
+        ],
+        "eigentümer": {
+          "name": "Sunay Ozdemir",
+          "email": "eigentuemer5@beispiel.invalid",
+          "telefon": "+XX XX XXX XX XX",
+          "typ": "eigentümer"
+        },
+        "mieter": null
+      },
+      {
+        "bezeichnung": "1OG.3",
+        "zimmer": "4.5",
+        "flaeche_m2": 90,
+        "besonderheiten": [
+          "Balkon"
+        ],
+        "eigentümer": {
+          "name": "Bülent Aytac",
+          "email": "n.sofi@hotmail.com",
+          "telefon": "+41 79 789 01 23",
+          "typ": "eigentümer"
+        },
+        "mieter": null
+      }
+    ],
+    "obergeschoss_2": [
+      {
+        "bezeichnung": "2OG.1",
+        "zimmer": "3.5",
+        "flaeche_m2": 75,
+        "besonderheiten": [
+          "Balkon",
+          "Dachgeschoss"
+        ],
+        "eigentümer": {
+          "name": "Slavica Ilic",
+          "email": "s.ilic@sunrise.ch",
+          "telefon": "+41 79 901 23 45",
+          "typ": "eigentümer"
+        },
+        "mieter": null
+      },
+      {
+        "bezeichnung": "2OG.2",
+        "zimmer": "4.5",
+        "flaeche_m2": 90,
+        "besonderheiten": [
+          "Balkon",
+          "Dachgeschoss"
+        ],
+        "eigentümer": {
+          "name": "Ajradin Emini",
+          "email": "s4dinka@hotmail.de",
+          "telefon": "+41 79 012 34 56",
+          "typ": "eigentümer"
+        },
+        "mieter": {
+          "name": "[Name Mieter]",
+          "email": "mieter-2og2@beispiel.invalid",
+          "telefon": "+41 79 XXX XX XX",
+          "typ": "mieter",
+          "berechtigt": false
+        }
+      },
+      {
+        "bezeichnung": "2OG.3",
+        "zimmer": "5.5",
+        "flaeche_m2": 100,
+        "besonderheiten": [
+          "Balkon",
+          "Dachgeschoss"
+        ],
+        "eigentümer": {
+          "name": "Rolf & Stefan Müller",
+          "email": "stefan+rosenweg@juroct.ch,rolf@juroct.net",
+          "telefon": "+41 76 519 99 70",
+          "typ": "eigentümer"
+        },
+        "mieter": null
+      }
+    ]
+  },
+  "sonstiges": [
+    {
+      "bezeichnung": "Hobbyraum",
+      "typ": "Hobbyraum",
+      "etage": "Untergeschoss",
+      "eigentümer": {
+        "name": "Rexhep Neziri",
+        "email": "rexhep_n@hotmail.com",
+        "telefon": "+41 79 747 68 44",
+        "typ": "eigentümer"
+      },
+      "mieter": null
+    }
+  ],
+  "hausverwaltung": {
+    "name": "LangPartners Immobilien AG",
+    "adresse": "Kirchplatz 18",
+    "plz": "4132",
+    "ort": "Muttenz",
+    "telefon": "+41 61 228 18 18",
+    "email": "hello@langpartners.ch",
+    "website": "https://langpartners.ch",
+    "öffnungszeiten": "Montag – Freitag, 09:00-12:00 Uhr"
+  },
+  "metadaten": {
+    "version": "2.0",
+    "erstellt_am": "2025-10-13",
+    "letzte_änderung": "2025-11-04",
+    "geändert_von": "Ausschuss STWEG 3",
+    "hinweise": [
+      "Alle Eigentümer haben automatisch Zugriff auf die geschützte Kontaktliste",
+      "Mieter haben nur Zugriff, wenn 'berechtigt': true gesetzt ist",
+      "Das 'berechtigt'-Feld bei Mietern muss explizit auf true gesetzt werden für Zugriff"
+    ]
+  }
 }
