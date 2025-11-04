@@ -49,9 +49,9 @@
       "parameters": {
         "fromEmail": "noreply@juroct.net",
         "toEmail": "={{ $json.body.email }}",
-        "subject": "🔒 Ihr Zugangscode für {{ $json.body.source || 'STWEG 3' }}",
+        "subject": "={{ '🔒 Ihr Zugangscode für ' + ($json.body.source || 'STWEG 3') }}",
         "emailType": "html",
-        "text": "=<html>\n<head>\n  <style>\n    body { font-family: 'Arial', sans-serif; background-color: #f4f4f4; margin: 0; padding: 20px; }\n    .container { max-width: 600px; margin: 0 auto; background-color: white; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }\n    .header { background: linear-gradient(135deg, #9333ea 0%, #7e22ce 100%); color: white; padding: 30px; text-align: center; }\n    .header h1 { margin: 0; font-size: 24px; }\n    .content { padding: 30px; }\n    .otp-box { background-color: #f3e8ff; border: 2px dashed #9333ea; border-radius: 8px; padding: 20px; text-align: center; margin: 20px 0; }\n    .otp-code { font-size: 32px; font-weight: bold; color: #7e22ce; letter-spacing: 8px; font-family: 'Courier New', monospace; }\n    .info { background-color: #dbeafe; border-left: 4px solid #3b82f6; padding: 15px; margin: 20px 0; border-radius: 4px; }\n    .source-box { background-color: #f0fdf4; border-left: 4px solid #22c55e; padding: 10px 15px; margin: 15px 0; border-radius: 4px; }\n    .footer { background-color: #f9fafb; padding: 20px; text-align: center; color: #6b7280; font-size: 12px; }\n    .warning { color: #dc2626; font-weight: bold; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>🔒 {{ $json.body.source || 'STWEG 3' }}</h1>\n      <p>Ihr Zugangscode ist bereit</p>\n    </div>\n    <div class=\"content\">\n      <p>Sehr geehrte Damen und Herren,</p>\n      <p>Sie haben einen Zugangscode für <strong>{{ $json.body.source || 'STWEG 3' }}</strong> angefordert.</p>\n      \n      <div class=\"source-box\">\n        <p style=\"margin: 0; color: #166534; font-size: 13px;\"><strong>📍 Angefordert für:</strong> {{ $json.body.source || 'STWEG 3' }}</p>\n      </div>\n      \n      <div class=\"otp-box\">\n        <p style=\"margin: 0 0 10px 0; color: #6b7280; font-size: 14px;\">Ihr Zugangscode:</p>\n        <div class=\"otp-code\">{{ $json.body.otp_code }}</div>\n      </div>\n      \n      <div class=\"info\">\n        <p style=\"margin: 0;\"><strong>⏱️ Wichtig:</strong> Dieser Code ist <strong>10 Minuten</strong> gültig.</p>\n      </div>\n      \n      <p>Geben Sie diesen Code auf der Webseite ein, um Zugriff zu erhalten.</p>\n      \n      <p class=\"warning\">⚠️ Falls Sie diese E-Mail nicht angefordert haben, ignorieren Sie sie bitte. Der Code verfällt automatisch.</p>\n      \n      <hr style=\"border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;\">\n      \n      <p style=\"font-size: 12px; color: #6b7280;\">\n        <strong>Datenschutz:</strong> Diese Daten sind nur für berechtigte Personen der STWEG 3 zugänglich.\n      </p>\n    </div>\n    <div class=\"footer\">\n      <p>© 2025 STWEG 3 - Rosenweg 9, 4303 Kaiseraugst</p>\n      <p>Teil der STWEG-Kooperation Rosenweg</p>\n    </div>\n  </div>\n</body>\n</html>"
+        "text": "=<html>\n<head>\n  <style>\n    body { font-family: 'Arial', sans-serif; background-color: #f4f4f4; margin: 0; padding: 20px; }\n    .container { max-width: 600px; margin: 0 auto; background-color: white; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }\n    .header { background: linear-gradient(135deg, #9333ea 0%, #7e22ce 100%); color: white; padding: 30px; text-align: center; }\n    .header h1 { margin: 0; font-size: 24px; }\n    .content { padding: 30px; }\n    .otp-box { background-color: #f3e8ff; border: 2px dashed #9333ea; border-radius: 8px; padding: 20px; text-align: center; margin: 20px 0; }\n    .otp-code { font-size: 32px; font-weight: bold; color: #7e22ce; letter-spacing: 8px; font-family: 'Courier New', monospace; }\n    .info { background-color: #dbeafe; border-left: 4px solid #3b82f6; padding: 15px; margin: 20px 0; border-radius: 4px; }\n    .source-box { background-color: #f0fdf4; border-left: 4px solid #22c55e; padding: 10px 15px; margin: 15px 0; border-radius: 4px; }\n    .footer { background-color: #f9fafb; padding: 20px; text-align: center; color: #6b7280; font-size: 12px; }\n    .warning { color: #dc2626; font-weight: bold; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>🔒 " + ($json.body.source || 'STWEG 3') + "</h1>\n      <p>Ihr Zugangscode ist bereit</p>\n    </div>\n    <div class=\"content\">\n      <p>Sehr geehrte Damen und Herren,</p>\n      <p>Sie haben einen Zugangscode für <strong>" + ($json.body.source || 'STWEG 3') + "</strong> angefordert.</p>\n      \n      <div class=\"source-box\">\n        <p style=\"margin: 0; color: #166534; font-size: 13px;\"><strong>📍 Angefordert für:</strong> " + ($json.body.source || 'STWEG 3') + "</p>\n      </div>\n      \n      <div class=\"otp-box\">\n        <p style=\"margin: 0 0 10px 0; color: #6b7280; font-size: 14px;\">Ihr Zugangscode:</p>\n        <div class=\"otp-code\">" + $json.body.otp_code + "</div>\n      </div>\n      \n      <div class=\"info\">\n        <p style=\"margin: 0;\"><strong>⏱️ Wichtig:</strong> Dieser Code ist <strong>10 Minuten</strong> gültig.</p>\n      </div>\n      \n      <p>Geben Sie diesen Code auf der Webseite ein, um Zugriff zu erhalten.</p>\n      \n      <p class=\"warning\">⚠️ Falls Sie diese E-Mail nicht angefordert haben, ignorieren Sie sie bitte. Der Code verfällt automatisch.</p>\n      \n      <hr style=\"border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;\">\n      \n      <p style=\"font-size: 12px; color: #6b7280;\">\n        <strong>Datenschutz:</strong> Diese Daten sind nur für berechtigte Personen der STWEG 3 zugänglich.\n      </p>\n    </div>\n    <div class=\"footer\">\n      <p>© 2025 STWEG 3 - Rosenweg 9, 4303 Kaiseraugst</p>\n      <p>Teil der STWEG-Kooperation Rosenweg</p>\n    </div>\n  </div>\n</body>\n</html>"
       },
       "id": "send-email",
       "name": "Send Email",
@@ -68,7 +68,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ { \"success\": true, \"message\": \"OTP wurde erfolgreich gesendet\" } }}"
+        "responseBody": "={{ { success: true, message: 'OTP wurde erfolgreich gesendet' } }}"
       },
       "id": "success-response",
       "name": "Success Response",
@@ -80,7 +80,7 @@
       "parameters": {
         "respondWith": "json",
         "responseCode": 400,
-        "responseBody": "={{ { \"success\": false, \"error\": \"Ungültige Anfrage. Email und OTP-Code sind erforderlich. Platzhalter-E-Mails (.invalid) werden nicht akzeptiert.\" } }}"
+        "responseBody": "={{ { success: false, error: 'Ungültige E-Mail-Adresse oder fehlender OTP-Code' } }}"
       },
       "id": "error-response-validation",
       "name": "Error Response - Validation",
@@ -92,10 +92,10 @@
       "parameters": {
         "respondWith": "json",
         "responseCode": 500,
-        "responseBody": "={{ { \"success\": false, \"error\": \"Fehler beim E-Mail-Versand. Bitte versuchen Sie es später erneut.\" } }}"
+        "responseBody": "={{ { success: false, error: 'Fehler beim Senden der E-Mail: ' + $json.error } }}"
       },
-      "id": "error-response-email",
-      "name": "Error Response - Email Failed",
+      "id": "error-response-send-failed",
+      "name": "Error Response - Send Failed",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [850, 300]
@@ -148,8 +148,17 @@
     "executionOrder": "v1"
   },
   "staticData": null,
-  "tags": [],
+  "tags": [
+    {
+      "name": "STWEG3",
+      "id": "1"
+    },
+    {
+      "name": "OTP",
+      "id": "2"
+    }
+  ],
   "triggerCount": 0,
-  "updatedAt": "2025-11-03T00:00:00.000Z",
-  "versionId": "1"
+  "updatedAt": "2025-11-04T10:30:00.000Z",
+  "versionId": "2"
 }
