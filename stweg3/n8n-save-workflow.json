@@ -1,5 +1,5 @@
 {
-  "name": "STWEG3 Save JSON (GitHub Nodes)",
+  "name": "STWEG3 Save JSON (GitHub Nodes - Fixed)",
   "nodes": [
     {
       "parameters": {
@@ -72,14 +72,14 @@
     },
     {
       "parameters": {
-        "jsCode": "// Hole die SHA aus dem GitHub Response\nconst githubData = $input.first().json;\nconst previousData = $input.all()[1].json;\n\n// GitHub gibt die SHA im sha Feld zurück\nconst fileSha = githubData.sha;\n\nreturn {\n  json: {\n    ...previousData,\n    fileSha: fileSha\n  }\n};"
+        "jsCode": "// Hole die Daten vom vorherigen Node (Get Current File SHA)\nconst currentItem = $input.item.json;\n\n// Hole die Prepare Data vom Webhook\nconst prepareData = $('Prepare Data').item.json;\n\n// Kombiniere alles\nreturn {\n  json: {\n    repoOwner: prepareData.repoOwner,\n    repoName: prepareData.repoName,\n    filePath: prepareData.filePath,\n    branch: prepareData.branch,\n    fileContent: prepareData.fileContent,\n    commitMessage: prepareData.commitMessage,\n    email: prepareData.email,\n    fileSha: currentItem.sha\n  }\n};"
       },
       "id": "merge-sha",
-      "name": "Merge SHA",
+      "name": "Merge SHA with Data",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [1050, 200],
-      "notes": "Kombiniert SHA mit den vorherigen Daten"
+      "notes": "Kombiniert SHA mit den vorbereiteten Daten"
     },
     {
       "parameters": {
@@ -127,17 +127,6 @@
       "typeVersion": 1,
       "position": [650, 400],
       "notes": "Fehler bei ungültiger Eingabe"
-    },
-    {
-      "parameters": {
-        "jsCode": "// Hole Prepare Data vom anderen Branch\nconst prepareNode = $('Prepare Data');\nif (prepareNode && prepareNode.item) {\n  return { json: prepareNode.item.json };\n}\nreturn { json: $input.item.json };"
-      },
-      "id": "pass-prepare-data",
-      "name": "Pass Prepare Data",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [850, 300],
-      "notes": "Gibt Daten von Prepare Data weiter für Merge"
     }
   ],
   "connections": {
@@ -177,11 +166,6 @@
             "node": "Get Current File SHA",
             "type": "main",
             "index": 0
-          },
-          {
-            "node": "Pass Prepare Data",
-            "type": "main",
-            "index": 0
           }
         ]
       ]
@@ -190,25 +174,14 @@
       "main": [
         [
           {
-            "node": "Merge SHA",
+            "node": "Merge SHA with Data",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Pass Prepare Data": {
-      "main": [
-        [
-          {
-            "node": "Merge SHA",
-            "type": "main",
-            "index": 1
-          }
-        ]
-      ]
-    },
-    "Merge SHA": {
+    "Merge SHA with Data": {
       "main": [
         [
           {
@@ -247,6 +220,6 @@
     }
   ],
   "triggerCount": 0,
-  "updatedAt": "2025-01-15T13:00:00.000Z",
-  "versionId": "3"
+  "updatedAt": "2025-01-15T14:00:00.000Z",
+  "versionId": "4"
 }
