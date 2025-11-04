@@ -63,8 +63,8 @@
         },
         "mieter": {
           "name": "Rexhep Neziri",
-          "email": "mieter2@beispiel.invalid",
-          "telefon": "+41 79 345 67 89",
+          "email": "rexhep_n@hotmail.com",
+          "telefon": "+41 79 747 68 44",
           "typ": "mieter",
           "berechtigt": false
         }
@@ -201,9 +201,9 @@
       "typ": "Hobbyraum",
       "etage": "Untergeschoss",
       "eigentümer": {
-        "name": "[Name Eigentümer]",
-        "email": "eigentuemer-hobby@beispiel.invalid",
-        "telefon": "+41 79 234 56 78",
+        "name": "Rexhep Neziri",
+        "email": "rexhep_n@hotmail.com",
+        "telefon": "+41 79 747 68 44",
         "typ": "eigentümer"
       },
       "mieter": null
