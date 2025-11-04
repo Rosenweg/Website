@@ -1,8 +1,9 @@
 {
   "meta": {
-    "letzte_aktualisierung": "2025-01-15T10:30:00Z",
+    "letzte_aktualisierung": "2025-11-04T10:23:52.513Z",
     "generiert_von": "n8n-workflow",
-    "version": "1.0"
+    "version": "1.0",
+    "quelle": "kontakte.json"
   },
   "verteiler": [
     {
@@ -37,26 +38,12 @@
       "typ": "automatisch",
       "quelle": "kontakte.json",
       "filter": {
-        "rolle": ["eigentümer", "mieter_berechtigt"]
+        "rolle": [
+          "eigentümer",
+          "mieter_berechtigt"
+        ]
       },
       "mitglieder": []
-    },
-    {
-      "id": "custom-beispiel",
-      "name": "Beispiel: Benutzerdefinierte Liste",
-      "email": "beispiel@rosenweg9.ch",
-      "beschreibung": "Benutzerdefinierte Verteilerliste (kann manuell verwaltet werden)",
-      "typ": "manuell",
-      "quelle": null,
-      "filter": null,
-      "mitglieder": [
-        {
-          "name": "Max Mustermann",
-          "email": "max@beispiel.ch",
-          "wohnung": "EG.1",
-          "hinzugefuegt_am": "2025-01-10"
-        }
-      ]
     }
   ]
 }
