@@ -32,15 +32,14 @@
     },
     {
       "id": "bewohner",
-      "name": "Berechtigte Bewohner",
+      "name": "Bewohner",
       "email": "bewohner@rosenweg9.ch",
-      "beschreibung": "Alle Eigentümer und berechtigte Mieter",
+      "beschreibung": "Alle Mieter + Eigentümer von Wohnungen ohne Mieter",
       "typ": "automatisch",
       "quelle": "kontakte.json",
       "filter": {
         "rolle": [
-          "eigentümer",
-          "mieter_berechtigt"
+          "mieter_oder_eigentuemer_ohne_mieter"
         ]
       },
       "mitglieder": []
