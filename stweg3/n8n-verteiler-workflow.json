@@ -1,0 +1,139 @@
+{
+  "name": "STWEG3 - Verteiler Generator (ohne Variablen)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "stweg3-verteiler-update",
+        "options": {}
+      },
+      "id": "trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "stweg3-verteiler-update",
+      "notes": "Webhook zum Auslösen der Verteiler-Generierung"
+    },
+    {
+      "parameters": {
+        "url": "https://raw.githubusercontent.com/Rosenweg/Website/main/stweg3/kontakte.json",
+        "options": {}
+      },
+      "id": "fetch-kontakte",
+      "name": "Lade kontakte.json",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [450, 300],
+      "notes": "Lädt die aktuelle kontakte.json von GitHub"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// KONFIGURATION - HIER ANPASSEN\n// ============================================\nconst REPO_OWNER = 'Rosenweg';\nconst REPO_NAME = 'Website';\nconst FILE_PATH = 'stweg3/verteiler.json';\nconst BRANCH = 'main';\n\n// Kontakte-Daten aus dem vorherigen Node\nconst kontakteData = $input.item.json;\n\n// ============================================\n// FUNKTIONEN\n// ============================================\n\n// Funktion zum Sammeln der Eigentümer\nfunction getEigentuemer(data) {\n  const eigentuemer = [];\n  \n  // Durchlaufe alle Etagen\n  ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {\n    if (data.wohnungen && data.wohnungen[etage]) {\n      data.wohnungen[etage].forEach(wohnung => {\n        if (wohnung.eigentümer) {\n          eigentuemer.push({\n            name: wohnung.eigentümer.name,\n            email: wohnung.eigentümer.email,\n            wohnung: wohnung.bezeichnung,\n            telefon: wohnung.eigentümer.telefon || null\n          });\n        }\n      });\n    }\n  });\n  \n  // Sonstiges (Hobbyraum)\n  if (data.sonstiges) {\n    data.sonstiges.forEach(item => {\n      if (item.eigentümer) {\n        eigentuemer.push({\n          name: item.eigentümer.name,\n          email: item.eigentümer.email,\n          wohnung: item.bezeichnung,\n          telefon: item.eigentümer.telefon || null\n        });\n      }\n    });\n  }\n  \n  return eigentuemer;\n}\n\n// Funktion zum Sammeln der Ausschussmitglieder\nfunction getAusschuss(data) {\n  if (!data.ausschuss) return [];\n  \n  return data.ausschuss.map(vertreter => ({\n    name: vertreter.name,\n    email: vertreter.email,\n    wohnung: vertreter.wohnung,\n    telefon: vertreter.telefon || null,\n    funktion: vertreter.funktion\n  }));\n}\n\n// Funktion zum Sammeln aller berechtigten Personen\nfunction getAlleBewohner(data) {\n  const alle = [];\n  \n  // Alle Eigentümer\n  const eigentuemer = getEigentuemer(data);\n  alle.push(...eigentuemer);\n  \n  // Berechtigte Mieter\n  ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {\n    if (data.wohnungen && data.wohnungen[etage]) {\n      data.wohnungen[etage].forEach(wohnung => {\n        if (wohnung.mieter && wohnung.mieter.berechtigt === true) {\n          alle.push({\n            name: wohnung.mieter.name,\n            email: wohnung.mieter.email,\n            wohnung: wohnung.bezeichnung,\n            telefon: wohnung.mieter.telefon || null\n          });\n        }\n      });\n    }\n  });\n  \n  return alle;\n}\n\n// ============================================\n// GENERIERE VERTEILER-JSON\n// ============================================\n\nconst verteilerData = {\n  meta: {\n    letzte_aktualisierung: new Date().toISOString(),\n    generiert_von: \"n8n-workflow\",\n    version: \"1.0\",\n    quelle: \"kontakte.json\"\n  },\n  verteiler: [\n    {\n      id: \"eigentuemer\",\n      name: \"Eigentümer-Verteiler\",\n      email: \"eigentuemer@rosenweg9.ch\",\n      beschreibung: \"Alle Eigentümer von STWEG 3\",\n      typ: \"automatisch\",\n      quelle: \"kontakte.json\",\n      filter: {\n        rolle: \"eigentümer\"\n      },\n      mitglieder: getEigentuemer(kontakteData)\n    },\n    {\n      id: \"ausschuss\",\n      name: \"Ausschuss-Verteiler\",\n      email: \"ausschuss@rosenweg9.ch\",\n      beschreibung: \"Ausschussmitglieder von STWEG 3\",\n      typ: \"automatisch\",\n      quelle: \"kontakte.json\",\n      filter: {\n        bereich: \"ausschuss\"\n      },\n      mitglieder: getAusschuss(kontakteData)\n    },\n    {\n      id: \"alle\",\n      name: \"Alle Bewohner\",\n      email: \"alle@rosenweg9.ch\",\n      beschreibung: \"Alle Eigentümer und berechtigte Mieter\",\n      typ: \"automatisch\",\n      quelle: \"kontakte.json\",\n      filter: {\n        rolle: [\"eigentümer\", \"mieter_berechtigt\"]\n      },\n      mitglieder: getAlleBewohner(kontakteData)\n    }\n  ]\n};\n\n// Output mit Repository-Informationen\nreturn {\n  json: {\n    verteilerContent: JSON.stringify(verteilerData, null, 2),\n    repoOwner: REPO_OWNER,\n    repoName: REPO_NAME,\n    filePath: FILE_PATH,\n    branch: BRANCH,\n    verteilerData: verteilerData\n  }\n};"
+      },
+      "id": "generate-verteiler",
+      "name": "Generiere Verteiler-JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 300],
+      "notes": "Extrahiert Mitglieder aus kontakte.json und erstellt verteiler.json"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "file",
+        "operation": "edit",
+        "owner": "={{ $json.repoOwner }}",
+        "repository": "={{ $json.repoName }}",
+        "filePath": "={{ $json.filePath }}",
+        "fileContent": "={{ $json.verteilerContent }}",
+        "commitMessage": "🤖 Auto-Update: Verteiler-Listen aktualisiert",
+        "additionalParameters": {
+          "branch": "={{ $json.branch }}"
+        }
+      },
+      "id": "update-github",
+      "name": "Update verteiler.json auf GitHub",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [850, 300],
+      "notes": "Schreibt die generierte verteiler.json zurück ins GitHub Repository"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \n  success: true, \n  message: 'Verteiler-Listen erfolgreich aktualisiert', \n  timestamp: new Date().toISOString(), \n  verteiler_anzahl: $json.verteilerData.verteiler.length,\n  eigentuemer: $json.verteilerData.verteiler.find(v => v.id === 'eigentuemer').mitglieder.length,\n  ausschuss: $json.verteilerData.verteiler.find(v => v.id === 'ausschuss').mitglieder.length,\n  alle: $json.verteilerData.verteiler.find(v => v.id === 'alle').mitglieder.length\n} }}",
+        "options": {}
+      },
+      "id": "response",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1050, 300],
+      "notes": "Sendet Erfolgsbestätigung zurück"
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Lade kontakte.json",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lade kontakte.json": {
+      "main": [
+        [
+          {
+            "node": "Generiere Verteiler-JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generiere Verteiler-JSON": {
+      "main": [
+        [
+          {
+            "node": "Update verteiler.json auf GitHub",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update verteiler.json auf GitHub": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "STWEG3",
+      "id": "1"
+    },
+    {
+      "name": "Automatisierung",
+      "id": "2"
+    }
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2025-01-15T12:00:00.000Z",
+  "versionId": "2"
+}

@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "letzte_aktualisierung": "2025-01-15T10:30:00Z",
+    "generiert_von": "n8n-workflow",
+    "version": "1.0"
+  },
+  "verteiler": [
+    {
+      "id": "eigentuemer",
+      "name": "Eigentümer-Verteiler",
+      "email": "eigentuemer@rosenweg9.ch",
+      "beschreibung": "Alle Eigentümer von STWEG 3",
+      "typ": "automatisch",
+      "quelle": "kontakte.json",
+      "filter": {
+        "rolle": "eigentümer"
+      },
+      "mitglieder": []
+    },
+    {
+      "id": "ausschuss",
+      "name": "Ausschuss-Verteiler",
+      "email": "ausschuss@rosenweg9.ch",
+      "beschreibung": "Ausschussmitglieder von STWEG 3",
+      "typ": "automatisch",
+      "quelle": "kontakte.json",
+      "filter": {
+        "bereich": "ausschuss"
+      },
+      "mitglieder": []
+    },
+    {
+      "id": "alle",
+      "name": "Alle Bewohner",
+      "email": "alle@rosenweg9.ch",
+      "beschreibung": "Alle Eigentümer und berechtigte Mieter",
+      "typ": "automatisch",
+      "quelle": "kontakte.json",
+      "filter": {
+        "rolle": ["eigentümer", "mieter_berechtigt"]
+      },
+      "mitglieder": []
+    },
+    {
+      "id": "custom-beispiel",
+      "name": "Beispiel: Benutzerdefinierte Liste",
+      "email": "beispiel@rosenweg9.ch",
+      "beschreibung": "Benutzerdefinierte Verteilerliste (kann manuell verwaltet werden)",
+      "typ": "manuell",
+      "quelle": null,
+      "filter": null,
+      "mitglieder": [
+        {
+          "name": "Max Mustermann",
+          "email": "max@beispiel.ch",
+          "wohnung": "EG.1",
+          "hinzugefuegt_am": "2025-01-10"
+        }
+      ]
+    }
+  ]
+}
