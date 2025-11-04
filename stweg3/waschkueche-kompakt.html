@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Waschküche STWEG 3</title>
+    <style>
+        @page { size: A4; margin: 10mm; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 11pt;
+            line-height: 1.3;
+            color: #111;
+        }
+        .container {
+            max-width: 190mm;
+            margin: 0 auto;
+        }
+        .header {
+            background: #16a34a;
+            color: white;
+            padding: 12mm;
+            text-align: center;
+            margin-bottom: 6mm;
+            border-radius: 4mm;
+        }
+        .header h1 {
+            font-size: 28pt;
+            margin-bottom: 2mm;
+        }
+        .header p {
+            font-size: 13pt;
+        }
+        .warning {
+            background: #fee;
+            border: 2mm solid #dc2626;
+            padding: 8mm;
+            margin-bottom: 5mm;
+            border-radius: 3mm;
+        }
+        .warning h2 {
+            color: #dc2626;
+            font-size: 16pt;
+            margin-bottom: 3mm;
+        }
+        .warning p {
+            font-size: 12pt;
+            line-height: 1.4;
+        }
+        .columns {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 5mm;
+            margin-bottom: 5mm;
+        }
+        .box {
+            background: #f9f9f9;
+            padding: 6mm;
+            border: 1mm solid #ddd;
+            border-radius: 3mm;
+        }
+        .box h3 {
+            font-size: 13pt;
+            margin-bottom: 3mm;
+            color: #16a34a;
+        }
+        .box ul {
+            list-style: none;
+            padding: 0;
+        }
+        .box li {
+            font-size: 10pt;
+            margin-bottom: 2mm;
+            padding-left: 5mm;
+            position: relative;
+        }
+        .box li:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #16a34a;
+            font-weight: bold;
+        }
+        .qr-container {
+            text-align: center;
+            background: #f9f9f9;
+            padding: 6mm;
+            border: 1mm solid #ddd;
+            border-radius: 3mm;
+        }
+        .qr-container h3 {
+            font-size: 13pt;
+            margin-bottom: 3mm;
+            color: #16a34a;
+        }
+        .qr-code {
+            width: 40mm;
+            height: 40mm;
+            margin: 3mm auto;
+            border: 1.5mm solid #16a34a;
+            padding: 2mm;
+            background: white;
+        }
+        .qr-code img {
+            width: 100%;
+            height: 100%;
+        }
+        .url {
+            font-size: 9pt;
+            color: #16a34a;
+            font-weight: bold;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 6mm;
+            padding-top: 4mm;
+            border-top: 1mm solid #ddd;
+            font-size: 9pt;
+            color: #666;
+        }
+        @media print {
+            body { margin: 0; padding: 0; }
+            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧺 Waschküche</h1>
+            <p>STWEG 3 - Rosenweg 9</p>
+        </div>
+
+        <div class="warning">
+            <h2>⚠ WICHTIG: Fenster geschlossen halten!</h2>
+            <p>Die Fenster müssen GESCHLOSSEN bleiben. Nutzen Sie den Trockner oder die fest verbauten Wäscheleinen!</p>
+        </div>
+
+        <div class="columns">
+            <div class="box">
+                <h3>📦 Ausstattung</h3>
+                <ul>
+                    <li>Waschmaschine</li>
+                    <li>Trockner</li>
+                    <li>Waschtisch</li>
+                    <li>Wäscheleinen (fest verbaut)</li>
+                </ul>
+            </div>
+
+            <div class="qr-container">
+                <h3>📱 Mehr Informationen</h3>
+                <div class="qr-code">
+                    <img src="https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=https://rosenweg4303.ch/stweg3/%23waschkueche" alt="QR">
+                </div>
+                <p class="url">rosenweg4303.ch/stweg3/#waschkueche</p>
+            </div>
+        </div>
+
+        <div class="box">
+            <h3>📋 Wichtige Regeln</h3>
+            <ul>
+                <li>Fenster geschlossen halten (keine Ausnahmen!)</li>
+                <li>Trockner für Wäschetrocknung nutzen</li>
+                <li>Reservation erforderlich (Liste vor Ort)</li>
+                <li>Waschküche nach Gebrauch reinigen</li>
+                <li>Waschtisch sauber hinterlassen</li>
+                <li>Ruhezeiten: Sonntags und 22:00-07:00 Uhr</li>
+            </ul>
+        </div>
+
+        <div class="footer">
+            <p><strong>STWEG 3</strong> - Rosenweg 9, 4303 Kaiseraugst - Teil der STWEG-Kooperation Rosenweg</p>
+        </div>
+    </div>
+</body>
+</html>
