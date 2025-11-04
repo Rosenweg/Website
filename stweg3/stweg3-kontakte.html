@@ -247,12 +247,14 @@
 
         // Pfad zur JSON-Datei (im gleichen Verzeichnis)
         const KONTAKTE_JSON_URL = 'kontakte.json';
+        const VERTEILER_JSON_URL = 'verteiler.json';
 
         // ============================================
         // GLOBALE VARIABLEN
         // ============================================
 
         let kontakteData = null;
+        let verteilerData = null;
         let authorizedEmails = [];
         let hausverwaltungDomain = null;
         let currentEmail = '';
@@ -362,12 +364,24 @@
         // Kontakte laden beim Seitenaufruf
         window.addEventListener('DOMContentLoaded', async function() {
             try {
-                const response = await fetch(KONTAKTE_JSON_URL);
-                if (!response.ok) {
+                // Kontakte laden
+                const kontakteResponse = await fetch(KONTAKTE_JSON_URL);
+                if (!kontakteResponse.ok) {
                     throw new Error('Kontakte konnten nicht geladen werden');
                 }
-                
-                kontakteData = await response.json();
+                kontakteData = await kontakteResponse.json();
+
+                // Verteilerlisten laden (optional - falls nicht vorhanden, wird Fallback verwendet)
+                try {
+                    const verteilerResponse = await fetch(VERTEILER_JSON_URL);
+                    if (verteilerResponse.ok) {
+                        verteilerData = await verteilerResponse.json();
+                        console.log('Verteilerlisten geladen:', verteilerData);
+                    }
+                } catch (verteilerError) {
+                    console.warn('Verteilerlisten konnten nicht geladen werden, verwende Fallback:', verteilerError);
+                    verteilerData = null;
+                }
 
                 // Berechtigte E-Mails AUTOMATISCH aus allen Wohnungen extrahieren
                 authorizedEmails = extractAllEmailsFromKontakte(kontakteData);
@@ -378,7 +392,7 @@
                 // Loading verstecken, Step 1 anzeigen
                 document.getElementById('loading').classList.add('hidden');
                 document.getElementById('step1').classList.remove('hidden');
-                
+
             } catch (error) {
                 console.error('Fehler beim Laden der Kontakte:', error);
                 document.getElementById('loading').innerHTML = `
@@ -552,7 +566,10 @@
             
             // Ausschussvertreter
             html += renderAusschuss(data.ausschuss);
-            
+
+            // E-Mail-Verteilerlisten
+            html += renderEmailVerteiler(data);
+
             container.innerHTML = html;
         }
 
@@ -663,6 +680,224 @@
             });
             
             html += '</div>';
+            return html;
+        }
+
+        function renderEmailVerteiler(data) {
+            let html = `
+                <div class="border-l-4 border-teal-500 bg-teal-50 p-4 rounded-lg">
+                    <h3 class="font-semibold text-lg text-teal-800 mb-3">📧 E-Mail-Verteilerlisten</h3>
+                    <p class="text-sm text-gray-600 mb-4">Übersicht der E-Mail-Verteilerlisten und deren Mitglieder</p>
+            `;
+
+            // Wenn verteiler.json vorhanden ist, diese verwenden
+            if (verteilerData && verteilerData.verteiler) {
+                // Generiere Mitgliederlisten aus kontakte.json für automatische Verteiler
+                const generatedLists = generateVerteilerMitglieder(data);
+
+                verteilerData.verteiler.forEach((verteiler, index) => {
+                    const isLast = index === verteilerData.verteiler.length - 1;
+
+                    // Hole Mitglieder: entweder aus generierten Listen oder aus manueller Liste
+                    let mitglieder = [];
+                    if (verteiler.typ === 'automatisch' && generatedLists[verteiler.id]) {
+                        mitglieder = generatedLists[verteiler.id];
+                    } else if (verteiler.typ === 'manuell') {
+                        mitglieder = verteiler.mitglieder || [];
+                    }
+
+                    // Badge-Farbe basierend auf Typ
+                    const badgeColor = verteiler.typ === 'automatisch' ? 'teal' : 'purple';
+
+                    html += `
+                        <div class="bg-white p-4 rounded-lg ${!isLast ? 'mb-3' : ''}">
+                            <div class="flex items-start justify-between mb-3">
+                                <div class="flex-1">
+                                    <div class="flex items-center gap-2 mb-1">
+                                        <p class="font-semibold text-gray-800">${verteiler.name}</p>
+                                        <span class="bg-${badgeColor}-100 text-${badgeColor}-700 px-2 py-0.5 rounded text-xs">${verteiler.typ === 'automatisch' ? '🔄 Auto' : '✏️ Manuell'}</span>
+                                    </div>
+                                    <p class="text-sm text-teal-700 font-mono">${verteiler.email}</p>
+                                    <p class="text-xs text-gray-500 mt-1">${verteiler.beschreibung}</p>
+                                </div>
+                                <span class="bg-${badgeColor}-100 text-${badgeColor}-800 px-3 py-1 rounded-full text-sm font-semibold whitespace-nowrap ml-2">${mitglieder.length} ${mitglieder.length === 1 ? 'Mitglied' : 'Mitglieder'}</span>
+                            </div>
+                            <div class="border-t border-gray-200 pt-3">
+                                <p class="text-xs text-gray-600 mb-2 font-semibold">Mitglieder:</p>
+                                <div class="grid grid-cols-1 ${verteiler.id === 'eigentuemer' || verteiler.id === 'alle' ? 'md:grid-cols-2' : ''} gap-2">
+                    `;
+
+                    mitglieder.forEach(person => {
+                        html += `
+                            <div class="text-sm text-gray-700 bg-gray-50 p-2 rounded">
+                                <span class="font-medium">${person.name}</span>
+                                <span class="text-gray-500 text-xs ml-2">(${person.wohnung}${person.funktion ? ' - ' + person.funktion : ''})</span>
+                            </div>
+                        `;
+                    });
+
+                    html += `
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                // Letzte Aktualisierung
+                if (verteilerData.meta && verteilerData.meta.letzte_aktualisierung) {
+                    const updateDate = new Date(verteilerData.meta.letzte_aktualisierung);
+                    html += `
+                        <div class="mt-4 text-xs text-gray-500 text-center">
+                            Letzte Aktualisierung der Verteilerlisten: ${updateDate.toLocaleString('de-CH')}
+                            ${verteilerData.meta.generiert_von ? ` (${verteilerData.meta.generiert_von})` : ''}
+                        </div>
+                    `;
+                }
+            } else {
+                // Fallback: Alte statische Methode
+                html += renderEmailVerteilerFallback(data);
+            }
+
+            html += '</div>';
+            return html;
+        }
+
+        function generateVerteilerMitglieder(data) {
+            const lists = {};
+
+            // Eigentümer-Liste
+            lists.eigentuemer = [];
+            ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {
+                data.wohnungen[etage].forEach(wohnung => {
+                    if (wohnung.eigentümer) {
+                        lists.eigentuemer.push({
+                            name: wohnung.eigentümer.name,
+                            email: wohnung.eigentümer.email,
+                            wohnung: wohnung.bezeichnung
+                        });
+                    }
+                });
+            });
+            if (data.sonstiges) {
+                data.sonstiges.forEach(item => {
+                    if (item.eigentümer) {
+                        lists.eigentuemer.push({
+                            name: item.eigentümer.name,
+                            email: item.eigentümer.email,
+                            wohnung: item.bezeichnung
+                        });
+                    }
+                });
+            }
+
+            // Ausschuss-Liste
+            lists.ausschuss = data.ausschuss.map(vertreter => ({
+                name: vertreter.name,
+                email: vertreter.email,
+                funktion: vertreter.funktion,
+                wohnung: vertreter.wohnung
+            }));
+
+            // Alle Bewohner (Eigentümer + berechtigte Mieter)
+            lists.alle = [...lists.eigentuemer];
+            ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {
+                data.wohnungen[etage].forEach(wohnung => {
+                    if (wohnung.mieter && wohnung.mieter.berechtigt) {
+                        lists.alle.push({
+                            name: wohnung.mieter.name,
+                            email: wohnung.mieter.email,
+                            wohnung: wohnung.bezeichnung
+                        });
+                    }
+                });
+            });
+
+            return lists;
+        }
+
+        function renderEmailVerteilerFallback(data) {
+            // Alte statische Methode als Fallback
+            const eigentuemer = [];
+            ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {
+                data.wohnungen[etage].forEach(wohnung => {
+                    if (wohnung.eigentümer) {
+                        eigentuemer.push({
+                            name: wohnung.eigentümer.name,
+                            email: wohnung.eigentümer.email,
+                            wohnung: wohnung.bezeichnung
+                        });
+                    }
+                });
+            });
+            if (data.sonstiges) {
+                data.sonstiges.forEach(item => {
+                    if (item.eigentümer) {
+                        eigentuemer.push({
+                            name: item.eigentümer.name,
+                            email: item.eigentümer.email,
+                            wohnung: item.bezeichnung
+                        });
+                    }
+                });
+            }
+
+            const ausschussMitglieder = data.ausschuss.map(vertreter => ({
+                name: vertreter.name,
+                email: vertreter.email,
+                funktion: vertreter.funktion,
+                wohnung: vertreter.wohnung
+            }));
+
+            let html = `
+                <div class="bg-white p-4 rounded-lg mb-3">
+                    <div class="flex items-center justify-between mb-3">
+                        <div>
+                            <p class="font-semibold text-gray-800">Eigentümer-Verteiler</p>
+                            <p class="text-sm text-teal-700 font-mono">eigentuemer@rosenweg9.ch</p>
+                        </div>
+                        <span class="bg-teal-100 text-teal-800 px-3 py-1 rounded-full text-sm font-semibold">${eigentuemer.length} Mitglieder</span>
+                    </div>
+                    <div class="border-t border-gray-200 pt-3">
+                        <p class="text-xs text-gray-600 mb-2 font-semibold">Mitglieder:</p>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+            `;
+            eigentuemer.forEach(person => {
+                html += `
+                    <div class="text-sm text-gray-700 bg-gray-50 p-2 rounded">
+                        <span class="font-medium">${person.name}</span>
+                        <span class="text-gray-500 text-xs ml-2">(${person.wohnung})</span>
+                    </div>
+                `;
+            });
+            html += `
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-white p-4 rounded-lg">
+                    <div class="flex items-center justify-between mb-3">
+                        <div>
+                            <p class="font-semibold text-gray-800">Ausschuss-Verteiler</p>
+                            <p class="text-sm text-teal-700 font-mono">ausschuss@rosenweg9.ch</p>
+                        </div>
+                        <span class="bg-teal-100 text-teal-800 px-3 py-1 rounded-full text-sm font-semibold">${ausschussMitglieder.length} Mitglieder</span>
+                    </div>
+                    <div class="border-t border-gray-200 pt-3">
+                        <p class="text-xs text-gray-600 mb-2 font-semibold">Mitglieder:</p>
+                        <div class="space-y-2">
+            `;
+            ausschussMitglieder.forEach(person => {
+                html += `
+                    <div class="text-sm text-gray-700 bg-gray-50 p-2 rounded">
+                        <span class="font-medium">${person.name}</span>
+                        <span class="text-gray-500 text-xs ml-2">(${person.wohnung} - ${person.funktion})</span>
+                    </div>
+                `;
+            });
+            html += `
+                        </div>
+                    </div>
+                </div>
+            `;
             return html;
         }
 
