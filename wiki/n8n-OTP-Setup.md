@@ -157,9 +157,15 @@ curl -X POST https://n8n.juroct.net/webhook/stweg3-otp \
   -H "Content-Type: application/json" \
   -d '{
     "email": "user@example.ch",
-    "otp_code": "123456"
+    "otp_code": "123456",
+    "source": "STWEG 3 - Kontaktliste"
   }'
 ```
+
+**Parameter:**
+- `email` (erforderlich): E-Mail-Adresse des Empfängers
+- `otp_code` (erforderlich): 6-stelliger OTP-Code
+- `source` (optional): Name der Seite/Funktion, die den Code anfordert (wird im E-Mail-Betreff und -Body angezeigt)
 
 ### JavaScript (Frontend)
 
@@ -171,7 +177,8 @@ const response = await fetch('https://n8n.juroct.net/webhook/stweg3-otp', {
     },
     body: JSON.stringify({
         email: email,
-        otp_code: otpCode
+        otp_code: otpCode,
+        source: 'STWEG 3 - Kontaktliste'  // Optional: Wird in E-Mail angezeigt
     })
 });
 
@@ -184,6 +191,10 @@ if (result.success) {
 }
 ```
 
+**Verwendete Sources:**
+- `'STWEG 3 - Kontaktliste'` - für stweg3-kontakte.html
+- `'STWEG 3 - Admin-Bereich'` - für admin.html
+
 ## Testing
 
 ### Manueller Test via curl
@@ -191,7 +202,7 @@ if (result.success) {
 ```bash
 curl -X POST https://n8n.juroct.net/webhook/stweg3-otp \
   -H "Content-Type: application/json" \
-  -d '{"email":"deine@email.ch","otp_code":"123456"}'
+  -d '{"email":"deine@email.ch","otp_code":"123456","source":"Test"}'
 ```
 
 ### Test über die Website

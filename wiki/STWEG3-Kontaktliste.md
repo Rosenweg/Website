@@ -28,7 +28,10 @@ Die geschützte Kontaktliste enthält Kontaktdaten aller Bewohner der STWEG 3 am
 ### Schritt 3: OTP-Code erhalten
 
 1. Prüfe dein **E-Mail-Postfach** (auch Spam-Ordner!)
-2. Du erhältst eine E-Mail mit einem **6-stelligen Code**
+2. Du erhältst eine E-Mail mit:
+   - **Betreff**: "🔒 Ihr Zugangscode für STWEG 3 - Kontaktliste"
+   - **6-stelliger Code** im E-Mail-Body
+   - **Quelle**: "STWEG 3 - Kontaktliste" (zeigt an, von welcher Seite der Code angefordert wurde)
 3. Der Code ist **10 Minuten** gültig
 
 ### Schritt 4: Code eingeben
