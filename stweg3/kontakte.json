@@ -38,14 +38,16 @@
           "name": "Basil Fersztand",
           "email": "fersztand.basil@teleport.ch",
           "telefon": "+41 78 899 79 38",
-          "typ": "eigentümer"
+          "typ": "eigentümer",
+          "waschkueche_berechtigt": true
         },
         "mieter": {
           "name": "Marija Rustoli",
           "email": "marija584@icloud.com",
           "telefon": "+41 76 823 15 55",
           "typ": "mieter",
-          "berechtigt": false
+          "berechtigt": false,
+          "waschkueche_berechtigt": true
         }
       },
       {
@@ -59,14 +61,16 @@
           "name": "Besim Neziri",
           "email": "besim.neziri@icloud.com",
           "telefon": "+41 79 234 56 78",
-          "typ": "eigentümer"
+          "typ": "eigentümer",
+          "waschkueche_berechtigt": true
         },
         "mieter": {
           "name": "Rexhep Neziri",
           "email": "rexhep_n@hotmail.com",
           "telefon": "+41 79 747 68 44",
           "typ": "mieter",
-          "berechtigt": false
+          "berechtigt": false,
+          "waschkueche_berechtigt": true
         }
       },
       {
@@ -80,7 +84,8 @@
           "name": "Elisabeth Müller",
           "email": "elisabeth.mueller@teleport.ch",
           "telefon": "+41 61 811 26 90",
-          "typ": "eigentümer"
+          "typ": "eigentümer",
+          "waschkueche_berechtigt": true
         },
         "mieter": null
       }
@@ -97,14 +102,16 @@
           "name": "Yves Wyss",
           "email": "wyss.y@gmx.ch",
           "telefon": "+41 79 567 89 01",
-          "typ": "eigentümer"
+          "typ": "eigentümer",
+          "waschkueche_berechtigt": true
         },
         "mieter": {
           "name": "Kirsten Dautel",
           "email": "mieter-1og1@beispiel.invalid",
           "telefon": "+XX XX XXX XX XX",
           "typ": "mieter",
-          "berechtigt": false
+          "berechtigt": false,
+          "waschkueche_berechtigt": true
         }
       },
       {
@@ -118,7 +125,8 @@
           "name": "Sunay Ozdemir",
           "email": "eigentuemer5@beispiel.invalid",
           "telefon": "+XX XX XXX XX XX",
-          "typ": "eigentümer"
+          "typ": "eigentümer",
+          "waschkueche_berechtigt": true
         },
         "mieter": null
       },
@@ -133,7 +141,8 @@
           "name": "Bülent Aytac",
           "email": "n.sofi@hotmail.com",
           "telefon": "+41 79 789 01 23",
-          "typ": "eigentümer"
+          "typ": "eigentümer",
+          "waschkueche_berechtigt": true
         },
         "mieter": null
       }
@@ -151,7 +160,8 @@
           "name": "Slavica Ilic",
           "email": "s.ilic@sunrise.ch",
           "telefon": "+41 79 901 23 45",
-          "typ": "eigentümer"
+          "typ": "eigentümer",
+          "waschkueche_berechtigt": true
         },
         "mieter": null
       },
@@ -167,14 +177,16 @@
           "name": "Ajradin Emini",
           "email": "s4dinka@hotmail.de",
           "telefon": "+41 79 012 34 56",
-          "typ": "eigentümer"
+          "typ": "eigentümer",
+          "waschkueche_berechtigt": true
         },
         "mieter": {
           "name": "[Name Mieter]",
           "email": "mieter-2og2@beispiel.invalid",
           "telefon": "+41 79 XXX XX XX",
           "typ": "mieter",
-          "berechtigt": false
+          "berechtigt": false,
+          "waschkueche_berechtigt": true
         }
       },
       {
@@ -189,7 +201,8 @@
           "name": "Rolf & Stefan Müller",
           "email": "stefan+rosenweg@juroct.ch,rolf@juroct.net",
           "telefon": "+41 76 519 99 70",
-          "typ": "eigentümer"
+          "typ": "eigentümer",
+          "waschkueche_berechtigt": true
         },
         "mieter": null
       }
@@ -204,7 +217,8 @@
         "name": "Rexhep Neziri",
         "email": "rexhep_n@hotmail.com",
         "telefon": "+41 79 747 68 44",
-        "typ": "eigentümer"
+        "typ": "eigentümer",
+        "waschkueche_berechtigt": true
       },
       "mieter": null
     }
@@ -227,7 +241,8 @@
     "hinweise": [
       "Alle Eigentümer haben automatisch Zugriff auf die geschützte Kontaktliste",
       "Mieter haben nur Zugriff, wenn 'berechtigt': true gesetzt ist",
-      "Das 'berechtigt'-Feld bei Mietern muss explizit auf true gesetzt werden für Zugriff"
+      "Das 'berechtigt'-Feld bei Mietern muss explizit auf true gesetzt werden für Zugriff",
+      "waschkueche_berechtigt: true/false - Berechtigung für Waschküchen-Reservierungssystem"
     ]
   }
 }
