@@ -1,0 +1,82 @@
+{
+  "meta": {
+    "letzte_aktualisierung": "2025-11-05T14:00:00.000Z",
+    "version": "1.0",
+    "zeitslots": [
+      {
+        "id": "slot1",
+        "von": "00:00",
+        "bis": "06:00",
+        "bezeichnung": "Nacht (00:00-06:00)"
+      },
+      {
+        "id": "slot2",
+        "von": "06:00",
+        "bis": "12:00",
+        "bezeichnung": "Morgen (06:00-12:00)"
+      },
+      {
+        "id": "slot3",
+        "von": "12:00",
+        "bis": "18:00",
+        "bezeichnung": "Nachmittag (12:00-18:00)"
+      },
+      {
+        "id": "slot4",
+        "von": "18:00",
+        "bis": "24:00",
+        "bezeichnung": "Abend (18:00-24:00)"
+      }
+    ],
+    "waschkuechen": [
+      {
+        "id": "wk1",
+        "bezeichnung": "Waschküche 1",
+        "standort": "Untergeschoss Links"
+      },
+      {
+        "id": "wk2",
+        "bezeichnung": "Waschküche 2",
+        "standort": "Untergeschoss Rechts"
+      }
+    ]
+  },
+  "reservierungen": [
+    {
+      "id": "res_example_001",
+      "waschkueche_id": "wk1",
+      "wohnung": "2OG.3",
+      "bewohner_name": "Stefan Müller",
+      "bewohner_email": "stefan+rosenweg@juroct.ch",
+      "typ": "einmalig",
+      "datum": "2025-11-10",
+      "zeitslot_id": "slot2",
+      "erstellt_am": "2025-11-05T14:00:00.000Z",
+      "status": "aktiv"
+    },
+    {
+      "id": "res_example_002",
+      "waschkueche_id": "wk2",
+      "wohnung": "EG.1",
+      "bewohner_name": "Basil Fersztand",
+      "bewohner_email": "fersztand.basil@teleport.ch",
+      "typ": "wiederkehrend",
+      "wochentag": "montag",
+      "zeitslot_id": "slot3",
+      "von_datum": "2025-01-01",
+      "bis_datum": "2025-12-31",
+      "erstellt_am": "2025-11-05T14:00:00.000Z",
+      "status": "aktiv",
+      "kommentar": "Jeden Montag Nachmittag - Jahresreservierung"
+    }
+  ],
+  "hinweise": [
+    "typ kann sein: 'einmalig' oder 'wiederkehrend'",
+    "Bei einmalig: 'datum' erforderlich (YYYY-MM-DD)",
+    "Bei wiederkehrend: 'wochentag' (montag-sonntag), 'von_datum', 'bis_datum' erforderlich",
+    "zeitslot_id muss einem der definierten Slots entsprechen (slot1-slot4)",
+    "waschkueche_id muss wk1 oder wk2 sein",
+    "status kann sein: 'aktiv', 'storniert'",
+    "id-Format: res_YYYYMMDD_HHMM_XXX oder beliebig, aber eindeutig"
+  ]
+}

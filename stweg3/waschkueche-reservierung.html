@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Waschküchen-Reservierung - STWEG 3</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .slot-free {
+            background: #d1fae5;
+            border: 2px solid #10b981;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .slot-free:hover {
+            background: #a7f3d0;
+            transform: scale(1.02);
+        }
+        .slot-occupied {
+            background: #fecaca;
+            border: 2px solid #ef4444;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+        .slot-own {
+            background: #fef3c7;
+            border: 2px solid #f59e0b;
+            cursor: pointer;
+        }
+        .slot-own:hover {
+            background: #fde68a;
+        }
+        .calendar-day {
+            min-height: 120px;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-lg sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <a href="index.html" class="flex items-center">
+                        <svg class="h-8 w-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path>
+                        </svg>
+                        <span class="ml-2 text-xl font-semibold text-gray-800">Waschküchen-Reservierung</span>
+                    </a>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <span id="userInfo" class="text-sm text-gray-600"></span>
+                    <a href="index.html" class="text-gray-700 hover:text-green-600 transition">← Zurück</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- OTP Login (wird ausgeblendet nach erfolgreicher Anmeldung) -->
+    <div id="otpSection" class="max-w-md mx-auto mt-12 p-8 bg-white rounded-lg shadow-lg">
+        <h2 class="text-2xl font-bold text-gray-800 mb-6 text-center">🔐 Anmeldung erforderlich</h2>
+        <p class="text-gray-600 mb-6 text-center">Bitte geben Sie Ihre E-Mail-Adresse ein, um einen Zugangs-Code zu erhalten.</p>
+
+        <div id="emailStep">
+            <input type="email" id="emailInput" placeholder="ihre.email@beispiel.ch"
+                   class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent mb-4">
+            <button onclick="requestOTP()" class="w-full bg-green-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-green-700 transition">
+                Code anfordern
+            </button>
+        </div>
+
+        <div id="otpStep" class="hidden">
+            <p class="text-sm text-gray-600 mb-4">Ein 6-stelliger Code wurde an <strong id="sentToEmail"></strong> gesendet.</p>
+            <input type="text" id="otpInput" placeholder="000000" maxlength="6"
+                   class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent mb-4 text-center text-2xl tracking-widest">
+            <button onclick="verifyOTP()" class="w-full bg-green-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-green-700 transition">
+                Code bestätigen
+            </button>
+            <button onclick="backToEmail()" class="w-full mt-2 text-gray-600 hover:text-gray-800 text-sm">
+                ← Andere E-Mail verwenden
+            </button>
+        </div>
+
+        <div id="loadingIndicator" class="hidden text-center py-4">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-green-500 border-t-transparent"></div>
+            <p class="text-gray-600 mt-2">Wird überprüft...</p>
+        </div>
+    </div>
+
+    <!-- Hauptbereich (wird nach Login sichtbar) -->
+    <div id="mainContent" class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        <!-- Waschküchen-Auswahl -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-2xl font-bold text-gray-800 mb-4">Waschküche wählen</h2>
+            <div class="grid md:grid-cols-2 gap-4">
+                <button onclick="selectWaschkueche('wk1')" id="btn-wk1"
+                        class="p-6 border-2 border-gray-300 rounded-lg hover:border-green-500 hover:bg-green-50 transition">
+                    <h3 class="text-xl font-semibold text-gray-800">🧺 Waschküche 1</h3>
+                    <p class="text-sm text-gray-600 mt-1">Untergeschoss Links</p>
+                </button>
+                <button onclick="selectWaschkueche('wk2')" id="btn-wk2"
+                        class="p-6 border-2 border-gray-300 rounded-lg hover:border-green-500 hover:bg-green-50 transition">
+                    <h3 class="text-xl font-semibold text-gray-800">🧺 Waschküche 2</h3>
+                    <p class="text-sm text-gray-600 mt-1">Untergeschoss Rechts</p>
+                </button>
+            </div>
+        </div>
+
+        <!-- Kalender-Ansicht -->
+        <div id="calendarSection" class="hidden">
+            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold text-gray-800">
+                        <span id="selectedWkName"></span> - Kalender
+                    </h2>
+                    <div class="flex space-x-2">
+                        <button onclick="previousWeek()" class="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition">
+                            ← Vorherige Woche
+                        </button>
+                        <button onclick="nextWeek()" class="px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 transition">
+                            Nächste Woche →
+                        </button>
+                    </div>
+                </div>
+
+                <div class="mb-4 text-center">
+                    <p class="text-lg font-semibold text-gray-700">
+                        KW <span id="weekNumber"></span> | <span id="weekRange"></span>
+                    </p>
+                </div>
+
+                <!-- Legende -->
+                <div class="flex flex-wrap gap-4 mb-6 justify-center">
+                    <div class="flex items-center">
+                        <div class="w-6 h-6 bg-green-200 border-2 border-green-500 rounded mr-2"></div>
+                        <span class="text-sm text-gray-700">Frei</span>
+                    </div>
+                    <div class="flex items-center">
+                        <div class="w-6 h-6 bg-red-200 border-2 border-red-500 rounded mr-2"></div>
+                        <span class="text-sm text-gray-700">Belegt</span>
+                    </div>
+                    <div class="flex items-center">
+                        <div class="w-6 h-6 bg-yellow-200 border-2 border-yellow-500 rounded mr-2"></div>
+                        <span class="text-sm text-gray-700">Ihre Reservierung</span>
+                    </div>
+                </div>
+
+                <!-- Wochentage als Grid -->
+                <div id="weekGrid" class="grid grid-cols-7 gap-2">
+                    <!-- Wird dynamisch befüllt -->
+                </div>
+            </div>
+
+            <!-- Neue Reservierung Button -->
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <button onclick="showBookingModal()" class="w-full bg-green-600 text-white py-4 px-6 rounded-lg font-semibold text-lg hover:bg-green-700 transition">
+                    ➕ Neue Reservierung erstellen
+                </button>
+            </div>
+        </div>
+
+        <!-- Meine Reservierungen -->
+        <div class="bg-white rounded-lg shadow-md p-6 mt-6">
+            <h2 class="text-2xl font-bold text-gray-800 mb-4">📋 Meine Reservierungen</h2>
+            <div id="myReservationsList">
+                <!-- Wird dynamisch befüllt -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Buchungsmodal -->
+    <div id="bookingModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div class="p-6">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold text-gray-800">Neue Reservierung</h2>
+                    <button onclick="closeBookingModal()" class="text-gray-500 hover:text-gray-700 text-3xl">&times;</button>
+                </div>
+
+                <form id="bookingForm" onsubmit="submitBooking(event)">
+                    <!-- Reservierungstyp -->
+                    <div class="mb-6">
+                        <label class="block text-gray-700 font-semibold mb-2">Reservierungsart</label>
+                        <div class="grid grid-cols-2 gap-4">
+                            <label class="flex items-center p-4 border-2 border-gray-300 rounded-lg cursor-pointer hover:border-green-500">
+                                <input type="radio" name="bookingType" value="einmalig" checked onchange="toggleBookingType()" class="mr-3">
+                                <span>📅 Einmalig</span>
+                            </label>
+                            <label class="flex items-center p-4 border-2 border-gray-300 rounded-lg cursor-pointer hover:border-green-500">
+                                <input type="radio" name="bookingType" value="wiederkehrend" onchange="toggleBookingType()" class="mr-3">
+                                <span>🔁 Wiederkehrend</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Einmalige Buchung -->
+                    <div id="einmaligFields">
+                        <div class="mb-4">
+                            <label class="block text-gray-700 font-semibold mb-2">Datum</label>
+                            <input type="date" id="bookingDate" required
+                                   class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500">
+                        </div>
+                    </div>
+
+                    <!-- Wiederkehrende Buchung -->
+                    <div id="wiederkehrendFields" class="hidden">
+                        <div class="mb-4">
+                            <label class="block text-gray-700 font-semibold mb-2">Wochentag</label>
+                            <select id="bookingWochentag" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500">
+                                <option value="montag">Montag</option>
+                                <option value="dienstag">Dienstag</option>
+                                <option value="mittwoch">Mittwoch</option>
+                                <option value="donnerstag">Donnerstag</option>
+                                <option value="freitag">Freitag</option>
+                                <option value="samstag">Samstag</option>
+                                <option value="sonntag">Sonntag</option>
+                            </select>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 mb-4">
+                            <div>
+                                <label class="block text-gray-700 font-semibold mb-2">Von Datum</label>
+                                <input type="date" id="bookingVonDatum"
+                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500">
+                            </div>
+                            <div>
+                                <label class="block text-gray-700 font-semibold mb-2">Bis Datum</label>
+                                <input type="date" id="bookingBisDatum"
+                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Zeitslot -->
+                    <div class="mb-4">
+                        <label class="block text-gray-700 font-semibold mb-2">Zeitslot (6 Stunden)</label>
+                        <div class="grid grid-cols-2 gap-3">
+                            <label class="flex items-center p-3 border-2 border-gray-300 rounded-lg cursor-pointer hover:border-green-500">
+                                <input type="radio" name="zeitslot" value="slot1" required class="mr-3">
+                                <span class="text-sm">🌙 00:00-06:00</span>
+                            </label>
+                            <label class="flex items-center p-3 border-2 border-gray-300 rounded-lg cursor-pointer hover:border-green-500">
+                                <input type="radio" name="zeitslot" value="slot2" required class="mr-3">
+                                <span class="text-sm">🌅 06:00-12:00</span>
+                            </label>
+                            <label class="flex items-center p-3 border-2 border-gray-300 rounded-lg cursor-pointer hover:border-green-500">
+                                <input type="radio" name="zeitslot" value="slot3" required class="mr-3">
+                                <span class="text-sm">☀️ 12:00-18:00</span>
+                            </label>
+                            <label class="flex items-center p-3 border-2 border-gray-300 rounded-lg cursor-pointer hover:border-green-500">
+                                <input type="radio" name="zeitslot" value="slot4" required class="mr-3">
+                                <span class="text-sm">🌆 18:00-24:00</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Kommentar (optional) -->
+                    <div class="mb-6">
+                        <label class="block text-gray-700 font-semibold mb-2">Kommentar (optional)</label>
+                        <textarea id="bookingKommentar" rows="3" placeholder="z.B. Große Wäsche, Bettwäsche, etc."
+                                  class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"></textarea>
+                    </div>
+
+                    <!-- Buttons -->
+                    <div class="flex space-x-4">
+                        <button type="button" onclick="closeBookingModal()"
+                                class="flex-1 bg-gray-200 text-gray-700 py-3 px-6 rounded-lg font-semibold hover:bg-gray-300 transition">
+                            Abbrechen
+                        </button>
+                        <button type="submit"
+                                class="flex-1 bg-green-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-green-700 transition">
+                            Reservieren
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Globale Variablen
+        let currentUser = null;
+        let currentWeekStart = null;
+        let selectedWaschkueche = null;
+        let reservierungen = [];
+        let zeitslots = [];
+
+        // OTP-Funktionen (Platzhalter - später mit n8n verbinden)
+        function requestOTP() {
+            const email = document.getElementById('emailInput').value.trim();
+            if (!email || !email.includes('@')) {
+                alert('Bitte geben Sie eine gültige E-Mail-Adresse ein.');
+                return;
+            }
+
+            document.getElementById('emailStep').classList.add('hidden');
+            document.getElementById('loadingIndicator').classList.remove('hidden');
+
+            // TODO: n8n API-Call für OTP-Anfrage
+            setTimeout(() => {
+                document.getElementById('loadingIndicator').classList.add('hidden');
+                document.getElementById('otpStep').classList.remove('hidden');
+                document.getElementById('sentToEmail').textContent = email;
+            }, 1500);
+        }
+
+        function verifyOTP() {
+            const otp = document.getElementById('otpInput').value.trim();
+            const email = document.getElementById('emailInput').value.trim();
+
+            if (otp.length !== 6) {
+                alert('Bitte geben Sie einen 6-stelligen Code ein.');
+                return;
+            }
+
+            document.getElementById('otpStep').classList.add('hidden');
+            document.getElementById('loadingIndicator').classList.remove('hidden');
+
+            // TODO: n8n API-Call für OTP-Verifizierung
+            // Für Demo: Jeder Code wird akzeptiert
+            setTimeout(() => {
+                currentUser = {
+                    email: email,
+                    name: 'Bewohner', // Wird aus kontakte.json geladen
+                    wohnung: 'XX.X' // Wird aus kontakte.json geladen
+                };
+
+                document.getElementById('otpSection').classList.add('hidden');
+                document.getElementById('mainContent').classList.remove('hidden');
+                document.getElementById('userInfo').textContent = `Angemeldet als: ${currentUser.email}`;
+
+                loadData();
+            }, 1000);
+        }
+
+        function backToEmail() {
+            document.getElementById('otpStep').classList.add('hidden');
+            document.getElementById('emailStep').classList.remove('hidden');
+            document.getElementById('otpInput').value = '';
+        }
+
+        // Daten laden
+        async function loadData() {
+            try {
+                const response = await fetch('reservierungen.json');
+                const data = await response.json();
+
+                zeitslots = data.meta.zeitslots;
+                reservierungen = data.reservierungen;
+
+                renderMyReservations();
+            } catch (error) {
+                console.error('Fehler beim Laden der Daten:', error);
+            }
+        }
+
+        // Waschküche auswählen
+        function selectWaschkueche(wkId) {
+            selectedWaschkueche = wkId;
+
+            // Buttons markieren
+            document.getElementById('btn-wk1').classList.remove('border-green-500', 'bg-green-50');
+            document.getElementById('btn-wk2').classList.remove('border-green-500', 'bg-green-50');
+            document.getElementById(`btn-${wkId}`).classList.add('border-green-500', 'bg-green-50');
+
+            // Kalender anzeigen
+            document.getElementById('calendarSection').classList.remove('hidden');
+            document.getElementById('selectedWkName').textContent = wkId === 'wk1' ? 'Waschküche 1' : 'Waschküche 2';
+
+            // Aktuelle Woche initialisieren
+            if (!currentWeekStart) {
+                const today = new Date();
+                const dayOfWeek = today.getDay();
+                const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek; // Montag als Wochenstart
+                currentWeekStart = new Date(today);
+                currentWeekStart.setDate(today.getDate() + diff);
+            }
+
+            renderCalendar();
+        }
+
+        // Kalender rendern
+        function renderCalendar() {
+            const grid = document.getElementById('weekGrid');
+            grid.innerHTML = '';
+
+            // Wochennummer und Datumsbereich
+            const weekNum = getWeekNumber(currentWeekStart);
+            document.getElementById('weekNumber').textContent = weekNum;
+
+            const endDate = new Date(currentWeekStart);
+            endDate.setDate(currentWeekStart.getDate() + 6);
+            document.getElementById('weekRange').textContent =
+                `${formatDate(currentWeekStart)} - ${formatDate(endDate)}`;
+
+            // 7 Tage der Woche
+            const wochentage = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+
+            for (let i = 0; i < 7; i++) {
+                const date = new Date(currentWeekStart);
+                date.setDate(currentWeekStart.getDate() + i);
+
+                const dayColumn = document.createElement('div');
+                dayColumn.className = 'calendar-day bg-white border-2 border-gray-200 rounded-lg p-2';
+
+                // Tag-Header
+                const header = document.createElement('div');
+                header.className = 'text-center font-semibold text-gray-700 mb-2 pb-2 border-b';
+                header.innerHTML = `
+                    <div class="text-xs">${wochentage[i]}</div>
+                    <div class="text-lg">${date.getDate()}.${date.getMonth() + 1}</div>
+                `;
+                dayColumn.appendChild(header);
+
+                // Zeitslots für diesen Tag
+                zeitslots.forEach(slot => {
+                    const slotDiv = document.createElement('div');
+                    slotDiv.className = 'p-2 mb-1 rounded text-xs text-center';
+
+                    // Prüfen ob Slot belegt ist
+                    const isOccupied = checkSlotOccupied(date, slot.id);
+                    const isOwn = isOccupied && isOccupied.bewohner_email === currentUser?.email;
+
+                    if (isOwn) {
+                        slotDiv.className += ' slot-own';
+                        slotDiv.innerHTML = `<div class="font-semibold">${slot.von}-${slot.bis}</div><div class="text-xs">Ihre Reservierung</div>`;
+                        slotDiv.onclick = () => showReservationDetails(isOccupied);
+                    } else if (isOccupied) {
+                        slotDiv.className += ' slot-occupied';
+                        slotDiv.innerHTML = `<div class="font-semibold">${slot.von}-${slot.bis}</div><div class="text-xs">Belegt</div>`;
+                    } else {
+                        slotDiv.className += ' slot-free';
+                        slotDiv.innerHTML = `<div class="font-semibold">${slot.von}-${slot.bis}</div><div class="text-xs">Frei</div>`;
+                        slotDiv.onclick = () => quickBook(date, slot.id);
+                    }
+
+                    dayColumn.appendChild(slotDiv);
+                });
+
+                grid.appendChild(dayColumn);
+            }
+        }
+
+        // Prüfen ob Slot belegt ist
+        function checkSlotOccupied(date, slotId) {
+            const dateStr = formatDateISO(date);
+            const wochentag = ['sonntag', 'montag', 'dienstag', 'mittwoch', 'donnerstag', 'freitag', 'samstag'][date.getDay()];
+
+            for (const res of reservierungen) {
+                if (res.waschkueche_id !== selectedWaschkueche) continue;
+                if (res.status !== 'aktiv') continue;
+                if (res.zeitslot_id !== slotId) continue;
+
+                if (res.typ === 'einmalig' && res.datum === dateStr) {
+                    return res;
+                }
+
+                if (res.typ === 'wiederkehrend' && res.wochentag === wochentag) {
+                    if (dateStr >= res.von_datum && dateStr <= res.bis_datum) {
+                        return res;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        // Schnellbuchung
+        function quickBook(date, slotId) {
+            document.getElementById('bookingDate').value = formatDateISO(date);
+            document.querySelector(`input[name="zeitslot"][value="${slotId}"]`).checked = true;
+            document.querySelector('input[name="bookingType"][value="einmalig"]').checked = true;
+            toggleBookingType();
+            showBookingModal();
+        }
+
+        // Meine Reservierungen anzeigen
+        function renderMyReservations() {
+            const list = document.getElementById('myReservationsList');
+            const myRes = reservierungen.filter(r => r.bewohner_email === currentUser?.email && r.status === 'aktiv');
+
+            if (myRes.length === 0) {
+                list.innerHTML = '<p class="text-gray-600">Sie haben noch keine Reservierungen.</p>';
+                return;
+            }
+
+            list.innerHTML = myRes.map(res => {
+                const slot = zeitslots.find(s => s.id === res.zeitslot_id);
+                const wk = res.waschkueche_id === 'wk1' ? 'Waschküche 1' : 'Waschküche 2';
+
+                let dateInfo = '';
+                if (res.typ === 'einmalig') {
+                    dateInfo = `📅 ${formatDate(new Date(res.datum))}`;
+                } else {
+                    dateInfo = `🔁 Jeden ${res.wochentag.charAt(0).toUpperCase() + res.wochentag.slice(1)} (${res.von_datum} bis ${res.bis_datum})`;
+                }
+
+                return `
+                    <div class="border-2 border-gray-200 rounded-lg p-4 mb-3 hover:border-green-500 transition">
+                        <div class="flex justify-between items-start">
+                            <div class="flex-1">
+                                <h4 class="font-semibold text-gray-800">${wk}</h4>
+                                <p class="text-sm text-gray-600 mt-1">${dateInfo}</p>
+                                <p class="text-sm text-gray-600">⏰ ${slot.von} - ${slot.bis}</p>
+                                ${res.kommentar ? `<p class="text-sm text-gray-500 mt-1 italic">"${res.kommentar}"</p>` : ''}
+                            </div>
+                            <button onclick="cancelReservation('${res.id}')"
+                                    class="bg-red-100 text-red-600 px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-200 transition">
+                                Stornieren
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Buchungsmodal
+        function showBookingModal() {
+            document.getElementById('bookingModal').classList.remove('hidden');
+        }
+
+        function closeBookingModal() {
+            document.getElementById('bookingModal').classList.add('hidden');
+            document.getElementById('bookingForm').reset();
+        }
+
+        function toggleBookingType() {
+            const type = document.querySelector('input[name="bookingType"]:checked').value;
+
+            if (type === 'einmalig') {
+                document.getElementById('einmaligFields').classList.remove('hidden');
+                document.getElementById('wiederkehrendFields').classList.add('hidden');
+                document.getElementById('bookingDate').required = true;
+            } else {
+                document.getElementById('einmaligFields').classList.add('hidden');
+                document.getElementById('wiederkehrendFields').classList.remove('hidden');
+                document.getElementById('bookingDate').required = false;
+            }
+        }
+
+        function submitBooking(event) {
+            event.preventDefault();
+
+            const type = document.querySelector('input[name="bookingType"]:checked').value;
+            const zeitslot = document.querySelector('input[name="zeitslot"]:checked').value;
+            const kommentar = document.getElementById('bookingKommentar').value.trim();
+
+            const newReservation = {
+                id: `res_${Date.now()}`,
+                waschkueche_id: selectedWaschkueche,
+                wohnung: currentUser.wohnung,
+                bewohner_name: currentUser.name,
+                bewohner_email: currentUser.email,
+                typ: type,
+                zeitslot_id: zeitslot,
+                erstellt_am: new Date().toISOString(),
+                status: 'aktiv',
+                kommentar: kommentar
+            };
+
+            if (type === 'einmalig') {
+                newReservation.datum = document.getElementById('bookingDate').value;
+            } else {
+                newReservation.wochentag = document.getElementById('bookingWochentag').value;
+                newReservation.von_datum = document.getElementById('bookingVonDatum').value;
+                newReservation.bis_datum = document.getElementById('bookingBisDatum').value;
+            }
+
+            // TODO: n8n API-Call um Reservierung zu speichern
+            console.log('Neue Reservierung:', newReservation);
+
+            // Für Demo: Lokale Aktualisierung
+            reservierungen.push(newReservation);
+            renderCalendar();
+            renderMyReservations();
+            closeBookingModal();
+
+            alert('✅ Reservierung erfolgreich erstellt!');
+        }
+
+        function cancelReservation(resId) {
+            if (!confirm('Möchten Sie diese Reservierung wirklich stornieren?')) return;
+
+            // TODO: n8n API-Call um Reservierung zu stornieren
+            const res = reservierungen.find(r => r.id === resId);
+            if (res) {
+                res.status = 'storniert';
+            }
+
+            renderCalendar();
+            renderMyReservations();
+            alert('✅ Reservierung storniert.');
+        }
+
+        function showReservationDetails(res) {
+            const slot = zeitslots.find(s => s.id === res.zeitslot_id);
+            let details = `Ihre Reservierung:\n\n`;
+            details += `Zeitslot: ${slot.bezeichnung}\n`;
+            if (res.kommentar) details += `Kommentar: ${res.kommentar}\n`;
+            alert(details);
+        }
+
+        // Wochennavigation
+        function previousWeek() {
+            currentWeekStart.setDate(currentWeekStart.getDate() - 7);
+            renderCalendar();
+        }
+
+        function nextWeek() {
+            currentWeekStart.setDate(currentWeekStart.getDate() + 7);
+            renderCalendar();
+        }
+
+        // Hilfsfunktionen
+        function formatDate(date) {
+            const d = new Date(date);
+            return `${d.getDate().toString().padStart(2, '0')}.${(d.getMonth() + 1).toString().padStart(2, '0')}.${d.getFullYear()}`;
+        }
+
+        function formatDateISO(date) {
+            const d = new Date(date);
+            return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
+        }
+
+        function getWeekNumber(date) {
+            const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+            const dayNum = d.getUTCDay() || 7;
+            d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+            const yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
+            return Math.ceil((((d - yearStart) / 86400000) + 1)/7);
+        }
+
+        // Bei Seitenload: Datumseingabe auf heute setzen
+        window.onload = () => {
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('bookingDate').value = today;
+            document.getElementById('bookingDate').min = today;
+            document.getElementById('bookingVonDatum').value = today;
+            document.getElementById('bookingVonDatum').min = today;
+            document.getElementById('bookingBisDatum').value = `${new Date().getFullYear()}-12-31`;
+        };
+    </script>
+</body>
+</html>
