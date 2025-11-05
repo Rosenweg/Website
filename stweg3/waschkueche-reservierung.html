@@ -327,20 +327,19 @@
 
             function addPersonIfAuthorized(person) {
                 if (!person) return;
-                if (person.typ === 'eigentümer') {
-                    addEmails(person.email);
-                }
-                else if (person.typ === 'mieter' && person.berechtigt === true) {
+
+                // Prüfen ob Waschküchen-Berechtigung vorhanden ist
+                if (person.waschkueche_berechtigt === true) {
                     addEmails(person.email);
                 }
             }
 
-            // Ausschuss
+            // Ausschuss (IMMER berechtigt für Kontrolle/Testing)
             if (data.ausschuss) {
                 data.ausschuss.forEach(vertreter => addEmails(vertreter.email));
             }
 
-            // Wohnungen
+            // Wohnungen (nur mit waschkueche_berechtigt: true)
             if (data.wohnungen) {
                 ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {
                     if (data.wohnungen[etage]) {
@@ -352,7 +351,14 @@
                 });
             }
 
-            // Hausverwaltung
+            // Sonstiges (z.B. Hobbyraum)
+            if (data.sonstiges) {
+                data.sonstiges.forEach(raum => {
+                    addPersonIfAuthorized(raum.eigentümer);
+                });
+            }
+
+            // Hausverwaltung (optional - für Administration)
             if (data.hausverwaltung && data.hausverwaltung.email) {
                 const domain = data.hausverwaltung.email.split('@')[1];
                 if (domain) {
@@ -421,7 +427,7 @@
 
             // Prüfen ob E-Mail berechtigt ist
             if (!isEmailAuthorized(email)) {
-                alert('Diese E-Mail-Adresse ist nicht berechtigt. Nur Eigentümer und berechtigte Mieter haben Zugriff.\n\nBei Fragen wenden Sie sich bitte an:\nStefan Müller: stefan+rosenweg@juroct.ch | +41 76 519 99 70');
+                alert('Diese E-Mail-Adresse ist nicht für die Waschküchen-Reservierung berechtigt.\n\nNur Bewohner mit Waschküchen-Berechtigung und Ausschuss-Mitglieder haben Zugriff.\n\nBei Fragen wenden Sie sich bitte an:\nStefan Müller: stefan+rosenweg@juroct.ch | +41 76 519 99 70');
                 return;
             }
 
