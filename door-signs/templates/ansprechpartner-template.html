@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ansprechpartner - [RAUMNAME]</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-gray-50 to-gray-100 min-h-screen">
+    <div class="max-w-2xl mx-auto px-4 py-8">
+        <!-- Header -->
+        <header class="text-center mb-8">
+            <div class="text-6xl mb-4">👤</div>
+            <h1 class="text-4xl font-extrabold text-gray-900 mb-2" id="pageTitle">
+                Ansprechpartner
+            </h1>
+            <p class="text-xl text-gray-600" id="roomName">
+                [RAUMNAME]
+            </p>
+            <p class="text-sm text-gray-500 mt-2">
+                STWEG-Kooperation Rosenweg · Kaiseraugst
+            </p>
+        </header>
+
+        <!-- Info Box -->
+        <div class="bg-blue-50 border-l-4 border-blue-500 rounded-lg p-4 mb-6">
+            <p class="text-gray-700">
+                <strong>Letzte Aktualisierung:</strong> <span id="lastUpdated">-</span>
+            </p>
+        </div>
+
+        <!-- Contacts Container -->
+        <div id="contactsContainer" class="space-y-4 mb-8">
+            <!-- Contacts will be loaded here -->
+        </div>
+
+        <!-- Service Info -->
+        <div id="serviceContainer" class="bg-white rounded-xl shadow-lg p-6 mb-6">
+            <!-- Service info will be loaded here -->
+        </div>
+
+        <!-- Notes -->
+        <div id="notesContainer" class="bg-yellow-50 border-l-4 border-yellow-500 rounded-lg p-6">
+            <!-- Notes will be loaded here -->
+        </div>
+
+        <!-- Footer -->
+        <footer class="mt-12 text-center">
+            <a href="index.html" class="inline-block bg-gray-600 hover:bg-gray-700 text-white font-semibold py-3 px-6 rounded-lg transition">
+                ← Zurück zur Übersicht
+            </a>
+        </footer>
+    </div>
+
+    <script>
+        // CONFIGURATION: Change this path to load different JSON files
+        const DATA_FILE = '../data/heizung-ansprechpartner.json';
+
+        // Load and display contact data
+        async function loadContactData() {
+            try {
+                const response = await fetch(DATA_FILE);
+                if (!response.ok) throw new Error('Data file not found');
+
+                const data = await response.json();
+
+                // Update page title
+                document.getElementById('pageTitle').textContent = data.title || 'Ansprechpartner';
+                document.getElementById('lastUpdated').textContent = data.updated || '-';
+
+                // Display contacts
+                const contactsHTML = data.contacts.map(contact => `
+                    <div class="bg-white rounded-xl shadow-lg p-6">
+                        <h3 class="text-xl font-bold text-gray-800 mb-4">${contact.role}</h3>
+                        <div class="space-y-2 text-gray-700">
+                            <p class="flex items-center">
+                                <span class="font-semibold w-32">Name:</span>
+                                <span>${contact.name}</span>
+                            </p>
+                            <p class="flex items-center">
+                                <span class="font-semibold w-32">Telefon:</span>
+                                <a href="tel:${contact.phone}" class="text-blue-600 hover:underline">${contact.phone}</a>
+                            </p>
+                            ${contact.email ? `
+                            <p class="flex items-center">
+                                <span class="font-semibold w-32">E-Mail:</span>
+                                <a href="mailto:${contact.email}" class="text-blue-600 hover:underline">${contact.email}</a>
+                            </p>
+                            ` : ''}
+                            ${contact.address ? `
+                            <p class="flex items-start">
+                                <span class="font-semibold w-32">Adresse:</span>
+                                <span>${contact.address}</span>
+                            </p>
+                            ` : ''}
+                            ${contact.available ? `
+                            <p class="flex items-center">
+                                <span class="font-semibold w-32">Erreichbar:</span>
+                                <span>${contact.available}</span>
+                            </p>
+                            ` : ''}
+                        </div>
+                    </div>
+                `).join('');
+                document.getElementById('contactsContainer').innerHTML = contactsHTML;
+
+                // Display service info
+                if (data.service) {
+                    const serviceHTML = `
+                        <h3 class="text-xl font-bold text-gray-800 mb-4">🔧 Service & Wartung</h3>
+                        <div class="space-y-2 text-gray-700">
+                            ${data.service.company ? `<p><span class="font-semibold">Firma:</span> ${data.service.company}</p>` : ''}
+                            ${data.service.phone ? `<p><span class="font-semibold">Telefon:</span> <a href="tel:${data.service.phone}" class="text-blue-600 hover:underline">${data.service.phone}</a></p>` : ''}
+                            ${data.service.emergency_phone ? `<p><span class="font-semibold">Notfall 24/7:</span> <a href="tel:${data.service.emergency_phone}" class="text-red-600 hover:underline font-bold">${data.service.emergency_phone}</a></p>` : ''}
+                            ${data.service.email ? `<p><span class="font-semibold">E-Mail:</span> <a href="mailto:${data.service.email}" class="text-blue-600 hover:underline">${data.service.email}</a></p>` : ''}
+                            ${data.service.website ? `<p><span class="font-semibold">Website:</span> <a href="${data.service.website}" target="_blank" class="text-blue-600 hover:underline">${data.service.website}</a></p>` : ''}
+                        </div>
+                    `;
+                    document.getElementById('serviceContainer').innerHTML = serviceHTML;
+                } else {
+                    document.getElementById('serviceContainer').style.display = 'none';
+                }
+
+                // Display notes
+                if (data.notes && data.notes.length > 0) {
+                    const notesHTML = `
+                        <h3 class="text-lg font-bold text-gray-800 mb-3">📝 Wichtige Hinweise</h3>
+                        <ul class="space-y-2 text-gray-700">
+                            ${data.notes.map(note => `<li class="flex items-start"><span class="mr-2">•</span><span>${note}</span></li>`).join('')}
+                        </ul>
+                    `;
+                    document.getElementById('notesContainer').innerHTML = notesHTML;
+                } else {
+                    document.getElementById('notesContainer').style.display = 'none';
+                }
+
+            } catch (error) {
+                console.error('Error loading contact data:', error);
+                document.getElementById('contactsContainer').innerHTML = `
+                    <div class="bg-red-50 border-l-4 border-red-500 rounded-lg p-6">
+                        <p class="text-red-700">
+                            <strong>Fehler:</strong> Kontaktdaten konnten nicht geladen werden.
+                            <br>Bitte wenden Sie sich an den Hauswart.
+                        </p>
+                    </div>
+                `;
+            }
+        }
+
+        // Load data when page loads
+        document.addEventListener('DOMContentLoaded', loadContactData);
+    </script>
+</body>
+</html>
