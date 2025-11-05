@@ -1,0 +1,40 @@
+{
+  "title": "Heizungs- und Technikraum - Ansprechpartner",
+  "updated": "2024-11-05",
+  "contacts": [
+    {
+      "role": "Hauswart STWEG-Kooperation",
+      "name": "Max Mustermann",
+      "phone": "+41 79 123 45 67",
+      "email": "hauswart@rosenweg4303.ch",
+      "available": "Mo-Fr 08:00-17:00"
+    },
+    {
+      "role": "Heizungsverantwortlicher",
+      "name": "Hans Meier",
+      "phone": "+41 79 234 56 78",
+      "email": "h.meier@rosenweg4303.ch",
+      "available": "Nach Vereinbarung"
+    },
+    {
+      "role": "Gebäudetechnik-Ausschuss",
+      "name": "Peter Schmidt",
+      "phone": "+41 79 345 67 89",
+      "email": "p.schmidt@rosenweg4303.ch",
+      "available": "Nach Vereinbarung"
+    }
+  ],
+  "service": {
+    "company": "Heizung AG Basel",
+    "contact": "Service-Hotline",
+    "phone": "+41 61 123 45 67",
+    "emergency_phone": "+41 79 999 88 77",
+    "email": "service@heizung-ag.ch",
+    "website": "https://www.heizung-ag.ch"
+  },
+  "notes": [
+    "Bei Heizungsausfall außerhalb der Geschäftszeiten: Notfallnummer der Heizung AG anrufen",
+    "Routinewartung findet 2x jährlich statt (Frühling & Herbst)",
+    "Schlüssel beim Hauswart oder bei den Verantwortlichen erhältlich"
+  ]
+}
