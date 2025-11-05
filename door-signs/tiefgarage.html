@@ -28,72 +28,72 @@
         .page {
             width: 210mm;
             height: 297mm;
-            padding: 12mm;
+            padding: 10mm;
             background: linear-gradient(135deg, #faf5ff 0%, #e9d5ff 100%);
             display: grid;
             grid-template-rows: auto auto 1fr auto;
-            gap: 6mm;
+            gap: 4mm;
         }
 
         /* Header */
         .header {
             background: linear-gradient(135deg, #9333ea 0%, #7c3aed 100%);
             color: white;
-            padding: 10mm;
-            border-radius: 8mm;
+            padding: 8mm;
+            border-radius: 6mm;
             text-align: center;
-            box-shadow: 0 3mm 8mm rgba(147, 51, 234, 0.3);
+            box-shadow: 0 2mm 6mm rgba(147, 51, 234, 0.3);
         }
 
         .header h1 {
-            font-size: 28pt;
+            font-size: 24pt;
             font-weight: 800;
-            margin-bottom: 2mm;
+            margin-bottom: 1.5mm;
             text-transform: uppercase;
-            letter-spacing: 1.5pt;
+            letter-spacing: 1pt;
         }
 
         .header p {
-            font-size: 14pt;
+            font-size: 12pt;
             opacity: 0.95;
         }
 
         /* Warning */
         .warning {
             background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-            border: 2.5mm solid #f59e0b;
-            border-radius: 6mm;
-            padding: 8mm;
-            box-shadow: 0 2mm 6mm rgba(245, 158, 11, 0.2);
+            border: 2mm solid #f59e0b;
+            border-radius: 5mm;
+            padding: 6mm;
+            box-shadow: 0 2mm 5mm rgba(245, 158, 11, 0.2);
         }
 
         .warning h2 {
             color: #92400e;
-            font-size: 18pt;
+            font-size: 15pt;
             font-weight: 800;
-            margin-bottom: 4mm;
+            margin-bottom: 3mm;
             display: flex;
             align-items: center;
-            gap: 3mm;
+            gap: 2.5mm;
         }
 
         .warning-icon {
             background: #f59e0b;
             color: white;
-            width: 30pt;
-            height: 30pt;
+            width: 26pt;
+            height: 26pt;
             border-radius: 50%;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            font-size: 18pt;
+            font-size: 16pt;
             flex-shrink: 0;
         }
 
         .warning p {
             color: #78350f;
-            font-size: 13pt;
-            line-height: 1.3;
+            font-size: 11pt;
+            line-height: 1.25;
             font-weight: 600;
         }
 
@@ -101,14 +101,14 @@
         .content {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 5mm;
+            gap: 4mm;
         }
 
         .box {
             background: white;
-            border-radius: 6mm;
-            padding: 7mm;
-            box-shadow: 0 2mm 5mm rgba(0, 0, 0, 0.1);
+            border-radius: 5mm;
+            padding: 5mm;
+            box-shadow: 0 1.5mm 4mm rgba(0, 0, 0, 0.1);
         }
 
         .box.full {
@@ -117,8 +117,8 @@
 
         .box h3 {
             color: #7c3aed;
-            font-size: 15pt;
-            margin-bottom: 4mm;
+            font-size: 13pt;
+            margin-bottom: 3mm;
             font-weight: 700;
         }
 
@@ -128,12 +128,12 @@
         }
 
         .box li {
-            font-size: 11pt;
-            margin-bottom: 2.5mm;
-            padding-left: 6mm;
+            font-size: 10pt;
+            margin-bottom: 2mm;
+            padding-left: 5mm;
             position: relative;
             color: #1f2937;
-            line-height: 1.2;
+            line-height: 1.15;
         }
 
         .box li:before {
@@ -142,18 +142,18 @@
             left: 0;
             color: #9333ea;
             font-weight: bold;
-            font-size: 14pt;
+            font-size: 12pt;
         }
 
         /* QR Codes Section */
         .qr-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 4mm;
+            gap: 3mm;
             background: white;
-            border-radius: 6mm;
-            padding: 7mm;
-            box-shadow: 0 2mm 5mm rgba(0, 0, 0, 0.1);
+            border-radius: 5mm;
+            padding: 5mm;
+            box-shadow: 0 1.5mm 4mm rgba(0, 0, 0, 0.1);
         }
 
         .qr-item {
@@ -162,19 +162,19 @@
 
         .qr-item h4 {
             color: #7c3aed;
-            font-size: 11pt;
-            margin-bottom: 3mm;
+            font-size: 10pt;
+            margin-bottom: 2mm;
             font-weight: 700;
         }
 
         .qr-code {
             width: 100%;
             aspect-ratio: 1;
-            margin: 0 auto 2mm;
+            margin: 0 auto 1.5mm;
             background: white;
-            padding: 2mm;
-            border: 1.5mm solid #9333ea;
-            border-radius: 4mm;
+            padding: 1.5mm;
+            border: 1mm solid #9333ea;
+            border-radius: 3mm;
         }
 
         .qr-code img {
@@ -184,22 +184,22 @@
         }
 
         .qr-label {
-            font-size: 8pt;
+            font-size: 7.5pt;
             color: #6b7280;
-            line-height: 1.2;
+            line-height: 1.1;
         }
 
         /* Footer */
         .footer {
             text-align: center;
             color: #6b7280;
-            font-size: 9pt;
-            padding-top: 4mm;
-            border-top: 1mm solid #d1d5db;
+            font-size: 8pt;
+            padding-top: 3mm;
+            border-top: 0.8mm solid #d1d5db;
         }
 
         .footer p {
-            margin: 1.5mm 0;
+            margin: 1mm 0;
         }
 
         /* Print Optimization */
@@ -237,9 +237,8 @@
                 Brandschutz beachten!
             </h2>
             <p>
-                <strong>Lagerverbot:</strong> Das Lagern von brennbaren Flüssigkeiten (Benzin, Petrol, etc.)
-                und gefährlichen Stoffen ist streng verboten. Die Tiefgarage darf nicht als Werkstatt,
-                Lagerraum oder für andere Zwecke zweckentfremdet werden.
+                <strong>Lagerverbot:</strong> Brennbare Flüssigkeiten und gefährliche Stoffe sind verboten.
+                Keine Zweckentfremdung als Werkstatt oder Lagerraum.
             </p>
         </div>
 
@@ -247,12 +246,10 @@
         <div class="content">
             <!-- Nutzung -->
             <div class="box">
-                <h3>✓ Erlaubte Nutzung</h3>
+                <h3>✓ Erlaubt</h3>
                 <ul>
-                    <li>Parkieren von Motorfahrzeugen</li>
-                    <li>Fahrzeugpflege & -reinigung</li>
-                    <li>Winterreifen (montiert am Fahrzeug)</li>
-                    <li>Kleine Werkzeugkisten</li>
+                    <li>Parkieren von Fahrzeugen</li>
+                    <li>Fahrzeugpflege</li>
                     <li>Fahrräder & E-Bikes</li>
                 </ul>
             </div>
@@ -262,22 +259,18 @@
                 <h3>✗ Verboten</h3>
                 <ul>
                     <li>Brennbare Flüssigkeiten</li>
-                    <li>Gefährliche Stoffe</li>
                     <li>Werkstattbetrieb</li>
-                    <li>Lagern von Möbeln & Kisten</li>
-                    <li>Blockieren von Fluchtwegen</li>
+                    <li>Lagern von Gegenständen</li>
                 </ul>
             </div>
 
             <!-- Sicherheit -->
             <div class="box full">
-                <h3>🔒 Sicherheitshinweise (VKF/AGV)</h3>
+                <h3>🔒 Sicherheit (VKF/AGV)</h3>
                 <ul>
-                    <li>Tiefgarage als eigener Brandabschnitt (VKF-Norm)</li>
-                    <li>Fluchtwege und Notausgänge müssen frei bleiben</li>
-                    <li>Bei Rauch oder Feuer: Sofort Feuerwehr rufen (Tel. 118)</li>
-                    <li>Keine Gegenstände vor Hydranten oder Löscher</li>
-                    <li>Beleuchtung und Lüftung nicht manipulieren</li>
+                    <li>Fluchtwege frei halten</li>
+                    <li>Bei Feuer: Feuerwehr 118</li>
+                    <li>Hydranten/Löscher zugänglich</li>
                 </ul>
             </div>
 
