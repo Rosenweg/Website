@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liftmaschinenraum - Türschild</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@600;700;800&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        @page {
+            size: A4;
+            margin: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: white;
+            margin: 0;
+            padding: 0;
+        }
+
+        .page {
+            width: 210mm;
+            height: 297mm;
+            padding: 15mm;
+            background: linear-gradient(135deg, #f1f5f9 0%, #cbd5e1 100%);
+            display: grid;
+            grid-template-rows: auto auto 1fr auto;
+            gap: 10mm;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #475569 0%, #334155 100%);
+            color: white;
+            padding: 15mm;
+            border-radius: 10mm;
+            text-align: center;
+            box-shadow: 0 4mm 10mm rgba(71, 85, 105, 0.3);
+        }
+
+        .header h1 {
+            font-size: 36pt;
+            font-weight: 800;
+            margin-bottom: 3mm;
+            text-transform: uppercase;
+            letter-spacing: 1.5pt;
+        }
+
+        .header p {
+            font-size: 16pt;
+            opacity: 0.95;
+        }
+
+        .header .location {
+            font-size: 14pt;
+            opacity: 0.9;
+            margin-top: 2mm;
+            font-weight: 600;
+        }
+
+        /* Warning */
+        .warning {
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border: 3mm solid #f59e0b;
+            border-radius: 8mm;
+            padding: 12mm;
+            box-shadow: 0 3mm 8mm rgba(245, 158, 11, 0.2);
+        }
+
+        .warning h2 {
+            color: #92400e;
+            font-size: 22pt;
+            font-weight: 800;
+            margin-bottom: 6mm;
+            display: flex;
+            align-items: center;
+            gap: 4mm;
+        }
+
+        .warning-icon {
+            background: #f59e0b;
+            color: white;
+            width: 35pt;
+            height: 35pt;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22pt;
+            flex-shrink: 0;
+        }
+
+        .warning p {
+            color: #78350f;
+            font-size: 16pt;
+            line-height: 1.4;
+            font-weight: 600;
+        }
+
+        /* Content */
+        .content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8mm;
+        }
+
+        .box {
+            background: white;
+            border-radius: 8mm;
+            padding: 10mm;
+            box-shadow: 0 2mm 6mm rgba(0, 0, 0, 0.1);
+        }
+
+        .box.full {
+            grid-column: 1 / -1;
+        }
+
+        .box h3 {
+            color: #334155;
+            font-size: 18pt;
+            margin-bottom: 6mm;
+            font-weight: 700;
+        }
+
+        .box ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .box li {
+            font-size: 13pt;
+            margin-bottom: 4mm;
+            padding-left: 8mm;
+            position: relative;
+            color: #1f2937;
+            line-height: 1.3;
+        }
+
+        .box li:before {
+            content: "•";
+            position: absolute;
+            left: 0;
+            color: #475569;
+            font-weight: bold;
+            font-size: 16pt;
+        }
+
+        /* QR Codes Section */
+        .qr-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6mm;
+            background: white;
+            border-radius: 8mm;
+            padding: 10mm;
+            box-shadow: 0 2mm 6mm rgba(0, 0, 0, 0.1);
+        }
+
+        .qr-item {
+            text-align: center;
+        }
+
+        .qr-item h4 {
+            color: #334155;
+            font-size: 13pt;
+            margin-bottom: 4mm;
+            font-weight: 700;
+        }
+
+        .qr-code {
+            width: 100%;
+            aspect-ratio: 1;
+            margin: 0 auto 3mm;
+            background: white;
+            padding: 3mm;
+            border: 2mm solid #475569;
+            border-radius: 6mm;
+        }
+
+        .qr-code img {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .qr-label {
+            font-size: 9pt;
+            color: #6b7280;
+            line-height: 1.3;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            color: #6b7280;
+            font-size: 10pt;
+            padding-top: 6mm;
+            border-top: 1.5mm solid #d1d5db;
+        }
+
+        .footer p {
+            margin: 2mm 0;
+        }
+
+        /* Print Optimization */
+        @media print {
+            body {
+                margin: 0;
+                padding: 0;
+            }
+
+            .page {
+                margin: 0;
+                box-shadow: none;
+            }
+
+            * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+                color-adjust: exact !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <!-- Header -->
+        <div class="header">
+            <h1>🛗 Liftmaschinenraum</h1>
+            <p>STWEG-Kooperation Rosenweg</p>
+            <p class="location">Rosenweg 7-43 · Kaiseraugst</p>
+        </div>
+
+        <!-- Warning -->
+        <div class="warning">
+            <h2>
+                <span class="warning-icon">⚠</span>
+                Zutritt nur für Berechtigte!
+            </h2>
+            <p>
+                Dieser Raum enthält die Liftmaschinenanlage. Zugang nur für
+                Hauswarte, berechtigte Bewohner und Servicetechniker der Liftfirma.
+            </p>
+        </div>
+
+        <!-- Content -->
+        <div class="content">
+            <!-- Ausstattung -->
+            <div class="box">
+                <h3>🔧 Ausstattung</h3>
+                <ul>
+                    <li>Liftantrieb & Motor</li>
+                    <li>Steuerungselektronik</li>
+                    <li>Seilwinde & Tragsystem</li>
+                    <li>Not-Stromversorgung</li>
+                    <li>Sicherheitsbremse</li>
+                </ul>
+            </div>
+
+            <!-- Informationen -->
+            <div class="box">
+                <h3>📋 Informationen</h3>
+                <ul>
+                    <li>Regelmässige Wartung</li>
+                    <li>TÜV/SUVA-Prüfungen</li>
+                    <li>Keine Lagerhaltung</li>
+                    <li>Sauberkeit beachten</li>
+                    <li>Tür immer verschliessen</li>
+                </ul>
+            </div>
+
+            <!-- QR Codes -->
+            <div class="qr-grid">
+                <div class="qr-item">
+                    <h4>👤 Ansprech&shy;partner</h4>
+                    <div class="qr-code">
+                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://rosenweg4303.ch/lift-ansprechpartner.html" alt="QR Code Ansprechpartner">
+                    </div>
+                    <p class="qr-label">Hauswart & Lift-Verantwortliche</p>
+                </div>
+
+                <div class="qr-item">
+                    <h4>🏢 Lift&shy;firma</h4>
+                    <div class="qr-code">
+                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://rosenweg4303.ch/lift-servicefirma.html" alt="QR Code Liftfirma">
+                    </div>
+                    <p class="qr-label">Service-Partner & Wartung</p>
+                </div>
+
+                <div class="qr-item">
+                    <h4>🚨 Notfall</h4>
+                    <div class="qr-code">
+                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://rosenweg4303.ch/lift-notfall.html" alt="QR Code Notfall">
+                    </div>
+                    <p class="qr-label">Störung & Not-Telefon 24/7</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p><strong>STWEG-Kooperation Rosenweg</strong> - Rosenweg 7-43, 4303 Kaiseraugst</p>
+            <p>Bei Liftpanne: Notruftaste im Lift drücken oder 118 (Feuerwehr)</p>
+        </div>
+    </div>
+
+    <script>
+        // Optional: Auto-print beim Laden
+        // window.onload = function() { window.print(); }
+    </script>
+</body>
+</html>

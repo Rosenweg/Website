@@ -1,0 +1,46 @@
+{
+  "title": "Waschküche - Ansprechpartner",
+  "updated": "2024-11-05",
+  "contacts": [
+    {
+      "role": "Waschküchen-Verantwortliche STWEG 3",
+      "name": "Maria Müller",
+      "phone": "+41 79 456 78 90",
+      "email": "m.mueller@rosenweg4303.ch",
+      "address": "STWEG 3, Rosenweg 9, Wohnung 3.2",
+      "available": "Mo-Fr 18:00-20:00"
+    },
+    {
+      "role": "Hauswart",
+      "name": "Max Mustermann",
+      "phone": "+41 79 123 45 67",
+      "email": "hauswart@rosenweg4303.ch",
+      "available": "Mo-Fr 08:00-17:00"
+    }
+  ],
+  "service": {
+    "washing_machine": {
+      "brand": "Miele Professional",
+      "service_phone": "+41 848 848 010",
+      "last_maintenance": "2024-08-15"
+    },
+    "dryer": {
+      "brand": "Miele Professional",
+      "service_phone": "+41 848 848 010",
+      "last_maintenance": "2024-08-15"
+    }
+  },
+  "booking": {
+    "method": "Reservierungsliste in der Waschküche",
+    "rules": [
+      "Max. 2 aufeinanderfolgende Zeitslots pro Woche",
+      "Bei Nichterscheinen verfällt die Reservation",
+      "Bitte 24h vorher absagen, falls verhindert"
+    ]
+  },
+  "notes": [
+    "Waschküche nach Gebrauch bitte sauber hinterlassen",
+    "Fenster müssen geschlossen bleiben!",
+    "Ruhezeiten: Sonntags ganztags & täglich 22:00-07:00 Uhr"
+  ]
+}
