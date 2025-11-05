@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hauptverteilung Kooperation - Türschild</title>
+    <title>Tiefgarage Zugang - Türschild</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@600;700;800&display=swap');
 
@@ -29,7 +29,7 @@
             width: 210mm;
             height: 297mm;
             padding: 15mm;
-            background: linear-gradient(135deg, #fefce8 0%, #fef3c7 100%);
+            background: linear-gradient(135deg, #faf5ff 0%, #e9d5ff 100%);
             display: grid;
             grid-template-rows: auto auto 1fr auto;
             gap: 10mm;
@@ -37,12 +37,12 @@
 
         /* Header */
         .header {
-            background: linear-gradient(135deg, #f59e0b 0%, #eab308 100%);
+            background: linear-gradient(135deg, #9333ea 0%, #7c3aed 100%);
             color: white;
             padding: 15mm;
             border-radius: 10mm;
             text-align: center;
-            box-shadow: 0 4mm 10mm rgba(245, 158, 11, 0.3);
+            box-shadow: 0 4mm 10mm rgba(147, 51, 234, 0.3);
         }
 
         .header h1 {
@@ -60,15 +60,15 @@
 
         /* Warning */
         .warning {
-            background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-            border: 3mm solid #dc2626;
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border: 3mm solid #f59e0b;
             border-radius: 8mm;
             padding: 12mm;
-            box-shadow: 0 3mm 8mm rgba(220, 38, 38, 0.2);
+            box-shadow: 0 3mm 8mm rgba(245, 158, 11, 0.2);
         }
 
         .warning h2 {
-            color: #991b1b;
+            color: #92400e;
             font-size: 22pt;
             font-weight: 800;
             margin-bottom: 6mm;
@@ -78,7 +78,7 @@
         }
 
         .warning-icon {
-            background: #dc2626;
+            background: #f59e0b;
             color: white;
             width: 35pt;
             height: 35pt;
@@ -91,7 +91,7 @@
         }
 
         .warning p {
-            color: #7f1d1d;
+            color: #78350f;
             font-size: 16pt;
             line-height: 1.4;
             font-weight: 600;
@@ -116,7 +116,7 @@
         }
 
         .box h3 {
-            color: #d97706;
+            color: #7c3aed;
             font-size: 18pt;
             margin-bottom: 6mm;
             font-weight: 700;
@@ -140,7 +140,7 @@
             content: "•";
             position: absolute;
             left: 0;
-            color: #f59e0b;
+            color: #9333ea;
             font-weight: bold;
             font-size: 16pt;
         }
@@ -161,7 +161,7 @@
         }
 
         .qr-item h4 {
-            color: #d97706;
+            color: #7c3aed;
             font-size: 13pt;
             margin-bottom: 4mm;
             font-weight: 700;
@@ -173,7 +173,7 @@
             margin: 0 auto 3mm;
             background: white;
             padding: 3mm;
-            border: 2mm solid #f59e0b;
+            border: 2mm solid #9333ea;
             border-radius: 6mm;
         }
 
@@ -226,7 +226,7 @@
     <div class="page">
         <!-- Header -->
         <div class="header">
-            <h1>⚡ Hauptverteilung</h1>
+            <h1>🚗 Tiefgarage</h1>
             <p>STWEG-Kooperation Rosenweg</p>
         </div>
 
@@ -234,37 +234,50 @@
         <div class="warning">
             <h2>
                 <span class="warning-icon">⚠</span>
-                Lebensgefahr - Hochspannung!
+                Brandschutz beachten!
             </h2>
             <p>
-                <strong>Zutritt streng verboten!</strong> Dieser Raum enthält die elektrische Hauptverteilung
-                mit Hochspannung. Zugang nur für autorisierte Elektriker mit gültiger Schaltberechtigung.
+                <strong>Lagerverbot:</strong> Das Lagern von brennbaren Flüssigkeiten (Benzin, Petrol, etc.)
+                und gefährlichen Stoffen ist streng verboten. Die Tiefgarage darf nicht als Werkstatt,
+                Lagerraum oder für andere Zwecke zweckentfremdet werden.
             </p>
         </div>
 
         <!-- Content -->
         <div class="content">
-            <!-- Ausstattung -->
+            <!-- Nutzung -->
             <div class="box">
-                <h3>⚡ Ausstattung</h3>
+                <h3>✓ Erlaubte Nutzung</h3>
                 <ul>
-                    <li>Hauptverteilung 400V/230V</li>
-                    <li>Unterverteilungen</li>
-                    <li>Hauptsicherungen & FI-Schalter</li>
-                    <li>Stromzähler (alle 8 Gebäude)</li>
-                    <li>Erdungsanlage</li>
+                    <li>Parkieren von Motorfahrzeugen</li>
+                    <li>Fahrzeugpflege & -reinigung</li>
+                    <li>Winterreifen (montiert am Fahrzeug)</li>
+                    <li>Kleine Werkzeugkisten</li>
+                    <li>Fahrräder & E-Bikes</li>
+                </ul>
+            </div>
+
+            <!-- Verboten -->
+            <div class="box">
+                <h3>✗ Verboten</h3>
+                <ul>
+                    <li>Brennbare Flüssigkeiten</li>
+                    <li>Gefährliche Stoffe</li>
+                    <li>Werkstattbetrieb</li>
+                    <li>Lagern von Möbeln & Kisten</li>
+                    <li>Blockieren von Fluchtwegen</li>
                 </ul>
             </div>
 
             <!-- Sicherheit -->
-            <div class="box">
-                <h3>🔒 Sicherheit</h3>
+            <div class="box full">
+                <h3>🔒 Sicherheitshinweise (VKF/AGV)</h3>
                 <ul>
-                    <li>Nur Fachpersonal (Elektriker)</li>
-                    <li>Schaltberechtigung erforderlich</li>
-                    <li>NIV/NIN Vorschriften beachten</li>
-                    <li>Arbeiten nur mit 5 Sicherheitsregeln</li>
-                    <li>Tür immer verschliessen</li>
+                    <li>Tiefgarage als eigener Brandabschnitt (VKF-Norm)</li>
+                    <li>Fluchtwege und Notausgänge müssen frei bleiben</li>
+                    <li>Bei Rauch oder Feuer: Sofort Feuerwehr rufen (Tel. 118)</li>
+                    <li>Keine Gegenstände vor Hydranten oder Löscher</li>
+                    <li>Beleuchtung und Lüftung nicht manipulieren</li>
                 </ul>
             </div>
 
@@ -273,25 +286,25 @@
                 <div class="qr-item">
                     <h4>👤 Ansprech&shy;partner</h4>
                     <div class="qr-code">
-                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://rosenweg4303.ch/hauptverteilung-ansprechpartner.html" alt="QR Code Ansprechpartner">
+                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://rosenweg4303.ch/tiefgarage-ansprechpartner.html" alt="QR Code Ansprechpartner">
                     </div>
-                    <p class="qr-label">Elektro-Verantwortliche & Hauswart</p>
+                    <p class="qr-label">Hauswart & Verwaltung</p>
                 </div>
 
                 <div class="qr-item">
-                    <h4>📋 Schalt&shy;schema</h4>
+                    <h4>📋 Hausordnung</h4>
                     <div class="qr-code">
-                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://rosenweg4303.ch/hauptverteilung-schema.html" alt="QR Code Schema">
+                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://rosenweg4303.ch/tiefgarage-hausordnung.html" alt="QR Code Hausordnung">
                     </div>
-                    <p class="qr-label">Verteil&shy;plan & Doku</p>
+                    <p class="qr-label">Regeln & Vorschriften</p>
                 </div>
 
                 <div class="qr-item">
                     <h4>🚨 Notfall</h4>
                     <div class="qr-code">
-                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://rosenweg4303.ch/hauptverteilung-notfall.html" alt="QR Code Notfall">
+                        <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=https://rosenweg4303.ch/tiefgarage-notfall.html" alt="QR Code Notfall">
                     </div>
-                    <p class="qr-label">Störungen & Notdienst 24/7</p>
+                    <p class="qr-label">Feuerwehr 118 · Polizei 117</p>
                 </div>
             </div>
         </div>
@@ -299,7 +312,7 @@
         <!-- Footer -->
         <div class="footer">
             <p><strong>STWEG-Kooperation Rosenweg</strong> - Rosenweg 7-43, 4303 Kaiseraugst</p>
-            <p>Elektrische Hauptverteilung für alle 8 Gebäude - Bei Störung: 144 (Notruf)</p>
+            <p>Brandschutz nach VKF & AGV Aargau - Bei Notfall: Feuerwehr 118</p>
         </div>
     </div>
 
