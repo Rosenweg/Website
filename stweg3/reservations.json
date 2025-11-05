@@ -1,0 +1,56 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "lastUpdated": "2025-11-05T10:00:00.000Z",
+    "description": "Waschküchen Reservierungen für STWEG 3 - Rosenweg 9"
+  },
+  "waschkuechen": [
+    {
+      "id": 1,
+      "name": "Waschküche 1",
+      "location": "Untergeschoss",
+      "equipment": ["Waschmaschine", "Trockner", "Waschtisch", "Wäscheleinen"]
+    },
+    {
+      "id": 2,
+      "name": "Waschküche 2",
+      "location": "Untergeschoss",
+      "equipment": ["Waschmaschine", "Trockner", "Waschtisch", "Wäscheleinen"]
+    }
+  ],
+  "timeSlots": [
+    {
+      "startTime": "07:00",
+      "endTime": "10:00",
+      "duration": 180
+    },
+    {
+      "startTime": "10:00",
+      "endTime": "13:00",
+      "duration": 180
+    },
+    {
+      "startTime": "13:00",
+      "endTime": "16:00",
+      "duration": 180
+    },
+    {
+      "startTime": "16:00",
+      "endTime": "19:00",
+      "duration": 180
+    },
+    {
+      "startTime": "19:00",
+      "endTime": "22:00",
+      "duration": 180
+    }
+  ],
+  "rules": {
+    "openingDays": [1, 2, 3, 4, 5, 6],
+    "closedDays": [0],
+    "openingHours": "07:00-22:00",
+    "maxReservationDays": 14,
+    "allowCancellation": true
+  },
+  "reservations": []
+}
