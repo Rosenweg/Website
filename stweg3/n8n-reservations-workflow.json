@@ -1,0 +1,375 @@
+{
+  "name": "STWEG3 Waschküchen Reservierungen",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "stweg3-reservations",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "webhook-node",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "stweg3-reservations"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.body.action }}",
+              "operation": "equals",
+              "value2": "create"
+            }
+          ]
+        }
+      },
+      "id": "action-create",
+      "name": "Action: Create",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [450, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.body.action }}",
+              "operation": "equals",
+              "value2": "list"
+            }
+          ]
+        }
+      },
+      "id": "action-list",
+      "name": "Action: List",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.body.action }}",
+              "operation": "equals",
+              "value2": "delete"
+            }
+          ]
+        }
+      },
+      "id": "action-delete",
+      "name": "Action: Delete",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [450, 400]
+    },
+    {
+      "parameters": {
+        "filePath": "/data/reservations.json",
+        "options": {}
+      },
+      "id": "read-reservations",
+      "name": "Read Reservations File",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse existing reservations\nconst existingData = JSON.parse($input.first().binary.data.toString());\nconst newReservation = $json.body.reservation;\n\n// Check for conflicts\nconst hasConflict = existingData.reservations.some(r => \n  r.date === newReservation.date && \n  r.waschkueche === newReservation.waschkueche && \n  r.startTime === newReservation.startTime\n);\n\nif (hasConflict) {\n  return [{\n    json: {\n      success: false,\n      error: 'Dieser Zeitslot ist bereits reserviert'\n    }\n  }];\n}\n\n// Add new reservation\nexistingData.reservations.push({\n  ...newReservation,\n  id: Date.now().toString() + Math.random().toString(36).substring(2, 9),\n  createdAt: new Date().toISOString()\n});\n\nreturn [{\n  json: {\n    success: true,\n    data: existingData,\n    newReservation: newReservation\n  }\n}];"
+      },
+      "id": "create-reservation-logic",
+      "name": "Create Reservation Logic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 200]
+    },
+    {
+      "parameters": {
+        "fileName": "=/data/reservations.json",
+        "binaryData": "={{ JSON.stringify($json.data, null, 2) }}",
+        "options": {}
+      },
+      "id": "save-reservations",
+      "name": "Save Reservations File",
+      "type": "n8n-nodes-base.writeFile",
+      "typeVersion": 1,
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: true, message: 'Reservierung erfolgreich erstellt', reservation: $json.newReservation } }}"
+      },
+      "id": "success-create-response",
+      "name": "Success Create Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1050, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse existing reservations\nconst data = JSON.parse($input.first().binary.data.toString());\nconst email = $json.body.email;\n\n// Filter reservations (optional: by email if provided)\nlet filteredReservations = data.reservations;\n\nif (email) {\n  filteredReservations = filteredReservations.filter(r => r.email === email);\n}\n\n// Remove past reservations\nconst now = new Date();\nfilteredReservations = filteredReservations.filter(r => {\n  const resDate = new Date(r.date);\n  return resDate >= now;\n});\n\nreturn [{\n  json: {\n    success: true,\n    reservations: filteredReservations\n  }\n}];"
+      },
+      "id": "list-reservations-logic",
+      "name": "List Reservations Logic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}"
+      },
+      "id": "success-list-response",
+      "name": "Success List Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse existing reservations\nconst existingData = JSON.parse($input.first().binary.data.toString());\nconst reservationId = $json.body.reservationId;\nconst userEmail = $json.body.email;\n\n// Find reservation\nconst reservation = existingData.reservations.find(r => r.id === reservationId);\n\nif (!reservation) {\n  return [{\n    json: {\n      success: false,\n      error: 'Reservierung nicht gefunden'\n    }\n  }];\n}\n\n// Check if user owns this reservation\nif (reservation.email !== userEmail) {\n  return [{\n    json: {\n      success: false,\n      error: 'Keine Berechtigung zum Löschen dieser Reservierung'\n    }\n  }];\n}\n\n// Remove reservation\nexistingData.reservations = existingData.reservations.filter(r => r.id !== reservationId);\n\nreturn [{\n  json: {\n    success: true,\n    data: existingData\n  }\n}];"
+      },
+      "id": "delete-reservation-logic",
+      "name": "Delete Reservation Logic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 400]
+    },
+    {
+      "parameters": {
+        "fileName": "=/data/reservations.json",
+        "binaryData": "={{ JSON.stringify($json.data, null, 2) }}",
+        "options": {}
+      },
+      "id": "save-after-delete",
+      "name": "Save After Delete",
+      "type": "n8n-nodes-base.writeFile",
+      "typeVersion": 1,
+      "position": [1050, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: true, message: 'Reservierung erfolgreich gelöscht' } }}"
+      },
+      "id": "success-delete-response",
+      "name": "Success Delete Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1250, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": 400,
+        "responseBody": "={{ $json }}"
+      },
+      "id": "error-response",
+      "name": "Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [650, 500]
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@juroct.net",
+        "toEmail": "={{ $json.newReservation.email }}",
+        "subject": "✓ Waschküchen-Reservierung bestätigt - STWEG 3",
+        "emailType": "html",
+        "text": "=<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 20px; }\n    .container { max-width: 600px; margin: 0 auto; background-color: white; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }\n    .header { background: linear-gradient(135deg, #16a34a 0%, #15803d 100%); color: white; padding: 30px; text-align: center; }\n    .content { padding: 30px; }\n    .reservation-box { background-color: #f0fdf4; border: 2px solid #16a34a; border-radius: 8px; padding: 20px; margin: 20px 0; }\n    .info-row { display: flex; justify-content: space-between; margin: 10px 0; padding: 8px 0; border-bottom: 1px solid #e5e7eb; }\n    .label { color: #6b7280; }\n    .value { font-weight: bold; color: #1f2937; }\n    .footer { background-color: #f9fafb; padding: 20px; text-align: center; color: #6b7280; font-size: 12px; }\n  </style>\n</head>\n<body>\n  <div class=\"container\">\n    <div class=\"header\">\n      <h1>🧺 Reservierung bestätigt</h1>\n      <p>Ihre Waschküchen-Reservierung wurde erfolgreich erstellt</p>\n    </div>\n    <div class=\"content\">\n      <p>Sehr geehrte Damen und Herren,</p>\n      <p>Ihre Reservierung für die Waschküche im <strong>STWEG 3 - Rosenweg 9</strong> wurde bestätigt.</p>\n      \n      <div class=\"reservation-box\">\n        <h3 style=\"margin-top: 0; color: #15803d;\">📋 Reservierungsdetails</h3>\n        <div class=\"info-row\">\n          <span class=\"label\">Waschküche:</span>\n          <span class=\"value\">Waschküche " + $json.newReservation.waschkueche + "</span>\n        </div>\n        <div class=\"info-row\">\n          <span class=\"label\">Datum:</span>\n          <span class=\"value\">" + new Date($json.newReservation.date).toLocaleDateString('de-DE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + "</span>\n        </div>\n        <div class=\"info-row\">\n          <span class=\"label\">Zeit:</span>\n          <span class=\"value\">" + $json.newReservation.startTime + " - " + $json.newReservation.endTime + "</span>\n        </div>\n        <div class=\"info-row\">\n          <span class=\"label\">Name:</span>\n          <span class=\"value\">" + $json.newReservation.name + "</span>\n        </div>\n      </div>\n      \n      <div style=\"background-color: #dbeafe; border-left: 4px solid #3b82f6; padding: 15px; margin: 20px 0; border-radius: 4px;\">\n        <p style=\"margin: 0; color: #1e40af;\"><strong>📌 Wichtige Hinweise:</strong></p>\n        <ul style=\"margin: 10px 0 0 0; padding-left: 20px; color: #1e3a8a;\">\n          <li>Bitte halten Sie sich an die reservierte Zeit</li>\n          <li>Reinigen Sie die Waschküche nach Gebrauch</li>\n          <li>Fenster müssen geschlossen bleiben</li>\n          <li>Nutzen Sie den Trockner oder die Wäscheleinen</li>\n        </ul>\n      </div>\n      \n      <p>Sie können Ihre Reservierung jederzeit über das Online-System stornieren.</p>\n      \n      <div style=\"text-align: center; margin-top: 30px;\">\n        <a href=\"https://rosenweg4303.ch/stweg3/waschkueche-reservierung.html\" style=\"display: inline-block; background-color: #16a34a; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: bold;\">Zur Reservierungsübersicht</a>\n      </div>\n    </div>\n    <div class=\"footer\">\n      <p>© 2025 STWEG 3 - Rosenweg 9, 4303 Kaiseraugst</p>\n      <p>Waschküchen-Reservierungssystem</p>\n    </div>\n  </div>\n</body>\n</html>"
+      },
+      "id": "send-confirmation-email",
+      "name": "Send Confirmation Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [850, 100],
+      "credentials": {
+        "smtp": {
+          "id": "1",
+          "name": "SMTP Account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Action: Create",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Action: List",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Action: Delete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Action: Create": {
+      "main": [
+        [
+          {
+            "node": "Read Reservations File",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Create Reservation Logic",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Action: List": {
+      "main": [
+        [
+          {
+            "node": "Read Reservations File",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "List Reservations Logic",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Action: Delete": {
+      "main": [
+        [
+          {
+            "node": "Read Reservations File",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Delete Reservation Logic",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Reservation Logic": {
+      "main": [
+        [
+          {
+            "node": "Save Reservations File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Reservations File": {
+      "main": [
+        [
+          {
+            "node": "Send Confirmation Email",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Success Create Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Reservations Logic": {
+      "main": [
+        [
+          {
+            "node": "Success List Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Reservation Logic": {
+      "main": [
+        [
+          {
+            "node": "Save After Delete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save After Delete": {
+      "main": [
+        [
+          {
+            "node": "Success Delete Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "STWEG3",
+      "id": "1"
+    },
+    {
+      "name": "Reservierungen",
+      "id": "2"
+    }
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2025-11-05T10:30:00.000Z",
+  "versionId": "1"
+}

@@ -335,14 +335,20 @@
                         <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                         </svg>
-                        Reservationssystem
+                        Online-Reservierungssystem
                     </h4>
+                    <div class="bg-gradient-to-r from-green-600 to-green-700 p-4 rounded mb-3 text-white">
+                        <p class="font-semibold mb-2">🎉 NEU: Online reservieren!</p>
+                        <p class="text-sm text-green-50 mb-3">Reservieren Sie jetzt bequem online mit OTP-Authentifizierung. Keine Wartezeiten, keine Papierlisten!</p>
+                        <a href="waschkueche-reservierung.html" class="inline-block bg-white text-green-700 px-5 py-2 rounded hover:bg-green-50 transition text-sm font-semibold">
+                            Zur Online-Reservierung →
+                        </a>
+                    </div>
                     <ul class="space-y-2 text-sm text-gray-700">
-                        <li>• <strong>Eintragung erforderlich:</strong> Tragen Sie sich in die Reservationsliste vor Ort ein</li>
-                        <li>• <strong>Waschzeiten:</strong> [z.B. Montag - Samstag, 07:00 - 20:00 Uhr]</li>
-                        <li>• <strong>Zeitfenster:</strong> [z.B. 2-3 Stunden pro Reservation]</li>
+                        <li>• <strong>Waschzeiten:</strong> Montag - Samstag, 07:00 - 22:00 Uhr</li>
+                        <li>• <strong>Zeitfenster:</strong> 3 Stunden pro Reservation</li>
                         <li>• <strong>Reinigung:</strong> Nach jeder Nutzung Waschküche reinigen und aufräumen</li>
-                        <li>• <strong>Ruhezeiten beachten:</strong> Sonntags und nachts (22:00-07:00 Uhr) keine Nutzung</li>
+                        <li>• <strong>Ruhezeiten beachten:</strong> Sonntags geschlossen</li>
                     </ul>
                 </div>
 
@@ -467,7 +473,40 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">🔐 Online-Services für STWEG 3</h2>
 
-            <div class="grid md:grid-cols-3 gap-6 max-w-6xl mx-auto">
+            <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-7xl mx-auto">
+                <!-- Waschküchen-Reservierung -->
+                <a href="waschkueche-reservierung.html" class="block bg-white p-8 rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1 border-2 border-green-300">
+                    <div class="flex items-center mb-4">
+                        <div class="bg-green-100 rounded-full p-3 mr-4">
+                            <svg class="h-10 w-10 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="text-2xl font-bold text-gray-800">Waschküchen</h3>
+                            <p class="text-sm text-green-600 font-semibold">NEU: Online buchen</p>
+                        </div>
+                    </div>
+                    <p class="text-gray-600 mb-4">
+                        Reservieren Sie online einen Zeitslot für die Waschküchen im Rosenweg 9. Einfach, sicher und bequem.
+                    </p>
+                    <div class="bg-green-50 rounded-lg p-4 mb-4">
+                        <p class="text-sm text-gray-700 mb-2"><strong>🧺 Features:</strong></p>
+                        <ul class="text-sm text-gray-600 space-y-1">
+                            <li>• 2 Waschküchen verfügbar</li>
+                            <li>• Zeitslots 07:00-22:00 Uhr</li>
+                            <li>• Sofortige Bestätigung</li>
+                            <li>• Online stornierbar</li>
+                        </ul>
+                    </div>
+                    <div class="flex items-center text-green-600 font-semibold">
+                        <span>Jetzt reservieren</span>
+                        <svg class="h-5 w-5 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                        </svg>
+                    </div>
+                </a>
+
                 <!-- Kontaktliste -->
                 <a href="stweg3-kontakte.html" class="block bg-white p-8 rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1">
                     <div class="flex items-center mb-4">
@@ -577,7 +616,7 @@
                     <div>
                         <p class="font-semibold text-gray-800 mb-2">🔒 Sicherheit durch OTP-Authentifizierung</p>
                         <p class="text-sm text-gray-700">
-                            Beide Bereiche sind durch eine sichere One-Time-Password (OTP) Authentifizierung geschützt.
+                            Alle Bereiche sind durch eine sichere One-Time-Password (OTP) Authentifizierung geschützt.
                             Sie erhalten einen 6-stelligen Code per E-Mail, der 10 Minuten gültig ist.
                             Nur berechtigte E-Mail-Adressen haben Zugriff.
                         </p>
