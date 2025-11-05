@@ -1,0 +1,35 @@
+{
+  "name": "waschkueche-smart-backend",
+  "version": "1.0.0",
+  "description": "Smart Waschküchen-Management Backend für STWEG 3",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "init-db": "node scripts/init-database.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "sqlite3": "^5.1.6",
+    "axios": "^1.6.0",
+    "body-parser": "^1.20.2",
+    "uuid": "^9.0.1",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1",
+    "jest": "^29.7.0"
+  },
+  "keywords": [
+    "iot",
+    "shelly",
+    "energy-monitoring",
+    "laundry-management"
+  ],
+  "author": "STWEG 3",
+  "license": "MIT"
+}
