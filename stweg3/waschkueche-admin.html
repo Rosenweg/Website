@@ -281,23 +281,25 @@
             'hello@langpartners.ch'
         ];
 
-        // DOM Elements
-        const authSection = document.getElementById('auth-section');
-        const mainContent = document.getElementById('main-content');
-        const emailStep = document.getElementById('email-step');
-        const otpStep = document.getElementById('otp-step');
-        const emailForm = document.getElementById('email-form');
-        const otpForm = document.getElementById('otp-form');
-        const emailInput = document.getElementById('email-input');
-        const otpInput = document.getElementById('otp-input');
-        const errorMessage = document.getElementById('error-message');
-        const sentEmail = document.getElementById('sent-email');
-        const backBtn = document.getElementById('back-btn');
-        const logoutBtn = document.getElementById('logout-btn');
+        // Wait for DOM to be fully loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            // DOM Elements
+            const authSection = document.getElementById('auth-section');
+            const mainContent = document.getElementById('main-content');
+            const emailStep = document.getElementById('email-step');
+            const otpStep = document.getElementById('otp-step');
+            const emailForm = document.getElementById('email-form');
+            const otpForm = document.getElementById('otp-form');
+            const emailInput = document.getElementById('email-input');
+            const otpInput = document.getElementById('otp-input');
+            const errorMessage = document.getElementById('error-message');
+            const sentEmail = document.getElementById('sent-email');
+            const backBtn = document.getElementById('back-btn');
+            const logoutBtn = document.getElementById('logout-btn');
 
-        // Tabs
-        const tabBtns = document.querySelectorAll('.tab-btn');
-        const tabContents = document.querySelectorAll('.tab-content');
+            // Tabs
+            const tabBtns = document.querySelectorAll('.tab-btn');
+            const tabContents = document.querySelectorAll('.tab-content');
 
         // OTP Authentication
         emailForm.addEventListener('submit', (e) => {
@@ -551,10 +553,11 @@
             }
         }
 
-        // CSV Export
-        document.getElementById('export-btn')?.addEventListener('click', () => {
-            window.open(`${API_BASE_URL}/admin/export/sessions`, '_blank');
-        });
+            // CSV Export
+            document.getElementById('export-btn')?.addEventListener('click', () => {
+                window.open(`${API_BASE_URL}/admin/export/sessions`, '_blank');
+            });
+        }); // End of DOMContentLoaded
     </script>
 </body>
 </html>
