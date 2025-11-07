@@ -1,0 +1,49 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "wohnung": "EG.1",
+      "name": "Max Mustermann",
+      "email": "max.mustermann@example.com",
+      "balance": 50.00,
+      "is_active": true,
+      "created_at": "2025-01-01T10:00:00Z"
+    },
+    {
+      "id": 2,
+      "wohnung": "EG.2",
+      "name": "Anna Schmidt",
+      "email": "anna.schmidt@example.com",
+      "balance": 35.50,
+      "is_active": true,
+      "created_at": "2025-01-01T10:00:00Z"
+    },
+    {
+      "id": 3,
+      "wohnung": "1OG.1",
+      "name": "Peter Weber",
+      "email": "peter.weber@example.com",
+      "balance": 42.30,
+      "is_active": true,
+      "created_at": "2025-01-01T10:00:00Z"
+    },
+    {
+      "id": 4,
+      "wohnung": "1OG.2",
+      "name": "Maria Müller",
+      "email": "maria.mueller@example.com",
+      "balance": 28.90,
+      "is_active": true,
+      "created_at": "2025-01-01T10:00:00Z"
+    },
+    {
+      "id": 5,
+      "wohnung": "2OG.1",
+      "name": "Stefan Meier",
+      "email": "stefan.meier@example.com",
+      "balance": 61.20,
+      "is_active": true,
+      "created_at": "2025-01-01T10:00:00Z"
+    }
+  ]
+}

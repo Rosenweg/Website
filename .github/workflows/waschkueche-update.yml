@@ -1,0 +1,196 @@
+name: Waschküche Data Update
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - add_balance
+          - start_session
+          - end_session
+          - update_user
+      user_id:
+        description: 'User ID'
+        required: false
+        type: string
+      amount:
+        description: 'Amount (for balance updates)'
+        required: false
+        type: string
+      device_id:
+        description: 'Device ID (for sessions)'
+        required: false
+        type: string
+      session_id:
+        description: 'Session ID (for ending sessions)'
+        required: false
+        type: string
+      energy_consumed:
+        description: 'Energy consumed in kWh (for ending sessions)'
+        required: false
+        type: string
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Update Data
+        run: |
+          cd stweg3/waschkueche-data
+
+          ACTION="${{ github.event.inputs.action }}"
+          USER_ID="${{ github.event.inputs.user_id }}"
+
+          case "$ACTION" in
+            add_balance)
+              AMOUNT="${{ github.event.inputs.amount }}"
+              TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+              # Update user balance
+              jq --arg uid "$USER_ID" \
+                 --argjson amt "$AMOUNT" \
+                 '(.users[] | select(.id == ($uid | tonumber)) | .balance) += $amt' \
+                 users.json > temp.json
+              mv temp.json users.json
+
+              # Add transaction
+              TRANS_ID=$(jq '.transactions | length + 1' transactions.json)
+              jq --argjson tid "$TRANS_ID" \
+                 --arg uid "$USER_ID" \
+                 --argjson amt "$AMOUNT" \
+                 --arg ts "$TIMESTAMP" \
+                 '.transactions += [{
+                   "id": $tid,
+                   "user_id": ($uid | tonumber),
+                   "amount": $amt,
+                   "type": "top_up",
+                   "description": "Guthaben aufgeladen",
+                   "timestamp": $ts
+                 }]' transactions.json > temp.json
+              mv temp.json transactions.json
+
+              echo "✓ Balance updated: User $USER_ID + CHF $AMOUNT"
+              ;;
+
+            start_session)
+              DEVICE_ID="${{ github.event.inputs.device_id }}"
+              TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+              # Create new session
+              SESSION_ID=$(jq '.sessions | length + 1' sessions.json)
+              jq --argjson sid "$SESSION_ID" \
+                 --arg uid "$USER_ID" \
+                 --arg did "$DEVICE_ID" \
+                 --arg ts "$TIMESTAMP" \
+                 '.sessions += [{
+                   "id": $sid,
+                   "user_id": ($uid | tonumber),
+                   "device_id": ($did | tonumber),
+                   "started_at": $ts,
+                   "ended_at": null,
+                   "energy_consumed": 0,
+                   "cost": 0,
+                   "status": "active"
+                 }]' sessions.json > temp.json
+              mv temp.json sessions.json
+
+              # Mark device as unavailable
+              jq --arg did "$DEVICE_ID" \
+                 '(.devices[] | select(.id == ($did | tonumber)) | .is_available) = false' \
+                 devices.json > temp.json
+              mv temp.json devices.json
+
+              echo "✓ Session started: $SESSION_ID"
+              echo "session_id=$SESSION_ID" >> $GITHUB_OUTPUT
+              ;;
+
+            end_session)
+              SESSION_ID="${{ github.event.inputs.session_id }}"
+              ENERGY="${{ github.event.inputs.energy_consumed }}"
+              TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+              # Get session details
+              USER_ID=$(jq -r --arg sid "$SESSION_ID" '.sessions[] | select(.id == ($sid | tonumber)) | .user_id' sessions.json)
+              DEVICE_ID=$(jq -r --arg sid "$SESSION_ID" '.sessions[] | select(.id == ($sid | tonumber)) | .device_id' sessions.json)
+
+              # Calculate cost (0.30 CHF/kWh)
+              COST=$(echo "$ENERGY * 0.30" | bc)
+
+              # Update session
+              jq --arg sid "$SESSION_ID" \
+                 --argjson energy "$ENERGY" \
+                 --argjson cost "$COST" \
+                 --arg ts "$TIMESTAMP" \
+                 '(.sessions[] | select(.id == ($sid | tonumber))) |= {
+                   id: .id,
+                   user_id: .user_id,
+                   device_id: .device_id,
+                   started_at: .started_at,
+                   ended_at: $ts,
+                   energy_consumed: $energy,
+                   cost: $cost,
+                   status: "completed"
+                 }' sessions.json > temp.json
+              mv temp.json sessions.json
+
+              # Deduct from user balance
+              jq --arg uid "$USER_ID" \
+                 --argjson cost "$COST" \
+                 '(.users[] | select(.id == ($uid | tonumber)) | .balance) -= $cost' \
+                 users.json > temp.json
+              mv temp.json users.json
+
+              # Add transaction
+              TRANS_ID=$(jq '.transactions | length + 1' transactions.json)
+              DEVICE_NAME=$(jq -r --arg did "$DEVICE_ID" '.devices[] | select(.id == ($did | tonumber)) | .device_name' devices.json)
+              jq --argjson tid "$TRANS_ID" \
+                 --arg uid "$USER_ID" \
+                 --argjson cost "$COST" \
+                 --arg sid "$SESSION_ID" \
+                 --arg ts "$TIMESTAMP" \
+                 --arg desc "$DEVICE_NAME - $ENERGY kWh" \
+                 '.transactions += [{
+                   "id": $tid,
+                   "user_id": ($uid | tonumber),
+                   "amount": -($cost),
+                   "type": "session",
+                   "description": $desc,
+                   "session_id": ($sid | tonumber),
+                   "timestamp": $ts
+                 }]' transactions.json > temp.json
+              mv temp.json transactions.json
+
+              # Mark device as available
+              jq --arg did "$DEVICE_ID" \
+                 '(.devices[] | select(.id == ($did | tonumber)) | .is_available) = true' \
+                 devices.json > temp.json
+              mv temp.json devices.json
+
+              echo "✓ Session ended: $SESSION_ID (CHF $COST)"
+              ;;
+          esac
+
+      - name: Commit changes
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add stweg3/waschkueche-data/*.json
+          git commit -m "💰 Waschküche: ${{ github.event.inputs.action }} (User: ${{ github.event.inputs.user_id }})" || echo "No changes to commit"
+          git push

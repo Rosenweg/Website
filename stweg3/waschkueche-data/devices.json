@@ -1,0 +1,44 @@
+{
+  "devices": [
+    {
+      "id": 1,
+      "device_id": "shellypro1pm-waschmaschine1",
+      "device_name": "Waschmaschine 1",
+      "device_type": "washer",
+      "location": "Waschküche 1",
+      "shelly_ip": "192.168.1.100",
+      "cost_per_kwh": 0.30,
+      "is_available": true
+    },
+    {
+      "id": 2,
+      "device_id": "shellypro1pm-trockner1",
+      "device_name": "Trockner 1",
+      "device_type": "dryer",
+      "location": "Waschküche 1",
+      "shelly_ip": "192.168.1.101",
+      "cost_per_kwh": 0.30,
+      "is_available": true
+    },
+    {
+      "id": 3,
+      "device_id": "shellypro1pm-waschmaschine2",
+      "device_name": "Waschmaschine 2",
+      "device_type": "washer",
+      "location": "Waschküche 2",
+      "shelly_ip": "192.168.1.102",
+      "cost_per_kwh": 0.30,
+      "is_available": true
+    },
+    {
+      "id": 4,
+      "device_id": "shellypro1pm-trockner2",
+      "device_name": "Trockner 2",
+      "device_type": "dryer",
+      "location": "Waschküche 2",
+      "shelly_ip": "192.168.1.103",
+      "cost_per_kwh": 0.30,
+      "is_available": true
+    }
+  ]
+}
