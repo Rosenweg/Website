@@ -32,18 +32,6 @@
         "waschkueche_admin": true,
         "alle_verbraeuche_sehen": true
       }
-    },
-    {
-      "funktion": "Vertreter 3 & Technischer Dienst",
-      "name": "Andreas Debona",
-      "email": "debona.andreas@teleport.ch",
-      "telefon": "+41 79 775 92 01",
-      "wohnung": "1OG.1",
-      "berechtigungen": {
-        "waschkueche_admin": true,
-        "ip_verwaltung": true,
-        "alle_verbraeuche_sehen": true
-      }
     }
   ],
   "wohnungen": {
