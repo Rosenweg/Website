@@ -194,23 +194,10 @@
         </div>
     </footer>
 
+    <script src="waschkueche-api.js"></script>
     <script>
-        const API_BASE_URL = 'http://localhost:3000/api';
-
-        // Email-basierte Berechtigungen
-        const USER_EMAILS = [
-            'max.mustermann@example.com',
-            'anna.schmidt@example.com',
-            'peter.weber@example.com',
-            'maria.mueller@example.com',
-            'stefan.meier@example.com'
-        ];
-
-        const ADMIN_EMAILS = [
-            'stefan+rosenweg@juroct.ch',
-            'fersztand.basil@teleport.ch',
-            'hello@langpartners.ch'
-        ];
+        // Verwende die neue JSON-basierte API
+        const API = WaschkuecheAPI;
 
         let currentUser = null;
         let userEmail = '';
@@ -232,27 +219,22 @@
         const refreshBtn = document.getElementById('refresh-btn');
 
         // Step 1: Request OTP
-        emailForm.addEventListener('submit', (e) => {
+        emailForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const email = emailInput.value.trim().toLowerCase();
 
-            const isUser = USER_EMAILS.includes(email);
-            const isAdminUser = ADMIN_EMAILS.includes(email);
+            try {
+                await API.sendOTP(email);
 
-            if (isUser || isAdminUser) {
                 userEmail = email;
-                isAdmin = isAdminUser;
+                isAdmin = API.isAdmin(email);
 
                 sentEmail.textContent = email;
                 emailStep.classList.add('hidden');
                 otpStep.classList.remove('hidden');
                 showError('');
-
-                // Demo: In Produktion würde hier ein echter OTP per E-Mail gesendet
-                const role = isAdmin ? 'Administrator' : 'Benutzer';
-                alert(`Demo: Ihr OTP-Code ist: 123456\n\nSie loggen sich ein als: ${role}\n\n(In Produktion wird dieser per E-Mail gesendet)`);
-            } else {
-                showError('Diese E-Mail-Adresse ist nicht berechtigt.');
+            } catch (error) {
+                showError(error.message || 'Fehler beim Senden des OTP-Codes');
             }
         });
 
@@ -261,15 +243,20 @@
             e.preventDefault();
             const otp = otpInput.value.trim();
 
-            if (otp === '123456') {
+            try {
+                const result = await API.verifyOTP(userEmail, otp);
+
                 showError('');
+                isAdmin = result.isAdmin;
+
+                // Lade Benutzer-Daten
+                currentUser = await API.getUserByEmail(userEmail);
 
                 // Admin oder normaler Benutzer?
                 if (isAdmin) {
                     await loadAdminDashboard();
                 } else {
-                    const userId = USER_EMAILS.indexOf(userEmail) + 1;
-                    await loadUserDashboard(userId);
+                    await loadUserDashboard(currentUser.id);
                 }
 
                 // Show main content
@@ -278,8 +265,8 @@
                 logoutBtn.classList.remove('hidden');
                 document.getElementById('user-email-display').textContent = userEmail;
                 document.getElementById('user-email-display').classList.remove('hidden');
-            } else {
-                showError('Ungültiger Code. Bitte versuchen Sie es erneut.');
+            } catch (error) {
+                showError(error.message || 'Ungültiger Code. Bitte versuchen Sie es erneut.');
             }
         });
 
@@ -290,13 +277,16 @@
             showError('');
         });
 
-        logoutBtn.addEventListener('click', () => location.reload());
-        refreshBtn.addEventListener('click', () => {
+        logoutBtn.addEventListener('click', () => {
+            API.logout();
+            location.reload();
+        });
+
+        refreshBtn.addEventListener('click', async () => {
             if (isAdmin) {
-                loadAdminDashboard();
+                await loadAdminDashboard();
             } else {
-                const userId = USER_EMAILS.indexOf(userEmail) + 1;
-                loadUserDashboard(userId);
+                await loadUserDashboard(currentUser.id);
             }
         });
 
@@ -314,18 +304,13 @@
         // ========================================
         async function loadUserDashboard(userId) {
             try {
-                // Get user info
-                const userResponse = await fetch(`${API_BASE_URL}/users/${userId}`);
-                currentUser = await userResponse.json();
-
                 document.getElementById('page-title').textContent = 'Meine Waschküchen-Daten';
                 document.getElementById('user-name').textContent = currentUser.name;
                 document.getElementById('user-wohnung').textContent = `• ${currentUser.wohnung}`;
                 document.getElementById('stats-title').textContent = 'Meine Statistiken';
 
                 // Get stats
-                const statsResponse = await fetch(`${API_BASE_URL}/users/${userId}/stats`);
-                const stats = await statsResponse.json();
+                const stats = await API.getStatistics(userId);
 
                 // Stats Grid
                 document.getElementById('stats-grid').innerHTML = `
