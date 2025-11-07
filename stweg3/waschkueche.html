@@ -697,12 +697,15 @@
             }
         }
 
-        function addDevice() {
+        async function addDevice() {
             const deviceName = prompt('Gerätename (z.B. Waschmaschine 3):');
             if (!deviceName) return;
 
             const deviceType = prompt('Typ (washer oder dryer):');
-            if (!deviceType) return;
+            if (!deviceType || !['washer', 'dryer'].includes(deviceType)) {
+                alert('❌ Typ muss "washer" oder "dryer" sein');
+                return;
+            }
 
             const location = prompt('Standort (z.B. Waschküche 1):');
             if (!location) return;
@@ -710,24 +713,95 @@
             const shellyIP = prompt('Shelly IP-Adresse (z.B. 192.168.1.100):');
             if (!shellyIP) return;
 
-            alert('⚠️ Gerät hinzufügen:\n\n' +
-                  'Bitte füge manuell in waschkueche-data/devices.json hinzu:\n\n' +
-                  JSON.stringify({
-                      id: 'NEXT_ID',
-                      device_id: 'shellypro1pm-' + deviceName.toLowerCase().replace(/\s/g, ''),
-                      device_name: deviceName,
-                      device_type: deviceType,
-                      location: location,
-                      shelly_ip: shellyIP,
-                      cost_per_kwh: 0.30,
-                      is_available: true
-                  }, null, 2));
+            // IP-Format validieren
+            if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(shellyIP)) {
+                alert('❌ Ungültige IP-Adresse');
+                return;
+            }
+
+            const costPerKwh = parseFloat(prompt('Preis pro kWh in CHF (z.B. 0.30):') || '0.30');
+
+            // Sende an N8N-Webhook
+            try {
+                const response = await fetch('https://n8n.juroct.net/webhook/stweg3-waschkueche-device', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: 'add',
+                        device_name: deviceName,
+                        device_type: deviceType,
+                        location: location,
+                        shelly_ip: shellyIP,
+                        cost_per_kwh: costPerKwh,
+                        requester_email: userEmail
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    alert('✅ ' + result.message + '\n\nGerät wird in wenigen Sekunden sichtbar sein.');
+                    // Warte kurz und lade dann neu
+                    setTimeout(() => loadAdminDevices(), 3000);
+                } else {
+                    alert('❌ Fehler: ' + (result.error || 'Unbekannter Fehler'));
+                }
+            } catch (error) {
+                console.error('N8N Webhook Fehler:', error);
+                alert('❌ Fehler beim Hinzufügen des Geräts.\n\n' +
+                      'Falls der N8N-Webhook noch nicht eingerichtet ist,\n' +
+                      'siehe: stweg3/N8N_WASCHKUECHE_WEBHOOK.md\n\n' +
+                      'Oder füge manuell in devices.json hinzu:\n' +
+                      JSON.stringify({
+                          device_name: deviceName,
+                          device_type: deviceType,
+                          location: location,
+                          shelly_ip: shellyIP,
+                          cost_per_kwh: costPerKwh
+                      }, null, 2));
+            }
         }
 
-        function editDevice(deviceId) {
-            alert('⚠️ Gerät bearbeiten:\n\n' +
-                  'Bitte bearbeite direkt in waschkueche-data/devices.json\n' +
-                  'Device ID: ' + deviceId);
+        async function editDevice(deviceId) {
+            const device = (await API.getDevices()).find(d => d.id === deviceId);
+            if (!device) {
+                alert('❌ Gerät nicht gefunden');
+                return;
+            }
+
+            const newIP = prompt('Neue Shelly IP-Adresse:', device.shelly_ip);
+            if (!newIP || newIP === device.shelly_ip) return;
+
+            const newPrice = parseFloat(prompt('Neuer Preis pro kWh (CHF):', device.cost_per_kwh));
+            if (isNaN(newPrice)) return;
+
+            try {
+                const response = await fetch('https://n8n.juroct.net/webhook/stweg3-waschkueche-device', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: 'update',
+                        device_id: deviceId,
+                        updates: {
+                            shelly_ip: newIP,
+                            cost_per_kwh: newPrice
+                        },
+                        requester_email: userEmail
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    alert('✅ ' + result.message);
+                    setTimeout(() => loadAdminDevices(), 2000);
+                } else {
+                    alert('❌ Fehler: ' + (result.error || 'Unbekannter Fehler'));
+                }
+            } catch (error) {
+                console.error('N8N Webhook Fehler:', error);
+                alert('❌ Fehler beim Bearbeiten.\n\nBitte bearbeite direkt in waschkueche-data/devices.json\nDevice ID: ' + deviceId);
+            }
         }
 
         async function testDevice(ip) {
