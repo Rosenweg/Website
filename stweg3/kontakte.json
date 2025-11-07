@@ -46,23 +46,6 @@
       }
     }
   ],
-  "technischer_dienst": {
-    "_hinweis": "Vollständige Daten siehe ../technischer-dienst.json",
-    "quelle": "../technischer-dienst.json",
-    "email": "technik@rosenweg9.ch",
-    "mitglieder_referenz": [
-      {
-        "id": "td_stefan",
-        "name": "Stefan Müller",
-        "email": "stefan+rosenweg@juroct.ch"
-      },
-      {
-        "id": "td_andreas",
-        "name": "Andreas Debona",
-        "email": "debona.andreas@teleport.ch"
-      }
-    ]
-  },
   "wohnungen": {
     "erdgeschoss": [
       {
