@@ -7,6 +7,7 @@ const WaschkuecheAPI = {
     // Konfiguration
     dataPath: 'waschkueche-data',
     N8N_WEBHOOK_URL: 'https://n8n.juroct.net/webhook/stweg3-otp',
+    N8N_DEVICE_WEBHOOK_URL: 'https://n8n.juroct.net/webhook/stweg3-waschkueche-device',
 
     // E-Mail-Whitelisten
     USER_EMAILS: [
