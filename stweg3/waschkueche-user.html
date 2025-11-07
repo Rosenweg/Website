@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meine Waschküchen-Daten - STWEG 3</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-lg sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <svg class="h-8 w-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path>
+                    </svg>
+                    <span class="ml-2 text-xl font-semibold text-gray-800">Meine Waschküchen-Daten</span>
+                </div>
+                <div class="flex items-center">
+                    <a href="index.html" class="text-gray-700 hover:text-blue-600 transition">← Zurück zur STWEG 3</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- OTP Authentication Section -->
+    <div id="auth-section" class="min-h-screen py-12 bg-gradient-to-br from-green-50 to-green-100">
+        <div class="max-w-md mx-auto px-4">
+            <div class="bg-white rounded-lg shadow-xl p-8">
+                <div class="text-center mb-6">
+                    <div class="bg-green-100 rounded-full p-4 inline-block mb-4">
+                        <svg class="h-12 w-12 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                        </svg>
+                    </div>
+                    <h1 class="text-2xl font-bold text-gray-800 mb-2">🔐 Zugriff schützen</h1>
+                    <p class="text-gray-600">Bitte authentifizieren Sie sich mit Ihrer E-Mail-Adresse</p>
+                </div>
+
+                <!-- Step 1: Email Input -->
+                <div id="email-step">
+                    <form id="email-form" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">E-Mail-Adresse</label>
+                            <input type="email" id="email-input" required
+                                class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                                placeholder="ihre.email@example.com">
+                            <p class="text-xs text-gray-500 mt-1">
+                                Sie erhalten einen 6-stelligen Code per E-Mail
+                            </p>
+                        </div>
+                        <button type="submit" id="send-otp-btn"
+                            class="w-full bg-green-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-700 transition">
+                            Code anfordern
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Step 2: OTP Verification -->
+                <div id="otp-step" class="hidden">
+                    <div class="mb-4 p-3 bg-green-50 border-l-4 border-green-500 rounded">
+                        <p class="text-sm text-green-800">
+                            ✓ Code wurde an <strong id="sent-email"></strong> gesendet
+                        </p>
+                    </div>
+
+                    <form id="otp-form" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Bestätigungscode</label>
+                            <input type="text" id="otp-input" required maxlength="6" pattern="[0-9]{6}"
+                                class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-center text-2xl font-mono tracking-widest"
+                                placeholder="000000">
+                            <p class="text-xs text-gray-500 mt-1">
+                                Code ist 10 Minuten gültig
+                            </p>
+                        </div>
+                        <button type="submit" id="verify-otp-btn"
+                            class="w-full bg-green-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-700 transition">
+                            Bestätigen
+                        </button>
+                        <button type="button" id="back-btn"
+                            class="w-full bg-gray-100 text-gray-700 px-6 py-3 rounded-lg font-semibold hover:bg-gray-200 transition">
+                            Zurück
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Error Message -->
+                <div id="error-message" class="hidden mt-4 p-3 bg-red-50 border-l-4 border-red-500 rounded">
+                    <p class="text-sm text-red-800"></p>
+                </div>
+
+                <!-- Info -->
+                <div class="mt-6 pt-6 border-t border-gray-200">
+                    <p class="text-xs text-gray-600">
+                        <strong>🔒 Datenschutz:</strong> Nur registrierte Bewohner der STWEG 3 haben Zugriff.
+                        Sie sehen ausschließlich Ihre eigenen Verbrauchsdaten.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content (Hidden until authenticated) -->
+    <div id="main-content" class="hidden">
+        <!-- User Info Header -->
+        <section class="bg-gradient-to-r from-green-600 to-green-800 text-white py-8">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <h1 class="text-3xl font-bold mb-2">Meine Waschküchen-Daten</h1>
+                        <p class="text-lg opacity-90">
+                            <span id="user-name"></span> • <span id="user-wohnung"></span>
+                        </p>
+                    </div>
+                    <button id="logout-btn" class="bg-white bg-opacity-20 hover:bg-opacity-30 px-4 py-2 rounded-lg transition">
+                        Abmelden
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Stats Overview -->
+        <section class="py-8 bg-white">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="grid md:grid-cols-4 gap-6">
+                    <div class="bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-lg border-2 border-green-200">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-sm font-medium text-gray-600">Aktuelles Guthaben</h3>
+                            <svg class="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                        </div>
+                        <p id="stat-balance" class="text-3xl font-bold text-green-700">-</p>
+                    </div>
+
+                    <div class="bg-gradient-to-br from-blue-50 to-blue-100 p-6 rounded-lg border-2 border-blue-200">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-sm font-medium text-gray-600">Nutzungen gesamt</h3>
+                            <svg class="h-6 w-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"></path>
+                            </svg>
+                        </div>
+                        <p id="stat-sessions" class="text-3xl font-bold text-blue-700">-</p>
+                    </div>
+
+                    <div class="bg-gradient-to-br from-orange-50 to-orange-100 p-6 rounded-lg border-2 border-orange-200">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-sm font-medium text-gray-600">Verbrauch gesamt</h3>
+                            <svg class="h-6 w-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                            </svg>
+                        </div>
+                        <p id="stat-energy" class="text-3xl font-bold text-orange-700">-</p>
+                        <p class="text-xs text-gray-600 mt-1">kWh</p>
+                    </div>
+
+                    <div class="bg-gradient-to-br from-purple-50 to-purple-100 p-6 rounded-lg border-2 border-purple-200">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-sm font-medium text-gray-600">Kosten gesamt</h3>
+                            <svg class="h-6 w-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
+                            </svg>
+                        </div>
+                        <p id="stat-cost" class="text-3xl font-bold text-purple-700">-</p>
+                        <p class="text-xs text-gray-600 mt-1">CHF</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Recent Sessions -->
+        <section class="py-12 bg-gray-50">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6">Meine letzten Nutzungen</h2>
+
+                <div id="sessions-container" class="bg-white rounded-lg shadow-md overflow-hidden">
+                    <div class="text-center py-8">
+                        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto mb-4"></div>
+                        <p class="text-gray-600">Lade Daten...</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Transactions -->
+        <section class="py-12 bg-white">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6">Transaktionen</h2>
+
+                <div id="transactions-container" class="bg-white rounded-lg shadow-md overflow-hidden">
+                    <div class="text-center py-8">
+                        <p class="text-gray-600">Lade Transaktionen...</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Help -->
+        <section class="py-12 bg-gray-50">
+            <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="bg-blue-50 border-l-4 border-blue-500 p-6 rounded-lg">
+                    <h3 class="text-lg font-semibold text-blue-800 mb-2">💡 Hilfe & Informationen</h3>
+                    <p class="text-gray-700 mb-3">
+                        Haben Sie Fragen zur Nutzung oder Abrechnung?
+                    </p>
+                    <a href="waschkueche-management-info.html" class="inline-flex items-center text-blue-600 hover:underline font-semibold">
+                        Zur vollständigen Dokumentation
+                        <svg class="h-5 w-5 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                        </svg>
+                    </a>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Footer -->
+    <footer class="bg-gray-800 text-white py-8">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <p class="text-sm">&copy; 2025 STWEG 3 - Smart Waschküchen-Management</p>
+            <p class="text-xs text-gray-400 mt-2">Rosenweg 9, Kaiseraugst</p>
+        </div>
+    </footer>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:3000/api';
+        let currentUser = null;
+        let authToken = null;
+
+        // Simulate OTP system (in production, this would be a real backend)
+        const ALLOWED_EMAILS = [
+            'max.mustermann@example.com',
+            'anna.schmidt@example.com',
+            'peter.weber@example.com',
+            'maria.mueller@example.com',
+            'stefan.meier@example.com'
+        ];
+
+        // DOM Elements
+        const authSection = document.getElementById('auth-section');
+        const mainContent = document.getElementById('main-content');
+        const emailStep = document.getElementById('email-step');
+        const otpStep = document.getElementById('otp-step');
+        const emailForm = document.getElementById('email-form');
+        const otpForm = document.getElementById('otp-form');
+        const emailInput = document.getElementById('email-input');
+        const otpInput = document.getElementById('otp-input');
+        const errorMessage = document.getElementById('error-message');
+        const sentEmail = document.getElementById('sent-email');
+        const backBtn = document.getElementById('back-btn');
+        const logoutBtn = document.getElementById('logout-btn');
+
+        // Step 1: Request OTP
+        emailForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = emailInput.value.trim().toLowerCase();
+
+            // Simulate OTP sending
+            if (ALLOWED_EMAILS.includes(email)) {
+                sentEmail.textContent = email;
+                emailStep.classList.add('hidden');
+                otpStep.classList.remove('hidden');
+                showError('');
+
+                // In production: Send real OTP via email
+                console.log('OTP sent to:', email);
+                alert(`Demo: Ihr OTP-Code ist: 123456\n\n(In Produktion wird dieser per E-Mail gesendet)`);
+            } else {
+                showError('Diese E-Mail-Adresse ist nicht berechtigt.');
+            }
+        });
+
+        // Step 2: Verify OTP
+        otpForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const otp = otpInput.value.trim();
+
+            // Simulate OTP verification (in production: verify with backend)
+            if (otp === '123456') {
+                showError('');
+
+                // Find user by email (simulation)
+                const email = sentEmail.textContent;
+                const userId = ALLOWED_EMAILS.indexOf(email) + 1;
+
+                // Fetch user data from API
+                await loadUserData(userId);
+
+                authSection.classList.add('hidden');
+                mainContent.classList.remove('hidden');
+            } else {
+                showError('Ungültiger Code. Bitte versuchen Sie es erneut.');
+            }
+        });
+
+        backBtn.addEventListener('click', () => {
+            otpStep.classList.add('hidden');
+            emailStep.classList.remove('hidden');
+            otpInput.value = '';
+            showError('');
+        });
+
+        logoutBtn.addEventListener('click', () => {
+            currentUser = null;
+            authToken = null;
+            authSection.classList.remove('hidden');
+            mainContent.classList.add('hidden');
+            emailInput.value = '';
+            otpInput.value = '';
+            emailStep.classList.remove('hidden');
+            otpStep.classList.add('hidden');
+        });
+
+        function showError(message) {
+            if (message) {
+                errorMessage.querySelector('p').textContent = message;
+                errorMessage.classList.remove('hidden');
+            } else {
+                errorMessage.classList.add('hidden');
+            }
+        }
+
+        async function loadUserData(userId) {
+            try {
+                // Get user info
+                const userResponse = await fetch(`${API_BASE_URL}/users/${userId}`);
+                currentUser = await userResponse.json();
+
+                document.getElementById('user-name').textContent = currentUser.name;
+                document.getElementById('user-wohnung').textContent = currentUser.wohnung;
+
+                // Get stats
+                const statsResponse = await fetch(`${API_BASE_URL}/users/${userId}/stats`);
+                const stats = await statsResponse.json();
+
+                document.getElementById('stat-balance').textContent = `CHF ${currentUser.balance.toFixed(2)}`;
+                document.getElementById('stat-sessions').textContent = stats.total.total_sessions;
+                document.getElementById('stat-energy').textContent = stats.total.total_energy.toFixed(2);
+                document.getElementById('stat-cost').textContent = `CHF ${stats.total.total_cost.toFixed(2)}`;
+
+                // Load sessions
+                loadSessions(userId);
+                loadTransactions(userId);
+
+            } catch (error) {
+                console.error('Error loading user data:', error);
+                showError('Fehler beim Laden der Daten.');
+            }
+        }
+
+        async function loadSessions(userId) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/sessions/user/${userId}`);
+                const sessions = await response.json();
+
+                const container = document.getElementById('sessions-container');
+
+                if (sessions.length === 0) {
+                    container.innerHTML = '<div class="text-center py-8"><p class="text-gray-600">Noch keine Nutzungen</p></div>';
+                    return;
+                }
+
+                container.innerHTML = `
+                    <table class="w-full">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Datum</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Gerät</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Verbrauch</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Kosten</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200">
+                            ${sessions.map(s => `
+                                <tr class="hover:bg-gray-50">
+                                    <td class="px-6 py-4 text-sm text-gray-900">
+                                        ${new Date(s.started_at).toLocaleString('de-CH', {
+                                            day: '2-digit',
+                                            month: '2-digit',
+                                            year: 'numeric',
+                                            hour: '2-digit',
+                                            minute: '2-digit'
+                                        })}
+                                    </td>
+                                    <td class="px-6 py-4">
+                                        <div class="text-sm font-medium text-gray-900">${s.device_name}</div>
+                                        <div class="text-sm text-gray-500">${s.location}</div>
+                                    </td>
+                                    <td class="px-6 py-4 text-sm text-gray-900">
+                                        ${s.energy_consumed ? s.energy_consumed.toFixed(2) + ' kWh' : '-'}
+                                    </td>
+                                    <td class="px-6 py-4 text-sm font-semibold ${s.cost ? 'text-red-600' : 'text-gray-900'}">
+                                        ${s.cost ? 'CHF ' + s.cost.toFixed(2) : '-'}
+                                    </td>
+                                    <td class="px-6 py-4">
+                                        <span class="px-2 py-1 text-xs rounded-full ${
+                                            s.status === 'completed' ? 'bg-green-100 text-green-800' :
+                                            s.status === 'active' ? 'bg-orange-100 text-orange-800' :
+                                            'bg-gray-100 text-gray-800'
+                                        }">
+                                            ${s.status === 'completed' ? 'Abgeschlossen' :
+                                              s.status === 'active' ? 'Aktiv' : s.status}
+                                        </span>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+            } catch (error) {
+                console.error('Error loading sessions:', error);
+            }
+        }
+
+        async function loadTransactions(userId) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/users/${userId}/transactions`);
+                const transactions = await response.json();
+
+                const container = document.getElementById('transactions-container');
+
+                if (transactions.length === 0) {
+                    container.innerHTML = '<div class="text-center py-8"><p class="text-gray-600">Keine Transaktionen</p></div>';
+                    return;
+                }
+
+                container.innerHTML = `
+                    <table class="w-full">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Datum</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Beschreibung</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Typ</th>
+                                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Betrag</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200">
+                            ${transactions.map(t => `
+                                <tr class="hover:bg-gray-50">
+                                    <td class="px-6 py-4 text-sm text-gray-900">
+                                        ${new Date(t.created_at).toLocaleString('de-CH', {
+                                            day: '2-digit',
+                                            month: '2-digit',
+                                            year: 'numeric'
+                                        })}
+                                    </td>
+                                    <td class="px-6 py-4 text-sm text-gray-900">${t.description}</td>
+                                    <td class="px-6 py-4">
+                                        <span class="px-2 py-1 text-xs rounded-full ${
+                                            t.transaction_type === 'topup' ? 'bg-green-100 text-green-800' :
+                                            t.transaction_type === 'usage' ? 'bg-red-100 text-red-800' :
+                                            'bg-gray-100 text-gray-800'
+                                        }">
+                                            ${t.transaction_type === 'topup' ? 'Aufladung' :
+                                              t.transaction_type === 'usage' ? 'Verbrauch' :
+                                              t.transaction_type}
+                                        </span>
+                                    </td>
+                                    <td class="px-6 py-4 text-sm text-right font-semibold ${t.amount >= 0 ? 'text-green-600' : 'text-red-600'}">
+                                        ${t.amount >= 0 ? '+' : ''}CHF ${Math.abs(t.amount).toFixed(2)}
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+            } catch (error) {
+                console.error('Error loading transactions:', error);
+            }
+        }
+    </script>
+</body>
+</html>
