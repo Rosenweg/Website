@@ -64,7 +64,7 @@ Die gemeinsam genutzte Tiefgarage (Einstellhalle), die allen Eigentümern zur Ve
 
 **Ämter:**
 - **Präsident**: Jörg Herrmann (STWEG 2)
-- **Technischer Dienst**: Siehe [technischer-dienst.json](../stweg3/technischer-dienst.json) für vollständige Details
+- **Technischer Dienst**: Siehe [technischer-dienst.json](../technischer-dienst.json) für vollständige Details
   - Stefan Müller (STWEG 3)
   - Andreas Debona (STWEG 3)
   - Rolf Müller (extern)
@@ -195,7 +195,7 @@ Die gemeinsam genutzte Tiefgarage (Einstellhalle), die allen Eigentümern zur Ve
 
 ### Wer aktualisiert die Website?
 
-- **Technischer Dienst**: Siehe [technischer-dienst.json](../stweg3/technischer-dienst.json)
+- **Technischer Dienst**: Siehe [technischer-dienst.json](../technischer-dienst.json)
 - **E-Mail**: technik@rosenweg9.ch
 - **Bei Änderungen**: GitHub Repository aktualisieren
 
@@ -230,7 +230,7 @@ Bei Fragen zur Struktur:
 
 **Technischer Dienst (Website)**
 - E-Mail: technik@rosenweg9.ch
-- Details: Siehe [technischer-dienst.json](../stweg3/technischer-dienst.json)
+- Details: Siehe [technischer-dienst.json](../technischer-dienst.json)
 
 ---
 
