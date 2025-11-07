@@ -24,11 +24,7 @@
         "github_admin": true
       },
       "zustaendigkeiten": [
-        "Smart Home Integration (Shelly, Tasmota)",
-        "n8n Workflow-Entwicklung",
-        "GitHub Pages & Repositories",
-        "Netzwerk-Infrastruktur",
-        "Monitoring & Logging"
+        "Strom und IT"
       ]
     },
     {
@@ -47,9 +43,7 @@
         "system_konfiguration": true
       },
       "zustaendigkeiten": [
-        "Hardware-Installation",
-        "Geräte-Wartung",
-        "Technischer Support vor Ort"
+        "Strom und IT"
       ]
     }
   ],
