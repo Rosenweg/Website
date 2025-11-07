@@ -13,7 +13,7 @@
       "telefon": "+41 76 440 45 42",
       "wohnung": "2OG.3",
       "stweg": "STWEG 3",
-      "rolle": "Leitung Technischer Dienst & Entwicklung",
+      "rolle": "Technischer Dienst Kooperation",
       "berechtigungen": {
         "alle_stwegs_zugriff": true,
         "ip_verwaltung": true,
@@ -24,7 +24,9 @@
         "github_admin": true
       },
       "zustaendigkeiten": [
-        "Strom und IT"
+        "Strom",
+        "IT",
+        "technische Anlagen"
       ]
     },
     {
@@ -43,7 +45,9 @@
         "system_konfiguration": true
       },
       "zustaendigkeiten": [
-        "Strom und IT"
+        "Strom",
+        "IT",
+        "technische Anlagen"
       ]
     }
   ],
