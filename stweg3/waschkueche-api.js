@@ -82,8 +82,7 @@ const WaschkuecheAPI = {
                 },
                 body: JSON.stringify({
                     email: email,
-                    otp: otpCode,
-                    timestamp: new Date().toISOString()
+                    otp_code: otpCode  // N8N erwartet "otp_code" (mit Unterstrich)
                 })
             });
 
