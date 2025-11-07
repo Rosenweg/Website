@@ -285,6 +285,7 @@
         // Konfiguration
         const N8N_WEBHOOK_URL = 'https://n8n.juroct.net/webhook/stweg3-otp';
         const KONTAKTE_JSON_URL = 'kontakte.json';
+        const TECHNISCHER_DIENST_JSON_URL = '../technischer-dienst.json';
 
         // Globale Variablen
         let currentUser = null;
@@ -294,18 +295,26 @@
         let zeitslots = [];
         let authorizedEmails = [];
         let kontakteData = null;
+        let technischerDienstData = null;
         let currentOTP = '';
         let otpTimestamp = 0;
 
         // Kontakte laden und autorisierte E-Mails extrahieren
         async function loadKontakte() {
             try {
-                const response = await fetch(KONTAKTE_JSON_URL);
-                kontakteData = await response.json();
+                // Beide JSON-Dateien parallel laden
+                const [kontakteResponse, techDienstResponse] = await Promise.all([
+                    fetch(KONTAKTE_JSON_URL),
+                    fetch(TECHNISCHER_DIENST_JSON_URL)
+                ]);
+
+                kontakteData = await kontakteResponse.json();
+                technischerDienstData = await techDienstResponse.json();
 
                 // Alle berechtigten E-Mails extrahieren
                 authorizedEmails = extractAuthorizedEmails(kontakteData);
                 console.log('Autorisierte E-Mails geladen:', authorizedEmails.length);
+                console.log('Technischer Dienst geladen:', technischerDienstData.mitglieder.length, 'Mitglieder');
             } catch (error) {
                 console.error('Fehler beim Laden der Kontakte:', error);
             }
@@ -386,6 +395,18 @@
             if (!kontakteData) return { name: 'Bewohner', wohnung: '?' };
 
             const emailLower = email.toLowerCase().trim();
+
+            // ZUERST: Technischer Dienst prüfen (höchste Priorität)
+            if (technischerDienstData && technischerDienstData.mitglieder) {
+                for (const mitglied of technischerDienstData.mitglieder) {
+                    if (mitglied.email && mitglied.email.toLowerCase().includes(emailLower)) {
+                        return {
+                            name: `${mitglied.name} [Tech. Dienst]`,
+                            wohnung: mitglied.wohnung || mitglied.stweg || 'Technischer Dienst'
+                        };
+                    }
+                }
+            }
 
             // Ausschuss prüfen
             if (kontakteData.ausschuss) {
