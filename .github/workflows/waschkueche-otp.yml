@@ -1,0 +1,95 @@
+name: Waschküche OTP Email
+
+on:
+  workflow_dispatch:
+    inputs:
+      email:
+        description: 'Email address to send OTP to'
+        required: true
+        type: string
+      otp_code:
+        description: 'OTP code to send'
+        required: true
+        type: string
+
+jobs:
+  send-otp:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate email
+        run: |
+          EMAIL="${{ github.event.inputs.email }}"
+
+          # Check if email is in allowed lists
+          if grep -q "$EMAIL" stweg3/waschkueche.html; then
+            echo "✓ Email is authorized"
+          else
+            echo "✗ Email not authorized"
+            exit 1
+          fi
+
+      - name: Store OTP in JSON
+        run: |
+          OTP_CODE="${{ github.event.inputs.otp_code }}"
+          EMAIL="${{ github.event.inputs.email }}"
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          EXPIRES_AT=$(date -u -d "+10 minutes" +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Read existing OTP file
+          OTP_FILE="stweg3/waschkueche-data/otp.json"
+
+          # Add new OTP
+          jq --arg email "$EMAIL" \
+             --arg code "$OTP_CODE" \
+             --arg timestamp "$TIMESTAMP" \
+             --arg expires "$EXPIRES_AT" \
+             '.otps += [{
+               "email": $email,
+               "code": $code,
+               "created_at": $timestamp,
+               "expires_at": $expires,
+               "used": false
+             }]' "$OTP_FILE" > temp.json
+
+          mv temp.json "$OTP_FILE"
+
+      - name: Send OTP Email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "Ihr OTP-Code für STWEG 3 Waschküchen"
+          to: ${{ github.event.inputs.email }}
+          from: STWEG 3 <${{ secrets.SMTP_FROM }}>
+          body: |
+            Hallo,
+
+            Ihr OTP-Code für die Anmeldung im Waschküchen-System lautet:
+
+            ${{ github.event.inputs.otp_code }}
+
+            Dieser Code ist 10 Minuten gültig.
+
+            Falls Sie diese E-Mail nicht angefordert haben, ignorieren Sie sie bitte.
+
+            Mit freundlichen Grüßen
+            STWEG 3 - Rosenweg 9
+
+      - name: Commit OTP file
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add stweg3/waschkueche-data/otp.json
+          git commit -m "🔐 Add OTP for ${{ github.event.inputs.email }}" || echo "No changes to commit"
+          git push
