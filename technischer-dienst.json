@@ -35,9 +35,9 @@
       "name": "Andreas Debona",
       "email": "debona.andreas@teleport.ch",
       "telefon": "+41 79 775 92 01",
-      "wohnung": "1OG.1",
-      "stweg": "STWEG 3",
-      "rolle": "Technischer Dienst & Ausschuss STWEG 3",
+      "wohnung": null,
+      "stweg": "STWEG 7",
+      "rolle": "Technischer Dienst Kooperation",
       "berechtigungen": {
         "alle_stwegs_zugriff": true,
         "ip_verwaltung": true,
