@@ -638,40 +638,51 @@
 
         async function loadAdminDevices() {
             try {
-                const response = await fetch(`${API_BASE_URL}/devices`);
-                const devices = await response.json();
+                const devices = await API.getDevices();
 
                 const html = `
                     <section class="py-8">
                         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                            <h2 class="text-2xl font-bold text-gray-800 mb-6">Geräte-Verwaltung</h2>
+                            <div class="flex justify-between items-center mb-6">
+                                <h2 class="text-2xl font-bold text-gray-800">Geräte-Verwaltung</h2>
+                                <button onclick="addDevice()" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
+                                    + Gerät hinzufügen
+                                </button>
+                            </div>
                             <div class="grid md:grid-cols-2 gap-6">
                                 ${devices.map(d => `
-                                    <div class="bg-white p-6 rounded-lg shadow-md border-2 ${d.is_online ? 'border-green-200' : 'border-red-200'}">
+                                    <div class="bg-white p-6 rounded-lg shadow-md border-2 ${d.is_available ? 'border-green-200' : 'border-red-200'}">
                                         <div class="flex justify-between items-start mb-4">
                                             <div>
                                                 <h3 class="text-lg font-semibold text-gray-800">${d.device_name}</h3>
                                                 <p class="text-sm text-gray-600">${d.location}</p>
+                                                <p class="text-xs text-gray-500 mt-1">${d.device_type === 'washer' ? '🧺 Waschmaschine' : '🌪️ Trockner'}</p>
                                             </div>
-                                            <span class="px-2 py-1 text-xs rounded-full ${d.is_online ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
-                                                ${d.is_online ? 'Online' : 'Offline'}
+                                            <span class="px-2 py-1 text-xs rounded-full ${d.is_available ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
+                                                ${d.is_available ? 'Verfügbar' : 'In Benutzung'}
                                             </span>
                                         </div>
                                         <div class="space-y-2 text-sm">
                                             <div class="flex justify-between">
-                                                <span class="text-gray-600">Status:</span>
-                                                <span class="font-medium">${d.is_in_use ? 'In Benutzung' : 'Verfügbar'}</span>
-                                            </div>
-                                            ${d.is_online ? `
-                                                <div class="flex justify-between">
-                                                    <span class="text-gray-600">Leistung:</span>
-                                                    <span class="font-medium">${d.power?.toFixed(1) || '0'} W</span>
-                                                </div>
-                                            ` : ''}
-                                            <div class="flex justify-between">
-                                                <span class="text-gray-600">IP:</span>
+                                                <span class="text-gray-600">Shelly IP:</span>
                                                 <span class="font-mono text-xs">${d.shelly_ip}</span>
                                             </div>
+                                            <div class="flex justify-between">
+                                                <span class="text-gray-600">Preis:</span>
+                                                <span class="font-medium">CHF ${d.cost_per_kwh.toFixed(2)}/kWh</span>
+                                            </div>
+                                            <div class="flex justify-between">
+                                                <span class="text-gray-600">Device ID:</span>
+                                                <span class="font-mono text-xs">${d.device_id}</span>
+                                            </div>
+                                        </div>
+                                        <div class="mt-4 flex gap-2">
+                                            <button onclick="editDevice(${d.id})" class="flex-1 bg-blue-100 text-blue-700 px-3 py-2 rounded text-sm hover:bg-blue-200 transition">
+                                                Bearbeiten
+                                            </button>
+                                            <button onclick="testDevice('${d.shelly_ip}')" class="flex-1 bg-yellow-100 text-yellow-700 px-3 py-2 rounded text-sm hover:bg-yellow-200 transition">
+                                                Testen
+                                            </button>
                                         </div>
                                     </div>
                                 `).join('')}
@@ -682,6 +693,56 @@
                 document.getElementById('dynamic-content').innerHTML = html;
             } catch (error) {
                 console.error('Error loading devices:', error);
+                alert('Fehler beim Laden der Geräte: ' + error.message);
+            }
+        }
+
+        function addDevice() {
+            const deviceName = prompt('Gerätename (z.B. Waschmaschine 3):');
+            if (!deviceName) return;
+
+            const deviceType = prompt('Typ (washer oder dryer):');
+            if (!deviceType) return;
+
+            const location = prompt('Standort (z.B. Waschküche 1):');
+            if (!location) return;
+
+            const shellyIP = prompt('Shelly IP-Adresse (z.B. 192.168.1.100):');
+            if (!shellyIP) return;
+
+            alert('⚠️ Gerät hinzufügen:\n\n' +
+                  'Bitte füge manuell in waschkueche-data/devices.json hinzu:\n\n' +
+                  JSON.stringify({
+                      id: 'NEXT_ID',
+                      device_id: 'shellypro1pm-' + deviceName.toLowerCase().replace(/\s/g, ''),
+                      device_name: deviceName,
+                      device_type: deviceType,
+                      location: location,
+                      shelly_ip: shellyIP,
+                      cost_per_kwh: 0.30,
+                      is_available: true
+                  }, null, 2));
+        }
+
+        function editDevice(deviceId) {
+            alert('⚠️ Gerät bearbeiten:\n\n' +
+                  'Bitte bearbeite direkt in waschkueche-data/devices.json\n' +
+                  'Device ID: ' + deviceId);
+        }
+
+        async function testDevice(ip) {
+            try {
+                const status = await API.getShellyStatus(ip);
+                if (status) {
+                    alert('✅ Shelly Gerät erreichbar!\n\n' +
+                          'Leistung: ' + (status.apower || 0) + ' W\n' +
+                          'Spannung: ' + (status.voltage || 0) + ' V\n' +
+                          'Status: ' + (status.output ? 'EIN' : 'AUS'));
+                } else {
+                    alert('❌ Gerät nicht erreichbar!\n\nBitte prüfe:\n- IP-Adresse korrekt?\n- Gerät im gleichen Netzwerk?\n- Firewall-Einstellungen');
+                }
+            } catch (error) {
+                alert('❌ Fehler beim Testen: ' + error.message);
             }
         }
 
