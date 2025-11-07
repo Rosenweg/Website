@@ -50,27 +50,6 @@
         "Geräte-Wartung",
         "Technischer Support vor Ort"
       ]
-    },
-    {
-      "id": "td_rolf",
-      "name": "Rolf Müller",
-      "email": "rolf@juroct.net",
-      "telefon": "+41 44 586 45 42",
-      "wohnung": null,
-      "stweg": null,
-      "rolle": "Technischer Dienst Kooperation",
-      "berechtigungen": {
-        "alle_stwegs_zugriff": true,
-        "ip_verwaltung": true,
-        "geraete_verwaltung": true,
-        "alle_verbraeuche_sehen": true,
-        "netzwerk_admin": true
-      },
-      "zustaendigkeiten": [
-        "Netzwerk-Administration",
-        "Server-Infrastruktur",
-        "Backup-Systeme"
-      ]
     }
   ],
   "berechtigungen_erklaerung": {
