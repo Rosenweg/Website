@@ -141,7 +141,7 @@ Bei technischen Problemen:
 
 **E-Mail**: technik@rosenweg9.ch
 
-Für vollständige Kontaktdaten und Berechtigungen siehe: [technischer-dienst.json](../stweg3/technischer-dienst.json)
+Für vollständige Kontaktdaten und Berechtigungen siehe: [technischer-dienst.json](../technischer-dienst.json)
 
 **Mitglieder**:
 - Stefan Müller (STWEG 3)

@@ -16,8 +16,8 @@
       "stweg_nummer": 2
     },
     "technischer_dienst": {
-      "_hinweis": "Vollständige Daten siehe stweg3/technischer-dienst.json",
-      "quelle": "stweg3/technischer-dienst.json",
+      "_hinweis": "Vollständige Daten siehe technischer-dienst.json",
+      "quelle": "technischer-dienst.json",
       "email": "technik@rosenweg9.ch"
     },
     "vertreter": [

@@ -47,8 +47,8 @@
     }
   ],
   "technischer_dienst": {
-    "_hinweis": "Vollständige Daten siehe technischer-dienst.json",
-    "quelle": "technischer-dienst.json",
+    "_hinweis": "Vollständige Daten siehe ../technischer-dienst.json",
+    "quelle": "../technischer-dienst.json",
     "email": "technik@rosenweg9.ch",
     "mitglieder_referenz": [
       {
