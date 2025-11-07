@@ -1,11 +1,12 @@
 /**
  * Waschküche API Client - JSON-basierte Static Site Implementation
- * Verwendet GitHub API für Workflow-Dispatch und lokale JSON-Dateien
+ * Verwendet N8N-Webhook für OTP-Versand und lokale JSON-Dateien
  */
 
 const WaschkuecheAPI = {
     // Konfiguration
     dataPath: 'waschkueche-data',
+    N8N_WEBHOOK_URL: 'https://n8n.juroct.net/webhook/stweg3-otp',
 
     // E-Mail-Whitelisten
     USER_EMAILS: [
@@ -21,6 +22,10 @@ const WaschkuecheAPI = {
         'fersztand.basil@teleport.ch',
         'hello@langpartners.ch'
     ],
+
+    // OTP-Storage (für Session-Management)
+    currentOTP: null,
+    otpTimestamp: null,
 
     /**
      * Generiert einen 6-stelligen OTP-Code
@@ -58,8 +63,7 @@ const WaschkuecheAPI = {
     },
 
     /**
-     * Sendet OTP-Code (simuliert GitHub Actions Workflow)
-     * In Produktion: GitHub API Workflow Dispatch
+     * Sendet OTP-Code via N8N-Webhook
      */
     async sendOTP(email) {
         if (!this.isEmailAuthorized(email)) {
@@ -67,62 +71,56 @@ const WaschkuecheAPI = {
         }
 
         const otpCode = this.generateOTP();
+        this.currentOTP = otpCode;
+        this.otpTimestamp = Date.now();
 
-        // HINWEIS: In Produktion würde hier der GitHub Actions Workflow getriggert:
-        // POST https://api.github.com/repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches
-        // mit { ref: 'main', inputs: { email, otp_code: otpCode } }
+        try {
+            const response = await fetch(this.N8N_WEBHOOK_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    email: email,
+                    otp: otpCode,
+                    timestamp: new Date().toISOString()
+                })
+            });
 
-        console.log('OTP für', email, ':', otpCode);
+            if (!response.ok) {
+                throw new Error('Fehler beim Senden des OTP-Codes');
+            }
 
-        // Für Demo: OTP im localStorage speichern
-        const otp = {
-            email,
-            code: otpCode,
-            created_at: new Date().toISOString(),
-            expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-            used: false
-        };
-
-        localStorage.setItem('demo_otp_' + email, JSON.stringify(otp));
-
-        // Simuliere E-Mail-Versand
-        alert(`DEMO-MODUS: Ihr OTP-Code lautet: ${otpCode}\n\nIn Produktion wird dieser per E-Mail gesendet.`);
-
-        return { success: true, message: 'OTP wurde gesendet' };
+            return { success: true, message: 'OTP wurde per E-Mail gesendet' };
+        } catch (error) {
+            console.error('N8N Webhook Fehler:', error);
+            throw new Error('Fehler beim Senden der E-Mail. Bitte versuchen Sie es erneut.');
+        }
     },
 
     /**
      * Verifiziert OTP-Code
      */
     async verifyOTP(email, code) {
-        // Für Demo: OTP aus localStorage lesen
-        const storedOTP = localStorage.getItem('demo_otp_' + email);
-
-        if (!storedOTP) {
+        // Prüfe ob Code existiert
+        if (!this.currentOTP) {
             throw new Error('Kein OTP gefunden. Bitte fordern Sie einen neuen Code an.');
         }
 
-        const otp = JSON.parse(storedOTP);
-
-        // Prüfe ob Code abgelaufen
-        if (new Date(otp.expires_at) < new Date()) {
-            localStorage.removeItem('demo_otp_' + email);
+        // Prüfe ob Code abgelaufen (10 Minuten)
+        const OTP_VALIDITY = 10 * 60 * 1000; // 10 Minuten
+        if (Date.now() - this.otpTimestamp > OTP_VALIDITY) {
+            this.currentOTP = null;
             throw new Error('OTP-Code ist abgelaufen. Bitte fordern Sie einen neuen Code an.');
         }
 
-        // Prüfe ob Code bereits verwendet
-        if (otp.used) {
-            throw new Error('Dieser OTP-Code wurde bereits verwendet.');
-        }
-
         // Prüfe Code
-        if (otp.code !== code) {
+        if (this.currentOTP !== code) {
             throw new Error('Ungültiger OTP-Code');
         }
 
-        // Markiere als verwendet
-        otp.used = true;
-        localStorage.setItem('demo_otp_' + email, JSON.stringify(otp));
+        // Code ist gültig - lösche ihn (Einmalverwendung)
+        this.currentOTP = null;
 
         // Erstelle Session-Token
         const sessionToken = btoa(JSON.stringify({

@@ -4,10 +4,10 @@
 
 Das Smart Waschküchen-System ist eine **vollständig statische Lösung** für die STWEG 3 in Rosenweg 9, Kaiseraugst. Es verwendet:
 
-- ✅ **JSON-Dateien** für Datenspeicherung (keine Datenbank)
-- ✅ **GitHub Actions** für Backend-Operationen (kein Node.js-Server)
+- ✅ **JSON-Dateien** für Datenspeicherung (keine Datenbank erforderlich)
+- ✅ **N8N-Webhook** für OTP-E-Mail-Versand (`https://n8n.juroct.net/webhook/stweg3-otp`)
+- ✅ **GitHub Actions** für Daten-Updates (optional)
 - ✅ **Shelly Pro 1 PM** für Energiemessung
-- ✅ **OTP-Authentifizierung** per E-Mail
 - ✅ **Rollen-basierter Zugriff** (Bewohner & Ausschuss)
 
 ## 📁 Dateistruktur
@@ -15,39 +15,47 @@ Das Smart Waschküchen-System ist eine **vollständig statische Lösung** für d
 ```
 stweg3/
 ├── waschkueche.html              # Hauptseite mit OTP-Auth
-├── waschkueche-api.js            # API-Client für JSON-Dateien
+├── waschkueche-api.js            # API-Client für JSON-Dateien + N8N
 ├── waschkueche-management.html   # Terminal-Interface (USB-Auth)
 ├── waschkueche-management-info.html  # Dokumentation
 └── waschkueche-data/             # JSON-Datenbank
     ├── users.json                # Benutzer & Guthaben
     ├── devices.json              # Shelly-Geräte
     ├── sessions.json             # Nutzungs-Sessions
-    ├── transactions.json         # Transaktionen
-    └── otp.json                  # OTP-Codes (temporär)
+    └── transactions.json         # Transaktionen
 
 .github/workflows/
-├── waschkueche-otp.yml           # OTP-E-Mail-Versand
 └── waschkueche-update.yml        # Daten-Updates (Balance, Sessions)
 ```
 
 ## 🚀 Setup & Installation
 
-### 1. GitHub Secrets konfigurieren
+### 1. N8N-Webhook (OTP-Versand)
 
-Füge folgende Secrets in deinem GitHub Repository hinzu (`Settings > Secrets and variables > Actions`):
+Der OTP-Versand erfolgt über einen **bereits konfigurierten N8N-Webhook**:
 
-```
-SMTP_SERVER=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USERNAME=your-email@gmail.com
-SMTP_PASSWORD=your-app-password
-SMTP_FROM=noreply@stweg3.ch
+```javascript
+N8N_WEBHOOK_URL: 'https://n8n.juroct.net/webhook/stweg3-otp'
 ```
 
-**Für Gmail:**
-1. Aktiviere 2-Faktor-Authentifizierung
-2. Erstelle ein App-Passwort: https://myaccount.google.com/apppasswords
-3. Verwende dieses als `SMTP_PASSWORD`
+**Request Format:**
+```json
+{
+  "email": "user@example.com",
+  "otp": "123456",
+  "timestamp": "2025-01-20T10:30:00Z"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "OTP sent to user@example.com"
+}
+```
+
+✅ **Keine weitere Konfiguration erforderlich** - der Webhook ist bereits aktiv und wird von anderen STWEG3-Seiten (Kontaktliste, Admin) genutzt!
 
 ### 2. Shelly Pro 1 PM Geräte konfigurieren
 
@@ -66,6 +74,7 @@ SMTP_FROM=noreply@stweg3.ch
        {
          "id": 1,
          "device_id": "shellypro1pm-waschmaschine1",
+         "device_name": "Waschmaschine 1",
          "shelly_ip": "192.168.1.100",
          ...
        }
@@ -85,8 +94,8 @@ Bearbeite `waschkueche-api.js`:
 ```javascript
 // Bewohner (nur eigene Daten sehen)
 USER_EMAILS: [
-    'bewohner1@example.com',
-    'bewohner2@example.com',
+    'max.mustermann@example.com',
+    'anna.schmidt@example.com',
     ...
 ],
 
@@ -117,13 +126,13 @@ Aktualisiere auch `users.json` mit den echten E-Mail-Adressen:
 
 ## 🔐 Authentifizierung & Zugriff
 
-### OTP-Authentifizierung
+### OTP-Ablauf (mit N8N)
 
-1. **Benutzer gibt E-Mail ein**
-2. **System prüft Berechtigung** (USER_EMAILS oder ADMIN_EMAILS)
-3. **GitHub Action sendet OTP** (6-stelliger Code per E-Mail)
-4. **Benutzer gibt OTP ein**
-5. **System validiert** und zeigt entsprechendes Dashboard
+1. **Benutzer gibt E-Mail ein** → Frontend validiert gegen Whitelist
+2. **OTP wird generiert** (6-stellig) und an N8N-Webhook gesendet
+3. **N8N sendet E-Mail** mit OTP-Code
+4. **Benutzer gibt OTP ein** → Frontend validiert (10 Min. Gültigkeit)
+5. **Session wird erstellt** → Dashboard wird geladen
 
 ### Berechtigungsstufen
 
@@ -143,38 +152,28 @@ Aktualisiere auch `users.json` mit den echten E-Mail-Adressen:
 
 ## 💾 Daten-Management
 
-### GitHub Actions Workflows
+### JSON-Dateien manuell bearbeiten
 
-#### 1. OTP-E-Mail senden
-
-**Manueller Trigger** (für Tests):
+Die einfachste Methode für Daten-Updates:
 
 ```bash
-# GitHub UI: Actions > Waschküche OTP Email > Run workflow
-# Inputs:
-# - email: max.mustermann@example.com
-# - otp_code: 123456
+# Guthaben aufladen
+vim stweg3/waschkueche-data/users.json
+# balance von User 1 ändern: 50.00 → 100.00
+
+# Transaction hinzufügen
+vim stweg3/waschkueche-data/transactions.json
+# Neuen Eintrag hinzufügen
+
+# Committen
+git add stweg3/waschkueche-data/*.json
+git commit -m "💰 Guthaben aufgeladen für User 1"
+git push
 ```
 
-**Automatisch** (vom Frontend):
+### GitHub Actions für automatische Updates (optional)
 
-```javascript
-// GitHub API
-POST https://api.github.com/repos/{owner}/{repo}/actions/workflows/waschkueche-otp.yml/dispatches
-Headers:
-  Authorization: Bearer <GITHUB_TOKEN>
-  Accept: application/vnd.github+json
-Body:
-  {
-    "ref": "main",
-    "inputs": {
-      "email": "user@example.com",
-      "otp_code": "123456"
-    }
-  }
-```
-
-#### 2. Guthaben aufladen
+Falls automatische Daten-Updates gewünscht:
 
 ```bash
 # GitHub UI: Actions > Waschküche Data Update > Run workflow
@@ -183,38 +182,6 @@ Body:
 # - user_id: 1
 # - amount: 50.00
 ```
-
-Aktualisiert automatisch:
-- `users.json` (balance += amount)
-- `transactions.json` (neuer Eintrag)
-
-#### 3. Session starten
-
-```bash
-# Inputs:
-# - action: start_session
-# - user_id: 1
-# - device_id: 1
-```
-
-Aktualisiert:
-- `sessions.json` (neue Session)
-- `devices.json` (is_available = false)
-
-#### 4. Session beenden
-
-```bash
-# Inputs:
-# - action: end_session
-# - session_id: 5
-# - energy_consumed: 1.25
-```
-
-Aktualisiert:
-- `sessions.json` (ended_at, energy_consumed, cost)
-- `users.json` (balance -= cost)
-- `transactions.json` (neuer Eintrag)
-- `devices.json` (is_available = true)
 
 ## 🔌 Shelly API Integration
 
@@ -263,119 +230,28 @@ console.log(energy);
 
 ## 📊 Typischer Ablauf: Wäsche waschen
 
-### 1. Benutzer startet Session (via Terminal oder App)
+### 1. Benutzer startet Session (via Terminal)
 
-```javascript
-// Frontend ruft GitHub Action auf
-triggerWorkflow({
-  action: 'start_session',
-  user_id: 1,
-  device_id: 1
-});
-```
+- USB-Stick einstecken
+- Gerät auswählen
+- Session wird in `sessions.json` erstellt
+- Shelly-Gerät wird eingeschaltet
 
-GitHub Action:
-- Erstellt neue Session in `sessions.json`
-- Setzt Device auf `is_available: false`
-- Returned `session_id`
+### 2. Wäsche läuft
 
-### 2. Shelly-Gerät einschalten
-
-```javascript
-// Frontend schaltet Gerät ein
-await API.setShellySwitch('192.168.1.100', true);
-
-// Optional: Energiezähler zurücksetzen
-await fetch('http://192.168.1.100/rpc/Switch.ResetCounters?id=0');
-```
+- Shelly misst Energieverbrauch
+- Frontend zeigt Live-Daten (optional)
 
 ### 3. Benutzer beendet Session
 
-```javascript
-// Energieverbrauch abfragen
-const energy = await API.getShellyEnergy('192.168.1.100');
+- Session wird geschlossen
+- Energieverbrauch wird abgelesen (z.B. 1.25 kWh)
+- Kosten werden berechnet (1.25 × CHF 0.30 = CHF 0.38)
+- Guthaben wird reduziert
+- Transaktion wird gespeichert
+- Shelly-Gerät wird ausgeschaltet
 
-// Session beenden
-triggerWorkflow({
-  action: 'end_session',
-  session_id: session_id,
-  energy_consumed: energy.totalEnergy
-});
-```
-
-GitHub Action:
-- Berechnet Kosten: `cost = energy * 0.30 CHF/kWh`
-- Aktualisiert Session (ended_at, energy, cost)
-- Zieht Kosten von Guthaben ab
-- Erstellt Transaktion
-- Setzt Device auf `is_available: true`
-
-### 4. Gerät ausschalten
-
-```javascript
-await API.setShellySwitch('192.168.1.100', false);
-```
-
-## 🧪 Demo-Modus
-
-Das System läuft im **Demo-Modus** wenn:
-- Keine GitHub Token konfiguriert ist
-- Kein SMTP-Server eingerichtet ist
-- Man lokal entwickelt
-
-### Demo-Features:
-
-1. **OTP im localStorage** statt E-Mail
-   ```javascript
-   localStorage.getItem('demo_otp_' + email)
-   ```
-
-2. **Alert statt E-Mail**
-   ```javascript
-   alert(`Ihr OTP-Code: ${otpCode}`);
-   ```
-
-3. **Keine echten Workflow-Triggers**
-   - Daten werden nur im Browser geladen
-   - Änderungen werden nicht gespeichert
-
-### Produktions-Modus aktivieren:
-
-1. GitHub Token als Secret hinzufügen:
-   ```
-   WASCHKUECHE_GITHUB_TOKEN=ghp_xxxxxxxxxxxxx
-   ```
-
-2. Token im Frontend verwenden:
-   ```javascript
-   const GITHUB_TOKEN = '<%= ENV.WASCHKUECHE_GITHUB_TOKEN %>';
-   ```
-
-3. Workflow-Dispatch aktivieren im Frontend
-
-## 📱 Zugriffswege
-
-### 1. Web-Dashboard (waschkueche.html)
-- **URL**: `https://yoursite.ch/stweg3/waschkueche.html`
-- **Auth**: OTP per E-Mail
-- **Für**: Bewohner & Ausschuss
-- **Features**: Verbrauchsanzeige, Statistiken, Admin-Panel
-
-### 2. Terminal-Interface (waschkueche-management.html)
-- **URL**: `https://yoursite.ch/stweg3/waschkueche-management.html`
-- **Auth**: USB-Stick / Yubikey
-- **Für**: Vor-Ort-Nutzung
-- **Features**: Session start/stop, Live-Monitoring
-
-### 3. Dokumentation (waschkueche-management-info.html)
-- **URL**: `https://yoursite.ch/stweg3/waschkueche-management-info.html`
-- **Auth**: Keine
-- **Für**: Alle
-- **Features**: Hilfe, FAQ, Anleitungen
-
-## 🔧 Entwicklung & Testing
-
-### Lokaler Test
+## 🧪 Lokaler Test
 
 1. **Static File Server starten**:
    ```bash
@@ -388,11 +264,9 @@ Das System läuft im **Demo-Modus** wenn:
    http://localhost:8000/waschkueche.html
    ```
 
-3. **OTP-Code aus Alert kopieren**
-
-4. **Daten testen**:
-   - Bearbeite JSON-Dateien manuell
-   - Lade Seite neu (F5)
+3. **E-Mail eingeben und OTP anfordern**
+   - OTP wird an deine echte E-Mail gesendet
+   - Code eingeben und Dashboard testen
 
 ### Shelly-Geräte testen
 
@@ -425,23 +299,16 @@ Exportiert alle Sessions mit:
 
 ### Monatliche Abrechnung
 
-1. **Sessions für Monat exportieren**
-2. **Pro Benutzer summieren**:
-   ```
-   Max Mustermann (EG.1):
-   - 5 Sessions
-   - 6.25 kWh
-   - CHF 1.88
-   ```
-
-3. **Von Guthaben abziehen** (automatisch bei Session-Ende)
+1. **Sessions für Monat filtern** (im JSON oder via Export)
+2. **Pro Benutzer summieren**
+3. **Abrechnung erstellen** (wird automatisch vom Guthaben abgezogen)
 
 ## 🔐 Sicherheit
 
-### Best Practices
+### Aktuelle Implementation
 
-✅ **OTP-Codes**:
-- 6-stellig (100.000 Kombinationen)
+✅ **OTP via N8N**:
+- 6-stellige Codes
 - 10 Minuten Gültigkeit
 - Einmalverwendung
 
@@ -449,46 +316,9 @@ Exportiert alle Sessions mit:
 - Nur bekannte E-Mails erlaubt
 - Getrennte Listen (User / Admin)
 
-✅ **GitHub Secrets**:
-- SMTP-Credentials sicher gespeichert
-- Nur GitHub Actions hat Zugriff
-
-✅ **CORS**:
-- Shelly-API nur im lokalen Netzwerk erreichbar
-- Alternativ: Shelly Cloud API nutzen
-
-### Noch zu implementieren
-
-⚠️ **Session-Timeout**:
-```javascript
-// Nach 24h abmelden
-if (sessionAge > 24 * 60 * 60 * 1000) {
-  API.logout();
-}
-```
-
-⚠️ **Rate-Limiting**:
-```javascript
-// Max 3 OTP-Anfragen pro Stunde
-const attempts = getOTPAttempts(email);
-if (attempts >= 3) {
-  throw new Error('Zu viele Anfragen');
-}
-```
-
-⚠️ **Audit-Log**:
-```json
-{
-  "logs": [
-    {
-      "timestamp": "2025-01-20T10:30:00Z",
-      "action": "login",
-      "user": "max.mustermann@example.com",
-      "ip": "192.168.1.50"
-    }
-  ]
-}
-```
+✅ **Shelly API**:
+- Nur im lokalen Netzwerk erreichbar
+- Keine Cloud-Verbindung erforderlich
 
 ## 🐛 Troubleshooting
 
@@ -496,10 +326,12 @@ if (attempts >= 3) {
 
 **Lösung**:
 1. Prüfe Spam-Ordner
-2. Prüfe SMTP-Settings in GitHub Secrets
-3. Teste SMTP-Verbindung:
+2. Prüfe N8N-Webhook-Status (frage Admin)
+3. Teste Webhook manuell:
    ```bash
-   telnet smtp.gmail.com 587
+   curl -X POST https://n8n.juroct.net/webhook/stweg3-otp \
+     -H "Content-Type: application/json" \
+     -d '{"email":"test@example.com","otp":"123456","timestamp":"2025-01-20T10:00:00Z"}'
    ```
 
 ### Problem: Shelly-Gerät nicht erreichbar
@@ -513,48 +345,34 @@ if (attempts >= 3) {
 3. Prüfe WLAN-Verbindung
 4. Firewall-Regeln prüfen
 
-### Problem: Daten werden nicht gespeichert
+### Problem: JSON-Daten nicht sichtbar
 
 **Lösung**:
-- **Lokal**: Normal - Demo-Modus speichert nicht
-- **Produktion**: Prüfe GitHub Actions Status
-  - `Actions` Tab im Repository
-  - Workflow-Logs ansehen
-  - Permissions prüfen
-
-### Problem: "Permission denied" bei Workflow
-
-**Lösung**:
-```yaml
-# In .github/workflows/*.yml
-jobs:
-  update-data:
-    permissions:
-      contents: write  # <-- Dies hinzufügen
-```
+- Browser-Cache leeren (Strg+Shift+R)
+- Datei-Pfad prüfen (`waschkueche-data/users.json`)
+- CORS-Fehler in Browser-Console prüfen
 
 ## 📞 Support
 
 Bei Fragen:
 - **Ausschuss STWEG 3**: stefan+rosenweg@juroct.ch
 - **Hausverwaltung**: hello@langpartners.ch
-- **Technischer Support**: [GitHub Issues](https://github.com/your-repo/issues)
+- **Technischer Support N8N**: stefan@juroct.net
 
 ## 📝 Changelog
 
-### v1.0.0 (2025-01-20)
+### v2.0.0 (2025-01-20) - **Aktuell**
+- ✅ **N8N-Webhook Integration** statt GitHub Actions für OTP
 - ✅ JSON-basierte Datenspeicherung
-- ✅ GitHub Actions für Backend
-- ✅ OTP-Authentifizierung
 - ✅ Shelly Pro 1 PM Integration
 - ✅ Rollen-basierter Zugriff
-- ✅ Demo-Modus für lokale Entwicklung
+- ✅ Adaptive Dashboards
 
-### Geplant (v1.1.0)
-- 🔄 GitHub API Integration (Workflow Dispatch vom Frontend)
+### Geplant (v2.1.0)
 - 🔄 Automatische Session-Timeouts
 - 🔄 Push-Benachrichtigungen
 - 🔄 Mobile App (PWA)
+- 🔄 Energieverbrauch-Charts
 
 ---
 
