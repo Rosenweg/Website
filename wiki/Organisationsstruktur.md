@@ -67,7 +67,6 @@ Die gemeinsam genutzte Tiefgarage (Einstellhalle), die allen Eigentümern zur Ve
 - **Technischer Dienst**: Siehe [technischer-dienst.json](../technischer-dienst.json) für vollständige Details
   - Stefan Müller (STWEG 3)
   - Andreas Debona (STWEG 3)
-  - Rolf Müller (extern)
 - **Mailingliste**: ausschuss@rosenweg4303.ch
 
 ## 👥 Ausschuss-Vertreter

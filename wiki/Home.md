@@ -146,7 +146,6 @@ Für vollständige Kontaktdaten und Berechtigungen siehe: [technischer-dienst.js
 **Mitglieder**:
 - Stefan Müller (STWEG 3)
 - Andreas Debona (STWEG 3)
-- Rolf Müller (extern)
 
 ### Hausverwaltung
 
