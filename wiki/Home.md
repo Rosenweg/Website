@@ -139,17 +139,14 @@ Bei technischen Problemen:
 
 ### Technischer Dienst Rosenweg
 
-**E-Mail**: technik@rosenweg4303.ch
+**E-Mail**: technik@rosenweg9.ch
 
-**Stefan Müller**
-- E-Mail: stefan+rosenweg@juroct.ch
-- Telefon: +41 76 519 99 70
-- STWEG: 3
+Für vollständige Kontaktdaten und Berechtigungen siehe: [technischer-dienst.json](../stweg3/technischer-dienst.json)
 
-**Andreas De Bona**
-- E-Mail: redbon@bluewin.ch
-- Telefon: +41 79 555 08 56
-- STWEG: 7 & 8
+**Mitglieder**:
+- Stefan Müller (STWEG 3)
+- Andreas Debona (STWEG 3)
+- Rolf Müller (extern)
 
 ### Hausverwaltung
 

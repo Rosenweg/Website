@@ -64,7 +64,10 @@ Die gemeinsam genutzte Tiefgarage (Einstellhalle), die allen Eigentümern zur Ve
 
 **Ämter:**
 - **Präsident**: Jörg Herrmann (STWEG 2)
-- **Technischer Dienst**: Stefan Müller (STWEG 3), Andreas De Bona (STWEG 7)
+- **Technischer Dienst**: Siehe [technischer-dienst.json](../stweg3/technischer-dienst.json) für vollständige Details
+  - Stefan Müller (STWEG 3)
+  - Andreas Debona (STWEG 3)
+  - Rolf Müller (extern)
 - **Mailingliste**: ausschuss@rosenweg4303.ch
 
 ## 👥 Ausschuss-Vertreter
@@ -192,8 +195,8 @@ Die gemeinsam genutzte Tiefgarage (Einstellhalle), die allen Eigentümern zur Ve
 
 ### Wer aktualisiert die Website?
 
-- **Technischer Dienst**: Stefan Müller, Andreas De Bona
-- **E-Mail**: technik@rosenweg4303.ch
+- **Technischer Dienst**: Siehe [technischer-dienst.json](../stweg3/technischer-dienst.json)
+- **E-Mail**: technik@rosenweg9.ch
 - **Bei Änderungen**: GitHub Repository aktualisieren
 
 ### Was sollte regelmäßig aktualisiert werden?
@@ -226,8 +229,8 @@ Bei Fragen zur Struktur:
 - Tel: +41 61 228 18 18
 
 **Technischer Dienst (Website)**
-- E-Mail: technik@rosenweg4303.ch
-- Stefan Müller: +41 76 519 99 70
+- E-Mail: technik@rosenweg9.ch
+- Details: Siehe [technischer-dienst.json](../stweg3/technischer-dienst.json)
 
 ---
 
