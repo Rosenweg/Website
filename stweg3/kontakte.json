@@ -32,34 +32,42 @@
         "waschkueche_admin": true,
         "alle_verbraeuche_sehen": true
       }
-    }
-  ],
-  "technischer_dienst_rosenweg": [
-    {
-      "funktion": "Technischer Dienst Kooperation",
-      "name": "Stefan Müller",
-      "email": "stefan+rosenweg@juroct.ch",
-      "telefon": "+41 76 519 99 70",
-      "berechtigungen": {
-        "alle_stwegs_zugriff": true,
-        "ip_verwaltung": true,
-        "geraete_verwaltung": true,
-        "alle_verbraeuche_sehen": true
-      }
     },
     {
-      "funktion": "Technischer Dienst Kooperation",
-      "name": "Rolf Müller",
-      "email": "rolf@juroct.net",
-      "telefon": "+41 61 811 26 90",
+      "funktion": "Vertreter 3 & Technischer Dienst",
+      "name": "Andreas Debona",
+      "email": "debona.andreas@teleport.ch",
+      "telefon": "+41 79 775 92 01",
+      "wohnung": "1OG.1",
       "berechtigungen": {
-        "alle_stwegs_zugriff": true,
+        "waschkueche_admin": true,
         "ip_verwaltung": true,
-        "geraete_verwaltung": true,
         "alle_verbraeuche_sehen": true
       }
     }
   ],
+  "technischer_dienst": {
+    "_hinweis": "Vollständige Daten siehe technischer-dienst.json",
+    "quelle": "technischer-dienst.json",
+    "email": "technik@rosenweg9.ch",
+    "mitglieder_referenz": [
+      {
+        "id": "td_stefan",
+        "name": "Stefan Müller",
+        "email": "stefan+rosenweg@juroct.ch"
+      },
+      {
+        "id": "td_andreas",
+        "name": "Andreas Debona",
+        "email": "debona.andreas@teleport.ch"
+      },
+      {
+        "id": "td_rolf",
+        "name": "Rolf Müller",
+        "email": "rolf@juroct.net"
+      }
+    ]
+  },
   "wohnungen": {
     "erdgeschoss": [
       {

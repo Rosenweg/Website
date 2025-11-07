@@ -1,0 +1,90 @@
+{
+  "meta": {
+    "beschreibung": "Technischer Dienst der STWEG-Kooperation Rosenweg 9",
+    "zuständigkeit": "Verwaltung und Wartung der technischen Infrastruktur über alle STWEGs hinweg",
+    "letzte_aktualisierung": "2025-11-08"
+  },
+  "mitglieder": [
+    {
+      "id": "td_stefan",
+      "name": "Stefan Müller",
+      "email": "stefan+rosenweg@juroct.ch",
+      "telefon": "+41 76 440 45 42",
+      "wohnung": "2OG.3",
+      "stweg": "STWEG 3",
+      "rolle": "Leitung Technischer Dienst & Entwicklung",
+      "berechtigungen": {
+        "alle_stwegs_zugriff": true,
+        "ip_verwaltung": true,
+        "geraete_verwaltung": true,
+        "alle_verbraeuche_sehen": true,
+        "system_konfiguration": true,
+        "n8n_workflows": true,
+        "github_admin": true
+      },
+      "zustaendigkeiten": [
+        "Smart Home Integration (Shelly, Tasmota)",
+        "n8n Workflow-Entwicklung",
+        "GitHub Pages & Repositories",
+        "Netzwerk-Infrastruktur",
+        "Monitoring & Logging"
+      ]
+    },
+    {
+      "id": "td_andreas",
+      "name": "Andreas Debona",
+      "email": "debona.andreas@teleport.ch",
+      "telefon": "+41 79 775 92 01",
+      "wohnung": "1OG.1",
+      "stweg": "STWEG 3",
+      "rolle": "Technischer Dienst & Ausschuss STWEG 3",
+      "berechtigungen": {
+        "alle_stwegs_zugriff": true,
+        "ip_verwaltung": true,
+        "geraete_verwaltung": true,
+        "alle_verbraeuche_sehen": true,
+        "system_konfiguration": true
+      },
+      "zustaendigkeiten": [
+        "Hardware-Installation",
+        "Geräte-Wartung",
+        "Technischer Support vor Ort"
+      ]
+    },
+    {
+      "id": "td_rolf",
+      "name": "Rolf Müller",
+      "email": "rolf@juroct.net",
+      "telefon": "+41 44 586 45 42",
+      "wohnung": null,
+      "stweg": null,
+      "rolle": "Technischer Dienst Kooperation",
+      "berechtigungen": {
+        "alle_stwegs_zugriff": true,
+        "ip_verwaltung": true,
+        "geraete_verwaltung": true,
+        "alle_verbraeuche_sehen": true,
+        "netzwerk_admin": true
+      },
+      "zustaendigkeiten": [
+        "Netzwerk-Administration",
+        "Server-Infrastruktur",
+        "Backup-Systeme"
+      ]
+    }
+  ],
+  "berechtigungen_erklaerung": {
+    "alle_stwegs_zugriff": "Zugriff auf Daten aller STWEGs (nicht nur eigene)",
+    "ip_verwaltung": "IP-Adressen für Smart Devices vergeben/ändern",
+    "geraete_verwaltung": "Smart Devices hinzufügen, konfigurieren, entfernen",
+    "alle_verbraeuche_sehen": "Stromverbrauch aller Geräte einsehen (nicht nur eigene Wohnung)",
+    "system_konfiguration": "System-Einstellungen und Workflows anpassen",
+    "n8n_workflows": "n8n Workflows erstellen und bearbeiten",
+    "github_admin": "GitHub Repository verwalten",
+    "netzwerk_admin": "Netzwerk-Infrastruktur konfigurieren"
+  },
+  "kontakt": {
+    "email": "technik@rosenweg9.ch",
+    "beschreibung": "Sammel-E-Mail für technische Anliegen der Bewohner"
+  }
+}
