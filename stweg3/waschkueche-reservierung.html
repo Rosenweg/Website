@@ -448,7 +448,7 @@
 
             // Prüfen ob E-Mail berechtigt ist
             if (!isEmailAuthorized(email)) {
-                alert('Diese E-Mail-Adresse ist nicht für die Waschküchen-Reservierung berechtigt.\n\nNur Bewohner mit Waschküchen-Berechtigung und Ausschuss-Mitglieder haben Zugriff.\n\nBei Fragen wenden Sie sich bitte an:\nStefan Müller: stefan+rosenweg@juroct.ch | +41 76 519 99 70');
+                alert('Diese E-Mail-Adresse ist nicht für die Waschküchen-Reservierung berechtigt.\n\nNur Bewohner mit Waschküchen-Berechtigung und Ausschuss-Mitglieder haben Zugriff.\n\nBei Fragen wenden Sie sich bitte an:\nE-Mail: technik@rosenweg9.ch');
                 return;
             }
 
@@ -482,7 +482,7 @@
                 console.error('Fehler beim E-Mail-Versand:', error);
                 document.getElementById('loadingIndicator').classList.add('hidden');
                 document.getElementById('emailStep').classList.remove('hidden');
-                alert('Fehler beim Versand der E-Mail. Bitte versuchen Sie es erneut.\n\nBei anhaltenden Problemen wenden Sie sich an:\nStefan Müller: stefan+rosenweg@juroct.ch | +41 76 519 99 70');
+                alert('Fehler beim Versand der E-Mail. Bitte versuchen Sie es erneut.\n\nBei anhaltenden Problemen wenden Sie sich an:\nE-Mail: technik@rosenweg9.ch');
             }
         }
 
