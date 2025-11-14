@@ -40,6 +40,24 @@ Das Repository enthält einen GitHub Actions Workflow, der **automatisch** die C
    - Ab jetzt werden alle Änderungen an `ausschuss-kontakte.json` automatisch mit Cloudflare synchronisiert
    - Sie können den Status unter **Actions** in Ihrem Repository verfolgen
 
+### Automatische E-Mail-Verifizierung
+
+Das Sync-Skript überprüft automatisch den Verifizierungsstatus aller Ziel-E-Mail-Adressen und sendet Verifizierungs-E-Mails an neue Empfänger:
+
+1. **Neue E-Mail-Adressen**:
+   - Wenn Sie in `ausschuss-kontakte.json` eine neue E-Mail-Adresse hinzufügen, sendet das Skript automatisch eine Verifizierungs-E-Mail
+   - Die Empfänger müssen den Link in der E-Mail anklicken, um die Adresse zu verifizieren
+   - Ohne Verifizierung kann Cloudflare keine E-Mails an diese Adresse weiterleiten
+
+2. **Verifizierungsstatus prüfen**:
+   - Das Skript zeigt an, welche Adressen noch nicht verifiziert sind
+   - Nicht verifizierte Adressen werden in der Ausgabe aufgelistet
+
+3. **Wichtig**:
+   - Informieren Sie die Empfänger, dass sie eine Verifizierungs-E-Mail von Cloudflare erhalten werden
+   - Die E-Mail kommt von `no-reply@cloudflare.com`
+   - Der Betreff lautet etwa "Verify your email address for Cloudflare Email Routing"
+
 ### Manuelle Synchronisation (für lokale Tests)
 
 Sie können das Sync-Skript auch lokal ausführen:
