@@ -12,7 +12,8 @@
     "präsident": {
       "name_vollständig": "Jörg Herrmann",
       "telefon": "+41 79 727 13 78",
-      "email": "jherrmann@gmx.ch",
+      "email": "praesident@rosenweg4303.ch",
+      "email_original": "jherrmann@gmx.ch",
       "stweg_nummer": 2
     },
     "technischer_dienst": {
@@ -25,6 +26,8 @@
         "stweg_nummer": 1,
         "stweg_typ": "Wohngebäude",
         "adressen": "Rosenweg 17/18",
+        "email": "stweg1@rosenweg4303.ch",
+        "email_forwards_to": ["silvia.muenzer@teleport.ch", "urs.speiser@gmail.com"],
         "vertreter": [
           {
             "funktion": "Vertreter 1",
@@ -44,6 +47,8 @@
         "stweg_nummer": 2,
         "stweg_typ": "Wohngebäude",
         "adressen": "Rosenweg 13/14/16",
+        "email": "stweg2@rosenweg4303.ch",
+        "email_forwards_to": ["dariogamboni@hotmail.ch", "jherrmann@gmx.ch"],
         "vertreter": [
           {
             "funktion": "Vertreter 1",
@@ -63,6 +68,8 @@
         "stweg_nummer": 3,
         "stweg_typ": "Wohngebäude",
         "adressen": "Rosenweg 9",
+        "email": "stweg3@rosenweg4303.ch",
+        "email_forwards_to": ["stefan+rosenweg@juroct.ch", "fersztand.basil@teleport.ch"],
         "vertreter": [
           {
             "funktion": "Vertreter 1",
@@ -82,6 +89,8 @@
         "stweg_nummer": 4,
         "stweg_typ": "Wohngebäude",
         "adressen": "Rosenweg 10/12",
+        "email": "stweg4@rosenweg4303.ch",
+        "email_forwards_to": ["francoisgoy@teleport.ch", "thymi@gmx.ch"],
         "vertreter": [
           {
             "funktion": "Vertreter 1",
@@ -101,6 +110,8 @@
         "stweg_nummer": 5,
         "stweg_typ": "Wohngebäude",
         "adressen": "Rosenweg 5/6/8",
+        "email": "stweg5@rosenweg4303.ch",
+        "email_forwards_to": ["m.probst@maneca.ch", "christian.christopher.bucher@gmail.com"],
         "vertreter": [
           {
             "funktion": "Vertreter 1",
@@ -120,6 +131,8 @@
         "stweg_nummer": 6,
         "stweg_typ": "Wohngebäude",
         "adressen": "Rosenweg 1",
+        "email": "stweg6@rosenweg4303.ch",
+        "email_forwards_to": ["mehmet.peker@pekerholding.ag", "wirzj@me.com"],
         "vertreter": [
           {
             "funktion": "Vertreter 1",
@@ -139,6 +152,8 @@
         "stweg_nummer": 7,
         "stweg_typ": "Wohngebäude",
         "adressen": "Rosenweg 2/4",
+        "email": "stweg7@rosenweg4303.ch",
+        "email_forwards_to": ["gisela.studer@hotmail.com", "redbon@bluewin.ch"],
         "vertreter": [
           {
             "funktion": "Vertreterin 1",
@@ -158,6 +173,8 @@
         "stweg_nummer": 8,
         "stweg_typ": "Tiefgarage",
         "adressen": "Einstellhalle (gemeinsame Tiefgarage)",
+        "email": "stweg8@rosenweg4303.ch",
+        "email_forwards_to": ["redbon@bluewin.ch"],
         "vertreter": [
           {
             "funktion": "Vertreter",
