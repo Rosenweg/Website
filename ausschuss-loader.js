@@ -131,7 +131,6 @@ function renderAusschuss(data) {
                 <p class="text-sm font-semibold text-yellow-800 mb-1">🏆 Präsident des Ausschusses</p>
                 <p class="text-sm font-bold text-gray-700">${präsident.name_vollständig}</p>
                 <p class="text-xs text-gray-600">STWEG ${präsident.stweg_nummer}</p>
-                ${präsident.telefon ? `<p class="text-xs text-gray-600">📞 ${präsident.telefon}</p>` : ''}
                 <p class="text-xs text-gray-600">📧 <a href="mailto:${präsident.email}" class="text-blue-600 hover:underline">${präsident.email}</a></p>
             </div>
         `;
@@ -155,15 +154,6 @@ function renderAusschuss(data) {
         // E-Mail-Adresse anzeigen (falls vorhanden)
         if (stweg.email) {
             html += `<p class="text-xs text-gray-600 mt-1">📧 <a href="mailto:${stweg.email}" class="text-blue-600 hover:underline">${stweg.email}</a></p>`;
-        }
-
-        // Telefonnummern anzeigen (nur bei voller Berechtigung verfügbar)
-        if (stweg.vertreter && stweg.vertreter.some(v => v.telefon)) {
-            const telefonnummern = stweg.vertreter
-                .filter(v => v.telefon)
-                .map(v => `${v.name_vollständig}: ${v.telefon}`)
-                .join(' • ');
-            html += `<p class="text-xs text-gray-600 mt-1">📞 ${telefonnummern}</p>`;
         }
 
         html += '</div>';
