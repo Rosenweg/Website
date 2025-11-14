@@ -1,0 +1,33 @@
+# Cloudflare Worker Konfiguration für Ausschuss-API
+#
+# Deployment:
+# 1. Installieren: npm install -g wrangler
+# 2. Login: wrangler login
+# 3. Deployen: wrangler deploy
+
+name = "ausschuss-api"
+main = "ausschuss-api-worker.js"
+compatibility_date = "2024-01-01"
+
+# Worker wird unter dieser Route verfügbar sein:
+# https://ausschuss-api.<your-subdomain>.workers.dev
+# Oder konfigurieren Sie eine Custom Domain/Route
+
+# Optional: Custom Domain/Route konfigurieren
+# routes = [
+#   { pattern = "rosenweg4303.ch/api/*", zone_name = "rosenweg4303.ch" }
+# ]
+# Oder als Subdomain:
+# routes = [
+#   { pattern = "api.rosenweg4303.ch/*", zone_name = "rosenweg4303.ch" }
+# ]
+
+# Umgebungsvariablen (optional)
+# [vars]
+# GITHUB_REPO = "Rosenweg/Website"
+# GITHUB_BRANCH = "main"
+
+# Cache-Bindung (optional, aber empfohlen für Performance)
+# [[kv_namespaces]]
+# binding = "CACHE"
+# id = "your-kv-namespace-id"
