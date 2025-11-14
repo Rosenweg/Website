@@ -402,7 +402,7 @@
                         </svg>
                         <p class="font-semibold mb-2">Fehler beim Laden der Kontaktdaten</p>
                         <p class="text-sm">Bitte versuchen Sie es später erneut oder kontaktieren Sie den technischen Dienst Rosenweg.</p>
-                        <p class="text-sm mt-2">Stefan Müller: <a href="mailto:stefan+rosenweg@juroct.ch" class="text-blue-600 hover:underline">stefan+rosenweg@juroct.ch</a></p>
+                        <p class="text-sm mt-2">E-Mail: <a href="mailto:technik@rosenweg9.ch" class="text-blue-600 hover:underline">technik@rosenweg9.ch</a></p>
                     </div>
                 `;
             }
@@ -432,8 +432,7 @@
                     '<strong>Hinweis:</strong> Alle Eigentümer haben automatisch Zugriff. ' +
                     'Mieter benötigen eine explizite Berechtigung vom Ausschuss.<br><br>' +
                     'Wenden Sie sich an den technischen Dienst Rosenweg:<br>' +
-                    'Stefan Müller: <a href="mailto:stefan+rosenweg@juroct.ch" class="text-blue-600 hover:underline">stefan+rosenweg@juroct.ch</a> | ' +
-                    '<a href="tel:+41765199970" class="text-blue-600 hover:underline">+41 76 519 99 70</a>';
+                    'E-Mail: <a href="mailto:technik@rosenweg9.ch" class="text-blue-600 hover:underline">technik@rosenweg9.ch</a>';
                 submitButton.disabled = false;
                 submitButton.innerHTML = `
                     <svg class="h-5 w-5 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -487,8 +486,7 @@
                 errorMessage += '<br><br>Bitte versuchen Sie es erneut oder kontaktieren Sie den technischen Dienst Rosenweg.';
 
                 errorDiv.querySelector('p').innerHTML = errorMessage +
-                    '<br><br>Stefan Müller: <a href="mailto:stefan+rosenweg@juroct.ch" class="text-blue-600 hover:underline">stefan+rosenweg@juroct.ch</a> | ' +
-                    '<a href="tel:+41765199970" class="text-blue-600 hover:underline">+41 76 519 99 70</a>';
+                    '<br><br>Technischer Dienst: <a href="mailto:technik@rosenweg9.ch" class="text-blue-600 hover:underline">technik@rosenweg9.ch</a>';
             } finally {
                 // Button wieder aktivieren
                 submitButton.disabled = false;
@@ -948,7 +946,7 @@
                 alert('Ein neuer Zugangscode wurde an ' + currentEmail + ' gesendet.');
             } catch (error) {
                 console.error('Fehler beim E-Mail-Versand:', error);
-                alert('Fehler beim Versand. Bitte kontaktieren Sie den technischen Dienst Rosenweg.\n\nStefan Müller: stefan+rosenweg@juroct.ch | +41 76 519 99 70');
+                alert('Fehler beim Versand. Bitte kontaktieren Sie den technischen Dienst Rosenweg.\n\nE-Mail: technik@rosenweg9.ch');
             }
         }
 
