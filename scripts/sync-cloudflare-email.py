@@ -187,6 +187,69 @@ def get_rule_forward_values(rule: Dict) -> List[str]:
     return []
 
 
+def get_verified_addresses() -> Dict[str, Dict]:
+    """Holt die Liste der verifizierten Destination Addresses von Cloudflare"""
+    try:
+        response = requests.get(
+            f"{API_BASE}/addresses",
+            headers=HEADERS,
+            timeout=30
+        )
+        response.raise_for_status()
+        result = response.json()
+
+        if not result.get('success'):
+            print(f"❌ Cloudflare API Fehler: {result.get('errors', 'Unbekannter Fehler')}")
+            return {}
+
+        addresses = result.get('result', [])
+        # Erstelle ein Dictionary mit E-Mail als Key
+        return {
+            addr['email']: {
+                'id': addr.get('tag'),
+                'verified': addr.get('verified'),
+                'created': addr.get('created')
+            }
+            for addr in addresses
+        }
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Fehler beim Abrufen der Destination Addresses: {e}")
+        return {}
+
+
+def request_email_verification(email: str) -> bool:
+    """Fordert Verifizierungs-E-Mail für eine neue Destination Address an"""
+    payload = {
+        "email": email
+    }
+
+    try:
+        response = requests.post(
+            f"{API_BASE}/addresses",
+            headers=HEADERS,
+            json=payload,
+            timeout=30
+        )
+        response.raise_for_status()
+        result = response.json()
+
+        if result.get('success'):
+            print(f"  📧 Verifizierungs-E-Mail gesendet an: {email}")
+            return True
+        else:
+            errors = result.get('errors', [])
+            # Prüfe ob die Adresse bereits existiert (oft Fehlercode 1004)
+            if any('already exists' in str(err).lower() for err in errors):
+                print(f"  ℹ️  E-Mail-Adresse bereits registriert: {email}")
+                return True
+            else:
+                print(f"  ❌ Fehler beim Anfordern der Verifizierung für {email}: {errors}")
+                return False
+    except requests.exceptions.RequestException as e:
+        print(f"  ❌ API-Fehler beim Anfordern der Verifizierung für {email}: {e}")
+        return False
+
+
 def sync_email_routing():
     """Hauptfunktion: Synchronisiert E-Mail-Routing mit Cloudflare"""
     print("🔄 Starte Synchronisation der E-Mail-Routing-Regeln mit Cloudflare...\n")
@@ -197,12 +260,51 @@ def sync_email_routing():
     desired_rules = extract_email_rules(data)
     print(f"  ℹ️  {len(desired_rules)} Regeln in JSON gefunden\n")
 
-    # 2. Hole existierende Regeln von Cloudflare
+    # 2. Extrahiere alle einzigartigen Ziel-E-Mail-Adressen
+    all_destination_emails = set()
+    for _, to_emails in desired_rules:
+        all_destination_emails.update(to_emails)
+    print(f"📧 Gefundene Ziel-E-Mail-Adressen: {len(all_destination_emails)}\n")
+
+    # 3. Hole verifizierte Destination Addresses von Cloudflare
+    print("🔐 Prüfe Verifizierungsstatus der Ziel-E-Mail-Adressen...")
+    verified_addresses = get_verified_addresses()
+    print(f"  ℹ️  {len(verified_addresses)} bereits registrierte Adressen in Cloudflare\n")
+
+    # 4. Identifiziere neue, nicht verifizierte Adressen und fordere Verifizierung an
+    new_addresses = all_destination_emails - set(verified_addresses.keys())
+    unverified_addresses = [
+        email for email in verified_addresses.keys()
+        if not verified_addresses[email].get('verified')
+    ]
+
+    if new_addresses or unverified_addresses:
+        print("📮 Verifizierungs-E-Mails anfordern...\n")
+
+        verification_requested = 0
+        for email in new_addresses:
+            if request_email_verification(email):
+                verification_requested += 1
+
+        if new_addresses:
+            print(f"\n  ✅ Verifizierungs-E-Mails an {verification_requested} neue Adressen gesendet")
+
+        if unverified_addresses:
+            print(f"\n  ⚠️  {len(unverified_addresses)} Adressen sind noch nicht verifiziert:")
+            for email in unverified_addresses:
+                print(f"     - {email}")
+            print("\n  ℹ️  Bitte die E-Mail-Postfächer überprüfen und die Verifizierungs-Links anklicken!")
+
+        print()
+    else:
+        print("✅ Alle Ziel-E-Mail-Adressen sind bereits verifiziert!\n")
+
+    # 5. Hole existierende Regeln von Cloudflare
     print("☁️  Hole existierende Regeln von Cloudflare...")
     existing_rules = get_existing_rules()
     print(f"  ℹ️  {len(existing_rules)} existierende Regeln in Cloudflare\n")
 
-    # 3. Erstelle ein Mapping der existierenden Regeln
+    # 6. Erstelle ein Mapping der existierenden Regeln
     existing_rules_map = {}
     for rule in existing_rules:
         from_email = get_rule_matcher_value(rule)
@@ -212,7 +314,7 @@ def sync_email_routing():
                 'to_emails': get_rule_forward_values(rule)
             }
 
-    # 4. Synchronisiere Regeln
+    # 7. Synchronisiere Regeln
     print("🔄 Synchronisiere Regeln...\n")
 
     created = 0
@@ -242,7 +344,7 @@ def sync_email_routing():
             else:
                 print(f"  ⚠️  Fehler beim Erstellen von {from_email}")
 
-    # 5. Zusammenfassung
+    # 8. Zusammenfassung
     print("\n" + "="*60)
     print("📊 Zusammenfassung:")
     print(f"  ✅ Erstellt:      {created}")

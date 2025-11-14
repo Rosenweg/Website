@@ -22,12 +22,14 @@ Die vollständige Dokumentation findest du im **[GitHub Wiki](../../wiki)**:
 ### Für Ausschussvertreter
 - [STWEG 3 - Admin-Bereich](../../wiki/STWEG3-Admin)
 - [Kontakte verwalten](../../wiki/Kontakte-Verwalten)
+- [Cloudflare E-Mail-Routing](CLOUDFLARE-EMAIL-ROUTING.md) - Automatische E-Mail-Weiterleitung
 
 ### Für Entwickler
 - [Architektur](../../wiki/Architektur)
 - [n8n OTP-Setup](../../wiki/n8n-OTP-Setup)
 - [n8n Save-Setup](../../wiki/n8n-Save-Setup)
 - [Deployment](../../wiki/Deployment)
+- [Cloudflare E-Mail-Routing](CLOUDFLARE-EMAIL-ROUTING.md) - E-Mail-Sync-Skript
 
 ## 🚀 Quick Start
 
@@ -78,6 +80,7 @@ Website/Website/
 - **OTP-Authentifizierung** für sensible Bereiche
 - **Frontend-Validierung** von E-Mail-Adressen
 - **Backend-Filter** für `.invalid` Platzhalter
+- **Cloudflare E-Mail-Routing** mit automatischer Verifizierung
 - **Git-Versionierung** aller Änderungen
 - **Audit-Trail** durch Commit-Messages
 
@@ -87,7 +90,8 @@ Website/Website/
 - **Backend**: n8n Workflows (Serverless Automation)
 - **Hosting**: GitHub Pages
 - **Datenbank**: JSON-Dateien (Git-versioniert)
-- **E-Mail**: SMTP via n8n
+- **E-Mail**: SMTP via n8n + Cloudflare E-Mail-Routing
+- **Automation**: GitHub Actions für E-Mail-Sync
 
 ## 📞 Support
 

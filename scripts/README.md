@@ -19,6 +19,8 @@ python3 sync-cloudflare-email.py
 
 ### Funktionen
 
+- **Automatische E-Mail-Verifizierung**: Sendet Verifizierungs-E-Mails an neue Ziel-E-Mail-Adressen
+- **Verifizierungsstatus-Prüfung**: Überprüft, welche Adressen bereits verifiziert sind
 - **Automatisches Erstellen**: Erstellt neue E-Mail-Routing-Regeln für alle @rosenweg4303.ch Adressen
 - **Intelligentes Updaten**: Aktualisiert nur Regeln, die sich geändert haben
 - **Überspringen**: Überspringt bereits aktuelle Regeln
@@ -31,6 +33,23 @@ python3 sync-cloudflare-email.py
 
 📖 Lade ausschuss-kontakte.json...
   ℹ️  9 Regeln in JSON gefunden
+
+📧 Gefundene Ziel-E-Mail-Adressen: 15
+
+🔐 Prüfe Verifizierungsstatus der Ziel-E-Mail-Adressen...
+  ℹ️  12 bereits registrierte Adressen in Cloudflare
+
+📮 Verifizierungs-E-Mails anfordern...
+
+  📧 Verifizierungs-E-Mail gesendet an: neue.adresse@example.com
+  📧 Verifizierungs-E-Mail gesendet an: weitere.adresse@example.com
+
+  ✅ Verifizierungs-E-Mails an 2 neue Adressen gesendet
+
+  ⚠️  1 Adressen sind noch nicht verifiziert:
+     - pending@example.com
+
+  ℹ️  Bitte die E-Mail-Postfächer überprüfen und die Verifizierungs-Links anklicken!
 
 ☁️  Hole existierende Regeln von Cloudflare...
   ℹ️  5 existierende Regeln in Cloudflare
