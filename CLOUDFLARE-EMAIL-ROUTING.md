@@ -6,6 +6,53 @@ Diese Datei enthält die Konfiguration für Cloudflare E-Mail-Routing für die A
 
 Die E-Mail-Adressen der Ausschussmitglieder wurden durch Cloudflare-E-Mail-Routing-Adressen ersetzt, um die Privatsphäre zu schützen und die Telefonnummern aus dem HTML zu entfernen.
 
+## ⚡ Automatische Synchronisation mit GitHub Actions (Empfohlen!)
+
+Das Repository enthält einen GitHub Actions Workflow, der **automatisch** die Cloudflare E-Mail-Routing-Regeln aktualisiert, wenn `ausschuss-kontakte.json` geändert wird.
+
+### Einrichtung der automatischen Synchronisation
+
+1. **GitHub Secrets konfigurieren**:
+   - Gehen Sie zu Ihrem Repository auf GitHub
+   - Navigieren Sie zu **Settings** → **Secrets and variables** → **Actions**
+   - Klicken Sie auf **New repository secret**
+   - Erstellen Sie folgende Secrets:
+
+   **CLOUDFLARE_API_TOKEN**:
+   - Gehen Sie zu [https://dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+   - Klicken Sie auf **Create Token**
+   - Verwenden Sie die Vorlage **Edit zone DNS** oder erstellen Sie einen Custom Token mit:
+     - Permissions: `Zone - Email Routing Rules - Edit`
+     - Zone Resources: `Include - Specific zone - rosenweg4303.ch`
+   - Kopieren Sie den Token und fügen Sie ihn als Secret hinzu
+
+   **CLOUDFLARE_ZONE_ID**:
+   - Gehen Sie zu [https://dash.cloudflare.com](https://dash.cloudflare.com)
+   - Wählen Sie Ihre Domain `rosenweg4303.ch`
+   - Scrollen Sie rechts nach unten zu **API** → **Zone ID**
+   - Kopieren Sie die Zone ID und fügen Sie sie als Secret hinzu
+
+2. **Workflow aktivieren**:
+   - Der Workflow wird automatisch ausgeführt, wenn `ausschuss-kontakte.json` in den `main` Branch gepusht wird
+   - Sie können den Workflow auch manuell über **Actions** → **Sync Cloudflare Email Routing** → **Run workflow** starten
+
+3. **Fertig!** 🎉
+   - Ab jetzt werden alle Änderungen an `ausschuss-kontakte.json` automatisch mit Cloudflare synchronisiert
+   - Sie können den Status unter **Actions** in Ihrem Repository verfolgen
+
+### Manuelle Synchronisation (für lokale Tests)
+
+Sie können das Sync-Skript auch lokal ausführen:
+
+```bash
+# Umgebungsvariablen setzen
+export CLOUDFLARE_API_TOKEN="Ihr_API_Token"
+export CLOUDFLARE_ZONE_ID="Ihre_Zone_ID"
+
+# Skript ausführen
+python3 scripts/sync-cloudflare-email.py
+```
+
 ## Cloudflare E-Mail-Routing Konfiguration
 
 ### Präsident
