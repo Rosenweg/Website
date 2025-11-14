@@ -28,6 +28,7 @@ Anleitungen für die Verwaltung und Administration:
 
 - **[STWEG 3 - Admin-Bereich](STWEG3-Admin)** - Kontaktdaten bearbeiten
 - **[Kontakte verwalten](Kontakte-Verwalten)** - Berechtigungen für Mieter erteilen
+- **[Cloudflare E-Mail-Routing](../CLOUDFLARE-EMAIL-ROUTING.md)** - E-Mail-Weiterleitung verwalten
 - **[n8n Save-Setup](n8n-Save-Setup)** - Backend für Datenspeicherung
 
 ### 💻 Für Entwickler & Technischer Dienst
@@ -93,8 +94,9 @@ Alle sensiblen Bereiche sind durch **OTP-Authentifizierung** geschützt:
 | **Backend** | n8n Workflows (Serverless Automation) |
 | **Hosting** | GitHub Pages |
 | **Datenbank** | JSON-Dateien (Git-versioniert) |
-| **E-Mail** | SMTP via n8n |
+| **E-Mail** | SMTP via n8n + Cloudflare E-Mail-Routing |
 | **Authentifizierung** | OTP (One-Time Password) |
+| **Automation** | GitHub Actions für E-Mail-Sync |
 
 ## 🏗️ Projektstruktur
 
@@ -194,6 +196,9 @@ git push
 ## 📝 Changelog
 
 ### November 2025
+- ✨ Automatische E-Mail-Verifizierung für Cloudflare E-Mail-Routing
+- ✨ GitHub Actions Workflow für automatische E-Mail-Synchronisation
+- ✨ Cloudflare E-Mail-Routing-Dokumentation
 - ✨ Initiale Wiki-Dokumentation
 - ✨ STWEG 3 Admin-Bereich implementiert
 - ✨ OTP-Authentifizierung für Kontaktliste
