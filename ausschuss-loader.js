@@ -44,7 +44,8 @@ function renderAusschuss(data) {
             <div class="border-l-4 border-yellow-500 pl-3 py-3 bg-yellow-50 rounded mb-3">
                 <p class="text-sm font-semibold text-yellow-800 mb-1">🏆 Präsident des Ausschusses</p>
                 <p class="text-sm font-bold text-gray-700">${data.ausschuss.präsident.name_vollständig}</p>
-                <p class="text-xs text-gray-600">STWEG ${data.ausschuss.präsident.stweg_nummer} • Tel: ${data.ausschuss.präsident.telefon}</p>
+                <p class="text-xs text-gray-600">STWEG ${data.ausschuss.präsident.stweg_nummer}</p>
+                <p class="text-xs text-gray-600"><a href="mailto:${data.ausschuss.präsident.email}" class="text-blue-600 hover:underline">${data.ausschuss.präsident.email}</a></p>
             </div>
         `;
     }
@@ -54,16 +55,21 @@ function renderAusschuss(data) {
         const borderColor = stweg.stweg_nummer === 8 ? 'green-500' : 'blue-400';
         const bgColor = stweg.stweg_nummer === 8 ? 'green-50' : 'gray-50';
         const label = stweg.stweg_nummer === 8 ? ' (Tiefgarage)' : '';
-        
+
         html += `
             <div class="border-l-4 border-${borderColor} pl-3 py-2 bg-${bgColor} rounded">
                 <p class="text-sm font-semibold text-gray-700 mb-1">STWEG ${stweg.stweg_nummer}${label}</p>
         `;
-        
+
         // Vertreter mit Namen anzeigen
         const vertreterNames = stweg.vertreter.map(v => v.name_vollständig).join(' • ');
         html += `<p class="text-sm text-gray-600">${vertreterNames}</p>`;
-        
+
+        // E-Mail-Adresse anzeigen (falls vorhanden)
+        if (stweg.email) {
+            html += `<p class="text-xs text-gray-600 mt-1"><a href="mailto:${stweg.email}" class="text-blue-600 hover:underline">${stweg.email}</a></p>`;
+        }
+
         html += '</div>';
     });
 
