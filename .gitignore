@@ -31,3 +31,9 @@ dist/
 build/
 stweg3/waschkueche-smart/backend/node_modules/
 stweg3/waschkueche-smart/backend/package-lock.json
+
+# Environment variables & credentials
+.env
+.env.local
+.env.*.local
+*-credentials.json
