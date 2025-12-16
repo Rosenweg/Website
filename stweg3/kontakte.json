@@ -109,7 +109,7 @@
         ],
         "eigentümer": {
           "name": "Yves Wyss",
-          "email": "wyss.y@gmx.ch",
+          "email": "wyss.y@gmx.net",
           "telefon": "+41 79 567 89 01",
           "typ": "eigentümer",
           "waschkueche_berechtigt": true
@@ -245,7 +245,7 @@
   "metadaten": {
     "version": "2.0",
     "erstellt_am": "2025-10-13",
-    "letzte_änderung": "2025-11-04",
+    "letzte_änderung": "2025-12-16",
     "geändert_von": "Ausschuss STWEG 3",
     "hinweise": [
       "Alle Eigentümer haben automatisch Zugriff auf die geschützte Kontaktliste",
