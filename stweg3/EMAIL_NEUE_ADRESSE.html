@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 20px; border-radius: 8px 8px 0 0; }
+        .content { background: #f9fafb; padding: 30px; border: 1px solid #e5e7eb; }
+        .changes { background: white; padding: 15px; margin: 20px 0; border-left: 4px solid #10b981; border-radius: 4px; }
+        .footer { background: #1f2937; color: #9ca3af; padding: 20px; text-align: center; font-size: 12px; border-radius: 0 0 8px 8px; }
+        .info { background: #dbeafe; border: 1px solid #3b82f6; padding: 15px; border-radius: 4px; margin: 20px 0; }
+        ul { list-style: none; padding: 0; }
+        li { padding: 8px 0; border-bottom: 1px solid #e5e7eb; }
+        li:last-child { border-bottom: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1 style="margin: 0;">✅ STWEG 3 Rosenweg</h1>
+            <p style="margin: 5px 0 0 0; opacity: 0.9;">Bestätigung</p>
+        </div>
+
+        <div class="content">
+            <h2>Ihre Kontaktdaten wurden erfolgreich aktualisiert</h2>
+
+            <p>Hallo,</p>
+
+            <p>Ihre Kontaktdaten für <strong>{{ $json.wohnung }}</strong> ({{ $json.type }}) wurden erfolgreich im STWEG 3 Admin-Bereich aktualisiert.</p>
+
+            <div class="changes">
+                <h3 style="margin-top: 0;">📝 Folgende Änderungen wurden vorgenommen:</h3>
+                <ul style="list-style: disc; padding-left: 20px; margin: 10px 0;">
+                    {{ $json.changeListHTML }}
+                </ul>
+            </div>
+
+            <div class="info">
+                <strong>✅ Bestätigung:</strong> Diese E-Mail-Adresse (<strong>{{ $json.newEmail }}</strong>) ist nun als Ihre aktuelle Kontaktadresse registriert.
+                Alle zukünftigen Benachrichtigungen werden an diese Adresse gesendet.
+            </div>
+
+            <p><strong>Details zur Änderung:</strong></p>
+            <ul style="background: white; padding: 15px; border-radius: 4px;">
+                <li><strong>Zeitpunkt:</strong> {{ $json.timestamp }}</li>
+                <li><strong>Geändert von:</strong> {{ $json.changedBy }}</li>
+                <li><strong>Wohnung:</strong> {{ $json.wohnung }}</li>
+                <li><strong>Art:</strong> {{ $json.type }}</li>
+                <li><strong>Vorherige E-Mail:</strong> {{ $json.oldEmail }}</li>
+            </ul>
+
+            <p>Falls Sie Fragen haben oder diese Änderung nicht vorgenommen haben, wenden Sie sich bitte an den Ausschuss oder an <strong>{{ $json.changedBy }}</strong>.</p>
+        </div>
+
+        <div class="footer">
+            <p>© 2025 STWEG 3 - Teil der STWEG-Kooperation Rosenweg<br>
+            Rosenweg 43, 4303 Kaiseraugst</p>
+            <p style="margin-top: 15px; font-size: 11px; color: #6b7280;">
+                Diese E-Mail wurde automatisch generiert. Bitte antworten Sie nicht direkt auf diese E-Mail.
+            </p>
+        </div>
+    </div>
+</body>
+</html>
