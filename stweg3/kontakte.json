@@ -91,7 +91,7 @@
         ],
         "eigentümer": {
           "name": "Elisabeth Müller",
-          "email": "elisabeth.mueller1@teleport.ch",
+          "email": "elisabeth.mueller@teleport.ch",
           "telefon": "+41 61 811 26 90",
           "typ": "eigentümer",
           "waschkueche_berechtigt": true
