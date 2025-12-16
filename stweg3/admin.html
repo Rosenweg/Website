@@ -16,6 +16,26 @@
         textarea {
             font-family: 'Monaco', 'Courier New', monospace;
         }
+        @keyframes fade-in {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .animate-fade-in {
+            animation: fade-in 0.3s ease-out;
+        }
+        input.invalid {
+            border-color: #ef4444;
+            background-color: #fef2f2;
+        }
+        input.valid {
+            border-color: #10b981;
+        }
     </style>
 </head>
 <body class="bg-gray-50">
@@ -313,6 +333,9 @@
         // n8n Webhook URL zum Speichern (muss noch erstellt werden)
         const N8N_SAVE_WEBHOOK_URL = 'https://n8n.juroct.net/webhook/stweg3-save-json';
 
+        // n8n Webhook URL für E-Mail-Änderungsbenachrichtigungen
+        const N8N_EMAIL_CHANGE_WEBHOOK_URL = 'https://n8n.juroct.net/webhook/stweg3-email-change-notification';
+
         // Pfad zur JSON-Datei
         const KONTAKTE_JSON_URL = 'kontakte.json';
 
@@ -321,11 +344,79 @@
         // ============================================
 
         let kontakteData = null;
+        let originalKontakteData = null; // Für Change-Tracking
         let ausschussEmails = [];
         let currentEmail = '';
         let currentOTP = '';
         let otpTimestamp = 0;
         let currentEditingWohnung = null;
+
+        // ============================================
+        // VALIDIERUNGS-FUNKTIONEN
+        // ============================================
+
+        function validateEmail(email) {
+            if (!email || email.trim() === '') {
+                return { valid: false, error: 'E-Mail-Adresse darf nicht leer sein' };
+            }
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                return { valid: false, error: 'Ungültiges E-Mail-Format' };
+            }
+            return { valid: true };
+        }
+
+        function validateTelefon(telefon) {
+            if (!telefon || telefon.trim() === '') {
+                return { valid: true }; // Telefon ist optional
+            }
+            // Erlaube: +41 79 123 45 67, 079 123 45 67, +41791234567, etc.
+            const telRegex = /^[\d\s\+\-\(\)]+$/;
+            if (!telRegex.test(telefon)) {
+                return { valid: false, error: 'Telefonnummer darf nur Zahlen, +, -, (, ) und Leerzeichen enthalten' };
+            }
+            return { valid: true };
+        }
+
+        function validateName(name) {
+            if (!name || name.trim() === '') {
+                return { valid: false, error: 'Name darf nicht leer sein' };
+            }
+            if (name.trim().length < 2) {
+                return { valid: false, error: 'Name muss mindestens 2 Zeichen lang sein' };
+            }
+            return { valid: true };
+        }
+
+        function showValidationError(message) {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'fixed top-20 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 animate-fade-in';
+            errorDiv.innerHTML = `
+                <div class="flex items-center">
+                    <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <span>${message}</span>
+                </div>
+            `;
+            document.body.appendChild(errorDiv);
+            setTimeout(() => errorDiv.remove(), 5000);
+        }
+
+        function showSuccessMessage(message) {
+            const successDiv = document.createElement('div');
+            successDiv.className = 'fixed top-20 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 animate-fade-in';
+            successDiv.innerHTML = `
+                <div class="flex items-center">
+                    <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <span>${message}</span>
+                </div>
+            `;
+            document.body.appendChild(successDiv);
+            setTimeout(() => successDiv.remove(), 5000);
+        }
 
         // ============================================
         // HILFSFUNKTION: BERECHTIGTE E-MAILS EXTRAHIEREN
@@ -388,6 +479,7 @@
                 }
 
                 kontakteData = await response.json();
+                originalKontakteData = JSON.parse(JSON.stringify(kontakteData)); // Deep copy für Change-Tracking
                 ausschussEmails = extractBerechtigteEmails(kontakteData);
 
                 document.getElementById('loading').classList.add('hidden');
@@ -615,38 +707,50 @@
             const formFields = document.getElementById('formFields');
             formFields.innerHTML = `
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Eigentümer Name</label>
-                    <input type="text" id="edit_eigentuemer_name" value="${wohnung.eigentümer.name}"
-                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Eigentümer Name *</label>
+                    <input type="text" id="edit_eigentuemer_name" value="${wohnung.eigentümer.name}" required
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                           oninput="validateFieldRealtime(this, 'name')">
+                    <p class="text-xs text-gray-500 mt-1">Mindestens 2 Zeichen</p>
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Eigentümer E-Mail</label>
-                    <input type="email" id="edit_eigentuemer_email" value="${wohnung.eigentümer.email}"
-                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Eigentümer E-Mail *</label>
+                    <input type="email" id="edit_eigentuemer_email" value="${wohnung.eigentümer.email}" required
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                           oninput="validateFieldRealtime(this, 'email')">
+                    <p class="text-xs text-gray-500 mt-1">Gültiges E-Mail-Format erforderlich</p>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Eigentümer Telefon</label>
                     <input type="tel" id="edit_eigentuemer_telefon" value="${wohnung.eigentümer.telefon}"
-                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+                           class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                           oninput="validateFieldRealtime(this, 'telefon')">
+                    <p class="text-xs text-gray-500 mt-1">Nur Zahlen, +, -, ( ) und Leerzeichen</p>
                 </div>
                 ${wohnung.mieter ? `
                     <div class="pt-4 border-t border-gray-200">
                         <h5 class="font-semibold text-gray-800 mb-2">Mieter</h5>
                         <div class="space-y-3">
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Mieter Name</label>
-                                <input type="text" id="edit_mieter_name" value="${wohnung.mieter.name}"
-                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Mieter Name *</label>
+                                <input type="text" id="edit_mieter_name" value="${wohnung.mieter.name}" required
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                                       oninput="validateFieldRealtime(this, 'name')">
+                                <p class="text-xs text-gray-500 mt-1">Mindestens 2 Zeichen</p>
                             </div>
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Mieter E-Mail</label>
-                                <input type="email" id="edit_mieter_email" value="${wohnung.mieter.email}"
-                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Mieter E-Mail *</label>
+                                <input type="email" id="edit_mieter_email" value="${wohnung.mieter.email}" required
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                                       oninput="validateFieldRealtime(this, 'email')">
+                                <p class="text-xs text-gray-500 mt-1">Gültiges E-Mail-Format erforderlich</p>
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Mieter Telefon</label>
                                 <input type="tel" id="edit_mieter_telefon" value="${wohnung.mieter.telefon}"
-                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500">
+                                       class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                                       oninput="validateFieldRealtime(this, 'telefon')">
+                                <p class="text-xs text-gray-500 mt-1">Nur Zahlen, +, -, ( ) und Leerzeichen</p>
                             </div>
                             <div>
                                 <label class="flex items-center">
@@ -663,27 +767,116 @@
             document.getElementById('editForm').classList.remove('hidden');
         }
 
-        function saveChanges() {
+        async function saveChanges() {
             if (!currentEditingWohnung) return;
 
             const { etage, idx } = currentEditingWohnung;
             const wohnung = kontakteData.wohnungen[etage][idx];
+            const originalWohnung = originalKontakteData.wohnungen[etage][idx];
+
+            // Neue Werte aus dem Formular
+            const newEigentuemerName = document.getElementById('edit_eigentuemer_name').value.trim();
+            const newEigentuemerEmail = document.getElementById('edit_eigentuemer_email').value.trim().toLowerCase();
+            const newEigentuemerTelefon = document.getElementById('edit_eigentuemer_telefon').value.trim();
+
+            // VALIDIERUNG: Eigentümer
+            const nameValidation = validateName(newEigentuemerName);
+            if (!nameValidation.valid) {
+                showValidationError('Eigentümer: ' + nameValidation.error);
+                return;
+            }
+
+            const emailValidation = validateEmail(newEigentuemerEmail);
+            if (!emailValidation.valid) {
+                showValidationError('Eigentümer E-Mail: ' + emailValidation.error);
+                return;
+            }
+
+            const telefonValidation = validateTelefon(newEigentuemerTelefon);
+            if (!telefonValidation.valid) {
+                showValidationError('Eigentümer Telefon: ' + telefonValidation.error);
+                return;
+            }
+
+            // Track E-Mail Änderungen für Benachrichtigung
+            const emailChanges = [];
+
+            // Check ob Eigentümer-E-Mail geändert wurde
+            if (originalWohnung.eigentümer.email !== newEigentuemerEmail) {
+                emailChanges.push({
+                    type: 'Eigentümer',
+                    oldEmail: originalWohnung.eigentümer.email,
+                    newEmail: newEigentuemerEmail,
+                    name: newEigentuemerName,
+                    wohnung: wohnung.bezeichnung,
+                    changes: {
+                        name: { old: originalWohnung.eigentümer.name, new: newEigentuemerName },
+                        email: { old: originalWohnung.eigentümer.email, new: newEigentuemerEmail },
+                        telefon: { old: originalWohnung.eigentümer.telefon, new: newEigentuemerTelefon }
+                    }
+                });
+            }
+
+            // Mieter-Validierung (falls vorhanden)
+            if (wohnung.mieter) {
+                const newMieterName = document.getElementById('edit_mieter_name').value.trim();
+                const newMieterEmail = document.getElementById('edit_mieter_email').value.trim().toLowerCase();
+                const newMieterTelefon = document.getElementById('edit_mieter_telefon').value.trim();
+                const newMieterBerechtigt = document.getElementById('edit_mieter_berechtigt').checked;
+
+                const mieterNameValidation = validateName(newMieterName);
+                if (!mieterNameValidation.valid) {
+                    showValidationError('Mieter: ' + mieterNameValidation.error);
+                    return;
+                }
+
+                const mieterEmailValidation = validateEmail(newMieterEmail);
+                if (!mieterEmailValidation.valid) {
+                    showValidationError('Mieter E-Mail: ' + mieterEmailValidation.error);
+                    return;
+                }
+
+                const mieterTelefonValidation = validateTelefon(newMieterTelefon);
+                if (!mieterTelefonValidation.valid) {
+                    showValidationError('Mieter Telefon: ' + mieterTelefonValidation.error);
+                    return;
+                }
+
+                // Check ob Mieter-E-Mail geändert wurde
+                if (originalWohnung.mieter && originalWohnung.mieter.email !== newMieterEmail) {
+                    emailChanges.push({
+                        type: 'Mieter',
+                        oldEmail: originalWohnung.mieter.email,
+                        newEmail: newMieterEmail,
+                        name: newMieterName,
+                        wohnung: wohnung.bezeichnung,
+                        changes: {
+                            name: { old: originalWohnung.mieter.name, new: newMieterName },
+                            email: { old: originalWohnung.mieter.email, new: newMieterEmail },
+                            telefon: { old: originalWohnung.mieter.telefon, new: newMieterTelefon }
+                        }
+                    });
+                }
+
+                // Mieter aktualisieren
+                wohnung.mieter.name = newMieterName;
+                wohnung.mieter.email = newMieterEmail;
+                wohnung.mieter.telefon = newMieterTelefon;
+                wohnung.mieter.berechtigt = newMieterBerechtigt;
+            }
 
             // Eigentümer aktualisieren
-            wohnung.eigentümer.name = document.getElementById('edit_eigentuemer_name').value;
-            wohnung.eigentümer.email = document.getElementById('edit_eigentuemer_email').value;
-            wohnung.eigentümer.telefon = document.getElementById('edit_eigentuemer_telefon').value;
-
-            // Mieter aktualisieren (falls vorhanden)
-            if (wohnung.mieter) {
-                wohnung.mieter.name = document.getElementById('edit_mieter_name').value;
-                wohnung.mieter.email = document.getElementById('edit_mieter_email').value;
-                wohnung.mieter.telefon = document.getElementById('edit_mieter_telefon').value;
-                wohnung.mieter.berechtigt = document.getElementById('edit_mieter_berechtigt').checked;
-            }
+            wohnung.eigentümer.name = newEigentuemerName;
+            wohnung.eigentümer.email = newEigentuemerEmail;
+            wohnung.eigentümer.telefon = newEigentuemerTelefon;
 
             // Metadaten aktualisieren
             kontakteData.metadaten.letzte_änderung = new Date().toISOString().split('T')[0];
+
+            // E-Mail-Benachrichtigungen senden
+            if (emailChanges.length > 0) {
+                await sendEmailChangeNotifications(emailChanges);
+            }
 
             // JSON-Editor aktualisieren
             document.getElementById('jsonEditor').value = JSON.stringify(kontakteData, null, 2);
@@ -694,13 +887,100 @@
             // Wohnungsliste neu laden
             loadWohnungList();
 
-            // Speichern-Aufforderung
-            alert('Änderungen wurden im Editor übernommen. Klicken Sie auf "JSON speichern", um die Änderungen dauerhaft zu speichern.');
+            // Erfolgs-Nachricht
+            showSuccessMessage('Änderungen wurden übernommen. Klicken Sie auf "Alle Änderungen speichern", um dauerhaft zu speichern.');
         }
 
         function cancelEdit() {
             document.getElementById('editForm').classList.add('hidden');
             currentEditingWohnung = null;
+        }
+
+        // ============================================
+        // REAL-TIME VALIDIERUNG
+        // ============================================
+
+        function validateFieldRealtime(inputElement, type) {
+            const value = inputElement.value.trim();
+            let validation;
+
+            switch (type) {
+                case 'name':
+                    validation = validateName(value);
+                    break;
+                case 'email':
+                    validation = validateEmail(value);
+                    break;
+                case 'telefon':
+                    validation = validateTelefon(value);
+                    break;
+                default:
+                    return;
+            }
+
+            // Visual Feedback
+            inputElement.classList.remove('invalid', 'valid');
+            if (value === '' && type !== 'telefon') {
+                // Leeres Pflichtfeld
+                inputElement.classList.add('invalid');
+            } else if (value !== '') {
+                if (validation.valid) {
+                    inputElement.classList.add('valid');
+                } else {
+                    inputElement.classList.add('invalid');
+                }
+            }
+        }
+
+        // ============================================
+        // E-MAIL-BENACHRICHTIGUNGEN
+        // ============================================
+
+        async function sendEmailChangeNotifications(emailChanges) {
+            for (const change of emailChanges) {
+                try {
+                    console.log('Sende Benachrichtigung an alte E-Mail:', change.oldEmail);
+
+                    // Erstelle lesbare Änderungsliste
+                    const changeList = [];
+                    if (change.changes.name.old !== change.changes.name.new) {
+                        changeList.push(`Name: "${change.changes.name.old}" → "${change.changes.name.new}"`);
+                    }
+                    if (change.changes.email.old !== change.changes.email.new) {
+                        changeList.push(`E-Mail: "${change.changes.email.old}" → "${change.changes.email.new}"`);
+                    }
+                    if (change.changes.telefon.old !== change.changes.telefon.new) {
+                        changeList.push(`Telefon: "${change.changes.telefon.old}" → "${change.changes.telefon.new}"`);
+                    }
+
+                    const response = await fetch(N8N_EMAIL_CHANGE_WEBHOOK_URL, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            oldEmail: change.oldEmail,
+                            newEmail: change.newEmail,
+                            type: change.type,
+                            name: change.name,
+                            wohnung: change.wohnung,
+                            changeList: changeList,
+                            changedBy: currentEmail,
+                            timestamp: new Date().toISOString()
+                        })
+                    });
+
+                    if (response.ok) {
+                        console.log('✓ Benachrichtigung erfolgreich gesendet an:', change.oldEmail);
+                        showSuccessMessage(`Benachrichtigung wurde an ${change.oldEmail} gesendet`);
+                    } else {
+                        console.warn('⚠ Benachrichtigung konnte nicht gesendet werden an:', change.oldEmail);
+                    }
+                } catch (error) {
+                    console.error('Fehler beim Senden der Benachrichtigung:', error);
+                    // Nicht blockieren - nur loggen
+                }
+            }
         }
 
         function formatJSON() {
