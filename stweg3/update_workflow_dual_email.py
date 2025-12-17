@@ -60,10 +60,23 @@ if (webhookData.changeList && Array.isArray(webhookData.changeList)) {
     changeListHTML = webhookData.changeList.map(change => `<li>${change}</li>`).join('\\n                    ');
 }
 
+// Format timestamp to human-readable German format
+let formattedTimestamp = webhookData.timestamp;
+if (webhookData.timestamp) {
+    const date = new Date(webhookData.timestamp);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    formattedTimestamp = `${day}.${month}.${year} um ${hours}:${minutes} Uhr`;
+}
+
 return {
     json: {
         ...webhookData,
-        changeListHTML: changeListHTML
+        changeListHTML: changeListHTML,
+        timestamp: formattedTimestamp
     }
 };"""
                 },
