@@ -904,9 +904,18 @@
             // Metadaten aktualisieren
             kontakteData.metadaten.letzte_änderung = new Date().toISOString().split('T')[0];
 
-            // Verteilerlisten automatisch aktualisieren
-            kontakteData.verteilerlisten = generateVerteilerListen(kontakteData);
+            // Verteilerlisten automatisch aktualisieren und Änderungen verfolgen
+            const oldVerteilerlisten = kontakteData.verteilerlisten;
+            const newVerteilerlisten = generateVerteilerListen(kontakteData);
+            kontakteData.verteilerlisten = newVerteilerlisten;
             console.log('Verteilerlisten nach Änderung aktualisiert');
+
+            // Prüfe auf Verteilerlisten-Änderungen
+            const verteilerChanges = compareVerteilerListen(oldVerteilerlisten, newVerteilerlisten);
+            if (verteilerChanges && verteilerChanges.hasChanges) {
+                console.log('Verteilerlisten-Änderungen erkannt:', verteilerChanges);
+                await sendVerteilerListenNotification(verteilerChanges);
+            }
 
             // E-Mail-Benachrichtigungen senden
             if (emailChanges.length > 0) {
@@ -1142,6 +1151,112 @@
             return false;
         }
 
+        // Funktion zum Vergleichen von Verteilerlisten
+        function compareVerteilerListen(oldLists, newLists) {
+            if (!oldLists) return null; // Keine alten Listen vorhanden
+
+            const changes = {
+                hasChanges: false,
+                details: []
+            };
+
+            const listTypes = ['eigentuemer', 'ausschuss', 'bewohner', 'alle'];
+
+            listTypes.forEach(type => {
+                const oldList = oldLists[type] || [];
+                const newList = newLists[type] || [];
+
+                // Vergleiche E-Mail-Listen
+                const oldEmails = oldList.map(m => m.email).sort();
+                const newEmails = newList.map(m => m.email).sort();
+
+                // Finde Unterschiede
+                const added = newEmails.filter(e => !oldEmails.includes(e));
+                const removed = oldEmails.filter(e => !newEmails.includes(e));
+
+                if (added.length > 0 || removed.length > 0) {
+                    changes.hasChanges = true;
+                    changes.details.push({
+                        type: type,
+                        oldCount: oldList.length,
+                        newCount: newList.length,
+                        added: added,
+                        removed: removed
+                    });
+                }
+            });
+
+            return changes;
+        }
+
+        // Funktion zum Senden von Verteilerlisten-Änderungsbenachrichtigungen
+        async function sendVerteilerListenNotification(changes) {
+            if (!changes || !changes.hasChanges) return;
+
+            try {
+                // Erstelle lesbare Änderungsliste
+                let changeListHTML = '<ul>';
+                changes.details.forEach(detail => {
+                    const typeName = {
+                        'eigentuemer': 'Eigentümer',
+                        'ausschuss': 'Ausschuss',
+                        'bewohner': 'Bewohner',
+                        'alle': 'Alle'
+                    }[detail.type];
+
+                    changeListHTML += `<li><strong>${typeName}</strong>: ${detail.oldCount} → ${detail.newCount} Mitglieder`;
+
+                    if (detail.added.length > 0) {
+                        changeListHTML += `<br>➕ Hinzugefügt: ${detail.added.join(', ')}`;
+                    }
+                    if (detail.removed.length > 0) {
+                        changeListHTML += `<br>➖ Entfernt: ${detail.removed.join(', ')}`;
+                    }
+                    changeListHTML += '</li>';
+                });
+                changeListHTML += '</ul>';
+
+                // Hole Ausschuss-E-Mails
+                const ausschussEmails = kontakteData.ausschuss.map(m => m.email);
+
+                console.log('Sende Verteilerlisten-Änderungsbenachrichtigung an Ausschuss:', ausschussEmails);
+
+                // Webhook-URL für Verteilerlisten-Änderungen (optional - kann später hinzugefügt werden)
+                const webhookUrl = kontakteData.stweg?.webhooks?.verteiler_change_notification;
+
+                if (!webhookUrl) {
+                    console.warn('⚠️ Keine Webhook-URL für Verteilerlisten-Benachrichtigungen konfiguriert');
+                    console.log('Änderungen:', changes);
+                    return;
+                }
+
+                const response = await fetch(webhookUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        recipients: ausschussEmails,
+                        changes: changes.details,
+                        changeListHTML: changeListHTML,
+                        changedBy: currentEmail,
+                        timestamp: new Date().toISOString(),
+                        stwegNummer: kontakteData.stweg?.nummer || 3,
+                        stwegAdresse: kontakteData.stweg?.adresse || 'Rosenweg 9',
+                        stwegOrt: `${kontakteData.stweg?.plz || '4303'} ${kontakteData.stweg?.ort || 'Kaiseraugst'}`
+                    })
+                });
+
+                if (response.ok) {
+                    console.log('✅ Verteilerlisten-Änderungsbenachrichtigung erfolgreich gesendet');
+                } else {
+                    console.error('❌ Fehler beim Senden der Benachrichtigung:', response.status);
+                }
+            } catch (error) {
+                console.error('Fehler beim Senden der Verteilerlisten-Benachrichtigung:', error);
+            }
+        }
+
         // Funktion zum Generieren der Verteilerlisten
         function generateVerteilerListen(data) {
             const lists = {};
@@ -1225,9 +1340,18 @@
                 return;
             }
 
-            // Verteilerlisten automatisch generieren und hinzufügen
-            kontakteData.verteilerlisten = generateVerteilerListen(kontakteData);
+            // Verteilerlisten automatisch generieren und Änderungen verfolgen
+            const oldVerteilerlisten = kontakteData.verteilerlisten;
+            const newVerteilerlisten = generateVerteilerListen(kontakteData);
+            kontakteData.verteilerlisten = newVerteilerlisten;
             console.log('Verteilerlisten generiert:', kontakteData.verteilerlisten);
+
+            // Prüfe auf Verteilerlisten-Änderungen
+            const verteilerChanges = compareVerteilerListen(oldVerteilerlisten, newVerteilerlisten);
+            if (verteilerChanges && verteilerChanges.hasChanges) {
+                console.log('Verteilerlisten-Änderungen erkannt:', verteilerChanges);
+                await sendVerteilerListenNotification(verteilerChanges);
+            }
 
             // JSON-Editor mit den aktualisierten Daten aktualisieren
             document.getElementById('jsonEditor').value = JSON.stringify(kontakteData, null, 2);
