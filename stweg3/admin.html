@@ -958,9 +958,13 @@
 
                     // Hole erste Ausschuss-E-Mail aus kontakteData
                     let ausschussEmail = 'ausschuss@rosenweg9.ch'; // Fallback
+                    console.log('DEBUG: kontakteData.ausschuss =', kontakteData.ausschuss);
                     if (kontakteData.ausschuss && kontakteData.ausschuss.length > 0 && kontakteData.ausschuss[0].email) {
                         const firstEmail = kontakteData.ausschuss[0].email.split(',')[0].trim();
                         if (firstEmail) ausschussEmail = firstEmail;
+                        console.log('DEBUG: Extracted ausschussEmail =', ausschussEmail);
+                    } else {
+                        console.log('DEBUG: Using fallback ausschussEmail');
                     }
 
                     const response = await fetch(N8N_EMAIL_CHANGE_WEBHOOK_URL, {
