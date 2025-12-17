@@ -881,6 +881,9 @@
             // JSON-Editor aktualisieren
             document.getElementById('jsonEditor').value = JSON.stringify(kontakteData, null, 2);
 
+            // WICHTIG: originalKontakteData aktualisieren, damit weitere Änderungen erkannt werden
+            originalKontakteData = JSON.parse(JSON.stringify(kontakteData));
+
             // Formular schließen
             cancelEdit();
 
