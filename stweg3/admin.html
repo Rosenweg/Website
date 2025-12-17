@@ -904,6 +904,10 @@
             // Metadaten aktualisieren
             kontakteData.metadaten.letzte_änderung = new Date().toISOString().split('T')[0];
 
+            // Verteilerlisten automatisch aktualisieren
+            kontakteData.verteilerlisten = generateVerteilerListen(kontakteData);
+            console.log('Verteilerlisten nach Änderung aktualisiert');
+
             // E-Mail-Benachrichtigungen senden
             if (emailChanges.length > 0) {
                 await sendEmailChangeNotifications(emailChanges);
@@ -1138,6 +1142,72 @@
             return false;
         }
 
+        // Funktion zum Generieren der Verteilerlisten
+        function generateVerteilerListen(data) {
+            const lists = {};
+
+            // Eigentümer-Liste
+            lists.eigentuemer = [];
+            ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {
+                data.wohnungen[etage].forEach(wohnung => {
+                    if (wohnung.eigentümer) {
+                        lists.eigentuemer.push({
+                            name: wohnung.eigentümer.name,
+                            email: wohnung.eigentümer.email,
+                            wohnung: wohnung.bezeichnung
+                        });
+                    }
+                });
+            });
+
+            // Ausschuss-Liste
+            lists.ausschuss = data.ausschuss.map(vertreter => ({
+                name: vertreter.name,
+                email: vertreter.email,
+                funktion: vertreter.funktion,
+                wohnung: vertreter.wohnung
+            }));
+
+            // Bewohner-Liste (Mieter + Eigentümer ohne Mieter)
+            lists.bewohner = [];
+            ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {
+                data.wohnungen[etage].forEach(wohnung => {
+                    // Wenn es einen Mieter gibt, nimm den Mieter
+                    if (wohnung.mieter) {
+                        lists.bewohner.push({
+                            name: wohnung.mieter.name,
+                            email: wohnung.mieter.email,
+                            wohnung: wohnung.bezeichnung
+                        });
+                    }
+                    // Wenn kein Mieter, nimm den Eigentümer
+                    else if (wohnung.eigentümer) {
+                        lists.bewohner.push({
+                            name: wohnung.eigentümer.name,
+                            email: wohnung.eigentümer.email,
+                            wohnung: wohnung.bezeichnung
+                        });
+                    }
+                });
+            });
+
+            // Alle Bewohner (Eigentümer + berechtigte Mieter)
+            lists.alle = [...lists.eigentuemer];
+            ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {
+                data.wohnungen[etage].forEach(wohnung => {
+                    if (wohnung.mieter && wohnung.mieter.berechtigt) {
+                        lists.alle.push({
+                            name: wohnung.mieter.name,
+                            email: wohnung.mieter.email,
+                            wohnung: wohnung.bezeichnung
+                        });
+                    }
+                });
+            });
+
+            return lists;
+        }
+
         // Modified saveJSON to accept auto-save parameter
         async function saveJSON(autoSave = false) {
             const jsonText = document.getElementById('jsonEditor').value;
@@ -1154,6 +1224,13 @@
                 }
                 return;
             }
+
+            // Verteilerlisten automatisch generieren und hinzufügen
+            kontakteData.verteilerlisten = generateVerteilerListen(kontakteData);
+            console.log('Verteilerlisten generiert:', kontakteData.verteilerlisten);
+
+            // JSON-Editor mit den aktualisierten Daten aktualisieren
+            document.getElementById('jsonEditor').value = JSON.stringify(kontakteData, null, 2);
 
             // Sicherheitsabfrage (skip for auto-save)
             if (!autoSave && !confirm('Möchten Sie die Änderungen wirklich speichern? Diese werden sofort für alle Nutzer sichtbar.')) {
