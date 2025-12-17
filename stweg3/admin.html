@@ -732,41 +732,50 @@
                            oninput="validateFieldRealtime(this, 'telefon')">
                     <p class="text-xs text-gray-500 mt-1">Nur Zahlen, +, -, ( ) und Leerzeichen</p>
                 </div>
-                ${wohnung.mieter ? `
-                    <div class="pt-4 border-t border-gray-200">
-                        <h5 class="font-semibold text-gray-800 mb-2">Mieter</h5>
+
+                <div class="pt-4 border-t border-gray-200">
+                    <label class="flex items-center mb-3">
+                        <input type="checkbox" id="edit_has_mieter" ${wohnung.mieter ? 'checked' : ''}
+                               class="mr-2 h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded"
+                               onchange="toggleMieterFields()">
+                        <span class="text-sm font-semibold text-gray-800">Wohnung hat Mieter</span>
+                    </label>
+
+                    <div id="mieter_fields" class="${wohnung.mieter ? '' : 'hidden'} space-y-3">
+                        <h5 class="font-semibold text-gray-800 mb-2">Mieter-Daten</h5>
                         <div class="space-y-3">
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Mieter Name *</label>
-                                <input type="text" id="edit_mieter_name" value="${wohnung.mieter.name}" required
+                                <input type="text" id="edit_mieter_name" value="${wohnung.mieter ? wohnung.mieter.name : ''}" required
                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
                                        oninput="validateFieldRealtime(this, 'name')">
                                 <p class="text-xs text-gray-500 mt-1">Mindestens 2 Zeichen</p>
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Mieter E-Mail *</label>
-                                <input type="email" id="edit_mieter_email" value="${wohnung.mieter.email}" required
+                                <input type="email" id="edit_mieter_email" value="${wohnung.mieter ? wohnung.mieter.email : ''}" required
                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
                                        oninput="validateFieldRealtime(this, 'email')">
                                 <p class="text-xs text-gray-500 mt-1">Gültiges E-Mail-Format erforderlich</p>
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Mieter Telefon</label>
-                                <input type="tel" id="edit_mieter_telefon" value="${wohnung.mieter.telefon}"
+                                <input type="tel" id="edit_mieter_telefon" value="${wohnung.mieter ? wohnung.mieter.telefon : ''}"
                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
                                        oninput="validateFieldRealtime(this, 'telefon')">
                                 <p class="text-xs text-gray-500 mt-1">Nur Zahlen, +, -, ( ) und Leerzeichen</p>
                             </div>
                             <div>
                                 <label class="flex items-center">
-                                    <input type="checkbox" id="edit_mieter_berechtigt" ${wohnung.mieter.berechtigt ? 'checked' : ''}
+                                    <input type="checkbox" id="edit_mieter_berechtigt" ${wohnung.mieter && wohnung.mieter.berechtigt ? 'checked' : ''}
                                            class="mr-2 h-4 w-4 text-orange-600 focus:ring-orange-500 border-gray-300 rounded">
                                     <span class="text-sm text-gray-700">Mieter hat Zugriff auf Kontaktliste</span>
                                 </label>
                             </div>
                         </div>
                     </div>
-                ` : ''}
+                </div>
+            ` : ''}
             `;
 
             document.getElementById('editForm').classList.remove('hidden');
@@ -822,8 +831,11 @@
                 });
             }
 
-            // Mieter-Validierung (falls vorhanden)
-            if (wohnung.mieter) {
+            // Check ob Mieter-Checkbox aktiviert ist
+            const hasMieter = document.getElementById('edit_has_mieter').checked;
+
+            // Mieter-Validierung und Verarbeitung
+            if (hasMieter) {
                 const newMieterName = document.getElementById('edit_mieter_name').value.trim();
                 const newMieterEmail = document.getElementById('edit_mieter_email').value.trim().toLowerCase();
                 const newMieterTelefon = document.getElementById('edit_mieter_telefon').value.trim();
@@ -863,11 +875,25 @@
                     });
                 }
 
-                // Mieter aktualisieren
-                wohnung.mieter.name = newMieterName;
-                wohnung.mieter.email = newMieterEmail;
-                wohnung.mieter.telefon = newMieterTelefon;
-                wohnung.mieter.berechtigt = newMieterBerechtigt;
+                // Mieter aktualisieren oder erstellen
+                if (!wohnung.mieter) {
+                    // Neuer Mieter wird hinzugefügt
+                    wohnung.mieter = {
+                        name: newMieterName,
+                        email: newMieterEmail,
+                        telefon: newMieterTelefon,
+                        berechtigt: newMieterBerechtigt
+                    };
+                } else {
+                    // Bestehender Mieter wird aktualisiert
+                    wohnung.mieter.name = newMieterName;
+                    wohnung.mieter.email = newMieterEmail;
+                    wohnung.mieter.telefon = newMieterTelefon;
+                    wohnung.mieter.berechtigt = newMieterBerechtigt;
+                }
+            } else {
+                // Checkbox ist nicht aktiviert - Mieter entfernen
+                wohnung.mieter = null;
             }
 
             // Eigentümer aktualisieren
@@ -902,6 +928,17 @@
         function cancelEdit() {
             document.getElementById('editForm').classList.add('hidden');
             currentEditingWohnung = null;
+        }
+
+        function toggleMieterFields() {
+            const checkbox = document.getElementById('edit_has_mieter');
+            const mieterFields = document.getElementById('mieter_fields');
+
+            if (checkbox.checked) {
+                mieterFields.classList.remove('hidden');
+            } else {
+                mieterFields.classList.add('hidden');
+            }
         }
 
         // ============================================
