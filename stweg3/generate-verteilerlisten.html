@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verteilerlisten Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-8">
+    <div class="max-w-4xl mx-auto bg-white rounded-lg shadow-lg p-6">
+        <h1 class="text-2xl font-bold mb-4">Verteilerlisten Generator</h1>
+        <p class="text-gray-600 mb-6">Generiert die Verteilerlisten aus kontakte.json für n8n</p>
+
+        <button onclick="generateLists()" class="bg-blue-500 hover:bg-blue-600 text-white font-semibold px-6 py-2 rounded-lg mb-4">
+            Verteilerlisten generieren
+        </button>
+
+        <div id="output" class="hidden">
+            <h2 class="text-xl font-semibold mb-3">Generierte Verteilerlisten:</h2>
+            <div class="bg-gray-50 p-4 rounded-lg">
+                <pre id="jsonOutput" class="text-xs overflow-auto max-h-96"></pre>
+            </div>
+            <button onclick="copyToClipboard()" class="mt-4 bg-green-500 hover:bg-green-600 text-white font-semibold px-6 py-2 rounded-lg">
+                In Zwischenablage kopieren
+            </button>
+            <p class="text-sm text-gray-500 mt-2">Kopiere diesen JSON-Code und füge ihn in kontakte.json vor "metadaten" ein.</p>
+        </div>
+    </div>
+
+    <script>
+        async function generateLists() {
+            try {
+                // Lade kontakte.json
+                const response = await fetch('kontakte.json');
+                const data = await response.json();
+
+                // Generiere Verteilerlisten
+                const lists = generateVerteilerListen(data);
+
+                // Zeige Ergebnis
+                document.getElementById('jsonOutput').textContent = JSON.stringify({ verteilerlisten: lists }, null, 2);
+                document.getElementById('output').classList.remove('hidden');
+
+                console.log('Verteilerlisten generiert:', lists);
+            } catch (error) {
+                alert('Fehler beim Laden der kontakte.json: ' + error.message);
+            }
+        }
+
+        function generateVerteilerListen(data) {
+            const lists = {};
+
+            // Eigentümer-Liste
+            lists.eigentuemer = [];
+            ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {
+                data.wohnungen[etage].forEach(wohnung => {
+                    if (wohnung.eigentümer) {
+                        lists.eigentuemer.push({
+                            name: wohnung.eigentümer.name,
+                            email: wohnung.eigentümer.email,
+                            wohnung: wohnung.bezeichnung
+                        });
+                    }
+                });
+            });
+
+            // Ausschuss-Liste
+            lists.ausschuss = data.ausschuss.map(vertreter => ({
+                name: vertreter.name,
+                email: vertreter.email,
+                funktion: vertreter.funktion,
+                wohnung: vertreter.wohnung
+            }));
+
+            // Bewohner-Liste (Mieter + Eigentümer ohne Mieter)
+            lists.bewohner = [];
+            ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {
+                data.wohnungen[etage].forEach(wohnung => {
+                    // Wenn es einen Mieter gibt, nimm den Mieter
+                    if (wohnung.mieter) {
+                        lists.bewohner.push({
+                            name: wohnung.mieter.name,
+                            email: wohnung.mieter.email,
+                            wohnung: wohnung.bezeichnung
+                        });
+                    }
+                    // Wenn kein Mieter, nimm den Eigentümer
+                    else if (wohnung.eigentümer) {
+                        lists.bewohner.push({
+                            name: wohnung.eigentümer.name,
+                            email: wohnung.eigentümer.email,
+                            wohnung: wohnung.bezeichnung
+                        });
+                    }
+                });
+            });
+
+            // Alle Bewohner (Eigentümer + berechtigte Mieter)
+            lists.alle = [...lists.eigentuemer];
+            ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {
+                data.wohnungen[etage].forEach(wohnung => {
+                    if (wohnung.mieter && wohnung.mieter.berechtigt) {
+                        lists.alle.push({
+                            name: wohnung.mieter.name,
+                            email: wohnung.mieter.email,
+                            wohnung: wohnung.bezeichnung
+                        });
+                    }
+                });
+            });
+
+            return lists;
+        }
+
+        function copyToClipboard() {
+            const text = document.getElementById('jsonOutput').textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                alert('In Zwischenablage kopiert!');
+            }).catch(err => {
+                alert('Fehler beim Kopieren: ' + err);
+            });
+        }
+    </script>
+</body>
+</html>

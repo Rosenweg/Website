@@ -761,6 +761,14 @@
         }
 
         function generateVerteilerMitglieder(data) {
+            // Falls Verteilerlisten bereits in kontakte.json vorhanden sind, diese verwenden
+            if (data.verteilerlisten) {
+                console.log('Verwende vorhandene Verteilerlisten aus kontakte.json');
+                return data.verteilerlisten;
+            }
+
+            // Ansonsten Listen dynamisch generieren
+            console.log('Generiere Verteilerlisten dynamisch');
             const lists = {};
 
             // Eigentümer-Liste
