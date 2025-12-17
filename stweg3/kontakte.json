@@ -246,6 +246,163 @@
     "website": "https://langpartners.ch",
     "öffnungszeiten": "Montag – Freitag, 09:00-12:00 Uhr"
   },
+  "verteilerlisten": {
+    "eigentuemer": [
+      {
+        "name": "Basil Fersztand",
+        "email": "fersztand.basil@teleport.ch",
+        "wohnung": "EG.1"
+      },
+      {
+        "name": "Besim Neziri",
+        "email": "besim.neziri@icloud.com",
+        "wohnung": "EG.2"
+      },
+      {
+        "name": "Elisabeth Müller",
+        "email": "elisabeth.mueller@teleport.ch",
+        "wohnung": "EG.3"
+      },
+      {
+        "name": "Yves Wyss",
+        "email": "wyss.y@gmx.net",
+        "wohnung": "1OG.1"
+      },
+      {
+        "name": "Sunay Ozdemir",
+        "email": "eigentuemer5@beispiel.invalid",
+        "wohnung": "1OG.2"
+      },
+      {
+        "name": "Sofi Aytac",
+        "email": "n.sofi@hotmail.com",
+        "wohnung": "1OG.3"
+      },
+      {
+        "name": "Slavica Ilic",
+        "email": "s.ilic@sunrise.ch",
+        "wohnung": "2OG.1"
+      },
+      {
+        "name": "Ajradin & Vjolca Emini",
+        "email": "s4dinka@hotmail.de,vjolca.ahmedi@hotmail.com",
+        "wohnung": "2OG.2"
+      },
+      {
+        "name": "Rolf & Stefan Müller",
+        "email": "stefan+rosenweg@juroct.ch,rolf@juroct.net",
+        "wohnung": "2OG.3"
+      }
+    ],
+    "ausschuss": [
+      {
+        "name": "Stefan Müller",
+        "email": "stefan+rosenweg@juroct.ch",
+        "funktion": "Vertreter 1",
+        "wohnung": "2OG.3"
+      },
+      {
+        "name": "Basil Fersztand",
+        "email": "fersztand.basil@teleport.ch",
+        "funktion": "Vertreter 2",
+        "wohnung": "EG.1"
+      }
+    ],
+    "bewohner": [
+      {
+        "name": "Marija Rustoli",
+        "email": "marija584@icloud.com",
+        "wohnung": "EG.1"
+      },
+      {
+        "name": "Rexhep Neziri",
+        "email": "rexhep_n@hotmail.com",
+        "wohnung": "EG.2"
+      },
+      {
+        "name": "Elisabeth Müller",
+        "email": "elisabeth.mueller@teleport.ch",
+        "wohnung": "EG.3"
+      },
+      {
+        "name": "Kirsten Dautel",
+        "email": "mieter-1og1@beispiel.invalid",
+        "wohnung": "1OG.1"
+      },
+      {
+        "name": "Sunay Ozdemir",
+        "email": "eigentuemer5@beispiel.invalid",
+        "wohnung": "1OG.2"
+      },
+      {
+        "name": "Sofi Aytac",
+        "email": "n.sofi@hotmail.com",
+        "wohnung": "1OG.3"
+      },
+      {
+        "name": "Slavica Ilic",
+        "email": "s.ilic@sunrise.ch",
+        "wohnung": "2OG.1"
+      },
+      {
+        "name": "[Name Mieter]",
+        "email": "mieter-2og2@beispiel.invalid",
+        "wohnung": "2OG.2"
+      },
+      {
+        "name": "Rolf & Stefan Müller",
+        "email": "stefan+rosenweg@juroct.ch,rolf@juroct.net",
+        "wohnung": "2OG.3"
+      }
+    ],
+    "alle": [
+      {
+        "name": "Basil Fersztand",
+        "email": "fersztand.basil@teleport.ch",
+        "wohnung": "EG.1"
+      },
+      {
+        "name": "Besim Neziri",
+        "email": "besim.neziri@icloud.com",
+        "wohnung": "EG.2"
+      },
+      {
+        "name": "Elisabeth Müller",
+        "email": "elisabeth.mueller@teleport.ch",
+        "wohnung": "EG.3"
+      },
+      {
+        "name": "Yves Wyss",
+        "email": "wyss.y@gmx.net",
+        "wohnung": "1OG.1"
+      },
+      {
+        "name": "Sunay Ozdemir",
+        "email": "eigentuemer5@beispiel.invalid",
+        "wohnung": "1OG.2"
+      },
+      {
+        "name": "Sofi Aytac",
+        "email": "n.sofi@hotmail.com",
+        "wohnung": "1OG.3"
+      },
+      {
+        "name": "Slavica Ilic",
+        "email": "s.ilic@sunrise.ch",
+        "wohnung": "2OG.1"
+      },
+      {
+        "name": "Ajradin & Vjolca Emini",
+        "email": "s4dinka@hotmail.de,vjolca.ahmedi@hotmail.com",
+        "wohnung": "2OG.2"
+      },
+      {
+        "name": "Rolf & Stefan Müller",
+        "email": "stefan+rosenweg@juroct.ch,rolf@juroct.net",
+        "wohnung": "2OG.3"
+      }
+    ]
+  },
   "metadaten": {
     "version": "2.0",
     "erstellt_am": "2025-10-13",
