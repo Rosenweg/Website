@@ -119,7 +119,7 @@ return {
 
             <div class="warning">
                 <strong>⚠️ Wichtig:</strong> Falls Sie diese Änderung nicht selbst vorgenommen haben oder nicht damit einverstanden sind,
-                wenden Sie sich bitte umgehend an den Ausschuss oder an <strong>{{ $json.changedBy }}</strong>,
+                wenden Sie sich bitte umgehend an den Ausschuss (<strong>{{ $json.ausschussEmail }}</strong>) oder an <strong>{{ $json.changedBy }}</strong>,
                 der diese Änderung durchgeführt hat.
             </div>
 
@@ -152,13 +152,7 @@ return {
                 "name": "E-Mail an alte Adresse",
                 "type": "n8n-nodes-base.emailSend",
                 "typeVersion": 2,
-                "position": [650, 200],
-                "credentials": {
-                    "smtp": {
-                        "id": "1",
-                        "name": "SMTP Account"
-                    }
-                }
+                "position": [650, 200]
             },
 
             # 4. E-Mail an NEUE Adresse (Bestätigung)
@@ -219,7 +213,7 @@ return {
                 <li><strong>Vorherige E-Mail:</strong> {{ $json.oldEmail }}</li>
             </ul>
 
-            <p>Falls Sie Fragen haben oder diese Änderung nicht vorgenommen haben, wenden Sie sich bitte an den Ausschuss oder an <strong>{{ $json.changedBy }}</strong>.</p>
+            <p>Falls Sie Fragen haben oder diese Änderung nicht vorgenommen haben, wenden Sie sich bitte an den Ausschuss (<strong>{{ $json.ausschussEmail }}</strong>) oder an <strong>{{ $json.changedBy }}</strong>.</p>
         </div>
 
         <div class="footer">
@@ -237,20 +231,13 @@ return {
                 "name": "E-Mail an neue Adresse",
                 "type": "n8n-nodes-base.emailSend",
                 "typeVersion": 2,
-                "position": [650, 400],
-                "credentials": {
-                    "smtp": {
-                        "id": "1",
-                        "name": "SMTP Account"
-                    }
-                }
+                "position": [650, 400]
             },
 
             # 5. Merge Node (wartet auf beide E-Mails)
             {
                 "parameters": {
-                    "mode": "mergeByPosition",
-                    "options": {}
+                    "mode": "combine"
                 },
                 "name": "Merge",
                 "type": "n8n-nodes-base.merge",
