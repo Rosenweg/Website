@@ -31,7 +31,7 @@
         async function generateLists() {
             try {
                 // Lade kontakte.json
-                const response = await fetch('kontakte.json');
+                const response = await fetch('../data/kontakte.json');
                 const data = await response.json();
 
                 // Generiere Verteilerlisten
