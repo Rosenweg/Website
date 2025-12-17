@@ -1,0 +1,99 @@
+{
+  "name": "Generic Email Sender",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "send-email",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-send-email",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        250,
+        300
+      ],
+      "webhookId": "send-email"
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $('Webhook').item.json.body.fromEmail || 'noreply@rosenweg4303.ch' }}",
+        "toEmail": "={{ $('Webhook').item.json.body.recipients.join(',') }}",
+        "subject": "={{ $('Webhook').item.json.body.subject }}",
+        "emailType": "html",
+        "message": "={{ $('Webhook').item.json.body.htmlContent }}",
+        "options": {
+          "ccEmail": "={{ $('Webhook').item.json.body.cc && $('Webhook').item.json.body.cc.length > 0 ? $('Webhook').item.json.body.cc.join(',') : '' }}",
+          "bccEmail": "={{ $('Webhook').item.json.body.bcc && $('Webhook').item.json.body.bcc.length > 0 ? $('Webhook').item.json.body.bcc.join(',') : '' }}",
+          "replyTo": "={{ $('Webhook').item.json.body.replyTo || '' }}"
+        }
+      },
+      "id": "send-email-node",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        470,
+        300
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "{{ $credentials.smtp.id }}",
+          "name": "{{ $credentials.smtp.name }}"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: true, message: 'Email sent successfully', recipients: $('Webhook').item.json.body.recipients } }}"
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        690,
+        300
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "generic-email-v3",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "rosenweg-n8n"
+  },
+  "tags": []
+}
