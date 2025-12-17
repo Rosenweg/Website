@@ -333,11 +333,11 @@
         // n8n Webhook URL zum Speichern (muss noch erstellt werden)
         const N8N_SAVE_WEBHOOK_URL = 'https://n8n.juroct.net/webhook/stweg3-save-json';
 
-        // n8n Webhook URL für E-Mail-Änderungsbenachrichtigungen
-        const N8N_EMAIL_CHANGE_WEBHOOK_URL = 'https://n8n.juroct.net/webhook/stweg3-email-change-notification';
-
         // Pfad zur JSON-Datei
         const KONTAKTE_JSON_URL = 'kontakte.json';
+
+        // n8n Webhook URL (wird dynamisch aus kontakte.json geladen)
+        let N8N_EMAIL_CHANGE_WEBHOOK_URL = null;
 
         // ============================================
         // GLOBALE VARIABLEN
@@ -481,6 +481,11 @@
                 kontakteData = await response.json();
                 originalKontakteData = JSON.parse(JSON.stringify(kontakteData)); // Deep copy für Change-Tracking
                 ausschussEmails = extractBerechtigteEmails(kontakteData);
+
+                // Lade Webhook-URL aus JSON
+                if (kontakteData.stweg?.webhooks?.email_change_notification) {
+                    N8N_EMAIL_CHANGE_WEBHOOK_URL = kontakteData.stweg.webhooks.email_change_notification;
+                }
 
                 document.getElementById('loading').classList.add('hidden');
                 document.getElementById('step1').classList.remove('hidden');
@@ -956,8 +961,14 @@
                         changeList.push(`Telefon: "${change.changes.telefon.old}" → "${change.changes.telefon.new}"`);
                     }
 
-                    // Hole offizielle STWEG3 Kontakt-E-Mail aus JSON
+                    // Hole offizielle STWEG Kontakt-E-Mail aus JSON
                     const ausschussEmail = kontakteData.stweg?.kontakt_email || 'stweg3@rosenweg4303.ch';
+
+                    // Überprüfe ob Webhook-URL konfiguriert ist
+                    if (!N8N_EMAIL_CHANGE_WEBHOOK_URL) {
+                        console.warn('⚠️ Keine Webhook-URL für E-Mail-Benachrichtigungen konfiguriert');
+                        continue;
+                    }
 
                     const response = await fetch(N8N_EMAIL_CHANGE_WEBHOOK_URL, {
                         method: 'POST',
@@ -973,7 +984,10 @@
                             changeList: changeList,
                             changedBy: currentEmail,
                             timestamp: new Date().toISOString(),
-                            ausschussEmail: ausschussEmail
+                            ausschussEmail: ausschussEmail,
+                            stwegNummer: kontakteData.stweg?.nummer || 3,
+                            stwegAdresse: kontakteData.stweg?.adresse || 'Rosenweg 9',
+                            stwegOrt: `${kontakteData.stweg?.plz || '4303'} ${kontakteData.stweg?.ort || 'Kaiseraugst'}`
                         })
                     });
 

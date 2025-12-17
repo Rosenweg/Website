@@ -17,7 +17,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1 style="margin: 0;">✅ STWEG 3 Rosenweg</h1>
+            <h1 style="margin: 0;">✅ STWEG {{ $json.stwegNummer }} Rosenweg</h1>
             <p style="margin: 5px 0 0 0; opacity: 0.9;">Bestätigung</p>
         </div>
 
@@ -53,8 +53,8 @@
         </div>
 
         <div class="footer">
-            <p>© 2025 STWEG 3 - Teil der STWEG-Kooperation Rosenweg<br>
-            Rosenweg 9, 4303 Kaiseraugst</p>
+            <p>© 2025 STWEG {{ $json.stwegNummer }} - Teil der STWEG-Kooperation Rosenweg<br>
+            {{ $json.stwegAdresse }}, {{ $json.stwegOrt }}</p>
             <p style="margin-top: 15px; font-size: 11px; color: #6b7280;">
                 Diese E-Mail wurde automatisch generiert. Bitte antworten Sie nicht direkt auf diese E-Mail.
             </p>
