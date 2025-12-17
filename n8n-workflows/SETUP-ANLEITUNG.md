@@ -30,17 +30,17 @@ Da der Workflow-Import manchmal Felder leer lässt, hier die manuelle Konfigurat
 
 #### From Email
 ```
-={{ $('Webhook').item.json.body.fromEmail || 'noreply@rosenweg4303.ch' }}
+{% raw %}={{ $('Webhook').item.json.body.fromEmail || 'noreply@rosenweg4303.ch' }}{% endraw %}
 ```
 
 #### To Email
 ```
-={{ $('Webhook').item.json.body.recipients.join(',') }}
+{% raw %}={{ $('Webhook').item.json.body.recipients.join(',') }}{% endraw %}
 ```
 
 #### Subject
 ```
-={{ $('Webhook').item.json.body.subject }}
+{% raw %}={{ $('Webhook').item.json.body.subject }}{% endraw %}
 ```
 
 #### Email Format
@@ -48,24 +48,24 @@ Da der Workflow-Import manchmal Felder leer lässt, hier die manuelle Konfigurat
 
 #### Message (HTML)
 ```
-={{ $('Webhook').item.json.body.htmlContent }}
+{% raw %}={{ $('Webhook').item.json.body.htmlContent }}{% endraw %}
 ```
 
 #### Options (aufklappen mit "Add option")
 
 **CC Email**:
 ```
-={{ $('Webhook').item.json.body.cc && $('Webhook').item.json.body.cc.length > 0 ? $('Webhook').item.json.body.cc.join(',') : '' }}
+{% raw %}={{ $('Webhook').item.json.body.cc && $('Webhook').item.json.body.cc.length > 0 ? $('Webhook').item.json.body.cc.join(',') : '' }}{% endraw %}
 ```
 
 **BCC Email**:
 ```
-={{ $('Webhook').item.json.body.bcc && $('Webhook').item.json.body.bcc.length > 0 ? $('Webhook').item.json.body.bcc.join(',') : '' }}
+{% raw %}={{ $('Webhook').item.json.body.bcc && $('Webhook').item.json.body.bcc.length > 0 ? $('Webhook').item.json.body.bcc.join(',') : '' }}{% endraw %}
 ```
 
 **Reply To**:
 ```
-={{ $('Webhook').item.json.body.replyTo || '' }}
+{% raw %}={{ $('Webhook').item.json.body.replyTo || '' }}{% endraw %}
 ```
 
 ### 4. Respond to Webhook Node hinzufügen
@@ -75,7 +75,7 @@ Da der Workflow-Import manchmal Felder leer lässt, hier die manuelle Konfigurat
    - **Respond With**: JSON
    - **Response Body**:
 ```
-={{ { success: true, message: 'Email sent successfully', recipients: $('Webhook').item.json.body.recipients } }}
+{% raw %}={{ { success: true, message: 'Email sent successfully', recipients: $('Webhook').item.json.body.recipients } }}{% endraw %}
 ```
 
 ### 5. Workflow aktivieren
