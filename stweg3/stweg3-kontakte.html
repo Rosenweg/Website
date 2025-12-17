@@ -796,6 +796,29 @@
                 wohnung: vertreter.wohnung
             }));
 
+            // Bewohner-Liste (Mieter + Eigentümer ohne Mieter)
+            lists.bewohner = [];
+            ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {
+                data.wohnungen[etage].forEach(wohnung => {
+                    // Wenn es einen Mieter gibt, nimm den Mieter
+                    if (wohnung.mieter) {
+                        lists.bewohner.push({
+                            name: wohnung.mieter.name,
+                            email: wohnung.mieter.email,
+                            wohnung: wohnung.bezeichnung
+                        });
+                    }
+                    // Wenn kein Mieter, nimm den Eigentümer
+                    else if (wohnung.eigentümer) {
+                        lists.bewohner.push({
+                            name: wohnung.eigentümer.name,
+                            email: wohnung.eigentümer.email,
+                            wohnung: wohnung.bezeichnung
+                        });
+                    }
+                });
+            });
+
             // Alle Bewohner (Eigentümer + berechtigte Mieter)
             lists.alle = [...lists.eigentuemer];
             ['erdgeschoss', 'obergeschoss_1', 'obergeschoss_2'].forEach(etage => {
