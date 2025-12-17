@@ -538,7 +538,7 @@
         // Daten laden
         async function loadData() {
             try {
-                const response = await fetch('reservierungen.json');
+                const response = await fetch('../data/reservierungen.json');
                 const data = await response.json();
 
                 zeitslots = data.meta.zeitslots;
