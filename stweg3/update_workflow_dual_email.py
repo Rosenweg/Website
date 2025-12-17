@@ -91,7 +91,7 @@ return {
                 "parameters": {
                     "fromEmail": "r9kaiseraugst@gmail.com",
                     "toEmail": "={{ $json.oldEmail }}",
-                    "subject": "⚠️ Ihre E-Mail-Adresse wurde geändert - STWEG 3",
+                    "subject": "={{ '⚠️ Ihre E-Mail-Adresse wurde geändert - STWEG ' + $json.stwegNummer }}",
                     "emailFormat": "html",
                     "text": """<!DOCTYPE html>
 <html>
@@ -112,7 +112,7 @@ return {
 <body>
     <div class="container">
         <div class="header">
-            <h1 style="margin: 0;">⚠️ STWEG 3 Rosenweg</h1>
+            <h1 style="margin: 0;">⚠️ STWEG {{ $json.stwegNummer }} Rosenweg</h1>
             <p style="margin: 5px 0 0 0; opacity: 0.9;">Sicherheitsbenachrichtigung</p>
         </div>
 
@@ -121,7 +121,7 @@ return {
 
             <p>Hallo,</p>
 
-            <p>Ihre E-Mail-Adresse für <strong>{{ $json.wohnung }}</strong> ({{ $json.type }}) wurde soeben im STWEG 3 Admin-Bereich geändert.</p>
+            <p>Ihre E-Mail-Adresse für <strong>{{ $json.wohnung }}</strong> ({{ $json.type }}) wurde soeben im STWEG {{ $json.stwegNummer }} Admin-Bereich geändert.</p>
 
             <div class="changes">
                 <h3 style="margin-top: 0;">📝 Folgende Änderungen wurden vorgenommen:</h3>
@@ -151,8 +151,8 @@ return {
         </div>
 
         <div class="footer">
-            <p>© 2025 STWEG 3 - Teil der STWEG-Kooperation Rosenweg<br>
-            Rosenweg 43, 4303 Kaiseraugst</p>
+            <p>© 2025 STWEG {{ $json.stwegNummer }} - Teil der STWEG-Kooperation Rosenweg<br>
+            {{ $json.stwegAdresse }}, {{ $json.stwegOrt }}</p>
             <p style="margin-top: 15px; font-size: 11px; color: #6b7280;">
                 Diese E-Mail wurde automatisch generiert. Bitte antworten Sie nicht direkt auf diese E-Mail.
             </p>
@@ -173,7 +173,7 @@ return {
                 "parameters": {
                     "fromEmail": "r9kaiseraugst@gmail.com",
                     "toEmail": "={{ $json.newEmail }}",
-                    "subject": "✅ Willkommen! Ihre Kontaktdaten wurden aktualisiert - STWEG 3",
+                    "subject": "={{ '✅ Willkommen! Ihre Kontaktdaten wurden aktualisiert - STWEG ' + $json.stwegNummer }}",
                     "emailFormat": "html",
                     "text": """<!DOCTYPE html>
 <html>
@@ -194,7 +194,7 @@ return {
 <body>
     <div class="container">
         <div class="header">
-            <h1 style="margin: 0;">✅ STWEG 3 Rosenweg</h1>
+            <h1 style="margin: 0;">✅ STWEG {{ $json.stwegNummer }} Rosenweg</h1>
             <p style="margin: 5px 0 0 0; opacity: 0.9;">Bestätigung</p>
         </div>
 
@@ -203,7 +203,7 @@ return {
 
             <p>Hallo,</p>
 
-            <p>Ihre Kontaktdaten für <strong>{{ $json.wohnung }}</strong> ({{ $json.type }}) wurden erfolgreich im STWEG 3 Admin-Bereich aktualisiert.</p>
+            <p>Ihre Kontaktdaten für <strong>{{ $json.wohnung }}</strong> ({{ $json.type }}) wurden erfolgreich im STWEG {{ $json.stwegNummer }} Admin-Bereich aktualisiert.</p>
 
             <div class="changes">
                 <h3 style="margin-top: 0;">📝 Folgende Änderungen wurden vorgenommen:</h3>
@@ -230,8 +230,8 @@ return {
         </div>
 
         <div class="footer">
-            <p>© 2025 STWEG 3 - Teil der STWEG-Kooperation Rosenweg<br>
-            Rosenweg 43, 4303 Kaiseraugst</p>
+            <p>© 2025 STWEG {{ $json.stwegNummer }} - Teil der STWEG-Kooperation Rosenweg<br>
+            {{ $json.stwegAdresse }}, {{ $json.stwegOrt }}</p>
             <p style="margin-top: 15px; font-size: 11px; color: #6b7280;">
                 Diese E-Mail wurde automatisch generiert. Bitte antworten Sie nicht direkt auf diese E-Mail.
             </p>
