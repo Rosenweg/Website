@@ -8,7 +8,7 @@ Der generische E-Mail-Workflow ermöglicht es, E-Mails mit beliebigem Inhalt üb
 
 1. Öffne n8n
 2. Klicke auf **"Import from File"** oder **"+"** → **"Import from file"**
-3. Wähle die Datei `n8n-workflow-generic-email.json`
+3. Wähle die Datei `/n8n-workflows/generic-email.json`
 4. Der Workflow wird importiert
 
 ## Workflow konfigurieren
