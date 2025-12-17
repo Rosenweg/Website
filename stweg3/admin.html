@@ -956,8 +956,8 @@
                         changeList.push(`Telefon: "${change.changes.telefon.old}" → "${change.changes.telefon.new}"`);
                     }
 
-                    // Verwende offizielle STWEG3 Ausschuss-E-Mail
-                    const ausschussEmail = 'stweg3@rosenweg4303.ch';
+                    // Hole offizielle STWEG3 Kontakt-E-Mail aus JSON
+                    const ausschussEmail = kontakteData.stweg?.kontakt_email || 'stweg3@rosenweg4303.ch';
 
                     const response = await fetch(N8N_EMAIL_CHANGE_WEBHOOK_URL, {
                         method: 'POST',
