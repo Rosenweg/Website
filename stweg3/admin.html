@@ -994,10 +994,196 @@
         // E-MAIL-BENACHRICHTIGUNGEN
         // ============================================
 
+        // Generische E-Mail-Funktion
+        async function sendEmail(recipients, subject, htmlContent, options = {}) {
+            try {
+                const webhookUrl = kontakteData.stweg?.webhooks?.send_email;
+
+                if (!webhookUrl) {
+                    console.warn('⚠️ Keine Webhook-URL für E-Mail-Versand konfiguriert');
+                    return false;
+                }
+
+                const payload = {
+                    recipients: Array.isArray(recipients) ? recipients : [recipients],
+                    subject: subject,
+                    htmlContent: htmlContent,
+                    cc: options.cc || [],
+                    bcc: options.bcc || [],
+                    replyTo: options.replyTo || kontakteData.stweg?.kontakt_email || ''
+                };
+
+                console.log('Sende E-Mail:', { recipients: payload.recipients, subject });
+
+                const response = await fetch(webhookUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) {
+                    console.log('✅ E-Mail erfolgreich gesendet');
+                    return true;
+                } else {
+                    console.error('❌ Fehler beim Senden:', response.status);
+                    return false;
+                }
+            } catch (error) {
+                console.error('Fehler beim E-Mail-Versand:', error);
+                return false;
+            }
+        }
+
+        // HTML-Template für E-Mail-Adressänderung
+        function generateEmailChangeHTML(data) {
+            return `<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 20px; border-radius: 8px 8px 0 0; }
+        .content { background: #f9fafb; padding: 30px; border: 1px solid #e5e7eb; }
+        .changes { background: white; padding: 15px; margin: 20px 0; border-left: 4px solid #10b981; border-radius: 4px; }
+        .footer { background: #1f2937; color: #9ca3af; padding: 20px; text-align: center; font-size: 12px; border-radius: 0 0 8px 8px; }
+        .info { background: #dbeafe; border: 1px solid #3b82f6; padding: 15px; border-radius: 4px; margin: 20px 0; }
+        ul { list-style: none; padding: 0; }
+        li { padding: 8px 0; border-bottom: 1px solid #e5e7eb; }
+        li:last-child { border-bottom: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1 style="margin: 0;">✅ STWEG ${data.stwegNummer} Rosenweg</h1>
+            <p style="margin: 5px 0 0 0; opacity: 0.9;">Bestätigung</p>
+        </div>
+        <div class="content">
+            <h2>Ihre Kontaktdaten wurden erfolgreich aktualisiert</h2>
+            <p>Hallo,</p>
+            <p>Ihre Kontaktdaten für <strong>${data.wohnung}</strong> (${data.type}) wurden erfolgreich im STWEG ${data.stwegNummer} Admin-Bereich aktualisiert.</p>
+            <div class="changes">
+                <h3 style="margin-top: 0;">📝 Folgende Änderungen wurden vorgenommen:</h3>
+                <ul style="list-style: disc; padding-left: 20px; margin: 10px 0;">
+                    ${data.changeList.map(c => `<li>${c}</li>`).join('')}
+                </ul>
+            </div>
+            <div class="info">
+                <strong>✅ Bestätigung:</strong> Diese E-Mail-Adresse (<strong>${data.newEmail}</strong>) ist nun als Ihre aktuelle Kontaktadresse registriert.
+                Alle zukünftigen Benachrichtigungen werden an diese Adresse gesendet.
+            </div>
+            <p><strong>Details zur Änderung:</strong></p>
+            <ul style="background: white; padding: 15px; border-radius: 4px;">
+                <li><strong>Zeitpunkt:</strong> ${new Date(data.timestamp).toLocaleString('de-CH')}</li>
+                <li><strong>Geändert von:</strong> ${data.changedBy}</li>
+                <li><strong>Wohnung:</strong> ${data.wohnung}</li>
+                <li><strong>Art:</strong> ${data.type}</li>
+                <li><strong>Vorherige E-Mail:</strong> ${data.oldEmail}</li>
+            </ul>
+            <p>Falls Sie Fragen haben oder diese Änderung nicht vorgenommen haben, wenden Sie sich bitte an den Ausschuss (<strong>${data.ausschussEmail}</strong>) oder an <strong>${data.changedBy}</strong>.</p>
+        </div>
+        <div class="footer">
+            <p>© 2025 STWEG ${data.stwegNummer} - Teil der STWEG-Kooperation Rosenweg<br>
+            ${data.stwegAdresse}, ${data.stwegOrt}</p>
+            <p style="margin-top: 15px; font-size: 11px; color: #6b7280;">
+                Diese E-Mail wurde automatisch generiert. Bitte antworten Sie nicht direkt auf diese E-Mail.
+            </p>
+        </div>
+    </div>
+</body>
+</html>`;
+        }
+
+        // HTML-Template für Verteilerlisten-Änderung
+        function generateVerteilerChangeHTML(data) {
+            const changeListHTML = data.changes.map(detail => {
+                const typeName = {
+                    'eigentuemer': 'Eigentümer',
+                    'ausschuss': 'Ausschuss',
+                    'bewohner': 'Bewohner',
+                    'alle': 'Alle'
+                }[detail.type];
+
+                let html = `<li><strong>${typeName}</strong>: ${detail.oldCount} → ${detail.newCount} Mitglieder`;
+                if (detail.added.length > 0) {
+                    html += `<br><span style="color: #059669;">➕ Hinzugefügt: ${detail.added.join(', ')}</span>`;
+                }
+                if (detail.removed.length > 0) {
+                    html += `<br><span style="color: #dc2626;">➖ Entfernt: ${detail.removed.join(', ')}</span>`;
+                }
+                html += '</li>';
+                return html;
+            }).join('');
+
+            return `<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white; padding: 20px; border-radius: 8px 8px 0 0; }
+        .content { background: #f9fafb; padding: 30px; border: 1px solid #e5e7eb; }
+        .changes { background: white; padding: 15px; margin: 20px 0; border-left: 4px solid #3b82f6; border-radius: 4px; }
+        .footer { background: #1f2937; color: #9ca3af; padding: 20px; text-align: center; font-size: 12px; border-radius: 0 0 8px 8px; }
+        .info { background: #dbeafe; border: 1px solid #3b82f6; padding: 15px; border-radius: 4px; margin: 20px 0; }
+        ul { list-style: none; padding: 0; }
+        li { padding: 8px 0; border-bottom: 1px solid #e5e7eb; }
+        li:last-child { border-bottom: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1 style="margin: 0;">📋 STWEG ${data.stwegNummer} Rosenweg</h1>
+            <p style="margin: 5px 0 0 0; opacity: 0.9;">Verteilerlisten geändert</p>
+        </div>
+        <div class="content">
+            <h2>Änderungen an den E-Mail-Verteilerlisten</h2>
+            <p>Hallo Ausschussmitglied,</p>
+            <p>Die E-Mail-Verteilerlisten wurden im STWEG ${data.stwegNummer} Admin-Bereich aktualisiert.</p>
+            <div class="changes">
+                <h3 style="margin-top: 0;">📝 Folgende Verteilerlisten haben sich geändert:</h3>
+                <ul>${changeListHTML}</ul>
+            </div>
+            <div class="info">
+                <strong>ℹ️ Information:</strong> Diese Änderungen wurden automatisch erkannt und die Verteilerlisten sind bereits aktualisiert.
+            </div>
+            <p><strong>Details zur Änderung:</strong></p>
+            <ul style="background: white; padding: 15px; border-radius: 4px;">
+                <li><strong>Zeitpunkt:</strong> ${new Date(data.timestamp).toLocaleString('de-CH')}</li>
+                <li><strong>Geändert durch:</strong> ${data.changedBy}</li>
+                <li><strong>Anzahl betroffener Listen:</strong> ${data.changes.length}</li>
+            </ul>
+            <h3>📊 Aktuelle Verteilerlisten-Übersicht:</h3>
+            <ul style="background: white; padding: 15px; border-radius: 4px;">
+                <li><strong>Eigentümer:</strong> Alle Wohnungseigentümer</li>
+                <li><strong>Ausschuss:</strong> Ausschussmitglieder mit Funktion</li>
+                <li><strong>Bewohner:</strong> Mieter (falls vorhanden) oder Eigentümer</li>
+                <li><strong>Alle:</strong> Alle Eigentümer + berechtigte Mieter</li>
+            </ul>
+            <p>Bei Fragen wenden Sie sich bitte an <strong>${data.changedBy}</strong>.</p>
+        </div>
+        <div class="footer">
+            <p>© 2025 STWEG ${data.stwegNummer} - Teil der STWEG-Kooperation Rosenweg<br>
+            ${data.stwegAdresse}, ${data.stwegOrt}</p>
+            <p style="margin-top: 15px; font-size: 11px; color: #6b7280;">
+                Diese E-Mail wurde automatisch generiert.
+            </p>
+        </div>
+    </div>
+</body>
+</html>`;
+        }
+
         async function sendEmailChangeNotifications(emailChanges) {
             for (const change of emailChanges) {
                 try {
                     console.log('Sende Benachrichtigung an alte E-Mail:', change.oldEmail);
+
+                    // Hole offizielle STWEG Kontakt-E-Mail
+                    const ausschussEmail = kontakteData.stweg?.kontakt_email || 'stweg3@rosenweg4303.ch';
 
                     // Erstelle lesbare Änderungsliste
                     const changeList = [];
@@ -1011,45 +1197,35 @@
                         changeList.push(`Telefon: "${change.changes.telefon.old}" → "${change.changes.telefon.new}"`);
                     }
 
-                    // Hole offizielle STWEG Kontakt-E-Mail aus JSON
-                    const ausschussEmail = kontakteData.stweg?.kontakt_email || 'stweg3@rosenweg4303.ch';
-
-                    // Überprüfe ob Webhook-URL konfiguriert ist
-                    if (!N8N_EMAIL_CHANGE_WEBHOOK_URL) {
-                        console.warn('⚠️ Keine Webhook-URL für E-Mail-Benachrichtigungen konfiguriert');
-                        continue;
-                    }
-
-                    const response = await fetch(N8N_EMAIL_CHANGE_WEBHOOK_URL, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            oldEmail: change.oldEmail,
-                            newEmail: change.newEmail,
-                            type: change.type,
-                            name: change.name,
-                            wohnung: change.wohnung,
-                            changeList: changeList,
-                            changedBy: currentEmail,
-                            timestamp: new Date().toISOString(),
-                            ausschussEmail: ausschussEmail,
-                            stwegNummer: kontakteData.stweg?.nummer || 3,
-                            stwegAdresse: kontakteData.stweg?.adresse || 'Rosenweg 9',
-                            stwegOrt: `${kontakteData.stweg?.plz || '4303'} ${kontakteData.stweg?.ort || 'Kaiseraugst'}`
-                        })
+                    // Generiere HTML
+                    const htmlContent = generateEmailChangeHTML({
+                        oldEmail: change.oldEmail,
+                        newEmail: change.newEmail,
+                        type: change.type,
+                        name: change.name,
+                        wohnung: change.wohnung,
+                        changeList: changeList,
+                        changedBy: currentEmail,
+                        timestamp: new Date().toISOString(),
+                        ausschussEmail: ausschussEmail,
+                        stwegNummer: kontakteData.stweg?.nummer || 3,
+                        stwegAdresse: kontakteData.stweg?.adresse || 'Rosenweg 9',
+                        stwegOrt: `${kontakteData.stweg?.plz || '4303'} ${kontakteData.stweg?.ort || 'Kaiseraugst'}`
                     });
 
-                    if (response.ok) {
+                    // Sende E-Mail
+                    const success = await sendEmail(
+                        change.oldEmail,
+                        `STWEG ${kontakteData.stweg?.nummer || 3}: Ihre Kontaktdaten wurden aktualisiert`,
+                        htmlContent
+                    );
+
+                    if (success) {
                         console.log('✓ Benachrichtigung erfolgreich gesendet an:', change.oldEmail);
                         showSuccessMessage(`Benachrichtigung wurde an ${change.oldEmail} gesendet`);
-                    } else {
-                        console.warn('⚠ Benachrichtigung konnte nicht gesendet werden an:', change.oldEmail);
                     }
                 } catch (error) {
                     console.error('Fehler beim Senden der Benachrichtigung:', error);
-                    // Nicht blockieren - nur loggen
                 }
             }
         }
@@ -1194,63 +1370,30 @@
             if (!changes || !changes.hasChanges) return;
 
             try {
-                // Erstelle lesbare Änderungsliste
-                let changeListHTML = '<ul>';
-                changes.details.forEach(detail => {
-                    const typeName = {
-                        'eigentuemer': 'Eigentümer',
-                        'ausschuss': 'Ausschuss',
-                        'bewohner': 'Bewohner',
-                        'alle': 'Alle'
-                    }[detail.type];
-
-                    changeListHTML += `<li><strong>${typeName}</strong>: ${detail.oldCount} → ${detail.newCount} Mitglieder`;
-
-                    if (detail.added.length > 0) {
-                        changeListHTML += `<br>➕ Hinzugefügt: ${detail.added.join(', ')}`;
-                    }
-                    if (detail.removed.length > 0) {
-                        changeListHTML += `<br>➖ Entfernt: ${detail.removed.join(', ')}`;
-                    }
-                    changeListHTML += '</li>';
-                });
-                changeListHTML += '</ul>';
-
                 // Hole Ausschuss-E-Mails
                 const ausschussEmails = kontakteData.ausschuss.map(m => m.email);
 
                 console.log('Sende Verteilerlisten-Änderungsbenachrichtigung an Ausschuss:', ausschussEmails);
 
-                // Webhook-URL für Verteilerlisten-Änderungen (optional - kann später hinzugefügt werden)
-                const webhookUrl = kontakteData.stweg?.webhooks?.verteiler_change_notification;
-
-                if (!webhookUrl) {
-                    console.warn('⚠️ Keine Webhook-URL für Verteilerlisten-Benachrichtigungen konfiguriert');
-                    console.log('Änderungen:', changes);
-                    return;
-                }
-
-                const response = await fetch(webhookUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        recipients: ausschussEmails,
-                        changes: changes.details,
-                        changeListHTML: changeListHTML,
-                        changedBy: currentEmail,
-                        timestamp: new Date().toISOString(),
-                        stwegNummer: kontakteData.stweg?.nummer || 3,
-                        stwegAdresse: kontakteData.stweg?.adresse || 'Rosenweg 9',
-                        stwegOrt: `${kontakteData.stweg?.plz || '4303'} ${kontakteData.stweg?.ort || 'Kaiseraugst'}`
-                    })
+                // Generiere HTML
+                const htmlContent = generateVerteilerChangeHTML({
+                    changes: changes.details,
+                    changedBy: currentEmail,
+                    timestamp: new Date().toISOString(),
+                    stwegNummer: kontakteData.stweg?.nummer || 3,
+                    stwegAdresse: kontakteData.stweg?.adresse || 'Rosenweg 9',
+                    stwegOrt: `${kontakteData.stweg?.plz || '4303'} ${kontakteData.stweg?.ort || 'Kaiseraugst'}`
                 });
 
-                if (response.ok) {
+                // Sende E-Mail an alle Ausschussmitglieder
+                const success = await sendEmail(
+                    ausschussEmails,
+                    `STWEG ${kontakteData.stweg?.nummer || 3}: Verteilerlisten aktualisiert`,
+                    htmlContent
+                );
+
+                if (success) {
                     console.log('✅ Verteilerlisten-Änderungsbenachrichtigung erfolgreich gesendet');
-                } else {
-                    console.error('❌ Fehler beim Senden der Benachrichtigung:', response.status);
                 }
             } catch (error) {
                 console.error('Fehler beim Senden der Verteilerlisten-Benachrichtigung:', error);

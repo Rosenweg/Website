@@ -10,8 +10,7 @@
     "letzte_aktualisierung": "2025-10-13",
     "kontakt_email": "stweg3@rosenweg4303.ch",
     "webhooks": {
-      "email_change_notification": "https://n8n.juroct.net/webhook/stweg3-email-change-notification",
-      "verteiler_change_notification": "https://n8n.juroct.net/webhook/stweg3-verteiler-change-notification"
+      "send_email": "https://n8n.juroct.net/webhook/send-email"
     }
   },
   "ausschuss": [
