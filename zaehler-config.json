@@ -1,0 +1,157 @@
+{
+  "$schema": "Konfiguration für Energie-Monitoring-System",
+  "version": "1.0",
+  "tarife": {
+    "hochtarif": {
+      "name": "Hochtarif (Zone 1)",
+      "beschreibung": "Mo-Fr 07:00-20:00, Sa 07:00-13:00",
+      "preis_pro_kwh": 0.2516,
+      "farbe": "#ef4444",
+      "zeiten": [
+        {
+          "wochentage": [1, 2, 3, 4, 5],
+          "von": "07:00",
+          "bis": "20:00"
+        },
+        {
+          "wochentage": [6],
+          "von": "07:00",
+          "bis": "13:00"
+        }
+      ]
+    },
+    "niedertarif": {
+      "name": "Niedertarif (Zone 2)",
+      "beschreibung": "Übrige Zeiten",
+      "preis_pro_kwh": 0.1789,
+      "farbe": "#3b82f6",
+      "zeiten": "übrige"
+    },
+    "solar": {
+      "name": "Solarstrom",
+      "beschreibung": "Eigenverbrauch vom Solarzähler",
+      "preis_pro_kwh": 0.10,
+      "farbe": "#fbbf24",
+      "typ": "erzeugung",
+      "info": "Solar mischt sich mit Netz (Hoch/Niedertarif). Eigenverbrauch = Solar-Erzeugung - Netz-Einspeisung"
+    }
+  },
+  "iobroker": {
+    "base_url": "http://iobroker.local:8087",
+    "api_endpoint": "/api/v1",
+    "update_intervall_sekunden": 5,
+    "timeout_ms": 3000,
+    "webhook_url": "https://n8n.juroct.net/webhook/zaehler-daten",
+    "info": "Webhook für n8n-Integration, um Zählerdaten zu empfangen und zu speichern"
+  },
+  "n8n_webhooks": {
+    "otp_versand": "https://n8n.juroct.net/webhook/stweg-zaehler-otp",
+    "daten_speichern": "https://n8n.juroct.net/webhook/zaehler-daten-speichern"
+  },
+  "benutzer": [
+    {
+      "email": "beispiel@rosenweg4303.ch",
+      "name": "Beispiel Bewohner",
+      "wohnung": "Rosenweg 9, Whg 1",
+      "stweg": 3,
+      "zugriff": "bewohner",
+      "zaehler": [
+        {
+          "id": "main_stweg3_whg1",
+          "typ": "hauptzaehler",
+          "name": "Hauptzähler Wohnung 1",
+          "iobroker_id": "modbus.0.meter_stweg3_whg1",
+          "einheit": "kWh",
+          "hat_solar": false,
+          "hat_unterzaehler": false,
+          "aktiv": true
+        }
+      ]
+    },
+    {
+      "email": "solar@rosenweg4303.ch",
+      "name": "Beispiel mit Solar",
+      "wohnung": "Rosenweg 9, Whg 5",
+      "stweg": 3,
+      "zugriff": "bewohner",
+      "zaehler": [
+        {
+          "id": "main_stweg3_whg5",
+          "typ": "hauptzaehler",
+          "name": "Hauptzähler Wohnung 5",
+          "iobroker_id": "modbus.0.meter_stweg3_whg5",
+          "einheit": "kWh",
+          "hat_solar": true,
+          "solar_zaehler_id": "solar_stweg3_whg5",
+          "hat_unterzaehler": true,
+          "aktiv": true
+        },
+        {
+          "id": "solar_stweg3_whg5",
+          "typ": "solarzaehler",
+          "name": "PV-Anlage Wohnung 5",
+          "iobroker_id": "modbus.0.solar_stweg3_whg5",
+          "einheit": "kWh",
+          "parent_zaehler": "main_stweg3_whg5",
+          "typ_messung": "erzeugung",
+          "leistung_kwp": 5.5,
+          "aktiv": true,
+          "info": "Misst Gesamterzeugung. Eigenverbrauch = Erzeugung - Einspeisung"
+        },
+        {
+          "id": "sub_stweg3_whg5_wasch",
+          "typ": "unterzaehler",
+          "name": "Waschmaschine",
+          "iobroker_id": "shelly.0.SHELLY123456",
+          "einheit": "kWh",
+          "parent_zaehler": "main_stweg3_whg5",
+          "geraetetyp": "shelly",
+          "aktiv": true
+        },
+        {
+          "id": "sub_stweg3_whg5_heiz",
+          "typ": "unterzaehler",
+          "name": "Heizung",
+          "iobroker_id": "shelly.0.SHELLY789012",
+          "einheit": "kWh",
+          "parent_zaehler": "main_stweg3_whg5",
+          "geraetetyp": "shelly",
+          "aktiv": true
+        }
+      ]
+    },
+    {
+      "email": "ausschuss@rosenweg4303.ch",
+      "name": "Ausschuss STWEG 3",
+      "wohnung": "Alle Wohnungen",
+      "stweg": 3,
+      "zugriff": "admin",
+      "info": "Admin sieht alle Zähler aller Bewohner",
+      "zaehler": []
+    }
+  ],
+  "daten_speicherung": {
+    "historie_tage": 90,
+    "aggregation_intervalle": {
+      "live": "5_sekunden",
+      "stunde": "5_minuten",
+      "tag": "1_stunde",
+      "woche": "6_stunden",
+      "monat": "1_tag"
+    },
+    "speicherort": "zaehler-daten/",
+    "datei_format": "YYYY-MM-DD_zaehler-id.json"
+  },
+  "info": {
+    "zaehler_typen": {
+      "hauptzaehler": "Hauptstromzähler der Wohnung (Netzbezug)",
+      "solarzaehler": "PV-Anlage Erzeugungszähler",
+      "unterzaehler": "Einzelgeräte (Shellys, etc.)"
+    },
+    "zugriff": {
+      "bewohner": "Sieht nur eigene Zähler",
+      "admin": "Sieht alle Zähler aller Bewohner"
+    },
+    "tarif_berechnung": "Für jeden Zeitstempel wird geprüft: Ist Hoch- oder Niedertarif? Wenn Solar vorhanden, wird Eigenverbrauch (Solar - Einspeisung) mit Solar-Tarif verrechnet, Rest mit Netz-Tarif."
+  }
+}

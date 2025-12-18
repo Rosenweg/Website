@@ -1,0 +1,98 @@
+{
+  "zaehler_id": "main_stweg3_whg5",
+  "datum": "2024-12-18",
+  "benutzer_email": "solar@rosenweg4303.ch",
+  "typ": "hauptzaehler",
+  "einheit": "kWh",
+  "hat_solar": true,
+  "solar_zaehler_id": "solar_stweg3_whg5",
+  "stand_tagesbeginn": 22145.2,
+  "stand_tagesende": 22154.8,
+  "verbrauch_gesamt": 9.6,
+  "solar_erzeugung_gesamt": 12.4,
+  "solar_eigenverbrauch": 8.2,
+  "solar_einspeisung": 4.2,
+  "netz_bezug": 1.4,
+  "verbrauch_nach_tarif": {
+    "solar_kwh": 8.2,
+    "solar_kosten": 0.82,
+    "hochtarif_kwh": 0.9,
+    "hochtarif_kosten": 0.23,
+    "niedertarif_kwh": 0.5,
+    "niedertarif_kosten": 0.09,
+    "gesamt_kosten": 1.14,
+    "einsparung_durch_solar": 1.45,
+    "info": "Eigenverbrauch = Solar-Erzeugung (12.4) - Einspeisung (4.2) = 8.2 kWh"
+  },
+  "stundenwerte": [
+    {
+      "timestamp": "2024-12-18T00:00:00Z",
+      "zaehlerstand_netz": 22145.2,
+      "zaehlerstand_solar": 1520.0,
+      "verbrauch_kwh": 0.3,
+      "solar_erzeugung_kwh": 0.0,
+      "solar_eigenverbrauch_kwh": 0.0,
+      "netz_bezug_kwh": 0.3,
+      "leistung_w": 320,
+      "tarif": "niedertarif"
+    },
+    {
+      "timestamp": "2024-12-18T08:00:00Z",
+      "zaehlerstand_netz": 22146.5,
+      "zaehlerstand_solar": 1520.5,
+      "verbrauch_kwh": 0.6,
+      "solar_erzeugung_kwh": 0.8,
+      "solar_eigenverbrauch_kwh": 0.6,
+      "solar_einspeisung_kwh": 0.2,
+      "netz_bezug_kwh": 0.0,
+      "leistung_w": 850,
+      "solar_leistung_w": 1200,
+      "tarif": "hochtarif"
+    },
+    {
+      "timestamp": "2024-12-18T12:00:00Z",
+      "zaehlerstand_netz": 22148.2,
+      "zaehlerstand_solar": 1524.8,
+      "verbrauch_kwh": 1.2,
+      "solar_erzeugung_kwh": 4.5,
+      "solar_eigenverbrauch_kwh": 1.2,
+      "solar_einspeisung_kwh": 3.3,
+      "netz_bezug_kwh": 0.0,
+      "leistung_w": 1400,
+      "solar_leistung_w": 5200,
+      "tarif": "hochtarif"
+    },
+    {
+      "timestamp": "2024-12-18T18:00:00Z",
+      "zaehlerstand_netz": 22152.1,
+      "zaehlerstand_solar": 1531.5,
+      "verbrauch_kwh": 0.8,
+      "solar_erzeugung_kwh": 0.5,
+      "solar_eigenverbrauch_kwh": 0.5,
+      "solar_einspeisung_kwh": 0.0,
+      "netz_bezug_kwh": 0.3,
+      "leistung_w": 950,
+      "solar_leistung_w": 600,
+      "tarif": "hochtarif"
+    },
+    {
+      "timestamp": "2024-12-18T20:00:00Z",
+      "zaehlerstand_netz": 22153.5,
+      "zaehlerstand_solar": 1532.4,
+      "verbrauch_kwh": 0.5,
+      "solar_erzeugung_kwh": 0.0,
+      "solar_eigenverbrauch_kwh": 0.0,
+      "netz_bezug_kwh": 0.5,
+      "leistung_w": 580,
+      "tarif": "niedertarif"
+    }
+  ],
+  "statistik": {
+    "autarkie_prozent": 85.4,
+    "eigenverbrauch_quote_prozent": 66.1,
+    "minimum_leistung_w": 280,
+    "maximum_leistung_w": 1400,
+    "durchschnitt_leistung_w": 620,
+    "solar_peak_leistung_w": 5200
+  }
+}
