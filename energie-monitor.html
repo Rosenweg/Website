@@ -297,13 +297,73 @@
                 return;
             }
 
+            // OTP-Code generieren (6-stellig)
+            const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+            // Code mit Timestamp speichern (10 Minuten gültig)
+            const otpData = {
+                code: otpCode,
+                email: email,
+                expires: Date.now() + 600000 // 10 Minuten
+            };
+            localStorage.setItem('energie_monitor_otp', JSON.stringify(otpData));
+
+            // HTML für E-Mail erstellen
+            const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
+        .container { max-width: 600px; margin: 20px auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .header { background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%); color: white; padding: 30px 20px; text-align: center; }
+        .header h1 { margin: 0; font-size: 28px; }
+        .content { padding: 30px 20px; }
+        .otp-box { background: #f0f9ff; border: 2px dashed #3b82f6; border-radius: 8px; padding: 20px; text-align: center; margin: 20px 0; }
+        .otp-code { font-size: 36px; font-weight: bold; color: #1e40af; letter-spacing: 8px; margin: 10px 0; }
+        .info { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 4px; }
+        .footer { background: #f9fafb; padding: 20px; text-align: center; font-size: 12px; color: #6b7280; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⚡ Energie-Monitor Login</h1>
+            <p>STWEG-Kooperation Rosenweg</p>
+        </div>
+        <div class="content">
+            <h2>Ihr Anmelde-Code</h2>
+            <p>Verwenden Sie folgenden Code, um sich im Energie-Monitor anzumelden:</p>
+
+            <div class="otp-box">
+                <div style="color: #6b7280; font-size: 14px; margin-bottom: 10px;">IHR CODE</div>
+                <div class="otp-code">${otpCode}</div>
+                <div style="color: #6b7280; font-size: 12px; margin-top: 10px;">Gültig für 10 Minuten</div>
+            </div>
+
+            <div class="info">
+                <strong>⚠️ Wichtig:</strong> Dieser Code ist nur 10 Minuten gültig. Geben Sie ihn niemals an Dritte weiter.
+            </div>
+
+            <p>Wenn Sie diese Anfrage nicht gestellt haben, ignorieren Sie diese E-Mail einfach.</p>
+        </div>
+        <div class="footer">
+            <p>STWEG-Kooperation Rosenweg | Kaiseraugst<br>
+            Diese E-Mail wurde automatisch generiert.</p>
+        </div>
+    </div>
+</body>
+</html>`;
+
             try {
-                const response = await fetch(zaehlerConfig.n8n_webhooks.otp_versand, {
+                const response = await fetch(zaehlerConfig.n8n_webhooks.send_email, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
-                        email: email,
-                        system: 'energie-monitor'
+                        recipients: [email],
+                        subject: 'Ihr Login-Code für den Energie-Monitor',
+                        htmlContent: htmlContent,
+                        fromEmail: 'noreply@rosenweg4303.ch'
                     })
                 });
 
@@ -331,8 +391,37 @@
                 return;
             }
 
-            // Hier würde die OTP-Verifikation über n8n erfolgen
-            // Für Demo: Simuliere erfolgreiche Anmeldung
+            // OTP-Daten aus LocalStorage holen
+            const otpDataStr = localStorage.getItem('energie_monitor_otp');
+            if (!otpDataStr) {
+                showMessage('Kein Code gefunden. Bitte fordern Sie einen neuen Code an.', 'error');
+                return;
+            }
+
+            const otpData = JSON.parse(otpDataStr);
+
+            // Prüfen ob abgelaufen
+            if (Date.now() > otpData.expires) {
+                localStorage.removeItem('energie_monitor_otp');
+                showMessage('Code abgelaufen. Bitte fordern Sie einen neuen Code an.', 'error');
+                backToEmail();
+                return;
+            }
+
+            // Prüfen ob E-Mail übereinstimmt
+            if (otpData.email.toLowerCase() !== email.toLowerCase()) {
+                showMessage('E-Mail stimmt nicht überein.', 'error');
+                return;
+            }
+
+            // Code prüfen
+            if (otpData.code !== otp) {
+                showMessage('Ungültiger Code. Bitte versuchen Sie es erneut.', 'error');
+                return;
+            }
+
+            // Code ist korrekt - Benutzer anmelden
+            localStorage.removeItem('energie_monitor_otp');
             const benutzer = zaehlerConfig.benutzer.find(b => b.email.toLowerCase() === email.toLowerCase());
 
             if (benutzer) {
@@ -340,7 +429,7 @@
                 benutzerDaten = benutzer;
                 await showDashboard();
             } else {
-                showMessage('Ungültiger Code oder E-Mail.', 'error');
+                showMessage('Ungültiger Benutzer.', 'error');
             }
         }
 

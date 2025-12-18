@@ -45,7 +45,7 @@
     "info": "Webhook für n8n-Integration, um Zählerdaten zu empfangen und zu speichern"
   },
   "n8n_webhooks": {
-    "otp_versand": "https://n8n.juroct.net/webhook/stweg-zaehler-otp",
+    "send_email": "https://n8n.juroct.net/webhook/send-email",
     "daten_speichern": "https://n8n.juroct.net/webhook/zaehler-daten-speichern"
   },
   "benutzer": [

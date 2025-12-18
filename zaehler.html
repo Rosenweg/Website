@@ -89,8 +89,8 @@
                     </div>
                 </a>
 
-                <!-- my.aew -->
-                <a href="https://my.aew.ch" target="_blank" rel="noopener noreferrer" class="block bg-white p-8 rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1 border-2 border-blue-200">
+                <!-- AEW Portal -->
+                <a href="https://portal.aew.ch/login" target="_blank" rel="noopener noreferrer" class="block bg-white p-8 rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1 border-2 border-blue-200">
                     <div class="flex items-center mb-4">
                         <div class="bg-blue-100 rounded-full p-3 mr-4">
                             <svg class="h-10 w-10 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -98,12 +98,12 @@
                             </svg>
                         </div>
                         <div>
-                            <h3 class="text-2xl font-bold text-gray-800">my.aew</h3>
-                            <p class="text-sm text-blue-600 font-semibold">Stromzähler-Portal</p>
+                            <h3 class="text-2xl font-bold text-gray-800">AEW Portal</h3>
+                            <p class="text-sm text-blue-600 font-semibold">Offizieller Zählerzugang</p>
                         </div>
                     </div>
                     <p class="text-gray-600 mb-4">
-                        Offizielles AEW Kundenportal für Stromzähler-Daten, Rechnungen und Verbrauchsstatistiken aller Wohnungen.
+                        Offizielles AEW Kundenportal für Wohnungen mit AEW-Zähler. Zugang zu Stromzähler-Daten, Rechnungen und Verbrauchsstatistiken.
                     </p>
                     <div class="bg-blue-50 rounded-lg p-4 mb-4">
                         <p class="text-sm text-gray-700 mb-2"><strong>📊 Funktionen:</strong></p>
@@ -133,10 +133,10 @@
                     <div>
                         <p class="font-semibold text-gray-800 mb-2">ℹ️ Unterschied der Systeme</p>
                         <p class="text-sm text-gray-700">
-                            <strong>Energie-Monitor:</strong> Internes Smart-Monitoring-System für die Waschküche in STWEG 3 mit Echtzeit-Daten und Guthabenverwaltung.
+                            <strong>Energie-Monitor:</strong> Internes Smart-Monitoring-System mit Live-Daten via ioBroker/Modbus für detaillierte Echtzeitanalysen und Tarifaufschlüsselung.
                         </p>
                         <p class="text-sm text-gray-700 mt-2">
-                            <strong>my.aew:</strong> Offizielles Portal des Energieversorgers AEW für Stromzähler-Daten aller Wohnungen in allen STWEGs.
+                            <strong>AEW Portal:</strong> Offizielles Portal des Energieversorgers AEW für Wohnungen mit AEW-Stromzähler. Zugang zu Zählerständen und Rechnungen.
                         </p>
                     </div>
                 </div>
@@ -144,23 +144,28 @@
 
             <!-- Weitere STWEGs -->
             <div class="bg-gray-100 rounded-lg p-6">
-                <h3 class="text-xl font-semibold text-gray-800 mb-4">Weitere Monitoring-Optionen</h3>
+                <h3 class="text-xl font-semibold text-gray-800 mb-4">Verfügbarkeit</h3>
                 <p class="text-gray-700 mb-4">
-                    Derzeit ist das Energie-Monitor-System nur für <strong>STWEG 3</strong> verfügbar. Andere STWEGs haben Zugang zu ihren Verbrauchsdaten über das my.aew Portal.
+                    Der <strong>Energie-Monitor</strong> ist für alle Wohnungen verfügbar, die über ein Smart-Meter-System (ioBroker/Modbus) verfügen.
+                    Das <strong>AEW Portal</strong> ist für alle Wohnungen mit offiziellem AEW-Stromzähler zugänglich.
                 </p>
                 <div class="grid md:grid-cols-2 gap-4">
                     <div class="bg-white p-4 rounded-lg">
-                        <p class="text-sm text-gray-600 mb-2"><strong>STWEG 3:</strong></p>
+                        <p class="text-sm text-gray-600 mb-2"><strong>Energie-Monitor:</strong></p>
                         <ul class="text-sm text-gray-600 space-y-1">
-                            <li>✅ Energie-Monitor (Waschküche)</li>
-                            <li>✅ my.aew Portal</li>
+                            <li>✅ Live-Daten (5-Sekunden-Updates)</li>
+                            <li>✅ Tarifaufschlüsselung (Hoch/Niedrig/Solar)</li>
+                            <li>✅ Solar-Integration</li>
+                            <li>✅ Unterzähler (Shellys)</li>
                         </ul>
                     </div>
                     <div class="bg-white p-4 rounded-lg">
-                        <p class="text-sm text-gray-600 mb-2"><strong>STWEG 1, 2, 4, 5, 6, 7:</strong></p>
+                        <p class="text-sm text-gray-600 mb-2"><strong>AEW Portal:</strong></p>
                         <ul class="text-sm text-gray-600 space-y-1">
-                            <li>✅ my.aew Portal</li>
-                            <li>⏳ Energie-Monitor (in Planung)</li>
+                            <li>✅ Zählerstände</li>
+                            <li>✅ Historische Daten</li>
+                            <li>✅ Rechnungen</li>
+                            <li>✅ Verbrauchsstatistiken</li>
                         </ul>
                     </div>
                 </div>
