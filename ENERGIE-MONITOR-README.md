@@ -9,7 +9,9 @@ Dynamisches Energie-Monitoring-System für die STWEG-Kooperation Rosenweg mit Li
 - **Tarifaufschlüsselung**: Hoch-/Niedertarif mit Zeitsteuerung
 - **Solar-Integration**: Eigenverbrauch, Einspeisung, Autarkie
 - **OTP-Authentifizierung**: Sicherer Login via E-Mail
+- **Auto-Benutzer-Erstellung**: Automatisches Anlegen von Benutzern aus STWEG-Kontaktlisten
 - **Multi-Zähler**: Haupt-, Solar- und Unterzähler (Shellys)
+- **Shelly-Support**: Alle STWEGs können Shelly-Geräte überwachen
 - **Dynamische Konfiguration**: Vollständig via JSON konfigurierbar
 
 ## 📁 Dateistruktur
@@ -199,14 +201,32 @@ n8n Workflow:
 ### OTP-System (Nutzt generischen Email-Webhook!)
 
 1. Benutzer gibt E-Mail ein
-2. System generiert 6-stelligen Code (client-side)
-3. Code wird via **generischen Email-Webhook** versendet
-4. Code wird im LocalStorage gespeichert (10 Min gültig)
-5. Benutzer gibt Code ein
-6. System prüft Code aus LocalStorage
-7. Session für 1 Stunde gültig
+2. **Automatische Benutzer-Erstellung**:
+   - Wenn E-Mail nicht in `zaehler-config.json` vorhanden
+   - System durchsucht alle STWEG `kontakte.json` Dateien
+   - Bei Fund: Automatische Erstellung via n8n Webhook
+   - Benutzer wird mit leerem Zähler-Array angelegt
+   - Flag `needs_meter_assignment: true` gesetzt
+   - Zählerzuordnung erfolgt durch Technik-Team
+3. System generiert 6-stelligen Code (client-side)
+4. Code wird via **generischen Email-Webhook** versendet
+5. Code wird im LocalStorage gespeichert (10 Min gültig)
+6. Benutzer gibt Code ein
+7. System prüft Code aus LocalStorage
+8. Session für 1 Stunde gültig
 
 **Vorteil**: Nutzt den bereits existierenden generischen Email-Webhook, kein separater OTP-Workflow nötig!
+
+### Auto-Benutzer-Erstellung
+
+Wenn eine E-Mail nicht in `zaehler-config.json` vorhanden ist:
+1. System sucht in allen STWEG `kontakte.json` Dateien (STWEG 1-8)
+2. Durchsucht:
+   - `verteilerlisten` (alle, bewohner, eigentuemer)
+   - `wohnungen` (eigentümer und mieter)
+3. Bei Fund: n8n Webhook erstellt Benutzer-Eintrag
+4. Zählerzuordnung muss durch Technik-Team erfolgen
+5. Benutzer erhält sofort OTP-Code und kann sich anmelden
 
 ### Email-Versand
 

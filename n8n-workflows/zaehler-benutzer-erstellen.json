@@ -1,0 +1,136 @@
+{
+  "name": "Zähler: Benutzer erstellen",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "zaehler-benutzer-erstellen",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "zaehler-benutzer-erstellen"
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/repos/StefanMueller82/Rosenweg/contents/Website/zaehler-config.json",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "options": {}
+      },
+      "name": "GitHub: zaehler-config.json lesen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aktuelle Config parsen\nconst configBase64 = $input.item.json.content;\nconst configContent = Buffer.from(configBase64, 'base64').toString('utf-8');\nconst config = JSON.parse(configContent);\n\n// Neue Benutzerdaten aus Webhook\nconst webhookData = $('Webhook').item.json.body;\n\n// Neuen Benutzer erstellen\nconst neuerBenutzer = {\n  email: webhookData.email,\n  name: webhookData.name,\n  wohnung: webhookData.wohnung,\n  stweg: webhookData.stweg,\n  zugriff: 'bewohner',\n  zaehler: [],\n  needs_meter_assignment: true,\n  created_at: webhookData.created_at || new Date().toISOString(),\n  info: 'Automatisch erstellt. Zählerzuordnung durch Technik-Team erforderlich.'\n};\n\n// Benutzer zur Config hinzufügen\nconfig.benutzer.push(neuerBenutzer);\n\n// Zurückgeben\nreturn {\n  json: {\n    config: config,\n    sha: $input.item.json.sha,\n    neuerBenutzer: neuerBenutzer\n  }\n};"
+      },
+      "name": "Config aktualisieren",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/repos/StefanMueller82/Rosenweg/contents/Website/zaehler-config.json",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"message\": \"Neuen Benutzer hinzugefügt: {{ $json.neuerBenutzer.email }}\",\n  \"content\": \"{{ Buffer.from(JSON.stringify($json.config, null, 2)).toString('base64') }}\",\n  \"sha\": \"{{ $json.sha }}\"\n}",
+        "options": {}
+      },
+      "name": "GitHub: Config aktualisieren",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"message\": \"Benutzer wurde angelegt\",\n  \"email\": \"{{ $('Config aktualisieren').item.json.neuerBenutzer.email }}\",\n  \"info\": \"Zählerzuordnung durch Technik-Team erforderlich\"\n}",
+        "options": {}
+      },
+      "name": "Erfolg zurückgeben",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": false,\n  \"message\": \"Fehler beim Anlegen des Benutzers\",\n  \"error\": \"{{ $json.error }}\"\n}",
+        "options": {
+          "responseCode": 500
+        }
+      },
+      "name": "Fehler zurückgeben",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1050, 500]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "GitHub: zaehler-config.json lesen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub: zaehler-config.json lesen": {
+      "main": [
+        [
+          {
+            "node": "Config aktualisieren",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config aktualisieren": {
+      "main": [
+        [
+          {
+            "node": "GitHub: Config aktualisieren",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub: Config aktualisieren": {
+      "main": [
+        [
+          {
+            "node": "Erfolg zurückgeben",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Energie-Monitor",
+      "id": "zaehler"
+    }
+  ],
+  "meta": {
+    "instanceId": "zaehler-benutzer-erstellen"
+  }
+}
