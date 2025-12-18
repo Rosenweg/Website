@@ -196,21 +196,32 @@ n8n Workflow:
 
 ## 🔐 Authentifizierung
 
-### OTP-System
+### OTP-System (Nutzt generischen Email-Webhook!)
 
 1. Benutzer gibt E-Mail ein
-2. n8n-Webhook sendet 6-stelligen Code
-3. Code wird verifiziert
-4. Session für 1 Stunde gültig
+2. System generiert 6-stelligen Code (client-side)
+3. Code wird via **generischen Email-Webhook** versendet
+4. Code wird im LocalStorage gespeichert (10 Min gültig)
+5. Benutzer gibt Code ein
+6. System prüft Code aus LocalStorage
+7. Session für 1 Stunde gültig
 
-### n8n OTP Workflow
+**Vorteil**: Nutzt den bereits existierenden generischen Email-Webhook, kein separater OTP-Workflow nötig!
 
-```bash
-POST https://n8n.juroct.net/webhook/stweg-zaehler-otp
-{
-  "email": "user@example.com",
-  "system": "energie-monitor"
-}
+### Email-Versand
+
+Das System nutzt den **generischen Email-Webhook** (`/webhook/send-email`):
+
+```javascript
+fetch('https://n8n.juroct.net/webhook/send-email', {
+  method: 'POST',
+  body: JSON.stringify({
+    recipients: ['user@example.com'],
+    subject: 'Ihr Login-Code für den Energie-Monitor',
+    htmlContent: '<html>...</html>',
+    fromEmail: 'noreply@rosenweg4303.ch'
+  })
+})
 ```
 
 ## 📈 Dashboard Features
