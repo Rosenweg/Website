@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zähler - STWEG 3</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-lg sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <a href="../index.html" class="flex items-center">
+                        <svg class="h-8 w-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                        </svg>
+                        <span class="ml-2 text-xl font-semibold text-gray-800">Zähler</span>
+                    </a>
+                </div>
+                <div class="flex items-center">
+                    <a href="../index.html" class="text-gray-700 hover:text-blue-600 transition">← Zurück zur Startseite</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Header -->
+    <section class="bg-gradient-to-r from-blue-600 to-blue-800 text-white py-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-4xl font-bold mb-2">Zähler & Verbrauchsdaten</h1>
+                    <p class="text-xl opacity-90">Energiemonitoring und Stromzähler-Zugang</p>
+                </div>
+                <div class="hidden md:block">
+                    <div class="bg-white bg-opacity-20 rounded-lg p-4 text-center">
+                        <svg class="h-16 w-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Optionen -->
+    <section class="py-12 bg-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid md:grid-cols-2 gap-8">
+
+                <!-- Energie-Monitor (Waschküche) -->
+                <a href="waschkueche.html" class="block bg-white p-8 rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1 border-2 border-green-200">
+                    <div class="flex items-center mb-4">
+                        <div class="bg-green-100 rounded-full p-3 mr-4">
+                            <svg class="h-10 w-10 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="text-2xl font-bold text-gray-800">Energie-Monitor</h3>
+                            <p class="text-sm text-green-600 font-semibold">Smart Monitoring</p>
+                        </div>
+                    </div>
+                    <p class="text-gray-600 mb-4">
+                        Energieverbrauch, Guthaben und Live-Status der Waschküche. Dashboard passt sich automatisch Ihrer Berechtigung an.
+                    </p>
+                    <div class="bg-green-50 rounded-lg p-4 mb-4">
+                        <p class="text-sm text-gray-700 mb-2"><strong>⚡ Je nach Berechtigung:</strong></p>
+                        <ul class="text-sm text-gray-600 space-y-1">
+                            <li>• Bewohner: Eigene Verbrauchsdaten</li>
+                            <li>• Ausschuss: Verwaltung & Alle Daten</li>
+                            <li>• Live-Monitoring der Geräte</li>
+                        </ul>
+                    </div>
+                    <div class="flex items-center text-green-600 font-semibold">
+                        <span>Zum Dashboard</span>
+                        <svg class="h-5 w-5 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                        </svg>
+                    </div>
+                </a>
+
+                <!-- my.aew -->
+                <a href="https://my.aew.ch" target="_blank" rel="noopener noreferrer" class="block bg-white p-8 rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1 border-2 border-blue-200">
+                    <div class="flex items-center mb-4">
+                        <div class="bg-blue-100 rounded-full p-3 mr-4">
+                            <svg class="h-10 w-10 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="text-2xl font-bold text-gray-800">my.aew</h3>
+                            <p class="text-sm text-blue-600 font-semibold">Stromzähler-Portal</p>
+                        </div>
+                    </div>
+                    <p class="text-gray-600 mb-4">
+                        Zugang zum offiziellen AEW Kundenportal für Stromzähler-Daten, Rechnungen und Verbrauchsstatistiken.
+                    </p>
+                    <div class="bg-blue-50 rounded-lg p-4 mb-4">
+                        <p class="text-sm text-gray-700 mb-2"><strong>📊 Funktionen:</strong></p>
+                        <ul class="text-sm text-gray-600 space-y-1">
+                            <li>• Stromzählerstand ablesen</li>
+                            <li>• Verbrauchsübersicht</li>
+                            <li>• Rechnungen einsehen</li>
+                            <li>• Historische Daten</li>
+                        </ul>
+                    </div>
+                    <div class="flex items-center text-blue-600 font-semibold">
+                        <span>Zum AEW Portal</span>
+                        <svg class="h-5 w-5 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                        </svg>
+                    </div>
+                </a>
+
+            </div>
+
+            <!-- Info-Box -->
+            <div class="mt-8 bg-blue-50 border-l-4 border-blue-500 p-6 rounded-lg">
+                <div class="flex items-start">
+                    <svg class="h-6 w-6 text-blue-600 mr-3 flex-shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <div>
+                        <p class="font-semibold text-gray-800 mb-2">ℹ️ Unterschied der Systeme</p>
+                        <p class="text-sm text-gray-700">
+                            <strong>Energie-Monitor:</strong> Internes Smart-Monitoring-System für die Waschküche mit Echtzeit-Daten und Guthabenverwaltung.
+                        </p>
+                        <p class="text-sm text-gray-700 mt-2">
+                            <strong>my.aew:</strong> Offizielles Portal des Energieversorgers AEW für Stromzähler-Daten der gesamten Wohnung.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-gray-800 text-white py-8 mt-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <p>&copy; 2024 STWEG 3 Rosenweg 9, Kaiseraugst</p>
+            <p class="text-sm text-gray-400 mt-2">Teil der STWEG-Kooperation Rosenweg</p>
+        </div>
+    </footer>
+</body>
+</html>
