@@ -68,8 +68,8 @@
 
             <!-- OTP Input -->
             <div id="otp-form" class="hidden space-y-4">
-                <div class="bg-green-50 border-l-4 border-green-500 p-4 mb-4">
-                    <p class="text-sm text-green-700">
+                <div class="bg-yellow-50 border-l-4 border-yellow-500 p-4 mb-4">
+                    <p class="text-sm text-yellow-700">
                         Ein 6-stelliger Code wurde an <strong id="display-email"></strong> gesendet.
                     </p>
                 </div>
@@ -87,7 +87,7 @@
                 </div>
                 <button
                     onclick="verifyOTP()"
-                    class="w-full bg-green-600 text-white py-3 rounded-lg hover:bg-green-700 transition font-semibold"
+                    class="w-full bg-yellow-600 text-white py-3 rounded-lg hover:bg-yellow-700 transition font-semibold"
                 >
                     Anmelden
                 </button>
@@ -132,8 +132,8 @@
             <div class="mb-8">
                 <div class="flex items-center justify-between mb-4">
                     <h2 class="text-2xl font-bold text-gray-800">Live-Verbrauch</h2>
-                    <div class="flex items-center text-green-600">
-                        <div class="w-3 h-3 bg-green-600 rounded-full pulse-green mr-2"></div>
+                    <div class="flex items-center text-yellow-600">
+                        <div class="w-3 h-3 bg-yellow-600 rounded-full pulse-green mr-2"></div>
                         <span class="text-sm font-medium">Live</span>
                     </div>
                 </div>
@@ -152,15 +152,15 @@
                     </div>
 
                     <!-- Heutiger Verbrauch -->
-                    <div class="bg-gradient-to-br from-green-500 to-green-600 rounded-lg shadow-lg p-6 text-white metric-card">
+                    <div class="bg-gradient-to-br from-yellow-500 to-orange-500 rounded-lg shadow-lg p-6 text-white metric-card">
                         <div class="flex items-center justify-between mb-2">
-                            <span class="text-green-100">Heute</span>
+                            <span class="text-yellow-100">Heute</span>
                             <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
                             </svg>
                         </div>
                         <div class="text-4xl font-bold" id="today-consumption">---</div>
-                        <div class="text-sm text-green-100 mt-1" id="today-cost">Kosten: ---</div>
+                        <div class="text-sm text-yellow-100 mt-1" id="today-cost">Kosten: ---</div>
                     </div>
 
                     <!-- Solar (wenn vorhanden) -->
@@ -666,7 +666,7 @@
             const tarifDaten = daten.verbrauch_nach_tarif;
             const labels = ['Hochtarif', 'Niedertarif'];
             const values = [tarifDaten.hochtarif_kwh, tarifDaten.niedertarif_kwh];
-            const colors = ['#ef4444', '#84cc16'];
+            const colors = ['#f59e0b', '#eab308'];
 
             if (tarifDaten.solar_kwh) {
                 labels.push('Solar');
@@ -705,7 +705,7 @@
             tbody.innerHTML += `
                 <tr>
                     <td class="px-4 py-3">
-                        <span class="inline-block w-3 h-3 rounded-full bg-red-500 mr-2"></span>
+                        <span class="inline-block w-3 h-3 rounded-full bg-yellow-600 mr-2"></span>
                         Hochtarif
                     </td>
                     <td class="px-4 py-3 text-right">${tarifDaten.hochtarif_kwh.toFixed(2)}</td>
@@ -718,7 +718,7 @@
             tbody.innerHTML += `
                 <tr>
                     <td class="px-4 py-3">
-                        <span class="inline-block w-3 h-3 rounded-full bg-lime-500 mr-2"></span>
+                        <span class="inline-block w-3 h-3 rounded-full bg-yellow-500 mr-2"></span>
                         Niedertarif
                     </td>
                     <td class="px-4 py-3 text-right">${tarifDaten.niedertarif_kwh.toFixed(2)}</td>
