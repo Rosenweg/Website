@@ -1,0 +1,74 @@
+{
+  "zaehler_id": "main_stweg3_whg1",
+  "datum": "2024-12-18",
+  "benutzer_email": "beispiel@rosenweg4303.ch",
+  "typ": "hauptzaehler",
+  "einheit": "kWh",
+  "stand_tagesbeginn": 15234.5,
+  "stand_tagesende": 15242.8,
+  "verbrauch_gesamt": 8.3,
+  "verbrauch_nach_tarif": {
+    "hochtarif_kwh": 5.2,
+    "hochtarif_kosten": 1.31,
+    "niedertarif_kwh": 3.1,
+    "niedertarif_kosten": 0.55,
+    "gesamt_kosten": 1.86
+  },
+  "stundenwerte": [
+    {
+      "timestamp": "2024-12-18T00:00:00Z",
+      "zaehlerstand": 15234.5,
+      "verbrauch_kwh": 0.3,
+      "leistung_w": 300,
+      "tarif": "niedertarif"
+    },
+    {
+      "timestamp": "2024-12-18T01:00:00Z",
+      "zaehlerstand": 15234.8,
+      "verbrauch_kwh": 0.3,
+      "leistung_w": 280,
+      "tarif": "niedertarif"
+    },
+    {
+      "timestamp": "2024-12-18T07:00:00Z",
+      "zaehlerstand": 15236.6,
+      "verbrauch_kwh": 0.4,
+      "leistung_w": 450,
+      "tarif": "hochtarif"
+    },
+    {
+      "timestamp": "2024-12-18T12:00:00Z",
+      "zaehlerstand": 15239.2,
+      "verbrauch_kwh": 0.8,
+      "leistung_w": 1200,
+      "tarif": "hochtarif"
+    },
+    {
+      "timestamp": "2024-12-18T18:00:00Z",
+      "zaehlerstand": 15241.5,
+      "verbrauch_kwh": 0.6,
+      "leistung_w": 850,
+      "tarif": "hochtarif"
+    },
+    {
+      "timestamp": "2024-12-18T20:00:00Z",
+      "zaehlerstand": 15242.1,
+      "verbrauch_kwh": 0.4,
+      "leistung_w": 520,
+      "tarif": "niedertarif"
+    },
+    {
+      "timestamp": "2024-12-18T23:00:00Z",
+      "zaehlerstand": 15242.8,
+      "verbrauch_kwh": 0.2,
+      "leistung_w": 240,
+      "tarif": "niedertarif"
+    }
+  ],
+  "statistik": {
+    "minimum_leistung_w": 240,
+    "maximum_leistung_w": 1200,
+    "durchschnitt_leistung_w": 548,
+    "grundlast_w": 250
+  }
+}

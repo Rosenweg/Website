@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Energie-Monitor - STWEG Rosenweg</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .hidden {
+            display: none;
+        }
+        .pulse-green {
+            animation: pulse-green 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse-green {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: .5;
+            }
+        }
+        .metric-card {
+            transition: transform 0.2s;
+        }
+        .metric-card:hover {
+            transform: translateY(-4px);
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+
+    <!-- Login Screen -->
+    <div id="login-screen" class="min-h-screen flex items-center justify-center bg-gradient-to-r from-blue-600 to-blue-800 p-4">
+        <div class="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
+            <div class="text-center mb-8">
+                <svg class="h-16 w-16 mx-auto text-blue-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                </svg>
+                <h1 class="text-3xl font-bold text-gray-800">Energie-Monitor</h1>
+                <p class="text-gray-600 mt-2">STWEG-Kooperation Rosenweg</p>
+            </div>
+
+            <!-- Email Input -->
+            <div id="email-form" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">E-Mail-Adresse</label>
+                    <input
+                        type="email"
+                        id="email-input"
+                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="ihre-email@example.com"
+                        autocomplete="email"
+                    >
+                </div>
+                <button
+                    onclick="sendOTP()"
+                    class="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition font-semibold"
+                >
+                    Code anfordern
+                </button>
+            </div>
+
+            <!-- OTP Input -->
+            <div id="otp-form" class="hidden space-y-4">
+                <div class="bg-green-50 border-l-4 border-green-500 p-4 mb-4">
+                    <p class="text-sm text-green-700">
+                        Ein 6-stelliger Code wurde an <strong id="display-email"></strong> gesendet.
+                    </p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">6-stelliger Code</label>
+                    <input
+                        type="text"
+                        id="otp-input"
+                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-center text-2xl tracking-widest"
+                        placeholder="000000"
+                        maxlength="6"
+                        pattern="[0-9]{6}"
+                        autocomplete="one-time-code"
+                    >
+                </div>
+                <button
+                    onclick="verifyOTP()"
+                    class="w-full bg-green-600 text-white py-3 rounded-lg hover:bg-green-700 transition font-semibold"
+                >
+                    Anmelden
+                </button>
+                <button
+                    onclick="backToEmail()"
+                    class="w-full bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300 transition text-sm"
+                >
+                    Andere E-Mail verwenden
+                </button>
+            </div>
+
+            <div id="message" class="mt-4 text-center text-sm"></div>
+        </div>
+    </div>
+
+    <!-- Dashboard -->
+    <div id="dashboard" class="hidden">
+        <!-- Navigation -->
+        <nav class="bg-white shadow-lg sticky top-0 z-50">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between h-16">
+                    <div class="flex items-center">
+                        <svg class="h-8 w-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                        </svg>
+                        <span class="ml-2 text-xl font-semibold text-gray-800">Energie-Monitor</span>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <span id="user-info" class="text-sm text-gray-600"></span>
+                        <button onclick="logout()" class="text-red-600 hover:text-red-700 text-sm font-medium">
+                            Abmelden
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+            <!-- Live Status -->
+            <div class="mb-8">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-2xl font-bold text-gray-800">Live-Verbrauch</h2>
+                    <div class="flex items-center text-green-600">
+                        <div class="w-3 h-3 bg-green-600 rounded-full pulse-green mr-2"></div>
+                        <span class="text-sm font-medium">Live</span>
+                    </div>
+                </div>
+
+                <div class="grid md:grid-cols-3 gap-6">
+                    <!-- Aktuelle Leistung -->
+                    <div class="bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg shadow-lg p-6 text-white metric-card">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-blue-100">Aktuelle Leistung</span>
+                            <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                            </svg>
+                        </div>
+                        <div class="text-4xl font-bold" id="live-power">---</div>
+                        <div class="text-sm text-blue-100 mt-1" id="live-tarif">Lade...</div>
+                    </div>
+
+                    <!-- Heutiger Verbrauch -->
+                    <div class="bg-gradient-to-br from-green-500 to-green-600 rounded-lg shadow-lg p-6 text-white metric-card">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-green-100">Heute</span>
+                            <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                            </svg>
+                        </div>
+                        <div class="text-4xl font-bold" id="today-consumption">---</div>
+                        <div class="text-sm text-green-100 mt-1" id="today-cost">Kosten: ---</div>
+                    </div>
+
+                    <!-- Solar (wenn vorhanden) -->
+                    <div id="solar-card" class="hidden bg-gradient-to-br from-yellow-500 to-orange-500 rounded-lg shadow-lg p-6 text-white metric-card">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-yellow-100">Solar</span>
+                            <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                            </svg>
+                        </div>
+                        <div class="text-4xl font-bold" id="solar-power">---</div>
+                        <div class="text-sm text-yellow-100 mt-1" id="solar-autarkie">Autarkie: ---</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Zeitraum-Auswahl -->
+            <div class="mb-6">
+                <div class="bg-white rounded-lg shadow p-4">
+                    <div class="flex flex-wrap gap-2">
+                        <button onclick="selectPeriod('day')" class="period-btn px-6 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition">
+                            Tag
+                        </button>
+                        <button onclick="selectPeriod('week')" class="period-btn px-6 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition">
+                            Woche
+                        </button>
+                        <button onclick="selectPeriod('month')" class="period-btn px-6 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition">
+                            Monat
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts -->
+            <div class="grid lg:grid-cols-2 gap-6 mb-8">
+                <!-- Verbrauchsverlauf -->
+                <div class="bg-white rounded-lg shadow-lg p-6">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-4">Verbrauchsverlauf</h3>
+                    <canvas id="consumption-chart" height="300"></canvas>
+                </div>
+
+                <!-- Tarifaufteilung -->
+                <div class="bg-white rounded-lg shadow-lg p-6">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-4">Tarifaufteilung</h3>
+                    <canvas id="tariff-chart" height="300"></canvas>
+                </div>
+            </div>
+
+            <!-- Statistik-Tabelle -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h3 class="text-lg font-semibold text-gray-800 mb-4">Detaillierte Statistik</h3>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-3 text-left font-semibold text-gray-700">Tarif</th>
+                                <th class="px-4 py-3 text-right font-semibold text-gray-700">Verbrauch (kWh)</th>
+                                <th class="px-4 py-3 text-right font-semibold text-gray-700">Preis/kWh</th>
+                                <th class="px-4 py-3 text-right font-semibold text-gray-700">Kosten (CHF)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="stats-table" class="divide-y divide-gray-200">
+                            <!-- Wird dynamisch gefüllt -->
+                        </tbody>
+                        <tfoot class="bg-gray-50 font-semibold">
+                            <tr>
+                                <td class="px-4 py-3 text-left">Gesamt</td>
+                                <td class="px-4 py-3 text-right" id="total-consumption">---</td>
+                                <td class="px-4 py-3 text-right">---</td>
+                                <td class="px-4 py-3 text-right" id="total-cost">---</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Unterzähler (wenn vorhanden) -->
+            <div id="submeters-section" class="hidden mt-8">
+                <h3 class="text-xl font-bold text-gray-800 mb-4">Unterzähler</h3>
+                <div id="submeters-grid" class="grid md:grid-cols-3 gap-4">
+                    <!-- Wird dynamisch gefüllt -->
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // Globale Variablen
+        let currentUser = null;
+        let currentPeriod = 'day';
+        let zaehlerConfig = null;
+        let benutzerDaten = null;
+        let charts = {};
+        let liveUpdateInterval = null;
+
+        // Konfiguration laden
+        async function loadConfig() {
+            try {
+                const response = await fetch('zaehler-config.json');
+                zaehlerConfig = await response.json();
+                console.log('✅ Konfiguration geladen', zaehlerConfig);
+            } catch (error) {
+                console.error('❌ Fehler beim Laden der Konfiguration:', error);
+            }
+        }
+
+        // Beim Laden der Seite
+        window.addEventListener('DOMContentLoaded', async function() {
+            await loadConfig();
+
+            // Auto-Logout nach 1 Stunde
+            setTimeout(() => {
+                if (currentUser) {
+                    alert('Sitzung abgelaufen. Bitte melden Sie sich erneut an.');
+                    logout();
+                }
+            }, 3600000);
+        });
+
+        // OTP anfordern
+        async function sendOTP() {
+            const email = document.getElementById('email-input').value.trim().toLowerCase();
+
+            if (!email || !email.includes('@')) {
+                showMessage('Bitte geben Sie eine gültige E-Mail-Adresse ein.', 'error');
+                return;
+            }
+
+            // Prüfen, ob E-Mail in Config existiert
+            const benutzer = zaehlerConfig.benutzer.find(b => b.email.toLowerCase() === email);
+            if (!benutzer) {
+                showMessage('Diese E-Mail-Adresse ist nicht berechtigt.', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(zaehlerConfig.n8n_webhooks.otp_versand, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        email: email,
+                        system: 'energie-monitor'
+                    })
+                });
+
+                if (response.ok) {
+                    document.getElementById('display-email').textContent = email;
+                    document.getElementById('email-form').classList.add('hidden');
+                    document.getElementById('otp-form').classList.remove('hidden');
+                    showMessage('Code wurde gesendet!', 'success');
+                } else {
+                    showMessage('Fehler beim Senden des Codes.', 'error');
+                }
+            } catch (error) {
+                console.error('Fehler:', error);
+                showMessage('Netzwerkfehler. Bitte versuchen Sie es erneut.', 'error');
+            }
+        }
+
+        // OTP verifizieren
+        async function verifyOTP() {
+            const email = document.getElementById('display-email').textContent;
+            const otp = document.getElementById('otp-input').value;
+
+            if (otp.length !== 6) {
+                showMessage('Bitte geben Sie einen 6-stelligen Code ein.', 'error');
+                return;
+            }
+
+            // Hier würde die OTP-Verifikation über n8n erfolgen
+            // Für Demo: Simuliere erfolgreiche Anmeldung
+            const benutzer = zaehlerConfig.benutzer.find(b => b.email.toLowerCase() === email.toLowerCase());
+
+            if (benutzer) {
+                currentUser = benutzer;
+                benutzerDaten = benutzer;
+                await showDashboard();
+            } else {
+                showMessage('Ungültiger Code oder E-Mail.', 'error');
+            }
+        }
+
+        // Dashboard anzeigen
+        async function showDashboard() {
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('dashboard').classList.remove('hidden');
+
+            // Benutzerinfo anzeigen
+            document.getElementById('user-info').textContent = `${currentUser.name} (${currentUser.wohnung})`;
+
+            // Solar-Karte anzeigen wenn vorhanden
+            const hatSolar = currentUser.zaehler.some(z => z.hat_solar);
+            if (hatSolar) {
+                document.getElementById('solar-card').classList.remove('hidden');
+            }
+
+            // Daten laden
+            await loadDashboardData();
+
+            // Live-Updates starten
+            startLiveUpdates();
+        }
+
+        // Dashboard-Daten laden
+        async function loadDashboardData() {
+            const heute = new Date().toISOString().split('T')[0];
+            const hauptzaehler = currentUser.zaehler.find(z => z.typ === 'hauptzaehler');
+
+            if (!hauptzaehler) {
+                console.error('Kein Hauptzähler gefunden');
+                return;
+            }
+
+            try {
+                const response = await fetch(`zaehler-daten/${heute}_${hauptzaehler.id}.json`);
+                const daten = await response.json();
+
+                // Live-Werte aktualisieren
+                updateLiveValues(daten);
+
+                // Charts aktualisieren
+                updateCharts(daten);
+
+                // Statistik aktualisieren
+                updateStatistics(daten);
+
+            } catch (error) {
+                console.error('Fehler beim Laden der Daten:', error);
+                // Fallback: Beispieldaten anzeigen
+                loadExampleData();
+            }
+        }
+
+        // Live-Werte aktualisieren
+        function updateLiveValues(daten) {
+            const letzterWert = daten.stundenwerte[daten.stundenwerte.length - 1];
+
+            // Aktuelle Leistung
+            document.getElementById('live-power').textContent = `${letzterWert.leistung_w} W`;
+            document.getElementById('live-tarif').textContent = getTarifName(letzterWert.tarif);
+
+            // Heutiger Verbrauch
+            document.getElementById('today-consumption').textContent = `${daten.verbrauch_gesamt.toFixed(2)} kWh`;
+            document.getElementById('today-cost').textContent = `CHF ${daten.verbrauch_nach_tarif.gesamt_kosten.toFixed(2)}`;
+
+            // Solar (wenn vorhanden)
+            if (daten.solar_erzeugung_gesamt) {
+                document.getElementById('solar-power').textContent = `${letzterWert.solar_leistung_w || 0} W`;
+                document.getElementById('solar-autarkie').textContent = `${daten.statistik.autarkie_prozent.toFixed(1)}%`;
+            }
+        }
+
+        // Charts aktualisieren
+        function updateCharts(daten) {
+            // Verbrauchsverlauf Chart
+            const ctx1 = document.getElementById('consumption-chart').getContext('2d');
+
+            if (charts.consumption) {
+                charts.consumption.destroy();
+            }
+
+            charts.consumption = new Chart(ctx1, {
+                type: 'line',
+                data: {
+                    labels: daten.stundenwerte.map(h => new Date(h.timestamp).toLocaleTimeString('de-CH', {hour: '2-digit', minute: '2-digit'})),
+                    datasets: [{
+                        label: 'Verbrauch (kWh)',
+                        data: daten.stundenwerte.map(h => h.verbrauch_kwh),
+                        borderColor: 'rgb(59, 130, 246)',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {display: false}
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'kWh'
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Tarifaufteilung Chart
+            const ctx2 = document.getElementById('tariff-chart').getContext('2d');
+
+            if (charts.tariff) {
+                charts.tariff.destroy();
+            }
+
+            const tarifDaten = daten.verbrauch_nach_tarif;
+            const labels = ['Hochtarif', 'Niedertarif'];
+            const values = [tarifDaten.hochtarif_kwh, tarifDaten.niedertarif_kwh];
+            const colors = ['#ef4444', '#3b82f6'];
+
+            if (tarifDaten.solar_kwh) {
+                labels.push('Solar');
+                values.push(tarifDaten.solar_kwh);
+                colors.push('#fbbf24');
+            }
+
+            charts.tariff = new Chart(ctx2, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: colors
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+        }
+
+        // Statistik-Tabelle aktualisieren
+        function updateStatistics(daten) {
+            const tarifDaten = daten.verbrauch_nach_tarif;
+            const tbody = document.getElementById('stats-table');
+            tbody.innerHTML = '';
+
+            // Hochtarif
+            tbody.innerHTML += `
+                <tr>
+                    <td class="px-4 py-3">
+                        <span class="inline-block w-3 h-3 rounded-full bg-red-500 mr-2"></span>
+                        Hochtarif
+                    </td>
+                    <td class="px-4 py-3 text-right">${tarifDaten.hochtarif_kwh.toFixed(2)}</td>
+                    <td class="px-4 py-3 text-right">${zaehlerConfig.tarife.hochtarif.preis_pro_kwh.toFixed(4)}</td>
+                    <td class="px-4 py-3 text-right">${tarifDaten.hochtarif_kosten.toFixed(2)}</td>
+                </tr>
+            `;
+
+            // Niedertarif
+            tbody.innerHTML += `
+                <tr>
+                    <td class="px-4 py-3">
+                        <span class="inline-block w-3 h-3 rounded-full bg-blue-500 mr-2"></span>
+                        Niedertarif
+                    </td>
+                    <td class="px-4 py-3 text-right">${tarifDaten.niedertarif_kwh.toFixed(2)}</td>
+                    <td class="px-4 py-3 text-right">${zaehlerConfig.tarife.niedertarif.preis_pro_kwh.toFixed(4)}</td>
+                    <td class="px-4 py-3 text-right">${tarifDaten.niedertarif_kosten.toFixed(2)}</td>
+                </tr>
+            `;
+
+            // Solar (wenn vorhanden)
+            if (tarifDaten.solar_kwh) {
+                tbody.innerHTML += `
+                    <tr>
+                        <td class="px-4 py-3">
+                            <span class="inline-block w-3 h-3 rounded-full bg-yellow-500 mr-2"></span>
+                            Solar (Eigenverbrauch)
+                        </td>
+                        <td class="px-4 py-3 text-right">${tarifDaten.solar_kwh.toFixed(2)}</td>
+                        <td class="px-4 py-3 text-right">${zaehlerConfig.tarife.solar.preis_pro_kwh.toFixed(4)}</td>
+                        <td class="px-4 py-3 text-right">${tarifDaten.solar_kosten.toFixed(2)}</td>
+                    </tr>
+                `;
+            }
+
+            // Gesamt
+            document.getElementById('total-consumption').textContent = `${daten.verbrauch_gesamt.toFixed(2)} kWh`;
+            document.getElementById('total-cost').textContent = `${tarifDaten.gesamt_kosten.toFixed(2)} CHF`;
+        }
+
+        // Live-Updates starten
+        function startLiveUpdates() {
+            // Alle 5 Sekunden Live-Daten von ioBroker abrufen
+            liveUpdateInterval = setInterval(async () => {
+                // Hier würde die ioBroker API abgefragt werden
+                await loadDashboardData();
+            }, 5000);
+        }
+
+        // Zeitraum wählen
+        function selectPeriod(period) {
+            currentPeriod = period;
+
+            // Buttons aktualisieren
+            document.querySelectorAll('.period-btn').forEach(btn => {
+                btn.classList.remove('bg-blue-600', 'text-white');
+                btn.classList.add('bg-gray-200', 'text-gray-700');
+            });
+            event.target.classList.remove('bg-gray-200', 'text-gray-700');
+            event.target.classList.add('bg-blue-600', 'text-white');
+
+            // Daten neu laden
+            loadDashboardData();
+        }
+
+        // Hilfsfunktionen
+        function getTarifName(tarif) {
+            return tarif === 'hochtarif' ? 'Hochtarif' : 'Niedertarif';
+        }
+
+        function showMessage(text, type) {
+            const messageEl = document.getElementById('message');
+            messageEl.textContent = text;
+            messageEl.className = `mt-4 text-center text-sm ${type === 'error' ? 'text-red-600' : 'text-green-600'}`;
+        }
+
+        function backToEmail() {
+            document.getElementById('otp-form').classList.add('hidden');
+            document.getElementById('email-form').classList.remove('hidden');
+            document.getElementById('otp-input').value = '';
+        }
+
+        function logout() {
+            currentUser = null;
+            benutzerDaten = null;
+
+            if (liveUpdateInterval) {
+                clearInterval(liveUpdateInterval);
+            }
+
+            // Charts zerstören
+            Object.values(charts).forEach(chart => chart.destroy());
+            charts = {};
+
+            document.getElementById('dashboard').classList.add('hidden');
+            document.getElementById('login-screen').classList.remove('hidden');
+            document.getElementById('email-form').classList.remove('hidden');
+            document.getElementById('otp-form').classList.add('hidden');
+            document.getElementById('email-input').value = '';
+            document.getElementById('otp-input').value = '';
+        }
+
+        // Beispieldaten laden (Fallback)
+        function loadExampleData() {
+            const beispiel = {
+                verbrauch_gesamt: 8.3,
+                verbrauch_nach_tarif: {
+                    hochtarif_kwh: 5.2,
+                    hochtarif_kosten: 1.31,
+                    niedertarif_kwh: 3.1,
+                    niedertarif_kosten: 0.55,
+                    gesamt_kosten: 1.86
+                },
+                stundenwerte: [
+                    {timestamp: '2024-12-18T08:00:00Z', verbrauch_kwh: 0.5, leistung_w: 450, tarif: 'hochtarif'},
+                    {timestamp: '2024-12-18T12:00:00Z', verbrauch_kwh: 1.2, leistung_w: 1200, tarif: 'hochtarif'},
+                    {timestamp: '2024-12-18T18:00:00Z', verbrauch_kwh: 0.8, leistung_w: 850, tarif: 'hochtarif'},
+                    {timestamp: '2024-12-18T22:00:00Z', verbrauch_kwh: 0.3, leistung_w: 320, tarif: 'niedertarif'}
+                ]
+            };
+
+            updateLiveValues(beispiel);
+            updateCharts(beispiel);
+            updateStatistics(beispiel);
+        }
+    </script>
+</body>
+</html>
