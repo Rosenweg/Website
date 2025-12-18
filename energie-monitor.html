@@ -368,7 +368,16 @@
                     })
                 });
 
-                return response.ok;
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('Webhook response not OK:', response.status, errorText);
+                    return false;
+                }
+
+                // Warte kurz, damit GitHub den Commit abschließen kann
+                await new Promise(resolve => setTimeout(resolve, 2000));
+
+                return true;
             } catch (error) {
                 console.error('Fehler beim Erstellen des Benutzers:', error);
                 return false;
@@ -393,19 +402,38 @@
                 const foundInKontakte = await searchEmailInSTWEGKontakte(email);
 
                 if (foundInKontakte) {
+                    showMessage('Benutzer wird angelegt, bitte warten...', 'info');
+
                     // Benutzer via n8n Webhook erstellen
                     const created = await createUserEntry(foundInKontakte);
+
                     if (created) {
-                        // Konfiguration neu laden
-                        await loadConfig();
-                        benutzer = zaehlerConfig.benutzer.find(b => b.email.toLowerCase() === email);
-                        showMessage('Benutzer wurde angelegt. Zählerzuordnung erfolgt durch Technik-Team.', 'info');
+                        // Konfiguration neu laden (mit Cache-Bypass)
+                        const timestamp = Date.now();
+                        try {
+                            const response = await fetch(`zaehler-config.json?t=${timestamp}`);
+                            zaehlerConfig = await response.json();
+                            console.log('✅ Konfiguration neu geladen nach Benutzer-Erstellung');
+
+                            benutzer = zaehlerConfig.benutzer.find(b => b.email.toLowerCase() === email);
+
+                            if (benutzer) {
+                                showMessage('Benutzer erfolgreich angelegt! Code wird gesendet...', 'success');
+                            } else {
+                                showMessage('Benutzer angelegt, aber noch nicht in Config verfügbar. Bitte versuchen Sie es in 30 Sekunden erneut.', 'error');
+                                return;
+                            }
+                        } catch (error) {
+                            console.error('Fehler beim Neuladen der Config:', error);
+                            showMessage('Benutzer angelegt, aber Config konnte nicht neu geladen werden. Bitte Seite neu laden.', 'error');
+                            return;
+                        }
                     } else {
                         showMessage('Fehler beim Anlegen des Benutzers. Bitte kontaktieren Sie das Technik-Team.', 'error');
                         return;
                     }
                 } else {
-                    showMessage('Diese E-Mail-Adresse ist nicht berechtigt.', 'error');
+                    showMessage('Diese E-Mail-Adresse ist nicht berechtigt. Sie muss in den STWEG-Kontakten vorhanden sein.', 'error');
                     return;
                 }
             }
