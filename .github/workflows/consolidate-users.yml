@@ -1,0 +1,123 @@
+name: Consolidate User JSON Files
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Website/zaehler-config.json'
+      - 'Website/stweg3/waschkueche-data/users.json'
+  workflow_dispatch:
+
+jobs:
+  consolidate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Consolidate user data
+        run: |
+          cd Website
+          node << 'EOF'
+          const fs = require('fs');
+          const path = require('path');
+
+          console.log('Starting user consolidation...');
+
+          // Read zaehler-config.json
+          const zaehlerConfig = JSON.parse(fs.readFileSync('zaehler-config.json', 'utf8'));
+          const zaehlerUsers = zaehlerConfig.benutzer || [];
+          console.log(`Found ${zaehlerUsers.length} users in zaehler-config.json`);
+
+          // Read stweg3/waschkueche-data/users.json
+          const waschkuecheData = JSON.parse(fs.readFileSync('stweg3/waschkueche-data/users.json', 'utf8'));
+          const waschkuecheUsers = waschkuecheData.users || [];
+          console.log(`Found ${waschkuecheUsers.length} users in waschkueche-data/users.json`);
+
+          // Create unified user list
+          const allUsers = [];
+          const emailSet = new Set();
+
+          // Process zaehler users
+          zaehlerUsers.forEach(user => {
+            const emailLower = user.email.toLowerCase();
+            if (!emailSet.has(emailLower)) {
+              emailSet.add(emailLower);
+              allUsers.push({
+                email: user.email,
+                name: user.name,
+                wohnung: user.wohnung,
+                stweg: user.stweg,
+                zugriff: user.zugriff || 'bewohner',
+                source: 'zaehler-config'
+              });
+            }
+          });
+
+          // Process waschkueche users
+          waschkuecheUsers.forEach(user => {
+            const emailLower = user.email.toLowerCase();
+            if (!emailSet.has(emailLower)) {
+              emailSet.add(emailLower);
+              allUsers.push({
+                email: user.email,
+                name: user.name,
+                wohnung: user.wohnung,
+                balance: user.balance,
+                is_active: user.is_active,
+                source: 'waschkueche-data'
+              });
+            } else {
+              console.log(`Duplicate email found (skipped): ${user.email}`);
+            }
+          });
+
+          // Sort by email
+          allUsers.sort((a, b) => a.email.localeCompare(b.email));
+
+          // Create output JSON
+          const output = {
+            last_updated: new Date().toISOString(),
+            total_users: allUsers.length,
+            users: allUsers
+          };
+
+          // Write to all-users.json
+          fs.writeFileSync('all-users.json', JSON.stringify(output, null, 2), 'utf8');
+          console.log(`✓ Created all-users.json with ${allUsers.length} unique users`);
+          console.log(`✓ Removed ${(zaehlerUsers.length + waschkuecheUsers.length) - allUsers.length} duplicates`);
+          EOF
+
+      - name: Check for changes
+        id: check_changes
+        run: |
+          cd Website
+          if git diff --quiet all-users.json; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No changes detected in all-users.json"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Changes detected in all-users.json"
+          fi
+
+      - name: Commit and push if changed
+        if: steps.check_changes.outputs.changed == 'true'
+        run: |
+          cd Website
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git add all-users.json
+          git commit -m "Auto-update consolidated user list
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
+          git push
