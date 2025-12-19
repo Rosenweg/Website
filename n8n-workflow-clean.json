@@ -1,0 +1,171 @@
+{
+  "name": "Zähler: Benutzer erstellen",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "zaehler-benutzer-erstellen",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "zaehler-benutzer-erstellen"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "owner": "={{ 'stefa' }}",
+        "repository": "={{ 'Rosenweg' }}",
+        "filePath": "={{ 'Website/zaehler-config.json' }}",
+        "asBinaryProperty": false,
+        "additionalParameters": {}
+      },
+      "id": "github-get-file",
+      "name": "GitHub: Config lesen",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Input: GitHub File Content und Webhook-Daten\nconst fileData = $input.first().json;\nconst webhookData = $('Webhook').first().json.body;\n\n// GitHub gibt base64-encoded content zurück\nconst configContent = Buffer.from(fileData.content, 'base64').toString('utf-8');\nconst config = JSON.parse(configContent);\n\n// Prüfen, ob Benutzer bereits existiert\nconst existingUser = config.benutzer.find(b =>\n  b.email.toLowerCase() === webhookData.email.toLowerCase()\n);\n\nif (existingUser) {\n  return {\n    json: {\n      success: false,\n      message: 'Benutzer existiert bereits',\n      skip_update: true,\n      email: webhookData.email\n    }\n  };\n}\n\n// Neuen Benutzer hinzufügen\nconst newUser = {\n  email: webhookData.email,\n  name: webhookData.name,\n  wohnung: webhookData.wohnung,\n  stweg: webhookData.stweg,\n  zugriff: webhookData.zugriff || 'bewohner',\n  zaehler: webhookData.zaehler || [],\n  needs_meter_assignment: true,\n  created_at: webhookData.created_at || new Date().toISOString()\n};\n\nconfig.benutzer.push(newUser);\n\n// Config wieder als JSON formatieren\nconst updatedContent = JSON.stringify(config, null, 2);\n\nreturn {\n  json: {\n    fileContent: updatedContent,\n    fileSha: fileData.sha,\n    email: webhookData.email,\n    name: webhookData.name,\n    success: true,\n    skip_update: false\n  }\n};"
+      },
+      "id": "process-config",
+      "name": "Benutzer hinzufügen",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.skip_update }}",
+              "value2": false
+            }
+          ]
+        }
+      },
+      "id": "check-skip",
+      "name": "Update nötig?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "operation": "edit",
+        "owner": "={{ 'stefa' }}",
+        "repository": "={{ 'Rosenweg' }}",
+        "filePath": "={{ 'Website/zaehler-config.json' }}",
+        "fileContent": "={{ $json.fileContent }}",
+        "commitMessage": "={{ 'Neuer Benutzer automatisch angelegt: ' + $json.email + '\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>' }}",
+        "additionalParameters": {
+          "branch": "main",
+          "sha": "={{ $json.fileSha }}"
+        }
+      },
+      "id": "github-update-file",
+      "name": "GitHub: Datei aktualisieren",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"success\": true, \"message\": \"Benutzer erfolgreich angelegt\", \"email\": $json.email } }}",
+        "options": {}
+      },
+      "id": "success-response",
+      "name": "Erfolg Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"success\": false, \"message\": $('Benutzer hinzufügen').item.json.message || 'Fehler beim Anlegen', \"email\": $('Benutzer hinzufügen').item.json.email } }}",
+        "options": {}
+      },
+      "id": "error-response",
+      "name": "Fehler Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1120, 400]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "GitHub: Config lesen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub: Config lesen": {
+      "main": [
+        [
+          {
+            "node": "Benutzer hinzufügen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Benutzer hinzufügen": {
+      "main": [
+        [
+          {
+            "node": "Update nötig?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update nötig?": {
+      "main": [
+        [
+          {
+            "node": "GitHub: Datei aktualisieren",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fehler Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub: Datei aktualisieren": {
+      "main": [
+        [
+          {
+            "node": "Erfolg Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
