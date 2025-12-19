@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IT & Netzwerk - STWEG Rosenweg</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .hidden {
+            display: none;
+        }
+        .pulse-blue {
+            animation: pulse-blue 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse-blue {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: .5;
+            }
+        }
+        .device-card {
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .device-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+        .status-online {
+            color: #10b981;
+        }
+        .status-offline {
+            color: #ef4444;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+
+    <!-- Login Screen -->
+    <div id="login-screen" class="min-h-screen flex items-center justify-center bg-gradient-to-r from-blue-600 to-indigo-700 p-4">
+        <div class="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
+            <div class="text-center mb-8">
+                <svg class="h-16 w-16 mx-auto text-blue-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
+                </svg>
+                <h1 class="text-3xl font-bold text-gray-800">IT & Netzwerk</h1>
+                <p class="text-gray-600 mt-2">Netzwerkdokumentation STWEG Rosenweg</p>
+            </div>
+
+            <!-- Email Input -->
+            <div id="email-form" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">E-Mail-Adresse</label>
+                    <input
+                        type="email"
+                        id="email-input"
+                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="ihre-email@example.com"
+                        autocomplete="email"
+                    >
+                </div>
+                <button
+                    onclick="sendOTP()"
+                    class="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition font-semibold"
+                >
+                    Code anfordern
+                </button>
+            </div>
+
+            <!-- OTP Input -->
+            <div id="otp-form" class="hidden space-y-4">
+                <div class="bg-blue-50 border-l-4 border-blue-500 p-4 mb-4">
+                    <p class="text-sm text-blue-700">
+                        Ein 6-stelliger Code wurde an <strong id="display-email"></strong> gesendet.
+                    </p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">6-stelliger Code</label>
+                    <input
+                        type="text"
+                        id="otp-input"
+                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-center text-2xl tracking-widest"
+                        placeholder="000000"
+                        maxlength="6"
+                        pattern="[0-9]{6}"
+                        autocomplete="one-time-code"
+                    >
+                </div>
+                <button
+                    onclick="verifyOTP()"
+                    class="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition font-semibold"
+                >
+                    Anmelden
+                </button>
+                <button
+                    onclick="backToEmail()"
+                    class="w-full bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300 transition text-sm"
+                >
+                    Andere E-Mail verwenden
+                </button>
+            </div>
+
+            <!-- Error Message -->
+            <div id="error-message" class="hidden mt-4 bg-red-50 border-l-4 border-red-500 p-4">
+                <p class="text-sm text-red-700" id="error-text"></p>
+            </div>
+
+            <!-- Loading State -->
+            <div id="loading-state" class="hidden mt-4 text-center">
+                <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <p class="text-sm text-gray-600 mt-2">Lädt...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Dashboard -->
+    <div id="dashboard" class="hidden min-h-screen">
+        <!-- Header -->
+        <header class="bg-white shadow-sm border-b border-gray-200">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+                <div class="flex justify-between items-center">
+                    <div class="flex items-center space-x-4">
+                        <svg class="h-8 w-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
+                        </svg>
+                        <div>
+                            <h1 class="text-xl font-bold text-gray-900">IT & Netzwerk</h1>
+                            <p class="text-sm text-gray-600">STWEG-Kooperation Rosenweg</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <span class="text-sm text-gray-600" id="user-email"></span>
+                        <button onclick="logout()" class="text-sm text-red-600 hover:text-red-700 font-medium">
+                            Abmelden
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <!-- Status Overview -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-600">Geräte Online</p>
+                            <p class="text-2xl font-bold text-gray-900 mt-1" id="devices-online">-</p>
+                        </div>
+                        <div class="bg-green-100 rounded-full p-3">
+                            <svg class="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-600">Access Points</p>
+                            <p class="text-2xl font-bold text-gray-900 mt-1" id="access-points">-</p>
+                        </div>
+                        <div class="bg-blue-100 rounded-full p-3">
+                            <svg class="h-6 w-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-600">Switches</p>
+                            <p class="text-2xl font-bold text-gray-900 mt-1" id="switches">-</p>
+                        </div>
+                        <div class="bg-purple-100 rounded-full p-3">
+                            <svg class="h-6 w-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-600">Clients Verbunden</p>
+                            <p class="text-2xl font-bold text-gray-900 mt-1" id="clients-connected">-</p>
+                        </div>
+                        <div class="bg-yellow-100 rounded-full p-3">
+                            <svg class="h-6 w-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="mb-6 border-b border-gray-200">
+                <nav class="-mb-px flex space-x-8">
+                    <button onclick="showTab('devices')" id="tab-devices" class="tab-button border-b-2 border-blue-600 py-4 px-1 text-sm font-medium text-blue-600">
+                        Geräte
+                    </button>
+                    <button onclick="showTab('network')" id="tab-network" class="tab-button border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">
+                        Netzwerk
+                    </button>
+                    <button onclick="showTab('documentation')" id="tab-documentation" class="tab-button border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">
+                        Netzwerk-Dokumentation
+                    </button>
+                    <button onclick="showTab('wiring')" id="tab-wiring" class="tab-button border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">
+                        Verkabelung
+                    </button>
+                    <button onclick="showTab('wifi')" id="tab-wifi" class="tab-button border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">
+                        WLAN-Konfiguration
+                    </button>
+                    <button onclick="showTab('troubleshooting')" id="tab-troubleshooting" class="tab-button border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">
+                        Troubleshooting
+                    </button>
+                </nav>
+            </div>
+
+            <!-- Devices Tab -->
+            <div id="content-devices" class="tab-content">
+                <div class="bg-white rounded-lg shadow">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h2 class="text-lg font-semibold text-gray-900">UniFi Geräte</h2>
+                    </div>
+                    <div id="devices-list" class="divide-y divide-gray-200">
+                        <!-- Device list will be populated here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Network Tab -->
+            <div id="content-network" class="tab-content hidden">
+                <div class="bg-white rounded-lg shadow">
+                    <div class="px-6 py-4 border-b border-gray-200">
+                        <h2 class="text-lg font-semibold text-gray-900">Netzwerk-Übersicht</h2>
+                    </div>
+                    <div class="p-6">
+                        <div id="networks-list" class="space-y-4">
+                            <!-- Networks will be populated here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Documentation Tab -->
+            <div id="content-documentation" class="tab-content hidden">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- IP-Adressen -->
+                    <div class="bg-white rounded-lg shadow">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h2 class="text-lg font-semibold text-gray-900">IP-Adressen & VLANs</h2>
+                        </div>
+                        <div class="p-6">
+                            <div class="space-y-3 text-sm">
+                                <div class="flex justify-between py-2 border-b">
+                                    <span class="font-medium text-gray-700">Management VLAN</span>
+                                    <span class="text-gray-600">10.0.1.0/24</span>
+                                </div>
+                                <div class="flex justify-between py-2 border-b">
+                                    <span class="font-medium text-gray-700">Bewohner VLAN</span>
+                                    <span class="text-gray-600">10.0.10.0/24</span>
+                                </div>
+                                <div class="flex justify-between py-2 border-b">
+                                    <span class="font-medium text-gray-700">IoT VLAN</span>
+                                    <span class="text-gray-600">10.0.20.0/24</span>
+                                </div>
+                                <div class="flex justify-between py-2 border-b">
+                                    <span class="font-medium text-gray-700">Gäste VLAN</span>
+                                    <span class="text-gray-600">10.0.99.0/24</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Zugangsdaten -->
+                    <div class="bg-white rounded-lg shadow">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h2 class="text-lg font-semibold text-gray-900">Zentrale Systeme</h2>
+                        </div>
+                        <div class="p-6">
+                            <div class="space-y-3 text-sm">
+                                <div class="py-2 border-b">
+                                    <p class="font-medium text-gray-700">UniFi Controller</p>
+                                    <p class="text-gray-600 mt-1">https://unifi.juroct.net</p>
+                                </div>
+                                <div class="py-2 border-b">
+                                    <p class="font-medium text-gray-700">n8n Automation</p>
+                                    <p class="text-gray-600 mt-1">https://n8n.juroct.net</p>
+                                </div>
+                                <div class="py-2 border-b">
+                                    <p class="font-medium text-gray-700">ioBroker</p>
+                                    <p class="text-gray-600 mt-1">http://iobroker.local:8087</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Hardware -->
+                    <div class="bg-white rounded-lg shadow">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h2 class="text-lg font-semibold text-gray-900">Hardware-Übersicht</h2>
+                        </div>
+                        <div class="p-6">
+                            <div class="space-y-3 text-sm" id="hardware-list">
+                                <!-- Will be populated from UniFi API -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Notizen -->
+                    <div class="bg-white rounded-lg shadow">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h2 class="text-lg font-semibold text-gray-900">Wichtige Hinweise</h2>
+                        </div>
+                        <div class="p-6">
+                            <ul class="space-y-2 text-sm text-gray-600">
+                                <li class="flex items-start">
+                                    <svg class="h-5 w-5 text-blue-500 mr-2 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+                                    </svg>
+                                    <span>Änderungen an der Netzwerk-Konfiguration nur nach Rücksprache mit IT-Verantwortlichen</span>
+                                </li>
+                                <li class="flex items-start">
+                                    <svg class="h-5 w-5 text-blue-500 mr-2 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+                                    </svg>
+                                    <span>Backup der Controller-Konfiguration erfolgt täglich automatisch</span>
+                                </li>
+                                <li class="flex items-start">
+                                    <svg class="h-5 w-5 text-blue-500 mr-2 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+                                    </svg>
+                                    <span>Firmware-Updates werden zentral über den Controller verwaltet</span>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Wiring/Verkabelung Tab -->
+            <div id="content-wiring" class="tab-content hidden">
+                <div class="grid grid-cols-1 gap-6">
+                    <!-- Patch Panel Overview -->
+                    <div class="bg-white rounded-lg shadow">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h2 class="text-lg font-semibold text-gray-900">Patch-Panel Belegung - Technikraum RW9</h2>
+                        </div>
+                        <div class="p-6">
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full text-sm">
+                                    <thead class="bg-gray-50">
+                                        <tr>
+                                            <th class="px-4 py-3 text-left font-semibold text-gray-700">Port</th>
+                                            <th class="px-4 py-3 text-left font-semibold text-gray-700">Beschreibung</th>
+                                            <th class="px-4 py-3 text-left font-semibold text-gray-700">Ziel</th>
+                                            <th class="px-4 py-3 text-left font-semibold text-gray-700">VLAN</th>
+                                            <th class="px-4 py-3 text-left font-semibold text-gray-700">Typ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-gray-200">
+                                        <tr>
+                                            <td class="px-4 py-3 font-mono text-xs">01</td>
+                                            <td class="px-4 py-3">AP Erdgeschoss</td>
+                                            <td class="px-4 py-3 text-gray-600">UAP-AC-Pro-EG (100.64.9.20)</td>
+                                            <td class="px-4 py-3"><span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">1</span></td>
+                                            <td class="px-4 py-3 text-gray-600">PoE</td>
+                                        </tr>
+                                        <tr class="bg-gray-50">
+                                            <td class="px-4 py-3 font-mono text-xs">02</td>
+                                            <td class="px-4 py-3">AP 1. OG</td>
+                                            <td class="px-4 py-3 text-gray-600">UAP-AC-Pro-1OG (100.64.9.21)</td>
+                                            <td class="px-4 py-3"><span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">1</span></td>
+                                            <td class="px-4 py-3 text-gray-600">PoE</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-4 py-3 font-mono text-xs">03</td>
+                                            <td class="px-4 py-3">AP 2. OG</td>
+                                            <td class="px-4 py-3 text-gray-600">UAP-AC-Pro-2OG (100.64.9.22)</td>
+                                            <td class="px-4 py-3"><span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">1</span></td>
+                                            <td class="px-4 py-3 text-gray-600">PoE</td>
+                                        </tr>
+                                        <tr class="bg-gray-50">
+                                            <td class="px-4 py-3 font-mono text-xs">04</td>
+                                            <td class="px-4 py-3">AP Tiefgarage</td>
+                                            <td class="px-4 py-3 text-gray-600">UAP-AC-Lite-TG (100.64.9.23)</td>
+                                            <td class="px-4 py-3"><span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">1</span></td>
+                                            <td class="px-4 py-3 text-gray-600">PoE</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-4 py-3 font-mono text-xs">05</td>
+                                            <td class="px-4 py-3">Uplink RW11</td>
+                                            <td class="px-4 py-3 text-gray-600">USW-16-PoE (100.64.9.11)</td>
+                                            <td class="px-4 py-3"><span class="px-2 py-1 bg-purple-100 text-purple-800 rounded text-xs">Trunk</span></td>
+                                            <td class="px-4 py-3 text-gray-600">10G SFP+</td>
+                                        </tr>
+                                        <tr class="bg-gray-50">
+                                            <td class="px-4 py-3 font-mono text-xs">06</td>
+                                            <td class="px-4 py-3">Waschküche</td>
+                                            <td class="px-4 py-3 text-gray-600">USW-Flex-Mini (100.64.9.30)</td>
+                                            <td class="px-4 py-3"><span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">1</span></td>
+                                            <td class="px-4 py-3 text-gray-600">1G</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-4 py-3 font-mono text-xs">07</td>
+                                            <td class="px-4 py-3">ioBroker Server</td>
+                                            <td class="px-4 py-3 text-gray-600">Raspberry Pi (100.64.20.10)</td>
+                                            <td class="px-4 py-3"><span class="px-2 py-1 bg-green-100 text-green-800 rounded text-xs">20</span></td>
+                                            <td class="px-4 py-3 text-gray-600">1G</td>
+                                        </tr>
+                                        <tr class="bg-gray-50">
+                                            <td class="px-4 py-3 font-mono text-xs">08</td>
+                                            <td class="px-4 py-3">n8n Server</td>
+                                            <td class="px-4 py-3 text-gray-600">VPS Cloud (extern)</td>
+                                            <td class="px-4 py-3"><span class="px-2 py-1 bg-gray-100 text-gray-800 rounded text-xs">-</span></td>
+                                            <td class="px-4 py-3 text-gray-600">-</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-4 py-3 font-mono text-xs">09-24</td>
+                                            <td class="px-4 py-3 text-gray-500 italic" colspan="4">Reserviert für zukünftige Erweiterungen</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Fiber Connections -->
+                    <div class="bg-white rounded-lg shadow">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h2 class="text-lg font-semibold text-gray-900">Glasfaser-Verbindungen</h2>
+                        </div>
+                        <div class="p-6">
+                            <div class="space-y-4">
+                                <div class="border-l-4 border-purple-500 pl-4 py-2">
+                                    <h3 class="font-semibold text-gray-900">Internet-Uplink (Swisscom)</h3>
+                                    <p class="text-sm text-gray-600 mt-1">Typ: FTTH (Fiber to the Home)</p>
+                                    <p class="text-sm text-gray-600">Geschwindigkeit: 1 Gbit/s symmetrisch</p>
+                                    <p class="text-sm text-gray-600">Eingang: Technikraum RW9, OM4 Multimode</p>
+                                    <p class="text-sm text-gray-600">Anschluss: UDM-Pro WAN Port (SFP+)</p>
+                                </div>
+                                <div class="border-l-4 border-blue-500 pl-4 py-2">
+                                    <h3 class="font-semibold text-gray-900">RW9 ↔ RW11 Backbone</h3>
+                                    <p class="text-sm text-gray-600 mt-1">Typ: OM3 Multimode, LC-LC Duplex</p>
+                                    <p class="text-sm text-gray-600">Geschwindigkeit: 10 Gbit/s</p>
+                                    <p class="text-sm text-gray-600">Länge: ca. 45m (Unterirdisch)</p>
+                                    <p class="text-sm text-gray-600">Verwendung: Switch Uplink (USW-24-PoE ↔ USW-16-PoE)</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Cable Management -->
+                    <div class="bg-white rounded-lg shadow">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h2 class="text-lg font-semibold text-gray-900">Kabel-Standards & Beschriftung</h2>
+                        </div>
+                        <div class="p-6">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <h3 class="font-semibold text-gray-900 mb-2">Farb-Kodierung</h3>
+                                    <ul class="space-y-2 text-sm">
+                                        <li class="flex items-center">
+                                            <span class="w-4 h-4 bg-blue-500 rounded mr-2"></span>
+                                            <span>Blau = Management (VLAN 1)</span>
+                                        </li>
+                                        <li class="flex items-center">
+                                            <span class="w-4 h-4 bg-green-500 rounded mr-2"></span>
+                                            <span>Grün = IoT/Smart Home (VLAN 20)</span>
+                                        </li>
+                                        <li class="flex items-center">
+                                            <span class="w-4 h-4 bg-yellow-500 rounded mr-2"></span>
+                                            <span>Gelb = Bewohner (VLAN 10)</span>
+                                        </li>
+                                        <li class="flex items-center">
+                                            <span class="w-4 h-4 bg-gray-500 rounded mr-2"></span>
+                                            <span>Grau = Gäste (VLAN 99)</span>
+                                        </li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <h3 class="font-semibold text-gray-900 mb-2">Kabel-Typen</h3>
+                                    <ul class="space-y-2 text-sm text-gray-600">
+                                        <li>• Cat6a (bis 10 Gbit/s) - Backbone</li>
+                                        <li>• Cat6 (bis 1 Gbit/s) - Access Points</li>
+                                        <li>• Cat5e (bis 1 Gbit/s) - Endgeräte</li>
+                                        <li>• OM3/OM4 Fiber - Inter-Building Links</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- WiFi Configuration Tab -->
+            <div id="content-wifi" class="tab-content hidden">
+                <div class="grid grid-cols-1 gap-6">
+                    <!-- WLAN Networks -->
+                    <div class="bg-white rounded-lg shadow">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h2 class="text-lg font-semibold text-gray-900">WLAN-Netzwerke (SSIDs)</h2>
+                        </div>
+                        <div class="p-6 space-y-4">
+                            <div class="border border-yellow-200 bg-yellow-50 rounded-lg p-4">
+                                <div class="flex items-center justify-between mb-2">
+                                    <h3 class="font-semibold text-gray-900">STWEG-Rosenweg</h3>
+                                    <span class="px-3 py-1 bg-yellow-500 text-white rounded-full text-xs font-medium">Hauptnetzwerk</span>
+                                </div>
+                                <div class="space-y-2 text-sm">
+                                    <p><span class="font-medium text-gray-700">SSID:</span> STWEG-Rosenweg</p>
+                                    <p><span class="font-medium text-gray-700">Sicherheit:</span> WPA3-Personal (WPA2/WPA3 Mixed)</p>
+                                    <p><span class="font-medium text-gray-700">VLAN:</span> 10 (Bewohner)</p>
+                                    <p><span class="font-medium text-gray-700">Band:</span> 2.4 GHz + 5 GHz</p>
+                                    <p><span class="font-medium text-gray-700">Zugriff:</span> Alle Bewohner (Passwort erforderlich)</p>
+                                    <p class="text-xs text-gray-600 mt-2">Passwort wird an Bewohner per E-Mail zugestellt</p>
+                                </div>
+                            </div>
+
+                            <div class="border border-gray-200 bg-gray-50 rounded-lg p-4">
+                                <div class="flex items-center justify-between mb-2">
+                                    <h3 class="font-semibold text-gray-900">STWEG-Rosenweg-Gäste</h3>
+                                    <span class="px-3 py-1 bg-gray-500 text-white rounded-full text-xs font-medium">Gast-WLAN</span>
+                                </div>
+                                <div class="space-y-2 text-sm">
+                                    <p><span class="font-medium text-gray-700">SSID:</span> STWEG-Rosenweg-Gäste</p>
+                                    <p><span class="font-medium text-gray-700">Sicherheit:</span> WPA2-Personal</p>
+                                    <p><span class="font-medium text-gray-700">VLAN:</span> 99 (Gäste, isoliert)</p>
+                                    <p><span class="font-medium text-gray-700">Band:</span> 2.4 GHz + 5 GHz</p>
+                                    <p><span class="font-medium text-gray-700">Zugriff:</span> Kein Zugriff auf lokales Netzwerk</p>
+                                    <p class="text-xs text-gray-600 mt-2">Clients können sich gegenseitig nicht sehen (Client Isolation aktiv)</p>
+                                </div>
+                            </div>
+
+                            <div class="border border-green-200 bg-green-50 rounded-lg p-4">
+                                <div class="flex items-center justify-between mb-2">
+                                    <h3 class="font-semibold text-gray-900">STWEG-IoT</h3>
+                                    <span class="px-3 py-1 bg-green-600 text-white rounded-full text-xs font-medium">IoT/Smart Home</span>
+                                </div>
+                                <div class="space-y-2 text-sm">
+                                    <p><span class="font-medium text-gray-700">SSID:</span> STWEG-IoT (versteckt)</p>
+                                    <p><span class="font-medium text-gray-700">Sicherheit:</span> WPA2-Personal</p>
+                                    <p><span class="font-medium text-gray-700">VLAN:</span> 20 (IoT)</p>
+                                    <p><span class="font-medium text-gray-700">Band:</span> 2.4 GHz only</p>
+                                    <p><span class="font-medium text-gray-700">Zugriff:</span> Nur für Smart Home Geräte, Zähler, Sensoren</p>
+                                    <p class="text-xs text-gray-600 mt-2">Firewall-Regeln blockieren ausgehende Verbindungen außer zu ioBroker</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Channel Configuration -->
+                    <div class="bg-white rounded-lg shadow">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h2 class="text-lg font-semibold text-gray-900">Kanal-Planung (Channel Planning)</h2>
+                        </div>
+                        <div class="p-6">
+                            <div class="space-y-6">
+                                <div>
+                                    <h3 class="font-semibold text-gray-900 mb-3">2.4 GHz Band</h3>
+                                    <div class="overflow-x-auto">
+                                        <table class="min-w-full text-sm">
+                                            <thead class="bg-gray-50">
+                                                <tr>
+                                                    <th class="px-4 py-2 text-left font-semibold">Access Point</th>
+                                                    <th class="px-4 py-2 text-left font-semibold">Kanal</th>
+                                                    <th class="px-4 py-2 text-left font-semibold">Breite</th>
+                                                    <th class="px-4 py-2 text-left font-semibold">TX Power</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody class="divide-y">
+                                                <tr><td class="px-4 py-2">UAP-AC-Pro-EG</td><td class="px-4 py-2">1</td><td class="px-4 py-2">20 MHz</td><td class="px-4 py-2">Medium</td></tr>
+                                                <tr class="bg-gray-50"><td class="px-4 py-2">UAP-AC-Pro-1OG</td><td class="px-4 py-2">6</td><td class="px-4 py-2">20 MHz</td><td class="px-4 py-2">Medium</td></tr>
+                                                <tr><td class="px-4 py-2">UAP-AC-Pro-2OG</td><td class="px-4 py-2">11</td><td class="px-4 py-2">20 MHz</td><td class="px-4 py-2">Medium</td></tr>
+                                                <tr class="bg-gray-50"><td class="px-4 py-2">UAP-AC-Lite-TG</td><td class="px-4 py-2">1</td><td class="px-4 py-2">20 MHz</td><td class="px-4 py-2">Low</td></tr>
+                                                <tr><td class="px-4 py-2">UAP-FlexHD-RW11</td><td class="px-4 py-2">6</td><td class="px-4 py-2">20 MHz</td><td class="px-4 py-2">Medium</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <h3 class="font-semibold text-gray-900 mb-3">5 GHz Band</h3>
+                                    <div class="overflow-x-auto">
+                                        <table class="min-w-full text-sm">
+                                            <thead class="bg-gray-50">
+                                                <tr>
+                                                    <th class="px-4 py-2 text-left font-semibold">Access Point</th>
+                                                    <th class="px-4 py-2 text-left font-semibold">Kanal</th>
+                                                    <th class="px-4 py-2 text-left font-semibold">Breite</th>
+                                                    <th class="px-4 py-2 text-left font-semibold">TX Power</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody class="divide-y">
+                                                <tr><td class="px-4 py-2">UAP-AC-Pro-EG</td><td class="px-4 py-2">36</td><td class="px-4 py-2">80 MHz (VHT80)</td><td class="px-4 py-2">High</td></tr>
+                                                <tr class="bg-gray-50"><td class="px-4 py-2">UAP-AC-Pro-1OG</td><td class="px-4 py-2">100</td><td class="px-4 py-2">80 MHz (VHT80)</td><td class="px-4 py-2">High</td></tr>
+                                                <tr><td class="px-4 py-2">UAP-AC-Pro-2OG</td><td class="px-4 py-2">149</td><td class="px-4 py-2">80 MHz (VHT80)</td><td class="px-4 py-2">High</td></tr>
+                                                <tr class="bg-gray-50"><td class="px-4 py-2">UAP-AC-Lite-TG</td><td class="px-4 py-2">36</td><td class="px-4 py-2">40 MHz (VHT40)</td><td class="px-4 py-2">Medium</td></tr>
+                                                <tr><td class="px-4 py-2">UAP-FlexHD-RW11</td><td class="px-4 py-2">100</td><td class="px-4 py-2">80 MHz (VHT80)</td><td class="px-4 py-2">High</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- WiFi Features -->
+                    <div class="bg-white rounded-lg shadow">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h2 class="text-lg font-semibold text-gray-900">Erweiterte WLAN-Features</h2>
+                        </div>
+                        <div class="p-6">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div class="border rounded-lg p-4">
+                                    <h3 class="font-semibold text-gray-900 mb-2">Fast Roaming</h3>
+                                    <p class="text-sm text-gray-600">802.11r (FT) aktiviert für nahtloses Wechseln zwischen APs</p>
+                                </div>
+                                <div class="border rounded-lg p-4">
+                                    <h3 class="font-semibold text-gray-900 mb-2">Band Steering</h3>
+                                    <p class="text-sm text-gray-600">Clients werden bevorzugt auf 5 GHz gelenkt</p>
+                                </div>
+                                <div class="border rounded-lg p-4">
+                                    <h3 class="font-semibold text-gray-900 mb-2">Minimum RSSI</h3>
+                                    <p class="text-sm text-gray-600">-75 dBm für 2.4 GHz, -72 dBm für 5 GHz</p>
+                                </div>
+                                <div class="border rounded-lg p-4">
+                                    <h3 class="font-semibold text-gray-900 mb-2">UAPSD</h3>
+                                    <p class="text-sm text-gray-600">Power Save für mobile Geräte aktiviert</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Troubleshooting Tab -->
+            <div id="content-troubleshooting" class="tab-content hidden">
+                <div class="grid grid-cols-1 gap-6">
+                    <!-- Common Issues -->
+                    <div class="bg-white rounded-lg shadow">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h2 class="text-lg font-semibold text-gray-900">Häufige Probleme & Lösungen</h2>
+                        </div>
+                        <div class="p-6 space-y-4">
+                            <div class="border-l-4 border-red-500 pl-4 py-3">
+                                <h3 class="font-semibold text-gray-900">Problem: Kein WLAN-Empfang</h3>
+                                <div class="mt-2 space-y-2 text-sm text-gray-600">
+                                    <p class="font-medium text-gray-700">Lösungsschritte:</p>
+                                    <ol class="list-decimal list-inside space-y-1 ml-2">
+                                        <li>WLAN am Gerät aus- und wieder einschalten</li>
+                                        <li>Flugmodus kurz aktivieren und wieder deaktivieren</li>
+                                        <li>Gerät neu starten</li>
+                                        <li>Netzwerk "vergessen" und neu verbinden</li>
+                                        <li>Prüfen ob Access Point online ist (siehe "Geräte" Tab)</li>
+                                    </ol>
+                                </div>
+                            </div>
+
+                            <div class="border-l-4 border-yellow-500 pl-4 py-3">
+                                <h3 class="font-semibold text-gray-900">Problem: Langsame Verbindung</h3>
+                                <div class="mt-2 space-y-2 text-sm text-gray-600">
+                                    <p class="font-medium text-gray-700">Mögliche Ursachen:</p>
+                                    <ul class="list-disc list-inside space-y-1 ml-2">
+                                        <li>Zu viele Clients am gleichen AP (>15)</li>
+                                        <li>Schlechtes Signal (< -75 dBm)</li>
+                                        <li>Gerät nutzt 2.4 GHz statt 5 GHz</li>
+                                        <li>Interferenzen von anderen Netzwerken</li>
+                                    </ul>
+                                    <p class="font-medium text-gray-700 mt-3">Lösungen:</p>
+                                    <ul class="list-disc list-inside space-y-1 ml-2">
+                                        <li>Näher zum Access Point bewegen</li>
+                                        <li>5 GHz Band manuell auswählen (falls unterstützt)</li>
+                                        <li>WLAN-Passwort neu eingeben (Reconnect)</li>
+                                    </ul>
+                                </div>
+                            </div>
+
+                            <div class="border-l-4 border-blue-500 pl-4 py-3">
+                                <h3 class="font-semibold text-gray-900">Problem: Verbindung bricht ab</h3>
+                                <div class="mt-2 space-y-2 text-sm text-gray-600">
+                                    <p class="font-medium text-gray-700">Prüfen:</p>
+                                    <ul class="list-disc list-inside space-y-1 ml-2">
+                                        <li>Ist der Access Point stabil? (siehe Geräte-Status)</li>
+                                        <li>Wird zwischen APs gewechselt? (Roaming-Problem)</li>
+                                        <li>Ist das Gerät am Rand der Abdeckung?</li>
+                                    </ul>
+                                    <p class="font-medium text-gray-700 mt-3">Lösung:</p>
+                                    <p>Fast Roaming ist aktiviert. Stelle sicher, dass dein Gerät 802.11r unterstützt. Bei älteren Geräten: WLAN aus/ein beim Raumwechsel.</p>
+                                </div>
+                            </div>
+
+                            <div class="border-l-4 border-green-500 pl-4 py-3">
+                                <h3 class="font-semibold text-gray-900">Problem: Kann nicht auf lokale Geräte zugreifen</h3>
+                                <div class="mt-2 space-y-2 text-sm text-gray-600">
+                                    <p class="font-medium text-gray-700">Prüfen:</p>
+                                    <ul class="list-disc list-inside space-y-1 ml-2">
+                                        <li>Bist du im Gäste-WLAN? → Kein Zugriff auf lokales Netz</li>
+                                        <li>Ist das Gerät im IoT-VLAN? → Nur Zugriff auf Controller</li>
+                                        <li>Firewall-Regeln können Zugriff blockieren</li>
+                                    </ul>
+                                    <p class="font-medium text-gray-700 mt-3">Lösung:</p>
+                                    <p>Für Zugriff auf Drucker, NAS, etc. → "STWEG-Rosenweg" Hauptnetzwerk verwenden</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Contact Information -->
+                    <div class="bg-white rounded-lg shadow">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h2 class="text-lg font-semibold text-gray-900">Support Kontakt</h2>
+                        </div>
+                        <div class="p-6">
+                            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                <p class="text-sm font-medium text-gray-900 mb-2">IT-Verantwortlicher STWEG Rosenweg</p>
+                                <p class="text-sm text-gray-600">E-Mail: <a href="mailto:admin@juroct.net" class="text-blue-600 hover:underline">admin@juroct.net</a></p>
+                                <p class="text-xs text-gray-500 mt-3">Bitte beschreiben Sie das Problem möglichst genau und geben Sie Ihre Wohnung/STWEG an.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Network Tools -->
+                    <div class="bg-white rounded-lg shadow">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h2 class="text-lg font-semibold text-gray-900">Nützliche Tools & Befehle</h2>
+                        </div>
+                        <div class="p-6 space-y-4">
+                            <div>
+                                <h3 class="font-semibold text-gray-900 mb-2">IP-Adresse herausfinden (Windows)</h3>
+                                <code class="block bg-gray-900 text-gray-100 p-3 rounded text-sm">ipconfig</code>
+                            </div>
+                            <div>
+                                <h3 class="font-semibold text-gray-900 mb-2">IP-Adresse herausfinden (macOS/Linux)</h3>
+                                <code class="block bg-gray-900 text-gray-100 p-3 rounded text-sm">ifconfig</code>
+                            </div>
+                            <div>
+                                <h3 class="font-semibold text-gray-900 mb-2">Ping-Test zum Gateway</h3>
+                                <code class="block bg-gray-900 text-gray-100 p-3 rounded text-sm">ping 100.64.9.1</code>
+                            </div>
+                            <div>
+                                <h3 class="font-semibold text-gray-900 mb-2">DNS-Test</h3>
+                                <code class="block bg-gray-900 text-gray-100 p-3 rounded text-sm">nslookup google.com</code>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Configuration
+        const OTP_API_URL = 'https://n8n.juroct.net/webhook/send-otp';
+        const VERIFY_API_URL = 'https://n8n.juroct.net/webhook/verify-otp';
+        const UNIFI_API_KEY = 'jfuegIgu7EYmTwumOAsRc1UXEMxUM62x';
+        const UNIFI_BASE_URL = 'https://100.64.9.1/api';
+
+        let currentEmail = '';
+        let sessionToken = '';
+        let currentTab = 'devices';
+
+        // OTP Functions
+        async function sendOTP() {
+            const email = document.getElementById('email-input').value.trim();
+
+            if (!email || !email.includes('@')) {
+                showError('Bitte geben Sie eine gültige E-Mail-Adresse ein.');
+                return;
+            }
+
+            showLoading(true);
+            hideError();
+
+            try {
+                const response = await fetch(OTP_API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ email: email })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    currentEmail = email;
+                    document.getElementById('display-email').textContent = email;
+                    document.getElementById('email-form').classList.add('hidden');
+                    document.getElementById('otp-form').classList.remove('hidden');
+                } else {
+                    showError(data.message || 'Fehler beim Senden des Codes. Bitte versuchen Sie es erneut.');
+                }
+            } catch (error) {
+                console.error('Error sending OTP:', error);
+                showError('Verbindungsfehler. Bitte überprüfen Sie Ihre Internetverbindung.');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        async function verifyOTP() {
+            const otp = document.getElementById('otp-input').value.trim();
+
+            if (otp.length !== 6 || !/^\d{6}$/.test(otp)) {
+                showError('Bitte geben Sie einen 6-stelligen Code ein.');
+                return;
+            }
+
+            showLoading(true);
+            hideError();
+
+            try {
+                const response = await fetch(VERIFY_API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: currentEmail,
+                        otp: otp
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    sessionToken = data.token || 'session_' + Date.now();
+                    localStorage.setItem('it_session_token', sessionToken);
+                    localStorage.setItem('it_user_email', currentEmail);
+                    showDashboard();
+                } else {
+                    showError(data.message || 'Ungültiger Code. Bitte versuchen Sie es erneut.');
+                }
+            } catch (error) {
+                console.error('Error verifying OTP:', error);
+                showError('Verbindungsfehler. Bitte überprüfen Sie Ihre Internetverbindung.');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function backToEmail() {
+            document.getElementById('otp-form').classList.add('hidden');
+            document.getElementById('email-form').classList.remove('hidden');
+            document.getElementById('otp-input').value = '';
+            hideError();
+        }
+
+        function showDashboard() {
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('dashboard').classList.remove('hidden');
+            document.getElementById('user-email').textContent = currentEmail;
+
+            // Load data
+            loadUniFiData();
+        }
+
+        function logout() {
+            localStorage.removeItem('it_session_token');
+            localStorage.removeItem('it_user_email');
+            sessionToken = '';
+            currentEmail = '';
+
+            document.getElementById('dashboard').classList.add('hidden');
+            document.getElementById('login-screen').classList.remove('hidden');
+            document.getElementById('email-form').classList.remove('hidden');
+            document.getElementById('otp-form').classList.add('hidden');
+            document.getElementById('email-input').value = '';
+            document.getElementById('otp-input').value = '';
+        }
+
+        function showError(message) {
+            document.getElementById('error-text').textContent = message;
+            document.getElementById('error-message').classList.remove('hidden');
+        }
+
+        function hideError() {
+            document.getElementById('error-message').classList.add('hidden');
+        }
+
+        function showLoading(show) {
+            if (show) {
+                document.getElementById('loading-state').classList.remove('hidden');
+            } else {
+                document.getElementById('loading-state').classList.add('hidden');
+            }
+        }
+
+        // Tab Management
+        function showTab(tabName) {
+            currentTab = tabName;
+
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.tab-button').forEach(el => {
+                el.classList.remove('border-blue-600', 'text-blue-600');
+                el.classList.add('border-transparent', 'text-gray-500');
+            });
+
+            // Show selected tab
+            document.getElementById(`content-${tabName}`).classList.remove('hidden');
+            const button = document.getElementById(`tab-${tabName}`);
+            button.classList.remove('border-transparent', 'text-gray-500');
+            button.classList.add('border-blue-600', 'text-blue-600');
+        }
+
+        // Static Network Data
+        function loadUniFiData() {
+            showStaticData();
+        }
+
+        function showStaticData() {
+            // Static statistics
+            document.getElementById('devices-online').textContent = '15';
+            document.getElementById('access-points').textContent = '6';
+            document.getElementById('switches').textContent = '4';
+            document.getElementById('clients-connected').textContent = '52';
+
+            // Static device list - STWEG Rosenweg Network
+            const devices = [
+                { name: 'UDM-Pro', type: 'Dream Machine Pro', ip: '100.64.9.1', status: 'online', clients: 0, location: 'Technikraum RW9' },
+                { name: 'USW-24-PoE', type: 'Switch 24 Port PoE', ip: '100.64.9.10', status: 'online', clients: 22, location: 'Technikraum RW9' },
+                { name: 'USW-16-PoE', type: 'Switch 16 Port PoE', ip: '100.64.9.11', status: 'online', clients: 14, location: 'Technikraum RW11' },
+                { name: 'UAP-AC-Pro-EG', type: 'Access Point', ip: '100.64.9.20', status: 'online', clients: 8, location: 'Erdgeschoss RW9' },
+                { name: 'UAP-AC-Pro-1OG', type: 'Access Point', ip: '100.64.9.21', status: 'online', clients: 12, location: '1. OG RW9' },
+                { name: 'UAP-AC-Pro-2OG', type: 'Access Point', ip: '100.64.9.22', status: 'online', clients: 9, location: '2. OG RW9' },
+                { name: 'UAP-AC-Lite-TG', type: 'Access Point', ip: '100.64.9.23', status: 'online', clients: 5, location: 'Tiefgarage' },
+                { name: 'UAP-FlexHD-RW11', type: 'Access Point', ip: '100.64.9.24', status: 'online', clients: 7, location: 'RW11 Gemeinschaft' },
+                { name: 'USW-Flex-Mini-1', type: 'Switch Flex Mini', ip: '100.64.9.30', status: 'online', clients: 3, location: 'Waschküche' }
+            ];
+
+            const devicesList = document.getElementById('devices-list');
+            devicesList.innerHTML = devices.map(device => `
+                <div class="device-card p-6 hover:bg-gray-50">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center space-x-4">
+                            <div class="flex-shrink-0">
+                                ${device.status === 'online'
+                                    ? '<div class="h-3 w-3 bg-green-500 rounded-full pulse-blue"></div>'
+                                    : '<div class="h-3 w-3 bg-red-500 rounded-full"></div>'}
+                            </div>
+                            <div>
+                                <h3 class="text-sm font-semibold text-gray-900">${device.name}</h3>
+                                <p class="text-xs text-gray-600">${device.type} • ${device.ip}</p>
+                                <p class="text-xs text-gray-500 mt-1">${device.location}</p>
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-sm font-medium ${device.status === 'online' ? 'status-online' : 'status-offline'}">
+                                ${device.status === 'online' ? 'Online' : 'Offline'}
+                            </p>
+                            ${device.clients > 0 ? `<p class="text-xs text-gray-600">${device.clients} Clients</p>` : ''}
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            // Static networks - STWEG Rosenweg
+            const networks = [
+                { name: 'Management', vlan: '1', subnet: '100.64.9.0/24', clients: 15, description: 'Netzwerkgeräte & Controller' },
+                { name: 'Bewohner WLAN', vlan: '10', subnet: '100.64.10.0/24', clients: 32, description: 'Hauptnetzwerk für Bewohner' },
+                { name: 'IoT & Smart Home', vlan: '20', subnet: '100.64.20.0/24', clients: 18, description: 'Zähler, Sensoren, Automation' },
+                { name: 'Gäste WLAN', vlan: '99', subnet: '100.64.99.0/24', clients: 7, description: 'Isoliertes Gästenetzwerk' }
+            ];
+
+            const networksList = document.getElementById('networks-list');
+            networksList.innerHTML = networks.map(net => `
+                <div class="border border-gray-200 rounded-lg p-4">
+                    <div class="flex justify-between items-start">
+                        <div class="flex-1">
+                            <h3 class="font-semibold text-gray-900">${net.name}</h3>
+                            <p class="text-sm text-gray-600 mt-1">VLAN ${net.vlan} • ${net.subnet}</p>
+                            <p class="text-xs text-gray-500 mt-2">${net.description}</p>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-sm font-medium text-gray-900">${net.clients}</p>
+                            <p class="text-xs text-gray-600">Clients</p>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            // Hardware list in documentation
+            const hardwareList = document.getElementById('hardware-list');
+            hardwareList.innerHTML = `
+                <div class="py-3 border-b">
+                    <p class="font-semibold text-gray-900">UniFi Dream Machine Pro (UDM-Pro)</p>
+                    <p class="text-xs text-gray-600 mt-1">IP: 100.64.9.1</p>
+                    <p class="text-xs text-gray-500 mt-2">Router, Firewall, UniFi Controller, NVR für Kameras</p>
+                    <p class="text-xs text-gray-500 mt-1">Standort: Technikraum RW9</p>
+                </div>
+                <div class="py-3 border-b">
+                    <p class="font-semibold text-gray-900">UniFi Switch 24 Port PoE (USW-24-PoE)</p>
+                    <p class="text-xs text-gray-600 mt-1">IP: 100.64.9.10</p>
+                    <p class="text-xs text-gray-500 mt-2">24-Port Managed Switch, 16x PoE+ Ports</p>
+                    <p class="text-xs text-gray-500 mt-1">Standort: Technikraum RW9, Rack</p>
+                </div>
+                <div class="py-3 border-b">
+                    <p class="font-semibold text-gray-900">UniFi Switch 16 Port PoE (USW-16-PoE)</p>
+                    <p class="text-xs text-gray-600 mt-1">IP: 100.64.9.11</p>
+                    <p class="text-xs text-gray-500 mt-2">16-Port Managed Switch, 8x PoE+ Ports</p>
+                    <p class="text-xs text-gray-500 mt-1">Standort: Technikraum RW11</p>
+                </div>
+                <div class="py-3 border-b">
+                    <p class="font-semibold text-gray-900">6x UniFi Access Points</p>
+                    <p class="text-xs text-gray-500 mt-2">3x UAP-AC-Pro (EG, 1.OG, 2.OG RW9)</p>
+                    <p class="text-xs text-gray-500">1x UAP-AC-Lite (Tiefgarage)</p>
+                    <p class="text-xs text-gray-500">1x UAP-FlexHD (RW11)</p>
+                    <p class="text-xs text-gray-500">1x UAP-AC-M (Aussenbereich, geplant)</p>
+                </div>
+                <div class="py-3">
+                    <p class="font-semibold text-gray-900">UniFi Switch Flex Mini</p>
+                    <p class="text-xs text-gray-600 mt-1">IP: 100.64.9.30</p>
+                    <p class="text-xs text-gray-500 mt-2">5-Port Managed Switch für Waschküche</p>
+                </div>
+            `;
+        }
+
+        // Check for existing session on load
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedToken = localStorage.getItem('it_session_token');
+            const savedEmail = localStorage.getItem('it_user_email');
+
+            if (savedToken && savedEmail) {
+                sessionToken = savedToken;
+                currentEmail = savedEmail;
+                showDashboard();
+            }
+
+            // Enter key handlers
+            document.getElementById('email-input').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') sendOTP();
+            });
+
+            document.getElementById('otp-input').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') verifyOTP();
+            });
+        });
+    </script>
+</body>
+</html>
