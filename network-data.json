@@ -1,0 +1,526 @@
+{
+  "generated_at": "2025-12-20T20:45:00Z",
+  "source": "UniFi Network Controller API",
+  "unifi_controller": {
+    "url": "https://100.64.9.1",
+    "api_endpoint": "/api",
+    "location": "UDM-Pro Technikraum RW9"
+  },
+  "statistics": {
+    "total_devices": 17,
+    "access_points": 8,
+    "switches": 5,
+    "gateway": 1,
+    "active_clients": 18,
+    "total_vlans": 31
+  },
+  "devices": [
+    {
+      "name": "UDM-Pro",
+      "type": "Dream Machine Pro",
+      "model": "UDM-Pro",
+      "ip": "100.64.9.1",
+      "mac": "e4:38:83:4d:02:e5",
+      "status": "online",
+      "location": "Technikraum RW9",
+      "role": "gateway",
+      "description": "Router, Firewall, UniFi Controller, VPN Server"
+    },
+    {
+      "name": "Poe-Switch1 Kooperation R9 T+T",
+      "type": "USW-24-PoE",
+      "model": "USW-24-PoE",
+      "ip": "100.64.0.40",
+      "status": "online",
+      "clients": 8,
+      "location": "Technikraum RW9",
+      "role": "switch",
+      "description": "24-Port Managed PoE Switch, Hauptverteiler"
+    },
+    {
+      "name": "Switch1 Kooperation R9 EG",
+      "type": "USW-24",
+      "model": "USW-24",
+      "ip": "100.64.0.41",
+      "status": "online",
+      "clients": 12,
+      "location": "Kooperation R9 EG",
+      "role": "switch",
+      "description": "24-Port Managed Switch Erdgeschoss"
+    },
+    {
+      "name": "Poe-Switch2 R9 Dach",
+      "type": "USW Flex",
+      "model": "USW-Flex",
+      "ip": "100.64.0.100",
+      "status": "online",
+      "clients": 3,
+      "location": "R9 Dach",
+      "role": "switch",
+      "description": "Flex PoE Switch Dach"
+    },
+    {
+      "name": "PoE-Switch1 R9 Heizungsraum",
+      "type": "USW Flex",
+      "model": "USW-Flex",
+      "ip": "100.64.90.1",
+      "status": "online",
+      "clients": 5,
+      "location": "R9 Heizungsraum",
+      "role": "switch",
+      "description": "Flex PoE Switch Heizungsraum"
+    },
+    {
+      "name": "WLAN-AP R9 Dach",
+      "type": "U7MSH",
+      "model": "U7-Mesh",
+      "ip": "100.64.0.93",
+      "mac": "78:8a:20:20:03:1e",
+      "status": "online",
+      "clients": 1,
+      "location": "R9 Dach",
+      "role": "access_point",
+      "description": "WiFi 7 Mesh Access Point",
+      "radios": {
+        "2.4GHz": {
+          "channel": 6,
+          "width": "20MHz",
+          "tx_power": 17
+        },
+        "5GHz": {
+          "channel": 44,
+          "width": "40MHz",
+          "tx_power": 19
+        }
+      }
+    },
+    {
+      "name": "WLAN-AP Kooperation R9 Hauptverteilung",
+      "type": "U7UKU",
+      "model": "U7-Pro",
+      "ip": "100.64.0.31",
+      "mac": "9c:05:d6:70:2b:98",
+      "status": "online",
+      "clients": 0,
+      "location": "R9 Hauptverteilung",
+      "role": "access_point",
+      "description": "WiFi 7 Pro Access Point"
+    },
+    {
+      "name": "WLAN-AP R9 Heizungsraum",
+      "type": "U6-Lite",
+      "model": "U6-Lite",
+      "ip": "100.64.90.2",
+      "mac": "d8:b3:70:a6:83:88",
+      "status": "online",
+      "clients": 4,
+      "location": "R9 Heizungsraum",
+      "role": "access_point",
+      "description": "WiFi 6 Lite Access Point"
+    },
+    {
+      "name": "WLAN-AP Kooperation R9 2OG",
+      "type": "U6-Lite",
+      "model": "U6-Lite",
+      "ip": "100.64.0.32",
+      "status": "online",
+      "clients": 0,
+      "location": "Kooperation R9 2OG",
+      "role": "access_point",
+      "description": "WiFi 6 Lite Access Point 2. OG"
+    },
+    {
+      "name": "WLAN-AP Kooperation R9 1OG",
+      "type": "U6-Lite",
+      "model": "U6-Lite",
+      "ip": "100.64.0.33",
+      "status": "online",
+      "clients": 0,
+      "location": "Kooperation R9 1OG",
+      "role": "access_point",
+      "description": "WiFi 6 Lite Access Point 1. OG"
+    },
+    {
+      "name": "WLAN-AP Kooperation R9 EG",
+      "type": "U6-Lite",
+      "model": "U6-Lite",
+      "ip": "100.64.0.34",
+      "status": "online",
+      "clients": 3,
+      "location": "Kooperation R9 EG",
+      "role": "access_point",
+      "description": "WiFi 6 Lite Access Point EG"
+    },
+    {
+      "name": "WLAN-AP Kooperation R9 UG",
+      "type": "U6-Lite",
+      "model": "U6-Lite",
+      "ip": "100.64.0.35",
+      "status": "online",
+      "clients": 0,
+      "location": "Kooperation R9 UG",
+      "role": "access_point",
+      "description": "WiFi 6 Lite Access Point UG"
+    },
+    {
+      "name": "WLAN AP Kooperation R9 Keller",
+      "type": "U6-Lite",
+      "model": "U6-Lite",
+      "ip": "100.64.0.36",
+      "status": "online",
+      "clients": 0,
+      "location": "Kooperation R9 Keller",
+      "role": "access_point",
+      "description": "WiFi 6 Lite Access Point Keller"
+    }
+  ],
+  "networks": [
+    {
+      "name": "Inter-Building Network",
+      "vlan": null,
+      "vlan_enabled": false,
+      "subnet": "100.64.0.1/24",
+      "gateway": "100.64.0.1",
+      "dhcp_range": {
+        "start": "100.64.0.6",
+        "end": "100.64.0.254"
+      },
+      "dns": ["100.64.2.50", "100.64.2.51"],
+      "domain": "kooperation.rosenweg4303.ch",
+      "purpose": "corporate",
+      "description": "Kooperation Hauptnetzwerk - Gebäudeübergreifend",
+      "active_clients": 0
+    },
+    {
+      "name": "RK-Dienste",
+      "vlan": 2,
+      "vlan_enabled": true,
+      "subnet": "100.64.2.1/24",
+      "gateway": "100.64.2.1",
+      "dhcp_range": {
+        "start": "100.64.2.100",
+        "end": "100.64.2.254"
+      },
+      "dns": ["1.1.1.1", "8.8.8.8"],
+      "domain": "dienste.rosenweg4303.ch",
+      "purpose": "corporate",
+      "description": "Dienste Rosenweg Kooperation (Server, NAS, etc.)",
+      "active_clients": 0,
+      "features": {
+        "dhcp_boot_enabled": true,
+        "boot_server": "100.64.2.33",
+        "boot_filename": "iventoy_loader_16000"
+      }
+    },
+    {
+      "name": "RK-Technik",
+      "vlan": 3,
+      "vlan_enabled": true,
+      "subnet": "100.64.3.1/24",
+      "gateway": "100.64.3.1",
+      "dhcp_range": {
+        "start": "100.64.3.100",
+        "end": "100.64.3.254"
+      },
+      "dns": ["1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4"],
+      "domain": "technik.rosenweg4303.ch",
+      "purpose": "corporate",
+      "description": "Technik Rosenweg Kooperation (Smart Home, IoT)",
+      "active_clients": 0
+    },
+    {
+      "name": "Rosenweg-Guest",
+      "vlan": 8,
+      "vlan_enabled": true,
+      "subnet": "192.168.2.1/24",
+      "gateway": "192.168.2.1",
+      "dhcp_range": {
+        "start": "192.168.2.6",
+        "end": "192.168.2.254"
+      },
+      "purpose": "guest",
+      "description": "Gast-WLAN - Isoliert vom Hauptnetzwerk",
+      "active_clients": 0,
+      "features": {
+        "client_isolation": true,
+        "internet_only": true
+      }
+    },
+    {
+      "name": "RK-Clients",
+      "vlan": 9,
+      "vlan_enabled": true,
+      "subnet": "100.64.9.1/24",
+      "gateway": "100.64.9.1",
+      "dhcp_range": {
+        "start": "100.64.9.6",
+        "end": "100.64.9.254"
+      },
+      "domain": "clients.rosenweg9.ch",
+      "purpose": "corporate",
+      "description": "Clients Rosenweg Kooperation",
+      "active_clients": 0
+    },
+    {
+      "name": "RW1-Clients",
+      "vlan": 19,
+      "vlan_enabled": true,
+      "subnet": "100.64.19.1/24",
+      "gateway": "100.64.19.1",
+      "dhcp_range": {
+        "start": "100.64.19.6",
+        "end": "100.64.19.254"
+      },
+      "domain": "clients.r1.rosenweg4303.ch",
+      "purpose": "corporate",
+      "description": "Clients Rosenweg 1",
+      "active_clients": 0
+    },
+    {
+      "name": "RW2-Clients",
+      "vlan": 29,
+      "vlan_enabled": true,
+      "subnet": "100.64.29.1/24",
+      "gateway": "100.64.29.1",
+      "dhcp_range": {
+        "start": "100.64.29.200",
+        "end": "100.64.29.254"
+      },
+      "dns": ["1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4"],
+      "domain": "clients.r2.rosenweg4303.ch",
+      "purpose": "corporate",
+      "description": "Clients Rosenweg 2",
+      "active_clients": 0
+    },
+    {
+      "name": "RW4-Clients",
+      "vlan": 49,
+      "vlan_enabled": true,
+      "subnet": "100.64.49.1/24",
+      "gateway": "100.64.49.1",
+      "dhcp_range": {
+        "start": "100.64.49.6",
+        "end": "100.64.49.254"
+      },
+      "domain": "clients.r4.rosenweg4303.ch",
+      "purpose": "corporate",
+      "description": "Clients Rosenweg 4",
+      "active_clients": 0
+    },
+    {
+      "name": "RW5-Clients",
+      "vlan": 59,
+      "vlan_enabled": true,
+      "subnet": "100.64.59.1/24",
+      "gateway": "100.64.59.1",
+      "dhcp_range": {
+        "start": "100.64.59.6",
+        "end": "100.64.59.254"
+      },
+      "domain": "clients.r5.rosenweg4303.ch",
+      "purpose": "corporate",
+      "description": "Clients Rosenweg 5",
+      "active_clients": 0
+    },
+    {
+      "name": "RW6-Clients",
+      "vlan": 69,
+      "vlan_enabled": true,
+      "subnet": "100.64.69.1/24",
+      "gateway": "100.64.69.1",
+      "dhcp_range": {
+        "start": "100.64.69.6",
+        "end": "100.64.69.254"
+      },
+      "domain": "clients.r6.rosenweg4303.ch",
+      "purpose": "corporate",
+      "description": "Clients Rosenweg 6",
+      "active_clients": 0
+    },
+    {
+      "name": "RW8-Clients",
+      "vlan": 89,
+      "vlan_enabled": true,
+      "subnet": "100.64.89.1/24",
+      "gateway": "100.64.89.1",
+      "dhcp_range": {
+        "start": "100.64.89.6",
+        "end": "100.64.89.254"
+      },
+      "domain": "clients.r8.rosenweg4303.ch",
+      "purpose": "corporate",
+      "description": "Clients Rosenweg 8",
+      "active_clients": 0
+    },
+    {
+      "name": "RW9-Technik",
+      "vlan": 90,
+      "vlan_enabled": true,
+      "subnet": "100.64.90.1/24",
+      "gateway": "100.64.90.1",
+      "dhcp_range": {
+        "start": "100.64.90.100",
+        "end": "100.64.90.254"
+      },
+      "dns": ["1.1.1.1", "8.8.8.8"],
+      "domain": "technik.rosenweg9.ch",
+      "purpose": "corporate",
+      "description": "Technik Rosenweg 9 (Smart Home, Shelly, Sensoren)",
+      "active_clients": 7
+    },
+    {
+      "name": "RW9-Dienste",
+      "vlan": 91,
+      "vlan_enabled": true,
+      "subnet": "100.64.91.1/24",
+      "gateway": "100.64.91.1",
+      "dhcp_range": {
+        "start": "100.64.91.100",
+        "end": "100.64.91.254"
+      },
+      "dns": ["1.1.1.1", "8.8.8.8"],
+      "domain": "dienste.rosenweg9.ch",
+      "purpose": "corporate",
+      "description": "Dienste Rosenweg 9",
+      "active_clients": 0
+    },
+    {
+      "name": "RW9-Kameras",
+      "vlan": 92,
+      "vlan_enabled": true,
+      "subnet": "100.64.92.1/24",
+      "gateway": "100.64.92.1",
+      "dhcp_range": {
+        "start": "100.64.92.100",
+        "end": "100.64.92.254"
+      },
+      "dns": ["1.1.1.1", "8.8.8.8"],
+      "domain": "kameras.rosenweg9.ch",
+      "purpose": "corporate",
+      "description": "Kamerasystem Rosenweg 9 (UniFi Protect)",
+      "active_clients": 1
+    },
+    {
+      "name": "RW9-Clients",
+      "vlan": 99,
+      "vlan_enabled": true,
+      "subnet": "100.64.99.1/24",
+      "gateway": "100.64.99.1",
+      "dhcp_range": {
+        "start": "100.64.99.200",
+        "end": "100.64.99.254"
+      },
+      "dns": ["100.64.0.1", "8.8.8.8"],
+      "domain": "clients.r9.rosenweg4303.ch",
+      "purpose": "corporate",
+      "description": "Clients Rosenweg 9",
+      "active_clients": 2
+    },
+    {
+      "name": "RW10-Clients",
+      "vlan": 109,
+      "vlan_enabled": true,
+      "subnet": "100.64.109.1/24",
+      "gateway": "100.64.109.1",
+      "dhcp_range": {
+        "start": "100.64.109.6",
+        "end": "100.64.109.254"
+      },
+      "domain": "clients.r10.rosenweg4303.ch",
+      "purpose": "corporate",
+      "description": "Clients Rosenweg 10",
+      "active_clients": 0
+    },
+    {
+      "name": "MUELLER-913",
+      "vlan": 913,
+      "vlan_enabled": true,
+      "purpose": "vlan-only",
+      "description": "VLAN-only Netzwerk (Müller 913)",
+      "active_clients": 6
+    },
+    {
+      "name": "MUELLER-914",
+      "vlan": 914,
+      "vlan_enabled": true,
+      "purpose": "vlan-only",
+      "description": "VLAN-only Netzwerk (Müller 914)",
+      "active_clients": 1
+    },
+    {
+      "name": "Parkplatz53",
+      "vlan": 915,
+      "vlan_enabled": true,
+      "purpose": "vlan-only",
+      "description": "VLAN-only Netzwerk (Parkplatz 53)",
+      "active_clients": 0
+    },
+    {
+      "name": "MÜLLER-Test",
+      "vlan": 916,
+      "vlan_enabled": true,
+      "purpose": "vlan-only",
+      "description": "VLAN-only Test-Netzwerk",
+      "active_clients": 0
+    }
+  ],
+  "wlan_networks": [
+    {
+      "ssid": "Rosenweg",
+      "security": "WPA2/WPA3",
+      "band": "2.4GHz + 5GHz",
+      "hidden": false,
+      "vlans": ["multiple"],
+      "description": "Haupt-WLAN für Bewohner"
+    },
+    {
+      "ssid": "Rosenweg-Guest",
+      "security": "WPA2",
+      "band": "2.4GHz + 5GHz",
+      "hidden": false,
+      "vlan": 8,
+      "description": "Gast-WLAN (client isolation aktiv)"
+    },
+    {
+      "ssid": "HausR9",
+      "security": "WPA2",
+      "band": "2.4GHz + 5GHz",
+      "hidden": false,
+      "vlan": 90,
+      "description": "Smart Home WLAN Rosenweg 9"
+    }
+  ],
+  "vpn": {
+    "type": "WireGuard",
+    "enabled": true,
+    "subnet": "192.168.9.1/24",
+    "port": 51820,
+    "interface": "wan",
+    "description": "Rosenweg Wireguard Client VPN"
+  },
+  "wan": [
+    {
+      "name": "Internet 1",
+      "type": "dhcp",
+      "dns": ["1.1.1.1", "8.8.8.8"],
+      "speed": {
+        "download": "10000 Mbps",
+        "upload": "10000 Mbps"
+      },
+      "load_balance_weight": 99,
+      "failover_priority": 1,
+      "status": "primary"
+    },
+    {
+      "name": "Internet 2",
+      "type": "dhcp",
+      "speed": {
+        "download": "50 Mbps",
+        "upload": "25 Mbps"
+      },
+      "load_balance_weight": 50,
+      "failover_priority": 2,
+      "status": "failover-only"
+    }
+  ]
+}

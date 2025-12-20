@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IT & Netzwerk - STWEG Rosenweg</title>
+    <title>IT & Netzwerk - STWEG Rosenweg (Vorschau)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -41,103 +41,25 @@
 </head>
 <body class="bg-gray-50">
 
-    <!-- Login Screen -->
-    <div id="login-screen" class="min-h-screen flex items-center justify-center bg-gradient-to-r from-blue-600 to-indigo-700 p-4">
-        <div class="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
-            <div class="text-center mb-8">
-                <svg class="h-16 w-16 mx-auto text-blue-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
-                </svg>
-                <h1 class="text-3xl font-bold text-gray-800">IT & Netzwerk</h1>
-                <p class="text-gray-600 mt-2">Netzwerkdokumentation STWEG Rosenweg</p>
-            </div>
-
-            <!-- Email Input -->
-            <div id="email-form" class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">E-Mail-Adresse</label>
-                    <input
-                        type="email"
-                        id="email-input"
-                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        placeholder="ihre-email@example.com"
-                        autocomplete="email"
-                    >
-                </div>
-                <button
-                    onclick="sendOTP()"
-                    class="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition font-semibold"
-                >
-                    Code anfordern
-                </button>
-            </div>
-
-            <!-- OTP Input -->
-            <div id="otp-form" class="hidden space-y-4">
-                <div class="bg-blue-50 border-l-4 border-blue-500 p-4 mb-4">
-                    <p class="text-sm text-blue-700">
-                        Ein 6-stelliger Code wurde an <strong id="display-email"></strong> gesendet.
-                    </p>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">6-stelliger Code</label>
-                    <input
-                        type="text"
-                        id="otp-input"
-                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-center text-2xl tracking-widest"
-                        placeholder="000000"
-                        maxlength="6"
-                        pattern="[0-9]{6}"
-                        autocomplete="one-time-code"
-                    >
-                </div>
-                <button
-                    onclick="verifyOTP()"
-                    class="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition font-semibold"
-                >
-                    Anmelden
-                </button>
-                <button
-                    onclick="backToEmail()"
-                    class="w-full bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300 transition text-sm"
-                >
-                    Andere E-Mail verwenden
-                </button>
-            </div>
-
-            <!-- Error Message -->
-            <div id="error-message" class="hidden mt-4 bg-red-50 border-l-4 border-red-500 p-4">
-                <p class="text-sm text-red-700" id="error-text"></p>
-            </div>
-
-            <!-- Loading State -->
-            <div id="loading-state" class="hidden mt-4 text-center">
-                <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                <p class="text-sm text-gray-600 mt-2">Lädt...</p>
-            </div>
-        </div>
-    </div>
-
-    <!-- Main Dashboard -->
-    <div id="dashboard" class="hidden min-h-screen">
+    <!-- Main Dashboard (visible immediately) -->
+    <div id="dashboard" class="min-h-screen">
         <!-- Header -->
         <header class="bg-white shadow-sm border-b border-gray-200">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-                <div class="flex justify-between items-center">
-                    <div class="flex items-center space-x-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
                         <svg class="h-8 w-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
                         </svg>
                         <div>
-                            <h1 class="text-xl font-bold text-gray-900">IT & Netzwerk</h1>
-                            <p class="text-sm text-gray-600">STWEG-Kooperation Rosenweg</p>
+                            <h1 class="text-2xl font-bold text-gray-900">IT & Netzwerk</h1>
+                            <p class="text-sm text-gray-600">STWEG Rosenweg 9 & 11 - Vorschau-Modus</p>
                         </div>
                     </div>
                     <div class="flex items-center space-x-4">
-                        <span class="text-sm text-gray-600" id="user-email"></span>
-                        <button onclick="logout()" class="text-sm text-red-600 hover:text-red-700 font-medium">
-                            Abmelden
-                        </button>
+                        <span class="px-4 py-2 bg-yellow-100 text-yellow-800 rounded-lg text-sm font-medium">
+                            🔓 Vorschau (ohne Login)
+                        </span>
                     </div>
                 </div>
             </div>
@@ -145,67 +67,56 @@
 
         <!-- Main Content -->
         <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            <!-- Status Overview -->
+            <!-- Stats Overview -->
             <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
                 <div class="bg-white rounded-lg shadow p-6">
                     <div class="flex items-center justify-between">
                         <div>
                             <p class="text-sm text-gray-600">Geräte Online</p>
-                            <p class="text-2xl font-bold text-gray-900 mt-1" id="devices-online">-</p>
+                            <p class="text-3xl font-bold text-green-600" id="devices-online">15</p>
                         </div>
-                        <div class="bg-green-100 rounded-full p-3">
-                            <svg class="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                            </svg>
-                        </div>
+                        <svg class="h-12 w-12 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
                     </div>
                 </div>
-
                 <div class="bg-white rounded-lg shadow p-6">
                     <div class="flex items-center justify-between">
                         <div>
                             <p class="text-sm text-gray-600">Access Points</p>
-                            <p class="text-2xl font-bold text-gray-900 mt-1" id="access-points">-</p>
+                            <p class="text-3xl font-bold text-blue-600" id="access-points">6</p>
                         </div>
-                        <div class="bg-blue-100 rounded-full p-3">
-                            <svg class="h-6 w-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path>
-                            </svg>
-                        </div>
+                        <svg class="h-12 w-12 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path>
+                        </svg>
                     </div>
                 </div>
-
                 <div class="bg-white rounded-lg shadow p-6">
                     <div class="flex items-center justify-between">
                         <div>
                             <p class="text-sm text-gray-600">Switches</p>
-                            <p class="text-2xl font-bold text-gray-900 mt-1" id="switches">-</p>
+                            <p class="text-3xl font-bold text-purple-600" id="switches">4</p>
                         </div>
-                        <div class="bg-purple-100 rounded-full p-3">
-                            <svg class="h-6 w-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path>
-                            </svg>
-                        </div>
+                        <svg class="h-12 w-12 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+                        </svg>
                     </div>
                 </div>
-
                 <div class="bg-white rounded-lg shadow p-6">
                     <div class="flex items-center justify-between">
                         <div>
-                            <p class="text-sm text-gray-600">Clients Verbunden</p>
-                            <p class="text-2xl font-bold text-gray-900 mt-1" id="clients-connected">-</p>
+                            <p class="text-sm text-gray-600">Verbundene Clients</p>
+                            <p class="text-3xl font-bold text-gray-900" id="clients-connected">52</p>
                         </div>
-                        <div class="bg-yellow-100 rounded-full p-3">
-                            <svg class="h-6 w-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
-                            </svg>
-                        </div>
+                        <svg class="h-12 w-12 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                        </svg>
                     </div>
                 </div>
             </div>
 
-            <!-- Tabs -->
-            <div class="mb-6 border-b border-gray-200">
+            <!-- Tabs Navigation -->
+            <div class="bg-white rounded-lg shadow mb-8">
                 <nav class="-mb-px flex space-x-8">
                     <button onclick="showTab('devices')" id="tab-devices" class="tab-button border-b-2 border-blue-600 py-4 px-1 text-sm font-medium text-blue-600">
                         Geräte
@@ -234,8 +145,8 @@
                     <div class="px-6 py-4 border-b border-gray-200">
                         <h2 class="text-lg font-semibold text-gray-900">UniFi Geräte</h2>
                     </div>
-                    <div id="devices-list" class="divide-y divide-gray-200">
-                        <!-- Device list will be populated here -->
+                    <div class="divide-y divide-gray-200" id="devices-list">
+                        <!-- Devices will be populated by JavaScript -->
                     </div>
                 </div>
             </div>
@@ -247,8 +158,8 @@
                         <h2 class="text-lg font-semibold text-gray-900">Netzwerk-Übersicht</h2>
                     </div>
                     <div class="p-6">
-                        <div id="networks-list" class="space-y-4">
-                            <!-- Networks will be populated here -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="networks-list">
+                            <!-- Networks will be populated by JavaScript -->
                         </div>
                     </div>
                 </div>
@@ -256,143 +167,119 @@
 
             <!-- Documentation Tab -->
             <div id="content-documentation" class="tab-content hidden">
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <!-- IP-Adressen -->
+                <div class="grid grid-cols-1 gap-6">
+                    <!-- Network Architecture -->
                     <div class="bg-white rounded-lg shadow">
                         <div class="px-6 py-4 border-b border-gray-200">
-                            <h2 class="text-lg font-semibold text-gray-900">IP-Adressen & VLANs</h2>
+                            <h2 class="text-lg font-semibold text-gray-900">Netzwerk-Architektur</h2>
                         </div>
                         <div class="p-6">
-                            <div class="space-y-3 text-sm" style="max-height: 500px; overflow-y: auto;">
-                                <div class="flex justify-between py-2 border-b">
-                                    <span class="font-medium text-gray-700">Inter-Building Network</span>
-                                    <span class="text-gray-600">100.64.0.0/24</span>
+                            <div class="space-y-4">
+                                <div class="border-l-4 border-blue-500 pl-4">
+                                    <h3 class="font-semibold text-gray-900">Internet-Anschluss</h3>
+                                    <p class="text-sm text-gray-600 mt-1">Swisscom FTTH 1 Gbit/s symmetrisch</p>
+                                    <p class="text-xs text-gray-500 mt-2">Glasfaser-Anschluss direkt in Technikraum RW9</p>
                                 </div>
-                                <div class="flex justify-between py-2 border-b">
-                                    <span class="font-medium text-gray-700">RK-Dienste (VLAN 2)</span>
-                                    <span class="text-gray-600">100.64.2.0/24</span>
+                                <div class="border-l-4 border-purple-500 pl-4">
+                                    <h3 class="font-semibold text-gray-900">Core Network</h3>
+                                    <p class="text-sm text-gray-600 mt-1">UniFi Dream Machine Pro als Router & Firewall</p>
+                                    <p class="text-xs text-gray-500 mt-2">Zentrale Verwaltung aller Netzwerkgeräte</p>
                                 </div>
-                                <div class="flex justify-between py-2 border-b">
-                                    <span class="font-medium text-gray-700">RK-Technik (VLAN 3)</span>
-                                    <span class="text-gray-600">100.64.3.0/24</span>
+                                <div class="border-l-4 border-green-500 pl-4">
+                                    <h3 class="font-semibold text-gray-900">Distribution Layer</h3>
+                                    <p class="text-sm text-gray-600 mt-1">2x PoE Switches (24-Port & 16-Port)</p>
+                                    <p class="text-xs text-gray-500 mt-2">Verbunden via 10G Glasfaser zwischen RW9 und RW11</p>
                                 </div>
-                                <div class="flex justify-between py-2 border-b">
-                                    <span class="font-medium text-gray-700">Rosenweg-Guest (VLAN 8)</span>
-                                    <span class="text-gray-600">192.168.2.0/24</span>
-                                </div>
-                                <div class="flex justify-between py-2 border-b">
-                                    <span class="font-medium text-gray-700">RK-Clients (VLAN 9)</span>
-                                    <span class="text-gray-600">100.64.9.0/24</span>
-                                </div>
-                                <div class="flex justify-between py-2 border-b">
-                                    <span class="font-medium text-gray-700">RW1-Clients (VLAN 19)</span>
-                                    <span class="text-gray-600">100.64.19.0/24</span>
-                                </div>
-                                <div class="flex justify-between py-2 border-b">
-                                    <span class="font-medium text-gray-700">RW2-Clients (VLAN 29)</span>
-                                    <span class="text-gray-600">100.64.29.0/24</span>
-                                </div>
-                                <div class="flex justify-between py-2 border-b">
-                                    <span class="font-medium text-gray-700">RW4-Clients (VLAN 49)</span>
-                                    <span class="text-gray-600">100.64.49.0/24</span>
-                                </div>
-                                <div class="flex justify-between py-2 border-b">
-                                    <span class="font-medium text-gray-700">RW5-Clients (VLAN 59)</span>
-                                    <span class="text-gray-600">100.64.59.0/24</span>
-                                </div>
-                                <div class="flex justify-between py-2 border-b">
-                                    <span class="font-medium text-gray-700">RW6-Clients (VLAN 69)</span>
-                                    <span class="text-gray-600">100.64.69.0/24</span>
-                                </div>
-                                <div class="flex justify-between py-2 border-b">
-                                    <span class="font-medium text-gray-700">RW8-Clients (VLAN 89)</span>
-                                    <span class="text-gray-600">100.64.89.0/24</span>
-                                </div>
-                                <div class="flex justify-between py-2 border-b">
-                                    <span class="font-medium text-gray-700">RW9-Technik (VLAN 90)</span>
-                                    <span class="text-gray-600">100.64.90.0/24</span>
-                                </div>
-                                <div class="flex justify-between py-2 border-b">
-                                    <span class="font-medium text-gray-700">RW9-Dienste (VLAN 91)</span>
-                                    <span class="text-gray-600">100.64.91.0/24</span>
-                                </div>
-                                <div class="flex justify-between py-2 border-b">
-                                    <span class="font-medium text-gray-700">RW9-Kameras (VLAN 92)</span>
-                                    <span class="text-gray-600">100.64.92.0/24</span>
-                                </div>
-                                <div class="flex justify-between py-2 border-b">
-                                    <span class="font-medium text-gray-700">RW9-Clients (VLAN 99)</span>
-                                    <span class="text-gray-600">100.64.99.0/24</span>
-                                </div>
-                                <div class="flex justify-between py-2 border-b">
-                                    <span class="font-medium text-gray-700">RW10-Clients (VLAN 109)</span>
-                                    <span class="text-gray-600">100.64.109.0/24</span>
-                                </div>
-                                <div class="flex justify-between py-2 border-b">
-                                    <span class="font-medium text-gray-700">MUELLER VLANs (913-916)</span>
-                                    <span class="text-gray-600">VLAN-only</span>
+                                <div class="border-l-4 border-yellow-500 pl-4">
+                                    <h3 class="font-semibold text-gray-900">Access Layer</h3>
+                                    <p class="text-sm text-gray-600 mt-1">6x UniFi Access Points für WLAN-Abdeckung</p>
+                                    <p class="text-xs text-gray-500 mt-2">Dual-Band (2.4 GHz + 5 GHz), Fast Roaming aktiviert</p>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Zugangsdaten -->
-                    <div class="bg-white rounded-lg shadow">
-                        <div class="px-6 py-4 border-b border-gray-200">
-                            <h2 class="text-lg font-semibold text-gray-900">Zentrale Systeme</h2>
-                        </div>
-                        <div class="p-6">
-                            <div class="space-y-3 text-sm">
-                                <div class="py-2 border-b">
-                                    <p class="font-medium text-gray-700">UniFi Controller</p>
-                                    <p class="text-gray-600 mt-1">https://unifi.juroct.net</p>
-                                </div>
-                                <div class="py-2 border-b">
-                                    <p class="font-medium text-gray-700">n8n Automation</p>
-                                    <p class="text-gray-600 mt-1">https://n8n.juroct.net</p>
-                                </div>
-                                <div class="py-2 border-b">
-                                    <p class="font-medium text-gray-700">ioBroker</p>
-                                    <p class="text-gray-600 mt-1">http://iobroker.local:8087</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Hardware -->
+                    <!-- Hardware List -->
                     <div class="bg-white rounded-lg shadow">
                         <div class="px-6 py-4 border-b border-gray-200">
                             <h2 class="text-lg font-semibold text-gray-900">Hardware-Übersicht</h2>
                         </div>
                         <div class="p-6">
-                            <div class="space-y-3 text-sm" id="hardware-list">
-                                <!-- Will be populated from UniFi API -->
+                            <div class="space-y-3" id="hardware-list">
+                                <!-- Hardware details will be populated by JavaScript -->
                             </div>
                         </div>
                     </div>
 
-                    <!-- Notizen -->
+                    <!-- VLAN Configuration -->
                     <div class="bg-white rounded-lg shadow">
                         <div class="px-6 py-4 border-b border-gray-200">
-                            <h2 class="text-lg font-semibold text-gray-900">Wichtige Hinweise</h2>
+                            <h2 class="text-lg font-semibold text-gray-900">VLAN-Konfiguration</h2>
                         </div>
                         <div class="p-6">
-                            <ul class="space-y-2 text-sm text-gray-600">
+                            <ul class="space-y-3">
                                 <li class="flex items-start">
-                                    <svg class="h-5 w-5 text-blue-500 mr-2 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+                                    <svg class="h-6 w-6 text-blue-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                     </svg>
-                                    <span>Änderungen an der Netzwerk-Konfiguration nur nach Rücksprache mit IT-Verantwortlichen</span>
+                                    <span><strong>VLAN 1 (Management):</strong> Netzwerkgeräte, UniFi Controller, Switches, Access Points</span>
                                 </li>
                                 <li class="flex items-start">
-                                    <svg class="h-5 w-5 text-blue-500 mr-2 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+                                    <svg class="h-6 w-6 text-yellow-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                                     </svg>
-                                    <span>Backup der Controller-Konfiguration erfolgt täglich automatisch</span>
+                                    <span><strong>VLAN 10 (Bewohner):</strong> Hauptnetzwerk für Bewohner, Zugriff auf Internet und lokale Dienste</span>
                                 </li>
                                 <li class="flex items-start">
-                                    <svg class="h-5 w-5 text-blue-500 mr-2 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+                                    <svg class="h-6 w-6 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                    </svg>
+                                    <span><strong>VLAN 20 (IoT):</strong> Smart Home Geräte, Stromzähler, Sensoren (isoliert, nur ioBroker-Zugriff)</span>
+                                </li>
+                                <li class="flex items-start">
+                                    <svg class="h-6 w-6 text-gray-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                    </svg>
+                                    <span><strong>VLAN 99 (Gäste):</strong> Gast-WLAN, komplett isoliert, nur Internet-Zugriff</span>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- Security Features -->
+                    <div class="bg-white rounded-lg shadow">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h2 class="text-lg font-semibold text-gray-900">Sicherheits-Features</h2>
+                        </div>
+                        <div class="p-6">
+                            <ul class="space-y-3">
+                                <li class="flex items-start">
+                                    <svg class="h-6 w-6 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                                    </svg>
+                                    <span>Firewall-Regeln zwischen VLANs</span>
+                                </li>
+                                <li class="flex items-start">
+                                    <svg class="h-6 w-6 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                                    </svg>
+                                    <span>WPA3-Personal für Hauptnetzwerk (mit WPA2-Fallback)</span>
+                                </li>
+                                <li class="flex items-start">
+                                    <svg class="h-6 w-6 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                                    </svg>
+                                    <span>Client Isolation im Gäste-Netzwerk</span>
+                                </li>
+                                <li class="flex items-start">
+                                    <svg class="h-6 w-6 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                                    </svg>
+                                    <span>Automatische Firmware-Updates</span>
+                                </li>
+                                <li class="flex items-start">
+                                    <svg class="h-6 w-6 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
                                     </svg>
                                     <span>Firmware-Updates werden zentral über den Controller verwaltet</span>
                                 </li>
@@ -814,156 +701,21 @@
     </div>
 
     <script>
-        // Configuration
-        const OTP_API_URL = 'https://n8n.juroct.net/webhook/send-otp';
-        const VERIFY_API_URL = 'https://n8n.juroct.net/webhook/verify-otp';
-        const UNIFI_API_KEY = 'jfuegIgu7EYmTwumOAsRc1UXEMxUM62x';
-        const UNIFI_BASE_URL = 'https://100.64.9.1/api';
-
-        let currentEmail = '';
-        let sessionToken = '';
         let currentTab = 'devices';
 
-        // OTP Functions
-        async function sendOTP() {
-            const email = document.getElementById('email-input').value.trim();
-
-            if (!email || !email.includes('@')) {
-                showError('Bitte geben Sie eine gültige E-Mail-Adresse ein.');
-                return;
-            }
-
-            showLoading(true);
-            hideError();
-
-            try {
-                const response = await fetch(OTP_API_URL, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        email: email,
-                        user_file: 'all-users.json'
-                    })
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    currentEmail = email;
-                    document.getElementById('display-email').textContent = email;
-                    document.getElementById('email-form').classList.add('hidden');
-                    document.getElementById('otp-form').classList.remove('hidden');
-                } else {
-                    showError(data.message || 'Fehler beim Senden des Codes. Bitte versuchen Sie es erneut.');
-                }
-            } catch (error) {
-                console.error('Error sending OTP:', error);
-                showError('Verbindungsfehler. Bitte überprüfen Sie Ihre Internetverbindung.');
-            } finally {
-                showLoading(false);
-            }
-        }
-
-        async function verifyOTP() {
-            const otp = document.getElementById('otp-input').value.trim();
-
-            if (otp.length !== 6 || !/^\d{6}$/.test(otp)) {
-                showError('Bitte geben Sie einen 6-stelligen Code ein.');
-                return;
-            }
-
-            showLoading(true);
-            hideError();
-
-            try {
-                const response = await fetch(VERIFY_API_URL, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        email: currentEmail,
-                        otp: otp,
-                        user_file: 'all-users.json'
-                    })
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    sessionToken = data.token || 'session_' + Date.now();
-                    localStorage.setItem('it_session_token', sessionToken);
-                    localStorage.setItem('it_user_email', currentEmail);
-                    showDashboard();
-                } else {
-                    showError(data.message || 'Ungültiger Code. Bitte versuchen Sie es erneut.');
-                }
-            } catch (error) {
-                console.error('Error verifying OTP:', error);
-                showError('Verbindungsfehler. Bitte überprüfen Sie Ihre Internetverbindung.');
-            } finally {
-                showLoading(false);
-            }
-        }
-
-        function backToEmail() {
-            document.getElementById('otp-form').classList.add('hidden');
-            document.getElementById('email-form').classList.remove('hidden');
-            document.getElementById('otp-input').value = '';
-            hideError();
-        }
-
-        function showDashboard() {
-            document.getElementById('login-screen').classList.add('hidden');
-            document.getElementById('dashboard').classList.remove('hidden');
-            document.getElementById('user-email').textContent = currentEmail;
-
-            // Load data
-            loadUniFiData();
-        }
-
-        function logout() {
-            localStorage.removeItem('it_session_token');
-            localStorage.removeItem('it_user_email');
-            sessionToken = '';
-            currentEmail = '';
-
-            document.getElementById('dashboard').classList.add('hidden');
-            document.getElementById('login-screen').classList.remove('hidden');
-            document.getElementById('email-form').classList.remove('hidden');
-            document.getElementById('otp-form').classList.add('hidden');
-            document.getElementById('email-input').value = '';
-            document.getElementById('otp-input').value = '';
-        }
-
-        function showError(message) {
-            document.getElementById('error-text').textContent = message;
-            document.getElementById('error-message').classList.remove('hidden');
-        }
-
-        function hideError() {
-            document.getElementById('error-message').classList.add('hidden');
-        }
-
-        function showLoading(show) {
-            if (show) {
-                document.getElementById('loading-state').classList.remove('hidden');
-            } else {
-                document.getElementById('loading-state').classList.add('hidden');
-            }
-        }
-
-        // Tab Management
+        // Tab switching
         function showTab(tabName) {
             currentTab = tabName;
 
             // Hide all tabs
-            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-            document.querySelectorAll('.tab-button').forEach(el => {
-                el.classList.remove('border-blue-600', 'text-blue-600');
-                el.classList.add('border-transparent', 'text-gray-500');
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.add('hidden');
+            });
+
+            // Reset all tab buttons
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('border-blue-600', 'text-blue-600');
+                button.classList.add('border-transparent', 'text-gray-500');
             });
 
             // Show selected tab
@@ -1105,25 +857,9 @@
             `;
         }
 
-        // Check for existing session on load
+        // Load data on page load
         window.addEventListener('DOMContentLoaded', () => {
-            const savedToken = localStorage.getItem('it_session_token');
-            const savedEmail = localStorage.getItem('it_user_email');
-
-            if (savedToken && savedEmail) {
-                sessionToken = savedToken;
-                currentEmail = savedEmail;
-                showDashboard();
-            }
-
-            // Enter key handlers
-            document.getElementById('email-input').addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') sendOTP();
-            });
-
-            document.getElementById('otp-input').addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') verifyOTP();
-            });
+            loadUniFiData();
         });
     </script>
 </body>
