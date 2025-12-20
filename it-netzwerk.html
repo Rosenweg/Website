@@ -263,22 +263,74 @@
                             <h2 class="text-lg font-semibold text-gray-900">IP-Adressen & VLANs</h2>
                         </div>
                         <div class="p-6">
-                            <div class="space-y-3 text-sm">
+                            <div class="space-y-3 text-sm" style="max-height: 500px; overflow-y: auto;">
                                 <div class="flex justify-between py-2 border-b">
-                                    <span class="font-medium text-gray-700">Management VLAN</span>
-                                    <span class="text-gray-600">10.0.1.0/24</span>
+                                    <span class="font-medium text-gray-700">Inter-Building Network</span>
+                                    <span class="text-gray-600">100.64.0.0/24</span>
                                 </div>
                                 <div class="flex justify-between py-2 border-b">
-                                    <span class="font-medium text-gray-700">Bewohner VLAN</span>
-                                    <span class="text-gray-600">10.0.10.0/24</span>
+                                    <span class="font-medium text-gray-700">RK-Dienste (VLAN 2)</span>
+                                    <span class="text-gray-600">100.64.2.0/24</span>
                                 </div>
                                 <div class="flex justify-between py-2 border-b">
-                                    <span class="font-medium text-gray-700">IoT VLAN</span>
-                                    <span class="text-gray-600">10.0.20.0/24</span>
+                                    <span class="font-medium text-gray-700">RK-Technik (VLAN 3)</span>
+                                    <span class="text-gray-600">100.64.3.0/24</span>
                                 </div>
                                 <div class="flex justify-between py-2 border-b">
-                                    <span class="font-medium text-gray-700">Gäste VLAN</span>
-                                    <span class="text-gray-600">10.0.99.0/24</span>
+                                    <span class="font-medium text-gray-700">Rosenweg-Guest (VLAN 8)</span>
+                                    <span class="text-gray-600">192.168.2.0/24</span>
+                                </div>
+                                <div class="flex justify-between py-2 border-b">
+                                    <span class="font-medium text-gray-700">RK-Clients (VLAN 9)</span>
+                                    <span class="text-gray-600">100.64.9.0/24</span>
+                                </div>
+                                <div class="flex justify-between py-2 border-b">
+                                    <span class="font-medium text-gray-700">RW1-Clients (VLAN 19)</span>
+                                    <span class="text-gray-600">100.64.19.0/24</span>
+                                </div>
+                                <div class="flex justify-between py-2 border-b">
+                                    <span class="font-medium text-gray-700">RW2-Clients (VLAN 29)</span>
+                                    <span class="text-gray-600">100.64.29.0/24</span>
+                                </div>
+                                <div class="flex justify-between py-2 border-b">
+                                    <span class="font-medium text-gray-700">RW4-Clients (VLAN 49)</span>
+                                    <span class="text-gray-600">100.64.49.0/24</span>
+                                </div>
+                                <div class="flex justify-between py-2 border-b">
+                                    <span class="font-medium text-gray-700">RW5-Clients (VLAN 59)</span>
+                                    <span class="text-gray-600">100.64.59.0/24</span>
+                                </div>
+                                <div class="flex justify-between py-2 border-b">
+                                    <span class="font-medium text-gray-700">RW6-Clients (VLAN 69)</span>
+                                    <span class="text-gray-600">100.64.69.0/24</span>
+                                </div>
+                                <div class="flex justify-between py-2 border-b">
+                                    <span class="font-medium text-gray-700">RW8-Clients (VLAN 89)</span>
+                                    <span class="text-gray-600">100.64.89.0/24</span>
+                                </div>
+                                <div class="flex justify-between py-2 border-b">
+                                    <span class="font-medium text-gray-700">RW9-Technik (VLAN 90)</span>
+                                    <span class="text-gray-600">100.64.90.0/24</span>
+                                </div>
+                                <div class="flex justify-between py-2 border-b">
+                                    <span class="font-medium text-gray-700">RW9-Dienste (VLAN 91)</span>
+                                    <span class="text-gray-600">100.64.91.0/24</span>
+                                </div>
+                                <div class="flex justify-between py-2 border-b">
+                                    <span class="font-medium text-gray-700">RW9-Kameras (VLAN 92)</span>
+                                    <span class="text-gray-600">100.64.92.0/24</span>
+                                </div>
+                                <div class="flex justify-between py-2 border-b">
+                                    <span class="font-medium text-gray-700">RW9-Clients (VLAN 99)</span>
+                                    <span class="text-gray-600">100.64.99.0/24</span>
+                                </div>
+                                <div class="flex justify-between py-2 border-b">
+                                    <span class="font-medium text-gray-700">RW10-Clients (VLAN 109)</span>
+                                    <span class="text-gray-600">100.64.109.0/24</span>
+                                </div>
+                                <div class="flex justify-between py-2 border-b">
+                                    <span class="font-medium text-gray-700">MUELLER VLANs (913-916)</span>
+                                    <span class="text-gray-600">VLAN-only</span>
                                 </div>
                             </div>
                         </div>
@@ -927,23 +979,27 @@
         }
 
         function showStaticData() {
-            // Static statistics
-            document.getElementById('devices-online').textContent = '15';
-            document.getElementById('access-points').textContent = '6';
-            document.getElementById('switches').textContent = '4';
-            document.getElementById('clients-connected').textContent = '52';
+            // Real statistics from UniFi Network
+            document.getElementById('devices-online').textContent = '17';
+            document.getElementById('access-points').textContent = '8';
+            document.getElementById('switches').textContent = '5';
+            document.getElementById('clients-connected').textContent = '18';
 
-            // Static device list - STWEG Rosenweg Network
+            // Real device list from UniFi Network
             const devices = [
                 { name: 'UDM-Pro', type: 'Dream Machine Pro', ip: '100.64.9.1', status: 'online', clients: 0, location: 'Technikraum RW9' },
-                { name: 'USW-24-PoE', type: 'Switch 24 Port PoE', ip: '100.64.9.10', status: 'online', clients: 22, location: 'Technikraum RW9' },
-                { name: 'USW-16-PoE', type: 'Switch 16 Port PoE', ip: '100.64.9.11', status: 'online', clients: 14, location: 'Technikraum RW11' },
-                { name: 'UAP-AC-Pro-EG', type: 'Access Point', ip: '100.64.9.20', status: 'online', clients: 8, location: 'Erdgeschoss RW9' },
-                { name: 'UAP-AC-Pro-1OG', type: 'Access Point', ip: '100.64.9.21', status: 'online', clients: 12, location: '1. OG RW9' },
-                { name: 'UAP-AC-Pro-2OG', type: 'Access Point', ip: '100.64.9.22', status: 'online', clients: 9, location: '2. OG RW9' },
-                { name: 'UAP-AC-Lite-TG', type: 'Access Point', ip: '100.64.9.23', status: 'online', clients: 5, location: 'Tiefgarage' },
-                { name: 'UAP-FlexHD-RW11', type: 'Access Point', ip: '100.64.9.24', status: 'online', clients: 7, location: 'RW11 Gemeinschaft' },
-                { name: 'USW-Flex-Mini-1', type: 'Switch Flex Mini', ip: '100.64.9.30', status: 'online', clients: 3, location: 'Waschküche' }
+                { name: 'Poe-Switch1 Kooperation R9 T+T', type: 'USW-24-PoE', ip: '100.64.0.40', status: 'online', clients: 8, location: 'Technikraum RW9' },
+                { name: 'Poe-Switch2 R9 Dach', type: 'USW Flex', ip: '100.64.0.100', status: 'online', clients: 3, location: 'R9 Dach' },
+                { name: 'PoE-Switch1 R9 Heizungsraum', type: 'USW Flex', ip: '100.64.90.1', status: 'online', clients: 5, location: 'R9 Heizungsraum' },
+                { name: 'Switch1 Kooperation R9 EG', type: 'USW-24', ip: '100.64.0.41', status: 'online', clients: 12, location: 'Kooperation R9 EG' },
+                { name: 'WLAN-AP R9 Dach', type: 'U7MSH', ip: '100.64.0.93', status: 'online', clients: 1, location: 'R9 Dach' },
+                { name: 'WLAN-AP Kooperation R9 Hauptverteilung', type: 'U7UKU', ip: '100.64.0.31', status: 'online', clients: 0, location: 'R9 Hauptverteilung' },
+                { name: 'WLAN-AP R9 Heizungsraum', type: 'U6-Lite', ip: '100.64.90.2', status: 'online', clients: 4, location: 'R9 Heizungsraum' },
+                { name: 'WLAN-AP Kooperation R9 2OG', type: 'U6-Lite', ip: '100.64.0.32', status: 'online', clients: 0, location: 'Kooperation R9 2OG' },
+                { name: 'WLAN-AP Kooperation R9 1OG', type: 'U6-Lite', ip: '100.64.0.33', status: 'online', clients: 0, location: 'Kooperation R9 1OG' },
+                { name: 'WLAN-AP Kooperation R9 EG', type: 'U6-Lite', ip: '100.64.0.34', status: 'online', clients: 3, location: 'Kooperation R9 EG' },
+                { name: 'WLAN-AP Kooperation R9 UG', type: 'U6-Lite', ip: '100.64.0.35', status: 'online', clients: 0, location: 'Kooperation R9 UG' },
+                { name: 'WLAN AP Kooperation R9 Keller', type: 'U6-Lite', ip: '100.64.0.36', status: 'online', clients: 0, location: 'Kooperation R9 Keller' }
             ];
 
             const devicesList = document.getElementById('devices-list');
@@ -972,12 +1028,28 @@
                 </div>
             `).join('');
 
-            // Static networks - STWEG Rosenweg
+            // Real networks from UniFi (31 VLANs total)
             const networks = [
-                { name: 'Management', vlan: '1', subnet: '100.64.9.0/24', clients: 15, description: 'Netzwerkgeräte & Controller' },
-                { name: 'Bewohner WLAN', vlan: '10', subnet: '100.64.10.0/24', clients: 32, description: 'Hauptnetzwerk für Bewohner' },
-                { name: 'IoT & Smart Home', vlan: '20', subnet: '100.64.20.0/24', clients: 18, description: 'Zähler, Sensoren, Automation' },
-                { name: 'Gäste WLAN', vlan: '99', subnet: '100.64.99.0/24', clients: 7, description: 'Isoliertes Gästenetzwerk' }
+                { name: 'Inter-Building Network', vlan: '-', subnet: '100.64.0.1/24', clients: 0, description: 'Kooperation Hauptnetzwerk' },
+                { name: 'RK-Dienste', vlan: '2', subnet: '100.64.2.1/24', clients: 0, description: 'Dienste Rosenweg Kooperation' },
+                { name: 'RK-Technik', vlan: '3', subnet: '100.64.3.1/24', clients: 0, description: 'Technik Rosenweg Kooperation' },
+                { name: 'Rosenweg-Guest', vlan: '8', subnet: '192.168.2.1/24', clients: 0, description: 'Gast-WLAN' },
+                { name: 'RK-Clients', vlan: '9', subnet: '100.64.9.1/24', clients: 0, description: 'Clients Rosenweg Kooperation' },
+                { name: 'RW1-Clients', vlan: '19', subnet: '100.64.19.1/24', clients: 0, description: 'Clients Rosenweg 1' },
+                { name: 'RW2-Clients', vlan: '29', subnet: '100.64.29.1/24', clients: 0, description: 'Clients Rosenweg 2' },
+                { name: 'RW4-Clients', vlan: '49', subnet: '100.64.49.1/24', clients: 0, description: 'Clients Rosenweg 4' },
+                { name: 'RW5-Clients', vlan: '59', subnet: '100.64.59.1/24', clients: 0, description: 'Clients Rosenweg 5' },
+                { name: 'RW6-Clients', vlan: '69', subnet: '100.64.69.1/24', clients: 0, description: 'Clients Rosenweg 6' },
+                { name: 'RW8-Clients', vlan: '89', subnet: '100.64.89.1/24', clients: 0, description: 'Clients Rosenweg 8' },
+                { name: 'RW9-Technik', vlan: '90', subnet: '100.64.90.1/24', clients: 7, description: 'Technik Rosenweg 9' },
+                { name: 'RW9-Dienste', vlan: '91', subnet: '100.64.91.1/24', clients: 0, description: 'Dienste Rosenweg 9' },
+                { name: 'RW9-Kameras', vlan: '92', subnet: '100.64.92.1/24', clients: 1, description: 'Kamerasystem Rosenweg 9' },
+                { name: 'RW9-Clients', vlan: '99', subnet: '100.64.99.1/24', clients: 2, description: 'Clients Rosenweg 9' },
+                { name: 'RW10-Clients', vlan: '109', subnet: '100.64.109.1/24', clients: 0, description: 'Clients Rosenweg 10' },
+                { name: 'MUELLER-913', vlan: '913', subnet: '-', clients: 6, description: 'VLAN-only (Müller 913)' },
+                { name: 'MUELLER-914', vlan: '914', subnet: '-', clients: 1, description: 'VLAN-only (Müller 914)' },
+                { name: 'Parkplatz53', vlan: '915', subnet: '-', clients: 0, description: 'VLAN-only' },
+                { name: 'MÜLLER-Test', vlan: '916', subnet: '-', clients: 0, description: 'VLAN-only (Test)' }
             ];
 
             const networksList = document.getElementById('networks-list');
