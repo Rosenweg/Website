@@ -222,6 +222,9 @@
                     <button onclick="showTab('wifi')" id="tab-wifi" class="tab-button border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">
                         WLAN-Konfiguration
                     </button>
+                    <button onclick="showTab('topology')" id="tab-topology" class="tab-button border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">
+                        Netzwerk-Topologie
+                    </button>
                     <button onclick="showTab('troubleshooting')" id="tab-troubleshooting" class="tab-button border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">
                         Troubleshooting
                     </button>
@@ -504,26 +507,28 @@
                         </div>
                     </div>
 
-                    <!-- Fiber Connections -->
+                    <!-- WAN Connections -->
                     <div class="bg-white rounded-lg shadow">
                         <div class="px-6 py-4 border-b border-gray-200">
-                            <h2 class="text-lg font-semibold text-gray-900">Glasfaser-Verbindungen</h2>
+                            <h2 class="text-lg font-semibold text-gray-900">Internet-Uplinks</h2>
                         </div>
                         <div class="p-6">
                             <div class="space-y-4">
-                                <div class="border-l-4 border-purple-500 pl-4 py-2">
-                                    <h3 class="font-semibold text-gray-900">Internet-Uplink (Swisscom)</h3>
-                                    <p class="text-sm text-gray-600 mt-1">Typ: FTTH (Fiber to the Home)</p>
-                                    <p class="text-sm text-gray-600">Geschwindigkeit: 1 Gbit/s symmetrisch</p>
-                                    <p class="text-sm text-gray-600">Eingang: Technikraum RW9, OM4 Multimode</p>
-                                    <p class="text-sm text-gray-600">Anschluss: UDM-Pro WAN Port (SFP+)</p>
+                                <div class="border-l-4 border-green-500 pl-4 py-2">
+                                    <h3 class="font-semibold text-gray-900">Internet 1 (Primary)</h3>
+                                    <p class="text-sm text-gray-600 mt-1">Geschwindigkeit: 10 Gbit/s symmetrisch</p>
+                                    <p class="text-sm text-gray-600">Load Balance Weight: 99</p>
+                                    <p class="text-sm text-gray-600">Failover Priority: 1 (Primary)</p>
+                                    <p class="text-sm text-gray-600">DNS: 1.1.1.1, 8.8.8.8</p>
+                                    <p class="text-sm text-gray-600">SmartQueue: 10 Gbit/s ↓↑</p>
                                 </div>
-                                <div class="border-l-4 border-blue-500 pl-4 py-2">
-                                    <h3 class="font-semibold text-gray-900">RW9 ↔ RW11 Backbone</h3>
-                                    <p class="text-sm text-gray-600 mt-1">Typ: OM3 Multimode, LC-LC Duplex</p>
-                                    <p class="text-sm text-gray-600">Geschwindigkeit: 10 Gbit/s</p>
-                                    <p class="text-sm text-gray-600">Länge: ca. 45m (Unterirdisch)</p>
-                                    <p class="text-sm text-gray-600">Verwendung: Switch Uplink (USW-24-PoE ↔ USW-16-PoE)</p>
+                                <div class="border-l-4 border-yellow-500 pl-4 py-2">
+                                    <h3 class="font-semibold text-gray-900">Internet 2 (Failover)</h3>
+                                    <p class="text-sm text-gray-600 mt-1">Geschwindigkeit: 50 Mbit/s ↓ / 25 Mbit/s ↑</p>
+                                    <p class="text-sm text-gray-600">Load Balance: Failover-only</p>
+                                    <p class="text-sm text-gray-600">Failover Priority: 2</p>
+                                    <p class="text-sm text-gray-600">SmartQueue: 50 Mbit/s ↓ / 25 Mbit/s ↑</p>
+                                    <p class="text-xs text-gray-500 mt-2">Wird nur aktiviert wenn Internet 1 ausfällt</p>
                                 </div>
                             </div>
                         </div>
@@ -710,6 +715,366 @@
                                     <h3 class="font-semibold text-gray-900 mb-2">UAPSD</h3>
                                     <p class="text-sm text-gray-600">Power Save für mobile Geräte aktiviert</p>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Network Topology Tab -->
+            <div id="content-topology" class="tab-content hidden">
+                <div class="grid grid-cols-1 gap-6">
+                    <!-- Network Topology Diagram -->
+                    <div class="bg-white rounded-lg shadow">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h2 class="text-lg font-semibold text-gray-900">Netzwerk-Topologie Hardware</h2>
+                            <p class="text-sm text-gray-600 mt-1">Übersicht der Netzwerk-Infrastruktur (ohne Clients)</p>
+                        </div>
+                        <div class="p-6">
+                            <div class="bg-gray-50 rounded-lg p-6 overflow-x-auto">
+                                <svg viewBox="0 0 1200 900" class="w-full" style="max-width: 1200px; margin: 0 auto;">
+                                    <defs>
+                                        <!-- Define gradients and filters -->
+                                        <linearGradient id="gatewayGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                                            <stop offset="0%" style="stop-color:#3B82F6;stop-opacity:1" />
+                                            <stop offset="100%" style="stop-color:#1D4ED8;stop-opacity:1" />
+                                        </linearGradient>
+                                        <linearGradient id="switchGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                                            <stop offset="0%" style="stop-color:#10B981;stop-opacity:1" />
+                                            <stop offset="100%" style="stop-color:#059669;stop-opacity:1" />
+                                        </linearGradient>
+                                        <linearGradient id="apGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                                            <stop offset="0%" style="stop-color:#8B5CF6;stop-opacity:1" />
+                                            <stop offset="100%" style="stop-color:#6D28D9;stop-opacity:1" />
+                                        </linearGradient>
+                                        <filter id="shadow">
+                                            <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.3"/>
+                                        </filter>
+                                    </defs>
+
+                                    <!-- Legend -->
+                                    <g id="legend">
+                                        <rect x="20" y="20" width="200" height="100" fill="white" stroke="#E5E7EB" stroke-width="2" rx="5"/>
+                                        <text x="35" y="45" font-size="14" font-weight="bold" fill="#111827">Legende</text>
+                                        <rect x="35" y="55" width="20" height="15" fill="url(#gatewayGradient)" rx="2"/>
+                                        <text x="60" y="67" font-size="12" fill="#4B5563">Gateway/Router</text>
+                                        <rect x="35" y="75" width="20" height="15" fill="url(#switchGradient)" rx="2"/>
+                                        <text x="60" y="87" font-size="12" fill="#4B5563">Switch</text>
+                                        <rect x="35" y="95" width="20" height="15" fill="url(#apGradient)" rx="2"/>
+                                        <text x="60" y="107" font-size="12" fill="#4B5563">Access Point</text>
+                                    </g>
+
+                                    <!-- Internet Cloud -->
+                                    <g id="internet">
+                                        <ellipse cx="600" cy="60" rx="80" ry="35" fill="#60A5FA" opacity="0.3" stroke="#3B82F6" stroke-width="2"/>
+                                        <text x="600" y="60" text-anchor="middle" font-size="14" font-weight="bold" fill="#1E40AF">Internet</text>
+                                        <text x="600" y="78" text-anchor="middle" font-size="10" fill="#1E40AF">10 Gbit/s + 50 Mbit/s</text>
+                                    </g>
+
+                                    <!-- Line from Internet to UDM-Pro -->
+                                    <line x1="600" y1="95" x2="600" y2="150" stroke="#3B82F6" stroke-width="3"/>
+
+                                    <!-- UDM-Pro (Gateway) -->
+                                    <g id="udm-pro" filter="url(#shadow)">
+                                        <rect x="520" y="150" width="160" height="80" fill="url(#gatewayGradient)" rx="8"/>
+                                        <text x="600" y="175" text-anchor="middle" font-size="14" font-weight="bold" fill="white">UDM-Pro</text>
+                                        <text x="600" y="195" text-anchor="middle" font-size="11" fill="white">Gateway / Controller</text>
+                                        <text x="600" y="210" text-anchor="middle" font-size="10" fill="#DBEAFE">100.64.9.1</text>
+                                        <text x="600" y="223" text-anchor="middle" font-size="9" fill="#DBEAFE">Technikraum RW9</text>
+                                    </g>
+
+                                    <!-- Lines from UDM-Pro to Switches -->
+                                    <line x1="600" y1="230" x2="250" y2="320" stroke="#10B981" stroke-width="2.5" stroke-dasharray="5,3"/>
+                                    <line x1="600" y1="230" x2="500" y2="320" stroke="#10B981" stroke-width="2.5"/>
+                                    <line x1="600" y1="230" x2="700" y2="320" stroke="#10B981" stroke-width="2.5"/>
+                                    <line x1="600" y1="230" x2="850" y2="320" stroke="#10B981" stroke-width="2.5" stroke-dasharray="5,3"/>
+                                    <line x1="600" y1="230" x2="950" y2="320" stroke="#10B981" stroke-width="2.5" stroke-dasharray="5,3"/>
+
+                                    <!-- Switch 1: USW-Flex (R9 Dach) -->
+                                    <g id="switch-flex-dach" filter="url(#shadow)">
+                                        <rect x="170" y="320" width="160" height="65" fill="url(#switchGradient)" rx="6"/>
+                                        <text x="250" y="343" text-anchor="middle" font-size="12" font-weight="bold" fill="white">USW-Flex</text>
+                                        <text x="250" y="360" text-anchor="middle" font-size="10" fill="white">100.64.0.100</text>
+                                        <text x="250" y="375" text-anchor="middle" font-size="9" fill="#D1FAE5">R9 Dach</text>
+                                    </g>
+
+                                    <!-- Switch 2: USW-24-PoE (Hauptverteiler) -->
+                                    <g id="switch-24-poe" filter="url(#shadow)">
+                                        <rect x="420" y="320" width="160" height="65" fill="url(#switchGradient)" rx="6"/>
+                                        <text x="500" y="343" text-anchor="middle" font-size="12" font-weight="bold" fill="white">USW-24-PoE</text>
+                                        <text x="500" y="360" text-anchor="middle" font-size="10" fill="white">100.64.0.40</text>
+                                        <text x="500" y="375" text-anchor="middle" font-size="9" fill="#D1FAE5">Technikraum RW9</text>
+                                    </g>
+
+                                    <!-- Switch 3: USW-24 (EG) -->
+                                    <g id="switch-24" filter="url(#shadow)">
+                                        <rect x="620" y="320" width="160" height="65" fill="url(#switchGradient)" rx="6"/>
+                                        <text x="700" y="343" text-anchor="middle" font-size="12" font-weight="bold" fill="white">USW-24</text>
+                                        <text x="700" y="360" text-anchor="middle" font-size="10" fill="white">100.64.0.41</text>
+                                        <text x="700" y="375" text-anchor="middle" font-size="9" fill="#D1FAE5">Kooperation R9 EG</text>
+                                    </g>
+
+                                    <!-- Switch 4: USW-Flex (Heizungsraum) -->
+                                    <g id="switch-flex-heizung" filter="url(#shadow)">
+                                        <rect x="770" y="320" width="160" height="65" fill="url(#switchGradient)" rx="6"/>
+                                        <text x="850" y="343" text-anchor="middle" font-size="12" font-weight="bold" fill="white">USW-Flex</text>
+                                        <text x="850" y="360" text-anchor="middle" font-size="10" fill="white">100.64.90.1</text>
+                                        <text x="850" y="375" text-anchor="middle" font-size="9" fill="#D1FAE5">R9 Heizungsraum</text>
+                                    </g>
+
+                                    <!-- Switch 5: USW-Flex (placeholder for additional) -->
+                                    <g id="switch-flex-3" filter="url(#shadow)">
+                                        <rect x="920" y="320" width="160" height="65" fill="url(#switchGradient)" rx="6"/>
+                                        <text x="1000" y="343" text-anchor="middle" font-size="12" font-weight="bold" fill="white">USW-Flex</text>
+                                        <text x="1000" y="360" text-anchor="middle" font-size="10" fill="white">N/A</text>
+                                        <text x="1000" y="375" text-anchor="middle" font-size="9" fill="#D1FAE5">Weitere Standorte</text>
+                                    </g>
+
+                                    <!-- Access Points Layer -->
+                                    <!-- Lines from switches to APs -->
+                                    <line x1="250" y1="385" x2="250" y2="470" stroke="#8B5CF6" stroke-width="2"/>
+                                    <line x1="500" y1="385" x2="150" y2="470" stroke="#8B5CF6" stroke-width="2"/>
+                                    <line x1="500" y1="385" x2="350" y2="630" stroke="#8B5CF6" stroke-width="2"/>
+                                    <line x1="700" y1="385" x2="550" y2="470" stroke="#8B5CF6" stroke-width="2"/>
+                                    <line x1="700" y1="385" x2="550" y2="630" stroke="#8B5CF6" stroke-width="2"/>
+                                    <line x1="700" y1="385" x2="750" y2="470" stroke="#8B5CF6" stroke-width="2"/>
+                                    <line x1="700" y1="385" x2="750" y2="630" stroke="#8B5CF6" stroke-width="2"/>
+                                    <line x1="850" y1="385" x2="950" y2="470" stroke="#8B5CF6" stroke-width="2"/>
+
+                                    <!-- AP 1: U7-MSH (Dach) -->
+                                    <g id="ap-u7-mesh" filter="url(#shadow)">
+                                        <rect x="190" y="470" width="120" height="55" fill="url(#apGradient)" rx="5"/>
+                                        <text x="250" y="490" text-anchor="middle" font-size="11" font-weight="bold" fill="white">U7-Mesh</text>
+                                        <text x="250" y="505" text-anchor="middle" font-size="9" fill="white">100.64.0.93</text>
+                                        <text x="250" y="518" text-anchor="middle" font-size="8" fill="#EDE9FE">R9 Dach</text>
+                                    </g>
+
+                                    <!-- AP 2: U7-Pro (Hauptverteilung) -->
+                                    <g id="ap-u7-pro" filter="url(#shadow)">
+                                        <rect x="90" y="470" width="120" height="55" fill="url(#apGradient)" rx="5"/>
+                                        <text x="150" y="490" text-anchor="middle" font-size="11" font-weight="bold" fill="white">U7-Pro</text>
+                                        <text x="150" y="505" text-anchor="middle" font-size="9" fill="white">100.64.0.31</text>
+                                        <text x="150" y="518" text-anchor="middle" font-size="8" fill="#EDE9FE">R9 Hauptvert.</text>
+                                    </g>
+
+                                    <!-- AP 3: U6-Lite (2OG) -->
+                                    <g id="ap-u6-2og" filter="url(#shadow)">
+                                        <rect x="490" y="470" width="120" height="55" fill="url(#apGradient)" rx="5"/>
+                                        <text x="550" y="490" text-anchor="middle" font-size="11" font-weight="bold" fill="white">U6-Lite</text>
+                                        <text x="550" y="505" text-anchor="middle" font-size="9" fill="white">100.64.0.32</text>
+                                        <text x="550" y="518" text-anchor="middle" font-size="8" fill="#EDE9FE">Koop R9 2OG</text>
+                                    </g>
+
+                                    <!-- AP 4: U6-Lite (1OG) -->
+                                    <g id="ap-u6-1og" filter="url(#shadow)">
+                                        <rect x="290" y="630" width="120" height="55" fill="url(#apGradient)" rx="5"/>
+                                        <text x="350" y="650" text-anchor="middle" font-size="11" font-weight="bold" fill="white">U6-Lite</text>
+                                        <text x="350" y="665" text-anchor="middle" font-size="9" fill="white">100.64.0.33</text>
+                                        <text x="350" y="678" text-anchor="middle" font-size="8" fill="#EDE9FE">Koop R9 1OG</text>
+                                    </g>
+
+                                    <!-- AP 5: U6-Lite (EG) -->
+                                    <g id="ap-u6-eg" filter="url(#shadow)">
+                                        <rect x="690" y="470" width="120" height="55" fill="url(#apGradient)" rx="5"/>
+                                        <text x="750" y="490" text-anchor="middle" font-size="11" font-weight="bold" fill="white">U6-Lite</text>
+                                        <text x="750" y="505" text-anchor="middle" font-size="9" fill="white">100.64.0.34</text>
+                                        <text x="750" y="518" text-anchor="middle" font-size="8" fill="#EDE9FE">Koop R9 EG</text>
+                                    </g>
+
+                                    <!-- AP 6: U6-Lite (UG) -->
+                                    <g id="ap-u6-ug" filter="url(#shadow)">
+                                        <rect x="490" y="630" width="120" height="55" fill="url(#apGradient)" rx="5"/>
+                                        <text x="550" y="650" text-anchor="middle" font-size="11" font-weight="bold" fill="white">U6-Lite</text>
+                                        <text x="550" y="665" text-anchor="middle" font-size="9" fill="white">100.64.0.35</text>
+                                        <text x="550" y="678" text-anchor="middle" font-size="8" fill="#EDE9FE">Koop R9 UG</text>
+                                    </g>
+
+                                    <!-- AP 7: U6-Lite (Keller) -->
+                                    <g id="ap-u6-keller" filter="url(#shadow)">
+                                        <rect x="690" y="630" width="120" height="55" fill="url(#apGradient)" rx="5"/>
+                                        <text x="750" y="650" text-anchor="middle" font-size="11" font-weight="bold" fill="white">U6-Lite</text>
+                                        <text x="750" y="665" text-anchor="middle" font-size="9" fill="white">100.64.0.36</text>
+                                        <text x="750" y="678" text-anchor="middle" font-size="8" fill="#EDE9FE">Koop R9 Keller</text>
+                                    </g>
+
+                                    <!-- AP 8: U6-Lite (Heizungsraum) -->
+                                    <g id="ap-u6-heizung" filter="url(#shadow)">
+                                        <rect x="890" y="470" width="120" height="55" fill="url(#apGradient)" rx="5"/>
+                                        <text x="950" y="490" text-anchor="middle" font-size="11" font-weight="bold" fill="white">U6-Lite</text>
+                                        <text x="950" y="505" text-anchor="middle" font-size="9" fill="white">100.64.90.2</text>
+                                        <text x="950" y="518" text-anchor="middle" font-size="8" fill="#EDE9FE">R9 Heizungsraum</text>
+                                    </g>
+
+                                    <!-- WiFi Coverage Indicator -->
+                                    <g id="wifi-coverage" opacity="0.15">
+                                        <circle cx="250" cy="497" r="60" fill="#8B5CF6"/>
+                                        <circle cx="150" cy="497" r="60" fill="#8B5CF6"/>
+                                        <circle cx="550" cy="497" r="60" fill="#8B5CF6"/>
+                                        <circle cx="350" cy="657" r="60" fill="#8B5CF6"/>
+                                        <circle cx="750" cy="497" r="60" fill="#8B5CF6"/>
+                                        <circle cx="550" cy="657" r="60" fill="#8B5CF6"/>
+                                        <circle cx="750" cy="657" r="60" fill="#8B5CF6"/>
+                                        <circle cx="950" cy="497" r="60" fill="#8B5CF6"/>
+                                    </g>
+
+                                    <!-- Statistics Box -->
+                                    <g id="stats-box">
+                                        <rect x="20" y="750" width="280" height="120" fill="white" stroke="#E5E7EB" stroke-width="2" rx="5"/>
+                                        <text x="35" y="775" font-size="14" font-weight="bold" fill="#111827">Netzwerk-Statistik</text>
+                                        <text x="35" y="795" font-size="12" fill="#4B5563">Total Geräte: 17</text>
+                                        <text x="35" y="813" font-size="12" fill="#4B5563">• 1x Gateway (UDM-Pro)</text>
+                                        <text x="35" y="831" font-size="12" fill="#4B5563">• 5x Switches (2x USW-24, 3x Flex)</text>
+                                        <text x="35" y="849" font-size="12" fill="#4B5563">• 8x Access Points (1x U7-MSH, 1x U7-Pro, 6x U6-Lite)</text>
+                                    </g>
+
+                                    <!-- VLAN Info Box -->
+                                    <g id="vlan-info">
+                                        <rect x="320" y="750" width="280" height="120" fill="white" stroke="#E5E7EB" stroke-width="2" rx="5"/>
+                                        <text x="335" y="775" font-size="14" font-weight="bold" fill="#111827">VLAN-Übersicht</text>
+                                        <text x="335" y="795" font-size="12" fill="#4B5563">Total VLANs: 31</text>
+                                        <text x="335" y="813" font-size="12" fill="#4B5563">• Kooperation: Inter-Building, Dienste, Technik</text>
+                                        <text x="335" y="831" font-size="12" fill="#4B5563">• Rosenweg 1-10: Client-Netzwerke</text>
+                                        <text x="335" y="849" font-size="12" fill="#4B5563">• VLAN 8: Gast-WLAN (isoliert)</text>
+                                    </g>
+
+                                    <!-- WLAN Info Box -->
+                                    <g id="wlan-info">
+                                        <rect x="620" y="750" width="280" height="120" fill="white" stroke="#E5E7EB" stroke-width="2" rx="5"/>
+                                        <text x="635" y="775" font-size="14" font-weight="bold" fill="#111827">WLAN-Netzwerke</text>
+                                        <text x="635" y="795" font-size="12" fill="#4B5563">3 SSIDs konfiguriert:</text>
+                                        <text x="635" y="813" font-size="12" fill="#4B5563">• Rosenweg (PPSK, Multi-VLAN)</text>
+                                        <text x="635" y="831" font-size="12" fill="#4B5563">• Rosenweg-Guest (Open, VLAN 8)</text>
+                                        <text x="635" y="849" font-size="12" fill="#4B5563">• HausR9 (2.4GHz, VLAN 90)</text>
+                                    </g>
+
+                                    <!-- Connection Info Box -->
+                                    <g id="connection-info">
+                                        <rect x="920" y="750" width="260" height="120" fill="white" stroke="#E5E7EB" stroke-width="2" rx="5"/>
+                                        <text x="935" y="775" font-size="14" font-weight="bold" fill="#111827">Internet-Verbindungen</text>
+                                        <text x="935" y="795" font-size="12" fill="#4B5563">Dual WAN Setup:</text>
+                                        <text x="935" y="813" font-size="12" fill="#10B981">✓ Internet 1: 10 Gbit/s (Primary)</text>
+                                        <text x="935" y="831" font-size="12" fill="#F59E0B">⚡ Internet 2: 50 Mbit/s (Failover)</text>
+                                        <text x="935" y="849" font-size="12" fill="#6B7280">VPN: WireGuard (Port 51820)</text>
+                                    </g>
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Device Details Table -->
+                    <div class="bg-white rounded-lg shadow">
+                        <div class="px-6 py-4 border-b border-gray-200">
+                            <h2 class="text-lg font-semibold text-gray-900">Geräte-Details</h2>
+                        </div>
+                        <div class="p-6">
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full divide-y divide-gray-200">
+                                    <thead class="bg-gray-50">
+                                        <tr>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Gerät</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Modell</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">IP-Adresse</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Standort</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Typ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white divide-y divide-gray-200">
+                                        <!-- Gateway -->
+                                        <tr class="bg-blue-50">
+                                            <td class="px-4 py-3 text-sm font-medium text-gray-900">UDM-Pro</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">UDM-Pro</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">100.64.9.1</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">Technikraum RW9</td>
+                                            <td class="px-4 py-3 text-sm"><span class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">Gateway</span></td>
+                                        </tr>
+                                        <!-- Switches -->
+                                        <tr>
+                                            <td class="px-4 py-3 text-sm font-medium text-gray-900">Poe-Switch1 Kooperation R9 T+T</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">USW-24-PoE</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">100.64.0.40</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">Technikraum RW9</td>
+                                            <td class="px-4 py-3 text-sm"><span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">Switch</span></td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-4 py-3 text-sm font-medium text-gray-900">Switch1 Kooperation R9 EG</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">USW-24</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">100.64.0.41</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">Kooperation R9 EG</td>
+                                            <td class="px-4 py-3 text-sm"><span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">Switch</span></td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-4 py-3 text-sm font-medium text-gray-900">Poe-Switch2 R9 Dach</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">USW-Flex</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">100.64.0.100</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">R9 Dach</td>
+                                            <td class="px-4 py-3 text-sm"><span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">Switch</span></td>
+                                        </tr>
+                                        <tr>
+                                            <td class="px-4 py-3 text-sm font-medium text-gray-900">PoE-Switch1 R9 Heizungsraum</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">USW-Flex</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">100.64.90.1</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">R9 Heizungsraum</td>
+                                            <td class="px-4 py-3 text-sm"><span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">Switch</span></td>
+                                        </tr>
+                                        <!-- Access Points -->
+                                        <tr class="bg-purple-50">
+                                            <td class="px-4 py-3 text-sm font-medium text-gray-900">WLAN-AP R9 Dach</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">U7-Mesh</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">100.64.0.93</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">R9 Dach</td>
+                                            <td class="px-4 py-3 text-sm"><span class="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">WiFi 7 Mesh</span></td>
+                                        </tr>
+                                        <tr class="bg-purple-50">
+                                            <td class="px-4 py-3 text-sm font-medium text-gray-900">WLAN-AP Kooperation R9 Hauptverteilung</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">U7-Pro</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">100.64.0.31</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">R9 Hauptverteilung</td>
+                                            <td class="px-4 py-3 text-sm"><span class="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">WiFi 7 Pro</span></td>
+                                        </tr>
+                                        <tr class="bg-purple-50">
+                                            <td class="px-4 py-3 text-sm font-medium text-gray-900">WLAN-AP R9 Heizungsraum</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">U6-Lite</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">100.64.90.2</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">R9 Heizungsraum</td>
+                                            <td class="px-4 py-3 text-sm"><span class="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">WiFi 6</span></td>
+                                        </tr>
+                                        <tr class="bg-purple-50">
+                                            <td class="px-4 py-3 text-sm font-medium text-gray-900">WLAN-AP Kooperation R9 2OG</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">U6-Lite</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">100.64.0.32</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">Kooperation R9 2OG</td>
+                                            <td class="px-4 py-3 text-sm"><span class="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">WiFi 6</span></td>
+                                        </tr>
+                                        <tr class="bg-purple-50">
+                                            <td class="px-4 py-3 text-sm font-medium text-gray-900">WLAN-AP Kooperation R9 1OG</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">U6-Lite</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">100.64.0.33</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">Kooperation R9 1OG</td>
+                                            <td class="px-4 py-3 text-sm"><span class="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">WiFi 6</span></td>
+                                        </tr>
+                                        <tr class="bg-purple-50">
+                                            <td class="px-4 py-3 text-sm font-medium text-gray-900">WLAN-AP Kooperation R9 EG</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">U6-Lite</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">100.64.0.34</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">Kooperation R9 EG</td>
+                                            <td class="px-4 py-3 text-sm"><span class="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">WiFi 6</span></td>
+                                        </tr>
+                                        <tr class="bg-purple-50">
+                                            <td class="px-4 py-3 text-sm font-medium text-gray-900">WLAN-AP Kooperation R9 UG</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">U6-Lite</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">100.64.0.35</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">Kooperation R9 UG</td>
+                                            <td class="px-4 py-3 text-sm"><span class="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">WiFi 6</span></td>
+                                        </tr>
+                                        <tr class="bg-purple-50">
+                                            <td class="px-4 py-3 text-sm font-medium text-gray-900">WLAN AP Kooperation R9 Keller</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">U6-Lite</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">100.64.0.36</td>
+                                            <td class="px-4 py-3 text-sm text-gray-600">Kooperation R9 Keller</td>
+                                            <td class="px-4 py-3 text-sm"><span class="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-800">WiFi 6</span></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     </div>
@@ -1051,19 +1416,29 @@
                 { name: 'Inter-Building Network', vlan: '-', subnet: '100.64.0.1/24', clients: 0, description: 'Kooperation Hauptnetzwerk' },
                 { name: 'RK-Dienste', vlan: '2', subnet: '100.64.2.1/24', clients: 0, description: 'Dienste Rosenweg Kooperation' },
                 { name: 'RK-Technik', vlan: '3', subnet: '100.64.3.1/24', clients: 0, description: 'Technik Rosenweg Kooperation' },
-                { name: 'Rosenweg-Guest', vlan: '8', subnet: '192.168.2.1/24', clients: 0, description: 'Gast-WLAN' },
+                { name: 'RW6-Technik', vlan: '6', subnet: '100.64.6.1/24', clients: 0, description: 'Technik Rosenweg 6' },
+                { name: 'Rosenweg-Guest', vlan: '8', subnet: '192.168.2.1/24', clients: 0, description: 'Gast-WLAN (Open)' },
                 { name: 'RK-Clients', vlan: '9', subnet: '100.64.9.1/24', clients: 0, description: 'Clients Rosenweg Kooperation' },
                 { name: 'RW1-Clients', vlan: '19', subnet: '100.64.19.1/24', clients: 0, description: 'Clients Rosenweg 1' },
+                { name: 'RW20', vlan: '20', subnet: '100.64.20.1/24', clients: 0, description: 'Rosenweg 20' },
                 { name: 'RW2-Clients', vlan: '29', subnet: '100.64.29.1/24', clients: 0, description: 'Clients Rosenweg 2' },
                 { name: 'RW4-Clients', vlan: '49', subnet: '100.64.49.1/24', clients: 0, description: 'Clients Rosenweg 4' },
                 { name: 'RW5-Clients', vlan: '59', subnet: '100.64.59.1/24', clients: 0, description: 'Clients Rosenweg 5' },
                 { name: 'RW6-Clients', vlan: '69', subnet: '100.64.69.1/24', clients: 0, description: 'Clients Rosenweg 6' },
                 { name: 'RW8-Clients', vlan: '89', subnet: '100.64.89.1/24', clients: 0, description: 'Clients Rosenweg 8' },
-                { name: 'RW9-Technik', vlan: '90', subnet: '100.64.90.1/24', clients: 7, description: 'Technik Rosenweg 9' },
+                { name: 'RW9-Technik', vlan: '90', subnet: '100.64.90.1/24', clients: 7, description: 'Technik Rosenweg 9 (Shelly, IoT)' },
                 { name: 'RW9-Dienste', vlan: '91', subnet: '100.64.91.1/24', clients: 0, description: 'Dienste Rosenweg 9' },
-                { name: 'RW9-Kameras', vlan: '92', subnet: '100.64.92.1/24', clients: 1, description: 'Kamerasystem Rosenweg 9' },
+                { name: 'RW9-Kameras', vlan: '92', subnet: '100.64.92.1/24', clients: 1, description: 'UniFi Protect Kameras' },
                 { name: 'RW9-Clients', vlan: '99', subnet: '100.64.99.1/24', clients: 2, description: 'Clients Rosenweg 9' },
                 { name: 'RW10-Clients', vlan: '109', subnet: '100.64.109.1/24', clients: 0, description: 'Clients Rosenweg 10' },
+                { name: 'RW129', vlan: '129', subnet: '100.64.129.1/24', clients: 0, description: 'Rosenweg 129' },
+                { name: 'RW139', vlan: '139', subnet: '100.64.139.1/24', clients: 0, description: 'Rosenweg 139' },
+                { name: 'RW149', vlan: '149', subnet: '100.64.149.1/24', clients: 0, description: 'Rosenweg 149' },
+                { name: 'RW169', vlan: '169', subnet: '100.64.169.1/24', clients: 0, description: 'Rosenweg 169' },
+                { name: 'RW179', vlan: '179', subnet: '100.64.179.1/24', clients: 0, description: 'Rosenweg 179' },
+                { name: 'RW189', vlan: '189', subnet: '100.64.189.1/24', clients: 0, description: 'Rosenweg 189' },
+                { name: 'VPN Wireguard', vlan: '-', subnet: '192.168.9.1/24', clients: 0, description: 'WireGuard VPN Server' },
+                { name: 'WAN Failover', vlan: '-', subnet: '192.168.200.1/24', clients: 0, description: 'Internet 2 (50 Mbit/s)' },
                 { name: 'MUELLER-913', vlan: '913', subnet: '-', clients: 6, description: 'VLAN-only (Müller 913)' },
                 { name: 'MUELLER-914', vlan: '914', subnet: '-', clients: 1, description: 'VLAN-only (Müller 914)' },
                 { name: 'Parkplatz53', vlan: '915', subnet: '-', clients: 0, description: 'VLAN-only' },
