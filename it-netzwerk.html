@@ -336,7 +336,7 @@
                         </div>
                     </div>
 
-                    <!-- Zugangsdaten -->
+                    <!-- Zentrale Systeme -->
                     <div class="bg-white rounded-lg shadow">
                         <div class="px-6 py-4 border-b border-gray-200">
                             <h2 class="text-lg font-semibold text-gray-900">Zentrale Systeme</h2>
@@ -345,15 +345,30 @@
                             <div class="space-y-3 text-sm">
                                 <div class="py-2 border-b">
                                     <p class="font-medium text-gray-700">UniFi Controller</p>
-                                    <p class="text-gray-600 mt-1">https://unifi.juroct.net</p>
+                                    <p class="text-gray-600 mt-1">UDM Kooperation R9 T+T</p>
+                                    <p class="text-gray-600">https://100.64.9.1</p>
+                                    <p class="text-xs text-gray-500 mt-1">Version: 10.0.162 (Console: 4.4.6)</p>
+                                    <p class="text-xs text-gray-500">Uptime: 4 Tage 23 Stunden</p>
                                 </div>
                                 <div class="py-2 border-b">
                                     <p class="font-medium text-gray-700">n8n Automation</p>
                                     <p class="text-gray-600 mt-1">https://n8n.juroct.net</p>
+                                    <p class="text-xs text-gray-500 mt-1">Workflow-Automation & Webhooks</p>
                                 </div>
                                 <div class="py-2 border-b">
-                                    <p class="font-medium text-gray-700">ioBroker</p>
-                                    <p class="text-gray-600 mt-1">http://iobroker.local:8087</p>
+                                    <p class="font-medium text-gray-700">DNS Server</p>
+                                    <p class="text-gray-600 mt-1">Primary: 100.64.2.50</p>
+                                    <p class="text-gray-600">Secondary: 100.64.2.51</p>
+                                    <p class="text-xs text-gray-500 mt-1">Fallback: 1.1.1.1 / 8.8.8.8</p>
+                                </div>
+                                <div class="py-2 border-b">
+                                    <p class="font-medium text-gray-700">VPN Server</p>
+                                    <p class="text-gray-600 mt-1">WireGuard (Port 51820)</p>
+                                    <p class="text-gray-600">Subnet: 192.168.9.0/24</p>
+                                </div>
+                                <div class="py-2">
+                                    <p class="font-medium text-gray-700">Timezone</p>
+                                    <p class="text-gray-600 mt-1">Europe/Zurich (CET/CEST)</p>
                                 </div>
                             </div>
                         </div>
@@ -566,48 +581,51 @@
                             <h2 class="text-lg font-semibold text-gray-900">WLAN-Netzwerke (SSIDs)</h2>
                         </div>
                         <div class="p-6 space-y-4">
-                            <div class="border border-yellow-200 bg-yellow-50 rounded-lg p-4">
+                            <div class="border border-blue-200 bg-blue-50 rounded-lg p-4">
                                 <div class="flex items-center justify-between mb-2">
-                                    <h3 class="font-semibold text-gray-900">STWEG-Rosenweg</h3>
-                                    <span class="px-3 py-1 bg-yellow-500 text-white rounded-full text-xs font-medium">Hauptnetzwerk</span>
+                                    <h3 class="font-semibold text-gray-900">Rosenweg</h3>
+                                    <span class="px-3 py-1 bg-blue-600 text-white rounded-full text-xs font-medium">Hauptnetzwerk</span>
                                 </div>
                                 <div class="space-y-2 text-sm">
-                                    <p><span class="font-medium text-gray-700">SSID:</span> STWEG-Rosenweg</p>
-                                    <p><span class="font-medium text-gray-700">Sicherheit:</span> WPA3-Personal (WPA2/WPA3 Mixed)</p>
-                                    <p><span class="font-medium text-gray-700">VLAN:</span> 10 (Bewohner)</p>
+                                    <p><span class="font-medium text-gray-700">SSID:</span> Rosenweg</p>
+                                    <p><span class="font-medium text-gray-700">Sicherheit:</span> WPA2-Personal</p>
+                                    <p><span class="font-medium text-gray-700">VLAN:</span> Mehrere (Private PSK pro Gebäude)</p>
                                     <p><span class="font-medium text-gray-700">Band:</span> 2.4 GHz + 5 GHz</p>
-                                    <p><span class="font-medium text-gray-700">Zugriff:</span> Alle Bewohner (Passwort erforderlich)</p>
-                                    <p class="text-xs text-gray-600 mt-2">Passwort wird an Bewohner per E-Mail zugestellt</p>
+                                    <p><span class="font-medium text-gray-700">Features:</span> Private Preshared Keys (PPSK) aktiviert</p>
+                                    <p><span class="font-medium text-gray-700">802.11w:</span> Deaktiviert</p>
+                                    <p class="text-xs text-gray-600 mt-2">Jedes Gebäude (RW1-RW10) erhält eigenes Passwort mit Zuweisung zum eigenen VLAN</p>
                                 </div>
                             </div>
 
                             <div class="border border-gray-200 bg-gray-50 rounded-lg p-4">
                                 <div class="flex items-center justify-between mb-2">
-                                    <h3 class="font-semibold text-gray-900">STWEG-Rosenweg-Gäste</h3>
+                                    <h3 class="font-semibold text-gray-900">Rosenweg-Guest</h3>
                                     <span class="px-3 py-1 bg-gray-500 text-white rounded-full text-xs font-medium">Gast-WLAN</span>
                                 </div>
                                 <div class="space-y-2 text-sm">
-                                    <p><span class="font-medium text-gray-700">SSID:</span> STWEG-Rosenweg-Gäste</p>
-                                    <p><span class="font-medium text-gray-700">Sicherheit:</span> WPA2-Personal</p>
-                                    <p><span class="font-medium text-gray-700">VLAN:</span> 99 (Gäste, isoliert)</p>
+                                    <p><span class="font-medium text-gray-700">SSID:</span> Rosenweg-Guest</p>
+                                    <p><span class="font-medium text-gray-700">Sicherheit:</span> Open (kein Passwort)</p>
+                                    <p><span class="font-medium text-gray-700">VLAN:</span> 8 (Gäste, isoliert)</p>
                                     <p><span class="font-medium text-gray-700">Band:</span> 2.4 GHz + 5 GHz</p>
-                                    <p><span class="font-medium text-gray-700">Zugriff:</span> Kein Zugriff auf lokales Netzwerk</p>
-                                    <p class="text-xs text-gray-600 mt-2">Clients können sich gegenseitig nicht sehen (Client Isolation aktiv)</p>
+                                    <p><span class="font-medium text-gray-700">Features:</span> Client Isolation, Fast Roaming</p>
+                                    <p><span class="font-medium text-gray-700">Zugriff:</span> Nur Internet, kein Zugriff auf lokales Netzwerk</p>
+                                    <p class="text-xs text-gray-600 mt-2">Clients können sich gegenseitig nicht sehen (L2 Isolation aktiv)</p>
                                 </div>
                             </div>
 
                             <div class="border border-green-200 bg-green-50 rounded-lg p-4">
                                 <div class="flex items-center justify-between mb-2">
-                                    <h3 class="font-semibold text-gray-900">STWEG-IoT</h3>
-                                    <span class="px-3 py-1 bg-green-600 text-white rounded-full text-xs font-medium">IoT/Smart Home</span>
+                                    <h3 class="font-semibold text-gray-900">HausR9</h3>
+                                    <span class="px-3 py-1 bg-green-600 text-white rounded-full text-xs font-medium">Smart Home</span>
                                 </div>
                                 <div class="space-y-2 text-sm">
-                                    <p><span class="font-medium text-gray-700">SSID:</span> STWEG-IoT (versteckt)</p>
+                                    <p><span class="font-medium text-gray-700">SSID:</span> HausR9</p>
                                     <p><span class="font-medium text-gray-700">Sicherheit:</span> WPA2-Personal</p>
-                                    <p><span class="font-medium text-gray-700">VLAN:</span> 20 (IoT)</p>
+                                    <p><span class="font-medium text-gray-700">VLAN:</span> 90 (RW9-Technik)</p>
                                     <p><span class="font-medium text-gray-700">Band:</span> 2.4 GHz only</p>
-                                    <p><span class="font-medium text-gray-700">Zugriff:</span> Nur für Smart Home Geräte, Zähler, Sensoren</p>
-                                    <p class="text-xs text-gray-600 mt-2">Firewall-Regeln blockieren ausgehende Verbindungen außer zu ioBroker</p>
+                                    <p><span class="font-medium text-gray-700">Features:</span> Fast Roaming, Proxy ARP</p>
+                                    <p><span class="font-medium text-gray-700">Zugriff:</span> Shelly-Geräte, Smart Home Automation</p>
+                                    <p class="text-xs text-gray-600 mt-2">Broadcast Filter aktiv für Gateway (e4:38:83:4d:02:dd)</p>
                                 </div>
                             </div>
                         </div>
@@ -1073,34 +1091,46 @@
             const hardwareList = document.getElementById('hardware-list');
             hardwareList.innerHTML = `
                 <div class="py-3 border-b">
-                    <p class="font-semibold text-gray-900">UniFi Dream Machine Pro (UDM-Pro)</p>
-                    <p class="text-xs text-gray-600 mt-1">IP: 100.64.9.1</p>
-                    <p class="text-xs text-gray-500 mt-2">Router, Firewall, UniFi Controller, NVR für Kameras</p>
+                    <p class="font-semibold text-gray-900">UniFi Dream Machine Pro</p>
+                    <p class="text-xs text-gray-600 mt-1">Model: UDM-Pro | IP: 100.64.9.1</p>
+                    <p class="text-xs text-gray-500 mt-2">Router, Firewall, Controller, VPN, UniFi Protect NVR</p>
+                    <p class="text-xs text-gray-500">Version: 10.0.162 | Console: 4.4.6 | Uptime: 4d 23h</p>
                     <p class="text-xs text-gray-500 mt-1">Standort: Technikraum RW9</p>
                 </div>
                 <div class="py-3 border-b">
-                    <p class="font-semibold text-gray-900">UniFi Switch 24 Port PoE (USW-24-PoE)</p>
-                    <p class="text-xs text-gray-600 mt-1">IP: 100.64.9.10</p>
-                    <p class="text-xs text-gray-500 mt-2">24-Port Managed Switch, 16x PoE+ Ports</p>
-                    <p class="text-xs text-gray-500 mt-1">Standort: Technikraum RW9, Rack</p>
+                    <p class="font-semibold text-gray-900">Poe-Switch1 Kooperation R9 T+T</p>
+                    <p class="text-xs text-gray-600 mt-1">Model: USW-24-PoE | IP: 100.64.0.40</p>
+                    <p class="text-xs text-gray-500 mt-2">24-Port Managed PoE Switch (Hauptverteiler)</p>
+                    <p class="text-xs text-gray-500 mt-1">Standort: Technikraum RW9</p>
                 </div>
                 <div class="py-3 border-b">
-                    <p class="font-semibold text-gray-900">UniFi Switch 16 Port PoE (USW-16-PoE)</p>
-                    <p class="text-xs text-gray-600 mt-1">IP: 100.64.9.11</p>
-                    <p class="text-xs text-gray-500 mt-2">16-Port Managed Switch, 8x PoE+ Ports</p>
-                    <p class="text-xs text-gray-500 mt-1">Standort: Technikraum RW11</p>
+                    <p class="font-semibold text-gray-900">Switch1 Kooperation R9 EG</p>
+                    <p class="text-xs text-gray-600 mt-1">Model: USW-24 | IP: 100.64.0.41</p>
+                    <p class="text-xs text-gray-500 mt-2">24-Port Managed Switch (kein PoE)</p>
+                    <p class="text-xs text-gray-500 mt-1">Standort: Kooperation R9 Erdgeschoss</p>
                 </div>
                 <div class="py-3 border-b">
-                    <p class="font-semibold text-gray-900">6x UniFi Access Points</p>
-                    <p class="text-xs text-gray-500 mt-2">3x UAP-AC-Pro (EG, 1.OG, 2.OG RW9)</p>
-                    <p class="text-xs text-gray-500">1x UAP-AC-Lite (Tiefgarage)</p>
-                    <p class="text-xs text-gray-500">1x UAP-FlexHD (RW11)</p>
-                    <p class="text-xs text-gray-500">1x UAP-AC-M (Aussenbereich, geplant)</p>
+                    <p class="font-semibold text-gray-900">Poe-Switch2 R9 Dach</p>
+                    <p class="text-xs text-gray-600 mt-1">Model: USW-Flex | IP: 100.64.0.100</p>
+                    <p class="text-xs text-gray-500 mt-2">5-Port Managed PoE Switch</p>
+                    <p class="text-xs text-gray-500 mt-1">Standort: R9 Dach</p>
+                </div>
+                <div class="py-3 border-b">
+                    <p class="font-semibold text-gray-900">PoE-Switch1 R9 Heizungsraum</p>
+                    <p class="text-xs text-gray-600 mt-1">Model: USW-Flex | IP: 100.64.90.1</p>
+                    <p class="text-xs text-gray-500 mt-2">5-Port Managed PoE Switch</p>
+                    <p class="text-xs text-gray-500 mt-1">Standort: R9 Heizungsraum</p>
+                </div>
+                <div class="py-3 border-b">
+                    <p class="font-semibold text-gray-900">8x UniFi Access Points</p>
+                    <p class="text-xs text-gray-500 mt-2">1x U7-MSH (R9 Dach) - WiFi 7 Mesh - IP: 100.64.0.93</p>
+                    <p class="text-xs text-gray-500">1x U7-Pro (R9 Hauptverteilung) - WiFi 7 Pro - IP: 100.64.0.31</p>
+                    <p class="text-xs text-gray-500">6x U6-Lite (R9 Heizung/2OG/1OG/EG/UG/Keller) - WiFi 6 - 100.64.90.2, 100.64.0.32-36</p>
                 </div>
                 <div class="py-3">
-                    <p class="font-semibold text-gray-900">UniFi Switch Flex Mini</p>
-                    <p class="text-xs text-gray-600 mt-1">IP: 100.64.9.30</p>
-                    <p class="text-xs text-gray-500 mt-2">5-Port Managed Switch für Waschküche</p>
+                    <p class="font-semibold text-gray-900">WAN Uplinks</p>
+                    <p class="text-xs text-gray-500 mt-2">Internet 1: 10 Gbit/s (Primary, Load Balance: 99)</p>
+                    <p class="text-xs text-gray-500">Internet 2: 50 Mbit/s ↓ / 25 Mbit/s ↑ (Failover only)</p>
                 </div>
             `;
         }

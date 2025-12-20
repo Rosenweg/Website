@@ -825,34 +825,46 @@
             const hardwareList = document.getElementById('hardware-list');
             hardwareList.innerHTML = `
                 <div class="py-3 border-b">
-                    <p class="font-semibold text-gray-900">UniFi Dream Machine Pro (UDM-Pro)</p>
-                    <p class="text-xs text-gray-600 mt-1">IP: 100.64.9.1</p>
-                    <p class="text-xs text-gray-500 mt-2">Router, Firewall, UniFi Controller, NVR für Kameras</p>
+                    <p class="font-semibold text-gray-900">UniFi Dream Machine Pro</p>
+                    <p class="text-xs text-gray-600 mt-1">Model: UDM-Pro | IP: 100.64.9.1</p>
+                    <p class="text-xs text-gray-500 mt-2">Router, Firewall, Controller, VPN, UniFi Protect NVR</p>
+                    <p class="text-xs text-gray-500">Version: 10.0.162 | Console: 4.4.6 | Uptime: 4d 23h</p>
                     <p class="text-xs text-gray-500 mt-1">Standort: Technikraum RW9</p>
                 </div>
                 <div class="py-3 border-b">
-                    <p class="font-semibold text-gray-900">UniFi Switch 24 Port PoE (USW-24-PoE)</p>
-                    <p class="text-xs text-gray-600 mt-1">IP: 100.64.9.10</p>
-                    <p class="text-xs text-gray-500 mt-2">24-Port Managed Switch, 16x PoE+ Ports</p>
-                    <p class="text-xs text-gray-500 mt-1">Standort: Technikraum RW9, Rack</p>
+                    <p class="font-semibold text-gray-900">Poe-Switch1 Kooperation R9 T+T</p>
+                    <p class="text-xs text-gray-600 mt-1">Model: USW-24-PoE | IP: 100.64.0.40</p>
+                    <p class="text-xs text-gray-500 mt-2">24-Port Managed PoE Switch (Hauptverteiler)</p>
+                    <p class="text-xs text-gray-500 mt-1">Standort: Technikraum RW9</p>
                 </div>
                 <div class="py-3 border-b">
-                    <p class="font-semibold text-gray-900">UniFi Switch 16 Port PoE (USW-16-PoE)</p>
-                    <p class="text-xs text-gray-600 mt-1">IP: 100.64.9.11</p>
-                    <p class="text-xs text-gray-500 mt-2">16-Port Managed Switch, 8x PoE+ Ports</p>
-                    <p class="text-xs text-gray-500 mt-1">Standort: Technikraum RW11</p>
+                    <p class="font-semibold text-gray-900">Switch1 Kooperation R9 EG</p>
+                    <p class="text-xs text-gray-600 mt-1">Model: USW-24 | IP: 100.64.0.41</p>
+                    <p class="text-xs text-gray-500 mt-2">24-Port Managed Switch (kein PoE)</p>
+                    <p class="text-xs text-gray-500 mt-1">Standort: Kooperation R9 Erdgeschoss</p>
                 </div>
                 <div class="py-3 border-b">
-                    <p class="font-semibold text-gray-900">6x UniFi Access Points</p>
-                    <p class="text-xs text-gray-500 mt-2">3x UAP-AC-Pro (EG, 1.OG, 2.OG RW9)</p>
-                    <p class="text-xs text-gray-500">1x UAP-AC-Lite (Tiefgarage)</p>
-                    <p class="text-xs text-gray-500">1x UAP-FlexHD (RW11)</p>
-                    <p class="text-xs text-gray-500">1x UAP-AC-M (Aussenbereich, geplant)</p>
+                    <p class="font-semibold text-gray-900">Poe-Switch2 R9 Dach</p>
+                    <p class="text-xs text-gray-600 mt-1">Model: USW-Flex | IP: 100.64.0.100</p>
+                    <p class="text-xs text-gray-500 mt-2">5-Port Managed PoE Switch</p>
+                    <p class="text-xs text-gray-500 mt-1">Standort: R9 Dach</p>
+                </div>
+                <div class="py-3 border-b">
+                    <p class="font-semibold text-gray-900">PoE-Switch1 R9 Heizungsraum</p>
+                    <p class="text-xs text-gray-600 mt-1">Model: USW-Flex | IP: 100.64.90.1</p>
+                    <p class="text-xs text-gray-500 mt-2">5-Port Managed PoE Switch</p>
+                    <p class="text-xs text-gray-500 mt-1">Standort: R9 Heizungsraum</p>
+                </div>
+                <div class="py-3 border-b">
+                    <p class="font-semibold text-gray-900">8x UniFi Access Points</p>
+                    <p class="text-xs text-gray-500 mt-2">1x U7-MSH (R9 Dach) - WiFi 7 Mesh - IP: 100.64.0.93</p>
+                    <p class="text-xs text-gray-500">1x U7-Pro (R9 Hauptverteilung) - WiFi 7 Pro - IP: 100.64.0.31</p>
+                    <p class="text-xs text-gray-500">6x U6-Lite (R9 Heizung/2OG/1OG/EG/UG/Keller) - WiFi 6 - 100.64.90.2, 100.64.0.32-36</p>
                 </div>
                 <div class="py-3">
-                    <p class="font-semibold text-gray-900">UniFi Switch Flex Mini</p>
-                    <p class="text-xs text-gray-600 mt-1">IP: 100.64.9.30</p>
-                    <p class="text-xs text-gray-500 mt-2">5-Port Managed Switch für Waschküche</p>
+                    <p class="font-semibold text-gray-900">WAN Uplinks</p>
+                    <p class="text-xs text-gray-500 mt-2">Internet 1: 10 Gbit/s (Primary, Load Balance: 99)</p>
+                    <p class="text-xs text-gray-500">Internet 2: 50 Mbit/s ↓ / 25 Mbit/s ↑ (Failover only)</p>
                 </div>
             `;
         }
