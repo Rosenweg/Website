@@ -43,16 +43,32 @@
 <body class="bg-gray-50">
 
     <!-- Login Screen -->
-    <div id="login-screen" class="min-h-screen flex items-center justify-center bg-gradient-to-r from-blue-600 to-indigo-700 p-4">
-        <div class="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
-            <div class="text-center mb-8">
-                <svg class="h-16 w-16 mx-auto text-blue-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
-                </svg>
-                <h1 class="text-3xl font-bold text-gray-800">IT & Netzwerk</h1>
-                <p class="text-gray-600 mt-2">Netzwerkdokumentation STWEG Rosenweg</p>
+    <div id="login-screen" class="min-h-screen bg-gradient-to-r from-blue-600 to-indigo-700">
+        <!-- Navigation -->
+        <nav class="bg-white bg-opacity-10 backdrop-blur-sm">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between h-16 items-center">
+                    <a href="index.html" class="flex items-center">
+                        <img src="logo rosenweg.png" alt="Rosenweg Logo" class="h-12 w-auto">
+                        <span class="ml-3 text-white font-semibold text-lg">STWEG-Kooperation Rosenweg</span>
+                    </a>
+                    <div class="flex items-center space-x-6">
+                        <a href="index.html" class="text-white hover:text-blue-200 transition">Start</a>
+                        <a href="zaehler.html" class="text-white hover:text-blue-200 transition">Zähler</a>
+                        <a href="energie-monitor.html" class="text-white hover:text-blue-200 transition">Energie</a>
+                    </div>
+                </div>
             </div>
-            <div id="login-button-container"></div>
+        </nav>
+        <div class="flex items-center justify-center p-4" style="min-height: calc(100vh - 4rem);">
+            <div class="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
+                <div class="text-center mb-8">
+                    <img src="logo rosenweg.png" alt="Rosenweg Logo" class="h-20 w-auto mx-auto mb-4">
+                    <h1 class="text-3xl font-bold text-gray-800">IT & Netzwerk</h1>
+                    <p class="text-gray-600 mt-2">Netzwerkdokumentation STWEG Rosenweg</p>
+                </div>
+                <div id="login-button-container"></div>
+            </div>
         </div>
     </div>
 
