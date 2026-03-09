@@ -7,8 +7,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  API_IMAGE: ghcr.io/${{ github.repository_owner }}/rosenweg-api
-  WEBSITE_IMAGE: ghcr.io/${{ github.repository_owner }}/rosenweg-website
+  API_IMAGE: ghcr.io/rosenweg/rosenweg-api
+  WEBSITE_IMAGE: ghcr.io/rosenweg/rosenweg-website
 
 jobs:
   build-api:
@@ -53,7 +53,7 @@ jobs:
       - name: Build and push Website
         uses: docker/build-push-action@v6
         with:
-          context: ./Website
+          context: .
           push: true
           tags: |
             ${{ env.WEBSITE_IMAGE }}:latest

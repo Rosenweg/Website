@@ -23,8 +23,14 @@ RUN rm -f /usr/share/nginx/html/Dockerfile \
               /usr/share/nginx/html/stweg3/n8n-workflows \
               /usr/share/nginx/html/wiki \
               /usr/share/nginx/html/scripts \
+              /usr/share/nginx/html/cloudflare-workers \
               /usr/share/nginx/html/*.unifi \
-              /usr/share/nginx/html/*.unf
+              /usr/share/nginx/html/*.unf \
+              /usr/share/nginx/html/.env.example \
+              /usr/share/nginx/html/.gitignore \
+              /usr/share/nginx/html/README.md \
+              /usr/share/nginx/html/CLOUDFLARE-EMAIL-ROUTING.md \
+              /usr/share/nginx/html/ENERGIE-MONITOR*.md
 
 EXPOSE 80
 
