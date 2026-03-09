@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>E-Mail Verteiler - STWEG 3</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body {
@@ -48,7 +49,7 @@
             <p class="mt-4 text-gray-600">Lade Authentifizierung...</p>
         </div>
 
-        <!-- Step 1: Login -->
+        <!-- Step 1: SSO Login -->
         <div id="step1" class="hidden">
             <div class="bg-white rounded-lg shadow-lg p-8">
                 <div class="text-center mb-8">
@@ -58,83 +59,14 @@
                         </svg>
                     </div>
                     <h2 class="text-2xl font-bold text-gray-800 mb-2">Anmeldung erforderlich</h2>
-                    <p class="text-gray-600">Bitte geben Sie Ihre E-Mail-Adresse ein, um einen Zugangscode zu erhalten.</p>
+                    <p class="text-gray-600">Bitte melden Sie sich an, um den E-Mail-Verteiler zu nutzen.</p>
                 </div>
 
-                <form id="emailForm">
-                    <div class="mb-4">
-                        <label for="userEmail" class="block text-sm font-medium text-gray-700 mb-2">E-Mail-Adresse</label>
-                        <input
-                            type="email"
-                            id="userEmail"
-                            required
-                            placeholder="ihre.email@beispiel.ch"
-                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent">
-                    </div>
-
-                    <div id="errorMessage" class="hidden bg-red-50 border-l-4 border-red-500 p-4 rounded mb-4">
-                        <p class="text-sm text-red-700"></p>
-                    </div>
-
-                    <button
-                        type="submit"
-                        class="w-full bg-orange-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-orange-700 transition flex items-center justify-center">
-                        <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                        </svg>
-                        Zugangscode per E-Mail senden
-                    </button>
-                </form>
+                <div id="sso-login-container"></div>
 
                 <p class="text-xs text-gray-500 mt-4 text-center">
                     Zugang haben: Ausschussmitglieder, Eigentümer und berechtigte Mieter
                 </p>
-            </div>
-        </div>
-
-        <!-- Step 2: OTP Verification -->
-        <div id="step2" class="hidden">
-            <div class="bg-white rounded-lg shadow-lg p-8">
-                <div class="text-center mb-8">
-                    <div class="bg-blue-100 rounded-full p-4 inline-block mb-4">
-                        <svg class="h-12 w-12 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
-                        </svg>
-                    </div>
-                    <h2 class="text-2xl font-bold text-gray-800 mb-2">Code eingeben</h2>
-                    <p class="text-gray-600">Wir haben einen 6-stelligen Code an <strong id="displayEmail"></strong> gesendet.</p>
-                </div>
-
-                <form id="otpForm">
-                    <div class="mb-4">
-                        <label for="otpInput" class="block text-sm font-medium text-gray-700 mb-2">Zugangscode</label>
-                        <input
-                            type="text"
-                            id="otpInput"
-                            required
-                            maxlength="6"
-                            pattern="[0-9]{6}"
-                            placeholder="000000"
-                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-center text-2xl tracking-widest font-mono">
-                    </div>
-
-                    <div id="otpErrorMessage" class="hidden bg-red-50 border-l-4 border-red-500 p-4 rounded mb-4">
-                        <p class="text-sm text-red-700"></p>
-                    </div>
-
-                    <button
-                        type="submit"
-                        class="w-full bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition">
-                        Code bestätigen
-                    </button>
-
-                    <button
-                        type="button"
-                        onclick="backToStep1()"
-                        class="w-full mt-3 text-gray-600 hover:text-gray-800 transition text-sm">
-                        ← Andere E-Mail verwenden
-                    </button>
-                </form>
             </div>
         </div>
 
@@ -239,16 +171,13 @@
 
     <script>
         // KONFIGURATION
-        const N8N_OTP_WEBHOOK_URL = 'https://n8n.juroct.net/webhook/stweg3-otp';
-        const N8N_EMAIL_VERTEILER_URL = 'https://n8n.juroct.net/webhook/stweg3-email-verteiler';
+        const API_VERTEILER_SEND = '/api/verteiler/send';
         const KONTAKTE_JSON_URL = 'https://rosenweg.github.io/Website/stweg3/data/kontakte.json';
 
         // GLOBALE VARIABLEN
         let kontakteData = null;
         let berechtigteEmails = [];
         let currentEmail = '';
-        let currentOTP = '';
-        let otpTimestamp = 0;
 
         // HILFSFUNKTION: BERECHTIGTE E-MAILS EXTRAHIEREN
         function extractBerechtigteEmails(data) {
@@ -306,8 +235,23 @@
                 kontakteData = await response.json();
                 berechtigteEmails = extractBerechtigteEmails(kontakteData);
 
+                // SSO Authentication
+                const user = await AuthentikAuth.init({
+                    requireAuth: false,
+                    onLogin(user) {
+                        currentEmail = user.email;
+                        document.getElementById('loading').classList.add('hidden');
+                        document.getElementById('step1').classList.add('hidden');
+                        document.getElementById('step3').classList.remove('hidden');
+                        document.getElementById('loggedInEmail').textContent = currentEmail;
+                    },
+                });
+
                 document.getElementById('loading').classList.add('hidden');
-                document.getElementById('step1').classList.remove('hidden');
+                if (!user) {
+                    document.getElementById('step1').classList.remove('hidden');
+                    AuthentikAuth.createLoginButton('sso-login-container');
+                }
 
             } catch (error) {
                 console.error('Fehler beim Laden der Kontakte:', error);
@@ -322,115 +266,6 @@
                 `;
             }
         });
-
-        // STEP 1: E-MAIL EINGABE
-        document.getElementById('emailForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
-
-            const email = document.getElementById('userEmail').value.trim().toLowerCase();
-            const errorDiv = document.getElementById('errorMessage');
-            const submitButton = e.target.querySelector('button[type="submit"]');
-
-            submitButton.disabled = true;
-            submitButton.innerHTML = '<span class="animate-spin inline-block mr-2">⏳</span> Wird gesendet...';
-
-            // Prüfe Berechtigung
-            if (!berechtigteEmails.includes(email)) {
-                errorDiv.classList.remove('hidden');
-                errorDiv.querySelector('p').textContent =
-                    'Diese E-Mail-Adresse ist nicht berechtigt. Zugang haben: Ausschussmitglieder, Eigentümer und berechtigte Mieter.';
-                submitButton.disabled = false;
-                submitButton.innerHTML = `
-                    <svg class="h-5 w-5 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                    </svg>
-                    Zugangscode per E-Mail senden
-                `;
-                return;
-            }
-
-            // OTP generieren
-            currentOTP = Math.floor(100000 + Math.random() * 900000).toString();
-            otpTimestamp = Date.now();
-            currentEmail = email;
-
-            try {
-                const response = await fetch(N8N_OTP_WEBHOOK_URL, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        email: email,
-                        otp_code: currentOTP,
-                        source: 'STWEG 3 - E-Mail Verteiler'
-                    })
-                });
-
-                if (!response.ok) {
-                    throw new Error('E-Mail konnte nicht gesendet werden');
-                }
-
-                errorDiv.classList.add('hidden');
-                document.getElementById('step1').classList.add('hidden');
-                document.getElementById('step2').classList.remove('hidden');
-                document.getElementById('displayEmail').textContent = email;
-
-            } catch (error) {
-                console.error('Fehler beim Senden:', error);
-                errorDiv.classList.remove('hidden');
-                errorDiv.querySelector('p').textContent =
-                    'Fehler beim Versenden des Codes. Bitte versuchen Sie es erneut.';
-            }
-
-            submitButton.disabled = false;
-            submitButton.innerHTML = `
-                <svg class="h-5 w-5 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                </svg>
-                Zugangscode per E-Mail senden
-            `;
-        });
-
-        // STEP 2: OTP VALIDIERUNG
-        document.getElementById('otpForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-
-            const enteredOTP = document.getElementById('otpInput').value;
-            const errorDiv = document.getElementById('otpErrorMessage');
-
-            // Prüfe OTP-Gültigkeit (10 Minuten)
-            const now = Date.now();
-            const tenMinutes = 10 * 60 * 1000;
-
-            if (now - otpTimestamp > tenMinutes) {
-                errorDiv.classList.remove('hidden');
-                errorDiv.querySelector('p').textContent =
-                    'Der Code ist abgelaufen. Bitte fordern Sie einen neuen Code an.';
-                return;
-            }
-
-            // Prüfe OTP
-            if (enteredOTP !== currentOTP) {
-                errorDiv.classList.remove('hidden');
-                errorDiv.querySelector('p').textContent =
-                    'Ungültiger Code. Bitte überprüfen Sie Ihre Eingabe.';
-                return;
-            }
-
-            // Erfolgreich authentifiziert
-            errorDiv.classList.add('hidden');
-            document.getElementById('step2').classList.add('hidden');
-            document.getElementById('step3').classList.remove('hidden');
-            document.getElementById('loggedInEmail').textContent = currentEmail;
-        });
-
-        function backToStep1() {
-            document.getElementById('step2').classList.add('hidden');
-            document.getElementById('step1').classList.remove('hidden');
-            document.getElementById('otpInput').value = '';
-            document.getElementById('otpErrorMessage').classList.add('hidden');
-        }
 
         // STEP 3: E-MAIL VERSAND
         document.getElementById('verteilerSelect').addEventListener('change', function() {
@@ -465,15 +300,22 @@
             sendButton.innerHTML = '<span class="animate-spin inline-block mr-2">⏳</span> Wird gesendet...';
 
             try {
-                const response = await fetch(N8N_EMAIL_VERTEILER_URL, {
+                const headers = {
+                    'Content-Type': 'application/json',
+                };
+                const token = AuthentikAuth.getToken();
+                if (token) {
+                    headers['Authorization'] = `Bearer ${token}`;
+                }
+
+                const response = await fetch(API_VERTEILER_SEND, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: headers,
                     body: JSON.stringify({
-                        verteiler: verteiler,
+                        verteiler_id: verteiler,
                         subject: subject,
-                        message: message,
+                        body: message,
+                        recipients: verteiler,
                         sender_email: currentEmail,
                         sender_name: senderName || currentEmail
                     })
@@ -515,7 +357,7 @@
 
         function logout() {
             if (confirm('Möchten Sie sich wirklich abmelden?')) {
-                location.reload();
+                AuthentikAuth.logout('email-verteiler.html');
             }
         }
     </script>

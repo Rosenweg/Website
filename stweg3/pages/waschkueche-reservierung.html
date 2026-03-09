@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Waschküchen-Reservierung - STWEG 3</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body {
@@ -60,35 +61,12 @@
         </div>
     </nav>
 
-    <!-- OTP Login (wird ausgeblendet nach erfolgreicher Anmeldung) -->
+    <!-- SSO Login (wird ausgeblendet nach erfolgreicher Anmeldung) -->
     <div id="otpSection" class="max-w-md mx-auto mt-12 p-8 bg-white rounded-lg shadow-lg">
-        <h2 class="text-2xl font-bold text-gray-800 mb-6 text-center">🔐 Anmeldung erforderlich</h2>
-        <p class="text-gray-600 mb-6 text-center">Bitte geben Sie Ihre E-Mail-Adresse ein, um einen Zugangs-Code zu erhalten.</p>
+        <h2 class="text-2xl font-bold text-gray-800 mb-6 text-center">Anmeldung erforderlich</h2>
+        <p class="text-gray-600 mb-6 text-center">Bitte melden Sie sich an, um Waschküchen-Reservierungen vorzunehmen.</p>
 
-        <div id="emailStep">
-            <input type="email" id="emailInput" placeholder="ihre.email@beispiel.ch"
-                   class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent mb-4">
-            <button onclick="requestOTP()" class="w-full bg-green-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-green-700 transition">
-                Code anfordern
-            </button>
-        </div>
-
-        <div id="otpStep" class="hidden">
-            <p class="text-sm text-gray-600 mb-4">Ein 6-stelliger Code wurde an <strong id="sentToEmail"></strong> gesendet.</p>
-            <input type="text" id="otpInput" placeholder="000000" maxlength="6"
-                   class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent mb-4 text-center text-2xl tracking-widest">
-            <button onclick="verifyOTP()" class="w-full bg-green-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-green-700 transition">
-                Code bestätigen
-            </button>
-            <button onclick="backToEmail()" class="w-full mt-2 text-gray-600 hover:text-gray-800 text-sm">
-                ← Andere E-Mail verwenden
-            </button>
-        </div>
-
-        <div id="loadingIndicator" class="hidden text-center py-4">
-            <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-green-500 border-t-transparent"></div>
-            <p class="text-gray-600 mt-2">Wird überprüft...</p>
-        </div>
+        <div id="sso-login-container"></div>
     </div>
 
     <!-- Hauptbereich (wird nach Login sichtbar) -->
@@ -283,7 +261,6 @@
 
     <script>
         // Konfiguration
-        const N8N_WEBHOOK_URL = 'https://n8n.juroct.net/webhook/stweg3-otp';
         const KONTAKTE_JSON_URL = '../data/kontakte.json';
         const TECHNISCHER_DIENST_JSON_URL = '../../technischer-dienst.json';
 
@@ -296,8 +273,6 @@
         let authorizedEmails = [];
         let kontakteData = null;
         let technischerDienstData = null;
-        let currentOTP = '';
-        let otpTimestamp = 0;
 
         // Kontakte laden und autorisierte E-Mails extrahieren
         async function loadKontakte() {
@@ -438,102 +413,7 @@
             return { name: 'Bewohner', wohnung: '?' };
         }
 
-        // OTP-Funktionen
-        async function requestOTP() {
-            const email = document.getElementById('emailInput').value.trim();
-            if (!email || !email.includes('@')) {
-                alert('Bitte geben Sie eine gültige E-Mail-Adresse ein.');
-                return;
-            }
-
-            // Prüfen ob E-Mail berechtigt ist
-            if (!isEmailAuthorized(email)) {
-                alert('Diese E-Mail-Adresse ist nicht für die Waschküchen-Reservierung berechtigt.\n\nNur Bewohner mit Waschküchen-Berechtigung und Ausschuss-Mitglieder haben Zugriff.\n\nBei Fragen wenden Sie sich bitte an:\nE-Mail: technik@rosenweg9.ch');
-                return;
-            }
-
-            document.getElementById('emailStep').classList.add('hidden');
-            document.getElementById('loadingIndicator').classList.remove('hidden');
-
-            // OTP generieren
-            currentOTP = Math.floor(100000 + Math.random() * 900000).toString();
-            otpTimestamp = Date.now();
-
-            try {
-                const response = await fetch(N8N_WEBHOOK_URL, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        email: email,
-                        otp_code: currentOTP
-                    })
-                });
-
-                if (!response.ok) {
-                    throw new Error('E-Mail-Versand fehlgeschlagen');
-                }
-
-                document.getElementById('loadingIndicator').classList.add('hidden');
-                document.getElementById('otpStep').classList.remove('hidden');
-                document.getElementById('sentToEmail').textContent = email;
-            } catch (error) {
-                console.error('Fehler beim E-Mail-Versand:', error);
-                document.getElementById('loadingIndicator').classList.add('hidden');
-                document.getElementById('emailStep').classList.remove('hidden');
-                alert('Fehler beim Versand der E-Mail. Bitte versuchen Sie es erneut.\n\nBei anhaltenden Problemen wenden Sie sich an:\nE-Mail: technik@rosenweg9.ch');
-            }
-        }
-
-        function verifyOTP() {
-            const otp = document.getElementById('otpInput').value.trim();
-            const email = document.getElementById('emailInput').value.trim();
-
-            if (otp.length !== 6) {
-                alert('Bitte geben Sie einen 6-stelligen Code ein.');
-                return;
-            }
-
-            // OTP-Ablauf prüfen (10 Minuten)
-            const now = Date.now();
-            const otpAge = (now - otpTimestamp) / 1000 / 60; // Minuten
-            if (otpAge > 10) {
-                alert('Der Code ist abgelaufen. Bitte fordern Sie einen neuen Code an.');
-                backToEmail();
-                return;
-            }
-
-            // OTP verifizieren
-            if (otp !== currentOTP) {
-                alert('Ungültiger Code. Bitte überprüfen Sie Ihre Eingabe.');
-                return;
-            }
-
-            document.getElementById('otpStep').classList.add('hidden');
-            document.getElementById('loadingIndicator').classList.remove('hidden');
-
-            setTimeout(() => {
-                const userData = getUserDataFromEmail(email);
-                currentUser = {
-                    email: email,
-                    name: userData.name,
-                    wohnung: userData.wohnung
-                };
-
-                document.getElementById('otpSection').classList.add('hidden');
-                document.getElementById('mainContent').classList.remove('hidden');
-                document.getElementById('userInfo').textContent = `${currentUser.name} (${currentUser.wohnung})`;
-
-                loadData();
-            }, 500);
-        }
-
-        function backToEmail() {
-            document.getElementById('otpStep').classList.add('hidden');
-            document.getElementById('emailStep').classList.remove('hidden');
-            document.getElementById('otpInput').value = '';
-        }
+        // SSO Authentication - handled in window.onload below
 
         // Daten laden
         async function loadData() {
@@ -826,10 +706,33 @@
             return Math.ceil((((d - yearStart) / 86400000) + 1)/7);
         }
 
-        // Bei Seitenload: Kontakte laden und Datumseingabe vorbereiten
+        // Bei Seitenload: Kontakte laden, SSO und Datumseingabe vorbereiten
         window.onload = async () => {
-            // Kontakte laden für OTP-Autorisierung
+            // Kontakte laden
             await loadKontakte();
+
+            // SSO Authentication
+            const user = await AuthentikAuth.init({
+                requireAuth: false,
+                onLogin(user) {
+                    const userData = getUserDataFromEmail(user.email);
+                    currentUser = {
+                        email: user.email,
+                        name: user.name || userData.name,
+                        wohnung: user.wohnung || userData.wohnung
+                    };
+
+                    document.getElementById('otpSection').classList.add('hidden');
+                    document.getElementById('mainContent').classList.remove('hidden');
+                    document.getElementById('userInfo').textContent = `${currentUser.name} (${currentUser.wohnung})`;
+
+                    loadData();
+                },
+            });
+
+            if (!user) {
+                AuthentikAuth.createLoginButton('sso-login-container');
+            }
 
             // Datumseingaben auf heute setzen
             const today = new Date().toISOString().split('T')[0];

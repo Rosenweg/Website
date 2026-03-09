@@ -1,0 +1,194 @@
+version: "3.8"
+
+services:
+  # ============================================
+  # Traefik - Reverse Proxy mit Let's Encrypt
+  # ============================================
+  traefik:
+    image: traefik:v3.2
+    command:
+      - "--api.dashboard=true"
+      - "--providers.swarm=true"
+      - "--providers.swarm.exposedByDefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=stefan+rosenweg@juroct.ch"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--log.level=WARN"
+      - "--accesslog=true"
+      - "--accesslog.filepath=/var/log/traefik/access.log"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-certs:/letsencrypt
+      - traefik-logs:/var/log/traefik
+    networks:
+      - rosenweg-net
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.traefik-dashboard.rule=Host(`www.rosenweg4303.ch`) && PathPrefix(`/traefik`)"
+        - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
+        - "traefik.http.routers.traefik-dashboard.tls.certresolver=letsencrypt"
+        - "traefik.http.routers.traefik-dashboard.service=api@internal"
+        - "traefik.http.routers.traefik-dashboard.middlewares=traefik-auth"
+        - "traefik.http.middlewares.traefik-auth.basicauth.users=admin:$$2y$$10$$CHANGE_THIS_HASH"
+        - "traefik.http.services.traefik-dashboard.loadbalancer.server.port=8080"
+
+  # ============================================
+  # Website - Static Files via Nginx
+  # ============================================
+  website:
+    image: ghcr.io/sjuroct/rosenweg-website:latest
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 3
+      placement:
+        constraints:
+          - node.hostname == docker-pve1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.rosenweg.rule=Host(`www.rosenweg4303.ch`) || Host(`rosenweg4303.ch`)"
+        - "traefik.http.routers.rosenweg.entrypoints=websecure"
+        - "traefik.http.routers.rosenweg.tls.certresolver=letsencrypt"
+        - "traefik.http.services.rosenweg.loadbalancer.server.port=80"
+        - "traefik.http.middlewares.rosenweg-www.redirectregex.regex=^https://rosenweg4303\\.ch/(.*)"
+        - "traefik.http.middlewares.rosenweg-www.redirectregex.replacement=https://www.rosenweg4303.ch/$${1}"
+        - "traefik.http.middlewares.rosenweg-www.redirectregex.permanent=true"
+        - "traefik.http.routers.rosenweg.middlewares=rosenweg-www"
+        - "com.centurylinklabs.watchtower.scope=rosenweg"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # ============================================
+  # API Backend - Node.js/Express
+  # ============================================
+  api:
+    image: ghcr.io/sjuroct/rosenweg-api:latest
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: rosenweg
+      DB_USER: rosenweg
+      DB_PASSWORD: "${DB_PASSWORD}"
+      SMTP_HOST: mail.smtp2go.com
+      SMTP_PORT: "2525"
+      SMTP_USER: "${SMTP_USER}"
+      SMTP_PASS: "${SMTP_PASS}"
+      MAIL_FROM: "noreply@rosenweg4303.ch"
+      PORT: "3000"
+      AUTHENTIK_URL: "https://authentik_server:9443"
+      AUTHENTIK_EXTERNAL_URL: "https://authentik.rosenweg4303.ch"
+      AUTHENTIK_CLIENT_ID: "${AUTHENTIK_CLIENT_ID}"
+      AUTHENTIK_CLIENT_SECRET: "${AUTHENTIK_CLIENT_SECRET}"
+      SITE_URL: "https://www.rosenweg4303.ch"
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+      PEOPLEFON_API_URL: "${PEOPLEFON_API_URL}"
+      PEOPLEFON_API_KEY: "${PEOPLEFON_API_KEY}"
+      PEOPLEFON_NUMBER: "${PEOPLEFON_NUMBER}"
+    networks:
+      - rosenweg-net
+      - authentik_authentik-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname == docker-pve1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - "com.centurylinklabs.watchtower.scope=rosenweg"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ============================================
+  # PostgreSQL Database
+  # ============================================
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: rosenweg
+      POSTGRES_USER: rosenweg
+      POSTGRES_PASSWORD: "${DB_PASSWORD}"
+    volumes:
+      - rosenweg-pgdata:/var/lib/postgresql/data
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname == docker-pve1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rosenweg"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # Watchtower - Auto-pull new GHCR images
+  # ============================================
+  watchtower:
+    image: containrrr/watchtower:latest
+    environment:
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_POLL_INTERVAL: "60"
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_SCOPE: rosenweg
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /root/.docker/config.json:/config.json:ro
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - "com.centurylinklabs.watchtower.scope=rosenweg"
+
+networks:
+  rosenweg-net:
+    driver: overlay
+    attachable: true
+  authentik_authentik-net:
+    external: true
+
+volumes:
+  traefik-certs:
+  traefik-logs:
+  rosenweg-pgdata:
