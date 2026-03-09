@@ -48,7 +48,7 @@ services:
   # Website - Static Files via Nginx
   # ============================================
   website:
-    image: ghcr.io/sjuroct/rosenweg-website:latest
+    image: ghcr.io/rosenweg/rosenweg-website:latest
     networks:
       - rosenweg-net
     deploy:
@@ -94,7 +94,7 @@ services:
   # API Backend - Node.js/Express
   # ============================================
   api:
-    image: ghcr.io/sjuroct/rosenweg-api:latest
+    image: ghcr.io/rosenweg/rosenweg-api:latest
     environment:
       DB_HOST: postgres
       DB_PORT: "5432"
