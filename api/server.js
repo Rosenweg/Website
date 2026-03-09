@@ -201,19 +201,25 @@ app.get('/api/auth/callback', async (req, res) => {
 
   try {
     // Exchange code for token
-    const tokenResp = await fetch(`${AUTHENTIK_EXTERNAL_URL}/application/o/token/`, {
+    const tokenUrl = `${AUTHENTIK_EXTERNAL_URL}/application/o/token/`;
+    const tokenBody = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: `${SITE_URL}/api/auth/callback`,
+      client_id: AUTHENTIK_CLIENT_ID,
+      client_secret: AUTHENTIK_CLIENT_SECRET,
+    }).toString();
+    console.log('Token exchange URL:', tokenUrl);
+    console.log('Redirect URI:', `${SITE_URL}/api/auth/callback`);
+    const tokenResp = await fetch(tokenUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: `${SITE_URL}/api/auth/callback`,
-        client_id: AUTHENTIK_CLIENT_ID,
-        client_secret: AUTHENTIK_CLIENT_SECRET,
-      }).toString(),
+      body: tokenBody,
       signal: AbortSignal.timeout(10000),
     });
-    const tokenData = await tokenResp.json();
+    const tokenText = await tokenResp.text();
+    console.log('Token response status:', tokenResp.status, 'body:', tokenText.substring(0, 500));
+    const tokenData = tokenText ? JSON.parse(tokenText) : {};
     if (!tokenData.access_token) {
       console.error('Token exchange failed:', tokenData);
       return res.status(400).send('Token-Austausch fehlgeschlagen');
