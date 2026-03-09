@@ -201,7 +201,7 @@ app.get('/api/auth/callback', async (req, res) => {
 
   try {
     // Exchange code for token
-    const tokenResp = await fetch(`${AUTHENTIK_URL}/application/o/token/`, {
+    const tokenResp = await fetch(`${AUTHENTIK_EXTERNAL_URL}/application/o/token/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -220,7 +220,7 @@ app.get('/api/auth/callback', async (req, res) => {
     }
 
     // Get user info
-    const userResp = await fetch(`${AUTHENTIK_URL}/application/o/userinfo/`, {
+    const userResp = await fetch(`${AUTHENTIK_EXTERNAL_URL}/application/o/userinfo/`, {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
       signal: AbortSignal.timeout(5000),
     });
@@ -281,7 +281,7 @@ async function validateAuthentikToken(token) {
       client_id: AUTHENTIK_CLIENT_ID,
       client_secret: AUTHENTIK_CLIENT_SECRET,
     });
-    const resp = await fetch(`${AUTHENTIK_URL}/application/o/introspect/`, {
+    const resp = await fetch(`${AUTHENTIK_EXTERNAL_URL}/application/o/introspect/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: params.toString(),
