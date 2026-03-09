@@ -78,7 +78,7 @@ services:
         - "traefik.http.routers.rosenweg9.rule=Host(`www.rosenweg9.ch`) || Host(`rosenweg9.ch`)"
         - "traefik.http.routers.rosenweg9.entrypoints=websecure"
         - "traefik.http.routers.rosenweg9.tls.certresolver=letsencrypt"
-        - "traefik.http.middlewares.rosenweg9-redirect.redirectregex.regex=^https://(www\\.)?rosenweg9\\.ch/(.*)"
+        - "traefik.http.middlewares.rosenweg9-redirect.redirectregex.regex=^https://(www\\.)?rosenweg9\\.ch/?(.*)"
         - "traefik.http.middlewares.rosenweg9-redirect.redirectregex.replacement=https://www.rosenweg4303.ch/stweg3/$${2}"
         - "traefik.http.middlewares.rosenweg9-redirect.redirectregex.permanent=true"
         - "traefik.http.routers.rosenweg9.middlewares=rosenweg9-redirect"
