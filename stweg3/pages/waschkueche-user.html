@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Meine Waschküchen-Daten - STWEG 3</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; }
@@ -28,7 +29,7 @@
         </div>
     </nav>
 
-    <!-- OTP Authentication Section -->
+    <!-- SSO Authentication Section -->
     <div id="auth-section" class="min-h-screen py-12 bg-gradient-to-br from-green-50 to-green-100">
         <div class="max-w-md mx-auto px-4">
             <div class="bg-white rounded-lg shadow-xl p-8">
@@ -38,67 +39,16 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
                         </svg>
                     </div>
-                    <h1 class="text-2xl font-bold text-gray-800 mb-2">🔐 Zugriff schützen</h1>
-                    <p class="text-gray-600">Bitte authentifizieren Sie sich mit Ihrer E-Mail-Adresse</p>
+                    <h1 class="text-2xl font-bold text-gray-800 mb-2">Anmeldung erforderlich</h1>
+                    <p class="text-gray-600">Bitte melden Sie sich an, um Ihre Verbrauchsdaten einzusehen</p>
                 </div>
 
-                <!-- Step 1: Email Input -->
-                <div id="email-step">
-                    <form id="email-form" class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">E-Mail-Adresse</label>
-                            <input type="email" id="email-input" required
-                                class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                                placeholder="ihre.email@example.com">
-                            <p class="text-xs text-gray-500 mt-1">
-                                Sie erhalten einen 6-stelligen Code per E-Mail
-                            </p>
-                        </div>
-                        <button type="submit" id="send-otp-btn"
-                            class="w-full bg-green-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-700 transition">
-                            Code anfordern
-                        </button>
-                    </form>
-                </div>
-
-                <!-- Step 2: OTP Verification -->
-                <div id="otp-step" class="hidden">
-                    <div class="mb-4 p-3 bg-green-50 border-l-4 border-green-500 rounded">
-                        <p class="text-sm text-green-800">
-                            ✓ Code wurde an <strong id="sent-email"></strong> gesendet
-                        </p>
-                    </div>
-
-                    <form id="otp-form" class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Bestätigungscode</label>
-                            <input type="text" id="otp-input" required maxlength="6" pattern="[0-9]{6}"
-                                class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-center text-2xl font-mono tracking-widest"
-                                placeholder="000000">
-                            <p class="text-xs text-gray-500 mt-1">
-                                Code ist 10 Minuten gültig
-                            </p>
-                        </div>
-                        <button type="submit" id="verify-otp-btn"
-                            class="w-full bg-green-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-700 transition">
-                            Bestätigen
-                        </button>
-                        <button type="button" id="back-btn"
-                            class="w-full bg-gray-100 text-gray-700 px-6 py-3 rounded-lg font-semibold hover:bg-gray-200 transition">
-                            Zurück
-                        </button>
-                    </form>
-                </div>
-
-                <!-- Error Message -->
-                <div id="error-message" class="hidden mt-4 p-3 bg-red-50 border-l-4 border-red-500 rounded">
-                    <p class="text-sm text-red-800"></p>
-                </div>
+                <div id="sso-login-container"></div>
 
                 <!-- Info -->
                 <div class="mt-6 pt-6 border-t border-gray-200">
                     <p class="text-xs text-gray-600">
-                        <strong>🔒 Datenschutz:</strong> Nur registrierte Bewohner der STWEG 3 haben Zugriff.
+                        <strong>Datenschutz:</strong> Nur registrierte Bewohner der STWEG 3 haben Zugriff.
                         Sie sehen ausschließlich Ihre eigenen Verbrauchsdaten.
                     </p>
                 </div>
@@ -229,102 +179,36 @@
     </footer>
 
     <script>
-        const API_BASE_URL = 'http://localhost:3000/api';
+        const API_BASE_URL = '/api';
         let currentUser = null;
-        let authToken = null;
-
-        // Simulate OTP system (in production, this would be a real backend)
-        const ALLOWED_EMAILS = [
-            'max.mustermann@example.com',
-            'anna.schmidt@example.com',
-            'peter.weber@example.com',
-            'maria.mueller@example.com',
-            'stefan.meier@example.com'
-        ];
 
         // DOM Elements
         const authSection = document.getElementById('auth-section');
         const mainContent = document.getElementById('main-content');
-        const emailStep = document.getElementById('email-step');
-        const otpStep = document.getElementById('otp-step');
-        const emailForm = document.getElementById('email-form');
-        const otpForm = document.getElementById('otp-form');
-        const emailInput = document.getElementById('email-input');
-        const otpInput = document.getElementById('otp-input');
-        const errorMessage = document.getElementById('error-message');
-        const sentEmail = document.getElementById('sent-email');
-        const backBtn = document.getElementById('back-btn');
         const logoutBtn = document.getElementById('logout-btn');
 
-        // Step 1: Request OTP
-        emailForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const email = emailInput.value.trim().toLowerCase();
+        // SSO Authentication
+        (async function() {
+            const user = await AuthentikAuth.init({
+                requireAuth: false,
+                async onLogin(user) {
+                    // Lade Benutzerdaten
+                    const userId = user.id || 1;
+                    await loadUserData(userId);
 
-            // Simulate OTP sending
-            if (ALLOWED_EMAILS.includes(email)) {
-                sentEmail.textContent = email;
-                emailStep.classList.add('hidden');
-                otpStep.classList.remove('hidden');
-                showError('');
+                    authSection.classList.add('hidden');
+                    mainContent.classList.remove('hidden');
+                },
+            });
 
-                // In production: Send real OTP via email
-                console.log('OTP sent to:', email);
-                alert(`Demo: Ihr OTP-Code ist: 123456\n\n(In Produktion wird dieser per E-Mail gesendet)`);
-            } else {
-                showError('Diese E-Mail-Adresse ist nicht berechtigt.');
+            if (!user) {
+                AuthentikAuth.createLoginButton('sso-login-container');
             }
-        });
-
-        // Step 2: Verify OTP
-        otpForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const otp = otpInput.value.trim();
-
-            // Simulate OTP verification (in production: verify with backend)
-            if (otp === '123456') {
-                showError('');
-
-                // Find user by email (simulation)
-                const email = sentEmail.textContent;
-                const userId = ALLOWED_EMAILS.indexOf(email) + 1;
-
-                // Fetch user data from API
-                await loadUserData(userId);
-
-                authSection.classList.add('hidden');
-                mainContent.classList.remove('hidden');
-            } else {
-                showError('Ungültiger Code. Bitte versuchen Sie es erneut.');
-            }
-        });
-
-        backBtn.addEventListener('click', () => {
-            otpStep.classList.add('hidden');
-            emailStep.classList.remove('hidden');
-            otpInput.value = '';
-            showError('');
-        });
+        })();
 
         logoutBtn.addEventListener('click', () => {
-            currentUser = null;
-            authToken = null;
-            authSection.classList.remove('hidden');
-            mainContent.classList.add('hidden');
-            emailInput.value = '';
-            otpInput.value = '';
-            emailStep.classList.remove('hidden');
-            otpStep.classList.add('hidden');
+            AuthentikAuth.logout('waschkueche-user.html');
         });
-
-        function showError(message) {
-            if (message) {
-                errorMessage.querySelector('p').textContent = message;
-                errorMessage.classList.remove('hidden');
-            } else {
-                errorMessage.classList.add('hidden');
-            }
-        }
 
         async function loadUserData(userId) {
             try {
@@ -350,7 +234,7 @@
 
             } catch (error) {
                 console.error('Error loading user data:', error);
-                showError('Fehler beim Laden der Daten.');
+                alert('Fehler beim Laden der Daten.');
             }
         }
 
