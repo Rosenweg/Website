@@ -101,7 +101,7 @@ services:
       DB_NAME: rosenweg
       DB_USER: rosenweg
       DB_PASSWORD: "${DB_PASSWORD}"
-      SMTP_HOST: mail.smtp2go.com
+      SMTP_HOST: mail-eu.smtp2go.com
       SMTP_PORT: "2525"
       SMTP_USER: "${SMTP_USER}"
       SMTP_PASS: "${SMTP_PASS}"
