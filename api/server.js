@@ -2216,8 +2216,6 @@ async function initDB() {
         created_at TIMESTAMP DEFAULT NOW()
       );
 
-      CREATE INDEX IF NOT EXISTS idx_wasch_res_times ON wasch_reservations(room_id, start_time, end_time) WHERE cancelled = false;
-
       CREATE TABLE IF NOT EXISTS wasch_sessions (
         id SERIAL PRIMARY KEY,
         user_id INTEGER REFERENCES users(id),
@@ -2340,9 +2338,12 @@ async function initDB() {
       ALTER TABLE sms_inbox ADD COLUMN IF NOT EXISTS direction VARCHAR(10) DEFAULT 'MO';
       ALTER TABLE sms_inbox ADD COLUMN IF NOT EXISTS status VARCHAR(50);
 
-      -- Migrate wasch_reservations: old schema had date+time_slot, new has start_time+end_time
+      -- Migrate wasch_reservations: old schema had date+time_slot or missing room_id
       DO $$ BEGIN
-        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='wasch_reservations' AND column_name='time_slot') THEN
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='wasch_reservations' AND column_name='time_slot')
+           OR (EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='wasch_reservations')
+               AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='wasch_reservations' AND column_name='room_id'))
+        THEN
           -- Drop old table and recreate (no production data yet)
           DROP TABLE IF EXISTS wasch_sessions CASCADE;
           DROP TABLE IF EXISTS wasch_billing CASCADE;
