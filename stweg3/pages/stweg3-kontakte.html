@@ -18,21 +18,9 @@
 </head>
 <body class="bg-gray-50">
     <!-- Navigation -->
-    <nav class="bg-white shadow-lg sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex items-center">
-                    <a href="index.html" class="flex items-center">
-                        <img src="../../logo-stweg3-rosenweg9.png" alt="Rosenweg 9 Logo" class="h-14 w-auto">
-                        <span class="ml-2 text-xl font-semibold text-gray-800">STWEG 3</span>
-                    </a>
-                </div>
-                <div class="flex items-center">
-                    <a href="index.html" class="text-gray-700 hover:text-blue-600 transition">← Zurück zu STWEG 3</a>
-                </div>
-            </div>
-        </div>
-    </nav>
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js"></script>
+    <script>RosenwegNav.init({ active: 'stweg3' });</script>
 
     <!-- Header -->
     <section class="bg-gradient-to-r from-purple-600 to-purple-800 text-white py-12">

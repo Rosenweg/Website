@@ -42,22 +42,9 @@
 </head>
 <body class="bg-gray-50">
     <!-- Navigation -->
-    <nav class="bg-white shadow-lg sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex items-center">
-                    <a href="index.html" class="flex items-center">
-                        <img src="../../logo-stweg3-rosenweg9.png" alt="Rosenweg 9 Logo" class="h-14 w-auto">
-                        <span class="ml-2 text-xl font-semibold text-gray-800">Waschküchen-Reservierung</span>
-                    </a>
-                </div>
-                <div class="flex items-center space-x-4">
-                    <span id="userInfo" class="text-sm text-gray-600"></span>
-                    <a href="index.html" class="text-gray-700 hover:text-green-600 transition">← Zurück</a>
-                </div>
-            </div>
-        </div>
-    </nav>
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js"></script>
+    <script>RosenwegNav.init({ active: 'waschkueche' });</script>
 
     <!-- SSO Login (wird ausgeblendet nach erfolgreicher Anmeldung) -->
     <div id="otpSection" class="max-w-md mx-auto mt-12 p-8 bg-white rounded-lg shadow-lg">

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hilfe & Dokumentation - Smart Waschküchen STWEG 3</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; }
@@ -12,19 +13,9 @@
 </head>
 <body class="bg-gray-50">
     <!-- Navigation -->
-    <nav class="bg-white shadow-lg sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex items-center">
-                    <img src="../../logo-stweg3-rosenweg9.png" alt="Rosenweg 9 Logo" class="h-14 w-auto">
-                    <span class="ml-2 text-xl font-semibold text-gray-800">Hilfe & Dokumentation</span>
-                </div>
-                <div class="flex items-center">
-                    <a href="waschkueche-management.html" class="text-gray-700 hover:text-blue-600 transition">← Zurück zum Dashboard</a>
-                </div>
-            </div>
-        </div>
-    </nav>
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js"></script>
+    <script>RosenwegNav.init({ active: 'waschkueche' });</script>
 
     <!-- Hero -->
     <section class="bg-gradient-to-r from-purple-600 to-purple-800 text-white py-12">

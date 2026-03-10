@@ -42,24 +42,13 @@
 </head>
 <body class="bg-gray-50">
 
+    <!-- Navigation -->
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js"></script>
+    <script>RosenwegNav.init({ active: 'it' });</script>
+
     <!-- Login Screen -->
     <div id="login-screen" class="min-h-screen bg-gradient-to-r from-blue-600 to-indigo-700">
-        <!-- Navigation -->
-        <nav class="bg-white bg-opacity-10 backdrop-blur-sm">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="flex justify-between h-16 items-center">
-                    <a href="index.html" class="flex items-center">
-                        <img src="logo-rosenweg.png" alt="Rosenweg Logo" class="h-12 w-auto">
-                        <span class="ml-3 text-white font-semibold text-lg">STWEG-Kooperation Rosenweg</span>
-                    </a>
-                    <div class="flex items-center space-x-6">
-                        <a href="index.html" class="text-white hover:text-blue-200 transition">Start</a>
-                        <a href="zaehler.html" class="text-white hover:text-blue-200 transition">Zähler</a>
-                        <a href="energie-monitor.html" class="text-white hover:text-blue-200 transition">Energie</a>
-                    </div>
-                </div>
-            </div>
-        </nav>
         <div class="flex items-center justify-center p-4" style="min-height: calc(100vh - 4rem);">
             <div class="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
                 <div class="text-center mb-8">
@@ -74,26 +63,6 @@
 
     <!-- Main Dashboard -->
     <div id="dashboard" class="hidden min-h-screen">
-        <!-- Header -->
-        <header class="bg-white shadow-sm border-b border-gray-200">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-                <div class="flex justify-between items-center">
-                    <div class="flex items-center space-x-4">
-                        <img src="logo-rosenweg.png" alt="Rosenweg Logo" class="h-14 w-auto">
-                        <div>
-                            <h1 class="text-xl font-bold text-gray-900">IT & Netzwerk</h1>
-                            <p class="text-sm text-gray-600">STWEG-Kooperation Rosenweg</p>
-                        </div>
-                    </div>
-                    <div class="flex items-center space-x-4">
-                        <span class="text-sm text-gray-600" id="user-email"></span>
-                        <button onclick="logout()" class="text-sm text-red-600 hover:text-red-700 font-medium">
-                            Abmelden
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </header>
 
         <!-- Main Content -->
         <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
