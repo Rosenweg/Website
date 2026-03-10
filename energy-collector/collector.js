@@ -39,7 +39,7 @@ function parseRegisterValue(buffer, type) {
 }
 
 async function readMeter(client, meter) {
-  client.setID(meter.unitId);
+  client.setID(meter.unit_id || meter.unitId || 1);
 
   const data = {};
 
