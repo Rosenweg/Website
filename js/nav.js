@@ -75,6 +75,7 @@ const RosenwegNav = {
               <a href="${base}energie-monitor.html" class="${dropA('energie')} block px-4 py-2 text-sm">Energie-Monitor</a>
               <a href="${base}zaehler.html" class="${dropA('zaehler')} block px-4 py-2 text-sm">Zähler & Verbrauch</a>
               <a href="${base}email-verteiler.html" class="${dropA('verteiler')} block px-4 py-2 text-sm">E-Mail-Verteiler</a>
+              <a href="${base}bewohner-verwaltung.html" class="${dropA('bewohner')} block px-4 py-2 text-sm">Bewohner-Verwaltung</a>
               <a href="${base}stweg3/pages/waschkueche.html" class="${dropA('waschkueche')} block px-4 py-2 text-sm">Waschküche</a>
             </div>
           </div>
@@ -133,6 +134,7 @@ const RosenwegNav = {
         <a href="${base}energie-monitor.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Energie-Monitor</a>
         <a href="${base}zaehler.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Zähler & Verbrauch</a>
         <a href="${base}email-verteiler.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">E-Mail-Verteiler</a>
+        <a href="${base}bewohner-verwaltung.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Bewohner-Verwaltung</a>
         <a href="${base}stweg3/pages/waschkueche.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Waschküche</a>
 
         <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Infos</div>

@@ -238,7 +238,7 @@ app.get('/api/auth/callback', async (req, res) => {
     const email = (userInfo.email || userInfo.sub).toLowerCase();
     const name = userInfo.name || userInfo.preferred_username || email;
     const groups = userInfo.groups || [];
-    const isAdmin = groups.includes('Technik') || groups.includes('technik');
+    const isAdmin = groups.some(g => g.toLowerCase() === 'technik' || g.toLowerCase().endsWith('-ausschuss'));
 
     // Create/update user in DB
     const userResult = await pool.query(
@@ -310,7 +310,7 @@ async function validateAuthentikToken(token) {
        VALUES ($1, $2, $3)
        ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
        RETURNING id, email, name, wohnung, stweg, role`,
-      [email.toLowerCase(), name, (data.groups?.includes('stweg3-ausschuss') || data.groups?.includes('technik')) ? 'admin' : 'bewohner']
+      [email.toLowerCase(), name, (data.groups?.some(g => g.toLowerCase() === 'technik' || g.toLowerCase().endsWith('-ausschuss'))) ? 'admin' : 'bewohner']
     );
     const user = result.rows[0];
     user.isAdmin = user.role === 'admin';
