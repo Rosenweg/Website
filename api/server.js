@@ -33,6 +33,8 @@ const transporter = nodemailer.createTransport({
 });
 
 const MAIL_FROM = process.env.MAIL_FROM || 'noreply@rosenweg4303.ch';
+const SMTP2GO_API_KEY = process.env.SMTP2GO_API_KEY || '';
+const SMTP2GO_API_URL = 'https://eu-api.smtp2go.com/v3';
 
 // ─── Helpers ────────────────────────────────────────────────────────
 function generateOTP() {
@@ -1036,41 +1038,30 @@ app.post('/api/email/inbound', async (req, res) => {
       cid: att.cid || undefined,
     }));
 
-    // Send to each recipient individually to track failures
-    const failedRecipients = [];
-    let sentCount = 0;
-    for (const recipient of recipients) {
-      try {
-        await transporter.sendMail({
-          from: `"${senderName} via ${list.name}" <${toAddress}>`,
-          to: recipient,
-          replyTo: replyTo,
-          subject: subject,
-          text: parsed.text || '',
-          html: parsed.html || undefined,
-          attachments: attachments,
-          headers: {
-            'List-Id': `<${toAddress.replace('@', '.')}>`,
-            'List-Post': `<mailto:${toAddress}>`,
-            'X-Original-From': senderEmail,
-            'X-Forwarded-By': 'Rosenweg Verteiler',
-          },
-        });
-        sentCount++;
-      } catch (sendErr) {
-        console.error(`Failed to send to ${recipient}:`, sendErr.message);
-        failedRecipients.push(recipient);
-      }
-    }
-    console.log(`Distributed email to ${sentCount}/${recipients.length} recipients for ${toAddress}`);
+    // Send to all recipients in one mail
+    await transporter.sendMail({
+      from: `"${senderName} via ${list.name}" <${toAddress}>`,
+      to: recipients,
+      replyTo: replyTo,
+      subject: subject,
+      text: parsed.text || '',
+      html: parsed.html || undefined,
+      attachments: attachments,
+      headers: {
+        'List-Id': `<${toAddress.replace('@', '.')}>`,
+        'List-Post': `<mailto:${toAddress}>`,
+        'X-Original-From': senderEmail,
+        'X-Forwarded-By': 'Rosenweg Verteiler',
+      },
+    });
+    console.log(`Distributed email to ${recipients.length} recipients for ${toAddress}`);
 
     // Log to DB
     await pool.query(
-      `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, failed_recipients, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      [list.id, senderEmail, senderName, parsed.subject, sentCount, attachments.length > 0,
-       JSON.stringify(recipients), failedRecipients.length > 0 ? JSON.stringify(failedRecipients) : null,
-       failedRecipients.length > 0 ? (sentCount === 0 ? 'failed' : 'partial') : 'sent']
+      `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [list.id, senderEmail, senderName, parsed.subject, recipients.length, attachments.length > 0,
+       JSON.stringify(recipients), 'sent']
     );
 
     res.json({ success: true, action: 'distributed', recipients: recipients.length });
@@ -1200,6 +1191,59 @@ app.get('/api/email/log', authMiddleware, adminOnly, async (req, res) => {
     res.json({ log: result.rows });
   } catch (err) {
     res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// SMTP2GO delivery status for a specific email log entry
+app.get('/api/email/log/:id/status', authMiddleware, adminOnly, async (req, res) => {
+  if (!SMTP2GO_API_KEY) return res.status(400).json({ error: 'SMTP2GO API-Key nicht konfiguriert' });
+  try {
+    const entry = await pool.query('SELECT * FROM email_log WHERE id = $1', [req.params.id]);
+    if (entry.rows.length === 0) return res.status(404).json({ error: 'Log-Eintrag nicht gefunden' });
+    const log = entry.rows[0];
+
+    // Search SMTP2GO activity for this email by subject and time range
+    const startDate = new Date(log.created_at);
+    startDate.setMinutes(startDate.getMinutes() - 1);
+    const endDate = new Date(log.created_at);
+    endDate.setHours(endDate.getHours() + 24);
+
+    const apiRes = await fetch(`${SMTP2GO_API_URL}/activity/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Smtp2go-Api-Key': SMTP2GO_API_KEY },
+      body: JSON.stringify({
+        start_date: startDate.toISOString(),
+        end_date: endDate.toISOString(),
+        search_subject: log.subject,
+        search_sender: log.from_email,
+        limit: 100,
+        only_latest: true,
+      }),
+    });
+    const apiData = await apiRes.json();
+
+    const events = (apiData.data?.events || []).map(e => ({
+      recipient: e.recipient,
+      event: e.event,
+      date: e.date,
+      smtp_response: e.smtp_response || null,
+    }));
+
+    // Update failed_recipients in DB based on SMTP2GO data
+    const bounced = events.filter(e => e.event.includes('bounced') || e.event === 'rejected');
+    if (bounced.length > 0) {
+      await pool.query(
+        'UPDATE email_log SET failed_recipients = $1, status = $2 WHERE id = $3',
+        [JSON.stringify(bounced.map(b => b.recipient)),
+         bounced.length >= (log.recipients_count || 1) ? 'failed' : 'partial',
+         log.id]
+      );
+    }
+
+    res.json({ events, total: apiData.data?.total_events || 0 });
+  } catch (err) {
+    console.error('SMTP2GO status error:', err);
+    res.status(500).json({ error: 'SMTP2GO-Abfrage fehlgeschlagen' });
   }
 });
 
