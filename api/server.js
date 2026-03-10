@@ -1187,6 +1187,99 @@ app.get('/api/email/log', authMiddleware, adminOnly, async (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════
+// GOOGLE CALENDAR (ICS → JSON Proxy)
+// ═══════════════════════════════════════════════════════════════════
+
+const GOOGLE_CALENDAR_ICS_URL = process.env.GOOGLE_CALENDAR_ICS_URL ||
+  'https://calendar.google.com/calendar/ical/rosenweg4303%40gmail.com/private-21cb7a217f2b19dc884e2baf38762fb0/basic.ics';
+
+// Simple ICS parser - extracts VEVENT blocks
+function parseICS(icsText) {
+  const events = [];
+  const blocks = icsText.split('BEGIN:VEVENT');
+
+  for (let i = 1; i < blocks.length; i++) {
+    const block = blocks[i].split('END:VEVENT')[0];
+    const event = {};
+
+    // Unfold lines (RFC 5545: lines starting with space/tab are continuations)
+    const unfolded = block.replace(/\r?\n[ \t]/g, '');
+
+    for (const line of unfolded.split(/\r?\n/)) {
+      const match = line.match(/^([A-Z\-;]+?)[:;](.+)/);
+      if (!match) continue;
+      const key = match[1];
+      const value = match[2];
+
+      if (key === 'SUMMARY') {
+        event.title = value.replace(/\\,/g, ',').replace(/\\n/g, '\n').trim();
+      } else if (key.startsWith('DTSTART')) {
+        event.start = parseICSDate(value);
+      } else if (key.startsWith('DTEND')) {
+        event.end = parseICSDate(value);
+      } else if (key === 'LOCATION') {
+        event.location = value.replace(/\\,/g, ',').replace(/\\n/g, '\n').trim();
+      } else if (key === 'DESCRIPTION') {
+        event.description = value.replace(/\\,/g, ',').replace(/\\n/g, '\n').replace(/\\;/g, ';').trim();
+      }
+    }
+
+    if (event.title && event.start) {
+      events.push(event);
+    }
+  }
+
+  return events;
+}
+
+function parseICSDate(value) {
+  // Remove any parameters like TZID=... before the actual value
+  const parts = value.split(':');
+  const dateStr = parts.length > 1 ? parts[parts.length - 1] : parts[0];
+  // Format: 20260315T190000Z or 20260315T190000 or 20260315
+  const m = dateStr.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2}))?/);
+  if (!m) return null;
+  const [, y, mo, d, h, mi, s] = m;
+  if (h !== undefined) {
+    const isUTC = dateStr.endsWith('Z');
+    if (isUTC) {
+      return new Date(Date.UTC(+y, +mo - 1, +d, +h, +mi, +s)).toISOString();
+    }
+    return new Date(+y, +mo - 1, +d, +h, +mi, +s).toISOString();
+  }
+  // All-day event
+  return `${y}-${mo}-${d}`;
+}
+
+// Cache: re-fetch at most every 5 minutes
+let calendarCache = { data: null, fetchedAt: 0 };
+
+app.get('/api/calendar', async (req, res) => {
+  try {
+    const now = Date.now();
+    if (!calendarCache.data || now - calendarCache.fetchedAt > 5 * 60 * 1000) {
+      const response = await fetch(GOOGLE_CALENDAR_ICS_URL);
+      if (!response.ok) throw new Error(`Google Calendar fetch failed: ${response.status}`);
+      const icsText = await response.text();
+      const allEvents = parseICS(icsText);
+
+      // Only return future events (from today onwards), sorted by start date
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const futureEvents = allEvents
+        .filter(e => new Date(e.start) >= today)
+        .sort((a, b) => new Date(a.start) - new Date(b.start));
+
+      calendarCache = { data: futureEvents, fetchedAt: now };
+    }
+    res.json({ events: calendarCache.data });
+  } catch (err) {
+    console.error('Calendar fetch error:', err.message);
+    res.status(500).json({ error: 'Kalender konnte nicht geladen werden' });
+  }
+});
+
 // ─── SMS Auto-Fetch (poll Peoplefon every 60s) ─────────────────────
 let smsFetchInterval = null;
 

@@ -420,37 +420,18 @@
         </div>
     </section>
 
-    <!-- Termine & Kalender -->
+    <!-- Termine & Kalender (dynamisch aus Google Calendar) -->
     <section class="py-16 bg-gray-50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">Termine & Veranstaltungen</h2>
             <div class="bg-white rounded-lg shadow-md p-6">
-                <div class="space-y-4">
-                    <div class="border-l-4 border-purple-600 pl-4 py-3 bg-purple-50">
-                        <p class="font-semibold text-gray-800 text-lg">Hauptversammlung aller STWEGs</p>
-                        <p class="text-gray-600 text-sm mt-1"><strong>Datum:</strong> [Datum und Uhrzeit eintragen]</p>
-                        <p class="text-gray-600 text-sm""><strong>Ort:</strong> [Ort eintragen]</p>
-                        <p class="text-gray-500 text-xs mt-2">Jährliche Versammlung aller 8 STWEGs - Wichtigste Entscheidungsinstanz</p>
-                    </div>
-                    <div class="border-l-4 border-blue-600 pl-4 py-2">
-                        <p class="font-semibold text-gray-800">Nächste Ausschusssitzung</p>
-                        <p class="text-gray-600 text-sm">[Datum und Uhrzeit eintragen]</p>
-                        <p class="text-gray-600 text-sm">[Ort eintragen]</p>
-                        <p class="text-gray-500 text-xs mt-1">Regelmäßige Sitzung der Ausschussvertreter</p>
-                    </div>
-                    <div class="border-l-4 border-green-600 pl-4 py-2">
-                        <p class="font-semibold text-gray-800">Geplante Wartungsarbeiten</p>
-                        <p class="text-gray-600 text-sm">[Datum eintragen]</p>
-                        <p class="text-gray-600 text-sm">[Beschreibung der Arbeiten]</p>
-                    </div>
-                    <div class="border-l-4 border-yellow-600 pl-4 py-2">
-                        <p class="font-semibold text-gray-800">Hausreinigung</p>
-                        <p class="text-gray-600 text-sm">Jeden [Wochentag]</p>
-                    </div>
+                <div id="calendar-events" class="space-y-4">
+                    <!-- Wird dynamisch aus Google Calendar geladen -->
                 </div>
             </div>
         </div>
     </section>
+    <script src="js/calendar-loader.js"></script>
 
     <!-- Dokumente -->
     <section id="dokumente" class="py-16 bg-white">
