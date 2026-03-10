@@ -244,6 +244,18 @@
         return user?.groups?.some(g => g.toLowerCase().includes('technik'));
     }
 
+    async function loadTariffs(date) {
+        try {
+            const dateParam = date ? `?date=${date}` : '';
+            const res = await fetch(`${API}/tariffs/current${dateParam}`);
+            const tariffs = await res.json();
+            const netz = tariffs.find(t => t.name.toLowerCase().includes('netz'));
+            const solar = tariffs.find(t => t.name.toLowerCase().includes('solar'));
+            TARIFE.netz = netz ? parseFloat(netz.price_per_kwh) : 0;
+            TARIFE.solar = solar ? parseFloat(solar.price_per_kwh) : 0;
+        } catch (e) { console.warn('Tariffs not loaded:', e); }
+    }
+
     // ─── Init ───────────────────────────────────────────────────────
     async function init() {
         // Require authentication
@@ -296,15 +308,7 @@
             return;
         }
 
-        // Load tariffs from DB
-        try {
-            const tariffRes = await fetch(`${API}/tariffs`);
-            const tariffs = await tariffRes.json();
-            const netz = tariffs.find(t => t.name.toLowerCase().includes('netz'));
-            const solar = tariffs.find(t => t.name.toLowerCase().includes('solar'));
-            if (netz) TARIFE.netz = parseFloat(netz.price_per_kwh);
-            if (solar) TARIFE.solar = parseFloat(solar.price_per_kwh);
-        } catch (e) { console.warn('Tariffs not loaded:', e); }
+        await loadTariffs();
 
         initCharts();
         initDateNav();
@@ -950,7 +954,11 @@
     }
 
     // ─── Refresh All ────────────────────────────────────────────────
-    function refreshAll() {
+    async function refreshAll() {
+        // Reload tariffs for selected date
+        const tariffDate = isLive ? null : selectedDate?.toISOString().slice(0, 10);
+        await loadTariffs(tariffDate);
+
         if (isLive) {
             pollLive();
         } else {
