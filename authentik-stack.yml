@@ -28,6 +28,7 @@ services:
       - authentik-templates:/templates
     networks:
       - authentik-net
+      - rosenweg-net
     deploy:
       replicas: 1
       placement:
@@ -37,6 +38,14 @@ services:
         condition: on-failure
         delay: 5s
         max_attempts: 3
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.authentik.rule=Host(`authentik.rosenweg4303.ch`)"
+        - "traefik.http.routers.authentik.entrypoints=websecure"
+        - "traefik.http.routers.authentik.tls.certresolver=letsencrypt"
+        - "traefik.http.services.authentik.loadbalancer.server.port=9000"
+        - "traefik.http.services.authentik.loadbalancer.server.scheme=http"
+        - "traefik.docker.network=rosenweg_rosenweg-net"
 
   # ============================================
   # Authentik Worker
@@ -124,6 +133,9 @@ networks:
   authentik-net:
     driver: overlay
     attachable: true
+  rosenweg-net:
+    external: true
+    name: rosenweg_rosenweg-net
 
 volumes:
   authentik-pgdata:
