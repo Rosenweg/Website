@@ -255,9 +255,6 @@
         currentUser = await AuthentikAuth.init({
             requireAuth: true,
             onLogin(user) {
-                document.getElementById('user-name').textContent = user.name;
-                document.getElementById('user-name').classList.remove('hidden');
-                document.getElementById('logout-btn').classList.remove('hidden');
                 if (isTechnik(user)) {
                     document.getElementById('config-link').classList.remove('hidden');
                 }
