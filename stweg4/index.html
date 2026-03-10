@@ -3,9 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>STWEG 4 - Rosenweg 10/12 - STWEG-Kooperation Rosenweg</title>
+    <title>STWEG 4 - STWEG-Kooperation Rosenweg</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/js/authentik-auth.js"></script>
+    <script src="/js/site-config.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body {
@@ -23,10 +24,20 @@
     <section class="bg-gradient-to-r from-blue-600 to-blue-800 text-white py-12">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <h1 class="text-4xl font-bold mb-2">STWEG 4</h1>
-            <p class="text-xl opacity-90">Rosenweg 10/12, 4303 Kaiseraugst</p>
-            <p class="text-lg opacity-80 mt-2">Wohngebäude</p>
+            <p id="stweg-adresse" class="text-xl opacity-90"></p>
+            <p id="stweg-typ" class="text-lg opacity-80 mt-2"></p>
         </div>
     </section>
+    <script>
+    SiteConfig.load().then(() => {
+        const s = SiteConfig.getStweg(4);
+        if (s) {
+            document.getElementById('stweg-adresse').textContent = s.adressen + ', 4303 Kaiseraugst';
+            document.getElementById('stweg-typ').textContent = s.typ;
+            document.title = s.name + ' - ' + s.adressen + ' - STWEG-Kooperation Rosenweg';
+        }
+    });
+    </script>
 
     <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <!-- Info Box -->

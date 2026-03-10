@@ -1,0 +1,109 @@
+{
+  "kooperation": {
+    "name": "STWEG-Kooperation Rosenweg",
+    "standort": "Rosenweg, 4303 Kaiseraugst",
+    "kanton": "Aargau",
+    "land": "Schweiz",
+    "beschreibung": "Gemeinschaft von 7 Wohngebäuden und einer gemeinsamen Tiefgarage",
+    "email_domain": "rosenweg4303.ch"
+  },
+  "stwegen": [
+    {
+      "nr": 1,
+      "name": "STWEG 1",
+      "adressen": "Rosenweg 17/18",
+      "typ": "Wohngebäude",
+      "email": "stweg1@rosenweg4303.ch"
+    },
+    {
+      "nr": 2,
+      "name": "STWEG 2",
+      "adressen": "Rosenweg 13/14/16",
+      "typ": "Wohngebäude",
+      "email": "stweg2@rosenweg4303.ch"
+    },
+    {
+      "nr": 3,
+      "name": "STWEG 3",
+      "adressen": "Rosenweg 9",
+      "typ": "Wohngebäude",
+      "email": "stweg3@rosenweg4303.ch"
+    },
+    {
+      "nr": 4,
+      "name": "STWEG 4",
+      "adressen": "Rosenweg 10/12",
+      "typ": "Wohngebäude",
+      "email": "stweg4@rosenweg4303.ch"
+    },
+    {
+      "nr": 5,
+      "name": "STWEG 5",
+      "adressen": "Rosenweg 5/6/8",
+      "typ": "Wohngebäude",
+      "email": "stweg5@rosenweg4303.ch"
+    },
+    {
+      "nr": 6,
+      "name": "STWEG 6",
+      "adressen": "Rosenweg 1",
+      "typ": "Wohngebäude",
+      "email": "stweg6@rosenweg4303.ch"
+    },
+    {
+      "nr": 7,
+      "name": "STWEG 7",
+      "adressen": "Rosenweg 2/4",
+      "typ": "Wohngebäude",
+      "email": "stweg7@rosenweg4303.ch"
+    },
+    {
+      "nr": 8,
+      "name": "STWEG 8",
+      "adressen": "Tiefgarage",
+      "typ": "Tiefgarage",
+      "email": "stweg8@rosenweg4303.ch"
+    }
+  ],
+  "verwaltung": {
+    "firma": "LangPartners Immobilien AG",
+    "strasse": "Kirchplatz 18",
+    "plz_ort": "4132 Muttenz",
+    "telefon": "+41 61 228 18 18",
+    "email": "hello@langpartners.ch",
+    "website": "langpartners.ch",
+    "oeffnungszeiten": "Montag – Freitag, 09:00–12:00 Uhr"
+  },
+  "technischer_dienst": {
+    "email": "technik@rosenweg9.ch",
+    "beschreibung": "Sammel-E-Mail für technische Anliegen"
+  },
+  "ausschuss": {
+    "email": "ausschuss@rosenweg4303.ch",
+    "beschreibung": "15 Ausschussmitglieder (2 Vertreter pro STWEG 1–7, 1 Vertreter für STWEG 8)",
+    "praesident": {
+      "name": "Jörg Herrmann",
+      "email": "praesident@rosenweg4303.ch",
+      "telefon": "+41 79 727 13 78",
+      "stweg_nr": 2
+    }
+  },
+  "entsorgung": {
+    "container_standort": "Östlich der Tiefgarageneinfahrt",
+    "container_typen": ["Abfall/Kehricht", "Altpapier", "Karton"],
+    "kehrichtabfuhr": "Freitags & Montags (bis 07:00 Uhr bereitstellen)",
+    "rewag": {
+      "firma": "REWAG Entsorgung AG",
+      "adresse": "Rinaustrasse 633, 4303 Kaiseraugst",
+      "telefon": "+41 61 816 99 70",
+      "website": "rewag-entsorgung.ch",
+      "oeffnungszeiten_buero": "Mo–Fr: 07:00–12:00 / 13:00–17:00, Sa: 09:00–14:00",
+      "oeffnungszeiten_recyclinghof": "Mo–Sa: 06:00–20:00"
+    }
+  },
+  "notfall": {
+    "polizei": "117",
+    "feuerwehr": "118",
+    "sanitaet": "144"
+  }
+}

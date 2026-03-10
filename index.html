@@ -6,6 +6,7 @@
     <title>STWEG-Kooperation Rosenweg - Kaiseraugst</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/js/authentik-auth.js"></script>
+    <script src="/js/site-config.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body {
@@ -179,21 +180,21 @@
                         </svg>
                         <h3 class="text-xl font-semibold">Hausverwaltung</h3>
                     </div>
-                    <p class="text-gray-700 mb-2 font-semibold text-lg">LangPartners Immobilien AG</p>
-                    <p class="text-gray-600 text-sm mb-2">Kirchplatz 18</p>
-                    <p class="text-gray-600 text-sm mb-3">4132 Muttenz</p>
+                    <p id="verw-firma" class="text-gray-700 mb-2 font-semibold text-lg"></p>
+                    <p id="verw-strasse" class="text-gray-600 text-sm mb-2"></p>
+                    <p id="verw-plz" class="text-gray-600 text-sm mb-3"></p>
                     <p class="text-gray-600 text-sm mb-2">
-                        <strong>Tel:</strong> <a href="tel:+41612281818" class="text-blue-600 hover:underline">+41 61 228 18 18</a>
+                        <strong>Tel:</strong> <a id="verw-tel" href="#" class="text-blue-600 hover:underline"></a>
                     </p>
                     <p class="text-gray-600 text-sm mb-2">
-                        <strong>E-Mail:</strong> <a href="mailto:hello@langpartners.ch" class="text-blue-600 hover:underline">hello@langpartners.ch</a>
+                        <strong>E-Mail:</strong> <a id="verw-email" href="#" class="text-blue-600 hover:underline"></a>
                     </p>
                     <p class="text-gray-600 text-sm mb-3">
-                        <strong>Web:</strong> <a href="https://langpartners.ch" target="_blank" class="text-blue-600 hover:underline">langpartners.ch</a>
+                        <strong>Web:</strong> <a id="verw-web" href="#" target="_blank" class="text-blue-600 hover:underline"></a>
                     </p>
                     <p class="text-gray-600 text-sm">
                         <strong>Öffnungszeiten:</strong><br>
-                        Montag – Freitag, 09:00-12:00 Uhr
+                        <span id="verw-oeffnung"></span>
                     </p>
                 </div>
 
@@ -227,7 +228,7 @@
                         <h3 class="text-xl font-semibold">Technischer Dienst</h3>
                     </div>
                     <div class="bg-blue-50 p-4 rounded-lg mb-4">
-                        <p class="text-sm text-blue-800 mb-2"><strong>E-Mail:</strong> <a href="mailto:technik@rosenweg9.ch" class="text-blue-600 hover:underline">technik@rosenweg9.ch</a></p>
+                        <p class="text-sm text-blue-800 mb-2"><strong>E-Mail:</strong> <a id="technik-email" href="#" class="text-blue-600 hover:underline"></a></p>
                         <p class="text-xs text-gray-600">Zuständig für technische Angelegenheiten der STWEG-Kooperation</p>
                     </div>
                     <div id="tech-dienst-mitglieder" class="grid md:grid-cols-3 gap-4">
@@ -247,22 +248,22 @@
                         </svg>
                         Notfallkontakte
                     </h3>
-                    <div class="grid md:grid-cols-2 gap-4 text-gray-700">
+                    <div id="notfall-grid" class="grid md:grid-cols-2 gap-4 text-gray-700">
                         <div>
                             <p class="font-semibold">Polizei:</p>
-                            <p class="text-2xl font-bold text-red-600">117</p>
+                            <p class="text-2xl font-bold text-red-600" id="notfall-polizei"></p>
                         </div>
                         <div>
                             <p class="font-semibold">Feuerwehr:</p>
-                            <p class="text-2xl font-bold text-red-600">118</p>
+                            <p class="text-2xl font-bold text-red-600" id="notfall-feuerwehr"></p>
                         </div>
                         <div>
                             <p class="font-semibold">Sanität:</p>
-                            <p class="text-2xl font-bold text-red-600">144</p>
+                            <p class="text-2xl font-bold text-red-600" id="notfall-sanitaet"></p>
                         </div>
                         <div>
                             <p class="font-semibold">Störungsdienst Heizung:</p>
-                            <p class="text-sm">Kontakt: <a href="mailto:technik@rosenweg9.ch" class="text-blue-600 hover:underline">Technischer Dienst</a></p>
+                            <p class="text-sm">Kontakt: <a id="notfall-technik" href="#" class="text-blue-600 hover:underline">Technischer Dienst</a></p>
                         </div>
                     </div>
                 </div>
@@ -325,11 +326,11 @@
                 <div class="bg-white p-4 rounded-lg mb-4">
                     <div class="flex items-start justify-between">
                         <div>
-                            <p class="font-semibold text-gray-800 mb-1">🏢 REWAG Entsorgung AG</p>
-                            <p class="text-sm text-gray-600 mb-1">Rinaustrasse 633, 4303 Kaiseraugst</p>
-                            <p class="text-xs text-gray-600">Recyclinghof: Mo–Sa 06:00–20:00</p>
+                            <p id="rewag-firma" class="font-semibold text-gray-800 mb-1"></p>
+                            <p id="rewag-adresse" class="text-sm text-gray-600 mb-1"></p>
+                            <p id="rewag-recyclinghof" class="text-xs text-gray-600"></p>
                         </div>
-                        <a href="tel:+41618169970" class="text-blue-600 hover:underline text-sm whitespace-nowrap ml-4">061 816 99 70</a>
+                        <a id="rewag-tel" href="#" class="text-blue-600 hover:underline text-sm whitespace-nowrap ml-4"></a>
                     </div>
                 </div>
 
@@ -550,7 +551,7 @@
             </div>
             <div class="mt-8 pt-8 border-t border-gray-700 text-center text-sm text-gray-400">
                 <p>&copy; 2025 STWEG-Kooperation Rosenweg. Alle Rechte vorbehalten.</p>
-                <p class="mt-2">Verwaltung: LangPartners Immobilien AG, Muttenz | Letzte Aktualisierung: Oktober 2025</p>
+                <p id="footer-verwaltung" class="mt-2"></p>
             </div>
         </div>
     </footer>
@@ -571,6 +572,52 @@
     
     <!-- Ausschuss-Loader -->
     <script src="ausschuss-loader.js"></script>
+
+    <!-- Config-basierte Daten laden -->
+    <script>
+    SiteConfig.load().then(() => {
+        const v = SiteConfig.getVerwaltung();
+        if (v) {
+            document.getElementById('verw-firma').textContent = v.firma;
+            document.getElementById('verw-strasse').textContent = v.strasse;
+            document.getElementById('verw-plz').textContent = v.plz_ort;
+            const tel = document.getElementById('verw-tel');
+            tel.textContent = v.telefon;
+            tel.href = 'tel:' + v.telefon.replace(/\s/g, '');
+            const email = document.getElementById('verw-email');
+            email.textContent = v.email;
+            email.href = 'mailto:' + v.email;
+            const web = document.getElementById('verw-web');
+            web.textContent = v.website;
+            web.href = 'https://' + v.website;
+            document.getElementById('verw-oeffnung').textContent = v.oeffnungszeiten;
+            document.getElementById('footer-verwaltung').textContent = 'Verwaltung: ' + v.firma + ', ' + v.plz_ort.split(' ').pop();
+        }
+        const t = SiteConfig.getTechnik();
+        if (t) {
+            const te = document.getElementById('technik-email');
+            te.textContent = t.email;
+            te.href = 'mailto:' + t.email;
+            const nt = document.getElementById('notfall-technik');
+            nt.href = 'mailto:' + t.email;
+        }
+        const n = SiteConfig.getNotfall();
+        if (n) {
+            document.getElementById('notfall-polizei').textContent = n.polizei;
+            document.getElementById('notfall-feuerwehr').textContent = n.feuerwehr;
+            document.getElementById('notfall-sanitaet').textContent = n.sanitaet;
+        }
+        const e = SiteConfig.getEntsorgung();
+        if (e && e.rewag) {
+            document.getElementById('rewag-firma').textContent = '🏢 ' + e.rewag.firma;
+            document.getElementById('rewag-adresse').textContent = e.rewag.adresse;
+            document.getElementById('rewag-recyclinghof').textContent = 'Recyclinghof: ' + e.rewag.oeffnungszeiten_recyclinghof;
+            const rt = document.getElementById('rewag-tel');
+            rt.textContent = e.rewag.telefon.replace('+41 ', '0').replace(/\s/g, ' ');
+            rt.href = 'tel:' + e.rewag.telefon.replace(/\s/g, '');
+        }
+    });
+    </script>
 
     <!-- Technischer Dienst Loader -->
     <script>
