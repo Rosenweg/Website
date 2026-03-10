@@ -134,10 +134,34 @@ async function initDB() {
       CREATE TABLE IF NOT EXISTS meters (
         id VARCHAR(100) PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
+        type VARCHAR(50) NOT NULL DEFAULT 'modbus',
         host VARCHAR(255) NOT NULL,
         port INTEGER NOT NULL DEFAULT 502,
         unit_id INTEGER NOT NULL DEFAULT 1,
+        shelly_type VARCHAR(50),
+        active BOOLEAN DEFAULT true,
         created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS tariffs (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        price_per_kwh DECIMAL(10,4) NOT NULL,
+        description TEXT,
+        valid_from DATE,
+        valid_to DATE,
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS meter_users (
+        id SERIAL PRIMARY KEY,
+        meter_id VARCHAR(100) NOT NULL REFERENCES meters(id) ON DELETE CASCADE,
+        user_email VARCHAR(255) NOT NULL,
+        user_name VARCHAR(255),
+        role VARCHAR(50) DEFAULT 'viewer',
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(meter_id, user_email)
       );
 
       CREATE TABLE IF NOT EXISTS readings (
@@ -193,13 +217,32 @@ async function initDB() {
         ON readings_hourly(meter_id, hour);
     `);
 
-    // Register configured meters
+    // Register configured meters (from env)
     for (const meter of METERS) {
       await client.query(
-        `INSERT INTO meters (id, name, host, port, unit_id)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO meters (id, name, type, host, port, unit_id)
+         VALUES ($1, $2, 'modbus', $3, $4, $5)
          ON CONFLICT (id) DO UPDATE SET name=$2, host=$3, port=$4, unit_id=$5`,
         [meter.name, meter.name, meter.host, meter.port, meter.unitId]
+      );
+    }
+
+    // Add valid_from/valid_to columns if they don't exist (migration for existing DBs)
+    await client.query(`
+      DO $$ BEGIN
+        ALTER TABLE tariffs ADD COLUMN IF NOT EXISTS valid_from DATE;
+        ALTER TABLE tariffs ADD COLUMN IF NOT EXISTS valid_to DATE;
+      EXCEPTION WHEN others THEN NULL;
+      END $$;
+    `);
+
+    // Insert default tariffs if none exist
+    const tariffsExist = await client.query('SELECT COUNT(*) FROM tariffs');
+    if (parseInt(tariffsExist.rows[0].count) === 0) {
+      await client.query(
+        `INSERT INTO tariffs (name, price_per_kwh, description, valid_from) VALUES
+         ('Netztarif', 0.2516, 'Standardtarif Netzbezug', '2025-01-01'),
+         ('Solartarif', 0.10, 'Eigenverbrauch Solarstrom', '2025-01-01')`
       );
     }
 
@@ -209,18 +252,87 @@ async function initDB() {
   }
 }
 
-// ─── Polling Loop ───────────────────────────────────────────────────
-const clients = new Map();
+// ─── Shelly HTTP Reader ─────────────────────────────────────────────
+async function readShelly(meter) {
+  const url = `http://${meter.host}/rpc/Switch.GetStatus?id=0`;
+  const urlMeter = `http://${meter.host}/rpc/Shelly.GetStatus`;
 
-async function getClient(meter) {
-  let client = clients.get(meter.name);
+  let data = {
+    power_w: 0, power_l1_w: 0, power_l2_w: 0, power_l3_w: 0,
+    voltage_l1_v: 0, voltage_l2_v: 0, voltage_l3_v: 0,
+    current_l1_a: 0, current_l2_a: 0, current_l3_a: 0,
+    pf_l1: 0, pf_l2: 0, pf_l3: 0, tariff: 0,
+    energy_import_kwh: 0, energy_export_kwh: 0,
+    energy_import_t1_kwh: 0, energy_import_t2_kwh: 0,
+    energy_export_t1_kwh: 0, energy_export_t2_kwh: 0,
+  };
+
+  try {
+    // Try Gen2+ API first (Shelly Plus/Pro)
+    const res = await fetch(urlMeter, { signal: AbortSignal.timeout(3000) });
+    const status = await res.json();
+
+    if (status['em:0']) {
+      // Shelly Pro 3EM
+      const em = status['em:0'];
+      data.power_w = em.total_act_power || 0;
+      data.power_l1_w = em.a_act_power || 0;
+      data.power_l2_w = em.b_act_power || 0;
+      data.power_l3_w = em.c_act_power || 0;
+      data.voltage_l1_v = em.a_voltage || 0;
+      data.voltage_l2_v = em.b_voltage || 0;
+      data.voltage_l3_v = em.c_voltage || 0;
+      data.current_l1_a = em.a_current || 0;
+      data.current_l2_a = em.b_current || 0;
+      data.current_l3_a = em.c_current || 0;
+      data.pf_l1 = em.a_pf || 0;
+      data.pf_l2 = em.b_pf || 0;
+      data.pf_l3 = em.c_pf || 0;
+      // Energy from emdata
+      if (status['emdata:0']) {
+        const emd = status['emdata:0'];
+        data.energy_import_kwh = (emd.total_act || 0) / 1000;
+        data.energy_export_kwh = (emd.total_act_ret || 0) / 1000;
+      }
+    } else if (status['switch:0']) {
+      // Shelly Plus Plug / Plus 1PM etc.
+      const sw = status['switch:0'];
+      data.power_w = sw.apower || 0;
+      data.power_l1_w = sw.apower || 0;
+      data.voltage_l1_v = sw.voltage || 0;
+      data.current_l1_a = sw.current || 0;
+      data.energy_import_kwh = (sw.aenergy?.total || 0) / 1000;
+    }
+  } catch (gen2Err) {
+    // Try Gen1 API (Shelly 1PM, Shelly Plug S, etc.)
+    try {
+      const res = await fetch(`http://${meter.host}/status`, { signal: AbortSignal.timeout(3000) });
+      const status = await res.json();
+      if (status.meters && status.meters[0]) {
+        data.power_w = status.meters[0].power || 0;
+        data.power_l1_w = data.power_w;
+        data.energy_import_kwh = (status.meters[0].total || 0) / 60000; // Watt-minutes to kWh
+      }
+    } catch (gen1Err) {
+      throw new Error(`Shelly unreachable: ${gen2Err.message}`);
+    }
+  }
+
+  return data;
+}
+
+// ─── Polling Loop ───────────────────────────────────────────────────
+const modbusClients = new Map();
+
+async function getModbusClient(meter) {
+  let client = modbusClients.get(meter.id);
   if (client && client.isOpen) return client;
 
   client = new ModbusRTU();
   await client.connectTCP(meter.host, { port: meter.port });
   client.setTimeout(3000);
-  clients.set(meter.name, client);
-  console.log(`Connected to ${meter.name} (${meter.host}:${meter.port})`);
+  modbusClients.set(meter.id, client);
+  console.log(`Modbus connected: ${meter.name} (${meter.host}:${meter.port})`);
   return client;
 }
 
@@ -229,11 +341,16 @@ const latestReadings = new Map();
 
 async function pollMeter(meter) {
   try {
-    const client = await getClient(meter);
-    const data = await readMeter(client, meter);
+    let data;
+    if (meter.type === 'shelly') {
+      data = await readShelly(meter);
+    } else {
+      const client = await getModbusClient(meter);
+      data = await readMeter(client, meter);
+    }
     const ts = new Date();
 
-    latestReadings.set(meter.name, { ...data, ts, meter_id: meter.name });
+    latestReadings.set(meter.id, { ...data, ts, meter_id: meter.id });
 
     await pool.query(
       `INSERT INTO readings (
@@ -246,7 +363,7 @@ async function pollMeter(meter) {
         energy_export_t1_kwh, energy_export_t2_kwh
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
       [
-        meter.name, ts,
+        meter.id, ts,
         data.power_w, data.power_l1_w, data.power_l2_w, data.power_l3_w,
         data.voltage_l1_v, data.voltage_l2_v, data.voltage_l3_v,
         data.current_l1_a, data.current_l2_a, data.current_l3_a,
@@ -258,17 +375,25 @@ async function pollMeter(meter) {
     );
   } catch (err) {
     console.error(`Poll error [${meter.name}]:`, err.message);
-    // Close broken connection so it reconnects next poll
-    const client = clients.get(meter.name);
-    if (client) {
-      try { client.close(); } catch (_) {}
-      clients.delete(meter.name);
+    if (meter.type === 'modbus') {
+      const client = modbusClients.get(meter.id);
+      if (client) {
+        try { client.close(); } catch (_) {}
+        modbusClients.delete(meter.id);
+      }
     }
   }
 }
 
+// Load active meters from DB for polling
+async function getActiveMeters() {
+  const result = await pool.query('SELECT * FROM meters WHERE active = true');
+  return result.rows;
+}
+
 async function pollAll() {
-  for (const meter of METERS) {
+  const meters = await getActiveMeters();
+  for (const meter of meters) {
     await pollMeter(meter);
   }
 }
@@ -420,6 +545,186 @@ app.get('/api/energy/today/:meterId', async (req, res) => {
     [meterId, today.toISOString()]
   );
   res.json(result.rows[0] || {});
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// CONFIG API (Meters, Users, Tariffs)
+// ═══════════════════════════════════════════════════════════════════
+app.use(express.json());
+
+// --- Meter Management ---
+app.post('/api/energy/meters', async (req, res) => {
+  const { id, name, type, host, port, unit_id, shelly_type } = req.body;
+  if (!id || !name || !host) return res.status(400).json({ error: 'id, name, host required' });
+  try {
+    const result = await pool.query(
+      `INSERT INTO meters (id, name, type, host, port, unit_id, shelly_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (id) DO UPDATE SET name=$2, type=$3, host=$4, port=$5, unit_id=$6, shelly_type=$7
+       RETURNING *`,
+      [id, name, type || 'modbus', host, port || 502, unit_id || 1, shelly_type || null]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/energy/meters/:id', async (req, res) => {
+  const { name, type, host, port, unit_id, shelly_type, active } = req.body;
+  try {
+    const result = await pool.query(
+      `UPDATE meters SET name=COALESCE($2,name), type=COALESCE($3,type), host=COALESCE($4,host),
+       port=COALESCE($5,port), unit_id=COALESCE($6,unit_id), shelly_type=$7, active=COALESCE($8,active)
+       WHERE id=$1 RETURNING *`,
+      [req.params.id, name, type, host, port, unit_id, shelly_type || null, active]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/energy/meters/:id', async (req, res) => {
+  try {
+    // Delete readings first
+    await pool.query('DELETE FROM readings WHERE meter_id = $1', [req.params.id]);
+    await pool.query('DELETE FROM meters WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Test meter connection
+app.post('/api/energy/meters/:id/test', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM meters WHERE id = $1', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const meter = result.rows[0];
+
+    if (meter.type === 'shelly') {
+      const data = await readShelly(meter);
+      res.json({ success: true, data });
+    } else {
+      const client = new ModbusRTU();
+      await client.connectTCP(meter.host, { port: meter.port });
+      client.setTimeout(3000);
+      const data = await readMeter(client, meter);
+      client.close();
+      res.json({ success: true, data });
+    }
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+  }
+});
+
+// --- Tariff Management ---
+app.get('/api/energy/tariffs', async (req, res) => {
+  const result = await pool.query('SELECT * FROM tariffs ORDER BY name, valid_from DESC NULLS LAST');
+  res.json(result.rows);
+});
+
+// Get currently active tariffs (valid_from <= today AND (valid_to IS NULL OR valid_to >= today))
+app.get('/api/energy/tariffs/current', async (req, res) => {
+  const result = await pool.query(
+    `SELECT * FROM tariffs
+     WHERE active = true
+       AND (valid_from IS NULL OR valid_from <= CURRENT_DATE)
+       AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
+     ORDER BY name`
+  );
+  res.json(result.rows);
+});
+
+app.post('/api/energy/tariffs', async (req, res) => {
+  const { name, price_per_kwh, description, valid_from, valid_to } = req.body;
+  if (!name || price_per_kwh == null) return res.status(400).json({ error: 'name, price_per_kwh required' });
+  try {
+    const result = await pool.query(
+      'INSERT INTO tariffs (name, price_per_kwh, description, valid_from, valid_to) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [name, price_per_kwh, description || '', valid_from || null, valid_to || null]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/energy/tariffs/:id', async (req, res) => {
+  const { name, price_per_kwh, description, valid_from, valid_to, active } = req.body;
+  try {
+    const result = await pool.query(
+      `UPDATE tariffs SET name=COALESCE($2,name), price_per_kwh=COALESCE($3,price_per_kwh),
+       description=COALESCE($4,description), valid_from=$5, valid_to=$6, active=COALESCE($7,active)
+       WHERE id=$1 RETURNING *`,
+      [req.params.id, name, price_per_kwh, description, valid_from || null, valid_to || null, active]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/energy/tariffs/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM tariffs WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- User-Meter Assignment ---
+app.get('/api/energy/meters/:meterId/users', async (req, res) => {
+  const result = await pool.query(
+    'SELECT * FROM meter_users WHERE meter_id = $1 ORDER BY user_name',
+    [req.params.meterId]
+  );
+  res.json(result.rows);
+});
+
+app.post('/api/energy/meters/:meterId/users', async (req, res) => {
+  const { user_email, user_name, role } = req.body;
+  if (!user_email) return res.status(400).json({ error: 'user_email required' });
+  try {
+    const result = await pool.query(
+      `INSERT INTO meter_users (meter_id, user_email, user_name, role)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (meter_id, user_email) DO UPDATE SET user_name=$3, role=$4
+       RETURNING *`,
+      [req.params.meterId, user_email.toLowerCase(), user_name || '', role || 'viewer']
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/energy/meters/:meterId/users/:email', async (req, res) => {
+  try {
+    await pool.query(
+      'DELETE FROM meter_users WHERE meter_id = $1 AND user_email = $2',
+      [req.params.meterId, req.params.email.toLowerCase()]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get meters for a specific user
+app.get('/api/energy/user/:email/meters', async (req, res) => {
+  const result = await pool.query(
+    `SELECT m.*, mu.role FROM meters m
+     JOIN meter_users mu ON m.id = mu.meter_id
+     WHERE mu.user_email = $1 AND m.active = true
+     ORDER BY m.name`,
+    [req.params.email.toLowerCase()]
+  );
+  res.json(result.rows);
 });
 
 // ─── Startup ────────────────────────────────────────────────────────
