@@ -2393,7 +2393,10 @@ async function initDB() {
       -- Ensure duration_minutes column exists on wasch_sessions
       ALTER TABLE wasch_sessions ADD COLUMN IF NOT EXISTS duration_minutes INTEGER;
 
-      -- Create index for reservation conflict checks
+    `);
+
+    // Create index after migration (separate query to avoid parse errors on old schema)
+    await client.query(`
       CREATE INDEX IF NOT EXISTS idx_wasch_res_times ON wasch_reservations(room_id, start_time, end_time) WHERE cancelled = false;
     `);
 
