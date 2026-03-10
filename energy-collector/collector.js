@@ -678,14 +678,17 @@ app.get('/api/energy/tariffs', async (req, res) => {
   res.json(result.rows);
 });
 
-// Get currently active tariffs (valid_from <= today AND (valid_to IS NULL OR valid_to >= today))
+// Get active tariffs for a date (default: today). Use ?date=YYYY-MM-DD for historical.
 app.get('/api/energy/tariffs/current', async (req, res) => {
+  const { date } = req.query;
+  const refDate = date || new Date().toISOString().slice(0, 10);
   const result = await pool.query(
     `SELECT * FROM tariffs
      WHERE active = true
-       AND (valid_from IS NULL OR valid_from <= CURRENT_DATE)
-       AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
-     ORDER BY name`
+       AND (valid_from IS NULL OR valid_from <= $1)
+       AND (valid_to IS NULL OR valid_to >= $1)
+     ORDER BY name`,
+    [refDate]
   );
   res.json(result.rows);
 });
