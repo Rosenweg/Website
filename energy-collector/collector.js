@@ -23,30 +23,9 @@ const pool = new Pool({
 
 // ─── smart-me Telstar 80A Register Map ──────────────────────────────
 // All registers use FC03 (Read Holding Registers), Big Endian
-const REGISTERS = {
-  serial:           { addr: 0x2000, len: 2, type: 'uint32', unit: null },
-  timestamp:        { addr: 0x2002, len: 2, type: 'uint32', unit: null },
-  power_total:      { addr: 0x2004, len: 2, type: 'int32',  unit: 'mW' },
-  power_l1:         { addr: 0x2006, len: 2, type: 'int32',  unit: 'mW' },
-  power_l2:         { addr: 0x2008, len: 2, type: 'int32',  unit: 'mW' },
-  power_l3:         { addr: 0x200A, len: 2, type: 'int32',  unit: 'mW' },
-  voltage_l1:       { addr: 0x2014, len: 2, type: 'uint32', unit: 'mV' },
-  voltage_l2:       { addr: 0x2016, len: 2, type: 'uint32', unit: 'mV' },
-  voltage_l3:       { addr: 0x2018, len: 2, type: 'uint32', unit: 'mV' },
-  current_l1:       { addr: 0x201A, len: 2, type: 'int32',  unit: 'mA' },
-  current_l2:       { addr: 0x201C, len: 2, type: 'int32',  unit: 'mA' },
-  current_l3:       { addr: 0x201E, len: 2, type: 'int32',  unit: 'mA' },
-  pf_l1:            { addr: 0x2020, len: 1, type: 'uint16', unit: '1/1000' },
-  pf_l2:            { addr: 0x2021, len: 1, type: 'uint16', unit: '1/1000' },
-  pf_l3:            { addr: 0x2022, len: 1, type: 'uint16', unit: '1/1000' },
-  tariff:           { addr: 0x2023, len: 1, type: 'uint16', unit: null },
-  energy_import:    { addr: 0x2024, len: 4, type: 'uint64', unit: 'mWh' },
-  energy_export:    { addr: 0x2028, len: 4, type: 'uint64', unit: 'mWh' },
-  energy_import_t1: { addr: 0x202C, len: 4, type: 'uint64', unit: 'mWh' },
-  energy_import_t2: { addr: 0x2030, len: 4, type: 'uint64', unit: 'mWh' },
-  energy_export_t1: { addr: 0x2034, len: 4, type: 'uint64', unit: 'mWh' },
-  energy_export_t2: { addr: 0x2038, len: 4, type: 'uint64', unit: 'mWh' },
-};
+// IMPORTANT: smart-me Modbus addresses are "internal address - 1"
+// All values are int32 (2 registers each)
+// Power in W, Voltage in mV, Current in cA (centamps), Energy in Wh
 
 // ─── Modbus Read Helpers ────────────────────────────────────────────
 function parseRegisterValue(buffer, type) {
@@ -54,11 +33,7 @@ function parseRegisterValue(buffer, type) {
     case 'uint16': return buffer.readUInt16BE(0);
     case 'int32':  return buffer.readInt32BE(0);
     case 'uint32': return buffer.readUInt32BE(0);
-    case 'uint64': {
-      const high = buffer.readUInt32BE(0);
-      const low = buffer.readUInt32BE(4);
-      return high * 0x100000000 + low;
-    }
+    case 'int16':  return buffer.readInt16BE(0);
     default: return 0;
   }
 }
@@ -68,61 +43,52 @@ async function readMeter(client, meter) {
 
   const data = {};
 
-  // Read all registers in logical groups to minimize requests
-  // Group 1: Power registers (0x2004 - 0x200B, 8 registers)
-  const powerBuf = await client.readHoldingRegisters(0x2004, 8);
-  data.power_total_mw = parseRegisterValue(Buffer.from(powerBuf.buffer), 'int32');
-  data.power_l1_mw = parseRegisterValue(Buffer.from(powerBuf.buffer.slice(4)), 'int32');
-  data.power_l2_mw = parseRegisterValue(Buffer.from(powerBuf.buffer.slice(8)), 'int32');
-  data.power_l3_mw = parseRegisterValue(Buffer.from(powerBuf.buffer.slice(12)), 'int32');
+  // smart-me: Modbus address = internal address - 1
+  // All values are int32 (2 registers each), Big Endian
 
-  // Group 2: Voltage + Current (0x2014 - 0x201F, 12 registers)
-  const vcBuf = await client.readHoldingRegisters(0x2014, 12);
-  data.voltage_l1_mv = parseRegisterValue(Buffer.from(vcBuf.buffer), 'uint32');
-  data.voltage_l2_mv = parseRegisterValue(Buffer.from(vcBuf.buffer.slice(4)), 'uint32');
-  data.voltage_l3_mv = parseRegisterValue(Buffer.from(vcBuf.buffer.slice(8)), 'uint32');
-  data.current_l1_ma = parseRegisterValue(Buffer.from(vcBuf.buffer.slice(12)), 'int32');
-  data.current_l2_ma = parseRegisterValue(Buffer.from(vcBuf.buffer.slice(16)), 'int32');
-  data.current_l3_ma = parseRegisterValue(Buffer.from(vcBuf.buffer.slice(20)), 'int32');
+  // Group 1: Power registers (internal 0x2004-0x200B → Modbus 0x2003-0x200A, 8 registers)
+  const powerBuf = await client.readHoldingRegisters(0x2003, 8);
+  data.power_w = parseRegisterValue(Buffer.from(powerBuf.buffer), 'int32');        // W
+  data.power_l1_w = parseRegisterValue(Buffer.from(powerBuf.buffer.slice(4)), 'int32');
+  data.power_l2_w = parseRegisterValue(Buffer.from(powerBuf.buffer.slice(8)), 'int32');
+  data.power_l3_w = parseRegisterValue(Buffer.from(powerBuf.buffer.slice(12)), 'int32');
 
-  // Group 3: Power factor + tariff (0x2020 - 0x2023, 4 registers)
-  const pfBuf = await client.readHoldingRegisters(0x2020, 4);
-  data.pf_l1 = parseRegisterValue(Buffer.from(pfBuf.buffer), 'uint16') / 1000;
-  data.pf_l2 = parseRegisterValue(Buffer.from(pfBuf.buffer.slice(2)), 'uint16') / 1000;
-  data.pf_l3 = parseRegisterValue(Buffer.from(pfBuf.buffer.slice(4)), 'uint16') / 1000;
-  data.tariff = parseRegisterValue(Buffer.from(pfBuf.buffer.slice(6)), 'uint16');
+  // Group 2: Voltage + Current (internal 0x2014-0x201F → Modbus 0x2013-0x201E, 12 registers)
+  const vcBuf = await client.readHoldingRegisters(0x2013, 12);
+  data.voltage_l1_mv = parseRegisterValue(Buffer.from(vcBuf.buffer), 'int32');      // mV
+  data.voltage_l2_mv = parseRegisterValue(Buffer.from(vcBuf.buffer.slice(4)), 'int32');
+  data.voltage_l3_mv = parseRegisterValue(Buffer.from(vcBuf.buffer.slice(8)), 'int32');
+  data.current_l1_ca = parseRegisterValue(Buffer.from(vcBuf.buffer.slice(12)), 'int32'); // cA (centamps)
+  data.current_l2_ca = parseRegisterValue(Buffer.from(vcBuf.buffer.slice(16)), 'int32');
+  data.current_l3_ca = parseRegisterValue(Buffer.from(vcBuf.buffer.slice(20)), 'int32');
 
-  // Group 4: Energy counters (0x2024 - 0x203B, 24 registers)
-  const energyBuf = await client.readHoldingRegisters(0x2024, 24);
-  data.energy_import_mwh = parseRegisterValue(Buffer.from(energyBuf.buffer), 'uint64');
-  data.energy_export_mwh = parseRegisterValue(Buffer.from(energyBuf.buffer.slice(8)), 'uint64');
-  data.energy_import_t1_mwh = parseRegisterValue(Buffer.from(energyBuf.buffer.slice(16)), 'uint64');
-  data.energy_import_t2_mwh = parseRegisterValue(Buffer.from(energyBuf.buffer.slice(24)), 'uint64');
-  data.energy_export_t1_mwh = parseRegisterValue(Buffer.from(energyBuf.buffer.slice(32)), 'uint64');
-  data.energy_export_t2_mwh = parseRegisterValue(Buffer.from(energyBuf.buffer.slice(40)), 'uint64');
+  // Group 3: Energy import/export in kWh (internal 0x204C/0x204E → Modbus 0x204B/0x204D)
+  const energyBuf = await client.readHoldingRegisters(0x204B, 4);
+  data.energy_import_raw = parseRegisterValue(Buffer.from(energyBuf.buffer), 'int32');      // kWh * 1000
+  data.energy_export_raw = parseRegisterValue(Buffer.from(energyBuf.buffer.slice(4)), 'int32');
 
   // Convert to human-readable units
   return {
-    power_w: data.power_total_mw / 1000,
-    power_l1_w: data.power_l1_mw / 1000,
-    power_l2_w: data.power_l2_mw / 1000,
-    power_l3_w: data.power_l3_mw / 1000,
+    power_w: data.power_w,
+    power_l1_w: data.power_l1_w,
+    power_l2_w: data.power_l2_w,
+    power_l3_w: data.power_l3_w,
     voltage_l1_v: data.voltage_l1_mv / 1000,
     voltage_l2_v: data.voltage_l2_mv / 1000,
     voltage_l3_v: data.voltage_l3_mv / 1000,
-    current_l1_a: data.current_l1_ma / 1000,
-    current_l2_a: data.current_l2_ma / 1000,
-    current_l3_a: data.current_l3_ma / 1000,
-    pf_l1: data.pf_l1,
-    pf_l2: data.pf_l2,
-    pf_l3: data.pf_l3,
-    tariff: data.tariff,
-    energy_import_kwh: data.energy_import_mwh / 1000000,
-    energy_export_kwh: data.energy_export_mwh / 1000000,
-    energy_import_t1_kwh: data.energy_import_t1_mwh / 1000000,
-    energy_import_t2_kwh: data.energy_import_t2_mwh / 1000000,
-    energy_export_t1_kwh: data.energy_export_t1_mwh / 1000000,
-    energy_export_t2_kwh: data.energy_export_t2_mwh / 1000000,
+    current_l1_a: data.current_l1_ca / 100,    // cA → A
+    current_l2_a: data.current_l2_ca / 100,
+    current_l3_a: data.current_l3_ca / 100,
+    pf_l1: 0,
+    pf_l2: 0,
+    pf_l3: 0,
+    tariff: 0,
+    energy_import_kwh: data.energy_import_raw / 1000,
+    energy_export_kwh: data.energy_export_raw / 1000,
+    energy_import_t1_kwh: 0,
+    energy_import_t2_kwh: 0,
+    energy_export_t1_kwh: 0,
+    energy_export_t2_kwh: 0,
   };
 }
 
@@ -331,6 +297,11 @@ async function getModbusClient(meter) {
   client = new ModbusRTU();
   await client.connectTCP(meter.host, { port: meter.port });
   client.setTimeout(3000);
+  // Handle connection errors to prevent unhandled rejections crashing the process
+  client._port.on('error', (err) => {
+    console.error(`Modbus connection error [${meter.name}]:`, err.message);
+    modbusClients.delete(meter.id);
+  });
   modbusClients.set(meter.id, client);
   console.log(`Modbus connected: ${meter.name} (${meter.host}:${meter.port})`);
   return client;
@@ -748,6 +719,11 @@ async function start() {
     console.log(`Energy API running on port ${API_PORT}`);
   });
 }
+
+// Prevent unhandled errors from crashing the process
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled rejection:', err.message);
+});
 
 start().catch(err => {
   console.error('Failed to start:', err);
