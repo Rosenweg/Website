@@ -482,11 +482,13 @@ app.get('/api/energy/hourly/:meterId', async (req, res) => {
   res.json(result.rows);
 });
 
-// Daily summary
+// Daily summary (supports ?days=N and optional ?to=YYYY-MM-DD)
 app.get('/api/energy/daily/:meterId', async (req, res) => {
   const { meterId } = req.params;
-  const { days } = req.query;
+  const { days, to } = req.query;
   const numDays = parseInt(days) || 30;
+  const endDate = to ? new Date(to + 'T23:59:59') : new Date();
+  const startDate = new Date(endDate.getTime() - numDays * 86400000);
 
   const result = await pool.query(
     `SELECT
@@ -499,19 +501,22 @@ app.get('/api/energy/daily/:meterId', async (req, res) => {
        MAX(energy_import_t2_kwh) - MIN(energy_import_t2_kwh) AS consumption_t2_kwh,
        COUNT(*) AS samples
      FROM readings
-     WHERE meter_id = $1 AND ts >= NOW() - ($2 || ' days')::INTERVAL
+     WHERE meter_id = $1 AND ts >= $2 AND ts <= $3
      GROUP BY date_trunc('day', ts)
      ORDER BY day`,
-    [meterId, numDays.toString()]
+    [meterId, startDate.toISOString(), endDate.toISOString()]
   );
   res.json(result.rows);
 });
 
-// Today's summary
+// Day summary (today or specific date via ?date=YYYY-MM-DD)
 app.get('/api/energy/today/:meterId', async (req, res) => {
   const { meterId } = req.params;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const { date } = req.query;
+  const dayStart = date ? new Date(date + 'T00:00:00') : new Date();
+  if (!date) dayStart.setHours(0, 0, 0, 0);
+  const dayEnd = new Date(dayStart);
+  dayEnd.setDate(dayEnd.getDate() + 1);
 
   const result = await pool.query(
     `SELECT
@@ -526,8 +531,8 @@ app.get('/api/energy/today/:meterId', async (req, res) => {
        MIN(power_w) AS min_power_w,
        COUNT(*) AS samples
      FROM readings
-     WHERE meter_id = $1 AND ts >= $2`,
-    [meterId, today.toISOString()]
+     WHERE meter_id = $1 AND ts >= $2 AND ts < $3`,
+    [meterId, dayStart.toISOString(), dayEnd.toISOString()]
   );
   res.json(result.rows[0] || {});
 });
