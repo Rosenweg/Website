@@ -68,8 +68,22 @@
             </div>
         </div>
 
-        <!-- Step 3: Email Form -->
+        <!-- Step 3: Email Form + Log -->
         <div id="step3" class="hidden">
+            <!-- Tab Navigation -->
+            <div class="flex mb-6 bg-white rounded-lg shadow overflow-hidden">
+                <button onclick="switchTab('form')" id="tab-form"
+                    class="flex-1 px-6 py-3 text-sm font-medium text-center border-b-2 border-orange-600 text-orange-600 bg-orange-50">
+                    E-Mail senden
+                </button>
+                <button onclick="switchTab('log')" id="tab-log"
+                    class="flex-1 px-6 py-3 text-sm font-medium text-center border-b-2 border-transparent text-gray-500 hover:text-gray-700">
+                    Versand-Protokoll
+                </button>
+            </div>
+
+            <!-- Tab: Form -->
+            <div id="panel-form">
             <div class="bg-white rounded-lg shadow-lg p-8">
                 <div class="flex items-center justify-between mb-6">
                     <div>
@@ -155,6 +169,35 @@
                     </button>
                 </form>
             </div>
+            </div>
+
+            <!-- Tab: Log -->
+            <div id="panel-log" class="hidden">
+                <div class="bg-white rounded-lg shadow-lg p-8">
+                    <div class="flex items-center justify-between mb-6">
+                        <h2 class="text-2xl font-bold text-gray-800">Versand-Protokoll</h2>
+                        <button onclick="loadEmailLog()" class="text-sm text-orange-600 hover:text-orange-800">Aktualisieren</button>
+                    </div>
+                    <div id="email-log-loading" class="text-center py-8 hidden">
+                        <div class="animate-spin inline-block w-8 h-8 border-4 border-orange-600 border-t-transparent rounded-full"></div>
+                    </div>
+                    <div id="email-log-empty" class="hidden text-center py-8 text-gray-500">
+                        Noch keine E-Mails versendet.
+                    </div>
+                    <div id="email-log-list" class="space-y-3"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recipient Detail Modal -->
+    <div id="detail-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[80vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-gray-800" id="modal-title">Empfänger-Details</h3>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+            </div>
+            <div id="modal-content"></div>
         </div>
     </div>
 
@@ -357,6 +400,160 @@
             if (confirm('Möchten Sie sich wirklich abmelden?')) {
                 AuthentikAuth.logout('email-verteiler.html');
             }
+        }
+
+        // Tab switching
+        function switchTab(tab) {
+            document.getElementById('panel-form').classList.toggle('hidden', tab !== 'form');
+            document.getElementById('panel-log').classList.toggle('hidden', tab !== 'log');
+            document.getElementById('tab-form').classList.toggle('border-orange-600', tab === 'form');
+            document.getElementById('tab-form').classList.toggle('text-orange-600', tab === 'form');
+            document.getElementById('tab-form').classList.toggle('bg-orange-50', tab === 'form');
+            document.getElementById('tab-form').classList.toggle('border-transparent', tab !== 'form');
+            document.getElementById('tab-form').classList.toggle('text-gray-500', tab !== 'form');
+            document.getElementById('tab-log').classList.toggle('border-orange-600', tab === 'log');
+            document.getElementById('tab-log').classList.toggle('text-orange-600', tab === 'log');
+            document.getElementById('tab-log').classList.toggle('bg-orange-50', tab === 'log');
+            document.getElementById('tab-log').classList.toggle('border-transparent', tab !== 'log');
+            document.getElementById('tab-log').classList.toggle('text-gray-500', tab !== 'log');
+            if (tab === 'log') loadEmailLog();
+        }
+
+        // Email log
+        async function loadEmailLog() {
+            const loading = document.getElementById('email-log-loading');
+            const empty = document.getElementById('email-log-empty');
+            const list = document.getElementById('email-log-list');
+            loading.classList.remove('hidden');
+            empty.classList.add('hidden');
+            list.innerHTML = '';
+
+            try {
+                const headers = {};
+                const token = AuthentikAuth.getToken();
+                if (token) headers['Authorization'] = `Bearer ${token}`;
+
+                const res = await fetch('/api/email/log?limit=50', { headers });
+                const data = await res.json();
+
+                loading.classList.add('hidden');
+                if (!data.log || data.log.length === 0) {
+                    empty.classList.remove('hidden');
+                    return;
+                }
+
+                data.log.forEach(entry => {
+                    const date = new Date(entry.created_at);
+                    const dateStr = date.toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                    const timeStr = date.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
+
+                    const statusColor = entry.status === 'sent' ? 'green' : entry.status === 'partial' ? 'yellow' : 'red';
+                    const statusLabel = entry.status === 'sent' ? 'Zugestellt' : entry.status === 'partial' ? 'Teilweise' : 'Fehlgeschlagen';
+                    const failedList = entry.failed_recipients ? JSON.parse(entry.failed_recipients) : [];
+                    const recipientsList = entry.recipients_list ? JSON.parse(entry.recipients_list) : [];
+
+                    const card = document.createElement('div');
+                    card.className = 'border rounded-lg p-4 hover:bg-gray-50 transition cursor-pointer';
+                    card.onclick = () => showDetail(entry, recipientsList, failedList);
+                    card.innerHTML = `
+                        <div class="flex items-start justify-between">
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <span class="inline-block w-2 h-2 rounded-full bg-${statusColor}-500"></span>
+                                    <span class="text-sm font-medium text-gray-900 truncate">${escapeHtml(entry.subject || 'Kein Betreff')}</span>
+                                </div>
+                                <div class="text-xs text-gray-500">
+                                    <span>Von: ${escapeHtml(entry.from_name || entry.from_email)}</span>
+                                    ${entry.verteiler_name ? `<span class="ml-2">an <strong>${escapeHtml(entry.verteiler_name)}</strong></span>` : ''}
+                                </div>
+                            </div>
+                            <div class="text-right ml-4 flex-shrink-0">
+                                <div class="text-xs text-gray-500">${dateStr} ${timeStr}</div>
+                                <div class="text-xs mt-1">
+                                    <span class="text-${statusColor}-600 font-medium">${statusLabel}</span>
+                                    <span class="text-gray-400 ml-1">${entry.recipients_count} Empf.</span>
+                                    ${failedList.length > 0 ? `<span class="text-red-600 ml-1">${failedList.length} fehlg.</span>` : ''}
+                                </div>
+                                ${entry.has_attachments ? '<div class="text-xs text-gray-400 mt-1">📎 Anhänge</div>' : ''}
+                            </div>
+                        </div>
+                    `;
+                    list.appendChild(card);
+                });
+            } catch (err) {
+                loading.classList.add('hidden');
+                list.innerHTML = '<p class="text-red-600 text-sm text-center py-4">Fehler beim Laden des Protokolls.</p>';
+                console.error('Log load error:', err);
+            }
+        }
+
+        function showDetail(entry, recipients, failed) {
+            const modal = document.getElementById('detail-modal');
+            const title = document.getElementById('modal-title');
+            const content = document.getElementById('modal-content');
+
+            const date = new Date(entry.created_at);
+            const dateStr = date.toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+            title.textContent = entry.subject || 'Kein Betreff';
+            let html = `
+                <div class="space-y-3 text-sm">
+                    <div class="flex justify-between">
+                        <span class="text-gray-500">Datum:</span>
+                        <span>${dateStr}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-500">Von:</span>
+                        <span>${escapeHtml(entry.from_name || '')} &lt;${escapeHtml(entry.from_email)}&gt;</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-500">Verteiler:</span>
+                        <span>${escapeHtml(entry.verteiler_name || '-')}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-500">Anhänge:</span>
+                        <span>${entry.has_attachments ? 'Ja' : 'Nein'}</span>
+                    </div>
+                    <hr>
+            `;
+
+            if (recipients.length > 0) {
+                html += `<h4 class="font-medium text-gray-800">Empfänger (${recipients.length}):</h4><ul class="space-y-1">`;
+                recipients.forEach(r => {
+                    const isFailed = failed.includes(r);
+                    html += `<li class="flex items-center gap-2">
+                        <span class="${isFailed ? 'text-red-500' : 'text-green-500'}">${isFailed ? '✗' : '✓'}</span>
+                        <span class="${isFailed ? 'text-red-700' : 'text-gray-700'}">${escapeHtml(r)}</span>
+                    </li>`;
+                });
+                html += '</ul>';
+            }
+
+            if (failed.length > 0) {
+                html += `<div class="mt-3 bg-red-50 border border-red-200 rounded p-3">
+                    <h4 class="font-medium text-red-800 mb-1">Fehlgeschlagen (${failed.length}):</h4>
+                    <ul class="text-red-700 text-xs space-y-1">`;
+                failed.forEach(f => { html += `<li>${escapeHtml(f)}</li>`; });
+                html += '</ul></div>';
+            }
+
+            html += '</div>';
+            content.innerHTML = html;
+            modal.classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('detail-modal').classList.add('hidden');
+        }
+
+        document.getElementById('detail-modal').addEventListener('click', function(e) {
+            if (e.target === this) closeModal();
+        });
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
         }
     </script>
 </body>

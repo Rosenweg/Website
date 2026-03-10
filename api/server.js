@@ -1036,31 +1036,41 @@ app.post('/api/email/inbound', async (req, res) => {
       cid: att.cid || undefined,
     }));
 
-    // Send to all recipients
-    const mailOptions = {
-      from: `"${senderName} via ${list.name}" <${toAddress}>`,
-      to: recipients,
-      replyTo: replyTo,
-      subject: subject,
-      text: parsed.text || '',
-      html: parsed.html || undefined,
-      attachments: attachments,
-      headers: {
-        'List-Id': `<${toAddress.replace('@', '.')}>`,
-        'List-Post': `<mailto:${toAddress}>`,
-        'X-Original-From': senderEmail,
-        'X-Forwarded-By': 'Rosenweg Verteiler',
-      },
-    };
-
-    await transporter.sendMail(mailOptions);
-    console.log(`Distributed email to ${recipients.length} recipients for ${toAddress}`);
+    // Send to each recipient individually to track failures
+    const failedRecipients = [];
+    let sentCount = 0;
+    for (const recipient of recipients) {
+      try {
+        await transporter.sendMail({
+          from: `"${senderName} via ${list.name}" <${toAddress}>`,
+          to: recipient,
+          replyTo: replyTo,
+          subject: subject,
+          text: parsed.text || '',
+          html: parsed.html || undefined,
+          attachments: attachments,
+          headers: {
+            'List-Id': `<${toAddress.replace('@', '.')}>`,
+            'List-Post': `<mailto:${toAddress}>`,
+            'X-Original-From': senderEmail,
+            'X-Forwarded-By': 'Rosenweg Verteiler',
+          },
+        });
+        sentCount++;
+      } catch (sendErr) {
+        console.error(`Failed to send to ${recipient}:`, sendErr.message);
+        failedRecipients.push(recipient);
+      }
+    }
+    console.log(`Distributed email to ${sentCount}/${recipients.length} recipients for ${toAddress}`);
 
     // Log to DB
     await pool.query(
-      `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [list.id, senderEmail, senderName, parsed.subject, recipients.length, attachments.length > 0]
+      `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, failed_recipients, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [list.id, senderEmail, senderName, parsed.subject, sentCount, attachments.length > 0,
+       JSON.stringify(recipients), failedRecipients.length > 0 ? JSON.stringify(failedRecipients) : null,
+       failedRecipients.length > 0 ? (sentCount === 0 ? 'failed' : 'partial') : 'sent']
     );
 
     res.json({ success: true, action: 'distributed', recipients: recipients.length });
@@ -1180,10 +1190,12 @@ app.delete('/api/verteiler/:id/members/:email', authMiddleware, adminOnly, async
 // Email log (recent distributions)
 app.get('/api/email/log', authMiddleware, adminOnly, async (req, res) => {
   try {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
     const result = await pool.query(
-      `SELECT l.*, v.name as verteiler_name FROM email_log l
+      `SELECT l.*, v.name as verteiler_name, v.address as verteiler_address FROM email_log l
        LEFT JOIN email_verteiler v ON v.id = l.verteiler_id
-       ORDER BY l.created_at DESC LIMIT 50`
+       ORDER BY l.created_at DESC LIMIT $1`,
+      [limit]
     );
     res.json({ log: result.rows });
   } catch (err) {
@@ -1454,6 +1466,10 @@ async function initDB() {
         has_attachments BOOLEAN DEFAULT false,
         created_at TIMESTAMP DEFAULT NOW()
       );
+
+      ALTER TABLE email_log ADD COLUMN IF NOT EXISTS recipients_list TEXT;
+      ALTER TABLE email_log ADD COLUMN IF NOT EXISTS failed_recipients TEXT;
+      ALTER TABLE email_log ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'sent';
 
       -- Migrate users if missing groups_json column
       ALTER TABLE users ADD COLUMN IF NOT EXISTS groups_json TEXT DEFAULT '[]';
