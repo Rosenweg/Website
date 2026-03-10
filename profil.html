@@ -183,25 +183,30 @@
                 }).join('');
             }
 
-            // Meters
+            // Meters - load from energy collector
             const metersEl = document.getElementById('meters-list');
-            const meters = currentUser.meters || [];
-            if (meters.length === 0) {
-                metersEl.innerHTML = '<span class="text-sm text-gray-400">Keine Zähler zugewiesen</span>';
-            } else {
-                metersEl.innerHTML = `
-                    <div class="space-y-2">
-                        ${meters.map(m => `
-                            <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                                <div>
-                                    <span class="font-medium text-gray-800">${m.bezeichnung || m.zaehler_id}</span>
-                                    ${m.typ ? `<span class="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">${m.typ}</span>` : ''}
-                                    ${m.standort ? `<p class="text-xs text-gray-500 mt-0.5">${m.standort}</p>` : ''}
+            try {
+                const meterResp = await fetch(`/api/energy/user/${encodeURIComponent(currentUser.email)}/meters`);
+                const meters = meterResp.ok ? await meterResp.json() : [];
+                if (meters.length === 0) {
+                    metersEl.innerHTML = '<span class="text-sm text-gray-400">Keine Zähler zugewiesen</span>';
+                } else {
+                    metersEl.innerHTML = `
+                        <div class="space-y-2">
+                            ${meters.map(m => `
+                                <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                    <div>
+                                        <span class="font-medium text-gray-800">${m.name || m.id}</span>
+                                        <span class="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">${m.type || 'modbus'}</span>
+                                        ${m.role ? `<span class="ml-1 text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">${m.role}</span>` : ''}
+                                    </div>
+                                    <a href="energie-monitor.html" class="text-sm text-blue-600 hover:text-blue-800">Dashboard</a>
                                 </div>
-                                <span class="text-sm text-gray-500">${m.einheit || 'kWh'}</span>
-                            </div>
-                        `).join('')}
-                    </div>`;
+                            `).join('')}
+                        </div>`;
+                }
+            } catch {
+                metersEl.innerHTML = '<span class="text-sm text-gray-400">Keine Zähler zugewiesen</span>';
             }
 
             // Form fields
