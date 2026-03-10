@@ -1005,10 +1005,9 @@ app.post('/api/email/inbound', async (req, res) => {
     const senderEmail = parsed.from?.value?.[0]?.address || '';
     const senderName = parsed.from?.value?.[0]?.name || senderEmail;
 
-    // Filter: don't send back to original sender
     const recipients = members
       .map(m => m.email)
-      .filter(e => e && e !== senderEmail && !e.endsWith('.invalid'));
+      .filter(e => e && !e.endsWith('.invalid'));
 
     if (recipients.length === 0) {
       return res.json({ success: true, action: 'dropped', reason: 'no valid recipients' });
