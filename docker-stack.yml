@@ -237,13 +237,10 @@ services:
     environment:
       SLEEP_TIME: "1m"
       FILTER_SERVICES: "label=shepherd.enable=true"
-      REGISTRIES_FILE: "/registries/config.json"
-      WITH_REGISTRY_AUTH: "true"
       IMAGE_AUTOCLEAN_LIMIT: "5"
       ROLLBACK_ON_FAILURE: "true"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /root/.docker/config.json:/registries/config.json:ro
     deploy:
       replicas: 1
       placement:
