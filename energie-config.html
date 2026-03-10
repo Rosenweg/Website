@@ -491,7 +491,7 @@
     }
 
     function isTechnik(user) {
-        return user?.groups?.some(g => g.toLowerCase().includes('technik')) || user?.isAdmin;
+        return user?.groups?.some(g => g.toLowerCase().includes('technik'));
     }
 
     // ─── Init ───────────────────────────────────────────────────────
