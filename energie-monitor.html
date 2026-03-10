@@ -47,19 +47,33 @@
     </nav>
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <!-- Date Navigation -->
+        <div id="date-nav" class="flex items-center justify-center gap-2 mb-4">
+            <button onclick="navigateDate(-1)" class="p-1.5 rounded-md hover:bg-gray-200 text-gray-500" title="Zurück">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+            </button>
+            <input type="date" id="date-picker" class="text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 px-3 py-1.5" />
+            <button onclick="navigateDate(1)" class="p-1.5 rounded-md hover:bg-gray-200 text-gray-500" title="Vor">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            </button>
+            <button onclick="goLive()" id="btn-live" class="ml-2 px-3 py-1.5 text-xs rounded-md bg-green-100 text-green-700 font-medium hover:bg-green-200">
+                ● Live
+            </button>
+        </div>
+
         <!-- Solar Overview Bar -->
         <div class="bg-gradient-to-r from-yellow-50 to-green-50 border border-yellow-200 rounded-xl shadow-md p-4 mb-6">
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div class="text-center">
-                    <p class="text-xs font-medium text-yellow-700">Solarproduktion</p>
+                    <p id="solar-production-label" class="text-xs font-medium text-yellow-700">Solarproduktion</p>
                     <p id="solar-production" class="text-xl font-bold text-yellow-600">-- kW</p>
                 </div>
                 <div class="text-center">
-                    <p class="text-xs font-medium text-green-700">Eigenverbrauch</p>
+                    <p id="solar-selfuse-label" class="text-xs font-medium text-green-700">Eigenverbrauch</p>
                     <p id="solar-selfuse" class="text-xl font-bold text-green-600">-- kW</p>
                 </div>
                 <div class="text-center">
-                    <p class="text-xs font-medium text-blue-700">Netzeinspeisung</p>
+                    <p id="solar-export-label" class="text-xs font-medium text-blue-700">Netzeinspeisung</p>
                     <p id="solar-export" class="text-xl font-bold text-blue-600">-- kW</p>
                 </div>
                 <div class="text-center">
@@ -206,6 +220,8 @@
     let pollTimer = null;
     let currentUser = null;
     let solarData = { production: 0, selfuse: 0, export: 0, share: 0 };
+    let selectedDate = null; // null = live/today, otherwise a Date object
+    let isLive = true;
 
     function isTechnik(user) {
         return user?.groups?.some(g => g.toLowerCase().includes('technik'));
@@ -264,6 +280,7 @@
         }
 
         initCharts();
+        initDateNav();
         refreshAll();
         pollTimer = setInterval(pollLive, POLL_INTERVAL);
     }
@@ -373,7 +390,7 @@
 
     // ─── Poll Live Data ─────────────────────────────────────────────
     async function pollLive() {
-        if (!currentMeter) return;
+        if (!currentMeter || !isLive) return;
         try {
             // Fetch selected meter + solar reference meters in parallel
             const [meterRes, liveAllRes] = await Promise.all([
@@ -414,6 +431,9 @@
             share: Math.min(100, Math.max(0, sharePercent)),
         };
 
+        document.getElementById('solar-production-label').textContent = 'Solarproduktion';
+        document.getElementById('solar-selfuse-label').textContent = 'Eigenverbrauch';
+        document.getElementById('solar-export-label').textContent = 'Netzeinspeisung';
         document.getElementById('solar-production').textContent = `${(solarProd / 1000).toFixed(1)} kW`;
         document.getElementById('solar-selfuse').textContent = `${(Math.max(0, eigenverbrauch) / 1000).toFixed(1)} kW`;
         document.getElementById('solar-export').textContent = `${(netzExport / 1000).toFixed(1)} kW`;
@@ -505,25 +525,31 @@
         `).join('');
     }
 
-    // ─── Load Today Summary ─────────────────────────────────────────
+    // ─── Load Day Summary ──────────────────────────────────────────
     async function loadToday() {
         if (!currentMeter) return;
         try {
-            const res = await fetch(`${API}/today/${currentMeter}`);
+            const dateParam = isLive ? '' : `?date=${selectedDate.toISOString().slice(0, 10)}`;
+            const res = await fetch(`${API}/today/${currentMeter}${dateParam}`);
             const d = await res.json();
-            if (currentMeter === 'r9-produktion') {
-                // Production meter: show export (= produced energy)
+
+            // Update label
+            const consumLabel = document.querySelector('#today-consumption').closest('.bg-white').querySelector('.text-sm.font-medium');
+            const isProd = currentMeter === 'r9-produktion';
+            const isHaupt = currentMeter === 'r9-haupt';
+
+            if (isProd) {
                 const prodKwh = parseFloat(d.export_kwh) || 0;
                 document.getElementById('today-consumption').textContent = `${prodKwh.toFixed(2)} kWh`;
-                document.getElementById('today-cost').textContent = `Solarproduktion heute`;
+                document.getElementById('today-cost').textContent = isLive ? 'Solarproduktion heute' : 'Solarproduktion';
                 document.getElementById('today-solar-split').classList.add('hidden');
-            } else if (d.consumption_kwh != null) {
-                const kwh = parseFloat(d.consumption_kwh);
+            } else {
+                const kwh = parseFloat(d.consumption_kwh) || 0;
                 document.getElementById('today-consumption').textContent = `${kwh.toFixed(2)} kWh`;
 
                 // Calculate cost with solar share
-                const isRefMeter = currentMeter === 'r9-haupt';
-                const share = isRefMeter ? 0 : solarData.share / 100;
+                const isRef = isHaupt;
+                const share = isRef ? 0 : solarData.share / 100;
                 const solarKwh = kwh * share;
                 const netzKwh = kwh - solarKwh;
                 const cost = (netzKwh * TARIFE.netz.preis) + (solarKwh * TARIFE.solar.preis);
@@ -538,7 +564,7 @@
                 }
             }
         } catch (err) {
-            console.error('Today load error:', err);
+            console.error('Day summary load error:', err);
         }
     }
 
@@ -547,16 +573,21 @@
         if (!currentMeter) return;
         try {
             let from, endpointFn;
+            const dayStart = getSelectedDayStart();
             if (currentPeriod === 'day') {
-                const today = new Date(); today.setHours(0, 0, 0, 0);
-                from = today.toISOString();
-                endpointFn = (id) => `${API}/history/${id}?from=${from}&limit=5000`;
+                from = dayStart.toISOString();
+                const dayEnd = getSelectedDayEnd();
+                endpointFn = (id) => `${API}/history/${id}?from=${from}&to=${dayEnd.toISOString()}&limit=5000`;
             } else if (currentPeriod === 'week') {
-                from = new Date(Date.now() - 7 * 86400000).toISOString();
-                endpointFn = (id) => `${API}/hourly/${id}?from=${from}`;
+                const weekStart = new Date(dayStart.getTime() - 6 * 86400000);
+                from = weekStart.toISOString();
+                const dayEnd = getSelectedDayEnd();
+                endpointFn = (id) => `${API}/hourly/${id}?from=${from}&to=${dayEnd.toISOString()}`;
             } else {
-                from = new Date(Date.now() - 30 * 86400000).toISOString();
-                endpointFn = (id) => `${API}/hourly/${id}?from=${from}`;
+                const monthStart = new Date(dayStart.getTime() - 29 * 86400000);
+                from = monthStart.toISOString();
+                const dayEnd = getSelectedDayEnd();
+                endpointFn = (id) => `${API}/hourly/${id}?from=${from}&to=${dayEnd.toISOString()}`;
             }
 
             // Load selected meter + solar + haupt in parallel
@@ -670,12 +701,13 @@
         try {
             const daysMap = { week: 7, month: 30, quarter: 90, year: 365 };
             const days = daysMap[consumptionPeriod] || 30;
+            const toParam = isLive ? '' : `&to=${selectedDate.toISOString().slice(0, 10)}`;
 
             // Load meter daily + haupt/produktion daily in parallel for solar split
             const [meterRes, hauptRes, prodRes] = await Promise.all([
-                fetch(`${API}/daily/${currentMeter}?days=${days}`),
-                fetch(`${API}/daily/r9-haupt?days=${days}`),
-                fetch(`${API}/daily/r9-produktion?days=${days}`),
+                fetch(`${API}/daily/${currentMeter}?days=${days}${toParam}`),
+                fetch(`${API}/daily/r9-haupt?days=${days}${toParam}`),
+                fetch(`${API}/daily/r9-produktion?days=${days}${toParam}`),
             ]);
             const data = await meterRes.json();
             const hauptData = await hauptRes.json();
@@ -758,9 +790,134 @@
         loadConsumptionChart();
     }
 
+    // ─── Date Navigation ─────────────────────────────────────────────
+    function initDateNav() {
+        const picker = document.getElementById('date-picker');
+        const today = new Date();
+        picker.value = today.toISOString().slice(0, 10);
+        picker.max = today.toISOString().slice(0, 10);
+        picker.addEventListener('change', () => {
+            const val = picker.value;
+            const todayStr = new Date().toISOString().slice(0, 10);
+            if (val === todayStr) {
+                goLive();
+            } else {
+                selectedDate = new Date(val + 'T00:00:00');
+                isLive = false;
+                updateDateNavUI();
+                refreshAll();
+            }
+        });
+    }
+
+    function navigateDate(dir) {
+        const picker = document.getElementById('date-picker');
+        const current = new Date(picker.value + 'T00:00:00');
+        current.setDate(current.getDate() + dir);
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const newStr = current.toISOString().slice(0, 10);
+        if (newStr > todayStr) return; // don't go into the future
+        picker.value = newStr;
+        if (newStr === todayStr) {
+            goLive();
+        } else {
+            selectedDate = current;
+            isLive = false;
+            updateDateNavUI();
+            refreshAll();
+        }
+    }
+
+    function goLive() {
+        selectedDate = null;
+        isLive = true;
+        const picker = document.getElementById('date-picker');
+        picker.value = new Date().toISOString().slice(0, 10);
+        updateDateNavUI();
+        refreshAll();
+    }
+
+    function updateDateNavUI() {
+        const liveBtn = document.getElementById('btn-live');
+        const indicator = document.getElementById('live-indicator');
+        if (isLive) {
+            liveBtn.className = 'ml-2 px-3 py-1.5 text-xs rounded-md bg-green-100 text-green-700 font-medium hover:bg-green-200';
+            indicator.classList.remove('hidden');
+            if (!pollTimer) pollTimer = setInterval(pollLive, POLL_INTERVAL);
+        } else {
+            liveBtn.className = 'ml-2 px-3 py-1.5 text-xs rounded-md bg-gray-100 text-gray-500 font-medium hover:bg-gray-200';
+            indicator.classList.add('hidden');
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        }
+    }
+
+    function getSelectedDayStart() {
+        if (isLive || !selectedDate) {
+            const d = new Date(); d.setHours(0, 0, 0, 0);
+            return d;
+        }
+        return new Date(selectedDate);
+    }
+
+    function getSelectedDayEnd() {
+        const start = getSelectedDayStart();
+        const end = new Date(start);
+        end.setDate(end.getDate() + 1);
+        return end;
+    }
+
+    // ─── Load Historical Solar Overview ─────────────────────────────
+    async function loadHistoricalSolar() {
+        if (isLive || !selectedDate) return;
+        const dateStr = selectedDate.toISOString().slice(0, 10);
+        try {
+            const [hauptRes, prodRes] = await Promise.all([
+                fetch(`${API}/today/r9-haupt?date=${dateStr}`),
+                fetch(`${API}/today/r9-produktion?date=${dateStr}`),
+            ]);
+            const haupt = await hauptRes.json();
+            const prod = await prodRes.json();
+
+            const prodKwh = parseFloat(prod.export_kwh) || 0;
+            const exportKwh = parseFloat(haupt.export_kwh) || 0;
+            const importKwh = parseFloat(haupt.consumption_kwh) || 0;
+            const eigenKwh = Math.max(0, prodKwh - exportKwh);
+            const totalKwh = eigenKwh + importKwh;
+            const share = totalKwh > 0 ? (eigenKwh / totalKwh) * 100 : 0;
+
+            // Update solar data for cost calculation
+            solarData.share = Math.min(100, Math.max(0, share));
+
+            document.getElementById('solar-production-label').textContent = 'Solarproduktion (Tag)';
+            document.getElementById('solar-selfuse-label').textContent = 'Eigenverbrauch (Tag)';
+            document.getElementById('solar-export-label').textContent = 'Netzeinspeisung (Tag)';
+            document.getElementById('solar-production').textContent = `${prodKwh.toFixed(1)} kWh`;
+            document.getElementById('solar-selfuse').textContent = `${eigenKwh.toFixed(1)} kWh`;
+            document.getElementById('solar-export').textContent = `${exportKwh.toFixed(1)} kWh`;
+            document.getElementById('solar-share').textContent = `${share.toFixed(0)} %`;
+            document.getElementById('solar-share-bar').style.width = `${Math.min(100, share)}%`;
+        } catch (err) {
+            console.error('Historical solar error:', err);
+        }
+    }
+
     // ─── Refresh All ────────────────────────────────────────────────
     function refreshAll() {
-        pollLive();
+        if (isLive) {
+            pollLive();
+        } else {
+            // In history mode, clear live-only fields
+            document.getElementById('live-power').textContent = '-- W';
+            document.getElementById('live-power-detail').textContent = 'Historische Ansicht';
+            document.getElementById('live-voltage').textContent = '-- V';
+            document.getElementById('live-voltage-detail').textContent = '';
+            document.getElementById('last-update').textContent =
+                `Anzeige: ${selectedDate.toLocaleDateString('de-CH', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}`;
+            phaseChart.data.datasets[0].data = [0, 0, 0];
+            phaseChart.update('none');
+            document.getElementById('phase-details').innerHTML = '<span class="text-gray-400 text-xs">Nur im Live-Modus verfügbar</span>';
+            loadHistoricalSolar();
+        }
         loadToday();
         loadPowerChart();
         loadConsumptionChart();
