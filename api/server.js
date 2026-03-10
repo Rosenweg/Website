@@ -173,6 +173,7 @@ const AUTHENTIK_URL = process.env.AUTHENTIK_URL || 'https://authentik-server:944
 const AUTHENTIK_EXTERNAL_URL = process.env.AUTHENTIK_EXTERNAL_URL || 'https://authentik.rosenweg4303.ch';
 const AUTHENTIK_CLIENT_ID = process.env.AUTHENTIK_CLIENT_ID || '';
 const AUTHENTIK_CLIENT_SECRET = process.env.AUTHENTIK_CLIENT_SECRET || '';
+const AUTHENTIK_API_TOKEN = process.env.AUTHENTIK_API_TOKEN || '';
 const SITE_URL = process.env.SITE_URL || 'https://www.rosenweg4303.ch';
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1372,6 +1373,146 @@ async function autoFetchSms() {
     console.error('SMS auto-fetch error:', err.message);
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// AUTHENTIK ADMIN PROXY API
+// ═══════════════════════════════════════════════════════════════════
+
+async function authentikAPI(method, path, body = null) {
+  const url = `${AUTHENTIK_URL}/api/v3${path}`;
+  const opts = {
+    method,
+    headers: {
+      'Authorization': `Bearer ${AUTHENTIK_API_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(url, opts);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Authentik API ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+// GET /api/admin/users - List all users
+app.get('/api/admin/users', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const data = await authentikAPI('GET', '/core/users/?page_size=500');
+    res.json(data);
+  } catch (err) {
+    console.error('Admin list users error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/admin/users - Create user
+app.post('/api/admin/users', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { username, name, email, password, groups } = req.body;
+    const user = await authentikAPI('POST', '/core/users/', {
+      username,
+      name,
+      email,
+      password,
+    });
+    if (groups && groups.length > 0) {
+      for (const groupPk of groups) {
+        await authentikAPI('POST', `/core/groups/${groupPk}/add_user/`, { pk: user.pk });
+      }
+    }
+    res.json(user);
+  } catch (err) {
+    console.error('Admin create user error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/admin/users/:pk - Get single user
+app.get('/api/admin/users/:pk', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const data = await authentikAPI('GET', `/core/users/${req.params.pk}/`);
+    res.json(data);
+  } catch (err) {
+    console.error('Admin get user error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/admin/users/:pk - Update user
+app.put('/api/admin/users/:pk', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { name, email, is_active, groups } = req.body;
+    const userPk = parseInt(req.params.pk);
+    const updated = await authentikAPI('PATCH', `/core/users/${userPk}/`, {
+      name,
+      email,
+      is_active,
+    });
+    if (groups) {
+      const currentUser = await authentikAPI('GET', `/core/users/${userPk}/`);
+      const currentGroups = currentUser.groups_obj ? currentUser.groups_obj.map(g => g.pk) : [];
+      const desiredGroups = groups;
+      const toAdd = desiredGroups.filter(g => !currentGroups.includes(g));
+      const toRemove = currentGroups.filter(g => !desiredGroups.includes(g));
+      for (const groupPk of toAdd) {
+        await authentikAPI('POST', `/core/groups/${groupPk}/add_user/`, { pk: userPk });
+      }
+      for (const groupPk of toRemove) {
+        await authentikAPI('POST', `/core/groups/${groupPk}/remove_user/`, { pk: userPk });
+      }
+    }
+    res.json(updated);
+  } catch (err) {
+    console.error('Admin update user error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/admin/users/:pk - Delete/deactivate user
+app.delete('/api/admin/users/:pk', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    await authentikAPI('DELETE', `/core/users/${req.params.pk}/`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Admin delete user error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/admin/groups - List all groups
+app.get('/api/admin/groups', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const data = await authentikAPI('GET', '/core/groups/?page_size=500');
+    res.json(data);
+  } catch (err) {
+    console.error('Admin list groups error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/admin/groups/:pk/add_user - Add user to group
+app.put('/api/admin/groups/:pk/add_user', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const data = await authentikAPI('POST', `/core/groups/${req.params.pk}/add_user/`, { pk: req.body.pk });
+    res.json(data);
+  } catch (err) {
+    console.error('Admin add user to group error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/admin/groups/:pk/remove_user - Remove user from group
+app.put('/api/admin/groups/:pk/remove_user', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const data = await authentikAPI('POST', `/core/groups/${req.params.pk}/remove_user/`, { pk: req.body.pk });
+    res.json(data);
+  } catch (err) {
+    console.error('Admin remove user from group error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ─── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;

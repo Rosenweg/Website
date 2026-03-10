@@ -92,7 +92,7 @@ const RosenwegNav = {
             </div>
           </div>
 
-          <a href="${base}#verwaltung" class="${a('verwaltung')} px-3 py-2 text-sm transition">Verwaltung</a>
+          <a href="${base}verwaltung.html" class="${a('verwaltung')} px-3 py-2 text-sm transition">Verwaltung</a>
           <a href="${base}#kontakt" class="${a('kontakt')} px-3 py-2 text-sm transition">Kontakt</a>
         </div>
 
@@ -141,7 +141,7 @@ const RosenwegNav = {
         <a href="${base}#dokumente" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Dokumente</a>
 
         <hr class="my-2">
-        <a href="${base}#verwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Verwaltung</a>
+        <a href="${base}verwaltung.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Verwaltung</a>
         <a href="${base}#kontakt" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Kontakt</a>
 
         <div id="nav-mobile-auth" class="pt-2 border-t mt-2"></div>
