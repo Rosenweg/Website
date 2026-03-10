@@ -221,8 +221,13 @@
                             </div>
                         </div>
                         <div class="mb-3">
-                            <label class="text-xs text-gray-500">Mitglieder (ein E-Mail pro Zeile, Format: Name &lt;email&gt; oder Name email)</label>
-                            <textarea id="vf-members" rows="6" class="w-full text-sm px-3 py-2 border rounded-lg font-mono" placeholder="Max Muster max@example.com&#10;Anna Test &lt;anna@test.ch&gt;"></textarea>
+                            <label class="text-xs text-gray-500">Mitglieder</label>
+                            <div class="relative">
+                                <input type="text" id="vf-member-search" placeholder="Benutzer suchen..." autocomplete="off"
+                                    class="w-full text-sm px-3 py-2 border rounded-lg" />
+                                <div id="vf-member-suggestions" class="hidden absolute z-10 w-full bg-white border rounded-lg shadow-lg max-h-48 overflow-y-auto mt-1"></div>
+                            </div>
+                            <div id="vf-members-list" class="mt-2 space-y-1"></div>
                         </div>
                         <div class="flex gap-2">
                             <button onclick="saveVerteiler()" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">Speichern</button>
@@ -435,7 +440,83 @@
             }
         }
 
-        function showVerteilerForm() {
+        // ═══ User Picker for Verteiler Members ═══
+        let authentikUsers = [];
+        let selectedMembers = [];
+
+        async function loadAuthentikUsers() {
+            if (authentikUsers.length > 0) return;
+            try {
+                const res = await AuthentikAuth.apiFetch('/api/admin/users');
+                const data = await res.json();
+                authentikUsers = (data.results || [])
+                    .filter(u => u.is_active && u.email)
+                    .map(u => ({ name: u.name || u.username, email: u.email, username: u.username }))
+                    .sort((a, b) => a.name.localeCompare(b.name));
+            } catch (err) {
+                console.error('Failed to load Authentik users:', err);
+            }
+        }
+
+        function renderSelectedMembers() {
+            const list = document.getElementById('vf-members-list');
+            if (selectedMembers.length === 0) {
+                list.innerHTML = '<p class="text-xs text-gray-400">Noch keine Mitglieder hinzugefügt</p>';
+                return;
+            }
+            list.innerHTML = selectedMembers.map((m, i) => `
+                <div class="flex items-center justify-between bg-white border rounded px-3 py-1.5 text-sm">
+                    <span>${escapeHtml(m.name)} <span class="text-gray-400">&lt;${escapeHtml(m.email)}&gt;</span></span>
+                    <button onclick="removeMember(${i})" class="text-gray-400 hover:text-red-500 ml-2" title="Entfernen">&times;</button>
+                </div>
+            `).join('');
+        }
+
+        function addMember(user) {
+            if (selectedMembers.some(m => m.email === user.email)) return;
+            selectedMembers.push({ name: user.name, email: user.email });
+            renderSelectedMembers();
+            document.getElementById('vf-member-search').value = '';
+            document.getElementById('vf-member-suggestions').classList.add('hidden');
+        }
+
+        function removeMember(index) {
+            selectedMembers.splice(index, 1);
+            renderSelectedMembers();
+        }
+
+        function setupMemberSearch() {
+            const input = document.getElementById('vf-member-search');
+            const suggestions = document.getElementById('vf-member-suggestions');
+
+            input.addEventListener('input', () => {
+                const q = input.value.toLowerCase().trim();
+                if (q.length < 1) { suggestions.classList.add('hidden'); return; }
+                const matches = authentikUsers.filter(u =>
+                    (u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || u.username.toLowerCase().includes(q))
+                    && !selectedMembers.some(m => m.email === u.email)
+                ).slice(0, 10);
+                if (matches.length === 0) { suggestions.classList.add('hidden'); return; }
+                suggestions.innerHTML = matches.map(u => `
+                    <div class="px-3 py-2 hover:bg-blue-50 cursor-pointer text-sm" onclick="addMember({name:'${u.name.replace(/'/g, "\\'")}',email:'${u.email.replace(/'/g, "\\'")}'})"}>
+                        <span class="font-medium">${escapeHtml(u.name)}</span>
+                        <span class="text-gray-400 ml-1">${escapeHtml(u.email)}</span>
+                    </div>
+                `).join('');
+                suggestions.classList.remove('hidden');
+            });
+
+            input.addEventListener('blur', () => {
+                setTimeout(() => suggestions.classList.add('hidden'), 200);
+            });
+            input.addEventListener('focus', () => {
+                if (input.value.trim().length >= 1) input.dispatchEvent(new Event('input'));
+            });
+        }
+
+        async function showVerteilerForm() {
+            await loadAuthentikUsers();
+            selectedMembers = [];
             document.getElementById('verteiler-form').classList.remove('hidden');
             document.getElementById('verteiler-form-title').textContent = 'Neuer Verteiler';
             document.getElementById('vf-id').value = '';
@@ -444,16 +525,20 @@
             document.getElementById('vf-stweg').value = '';
             document.getElementById('vf-reply-to').value = 'sender';
             document.getElementById('vf-prefix').value = '';
-            document.getElementById('vf-members').value = '';
+            document.getElementById('vf-member-search').value = '';
+            renderSelectedMembers();
+            setupMemberSearch();
         }
 
         function closeVerteilerForm() {
             document.getElementById('verteiler-form').classList.add('hidden');
         }
 
-        function editVerteiler(id) {
+        async function editVerteiler(id) {
+            await loadAuthentikUsers();
             const v = adminVerteilerData.find(x => x.id === id);
             if (!v) return;
+            selectedMembers = (v.members || []).map(m => ({ name: m.name || '', email: m.email }));
             document.getElementById('verteiler-form').classList.remove('hidden');
             document.getElementById('verteiler-form-title').textContent = 'Verteiler bearbeiten';
             document.getElementById('vf-id').value = v.id;
@@ -462,9 +547,9 @@
             document.getElementById('vf-stweg').value = v.stweg || '';
             document.getElementById('vf-reply-to').value = v.reply_to || 'sender';
             document.getElementById('vf-prefix').value = v.subject_prefix || '';
-            document.getElementById('vf-members').value = (v.members || []).map(m =>
-                m.name ? `${m.name} <${m.email}>` : m.email
-            ).join('\n');
+            document.getElementById('vf-member-search').value = '';
+            renderSelectedMembers();
+            setupMemberSearch();
         }
 
         async function saveVerteiler() {
@@ -473,19 +558,9 @@
             const email_address = document.getElementById('vf-email').value;
             if (!name || !email_address) return alert('Name und E-Mail-Adresse erforderlich');
 
-            const membersText = document.getElementById('vf-members').value.trim();
-            const members = membersText ? membersText.split('\n').filter(l => l.trim()).map(line => {
-                line = line.trim();
-                const angleMatch = line.match(/^(.+?)\s*<(.+?)>\s*$/);
-                if (angleMatch) return { name: angleMatch[1].trim(), email: angleMatch[2].trim() };
-                const parts = line.split(/\s+/);
-                const email = parts.pop();
-                return { name: parts.join(' ') || '', email };
-            }) : [];
-
             const body = {
                 stweg: parseInt(document.getElementById('vf-stweg').value) || 0,
-                name, email_address, members,
+                name, email_address, members: selectedMembers,
                 reply_to: document.getElementById('vf-reply-to').value,
                 subject_prefix: document.getElementById('vf-prefix').value || null,
                 active: true
