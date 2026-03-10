@@ -360,7 +360,7 @@
             const d = await meterRes.json();
             const allLive = await liveAllRes.json();
 
-            // Calculate solar share from haupt-r9 and produktion meters
+            // Calculate solar share from r9-haupt and r9-produktion meters
             updateSolarOverview(allLive);
             updateLiveCards(d);
             updateDetailTable(d);
@@ -370,8 +370,8 @@
     }
 
     function updateSolarOverview(allLive) {
-        const haupt = allLive['haupt-r9'];
-        const prod = allLive['produktion'];
+        const haupt = allLive['r9-haupt'];
+        const prod = allLive['r9-produktion'];
         if (!haupt || !prod) return;
 
         // Produktion is negative when generating → make positive
@@ -401,8 +401,8 @@
         document.getElementById('live-indicator').querySelector('.pulse-dot').classList.replace('bg-red-500', 'bg-green-500');
 
         // Adapt labels for special meters
-        const isProd = currentMeter === 'produktion';
-        const isHaupt = currentMeter === 'haupt-r9';
+        const isProd = currentMeter === 'r9-produktion';
+        const isHaupt = currentMeter === 'r9-haupt';
         const powerLabel = document.querySelector('#live-power').closest('.bg-white').querySelector('.text-sm.font-medium');
         const consumLabel = document.querySelector('#today-consumption').closest('.bg-white').querySelector('.text-sm.font-medium');
         if (isProd) {
@@ -487,7 +487,7 @@
         try {
             const res = await fetch(`${API}/today/${currentMeter}`);
             const d = await res.json();
-            if (currentMeter === 'produktion') {
+            if (currentMeter === 'r9-produktion') {
                 // Production meter: show export (= produced energy)
                 const prodKwh = parseFloat(d.export_kwh) || 0;
                 document.getElementById('today-consumption').textContent = `${prodKwh.toFixed(2)} kWh`;
@@ -498,7 +498,7 @@
                 document.getElementById('today-consumption').textContent = `${kwh.toFixed(2)} kWh`;
 
                 // Calculate cost with solar share
-                const isRefMeter = currentMeter === 'haupt-r9';
+                const isRefMeter = currentMeter === 'r9-haupt';
                 const share = isRefMeter ? 0 : solarData.share / 100;
                 const solarKwh = kwh * share;
                 const netzKwh = kwh - solarKwh;
@@ -577,8 +577,8 @@
             // Load meter daily + haupt/produktion daily in parallel for solar split
             const [meterRes, hauptRes, prodRes] = await Promise.all([
                 fetch(`${API}/daily/${currentMeter}?days=${days}`),
-                fetch(`${API}/daily/haupt-r9?days=${days}`),
-                fetch(`${API}/daily/produktion?days=${days}`),
+                fetch(`${API}/daily/r9-haupt?days=${days}`),
+                fetch(`${API}/daily/r9-produktion?days=${days}`),
             ]);
             const data = await meterRes.json();
             const hauptData = await hauptRes.json();
@@ -594,7 +594,7 @@
                 new Date(r.day).toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit' })
             );
 
-            const isRefMeter = currentMeter === 'haupt-r9' || currentMeter === 'produktion';
+            const isRefMeter = currentMeter === 'r9-haupt' || currentMeter === 'r9-produktion';
             const solarArr = [];
             const netzArr = [];
 
