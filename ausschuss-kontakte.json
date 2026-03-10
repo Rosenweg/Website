@@ -111,7 +111,7 @@
         "stweg_typ": "Wohngebäude",
         "adressen": "Rosenweg 5/6/8",
         "email": "stweg5@rosenweg4303.ch",
-        "email_forwards_to": ["m.probst@maneca.ch", "christian.christopher.bucher@gmail.com"],
+        "email_forwards_to": ["m.probst@maneca.ch", "c.c.b@bucher-ch.com"],
         "vertreter": [
           {
             "funktion": "Vertreter 1",
