@@ -274,9 +274,9 @@
                         document.getElementById('loggedInEmail').textContent = user.name || currentEmail;
                         loadVerteilerDropdown();
 
-                        // Show admin tab for admins
+                        // Show admin tab for Technik group
                         const groups = user.groups || [];
-                        if (groups.includes('admins') || groups.includes('Admins')) {
+                        if (groups.includes('Technik') || groups.includes('technik')) {
                             document.getElementById('tab-admin').classList.remove('hidden');
                         }
                     },
