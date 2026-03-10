@@ -300,6 +300,50 @@ async function readShelly(meter) {
   return data;
 }
 
+// ─── SmartFox Pro2 HTTP/XML Reader (Heizstab/Boiler) ────────────────
+async function readSmartFox(meter) {
+  const url = `http://${meter.host}/values.xml`;
+
+  let data = {
+    power_w: 0, power_l1_w: 0, power_l2_w: 0, power_l3_w: 0,
+    voltage_l1_v: 0, voltage_l2_v: 0, voltage_l3_v: 0,
+    current_l1_a: 0, current_l2_a: 0, current_l3_a: 0,
+    pf_l1: 0, pf_l2: 0, pf_l3: 0, tariff: 0,
+    energy_import_kwh: 0, energy_export_kwh: 0,
+    energy_import_t1_kwh: 0, energy_import_t2_kwh: 0,
+    energy_export_t1_kwh: 0, energy_export_t2_kwh: 0,
+  };
+
+  const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+  const xml = await res.text();
+
+  // Parse XML value by id - extract numeric value from text content
+  const parseVal = (id) => {
+    const match = xml.match(new RegExp(`<value id="${id}">([^<]*)</value>`));
+    if (!match) return 0;
+    const text = match[1].replace(/&[^;]+;/g, '').replace(/<[^>]*>/g, '');
+    const num = parseFloat(text);
+    return isNaN(num) ? 0 : num;
+  };
+
+  // Heizstab/Boiler power (kW -> W)
+  data.power_w = parseVal('analogOutPower') * 1000;
+  data.power_l1_w = data.power_w;
+
+  // Heizstab percentage stored in pf_l1 (0-1 range)
+  data.pf_l1 = parseVal('hidAoutPercentage') / 100;
+
+  // Grid voltage for reference
+  data.voltage_l1_v = parseVal('voltageL1Value');
+  data.voltage_l2_v = parseVal('voltageL2Value');
+  data.voltage_l3_v = parseVal('voltageL3Value');
+
+  // Daily energy counter (Wh -> kWh) - resets at midnight
+  data.energy_import_kwh = parseVal('hidAoutEnergyDay') / 1000;
+
+  return data;
+}
+
 // ─── Polling Loop ───────────────────────────────────────────────────
 const modbusClients = new Map();
 
@@ -328,6 +372,8 @@ async function pollMeter(meter) {
     let data;
     if (meter.type === 'shelly') {
       data = await readShelly(meter);
+    } else if (meter.type === 'smartfox') {
+      data = await readSmartFox(meter);
     } else {
       const client = await getModbusClient(meter);
       data = await readMeter(client, meter);
@@ -596,6 +642,9 @@ app.post('/api/energy/meters/:id/test', async (req, res) => {
 
     if (meter.type === 'shelly') {
       const data = await readShelly(meter);
+      res.json({ success: true, data });
+    } else if (meter.type === 'smartfox') {
+      const data = await readSmartFox(meter);
       res.json({ success: true, data });
     } else {
       const client = new ModbusRTU();
