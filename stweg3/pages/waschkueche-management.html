@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Smart Waschküchen-Management - STWEG 3</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body {
@@ -21,33 +22,9 @@
 </head>
 <body class="bg-gray-50">
     <!-- Navigation -->
-    <nav class="bg-white shadow-lg sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex items-center">
-                    <a href="index.html" class="flex items-center">
-                        <img src="../../logo-stweg3-rosenweg9.png" alt="Rosenweg 9 Logo" class="h-14 w-auto">
-                        <span class="ml-2 text-xl font-semibold text-gray-800">Smart Waschküchen</span>
-                    </a>
-                </div>
-                <div class="flex items-center space-x-4">
-                    <div id="user-info" class="hidden">
-                        <span class="text-sm text-gray-600">
-                            <span id="user-name" class="font-semibold"></span>
-                            <span id="user-wohnung" class="ml-2 text-gray-500"></span>
-                        </span>
-                        <span id="user-balance" class="ml-4 px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-semibold"></span>
-                    </div>
-                    <button id="logout-btn" class="hidden text-gray-700 hover:text-red-600 transition">
-                        <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
-                        </svg>
-                    </button>
-                    <a href="index.html" class="text-gray-700 hover:text-blue-600 transition">← Zurück</a>
-                </div>
-            </div>
-        </div>
-    </nav>
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js"></script>
+    <script>RosenwegNav.init({ active: 'waschkueche' });</script>
 
     <!-- Hero Section -->
     <section class="bg-gradient-to-r from-green-600 to-green-800 text-white py-12">
