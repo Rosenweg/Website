@@ -360,18 +360,47 @@ function adminOnly(req, res, next) {
 }
 
 // Get current user from session token
-app.get('/api/auth/me', authMiddleware, (req, res) => {
+app.get('/api/auth/me', authMiddleware, async (req, res) => {
+  const userId = req.user.user_id || req.user.id;
+  const result = await pool.query(
+    'SELECT id, email, name, wohnung, stweg, role, phone, strasse, plz, ort FROM users WHERE id = $1',
+    [userId]
+  );
+  const u = result.rows[0] || req.user;
   res.json({
     user: {
-      id: req.user.user_id || req.user.id,
-      name: req.user.name,
-      email: req.user.email,
-      role: req.user.role,
-      wohnung: req.user.wohnung,
-      stweg: req.user.stweg,
-      isAdmin: req.user.isAdmin,
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      role: u.role,
+      wohnung: u.wohnung,
+      stweg: u.stweg,
+      phone: u.phone,
+      strasse: u.strasse,
+      plz: u.plz,
+      ort: u.ort,
+      isAdmin: u.role === 'admin',
     },
   });
+});
+
+// Update own profile
+app.put('/api/auth/profile', authMiddleware, async (req, res) => {
+  const userId = req.user.user_id || req.user.id;
+  const { name, wohnung, stweg, phone, strasse, plz, ort } = req.body;
+  try {
+    const result = await pool.query(
+      `UPDATE users SET name = COALESCE($1, name), wohnung = $2, stweg = $3,
+       phone = $4, strasse = $5, plz = $6, ort = $7, updated_at = NOW()
+       WHERE id = $8
+       RETURNING id, email, name, wohnung, stweg, role, phone, strasse, plz, ort`,
+      [name, wohnung || null, stweg || null, phone || null, strasse || null, plz || null, ort || null, userId]
+    );
+    res.json({ user: result.rows[0] });
+  } catch (err) {
+    console.error('Profile update error:', err);
+    res.status(500).json({ error: 'Profil konnte nicht gespeichert werden' });
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════
