@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Energie-Konfiguration - Rosenweg</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="js/authentik-auth.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; }
@@ -20,12 +21,24 @@
                         <span class="ml-3 text-lg font-semibold text-gray-800">Energie-Konfiguration</span>
                     </a>
                 </div>
-                <div class="flex items-center">
+                <div class="flex items-center space-x-3">
                     <a href="energie-monitor.html" class="text-sm text-blue-600 hover:text-blue-800">Zum Dashboard</a>
+                    <span id="user-name" class="hidden text-sm text-gray-500"></span>
+                    <button id="logout-btn" onclick="AuthentikAuth.logout()" class="hidden text-xs text-gray-400 hover:text-red-500">Abmelden</button>
                 </div>
             </div>
         </div>
     </nav>
+
+    <!-- Access Denied overlay (shown for non-Technik users) -->
+    <div id="access-denied" class="hidden fixed inset-0 bg-white z-40 flex items-center justify-center">
+        <div class="text-center">
+            <svg class="w-16 h-16 text-red-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+            <h2 class="text-xl font-semibold text-gray-800 mb-2">Zugriff verweigert</h2>
+            <p class="text-gray-500 mb-4">Diese Seite ist nur für die Technik-Gruppe zugänglich.</p>
+            <a href="energie-monitor.html" class="text-blue-600 hover:text-blue-800">Zum Dashboard</a>
+        </div>
+    </div>
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         <!-- Tabs -->
@@ -477,8 +490,27 @@
         return d.toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit', year: 'numeric' });
     }
 
+    function isTechnik(user) {
+        return user?.groups?.some(g => g.toLowerCase().includes('technik')) || user?.isAdmin;
+    }
+
     // ─── Init ───────────────────────────────────────────────────────
-    loadMeters();
+    (async function() {
+        const user = await AuthentikAuth.init({
+            requireAuth: true,
+            onLogin(user) {
+                document.getElementById('user-name').textContent = user.name;
+                document.getElementById('user-name').classList.remove('hidden');
+                document.getElementById('logout-btn').classList.remove('hidden');
+            }
+        });
+        if (!user) return;
+        if (!isTechnik(user)) {
+            document.getElementById('access-denied').classList.remove('hidden');
+            return;
+        }
+        loadMeters();
+    })();
     </script>
 </body>
 </html>

@@ -234,15 +234,16 @@ app.get('/api/auth/callback', async (req, res) => {
 
     const email = (userInfo.email || userInfo.sub).toLowerCase();
     const name = userInfo.name || userInfo.preferred_username || email;
-    const isAdmin = userInfo.groups?.includes('stweg3-ausschuss') || false;
+    const groups = userInfo.groups || [];
+    const isAdmin = groups.includes('stweg3-ausschuss') || groups.includes('technik') || false;
 
     // Create/update user in DB
     const userResult = await pool.query(
-      `INSERT INTO users (email, name, role)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role
-       RETURNING id, email, name, wohnung, stweg, role`,
-      [email, name, isAdmin ? 'admin' : 'bewohner']
+      `INSERT INTO users (email, name, role, groups_json)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, groups_json = EXCLUDED.groups_json
+       RETURNING id, email, name, wohnung, stweg, role, groups_json`,
+      [email, name, isAdmin ? 'admin' : 'bewohner', JSON.stringify(groups)]
     );
     const user = userResult.rows[0];
 
@@ -264,6 +265,7 @@ app.get('/api/auth/callback', async (req, res) => {
         wohnung: user.wohnung,
         stweg: user.stweg,
         isAdmin: user.role === 'admin',
+        groups: groups,
       },
     }));
     res.redirect(`${SITE_URL}${redirectPath}#auth=${userData}`);
@@ -305,7 +307,7 @@ async function validateAuthentikToken(token) {
        VALUES ($1, $2, $3)
        ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
        RETURNING id, email, name, wohnung, stweg, role`,
-      [email.toLowerCase(), name, data.groups?.includes('stweg3-ausschuss') ? 'admin' : 'bewohner']
+      [email.toLowerCase(), name, (data.groups?.includes('stweg3-ausschuss') || data.groups?.includes('technik')) ? 'admin' : 'bewohner']
     );
     const user = result.rows[0];
     user.isAdmin = user.role === 'admin';
@@ -363,10 +365,11 @@ function adminOnly(req, res, next) {
 app.get('/api/auth/me', authMiddleware, async (req, res) => {
   const userId = req.user.user_id || req.user.id;
   const result = await pool.query(
-    'SELECT id, email, name, wohnung, stweg, role, phone, strasse, plz, ort FROM users WHERE id = $1',
+    'SELECT id, email, name, wohnung, stweg, role, phone, strasse, plz, ort, groups_json FROM users WHERE id = $1',
     [userId]
   );
   const u = result.rows[0] || req.user;
+  const groups = (() => { try { return JSON.parse(u.groups_json || '[]'); } catch { return []; } })();
   res.json({
     user: {
       id: u.id,
@@ -380,6 +383,7 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
       plz: u.plz,
       ort: u.ort,
       isAdmin: u.role === 'admin',
+      groups: groups,
     },
   });
 });
@@ -1328,6 +1332,7 @@ async function initDB() {
         wohnung VARCHAR(255),
         stweg INTEGER,
         role VARCHAR(50) DEFAULT 'bewohner',
+        groups_json TEXT DEFAULT '[]',
         balance DECIMAL(10,2) DEFAULT 0,
         active BOOLEAN DEFAULT true,
         created_at TIMESTAMP DEFAULT NOW(),
@@ -1449,6 +1454,9 @@ async function initDB() {
         has_attachments BOOLEAN DEFAULT false,
         created_at TIMESTAMP DEFAULT NOW()
       );
+
+      -- Migrate users if missing groups_json column
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS groups_json TEXT DEFAULT '[]';
 
       -- Migrate email_verteiler if missing new columns
       ALTER TABLE email_verteiler ADD COLUMN IF NOT EXISTS reply_to VARCHAR(255) DEFAULT 'sender';
