@@ -12,23 +12,8 @@
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
-    <nav class="bg-white shadow-lg sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex items-center">
-                    <a href="index.html" class="flex items-center">
-                        <img src="logo-rosenweg.png" alt="Rosenweg" class="h-12 w-auto">
-                        <span class="ml-3 text-lg font-semibold text-gray-800">Energie-Konfiguration</span>
-                    </a>
-                </div>
-                <div class="flex items-center space-x-3">
-                    <a href="energie-monitor.html" class="text-sm text-blue-600 hover:text-blue-800">Zum Dashboard</a>
-                    <span id="user-name" class="hidden text-sm text-gray-500"></span>
-                    <button id="logout-btn" onclick="AuthentikAuth.logout()" class="hidden text-xs text-gray-400 hover:text-red-500">Abmelden</button>
-                </div>
-            </div>
-        </div>
-    </nav>
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js"></script>
 
     <!-- Access Denied overlay (shown for non-Technik users) -->
     <div id="access-denied" class="hidden fixed inset-0 bg-white z-40 flex items-center justify-center">
@@ -159,18 +144,17 @@
             </div>
 
             <div class="bg-white rounded-xl shadow-md p-6 mb-6">
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
                     <div>
                         <label class="block text-xs font-medium text-gray-500 mb-1">Zähler</label>
                         <select id="u-meter" class="w-full border-gray-300 rounded-md shadow-sm text-sm"></select>
                     </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-500 mb-1">E-Mail</label>
-                        <input id="u-email" type="email" class="w-full border-gray-300 rounded-md shadow-sm text-sm" placeholder="benutzer@example.com">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-gray-500 mb-1">Name</label>
-                        <input id="u-name" type="text" class="w-full border-gray-300 rounded-md shadow-sm text-sm" placeholder="Max Muster">
+                    <div class="relative">
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Benutzer (Authentik)</label>
+                        <input id="u-search" type="text" class="w-full border-gray-300 rounded-md shadow-sm text-sm" placeholder="Name oder E-Mail suchen..." autocomplete="off">
+                        <div id="u-dropdown" class="hidden absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto"></div>
+                        <input id="u-email" type="hidden">
+                        <input id="u-name" type="hidden">
                     </div>
                     <button onclick="assignUser()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 h-10">Zuweisen</button>
                 </div>
@@ -198,7 +182,7 @@
         });
         if (tab === 'meters') loadMeters();
         if (tab === 'tariffs') loadTariffs();
-        if (tab === 'users') { loadMetersForSelect(); loadAllAssignments(); }
+        if (tab === 'users') { loadMetersForSelect(); loadAllAssignments(); loadAuthentikUsers(); }
     }
 
     // ─── Meters ─────────────────────────────────────────────────────
@@ -421,6 +405,20 @@
     }
 
     // ─── User Assignments ───────────────────────────────────────────
+    let authentikUsers = [];
+
+    async function loadAuthentikUsers() {
+        try {
+            const res = await AuthentikAuth.apiFetch('/api/admin/users');
+            if (res.ok) {
+                const data = await res.json();
+                authentikUsers = (data.results || []).filter(u => u.is_active);
+            }
+        } catch (err) {
+            console.error('Failed to load Authentik users:', err);
+        }
+    }
+
     async function loadMetersForSelect() {
         const res = await fetch(`${API}/meters`);
         const meters = await res.json();
@@ -428,17 +426,59 @@
         sel.innerHTML = meters.map(m => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('');
     }
 
+    function setupUserSearch() {
+        const input = document.getElementById('u-search');
+        const dropdown = document.getElementById('u-dropdown');
+
+        input.addEventListener('input', () => {
+            const q = input.value.toLowerCase().trim();
+            if (q.length < 1) { dropdown.classList.add('hidden'); return; }
+
+            const matches = authentikUsers.filter(u =>
+                (u.name || '').toLowerCase().includes(q) ||
+                (u.email || '').toLowerCase().includes(q) ||
+                (u.username || '').toLowerCase().includes(q)
+            ).slice(0, 10);
+
+            if (matches.length === 0) {
+                dropdown.innerHTML = '<div class="px-4 py-3 text-sm text-gray-400">Keine Benutzer gefunden</div>';
+            } else {
+                dropdown.innerHTML = matches.map(u => `
+                    <div class="px-4 py-2 hover:bg-blue-50 cursor-pointer flex items-center justify-between" onclick="selectUser('${esc(u.email)}', '${esc(u.name)}', '${esc(u.username)}')">
+                        <div>
+                            <span class="text-sm font-medium text-gray-800">${esc(u.name || u.username)}</span>
+                            <span class="text-xs text-gray-400 ml-2">${esc(u.email)}</span>
+                        </div>
+                        ${u.groups_obj?.length ? `<span class="text-xs text-gray-400">${u.groups_obj.map(g => g.name).join(', ')}</span>` : ''}
+                    </div>
+                `).join('');
+            }
+            dropdown.classList.remove('hidden');
+        });
+
+        input.addEventListener('focus', () => { if (input.value.length >= 1) input.dispatchEvent(new Event('input')); });
+        document.addEventListener('click', (e) => { if (!e.target.closest('#u-search') && !e.target.closest('#u-dropdown')) dropdown.classList.add('hidden'); });
+    }
+
+    function selectUser(email, name, username) {
+        document.getElementById('u-email').value = email;
+        document.getElementById('u-name').value = name || username;
+        document.getElementById('u-search').value = `${name || username} (${email})`;
+        document.getElementById('u-dropdown').classList.add('hidden');
+    }
+
     async function assignUser() {
         const meterId = document.getElementById('u-meter').value;
         const email = document.getElementById('u-email').value.trim();
         const name = document.getElementById('u-name').value.trim();
-        if (!meterId || !email) return alert('Zähler und E-Mail sind Pflichtfelder');
+        if (!meterId || !email) return alert('Bitte Zähler und Benutzer auswählen');
 
         await fetch(`${API}/meters/${meterId}/users`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ user_email: email, user_name: name, role: 'viewer' })
         });
+        document.getElementById('u-search').value = '';
         document.getElementById('u-email').value = '';
         document.getElementById('u-name').value = '';
         loadAllAssignments();
@@ -496,19 +536,15 @@
 
     // ─── Init ───────────────────────────────────────────────────────
     (async function() {
-        const user = await AuthentikAuth.init({
-            requireAuth: true,
-            onLogin(user) {
-                document.getElementById('user-name').textContent = user.name;
-                document.getElementById('user-name').classList.remove('hidden');
-                document.getElementById('logout-btn').classList.remove('hidden');
-            }
-        });
+        const user = await AuthentikAuth.init({ requireAuth: true });
         if (!user) return;
+        RosenwegNav.init({ active: 'energie' });
         if (!isTechnik(user)) {
             document.getElementById('access-denied').classList.remove('hidden');
             return;
         }
+        setupUserSearch();
+        loadAuthentikUsers();
         loadMeters();
     })();
     </script>
