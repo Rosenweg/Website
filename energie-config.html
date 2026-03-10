@@ -82,6 +82,20 @@
                             <option value="em">Shelly Plus EM</option>
                         </select>
                     </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Standort / Zuordnung</label>
+                        <select id="m-location" class="w-full border-gray-300 rounded-md shadow-sm text-sm">
+                            <option value="">— Keine Zuordnung —</option>
+                            <optgroup label="Waschküche STWEG 3">
+                                <option value="waschkueche-1">Waschküche 1 (UG Links)</option>
+                                <option value="waschkueche-2">Waschküche 2 (UG Rechts)</option>
+                            </optgroup>
+                            <optgroup label="Allgemein">
+                                <option value="allgemein">Allgemeinzähler</option>
+                                <option value="produktion">Produktion / PV</option>
+                            </optgroup>
+                        </select>
+                    </div>
                 </div>
                 <div class="flex justify-end space-x-3 mt-4">
                     <button onclick="hideMeterForm()" class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Abbrechen</button>
@@ -187,6 +201,12 @@
 
     // ─── Meters ─────────────────────────────────────────────────────
     let editingMeterId = null;
+    const locationLabels = {
+        'waschkueche-1': 'Waschküche 1',
+        'waschkueche-2': 'Waschküche 2',
+        'allgemein': 'Allgemein',
+        'produktion': 'Produktion / PV',
+    };
 
     function toggleMeterFields() {
         const isShelly = document.getElementById('m-type').value === 'shelly';
@@ -209,6 +229,7 @@
             document.getElementById('m-port').value = meter.port;
             document.getElementById('m-unit').value = meter.unit_id;
             document.getElementById('m-shelly-type').value = meter.shelly_type || 'plug';
+            document.getElementById('m-location').value = meter.location || '';
         } else {
             editingMeterId = null;
             document.getElementById('meter-form-title').textContent = 'Neuer Zähler';
@@ -219,6 +240,7 @@
             document.getElementById('m-host').value = '';
             document.getElementById('m-port').value = 502;
             document.getElementById('m-unit').value = 1;
+            document.getElementById('m-location').value = '';
         }
         toggleMeterFields();
     }
@@ -237,6 +259,7 @@
             port: parseInt(document.getElementById('m-port').value) || 502,
             unit_id: parseInt(document.getElementById('m-unit').value) || 1,
             shelly_type: document.getElementById('m-type').value === 'shelly' ? document.getElementById('m-shelly-type').value : null,
+            location: document.getElementById('m-location').value || null,
         };
         if (!data.id || !data.name || !data.host) return alert('ID, Name und IP sind Pflichtfelder');
 
@@ -308,7 +331,7 @@
                         <span class="text-xs text-gray-400">(${esc(m.id)})</span>
                         ${!m.active ? '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">Inaktiv</span>' : ''}
                     </div>
-                    <p class="text-sm text-gray-500 mt-1">${esc(m.host)}:${m.port} ${m.type === 'modbus' ? '(Unit ' + m.unit_id + ')' : ''}</p>
+                    <p class="text-sm text-gray-500 mt-1">${esc(m.host)}:${m.port} ${m.type === 'modbus' ? '(Unit ' + m.unit_id + ')' : ''}${m.location ? ' · <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">' + esc(locationLabels[m.location] || m.location) + '</span>' : ''}</p>
                 </div>
                 <div class="flex items-center gap-2">
                     <button onclick="toggleMeter('${esc(m.id)}', ${m.active})" class="px-3 py-1 text-xs rounded-md ${m.active ? 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100' : 'bg-green-50 text-green-700 hover:bg-green-100'}">${m.active ? 'Deaktivieren' : 'Aktivieren'}</button>

@@ -17,7 +17,7 @@
     <script src="/js/nav.js"></script>
     <script>RosenwegNav.init({ active: 'waschkueche' });</script>
 
-    <!-- OTP Authentication -->
+    <!-- SSO Authentication -->
     <div id="auth-section" class="min-h-screen py-12 bg-gradient-to-br from-orange-50 to-orange-100">
         <div class="max-w-md mx-auto px-4">
             <div class="bg-white rounded-lg shadow-xl p-8">
@@ -27,59 +27,16 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
                         </svg>
                     </div>
-                    <h1 class="text-2xl font-bold text-gray-800 mb-2">🔐 Ausschuss-Zugang</h1>
-                    <p class="text-gray-600">Nur für Ausschussvertreter und Verwaltung</p>
+                    <h1 class="text-2xl font-bold text-gray-800 mb-2">Ausschuss-Zugang</h1>
+                    <p class="text-gray-600">Nur für Ausschussvertreter (Technik-Gruppe)</p>
                 </div>
-
-                <!-- Email Step -->
-                <div id="email-step">
-                    <form id="email-form" class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">E-Mail-Adresse</label>
-                            <input type="email" id="email-input" required
-                                class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                                placeholder="ausschuss@example.com">
-                        </div>
-                        <button type="submit"
-                            class="w-full bg-orange-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-orange-700 transition">
-                            OTP-Code anfordern
-                        </button>
-                    </form>
+                <div id="sso-login-container"></div>
+                <div id="access-denied" class="hidden mt-4 p-3 bg-red-50 border-l-4 border-red-500 rounded">
+                    <p class="text-sm text-red-800">Sie haben keine Administratorrechte. Nur Mitglieder der Technik-Gruppe haben Zugang.</p>
                 </div>
-
-                <!-- OTP Step -->
-                <div id="otp-step" class="hidden">
-                    <div class="mb-4 p-3 bg-orange-50 border-l-4 border-orange-500 rounded">
-                        <p class="text-sm text-orange-800">
-                            ✓ Code wurde an <strong id="sent-email"></strong> gesendet
-                        </p>
-                    </div>
-
-                    <form id="otp-form" class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Bestätigungscode</label>
-                            <input type="text" id="otp-input" required maxlength="6"
-                                class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 text-center text-2xl font-mono tracking-widest"
-                                placeholder="000000">
-                        </div>
-                        <button type="submit"
-                            class="w-full bg-orange-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-orange-700 transition">
-                            Bestätigen
-                        </button>
-                        <button type="button" id="back-btn"
-                            class="w-full bg-gray-100 text-gray-700 px-6 py-3 rounded-lg font-semibold hover:bg-gray-200 transition">
-                            Zurück
-                        </button>
-                    </form>
-                </div>
-
-                <div id="error-message" class="hidden mt-4 p-3 bg-red-50 border-l-4 border-red-500 rounded">
-                    <p class="text-sm text-red-800"></p>
-                </div>
-
                 <div class="mt-6 pt-6 border-t border-gray-200">
                     <p class="text-xs text-gray-600">
-                        <strong>🔒 Zugriffsbeschränkt:</strong> Nur Ausschussvertreter haben Zugang zu diesem Bereich.
+                        Zugriff nur mit Authentik SSO und Technik-Gruppenzugehörigkeit.
                     </p>
                 </div>
             </div>
@@ -99,20 +56,20 @@
         <!-- Tabs -->
         <div class="bg-white border-b">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <nav class="flex space-x-8">
-                    <button class="tab-btn py-4 px-1 border-b-2 font-medium text-sm active" data-tab="overview">
+                <nav class="flex space-x-8 overflow-x-auto">
+                    <button class="tab-btn py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap border-green-600 text-green-600" data-tab="overview">
                         Übersicht
                     </button>
-                    <button class="tab-btn py-4 px-1 border-b-2 font-medium text-sm" data-tab="users">
-                        Benutzer
+                    <button class="tab-btn py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap border-transparent text-gray-500" data-tab="rooms">
+                        Räume
                     </button>
-                    <button class="tab-btn py-4 px-1 border-b-2 font-medium text-sm" data-tab="devices">
-                        Geräte
-                    </button>
-                    <button class="tab-btn py-4 px-1 border-b-2 font-medium text-sm" data-tab="sessions">
+                    <button class="tab-btn py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap border-transparent text-gray-500" data-tab="sessions">
                         Sessions
                     </button>
-                    <button class="tab-btn py-4 px-1 border-b-2 font-medium text-sm" data-tab="settings">
+                    <button class="tab-btn py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap border-transparent text-gray-500" data-tab="billing">
+                        Abrechnung
+                    </button>
+                    <button class="tab-btn py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap border-transparent text-gray-500" data-tab="settings">
                         Einstellungen
                     </button>
                 </nav>
@@ -121,14 +78,13 @@
 
         <!-- Tab: Overview -->
         <div id="tab-overview" class="tab-content">
-            <!-- Stats -->
             <section class="py-8 bg-white">
                 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <h2 class="text-2xl font-bold text-gray-800 mb-6">Gesamt-Statistiken</h2>
                     <div class="grid md:grid-cols-4 gap-6">
                         <div class="bg-gradient-to-br from-blue-50 to-blue-100 p-6 rounded-lg border-2 border-blue-200">
-                            <h3 class="text-sm font-medium text-gray-600 mb-2">Aktive Benutzer</h3>
-                            <p id="stat-total-users" class="text-3xl font-bold text-blue-700">-</p>
+                            <h3 class="text-sm font-medium text-gray-600 mb-2">Aktive Räume</h3>
+                            <p id="stat-rooms" class="text-3xl font-bold text-blue-700">-</p>
                         </div>
                         <div class="bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-lg border-2 border-green-200">
                             <h3 class="text-sm font-medium text-gray-600 mb-2">Nutzungen gesamt</h3>
@@ -148,7 +104,6 @@
                 </div>
             </section>
 
-            <!-- Top Users -->
             <section class="py-8 bg-gray-50">
                 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <h2 class="text-2xl font-bold text-gray-800 mb-6">Top Nutzer</h2>
@@ -159,30 +114,18 @@
             </section>
         </div>
 
-        <!-- Tab: Users -->
-        <div id="tab-users" class="tab-content hidden">
+        <!-- Tab: Rooms -->
+        <div id="tab-rooms" class="tab-content hidden">
             <section class="py-8">
                 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div class="flex justify-between items-center mb-6">
-                        <h2 class="text-2xl font-bold text-gray-800">Benutzerverwaltung</h2>
-                        <button id="add-user-btn" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
-                            + Benutzer hinzufügen
+                        <h2 class="text-2xl font-bold text-gray-800">Räume-Verwaltung</h2>
+                        <button id="add-room-btn" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
+                            + Raum hinzufügen
                         </button>
                     </div>
-                    <div id="users-table" class="bg-white rounded-lg shadow-md overflow-hidden">
-                        <p class="p-6 text-gray-600">Lade Benutzer...</p>
-                    </div>
-                </div>
-            </section>
-        </div>
-
-        <!-- Tab: Devices -->
-        <div id="tab-devices" class="tab-content hidden">
-            <section class="py-8">
-                <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <h2 class="text-2xl font-bold text-gray-800 mb-6">Geräte-Verwaltung</h2>
-                    <div id="devices-grid" class="grid md:grid-cols-2 gap-6">
-                        <p class="text-gray-600">Lade Geräte...</p>
+                    <div id="rooms-grid" class="grid md:grid-cols-2 gap-6">
+                        <p class="text-gray-600">Lade Räume...</p>
                     </div>
                 </div>
             </section>
@@ -194,12 +137,38 @@
                 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div class="flex justify-between items-center mb-6">
                         <h2 class="text-2xl font-bold text-gray-800">Alle Sessions</h2>
-                        <button id="export-btn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
-                            📥 CSV Export
-                        </button>
+                        <div class="flex items-center gap-3">
+                            <input type="month" id="sessions-month" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                            <button id="sessions-filter-btn" class="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition text-sm">
+                                Filtern
+                            </button>
+                        </div>
                     </div>
                     <div id="sessions-table" class="bg-white rounded-lg shadow-md overflow-hidden">
                         <p class="p-6 text-gray-600">Lade Sessions...</p>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Tab: Billing -->
+        <div id="tab-billing" class="tab-content hidden">
+            <section class="py-8">
+                <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-2xl font-bold text-gray-800">Monatsabrechnung</h2>
+                        <div class="flex items-center gap-3">
+                            <input type="month" id="billing-month" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                            <button id="billing-filter-btn" class="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition text-sm">
+                                Anzeigen
+                            </button>
+                            <button id="run-billing-btn" class="bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700 transition text-sm">
+                                Abrechnung senden
+                            </button>
+                        </div>
+                    </div>
+                    <div id="billing-table" class="bg-white rounded-lg shadow-md overflow-hidden">
+                        <p class="p-6 text-gray-600">Lade Abrechnung...</p>
                     </div>
                 </div>
             </section>
@@ -210,44 +179,40 @@
             <section class="py-8">
                 <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
                     <h2 class="text-2xl font-bold text-gray-800 mb-6">System-Einstellungen</h2>
-
-                    <div class="bg-white rounded-lg shadow-md p-6 mb-6">
-                        <h3 class="text-lg font-semibold text-gray-800 mb-4">Preiseinstellungen</h3>
-                        <div class="space-y-4">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-2">Preis pro kWh (CHF)</label>
-                                <input type="number" step="0.01" value="0.30"
-                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500">
-                            </div>
-                            <button class="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition">
-                                Speichern
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="bg-white rounded-lg shadow-md p-6">
-                        <h3 class="text-lg font-semibold text-gray-800 mb-4">Shelly-Geräte</h3>
-                        <div class="space-y-3">
-                            <div class="flex justify-between items-center p-3 bg-gray-50 rounded">
-                                <span class="text-sm font-medium">Waschmaschine 1</span>
-                                <span class="text-xs text-gray-600">192.168.1.101</span>
-                            </div>
-                            <div class="flex justify-between items-center p-3 bg-gray-50 rounded">
-                                <span class="text-sm font-medium">Trockner 1</span>
-                                <span class="text-xs text-gray-600">192.168.1.102</span>
-                            </div>
-                            <div class="flex justify-between items-center p-3 bg-gray-50 rounded">
-                                <span class="text-sm font-medium">Waschmaschine 2</span>
-                                <span class="text-xs text-gray-600">192.168.1.103</span>
-                            </div>
-                            <div class="flex justify-between items-center p-3 bg-gray-50 rounded">
-                                <span class="text-sm font-medium">Trockner 2</span>
-                                <span class="text-xs text-gray-600">192.168.1.104</span>
-                            </div>
-                        </div>
+                    <div id="settings-form" class="space-y-6">
+                        <p class="text-gray-600">Lade Einstellungen...</p>
                     </div>
                 </div>
             </section>
+        </div>
+    </div>
+
+    <!-- Edit Room Modal -->
+    <div id="room-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+            <h3 id="room-modal-title" class="text-xl font-bold text-gray-800 mb-4">Raum bearbeiten</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                    <input type="text" id="room-name" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500" placeholder="z.B. Waschküche 1">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Standort</label>
+                    <input type="text" id="room-location" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500" placeholder="z.B. UG links">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Energiezähler-ID (aus Energie-Monitor)</label>
+                    <input type="text" id="room-meter" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500" placeholder="z.B. shelly-wasch1">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">UniFi Door-ID (optional)</label>
+                    <input type="text" id="room-door" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500" placeholder="z.B. door_abc123">
+                </div>
+            </div>
+            <div class="flex justify-end gap-3 mt-6">
+                <button id="room-modal-cancel" class="px-4 py-2 text-gray-600 hover:text-gray-800 transition">Abbrechen</button>
+                <button id="room-modal-save" class="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition">Speichern</button>
+            </div>
         </div>
     </div>
 
@@ -259,289 +224,388 @@
     </footer>
 
     <script>
-        const API_BASE_URL = '/api';
-        const ADMIN_EMAILS = [
-            'stweg3@rosenweg4303.ch',  // Weitergeleitet an beide Vertreter
-            'hello@langpartners.ch'
-        ];
+        // API Helper using Authentik SSO
+        async function api(path, opts = {}) {
+            const res = await AuthentikAuth.apiFetch(path, opts);
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({ error: res.statusText }));
+                throw new Error(err.error || 'API-Fehler');
+            }
+            return res.json();
+        }
 
-        // Wait for DOM to be fully loaded
-        document.addEventListener('DOMContentLoaded', () => {
-            // DOM Elements
+        function toast(msg, type = 'success') {
+            const t = document.createElement('div');
+            t.className = `fixed bottom-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-white text-sm transition-all ${type === 'error' ? 'bg-red-600' : 'bg-gray-800'}`;
+            t.textContent = msg;
+            document.body.appendChild(t);
+            setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 3000);
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
             const authSection = document.getElementById('auth-section');
             const mainContent = document.getElementById('main-content');
-            const emailStep = document.getElementById('email-step');
-            const otpStep = document.getElementById('otp-step');
-            const emailForm = document.getElementById('email-form');
-            const otpForm = document.getElementById('otp-form');
-            const emailInput = document.getElementById('email-input');
-            const otpInput = document.getElementById('otp-input');
-            const errorMessage = document.getElementById('error-message');
-            const sentEmail = document.getElementById('sent-email');
-            const backBtn = document.getElementById('back-btn');
-            const logoutBtn = document.getElementById('logout-btn');
-
-            // Tabs
             const tabBtns = document.querySelectorAll('.tab-btn');
             const tabContents = document.querySelectorAll('.tab-content');
 
-        // OTP Authentication
-        emailForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const email = emailInput.value.trim().toLowerCase();
+            // SSO Authentication with Technik group check
+            const user = await AuthentikAuth.init({
+                requireAuth: false,
+                onLogin: async (u) => {
+                    const groups = u.groups || [];
+                    const isAdmin = groups.includes('Technik') || groups.includes('technik');
+                    if (!isAdmin) {
+                        document.getElementById('access-denied').classList.remove('hidden');
+                        return;
+                    }
+                    authSection.classList.add('hidden');
+                    mainContent.classList.remove('hidden');
+                    await loadDashboard();
+                },
+            });
 
-            if (ADMIN_EMAILS.includes(email)) {
-                sentEmail.textContent = email;
-                emailStep.classList.add('hidden');
-                otpStep.classList.remove('hidden');
-                showError('');
-                alert(`Demo: Ihr OTP-Code ist: 123456`);
-            } else {
-                showError('Diese E-Mail-Adresse hat keine Administratorrechte.');
+            if (!user) {
+                AuthentikAuth.createLoginButton('sso-login-container');
             }
-        });
 
-        otpForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            if (otpInput.value === '123456') {
-                showError('');
-                authSection.classList.add('hidden');
-                mainContent.classList.remove('hidden');
-                logoutBtn.classList.remove('hidden');
-                await loadDashboard();
-            } else {
-                showError('Ungültiger Code.');
-            }
-        });
+            // Tabs
+            tabBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const tab = btn.dataset.tab;
+                    tabBtns.forEach(b => {
+                        b.classList.remove('border-green-600', 'text-green-600');
+                        b.classList.add('border-transparent', 'text-gray-500');
+                    });
+                    btn.classList.add('border-green-600', 'text-green-600');
+                    btn.classList.remove('border-transparent', 'text-gray-500');
+                    tabContents.forEach(c => c.classList.add('hidden'));
+                    document.getElementById(`tab-${tab}`).classList.remove('hidden');
 
-        backBtn.addEventListener('click', () => {
-            otpStep.classList.add('hidden');
-            emailStep.classList.remove('hidden');
-            otpInput.value = '';
-        });
-
-        logoutBtn.addEventListener('click', () => {
-            location.reload();
-        });
-
-        // Tabs
-        tabBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const tab = btn.dataset.tab;
-
-                tabBtns.forEach(b => {
-                    b.classList.remove('active', 'border-green-600', 'text-green-600');
-                    b.classList.add('border-transparent', 'text-gray-500');
+                    if (tab === 'rooms') loadRooms();
+                    if (tab === 'sessions') loadSessions();
+                    if (tab === 'billing') loadBilling();
+                    if (tab === 'settings') loadSettings();
                 });
-
-                btn.classList.add('active', 'border-green-600', 'text-green-600');
-                btn.classList.remove('border-transparent', 'text-gray-500');
-
-                tabContents.forEach(content => content.classList.add('hidden'));
-                document.getElementById(`tab-${tab}`).classList.remove('hidden');
-
-                if (tab === 'users') loadUsers();
-                if (tab === 'devices') loadDevices();
-                if (tab === 'sessions') loadAllSessions();
             });
-        });
 
-        function showError(msg) {
-            if (msg) {
-                errorMessage.querySelector('p').textContent = msg;
-                errorMessage.classList.remove('hidden');
-            } else {
-                errorMessage.classList.add('hidden');
-            }
-        }
+            // ── Overview ─────────────────────────────────────────────
+            async function loadDashboard() {
+                try {
+                    const stats = await api('/api/wasch/admin/stats');
+                    document.getElementById('stat-rooms').textContent = stats.rooms || 0;
+                    document.getElementById('stat-total-sessions').textContent = stats.total_sessions || 0;
+                    document.getElementById('stat-total-energy').textContent = parseFloat(stats.total_kwh || 0).toFixed(2);
+                    document.getElementById('stat-total-revenue').textContent = `CHF ${parseFloat(stats.total_cost || 0).toFixed(2)}`;
 
-        async function loadDashboard() {
-            try {
-                const response = await fetch(`${API_BASE_URL}/admin/stats`);
-                const stats = await response.json();
-
-                document.getElementById('stat-total-users').textContent = stats.overview.total_users;
-                document.getElementById('stat-total-sessions').textContent = stats.overview.total_sessions;
-                document.getElementById('stat-total-energy').textContent = stats.overview.total_energy.toFixed(2);
-                document.getElementById('stat-total-revenue').textContent = `CHF ${stats.overview.total_revenue.toFixed(2)}`;
-
-                // Top Users
-                const topUsersHtml = stats.top_users.map((u, i) => `
-                    <div class="flex justify-between items-center p-3 ${i === 0 ? 'bg-yellow-50' : 'bg-gray-50'} rounded mb-2">
-                        <div class="flex items-center">
-                            <span class="w-8 h-8 flex items-center justify-center bg-green-100 text-green-700 rounded-full font-bold mr-3">
-                                ${i + 1}
-                            </span>
-                            <div>
-                                <div class="font-medium">${u.name}</div>
-                                <div class="text-xs text-gray-600">${u.wohnung}</div>
-                            </div>
-                        </div>
-                        <div class="text-right">
-                            <div class="font-semibold text-gray-800">${u.sessions} Nutzungen</div>
-                            <div class="text-xs text-gray-600">${u.energy.toFixed(2)} kWh • CHF ${u.spent.toFixed(2)}</div>
-                        </div>
-                    </div>
-                `).join('');
-                document.getElementById('top-users').innerHTML = topUsersHtml;
-
-            } catch (error) {
-                console.error('Error loading dashboard:', error);
-            }
-        }
-
-        async function loadUsers() {
-            try {
-                const response = await fetch(`${API_BASE_URL}/admin/users`);
-                const users = await response.json();
-
-                const html = `
-                    <table class="w-full">
-                        <thead class="bg-gray-50">
-                            <tr>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Wohnung</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">E-Mail</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Guthaben</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Aktionen</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-gray-200">
-                            ${users.map(u => `
-                                <tr class="hover:bg-gray-50">
-                                    <td class="px-6 py-4 text-sm font-medium text-gray-900">${u.name}</td>
-                                    <td class="px-6 py-4 text-sm text-gray-900">${u.wohnung}</td>
-                                    <td class="px-6 py-4 text-sm text-gray-600">${u.email || '-'}</td>
-                                    <td class="px-6 py-4 text-sm font-semibold ${u.balance < 5 ? 'text-red-600' : 'text-green-600'}">
-                                        CHF ${u.balance.toFixed(2)}
-                                    </td>
-                                    <td class="px-6 py-4">
-                                        <span class="px-2 py-1 text-xs rounded-full ${u.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
-                                            ${u.is_active ? 'Aktiv' : 'Inaktiv'}
-                                        </span>
-                                    </td>
-                                    <td class="px-6 py-4 text-sm">
-                                        <button class="text-blue-600 hover:underline mr-3">Bearbeiten</button>
-                                        <button class="text-green-600 hover:underline">Aufladen</button>
-                                    </td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                `;
-                document.getElementById('users-table').innerHTML = html;
-            } catch (error) {
-                console.error('Error loading users:', error);
-            }
-        }
-
-        async function loadDevices() {
-            try {
-                const response = await fetch(`${API_BASE_URL}/devices`);
-                const devices = await response.json();
-
-                const html = devices.map(d => `
-                    <div class="bg-white p-6 rounded-lg shadow-md border-2 ${d.is_online ? 'border-green-200' : 'border-red-200'}">
-                        <div class="flex justify-between items-start mb-4">
-                            <div>
-                                <h3 class="text-lg font-semibold text-gray-800">${d.device_name}</h3>
-                                <p class="text-sm text-gray-600">${d.location}</p>
-                            </div>
-                            <span class="px-2 py-1 text-xs rounded-full ${d.is_online ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
-                                ${d.is_online ? 'Online' : 'Offline'}
-                            </span>
-                        </div>
-                        <div class="space-y-2 text-sm">
-                            <div class="flex justify-between">
-                                <span class="text-gray-600">Status:</span>
-                                <span class="font-medium">${d.is_in_use ? 'In Benutzung' : 'Verfügbar'}</span>
-                            </div>
-                            ${d.is_online ? `
-                                <div class="flex justify-between">
-                                    <span class="text-gray-600">Leistung:</span>
-                                    <span class="font-medium">${d.power?.toFixed(1) || '0'} W</span>
+                    const topUsers = (stats.top_users || []);
+                    if (topUsers.length === 0) {
+                        document.getElementById('top-users').innerHTML = '<p class="text-gray-500">Noch keine Nutzungen vorhanden.</p>';
+                        return;
+                    }
+                    document.getElementById('top-users').innerHTML = topUsers.map((u, i) => `
+                        <div class="flex justify-between items-center p-3 ${i === 0 ? 'bg-yellow-50' : 'bg-gray-50'} rounded mb-2">
+                            <div class="flex items-center">
+                                <span class="w-8 h-8 flex items-center justify-center bg-green-100 text-green-700 rounded-full font-bold mr-3">${i + 1}</span>
+                                <div>
+                                    <div class="font-medium">${u.name}</div>
+                                    <div class="text-xs text-gray-600">${u.wohnung || ''}</div>
                                 </div>
-                            ` : ''}
-                            <div class="flex justify-between">
-                                <span class="text-gray-600">IP:</span>
-                                <span class="font-mono text-xs">${d.shelly_ip}</span>
+                            </div>
+                            <div class="text-right">
+                                <div class="font-semibold text-gray-800">${u.sessions} Nutzungen</div>
+                                <div class="text-xs text-gray-600">${parseInt(u.minutes || 0)} Min. &bull; CHF ${parseFloat(u.cost || 0).toFixed(2)}</div>
                             </div>
                         </div>
-                    </div>
-                `).join('');
-                document.getElementById('devices-grid').innerHTML = html;
-            } catch (error) {
-                console.error('Error loading devices:', error);
+                    `).join('');
+                } catch (err) {
+                    console.error('Dashboard error:', err);
+                    toast('Fehler beim Laden der Statistiken', 'error');
+                }
             }
-        }
 
-        async function loadAllSessions() {
-            try {
-                const response = await fetch(`${API_BASE_URL}/admin/sessions?limit=100`);
-                const sessions = await response.json();
+            // ── Rooms ────────────────────────────────────────────────
+            let editingRoomId = null;
 
-                const html = `
-                    <table class="w-full">
-                        <thead class="bg-gray-50">
-                            <tr>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Datum</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Benutzer</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Gerät</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Verbrauch</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Kosten</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-gray-200">
-                            ${sessions.map(s => `
-                                <tr class="hover:bg-gray-50">
-                                    <td class="px-6 py-4 text-sm text-gray-900">
-                                        ${new Date(s.started_at).toLocaleString('de-CH', {
-                                            day: '2-digit', month: '2-digit', year: 'numeric',
-                                            hour: '2-digit', minute: '2-digit'
-                                        })}
-                                    </td>
-                                    <td class="px-6 py-4">
-                                        <div class="text-sm font-medium text-gray-900">${s.name}</div>
-                                        <div class="text-sm text-gray-500">${s.wohnung}</div>
-                                    </td>
-                                    <td class="px-6 py-4">
-                                        <div class="text-sm font-medium text-gray-900">${s.device_name}</div>
-                                        <div class="text-sm text-gray-500">${s.location}</div>
-                                    </td>
-                                    <td class="px-6 py-4 text-sm text-gray-900">
-                                        ${s.energy_consumed ? s.energy_consumed.toFixed(2) + ' kWh' : '-'}
-                                    </td>
-                                    <td class="px-6 py-4 text-sm font-semibold ${s.cost ? 'text-green-600' : 'text-gray-900'}">
-                                        ${s.cost ? 'CHF ' + s.cost.toFixed(2) : '-'}
-                                    </td>
-                                    <td class="px-6 py-4">
-                                        <span class="px-2 py-1 text-xs rounded-full ${
-                                            s.status === 'completed' ? 'bg-green-100 text-green-800' :
-                                            s.status === 'active' ? 'bg-orange-100 text-orange-800' :
-                                            'bg-gray-100 text-gray-800'
-                                        }">
-                                            ${s.status === 'completed' ? 'Abgeschlossen' :
-                                              s.status === 'active' ? 'Aktiv' : s.status}
-                                        </span>
-                                    </td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                `;
-                document.getElementById('sessions-table').innerHTML = html;
-            } catch (error) {
-                console.error('Error loading sessions:', error);
+            async function loadRooms() {
+                try {
+                    const rooms = await api('/api/wasch/rooms');
+                    if (rooms.length === 0) {
+                        document.getElementById('rooms-grid').innerHTML = '<p class="text-gray-500 col-span-2">Keine Räume konfiguriert.</p>';
+                        return;
+                    }
+                    document.getElementById('rooms-grid').innerHTML = rooms.map(r => `
+                        <div class="bg-white p-6 rounded-lg shadow-md border-2 border-green-200">
+                            <div class="flex justify-between items-start mb-4">
+                                <div>
+                                    <h3 class="text-lg font-semibold text-gray-800">${r.name}</h3>
+                                    <p class="text-sm text-gray-600">${r.location || 'Kein Standort'}</p>
+                                </div>
+                                <button onclick="openEditRoom(${r.id}, '${r.name}', '${r.location || ''}', '${r.energy_meter_id || ''}', '${r.unifi_door_id || ''}')"
+                                    class="text-blue-600 hover:text-blue-800 text-sm font-medium">Bearbeiten</button>
+                            </div>
+                            <div class="space-y-2 text-sm">
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Energiezähler:</span>
+                                    <span class="font-mono text-xs ${r.energy_meter_id ? 'text-green-700' : 'text-gray-400'}">${r.energy_meter_id || 'Nicht zugewiesen'}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">UniFi Door:</span>
+                                    <span class="font-mono text-xs ${r.unifi_door_id ? 'text-green-700' : 'text-gray-400'}">${r.unifi_door_id || 'Nicht konfiguriert'}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                } catch (err) {
+                    console.error('Rooms error:', err);
+                    toast('Fehler beim Laden der Räume', 'error');
+                }
             }
-        }
 
-            // CSV Export
-            document.getElementById('export-btn')?.addEventListener('click', () => {
-                window.open(`${API_BASE_URL}/admin/export/sessions`, '_blank');
+            // Room modal
+            const roomModal = document.getElementById('room-modal');
+            document.getElementById('room-modal-cancel').addEventListener('click', () => roomModal.classList.add('hidden'));
+            roomModal.addEventListener('click', (e) => { if (e.target === roomModal) roomModal.classList.add('hidden'); });
+            document.addEventListener('keydown', (e) => { if (e.key === 'Escape') roomModal.classList.add('hidden'); });
+
+            window.openEditRoom = function(id, name, location, meter, door) {
+                editingRoomId = id;
+                document.getElementById('room-modal-title').textContent = id ? 'Raum bearbeiten' : 'Neuer Raum';
+                document.getElementById('room-name').value = name || '';
+                document.getElementById('room-location').value = location || '';
+                document.getElementById('room-meter').value = meter || '';
+                document.getElementById('room-door').value = door || '';
+                roomModal.classList.remove('hidden');
+            };
+
+            document.getElementById('add-room-btn').addEventListener('click', () => {
+                openEditRoom(null, '', '', '', '');
             });
-        }); // End of DOMContentLoaded
+
+            document.getElementById('room-modal-save').addEventListener('click', async () => {
+                const body = {
+                    name: document.getElementById('room-name').value.trim(),
+                    location: document.getElementById('room-location').value.trim(),
+                    energy_meter_id: document.getElementById('room-meter').value.trim() || null,
+                    unifi_door_id: document.getElementById('room-door').value.trim() || null,
+                };
+                if (!body.name) { toast('Name ist erforderlich', 'error'); return; }
+                try {
+                    if (editingRoomId) {
+                        await api(`/api/wasch/rooms/${editingRoomId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                    } else {
+                        await api('/api/wasch/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                    }
+                    roomModal.classList.add('hidden');
+                    toast('Raum gespeichert');
+                    loadRooms();
+                } catch (err) {
+                    toast(err.message, 'error');
+                }
+            });
+
+            // ── Sessions ─────────────────────────────────────────────
+            async function loadSessions() {
+                try {
+                    const monthInput = document.getElementById('sessions-month');
+                    const monthParam = monthInput.value ? `?month=${monthInput.value}` : '';
+                    const sessions = await api(`/api/wasch/admin/sessions${monthParam}`);
+
+                    if (sessions.length === 0) {
+                        document.getElementById('sessions-table').innerHTML = '<p class="p-6 text-gray-500">Keine Sessions gefunden.</p>';
+                        return;
+                    }
+                    document.getElementById('sessions-table').innerHTML = `
+                        <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Datum</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Benutzer</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Raum</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Dauer</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Verbrauch</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Kosten</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-200">
+                                ${sessions.map(s => `
+                                    <tr class="hover:bg-gray-50">
+                                        <td class="px-6 py-4 text-sm text-gray-900">
+                                            ${new Date(s.started_at).toLocaleString('de-CH', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                        </td>
+                                        <td class="px-6 py-4">
+                                            <div class="text-sm font-medium text-gray-900">${s.name || '-'}</div>
+                                            <div class="text-sm text-gray-500">${s.wohnung || ''}</div>
+                                        </td>
+                                        <td class="px-6 py-4 text-sm text-gray-900">${s.room_name || '-'}</td>
+                                        <td class="px-6 py-4 text-sm text-gray-900">${s.duration_minutes ? s.duration_minutes + ' Min.' : '-'}</td>
+                                        <td class="px-6 py-4 text-sm text-gray-900">
+                                            ${s.energy_consumed ? parseFloat(s.energy_consumed).toFixed(2) + ' kWh' : '-'}
+                                        </td>
+                                        <td class="px-6 py-4 text-sm font-semibold ${s.cost ? 'text-green-600' : 'text-gray-900'}">
+                                            ${s.cost ? 'CHF ' + parseFloat(s.cost).toFixed(2) : '-'}
+                                        </td>
+                                        <td class="px-6 py-4">
+                                            <span class="px-2 py-1 text-xs rounded-full ${
+                                                s.status === 'completed' ? 'bg-green-100 text-green-800' :
+                                                s.status === 'active' ? 'bg-orange-100 text-orange-800' :
+                                                'bg-gray-100 text-gray-800'
+                                            }">
+                                                ${s.status === 'completed' ? 'Abgeschlossen' :
+                                                  s.status === 'active' ? 'Aktiv' : s.status || '-'}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                        </div>
+                    `;
+                } catch (err) {
+                    console.error('Sessions error:', err);
+                    toast('Fehler beim Laden der Sessions', 'error');
+                }
+            }
+
+            document.getElementById('sessions-filter-btn').addEventListener('click', loadSessions);
+
+            // ── Billing ──────────────────────────────────────────────
+            async function loadBilling() {
+                try {
+                    const monthInput = document.getElementById('billing-month');
+                    const month = monthInput.value || new Date().toISOString().slice(0, 7);
+                    if (!monthInput.value) monthInput.value = month;
+
+                    const costs = await api(`/api/wasch/admin/costs?month=${month}`);
+
+                    if (costs.length === 0) {
+                        document.getElementById('billing-table').innerHTML = '<p class="p-6 text-gray-500">Keine Nutzungen in diesem Monat.</p>';
+                        return;
+                    }
+                    const totalCost = costs.reduce((s, c) => s + parseFloat(c.total_cost || 0), 0);
+                    const totalKwh = costs.reduce((s, c) => s + parseFloat(c.total_kwh || 0), 0);
+
+                    document.getElementById('billing-table').innerHTML = `
+                        <div class="p-4 bg-gray-50 border-b flex justify-between items-center">
+                            <span class="font-medium text-gray-700">Gesamt: ${totalKwh.toFixed(2)} kWh &bull; CHF ${totalCost.toFixed(2)}</span>
+                        </div>
+                        <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Bewohner</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Wohnung</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sessions</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Dauer</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Verbrauch</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Kosten</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-200">
+                                ${costs.map(c => `
+                                    <tr class="hover:bg-gray-50">
+                                        <td class="px-6 py-4 text-sm font-medium text-gray-900">${c.name}</td>
+                                        <td class="px-6 py-4 text-sm text-gray-600">${c.wohnung || '-'}</td>
+                                        <td class="px-6 py-4 text-sm text-gray-900">${c.sessions}</td>
+                                        <td class="px-6 py-4 text-sm text-gray-900">${parseInt(c.total_minutes || 0)} Min.</td>
+                                        <td class="px-6 py-4 text-sm text-gray-900">${parseFloat(c.total_kwh || 0).toFixed(2)} kWh</td>
+                                        <td class="px-6 py-4 text-sm font-semibold text-green-600">CHF ${parseFloat(c.total_cost || 0).toFixed(2)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                        </div>
+                    `;
+                } catch (err) {
+                    console.error('Billing error:', err);
+                    toast('Fehler beim Laden der Abrechnung', 'error');
+                }
+            }
+
+            document.getElementById('billing-filter-btn').addEventListener('click', loadBilling);
+
+            document.getElementById('run-billing-btn').addEventListener('click', async () => {
+                const month = document.getElementById('billing-month').value;
+                if (!month) { toast('Bitte Monat auswählen', 'error'); return; }
+                if (!confirm(`Abrechnung für ${month} wirklich per E-Mail versenden?`)) return;
+                try {
+                    const result = await api('/api/wasch/admin/billing/run', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ month }),
+                    });
+                    toast(result.message || 'Abrechnung versendet');
+                } catch (err) {
+                    toast(err.message, 'error');
+                }
+            });
+
+            // ── Settings ─────────────────────────────────────────────
+            async function loadSettings() {
+                try {
+                    const settings = await api('/api/wasch/settings');
+                    const settingsEl = document.getElementById('settings-form');
+
+                    const fields = [
+                        { key: 'cost_per_kwh', label: 'Preis pro kWh (CHF)', type: 'number', step: '0.01' },
+                        { key: 'unifi_access_host', label: 'UniFi Access Host', type: 'text', placeholder: 'z.B. 192.168.1.1' },
+                        { key: 'unifi_access_token', label: 'UniFi Access API Token', type: 'password' },
+                        { key: 'unifi_access_enabled', label: 'UniFi Access aktiviert', type: 'toggle' },
+                    ];
+
+                    settingsEl.innerHTML = `
+                        <div class="bg-white rounded-lg shadow-md p-6 space-y-5">
+                            ${fields.map(f => {
+                                const val = settings[f.key] || '';
+                                if (f.type === 'toggle') {
+                                    const checked = val === 'true' || val === '1';
+                                    return `
+                                        <div class="flex items-center justify-between">
+                                            <label class="text-sm font-medium text-gray-700">${f.label}</label>
+                                            <label class="relative inline-flex items-center cursor-pointer">
+                                                <input type="checkbox" data-key="${f.key}" class="sr-only peer setting-input" ${checked ? 'checked' : ''}>
+                                                <div class="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-green-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                                            </label>
+                                        </div>`;
+                                }
+                                return `
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">${f.label}</label>
+                                        <input type="${f.type}" step="${f.step || ''}" data-key="${f.key}"
+                                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 setting-input"
+                                            value="${val}" placeholder="${f.placeholder || ''}">
+                                    </div>`;
+                            }).join('')}
+                            <button id="save-settings-btn" class="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition">
+                                Speichern
+                            </button>
+                        </div>
+                    `;
+
+                    document.getElementById('save-settings-btn').addEventListener('click', async () => {
+                        const body = {};
+                        settingsEl.querySelectorAll('.setting-input').forEach(el => {
+                            const key = el.dataset.key;
+                            body[key] = el.type === 'checkbox' ? String(el.checked) : el.value;
+                        });
+                        try {
+                            await api('/api/wasch/settings', {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(body),
+                            });
+                            toast('Einstellungen gespeichert');
+                        } catch (err) {
+                            toast(err.message, 'error');
+                        }
+                    });
+                } catch (err) {
+                    console.error('Settings error:', err);
+                    toast('Fehler beim Laden der Einstellungen', 'error');
+                }
+            }
+        });
     </script>
 </body>
 </html>
