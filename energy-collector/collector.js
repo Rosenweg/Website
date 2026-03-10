@@ -25,7 +25,7 @@ const pool = new Pool({
 // All registers use FC03 (Read Holding Registers), Big Endian
 // IMPORTANT: smart-me Modbus addresses are "internal address - 1"
 // All values are int32 (2 registers each)
-// Power in W, Voltage in mV, Current in cA (centamps), Energy in Wh
+// Power in mW, Voltage in mV, Current in mA, Energy kWh registers at 0x204B/0x204D (*1000)
 
 // ─── Modbus Read Helpers ────────────────────────────────────────────
 function parseRegisterValue(buffer, type) {
@@ -48,19 +48,19 @@ async function readMeter(client, meter) {
 
   // Group 1: Power registers (internal 0x2004-0x200B → Modbus 0x2003-0x200A, 8 registers)
   const powerBuf = await client.readHoldingRegisters(0x2003, 8);
-  data.power_w = parseRegisterValue(Buffer.from(powerBuf.buffer), 'int32');        // W
-  data.power_l1_w = parseRegisterValue(Buffer.from(powerBuf.buffer.slice(4)), 'int32');
-  data.power_l2_w = parseRegisterValue(Buffer.from(powerBuf.buffer.slice(8)), 'int32');
-  data.power_l3_w = parseRegisterValue(Buffer.from(powerBuf.buffer.slice(12)), 'int32');
+  data.power_mw = parseRegisterValue(Buffer.from(powerBuf.buffer), 'int32');        // mW
+  data.power_l1_mw = parseRegisterValue(Buffer.from(powerBuf.buffer.slice(4)), 'int32');
+  data.power_l2_mw = parseRegisterValue(Buffer.from(powerBuf.buffer.slice(8)), 'int32');
+  data.power_l3_mw = parseRegisterValue(Buffer.from(powerBuf.buffer.slice(12)), 'int32');
 
   // Group 2: Voltage + Current (internal 0x2014-0x201F → Modbus 0x2013-0x201E, 12 registers)
   const vcBuf = await client.readHoldingRegisters(0x2013, 12);
   data.voltage_l1_mv = parseRegisterValue(Buffer.from(vcBuf.buffer), 'int32');      // mV
   data.voltage_l2_mv = parseRegisterValue(Buffer.from(vcBuf.buffer.slice(4)), 'int32');
   data.voltage_l3_mv = parseRegisterValue(Buffer.from(vcBuf.buffer.slice(8)), 'int32');
-  data.current_l1_ca = parseRegisterValue(Buffer.from(vcBuf.buffer.slice(12)), 'int32'); // cA (centamps)
-  data.current_l2_ca = parseRegisterValue(Buffer.from(vcBuf.buffer.slice(16)), 'int32');
-  data.current_l3_ca = parseRegisterValue(Buffer.from(vcBuf.buffer.slice(20)), 'int32');
+  data.current_l1_ma = parseRegisterValue(Buffer.from(vcBuf.buffer.slice(12)), 'int32'); // mA
+  data.current_l2_ma = parseRegisterValue(Buffer.from(vcBuf.buffer.slice(16)), 'int32');
+  data.current_l3_ma = parseRegisterValue(Buffer.from(vcBuf.buffer.slice(20)), 'int32');
 
   // Group 3: Energy import/export in kWh (internal 0x204C/0x204E → Modbus 0x204B/0x204D)
   const energyBuf = await client.readHoldingRegisters(0x204B, 4);
@@ -69,16 +69,16 @@ async function readMeter(client, meter) {
 
   // Convert to human-readable units
   return {
-    power_w: data.power_w,
-    power_l1_w: data.power_l1_w,
-    power_l2_w: data.power_l2_w,
-    power_l3_w: data.power_l3_w,
-    voltage_l1_v: data.voltage_l1_mv / 1000,
+    power_w: data.power_mw / 1000,           // mW → W
+    power_l1_w: data.power_l1_mw / 1000,
+    power_l2_w: data.power_l2_mw / 1000,
+    power_l3_w: data.power_l3_mw / 1000,
+    voltage_l1_v: data.voltage_l1_mv / 1000, // mV → V
     voltage_l2_v: data.voltage_l2_mv / 1000,
     voltage_l3_v: data.voltage_l3_mv / 1000,
-    current_l1_a: data.current_l1_ca / 100,    // cA → A
-    current_l2_a: data.current_l2_ca / 100,
-    current_l3_a: data.current_l3_ca / 100,
+    current_l1_a: data.current_l1_ma / 1000, // mA → A
+    current_l2_a: data.current_l2_ma / 1000,
+    current_l3_a: data.current_l3_ma / 1000,
     pf_l1: 0,
     pf_l2: 0,
     pf_l3: 0,
