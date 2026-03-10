@@ -6,6 +6,7 @@
     <title>Energie-Monitor - Rosenweg</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <script src="js/authentik-auth.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; }
@@ -35,6 +36,11 @@
                     <select id="meter-select" class="text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500">
                         <option value="">Zähler laden...</option>
                     </select>
+                    <a id="config-link" href="energie-config.html" class="hidden text-sm text-blue-600 hover:text-blue-800" title="Konfiguration">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                    </a>
+                    <span id="user-name" class="hidden text-sm text-gray-500"></span>
+                    <button id="logout-btn" onclick="AuthentikAuth.logout()" class="hidden text-xs text-gray-400 hover:text-red-500">Abmelden</button>
                 </div>
             </div>
         </div>
@@ -167,24 +173,53 @@
     let phaseChart = null;
     let consumptionChart = null;
     let pollTimer = null;
+    let currentUser = null;
+
+    function isTechnik(user) {
+        return user?.groups?.some(g => g.toLowerCase().includes('technik')) || user?.isAdmin;
+    }
 
     // ─── Init ───────────────────────────────────────────────────────
     async function init() {
+        // Require authentication
+        currentUser = await AuthentikAuth.init({
+            requireAuth: true,
+            onLogin(user) {
+                document.getElementById('user-name').textContent = user.name;
+                document.getElementById('user-name').classList.remove('hidden');
+                document.getElementById('logout-btn').classList.remove('hidden');
+                if (isTechnik(user)) {
+                    document.getElementById('config-link').classList.remove('hidden');
+                }
+            }
+        });
+        if (!currentUser) return;
+
         try {
-            const res = await fetch(`${API}/meters`);
-            const meters = await res.json();
+            let meters;
+            if (isTechnik(currentUser)) {
+                // Technik sieht alle Zähler
+                const res = await fetch(`${API}/meters`);
+                meters = await res.json();
+            } else {
+                // Normale User sehen nur zugewiesene Zähler
+                const res = await fetch(`${API}/user/${encodeURIComponent(currentUser.email)}/meters`);
+                meters = await res.json();
+            }
             const select = document.getElementById('meter-select');
             select.innerHTML = '';
+            if (meters.length === 0) {
+                select.innerHTML = '<option>Keine Zähler zugewiesen</option>';
+                return;
+            }
             meters.forEach(m => {
                 const opt = document.createElement('option');
                 opt.value = m.id;
                 opt.textContent = m.name;
                 select.appendChild(opt);
             });
-            if (meters.length > 0) {
-                currentMeter = meters[0].id;
-                select.value = currentMeter;
-            }
+            currentMeter = meters[0].id;
+            select.value = currentMeter;
             select.addEventListener('change', (e) => {
                 currentMeter = e.target.value;
                 refreshAll();
