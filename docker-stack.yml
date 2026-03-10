@@ -169,6 +169,67 @@ services:
       retries: 5
 
   # ============================================
+  # Energy Collector - Modbus TCP → PostgreSQL
+  # ============================================
+  energy-collector:
+    image: ghcr.io/rosenweg/energy-collector:latest
+    environment:
+      METERS: "${ENERGY_METERS:-100.64.90.72:502:1:test-meter}"
+      POLL_INTERVAL: "5"
+      API_PORT: "3001"
+      DB_HOST: energy-db
+      DB_PORT: "5432"
+      DB_NAME: energy
+      DB_USER: energy
+      DB_PASSWORD: "${ENERGY_DB_PASSWORD:-energy2026}"
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname == docker-pve1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      labels:
+        - "shepherd.enable=true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ============================================
+  # Energy Database - Separate PostgreSQL
+  # ============================================
+  energy-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: energy
+      POSTGRES_USER: energy
+      POSTGRES_PASSWORD: "${ENERGY_DB_PASSWORD:-energy2026}"
+    volumes:
+      - energy-pgdata:/var/lib/postgresql/data
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname == docker-pve1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U energy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
   # Shepherd - Auto-update Docker Swarm services
   # ============================================
   shepherd:
@@ -200,3 +261,4 @@ volumes:
   traefik-certs:
   traefik-logs:
   rosenweg-pgdata:
+  energy-pgdata:
