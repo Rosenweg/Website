@@ -157,8 +157,8 @@
     const API = '/api/energy';
     const POLL_INTERVAL = 5000;
     const TARIFE = {
-        hochtarif: { preis: 0.2516, name: 'Hochtarif' },
-        niedertarif: { preis: 0.1789, name: 'Niedertarif' },
+        netz: { preis: 0.2516, name: 'Netztarif' },
+        solar: { preis: 0.10, name: 'Solartarif' },
     };
 
     let currentMeter = null;
@@ -262,8 +262,7 @@
             data: {
                 labels: [],
                 datasets: [
-                    { label: 'Hochtarif', data: [], backgroundColor: '#ef4444', borderRadius: 3 },
-                    { label: 'Niedertarif', data: [], backgroundColor: '#3b82f6', borderRadius: 3 },
+                    { label: 'Netzbezug', data: [], backgroundColor: '#3b82f6', borderRadius: 3 },
                 ]
             },
             options: {
@@ -335,8 +334,7 @@
             { label: 'Spannung', l1: `${d.voltage_l1_v.toFixed(1)} V`, l2: `${d.voltage_l2_v.toFixed(1)} V`, l3: `${d.voltage_l3_v.toFixed(1)} V`, total: '-' },
             { label: 'Strom', l1: `${d.current_l1_a.toFixed(2)} A`, l2: `${d.current_l2_a.toFixed(2)} A`, l3: `${d.current_l3_a.toFixed(2)} A`, total: `${(d.current_l1_a + d.current_l2_a + d.current_l3_a).toFixed(2)} A` },
             { label: 'cos &phi;', l1: d.pf_l1.toFixed(3), l2: d.pf_l2.toFixed(3), l3: d.pf_l3.toFixed(3), total: '-' },
-            { label: 'Bezug (T1)', l1: '-', l2: '-', l3: '-', total: `${d.energy_import_t1_kwh.toFixed(2)} kWh` },
-            { label: 'Bezug (T2)', l1: '-', l2: '-', l3: '-', total: `${d.energy_import_t2_kwh.toFixed(2)} kWh` },
+            { label: 'Netzbezug', l1: '-', l2: '-', l3: '-', total: `${d.energy_import_kwh.toFixed(2)} kWh` },
             { label: 'Einspeisung', l1: '-', l2: '-', l3: '-', total: `${d.energy_export_kwh.toFixed(2)} kWh` },
         ];
         document.getElementById('detail-table').innerHTML = rows.map(r => `
@@ -359,10 +357,8 @@
             if (d.consumption_kwh != null) {
                 const kwh = parseFloat(d.consumption_kwh);
                 document.getElementById('today-consumption').textContent = `${kwh.toFixed(2)} kWh`;
-                const t1 = parseFloat(d.consumption_t1_kwh) || 0;
-                const t2 = parseFloat(d.consumption_t2_kwh) || 0;
-                const cost = t1 * TARIFE.hochtarif.preis + t2 * TARIFE.niedertarif.preis;
-                document.getElementById('today-cost').textContent = `Kosten: CHF ${cost.toFixed(2)} (HT: ${t1.toFixed(1)} / NT: ${t2.toFixed(1)} kWh)`;
+                const cost = kwh * TARIFE.netz.preis;
+                document.getElementById('today-cost').textContent = `Kosten: CHF ${cost.toFixed(2)} (Netztarif)`;
             }
         } catch (err) {
             console.error('Today load error:', err);
@@ -428,8 +424,7 @@
             consumptionChart.data.labels = data.map(r =>
                 new Date(r.day).toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit' })
             );
-            consumptionChart.data.datasets[0].data = data.map(r => parseFloat(r.consumption_t1_kwh) || 0);
-            consumptionChart.data.datasets[1].data = data.map(r => parseFloat(r.consumption_t2_kwh) || 0);
+            consumptionChart.data.datasets[0].data = data.map(r => parseFloat(r.consumption_kwh) || 0);
             consumptionChart.update();
         } catch (err) {
             console.error('Consumption chart error:', err);
