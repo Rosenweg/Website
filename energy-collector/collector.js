@@ -114,6 +114,7 @@ async function initDB() {
         port INTEGER NOT NULL DEFAULT 502,
         unit_id INTEGER NOT NULL DEFAULT 1,
         shelly_type VARCHAR(50),
+        location VARCHAR(255),
         active BOOLEAN DEFAULT true,
         created_at TIMESTAMP DEFAULT NOW()
       );
@@ -190,6 +191,9 @@ async function initDB() {
 
       CREATE UNIQUE INDEX IF NOT EXISTS idx_readings_hourly_pk
         ON readings_hourly(meter_id, hour);
+
+      -- Migration: add location column if missing
+      ALTER TABLE meters ADD COLUMN IF NOT EXISTS location VARCHAR(255);
     `);
 
     // Seed meters from METERS env var only if DB has no meters yet
@@ -485,6 +489,41 @@ app.get('/api/energy/meters', async (req, res) => {
   res.json(result.rows);
 });
 
+// Get meters by location (e.g. ?location=waschkueche-1)
+app.get('/api/energy/meters/by-location', async (req, res) => {
+  const { location } = req.query;
+  if (!location) return res.status(400).json({ error: 'location query parameter required' });
+  const result = await pool.query(
+    'SELECT * FROM meters WHERE location = $1 AND active = true ORDER BY name',
+    [location]
+  );
+  res.json(result.rows);
+});
+
+// Consumption for a meter between two timestamps
+app.get('/api/energy/consumption/:meterId', async (req, res) => {
+  const { meterId } = req.params;
+  const { from, to } = req.query;
+  if (!from || !to) return res.status(400).json({ error: 'from and to query parameters required' });
+  try {
+    const result = await pool.query(
+      `SELECT
+         MIN(energy_import_kwh) AS start_kwh,
+         MAX(energy_import_kwh) AS end_kwh,
+         MAX(energy_import_kwh) - MIN(energy_import_kwh) AS consumption_kwh,
+         AVG(power_w) AS avg_power_w,
+         MAX(power_w) AS max_power_w,
+         COUNT(*) AS samples
+       FROM readings
+       WHERE meter_id = $1 AND ts >= $2 AND ts <= $3`,
+      [meterId, from, to]
+    );
+    res.json(result.rows[0] || {});
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Live data (latest reading per meter)
 app.get('/api/energy/live', (req, res) => {
   const live = {};
@@ -603,15 +642,15 @@ app.use(express.json());
 
 // --- Meter Management ---
 app.post('/api/energy/meters', async (req, res) => {
-  const { id, name, type, host, port, unit_id, shelly_type } = req.body;
+  const { id, name, type, host, port, unit_id, shelly_type, location } = req.body;
   if (!id || !name || !host) return res.status(400).json({ error: 'id, name, host required' });
   try {
     const result = await pool.query(
-      `INSERT INTO meters (id, name, type, host, port, unit_id, shelly_type)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT (id) DO UPDATE SET name=$2, type=$3, host=$4, port=$5, unit_id=$6, shelly_type=$7
+      `INSERT INTO meters (id, name, type, host, port, unit_id, shelly_type, location)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (id) DO UPDATE SET name=$2, type=$3, host=$4, port=$5, unit_id=$6, shelly_type=$7, location=$8
        RETURNING *`,
-      [id, name, type || 'modbus', host, port || 502, unit_id || 1, shelly_type || null]
+      [id, name, type || 'modbus', host, port || 502, unit_id || 1, shelly_type || null, location || null]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -620,13 +659,13 @@ app.post('/api/energy/meters', async (req, res) => {
 });
 
 app.put('/api/energy/meters/:id', async (req, res) => {
-  const { name, type, host, port, unit_id, shelly_type, active } = req.body;
+  const { name, type, host, port, unit_id, shelly_type, location, active } = req.body;
   try {
     const result = await pool.query(
       `UPDATE meters SET name=COALESCE($2,name), type=COALESCE($3,type), host=COALESCE($4,host),
-       port=COALESCE($5,port), unit_id=COALESCE($6,unit_id), shelly_type=$7, active=COALESCE($8,active)
+       port=COALESCE($5,port), unit_id=COALESCE($6,unit_id), shelly_type=$7, location=$8, active=COALESCE($9,active)
        WHERE id=$1 RETURNING *`,
-      [req.params.id, name, type, host, port, unit_id, shelly_type || null, active]
+      [req.params.id, name, type, host, port, unit_id, shelly_type || null, location !== undefined ? location : null, active]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     res.json(result.rows[0]);

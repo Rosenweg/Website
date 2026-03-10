@@ -21,6 +21,15 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD || 'changeme',
 });
 
+// ─── Energy Database (for Waschküche billing) ──────────────────────
+const energyPool = new Pool({
+  host: process.env.ENERGY_DB_HOST || 'energy-db',
+  port: process.env.ENERGY_DB_PORT || 5432,
+  database: process.env.ENERGY_DB_NAME || 'energy',
+  user: process.env.ENERGY_DB_USER || 'energy',
+  password: process.env.ENERGY_DB_PASSWORD || 'energy2026',
+});
+
 // ─── SMTP (SMTP2GO) ────────────────────────────────────────────────
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || 'mail.smtp2go.com',
@@ -489,148 +498,155 @@ app.get('/api/users/:id', authMiddleware, async (req, res) => {
   }
 });
 
-app.get('/api/users/:id/stats', authMiddleware, async (req, res) => {
-  try {
-    const stats = await pool.query(
-      `SELECT
-         COUNT(*) FILTER (WHERE status = 'completed') as total_sessions,
-         COALESCE(SUM(energy_consumed) FILTER (WHERE status = 'completed'), 0) as total_energy,
-         COALESCE(SUM(cost) FILTER (WHERE status = 'completed'), 0) as total_cost,
-         COUNT(*) FILTER (WHERE status = 'active') as active_sessions
-       FROM wasch_sessions WHERE user_id = $1`,
-      [req.params.id]
-    );
-    const user = await pool.query('SELECT balance FROM users WHERE id = $1', [req.params.id]);
-    res.json({
-      ...stats.rows[0],
-      balance: user.rows[0]?.balance || 0,
-    });
-  } catch (err) {
-    res.status(500).json({ error: 'Fehler' });
-  }
-});
 
-app.get('/api/users/:id/transactions', authMiddleware, async (req, res) => {
+// ═══════════════════════════════════════════════════════════════════
+// WASCHKÜCHE - RÄUME
+// ═══════════════════════════════════════════════════════════════════
+
+app.get('/api/wasch/rooms', authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT * FROM wasch_transactions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50',
-      [req.params.id]
+      'SELECT * FROM wasch_rooms WHERE active = true ORDER BY name'
     );
     res.json(result.rows);
   } catch (err) {
-    res.status(500).json({ error: 'Fehler' });
+    res.status(500).json({ error: 'Fehler beim Laden der Räume' });
   }
 });
 
-// ═══════════════════════════════════════════════════════════════════
-// WASCHKÜCHE - DEVICES
-// ═══════════════════════════════════════════════════════════════════
-
-app.get('/api/devices', authMiddleware, async (req, res) => {
+app.post('/api/wasch/rooms', authMiddleware, adminOnly, async (req, res) => {
+  const { name, location, energy_meter_id, unifi_door_id } = req.body;
+  if (!name) return res.status(400).json({ error: 'Name erforderlich' });
   try {
     const result = await pool.query(
-      'SELECT * FROM wasch_devices WHERE active = true ORDER BY location, device_name'
-    );
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: 'Fehler' });
-  }
-});
-
-app.post('/api/devices/:id/control', authMiddleware, async (req, res) => {
-  const { action } = req.body; // 'on' or 'off'
-  try {
-    const device = await pool.query('SELECT * FROM wasch_devices WHERE id = $1', [req.params.id]);
-    if (device.rows.length === 0) return res.status(404).json({ error: 'Gerät nicht gefunden' });
-
-    const d = device.rows[0];
-    if (!d.shelly_ip) return res.status(400).json({ error: 'Keine Shelly-IP konfiguriert' });
-
-    // Call Shelly API
-    const shellyUrl = `http://${d.shelly_ip}/rpc/Switch.Set?id=0&on=${action === 'on'}`;
-    const response = await fetch(shellyUrl, { signal: AbortSignal.timeout(5000) });
-    const result = await response.json();
-
-    res.json({ success: true, result });
-  } catch (err) {
-    console.error('Device control error:', err);
-    res.status(500).json({ error: 'Fehler bei Gerätesteuerung' });
-  }
-});
-
-app.get('/api/devices/:id/status', authMiddleware, async (req, res) => {
-  try {
-    const device = await pool.query('SELECT * FROM wasch_devices WHERE id = $1', [req.params.id]);
-    if (device.rows.length === 0) return res.status(404).json({ error: 'Gerät nicht gefunden' });
-
-    const d = device.rows[0];
-    if (!d.shelly_ip) return res.json({ available: false });
-
-    const response = await fetch(`http://${d.shelly_ip}/rpc/Switch.GetStatus?id=0`, {
-      signal: AbortSignal.timeout(5000),
-    });
-    const data = await response.json();
-
-    res.json({
-      available: true,
-      power: data.apower || 0,
-      voltage: data.voltage || 0,
-      current: data.current || 0,
-      totalEnergy: (data.aenergy?.total || 0) / 1000,
-      isOn: data.output || false,
-    });
-  } catch (err) {
-    res.json({ available: false });
-  }
-});
-
-// ═══════════════════════════════════════════════════════════════════
-// WASCHKÜCHE - SESSIONS
-// ═══════════════════════════════════════════════════════════════════
-
-app.post('/api/sessions/start', authMiddleware, async (req, res) => {
-  const { device_id } = req.body;
-  try {
-    const result = await pool.query(
-      `INSERT INTO wasch_sessions (user_id, device_id, status, started_at)
-       VALUES ($1, $2, 'active', NOW()) RETURNING *`,
-      [req.user.user_id, device_id]
+      `INSERT INTO wasch_rooms (name, location, energy_meter_id, unifi_door_id)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [name, location || '', energy_meter_id || null, unifi_door_id || null]
     );
     res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: 'Fehler' });
+    res.status(500).json({ error: err.message });
   }
 });
 
-app.get('/api/sessions/user/:userId', authMiddleware, async (req, res) => {
+app.put('/api/wasch/rooms/:id', authMiddleware, adminOnly, async (req, res) => {
+  const { name, location, energy_meter_id, unifi_door_id, active } = req.body;
   try {
     const result = await pool.query(
-      `SELECT s.*, d.device_name, d.location
-       FROM wasch_sessions s
-       JOIN wasch_devices d ON d.id = s.device_id
-       WHERE s.user_id = $1
-       ORDER BY s.started_at DESC LIMIT 20`,
-      [req.params.userId]
+      `UPDATE wasch_rooms SET name=COALESCE($2,name), location=COALESCE($3,location),
+       energy_meter_id=$4, unifi_door_id=$5, active=COALESCE($6,active)
+       WHERE id=$1 RETURNING *`,
+      [req.params.id, name, location, energy_meter_id || null, unifi_door_id || null, active]
     );
-    res.json(result.rows);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Raum nicht gefunden' });
+    res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: 'Fehler' });
+    res.status(500).json({ error: err.message });
   }
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// WASCHKÜCHE - RESERVIERUNGEN
+// WASCHKÜCHE - RESERVIERUNGEN (minutengenau)
 // ═══════════════════════════════════════════════════════════════════
 
-app.get('/api/reservations', authMiddleware, async (req, res) => {
+// Get all reservations (optionally filter by ?room_id=X and ?from=ISO&to=ISO)
+app.get('/api/wasch/reservations', authMiddleware, async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT r.*, u.name as user_name, d.device_name
+    const { room_id, from, to } = req.query;
+    let query = `SELECT r.*, u.name as user_name, u.wohnung, rm.name as room_name
        FROM wasch_reservations r
        JOIN users u ON u.id = r.user_id
-       JOIN wasch_devices d ON d.id = r.device_id
-       WHERE r.date >= CURRENT_DATE
-       ORDER BY r.date, r.time_slot`
+       JOIN wasch_rooms rm ON rm.id = r.room_id
+       WHERE r.cancelled = false`;
+    const params = [];
+    if (room_id) { params.push(room_id); query += ` AND r.room_id = $${params.length}`; }
+    if (from) { params.push(from); query += ` AND r.end_time >= $${params.length}::timestamp`; }
+    if (to) { params.push(to); query += ` AND r.start_time <= $${params.length}::timestamp`; }
+    if (!from && !to) { query += ' AND r.end_time >= NOW()'; }
+    query += ' ORDER BY r.start_time';
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler beim Laden der Reservierungen' });
+  }
+});
+
+// Create reservation (one-time or recurring weekly)
+app.post('/api/wasch/reservations', authMiddleware, async (req, res) => {
+  const { room_id, start_time, end_time, recurring, recurring_until } = req.body;
+  if (!room_id || !start_time || !end_time) {
+    return res.status(400).json({ error: 'room_id, start_time und end_time erforderlich' });
+  }
+
+  const startDt = new Date(start_time);
+  const endDt = new Date(end_time);
+  if (endDt <= startDt) return res.status(400).json({ error: 'end_time muss nach start_time liegen' });
+
+  // Duration in minutes
+  const durationMin = (endDt - startDt) / 60000;
+  if (durationMin < 30) return res.status(400).json({ error: 'Mindestdauer: 30 Minuten' });
+  if (durationMin > 720) return res.status(400).json({ error: 'Maximaldauer: 12 Stunden' });
+
+  try {
+    if (recurring && recurring_until) {
+      // Generate weekly recurring reservations (same weekday, same time)
+      const created = [];
+      const until = new Date(recurring_until);
+      let curStart = new Date(startDt);
+      let curEnd = new Date(endDt);
+
+      while (curStart <= until) {
+        // Check overlap with existing reservations
+        const conflict = await pool.query(
+          `SELECT id FROM wasch_reservations
+           WHERE room_id=$1 AND cancelled=false
+           AND start_time < $3::timestamp AND end_time > $2::timestamp`,
+          [room_id, curStart.toISOString(), curEnd.toISOString()]
+        );
+        if (conflict.rows.length === 0) {
+          const result = await pool.query(
+            `INSERT INTO wasch_reservations (user_id, room_id, start_time, end_time, recurring, recurring_until)
+             VALUES ($1, $2, $3, $4, true, $5) RETURNING *`,
+            [req.user.user_id, room_id, curStart.toISOString(), curEnd.toISOString(), recurring_until]
+          );
+          created.push(result.rows[0]);
+        }
+        curStart.setDate(curStart.getDate() + 7);
+        curEnd.setDate(curEnd.getDate() + 7);
+      }
+      res.json({ created: created.length, reservations: created });
+    } else {
+      // One-time reservation - check overlap
+      const conflict = await pool.query(
+        `SELECT id FROM wasch_reservations
+         WHERE room_id=$1 AND cancelled=false
+         AND start_time < $3::timestamp AND end_time > $2::timestamp`,
+        [room_id, start_time, end_time]
+      );
+      if (conflict.rows.length > 0) return res.status(409).json({ error: 'Zeitraum überschneidet sich mit bestehender Reservierung' });
+
+      const result = await pool.query(
+        `INSERT INTO wasch_reservations (user_id, room_id, start_time, end_time)
+         VALUES ($1, $2, $3, $4) RETURNING *`,
+        [req.user.user_id, room_id, start_time, end_time]
+      );
+      res.json(result.rows[0]);
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler beim Erstellen der Reservierung' });
+  }
+});
+
+// My reservations (upcoming)
+app.get('/api/wasch/my/reservations', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT r.*, rm.name as room_name
+       FROM wasch_reservations r
+       JOIN wasch_rooms rm ON rm.id = r.room_id
+       WHERE r.user_id = $1 AND r.cancelled = false AND r.end_time >= NOW()
+       ORDER BY r.start_time`,
+      [req.user.user_id]
     );
     res.json(result.rows);
   } catch (err) {
@@ -638,39 +654,612 @@ app.get('/api/reservations', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/reservations', authMiddleware, async (req, res) => {
-  const { device_id, date, time_slot } = req.body;
+// Cancel reservation (own or admin)
+app.delete('/api/wasch/reservations/:id', authMiddleware, async (req, res) => {
   try {
-    // Check for conflicts
-    const conflict = await pool.query(
-      `SELECT id FROM wasch_reservations
-       WHERE device_id = $1 AND date = $2 AND time_slot = $3 AND cancelled = false`,
-      [device_id, date, time_slot]
-    );
-    if (conflict.rows.length > 0) {
-      return res.status(409).json({ error: 'Zeitslot bereits reserviert' });
+    let query = 'UPDATE wasch_reservations SET cancelled = true WHERE id = $1';
+    const params = [req.params.id];
+    if (!req.user.isAdmin) {
+      query += ' AND user_id = $2';
+      params.push(req.user.user_id);
     }
-
-    const result = await pool.query(
-      `INSERT INTO wasch_reservations (user_id, device_id, date, time_slot)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [req.user.user_id, device_id, date, time_slot]
-    );
-    res.json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: 'Fehler' });
-  }
-});
-
-app.delete('/api/reservations/:id', authMiddleware, async (req, res) => {
-  try {
-    await pool.query(
-      'UPDATE wasch_reservations SET cancelled = true WHERE id = $1 AND user_id = $2',
-      [req.params.id, req.user.user_id]
-    );
+    query += ' RETURNING *';
+    const result = await pool.query(query, params);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Reservierung nicht gefunden' });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// Cancel all recurring reservations from a series (future only)
+app.delete('/api/wasch/reservations/:id/series', authMiddleware, async (req, res) => {
+  try {
+    const reservation = await pool.query(
+      'SELECT * FROM wasch_reservations WHERE id=$1 AND user_id=$2',
+      [req.params.id, req.user.user_id]
+    );
+    if (reservation.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const r = reservation.rows[0];
+    if (!r.recurring) return res.status(400).json({ error: 'Keine wiederkehrende Reservierung' });
+    const result = await pool.query(
+      `UPDATE wasch_reservations SET cancelled = true
+       WHERE user_id=$1 AND room_id=$2 AND recurring_until=$3
+       AND start_time >= NOW() AND cancelled=false`,
+      [req.user.user_id, r.room_id, r.recurring_until]
+    );
+    res.json({ success: true, cancelled: result.rowCount });
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// WASCHKÜCHE - SESSIONS & VERBRAUCH
+// ═══════════════════════════════════════════════════════════════════
+
+// My sessions
+app.get('/api/wasch/my/sessions', authMiddleware, async (req, res) => {
+  try {
+    const { month } = req.query; // optional: YYYY-MM
+    let query = `SELECT s.*, rm.name as room_name
+       FROM wasch_sessions s
+       JOIN wasch_rooms rm ON rm.id = s.room_id
+       WHERE s.user_id = $1`;
+    const params = [req.user.user_id];
+    if (month) {
+      params.push(month + '-01');
+      query += ` AND s.started_at >= $${params.length}::date AND s.started_at < ($${params.length}::date + interval '1 month')`;
+    }
+    query += ' ORDER BY s.started_at DESC LIMIT 50';
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// My costs summary
+app.get('/api/wasch/my/costs', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT rm.name as room_name,
+         COUNT(s.id) as sessions,
+         COALESCE(SUM(s.energy_consumed), 0) as total_kwh,
+         COALESCE(SUM(s.duration_minutes), 0) as total_minutes,
+         COALESCE(SUM(cost), 0) as total_cost
+       FROM wasch_sessions s
+       JOIN wasch_rooms rm ON rm.id = s.room_id
+       WHERE s.user_id = $1 AND s.status = 'completed'
+       GROUP BY rm.name`,
+      [req.user.user_id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// WASCHKÜCHE - ADMIN
+// ═══════════════════════════════════════════════════════════════════
+
+// Admin dashboard stats
+app.get('/api/wasch/admin/stats', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const rooms = await pool.query('SELECT COUNT(*) FROM wasch_rooms WHERE active=true');
+    const sessions = await pool.query(
+      `SELECT COUNT(*) as total_sessions,
+       COALESCE(SUM(energy_consumed),0) as total_kwh,
+       COALESCE(SUM(duration_minutes),0) as total_minutes,
+       COALESCE(SUM(cost),0) as total_cost FROM wasch_sessions WHERE status='completed'`
+    );
+    const topUsers = await pool.query(
+      `SELECT u.name, u.wohnung, COUNT(s.id) as sessions,
+       COALESCE(SUM(s.duration_minutes),0) as minutes,
+       COALESCE(SUM(cost),0) as cost FROM wasch_sessions s
+       JOIN users u ON u.id = s.user_id
+       WHERE s.status='completed'
+       GROUP BY u.name, u.wohnung ORDER BY cost DESC LIMIT 5`
+    );
+    res.json({
+      rooms: parseInt(rooms.rows[0].count),
+      ...sessions.rows[0],
+      top_users: topUsers.rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// Admin: all sessions (with optional month filter)
+app.get('/api/wasch/admin/sessions', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { month } = req.query;
+    let query = `SELECT s.*, u.name, u.wohnung, rm.name as room_name
+       FROM wasch_sessions s
+       JOIN users u ON u.id = s.user_id
+       JOIN wasch_rooms rm ON rm.id = s.room_id`;
+    const params = [];
+    if (month) {
+      params.push(month + '-01');
+      query += ` WHERE s.started_at >= $1::date AND s.started_at < ($1::date + interval '1 month')`;
+    }
+    query += ' ORDER BY s.started_at DESC LIMIT 200';
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// Admin: monthly cost breakdown per user
+app.get('/api/wasch/admin/costs', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { month } = req.query;
+    const monthStr = month || new Date().toISOString().slice(0, 7);
+    const result = await pool.query(
+      `SELECT u.name, u.wohnung, u.email,
+         COUNT(s.id) as sessions,
+         COALESCE(SUM(s.energy_consumed), 0) as total_kwh,
+         COALESCE(SUM(s.duration_minutes), 0) as total_minutes,
+         COALESCE(SUM(s.cost), 0) as total_cost
+       FROM wasch_sessions s
+       JOIN users u ON u.id = s.user_id
+       WHERE s.status = 'completed'
+         AND s.started_at >= $1::date
+         AND s.started_at < ($1::date + interval '1 month')
+       GROUP BY u.name, u.wohnung, u.email
+       ORDER BY total_cost DESC`,
+      [monthStr + '-01']
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// Admin: billing overview
+app.get('/api/wasch/admin/billing', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT b.*, u.name, u.wohnung, u.email FROM wasch_billing b JOIN users u ON u.id = b.user_id ORDER BY b.month DESC, u.name'
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// Waschküche settings
+app.get('/api/wasch/settings', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM wasch_settings ORDER BY key');
+    const settings = {};
+    result.rows.forEach(r => { settings[r.key] = r.value; });
+    res.json(settings);
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+app.put('/api/wasch/settings', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const settings = req.body;
+    for (const [key, value] of Object.entries(settings)) {
+      await pool.query(
+        `INSERT INTO wasch_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+        [key, String(value)]
+      );
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// WASCHKÜCHE - MINUTENGENAUE ABRECHNUNG (Cron)
+// ═══════════════════════════════════════════════════════════════════
+
+async function getWaschSetting(key, defaultValue) {
+  try {
+    const result = await pool.query('SELECT value FROM wasch_settings WHERE key = $1', [key]);
+    return result.rows.length > 0 ? result.rows[0].value : defaultValue;
+  } catch { return defaultValue; }
+}
+
+// Process a completed reservation: read exact energy consumption from energy DB
+async function processReservationEnd(reservation) {
+  const room = await pool.query('SELECT * FROM wasch_rooms WHERE id = $1', [reservation.room_id]);
+  if (room.rows.length === 0 || !room.rows[0].energy_meter_id) return;
+
+  const meterId = room.rows[0].energy_meter_id;
+  const startTime = new Date(reservation.start_time).toISOString();
+  const endTime = new Date(reservation.end_time).toISOString();
+  const durationMinutes = Math.round((new Date(reservation.end_time) - new Date(reservation.start_time)) / 60000);
+
+  try {
+    // Read exact consumption between reservation start and end from energy DB
+    const consumption = await energyPool.query(
+      `SELECT
+         MIN(energy_import_kwh) AS start_kwh,
+         MAX(energy_import_kwh) AS end_kwh,
+         MAX(energy_import_kwh) - MIN(energy_import_kwh) AS consumption_kwh,
+         COUNT(*) AS samples
+       FROM readings
+       WHERE meter_id = $1 AND ts >= $2 AND ts <= $3`,
+      [meterId, startTime, endTime]
+    );
+
+    const data = consumption.rows[0];
+    if (!data || data.consumption_kwh == null || parseInt(data.samples) < 2) return;
+
+    const costPerKwh = parseFloat(await getWaschSetting('cost_per_kwh', '0.30'));
+    const kwh = parseFloat(data.consumption_kwh) || 0;
+    const cost = Math.round(kwh * costPerKwh * 100) / 100;
+
+    // Create session with exact timestamps and duration
+    await pool.query(
+      `INSERT INTO wasch_sessions (user_id, room_id, reservation_id, status, started_at, ended_at, duration_minutes, energy_start_kwh, energy_end_kwh, energy_consumed, cost)
+       VALUES ($1, $2, $3, 'completed', $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT DO NOTHING`,
+      [reservation.user_id, reservation.room_id, reservation.id,
+       startTime, endTime, durationMinutes, data.start_kwh, data.end_kwh, kwh, cost]
+    );
+
+    console.log(`[Waschküche] Session created: reservation ${reservation.id}, ${durationMinutes}min, ${kwh.toFixed(3)}kWh, CHF ${cost.toFixed(2)}`);
+  } catch (err) {
+    console.error(`[Waschküche] processReservationEnd error for reservation ${reservation.id}:`, err.message);
+  }
+}
+
+// Monthly billing: aggregate sessions and send detailed emails
+async function runMonthlyBilling() {
+  const now = new Date();
+  const billingMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const monthStr = billingMonth.toISOString().slice(0, 7);
+  const monthStart = monthStr + '-01';
+
+  console.log(`[Waschküche] Running monthly billing for ${monthStr}`);
+
+  try {
+    const costPerKwh = parseFloat(await getWaschSetting('cost_per_kwh', '0.30'));
+
+    const users = await pool.query(
+      `SELECT u.id as user_id, u.name, u.email, u.wohnung,
+         COUNT(s.id) as total_sessions,
+         COALESCE(SUM(s.energy_consumed), 0) as total_kwh,
+         COALESCE(SUM(s.duration_minutes), 0) as total_minutes,
+         COALESCE(SUM(s.cost), 0) as total_cost
+       FROM wasch_sessions s
+       JOIN users u ON u.id = s.user_id
+       WHERE s.status = 'completed'
+         AND s.started_at >= $1::date
+         AND s.started_at < ($1::date + interval '1 month')
+       GROUP BY u.id, u.name, u.email, u.wohnung
+       HAVING COUNT(s.id) > 0`,
+      [monthStart]
+    );
+
+    const monthNames = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+    const monthName = monthNames[billingMonth.getMonth()];
+    const year = billingMonth.getFullYear();
+
+    for (const user of users.rows) {
+      // Get individual sessions for detail view in email
+      const sessions = await pool.query(
+        `SELECT s.*, rm.name as room_name
+         FROM wasch_sessions s
+         JOIN wasch_rooms rm ON rm.id = s.room_id
+         WHERE s.user_id = $1 AND s.status = 'completed'
+           AND s.started_at >= $2::date AND s.started_at < ($2::date + interval '1 month')
+         ORDER BY s.started_at`,
+        [user.user_id, monthStart]
+      );
+
+      await pool.query(
+        `INSERT INTO wasch_billing (user_id, month, total_sessions, total_kwh, cost_per_kwh, total_cost)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (user_id, month) DO UPDATE SET total_sessions=$3, total_kwh=$4, cost_per_kwh=$5, total_cost=$6`,
+        [user.user_id, monthStart, user.total_sessions, user.total_kwh, costPerKwh, user.total_cost]
+      );
+
+      if (user.email) {
+        // Build session detail rows for email
+        const sessionRows = sessions.rows.map(s => {
+          const start = new Date(s.started_at);
+          const dateStr = `${start.getDate()}.${start.getMonth()+1}.${start.getFullYear()}`;
+          const startStr = `${String(start.getHours()).padStart(2,'0')}:${String(start.getMinutes()).padStart(2,'0')}`;
+          const end = new Date(s.ended_at);
+          const endStr = `${String(end.getHours()).padStart(2,'0')}:${String(end.getMinutes()).padStart(2,'0')}`;
+          return `<tr>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb;">${dateStr}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb;">${s.room_name}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb;">${startStr}-${endStr} (${s.duration_minutes} Min.)</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb;">${parseFloat(s.energy_consumed).toFixed(3)} kWh</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right;">CHF ${parseFloat(s.cost).toFixed(2)}</td>
+          </tr>`;
+        }).join('');
+
+        try {
+          await transporter.sendMail({
+            from: MAIL_FROM,
+            to: user.email,
+            subject: `Waschküche Abrechnung ${monthName} ${year} - STWEG 3`,
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto;">
+                <h2 style="color: #1a56db;">Waschküche Abrechnung</h2>
+                <p>Hallo ${user.name},</p>
+                <p>hier ist Ihre minutengenaue Waschküche-Abrechnung für <strong>${monthName} ${year}</strong>:</p>
+
+                <h3 style="color:#374151;margin-top:24px;">Einzelnachweise</h3>
+                <table style="width:100%;border-collapse:collapse;margin:10px 0;font-size:0.9em;">
+                  <thead>
+                    <tr style="background:#f3f4f6;">
+                      <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left;">Datum</th>
+                      <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left;">Raum</th>
+                      <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left;">Zeit (Dauer)</th>
+                      <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left;">Verbrauch</th>
+                      <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right;">Kosten</th>
+                    </tr>
+                  </thead>
+                  <tbody>${sessionRows}</tbody>
+                </table>
+
+                <h3 style="color:#374151;margin-top:24px;">Zusammenfassung</h3>
+                <table style="width: 100%; border-collapse: collapse; margin: 10px 0;">
+                  <tr style="background: #f3f4f6;">
+                    <td style="padding: 10px; border: 1px solid #e5e7eb;">Wohnung</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: bold;">${user.wohnung || '-'}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb;">Anzahl Waschgänge</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: bold;">${user.total_sessions}</td>
+                  </tr>
+                  <tr style="background: #f3f4f6;">
+                    <td style="padding: 10px; border: 1px solid #e5e7eb;">Gesamtdauer</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: bold;">${Math.floor(user.total_minutes / 60)}h ${user.total_minutes % 60}min</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb;">Gesamtverbrauch</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: bold;">${parseFloat(user.total_kwh).toFixed(2)} kWh</td>
+                  </tr>
+                  <tr style="background: #f3f4f6;">
+                    <td style="padding: 10px; border: 1px solid #e5e7eb;">Tarif</td>
+                    <td style="padding: 10px; border: 1px solid #e5e7eb;">CHF ${costPerKwh.toFixed(2)} / kWh</td>
+                  </tr>
+                  <tr style="background: #1a56db; color: white;">
+                    <td style="padding: 12px; border: 1px solid #1a56db; font-weight: bold;">Gesamtbetrag</td>
+                    <td style="padding: 12px; border: 1px solid #1a56db; font-weight: bold; font-size: 1.2em;">CHF ${parseFloat(user.total_cost).toFixed(2)}</td>
+                  </tr>
+                </table>
+                <p style="color: #6b7280; font-size: 0.9em;">
+                  Der Betrag wird mit der nächsten Nebenkostenabrechnung verrechnet.
+                </p>
+                <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+                <p style="color: #9ca3af; font-size: 0.8em;">
+                  STWEG 3 - Rosenweg 9, 4303 Kaiseraugst<br>
+                  Minutengenaue Abrechnung basierend auf tatsächlichem Stromverbrauch.<br>
+                  Diese Email wurde automatisch generiert.
+                </p>
+              </div>
+            `,
+          });
+
+          await pool.query(
+            'UPDATE wasch_billing SET email_sent = true, email_sent_at = NOW() WHERE user_id = $1 AND month = $2',
+            [user.user_id, monthStart]
+          );
+          console.log(`[Waschküche] Billing email sent to ${user.email} for ${monthStr}`);
+        } catch (emailErr) {
+          console.error(`[Waschküche] Email to ${user.email} failed:`, emailErr.message);
+        }
+      }
+    }
+
+    console.log(`[Waschküche] Monthly billing complete: ${users.rows.length} users billed`);
+  } catch (err) {
+    console.error('[Waschküche] Monthly billing error:', err.message);
+  }
+}
+
+// Cron: process completed reservations (runs every 5 min for minute-precision)
+async function processCompletedReservations() {
+  try {
+    const now = new Date();
+
+    // Find reservations whose end_time has passed and have no session yet
+    // Look back up to 7 days for any missed reservations
+    const reservations = await pool.query(
+      `SELECT r.* FROM wasch_reservations r
+       WHERE r.end_time <= $1 AND r.cancelled = false
+       AND NOT EXISTS (SELECT 1 FROM wasch_sessions s WHERE s.reservation_id = r.id)
+       AND r.end_time >= NOW() - interval '7 days'`,
+      [now.toISOString()]
+    );
+
+    for (const reservation of reservations.rows) {
+      await processReservationEnd(reservation);
+    }
+
+    if (reservations.rows.length > 0) {
+      console.log(`[Waschküche] Processed ${reservations.rows.length} completed reservations`);
+    }
+  } catch (err) {
+    console.error('[Waschküche] processCompletedReservations error:', err.message);
+  }
+}
+
+// Schedule: process reservations every 5 min, door access every 1 min, monthly billing on 1st at 08:00
+let waschCronInterval;
+function startWaschCron() {
+  // Process completed reservations & billing every 5 min
+  waschCronInterval = setInterval(processCompletedReservations, 5 * 60 * 1000);
+  setTimeout(processCompletedReservations, 30 * 1000);
+
+  // Door access control every minute (quick check, no-op if disabled)
+  setInterval(manageDoorAccess, 60 * 1000);
+  setTimeout(manageDoorAccess, 10 * 1000);
+
+  // Monthly billing on 1st at 08:00
+  setInterval(() => {
+    const now = new Date();
+    if (now.getDate() === 1 && now.getHours() === 8 && now.getMinutes() < 5) {
+      runMonthlyBilling();
+    }
+  }, 5 * 60 * 1000);
+
+  console.log('[Waschküche] Cron jobs started (reservations 5min, doors 1min, billing 1st@08:00)');
+}
+
+// Manual trigger for billing (admin only)
+app.post('/api/wasch/admin/billing/run', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    await runMonthlyBilling();
+    res.json({ success: true, message: 'Abrechnung wurde ausgeführt' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// WASCHKÜCHE - UNIFI ACCESS (Zutrittskontrolle)
+// ═══════════════════════════════════════════════════════════════════
+
+// UniFi Access API helper
+async function unifiAccessRequest(method, path, body = null) {
+  const host = await getWaschSetting('unifi_access_host', '');
+  const token = await getWaschSetting('unifi_access_token', '');
+  if (!host || !token) return null;
+
+  const url = `https://${host}/api/v1/developer${path}`;
+  const opts = {
+    method,
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    signal: AbortSignal.timeout(5000),
+  };
+  // UniFi Access uses self-signed certs
+  if (body) opts.body = JSON.stringify(body);
+
+  try {
+    const res = await fetch(url, opts);
+    if (!res.ok) {
+      console.error(`[UniFi Access] ${method} ${path}: ${res.status}`);
+      return null;
+    }
+    return await res.json();
+  } catch (err) {
+    console.error(`[UniFi Access] ${method} ${path} error:`, err.message);
+    return null;
+  }
+}
+
+// Unlock a door temporarily (for reservation start)
+async function unlockDoor(doorId, durationSeconds = 10) {
+  const enabled = await getWaschSetting('unifi_access_enabled', 'false');
+  if (enabled !== 'true' || !doorId) return false;
+
+  const result = await unifiAccessRequest('PUT', `/door/${doorId}/unlock`, {
+    duration: durationSeconds,
+  });
+  if (result) {
+    console.log(`[UniFi Access] Door ${doorId} unlocked for ${durationSeconds}s`);
+    return true;
+  }
+  return false;
+}
+
+// Lock a door (for reservation end)
+async function lockDoor(doorId) {
+  const enabled = await getWaschSetting('unifi_access_enabled', 'false');
+  if (enabled !== 'true' || !doorId) return false;
+
+  const result = await unifiAccessRequest('PUT', `/door/${doorId}/lock`);
+  if (result) {
+    console.log(`[UniFi Access] Door ${doorId} locked`);
+    return true;
+  }
+  return false;
+}
+
+// Check door status
+async function getDoorStatus(doorId) {
+  if (!doorId) return null;
+  return await unifiAccessRequest('GET', `/door/${doorId}`);
+}
+
+// Cron: manage door access based on active reservations (runs with billing cron)
+async function manageDoorAccess() {
+  const enabled = await getWaschSetting('unifi_access_enabled', 'false');
+  if (enabled !== 'true') return;
+
+  const now = new Date();
+  try {
+    // Find rooms with UniFi door IDs
+    const rooms = await pool.query('SELECT * FROM wasch_rooms WHERE active = true AND unifi_door_id IS NOT NULL');
+
+    for (const room of rooms.rows) {
+      // Check if there's an active reservation right now
+      const active = await pool.query(
+        `SELECT r.* FROM wasch_reservations r
+         WHERE r.room_id = $1 AND r.cancelled = false
+         AND r.start_time <= $2 AND r.end_time > $2`,
+        [room.id, now.toISOString()]
+      );
+
+      if (active.rows.length > 0) {
+        // Reservation active → ensure door is accessible (unlock briefly for entry)
+        // Note: In practice, UniFi Access policies handle ongoing access.
+        // This just ensures the door unlock happens at reservation start.
+        const res = active.rows[0];
+        const startTime = new Date(res.start_time);
+        const timeSinceStart = (now - startTime) / 60000; // minutes
+        if (timeSinceStart < 6) {
+          // Within first 6 minutes of reservation → unlock for entry
+          await unlockDoor(room.unifi_door_id, 300); // 5 min unlock window
+        }
+      } else {
+        // No active reservation → lock
+        await lockDoor(room.unifi_door_id);
+      }
+    }
+  } catch (err) {
+    console.error('[UniFi Access] manageDoorAccess error:', err.message);
+  }
+}
+
+// Admin: get door status
+app.get('/api/wasch/admin/doors', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const rooms = await pool.query('SELECT * FROM wasch_rooms WHERE active = true AND unifi_door_id IS NOT NULL');
+    const statuses = [];
+    for (const room of rooms.rows) {
+      const status = await getDoorStatus(room.unifi_door_id);
+      statuses.push({ room_id: room.id, room_name: room.name, door_id: room.unifi_door_id, status });
+    }
+    res.json(statuses);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin: manually unlock a door
+app.post('/api/wasch/admin/doors/:roomId/unlock', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const room = await pool.query('SELECT * FROM wasch_rooms WHERE id = $1', [req.params.roomId]);
+    if (room.rows.length === 0) return res.status(404).json({ error: 'Raum nicht gefunden' });
+    if (!room.rows[0].unifi_door_id) return res.status(400).json({ error: 'Kein UniFi Türschloss konfiguriert' });
+
+    const duration = parseInt(req.body.duration) || 30;
+    const ok = await unlockDoor(room.rows[0].unifi_door_id, duration);
+    res.json({ success: ok, message: ok ? `Tür für ${duration}s entsperrt` : 'UniFi Access nicht erreichbar' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -1605,45 +2194,63 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
 
-      CREATE TABLE IF NOT EXISTS wasch_devices (
+      CREATE TABLE IF NOT EXISTS wasch_rooms (
         id SERIAL PRIMARY KEY,
-        device_name VARCHAR(255) NOT NULL,
-        device_type VARCHAR(100),
+        name VARCHAR(255) NOT NULL,
         location VARCHAR(255),
-        shelly_ip VARCHAR(45),
-        shelly_id VARCHAR(100),
+        energy_meter_id VARCHAR(100),
+        unifi_door_id VARCHAR(100),
         active BOOLEAN DEFAULT true,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS wasch_sessions (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id),
-        device_id INTEGER REFERENCES wasch_devices(id),
-        status VARCHAR(50) DEFAULT 'active',
-        started_at TIMESTAMP DEFAULT NOW(),
-        ended_at TIMESTAMP,
-        energy_consumed DECIMAL(10,4),
-        cost DECIMAL(10,2)
-      );
-
-      CREATE TABLE IF NOT EXISTS wasch_transactions (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id),
-        amount DECIMAL(10,2) NOT NULL,
-        type VARCHAR(50) NOT NULL,
-        description TEXT,
         created_at TIMESTAMP DEFAULT NOW()
       );
 
       CREATE TABLE IF NOT EXISTS wasch_reservations (
         id SERIAL PRIMARY KEY,
         user_id INTEGER REFERENCES users(id),
-        device_id INTEGER REFERENCES wasch_devices(id),
-        date DATE NOT NULL,
-        time_slot VARCHAR(20) NOT NULL,
+        room_id INTEGER REFERENCES wasch_rooms(id),
+        start_time TIMESTAMP NOT NULL,
+        end_time TIMESTAMP NOT NULL,
+        recurring BOOLEAN DEFAULT false,
+        recurring_until DATE,
         cancelled BOOLEAN DEFAULT false,
         created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_wasch_res_times ON wasch_reservations(room_id, start_time, end_time) WHERE cancelled = false;
+
+      CREATE TABLE IF NOT EXISTS wasch_sessions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
+        room_id INTEGER REFERENCES wasch_rooms(id),
+        reservation_id INTEGER REFERENCES wasch_reservations(id),
+        status VARCHAR(50) DEFAULT 'active',
+        started_at TIMESTAMP DEFAULT NOW(),
+        ended_at TIMESTAMP,
+        duration_minutes INTEGER,
+        energy_start_kwh DECIMAL(10,4),
+        energy_end_kwh DECIMAL(10,4),
+        energy_consumed DECIMAL(10,4),
+        cost DECIMAL(10,2)
+      );
+
+      CREATE TABLE IF NOT EXISTS wasch_billing (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
+        month DATE NOT NULL,
+        total_sessions INTEGER DEFAULT 0,
+        total_kwh DECIMAL(10,4) DEFAULT 0,
+        cost_per_kwh DECIMAL(10,4),
+        total_cost DECIMAL(10,2) DEFAULT 0,
+        email_sent BOOLEAN DEFAULT false,
+        email_sent_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(user_id, month)
+      );
+
+      CREATE TABLE IF NOT EXISTS wasch_settings (
+        key VARCHAR(100) PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMP DEFAULT NOW()
       );
 
       CREATE TABLE IF NOT EXISTS kontakte (
@@ -1732,7 +2339,89 @@ async function initDB() {
       ALTER TABLE sms_inbox ADD COLUMN IF NOT EXISTS message_id VARCHAR(255) UNIQUE;
       ALTER TABLE sms_inbox ADD COLUMN IF NOT EXISTS direction VARCHAR(10) DEFAULT 'MO';
       ALTER TABLE sms_inbox ADD COLUMN IF NOT EXISTS status VARCHAR(50);
+
+      -- Migrate wasch_reservations: old schema had date+time_slot, new has start_time+end_time
+      DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='wasch_reservations' AND column_name='time_slot') THEN
+          -- Drop old table and recreate (no production data yet)
+          DROP TABLE IF EXISTS wasch_sessions CASCADE;
+          DROP TABLE IF EXISTS wasch_billing CASCADE;
+          DROP TABLE IF EXISTS wasch_reservations CASCADE;
+          CREATE TABLE wasch_reservations (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id),
+            room_id INTEGER REFERENCES wasch_rooms(id),
+            start_time TIMESTAMP NOT NULL,
+            end_time TIMESTAMP NOT NULL,
+            recurring BOOLEAN DEFAULT false,
+            recurring_until DATE,
+            cancelled BOOLEAN DEFAULT false,
+            created_at TIMESTAMP DEFAULT NOW()
+          );
+          CREATE TABLE wasch_sessions (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id),
+            room_id INTEGER REFERENCES wasch_rooms(id),
+            reservation_id INTEGER REFERENCES wasch_reservations(id),
+            status VARCHAR(50) DEFAULT 'active',
+            started_at TIMESTAMP DEFAULT NOW(),
+            ended_at TIMESTAMP,
+            duration_minutes INTEGER,
+            energy_start_kwh DECIMAL(10,4),
+            energy_end_kwh DECIMAL(10,4),
+            energy_consumed DECIMAL(10,4),
+            cost DECIMAL(10,2)
+          );
+          CREATE TABLE wasch_billing (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id),
+            month DATE NOT NULL,
+            total_sessions INTEGER DEFAULT 0,
+            total_kwh DECIMAL(10,4) DEFAULT 0,
+            cost_per_kwh DECIMAL(10,4),
+            total_cost DECIMAL(10,2) DEFAULT 0,
+            email_sent BOOLEAN DEFAULT false,
+            email_sent_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(user_id, month)
+          );
+          RAISE NOTICE 'Migrated wasch_reservations to new schema (start_time/end_time)';
+        END IF;
+      END $$;
+
+      -- Ensure duration_minutes column exists on wasch_sessions
+      ALTER TABLE wasch_sessions ADD COLUMN IF NOT EXISTS duration_minutes INTEGER;
+
+      -- Create index for reservation conflict checks
+      CREATE INDEX IF NOT EXISTS idx_wasch_res_times ON wasch_reservations(room_id, start_time, end_time) WHERE cancelled = false;
     `);
+
+    // Seed default wasch_rooms if none exist
+    const roomsExist = await client.query('SELECT COUNT(*) FROM wasch_rooms');
+    if (parseInt(roomsExist.rows[0].count) === 0) {
+      await client.query(`
+        INSERT INTO wasch_rooms (name, location, energy_meter_id, unifi_door_id) VALUES
+        ('Waschküche 1', 'Untergeschoss Links', NULL, NULL),
+        ('Waschküche 2', 'Untergeschoss Rechts', NULL, NULL)
+      `);
+      console.log('Seeded 2 default Waschküche rooms');
+    }
+
+    // Seed default wasch_settings if none exist
+    const settingsExist = await client.query('SELECT COUNT(*) FROM wasch_settings');
+    if (parseInt(settingsExist.rows[0].count) === 0) {
+      await client.query(`
+        INSERT INTO wasch_settings (key, value) VALUES
+        ('cost_per_kwh', '0.30'),
+        ('min_duration_minutes', '30'),
+        ('max_duration_minutes', '720'),
+        ('unifi_access_enabled', 'false'),
+        ('unifi_access_host', ''),
+        ('unifi_access_token', '')
+      `);
+      console.log('Seeded default Waschküche settings');
+    }
+
     console.log('Database schema initialized');
   } finally {
     client.release();
@@ -1749,6 +2438,8 @@ initDB()
         smsFetchInterval = setInterval(autoFetchSms, 60 * 1000);
         console.log('SMS auto-fetch enabled (60s interval)');
       }
+      // Start Waschküche cron jobs
+      startWaschCron();
     });
   })
   .catch((err) => {

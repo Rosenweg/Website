@@ -118,6 +118,11 @@ services:
       PEOPLEFON_API_URL: "${PEOPLEFON_API_URL}"
       PEOPLEFON_API_KEY: "${PEOPLEFON_API_KEY}"
       PEOPLEFON_NUMBER: "${PEOPLEFON_NUMBER}"
+      ENERGY_DB_HOST: energy-db
+      ENERGY_DB_PORT: "5432"
+      ENERGY_DB_NAME: energy
+      ENERGY_DB_USER: energy
+      ENERGY_DB_PASSWORD: "${ENERGY_DB_PASSWORD:-energy2026}"
     networks:
       - rosenweg-net
       - authentik_authentik-net
