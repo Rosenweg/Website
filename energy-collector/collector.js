@@ -64,7 +64,14 @@ async function readMeter(client, meter) {
   data.current_l2_ma = parseRegisterValue(Buffer.from(vcBuf.buffer.slice(16)), 'int32');
   data.current_l3_ma = parseRegisterValue(Buffer.from(vcBuf.buffer.slice(20)), 'int32');
 
-  // Group 3: Energy import/export in kWh (internal 0x204C/0x204E → Modbus 0x204B/0x204D)
+  // Group 3: Power factor + tariff (internal 0x2020-0x2023 → Modbus 0x201F-0x2022, 4 x uint16)
+  const pfBuf = await client.readHoldingRegisters(0x201F, 4);
+  data.pf_l1_raw = parseRegisterValue(Buffer.from(pfBuf.buffer.subarray(0, 2)), 'uint16');   // /1000
+  data.pf_l2_raw = parseRegisterValue(Buffer.from(pfBuf.buffer.subarray(2, 4)), 'uint16');
+  data.pf_l3_raw = parseRegisterValue(Buffer.from(pfBuf.buffer.subarray(4, 6)), 'uint16');
+  data.tariff_raw = parseRegisterValue(Buffer.from(pfBuf.buffer.subarray(6, 8)), 'uint16');
+
+  // Group 4: Energy import/export in kWh (internal 0x204C/0x204E → Modbus 0x204B/0x204D)
   const energyBuf = await client.readHoldingRegisters(0x204B, 4);
   data.energy_import_raw = parseRegisterValue(Buffer.from(energyBuf.buffer), 'int32');      // kWh * 1000
   data.energy_export_raw = parseRegisterValue(Buffer.from(energyBuf.buffer.slice(4)), 'int32');
@@ -81,10 +88,10 @@ async function readMeter(client, meter) {
     current_l1_a: data.current_l1_ma / 1000, // mA → A
     current_l2_a: data.current_l2_ma / 1000,
     current_l3_a: data.current_l3_ma / 1000,
-    pf_l1: 0,
-    pf_l2: 0,
-    pf_l3: 0,
-    tariff: 0,
+    pf_l1: data.pf_l1_raw / 1000,
+    pf_l2: data.pf_l2_raw / 1000,
+    pf_l3: data.pf_l3_raw / 1000,
+    tariff: data.tariff_raw,
     energy_import_kwh: data.energy_import_raw / 1000,
     energy_export_kwh: data.energy_export_raw / 1000,
     energy_import_t1_kwh: 0,
