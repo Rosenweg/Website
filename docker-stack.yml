@@ -105,6 +105,7 @@ services:
       SMTP_PORT: "2525"
       SMTP_USER: "${SMTP_USER}"
       SMTP_PASS: "${SMTP_PASS}"
+      SMTP2GO_API_KEY: "${SMTP2GO_API_KEY}"
       MAIL_FROM: "noreply@rosenweg4303.ch"
       PORT: "3000"
       AUTHENTIK_URL: "https://authentik_server:9443"
