@@ -41,12 +41,8 @@
     "api_endpoint": "/api/v1",
     "update_intervall_sekunden": 5,
     "timeout_ms": 3000,
-    "webhook_url": "https://n8n.juroct.net/webhook/zaehler-daten",
-    "info": "Webhook für n8n-Integration, um Zählerdaten zu empfangen und zu speichern"
-  },
-  "n8n_webhooks": {
-    "send_email": "https://n8n.juroct.net/webhook/send-email",
-    "daten_speichern": "https://n8n.juroct.net/webhook/zaehler-daten-speichern"
+    "webhook_url": "/api/energie/webhook",
+    "info": "API-Endpoint für Zählerdaten"
   },
   "benutzer": [
     {

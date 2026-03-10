@@ -1351,8 +1351,7 @@
                 if (!autoSave) {
                     document.getElementById('jsonError').classList.remove('hidden');
                     document.getElementById('jsonError').querySelector('p').textContent =
-                        'Fehler beim Speichern: ' + error.message +
-                        '. Hinweis: Das Speichern erfordert einen Backend-Endpunkt (n8n Workflow).';
+                        'Fehler beim Speichern: ' + error.message;
                 }
             }
         }
