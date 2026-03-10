@@ -238,7 +238,7 @@ app.get('/api/auth/callback', async (req, res) => {
     const email = (userInfo.email || userInfo.sub).toLowerCase();
     const name = userInfo.name || userInfo.preferred_username || email;
     const groups = userInfo.groups || [];
-    const isAdmin = groups.includes('stweg3-ausschuss') || groups.includes('technik') || false;
+    const isAdmin = groups.includes('Technik') || groups.includes('technik');
 
     // Create/update user in DB
     const userResult = await pool.query(
