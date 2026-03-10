@@ -179,6 +179,26 @@
             <div class="relative" style="height: 250px;">
                 <canvas id="consumption-chart"></canvas>
             </div>
+            <div id="consumption-summary" class="mt-4 pt-3 border-t border-gray-100 hidden">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div>
+                        <p class="text-gray-500 text-xs">Gesamtverbrauch</p>
+                        <p id="sum-total" class="font-bold text-gray-800">-- kWh</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-500 text-xs">davon Solar</p>
+                        <p id="sum-solar" class="font-bold text-green-600">-- kWh</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-500 text-xs">davon Netz</p>
+                        <p id="sum-netz" class="font-bold text-blue-600">-- kWh</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-500 text-xs">Geschätzte Kosten</p>
+                        <p id="sum-cost" class="font-bold text-orange-600">-- CHF</p>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Detail Table -->
@@ -207,10 +227,7 @@
     // ─── Config ─────────────────────────────────────────────────────
     const API = '/api/energy';
     const POLL_INTERVAL = 5000;
-    const TARIFE = {
-        netz: { preis: 0.2516, name: 'Netztarif' },
-        solar: { preis: 0.10, name: 'Solartarif' },
-    };
+    let TARIFE = { netz: 0, solar: 0 };
 
     let currentMeter = null;
     let currentPeriod = 'day';
@@ -278,6 +295,16 @@
             console.error('Init error:', err);
             return;
         }
+
+        // Load tariffs from DB
+        try {
+            const tariffRes = await fetch(`${API}/tariffs`);
+            const tariffs = await tariffRes.json();
+            const netz = tariffs.find(t => t.name.toLowerCase().includes('netz'));
+            const solar = tariffs.find(t => t.name.toLowerCase().includes('solar'));
+            if (netz) TARIFE.netz = parseFloat(netz.price_per_kwh);
+            if (solar) TARIFE.solar = parseFloat(solar.price_per_kwh);
+        } catch (e) { console.warn('Tariffs not loaded:', e); }
 
         initCharts();
         initDateNav();
@@ -552,8 +579,10 @@
                 const share = isRef ? 0 : solarData.share / 100;
                 const solarKwh = kwh * share;
                 const netzKwh = kwh - solarKwh;
-                const cost = (netzKwh * TARIFE.netz.preis) + (solarKwh * TARIFE.solar.preis);
-                document.getElementById('today-cost').textContent = `Kosten: CHF ${cost.toFixed(2)}`;
+                const cost = (netzKwh * TARIFE.netz) + (solarKwh * TARIFE.solar);
+                document.getElementById('today-cost').textContent = TARIFE.netz > 0
+                    ? `Kosten: CHF ${cost.toFixed(2)}`
+                    : 'Kosten: --';
 
                 const splitEl = document.getElementById('today-solar-split');
                 if (share > 0) {
@@ -756,6 +785,25 @@
             consumptionChart.data.datasets[0].data = solarArr;
             consumptionChart.data.datasets[1].data = netzArr;
             consumptionChart.update();
+
+            // Update cost summary
+            const totalSolar = solarArr.reduce((a, b) => a + b, 0);
+            const totalNetz = netzArr.reduce((a, b) => a + b, 0);
+            const totalKwh = totalSolar + totalNetz;
+            const totalCost = (totalNetz * TARIFE.netz) + (totalSolar * TARIFE.solar);
+
+            const summaryEl = document.getElementById('consumption-summary');
+            if (totalKwh > 0 && !isRefMeter) {
+                document.getElementById('sum-total').textContent = `${totalKwh.toFixed(1)} kWh`;
+                document.getElementById('sum-solar').textContent = `${totalSolar.toFixed(1)} kWh (${(totalSolar/totalKwh*100).toFixed(0)}%)`;
+                document.getElementById('sum-netz').textContent = `${totalNetz.toFixed(1)} kWh`;
+                document.getElementById('sum-cost').textContent = TARIFE.netz > 0
+                    ? `CHF ${totalCost.toFixed(2)}`
+                    : '-- CHF';
+                summaryEl.classList.remove('hidden');
+            } else {
+                summaryEl.classList.add('hidden');
+            }
         } catch (err) {
             console.error('Consumption chart error:', err);
         }
