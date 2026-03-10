@@ -1,27 +1,39 @@
 /**
  * Shared Navigation Component for Rosenweg Website
+ * Loads STWEG data from /site-config.json (single source of truth)
  * Include via: <script src="/js/nav.js"></script>
  * Then call: RosenwegNav.init({ active: 'services' })
  */
 const RosenwegNav = {
-  init(opts = {}) {
+  _config: null,
+
+  async init(opts = {}) {
     const nav = document.getElementById('main-nav');
     if (!nav) return;
 
     const active = opts.active || '';
-    const isSubpage = opts.isSubpage !== false; // default true for subpages
     const basePath = opts.basePath || this._detectBasePath();
 
+    await this._loadConfig(basePath);
     nav.innerHTML = this._render(active, basePath);
     this._setupMobile();
     this._setupDropdowns();
     this._setupAuth(basePath);
   },
 
+  async _loadConfig(base) {
+    if (this._config) return;
+    try {
+      const res = await fetch(base + 'site-config.json');
+      this._config = await res.json();
+    } catch (e) {
+      this._config = { stwegen: [] };
+    }
+  },
+
   _detectBasePath() {
     const path = window.location.pathname;
     if (path.includes('/stweg')) {
-      const depth = (path.match(/\//g) || []).length - 1;
       if (path.includes('/pages/')) return '../../';
       if (path.includes('/stweg')) return '../';
     }
@@ -31,6 +43,17 @@ const RosenwegNav = {
   _render(active, base) {
     const a = (key) => active === key ? 'text-blue-600 font-semibold' : 'text-gray-700 hover:text-blue-600';
     const dropA = (key) => active === key ? 'bg-blue-50 text-blue-600' : 'text-gray-700 hover:bg-gray-50';
+    const stwegen = this._config?.stwegen || [];
+
+    const desktopLinks = stwegen.map(s => {
+      const label = s.typ === 'Tiefgarage' ? `${s.name} – ${s.adressen}` : `${s.name} – ${s.adressen}`;
+      const sep = s.nr === 8 ? '<hr class="my-1">' : '';
+      return `${sep}<a href="${base}stweg${s.nr}/" class="${dropA('stweg' + s.nr)} block px-4 py-2 text-sm">${label}</a>`;
+    }).join('\n              ');
+
+    const mobileLinks = stwegen.map(s =>
+      `<a href="${base}stweg${s.nr}/" class="text-sm text-gray-700 hover:bg-gray-100 rounded px-2 py-1">STWEG ${s.nr}</a>`
+    ).join('\n          ');
 
     return `
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -52,16 +75,8 @@ const RosenwegNav = {
               Gebäude
               <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
             </button>
-            <div class="nav-dropdown-menu hidden absolute left-0 mt-1 w-48 bg-white rounded-lg shadow-lg border py-1 z-50">
-              <a href="${base}stweg1/" class="${dropA('stweg1')} block px-4 py-2 text-sm">STWEG 1 – Rosenweg 11</a>
-              <a href="${base}stweg2/" class="${dropA('stweg2')} block px-4 py-2 text-sm">STWEG 2 – Rosenweg 7</a>
-              <a href="${base}stweg3/" class="${dropA('stweg3')} block px-4 py-2 text-sm">STWEG 3 – Rosenweg 9</a>
-              <a href="${base}stweg4/" class="${dropA('stweg4')} block px-4 py-2 text-sm">STWEG 4 – Rosenweg 5</a>
-              <a href="${base}stweg5/" class="${dropA('stweg5')} block px-4 py-2 text-sm">STWEG 5 – Rosenweg 3</a>
-              <a href="${base}stweg6/" class="${dropA('stweg6')} block px-4 py-2 text-sm">STWEG 6 – Rosenweg 1</a>
-              <a href="${base}stweg7/" class="${dropA('stweg7')} block px-4 py-2 text-sm">STWEG 7 – Rosenweg 13</a>
-              <hr class="my-1">
-              <a href="${base}stweg8/" class="${dropA('stweg8')} block px-4 py-2 text-sm">STWEG 8 – Tiefgarage</a>
+            <div class="nav-dropdown-menu hidden absolute left-0 mt-1 w-56 bg-white rounded-lg shadow-lg border py-1 z-50">
+              ${desktopLinks}
             </div>
           </div>
 
@@ -120,14 +135,7 @@ const RosenwegNav = {
 
         <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Gebäude</div>
         <div class="grid grid-cols-2 gap-1 px-3">
-          <a href="${base}stweg1/" class="text-sm text-gray-700 hover:bg-gray-100 rounded px-2 py-1">STWEG 1</a>
-          <a href="${base}stweg2/" class="text-sm text-gray-700 hover:bg-gray-100 rounded px-2 py-1">STWEG 2</a>
-          <a href="${base}stweg3/" class="text-sm text-gray-700 hover:bg-gray-100 rounded px-2 py-1">STWEG 3</a>
-          <a href="${base}stweg4/" class="text-sm text-gray-700 hover:bg-gray-100 rounded px-2 py-1">STWEG 4</a>
-          <a href="${base}stweg5/" class="text-sm text-gray-700 hover:bg-gray-100 rounded px-2 py-1">STWEG 5</a>
-          <a href="${base}stweg6/" class="text-sm text-gray-700 hover:bg-gray-100 rounded px-2 py-1">STWEG 6</a>
-          <a href="${base}stweg7/" class="text-sm text-gray-700 hover:bg-gray-100 rounded px-2 py-1">STWEG 7</a>
-          <a href="${base}stweg8/" class="text-sm text-gray-700 hover:bg-gray-100 rounded px-2 py-1">STWEG 8</a>
+          ${mobileLinks}
         </div>
 
         <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Services</div>

@@ -6,6 +6,7 @@
     <title>Entsorgung & Recycling - STWEG-Kooperation Rosenweg</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/js/authentik-auth.js"></script>
+    <script src="/js/site-config.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body {
@@ -509,14 +510,14 @@
             <div class="grid md:grid-cols-3 gap-6">
                 <!-- REWAG -->
                 <div class="bg-white p-6 rounded-lg shadow-lg border-t-4 border-green-600">
-                    <h3 class="font-semibold text-xl mb-3">REWAG Entsorgung AG</h3>
-                    <p class="text-sm text-gray-700 mb-2">Rinaustrasse 633</p>
-                    <p class="text-sm text-gray-700 mb-3">4303 Kaiseraugst</p>
+                    <h3 id="ent-rewag-firma" class="font-semibold text-xl mb-3"></h3>
+                    <p id="ent-rewag-strasse" class="text-sm text-gray-700 mb-2"></p>
+                    <p id="ent-rewag-ort" class="text-sm text-gray-700 mb-3"></p>
                     <p class="text-sm mb-2">
-                        <strong>Tel:</strong> <a href="tel:+41618169970" class="text-blue-600 hover:underline">061 816 99 70</a>
+                        <strong>Tel:</strong> <a id="ent-rewag-tel" href="#" class="text-blue-600 hover:underline"></a>
                     </p>
                     <p class="text-sm mb-4">
-                        <strong>Web:</strong> <a href="https://www.rewag-entsorgung.ch" target="_blank" class="text-blue-600 hover:underline">rewag-entsorgung.ch</a>
+                        <strong>Web:</strong> <a id="ent-rewag-web" href="#" target="_blank" class="text-blue-600 hover:underline"></a>
                     </p>
                     
                     <div class="bg-green-50 p-4 rounded mb-3">
@@ -632,6 +633,26 @@
             </div>
         </div>
     </section>
+
+    <!-- Config-basierte REWAG-Daten laden -->
+    <script>
+    SiteConfig.load().then(() => {
+        const e = SiteConfig.getEntsorgung();
+        if (e && e.rewag) {
+            const r = e.rewag;
+            const parts = r.adresse.split(', ');
+            document.getElementById('ent-rewag-firma').textContent = r.firma;
+            document.getElementById('ent-rewag-strasse').textContent = parts[0] || r.adresse;
+            document.getElementById('ent-rewag-ort').textContent = parts[1] || '';
+            const tel = document.getElementById('ent-rewag-tel');
+            tel.textContent = r.telefon.replace('+41 ', '0').replace(/\s/g, ' ');
+            tel.href = 'tel:' + r.telefon.replace(/\s/g, '');
+            const web = document.getElementById('ent-rewag-web');
+            web.textContent = r.website;
+            web.href = 'https://www.' + r.website;
+        }
+    });
+    </script>
 
     <!-- Footer -->
     <footer class="bg-gray-800 text-white py-8">
