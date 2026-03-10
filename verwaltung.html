@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Benutzer & Gruppen - STWEG Rosenweg</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .tab-active { border-color: #2563eb; color: #2563eb; font-weight: 600; }
+        .tab-inactive { border-color: transparent; color: #6b7280; }
+        .tab-inactive:hover { color: #374151; border-color: #d1d5db; }
+        .group-child { padding-left: 2rem; }
+        .group-grandchild { padding-left: 4rem; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen flex flex-col">
+
+    <!-- Navigation -->
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js"></script>
+    <script>RosenwegNav.init({ active: 'verwaltung' });</script>
+
+    <!-- Auth Gate -->
+    <div id="auth-gate" class="flex-1 flex items-center justify-center">
+        <div class="text-center text-gray-500">
+            <svg class="animate-spin h-8 w-8 mx-auto mb-3 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            <p>Authentifizierung wird gepr&uuml;ft...</p>
+        </div>
+    </div>
+
+    <!-- No Admin Access -->
+    <div id="no-admin" class="hidden flex-1 flex items-center justify-center">
+        <div class="text-center">
+            <svg class="h-16 w-16 text-red-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <h2 class="text-xl font-semibold text-gray-800 mb-2">Kein Zugriff</h2>
+            <p class="text-gray-600">Diese Seite ist nur f&uuml;r Administratoren verf&uuml;gbar.</p>
+            <a href="/" class="inline-block mt-4 text-blue-600 hover:text-blue-700 font-medium">Zur&uuml;ck zur Startseite</a>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div id="main-content" class="hidden flex-1">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <!-- Header -->
+            <div class="mb-6">
+                <h1 class="text-2xl font-bold text-gray-800">Benutzer- &amp; Gruppenverwaltung</h1>
+                <p class="text-gray-500 text-sm mt-1">Benutzer und Gruppen verwalten</p>
+            </div>
+
+            <!-- Tabs -->
+            <div class="border-b border-gray-200 mb-6">
+                <nav class="flex space-x-8">
+                    <button id="tab-benutzer" onclick="switchTab('benutzer')" class="tab-active border-b-2 pb-3 px-1 text-sm transition">
+                        Benutzer
+                    </button>
+                    <button id="tab-gruppen" onclick="switchTab('gruppen')" class="tab-inactive border-b-2 pb-3 px-1 text-sm transition">
+                        Gruppen
+                    </button>
+                </nav>
+            </div>
+
+            <!-- Benutzer Tab -->
+            <div id="panel-benutzer">
+                <div class="flex justify-between items-center mb-4">
+                    <div class="relative">
+                        <input type="text" id="user-search" placeholder="Benutzer suchen..." oninput="filterUsers()"
+                            class="border border-gray-300 rounded-lg pl-9 pr-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-64">
+                        <svg class="absolute left-3 top-2.5 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                    </div>
+                    <button onclick="openNewUserModal()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm font-medium flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                        </svg>
+                        Neuer Benutzer
+                    </button>
+                </div>
+
+                <div id="users-loading" class="text-center py-12 text-gray-500">
+                    <svg class="animate-spin h-6 w-6 mx-auto mb-2 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                    </svg>
+                    Benutzer werden geladen...
+                </div>
+                <div id="users-error" class="hidden bg-red-50 text-red-700 p-4 rounded-lg text-sm"></div>
+                <div class="bg-white rounded-lg shadow overflow-hidden">
+                    <table id="users-table" class="hidden w-full">
+                        <thead class="bg-gray-50 border-b">
+                            <tr>
+                                <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Name</th>
+                                <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Username</th>
+                                <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider hidden md:table-cell">E-Mail</th>
+                                <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider hidden lg:table-cell">Gruppen</th>
+                                <th class="text-center px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Aktiv</th>
+                                <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider hidden lg:table-cell">Letzter Login</th>
+                                <th class="px-4 py-3"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-tbody" class="divide-y divide-gray-100"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Gruppen Tab -->
+            <div id="panel-gruppen" class="hidden">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-semibold text-gray-700">Alle Gruppen</h2>
+                    <button onclick="openNewGroupModal()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm font-medium flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                        </svg>
+                        Neue Gruppe
+                    </button>
+                </div>
+
+                <div id="groups-loading" class="text-center py-12 text-gray-500">
+                    <svg class="animate-spin h-6 w-6 mx-auto mb-2 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                    </svg>
+                    Gruppen werden geladen...
+                </div>
+                <div id="groups-error" class="hidden bg-red-50 text-red-700 p-4 rounded-lg text-sm"></div>
+                <div id="groups-list" class="space-y-1"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Overlay -->
+    <div id="modal-overlay" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div id="modal-content" class="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"></div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t mt-auto">
+        <div class="max-w-7xl mx-auto px-4 py-6 text-center text-sm text-gray-500">
+            &copy; 2025 STWEG-Kooperation Rosenweg
+        </div>
+    </footer>
+
+    <script>
+        // ── State ──
+        let allUsers = [];
+        let allGroups = [];
+
+        // ── Auth Init ──
+        AuthentikAuth.init({
+            requireAuth: true,
+            requireAdmin: true,
+            onLogin(user) {
+                document.getElementById('auth-gate').classList.add('hidden');
+                document.getElementById('main-content').classList.remove('hidden');
+                loadData();
+            },
+            onLogout(reason) {
+                if (reason === 'no-admin') {
+                    document.getElementById('auth-gate').classList.add('hidden');
+                    document.getElementById('no-admin').classList.remove('hidden');
+                    document.getElementById('no-admin').classList.add('flex');
+                }
+                // 'not-logged-in' triggers redirect automatically
+            }
+        });
+
+        // ── Data Loading ──
+        async function loadData() {
+            await Promise.all([loadUsers(), loadGroups()]);
+        }
+
+        async function loadUsers() {
+            const loading = document.getElementById('users-loading');
+            const error = document.getElementById('users-error');
+            const table = document.getElementById('users-table');
+            loading.classList.remove('hidden');
+            error.classList.add('hidden');
+            table.classList.add('hidden');
+
+            try {
+                const resp = await AuthentikAuth.apiFetch('/api/admin/users');
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const data = await resp.json();
+                allUsers = Array.isArray(data) ? data : (data.results || data.users || []);
+                renderUsers(allUsers);
+                loading.classList.add('hidden');
+                table.classList.remove('hidden');
+            } catch (e) {
+                loading.classList.add('hidden');
+                error.textContent = 'Fehler beim Laden der Benutzer: ' + e.message;
+                error.classList.remove('hidden');
+            }
+        }
+
+        async function loadGroups() {
+            const loading = document.getElementById('groups-loading');
+            const error = document.getElementById('groups-error');
+            loading.classList.remove('hidden');
+            error.classList.add('hidden');
+
+            try {
+                const resp = await AuthentikAuth.apiFetch('/api/admin/groups');
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const data = await resp.json();
+                allGroups = Array.isArray(data) ? data : (data.results || data.groups || []);
+                renderGroups();
+                loading.classList.add('hidden');
+            } catch (e) {
+                loading.classList.add('hidden');
+                error.textContent = 'Fehler beim Laden der Gruppen: ' + e.message;
+                error.classList.remove('hidden');
+            }
+        }
+
+        // ── Tab Switching ──
+        function switchTab(tab) {
+            const tabs = ['benutzer', 'gruppen'];
+            tabs.forEach(t => {
+                document.getElementById(`tab-${t}`).className = t === tab
+                    ? 'tab-active border-b-2 pb-3 px-1 text-sm transition'
+                    : 'tab-inactive border-b-2 pb-3 px-1 text-sm transition';
+                document.getElementById(`panel-${t}`).classList.toggle('hidden', t !== tab);
+            });
+        }
+
+        // ── User Rendering ──
+        function renderUsers(users) {
+            const tbody = document.getElementById('users-tbody');
+            if (users.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8 text-gray-500">Keine Benutzer gefunden.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = users.map(u => {
+                const groups = (u.groups || u.groups_obj || []).map(g => typeof g === 'string' ? g : g.name).join(', ');
+                const lastLogin = u.last_login ? new Date(u.last_login).toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Nie';
+                return `
+                <tr class="hover:bg-gray-50 cursor-pointer" onclick="openEditUserModal(${u.pk || u.id})">
+                    <td class="px-4 py-3 text-sm font-medium text-gray-900">${esc(u.name || '-')}</td>
+                    <td class="px-4 py-3 text-sm text-gray-600">${esc(u.username)}</td>
+                    <td class="px-4 py-3 text-sm text-gray-600 hidden md:table-cell">${esc(u.email || '-')}</td>
+                    <td class="px-4 py-3 text-sm text-gray-600 hidden lg:table-cell">
+                        ${groups ? `<span class="text-xs">${esc(groups)}</span>` : '<span class="text-gray-400">-</span>'}
+                    </td>
+                    <td class="px-4 py-3 text-center">
+                        ${u.is_active !== false
+                            ? '<span class="inline-block w-2.5 h-2.5 rounded-full bg-green-500" title="Aktiv"></span>'
+                            : '<span class="inline-block w-2.5 h-2.5 rounded-full bg-gray-300" title="Inaktiv"></span>'}
+                    </td>
+                    <td class="px-4 py-3 text-sm text-gray-500 hidden lg:table-cell">${lastLogin}</td>
+                    <td class="px-4 py-3 text-right" onclick="event.stopPropagation()">
+                        <button onclick="deleteUser(${u.pk || u.id}, '${esc(u.username)}')" class="text-red-400 hover:text-red-600 transition p-1" title="L&ouml;schen">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                            </svg>
+                        </button>
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+
+        function filterUsers() {
+            const q = document.getElementById('user-search').value.toLowerCase();
+            const filtered = allUsers.filter(u =>
+                (u.name || '').toLowerCase().includes(q) ||
+                (u.username || '').toLowerCase().includes(q) ||
+                (u.email || '').toLowerCase().includes(q)
+            );
+            renderUsers(filtered);
+        }
+
+        // ── Group Rendering (hierarchical) ──
+        function renderGroups() {
+            const container = document.getElementById('groups-list');
+            const groupMap = {};
+            allGroups.forEach(g => groupMap[g.pk || g.id] = g);
+
+            // Build tree
+            const roots = [];
+            const children = {};
+            allGroups.forEach(g => {
+                const parentId = g.parent || g.parent_id || null;
+                if (parentId && groupMap[parentId]) {
+                    if (!children[parentId]) children[parentId] = [];
+                    children[parentId].push(g);
+                } else {
+                    roots.push(g);
+                }
+            });
+
+            function renderGroupNode(g, depth) {
+                const id = g.pk || g.id;
+                const userCount = g.users_count ?? (g.users ? g.users.length : '?');
+                const indent = depth === 0 ? '' : depth === 1 ? 'ml-8' : 'ml-16';
+                const parentName = g.parent ? (groupMap[g.parent]?.name || g.parent_name || '') : '';
+
+                let html = `
+                <div class="bg-white rounded-lg shadow-sm border hover:shadow-md transition cursor-pointer ${indent}" onclick="openGroupDetail(${id})">
+                    <div class="px-4 py-3 flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded-lg ${g.is_superuser ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600'} flex items-center justify-center">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                </svg>
+                            </div>
+                            <div>
+                                <span class="font-medium text-gray-900 text-sm">${esc(g.name)}</span>
+                                ${g.is_superuser ? '<span class="ml-2 text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">Superuser</span>' : ''}
+                                ${parentName ? `<p class="text-xs text-gray-400">Elterngruppe: ${esc(parentName)}</p>` : ''}
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-4">
+                            <span class="text-sm text-gray-500">${userCount} Benutzer</span>
+                            <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                            </svg>
+                        </div>
+                    </div>
+                </div>`;
+
+                if (children[id]) {
+                    children[id].forEach(child => {
+                        html += renderGroupNode(child, depth + 1);
+                    });
+                }
+                return html;
+            }
+
+            container.innerHTML = roots.length > 0
+                ? roots.map(g => renderGroupNode(g, 0)).join('')
+                : '<p class="text-center py-8 text-gray-500">Keine Gruppen gefunden.</p>';
+        }
+
+        // ── Modals ──
+        function openModal(html) {
+            document.getElementById('modal-content').innerHTML = html;
+            document.getElementById('modal-overlay').classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('modal-overlay').classList.add('hidden');
+        }
+
+        // Close on overlay click
+        document.getElementById('modal-overlay').addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) closeModal();
+        });
+
+        // Close on Escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeModal();
+        });
+
+        function groupCheckboxes(selectedIds = []) {
+            return allGroups.map(g => {
+                const id = g.pk || g.id;
+                const checked = selectedIds.includes(id) ? 'checked' : '';
+                return `<label class="flex items-center gap-2 text-sm">
+                    <input type="checkbox" name="groups" value="${id}" ${checked} class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                    ${esc(g.name)}
+                    ${g.is_superuser ? '<span class="text-xs text-amber-600">(Superuser)</span>' : ''}
+                </label>`;
+            }).join('');
+        }
+
+        // ── Edit User Modal ──
+        function openEditUserModal(userId) {
+            const user = allUsers.find(u => (u.pk || u.id) === userId);
+            if (!user) return;
+
+            const groupIds = (user.groups || user.groups_obj || []).map(g => typeof g === 'object' ? (g.pk || g.id) : g);
+
+            openModal(`
+                <div class="p-6">
+                    <div class="flex justify-between items-center mb-5">
+                        <h3 class="text-lg font-semibold text-gray-800">Benutzer bearbeiten</h3>
+                        <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <form id="edit-user-form" onsubmit="saveUser(event, ${userId})" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                            <input type="text" value="${esc(user.username)}" disabled
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100 cursor-not-allowed">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                            <input type="text" id="edit-name" value="${esc(user.name || '')}"
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">E-Mail</label>
+                            <input type="email" id="edit-email" value="${esc(user.email || '')}"
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <input type="checkbox" id="edit-active" ${user.is_active !== false ? 'checked' : ''}
+                                class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                            <label for="edit-active" class="text-sm font-medium text-gray-700">Aktiv</label>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Gruppen</label>
+                            <div class="space-y-2 max-h-40 overflow-y-auto border border-gray-200 rounded-lg p-3">
+                                ${groupCheckboxes(groupIds)}
+                                ${allGroups.length === 0 ? '<p class="text-sm text-gray-400">Keine Gruppen verf&uuml;gbar</p>' : ''}
+                            </div>
+                        </div>
+                        <div id="edit-user-msg" class="hidden text-sm p-3 rounded-lg"></div>
+                        <div class="flex justify-end gap-3 pt-2">
+                            <button type="button" onclick="closeModal()" class="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition">Abbrechen</button>
+                            <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition font-medium">Speichern</button>
+                        </div>
+                    </form>
+                </div>
+            `);
+        }
+
+        async function saveUser(e, userId) {
+            e.preventDefault();
+            const msg = document.getElementById('edit-user-msg');
+            const groups = [...document.querySelectorAll('#edit-user-form input[name="groups"]:checked')].map(cb => cb.value);
+
+            const body = {
+                name: document.getElementById('edit-name').value.trim(),
+                email: document.getElementById('edit-email').value.trim(),
+                is_active: document.getElementById('edit-active').checked,
+                groups: groups,
+            };
+
+            try {
+                const resp = await AuthentikAuth.apiFetch(`/api/admin/users/${userId}`, {
+                    method: 'PUT',
+                    body,
+                });
+                if (resp.ok) {
+                    msg.textContent = 'Benutzer erfolgreich gespeichert.';
+                    msg.className = 'text-sm p-3 rounded-lg bg-green-100 text-green-700';
+                    msg.classList.remove('hidden');
+                    setTimeout(() => { closeModal(); loadUsers(); }, 1000);
+                } else {
+                    const err = await resp.json().catch(() => ({}));
+                    msg.textContent = 'Fehler: ' + (err.detail || err.message || `HTTP ${resp.status}`);
+                    msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700';
+                    msg.classList.remove('hidden');
+                }
+            } catch (e) {
+                msg.textContent = 'Netzwerkfehler: ' + e.message;
+                msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700';
+                msg.classList.remove('hidden');
+            }
+        }
+
+        // ── New User Modal ──
+        function openNewUserModal() {
+            openModal(`
+                <div class="p-6">
+                    <div class="flex justify-between items-center mb-5">
+                        <h3 class="text-lg font-semibold text-gray-800">Neuer Benutzer</h3>
+                        <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <form id="new-user-form" onsubmit="createUser(event)" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Username *</label>
+                            <input type="text" id="new-username" required
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                            <input type="text" id="new-name"
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">E-Mail</label>
+                            <input type="email" id="new-email"
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Passwort *</label>
+                            <input type="password" id="new-password" required minlength="8"
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Gruppen</label>
+                            <div class="space-y-2 max-h-40 overflow-y-auto border border-gray-200 rounded-lg p-3">
+                                ${groupCheckboxes([])}
+                                ${allGroups.length === 0 ? '<p class="text-sm text-gray-400">Keine Gruppen verf&uuml;gbar</p>' : ''}
+                            </div>
+                        </div>
+                        <div id="new-user-msg" class="hidden text-sm p-3 rounded-lg"></div>
+                        <div class="flex justify-end gap-3 pt-2">
+                            <button type="button" onclick="closeModal()" class="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition">Abbrechen</button>
+                            <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition font-medium">Erstellen</button>
+                        </div>
+                    </form>
+                </div>
+            `);
+        }
+
+        async function createUser(e) {
+            e.preventDefault();
+            const msg = document.getElementById('new-user-msg');
+            const groups = [...document.querySelectorAll('#new-user-form input[name="groups"]:checked')].map(cb => cb.value);
+
+            const body = {
+                username: document.getElementById('new-username').value.trim(),
+                name: document.getElementById('new-name').value.trim(),
+                email: document.getElementById('new-email').value.trim(),
+                password: document.getElementById('new-password').value,
+                groups: groups,
+            };
+
+            try {
+                const resp = await AuthentikAuth.apiFetch('/api/admin/users', {
+                    method: 'POST',
+                    body,
+                });
+                if (resp.ok) {
+                    msg.textContent = 'Benutzer erfolgreich erstellt.';
+                    msg.className = 'text-sm p-3 rounded-lg bg-green-100 text-green-700';
+                    msg.classList.remove('hidden');
+                    setTimeout(() => { closeModal(); loadUsers(); }, 1000);
+                } else {
+                    const err = await resp.json().catch(() => ({}));
+                    msg.textContent = 'Fehler: ' + (err.detail || err.message || `HTTP ${resp.status}`);
+                    msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700';
+                    msg.classList.remove('hidden');
+                }
+            } catch (e) {
+                msg.textContent = 'Netzwerkfehler: ' + e.message;
+                msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700';
+                msg.classList.remove('hidden');
+            }
+        }
+
+        // ── Delete User ──
+        async function deleteUser(userId, username) {
+            if (!confirm(`Benutzer "${username}" wirklich l\u00f6schen?`)) return;
+            try {
+                const resp = await AuthentikAuth.apiFetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+                if (resp.ok || resp.status === 204) {
+                    loadUsers();
+                } else {
+                    const err = await resp.json().catch(() => ({}));
+                    alert('Fehler beim L\u00f6schen: ' + (err.detail || err.message || `HTTP ${resp.status}`));
+                }
+            } catch (e) {
+                alert('Netzwerkfehler: ' + e.message);
+            }
+        }
+
+        // ── Group Detail Modal ──
+        async function openGroupDetail(groupId) {
+            const group = allGroups.find(g => (g.pk || g.id) === groupId);
+            if (!group) return;
+
+            // Load group members
+            let members = [];
+            try {
+                const resp = await AuthentikAuth.apiFetch(`/api/admin/groups/${groupId}`);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    members = data.users || data.members || [];
+                }
+            } catch (e) {
+                // Fall back to matching from allUsers
+                members = allUsers.filter(u => {
+                    const uGroups = (u.groups || u.groups_obj || []).map(g => typeof g === 'object' ? (g.pk || g.id) : g);
+                    return uGroups.includes(groupId);
+                });
+            }
+
+            const nonMembers = allUsers.filter(u => {
+                const uid = u.pk || u.id;
+                return !members.some(m => (m.pk || m.id) === uid);
+            });
+
+            openModal(`
+                <div class="p-6">
+                    <div class="flex justify-between items-center mb-5">
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-800">${esc(group.name)}</h3>
+                            ${group.is_superuser ? '<span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded font-medium">Superuser-Gruppe</span>' : ''}
+                        </div>
+                        <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <h4 class="text-sm font-semibold text-gray-600 mb-2">Mitglieder (${members.length})</h4>
+                    <div class="space-y-1 mb-5 max-h-48 overflow-y-auto">
+                        ${members.length > 0 ? members.map(m => `
+                            <div class="flex justify-between items-center bg-gray-50 rounded-lg px-3 py-2">
+                                <div>
+                                    <span class="text-sm font-medium text-gray-900">${esc(m.name || m.username)}</span>
+                                    <span class="text-xs text-gray-500 ml-2">${esc(m.username)}</span>
+                                </div>
+                                <button onclick="removeUserFromGroup(${m.pk || m.id}, ${groupId})" class="text-red-400 hover:text-red-600 transition text-xs font-medium">Entfernen</button>
+                            </div>
+                        `).join('') : '<p class="text-sm text-gray-400 py-2">Keine Mitglieder</p>'}
+                    </div>
+
+                    <h4 class="text-sm font-semibold text-gray-600 mb-2">Benutzer hinzuf&uuml;gen</h4>
+                    <div class="flex gap-2">
+                        <select id="add-user-select" class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                            <option value="">-- Benutzer w&auml;hlen --</option>
+                            ${nonMembers.map(u => `<option value="${u.pk || u.id}">${esc(u.name || u.username)} (${esc(u.username)})</option>`).join('')}
+                        </select>
+                        <button onclick="addUserToGroup(${groupId})" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition font-medium">Hinzuf&uuml;gen</button>
+                    </div>
+                    <div id="group-detail-msg" class="hidden text-sm p-3 rounded-lg mt-3"></div>
+                </div>
+            `);
+        }
+
+        async function addUserToGroup(groupId) {
+            const select = document.getElementById('add-user-select');
+            const userId = select.value;
+            if (!userId) return;
+
+            const msg = document.getElementById('group-detail-msg');
+            try {
+                const user = allUsers.find(u => (u.pk || u.id) == userId);
+                if (!user) return;
+
+                const currentGroups = (user.groups || user.groups_obj || []).map(g => typeof g === 'object' ? (g.pk || g.id) : g);
+                const newGroups = [...new Set([...currentGroups, groupId])];
+
+                const resp = await AuthentikAuth.apiFetch(`/api/admin/users/${userId}`, {
+                    method: 'PUT',
+                    body: { groups: newGroups },
+                });
+
+                if (resp.ok) {
+                    await loadData();
+                    openGroupDetail(groupId);
+                } else {
+                    const err = await resp.json().catch(() => ({}));
+                    msg.textContent = 'Fehler: ' + (err.detail || err.message || `HTTP ${resp.status}`);
+                    msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700';
+                    msg.classList.remove('hidden');
+                }
+            } catch (e) {
+                msg.textContent = 'Netzwerkfehler: ' + e.message;
+                msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700';
+                msg.classList.remove('hidden');
+            }
+        }
+
+        async function removeUserFromGroup(userId, groupId) {
+            const msg = document.getElementById('group-detail-msg');
+            try {
+                const user = allUsers.find(u => (u.pk || u.id) === userId);
+                if (!user) return;
+
+                const currentGroups = (user.groups || user.groups_obj || []).map(g => typeof g === 'object' ? (g.pk || g.id) : g);
+                const newGroups = currentGroups.filter(gid => gid !== groupId);
+
+                const resp = await AuthentikAuth.apiFetch(`/api/admin/users/${userId}`, {
+                    method: 'PUT',
+                    body: { groups: newGroups },
+                });
+
+                if (resp.ok) {
+                    await loadData();
+                    openGroupDetail(groupId);
+                } else {
+                    const err = await resp.json().catch(() => ({}));
+                    msg.textContent = 'Fehler: ' + (err.detail || err.message || `HTTP ${resp.status}`);
+                    msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700';
+                    msg.classList.remove('hidden');
+                }
+            } catch (e) {
+                msg.textContent = 'Netzwerkfehler: ' + e.message;
+                msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700';
+                msg.classList.remove('hidden');
+            }
+        }
+
+        // ── New Group Modal ──
+        function openNewGroupModal() {
+            openModal(`
+                <div class="p-6">
+                    <div class="flex justify-between items-center mb-5">
+                        <h3 class="text-lg font-semibold text-gray-800">Neue Gruppe</h3>
+                        <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <form id="new-group-form" onsubmit="createGroup(event)" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                            <input type="text" id="new-group-name" required
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Elterngruppe</label>
+                            <select id="new-group-parent" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                <option value="">-- Keine --</option>
+                                ${allGroups.map(g => `<option value="${g.pk || g.id}">${esc(g.name)}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <input type="checkbox" id="new-group-superuser"
+                                class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                            <label for="new-group-superuser" class="text-sm font-medium text-gray-700">Superuser-Gruppe</label>
+                        </div>
+                        <div id="new-group-msg" class="hidden text-sm p-3 rounded-lg"></div>
+                        <div class="flex justify-end gap-3 pt-2">
+                            <button type="button" onclick="closeModal()" class="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition">Abbrechen</button>
+                            <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition font-medium">Erstellen</button>
+                        </div>
+                    </form>
+                </div>
+            `);
+        }
+
+        async function createGroup(e) {
+            e.preventDefault();
+            const msg = document.getElementById('new-group-msg');
+            const body = {
+                name: document.getElementById('new-group-name').value.trim(),
+                is_superuser: document.getElementById('new-group-superuser').checked,
+            };
+            const parent = document.getElementById('new-group-parent').value;
+            if (parent) body.parent = parent;
+
+            try {
+                const resp = await AuthentikAuth.apiFetch('/api/admin/groups', {
+                    method: 'POST',
+                    body,
+                });
+                if (resp.ok) {
+                    msg.textContent = 'Gruppe erfolgreich erstellt.';
+                    msg.className = 'text-sm p-3 rounded-lg bg-green-100 text-green-700';
+                    msg.classList.remove('hidden');
+                    setTimeout(() => { closeModal(); loadGroups(); }, 1000);
+                } else {
+                    const err = await resp.json().catch(() => ({}));
+                    msg.textContent = 'Fehler: ' + (err.detail || err.message || `HTTP ${resp.status}`);
+                    msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700';
+                    msg.classList.remove('hidden');
+                }
+            } catch (e) {
+                msg.textContent = 'Netzwerkfehler: ' + e.message;
+                msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700';
+                msg.classList.remove('hidden');
+            }
+        }
+
+        // ── Helpers ──
+        function esc(str) {
+            if (!str) return '';
+            const d = document.createElement('div');
+            d.textContent = str;
+            return d.innerHTML;
+        }
+    </script>
+</body>
+</html>
