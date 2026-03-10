@@ -1038,7 +1038,7 @@ app.post('/api/email/inbound', async (req, res) => {
 
     // Send to all recipients
     const mailOptions = {
-      from: `"${senderName} via ${list.name}" <${MAIL_FROM}>`,
+      from: `"${senderName} via ${list.name}" <${toAddress}>`,
       to: recipients,
       replyTo: replyTo,
       subject: subject,
