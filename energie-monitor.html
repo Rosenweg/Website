@@ -280,16 +280,40 @@
             type: 'line',
             data: {
                 labels: [],
-                datasets: [{
-                    label: 'Leistung (W)',
-                    data: [],
-                    borderColor: '#3b82f6',
-                    backgroundColor: 'rgba(59,130,246,0.1)',
-                    fill: true,
-                    tension: 0.3,
-                    pointRadius: 0,
-                    borderWidth: 2,
-                }]
+                datasets: [
+                    {
+                        label: 'Leistung (W)',
+                        data: [],
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59,130,246,0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        borderWidth: 2,
+                    },
+                    {
+                        label: 'Solar (W)',
+                        data: [],
+                        borderColor: '#eab308',
+                        backgroundColor: 'rgba(234,179,8,0.08)',
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        borderWidth: 1.5,
+                        borderDash: [4, 2],
+                    },
+                    {
+                        label: 'Netzstrom (W)',
+                        data: [],
+                        borderColor: '#ef4444',
+                        backgroundColor: 'rgba(239,68,68,0.08)',
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        borderWidth: 1.5,
+                        borderDash: [4, 2],
+                    },
+                ]
             },
             options: {
                 ...defaultOpts,
@@ -299,8 +323,8 @@
                 },
                 interaction: { intersect: false, mode: 'index' },
                 plugins: {
-                    legend: { display: false },
-                    tooltip: { callbacks: { label: ctx => `${ctx.parsed.y.toFixed(0)} W` } },
+                    legend: { display: true, position: 'top', labels: { font: { size: 10 }, padding: 8, usePointStyle: true, pointStyle: 'line' } },
+                    tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(0)} W` } },
                 },
             }
         });
@@ -522,45 +546,118 @@
     async function loadPowerChart() {
         if (!currentMeter) return;
         try {
-            let from, endpoint;
+            let from, endpointFn;
             if (currentPeriod === 'day') {
                 const today = new Date(); today.setHours(0, 0, 0, 0);
                 from = today.toISOString();
-                endpoint = `${API}/history/${currentMeter}?from=${from}&limit=5000`;
+                endpointFn = (id) => `${API}/history/${id}?from=${from}&limit=5000`;
             } else if (currentPeriod === 'week') {
                 from = new Date(Date.now() - 7 * 86400000).toISOString();
-                endpoint = `${API}/hourly/${currentMeter}?from=${from}`;
+                endpointFn = (id) => `${API}/hourly/${id}?from=${from}`;
             } else {
                 from = new Date(Date.now() - 30 * 86400000).toISOString();
-                endpoint = `${API}/hourly/${currentMeter}?from=${from}`;
+                endpointFn = (id) => `${API}/hourly/${id}?from=${from}`;
             }
 
-            const res = await fetch(endpoint);
+            // Load selected meter + solar + haupt in parallel
+            const [res, solarRes, hauptRes] = await Promise.all([
+                fetch(endpointFn(currentMeter)),
+                fetch(endpointFn('r9-produktion')).catch(() => null),
+                fetch(endpointFn('r9-haupt')).catch(() => null),
+            ]);
             const data = await res.json();
+            const solarRaw = solarRes?.ok ? await solarRes.json() : [];
+            const hauptRaw = hauptRes?.ok ? await hauptRes.json() : [];
+
+            const tsKey = currentPeriod === 'day' ? 'ts' : 'hour';
+            const valKey = currentPeriod === 'day' ? 'power_w' : 'avg_power_w';
 
             const labels = data.map(r => {
-                const d = new Date(r.ts || r.hour);
+                const d = new Date(r[tsKey] || r.ts || r.hour);
                 if (currentPeriod === 'day') return d.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
                 return d.toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit' }) + ' ' +
                        d.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
             });
-            const values = data.map(r => parseFloat(r.power_w || r.avg_power_w) || 0);
+            const values = data.map(r => parseFloat(r[valKey] || r.power_w || r.avg_power_w) || 0);
+
+            // Build time-indexed maps for solar production and haupt (grid import/export)
+            const solarProdMap = {};
+            solarRaw.forEach(r => {
+                const t = new Date(r[tsKey] || r.ts || r.hour).getTime();
+                solarProdMap[t] = Math.abs(parseFloat(r[valKey] || r.power_w || r.avg_power_w) || 0);
+            });
+            const hauptPowerMap = {};
+            hauptRaw.forEach(r => {
+                const t = new Date(r[tsKey] || r.ts || r.hour).getTime();
+                hauptPowerMap[t] = parseFloat(r[valKey] || r.power_w || r.avg_power_w) || 0;
+            });
+
+            // Helper: find closest value in map
+            const findClosest = (map, t) => {
+                if (map[t] !== undefined) return map[t];
+                const tolerance = currentPeriod === 'day' ? 30000 : 3600000;
+                for (const [key, val] of Object.entries(map)) {
+                    if (Math.abs(key - t) < tolerance) return val;
+                }
+                return null;
+            };
+
+            // Calculate solar share per timestamp, then split meter consumption
+            const solarValues = [];
+            const hauptValues = [];
+            data.forEach((r, i) => {
+                const t = new Date(r[tsKey] || r.ts || r.hour).getTime();
+                const meterPower = values[i];
+                const prod = findClosest(solarProdMap, t);
+                const hauptW = findClosest(hauptPowerMap, t);
+
+                if (prod === null || hauptW === null || meterPower <= 0) {
+                    solarValues.push(null);
+                    hauptValues.push(null);
+                    return;
+                }
+
+                // haupt positive = grid import, negative = grid export
+                const netzExport = Math.max(0, -hauptW);
+                const netzImport = Math.max(0, hauptW);
+                const eigenverbrauch = Math.max(0, prod - netzExport);
+                const totalBuilding = eigenverbrauch + netzImport;
+                const sharePercent = totalBuilding > 0 ? eigenverbrauch / totalBuilding : 0;
+
+                // Apply share to this meter's consumption
+                const solarW = meterPower * sharePercent;
+                const netzW = meterPower - solarW;
+                solarValues.push(Math.round(solarW));
+                hauptValues.push(Math.round(netzW));
+            });
 
             // Downsample if too many points
             const maxPoints = 500;
             if (labels.length > maxPoints) {
                 const step = Math.ceil(labels.length / maxPoints);
-                const newLabels = [], newValues = [];
+                const dl = [], dv = [], ds = [], dh = [];
                 for (let i = 0; i < labels.length; i += step) {
-                    newLabels.push(labels[i]);
-                    newValues.push(values[i]);
+                    dl.push(labels[i]);
+                    dv.push(values[i]);
+                    ds.push(solarValues[i]);
+                    dh.push(hauptValues[i]);
                 }
-                powerChart.data.labels = newLabels;
-                powerChart.data.datasets[0].data = newValues;
+                powerChart.data.labels = dl;
+                powerChart.data.datasets[0].data = dv;
+                powerChart.data.datasets[1].data = ds;
+                powerChart.data.datasets[2].data = dh;
             } else {
                 powerChart.data.labels = labels;
                 powerChart.data.datasets[0].data = values;
+                powerChart.data.datasets[1].data = solarValues;
+                powerChart.data.datasets[2].data = hauptValues;
             }
+
+            // Hide solar/netz split for reference meters (no split makes sense there)
+            const isRefMeter = currentMeter === 'r9-produktion' || currentMeter === 'r9-haupt';
+            powerChart.data.datasets[1].hidden = isRefMeter;
+            powerChart.data.datasets[2].hidden = isRefMeter;
+
             powerChart.update();
         } catch (err) {
             console.error('Power chart error:', err);
