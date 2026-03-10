@@ -9,9 +9,7 @@
     "anzahl_hobbyräume": 1,
     "letzte_aktualisierung": "2025-10-13",
     "kontakt_email": "stweg3@rosenweg4303.ch",
-    "webhooks": {
-      "send_email": "https://n8n.juroct.net/webhook/send-email"
-    }
+    "webhooks": {}
   },
   "ausschuss": [
     {

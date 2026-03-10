@@ -20,7 +20,7 @@
         "geraete_verwaltung": true,
         "alle_verbraeuche_sehen": true,
         "system_konfiguration": true,
-        "n8n_workflows": true,
+        "api_verwaltung": true,
         "github_admin": true
       },
       "zustaendigkeiten": [
@@ -57,7 +57,7 @@
     "geraete_verwaltung": "Smart Devices hinzufügen, konfigurieren, entfernen",
     "alle_verbraeuche_sehen": "Stromverbrauch aller Geräte einsehen (nicht nur eigene Wohnung)",
     "system_konfiguration": "System-Einstellungen und Workflows anpassen",
-    "n8n_workflows": "n8n Workflows erstellen und bearbeiten",
+    "api_verwaltung": "API-Endpoints und Automatisierungen verwalten",
     "github_admin": "GitHub Repository verwalten",
     "netzwerk_admin": "Netzwerk-Infrastruktur konfigurieren"
   },

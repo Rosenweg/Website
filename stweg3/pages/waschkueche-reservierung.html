@@ -627,7 +627,7 @@
                 newReservation.bis_datum = document.getElementById('bookingBisDatum').value;
             }
 
-            // TODO: n8n API-Call um Reservierung zu speichern
+            // TODO: API-Call um Reservierung zu speichern
             console.log('Neue Reservierung:', newReservation);
 
             // Für Demo: Lokale Aktualisierung
@@ -642,7 +642,7 @@
         function cancelReservation(resId) {
             if (!confirm('Möchten Sie diese Reservierung wirklich stornieren?')) return;
 
-            // TODO: n8n API-Call um Reservierung zu stornieren
+            // TODO: API-Call um Reservierung zu stornieren
             const res = reservierungen.find(r => r.id === resId);
             if (res) {
                 res.status = 'storniert';
