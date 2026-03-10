@@ -4,10 +4,12 @@ const express = require('express');
 const cors = require('cors');
 
 // ─── Configuration ──────────────────────────────────────────────────
-const METERS = (process.env.METERS || '100.64.90.72:502:1:test-meter').split(',').map(m => {
+// METERS env var is only used for initial DB seeding (first start)
+// After that, all meter config comes from the database
+const SEED_METERS = process.env.METERS ? process.env.METERS.split(',').map(m => {
   const [host, port, unitId, name] = m.split(':');
   return { host, port: parseInt(port), unitId: parseInt(unitId) || 1, name: name || host };
-});
+}) : [];
 
 const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL || '5') * 1000;
 const API_PORT = parseInt(process.env.API_PORT || '3001');
@@ -183,14 +185,18 @@ async function initDB() {
         ON readings_hourly(meter_id, hour);
     `);
 
-    // Register configured meters (from env)
-    for (const meter of METERS) {
-      await client.query(
-        `INSERT INTO meters (id, name, type, host, port, unit_id)
-         VALUES ($1, $2, 'modbus', $3, $4, $5)
-         ON CONFLICT (id) DO UPDATE SET name=$2, host=$3, port=$4, unit_id=$5`,
-        [meter.name, meter.name, meter.host, meter.port, meter.unitId]
-      );
+    // Seed meters from METERS env var only if DB has no meters yet
+    const metersExist = await client.query('SELECT COUNT(*) FROM meters');
+    if (parseInt(metersExist.rows[0].count) === 0 && SEED_METERS.length > 0) {
+      console.log(`Seeding ${SEED_METERS.length} meters from METERS env var`);
+      for (const meter of SEED_METERS) {
+        await client.query(
+          `INSERT INTO meters (id, name, type, host, port, unit_id)
+           VALUES ($1, $2, 'modbus', $3, $4, $5)
+           ON CONFLICT (id) DO NOTHING`,
+          [meter.name, meter.name, meter.host, meter.port, meter.unitId]
+        );
+      }
     }
 
     // Add valid_from/valid_to columns if they don't exist (migration for existing DBs)
@@ -402,8 +408,9 @@ const app = express();
 app.use(cors({ origin: true }));
 
 // Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', meters: METERS.length, uptime: process.uptime() });
+app.get('/health', async (req, res) => {
+  const meters = await getActiveMeters();
+  res.json({ status: 'ok', meters: meters.length, uptime: process.uptime() });
 });
 
 // List meters
@@ -702,8 +709,9 @@ app.get('/api/energy/user/:email/meters', async (req, res) => {
 async function start() {
   await initDB();
 
-  // Start polling
-  console.log(`Polling ${METERS.length} meter(s) every ${POLL_INTERVAL / 1000}s`);
+  // Start polling (meters loaded from DB)
+  const activeMeters = await getActiveMeters();
+  console.log(`Polling ${activeMeters.length} meter(s) every ${POLL_INTERVAL / 1000}s`);
   pollAll(); // immediate first poll
   setInterval(pollAll, POLL_INTERVAL);
 
