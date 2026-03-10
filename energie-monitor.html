@@ -47,6 +47,31 @@
     </nav>
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <!-- Solar Overview Bar -->
+        <div class="bg-gradient-to-r from-yellow-50 to-green-50 border border-yellow-200 rounded-xl shadow-md p-4 mb-6">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="text-center">
+                    <p class="text-xs font-medium text-yellow-700">Solarproduktion</p>
+                    <p id="solar-production" class="text-xl font-bold text-yellow-600">-- kW</p>
+                </div>
+                <div class="text-center">
+                    <p class="text-xs font-medium text-green-700">Eigenverbrauch</p>
+                    <p id="solar-selfuse" class="text-xl font-bold text-green-600">-- kW</p>
+                </div>
+                <div class="text-center">
+                    <p class="text-xs font-medium text-blue-700">Netzeinspeisung</p>
+                    <p id="solar-export" class="text-xl font-bold text-blue-600">-- kW</p>
+                </div>
+                <div class="text-center">
+                    <p class="text-xs font-medium text-emerald-700">Solaranteil</p>
+                    <p id="solar-share" class="text-xl font-bold text-emerald-600">-- %</p>
+                    <div class="w-full bg-gray-200 rounded-full h-2 mt-1">
+                        <div id="solar-share-bar" class="bg-emerald-500 h-2 rounded-full transition-all" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Live Cards -->
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             <!-- Aktuelle Leistung -->
@@ -71,6 +96,7 @@
                 </div>
                 <p id="today-consumption" class="text-3xl font-bold text-gray-900">-- kWh</p>
                 <p id="today-cost" class="text-xs text-gray-400 mt-1">Kosten: --</p>
+                <p id="today-solar-split" class="text-xs text-green-600 mt-0.5 hidden"></p>
             </div>
 
             <!-- Spannung -->
@@ -129,7 +155,12 @@
         <div class="bg-white rounded-xl shadow-md p-5 mb-6">
             <div class="flex items-center justify-between mb-4">
                 <h3 class="text-sm font-semibold text-gray-700">Tagesverbrauch</h3>
-                <span id="consumption-period" class="text-xs text-gray-400">Letzte 30 Tage</span>
+                <div class="flex space-x-1">
+                    <button onclick="setConsumptionPeriod('week')" id="cbtn-week" class="px-3 py-1 text-xs rounded-md text-gray-500 hover:bg-gray-100">Woche</button>
+                    <button onclick="setConsumptionPeriod('month')" id="cbtn-month" class="px-3 py-1 text-xs rounded-md bg-blue-100 text-blue-700 font-medium">Monat</button>
+                    <button onclick="setConsumptionPeriod('quarter')" id="cbtn-quarter" class="px-3 py-1 text-xs rounded-md text-gray-500 hover:bg-gray-100">Quartal</button>
+                    <button onclick="setConsumptionPeriod('year')" id="cbtn-year" class="px-3 py-1 text-xs rounded-md text-gray-500 hover:bg-gray-100">Jahr</button>
+                </div>
             </div>
             <div class="relative" style="height: 250px;">
                 <canvas id="consumption-chart"></canvas>
@@ -174,6 +205,7 @@
     let consumptionChart = null;
     let pollTimer = null;
     let currentUser = null;
+    let solarData = { production: 0, selfuse: 0, export: 0, share: 0 };
 
     function isTechnik(user) {
         return user?.groups?.some(g => g.toLowerCase().includes('technik'));
@@ -297,6 +329,7 @@
             data: {
                 labels: [],
                 datasets: [
+                    { label: 'Solar', data: [], backgroundColor: '#22c55e', borderRadius: 3 },
                     { label: 'Netzbezug', data: [], backgroundColor: '#3b82f6', borderRadius: 3 },
                 ]
             },
@@ -318,9 +351,17 @@
     async function pollLive() {
         if (!currentMeter) return;
         try {
-            const res = await fetch(`${API}/live/${currentMeter}`);
-            if (!res.ok) throw new Error('No data');
-            const d = await res.json();
+            // Fetch selected meter + solar reference meters in parallel
+            const [meterRes, liveAllRes] = await Promise.all([
+                fetch(`${API}/live/${currentMeter}`),
+                fetch(`${API}/live`),
+            ]);
+            if (!meterRes.ok) throw new Error('No data');
+            const d = await meterRes.json();
+            const allLive = await liveAllRes.json();
+
+            // Calculate solar share from haupt-r9 and produktion meters
+            updateSolarOverview(allLive);
             updateLiveCards(d);
             updateDetailTable(d);
         } catch (err) {
@@ -328,12 +369,69 @@
         }
     }
 
+    function updateSolarOverview(allLive) {
+        const haupt = allLive['haupt-r9'];
+        const prod = allLive['produktion'];
+        if (!haupt || !prod) return;
+
+        // Produktion is negative when generating → make positive
+        const solarProd = Math.abs(prod.power_w);
+        // Haupt: negative = exporting to grid, positive = importing from grid
+        const netzExport = Math.max(0, -haupt.power_w);
+        const netzImport = Math.max(0, haupt.power_w);
+        const eigenverbrauch = solarProd - netzExport;
+        const totalConsumption = eigenverbrauch + netzImport;
+        const sharePercent = totalConsumption > 0 ? (eigenverbrauch / totalConsumption) * 100 : 0;
+
+        solarData = {
+            production: solarProd,
+            selfuse: Math.max(0, eigenverbrauch),
+            export: netzExport,
+            share: Math.min(100, Math.max(0, sharePercent)),
+        };
+
+        document.getElementById('solar-production').textContent = `${(solarProd / 1000).toFixed(1)} kW`;
+        document.getElementById('solar-selfuse').textContent = `${(Math.max(0, eigenverbrauch) / 1000).toFixed(1)} kW`;
+        document.getElementById('solar-export').textContent = `${(netzExport / 1000).toFixed(1)} kW`;
+        document.getElementById('solar-share').textContent = `${sharePercent.toFixed(0)} %`;
+        document.getElementById('solar-share-bar').style.width = `${Math.min(100, sharePercent)}%`;
+    }
+
     function updateLiveCards(d) {
         document.getElementById('live-indicator').querySelector('.pulse-dot').classList.replace('bg-red-500', 'bg-green-500');
 
-        document.getElementById('live-power').textContent = `${Math.round(d.power_w)} W`;
+        // Adapt labels for special meters
+        const isProd = currentMeter === 'produktion';
+        const isHaupt = currentMeter === 'haupt-r9';
+        const powerLabel = document.querySelector('#live-power').closest('.bg-white').querySelector('.text-sm.font-medium');
+        const consumLabel = document.querySelector('#today-consumption').closest('.bg-white').querySelector('.text-sm.font-medium');
+        if (isProd) {
+            powerLabel.textContent = 'Solarleistung';
+            consumLabel.textContent = 'Produktion heute';
+        } else if (isHaupt) {
+            powerLabel.textContent = 'Netzleistung';
+            consumLabel.textContent = 'Netzbezug heute';
+        } else {
+            powerLabel.textContent = 'Aktuelle Leistung';
+            consumLabel.textContent = 'Verbrauch heute';
+        }
+
+        const displayPower = isProd ? Math.abs(d.power_w) : d.power_w;
+        const powerEl = document.getElementById('live-power');
+        powerEl.textContent = `${Math.round(displayPower)} W`;
+        // Color: green for production (negative on haupt = export), red for high consumption
+        if (isHaupt && d.power_w < 0) {
+            powerEl.className = 'text-3xl font-bold text-green-600';
+        } else if (isProd) {
+            powerEl.className = 'text-3xl font-bold text-yellow-600';
+        } else {
+            powerEl.className = 'text-3xl font-bold text-gray-900';
+        }
+        const pl1 = isProd ? Math.abs(d.power_l1_w) : d.power_l1_w;
+        const pl2 = isProd ? Math.abs(d.power_l2_w) : d.power_l2_w;
+        const pl3 = isProd ? Math.abs(d.power_l3_w) : d.power_l3_w;
         document.getElementById('live-power-detail').textContent =
-            `L1: ${Math.round(d.power_l1_w)} W | L2: ${Math.round(d.power_l2_w)} W | L3: ${Math.round(d.power_l3_w)} W`;
+            `L1: ${Math.round(pl1)} W | L2: ${Math.round(pl2)} W | L3: ${Math.round(pl3)} W`;
 
         const avgV = ((d.voltage_l1_v + d.voltage_l2_v + d.voltage_l3_v) / 3).toFixed(1);
         document.getElementById('live-voltage').textContent = `${avgV} V`;
@@ -389,11 +487,31 @@
         try {
             const res = await fetch(`${API}/today/${currentMeter}`);
             const d = await res.json();
-            if (d.consumption_kwh != null) {
+            if (currentMeter === 'produktion') {
+                // Production meter: show export (= produced energy)
+                const prodKwh = parseFloat(d.export_kwh) || 0;
+                document.getElementById('today-consumption').textContent = `${prodKwh.toFixed(2)} kWh`;
+                document.getElementById('today-cost').textContent = `Solarproduktion heute`;
+                document.getElementById('today-solar-split').classList.add('hidden');
+            } else if (d.consumption_kwh != null) {
                 const kwh = parseFloat(d.consumption_kwh);
                 document.getElementById('today-consumption').textContent = `${kwh.toFixed(2)} kWh`;
-                const cost = kwh * TARIFE.netz.preis;
-                document.getElementById('today-cost').textContent = `Kosten: CHF ${cost.toFixed(2)} (Netztarif)`;
+
+                // Calculate cost with solar share
+                const isRefMeter = currentMeter === 'haupt-r9';
+                const share = isRefMeter ? 0 : solarData.share / 100;
+                const solarKwh = kwh * share;
+                const netzKwh = kwh - solarKwh;
+                const cost = (netzKwh * TARIFE.netz.preis) + (solarKwh * TARIFE.solar.preis);
+                document.getElementById('today-cost').textContent = `Kosten: CHF ${cost.toFixed(2)}`;
+
+                const splitEl = document.getElementById('today-solar-split');
+                if (share > 0) {
+                    splitEl.textContent = `Solar: ${solarKwh.toFixed(1)} kWh (${(share*100).toFixed(0)}%) | Netz: ${netzKwh.toFixed(1)} kWh`;
+                    splitEl.classList.remove('hidden');
+                } else {
+                    splitEl.classList.add('hidden');
+                }
             }
         } catch (err) {
             console.error('Today load error:', err);
@@ -453,13 +571,61 @@
     async function loadConsumptionChart() {
         if (!currentMeter) return;
         try {
-            const res = await fetch(`${API}/daily/${currentMeter}?days=30`);
-            const data = await res.json();
+            const daysMap = { week: 7, month: 30, quarter: 90, year: 365 };
+            const days = daysMap[consumptionPeriod] || 30;
+
+            // Load meter daily + haupt/produktion daily in parallel for solar split
+            const [meterRes, hauptRes, prodRes] = await Promise.all([
+                fetch(`${API}/daily/${currentMeter}?days=${days}`),
+                fetch(`${API}/daily/haupt-r9?days=${days}`),
+                fetch(`${API}/daily/produktion?days=${days}`),
+            ]);
+            const data = await meterRes.json();
+            const hauptData = await hauptRes.json();
+            const prodData = await prodRes.json();
+
+            // Build lookup maps for solar calculation per day
+            const hauptByDay = {};
+            hauptData.forEach(r => { hauptByDay[r.day] = r; });
+            const prodByDay = {};
+            prodData.forEach(r => { prodByDay[r.day] = r; });
 
             consumptionChart.data.labels = data.map(r =>
                 new Date(r.day).toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit' })
             );
-            consumptionChart.data.datasets[0].data = data.map(r => parseFloat(r.consumption_kwh) || 0);
+
+            const isRefMeter = currentMeter === 'haupt-r9' || currentMeter === 'produktion';
+            const solarArr = [];
+            const netzArr = [];
+
+            data.forEach(r => {
+                const consumption = parseFloat(r.consumption_kwh) || 0;
+                if (isRefMeter || consumption === 0) {
+                    solarArr.push(0);
+                    netzArr.push(consumption);
+                    return;
+                }
+                // Calculate solar share for this day
+                const h = hauptByDay[r.day];
+                const p = prodByDay[r.day];
+                if (h && p) {
+                    const dayProd = parseFloat(p.export_kwh) || 0; // Solar exported = production
+                    const dayNetExport = parseFloat(h.export_kwh) || 0;
+                    const dayNetImport = parseFloat(h.consumption_kwh) || 0;
+                    const eigenverbrauch = Math.max(0, dayProd - dayNetExport);
+                    const totalBuilding = eigenverbrauch + dayNetImport;
+                    const dayShare = totalBuilding > 0 ? eigenverbrauch / totalBuilding : 0;
+                    const solarKwh = consumption * dayShare;
+                    solarArr.push(parseFloat(solarKwh.toFixed(2)));
+                    netzArr.push(parseFloat((consumption - solarKwh).toFixed(2)));
+                } else {
+                    solarArr.push(0);
+                    netzArr.push(consumption);
+                }
+            });
+
+            consumptionChart.data.datasets[0].data = solarArr;
+            consumptionChart.data.datasets[1].data = netzArr;
             consumptionChart.update();
         } catch (err) {
             console.error('Consumption chart error:', err);
@@ -467,6 +633,8 @@
     }
 
     // ─── Period Switch ──────────────────────────────────────────────
+    let consumptionPeriod = 'month';
+
     function setPeriod(period) {
         currentPeriod = period;
         ['day', 'week', 'month'].forEach(p => {
@@ -478,6 +646,19 @@
             }
         });
         loadPowerChart();
+    }
+
+    function setConsumptionPeriod(period) {
+        consumptionPeriod = period;
+        ['week', 'month', 'quarter', 'year'].forEach(p => {
+            const btn = document.getElementById(`cbtn-${p}`);
+            if (p === period) {
+                btn.className = 'px-3 py-1 text-xs rounded-md bg-blue-100 text-blue-700 font-medium';
+            } else {
+                btn.className = 'px-3 py-1 text-xs rounded-md text-gray-500 hover:bg-gray-100';
+            }
+        });
+        loadConsumptionChart();
     }
 
     // ─── Refresh All ────────────────────────────────────────────────
