@@ -368,11 +368,25 @@ function adminOnly(req, res, next) {
 app.get('/api/auth/me', authMiddleware, async (req, res) => {
   const userId = req.user.user_id || req.user.id;
   const result = await pool.query(
-    'SELECT id, email, name, wohnung, stweg, role, phone, strasse, plz, ort, groups_json FROM users WHERE id = $1',
+    'SELECT id, email, name, wohnung, stweg, role, phone, strasse, plz, ort, groups_json, avatar_url FROM users WHERE id = $1',
     [userId]
   );
   const u = result.rows[0] || req.user;
   const groups = (() => { try { return JSON.parse(u.groups_json || '[]'); } catch { return []; } })();
+
+  // Fetch user's assigned meters
+  let meters = [];
+  try {
+    const meterResult = await pool.query(
+      `SELECT zc.zaehler_id, zc.bezeichnung, zc.typ, zc.standort, zc.einheit
+       FROM zaehler_config zc
+       WHERE zc.user_id = $1 AND zc.active = true
+       ORDER BY zc.bezeichnung`,
+      [userId]
+    );
+    meters = meterResult.rows;
+  } catch { /* table may not exist yet */ }
+
   res.json({
     user: {
       id: u.id,
@@ -385,8 +399,10 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
       strasse: u.strasse,
       plz: u.plz,
       ort: u.ort,
+      avatar_url: u.avatar_url,
       isAdmin: u.role === 'admin',
       groups: groups,
+      meters: meters,
     },
   });
 });
@@ -407,6 +423,41 @@ app.put('/api/auth/profile', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('Profile update error:', err);
     res.status(500).json({ error: 'Profil konnte nicht gespeichert werden' });
+  }
+});
+
+// Upload avatar (base64) and sync to Authentik
+app.put('/api/auth/avatar', authMiddleware, async (req, res) => {
+  const userId = req.user.user_id || req.user.id;
+  const { avatar } = req.body; // base64 data URL e.g. "data:image/png;base64,..."
+  if (!avatar) return res.status(400).json({ error: 'Kein Avatar-Bild' });
+
+  try {
+    // Store in DB
+    await pool.query('UPDATE users SET avatar_url = $1, updated_at = NOW() WHERE id = $2', [avatar, userId]);
+
+    // Sync to Authentik: get user email, find Authentik user, set avatar attribute
+    const userRow = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
+    if (userRow.rows[0] && AUTHENTIK_API_TOKEN) {
+      const email = userRow.rows[0].email;
+      try {
+        const searchData = await authentikAPI('GET', `/core/users/?search=${encodeURIComponent(email)}`);
+        const akUser = searchData.results?.find(u => u.email === email);
+        if (akUser) {
+          await authentikAPI('PATCH', `/core/users/${akUser.pk}/`, {
+            attributes: { ...akUser.attributes, avatar: avatar },
+          });
+        }
+      } catch (akErr) {
+        console.error('Authentik avatar sync error:', akErr.message);
+        // non-fatal, avatar is still saved locally
+      }
+    }
+
+    res.json({ success: true, avatar_url: avatar });
+  } catch (err) {
+    console.error('Avatar upload error:', err);
+    res.status(500).json({ error: 'Avatar konnte nicht gespeichert werden' });
   }
 });
 
@@ -1655,8 +1706,23 @@ async function initDB() {
       ALTER TABLE email_log ADD COLUMN IF NOT EXISTS failed_recipients TEXT;
       ALTER TABLE email_log ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'sent';
 
-      -- Migrate users if missing groups_json column
+      CREATE TABLE IF NOT EXISTS zaehler_config (
+        id SERIAL PRIMARY KEY,
+        zaehler_id VARCHAR(100) UNIQUE NOT NULL,
+        bezeichnung VARCHAR(255),
+        typ VARCHAR(100),
+        standort VARCHAR(255),
+        einheit VARCHAR(50) DEFAULT 'kWh',
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        stweg INTEGER,
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_zaehler_config_user ON zaehler_config(user_id);
+
+      -- Migrate users if missing columns
       ALTER TABLE users ADD COLUMN IF NOT EXISTS groups_json TEXT DEFAULT '[]';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
 
       -- Migrate email_verteiler if missing new columns
       ALTER TABLE email_verteiler ADD COLUMN IF NOT EXISTS reply_to VARCHAR(255) DEFAULT 'sender';
