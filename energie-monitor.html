@@ -249,8 +249,8 @@
             const dateParam = date ? `?date=${date}` : '';
             const res = await fetch(`${API}/tariffs/current${dateParam}`);
             const tariffs = await res.json();
-            const netz = tariffs.find(t => t.name.toLowerCase().includes('netz'));
-            const solar = tariffs.find(t => t.name.toLowerCase().includes('solar'));
+            const netz = tariffs.find(t => t.name === 'Netztarif');
+            const solar = tariffs.find(t => t.name === 'Solartarif');
             TARIFE.netz = netz ? parseFloat(netz.price_per_kwh) : 0;
             TARIFE.solar = solar ? parseFloat(solar.price_per_kwh) : 0;
         } catch (e) { console.warn('Tariffs not loaded:', e); }
