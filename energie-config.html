@@ -83,6 +83,18 @@
                         </select>
                     </div>
                     <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Kategorie</label>
+                        <select id="m-category" class="w-full border-gray-300 rounded-md shadow-sm text-sm">
+                            <option value="consumer">Verbraucher</option>
+                            <option value="grid">Netzübergabe</option>
+                            <option value="production">Erzeugung (Solar/PV)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Gruppe</label>
+                        <input type="text" id="m-group" class="w-full border-gray-300 rounded-md shadow-sm text-sm" placeholder="z.B. r9">
+                    </div>
+                    <div>
                         <label class="block text-xs font-medium text-gray-500 mb-1">Standort / Zuordnung</label>
                         <select id="m-location" class="w-full border-gray-300 rounded-md shadow-sm text-sm">
                             <option value="">— Keine Zuordnung —</option>
@@ -230,6 +242,8 @@
             document.getElementById('m-unit').value = meter.unit_id;
             document.getElementById('m-shelly-type').value = meter.shelly_type || 'plug';
             document.getElementById('m-location').value = meter.location || '';
+            document.getElementById('m-category').value = meter.category || 'consumer';
+            document.getElementById('m-group').value = meter.group_id || '';
         } else {
             editingMeterId = null;
             document.getElementById('meter-form-title').textContent = 'Neuer Zähler';
@@ -241,6 +255,8 @@
             document.getElementById('m-port').value = 502;
             document.getElementById('m-unit').value = 1;
             document.getElementById('m-location').value = '';
+            document.getElementById('m-category').value = 'consumer';
+            document.getElementById('m-group').value = '';
         }
         toggleMeterFields();
     }
@@ -260,6 +276,8 @@
             unit_id: parseInt(document.getElementById('m-unit').value) || 1,
             shelly_type: document.getElementById('m-type').value === 'shelly' ? document.getElementById('m-shelly-type').value : null,
             location: document.getElementById('m-location').value || null,
+            category: document.getElementById('m-category').value || 'consumer',
+            group_id: document.getElementById('m-group').value.trim() || null,
         };
         if (!data.id || !data.name || !data.host) return alert('ID, Name und IP sind Pflichtfelder');
 
@@ -325,8 +343,10 @@
         list.innerHTML = meters.map(m => `
             <div class="bg-white rounded-xl shadow-md p-5 flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div class="flex-1">
-                    <div class="flex items-center gap-2">
-                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${m.type === 'shelly' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}">${m.type === 'shelly' ? 'Shelly' : 'Modbus'}</span>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${m.type === 'shelly' ? 'bg-purple-100 text-purple-700' : m.type === 'smartfox' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}">${m.type === 'shelly' ? 'Shelly' : m.type === 'smartfox' ? 'SmartFox' : 'Modbus'}</span>
+                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${m.category === 'grid' ? 'bg-red-100 text-red-700' : m.category === 'production' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'}">${m.category === 'grid' ? 'Netzübergabe' : m.category === 'production' ? 'Erzeugung' : 'Verbraucher'}</span>
+                        ${m.group_id ? '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700">' + esc(m.group_id) + '</span>' : ''}
                         <span class="font-semibold text-gray-800">${esc(m.name)}</span>
                         <span class="text-xs text-gray-400">(${esc(m.id)})</span>
                         ${!m.active ? '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">Inaktiv</span>' : ''}

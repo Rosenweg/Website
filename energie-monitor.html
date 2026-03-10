@@ -232,6 +232,9 @@
     let solarData = { production: 0, selfuse: 0, export: 0, share: 0 };
     let selectedDate = null; // null = live/today, otherwise a Date object
     let isLive = true;
+    let allMeters = []; // all loaded meters with category/group_id
+    let gridMeterId = null; // dynamically resolved from category='grid'
+    let prodMeterId = null; // dynamically resolved from category='production'
 
     function isTechnik(user) {
         return user?.groups?.some(g => g.toLowerCase().includes('technik'));
@@ -249,6 +252,18 @@
         } catch (e) { console.warn('Tariffs not loaded:', e); }
     }
 
+    // Resolve reference meters (grid + production) for the current meter's group
+    function resolveRefMeters() {
+        const cur = allMeters.find(m => m.id === currentMeter);
+        const group = cur?.group_id;
+        gridMeterId = allMeters.find(m => m.category === 'grid' && m.group_id === group)?.id || null;
+        prodMeterId = allMeters.find(m => m.category === 'production' && m.group_id === group)?.id || null;
+    }
+
+    function isGrid(id) { return id && id === gridMeterId; }
+    function isProd(id) { return id && id === prodMeterId; }
+    function isRefMeter(id) { return isGrid(id) || isProd(id); }
+
     // ─── Init ───────────────────────────────────────────────────────
     async function init() {
         // Require authentication
@@ -265,32 +280,51 @@
         try {
             let meters;
             if (isTechnik(currentUser)) {
-                // Technik sieht alle Zähler
                 const res = await fetch(`${API}/meters`);
                 meters = await res.json();
             } else {
-                // Normale User sehen nur zugewiesene Zähler
                 const res = await fetch(`${API}/user/${encodeURIComponent(currentUser.email)}/meters`);
                 meters = await res.json();
             }
+            allMeters = meters;
+
             const select = document.getElementById('meter-select');
             select.innerHTML = '';
             if (meters.length === 0) {
                 select.innerHTML = '<option>Keine Zähler zugewiesen</option>';
                 return;
             }
+
+            // Group meters by group_id for optgroups
+            const groups = {};
             meters.forEach(m => {
-                const opt = document.createElement('option');
-                opt.value = m.id;
-                opt.textContent = m.name;
-                select.appendChild(opt);
+                const g = m.group_id || 'Andere';
+                if (!groups[g]) groups[g] = [];
+                groups[g].push(m);
             });
+            const groupKeys = Object.keys(groups);
+            const useGroups = groupKeys.length > 1;
+            groupKeys.forEach(gk => {
+                const container = useGroups ? document.createElement('optgroup') : select;
+                if (useGroups) { container.label = gk.toUpperCase(); select.appendChild(container); }
+                groups[gk].forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m.id;
+                    const catLabel = m.category === 'grid' ? ' [Netz]' : m.category === 'production' ? ' [Solar]' : '';
+                    opt.textContent = m.name + catLabel;
+                    container.appendChild(opt);
+                });
+            });
+
             currentMeter = meters[0].id;
             select.value = currentMeter;
             select.addEventListener('change', (e) => {
                 currentMeter = e.target.value;
+                resolveRefMeters();
                 refreshAll();
             });
+
+            resolveRefMeters();
         } catch (err) {
             const select = document.getElementById('meter-select');
             select.innerHTML = '<option>Verbindung fehlgeschlagen</option>';
@@ -422,7 +456,7 @@
             const d = await meterRes.json();
             const allLive = await liveAllRes.json();
 
-            // Calculate solar share from r9-haupt and r9-produktion meters
+            // Calculate solar share from grid and production reference meters
             updateSolarOverview(allLive);
             updateLiveCards(d);
             updateDetailTable(d);
@@ -432,8 +466,9 @@
     }
 
     function updateSolarOverview(allLive) {
-        const haupt = allLive['r9-haupt'];
-        const prod = allLive['r9-produktion'];
+        if (!gridMeterId || !prodMeterId) return;
+        const haupt = allLive[gridMeterId];
+        const prod = allLive[prodMeterId];
         if (!haupt || !prod) return;
 
         // Produktion is negative when generating → make positive
@@ -466,14 +501,14 @@
         document.getElementById('live-indicator').querySelector('.pulse-dot').classList.replace('bg-red-500', 'bg-green-500');
 
         // Adapt labels for special meters
-        const isProd = currentMeter === 'r9-produktion';
-        const isHaupt = currentMeter === 'r9-haupt';
+        const meterIsProd = isProd(currentMeter);
+        const meterIsGrid = isGrid(currentMeter);
         const powerLabel = document.querySelector('#live-power').closest('.bg-white').querySelector('.text-sm.font-medium');
         const consumLabel = document.querySelector('#today-consumption').closest('.bg-white').querySelector('.text-sm.font-medium');
-        if (isProd) {
+        if (meterIsProd) {
             powerLabel.textContent = 'Solarleistung';
             consumLabel.textContent = 'Produktion heute';
-        } else if (isHaupt) {
+        } else if (meterIsGrid) {
             powerLabel.textContent = 'Netzleistung';
             consumLabel.textContent = 'Netzbezug heute';
         } else {
@@ -481,20 +516,19 @@
             consumLabel.textContent = 'Verbrauch heute';
         }
 
-        const displayPower = isProd ? Math.abs(d.power_w) : d.power_w;
+        const displayPower = meterIsProd ? Math.abs(d.power_w) : d.power_w;
         const powerEl = document.getElementById('live-power');
         powerEl.textContent = `${Math.round(displayPower)} W`;
-        // Color: green for production (negative on haupt = export), red for high consumption
-        if (isHaupt && d.power_w < 0) {
+        if (meterIsGrid && d.power_w < 0) {
             powerEl.className = 'text-3xl font-bold text-green-600';
-        } else if (isProd) {
+        } else if (meterIsProd) {
             powerEl.className = 'text-3xl font-bold text-yellow-600';
         } else {
             powerEl.className = 'text-3xl font-bold text-gray-900';
         }
-        const pl1 = isProd ? Math.abs(d.power_l1_w) : d.power_l1_w;
-        const pl2 = isProd ? Math.abs(d.power_l2_w) : d.power_l2_w;
-        const pl3 = isProd ? Math.abs(d.power_l3_w) : d.power_l3_w;
+        const pl1 = meterIsProd ? Math.abs(d.power_l1_w) : d.power_l1_w;
+        const pl2 = meterIsProd ? Math.abs(d.power_l2_w) : d.power_l2_w;
+        const pl3 = meterIsProd ? Math.abs(d.power_l3_w) : d.power_l3_w;
         document.getElementById('live-power-detail').textContent =
             `L1: ${Math.round(pl1)} W | L2: ${Math.round(pl2)} W | L3: ${Math.round(pl3)} W`;
 
@@ -556,10 +590,8 @@
 
             // Update label
             const consumLabel = document.querySelector('#today-consumption').closest('.bg-white').querySelector('.text-sm.font-medium');
-            const isProd = currentMeter === 'r9-produktion';
-            const isHaupt = currentMeter === 'r9-haupt';
 
-            if (isProd) {
+            if (isProd(currentMeter)) {
                 const prodKwh = parseFloat(d.export_kwh) || 0;
                 document.getElementById('today-consumption').textContent = `${prodKwh.toFixed(2)} kWh`;
                 document.getElementById('today-cost').textContent = isLive ? 'Solarproduktion heute' : 'Solarproduktion';
@@ -569,8 +601,7 @@
                 document.getElementById('today-consumption').textContent = `${kwh.toFixed(2)} kWh`;
 
                 // Calculate cost with solar share
-                const isRef = isHaupt;
-                const share = isRef ? 0 : solarData.share / 100;
+                const share = isGrid(currentMeter) ? 0 : solarData.share / 100;
                 const solarKwh = kwh * share;
                 const netzKwh = kwh - solarKwh;
                 const cost = (netzKwh * TARIFE.netz) + (solarKwh * TARIFE.solar);
@@ -613,11 +644,11 @@
                 endpointFn = (id) => `${API}/hourly/${id}?from=${from}&to=${dayEnd.toISOString()}`;
             }
 
-            // Load selected meter + solar + haupt in parallel
+            // Load selected meter + reference meters (production + grid) in parallel
             const [res, solarRes, hauptRes] = await Promise.all([
                 fetch(endpointFn(currentMeter)),
-                fetch(endpointFn('r9-produktion')).catch(() => null),
-                fetch(endpointFn('r9-haupt')).catch(() => null),
+                prodMeterId ? fetch(endpointFn(prodMeterId)).catch(() => null) : null,
+                gridMeterId ? fetch(endpointFn(gridMeterId)).catch(() => null) : null,
             ]);
             const data = await res.json();
             const solarRaw = solarRes?.ok ? await solarRes.json() : [];
@@ -708,9 +739,8 @@
             }
 
             // Hide solar/netz split for reference meters (no split makes sense there)
-            const isRefMeter = currentMeter === 'r9-produktion' || currentMeter === 'r9-haupt';
-            powerChart.data.datasets[1].hidden = isRefMeter;
-            powerChart.data.datasets[2].hidden = isRefMeter;
+            powerChart.data.datasets[1].hidden = isRefMeter(currentMeter);
+            powerChart.data.datasets[2].hidden = isRefMeter(currentMeter);
 
             powerChart.update();
         } catch (err) {
@@ -726,15 +756,15 @@
             const days = daysMap[consumptionPeriod] || 30;
             const toParam = isLive ? '' : `&to=${selectedDate.toISOString().slice(0, 10)}`;
 
-            // Load meter daily + haupt/produktion daily in parallel for solar split
+            // Load meter daily + reference meters daily in parallel for solar split
             const [meterRes, hauptRes, prodRes] = await Promise.all([
                 fetch(`${API}/daily/${currentMeter}?days=${days}${toParam}`),
-                fetch(`${API}/daily/r9-haupt?days=${days}${toParam}`),
-                fetch(`${API}/daily/r9-produktion?days=${days}${toParam}`),
+                gridMeterId ? fetch(`${API}/daily/${gridMeterId}?days=${days}${toParam}`) : null,
+                prodMeterId ? fetch(`${API}/daily/${prodMeterId}?days=${days}${toParam}`) : null,
             ]);
             const data = await meterRes.json();
-            const hauptData = await hauptRes.json();
-            const prodData = await prodRes.json();
+            const hauptData = hauptRes ? await hauptRes.json() : [];
+            const prodData = prodRes ? await prodRes.json() : [];
 
             // Build lookup maps for solar calculation per day
             const hauptByDay = {};
@@ -746,13 +776,12 @@
                 new Date(r.day).toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit' })
             );
 
-            const isRefMeter = currentMeter === 'r9-haupt' || currentMeter === 'r9-produktion';
             const solarArr = [];
             const netzArr = [];
 
             data.forEach(r => {
                 const consumption = parseFloat(r.consumption_kwh) || 0;
-                if (isRefMeter || consumption === 0) {
+                if (isRefMeter(currentMeter) || consumption === 0) {
                     solarArr.push(0);
                     netzArr.push(consumption);
                     return;
@@ -913,9 +942,10 @@
         if (isLive || !selectedDate) return;
         const dateStr = selectedDate.toISOString().slice(0, 10);
         try {
+            if (!gridMeterId || !prodMeterId) return;
             const [hauptRes, prodRes] = await Promise.all([
-                fetch(`${API}/today/r9-haupt?date=${dateStr}`),
-                fetch(`${API}/today/r9-produktion?date=${dateStr}`),
+                fetch(`${API}/today/${gridMeterId}?date=${dateStr}`),
+                fetch(`${API}/today/${prodMeterId}?date=${dateStr}`),
             ]);
             const haupt = await hauptRes.json();
             const prod = await prodRes.json();

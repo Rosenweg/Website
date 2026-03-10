@@ -194,6 +194,13 @@ async function initDB() {
 
       -- Migration: add location column if missing
       ALTER TABLE meters ADD COLUMN IF NOT EXISTS location VARCHAR(255);
+      ALTER TABLE meters ADD COLUMN IF NOT EXISTS category VARCHAR(50) DEFAULT 'consumer';
+      ALTER TABLE meters ADD COLUMN IF NOT EXISTS group_id VARCHAR(100);
+
+      -- Auto-classify known meter types and groups
+      UPDATE meters SET category = 'grid' WHERE category = 'consumer' AND (id LIKE '%-haupt' OR name ILIKE '%haupt%' OR name ILIKE '%netzübergabe%');
+      UPDATE meters SET category = 'production' WHERE category = 'consumer' AND (id LIKE '%-produktion' OR name ILIKE '%produktion%' OR name ILIKE '%solar%' OR name ILIKE '%pv%');
+      UPDATE meters SET group_id = split_part(id, '-', 1) WHERE group_id IS NULL;
     `);
 
     // Seed meters from METERS env var only if DB has no meters yet
@@ -642,15 +649,15 @@ app.use(express.json());
 
 // --- Meter Management ---
 app.post('/api/energy/meters', async (req, res) => {
-  const { id, name, type, host, port, unit_id, shelly_type, location } = req.body;
+  const { id, name, type, host, port, unit_id, shelly_type, location, category, group_id } = req.body;
   if (!id || !name || !host) return res.status(400).json({ error: 'id, name, host required' });
   try {
     const result = await pool.query(
-      `INSERT INTO meters (id, name, type, host, port, unit_id, shelly_type, location)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       ON CONFLICT (id) DO UPDATE SET name=$2, type=$3, host=$4, port=$5, unit_id=$6, shelly_type=$7, location=$8
+      `INSERT INTO meters (id, name, type, host, port, unit_id, shelly_type, location, category, group_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT (id) DO UPDATE SET name=$2, type=$3, host=$4, port=$5, unit_id=$6, shelly_type=$7, location=$8, category=$9, group_id=$10
        RETURNING *`,
-      [id, name, type || 'modbus', host, port || 502, unit_id || 1, shelly_type || null, location || null]
+      [id, name, type || 'modbus', host, port || 502, unit_id || 1, shelly_type || null, location || null, category || 'consumer', group_id || null]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -659,13 +666,14 @@ app.post('/api/energy/meters', async (req, res) => {
 });
 
 app.put('/api/energy/meters/:id', async (req, res) => {
-  const { name, type, host, port, unit_id, shelly_type, location, active } = req.body;
+  const { name, type, host, port, unit_id, shelly_type, location, active, category, group_id } = req.body;
   try {
     const result = await pool.query(
       `UPDATE meters SET name=COALESCE($2,name), type=COALESCE($3,type), host=COALESCE($4,host),
-       port=COALESCE($5,port), unit_id=COALESCE($6,unit_id), shelly_type=$7, location=$8, active=COALESCE($9,active)
+       port=COALESCE($5,port), unit_id=COALESCE($6,unit_id), shelly_type=$7, location=$8,
+       active=COALESCE($9,active), category=COALESCE($10,category), group_id=COALESCE($11,group_id)
        WHERE id=$1 RETURNING *`,
-      [req.params.id, name, type, host, port, unit_id, shelly_type || null, location !== undefined ? location : null, active]
+      [req.params.id, name, type, host, port, unit_id, shelly_type || null, location !== undefined ? location : null, active, category, group_id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     res.json(result.rows[0]);
