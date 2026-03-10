@@ -9,6 +9,7 @@ env:
   REGISTRY: ghcr.io
   API_IMAGE: ghcr.io/rosenweg/rosenweg-api
   WEBSITE_IMAGE: ghcr.io/rosenweg/rosenweg-website
+  ENERGY_IMAGE: ghcr.io/rosenweg/energy-collector
 
 jobs:
   build-api:
@@ -58,3 +59,27 @@ jobs:
           tags: |
             ${{ env.WEBSITE_IMAGE }}:latest
             ${{ env.WEBSITE_IMAGE }}:${{ github.sha }}
+
+  build-energy-collector:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Energy Collector
+        uses: docker/build-push-action@v6
+        with:
+          context: ./energy-collector
+          push: true
+          tags: |
+            ${{ env.ENERGY_IMAGE }}:latest
+            ${{ env.ENERGY_IMAGE }}:${{ github.sha }}
