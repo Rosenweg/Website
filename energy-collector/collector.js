@@ -301,6 +301,20 @@ async function readShelly(meter) {
 }
 
 // ─── SmartFox Pro2 HTTP/XML Reader (Heizstab/Boiler) ────────────────
+const http = require('http');
+
+function smartFoxFetch(url, timeout = 10000) {
+  return new Promise((resolve, reject) => {
+    const req = http.get(url, { timeout }, (res) => {
+      let body = '';
+      res.on('data', (chunk) => body += chunk);
+      res.on('end', () => resolve(body));
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('SmartFox timeout')); });
+  });
+}
+
 async function readSmartFox(meter) {
   const url = `http://${meter.host}/values.xml`;
 
@@ -314,8 +328,7 @@ async function readSmartFox(meter) {
     energy_export_t1_kwh: 0, energy_export_t2_kwh: 0,
   };
 
-  const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-  const xml = await res.text();
+  const xml = await smartFoxFetch(url);
 
   // Parse XML value by id - extract numeric value from text content
   const parseVal = (id) => {
