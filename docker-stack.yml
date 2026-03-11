@@ -237,6 +237,36 @@ services:
       retries: 5
 
   # ============================================
+  # Netbird Gateway - Mueller VPN Routing
+  # ============================================
+  netbird-gateway:
+    image: netbirdio/netbird:latest
+    environment:
+      NB_SETUP_KEY: "${NB_SETUP_KEY}"
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_RESOURCE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv6.conf.all.disable_ipv6=0
+      - net.ipv6.conf.all.forwarding=1
+    volumes:
+      - netbird-config:/etc/netbird
+      - /dev/net/tun:/dev/net/tun
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname == docker-pve1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+
+  # ============================================
   # Shepherd - Auto-update Docker Swarm services
   # ============================================
   shepherd:
@@ -266,3 +296,4 @@ volumes:
   traefik-logs:
   rosenweg-pgdata:
   energy-pgdata:
+  netbird-config:
