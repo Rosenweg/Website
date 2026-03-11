@@ -161,9 +161,11 @@
             // Determine which STWEG the user manages (from their groups)
             const groups = user.groups || [];
             const isTechnik = groups.some(g => g.toLowerCase() === 'technik');
+            const isVerwaltung = groups.some(g => g.toLowerCase() === 'verwaltung');
+            const seesAll = isTechnik || isVerwaltung;
 
-            // Technik sees all – only set userStweg if NOT Technik
-            if (!isTechnik) {
+            // Technik/Verwaltung sees all – only set userStweg if not global admin
+            if (!seesAll) {
                 const ausschussGroup = groups.find(g => g.match(/stweg\d+-ausschuss/i));
                 if (ausschussGroup) {
                     const match = ausschussGroup.match(/stweg(\d+)/i);
@@ -171,8 +173,9 @@
                 }
             }
 
-            if (isTechnik) {
-                document.getElementById('page-subtitle').textContent = 'Alle Bewohner verwalten (Technik)';
+            if (seesAll) {
+                const label = isVerwaltung ? 'Verwaltung' : 'Technik';
+                document.getElementById('page-subtitle').textContent = `Alle Bewohner verwalten (${label})`;
                 document.getElementById('bewohner-title').textContent = 'Alle Bewohner';
             } else if (userStweg) {
                 document.getElementById('page-subtitle').textContent = `STWEG ${userStweg} – Eigentümer und Mieter verwalten`;
