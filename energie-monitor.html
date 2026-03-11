@@ -320,6 +320,10 @@
         return user?.groups?.some(g => g.toLowerCase().includes('technik'));
     }
 
+    function meterDisplayName(m) {
+        return m.group_id ? m.group_id + '-' + m.name : m.name;
+    }
+
     async function loadTariffs(date) {
         try {
             const dateParam = date ? `?date=${date}` : '';
@@ -392,7 +396,7 @@
                     const opt = document.createElement('option');
                     opt.value = m.id;
                     const catLabel = m.category === 'grid' ? ' [Netz]' : m.category === 'production' ? ' [Solar]' : '';
-                    opt.textContent = m.name + catLabel;
+                    opt.textContent = meterDisplayName(m) + catLabel;
                     container.appendChild(opt);
                 });
             });
@@ -1110,7 +1114,7 @@
                         ? '<span class="w-2 h-2 bg-green-500 rounded-full inline-block"></span>'
                         : '<span class="w-2 h-2 bg-red-400 rounded-full inline-block"></span>';
                     return `<tr class="border-b border-gray-50 hover:bg-gray-50 cursor-pointer" onclick="switchView('meter');document.getElementById('meter-select').value='${m.id}';currentMeter='${m.id}';resolveRefMeters();refreshAll();">
-                        <td class="py-2 px-3 flex items-center gap-2">${statusDot} ${m.name} ${catBadge}</td>
+                        <td class="py-2 px-3 flex items-center gap-2">${statusDot} ${meterDisplayName(m)} ${catBadge}</td>
                         <td class="py-2 px-3 text-right font-mono">${power}</td>
                         <td class="py-2 px-3 text-right font-mono">${consumption}</td>
                     </tr>`;
@@ -1174,7 +1178,7 @@
         container.innerHTML = consumers.map(m => `
             <label class="flex items-center gap-1 px-2 py-1 rounded border border-gray-200 hover:bg-gray-50 cursor-pointer">
                 <input type="checkbox" value="${m.id}" class="compare-cb rounded text-blue-600" onchange="toggleCompare(this)">
-                <span>${m.name}</span>
+                <span>${meterDisplayName(m)}</span>
             </label>
         `).join('');
         if (!compareChart) {
@@ -1229,7 +1233,7 @@
             compareChart.data.datasets = ids.map((id, i) => {
                 const meter = allMeters.find(m => m.id === id);
                 return {
-                    label: meter?.name || id,
+                    label: meter ? meterDisplayName(meter) : id,
                     data: dayLabels.map(d => meterMap[id]?.[d] || 0),
                     backgroundColor: COMPARE_COLORS[i % COMPARE_COLORS.length] + '88',
                     borderColor: COMPARE_COLORS[i % COMPARE_COLORS.length],
@@ -1250,7 +1254,7 @@
                 return `<div class="flex items-center gap-2">
                     <span class="w-3 h-3 rounded-sm flex-shrink-0" style="background:${color}"></span>
                     <div>
-                        <p class="font-medium text-gray-800">${meter?.name || id}</p>
+                        <p class="font-medium text-gray-800">${meter ? meterDisplayName(meter) : id}</p>
                         <p class="text-xs text-gray-500">Total: ${total.toFixed(1)} kWh | Ø ${avg.toFixed(1)} kWh/Tag</p>
                     </div>
                 </div>`;
