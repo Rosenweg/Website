@@ -90,7 +90,7 @@ const RosenwegNav = {
               <a href="${base}energie-monitor.html" data-perm="energie-monitor" class="${dropA('energie')} block px-4 py-2 text-sm">Energie-Monitor</a>
               <a href="${base}zaehler.html" data-perm="zaehler" class="${dropA('zaehler')} block px-4 py-2 text-sm">Zähler & Verbrauch</a>
               <a href="${base}email-verteiler.html" data-perm="email-verteiler" class="${dropA('verteiler')} block px-4 py-2 text-sm">E-Mail-Verteiler</a>
-              <a href="${base}bewohner-verwaltung.html" data-perm="bewohner-verwaltung" class="${dropA('bewohner')} block px-4 py-2 text-sm">Bewohner-Verwaltung</a>
+              <a href="${base}verwaltung.html" data-perm="bewohner-verwaltung" class="${dropA('verwaltung')} block px-4 py-2 text-sm">Verwaltung</a>
               <a href="${base}stweg3/pages/waschkueche-reservierung.html" class="${dropA('waschkueche')} block px-4 py-2 text-sm">Waschküche</a>
             </div>
           </div>
@@ -108,7 +108,6 @@ const RosenwegNav = {
             </div>
           </div>
 
-          <a href="${base}verwaltung.html" data-perm="verwaltung" class="${a('verwaltung')} px-3 py-2 text-sm transition">Verwaltung</a>
           <a href="${base}rechteverwaltung.html" data-perm="rechteverwaltung" class="${a('rechte')} px-3 py-2 text-sm transition">Rechte</a>
           <a href="${base}#kontakt" class="${a('kontakt')} px-3 py-2 text-sm transition">Kontakt</a>
         </div>
@@ -143,7 +142,7 @@ const RosenwegNav = {
         <a href="${base}energie-monitor.html" data-perm="energie-monitor" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Energie-Monitor</a>
         <a href="${base}zaehler.html" data-perm="zaehler" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Zähler & Verbrauch</a>
         <a href="${base}email-verteiler.html" data-perm="email-verteiler" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">E-Mail-Verteiler</a>
-        <a href="${base}bewohner-verwaltung.html" data-perm="bewohner-verwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Bewohner-Verwaltung</a>
+        <a href="${base}verwaltung.html" data-perm="bewohner-verwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Verwaltung</a>
         <a href="${base}stweg3/pages/waschkueche-reservierung.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Waschküche</a>
 
         <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Infos</div>
@@ -152,7 +151,6 @@ const RosenwegNav = {
         <a href="${base}#dokumente" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Dokumente</a>
 
         <hr class="my-2">
-        <a href="${base}verwaltung.html" data-perm="verwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Verwaltung</a>
         <a href="${base}rechteverwaltung.html" data-perm="rechteverwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Rechte</a>
         <a href="${base}#kontakt" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Kontakt</a>
 
