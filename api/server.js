@@ -258,7 +258,7 @@ app.get('/api/auth/callback', async (req, res) => {
     const email = (userInfo.email || userInfo.sub).toLowerCase();
     const name = userInfo.name || userInfo.preferred_username || email;
     const groups = userInfo.groups || [];
-    const isAdmin = groups.some(g => g.toLowerCase() === 'technik' || g.toLowerCase().endsWith('-ausschuss'));
+    const isAdmin = groups.some(g => g.toLowerCase() === 'technik');
 
     // Create/update user in DB
     const userResult = await pool.query(
@@ -277,6 +277,9 @@ app.get('/api/auth/callback', async (req, res) => {
       [sessionToken, user.id, new Date(Date.now() + 24 * 60 * 60 * 1000)]
     );
 
+    // Fetch permissions for this user
+    const permissions = await getUserPermissions(groups);
+
     // Redirect back to frontend with session token
     const userData = encodeURIComponent(JSON.stringify({
       token: sessionToken,
@@ -289,6 +292,7 @@ app.get('/api/auth/callback', async (req, res) => {
         stweg: user.stweg,
         isAdmin: user.role === 'admin',
         groups: groups,
+        permissions: permissions,
       },
     }));
     res.redirect(`${SITE_URL}${redirectPath}#auth=${userData}`);
@@ -330,7 +334,7 @@ async function validateAuthentikToken(token) {
        VALUES ($1, $2, $3)
        ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
        RETURNING id, email, name, wohnung, stweg, role`,
-      [email.toLowerCase(), name, (data.groups?.some(g => g.toLowerCase() === 'technik' || g.toLowerCase().endsWith('-ausschuss'))) ? 'admin' : 'bewohner']
+      [email.toLowerCase(), name, (data.groups?.some(g => g.toLowerCase() === 'technik')) ? 'admin' : 'bewohner']
     );
     const user = result.rows[0];
     user.isAdmin = user.role === 'admin';
@@ -353,7 +357,7 @@ async function authMiddleware(req, res, next) {
   try {
     // 1. Try local session token first
     const result = await pool.query(
-      `SELECT s.user_id, u.name, u.email, u.role, u.wohnung, u.stweg
+      `SELECT s.user_id, u.name, u.email, u.role, u.wohnung, u.stweg, u.groups_json
        FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.token = $1 AND s.expires_at > NOW()`,
       [token]
@@ -361,6 +365,7 @@ async function authMiddleware(req, res, next) {
     if (result.rows.length > 0) {
       req.user = result.rows[0];
       req.user.isAdmin = req.user.role === 'admin';
+      req.user.groups = (() => { try { return JSON.parse(req.user.groups_json || '[]'); } catch { return []; } })();
       return next();
     }
 
@@ -383,6 +388,114 @@ function adminOnly(req, res, next) {
   if (!req.user?.isAdmin) return res.status(403).json({ error: 'Admin-Rechte erforderlich' });
   next();
 }
+
+// ─── Permission System ──────────────────────────────────────────────
+const MANAGED_PAGES = [
+  { id: 'bewohner-verwaltung', label: 'Bewohner-Verwaltung' },
+  { id: 'energie-monitor', label: 'Energie-Monitor' },
+  { id: 'energie-config', label: 'Energie-Konfiguration' },
+  { id: 'email-verteiler', label: 'E-Mail-Verteiler' },
+  { id: 'zaehler', label: 'Zähler & Verbrauch' },
+  { id: 'waschkueche', label: 'Waschküche' },
+  { id: 'waschkueche-admin', label: 'Waschküche-Admin' },
+  { id: 'kontakte', label: 'Kontakte' },
+  { id: 'verwaltung', label: 'Verwaltung' },
+  { id: 'sms', label: 'SMS' },
+  { id: 'rechteverwaltung', label: 'Rechteverwaltung' },
+];
+
+const ACCESS_LEVELS = { none: 0, read: 1, write: 2 };
+
+function requirePermission(page, level = 'read') {
+  return async (req, res, next) => {
+    const groups = req.user.groups || (() => { try { return JSON.parse(req.user.groups_json || '[]'); } catch { return []; } })();
+    // Technik always has full access
+    if (groups.some(g => g.toLowerCase() === 'technik')) return next();
+
+    try {
+      const lowerGroups = groups.map(g => g.toLowerCase());
+      const result = await pool.query(
+        'SELECT access FROM permissions WHERE LOWER(group_name) = ANY($1) AND page = $2',
+        [lowerGroups, page]
+      );
+      const maxAccess = result.rows.reduce((max, r) => Math.max(max, ACCESS_LEVELS[r.access] || 0), 0);
+      if (maxAccess >= (ACCESS_LEVELS[level] || 0)) return next();
+    } catch (err) {
+      console.error('Permission check error:', err);
+    }
+    res.status(403).json({ error: 'Keine Berechtigung' });
+  };
+}
+
+async function getUserPermissions(groups) {
+  const permissions = {};
+  // Technik gets write on everything
+  if (groups.some(g => g.toLowerCase() === 'technik')) {
+    for (const p of MANAGED_PAGES) permissions[p.id] = 'write';
+    return permissions;
+  }
+  try {
+    const lowerGroups = groups.map(g => g.toLowerCase());
+    const result = await pool.query(
+      'SELECT page, access FROM permissions WHERE LOWER(group_name) = ANY($1)',
+      [lowerGroups]
+    );
+    for (const row of result.rows) {
+      const current = ACCESS_LEVELS[permissions[row.page]] || 0;
+      if ((ACCESS_LEVELS[row.access] || 0) > current) {
+        permissions[row.page] = row.access;
+      }
+    }
+  } catch (err) {
+    console.error('getUserPermissions error:', err);
+  }
+  return permissions;
+}
+
+// ─── Permission API ─────────────────────────────────────────────────
+app.get('/api/permissions/pages', authMiddleware, adminOnly, (req, res) => {
+  res.json({ pages: MANAGED_PAGES });
+});
+
+app.get('/api/permissions', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const result = await pool.query('SELECT group_name, page, access FROM permissions ORDER BY group_name, page');
+    res.json({ permissions: result.rows, pages: MANAGED_PAGES });
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler beim Laden der Berechtigungen' });
+  }
+});
+
+app.put('/api/permissions', authMiddleware, adminOnly, async (req, res) => {
+  const { permissions } = req.body; // [{ group_name, page, access }]
+  if (!Array.isArray(permissions)) return res.status(400).json({ error: 'permissions Array erforderlich' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const p of permissions) {
+      if (!p.group_name || !p.page || !['none', 'read', 'write'].includes(p.access)) continue;
+      if (p.access === 'none') {
+        await client.query('DELETE FROM permissions WHERE group_name = $1 AND page = $2', [p.group_name, p.page]);
+      } else {
+        await client.query(
+          `INSERT INTO permissions (group_name, page, access) VALUES ($1, $2, $3)
+           ON CONFLICT (group_name, page) DO UPDATE SET access = EXCLUDED.access`,
+          [p.group_name, p.page, p.access]
+        );
+      }
+    }
+    await client.query('COMMIT');
+    const result = await pool.query('SELECT group_name, page, access FROM permissions ORDER BY group_name, page');
+    res.json({ success: true, permissions: result.rows });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Permission update error:', err);
+    res.status(500).json({ error: 'Fehler beim Speichern' });
+  } finally {
+    client.release();
+  }
+});
 
 // Get current user from session token
 app.get('/api/auth/me', authMiddleware, async (req, res) => {
@@ -407,6 +520,9 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
     meters = meterResult.rows;
   } catch { /* table may not exist yet */ }
 
+  // Fetch user's effective permissions
+  const permissions = await getUserPermissions(groups);
+
   res.json({
     user: {
       id: u.id,
@@ -423,6 +539,7 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
       isAdmin: u.role === 'admin',
       groups: groups,
       meters: meters,
+      permissions: permissions,
     },
   });
 });
@@ -2048,7 +2165,7 @@ async function authentikAPI(method, path, body = null) {
 }
 
 // GET /api/admin/users - List all users
-app.get('/api/admin/users', authMiddleware, adminOnly, async (req, res) => {
+app.get('/api/admin/users', authMiddleware, requirePermission('bewohner-verwaltung', 'read'), async (req, res) => {
   try {
     const data = await authentikAPI('GET', '/core/users/?page_size=500');
     res.json(data);
@@ -2059,7 +2176,7 @@ app.get('/api/admin/users', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // POST /api/admin/users - Create user
-app.post('/api/admin/users', authMiddleware, adminOnly, async (req, res) => {
+app.post('/api/admin/users', authMiddleware, requirePermission('bewohner-verwaltung', 'write'), async (req, res) => {
   try {
     const { username, name, email, password, groups } = req.body;
     const user = await authentikAPI('POST', '/core/users/', {
@@ -2081,7 +2198,7 @@ app.post('/api/admin/users', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // GET /api/admin/users/:pk - Get single user
-app.get('/api/admin/users/:pk', authMiddleware, adminOnly, async (req, res) => {
+app.get('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verwaltung', 'read'), async (req, res) => {
   try {
     const data = await authentikAPI('GET', `/core/users/${req.params.pk}/`);
     res.json(data);
@@ -2092,7 +2209,7 @@ app.get('/api/admin/users/:pk', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // PUT /api/admin/users/:pk - Update user
-app.put('/api/admin/users/:pk', authMiddleware, adminOnly, async (req, res) => {
+app.put('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verwaltung', 'write'), async (req, res) => {
   try {
     const { name, email, is_active, groups } = req.body;
     const userPk = parseInt(req.params.pk);
@@ -2122,7 +2239,7 @@ app.put('/api/admin/users/:pk', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // DELETE /api/admin/users/:pk - Delete/deactivate user
-app.delete('/api/admin/users/:pk', authMiddleware, adminOnly, async (req, res) => {
+app.delete('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verwaltung', 'write'), async (req, res) => {
   try {
     await authentikAPI('DELETE', `/core/users/${req.params.pk}/`);
     res.json({ success: true });
@@ -2133,7 +2250,7 @@ app.delete('/api/admin/users/:pk', authMiddleware, adminOnly, async (req, res) =
 });
 
 // GET /api/admin/groups - List all groups
-app.get('/api/admin/groups', authMiddleware, adminOnly, async (req, res) => {
+app.get('/api/admin/groups', authMiddleware, requirePermission('bewohner-verwaltung', 'read'), async (req, res) => {
   try {
     const data = await authentikAPI('GET', '/core/groups/?page_size=500');
     res.json(data);
@@ -2144,7 +2261,7 @@ app.get('/api/admin/groups', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // PUT /api/admin/groups/:pk/add_user - Add user to group
-app.put('/api/admin/groups/:pk/add_user', authMiddleware, adminOnly, async (req, res) => {
+app.put('/api/admin/groups/:pk/add_user', authMiddleware, requirePermission('bewohner-verwaltung', 'write'), async (req, res) => {
   try {
     const data = await authentikAPI('POST', `/core/groups/${req.params.pk}/add_user/`, { pk: req.body.pk });
     res.json(data);
@@ -2155,7 +2272,7 @@ app.put('/api/admin/groups/:pk/add_user', authMiddleware, adminOnly, async (req,
 });
 
 // PUT /api/admin/groups/:pk/remove_user - Remove user from group
-app.put('/api/admin/groups/:pk/remove_user', authMiddleware, adminOnly, async (req, res) => {
+app.put('/api/admin/groups/:pk/remove_user', authMiddleware, requirePermission('bewohner-verwaltung', 'write'), async (req, res) => {
   try {
     const data = await authentikAPI('POST', `/core/groups/${req.params.pk}/remove_user/`, { pk: req.body.pk });
     res.json(data);
@@ -2404,6 +2521,14 @@ async function initDB() {
       -- Ensure duration_minutes column exists on wasch_sessions
       ALTER TABLE wasch_sessions ADD COLUMN IF NOT EXISTS duration_minutes INTEGER;
 
+      -- Permissions table
+      CREATE TABLE IF NOT EXISTS permissions (
+        id SERIAL PRIMARY KEY,
+        group_name VARCHAR(255) NOT NULL,
+        page VARCHAR(100) NOT NULL,
+        access VARCHAR(10) NOT NULL DEFAULT 'none' CHECK(access IN ('none', 'read', 'write')),
+        UNIQUE(group_name, page)
+      );
     `);
 
     // Create index after migration (separate query to avoid parse errors on old schema)
@@ -2435,6 +2560,22 @@ async function initDB() {
         ('unifi_access_token', '')
       `);
       console.log('Seeded default Waschküche settings');
+    }
+
+    // Seed default permissions if none exist
+    const permsExist = await client.query('SELECT COUNT(*) FROM permissions');
+    if (parseInt(permsExist.rows[0].count) === 0) {
+      await client.query(`
+        INSERT INTO permissions (group_name, page, access) VALUES
+        ('Verwaltung', 'bewohner-verwaltung', 'write'),
+        ('Verwaltung', 'energie-monitor', 'read'),
+        ('Verwaltung', 'email-verteiler', 'read'),
+        ('Verwaltung', 'zaehler', 'read'),
+        ('Verwaltung', 'kontakte', 'read'),
+        ('Verwaltung', 'verwaltung', 'read')
+        ON CONFLICT DO NOTHING
+      `);
+      console.log('Seeded default permissions');
     }
 
     console.log('Database schema initialized');
