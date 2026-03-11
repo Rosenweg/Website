@@ -153,15 +153,15 @@
                 return;
             }
 
-            if (!user.isAdmin) {
-                document.getElementById('no-permission').classList.remove('hidden');
-                return;
-            }
-
             // Determine which STWEG the user manages (from their groups)
             const groups = user.groups || [];
             const isTechnik = groups.some(g => g.toLowerCase() === 'technik');
             const isVerwaltung = groups.some(g => g.toLowerCase() === 'verwaltung');
+
+            if (!user.isAdmin && !isVerwaltung) {
+                document.getElementById('no-permission').classList.remove('hidden');
+                return;
+            }
             const seesAll = isTechnik || isVerwaltung;
 
             // Technik/Verwaltung sees all – only set userStweg if not global admin
