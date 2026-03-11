@@ -5,6 +5,18 @@ const nodemailer = require('nodemailer');
 const { simpleParser } = require('mailparser');
 const crypto = require('crypto');
 
+// STWEG group mapping (mirrors site-config.json groups)
+const STWEG_GROUPS = {
+  1: { bewohner: 'stweg1-bewohner', eigentuemer: 'stweg1-eigentuemer', ausschuss: 'stweg1-ausschuss' },
+  2: { bewohner: 'stweg2-bewohner', eigentuemer: 'stweg2-eigentuemer', ausschuss: 'stweg2-ausschuss' },
+  3: { bewohner: 'r9-bewohner', eigentuemer: 'r9-eigentuemer', ausschuss: 'stweg3-ausschuss' },
+  4: { bewohner: 'stweg4-bewohner', eigentuemer: 'stweg4-eigentuemer', ausschuss: 'stweg4-ausschuss' },
+  5: { bewohner: 'stweg5-bewohner', eigentuemer: 'stweg5-eigentuemer', ausschuss: 'stweg5-ausschuss' },
+  6: { bewohner: 'r1-bewohner', eigentuemer: 'r1-eigentuemer', ausschuss: 'stweg6-ausschuss' },
+  7: { bewohner: 'stweg7-bewohner', eigentuemer: 'stweg7-eigentuemer', ausschuss: 'stweg7-ausschuss' },
+  8: { ausschuss: 'stweg8-ausschuss' },
+};
+
 const app = express();
 
 // Raw body parser for email inbound (must be before json parser for this route)
@@ -340,6 +352,7 @@ async function validateAuthentikToken(token) {
     user.isAdmin = user.role === 'admin';
     user.user_id = user.id;
     user.auth_source = 'authentik';
+    user.groups = data.groups || [];
 
     tokenCache.set(token, { user, time: Date.now() });
     return user;
@@ -1927,6 +1940,147 @@ app.post('/api/email/inbound', async (req, res) => {
   } catch (err) {
     console.error('Email inbound error:', err);
     res.status(500).json({ error: `Email-Verarbeitung fehlgeschlagen: ${err.message}` });
+  }
+});
+
+// ─── STWEG Kontakte ─────────────────────────────────────────────────
+
+// Cache for kontakte data (users + groups from Authentik)
+let _kontakteCache = null;
+let _kontakteCacheTime = 0;
+const KONTAKTE_CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+
+async function getKontakteData() {
+  const now = Date.now();
+  if (_kontakteCache && now - _kontakteCacheTime < KONTAKTE_CACHE_TTL) {
+    return _kontakteCache;
+  }
+  const [groupsData, usersData] = await Promise.all([
+    authentikAPI('GET', '/core/groups/?page_size=500'),
+    authentikAPI('GET', '/core/users/?page_size=500'),
+  ]);
+  _kontakteCache = {
+    groups: groupsData.results || groupsData,
+    users: (usersData.results || usersData).filter(u => u.is_active),
+  };
+  _kontakteCacheTime = now;
+  return _kontakteCache;
+}
+
+// Resolve all descendant group PKs for a given group name
+function resolveDescendantPks(groupName, allGroups) {
+  const target = allGroups.find(g => g.name.toLowerCase() === groupName.toLowerCase());
+  if (!target) return new Set();
+  const pks = new Set([target.pk]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const g of allGroups) {
+      if (g.parent && pks.has(g.parent) && !pks.has(g.pk)) {
+        pks.add(g.pk);
+        changed = true;
+      }
+    }
+  }
+  return pks;
+}
+
+// Get users in a set of group PKs
+function getUsersInGroups(groupPks, allUsers) {
+  return allUsers.filter(u => {
+    const userPks = u.groups_obj ? u.groups_obj.map(g => g.pk) : (u.groups || []);
+    return userPks.some(pk => groupPks.has(pk));
+  });
+}
+
+// Natural sort for wohnung (EG.1, EG.2, 1OG.1, 1OG.2, 2OG.1, ...)
+function wohnungSort(a, b) {
+  const order = { 'ug': 0, 'eg': 1, '1og': 2, '2og': 3, '3og': 4, 'dg': 5 };
+  const parseW = (w) => {
+    if (!w) return { floor: 99, num: 99 };
+    const m = w.toLowerCase().match(/^(\d*[a-z]+)\.?(\d+)?$/);
+    if (!m) return { floor: 99, num: 99 };
+    return { floor: order[m[1]] ?? 99, num: parseInt(m[2]) || 0 };
+  };
+  const pa = parseW(a), pb = parseW(b);
+  return pa.floor - pb.floor || pa.num - pb.num;
+}
+
+app.get('/api/stweg/:nr/kontakte', authMiddleware, async (req, res) => {
+  try {
+    const nr = parseInt(req.params.nr);
+    const stwegGroups = STWEG_GROUPS[nr];
+    if (!stwegGroups) return res.status(404).json({ error: 'STWEG nicht gefunden' });
+
+    // Check access: user must be in one of the STWEG's groups or Technik
+    const userGroups = (req.user.groups || []).map(g => g.toLowerCase());
+    const allUserGroups = await resolveAncestorGroups(req.user.groups || []);
+    const accessGroups = Object.values(stwegGroups).map(g => g.toLowerCase());
+    const hasAccess = allUserGroups.some(g => g === 'technik') ||
+                      allUserGroups.some(g => accessGroups.includes(g));
+    if (!hasAccess) return res.status(403).json({ error: 'Kein Zugriff auf diese STWEG' });
+
+    const { groups: allGroups, users: allUsers } = await getKontakteData();
+
+    // Resolve group PKs (including child groups)
+    const bewohnerPks = stwegGroups.bewohner ? resolveDescendantPks(stwegGroups.bewohner, allGroups) : new Set();
+    const eigentuemerPks = stwegGroups.eigentuemer ? resolveDescendantPks(stwegGroups.eigentuemer, allGroups) : new Set();
+    const ausschussPks = stwegGroups.ausschuss ? resolveDescendantPks(stwegGroups.ausschuss, allGroups) : new Set();
+
+    // Get all relevant users (union of all groups)
+    const allPks = new Set([...bewohnerPks, ...eigentuemerPks, ...ausschussPks]);
+    const relevantUsers = getUsersInGroups(allPks, allUsers);
+
+    // Build contact list grouped by wohnung
+    const wohnungen = {};
+    const ausschuss = [];
+
+    for (const u of relevantUsers) {
+      const userPks = u.groups_obj ? u.groups_obj.map(g => g.pk) : (u.groups || []);
+      const isEigentuemer = userPks.some(pk => eigentuemerPks.has(pk));
+      const isBewohner = userPks.some(pk => bewohnerPks.has(pk));
+      const isAusschuss = userPks.some(pk => ausschussPks.has(pk));
+
+      const attrs = u.attributes || {};
+      const person = {
+        name: u.name,
+        email: u.email,
+        telefon: attrs.telefon || null,
+        wohnung: attrs.wohnung || null,
+        rolle: isEigentuemer ? 'eigentuemer' : 'mieter',
+      };
+
+      if (isAusschuss) {
+        ausschuss.push({ ...person, funktion: attrs.funktion || 'Vertreter' });
+      }
+
+      if (person.wohnung) {
+        if (!wohnungen[person.wohnung]) wohnungen[person.wohnung] = [];
+        wohnungen[person.wohnung].push(person);
+      }
+    }
+
+    // Sort wohnungen and build response
+    const sortedWohnungen = Object.keys(wohnungen)
+      .sort(wohnungSort)
+      .map(w => ({
+        bezeichnung: w,
+        bewohner: wohnungen[w].sort((a, b) => {
+          // Eigentuemer first
+          if (a.rolle === 'eigentuemer' && b.rolle !== 'eigentuemer') return -1;
+          if (a.rolle !== 'eigentuemer' && b.rolle === 'eigentuemer') return 1;
+          return 0;
+        }),
+      }));
+
+    res.json({
+      stweg: nr,
+      wohnungen: sortedWohnungen,
+      ausschuss: ausschuss,
+    });
+  } catch (err) {
+    console.error('Kontakte error:', err);
+    res.status(500).json({ error: 'Fehler beim Laden der Kontakte' });
   }
 });
 

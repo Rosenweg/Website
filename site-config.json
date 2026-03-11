@@ -13,56 +13,94 @@
       "name": "STWEG 1",
       "adressen": "Rosenweg 17/18",
       "typ": "Wohngebäude",
-      "email": "stweg1@rosenweg4303.ch"
+      "email": "stweg1@rosenweg4303.ch",
+      "groups": {
+        "bewohner": "stweg1-bewohner",
+        "eigentuemer": "stweg1-eigentuemer",
+        "ausschuss": "stweg1-ausschuss"
+      }
     },
     {
       "nr": 2,
       "name": "STWEG 2",
       "adressen": "Rosenweg 13/14/16",
       "typ": "Wohngebäude",
-      "email": "stweg2@rosenweg4303.ch"
+      "email": "stweg2@rosenweg4303.ch",
+      "groups": {
+        "bewohner": "stweg2-bewohner",
+        "eigentuemer": "stweg2-eigentuemer",
+        "ausschuss": "stweg2-ausschuss"
+      }
     },
     {
       "nr": 3,
       "name": "STWEG 3",
       "adressen": "Rosenweg 9",
       "typ": "Wohngebäude",
-      "email": "stweg3@rosenweg4303.ch"
+      "email": "stweg3@rosenweg4303.ch",
+      "groups": {
+        "bewohner": "r9-bewohner",
+        "eigentuemer": "r9-eigentuemer",
+        "ausschuss": "stweg3-ausschuss"
+      }
     },
     {
       "nr": 4,
       "name": "STWEG 4",
       "adressen": "Rosenweg 10/12",
       "typ": "Wohngebäude",
-      "email": "stweg4@rosenweg4303.ch"
+      "email": "stweg4@rosenweg4303.ch",
+      "groups": {
+        "bewohner": "stweg4-bewohner",
+        "eigentuemer": "stweg4-eigentuemer",
+        "ausschuss": "stweg4-ausschuss"
+      }
     },
     {
       "nr": 5,
       "name": "STWEG 5",
       "adressen": "Rosenweg 5/6/8",
       "typ": "Wohngebäude",
-      "email": "stweg5@rosenweg4303.ch"
+      "email": "stweg5@rosenweg4303.ch",
+      "groups": {
+        "bewohner": "stweg5-bewohner",
+        "eigentuemer": "stweg5-eigentuemer",
+        "ausschuss": "stweg5-ausschuss"
+      }
     },
     {
       "nr": 6,
       "name": "STWEG 6",
       "adressen": "Rosenweg 1",
       "typ": "Wohngebäude",
-      "email": "stweg6@rosenweg4303.ch"
+      "email": "stweg6@rosenweg4303.ch",
+      "groups": {
+        "bewohner": "r1-bewohner",
+        "eigentuemer": "r1-eigentuemer",
+        "ausschuss": "stweg6-ausschuss"
+      }
     },
     {
       "nr": 7,
       "name": "STWEG 7",
       "adressen": "Rosenweg 2/4",
       "typ": "Wohngebäude",
-      "email": "stweg7@rosenweg4303.ch"
+      "email": "stweg7@rosenweg4303.ch",
+      "groups": {
+        "bewohner": "stweg7-bewohner",
+        "eigentuemer": "stweg7-eigentuemer",
+        "ausschuss": "stweg7-ausschuss"
+      }
     },
     {
       "nr": 8,
       "name": "STWEG 8",
       "adressen": "Tiefgarage",
       "typ": "Tiefgarage",
-      "email": "stweg8@rosenweg4303.ch"
+      "email": "stweg8@rosenweg4303.ch",
+      "groups": {
+        "ausschuss": "stweg8-ausschuss"
+      }
     }
   ],
   "verwaltung": {
