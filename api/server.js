@@ -453,11 +453,11 @@ async function getUserPermissions(groups) {
 }
 
 // ─── Permission API ─────────────────────────────────────────────────
-app.get('/api/permissions/pages', authMiddleware, adminOnly, (req, res) => {
+app.get('/api/permissions/pages', authMiddleware, requirePermission('rechteverwaltung', 'read'), (req, res) => {
   res.json({ pages: MANAGED_PAGES });
 });
 
-app.get('/api/permissions', authMiddleware, adminOnly, async (req, res) => {
+app.get('/api/permissions', authMiddleware, requirePermission('rechteverwaltung', 'read'), async (req, res) => {
   try {
     const result = await pool.query('SELECT group_name, page, access FROM permissions ORDER BY group_name, page');
     res.json({ permissions: result.rows, pages: MANAGED_PAGES });
@@ -466,7 +466,7 @@ app.get('/api/permissions', authMiddleware, adminOnly, async (req, res) => {
   }
 });
 
-app.put('/api/permissions', authMiddleware, adminOnly, async (req, res) => {
+app.put('/api/permissions', authMiddleware, requirePermission('rechteverwaltung', 'write'), async (req, res) => {
   const { permissions } = req.body; // [{ group_name, page, access }]
   if (!Array.isArray(permissions)) return res.status(400).json({ error: 'permissions Array erforderlich' });
 

@@ -81,16 +81,16 @@ const RosenwegNav = {
           </div>
 
           <!-- Services Dropdown -->
-          <div class="relative nav-dropdown">
+          <div class="relative nav-dropdown nav-perm-group" data-perm-group="services">
             <button class="${a('services')} px-3 py-2 text-sm transition flex items-center gap-1">
               Services
               <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
             </button>
             <div class="nav-dropdown-menu hidden absolute left-0 mt-1 w-56 bg-white rounded-lg shadow-lg border py-1 z-50">
-              <a href="${base}energie-monitor.html" class="${dropA('energie')} block px-4 py-2 text-sm">Energie-Monitor</a>
-              <a href="${base}zaehler.html" class="${dropA('zaehler')} block px-4 py-2 text-sm">Zähler & Verbrauch</a>
-              <a href="${base}email-verteiler.html" class="${dropA('verteiler')} block px-4 py-2 text-sm">E-Mail-Verteiler</a>
-              <a href="${base}bewohner-verwaltung.html" class="${dropA('bewohner')} block px-4 py-2 text-sm">Bewohner-Verwaltung</a>
+              <a href="${base}energie-monitor.html" data-perm="energie-monitor" class="${dropA('energie')} block px-4 py-2 text-sm">Energie-Monitor</a>
+              <a href="${base}zaehler.html" data-perm="zaehler" class="${dropA('zaehler')} block px-4 py-2 text-sm">Zähler & Verbrauch</a>
+              <a href="${base}email-verteiler.html" data-perm="email-verteiler" class="${dropA('verteiler')} block px-4 py-2 text-sm">E-Mail-Verteiler</a>
+              <a href="${base}bewohner-verwaltung.html" data-perm="bewohner-verwaltung" class="${dropA('bewohner')} block px-4 py-2 text-sm">Bewohner-Verwaltung</a>
               <a href="${base}stweg3/pages/waschkueche-reservierung.html" class="${dropA('waschkueche')} block px-4 py-2 text-sm">Waschküche</a>
             </div>
           </div>
@@ -108,7 +108,8 @@ const RosenwegNav = {
             </div>
           </div>
 
-          <a href="${base}verwaltung.html" class="${a('verwaltung')} px-3 py-2 text-sm transition">Verwaltung</a>
+          <a href="${base}verwaltung.html" data-perm="verwaltung" class="${a('verwaltung')} px-3 py-2 text-sm transition">Verwaltung</a>
+          <a href="${base}rechteverwaltung.html" data-perm="rechteverwaltung" class="${a('rechte')} px-3 py-2 text-sm transition">Rechte</a>
           <a href="${base}#kontakt" class="${a('kontakt')} px-3 py-2 text-sm transition">Kontakt</a>
         </div>
 
@@ -138,11 +139,11 @@ const RosenwegNav = {
           ${mobileLinks}
         </div>
 
-        <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Services</div>
-        <a href="${base}energie-monitor.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Energie-Monitor</a>
-        <a href="${base}zaehler.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Zähler & Verbrauch</a>
-        <a href="${base}email-verteiler.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">E-Mail-Verteiler</a>
-        <a href="${base}bewohner-verwaltung.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Bewohner-Verwaltung</a>
+        <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase nav-perm-section" data-perm-section="services">Services</div>
+        <a href="${base}energie-monitor.html" data-perm="energie-monitor" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Energie-Monitor</a>
+        <a href="${base}zaehler.html" data-perm="zaehler" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Zähler & Verbrauch</a>
+        <a href="${base}email-verteiler.html" data-perm="email-verteiler" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">E-Mail-Verteiler</a>
+        <a href="${base}bewohner-verwaltung.html" data-perm="bewohner-verwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Bewohner-Verwaltung</a>
         <a href="${base}stweg3/pages/waschkueche-reservierung.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Waschküche</a>
 
         <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Infos</div>
@@ -151,7 +152,8 @@ const RosenwegNav = {
         <a href="${base}#dokumente" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Dokumente</a>
 
         <hr class="my-2">
-        <a href="${base}verwaltung.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Verwaltung</a>
+        <a href="${base}verwaltung.html" data-perm="verwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Verwaltung</a>
+        <a href="${base}rechteverwaltung.html" data-perm="rechteverwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Rechte</a>
         <a href="${base}#kontakt" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Kontakt</a>
 
         <div id="nav-mobile-auth" class="pt-2 border-t mt-2"></div>
@@ -191,6 +193,46 @@ const RosenwegNav = {
     });
   },
 
+  _applyPermissions(user) {
+    const hasPerm = (page) => {
+      if (!user) return false;
+      if (user.groups?.some(g => g.toLowerCase() === 'technik')) return true;
+      const perms = user.permissions || {};
+      return (perms[page] === 'read' || perms[page] === 'write');
+    };
+
+    // Hide individual links the user has no permission for
+    document.querySelectorAll('[data-perm]').forEach(el => {
+      const page = el.dataset.perm;
+      if (!hasPerm(page)) {
+        el.style.display = 'none';
+      }
+    });
+
+    // Hide "Services" dropdown entirely if no service links are visible
+    document.querySelectorAll('[data-perm-group="services"]').forEach(group => {
+      const visibleLinks = group.querySelectorAll('[data-perm]:not([style*="display: none"])');
+      const unpermLinks = group.querySelectorAll('a:not([data-perm])');
+      if (visibleLinks.length === 0 && unpermLinks.length === 0) {
+        group.style.display = 'none';
+      }
+    });
+
+    // Hide mobile "Services" section header if no service links visible
+    document.querySelectorAll('[data-perm-section="services"]').forEach(header => {
+      let next = header.nextElementSibling;
+      let anyVisible = false;
+      while (next && !next.classList?.contains('nav-perm-section') && next.tagName !== 'HR' && !next.textContent.includes('Infos')) {
+        if (next.tagName === 'A' && next.style.display !== 'none') {
+          anyVisible = true;
+          break;
+        }
+        next = next.nextElementSibling;
+      }
+      if (!anyVisible) header.style.display = 'none';
+    });
+  },
+
   _setupAuth(base) {
     const authDiv = document.getElementById('nav-auth');
     const loginBtn = document.getElementById('nav-login-btn');
@@ -204,12 +246,14 @@ const RosenwegNav = {
       loginBtn?.addEventListener('click', () => {
         window.location.href = `/api/auth/login?redirect=${encodeURIComponent(window.location.pathname)}`;
       });
+      // No auth available - hide all permission-gated links
+      this._applyPermissions(null);
       return;
     }
 
     AuthentikAuth.init({
       requireAuth: false,
-      onLogin(user) {
+      onLogin: (user) => {
         authDiv?.classList.remove('hidden');
         userLink.textContent = user.name || user.email;
         userLink.classList.remove('hidden');
@@ -221,6 +265,8 @@ const RosenwegNav = {
             <a href="${base}profil.html" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">${user.name || user.email}</a>
             <button onclick="AuthentikAuth.logout()" class="block w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded">Abmelden</button>`;
         }
+
+        this._applyPermissions(user);
       },
     }).then(user => {
       if (!user) {
@@ -230,6 +276,8 @@ const RosenwegNav = {
         if (mobileAuth) {
           mobileAuth.innerHTML = `<button onclick="AuthentikAuth.login()" class="block w-full text-left px-3 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded">Anmelden</button>`;
         }
+        // Not logged in - hide permission-gated links
+        this._applyPermissions(null);
       }
     });
   },
