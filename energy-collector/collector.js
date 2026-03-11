@@ -140,6 +140,14 @@ async function initDB() {
         UNIQUE(meter_id, user_email)
       );
 
+      CREATE TABLE IF NOT EXISTS meter_groups (
+        id SERIAL PRIMARY KEY,
+        meter_id VARCHAR(100) NOT NULL REFERENCES meters(id) ON DELETE CASCADE,
+        group_name VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(meter_id, group_name)
+      );
+
       CREATE TABLE IF NOT EXISTS readings (
         id BIGSERIAL PRIMARY KEY,
         meter_id VARCHAR(100) NOT NULL REFERENCES meters(id),
@@ -817,14 +825,53 @@ app.delete('/api/energy/meters/:meterId/users/:email', async (req, res) => {
   }
 });
 
-// Get meters for a specific user
+// ─── Group Assignments ───────────────────────────────────────────────
+app.get('/api/energy/meters/:meterId/groups', async (req, res) => {
+  const result = await pool.query(
+    'SELECT * FROM meter_groups WHERE meter_id = $1 ORDER BY group_name',
+    [req.params.meterId]
+  );
+  res.json(result.rows);
+});
+
+app.post('/api/energy/meters/:meterId/groups', async (req, res) => {
+  const { group_name } = req.body;
+  if (!group_name) return res.status(400).json({ error: 'group_name required' });
+  try {
+    const result = await pool.query(
+      `INSERT INTO meter_groups (meter_id, group_name)
+       VALUES ($1, $2)
+       ON CONFLICT (meter_id, group_name) DO NOTHING
+       RETURNING *`,
+      [req.params.meterId, group_name]
+    );
+    res.json(result.rows[0] || { meter_id: req.params.meterId, group_name });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/energy/meters/:meterId/groups/:groupName', async (req, res) => {
+  try {
+    await pool.query(
+      'DELETE FROM meter_groups WHERE meter_id = $1 AND group_name = $2',
+      [req.params.meterId, req.params.groupName]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get meters for a specific user (by email OR group membership)
 app.get('/api/energy/user/:email/meters', async (req, res) => {
   const result = await pool.query(
-    `SELECT m.*, mu.role FROM meters m
-     JOIN meter_users mu ON m.id = mu.meter_id
-     WHERE mu.user_email = $1 AND m.active = true
+    `SELECT DISTINCT m.*, COALESCE(mu.role, 'viewer') as role FROM meters m
+     LEFT JOIN meter_users mu ON m.id = mu.meter_id AND mu.user_email = $1
+     LEFT JOIN meter_groups mg ON m.id = mg.meter_id
+     WHERE m.active = true AND (mu.user_email IS NOT NULL OR mg.group_name = ANY($2::text[]))
      ORDER BY m.name`,
-    [req.params.email.toLowerCase()]
+    [req.params.email.toLowerCase(), req.query.groups ? req.query.groups.split(',') : []]
   );
   res.json(result.rows);
 });
