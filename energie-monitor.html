@@ -764,12 +764,29 @@
                 hauptPowerMap[t] = parseFloat(r[valKey] || r.power_w || r.avg_power_w) || 0;
             });
 
-            // Helper: find closest value in map
-            const findClosest = (map, t) => {
-                if (map[t] !== undefined) return map[t];
+            // Helper: find closest value in map using binary search on sorted keys
+            const makeIndex = (map) => {
+                const keys = Object.keys(map).map(Number).sort((a, b) => a - b);
+                return { keys, map };
+            };
+            const solarIndex = makeIndex(solarProdMap);
+            const hauptIndex = makeIndex(hauptPowerMap);
+            const findClosest = (index, t) => {
+                if (index.map[t] !== undefined) return index.map[t];
                 const tolerance = currentPeriod === 'day' ? 30000 : 3600000;
-                for (const [key, val] of Object.entries(map)) {
-                    if (Math.abs(key - t) < tolerance) return val;
+                const keys = index.keys;
+                // Binary search for closest key
+                let lo = 0, hi = keys.length - 1;
+                while (lo <= hi) {
+                    const mid = (lo + hi) >> 1;
+                    if (keys[mid] < t) lo = mid + 1;
+                    else hi = mid - 1;
+                }
+                // Check lo and lo-1
+                for (const idx of [lo, lo - 1]) {
+                    if (idx >= 0 && idx < keys.length && Math.abs(keys[idx] - t) < tolerance) {
+                        return index.map[keys[idx]];
+                    }
                 }
                 return null;
             };
@@ -780,8 +797,8 @@
             data.forEach((r, i) => {
                 const t = new Date(r[tsKey] || r.ts || r.hour).getTime();
                 const meterPower = values[i];
-                const prod = findClosest(solarProdMap, t);
-                const hauptW = findClosest(hauptPowerMap, t);
+                const prod = findClosest(solarIndex, t);
+                const hauptW = findClosest(hauptIndex, t);
 
                 if (prod === null || hauptW === null || meterPower <= 0) {
                     solarValues.push(null);
