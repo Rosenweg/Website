@@ -57,6 +57,25 @@ const AuthentikAuth = {
     return user?.isAdmin === true;
   },
 
+  /** Check if current user has permission for a page (read/write) */
+  hasPermission(page, level = 'read') {
+    const user = this.getUser();
+    if (!user) return false;
+    // Technik always has full access
+    if (user.groups?.some(g => g.toLowerCase() === 'technik')) return true;
+    const perms = user.permissions || {};
+    const levels = { none: 0, read: 1, write: 2 };
+    return (levels[perms[page]] || 0) >= (levels[level] || 0);
+  },
+
+  /** Get user's access level for a page (none/read/write) */
+  getPermission(page) {
+    const user = this.getUser();
+    if (!user) return 'none';
+    if (user.groups?.some(g => g.toLowerCase() === 'technik')) return 'write';
+    return user.permissions?.[page] || 'none';
+  },
+
   /** Logout - clear session and end Authentik session */
   logout(redirectTo) {
     localStorage.removeItem(this.SESSION_KEY);
