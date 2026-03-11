@@ -7,6 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/js/authentik-auth.js?v=2"></script>
     <script src="/js/site-config.js"></script>
+    <script src="/js/stweg-kontakte.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body {
@@ -23,134 +24,85 @@
     <!-- Header -->
     <section class="bg-gradient-to-r from-blue-600 to-blue-800 text-white py-12">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <h1 class="text-4xl font-bold mb-2">STWEG 6</h1>
-            <p id="stweg-adresse" class="text-xl opacity-90"></p>
-            <p id="stweg-typ" class="text-lg opacity-80 mt-2"></p>
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-4xl font-bold mb-2">STWEG 6</h1>
+                    <p id="stweg-adresse" class="text-xl opacity-90 mb-1"></p>
+                    <script>
+                    SiteConfig.load().then(() => {
+                        const s = SiteConfig.getStweg(6);
+                        if (s) {
+                            document.getElementById('stweg-adresse').textContent = s.adressen + ', 4303 Kaiseraugst';
+                            document.title = s.name + ' - ' + s.adressen + ' - STWEG-Kooperation Rosenweg';
+                        }
+                    });
+                    </script>
+                </div>
+                <div class="hidden md:block">
+                    <div class="bg-white bg-opacity-20 rounded-lg p-4 text-center">
+                        <div class="text-5xl font-bold">6</div>
+                        <div class="text-sm uppercase tracking-wide">STWEG</div>
+                    </div>
+                </div>
+            </div>
         </div>
     </section>
-    <script>
-    SiteConfig.load().then(() => {
-        const s = SiteConfig.getStweg(6);
-        if (s) {
-            document.getElementById('stweg-adresse').textContent = s.adressen + ', 4303 Kaiseraugst';
-            document.getElementById('stweg-typ').textContent = s.typ;
-            document.title = s.name + ' - ' + s.adressen + ' - STWEG-Kooperation Rosenweg';
-        }
-    });
-    </script>
 
-    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <!-- Info Box -->
-        <div class="bg-white rounded-lg shadow-lg p-8 mb-8">
-            <div class="flex items-center mb-6">
-                <div class="bg-blue-100 rounded-full p-3 mr-4">
-                    <svg class="h-8 w-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                </div>
-                <div>
-                    <h2 class="text-2xl font-bold text-gray-800">Seite noch nicht verfügbar</h2>
-                    <p class="text-sm text-gray-600">Diese STWEG hat noch keine eigene Informationsseite</p>
+    <!-- Verwaltung & Kontakte -->
+    <section class="py-12 bg-gray-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">Verwaltung & Kontakte</h2>
+
+            <div class="grid md:grid-cols-2 gap-6 mb-8">
+                <div class="bg-white p-6 rounded-lg shadow-md" id="hausverwaltung-card"></div>
+                <div class="bg-white p-6 rounded-lg shadow-md" id="ausschuss-card">
+                    <div class="animate-pulse">
+                        <div class="h-6 bg-gray-200 rounded w-3/4 mb-4"></div>
+                        <div class="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
+                        <div class="h-4 bg-gray-200 rounded w-2/3"></div>
+                    </div>
                 </div>
             </div>
 
-            <div class="bg-blue-50 border-l-4 border-blue-500 p-4 mb-6">
-                <p class="text-gray-700 mb-4">
-                    Die Informationsseite für STWEG 6 ist derzeit noch nicht eingerichtet.
-                </p>
-                <p class="text-gray-700">
-                    <strong>Möchten Sie eine eigene STWEG-Seite?</strong> Wenden Sie sich an Ihre Ausschussvertreter!
-                </p>
-            </div>
-
-            <!-- Ausschussvertreter -->
-            <div class="bg-gray-50 rounded-lg p-6">
-                <h3 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
-                    <svg class="h-6 w-6 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
-                    </svg>
-                    Ihre Ausschussvertreter
-                </h3>
-
-                <div class="bg-white p-4 rounded-lg border-2 border-blue-200 mb-6">
-                    <p class="text-sm text-blue-600 font-semibold mb-2">Ihre Ausschussvertreter</p>
-                    <p class="font-semibold text-gray-800 mb-2">Mehmet Peker • Jürgen Wirz</p>
-                    <p class="text-sm text-gray-600">
-                        <strong>E-Mail:</strong> <a href="mailto:stweg6@rosenweg4303.ch" class="text-blue-600 hover:underline">stweg6@rosenweg4303.ch</a>
-                    </p>
-                    <p class="text-xs text-gray-500 mt-2">
-                        💡 Diese E-Mail erreicht beide Vertreter
-                    </p>
-                </div>
-
-                <div class="text-center">
-                    <a href="../ausschuss.html" class="inline-flex items-center bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition">
-                        <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+            <div id="kontakte-section" class="hidden">
+                <div class="flex items-center justify-between mb-6">
+                    <h3 class="text-2xl font-bold text-gray-800">Kontaktliste</h3>
+                    <button onclick="window.print()" class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition text-sm flex items-center">
+                        <svg class="h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path>
                         </svg>
-                        Zu allen Ausschussvertretern
-                    </a>
+                        Drucken
+                    </button>
                 </div>
+                <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6 rounded">
+                    <p class="text-sm text-gray-700">
+                        <strong>Vertraulich:</strong> Diese Kontaktdaten sind ausschliesslich für den internen Gebrauch bestimmt
+                        und dürfen nicht an Dritte weitergegeben werden.
+                    </p>
+                </div>
+                <div id="kontakte-list" class="space-y-4"></div>
+            </div>
+
+            <div id="kontakte-login" class="hidden text-center py-8">
+                <p class="text-gray-600 mb-4">Melden Sie sich an, um die Kontaktliste einzusehen.</p>
+                <button id="kontakte-login-btn" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition">Anmelden</button>
             </div>
         </div>
+    </section>
 
-        <!-- Vorteile einer eigenen Seite -->
-        <div class="bg-white rounded-lg shadow-lg p-8">
-            <h3 class="text-xl font-semibold text-gray-800 mb-4">Vorteile einer eigenen STWEG-Seite</h3>
-            <div class="grid md:grid-cols-2 gap-4">
-                <div class="flex items-start">
-                    <svg class="h-6 w-6 text-green-500 mr-3 mt-1 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                    <div>
-                        <p class="font-semibold text-gray-800">Geschützte Kontaktliste</p>
-                        <p class="text-sm text-gray-600">Zugriff auf alle Kontaktdaten Ihrer Miteigentümer</p>
-                    </div>
-                </div>
-                <div class="flex items-start">
-                    <svg class="h-6 w-6 text-green-500 mr-3 mt-1 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                    <div>
-                        <p class="font-semibold text-gray-800">STWEG-Informationen</p>
-                        <p class="text-sm text-gray-600">Übersicht über Wohnungen und Besonderheiten</p>
-                    </div>
-                </div>
-                <div class="flex items-start">
-                    <svg class="h-6 w-6 text-green-500 mr-3 mt-1 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                    <div>
-                        <p class="font-semibold text-gray-800">Sichere Authentifizierung</p>
-                        <p class="text-sm text-gray-600">OTP-Code per E-Mail für Datenschutz</p>
-                    </div>
-                </div>
-                <div class="flex items-start">
-                    <svg class="h-6 w-6 text-green-500 mr-3 mt-1 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                    <div>
-                        <p class="font-semibold text-gray-800">Immer aktuell</p>
-                        <p class="text-sm text-gray-600">Zentrale Verwaltung durch Ausschussvertreter</p>
-                    </div>
-                </div>
-            </div>
+    <script>STWEGKontakte.init(6);</script>
 
-            <div class="mt-6 pt-6 border-t border-gray-200">
-                <p class="text-sm text-gray-600">
-                    <strong>Beispiel:</strong> Sehen Sie sich die
-                    <a href="../stweg3/" class="text-blue-600 hover:underline font-semibold">STWEG 3 Seite</a>
-                    als Beispiel an.
-                </p>
-            </div>
-        </div>
-    </div>
+    <style>
+        @media print {
+            nav, footer, button, #kontakte-login, .bg-yellow-50 { display: none; }
+            section { break-inside: avoid; }
+        }
+    </style>
 
-    <!-- Footer -->
     <footer class="bg-gray-800 text-white py-8 mt-12">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
             <p class="text-sm text-gray-400">
-                © 2025 STWEG 6 - Teil der STWEG-Kooperation Rosenweg
+                &copy; 2025 STWEG 6 - Teil der STWEG-Kooperation Rosenweg
             </p>
         </div>
     </footer>
