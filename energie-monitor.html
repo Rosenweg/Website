@@ -363,7 +363,8 @@
                 const res = await fetch(`${API}/meters`);
                 meters = await res.json();
             } else {
-                const res = await fetch(`${API}/user/${encodeURIComponent(currentUser.email)}/meters`);
+                const userGroups = (currentUser.groups || []).join(',');
+                const res = await fetch(`${API}/user/${encodeURIComponent(currentUser.email)}/meters?groups=${encodeURIComponent(userGroups)}`);
                 meters = await res.json();
             }
             allMeters = meters;
