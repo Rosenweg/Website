@@ -2578,6 +2578,14 @@ async function initDB() {
       console.log('Seeded default permissions');
     }
 
+    // Ensure Ausschuss groups have bewohner-verwaltung write access
+    await client.query(`
+      INSERT INTO permissions (group_name, page, access) VALUES
+      ('stweg3-ausschuss', 'bewohner-verwaltung', 'write'),
+      ('stweg6-ausschuss', 'bewohner-verwaltung', 'write')
+      ON CONFLICT (group_name, page) DO NOTHING
+    `);
+
     console.log('Database schema initialized');
   } finally {
     client.release();

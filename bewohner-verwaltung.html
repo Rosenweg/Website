@@ -138,6 +138,10 @@
         let allGroups = [];
         let currentUser = null;
         let userStweg = null;
+        let userGroupPrefix = null; // e.g. "r9-" for stweg3
+
+        // STWEG number → Rosenweg address number (for group prefix matching)
+        const STWEG_TO_ROSENWEG = { 1: [17,18], 2: [13,14,16], 3: [9], 4: [10,12], 5: [5,6,8], 6: [1], 7: [2,4] };
 
         window.addEventListener('DOMContentLoaded', async () => {
             const user = await AuthentikAuth.init({
@@ -171,7 +175,12 @@
                 const ausschussGroup = groups.find(g => g.match(/stweg\d+-ausschuss/i));
                 if (ausschussGroup) {
                     const match = ausschussGroup.match(/stweg(\d+)/i);
-                    if (match) userStweg = parseInt(match[1]);
+                    if (match) {
+                        userStweg = parseInt(match[1]);
+                        // Map STWEG number to Rosenweg address numbers for group prefix
+                        const rwNrs = STWEG_TO_ROSENWEG[userStweg] || [];
+                        userGroupPrefix = rwNrs.map(n => `r${n}-`);
+                    }
                 }
             }
 
@@ -228,12 +237,13 @@
 
             // Filter users for this STWEG if applicable
             let users = allUsers;
-            if (userStweg) {
-                const stwegGroupName = `r${userStweg}-`;
+            if (userStweg && userGroupPrefix) {
                 const stwegAusschuss = `stweg${userStweg}-ausschuss`;
                 users = allUsers.filter(u => {
                     const uGroups = (u.groups_obj || []).map(g => g.name.toLowerCase());
-                    return uGroups.some(g => g.startsWith(stwegGroupName) || g === stwegAusschuss);
+                    return uGroups.some(g =>
+                        userGroupPrefix.some(prefix => g.startsWith(prefix)) || g === stwegAusschuss
+                    );
                 });
             }
 
