@@ -17,7 +17,7 @@
 </head>
 <body class="bg-gray-50">
     <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
-    <script>RosenwegNav.init({ active: 'services' });</script>
+    <script>RosenwegNav.init({ active: 'rechte' });</script>
 
     <section class="bg-gradient-to-r from-purple-600 to-purple-800 text-white py-12">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -110,7 +110,7 @@
                 return;
             }
 
-            if (!user.isAdmin) {
+            if (!AuthentikAuth.hasPermission('rechteverwaltung', 'read')) {
                 document.getElementById('no-permission').classList.remove('hidden');
                 return;
             }
