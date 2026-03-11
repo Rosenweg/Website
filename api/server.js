@@ -2260,6 +2260,23 @@ app.get('/api/admin/groups', authMiddleware, requirePermission('bewohner-verwalt
   }
 });
 
+// GET /api/admin/groups/:pk - Get single group with members
+app.get('/api/admin/groups/:pk', authMiddleware, requirePermission('bewohner-verwaltung', 'read'), async (req, res) => {
+  try {
+    const data = await authentikAPI('GET', `/core/groups/${req.params.pk}/`);
+    // Resolve user details if group only has user PKs
+    if (data.users && data.users.length > 0 && typeof data.users[0] === 'number') {
+      const usersData = await authentikAPI('GET', '/core/users/?page_size=500');
+      const allUsers = usersData.results || usersData;
+      data.users = data.users.map(uid => allUsers.find(u => u.pk === uid)).filter(Boolean);
+    }
+    res.json(data);
+  } catch (err) {
+    console.error('Admin get group detail error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PUT /api/admin/groups/:pk/add_user - Add user to group
 app.put('/api/admin/groups/:pk/add_user', authMiddleware, requirePermission('bewohner-verwaltung', 'write'), async (req, res) => {
   try {

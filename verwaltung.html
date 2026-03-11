@@ -302,7 +302,7 @@
                 const parentName = g.parent ? (groupMap[g.parent]?.name || g.parent_name || '') : '';
 
                 let html = `
-                <div class="bg-white rounded-lg shadow-sm border hover:shadow-md transition cursor-pointer ${indent}" onclick="openGroupDetail(${id})">
+                <div class="bg-white rounded-lg shadow-sm border hover:shadow-md transition cursor-pointer ${indent}" onclick="openGroupDetail('${id}')">
                     <div class="px-4 py-3 flex items-center justify-between">
                         <div class="flex items-center gap-3">
                             <div class="w-8 h-8 rounded-lg ${g.is_superuser ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600'} flex items-center justify-center">
@@ -610,7 +610,7 @@
                                     <span class="text-sm font-medium text-gray-900">${esc(m.name || m.username)}</span>
                                     <span class="text-xs text-gray-500 ml-2">${esc(m.username)}</span>
                                 </div>
-                                <button onclick="removeUserFromGroup(${m.pk || m.id}, ${groupId})" class="text-red-400 hover:text-red-600 transition text-xs font-medium">Entfernen</button>
+                                <button onclick="removeUserFromGroup(${m.pk || m.id}, '${groupId}')" class="text-red-400 hover:text-red-600 transition text-xs font-medium">Entfernen</button>
                             </div>
                         `).join('') : '<p class="text-sm text-gray-400 py-2">Keine Mitglieder</p>'}
                     </div>
@@ -621,7 +621,7 @@
                             <option value="">-- Benutzer w&auml;hlen --</option>
                             ${nonMembers.map(u => `<option value="${u.pk || u.id}">${esc(u.name || u.username)} (${esc(u.username)})</option>`).join('')}
                         </select>
-                        <button onclick="addUserToGroup(${groupId})" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition font-medium">Hinzuf&uuml;gen</button>
+                        <button onclick="addUserToGroup('${groupId}')" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition font-medium">Hinzuf&uuml;gen</button>
                     </div>
                     <div id="group-detail-msg" class="hidden text-sm p-3 rounded-lg mt-3"></div>
                 </div>
