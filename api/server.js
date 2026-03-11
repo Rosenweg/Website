@@ -406,6 +406,51 @@ const MANAGED_PAGES = [
 
 const ACCESS_LEVELS = { none: 0, read: 1, write: 2 };
 
+// Resolve user's direct groups to include all ancestor groups via Authentik hierarchy
+// Caches the group hierarchy for 5 minutes
+let _groupHierarchyCache = null;
+let _groupHierarchyCacheTime = 0;
+const GROUP_HIERARCHY_TTL = 5 * 60 * 1000;
+
+async function resolveAncestorGroups(directGroupNames) {
+  // Fetch and cache group hierarchy from Authentik
+  const now = Date.now();
+  if (!_groupHierarchyCache || now - _groupHierarchyCacheTime > GROUP_HIERARCHY_TTL) {
+    try {
+      const data = await authentikAPI('GET', '/core/groups/?page_size=500');
+      const groups = data.results || data;
+      // Build name->parent_name lookup
+      const byPk = {};
+      for (const g of groups) byPk[g.pk] = g;
+      const parentNameOf = {};
+      for (const g of groups) {
+        if (g.parent && byPk[g.parent]) {
+          parentNameOf[g.name.toLowerCase()] = byPk[g.parent].name.toLowerCase();
+        }
+      }
+      _groupHierarchyCache = parentNameOf;
+      _groupHierarchyCacheTime = now;
+    } catch (err) {
+      console.error('Failed to fetch group hierarchy:', err.message);
+      // Fall back to direct groups only
+      return directGroupNames.map(g => g.toLowerCase());
+    }
+  }
+
+  // Walk up parent chain for each group
+  const result = new Set(directGroupNames.map(g => g.toLowerCase()));
+  for (const name of directGroupNames) {
+    let current = name.toLowerCase();
+    while (_groupHierarchyCache[current]) {
+      const parent = _groupHierarchyCache[current];
+      if (result.has(parent)) break;
+      result.add(parent);
+      current = parent;
+    }
+  }
+  return [...result];
+}
+
 function requirePermission(page, level = 'read') {
   return async (req, res, next) => {
     const groups = req.user.groups || (() => { try { return JSON.parse(req.user.groups_json || '[]'); } catch { return []; } })();
@@ -413,10 +458,10 @@ function requirePermission(page, level = 'read') {
     if (groups.some(g => g.toLowerCase() === 'technik')) return next();
 
     try {
-      const lowerGroups = groups.map(g => g.toLowerCase());
+      const allGroups = await resolveAncestorGroups(groups);
       const result = await pool.query(
         'SELECT access FROM permissions WHERE LOWER(group_name) = ANY($1) AND page = $2',
-        [lowerGroups, page]
+        [allGroups, page]
       );
       const maxAccess = result.rows.reduce((max, r) => Math.max(max, ACCESS_LEVELS[r.access] || 0), 0);
       if (maxAccess >= (ACCESS_LEVELS[level] || 0)) return next();
@@ -435,10 +480,10 @@ async function getUserPermissions(groups) {
     return permissions;
   }
   try {
-    const lowerGroups = groups.map(g => g.toLowerCase());
+    const allGroups = await resolveAncestorGroups(groups);
     const result = await pool.query(
       'SELECT page, access FROM permissions WHERE LOWER(group_name) = ANY($1)',
-      [lowerGroups]
+      [allGroups]
     );
     for (const row of result.rows) {
       const current = ACCESS_LEVELS[permissions[row.page]] || 0;
