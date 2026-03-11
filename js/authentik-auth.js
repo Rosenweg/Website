@@ -57,12 +57,14 @@ const AuthentikAuth = {
     return user?.isAdmin === true;
   },
 
-  /** Logout - clear session and optionally redirect */
+  /** Logout - clear session and end Authentik session */
   logout(redirectTo) {
     localStorage.removeItem(this.SESSION_KEY);
     localStorage.removeItem(this.USER_KEY);
     if (redirectTo !== false) {
-      window.location.href = redirectTo || window.location.pathname;
+      // Redirect through Authentik's end-session endpoint to fully log out
+      const postLogoutRedirect = redirectTo || window.location.origin + window.location.pathname;
+      window.location.href = `/api/auth/logout?redirect=${encodeURIComponent(postLogoutRedirect)}`;
     }
   },
 

@@ -204,6 +204,17 @@ app.get('/api/auth/login', (req, res) => {
   res.redirect(`${AUTHENTIK_EXTERNAL_URL}/application/o/authorize/?${params}`);
 });
 
+// Logout - end Authentik session and redirect back
+app.get('/api/auth/logout', (req, res) => {
+  const { redirect } = req.query;
+  const postLogoutRedirect = redirect || SITE_URL;
+  const params = new URLSearchParams({
+    post_logout_redirect_uri: postLogoutRedirect,
+    client_id: AUTHENTIK_CLIENT_ID,
+  });
+  res.redirect(`${AUTHENTIK_EXTERNAL_URL}/application/o/rosenweg-website/end-session/?${params}`);
+});
+
 // OAuth2 callback - exchanges code for token, creates session, redirects back
 app.get('/api/auth/callback', async (req, res) => {
   const { code, state } = req.query;
