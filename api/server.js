@@ -2186,7 +2186,10 @@ app.post('/api/admin/users', authMiddleware, requirePermission('bewohner-verwalt
       password,
     });
     if (groups && groups.length > 0) {
-      for (const groupPk of groups) {
+      const allGroupsData = await authentikAPI('GET', '/core/groups/?page_size=500');
+      const allGroups = allGroupsData.results || allGroupsData;
+      const resolvedGroups = await resolveImpliedGroups(groups, allGroups);
+      for (const groupPk of resolvedGroups) {
         await authentikAPI('POST', `/core/groups/${groupPk}/add_user/`, { pk: user.pk });
       }
     }
@@ -2208,20 +2211,46 @@ app.get('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verw
   }
 });
 
+// Auto-add all parent groups (via Authentik's parent field) when adding a child group
+async function resolveImpliedGroups(desiredGroupPks, allGroups) {
+  const groupByPk = {};
+  for (const g of allGroups) {
+    groupByPk[g.pk] = g;
+  }
+
+  const result = new Set(desiredGroupPks);
+  for (const pk of desiredGroupPks) {
+    // Walk up the parent chain and add all ancestors
+    let current = groupByPk[pk];
+    while (current && current.parent) {
+      if (result.has(current.parent)) break; // already included
+      result.add(current.parent);
+      current = groupByPk[current.parent];
+    }
+  }
+  return [...result];
+}
+
 // PUT /api/admin/users/:pk - Update user
 app.put('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verwaltung', 'write'), async (req, res) => {
   try {
     const { name, email, is_active, groups } = req.body;
     const userPk = parseInt(req.params.pk);
-    const updated = await authentikAPI('PATCH', `/core/users/${userPk}/`, {
-      name,
-      email,
-      is_active,
-    });
+    const patchBody = {};
+    if (name !== undefined) patchBody.name = name;
+    if (email !== undefined) patchBody.email = email;
+    if (is_active !== undefined) patchBody.is_active = is_active;
+    const updated = Object.keys(patchBody).length > 0
+      ? await authentikAPI('PATCH', `/core/users/${userPk}/`, patchBody)
+      : await authentikAPI('GET', `/core/users/${userPk}/`);
     if (groups) {
+      // Fetch all groups to resolve implied parent groups
+      const allGroupsData = await authentikAPI('GET', '/core/groups/?page_size=500');
+      const allGroups = allGroupsData.results || allGroupsData;
+      const desiredGroups = await resolveImpliedGroups(groups, allGroups);
+
       const currentUser = await authentikAPI('GET', `/core/users/${userPk}/`);
       const currentGroups = currentUser.groups_obj ? currentUser.groups_obj.map(g => g.pk) : [];
-      const desiredGroups = groups;
       const toAdd = desiredGroups.filter(g => !currentGroups.includes(g));
       const toRemove = currentGroups.filter(g => !desiredGroups.includes(g));
       for (const groupPk of toAdd) {

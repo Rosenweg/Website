@@ -474,8 +474,8 @@
                 }
 
                 if (!res.ok) {
-                    const data = await res.json();
-                    throw new Error(data.error || 'Fehler beim Speichern');
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error(data.error || `Fehler beim Speichern (HTTP ${res.status})`);
                 }
                 closeDialog();
                 await loadUsers();
