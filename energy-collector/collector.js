@@ -205,10 +205,15 @@ async function initDB() {
       ALTER TABLE meters ADD COLUMN IF NOT EXISTS category VARCHAR(50) DEFAULT 'consumer';
       ALTER TABLE meters ADD COLUMN IF NOT EXISTS group_id VARCHAR(100);
 
+      ALTER TABLE meters ADD COLUMN IF NOT EXISTS parent_id VARCHAR(100) REFERENCES meters(id);
+
       -- Auto-classify known meter types and groups
       UPDATE meters SET category = 'grid' WHERE category = 'consumer' AND (id LIKE '%-haupt' OR name ILIKE '%haupt%' OR name ILIKE '%netzübergabe%');
       UPDATE meters SET category = 'production' WHERE category = 'consumer' AND (id LIKE '%-produktion' OR name ILIKE '%produktion%' OR name ILIKE '%solar%' OR name ILIKE '%pv%');
       UPDATE meters SET group_id = split_part(id, '-', 1) WHERE group_id IS NULL;
+
+      -- Known parent-child relationships
+      UPDATE meters SET parent_id = 'r9-allgemein' WHERE id = 'r9-heizstab' AND parent_id IS NULL;
     `);
 
     // Seed meters from METERS env var only if DB has no meters yet
@@ -503,10 +508,14 @@ app.get('/health', async (req, res) => {
   res.json({ status: 'ok', meters: meters.length, uptime: process.uptime() });
 });
 
-// List meters
+// List meters (includes parent_id and children info)
 app.get('/api/energy/meters', async (req, res) => {
   const result = await pool.query('SELECT * FROM meters ORDER BY name');
-  res.json(result.rows);
+  const meters = result.rows.map(m => ({
+    ...m,
+    children: childrenMap[m.id] || [],
+  }));
+  res.json(meters);
 });
 
 // Get meters by location (e.g. ?location=waschkueche-1)
@@ -544,21 +553,114 @@ app.get('/api/energy/consumption/:meterId', async (req, res) => {
   }
 });
 
-// Live data (latest reading per meter)
+// Build parent→children map from cached meter list
+let childrenMap = {}; // { parentId: [childId, ...] }
+async function refreshChildrenMap() {
+  try {
+    const result = await pool.query('SELECT id, parent_id FROM meters WHERE parent_id IS NOT NULL AND active = true');
+    const map = {};
+    for (const row of result.rows) {
+      if (!map[row.parent_id]) map[row.parent_id] = [];
+      map[row.parent_id].push(row.id);
+    }
+    childrenMap = map;
+  } catch (e) { console.error('refreshChildrenMap error:', e.message); }
+}
+
+// Subtract child meter values from parent for live display
+function getNetLiveData(meterId) {
+  const raw = latestReadings.get(meterId);
+  if (!raw) return null;
+  const children = childrenMap[meterId];
+  if (!children || children.length === 0) return raw;
+
+  const net = { ...raw };
+  for (const childId of children) {
+    const child = latestReadings.get(childId);
+    if (!child) continue;
+    for (const key of ['power_w', 'power_l1_w', 'power_l2_w', 'power_l3_w',
+                        'current_l1_a', 'current_l2_a', 'current_l3_a']) {
+      if (typeof net[key] === 'number' && typeof child[key] === 'number') {
+        net[key] -= child[key];
+      }
+    }
+  }
+  return net;
+}
+
+// Live data (latest reading per meter, with child subtraction)
 app.get('/api/energy/live', (req, res) => {
   const live = {};
-  for (const [id, data] of latestReadings) {
-    live[id] = data;
+  for (const [id] of latestReadings) {
+    live[id] = getNetLiveData(id);
   }
   res.json(live);
 });
 
 // Live data for specific meter
 app.get('/api/energy/live/:meterId', (req, res) => {
-  const data = latestReadings.get(req.params.meterId);
+  const data = getNetLiveData(req.params.meterId);
   if (!data) return res.status(404).json({ error: 'Meter not found' });
   res.json(data);
 });
+
+// Helper: subtract child meter values from parent rows (in-memory, after query)
+async function subtractChildren(meterId, parentRows, fromDate, toDate, bucketSec) {
+  const children = childrenMap[meterId];
+  if (!children || children.length === 0) return parentRows;
+
+  // For each child, fetch the same time range with the same bucketing
+  for (const childId of children) {
+    let childRows;
+    if (bucketSec) {
+      const result = await pool.query(
+        `SELECT to_timestamp(floor(extract(epoch from ts) / ${bucketSec}) * ${bucketSec}) AS ts,
+                AVG(power_w) as power_w, AVG(power_l1_w) as power_l1_w, AVG(power_l2_w) as power_l2_w, AVG(power_l3_w) as power_l3_w,
+                AVG(current_l1_a) as current_l1_a, AVG(current_l2_a) as current_l2_a, AVG(current_l3_a) as current_l3_a
+         FROM readings WHERE meter_id = $1 AND ts >= $2 AND ts <= $3
+         GROUP BY 1 ORDER BY 1`,
+        [childId, fromDate, toDate]
+      );
+      childRows = result.rows;
+    } else {
+      const result = await pool.query(
+        `SELECT ts, power_w, power_l1_w, power_l2_w, power_l3_w,
+                current_l1_a, current_l2_a, current_l3_a
+         FROM readings WHERE meter_id = $1 AND ts >= $2 AND ts <= $3
+         ORDER BY ts`,
+        [childId, fromDate, toDate]
+      );
+      childRows = result.rows;
+    }
+
+    // Build time-indexed map of child data
+    const childMap = new Map();
+    for (const r of childRows) {
+      childMap.set(new Date(r.ts).getTime(), r);
+    }
+
+    // Subtract child values from parent at matching timestamps
+    const tolerance = bucketSec ? bucketSec * 1000 : 10000;
+    for (const row of parentRows) {
+      const t = new Date(row.ts).getTime();
+      let child = childMap.get(t);
+      // Try nearby timestamps if exact match fails
+      if (!child) {
+        for (const [ct, cr] of childMap) {
+          if (Math.abs(ct - t) < tolerance) { child = cr; break; }
+        }
+      }
+      if (!child) continue;
+      for (const key of ['power_w', 'power_l1_w', 'power_l2_w', 'power_l3_w',
+                          'current_l1_a', 'current_l2_a', 'current_l3_a']) {
+        if (typeof row[key] === 'number' && typeof child[key] === 'number') {
+          row[key] = Math.max(0, row[key] - child[key]);
+        }
+      }
+    }
+  }
+  return parentRows;
+}
 
 // Historical data (raw readings)
 app.get('/api/energy/history/:meterId', async (req, res) => {
@@ -575,9 +677,10 @@ app.get('/api/energy/history/:meterId', async (req, res) => {
   // Downsample by averaging into time buckets for spans > 2h.
   let query;
   let params;
+  let bucketSec = null;
   if (spanHours > 2) {
     // Target ~1000 data points. Bucket size in seconds (min 30s).
-    const bucketSec = Math.max(30, Math.ceil(spanMs / 1000 / maxRows));
+    bucketSec = Math.max(30, Math.ceil(spanMs / 1000 / maxRows));
     query = `SELECT
         to_timestamp(floor(extract(epoch from ts) / ${bucketSec}) * ${bucketSec}) AS ts,
         AVG(power_w) as power_w, AVG(power_l1_w) as power_l1_w, AVG(power_l2_w) as power_l2_w, AVG(power_l3_w) as power_l3_w,
@@ -607,7 +710,8 @@ app.get('/api/energy/history/:meterId', async (req, res) => {
   }
 
   const result = await pool.query(query, params);
-  res.json(result.rows);
+  const rows = await subtractChildren(meterId, result.rows, fromDate, toDate, bucketSec);
+  res.json(rows);
 });
 
 // Hourly aggregated data
@@ -626,6 +730,31 @@ app.get('/api/energy/hourly/:meterId', async (req, res) => {
   res.json(result.rows);
 });
 
+// Helper: subtract child consumption from daily/today aggregates
+async function subtractChildrenAgg(meterId, rows, query, startDate, endDate, keyField) {
+  const children = childrenMap[meterId];
+  if (!children || children.length === 0) return rows;
+
+  for (const childId of children) {
+    const childResult = await pool.query(query, [childId, startDate, endDate]);
+    const childMap = new Map();
+    for (const cr of childResult.rows) {
+      childMap.set(keyField ? new Date(cr[keyField]).getTime() : 'single', cr);
+    }
+    for (const row of rows) {
+      const key = keyField ? new Date(row[keyField]).getTime() : 'single';
+      const child = childMap.get(key);
+      if (!child) continue;
+      for (const k of ['consumption_kwh', 'export_kwh', 'consumption_t1_kwh', 'consumption_t2_kwh', 'avg_power_w']) {
+        if (typeof row[k] === 'number' && typeof child[k] === 'number') {
+          row[k] = Math.max(0, row[k] - child[k]);
+        }
+      }
+    }
+  }
+  return rows;
+}
+
 // Daily summary (supports ?days=N and optional ?to=YYYY-MM-DD)
 app.get('/api/energy/daily/:meterId', async (req, res) => {
   const { meterId } = req.params;
@@ -634,8 +763,7 @@ app.get('/api/energy/daily/:meterId', async (req, res) => {
   const endDate = to ? new Date(to + 'T23:59:59') : new Date();
   const startDate = new Date(endDate.getTime() - numDays * 86400000);
 
-  const result = await pool.query(
-    `SELECT
+  const dailyQuery = `SELECT
        date_trunc('day', ts) AS day,
        AVG(power_w) AS avg_power_w,
        MAX(power_w) AS max_power_w,
@@ -647,10 +775,11 @@ app.get('/api/energy/daily/:meterId', async (req, res) => {
      FROM readings
      WHERE meter_id = $1 AND ts >= $2 AND ts <= $3
      GROUP BY date_trunc('day', ts)
-     ORDER BY day`,
-    [meterId, startDate.toISOString(), endDate.toISOString()]
-  );
-  res.json(result.rows);
+     ORDER BY day`;
+
+  const result = await pool.query(dailyQuery, [meterId, startDate.toISOString(), endDate.toISOString()]);
+  const rows = await subtractChildrenAgg(meterId, result.rows, dailyQuery, startDate.toISOString(), endDate.toISOString(), 'day');
+  res.json(rows);
 });
 
 // Day summary (today or specific date via ?date=YYYY-MM-DD)
@@ -662,8 +791,7 @@ app.get('/api/energy/today/:meterId', async (req, res) => {
   const dayEnd = new Date(dayStart);
   dayEnd.setDate(dayEnd.getDate() + 1);
 
-  const result = await pool.query(
-    `SELECT
+  const todayQuery = `SELECT
        MIN(energy_import_kwh) AS start_kwh,
        MAX(energy_import_kwh) AS end_kwh,
        MAX(energy_import_kwh) - MIN(energy_import_kwh) AS consumption_kwh,
@@ -675,10 +803,12 @@ app.get('/api/energy/today/:meterId', async (req, res) => {
        MIN(power_w) AS min_power_w,
        COUNT(*) AS samples
      FROM readings
-     WHERE meter_id = $1 AND ts >= $2 AND ts < $3`,
-    [meterId, dayStart.toISOString(), dayEnd.toISOString()]
-  );
-  res.json(result.rows[0] || {});
+     WHERE meter_id = $1 AND ts >= $2 AND ts < $3`;
+
+  const result = await pool.query(todayQuery, [meterId, dayStart.toISOString(), dayEnd.toISOString()]);
+  const rows = result.rows[0] ? [result.rows[0]] : [];
+  await subtractChildrenAgg(meterId, rows, todayQuery, dayStart.toISOString(), dayEnd.toISOString(), null);
+  res.json(rows[0] || {});
 });
 
 // ═══════════════════════════════════════════════════════════════════
@@ -688,15 +818,15 @@ app.use(express.json());
 
 // --- Meter Management ---
 app.post('/api/energy/meters', async (req, res) => {
-  const { id, name, type, host, port, unit_id, shelly_type, location, category, group_id } = req.body;
+  const { id, name, type, host, port, unit_id, shelly_type, location, category, group_id, parent_id } = req.body;
   if (!id || !name || !host) return res.status(400).json({ error: 'id, name, host required' });
   try {
     const result = await pool.query(
-      `INSERT INTO meters (id, name, type, host, port, unit_id, shelly_type, location, category, group_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       ON CONFLICT (id) DO UPDATE SET name=$2, type=$3, host=$4, port=$5, unit_id=$6, shelly_type=$7, location=$8, category=$9, group_id=$10
+      `INSERT INTO meters (id, name, type, host, port, unit_id, shelly_type, location, category, group_id, parent_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       ON CONFLICT (id) DO UPDATE SET name=$2, type=$3, host=$4, port=$5, unit_id=$6, shelly_type=$7, location=$8, category=$9, group_id=$10, parent_id=$11
        RETURNING *`,
-      [id, name, type || 'modbus', host, port || 502, unit_id || 1, shelly_type || null, location || null, category || 'consumer', group_id || null]
+      [id, name, type || 'modbus', host, port || 502, unit_id || 1, shelly_type || null, location || null, category || 'consumer', group_id || null, parent_id || null]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -1168,6 +1298,10 @@ app.get('/api/energy/export/:meterId', async (req, res) => {
 // ─── Startup ────────────────────────────────────────────────────────
 async function start() {
   await initDB();
+
+  // Load parent-child meter relationships
+  await refreshChildrenMap();
+  setInterval(refreshChildrenMap, 5 * 60 * 1000); // refresh every 5 min
 
   // Start polling (meters loaded from DB)
   const activeMeters = await getActiveMeters();
