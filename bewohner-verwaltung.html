@@ -160,20 +160,23 @@
 
             // Determine which STWEG the user manages (from their groups)
             const groups = user.groups || [];
-            const ausschussGroup = groups.find(g => g.match(/stweg\d+-ausschuss/i));
-            if (ausschussGroup) {
-                const match = ausschussGroup.match(/stweg(\d+)/i);
-                if (match) userStweg = parseInt(match[1]);
-            }
-            // Technik sees all
             const isTechnik = groups.some(g => g.toLowerCase() === 'technik');
 
-            if (userStweg) {
-                document.getElementById('page-subtitle').textContent = `STWEG ${userStweg} – Eigentümer und Mieter verwalten`;
-                document.getElementById('bewohner-title').textContent = `Bewohner STWEG ${userStweg}`;
-            } else if (isTechnik) {
+            // Technik sees all – only set userStweg if NOT Technik
+            if (!isTechnik) {
+                const ausschussGroup = groups.find(g => g.match(/stweg\d+-ausschuss/i));
+                if (ausschussGroup) {
+                    const match = ausschussGroup.match(/stweg(\d+)/i);
+                    if (match) userStweg = parseInt(match[1]);
+                }
+            }
+
+            if (isTechnik) {
                 document.getElementById('page-subtitle').textContent = 'Alle Bewohner verwalten (Technik)';
                 document.getElementById('bewohner-title').textContent = 'Alle Bewohner';
+            } else if (userStweg) {
+                document.getElementById('page-subtitle').textContent = `STWEG ${userStweg} – Eigentümer und Mieter verwalten`;
+                document.getElementById('bewohner-title').textContent = `Bewohner STWEG ${userStweg}`;
             }
 
             document.getElementById('main-content').classList.remove('hidden');
