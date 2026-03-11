@@ -358,17 +358,22 @@ async function readSmartFox(meter) {
     return isNaN(num) ? 0 : num;
   };
 
-  // Heizstab/Boiler power (kW -> W)
+  // Heizstab/Boiler power (kW -> W) - 3-phase heater, split equally
   data.power_w = parseVal('analogOutPower') * 1000;
-  data.power_l1_w = data.power_w;
+  data.power_l1_w = data.power_w / 3;
+  data.power_l2_w = data.power_w / 3;
+  data.power_l3_w = data.power_w / 3;
 
   // Heizstab percentage stored in pf_l1 (0-1 range)
   data.pf_l1 = parseVal('hidAoutPercentage') / 100;
 
-  // Grid voltage for reference
+  // Grid voltage and current per phase from SmartFox
   data.voltage_l1_v = parseVal('voltageL1Value');
   data.voltage_l2_v = parseVal('voltageL2Value');
   data.voltage_l3_v = parseVal('voltageL3Value');
+  data.current_l1_a = parseVal('ampereL1Value');
+  data.current_l2_a = parseVal('ampereL2Value');
+  data.current_l3_a = parseVal('ampereL3Value');
 
   // Daily energy counter (Wh -> kWh) - resets at midnight
   data.energy_import_kwh = parseVal('hidAoutEnergyDay') / 1000;
@@ -563,8 +568,32 @@ app.get('/api/energy/history/:meterId', async (req, res) => {
   const toDate = to || new Date().toISOString();
   const maxRows = Math.min(parseInt(limit) || 2000, 10000);
 
-  const result = await pool.query(
-    `SELECT ts, power_w, power_l1_w, power_l2_w, power_l3_w,
+  // Calculate time span to decide on downsampling
+  const spanMs = new Date(toDate) - new Date(fromDate);
+  const spanHours = spanMs / 3600000;
+  // At 5s intervals, 1 hour = 720 rows. For a full day (24h) we'd get 17280 rows.
+  // Downsample by averaging into time buckets for spans > 2h.
+  let query;
+  let params;
+  if (spanHours > 2) {
+    // Target ~1000 data points. Bucket size in seconds (min 30s).
+    const bucketSec = Math.max(30, Math.ceil(spanMs / 1000 / maxRows));
+    query = `SELECT
+        to_timestamp(floor(extract(epoch from ts) / ${bucketSec}) * ${bucketSec}) AS ts,
+        AVG(power_w) as power_w, AVG(power_l1_w) as power_l1_w, AVG(power_l2_w) as power_l2_w, AVG(power_l3_w) as power_l3_w,
+        AVG(voltage_l1_v) as voltage_l1_v, AVG(voltage_l2_v) as voltage_l2_v, AVG(voltage_l3_v) as voltage_l3_v,
+        AVG(current_l1_a) as current_l1_a, AVG(current_l2_a) as current_l2_a, AVG(current_l3_a) as current_l3_a,
+        AVG(pf_l1) as pf_l1, AVG(pf_l2) as pf_l2, AVG(pf_l3) as pf_l3,
+        MAX(tariff) as tariff,
+        MAX(energy_import_kwh) as energy_import_kwh, MAX(energy_export_kwh) as energy_export_kwh,
+        MAX(energy_import_t1_kwh) as energy_import_t1_kwh, MAX(energy_import_t2_kwh) as energy_import_t2_kwh
+     FROM readings
+     WHERE meter_id = $1 AND ts >= $2 AND ts <= $3
+     GROUP BY 1
+     ORDER BY 1`;
+    params = [meterId, fromDate, toDate];
+  } else {
+    query = `SELECT ts, power_w, power_l1_w, power_l2_w, power_l3_w,
             voltage_l1_v, voltage_l2_v, voltage_l3_v,
             current_l1_a, current_l2_a, current_l3_a,
             pf_l1, pf_l2, pf_l3, tariff,
@@ -573,9 +602,11 @@ app.get('/api/energy/history/:meterId', async (req, res) => {
      FROM readings
      WHERE meter_id = $1 AND ts >= $2 AND ts <= $3
      ORDER BY ts
-     LIMIT $4`,
-    [meterId, fromDate, toDate, maxRows]
-  );
+     LIMIT $4`;
+    params = [meterId, fromDate, toDate, maxRows];
+  }
+
+  const result = await pool.query(query, params);
   res.json(result.rows);
 });
 

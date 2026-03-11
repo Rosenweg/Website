@@ -718,7 +718,7 @@
             if (currentPeriod === 'day') {
                 from = dayStart.toISOString();
                 const dayEnd = getSelectedDayEnd();
-                endpointFn = (id) => `${API}/history/${id}?from=${from}&to=${dayEnd.toISOString()}&limit=5000`;
+                endpointFn = (id) => `${API}/history/${id}?from=${from}&to=${dayEnd.toISOString()}&limit=2000`;
             } else if (currentPeriod === 'week') {
                 const weekStart = new Date(dayStart.getTime() - 6 * 86400000);
                 from = weekStart.toISOString();
@@ -734,12 +734,13 @@
             // Load selected meter + reference meters (production + grid) in parallel
             const [res, solarRes, hauptRes] = await Promise.all([
                 fetch(endpointFn(currentMeter)),
-                prodMeterId ? fetch(endpointFn(prodMeterId)).catch(() => null) : null,
-                gridMeterId ? fetch(endpointFn(gridMeterId)).catch(() => null) : null,
+                prodMeterId ? fetch(endpointFn(prodMeterId)).catch(e => { console.warn('Solar fetch failed:', e); return null; }) : null,
+                gridMeterId ? fetch(endpointFn(gridMeterId)).catch(e => { console.warn('Grid fetch failed:', e); return null; }) : null,
             ]);
             const data = await res.json();
             const solarRaw = solarRes?.ok ? await solarRes.json() : [];
             const hauptRaw = hauptRes?.ok ? await hauptRes.json() : [];
+            console.log(`Power chart: ${data.length} meter points, ${solarRaw.length} solar points, ${hauptRaw.length} grid points (prodMeter=${prodMeterId}, gridMeter=${gridMeterId})`);
 
             const tsKey = currentPeriod === 'day' ? 'ts' : 'hour';
             const valKey = currentPeriod === 'day' ? 'power_w' : 'avg_power_w';
@@ -794,6 +795,7 @@
             // Calculate solar share per timestamp, then split meter consumption
             const solarValues = [];
             const hauptValues = [];
+            let nullCount = 0, validCount = 0;
             data.forEach((r, i) => {
                 const t = new Date(r[tsKey] || r.ts || r.hour).getTime();
                 const meterPower = values[i];
@@ -801,10 +803,13 @@
                 const hauptW = findClosest(hauptIndex, t);
 
                 if (prod === null || hauptW === null || meterPower <= 0) {
+                    nullCount++;
+                    if (nullCount <= 3) console.log(`Split null at ${i}: prod=${prod}, hauptW=${hauptW}, meterPower=${meterPower}`);
                     solarValues.push(null);
                     hauptValues.push(null);
                     return;
                 }
+                validCount++;
 
                 // haupt positive = grid import, negative = grid export
                 const netzExport = Math.max(0, -hauptW);
@@ -819,6 +824,8 @@
                 solarValues.push(Math.round(solarW));
                 hauptValues.push(Math.round(netzW));
             });
+
+            console.log(`Split result: ${validCount} valid, ${nullCount} null`);
 
             // Downsample if too many points
             const maxPoints = 500;
