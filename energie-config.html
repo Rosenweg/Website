@@ -59,6 +59,7 @@
                         <select id="m-type" onchange="toggleMeterFields()" class="w-full border-gray-300 rounded-md shadow-sm text-sm">
                             <option value="modbus">Modbus TCP (smart-me Telstar)</option>
                             <option value="shelly">Shelly (HTTP)</option>
+                            <option value="smartfox">SmartFox (HTTP)</option>
                         </select>
                     </div>
                     <div>
@@ -242,9 +243,11 @@
     };
 
     function toggleMeterFields() {
-        const isShelly = document.getElementById('m-type').value === 'shelly';
-        document.getElementById('field-port').classList.toggle('hidden', isShelly);
-        document.getElementById('field-unit').classList.toggle('hidden', isShelly);
+        const type = document.getElementById('m-type').value;
+        const isModbus = type === 'modbus';
+        const isShelly = type === 'shelly';
+        document.getElementById('field-port').classList.toggle('hidden', !isModbus);
+        document.getElementById('field-unit').classList.toggle('hidden', !isModbus);
         document.getElementById('field-shelly-type').classList.toggle('hidden', !isShelly);
     }
 
