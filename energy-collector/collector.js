@@ -829,6 +829,264 @@ app.get('/api/energy/user/:email/meters', async (req, res) => {
   res.json(result.rows);
 });
 
+// ─── Dashboard overview ─────────────────────────────────────────────
+app.get('/api/energy/dashboard', async (req, res) => {
+  try {
+    // Get all active meters with their categories and groups
+    const meters = await pool.query('SELECT * FROM meters WHERE active = true ORDER BY group_id, name');
+
+    // Get today's consumption per meter
+    const today = new Date().toISOString().slice(0, 10);
+    const todayData = await pool.query(
+      `SELECT meter_id,
+        MAX(energy_import_kwh) - MIN(energy_import_kwh) AS consumption_kwh,
+        MAX(energy_export_kwh) - MIN(energy_export_kwh) AS export_kwh
+       FROM readings WHERE ts >= $1::date AND ts < ($1::date + interval '1 day')
+       GROUP BY meter_id`,
+      [today]
+    );
+    const todayMap = {};
+    todayData.rows.forEach(r => { todayMap[r.meter_id] = r; });
+
+    // Get latest reading per meter for live power
+    const latest = await pool.query(
+      `SELECT DISTINCT ON (meter_id) meter_id, power_w, ts
+       FROM readings ORDER BY meter_id, ts DESC`
+    );
+    const liveMap = {};
+    latest.rows.forEach(r => { liveMap[r.meter_id] = r; });
+
+    // Build groups
+    const groups = {};
+    meters.rows.forEach(m => {
+      const gid = m.group_id || 'default';
+      if (!groups[gid]) groups[gid] = { id: gid, meters: [], grid: null, production: null };
+      groups[gid].meters.push({
+        ...m,
+        live_power_w: liveMap[m.id]?.power_w || 0,
+        live_ts: liveMap[m.id]?.ts || null,
+        today_consumption_kwh: parseFloat(todayMap[m.id]?.consumption_kwh || 0),
+        today_export_kwh: parseFloat(todayMap[m.id]?.export_kwh || 0),
+      });
+      if (m.category === 'grid') groups[gid].grid = m.id;
+      if (m.category === 'production') groups[gid].production = m.id;
+    });
+
+    // Calculate solar share per group
+    Object.values(groups).forEach(g => {
+      const gridData = todayMap[g.grid];
+      const prodData = todayMap[g.production];
+      if (gridData && prodData) {
+        const prodKwh = parseFloat(prodData.export_kwh || 0);
+        const netExport = parseFloat(gridData.export_kwh || 0);
+        const netImport = parseFloat(gridData.consumption_kwh || 0);
+        const eigen = Math.max(0, prodKwh - netExport);
+        const total = eigen + netImport;
+        g.solar_share = total > 0 ? (eigen / total) * 100 : 0;
+        g.solar_production_kwh = prodKwh;
+        g.self_consumption_kwh = eigen;
+        g.grid_import_kwh = netImport;
+        g.grid_export_kwh = netExport;
+      } else {
+        g.solar_share = 0;
+        g.solar_production_kwh = 0;
+        g.self_consumption_kwh = 0;
+        g.grid_import_kwh = 0;
+        g.grid_export_kwh = 0;
+      }
+      // Total consumer consumption
+      g.total_consumption_kwh = g.meters
+        .filter(m => m.category === 'consumer')
+        .reduce((s, m) => s + m.today_consumption_kwh, 0);
+    });
+
+    res.json(Object.values(groups));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Comparison endpoint ────────────────────────────────────────────
+app.get('/api/energy/compare', async (req, res) => {
+  try {
+    const meterIds = (req.query.meters || '').split(',').filter(Boolean);
+    const days = parseInt(req.query.days) || 7;
+    if (meterIds.length === 0) return res.status(400).json({ error: 'meters parameter required' });
+    if (meterIds.length > 10) return res.status(400).json({ error: 'max 10 meters' });
+
+    const result = await pool.query(
+      `SELECT meter_id, date_trunc('day', ts)::date AS day,
+        MAX(energy_import_kwh) - MIN(energy_import_kwh) AS consumption_kwh
+       FROM readings
+       WHERE meter_id = ANY($1) AND ts >= NOW() - ($2 || ' days')::interval
+       GROUP BY meter_id, day
+       ORDER BY day, meter_id`,
+      [meterIds, String(days)]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Cost projection ────────────────────────────────────────────────
+app.get('/api/energy/projection/:meterId', async (req, res) => {
+  try {
+    const { meterId } = req.params;
+    // Get last 30 days daily consumption
+    const result = await pool.query(
+      `SELECT date_trunc('day', ts)::date AS day,
+        MAX(energy_import_kwh) - MIN(energy_import_kwh) AS consumption_kwh
+       FROM readings
+       WHERE meter_id = $1 AND ts >= NOW() - interval '30 days'
+       GROUP BY day ORDER BY day`,
+      [meterId]
+    );
+    const days = result.rows;
+    if (days.length === 0) return res.json({ avg_daily: 0, projected_monthly: 0, projected_yearly: 0 });
+
+    const totalKwh = days.reduce((s, d) => s + parseFloat(d.consumption_kwh || 0), 0);
+    const avgDaily = totalKwh / days.length;
+
+    // Get current tariffs
+    const tariffs = await pool.query("SELECT * FROM tariffs WHERE active = true AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)");
+    const netzTarif = tariffs.rows.find(t => t.name === 'Netztarif');
+    const solarTarif = tariffs.rows.find(t => t.name === 'Solartarif');
+    const netzPrice = netzTarif ? parseFloat(netzTarif.price_per_kwh) : 0;
+    const solarPrice = solarTarif ? parseFloat(solarTarif.price_per_kwh) : 0;
+
+    // Get meter's group solar share
+    const meter = await pool.query('SELECT * FROM meters WHERE id = $1', [meterId]);
+    let solarShare = 0;
+    if (meter.rows.length > 0 && meter.rows[0].group_id) {
+      const gid = meter.rows[0].group_id;
+      const grid = await pool.query("SELECT id FROM meters WHERE group_id = $1 AND category = 'grid'", [gid]);
+      const prod = await pool.query("SELECT id FROM meters WHERE group_id = $1 AND category = 'production'", [gid]);
+      if (grid.rows.length > 0 && prod.rows.length > 0) {
+        const gridDaily = await pool.query(
+          `SELECT MAX(energy_import_kwh) - MIN(energy_import_kwh) AS import, MAX(energy_export_kwh) - MIN(energy_export_kwh) AS export
+           FROM readings WHERE meter_id = $1 AND ts >= NOW() - interval '30 days'`,
+          [grid.rows[0].id]
+        );
+        const prodDaily = await pool.query(
+          `SELECT MAX(energy_export_kwh) - MIN(energy_export_kwh) AS production
+           FROM readings WHERE meter_id = $1 AND ts >= NOW() - interval '30 days'`,
+          [prod.rows[0].id]
+        );
+        const gridImport = parseFloat(gridDaily.rows[0]?.import || 0);
+        const gridExport = parseFloat(gridDaily.rows[0]?.export || 0);
+        const production = parseFloat(prodDaily.rows[0]?.production || 0);
+        const eigen = Math.max(0, production - gridExport);
+        const total = eigen + gridImport;
+        solarShare = total > 0 ? eigen / total : 0;
+      }
+    }
+
+    const projectedMonthly = avgDaily * 30.44;
+    const projectedYearly = avgDaily * 365;
+    const monthlySolar = projectedMonthly * solarShare;
+    const monthlyNetz = projectedMonthly - monthlySolar;
+    const monthlyCost = (monthlyNetz * netzPrice) + (monthlySolar * solarPrice);
+    const yearlyCost = monthlyCost * 12;
+
+    res.json({
+      days_analyzed: days.length,
+      avg_daily_kwh: Math.round(avgDaily * 100) / 100,
+      solar_share_percent: Math.round(solarShare * 10000) / 100,
+      projected_monthly_kwh: Math.round(projectedMonthly * 100) / 100,
+      projected_yearly_kwh: Math.round(projectedYearly * 100) / 100,
+      projected_monthly_cost: Math.round(monthlyCost * 100) / 100,
+      projected_yearly_cost: Math.round(yearlyCost * 100) / 100,
+      netz_price: netzPrice,
+      solar_price: solarPrice,
+      daily_data: days,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Alerts endpoint ────────────────────────────────────────────────
+// Alert check: runs as part of polling, stores alerts in memory (no DB table needed yet)
+const activeAlerts = [];
+
+app.get('/api/energy/alerts', async (req, res) => {
+  try {
+    // Check all active meters for issues
+    const alerts = [];
+    const meters = await pool.query('SELECT * FROM meters WHERE active = true');
+
+    for (const meter of meters.rows) {
+      // Check if meter has recent readings (last 10 minutes)
+      const latest = await pool.query(
+        'SELECT ts, power_w FROM readings WHERE meter_id = $1 ORDER BY ts DESC LIMIT 1',
+        [meter.id]
+      );
+      if (latest.rows.length === 0 || (Date.now() - new Date(latest.rows[0].ts).getTime() > 10 * 60 * 1000)) {
+        alerts.push({ type: 'offline', severity: 'warning', meter_id: meter.id, meter_name: meter.name, message: `Keine Daten seit >10 Min.` });
+      }
+
+      // Check for unusually high consumption (> 2x daily average)
+      if (meter.category === 'consumer' && latest.rows.length > 0) {
+        const avgResult = await pool.query(
+          `SELECT AVG(avg_power) AS avg_power FROM (
+            SELECT AVG(power_w) AS avg_power FROM readings
+            WHERE meter_id = $1 AND ts >= NOW() - interval '7 days'
+            GROUP BY date_trunc('hour', ts)
+          ) sub`,
+          [meter.id]
+        );
+        const avgPower = parseFloat(avgResult.rows[0]?.avg_power || 0);
+        const currentPower = Math.abs(latest.rows[0].power_w);
+        if (avgPower > 0 && currentPower > avgPower * 3) {
+          alerts.push({ type: 'high_consumption', severity: 'info', meter_id: meter.id, meter_name: meter.name,
+            message: `Aktuell ${Math.round(currentPower)} W (Durchschnitt: ${Math.round(avgPower)} W)` });
+        }
+      }
+    }
+    res.json(alerts);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── CSV Export ─────────────────────────────────────────────────────
+app.get('/api/energy/export/:meterId', async (req, res) => {
+  try {
+    const { meterId } = req.params;
+    const from = req.query.from || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const to = req.query.to || new Date().toISOString().slice(0, 10);
+
+    const meter = await pool.query('SELECT name FROM meters WHERE id = $1', [meterId]);
+    const meterName = meter.rows[0]?.name || meterId;
+
+    const result = await pool.query(
+      `SELECT date_trunc('day', ts)::date AS datum,
+        MAX(energy_import_kwh) - MIN(energy_import_kwh) AS verbrauch_kwh,
+        MAX(energy_export_kwh) - MIN(energy_export_kwh) AS einspeisung_kwh,
+        AVG(power_w) AS durchschnitt_w,
+        MAX(power_w) AS max_w
+       FROM readings
+       WHERE meter_id = $1 AND ts >= $2::date AND ts <= ($3::date + interval '1 day')
+       GROUP BY datum ORDER BY datum`,
+      [meterId, from, to]
+    );
+
+    // Build CSV
+    const header = 'Datum;Verbrauch (kWh);Einspeisung (kWh);Durchschnitt (W);Maximum (W)';
+    const rows = result.rows.map(r =>
+      `${r.datum};${parseFloat(r.verbrauch_kwh || 0).toFixed(2)};${parseFloat(r.einspeisung_kwh || 0).toFixed(2)};${Math.round(r.durchschnitt_w || 0)};${Math.round(r.max_w || 0)}`
+    );
+    const csv = [header, ...rows].join('\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${meterName}_${from}_${to}.csv"`);
+    res.send('\uFEFF' + csv); // BOM for Excel
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Startup ────────────────────────────────────────────────────────
 async function start() {
   await initDB();
