@@ -2188,7 +2188,7 @@ app.post('/api/admin/users', authMiddleware, requirePermission('bewohner-verwalt
     if (groups && groups.length > 0) {
       const allGroupsData = await authentikAPI('GET', '/core/groups/?page_size=500');
       const allGroups = allGroupsData.results || allGroupsData;
-      const resolvedGroups = await resolveImpliedGroups(groups, allGroups);
+      const resolvedGroups = resolveGroupHierarchy(groups, allGroups);
       for (const groupPk of resolvedGroups) {
         await authentikAPI('POST', `/core/groups/${groupPk}/add_user/`, { pk: user.pk });
       }
@@ -2212,22 +2212,51 @@ app.get('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verw
 });
 
 // Auto-add all parent groups (via Authentik's parent field) when adding a child group
-async function resolveImpliedGroups(desiredGroupPks, allGroups) {
+// Auto-remove parent groups when no other child in that parent remains
+function resolveGroupHierarchy(desiredGroupPks, allGroups) {
   const groupByPk = {};
+  const childrenOf = {}; // parentPk -> [childGroup, ...]
   for (const g of allGroups) {
     groupByPk[g.pk] = g;
+    if (g.parent) {
+      if (!childrenOf[g.parent]) childrenOf[g.parent] = [];
+      childrenOf[g.parent].push(g);
+    }
   }
 
   const result = new Set(desiredGroupPks);
+
+  // Walk UP: add all ancestors of desired groups
   for (const pk of desiredGroupPks) {
-    // Walk up the parent chain and add all ancestors
     let current = groupByPk[pk];
     while (current && current.parent) {
-      if (result.has(current.parent)) break; // already included
+      if (result.has(current.parent)) break;
       result.add(current.parent);
       current = groupByPk[current.parent];
     }
   }
+
+  // Walk DOWN from removed parents: if a parent group is NOT in desired set,
+  // but WAS added by walking up, check if it still has any desired children.
+  // If not, remove it again. This handles the removal case.
+  // We do this by re-validating: a parent stays only if at least one child is in the set.
+  // Iterate bottom-up by removing parents that have no children in the result.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const pk of [...result]) {
+      // Skip if this was explicitly desired (user checked it)
+      if (desiredGroupPks.includes(pk)) continue;
+      // This was auto-added as a parent - check if any child is still in result
+      const children = childrenOf[pk] || [];
+      const hasChildInResult = children.some(c => result.has(c.pk));
+      if (!hasChildInResult) {
+        result.delete(pk);
+        changed = true;
+      }
+    }
+  }
+
   return [...result];
 }
 
@@ -2247,7 +2276,7 @@ app.put('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verw
       // Fetch all groups to resolve implied parent groups
       const allGroupsData = await authentikAPI('GET', '/core/groups/?page_size=500');
       const allGroups = allGroupsData.results || allGroupsData;
-      const desiredGroups = await resolveImpliedGroups(groups, allGroups);
+      const desiredGroups = resolveGroupHierarchy(groups, allGroups);
 
       const currentUser = await authentikAPI('GET', `/core/users/${userPk}/`);
       const currentGroups = currentUser.groups_obj ? currentUser.groups_obj.map(g => g.pk) : [];
