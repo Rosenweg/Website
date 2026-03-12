@@ -413,7 +413,6 @@ const MANAGED_PAGES = [
   { id: 'waschkueche-admin', label: 'Waschküche-Admin' },
   { id: 'kontakte', label: 'Kontakte' },
   { id: 'verwaltung', label: 'Verwaltung' },
-  { id: 'sms', label: 'SMS' },
   { id: 'rechteverwaltung', label: 'Rechteverwaltung' },
 ];
 
@@ -1654,191 +1653,6 @@ app.post('/api/email/send', authMiddleware, adminOnly, async (req, res) => {
   }
 });
 
-// ═══════════════════════════════════════════════════════════════════
-// SMS INBOX (Peoplefon SMS GW API)
-// Base: https://api.peoplefone.com/customer/sms
-// ═══════════════════════════════════════════════════════════════════
-
-const PEOPLEFON_API_URL = process.env.PEOPLEFON_API_URL || 'https://api.peoplefone.com/customer/sms';
-const PEOPLEFON_API_KEY = process.env.PEOPLEFON_API_KEY || '';
-const PEOPLEFON_NUMBER = process.env.PEOPLEFON_NUMBER || '+41615510152';
-
-async function peoplefonRequest(method, path, body) {
-  const url = `${PEOPLEFON_API_URL}${path}`;
-  const options = {
-    method,
-    headers: {
-      'Authorization': `Bearer ${PEOPLEFON_API_KEY}`,
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
-    }
-  };
-  if (body) options.body = JSON.stringify(body);
-  const resp = await fetch(url, options);
-  const text = await resp.text();
-  if (!resp.ok) {
-    throw new Error(`Peoplefon API ${resp.status}: ${text}`);
-  }
-  if (!text || text.trim() === '') return {};
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error(`Peoplefon API invalid JSON: ${text.substring(0, 200)}`);
-  }
-}
-
-// SMS webhook handler (shared between /incoming and /status)
-async function handleSmsWebhook(body) {
-  // SmsMessageEvent: eventType, status, text, to, from, messageId, binary, validityPeriod
-  // SmsStatusUpdateEvent: eventType, messageId, status, direction, updatedAt, to, from
-  console.log('SMS webhook received:', JSON.stringify(body));
-
-  if (body.eventType === 'smsStatusUpdateEvent') {
-    // Status update for a sent message - update existing record
-    if (body.messageId) {
-      await pool.query(
-        `UPDATE sms_inbox SET status = $1 WHERE message_id = $2`,
-        [body.status, body.messageId]
-      );
-    }
-  } else {
-    // Incoming SMS (SmsMessageEvent or unknown format)
-    const messageId = body.messageId || null;
-    const sender = body.from || body.From || 'unknown';
-    const recipient = body.to || body.To || PEOPLEFON_NUMBER;
-    const message = body.text || body.Body || body.message || '';
-    const status = body.status || 'received';
-
-    await pool.query(
-      `INSERT INTO sms_inbox (message_id, direction, sender, recipient, message, status, received_at)
-       VALUES ($1, 'MO', $2, $3, $4, $5, NOW())
-       ON CONFLICT (message_id) DO NOTHING`,
-      [messageId, sender, recipient, message, status]
-    );
-  }
-}
-
-// Webhook endpoint - receives SmsMessageEvent from Peoplefon (incoming SMS)
-app.post('/api/sms/incoming', async (req, res) => {
-  try {
-    await handleSmsWebhook(req.body);
-    res.json({ success: true });
-  } catch (err) {
-    console.error('SMS webhook error:', err);
-    res.status(500).json({ error: 'Fehler beim Verarbeiten der SMS' });
-  }
-});
-
-// Status callback endpoint (configured in Peoplefon portal)
-app.post('/api/sms/status', async (req, res) => {
-  try {
-    await handleSmsWebhook(req.body);
-    res.json({ success: true });
-  } catch (err) {
-    console.error('SMS status webhook error:', err);
-    res.status(500).json({ error: 'Fehler beim Verarbeiten des Status' });
-  }
-});
-
-// Fetch SMS from Peoplefon API and sync to local DB (admin only)
-app.post('/api/sms/fetch', authMiddleware, adminOnly, async (req, res) => {
-  if (!PEOPLEFON_API_KEY) {
-    return res.status(400).json({ error: 'Peoplefon API-Key nicht konfiguriert' });
-  }
-  try {
-    const data = await peoplefonRequest('GET', '/v1/sms/messages?pageSize=50');
-    let imported = 0;
-    if (data.messages && data.messages.length > 0) {
-      for (const msg of data.messages) {
-        const direction = msg.direction || (msg.to === PEOPLEFON_NUMBER ? 'MO' : 'MT');
-        const sender = direction === 'MO' ? msg.from : (msg.from || PEOPLEFON_NUMBER);
-        const recipient = direction === 'MO' ? PEOPLEFON_NUMBER : msg.to;
-        let text = msg.text || '';
-        if (!text && msg.messageId) {
-          try {
-            const details = await peoplefonRequest('GET', `/v1/sms/messages/${msg.messageId}`);
-            text = details.text || '';
-          } catch {}
-        }
-        const result = await pool.query(
-          `INSERT INTO sms_inbox (message_id, direction, sender, recipient, message, status, received_at)
-           VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::timestamp, NOW()))
-           ON CONFLICT (message_id) DO UPDATE SET status = EXCLUDED.status, message = CASE WHEN sms_inbox.message = '' OR sms_inbox.message IS NULL THEN EXCLUDED.message ELSE sms_inbox.message END
-           RETURNING id`,
-          [msg.messageId, direction, sender, recipient, text, msg.status || 'unknown', msg.receivedAt || msg.sentAt || null]
-        );
-        if (result.rows.length > 0) imported++;
-      }
-    }
-    res.json({ success: true, imported, total: data.totalElements || 0 });
-  } catch (err) {
-    console.error('SMS fetch error:', err);
-    res.status(500).json({ error: `Peoplefon-Abruf fehlgeschlagen: ${err.message}` });
-  }
-});
-
-// Send SMS via Peoplefon (admin only)
-app.post('/api/sms/send', authMiddleware, adminOnly, async (req, res) => {
-  if (!PEOPLEFON_API_KEY) {
-    return res.status(400).json({ error: 'Peoplefon API-Key nicht konfiguriert' });
-  }
-  const { to, text } = req.body;
-  if (!to || !text) {
-    return res.status(400).json({ error: 'Empfänger und Text erforderlich' });
-  }
-  try {
-    const result = await peoplefonRequest('POST', '/v1/sms/messages', {
-      to: Array.isArray(to) ? to : [to],
-      text
-    });
-    // Store sent messages locally
-    const messages = result.messages || [result];
-    for (const msg of messages) {
-      await pool.query(
-        `INSERT INTO sms_inbox (message_id, direction, sender, recipient, message, status, received_at)
-         VALUES ($1, 'MT', $2, $3, $4, $5, COALESCE($6::timestamp, NOW()))
-         ON CONFLICT (message_id) DO NOTHING`,
-        [msg.messageId, PEOPLEFON_NUMBER, msg.to || to, text, msg.status || 'sent', msg.receivedAt || null]
-      );
-    }
-    res.json({ success: true, messageId: messages[0]?.messageId });
-  } catch (err) {
-    console.error('SMS send error:', err);
-    res.status(500).json({ error: `SMS-Versand fehlgeschlagen: ${err.message}` });
-  }
-});
-
-// Get received SMS (admin only)
-app.get('/api/sms/inbox', authMiddleware, adminOnly, async (req, res) => {
-  try {
-    const result = await pool.query(
-      'SELECT * FROM sms_inbox ORDER BY received_at DESC LIMIT 50'
-    );
-    res.json({ messages: result.rows, number: PEOPLEFON_NUMBER });
-  } catch (err) {
-    res.status(500).json({ error: 'Fehler beim Laden der SMS' });
-  }
-});
-
-// Mark SMS as read
-app.patch('/api/sms/inbox/:id/read', authMiddleware, adminOnly, async (req, res) => {
-  try {
-    await pool.query('UPDATE sms_inbox SET read = true WHERE id = $1', [req.params.id]);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: 'Fehler' });
-  }
-});
-
-// Delete SMS
-app.delete('/api/sms/inbox/:id', authMiddleware, adminOnly, async (req, res) => {
-  try {
-    await pool.query('DELETE FROM sms_inbox WHERE id = $1', [req.params.id]);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: 'Fehler' });
-  }
-});
 
 // ═══════════════════════════════════════════════════════════════════
 // EMAIL VERTEILERLISTEN (Cloudflare Worker → API → SMTP2GO)
@@ -2367,40 +2181,6 @@ app.get('/api/calendar', async (req, res) => {
   }
 });
 
-// ─── SMS Auto-Fetch (poll Peoplefon every 60s) ─────────────────────
-let smsFetchInterval = null;
-
-async function autoFetchSms() {
-  if (!PEOPLEFON_API_KEY) return;
-  try {
-    const data = await peoplefonRequest('GET', '/v1/sms/messages?pageSize=50');
-    if (data.messages && data.messages.length > 0) {
-      for (const msg of data.messages) {
-        // Determine direction: if 'to' matches our number, it's incoming (MO), otherwise outgoing (MT)
-        const direction = msg.direction || (msg.to === PEOPLEFON_NUMBER ? 'MO' : 'MT');
-        const sender = direction === 'MO' ? msg.from : (msg.from || PEOPLEFON_NUMBER);
-        const recipient = direction === 'MO' ? PEOPLEFON_NUMBER : msg.to;
-        // Fetch full message details if text is missing
-        let text = msg.text || '';
-        if (!text && msg.messageId) {
-          try {
-            const details = await peoplefonRequest('GET', `/v1/sms/messages/${msg.messageId}`);
-            text = details.text || '';
-          } catch {}
-        }
-        await pool.query(
-          `INSERT INTO sms_inbox (message_id, direction, sender, recipient, message, status, received_at)
-           VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::timestamp, NOW()))
-           ON CONFLICT (message_id) DO UPDATE SET status = EXCLUDED.status, message = CASE WHEN sms_inbox.message = '' OR sms_inbox.message IS NULL THEN EXCLUDED.message ELSE sms_inbox.message END`,
-          [msg.messageId, direction, sender, recipient, text, msg.status || 'unknown', msg.receivedAt || msg.sentAt || null]
-        );
-      }
-    }
-  } catch (err) {
-    console.error('SMS auto-fetch error:', err.message);
-  }
-}
-
 // ═══════════════════════════════════════════════════════════════════
 // AUTHENTIK ADMIN PROXY API
 // ═══════════════════════════════════════════════════════════════════
@@ -2745,19 +2525,6 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_zaehler ON zaehler_daten(zaehler_id, timestamp);
 
-      CREATE TABLE IF NOT EXISTS sms_inbox (
-        id SERIAL PRIMARY KEY,
-        message_id VARCHAR(255) UNIQUE,
-        direction VARCHAR(10) DEFAULT 'MO',
-        sender VARCHAR(50),
-        recipient VARCHAR(50),
-        message TEXT,
-        status VARCHAR(50),
-        received_at TIMESTAMP DEFAULT NOW(),
-        read BOOLEAN DEFAULT false,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-
       CREATE TABLE IF NOT EXISTS email_log (
         id SERIAL PRIMARY KEY,
         verteiler_id INTEGER REFERENCES email_verteiler(id) ON DELETE SET NULL,
@@ -2795,11 +2562,6 @@ async function initDB() {
       ALTER TABLE email_verteiler ADD COLUMN IF NOT EXISTS reply_to VARCHAR(255) DEFAULT 'sender';
       ALTER TABLE email_verteiler ADD COLUMN IF NOT EXISTS subject_prefix VARCHAR(100);
       ALTER TABLE email_verteiler ADD COLUMN IF NOT EXISTS group_name VARCHAR(255);
-
-      -- Migrate existing sms_inbox if missing new columns
-      ALTER TABLE sms_inbox ADD COLUMN IF NOT EXISTS message_id VARCHAR(255) UNIQUE;
-      ALTER TABLE sms_inbox ADD COLUMN IF NOT EXISTS direction VARCHAR(10) DEFAULT 'MO';
-      ALTER TABLE sms_inbox ADD COLUMN IF NOT EXISTS status VARCHAR(50);
 
       -- Migrate wasch_reservations: old schema had date+time_slot or missing room_id
       DO $$ BEGIN
@@ -2931,12 +2693,6 @@ initDB()
   .then(() => {
     app.listen(PORT, () => {
       console.log(`Rosenweg API running on port ${PORT}`);
-      // Start SMS auto-fetch every 60 seconds
-      if (PEOPLEFON_API_KEY) {
-        autoFetchSms(); // initial fetch
-        smsFetchInterval = setInterval(autoFetchSms, 60 * 1000);
-        console.log('SMS auto-fetch enabled (60s interval)');
-      }
       // Start Waschküche cron jobs
       startWaschCron();
     });
