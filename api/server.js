@@ -1800,37 +1800,22 @@ async function pollGmailForVerteiler() {
     const lock = await client.getMailboxLock('INBOX');
 
     try {
-      const messages = await client.search({ seen: false });
-      if (!messages.length) { lock.release(); await client.logout(); return; }
-
-      for (const uid of messages) {
+      // Use fetch iterator (fetchOne doesn't return source correctly)
+      for await (const msg of client.fetch({ seen: false }, { uid: true, source: true })) {
         try {
-          const msg = await client.fetchOne(uid, { source: true, envelope: true, headers: ['delivered-to', 'x-original-to'] }, { uid: true });
           if (!msg?.source) continue;
 
-          // Find plus-tag from headers
-          let plusTag = null;
-          const sourceStr = msg.source.toString('utf8', 0, Math.min(msg.source.length, 4096)); // only scan headers
+          // Scan first 4KB of headers for plus-tag
+          const headerStr = msg.source.toString('utf8', 0, Math.min(msg.source.length, 4096));
 
-          // Check Delivered-To header for plus-tag
-          const deliveredMatch = sourceStr.match(/^Delivered-To:\s*[^+\r\n]+\+([^@\r\n]+)@/im);
+          let plusTag = null;
+          // Check Delivered-To header for plus-tag (rosenweg4303+ausschuss@gmail.com)
+          const deliveredMatch = headerStr.match(/^Delivered-To:\s*[^+\r\n]+\+([^@\r\n]+)@/im);
           if (deliveredMatch) {
             plusTag = deliveredMatch[1].toLowerCase();
           }
 
-          // Check X-Original-To header
-          if (!plusTag) {
-            const origMatch = sourceStr.match(/^X-Original-To:\s*([^@\r\n]+)@/im);
-            if (origMatch) {
-              const localPart = origMatch[1].toLowerCase();
-              // If it's a direct verteiler address (no plus), use it
-              if (!localPart.includes('+')) {
-                plusTag = localPart;
-              }
-            }
-          }
-
-          if (!plusTag) continue; // Not a verteiler email
+          if (!plusTag) continue; // Not a plus-tagged verteiler email
 
           const verteilerAddress = `${plusTag}@${VERTEILER_DOMAIN}`;
           console.log(`[IMAP] Processing: +${plusTag} → ${verteilerAddress}`);
@@ -1838,8 +1823,8 @@ async function pollGmailForVerteiler() {
           const result = await processInboundEmail(msg.source, verteilerAddress);
           console.log(`[IMAP] Result: ${result.action} (${result.recipients || 0} recipients)`);
 
-          // Mark as read
-          await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
+          // Mark as read after successful processing
+          await client.messageFlagsAdd(msg.uid, ['\\Seen'], { uid: true });
         } catch (msgErr) {
           console.error(`[IMAP] Error processing message:`, msgErr.message);
         }
