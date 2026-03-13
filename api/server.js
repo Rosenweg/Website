@@ -1793,7 +1793,7 @@ async function pollGmailForVerteiler() {
     secure: true,
     auth: { user: IMAP_USER, pass: IMAP_PASS },
     logger: false,
-    socketTimeout: 30000,
+    socketTimeout: 120000,
   });
   client.on('error', (err) => {
     console.error('[IMAP] Connection error:', err.message);
@@ -1804,14 +1804,26 @@ async function pollGmailForVerteiler() {
     const lock = await client.getMailboxLock('INBOX');
 
     try {
-      for await (const msg of client.fetch({ seen: false }, { uid: true, source: true })) {
+      // Search for unread emails, then process one at a time
+      const uids = await client.search({ seen: false }, { uid: true });
+      if (!uids.length) { lock.release(); await client.logout(); return; }
+
+      for (const uid of uids) {
         try {
-          if (!msg?.source) continue;
+          // Mark as read immediately to prevent reprocessing
+          await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
+
+          // Fetch this single message
+          let source = null;
+          for await (const msg of client.fetch(String(uid), { source: true }, { uid: true })) {
+            source = msg.source;
+          }
+          if (!source) continue;
 
           // Scan headers (can be >9KB with DKIM/ARC signatures)
-          const headerEnd = msg.source.indexOf('\r\n\r\n');
-          const scanLen = headerEnd > 0 ? headerEnd : Math.min(msg.source.length, 16384);
-          const headerStr = msg.source.toString('utf8', 0, scanLen);
+          const headerEnd = source.indexOf('\r\n\r\n');
+          const scanLen = headerEnd > 0 ? headerEnd : Math.min(source.length, 16384);
+          const headerStr = source.toString('utf8', 0, scanLen);
 
           // Extract Message-ID for deduplication
           const msgIdMatch = headerStr.match(/^Message-ID:\s*<?([^>\r\n]+)>?/im);
@@ -1819,30 +1831,19 @@ async function pollGmailForVerteiler() {
 
           let verteilerAddress = null;
 
-          // Method 1: Plus-tag in Delivered-To (rosenweg4303+ausschuss@gmail.com)
+          // Plus-tag in Delivered-To (rosenweg4303+ausschuss@gmail.com)
           const plusMatch = headerStr.match(/^Delivered-To:\s*[^+\r\n]+\+([^@\r\n]+)@/im);
           if (plusMatch) {
             verteilerAddress = `${plusMatch[1].toLowerCase()}@${VERTEILER_DOMAIN}`;
           }
 
-          // Method 2: To: header contains @rosenweg4303.ch address
+          // To: header contains @rosenweg4303.ch address
           if (!verteilerAddress) {
             const toMatch = headerStr.match(/^To:\s*[^]*?([a-z0-9._-]+@rosenweg4303\.ch)/im);
             if (toMatch) {
               verteilerAddress = toMatch[1].toLowerCase();
             }
           }
-
-          // Method 3: X-Original-To header
-          if (!verteilerAddress) {
-            const origMatch = headerStr.match(/^X-Original-To:\s*([^\s]+@rosenweg4303\.ch)/im);
-            if (origMatch) {
-              verteilerAddress = origMatch[1].toLowerCase();
-            }
-          }
-
-          // Mark as read immediately to prevent reprocessing on next poll
-          await client.messageFlagsAdd(msg.uid, ['\\Seen'], { uid: true });
 
           if (!verteilerAddress) continue; // Not a verteiler email
 
@@ -1852,24 +1853,20 @@ async function pollGmailForVerteiler() {
           );
           if (exists.rows.length === 0) continue;
 
-          // Dedup: skip if already processed (same message-id in email_log)
+          // Dedup: skip if already processed (same message-id)
           if (messageId) {
-            const dup = await pool.query(
-              'SELECT id FROM email_log WHERE message_id = $1', [messageId]
-            );
+            const dup = await pool.query('SELECT id FROM email_log WHERE message_id = $1', [messageId]);
             if (dup.rows.length > 0) {
               console.log(`[IMAP] Skipping duplicate: ${messageId}`);
               continue;
             }
           }
 
-          console.log(`[IMAP] Processing: ${verteilerAddress} (UID ${msg.uid})`);
-          const result = await processInboundEmail(msg.source, verteilerAddress, messageId);
+          console.log(`[IMAP] Processing: ${verteilerAddress} (UID ${uid})`);
+          const result = await processInboundEmail(source, verteilerAddress, messageId);
           console.log(`[IMAP] Result: ${result.action} (${result.recipients || 0} recipients)`);
-
-          // Already marked as read above; dedup via message_id prevents reprocessing
         } catch (msgErr) {
-          console.error(`[IMAP] Error processing message:`, msgErr.message);
+          console.error(`[IMAP] Error processing UID ${uid}:`, msgErr.message);
         }
       }
     } finally {
