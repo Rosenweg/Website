@@ -8,4 +8,4 @@ compatibility_date = "2024-01-01"
 
 [vars]
 API_URL = "https://www.rosenweg4303.ch/api/email/inbound"
-FALLBACK_EMAIL = "rosenweg4303@gmail.com"
+ARCHIVE_EMAIL = "rosenweg4303@gmail.com"

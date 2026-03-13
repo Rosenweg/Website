@@ -17,12 +17,20 @@ export default {
   async email(message, env, ctx) {
     const apiUrl = env.API_URL || "https://www.rosenweg4303.ch/api/email/inbound";
     const secret = env.EMAIL_SECRET || "rosenweg-email-2026";
+    const archiveEmail = env.ARCHIVE_EMAIL || "rosenweg4303@gmail.com";
+
+    // Always forward a copy to the archive/Gmail
+    try {
+      await message.forward(archiveEmail);
+    } catch (fwdErr) {
+      console.log(`Archive forward failed: ${fwdErr.message}`);
+    }
 
     try {
       // Read the raw email as a stream
       const rawEmail = await new Response(message.raw).arrayBuffer();
 
-      // Forward to our API
+      // Forward to our API for verteiler distribution
       const response = await fetch(apiUrl, {
         method: "POST",
         headers: {
@@ -37,16 +45,12 @@ export default {
       if (!response.ok) {
         const text = await response.text();
         console.log(`API error ${response.status}: ${text}`);
-        // If API fails, forward to fallback
-        await message.forward(env.FALLBACK_EMAIL || "rosenweg4303@gmail.com");
       } else {
         const result = await response.json();
         console.log(`Email processed: ${message.from} → ${message.to} | ${result.action} (${result.recipients || 0} recipients)`);
       }
     } catch (err) {
       console.log(`Worker error: ${err.message}`);
-      // Fallback: forward to Gmail
-      await message.forward(env.FALLBACK_EMAIL || "rosenweg4303@gmail.com");
     }
   },
 };
