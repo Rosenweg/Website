@@ -1793,6 +1793,10 @@ async function pollGmailForVerteiler() {
     secure: true,
     auth: { user: IMAP_USER, pass: IMAP_PASS },
     logger: false,
+    socketTimeout: 30000,
+  });
+  client.on('error', (err) => {
+    console.error('[IMAP] Connection error:', err.message);
   });
 
   try {
