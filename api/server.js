@@ -1746,10 +1746,12 @@ app.post('/api/email/inbound', async (req, res) => {
       cid: att.cid || undefined,
     }));
 
-    // Send to all recipients in one mail
+    // Send to all recipients (+ archive BCC to Gmail)
+    const archiveEmail = process.env.ARCHIVE_EMAIL || 'rosenweg4303@gmail.com';
     await transporter.sendMail({
       from: `"${senderName} via ${list.name}" <${toAddress}>`,
       to: recipients,
+      bcc: archiveEmail,
       replyTo: replyTo,
       subject: subject,
       text: parsed.text || '',
