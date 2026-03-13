@@ -1804,8 +1804,10 @@ async function pollGmailForVerteiler() {
         try {
           if (!msg?.source) continue;
 
-          // Scan headers for verteiler address
-          const headerStr = msg.source.toString('utf8', 0, Math.min(msg.source.length, 4096));
+          // Scan headers (can be >9KB with DKIM/ARC signatures)
+          const headerEnd = msg.source.indexOf('\r\n\r\n');
+          const scanLen = headerEnd > 0 ? headerEnd : Math.min(msg.source.length, 16384);
+          const headerStr = msg.source.toString('utf8', 0, scanLen);
 
           let verteilerAddress = null;
 
