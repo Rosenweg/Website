@@ -221,11 +221,10 @@
                             </div>
                         </div>
                         <div class="mb-3">
-                            <label class="text-xs text-gray-500">Authentik-Gruppe</label>
-                            <select id="vf-group" class="w-full text-sm px-3 py-2 border rounded-lg">
-                                <option value="">-- Gruppe wählen --</option>
+                            <label class="text-xs text-gray-500">Authentik-Gruppen (mehrere möglich)</label>
+                            <select id="vf-group" multiple class="w-full text-sm px-3 py-2 border rounded-lg" size="6">
                             </select>
-                            <p class="text-xs text-gray-400 mt-1">Alle Mitglieder dieser Gruppe und aller Untergruppen werden automatisch einbezogen.</p>
+                            <p class="text-xs text-gray-400 mt-1">Alle Mitglieder der gewählten Gruppen und deren Untergruppen werden automatisch einbezogen. Strg/Cmd gedrückt halten für Mehrfachauswahl.</p>
                             <div id="vf-group-preview" class="mt-2"></div>
                         </div>
                         <div class="flex gap-2">
@@ -413,8 +412,9 @@
                 el.innerHTML = adminVerteilerData.map(v => {
                     const statusClass = v.active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500';
                     const statusText = v.active ? 'Aktiv' : 'Inaktiv';
-                    const sourceTag = v.group_name
-                        ? `<span class="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">Gruppe: ${escapeHtml(v.group_name)}</span>`
+                    const groups = v.group_names?.length ? v.group_names : (v.group_name ? [v.group_name] : []);
+                    const sourceTag = groups.length > 0
+                        ? groups.map(g => `<span class="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">${escapeHtml(g)}</span>`).join(' ')
                         : `<span class="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">Statisch</span>`;
                     return `
                     <div class="p-4 bg-gray-50 rounded-lg border hover:border-blue-300 cursor-pointer" onclick="editVerteiler(${v.id})">
@@ -459,27 +459,21 @@
             }
         }
 
-        function populateGroupDropdown(selected) {
+        function populateGroupDropdown(selectedGroups) {
             const select = document.getElementById('vf-group');
-            select.innerHTML = '<option value="">-- Gruppe wählen --</option>' +
-                authentikGroups.map(g =>
-                    `<option value="${escapeHtml(g.name)}" ${g.name === selected ? 'selected' : ''}>${escapeHtml(g.name)}</option>`
-                ).join('');
+            const selected = Array.isArray(selectedGroups) ? selectedGroups : (selectedGroups ? [selectedGroups] : []);
+            select.innerHTML = authentikGroups.map(g =>
+                `<option value="${escapeHtml(g.name)}" ${selected.includes(g.name) ? 'selected' : ''}>${escapeHtml(g.name)}</option>`
+            ).join('');
         }
 
-        // Preview resolved group members when group changes
+        // Preview resolved group members when group selection changes
         document.addEventListener('change', async (e) => {
             if (e.target.id !== 'vf-group') return;
             const preview = document.getElementById('vf-group-preview');
-            const groupName = e.target.value;
-            if (!groupName) { preview.innerHTML = ''; return; }
-            // Check if we already have resolved emails from admin data
-            const cached = adminVerteilerData.find(v => v.group_name === groupName);
-            if (cached?.resolved_emails) {
-                preview.innerHTML = `<div class="bg-white border rounded-lg p-2 mt-1"><p class="text-xs font-medium text-green-700 mb-1">${cached.resolved_emails.length} Empfänger (inkl. Untergruppen):</p><p class="text-xs text-gray-500">${cached.resolved_emails.join(', ')}</p></div>`;
-            } else {
-                preview.innerHTML = `<p class="text-xs text-blue-600 mt-1">Gruppe wird beim Senden aufgelöst (inkl. Untergruppen)</p>`;
-            }
+            const selectedGroups = [...e.target.selectedOptions].map(o => o.value);
+            if (selectedGroups.length === 0) { preview.innerHTML = ''; return; }
+            preview.innerHTML = `<p class="text-xs text-blue-600 mt-1">${selectedGroups.length} Gruppe(n) gewählt – Empfänger werden beim Senden aufgelöst (inkl. Untergruppen)</p>`;
         });
 
 
@@ -513,10 +507,11 @@
             document.getElementById('vf-stweg').value = v.stweg || '';
             document.getElementById('vf-reply-to').value = v.reply_to || 'sender';
             document.getElementById('vf-prefix').value = v.subject_prefix || '';
-            populateGroupDropdown(v.group_name || '');
+            const groups = v.group_names?.length ? v.group_names : (v.group_name ? [v.group_name] : []);
+            populateGroupDropdown(groups);
             // Show resolved members preview
             if (v.resolved_emails) {
-                document.getElementById('vf-group-preview').innerHTML = `<div class="bg-white border rounded-lg p-2 mt-1"><p class="text-xs font-medium text-green-700 mb-1">${v.resolved_emails.length} Empfänger (inkl. Untergruppen):</p><p class="text-xs text-gray-500">${v.resolved_emails.join(', ')}</p></div>`;
+                document.getElementById('vf-group-preview').innerHTML = `<div class="bg-white border rounded-lg p-2 mt-1"><p class="text-xs font-medium text-green-700 mb-1">${v.resolved_emails.length} Empfänger aus ${groups.length} Gruppe(n) (inkl. Untergruppen):</p><p class="text-xs text-gray-500">${v.resolved_emails.join(', ')}</p></div>`;
             } else {
                 document.getElementById('vf-group-preview').innerHTML = '';
             }
@@ -526,13 +521,13 @@
             const id = document.getElementById('vf-id').value;
             const name = document.getElementById('vf-name').value;
             const email_address = document.getElementById('vf-email').value;
-            const group_name = document.getElementById('vf-group').value;
+            const group_names = [...document.getElementById('vf-group').selectedOptions].map(o => o.value);
             if (!name || !email_address) return alert('Name und E-Mail-Adresse erforderlich');
-            if (!group_name) return alert('Bitte eine Authentik-Gruppe wählen');
+            if (group_names.length === 0) return alert('Bitte mindestens eine Authentik-Gruppe wählen');
 
             const body = {
                 stweg: parseInt(document.getElementById('vf-stweg').value) || 0,
-                name, email_address, group_name,
+                name, email_address, group_names,
                 reply_to: document.getElementById('vf-reply-to').value,
                 subject_prefix: document.getElementById('vf-prefix').value || null,
                 active: true
