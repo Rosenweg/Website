@@ -17,27 +17,13 @@ export default {
   async email(message, env, ctx) {
     const apiUrl = env.API_URL || "https://www.rosenweg4303.ch/api/email/inbound";
     const secret = env.EMAIL_SECRET || "rosenweg-email-2026";
-    const archiveEmail = env.ARCHIVE_EMAIL || "rosenweg4303@gmail.com";
+    const fallbackEmail = env.ARCHIVE_EMAIL || "rosenweg4303@gmail.com";
 
-    // Read raw email FIRST before any forwarding (stream can only be consumed once)
-    let rawEmail;
     try {
-      rawEmail = await new Response(message.raw).arrayBuffer();
-    } catch (err) {
-      console.log(`Failed to read raw email: ${err.message}`);
-      await message.forward(archiveEmail);
-      return;
-    }
+      // Read the raw email (stream can only be consumed once)
+      const rawEmail = await new Response(message.raw).arrayBuffer();
 
-    // Forward copy to Gmail archive using raw bytes
-    try {
-      await message.forward(archiveEmail);
-    } catch (fwdErr) {
-      console.log(`Archive forward failed: ${fwdErr.message}`);
-    }
-
-    // Forward to API for verteiler distribution
-    try {
+      // Forward to our API for verteiler distribution (API also sends archive copy)
       const response = await fetch(apiUrl, {
         method: "POST",
         headers: {
@@ -52,12 +38,16 @@ export default {
       if (!response.ok) {
         const text = await response.text();
         console.log(`API error ${response.status}: ${text}`);
+        // API failed - forward to Gmail as fallback
+        await message.forward(fallbackEmail);
       } else {
         const result = await response.json();
         console.log(`Email processed: ${message.from} → ${message.to} | ${result.action} (${result.recipients || 0} recipients)`);
       }
     } catch (err) {
       console.log(`Worker error: ${err.message}`);
+      // Worker/network error - forward to Gmail as fallback
+      await message.forward(fallbackEmail);
     }
   },
 };
