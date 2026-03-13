@@ -1683,7 +1683,7 @@ app.post('/api/email/send', authMiddleware, adminOnly, async (req, res) => {
 const EMAIL_INBOUND_SECRET = process.env.EMAIL_INBOUND_SECRET || 'rosenweg-email-2026';
 
 // ─── Shared email processing logic ──────────────────────────────────
-async function processInboundEmail(rawEmail, overrideToAddress) {
+async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
   const parsed = await simpleParser(Buffer.isBuffer(rawEmail) ? rawEmail : Buffer.from(rawEmail));
 
   const toAddress = overrideToAddress || parsed.to?.value?.[0]?.address?.toLowerCase();
@@ -1751,10 +1751,10 @@ async function processInboundEmail(rawEmail, overrideToAddress) {
   console.log(`Distributed email to ${recipients.length} recipients for ${toAddress}`);
 
   await pool.query(
-    `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, status, message_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
     [list.id, senderEmail, senderName, parsed.subject, recipients.length, attachments.length > 0,
-     JSON.stringify(recipients), 'sent']
+     JSON.stringify(recipients), 'sent', messageId || parsed.messageId || null]
   );
 
   return { success: true, action: 'distributed', recipients: recipients.length };
@@ -1809,6 +1809,10 @@ async function pollGmailForVerteiler() {
           const scanLen = headerEnd > 0 ? headerEnd : Math.min(msg.source.length, 16384);
           const headerStr = msg.source.toString('utf8', 0, scanLen);
 
+          // Extract Message-ID for deduplication
+          const msgIdMatch = headerStr.match(/^Message-ID:\s*<?([^>\r\n]+)>?/im);
+          const messageId = msgIdMatch ? msgIdMatch[1].trim() : null;
+
           let verteilerAddress = null;
 
           // Method 1: Plus-tag in Delivered-To (rosenweg4303+ausschuss@gmail.com)
@@ -1833,24 +1837,33 @@ async function pollGmailForVerteiler() {
             }
           }
 
+          // Mark as read immediately to prevent reprocessing on next poll
+          await client.messageFlagsAdd(msg.uid, ['\\Seen'], { uid: true });
+
           if (!verteilerAddress) continue; // Not a verteiler email
 
-          // Check if verteiler exists before processing
+          // Check if verteiler exists
           const exists = await pool.query(
             'SELECT id FROM email_verteiler WHERE email_address = $1 AND active = true', [verteilerAddress]
           );
-          if (exists.rows.length === 0) {
-            // Mark as read to avoid reprocessing non-verteiler emails
-            await client.messageFlagsAdd(msg.uid, ['\\Seen'], { uid: true });
-            continue;
+          if (exists.rows.length === 0) continue;
+
+          // Dedup: skip if already processed (same message-id in email_log)
+          if (messageId) {
+            const dup = await pool.query(
+              'SELECT id FROM email_log WHERE message_id = $1', [messageId]
+            );
+            if (dup.rows.length > 0) {
+              console.log(`[IMAP] Skipping duplicate: ${messageId}`);
+              continue;
+            }
           }
 
           console.log(`[IMAP] Processing: ${verteilerAddress} (UID ${msg.uid})`);
-          const result = await processInboundEmail(msg.source, verteilerAddress);
+          const result = await processInboundEmail(msg.source, verteilerAddress, messageId);
           console.log(`[IMAP] Result: ${result.action} (${result.recipients || 0} recipients)`);
 
-          // Mark as read after successful processing
-          await client.messageFlagsAdd(msg.uid, ['\\Seen'], { uid: true });
+          // Already marked as read above; dedup via message_id prevents reprocessing
         } catch (msgErr) {
           console.error(`[IMAP] Error processing message:`, msgErr.message);
         }
@@ -2679,6 +2692,7 @@ async function initDB() {
       ALTER TABLE email_log ADD COLUMN IF NOT EXISTS recipients_list TEXT;
       ALTER TABLE email_log ADD COLUMN IF NOT EXISTS failed_recipients TEXT;
       ALTER TABLE email_log ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'sent';
+      ALTER TABLE email_log ADD COLUMN IF NOT EXISTS message_id VARCHAR(500);
 
       CREATE TABLE IF NOT EXISTS zaehler_config (
         id SERIAL PRIMARY KEY,
