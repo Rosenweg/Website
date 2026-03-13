@@ -1677,109 +1677,193 @@ app.post('/api/email/send', authMiddleware, adminOnly, async (req, res) => {
 
 
 // ═══════════════════════════════════════════════════════════════════
-// EMAIL VERTEILERLISTEN (Cloudflare Worker → API → SMTP2GO)
+// EMAIL VERTEILERLISTEN (Cloudflare Worker → Gmail+tag → IMAP → SMTP2GO)
 // ═══════════════════════════════════════════════════════════════════
 
 const EMAIL_INBOUND_SECRET = process.env.EMAIL_INBOUND_SECRET || 'rosenweg-email-2026';
 
-// Inbound email webhook - receives raw email from Cloudflare Worker
+// ─── Shared email processing logic ──────────────────────────────────
+async function processInboundEmail(rawEmail, overrideToAddress) {
+  const parsed = await simpleParser(Buffer.isBuffer(rawEmail) ? rawEmail : Buffer.from(rawEmail));
+
+  const toAddress = overrideToAddress || parsed.to?.value?.[0]?.address?.toLowerCase();
+  if (!toAddress) {
+    return { success: false, error: 'No recipient found' };
+  }
+
+  console.log(`Email inbound: ${parsed.from?.text} → ${toAddress} | Subject: ${parsed.subject}`);
+
+  const verteiler = await pool.query(
+    'SELECT * FROM email_verteiler WHERE email_address = $1 AND active = true',
+    [toAddress]
+  );
+
+  if (verteiler.rows.length === 0) {
+    console.log(`No verteiler found for ${toAddress}, dropping`);
+    return { success: true, action: 'dropped', reason: 'no verteiler' };
+  }
+
+  const list = verteiler.rows[0];
+  const senderEmail = parsed.from?.value?.[0]?.address || '';
+  const senderName = parsed.from?.value?.[0]?.name || senderEmail;
+  const recipients = await resolveVerteilerRecipients(list);
+
+  if (recipients.length === 0) {
+    return { success: true, action: 'dropped', reason: 'no valid recipients' };
+  }
+
+  const subjectPrefix = list.subject_prefix || `[${list.name}]`;
+  const subject = parsed.subject?.startsWith(subjectPrefix)
+    ? parsed.subject
+    : `${subjectPrefix} ${parsed.subject || '(kein Betreff)'}`;
+
+  let replyTo;
+  if (list.reply_to === 'list') {
+    replyTo = toAddress;
+  } else if (list.reply_to === 'sender') {
+    replyTo = senderEmail;
+  } else {
+    replyTo = list.reply_to || senderEmail;
+  }
+
+  const attachments = (parsed.attachments || []).map(att => ({
+    filename: att.filename,
+    content: att.content,
+    contentType: att.contentType,
+    cid: att.cid || undefined,
+  }));
+
+  await transporter.sendMail({
+    from: `"${senderName} via ${list.name}" <${toAddress}>`,
+    to: recipients,
+    replyTo: replyTo,
+    subject: subject,
+    text: parsed.text || '',
+    html: parsed.html || undefined,
+    attachments: attachments,
+    headers: {
+      'List-Id': `<${toAddress.replace('@', '.')}>`,
+      'List-Post': `<mailto:${toAddress}>`,
+      'X-Original-From': senderEmail,
+      'X-Forwarded-By': 'Rosenweg Verteiler',
+    },
+  });
+  console.log(`Distributed email to ${recipients.length} recipients for ${toAddress}`);
+
+  await pool.query(
+    `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [list.id, senderEmail, senderName, parsed.subject, recipients.length, attachments.length > 0,
+     JSON.stringify(recipients), 'sent']
+  );
+
+  return { success: true, action: 'distributed', recipients: recipients.length };
+}
+
+// HTTP endpoint (kept for direct API testing)
 app.post('/api/email/inbound', async (req, res) => {
-  // Verify secret
   const secret = req.headers['x-email-secret'] || req.query.secret;
   if (secret !== EMAIL_INBOUND_SECRET) {
     return res.status(403).json({ error: 'Unauthorized' });
   }
-
   try {
-    const rawEmail = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body);
-    const parsed = await simpleParser(rawEmail);
-
-    const toAddress = parsed.to?.value?.[0]?.address?.toLowerCase();
-    if (!toAddress) {
-      return res.status(400).json({ error: 'No recipient found' });
-    }
-
-    console.log(`Email inbound: ${parsed.from?.text} → ${toAddress} | Subject: ${parsed.subject}`);
-
-    // Look up verteiler
-    const verteiler = await pool.query(
-      'SELECT * FROM email_verteiler WHERE email_address = $1 AND active = true',
-      [toAddress]
-    );
-
-    if (verteiler.rows.length === 0) {
-      console.log(`No verteiler found for ${toAddress}, dropping`);
-      return res.json({ success: true, action: 'dropped', reason: 'no verteiler' });
-    }
-
-    const list = verteiler.rows[0];
-    const senderEmail = parsed.from?.value?.[0]?.address || '';
-    const senderName = parsed.from?.value?.[0]?.name || senderEmail;
-
-    const recipients = await resolveVerteilerRecipients(list);
-
-    if (recipients.length === 0) {
-      return res.json({ success: true, action: 'dropped', reason: 'no valid recipients' });
-    }
-
-    // Build forwarded email
-    const subjectPrefix = list.subject_prefix || `[${list.name}]`;
-    const subject = parsed.subject?.startsWith(subjectPrefix)
-      ? parsed.subject
-      : `${subjectPrefix} ${parsed.subject || '(kein Betreff)'}`;
-
-    // Determine reply-to based on verteiler config
-    let replyTo;
-    if (list.reply_to === 'list') {
-      replyTo = toAddress; // Reply goes back to the list
-    } else if (list.reply_to === 'sender') {
-      replyTo = senderEmail; // Reply goes to original sender
-    } else {
-      replyTo = list.reply_to || senderEmail; // Custom or default to sender
-    }
-
-    // Prepare attachments from parsed email
-    const attachments = (parsed.attachments || []).map(att => ({
-      filename: att.filename,
-      content: att.content,
-      contentType: att.contentType,
-      cid: att.cid || undefined,
-    }));
-
-    // Send to all recipients (+ archive BCC to Gmail)
-    const archiveEmail = process.env.ARCHIVE_EMAIL || 'rosenweg4303@gmail.com';
-    await transporter.sendMail({
-      from: `"${senderName} via ${list.name}" <${toAddress}>`,
-      to: recipients,
-      bcc: archiveEmail,
-      replyTo: replyTo,
-      subject: subject,
-      text: parsed.text || '',
-      html: parsed.html || undefined,
-      attachments: attachments,
-      headers: {
-        'List-Id': `<${toAddress.replace('@', '.')}>`,
-        'List-Post': `<mailto:${toAddress}>`,
-        'X-Original-From': senderEmail,
-        'X-Forwarded-By': 'Rosenweg Verteiler',
-      },
-    });
-    console.log(`Distributed email to ${recipients.length} recipients for ${toAddress}`);
-
-    // Log to DB
-    await pool.query(
-      `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [list.id, senderEmail, senderName, parsed.subject, recipients.length, attachments.length > 0,
-       JSON.stringify(recipients), 'sent']
-    );
-
-    res.json({ success: true, action: 'distributed', recipients: recipients.length });
+    const result = await processInboundEmail(req.body);
+    res.json(result);
   } catch (err) {
     console.error('Email inbound error:', err);
     res.status(500).json({ error: `Email-Verarbeitung fehlgeschlagen: ${err.message}` });
   }
 });
+
+// ─── IMAP Gmail Polling ──────────────────────────────────────────────
+const IMAP_HOST = process.env.IMAP_HOST || 'imap.gmail.com';
+const IMAP_PORT = parseInt(process.env.IMAP_PORT || '993');
+const IMAP_USER = process.env.IMAP_USER || '';
+const IMAP_PASS = process.env.IMAP_PASS || '';  // Gmail App Password
+const IMAP_POLL_INTERVAL = parseInt(process.env.IMAP_POLL_INTERVAL || '60') * 1000;
+const VERTEILER_DOMAIN = process.env.VERTEILER_DOMAIN || 'rosenweg4303.ch';
+
+async function pollGmailForVerteiler() {
+  if (!IMAP_USER || !IMAP_PASS) return;
+
+  const { ImapFlow } = require('imapflow');
+  const client = new ImapFlow({
+    host: IMAP_HOST,
+    port: IMAP_PORT,
+    secure: true,
+    auth: { user: IMAP_USER, pass: IMAP_PASS },
+    logger: false,
+  });
+
+  try {
+    await client.connect();
+    const lock = await client.getMailboxLock('INBOX');
+
+    try {
+      const messages = await client.search({ seen: false });
+      if (!messages.length) { lock.release(); await client.logout(); return; }
+
+      for (const uid of messages) {
+        try {
+          const msg = await client.fetchOne(uid, { source: true, envelope: true, headers: ['delivered-to', 'x-original-to'] }, { uid: true });
+          if (!msg?.source) continue;
+
+          // Find plus-tag from headers
+          let plusTag = null;
+          const sourceStr = msg.source.toString('utf8', 0, Math.min(msg.source.length, 4096)); // only scan headers
+
+          // Check Delivered-To header for plus-tag
+          const deliveredMatch = sourceStr.match(/^Delivered-To:\s*[^+\r\n]+\+([^@\r\n]+)@/im);
+          if (deliveredMatch) {
+            plusTag = deliveredMatch[1].toLowerCase();
+          }
+
+          // Check X-Original-To header
+          if (!plusTag) {
+            const origMatch = sourceStr.match(/^X-Original-To:\s*([^@\r\n]+)@/im);
+            if (origMatch) {
+              const localPart = origMatch[1].toLowerCase();
+              // If it's a direct verteiler address (no plus), use it
+              if (!localPart.includes('+')) {
+                plusTag = localPart;
+              }
+            }
+          }
+
+          if (!plusTag) continue; // Not a verteiler email
+
+          const verteilerAddress = `${plusTag}@${VERTEILER_DOMAIN}`;
+          console.log(`[IMAP] Processing: +${plusTag} → ${verteilerAddress}`);
+
+          const result = await processInboundEmail(msg.source, verteilerAddress);
+          console.log(`[IMAP] Result: ${result.action} (${result.recipients || 0} recipients)`);
+
+          // Mark as read
+          await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
+        } catch (msgErr) {
+          console.error(`[IMAP] Error processing message:`, msgErr.message);
+        }
+      }
+    } finally {
+      lock.release();
+    }
+
+    await client.logout();
+  } catch (err) {
+    console.error('[IMAP] Poll error:', err.message);
+    try { await client.logout(); } catch {}
+  }
+}
+
+function startImapPoll() {
+  if (!IMAP_USER || !IMAP_PASS) {
+    console.log('[IMAP] No credentials configured, polling disabled');
+    return;
+  }
+  console.log(`[IMAP] Polling ${IMAP_USER} every ${IMAP_POLL_INTERVAL / 1000}s`);
+  setTimeout(pollGmailForVerteiler, 10000);
+  setInterval(pollGmailForVerteiler, IMAP_POLL_INTERVAL);
+}
 
 // ─── STWEG Kontakte ─────────────────────────────────────────────────
 
@@ -2240,8 +2324,12 @@ async function authentikAPI(method, path, body = null) {
     throw new Error(`Authentik API ${res.status}: ${text}`);
   }
   const text = await res.text();
-  if (!text) return {};
-  return JSON.parse(text);
+  if (!text || !text.trim()) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
 }
 
 // GET /api/admin/users - List all users
@@ -2740,6 +2828,8 @@ initDB()
       console.log(`Rosenweg API running on port ${PORT}`);
       // Start Waschküche cron jobs
       startWaschCron();
+      // Start IMAP polling for verteiler emails
+      startImapPoll();
     });
   })
   .catch((err) => {
