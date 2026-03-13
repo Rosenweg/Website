@@ -19,18 +19,25 @@ export default {
     const secret = env.EMAIL_SECRET || "rosenweg-email-2026";
     const archiveEmail = env.ARCHIVE_EMAIL || "rosenweg4303@gmail.com";
 
-    // Always forward a copy to the archive/Gmail
+    // Read raw email FIRST before any forwarding (stream can only be consumed once)
+    let rawEmail;
+    try {
+      rawEmail = await new Response(message.raw).arrayBuffer();
+    } catch (err) {
+      console.log(`Failed to read raw email: ${err.message}`);
+      await message.forward(archiveEmail);
+      return;
+    }
+
+    // Forward copy to Gmail archive using raw bytes
     try {
       await message.forward(archiveEmail);
     } catch (fwdErr) {
       console.log(`Archive forward failed: ${fwdErr.message}`);
     }
 
+    // Forward to API for verteiler distribution
     try {
-      // Read the raw email as a stream
-      const rawEmail = await new Response(message.raw).arrayBuffer();
-
-      // Forward to our API for verteiler distribution
       const response = await fetch(apiUrl, {
         method: "POST",
         headers: {
