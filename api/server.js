@@ -2080,9 +2080,9 @@ app.get('/api/email/log/:id/status', authMiddleware, adminOnly, async (req, res)
 
     // Search SMTP2GO activity for this email by subject and time range
     const startDate = new Date(log.created_at);
-    startDate.setMinutes(startDate.getMinutes() - 1);
+    startDate.setMinutes(startDate.getMinutes() - 5);
     const endDate = new Date(log.created_at);
-    endDate.setHours(endDate.getHours() + 24);
+    endDate.setHours(endDate.getHours() + 48);
 
     const apiRes = await fetch(`${SMTP2GO_API_URL}/activity/search`, {
       method: 'POST',
@@ -2091,19 +2091,21 @@ app.get('/api/email/log/:id/status', authMiddleware, adminOnly, async (req, res)
         start_date: startDate.toISOString(),
         end_date: endDate.toISOString(),
         search_subject: log.subject,
-        search_sender: log.from_email,
-        limit: 100,
-        only_latest: true,
+        limit: 200,
       }),
     });
     const apiData = await apiRes.json();
 
-    const events = (apiData.data?.events || []).map(e => ({
-      recipient: e.recipient,
-      event: e.event,
-      date: e.date,
-      smtp_response: e.smtp_response || null,
-    }));
+    // Deduplicate: keep the most recent/best event per recipient
+    const eventMap = new Map();
+    const priority = { 'clicked': 5, 'opened': 4, 'delivered': 3, 'soft_bounced': 2, 'bounced': 2, 'rejected': 2, 'sent': 1, 'queued': 0 };
+    for (const e of (apiData.data?.events || [])) {
+      const existing = eventMap.get(e.recipient);
+      if (!existing || (priority[e.event] || 0) > (priority[existing.event] || 0)) {
+        eventMap.set(e.recipient, { recipient: e.recipient, event: e.event, date: e.date, smtp_response: e.smtp_response || null });
+      }
+    }
+    const events = [...eventMap.values()];
 
     // Update failed_recipients in DB based on SMTP2GO data
     const bounced = events.filter(e => e.event.includes('bounced') || e.event === 'rejected');
