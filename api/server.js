@@ -1800,26 +1800,50 @@ async function pollGmailForVerteiler() {
     const lock = await client.getMailboxLock('INBOX');
 
     try {
-      // Use fetch iterator (fetchOne doesn't return source correctly)
       for await (const msg of client.fetch({ seen: false }, { uid: true, source: true })) {
         try {
           if (!msg?.source) continue;
 
-          // Scan first 4KB of headers for plus-tag
+          // Scan headers for verteiler address
           const headerStr = msg.source.toString('utf8', 0, Math.min(msg.source.length, 4096));
 
-          let plusTag = null;
-          // Check Delivered-To header for plus-tag (rosenweg4303+ausschuss@gmail.com)
-          const deliveredMatch = headerStr.match(/^Delivered-To:\s*[^+\r\n]+\+([^@\r\n]+)@/im);
-          if (deliveredMatch) {
-            plusTag = deliveredMatch[1].toLowerCase();
+          let verteilerAddress = null;
+
+          // Method 1: Plus-tag in Delivered-To (rosenweg4303+ausschuss@gmail.com)
+          const plusMatch = headerStr.match(/^Delivered-To:\s*[^+\r\n]+\+([^@\r\n]+)@/im);
+          if (plusMatch) {
+            verteilerAddress = `${plusMatch[1].toLowerCase()}@${VERTEILER_DOMAIN}`;
           }
 
-          if (!plusTag) continue; // Not a plus-tagged verteiler email
+          // Method 2: To: header contains @rosenweg4303.ch address
+          if (!verteilerAddress) {
+            const toMatch = headerStr.match(/^To:\s*[^]*?([a-z0-9._-]+@rosenweg4303\.ch)/im);
+            if (toMatch) {
+              verteilerAddress = toMatch[1].toLowerCase();
+            }
+          }
 
-          const verteilerAddress = `${plusTag}@${VERTEILER_DOMAIN}`;
-          console.log(`[IMAP] Processing: +${plusTag} → ${verteilerAddress}`);
+          // Method 3: X-Original-To header
+          if (!verteilerAddress) {
+            const origMatch = headerStr.match(/^X-Original-To:\s*([^\s]+@rosenweg4303\.ch)/im);
+            if (origMatch) {
+              verteilerAddress = origMatch[1].toLowerCase();
+            }
+          }
 
+          if (!verteilerAddress) continue; // Not a verteiler email
+
+          // Check if verteiler exists before processing
+          const exists = await pool.query(
+            'SELECT id FROM email_verteiler WHERE email_address = $1 AND active = true', [verteilerAddress]
+          );
+          if (exists.rows.length === 0) {
+            // Mark as read to avoid reprocessing non-verteiler emails
+            await client.messageFlagsAdd(msg.uid, ['\\Seen'], { uid: true });
+            continue;
+          }
+
+          console.log(`[IMAP] Processing: ${verteilerAddress} (UID ${msg.uid})`);
           const result = await processInboundEmail(msg.source, verteilerAddress);
           console.log(`[IMAP] Result: ${result.action} (${result.recipients || 0} recipients)`);
 
