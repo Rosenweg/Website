@@ -2239,7 +2239,9 @@ async function authentikAPI(method, path, body = null) {
     const text = await res.text();
     throw new Error(`Authentik API ${res.status}: ${text}`);
   }
-  return res.json();
+  const text = await res.text();
+  if (!text) return {};
+  return JSON.parse(text);
 }
 
 // GET /api/admin/users - List all users
