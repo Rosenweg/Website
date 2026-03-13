@@ -1540,10 +1540,16 @@ async function resolveGroupEmails(groupName) {
   }
 }
 
-// Resolve members for a verteiler (group-based or static)
+// Resolve members for a verteiler (multi-group or single group or static)
 async function resolveVerteilerRecipients(verteiler) {
-  if (verteiler.group_name) {
-    return resolveGroupEmails(verteiler.group_name);
+  const groupNames = verteiler.group_names?.length ? verteiler.group_names : (verteiler.group_name ? [verteiler.group_name] : []);
+  if (groupNames.length > 0) {
+    const allEmails = new Set();
+    for (const gn of groupNames) {
+      const emails = await resolveGroupEmails(gn);
+      emails.forEach(e => allEmails.add(e));
+    }
+    return [...allEmails];
   }
   // Fallback: static members list
   return (verteiler.members || []).map(m => m.email).filter(e => e && !e.endsWith('.invalid'));
@@ -1569,16 +1575,32 @@ app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
 
   try {
     let sent = 0;
+    const failed = [];
     for (const to of recipients) {
-      await transporter.sendMail({
-        from: MAIL_FROM,
-        to,
-        subject,
-        html: body,
-      });
-      sent++;
+      try {
+        await transporter.sendMail({
+          from: MAIL_FROM,
+          to,
+          subject,
+          html: body,
+        });
+        sent++;
+      } catch (sendErr) {
+        console.error(`Failed to send to ${to}:`, sendErr.message);
+        failed.push(to);
+      }
     }
-    res.json({ success: true, sent });
+
+    // Log to email_log
+    const status = failed.length === 0 ? 'sent' : (sent > 0 ? 'partial' : 'failed');
+    await pool.query(
+      `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, failed_recipients, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [verteiler_id || null, req.user?.email || MAIL_FROM, req.user?.name || 'Admin', subject, sent, false,
+       JSON.stringify(recipients), failed.length > 0 ? JSON.stringify(failed) : null, status]
+    );
+
+    res.json({ success: true, sent, failed: failed.length });
   } catch (err) {
     console.error('Email send error:', err);
     res.status(500).json({ error: 'Fehler beim E-Mail-Versand' });
@@ -1905,17 +1927,22 @@ app.get('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT id, stweg, name, email_address, members, active,
-              reply_to, subject_prefix, group_name, created_at,
+              reply_to, subject_prefix, group_name, group_names, created_at,
               jsonb_array_length(COALESCE(members, '[]'::jsonb)) as member_count
        FROM email_verteiler ORDER BY stweg, name`
     );
     // For group-based verteiler, resolve actual member count
     const rows = result.rows;
     for (const v of rows) {
-      if (v.group_name) {
-        const emails = await resolveGroupEmails(v.group_name);
-        v.member_count = emails.length;
-        v.resolved_emails = emails;
+      const groupNames = v.group_names?.length ? v.group_names : (v.group_name ? [v.group_name] : []);
+      if (groupNames.length > 0) {
+        const allEmails = new Set();
+        for (const gn of groupNames) {
+          const emails = await resolveGroupEmails(gn);
+          emails.forEach(e => allEmails.add(e));
+        }
+        v.member_count = allEmails.size;
+        v.resolved_emails = [...allEmails];
       }
     }
     res.json({ verteiler: rows });
@@ -1930,9 +1957,15 @@ app.get('/api/verteiler/:id', authMiddleware, adminOnly, async (req, res) => {
     const result = await pool.query('SELECT * FROM email_verteiler WHERE id = $1', [req.params.id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = result.rows[0];
-    if (v.group_name) {
-      v.resolved_emails = await resolveGroupEmails(v.group_name);
-      v.member_count = v.resolved_emails.length;
+    const groupNames = v.group_names?.length ? v.group_names : (v.group_name ? [v.group_name] : []);
+    if (groupNames.length > 0) {
+      const allEmails = new Set();
+      for (const gn of groupNames) {
+        const emails = await resolveGroupEmails(gn);
+        emails.forEach(e => allEmails.add(e));
+      }
+      v.resolved_emails = [...allEmails];
+      v.member_count = allEmails.size;
     }
     res.json(v);
   } catch (err) {
@@ -1942,13 +1975,14 @@ app.get('/api/verteiler/:id', authMiddleware, adminOnly, async (req, res) => {
 
 // Create Verteiler
 app.post('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
-  const { stweg, name, email_address, members, reply_to, subject_prefix, group_name } = req.body;
+  const { stweg, name, email_address, members, reply_to, subject_prefix, group_name, group_names } = req.body;
   if (!name || !email_address) return res.status(400).json({ error: 'Name und Email-Adresse erforderlich' });
   try {
+    const groups = group_names?.length ? group_names : (group_name ? [group_name] : []);
     const result = await pool.query(
-      `INSERT INTO email_verteiler (stweg, name, email_address, members, reply_to, subject_prefix, group_name)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [stweg || 0, name, email_address, JSON.stringify(members || []), reply_to || 'sender', subject_prefix || null, group_name || null]
+      `INSERT INTO email_verteiler (stweg, name, email_address, members, reply_to, subject_prefix, group_name, group_names)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [stweg || 0, name, email_address, JSON.stringify(members || []), reply_to || 'sender', subject_prefix || null, groups[0] || null, JSON.stringify(groups)]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -1959,13 +1993,14 @@ app.post('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
 
 // Update Verteiler
 app.put('/api/verteiler/:id', authMiddleware, adminOnly, async (req, res) => {
-  const { stweg, name, email_address, members, active, reply_to, subject_prefix, group_name } = req.body;
+  const { stweg, name, email_address, members, active, reply_to, subject_prefix, group_name, group_names } = req.body;
   try {
+    const groups = group_names?.length ? group_names : (group_name ? [group_name] : []);
     const result = await pool.query(
       `UPDATE email_verteiler SET stweg=$1, name=$2, email_address=$3, members=$4, active=$5,
-              reply_to=$6, subject_prefix=$7, group_name=$8
-       WHERE id=$9 RETURNING *`,
-      [stweg, name, email_address, JSON.stringify(members || []), active !== false, reply_to || 'sender', subject_prefix || null, group_name || null, req.params.id]
+              reply_to=$6, subject_prefix=$7, group_name=$8, group_names=$9
+       WHERE id=$10 RETURNING *`,
+      [stweg, name, email_address, JSON.stringify(members || []), active !== false, reply_to || 'sender', subject_prefix || null, groups[0] || null, JSON.stringify(groups), req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     res.json(result.rows[0]);
@@ -2024,7 +2059,7 @@ app.get('/api/email/log', authMiddleware, adminOnly, async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit) || 50, 200);
     const result = await pool.query(
-      `SELECT l.*, v.name as verteiler_name, v.address as verteiler_address FROM email_log l
+      `SELECT l.*, v.name as verteiler_name, v.email_address as verteiler_address FROM email_log l
        LEFT JOIN email_verteiler v ON v.id = l.verteiler_id
        ORDER BY l.created_at DESC LIMIT $1`,
       [limit]
@@ -2562,6 +2597,10 @@ async function initDB() {
       ALTER TABLE email_verteiler ADD COLUMN IF NOT EXISTS reply_to VARCHAR(255) DEFAULT 'sender';
       ALTER TABLE email_verteiler ADD COLUMN IF NOT EXISTS subject_prefix VARCHAR(100);
       ALTER TABLE email_verteiler ADD COLUMN IF NOT EXISTS group_name VARCHAR(255);
+      ALTER TABLE email_verteiler ADD COLUMN IF NOT EXISTS group_names JSONB DEFAULT '[]';
+      -- Migrate single group_name to group_names array
+      UPDATE email_verteiler SET group_names = jsonb_build_array(group_name)
+        WHERE group_name IS NOT NULL AND group_name != '' AND (group_names IS NULL OR group_names = '[]'::jsonb);
 
       -- Migrate wasch_reservations: old schema had date+time_slot or missing room_id
       DO $$ BEGIN
