@@ -2664,6 +2664,98 @@ app.put('/api/admin/groups/:pk/remove_user', authMiddleware, requirePermission('
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════
+// DOCUMENTS (files from private GitHub repo, auth required)
+// ═══════════════════════════════════════════════════════════════════
+
+const GITHUB_DOCS_REPO = process.env.GITHUB_DOCS_REPO || 'Rosenweg/documents';
+const GITHUB_DOCS_TOKEN = process.env.GITHUB_DOCS_TOKEN || '';
+const GITHUB_DOCS_BRANCH = process.env.GITHUB_DOCS_BRANCH || 'main';
+
+// Cache for document list (5 min TTL)
+let docsListCache = { data: null, expires: 0 };
+
+// GET /api/documents - List available documents
+app.get('/api/documents', authMiddleware, async (req, res) => {
+  try {
+    const now = Date.now();
+    if (docsListCache.data && docsListCache.expires > now) {
+      return res.json(docsListCache.data);
+    }
+
+    const response = await fetch(
+      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/git/trees/${GITHUB_DOCS_BRANCH}?recursive=1`,
+      { headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json' } }
+    );
+    if (!response.ok) throw new Error(`GitHub API error: ${response.status}`);
+
+    const tree = await response.json();
+    const IGNORED = ['README.md', 'LICENSE', '.gitignore'];
+    const docs = tree.tree
+      .filter(f => f.type === 'blob' && !IGNORED.includes(f.path) && !f.path.startsWith('.'))
+      .map(f => ({
+        path: f.path,
+        size: f.size,
+        url: `/api/documents/${f.path}`,
+      }));
+
+    docsListCache = { data: docs, expires: now + 5 * 60 * 1000 };
+    res.json(docs);
+  } catch (err) {
+    console.error('Documents list error:', err.message);
+    res.status(500).json({ error: 'Dokumente konnten nicht geladen werden' });
+  }
+});
+
+// GET /api/documents/:path(*) - Download a document
+app.get('/api/documents/:path(*)', authMiddleware, async (req, res) => {
+  try {
+    const filePath = req.params.path;
+
+    // Prevent path traversal
+    if (filePath.includes('..') || filePath.startsWith('/')) {
+      return res.status(400).json({ error: 'Ungültiger Pfad' });
+    }
+
+    const response = await fetch(
+      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${encodeURIComponent(filePath)}?ref=${GITHUB_DOCS_BRANCH}`,
+      { headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3.raw' } }
+    );
+
+    if (!response.ok) {
+      if (response.status === 404) return res.status(404).json({ error: 'Dokument nicht gefunden' });
+      throw new Error(`GitHub API error: ${response.status}`);
+    }
+
+    // Set content type based on extension
+    const ext = filePath.split('.').pop().toLowerCase();
+    const contentTypes = {
+      pdf: 'application/pdf',
+      xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      xls: 'application/vnd.ms-excel',
+      docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      doc: 'application/msword',
+      pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      png: 'image/png',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      txt: 'text/plain',
+      csv: 'text/csv',
+    };
+    const contentType = contentTypes[ext] || 'application/octet-stream';
+    const fileName = filePath.split('/').pop();
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+
+    const buffer = await response.arrayBuffer();
+    res.send(Buffer.from(buffer));
+  } catch (err) {
+    console.error('Document download error:', err.message);
+    res.status(500).json({ error: 'Dokument konnte nicht geladen werden' });
+  }
+});
+
 // ─── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
