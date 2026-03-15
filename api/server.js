@@ -413,6 +413,46 @@ function canManageDocs(req, res, next) {
   next();
 }
 
+/** Get STWEG numbers a user belongs to based on their groups */
+function getUserStwegs(groups) {
+  const stwegs = new Set();
+  for (const [nr, mapping] of Object.entries(STWEG_GROUPS)) {
+    const groupNames = Object.values(mapping).map(g => g.toLowerCase());
+    if (groups.some(g => groupNames.includes(g.toLowerCase()))) {
+      stwegs.add(parseInt(nr));
+    }
+  }
+  return stwegs;
+}
+
+/** Check if user is Technik (full access to all folders) */
+function isTechnik(groups) {
+  return groups.some(g => g.toLowerCase() === 'technik');
+}
+
+/** Check if a document path is allowed for a user */
+function isDocPathAllowed(filePath, groups) {
+  if (isTechnik(groups)) return true;
+  const folder = filePath.includes('/') ? filePath.split('/')[0] : 'allgemein';
+  if (folder === 'allgemein') return true;
+  const stwegs = getUserStwegs(groups);
+  const match = folder.match(/^stweg(\d+)$/);
+  return match && stwegs.has(parseInt(match[1]));
+}
+
+/** Check if user can write to a document path */
+function canWriteDocPath(filePath, groups) {
+  if (isTechnik(groups)) return true;
+  const folder = filePath.includes('/') ? filePath.split('/')[0] : 'allgemein';
+  // Ausschuss members can write to their own stweg + allgemein
+  const isAusschuss = groups.some(g => g.toLowerCase().endsWith('-ausschuss'));
+  if (!isAusschuss) return false;
+  if (folder === 'allgemein') return true;
+  const stwegs = getUserStwegs(groups);
+  const match = folder.match(/^stweg(\d+)$/);
+  return match && stwegs.has(parseInt(match[1]));
+}
+
 // ─── Permission System ──────────────────────────────────────────────
 const MANAGED_PAGES = [
   { id: 'bewohner-verwaltung', label: 'Bewohner-Verwaltung' },
@@ -2686,31 +2726,34 @@ const GITHUB_DOCS_BRANCH = process.env.GITHUB_DOCS_BRANCH || 'main';
 // Cache for document list (5 min TTL)
 let docsListCache = { data: null, expires: 0 };
 
-// GET /api/documents - List available documents
+// GET /api/documents - List available documents (filtered by user's STWEGs)
 app.get('/api/documents', authMiddleware, async (req, res) => {
   try {
     const now = Date.now();
-    if (docsListCache.data && docsListCache.expires > now) {
-      return res.json(docsListCache.data);
+    let allDocs = docsListCache.data;
+    if (!allDocs || docsListCache.expires <= now) {
+      const response = await fetch(
+        `https://api.github.com/repos/${GITHUB_DOCS_REPO}/git/trees/${GITHUB_DOCS_BRANCH}?recursive=1`,
+        { headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json' } }
+      );
+      if (!response.ok) throw new Error(`GitHub API error: ${response.status}`);
+
+      const tree = await response.json();
+      const IGNORED = ['README.md', 'LICENSE', '.gitignore'];
+      allDocs = tree.tree
+        .filter(f => f.type === 'blob' && !IGNORED.includes(f.path) && !f.path.startsWith('.'))
+        .map(f => ({
+          path: f.path,
+          size: f.size,
+          url: `/api/documents/${f.path}`,
+        }));
+      docsListCache = { data: allDocs, expires: now + 5 * 60 * 1000 };
     }
 
-    const response = await fetch(
-      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/git/trees/${GITHUB_DOCS_BRANCH}?recursive=1`,
-      { headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json' } }
-    );
-    if (!response.ok) throw new Error(`GitHub API error: ${response.status}`);
+    // Filter by user's allowed STWEGs
+    const groups = req.user?.groups || [];
+    const docs = allDocs.filter(f => isDocPathAllowed(f.path, groups));
 
-    const tree = await response.json();
-    const IGNORED = ['README.md', 'LICENSE', '.gitignore'];
-    const docs = tree.tree
-      .filter(f => f.type === 'blob' && !IGNORED.includes(f.path) && !f.path.startsWith('.'))
-      .map(f => ({
-        path: f.path,
-        size: f.size,
-        url: `/api/documents/${f.path}`,
-      }));
-
-    docsListCache = { data: docs, expires: now + 5 * 60 * 1000 };
     res.json(docs);
   } catch (err) {
     console.error('Documents list error:', err.message);
@@ -2726,6 +2769,12 @@ app.get('/api/documents/:path(*)', authMiddleware, async (req, res) => {
     // Prevent path traversal
     if (filePath.includes('..') || filePath.startsWith('/')) {
       return res.status(400).json({ error: 'Ungültiger Pfad' });
+    }
+
+    // Check STWEG access
+    const groups = req.user?.groups || [];
+    if (!isDocPathAllowed(filePath, groups)) {
+      return res.status(403).json({ error: 'Kein Zugriff auf dieses Dokument' });
     }
 
     const response = await fetch(
@@ -2773,6 +2822,11 @@ app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, re
     const filePath = req.params.path;
     if (filePath.includes('..') || filePath.startsWith('/')) {
       return res.status(400).json({ error: 'Ungültiger Pfad' });
+    }
+
+    const groups = req.user?.groups || [];
+    if (!canWriteDocPath(filePath, groups)) {
+      return res.status(403).json({ error: 'Kein Schreibzugriff auf diesen Ordner' });
     }
 
     const content = req.body.toString('base64');
@@ -2823,6 +2877,11 @@ app.delete('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req,
     const filePath = req.params.path;
     if (filePath.includes('..') || filePath.startsWith('/')) {
       return res.status(400).json({ error: 'Ungültiger Pfad' });
+    }
+
+    const groups = req.user?.groups || [];
+    if (!canWriteDocPath(filePath, groups)) {
+      return res.status(403).json({ error: 'Kein Schreibzugriff auf diesen Ordner' });
     }
 
     // Get SHA (required for delete)
