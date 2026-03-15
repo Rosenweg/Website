@@ -5,7 +5,7 @@ const nodemailer = require('nodemailer');
 const { simpleParser } = require('mailparser');
 const crypto = require('crypto');
 
-// STWEG group mapping (mirrors site-config.json groups)
+// STWEG group mapping (Authentik group names per STWEG)
 const STWEG_GROUPS = {
   1: { bewohner: 'stweg1-bewohner', eigentuemer: 'stweg1-eigentuemer', ausschuss: 'stweg1-ausschuss' },
   2: { bewohner: 'stweg2-bewohner', eigentuemer: 'stweg2-eigentuemer', ausschuss: 'stweg2-ausschuss' },
@@ -2249,6 +2249,104 @@ app.get('/api/email/log/:id/status', authMiddleware, adminOnly, async (req, res)
   } catch (err) {
     console.error('SMTP2GO status error:', err);
     res.status(500).json({ error: 'SMTP2GO-Abfrage fehlgeschlagen' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// PUBLIC INFO API (Ausschuss, Technischer Dienst)
+// ═══════════════════════════════════════════════════════════════════
+
+// GET /api/public/ausschuss - Ausschuss-Vertreter per STWEG (from Authentik groups)
+app.get('/api/public/ausschuss', async (req, res) => {
+  try {
+    const [groupsData, usersData] = await Promise.all([
+      authentikAPI('GET', '/core/groups/?page_size=500'),
+      authentikAPI('GET', '/core/users/?page_size=500'),
+    ]);
+    const allGroups = groupsData.results || [];
+    const allUsers = (usersData.results || []).filter(u => u.is_active && u.email);
+
+    // Build group PK → name mapping
+    const groupMap = {};
+    for (const g of allGroups) groupMap[g.pk] = g.name;
+
+    // Find users per ausschuss group
+    const result = { vertreter: [] };
+
+    for (let nr = 1; nr <= 8; nr++) {
+      const groupName = STWEG_GROUPS[nr]?.ausschuss;
+      if (!groupName) continue;
+
+      const group = allGroups.find(g => g.name.toLowerCase() === groupName.toLowerCase());
+      if (!group) continue;
+
+      const members = allUsers
+        .filter(u => {
+          const uGroups = u.groups_obj ? u.groups_obj.map(g => g.pk) : (u.groups || []);
+          return uGroups.includes(group.pk);
+        })
+        .map(u => ({ name: u.name, email: u.email }));
+
+      result.vertreter.push({
+        stweg_nummer: nr,
+        stweg_typ: nr === 8 ? 'Tiefgarage' : 'Wohngebäude',
+        email: `stweg${nr}@rosenweg4303.ch`,
+        vertreter: members,
+      });
+    }
+
+    // Präsident: look for user in "Präsident" group or first eigentuemer group match
+    const praesidentGroup = allGroups.find(g => g.name.toLowerCase() === 'präsident' || g.name.toLowerCase() === 'praesident');
+    if (praesidentGroup) {
+      const praesidentUser = allUsers.find(u => {
+        const uGroups = u.groups_obj ? u.groups_obj.map(g => g.pk) : (u.groups || []);
+        return uGroups.includes(praesidentGroup.pk);
+      });
+      if (praesidentUser) {
+        result.praesident = {
+          name: praesidentUser.name,
+          email: 'praesident@rosenweg4303.ch',
+        };
+      }
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error('Public ausschuss error:', err.message);
+    res.status(500).json({ error: 'Ausschuss-Daten konnten nicht geladen werden' });
+  }
+});
+
+// GET /api/public/technik - Technischer Dienst Mitglieder (from Authentik Technik group)
+app.get('/api/public/technik', async (req, res) => {
+  try {
+    const [groupsData, usersData] = await Promise.all([
+      authentikAPI('GET', '/core/groups/?page_size=500'),
+      authentikAPI('GET', '/core/users/?page_size=500'),
+    ]);
+    const allGroups = groupsData.results || [];
+    const allUsers = (usersData.results || []).filter(u => u.is_active && u.email);
+
+    const technikGroup = allGroups.find(g => g.name === 'Technik' || g.name === 'technik');
+    if (!technikGroup) return res.json({ mitglieder: [] });
+
+    const mitglieder = allUsers
+      .filter(u => {
+        const uGroups = u.groups_obj ? u.groups_obj.map(g => g.pk) : (u.groups || []);
+        return uGroups.includes(technikGroup.pk);
+      })
+      .map(u => ({
+        name: u.name,
+        email: u.email,
+      }));
+
+    res.json({
+      email: 'technik@rosenweg9.ch',
+      mitglieder,
+    });
+  } catch (err) {
+    console.error('Public technik error:', err.message);
+    res.status(500).json({ error: 'Technik-Daten konnten nicht geladen werden' });
   }
 });
 
