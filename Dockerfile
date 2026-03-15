@@ -14,23 +14,20 @@ RUN rm -f /usr/share/nginx/html/Dockerfile \
           /usr/share/nginx/html/docker-stack.yml \
           /usr/share/nginx/html/nginx.conf \
           /usr/share/nginx/html/.env \
-          /usr/share/nginx/html/deploy.sh \
+          /usr/share/nginx/html/.env.example \
+          /usr/share/nginx/html/.gitignore \
+          /usr/share/nginx/html/README.md \
     && rm -rf /usr/share/nginx/html/.git \
               /usr/share/nginx/html/.github \
               /usr/share/nginx/html/.claude \
+              /usr/share/nginx/html/.trunk \
               /usr/share/nginx/html/api \
-              /usr/share/nginx/html/n8n-workflow*.json \
-              /usr/share/nginx/html/stweg3/n8n-workflows \
+              /usr/share/nginx/html/energy-collector \
               /usr/share/nginx/html/wiki \
               /usr/share/nginx/html/scripts \
-              /usr/share/nginx/html/cloudflare-workers \
-              /usr/share/nginx/html/*.unifi \
-              /usr/share/nginx/html/*.unf \
-              /usr/share/nginx/html/.env.example \
-              /usr/share/nginx/html/.gitignore \
-              /usr/share/nginx/html/README.md \
-              /usr/share/nginx/html/CLOUDFLARE-EMAIL-ROUTING.md \
-              /usr/share/nginx/html/ENERGIE-MONITOR*.md
+              /usr/share/nginx/html/stweg3/waschkueche-smart/README.md \
+              /usr/share/nginx/html/stweg3/README.md \
+              /usr/share/nginx/html/door-signs/README.md
 
 EXPOSE 80
 

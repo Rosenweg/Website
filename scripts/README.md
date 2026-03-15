@@ -89,4 +89,4 @@ Das Skript wird automatisch von `.github/workflows/cloudflare-email-sync.yml` au
 - `ausschuss-kontakte.json` in den `main` Branch gepusht wird
 - Der Workflow manuell über GitHub Actions gestartet wird
 
-Siehe [CLOUDFLARE-EMAIL-ROUTING.md](../CLOUDFLARE-EMAIL-ROUTING.md) für weitere Details.
+Siehe die Cloudflare Email Routing Konfiguration im Cloudflare Dashboard für weitere Details.
