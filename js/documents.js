@@ -205,14 +205,14 @@ const RosenwegDocs = {
 
         html += `
             <div class="flex items-center justify-between bg-gray-50 rounded-lg px-4 py-3 hover:bg-gray-100 transition group">
-              <a href="${doc.url}" target="_blank" class="flex items-center gap-3 flex-1 min-w-0">
+              <a href="#" onclick="RosenwegDocs.downloadFile('${doc.url}', '${fileName}'); return false;" class="flex items-center gap-3 flex-1 min-w-0 cursor-pointer">
                 ${this.getIcon(ext)}
                 <span class="truncate text-gray-800">${fileName}</span>
                 <span class="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600 flex-shrink-0">${extBadge}</span>
                 <span class="text-xs text-gray-400 flex-shrink-0">${size}</span>
               </a>
               <div class="flex items-center gap-2 ml-2">
-                <a href="${doc.url}" target="_blank" download class="text-blue-600 hover:text-blue-800 p-1" title="Herunterladen">
+                <a href="#" onclick="RosenwegDocs.downloadFile('${doc.url}', '${fileName}'); return false;" class="text-blue-600 hover:text-blue-800 p-1" title="Herunterladen">
                   <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
                   </svg>
@@ -458,6 +458,24 @@ const RosenwegDocs = {
       this._showUploadError('Fehler: ' + err.message);
       btn.disabled = false;
       btn.textContent = 'Ersetzen';
+    }
+  },
+
+  async downloadFile(url, fileName) {
+    try {
+      const resp = await AuthentikAuth.apiFetch(url);
+      if (!resp.ok) throw new Error('Download fehlgeschlagen');
+      const blob = await resp.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      alert('Fehler beim Download: ' + err.message);
     }
   },
 
