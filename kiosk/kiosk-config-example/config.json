@@ -1,0 +1,23 @@
+{
+    "hostname": "rosenweg-kiosk",
+    "root_password": "CHANGE_ME",
+    "wifi": {
+        "ssid": "Rosenweg-WLAN",
+        "password": "CHANGE_ME"
+    },
+    "kiosk": {
+        "url": "https://www.rosenweg4303.ch",
+        "allowed_domains": [
+            "www.rosenweg4303.ch",
+            "authentik.rosenweg4303.ch"
+        ],
+        "inactivity_timeout_seconds": 600,
+        "timezone": "Europe/Zurich",
+        "locale": "de_CH.UTF-8",
+        "keymap": "ch"
+    },
+    "logging": {
+        "push_interval_minutes": 60,
+        "keep_days": 30
+    }
+}
