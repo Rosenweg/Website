@@ -147,6 +147,17 @@ const RosenwegDocs = {
     return path.split('/').pop();
   },
 
+  /** Sanitize filename: replace spaces/special chars with hyphens, lowercase */
+  sanitizeFileName(name) {
+    return name
+      .replace(/ä/gi, 'ae').replace(/ö/gi, 'oe').replace(/ü/gi, 'ue').replace(/ß/g, 'ss')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // Remove remaining accents
+      .replace(/[^a-zA-Z0-9._-]/g, '-')                // Replace special chars with hyphens
+      .replace(/-+/g, '-')                              // Collapse multiple hyphens
+      .replace(/^-|-$/g, '')                            // Trim leading/trailing hyphens
+      .toLowerCase();
+  },
+
   getIcon(ext) {
     const iconPath = this.FILE_ICONS[ext] || this.FILE_ICONS.default;
     const color = this.EXT_COLORS[ext] || 'text-gray-500';
@@ -314,12 +325,13 @@ const RosenwegDocs = {
     }
 
     const file = fileInput.files[0];
-    const path = `${folder}/${file.name}`;
+    const safeName = this.sanitizeFileName(file.name);
+    const path = `${folder}/${safeName}`;
 
     btn.disabled = true;
     btn.textContent = 'Wird hochgeladen...';
     status.className = 'text-sm text-blue-600';
-    status.textContent = `Lade ${file.name} hoch...`;
+    status.textContent = `Lade ${safeName} hoch...`;
     status.classList.remove('hidden');
 
     try {
@@ -358,12 +370,13 @@ const RosenwegDocs = {
     const file = fileInput.files[0];
     // Use original path but allow different file extension
     const folder = path.substring(0, path.lastIndexOf('/'));
-    const uploadPath = `${folder}/${file.name}`;
+    const safeName = this.sanitizeFileName(file.name);
+    const uploadPath = `${folder}/${safeName}`;
 
     btn.disabled = true;
     btn.textContent = 'Wird ersetzt...';
     status.className = 'text-sm text-blue-600';
-    status.textContent = `Lade ${file.name} hoch...`;
+    status.textContent = `Lade ${safeName} hoch...`;
     status.classList.remove('hidden');
 
     try {

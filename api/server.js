@@ -2819,10 +2819,20 @@ app.get('/api/documents/:path(*)', authMiddleware, async (req, res) => {
 // PUT /api/documents/:path(*) - Upload/replace a document (admin only)
 app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, res) => {
   try {
-    const filePath = req.params.path;
-    if (filePath.includes('..') || filePath.startsWith('/')) {
+    // Sanitize filename: keep folder structure, clean the filename part
+    const rawPath = req.params.path;
+    if (rawPath.includes('..') || rawPath.startsWith('/')) {
       return res.status(400).json({ error: 'Ungültiger Pfad' });
     }
+    const parts = rawPath.split('/');
+    const fileName = parts.pop()
+      .replace(/ä/gi, 'ae').replace(/ö/gi, 'oe').replace(/ü/gi, 'ue').replace(/ß/g, 'ss')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9._-]/g, '-')
+      .replace(/-+/g, '-').replace(/^-|-$/g, '')
+      .toLowerCase();
+    parts.push(fileName);
+    const filePath = parts.join('/');
 
     const groups = req.user?.groups || [];
     if (!canWriteDocPath(filePath, groups)) {
