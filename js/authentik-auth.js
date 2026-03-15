@@ -113,7 +113,7 @@ const AuthentikAuth = {
     const token = this.getToken();
     const headers = { ...options.headers };
     if (token) headers.Authorization = `Bearer ${token}`;
-    if (options.body && typeof options.body === 'object' && !(options.body instanceof FormData)) {
+    if (options.body && typeof options.body === 'object' && !(options.body instanceof FormData) && !(options.body instanceof ArrayBuffer) && !(options.body instanceof Uint8Array)) {
       headers['Content-Type'] = 'application/json';
       options.body = JSON.stringify(options.body);
     }

@@ -19,8 +19,9 @@ const STWEG_GROUPS = {
 
 const app = express();
 
-// Raw body parser for email inbound (must be before json parser for this route)
+// Raw body parser for email inbound and document uploads (must be before json parser)
 app.use('/api/email/inbound', express.raw({ type: '*/*', limit: '25mb' }));
+app.use('/api/documents', express.raw({ type: 'application/octet-stream', limit: '50mb' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(cors({ origin: true, credentials: true }));
 
@@ -2753,6 +2754,95 @@ app.get('/api/documents/:path(*)', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('Document download error:', err.message);
     res.status(500).json({ error: 'Dokument konnte nicht geladen werden' });
+  }
+});
+
+// PUT /api/documents/:path(*) - Upload/replace a document (admin only)
+app.put('/api/documents/:path(*)', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const filePath = req.params.path;
+    if (filePath.includes('..') || filePath.startsWith('/')) {
+      return res.status(400).json({ error: 'Ungültiger Pfad' });
+    }
+
+    const content = req.body.toString('base64');
+
+    // Check if file already exists (need SHA for update)
+    let sha;
+    const checkResp = await fetch(
+      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${filePath}?ref=${GITHUB_DOCS_BRANCH}`,
+      { headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json' } }
+    );
+    if (checkResp.ok) {
+      const existing = await checkResp.json();
+      sha = existing.sha;
+    }
+
+    const body = {
+      message: `Upload: ${filePath.split('/').pop()} (von ${req.user.name || req.user.email})`,
+      content,
+      branch: GITHUB_DOCS_BRANCH,
+    };
+    if (sha) body.sha = sha;
+
+    const response = await fetch(
+      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${filePath}`,
+      {
+        method: 'PUT',
+        headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }
+    );
+
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.message || `GitHub API error: ${response.status}`);
+    }
+
+    docsListCache = { data: null, expires: 0 }; // Invalidate cache
+    res.json({ success: true, path: filePath });
+  } catch (err) {
+    console.error('Document upload error:', err.message);
+    res.status(500).json({ error: 'Dokument konnte nicht hochgeladen werden' });
+  }
+});
+
+// DELETE /api/documents/:path(*) - Delete a document (admin only)
+app.delete('/api/documents/:path(*)', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const filePath = req.params.path;
+    if (filePath.includes('..') || filePath.startsWith('/')) {
+      return res.status(400).json({ error: 'Ungültiger Pfad' });
+    }
+
+    // Get SHA (required for delete)
+    const checkResp = await fetch(
+      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${filePath}?ref=${GITHUB_DOCS_BRANCH}`,
+      { headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json' } }
+    );
+    if (!checkResp.ok) return res.status(404).json({ error: 'Dokument nicht gefunden' });
+    const { sha } = await checkResp.json();
+
+    const response = await fetch(
+      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${filePath}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: `Gelöscht: ${filePath.split('/').pop()} (von ${req.user.name || req.user.email})`,
+          sha,
+          branch: GITHUB_DOCS_BRANCH,
+        }),
+      }
+    );
+
+    if (!response.ok) throw new Error(`GitHub API error: ${response.status}`);
+
+    docsListCache = { data: null, expires: 0 };
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Document delete error:', err.message);
+    res.status(500).json({ error: 'Dokument konnte nicht gelöscht werden' });
   }
 });
 
