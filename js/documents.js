@@ -371,10 +371,12 @@ const RosenwegDocs = {
     if (errorEl) { errorEl.textContent = msg; errorEl.classList.remove('hidden'); }
   },
 
-  _uploadFile(url, file) {
+  async _uploadFile(url, file) {
+    const buffer = await file.arrayBuffer();
+    const fileName = this.sanitizeFileName(file.name);
+
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      const fileName = this.sanitizeFileName(file.name);
 
       xhr.upload.addEventListener('progress', (e) => {
         if (e.lengthComputable) this._updateProgress(e.loaded, e.total, fileName);
@@ -395,7 +397,7 @@ const RosenwegDocs = {
       xhr.setRequestHeader('Content-Type', 'application/octet-stream');
       const token = AuthentikAuth.getToken();
       if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-      xhr.send(file);
+      xhr.send(buffer);
     });
   },
 
