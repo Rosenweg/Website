@@ -268,7 +268,17 @@ const RosenwegDocs = {
             <input type="file" id="upload-file" class="w-full border rounded-lg px-3 py-2"
               accept=".pdf,.xlsx,.xls,.docx,.doc,.pptx,.png,.jpg,.jpeg,.txt,.csv">
           </div>
-          <div id="upload-status" class="text-sm hidden"></div>
+          <div id="upload-progress" class="hidden">
+            <div class="flex items-center justify-between text-sm mb-1">
+              <span id="upload-status-text" class="text-gray-600">Wird hochgeladen...</span>
+              <span id="upload-percent" class="text-gray-500 font-mono">0%</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
+              <div id="upload-bar" class="h-full bg-blue-600 rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+            <p id="upload-size-info" class="text-xs text-gray-400 mt-1"></p>
+          </div>
+          <div id="upload-error" class="text-sm text-red-600 hidden"></div>
           <div class="flex justify-end gap-3 pt-2">
             <button onclick="RosenwegDocs.closeModal()" class="px-4 py-2 text-gray-600 hover:text-gray-800">Abbrechen</button>
             <button onclick="RosenwegDocs.doUpload()" id="upload-btn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">Hochladen</button>
@@ -295,7 +305,17 @@ const RosenwegDocs = {
               accept=".pdf,.xlsx,.xls,.docx,.doc,.pptx,.png,.jpg,.jpeg,.txt,.csv">
           </div>
           <input type="hidden" id="replace-path" value="${path}">
-          <div id="upload-status" class="text-sm hidden"></div>
+          <div id="upload-progress" class="hidden">
+            <div class="flex items-center justify-between text-sm mb-1">
+              <span id="upload-status-text" class="text-gray-600">Wird hochgeladen...</span>
+              <span id="upload-percent" class="text-gray-500 font-mono">0%</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
+              <div id="upload-bar" class="h-full bg-blue-600 rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+            <p id="upload-size-info" class="text-xs text-gray-400 mt-1"></p>
+          </div>
+          <div id="upload-error" class="text-sm text-red-600 hidden"></div>
           <div class="flex justify-end gap-3 pt-2">
             <button onclick="RosenwegDocs.closeModal()" class="px-4 py-2 text-gray-600 hover:text-gray-800">Abbrechen</button>
             <button onclick="RosenwegDocs.doReplace()" id="upload-btn" class="bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 transition">Ersetzen</button>
@@ -311,16 +331,81 @@ const RosenwegDocs = {
     if (modal) modal.remove();
   },
 
+  _showProgress(file) {
+    const progress = document.getElementById('upload-progress');
+    const sizeInfo = document.getElementById('upload-size-info');
+    progress.classList.remove('hidden');
+    sizeInfo.textContent = `0 / ${this.formatSize(file.size)}`;
+  },
+
+  _updateProgress(loaded, total, fileName) {
+    const pct = total > 0 ? Math.round((loaded / total) * 100) : 0;
+    const bar = document.getElementById('upload-bar');
+    const percent = document.getElementById('upload-percent');
+    const statusText = document.getElementById('upload-status-text');
+    const sizeInfo = document.getElementById('upload-size-info');
+    if (bar) bar.style.width = pct + '%';
+    if (percent) percent.textContent = pct + '%';
+    if (statusText) statusText.textContent = pct < 100 ? `Lade ${fileName} hoch...` : 'Wird verarbeitet...';
+    if (sizeInfo) sizeInfo.textContent = `${this.formatSize(loaded)} / ${this.formatSize(total)}`;
+    // Change bar color when processing server-side
+    if (pct >= 100 && bar) {
+      bar.classList.remove('bg-blue-600');
+      bar.classList.add('bg-yellow-500', 'animate-pulse');
+    }
+  },
+
+  _showUploadSuccess() {
+    const bar = document.getElementById('upload-bar');
+    const statusText = document.getElementById('upload-status-text');
+    const percent = document.getElementById('upload-percent');
+    if (bar) { bar.classList.remove('bg-yellow-500', 'animate-pulse'); bar.classList.add('bg-green-500'); }
+    if (statusText) statusText.textContent = 'Erfolgreich hochgeladen!';
+    if (percent) percent.textContent = '100%';
+  },
+
+  _showUploadError(msg) {
+    const errorEl = document.getElementById('upload-error');
+    const progress = document.getElementById('upload-progress');
+    if (progress) progress.classList.add('hidden');
+    if (errorEl) { errorEl.textContent = msg; errorEl.classList.remove('hidden'); }
+  },
+
+  _uploadFile(url, file) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      const fileName = this.sanitizeFileName(file.name);
+
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable) this._updateProgress(e.loaded, e.total, fileName);
+      });
+
+      xhr.addEventListener('load', () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          this._showUploadSuccess();
+          resolve(xhr);
+        } else {
+          reject(new Error(`Upload fehlgeschlagen (${xhr.status})`));
+        }
+      });
+      xhr.addEventListener('error', () => reject(new Error('Netzwerkfehler')));
+      xhr.addEventListener('abort', () => reject(new Error('Upload abgebrochen')));
+
+      xhr.open('PUT', url);
+      xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+      const token = AuthentikAuth.getToken();
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.send(file);
+    });
+  },
+
   async doUpload() {
     const folder = document.getElementById('upload-folder').value;
     const fileInput = document.getElementById('upload-file');
-    const status = document.getElementById('upload-status');
     const btn = document.getElementById('upload-btn');
 
     if (!fileInput.files.length) {
-      status.className = 'text-sm text-red-600';
-      status.textContent = 'Bitte eine Datei auswählen.';
-      status.classList.remove('hidden');
+      this._showUploadError('Bitte eine Datei auswählen.');
       return;
     }
 
@@ -330,25 +415,13 @@ const RosenwegDocs = {
 
     btn.disabled = true;
     btn.textContent = 'Wird hochgeladen...';
-    status.className = 'text-sm text-blue-600';
-    status.textContent = `Lade ${safeName} hoch...`;
-    status.classList.remove('hidden');
+    this._showProgress(file);
 
     try {
-      const buffer = await file.arrayBuffer();
-      const resp = await AuthentikAuth.apiFetch(`/api/documents/${path}`, {
-        method: 'PUT',
-        body: buffer,
-        headers: { 'Content-Type': 'application/octet-stream' },
-      });
-
-      if (!resp.ok) throw new Error('Upload fehlgeschlagen');
-
-      this.closeModal();
-      await this.loadAndRender();
+      await this._uploadFile(`/api/documents/${path}`, file);
+      setTimeout(() => { this.closeModal(); this.loadAndRender(); }, 500);
     } catch (err) {
-      status.className = 'text-sm text-red-600';
-      status.textContent = 'Fehler beim Hochladen: ' + err.message;
+      this._showUploadError('Fehler: ' + err.message);
       btn.disabled = false;
       btn.textContent = 'Hochladen';
     }
@@ -357,48 +430,30 @@ const RosenwegDocs = {
   async doReplace() {
     const path = document.getElementById('replace-path').value;
     const fileInput = document.getElementById('upload-file');
-    const status = document.getElementById('upload-status');
     const btn = document.getElementById('upload-btn');
 
     if (!fileInput.files.length) {
-      status.className = 'text-sm text-red-600';
-      status.textContent = 'Bitte eine Datei auswählen.';
-      status.classList.remove('hidden');
+      this._showUploadError('Bitte eine Datei auswählen.');
       return;
     }
 
     const file = fileInput.files[0];
-    // Use original path but allow different file extension
     const folder = path.substring(0, path.lastIndexOf('/'));
     const safeName = this.sanitizeFileName(file.name);
     const uploadPath = `${folder}/${safeName}`;
 
     btn.disabled = true;
     btn.textContent = 'Wird ersetzt...';
-    status.className = 'text-sm text-blue-600';
-    status.textContent = `Lade ${safeName} hoch...`;
-    status.classList.remove('hidden');
+    this._showProgress(file);
 
     try {
-      // If filename changed, delete old file first
       if (uploadPath !== path) {
         await AuthentikAuth.apiFetch(`/api/documents/${path}`, { method: 'DELETE' });
       }
-
-      const buffer = await file.arrayBuffer();
-      const resp = await AuthentikAuth.apiFetch(`/api/documents/${uploadPath}`, {
-        method: 'PUT',
-        body: buffer,
-        headers: { 'Content-Type': 'application/octet-stream' },
-      });
-
-      if (!resp.ok) throw new Error('Upload fehlgeschlagen');
-
-      this.closeModal();
-      await this.loadAndRender();
+      await this._uploadFile(`/api/documents/${uploadPath}`, file);
+      setTimeout(() => { this.closeModal(); this.loadAndRender(); }, 500);
     } catch (err) {
-      status.className = 'text-sm text-red-600';
-      status.textContent = 'Fehler: ' + err.message;
+      this._showUploadError('Fehler: ' + err.message);
       btn.disabled = false;
       btn.textContent = 'Ersetzen';
     }
