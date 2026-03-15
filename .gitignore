@@ -41,3 +41,7 @@ stweg3/waschkueche-smart/backend/package-lock.json
 .env.local
 .env.*.local
 *-credentials.json
+
+# Personal data (DSG/DSGVO) - served via API, not in git
+ausschuss-kontakte.json
+technischer-dienst.json

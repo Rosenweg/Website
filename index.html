@@ -208,12 +208,10 @@
                     </div>
                     <p class="text-sm text-gray-600 mb-4">Jede STWEG entsendet 2 Vertreter in den Ausschuss (insgesamt 16 Mitglieder)</p>
                     <div id="ausschuss-liste" class="space-y-3">
-                        <!-- Wird automatisch aus ausschuss-kontakte.json geladen -->
+                        <!-- Wird aus /api/public/ausschuss geladen -->
                         <div class="text-sm text-gray-600 animate-pulse">
-                        <p>Lade Ausschussmitglieder...</p>
-                    </div>
-</div>
-<p id="ausschuss-last-update" class="text-xs text-gray-500 mt-4 pt-4 border-t border-gray-200"></p>
+                            <p>Lade Ausschussmitglieder...</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -232,7 +230,7 @@
                         <p class="text-xs text-gray-600">Zuständig für technische Angelegenheiten der STWEG-Kooperation</p>
                     </div>
                     <div id="tech-dienst-mitglieder" class="grid md:grid-cols-3 gap-4">
-                        <!-- Wird dynamisch aus technischer-dienst.json geladen -->
+                        <!-- Wird aus /api/public/technik geladen -->
                         <div class="bg-gray-50 p-4 rounded-lg animate-pulse">
                             <div class="h-4 bg-gray-300 rounded w-3/4 mb-2"></div>
                             <div class="h-3 bg-gray-200 rounded w-1/2"></div>
@@ -570,8 +568,44 @@
         });
     </script>
     
-    <!-- Ausschuss-Loader -->
-    <script src="ausschuss-loader.js"></script>
+    <!-- Ausschuss-Loader (from API) -->
+    <script>
+    async function loadAusschuss() {
+        try {
+            const res = await fetch('/api/public/ausschuss');
+            if (!res.ok) throw new Error('API ' + res.status);
+            const data = await res.json();
+            const container = document.getElementById('ausschuss-liste');
+            if (!container) return;
+            let html = '';
+            if (data.praesident) {
+                html += `<div class="border-l-4 border-yellow-500 pl-3 py-3 bg-yellow-50 rounded mb-3">
+                    <p class="text-sm font-semibold text-yellow-800 mb-1">Präsident des Ausschusses</p>
+                    <p class="text-sm font-bold text-gray-700">${data.praesident.name}</p>
+                    <p class="text-xs text-gray-600"><a href="mailto:${data.praesident.email}" class="text-blue-600 hover:underline">${data.praesident.email}</a></p>
+                </div>`;
+            }
+            for (const stweg of data.vertreter) {
+                const border = stweg.stweg_nummer === 8 ? 'green-500' : 'blue-400';
+                const bg = stweg.stweg_nummer === 8 ? 'green-50' : 'gray-50';
+                const label = stweg.stweg_nummer === 8 ? ' (Tiefgarage)' : '';
+                const names = stweg.vertreter.map(v => v.name).join(' &bull; ');
+                html += `<div class="border-l-4 border-${border} pl-3 py-2 bg-${bg} rounded">
+                    <p class="text-sm font-semibold text-gray-700 mb-1">STWEG ${stweg.stweg_nummer}${label}</p>
+                    <p class="text-sm text-gray-600">${names || '<em>Keine Vertreter zugewiesen</em>'}</p>
+                    <p class="text-xs text-gray-600 mt-1"><a href="mailto:${stweg.email}" class="text-blue-600 hover:underline">${stweg.email}</a></p>
+                </div>`;
+            }
+            container.innerHTML = html;
+        } catch (err) {
+            console.error('Ausschuss laden:', err);
+            const c = document.getElementById('ausschuss-liste');
+            if (c) c.innerHTML = '<p class="text-sm text-gray-500">Ausschuss-Daten konnten nicht geladen werden.</p>';
+        }
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loadAusschuss);
+    else loadAusschuss();
+    </script>
 
     <!-- Config-basierte Daten laden -->
     <script>
@@ -619,64 +653,31 @@
     });
     </script>
 
-    <!-- Technischer Dienst Loader -->
+    <!-- Technischer Dienst Loader (from API) -->
     <script>
         async function loadTechnischerDienst() {
             try {
-                const response = await fetch('technischer-dienst.json');
-                if (!response.ok) {
-                    throw new Error('technischer-dienst.json konnte nicht geladen werden');
-                }
-                const data = await response.json();
-                renderTechnischerDienst(data);
-            } catch (error) {
-                console.error('Fehler beim Laden des Technischen Dienstes:', error);
-                // Fallback anzeigen
+                const res = await fetch('/api/public/technik');
+                if (!res.ok) throw new Error('API ' + res.status);
+                const data = await res.json();
                 const container = document.getElementById('tech-dienst-mitglieder');
-                if (container) {
-                    container.innerHTML = `
-                        <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded col-span-3">
-                            <p class="text-sm text-yellow-800">Die Mitgliederliste konnte nicht automatisch geladen werden.</p>
-                            <p class="text-xs text-yellow-600 mt-1">Bitte laden Sie die Seite neu oder kontaktieren Sie den technischen Dienst.</p>
-                        </div>
-                    `;
+                if (!container) return;
+                let html = '';
+                for (const m of data.mitglieder) {
+                    html += `<div class="bg-gray-50 p-4 rounded-lg hover:bg-gray-100 transition">
+                        <p class="text-gray-700 mb-2 font-semibold">${m.name}</p>
+                        <p class="text-gray-600 text-sm"><a href="mailto:${m.email}" class="text-blue-600 hover:underline">${m.email}</a></p>
+                    </div>`;
                 }
+                container.innerHTML = html || '<p class="text-sm text-gray-500">Keine Mitglieder gefunden.</p>';
+            } catch (err) {
+                console.error('Technischer Dienst laden:', err);
+                const c = document.getElementById('tech-dienst-mitglieder');
+                if (c) c.innerHTML = '<p class="text-sm text-gray-500 col-span-3">Daten konnten nicht geladen werden.</p>';
             }
         }
-
-        function renderTechnischerDienst(data) {
-            const container = document.getElementById('tech-dienst-mitglieder');
-            if (!container) return;
-
-            let html = '';
-            data.mitglieder.forEach(mitglied => {
-                const stweg = mitglied.stweg ? `${mitglied.stweg}` : 'extern';
-                const wohnung = mitglied.wohnung ? ` (${mitglied.wohnung})` : '';
-                const zustaendigkeiten = mitglied.zustaendigkeiten && mitglied.zustaendigkeiten.length > 0
-                    ? `<p class="text-gray-600 text-xs mt-2">📋 ${mitglied.zustaendigkeiten.join(' • ')}</p>`
-                    : '';
-                html += `
-                    <div class="bg-gray-50 p-4 rounded-lg hover:bg-gray-100 transition">
-                        <p class="text-gray-700 mb-2 font-semibold">${mitglied.name}</p>
-                        <p class="text-gray-600 text-sm mb-1">${stweg}${wohnung}</p>
-                        <p class="text-gray-600 text-sm">
-                            <a href="tel:${mitglied.telefon}" class="text-blue-600 hover:underline">${mitglied.telefon}</a>
-                        </p>
-                        <p class="text-gray-500 text-xs mt-2">${mitglied.rolle}</p>
-                        ${zustaendigkeiten}
-                    </div>
-                `;
-            });
-
-            container.innerHTML = html;
-        }
-
-        // Beim Laden der Seite
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', loadTechnischerDienst);
-        } else {
-            loadTechnischerDienst();
-        }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loadTechnischerDienst);
+        else loadTechnischerDienst();
     </script>
 </body>
 </html>

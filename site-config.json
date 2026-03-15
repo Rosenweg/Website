@@ -119,12 +119,7 @@
   "ausschuss": {
     "email": "ausschuss@rosenweg4303.ch",
     "beschreibung": "15 Ausschussmitglieder (2 Vertreter pro STWEG 1–7, 1 Vertreter für STWEG 8)",
-    "praesident": {
-      "name": "Jörg Herrmann",
-      "email": "praesident@rosenweg4303.ch",
-      "telefon": "+41 79 727 13 78",
-      "stweg_nr": 2
-    }
+    "praesident_email": "praesident@rosenweg4303.ch"
   },
   "entsorgung": {
     "container_standort": "Östlich der Tiefgarageneinfahrt",
