@@ -2741,7 +2741,7 @@ app.get('/api/documents', authMiddleware, async (req, res) => {
       const tree = await response.json();
       const IGNORED = ['README.md', 'LICENSE', '.gitignore'];
       allDocs = tree.tree
-        .filter(f => f.type === 'blob' && !IGNORED.includes(f.path) && !f.path.startsWith('.'))
+        .filter(f => f.type === 'blob' && !IGNORED.includes(f.path) && !f.path.startsWith('.') && !f.path.endsWith('.gitkeep'))
         .map(f => ({
           path: f.path,
           size: f.size,
@@ -2777,8 +2777,9 @@ app.get('/api/documents/:path(*)', authMiddleware, async (req, res) => {
       return res.status(403).json({ error: 'Kein Zugriff auf dieses Dokument' });
     }
 
+    const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
     const response = await fetch(
-      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${encodeURIComponent(filePath)}?ref=${GITHUB_DOCS_BRANCH}`,
+      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${encodedPath}?ref=${GITHUB_DOCS_BRANCH}`,
       { headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3.raw' } }
     );
 
