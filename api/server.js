@@ -403,6 +403,16 @@ function adminOnly(req, res, next) {
   next();
 }
 
+function canManageDocs(req, res, next) {
+  const groups = req.user?.groups || [];
+  const allowed = groups.some(g => {
+    const gl = g.toLowerCase();
+    return gl === 'technik' || gl.endsWith('-ausschuss');
+  });
+  if (!allowed) return res.status(403).json({ error: 'Nur Technik und Ausschuss dürfen Dokumente verwalten' });
+  next();
+}
+
 // ─── Permission System ──────────────────────────────────────────────
 const MANAGED_PAGES = [
   { id: 'bewohner-verwaltung', label: 'Bewohner-Verwaltung' },
@@ -2758,7 +2768,7 @@ app.get('/api/documents/:path(*)', authMiddleware, async (req, res) => {
 });
 
 // PUT /api/documents/:path(*) - Upload/replace a document (admin only)
-app.put('/api/documents/:path(*)', authMiddleware, adminOnly, async (req, res) => {
+app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, res) => {
   try {
     const filePath = req.params.path;
     if (filePath.includes('..') || filePath.startsWith('/')) {
@@ -2808,7 +2818,7 @@ app.put('/api/documents/:path(*)', authMiddleware, adminOnly, async (req, res) =
 });
 
 // DELETE /api/documents/:path(*) - Delete a document (admin only)
-app.delete('/api/documents/:path(*)', authMiddleware, adminOnly, async (req, res) => {
+app.delete('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, res) => {
   try {
     const filePath = req.params.path;
     if (filePath.includes('..') || filePath.startsWith('/')) {

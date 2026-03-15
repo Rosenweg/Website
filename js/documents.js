@@ -6,7 +6,7 @@
 const RosenwegDocs = {
   container: null,
   docs: [],
-  isAdmin: false,
+  canManage: false,
 
   CATEGORY_LABELS: {
     'allgemein': 'Allgemein',
@@ -42,7 +42,12 @@ const RosenwegDocs = {
     this.container = document.getElementById(containerId);
     if (!this.container) return;
 
-    this.isAdmin = AuthentikAuth.isAdmin();
+    const user = AuthentikAuth.getUser();
+    const groups = user?.groups || [];
+    this.canManage = groups.some(g => {
+      const gl = g.toLowerCase();
+      return gl === 'technik' || gl.endsWith('-ausschuss');
+    });
 
     const token = AuthentikAuth.getToken();
     if (!token) {
@@ -123,7 +128,7 @@ const RosenwegDocs = {
     let html = '';
 
     // Admin: upload button
-    if (this.isAdmin) {
+    if (this.canManage) {
       html += `
         <div class="mb-6 flex justify-end">
           <button onclick="RosenwegDocs.showUploadDialog()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition flex items-center gap-2 text-sm">
@@ -167,7 +172,7 @@ const RosenwegDocs = {
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
                   </svg>
                 </a>
-                ${this.isAdmin ? `
+                ${this.canManage ? `
                 <button onclick="RosenwegDocs.showReplaceDialog('${doc.path}')" class="text-yellow-600 hover:text-yellow-800 p-1 opacity-0 group-hover:opacity-100 transition" title="Ersetzen">
                   <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
