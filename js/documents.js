@@ -7,6 +7,20 @@ const RosenwegDocs = {
   container: null,
   docs: [],
   canManage: false,
+  isTechnik: false,
+  groups: [],
+  writableFolders: [],
+
+  STWEG_GROUPS: {
+    1: ['stweg1-bewohner', 'stweg1-eigentuemer', 'stweg1-ausschuss'],
+    2: ['stweg2-bewohner', 'stweg2-eigentuemer', 'stweg2-ausschuss'],
+    3: ['r9-bewohner', 'r9-eigentuemer', 'stweg3-ausschuss'],
+    4: ['stweg4-bewohner', 'stweg4-eigentuemer', 'stweg4-ausschuss'],
+    5: ['stweg5-bewohner', 'stweg5-eigentuemer', 'stweg5-ausschuss'],
+    6: ['r1-bewohner', 'r1-eigentuemer', 'stweg6-ausschuss'],
+    7: ['stweg7-bewohner', 'stweg7-eigentuemer', 'stweg7-ausschuss'],
+    8: ['stweg8-ausschuss'],
+  },
 
   CATEGORY_LABELS: {
     'allgemein': 'Allgemein',
@@ -38,16 +52,36 @@ const RosenwegDocs = {
     txt: 'text-gray-500',
   },
 
+  _getWritableFolders() {
+    if (this.isTechnik) return Object.keys(this.CATEGORY_LABELS);
+    if (!this.canManage) return [];
+    const folders = ['allgemein'];
+    for (const [nr, groupNames] of Object.entries(this.STWEG_GROUPS)) {
+      if (this.groups.some(g => groupNames.includes(g.toLowerCase()) && g.toLowerCase().endsWith('-ausschuss'))) {
+        folders.push(`stweg${nr}`);
+      }
+    }
+    return folders;
+  },
+
+  _canWritePath(path) {
+    if (this.isTechnik) return true;
+    const folder = path.includes('/') ? path.split('/')[0] : 'allgemein';
+    return this.writableFolders.includes(folder);
+  },
+
   async init(containerId) {
     this.container = document.getElementById(containerId);
     if (!this.container) return;
 
     const user = AuthentikAuth.getUser();
-    const groups = user?.groups || [];
-    this.canManage = groups.some(g => {
+    this.groups = user?.groups || [];
+    this.isTechnik = this.groups.some(g => g.toLowerCase() === 'technik');
+    this.canManage = this.groups.some(g => {
       const gl = g.toLowerCase();
       return gl === 'technik' || gl.endsWith('-ausschuss');
     });
+    this.writableFolders = this._getWritableFolders();
 
     const token = AuthentikAuth.getToken();
     if (!token) {
@@ -172,7 +206,7 @@ const RosenwegDocs = {
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
                   </svg>
                 </a>
-                ${this.canManage ? `
+                ${this._canWritePath(doc.path) ? `
                 <button onclick="RosenwegDocs.showReplaceDialog('${doc.path}')" class="text-yellow-600 hover:text-yellow-800 p-1 opacity-0 group-hover:opacity-100 transition" title="Ersetzen">
                   <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
@@ -201,6 +235,7 @@ const RosenwegDocs = {
 
   showUploadDialog(prefillPath) {
     const folders = Object.entries(this.CATEGORY_LABELS)
+      .filter(([key]) => this.writableFolders.includes(key))
       .map(([key, label]) => `<option value="${key}"${prefillPath && prefillPath.startsWith(key) ? ' selected' : ''}>${label}</option>`)
       .join('');
 
