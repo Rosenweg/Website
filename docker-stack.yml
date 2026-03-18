@@ -1,0 +1,332 @@
+version: "3.8"
+
+services:
+  # ============================================
+  # Traefik - Reverse Proxy mit Let's Encrypt
+  # ============================================
+  traefik:
+    image: traefik:v3.2
+    command:
+      - "--api.dashboard=true"
+      - "--providers.swarm=true"
+      - "--providers.swarm.exposedByDefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=stefan+rosenweg@juroct.ch"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--log.level=WARN"
+      - "--accesslog=true"
+      - "--accesslog.filepath=/var/log/traefik/access.log"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-certs:/letsencrypt
+      - traefik-logs:/var/log/traefik
+    networks:
+      - rosenweg-net
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.traefik-dashboard.rule=Host(`www.rosenweg4303.ch`) && PathPrefix(`/traefik`)"
+        - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
+        - "traefik.http.routers.traefik-dashboard.tls.certresolver=letsencrypt"
+        - "traefik.http.routers.traefik-dashboard.service=api@internal"
+        - "traefik.http.routers.traefik-dashboard.middlewares=traefik-auth"
+        - "traefik.http.middlewares.traefik-auth.basicauth.users=admin:$$2y$$10$$CHANGE_THIS_HASH"
+        - "traefik.http.services.traefik-dashboard.loadbalancer.server.port=8080"
+
+  # ============================================
+  # Website - Static Files via Nginx
+  # ============================================
+  website:
+    image: ghcr.io/rosenweg/rosenweg-website:latest
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 3
+      placement:
+        constraints:
+          - node.hostname == docker-pve1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.rosenweg.rule=Host(`www.rosenweg4303.ch`) || Host(`rosenweg4303.ch`)"
+        - "traefik.http.routers.rosenweg.entrypoints=websecure"
+        - "traefik.http.routers.rosenweg.tls.certresolver=letsencrypt"
+        - "traefik.http.services.rosenweg.loadbalancer.server.port=80"
+        - "traefik.http.middlewares.rosenweg-www.redirectregex.regex=^https://rosenweg4303\\.ch/(.*)"
+        - "traefik.http.middlewares.rosenweg-www.redirectregex.replacement=https://www.rosenweg4303.ch/$${1}"
+        - "traefik.http.middlewares.rosenweg-www.redirectregex.permanent=true"
+        - "traefik.http.routers.rosenweg.middlewares=rosenweg-www"
+        # rosenweg9.ch → /stweg3/
+        - "traefik.http.routers.rosenweg9.rule=Host(`www.rosenweg9.ch`) || Host(`rosenweg9.ch`)"
+        - "traefik.http.routers.rosenweg9.entrypoints=websecure"
+        - "traefik.http.routers.rosenweg9.tls.certresolver=letsencrypt"
+        - "traefik.http.middlewares.rosenweg9-redirect.redirectregex.regex=^https://(www\\.)?rosenweg9\\.ch/?(.*)"
+        - "traefik.http.middlewares.rosenweg9-redirect.redirectregex.replacement=https://www.rosenweg4303.ch/stweg3/$${2}"
+        - "traefik.http.middlewares.rosenweg9-redirect.redirectregex.permanent=true"
+        - "traefik.http.routers.rosenweg9.middlewares=rosenweg9-redirect"
+        - "shepherd.enable=true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # ============================================
+  # API Backend - Node.js/Express
+  # ============================================
+  api:
+    image: ghcr.io/rosenweg/rosenweg-api:latest
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: rosenweg
+      DB_USER: rosenweg
+      DB_PASSWORD: "${DB_PASSWORD}"
+      SMTP_HOST: mail-eu.smtp2go.com
+      SMTP_PORT: "2525"
+      SMTP_USER: "${SMTP_USER}"
+      SMTP_PASS: "${SMTP_PASS}"
+      SMTP2GO_API_KEY: "${SMTP2GO_API_KEY}"
+      MAIL_FROM: "noreply@rosenweg4303.ch"
+      PORT: "3000"
+      AUTHENTIK_URL: "https://server:9443"
+      AUTHENTIK_EXTERNAL_URL: "https://authentik.rosenweg4303.ch"
+      AUTHENTIK_CLIENT_ID: "${AUTHENTIK_CLIENT_ID}"
+      AUTHENTIK_CLIENT_SECRET: "${AUTHENTIK_CLIENT_SECRET}"
+      AUTHENTIK_API_TOKEN: "${AUTHENTIK_API_TOKEN}"
+      SITE_URL: "https://www.rosenweg4303.ch"
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+      PEOPLEFON_API_URL: "${PEOPLEFON_API_URL}"
+      PEOPLEFON_API_KEY: "${PEOPLEFON_API_KEY}"
+      PEOPLEFON_NUMBER: "${PEOPLEFON_NUMBER}"
+      ENERGY_DB_HOST: energy-db
+      ENERGY_DB_PORT: "5432"
+      ENERGY_DB_NAME: energy
+      ENERGY_DB_USER: energy
+      ENERGY_DB_PASSWORD: "${ENERGY_DB_PASSWORD:-energy2026}"
+      GITHUB_DOCS_REPO: "Rosenweg/documents"
+      GITHUB_DOCS_TOKEN: "${GITHUB_DOCS_TOKEN}"
+    networks:
+      - rosenweg-net
+      - authentik_authentik-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname == docker-pve1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - "shepherd.enable=true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ============================================
+  # PostgreSQL Database
+  # ============================================
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: rosenweg
+      POSTGRES_USER: rosenweg
+      POSTGRES_PASSWORD: "${DB_PASSWORD}"
+    volumes:
+      - rosenweg-pgdata:/var/lib/postgresql/data
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname == docker-pve1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rosenweg"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # Energy Collector - Modbus TCP → PostgreSQL
+  # ============================================
+  energy-collector:
+    image: ghcr.io/rosenweg/energy-collector:latest
+    environment:
+      METERS: "${ENERGY_METERS:-100.64.90.70:502:1:r9-haupt,100.64.90.71:502:1:r9-produktion,100.64.90.72:502:1:r9-allgemein,100.64.90.73:502:1:r9-eg1,100.64.90.74:502:1:r9-eg2,100.64.90.75:502:1:r9-eg3,100.64.90.76:502:1:r9-1og1,100.64.90.77:502:1:r9-1og2,100.64.90.78:502:1:r9-1og3,100.64.90.79:502:1:r9-2og1,100.64.90.80:502:1:r9-2og2,100.64.90.81:502:1:r9-2og3,100.64.90.82:502:1:r9-keller-neziri}"
+      POLL_INTERVAL: "5"
+      API_PORT: "3001"
+      DB_HOST: energy-db
+      DB_PORT: "5432"
+      DB_NAME: energy
+      DB_USER: energy
+      DB_PASSWORD: "${ENERGY_DB_PASSWORD:-energy2026}"
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname == docker-pve1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      labels:
+        - "shepherd.enable=true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ============================================
+  # Energy Database - Separate PostgreSQL
+  # ============================================
+  energy-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: energy
+      POSTGRES_USER: energy
+      POSTGRES_PASSWORD: "${ENERGY_DB_PASSWORD:-energy2026}"
+    volumes:
+      - energy-pgdata:/var/lib/postgresql/data
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname == docker-pve1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U energy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # Document Converter - LibreOffice via Gotenberg
+  # ============================================
+  doc-converter:
+    image: gotenberg/gotenberg:8
+    command:
+      - "gotenberg"
+      - "--api-timeout=120s"
+      - "--libreoffice-disable-routes=false"
+      - "--chromium-disable-routes=true"
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname == docker-pve1
+      resources:
+        limits:
+          memory: 512M
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ============================================
+  # Netbird Gateway - Mueller VPN Routing
+  # ============================================
+  netbird-gateway:
+    image: netbirdio/netbird:latest
+    environment:
+      NB_SETUP_KEY: "${NB_SETUP_KEY}"
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_RESOURCE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv6.conf.all.disable_ipv6=0
+      - net.ipv6.conf.all.forwarding=1
+    volumes:
+      - netbird-config:/etc/netbird
+      - /dev/net/tun:/dev/net/tun
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname == docker-pve1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+
+  # ============================================
+  # Shepherd - Auto-update Docker Swarm services
+  # ============================================
+  shepherd:
+    image: mazzolino/shepherd:latest
+    environment:
+      SLEEP_TIME: "1m"
+      FILTER_SERVICES: "label=shepherd.enable=true"
+      IMAGE_AUTOCLEAN_LIMIT: "5"
+      ROLLBACK_ON_FAILURE: "true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+
+networks:
+  rosenweg-net:
+    driver: overlay
+    attachable: true
+  authentik_authentik-net:
+    external: true
+
+volumes:
+  traefik-certs:
+  traefik-logs:
+  rosenweg-pgdata:
+  energy-pgdata:
+  netbird-config:

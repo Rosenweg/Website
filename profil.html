@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mein Profil - Rosenweg</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .avatar-upload { position: relative; cursor: pointer; }
+        .avatar-upload:hover .avatar-overlay { opacity: 1; }
+        .avatar-overlay {
+            position: absolute; inset: 0; border-radius: 50%;
+            background: rgba(0,0,0,0.5); opacity: 0; transition: opacity 0.2s;
+            display: flex; align-items: center; justify-content: center;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js?v=2"></script>
+
+    <div class="max-w-4xl mx-auto px-4 py-8 space-y-6">
+
+        <!-- Avatar + Header -->
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <div class="flex items-center gap-6">
+                <div class="avatar-upload" onclick="document.getElementById('avatar-input').click()">
+                    <div id="avatar-display" class="w-24 h-24 rounded-full bg-blue-100 flex items-center justify-center text-3xl font-bold text-blue-600 overflow-hidden">
+                        ?
+                    </div>
+                    <div class="avatar-overlay">
+                        <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/>
+                        </svg>
+                    </div>
+                    <input type="file" id="avatar-input" class="hidden" accept="image/*" onchange="uploadAvatar(event)">
+                </div>
+                <div>
+                    <h1 id="profile-name" class="text-2xl font-bold text-gray-800">Mein Profil</h1>
+                    <p id="profile-email" class="text-gray-500"></p>
+                    <p id="profile-role" class="text-sm text-blue-600 mt-1"></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Gruppen -->
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                Meine Gruppen
+            </h2>
+            <div id="groups-list" class="flex flex-wrap gap-2">
+                <span class="text-sm text-gray-400">Laden...</span>
+            </div>
+        </div>
+
+        <!-- Zähler -->
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                Meine Zähler
+            </h2>
+            <div id="meters-list">
+                <span class="text-sm text-gray-400">Laden...</span>
+            </div>
+        </div>
+
+        <!-- Persönliche Daten -->
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                Persönliche Daten
+            </h2>
+
+            <div id="save-message" class="hidden mb-4 p-3 rounded-lg text-sm font-medium"></div>
+
+            <form id="profile-form" class="space-y-5">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                        <input type="text" id="f-name" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">E-Mail</label>
+                        <input type="email" id="f-email" class="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-100 cursor-not-allowed" disabled>
+                        <p class="text-xs text-gray-500 mt-1">Wird über Authentik verwaltet</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Telefon</label>
+                        <input type="tel" id="f-phone" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="+41 ...">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">STWEG</label>
+                        <select id="f-stweg" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                            <option value="">-- Bitte wählen --</option>
+                            <option value="1">STWEG 1</option>
+                            <option value="2">STWEG 2</option>
+                            <option value="3">STWEG 3</option>
+                            <option value="4">STWEG 4</option>
+                            <option value="5">STWEG 5</option>
+                            <option value="6">STWEG 6</option>
+                            <option value="7">STWEG 7</option>
+                            <option value="8">STWEG 8 (Tiefgarage)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Wohnung</label>
+                        <input type="text" id="f-wohnung" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="z.B. 3. OG links">
+                    </div>
+                </div>
+
+                <hr class="my-6">
+                <h3 class="text-lg font-semibold text-gray-700">Adresse</h3>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div class="md:col-span-2">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Strasse</label>
+                        <input type="text" id="f-strasse" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Rosenweg ...">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">PLZ</label>
+                        <input type="text" id="f-plz" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="4303">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Ort</label>
+                        <input type="text" id="f-ort" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Kaiseraugst">
+                    </div>
+                </div>
+
+                <div class="flex justify-end pt-4">
+                    <button type="submit" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition font-medium">
+                        Speichern
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = null;
+
+        async function loadProfile() {
+            const resp = await AuthentikAuth.apiFetch('/api/auth/me');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            currentUser = data.user;
+
+            // Header
+            document.getElementById('profile-name').textContent = currentUser.name || 'Unbekannt';
+            document.getElementById('profile-email').textContent = currentUser.email || '';
+            document.getElementById('profile-role').textContent =
+                currentUser.isAdmin ? 'Administrator' : 'Bewohner';
+
+            // Avatar
+            const avatarEl = document.getElementById('avatar-display');
+            if (currentUser.avatar_url) {
+                avatarEl.innerHTML = `<img src="${currentUser.avatar_url}" class="w-full h-full object-cover" alt="Avatar">`;
+            } else {
+                const initials = (currentUser.name || '?').split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+                avatarEl.textContent = initials;
+            }
+
+            // Groups
+            const groupsEl = document.getElementById('groups-list');
+            const groups = currentUser.groups || [];
+            if (groups.length === 0) {
+                groupsEl.innerHTML = '<span class="text-sm text-gray-400">Keine Gruppen zugewiesen</span>';
+            } else {
+                const groupColors = {
+                    'admin': 'bg-red-100 text-red-700',
+                    'technik': 'bg-purple-100 text-purple-700',
+                    'stweg3-ausschuss': 'bg-blue-100 text-blue-700',
+                    'verwaltung': 'bg-green-100 text-green-700',
+                };
+                groupsEl.innerHTML = groups.map(g => {
+                    const color = groupColors[g] || 'bg-gray-100 text-gray-700';
+                    return `<span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${color}">${g}</span>`;
+                }).join('');
+            }
+
+            // Meters - load from energy collector
+            const metersEl = document.getElementById('meters-list');
+            try {
+                const meterResp = await fetch(`/api/energy/user/${encodeURIComponent(currentUser.email)}/meters`);
+                const meters = meterResp.ok ? await meterResp.json() : [];
+                if (meters.length === 0) {
+                    metersEl.innerHTML = '<span class="text-sm text-gray-400">Keine Zähler zugewiesen</span>';
+                } else {
+                    metersEl.innerHTML = `
+                        <div class="space-y-2">
+                            ${meters.map(m => `
+                                <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                    <div>
+                                        <span class="font-medium text-gray-800">${m.name || m.id}</span>
+                                        <span class="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">${m.type || 'modbus'}</span>
+                                        ${m.role ? `<span class="ml-1 text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">${m.role}</span>` : ''}
+                                    </div>
+                                    <a href="energie-monitor.html" class="text-sm text-blue-600 hover:text-blue-800">Dashboard</a>
+                                </div>
+                            `).join('')}
+                        </div>`;
+                }
+            } catch {
+                metersEl.innerHTML = '<span class="text-sm text-gray-400">Keine Zähler zugewiesen</span>';
+            }
+
+            // Form fields
+            document.getElementById('f-name').value = currentUser.name || '';
+            document.getElementById('f-email').value = currentUser.email || '';
+            document.getElementById('f-phone').value = currentUser.phone || '';
+            document.getElementById('f-stweg').value = currentUser.stweg || '';
+            document.getElementById('f-wohnung').value = currentUser.wohnung || '';
+            document.getElementById('f-strasse').value = currentUser.strasse || '';
+            document.getElementById('f-plz').value = currentUser.plz || '';
+            document.getElementById('f-ort').value = currentUser.ort || '';
+        }
+
+        async function uploadAvatar(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            // Max 500KB
+            if (file.size > 512000) {
+                alert('Bild ist zu gross (max 500 KB)');
+                return;
+            }
+
+            // Resize to 200x200 and convert to base64
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+
+            img.onload = async () => {
+                const size = 200;
+                canvas.width = size;
+                canvas.height = size;
+
+                // Crop to square from center
+                const minDim = Math.min(img.width, img.height);
+                const sx = (img.width - minDim) / 2;
+                const sy = (img.height - minDim) / 2;
+                ctx.drawImage(img, sx, sy, minDim, minDim, 0, 0, size, size);
+
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+
+                const resp = await AuthentikAuth.apiFetch('/api/auth/avatar', {
+                    method: 'PUT',
+                    body: { avatar: dataUrl },
+                });
+
+                if (resp.ok) {
+                    const avatarEl = document.getElementById('avatar-display');
+                    avatarEl.innerHTML = `<img src="${dataUrl}" class="w-full h-full object-cover" alt="Avatar">`;
+                } else {
+                    alert('Fehler beim Hochladen des Avatars');
+                }
+            };
+
+            img.src = URL.createObjectURL(file);
+        }
+
+        document.getElementById('profile-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const msg = document.getElementById('save-message');
+
+            const body = {
+                name: document.getElementById('f-name').value.trim(),
+                phone: document.getElementById('f-phone').value.trim(),
+                stweg: document.getElementById('f-stweg').value || null,
+                wohnung: document.getElementById('f-wohnung').value.trim(),
+                strasse: document.getElementById('f-strasse').value.trim(),
+                plz: document.getElementById('f-plz').value.trim(),
+                ort: document.getElementById('f-ort').value.trim(),
+            };
+
+            const resp = await AuthentikAuth.apiFetch('/api/auth/profile', {
+                method: 'PUT',
+                body,
+            });
+
+            if (resp.ok) {
+                msg.textContent = 'Profil erfolgreich gespeichert.';
+                msg.className = 'mb-4 p-3 rounded-lg text-sm font-medium bg-green-100 text-green-700';
+                // Update header name
+                document.getElementById('profile-name').textContent = body.name;
+            } else {
+                msg.textContent = 'Fehler beim Speichern.';
+                msg.className = 'mb-4 p-3 rounded-lg text-sm font-medium bg-red-100 text-red-700';
+            }
+            msg.classList.remove('hidden');
+            setTimeout(() => msg.classList.add('hidden'), 4000);
+        });
+
+        // Init
+        AuthentikAuth.init({ requireAuth: true }).then(user => {
+            if (user) {
+                loadProfile();
+                RosenwegNav.init({ active: 'profil' });
+            }
+        });
+    </script>
+</body>
+</html>

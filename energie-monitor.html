@@ -3,866 +3,1388 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Energie-Monitor - STWEG Rosenweg</title>
+    <title>Energie-Monitor - Rosenweg</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <script src="js/authentik-auth.js?v=2"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-        body {
-            font-family: 'Inter', sans-serif;
-        }
-        .hidden {
-            display: none;
-        }
-        .pulse-green {
-            animation: pulse-green 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
-        @keyframes pulse-green {
-            0%, 100% {
-                opacity: 1;
-            }
-            50% {
-                opacity: .5;
-            }
-        }
-        .metric-card {
-            transition: transform 0.2s;
-        }
-        .metric-card:hover {
-            transform: translateY(-4px);
+        body { font-family: 'Inter', sans-serif; }
+        .pulse-dot { animation: pulse 2s infinite; }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
         }
     </style>
 </head>
-<body class="bg-gray-50">
+<body class="bg-gray-50 min-h-screen">
+    <!-- Navigation -->
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js?v=2"></script>
+    <script>RosenwegNav.init({ active: 'energie' });</script>
 
-    <!-- Login Screen -->
-    <div id="login-screen" class="min-h-screen flex items-center justify-center bg-gradient-to-r from-yellow-500 to-orange-600 p-4">
-        <div class="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
-            <div class="text-center mb-8">
-                <svg class="h-16 w-16 mx-auto text-yellow-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                </svg>
-                <h1 class="text-3xl font-bold text-gray-800">Energie-Monitor</h1>
-                <p class="text-gray-600 mt-2">STWEG-Kooperation Rosenweg</p>
-            </div>
-
-            <!-- Email Input -->
-            <div id="email-form" class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">E-Mail-Adresse</label>
-                    <input
-                        type="email"
-                        id="email-input"
-                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
-                        placeholder="ihre-email@example.com"
-                        autocomplete="email"
-                    >
-                </div>
-                <button
-                    onclick="sendOTP()"
-                    class="w-full bg-yellow-600 text-white py-3 rounded-lg hover:bg-yellow-700 transition font-semibold"
-                >
-                    Code anfordern
-                </button>
-            </div>
-
-            <!-- OTP Input -->
-            <div id="otp-form" class="hidden space-y-4">
-                <div class="bg-yellow-50 border-l-4 border-yellow-500 p-4 mb-4">
-                    <p class="text-sm text-yellow-700">
-                        Ein 6-stelliger Code wurde an <strong id="display-email"></strong> gesendet.
-                    </p>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">6-stelliger Code</label>
-                    <input
-                        type="text"
-                        id="otp-input"
-                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent text-center text-2xl tracking-widest"
-                        placeholder="000000"
-                        maxlength="6"
-                        pattern="[0-9]{6}"
-                        autocomplete="one-time-code"
-                    >
-                </div>
-                <button
-                    onclick="verifyOTP()"
-                    class="w-full bg-yellow-600 text-white py-3 rounded-lg hover:bg-yellow-700 transition font-semibold"
-                >
-                    Anmelden
-                </button>
-                <button
-                    onclick="backToEmail()"
-                    class="w-full bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300 transition text-sm"
-                >
-                    Andere E-Mail verwenden
-                </button>
-            </div>
-
-            <div id="message" class="mt-4 text-center text-sm"></div>
+    <!-- Energie Controls -->
+    <div class="bg-white border-b px-4 sm:px-6 lg:px-8">
+        <div class="max-w-7xl mx-auto flex items-center justify-end space-x-3 h-10">
+            <span id="live-indicator" class="flex items-center text-sm text-gray-500">
+                <span class="pulse-dot w-2 h-2 bg-green-500 rounded-full mr-2"></span>
+                Live
+            </span>
+            <select id="meter-select" class="text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500">
+                <option value="">Zähler laden...</option>
+            </select>
+            <a id="config-link" href="energie-config.html" class="hidden text-sm text-blue-600 hover:text-blue-800" title="Konfiguration">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            </a>
         </div>
     </div>
 
-    <!-- Dashboard -->
-    <div id="dashboard" class="hidden">
-        <!-- Navigation -->
-        <nav class="bg-white shadow-lg sticky top-0 z-50">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="flex justify-between h-16">
-                    <div class="flex items-center">
-                        <svg class="h-8 w-8 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                        </svg>
-                        <span class="ml-2 text-xl font-semibold text-gray-800">Energie-Monitor</span>
-                    </div>
-                    <div class="flex items-center space-x-4">
-                        <span id="user-info" class="text-sm text-gray-600"></span>
-                        <button onclick="logout()" class="text-red-600 hover:text-red-700 text-sm font-medium">
-                            Abmelden
-                        </button>
+    <!-- Alerts Bar -->
+    <div id="alerts-bar" class="hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-2"></div>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <!-- View Tabs -->
+        <div class="flex space-x-1 bg-gray-100 rounded-lg p-1 mb-4 w-fit">
+            <button onclick="switchView('meter')" id="tab-meter" class="px-4 py-1.5 text-sm font-medium rounded-md bg-white text-gray-900 shadow-sm">Einzelzähler</button>
+            <button onclick="switchView('dashboard')" id="tab-dashboard" class="px-4 py-1.5 text-sm font-medium rounded-md text-gray-500 hover:text-gray-700">Dashboard</button>
+            <button onclick="switchView('compare')" id="tab-compare" class="px-4 py-1.5 text-sm font-medium rounded-md text-gray-500 hover:text-gray-700">Vergleich</button>
+        </div>
+
+        <!-- ══════ METER VIEW (existing) ══════ -->
+        <div id="view-meter">
+        <!-- Date Navigation -->
+        <div id="date-nav" class="flex items-center justify-center gap-2 mb-4">
+            <button onclick="navigateDate(-1)" class="p-1.5 rounded-md hover:bg-gray-200 text-gray-500" title="Zurück">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+            </button>
+            <input type="date" id="date-picker" class="text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 px-3 py-1.5" />
+            <button onclick="navigateDate(1)" class="p-1.5 rounded-md hover:bg-gray-200 text-gray-500" title="Vor">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            </button>
+            <button onclick="goLive()" id="btn-live" class="ml-2 px-3 py-1.5 text-xs rounded-md bg-green-100 text-green-700 font-medium hover:bg-green-200">
+                ● Live
+            </button>
+        </div>
+
+        <!-- Solar Overview Bar -->
+        <div class="bg-gradient-to-r from-yellow-50 to-green-50 border border-yellow-200 rounded-xl shadow-md p-4 mb-6">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="text-center">
+                    <p id="solar-production-label" class="text-xs font-medium text-yellow-700">Solarproduktion</p>
+                    <p id="solar-production" class="text-xl font-bold text-yellow-600">-- kW</p>
+                </div>
+                <div class="text-center">
+                    <p id="solar-selfuse-label" class="text-xs font-medium text-green-700">Eigenverbrauch</p>
+                    <p id="solar-selfuse" class="text-xl font-bold text-green-600">-- kW</p>
+                </div>
+                <div class="text-center">
+                    <p id="solar-export-label" class="text-xs font-medium text-blue-700">Netzeinspeisung</p>
+                    <p id="solar-export" class="text-xl font-bold text-blue-600">-- kW</p>
+                </div>
+                <div class="text-center">
+                    <p class="text-xs font-medium text-emerald-700">Solaranteil</p>
+                    <p id="solar-share" class="text-xl font-bold text-emerald-600">-- %</p>
+                    <div class="w-full bg-gray-200 rounded-full h-2 mt-1">
+                        <div id="solar-share-bar" class="bg-emerald-500 h-2 rounded-full transition-all" style="width: 0%"></div>
                     </div>
                 </div>
             </div>
-        </nav>
+        </div>
 
-        <!-- Main Content -->
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- Live Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <!-- Aktuelle Leistung -->
+            <div class="bg-white rounded-xl shadow-md p-5">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium text-gray-500">Aktuelle Leistung</span>
+                    <svg class="w-5 h-5 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                    </svg>
+                </div>
+                <p id="live-power" class="text-3xl font-bold text-gray-900">-- W</p>
+                <p id="live-power-detail" class="text-xs text-gray-400 mt-1">L1: -- | L2: -- | L3: --</p>
+            </div>
 
-            <!-- Live Status -->
-            <div class="mb-8">
+            <!-- Verbrauch heute -->
+            <div class="bg-white rounded-xl shadow-md p-5">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium text-gray-500">Verbrauch heute</span>
+                    <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                    </svg>
+                </div>
+                <p id="today-consumption" class="text-3xl font-bold text-gray-900">-- kWh</p>
+                <p id="today-cost" class="text-xs text-gray-400 mt-1">Kosten: --</p>
+                <p id="today-solar-split" class="text-xs text-green-600 mt-0.5 hidden"></p>
+            </div>
+
+            <!-- Spannung -->
+            <div class="bg-white rounded-xl shadow-md p-5">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium text-gray-500">Spannung</span>
+                    <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+                    </svg>
+                </div>
+                <p id="live-voltage" class="text-3xl font-bold text-gray-900">-- V</p>
+                <p id="live-voltage-detail" class="text-xs text-gray-400 mt-1">L1: -- | L2: -- | L3: --</p>
+            </div>
+
+            <!-- Zählerstand -->
+            <div class="bg-white rounded-xl shadow-md p-5">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium text-gray-500">Zählerstand</span>
+                    <svg class="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+                    </svg>
+                </div>
+                <p id="live-meter" class="text-3xl font-bold text-gray-900">-- kWh</p>
+                <p id="live-meter-detail" class="text-xs text-gray-400 mt-1">Export: -- kWh</p>
+            </div>
+        </div>
+
+        <!-- Charts Row -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+            <!-- Power Chart (2/3 width) -->
+            <div class="lg:col-span-2 bg-white rounded-xl shadow-md p-5">
                 <div class="flex items-center justify-between mb-4">
-                    <h2 class="text-2xl font-bold text-gray-800">Live-Verbrauch</h2>
-                    <div class="flex items-center text-yellow-600">
-                        <div class="w-3 h-3 bg-yellow-600 rounded-full pulse-green mr-2"></div>
-                        <span class="text-sm font-medium">Live</span>
+                    <h3 class="text-sm font-semibold text-gray-700">Leistungsverlauf</h3>
+                    <div class="flex space-x-1">
+                        <button onclick="setPeriod('day')" id="btn-day" class="px-3 py-1 text-xs rounded-md bg-blue-100 text-blue-700 font-medium">Heute</button>
+                        <button onclick="setPeriod('week')" id="btn-week" class="px-3 py-1 text-xs rounded-md text-gray-500 hover:bg-gray-100">Woche</button>
+                        <button onclick="setPeriod('month')" id="btn-month" class="px-3 py-1 text-xs rounded-md text-gray-500 hover:bg-gray-100">Monat</button>
                     </div>
                 </div>
-
-                <div class="grid md:grid-cols-3 gap-6">
-                    <!-- Aktuelle Leistung -->
-                    <div class="bg-gradient-to-br from-yellow-500 to-orange-500 rounded-lg shadow-lg p-6 text-white metric-card">
-                        <div class="flex items-center justify-between mb-2">
-                            <span class="text-yellow-100">Aktuelle Leistung</span>
-                            <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                            </svg>
-                        </div>
-                        <div class="text-4xl font-bold" id="live-power">---</div>
-                        <div class="text-sm text-yellow-100 mt-1" id="live-tarif">Lade...</div>
-                    </div>
-
-                    <!-- Heutiger Verbrauch -->
-                    <div class="bg-gradient-to-br from-yellow-500 to-orange-500 rounded-lg shadow-lg p-6 text-white metric-card">
-                        <div class="flex items-center justify-between mb-2">
-                            <span class="text-yellow-100">Heute</span>
-                            <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
-                            </svg>
-                        </div>
-                        <div class="text-4xl font-bold" id="today-consumption">---</div>
-                        <div class="text-sm text-yellow-100 mt-1" id="today-cost">Kosten: ---</div>
-                    </div>
-
-                    <!-- Solar (wenn vorhanden) -->
-                    <div id="solar-card" class="hidden bg-gradient-to-br from-yellow-500 to-orange-500 rounded-lg shadow-lg p-6 text-white metric-card">
-                        <div class="flex items-center justify-between mb-2">
-                            <span class="text-yellow-100">Solar</span>
-                            <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
-                            </svg>
-                        </div>
-                        <div class="text-4xl font-bold" id="solar-power">---</div>
-                        <div class="text-sm text-yellow-100 mt-1" id="solar-autarkie">Autarkie: ---</div>
-                    </div>
+                <div class="relative" style="height: 280px;">
+                    <canvas id="power-chart"></canvas>
                 </div>
             </div>
 
-            <!-- Zeitraum-Auswahl -->
-            <div class="mb-6">
-                <div class="bg-white rounded-lg shadow p-4">
-                    <div class="flex flex-wrap gap-2">
-                        <button onclick="selectPeriod('day')" class="period-btn px-6 py-2 bg-yellow-600 text-white rounded-lg font-medium hover:bg-yellow-700 transition">
-                            Tag
-                        </button>
-                        <button onclick="selectPeriod('week')" class="period-btn px-6 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition">
-                            Woche
-                        </button>
-                        <button onclick="selectPeriod('month')" class="period-btn px-6 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition">
-                            Monat
-                        </button>
-                    </div>
+            <!-- Phase Distribution -->
+            <div class="bg-white rounded-xl shadow-md p-5">
+                <h3 class="text-sm font-semibold text-gray-700 mb-4">Phasenverteilung</h3>
+                <div class="relative" style="height: 200px;">
+                    <canvas id="phase-chart"></canvas>
                 </div>
+                <div id="phase-details" class="mt-3 space-y-2 text-sm"></div>
             </div>
-
-            <!-- Charts -->
-            <div class="grid lg:grid-cols-2 gap-6 mb-8">
-                <!-- Verbrauchsverlauf -->
-                <div class="bg-white rounded-lg shadow-lg p-6">
-                    <h3 class="text-lg font-semibold text-gray-800 mb-4">Verbrauchsverlauf</h3>
-                    <canvas id="consumption-chart" height="300"></canvas>
-                </div>
-
-                <!-- Tarifaufteilung -->
-                <div class="bg-white rounded-lg shadow-lg p-6">
-                    <h3 class="text-lg font-semibold text-gray-800 mb-4">Tarifaufteilung</h3>
-                    <canvas id="tariff-chart" height="300"></canvas>
-                </div>
-            </div>
-
-            <!-- Statistik-Tabelle -->
-            <div class="bg-white rounded-lg shadow-lg p-6">
-                <h3 class="text-lg font-semibold text-gray-800 mb-4">Detaillierte Statistik</h3>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
-                        <thead class="bg-gray-50">
-                            <tr>
-                                <th class="px-4 py-3 text-left font-semibold text-gray-700">Tarif</th>
-                                <th class="px-4 py-3 text-right font-semibold text-gray-700">Verbrauch (kWh)</th>
-                                <th class="px-4 py-3 text-right font-semibold text-gray-700">Preis/kWh</th>
-                                <th class="px-4 py-3 text-right font-semibold text-gray-700">Kosten (CHF)</th>
-                            </tr>
-                        </thead>
-                        <tbody id="stats-table" class="divide-y divide-gray-200">
-                            <!-- Wird dynamisch gefüllt -->
-                        </tbody>
-                        <tfoot class="bg-gray-50 font-semibold">
-                            <tr>
-                                <td class="px-4 py-3 text-left">Gesamt</td>
-                                <td class="px-4 py-3 text-right" id="total-consumption">---</td>
-                                <td class="px-4 py-3 text-right">---</td>
-                                <td class="px-4 py-3 text-right" id="total-cost">---</td>
-                            </tr>
-                        </tfoot>
-                    </table>
-                </div>
-            </div>
-
-            <!-- Unterzähler (wenn vorhanden) -->
-            <div id="submeters-section" class="hidden mt-8">
-                <h3 class="text-xl font-bold text-gray-800 mb-4">Unterzähler</h3>
-                <div id="submeters-grid" class="grid md:grid-cols-3 gap-4">
-                    <!-- Wird dynamisch gefüllt -->
-                </div>
-            </div>
-
         </div>
-    </div>
+
+        <!-- Cost Projection -->
+        <div id="projection-card" class="bg-gradient-to-r from-orange-50 to-amber-50 border border-orange-200 rounded-xl shadow-md p-4 mb-6 hidden">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-sm font-semibold text-orange-800">Kosten-Prognose</h3>
+                <span id="projection-days" class="text-xs text-orange-500">Basis: -- Tage</span>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="text-center">
+                    <p class="text-xs text-orange-600">Ø Tagesverbrauch</p>
+                    <p id="proj-daily" class="text-lg font-bold text-orange-800">-- kWh</p>
+                </div>
+                <div class="text-center">
+                    <p class="text-xs text-orange-600">Monats-Prognose</p>
+                    <p id="proj-monthly-kwh" class="text-lg font-bold text-orange-800">-- kWh</p>
+                    <p id="proj-monthly-cost" class="text-sm font-semibold text-orange-600">-- CHF</p>
+                </div>
+                <div class="text-center">
+                    <p class="text-xs text-orange-600">Jahres-Prognose</p>
+                    <p id="proj-yearly-kwh" class="text-lg font-bold text-orange-800">-- kWh</p>
+                    <p id="proj-yearly-cost" class="text-sm font-semibold text-orange-600">-- CHF</p>
+                </div>
+                <div class="text-center">
+                    <p class="text-xs text-orange-600">Solaranteil</p>
+                    <p id="proj-solar" class="text-lg font-bold text-green-600">-- %</p>
+                    <div class="w-full bg-gray-200 rounded-full h-1.5 mt-1">
+                        <div id="proj-solar-bar" class="bg-green-500 h-1.5 rounded-full transition-all" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Consumption Chart -->
+        <div class="bg-white rounded-xl shadow-md p-5 mb-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-sm font-semibold text-gray-700">Tagesverbrauch</h3>
+                <div class="flex space-x-1">
+                    <button onclick="setConsumptionPeriod('week')" id="cbtn-week" class="px-3 py-1 text-xs rounded-md text-gray-500 hover:bg-gray-100">Woche</button>
+                    <button onclick="setConsumptionPeriod('month')" id="cbtn-month" class="px-3 py-1 text-xs rounded-md bg-blue-100 text-blue-700 font-medium">Monat</button>
+                    <button onclick="setConsumptionPeriod('quarter')" id="cbtn-quarter" class="px-3 py-1 text-xs rounded-md text-gray-500 hover:bg-gray-100">Quartal</button>
+                    <button onclick="setConsumptionPeriod('year')" id="cbtn-year" class="px-3 py-1 text-xs rounded-md text-gray-500 hover:bg-gray-100">Jahr</button>
+                    <span class="border-l border-gray-200 mx-1"></span>
+                    <button onclick="exportCSV()" class="px-3 py-1 text-xs rounded-md text-gray-500 hover:bg-gray-100 flex items-center gap-1" title="CSV Export">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        CSV
+                    </button>
+                </div>
+            </div>
+            <div class="relative" style="height: 250px;">
+                <canvas id="consumption-chart"></canvas>
+            </div>
+            <div id="consumption-summary" class="mt-4 pt-3 border-t border-gray-100 hidden">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div>
+                        <p class="text-gray-500 text-xs">Gesamtverbrauch</p>
+                        <p id="sum-total" class="font-bold text-gray-800">-- kWh</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-500 text-xs">davon Solar</p>
+                        <p id="sum-solar" class="font-bold text-green-600">-- kWh</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-500 text-xs">davon Netz</p>
+                        <p id="sum-netz" class="font-bold text-blue-600">-- kWh</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-500 text-xs">Geschätzte Kosten</p>
+                        <p id="sum-cost" class="font-bold text-orange-600">-- CHF</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Detail Table -->
+        <div class="bg-white rounded-xl shadow-md p-5">
+            <h3 class="text-sm font-semibold text-gray-700 mb-4">Aktuelle Messwerte</h3>
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-sm">
+                    <thead>
+                        <tr class="border-b border-gray-200">
+                            <th class="text-left py-2 px-3 text-gray-500 font-medium">Messwert</th>
+                            <th class="text-right py-2 px-3 text-gray-500 font-medium">L1</th>
+                            <th class="text-right py-2 px-3 text-gray-500 font-medium">L2</th>
+                            <th class="text-right py-2 px-3 text-gray-500 font-medium">L3</th>
+                            <th class="text-right py-2 px-3 text-gray-500 font-medium">Total</th>
+                        </tr>
+                    </thead>
+                    <tbody id="detail-table" class="divide-y divide-gray-100">
+                    </tbody>
+                </table>
+            </div>
+            <p id="last-update" class="text-xs text-gray-400 mt-3 text-right">Letzte Aktualisierung: --</p>
+        </div>
+        </div><!-- /view-meter -->
+
+        <!-- ══════ DASHBOARD VIEW ══════ -->
+        <div id="view-dashboard" class="hidden">
+            <h2 class="text-lg font-semibold text-gray-800 mb-4">Gruppen-Übersicht</h2>
+            <div id="dashboard-groups" class="space-y-6">
+                <p class="text-gray-400 text-sm">Lade Dashboard...</p>
+            </div>
+        </div>
+
+        <!-- ══════ COMPARE VIEW ══════ -->
+        <div id="view-compare" class="hidden">
+            <div class="bg-white rounded-xl shadow-md p-5 mb-6">
+                <div class="flex flex-wrap items-center gap-3 mb-4">
+                    <h3 class="text-sm font-semibold text-gray-700">Zähler vergleichen</h3>
+                    <div id="compare-checkboxes" class="flex flex-wrap gap-2 text-sm"></div>
+                    <select id="compare-days" class="text-sm border-gray-300 rounded-md shadow-sm ml-auto">
+                        <option value="7">7 Tage</option>
+                        <option value="14">14 Tage</option>
+                        <option value="30" selected>30 Tage</option>
+                        <option value="90">90 Tage</option>
+                    </select>
+                    <button onclick="loadComparison()" class="px-3 py-1.5 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700 font-medium">Vergleichen</button>
+                </div>
+                <div class="relative" style="height: 350px;">
+                    <canvas id="compare-chart"></canvas>
+                </div>
+                <div id="compare-summary" class="mt-4 pt-3 border-t border-gray-100 hidden">
+                    <div id="compare-summary-content" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm"></div>
+                </div>
+            </div>
+        </div>
+    </main>
 
     <script>
-        // Globale Variablen
-        let currentUser = null;
-        let currentPeriod = 'day';
-        let zaehlerConfig = null;
-        let benutzerDaten = null;
-        let charts = {};
-        let liveUpdateInterval = null;
+    // ─── Config ─────────────────────────────────────────────────────
+    const API = '/api/energy';
+    const POLL_INTERVAL = 5000;
+    let TARIFE = { netz: 0, solar: 0 };
 
-        // Konfiguration laden
-        async function loadConfig() {
-            try {
-                const response = await fetch('zaehler-config.json');
-                zaehlerConfig = await response.json();
-                console.log('✅ Konfiguration geladen', zaehlerConfig);
-            } catch (error) {
-                console.error('❌ Fehler beim Laden der Konfiguration:', error);
+    let currentMeter = null;
+    let currentPeriod = 'day';
+    let powerChart = null;
+    let phaseChart = null;
+    let consumptionChart = null;
+    let pollTimer = null;
+    let currentUser = null;
+    let solarData = { production: 0, selfuse: 0, export: 0, share: 0 };
+    let selectedDate = null; // null = live/today, otherwise a Date object
+    let isLive = true;
+    let allMeters = []; // all loaded meters with category/group_id
+    let gridMeterId = null; // dynamically resolved from category='grid'
+    let prodMeterId = null; // dynamically resolved from category='production'
+
+    function isTechnik(user) {
+        return user?.groups?.some(g => g.toLowerCase().includes('technik'));
+    }
+
+    function meterDisplayName(m) {
+        return m.group_id ? m.group_id + '-' + m.name : m.name;
+    }
+
+    async function loadTariffs(date) {
+        try {
+            const dateParam = date ? `?date=${date}` : '';
+            const res = await fetch(`${API}/tariffs/current${dateParam}`);
+            const tariffs = await res.json();
+            const netz = tariffs.find(t => t.name === 'Netztarif');
+            const solar = tariffs.find(t => t.name === 'Solartarif');
+            TARIFE.netz = netz ? parseFloat(netz.price_per_kwh) : 0;
+            TARIFE.solar = solar ? parseFloat(solar.price_per_kwh) : 0;
+        } catch (e) { console.warn('Tariffs not loaded:', e); }
+    }
+
+    // Resolve reference meters (grid + production) for the current meter's group
+    function resolveRefMeters() {
+        const cur = allMeters.find(m => m.id === currentMeter);
+        const group = cur?.group_id;
+        gridMeterId = allMeters.find(m => m.category === 'grid' && m.group_id === group)?.id || null;
+        prodMeterId = allMeters.find(m => m.category === 'production' && m.group_id === group)?.id || null;
+    }
+
+    function isGrid(id) { return id && id === gridMeterId; }
+    function isProd(id) { return id && id === prodMeterId; }
+    function isRefMeter(id) { return isGrid(id) || isProd(id); }
+
+    // ─── Init ───────────────────────────────────────────────────────
+    async function init() {
+        // Require authentication
+        currentUser = await AuthentikAuth.init({
+            requireAuth: true,
+            onLogin(user) {
+                if (isTechnik(user)) {
+                    document.getElementById('config-link').classList.remove('hidden');
+                }
             }
+        });
+        if (!currentUser) return;
+
+        try {
+            let meters;
+            if (isTechnik(currentUser)) {
+                const res = await fetch(`${API}/meters`);
+                meters = await res.json();
+            } else {
+                const userGroups = (currentUser.groups || []).join(',');
+                const res = await fetch(`${API}/user/${encodeURIComponent(currentUser.email)}/meters?groups=${encodeURIComponent(userGroups)}`);
+                meters = await res.json();
+            }
+            allMeters = meters;
+
+            const select = document.getElementById('meter-select');
+            select.innerHTML = '';
+            if (meters.length === 0) {
+                select.innerHTML = '<option>Keine Zähler zugewiesen</option>';
+                return;
+            }
+
+            // Group meters by group_id for optgroups
+            const groups = {};
+            meters.forEach(m => {
+                const g = m.group_id || 'Andere';
+                if (!groups[g]) groups[g] = [];
+                groups[g].push(m);
+            });
+            const groupKeys = Object.keys(groups);
+            const useGroups = groupKeys.length > 1;
+            groupKeys.forEach(gk => {
+                const container = useGroups ? document.createElement('optgroup') : select;
+                if (useGroups) { container.label = gk.toUpperCase(); select.appendChild(container); }
+                groups[gk].forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m.id;
+                    const catLabel = m.category === 'grid' ? ' [Netz]' : m.category === 'production' ? ' [Solar]' : '';
+                    opt.textContent = meterDisplayName(m) + catLabel;
+                    container.appendChild(opt);
+                });
+            });
+
+            currentMeter = meters[0].id;
+            select.value = currentMeter;
+            select.addEventListener('change', (e) => {
+                currentMeter = e.target.value;
+                resolveRefMeters();
+                refreshAll();
+            });
+
+            resolveRefMeters();
+        } catch (err) {
+            const select = document.getElementById('meter-select');
+            select.innerHTML = '<option>Verbindung fehlgeschlagen</option>';
+            console.error('Init error:', err);
+            return;
         }
 
-        // Beim Laden der Seite
-        window.addEventListener('DOMContentLoaded', async function() {
-            await loadConfig();
+        await loadTariffs();
 
-            // Auto-Logout nach 1 Stunde
-            setTimeout(() => {
-                if (currentUser) {
-                    alert('Sitzung abgelaufen. Bitte melden Sie sich erneut an.');
-                    logout();
-                }
-            }, 3600000);
+        initCharts();
+        initDateNav();
+        refreshAll();
+        pollTimer = setInterval(pollLive, POLL_INTERVAL);
+        loadAlerts();
+        setInterval(loadAlerts, 60000); // refresh alerts every minute
+    }
+
+    // ─── Charts Init ────────────────────────────────────────────────
+    function initCharts() {
+        const defaultOpts = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+        };
+
+        powerChart = new Chart(document.getElementById('power-chart'), {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'Leistung (W)',
+                        data: [],
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'transparent',
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        borderWidth: 2,
+                        order: 0,
+                    },
+                    {
+                        label: 'Solar (W)',
+                        data: [],
+                        borderColor: 'rgba(234,179,8,0.7)',
+                        backgroundColor: 'rgba(234,179,8,0.3)',
+                        fill: 'origin',
+                        tension: 0.3,
+                        pointRadius: 0,
+                        borderWidth: 1,
+                        order: 1,
+                    },
+                    {
+                        label: 'Netzstrom (W)',
+                        data: [],
+                        borderColor: 'rgba(239,68,68,0.7)',
+                        backgroundColor: 'rgba(239,68,68,0.3)',
+                        fill: 'origin',
+                        tension: 0.3,
+                        pointRadius: 0,
+                        borderWidth: 1,
+                        order: 2,
+                    },
+                ]
+            },
+            options: {
+                ...defaultOpts,
+                scales: {
+                    x: { ticks: { maxTicksLimit: 12, font: { size: 10 } }, grid: { display: false } },
+                    y: { beginAtZero: true, ticks: { font: { size: 10 }, callback: v => v + ' W' }, grid: { color: '#f3f4f6' } },
+                },
+                interaction: { intersect: false, mode: 'index' },
+                plugins: {
+                    legend: { display: true, position: 'top', labels: { font: { size: 10 }, padding: 8, usePointStyle: true, pointStyle: 'line' } },
+                    tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(0)} W` } },
+                },
+            }
         });
 
-        // E-Mail in STWEG kontakte.json Dateien suchen
-        async function searchEmailInSTWEGKontakte(email) {
-            // Liste der STWEGs (aktuell 1-8, kann erweitert werden)
-            const stwegs = [1, 2, 3, 4, 5, 6, 7, 8];
-
-            for (const stwegNr of stwegs) {
-                try {
-                    const response = await fetch(`stweg${stwegNr}/data/kontakte.json`);
-                    if (!response.ok) continue;
-
-                    const kontakte = await response.json();
-
-                    // In Verteilerlisten suchen (alle, bewohner, eigentuemer)
-                    const verteilerlisten = kontakte.verteilerlisten || {};
-                    for (const [listName, liste] of Object.entries(verteilerlisten)) {
-                        for (const person of liste) {
-                            // E-Mail kann mehrere Adressen enthalten (komma-separiert)
-                            const emails = person.email.split(',').map(e => e.trim().toLowerCase());
-                            if (emails.includes(email)) {
-                                return {
-                                    email: email,
-                                    name: person.name,
-                                    wohnung: `Rosenweg ${kontakte.stweg.adresse.split(' ')[1]}, ${person.wohnung}`,
-                                    stweg: stwegNr
-                                };
-                            }
-                        }
-                    }
-
-                    // In Wohnungen suchen (Eigentümer und Mieter)
-                    const wohnungen = kontakte.wohnungen || {};
-                    for (const [etage, whgListe] of Object.entries(wohnungen)) {
-                        for (const wohnung of whgListe) {
-                            // Eigentümer prüfen
-                            if (wohnung.eigentümer && wohnung.eigentümer.email) {
-                                const emails = wohnung.eigentümer.email.split(',').map(e => e.trim().toLowerCase());
-                                if (emails.includes(email)) {
-                                    return {
-                                        email: email,
-                                        name: wohnung.eigentümer.name,
-                                        wohnung: `Rosenweg ${kontakte.stweg.adresse.split(' ')[1]}, ${wohnung.bezeichnung}`,
-                                        stweg: stwegNr
-                                    };
-                                }
-                            }
-
-                            // Mieter prüfen
-                            if (wohnung.mieter && wohnung.mieter.email) {
-                                const emails = wohnung.mieter.email.split(',').map(e => e.trim().toLowerCase());
-                                if (emails.includes(email)) {
-                                    return {
-                                        email: email,
-                                        name: wohnung.mieter.name,
-                                        wohnung: `Rosenweg ${kontakte.stweg.adresse.split(' ')[1]}, ${wohnung.bezeichnung}`,
-                                        stweg: stwegNr
-                                    };
-                                }
-                            }
-                        }
-                    }
-
-                } catch (error) {
-                    console.log(`STWEG ${stwegNr} kontakte.json nicht gefunden oder Fehler:`, error);
-                }
+        phaseChart = new Chart(document.getElementById('phase-chart'), {
+            type: 'doughnut',
+            data: {
+                labels: ['L1', 'L2', 'L3'],
+                datasets: [{
+                    data: [0, 0, 0],
+                    backgroundColor: ['#ef4444', '#f59e0b', '#3b82f6'],
+                    borderWidth: 0,
+                }]
+            },
+            options: {
+                ...defaultOpts,
+                cutout: '65%',
+                plugins: {
+                    legend: { display: true, position: 'bottom', labels: { font: { size: 11 }, padding: 8 } },
+                },
             }
+        });
 
-            return null;
+        consumptionChart = new Chart(document.getElementById('consumption-chart'), {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [
+                    { label: 'Solar', data: [], backgroundColor: '#22c55e', borderRadius: 3 },
+                    { label: 'Netzbezug', data: [], backgroundColor: '#3b82f6', borderRadius: 3 },
+                ]
+            },
+            options: {
+                ...defaultOpts,
+                scales: {
+                    x: { stacked: true, ticks: { font: { size: 10 } }, grid: { display: false } },
+                    y: { stacked: true, beginAtZero: true, ticks: { font: { size: 10 }, callback: v => v + ' kWh' }, grid: { color: '#f3f4f6' } },
+                },
+                plugins: {
+                    legend: { display: true, position: 'top', labels: { font: { size: 11 }, padding: 12 } },
+                    tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)} kWh` } },
+                },
+            }
+        });
+    }
+
+    // ─── Poll Live Data ─────────────────────────────────────────────
+    async function pollLive() {
+        if (!currentMeter || !isLive) return;
+        try {
+            // Fetch selected meter + solar reference meters in parallel
+            const [meterRes, liveAllRes] = await Promise.all([
+                fetch(`${API}/live/${currentMeter}`),
+                fetch(`${API}/live`),
+            ]);
+            if (!meterRes.ok) throw new Error('No data');
+            const d = await meterRes.json();
+            const allLive = await liveAllRes.json();
+
+            // Calculate solar share from grid and production reference meters
+            updateSolarOverview(allLive);
+            updateLiveCards(d);
+            updateDetailTable(d);
+        } catch (err) {
+            document.getElementById('live-indicator').querySelector('.pulse-dot').classList.replace('bg-green-500', 'bg-red-500');
+        }
+    }
+
+    function updateSolarOverview(allLive) {
+        if (!gridMeterId || !prodMeterId) return;
+        const haupt = allLive[gridMeterId];
+        const prod = allLive[prodMeterId];
+        if (!haupt || !prod) return;
+
+        // Produktion is negative when generating → make positive
+        const solarProd = Math.abs(prod.power_w);
+        // Haupt: negative = exporting to grid, positive = importing from grid
+        const netzExport = Math.max(0, -haupt.power_w);
+        const netzImport = Math.max(0, haupt.power_w);
+        const eigenverbrauch = solarProd - netzExport;
+        const totalConsumption = eigenverbrauch + netzImport;
+        const sharePercent = totalConsumption > 0 ? (eigenverbrauch / totalConsumption) * 100 : 0;
+
+        solarData = {
+            production: solarProd,
+            selfuse: Math.max(0, eigenverbrauch),
+            export: netzExport,
+            share: Math.min(100, Math.max(0, sharePercent)),
+        };
+
+        document.getElementById('solar-production-label').textContent = 'Solarproduktion';
+        document.getElementById('solar-selfuse-label').textContent = 'Eigenverbrauch';
+        document.getElementById('solar-export-label').textContent = 'Netzeinspeisung';
+        document.getElementById('solar-production').textContent = `${(solarProd / 1000).toFixed(1)} kW`;
+        document.getElementById('solar-selfuse').textContent = `${(Math.max(0, eigenverbrauch) / 1000).toFixed(1)} kW`;
+        document.getElementById('solar-export').textContent = `${(netzExport / 1000).toFixed(1)} kW`;
+        document.getElementById('solar-share').textContent = `${sharePercent.toFixed(0)} %`;
+        document.getElementById('solar-share-bar').style.width = `${Math.min(100, sharePercent)}%`;
+    }
+
+    function updateLiveCards(d) {
+        document.getElementById('live-indicator').querySelector('.pulse-dot').classList.replace('bg-red-500', 'bg-green-500');
+
+        // Adapt labels for special meters
+        const meterIsProd = isProd(currentMeter);
+        const meterIsGrid = isGrid(currentMeter);
+        const powerLabel = document.querySelector('#live-power').closest('.bg-white').querySelector('.text-sm.font-medium');
+        const consumLabel = document.querySelector('#today-consumption').closest('.bg-white').querySelector('.text-sm.font-medium');
+        if (meterIsProd) {
+            powerLabel.textContent = 'Solarleistung';
+            consumLabel.textContent = 'Produktion heute';
+        } else if (meterIsGrid) {
+            powerLabel.textContent = 'Netzleistung';
+            consumLabel.textContent = 'Netzbezug heute';
+        } else {
+            powerLabel.textContent = 'Aktuelle Leistung';
+            consumLabel.textContent = 'Verbrauch heute';
         }
 
-        // Benutzer-Eintrag via n8n Webhook erstellen
-        async function createUserEntry(userData) {
-            try {
-                const response = await fetch('https://n8n.juroct.net/webhook/zaehler-benutzer-erstellen', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        email: userData.email,
-                        name: userData.name,
-                        wohnung: userData.wohnung,
-                        stweg: userData.stweg,
-                        zugriff: 'bewohner',
-                        zaehler: [], // Leer - muss von Technik zugeordnet werden
-                        needs_meter_assignment: true,
-                        created_at: new Date().toISOString()
-                    })
-                });
-
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    console.error('Webhook response not OK:', response.status, errorText);
-                    return false;
-                }
-
-                // Warte kurz, damit GitHub den Commit abschließen kann
-                await new Promise(resolve => setTimeout(resolve, 2000));
-
-                return true;
-            } catch (error) {
-                console.error('Fehler beim Erstellen des Benutzers:', error);
-                return false;
-            }
+        const displayPower = meterIsProd ? Math.abs(d.power_w) : d.power_w;
+        const powerEl = document.getElementById('live-power');
+        powerEl.textContent = `${Math.round(displayPower)} W`;
+        if (meterIsGrid && d.power_w < 0) {
+            powerEl.className = 'text-3xl font-bold text-green-600';
+        } else if (meterIsProd) {
+            powerEl.className = 'text-3xl font-bold text-yellow-600';
+        } else {
+            powerEl.className = 'text-3xl font-bold text-gray-900';
         }
+        const pl1 = meterIsProd ? Math.abs(d.power_l1_w) : d.power_l1_w;
+        const pl2 = meterIsProd ? Math.abs(d.power_l2_w) : d.power_l2_w;
+        const pl3 = meterIsProd ? Math.abs(d.power_l3_w) : d.power_l3_w;
+        document.getElementById('live-power-detail').textContent =
+            `L1: ${Math.round(pl1)} W | L2: ${Math.round(pl2)} W | L3: ${Math.round(pl3)} W`;
 
-        // OTP anfordern
-        async function sendOTP() {
-            const email = document.getElementById('email-input').value.trim().toLowerCase();
+        const avgV = ((d.voltage_l1_v + d.voltage_l2_v + d.voltage_l3_v) / 3).toFixed(1);
+        document.getElementById('live-voltage').textContent = `${avgV} V`;
+        document.getElementById('live-voltage-detail').textContent =
+            `L1: ${d.voltage_l1_v.toFixed(1)} | L2: ${d.voltage_l2_v.toFixed(1)} | L3: ${d.voltage_l3_v.toFixed(1)}`;
 
-            if (!email || !email.includes('@')) {
-                showMessage('Bitte geben Sie eine gültige E-Mail-Adresse ein.', 'error');
-                return;
-            }
+        document.getElementById('live-meter').textContent = `${d.energy_import_kwh.toFixed(1)} kWh`;
+        document.getElementById('live-meter-detail').textContent = `Export: ${d.energy_export_kwh.toFixed(1)} kWh`;
 
-            // Prüfen, ob E-Mail in Config existiert
-            let benutzer = zaehlerConfig.benutzer.find(b => b.email.toLowerCase() === email);
+        document.getElementById('last-update').textContent =
+            `Letzte Aktualisierung: ${new Date(d.ts).toLocaleTimeString('de-CH')}`;
 
-            // Wenn nicht gefunden, in STWEG kontakte.json suchen
-            if (!benutzer) {
-                showMessage('E-Mail wird geprüft...', 'info');
-                const foundInKontakte = await searchEmailInSTWEGKontakte(email);
+        // Update phase chart
+        const phases = [Math.abs(d.power_l1_w), Math.abs(d.power_l2_w), Math.abs(d.power_l3_w)];
+        phaseChart.data.datasets[0].data = phases;
+        phaseChart.update('none');
 
-                if (foundInKontakte) {
-                    showMessage('Benutzer wird angelegt, bitte warten...', 'info');
+        document.getElementById('phase-details').innerHTML = [
+            { name: 'L1', val: d.power_l1_w, current: d.current_l1_a, pf: d.pf_l1 },
+            { name: 'L2', val: d.power_l2_w, current: d.current_l2_a, pf: d.pf_l2 },
+            { name: 'L3', val: d.power_l3_w, current: d.current_l3_a, pf: d.pf_l3 },
+        ].map(p => `
+            <div class="flex justify-between items-center">
+                <span class="text-gray-500">${p.name}: ${Math.round(p.val)} W</span>
+                <span class="text-gray-400 text-xs">${p.current.toFixed(2)} A | cos&phi; ${p.pf.toFixed(3)}</span>
+            </div>
+        `).join('');
+    }
 
-                    // Benutzer via n8n Webhook erstellen
-                    const created = await createUserEntry(foundInKontakte);
+    function updateDetailTable(d) {
+        const rows = [
+            { label: 'Leistung', l1: `${Math.round(d.power_l1_w)} W`, l2: `${Math.round(d.power_l2_w)} W`, l3: `${Math.round(d.power_l3_w)} W`, total: `${Math.round(d.power_w)} W` },
+            { label: 'Spannung', l1: `${d.voltage_l1_v.toFixed(1)} V`, l2: `${d.voltage_l2_v.toFixed(1)} V`, l3: `${d.voltage_l3_v.toFixed(1)} V`, total: '-' },
+            { label: 'Strom', l1: `${d.current_l1_a.toFixed(2)} A`, l2: `${d.current_l2_a.toFixed(2)} A`, l3: `${d.current_l3_a.toFixed(2)} A`, total: `${(d.current_l1_a + d.current_l2_a + d.current_l3_a).toFixed(2)} A` },
+            { label: 'cos &phi;', l1: d.pf_l1.toFixed(3), l2: d.pf_l2.toFixed(3), l3: d.pf_l3.toFixed(3), total: '-' },
+            { label: 'Netzbezug', l1: '-', l2: '-', l3: '-', total: `${d.energy_import_kwh.toFixed(2)} kWh` },
+            { label: 'Einspeisung', l1: '-', l2: '-', l3: '-', total: `${d.energy_export_kwh.toFixed(2)} kWh` },
+        ];
+        document.getElementById('detail-table').innerHTML = rows.map(r => `
+            <tr>
+                <td class="py-2 px-3 text-gray-700 font-medium">${r.label}</td>
+                <td class="py-2 px-3 text-right text-gray-600">${r.l1}</td>
+                <td class="py-2 px-3 text-right text-gray-600">${r.l2}</td>
+                <td class="py-2 px-3 text-right text-gray-600">${r.l3}</td>
+                <td class="py-2 px-3 text-right text-gray-900 font-semibold">${r.total}</td>
+            </tr>
+        `).join('');
+    }
 
-                    if (created) {
-                        // Konfiguration neu laden (mit Cache-Bypass)
-                        const timestamp = Date.now();
-                        try {
-                            const response = await fetch(`zaehler-config.json?t=${timestamp}`);
-                            zaehlerConfig = await response.json();
-                            console.log('✅ Konfiguration neu geladen nach Benutzer-Erstellung');
+    // ─── Load Day Summary ──────────────────────────────────────────
+    async function loadToday() {
+        if (!currentMeter) return;
+        try {
+            const dateParam = isLive ? '' : `?date=${selectedDate.toISOString().slice(0, 10)}`;
+            const res = await fetch(`${API}/today/${currentMeter}${dateParam}`);
+            const d = await res.json();
 
-                            benutzer = zaehlerConfig.benutzer.find(b => b.email.toLowerCase() === email);
+            // Update label
+            const consumLabel = document.querySelector('#today-consumption').closest('.bg-white').querySelector('.text-sm.font-medium');
 
-                            if (benutzer) {
-                                showMessage('Benutzer erfolgreich angelegt! Code wird gesendet...', 'success');
-                            } else {
-                                showMessage('Benutzer angelegt, aber noch nicht in Config verfügbar. Bitte versuchen Sie es in 30 Sekunden erneut.', 'error');
-                                return;
-                            }
-                        } catch (error) {
-                            console.error('Fehler beim Neuladen der Config:', error);
-                            showMessage('Benutzer angelegt, aber Config konnte nicht neu geladen werden. Bitte Seite neu laden.', 'error');
-                            return;
-                        }
-                    } else {
-                        showMessage('Fehler beim Anlegen des Benutzers. Bitte kontaktieren Sie das Technik-Team.', 'error');
-                        return;
-                    }
+            if (isProd(currentMeter)) {
+                const prodKwh = parseFloat(d.export_kwh) || 0;
+                document.getElementById('today-consumption').textContent = `${prodKwh.toFixed(2)} kWh`;
+                document.getElementById('today-cost').textContent = isLive ? 'Solarproduktion heute' : 'Solarproduktion';
+                document.getElementById('today-solar-split').classList.add('hidden');
+            } else {
+                const kwh = parseFloat(d.consumption_kwh) || 0;
+                document.getElementById('today-consumption').textContent = `${kwh.toFixed(2)} kWh`;
+
+                // Calculate cost with solar share
+                const share = isGrid(currentMeter) ? 0 : solarData.share / 100;
+                const solarKwh = kwh * share;
+                const netzKwh = kwh - solarKwh;
+                const cost = (netzKwh * TARIFE.netz) + (solarKwh * TARIFE.solar);
+                document.getElementById('today-cost').textContent = TARIFE.netz > 0
+                    ? `Kosten: CHF ${cost.toFixed(2)}`
+                    : 'Kosten: --';
+
+                const splitEl = document.getElementById('today-solar-split');
+                if (share > 0) {
+                    splitEl.textContent = `Solar: ${solarKwh.toFixed(1)} kWh (${(share*100).toFixed(0)}%) | Netz: ${netzKwh.toFixed(1)} kWh`;
+                    splitEl.classList.remove('hidden');
                 } else {
-                    showMessage('Diese E-Mail-Adresse ist nicht berechtigt. Sie muss in den STWEG-Kontakten vorhanden sein.', 'error');
+                    splitEl.classList.add('hidden');
+                }
+            }
+        } catch (err) {
+            console.error('Day summary load error:', err);
+        }
+    }
+
+    // ─── Load Power Chart ───────────────────────────────────────────
+    async function loadPowerChart() {
+        if (!currentMeter) return;
+        try {
+            let from, endpointFn;
+            const dayStart = getSelectedDayStart();
+            if (currentPeriod === 'day') {
+                from = dayStart.toISOString();
+                const dayEnd = getSelectedDayEnd();
+                endpointFn = (id) => `${API}/history/${id}?from=${from}&to=${dayEnd.toISOString()}&limit=2000`;
+            } else if (currentPeriod === 'week') {
+                const weekStart = new Date(dayStart.getTime() - 6 * 86400000);
+                from = weekStart.toISOString();
+                const dayEnd = getSelectedDayEnd();
+                endpointFn = (id) => `${API}/hourly/${id}?from=${from}&to=${dayEnd.toISOString()}`;
+            } else {
+                const monthStart = new Date(dayStart.getTime() - 29 * 86400000);
+                from = monthStart.toISOString();
+                const dayEnd = getSelectedDayEnd();
+                endpointFn = (id) => `${API}/hourly/${id}?from=${from}&to=${dayEnd.toISOString()}`;
+            }
+
+            // Load selected meter + reference meters (production + grid) in parallel
+            const [res, solarRes, hauptRes] = await Promise.all([
+                fetch(endpointFn(currentMeter)),
+                prodMeterId ? fetch(endpointFn(prodMeterId)).catch(e => { console.warn('Solar fetch failed:', e); return null; }) : null,
+                gridMeterId ? fetch(endpointFn(gridMeterId)).catch(e => { console.warn('Grid fetch failed:', e); return null; }) : null,
+            ]);
+            const data = await res.json();
+            const solarRaw = solarRes?.ok ? await solarRes.json() : [];
+            const hauptRaw = hauptRes?.ok ? await hauptRes.json() : [];
+            console.log(`Power chart: ${data.length} meter points, ${solarRaw.length} solar points, ${hauptRaw.length} grid points (prodMeter=${prodMeterId}, gridMeter=${gridMeterId})`);
+
+            const tsKey = currentPeriod === 'day' ? 'ts' : 'hour';
+            const valKey = currentPeriod === 'day' ? 'power_w' : 'avg_power_w';
+
+            const labels = data.map(r => {
+                const d = new Date(r[tsKey] || r.ts || r.hour);
+                if (currentPeriod === 'day') return d.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
+                return d.toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit' }) + ' ' +
+                       d.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
+            });
+            const values = data.map(r => parseFloat(r[valKey] || r.power_w || r.avg_power_w) || 0);
+
+            // Build time-indexed maps for solar production and haupt (grid import/export)
+            const solarProdMap = {};
+            solarRaw.forEach(r => {
+                const t = new Date(r[tsKey] || r.ts || r.hour).getTime();
+                solarProdMap[t] = Math.abs(parseFloat(r[valKey] || r.power_w || r.avg_power_w) || 0);
+            });
+            const hauptPowerMap = {};
+            hauptRaw.forEach(r => {
+                const t = new Date(r[tsKey] || r.ts || r.hour).getTime();
+                hauptPowerMap[t] = parseFloat(r[valKey] || r.power_w || r.avg_power_w) || 0;
+            });
+
+            // Helper: find closest value in map using binary search on sorted keys
+            const makeIndex = (map) => {
+                const keys = Object.keys(map).map(Number).sort((a, b) => a - b);
+                return { keys, map };
+            };
+            const solarIndex = makeIndex(solarProdMap);
+            const hauptIndex = makeIndex(hauptPowerMap);
+            const findClosest = (index, t) => {
+                if (index.map[t] !== undefined) return index.map[t];
+                const tolerance = currentPeriod === 'day' ? 30000 : 3600000;
+                const keys = index.keys;
+                // Binary search for closest key
+                let lo = 0, hi = keys.length - 1;
+                while (lo <= hi) {
+                    const mid = (lo + hi) >> 1;
+                    if (keys[mid] < t) lo = mid + 1;
+                    else hi = mid - 1;
+                }
+                // Check lo and lo-1
+                for (const idx of [lo, lo - 1]) {
+                    if (idx >= 0 && idx < keys.length && Math.abs(keys[idx] - t) < tolerance) {
+                        return index.map[keys[idx]];
+                    }
+                }
+                return null;
+            };
+
+            // Calculate solar share per timestamp, then split meter consumption
+            const solarValues = [];
+            const hauptValues = [];
+            let nullCount = 0, validCount = 0;
+            data.forEach((r, i) => {
+                const t = new Date(r[tsKey] || r.ts || r.hour).getTime();
+                const meterPower = values[i];
+                const prod = findClosest(solarIndex, t);
+                const hauptW = findClosest(hauptIndex, t);
+
+                if (prod === null || hauptW === null || meterPower <= 0) {
+                    nullCount++;
+                    if (nullCount <= 3) console.log(`Split null at ${i}: prod=${prod}, hauptW=${hauptW}, meterPower=${meterPower}`);
+                    solarValues.push(null);
+                    hauptValues.push(null);
                     return;
                 }
-            }
+                validCount++;
 
-            // OTP-Code generieren (6-stellig)
-            const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+                // haupt positive = grid import, negative = grid export
+                const netzExport = Math.max(0, -hauptW);
+                const netzImport = Math.max(0, hauptW);
+                const eigenverbrauch = Math.max(0, prod - netzExport);
+                const totalBuilding = eigenverbrauch + netzImport;
+                const sharePercent = totalBuilding > 0 ? eigenverbrauch / totalBuilding : 0;
 
-            // Code mit Timestamp speichern (10 Minuten gültig)
-            const otpData = {
-                code: otpCode,
-                email: email,
-                expires: Date.now() + 600000 // 10 Minuten
-            };
-            localStorage.setItem('energie_monitor_otp', JSON.stringify(otpData));
+                // Apply share to this meter's consumption
+                const solarW = meterPower * sharePercent;
+                const netzW = meterPower - solarW;
+                solarValues.push(Math.round(solarW));
+                hauptValues.push(Math.round(netzW));
+            });
 
-            // HTML für E-Mail erstellen
-            const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 0; }
-        .container { max-width: 600px; margin: 20px auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .header { background: linear-gradient(135deg, #eab308 0%, #f97316 100%); color: white; padding: 30px 20px; text-align: center; }
-        .header h1 { margin: 0; font-size: 28px; }
-        .content { padding: 30px 20px; }
-        .otp-box { background: #fef9c3; border: 2px dashed #eab308; border-radius: 8px; padding: 20px; text-align: center; margin: 20px 0; }
-        .otp-code { font-size: 36px; font-weight: bold; color: #d97706; letter-spacing: 8px; margin: 10px 0; }
-        .info { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 4px; }
-        .footer { background: #f9fafb; padding: 20px; text-align: center; font-size: 12px; color: #6b7280; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>⚡ Energie-Monitor Login</h1>
-            <p>STWEG-Kooperation Rosenweg</p>
-        </div>
-        <div class="content">
-            <h2>Ihr Anmelde-Code</h2>
-            <p>Verwenden Sie folgenden Code, um sich im Energie-Monitor anzumelden:</p>
+            console.log(`Split result: ${validCount} valid, ${nullCount} null`);
 
-            <div class="otp-box">
-                <div style="color: #6b7280; font-size: 14px; margin-bottom: 10px;">IHR CODE</div>
-                <div class="otp-code">${otpCode}</div>
-                <div style="color: #6b7280; font-size: 12px; margin-top: 10px;">Gültig für 10 Minuten</div>
-            </div>
-
-            <div class="info">
-                <strong>⚠️ Wichtig:</strong> Dieser Code ist nur 10 Minuten gültig. Geben Sie ihn niemals an Dritte weiter.
-            </div>
-
-            <p>Wenn Sie diese Anfrage nicht gestellt haben, ignorieren Sie diese E-Mail einfach.</p>
-        </div>
-        <div class="footer">
-            <p>STWEG-Kooperation Rosenweg | Kaiseraugst<br>
-            Diese E-Mail wurde automatisch generiert.</p>
-        </div>
-    </div>
-</body>
-</html>`;
-
-            try {
-                const response = await fetch(zaehlerConfig.n8n_webhooks.send_email, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        recipients: [email],
-                        subject: 'Ihr Login-Code für den Energie-Monitor',
-                        htmlContent: htmlContent,
-                        fromEmail: 'noreply@rosenweg4303.ch'
-                    })
-                });
-
-                if (response.ok) {
-                    document.getElementById('display-email').textContent = email;
-                    document.getElementById('email-form').classList.add('hidden');
-                    document.getElementById('otp-form').classList.remove('hidden');
-                    showMessage('Code wurde gesendet!', 'success');
-                } else {
-                    showMessage('Fehler beim Senden des Codes.', 'error');
+            // Downsample if too many points
+            const maxPoints = 500;
+            if (labels.length > maxPoints) {
+                const step = Math.ceil(labels.length / maxPoints);
+                const dl = [], dv = [], ds = [], dh = [];
+                for (let i = 0; i < labels.length; i += step) {
+                    dl.push(labels[i]);
+                    dv.push(values[i]);
+                    ds.push(solarValues[i]);
+                    dh.push(hauptValues[i]);
                 }
-            } catch (error) {
-                console.error('Fehler:', error);
-                showMessage('Netzwerkfehler. Bitte versuchen Sie es erneut.', 'error');
-            }
-        }
-
-        // OTP verifizieren
-        async function verifyOTP() {
-            const email = document.getElementById('display-email').textContent;
-            const otp = document.getElementById('otp-input').value;
-
-            if (otp.length !== 6) {
-                showMessage('Bitte geben Sie einen 6-stelligen Code ein.', 'error');
-                return;
-            }
-
-            // OTP-Daten aus LocalStorage holen
-            const otpDataStr = localStorage.getItem('energie_monitor_otp');
-            if (!otpDataStr) {
-                showMessage('Kein Code gefunden. Bitte fordern Sie einen neuen Code an.', 'error');
-                return;
-            }
-
-            const otpData = JSON.parse(otpDataStr);
-
-            // Prüfen ob abgelaufen
-            if (Date.now() > otpData.expires) {
-                localStorage.removeItem('energie_monitor_otp');
-                showMessage('Code abgelaufen. Bitte fordern Sie einen neuen Code an.', 'error');
-                backToEmail();
-                return;
-            }
-
-            // Prüfen ob E-Mail übereinstimmt
-            if (otpData.email.toLowerCase() !== email.toLowerCase()) {
-                showMessage('E-Mail stimmt nicht überein.', 'error');
-                return;
-            }
-
-            // Code prüfen
-            if (otpData.code !== otp) {
-                showMessage('Ungültiger Code. Bitte versuchen Sie es erneut.', 'error');
-                return;
-            }
-
-            // Code ist korrekt - Benutzer anmelden
-            localStorage.removeItem('energie_monitor_otp');
-            const benutzer = zaehlerConfig.benutzer.find(b => b.email.toLowerCase() === email.toLowerCase());
-
-            if (benutzer) {
-                currentUser = benutzer;
-                benutzerDaten = benutzer;
-                await showDashboard();
+                powerChart.data.labels = dl;
+                powerChart.data.datasets[0].data = dv;
+                powerChart.data.datasets[1].data = ds;
+                powerChart.data.datasets[2].data = dh;
             } else {
-                showMessage('Ungültiger Benutzer.', 'error');
-            }
-        }
-
-        // Dashboard anzeigen
-        async function showDashboard() {
-            document.getElementById('login-screen').classList.add('hidden');
-            document.getElementById('dashboard').classList.remove('hidden');
-
-            // Benutzerinfo anzeigen
-            document.getElementById('user-info').textContent = `${currentUser.name} (${currentUser.wohnung})`;
-
-            // Solar-Karte anzeigen wenn vorhanden
-            const hatSolar = currentUser.zaehler.some(z => z.hat_solar);
-            if (hatSolar) {
-                document.getElementById('solar-card').classList.remove('hidden');
+                powerChart.data.labels = labels;
+                powerChart.data.datasets[0].data = values;
+                powerChart.data.datasets[1].data = solarValues;
+                powerChart.data.datasets[2].data = hauptValues;
             }
 
-            // Daten laden
-            await loadDashboardData();
+            // Hide solar/netz split for reference meters (no split makes sense there)
+            powerChart.data.datasets[1].hidden = isRefMeter(currentMeter);
+            powerChart.data.datasets[2].hidden = isRefMeter(currentMeter);
 
-            // Live-Updates starten
-            startLiveUpdates();
+            powerChart.update();
+        } catch (err) {
+            console.error('Power chart error:', err);
         }
+    }
 
-        // Dashboard-Daten laden
-        async function loadDashboardData() {
-            const heute = new Date().toISOString().split('T')[0];
-            const hauptzaehler = currentUser.zaehler.find(z => z.typ === 'hauptzaehler');
+    // ─── Load Consumption Chart ─────────────────────────────────────
+    async function loadConsumptionChart() {
+        if (!currentMeter) return;
+        try {
+            const daysMap = { week: 7, month: 30, quarter: 90, year: 365 };
+            const days = daysMap[consumptionPeriod] || 30;
+            const toParam = isLive ? '' : `&to=${selectedDate.toISOString().slice(0, 10)}`;
 
-            if (!hauptzaehler) {
-                console.error('Kein Hauptzähler gefunden');
+            // Load meter daily + reference meters daily in parallel for solar split
+            const [meterRes, hauptRes, prodRes] = await Promise.all([
+                fetch(`${API}/daily/${currentMeter}?days=${days}${toParam}`),
+                gridMeterId ? fetch(`${API}/daily/${gridMeterId}?days=${days}${toParam}`) : null,
+                prodMeterId ? fetch(`${API}/daily/${prodMeterId}?days=${days}${toParam}`) : null,
+            ]);
+            const data = await meterRes.json();
+            const hauptData = hauptRes ? await hauptRes.json() : [];
+            const prodData = prodRes ? await prodRes.json() : [];
+
+            // Build lookup maps for solar calculation per day
+            const hauptByDay = {};
+            hauptData.forEach(r => { hauptByDay[r.day] = r; });
+            const prodByDay = {};
+            prodData.forEach(r => { prodByDay[r.day] = r; });
+
+            consumptionChart.data.labels = data.map(r =>
+                new Date(r.day).toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit' })
+            );
+
+            const solarArr = [];
+            const netzArr = [];
+
+            data.forEach(r => {
+                const consumption = parseFloat(r.consumption_kwh) || 0;
+                if (isRefMeter(currentMeter) || consumption === 0) {
+                    solarArr.push(0);
+                    netzArr.push(consumption);
+                    return;
+                }
+                // Calculate solar share for this day
+                const h = hauptByDay[r.day];
+                const p = prodByDay[r.day];
+                if (h && p) {
+                    const dayProd = parseFloat(p.export_kwh) || 0; // Solar exported = production
+                    const dayNetExport = parseFloat(h.export_kwh) || 0;
+                    const dayNetImport = parseFloat(h.consumption_kwh) || 0;
+                    const eigenverbrauch = Math.max(0, dayProd - dayNetExport);
+                    const totalBuilding = eigenverbrauch + dayNetImport;
+                    const dayShare = totalBuilding > 0 ? eigenverbrauch / totalBuilding : 0;
+                    const solarKwh = consumption * dayShare;
+                    solarArr.push(parseFloat(solarKwh.toFixed(2)));
+                    netzArr.push(parseFloat((consumption - solarKwh).toFixed(2)));
+                } else {
+                    solarArr.push(0);
+                    netzArr.push(consumption);
+                }
+            });
+
+            consumptionChart.data.datasets[0].data = solarArr;
+            consumptionChart.data.datasets[1].data = netzArr;
+            consumptionChart.update();
+
+            // Update cost summary
+            const totalSolar = solarArr.reduce((a, b) => a + b, 0);
+            const totalNetz = netzArr.reduce((a, b) => a + b, 0);
+            const totalKwh = totalSolar + totalNetz;
+            const totalCost = (totalNetz * TARIFE.netz) + (totalSolar * TARIFE.solar);
+
+            const summaryEl = document.getElementById('consumption-summary');
+            if (totalKwh > 0 && !isRefMeter(currentMeter)) {
+                document.getElementById('sum-total').textContent = `${totalKwh.toFixed(1)} kWh`;
+                document.getElementById('sum-solar').textContent = `${totalSolar.toFixed(1)} kWh (${(totalSolar/totalKwh*100).toFixed(0)}%)`;
+                document.getElementById('sum-netz').textContent = `${totalNetz.toFixed(1)} kWh`;
+                document.getElementById('sum-cost').textContent = TARIFE.netz > 0
+                    ? `CHF ${totalCost.toFixed(2)}`
+                    : '-- CHF';
+                summaryEl.classList.remove('hidden');
+            } else {
+                summaryEl.classList.add('hidden');
+            }
+        } catch (err) {
+            console.error('Consumption chart error:', err);
+        }
+    }
+
+    // ─── Period Switch ──────────────────────────────────────────────
+    let consumptionPeriod = 'month';
+
+    function setPeriod(period) {
+        currentPeriod = period;
+        ['day', 'week', 'month'].forEach(p => {
+            const btn = document.getElementById(`btn-${p}`);
+            if (p === period) {
+                btn.className = 'px-3 py-1 text-xs rounded-md bg-blue-100 text-blue-700 font-medium';
+            } else {
+                btn.className = 'px-3 py-1 text-xs rounded-md text-gray-500 hover:bg-gray-100';
+            }
+        });
+        loadPowerChart();
+    }
+
+    function setConsumptionPeriod(period) {
+        consumptionPeriod = period;
+        ['week', 'month', 'quarter', 'year'].forEach(p => {
+            const btn = document.getElementById(`cbtn-${p}`);
+            if (p === period) {
+                btn.className = 'px-3 py-1 text-xs rounded-md bg-blue-100 text-blue-700 font-medium';
+            } else {
+                btn.className = 'px-3 py-1 text-xs rounded-md text-gray-500 hover:bg-gray-100';
+            }
+        });
+        loadConsumptionChart();
+    }
+
+    // ─── Date Navigation ─────────────────────────────────────────────
+    function initDateNav() {
+        const picker = document.getElementById('date-picker');
+        const today = new Date();
+        picker.value = today.toISOString().slice(0, 10);
+        picker.max = today.toISOString().slice(0, 10);
+        picker.addEventListener('change', () => {
+            const val = picker.value;
+            const todayStr = new Date().toISOString().slice(0, 10);
+            if (val === todayStr) {
+                goLive();
+            } else {
+                selectedDate = new Date(val + 'T00:00:00');
+                isLive = false;
+                updateDateNavUI();
+                refreshAll();
+            }
+        });
+    }
+
+    function navigateDate(dir) {
+        const picker = document.getElementById('date-picker');
+        const current = new Date(picker.value + 'T00:00:00');
+        current.setDate(current.getDate() + dir);
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const newStr = current.toISOString().slice(0, 10);
+        if (newStr > todayStr) return; // don't go into the future
+        picker.value = newStr;
+        if (newStr === todayStr) {
+            goLive();
+        } else {
+            selectedDate = current;
+            isLive = false;
+            updateDateNavUI();
+            refreshAll();
+        }
+    }
+
+    function goLive() {
+        selectedDate = null;
+        isLive = true;
+        const picker = document.getElementById('date-picker');
+        picker.value = new Date().toISOString().slice(0, 10);
+        updateDateNavUI();
+        refreshAll();
+    }
+
+    function updateDateNavUI() {
+        const liveBtn = document.getElementById('btn-live');
+        const indicator = document.getElementById('live-indicator');
+        if (isLive) {
+            liveBtn.className = 'ml-2 px-3 py-1.5 text-xs rounded-md bg-green-100 text-green-700 font-medium hover:bg-green-200';
+            indicator.classList.remove('hidden');
+            if (!pollTimer) pollTimer = setInterval(pollLive, POLL_INTERVAL);
+        } else {
+            liveBtn.className = 'ml-2 px-3 py-1.5 text-xs rounded-md bg-gray-100 text-gray-500 font-medium hover:bg-gray-200';
+            indicator.classList.add('hidden');
+            if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        }
+    }
+
+    function getSelectedDayStart() {
+        if (isLive || !selectedDate) {
+            const d = new Date(); d.setHours(0, 0, 0, 0);
+            return d;
+        }
+        return new Date(selectedDate);
+    }
+
+    function getSelectedDayEnd() {
+        const start = getSelectedDayStart();
+        const end = new Date(start);
+        end.setDate(end.getDate() + 1);
+        return end;
+    }
+
+    // ─── Load Historical Solar Overview ─────────────────────────────
+    async function loadHistoricalSolar() {
+        if (isLive || !selectedDate) return;
+        const dateStr = selectedDate.toISOString().slice(0, 10);
+        try {
+            if (!gridMeterId || !prodMeterId) return;
+            const [hauptRes, prodRes] = await Promise.all([
+                fetch(`${API}/today/${gridMeterId}?date=${dateStr}`),
+                fetch(`${API}/today/${prodMeterId}?date=${dateStr}`),
+            ]);
+            const haupt = await hauptRes.json();
+            const prod = await prodRes.json();
+
+            const prodKwh = parseFloat(prod.export_kwh) || 0;
+            const exportKwh = parseFloat(haupt.export_kwh) || 0;
+            const importKwh = parseFloat(haupt.consumption_kwh) || 0;
+            const eigenKwh = Math.max(0, prodKwh - exportKwh);
+            const totalKwh = eigenKwh + importKwh;
+            const share = totalKwh > 0 ? (eigenKwh / totalKwh) * 100 : 0;
+
+            // Update solar data for cost calculation
+            solarData.share = Math.min(100, Math.max(0, share));
+
+            document.getElementById('solar-production-label').textContent = 'Solarproduktion (Tag)';
+            document.getElementById('solar-selfuse-label').textContent = 'Eigenverbrauch (Tag)';
+            document.getElementById('solar-export-label').textContent = 'Netzeinspeisung (Tag)';
+            document.getElementById('solar-production').textContent = `${prodKwh.toFixed(1)} kWh`;
+            document.getElementById('solar-selfuse').textContent = `${eigenKwh.toFixed(1)} kWh`;
+            document.getElementById('solar-export').textContent = `${exportKwh.toFixed(1)} kWh`;
+            document.getElementById('solar-share').textContent = `${share.toFixed(0)} %`;
+            document.getElementById('solar-share-bar').style.width = `${Math.min(100, share)}%`;
+        } catch (err) {
+            console.error('Historical solar error:', err);
+        }
+    }
+
+    // ─── View Switching ──────────────────────────────────────────────
+    let currentView = 'meter';
+    let compareChart = null;
+    let compareSelected = new Set();
+
+    function switchView(view) {
+        currentView = view;
+        ['meter', 'dashboard', 'compare'].forEach(v => {
+            document.getElementById(`view-${v}`).classList.toggle('hidden', v !== view);
+            const tab = document.getElementById(`tab-${v}`);
+            if (v === view) {
+                tab.className = 'px-4 py-1.5 text-sm font-medium rounded-md bg-white text-gray-900 shadow-sm';
+            } else {
+                tab.className = 'px-4 py-1.5 text-sm font-medium rounded-md text-gray-500 hover:text-gray-700';
+            }
+        });
+        // Show/hide meter-specific controls
+        const dateNav = document.getElementById('date-nav');
+        const meterSelect = document.getElementById('meter-select');
+        if (view === 'meter') {
+            dateNav.classList.remove('hidden');
+            meterSelect.classList.remove('hidden');
+        } else {
+            dateNav.classList.add('hidden');
+            if (view === 'dashboard') meterSelect.classList.add('hidden');
+            else meterSelect.classList.remove('hidden');
+        }
+        if (view === 'dashboard') loadDashboard();
+        if (view === 'compare') initCompareView();
+    }
+
+    // ─── Dashboard ──────────────────────────────────────────────────
+    async function loadDashboard() {
+        const container = document.getElementById('dashboard-groups');
+        container.innerHTML = '<p class="text-gray-400 text-sm">Lade Dashboard...</p>';
+        try {
+            const res = await fetch(`${API}/dashboard`);
+            const groups = await res.json();
+            if (groups.length === 0) {
+                container.innerHTML = '<p class="text-gray-400 text-sm">Keine Zählergruppen gefunden.</p>';
                 return;
             }
+            container.innerHTML = groups.map(g => {
+                const meterRows = g.meters.map(m => {
+                    const catBadge = m.category === 'grid' ? '<span class="px-1.5 py-0.5 text-[10px] bg-blue-100 text-blue-700 rounded">Netz</span>'
+                        : m.category === 'production' ? '<span class="px-1.5 py-0.5 text-[10px] bg-yellow-100 text-yellow-700 rounded">Solar</span>'
+                        : '<span class="px-1.5 py-0.5 text-[10px] bg-gray-100 text-gray-600 rounded">Verbraucher</span>';
+                    const power = m.live_power_w != null ? `${Math.round(Math.abs(m.live_power_w))} W` : '--';
+                    const consumption = m.today_consumption_kwh > 0 ? `${m.today_consumption_kwh.toFixed(1)} kWh` : '--';
+                    const isOnline = m.live_ts && (Date.now() - new Date(m.live_ts).getTime() < 600000);
+                    const statusDot = isOnline
+                        ? '<span class="w-2 h-2 bg-green-500 rounded-full inline-block"></span>'
+                        : '<span class="w-2 h-2 bg-red-400 rounded-full inline-block"></span>';
+                    return `<tr class="border-b border-gray-50 hover:bg-gray-50 cursor-pointer" onclick="switchView('meter');document.getElementById('meter-select').value='${m.id}';currentMeter='${m.id}';resolveRefMeters();refreshAll();">
+                        <td class="py-2 px-3 flex items-center gap-2">${statusDot} ${meterDisplayName(m)} ${catBadge}</td>
+                        <td class="py-2 px-3 text-right font-mono">${power}</td>
+                        <td class="py-2 px-3 text-right font-mono">${consumption}</td>
+                    </tr>`;
+                }).join('');
 
-            try {
-                const response = await fetch(`zaehler-daten/${heute}_${hauptzaehler.id}.json`);
-                const daten = await response.json();
+                const solarBar = g.solar_share > 0 ? `
+                    <div class="w-full bg-gray-200 rounded-full h-2 mt-1">
+                        <div class="bg-emerald-500 h-2 rounded-full" style="width: ${Math.min(100, g.solar_share).toFixed(0)}%"></div>
+                    </div>` : '';
 
-                // Live-Werte aktualisieren
-                updateLiveValues(daten);
-
-                // Charts aktualisieren
-                updateCharts(daten);
-
-                // Statistik aktualisieren
-                updateStatistics(daten);
-
-            } catch (error) {
-                console.error('Fehler beim Laden der Daten:', error);
-                // Fallback: Beispieldaten anzeigen
-                loadExampleData();
-            }
+                return `<div class="bg-white rounded-xl shadow-md overflow-hidden">
+                    <div class="bg-gradient-to-r from-blue-50 to-indigo-50 px-5 py-3 border-b flex items-center justify-between">
+                        <h3 class="font-semibold text-gray-800">${g.id.toUpperCase()}</h3>
+                        <span class="text-xs text-gray-500">${g.meters.length} Zähler</span>
+                    </div>
+                    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 p-4 bg-gray-50 border-b text-center text-sm">
+                        <div>
+                            <p class="text-xs text-gray-500">Solarproduktion</p>
+                            <p class="font-bold text-yellow-600">${g.solar_production_kwh.toFixed(1)} kWh</p>
+                        </div>
+                        <div>
+                            <p class="text-xs text-gray-500">Eigenverbrauch</p>
+                            <p class="font-bold text-green-600">${g.self_consumption_kwh.toFixed(1)} kWh</p>
+                        </div>
+                        <div>
+                            <p class="text-xs text-gray-500">Netzbezug</p>
+                            <p class="font-bold text-blue-600">${g.grid_import_kwh.toFixed(1)} kWh</p>
+                        </div>
+                        <div>
+                            <p class="text-xs text-gray-500">Einspeisung</p>
+                            <p class="font-bold text-purple-600">${g.grid_export_kwh.toFixed(1)} kWh</p>
+                        </div>
+                        <div>
+                            <p class="text-xs text-gray-500">Solaranteil</p>
+                            <p class="font-bold text-emerald-600">${g.solar_share.toFixed(0)} %</p>
+                            ${solarBar}
+                        </div>
+                    </div>
+                    <div class="p-4">
+                        <table class="w-full text-sm">
+                            <thead><tr class="text-xs text-gray-500 border-b">
+                                <th class="text-left py-1 px-3">Zähler</th>
+                                <th class="text-right py-1 px-3">Leistung</th>
+                                <th class="text-right py-1 px-3">Heute</th>
+                            </tr></thead>
+                            <tbody>${meterRows}</tbody>
+                        </table>
+                    </div>
+                </div>`;
+            }).join('');
+        } catch (err) {
+            container.innerHTML = `<p class="text-red-500 text-sm">Fehler: ${err.message}</p>`;
         }
+    }
 
-        // Live-Werte aktualisieren
-        function updateLiveValues(daten) {
-            const letzterWert = daten.stundenwerte[daten.stundenwerte.length - 1];
-
-            // Aktuelle Leistung
-            document.getElementById('live-power').textContent = `${letzterWert.leistung_w} W`;
-            document.getElementById('live-tarif').textContent = getTarifName(letzterWert.tarif);
-
-            // Heutiger Verbrauch
-            document.getElementById('today-consumption').textContent = `${daten.verbrauch_gesamt.toFixed(2)} kWh`;
-            document.getElementById('today-cost').textContent = `CHF ${daten.verbrauch_nach_tarif.gesamt_kosten.toFixed(2)}`;
-
-            // Solar (wenn vorhanden)
-            if (daten.solar_erzeugung_gesamt) {
-                document.getElementById('solar-power').textContent = `${letzterWert.solar_leistung_w || 0} W`;
-                document.getElementById('solar-autarkie').textContent = `${daten.statistik.autarkie_prozent.toFixed(1)}%`;
-            }
-        }
-
-        // Charts aktualisieren
-        function updateCharts(daten) {
-            // Verbrauchsverlauf Chart
-            const ctx1 = document.getElementById('consumption-chart').getContext('2d');
-
-            if (charts.consumption) {
-                charts.consumption.destroy();
-            }
-
-            charts.consumption = new Chart(ctx1, {
-                type: 'line',
-                data: {
-                    labels: daten.stundenwerte.map(h => new Date(h.timestamp).toLocaleTimeString('de-CH', {hour: '2-digit', minute: '2-digit'})),
-                    datasets: [{
-                        label: 'Verbrauch (kWh)',
-                        data: daten.stundenwerte.map(h => h.verbrauch_kwh),
-                        borderColor: 'rgb(234, 179, 8)',
-                        backgroundColor: 'rgba(234, 179, 8, 0.1)',
-                        tension: 0.4,
-                        fill: true
-                    }]
-                },
+    // ─── Comparison View ────────────────────────────────────────────
+    function initCompareView() {
+        const container = document.getElementById('compare-checkboxes');
+        if (container.children.length > 0) return; // already initialized
+        const consumers = allMeters.filter(m => m.category === 'consumer');
+        container.innerHTML = consumers.map(m => `
+            <label class="flex items-center gap-1 px-2 py-1 rounded border border-gray-200 hover:bg-gray-50 cursor-pointer">
+                <input type="checkbox" value="${m.id}" class="compare-cb rounded text-blue-600" onchange="toggleCompare(this)">
+                <span>${meterDisplayName(m)}</span>
+            </label>
+        `).join('');
+        if (!compareChart) {
+            compareChart = new Chart(document.getElementById('compare-chart'), {
+                type: 'bar',
+                data: { labels: [], datasets: [] },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    plugins: {
-                        legend: {display: false}
-                    },
                     scales: {
-                        y: {
-                            beginAtZero: true,
-                            title: {
-                                display: true,
-                                text: 'kWh'
-                            }
-                        }
-                    }
-                }
-            });
-
-            // Tarifaufteilung Chart
-            const ctx2 = document.getElementById('tariff-chart').getContext('2d');
-
-            if (charts.tariff) {
-                charts.tariff.destroy();
-            }
-
-            const tarifDaten = daten.verbrauch_nach_tarif;
-            const labels = ['Hochtarif', 'Niedertarif'];
-            const values = [tarifDaten.hochtarif_kwh, tarifDaten.niedertarif_kwh];
-            const colors = ['#f59e0b', '#eab308'];
-
-            if (tarifDaten.solar_kwh) {
-                labels.push('Solar');
-                values.push(tarifDaten.solar_kwh);
-                colors.push('#fbbf24');
-            }
-
-            charts.tariff = new Chart(ctx2, {
-                type: 'doughnut',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        data: values,
-                        backgroundColor: colors
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
+                        x: { ticks: { font: { size: 10 } }, grid: { display: false } },
+                        y: { beginAtZero: true, ticks: { font: { size: 10 }, callback: v => v + ' kWh' }, grid: { color: '#f3f4f6' } },
+                    },
                     plugins: {
-                        legend: {
-                            position: 'bottom'
-                        }
-                    }
+                        legend: { display: true, position: 'top', labels: { font: { size: 11 }, padding: 8 } },
+                        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)} kWh` } },
+                    },
                 }
             });
         }
+    }
 
-        // Statistik-Tabelle aktualisieren
-        function updateStatistics(daten) {
-            const tarifDaten = daten.verbrauch_nach_tarif;
-            const tbody = document.getElementById('stats-table');
-            tbody.innerHTML = '';
+    function toggleCompare(cb) {
+        if (cb.checked) compareSelected.add(cb.value);
+        else compareSelected.delete(cb.value);
+    }
 
-            // Hochtarif
-            tbody.innerHTML += `
-                <tr>
-                    <td class="px-4 py-3">
-                        <span class="inline-block w-3 h-3 rounded-full bg-yellow-600 mr-2"></span>
-                        Hochtarif
-                    </td>
-                    <td class="px-4 py-3 text-right">${tarifDaten.hochtarif_kwh.toFixed(2)}</td>
-                    <td class="px-4 py-3 text-right">${zaehlerConfig.tarife.hochtarif.preis_pro_kwh.toFixed(4)}</td>
-                    <td class="px-4 py-3 text-right">${tarifDaten.hochtarif_kosten.toFixed(2)}</td>
-                </tr>
-            `;
+    const COMPARE_COLORS = ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16'];
 
-            // Niedertarif
-            tbody.innerHTML += `
-                <tr>
-                    <td class="px-4 py-3">
-                        <span class="inline-block w-3 h-3 rounded-full bg-yellow-500 mr-2"></span>
-                        Niedertarif
-                    </td>
-                    <td class="px-4 py-3 text-right">${tarifDaten.niedertarif_kwh.toFixed(2)}</td>
-                    <td class="px-4 py-3 text-right">${zaehlerConfig.tarife.niedertarif.preis_pro_kwh.toFixed(4)}</td>
-                    <td class="px-4 py-3 text-right">${tarifDaten.niedertarif_kosten.toFixed(2)}</td>
-                </tr>
-            `;
+    async function loadComparison() {
+        if (compareSelected.size === 0) return;
+        const ids = [...compareSelected];
+        const days = document.getElementById('compare-days').value;
+        try {
+            const res = await fetch(`${API}/compare?meters=${ids.join(',')}&days=${days}`);
+            const data = await res.json();
 
-            // Solar (wenn vorhanden)
-            if (tarifDaten.solar_kwh) {
-                tbody.innerHTML += `
-                    <tr>
-                        <td class="px-4 py-3">
-                            <span class="inline-block w-3 h-3 rounded-full bg-yellow-500 mr-2"></span>
-                            Solar (Eigenverbrauch)
-                        </td>
-                        <td class="px-4 py-3 text-right">${tarifDaten.solar_kwh.toFixed(2)}</td>
-                        <td class="px-4 py-3 text-right">${zaehlerConfig.tarife.solar.preis_pro_kwh.toFixed(4)}</td>
-                        <td class="px-4 py-3 text-right">${tarifDaten.solar_kosten.toFixed(2)}</td>
-                    </tr>
-                `;
-            }
+            // Build day labels and per-meter data
+            const daySet = new Set();
+            data.forEach(r => daySet.add(r.day));
+            const dayLabels = [...daySet].sort();
 
-            // Gesamt
-            document.getElementById('total-consumption').textContent = `${daten.verbrauch_gesamt.toFixed(2)} kWh`;
-            document.getElementById('total-cost').textContent = `${tarifDaten.gesamt_kosten.toFixed(2)} CHF`;
-        }
-
-        // Live-Updates starten
-        function startLiveUpdates() {
-            // Alle 5 Sekunden Live-Daten von ioBroker abrufen
-            liveUpdateInterval = setInterval(async () => {
-                // Hier würde die ioBroker API abgefragt werden
-                await loadDashboardData();
-            }, 5000);
-        }
-
-        // Zeitraum wählen
-        function selectPeriod(period) {
-            currentPeriod = period;
-
-            // Buttons aktualisieren
-            document.querySelectorAll('.period-btn').forEach(btn => {
-                btn.classList.remove('bg-yellow-600', 'text-white');
-                btn.classList.add('bg-gray-200', 'text-gray-700');
+            const meterMap = {};
+            data.forEach(r => {
+                if (!meterMap[r.meter_id]) meterMap[r.meter_id] = {};
+                meterMap[r.meter_id][r.day] = parseFloat(r.consumption_kwh) || 0;
             });
-            event.target.classList.remove('bg-gray-200', 'text-gray-700');
-            event.target.classList.add('bg-yellow-600', 'text-white');
 
-            // Daten neu laden
-            loadDashboardData();
+            compareChart.data.labels = dayLabels.map(d =>
+                new Date(d).toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit' })
+            );
+            compareChart.data.datasets = ids.map((id, i) => {
+                const meter = allMeters.find(m => m.id === id);
+                return {
+                    label: meter ? meterDisplayName(meter) : id,
+                    data: dayLabels.map(d => meterMap[id]?.[d] || 0),
+                    backgroundColor: COMPARE_COLORS[i % COMPARE_COLORS.length] + '88',
+                    borderColor: COMPARE_COLORS[i % COMPARE_COLORS.length],
+                    borderWidth: 1,
+                    borderRadius: 2,
+                };
+            });
+            compareChart.update();
+
+            // Summary
+            const summaryEl = document.getElementById('compare-summary');
+            const summaryContent = document.getElementById('compare-summary-content');
+            summaryContent.innerHTML = ids.map((id, i) => {
+                const meter = allMeters.find(m => m.id === id);
+                const total = dayLabels.reduce((s, d) => s + (meterMap[id]?.[d] || 0), 0);
+                const avg = dayLabels.length > 0 ? total / dayLabels.length : 0;
+                const color = COMPARE_COLORS[i % COMPARE_COLORS.length];
+                return `<div class="flex items-center gap-2">
+                    <span class="w-3 h-3 rounded-sm flex-shrink-0" style="background:${color}"></span>
+                    <div>
+                        <p class="font-medium text-gray-800">${meter ? meterDisplayName(meter) : id}</p>
+                        <p class="text-xs text-gray-500">Total: ${total.toFixed(1)} kWh | Ø ${avg.toFixed(1)} kWh/Tag</p>
+                    </div>
+                </div>`;
+            }).join('');
+            summaryEl.classList.remove('hidden');
+        } catch (err) {
+            console.error('Compare error:', err);
         }
+    }
 
-        // Hilfsfunktionen
-        function getTarifName(tarif) {
-            return tarif === 'hochtarif' ? 'Hochtarif' : 'Niedertarif';
+    // ─── Cost Projection ────────────────────────────────────────────
+    async function loadProjection() {
+        if (!currentMeter || isRefMeter(currentMeter)) {
+            document.getElementById('projection-card').classList.add('hidden');
+            return;
         }
-
-        function showMessage(text, type) {
-            const messageEl = document.getElementById('message');
-            messageEl.textContent = text;
-            let colorClass = 'text-green-600';
-            if (type === 'error') colorClass = 'text-red-600';
-            else if (type === 'info') colorClass = 'text-blue-600';
-            messageEl.className = `mt-4 text-center text-sm ${colorClass}`;
-        }
-
-        function backToEmail() {
-            document.getElementById('otp-form').classList.add('hidden');
-            document.getElementById('email-form').classList.remove('hidden');
-            document.getElementById('otp-input').value = '';
-        }
-
-        function logout() {
-            currentUser = null;
-            benutzerDaten = null;
-
-            if (liveUpdateInterval) {
-                clearInterval(liveUpdateInterval);
+        try {
+            const res = await fetch(`${API}/projection/${currentMeter}`);
+            const p = await res.json();
+            if (p.days_analyzed === 0) {
+                document.getElementById('projection-card').classList.add('hidden');
+                return;
             }
-
-            // Charts zerstören
-            Object.values(charts).forEach(chart => chart.destroy());
-            charts = {};
-
-            document.getElementById('dashboard').classList.add('hidden');
-            document.getElementById('login-screen').classList.remove('hidden');
-            document.getElementById('email-form').classList.remove('hidden');
-            document.getElementById('otp-form').classList.add('hidden');
-            document.getElementById('email-input').value = '';
-            document.getElementById('otp-input').value = '';
+            document.getElementById('projection-card').classList.remove('hidden');
+            document.getElementById('projection-days').textContent = `Basis: ${p.days_analyzed} Tage`;
+            document.getElementById('proj-daily').textContent = `${p.avg_daily_kwh} kWh`;
+            document.getElementById('proj-monthly-kwh').textContent = `${p.projected_monthly_kwh} kWh`;
+            document.getElementById('proj-monthly-cost').textContent = p.projected_monthly_cost > 0 ? `CHF ${p.projected_monthly_cost.toFixed(2)}` : '--';
+            document.getElementById('proj-yearly-kwh').textContent = `${p.projected_yearly_kwh} kWh`;
+            document.getElementById('proj-yearly-cost').textContent = p.projected_yearly_cost > 0 ? `CHF ${p.projected_yearly_cost.toFixed(2)}` : '--';
+            document.getElementById('proj-solar').textContent = `${p.solar_share_percent} %`;
+            document.getElementById('proj-solar-bar').style.width = `${Math.min(100, p.solar_share_percent)}%`;
+        } catch (err) {
+            document.getElementById('projection-card').classList.add('hidden');
         }
+    }
 
-        // Beispieldaten laden (Fallback)
-        function loadExampleData() {
-            const beispiel = {
-                verbrauch_gesamt: 8.3,
-                verbrauch_nach_tarif: {
-                    hochtarif_kwh: 5.2,
-                    hochtarif_kosten: 1.31,
-                    niedertarif_kwh: 3.1,
-                    niedertarif_kosten: 0.55,
-                    gesamt_kosten: 1.86
-                },
-                stundenwerte: [
-                    {timestamp: '2024-12-18T08:00:00Z', verbrauch_kwh: 0.5, leistung_w: 450, tarif: 'hochtarif'},
-                    {timestamp: '2024-12-18T12:00:00Z', verbrauch_kwh: 1.2, leistung_w: 1200, tarif: 'hochtarif'},
-                    {timestamp: '2024-12-18T18:00:00Z', verbrauch_kwh: 0.8, leistung_w: 850, tarif: 'hochtarif'},
-                    {timestamp: '2024-12-18T22:00:00Z', verbrauch_kwh: 0.3, leistung_w: 320, tarif: 'niedertarif'}
-                ]
-            };
+    // ─── Alerts ─────────────────────────────────────────────────────
+    async function loadAlerts() {
+        try {
+            const res = await fetch(`${API}/alerts`);
+            const alerts = await res.json();
+            const bar = document.getElementById('alerts-bar');
+            if (alerts.length === 0) {
+                bar.classList.add('hidden');
+                return;
+            }
+            bar.classList.remove('hidden');
+            bar.innerHTML = alerts.map(a => {
+                const icon = a.type === 'offline'
+                    ? '<svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>'
+                    : '<svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>';
+                const bg = a.severity === 'warning' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-blue-50 border-blue-200 text-blue-800';
+                return `<div class="flex items-center gap-2 px-3 py-2 rounded-lg border ${bg} text-sm mb-1">
+                    ${icon}
+                    <span class="font-medium">${a.meter_name}:</span>
+                    <span>${a.message}</span>
+                </div>`;
+            }).join('');
+        } catch (err) { /* silent */ }
+    }
 
-            updateLiveValues(beispiel);
-            updateCharts(beispiel);
-            updateStatistics(beispiel);
+    // ─── CSV Export ──────────────────────────────────────────────────
+    function exportCSV() {
+        if (!currentMeter) return;
+        const daysMap = { week: 7, month: 30, quarter: 90, year: 365 };
+        const days = daysMap[consumptionPeriod] || 30;
+        const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+        const to = new Date().toISOString().slice(0, 10);
+        window.open(`${API}/export/${currentMeter}?from=${from}&to=${to}`, '_blank');
+    }
+
+    // ─── Refresh All ────────────────────────────────────────────────
+    async function refreshAll() {
+        // Reload tariffs for selected date
+        const tariffDate = isLive ? null : selectedDate?.toISOString().slice(0, 10);
+        await loadTariffs(tariffDate);
+
+        if (isLive) {
+            pollLive();
+        } else {
+            // In history mode, clear live-only fields
+            document.getElementById('live-power').textContent = '-- W';
+            document.getElementById('live-power-detail').textContent = 'Historische Ansicht';
+            document.getElementById('live-voltage').textContent = '-- V';
+            document.getElementById('live-voltage-detail').textContent = '';
+            document.getElementById('last-update').textContent =
+                `Anzeige: ${selectedDate.toLocaleDateString('de-CH', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}`;
+            phaseChart.data.datasets[0].data = [0, 0, 0];
+            phaseChart.update('none');
+            document.getElementById('phase-details').innerHTML = '<span class="text-gray-400 text-xs">Nur im Live-Modus verfügbar</span>';
+            loadHistoricalSolar();
         }
+        loadToday();
+        loadPowerChart();
+        loadConsumptionChart();
+        loadProjection();
+    }
+
+    // ─── Start ──────────────────────────────────────────────────────
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
     </script>
 </body>
 </html>

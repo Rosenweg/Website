@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>IT & Netzwerk - STWEG Rosenweg</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body {
@@ -41,107 +42,27 @@
 </head>
 <body class="bg-gray-50">
 
+    <!-- Navigation -->
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js?v=2"></script>
+    <script>RosenwegNav.init({ active: 'it' });</script>
+
     <!-- Login Screen -->
-    <div id="login-screen" class="min-h-screen flex items-center justify-center bg-gradient-to-r from-blue-600 to-indigo-700 p-4">
-        <div class="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
-            <div class="text-center mb-8">
-                <svg class="h-16 w-16 mx-auto text-blue-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
-                </svg>
-                <h1 class="text-3xl font-bold text-gray-800">IT & Netzwerk</h1>
-                <p class="text-gray-600 mt-2">Netzwerkdokumentation STWEG Rosenweg</p>
-            </div>
-
-            <!-- Email Input -->
-            <div id="email-form" class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">E-Mail-Adresse</label>
-                    <input
-                        type="email"
-                        id="email-input"
-                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        placeholder="ihre-email@example.com"
-                        autocomplete="email"
-                    >
+    <div id="login-screen" class="min-h-screen bg-gradient-to-r from-blue-600 to-indigo-700">
+        <div class="flex items-center justify-center p-4" style="min-height: calc(100vh - 4rem);">
+            <div class="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
+                <div class="text-center mb-8">
+                    <img src="logo-rosenweg.png" alt="Rosenweg Logo" class="h-20 w-auto mx-auto mb-4">
+                    <h1 class="text-3xl font-bold text-gray-800">IT & Netzwerk</h1>
+                    <p class="text-gray-600 mt-2">Netzwerkdokumentation STWEG Rosenweg</p>
                 </div>
-                <button
-                    onclick="sendOTP()"
-                    class="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition font-semibold"
-                >
-                    Code anfordern
-                </button>
-            </div>
-
-            <!-- OTP Input -->
-            <div id="otp-form" class="hidden space-y-4">
-                <div class="bg-blue-50 border-l-4 border-blue-500 p-4 mb-4">
-                    <p class="text-sm text-blue-700">
-                        Ein 6-stelliger Code wurde an <strong id="display-email"></strong> gesendet.
-                    </p>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">6-stelliger Code</label>
-                    <input
-                        type="text"
-                        id="otp-input"
-                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-center text-2xl tracking-widest"
-                        placeholder="000000"
-                        maxlength="6"
-                        pattern="[0-9]{6}"
-                        autocomplete="one-time-code"
-                    >
-                </div>
-                <button
-                    onclick="verifyOTP()"
-                    class="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition font-semibold"
-                >
-                    Anmelden
-                </button>
-                <button
-                    onclick="backToEmail()"
-                    class="w-full bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300 transition text-sm"
-                >
-                    Andere E-Mail verwenden
-                </button>
-            </div>
-
-            <!-- Error Message -->
-            <div id="error-message" class="hidden mt-4 bg-red-50 border-l-4 border-red-500 p-4">
-                <p class="text-sm text-red-700" id="error-text"></p>
-            </div>
-
-            <!-- Loading State -->
-            <div id="loading-state" class="hidden mt-4 text-center">
-                <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                <p class="text-sm text-gray-600 mt-2">Lädt...</p>
+                <div id="login-button-container"></div>
             </div>
         </div>
     </div>
 
     <!-- Main Dashboard -->
     <div id="dashboard" class="hidden min-h-screen">
-        <!-- Header -->
-        <header class="bg-white shadow-sm border-b border-gray-200">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-                <div class="flex justify-between items-center">
-                    <div class="flex items-center space-x-4">
-                        <svg class="h-8 w-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
-                        </svg>
-                        <div>
-                            <h1 class="text-xl font-bold text-gray-900">IT & Netzwerk</h1>
-                            <p class="text-sm text-gray-600">STWEG-Kooperation Rosenweg</p>
-                        </div>
-                    </div>
-                    <div class="flex items-center space-x-4">
-                        <span class="text-sm text-gray-600" id="user-email"></span>
-                        <button onclick="logout()" class="text-sm text-red-600 hover:text-red-700 font-medium">
-                            Abmelden
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </header>
 
         <!-- Main Content -->
         <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -227,6 +148,9 @@
                     </button>
                     <button onclick="showTab('troubleshooting')" id="tab-troubleshooting" class="tab-button border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">
                         Troubleshooting
+                    </button>
+                    <button onclick="showTab('admin')" id="tab-admin" class="tab-button border-b-2 border-transparent py-4 px-1 text-sm font-medium text-red-500 hover:text-red-700 hover:border-red-300 hidden">
+                        Admin
                     </button>
                 </nav>
             </div>
@@ -354,9 +278,9 @@
                                     <p class="text-xs text-gray-500">Uptime: 4 Tage 23 Stunden</p>
                                 </div>
                                 <div class="py-2 border-b">
-                                    <p class="font-medium text-gray-700">n8n Automation</p>
-                                    <p class="text-gray-600 mt-1">https://n8n.juroct.net</p>
-                                    <p class="text-xs text-gray-500 mt-1">Workflow-Automation & Webhooks</p>
+                                    <p class="font-medium text-gray-700">Rosenweg API</p>
+                                    <p class="text-gray-600 mt-1">Docker Service (rosenweg_api)</p>
+                                    <p class="text-xs text-gray-500 mt-1">E-Mail-Verteiler, Energie, Authentik-Proxy</p>
                                 </div>
                                 <div class="py-2 border-b">
                                     <p class="font-medium text-gray-700">DNS Server</p>
@@ -492,8 +416,8 @@
                                         </tr>
                                         <tr class="bg-gray-50">
                                             <td class="px-4 py-3 font-mono text-xs">08</td>
-                                            <td class="px-4 py-3">n8n Server</td>
-                                            <td class="px-4 py-3 text-gray-600">VPS Cloud (extern)</td>
+                                            <td class="px-4 py-3">Rosenweg API</td>
+                                            <td class="px-4 py-3 text-gray-600">Docker Service</td>
                                             <td class="px-4 py-3"><span class="px-2 py-1 bg-gray-100 text-gray-800 rounded text-xs">-</span></td>
                                             <td class="px-4 py-3 text-gray-600">-</td>
                                         </tr>
@@ -1193,149 +1117,155 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Admin Tab (hidden for non-admins) -->
+            <div id="content-admin" class="tab-content hidden">
+                <div class="space-y-6">
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <h2 class="text-lg font-semibold text-gray-900 mb-4">Admin-Dienste</h2>
+                        <p class="text-sm text-gray-600 mb-6">Geschützte Verwaltungsoberflächen für Administratoren.</p>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="admin-services">
+                            <a href="https://authentik.rosenweg4303.ch" target="_blank" class="block p-4 border rounded-lg hover:shadow-md transition hover:border-blue-300">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <div class="bg-blue-100 rounded-lg p-2"><svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg></div>
+                                    <h3 class="font-semibold text-gray-900">Authentik SSO</h3>
+                                </div>
+                                <p class="text-sm text-gray-600">Benutzerverwaltung, Gruppen & OAuth2-Konfiguration</p>
+                            </a>
+                            <a href="https://netbox.rosenweg4303.ch" target="_blank" class="block p-4 border rounded-lg hover:shadow-md transition hover:border-green-300">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <div class="bg-green-100 rounded-lg p-2"><svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"></path></svg></div>
+                                    <h3 class="font-semibold text-gray-900">NetBox DCIM</h3>
+                                </div>
+                                <p class="text-sm text-gray-600">IP-Adressen, Geräte-Inventar & Netzwerk-Dokumentation</p>
+                            </a>
+                            <a href="https://100.64.9.1" target="_blank" class="block p-4 border rounded-lg hover:shadow-md transition hover:border-purple-300">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <div class="bg-purple-100 rounded-lg p-2"><svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path></svg></div>
+                                    <h3 class="font-semibold text-gray-900">UniFi Controller</h3>
+                                </div>
+                                <p class="text-sm text-gray-600">Netzwerk-Management, WLAN & Firewall-Regeln</p>
+                            </a>
+                            <a href="/stweg3/pages/admin.html" class="block p-4 border rounded-lg hover:shadow-md transition hover:border-yellow-300">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <div class="bg-yellow-100 rounded-lg p-2"><svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"></path></svg></div>
+                                    <h3 class="font-semibold text-gray-900">Kontakte verwalten</h3>
+                                </div>
+                                <p class="text-sm text-gray-600">Bewohner-Kontaktdaten bearbeiten</p>
+                            </a>
+                            <a href="/email-verteiler.html" class="block p-4 border rounded-lg hover:shadow-md transition hover:border-red-300">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <div class="bg-red-100 rounded-lg p-2"><svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg></div>
+                                    <h3 class="font-semibold text-gray-900">E-Mail Verteiler</h3>
+                                </div>
+                                <p class="text-sm text-gray-600">Rundschreiben an Bewohner versenden</p>
+                            </a>
+                            <a href="/energie-monitor.html" class="block p-4 border rounded-lg hover:shadow-md transition hover:border-teal-300">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <div class="bg-teal-100 rounded-lg p-2"><svg class="w-6 h-6 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg></div>
+                                    <h3 class="font-semibold text-gray-900">Energie-Monitor</h3>
+                                </div>
+                                <p class="text-sm text-gray-600">Zählerstand-Übersicht & Verbrauchsdaten</p>
+                            </a>
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-lg shadow p-6">
+                        <h2 class="text-lg font-semibold text-gray-900 mb-4">System-Status</h2>
+                        <div id="system-status" class="space-y-3">
+                            <div class="text-sm text-gray-500">Lade Status...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </main>
     </div>
 
     <script>
         // Configuration
-        const OTP_API_URL = 'https://n8n.juroct.net/webhook/send-otp';
-        const VERIFY_API_URL = 'https://n8n.juroct.net/webhook/verify-otp';
-        const UNIFI_API_KEY = 'jfuegIgu7EYmTwumOAsRc1UXEMxUM62x';
-        const UNIFI_BASE_URL = 'https://100.64.9.1/api';
-
-        let currentEmail = '';
-        let sessionToken = '';
         let currentTab = 'devices';
 
-        // OTP Functions
-        async function sendOTP() {
-            const email = document.getElementById('email-input').value.trim();
+        // Auth initialization
+        document.addEventListener('DOMContentLoaded', async () => {
+            const user = await AuthentikAuth.init({
+                requireAuth: true,
+                onLogin(user) {
+                    document.getElementById('login-screen').classList.add('hidden');
+                    document.getElementById('dashboard').classList.remove('hidden');
+                    document.getElementById('user-email').textContent = user.name || user.email;
 
-            if (!email || !email.includes('@')) {
-                showError('Bitte geben Sie eine gültige E-Mail-Adresse ein.');
-                return;
+                    // Show admin tab for admins
+                    if (user.isAdmin) {
+                        document.getElementById('tab-admin').classList.remove('hidden');
+                        loadSystemStatus();
+                    }
+
+                    loadUniFiData();
+                },
+            });
+
+            if (!user) {
+                AuthentikAuth.createLoginButton('login-button-container');
             }
-
-            showLoading(true);
-            hideError();
-
-            try {
-                const response = await fetch(OTP_API_URL, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        email: email,
-                        user_file: 'all-users.json'
-                    })
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    currentEmail = email;
-                    document.getElementById('display-email').textContent = email;
-                    document.getElementById('email-form').classList.add('hidden');
-                    document.getElementById('otp-form').classList.remove('hidden');
-                } else {
-                    showError(data.message || 'Fehler beim Senden des Codes. Bitte versuchen Sie es erneut.');
-                }
-            } catch (error) {
-                console.error('Error sending OTP:', error);
-                showError('Verbindungsfehler. Bitte überprüfen Sie Ihre Internetverbindung.');
-            } finally {
-                showLoading(false);
-            }
-        }
-
-        async function verifyOTP() {
-            const otp = document.getElementById('otp-input').value.trim();
-
-            if (otp.length !== 6 || !/^\d{6}$/.test(otp)) {
-                showError('Bitte geben Sie einen 6-stelligen Code ein.');
-                return;
-            }
-
-            showLoading(true);
-            hideError();
-
-            try {
-                const response = await fetch(VERIFY_API_URL, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        email: currentEmail,
-                        otp: otp,
-                        user_file: 'all-users.json'
-                    })
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    sessionToken = data.token || 'session_' + Date.now();
-                    localStorage.setItem('it_session_token', sessionToken);
-                    localStorage.setItem('it_user_email', currentEmail);
-                    showDashboard();
-                } else {
-                    showError(data.message || 'Ungültiger Code. Bitte versuchen Sie es erneut.');
-                }
-            } catch (error) {
-                console.error('Error verifying OTP:', error);
-                showError('Verbindungsfehler. Bitte überprüfen Sie Ihre Internetverbindung.');
-            } finally {
-                showLoading(false);
-            }
-        }
-
-        function backToEmail() {
-            document.getElementById('otp-form').classList.add('hidden');
-            document.getElementById('email-form').classList.remove('hidden');
-            document.getElementById('otp-input').value = '';
-            hideError();
-        }
-
-        function showDashboard() {
-            document.getElementById('login-screen').classList.add('hidden');
-            document.getElementById('dashboard').classList.remove('hidden');
-            document.getElementById('user-email').textContent = currentEmail;
-
-            // Load data
-            loadUniFiData();
-        }
+        });
 
         function logout() {
-            localStorage.removeItem('it_session_token');
-            localStorage.removeItem('it_user_email');
-            sessionToken = '';
-            currentEmail = '';
-
-            document.getElementById('dashboard').classList.add('hidden');
-            document.getElementById('login-screen').classList.remove('hidden');
-            document.getElementById('email-form').classList.remove('hidden');
-            document.getElementById('otp-form').classList.add('hidden');
-            document.getElementById('email-input').value = '';
-            document.getElementById('otp-input').value = '';
+            AuthentikAuth.logout('/it-netzwerk.html');
         }
 
-        function showError(message) {
-            document.getElementById('error-text').textContent = message;
-            document.getElementById('error-message').classList.remove('hidden');
-        }
-
-        function hideError() {
-            document.getElementById('error-message').classList.add('hidden');
-        }
-
-        function showLoading(show) {
-            if (show) {
-                document.getElementById('loading-state').classList.remove('hidden');
-            } else {
-                document.getElementById('loading-state').classList.add('hidden');
+        async function loadSystemStatus() {
+            const statusEl = document.getElementById('system-status');
+            const services = [
+                { name: 'Website (Nginx)', url: '/api/health', check: 'proxy' },
+                { name: 'API Backend', url: '/api/health', check: 'direct' },
+            ];
+            let html = '';
+            for (const svc of services) {
+                try {
+                    const resp = await AuthentikAuth.apiFetch(svc.url);
+                    const ok = resp.ok;
+                    html += `<div class="flex items-center justify-between p-3 rounded-lg ${ok ? 'bg-green-50' : 'bg-red-50'}">
+                        <span class="text-sm font-medium ${ok ? 'text-green-800' : 'text-red-800'}">${svc.name}</span>
+                        <span class="text-xs px-2 py-1 rounded-full ${ok ? 'bg-green-200 text-green-800' : 'bg-red-200 text-red-800'}">${ok ? 'Online' : 'Offline'}</span>
+                    </div>`;
+                } catch {
+                    html += `<div class="flex items-center justify-between p-3 rounded-lg bg-red-50">
+                        <span class="text-sm font-medium text-red-800">${svc.name}</span>
+                        <span class="text-xs px-2 py-1 rounded-full bg-red-200 text-red-800">Nicht erreichbar</span>
+                    </div>`;
+                }
             }
+            statusEl.innerHTML = html;
+        }
+
+        function escapeHtml(str) {
+            const d = document.createElement('div');
+            d.textContent = str;
+            return d.innerHTML;
+        }
+            try {
+                const resp = await AuthentikAuth.apiFetch('/api/sms/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ to: toEl.value, text: textEl.value })
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    statusEl.textContent = 'SMS gesendet';
+                    statusEl.className = 'text-xs mt-1 text-green-600';
+                    textEl.value = '';
+                    loadSmsInbox();
+                } else {
+                    statusEl.textContent = data.error || 'Fehler';
+                    statusEl.className = 'text-xs mt-1 text-red-500';
+                }
+            } catch (err) {
+                statusEl.textContent = 'Versand fehlgeschlagen';
+                statusEl.className = 'text-xs mt-1 text-red-500';
+            }
+            statusEl.classList.remove('hidden');
+            btn.disabled = false;
+            btn.textContent = 'Senden';
         }
 
         // Tab Management
@@ -1510,26 +1440,9 @@
             `;
         }
 
-        // Check for existing session on load
-        window.addEventListener('DOMContentLoaded', () => {
-            const savedToken = localStorage.getItem('it_session_token');
-            const savedEmail = localStorage.getItem('it_user_email');
-
-            if (savedToken && savedEmail) {
-                sessionToken = savedToken;
-                currentEmail = savedEmail;
-                showDashboard();
-            }
-
-            // Enter key handlers
-            document.getElementById('email-input').addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') sendOTP();
-            });
-
-            document.getElementById('otp-input').addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') verifyOTP();
-            });
-        });
+        // Migrate old session keys
+        localStorage.removeItem('it_session_token');
+        localStorage.removeItem('it_user_email');
     </script>
 </body>
 </html>

@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E-Mail Verteiler - Rosenweg</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/nav.js?v=2"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Navigation -->
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script>RosenwegNav.init({ active: 'verteiler' });</script>
+
+    <!-- Header -->
+    <section class="bg-gradient-to-r from-blue-600 to-blue-800 text-white py-12">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h1 class="text-3xl font-bold mb-2">E-Mail Verteiler</h1>
+            <p class="text-lg opacity-90">Nachrichten an Verteiler senden und Versand-Protokoll einsehen</p>
+        </div>
+    </section>
+
+    <!-- Main Content -->
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <!-- Loading State -->
+        <div id="loading" class="text-center py-12">
+            <div class="animate-spin inline-block w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full"></div>
+            <p class="mt-4 text-gray-600">Lade Authentifizierung...</p>
+        </div>
+
+        <!-- Step 1: SSO Login -->
+        <div id="step1" class="hidden">
+            <div class="bg-white rounded-lg shadow-lg p-8">
+                <div class="text-center mb-8">
+                    <div class="bg-blue-100 rounded-full p-4 inline-block mb-4">
+                        <svg class="h-12 w-12 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207"></path>
+                        </svg>
+                    </div>
+                    <h2 class="text-2xl font-bold text-gray-800 mb-2">Anmeldung erforderlich</h2>
+                    <p class="text-gray-600">Bitte melden Sie sich an, um den E-Mail-Verteiler zu nutzen.</p>
+                </div>
+
+                <div id="sso-login-container"></div>
+
+                <p class="text-xs text-gray-500 mt-4 text-center">
+                    Zugang haben: Ausschussmitglieder, Eigentümer und berechtigte Mieter
+                </p>
+            </div>
+        </div>
+
+        <!-- Step 3: Email Form + Log -->
+        <div id="step3" class="hidden">
+            <!-- Tab Navigation -->
+            <div class="flex mb-6 bg-white rounded-lg shadow overflow-hidden">
+                <button onclick="switchTab('form')" id="tab-form"
+                    class="flex-1 px-6 py-3 text-sm font-medium text-center border-b-2 border-blue-600 text-blue-600 bg-blue-50">
+                    E-Mail senden
+                </button>
+                <button onclick="switchTab('log')" id="tab-log"
+                    class="flex-1 px-6 py-3 text-sm font-medium text-center border-b-2 border-transparent text-gray-500 hover:text-gray-700">
+                    Versand-Protokoll
+                </button>
+                <button onclick="switchTab('admin')" id="tab-admin"
+                    class="hidden flex-1 px-6 py-3 text-sm font-medium text-center border-b-2 border-transparent text-gray-500 hover:text-gray-700">
+                    Verteiler verwalten
+                </button>
+            </div>
+
+            <!-- Tab: Form -->
+            <div id="panel-form">
+            <div class="bg-white rounded-lg shadow-lg p-8">
+                <div class="flex items-center justify-between mb-6">
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-800">E-Mail an Verteiler senden</h2>
+                        <p class="text-sm text-gray-600">Angemeldet als: <strong id="loggedInEmail"></strong></p>
+                    </div>
+                    <button
+                        onclick="logout()"
+                        class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition text-sm">
+                        Abmelden
+                    </button>
+                </div>
+
+                <form id="emailVerteilerForm">
+                    <div class="mb-6">
+                        <label for="verteilerSelect" class="block text-sm font-medium text-gray-700 mb-2">
+                            An welchen Verteiler senden? *
+                        </label>
+                        <select
+                            id="verteilerSelect"
+                            required
+                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            <option value="">-- Bitte wählen --</option>
+                        </select>
+                        <p class="text-xs text-gray-500 mt-1" id="verteilerInfo"></p>
+                    </div>
+
+                    <div class="mb-6">
+                        <label for="subjectInput" class="block text-sm font-medium text-gray-700 mb-2">
+                            Betreff *
+                        </label>
+                        <input
+                            type="text"
+                            id="subjectInput"
+                            required
+                            placeholder="z.B. Hausversammlung am 15. Januar 2025"
+                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                    </div>
+
+                    <div class="mb-6">
+                        <label for="messageInput" class="block text-sm font-medium text-gray-700 mb-2">
+                            Nachricht *
+                        </label>
+                        <textarea
+                            id="messageInput"
+                            required
+                            rows="8"
+                            placeholder="Ihre Nachricht an den Verteiler..."
+                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"></textarea>
+                    </div>
+
+                    <div class="mb-6">
+                        <label for="senderNameInput" class="block text-sm font-medium text-gray-700 mb-2">
+                            Ihr Name (optional)
+                        </label>
+                        <input
+                            type="text"
+                            id="senderNameInput"
+                            placeholder="Max Mustermann"
+                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        <p class="text-xs text-gray-500 mt-1">Wird als Absender in der E-Mail angezeigt</p>
+                    </div>
+
+                    <div id="sendErrorMessage" class="hidden bg-red-50 border-l-4 border-red-500 p-4 rounded mb-4">
+                        <p class="text-sm text-red-700"></p>
+                    </div>
+
+                    <div id="sendSuccessMessage" class="hidden bg-green-50 border-l-4 border-green-500 p-4 rounded mb-4">
+                        <p class="text-sm text-green-700"></p>
+                    </div>
+
+                    <button
+                        type="submit"
+                        id="sendButton"
+                        class="w-full bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition flex items-center justify-center">
+                        <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                        </svg>
+                        E-Mail senden
+                    </button>
+                </form>
+            </div>
+            </div>
+
+            <!-- Tab: Log -->
+            <div id="panel-log" class="hidden">
+                <div class="bg-white rounded-lg shadow-lg p-8">
+                    <div class="flex items-center justify-between mb-6">
+                        <h2 class="text-2xl font-bold text-gray-800">Versand-Protokoll</h2>
+                        <button onclick="loadEmailLog()" class="text-sm text-blue-600 hover:text-blue-800">Aktualisieren</button>
+                    </div>
+                    <div id="email-log-loading" class="text-center py-8 hidden">
+                        <div class="animate-spin inline-block w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full"></div>
+                    </div>
+                    <div id="email-log-empty" class="hidden text-center py-8 text-gray-500">
+                        Noch keine E-Mails versendet.
+                    </div>
+                    <div id="email-log-list" class="space-y-3"></div>
+                </div>
+            </div>
+
+            <!-- Tab: Admin -->
+            <div id="panel-admin" class="hidden">
+                <div class="bg-white rounded-lg shadow-lg p-8">
+                    <div class="flex items-center justify-between mb-6">
+                        <h2 class="text-2xl font-bold text-gray-800">Verteiler verwalten</h2>
+                        <div class="flex gap-2">
+                            <button onclick="showVerteilerForm()" class="text-sm bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700">+ Neuer Verteiler</button>
+                            <button onclick="loadAdminVerteiler()" class="text-sm text-blue-600 hover:text-blue-800">Aktualisieren</button>
+                        </div>
+                    </div>
+                    <div id="admin-verteiler-list" class="space-y-3"></div>
+
+                    <!-- Add/Edit Form -->
+                    <div id="verteiler-form" class="hidden mt-6 p-6 bg-gray-50 rounded-lg border">
+                        <h3 class="text-lg font-medium text-gray-900 mb-4" id="verteiler-form-title">Neuer Verteiler</h3>
+                        <input type="hidden" id="vf-id" />
+                        <div class="grid grid-cols-2 gap-3 mb-3">
+                            <div>
+                                <label class="text-xs text-gray-500">Name</label>
+                                <input type="text" id="vf-name" placeholder="z.B. Ausschuss Gesamt" class="w-full text-sm px-3 py-2 border rounded-lg" />
+                            </div>
+                            <div>
+                                <label class="text-xs text-gray-500">E-Mail-Adresse</label>
+                                <input type="email" id="vf-email" placeholder="adresse@rosenweg4303.ch" class="w-full text-sm px-3 py-2 border rounded-lg" />
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-3 gap-3 mb-3">
+                            <div>
+                                <label class="text-xs text-gray-500">STWEG Nr.</label>
+                                <input type="number" id="vf-stweg" placeholder="0" class="w-full text-sm px-3 py-2 border rounded-lg" />
+                            </div>
+                            <div>
+                                <label class="text-xs text-gray-500">Reply-To</label>
+                                <select id="vf-reply-to" class="w-full text-sm px-3 py-2 border rounded-lg">
+                                    <option value="sender">Absender</option>
+                                    <option value="list">Liste</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="text-xs text-gray-500">Betreff-Prefix</label>
+                                <input type="text" id="vf-prefix" placeholder="[Prefix]" class="w-full text-sm px-3 py-2 border rounded-lg" />
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="text-xs text-gray-500">Authentik-Gruppen (mehrere möglich)</label>
+                            <select id="vf-group" multiple class="w-full text-sm px-3 py-2 border rounded-lg" size="6">
+                            </select>
+                            <p class="text-xs text-gray-400 mt-1">Alle Mitglieder der gewählten Gruppen und deren Untergruppen werden automatisch einbezogen. Strg/Cmd gedrückt halten für Mehrfachauswahl.</p>
+                            <div id="vf-group-preview" class="mt-2"></div>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="saveVerteiler()" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">Speichern</button>
+                            <button onclick="closeVerteilerForm()" class="px-4 py-2 bg-gray-200 text-gray-700 text-sm rounded-lg hover:bg-gray-300">Abbrechen</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recipient Detail Modal -->
+    <div id="detail-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[80vh] overflow-y-auto p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-gray-800" id="modal-title">Empfänger-Details</h3>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+            </div>
+            <div id="modal-content"></div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="bg-gray-800 text-white py-8 mt-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <p class="text-sm text-gray-400">
+                © 2025 STWEG-Kooperation Rosenweg
+            </p>
+        </div>
+    </footer>
+
+    <script>
+        let currentEmail = '';
+        let currentUser = null;
+        let verteilerList = [];
+        let adminVerteilerData = [];
+
+        // INITIALISIERUNG
+        window.addEventListener('DOMContentLoaded', async function() {
+            try {
+                const user = await AuthentikAuth.init({
+                    requireAuth: false,
+                    onLogin(user) {
+                        currentEmail = user.email;
+                        currentUser = user;
+                        document.getElementById('loading').classList.add('hidden');
+                        document.getElementById('step1').classList.add('hidden');
+                        document.getElementById('step3').classList.remove('hidden');
+                        document.getElementById('loggedInEmail').textContent = user.name || currentEmail;
+                        loadVerteilerDropdown();
+
+                        // Show admin tab for Technik group
+                        const groups = user.groups || [];
+                        if (groups.includes('Technik') || groups.includes('technik')) {
+                            document.getElementById('tab-admin').classList.remove('hidden');
+                        }
+                    },
+                });
+
+                document.getElementById('loading').classList.add('hidden');
+                if (!user) {
+                    document.getElementById('step1').classList.remove('hidden');
+                    AuthentikAuth.createLoginButton('sso-login-container');
+                }
+            } catch (error) {
+                console.error('Init error:', error);
+                document.getElementById('loading').innerHTML = `
+                    <div class="text-red-600 text-center">
+                        <p class="font-semibold mb-2">Fehler beim Laden</p>
+                        <p class="text-sm">Bitte versuchen Sie es später erneut.</p>
+                    </div>`;
+            }
+        });
+
+        // Verteiler-Dropdown dynamisch laden
+        async function loadVerteilerDropdown() {
+            try {
+                const res = await AuthentikAuth.apiFetch('/api/verteiler');
+                const data = await res.json();
+                verteilerList = data.verteiler || [];
+
+                const select = document.getElementById('verteilerSelect');
+                select.innerHTML = '<option value="">-- Bitte wählen --</option>';
+                verteilerList.filter(v => v.active).forEach(v => {
+                    const count = v.member_count || 0;
+                    select.innerHTML += `<option value="${v.id}">${escapeHtml(v.name)} (${count} Empfänger)</option>`;
+                });
+            } catch (err) {
+                console.error('Verteiler load error:', err);
+            }
+        }
+
+        // Verteiler-Info anzeigen
+        document.getElementById('verteilerSelect').addEventListener('change', function() {
+            const v = verteilerList.find(x => x.id === parseInt(this.value));
+            document.getElementById('verteilerInfo').textContent = v
+                ? `Sendet an ${v.email_address} (${v.member_count || 0} Mitglieder)`
+                : '';
+        });
+
+        // E-Mail senden
+        document.getElementById('emailVerteilerForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const verteilerId = document.getElementById('verteilerSelect').value;
+            const subject = document.getElementById('subjectInput').value.trim();
+            const message = document.getElementById('messageInput').value.trim();
+            const senderName = document.getElementById('senderNameInput').value.trim();
+
+            const errorDiv = document.getElementById('sendErrorMessage');
+            const successDiv = document.getElementById('sendSuccessMessage');
+            const sendButton = document.getElementById('sendButton');
+
+            errorDiv.classList.add('hidden');
+            successDiv.classList.add('hidden');
+            sendButton.disabled = true;
+            sendButton.innerHTML = '<span class="animate-spin inline-block mr-2">⏳</span> Wird gesendet...';
+
+            try {
+                const res = await AuthentikAuth.apiFetch('/api/verteiler/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        verteiler_id: verteilerId,
+                        subject,
+                        body: message,
+                        sender_email: currentEmail,
+                        sender_name: senderName || currentUser?.name || currentEmail
+                    })
+                });
+
+                const result = await res.json();
+                if (!res.ok || !result.success) throw new Error(result.error || 'Fehler beim Senden');
+
+                successDiv.classList.remove('hidden');
+                successDiv.querySelector('p').textContent = `E-Mail erfolgreich an ${result.recipients_count} Empfänger gesendet!`;
+                document.getElementById('emailVerteilerForm').reset();
+                setTimeout(() => successDiv.classList.add('hidden'), 5000);
+            } catch (error) {
+                errorDiv.classList.remove('hidden');
+                errorDiv.querySelector('p').textContent = 'Fehler: ' + error.message;
+            }
+
+            sendButton.disabled = false;
+            sendButton.innerHTML = `<svg class="h-5 w-5 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg> E-Mail senden`;
+        });
+
+        function logout() {
+            if (confirm('Möchten Sie sich wirklich abmelden?')) {
+                AuthentikAuth.logout();
+            }
+        }
+
+        // Tab switching
+        function switchTab(tab) {
+            ['form', 'log', 'admin'].forEach(t => {
+                const panel = document.getElementById(`panel-${t}`);
+                const tabBtn = document.getElementById(`tab-${t}`);
+                if (panel) panel.classList.toggle('hidden', tab !== t);
+                if (tabBtn) {
+                    tabBtn.classList.toggle('border-blue-600', tab === t);
+                    tabBtn.classList.toggle('text-blue-600', tab === t);
+                    tabBtn.classList.toggle('bg-blue-50', tab === t);
+                    tabBtn.classList.toggle('border-transparent', tab !== t);
+                    tabBtn.classList.toggle('text-gray-500', tab !== t);
+                }
+            });
+            if (tab === 'log') loadEmailLog();
+            if (tab === 'admin') loadAdminVerteiler();
+        }
+
+        // ═══ Admin: Verteiler Management ═══
+        async function loadAdminVerteiler() {
+            const el = document.getElementById('admin-verteiler-list');
+            el.innerHTML = '<div class="text-sm text-gray-400 text-center py-4">Lade Verteiler...</div>';
+            try {
+                const res = await AuthentikAuth.apiFetch('/api/verteiler');
+                const data = await res.json();
+                adminVerteilerData = data.verteiler || [];
+                if (adminVerteilerData.length === 0) {
+                    el.innerHTML = '<div class="text-sm text-gray-400 text-center py-4">Keine Verteiler konfiguriert.</div>';
+                    return;
+                }
+                el.innerHTML = adminVerteilerData.map(v => {
+                    const statusClass = v.active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500';
+                    const statusText = v.active ? 'Aktiv' : 'Inaktiv';
+                    const groups = v.group_names?.length ? v.group_names : (v.group_name ? [v.group_name] : []);
+                    const sourceTag = groups.length > 0
+                        ? groups.map(g => `<span class="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">${escapeHtml(g)}</span>`).join(' ')
+                        : `<span class="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">Statisch</span>`;
+                    return `
+                    <div class="p-4 bg-gray-50 rounded-lg border hover:border-blue-300 cursor-pointer" onclick="editVerteiler(${v.id})">
+                        <div class="flex justify-between items-start">
+                            <div class="flex-1">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <span class="font-medium text-gray-900">${escapeHtml(v.name)}</span>
+                                    <span class="text-xs ${statusClass} px-1.5 py-0.5 rounded">${statusText}</span>
+                                    ${sourceTag}
+                                    ${v.stweg > 0 ? `<span class="text-xs text-gray-400">STWEG ${v.stweg}</span>` : ''}
+                                </div>
+                                <div class="flex items-center gap-3 text-xs text-gray-500">
+                                    <span class="font-mono">${escapeHtml(v.email_address)}</span>
+                                    <span>${v.member_count || 0} Mitglieder</span>
+                                    <span>Reply-To: ${v.reply_to === 'list' ? 'Liste' : 'Absender'}</span>
+                                </div>
+                            </div>
+                            <button onclick="event.stopPropagation(); deleteVerteiler(${v.id}, '${escapeHtml(v.name)}')" class="ml-2 text-gray-400 hover:text-red-500" title="Löschen">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                            </button>
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch (err) {
+                el.innerHTML = '<div class="text-sm text-red-500 text-center py-4">Fehler beim Laden.</div>';
+            }
+        }
+
+        // ═══ User Picker for Verteiler Members ═══
+        let authentikGroups = [];
+
+        async function loadAuthentikGroups() {
+            if (authentikGroups.length > 0) return;
+            try {
+                const res = await AuthentikAuth.apiFetch('/api/admin/groups');
+                const data = await res.json();
+                authentikGroups = (data.results || [])
+                    .filter(g => !g.name.startsWith('authentik '))
+                    .sort((a, b) => a.name.localeCompare(b.name));
+            } catch (err) {
+                console.error('Failed to load groups:', err);
+            }
+        }
+
+        function populateGroupDropdown(selectedGroups) {
+            const select = document.getElementById('vf-group');
+            const selected = Array.isArray(selectedGroups) ? selectedGroups : (selectedGroups ? [selectedGroups] : []);
+            select.innerHTML = authentikGroups.map(g =>
+                `<option value="${escapeHtml(g.name)}" ${selected.includes(g.name) ? 'selected' : ''}>${escapeHtml(g.name)}</option>`
+            ).join('');
+        }
+
+        // Preview resolved group members when group selection changes
+        document.addEventListener('change', async (e) => {
+            if (e.target.id !== 'vf-group') return;
+            const preview = document.getElementById('vf-group-preview');
+            const selectedGroups = [...e.target.selectedOptions].map(o => o.value);
+            if (selectedGroups.length === 0) { preview.innerHTML = ''; return; }
+            preview.innerHTML = `<p class="text-xs text-blue-600 mt-1">${selectedGroups.length} Gruppe(n) gewählt – Empfänger werden beim Senden aufgelöst (inkl. Untergruppen)</p>`;
+        });
+
+
+        async function showVerteilerForm() {
+            await loadAuthentikGroups();
+            document.getElementById('verteiler-form').classList.remove('hidden');
+            document.getElementById('verteiler-form-title').textContent = 'Neuer Verteiler';
+            document.getElementById('vf-id').value = '';
+            document.getElementById('vf-name').value = '';
+            document.getElementById('vf-email').value = '';
+            document.getElementById('vf-stweg').value = '';
+            document.getElementById('vf-reply-to').value = 'sender';
+            document.getElementById('vf-prefix').value = '';
+            document.getElementById('vf-group-preview').innerHTML = '';
+            populateGroupDropdown('');
+        }
+
+        function closeVerteilerForm() {
+            document.getElementById('verteiler-form').classList.add('hidden');
+        }
+
+        async function editVerteiler(id) {
+            await loadAuthentikGroups();
+            const v = adminVerteilerData.find(x => x.id === id);
+            if (!v) return;
+            document.getElementById('verteiler-form').classList.remove('hidden');
+            document.getElementById('verteiler-form-title').textContent = 'Verteiler bearbeiten';
+            document.getElementById('vf-id').value = v.id;
+            document.getElementById('vf-name').value = v.name;
+            document.getElementById('vf-email').value = v.email_address;
+            document.getElementById('vf-stweg').value = v.stweg || '';
+            document.getElementById('vf-reply-to').value = v.reply_to || 'sender';
+            document.getElementById('vf-prefix').value = v.subject_prefix || '';
+            const groups = v.group_names?.length ? v.group_names : (v.group_name ? [v.group_name] : []);
+            populateGroupDropdown(groups);
+            // Show resolved members preview
+            if (v.resolved_emails) {
+                document.getElementById('vf-group-preview').innerHTML = `<div class="bg-white border rounded-lg p-2 mt-1"><p class="text-xs font-medium text-green-700 mb-1">${v.resolved_emails.length} Empfänger aus ${groups.length} Gruppe(n) (inkl. Untergruppen):</p><p class="text-xs text-gray-500">${v.resolved_emails.join(', ')}</p></div>`;
+            } else {
+                document.getElementById('vf-group-preview').innerHTML = '';
+            }
+        }
+
+        async function saveVerteiler() {
+            const id = document.getElementById('vf-id').value;
+            const name = document.getElementById('vf-name').value;
+            const email_address = document.getElementById('vf-email').value;
+            const group_names = [...document.getElementById('vf-group').selectedOptions].map(o => o.value);
+            if (!name || !email_address) return alert('Name und E-Mail-Adresse erforderlich');
+            if (group_names.length === 0) return alert('Bitte mindestens eine Authentik-Gruppe wählen');
+
+            const body = {
+                stweg: parseInt(document.getElementById('vf-stweg').value) || 0,
+                name, email_address, group_names,
+                reply_to: document.getElementById('vf-reply-to').value,
+                subject_prefix: document.getElementById('vf-prefix').value || null,
+                active: true
+            };
+
+            try {
+                const method = id ? 'PUT' : 'POST';
+                const url = id ? `/api/verteiler/${id}` : '/api/verteiler';
+                await AuthentikAuth.apiFetch(url, {
+                    method, headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                closeVerteilerForm();
+                loadAdminVerteiler();
+                loadVerteilerDropdown();
+            } catch (err) {
+                alert('Fehler beim Speichern');
+            }
+        }
+
+        async function deleteVerteiler(id, name) {
+            if (!confirm(`Verteiler "${name}" wirklich löschen?`)) return;
+            await AuthentikAuth.apiFetch(`/api/verteiler/${id}`, { method: 'DELETE' });
+            loadAdminVerteiler();
+            loadVerteilerDropdown();
+        }
+
+        // Email log
+        async function loadEmailLog() {
+            const loading = document.getElementById('email-log-loading');
+            const empty = document.getElementById('email-log-empty');
+            const list = document.getElementById('email-log-list');
+            loading.classList.remove('hidden');
+            empty.classList.add('hidden');
+            list.innerHTML = '';
+
+            try {
+                const headers = {};
+                const token = AuthentikAuth.getToken();
+                if (token) headers['Authorization'] = `Bearer ${token}`;
+
+                const res = await fetch('/api/email/log?limit=50', { headers });
+                const data = await res.json();
+
+                loading.classList.add('hidden');
+                if (!data.log || data.log.length === 0) {
+                    empty.classList.remove('hidden');
+                    return;
+                }
+
+                data.log.forEach(entry => {
+                    const date = new Date(entry.created_at);
+                    const dateStr = date.toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                    const timeStr = date.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
+
+                    const statusColor = entry.status === 'sent' ? 'green' : entry.status === 'partial' ? 'yellow' : 'red';
+                    const statusLabel = entry.status === 'sent' ? 'Zugestellt' : entry.status === 'partial' ? 'Teilweise' : 'Fehlgeschlagen';
+                    const failedList = entry.failed_recipients ? JSON.parse(entry.failed_recipients) : [];
+                    const recipientsList = entry.recipients_list ? JSON.parse(entry.recipients_list) : [];
+
+                    const card = document.createElement('div');
+                    card.className = 'border rounded-lg p-4 hover:bg-gray-50 transition cursor-pointer';
+                    card.onclick = () => showDetail(entry, recipientsList, failedList);
+                    card.innerHTML = `
+                        <div class="flex items-start justify-between">
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <span class="inline-block w-2 h-2 rounded-full bg-${statusColor}-500"></span>
+                                    <span class="text-sm font-medium text-gray-900 truncate">${escapeHtml(entry.subject || 'Kein Betreff')}</span>
+                                </div>
+                                <div class="text-xs text-gray-500">
+                                    <span>Von: ${escapeHtml(entry.from_name || entry.from_email)}</span>
+                                    ${entry.verteiler_name ? `<span class="ml-2">an <strong>${escapeHtml(entry.verteiler_name)}</strong></span>` : ''}
+                                </div>
+                            </div>
+                            <div class="text-right ml-4 flex-shrink-0">
+                                <div class="text-xs text-gray-500">${dateStr} ${timeStr}</div>
+                                <div class="text-xs mt-1">
+                                    <span class="text-${statusColor}-600 font-medium">${statusLabel}</span>
+                                    <span class="text-gray-400 ml-1">${entry.recipients_count} Empf.</span>
+                                    ${failedList.length > 0 ? `<span class="text-red-600 ml-1">${failedList.length} fehlg.</span>` : ''}
+                                </div>
+                                ${entry.has_attachments ? '<div class="text-xs text-gray-400 mt-1">📎 Anhänge</div>' : ''}
+                            </div>
+                        </div>
+                    `;
+                    list.appendChild(card);
+                });
+            } catch (err) {
+                loading.classList.add('hidden');
+                list.innerHTML = '<p class="text-red-600 text-sm text-center py-4">Fehler beim Laden des Protokolls.</p>';
+                console.error('Log load error:', err);
+            }
+        }
+
+        function showDetail(entry, recipients, failed) {
+            const modal = document.getElementById('detail-modal');
+            const title = document.getElementById('modal-title');
+            const content = document.getElementById('modal-content');
+
+            const date = new Date(entry.created_at);
+            const dateStr = date.toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+            title.textContent = entry.subject || 'Kein Betreff';
+            let html = `
+                <div class="space-y-3 text-sm">
+                    <div class="flex justify-between">
+                        <span class="text-gray-500">Datum:</span>
+                        <span>${dateStr}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-500">Von:</span>
+                        <span>${escapeHtml(entry.from_name || '')} &lt;${escapeHtml(entry.from_email)}&gt;</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-500">Verteiler:</span>
+                        <span>${escapeHtml(entry.verteiler_name || '-')}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-500">Anhänge:</span>
+                        <span>${entry.has_attachments ? 'Ja' : 'Nein'}</span>
+                    </div>
+                    <hr>
+                    <button onclick="checkDeliveryStatus(${entry.id})"
+                        class="w-full bg-blue-50 text-blue-700 border border-blue-200 rounded-lg px-4 py-2 text-sm font-medium hover:bg-blue-100 transition"
+                        id="status-btn-${entry.id}">
+                        Zustellstatus bei SMTP2GO prüfen
+                    </button>
+                    <div id="delivery-status-${entry.id}"></div>
+            `;
+
+            if (recipients.length > 0) {
+                html += `<h4 class="font-medium text-gray-800" id="recipients-header-${entry.id}">Empfänger (${recipients.length}):</h4>
+                    <ul class="space-y-1" id="recipients-list-${entry.id}">`;
+                recipients.forEach(r => {
+                    const isFailed = failed.includes(r);
+                    html += `<li class="flex items-center gap-2" data-recipient="${escapeHtml(r)}">
+                        <span class="${isFailed ? 'text-red-500' : 'text-gray-400'}">${isFailed ? '✗' : '—'}</span>
+                        <span class="${isFailed ? 'text-red-700' : 'text-gray-700'}">${escapeHtml(r)}</span>
+                    </li>`;
+                });
+                html += '</ul>';
+            }
+
+            html += '</div>';
+            content.innerHTML = html;
+            modal.classList.remove('hidden');
+        }
+
+        async function checkDeliveryStatus(logId) {
+            const btn = document.getElementById(`status-btn-${logId}`);
+            const statusDiv = document.getElementById(`delivery-status-${logId}`);
+            btn.disabled = true;
+            btn.textContent = 'Wird abgefragt...';
+
+            try {
+                const headers = {};
+                const token = AuthentikAuth.getToken();
+                if (token) headers['Authorization'] = `Bearer ${token}`;
+
+                const res = await fetch(`/api/email/log/${logId}/status`, { headers });
+                const data = await res.json();
+
+                if (data.error) {
+                    statusDiv.innerHTML = `<p class="text-red-600 text-xs mt-2">${escapeHtml(data.error)}</p>`;
+                    btn.textContent = 'Erneut prüfen';
+                    btn.disabled = false;
+                    return;
+                }
+
+                // Update recipient list with delivery status
+                const listEl = document.getElementById(`recipients-list-${logId}`);
+                if (listEl && data.events) {
+                    const eventMap = {};
+                    data.events.forEach(e => { eventMap[e.recipient] = e; });
+
+                    listEl.querySelectorAll('li').forEach(li => {
+                        const addr = li.dataset.recipient;
+                        const ev = eventMap[addr];
+                        if (ev) {
+                            const icon = li.querySelector('span:first-child');
+                            const label = li.querySelector('span:last-child');
+                            if (ev.event === 'delivered') {
+                                icon.textContent = '✓';
+                                icon.className = 'text-green-500';
+                                label.className = 'text-gray-700';
+                            } else if (ev.event.includes('bounced') || ev.event === 'rejected') {
+                                icon.textContent = '✗';
+                                icon.className = 'text-red-500';
+                                label.className = 'text-red-700';
+                                label.textContent += ` (${ev.event})`;
+                            } else if (ev.event === 'sent' || ev.event === 'queued') {
+                                icon.textContent = '↗';
+                                icon.className = 'text-blue-500';
+                            } else if (ev.event === 'opened') {
+                                icon.textContent = '👁';
+                                icon.className = 'text-green-600';
+                                label.textContent += ' (geöffnet)';
+                            } else if (ev.event === 'clicked') {
+                                icon.textContent = '🔗';
+                                icon.className = 'text-green-600';
+                                label.textContent += ' (geklickt)';
+                            } else {
+                                icon.textContent = '?';
+                                icon.className = 'text-yellow-500';
+                                label.textContent += ` (${ev.event})`;
+                            }
+                        }
+                    });
+                }
+
+                const delivered = data.events.filter(e => e.event === 'delivered' || e.event === 'opened' || e.event === 'clicked').length;
+                const bounced = data.events.filter(e => e.event.includes('bounced') || e.event === 'rejected').length;
+                const pending = data.events.filter(e => e.event === 'sent' || e.event === 'queued').length;
+
+                statusDiv.innerHTML = `<div class="flex gap-3 text-xs mt-2">
+                    ${delivered > 0 ? `<span class="text-green-600">${delivered} zugestellt</span>` : ''}
+                    ${bounced > 0 ? `<span class="text-red-600">${bounced} fehlgeschlagen</span>` : ''}
+                    ${pending > 0 ? `<span class="text-blue-600">${pending} ausstehend</span>` : ''}
+                    ${data.events.length === 0 ? '<span class="text-gray-500">Noch kein Status verfügbar</span>' : ''}
+                </div>`;
+
+                btn.textContent = 'Erneut prüfen';
+                btn.disabled = false;
+            } catch (err) {
+                statusDiv.innerHTML = '<p class="text-red-600 text-xs mt-2">Fehler bei der Abfrage</p>';
+                btn.textContent = 'Erneut prüfen';
+                btn.disabled = false;
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('detail-modal').classList.add('hidden');
+        }
+
+        document.getElementById('detail-modal').addEventListener('click', function(e) {
+            if (e.target === this) closeModal();
+        });
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>

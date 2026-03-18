@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>STWEG-Kooperation Rosenweg - Kaiseraugst</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/site-config.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body {
@@ -14,48 +16,9 @@
 </head>
 <body class="bg-gray-50">
     <!-- Navigation -->
-    <nav class="bg-white shadow-lg sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex items-center">
-                    <svg class="h-8 w-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
-                    </svg>
-                    <span class="ml-2 text-xl font-semibold text-gray-800">STWEG-Kooperation Rosenweg</span>
-                </div>
-                <div class="hidden md:flex items-center space-x-8">
-                    <a href="#home" class="text-gray-700 hover:text-blue-600 transition">Start</a>
-                    <a href="#about" class="text-gray-700 hover:text-blue-600 transition">Über uns</a>
-                    <a href="zaehler.html" class="text-gray-700 hover:text-blue-600 transition">Zähler</a>
-                    <a href="it-netzwerk.html" class="text-gray-700 hover:text-blue-600 transition">IT & Netzwerk</a>
-                    <a href="#verwaltung" class="text-gray-700 hover:text-blue-600 transition">Verwaltung</a>
-                    <a href="#infos" class="text-gray-700 hover:text-blue-600 transition">Informationen</a>
-                    <a href="#dokumente" class="text-gray-700 hover:text-blue-600 transition">Dokumente</a>
-                    <a href="#kontakt" class="text-gray-700 hover:text-blue-600 transition">Kontakt</a>
-                </div>
-                <div class="md:hidden flex items-center">
-                    <button id="mobile-menu-button" class="text-gray-700 hover:text-blue-600">
-                        <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
-                        </svg>
-                    </button>
-                </div>
-            </div>
-        </div>
-        <!-- Mobile Menu -->
-        <div id="mobile-menu" class="hidden md:hidden bg-white border-t">
-            <div class="px-2 pt-2 pb-3 space-y-1">
-                <a href="#home" class="block px-3 py-2 text-gray-700 hover:bg-gray-100">Start</a>
-                <a href="#about" class="block px-3 py-2 text-gray-700 hover:bg-gray-100">Über uns</a>
-                <a href="zaehler.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100">Zähler</a>
-                <a href="it-netzwerk.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100">IT & Netzwerk</a>
-                <a href="#verwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100">Verwaltung</a>
-                <a href="#infos" class="block px-3 py-2 text-gray-700 hover:bg-gray-100">Informationen</a>
-                <a href="#dokumente" class="block px-3 py-2 text-gray-700 hover:bg-gray-100">Dokumente</a>
-                <a href="#kontakt" class="block px-3 py-2 text-gray-700 hover:bg-gray-100">Kontakt</a>
-            </div>
-        </div>
-    </nav>
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js?v=2"></script>
+    <script>RosenwegNav.init({ active: 'home', basePath: '/' });</script>
 
     <!-- Hero Section -->
     <section id="home" class="bg-gradient-to-r from-blue-600 to-blue-800 text-white py-20">
@@ -217,21 +180,21 @@
                         </svg>
                         <h3 class="text-xl font-semibold">Hausverwaltung</h3>
                     </div>
-                    <p class="text-gray-700 mb-2 font-semibold text-lg">LangPartners Immobilien AG</p>
-                    <p class="text-gray-600 text-sm mb-2">Kirchplatz 18</p>
-                    <p class="text-gray-600 text-sm mb-3">4132 Muttenz</p>
+                    <p id="verw-firma" class="text-gray-700 mb-2 font-semibold text-lg"></p>
+                    <p id="verw-strasse" class="text-gray-600 text-sm mb-2"></p>
+                    <p id="verw-plz" class="text-gray-600 text-sm mb-3"></p>
                     <p class="text-gray-600 text-sm mb-2">
-                        <strong>Tel:</strong> <a href="tel:+41612281818" class="text-blue-600 hover:underline">+41 61 228 18 18</a>
+                        <strong>Tel:</strong> <a id="verw-tel" href="#" class="text-blue-600 hover:underline"></a>
                     </p>
                     <p class="text-gray-600 text-sm mb-2">
-                        <strong>E-Mail:</strong> <a href="mailto:hello@langpartners.ch" class="text-blue-600 hover:underline">hello@langpartners.ch</a>
+                        <strong>E-Mail:</strong> <a id="verw-email" href="#" class="text-blue-600 hover:underline"></a>
                     </p>
                     <p class="text-gray-600 text-sm mb-3">
-                        <strong>Web:</strong> <a href="https://langpartners.ch" target="_blank" class="text-blue-600 hover:underline">langpartners.ch</a>
+                        <strong>Web:</strong> <a id="verw-web" href="#" target="_blank" class="text-blue-600 hover:underline"></a>
                     </p>
                     <p class="text-gray-600 text-sm">
                         <strong>Öffnungszeiten:</strong><br>
-                        Montag – Freitag, 09:00-12:00 Uhr
+                        <span id="verw-oeffnung"></span>
                     </p>
                 </div>
 
@@ -245,12 +208,10 @@
                     </div>
                     <p class="text-sm text-gray-600 mb-4">Jede STWEG entsendet 2 Vertreter in den Ausschuss (insgesamt 16 Mitglieder)</p>
                     <div id="ausschuss-liste" class="space-y-3">
-                        <!-- Wird automatisch aus ausschuss-kontakte.json geladen -->
+                        <!-- Wird aus /api/public/ausschuss geladen -->
                         <div class="text-sm text-gray-600 animate-pulse">
-                        <p>Lade Ausschussmitglieder...</p>
-                    </div>
-</div>
-<p id="ausschuss-last-update" class="text-xs text-gray-500 mt-4 pt-4 border-t border-gray-200"></p>
+                            <p>Lade Ausschussmitglieder...</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -265,11 +226,11 @@
                         <h3 class="text-xl font-semibold">Technischer Dienst</h3>
                     </div>
                     <div class="bg-blue-50 p-4 rounded-lg mb-4">
-                        <p class="text-sm text-blue-800 mb-2"><strong>E-Mail:</strong> <a href="mailto:technik@rosenweg9.ch" class="text-blue-600 hover:underline">technik@rosenweg9.ch</a></p>
+                        <p class="text-sm text-blue-800 mb-2"><strong>E-Mail:</strong> <a id="technik-email" href="#" class="text-blue-600 hover:underline"></a></p>
                         <p class="text-xs text-gray-600">Zuständig für technische Angelegenheiten der STWEG-Kooperation</p>
                     </div>
                     <div id="tech-dienst-mitglieder" class="grid md:grid-cols-3 gap-4">
-                        <!-- Wird dynamisch aus technischer-dienst.json geladen -->
+                        <!-- Wird aus /api/public/technik geladen -->
                         <div class="bg-gray-50 p-4 rounded-lg animate-pulse">
                             <div class="h-4 bg-gray-300 rounded w-3/4 mb-2"></div>
                             <div class="h-3 bg-gray-200 rounded w-1/2"></div>
@@ -285,22 +246,22 @@
                         </svg>
                         Notfallkontakte
                     </h3>
-                    <div class="grid md:grid-cols-2 gap-4 text-gray-700">
+                    <div id="notfall-grid" class="grid md:grid-cols-2 gap-4 text-gray-700">
                         <div>
                             <p class="font-semibold">Polizei:</p>
-                            <p class="text-2xl font-bold text-red-600">117</p>
+                            <p class="text-2xl font-bold text-red-600" id="notfall-polizei"></p>
                         </div>
                         <div>
                             <p class="font-semibold">Feuerwehr:</p>
-                            <p class="text-2xl font-bold text-red-600">118</p>
+                            <p class="text-2xl font-bold text-red-600" id="notfall-feuerwehr"></p>
                         </div>
                         <div>
                             <p class="font-semibold">Sanität:</p>
-                            <p class="text-2xl font-bold text-red-600">144</p>
+                            <p class="text-2xl font-bold text-red-600" id="notfall-sanitaet"></p>
                         </div>
                         <div>
                             <p class="font-semibold">Störungsdienst Heizung:</p>
-                            <p class="text-sm">Kontakt: <a href="mailto:technik@rosenweg9.ch" class="text-blue-600 hover:underline">Technischer Dienst</a></p>
+                            <p class="text-sm">Kontakt: <a id="notfall-technik" href="#" class="text-blue-600 hover:underline">Technischer Dienst</a></p>
                         </div>
                     </div>
                 </div>
@@ -363,11 +324,11 @@
                 <div class="bg-white p-4 rounded-lg mb-4">
                     <div class="flex items-start justify-between">
                         <div>
-                            <p class="font-semibold text-gray-800 mb-1">🏢 REWAG Entsorgung AG</p>
-                            <p class="text-sm text-gray-600 mb-1">Rinaustrasse 633, 4303 Kaiseraugst</p>
-                            <p class="text-xs text-gray-600">Recyclinghof: Mo–Sa 06:00–20:00</p>
+                            <p id="rewag-firma" class="font-semibold text-gray-800 mb-1"></p>
+                            <p id="rewag-adresse" class="text-sm text-gray-600 mb-1"></p>
+                            <p id="rewag-recyclinghof" class="text-xs text-gray-600"></p>
                         </div>
-                        <a href="tel:+41618169970" class="text-blue-600 hover:underline text-sm whitespace-nowrap ml-4">061 816 99 70</a>
+                        <a id="rewag-tel" href="#" class="text-blue-600 hover:underline text-sm whitespace-nowrap ml-4"></a>
                     </div>
                 </div>
 
@@ -422,115 +383,28 @@
         </div>
     </section>
 
-    <!-- Termine & Kalender -->
+    <!-- Termine & Kalender (dynamisch aus Google Calendar) -->
     <section class="py-16 bg-gray-50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">Termine & Veranstaltungen</h2>
             <div class="bg-white rounded-lg shadow-md p-6">
-                <div class="space-y-4">
-                    <div class="border-l-4 border-purple-600 pl-4 py-3 bg-purple-50">
-                        <p class="font-semibold text-gray-800 text-lg">Hauptversammlung aller STWEGs</p>
-                        <p class="text-gray-600 text-sm mt-1"><strong>Datum:</strong> [Datum und Uhrzeit eintragen]</p>
-                        <p class="text-gray-600 text-sm""><strong>Ort:</strong> [Ort eintragen]</p>
-                        <p class="text-gray-500 text-xs mt-2">Jährliche Versammlung aller 8 STWEGs - Wichtigste Entscheidungsinstanz</p>
-                    </div>
-                    <div class="border-l-4 border-blue-600 pl-4 py-2">
-                        <p class="font-semibold text-gray-800">Nächste Ausschusssitzung</p>
-                        <p class="text-gray-600 text-sm">[Datum und Uhrzeit eintragen]</p>
-                        <p class="text-gray-600 text-sm">[Ort eintragen]</p>
-                        <p class="text-gray-500 text-xs mt-1">Regelmäßige Sitzung der Ausschussvertreter</p>
-                    </div>
-                    <div class="border-l-4 border-green-600 pl-4 py-2">
-                        <p class="font-semibold text-gray-800">Geplante Wartungsarbeiten</p>
-                        <p class="text-gray-600 text-sm">[Datum eintragen]</p>
-                        <p class="text-gray-600 text-sm">[Beschreibung der Arbeiten]</p>
-                    </div>
-                    <div class="border-l-4 border-yellow-600 pl-4 py-2">
-                        <p class="font-semibold text-gray-800">Hausreinigung</p>
-                        <p class="text-gray-600 text-sm">Jeden [Wochentag]</p>
-                    </div>
+                <div id="calendar-events" class="space-y-4">
+                    <!-- Wird dynamisch aus Google Calendar geladen -->
                 </div>
             </div>
         </div>
     </section>
+    <script src="js/calendar-loader.js"></script>
 
     <!-- Dokumente -->
     <section id="dokumente" class="py-16 bg-white">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">Dokumente</h2>
-            <div class="bg-blue-50 border-l-4 border-blue-500 p-6 rounded-lg mb-6">
-                <p class="text-gray-700">
-                    <svg class="h-5 w-5 inline mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
-                    </svg>
-                    <strong>Hinweis:</strong> Die meisten Dokumente sind passwortgeschützt und nur für Eigentümer zugänglich. 
-                    Bei Fragen wenden Sie sich bitte an die Hausverwaltung.
-                </p>
-            </div>
-            <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div class="bg-gray-50 p-4 rounded-lg hover:shadow-md transition">
-                    <div class="flex items-center mb-2">
-                        <svg class="h-6 w-6 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                        </svg>
-                        <h3 class="font-semibold">Hausordnung</h3>
-                    </div>
-                    <p class="text-sm text-gray-600 mb-2">Reglement für alle Bewohner</p>
-                    <a href="#" class="text-blue-600 hover:underline text-sm">Download (PDF)</a>
-                </div>
-                <div class="bg-gray-50 p-4 rounded-lg hover:shadow-md transition">
-                    <div class="flex items-center mb-2">
-                        <svg class="h-6 w-6 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                        </svg>
-                        <h3 class="font-semibold">Protokolle</h3>
-                    </div>
-                    <p class="text-sm text-gray-600 mb-2">Versammlungsprotokolle</p>
-                    <a href="#" class="text-blue-600 hover:underline text-sm">🔒 Geschützter Bereich</a>
-                </div>
-                <div class="bg-gray-50 p-4 rounded-lg hover:shadow-md transition">
-                    <div class="flex items-center mb-2">
-                        <svg class="h-6 w-6 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                        </svg>
-                        <h3 class="font-semibold">Jahresabrechnung</h3>
-                    </div>
-                    <p class="text-sm text-gray-600 mb-2">Finanzübersicht</p>
-                    <a href="#" class="text-blue-600 hover:underline text-sm">🔒 Geschützter Bereich</a>
-                </div>
-                <div class="bg-gray-50 p-4 rounded-lg hover:shadow-md transition">
-                    <div class="flex items-center mb-2">
-                        <svg class="h-6 w-6 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                        </svg>
-                        <h3 class="font-semibold">Versicherungen</h3>
-                    </div>
-                    <p class="text-sm text-gray-600 mb-2">Versicherungsübersicht</p>
-                    <a href="#" class="text-blue-600 hover:underline text-sm">🔒 Geschützter Bereich</a>
-                </div>
-                <div class="bg-gray-50 p-4 rounded-lg hover:shadow-md transition">
-                    <div class="flex items-center mb-2">
-                        <svg class="h-6 w-6 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                        </svg>
-                        <h3 class="font-semibold">Wartungsplan</h3>
-                    </div>
-                    <p class="text-sm text-gray-600 mb-2">Geplante Unterhaltsarbeiten</p>
-                    <a href="#" class="text-blue-600 hover:underline text-sm">🔒 Geschützter Bereich</a>
-                </div>
-                <div class="bg-gray-50 p-4 rounded-lg hover:shadow-md transition">
-                    <div class="flex items-center mb-2">
-                        <svg class="h-6 w-6 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                        </svg>
-                        <h3 class="font-semibold">Formulare</h3>
-                    </div>
-                    <p class="text-sm text-gray-600 mb-2">Nützliche Formulare</p>
-                    <a href="#" class="text-blue-600 hover:underline text-sm">Download</a>
-                </div>
-            </div>
+            <div id="documents-container"></div>
         </div>
     </section>
+    <script src="/js/documents.js"></script>
+    <script>RosenwegDocs.init('documents-container');</script>
 
     <!-- Kontakt -->
     <section id="kontakt" class="py-16 bg-gray-50">
@@ -607,98 +481,135 @@
             </div>
             <div class="mt-8 pt-8 border-t border-gray-700 text-center text-sm text-gray-400">
                 <p>&copy; 2025 STWEG-Kooperation Rosenweg. Alle Rechte vorbehalten.</p>
-                <p class="mt-2">Verwaltung: LangPartners Immobilien AG, Muttenz | Letzte Aktualisierung: Oktober 2025</p>
+                <p id="footer-verwaltung" class="mt-2"></p>
             </div>
         </div>
     </footer>
 
-    <!-- Mobile Menu Script -->
+    <!-- Smooth Scrolling -->
     <script>
-        const mobileMenuButton = document.getElementById('mobile-menu-button');
-        const mobileMenu = document.getElementById('mobile-menu');
-        
-        mobileMenuButton.addEventListener('click', () => {
-            mobileMenu.classList.toggle('hidden');
-        });
-
-        // Smooth scrolling für Anker-Links
         document.querySelectorAll('a[href^="#"]').forEach(anchor => {
             anchor.addEventListener('click', function (e) {
                 e.preventDefault();
                 const target = document.querySelector(this.getAttribute('href'));
                 if (target) {
-                    target.scrollIntoView({
-                        behavior: 'smooth',
-                        block: 'start'
-                    });
-                    // Mobile Menu schließen nach Klick
-                    mobileMenu.classList.add('hidden');
+                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    document.getElementById('nav-mobile-menu')?.classList.add('hidden');
                 }
             });
         });
     </script>
     
-    <!-- Ausschuss-Loader -->
-    <script src="ausschuss-loader.js"></script>
+    <!-- Ausschuss-Loader (from API) -->
+    <script>
+    async function loadAusschuss() {
+        try {
+            const res = await fetch('/api/public/ausschuss');
+            if (!res.ok) throw new Error('API ' + res.status);
+            const data = await res.json();
+            const container = document.getElementById('ausschuss-liste');
+            if (!container) return;
+            let html = '';
+            if (data.praesident) {
+                html += `<div class="border-l-4 border-yellow-500 pl-3 py-3 bg-yellow-50 rounded mb-3">
+                    <p class="text-sm font-semibold text-yellow-800 mb-1">Präsident des Ausschusses</p>
+                    <p class="text-sm font-bold text-gray-700">${data.praesident.name}</p>
+                    <p class="text-xs text-gray-600"><a href="mailto:${data.praesident.email}" class="text-blue-600 hover:underline">${data.praesident.email}</a></p>
+                </div>`;
+            }
+            for (const stweg of data.vertreter) {
+                const border = stweg.stweg_nummer === 8 ? 'green-500' : 'blue-400';
+                const bg = stweg.stweg_nummer === 8 ? 'green-50' : 'gray-50';
+                const label = stweg.stweg_nummer === 8 ? ' (Tiefgarage)' : '';
+                const names = stweg.vertreter.map(v => v.name).join(' &bull; ');
+                html += `<div class="border-l-4 border-${border} pl-3 py-2 bg-${bg} rounded">
+                    <p class="text-sm font-semibold text-gray-700 mb-1">STWEG ${stweg.stweg_nummer}${label}</p>
+                    <p class="text-sm text-gray-600">${names || '<em>Keine Vertreter zugewiesen</em>'}</p>
+                    <p class="text-xs text-gray-600 mt-1"><a href="mailto:${stweg.email}" class="text-blue-600 hover:underline">${stweg.email}</a></p>
+                </div>`;
+            }
+            container.innerHTML = html;
+        } catch (err) {
+            console.error('Ausschuss laden:', err);
+            const c = document.getElementById('ausschuss-liste');
+            if (c) c.innerHTML = '<p class="text-sm text-gray-500">Ausschuss-Daten konnten nicht geladen werden.</p>';
+        }
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loadAusschuss);
+    else loadAusschuss();
+    </script>
 
-    <!-- Technischer Dienst Loader -->
+    <!-- Config-basierte Daten laden -->
+    <script>
+    SiteConfig.load().then(() => {
+        const v = SiteConfig.getVerwaltung();
+        if (v) {
+            document.getElementById('verw-firma').textContent = v.firma;
+            document.getElementById('verw-strasse').textContent = v.strasse;
+            document.getElementById('verw-plz').textContent = v.plz_ort;
+            const tel = document.getElementById('verw-tel');
+            tel.textContent = v.telefon;
+            tel.href = 'tel:' + v.telefon.replace(/\s/g, '');
+            const email = document.getElementById('verw-email');
+            email.textContent = v.email;
+            email.href = 'mailto:' + v.email;
+            const web = document.getElementById('verw-web');
+            web.textContent = v.website;
+            web.href = 'https://' + v.website;
+            document.getElementById('verw-oeffnung').textContent = v.oeffnungszeiten;
+            document.getElementById('footer-verwaltung').textContent = 'Verwaltung: ' + v.firma + ', ' + v.plz_ort.split(' ').pop();
+        }
+        const t = SiteConfig.getTechnik();
+        if (t) {
+            const te = document.getElementById('technik-email');
+            te.textContent = t.email;
+            te.href = 'mailto:' + t.email;
+            const nt = document.getElementById('notfall-technik');
+            nt.href = 'mailto:' + t.email;
+        }
+        const n = SiteConfig.getNotfall();
+        if (n) {
+            document.getElementById('notfall-polizei').textContent = n.polizei;
+            document.getElementById('notfall-feuerwehr').textContent = n.feuerwehr;
+            document.getElementById('notfall-sanitaet').textContent = n.sanitaet;
+        }
+        const e = SiteConfig.getEntsorgung();
+        if (e && e.rewag) {
+            document.getElementById('rewag-firma').textContent = '🏢 ' + e.rewag.firma;
+            document.getElementById('rewag-adresse').textContent = e.rewag.adresse;
+            document.getElementById('rewag-recyclinghof').textContent = 'Recyclinghof: ' + e.rewag.oeffnungszeiten_recyclinghof;
+            const rt = document.getElementById('rewag-tel');
+            rt.textContent = e.rewag.telefon.replace('+41 ', '0').replace(/\s/g, ' ');
+            rt.href = 'tel:' + e.rewag.telefon.replace(/\s/g, '');
+        }
+    });
+    </script>
+
+    <!-- Technischer Dienst Loader (from API) -->
     <script>
         async function loadTechnischerDienst() {
             try {
-                const response = await fetch('technischer-dienst.json');
-                if (!response.ok) {
-                    throw new Error('technischer-dienst.json konnte nicht geladen werden');
-                }
-                const data = await response.json();
-                renderTechnischerDienst(data);
-            } catch (error) {
-                console.error('Fehler beim Laden des Technischen Dienstes:', error);
-                // Fallback anzeigen
+                const res = await fetch('/api/public/technik');
+                if (!res.ok) throw new Error('API ' + res.status);
+                const data = await res.json();
                 const container = document.getElementById('tech-dienst-mitglieder');
-                if (container) {
-                    container.innerHTML = `
-                        <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded col-span-3">
-                            <p class="text-sm text-yellow-800">Die Mitgliederliste konnte nicht automatisch geladen werden.</p>
-                            <p class="text-xs text-yellow-600 mt-1">Bitte laden Sie die Seite neu oder kontaktieren Sie den technischen Dienst.</p>
-                        </div>
-                    `;
+                if (!container) return;
+                let html = '';
+                for (const m of data.mitglieder) {
+                    html += `<div class="bg-gray-50 p-4 rounded-lg hover:bg-gray-100 transition">
+                        <p class="text-gray-700 mb-2 font-semibold">${m.name}</p>
+                        <p class="text-gray-600 text-sm"><a href="mailto:${m.email}" class="text-blue-600 hover:underline">${m.email}</a></p>
+                    </div>`;
                 }
+                container.innerHTML = html || '<p class="text-sm text-gray-500">Keine Mitglieder gefunden.</p>';
+            } catch (err) {
+                console.error('Technischer Dienst laden:', err);
+                const c = document.getElementById('tech-dienst-mitglieder');
+                if (c) c.innerHTML = '<p class="text-sm text-gray-500 col-span-3">Daten konnten nicht geladen werden.</p>';
             }
         }
-
-        function renderTechnischerDienst(data) {
-            const container = document.getElementById('tech-dienst-mitglieder');
-            if (!container) return;
-
-            let html = '';
-            data.mitglieder.forEach(mitglied => {
-                const stweg = mitglied.stweg ? `${mitglied.stweg}` : 'extern';
-                const wohnung = mitglied.wohnung ? ` (${mitglied.wohnung})` : '';
-                const zustaendigkeiten = mitglied.zustaendigkeiten && mitglied.zustaendigkeiten.length > 0
-                    ? `<p class="text-gray-600 text-xs mt-2">📋 ${mitglied.zustaendigkeiten.join(' • ')}</p>`
-                    : '';
-                html += `
-                    <div class="bg-gray-50 p-4 rounded-lg hover:bg-gray-100 transition">
-                        <p class="text-gray-700 mb-2 font-semibold">${mitglied.name}</p>
-                        <p class="text-gray-600 text-sm mb-1">${stweg}${wohnung}</p>
-                        <p class="text-gray-600 text-sm">
-                            <a href="tel:${mitglied.telefon}" class="text-blue-600 hover:underline">${mitglied.telefon}</a>
-                        </p>
-                        <p class="text-gray-500 text-xs mt-2">${mitglied.rolle}</p>
-                        ${zustaendigkeiten}
-                    </div>
-                `;
-            });
-
-            container.innerHTML = html;
-        }
-
-        // Beim Laden der Seite
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', loadTechnischerDienst);
-        } else {
-            loadTechnischerDienst();
-        }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loadTechnischerDienst);
+        else loadTechnischerDienst();
     </script>
 </body>
 </html>

@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rechteverwaltung - Rosenweg</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/nav.js?v=2"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .perm-none { background-color: #f3f4f6; color: #6b7280; }
+        .perm-read { background-color: #dcfce7; color: #166534; }
+        .perm-write { background-color: #dbeafe; color: #1e40af; }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script>RosenwegNav.init({ active: 'rechte' });</script>
+
+    <section class="bg-gradient-to-r from-purple-600 to-purple-800 text-white py-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h1 class="text-3xl font-bold mb-2">Rechteverwaltung</h1>
+            <p class="text-lg opacity-90">Berechtigungen pro Authentik-Gruppe und Seite konfigurieren</p>
+        </div>
+    </section>
+
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- Loading -->
+        <div id="loading" class="text-center py-12">
+            <div class="animate-spin inline-block w-12 h-12 border-4 border-purple-600 border-t-transparent rounded-full"></div>
+            <p class="mt-4 text-gray-600">Lade...</p>
+        </div>
+
+        <!-- No Permission -->
+        <div id="no-permission" class="hidden">
+            <div class="bg-yellow-50 border-l-4 border-yellow-500 p-6 rounded">
+                <p class="text-yellow-800 font-semibold">Kein Zugriff</p>
+                <p class="text-yellow-700 text-sm mt-1">Diese Seite ist nur für Technik-Mitglieder zugänglich.</p>
+            </div>
+        </div>
+
+        <!-- Login Required -->
+        <div id="login-required" class="hidden">
+            <div class="bg-white rounded-lg shadow-lg p-8 text-center">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">Anmeldung erforderlich</h2>
+                <div id="login-container"></div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div id="main-content" class="hidden">
+            <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded mb-6">
+                <p class="text-sm text-blue-800">
+                    Klicken Sie auf eine Zelle um die Berechtigung zu ändern: <strong>none</strong> (kein Zugriff),
+                    <strong>read</strong> (nur lesen), <strong>write</strong> (lesen & schreiben).
+                    Technik hat immer vollen Zugriff und wird nicht angezeigt.
+                </p>
+            </div>
+
+            <!-- Add Group -->
+            <div class="flex gap-3 mb-6">
+                <select id="add-group-select" class="flex-1 px-3 py-2 border rounded-lg text-sm">
+                    <option value="">Gruppe hinzufügen...</option>
+                </select>
+                <button onclick="addGroup()" class="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-purple-700 transition">
+                    Hinzufügen
+                </button>
+            </div>
+
+            <!-- Permissions Table -->
+            <div class="overflow-x-auto">
+                <table class="w-full bg-white rounded-lg shadow border" id="perm-table">
+                    <thead id="perm-thead"></thead>
+                    <tbody id="perm-tbody"></tbody>
+                </table>
+            </div>
+
+            <!-- Save Button -->
+            <div class="mt-6 flex justify-end gap-3">
+                <span id="save-status" class="text-sm text-gray-500 self-center"></span>
+                <button onclick="savePermissions()" id="save-btn" class="bg-purple-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-purple-700 transition">
+                    Speichern
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <footer class="bg-gray-800 text-white py-8 mt-12">
+        <div class="max-w-7xl mx-auto px-4 text-center">
+            <p class="text-sm text-gray-400">&copy; 2025 STWEG-Kooperation Rosenweg</p>
+        </div>
+    </footer>
+
+    <script>
+        let allGroups = [];
+        let pages = [];
+        let permMap = {}; // { "groupName::page": "access" }
+        let configuredGroups = new Set();
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            const user = await AuthentikAuth.init({ requireAuth: false });
+
+            document.getElementById('loading').classList.add('hidden');
+
+            if (!user) {
+                document.getElementById('login-required').classList.remove('hidden');
+                AuthentikAuth.createLoginButton('login-container');
+                return;
+            }
+
+            if (!AuthentikAuth.hasPermission('rechteverwaltung', 'read')) {
+                document.getElementById('no-permission').classList.remove('hidden');
+                return;
+            }
+
+            document.getElementById('main-content').classList.remove('hidden');
+            await loadData();
+        });
+
+        async function loadData() {
+            try {
+                const [permResp, groupResp] = await Promise.all([
+                    AuthentikAuth.apiFetch('/api/permissions'),
+                    AuthentikAuth.apiFetch('/api/admin/groups'),
+                ]);
+
+                const permData = await permResp.json();
+                const groupData = await groupResp.json();
+
+                pages = permData.pages || [];
+                allGroups = (groupData.results || [])
+                    .filter(g => !g.name.startsWith('authentik ') && g.name.toLowerCase() !== 'technik')
+                    .sort((a, b) => a.name.localeCompare(b.name));
+
+                // Build permission map
+                permMap = {};
+                configuredGroups = new Set();
+                for (const p of permData.permissions || []) {
+                    permMap[`${p.group_name}::${p.page}`] = p.access;
+                    if (p.group_name.toLowerCase() !== 'technik') {
+                        configuredGroups.add(p.group_name);
+                    }
+                }
+
+                populateGroupSelect();
+                renderTable();
+            } catch (err) {
+                console.error('Load error:', err);
+            }
+        }
+
+        function populateGroupSelect() {
+            const select = document.getElementById('add-group-select');
+            const existing = [...configuredGroups].map(g => g.toLowerCase());
+            const available = allGroups.filter(g => !existing.includes(g.name.toLowerCase()));
+            select.innerHTML = '<option value="">Gruppe hinzufügen...</option>' +
+                available.map(g => `<option value="${esc(g.name)}">${esc(g.name)}</option>`).join('');
+        }
+
+        function addGroup() {
+            const select = document.getElementById('add-group-select');
+            const name = select.value;
+            if (!name) return;
+            configuredGroups.add(name);
+            populateGroupSelect();
+            renderTable();
+        }
+
+        function renderTable() {
+            const thead = document.getElementById('perm-thead');
+            const tbody = document.getElementById('perm-tbody');
+            const groups = [...configuredGroups].sort();
+
+            // Filter out rechteverwaltung from displayed pages (Technik-only)
+            const displayPages = pages.filter(p => p.id !== 'rechteverwaltung');
+
+            thead.innerHTML = `<tr class="bg-gray-50 border-b">
+                <th class="text-left px-4 py-3 text-sm font-semibold text-gray-700 sticky left-0 bg-gray-50 min-w-[180px]">Gruppe</th>
+                ${displayPages.map(p => `<th class="px-3 py-3 text-sm font-semibold text-gray-700 text-center min-w-[120px]">${esc(p.label)}</th>`).join('')}
+                <th class="px-3 py-3 w-10"></th>
+            </tr>`;
+
+            if (groups.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="${displayPages.length + 2}" class="text-center py-8 text-gray-400">
+                    Keine Gruppen konfiguriert. Fügen Sie oben eine Gruppe hinzu.
+                </td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = groups.map(group => `
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="px-4 py-3 font-medium text-gray-900 sticky left-0 bg-white text-sm">${esc(group)}</td>
+                    ${displayPages.map(p => {
+                        const key = `${group}::${p.id}`;
+                        const access = permMap[key] || 'none';
+                        return `<td class="px-3 py-2 text-center">
+                            <button onclick="cyclePermission('${escAttr(group)}', '${p.id}')"
+                                class="perm-${access} px-3 py-1 rounded-full text-xs font-medium cursor-pointer hover:opacity-80 transition min-w-[60px]">
+                                ${access}
+                            </button>
+                        </td>`;
+                    }).join('')}
+                    <td class="px-3 py-2">
+                        <button onclick="removeGroup('${escAttr(group)}')" class="text-gray-400 hover:text-red-500 p-1" title="Gruppe entfernen">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function cyclePermission(group, page) {
+            const key = `${group}::${page}`;
+            const current = permMap[key] || 'none';
+            const cycle = { none: 'read', read: 'write', write: 'none' };
+            permMap[key] = cycle[current];
+            renderTable();
+            document.getElementById('save-status').textContent = 'Ungespeicherte Änderungen';
+            document.getElementById('save-status').className = 'text-sm text-orange-600 self-center font-medium';
+        }
+
+        function removeGroup(group) {
+            if (!confirm(`Alle Berechtigungen für "${group}" entfernen?`)) return;
+            configuredGroups.delete(group);
+            // Set all permissions for this group to none
+            for (const p of pages) {
+                permMap[`${group}::${p.id}`] = 'none';
+            }
+            populateGroupSelect();
+            renderTable();
+            document.getElementById('save-status').textContent = 'Ungespeicherte Änderungen';
+            document.getElementById('save-status').className = 'text-sm text-orange-600 self-center font-medium';
+        }
+
+        async function savePermissions() {
+            const btn = document.getElementById('save-btn');
+            const status = document.getElementById('save-status');
+            btn.disabled = true;
+            btn.textContent = 'Speichern...';
+
+            // Build permissions array from permMap
+            const permissions = [];
+            for (const [key, access] of Object.entries(permMap)) {
+                const [group, page] = key.split('::');
+                if (group.toLowerCase() === 'technik') continue;
+                permissions.push({ group_name: group, page, access });
+            }
+
+            try {
+                const resp = await AuthentikAuth.apiFetch('/api/permissions', {
+                    method: 'PUT',
+                    body: { permissions },
+                });
+                if (!resp.ok) throw new Error('Speichern fehlgeschlagen');
+                status.textContent = 'Gespeichert';
+                status.className = 'text-sm text-green-600 self-center font-medium';
+                // Reload to refresh from server
+                await loadData();
+            } catch (err) {
+                status.textContent = 'Fehler: ' + err.message;
+                status.className = 'text-sm text-red-600 self-center font-medium';
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Speichern';
+        }
+
+        function esc(str) {
+            if (!str) return '';
+            const d = document.createElement('div');
+            d.textContent = str;
+            return d.innerHTML;
+        }
+
+        function escAttr(str) {
+            return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        }
+    </script>
+</body>
+</html>
