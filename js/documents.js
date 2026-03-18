@@ -52,6 +52,13 @@ const RosenwegDocs = {
     txt: 'text-gray-500',
   },
 
+  VIEWABLE_EXTS: new Set(['pdf', 'png', 'jpg', 'jpeg', 'txt', 'csv']),
+  OFFICE_EXTS: new Set(['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'dotx']),
+
+  _isViewable(ext) {
+    return this.VIEWABLE_EXTS.has(ext) || this.OFFICE_EXTS.has(ext);
+  },
+
   _getWritableFolders() {
     if (this.isTechnik) return Object.keys(this.CATEGORY_LABELS);
     if (!this.canManage) return [];
@@ -202,14 +209,20 @@ const RosenwegDocs = {
         const fileName = this.getFileName(doc.path);
         const size = this.formatSize(doc.size);
         const extBadge = ext.toUpperCase();
+        const viewable = this._isViewable(ext);
+        const escapedPath = doc.path.replace(/'/g, "\\'");
+        const clickAction = viewable
+          ? `RosenwegDocs.viewFile('${escapedPath}', '${fileName}', '${ext}')`
+          : `RosenwegDocs.downloadFile('${doc.url}', '${fileName}')`;
 
         html += `
             <div class="flex items-center justify-between bg-gray-50 rounded-lg px-4 py-3 hover:bg-gray-100 transition group">
-              <a href="#" onclick="RosenwegDocs.downloadFile('${doc.url}', '${fileName}'); return false;" class="flex items-center gap-3 flex-1 min-w-0 cursor-pointer">
+              <a href="#" onclick="${clickAction}; return false;" class="flex items-center gap-3 flex-1 min-w-0 cursor-pointer">
                 ${this.getIcon(ext)}
                 <span class="truncate text-gray-800">${fileName}</span>
                 <span class="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600 flex-shrink-0">${extBadge}</span>
                 <span class="text-xs text-gray-400 flex-shrink-0">${size}</span>
+                ${viewable ? '<span class="text-xs text-blue-500 flex-shrink-0"><svg class="h-3.5 w-3.5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg></span>' : ''}
               </a>
               <div class="flex items-center gap-2 ml-2">
                 <a href="#" onclick="RosenwegDocs.downloadFile('${doc.url}', '${fileName}'); return false;" class="text-blue-600 hover:text-blue-800 p-1" title="Herunterladen">
@@ -458,6 +471,102 @@ const RosenwegDocs = {
       this._showUploadError('Fehler: ' + err.message);
       btn.disabled = false;
       btn.textContent = 'Ersetzen';
+    }
+  },
+
+  async viewFile(path, fileName, ext) {
+    const downloadUrl = `/api/documents/${path}`;
+    const isOffice = this.OFFICE_EXTS.has(ext);
+    const modal = document.createElement('div');
+    modal.id = 'docs-viewer-modal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-80 z-50 flex flex-col';
+    modal.innerHTML = `
+      <div class="flex items-center justify-between px-4 py-3 bg-gray-900 text-white flex-shrink-0">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="font-medium truncate">${fileName}</span>
+          ${isOffice ? '<span class="text-xs bg-blue-600 px-2 py-0.5 rounded">PDF-Vorschau</span>' : ''}
+        </div>
+        <div class="flex items-center gap-2 ml-4 flex-shrink-0">
+          <button onclick="RosenwegDocs.downloadFile('${downloadUrl}', '${fileName}'); return false;" class="text-gray-300 hover:text-white p-1.5 rounded hover:bg-gray-700 transition" title="Original herunterladen">
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+            </svg>
+          </button>
+          <button onclick="RosenwegDocs.closeViewer()" class="text-gray-300 hover:text-white p-1.5 rounded hover:bg-gray-700 transition" title="Schließen">
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="flex-1 flex items-center justify-center overflow-auto p-4">
+        <div class="text-white text-center">
+          <svg class="animate-spin h-8 w-8 mx-auto mb-2" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+          ${isOffice ? 'Wird konvertiert...' : 'Wird geladen...'}
+        </div>
+      </div>`;
+    modal.addEventListener('click', (e) => { if (e.target === modal) this.closeViewer(); });
+    document.addEventListener('keydown', this._viewerKeyHandler = (e) => {
+      if (e.key === 'Escape') this.closeViewer();
+    });
+    document.body.appendChild(modal);
+
+    try {
+      let blob;
+      if (isOffice) {
+        // Convert via server-side Gotenberg
+        const resp = await AuthentikAuth.apiFetch('/api/documents-preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          throw new Error(err.error || 'Konvertierung fehlgeschlagen');
+        }
+        blob = await resp.blob();
+      } else {
+        const resp = await AuthentikAuth.apiFetch(downloadUrl);
+        if (!resp.ok) throw new Error('Laden fehlgeschlagen');
+        blob = await resp.blob();
+      }
+
+      const blobUrl = URL.createObjectURL(blob);
+      const contentArea = modal.querySelector('.flex-1');
+
+      if (ext === 'pdf' || isOffice) {
+        contentArea.innerHTML = `<iframe src="${blobUrl}" class="w-full h-full rounded" style="min-height: 80vh;"></iframe>`;
+        contentArea.className = 'flex-1 p-4';
+      } else if (['png', 'jpg', 'jpeg'].includes(ext)) {
+        contentArea.innerHTML = `<img src="${blobUrl}" class="max-w-full max-h-full object-contain rounded shadow-lg" alt="${fileName}">`;
+      } else if (['txt', 'csv'].includes(ext)) {
+        const text = await blob.text();
+        contentArea.innerHTML = `<pre class="bg-white text-gray-800 rounded-lg p-6 max-w-4xl w-full max-h-[80vh] overflow-auto text-sm font-mono whitespace-pre-wrap">${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`;
+      }
+
+      modal._blobUrl = blobUrl;
+    } catch (err) {
+      const contentArea = modal.querySelector('.flex-1');
+      contentArea.innerHTML = `
+        <div class="text-center">
+          <p class="text-red-400 mb-4">Fehler: ${err.message}</p>
+          <button onclick="RosenwegDocs.downloadFile('${downloadUrl}', '${fileName}'); RosenwegDocs.closeViewer();"
+            class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
+            Stattdessen herunterladen
+          </button>
+        </div>`;
+    }
+  },
+
+  closeViewer() {
+    const modal = document.getElementById('docs-viewer-modal');
+    if (modal) {
+      if (modal._blobUrl) URL.revokeObjectURL(modal._blobUrl);
+      modal.remove();
+    }
+    if (this._viewerKeyHandler) {
+      document.removeEventListener('keydown', this._viewerKeyHandler);
+      this._viewerKeyHandler = null;
     }
   },
 
