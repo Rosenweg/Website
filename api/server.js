@@ -2761,6 +2761,87 @@ app.get('/api/documents', authMiddleware, async (req, res) => {
   }
 });
 
+// POST /api/documents-preview - Convert Office document to PDF for viewing
+const DOC_CONVERTER_URL = process.env.DOC_CONVERTER_URL || 'http://doc-converter:3000';
+const OFFICE_EXTS = new Set(['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'dotx']);
+const previewCache = new Map(); // path → { pdf: Buffer, expires: number }
+const PREVIEW_CACHE_TTL = 30 * 60 * 1000; // 30 min
+
+app.post('/api/documents-preview', authMiddleware, async (req, res) => {
+  try {
+    const filePath = req.body?.path;
+    if (!filePath || filePath.includes('..') || filePath.startsWith('/')) {
+      return res.status(400).json({ error: 'Ungültiger Pfad' });
+    }
+
+    const ext = filePath.split('.').pop().toLowerCase();
+    if (!OFFICE_EXTS.has(ext)) {
+      return res.status(400).json({ error: 'Dateityp wird nicht unterstützt' });
+    }
+
+    // Check access
+    const groups = req.user?.groups || [];
+    if (!isDocPathAllowed(filePath, groups)) {
+      return res.status(403).json({ error: 'Kein Zugriff auf dieses Dokument' });
+    }
+
+    // Check cache
+    const now = Date.now();
+    const cached = previewCache.get(filePath);
+    if (cached && cached.expires > now) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="preview.pdf"`);
+      return res.send(cached.pdf);
+    }
+
+    // Fetch document from GitHub
+    const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+    const ghResp = await fetch(
+      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${encodedPath}?ref=${GITHUB_DOCS_BRANCH}`,
+      { headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3.raw' } }
+    );
+    if (!ghResp.ok) {
+      if (ghResp.status === 404) return res.status(404).json({ error: 'Dokument nicht gefunden' });
+      throw new Error(`GitHub API error: ${ghResp.status}`);
+    }
+    const docBuffer = Buffer.from(await ghResp.arrayBuffer());
+
+    // Send to Gotenberg for conversion
+    const FormData = (await import('form-data')).default;
+    const form = new FormData();
+    const fileName = filePath.split('/').pop();
+    form.append('files', docBuffer, { filename: fileName, contentType: 'application/octet-stream' });
+
+    const convertResp = await fetch(`${DOC_CONVERTER_URL}/forms/libreoffice/convert`, {
+      method: 'POST',
+      body: form,
+      headers: form.getHeaders(),
+    });
+
+    if (!convertResp.ok) {
+      const errText = await convertResp.text().catch(() => '');
+      throw new Error(`Converter error ${convertResp.status}: ${errText}`);
+    }
+
+    const pdfBuffer = Buffer.from(await convertResp.arrayBuffer());
+
+    // Cache the result
+    previewCache.set(filePath, { pdf: pdfBuffer, expires: now + PREVIEW_CACHE_TTL });
+    // Limit cache size (max 50 entries)
+    if (previewCache.size > 50) {
+      const oldest = previewCache.keys().next().value;
+      previewCache.delete(oldest);
+    }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="preview.pdf"`);
+    res.send(pdfBuffer);
+  } catch (err) {
+    console.error('Document preview error:', err.message);
+    res.status(500).json({ error: 'Vorschau konnte nicht erstellt werden' });
+  }
+});
+
 // GET /api/documents/:path(*) - Download a document
 app.get('/api/documents/:path(*)', authMiddleware, async (req, res) => {
   try {
@@ -2874,7 +2955,8 @@ app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, re
       throw new Error(err.message || `GitHub API error: ${response.status}`);
     }
 
-    docsListCache = { data: null, expires: 0 }; // Invalidate cache
+    docsListCache = { data: null, expires: 0 };
+    previewCache.delete(filePath);
     res.json({ success: true, path: filePath });
   } catch (err) {
     console.error('Document upload error:', err.message);
@@ -2919,6 +3001,7 @@ app.delete('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req,
     if (!response.ok) throw new Error(`GitHub API error: ${response.status}`);
 
     docsListCache = { data: null, expires: 0 };
+    previewCache.delete(filePath);
     res.json({ success: true });
   } catch (err) {
     console.error('Document delete error:', err.message);
