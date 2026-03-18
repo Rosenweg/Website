@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wohnungsverwaltung - STWEG Rosenweg</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/nav.js?v=2"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen flex flex-col">
+
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script>RosenwegNav.init({ active: 'wohnungsverwaltung' });</script>
+
+    <!-- Auth Gate -->
+    <div id="auth-gate" class="flex-1 flex items-center justify-center">
+        <div class="text-center text-gray-500">
+            <svg class="animate-spin h-8 w-8 mx-auto mb-3 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            <p>Wird geladen...</p>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div id="main-content" class="hidden flex-1">
+        <!-- Header -->
+        <div class="bg-gradient-to-r from-blue-600 to-blue-800 text-white">
+            <div class="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+                <h1 class="text-2xl font-bold" id="page-title">Wohnungsverwaltung</h1>
+                <p class="text-blue-200 text-sm mt-1" id="page-subtitle">Eigentumer und Mieter verwalten</p>
+            </div>
+        </div>
+
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+            <!-- STWEG Selector -->
+            <div class="flex flex-wrap items-center gap-3 mb-6">
+                <label class="text-sm font-medium text-gray-700">STWEG:</label>
+                <div id="stweg-tabs" class="flex flex-wrap gap-2"></div>
+            </div>
+
+            <!-- Stats Bar -->
+            <div id="stats-bar" class="hidden grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+                <div class="bg-white rounded-lg border p-3 text-center">
+                    <div class="text-2xl font-bold text-gray-800" id="stat-total">0</div>
+                    <div class="text-xs text-gray-500">Wohnungen</div>
+                </div>
+                <div class="bg-white rounded-lg border p-3 text-center">
+                    <div class="text-2xl font-bold text-green-600" id="stat-selbst">0</div>
+                    <div class="text-xs text-gray-500">Selbstbewohnt</div>
+                </div>
+                <div class="bg-white rounded-lg border p-3 text-center">
+                    <div class="text-2xl font-bold text-blue-600" id="stat-vermietet">0</div>
+                    <div class="text-xs text-gray-500">Vermietet</div>
+                </div>
+                <div class="bg-white rounded-lg border p-3 text-center">
+                    <div class="text-2xl font-bold text-yellow-600" id="stat-leer">0</div>
+                    <div class="text-xs text-gray-500">Leer</div>
+                </div>
+            </div>
+
+            <!-- Toolbar -->
+            <div class="flex justify-between items-center mb-4">
+                <div class="relative">
+                    <input type="text" id="wohnung-search" placeholder="Suchen..." oninput="filterWohnungen()"
+                        class="border border-gray-300 rounded-lg pl-9 pr-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-64">
+                    <svg class="absolute left-3 top-2.5 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                </div>
+                <div class="flex gap-2">
+                    <button id="btn-import" onclick="importKontakte()" class="hidden bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition flex items-center gap-2" title="Aus kontakte.json importieren">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                        Import
+                    </button>
+                    <button id="btn-add" onclick="showAddModal()" class="hidden bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                        Neue Wohnung
+                    </button>
+                </div>
+            </div>
+
+            <!-- Wohnungen Table -->
+            <div id="wohnungen-list" class="space-y-2"></div>
+            <div id="loading" class="text-center py-12 text-gray-500">
+                <svg class="animate-spin h-6 w-6 mx-auto mb-2 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                </svg>
+                Wohnungen werden geladen...
+            </div>
+            <div id="no-data" class="hidden text-center py-8 text-gray-400">Keine Wohnungen vorhanden.</div>
+        </div>
+    </div>
+
+    <!-- Edit/Add Modal -->
+    <div id="edit-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
+            <h3 class="text-lg font-bold text-gray-800 mb-4" id="modal-title">Neue Wohnung</h3>
+            <div id="modal-error" class="hidden bg-red-50 text-red-600 text-sm p-3 rounded-lg mb-4"></div>
+            <input type="hidden" id="f-id" />
+
+            <!-- Wohnung Details -->
+            <div class="space-y-4 mb-6">
+                <h4 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Wohnung</h4>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Bezeichnung *</label>
+                        <input type="text" id="f-bezeichnung" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="z.B. EG.1" />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Stockwerk</label>
+                        <select id="f-stockwerk" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <option value="">--</option>
+                            <option>Untergeschoss</option>
+                            <option>Erdgeschoss</option>
+                            <option>1. Obergeschoss</option>
+                            <option>2. Obergeschoss</option>
+                            <option>3. Obergeschoss</option>
+                            <option>Dachgeschoss</option>
+                            <option>Sonstiges</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-cols-3 gap-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Zimmer</label>
+                        <input type="text" id="f-zimmer" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="3.5" />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Flache m2</label>
+                        <input type="number" id="f-flaeche" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="75" />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Typ</label>
+                        <select id="f-typ" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <option>Wohnung</option>
+                            <option>Hobbyraum</option>
+                            <option>Tiefgarage-Platz</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Besonderheiten</label>
+                    <input type="text" id="f-besonderheiten" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="z.B. Garten, Balkon" />
+                </div>
+            </div>
+
+            <!-- Eigentumer -->
+            <div class="space-y-3 mb-6">
+                <h4 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Eigentumer</h4>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                    <input type="text" id="f-eig-name" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">E-Mail</label>
+                        <input type="email" id="f-eig-email" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Telefon</label>
+                        <input type="text" id="f-eig-tel" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                </div>
+            </div>
+
+            <!-- Status -->
+            <div class="space-y-3 mb-6">
+                <h4 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Bewohnung</h4>
+                <div class="flex gap-4">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="bewohnt" value="eigentuemer" checked onchange="toggleMieter()" class="text-blue-600" />
+                        <span class="text-sm">Selbstbewohnt</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="bewohnt" value="mieter" onchange="toggleMieter()" class="text-blue-600" />
+                        <span class="text-sm">Vermietet</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="bewohnt" value="leer" onchange="toggleMieter()" class="text-blue-600" />
+                        <span class="text-sm">Leer</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Mieter (conditional) -->
+            <div id="mieter-section" class="hidden space-y-3 mb-6">
+                <h4 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Mieter</h4>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                    <input type="text" id="f-mie-name" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">E-Mail</label>
+                        <input type="email" id="f-mie-email" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Telefon</label>
+                        <input type="text" id="f-mie-tel" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
+                    </div>
+                </div>
+            </div>
+
+            <!-- Notizen -->
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Notizen</label>
+                <textarea id="f-notizen" rows="2" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"></textarea>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex justify-between items-center">
+                <button id="btn-delete" onclick="deleteWohnung()" class="hidden text-red-600 hover:text-red-800 text-sm font-medium">Loschen</button>
+                <div class="flex gap-3 ml-auto">
+                    <button onclick="closeModal()" class="px-4 py-2 text-gray-600 hover:text-gray-800 text-sm">Abbrechen</button>
+                    <button onclick="saveWohnung()" class="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition">Speichern</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const esc = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '';
+
+        let allWohnungen = [];
+        let stwegList = [];
+        let currentStweg = null;
+        let canWrite = false;
+        let currentUser = null;
+
+        // ── Auth Init ──
+        window.addEventListener('DOMContentLoaded', async () => {
+            const user = await AuthentikAuth.init({ requireAuth: false });
+
+            if (!user) {
+                document.getElementById('auth-gate').innerHTML = `
+                    <div class="text-center">
+                        <h2 class="text-xl font-semibold text-gray-800 mb-4">Anmeldung erforderlich</h2>
+                        <div id="login-container"></div>
+                    </div>`;
+                AuthentikAuth.createLoginButton('login-container');
+                return;
+            }
+
+            currentUser = user;
+            const access = AuthentikAuth.getPermission('wohnungsverwaltung');
+            if (access === 'none') {
+                document.getElementById('auth-gate').innerHTML = `
+                    <div class="text-center">
+                        <svg class="h-12 w-12 mx-auto mb-3 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        <p class="text-lg font-medium text-gray-700">Keine Berechtigung</p>
+                    </div>`;
+                return;
+            }
+
+            canWrite = access === 'write';
+            const groups = user.groups || [];
+            const isTechnik = groups.some(g => g.toLowerCase() === 'technik');
+
+            // Load site config to get STWEG list
+            try {
+                const configRes = await fetch('/site-config.json');
+                const config = await configRes.json();
+                stwegList = config.stwegen || [];
+            } catch { stwegList = []; }
+
+            // Determine accessible STWEGs
+            const accessibleStwegs = [];
+            for (const s of stwegList) {
+                if (isTechnik) { accessibleStwegs.push(s); continue; }
+                const sGroups = s.groups ? Object.values(s.groups).map(g => g.toLowerCase()) : [];
+                if (groups.some(g => sGroups.includes(g.toLowerCase()))) accessibleStwegs.push(s);
+            }
+
+            if (accessibleStwegs.length === 0) {
+                document.getElementById('auth-gate').innerHTML = `
+                    <div class="text-center"><p class="text-lg font-medium text-gray-700">Keine STWEGs zugewiesen</p></div>`;
+                return;
+            }
+
+            // Render STWEG tabs
+            const tabsEl = document.getElementById('stweg-tabs');
+            tabsEl.innerHTML = accessibleStwegs.map(s => `
+                <button onclick="selectStweg(${s.nr})" id="stweg-tab-${s.nr}"
+                    class="px-3 py-1.5 rounded-lg text-sm font-medium border transition
+                           ${s.nr === accessibleStwegs[0].nr ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'}">
+                    ${esc(s.name)} <span class="text-xs opacity-75">${esc(s.adressen)}</span>
+                </button>
+            `).join('');
+
+            if (canWrite) {
+                document.getElementById('btn-add').classList.remove('hidden');
+                document.getElementById('btn-import').classList.remove('hidden');
+            }
+
+            document.getElementById('auth-gate').classList.add('hidden');
+            document.getElementById('main-content').classList.remove('hidden');
+            selectStweg(accessibleStwegs[0].nr);
+        });
+
+        // ── STWEG Selection ──
+        async function selectStweg(nr) {
+            currentStweg = nr;
+            // Update tab styles
+            document.querySelectorAll('#stweg-tabs button').forEach(btn => {
+                const isActive = btn.id === `stweg-tab-${nr}`;
+                btn.className = `px-3 py-1.5 rounded-lg text-sm font-medium border transition ${
+                    isActive ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'}`;
+            });
+
+            const info = stwegList.find(s => s.nr === nr);
+            document.getElementById('page-subtitle').textContent = info
+                ? `${info.name} - ${info.adressen}`
+                : `STWEG ${nr}`;
+
+            await loadWohnungen();
+        }
+
+        // ── Data Loading ──
+        async function loadWohnungen() {
+            const loading = document.getElementById('loading');
+            const noData = document.getElementById('no-data');
+            loading.classList.remove('hidden');
+            noData.classList.add('hidden');
+            document.getElementById('wohnungen-list').innerHTML = '';
+
+            try {
+                const [wRes, sRes] = await Promise.all([
+                    AuthentikAuth.apiFetch(`/api/wohnungen/${currentStweg}`),
+                    AuthentikAuth.apiFetch(`/api/wohnungen/${currentStweg}/stats`),
+                ]);
+                const wData = await wRes.json();
+                const stats = await sRes.json();
+                allWohnungen = wData.wohnungen || [];
+
+                // Update stats
+                document.getElementById('stat-total').textContent = stats.total || 0;
+                document.getElementById('stat-selbst').textContent = stats.selbstbewohnt || 0;
+                document.getElementById('stat-vermietet').textContent = stats.vermietet || 0;
+                document.getElementById('stat-leer').textContent = stats.leer || 0;
+                document.getElementById('stats-bar').classList.remove('hidden');
+            } catch (err) {
+                console.error('Error loading wohnungen:', err);
+                allWohnungen = [];
+            }
+
+            loading.classList.add('hidden');
+            renderWohnungen();
+        }
+
+        // ── Rendering ──
+        function renderWohnungen() {
+            const q = (document.getElementById('wohnung-search')?.value || '').toLowerCase();
+            let filtered = allWohnungen;
+            if (q) {
+                filtered = filtered.filter(w =>
+                    (w.bezeichnung || '').toLowerCase().includes(q) ||
+                    (w.eigentuemer_name || '').toLowerCase().includes(q) ||
+                    (w.mieter_name || '').toLowerCase().includes(q) ||
+                    (w.stockwerk || '').toLowerCase().includes(q)
+                );
+            }
+
+            const noData = document.getElementById('no-data');
+            const list = document.getElementById('wohnungen-list');
+
+            if (filtered.length === 0) {
+                list.innerHTML = '';
+                noData.classList.remove('hidden');
+                return;
+            }
+            noData.classList.add('hidden');
+
+            list.innerHTML = filtered.map(w => {
+                const statusBadge = w.bewohnt_von === 'mieter'
+                    ? '<span class="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">Vermietet</span>'
+                    : w.bewohnt_von === 'leer'
+                    ? '<span class="text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700">Leer</span>'
+                    : '<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">Selbstbewohnt</span>';
+
+                const typBadge = w.typ && w.typ !== 'Wohnung'
+                    ? `<span class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">${esc(w.typ)}</span>` : '';
+
+                const bewohner = w.bewohnt_von === 'mieter' && w.mieter_name
+                    ? esc(w.mieter_name)
+                    : w.bewohnt_von === 'leer' ? '<span class="text-gray-400">-</span>' : esc(w.eigentuemer_name || '-');
+
+                const details = [w.zimmer ? `${w.zimmer} Zi.` : '', w.flaeche_m2 ? `${w.flaeche_m2} m2` : ''].filter(Boolean).join(', ');
+
+                return `
+                <div class="bg-white rounded-lg border p-4 hover:shadow-sm transition cursor-pointer" onclick="editWohnung(${w.id})">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-4 min-w-0">
+                            <div class="bg-blue-50 rounded-lg w-12 h-12 flex items-center justify-center text-blue-600 font-bold text-sm flex-shrink-0">
+                                ${esc(w.bezeichnung)}
+                            </div>
+                            <div class="min-w-0">
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <span class="font-medium text-gray-900">${esc(w.eigentuemer_name || 'Kein Eigentumer')}</span>
+                                    ${statusBadge} ${typBadge}
+                                </div>
+                                <div class="text-sm text-gray-500 flex items-center gap-3 mt-0.5">
+                                    ${w.stockwerk ? `<span>${esc(w.stockwerk)}</span>` : ''}
+                                    ${details ? `<span>${details}</span>` : ''}
+                                </div>
+                                ${w.bewohnt_von === 'mieter' && w.mieter_name ? `
+                                <div class="text-sm text-gray-600 mt-0.5">
+                                    <span class="text-gray-400">Mieter:</span> ${esc(w.mieter_name)}
+                                </div>` : ''}
+                            </div>
+                        </div>
+                        ${canWrite ? `
+                        <div class="flex items-center gap-1 ml-2 flex-shrink-0">
+                            <button onclick="event.stopPropagation(); editWohnung(${w.id})" class="p-2 text-gray-400 hover:text-blue-600 rounded-lg hover:bg-blue-50 transition" title="Bearbeiten">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                            </button>
+                        </div>` : ''}
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function filterWohnungen() { renderWohnungen(); }
+
+        // ── Modal ──
+        function toggleMieter() {
+            const val = document.querySelector('input[name="bewohnt"]:checked')?.value;
+            document.getElementById('mieter-section').classList.toggle('hidden', val !== 'mieter');
+        }
+
+        function showAddModal() {
+            document.getElementById('modal-title').textContent = 'Neue Wohnung';
+            document.getElementById('modal-error').classList.add('hidden');
+            document.getElementById('btn-delete').classList.add('hidden');
+            document.getElementById('f-id').value = '';
+            document.getElementById('f-bezeichnung').value = '';
+            document.getElementById('f-stockwerk').value = '';
+            document.getElementById('f-zimmer').value = '';
+            document.getElementById('f-flaeche').value = '';
+            document.getElementById('f-typ').value = 'Wohnung';
+            document.getElementById('f-besonderheiten').value = '';
+            document.getElementById('f-eig-name').value = '';
+            document.getElementById('f-eig-email').value = '';
+            document.getElementById('f-eig-tel').value = '';
+            document.getElementById('f-mie-name').value = '';
+            document.getElementById('f-mie-email').value = '';
+            document.getElementById('f-mie-tel').value = '';
+            document.getElementById('f-notizen').value = '';
+            document.querySelector('input[name="bewohnt"][value="eigentuemer"]').checked = true;
+            toggleMieter();
+            document.getElementById('edit-modal').classList.remove('hidden');
+        }
+
+        function editWohnung(id) {
+            const w = allWohnungen.find(x => x.id === id);
+            if (!w) return;
+            document.getElementById('modal-title').textContent = `${w.bezeichnung} bearbeiten`;
+            document.getElementById('modal-error').classList.add('hidden');
+            document.getElementById('f-id').value = w.id;
+            document.getElementById('f-bezeichnung').value = w.bezeichnung || '';
+            document.getElementById('f-stockwerk').value = w.stockwerk || '';
+            document.getElementById('f-zimmer').value = w.zimmer || '';
+            document.getElementById('f-flaeche').value = w.flaeche_m2 || '';
+            document.getElementById('f-typ').value = w.typ || 'Wohnung';
+            document.getElementById('f-besonderheiten').value = w.besonderheiten || '';
+            document.getElementById('f-eig-name').value = w.eigentuemer_name || '';
+            document.getElementById('f-eig-email').value = w.eigentuemer_email || '';
+            document.getElementById('f-eig-tel').value = w.eigentuemer_telefon || '';
+            document.getElementById('f-mie-name').value = w.mieter_name || '';
+            document.getElementById('f-mie-email').value = w.mieter_email || '';
+            document.getElementById('f-mie-tel').value = w.mieter_telefon || '';
+            document.getElementById('f-notizen').value = w.notizen || '';
+            const bewohnt = w.bewohnt_von || 'eigentuemer';
+            const radio = document.querySelector(`input[name="bewohnt"][value="${bewohnt}"]`);
+            if (radio) radio.checked = true;
+            toggleMieter();
+
+            if (canWrite) document.getElementById('btn-delete').classList.remove('hidden');
+            else document.getElementById('btn-delete').classList.add('hidden');
+
+            document.getElementById('edit-modal').classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('edit-modal').classList.add('hidden');
+        }
+
+        // ── Save ──
+        async function saveWohnung() {
+            const id = document.getElementById('f-id').value;
+            const bezeichnung = document.getElementById('f-bezeichnung').value.trim();
+            if (!bezeichnung) {
+                showError('Bezeichnung ist erforderlich');
+                return;
+            }
+
+            const body = {
+                bezeichnung,
+                stockwerk: document.getElementById('f-stockwerk').value,
+                zimmer: document.getElementById('f-zimmer').value,
+                flaeche_m2: parseFloat(document.getElementById('f-flaeche').value) || null,
+                typ: document.getElementById('f-typ').value,
+                besonderheiten: document.getElementById('f-besonderheiten').value,
+                eigentuemer_name: document.getElementById('f-eig-name').value,
+                eigentuemer_email: document.getElementById('f-eig-email').value,
+                eigentuemer_telefon: document.getElementById('f-eig-tel').value,
+                mieter_name: document.getElementById('f-mie-name').value || null,
+                mieter_email: document.getElementById('f-mie-email').value || null,
+                mieter_telefon: document.getElementById('f-mie-tel').value || null,
+                bewohnt_von: document.querySelector('input[name="bewohnt"]:checked')?.value || 'eigentuemer',
+                notizen: document.getElementById('f-notizen').value || null,
+            };
+
+            // Clear mieter if not vermietet
+            if (body.bewohnt_von !== 'mieter') {
+                body.mieter_name = null;
+                body.mieter_email = null;
+                body.mieter_telefon = null;
+            }
+
+            try {
+                const url = id ? `/api/wohnungen/${currentStweg}/${id}` : `/api/wohnungen/${currentStweg}`;
+                const method = id ? 'PUT' : 'POST';
+                const res = await AuthentikAuth.apiFetch(url, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.error || 'Speichern fehlgeschlagen');
+                }
+                closeModal();
+                await loadWohnungen();
+            } catch (err) {
+                showError(err.message);
+            }
+        }
+
+        // ── Delete ──
+        async function deleteWohnung() {
+            const id = document.getElementById('f-id').value;
+            if (!id || !confirm('Wohnung wirklich loschen?')) return;
+            try {
+                const res = await AuthentikAuth.apiFetch(`/api/wohnungen/${currentStweg}/${id}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error('Loschen fehlgeschlagen');
+                closeModal();
+                await loadWohnungen();
+            } catch (err) {
+                showError(err.message);
+            }
+        }
+
+        // ── Import ──
+        async function importKontakte() {
+            if (!confirm(`Kontakte-Daten fur STWEG ${currentStweg} importieren? Vorhandene Daten werden aktualisiert.`)) return;
+            try {
+                // Fetch the kontakte.json for the current STWEG
+                const stweg = stwegList.find(s => s.nr === currentStweg);
+                const path = `/stweg${currentStweg}/data/kontakte.json`;
+                const configRes = await fetch(path);
+                if (!configRes.ok) throw new Error(`kontakte.json nicht gefunden unter ${path}`);
+                const data = await configRes.json();
+
+                const res = await AuthentikAuth.apiFetch(`/api/wohnungen/${currentStweg}/import`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data),
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.error || 'Import fehlgeschlagen');
+                }
+                const result = await res.json();
+                alert(`${result.imported} Wohnungen importiert.`);
+                await loadWohnungen();
+            } catch (err) {
+                alert('Import-Fehler: ' + err.message);
+            }
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('modal-error');
+            el.textContent = msg;
+            el.classList.remove('hidden');
+        }
+    </script>
+
+</body>
+</html>
