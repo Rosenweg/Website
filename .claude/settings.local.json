@@ -11,7 +11,10 @@
       "Bash(git push:*)",
       "Bash(python:*)",
       "Bash(paste - - -)",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "Bash(ssh root@100.64.2.21 \"docker ps | grep authentik\")",
+      "Bash(ssh root@100.64.2.22 \"docker ps | grep authentik\")",
+      "Bash(ping:*)"
     ]
   }
 }
