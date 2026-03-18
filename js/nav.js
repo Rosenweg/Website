@@ -91,6 +91,7 @@ const RosenwegNav = {
               <a href="${base}zaehler.html" data-perm="zaehler" class="${dropA('zaehler')} block px-4 py-2 text-sm">Zähler & Verbrauch</a>
               <a href="${base}email-verteiler.html" data-perm="email-verteiler" class="${dropA('verteiler')} block px-4 py-2 text-sm">E-Mail-Verteiler</a>
               <a href="${base}verwaltung.html" data-perm="bewohner-verwaltung" class="${dropA('verwaltung')} block px-4 py-2 text-sm">Verwaltung</a>
+              <a href="${base}wohnungsverwaltung.html" data-perm="wohnungsverwaltung" class="${dropA('wohnungsverwaltung')} block px-4 py-2 text-sm">Wohnungen</a>
               <a href="${base}stweg3/pages/waschkueche-reservierung.html" class="${dropA('waschkueche')} block px-4 py-2 text-sm">Waschküche</a>
             </div>
           </div>
@@ -143,6 +144,7 @@ const RosenwegNav = {
         <a href="${base}zaehler.html" data-perm="zaehler" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Zähler & Verbrauch</a>
         <a href="${base}email-verteiler.html" data-perm="email-verteiler" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">E-Mail-Verteiler</a>
         <a href="${base}verwaltung.html" data-perm="bewohner-verwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Verwaltung</a>
+        <a href="${base}wohnungsverwaltung.html" data-perm="wohnungsverwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Wohnungen</a>
         <a href="${base}stweg3/pages/waschkueche-reservierung.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Waschküche</a>
 
         <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Infos</div>
