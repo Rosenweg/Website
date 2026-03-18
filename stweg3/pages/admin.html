@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin - Kontakte bearbeiten - STWEG 3</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body {
@@ -40,24 +41,9 @@
 </head>
 <body class="bg-gray-50">
     <!-- Navigation -->
-    <nav class="bg-white shadow-lg sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex items-center">
-                    <a href="index.html" class="flex items-center">
-                        <svg class="h-8 w-8 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                        </svg>
-                        <span class="ml-2 text-xl font-semibold text-gray-800">STWEG 3 Admin</span>
-                    </a>
-                </div>
-                <div class="flex items-center">
-                    <a href="index.html" class="text-gray-700 hover:text-orange-600 transition">← Zurück zu STWEG 3</a>
-                </div>
-            </div>
-        </div>
-    </nav>
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js?v=2"></script>
+    <script>RosenwegNav.init({ active: 'stweg3' });</script>
 
     <!-- Header -->
     <section class="bg-gradient-to-r from-orange-600 to-orange-800 text-white py-12">
@@ -74,7 +60,7 @@
             <p class="text-gray-600">Lade Daten...</p>
         </div>
 
-        <!-- Schritt 1: OTP-Authentifizierung -->
+        <!-- Schritt 1: SSO-Authentifizierung -->
         <div id="step1" class="hidden bg-white rounded-lg shadow-lg p-8">
             <div class="flex items-center mb-6">
                 <div class="bg-orange-100 rounded-full p-3 mr-4">
@@ -84,98 +70,18 @@
                 </div>
                 <div>
                     <h2 class="text-2xl font-bold text-gray-800">Admin-Zugang</h2>
-                    <p class="text-sm text-gray-600">Schritt 1: Authentifizierung</p>
+                    <p class="text-sm text-gray-600">Bitte melden Sie sich an</p>
                 </div>
             </div>
 
             <div class="bg-red-50 border-l-4 border-red-500 p-4 mb-6">
                 <p class="text-sm text-gray-700">
-                    <strong>⚠️ Achtung:</strong> Der Admin-Bereich ist zur Mutation durch den Ausschuss und Selbstmutation da.
-                    Nur berechtigte E-Mails können OTP-Codes anfordern.
+                    <strong>Achtung:</strong> Der Admin-Bereich ist zur Mutation durch den Ausschuss und Selbstmutation da.
+                    Nur berechtigte Benutzer haben Zugriff.
                 </p>
             </div>
 
-            <form id="emailForm" class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">
-                        Ihre E-Mail-Adresse (Ausschuss) *
-                    </label>
-                    <input
-                        type="email"
-                        id="userEmail"
-                        required
-                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                        placeholder="ihre@email.ch">
-                </div>
-
-                <div id="errorMessage" class="hidden bg-red-50 border-l-4 border-red-500 p-4 rounded">
-                    <p class="text-sm text-red-700"></p>
-                </div>
-
-                <button
-                    type="submit"
-                    class="w-full bg-orange-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-orange-700 transition flex items-center justify-center">
-                    <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                    </svg>
-                    Zugangscode per E-Mail senden
-                </button>
-            </form>
-        </div>
-
-        <!-- Schritt 2: OTP-Eingabe -->
-        <div id="step2" class="hidden bg-white rounded-lg shadow-lg p-8">
-            <div class="flex items-center mb-6">
-                <div class="bg-orange-100 rounded-full p-3 mr-4">
-                    <svg class="h-8 w-8 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path>
-                    </svg>
-                </div>
-                <div>
-                    <h2 class="text-2xl font-bold text-gray-800">Code eingeben</h2>
-                    <p class="text-sm text-gray-600">Schritt 2: Verifizierung</p>
-                </div>
-            </div>
-
-            <div class="bg-blue-50 border-l-4 border-blue-500 p-4 mb-6">
-                <p class="text-sm text-gray-700">
-                    Wir haben Ihnen einen 6-stelligen Code an <strong id="displayEmail"></strong> gesendet.
-                    Der Code ist 10 Minuten gültig.
-                </p>
-            </div>
-
-            <form id="otpForm" class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">
-                        Zugangscode *
-                    </label>
-                    <input
-                        type="text"
-                        id="otpInput"
-                        required
-                        maxlength="6"
-                        pattern="[0-9]{6}"
-                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent text-center text-2xl tracking-widest font-mono"
-                        placeholder="123456">
-                </div>
-
-                <div id="otpErrorMessage" class="hidden bg-red-50 border-l-4 border-red-500 p-4 rounded">
-                    <p class="text-sm text-red-700"></p>
-                </div>
-
-                <button
-                    type="submit"
-                    class="w-full bg-orange-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-orange-700 transition">
-                    Code bestätigen
-                </button>
-
-                <button
-                    type="button"
-                    onclick="backToStep1()"
-                    class="w-full bg-gray-100 text-gray-700 px-6 py-3 rounded-lg font-semibold hover:bg-gray-200 transition">
-                    Zurück
-                </button>
-            </form>
+            <div id="sso-login-container"></div>
         </div>
 
         <!-- Schritt 3: Editor -->
@@ -327,17 +233,14 @@
         // KONFIGURATION
         // ============================================
 
-        // n8n Webhook URL für OTP-Versand
-        const N8N_WEBHOOK_URL = 'https://n8n.juroct.net/webhook/stweg3-otp';
-
-        // n8n Webhook URL zum Speichern (muss noch erstellt werden)
-        const N8N_SAVE_WEBHOOK_URL = 'https://n8n.juroct.net/webhook/stweg3-save-json';
+        // API-Endpunkte (relativ, via Reverse Proxy)
+        const API_KONTAKTE_SAVE = '/api/kontakte';
 
         // Pfad zur JSON-Datei
         const KONTAKTE_JSON_URL = '../data/kontakte.json';
 
-        // n8n Webhook URL (wird dynamisch aus kontakte.json geladen)
-        let N8N_EMAIL_CHANGE_WEBHOOK_URL = null;
+        // Webhook URL für E-Mail-Änderungsbenachrichtigungen (wird dynamisch aus kontakte.json geladen)
+        let EMAIL_CHANGE_WEBHOOK_URL = null;
 
         // ============================================
         // GLOBALE VARIABLEN
@@ -347,8 +250,6 @@
         let originalKontakteData = null; // Für Change-Tracking
         let ausschussEmails = [];
         let currentEmail = '';
-        let currentOTP = '';
-        let otpTimestamp = 0;
         let currentEditingWohnung = null;
 
         // ============================================
@@ -484,11 +385,29 @@
 
                 // Lade Webhook-URL aus JSON
                 if (kontakteData.stweg?.webhooks?.email_change_notification) {
-                    N8N_EMAIL_CHANGE_WEBHOOK_URL = kontakteData.stweg.webhooks.email_change_notification;
+                    EMAIL_CHANGE_WEBHOOK_URL = kontakteData.stweg.webhooks.email_change_notification;
                 }
 
+                // SSO Authentication
+                const user = await AuthentikAuth.init({
+                    requireAuth: false,
+                    onLogin(user) {
+                        currentEmail = user.email;
+                        document.getElementById('loading').classList.add('hidden');
+                        document.getElementById('step1').classList.add('hidden');
+                        document.getElementById('step3').classList.remove('hidden');
+                        document.getElementById('loggedInEmail').textContent = currentEmail;
+
+                        // JSON-Editor befüllen
+                        loadEditor();
+                    },
+                });
+
                 document.getElementById('loading').classList.add('hidden');
-                document.getElementById('step1').classList.remove('hidden');
+                if (!user) {
+                    document.getElementById('step1').classList.remove('hidden');
+                    AuthentikAuth.createLoginButton('sso-login-container');
+                }
 
             } catch (error) {
                 console.error('Fehler beim Laden der Kontakte:', error);
@@ -503,126 +422,6 @@
                 `;
             }
         });
-
-        // ============================================
-        // SCHRITT 1: E-MAIL EINGABE
-        // ============================================
-
-        document.getElementById('emailForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
-
-            const email = document.getElementById('userEmail').value.trim().toLowerCase();
-            const errorDiv = document.getElementById('errorMessage');
-            const submitButton = e.target.querySelector('button[type="submit"]');
-
-            submitButton.disabled = true;
-            submitButton.innerHTML = '<span class="animate-spin inline-block mr-2">⏳</span> Wird gesendet...';
-
-            // Prüfe, ob E-Mail berechtigt ist (Ausschuss, Eigentümer oder berechtigter Mieter)
-            if (!ausschussEmails.includes(email)) {
-                errorDiv.classList.remove('hidden');
-                errorDiv.querySelector('p').textContent =
-                    'Diese E-Mail-Adresse ist nicht berechtigt. Zugang haben: Ausschussmitglieder, Eigentümer und berechtigte Mieter.';
-                submitButton.disabled = false;
-                submitButton.innerHTML = `
-                    <svg class="h-5 w-5 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                    </svg>
-                    Zugangscode per E-Mail senden
-                `;
-                return;
-            }
-
-            // OTP generieren
-            currentOTP = Math.floor(100000 + Math.random() * 900000).toString();
-            otpTimestamp = Date.now();
-            currentEmail = email;
-
-            try {
-                // OTP per n8n versenden
-                const response = await fetch(N8N_WEBHOOK_URL, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        email: email,
-                        otp_code: currentOTP,
-                        source: 'STWEG 3 - Admin-Bereich'
-                    })
-                });
-
-                if (!response.ok) {
-                    throw new Error('E-Mail konnte nicht gesendet werden');
-                }
-
-                // Zu Schritt 2 wechseln
-                errorDiv.classList.add('hidden');
-                document.getElementById('step1').classList.add('hidden');
-                document.getElementById('step2').classList.remove('hidden');
-                document.getElementById('displayEmail').textContent = email;
-
-            } catch (error) {
-                console.error('Fehler beim Senden:', error);
-                errorDiv.classList.remove('hidden');
-                errorDiv.querySelector('p').textContent =
-                    'Fehler beim Versenden des Codes. Bitte versuchen Sie es erneut.';
-            }
-
-            submitButton.disabled = false;
-            submitButton.innerHTML = `
-                <svg class="h-5 w-5 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-                </svg>
-                Zugangscode per E-Mail senden
-            `;
-        });
-
-        // ============================================
-        // SCHRITT 2: OTP VALIDIERUNG
-        // ============================================
-
-        document.getElementById('otpForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-
-            const enteredOTP = document.getElementById('otpInput').value;
-            const errorDiv = document.getElementById('otpErrorMessage');
-
-            // Prüfe OTP-Gültigkeit (10 Minuten)
-            const now = Date.now();
-            const tenMinutes = 10 * 60 * 1000;
-
-            if (now - otpTimestamp > tenMinutes) {
-                errorDiv.classList.remove('hidden');
-                errorDiv.querySelector('p').textContent =
-                    'Der Code ist abgelaufen. Bitte fordern Sie einen neuen Code an.';
-                return;
-            }
-
-            // Prüfe OTP
-            if (enteredOTP !== currentOTP) {
-                errorDiv.classList.remove('hidden');
-                errorDiv.querySelector('p').textContent =
-                    'Ungültiger Code. Bitte überprüfen Sie Ihre Eingabe.';
-                return;
-            }
-
-            // Erfolgreich authentifiziert
-            errorDiv.classList.add('hidden');
-            document.getElementById('step2').classList.add('hidden');
-            document.getElementById('step3').classList.remove('hidden');
-            document.getElementById('loggedInEmail').textContent = currentEmail;
-
-            // JSON-Editor befüllen
-            loadEditor();
-        });
-
-        function backToStep1() {
-            document.getElementById('step2').classList.add('hidden');
-            document.getElementById('step1').classList.remove('hidden');
-            document.getElementById('otpInput').value = '';
-            document.getElementById('otpErrorMessage').classList.add('hidden');
-        }
 
         // ============================================
         // EDITOR-FUNKTIONEN
@@ -1265,7 +1064,7 @@
 
         function logout() {
             if (confirm('Möchten Sie sich wirklich abmelden?')) {
-                location.reload();
+                AuthentikAuth.logout('admin.html');
             }
         }
 
@@ -1505,14 +1304,19 @@
             }
 
             try {
-                const response = await fetch(N8N_SAVE_WEBHOOK_URL, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                const saveHeaders = {
+                    'Content-Type': 'application/json',
+                };
+                const token = AuthentikAuth.getToken();
+                if (token) {
+                    saveHeaders['Authorization'] = `Bearer ${token}`;
+                }
+
+                const response = await fetch(API_KONTAKTE_SAVE, {
+                    method: 'PUT',
+                    headers: saveHeaders,
                     body: JSON.stringify({
-                        email: currentEmail,
-                        data: kontakteData
+                        kontakte: kontakteData
                     })
                 });
 
@@ -1547,8 +1351,7 @@
                 if (!autoSave) {
                     document.getElementById('jsonError').classList.remove('hidden');
                     document.getElementById('jsonError').querySelector('p').textContent =
-                        'Fehler beim Speichern: ' + error.message +
-                        '. Hinweis: Das Speichern erfordert einen Backend-Endpunkt (n8n Workflow).';
+                        'Fehler beim Speichern: ' + error.message;
                 }
             }
         }

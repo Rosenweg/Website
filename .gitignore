@@ -20,6 +20,10 @@ Desktop.ini
 *.bak
 *.log
 
+# Backup files
+*.unf
+*.unifi
+
 # Node modules (falls später JavaScript-Build-Tools verwendet werden)
 node_modules/
 npm-debug.log
@@ -37,3 +41,13 @@ stweg3/waschkueche-smart/backend/package-lock.json
 .env.local
 .env.*.local
 *-credentials.json
+
+# Personal data (DSG/DSGVO) - served via API, not in git
+ausschuss-kontakte.json
+technischer-dienst.json
+
+# Kiosk - sensitive files (never commit!)
+kiosk/deploy-key
+kiosk/deploy-key.pub
+kiosk/*.iso
+kiosk/.cached-debian-netinst.iso

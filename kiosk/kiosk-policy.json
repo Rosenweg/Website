@@ -1,0 +1,24 @@
+{
+    "URLBlocklist": ["*"],
+    "URLAllowlist": [
+        "https://www.rosenweg4303.ch",
+        "https://www.rosenweg4303.ch/*",
+        "https://authentik.rosenweg4303.ch",
+        "https://authentik.rosenweg4303.ch/*"
+    ],
+    "BookmarkBarEnabled": false,
+    "BrowserSignin": 0,
+    "DefaultBrowserSettingEnabled": false,
+    "DeveloperToolsAvailability": 2,
+    "DownloadRestrictions": 3,
+    "EditBookmarksEnabled": false,
+    "ExtensionInstallBlocklist": ["*"],
+    "FullscreenAllowed": true,
+    "IncognitoModeAvailability": 1,
+    "ManagedBookmarks": [],
+    "PasswordManagerEnabled": false,
+    "PrintingEnabled": false,
+    "SavingBrowserHistoryDisabled": true,
+    "SearchSuggestEnabled": false,
+    "ShowHomeButton": false
+}

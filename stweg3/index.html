@@ -3,8 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>STWEG 3 - Rosenweg 9 - STWEG-Kooperation Rosenweg</title>
+    <title>STWEG 3 - STWEG-Kooperation Rosenweg</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/site-config.js"></script>
+    <script src="/js/stweg-kontakte.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body {
@@ -14,23 +17,9 @@
 </head>
 <body class="bg-gray-50">
     <!-- Navigation -->
-    <nav class="bg-white shadow-lg sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex items-center">
-                    <a href="../index.html" class="flex items-center">
-                        <svg class="h-8 w-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
-                        </svg>
-                        <span class="ml-2 text-xl font-semibold text-gray-800">STWEG3 Rosenweg 9</span>
-                    </a>
-                </div>
-                <div class="flex items-center">
-                    <a href="../index.html" class="text-gray-700 hover:text-blue-600 transition">← Zurück zur Startseite</a>
-                </div>
-            </div>
-        </div>
-    </nav>
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js?v=2"></script>
+    <script>RosenwegNav.init({ active: 'stweg3' });</script>
 
     <!-- Header -->
     <section class="bg-gradient-to-r from-blue-600 to-blue-800 text-white py-12">
@@ -38,7 +27,16 @@
             <div class="flex items-center justify-between">
                 <div>
                     <h1 class="text-4xl font-bold mb-2">STWEG 3</h1>
-                    <p class="text-xl opacity-90 mb-1">Rosenweg 9, 4303 Kaiseraugst</p>
+                    <p id="stweg-adresse" class="text-xl opacity-90 mb-1"></p>
+                    <script>
+                    SiteConfig.load().then(() => {
+                        const s = SiteConfig.getStweg(3);
+                        if (s) {
+                            document.getElementById('stweg-adresse').textContent = s.adressen + ', 4303 Kaiseraugst';
+                            document.title = s.name + ' - ' + s.adressen + ' - STWEG-Kooperation Rosenweg';
+                        }
+                    });
+                    </script>
                     <p class="text-lg opacity-80">9 Wohnungen • 1 Hobbyraum • 2 Waschküchen</p>
                 </div>
                 <div class="hidden md:block">
@@ -398,64 +396,57 @@
     <section class="py-12 bg-gray-50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">Verwaltung & Kontakte</h2>
-            
-            <div class="grid md:grid-cols-2 gap-6">
-                <!-- Hausverwaltung -->
-                <div class="bg-white p-6 rounded-lg shadow-md">
-                    <div class="flex items-center mb-4">
-                        <svg class="h-8 w-8 text-blue-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
-                        </svg>
-                        <h3 class="text-xl font-semibold">Hausverwaltung</h3>
-                    </div>
-                    <p class="text-gray-700 mb-2 font-semibold text-lg">LangPartners Immobilien AG</p>
-                    <p class="text-gray-600 text-sm mb-2">Kirchplatz 18</p>
-                    <p class="text-gray-600 text-sm mb-3">4132 Muttenz</p>
-                    <p class="text-gray-600 text-sm mb-2">
-                        <strong>Tel:</strong> <a href="tel:+41612281818" class="text-blue-600 hover:underline">+41 61 228 18 18</a>
-                    </p>
-                    <p class="text-gray-600 text-sm mb-2">
-                        <strong>E-Mail:</strong> <a href="mailto:hello@langpartners.ch" class="text-blue-600 hover:underline">hello@langpartners.ch</a>
-                    </p>
-                    <p class="text-gray-600 text-sm mb-3">
-                        <strong>Web:</strong> <a href="https://langpartners.ch" target="_blank" class="text-blue-600 hover:underline">langpartners.ch</a>
-                    </p>
-                    <p class="text-gray-600 text-sm">
-                        <strong>Öffnungszeiten:</strong><br>
-                        Montag – Freitag, 09:00-12:00 Uhr
-                    </p>
-                </div>
 
-                <!-- Ausschuss-Vertreter -->
-                <div class="bg-white p-6 rounded-lg shadow-md">
-                    <div class="flex items-center mb-4">
-                        <svg class="h-8 w-8 text-blue-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
-                        </svg>
-                        <h3 class="text-xl font-semibold">Ausschuss-Vertreter STWEG 3</h3>
-                    </div>
-                    <p class="text-sm text-gray-600 mb-4">STWEG 3 entsendet 2 Vertreter in den Ausschuss der STWEG-Kooperation</p>
-                    
-                    <div class="border-l-4 border-blue-500 pl-4 py-3 bg-blue-50 rounded">
-                        <p class="font-semibold text-gray-800 mb-2">Ihre Ausschussvertreter</p>
-                        <p class="text-sm text-gray-600 mb-2">Stefan Müller (Vertreter & Technischer Dienst) • Basil Fersztand</p>
-                        <p class="text-sm text-gray-600">
-                            <strong>E-Mail:</strong> <a href="mailto:stweg3@rosenweg4303.ch" class="text-blue-600 hover:underline">stweg3@rosenweg4303.ch</a>
-                        </p>
-                        <p class="text-xs text-gray-500 mt-2">
-                            💡 Diese E-Mail erreicht beide Vertreter
-                        </p>
-                    </div>
+            <div class="grid md:grid-cols-2 gap-6 mb-8">
+                <!-- Hausverwaltung (from site-config.json) -->
+                <div class="bg-white p-6 rounded-lg shadow-md" id="hausverwaltung-card"></div>
 
-                    <div class="mt-4 pt-4 border-t border-gray-200">
-                        <p class="text-xs text-gray-600">
-                            Die Ausschussvertreter sind Ihre erste Anlaufstelle für Fragen zur STWEG-Kooperation und vertreten STWEG 3 in Ausschusssitzungen.
-                        </p>
+                <!-- Ausschuss-Vertreter (dynamisch aus Authentik) -->
+                <div class="bg-white p-6 rounded-lg shadow-md" id="ausschuss-card">
+                    <div class="animate-pulse">
+                        <div class="h-6 bg-gray-200 rounded w-3/4 mb-4"></div>
+                        <div class="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
+                        <div class="h-4 bg-gray-200 rounded w-2/3"></div>
                     </div>
                 </div>
             </div>
+
+            <!-- Kontaktliste (nur für eingeloggte Bewohner) -->
+            <div id="kontakte-section" class="hidden">
+                <div class="flex items-center justify-between mb-6">
+                    <h3 class="text-2xl font-bold text-gray-800">Kontaktliste</h3>
+                    <button onclick="window.print()" class="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition text-sm flex items-center">
+                        <svg class="h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path>
+                        </svg>
+                        Drucken
+                    </button>
+                </div>
+                <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6 rounded">
+                    <p class="text-sm text-gray-700">
+                        <strong>Vertraulich:</strong> Diese Kontaktdaten sind ausschliesslich für den internen Gebrauch bestimmt
+                        und dürfen nicht an Dritte weitergegeben werden.
+                    </p>
+                </div>
+                <div id="kontakte-list" class="space-y-4"></div>
+            </div>
+
+            <!-- Login-Hinweis für nicht eingeloggte Besucher -->
+            <div id="kontakte-login" class="hidden text-center py-8">
+                <p class="text-gray-600 mb-4">Melden Sie sich an, um die Kontaktliste einzusehen.</p>
+                <button id="kontakte-login-btn" class="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition">Anmelden</button>
+            </div>
         </div>
     </section>
+
+    <script>STWEGKontakte.init(3);</script>
+
+    <style>
+        @media print {
+            nav, footer, button, #kontakte-login, .bg-yellow-50 { display: none; }
+            section { break-inside: avoid; }
+        }
+    </style>
 
     <!-- Online-Services -->
     <section class="py-12 bg-gradient-to-br from-purple-50 to-orange-50">
@@ -463,39 +454,6 @@
             <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">🔐 Online-Services für STWEG 3</h2>
 
             <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">
-                <!-- Kontaktliste -->
-                <a href="pages/stweg3-kontakte.html" class="block bg-white p-8 rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1">
-                    <div class="flex items-center mb-4">
-                        <div class="bg-purple-100 rounded-full p-3 mr-4">
-                            <svg class="h-10 w-10 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
-                            </svg>
-                        </div>
-                        <div>
-                            <h3 class="text-2xl font-bold text-gray-800">Kontaktliste</h3>
-                            <p class="text-sm text-purple-600 font-semibold">Geschützt mit OTP</p>
-                        </div>
-                    </div>
-                    <p class="text-gray-600 mb-4">
-                        Zugriff auf die vollständige Kontaktliste aller Eigentümer und berechtigten Mieter der STWEG 3.
-                    </p>
-                    <div class="bg-purple-50 rounded-lg p-4 mb-4">
-                        <p class="text-sm text-gray-700 mb-2"><strong>✓ Zugang für:</strong></p>
-                        <ul class="text-sm text-gray-600 space-y-1">
-                            <li>• Alle Eigentümer</li>
-                            <li>• Berechtigte Mieter</li>
-                            <li>• Ausschussvertreter</li>
-                            <li>• Hausverwaltung</li>
-                        </ul>
-                    </div>
-                    <div class="flex items-center text-purple-600 font-semibold">
-                        <span>Zur Kontaktliste</span>
-                        <svg class="h-5 w-5 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                        </svg>
-                    </div>
-                </a>
-
                 <!-- Admin-Bereich -->
                 <a href="pages/admin.html" class="block bg-white p-8 rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1">
                     <div class="flex items-center mb-4">
@@ -596,8 +554,8 @@
                     </div>
                 </a>
 
-                <!-- Zähler -->
-                <a href="pages/zaehler.html" class="block bg-white p-8 rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1">
+                <!-- Energie-Monitor -->
+                <a href="../energie-monitor.html" class="block bg-white p-8 rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1">
                     <div class="flex items-center mb-4">
                         <div class="bg-yellow-100 rounded-full p-3 mr-4">
                             <svg class="h-10 w-10 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -605,27 +563,30 @@
                             </svg>
                         </div>
                         <div>
-                            <h3 class="text-2xl font-bold text-gray-800">Zähler</h3>
-                            <p class="text-sm text-yellow-600 font-semibold">Verbrauchsdaten & Monitoring</p>
+                            <h3 class="text-2xl font-bold text-gray-800">Energie-Monitor</h3>
+                            <p class="text-sm text-yellow-600 font-semibold">Zähler & Verbrauchsdaten</p>
                         </div>
                     </div>
                     <p class="text-gray-600 mb-4">
-                        Zugang zu Energiemonitoring und Stromzähler-Daten. Wählen Sie zwischen internem Dashboard und AEW-Portal.
+                        Persönliches Dashboard für Ihre Stromzähler mit Live-Daten, Verlauf und Tarifaufschlüsselung. OTP-Login geschützt.
                     </p>
                     <div class="bg-yellow-50 rounded-lg p-4 mb-4">
-                        <p class="text-sm text-gray-700 mb-2"><strong>⚡ Zwei Optionen:</strong></p>
+                        <p class="text-sm text-gray-700 mb-2"><strong>⚡ Funktionen:</strong></p>
                         <ul class="text-sm text-gray-600 space-y-1">
-                            <li>• Energie-Monitor: Internes Smart-Monitoring</li>
-                            <li>• my.aew: Offizielles Stromzähler-Portal</li>
+                            <li>• Live-Verbrauch & aktuelle Leistung</li>
+                            <li>• Tages-/Wochen-/Monatsauswertung</li>
+                            <li>• Tarifaufschlüsselung (HT/NT)</li>
+                            <li>• Historische Daten mit Datumsnavigation</li>
                         </ul>
                     </div>
                     <div class="flex items-center text-yellow-600 font-semibold">
-                        <span>Zu den Optionen</span>
+                        <span>Zum Energie-Monitor</span>
                         <svg class="h-5 w-5 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
                         </svg>
                     </div>
                 </a>
+
             </div>
 
             <div class="mt-8 max-w-7xl mx-auto bg-blue-50 border-l-4 border-blue-500 p-6 rounded">

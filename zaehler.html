@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Zähler & Verbrauchsdaten - STWEG Rosenweg</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body {
@@ -14,23 +15,9 @@
 </head>
 <body class="bg-gray-50">
     <!-- Navigation -->
-    <nav class="bg-white shadow-lg sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex items-center">
-                    <a href="index.html" class="flex items-center">
-                        <svg class="h-8 w-8 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                        </svg>
-                        <span class="ml-2 text-xl font-semibold text-gray-800">Zähler & Verbrauchsdaten</span>
-                    </a>
-                </div>
-                <div class="flex items-center">
-                    <a href="index.html" class="text-gray-700 hover:text-yellow-600 transition">← Zurück zur Startseite</a>
-                </div>
-            </div>
-        </div>
-    </nav>
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js?v=2"></script>
+    <script>RosenwegNav.init({ active: 'zaehler' });</script>
 
     <!-- Header -->
     <section class="bg-gradient-to-r from-yellow-500 to-orange-600 text-white py-12">

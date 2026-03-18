@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Energie-Konfiguration - Rosenweg</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="js/authentik-auth.js?v=2"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js?v=2"></script>
+
+    <!-- Access Denied overlay (shown for non-Technik users) -->
+    <div id="access-denied" class="hidden fixed inset-0 bg-white z-40 flex items-center justify-center">
+        <div class="text-center">
+            <svg class="w-16 h-16 text-red-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+            <h2 class="text-xl font-semibold text-gray-800 mb-2">Zugriff verweigert</h2>
+            <p class="text-gray-500 mb-4">Diese Seite ist nur für die Technik-Gruppe zugänglich.</p>
+            <a href="energie-monitor.html" class="text-blue-600 hover:text-blue-800">Zum Dashboard</a>
+        </div>
+    </div>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <!-- Tabs -->
+        <div class="border-b border-gray-200 mb-6">
+            <nav class="flex space-x-8">
+                <button onclick="showTab('meters')" id="tab-meters" class="border-b-2 border-blue-500 text-blue-600 py-3 px-1 text-sm font-medium">Zähler</button>
+                <button onclick="showTab('tariffs')" id="tab-tariffs" class="border-b-2 border-transparent text-gray-500 hover:text-gray-700 py-3 px-1 text-sm font-medium">Tarife</button>
+                <button onclick="showTab('users')" id="tab-users" class="border-b-2 border-transparent text-gray-500 hover:text-gray-700 py-3 px-1 text-sm font-medium">Benutzer-Zuweisungen</button>
+            </nav>
+        </div>
+
+        <!-- ═══ Meters Tab ═══ -->
+        <div id="panel-meters">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-semibold text-gray-800">Zähler verwalten</h2>
+                <button onclick="showMeterForm()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700">+ Zähler hinzufügen</button>
+            </div>
+
+            <!-- Meter Form (hidden by default) -->
+            <div id="meter-form" class="hidden bg-white rounded-xl shadow-md p-6 mb-6">
+                <h3 id="meter-form-title" class="text-sm font-semibold text-gray-700 mb-4">Neuer Zähler</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">ID (eindeutig)</label>
+                        <input id="m-id" type="text" class="w-full border-gray-300 rounded-md shadow-sm text-sm" placeholder="z.B. stweg3-eg-links">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Name</label>
+                        <input id="m-name" type="text" class="w-full border-gray-300 rounded-md shadow-sm text-sm" placeholder="z.B. STWEG 3 - EG Links">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Typ</label>
+                        <select id="m-type" onchange="toggleMeterFields()" class="w-full border-gray-300 rounded-md shadow-sm text-sm">
+                            <option value="modbus">Modbus TCP (smart-me Telstar)</option>
+                            <option value="shelly">Shelly (HTTP)</option>
+                            <option value="smartfox">SmartFox (HTTP)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">IP-Adresse</label>
+                        <input id="m-host" type="text" class="w-full border-gray-300 rounded-md shadow-sm text-sm" placeholder="z.B. 192.168.1.100">
+                    </div>
+                    <div id="field-port">
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Port</label>
+                        <input id="m-port" type="number" value="502" class="w-full border-gray-300 rounded-md shadow-sm text-sm">
+                    </div>
+                    <div id="field-unit">
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Modbus Unit ID</label>
+                        <input id="m-unit" type="number" value="1" class="w-full border-gray-300 rounded-md shadow-sm text-sm">
+                    </div>
+                    <div id="field-shelly-type" class="hidden">
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Shelly-Modell</label>
+                        <select id="m-shelly-type" class="w-full border-gray-300 rounded-md shadow-sm text-sm">
+                            <option value="plug">Shelly Plug S / Plus Plug</option>
+                            <option value="1pm">Shelly 1PM / Plus 1PM</option>
+                            <option value="3em">Shelly Pro 3EM</option>
+                            <option value="em">Shelly Plus EM</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Kategorie</label>
+                        <select id="m-category" class="w-full border-gray-300 rounded-md shadow-sm text-sm">
+                            <option value="consumer">Verbraucher</option>
+                            <option value="grid">Netzübergabe</option>
+                            <option value="production">Erzeugung (Solar/PV)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Gruppe</label>
+                        <input type="text" id="m-group" list="group-suggestions" class="w-full border-gray-300 rounded-md shadow-sm text-sm" placeholder="z.B. r9">
+                        <datalist id="group-suggestions"></datalist>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Standort / Zuordnung</label>
+                        <select id="m-location" class="w-full border-gray-300 rounded-md shadow-sm text-sm">
+                            <option value="">— Keine Zuordnung —</option>
+                            <optgroup label="Waschküche STWEG 3">
+                                <option value="waschkueche-1">Waschküche 1 (UG Links)</option>
+                                <option value="waschkueche-2">Waschküche 2 (UG Rechts)</option>
+                            </optgroup>
+                            <optgroup label="Allgemein">
+                                <option value="allgemein">Allgemeinzähler</option>
+                                <option value="produktion">Produktion / PV</option>
+                            </optgroup>
+                        </select>
+                    </div>
+                </div>
+                <div class="flex justify-end space-x-3 mt-4">
+                    <button onclick="hideMeterForm()" class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Abbrechen</button>
+                    <button onclick="testMeter()" id="btn-test" class="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200">Verbindung testen</button>
+                    <button onclick="saveMeter()" class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Speichern</button>
+                </div>
+                <div id="meter-test-result" class="hidden mt-3 p-3 rounded-lg text-sm"></div>
+            </div>
+
+            <!-- Meter List -->
+            <div id="meter-list" class="space-y-3"></div>
+        </div>
+
+        <!-- ═══ Tariffs Tab ═══ -->
+        <div id="panel-tariffs" class="hidden">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-semibold text-gray-800">Tarife verwalten</h2>
+                <button onclick="showTariffForm()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700">+ Tarif hinzufügen</button>
+            </div>
+
+            <div id="tariff-form" class="hidden bg-white rounded-xl shadow-md p-6 mb-6">
+                <h3 class="text-sm font-semibold text-gray-700 mb-4">Tarif bearbeiten</h3>
+                <input id="t-id" type="hidden">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Name</label>
+                        <input id="t-name" type="text" class="w-full border-gray-300 rounded-md shadow-sm text-sm" placeholder="z.B. Netztarif">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Preis pro kWh (CHF)</label>
+                        <input id="t-price" type="number" step="0.0001" class="w-full border-gray-300 rounded-md shadow-sm text-sm" placeholder="z.B. 0.2516">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Beschreibung</label>
+                        <input id="t-desc" type="text" class="w-full border-gray-300 rounded-md shadow-sm text-sm" placeholder="z.B. Standardtarif Netzbezug">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Gültig ab</label>
+                        <input id="t-valid-from" type="date" class="w-full border-gray-300 rounded-md shadow-sm text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Gültig bis (leer = unbefristet)</label>
+                        <input id="t-valid-to" type="date" class="w-full border-gray-300 rounded-md shadow-sm text-sm">
+                    </div>
+                </div>
+                <div class="flex justify-end space-x-3 mt-4">
+                    <button onclick="hideTariffForm()" class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Abbrechen</button>
+                    <button onclick="saveTariff()" class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Speichern</button>
+                </div>
+            </div>
+
+            <div id="tariff-list" class="space-y-3"></div>
+        </div>
+
+        <!-- ═══ Users Tab ═══ -->
+        <div id="panel-users" class="hidden">
+            <div class="mb-4">
+                <h2 class="text-lg font-semibold text-gray-800 mb-2">Benutzer- & Gruppen-Zuweisungen</h2>
+                <p class="text-sm text-gray-500">Legt fest, welche Benutzer und Gruppen welchen Zähler im Dashboard sehen können.</p>
+            </div>
+
+            <!-- User assignment -->
+            <div class="bg-white rounded-xl shadow-md p-6 mb-4">
+                <h3 class="text-sm font-semibold text-gray-700 mb-3">Benutzer zuweisen</h3>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Zähler</label>
+                        <select id="u-meter" class="w-full border-gray-300 rounded-md shadow-sm text-sm"></select>
+                    </div>
+                    <div class="relative">
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Benutzer (Authentik)</label>
+                        <input id="u-search" type="text" class="w-full border-gray-300 rounded-md shadow-sm text-sm" placeholder="Name oder E-Mail suchen..." autocomplete="off">
+                        <div id="u-dropdown" class="hidden absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto"></div>
+                        <input id="u-email" type="hidden">
+                        <input id="u-name" type="hidden">
+                    </div>
+                    <button onclick="assignUser()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 h-10">Zuweisen</button>
+                </div>
+            </div>
+
+            <!-- Group assignment -->
+            <div class="bg-white rounded-xl shadow-md p-6 mb-6">
+                <h3 class="text-sm font-semibold text-gray-700 mb-3">Gruppe zuweisen</h3>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Zähler</label>
+                        <select id="g-meter" class="w-full border-gray-300 rounded-md shadow-sm text-sm"></select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 mb-1">Authentik-Gruppe</label>
+                        <select id="g-group" class="w-full border-gray-300 rounded-md shadow-sm text-sm">
+                            <option value="">— Gruppe wählen —</option>
+                        </select>
+                    </div>
+                    <button onclick="assignGroup()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 h-10">Zuweisen</button>
+                </div>
+            </div>
+
+            <div id="user-list" class="space-y-3"></div>
+        </div>
+    </main>
+
+    <script>
+    const API = '/api/energy';
+
+    // ─── Tab Navigation ─────────────────────────────────────────────
+    function showTab(tab) {
+        ['meters', 'tariffs', 'users'].forEach(t => {
+            document.getElementById(`panel-${t}`).classList.toggle('hidden', t !== tab);
+            const btn = document.getElementById(`tab-${t}`);
+            if (t === tab) {
+                btn.classList.add('border-blue-500', 'text-blue-600');
+                btn.classList.remove('border-transparent', 'text-gray-500');
+            } else {
+                btn.classList.remove('border-blue-500', 'text-blue-600');
+                btn.classList.add('border-transparent', 'text-gray-500');
+            }
+        });
+        if (tab === 'meters') loadMeters();
+        if (tab === 'tariffs') loadTariffs();
+        if (tab === 'users') { loadMetersForSelect(); loadAllAssignments(); loadAuthentikUsers(); loadAuthentikGroups(); }
+    }
+
+    // ─── Meters ─────────────────────────────────────────────────────
+    let editingMeterId = null;
+    const locationLabels = {
+        'waschkueche-1': 'Waschküche 1',
+        'waschkueche-2': 'Waschküche 2',
+        'allgemein': 'Allgemein',
+        'produktion': 'Produktion / PV',
+    };
+
+    function toggleMeterFields() {
+        const type = document.getElementById('m-type').value;
+        const isModbus = type === 'modbus';
+        const isShelly = type === 'shelly';
+        document.getElementById('field-port').classList.toggle('hidden', !isModbus);
+        document.getElementById('field-unit').classList.toggle('hidden', !isModbus);
+        document.getElementById('field-shelly-type').classList.toggle('hidden', !isShelly);
+    }
+
+    function showMeterForm(meter) {
+        document.getElementById('meter-form').classList.remove('hidden');
+        document.getElementById('meter-test-result').classList.add('hidden');
+        if (meter) {
+            editingMeterId = meter.id;
+            document.getElementById('meter-form-title').textContent = 'Zähler bearbeiten';
+            document.getElementById('m-id').value = meter.id;
+            document.getElementById('m-id').disabled = true;
+            document.getElementById('m-name').value = meter.name;
+            document.getElementById('m-type').value = meter.type;
+            document.getElementById('m-host').value = meter.host;
+            document.getElementById('m-port').value = meter.port;
+            document.getElementById('m-unit').value = meter.unit_id;
+            document.getElementById('m-shelly-type').value = meter.shelly_type || 'plug';
+            document.getElementById('m-location').value = meter.location || '';
+            document.getElementById('m-category').value = meter.category || 'consumer';
+            document.getElementById('m-group').value = meter.group_id || '';
+        } else {
+            editingMeterId = null;
+            document.getElementById('meter-form-title').textContent = 'Neuer Zähler';
+            document.getElementById('m-id').value = '';
+            document.getElementById('m-id').disabled = false;
+            document.getElementById('m-name').value = '';
+            document.getElementById('m-type').value = 'modbus';
+            document.getElementById('m-host').value = '';
+            document.getElementById('m-port').value = 502;
+            document.getElementById('m-unit').value = 1;
+            document.getElementById('m-location').value = '';
+            document.getElementById('m-category').value = 'consumer';
+            document.getElementById('m-group').value = '';
+        }
+        toggleMeterFields();
+    }
+
+    function hideMeterForm() {
+        document.getElementById('meter-form').classList.add('hidden');
+        editingMeterId = null;
+    }
+
+    async function saveMeter() {
+        const data = {
+            id: document.getElementById('m-id').value.trim(),
+            name: document.getElementById('m-name').value.trim(),
+            type: document.getElementById('m-type').value,
+            host: document.getElementById('m-host').value.trim(),
+            port: parseInt(document.getElementById('m-port').value) || 502,
+            unit_id: parseInt(document.getElementById('m-unit').value) || 1,
+            shelly_type: document.getElementById('m-type').value === 'shelly' ? document.getElementById('m-shelly-type').value : null,
+            location: document.getElementById('m-location').value || null,
+            category: document.getElementById('m-category').value || 'consumer',
+            group_id: document.getElementById('m-group').value.trim() || null,
+        };
+        if (!data.id || !data.name || !data.host) return alert('ID, Name und IP sind Pflichtfelder');
+
+        const url = editingMeterId ? `${API}/meters/${editingMeterId}` : `${API}/meters`;
+        const method = editingMeterId ? 'PUT' : 'POST';
+        await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+        hideMeterForm();
+        loadMeters();
+    }
+
+    async function testMeter() {
+        const id = document.getElementById('m-id').value.trim() || 'temp-test';
+        // Save first if new, then test
+        if (!editingMeterId) await saveMeter();
+        const testId = editingMeterId || id;
+
+        const resultEl = document.getElementById('meter-test-result');
+        resultEl.classList.remove('hidden', 'bg-green-50', 'text-green-700', 'bg-red-50', 'text-red-700');
+        resultEl.textContent = 'Teste Verbindung...';
+        resultEl.classList.add('bg-gray-50', 'text-gray-600');
+
+        try {
+            const res = await fetch(`${API}/meters/${testId}/test`, { method: 'POST' });
+            const data = await res.json();
+            resultEl.classList.remove('bg-gray-50', 'text-gray-600');
+            if (data.success) {
+                resultEl.classList.add('bg-green-50', 'text-green-700');
+                resultEl.textContent = `Verbindung OK! Leistung: ${Math.round(data.data.power_w)} W, Spannung: ${data.data.voltage_l1_v?.toFixed(1) || 0} V`;
+            } else {
+                resultEl.classList.add('bg-red-50', 'text-red-700');
+                resultEl.textContent = `Fehler: ${data.error}`;
+            }
+        } catch (err) {
+            resultEl.classList.remove('bg-gray-50', 'text-gray-600');
+            resultEl.classList.add('bg-red-50', 'text-red-700');
+            resultEl.textContent = `Fehler: ${err.message}`;
+        }
+    }
+
+    async function deleteMeter(id) {
+        if (!confirm(`Zähler "${id}" und alle Messdaten wirklich löschen?`)) return;
+        await fetch(`${API}/meters/${id}`, { method: 'DELETE' });
+        loadMeters();
+    }
+
+    async function toggleMeter(id, active) {
+        await fetch(`${API}/meters/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ active: !active })
+        });
+        loadMeters();
+    }
+
+    async function loadMeters() {
+        const res = await fetch(`${API}/meters`);
+        const meters = await res.json();
+
+        // Populate group suggestions datalist
+        const existingGroups = [...new Set(meters.map(m => m.group_id).filter(Boolean))];
+        document.getElementById('group-suggestions').innerHTML =
+            existingGroups.map(g => `<option value="${esc(g)}">`).join('');
+
+        const list = document.getElementById('meter-list');
+        if (meters.length === 0) {
+            list.innerHTML = '<div class="bg-white rounded-xl shadow-md p-8 text-center text-gray-400">Noch keine Zähler konfiguriert</div>';
+            return;
+        }
+        list.innerHTML = meters.map(m => `
+            <div class="bg-white rounded-xl shadow-md p-5 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div class="flex-1">
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${m.type === 'shelly' ? 'bg-purple-100 text-purple-700' : m.type === 'smartfox' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}">${m.type === 'shelly' ? 'Shelly' : m.type === 'smartfox' ? 'SmartFox' : 'Modbus'}</span>
+                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${m.category === 'grid' ? 'bg-red-100 text-red-700' : m.category === 'production' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'}">${m.category === 'grid' ? 'Netzübergabe' : m.category === 'production' ? 'Erzeugung' : 'Verbraucher'}</span>
+                        ${m.group_id ? '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700">' + esc(m.group_id) + '</span>' : ''}
+                        <span class="font-semibold text-gray-800">${esc(meterDisplayName(m))}</span>
+                        <span class="text-xs text-gray-400">(${esc(m.id)})</span>
+                        ${!m.active ? '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">Inaktiv</span>' : ''}
+                    </div>
+                    <p class="text-sm text-gray-500 mt-1">${esc(m.host)}:${m.port} ${m.type === 'modbus' ? '(Unit ' + m.unit_id + ')' : ''}${m.location ? ' · <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">' + esc(locationLabels[m.location] || m.location) + '</span>' : ''}</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="toggleMeter('${esc(m.id)}', ${m.active})" class="px-3 py-1 text-xs rounded-md ${m.active ? 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100' : 'bg-green-50 text-green-700 hover:bg-green-100'}">${m.active ? 'Deaktivieren' : 'Aktivieren'}</button>
+                    <button onclick='showMeterForm(${JSON.stringify(m)})' class="px-3 py-1 text-xs rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200">Bearbeiten</button>
+                    <button onclick="deleteMeter('${esc(m.id)}')" class="px-3 py-1 text-xs rounded-md bg-red-50 text-red-700 hover:bg-red-100">Löschen</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    // ─── Tariffs ────────────────────────────────────────────────────
+    function showTariffForm(tariff) {
+        document.getElementById('tariff-form').classList.remove('hidden');
+        if (tariff) {
+            document.getElementById('t-id').value = tariff.id;
+            document.getElementById('t-name').value = tariff.name;
+            document.getElementById('t-price').value = tariff.price_per_kwh;
+            document.getElementById('t-desc').value = tariff.description || '';
+            document.getElementById('t-valid-from').value = tariff.valid_from ? tariff.valid_from.substring(0, 10) : '';
+            document.getElementById('t-valid-to').value = tariff.valid_to ? tariff.valid_to.substring(0, 10) : '';
+        } else {
+            document.getElementById('t-id').value = '';
+            document.getElementById('t-name').value = '';
+            document.getElementById('t-price').value = '';
+            document.getElementById('t-desc').value = '';
+            document.getElementById('t-valid-from').value = '';
+            document.getElementById('t-valid-to').value = '';
+        }
+    }
+
+    function hideTariffForm() {
+        document.getElementById('tariff-form').classList.add('hidden');
+    }
+
+    async function saveTariff() {
+        const id = document.getElementById('t-id').value;
+        const data = {
+            name: document.getElementById('t-name').value.trim(),
+            price_per_kwh: parseFloat(document.getElementById('t-price').value),
+            description: document.getElementById('t-desc').value.trim(),
+            valid_from: document.getElementById('t-valid-from').value || null,
+            valid_to: document.getElementById('t-valid-to').value || null,
+        };
+        if (!data.name || isNaN(data.price_per_kwh)) return alert('Name und Preis sind Pflichtfelder');
+
+        const url = id ? `${API}/tariffs/${id}` : `${API}/tariffs`;
+        const method = id ? 'PUT' : 'POST';
+        await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+        hideTariffForm();
+        loadTariffs();
+    }
+
+    async function deleteTariff(id) {
+        if (!confirm('Tarif wirklich löschen?')) return;
+        await fetch(`${API}/tariffs/${id}`, { method: 'DELETE' });
+        loadTariffs();
+    }
+
+    async function loadTariffs() {
+        const res = await fetch(`${API}/tariffs`);
+        const tariffs = await res.json();
+        const list = document.getElementById('tariff-list');
+        if (tariffs.length === 0) {
+            list.innerHTML = '<div class="bg-white rounded-xl shadow-md p-8 text-center text-gray-400">Noch keine Tarife konfiguriert</div>';
+            return;
+        }
+        list.innerHTML = tariffs.map(t => {
+            const today = new Date().toISOString().substring(0, 10);
+            const from = t.valid_from ? t.valid_from.substring(0, 10) : null;
+            const to = t.valid_to ? t.valid_to.substring(0, 10) : null;
+            const isCurrent = t.active && (!from || from <= today) && (!to || to >= today);
+            const isFuture = from && from > today;
+            const isExpired = to && to < today;
+            const dateLabel = from || to ? `${from ? formatDate(from) : '...'} – ${to ? formatDate(to) : 'unbefristet'}` : 'Kein Zeitraum';
+            return `
+            <div class="bg-white rounded-xl shadow-md p-5 flex flex-col md:flex-row md:items-center justify-between gap-3 ${isExpired ? 'opacity-60' : ''}">
+                <div class="flex-1">
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <span class="font-semibold text-gray-800">${esc(t.name)}</span>
+                        ${isCurrent ? '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">Aktiv</span>' : ''}
+                        ${isFuture ? '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">Zukünftig</span>' : ''}
+                        ${isExpired ? '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">Abgelaufen</span>' : ''}
+                        ${!t.active ? '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">Deaktiviert</span>' : ''}
+                    </div>
+                    <p class="text-sm text-gray-500 mt-1">CHF ${parseFloat(t.price_per_kwh).toFixed(4)} / kWh ${t.description ? '– ' + esc(t.description) : ''}</p>
+                    <p class="text-xs text-gray-400 mt-0.5">${dateLabel}</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick='showTariffForm(${JSON.stringify(t)})' class="px-3 py-1 text-xs rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200">Bearbeiten</button>
+                    <button onclick="deleteTariff(${t.id})" class="px-3 py-1 text-xs rounded-md bg-red-50 text-red-700 hover:bg-red-100">Löschen</button>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    // ─── User Assignments ───────────────────────────────────────────
+    let authentikUsers = [];
+
+    async function loadAuthentikUsers() {
+        try {
+            const res = await AuthentikAuth.apiFetch('/api/admin/users');
+            if (res.ok) {
+                const data = await res.json();
+                authentikUsers = (data.results || []).filter(u => u.is_active);
+            }
+        } catch (err) {
+            console.error('Failed to load Authentik users:', err);
+        }
+    }
+
+    async function loadMetersForSelect() {
+        const res = await fetch(`${API}/meters`);
+        const meters = await res.json();
+        const sel = document.getElementById('u-meter');
+        sel.innerHTML = meters.map(m => `<option value="${esc(m.id)}">${esc(meterDisplayName(m))}</option>`).join('');
+        const gSel = document.getElementById('g-meter');
+        gSel.innerHTML = meters.map(m => `<option value="${esc(m.id)}">${esc(meterDisplayName(m))}</option>`).join('');
+    }
+
+    async function loadAuthentikGroups() {
+        try {
+            const res = await AuthentikAuth.apiFetch('/api/admin/groups');
+            if (res.ok) {
+                const data = await res.json();
+                const groups = data.results || [];
+                const sel = document.getElementById('g-group');
+                sel.innerHTML = '<option value="">— Gruppe wählen —</option>' +
+                    groups.map(g => `<option value="${esc(g.name)}">${esc(g.name)} (${g.users_obj?.length || 0} Mitglieder)</option>`).join('');
+            }
+        } catch (err) {
+            console.error('Failed to load Authentik groups:', err);
+        }
+    }
+
+    async function assignGroup() {
+        const meterId = document.getElementById('g-meter').value;
+        const groupName = document.getElementById('g-group').value;
+        if (!meterId || !groupName) return alert('Bitte Zähler und Gruppe auswählen');
+
+        await fetch(`${API}/meters/${meterId}/groups`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ group_name: groupName })
+        });
+        document.getElementById('g-group').value = '';
+        loadAllAssignments();
+    }
+
+    async function removeGroup(meterId, groupName) {
+        await fetch(`${API}/meters/${meterId}/groups/${encodeURIComponent(groupName)}`, { method: 'DELETE' });
+        loadAllAssignments();
+    }
+
+    function setupUserSearch() {
+        const input = document.getElementById('u-search');
+        const dropdown = document.getElementById('u-dropdown');
+
+        input.addEventListener('input', () => {
+            const q = input.value.toLowerCase().trim();
+            if (q.length < 1) { dropdown.classList.add('hidden'); return; }
+
+            const matches = authentikUsers.filter(u =>
+                (u.name || '').toLowerCase().includes(q) ||
+                (u.email || '').toLowerCase().includes(q) ||
+                (u.username || '').toLowerCase().includes(q)
+            ).slice(0, 10);
+
+            if (matches.length === 0) {
+                dropdown.innerHTML = '<div class="px-4 py-3 text-sm text-gray-400">Keine Benutzer gefunden</div>';
+            } else {
+                dropdown.innerHTML = matches.map(u => `
+                    <div class="px-4 py-2 hover:bg-blue-50 cursor-pointer flex items-center justify-between" onclick="selectUser('${esc(u.email)}', '${esc(u.name)}', '${esc(u.username)}')">
+                        <div>
+                            <span class="text-sm font-medium text-gray-800">${esc(u.name || u.username)}</span>
+                            <span class="text-xs text-gray-400 ml-2">${esc(u.email)}</span>
+                        </div>
+                        ${u.groups_obj?.length ? `<span class="text-xs text-gray-400">${u.groups_obj.map(g => g.name).join(', ')}</span>` : ''}
+                    </div>
+                `).join('');
+            }
+            dropdown.classList.remove('hidden');
+        });
+
+        input.addEventListener('focus', () => { if (input.value.length >= 1) input.dispatchEvent(new Event('input')); });
+        document.addEventListener('click', (e) => { if (!e.target.closest('#u-search') && !e.target.closest('#u-dropdown')) dropdown.classList.add('hidden'); });
+    }
+
+    function selectUser(email, name, username) {
+        document.getElementById('u-email').value = email;
+        document.getElementById('u-name').value = name || username;
+        document.getElementById('u-search').value = `${name || username} (${email})`;
+        document.getElementById('u-dropdown').classList.add('hidden');
+    }
+
+    async function assignUser() {
+        const meterId = document.getElementById('u-meter').value;
+        const email = document.getElementById('u-email').value.trim();
+        const name = document.getElementById('u-name').value.trim();
+        if (!meterId || !email) return alert('Bitte Zähler und Benutzer auswählen');
+
+        await fetch(`${API}/meters/${meterId}/users`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_email: email, user_name: name, role: 'viewer' })
+        });
+        document.getElementById('u-search').value = '';
+        document.getElementById('u-email').value = '';
+        document.getElementById('u-name').value = '';
+        loadAllAssignments();
+    }
+
+    async function removeUser(meterId, email) {
+        await fetch(`${API}/meters/${meterId}/users/${encodeURIComponent(email)}`, { method: 'DELETE' });
+        loadAllAssignments();
+    }
+
+    async function loadAllAssignments() {
+        const metersRes = await fetch(`${API}/meters`);
+        const meters = await metersRes.json();
+        const list = document.getElementById('user-list');
+        let html = '';
+
+        for (const meter of meters) {
+            const [usersRes, groupsRes] = await Promise.all([
+                fetch(`${API}/meters/${meter.id}/users`),
+                fetch(`${API}/meters/${meter.id}/groups`)
+            ]);
+            const users = await usersRes.json();
+            const groups = await groupsRes.json();
+            const hasAssignments = users.length > 0 || groups.length > 0;
+            html += `
+                <div class="bg-white rounded-xl shadow-md p-5">
+                    <h3 class="font-semibold text-gray-800 mb-3">${esc(meterDisplayName(meter))} <span class="text-xs text-gray-400">(${esc(meter.id)})</span></h3>
+                    ${!hasAssignments ? '<p class="text-sm text-gray-400">Keine Zuweisungen</p>' : `<div class="space-y-2">
+                        ${groups.map(g => `
+                            <div class="flex items-center justify-between py-1">
+                                <div>
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700 mr-2">Gruppe</span>
+                                    <span class="text-sm text-gray-700">${esc(g.group_name)}</span>
+                                </div>
+                                <button onclick="removeGroup('${esc(meter.id)}', '${esc(g.group_name)}')" class="text-xs text-red-500 hover:text-red-700">Entfernen</button>
+                            </div>
+                        `).join('')}
+                        ${users.map(u => `
+                            <div class="flex items-center justify-between py-1">
+                                <div>
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 mr-2">Benutzer</span>
+                                    <span class="text-sm text-gray-700">${esc(u.user_name || u.user_email)}</span>
+                                    <span class="text-xs text-gray-400 ml-2">${esc(u.user_email)}</span>
+                                </div>
+                                <button onclick="removeUser('${esc(meter.id)}', '${esc(u.user_email)}')" class="text-xs text-red-500 hover:text-red-700">Entfernen</button>
+                            </div>
+                        `).join('')}
+                    </div>`}
+                </div>`;
+        }
+
+        list.innerHTML = html || '<div class="bg-white rounded-xl shadow-md p-8 text-center text-gray-400">Noch keine Zähler vorhanden</div>';
+    }
+
+    // ─── Helpers ─────────────────────────────────────────────────────
+    function meterDisplayName(m) {
+        return m.group_id ? m.group_id + '-' + m.name : m.name;
+    }
+
+    function esc(s) {
+        const div = document.createElement('div');
+        div.textContent = s || '';
+        return div.innerHTML;
+    }
+
+    function formatDate(dateStr) {
+        if (!dateStr) return '';
+        const d = new Date(dateStr + 'T00:00:00');
+        return d.toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    }
+
+    function isTechnik(user) {
+        return user?.groups?.some(g => g.toLowerCase().includes('technik'));
+    }
+
+    // ─── Init ───────────────────────────────────────────────────────
+    (async function() {
+        const user = await AuthentikAuth.init({ requireAuth: true });
+        if (!user) return;
+        RosenwegNav.init({ active: 'energie' });
+        if (!isTechnik(user)) {
+            document.getElementById('access-denied').classList.remove('hidden');
+            return;
+        }
+        setupUserSearch();
+        loadAuthentikUsers();
+        loadMeters();
+    })();
+    </script>
+</body>
+</html>

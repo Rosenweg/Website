@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hilfe & Dokumentation - Smart Waschküchen STWEG 3</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/site-config.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; }
@@ -12,21 +14,9 @@
 </head>
 <body class="bg-gray-50">
     <!-- Navigation -->
-    <nav class="bg-white shadow-lg sticky top-0 z-50">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex items-center">
-                    <svg class="h-8 w-8 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                    <span class="ml-2 text-xl font-semibold text-gray-800">Hilfe & Dokumentation</span>
-                </div>
-                <div class="flex items-center">
-                    <a href="waschkueche-management.html" class="text-gray-700 hover:text-blue-600 transition">← Zurück zum Dashboard</a>
-                </div>
-            </div>
-        </div>
-    </nav>
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js?v=2"></script>
+    <script>RosenwegNav.init({ active: 'waschkueche' });</script>
 
     <!-- Hero -->
     <section class="bg-gradient-to-r from-purple-600 to-purple-800 text-white py-12">
@@ -64,7 +54,7 @@
                     <ul class="ml-11 space-y-2 text-gray-700">
                         <li>• Überweisung an die Hausverwaltung</li>
                         <li>• Bargeldeinzahlung bei der Verwaltung</li>
-                        <li>• Kontakt: hello@langpartners.ch oder +41 61 228 18 18</li>
+                        <li id="wk-verw-kontakt">• Kontakt: ...</li>
                     </ul>
                 </div>
 
@@ -264,17 +254,30 @@ npm start</code></pre>
 
                 <div class="bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-lg border-2 border-green-200">
                     <h3 class="text-xl font-semibold text-green-800 mb-4">Hausverwaltung</h3>
-                    <p class="text-gray-700 mb-1">LangPartners Immobilien AG</p>
+                    <p id="wk-verw-firma" class="text-gray-700 mb-1"></p>
                     <p class="text-gray-700 mb-3">
-                        <strong>Tel:</strong> +41 61 228 18 18
+                        <strong>Tel:</strong> <span id="wk-verw-tel"></span>
                     </p>
                     <p class="text-gray-700">
-                        <strong>E-Mail:</strong> hello@langpartners.ch
+                        <strong>E-Mail:</strong> <span id="wk-verw-email"></span>
                     </p>
                 </div>
             </div>
         </div>
     </section>
+
+    <!-- Config-basierte Verwaltungsdaten laden -->
+    <script>
+    SiteConfig.load().then(() => {
+        const v = SiteConfig.getVerwaltung();
+        if (v) {
+            document.getElementById('wk-verw-firma').textContent = v.firma;
+            document.getElementById('wk-verw-tel').textContent = v.telefon;
+            document.getElementById('wk-verw-email').textContent = v.email;
+            document.getElementById('wk-verw-kontakt').textContent = '• Kontakt: ' + v.email + ' oder ' + v.telefon;
+        }
+    });
+    </script>
 
     <!-- Footer -->
     <footer class="bg-gray-800 text-white py-8">

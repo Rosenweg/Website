@@ -1,0 +1,171 @@
+/**
+ * Shared STWEG Kontakte module
+ * Loads Hausverwaltung, Ausschuss and Kontaktliste dynamically from API
+ * Usage: STWEGKontakte.init(stwegNr)
+ */
+const STWEGKontakte = (function() {
+    const floorNames = { 'ug': 'Untergeschoss', 'eg': 'Erdgeschoss', '1og': '1. Obergeschoss', '2og': '2. Obergeschoss', '3og': '3. Obergeschoss', 'dg': 'Dachgeschoss' };
+    const floorColors = { 'ug': 'orange', 'eg': 'blue', '1og': 'green', '2og': 'purple', '3og': 'teal', 'dg': 'pink' };
+
+    async function loadHausverwaltung(stwegNr) {
+        try {
+            const cfg = await (await fetch('/site-config.json')).json();
+            const v = cfg.verwaltung;
+            const el = document.getElementById('hausverwaltung-card');
+            if (!el) return;
+            el.innerHTML = `
+                <div class="flex items-center mb-4">
+                    <svg class="h-8 w-8 text-blue-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
+                    </svg>
+                    <h3 class="text-xl font-semibold">Hausverwaltung</h3>
+                </div>
+                <p class="text-gray-700 mb-2 font-semibold text-lg">${v.firma}</p>
+                <p class="text-gray-600 text-sm mb-2">${v.strasse}</p>
+                <p class="text-gray-600 text-sm mb-3">${v.plz_ort}</p>
+                <p class="text-gray-600 text-sm mb-2"><strong>Tel:</strong> <a href="tel:${v.telefon.replace(/\s/g,'')}" class="text-blue-600 hover:underline">${v.telefon}</a></p>
+                <p class="text-gray-600 text-sm mb-2"><strong>E-Mail:</strong> <a href="mailto:${v.email}" class="text-blue-600 hover:underline">${v.email}</a></p>
+                <p class="text-gray-600 text-sm mb-3"><strong>Web:</strong> <a href="https://${v.website}" target="_blank" class="text-blue-600 hover:underline">${v.website}</a></p>
+                <p class="text-gray-600 text-sm"><strong>Öffnungszeiten:</strong><br>${v.oeffnungszeiten}</p>`;
+        } catch(e) { console.error('Config load error:', e); }
+    }
+
+    async function loadKontakte(stwegNr, user) {
+        try {
+            const res = await AuthentikAuth.apiFetch('/api/stweg/' + stwegNr + '/kontakte');
+            if (!res.ok) {
+                if (res.status === 403) {
+                    var ks = document.getElementById('kontakte-section');
+                    if (ks) ks.classList.add('hidden');
+                    return;
+                }
+                throw new Error('API Fehler');
+            }
+            const data = await res.json();
+            renderAusschuss(stwegNr, data.ausschuss);
+            if (data.wohnungen && data.wohnungen.length > 0) {
+                renderKontakte(data.wohnungen);
+                var ks = document.getElementById('kontakte-section');
+                if (ks) ks.classList.remove('hidden');
+            }
+        } catch(e) {
+            console.error('Kontakte error:', e);
+            var ac = document.getElementById('ausschuss-card');
+            if (ac) ac.innerHTML = '<p class="text-red-600 text-sm">Fehler beim Laden der Ausschuss-Daten</p>';
+        }
+    }
+
+    function renderAusschuss(stwegNr, ausschuss) {
+        var el = document.getElementById('ausschuss-card');
+        if (!el) return;
+        var names = ausschuss.map(function(a) { return a.name + ' (' + a.funktion + ')'; }).join(' &bull; ');
+        el.innerHTML = `
+            <div class="flex items-center mb-4">
+                <svg class="h-8 w-8 text-blue-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                </svg>
+                <h3 class="text-xl font-semibold">Ausschuss-Vertreter STWEG ${stwegNr}</h3>
+            </div>
+            <div class="border-l-4 border-blue-500 pl-4 py-3 bg-blue-50 rounded">
+                <p class="font-semibold text-gray-800 mb-2">Ihre Ausschussvertreter</p>
+                <p class="text-sm text-gray-600 mb-2">${names}</p>
+                ${ausschuss.map(function(a) { return `
+                    <div class="text-sm text-gray-600 mt-2">
+                        <strong>${a.name}</strong>
+                        ${a.email ? ' &mdash; <a href="mailto:' + a.email + '" class="text-blue-600 hover:underline">' + a.email + '</a>' : ''}
+                        ${a.telefon ? ' &mdash; <a href="tel:' + a.telefon.replace(/\s/g,'') + '" class="text-blue-600 hover:underline">' + a.telefon + '</a>' : ''}
+                    </div>
+                `; }).join('')}
+            </div>`;
+    }
+
+    function renderKontakte(wohnungen) {
+        var container = document.getElementById('kontakte-list');
+        if (!container) return;
+
+        // Group by floor
+        var floors = {};
+        for (var i = 0; i < wohnungen.length; i++) {
+            var w = wohnungen[i];
+            var m = w.bezeichnung.toLowerCase().match(/^(\d*[a-z]+)/);
+            var floorKey = m ? m[1] : 'sonstige';
+            if (!floors[floorKey]) floors[floorKey] = [];
+            floors[floorKey].push(w);
+        }
+
+        var html = '';
+        for (var key in floors) {
+            var wohnungenInFloor = floors[key];
+            var floorName = floorNames[key] || key.toUpperCase();
+            var color = floorColors[key] || 'gray';
+            html += '<div class="border-l-4 border-' + color + '-500 bg-' + color + '-50 p-4 rounded-lg">';
+            html += '<h3 class="font-semibold text-lg text-' + color + '-800 mb-3">' + floorName + '</h3>';
+
+            for (var j = 0; j < wohnungenInFloor.length; j++) {
+                var w = wohnungenInFloor[j];
+                var isLast = j === wohnungenInFloor.length - 1;
+                html += '<div class="bg-white p-4 rounded-lg ' + (!isLast ? 'mb-3' : '') + '">';
+                html += '<div class="mb-2"><span class="bg-' + color + '-100 text-' + color + '-800 px-2 py-1 rounded text-sm font-semibold">' + w.bezeichnung + '</span></div>';
+                html += '<div class="space-y-2">';
+
+                for (var k = 0; k < w.bewohner.length; k++) {
+                    var person = w.bewohner[k];
+                    var rolleLabel = person.rolle === 'eigentuemer' ? 'Eigentümer' : 'Mieter';
+                    var isSelfOwner = person.rolle === 'eigentuemer' && w.bewohner.length === 1;
+                    var displayRolle = isSelfOwner ? 'Eigentümer (Selbstbewohner)' : rolleLabel;
+                    html += '<div>';
+                    html += '<p class="font-semibold text-gray-800">' + person.name + '</p>';
+                    if (person.email) html += '<p class="text-sm text-gray-600">&#x1F4E7; <a href="mailto:' + person.email + '" class="text-blue-600 hover:underline">' + person.email + '</a></p>';
+                    if (person.telefon) html += '<p class="text-sm text-gray-600">&#x1F4F1; <a href="tel:' + person.telefon.replace(/\s/g,'') + '" class="text-blue-600 hover:underline">' + person.telefon + '</a></p>';
+                    html += '<p class="text-xs text-gray-500 mt-1">' + displayRolle + '</p>';
+                    html += '</div>';
+                    if (person.rolle === 'eigentuemer' && w.bewohner.length > 1) {
+                        html += '<div class="border-t border-gray-200 mt-2 pt-2"></div>';
+                    }
+                }
+
+                html += '</div></div>';
+            }
+            html += '</div>';
+        }
+        container.innerHTML = html;
+    }
+
+    function showLoginState(stwegNr) {
+        var ac = document.getElementById('ausschuss-card');
+        if (ac) {
+            ac.innerHTML = `
+                <div class="flex items-center mb-4">
+                    <svg class="h-8 w-8 text-blue-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                    </svg>
+                    <h3 class="text-xl font-semibold">Ausschuss-Vertreter STWEG ${stwegNr}</h3>
+                </div>
+                <p class="text-sm text-gray-600">Melden Sie sich an, um die Ausschussvertreter zu sehen.</p>`;
+        }
+        var loginEl = document.getElementById('kontakte-login');
+        if (loginEl) {
+            loginEl.classList.remove('hidden');
+            var btn = document.getElementById('kontakte-login-btn');
+            if (btn) btn.addEventListener('click', function() { AuthentikAuth.login(); });
+        }
+    }
+
+    function init(stwegNr) {
+        loadHausverwaltung(stwegNr);
+
+        function checkAuth() {
+            if (typeof AuthentikAuth === 'undefined') return;
+            var user = AuthentikAuth.getUser();
+            if (user && AuthentikAuth.isLoggedIn()) {
+                loadKontakte(stwegNr, user);
+            } else {
+                showLoginState(stwegNr);
+            }
+        }
+        // nav.js init is async, wait a tick for it to complete
+        setTimeout(checkAuth, 500);
+    }
+
+    return { init: init };
+})();
