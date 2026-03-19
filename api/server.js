@@ -1897,11 +1897,11 @@ async function pollGmailForVerteiler() {
             verteilerAddress = `${plusMatch[1].toLowerCase()}@${VERTEILER_DOMAIN}`;
           }
 
-          // To: header contains @rosenweg4303.ch address
+          // To: header contains @rosenweg4303.ch address (strip +tag if present)
           if (!verteilerAddress) {
-            const toMatch = headers.match(/^To:\s*[^]*?([a-z0-9._-]+@rosenweg4303\.ch)/im);
+            const toMatch = headers.match(/^To:\s*[^]*?([a-z0-9._+-]+@rosenweg4303\.ch)/im);
             if (toMatch) {
-              verteilerAddress = toMatch[1].toLowerCase();
+              verteilerAddress = toMatch[1].toLowerCase().replace(/\+[^@]*/, '');
             }
           }
 
