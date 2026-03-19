@@ -3170,6 +3170,73 @@ app.get('/api/documents/:path(*)', authMiddleware, async (req, res) => {
   }
 });
 
+// POST /api/scan-upload - Upload scanned document via API key (for scan server)
+const SCAN_API_KEY = process.env.SCAN_API_KEY || '';
+
+app.post('/api/scan-upload', async (req, res) => {
+  try {
+    const apiKey = req.headers['x-api-key'];
+    if (!SCAN_API_KEY || apiKey !== SCAN_API_KEY) {
+      return res.status(401).json({ error: 'Ungültiger API-Key' });
+    }
+
+    const fileName = req.headers['x-filename'];
+    if (!fileName) {
+      return res.status(400).json({ error: 'X-Filename Header fehlt' });
+    }
+
+    // Sanitize filename
+    const cleanName = fileName
+      .replace(/ä/gi, 'ae').replace(/ö/gi, 'oe').replace(/ü/gi, 'ue').replace(/ß/g, 'ss')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9._-]/g, '-')
+      .replace(/-+/g, '-').replace(/^-|-$/g, '')
+      .toLowerCase();
+
+    const filePath = `Scans/${cleanName}`;
+    const content = req.body.toString('base64');
+
+    // Check if file already exists
+    let sha;
+    const checkResp = await fetch(
+      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${filePath}?ref=${GITHUB_DOCS_BRANCH}`,
+      { headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json' } }
+    );
+    if (checkResp.ok) {
+      const existing = await checkResp.json();
+      sha = existing.sha;
+    }
+
+    const body = {
+      message: `Scan: ${cleanName} (via Scanner)`,
+      content,
+      branch: GITHUB_DOCS_BRANCH,
+    };
+    if (sha) body.sha = sha;
+
+    const response = await fetch(
+      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${filePath}`,
+      {
+        method: 'PUT',
+        headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }
+    );
+
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.message || `GitHub API error: ${response.status}`);
+    }
+
+    docsListCache = { data: null, expires: 0 };
+    console.log(`[SCAN] Uploaded: ${filePath}`);
+    res.json({ success: true, path: filePath });
+  } catch (err) {
+    console.error('[SCAN] Upload error:', err.message);
+    res.status(500).json({ error: 'Scan-Upload fehlgeschlagen' });
+  }
+});
+
 // PUT /api/documents/:path(*) - Upload/replace a document (admin only)
 app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, res) => {
   try {
