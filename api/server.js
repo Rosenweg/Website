@@ -2130,13 +2130,49 @@ app.get('/api/stweg/:nr/kontakte', authMiddleware, async (req, res) => {
 
 // ─── Wohnungsverwaltung ─────────────────────────────────────────────
 
+// Helper: load wohnung with kontakte
+async function loadWohnungMitKontakte(wohnungId) {
+  const wRes = await pool.query('SELECT * FROM wohnungen WHERE id = $1', [wohnungId]);
+  if (wRes.rows.length === 0) return null;
+  const w = wRes.rows[0];
+  const kRes = await pool.query('SELECT * FROM wohnungen_kontakte WHERE wohnung_id = $1 ORDER BY rolle, sort_order, id', [wohnungId]);
+  w.kontakte = kRes.rows;
+  return w;
+}
+
+// Helper: save kontakte for a wohnung (replace all)
+async function saveKontakte(client, wohnungId, kontakte) {
+  await client.query('DELETE FROM wohnungen_kontakte WHERE wohnung_id = $1', [wohnungId]);
+  if (!kontakte || !Array.isArray(kontakte)) return;
+  for (let i = 0; i < kontakte.length; i++) {
+    const k = kontakte[i];
+    if (!k.name && !k.email) continue;
+    await client.query(
+      `INSERT INTO wohnungen_kontakte (wohnung_id, rolle, name, email, telefon, adresse, sort_order)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [wohnungId, k.rolle || 'eigentuemer', k.name || null, k.email || null, k.telefon || null, k.adresse || null, i]
+    );
+  }
+}
+
 // GET /api/wohnungen/:stweg - List all apartments for a STWEG
 app.get('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
   try {
     const stweg = parseInt(req.params.stweg);
-    const result = await pool.query('SELECT * FROM wohnungen WHERE stweg = $1', [stweg]);
-    const sorted = result.rows.sort((a, b) => wohnungSort(a.bezeichnung, b.bezeichnung));
-    res.json({ stweg, wohnungen: sorted });
+    const wResult = await pool.query('SELECT * FROM wohnungen WHERE stweg = $1', [stweg]);
+    const kResult = await pool.query(
+      `SELECT k.* FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id WHERE w.stweg = $1 ORDER BY k.rolle, k.sort_order, k.id`,
+      [stweg]
+    );
+    // Group kontakte by wohnung_id
+    const kontakteMap = {};
+    for (const k of kResult.rows) {
+      if (!kontakteMap[k.wohnung_id]) kontakteMap[k.wohnung_id] = [];
+      kontakteMap[k.wohnung_id].push(k);
+    }
+    const wohnungen = wResult.rows.map(w => ({ ...w, kontakte: kontakteMap[w.id] || [] }));
+    wohnungen.sort((a, b) => wohnungSort(a.bezeichnung, b.bezeichnung));
+    res.json({ stweg, wohnungen });
   } catch (err) {
     console.error('Wohnungen list error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Wohnungen' });
@@ -2161,12 +2197,12 @@ app.get('/api/wohnungen/:stweg/stats', authMiddleware, requirePermission('wohnun
   }
 });
 
-// GET /api/wohnungen/:stweg/:id - Single apartment
+// GET /api/wohnungen/:stweg/:id - Single apartment with kontakte
 app.get('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM wohnungen WHERE id = $1 AND stweg = $2', [req.params.id, req.params.stweg]);
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Wohnung nicht gefunden' });
-    res.json(result.rows[0]);
+    const w = await loadWohnungMitKontakte(parseInt(req.params.id));
+    if (!w || w.stweg !== parseInt(req.params.stweg)) return res.status(404).json({ error: 'Wohnung nicht gefunden' });
+    res.json(w);
   } catch (err) {
     console.error('Wohnung get error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Wohnung' });
@@ -2175,54 +2211,62 @@ app.get('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
 
 // POST /api/wohnungen/:stweg - Create apartment
 app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, async (req, res) => {
+  const client = await pool.connect();
   try {
     const stweg = parseInt(req.params.stweg);
     const b = req.body;
-    const result = await pool.query(
+    await client.query('BEGIN');
+    const result = await client.query(
       `INSERT INTO wohnungen (stweg, bezeichnung, stockwerk, zimmer, flaeche_m2, typ, besonderheiten,
-        eigentuemer_name, eigentuemer_email, eigentuemer_telefon, eigentuemer_user_pk,
-        mieter_name, mieter_email, mieter_telefon, mieter_user_pk,
         bewohnt_von, waschkueche_berechtigt, notizen)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        RETURNING *`,
       [stweg, b.bezeichnung, b.stockwerk, b.zimmer, b.flaeche_m2, b.typ || 'Wohnung', b.besonderheiten,
-       b.eigentuemer_name, b.eigentuemer_email, b.eigentuemer_telefon, b.eigentuemer_user_pk || null,
-       b.mieter_name, b.mieter_email, b.mieter_telefon, b.mieter_user_pk || null,
        b.bewohnt_von || 'eigentuemer', b.waschkueche_berechtigt !== false, b.notizen]
     );
-    // Auto-sync Authentik groups
-    await syncWohnungGroups(stweg, result.rows[0]);
-    res.status(201).json(result.rows[0]);
+    await saveKontakte(client, result.rows[0].id, b.kontakte);
+    await client.query('COMMIT');
+    const wohnung = await loadWohnungMitKontakte(result.rows[0].id);
+    res.status(201).json(wohnung);
   } catch (err) {
+    await client.query('ROLLBACK');
     if (err.code === '23505') return res.status(409).json({ error: 'Wohnung mit dieser Bezeichnung existiert bereits' });
     console.error('Wohnung create error:', err);
     res.status(500).json({ error: 'Fehler beim Anlegen der Wohnung' });
+  } finally {
+    client.release();
   }
 });
 
 // PUT /api/wohnungen/:stweg/:id - Update apartment
 app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, async (req, res) => {
+  const client = await pool.connect();
   try {
     const b = req.body;
-    const result = await pool.query(
+    await client.query('BEGIN');
+    const result = await client.query(
       `UPDATE wohnungen SET bezeichnung=$1, stockwerk=$2, zimmer=$3, flaeche_m2=$4, typ=$5, besonderheiten=$6,
-        eigentuemer_name=$7, eigentuemer_email=$8, eigentuemer_telefon=$9, eigentuemer_user_pk=$10,
-        mieter_name=$11, mieter_email=$12, mieter_telefon=$13, mieter_user_pk=$14,
-        bewohnt_von=$15, waschkueche_berechtigt=$16, notizen=$17, updated_at=NOW()
-       WHERE id=$18 AND stweg=$19 RETURNING *`,
+        bewohnt_von=$7, waschkueche_berechtigt=$8, notizen=$9, updated_at=NOW()
+       WHERE id=$10 AND stweg=$11 RETURNING *`,
       [b.bezeichnung, b.stockwerk, b.zimmer, b.flaeche_m2, b.typ || 'Wohnung', b.besonderheiten,
-       b.eigentuemer_name, b.eigentuemer_email, b.eigentuemer_telefon, b.eigentuemer_user_pk || null,
-       b.mieter_name, b.mieter_email, b.mieter_telefon, b.mieter_user_pk || null,
        b.bewohnt_von || 'eigentuemer', b.waschkueche_berechtigt !== false, b.notizen,
        req.params.id, req.params.stweg]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Wohnung nicht gefunden' });
-    await syncWohnungGroups(parseInt(req.params.stweg), result.rows[0]);
-    res.json(result.rows[0]);
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Wohnung nicht gefunden' });
+    }
+    await saveKontakte(client, result.rows[0].id, b.kontakte);
+    await client.query('COMMIT');
+    const wohnung = await loadWohnungMitKontakte(result.rows[0].id);
+    res.json(wohnung);
   } catch (err) {
+    await client.query('ROLLBACK');
     if (err.code === '23505') return res.status(409).json({ error: 'Wohnung mit dieser Bezeichnung existiert bereits' });
     console.error('Wohnung update error:', err);
     res.status(500).json({ error: 'Fehler beim Aktualisieren der Wohnung' });
+  } finally {
+    client.release();
   }
 });
 
@@ -2243,7 +2287,7 @@ app.post('/api/wohnungen/:stweg/import', authMiddleware, requirePermission('wohn
   const client = await pool.connect();
   try {
     const stweg = parseInt(req.params.stweg);
-    const data = req.body; // expects { wohnungen: { erdgeschoss: [...], obergeschoss_1: [...], ... } }
+    const data = req.body;
     if (!data.wohnungen) return res.status(400).json({ error: 'Keine Wohnungsdaten gefunden' });
 
     const stockwerkMap = {
@@ -2260,26 +2304,25 @@ app.post('/api/wohnungen/:stweg/import', authMiddleware, requirePermission('wohn
       for (const u of units) {
         const hasMieter = u.mieter && u.mieter.name;
         const bewohntVon = hasMieter ? 'mieter' : 'eigentuemer';
-        await client.query(
+        const wResult = await client.query(
           `INSERT INTO wohnungen (stweg, bezeichnung, stockwerk, zimmer, flaeche_m2, typ, besonderheiten,
-            eigentuemer_name, eigentuemer_email, eigentuemer_telefon,
-            mieter_name, mieter_email, mieter_telefon,
             bewohnt_von, waschkueche_berechtigt)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
            ON CONFLICT (stweg, bezeichnung) DO UPDATE SET
             stockwerk=EXCLUDED.stockwerk, zimmer=EXCLUDED.zimmer, flaeche_m2=EXCLUDED.flaeche_m2,
-            eigentuemer_name=EXCLUDED.eigentuemer_name, eigentuemer_email=EXCLUDED.eigentuemer_email,
-            eigentuemer_telefon=EXCLUDED.eigentuemer_telefon,
-            mieter_name=EXCLUDED.mieter_name, mieter_email=EXCLUDED.mieter_email,
-            mieter_telefon=EXCLUDED.mieter_telefon,
-            bewohnt_von=EXCLUDED.bewohnt_von, updated_at=NOW()`,
+            bewohnt_von=EXCLUDED.bewohnt_von, updated_at=NOW()
+           RETURNING id`,
           [stweg, u.bezeichnung, stockwerk, u.zimmer, u.flaeche_m2,
            u.typ || 'Wohnung', u.besonderheiten ? JSON.stringify(u.besonderheiten) : null,
-           u.eigentümer?.name || u.eigentuemer?.name, u.eigentümer?.email || u.eigentuemer?.email,
-           u.eigentümer?.telefon || u.eigentuemer?.telefon,
-           u.mieter?.name || null, u.mieter?.email || null, u.mieter?.telefon || null,
            bewohntVon, u.eigentümer?.waschkueche_berechtigt ?? u.eigentuemer?.waschkueche_berechtigt ?? true]
         );
+        const wohnungId = wResult.rows[0].id;
+        // Build kontakte from legacy format
+        const kontakte = [];
+        const eig = u.eigentümer || u.eigentuemer;
+        if (eig?.name) kontakte.push({ rolle: 'eigentuemer', name: eig.name, email: eig.email, telefon: eig.telefon });
+        if (u.mieter?.name) kontakte.push({ rolle: 'mieter', name: u.mieter.name, email: u.mieter.email, telefon: u.mieter.telefon });
+        await saveKontakte(client, wohnungId, kontakte);
         imported++;
       }
     }
@@ -3495,6 +3538,44 @@ async function initDB() {
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_wohnungen_stweg ON wohnungen(stweg);
     `);
+
+    // Kontakte table for dynamic contacts per wohnung
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS wohnungen_kontakte (
+        id SERIAL PRIMARY KEY,
+        wohnung_id INTEGER NOT NULL REFERENCES wohnungen(id) ON DELETE CASCADE,
+        rolle VARCHAR(50) NOT NULL DEFAULT 'eigentuemer',
+        name VARCHAR(255),
+        email VARCHAR(255),
+        telefon VARCHAR(100),
+        adresse TEXT,
+        sort_order INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_wohnungen_kontakte_wohnung ON wohnungen_kontakte(wohnung_id);
+    `);
+
+    // Migrate existing flat columns to kontakte table (one-time)
+    const migrationCheck = await client.query(
+      `SELECT COUNT(*) as cnt FROM wohnungen WHERE eigentuemer_name IS NOT NULL
+       AND id NOT IN (SELECT DISTINCT wohnung_id FROM wohnungen_kontakte)`
+    );
+    if (parseInt(migrationCheck.rows[0].cnt) > 0) {
+      console.log('Migrating wohnungen contacts to wohnungen_kontakte table...');
+      await client.query(`
+        INSERT INTO wohnungen_kontakte (wohnung_id, rolle, name, email, telefon, sort_order)
+        SELECT id, 'eigentuemer', eigentuemer_name, eigentuemer_email, eigentuemer_telefon, 0
+        FROM wohnungen WHERE eigentuemer_name IS NOT NULL
+        AND id NOT IN (SELECT DISTINCT wohnung_id FROM wohnungen_kontakte)
+      `);
+      await client.query(`
+        INSERT INTO wohnungen_kontakte (wohnung_id, rolle, name, email, telefon, sort_order)
+        SELECT id, 'mieter', mieter_name, mieter_email, mieter_telefon, 1
+        FROM wohnungen WHERE mieter_name IS NOT NULL
+        AND id NOT IN (SELECT DISTINCT wohnung_id FROM wohnungen_kontakte WHERE rolle = 'mieter')
+      `);
+      console.log('Migration complete.');
+    }
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS permissions (

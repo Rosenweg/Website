@@ -34,7 +34,7 @@
         <div class="bg-gradient-to-r from-blue-600 to-blue-800 text-white">
             <div class="max-w-6xl mx-auto px-4 sm:px-6 py-6">
                 <h1 class="text-2xl font-bold" id="page-title">Wohnungsverwaltung</h1>
-                <p class="text-blue-200 text-sm mt-1" id="page-subtitle">Eigentumer und Mieter verwalten</p>
+                <p class="text-blue-200 text-sm mt-1" id="page-subtitle">Wohnungen, Eigentümer und Bewohner verwalten</p>
             </div>
         </div>
 
@@ -134,7 +134,7 @@
                         <input type="text" id="f-zimmer" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="3.5" />
                     </div>
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Flache m2</label>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Fläche m²</label>
                         <input type="number" id="f-flaeche" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="75" />
                     </div>
                     <div>
@@ -152,61 +152,33 @@
                 </div>
             </div>
 
-            <!-- Eigentumer -->
-            <div class="space-y-3 mb-6">
-                <h4 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Eigentumer</h4>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                    <input type="text" id="f-eig-name" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
-                </div>
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">E-Mail</label>
-                        <input type="email" id="f-eig-email" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Telefon</label>
-                        <input type="text" id="f-eig-tel" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
-                    </div>
-                </div>
-            </div>
-
             <!-- Status -->
             <div class="space-y-3 mb-6">
                 <h4 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Bewohnung</h4>
                 <div class="flex gap-4">
                     <label class="flex items-center gap-2 cursor-pointer">
-                        <input type="radio" name="bewohnt" value="eigentuemer" checked onchange="toggleMieter()" class="text-blue-600" />
+                        <input type="radio" name="bewohnt" value="eigentuemer" checked class="text-blue-600" />
                         <span class="text-sm">Selbstbewohnt</span>
                     </label>
                     <label class="flex items-center gap-2 cursor-pointer">
-                        <input type="radio" name="bewohnt" value="mieter" onchange="toggleMieter()" class="text-blue-600" />
+                        <input type="radio" name="bewohnt" value="mieter" class="text-blue-600" />
                         <span class="text-sm">Vermietet</span>
                     </label>
                     <label class="flex items-center gap-2 cursor-pointer">
-                        <input type="radio" name="bewohnt" value="leer" onchange="toggleMieter()" class="text-blue-600" />
+                        <input type="radio" name="bewohnt" value="leer" class="text-blue-600" />
                         <span class="text-sm">Leer</span>
                     </label>
                 </div>
             </div>
 
-            <!-- Mieter (conditional) -->
-            <div id="mieter-section" class="hidden space-y-3 mb-6">
-                <h4 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Mieter</h4>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                    <input type="text" id="f-mie-name" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
+            <!-- Dynamic Kontakte -->
+            <div class="mb-6">
+                <div class="flex items-center justify-between mb-3">
+                    <h4 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Kontakte</h4>
+                    <button type="button" onclick="addKontakt()" class="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-3 py-1 rounded-lg font-medium transition">+ Kontakt hinzufügen</button>
                 </div>
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">E-Mail</label>
-                        <input type="email" id="f-mie-email" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Telefon</label>
-                        <input type="text" id="f-mie-tel" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
-                    </div>
-                </div>
+                <div id="kontakte-list" class="space-y-3"></div>
+                <div id="no-kontakte" class="text-center py-4 text-gray-400 text-sm">Noch keine Kontakte. Klicke "Kontakt hinzufügen" um loszulegen.</div>
             </div>
 
             <!-- Notizen -->
@@ -217,7 +189,7 @@
 
             <!-- Actions -->
             <div class="flex justify-between items-center">
-                <button id="btn-delete" onclick="deleteWohnung()" class="hidden text-red-600 hover:text-red-800 text-sm font-medium">Loschen</button>
+                <button id="btn-delete" onclick="deleteWohnung()" class="hidden text-red-600 hover:text-red-800 text-sm font-medium">Löschen</button>
                 <div class="flex gap-3 ml-auto">
                     <button onclick="closeModal()" class="px-4 py-2 text-gray-600 hover:text-gray-800 text-sm">Abbrechen</button>
                     <button onclick="saveWohnung()" class="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition">Speichern</button>
@@ -229,11 +201,20 @@
     <script>
         const esc = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '';
 
+        const ROLLEN = [
+            { value: 'eigentuemer', label: 'Eigentümer', color: 'green' },
+            { value: 'mieter', label: 'Mieter', color: 'blue' },
+            { value: 'verwalter', label: 'Verwalter', color: 'purple' },
+            { value: 'bewohner', label: 'Bewohner', color: 'teal' },
+            { value: 'sonstige', label: 'Sonstige', color: 'gray' },
+        ];
+
         let allWohnungen = [];
         let stwegList = [];
         let currentStweg = null;
         let canWrite = false;
         let currentUser = null;
+        let kontaktCounter = 0;
 
         // ── Auth Init ──
         window.addEventListener('DOMContentLoaded', async () => {
@@ -266,14 +247,12 @@
             const groups = user.groups || [];
             const isTechnik = groups.some(g => g.toLowerCase() === 'technik');
 
-            // Load site config to get STWEG list
             try {
                 const configRes = await fetch('/site-config.json');
                 const config = await configRes.json();
                 stwegList = config.stwegen || [];
             } catch { stwegList = []; }
 
-            // Determine accessible STWEGs
             const accessibleStwegs = [];
             for (const s of stwegList) {
                 if (isTechnik) { accessibleStwegs.push(s); continue; }
@@ -287,7 +266,6 @@
                 return;
             }
 
-            // Render STWEG tabs
             const tabsEl = document.getElementById('stweg-tabs');
             tabsEl.innerHTML = accessibleStwegs.map(s => `
                 <button onclick="selectStweg(${s.nr})" id="stweg-tab-${s.nr}"
@@ -310,18 +288,13 @@
         // ── STWEG Selection ──
         async function selectStweg(nr) {
             currentStweg = nr;
-            // Update tab styles
             document.querySelectorAll('#stweg-tabs button').forEach(btn => {
                 const isActive = btn.id === `stweg-tab-${nr}`;
                 btn.className = `px-3 py-1.5 rounded-lg text-sm font-medium border transition ${
                     isActive ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'}`;
             });
-
             const info = stwegList.find(s => s.nr === nr);
-            document.getElementById('page-subtitle').textContent = info
-                ? `${info.name} - ${info.adressen}`
-                : `STWEG ${nr}`;
-
+            document.getElementById('page-subtitle').textContent = info ? `${info.name} - ${info.adressen}` : `STWEG ${nr}`;
             await loadWohnungen();
         }
 
@@ -342,7 +315,6 @@
                 const stats = await sRes.json();
                 allWohnungen = wData.wohnungen || [];
 
-                // Update stats
                 document.getElementById('stat-total').textContent = stats.total || 0;
                 document.getElementById('stat-selbst').textContent = stats.selbstbewohnt || 0;
                 document.getElementById('stat-vermietet').textContent = stats.vermietet || 0;
@@ -357,17 +329,27 @@
             renderWohnungen();
         }
 
+        // ── Helper: get kontakte by rolle ──
+        function getKontakte(w, rolle) {
+            return (w.kontakte || []).filter(k => k.rolle === rolle);
+        }
+
+        function getKontaktName(w, rolle) {
+            const k = getKontakte(w, rolle);
+            return k.length > 0 ? k.map(c => c.name).filter(Boolean).join(', ') : '';
+        }
+
         // ── Rendering ──
         function renderWohnungen() {
             const q = (document.getElementById('wohnung-search')?.value || '').toLowerCase();
             let filtered = allWohnungen;
             if (q) {
-                filtered = filtered.filter(w =>
-                    (w.bezeichnung || '').toLowerCase().includes(q) ||
-                    (w.eigentuemer_name || '').toLowerCase().includes(q) ||
-                    (w.mieter_name || '').toLowerCase().includes(q) ||
-                    (w.stockwerk || '').toLowerCase().includes(q)
-                );
+                filtered = filtered.filter(w => {
+                    const kontakteStr = (w.kontakte || []).map(k => `${k.name || ''} ${k.email || ''}`).join(' ').toLowerCase();
+                    return (w.bezeichnung || '').toLowerCase().includes(q) ||
+                        (w.stockwerk || '').toLowerCase().includes(q) ||
+                        kontakteStr.includes(q);
+                });
             }
 
             const noData = document.getElementById('no-data');
@@ -390,11 +372,10 @@
                 const typBadge = w.typ && w.typ !== 'Wohnung'
                     ? `<span class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">${esc(w.typ)}</span>` : '';
 
-                const bewohner = w.bewohnt_von === 'mieter' && w.mieter_name
-                    ? esc(w.mieter_name)
-                    : w.bewohnt_von === 'leer' ? '<span class="text-gray-400">-</span>' : esc(w.eigentuemer_name || '-');
-
-                const details = [w.zimmer ? `${w.zimmer} Zi.` : '', w.flaeche_m2 ? `${w.flaeche_m2} m2` : ''].filter(Boolean).join(', ');
+                const eigName = getKontaktName(w, 'eigentuemer');
+                const mieterName = getKontaktName(w, 'mieter');
+                const verwalterName = getKontaktName(w, 'verwalter');
+                const details = [w.zimmer ? `${w.zimmer} Zi.` : '', w.flaeche_m2 ? `${w.flaeche_m2} m²` : ''].filter(Boolean).join(', ');
 
                 return `
                 <div class="bg-white rounded-lg border p-4 hover:shadow-sm transition cursor-pointer" onclick="editWohnung(${w.id})">
@@ -405,17 +386,15 @@
                             </div>
                             <div class="min-w-0">
                                 <div class="flex items-center gap-2 flex-wrap">
-                                    <span class="font-medium text-gray-900">${esc(w.eigentuemer_name || 'Kein Eigentumer')}</span>
+                                    <span class="font-medium text-gray-900">${esc(eigName || 'Kein Eigentümer')}</span>
                                     ${statusBadge} ${typBadge}
                                 </div>
                                 <div class="text-sm text-gray-500 flex items-center gap-3 mt-0.5">
                                     ${w.stockwerk ? `<span>${esc(w.stockwerk)}</span>` : ''}
                                     ${details ? `<span>${details}</span>` : ''}
                                 </div>
-                                ${w.bewohnt_von === 'mieter' && w.mieter_name ? `
-                                <div class="text-sm text-gray-600 mt-0.5">
-                                    <span class="text-gray-400">Mieter:</span> ${esc(w.mieter_name)}
-                                </div>` : ''}
+                                ${mieterName ? `<div class="text-sm text-gray-600 mt-0.5"><span class="text-gray-400">Mieter:</span> ${esc(mieterName)}</div>` : ''}
+                                ${verwalterName ? `<div class="text-sm text-gray-600 mt-0.5"><span class="text-gray-400">Verwalter:</span> ${esc(verwalterName)}</div>` : ''}
                             </div>
                         </div>
                         ${canWrite ? `
@@ -431,12 +410,79 @@
 
         function filterWohnungen() { renderWohnungen(); }
 
-        // ── Modal ──
-        function toggleMieter() {
-            const val = document.querySelector('input[name="bewohnt"]:checked')?.value;
-            document.getElementById('mieter-section').classList.toggle('hidden', val !== 'mieter');
+        // ── Kontakt Card ──
+        function renderKontaktCard(kontakt = {}) {
+            const id = `kontakt-${kontaktCounter++}`;
+            const rolleOptions = ROLLEN.map(r =>
+                `<option value="${r.value}" ${kontakt.rolle === r.value ? 'selected' : ''}>${r.label}</option>`
+            ).join('');
+
+            const rolleInfo = ROLLEN.find(r => r.value === (kontakt.rolle || 'eigentuemer')) || ROLLEN[0];
+            const colorMap = { green: 'border-green-300 bg-green-50', blue: 'border-blue-300 bg-blue-50', purple: 'border-purple-300 bg-purple-50', teal: 'border-teal-300 bg-teal-50', gray: 'border-gray-300 bg-gray-50' };
+
+            return `
+            <div id="${id}" class="border rounded-lg p-3 ${colorMap[rolleInfo.color] || colorMap.gray} kontakt-card">
+                <div class="flex items-center justify-between mb-2">
+                    <select onchange="updateKontaktColor(this)" class="text-sm font-medium border rounded px-2 py-1 bg-white kontakt-rolle">
+                        ${rolleOptions}
+                    </select>
+                    <button type="button" onclick="removeKontakt('${id}')" class="text-red-400 hover:text-red-600 p-1" title="Entfernen">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <div class="space-y-2">
+                    <input type="text" value="${esc(kontakt.name || '')}" placeholder="Name" class="w-full px-3 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 kontakt-name" />
+                    <div class="grid grid-cols-2 gap-2">
+                        <input type="email" value="${esc(kontakt.email || '')}" placeholder="E-Mail" class="w-full px-3 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 kontakt-email" />
+                        <input type="text" value="${esc(kontakt.telefon || '')}" placeholder="Telefon" class="w-full px-3 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 kontakt-telefon" />
+                    </div>
+                    <input type="text" value="${esc(kontakt.adresse || '')}" placeholder="Adresse (Strasse, PLZ Ort)" class="w-full px-3 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 kontakt-adresse" />
+                </div>
+            </div>`;
         }
 
+        function addKontakt(kontakt = {}) {
+            const list = document.getElementById('kontakte-list');
+            list.insertAdjacentHTML('beforeend', renderKontaktCard(kontakt));
+            document.getElementById('no-kontakte').classList.add('hidden');
+        }
+
+        function removeKontakt(id) {
+            document.getElementById(id)?.remove();
+            const list = document.getElementById('kontakte-list');
+            if (list.children.length === 0) {
+                document.getElementById('no-kontakte').classList.remove('hidden');
+            }
+        }
+
+        function updateKontaktColor(selectEl) {
+            const card = selectEl.closest('.kontakt-card');
+            const rolle = selectEl.value;
+            const info = ROLLEN.find(r => r.value === rolle) || ROLLEN[4];
+            const colorMap = { green: 'border-green-300 bg-green-50', blue: 'border-blue-300 bg-blue-50', purple: 'border-purple-300 bg-purple-50', teal: 'border-teal-300 bg-teal-50', gray: 'border-gray-300 bg-gray-50' };
+            // Remove all color classes
+            Object.values(colorMap).forEach(cls => cls.split(' ').forEach(c => card.classList.remove(c)));
+            // Add new color
+            (colorMap[info.color] || colorMap.gray).split(' ').forEach(c => card.classList.add(c));
+        }
+
+        function collectKontakte() {
+            const cards = document.querySelectorAll('#kontakte-list .kontakt-card');
+            const kontakte = [];
+            cards.forEach(card => {
+                const rolle = card.querySelector('.kontakt-rolle')?.value || 'eigentuemer';
+                const name = card.querySelector('.kontakt-name')?.value?.trim() || '';
+                const email = card.querySelector('.kontakt-email')?.value?.trim() || '';
+                const telefon = card.querySelector('.kontakt-telefon')?.value?.trim() || '';
+                const adresse = card.querySelector('.kontakt-adresse')?.value?.trim() || '';
+                if (name || email) {
+                    kontakte.push({ rolle, name: name || null, email: email || null, telefon: telefon || null, adresse: adresse || null });
+                }
+            });
+            return kontakte;
+        }
+
+        // ── Modal ──
         function showAddModal() {
             document.getElementById('modal-title').textContent = 'Neue Wohnung';
             document.getElementById('modal-error').classList.add('hidden');
@@ -448,15 +494,12 @@
             document.getElementById('f-flaeche').value = '';
             document.getElementById('f-typ').value = 'Wohnung';
             document.getElementById('f-besonderheiten').value = '';
-            document.getElementById('f-eig-name').value = '';
-            document.getElementById('f-eig-email').value = '';
-            document.getElementById('f-eig-tel').value = '';
-            document.getElementById('f-mie-name').value = '';
-            document.getElementById('f-mie-email').value = '';
-            document.getElementById('f-mie-tel').value = '';
             document.getElementById('f-notizen').value = '';
             document.querySelector('input[name="bewohnt"][value="eigentuemer"]').checked = true;
-            toggleMieter();
+            // Start with one empty Eigentümer
+            document.getElementById('kontakte-list').innerHTML = '';
+            kontaktCounter = 0;
+            addKontakt({ rolle: 'eigentuemer' });
             document.getElementById('edit-modal').classList.remove('hidden');
         }
 
@@ -472,17 +515,20 @@
             document.getElementById('f-flaeche').value = w.flaeche_m2 || '';
             document.getElementById('f-typ').value = w.typ || 'Wohnung';
             document.getElementById('f-besonderheiten').value = w.besonderheiten || '';
-            document.getElementById('f-eig-name').value = w.eigentuemer_name || '';
-            document.getElementById('f-eig-email').value = w.eigentuemer_email || '';
-            document.getElementById('f-eig-tel').value = w.eigentuemer_telefon || '';
-            document.getElementById('f-mie-name').value = w.mieter_name || '';
-            document.getElementById('f-mie-email').value = w.mieter_email || '';
-            document.getElementById('f-mie-tel').value = w.mieter_telefon || '';
             document.getElementById('f-notizen').value = w.notizen || '';
             const bewohnt = w.bewohnt_von || 'eigentuemer';
             const radio = document.querySelector(`input[name="bewohnt"][value="${bewohnt}"]`);
             if (radio) radio.checked = true;
-            toggleMieter();
+
+            // Load kontakte
+            document.getElementById('kontakte-list').innerHTML = '';
+            kontaktCounter = 0;
+            const kontakte = w.kontakte || [];
+            if (kontakte.length === 0) {
+                addKontakt({ rolle: 'eigentuemer' });
+            } else {
+                kontakte.forEach(k => addKontakt(k));
+            }
 
             if (canWrite) document.getElementById('btn-delete').classList.remove('hidden');
             else document.getElementById('btn-delete').classList.add('hidden');
@@ -510,22 +556,10 @@
                 flaeche_m2: parseFloat(document.getElementById('f-flaeche').value) || null,
                 typ: document.getElementById('f-typ').value,
                 besonderheiten: document.getElementById('f-besonderheiten').value,
-                eigentuemer_name: document.getElementById('f-eig-name').value,
-                eigentuemer_email: document.getElementById('f-eig-email').value,
-                eigentuemer_telefon: document.getElementById('f-eig-tel').value,
-                mieter_name: document.getElementById('f-mie-name').value || null,
-                mieter_email: document.getElementById('f-mie-email').value || null,
-                mieter_telefon: document.getElementById('f-mie-tel').value || null,
                 bewohnt_von: document.querySelector('input[name="bewohnt"]:checked')?.value || 'eigentuemer',
                 notizen: document.getElementById('f-notizen').value || null,
+                kontakte: collectKontakte(),
             };
-
-            // Clear mieter if not vermietet
-            if (body.bewohnt_von !== 'mieter') {
-                body.mieter_name = null;
-                body.mieter_email = null;
-                body.mieter_telefon = null;
-            }
 
             try {
                 const url = id ? `/api/wohnungen/${currentStweg}/${id}` : `/api/wohnungen/${currentStweg}`;
@@ -549,10 +583,10 @@
         // ── Delete ──
         async function deleteWohnung() {
             const id = document.getElementById('f-id').value;
-            if (!id || !confirm('Wohnung wirklich loschen?')) return;
+            if (!id || !confirm('Wohnung wirklich löschen?')) return;
             try {
                 const res = await AuthentikAuth.apiFetch(`/api/wohnungen/${currentStweg}/${id}`, { method: 'DELETE' });
-                if (!res.ok) throw new Error('Loschen fehlgeschlagen');
+                if (!res.ok) throw new Error('Löschen fehlgeschlagen');
                 closeModal();
                 await loadWohnungen();
             } catch (err) {
@@ -562,10 +596,8 @@
 
         // ── Import ──
         async function importKontakte() {
-            if (!confirm(`Kontakte-Daten fur STWEG ${currentStweg} importieren? Vorhandene Daten werden aktualisiert.`)) return;
+            if (!confirm(`Kontakte-Daten für STWEG ${currentStweg} importieren? Vorhandene Daten werden aktualisiert.`)) return;
             try {
-                // Fetch the kontakte.json for the current STWEG
-                const stweg = stwegList.find(s => s.nr === currentStweg);
                 const path = `/stweg${currentStweg}/data/kontakte.json`;
                 const configRes = await fetch(path);
                 if (!configRes.ok) throw new Error(`kontakte.json nicht gefunden unter ${path}`);
