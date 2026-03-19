@@ -1870,8 +1870,10 @@ async function pollGmailForVerteiler() {
     const lock = await client.getMailboxLock('INBOX');
 
     try {
-      // Search for unread emails, then process one at a time
-      const uids = await client.search({ seen: false }, { uid: true });
+      // Search all emails from last 7 days (not just unread) and check against DB
+      const since = new Date();
+      since.setDate(since.getDate() - 7);
+      const uids = await client.search({ since }, { uid: true });
       if (!uids.length) { lock.release(); return; }
 
       for (const uid of uids) {
@@ -1918,11 +1920,10 @@ async function pollGmailForVerteiler() {
             continue;
           }
 
-          // Dedup: skip if already processed (same message-id)
+          // Dedup: skip if already processed (same message-id in email_log)
           if (messageId) {
             const dup = await pool.query('SELECT id FROM email_log WHERE message_id = $1', [messageId]);
             if (dup.rows.length > 0) {
-              console.log(`[IMAP] Skipping duplicate: ${messageId}`);
               await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
               continue;
             }
@@ -1938,15 +1939,15 @@ async function pollGmailForVerteiler() {
             continue;
           }
 
-          // Mark as read before processing
-          await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
-
           console.log(`[IMAP] Processing: ${verteilerAddress} (UID ${uid})`);
           const result = await processInboundEmail(source, verteilerAddress, messageId);
           console.log(`[IMAP] Result: ${result.action} (${result.recipients || 0} recipients)`);
+
+          // Mark as read only after successful processing
+          await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
         } catch (msgErr) {
           console.error(`[IMAP] Error processing UID ${uid}:`, msgErr.message);
-          try { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); } catch {}
+          // Don't mark as read on error - will retry next poll
         }
       }
     } finally {
