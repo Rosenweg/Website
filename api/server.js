@@ -1906,8 +1906,11 @@ async function pollGmailForVerteiler() {
           }
 
           if (!verteilerAddress) {
-            // Not a verteiler email, mark as read and skip
-            await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
+            // Not a verteiler email, move to _sonstige
+            try {
+              try { await client.mailboxCreate('Verteiler/_sonstige'); } catch {}
+              await client.messageMove(uid, 'Verteiler/_sonstige', { uid: true });
+            } catch { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); }
             continue;
           }
 
@@ -1916,7 +1919,10 @@ async function pollGmailForVerteiler() {
             'SELECT id FROM email_verteiler WHERE email_address = $1 AND active = true', [verteilerAddress]
           );
           if (exists.rows.length === 0) {
-            await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
+            try {
+              try { await client.mailboxCreate('Verteiler/_unbekannt'); } catch {}
+              await client.messageMove(uid, 'Verteiler/_unbekannt', { uid: true });
+            } catch { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); }
             continue;
           }
 
@@ -1943,8 +1949,17 @@ async function pollGmailForVerteiler() {
           const result = await processInboundEmail(source, verteilerAddress, messageId);
           console.log(`[IMAP] Result: ${result.action} (${result.recipients || 0} recipients)`);
 
-          // Mark as read only after successful processing
-          await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
+          // Move to verteiler-named folder (e.g. "Verteiler/ausschuss")
+          const folderName = verteilerAddress.split('@')[0];
+          const targetFolder = `Verteiler/${folderName}`;
+          try {
+            try { await client.mailboxCreate(targetFolder); } catch {}
+            await client.messageMove(uid, targetFolder, { uid: true });
+          } catch (moveErr) {
+            // Fallback: just mark as read if move fails
+            console.error(`[IMAP] Move to ${targetFolder} failed:`, moveErr.message);
+            await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
+          }
         } catch (msgErr) {
           console.error(`[IMAP] Error processing UID ${uid}:`, msgErr.message);
           // Don't mark as read on error - will retry next poll
