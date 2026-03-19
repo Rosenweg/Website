@@ -3015,12 +3015,20 @@ app.post('/api/documents-preview', authMiddleware, async (req, res) => {
 
     // Send to Gotenberg for conversion
     const fileName = filePath.split('/').pop();
-    const form = new FormData();
-    form.append('files', new Blob([docBuffer], { type: 'application/octet-stream' }), fileName);
+    const boundary = '----FormBoundary' + Math.random().toString(36).slice(2);
+    const bodyParts = [
+      `--${boundary}\r\n`,
+      `Content-Disposition: form-data; name="files"; filename="${fileName}"\r\n`,
+      `Content-Type: application/octet-stream\r\n\r\n`,
+    ];
+    const header = Buffer.from(bodyParts.join(''));
+    const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
+    const multipartBody = Buffer.concat([header, docBuffer, footer]);
 
     const convertResp = await fetch(`${DOC_CONVERTER_URL}/forms/libreoffice/convert`, {
       method: 'POST',
-      body: form,
+      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+      body: multipartBody,
     });
 
     if (!convertResp.ok) {
