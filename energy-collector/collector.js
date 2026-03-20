@@ -545,11 +545,15 @@ app.get('/api/energy/meters', async (req, res) => {
 app.get('/api/energy/meters/by-location', async (req, res) => {
   const { location } = req.query;
   if (!location) return res.status(400).json({ error: 'location query parameter required' });
-  const result = await pool.query(
-    'SELECT * FROM meters WHERE location = $1 AND active = true ORDER BY name',
-    [location]
-  );
-  res.json(result.rows);
+  try {
+    const result = await pool.query(
+      'SELECT * FROM meters WHERE location = $1 AND active = true ORDER BY name',
+      [location]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Consumption for a meter between two timestamps
@@ -812,9 +816,13 @@ app.get('/api/energy/daily/:meterId', async (req, res) => {
      GROUP BY date_trunc('day', ts)
      ORDER BY day`;
 
-  const result = await pool.query(dailyQuery, [meterId, startDate.toISOString(), endDate.toISOString()]);
-  const rows = await subtractChildrenAgg(meterId, result.rows, dailyQuery, startDate.toISOString(), endDate.toISOString(), 'day');
-  res.json(rows);
+  try {
+    const result = await pool.query(dailyQuery, [meterId, startDate.toISOString(), endDate.toISOString()]);
+    const rows = await subtractChildrenAgg(meterId, result.rows, dailyQuery, startDate.toISOString(), endDate.toISOString(), 'day');
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Day summary (today or specific date via ?date=YYYY-MM-DD)
@@ -925,8 +933,12 @@ app.post('/api/energy/meters/:id/test', async (req, res) => {
 
 // --- Tariff Management ---
 app.get('/api/energy/tariffs', async (req, res) => {
-  const result = await pool.query('SELECT * FROM tariffs ORDER BY name, valid_from DESC NULLS LAST');
-  res.json(result.rows);
+  try {
+    const result = await pool.query('SELECT * FROM tariffs ORDER BY name, valid_from DESC NULLS LAST');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Get active tariffs for a date (default: today). Use ?date=YYYY-MM-DD for historical.
@@ -985,11 +997,15 @@ app.delete('/api/energy/tariffs/:id', async (req, res) => {
 
 // --- User-Meter Assignment ---
 app.get('/api/energy/meters/:meterId/users', async (req, res) => {
-  const result = await pool.query(
-    'SELECT * FROM meter_users WHERE meter_id = $1 ORDER BY user_name',
-    [req.params.meterId]
-  );
-  res.json(result.rows);
+  try {
+    const result = await pool.query(
+      'SELECT * FROM meter_users WHERE meter_id = $1 ORDER BY user_name',
+      [req.params.meterId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/energy/meters/:meterId/users', async (req, res) => {
@@ -1023,11 +1039,15 @@ app.delete('/api/energy/meters/:meterId/users/:email', async (req, res) => {
 
 // ─── Group Assignments ───────────────────────────────────────────────
 app.get('/api/energy/meters/:meterId/groups', async (req, res) => {
-  const result = await pool.query(
-    'SELECT * FROM meter_groups WHERE meter_id = $1 ORDER BY group_name',
-    [req.params.meterId]
-  );
-  res.json(result.rows);
+  try {
+    const result = await pool.query(
+      'SELECT * FROM meter_groups WHERE meter_id = $1 ORDER BY group_name',
+      [req.params.meterId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/energy/meters/:meterId/groups', async (req, res) => {
@@ -1061,15 +1081,19 @@ app.delete('/api/energy/meters/:meterId/groups/:groupName', async (req, res) => 
 
 // Get meters for a specific user (by email OR group membership)
 app.get('/api/energy/user/:email/meters', async (req, res) => {
-  const result = await pool.query(
-    `SELECT DISTINCT m.*, COALESCE(mu.role, 'viewer') as role FROM meters m
-     LEFT JOIN meter_users mu ON m.id = mu.meter_id AND mu.user_email = $1
-     LEFT JOIN meter_groups mg ON m.id = mg.meter_id
-     WHERE m.active = true AND (mu.user_email IS NOT NULL OR mg.group_name = ANY($2::text[]))
-     ORDER BY m.name`,
-    [req.params.email.toLowerCase(), req.query.groups ? req.query.groups.split(',') : []]
-  );
-  res.json(result.rows);
+  try {
+    const result = await pool.query(
+      `SELECT DISTINCT m.*, COALESCE(mu.role, 'viewer') as role FROM meters m
+       LEFT JOIN meter_users mu ON m.id = mu.meter_id AND mu.user_email = $1
+       LEFT JOIN meter_groups mg ON m.id = mg.meter_id
+       WHERE m.active = true AND (mu.user_email IS NOT NULL OR mg.group_name = ANY($2::text[]))
+       ORDER BY m.name`,
+      [req.params.email.toLowerCase(), req.query.groups ? req.query.groups.split(',') : []]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── Dashboard overview ─────────────────────────────────────────────
@@ -1250,9 +1274,6 @@ app.get('/api/energy/projection/:meterId', async (req, res) => {
 });
 
 // ─── Alerts endpoint ────────────────────────────────────────────────
-// Alert check: runs as part of polling, stores alerts in memory (no DB table needed yet)
-const activeAlerts = [];
-
 app.get('/api/energy/alerts', async (req, res) => {
   try {
     // Check all active meters for issues
@@ -1322,8 +1343,9 @@ app.get('/api/energy/export/:meterId', async (req, res) => {
     );
     const csv = [header, ...rows].join('\n');
 
+    const safeName = meterName.replace(/[^a-zA-Z0-9_-]/g, '_');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${meterName}_${from}_${to}.csv"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}_${from}_${to}.csv"`);
     res.send('\uFEFF' + csv); // BOM for Excel
   } catch (err) {
     res.status(500).json({ error: err.message });

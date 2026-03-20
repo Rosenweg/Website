@@ -1,6 +1,11 @@
 // API Configuration
 const API_BASE_URL = '/api';
 
+// HTML escaping helper
+function escHtml(str) {
+  return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 // State
 let currentUser = null;
 let authToken = null;
@@ -201,8 +206,8 @@ function renderDevices() {
           <div class="flex items-center">
             ${getDeviceIcon(device.device_type)}
             <div class="ml-3">
-              <h3 class="text-lg font-semibold text-gray-800">${device.device_name}</h3>
-              <p class="text-sm text-gray-500">${device.location}</p>
+              <h3 class="text-lg font-semibold text-gray-800">${escHtml(device.device_name)}</h3>
+              <p class="text-sm text-gray-500">${escHtml(device.location)}</p>
             </div>
           </div>
           <div class="flex items-center">
@@ -376,8 +381,8 @@ function renderUserSessions(sessions) {
         ${sessions.map(session => `
           <tr class="hover:bg-gray-50">
             <td class="px-6 py-4">
-              <div class="text-sm font-medium text-gray-900">${session.device_name}</div>
-              <div class="text-sm text-gray-500">${session.location}</div>
+              <div class="text-sm font-medium text-gray-900">${escHtml(session.device_name)}</div>
+              <div class="text-sm text-gray-500">${escHtml(session.location)}</div>
             </td>
             <td class="px-6 py-4 text-sm text-gray-900">
               ${new Date(session.started_at).toLocaleString('de-CH')}
