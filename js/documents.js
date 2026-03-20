@@ -316,20 +316,22 @@ const RosenwegDocs = {
 
   showReplaceDialog(path) {
     const fileName = this.getFileName(path);
+    const safeFileName = this._escapeHtml(fileName);
+    const safePath = this._escapeHtml(path);
     const modal = document.createElement('div');
     modal.id = 'docs-upload-modal';
     modal.className = 'fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4';
     modal.innerHTML = `
       <div class="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
         <h3 class="text-lg font-bold mb-4">Dokument ersetzen</h3>
-        <p class="text-sm text-gray-600 mb-4">Aktuelle Datei: <strong>${fileName}</strong></p>
+        <p class="text-sm text-gray-600 mb-4">Aktuelle Datei: <strong>${safeFileName}</strong></p>
         <div class="space-y-4">
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Neue Datei</label>
             <input type="file" id="upload-file" class="w-full border rounded-lg px-3 py-2"
               accept=".pdf,.xlsx,.xls,.docx,.doc,.pptx,.png,.jpg,.jpeg,.txt,.csv">
           </div>
-          <input type="hidden" id="replace-path" value="${path}">
+          <input type="hidden" id="replace-path" value="${safePath}">
           <div id="upload-progress" class="hidden">
             <div class="flex items-center justify-between text-sm mb-1">
               <span id="upload-status-text" class="text-gray-600">Wird hochgeladen...</span>
