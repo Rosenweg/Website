@@ -5,6 +5,11 @@ const nodemailer = require('nodemailer');
 const { simpleParser } = require('mailparser');
 const crypto = require('crypto');
 
+/** Escape string for safe HTML insertion */
+function escapeHtml(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 // STWEG group mapping (Authentik group names per STWEG)
 const STWEG_GROUPS = {
   1: { bewohner: 'stweg1-bewohner', eigentuemer: 'stweg1-eigentuemer', ausschuss: 'stweg1-ausschuss' },
@@ -78,9 +83,31 @@ app.get('/api/health', async (req, res) => {
 // OTP ENDPOINTS (replaces n8n stweg3-otp, send-otp, verify-otp)
 // ═══════════════════════════════════════════════════════════════════
 
+// Rate limiting for OTP endpoints
+const otpRateLimit = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of otpRateLimit) {
+    if (now - val.first > 10 * 60 * 1000) otpRateLimit.delete(key);
+  }
+}, 60 * 1000);
+
 app.post('/api/otp/send', async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'E-Mail erforderlich' });
+
+  // Rate limit: max 3 OTP requests per email per 10 minutes
+  const rateLimitKey = email.toLowerCase().trim();
+  const now = Date.now();
+  const entry = otpRateLimit.get(rateLimitKey);
+  if (entry && now - entry.first < 10 * 60 * 1000 && entry.count >= 3) {
+    return res.status(429).json({ error: 'Zu viele Anfragen. Bitte warten Sie einige Minuten.' });
+  }
+  if (entry && now - entry.first < 10 * 60 * 1000) {
+    entry.count++;
+  } else {
+    otpRateLimit.set(rateLimitKey, { first: now, count: 1 });
+  }
 
   try {
     // Check if email is authorized
@@ -116,7 +143,7 @@ app.post('/api/otp/send', async (req, res) => {
       html: `
         <div style="font-family: sans-serif; max-width: 400px; margin: 0 auto; padding: 20px;">
           <h2 style="color: #1e40af;">Rosenweg Login</h2>
-          <p>Hallo ${user.name},</p>
+          <p>Hallo ${escapeHtml(user.name)},</p>
           <p>Ihr Anmeldecode lautet:</p>
           <div style="background: #f0f9ff; border: 2px solid #3b82f6; border-radius: 8px; padding: 20px; text-align: center; margin: 20px 0;">
             <span style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #1e40af;">${code}</span>
@@ -133,9 +160,31 @@ app.post('/api/otp/send', async (req, res) => {
   }
 });
 
+// Rate limiting for OTP verification
+const otpVerifyRateLimit = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of otpVerifyRateLimit) {
+    if (now - val.first > 10 * 60 * 1000) otpVerifyRateLimit.delete(key);
+  }
+}, 60 * 1000);
+
 app.post('/api/otp/verify', async (req, res) => {
   const { email, code } = req.body;
   if (!email || !code) return res.status(400).json({ error: 'E-Mail und Code erforderlich' });
+
+  // Rate limit: max 5 verify attempts per email per 10 minutes
+  const verifyKey = email.toLowerCase().trim();
+  const now = Date.now();
+  const entry = otpVerifyRateLimit.get(verifyKey);
+  if (entry && now - entry.first < 10 * 60 * 1000 && entry.count >= 5) {
+    return res.status(429).json({ error: 'Zu viele Fehlversuche. Bitte warten Sie einige Minuten.' });
+  }
+  if (entry && now - entry.first < 10 * 60 * 1000) {
+    entry.count++;
+  } else {
+    otpVerifyRateLimit.set(verifyKey, { first: now, count: 1 });
+  }
 
   try {
     const result = await pool.query(
@@ -234,7 +283,17 @@ app.get('/api/auth/login', (req, res) => {
 });
 
 // Logout - end Authentik session and redirect back
-app.get('/api/auth/logout', (req, res) => {
+app.get('/api/auth/logout', async (req, res) => {
+  // Invalidate local session if token is provided
+  const token = req.headers.authorization?.replace('Bearer ', '') || req.query.token;
+  if (token) {
+    try {
+      await pool.query('DELETE FROM sessions WHERE token = $1', [token]);
+    } catch (err) {
+      console.error('Session invalidation error:', err.message);
+    }
+  }
+
   const { redirect } = req.query;
   const postLogoutRedirect = redirect || SITE_URL;
   const params = new URLSearchParams({
@@ -268,8 +327,6 @@ app.get('/api/auth/callback', async (req, res) => {
       client_id: AUTHENTIK_CLIENT_ID,
       client_secret: AUTHENTIK_CLIENT_SECRET,
     }).toString();
-    console.log('Token exchange URL:', tokenUrl);
-    console.log('Redirect URI:', `${SITE_URL}/api/auth/callback`);
     const tokenResp = await fetch(tokenUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -277,10 +334,9 @@ app.get('/api/auth/callback', async (req, res) => {
       signal: AbortSignal.timeout(10000),
     });
     const tokenText = await tokenResp.text();
-    console.log('Token response status:', tokenResp.status, 'body:', tokenText.substring(0, 500));
     const tokenData = tokenText ? JSON.parse(tokenText) : {};
     if (!tokenData.access_token) {
-      console.error('Token exchange failed:', tokenData);
+      console.error('Token exchange failed, status:', tokenResp.status);
       return res.status(400).send('Token-Austausch fehlgeschlagen');
     }
 
@@ -437,6 +493,12 @@ function canManageDocs(req, res, next) {
   next();
 }
 
+/** Parse and validate stweg param - returns number or null */
+function parseStweg(val) {
+  const n = parseInt(val, 10);
+  return (Number.isFinite(n) && n > 0) ? n : null;
+}
+
 /** Get STWEG numbers a user belongs to based on their groups */
 function getUserStwegs(groups) {
   const stwegs = new Set();
@@ -479,7 +541,8 @@ function canWriteDocPath(filePath, groups) {
 
 /** Middleware: require user to have access to the :stweg param (Technik=all, Ausschuss/Bewohner=own STWEG) */
 function requireStwegAccess(req, res, next) {
-  const stweg = parseInt(req.params.stweg);
+  const stweg = parseStweg(req.params.stweg);
+  if (!stweg) return res.status(400).json({ error: 'Ungültige STWEG-Nummer' });
   const groups = req.user?.groups || [];
   if (isTechnik(groups)) return next();
   const stwegGroups = STWEG_GROUPS[stweg];
@@ -810,7 +873,7 @@ app.post('/api/wasch/rooms', authMiddleware, adminOnly, async (req, res) => {
     );
     res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -826,7 +889,7 @@ app.put('/api/wasch/rooms/:id', authMiddleware, adminOnly, async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ error: 'Raum nicht gefunden' });
     res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -1274,7 +1337,7 @@ async function runMonthlyBilling() {
           const endStr = `${String(end.getHours()).padStart(2,'0')}:${String(end.getMinutes()).padStart(2,'0')}`;
           return `<tr>
             <td style="padding:6px 10px;border:1px solid #e5e7eb;">${dateStr}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb;">${s.room_name}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb;">${escapeHtml(s.room_name)}</td>
             <td style="padding:6px 10px;border:1px solid #e5e7eb;">${startStr}-${endStr} (${s.duration_minutes} Min.)</td>
             <td style="padding:6px 10px;border:1px solid #e5e7eb;">${parseFloat(s.energy_consumed).toFixed(3)} kWh</td>
             <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right;">CHF ${parseFloat(s.cost).toFixed(2)}</td>
@@ -1289,7 +1352,7 @@ async function runMonthlyBilling() {
             html: `
               <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto;">
                 <h2 style="color: #1a56db;">Waschküche Abrechnung</h2>
-                <p>Hallo ${user.name},</p>
+                <p>Hallo ${escapeHtml(user.name)},</p>
                 <p>hier ist Ihre minutengenaue Waschküche-Abrechnung für <strong>${monthName} ${year}</strong>:</p>
 
                 <h3 style="color:#374151;margin-top:24px;">Einzelnachweise</h3>
@@ -1350,9 +1413,9 @@ async function runMonthlyBilling() {
             'UPDATE wasch_billing SET email_sent = true, email_sent_at = NOW() WHERE user_id = $1 AND month = $2',
             [user.user_id, monthStart]
           );
-          console.log(`[Waschküche] Billing email sent to ${user.email} for ${monthStr}`);
+          console.log(`[Waschküche] Billing email sent to user ${user.user_id} for ${monthStr}`);
         } catch (emailErr) {
-          console.error(`[Waschküche] Email to ${user.email} failed:`, emailErr.message);
+          console.error(`[Waschküche] Email to user ${user.user_id} failed:`, emailErr.message);
         }
       }
     }
@@ -1418,7 +1481,7 @@ app.post('/api/wasch/admin/billing/run', authMiddleware, adminOnly, async (req, 
     await runMonthlyBilling();
     res.json({ success: true, message: 'Abrechnung wurde ausgeführt' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -1542,7 +1605,7 @@ app.get('/api/wasch/admin/doors', authMiddleware, adminOnly, async (req, res) =>
     }
     res.json(statuses);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -1553,11 +1616,11 @@ app.post('/api/wasch/admin/doors/:roomId/unlock', authMiddleware, adminOnly, asy
     if (room.rows.length === 0) return res.status(404).json({ error: 'Raum nicht gefunden' });
     if (!room.rows[0].unifi_door_id) return res.status(400).json({ error: 'Kein UniFi Türschloss konfiguriert' });
 
-    const duration = parseInt(req.body.duration) || 30;
+    const duration = Math.min(Math.max(parseInt(req.body.duration) || 30, 5), 300); // 5s min, 5min max
     const ok = await unlockDoor(room.rows[0].unifi_door_id, duration);
     res.json({ success: ok, message: ok ? `Tür für ${duration}s entsperrt` : 'UniFi Access nicht erreichbar' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -1566,10 +1629,12 @@ app.post('/api/wasch/admin/doors/:roomId/unlock', authMiddleware, adminOnly, asy
 // ═══════════════════════════════════════════════════════════════════
 
 app.get('/api/kontakte/:stweg', async (req, res) => {
+  const stweg = parseStweg(req.params.stweg);
+  if (!stweg) return res.status(400).json({ error: 'Ungültige STWEG-Nummer' });
   try {
     const result = await pool.query(
       `SELECT * FROM kontakte WHERE stweg = $1 ORDER BY sort_order, name`,
-      [parseInt(req.params.stweg)]
+      [stweg]
     );
     res.json({ kontakte: result.rows });
   } catch (err) {
@@ -1672,7 +1737,7 @@ app.get('/api/verteiler/by-stweg/:stweg', authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT * FROM email_verteiler WHERE stweg = $1 ORDER BY name`,
-      [parseInt(req.params.stweg)]
+      [parseStweg(req.params.stweg)]
     );
     res.json(result.rows);
   } catch (err) {
@@ -1956,7 +2021,7 @@ async function pollGmailForVerteiler() {
 
           // To: header contains @rosenweg4303.ch address (strip +tag if present)
           if (!verteilerAddress) {
-            const toMatch = headers.match(/^To:\s*[^]*?([a-z0-9._+-]+@rosenweg4303\.ch)/im);
+            const toMatch = headers.match(/^To:\s*.*?([a-z0-9._+-]+@rosenweg4303\.ch)/im);
             if (toMatch) {
               verteilerAddress = toMatch[1].toLowerCase().replace(/\+[^@]*/, '');
             }
@@ -2225,7 +2290,7 @@ async function saveKontakte(client, wohnungId, kontakte) {
 // GET /api/wohnungen/:stweg - List all apartments for a STWEG
 app.get('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
   try {
-    const stweg = parseInt(req.params.stweg);
+    const stweg = parseStweg(req.params.stweg);
     const wResult = await pool.query('SELECT * FROM wohnungen WHERE stweg = $1', [stweg]);
     const kResult = await pool.query(
       `SELECT k.* FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id WHERE w.stweg = $1 ORDER BY k.rolle, k.sort_order, k.id`,
@@ -2265,7 +2330,7 @@ app.get('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverw
 // GET /api/wohnungen/:stweg/stats - Occupancy statistics
 app.get('/api/wohnungen/:stweg/stats', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
   try {
-    const stweg = parseInt(req.params.stweg);
+    const stweg = parseStweg(req.params.stweg);
     const result = await pool.query(
       `SELECT COUNT(*) as total,
               COUNT(*) FILTER (WHERE bewohnt_von = 'eigentuemer') as selbstbewohnt,
@@ -2284,7 +2349,7 @@ app.get('/api/wohnungen/:stweg/stats', authMiddleware, requirePermission('wohnun
 app.get('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
   try {
     const w = await loadWohnungMitKontakte(parseInt(req.params.id));
-    if (!w || w.stweg !== parseInt(req.params.stweg)) return res.status(404).json({ error: 'Wohnung nicht gefunden' });
+    if (!w || w.stweg !== parseStweg(req.params.stweg)) return res.status(404).json({ error: 'Wohnung nicht gefunden' });
     res.json(w);
   } catch (err) {
     console.error('Wohnung get error:', err);
@@ -2296,7 +2361,7 @@ app.get('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
 app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, async (req, res) => {
   const client = await pool.connect();
   try {
-    const stweg = parseInt(req.params.stweg);
+    const stweg = parseStweg(req.params.stweg);
     const b = req.body;
     await client.query('BEGIN');
     const result = await client.query(
@@ -2377,7 +2442,7 @@ app.delete('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnu
 app.post('/api/wohnungen/:stweg/import', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, async (req, res) => {
   const client = await pool.connect();
   try {
-    const stweg = parseInt(req.params.stweg);
+    const stweg = parseStweg(req.params.stweg);
     const data = req.body;
     if (!data.wohnungen) return res.status(400).json({ error: 'Keine Wohnungsdaten gefunden' });
 
@@ -2886,7 +2951,7 @@ app.get('/api/admin/users', authMiddleware, requirePermission('bewohner-verwaltu
     res.json(data);
   } catch (err) {
     console.error('Admin list users error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -2911,7 +2976,7 @@ app.post('/api/admin/users', authMiddleware, requirePermission('bewohner-verwalt
     res.json(user);
   } catch (err) {
     console.error('Admin create user error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -2922,7 +2987,7 @@ app.get('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verw
     res.json(data);
   } catch (err) {
     console.error('Admin get user error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -3007,7 +3072,7 @@ app.put('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verw
     res.json(updated);
   } catch (err) {
     console.error('Admin update user error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -3018,7 +3083,7 @@ app.delete('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-v
     res.json({ success: true });
   } catch (err) {
     console.error('Admin delete user error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -3029,7 +3094,7 @@ app.get('/api/admin/groups', authMiddleware, requirePermission('bewohner-verwalt
     res.json(data);
   } catch (err) {
     console.error('Admin list groups error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -3046,7 +3111,7 @@ app.get('/api/admin/groups/:pk', authMiddleware, requirePermission('bewohner-ver
     res.json(data);
   } catch (err) {
     console.error('Admin get group detail error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -3057,7 +3122,7 @@ app.put('/api/admin/groups/:pk/add_user', authMiddleware, requirePermission('bew
     res.json(data);
   } catch (err) {
     console.error('Admin add user to group error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -3068,7 +3133,7 @@ app.put('/api/admin/groups/:pk/remove_user', authMiddleware, requirePermission('
     res.json(data);
   } catch (err) {
     console.error('Admin remove user from group error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -3127,7 +3192,7 @@ const PREVIEW_CACHE_TTL = 30 * 60 * 1000; // 30 min
 app.post('/api/documents-preview', authMiddleware, async (req, res) => {
   try {
     const filePath = req.body?.path;
-    if (!filePath || filePath.includes('..') || filePath.startsWith('/')) {
+    if (!filePath || filePath.includes('..') || filePath.startsWith('/') || /[%\\]/.test(filePath) || /\0/.test(filePath)) {
       return res.status(400).json({ error: 'Ungültiger Pfad' });
     }
 
@@ -3203,7 +3268,7 @@ app.get('/api/documents/:path(*)', authMiddleware, async (req, res) => {
     const filePath = req.params.path;
 
     // Prevent path traversal
-    if (filePath.includes('..') || filePath.startsWith('/')) {
+    if (filePath.includes('..') || filePath.startsWith('/') || /[%\\]/.test(filePath) || /\0/.test(filePath)) {
       return res.status(400).json({ error: 'Ungültiger Pfad' });
     }
 
@@ -3325,7 +3390,7 @@ app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, re
   try {
     // Sanitize filename: keep folder structure, clean the filename part
     const rawPath = req.params.path;
-    if (rawPath.includes('..') || rawPath.startsWith('/')) {
+    if (rawPath.includes('..') || rawPath.startsWith('/') || /[%\\]/.test(rawPath) || /\0/.test(rawPath)) {
       return res.status(400).json({ error: 'Ungültiger Pfad' });
     }
     const parts = rawPath.split('/');
@@ -3335,6 +3400,14 @@ app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, re
       .replace(/[^a-zA-Z0-9._-]/g, '-')
       .replace(/-+/g, '-').replace(/^-|-$/g, '')
       .toLowerCase();
+
+    // Validate file extension
+    const ALLOWED_UPLOAD_EXTS = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'txt', 'csv', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'dotx']);
+    const uploadExt = fileName.split('.').pop();
+    if (!uploadExt || !ALLOWED_UPLOAD_EXTS.has(uploadExt)) {
+      return res.status(400).json({ error: `Dateityp .${uploadExt} nicht erlaubt` });
+    }
+
     parts.push(fileName);
     const filePath = parts.join('/');
 
