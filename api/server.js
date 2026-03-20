@@ -435,7 +435,7 @@ function isTechnik(groups) {
 function isDocPathAllowed(filePath, groups) {
   if (isTechnik(groups)) return true;
   const folder = filePath.includes('/') ? filePath.split('/')[0] : 'allgemein';
-  if (folder === 'allgemein') return true;
+  if (folder === 'allgemein' || folder.toLowerCase() === 'scans') return true;
   const stwegs = getUserStwegs(groups);
   const match = folder.match(/^stweg(\d+)$/);
   return match && stwegs.has(parseInt(match[1]));
