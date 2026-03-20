@@ -7,6 +7,10 @@
 const RosenwegNav = {
   _config: null,
 
+  _esc(str) {
+    return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  },
+
   async init(opts = {}) {
     const nav = document.getElementById('main-nav');
     if (!nav) return;
@@ -46,9 +50,9 @@ const RosenwegNav = {
     const stwegen = this._config?.stwegen || [];
 
     const desktopLinks = stwegen.map(s => {
-      const label = s.typ === 'Tiefgarage' ? `${s.name} – TG ${s.adressen}` : `${s.name} – ${s.adressen}`;
+      const label = s.typ === 'Tiefgarage' ? `${this._esc(s.name)} – TG ${this._esc(s.adressen)}` : `${this._esc(s.name)} – ${this._esc(s.adressen)}`;
       const sep = s.nr === 8 ? '<hr class="my-1">' : '';
-      return `${sep}<a href="${base}stweg${s.nr}/" class="${dropA('stweg' + s.nr)} block px-4 py-2 text-sm">${label}</a>`;
+      return `${sep}<a href="${base}stweg${parseInt(s.nr)}/" class="${dropA('stweg' + s.nr)} block px-4 py-2 text-sm">${label}</a>`;
     }).join('\n              ');
 
     const mobileLinks = stwegen.map(s =>
@@ -262,7 +266,7 @@ const RosenwegNav = {
 
         if (mobileAuth) {
           mobileAuth.innerHTML = `
-            <a href="${base}profil.html" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">${user.name || user.email}</a>
+            <a href="${base}profil.html" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">${this._esc(user.name || user.email)}</a>
             <button onclick="AuthentikAuth.logout()" class="block w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded">Abmelden</button>`;
         }
 

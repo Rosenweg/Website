@@ -295,7 +295,14 @@ app.get('/api/auth/logout', async (req, res) => {
   }
 
   const { redirect } = req.query;
-  const postLogoutRedirect = redirect || SITE_URL;
+  // Only allow redirects to our own site to prevent open redirect
+  let postLogoutRedirect = SITE_URL;
+  if (redirect) {
+    try {
+      const url = new URL(redirect, SITE_URL);
+      if (url.origin === new URL(SITE_URL).origin) postLogoutRedirect = url.href;
+    } catch {}
+  }
   const params = new URLSearchParams({
     post_logout_redirect_uri: postLogoutRedirect,
     client_id: AUTHENTIK_CLIENT_ID,
@@ -1069,6 +1076,7 @@ app.get('/api/wasch/my/sessions', authMiddleware, async (req, res) => {
        WHERE s.user_id = $1`;
     const params = [req.user.user_id];
     if (month) {
+      if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'Ungültiges Monatsformat (YYYY-MM)' });
       params.push(month + '-01');
       query += ` AND s.started_at >= $${params.length}::date AND s.started_at < ($${params.length}::date + interval '1 month')`;
     }
@@ -1143,6 +1151,7 @@ app.get('/api/wasch/admin/sessions', authMiddleware, adminOnly, async (req, res)
        JOIN wasch_rooms rm ON rm.id = s.room_id`;
     const params = [];
     if (month) {
+      if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'Ungültiges Monatsformat (YYYY-MM)' });
       params.push(month + '-01');
       query += ` WHERE s.started_at >= $1::date AND s.started_at < ($1::date + interval '1 month')`;
     }
@@ -1159,6 +1168,7 @@ app.get('/api/wasch/admin/costs', authMiddleware, adminOnly, async (req, res) =>
   try {
     const { month } = req.query;
     const monthStr = month || new Date().toISOString().slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(monthStr)) return res.status(400).json({ error: 'Ungültiges Monatsformat (YYYY-MM)' });
     const result = await pool.query(
       `SELECT u.name, u.wohnung, u.email,
          COUNT(s.id) as sessions,
@@ -1207,7 +1217,9 @@ app.get('/api/wasch/settings', authMiddleware, async (req, res) => {
 app.put('/api/wasch/settings', authMiddleware, adminOnly, async (req, res) => {
   try {
     const settings = req.body;
+    const ALLOWED_SETTINGS = ['cost_per_kwh', 'auto_billing', 'billing_day', 'reservation_max_days', 'reservation_max_per_user'];
     for (const [key, value] of Object.entries(settings)) {
+      if (!ALLOWED_SETTINGS.includes(key)) continue;
       await pool.query(
         `INSERT INTO wasch_settings (key, value, updated_at) VALUES ($1, $2, NOW())
          ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
@@ -1628,7 +1640,7 @@ app.post('/api/wasch/admin/doors/:roomId/unlock', authMiddleware, adminOnly, asy
 // KONTAKTE (replaces n8n stweg3-save-json)
 // ═══════════════════════════════════════════════════════════════════
 
-app.get('/api/kontakte/:stweg', async (req, res) => {
+app.get('/api/kontakte/:stweg', authMiddleware, async (req, res) => {
   const stweg = parseStweg(req.params.stweg);
   if (!stweg) return res.status(400).json({ error: 'Ungültige STWEG-Nummer' });
   try {
@@ -1751,10 +1763,17 @@ app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
     return res.status(400).json({ error: 'Betreff, Text und Empfänger erforderlich' });
   }
 
+  // Validate all recipients are valid email addresses
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const validRecipients = recipients.filter(r => typeof r === 'string' && emailRegex.test(r));
+  if (validRecipients.length === 0) {
+    return res.status(400).json({ error: 'Keine gültigen E-Mail-Adressen' });
+  }
+
   try {
     let sent = 0;
     const failed = [];
-    for (const to of recipients) {
+    for (const to of validRecipients) {
       try {
         await transporter.sendMail({
           from: MAIL_FROM,
@@ -1764,7 +1783,7 @@ app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
         });
         sent++;
       } catch (sendErr) {
-        console.error(`Failed to send to ${to}:`, sendErr.message);
+        console.error(`Failed to send to recipient:`, sendErr.message);
         failed.push(to);
       }
     }
@@ -1808,6 +1827,7 @@ app.post('/api/zaehler/benutzer', authMiddleware, adminOnly, async (req, res) =>
 app.post('/api/zaehler/daten', authMiddleware, async (req, res) => {
   // Receives meter data from ioBroker/webhook
   const { zaehler_id, wert, timestamp } = req.body;
+  if (!zaehler_id || wert == null) return res.status(400).json({ error: 'zaehler_id und wert erforderlich' });
   try {
     await pool.query(
       `INSERT INTO zaehler_daten (zaehler_id, wert, timestamp)
@@ -1870,7 +1890,7 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
     return { success: false, error: 'No recipient found' };
   }
 
-  console.log(`Email inbound: ${parsed.from?.text} → ${toAddress} | Subject: ${parsed.subject}`);
+  console.log(`Email inbound → ${toAddress} | Subject: ${parsed.subject?.substring(0, 80)}`);
 
   const verteiler = await pool.query(
     'SELECT * FROM email_verteiler WHERE email_address = $1 AND active = true',
@@ -2276,13 +2296,15 @@ async function loadWohnungMitKontakte(wohnungId) {
 async function saveKontakte(client, wohnungId, kontakte) {
   await client.query('DELETE FROM wohnungen_kontakte WHERE wohnung_id = $1', [wohnungId]);
   if (!kontakte || !Array.isArray(kontakte)) return;
+  const VALID_ROLLEN = ['eigentuemer', 'mieter', 'verwalter', 'handwerker'];
   for (let i = 0; i < kontakte.length; i++) {
     const k = kontakte[i];
     if (!k.name && !k.email) continue;
+    const rolle = VALID_ROLLEN.includes(k.rolle) ? k.rolle : 'eigentuemer';
     await client.query(
       `INSERT INTO wohnungen_kontakte (wohnung_id, rolle, name, email, telefon, adresse, sort_order)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [wohnungId, k.rolle || 'eigentuemer', k.name || null, k.email || null, k.telefon || null, k.adresse || null, i]
+      [wohnungId, rolle, k.name || null, k.email || null, k.telefon || null, k.adresse || null, i]
     );
   }
 }
@@ -2348,7 +2370,9 @@ app.get('/api/wohnungen/:stweg/stats', authMiddleware, requirePermission('wohnun
 // GET /api/wohnungen/:stweg/:id - Single apartment with kontakte
 app.get('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
   try {
-    const w = await loadWohnungMitKontakte(parseInt(req.params.id));
+    const wId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(wId) || wId < 1) return res.status(400).json({ error: 'Ungültige Wohnungs-ID' });
+    const w = await loadWohnungMitKontakte(wId);
     if (!w || w.stweg !== parseStweg(req.params.stweg)) return res.status(404).json({ error: 'Wohnung nicht gefunden' });
     res.json(w);
   } catch (err) {
@@ -2982,8 +3006,10 @@ app.post('/api/admin/users', authMiddleware, requirePermission('bewohner-verwalt
 
 // GET /api/admin/users/:pk - Get single user
 app.get('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verwaltung', 'read'), async (req, res) => {
+  const pk = parseInt(req.params.pk, 10);
+  if (!Number.isFinite(pk) || pk < 1) return res.status(400).json({ error: 'Ungültige User-ID' });
   try {
-    const data = await authentikAPI('GET', `/core/users/${req.params.pk}/`);
+    const data = await authentikAPI('GET', `/core/users/${pk}/`);
     res.json(data);
   } catch (err) {
     console.error('Admin get user error:', err.message);
@@ -3042,9 +3068,10 @@ function resolveGroupHierarchy(desiredGroupPks, allGroups) {
 
 // PUT /api/admin/users/:pk - Update user
 app.put('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verwaltung', 'write'), async (req, res) => {
+  const userPk = parseInt(req.params.pk, 10);
+  if (!Number.isFinite(userPk) || userPk < 1) return res.status(400).json({ error: 'Ungültige User-ID' });
   try {
     const { name, email, is_active, groups } = req.body;
-    const userPk = parseInt(req.params.pk);
     const patchBody = {};
     if (name !== undefined) patchBody.name = name;
     if (email !== undefined) patchBody.email = email;
@@ -3078,8 +3105,10 @@ app.put('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verw
 
 // DELETE /api/admin/users/:pk - Delete/deactivate user
 app.delete('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verwaltung', 'write'), async (req, res) => {
+  const pk = parseInt(req.params.pk, 10);
+  if (!Number.isFinite(pk) || pk < 1) return res.status(400).json({ error: 'Ungültige User-ID' });
   try {
-    await authentikAPI('DELETE', `/core/users/${req.params.pk}/`);
+    await authentikAPI('DELETE', `/core/users/${pk}/`);
     res.json({ success: true });
   } catch (err) {
     console.error('Admin delete user error:', err.message);

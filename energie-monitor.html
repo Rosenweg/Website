@@ -297,6 +297,7 @@
     </main>
 
     <script>
+    function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
     // ─── Config ─────────────────────────────────────────────────────
     const API = '/api/energy';
     const POLL_INTERVAL = 5000;
@@ -1191,7 +1192,7 @@
                 </div>`;
             }).join('');
         } catch (err) {
-            container.innerHTML = `<p class="text-red-500 text-sm">Fehler: ${err.message}</p>`;
+            container.innerHTML = `<p class="text-red-500 text-sm">Fehler: ${esc(err.message)}</p>`;
         }
     }
 
