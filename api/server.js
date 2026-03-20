@@ -1897,16 +1897,25 @@ async function pollGmailForVerteiler() {
           }
           if (!headers) { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); continue; }
 
-          // Extract Message-ID for deduplication
+          // Extract Message-ID for deduplication (fallback: hash from Date+Subject+From)
           const msgIdMatch = headers.match(/^Message-ID:\s*<?([^>\r\n]+)>?/im);
-          const messageId = msgIdMatch ? msgIdMatch[1].trim() : null;
+          let messageId = msgIdMatch ? msgIdMatch[1].trim() : null;
+          if (!messageId) {
+            const dateH = (headers.match(/^Date:\s*(.+)/im) || [])[1] || '';
+            const subjH = (headers.match(/^Subject:\s*(.+)/im) || [])[1] || '';
+            const fromH = (headers.match(/^From:\s*(.+)/im) || [])[1] || '';
+            const crypto = require('crypto');
+            messageId = 'gen-' + crypto.createHash('md5').update(dateH + subjH + fromH).digest('hex');
+          }
 
           let verteilerAddress = null;
 
-          // Plus-tag in Delivered-To (rosenweg4303+ausschuss@gmail.com)
+          // Plus-tag in Delivered-To (rosenweg4303+ausschuss@gmail.com or rosenweg4303+ausschuss+tag@gmail.com)
           const plusMatch = headers.match(/^Delivered-To:\s*[^+\r\n]+\+([^@\r\n]+)@/im);
           if (plusMatch) {
-            verteilerAddress = `${plusMatch[1].toLowerCase()}@${VERTEILER_DOMAIN}`;
+            // Strip sub-tags: "ausschuss+xyz" → "ausschuss"
+            const base = plusMatch[1].toLowerCase().split('+')[0];
+            verteilerAddress = `${base}@${VERTEILER_DOMAIN}`;
           }
 
           // To: header contains @rosenweg4303.ch address (strip +tag if present)
@@ -1939,12 +1948,15 @@ async function pollGmailForVerteiler() {
           }
 
           // Dedup: skip if already processed (same message-id in email_log)
-          if (messageId) {
-            const dup = await pool.query('SELECT id FROM email_log WHERE message_id = $1', [messageId]);
-            if (dup.rows.length > 0) {
-              await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
-              continue;
-            }
+          const dup = await pool.query('SELECT id FROM email_log WHERE message_id = $1', [messageId]);
+          if (dup.rows.length > 0) {
+            // Already processed, just ensure it's moved to the right folder
+            try {
+              const folderName2 = verteilerAddress.split('@')[0];
+              try { await client.mailboxCreate(`Verteiler/${folderName2}`); } catch {}
+              await client.messageMove(uid, `Verteiler/${folderName2}`, { uid: true });
+            } catch { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); }
+            continue;
           }
 
           // Now fetch the full source for processing
@@ -2149,6 +2161,13 @@ async function loadWohnungMitKontakte(wohnungId) {
   const w = wRes.rows[0];
   const kRes = await pool.query('SELECT * FROM wohnungen_kontakte WHERE wohnung_id = $1 ORDER BY rolle, sort_order, id', [wohnungId]);
   w.kontakte = kRes.rows;
+  // Fallback: synthesize kontakte from flat fields
+  if (w.kontakte.length === 0 && w.eigentuemer_name) {
+    w.kontakte.push({ rolle: 'eigentuemer', name: w.eigentuemer_name, email: w.eigentuemer_email || null, telefon: w.eigentuemer_telefon || null, adresse: null });
+  }
+  if (w.kontakte.length === 0 && w.mieter_name) {
+    w.kontakte.push({ rolle: 'mieter', name: w.mieter_name, email: w.mieter_email || null, telefon: w.mieter_telefon || null, adresse: null });
+  }
   return w;
 }
 
@@ -2182,7 +2201,23 @@ app.get('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverw
       if (!kontakteMap[k.wohnung_id]) kontakteMap[k.wohnung_id] = [];
       kontakteMap[k.wohnung_id].push(k);
     }
-    const wohnungen = wResult.rows.map(w => ({ ...w, kontakte: kontakteMap[w.id] || [] }));
+    const wohnungen = wResult.rows.map(w => {
+      const kontakte = kontakteMap[w.id] || [];
+      // Fallback: if no kontakte but flat eigentuemer_name exists, synthesize a kontakt
+      if (kontakte.length === 0 && w.eigentuemer_name) {
+        kontakte.push({
+          rolle: 'eigentuemer', name: w.eigentuemer_name,
+          email: w.eigentuemer_email || null, telefon: w.eigentuemer_telefon || null, adresse: null,
+        });
+      }
+      if (kontakte.length === 0 && w.mieter_name) {
+        kontakte.push({
+          rolle: 'mieter', name: w.mieter_name,
+          email: w.mieter_email || null, telefon: w.mieter_telefon || null, adresse: null,
+        });
+      }
+      return { ...w, kontakte };
+    });
     wohnungen.sort((a, b) => wohnungSort(a.bezeichnung, b.bezeichnung));
     res.json({ stweg, wohnungen });
   } catch (err) {
@@ -2269,6 +2304,14 @@ app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
       return res.status(404).json({ error: 'Wohnung nicht gefunden' });
     }
     await saveKontakte(client, result.rows[0].id, b.kontakte);
+    // Clear flat fields when kontakte are saved (migration from old format)
+    if (b.kontakte && b.kontakte.length > 0) {
+      await client.query(
+        `UPDATE wohnungen SET eigentuemer_name=NULL, eigentuemer_email=NULL, eigentuemer_telefon=NULL,
+         mieter_name=NULL, mieter_email=NULL, mieter_telefon=NULL WHERE id=$1`,
+        [result.rows[0].id]
+      );
+    }
     await client.query('COMMIT');
     const wohnung = await loadWohnungMitKontakte(result.rows[0].id);
     res.json(wohnung);
@@ -3086,20 +3129,12 @@ app.post('/api/documents-preview', authMiddleware, async (req, res) => {
 
     // Send to Gotenberg for conversion
     const fileName = filePath.split('/').pop();
-    const boundary = '----FormBoundary' + Math.random().toString(36).slice(2);
-    const bodyParts = [
-      `--${boundary}\r\n`,
-      `Content-Disposition: form-data; name="files"; filename="${fileName}"\r\n`,
-      `Content-Type: application/octet-stream\r\n\r\n`,
-    ];
-    const header = Buffer.from(bodyParts.join(''));
-    const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
-    const multipartBody = Buffer.concat([header, docBuffer, footer]);
+    const form = new FormData();
+    form.append('files', new Blob([docBuffer]), fileName);
 
     const convertResp = await fetch(`${DOC_CONVERTER_URL}/forms/libreoffice/convert`, {
       method: 'POST',
-      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
-      body: multipartBody,
+      body: form,
     });
 
     if (!convertResp.ok) {

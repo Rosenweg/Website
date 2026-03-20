@@ -80,6 +80,10 @@
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                         Excel
                     </button>
+                    <button id="btn-csv" onclick="exportCSV()" class="hidden bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition flex items-center gap-2" title="CSV exportieren">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        CSV
+                    </button>
                     <button id="btn-import" onclick="importKontakte()" class="hidden bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition flex items-center gap-2" title="Aus kontakte.json importieren">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
                         Import
@@ -281,6 +285,7 @@
             `).join('');
 
             document.getElementById('btn-export').classList.remove('hidden');
+            document.getElementById('btn-csv').classList.remove('hidden');
             if (canWrite) {
                 document.getElementById('btn-add').classList.remove('hidden');
                 document.getElementById('btn-import').classList.remove('hidden');
@@ -689,6 +694,40 @@
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, stwegName);
             XLSX.writeFile(wb, `Wohnungen_${stwegName.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
+        }
+
+        // ── CSV Export ──
+        function exportCSV() {
+            if (!allWohnungen.length) return alert('Keine Daten zum Exportieren.');
+            const stweg = stwegList.find(s => s.nr === currentStweg);
+            const stwegName = stweg ? stweg.name : `STWEG ${currentStweg}`;
+            const headers = ['Bezeichnung','Stockwerk','Zimmer','Fläche m²','Typ','Bewohnung','Rolle','Name','E-Mail','Telefon','Adresse','Notizen'];
+            const csvEsc = v => { const s = String(v ?? ''); return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g,'""')}"` : s; };
+            const rows = [headers.map(csvEsc).join(',')];
+            for (const w of allWohnungen) {
+                const kontakte = w.kontakte || [];
+                const bewohnung = w.bewohnt_von === 'mieter' ? 'Vermietet' : w.bewohnt_von === 'leer' ? 'Leer' : 'Selbstbewohnt';
+                if (kontakte.length === 0) {
+                    rows.push([w.bezeichnung, w.stockwerk||'', w.zimmer||'', w.flaeche_m2||'', w.typ||'', bewohnung, '', '', '', '', '', w.notizen||''].map(csvEsc).join(','));
+                } else {
+                    kontakte.forEach((k, i) => {
+                        const rolleLabel = ROLLEN.find(r => r.value === k.rolle)?.label || k.rolle;
+                        rows.push([
+                            i === 0 ? w.bezeichnung : '', i === 0 ? (w.stockwerk||'') : '', i === 0 ? (w.zimmer||'') : '',
+                            i === 0 ? (w.flaeche_m2||'') : '', i === 0 ? (w.typ||'') : '', i === 0 ? bewohnung : '',
+                            rolleLabel, k.name||'', k.email||'', k.telefon||'', k.adresse||'', i === 0 ? (w.notizen||'') : ''
+                        ].map(csvEsc).join(','));
+                    });
+                }
+            }
+            const bom = '\uFEFF';
+            const blob = new Blob([bom + rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Wohnungen_${stwegName.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
         }
     </script>
 
