@@ -203,17 +203,32 @@ const SITE_URL = process.env.SITE_URL || 'https://www.rosenweg4303.ch';
 // AUTHENTIK OAuth2 LOGIN
 // ═══════════════════════════════════════════════════════════════════
 
+// OAuth2 state store (CSRF protection) - states expire after 10 minutes
+const oauthStates = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of oauthStates) {
+    if (now - val.created > 10 * 60 * 1000) oauthStates.delete(key);
+  }
+}, 60 * 1000);
+
 // Returns the Authentik authorize URL for the frontend to redirect to
 app.get('/api/auth/login', (req, res) => {
   const { redirect } = req.query;
   const state = crypto.randomBytes(16).toString('hex');
   const redirectUri = `${SITE_URL}/api/auth/callback`;
+
+  // Sanitize redirect: only allow relative paths to prevent open redirect
+  const safeRedirect = (redirect && redirect.startsWith('/') && !redirect.startsWith('//')) ? redirect : '/';
+  // Store state for CSRF validation in callback
+  oauthStates.set(state, { redirect: safeRedirect, created: Date.now() });
+
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: AUTHENTIK_CLIENT_ID,
     redirect_uri: redirectUri,
     scope: 'openid profile email',
-    state: `${state}:${redirect || '/'}`,
+    state,
   });
   res.redirect(`${AUTHENTIK_EXTERNAL_URL}/application/o/authorize/?${params}`);
 });
@@ -234,7 +249,14 @@ app.get('/api/auth/callback', async (req, res) => {
   const { code, state } = req.query;
   if (!code) return res.status(400).send('Kein Authorization Code erhalten');
 
-  const redirectPath = state?.split(':').slice(1).join(':') || '/';
+  // Validate CSRF state
+  const storedState = oauthStates.get(state);
+  if (!storedState) return res.status(400).send('Ungültiger oder abgelaufener State-Parameter (CSRF-Schutz)');
+  oauthStates.delete(state);
+
+  // Sanitize redirect path: must be a relative path starting with /, prevent open redirect
+  let redirectPath = storedState.redirect || '/';
+  if (!redirectPath.startsWith('/') || redirectPath.startsWith('//')) redirectPath = '/';
 
   try {
     // Exchange code for token
@@ -379,6 +401,7 @@ async function authMiddleware(req, res, next) {
     );
     if (result.rows.length > 0) {
       req.user = result.rows[0];
+      req.user.id = req.user.user_id; // Ensure both .id and .user_id are set consistently
       req.user.isAdmin = req.user.role === 'admin';
       req.user.groups = (() => { try { return JSON.parse(req.user.groups_json || '[]'); } catch { return []; } })();
       return next();
@@ -849,7 +872,12 @@ app.post('/api/wasch/reservations', authMiddleware, async (req, res) => {
   if (durationMin < 30) return res.status(400).json({ error: 'Mindestdauer: 30 Minuten' });
   if (durationMin > 720) return res.status(400).json({ error: 'Maximaldauer: 12 Stunden' });
 
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+    // Lock on room_id to prevent concurrent overlapping reservations
+    await client.query('SELECT pg_advisory_xact_lock($1)', [room_id]);
+
     if (recurring && recurring_until) {
       // Generate weekly recurring reservations (same weekday, same time)
       const created = [];
@@ -859,14 +887,14 @@ app.post('/api/wasch/reservations', authMiddleware, async (req, res) => {
 
       while (curStart <= until) {
         // Check overlap with existing reservations
-        const conflict = await pool.query(
+        const conflict = await client.query(
           `SELECT id FROM wasch_reservations
            WHERE room_id=$1 AND cancelled=false
            AND start_time < $3::timestamp AND end_time > $2::timestamp`,
           [room_id, curStart.toISOString(), curEnd.toISOString()]
         );
         if (conflict.rows.length === 0) {
-          const result = await pool.query(
+          const result = await client.query(
             `INSERT INTO wasch_reservations (user_id, room_id, start_time, end_time, recurring, recurring_until)
              VALUES ($1, $2, $3, $4, true, $5) RETURNING *`,
             [req.user.user_id, room_id, curStart.toISOString(), curEnd.toISOString(), recurring_until]
@@ -876,26 +904,34 @@ app.post('/api/wasch/reservations', authMiddleware, async (req, res) => {
         curStart.setDate(curStart.getDate() + 7);
         curEnd.setDate(curEnd.getDate() + 7);
       }
+      await client.query('COMMIT');
       res.json({ created: created.length, reservations: created });
     } else {
       // One-time reservation - check overlap
-      const conflict = await pool.query(
+      const conflict = await client.query(
         `SELECT id FROM wasch_reservations
          WHERE room_id=$1 AND cancelled=false
          AND start_time < $3::timestamp AND end_time > $2::timestamp`,
         [room_id, start_time, end_time]
       );
-      if (conflict.rows.length > 0) return res.status(409).json({ error: 'Zeitraum überschneidet sich mit bestehender Reservierung' });
+      if (conflict.rows.length > 0) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'Zeitraum überschneidet sich mit bestehender Reservierung' });
+      }
 
-      const result = await pool.query(
+      const result = await client.query(
         `INSERT INTO wasch_reservations (user_id, room_id, start_time, end_time)
          VALUES ($1, $2, $3, $4) RETURNING *`,
         [req.user.user_id, room_id, start_time, end_time]
       );
+      await client.query('COMMIT');
       res.json(result.rows[0]);
     }
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     res.status(500).json({ error: 'Fehler beim Erstellen der Reservierung' });
+  } finally {
+    client.release();
   }
 });
 
@@ -1704,7 +1740,7 @@ app.post('/api/zaehler/benutzer', authMiddleware, adminOnly, async (req, res) =>
   }
 });
 
-app.post('/api/zaehler/daten', async (req, res) => {
+app.post('/api/zaehler/daten', authMiddleware, async (req, res) => {
   // Receives meter data from ioBroker/webhook
   const { zaehler_id, wert, timestamp } = req.body;
   try {
@@ -1757,7 +1793,8 @@ app.post('/api/email/send', authMiddleware, adminOnly, async (req, res) => {
 // EMAIL VERTEILERLISTEN (Cloudflare Worker → Gmail+tag → IMAP → SMTP2GO)
 // ═══════════════════════════════════════════════════════════════════
 
-const EMAIL_INBOUND_SECRET = process.env.EMAIL_INBOUND_SECRET || 'rosenweg-email-2026';
+const EMAIL_INBOUND_SECRET = process.env.EMAIL_INBOUND_SECRET || '';
+if (!process.env.EMAIL_INBOUND_SECRET) console.warn('WARNING: EMAIL_INBOUND_SECRET not set - inbound email endpoint is disabled');
 
 // ─── Shared email processing logic ──────────────────────────────────
 async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
@@ -1840,7 +1877,7 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
 // HTTP endpoint (kept for direct API testing)
 app.post('/api/email/inbound', async (req, res) => {
   const secret = req.headers['x-email-secret'] || req.query.secret;
-  if (secret !== EMAIL_INBOUND_SECRET) {
+  if (!EMAIL_INBOUND_SECRET || secret !== EMAIL_INBOUND_SECRET) {
     return res.status(403).json({ error: 'Unauthorized' });
   }
   try {
@@ -1904,7 +1941,6 @@ async function pollGmailForVerteiler() {
             const dateH = (headers.match(/^Date:\s*(.+)/im) || [])[1] || '';
             const subjH = (headers.match(/^Subject:\s*(.+)/im) || [])[1] || '';
             const fromH = (headers.match(/^From:\s*(.+)/im) || [])[1] || '';
-            const crypto = require('crypto');
             messageId = 'gen-' + crypto.createHash('md5').update(dateH + subjH + fromH).digest('hex');
           }
 
@@ -3771,6 +3807,19 @@ async function initDB() {
   }
 }
 
+// Cleanup expired sessions and OTP codes periodically
+async function cleanupExpiredSessions() {
+  try {
+    const sessions = await pool.query('DELETE FROM sessions WHERE expires_at < NOW()');
+    const otps = await pool.query('DELETE FROM otp_codes WHERE expires_at < NOW()');
+    if (sessions.rowCount > 0 || otps.rowCount > 0) {
+      console.log(`Cleanup: ${sessions.rowCount} expired sessions, ${otps.rowCount} expired OTPs removed`);
+    }
+  } catch (err) {
+    console.error('Session cleanup error:', err.message);
+  }
+}
+
 initDB()
   .then(() => {
     app.listen(PORT, () => {
@@ -3779,6 +3828,9 @@ initDB()
       startWaschCron();
       // Start IMAP polling for verteiler emails
       startImapPoll();
+      // Cleanup expired sessions every hour
+      setInterval(cleanupExpiredSessions, 60 * 60 * 1000);
+      setTimeout(cleanupExpiredSessions, 30 * 1000); // first cleanup after 30s
     });
   })
   .catch((err) => {
