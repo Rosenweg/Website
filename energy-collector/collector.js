@@ -21,7 +21,12 @@ const pool = new Pool({
   database: process.env.DB_NAME || 'energy',
   user: process.env.DB_USER || 'energy',
   password: process.env.DB_PASSWORD || '',
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+  statement_timeout: 30000,
 });
+pool.on('error', (err) => console.error('[DB] Idle client error:', err.message));
 
 // ─── smart-me Telstar 80A Register Map ──────────────────────────────
 // All registers use FC03 (Read Holding Registers), Big Endian
@@ -463,10 +468,19 @@ async function getActiveMeters() {
   return result.rows;
 }
 
+let isPolling = false;
 async function pollAll() {
-  const meters = await getActiveMeters();
-  for (const meter of meters) {
-    await pollMeter(meter);
+  if (isPolling) { console.log('[Poll] Still running, skipping'); return; }
+  isPolling = true;
+  try {
+    const meters = await getActiveMeters();
+    for (const meter of meters) {
+      await pollMeter(meter);
+    }
+  } catch (err) {
+    console.error('[Poll] pollAll error:', err.message);
+  } finally {
+    isPolling = false;
   }
 }
 
@@ -1343,9 +1357,35 @@ async function start() {
   });
 }
 
-// Prevent unhandled errors from crashing the process
-process.on('unhandledRejection', (err) => {
-  console.error('Unhandled rejection:', err.message);
+// ─── Graceful Shutdown ───────────────────────────────────────────────
+let shuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`\n${signal} received. Shutting down gracefully...`);
+
+  // Close Modbus connections
+  for (const [id, client] of modbusClients) {
+    try { client.close(); } catch (_) {}
+    modbusClients.delete(id);
+  }
+
+  // Close DB pool
+  try {
+    await pool.end();
+    console.log('Database pool closed');
+  } catch (err) {
+    console.error('Error closing database pool:', err.message);
+  }
+
+  setTimeout(() => { console.error('Forced shutdown after timeout'); process.exit(1); }, 10000).unref();
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection:', reason?.message || reason);
 });
 
 start().catch(err => {

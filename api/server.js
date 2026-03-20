@@ -38,7 +38,12 @@ const pool = new Pool({
   database: process.env.DB_NAME || 'rosenweg',
   user: process.env.DB_USER || 'rosenweg',
   password: process.env.DB_PASSWORD || 'changeme',
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+  statement_timeout: 30000,
 });
+pool.on('error', (err) => console.error('[DB] Idle client error:', err.message));
 
 // ─── Energy Database (for Waschküche billing) ──────────────────────
 const energyPool = new Pool({
@@ -47,7 +52,12 @@ const energyPool = new Pool({
   database: process.env.ENERGY_DB_NAME || 'energy',
   user: process.env.ENERGY_DB_USER || 'energy',
   password: process.env.ENERGY_DB_PASSWORD || 'energy2026',
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+  statement_timeout: 30000,
 });
+energyPool.on('error', (err) => console.error('[EnergyDB] Idle client error:', err.message));
 
 // ─── SMTP (SMTP2GO) ────────────────────────────────────────────────
 const transporter = nodemailer.createTransport({
@@ -289,6 +299,7 @@ app.get('/api/auth/logout', async (req, res) => {
   if (token) {
     try {
       await pool.query('DELETE FROM sessions WHERE token = $1', [token]);
+      tokenCache.delete(token);
     } catch (err) {
       console.error('Session invalidation error:', err.message);
     }
@@ -1298,6 +1309,15 @@ async function runMonthlyBilling() {
   console.log(`[Waschküche] Running monthly billing for ${monthStr}`);
 
   try {
+    // Check if billing was already run for this month (prevent duplicate emails on restart)
+    const existingBilling = await pool.query(
+      'SELECT COUNT(*) FROM wasch_billing WHERE month = $1', [monthStart]
+    );
+    if (parseInt(existingBilling.rows[0].count) > 0) {
+      console.log(`[Waschküche] Billing for ${monthStr} already exists, skipping`);
+      return;
+    }
+
     const costPerKwh = parseFloat(await getWaschSetting('cost_per_kwh', '0.30'));
 
     const users = await pool.query(
@@ -1467,20 +1487,42 @@ async function processCompletedReservations() {
 
 // Schedule: process reservations every 5 min, door access every 1 min, monthly billing on 1st at 08:00
 let waschCronInterval;
-function startWaschCron() {
-  // Process completed reservations & billing every 5 min
-  waschCronInterval = setInterval(processCompletedReservations, 5 * 60 * 1000);
-  setTimeout(processCompletedReservations, 30 * 1000);
+let isProcessingReservations = false;
+let isRunningBilling = false;
+let isManagingDoors = false;
 
-  // Door access control every minute (quick check, no-op if disabled)
-  setInterval(manageDoorAccess, 60 * 1000);
-  setTimeout(manageDoorAccess, 10 * 1000);
+async function guardedProcessReservations() {
+  if (isProcessingReservations) { console.log('[Waschküche] processCompletedReservations still running, skipping'); return; }
+  isProcessingReservations = true;
+  try { await processCompletedReservations(); } finally { isProcessingReservations = false; }
+}
+
+async function guardedManageDoorAccess() {
+  if (isManagingDoors) return;
+  isManagingDoors = true;
+  try { await manageDoorAccess(); } finally { isManagingDoors = false; }
+}
+
+async function guardedRunMonthlyBilling() {
+  if (isRunningBilling) { console.log('[Waschküche] runMonthlyBilling still running, skipping'); return; }
+  isRunningBilling = true;
+  try { await runMonthlyBilling(); } finally { isRunningBilling = false; }
+}
+
+function startWaschCron() {
+  // Process completed reservations every 5 min
+  waschCronInterval = setInterval(guardedProcessReservations, 5 * 60 * 1000);
+  setTimeout(guardedProcessReservations, 30 * 1000);
+
+  // Door access control every minute
+  setInterval(guardedManageDoorAccess, 60 * 1000);
+  setTimeout(guardedManageDoorAccess, 10 * 1000);
 
   // Monthly billing on 1st at 08:00
   setInterval(() => {
     const now = new Date();
     if (now.getDate() === 1 && now.getHours() === 8 && now.getMinutes() < 5) {
-      runMonthlyBilling();
+      guardedRunMonthlyBilling();
     }
   }, 5 * 60 * 1000);
 
@@ -2122,14 +2164,36 @@ async function pollGmailForVerteiler() {
   }
 }
 
+let imapPolling = false;
+let imapConsecutiveErrors = 0;
+
+async function guardedPollGmail() {
+  if (imapPolling) return;
+  imapPolling = true;
+  try {
+    await pollGmailForVerteiler();
+    imapConsecutiveErrors = 0;
+  } catch (err) {
+    imapConsecutiveErrors++;
+    console.error(`[IMAP] Poll failed (${imapConsecutiveErrors} consecutive):`, err.message);
+  } finally {
+    imapPolling = false;
+  }
+}
+
 function startImapPoll() {
   if (!IMAP_USER || !IMAP_PASS) {
     console.log('[IMAP] No credentials configured, polling disabled');
     return;
   }
   console.log(`[IMAP] Polling ${IMAP_USER} every ${IMAP_POLL_INTERVAL / 1000}s`);
-  setTimeout(pollGmailForVerteiler, 10000);
-  setInterval(pollGmailForVerteiler, IMAP_POLL_INTERVAL);
+  setTimeout(guardedPollGmail, 10000);
+  // Use dynamic interval with backoff on consecutive errors (max 5min extra)
+  const scheduleNext = () => {
+    const backoff = Math.min(imapConsecutiveErrors * 30000, 300000);
+    setTimeout(() => { guardedPollGmail().then(scheduleNext); }, IMAP_POLL_INTERVAL + backoff);
+  };
+  guardedPollGmail().then(scheduleNext);
 }
 
 // ─── STWEG Kontakte ─────────────────────────────────────────────────
@@ -3276,10 +3340,18 @@ app.post('/api/documents-preview', authMiddleware, async (req, res) => {
 
     // Cache the result
     previewCache.set(filePath, { pdf: pdfBuffer, expires: now + PREVIEW_CACHE_TTL });
-    // Limit cache size (max 50 entries)
+    // Evict expired entries, then oldest if still over limit
     if (previewCache.size > 50) {
-      const oldest = previewCache.keys().next().value;
-      previewCache.delete(oldest);
+      for (const [k, v] of previewCache) {
+        if (v.expires < now) previewCache.delete(k);
+      }
+      while (previewCache.size > 50) {
+        let oldestKey = null, oldestExp = Infinity;
+        for (const [k, v] of previewCache) {
+          if (v.expires < oldestExp) { oldestKey = k; oldestExp = v.expires; }
+        }
+        if (oldestKey) previewCache.delete(oldestKey); else break;
+      }
     }
 
     res.setHeader('Content-Type', 'application/pdf');
@@ -3922,16 +3994,20 @@ async function cleanupExpiredSessions() {
   }
 }
 
+// Track intervals and server for graceful shutdown
+let server;
+const activeIntervals = [];
+
 initDB()
   .then(() => {
-    app.listen(PORT, () => {
+    server = app.listen(PORT, () => {
       console.log(`Rosenweg API running on port ${PORT}`);
       // Start Waschküche cron jobs
       startWaschCron();
       // Start IMAP polling for verteiler emails
       startImapPoll();
       // Cleanup expired sessions every hour
-      setInterval(cleanupExpiredSessions, 60 * 60 * 1000);
+      activeIntervals.push(setInterval(cleanupExpiredSessions, 60 * 60 * 1000));
       setTimeout(cleanupExpiredSessions, 30 * 1000); // first cleanup after 30s
     });
   })
@@ -3939,3 +4015,41 @@ initDB()
     console.error('Failed to initialize database:', err);
     process.exit(1);
   });
+
+// Graceful shutdown
+let shuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`\n${signal} received. Shutting down gracefully...`);
+
+  // Stop accepting new requests
+  if (server) server.close(() => console.log('HTTP server closed'));
+
+  // Clear all intervals
+  activeIntervals.forEach(id => clearInterval(id));
+
+  // Close database pool
+  try {
+    await pool.end();
+    console.log('Database pool closed');
+  } catch (err) {
+    console.error('Error closing database pool:', err.message);
+  }
+
+  // Force exit after 10s
+  setTimeout(() => {
+    console.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, 10000).unref();
+
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Prevent crashes from unhandled rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason?.message || reason);
+});
