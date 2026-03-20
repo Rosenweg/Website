@@ -56,6 +56,11 @@ const RosenwegDocs = {
   VIEWABLE_EXTS: new Set(['pdf', 'png', 'jpg', 'jpeg', 'txt', 'csv']),
   OFFICE_EXTS: new Set(['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'dotx']),
 
+  /** Escape string for safe HTML insertion */
+  _escapeHtml(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  },
+
   _isViewable(ext) {
     return this.VIEWABLE_EXTS.has(ext) || this.OFFICE_EXTS.has(ext);
   },
@@ -208,36 +213,42 @@ const RosenwegDocs = {
       for (const doc of files) {
         const ext = this.getExt(doc.path);
         const fileName = this.getFileName(doc.path);
+        const safeFileName = this._escapeHtml(fileName);
+        const safePath = this._escapeHtml(doc.path);
+        const safeUrl = this._escapeHtml(doc.url || `/api/documents/${doc.path}`);
         const size = this.formatSize(doc.size);
         const extBadge = ext.toUpperCase();
         const viewable = this._isViewable(ext);
-        const escapedPath = doc.path.replace(/'/g, "\\'");
+        // Escape for JS string inside onclick attributes
+        const jsPath = doc.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        const jsFileName = fileName.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        const jsUrl = (doc.url || `/api/documents/${doc.path}`).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
         const clickAction = viewable
-          ? `RosenwegDocs.viewFile('${escapedPath}', '${fileName}', '${ext}')`
-          : `RosenwegDocs.downloadFile('${doc.url}', '${fileName}')`;
+          ? `RosenwegDocs.viewFile('${jsPath}', '${jsFileName}', '${ext}')`
+          : `RosenwegDocs.downloadFile('${jsUrl}', '${jsFileName}')`;
 
         html += `
             <div class="flex items-center justify-between bg-gray-50 rounded-lg px-4 py-3 hover:bg-gray-100 transition group">
               <a href="#" onclick="${clickAction}; return false;" class="flex items-center gap-3 flex-1 min-w-0 cursor-pointer">
                 ${this.getIcon(ext)}
-                <span class="truncate text-gray-800">${fileName}</span>
+                <span class="truncate text-gray-800">${safeFileName}</span>
                 <span class="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600 flex-shrink-0">${extBadge}</span>
                 <span class="text-xs text-gray-400 flex-shrink-0">${size}</span>
                 ${viewable ? '<span class="text-xs text-blue-500 flex-shrink-0"><svg class="h-3.5 w-3.5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg></span>' : ''}
               </a>
               <div class="flex items-center gap-2 ml-2">
-                <a href="#" onclick="RosenwegDocs.downloadFile('${doc.url}', '${fileName}'); return false;" class="text-blue-600 hover:text-blue-800 p-1" title="Herunterladen">
+                <a href="#" onclick="RosenwegDocs.downloadFile('${jsUrl}', '${jsFileName}'); return false;" class="text-blue-600 hover:text-blue-800 p-1" title="Herunterladen">
                   <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
                   </svg>
                 </a>
                 ${this._canWritePath(doc.path) ? `
-                <button onclick="RosenwegDocs.showReplaceDialog('${doc.path}')" class="text-yellow-600 hover:text-yellow-800 p-1 opacity-0 group-hover:opacity-100 transition" title="Ersetzen">
+                <button onclick="RosenwegDocs.showReplaceDialog('${jsPath}')" class="text-yellow-600 hover:text-yellow-800 p-1 opacity-0 group-hover:opacity-100 transition" title="Ersetzen">
                   <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
                   </svg>
                 </button>
-                <button onclick="RosenwegDocs.confirmDelete('${doc.path}')" class="text-red-500 hover:text-red-700 p-1 opacity-0 group-hover:opacity-100 transition" title="Löschen">
+                <button onclick="RosenwegDocs.confirmDelete('${jsPath}')" class="text-red-500 hover:text-red-700 p-1 opacity-0 group-hover:opacity-100 transition" title="Löschen">
                   <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
                   </svg>
@@ -477,6 +488,9 @@ const RosenwegDocs = {
 
   async viewFile(path, fileName, ext) {
     const downloadUrl = `/api/documents/${path}`;
+    const safeFileName = this._escapeHtml(fileName);
+    const jsDownloadUrl = downloadUrl.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    const jsFileName = fileName.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
     const isOffice = this.OFFICE_EXTS.has(ext);
     const modal = document.createElement('div');
     modal.id = 'docs-viewer-modal';
@@ -484,11 +498,11 @@ const RosenwegDocs = {
     modal.innerHTML = `
       <div class="flex items-center justify-between px-4 py-3 bg-gray-900 text-white flex-shrink-0">
         <div class="flex items-center gap-2 min-w-0">
-          <span class="font-medium truncate">${fileName}</span>
+          <span class="font-medium truncate">${safeFileName}</span>
           ${isOffice ? '<span class="text-xs bg-blue-600 px-2 py-0.5 rounded">PDF-Vorschau</span>' : ''}
         </div>
         <div class="flex items-center gap-2 ml-4 flex-shrink-0">
-          <button onclick="RosenwegDocs.downloadFile('${downloadUrl}', '${fileName}'); return false;" class="text-gray-300 hover:text-white p-1.5 rounded hover:bg-gray-700 transition" title="Original herunterladen">
+          <button onclick="RosenwegDocs.downloadFile('${jsDownloadUrl}', '${jsFileName}'); return false;" class="text-gray-300 hover:text-white p-1.5 rounded hover:bg-gray-700 transition" title="Original herunterladen">
             <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
             </svg>
@@ -550,8 +564,8 @@ const RosenwegDocs = {
       const contentArea = modal.querySelector('.flex-1');
       contentArea.innerHTML = `
         <div class="text-center">
-          <p class="text-red-400 mb-4">Fehler: ${err.message}</p>
-          <button onclick="RosenwegDocs.downloadFile('${downloadUrl}', '${fileName}'); RosenwegDocs.closeViewer();"
+          <p class="text-red-400 mb-4">Fehler: ${this._escapeHtml(err.message)}</p>
+          <button onclick="RosenwegDocs.downloadFile('${jsDownloadUrl}', '${jsFileName}'); RosenwegDocs.closeViewer();"
             class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
             Stattdessen herunterladen
           </button>

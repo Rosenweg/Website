@@ -504,18 +504,26 @@ app.use(cors({ origin: true }));
 
 // Health check
 app.get('/health', async (req, res) => {
-  const meters = await getActiveMeters();
-  res.json({ status: 'ok', meters: meters.length, uptime: process.uptime() });
+  try {
+    const meters = await getActiveMeters();
+    res.json({ status: 'ok', meters: meters.length, uptime: process.uptime() });
+  } catch (err) {
+    res.status(503).json({ status: 'error', error: err.message });
+  }
 });
 
 // List meters (includes parent_id and children info)
 app.get('/api/energy/meters', async (req, res) => {
-  const result = await pool.query('SELECT * FROM meters ORDER BY name');
-  const meters = result.rows.map(m => ({
-    ...m,
-    children: childrenMap[m.id] || [],
-  }));
-  res.json(meters);
+  try {
+    const result = await pool.query('SELECT * FROM meters ORDER BY name');
+    const meters = result.rows.map(m => ({
+      ...m,
+      children: childrenMap[m.id] || [],
+    }));
+    res.json(meters);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Get meters by location (e.g. ?location=waschkueche-1)
@@ -613,8 +621,10 @@ async function subtractChildren(meterId, parentRows, fromDate, toDate, bucketSec
   for (const childId of children) {
     let childRows;
     if (bucketSec) {
+      // Safe to interpolate: bucketSec is validated as positive integer by caller
+      const safeBucket = parseInt(bucketSec, 10) || 30;
       const result = await pool.query(
-        `SELECT to_timestamp(floor(extract(epoch from ts) / ${bucketSec}) * ${bucketSec}) AS ts,
+        `SELECT to_timestamp(floor(extract(epoch from ts) / ${safeBucket}) * ${safeBucket}) AS ts,
                 AVG(power_w) as power_w, AVG(power_l1_w) as power_l1_w, AVG(power_l2_w) as power_l2_w, AVG(power_l3_w) as power_l3_w,
                 AVG(current_l1_a) as current_l1_a, AVG(current_l2_a) as current_l2_a, AVG(current_l3_a) as current_l3_a
          FROM readings WHERE meter_id = $1 AND ts >= $2 AND ts <= $3
@@ -680,7 +690,9 @@ app.get('/api/energy/history/:meterId', async (req, res) => {
   let bucketSec = null;
   if (spanHours > 2) {
     // Target ~1000 data points. Bucket size in seconds (min 30s).
-    bucketSec = Math.max(30, Math.ceil(spanMs / 1000 / maxRows));
+    // Safe to interpolate: bucketSec is always a positive integer from Math.max/Math.ceil
+    bucketSec = parseInt(Math.max(30, Math.ceil(spanMs / 1000 / maxRows)), 10);
+    if (!Number.isFinite(bucketSec) || bucketSec < 1) bucketSec = 30;
     query = `SELECT
         to_timestamp(floor(extract(epoch from ts) / ${bucketSec}) * ${bucketSec}) AS ts,
         AVG(power_w) as power_w, AVG(power_l1_w) as power_l1_w, AVG(power_l2_w) as power_l2_w, AVG(power_l3_w) as power_l3_w,
@@ -709,9 +721,13 @@ app.get('/api/energy/history/:meterId', async (req, res) => {
     params = [meterId, fromDate, toDate, maxRows];
   }
 
-  const result = await pool.query(query, params);
-  const rows = await subtractChildren(meterId, result.rows, fromDate, toDate, bucketSec);
-  res.json(rows);
+  try {
+    const result = await pool.query(query, params);
+    const rows = await subtractChildren(meterId, result.rows, fromDate, toDate, bucketSec);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Hourly aggregated data
@@ -721,6 +737,7 @@ app.get('/api/energy/hourly/:meterId', async (req, res) => {
   const fromDate = from || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const toDate = to || new Date().toISOString();
 
+  try {
   const result = await pool.query(
     `SELECT * FROM readings_hourly
      WHERE meter_id = $1 AND hour >= $2 AND hour <= $3
@@ -728,6 +745,9 @@ app.get('/api/energy/hourly/:meterId', async (req, res) => {
     [meterId, fromDate, toDate]
   );
   res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Helper: subtract child consumption from daily/today aggregates

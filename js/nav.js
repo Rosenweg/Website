@@ -46,7 +46,7 @@ const RosenwegNav = {
     const stwegen = this._config?.stwegen || [];
 
     const desktopLinks = stwegen.map(s => {
-      const label = s.typ === 'Tiefgarage' ? `${s.name} – ${s.adressen}` : `${s.name} – ${s.adressen}`;
+      const label = s.typ === 'Tiefgarage' ? `${s.name} – TG ${s.adressen}` : `${s.name} – ${s.adressen}`;
       const sep = s.nr === 8 ? '<hr class="my-1">' : '';
       return `${sep}<a href="${base}stweg${s.nr}/" class="${dropA('stweg' + s.nr)} block px-4 py-2 text-sm">${label}</a>`;
     }).join('\n              ');
