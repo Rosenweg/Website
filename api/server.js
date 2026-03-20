@@ -646,6 +646,11 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
   // Fetch user's effective permissions
   const permissions = await getUserPermissions(groups);
 
+  // Auto-grant energie-monitor access if user has assigned meters
+  if (meters.length > 0 && !permissions['energie-monitor']) {
+    permissions['energie-monitor'] = 'read';
+  }
+
   res.json({
     user: {
       id: u.id,
