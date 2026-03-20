@@ -158,8 +158,13 @@
 
             // Avatar
             const avatarEl = document.getElementById('avatar-display');
-            if (currentUser.avatar_url) {
-                avatarEl.innerHTML = `<img src="${currentUser.avatar_url}" class="w-full h-full object-cover" alt="Avatar">`;
+            if (currentUser.avatar_url && /^https?:\/\//.test(currentUser.avatar_url)) {
+                const img = document.createElement('img');
+                img.src = currentUser.avatar_url;
+                img.className = 'w-full h-full object-cover';
+                img.alt = 'Avatar';
+                avatarEl.innerHTML = '';
+                avatarEl.appendChild(img);
             } else {
                 const initials = (currentUser.name || '?').split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
                 avatarEl.textContent = initials;
@@ -255,7 +260,12 @@
 
                 if (resp.ok) {
                     const avatarEl = document.getElementById('avatar-display');
-                    avatarEl.innerHTML = `<img src="${dataUrl}" class="w-full h-full object-cover" alt="Avatar">`;
+                    const img = document.createElement('img');
+                    img.src = dataUrl;
+                    img.className = 'w-full h-full object-cover';
+                    img.alt = 'Avatar';
+                    avatarEl.innerHTML = '';
+                    avatarEl.appendChild(img);
                 } else {
                     alert('Fehler beim Hochladen des Avatars');
                 }

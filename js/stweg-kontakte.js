@@ -7,6 +7,10 @@ const STWEGKontakte = (function() {
     const floorNames = { 'ug': 'Untergeschoss', 'eg': 'Erdgeschoss', '1og': '1. Obergeschoss', '2og': '2. Obergeschoss', '3og': '3. Obergeschoss', 'dg': 'Dachgeschoss' };
     const floorColors = { 'ug': 'orange', 'eg': 'blue', '1og': 'green', '2og': 'purple', '3og': 'teal', 'dg': 'pink' };
 
+    function esc(str) {
+        return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
     async function loadHausverwaltung(stwegNr) {
         try {
             const cfg = await (await fetch('/site-config.json')).json();
@@ -20,13 +24,13 @@ const STWEGKontakte = (function() {
                     </svg>
                     <h3 class="text-xl font-semibold">Hausverwaltung</h3>
                 </div>
-                <p class="text-gray-700 mb-2 font-semibold text-lg">${v.firma}</p>
-                <p class="text-gray-600 text-sm mb-2">${v.strasse}</p>
-                <p class="text-gray-600 text-sm mb-3">${v.plz_ort}</p>
-                <p class="text-gray-600 text-sm mb-2"><strong>Tel:</strong> <a href="tel:${v.telefon.replace(/\s/g,'')}" class="text-blue-600 hover:underline">${v.telefon}</a></p>
-                <p class="text-gray-600 text-sm mb-2"><strong>E-Mail:</strong> <a href="mailto:${v.email}" class="text-blue-600 hover:underline">${v.email}</a></p>
-                <p class="text-gray-600 text-sm mb-3"><strong>Web:</strong> <a href="https://${v.website}" target="_blank" class="text-blue-600 hover:underline">${v.website}</a></p>
-                <p class="text-gray-600 text-sm"><strong>Öffnungszeiten:</strong><br>${v.oeffnungszeiten}</p>`;
+                <p class="text-gray-700 mb-2 font-semibold text-lg">${esc(v.firma)}</p>
+                <p class="text-gray-600 text-sm mb-2">${esc(v.strasse)}</p>
+                <p class="text-gray-600 text-sm mb-3">${esc(v.plz_ort)}</p>
+                <p class="text-gray-600 text-sm mb-2"><strong>Tel:</strong> <a href="tel:${esc(v.telefon?.replace(/\s/g,''))}" class="text-blue-600 hover:underline">${esc(v.telefon)}</a></p>
+                <p class="text-gray-600 text-sm mb-2"><strong>E-Mail:</strong> <a href="mailto:${esc(v.email)}" class="text-blue-600 hover:underline">${esc(v.email)}</a></p>
+                <p class="text-gray-600 text-sm mb-3"><strong>Web:</strong> <a href="https://${esc(v.website)}" target="_blank" class="text-blue-600 hover:underline">${esc(v.website)}</a></p>
+                <p class="text-gray-600 text-sm"><strong>Öffnungszeiten:</strong><br>${esc(v.oeffnungszeiten)}</p>`;
         } catch(e) { console.error('Config load error:', e); }
     }
 
@@ -58,7 +62,7 @@ const STWEGKontakte = (function() {
     function renderAusschuss(stwegNr, ausschuss) {
         var el = document.getElementById('ausschuss-card');
         if (!el) return;
-        var names = ausschuss.map(function(a) { return a.name + ' (' + a.funktion + ')'; }).join(' &bull; ');
+        var names = ausschuss.map(function(a) { return esc(a.name) + ' (' + esc(a.funktion) + ')'; }).join(' &bull; ');
         el.innerHTML = `
             <div class="flex items-center mb-4">
                 <svg class="h-8 w-8 text-blue-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -71,9 +75,9 @@ const STWEGKontakte = (function() {
                 <p class="text-sm text-gray-600 mb-2">${names}</p>
                 ${ausschuss.map(function(a) { return `
                     <div class="text-sm text-gray-600 mt-2">
-                        <strong>${a.name}</strong>
-                        ${a.email ? ' &mdash; <a href="mailto:' + a.email + '" class="text-blue-600 hover:underline">' + a.email + '</a>' : ''}
-                        ${a.telefon ? ' &mdash; <a href="tel:' + a.telefon.replace(/\s/g,'') + '" class="text-blue-600 hover:underline">' + a.telefon + '</a>' : ''}
+                        <strong>${esc(a.name)}</strong>
+                        ${a.email ? ' &mdash; <a href="mailto:' + esc(a.email) + '" class="text-blue-600 hover:underline">' + esc(a.email) + '</a>' : ''}
+                        ${a.telefon ? ' &mdash; <a href="tel:' + esc(a.telefon.replace(/\s/g,'')) + '" class="text-blue-600 hover:underline">' + esc(a.telefon) + '</a>' : ''}
                     </div>
                 `; }).join('')}
             </div>`;
@@ -105,7 +109,7 @@ const STWEGKontakte = (function() {
                 var w = wohnungenInFloor[j];
                 var isLast = j === wohnungenInFloor.length - 1;
                 html += '<div class="bg-white p-4 rounded-lg ' + (!isLast ? 'mb-3' : '') + '">';
-                html += '<div class="mb-2"><span class="bg-' + color + '-100 text-' + color + '-800 px-2 py-1 rounded text-sm font-semibold">' + w.bezeichnung + '</span></div>';
+                html += '<div class="mb-2"><span class="bg-' + color + '-100 text-' + color + '-800 px-2 py-1 rounded text-sm font-semibold">' + esc(w.bezeichnung) + '</span></div>';
                 html += '<div class="space-y-2">';
 
                 for (var k = 0; k < w.bewohner.length; k++) {
@@ -114,9 +118,9 @@ const STWEGKontakte = (function() {
                     var isSelfOwner = person.rolle === 'eigentuemer' && w.bewohner.length === 1;
                     var displayRolle = isSelfOwner ? 'Eigentümer (Selbstbewohner)' : rolleLabel;
                     html += '<div>';
-                    html += '<p class="font-semibold text-gray-800">' + person.name + '</p>';
-                    if (person.email) html += '<p class="text-sm text-gray-600">&#x1F4E7; <a href="mailto:' + person.email + '" class="text-blue-600 hover:underline">' + person.email + '</a></p>';
-                    if (person.telefon) html += '<p class="text-sm text-gray-600">&#x1F4F1; <a href="tel:' + person.telefon.replace(/\s/g,'') + '" class="text-blue-600 hover:underline">' + person.telefon + '</a></p>';
+                    html += '<p class="font-semibold text-gray-800">' + esc(person.name) + '</p>';
+                    if (person.email) html += '<p class="text-sm text-gray-600">&#x1F4E7; <a href="mailto:' + esc(person.email) + '" class="text-blue-600 hover:underline">' + esc(person.email) + '</a></p>';
+                    if (person.telefon) html += '<p class="text-sm text-gray-600">&#x1F4F1; <a href="tel:' + esc(person.telefon.replace(/\s/g,'')) + '" class="text-blue-600 hover:underline">' + esc(person.telefon) + '</a></p>';
                     html += '<p class="text-xs text-gray-500 mt-1">' + displayRolle + '</p>';
                     html += '</div>';
                     if (person.rolle === 'eigentuemer' && w.bewohner.length > 1) {

@@ -20,7 +20,7 @@ const pool = new Pool({
   port: parseInt(process.env.DB_PORT || '5432'),
   database: process.env.DB_NAME || 'energy',
   user: process.env.DB_USER || 'energy',
-  password: process.env.DB_PASSWORD || 'changeme',
+  password: process.env.DB_PASSWORD || '',
 });
 
 // ─── smart-me Telstar 80A Register Map ──────────────────────────────
@@ -500,7 +500,8 @@ async function cleanupOldData() {
 
 // ─── REST API ───────────────────────────────────────────────────────
 const app = express();
-app.use(cors({ origin: true }));
+const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://www.rosenweg4303.ch';
+app.use(cors({ origin: CORS_ORIGIN.split(',') }));
 
 // Health check
 app.get('/health', async (req, res) => {
