@@ -630,18 +630,22 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
   const u = result.rows[0] || req.user;
   const groups = (() => { try { return JSON.parse(u.groups_json || '[]'); } catch { return []; } })();
 
-  // Fetch user's assigned meters
+  // Fetch user's assigned meters from energy-db
   let meters = [];
   try {
-    const meterResult = await pool.query(
-      `SELECT zc.zaehler_id, zc.bezeichnung, zc.typ, zc.standort, zc.einheit
-       FROM zaehler_config zc
-       WHERE zc.user_id = $1 AND zc.active = true
-       ORDER BY zc.bezeichnung`,
-      [userId]
-    );
-    meters = meterResult.rows;
-  } catch { /* table may not exist yet */ }
+    const userEmail = u.email?.toLowerCase();
+    if (userEmail) {
+      const meterResult = await energyPool.query(
+        `SELECT mu.meter_id as zaehler_id, m.name as bezeichnung, m.type as typ
+         FROM meter_users mu
+         JOIN meters m ON mu.meter_id = m.id
+         WHERE LOWER(mu.user_email) = $1
+         ORDER BY m.name`,
+        [userEmail]
+      );
+      meters = meterResult.rows;
+    }
+  } catch { /* energy-db may not be available */ }
 
   // Fetch user's effective permissions
   const permissions = await getUserPermissions(groups);
