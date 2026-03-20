@@ -630,18 +630,20 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
   const u = result.rows[0] || req.user;
   const groups = (() => { try { return JSON.parse(u.groups_json || '[]'); } catch { return []; } })();
 
-  // Fetch user's assigned meters from energy-db
+  // Fetch user's assigned meters from energy-db (direct + group-based)
   let meters = [];
   try {
     const userEmail = u.email?.toLowerCase();
-    if (userEmail) {
+    const lowerGroups = groups.map(g => g.toLowerCase());
+    if (userEmail || lowerGroups.length > 0) {
       const meterResult = await energyPool.query(
-        `SELECT mu.meter_id as zaehler_id, m.name as bezeichnung, m.type as typ
-         FROM meter_users mu
-         JOIN meters m ON mu.meter_id = m.id
-         WHERE LOWER(mu.user_email) = $1
+        `SELECT DISTINCT m.id as zaehler_id, m.name as bezeichnung, m.type as typ
+         FROM meters m
+         LEFT JOIN meter_users mu ON mu.meter_id = m.id AND LOWER(mu.user_email) = $1
+         LEFT JOIN meter_groups mg ON mg.meter_id = m.id AND LOWER(mg.group_name) = ANY($2)
+         WHERE mu.id IS NOT NULL OR mg.id IS NOT NULL
          ORDER BY m.name`,
-        [userEmail]
+        [userEmail || '', lowerGroups]
       );
       meters = meterResult.rows;
     }
