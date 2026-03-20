@@ -24,6 +24,7 @@ const RosenwegDocs = {
 
   CATEGORY_LABELS: {
     'allgemein': 'Allgemein',
+    'Scans': 'Scans',
     'stweg1': 'STWEG 1 – Rosenweg 17/18',
     'stweg2': 'STWEG 2 – Rosenweg 15/16',
     'stweg3': 'STWEG 3 – Rosenweg 9',
