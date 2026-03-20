@@ -22,6 +22,7 @@ const app = express();
 // Raw body parser for email inbound and document uploads (must be before json parser)
 app.use('/api/email/inbound', express.raw({ type: '*/*', limit: '25mb' }));
 app.use('/api/documents', express.raw({ type: 'application/octet-stream', limit: '100mb' }));
+app.use('/api/scan-upload', express.raw({ type: 'application/octet-stream', limit: '100mb' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(cors({ origin: true, credentials: true }));
 
