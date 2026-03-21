@@ -5,6 +5,11 @@ const nodemailer = require('nodemailer');
 const { simpleParser } = require('mailparser');
 const crypto = require('crypto');
 
+/** Escape string for safe HTML insertion */
+function escapeHtml(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 // STWEG group mapping (Authentik group names per STWEG)
 const STWEG_GROUPS = {
   1: { bewohner: 'stweg1-bewohner', eigentuemer: 'stweg1-eigentuemer', ausschuss: 'stweg1-ausschuss' },
@@ -33,7 +38,12 @@ const pool = new Pool({
   database: process.env.DB_NAME || 'rosenweg',
   user: process.env.DB_USER || 'rosenweg',
   password: process.env.DB_PASSWORD || 'changeme',
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+  statement_timeout: 30000,
 });
+pool.on('error', (err) => console.error('[DB] Idle client error:', err.message));
 
 // ─── Energy Database (for Waschküche billing) ──────────────────────
 const energyPool = new Pool({
@@ -42,7 +52,12 @@ const energyPool = new Pool({
   database: process.env.ENERGY_DB_NAME || 'energy',
   user: process.env.ENERGY_DB_USER || 'energy',
   password: process.env.ENERGY_DB_PASSWORD || 'energy2026',
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+  statement_timeout: 30000,
 });
+energyPool.on('error', (err) => console.error('[EnergyDB] Idle client error:', err.message));
 
 // ─── SMTP (SMTP2GO) ────────────────────────────────────────────────
 const transporter = nodemailer.createTransport({
@@ -78,9 +93,31 @@ app.get('/api/health', async (req, res) => {
 // OTP ENDPOINTS (replaces n8n stweg3-otp, send-otp, verify-otp)
 // ═══════════════════════════════════════════════════════════════════
 
+// Rate limiting for OTP endpoints
+const otpRateLimit = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of otpRateLimit) {
+    if (now - val.first > 10 * 60 * 1000) otpRateLimit.delete(key);
+  }
+}, 60 * 1000);
+
 app.post('/api/otp/send', async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'E-Mail erforderlich' });
+
+  // Rate limit: max 3 OTP requests per email per 10 minutes
+  const rateLimitKey = email.toLowerCase().trim();
+  const now = Date.now();
+  const entry = otpRateLimit.get(rateLimitKey);
+  if (entry && now - entry.first < 10 * 60 * 1000 && entry.count >= 3) {
+    return res.status(429).json({ error: 'Zu viele Anfragen. Bitte warten Sie einige Minuten.' });
+  }
+  if (entry && now - entry.first < 10 * 60 * 1000) {
+    entry.count++;
+  } else {
+    otpRateLimit.set(rateLimitKey, { first: now, count: 1 });
+  }
 
   try {
     // Check if email is authorized
@@ -116,7 +153,7 @@ app.post('/api/otp/send', async (req, res) => {
       html: `
         <div style="font-family: sans-serif; max-width: 400px; margin: 0 auto; padding: 20px;">
           <h2 style="color: #1e40af;">Rosenweg Login</h2>
-          <p>Hallo ${user.name},</p>
+          <p>Hallo ${escapeHtml(user.name)},</p>
           <p>Ihr Anmeldecode lautet:</p>
           <div style="background: #f0f9ff; border: 2px solid #3b82f6; border-radius: 8px; padding: 20px; text-align: center; margin: 20px 0;">
             <span style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #1e40af;">${code}</span>
@@ -133,9 +170,31 @@ app.post('/api/otp/send', async (req, res) => {
   }
 });
 
+// Rate limiting for OTP verification
+const otpVerifyRateLimit = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of otpVerifyRateLimit) {
+    if (now - val.first > 10 * 60 * 1000) otpVerifyRateLimit.delete(key);
+  }
+}, 60 * 1000);
+
 app.post('/api/otp/verify', async (req, res) => {
   const { email, code } = req.body;
   if (!email || !code) return res.status(400).json({ error: 'E-Mail und Code erforderlich' });
+
+  // Rate limit: max 5 verify attempts per email per 10 minutes
+  const verifyKey = email.toLowerCase().trim();
+  const now = Date.now();
+  const entry = otpVerifyRateLimit.get(verifyKey);
+  if (entry && now - entry.first < 10 * 60 * 1000 && entry.count >= 5) {
+    return res.status(429).json({ error: 'Zu viele Fehlversuche. Bitte warten Sie einige Minuten.' });
+  }
+  if (entry && now - entry.first < 10 * 60 * 1000) {
+    entry.count++;
+  } else {
+    otpVerifyRateLimit.set(verifyKey, { first: now, count: 1 });
+  }
 
   try {
     const result = await pool.query(
@@ -203,25 +262,58 @@ const SITE_URL = process.env.SITE_URL || 'https://www.rosenweg4303.ch';
 // AUTHENTIK OAuth2 LOGIN
 // ═══════════════════════════════════════════════════════════════════
 
+// OAuth2 state store (CSRF protection) - states expire after 10 minutes
+const oauthStates = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of oauthStates) {
+    if (now - val.created > 10 * 60 * 1000) oauthStates.delete(key);
+  }
+}, 60 * 1000);
+
 // Returns the Authentik authorize URL for the frontend to redirect to
 app.get('/api/auth/login', (req, res) => {
   const { redirect } = req.query;
   const state = crypto.randomBytes(16).toString('hex');
   const redirectUri = `${SITE_URL}/api/auth/callback`;
+
+  // Sanitize redirect: only allow relative paths to prevent open redirect
+  const safeRedirect = (redirect && redirect.startsWith('/') && !redirect.startsWith('//')) ? redirect : '/';
+  // Store state for CSRF validation in callback
+  oauthStates.set(state, { redirect: safeRedirect, created: Date.now() });
+
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: AUTHENTIK_CLIENT_ID,
     redirect_uri: redirectUri,
     scope: 'openid profile email',
-    state: `${state}:${redirect || '/'}`,
+    state,
   });
   res.redirect(`${AUTHENTIK_EXTERNAL_URL}/application/o/authorize/?${params}`);
 });
 
 // Logout - end Authentik session and redirect back
-app.get('/api/auth/logout', (req, res) => {
+app.get('/api/auth/logout', async (req, res) => {
+  // Invalidate local session if token is provided
+  const token = req.headers.authorization?.replace('Bearer ', '') || req.query.token;
+  if (token) {
+    try {
+      await pool.query('DELETE FROM sessions WHERE token = $1', [token]);
+      tokenCache.delete(token);
+    } catch (err) {
+      console.error('Session invalidation error:', err.message);
+    }
+  }
+
   const { redirect } = req.query;
-  const postLogoutRedirect = redirect || SITE_URL;
+  // Only allow redirects to our own site to prevent open redirect
+  let postLogoutRedirect = SITE_URL;
+  if (redirect) {
+    try {
+      const url = new URL(redirect, SITE_URL);
+      if (url.origin === new URL(SITE_URL).origin) postLogoutRedirect = url.href;
+    } catch {}
+  }
   const params = new URLSearchParams({
     post_logout_redirect_uri: postLogoutRedirect,
     client_id: AUTHENTIK_CLIENT_ID,
@@ -234,7 +326,14 @@ app.get('/api/auth/callback', async (req, res) => {
   const { code, state } = req.query;
   if (!code) return res.status(400).send('Kein Authorization Code erhalten');
 
-  const redirectPath = state?.split(':').slice(1).join(':') || '/';
+  // Validate CSRF state
+  const storedState = oauthStates.get(state);
+  if (!storedState) return res.status(400).send('Ungültiger oder abgelaufener State-Parameter (CSRF-Schutz)');
+  oauthStates.delete(state);
+
+  // Sanitize redirect path: must be a relative path starting with /, prevent open redirect
+  let redirectPath = storedState.redirect || '/';
+  if (!redirectPath.startsWith('/') || redirectPath.startsWith('//')) redirectPath = '/';
 
   try {
     // Exchange code for token
@@ -246,8 +345,6 @@ app.get('/api/auth/callback', async (req, res) => {
       client_id: AUTHENTIK_CLIENT_ID,
       client_secret: AUTHENTIK_CLIENT_SECRET,
     }).toString();
-    console.log('Token exchange URL:', tokenUrl);
-    console.log('Redirect URI:', `${SITE_URL}/api/auth/callback`);
     const tokenResp = await fetch(tokenUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -255,10 +352,9 @@ app.get('/api/auth/callback', async (req, res) => {
       signal: AbortSignal.timeout(10000),
     });
     const tokenText = await tokenResp.text();
-    console.log('Token response status:', tokenResp.status, 'body:', tokenText.substring(0, 500));
     const tokenData = tokenText ? JSON.parse(tokenText) : {};
     if (!tokenData.access_token) {
-      console.error('Token exchange failed:', tokenData);
+      console.error('Token exchange failed, status:', tokenResp.status);
       return res.status(400).send('Token-Austausch fehlgeschlagen');
     }
 
@@ -379,6 +475,7 @@ async function authMiddleware(req, res, next) {
     );
     if (result.rows.length > 0) {
       req.user = result.rows[0];
+      req.user.id = req.user.user_id; // Ensure both .id and .user_id are set consistently
       req.user.isAdmin = req.user.role === 'admin';
       req.user.groups = (() => { try { return JSON.parse(req.user.groups_json || '[]'); } catch { return []; } })();
       return next();
@@ -412,6 +509,12 @@ function canManageDocs(req, res, next) {
   });
   if (!allowed) return res.status(403).json({ error: 'Nur Technik und Ausschuss dürfen Dokumente verwalten' });
   next();
+}
+
+/** Parse and validate stweg param - returns number or null */
+function parseStweg(val) {
+  const n = parseInt(val, 10);
+  return (Number.isFinite(n) && n > 0) ? n : null;
 }
 
 /** Get STWEG numbers a user belongs to based on their groups */
@@ -456,7 +559,8 @@ function canWriteDocPath(filePath, groups) {
 
 /** Middleware: require user to have access to the :stweg param (Technik=all, Ausschuss/Bewohner=own STWEG) */
 function requireStwegAccess(req, res, next) {
-  const stweg = parseInt(req.params.stweg);
+  const stweg = parseStweg(req.params.stweg);
+  if (!stweg) return res.status(400).json({ error: 'Ungültige STWEG-Nummer' });
   const groups = req.user?.groups || [];
   if (isTechnik(groups)) return next();
   const stwegGroups = STWEG_GROUPS[stweg];
@@ -787,7 +891,7 @@ app.post('/api/wasch/rooms', authMiddleware, adminOnly, async (req, res) => {
     );
     res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -803,7 +907,7 @@ app.put('/api/wasch/rooms/:id', authMiddleware, adminOnly, async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ error: 'Raum nicht gefunden' });
     res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -849,7 +953,12 @@ app.post('/api/wasch/reservations', authMiddleware, async (req, res) => {
   if (durationMin < 30) return res.status(400).json({ error: 'Mindestdauer: 30 Minuten' });
   if (durationMin > 720) return res.status(400).json({ error: 'Maximaldauer: 12 Stunden' });
 
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
+    // Lock on room_id to prevent concurrent overlapping reservations
+    await client.query('SELECT pg_advisory_xact_lock($1)', [room_id]);
+
     if (recurring && recurring_until) {
       // Generate weekly recurring reservations (same weekday, same time)
       const created = [];
@@ -859,14 +968,14 @@ app.post('/api/wasch/reservations', authMiddleware, async (req, res) => {
 
       while (curStart <= until) {
         // Check overlap with existing reservations
-        const conflict = await pool.query(
+        const conflict = await client.query(
           `SELECT id FROM wasch_reservations
            WHERE room_id=$1 AND cancelled=false
            AND start_time < $3::timestamp AND end_time > $2::timestamp`,
           [room_id, curStart.toISOString(), curEnd.toISOString()]
         );
         if (conflict.rows.length === 0) {
-          const result = await pool.query(
+          const result = await client.query(
             `INSERT INTO wasch_reservations (user_id, room_id, start_time, end_time, recurring, recurring_until)
              VALUES ($1, $2, $3, $4, true, $5) RETURNING *`,
             [req.user.user_id, room_id, curStart.toISOString(), curEnd.toISOString(), recurring_until]
@@ -876,26 +985,34 @@ app.post('/api/wasch/reservations', authMiddleware, async (req, res) => {
         curStart.setDate(curStart.getDate() + 7);
         curEnd.setDate(curEnd.getDate() + 7);
       }
+      await client.query('COMMIT');
       res.json({ created: created.length, reservations: created });
     } else {
       // One-time reservation - check overlap
-      const conflict = await pool.query(
+      const conflict = await client.query(
         `SELECT id FROM wasch_reservations
          WHERE room_id=$1 AND cancelled=false
          AND start_time < $3::timestamp AND end_time > $2::timestamp`,
         [room_id, start_time, end_time]
       );
-      if (conflict.rows.length > 0) return res.status(409).json({ error: 'Zeitraum überschneidet sich mit bestehender Reservierung' });
+      if (conflict.rows.length > 0) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({ error: 'Zeitraum überschneidet sich mit bestehender Reservierung' });
+      }
 
-      const result = await pool.query(
+      const result = await client.query(
         `INSERT INTO wasch_reservations (user_id, room_id, start_time, end_time)
          VALUES ($1, $2, $3, $4) RETURNING *`,
         [req.user.user_id, room_id, start_time, end_time]
       );
+      await client.query('COMMIT');
       res.json(result.rows[0]);
     }
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     res.status(500).json({ error: 'Fehler beim Erstellen der Reservierung' });
+  } finally {
+    client.release();
   }
 });
 
@@ -970,6 +1087,7 @@ app.get('/api/wasch/my/sessions', authMiddleware, async (req, res) => {
        WHERE s.user_id = $1`;
     const params = [req.user.user_id];
     if (month) {
+      if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'Ungültiges Monatsformat (YYYY-MM)' });
       params.push(month + '-01');
       query += ` AND s.started_at >= $${params.length}::date AND s.started_at < ($${params.length}::date + interval '1 month')`;
     }
@@ -1044,6 +1162,7 @@ app.get('/api/wasch/admin/sessions', authMiddleware, adminOnly, async (req, res)
        JOIN wasch_rooms rm ON rm.id = s.room_id`;
     const params = [];
     if (month) {
+      if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'Ungültiges Monatsformat (YYYY-MM)' });
       params.push(month + '-01');
       query += ` WHERE s.started_at >= $1::date AND s.started_at < ($1::date + interval '1 month')`;
     }
@@ -1060,6 +1179,7 @@ app.get('/api/wasch/admin/costs', authMiddleware, adminOnly, async (req, res) =>
   try {
     const { month } = req.query;
     const monthStr = month || new Date().toISOString().slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(monthStr)) return res.status(400).json({ error: 'Ungültiges Monatsformat (YYYY-MM)' });
     const result = await pool.query(
       `SELECT u.name, u.wohnung, u.email,
          COUNT(s.id) as sessions,
@@ -1108,7 +1228,9 @@ app.get('/api/wasch/settings', authMiddleware, async (req, res) => {
 app.put('/api/wasch/settings', authMiddleware, adminOnly, async (req, res) => {
   try {
     const settings = req.body;
+    const ALLOWED_SETTINGS = ['cost_per_kwh', 'auto_billing', 'billing_day', 'reservation_max_days', 'reservation_max_per_user'];
     for (const [key, value] of Object.entries(settings)) {
+      if (!ALLOWED_SETTINGS.includes(key)) continue;
       await pool.query(
         `INSERT INTO wasch_settings (key, value, updated_at) VALUES ($1, $2, NOW())
          ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
@@ -1187,6 +1309,15 @@ async function runMonthlyBilling() {
   console.log(`[Waschküche] Running monthly billing for ${monthStr}`);
 
   try {
+    // Check if billing was already run for this month (prevent duplicate emails on restart)
+    const existingBilling = await pool.query(
+      'SELECT COUNT(*) FROM wasch_billing WHERE month = $1', [monthStart]
+    );
+    if (parseInt(existingBilling.rows[0].count) > 0) {
+      console.log(`[Waschküche] Billing for ${monthStr} already exists, skipping`);
+      return;
+    }
+
     const costPerKwh = parseFloat(await getWaschSetting('cost_per_kwh', '0.30'));
 
     const users = await pool.query(
@@ -1238,7 +1369,7 @@ async function runMonthlyBilling() {
           const endStr = `${String(end.getHours()).padStart(2,'0')}:${String(end.getMinutes()).padStart(2,'0')}`;
           return `<tr>
             <td style="padding:6px 10px;border:1px solid #e5e7eb;">${dateStr}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb;">${s.room_name}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb;">${escapeHtml(s.room_name)}</td>
             <td style="padding:6px 10px;border:1px solid #e5e7eb;">${startStr}-${endStr} (${s.duration_minutes} Min.)</td>
             <td style="padding:6px 10px;border:1px solid #e5e7eb;">${parseFloat(s.energy_consumed).toFixed(3)} kWh</td>
             <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right;">CHF ${parseFloat(s.cost).toFixed(2)}</td>
@@ -1253,7 +1384,7 @@ async function runMonthlyBilling() {
             html: `
               <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto;">
                 <h2 style="color: #1a56db;">Waschküche Abrechnung</h2>
-                <p>Hallo ${user.name},</p>
+                <p>Hallo ${escapeHtml(user.name)},</p>
                 <p>hier ist Ihre minutengenaue Waschküche-Abrechnung für <strong>${monthName} ${year}</strong>:</p>
 
                 <h3 style="color:#374151;margin-top:24px;">Einzelnachweise</h3>
@@ -1314,9 +1445,9 @@ async function runMonthlyBilling() {
             'UPDATE wasch_billing SET email_sent = true, email_sent_at = NOW() WHERE user_id = $1 AND month = $2',
             [user.user_id, monthStart]
           );
-          console.log(`[Waschküche] Billing email sent to ${user.email} for ${monthStr}`);
+          console.log(`[Waschküche] Billing email sent to user ${user.user_id} for ${monthStr}`);
         } catch (emailErr) {
-          console.error(`[Waschküche] Email to ${user.email} failed:`, emailErr.message);
+          console.error(`[Waschküche] Email to user ${user.user_id} failed:`, emailErr.message);
         }
       }
     }
@@ -1356,20 +1487,42 @@ async function processCompletedReservations() {
 
 // Schedule: process reservations every 5 min, door access every 1 min, monthly billing on 1st at 08:00
 let waschCronInterval;
-function startWaschCron() {
-  // Process completed reservations & billing every 5 min
-  waschCronInterval = setInterval(processCompletedReservations, 5 * 60 * 1000);
-  setTimeout(processCompletedReservations, 30 * 1000);
+let isProcessingReservations = false;
+let isRunningBilling = false;
+let isManagingDoors = false;
 
-  // Door access control every minute (quick check, no-op if disabled)
-  setInterval(manageDoorAccess, 60 * 1000);
-  setTimeout(manageDoorAccess, 10 * 1000);
+async function guardedProcessReservations() {
+  if (isProcessingReservations) { console.log('[Waschküche] processCompletedReservations still running, skipping'); return; }
+  isProcessingReservations = true;
+  try { await processCompletedReservations(); } finally { isProcessingReservations = false; }
+}
+
+async function guardedManageDoorAccess() {
+  if (isManagingDoors) return;
+  isManagingDoors = true;
+  try { await manageDoorAccess(); } finally { isManagingDoors = false; }
+}
+
+async function guardedRunMonthlyBilling() {
+  if (isRunningBilling) { console.log('[Waschküche] runMonthlyBilling still running, skipping'); return; }
+  isRunningBilling = true;
+  try { await runMonthlyBilling(); } finally { isRunningBilling = false; }
+}
+
+function startWaschCron() {
+  // Process completed reservations every 5 min
+  waschCronInterval = setInterval(guardedProcessReservations, 5 * 60 * 1000);
+  setTimeout(guardedProcessReservations, 30 * 1000);
+
+  // Door access control every minute
+  setInterval(guardedManageDoorAccess, 60 * 1000);
+  setTimeout(guardedManageDoorAccess, 10 * 1000);
 
   // Monthly billing on 1st at 08:00
   setInterval(() => {
     const now = new Date();
     if (now.getDate() === 1 && now.getHours() === 8 && now.getMinutes() < 5) {
-      runMonthlyBilling();
+      guardedRunMonthlyBilling();
     }
   }, 5 * 60 * 1000);
 
@@ -1382,7 +1535,7 @@ app.post('/api/wasch/admin/billing/run', authMiddleware, adminOnly, async (req, 
     await runMonthlyBilling();
     res.json({ success: true, message: 'Abrechnung wurde ausgeführt' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -1506,7 +1659,7 @@ app.get('/api/wasch/admin/doors', authMiddleware, adminOnly, async (req, res) =>
     }
     res.json(statuses);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -1517,11 +1670,11 @@ app.post('/api/wasch/admin/doors/:roomId/unlock', authMiddleware, adminOnly, asy
     if (room.rows.length === 0) return res.status(404).json({ error: 'Raum nicht gefunden' });
     if (!room.rows[0].unifi_door_id) return res.status(400).json({ error: 'Kein UniFi Türschloss konfiguriert' });
 
-    const duration = parseInt(req.body.duration) || 30;
+    const duration = Math.min(Math.max(parseInt(req.body.duration) || 30, 5), 300); // 5s min, 5min max
     const ok = await unlockDoor(room.rows[0].unifi_door_id, duration);
     res.json({ success: ok, message: ok ? `Tür für ${duration}s entsperrt` : 'UniFi Access nicht erreichbar' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -1529,11 +1682,13 @@ app.post('/api/wasch/admin/doors/:roomId/unlock', authMiddleware, adminOnly, asy
 // KONTAKTE (replaces n8n stweg3-save-json)
 // ═══════════════════════════════════════════════════════════════════
 
-app.get('/api/kontakte/:stweg', async (req, res) => {
+app.get('/api/kontakte/:stweg', authMiddleware, async (req, res) => {
+  const stweg = parseStweg(req.params.stweg);
+  if (!stweg) return res.status(400).json({ error: 'Ungültige STWEG-Nummer' });
   try {
     const result = await pool.query(
       `SELECT * FROM kontakte WHERE stweg = $1 ORDER BY sort_order, name`,
-      [parseInt(req.params.stweg)]
+      [stweg]
     );
     res.json({ kontakte: result.rows });
   } catch (err) {
@@ -1636,7 +1791,7 @@ app.get('/api/verteiler/by-stweg/:stweg', authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT * FROM email_verteiler WHERE stweg = $1 ORDER BY name`,
-      [parseInt(req.params.stweg)]
+      [parseStweg(req.params.stweg)]
     );
     res.json(result.rows);
   } catch (err) {
@@ -1650,10 +1805,17 @@ app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
     return res.status(400).json({ error: 'Betreff, Text und Empfänger erforderlich' });
   }
 
+  // Validate all recipients are valid email addresses
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const validRecipients = recipients.filter(r => typeof r === 'string' && emailRegex.test(r));
+  if (validRecipients.length === 0) {
+    return res.status(400).json({ error: 'Keine gültigen E-Mail-Adressen' });
+  }
+
   try {
     let sent = 0;
     const failed = [];
-    for (const to of recipients) {
+    for (const to of validRecipients) {
       try {
         await transporter.sendMail({
           from: MAIL_FROM,
@@ -1663,7 +1825,7 @@ app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
         });
         sent++;
       } catch (sendErr) {
-        console.error(`Failed to send to ${to}:`, sendErr.message);
+        console.error(`Failed to send to recipient:`, sendErr.message);
         failed.push(to);
       }
     }
@@ -1704,9 +1866,10 @@ app.post('/api/zaehler/benutzer', authMiddleware, adminOnly, async (req, res) =>
   }
 });
 
-app.post('/api/zaehler/daten', async (req, res) => {
+app.post('/api/zaehler/daten', authMiddleware, async (req, res) => {
   // Receives meter data from ioBroker/webhook
   const { zaehler_id, wert, timestamp } = req.body;
+  if (!zaehler_id || wert == null) return res.status(400).json({ error: 'zaehler_id und wert erforderlich' });
   try {
     await pool.query(
       `INSERT INTO zaehler_daten (zaehler_id, wert, timestamp)
@@ -1757,7 +1920,8 @@ app.post('/api/email/send', authMiddleware, adminOnly, async (req, res) => {
 // EMAIL VERTEILERLISTEN (Cloudflare Worker → Gmail+tag → IMAP → SMTP2GO)
 // ═══════════════════════════════════════════════════════════════════
 
-const EMAIL_INBOUND_SECRET = process.env.EMAIL_INBOUND_SECRET || 'rosenweg-email-2026';
+const EMAIL_INBOUND_SECRET = process.env.EMAIL_INBOUND_SECRET || '';
+if (!process.env.EMAIL_INBOUND_SECRET) console.warn('WARNING: EMAIL_INBOUND_SECRET not set - inbound email endpoint is disabled');
 
 // ─── Shared email processing logic ──────────────────────────────────
 async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
@@ -1768,7 +1932,7 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
     return { success: false, error: 'No recipient found' };
   }
 
-  console.log(`Email inbound: ${parsed.from?.text} → ${toAddress} | Subject: ${parsed.subject}`);
+  console.log(`Email inbound → ${toAddress} | Subject: ${parsed.subject?.substring(0, 80)}`);
 
   const verteiler = await pool.query(
     'SELECT * FROM email_verteiler WHERE email_address = $1 AND active = true',
@@ -1840,7 +2004,7 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
 // HTTP endpoint (kept for direct API testing)
 app.post('/api/email/inbound', async (req, res) => {
   const secret = req.headers['x-email-secret'] || req.query.secret;
-  if (secret !== EMAIL_INBOUND_SECRET) {
+  if (!EMAIL_INBOUND_SECRET || secret !== EMAIL_INBOUND_SECRET) {
     return res.status(403).json({ error: 'Unauthorized' });
   }
   try {
@@ -1904,7 +2068,6 @@ async function pollGmailForVerteiler() {
             const dateH = (headers.match(/^Date:\s*(.+)/im) || [])[1] || '';
             const subjH = (headers.match(/^Subject:\s*(.+)/im) || [])[1] || '';
             const fromH = (headers.match(/^From:\s*(.+)/im) || [])[1] || '';
-            const crypto = require('crypto');
             messageId = 'gen-' + crypto.createHash('md5').update(dateH + subjH + fromH).digest('hex');
           }
 
@@ -1920,7 +2083,7 @@ async function pollGmailForVerteiler() {
 
           // To: header contains @rosenweg4303.ch address (strip +tag if present)
           if (!verteilerAddress) {
-            const toMatch = headers.match(/^To:\s*[^]*?([a-z0-9._+-]+@rosenweg4303\.ch)/im);
+            const toMatch = headers.match(/^To:\s*.*?([a-z0-9._+-]+@rosenweg4303\.ch)/im);
             if (toMatch) {
               verteilerAddress = toMatch[1].toLowerCase().replace(/\+[^@]*/, '');
             }
@@ -2001,14 +2164,36 @@ async function pollGmailForVerteiler() {
   }
 }
 
+let imapPolling = false;
+let imapConsecutiveErrors = 0;
+
+async function guardedPollGmail() {
+  if (imapPolling) return;
+  imapPolling = true;
+  try {
+    await pollGmailForVerteiler();
+    imapConsecutiveErrors = 0;
+  } catch (err) {
+    imapConsecutiveErrors++;
+    console.error(`[IMAP] Poll failed (${imapConsecutiveErrors} consecutive):`, err.message);
+  } finally {
+    imapPolling = false;
+  }
+}
+
 function startImapPoll() {
   if (!IMAP_USER || !IMAP_PASS) {
     console.log('[IMAP] No credentials configured, polling disabled');
     return;
   }
   console.log(`[IMAP] Polling ${IMAP_USER} every ${IMAP_POLL_INTERVAL / 1000}s`);
-  setTimeout(pollGmailForVerteiler, 10000);
-  setInterval(pollGmailForVerteiler, IMAP_POLL_INTERVAL);
+  setTimeout(guardedPollGmail, 10000);
+  // Use dynamic interval with backoff on consecutive errors (max 5min extra)
+  const scheduleNext = () => {
+    const backoff = Math.min(imapConsecutiveErrors * 30000, 300000);
+    setTimeout(() => { guardedPollGmail().then(scheduleNext); }, IMAP_POLL_INTERVAL + backoff);
+  };
+  guardedPollGmail().then(scheduleNext);
 }
 
 // ─── STWEG Kontakte ─────────────────────────────────────────────────
@@ -2175,13 +2360,15 @@ async function loadWohnungMitKontakte(wohnungId) {
 async function saveKontakte(client, wohnungId, kontakte) {
   await client.query('DELETE FROM wohnungen_kontakte WHERE wohnung_id = $1', [wohnungId]);
   if (!kontakte || !Array.isArray(kontakte)) return;
+  const VALID_ROLLEN = ['eigentuemer', 'mieter', 'verwalter', 'handwerker'];
   for (let i = 0; i < kontakte.length; i++) {
     const k = kontakte[i];
     if (!k.name && !k.email) continue;
+    const rolle = VALID_ROLLEN.includes(k.rolle) ? k.rolle : 'eigentuemer';
     await client.query(
       `INSERT INTO wohnungen_kontakte (wohnung_id, rolle, name, email, telefon, adresse, sort_order)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [wohnungId, k.rolle || 'eigentuemer', k.name || null, k.email || null, k.telefon || null, k.adresse || null, i]
+      [wohnungId, rolle, k.name || null, k.email || null, k.telefon || null, k.adresse || null, i]
     );
   }
 }
@@ -2189,7 +2376,7 @@ async function saveKontakte(client, wohnungId, kontakte) {
 // GET /api/wohnungen/:stweg - List all apartments for a STWEG
 app.get('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
   try {
-    const stweg = parseInt(req.params.stweg);
+    const stweg = parseStweg(req.params.stweg);
     const wResult = await pool.query('SELECT * FROM wohnungen WHERE stweg = $1', [stweg]);
     const kResult = await pool.query(
       `SELECT k.* FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id WHERE w.stweg = $1 ORDER BY k.rolle, k.sort_order, k.id`,
@@ -2229,7 +2416,7 @@ app.get('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverw
 // GET /api/wohnungen/:stweg/stats - Occupancy statistics
 app.get('/api/wohnungen/:stweg/stats', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
   try {
-    const stweg = parseInt(req.params.stweg);
+    const stweg = parseStweg(req.params.stweg);
     const result = await pool.query(
       `SELECT COUNT(*) as total,
               COUNT(*) FILTER (WHERE bewohnt_von = 'eigentuemer') as selbstbewohnt,
@@ -2247,8 +2434,10 @@ app.get('/api/wohnungen/:stweg/stats', authMiddleware, requirePermission('wohnun
 // GET /api/wohnungen/:stweg/:id - Single apartment with kontakte
 app.get('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
   try {
-    const w = await loadWohnungMitKontakte(parseInt(req.params.id));
-    if (!w || w.stweg !== parseInt(req.params.stweg)) return res.status(404).json({ error: 'Wohnung nicht gefunden' });
+    const wId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(wId) || wId < 1) return res.status(400).json({ error: 'Ungültige Wohnungs-ID' });
+    const w = await loadWohnungMitKontakte(wId);
+    if (!w || w.stweg !== parseStweg(req.params.stweg)) return res.status(404).json({ error: 'Wohnung nicht gefunden' });
     res.json(w);
   } catch (err) {
     console.error('Wohnung get error:', err);
@@ -2260,7 +2449,7 @@ app.get('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
 app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, async (req, res) => {
   const client = await pool.connect();
   try {
-    const stweg = parseInt(req.params.stweg);
+    const stweg = parseStweg(req.params.stweg);
     const b = req.body;
     await client.query('BEGIN');
     const result = await client.query(
@@ -2341,7 +2530,7 @@ app.delete('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnu
 app.post('/api/wohnungen/:stweg/import', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, async (req, res) => {
   const client = await pool.connect();
   try {
-    const stweg = parseInt(req.params.stweg);
+    const stweg = parseStweg(req.params.stweg);
     const data = req.body;
     if (!data.wohnungen) return res.status(400).json({ error: 'Keine Wohnungsdaten gefunden' });
 
@@ -2850,7 +3039,7 @@ app.get('/api/admin/users', authMiddleware, requirePermission('bewohner-verwaltu
     res.json(data);
   } catch (err) {
     console.error('Admin list users error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -2875,18 +3064,20 @@ app.post('/api/admin/users', authMiddleware, requirePermission('bewohner-verwalt
     res.json(user);
   } catch (err) {
     console.error('Admin create user error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
 // GET /api/admin/users/:pk - Get single user
 app.get('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verwaltung', 'read'), async (req, res) => {
+  const pk = parseInt(req.params.pk, 10);
+  if (!Number.isFinite(pk) || pk < 1) return res.status(400).json({ error: 'Ungültige User-ID' });
   try {
-    const data = await authentikAPI('GET', `/core/users/${req.params.pk}/`);
+    const data = await authentikAPI('GET', `/core/users/${pk}/`);
     res.json(data);
   } catch (err) {
     console.error('Admin get user error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -2941,9 +3132,10 @@ function resolveGroupHierarchy(desiredGroupPks, allGroups) {
 
 // PUT /api/admin/users/:pk - Update user
 app.put('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verwaltung', 'write'), async (req, res) => {
+  const userPk = parseInt(req.params.pk, 10);
+  if (!Number.isFinite(userPk) || userPk < 1) return res.status(400).json({ error: 'Ungültige User-ID' });
   try {
     const { name, email, is_active, groups } = req.body;
-    const userPk = parseInt(req.params.pk);
     const patchBody = {};
     if (name !== undefined) patchBody.name = name;
     if (email !== undefined) patchBody.email = email;
@@ -2971,18 +3163,20 @@ app.put('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verw
     res.json(updated);
   } catch (err) {
     console.error('Admin update user error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
 // DELETE /api/admin/users/:pk - Delete/deactivate user
 app.delete('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verwaltung', 'write'), async (req, res) => {
+  const pk = parseInt(req.params.pk, 10);
+  if (!Number.isFinite(pk) || pk < 1) return res.status(400).json({ error: 'Ungültige User-ID' });
   try {
-    await authentikAPI('DELETE', `/core/users/${req.params.pk}/`);
+    await authentikAPI('DELETE', `/core/users/${pk}/`);
     res.json({ success: true });
   } catch (err) {
     console.error('Admin delete user error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -2993,7 +3187,7 @@ app.get('/api/admin/groups', authMiddleware, requirePermission('bewohner-verwalt
     res.json(data);
   } catch (err) {
     console.error('Admin list groups error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -3010,7 +3204,7 @@ app.get('/api/admin/groups/:pk', authMiddleware, requirePermission('bewohner-ver
     res.json(data);
   } catch (err) {
     console.error('Admin get group detail error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -3021,7 +3215,7 @@ app.put('/api/admin/groups/:pk/add_user', authMiddleware, requirePermission('bew
     res.json(data);
   } catch (err) {
     console.error('Admin add user to group error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -3032,7 +3226,7 @@ app.put('/api/admin/groups/:pk/remove_user', authMiddleware, requirePermission('
     res.json(data);
   } catch (err) {
     console.error('Admin remove user from group error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
   }
 });
 
@@ -3091,7 +3285,7 @@ const PREVIEW_CACHE_TTL = 30 * 60 * 1000; // 30 min
 app.post('/api/documents-preview', authMiddleware, async (req, res) => {
   try {
     const filePath = req.body?.path;
-    if (!filePath || filePath.includes('..') || filePath.startsWith('/')) {
+    if (!filePath || filePath.includes('..') || filePath.startsWith('/') || /[%\\]/.test(filePath) || /\0/.test(filePath)) {
       return res.status(400).json({ error: 'Ungültiger Pfad' });
     }
 
@@ -3146,10 +3340,18 @@ app.post('/api/documents-preview', authMiddleware, async (req, res) => {
 
     // Cache the result
     previewCache.set(filePath, { pdf: pdfBuffer, expires: now + PREVIEW_CACHE_TTL });
-    // Limit cache size (max 50 entries)
+    // Evict expired entries, then oldest if still over limit
     if (previewCache.size > 50) {
-      const oldest = previewCache.keys().next().value;
-      previewCache.delete(oldest);
+      for (const [k, v] of previewCache) {
+        if (v.expires < now) previewCache.delete(k);
+      }
+      while (previewCache.size > 50) {
+        let oldestKey = null, oldestExp = Infinity;
+        for (const [k, v] of previewCache) {
+          if (v.expires < oldestExp) { oldestKey = k; oldestExp = v.expires; }
+        }
+        if (oldestKey) previewCache.delete(oldestKey); else break;
+      }
     }
 
     res.setHeader('Content-Type', 'application/pdf');
@@ -3167,7 +3369,7 @@ app.get('/api/documents/:path(*)', authMiddleware, async (req, res) => {
     const filePath = req.params.path;
 
     // Prevent path traversal
-    if (filePath.includes('..') || filePath.startsWith('/')) {
+    if (filePath.includes('..') || filePath.startsWith('/') || /[%\\]/.test(filePath) || /\0/.test(filePath)) {
       return res.status(400).json({ error: 'Ungültiger Pfad' });
     }
 
@@ -3289,7 +3491,7 @@ app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, re
   try {
     // Sanitize filename: keep folder structure, clean the filename part
     const rawPath = req.params.path;
-    if (rawPath.includes('..') || rawPath.startsWith('/')) {
+    if (rawPath.includes('..') || rawPath.startsWith('/') || /[%\\]/.test(rawPath) || /\0/.test(rawPath)) {
       return res.status(400).json({ error: 'Ungültiger Pfad' });
     }
     const parts = rawPath.split('/');
@@ -3299,6 +3501,14 @@ app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, re
       .replace(/[^a-zA-Z0-9._-]/g, '-')
       .replace(/-+/g, '-').replace(/^-|-$/g, '')
       .toLowerCase();
+
+    // Validate file extension
+    const ALLOWED_UPLOAD_EXTS = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'txt', 'csv', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'dotx']);
+    const uploadExt = fileName.split('.').pop();
+    if (!uploadExt || !ALLOWED_UPLOAD_EXTS.has(uploadExt)) {
+      return res.status(400).json({ error: `Dateityp .${uploadExt} nicht erlaubt` });
+    }
+
     parts.push(fileName);
     const filePath = parts.join('/');
 
@@ -3771,17 +3981,75 @@ async function initDB() {
   }
 }
 
+// Cleanup expired sessions and OTP codes periodically
+async function cleanupExpiredSessions() {
+  try {
+    const sessions = await pool.query('DELETE FROM sessions WHERE expires_at < NOW()');
+    const otps = await pool.query('DELETE FROM otp_codes WHERE expires_at < NOW()');
+    if (sessions.rowCount > 0 || otps.rowCount > 0) {
+      console.log(`Cleanup: ${sessions.rowCount} expired sessions, ${otps.rowCount} expired OTPs removed`);
+    }
+  } catch (err) {
+    console.error('Session cleanup error:', err.message);
+  }
+}
+
+// Track intervals and server for graceful shutdown
+let server;
+const activeIntervals = [];
+
 initDB()
   .then(() => {
-    app.listen(PORT, () => {
+    server = app.listen(PORT, () => {
       console.log(`Rosenweg API running on port ${PORT}`);
       // Start Waschküche cron jobs
       startWaschCron();
       // Start IMAP polling for verteiler emails
       startImapPoll();
+      // Cleanup expired sessions every hour
+      activeIntervals.push(setInterval(cleanupExpiredSessions, 60 * 60 * 1000));
+      setTimeout(cleanupExpiredSessions, 30 * 1000); // first cleanup after 30s
     });
   })
   .catch((err) => {
     console.error('Failed to initialize database:', err);
     process.exit(1);
   });
+
+// Graceful shutdown
+let shuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`\n${signal} received. Shutting down gracefully...`);
+
+  // Stop accepting new requests
+  if (server) server.close(() => console.log('HTTP server closed'));
+
+  // Clear all intervals
+  activeIntervals.forEach(id => clearInterval(id));
+
+  // Close database pool
+  try {
+    await pool.end();
+    console.log('Database pool closed');
+  } catch (err) {
+    console.error('Error closing database pool:', err.message);
+  }
+
+  // Force exit after 10s
+  setTimeout(() => {
+    console.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, 10000).unref();
+
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Prevent crashes from unhandled rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason?.message || reason);
+});
