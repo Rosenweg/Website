@@ -78,12 +78,14 @@ const AuthentikAuth = {
 
   /** Logout - clear session and end Authentik session */
   logout(redirectTo) {
+    const token = localStorage.getItem(this.SESSION_KEY);
     localStorage.removeItem(this.SESSION_KEY);
     localStorage.removeItem(this.USER_KEY);
     if (redirectTo !== false) {
       // Redirect through Authentik's end-session endpoint to fully log out
       const postLogoutRedirect = redirectTo || window.location.origin + window.location.pathname;
-      window.location.href = `/api/auth/logout?redirect=${encodeURIComponent(postLogoutRedirect)}`;
+      const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+      window.location.href = `/api/auth/logout?redirect=${encodeURIComponent(postLogoutRedirect)}${tokenParam}`;
     }
   },
 

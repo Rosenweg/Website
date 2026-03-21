@@ -20,8 +20,13 @@ const pool = new Pool({
   port: parseInt(process.env.DB_PORT || '5432'),
   database: process.env.DB_NAME || 'energy',
   user: process.env.DB_USER || 'energy',
-  password: process.env.DB_PASSWORD || 'changeme',
+  password: process.env.DB_PASSWORD || '',
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+  statement_timeout: 30000,
 });
+pool.on('error', (err) => console.error('[DB] Idle client error:', err.message));
 
 // ─── smart-me Telstar 80A Register Map ──────────────────────────────
 // All registers use FC03 (Read Holding Registers), Big Endian
@@ -463,10 +468,19 @@ async function getActiveMeters() {
   return result.rows;
 }
 
+let isPolling = false;
 async function pollAll() {
-  const meters = await getActiveMeters();
-  for (const meter of meters) {
-    await pollMeter(meter);
+  if (isPolling) { console.log('[Poll] Still running, skipping'); return; }
+  isPolling = true;
+  try {
+    const meters = await getActiveMeters();
+    for (const meter of meters) {
+      await pollMeter(meter);
+    }
+  } catch (err) {
+    console.error('[Poll] pollAll error:', err.message);
+  } finally {
+    isPolling = false;
   }
 }
 
@@ -500,33 +514,46 @@ async function cleanupOldData() {
 
 // ─── REST API ───────────────────────────────────────────────────────
 const app = express();
-app.use(cors({ origin: true }));
+const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://www.rosenweg4303.ch';
+app.use(cors({ origin: CORS_ORIGIN.split(',') }));
 
 // Health check
 app.get('/health', async (req, res) => {
-  const meters = await getActiveMeters();
-  res.json({ status: 'ok', meters: meters.length, uptime: process.uptime() });
+  try {
+    const meters = await getActiveMeters();
+    res.json({ status: 'ok', meters: meters.length, uptime: process.uptime() });
+  } catch (err) {
+    res.status(503).json({ status: 'error', error: err.message });
+  }
 });
 
 // List meters (includes parent_id and children info)
 app.get('/api/energy/meters', async (req, res) => {
-  const result = await pool.query('SELECT * FROM meters ORDER BY name');
-  const meters = result.rows.map(m => ({
-    ...m,
-    children: childrenMap[m.id] || [],
-  }));
-  res.json(meters);
+  try {
+    const result = await pool.query('SELECT * FROM meters ORDER BY name');
+    const meters = result.rows.map(m => ({
+      ...m,
+      children: childrenMap[m.id] || [],
+    }));
+    res.json(meters);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Get meters by location (e.g. ?location=waschkueche-1)
 app.get('/api/energy/meters/by-location', async (req, res) => {
   const { location } = req.query;
   if (!location) return res.status(400).json({ error: 'location query parameter required' });
-  const result = await pool.query(
-    'SELECT * FROM meters WHERE location = $1 AND active = true ORDER BY name',
-    [location]
-  );
-  res.json(result.rows);
+  try {
+    const result = await pool.query(
+      'SELECT * FROM meters WHERE location = $1 AND active = true ORDER BY name',
+      [location]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Consumption for a meter between two timestamps
@@ -613,8 +640,10 @@ async function subtractChildren(meterId, parentRows, fromDate, toDate, bucketSec
   for (const childId of children) {
     let childRows;
     if (bucketSec) {
+      // Safe to interpolate: bucketSec is validated as positive integer by caller
+      const safeBucket = parseInt(bucketSec, 10) || 30;
       const result = await pool.query(
-        `SELECT to_timestamp(floor(extract(epoch from ts) / ${bucketSec}) * ${bucketSec}) AS ts,
+        `SELECT to_timestamp(floor(extract(epoch from ts) / ${safeBucket}) * ${safeBucket}) AS ts,
                 AVG(power_w) as power_w, AVG(power_l1_w) as power_l1_w, AVG(power_l2_w) as power_l2_w, AVG(power_l3_w) as power_l3_w,
                 AVG(current_l1_a) as current_l1_a, AVG(current_l2_a) as current_l2_a, AVG(current_l3_a) as current_l3_a
          FROM readings WHERE meter_id = $1 AND ts >= $2 AND ts <= $3
@@ -680,7 +709,9 @@ app.get('/api/energy/history/:meterId', async (req, res) => {
   let bucketSec = null;
   if (spanHours > 2) {
     // Target ~1000 data points. Bucket size in seconds (min 30s).
-    bucketSec = Math.max(30, Math.ceil(spanMs / 1000 / maxRows));
+    // Safe to interpolate: bucketSec is always a positive integer from Math.max/Math.ceil
+    bucketSec = parseInt(Math.max(30, Math.ceil(spanMs / 1000 / maxRows)), 10);
+    if (!Number.isFinite(bucketSec) || bucketSec < 1) bucketSec = 30;
     query = `SELECT
         to_timestamp(floor(extract(epoch from ts) / ${bucketSec}) * ${bucketSec}) AS ts,
         AVG(power_w) as power_w, AVG(power_l1_w) as power_l1_w, AVG(power_l2_w) as power_l2_w, AVG(power_l3_w) as power_l3_w,
@@ -709,9 +740,13 @@ app.get('/api/energy/history/:meterId', async (req, res) => {
     params = [meterId, fromDate, toDate, maxRows];
   }
 
-  const result = await pool.query(query, params);
-  const rows = await subtractChildren(meterId, result.rows, fromDate, toDate, bucketSec);
-  res.json(rows);
+  try {
+    const result = await pool.query(query, params);
+    const rows = await subtractChildren(meterId, result.rows, fromDate, toDate, bucketSec);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Hourly aggregated data
@@ -721,6 +756,7 @@ app.get('/api/energy/hourly/:meterId', async (req, res) => {
   const fromDate = from || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const toDate = to || new Date().toISOString();
 
+  try {
   const result = await pool.query(
     `SELECT * FROM readings_hourly
      WHERE meter_id = $1 AND hour >= $2 AND hour <= $3
@@ -728,6 +764,9 @@ app.get('/api/energy/hourly/:meterId', async (req, res) => {
     [meterId, fromDate, toDate]
   );
   res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Helper: subtract child consumption from daily/today aggregates
@@ -777,9 +816,13 @@ app.get('/api/energy/daily/:meterId', async (req, res) => {
      GROUP BY date_trunc('day', ts)
      ORDER BY day`;
 
-  const result = await pool.query(dailyQuery, [meterId, startDate.toISOString(), endDate.toISOString()]);
-  const rows = await subtractChildrenAgg(meterId, result.rows, dailyQuery, startDate.toISOString(), endDate.toISOString(), 'day');
-  res.json(rows);
+  try {
+    const result = await pool.query(dailyQuery, [meterId, startDate.toISOString(), endDate.toISOString()]);
+    const rows = await subtractChildrenAgg(meterId, result.rows, dailyQuery, startDate.toISOString(), endDate.toISOString(), 'day');
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Day summary (today or specific date via ?date=YYYY-MM-DD)
@@ -890,8 +933,12 @@ app.post('/api/energy/meters/:id/test', async (req, res) => {
 
 // --- Tariff Management ---
 app.get('/api/energy/tariffs', async (req, res) => {
-  const result = await pool.query('SELECT * FROM tariffs ORDER BY name, valid_from DESC NULLS LAST');
-  res.json(result.rows);
+  try {
+    const result = await pool.query('SELECT * FROM tariffs ORDER BY name, valid_from DESC NULLS LAST');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Get active tariffs for a date (default: today). Use ?date=YYYY-MM-DD for historical.
@@ -950,11 +997,15 @@ app.delete('/api/energy/tariffs/:id', async (req, res) => {
 
 // --- User-Meter Assignment ---
 app.get('/api/energy/meters/:meterId/users', async (req, res) => {
-  const result = await pool.query(
-    'SELECT * FROM meter_users WHERE meter_id = $1 ORDER BY user_name',
-    [req.params.meterId]
-  );
-  res.json(result.rows);
+  try {
+    const result = await pool.query(
+      'SELECT * FROM meter_users WHERE meter_id = $1 ORDER BY user_name',
+      [req.params.meterId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/energy/meters/:meterId/users', async (req, res) => {
@@ -988,11 +1039,15 @@ app.delete('/api/energy/meters/:meterId/users/:email', async (req, res) => {
 
 // ─── Group Assignments ───────────────────────────────────────────────
 app.get('/api/energy/meters/:meterId/groups', async (req, res) => {
-  const result = await pool.query(
-    'SELECT * FROM meter_groups WHERE meter_id = $1 ORDER BY group_name',
-    [req.params.meterId]
-  );
-  res.json(result.rows);
+  try {
+    const result = await pool.query(
+      'SELECT * FROM meter_groups WHERE meter_id = $1 ORDER BY group_name',
+      [req.params.meterId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/energy/meters/:meterId/groups', async (req, res) => {
@@ -1026,15 +1081,19 @@ app.delete('/api/energy/meters/:meterId/groups/:groupName', async (req, res) => 
 
 // Get meters for a specific user (by email OR group membership)
 app.get('/api/energy/user/:email/meters', async (req, res) => {
-  const result = await pool.query(
-    `SELECT DISTINCT m.*, COALESCE(mu.role, 'viewer') as role FROM meters m
-     LEFT JOIN meter_users mu ON m.id = mu.meter_id AND mu.user_email = $1
-     LEFT JOIN meter_groups mg ON m.id = mg.meter_id
-     WHERE m.active = true AND (mu.user_email IS NOT NULL OR mg.group_name = ANY($2::text[]))
-     ORDER BY m.name`,
-    [req.params.email.toLowerCase(), req.query.groups ? req.query.groups.split(',') : []]
-  );
-  res.json(result.rows);
+  try {
+    const result = await pool.query(
+      `SELECT DISTINCT m.*, COALESCE(mu.role, 'viewer') as role FROM meters m
+       LEFT JOIN meter_users mu ON m.id = mu.meter_id AND mu.user_email = $1
+       LEFT JOIN meter_groups mg ON m.id = mg.meter_id
+       WHERE m.active = true AND (mu.user_email IS NOT NULL OR mg.group_name = ANY($2::text[]))
+       ORDER BY m.name`,
+      [req.params.email.toLowerCase(), req.query.groups ? req.query.groups.split(',') : []]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── Dashboard overview ─────────────────────────────────────────────
@@ -1215,9 +1274,6 @@ app.get('/api/energy/projection/:meterId', async (req, res) => {
 });
 
 // ─── Alerts endpoint ────────────────────────────────────────────────
-// Alert check: runs as part of polling, stores alerts in memory (no DB table needed yet)
-const activeAlerts = [];
-
 app.get('/api/energy/alerts', async (req, res) => {
   try {
     // Check all active meters for issues
@@ -1287,8 +1343,9 @@ app.get('/api/energy/export/:meterId', async (req, res) => {
     );
     const csv = [header, ...rows].join('\n');
 
+    const safeName = meterName.replace(/[^a-zA-Z0-9_-]/g, '_');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${meterName}_${from}_${to}.csv"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}_${from}_${to}.csv"`);
     res.send('\uFEFF' + csv); // BOM for Excel
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1322,9 +1379,35 @@ async function start() {
   });
 }
 
-// Prevent unhandled errors from crashing the process
-process.on('unhandledRejection', (err) => {
-  console.error('Unhandled rejection:', err.message);
+// ─── Graceful Shutdown ───────────────────────────────────────────────
+let shuttingDown = false;
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`\n${signal} received. Shutting down gracefully...`);
+
+  // Close Modbus connections
+  for (const [id, client] of modbusClients) {
+    try { client.close(); } catch (_) {}
+    modbusClients.delete(id);
+  }
+
+  // Close DB pool
+  try {
+    await pool.end();
+    console.log('Database pool closed');
+  } catch (err) {
+    console.error('Error closing database pool:', err.message);
+  }
+
+  setTimeout(() => { console.error('Forced shutdown after timeout'); process.exit(1); }, 10000).unref();
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection:', reason?.message || reason);
 });
 
 start().catch(err => {

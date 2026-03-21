@@ -297,6 +297,7 @@
     // ═══════════════════════════════════════════════════════════════
     // HELPERS
     // ═══════════════════════════════════════════════════════════════
+    function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
     function localDateStr(d) {
         return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     }
@@ -540,7 +541,7 @@
 
                 const showName = height > 30;
                 block.innerHTML = `<div class="font-semibold">${fmtTime(rS)}\u2013${fmtTime(rE)}</div>` +
-                    (showName ? `<div class="truncate opacity-80">${r.user_name || ''}</div>` : '');
+                    (showName ? `<div class="truncate opacity-80">${esc(r.user_name)}</div>` : '');
                 block.title = `${r.user_name || '?'} ${r.wohnung ? '('+r.wohnung+')' : ''}\n${fmtTime(rS)}\u2013${fmtTime(rE)}`;
                 block.addEventListener('click', (e) => { e.stopPropagation(); showDetail(r); });
                 inner.appendChild(block);
@@ -786,10 +787,10 @@
                     ${isActive ? '<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span><span class="text-green-700 font-medium">Gerade aktiv</span>' : ''}
                 </div>
                 <div class="grid grid-cols-[80px_1fr] gap-y-2 text-sm">
-                    <span class="text-gray-400">Raum</span><span class="font-medium">${r.room_name}</span>
+                    <span class="text-gray-400">Raum</span><span class="font-medium">${esc(r.room_name)}</span>
                     <span class="text-gray-400">Datum</span><span>${fmtDayLong(s)}</span>
                     <span class="text-gray-400">Uhrzeit</span><span>${fmtTime(s)} \u2013 ${fmtTime(e)} (${dur} Min.)</span>
-                    <span class="text-gray-400">Person</span><span>${r.user_name || '?'} ${r.wohnung ? '('+r.wohnung+')' : ''}</span>
+                    <span class="text-gray-400">Person</span><span>${esc(r.user_name || '?')} ${r.wohnung ? '('+esc(r.wohnung)+')' : ''}</span>
                 </div>
                 ${r.recurring ? '<div class="flex items-center gap-1.5 text-blue-600 text-xs"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Wöchentlich wiederkehrend</div>' : ''}
             </div>
