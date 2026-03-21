@@ -2540,13 +2540,13 @@ async function processAuthentiKDeletions() {
         const usersData = await authentikAPI('GET', `/core/users/?search=${encodeURIComponent(row.email)}`);
         const user = (usersData.results || []).find(u => u.email?.toLowerCase() === row.email.toLowerCase());
         if (user) {
-          // Deactivate instead of hard delete (safer)
-          await authentikAPI('PATCH', `/core/users/${user.pk}/`, { is_active: false });
-          console.log(`[Authentik] Deactivated user ${row.email} (pk: ${user.pk})`);
+          // Hard delete per DSG/DSGVO requirements
+          await authentikAPI('DELETE', `/core/users/${user.pk}/`);
+          console.log(`[Authentik] Deleted user ${row.email} (pk: ${user.pk})`);
         }
         await pool.query('DELETE FROM authentik_pending_deletions WHERE id = $1', [row.id]);
       } catch (err) {
-        console.error(`[Authentik] Failed to deactivate ${row.email}:`, err.message);
+        console.error(`[Authentik] Failed to delete ${row.email}:`, err.message);
       }
     }
   } catch (err) {
