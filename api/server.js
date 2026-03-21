@@ -2360,7 +2360,7 @@ async function loadWohnungMitKontakte(wohnungId) {
 async function saveKontakte(client, wohnungId, kontakte) {
   await client.query('DELETE FROM wohnungen_kontakte WHERE wohnung_id = $1', [wohnungId]);
   if (!kontakte || !Array.isArray(kontakte)) return;
-  const VALID_ROLLEN = ['eigentuemer', 'mieter', 'verwalter', 'handwerker'];
+  const VALID_ROLLEN = ['eigentuemer', 'mieter', 'verwalter', 'bewohner', 'sonstige'];
   for (let i = 0; i < kontakte.length; i++) {
     const k = kontakte[i];
     if (!k.name && !k.email) continue;
@@ -2372,6 +2372,103 @@ async function saveKontakte(client, wohnungId, kontakte) {
     );
   }
 }
+
+// Sync kontakte with email to Authentik as users and assign STWEG groups
+async function syncKontakteToAuthentik(stweg, kontakte) {
+  if (!AUTHENTIK_API_TOKEN || !kontakte || !Array.isArray(kontakte)) return;
+  const withEmail = kontakte.filter(k => k.email && k.email.includes('@'));
+  if (withEmail.length === 0) return;
+
+  try {
+    // Fetch all existing users and groups once
+    const [usersData, groupsData] = await Promise.all([
+      authentikAPI('GET', '/core/users/?page_size=1000'),
+      authentikAPI('GET', '/core/groups/?page_size=500'),
+    ]);
+    const existingUsers = (usersData.results || []);
+    const allGroups = (groupsData.results || []);
+
+    const stwegGroups = STWEG_GROUPS[stweg] || {};
+
+    for (const k of withEmail) {
+      const email = k.email.toLowerCase().trim();
+      let user = existingUsers.find(u => u.email?.toLowerCase() === email);
+
+      if (!user) {
+        // Create user in Authentik
+        const username = email.split('@')[0].replace(/[^a-z0-9._-]/gi, '').substring(0, 50);
+        // Check if username already taken
+        const existingByName = existingUsers.find(u => u.username === username);
+        const finalUsername = existingByName ? `${username}-${Date.now().toString(36).slice(-4)}` : username;
+
+        try {
+          user = await authentikAPI('POST', '/core/users/', {
+            username: finalUsername,
+            name: k.name || email.split('@')[0],
+            email,
+            is_active: true,
+          });
+          console.log(`[Authentik] Created user: ${finalUsername} (${email})`);
+        } catch (err) {
+          console.error(`[Authentik] Failed to create user ${email}:`, err.message);
+          continue;
+        }
+      }
+
+      // Determine which group to assign based on rolle
+      let targetGroupName = null;
+      if (k.rolle === 'eigentuemer') {
+        targetGroupName = stwegGroups.eigentuemer;
+      } else if (k.rolle === 'mieter' || k.rolle === 'bewohner' || k.rolle === 'verwalter') {
+        targetGroupName = stwegGroups.bewohner;
+      }
+
+      if (targetGroupName && user.pk) {
+        const group = allGroups.find(g => g.name === targetGroupName);
+        if (group) {
+          // Check if user already in group
+          const userGroups = user.groups_obj || [];
+          const alreadyInGroup = userGroups.some(g => g.pk === group.pk);
+          if (!alreadyInGroup) {
+            try {
+              await authentikAPI('POST', `/core/groups/${group.pk}/add_user/`, { pk: user.pk });
+              console.log(`[Authentik] Added ${email} to group ${targetGroupName}`);
+            } catch (err) {
+              console.error(`[Authentik] Failed to add ${email} to ${targetGroupName}:`, err.message);
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    // Don't fail the save operation if Authentik sync fails
+    console.error('[Authentik] Kontakte sync error:', err.message);
+  }
+}
+
+// POST /api/wohnungen/sync-authentik - Bulk sync all kontakte with email to Authentik
+app.post('/api/wohnungen/sync-authentik', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT k.rolle, k.name, k.email, w.stweg
+       FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id
+       WHERE k.email IS NOT NULL AND k.email != ''
+       ORDER BY w.stweg`
+    );
+    const byStwg = {};
+    for (const row of result.rows) {
+      if (!byStwg[row.stweg]) byStwg[row.stweg] = [];
+      byStwg[row.stweg].push(row);
+    }
+    for (const [stweg, kontakte] of Object.entries(byStwg)) {
+      await syncKontakteToAuthentik(parseInt(stweg), kontakte);
+    }
+    res.json({ success: true, total: result.rows.length, message: `Sync für ${result.rows.length} Kontakte mit E-Mail abgeschlossen.` });
+  } catch (err) {
+    console.error('Bulk Authentik sync error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // GET /api/wohnungen/:stweg - List all apartments for a STWEG
 app.get('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
@@ -2464,6 +2561,8 @@ app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsver
     await client.query('COMMIT');
     const wohnung = await loadWohnungMitKontakte(result.rows[0].id);
     res.status(201).json(wohnung);
+    // Sync kontakte to Authentik in background (don't block response)
+    syncKontakteToAuthentik(stweg, b.kontakte).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK');
     if (err.code === '23505') return res.status(409).json({ error: 'Wohnung mit dieser Bezeichnung existiert bereits' });
@@ -2504,6 +2603,8 @@ app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
     await client.query('COMMIT');
     const wohnung = await loadWohnungMitKontakte(result.rows[0].id);
     res.json(wohnung);
+    // Sync kontakte to Authentik in background
+    syncKontakteToAuthentik(parseStweg(req.params.stweg), b.kontakte).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK');
     if (err.code === '23505') return res.status(409).json({ error: 'Wohnung mit dieser Bezeichnung existiert bereits' });
@@ -2572,6 +2673,16 @@ app.post('/api/wohnungen/:stweg/import', authMiddleware, requirePermission('wohn
     }
     await client.query('COMMIT');
     res.json({ success: true, imported });
+    // Sync all imported kontakte to Authentik in background
+    const allKontakte = [];
+    for (const [, units] of Object.entries(data.wohnungen)) {
+      for (const u of units) {
+        const eig = u.eigentümer || u.eigentuemer;
+        if (eig?.email) allKontakte.push({ rolle: 'eigentuemer', name: eig.name, email: eig.email });
+        if (u.mieter?.email) allKontakte.push({ rolle: 'mieter', name: u.mieter.name, email: u.mieter.email });
+      }
+    }
+    if (allKontakte.length > 0) syncKontakteToAuthentik(stweg, allKontakte).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Wohnungen import error:', err);
@@ -2581,32 +2692,6 @@ app.post('/api/wohnungen/:stweg/import', authMiddleware, requirePermission('wohn
   }
 });
 
-/** Auto-add users to Authentik STWEG groups when assigned to apartments */
-async function syncWohnungGroups(stweg, wohnung) {
-  try {
-    const stwegGroups = STWEG_GROUPS[stweg];
-    if (!stwegGroups) return;
-
-    // Sync owner to eigentuemer group
-    if (wohnung.eigentuemer_user_pk && stwegGroups.eigentuemer) {
-      const groupData = await authentikAPI('GET', `/core/groups/?search=${encodeURIComponent(stwegGroups.eigentuemer)}`);
-      const group = (groupData.results || []).find(g => g.name.toLowerCase() === stwegGroups.eigentuemer.toLowerCase());
-      if (group) {
-        await authentikAPI('POST', `/core/groups/${group.pk}/add_user/`, { pk: wohnung.eigentuemer_user_pk }).catch(() => {});
-      }
-    }
-    // Sync tenant to bewohner group
-    if (wohnung.mieter_user_pk && stwegGroups.bewohner) {
-      const groupData = await authentikAPI('GET', `/core/groups/?search=${encodeURIComponent(stwegGroups.bewohner)}`);
-      const group = (groupData.results || []).find(g => g.name.toLowerCase() === stwegGroups.bewohner.toLowerCase());
-      if (group) {
-        await authentikAPI('POST', `/core/groups/${group.pk}/add_user/`, { pk: wohnung.mieter_user_pk }).catch(() => {});
-      }
-    }
-  } catch (err) {
-    console.error('Authentik group sync error:', err.message);
-  }
-}
 
 // ─── Verteiler CRUD (admin only) ────────────────────────────────────
 
