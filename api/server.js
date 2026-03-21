@@ -2357,7 +2357,11 @@ async function loadWohnungMitKontakte(wohnungId) {
 }
 
 // Helper: save kontakte for a wohnung (replace all)
-async function saveKontakte(client, wohnungId, kontakte) {
+async function saveKontakte(client, wohnungId, kontakte, stweg) {
+  // Load old kontakte before deleting (for tracking removals)
+  const oldRes = await client.query('SELECT * FROM wohnungen_kontakte WHERE wohnung_id = $1', [wohnungId]);
+  const oldKontakte = oldRes.rows;
+
   await client.query('DELETE FROM wohnungen_kontakte WHERE wohnung_id = $1', [wohnungId]);
   if (!kontakte || !Array.isArray(kontakte)) return;
   const VALID_ROLLEN = ['eigentuemer', 'mieter', 'verwalter', 'bewohner', 'sonstige'];
@@ -2370,7 +2374,12 @@ async function saveKontakte(client, wohnungId, kontakte) {
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [wohnungId, rolle, k.name || null, k.email || null, k.telefon || null, k.adresse || null, i]
     );
+    // Cancel pending deletion if contact is re-added
+    if (k.email) cancelPendingDeletion(k.email).catch(() => {});
   }
+
+  // Track removed kontakte for delayed Authentik deletion
+  if (stweg) trackRemovedKontakte(wohnungId, stweg, oldKontakte, kontakte).catch(() => {});
 }
 
 // Sync kontakte with email to Authentik as users and assign STWEG groups
@@ -2445,6 +2454,110 @@ async function syncKontakteToAuthentik(stweg, kontakte) {
     console.error('[Authentik] Kontakte sync error:', err.message);
   }
 }
+
+// Track removed kontakte for delayed Authentik user deletion
+async function trackRemovedKontakte(wohnungId, stweg, oldKontakte, newKontakte) {
+  if (!AUTHENTIK_API_TOKEN) return;
+  const newEmails = new Set((newKontakte || []).filter(k => k.email).map(k => k.email.toLowerCase().trim()));
+  const removedWithEmail = (oldKontakte || []).filter(k => k.email && !newEmails.has(k.email.toLowerCase().trim()));
+  if (removedWithEmail.length === 0) return;
+
+  // Check if the email still exists in another wohnung
+  for (const k of removedWithEmail) {
+    const email = k.email.toLowerCase().trim();
+    const stillExists = await pool.query(
+      `SELECT COUNT(*) as cnt FROM wohnungen_kontakte WHERE LOWER(email) = $1 AND wohnung_id != $2`,
+      [email, wohnungId]
+    );
+    if (parseInt(stillExists.rows[0].cnt) > 0) continue; // Still assigned elsewhere
+
+    // Schedule for deletion in 30 days
+    await pool.query(
+      `INSERT INTO authentik_pending_deletions (email, name, stweg, scheduled_at, reminder_sent)
+       VALUES ($1, $2, $3, NOW() + INTERVAL '30 days', false)
+       ON CONFLICT (email) DO UPDATE SET scheduled_at = NOW() + INTERVAL '30 days', cancelled = false, reminder_sent = false`,
+      [email, k.name || '', stweg]
+    );
+    console.log(`[Authentik] Scheduled deletion for ${email} in 30 days`);
+  }
+}
+
+// Cancel pending deletion if contact is re-added
+async function cancelPendingDeletion(email) {
+  if (!email) return;
+  await pool.query(
+    `UPDATE authentik_pending_deletions SET cancelled = true WHERE LOWER(email) = $1 AND cancelled = false`,
+    [email.toLowerCase().trim()]
+  );
+}
+
+// Periodic job: process pending Authentik deletions (reminders + deletions)
+async function processAuthentiKDeletions() {
+  if (!AUTHENTIK_API_TOKEN) return;
+  try {
+    // 1. Send reminders (7 days before deletion, i.e. scheduled_at - 7 days <= NOW)
+    const reminders = await pool.query(
+      `SELECT * FROM authentik_pending_deletions
+       WHERE cancelled = false AND reminder_sent = false
+       AND scheduled_at - INTERVAL '7 days' <= NOW()
+       AND scheduled_at > NOW()`
+    );
+    for (const row of reminders.rows) {
+      try {
+        const deleteDate = new Date(row.scheduled_at);
+        const formattedDate = `${deleteDate.getDate()}.${deleteDate.getMonth() + 1}.${deleteDate.getFullYear()}`;
+        await transporter.sendMail({
+          from: MAIL_FROM,
+          to: row.email,
+          subject: 'Rosenweg: Ihr Konto wird in 7 Tagen gelöscht',
+          html: `
+            <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
+              <h2 style="color: #1e40af;">Rosenweg Kooperation</h2>
+              <p>Hallo ${escapeHtml(row.name || row.email)},</p>
+              <p>Ihr Konto bei der STWEG-Kooperation Rosenweg wird am <strong>${formattedDate}</strong> gelöscht,
+                 da Sie keiner Wohnung mehr zugeordnet sind.</p>
+              <p>Falls dies ein Fehler ist, wenden Sie sich bitte an die Verwaltung oder den Technischen Dienst.</p>
+              <p style="color: #6b7280; font-size: 0.875rem; margin-top: 24px;">
+                STWEG-Kooperation Rosenweg, Kaiseraugst
+              </p>
+            </div>`,
+        });
+        await pool.query('UPDATE authentik_pending_deletions SET reminder_sent = true WHERE id = $1', [row.id]);
+        console.log(`[Authentik] Deletion reminder sent to ${row.email}`);
+      } catch (err) {
+        console.error(`[Authentik] Failed to send reminder to ${row.email}:`, err.message);
+      }
+    }
+
+    // 2. Delete users past their scheduled date
+    const deletions = await pool.query(
+      `SELECT * FROM authentik_pending_deletions
+       WHERE cancelled = false AND scheduled_at <= NOW()`
+    );
+    for (const row of deletions.rows) {
+      try {
+        // Find user in Authentik by email
+        const usersData = await authentikAPI('GET', `/core/users/?search=${encodeURIComponent(row.email)}`);
+        const user = (usersData.results || []).find(u => u.email?.toLowerCase() === row.email.toLowerCase());
+        if (user) {
+          // Deactivate instead of hard delete (safer)
+          await authentikAPI('PATCH', `/core/users/${user.pk}/`, { is_active: false });
+          console.log(`[Authentik] Deactivated user ${row.email} (pk: ${user.pk})`);
+        }
+        await pool.query('DELETE FROM authentik_pending_deletions WHERE id = $1', [row.id]);
+      } catch (err) {
+        console.error(`[Authentik] Failed to deactivate ${row.email}:`, err.message);
+      }
+    }
+  } catch (err) {
+    console.error('[Authentik] Deletion processing error:', err.message);
+  }
+}
+
+// Run deletion processor daily (every 24h)
+setInterval(processAuthentiKDeletions, 24 * 60 * 60 * 1000);
+// Also run once 60s after startup
+setTimeout(processAuthentiKDeletions, 60 * 1000);
 
 // POST /api/wohnungen/sync-authentik - Bulk sync all kontakte with email to Authentik
 app.post('/api/wohnungen/sync-authentik', authMiddleware, adminOnly, async (req, res) => {
@@ -2557,7 +2670,7 @@ app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsver
       [stweg, b.bezeichnung, b.stockwerk, b.zimmer, b.flaeche_m2, b.typ || 'Wohnung', b.besonderheiten,
        b.bewohnt_von || 'eigentuemer', b.waschkueche_berechtigt !== false, b.notizen]
     );
-    await saveKontakte(client, result.rows[0].id, b.kontakte);
+    await saveKontakte(client, result.rows[0].id, b.kontakte, stweg);
     await client.query('COMMIT');
     const wohnung = await loadWohnungMitKontakte(result.rows[0].id);
     res.status(201).json(wohnung);
@@ -2577,6 +2690,7 @@ app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsver
 app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, async (req, res) => {
   const client = await pool.connect();
   try {
+    const stweg = parseStweg(req.params.stweg);
     const b = req.body;
     await client.query('BEGIN');
     const result = await client.query(
@@ -2585,13 +2699,13 @@ app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
        WHERE id=$10 AND stweg=$11 RETURNING *`,
       [b.bezeichnung, b.stockwerk, b.zimmer, b.flaeche_m2, b.typ || 'Wohnung', b.besonderheiten,
        b.bewohnt_von || 'eigentuemer', b.waschkueche_berechtigt !== false, b.notizen,
-       req.params.id, req.params.stweg]
+       req.params.id, stweg]
     );
     if (result.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Wohnung nicht gefunden' });
     }
-    await saveKontakte(client, result.rows[0].id, b.kontakte);
+    await saveKontakte(client, result.rows[0].id, b.kontakte, stweg);
     // Clear flat fields when kontakte are saved (migration from old format)
     if (b.kontakte && b.kontakte.length > 0) {
       await client.query(
@@ -2667,7 +2781,7 @@ app.post('/api/wohnungen/:stweg/import', authMiddleware, requirePermission('wohn
         const eig = u.eigentümer || u.eigentuemer;
         if (eig?.name) kontakte.push({ rolle: 'eigentuemer', name: eig.name, email: eig.email, telefon: eig.telefon });
         if (u.mieter?.name) kontakte.push({ rolle: 'mieter', name: u.mieter.name, email: u.mieter.email, telefon: u.mieter.telefon });
-        await saveKontakte(client, wohnungId, kontakte);
+        await saveKontakte(client, wohnungId, kontakte, stweg);
         imported++;
       }
     }
@@ -3962,6 +4076,20 @@ async function initDB() {
         created_at TIMESTAMP DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_wohnungen_kontakte_wohnung ON wohnungen_kontakte(wohnung_id);
+    `);
+
+    // Pending Authentik user deletions (30-day grace period)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS authentik_pending_deletions (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) NOT NULL UNIQUE,
+        name VARCHAR(255),
+        stweg INTEGER,
+        scheduled_at TIMESTAMP NOT NULL,
+        reminder_sent BOOLEAN DEFAULT false,
+        cancelled BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
     `);
 
     // Migrate existing flat columns to kontakte table (one-time)
