@@ -4,6 +4,9 @@ const { Pool } = require('pg');
 const nodemailer = require('nodemailer');
 const { simpleParser } = require('mailparser');
 const crypto = require('crypto');
+const fsSync = require('fs');
+const fs = require('fs').promises;
+const pathModule = require('path');
 
 /** Escape string for safe HTML insertion */
 function escapeHtml(str) {
@@ -26,8 +29,8 @@ const app = express();
 
 // Raw body parser for email inbound and document uploads (must be before json parser)
 app.use('/api/email/inbound', express.raw({ type: '*/*', limit: '25mb' }));
-app.use('/api/documents', express.raw({ type: 'application/octet-stream', limit: '100mb' }));
-app.use('/api/scan-upload', express.raw({ type: 'application/octet-stream', limit: '100mb' }));
+app.use('/api/documents', express.raw({ type: 'application/octet-stream', limit: '500mb' }));
+app.use('/api/scan-upload', express.raw({ type: 'application/octet-stream', limit: '500mb' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(cors({ origin: true, credentials: true }));
 
@@ -533,11 +536,6 @@ function getUserStwegs(groups) {
 function isTechnik(groups) {
   return groups.some(g => g.toLowerCase() === 'technik');
 }
-function isPraesident(groups) {
-  return groups.some(g => g.toLowerCase() === 'präsident' || g.toLowerCase() === 'praesident');
-}
-
-/** Check if user is Präsident (full access to all folders) */
 function isPraesident(groups) {
   return groups.some(g => g.toLowerCase() === 'präsident' || g.toLowerCase() === 'praesident');
 }
@@ -3517,45 +3515,47 @@ app.put('/api/admin/groups/:pk/remove_user', authMiddleware, requirePermission('
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// DOCUMENTS (files from private GitHub repo, auth required)
+// DOCUMENTS (local fileserver, NFS-mounted or local path)
 // ═══════════════════════════════════════════════════════════════════
 
-const GITHUB_DOCS_REPO = process.env.GITHUB_DOCS_REPO || 'Rosenweg/documents';
-const GITHUB_DOCS_TOKEN = process.env.GITHUB_DOCS_TOKEN || '';
-const GITHUB_DOCS_BRANCH = process.env.GITHUB_DOCS_BRANCH || 'main';
+const DOCS_PATH = process.env.DOCS_PATH || '/documents';
+const IGNORED_FILES = new Set(['README.md', 'LICENSE', '.gitignore', '.gitkeep', '.gitattributes']);
 
-// Cache for document list (5 min TTL)
-let docsListCache = { data: null, expires: 0 };
+/** Resolve user path safely within DOCS_PATH, returns null if path escapes */
+function safeDocPath(userPath) {
+  const resolved = pathModule.resolve(DOCS_PATH, userPath);
+  if (!resolved.startsWith(pathModule.resolve(DOCS_PATH) + '/') && resolved !== pathModule.resolve(DOCS_PATH)) return null;
+  return resolved;
+}
+
+/** Recursively walk directory and collect files */
+async function walkDocs(dir, prefix = '') {
+  const results = [];
+  let entries;
+  try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return results; }
+  for (const entry of entries) {
+    if (entry.name.startsWith('.')) continue; // skip .recycle, .git-backup, etc.
+    const relPath = prefix ? `${prefix}/${entry.name}` : entry.name;
+    const fullPath = pathModule.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...await walkDocs(fullPath, relPath));
+    } else {
+      if (IGNORED_FILES.has(entry.name)) continue;
+      try {
+        const stat = await fs.stat(fullPath);
+        results.push({ path: relPath, size: stat.size, url: `/api/documents/${relPath}` });
+      } catch { /* skip unreadable files */ }
+    }
+  }
+  return results;
+}
 
 // GET /api/documents - List available documents (filtered by user's STWEGs)
 app.get('/api/documents', authMiddleware, async (req, res) => {
   try {
-    const now = Date.now();
-    let allDocs = docsListCache.data;
-    const forceRefresh = req.query.refresh === '1';
-    if (!allDocs || docsListCache.expires <= now || forceRefresh) {
-      const response = await fetch(
-        `https://api.github.com/repos/${GITHUB_DOCS_REPO}/git/trees/${GITHUB_DOCS_BRANCH}?recursive=1`,
-        { headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json' } }
-      );
-      if (!response.ok) throw new Error(`GitHub API error: ${response.status}`);
-
-      const tree = await response.json();
-      const IGNORED = ['README.md', 'LICENSE', '.gitignore'];
-      allDocs = tree.tree
-        .filter(f => f.type === 'blob' && !IGNORED.includes(f.path) && !f.path.startsWith('.'))
-        .map(f => ({
-          path: f.path,
-          size: f.size,
-          url: `/api/documents/${f.path}`,
-        }));
-      docsListCache = { data: allDocs, expires: now + 5 * 60 * 1000 };
-    }
-
-    // Filter by user's allowed STWEGs
+    const allDocs = await walkDocs(DOCS_PATH);
     const groups = req.user?.groups || [];
     const docs = allDocs.filter(f => isDocPathAllowed(f.path, groups));
-
     res.json(docs);
   } catch (err) {
     console.error('Documents list error:', err.message);
@@ -3581,7 +3581,6 @@ app.post('/api/documents-preview', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Dateityp wird nicht unterstützt' });
     }
 
-    // Check access
     const groups = req.user?.groups || [];
     if (!isDocPathAllowed(filePath, groups)) {
       return res.status(403).json({ error: 'Kein Zugriff auf dieses Dokument' });
@@ -3596,17 +3595,10 @@ app.post('/api/documents-preview', authMiddleware, async (req, res) => {
       return res.send(cached.pdf);
     }
 
-    // Fetch document from GitHub
-    const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
-    const ghResp = await fetch(
-      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${encodedPath}?ref=${GITHUB_DOCS_BRANCH}`,
-      { headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3.raw' } }
-    );
-    if (!ghResp.ok) {
-      if (ghResp.status === 404) return res.status(404).json({ error: 'Dokument nicht gefunden' });
-      throw new Error(`GitHub API error: ${ghResp.status}`);
-    }
-    const docBuffer = Buffer.from(await ghResp.arrayBuffer());
+    // Read from local filesystem
+    const fullPath = safeDocPath(filePath);
+    if (!fullPath) return res.status(400).json({ error: 'Ungültiger Pfad' });
+    const docBuffer = await fs.readFile(fullPath);
 
     // Send to Gotenberg for conversion
     const fileName = filePath.split('/').pop();
@@ -3627,7 +3619,6 @@ app.post('/api/documents-preview', authMiddleware, async (req, res) => {
 
     // Cache the result
     previewCache.set(filePath, { pdf: pdfBuffer, expires: now + PREVIEW_CACHE_TTL });
-    // Evict expired entries, then oldest if still over limit
     if (previewCache.size > 50) {
       for (const [k, v] of previewCache) {
         if (v.expires < now) previewCache.delete(k);
@@ -3645,6 +3636,7 @@ app.post('/api/documents-preview', authMiddleware, async (req, res) => {
     res.setHeader('Content-Disposition', `inline; filename="preview.pdf"`);
     res.send(pdfBuffer);
   } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'Dokument nicht gefunden' });
     console.error('Document preview error:', err.message);
     res.status(500).json({ error: 'Vorschau konnte nicht erstellt werden' });
   }
@@ -3654,30 +3646,19 @@ app.post('/api/documents-preview', authMiddleware, async (req, res) => {
 app.get('/api/documents/:path(*)', authMiddleware, async (req, res) => {
   try {
     const filePath = req.params.path;
-
-    // Prevent path traversal
     if (filePath.includes('..') || filePath.startsWith('/') || /[%\\]/.test(filePath) || /\0/.test(filePath)) {
       return res.status(400).json({ error: 'Ungültiger Pfad' });
     }
 
-    // Check STWEG access
     const groups = req.user?.groups || [];
     if (!isDocPathAllowed(filePath, groups)) {
       return res.status(403).json({ error: 'Kein Zugriff auf dieses Dokument' });
     }
 
-    const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
-    const response = await fetch(
-      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${encodedPath}?ref=${GITHUB_DOCS_BRANCH}`,
-      { headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3.raw' } }
-    );
+    const fullPath = safeDocPath(filePath);
+    if (!fullPath) return res.status(400).json({ error: 'Ungültiger Pfad' });
 
-    if (!response.ok) {
-      if (response.status === 404) return res.status(404).json({ error: 'Dokument nicht gefunden' });
-      throw new Error(`GitHub API error: ${response.status}`);
-    }
-
-    // Set content type based on extension
+    const stat = await fs.stat(fullPath);
     const ext = filePath.split('.').pop().toLowerCase();
     const contentTypes = {
       pdf: 'application/pdf',
@@ -3689,18 +3670,21 @@ app.get('/api/documents/:path(*)', authMiddleware, async (req, res) => {
       png: 'image/png',
       jpg: 'image/jpeg',
       jpeg: 'image/jpeg',
+      gif: 'image/gif',
+      svg: 'image/svg+xml',
       txt: 'text/plain',
       csv: 'text/csv',
+      zip: 'application/zip',
     };
-    const contentType = contentTypes[ext] || 'application/octet-stream';
     const fileName = filePath.split('/').pop();
 
-    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Type', contentTypes[ext] || 'application/octet-stream');
     res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+    res.setHeader('Content-Length', stat.size);
 
-    const buffer = await response.arrayBuffer();
-    res.send(Buffer.from(buffer));
+    fsSync.createReadStream(fullPath).pipe(res);
   } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'Dokument nicht gefunden' });
     console.error('Document download error:', err.message);
     res.status(500).json({ error: 'Dokument konnte nicht geladen werden' });
   }
@@ -3721,7 +3705,6 @@ app.post('/api/scan-upload', async (req, res) => {
       return res.status(400).json({ error: 'X-Filename Header fehlt' });
     }
 
-    // Sanitize filename
     const cleanName = fileName
       .replace(/ä/gi, 'ae').replace(/ö/gi, 'oe').replace(/ü/gi, 'ue').replace(/ß/g, 'ss')
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -3730,41 +3713,12 @@ app.post('/api/scan-upload', async (req, res) => {
       .toLowerCase();
 
     const filePath = `Scans/${cleanName}`;
-    const content = req.body.toString('base64');
+    const fullPath = safeDocPath(filePath);
+    if (!fullPath) return res.status(400).json({ error: 'Ungültiger Pfad' });
 
-    // Check if file already exists
-    let sha;
-    const checkResp = await fetch(
-      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${filePath}?ref=${GITHUB_DOCS_BRANCH}`,
-      { headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json' } }
-    );
-    if (checkResp.ok) {
-      const existing = await checkResp.json();
-      sha = existing.sha;
-    }
+    await fs.mkdir(pathModule.dirname(fullPath), { recursive: true });
+    await fs.writeFile(fullPath, req.body);
 
-    const body = {
-      message: `Scan: ${cleanName} (via Scanner)`,
-      content,
-      branch: GITHUB_DOCS_BRANCH,
-    };
-    if (sha) body.sha = sha;
-
-    const response = await fetch(
-      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${filePath}`,
-      {
-        method: 'PUT',
-        headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      }
-    );
-
-    if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.message || `GitHub API error: ${response.status}`);
-    }
-
-    docsListCache = { data: null, expires: 0 };
     console.log(`[SCAN] Uploaded: ${filePath}`);
     res.json({ success: true, path: filePath });
   } catch (err) {
@@ -3773,7 +3727,7 @@ app.post('/api/scan-upload', async (req, res) => {
   }
 });
 
-// POST /api/documents/folder - Create a subfolder (via .gitkeep placeholder)
+// POST /api/documents/folder - Create a subfolder
 app.post('/api/documents/folder', authMiddleware, canManageDocs, async (req, res) => {
   try {
     const { parent, name } = req.body || {};
@@ -3795,20 +3749,10 @@ app.post('/api/documents/folder', authMiddleware, canManageDocs, async (req, res
       return res.status(403).json({ error: 'Kein Schreibzugriff' });
     }
 
-    const gitkeepPath = `${folderPath}/.gitkeep`;
-    const putResp = await fetch(
-      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${gitkeepPath}`,
-      {
-        method: 'PUT',
-        headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: `Ordner ${folderPath} erstellt`, content: '', branch: GITHUB_DOCS_BRANCH }),
-      }
-    );
-    if (!putResp.ok) {
-      const err = await putResp.json().catch(() => ({}));
-      throw new Error(err.message || `GitHub API error: ${putResp.status}`);
-    }
-    docsListCache = { data: null, expires: 0 };
+    const fullPath = safeDocPath(folderPath);
+    if (!fullPath) return res.status(400).json({ error: 'Ungültiger Pfad' });
+
+    await fs.mkdir(fullPath, { recursive: true });
     res.json({ success: true, path: folderPath });
   } catch (err) {
     console.error('[DOCS] Create folder error:', err.message);
@@ -3819,7 +3763,6 @@ app.post('/api/documents/folder', authMiddleware, canManageDocs, async (req, res
 // PUT /api/documents/:path(*) - Upload/replace a document (admin only)
 app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, res) => {
   try {
-    // Sanitize filename: keep folder structure, clean the filename part
     const rawPath = req.params.path;
     if (rawPath.includes('..') || rawPath.startsWith('/') || /[%\\]/.test(rawPath) || /\0/.test(rawPath)) {
       return res.status(400).json({ error: 'Ungültiger Pfad' });
@@ -3832,8 +3775,7 @@ app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, re
       .replace(/-+/g, '-').replace(/^-|-$/g, '')
       .toLowerCase();
 
-    // Validate file extension
-    const ALLOWED_UPLOAD_EXTS = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'txt', 'csv', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'dotx']);
+    const ALLOWED_UPLOAD_EXTS = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'txt', 'csv', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'dotx', 'zip', 'tiff', 'tif', 'bmp']);
     const uploadExt = fileName.split('.').pop();
     if (!uploadExt || !ALLOWED_UPLOAD_EXTS.has(uploadExt)) {
       return res.status(400).json({ error: `Dateityp .${uploadExt} nicht erlaubt` });
@@ -3847,38 +3789,12 @@ app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, re
       return res.status(403).json({ error: 'Kein Schreibzugriff auf diesen Ordner' });
     }
 
-    const fileBuffer = req.body;
-    if (fileBuffer.length > 25 * 1024 * 1024) {
-      return res.status(400).json({ error: 'Datei zu gross (max. 25 MB)' });
-    }
-    const content = fileBuffer.toString('base64');
-    const commitMsg = `Upload: ${filePath.split('/').pop()} (von ${req.user.name || req.user.email})`;
-    const ghHeaders = { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' };
+    const fullPath = safeDocPath(filePath);
+    if (!fullPath) return res.status(400).json({ error: 'Ungültiger Pfad' });
 
-    // Check if file already exists (need SHA for update)
-    let sha;
-    const checkResp = await fetch(
-      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${filePath}?ref=${GITHUB_DOCS_BRANCH}`,
-      { headers: ghHeaders }
-    );
-    if (checkResp.ok) {
-      const existing = await checkResp.json();
-      sha = existing.sha;
-    }
+    await fs.mkdir(pathModule.dirname(fullPath), { recursive: true });
+    await fs.writeFile(fullPath, req.body);
 
-    const body = { message: commitMsg, content, branch: GITHUB_DOCS_BRANCH };
-    if (sha) body.sha = sha;
-
-    const response = await fetch(
-      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${filePath}`,
-      { method: 'PUT', headers: ghHeaders, body: JSON.stringify(body) }
-    );
-    if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.message || `GitHub API error: ${response.status}`);
-    }
-
-    docsListCache = { data: null, expires: 0 };
     previewCache.delete(filePath);
     res.json({ success: true, path: filePath });
   } catch (err) {
@@ -3900,33 +3816,14 @@ app.delete('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req,
       return res.status(403).json({ error: 'Kein Schreibzugriff auf diesen Ordner' });
     }
 
-    // Get SHA (required for delete)
-    const checkResp = await fetch(
-      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${filePath}?ref=${GITHUB_DOCS_BRANCH}`,
-      { headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json' } }
-    );
-    if (!checkResp.ok) return res.status(404).json({ error: 'Dokument nicht gefunden' });
-    const { sha } = await checkResp.json();
+    const fullPath = safeDocPath(filePath);
+    if (!fullPath) return res.status(400).json({ error: 'Ungültiger Pfad' });
 
-    const response = await fetch(
-      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${filePath}`,
-      {
-        method: 'DELETE',
-        headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: `Gelöscht: ${filePath.split('/').pop()} (von ${req.user.name || req.user.email})`,
-          sha,
-          branch: GITHUB_DOCS_BRANCH,
-        }),
-      }
-    );
-
-    if (!response.ok) throw new Error(`GitHub API error: ${response.status}`);
-
-    docsListCache = { data: null, expires: 0 };
+    await fs.unlink(fullPath);
     previewCache.delete(filePath);
     res.json({ success: true });
   } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'Dokument nicht gefunden' });
     console.error('Document delete error:', err.message);
     res.status(500).json({ error: 'Dokument konnte nicht gelöscht werden' });
   }
@@ -3946,43 +3843,17 @@ app.post('/api/documents/move', authMiddleware, canManageDocs, async (req, res) 
       return res.status(403).json({ error: 'Kein Schreibzugriff' });
     }
 
-    // 1. Get file content + SHA
-    const getResp = await fetch(
-      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${from}?ref=${GITHUB_DOCS_BRANCH}`,
-      { headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json' } }
-    );
-    if (!getResp.ok) return res.status(404).json({ error: 'Quelldatei nicht gefunden' });
-    const fileData = await getResp.json();
+    const fromPath = safeDocPath(from);
+    const toPath = safeDocPath(to);
+    if (!fromPath || !toPath) return res.status(400).json({ error: 'Ungültiger Pfad' });
 
-    // 2. Create at new location
-    const putResp = await fetch(
-      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${to}`,
-      {
-        method: 'PUT',
-        headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: `Verschoben: ${from} → ${to} (von ${req.user.name || req.user.email})`,
-          content: fileData.content.replace(/\n/g, ''),
-          branch: GITHUB_DOCS_BRANCH,
-        }),
-      }
-    );
-    if (!putResp.ok) throw new Error(`Erstellen am Ziel fehlgeschlagen: ${putResp.status}`);
+    await fs.mkdir(pathModule.dirname(toPath), { recursive: true });
+    await fs.rename(fromPath, toPath);
 
-    // 3. Delete at old location
-    await fetch(
-      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${from}`,
-      {
-        method: 'DELETE',
-        headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: `Verschoben nach ${to}`, sha: fileData.sha, branch: GITHUB_DOCS_BRANCH }),
-      }
-    );
-
-    docsListCache = { data: null, expires: 0 };
     previewCache.delete(from);
     res.json({ success: true, from, to });
   } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'Quelldatei nicht gefunden' });
     console.error('Document move error:', err.message);
     res.status(500).json({ error: 'Verschieben fehlgeschlagen: ' + err.message });
   }
