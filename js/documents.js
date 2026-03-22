@@ -645,6 +645,10 @@ const RosenwegDocs = {
     }
 
     const file = fileInput.files[0];
+    if (file.size > 25 * 1024 * 1024) {
+      this._showUploadError('Datei zu gross (max. 25 MB). Bitte die Datei verkleinern.');
+      return;
+    }
     const safeName = this.sanitizeFileName(file.name);
     const path = `${folder}/${safeName}`;
 
@@ -673,6 +677,10 @@ const RosenwegDocs = {
     }
 
     const file = fileInput.files[0];
+    if (file.size > 25 * 1024 * 1024) {
+      this._showUploadError('Datei zu gross (max. 25 MB). Bitte die Datei verkleinern.');
+      return;
+    }
     const folder = path.substring(0, path.lastIndexOf('/'));
     const safeName = this.sanitizeFileName(file.name);
     const uploadPath = `${folder}/${safeName}`;
