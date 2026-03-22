@@ -3528,7 +3528,8 @@ function safeDocPath(userPath) {
   return resolved;
 }
 
-/** Recursively walk directory and collect files */
+/** Recursively walk directory and collect files.
+ *  For empty subdirectories, emit a .gitkeep entry so the frontend can register them. */
 async function walkDocs(dir, prefix = '') {
   const results = [];
   let entries;
@@ -3538,7 +3539,13 @@ async function walkDocs(dir, prefix = '') {
     const relPath = prefix ? `${prefix}/${entry.name}` : entry.name;
     const fullPath = pathModule.join(dir, entry.name);
     if (entry.isDirectory()) {
-      results.push(...await walkDocs(fullPath, relPath));
+      const subResults = await walkDocs(fullPath, relPath);
+      if (subResults.length === 0) {
+        // Empty directory: emit a .gitkeep so frontend registers the subfolder
+        results.push({ path: `${relPath}/.gitkeep`, size: 0, url: `/api/documents/${relPath}/.gitkeep` });
+      } else {
+        results.push(...subResults);
+      }
     } else {
       if (IGNORED_FILES.has(entry.name)) continue;
       try {
