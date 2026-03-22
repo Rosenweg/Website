@@ -1994,14 +1994,93 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
   });
   console.log(`Distributed email to ${recipients.length} recipients for ${toAddress}`);
 
-  await pool.query(
+  const logResult = await pool.query(
     `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, status, message_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
     [list.id, senderEmail, senderName, parsed.subject, recipients.length, attachments.length > 0,
      JSON.stringify(recipients), 'sent', messageId || parsed.messageId || null]
   );
 
+  // Schedule delivery report to sender after 90 seconds
+  if (SMTP2GO_API_KEY && senderEmail) {
+    const logId = logResult.rows[0].id;
+    setTimeout(() => sendDeliveryReport(logId, senderEmail, list.name, parsed.subject, recipients).catch(
+      err => console.error('[DeliveryReport] Error:', err.message)
+    ), 90_000);
+  }
+
   return { success: true, action: 'distributed', recipients: recipients.length };
+}
+
+// ─── Delivery Report ────────────────────────────────────────────────
+async function sendDeliveryReport(logId, senderEmail, verteilerName, originalSubject, recipientsList) {
+  const log = await pool.query('SELECT * FROM email_log WHERE id = $1', [logId]);
+  if (log.rows.length === 0) return;
+  const entry = log.rows[0];
+
+  // Query SMTP2GO for delivery status
+  const startDate = new Date(entry.created_at);
+  startDate.setMinutes(startDate.getMinutes() - 5);
+  const endDate = new Date(entry.created_at);
+  endDate.setHours(endDate.getHours() + 2);
+
+  const apiRes = await fetch(`${SMTP2GO_API_URL}/activity/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Smtp2go-Api-Key': SMTP2GO_API_KEY },
+    body: JSON.stringify({
+      start_date: startDate.toISOString(),
+      end_date: endDate.toISOString(),
+      search_subject: originalSubject,
+      limit: 200,
+    }),
+  });
+  const apiData = await apiRes.json();
+
+  // Best status per recipient
+  const statusMap = new Map();
+  const priority = { clicked: 5, opened: 4, delivered: 3, soft_bounced: 2, bounced: 2, rejected: 2, sent: 1, queued: 0 };
+  for (const e of (apiData.data?.events || [])) {
+    const cur = statusMap.get(e.recipient);
+    if (!cur || (priority[e.event] || 0) > (priority[cur.event] || 0)) {
+      statusMap.set(e.recipient, { event: e.event, date: e.date });
+    }
+  }
+
+  // Build report
+  const statusIcon = { delivered: '\u2705', opened: '\u2705', clicked: '\u2705', sent: '\u23F3', queued: '\u23F3', soft_bounced: '\u26A0\uFE0F', bounced: '\u274C', rejected: '\u274C' };
+  const statusLabel = { delivered: 'Zugestellt', opened: 'Gelesen', clicked: 'Link geklickt', sent: 'Gesendet', queued: 'In Warteschlange', soft_bounced: 'Temporärer Fehler', bounced: 'Fehlgeschlagen', rejected: 'Abgelehnt' };
+
+  let rows = '';
+  for (const email of recipientsList) {
+    const status = statusMap.get(email);
+    const icon = status ? (statusIcon[status.event] || '\u2753') : '\u2753';
+    const label = status ? (statusLabel[status.event] || status.event) : 'Unbekannt';
+    rows += `<tr><td style="padding:4px 12px;border-bottom:1px solid #eee">${escapeHtml(email)}</td><td style="padding:4px 12px;border-bottom:1px solid #eee">${icon} ${label}</td></tr>`;
+  }
+
+  const delivered = [...statusMap.values()].filter(s => ['delivered', 'opened', 'clicked'].includes(s.event)).length;
+  const failed = [...statusMap.values()].filter(s => ['bounced', 'rejected'].includes(s.event)).length;
+  const pending = recipientsList.length - delivered - failed;
+
+  const html = `
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+      <h2 style="color:#1a56db">Zustellbericht: ${escapeHtml(verteilerName)}</h2>
+      <p><strong>Betreff:</strong> ${escapeHtml(originalSubject || '(kein Betreff)')}</p>
+      <p><strong>Empfänger:</strong> ${recipientsList.length} | <strong>Zugestellt:</strong> ${delivered} | <strong>Ausstehend:</strong> ${pending} | <strong>Fehlgeschlagen:</strong> ${failed}</p>
+      <table style="border-collapse:collapse;width:100%;margin-top:12px">
+        <thead><tr style="background:#f3f4f6"><th style="padding:6px 12px;text-align:left">Empfänger</th><th style="padding:6px 12px;text-align:left">Status</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p style="color:#6b7280;font-size:12px;margin-top:16px">Automatischer Zustellbericht von Rosenweg Verteiler. Status kann sich noch ändern (z.B. "Gesendet" → "Zugestellt").</p>
+    </div>`;
+
+  await transporter.sendMail({
+    from: `"Rosenweg Verteiler" <noreply@rosenweg4303.ch>`,
+    to: senderEmail,
+    subject: `Zustellbericht: ${originalSubject || verteilerName}`,
+    html,
+  });
+  console.log(`[DeliveryReport] Sent to ${senderEmail} for log #${logId}: ${delivered}/${recipientsList.length} delivered`);
 }
 
 // HTTP endpoint (kept for direct API testing)
