@@ -125,7 +125,7 @@ services:
       ENERGY_DB_PASSWORD: "${ENERGY_DB_PASSWORD:-energy2026}"
       DOCS_PATH: /documents
     volumes:
-      - documents:/documents
+      - /srv/documents:/documents
     networks:
       - rosenweg-net
       - authentik_authentik-net
@@ -331,9 +331,3 @@ volumes:
   rosenweg-pgdata:
   energy-pgdata:
   netbird-config:
-  documents:
-    driver: local
-    driver_opts:
-      type: nfs
-      o: addr=100.64.2.26,rw,nolock,soft,timeo=30
-      device: :/srv/documents
