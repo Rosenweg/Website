@@ -453,14 +453,11 @@ const RosenwegDocs = {
       this._showUploadError('Bitte einen Ordnernamen eingeben.');
       return;
     }
-    const safeName = this.sanitizeFileName(name) || name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-    // Create folder by uploading a .gitkeep placeholder
-    const path = `${parentFolder}/${safeName}/.gitkeep`;
     try {
-      const resp = await AuthentikAuth.apiFetch(`/api/documents/${path}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/octet-stream' },
-        body: new ArrayBuffer(0),
+      const resp = await AuthentikAuth.apiFetch('/api/documents/folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parent: parentFolder, name }),
       });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
