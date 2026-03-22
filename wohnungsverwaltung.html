@@ -254,7 +254,7 @@
 
             canWrite = access === 'write';
             const groups = user.groups || [];
-            const isTechnik = groups.some(g => g.toLowerCase() === 'technik');
+            const isTechnik = groups.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; });
 
             try {
                 const configRes = await fetch('/site-config.json');

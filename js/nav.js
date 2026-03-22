@@ -200,7 +200,7 @@ const RosenwegNav = {
   _applyPermissions(user) {
     const hasPerm = (page) => {
       if (!user) return false;
-      if (user.groups?.some(g => g.toLowerCase() === 'technik')) return true;
+      if (user.groups?.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; })) return true;
       const perms = user.permissions || {};
       return (perms[page] === 'read' || perms[page] === 'write');
     };
