@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wohnungsverwaltung - STWEG Rosenweg</title>
+    <title>Verwaltung - STWEG Rosenweg</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
     <script src="/js/authentik-auth.js?v=2"></script>
@@ -11,12 +11,15 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; }
+        .tab-active { border-color: #2563eb; color: #2563eb; font-weight: 600; }
+        .tab-inactive { border-color: transparent; color: #6b7280; }
+        .tab-inactive:hover { color: #374151; border-color: #d1d5db; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen flex flex-col">
 
     <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
-    <script>RosenwegNav.init({ active: 'wohnungsverwaltung' });</script>
+    <script>RosenwegNav.init({ active: 'verwaltung' });</script>
 
     <!-- Auth Gate -->
     <div id="auth-gate" class="flex-1 flex items-center justify-center">
@@ -34,81 +37,141 @@
         <!-- Header -->
         <div class="bg-gradient-to-r from-blue-600 to-blue-800 text-white">
             <div class="max-w-6xl mx-auto px-4 sm:px-6 py-6">
-                <h1 class="text-2xl font-bold" id="page-title">Wohnungsverwaltung</h1>
-                <p class="text-blue-200 text-sm mt-1" id="page-subtitle">Wohnungen, Eigentümer und Bewohner verwalten</p>
+                <h1 class="text-2xl font-bold" id="page-title">Verwaltung</h1>
+                <p class="text-blue-200 text-sm mt-1" id="page-subtitle">Wohnungen, Bewohner und Gruppen verwalten</p>
             </div>
         </div>
 
         <div class="max-w-6xl mx-auto px-4 sm:px-6 py-6">
-            <!-- STWEG Selector -->
-            <div class="flex flex-wrap items-center gap-3 mb-6">
-                <label class="text-sm font-medium text-gray-700">STWEG:</label>
-                <div id="stweg-tabs" class="flex flex-wrap gap-2"></div>
+            <!-- Top-level Tabs -->
+            <div class="border-b border-gray-200 mb-6">
+                <nav class="flex space-x-8">
+                    <button id="main-tab-wohnungen" onclick="switchMainTab('wohnungen')" class="tab-active border-b-2 pb-3 px-1 text-sm transition">
+                        Wohnungen
+                    </button>
+                    <button id="main-tab-bewohner" onclick="switchMainTab('bewohner')" class="tab-inactive border-b-2 pb-3 px-1 text-sm transition hidden">
+                        Bewohner
+                    </button>
+                    <button id="main-tab-gruppen" onclick="switchMainTab('gruppen')" class="tab-inactive border-b-2 pb-3 px-1 text-sm transition hidden">
+                        Gruppen
+                    </button>
+                </nav>
             </div>
 
-            <!-- Stats Bar -->
-            <div id="stats-bar" class="hidden grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-                <div class="bg-white rounded-lg border p-3 text-center">
-                    <div class="text-2xl font-bold text-gray-800" id="stat-total">0</div>
-                    <div class="text-xs text-gray-500">Wohnungen</div>
+            <!-- ═══ Wohnungen Tab ═══ -->
+            <div id="panel-wohnungen">
+                <!-- STWEG Selector -->
+                <div class="flex flex-wrap items-center gap-3 mb-6">
+                    <label class="text-sm font-medium text-gray-700">STWEG:</label>
+                    <div id="stweg-tabs" class="flex flex-wrap gap-2"></div>
                 </div>
-                <div class="bg-white rounded-lg border p-3 text-center">
-                    <div class="text-2xl font-bold text-green-600" id="stat-selbst">0</div>
-                    <div class="text-xs text-gray-500">Selbstbewohnt</div>
-                </div>
-                <div class="bg-white rounded-lg border p-3 text-center">
-                    <div class="text-2xl font-bold text-blue-600" id="stat-vermietet">0</div>
-                    <div class="text-xs text-gray-500">Vermietet</div>
-                </div>
-                <div class="bg-white rounded-lg border p-3 text-center">
-                    <div class="text-2xl font-bold text-yellow-600" id="stat-leer">0</div>
-                    <div class="text-xs text-gray-500">Leer</div>
-                </div>
-            </div>
 
-            <!-- Toolbar -->
-            <div class="flex justify-between items-center mb-4">
-                <div class="relative">
-                    <input type="text" id="wohnung-search" placeholder="Suchen..." oninput="filterWohnungen()"
-                        class="border border-gray-300 rounded-lg pl-9 pr-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-64">
-                    <svg class="absolute left-3 top-2.5 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                <!-- Stats Bar -->
+                <div id="stats-bar" class="hidden grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+                    <div class="bg-white rounded-lg border p-3 text-center">
+                        <div class="text-2xl font-bold text-gray-800" id="stat-total">0</div>
+                        <div class="text-xs text-gray-500">Wohnungen</div>
+                    </div>
+                    <div class="bg-white rounded-lg border p-3 text-center">
+                        <div class="text-2xl font-bold text-green-600" id="stat-selbst">0</div>
+                        <div class="text-xs text-gray-500">Selbstbewohnt</div>
+                    </div>
+                    <div class="bg-white rounded-lg border p-3 text-center">
+                        <div class="text-2xl font-bold text-blue-600" id="stat-vermietet">0</div>
+                        <div class="text-xs text-gray-500">Vermietet</div>
+                    </div>
+                    <div class="bg-white rounded-lg border p-3 text-center">
+                        <div class="text-2xl font-bold text-yellow-600" id="stat-leer">0</div>
+                        <div class="text-xs text-gray-500">Leer</div>
+                    </div>
+                </div>
+
+                <!-- Toolbar -->
+                <div class="flex justify-between items-center mb-4">
+                    <div class="relative">
+                        <input type="text" id="wohnung-search" placeholder="Suchen..." oninput="filterWohnungen()"
+                            class="border border-gray-300 rounded-lg pl-9 pr-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-64">
+                        <svg class="absolute left-3 top-2.5 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                    </div>
+                    <div class="flex gap-2">
+                        <button id="btn-export" onclick="exportXLSX()" class="hidden bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition flex items-center gap-2" title="Excel exportieren">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                            Excel
+                        </button>
+                        <button id="btn-csv" onclick="exportCSV()" class="hidden bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition flex items-center gap-2" title="CSV exportieren">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                            CSV
+                        </button>
+                        <button id="btn-import" onclick="importKontakte()" class="hidden bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition flex items-center gap-2" title="Aus kontakte.json importieren">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                            Import
+                        </button>
+                        <button id="btn-add" onclick="showAddModal()" class="hidden bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                            Neue Wohnung
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Wohnungen Table -->
+                <div id="wohnungen-list" class="space-y-2"></div>
+                <div id="loading" class="text-center py-12 text-gray-500">
+                    <svg class="animate-spin h-6 w-6 mx-auto mb-2 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
                     </svg>
+                    Wohnungen werden geladen...
                 </div>
-                <div class="flex gap-2">
-                    <button id="btn-export" onclick="exportXLSX()" class="hidden bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition flex items-center gap-2" title="Excel exportieren">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                        Excel
-                    </button>
-                    <button id="btn-csv" onclick="exportCSV()" class="hidden bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition flex items-center gap-2" title="CSV exportieren">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                        CSV
-                    </button>
-                    <button id="btn-import" onclick="importKontakte()" class="hidden bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition flex items-center gap-2" title="Aus kontakte.json importieren">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-                        Import
-                    </button>
-                    <button id="btn-add" onclick="showAddModal()" class="hidden bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition flex items-center gap-2">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-                        Neue Wohnung
-                    </button>
-                </div>
+                <div id="no-data" class="hidden text-center py-8 text-gray-400">Keine Wohnungen vorhanden.</div>
             </div>
 
-            <!-- Wohnungen Table -->
-            <div id="wohnungen-list" class="space-y-2"></div>
-            <div id="loading" class="text-center py-12 text-gray-500">
-                <svg class="animate-spin h-6 w-6 mx-auto mb-2 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                </svg>
-                Wohnungen werden geladen...
+            <!-- ═══ Bewohner Tab ═══ -->
+            <div id="panel-bewohner" class="hidden">
+                <div class="flex justify-between items-center mb-4">
+                    <div class="relative">
+                        <input type="text" id="user-search" placeholder="Suchen..." oninput="filterUsers()"
+                            class="border border-gray-300 rounded-lg pl-9 pr-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-64">
+                        <svg class="absolute left-3 top-2.5 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                    </div>
+                    <button id="btn-add-user" onclick="showAddForm()" class="hidden bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                        Neuer Bewohner
+                    </button>
+                </div>
+
+                <!-- User Cards -->
+                <div id="user-cards" class="space-y-3"></div>
+                <div id="users-loading" class="hidden text-center py-12 text-gray-500">
+                    <svg class="animate-spin h-6 w-6 mx-auto mb-2 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                    </svg>
+                    Bewohner werden geladen...
+                </div>
+                <div id="no-users" class="hidden text-center py-8 text-gray-400">Keine Bewohner gefunden.</div>
             </div>
-            <div id="no-data" class="hidden text-center py-8 text-gray-400">Keine Wohnungen vorhanden.</div>
+
+            <!-- ═══ Gruppen Tab ═══ -->
+            <div id="panel-gruppen" class="hidden">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-semibold text-gray-700" id="groups-title">Gruppen</h2>
+                    <button id="btn-new-group" onclick="openNewGroupModal()" class="hidden bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm font-medium flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                        </svg>
+                        Neue Gruppe
+                    </button>
+                </div>
+                <div id="groups-list" class="space-y-1"></div>
+            </div>
         </div>
     </div>
 
-    <!-- Edit/Add Modal -->
+    <!-- Wohnung Edit/Add Modal -->
     <div id="edit-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-xl shadow-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
             <h3 class="text-lg font-bold text-gray-800 mb-4" id="modal-title">Neue Wohnung</h3>
@@ -200,11 +263,57 @@
             <div class="flex justify-between items-center">
                 <button id="btn-delete" onclick="deleteWohnung()" class="hidden text-red-600 hover:text-red-800 text-sm font-medium">Löschen</button>
                 <div class="flex gap-3 ml-auto">
-                    <button onclick="closeModal()" class="px-4 py-2 text-gray-600 hover:text-gray-800 text-sm">Abbrechen</button>
+                    <button onclick="closeWohnungModal()" class="px-4 py-2 text-gray-600 hover:text-gray-800 text-sm">Abbrechen</button>
                     <button onclick="saveWohnung()" class="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition">Speichern</button>
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- User Edit/Add Dialog -->
+    <div id="edit-dialog" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+            <h3 class="text-lg font-bold text-gray-800 mb-4" id="dialog-title">Neuer Bewohner</h3>
+            <div class="space-y-4">
+                <input type="hidden" id="f-pk" />
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                    <input type="text" id="f-name" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="z.B. Max Mustermann" />
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">E-Mail *</label>
+                    <input type="email" id="f-email" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="name@example.com" />
+                    <p class="text-xs text-gray-400 mt-1">Der Bewohner meldet sich mit dieser E-Mail-Adresse an</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Rolle</label>
+                    <div class="flex gap-4">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="rolle" value="eigentuemer" checked class="text-blue-600" />
+                            <span class="text-sm">Eigentümer</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="rolle" value="mieter" class="text-blue-600" />
+                            <span class="text-sm">Mieter</span>
+                        </label>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Gruppen</label>
+                    <div id="f-groups" class="space-y-2 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-3"></div>
+                </div>
+                <div id="dialog-error" class="hidden bg-red-50 border-l-4 border-red-500 p-3 rounded text-sm text-red-700"></div>
+                <div class="flex gap-3 pt-2">
+                    <button onclick="saveUser()" id="save-btn" class="flex-1 bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700 transition">Speichern</button>
+                    <button onclick="closeDialog()" class="px-6 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition">Abbrechen</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Group Modal Overlay -->
+    <div id="group-modal-overlay" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div id="group-modal-content" class="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"></div>
     </div>
 
     <script>
@@ -218,14 +327,32 @@
             { value: 'sonstige', label: 'Sonstige', color: 'gray' },
         ];
 
+        const STWEG_TO_ROSENWEG = { 1: [17,18], 2: [13,14,16], 3: [9], 4: [10,12], 5: [5,6,8], 6: [1], 7: [2,4] };
+
+        // ── Wohnungen State ──
         let allWohnungen = [];
         let stwegList = [];
         let currentStweg = null;
-        let canWrite = false;
-        let currentUser = null;
+        let canWriteWohnungen = false;
         let kontaktCounter = 0;
 
+        // ── Bewohner/Gruppen State ──
+        let allUsers = [];
+        let allGroups = [];
+        let canWriteBewohner = false;
+        let seesAll = false;
+        let userStweg = null;
+        let userGroupPrefix = null;
+        let bewohnerLoaded = false;
+
+        // ── Shared State ──
+        let currentUser = null;
+        let hasWohnungenAccess = false;
+        let hasBewohnerAccess = false;
+
+        // ══════════════════════════════
         // ── Auth Init ──
+        // ══════════════════════════════
         window.addEventListener('DOMContentLoaded', async () => {
             const user = await AuthentikAuth.init({ requireAuth: false });
 
@@ -240,8 +367,19 @@
             }
 
             currentUser = user;
-            const access = AuthentikAuth.getPermission('wohnungsverwaltung');
-            if (access === 'none') {
+            const groups = user.groups || [];
+            const isTechnik = groups.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; });
+            const isVerwaltung = groups.some(g => g.toLowerCase() === 'verwaltung');
+
+            // Check permissions for both areas
+            const accessWohnungen = AuthentikAuth.getPermission('wohnungsverwaltung');
+            const accessBewohner = AuthentikAuth.getPermission('bewohner-verwaltung');
+            const accessVerwaltung = AuthentikAuth.getPermission('verwaltung');
+
+            hasWohnungenAccess = accessWohnungen !== 'none';
+            hasBewohnerAccess = accessBewohner !== 'none' || accessVerwaltung !== 'none';
+
+            if (!hasWohnungenAccess && !hasBewohnerAccess) {
                 document.getElementById('auth-gate').innerHTML = `
                     <div class="text-center">
                         <svg class="h-12 w-12 mx-auto mb-3 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -252,51 +390,115 @@
                 return;
             }
 
-            canWrite = access === 'write';
-            const groups = user.groups || [];
-            const isTechnik = groups.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; });
+            canWriteWohnungen = accessWohnungen === 'write';
+            canWriteBewohner = accessBewohner === 'write' || accessVerwaltung === 'write';
+            seesAll = isTechnik || isVerwaltung;
 
-            try {
-                const configRes = await fetch('/site-config.json');
-                const config = await configRes.json();
-                stwegList = config.stwegen || [];
-            } catch { stwegList = []; }
-
-            const accessibleStwegs = [];
-            for (const s of stwegList) {
-                if (isTechnik) { accessibleStwegs.push(s); continue; }
-                const sGroups = s.groups ? Object.values(s.groups).map(g => g.toLowerCase()) : [];
-                if (groups.some(g => sGroups.includes(g.toLowerCase()))) accessibleStwegs.push(s);
+            // Determine STWEG for non-admin users (Bewohner tab)
+            if (!seesAll) {
+                const ausschussGroup = groups.find(g => g.match(/stweg\d+-ausschuss/i));
+                if (ausschussGroup) {
+                    const match = ausschussGroup.match(/stweg(\d+)/i);
+                    if (match) {
+                        userStweg = parseInt(match[1]);
+                        const rwNrs = STWEG_TO_ROSENWEG[userStweg] || [];
+                        userGroupPrefix = rwNrs.map(n => `r${n}-`);
+                    }
+                }
             }
 
-            if (accessibleStwegs.length === 0) {
-                document.getElementById('auth-gate').innerHTML = `
-                    <div class="text-center"><p class="text-lg font-medium text-gray-700">Keine STWEGs zugewiesen</p></div>`;
-                return;
+            // Show/hide tabs based on permissions
+            const firstTab = hasWohnungenAccess ? 'wohnungen' : 'bewohner';
+
+            if (!hasWohnungenAccess) {
+                document.getElementById('main-tab-wohnungen').classList.add('hidden');
+            }
+            if (hasBewohnerAccess) {
+                document.getElementById('main-tab-bewohner').classList.remove('hidden');
+                if (canWriteBewohner) {
+                    document.getElementById('main-tab-gruppen').classList.remove('hidden');
+                    document.getElementById('btn-add-user').classList.remove('hidden');
+                    if (seesAll) {
+                        document.getElementById('btn-new-group').classList.remove('hidden');
+                        document.getElementById('groups-title').textContent = 'Alle Gruppen';
+                    }
+                }
             }
 
-            const tabsEl = document.getElementById('stweg-tabs');
-            tabsEl.innerHTML = accessibleStwegs.map(s => `
-                <button onclick="selectStweg(${s.nr})" id="stweg-tab-${s.nr}"
-                    class="px-3 py-1.5 rounded-lg text-sm font-medium border transition
-                           ${s.nr === accessibleStwegs[0].nr ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'}">
-                    ${esc(s.name)} <span class="text-xs opacity-75">${esc(s.adressen)}</span>
-                </button>
-            `).join('');
+            // ── Wohnungen init ──
+            if (hasWohnungenAccess) {
+                try {
+                    const configRes = await fetch('/site-config.json');
+                    const config = await configRes.json();
+                    stwegList = config.stwegen || [];
+                } catch { stwegList = []; }
 
-            document.getElementById('btn-export').classList.remove('hidden');
-            document.getElementById('btn-csv').classList.remove('hidden');
-            if (canWrite) {
-                document.getElementById('btn-add').classList.remove('hidden');
-                document.getElementById('btn-import').classList.remove('hidden');
+                const accessibleStwegs = [];
+                for (const s of stwegList) {
+                    if (isTechnik) { accessibleStwegs.push(s); continue; }
+                    const sGroups = s.groups ? Object.values(s.groups).map(g => g.toLowerCase()) : [];
+                    if (groups.some(g => sGroups.includes(g.toLowerCase()))) accessibleStwegs.push(s);
+                }
+
+                if (accessibleStwegs.length > 0) {
+                    const tabsEl = document.getElementById('stweg-tabs');
+                    tabsEl.innerHTML = accessibleStwegs.map(s => `
+                        <button onclick="selectStweg(${s.nr})" id="stweg-tab-${s.nr}"
+                            class="px-3 py-1.5 rounded-lg text-sm font-medium border transition
+                                   ${s.nr === accessibleStwegs[0].nr ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'}">
+                            ${esc(s.name)} <span class="text-xs opacity-75">${esc(s.adressen)}</span>
+                        </button>
+                    `).join('');
+
+                    document.getElementById('btn-export').classList.remove('hidden');
+                    document.getElementById('btn-csv').classList.remove('hidden');
+                    if (canWriteWohnungen) {
+                        document.getElementById('btn-add').classList.remove('hidden');
+                        document.getElementById('btn-import').classList.remove('hidden');
+                    }
+
+                    currentStweg = accessibleStwegs[0].nr;
+                } else if (!hasBewohnerAccess) {
+                    document.getElementById('auth-gate').innerHTML = `
+                        <div class="text-center"><p class="text-lg font-medium text-gray-700">Keine STWEGs zugewiesen</p></div>`;
+                    return;
+                }
             }
 
             document.getElementById('auth-gate').classList.add('hidden');
             document.getElementById('main-content').classList.remove('hidden');
-            selectStweg(accessibleStwegs[0].nr);
+
+            // Activate first available tab
+            switchMainTab(firstTab);
         });
 
-        // ── STWEG Selection ──
+        // ══════════════════════════════
+        // ── Top-level Tab Switching ──
+        // ══════════════════════════════
+        function switchMainTab(tab) {
+            ['wohnungen', 'bewohner', 'gruppen'].forEach(t => {
+                const tabBtn = document.getElementById(`main-tab-${t}`);
+                const panel = document.getElementById(`panel-${t}`);
+                if (tabBtn && !tabBtn.classList.contains('hidden')) {
+                    tabBtn.className = t === tab
+                        ? 'tab-active border-b-2 pb-3 px-1 text-sm transition'
+                        : 'tab-inactive border-b-2 pb-3 px-1 text-sm transition';
+                }
+                if (panel) panel.classList.toggle('hidden', t !== tab);
+            });
+
+            if (tab === 'wohnungen' && currentStweg) {
+                loadWohnungen();
+            }
+            if ((tab === 'bewohner' || tab === 'gruppen') && !bewohnerLoaded) {
+                bewohnerLoaded = true;
+                Promise.all([loadUsers(), loadGroups()]);
+            }
+        }
+
+        // ══════════════════════════════
+        // ── WOHNUNGEN ──
+        // ══════════════════════════════
         async function selectStweg(nr) {
             currentStweg = nr;
             document.querySelectorAll('#stweg-tabs button').forEach(btn => {
@@ -304,12 +506,9 @@
                 btn.className = `px-3 py-1.5 rounded-lg text-sm font-medium border transition ${
                     isActive ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'}`;
             });
-            const info = stwegList.find(s => s.nr === nr);
-            document.getElementById('page-subtitle').textContent = info ? `${info.name} - ${info.adressen}` : `STWEG ${nr}`;
             await loadWohnungen();
         }
 
-        // ── Data Loading ──
         async function loadWohnungen() {
             const loading = document.getElementById('loading');
             const noData = document.getElementById('no-data');
@@ -340,7 +539,6 @@
             renderWohnungen();
         }
 
-        // ── Helper: get kontakte by rolle ──
         function getKontakte(w, rolle) {
             return (w.kontakte || []).filter(k => k.rolle === rolle);
         }
@@ -350,7 +548,6 @@
             return k.length > 0 ? k.map(c => c.name).filter(Boolean).join(', ') : '';
         }
 
-        // ── Rendering ──
         function renderWohnungen() {
             const q = (document.getElementById('wohnung-search')?.value || '').toLowerCase();
             let filtered = allWohnungen;
@@ -408,7 +605,7 @@
                                 ${verwalterName ? `<div class="text-sm text-gray-600 mt-0.5"><span class="text-gray-400">Verwalter:</span> ${esc(verwalterName)}</div>` : ''}
                             </div>
                         </div>
-                        ${canWrite ? `
+                        ${canWriteWohnungen ? `
                         <div class="flex items-center gap-1 ml-2 flex-shrink-0">
                             <button onclick="event.stopPropagation(); editWohnung(${w.id})" class="p-2 text-gray-400 hover:text-blue-600 rounded-lg hover:bg-blue-50 transition" title="Bearbeiten">
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
@@ -460,8 +657,7 @@
 
         function removeKontakt(id) {
             document.getElementById(id)?.remove();
-            const list = document.getElementById('kontakte-list');
-            if (list.children.length === 0) {
+            if (document.getElementById('kontakte-list').children.length === 0) {
                 document.getElementById('no-kontakte').classList.remove('hidden');
             }
         }
@@ -471,9 +667,7 @@
             const rolle = selectEl.value;
             const info = ROLLEN.find(r => r.value === rolle) || ROLLEN[4];
             const colorMap = { green: 'border-green-300 bg-green-50', blue: 'border-blue-300 bg-blue-50', purple: 'border-purple-300 bg-purple-50', teal: 'border-teal-300 bg-teal-50', gray: 'border-gray-300 bg-gray-50' };
-            // Remove all color classes
             Object.values(colorMap).forEach(cls => cls.split(' ').forEach(c => card.classList.remove(c)));
-            // Add new color
             (colorMap[info.color] || colorMap.gray).split(' ').forEach(c => card.classList.add(c));
         }
 
@@ -493,7 +687,7 @@
             return kontakte;
         }
 
-        // ── Modal ──
+        // ── Wohnung Modal ──
         function showAddModal() {
             document.getElementById('modal-title').textContent = 'Neue Wohnung';
             document.getElementById('modal-error').classList.add('hidden');
@@ -507,7 +701,6 @@
             document.getElementById('f-besonderheiten').value = '';
             document.getElementById('f-notizen').value = '';
             document.querySelector('input[name="bewohnt"][value="eigentuemer"]').checked = true;
-            // Start with one empty Eigentümer
             document.getElementById('kontakte-list').innerHTML = '';
             kontaktCounter = 0;
             addKontakt({ rolle: 'eigentuemer' });
@@ -531,7 +724,6 @@
             const radio = document.querySelector(`input[name="bewohnt"][value="${bewohnt}"]`);
             if (radio) radio.checked = true;
 
-            // Load kontakte
             document.getElementById('kontakte-list').innerHTML = '';
             kontaktCounter = 0;
             const kontakte = w.kontakte || [];
@@ -541,22 +733,21 @@
                 kontakte.forEach(k => addKontakt(k));
             }
 
-            if (canWrite) document.getElementById('btn-delete').classList.remove('hidden');
+            if (canWriteWohnungen) document.getElementById('btn-delete').classList.remove('hidden');
             else document.getElementById('btn-delete').classList.add('hidden');
 
             document.getElementById('edit-modal').classList.remove('hidden');
         }
 
-        function closeModal() {
+        function closeWohnungModal() {
             document.getElementById('edit-modal').classList.add('hidden');
         }
 
-        // ── Save ──
         async function saveWohnung() {
             const id = document.getElementById('f-id').value;
             const bezeichnung = document.getElementById('f-bezeichnung').value.trim();
             if (!bezeichnung) {
-                showError('Bezeichnung ist erforderlich');
+                showWohnungError('Bezeichnung ist erforderlich');
                 return;
             }
 
@@ -584,28 +775,26 @@
                     const err = await res.json().catch(() => ({}));
                     throw new Error(err.error || 'Speichern fehlgeschlagen');
                 }
-                closeModal();
+                closeWohnungModal();
                 await loadWohnungen();
             } catch (err) {
-                showError(err.message);
+                showWohnungError(err.message);
             }
         }
 
-        // ── Delete ──
         async function deleteWohnung() {
             const id = document.getElementById('f-id').value;
             if (!id || !confirm('Wohnung wirklich löschen?')) return;
             try {
                 const res = await AuthentikAuth.apiFetch(`/api/wohnungen/${currentStweg}/${id}`, { method: 'DELETE' });
                 if (!res.ok) throw new Error('Löschen fehlgeschlagen');
-                closeModal();
+                closeWohnungModal();
                 await loadWohnungen();
             } catch (err) {
-                showError(err.message);
+                showWohnungError(err.message);
             }
         }
 
-        // ── Import ──
         async function importKontakte() {
             if (!confirm(`Kontakte-Daten für STWEG ${currentStweg} importieren? Vorhandene Daten werden aktualisiert.`)) return;
             try {
@@ -631,7 +820,7 @@
             }
         }
 
-        function showError(msg) {
+        function showWohnungError(msg) {
             const el = document.getElementById('modal-error');
             el.textContent = msg;
             el.classList.remove('hidden');
@@ -643,48 +832,32 @@
             const stweg = stwegList.find(s => s.nr === currentStweg);
             const stwegName = stweg ? stweg.name : `STWEG ${currentStweg}`;
 
-            // Build rows - one row per kontakt, wohnung info repeated
             const rows = [];
             for (const w of allWohnungen) {
                 const kontakte = w.kontakte || [];
                 if (kontakte.length === 0) {
                     rows.push({
-                        'Bezeichnung': w.bezeichnung,
-                        'Stockwerk': w.stockwerk || '',
-                        'Zimmer': w.zimmer || '',
-                        'Fläche m²': w.flaeche_m2 || '',
-                        'Typ': w.typ || '',
+                        'Bezeichnung': w.bezeichnung, 'Stockwerk': w.stockwerk || '', 'Zimmer': w.zimmer || '',
+                        'Fläche m²': w.flaeche_m2 || '', 'Typ': w.typ || '',
                         'Bewohnung': w.bewohnt_von === 'mieter' ? 'Vermietet' : w.bewohnt_von === 'leer' ? 'Leer' : 'Selbstbewohnt',
-                        'Rolle': '',
-                        'Name': '',
-                        'E-Mail': '',
-                        'Telefon': '',
-                        'Adresse': '',
-                        'Notizen': w.notizen || '',
+                        'Rolle': '', 'Name': '', 'E-Mail': '', 'Telefon': '', 'Adresse': '', 'Notizen': w.notizen || '',
                     });
                 } else {
                     kontakte.forEach((k, i) => {
                         const rolleLabel = ROLLEN.find(r => r.value === k.rolle)?.label || k.rolle;
                         rows.push({
-                            'Bezeichnung': i === 0 ? w.bezeichnung : '',
-                            'Stockwerk': i === 0 ? (w.stockwerk || '') : '',
-                            'Zimmer': i === 0 ? (w.zimmer || '') : '',
-                            'Fläche m²': i === 0 ? (w.flaeche_m2 || '') : '',
+                            'Bezeichnung': i === 0 ? w.bezeichnung : '', 'Stockwerk': i === 0 ? (w.stockwerk || '') : '',
+                            'Zimmer': i === 0 ? (w.zimmer || '') : '', 'Fläche m²': i === 0 ? (w.flaeche_m2 || '') : '',
                             'Typ': i === 0 ? (w.typ || '') : '',
                             'Bewohnung': i === 0 ? (w.bewohnt_von === 'mieter' ? 'Vermietet' : w.bewohnt_von === 'leer' ? 'Leer' : 'Selbstbewohnt') : '',
-                            'Rolle': rolleLabel,
-                            'Name': k.name || '',
-                            'E-Mail': k.email || '',
-                            'Telefon': k.telefon || '',
-                            'Adresse': k.adresse || '',
-                            'Notizen': i === 0 ? (w.notizen || '') : '',
+                            'Rolle': rolleLabel, 'Name': k.name || '', 'E-Mail': k.email || '',
+                            'Telefon': k.telefon || '', 'Adresse': k.adresse || '', 'Notizen': i === 0 ? (w.notizen || '') : '',
                         });
                     });
                 }
             }
 
             const ws = XLSX.utils.json_to_sheet(rows);
-            // Auto-width columns
             const colWidths = Object.keys(rows[0] || {}).map(key => {
                 const maxLen = Math.max(key.length, ...rows.map(r => String(r[key] || '').length));
                 return { wch: Math.min(maxLen + 2, 40) };
@@ -696,7 +869,6 @@
             XLSX.writeFile(wb, `Wohnungen_${stwegName.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
         }
 
-        // ── CSV Export ──
         function exportCSV() {
             if (!allWohnungen.length) return alert('Keine Daten zum Exportieren.');
             const stweg = stwegList.find(s => s.nr === currentStweg);
@@ -728,6 +900,493 @@
             a.download = `Wohnungen_${stwegName.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.csv`;
             a.click();
             URL.revokeObjectURL(url);
+        }
+
+        // ══════════════════════════════
+        // ── BEWOHNER ──
+        // ══════════════════════════════
+        async function loadUsers() {
+            const loading = document.getElementById('users-loading');
+            loading.classList.remove('hidden');
+            try {
+                const res = await AuthentikAuth.apiFetch('/api/admin/users');
+                const data = await res.json();
+                allUsers = (Array.isArray(data) ? data : (data.results || []))
+                    .filter(u => u.is_active && !u.username.startsWith('ak-') && u.username !== 'akadmin' && u.username !== 'ldap-service')
+                    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+                loading.classList.add('hidden');
+                renderUsers();
+            } catch (err) {
+                loading.classList.add('hidden');
+                console.error('Error loading users:', err);
+            }
+        }
+
+        async function loadGroups() {
+            try {
+                const res = await AuthentikAuth.apiFetch('/api/admin/groups');
+                const data = await res.json();
+                allGroups = (Array.isArray(data) ? data : (data.results || []))
+                    .filter(g => !g.name.startsWith('authentik '))
+                    .sort((a, b) => a.name.localeCompare(b.name));
+                if (canWriteBewohner) renderGroups();
+            } catch (err) {
+                console.error('Error loading groups:', err);
+            }
+        }
+
+        function getVisibleGroups() {
+            if (seesAll) return allGroups;
+            if (!userGroupPrefix) return [];
+            const stwegAusschuss = userStweg ? `stweg${userStweg}-ausschuss` : '';
+            return allGroups.filter(g => {
+                const n = g.name.toLowerCase();
+                return userGroupPrefix.some(prefix => n.startsWith(prefix)) || n === stwegAusschuss;
+            });
+        }
+
+        function getFilteredUsers() {
+            let users = allUsers;
+            if (userStweg && userGroupPrefix) {
+                const stwegAusschuss = `stweg${userStweg}-ausschuss`;
+                users = users.filter(u => {
+                    const uGroups = (u.groups_obj || []).map(g => g.name.toLowerCase());
+                    return uGroups.some(g =>
+                        userGroupPrefix.some(prefix => g.startsWith(prefix)) || g === stwegAusschuss
+                    );
+                });
+            }
+            const q = (document.getElementById('user-search')?.value || '').toLowerCase();
+            if (q) {
+                users = users.filter(u =>
+                    (u.name || '').toLowerCase().includes(q) ||
+                    (u.username || '').toLowerCase().includes(q) ||
+                    (u.email || '').toLowerCase().includes(q)
+                );
+            }
+            return users;
+        }
+
+        function renderUsers() {
+            const container = document.getElementById('user-cards');
+            const empty = document.getElementById('no-users');
+            const users = getFilteredUsers();
+
+            if (users.length === 0) {
+                container.innerHTML = '';
+                empty.classList.remove('hidden');
+                return;
+            }
+            empty.classList.add('hidden');
+
+            container.innerHTML = users.map(u => {
+                const groups = (u.groups_obj || []).map(g => g.name);
+                const isAusschuss = groups.some(g => g.toLowerCase().includes('ausschuss'));
+                const isEigentuemer = groups.some(g => g.toLowerCase().includes('eigentuemer'));
+                const isMieter = !isEigentuemer && groups.some(g => g.toLowerCase().includes('bewohner'));
+
+                const tags = [];
+                if (isAusschuss) tags.push('<span class="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">Ausschuss</span>');
+                if (isEigentuemer) tags.push('<span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Eigentümer</span>');
+                if (isMieter) tags.push('<span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Mieter</span>');
+
+                const groupNames = seesAll ? groups.filter(g => {
+                    const n = g.toLowerCase();
+                    return !n.startsWith('authentik ') && n !== 'technik';
+                }).map(g => `<span class="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">${esc(g)}</span>`).join(' ') : '';
+
+                const actions = canWriteBewohner ? `
+                    <div class="flex items-center gap-1">
+                        <button onclick="editUser(${u.pk})" class="p-2 text-gray-400 hover:text-blue-600 rounded-lg hover:bg-blue-50 transition" title="Bearbeiten">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                        </button>
+                        <button onclick="removeUser(${u.pk}, '${esc(u.name || u.username)}')" class="p-2 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition" title="Entfernen">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                        </button>
+                    </div>` : '';
+
+                return `
+                <div class="bg-white rounded-lg border p-4 hover:shadow-sm transition">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-4">
+                            <div class="bg-gray-100 rounded-full w-10 h-10 flex items-center justify-center text-gray-500 font-medium text-sm">
+                                ${esc((u.name || '?')[0].toUpperCase())}
+                            </div>
+                            <div>
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <span class="font-medium text-gray-900">${esc(u.name || u.username)}</span>
+                                    ${tags.join('')}
+                                </div>
+                                <p class="text-sm text-gray-500">${esc(u.email || '')}</p>
+                                ${groupNames ? `<div class="flex flex-wrap gap-1 mt-1">${groupNames}</div>` : ''}
+                            </div>
+                        </div>
+                        ${actions}
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function filterUsers() { renderUsers(); }
+
+        // ── Add/Edit User ──
+        function showAddForm() {
+            document.getElementById('dialog-title').textContent = 'Neuer Bewohner';
+            document.getElementById('f-pk').value = '';
+            document.getElementById('f-name').value = '';
+            document.getElementById('f-email').value = '';
+            document.querySelector('input[name="rolle"][value="eigentuemer"]').checked = true;
+            document.getElementById('dialog-error').classList.add('hidden');
+            renderGroupCheckboxes([]);
+            document.getElementById('edit-dialog').classList.remove('hidden');
+        }
+
+        function editUser(pk) {
+            const u = allUsers.find(x => x.pk === pk);
+            if (!u) return;
+            document.getElementById('dialog-title').textContent = 'Bewohner bearbeiten';
+            document.getElementById('f-pk').value = u.pk;
+            document.getElementById('f-name').value = u.name || '';
+            document.getElementById('f-email').value = u.email || '';
+            document.getElementById('dialog-error').classList.add('hidden');
+
+            const groups = (u.groups_obj || []).map(g => g.name.toLowerCase());
+            if (groups.some(g => g.includes('eigentuemer'))) {
+                document.querySelector('input[name="rolle"][value="eigentuemer"]').checked = true;
+            } else {
+                document.querySelector('input[name="rolle"][value="mieter"]').checked = true;
+            }
+
+            const userGroupPks = (u.groups_obj || []).map(g => g.pk);
+            renderGroupCheckboxes(userGroupPks);
+            document.getElementById('edit-dialog').classList.remove('hidden');
+        }
+
+        function renderGroupCheckboxes(selectedPks) {
+            const container = document.getElementById('f-groups');
+            const relevantGroups = allGroups.filter(g => {
+                const n = g.name.toLowerCase();
+                return n.includes('ausschuss') || n.includes('bewohner') || n.includes('eigentuemer') || n === 'technik';
+            });
+
+            if (relevantGroups.length === 0) {
+                container.innerHTML = '<p class="text-xs text-gray-400">Keine Gruppen verfügbar</p>';
+                return;
+            }
+            container.innerHTML = relevantGroups.map(g => `
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" value="${g.pk}" ${selectedPks.includes(g.pk) ? 'checked' : ''} class="grp-cb rounded text-blue-600" />
+                    <span class="text-sm text-gray-700">${esc(g.name)}</span>
+                </label>
+            `).join('');
+        }
+
+        function closeDialog() {
+            document.getElementById('edit-dialog').classList.add('hidden');
+        }
+
+        async function saveUser() {
+            const pk = document.getElementById('f-pk').value;
+            const name = document.getElementById('f-name').value.trim();
+            const email = document.getElementById('f-email').value.trim();
+            const groups = [...document.querySelectorAll('.grp-cb:checked')].map(cb => cb.value);
+            const errorDiv = document.getElementById('dialog-error');
+
+            if (!name || !email) {
+                errorDiv.textContent = 'Bitte Name und E-Mail eingeben.';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+
+            const btn = document.getElementById('save-btn');
+            btn.disabled = true;
+            btn.textContent = 'Speichern...';
+
+            try {
+                let res;
+                if (pk) {
+                    res = await AuthentikAuth.apiFetch(`/api/admin/users/${pk}`, {
+                        method: 'PUT',
+                        body: { name, email, is_active: true, groups },
+                    });
+                } else {
+                    const username = name.toLowerCase()
+                        .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+                        .replace(/[^a-z0-9\s.-]/g, '').trim().split(/\s+/)
+                        .filter(Boolean);
+                    const uname = username.length >= 2
+                        ? username[0] + '.' + username[username.length - 1]
+                        : username[0] || 'user';
+                    res = await AuthentikAuth.apiFetch('/api/admin/users', {
+                        method: 'POST',
+                        body: { username: uname, name, email, groups },
+                    });
+                }
+
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error(data.error || `Fehler beim Speichern (HTTP ${res.status})`);
+                }
+                closeDialog();
+                await loadUsers();
+            } catch (err) {
+                errorDiv.textContent = err.message;
+                errorDiv.classList.remove('hidden');
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Speichern';
+        }
+
+        async function removeUser(pk, name) {
+            if (!confirm(`"${name}" wirklich entfernen?\n\nDer Benutzer wird deaktiviert.`)) return;
+            try {
+                await AuthentikAuth.apiFetch(`/api/admin/users/${pk}`, { method: 'DELETE' });
+                await loadUsers();
+            } catch (err) {
+                alert('Fehler: ' + err.message);
+            }
+        }
+
+        document.getElementById('edit-dialog').addEventListener('click', function(e) {
+            if (e.target === this) closeDialog();
+        });
+
+        // ══════════════════════════════
+        // ── GRUPPEN ──
+        // ══════════════════════════════
+        function renderGroups() {
+            const container = document.getElementById('groups-list');
+            const visibleGroups = getVisibleGroups();
+            const groupMap = {};
+            allGroups.forEach(g => groupMap[g.pk || g.id] = g);
+            const visibleIds = new Set(visibleGroups.map(g => g.pk || g.id));
+
+            const roots = [];
+            const children = {};
+            visibleGroups.forEach(g => {
+                const parentId = g.parent || g.parent_id || null;
+                if (parentId && visibleIds.has(parentId)) {
+                    if (!children[parentId]) children[parentId] = [];
+                    children[parentId].push(g);
+                } else {
+                    roots.push(g);
+                }
+            });
+
+            function renderGroupNode(g, depth) {
+                const id = g.pk || g.id;
+                const userCount = g.users_count ?? (g.users ? g.users.length : '?');
+                const indent = depth === 0 ? '' : depth === 1 ? 'ml-8' : 'ml-16';
+                const parentName = g.parent ? (groupMap[g.parent]?.name || g.parent_name || '') : '';
+
+                let html = `
+                <div class="bg-white rounded-lg shadow-sm border hover:shadow-md transition cursor-pointer ${indent}" onclick="openGroupDetail('${id}')">
+                    <div class="px-4 py-3 flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded-lg ${g.is_superuser ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600'} flex items-center justify-center">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                </svg>
+                            </div>
+                            <div>
+                                <span class="font-medium text-gray-900 text-sm">${esc(g.name)}</span>
+                                ${g.is_superuser ? '<span class="ml-2 text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">Superuser</span>' : ''}
+                                ${parentName ? `<p class="text-xs text-gray-400">Elterngruppe: ${esc(parentName)}</p>` : ''}
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-4">
+                            <span class="text-sm text-gray-500">${userCount} Benutzer</span>
+                            <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                            </svg>
+                        </div>
+                    </div>
+                </div>`;
+
+                if (children[id]) {
+                    children[id].forEach(child => { html += renderGroupNode(child, depth + 1); });
+                }
+                return html;
+            }
+
+            container.innerHTML = roots.length > 0
+                ? roots.map(g => renderGroupNode(g, 0)).join('')
+                : '<p class="text-center py-8 text-gray-500">Keine Gruppen gefunden.</p>';
+        }
+
+        // ── Group Modals ──
+        function openGroupModal(html) {
+            document.getElementById('group-modal-content').innerHTML = html;
+            document.getElementById('group-modal-overlay').classList.remove('hidden');
+        }
+        function closeGroupModal() {
+            document.getElementById('group-modal-overlay').classList.add('hidden');
+        }
+        document.getElementById('group-modal-overlay').addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) closeGroupModal();
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') { closeGroupModal(); closeDialog(); closeWohnungModal(); }
+        });
+
+        async function openGroupDetail(groupId) {
+            const group = allGroups.find(g => (g.pk || g.id) === groupId);
+            if (!group) return;
+
+            let members = [];
+            try {
+                const resp = await AuthentikAuth.apiFetch(`/api/admin/groups/${groupId}`);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    members = data.users || data.members || [];
+                }
+            } catch (e) {
+                members = allUsers.filter(u => {
+                    const uGroups = (u.groups || u.groups_obj || []).map(g => typeof g === 'object' ? (g.pk || g.id) : g);
+                    return uGroups.includes(groupId);
+                });
+            }
+
+            const nonMembers = allUsers.filter(u => {
+                const uid = u.pk || u.id;
+                return !members.some(m => (m.pk || m.id) === uid);
+            });
+
+            openGroupModal(`
+                <div class="p-6">
+                    <div class="flex justify-between items-center mb-5">
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-800">${esc(group.name)}</h3>
+                            ${group.is_superuser ? '<span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded font-medium">Superuser</span>' : ''}
+                        </div>
+                        <button onclick="closeGroupModal()" class="text-gray-400 hover:text-gray-600">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <h4 class="text-sm font-semibold text-gray-600 mb-2">Mitglieder (${members.length})</h4>
+                    <div class="space-y-1 mb-5 max-h-48 overflow-y-auto">
+                        ${members.length > 0 ? members.map(m => `
+                            <div class="flex justify-between items-center bg-gray-50 rounded-lg px-3 py-2">
+                                <div>
+                                    <span class="text-sm font-medium text-gray-900">${esc(m.name || m.username)}</span>
+                                    <span class="text-xs text-gray-500 ml-2">${esc(m.username)}</span>
+                                </div>
+                                <button onclick="removeUserFromGroup(${m.pk || m.id}, '${groupId}')" class="text-red-400 hover:text-red-600 transition text-xs font-medium">Entfernen</button>
+                            </div>
+                        `).join('') : '<p class="text-sm text-gray-400 py-2">Keine Mitglieder</p>'}
+                    </div>
+                    <h4 class="text-sm font-semibold text-gray-600 mb-2">Benutzer hinzuf&uuml;gen</h4>
+                    <div class="flex gap-2">
+                        <select id="add-user-select" class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                            <option value="">-- Benutzer w&auml;hlen --</option>
+                            ${nonMembers.map(u => `<option value="${u.pk || u.id}">${esc(u.name || u.username)} (${esc(u.username)})</option>`).join('')}
+                        </select>
+                        <button onclick="addUserToGroup('${groupId}')" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition font-medium">Hinzuf&uuml;gen</button>
+                    </div>
+                    <div id="group-detail-msg" class="hidden text-sm p-3 rounded-lg mt-3"></div>
+                </div>
+            `);
+        }
+
+        async function addUserToGroup(groupId) {
+            const select = document.getElementById('add-user-select');
+            const userId = select.value;
+            if (!userId) return;
+            const msg = document.getElementById('group-detail-msg');
+            try {
+                const user = allUsers.find(u => (u.pk || u.id) == userId);
+                if (!user) return;
+                const currentGroups = (user.groups || user.groups_obj || []).map(g => typeof g === 'object' ? (g.pk || g.id) : g);
+                const newGroups = [...new Set([...currentGroups, groupId])];
+                const resp = await AuthentikAuth.apiFetch(`/api/admin/users/${userId}`, { method: 'PUT', body: { groups: newGroups } });
+                if (resp.ok) { await Promise.all([loadUsers(), loadGroups()]); openGroupDetail(groupId); }
+                else {
+                    const err = await resp.json().catch(() => ({}));
+                    msg.textContent = 'Fehler: ' + (err.detail || err.message || `HTTP ${resp.status}`);
+                    msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700 mt-3'; msg.classList.remove('hidden');
+                }
+            } catch (e) {
+                msg.textContent = 'Netzwerkfehler: ' + e.message;
+                msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700 mt-3'; msg.classList.remove('hidden');
+            }
+        }
+
+        async function removeUserFromGroup(userId, groupId) {
+            const msg = document.getElementById('group-detail-msg');
+            try {
+                const user = allUsers.find(u => (u.pk || u.id) === userId);
+                if (!user) return;
+                const currentGroups = (user.groups || user.groups_obj || []).map(g => typeof g === 'object' ? (g.pk || g.id) : g);
+                const newGroups = currentGroups.filter(gid => gid !== groupId);
+                const resp = await AuthentikAuth.apiFetch(`/api/admin/users/${userId}`, { method: 'PUT', body: { groups: newGroups } });
+                if (resp.ok) { await Promise.all([loadUsers(), loadGroups()]); openGroupDetail(groupId); }
+                else {
+                    const err = await resp.json().catch(() => ({}));
+                    msg.textContent = 'Fehler: ' + (err.detail || err.message || `HTTP ${resp.status}`);
+                    msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700 mt-3'; msg.classList.remove('hidden');
+                }
+            } catch (e) {
+                msg.textContent = 'Netzwerkfehler: ' + e.message;
+                msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700 mt-3'; msg.classList.remove('hidden');
+            }
+        }
+
+        function openNewGroupModal() {
+            openGroupModal(`
+                <div class="p-6">
+                    <div class="flex justify-between items-center mb-5">
+                        <h3 class="text-lg font-semibold text-gray-800">Neue Gruppe</h3>
+                        <button onclick="closeGroupModal()" class="text-gray-400 hover:text-gray-600">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <form id="new-group-form" onsubmit="createGroup(event)" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                            <input type="text" id="new-group-name" required
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Elterngruppe</label>
+                            <select id="new-group-parent" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                                <option value="">-- Keine --</option>
+                                ${allGroups.map(g => `<option value="${g.pk || g.id}">${esc(g.name)}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div id="new-group-msg" class="hidden text-sm p-3 rounded-lg"></div>
+                        <div class="flex justify-end gap-3 pt-2">
+                            <button type="button" onclick="closeGroupModal()" class="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition">Abbrechen</button>
+                            <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition font-medium">Erstellen</button>
+                        </div>
+                    </form>
+                </div>
+            `);
+        }
+
+        async function createGroup(e) {
+            e.preventDefault();
+            const msg = document.getElementById('new-group-msg');
+            const body = { name: document.getElementById('new-group-name').value.trim() };
+            const parent = document.getElementById('new-group-parent').value;
+            if (parent) body.parent = parent;
+            try {
+                const resp = await AuthentikAuth.apiFetch('/api/admin/groups', { method: 'POST', body });
+                if (resp.ok) {
+                    msg.textContent = 'Gruppe erstellt.'; msg.className = 'text-sm p-3 rounded-lg bg-green-100 text-green-700'; msg.classList.remove('hidden');
+                    setTimeout(() => { closeGroupModal(); loadGroups(); }, 1000);
+                } else {
+                    const err = await resp.json().catch(() => ({}));
+                    msg.textContent = 'Fehler: ' + (err.detail || err.message); msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700'; msg.classList.remove('hidden');
+                }
+            } catch (e) {
+                msg.textContent = 'Netzwerkfehler: ' + e.message; msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700'; msg.classList.remove('hidden');
+            }
         }
     </script>
 
