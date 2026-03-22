@@ -61,8 +61,8 @@ const AuthentikAuth = {
   hasPermission(page, level = 'read') {
     const user = this.getUser();
     if (!user) return false;
-    // Technik always has full access
-    if (user.groups?.some(g => g.toLowerCase() === 'technik')) return true;
+    // Technik and Präsident always have full access
+    if (user.groups?.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; })) return true;
     const perms = user.permissions || {};
     const levels = { none: 0, read: 1, write: 2 };
     return (levels[perms[page]] || 0) >= (levels[level] || 0);
@@ -72,7 +72,7 @@ const AuthentikAuth = {
   getPermission(page) {
     const user = this.getUser();
     if (!user) return 'none';
-    if (user.groups?.some(g => g.toLowerCase() === 'technik')) return 'write';
+    if (user.groups?.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; })) return 'write';
     return user.permissions?.[page] || 'none';
   },
 

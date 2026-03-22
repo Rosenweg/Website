@@ -368,7 +368,7 @@ app.get('/api/auth/callback', async (req, res) => {
     const email = (userInfo.email || userInfo.sub).toLowerCase();
     const name = userInfo.name || userInfo.preferred_username || email;
     const groups = userInfo.groups || [];
-    const isAdmin = groups.some(g => g.toLowerCase() === 'technik');
+    const isAdmin = groups.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; });
 
     // Create/update user in DB
     const userResult = await pool.query(
@@ -444,7 +444,7 @@ async function validateAuthentikToken(token) {
        VALUES ($1, $2, $3)
        ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
        RETURNING id, email, name, wohnung, stweg, role`,
-      [email.toLowerCase(), name, (data.groups?.some(g => g.toLowerCase() === 'technik')) ? 'admin' : 'bewohner']
+      [email.toLowerCase(), name, (data.groups?.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; })) ? 'admin' : 'bewohner']
     );
     const user = result.rows[0];
     user.isAdmin = user.role === 'admin';
@@ -505,9 +505,9 @@ function canManageDocs(req, res, next) {
   const groups = req.user?.groups || [];
   const allowed = groups.some(g => {
     const gl = g.toLowerCase();
-    return gl === 'technik' || gl.endsWith('-ausschuss');
+    return gl === 'technik' || gl === 'präsident' || gl === 'praesident' || gl.endsWith('-ausschuss');
   });
-  if (!allowed) return res.status(403).json({ error: 'Nur Technik und Ausschuss dürfen Dokumente verwalten' });
+  if (!allowed) return res.status(403).json({ error: 'Nur Technik, Präsident und Ausschuss dürfen Dokumente verwalten' });
   next();
 }
 
@@ -537,6 +537,11 @@ function isPraesident(groups) {
   return groups.some(g => g.toLowerCase() === 'präsident' || g.toLowerCase() === 'praesident');
 }
 
+/** Check if user is Präsident (full access to all folders) */
+function isPraesident(groups) {
+  return groups.some(g => g.toLowerCase() === 'präsident' || g.toLowerCase() === 'praesident');
+}
+
 /** Check if a document path is allowed for a user */
 function isDocPathAllowed(filePath, groups) {
   if (isTechnik(groups) || isPraesident(groups)) return true;
@@ -549,7 +554,7 @@ function isDocPathAllowed(filePath, groups) {
 
 /** Check if user can write to a document path */
 function canWriteDocPath(filePath, groups) {
-  if (isTechnik(groups)) return true;
+  if (isTechnik(groups) || isPraesident(groups)) return true;
   const folder = filePath.includes('/') ? filePath.split('/')[0] : 'allgemein';
   // Ausschuss members can write to their own stweg + allgemein
   const isAusschuss = groups.some(g => g.toLowerCase().endsWith('-ausschuss'));
@@ -565,7 +570,7 @@ function requireStwegAccess(req, res, next) {
   const stweg = parseStweg(req.params.stweg);
   if (!stweg) return res.status(400).json({ error: 'Ungültige STWEG-Nummer' });
   const groups = req.user?.groups || [];
-  if (isTechnik(groups)) return next();
+  if (isTechnik(groups) || isPraesident(groups)) return next();
   const stwegGroups = STWEG_GROUPS[stweg];
   if (!stwegGroups) return res.status(404).json({ error: 'STWEG nicht gefunden' });
   const userGroupsLower = groups.map(g => g.toLowerCase());
@@ -639,8 +644,8 @@ async function resolveAncestorGroups(directGroupNames) {
 function requirePermission(page, level = 'read') {
   return async (req, res, next) => {
     const groups = req.user.groups || (() => { try { return JSON.parse(req.user.groups_json || '[]'); } catch { return []; } })();
-    // Technik always has full access
-    if (groups.some(g => g.toLowerCase() === 'technik')) return next();
+    // Technik and Präsident always have full access
+    if (groups.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; })) return next();
 
     try {
       const allGroups = await resolveAncestorGroups(groups);
@@ -659,8 +664,8 @@ function requirePermission(page, level = 'read') {
 
 async function getUserPermissions(groups) {
   const permissions = {};
-  // Technik gets write on everything
-  if (groups.some(g => g.toLowerCase() === 'technik')) {
+  // Technik and Präsident get write on everything
+  if (groups.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; })) {
     for (const p of MANAGED_PAGES) permissions[p.id] = 'write';
     return permissions;
   }

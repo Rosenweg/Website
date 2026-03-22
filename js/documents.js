@@ -8,6 +8,7 @@ const RosenwegDocs = {
   docs: [],
   canManage: false,
   isTechnik: false,
+  isPraesident: false,
   groups: [],
   writableFolders: [],
 
@@ -66,7 +67,7 @@ const RosenwegDocs = {
   },
 
   _getWritableFolders() {
-    if (this.isTechnik) return Object.keys(this.CATEGORY_LABELS);
+    if (this.isTechnik || this.isPraesident) return Object.keys(this.CATEGORY_LABELS);
     if (!this.canManage) return [];
     const folders = ['allgemein'];
     for (const [nr, groupNames] of Object.entries(this.STWEG_GROUPS)) {
@@ -78,7 +79,7 @@ const RosenwegDocs = {
   },
 
   _canWritePath(path) {
-    if (this.isTechnik) return true;
+    if (this.isTechnik || this.isPraesident) return true;
     const folder = path.includes('/') ? path.split('/')[0] : 'allgemein';
     return this.writableFolders.includes(folder);
   },
@@ -90,9 +91,10 @@ const RosenwegDocs = {
     const user = AuthentikAuth.getUser();
     this.groups = user?.groups || [];
     this.isTechnik = this.groups.some(g => g.toLowerCase() === 'technik');
+    this.isPraesident = this.groups.some(g => g.toLowerCase() === 'präsident' || g.toLowerCase() === 'praesident');
     this.canManage = this.groups.some(g => {
       const gl = g.toLowerCase();
-      return gl === 'technik' || gl.endsWith('-ausschuss');
+      return gl === 'technik' || gl === 'präsident' || gl === 'praesident' || gl.endsWith('-ausschuss');
     });
     this.writableFolders = this._getWritableFolders();
 

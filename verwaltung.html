@@ -192,7 +192,7 @@
             }
 
             const groups = user.groups || [];
-            const isTechnik = groups.some(g => g.toLowerCase() === 'technik');
+            const isTechnik = groups.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; });
             const isVerwaltung = groups.some(g => g.toLowerCase() === 'verwaltung');
             seesAll = isTechnik || isVerwaltung;
             canWrite = (access === 'write' || accessVerwaltung === 'write');
