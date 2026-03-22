@@ -3930,6 +3930,62 @@ app.delete('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req,
   }
 });
 
+// POST /api/documents/move - Move a document to another folder
+app.post('/api/documents/move', authMiddleware, canManageDocs, async (req, res) => {
+  try {
+    const { from, to } = req.body || {};
+    if (!from || !to) return res.status(400).json({ error: 'from und to erforderlich' });
+    if (from.includes('..') || to.includes('..') || from.startsWith('/') || to.startsWith('/')) {
+      return res.status(400).json({ error: 'Ungültiger Pfad' });
+    }
+
+    const groups = req.user?.groups || [];
+    if (!canWriteDocPath(from, groups) || !canWriteDocPath(to, groups)) {
+      return res.status(403).json({ error: 'Kein Schreibzugriff' });
+    }
+
+    // 1. Get file content + SHA
+    const getResp = await fetch(
+      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${from}?ref=${GITHUB_DOCS_BRANCH}`,
+      { headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json' } }
+    );
+    if (!getResp.ok) return res.status(404).json({ error: 'Quelldatei nicht gefunden' });
+    const fileData = await getResp.json();
+
+    // 2. Create at new location
+    const putResp = await fetch(
+      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${to}`,
+      {
+        method: 'PUT',
+        headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: `Verschoben: ${from} → ${to} (von ${req.user.name || req.user.email})`,
+          content: fileData.content.replace(/\n/g, ''),
+          branch: GITHUB_DOCS_BRANCH,
+        }),
+      }
+    );
+    if (!putResp.ok) throw new Error(`Erstellen am Ziel fehlgeschlagen: ${putResp.status}`);
+
+    // 3. Delete at old location
+    await fetch(
+      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${from}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: `Verschoben nach ${to}`, sha: fileData.sha, branch: GITHUB_DOCS_BRANCH }),
+      }
+    );
+
+    docsListCache = { data: null, expires: 0 };
+    previewCache.delete(from);
+    res.json({ success: true, from, to });
+  } catch (err) {
+    console.error('Document move error:', err.message);
+    res.status(500).json({ error: 'Verschieben fehlgeschlagen: ' + err.message });
+  }
+});
+
 // ─── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
