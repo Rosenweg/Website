@@ -130,17 +130,30 @@ const RosenwegDocs = {
     }
   },
 
+  /** Group docs by top-level folder, then by subfolder within each */
   groupByFolder() {
     const groups = {};
     for (const doc of this.docs) {
       const parts = doc.path.split('/');
       const folder = parts.length > 1 ? parts[0] : 'allgemein';
-      if (!groups[folder]) groups[folder] = [];
-      groups[folder].push(doc);
+      if (!groups[folder]) groups[folder] = { _root: [], _subs: {} };
+      if (parts.length > 2) {
+        const sub = parts[1];
+        if (!groups[folder]._subs[sub]) groups[folder]._subs[sub] = [];
+        // Skip .gitkeep from display but still register the subfolder
+        if (!doc.path.endsWith('.gitkeep')) {
+          groups[folder]._subs[sub].push(doc);
+        }
+      } else if (!doc.path.endsWith('.gitkeep')) {
+        groups[folder]._root.push(doc);
+      }
     }
-    // Sort files alphabetically within each group
+    // Sort files alphabetically
     for (const folder of Object.keys(groups)) {
-      groups[folder].sort((a, b) => a.path.localeCompare(b.path));
+      groups[folder]._root.sort((a, b) => a.path.localeCompare(b.path));
+      for (const sub of Object.keys(groups[folder]._subs)) {
+        groups[folder]._subs[sub].sort((a, b) => a.path.localeCompare(b.path));
+      }
     }
     return groups;
   },
@@ -177,6 +190,49 @@ const RosenwegDocs = {
     return `<svg class="h-5 w-5 ${color} flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">${iconPath}</svg>`;
   },
 
+  _renderFileRow(doc) {
+    const ext = this.getExt(doc.path);
+    const fileName = this.getFileName(doc.path);
+    const safeFileName = this._escapeHtml(fileName);
+    const size = this.formatSize(doc.size);
+    const extBadge = ext.toUpperCase();
+    const viewable = this._isViewable(ext);
+    const jsPath = doc.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    const jsFileName = fileName.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    const jsUrl = (doc.url || `/api/documents/${doc.path}`).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    const clickAction = viewable
+      ? `RosenwegDocs.viewFile('${jsPath}', '${jsFileName}', '${ext}')`
+      : `RosenwegDocs.downloadFile('${jsUrl}', '${jsFileName}')`;
+    return `
+      <div class="flex items-center justify-between bg-gray-50 rounded-lg px-4 py-3 hover:bg-gray-100 transition group">
+        <a href="#" onclick="${clickAction}; return false;" class="flex items-center gap-3 flex-1 min-w-0 cursor-pointer">
+          ${this.getIcon(ext)}
+          <span class="truncate text-gray-800">${safeFileName}</span>
+          <span class="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600 flex-shrink-0">${extBadge}</span>
+          <span class="text-xs text-gray-400 flex-shrink-0">${size}</span>
+          ${viewable ? '<span class="text-xs text-blue-500 flex-shrink-0"><svg class="h-3.5 w-3.5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg></span>' : ''}
+        </a>
+        <div class="flex items-center gap-2 ml-2">
+          <a href="#" onclick="RosenwegDocs.downloadFile('${jsUrl}', '${jsFileName}'); return false;" class="text-blue-600 hover:text-blue-800 p-1" title="Herunterladen">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+            </svg>
+          </a>
+          ${this._canWritePath(doc.path) ? `
+          <button onclick="RosenwegDocs.showReplaceDialog('${jsPath}')" class="text-yellow-600 hover:text-yellow-800 p-1 opacity-0 group-hover:opacity-100 transition" title="Ersetzen">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+          </button>
+          <button onclick="RosenwegDocs.confirmDelete('${jsPath}')" class="text-red-500 hover:text-red-700 p-1 opacity-0 group-hover:opacity-100 transition" title="Löschen">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+            </svg>
+          </button>` : ''}
+        </div>
+      </div>`;
+  },
+
   render() {
     const groups = this.groupByFolder();
     const folderOrder = Object.keys(this.CATEGORY_LABELS);
@@ -200,61 +256,55 @@ const RosenwegDocs = {
 
     let hasAny = false;
     for (const folder of allFolders) {
-      const files = groups[folder];
-      if (!files || files.length === 0) continue;
+      const group = groups[folder];
+      if (!group || (group._root.length === 0 && Object.keys(group._subs).length === 0)) continue;
       hasAny = true;
 
       const label = this.CATEGORY_LABELS[folder] || folder;
       html += `
         <div class="mb-6">
-          <h3 class="text-lg font-semibold text-gray-700 mb-3 border-b pb-2">${label}</h3>
+          <h3 class="text-lg font-semibold text-gray-700 mb-3 border-b pb-2 flex items-center justify-between">
+            ${label}
+            ${this._canWritePath(folder + '/x') ? `<button onclick="RosenwegDocs.showCreateFolderDialog('${folder}')" class="text-sm font-normal text-blue-600 hover:text-blue-800 flex items-center gap-1" title="Unterordner erstellen">
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+              Ordner
+            </button>` : ''}
+          </h3>
           <div class="space-y-2">`;
 
-      for (const doc of files) {
-        const ext = this.getExt(doc.path);
-        const fileName = this.getFileName(doc.path);
-        const safeFileName = this._escapeHtml(fileName);
-        const safePath = this._escapeHtml(doc.path);
-        const safeUrl = this._escapeHtml(doc.url || `/api/documents/${doc.path}`);
-        const size = this.formatSize(doc.size);
-        const extBadge = ext.toUpperCase();
-        const viewable = this._isViewable(ext);
-        // Escape for JS string inside onclick attributes
-        const jsPath = doc.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-        const jsFileName = fileName.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-        const jsUrl = (doc.url || `/api/documents/${doc.path}`).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-        const clickAction = viewable
-          ? `RosenwegDocs.viewFile('${jsPath}', '${jsFileName}', '${ext}')`
-          : `RosenwegDocs.downloadFile('${jsUrl}', '${jsFileName}')`;
-
+      // Render subfolders first
+      const subNames = Object.keys(group._subs).sort();
+      for (const sub of subNames) {
+        const subFiles = group._subs[sub];
+        const safeSub = this._escapeHtml(sub);
+        const subId = `sub-${folder}-${sub}`.replace(/[^a-zA-Z0-9-]/g, '_');
         html += `
-            <div class="flex items-center justify-between bg-gray-50 rounded-lg px-4 py-3 hover:bg-gray-100 transition group">
-              <a href="#" onclick="${clickAction}; return false;" class="flex items-center gap-3 flex-1 min-w-0 cursor-pointer">
-                ${this.getIcon(ext)}
-                <span class="truncate text-gray-800">${safeFileName}</span>
-                <span class="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600 flex-shrink-0">${extBadge}</span>
-                <span class="text-xs text-gray-400 flex-shrink-0">${size}</span>
-                ${viewable ? '<span class="text-xs text-blue-500 flex-shrink-0"><svg class="h-3.5 w-3.5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg></span>' : ''}
-              </a>
-              <div class="flex items-center gap-2 ml-2">
-                <a href="#" onclick="RosenwegDocs.downloadFile('${jsUrl}', '${jsFileName}'); return false;" class="text-blue-600 hover:text-blue-800 p-1" title="Herunterladen">
-                  <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
-                  </svg>
-                </a>
-                ${this._canWritePath(doc.path) ? `
-                <button onclick="RosenwegDocs.showReplaceDialog('${jsPath}')" class="text-yellow-600 hover:text-yellow-800 p-1 opacity-0 group-hover:opacity-100 transition" title="Ersetzen">
-                  <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-                  </svg>
-                </button>
-                <button onclick="RosenwegDocs.confirmDelete('${jsPath}')" class="text-red-500 hover:text-red-700 p-1 opacity-0 group-hover:opacity-100 transition" title="Löschen">
-                  <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                  </svg>
-                </button>` : ''}
-              </div>
-            </div>`;
+          <div class="ml-2 border-l-2 border-blue-200">
+            <button onclick="document.getElementById('${subId}').classList.toggle('hidden'); this.querySelector('svg').classList.toggle('rotate-90')" class="flex items-center gap-2 px-3 py-2 w-full text-left hover:bg-gray-50 rounded-r transition">
+              <svg class="h-4 w-4 text-gray-400 transform rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+              <svg class="h-4 w-4 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+              <span class="font-medium text-gray-700">${safeSub}</span>
+              <span class="text-xs text-gray-400">(${subFiles.length})</span>
+            </button>
+            <div id="${subId}" class="space-y-1 ml-6 mt-1">`;
+        if (subFiles.length === 0) {
+          html += `<p class="text-sm text-gray-400 italic px-2 py-1">Noch keine Dateien</p>`;
+          if (this._canWritePath(folder + '/x')) {
+            html += `<button onclick="RosenwegDocs.showUploadDialog('${folder}/${sub}')" class="text-sm text-blue-600 hover:text-blue-800 px-2 py-1 flex items-center gap-1">
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              Dokument hochladen</button>`;
+          }
+        } else {
+          for (const doc of subFiles) {
+            html += this._renderFileRow(doc);
+          }
+        }
+        html += `</div></div>`;
+      }
+
+      // Render root files
+      for (const doc of group._root) {
+        html += this._renderFileRow(doc);
       }
 
       html += `
@@ -270,9 +320,21 @@ const RosenwegDocs = {
   },
 
   showUploadDialog(prefillPath) {
-    const folders = Object.entries(this.CATEGORY_LABELS)
-      .filter(([key]) => this.writableFolders.includes(key))
-      .map(([key, label]) => `<option value="${key}"${prefillPath && prefillPath.startsWith(key) ? ' selected' : ''}>${label}</option>`)
+    // Build folder options including subfolders from existing docs
+    const folderOptions = [];
+    const groups = this.groupByFolder();
+    for (const [key, label] of Object.entries(this.CATEGORY_LABELS)) {
+      if (!this.writableFolders.includes(key)) continue;
+      folderOptions.push({ value: key, label: label });
+      const group = groups[key];
+      if (group) {
+        for (const sub of Object.keys(group._subs).sort()) {
+          folderOptions.push({ value: `${key}/${sub}`, label: `${label} / ${sub}` });
+        }
+      }
+    }
+    const folders = folderOptions
+      .map(o => `<option value="${o.value}"${prefillPath && prefillPath.startsWith(o.value) ? ' selected' : ''}>${this._escapeHtml(o.label)}</option>`)
       .join('');
 
     const modal = document.createElement('div');
@@ -356,6 +418,59 @@ const RosenwegDocs = {
   closeModal() {
     const modal = document.getElementById('docs-upload-modal');
     if (modal) modal.remove();
+  },
+
+  showCreateFolderDialog(parentFolder) {
+    const parentLabel = this.CATEGORY_LABELS[parentFolder] || parentFolder;
+    const modal = document.createElement('div');
+    modal.id = 'docs-upload-modal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4';
+    modal.innerHTML = `
+      <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-6">
+        <h3 class="text-lg font-bold mb-4">Unterordner erstellen</h3>
+        <p class="text-sm text-gray-600 mb-3">in <strong>${this._escapeHtml(parentLabel)}</strong></p>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Ordnername</label>
+            <input type="text" id="new-folder-name" class="w-full border rounded-lg px-3 py-2" placeholder="z.B. Protokolle" autofocus>
+          </div>
+          <div id="upload-error" class="text-sm text-red-600 hidden"></div>
+          <div class="flex justify-end gap-3 pt-2">
+            <button onclick="RosenwegDocs.closeModal()" class="px-4 py-2 text-gray-600 hover:text-gray-800">Abbrechen</button>
+            <button onclick="RosenwegDocs.doCreateFolder('${parentFolder}')" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">Erstellen</button>
+          </div>
+        </div>
+      </div>`;
+    modal.addEventListener('click', (e) => { if (e.target === modal) this.closeModal(); });
+    document.body.appendChild(modal);
+    setTimeout(() => document.getElementById('new-folder-name')?.focus(), 100);
+  },
+
+  async doCreateFolder(parentFolder) {
+    const nameInput = document.getElementById('new-folder-name');
+    const name = nameInput?.value?.trim();
+    if (!name) {
+      this._showUploadError('Bitte einen Ordnernamen eingeben.');
+      return;
+    }
+    const safeName = this.sanitizeFileName(name) || name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    // Create folder by uploading a .gitkeep placeholder
+    const path = `${parentFolder}/${safeName}/.gitkeep`;
+    try {
+      const resp = await AuthentikAuth.apiFetch(`/api/documents/${path}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: new ArrayBuffer(0),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || 'Ordner konnte nicht erstellt werden');
+      }
+      this.closeModal();
+      this.loadAndRender();
+    } catch (err) {
+      this._showUploadError('Fehler: ' + err.message);
+    }
   },
 
   _showProgress(file) {
