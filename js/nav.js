@@ -94,8 +94,7 @@ const RosenwegNav = {
               <a href="${base}energie-monitor.html" data-perm="energie-monitor" class="${dropA('energie')} block px-4 py-2 text-sm">Energie-Monitor</a>
               <a href="${base}zaehler.html" data-perm="zaehler" class="${dropA('zaehler')} block px-4 py-2 text-sm">Zähler & Verbrauch</a>
               <a href="${base}email-verteiler.html" data-perm="email-verteiler" class="${dropA('verteiler')} block px-4 py-2 text-sm">E-Mail-Verteiler</a>
-              <a href="${base}verwaltung.html" data-perm="bewohner-verwaltung" class="${dropA('verwaltung')} block px-4 py-2 text-sm">Verwaltung</a>
-              <a href="${base}wohnungsverwaltung.html" data-perm="wohnungsverwaltung" class="${dropA('wohnungsverwaltung')} block px-4 py-2 text-sm">Wohnungen</a>
+              <a href="${base}wohnungsverwaltung.html" data-perm-any="wohnungsverwaltung,bewohner-verwaltung,verwaltung" class="${dropA('verwaltung')} block px-4 py-2 text-sm">Verwaltung</a>
               <a href="${base}stweg3/pages/waschkueche-reservierung.html" class="${dropA('waschkueche')} block px-4 py-2 text-sm">Waschküche</a>
             </div>
           </div>
@@ -147,8 +146,7 @@ const RosenwegNav = {
         <a href="${base}energie-monitor.html" data-perm="energie-monitor" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Energie-Monitor</a>
         <a href="${base}zaehler.html" data-perm="zaehler" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Zähler & Verbrauch</a>
         <a href="${base}email-verteiler.html" data-perm="email-verteiler" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">E-Mail-Verteiler</a>
-        <a href="${base}verwaltung.html" data-perm="bewohner-verwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Verwaltung</a>
-        <a href="${base}wohnungsverwaltung.html" data-perm="wohnungsverwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Wohnungen</a>
+        <a href="${base}wohnungsverwaltung.html" data-perm-any="wohnungsverwaltung,bewohner-verwaltung,verwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Verwaltung</a>
         <a href="${base}stweg3/pages/waschkueche-reservierung.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Waschküche</a>
 
         <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Infos</div>
@@ -209,6 +207,14 @@ const RosenwegNav = {
     document.querySelectorAll('[data-perm]').forEach(el => {
       const page = el.dataset.perm;
       if (!hasPerm(page)) {
+        el.style.display = 'none';
+      }
+    });
+
+    // Support data-perm-any="page1,page2" (show if user has ANY of the permissions)
+    document.querySelectorAll('[data-perm-any]').forEach(el => {
+      const pages = el.dataset.permAny.split(',');
+      if (!pages.some(page => hasPerm(page.trim()))) {
         el.style.display = 'none';
       }
     });
