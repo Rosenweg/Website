@@ -262,8 +262,10 @@ const RosenwegDocs = {
 
     let hasAny = false;
     for (const folder of allFolders) {
-      const group = groups[folder];
-      if (!group || (group._root.length === 0 && Object.keys(group._subs).length === 0)) continue;
+      // Skip folders user has no access to (not in CATEGORY_LABELS or not visible)
+      if (!this.CATEGORY_LABELS[folder] && !groups[folder]) continue;
+      const group = groups[folder] || { _root: [], _subs: {} };
+      const isEmpty = group._root.length === 0 && Object.keys(group._subs).length === 0;
       hasAny = true;
 
       const label = this.CATEGORY_LABELS[folder] || folder;
@@ -311,6 +313,10 @@ const RosenwegDocs = {
       // Render root files
       for (const doc of group._root) {
         html += this._renderFileRow(doc);
+      }
+
+      if (isEmpty) {
+        html += `<p class="text-sm text-gray-400 italic py-2">Noch keine Dokumente</p>`;
       }
 
       html += `
