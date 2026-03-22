@@ -117,11 +117,12 @@ const RosenwegDocs = {
       </div>`;
   },
 
-  async loadAndRender() {
+  async loadAndRender(forceRefresh) {
     this.container.innerHTML = '<p class="text-center text-gray-500 py-8">Dokumente werden geladen...</p>';
 
     try {
-      const resp = await AuthentikAuth.apiFetch('/api/documents');
+      const url = forceRefresh ? '/api/documents?refresh=1' : '/api/documents';
+      const resp = await AuthentikAuth.apiFetch(url);
       if (!resp.ok) throw new Error('API error');
       this.docs = await resp.json();
       this.render();
@@ -464,7 +465,7 @@ const RosenwegDocs = {
         throw new Error(err.error || 'Ordner konnte nicht erstellt werden');
       }
       this.closeModal();
-      this.loadAndRender();
+      this.loadAndRender(true);
     } catch (err) {
       this._showUploadError('Fehler: ' + err.message);
     }
@@ -560,7 +561,7 @@ const RosenwegDocs = {
 
     try {
       await this._uploadFile(`/api/documents/${path}`, file);
-      setTimeout(() => { this.closeModal(); this.loadAndRender(); }, 500);
+      setTimeout(() => { this.closeModal(); this.loadAndRender(true); }, 500);
     } catch (err) {
       this._showUploadError('Fehler: ' + err.message);
       btn.disabled = false;
@@ -592,7 +593,7 @@ const RosenwegDocs = {
         await AuthentikAuth.apiFetch(`/api/documents/${path}`, { method: 'DELETE' });
       }
       await this._uploadFile(`/api/documents/${uploadPath}`, file);
-      setTimeout(() => { this.closeModal(); this.loadAndRender(); }, 500);
+      setTimeout(() => { this.closeModal(); this.loadAndRender(true); }, 500);
     } catch (err) {
       this._showUploadError('Fehler: ' + err.message);
       btn.disabled = false;
@@ -724,7 +725,7 @@ const RosenwegDocs = {
     try {
       const resp = await AuthentikAuth.apiFetch(`/api/documents/${path}`, { method: 'DELETE' });
       if (!resp.ok) throw new Error('Löschen fehlgeschlagen');
-      await this.loadAndRender();
+      await this.loadAndRender(true);
     } catch (err) {
       alert('Fehler beim Löschen: ' + err.message);
     }

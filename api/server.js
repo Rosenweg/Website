@@ -3527,7 +3527,8 @@ app.get('/api/documents', authMiddleware, async (req, res) => {
   try {
     const now = Date.now();
     let allDocs = docsListCache.data;
-    if (!allDocs || docsListCache.expires <= now) {
+    const forceRefresh = req.query.refresh === '1';
+    if (!allDocs || docsListCache.expires <= now || forceRefresh) {
       const response = await fetch(
         `https://api.github.com/repos/${GITHUB_DOCS_REPO}/git/trees/${GITHUB_DOCS_BRANCH}?recursive=1`,
         { headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json' } }
@@ -3537,7 +3538,7 @@ app.get('/api/documents', authMiddleware, async (req, res) => {
       const tree = await response.json();
       const IGNORED = ['README.md', 'LICENSE', '.gitignore'];
       allDocs = tree.tree
-        .filter(f => f.type === 'blob' && !IGNORED.includes(f.path) && !f.path.startsWith('.') && !f.path.endsWith('.gitkeep'))
+        .filter(f => f.type === 'blob' && !IGNORED.includes(f.path) && !f.path.startsWith('.'))
         .map(f => ({
           path: f.path,
           size: f.size,
