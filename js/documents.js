@@ -220,6 +220,11 @@ const RosenwegDocs = {
             </svg>
           </a>
           ${this._canWritePath(doc.path) ? `
+          <button onclick="RosenwegDocs.showMoveDialog('${jsPath}')" class="text-indigo-600 hover:text-indigo-800 p-1 opacity-0 group-hover:opacity-100 transition" title="Verschieben">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+            </svg>
+          </button>
           <button onclick="RosenwegDocs.showReplaceDialog('${jsPath}')" class="text-yellow-600 hover:text-yellow-800 p-1 opacity-0 group-hover:opacity-100 transition" title="Ersetzen">
             <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
@@ -468,6 +473,88 @@ const RosenwegDocs = {
       this.loadAndRender(true);
     } catch (err) {
       this._showUploadError('Fehler: ' + err.message);
+    }
+  },
+
+  showMoveDialog(path) {
+    const fileName = this.getFileName(path);
+    const currentFolder = path.substring(0, path.lastIndexOf('/'));
+    const safeFileName = this._escapeHtml(fileName);
+
+    // Build folder options (top-level + subfolders)
+    const folderOptions = [];
+    const groups = this.groupByFolder();
+    for (const [key, label] of Object.entries(this.CATEGORY_LABELS)) {
+      if (!this.writableFolders.includes(key)) continue;
+      folderOptions.push({ value: key, label: label });
+      const group = groups[key];
+      if (group) {
+        for (const sub of Object.keys(group._subs).sort()) {
+          folderOptions.push({ value: `${key}/${sub}`, label: `${label} / ${sub}` });
+        }
+      }
+    }
+    const options = folderOptions
+      .map(o => `<option value="${o.value}"${o.value === currentFolder ? ' selected' : ''}>${this._escapeHtml(o.label)}</option>`)
+      .join('');
+
+    const modal = document.createElement('div');
+    modal.id = 'docs-upload-modal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4';
+    modal.innerHTML = `
+      <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-6">
+        <h3 class="text-lg font-bold mb-4">Dokument verschieben</h3>
+        <p class="text-sm text-gray-600 mb-3"><strong>${safeFileName}</strong></p>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Zielordner</label>
+            <select id="move-target" class="w-full border rounded-lg px-3 py-2">
+              ${options}
+            </select>
+          </div>
+          <input type="hidden" id="move-source" value="${this._escapeHtml(path)}">
+          <div id="upload-error" class="text-sm text-red-600 hidden"></div>
+          <div class="flex justify-end gap-3 pt-2">
+            <button onclick="RosenwegDocs.closeModal()" class="px-4 py-2 text-gray-600 hover:text-gray-800">Abbrechen</button>
+            <button onclick="RosenwegDocs.doMove()" id="move-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition">Verschieben</button>
+          </div>
+        </div>
+      </div>`;
+    modal.addEventListener('click', (e) => { if (e.target === modal) this.closeModal(); });
+    document.body.appendChild(modal);
+  },
+
+  async doMove() {
+    const sourcePath = document.getElementById('move-source').value;
+    const targetFolder = document.getElementById('move-target').value;
+    const fileName = this.getFileName(sourcePath);
+    const targetPath = `${targetFolder}/${fileName}`;
+    const btn = document.getElementById('move-btn');
+
+    if (targetPath === sourcePath) {
+      this._showUploadError('Datei ist bereits in diesem Ordner.');
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Wird verschoben...';
+
+    try {
+      const resp = await AuthentikAuth.apiFetch('/api/documents/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: sourcePath, to: targetPath }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || 'Verschieben fehlgeschlagen');
+      }
+      this.closeModal();
+      this.loadAndRender(true);
+    } catch (err) {
+      this._showUploadError('Fehler: ' + err.message);
+      btn.disabled = false;
+      btn.textContent = 'Verschieben';
     }
   },
 
