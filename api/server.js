@@ -3767,6 +3767,49 @@ app.post('/api/scan-upload', async (req, res) => {
   }
 });
 
+// POST /api/documents/folder - Create a subfolder (via .gitkeep placeholder)
+app.post('/api/documents/folder', authMiddleware, canManageDocs, async (req, res) => {
+  try {
+    const { parent, name } = req.body || {};
+    if (!parent || !name) return res.status(400).json({ error: 'parent und name erforderlich' });
+    if (parent.includes('..') || /[%\\]/.test(parent) || /\0/.test(parent)) {
+      return res.status(400).json({ error: 'Ungültiger Pfad' });
+    }
+    const safeName = name
+      .replace(/ä/gi, 'ae').replace(/ö/gi, 'oe').replace(/ü/gi, 'ue').replace(/ß/g, 'ss')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9._-]/g, '-')
+      .replace(/-+/g, '-').replace(/^-|-$/g, '')
+      .toLowerCase();
+    if (!safeName) return res.status(400).json({ error: 'Ungültiger Ordnername' });
+
+    const folderPath = `${parent}/${safeName}`;
+    const groups = req.user?.groups || [];
+    if (!canWriteDocPath(folderPath + '/x', groups)) {
+      return res.status(403).json({ error: 'Kein Schreibzugriff' });
+    }
+
+    const gitkeepPath = `${folderPath}/.gitkeep`;
+    const putResp = await fetch(
+      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${gitkeepPath}`,
+      {
+        method: 'PUT',
+        headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: `Ordner ${folderPath} erstellt`, content: '', branch: GITHUB_DOCS_BRANCH }),
+      }
+    );
+    if (!putResp.ok) {
+      const err = await putResp.json().catch(() => ({}));
+      throw new Error(err.message || `GitHub API error: ${putResp.status}`);
+    }
+    docsListCache = { data: null, expires: 0 };
+    res.json({ success: true, path: folderPath });
+  } catch (err) {
+    console.error('[DOCS] Create folder error:', err.message);
+    res.status(500).json({ error: 'Ordner konnte nicht erstellt werden: ' + err.message });
+  }
+});
+
 // PUT /api/documents/:path(*) - Upload/replace a document (admin only)
 app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, res) => {
   try {
