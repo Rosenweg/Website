@@ -3842,38 +3842,80 @@ app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, re
       return res.status(403).json({ error: 'Kein Schreibzugriff auf diesen Ordner' });
     }
 
-    const content = req.body.toString('base64');
+    const fileBuffer = req.body;
+    const commitMsg = `Upload: ${filePath.split('/').pop()} (von ${req.user.name || req.user.email})`;
+    const ghHeaders = { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' };
+    const ghApi = `https://api.github.com/repos/${GITHUB_DOCS_REPO}`;
 
-    // Check if file already exists (need SHA for update)
-    let sha;
-    const checkResp = await fetch(
-      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${filePath}?ref=${GITHUB_DOCS_BRANCH}`,
-      { headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json' } }
-    );
-    if (checkResp.ok) {
-      const existing = await checkResp.json();
-      sha = existing.sha;
-    }
+    if (fileBuffer.length > 20 * 1024 * 1024) {
+      // Large file: use Git Data API (blobs → tree → commit → ref update)
+      // 1. Create blob
+      const blobResp = await fetch(`${ghApi}/git/blobs`, {
+        method: 'POST', headers: ghHeaders,
+        body: JSON.stringify({ content: fileBuffer.toString('base64'), encoding: 'base64' }),
+      });
+      if (!blobResp.ok) throw new Error(`Blob erstellen fehlgeschlagen: ${blobResp.status}`);
+      const blob = await blobResp.json();
 
-    const body = {
-      message: `Upload: ${filePath.split('/').pop()} (von ${req.user.name || req.user.email})`,
-      content,
-      branch: GITHUB_DOCS_BRANCH,
-    };
-    if (sha) body.sha = sha;
+      // 2. Get current commit SHA for branch
+      const refResp = await fetch(`${ghApi}/git/ref/heads/${GITHUB_DOCS_BRANCH}`, { headers: ghHeaders });
+      if (!refResp.ok) throw new Error('Branch-Ref nicht gefunden');
+      const ref = await refResp.json();
+      const baseCommitSha = ref.object.sha;
 
-    const response = await fetch(
-      `https://api.github.com/repos/${GITHUB_DOCS_REPO}/contents/${filePath}`,
-      {
-        method: 'PUT',
-        headers: { Authorization: `token ${GITHUB_DOCS_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+      // 3. Get base tree
+      const commitResp = await fetch(`${ghApi}/git/commits/${baseCommitSha}`, { headers: ghHeaders });
+      const baseCommit = await commitResp.json();
+
+      // 4. Create new tree with the file
+      const treeResp = await fetch(`${ghApi}/git/trees`, {
+        method: 'POST', headers: ghHeaders,
+        body: JSON.stringify({
+          base_tree: baseCommit.tree.sha,
+          tree: [{ path: filePath, mode: '100644', type: 'blob', sha: blob.sha }],
+        }),
+      });
+      if (!treeResp.ok) throw new Error('Tree erstellen fehlgeschlagen');
+      const newTree = await treeResp.json();
+
+      // 5. Create commit
+      const newCommitResp = await fetch(`${ghApi}/git/commits`, {
+        method: 'POST', headers: ghHeaders,
+        body: JSON.stringify({ message: commitMsg, tree: newTree.sha, parents: [baseCommitSha] }),
+      });
+      if (!newCommitResp.ok) throw new Error('Commit erstellen fehlgeschlagen');
+      const newCommit = await newCommitResp.json();
+
+      // 6. Update branch ref
+      const updateResp = await fetch(`${ghApi}/git/refs/heads/${GITHUB_DOCS_BRANCH}`, {
+        method: 'PATCH', headers: ghHeaders,
+        body: JSON.stringify({ sha: newCommit.sha }),
+      });
+      if (!updateResp.ok) throw new Error('Branch-Update fehlgeschlagen');
+    } else {
+      // Small file: use Contents API (simpler, works up to ~25MB)
+      const content = fileBuffer.toString('base64');
+
+      let sha;
+      const checkResp = await fetch(
+        `${ghApi}/contents/${filePath}?ref=${GITHUB_DOCS_BRANCH}`,
+        { headers: ghHeaders }
+      );
+      if (checkResp.ok) {
+        const existing = await checkResp.json();
+        sha = existing.sha;
       }
-    );
 
-    if (!response.ok) {
-      const err = await response.json();
-      throw new Error(err.message || `GitHub API error: ${response.status}`);
+      const body = { message: commitMsg, content, branch: GITHUB_DOCS_BRANCH };
+      if (sha) body.sha = sha;
+
+      const response = await fetch(`${ghApi}/contents/${filePath}`, {
+        method: 'PUT', headers: ghHeaders, body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.message || `GitHub API error: ${response.status}`);
+      }
     }
 
     docsListCache = { data: null, expires: 0 };
