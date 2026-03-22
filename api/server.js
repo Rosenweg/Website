@@ -533,10 +533,13 @@ function getUserStwegs(groups) {
 function isTechnik(groups) {
   return groups.some(g => g.toLowerCase() === 'technik');
 }
+function isPraesident(groups) {
+  return groups.some(g => g.toLowerCase() === 'präsident' || g.toLowerCase() === 'praesident');
+}
 
 /** Check if a document path is allowed for a user */
 function isDocPathAllowed(filePath, groups) {
-  if (isTechnik(groups)) return true;
+  if (isTechnik(groups) || isPraesident(groups)) return true;
   const folder = filePath.includes('/') ? filePath.split('/')[0] : 'allgemein';
   if (folder === 'allgemein' || folder.toLowerCase() === 'scans') return true;
   const stwegs = getUserStwegs(groups);
