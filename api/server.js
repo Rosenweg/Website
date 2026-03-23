@@ -2511,9 +2511,9 @@ async function syncKontakteToAuthentik(stweg, kontakte) {
 
       // Determine which group to assign based on rolle
       let targetGroupName = null;
-      if (k.rolle === 'eigentuemer') {
+      if (k.rolle === 'eigentuemer' || k.rolle === 'verwalter') {
         targetGroupName = stwegGroups.eigentuemer;
-      } else if (k.rolle === 'mieter' || k.rolle === 'bewohner' || k.rolle === 'verwalter') {
+      } else if (k.rolle === 'mieter' || k.rolle === 'bewohner') {
         targetGroupName = stwegGroups.bewohner;
       }
 
