@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proxmox-Verwaltung - Rosenweg</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/nav.js?v=2"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script>RosenwegNav.init({ active: 'proxmox' });</script>
+
+    <section class="bg-gradient-to-r from-green-600 to-green-800 text-white py-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h1 class="text-3xl font-bold mb-2">Proxmox-Verwaltung</h1>
+            <p class="text-lg opacity-90">VM/CT-Zugriff pro Benutzer verwalten</p>
+        </div>
+    </section>
+
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- Loading -->
+        <div id="loading" class="text-center py-12">
+            <div class="animate-spin inline-block w-12 h-12 border-4 border-green-600 border-t-transparent rounded-full"></div>
+            <p class="mt-4 text-gray-600">Lade...</p>
+        </div>
+
+        <!-- No Permission -->
+        <div id="no-permission" class="hidden">
+            <div class="bg-yellow-50 border-l-4 border-yellow-500 p-6 rounded">
+                <p class="text-yellow-800 font-semibold">Kein Zugriff</p>
+                <p class="text-yellow-700 text-sm mt-1">Diese Seite ist nur für Technik-Mitglieder zugänglich.</p>
+            </div>
+        </div>
+
+        <!-- Login Required -->
+        <div id="login-required" class="hidden">
+            <div class="bg-white rounded-lg shadow-lg p-8 text-center">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">Anmeldung erforderlich</h2>
+                <div id="login-container"></div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div id="main-content" class="hidden space-y-6">
+            <!-- Info -->
+            <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
+                <p class="text-sm text-blue-800">
+                    Hier können Sie Authentik-Benutzern Zugriff auf einzelne VMs und Container in Proxmox gewähren oder entziehen.
+                </p>
+            </div>
+
+            <!-- Add Access -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-lg font-semibold text-gray-800 mb-4">Zugriff gewähren</h2>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Benutzer</label>
+                        <select id="sel-user" class="w-full px-3 py-2 border rounded-lg text-sm">
+                            <option value="">Benutzer wählen...</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">VM / Container</label>
+                        <select id="sel-vm" class="w-full px-3 py-2 border rounded-lg text-sm">
+                            <option value="">VM/CT wählen...</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Rolle</label>
+                        <select id="sel-role" class="w-full px-3 py-2 border rounded-lg text-sm">
+                            <option value="">Rolle wählen...</option>
+                        </select>
+                    </div>
+                    <div class="flex items-end">
+                        <button onclick="grantAccess()" class="w-full bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 transition">
+                            Zugriff gewähren
+                        </button>
+                    </div>
+                </div>
+                <div id="grant-status" class="mt-3 text-sm hidden"></div>
+            </div>
+
+            <!-- Resources Overview -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-lg font-semibold text-gray-800 mb-4">VMs & Container</h2>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="border-b text-left text-gray-500">
+                                <th class="pb-2 font-medium">VMID</th>
+                                <th class="pb-2 font-medium">Name</th>
+                                <th class="pb-2 font-medium">Typ</th>
+                                <th class="pb-2 font-medium">Node</th>
+                                <th class="pb-2 font-medium">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="vm-table"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Current ACLs -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-lg font-semibold text-gray-800 mb-4">Aktuelle Berechtigungen</h2>
+                <div id="acl-empty" class="hidden text-gray-500 text-sm py-4">Keine VM/CT-Berechtigungen konfiguriert.</div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm" id="acl-table-wrap">
+                        <thead>
+                            <tr class="border-b text-left text-gray-500">
+                                <th class="pb-2 font-medium">Benutzer</th>
+                                <th class="pb-2 font-medium">VM/CT</th>
+                                <th class="pb-2 font-medium">Rolle</th>
+                                <th class="pb-2 font-medium">Aktion</th>
+                            </tr>
+                        </thead>
+                        <tbody id="acl-table"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="bg-gray-800 text-white py-8 mt-12">
+        <div class="max-w-7xl mx-auto px-4 text-center">
+            <p class="text-sm text-gray-400">&copy; 2025 STWEG-Kooperation Rosenweg</p>
+        </div>
+    </footer>
+
+    <script>
+        let resources = [];
+        let acls = [];
+        let pveUsers = [];
+        let roles = [];
+        let authentikUsers = [];
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            const user = await AuthentikAuth.init({ requireAuth: false });
+            document.getElementById('loading').classList.add('hidden');
+
+            if (!user) {
+                document.getElementById('login-required').classList.remove('hidden');
+                AuthentikAuth.createLoginButton('login-container');
+                return;
+            }
+
+            const groups = user.groups || [];
+            const isTechnik = groups.some(g => g.toLowerCase() === 'technik');
+            if (!isTechnik) {
+                document.getElementById('no-permission').classList.remove('hidden');
+                return;
+            }
+
+            document.getElementById('main-content').classList.remove('hidden');
+            await loadData();
+        });
+
+        async function api(path, opts = {}) {
+            const res = await AuthentikAuth.apiFetch(path, opts);
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({ error: res.statusText }));
+                throw new Error(err.error || 'API-Fehler');
+            }
+            return res.json();
+        }
+
+        async function loadData() {
+            try {
+                const [res, aclData, pveU, rolesData, authUsers] = await Promise.all([
+                    api('/api/proxmox/resources'),
+                    api('/api/proxmox/acl'),
+                    api('/api/proxmox/users'),
+                    api('/api/proxmox/roles'),
+                    api('/api/admin/users'),
+                ]);
+
+                resources = res;
+                acls = aclData;
+                pveUsers = pveU;
+                roles = rolesData.filter(r => !r.special);
+                authentikUsers = (authUsers.results || []).sort((a, b) => (a.username || '').localeCompare(b.username || ''));
+
+                renderVMs();
+                renderACLs();
+                populateSelects();
+            } catch (err) {
+                console.error('Load error:', err);
+                document.getElementById('main-content').innerHTML =
+                    `<div class="bg-red-50 border-l-4 border-red-500 p-4 rounded"><p class="text-red-800">Fehler: ${err.message}</p></div>`;
+            }
+        }
+
+        function vmName(vmid) {
+            const vm = resources.find(r => r.vmid === vmid);
+            return vm ? `${vm.vmid} (${vm.name})` : vmid;
+        }
+
+        function renderVMs() {
+            const tbody = document.getElementById('vm-table');
+            tbody.innerHTML = resources.map(r => {
+                const statusColor = r.status === 'running' ? 'text-green-600' : 'text-gray-500';
+                const typeLabel = r.type === 'qemu' ? 'VM' : 'CT';
+                const typeBg = r.type === 'qemu' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700';
+                return `<tr class="border-b hover:bg-gray-50">
+                    <td class="py-2 font-mono">${r.vmid}</td>
+                    <td class="py-2">${r.name || '-'}</td>
+                    <td class="py-2"><span class="px-2 py-0.5 rounded text-xs font-medium ${typeBg}">${typeLabel}</span></td>
+                    <td class="py-2 text-gray-600">${r.node}</td>
+                    <td class="py-2 ${statusColor} font-medium">${r.status}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        function renderACLs() {
+            const tbody = document.getElementById('acl-table');
+            const empty = document.getElementById('acl-empty');
+            const table = document.getElementById('acl-table-wrap');
+
+            if (acls.length === 0) {
+                empty.classList.remove('hidden');
+                table.classList.add('hidden');
+                return;
+            }
+            empty.classList.add('hidden');
+            table.classList.remove('hidden');
+
+            tbody.innerHTML = acls.map(a => {
+                const vmid = a.path.replace('/vms/', '');
+                return `<tr class="border-b hover:bg-gray-50">
+                    <td class="py-2">${a.ugid}</td>
+                    <td class="py-2 font-mono">${vmName(parseInt(vmid))}</td>
+                    <td class="py-2"><span class="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">${a.roleid}</span></td>
+                    <td class="py-2">
+                        <button onclick="revokeAccess('${a.path}', '${a.ugid}', '${a.roleid}')"
+                            class="text-red-600 hover:text-red-800 text-sm font-medium">Entziehen</button>
+                    </td>
+                </tr>`;
+            }).join('');
+        }
+
+        function populateSelects() {
+            const userSel = document.getElementById('sel-user');
+            const vmSel = document.getElementById('sel-vm');
+            const roleSel = document.getElementById('sel-role');
+
+            authentikUsers.forEach(u => {
+                const opt = document.createElement('option');
+                opt.value = u.username;
+                opt.textContent = `${u.username} (${u.name || u.email || ''})`;
+                userSel.appendChild(opt);
+            });
+
+            resources.forEach(r => {
+                const opt = document.createElement('option');
+                opt.value = r.vmid;
+                const typeLabel = r.type === 'qemu' ? 'VM' : 'CT';
+                opt.textContent = `${r.vmid} - ${r.name || '?'} (${typeLabel})`;
+                vmSel.appendChild(opt);
+            });
+
+            roles.forEach(r => {
+                const opt = document.createElement('option');
+                opt.value = r.roleid;
+                opt.textContent = r.roleid;
+                roleSel.appendChild(opt);
+            });
+        }
+
+        function showStatus(id, msg, ok) {
+            const el = document.getElementById(id);
+            el.textContent = msg;
+            el.className = `mt-3 text-sm ${ok ? 'text-green-700' : 'text-red-700'}`;
+            el.classList.remove('hidden');
+            setTimeout(() => el.classList.add('hidden'), 4000);
+        }
+
+        async function grantAccess() {
+            const username = document.getElementById('sel-user').value;
+            const vmid = document.getElementById('sel-vm').value;
+            const roleid = document.getElementById('sel-role').value;
+
+            if (!username || !vmid || !roleid) {
+                showStatus('grant-status', 'Bitte alle Felder ausfüllen.', false);
+                return;
+            }
+
+            try {
+                // Ensure user exists in Proxmox
+                const { userid } = await api('/api/proxmox/ensure-user', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username }),
+                });
+
+                // Grant ACL
+                await api('/api/proxmox/acl', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: `/vms/${vmid}`, userid, roleid }),
+                });
+
+                showStatus('grant-status', `Zugriff für ${userid} auf VM ${vmid} gewährt.`, true);
+                await loadData();
+            } catch (err) {
+                showStatus('grant-status', `Fehler: ${err.message}`, false);
+            }
+        }
+
+        async function revokeAccess(path, userid, roleid) {
+            if (!confirm(`Zugriff von ${userid} auf ${path} (${roleid}) wirklich entziehen?`)) return;
+
+            try {
+                await api('/api/proxmox/acl', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path, userid, roleid }),
+                });
+                await loadData();
+            } catch (err) {
+                alert('Fehler: ' + err.message);
+            }
+        }
+    </script>
+</body>
+</html>
