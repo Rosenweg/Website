@@ -373,7 +373,8 @@ app.get('/api/auth/callback', async (req, res) => {
     const userInfo = await userResp.json();
 
     const email = (userInfo.email || userInfo.sub).toLowerCase();
-    const name = userInfo.name || userInfo.preferred_username || email;
+    const username = userInfo.preferred_username || email.split('@')[0];
+    const name = userInfo.name || username;
     const groups = userInfo.groups || [];
     const isAdmin = groups.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; });
 
@@ -402,6 +403,7 @@ app.get('/api/auth/callback', async (req, res) => {
       token: sessionToken,
       user: {
         id: user.id,
+        username: username,
         name: user.name,
         email: user.email,
         role: user.role,
