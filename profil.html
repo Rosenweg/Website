@@ -42,7 +42,9 @@
                 </div>
                 <div>
                     <h1 id="profile-name" class="text-2xl font-bold text-gray-800">Mein Profil</h1>
-                    <p id="profile-username" class="text-sm text-gray-400 font-mono"></p>
+                    <p id="profile-username" class="text-sm text-gray-400 font-mono">
+                        <span class="text-gray-300">Username:</span> <span id="profile-username-value"></span>
+                    </p>
                     <p id="profile-email" class="text-gray-500"></p>
                     <p id="profile-role" class="text-sm text-blue-600 mt-1"></p>
                 </div>
@@ -153,7 +155,12 @@
 
             // Header
             document.getElementById('profile-name').textContent = currentUser.name || 'Unbekannt';
-            document.getElementById('profile-username').textContent = currentUser.username || '';
+            const usernameEl = document.getElementById('profile-username');
+            if (currentUser.username) {
+                document.getElementById('profile-username-value').textContent = currentUser.username;
+            } else {
+                usernameEl.classList.add('hidden');
+            }
             document.getElementById('profile-email').textContent = currentUser.email || '';
             document.getElementById('profile-role').textContent =
                 currentUser.isAdmin ? 'Administrator' : 'Bewohner';
