@@ -2855,7 +2855,7 @@ app.post('/api/wohnungen/:stweg/import', authMiddleware, requirePermission('wohn
       const stockwerk = stockwerkMap[floor] || floor;
       for (const u of units) {
         const hasMieter = u.mieter && u.mieter.name;
-        const bewohntVon = hasMieter ? 'mieter' : 'eigentuemer';
+        const bewohntVon = u.bewohnt_von || (hasMieter ? 'mieter' : 'eigentuemer');
         const wResult = await client.query(
           `INSERT INTO wohnungen (stweg, bezeichnung, stockwerk, zimmer, flaeche_m2, typ, besonderheiten,
             bewohnt_von, waschkueche_berechtigt)

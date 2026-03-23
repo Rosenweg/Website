@@ -1,0 +1,764 @@
+{
+  "stweg": {
+    "nummer": 8,
+    "adresse": "Rosenweg, 4303 Kaiseraugst",
+    "plz": "4303",
+    "ort": "Kaiseraugst",
+    "kanton": "Aargau",
+    "letzte_aktualisierung": "2026-03-23",
+    "kontakt_email": "stweg8@rosenweg4303.ch"
+  },
+  "wohnungen": {
+    "untergeschoss": [
+      {
+        "bezeichnung": "P1",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P2",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P3",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P4",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P5",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P6",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P7",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P8",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P9",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P10",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P11",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P12",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P13",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P14",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P15",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P16",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P17",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P18",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P19",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P20",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P21",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P22",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P23",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P24",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P25",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P26",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P27",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P28",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P29",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P30",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P31",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P32",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P33",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P34",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P35",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P36",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P37",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P38",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P39",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P40",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P41",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P42",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P43",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P44",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P45",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P46",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P47",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P48",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P49",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P50",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P51",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P52",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P53",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P54",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P55",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P56",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P57",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P58",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P59",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P60",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P61",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P62",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P63",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P64",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P65",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P66",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P67",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P68",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P69",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P70",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P71",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P72",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P73",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P74",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P75",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P76",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P77",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P78",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P79",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P80",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P81",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P82",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P83",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P84",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P85",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P86",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P87",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P88",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P89",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P90",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P91",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P92",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P93",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P94",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P95",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P96",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P97",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P98",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P99",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P100",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P101",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P102",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P103",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P104",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P105",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P106",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      },
+      {
+        "bezeichnung": "P107",
+        "typ": "Parkplatz",
+        "bewohnt_von": "leer",
+        "zimmer": null,
+        "flaeche_m2": null
+      }
+    ]
+  }
+}
