@@ -3345,6 +3345,17 @@ app.post('/api/admin/users', authMiddleware, requirePermission('bewohner-verwalt
         await authentikAPI('POST', `/core/groups/${groupPk}/add_user/`, { pk: user.pk });
       }
     }
+    // Sync password to SMB fileserver
+    if (password && username) {
+      try {
+        await fetch('http://100.64.2.28:8445/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer RwSmbWebhook2026!' },
+          body: JSON.stringify({ username, password }),
+          signal: AbortSignal.timeout(5000),
+        });
+      } catch (e) { console.error('SMB password sync failed:', e.message); }
+    }
     res.json(user);
   } catch (err) {
     console.error('Admin create user error:', err.message);
