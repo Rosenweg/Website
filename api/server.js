@@ -380,11 +380,11 @@ app.get('/api/auth/callback', async (req, res) => {
 
     // Create/update user in DB
     const userResult = await pool.query(
-      `INSERT INTO users (email, name, role, groups_json)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, groups_json = EXCLUDED.groups_json
-       RETURNING id, email, name, wohnung, stweg, role, groups_json`,
-      [email, name, isAdmin ? 'admin' : 'bewohner', JSON.stringify(groups)]
+      `INSERT INTO users (email, name, role, groups_json, username)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, groups_json = EXCLUDED.groups_json, username = EXCLUDED.username
+       RETURNING id, email, name, wohnung, stweg, role, groups_json, username`,
+      [email, name, isAdmin ? 'admin' : 'bewohner', JSON.stringify(groups), username]
     );
     const user = userResult.rows[0];
 
@@ -741,7 +741,7 @@ app.put('/api/permissions', authMiddleware, requirePermission('rechteverwaltung'
 app.get('/api/auth/me', authMiddleware, async (req, res) => {
   const userId = req.user.user_id || req.user.id;
   const result = await pool.query(
-    'SELECT id, email, name, wohnung, stweg, role, phone, strasse, plz, ort, groups_json, avatar_url FROM users WHERE id = $1',
+    'SELECT id, email, name, username, wohnung, stweg, role, phone, strasse, plz, ort, groups_json, avatar_url FROM users WHERE id = $1',
     [userId]
   );
   const u = result.rows[0] || req.user;
@@ -777,6 +777,7 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
   res.json({
     user: {
       id: u.id,
+      username: u.username,
       name: u.name,
       email: u.email,
       role: u.role,
@@ -4033,6 +4034,8 @@ async function initDB() {
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       );
+
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(255);
 
       CREATE TABLE IF NOT EXISTS otp_codes (
         id SERIAL PRIMARY KEY,
