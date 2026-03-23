@@ -3957,7 +3957,7 @@ app.get('/api/proxmox/acl', authMiddleware, adminOnly, async (req, res) => {
 app.get('/api/proxmox/roles', authMiddleware, adminOnly, async (req, res) => {
   try {
     const roles = await pveAPI('GET', '/access/roles');
-    res.json(roles.map(r => ({ roleid: r.roleid, special: r.special || false })));
+    res.json(roles.map(r => ({ roleid: r.roleid })));
   } catch (err) {
     console.error('PVE roles error:', err.message);
     res.status(500).json({ error: err.message });
