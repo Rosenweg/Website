@@ -261,6 +261,10 @@ const AUTHENTIK_CLIENT_SECRET = process.env.AUTHENTIK_CLIENT_SECRET || '';
 const AUTHENTIK_API_TOKEN = process.env.AUTHENTIK_API_TOKEN || '';
 const SITE_URL = process.env.SITE_URL || 'https://www.rosenweg4303.ch';
 
+// ─── Proxmox VE Config ──────────────────────────────────────────────
+const PVE_API_URL = process.env.PVE_API_URL || 'https://100.64.2.20:8006';
+const PVE_API_TOKEN = process.env.PVE_API_TOKEN || '';
+
 // ═══════════════════════════════════════════════════════════════════
 // AUTHENTIK OAuth2 LOGIN
 // ═══════════════════════════════════════════════════════════════════
@@ -590,6 +594,7 @@ const MANAGED_PAGES = [
   { id: 'verwaltung', label: 'Verwaltung' },
   { id: 'rechteverwaltung', label: 'Rechteverwaltung' },
   { id: 'wohnungsverwaltung', label: 'Wohnungsverwaltung' },
+  { id: 'proxmox-verwaltung', label: 'Proxmox-Verwaltung' },
 ];
 
 const ACCESS_LEVELS = { none: 0, read: 1, write: 2 };
@@ -3874,6 +3879,135 @@ app.post('/api/documents/move', authMiddleware, canManageDocs, async (req, res) 
     if (err.code === 'ENOENT') return res.status(404).json({ error: 'Quelldatei nicht gefunden' });
     console.error('Document move error:', err.message);
     res.status(500).json({ error: 'Verschieben fehlgeschlagen: ' + err.message });
+  }
+});
+
+// ─── Proxmox VE Management ──────────────────────────────────────────
+
+async function pveAPI(method, path, body = null) {
+  if (!PVE_API_TOKEN) throw new Error('PVE_API_TOKEN nicht konfiguriert');
+  const url = `${PVE_API_URL}/api2/json${path}`;
+  const opts = {
+    method,
+    headers: { 'Authorization': `PVEAPIToken=${PVE_API_TOKEN}` },
+    signal: AbortSignal.timeout(10000),
+  };
+  if (body) {
+    opts.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    opts.body = new URLSearchParams(body).toString();
+  }
+  const res = await fetch(url, opts);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`PVE API ${res.status}: ${text}`);
+  }
+  return (await res.json()).data;
+}
+
+// List all VMs and CTs
+app.get('/api/proxmox/resources', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const resources = await pveAPI('GET', '/cluster/resources?type=vm');
+    const items = resources.map(r => ({
+      vmid: r.vmid,
+      name: r.name,
+      type: r.type, // qemu or lxc
+      status: r.status,
+      node: r.node,
+      id: r.id, // e.g. "qemu/100" or "lxc/201"
+    }));
+    items.sort((a, b) => a.vmid - b.vmid);
+    res.json(items);
+  } catch (err) {
+    console.error('PVE resources error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// List Proxmox users (authentik realm)
+app.get('/api/proxmox/users', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const users = await pveAPI('GET', '/access/users');
+    const filtered = users
+      .filter(u => u.userid.endsWith('@authentik'))
+      .map(u => ({ userid: u.userid, enable: u.enable }));
+    res.json(filtered);
+  } catch (err) {
+    console.error('PVE users error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// List ACLs
+app.get('/api/proxmox/acl', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const acl = await pveAPI('GET', '/access/acl');
+    // Only return ACLs for VMs/CTs (path starts with /vms/)
+    const filtered = acl
+      .filter(a => a.path.startsWith('/vms/'))
+      .map(a => ({ path: a.path, ugid: a.ugid, roleid: a.roleid, type: a.type, propagate: a.propagate }));
+    res.json(filtered);
+  } catch (err) {
+    console.error('PVE ACL error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// List available roles
+app.get('/api/proxmox/roles', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const roles = await pveAPI('GET', '/access/roles');
+    res.json(roles.map(r => ({ roleid: r.roleid, special: r.special || false })));
+  } catch (err) {
+    console.error('PVE roles error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Set ACL (grant access)
+app.put('/api/proxmox/acl', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { path, userid, roleid } = req.body;
+    if (!path || !userid || !roleid) return res.status(400).json({ error: 'path, userid und roleid erforderlich' });
+    // Validate path format: /vms/{vmid}
+    if (!/^\/vms\/\d+$/.test(path)) return res.status(400).json({ error: 'Ungültiger Pfad (Format: /vms/{vmid})' });
+    await pveAPI('PUT', '/access/acl', { path, users: userid, roles: roleid, propagate: 1 });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('PVE ACL set error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete ACL (revoke access)
+app.delete('/api/proxmox/acl', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { path, userid, roleid } = req.body;
+    if (!path || !userid || !roleid) return res.status(400).json({ error: 'path, userid und roleid erforderlich' });
+    await pveAPI('PUT', '/access/acl', { path, users: userid, roles: roleid, delete: 1 });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('PVE ACL delete error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Ensure user exists in Proxmox (auto-create if needed)
+app.post('/api/proxmox/ensure-user', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { username } = req.body;
+    if (!username) return res.status(400).json({ error: 'username erforderlich' });
+    const userid = username.includes('@') ? username : `${username}@authentik`;
+    // Check if user exists
+    const users = await pveAPI('GET', '/access/users');
+    const exists = users.some(u => u.userid === userid);
+    if (!exists) {
+      await pveAPI('POST', '/access/users', { userid, enable: 1 });
+    }
+    res.json({ userid, created: !exists });
+  } catch (err) {
+    console.error('PVE ensure-user error:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 

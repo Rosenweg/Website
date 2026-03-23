@@ -33,7 +33,7 @@ services:
     deploy:
       placement:
         constraints:
-          - node.role == manager
+          - node.hostname == docker-pve1
       labels:
         - "traefik.enable=true"
         - "traefik.http.routers.traefik-dashboard.rule=Host(`www.rosenweg4303.ch`) && PathPrefix(`/traefik`)"
@@ -84,7 +84,7 @@ services:
         - "traefik.http.routers.rosenweg9.middlewares=rosenweg9-redirect"
         - "shepherd.enable=true"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -123,6 +123,8 @@ services:
       ENERGY_DB_NAME: energy
       ENERGY_DB_USER: energy
       ENERGY_DB_PASSWORD: "${ENERGY_DB_PASSWORD:-energy2026}"
+      PVE_API_URL: https://100.64.2.20:8006
+      PVE_API_TOKEN: "${PVE_API_TOKEN}"
       DOCS_PATH: /documents
     volumes:
       - rosenweg-documents:/documents
@@ -145,7 +147,7 @@ services:
       labels:
         - "shepherd.enable=true"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -206,7 +208,7 @@ services:
       labels:
         - "shepherd.enable=true"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -264,7 +266,7 @@ services:
         delay: 10s
         max_attempts: 3
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:3000/health"]
       interval: 30s
       timeout: 5s
       retries: 3
