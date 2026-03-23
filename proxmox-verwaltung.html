@@ -182,7 +182,7 @@
                 resources = res;
                 acls = aclData;
                 pveUsers = pveU;
-                roles = rolesData.filter(r => !r.special);
+                roles = rolesData;
                 authentikUsers = (authUsers.results || []).sort((a, b) => (a.username || '').localeCompare(b.username || ''));
 
                 renderVMs();
