@@ -367,7 +367,7 @@ const RosenwegDocs = {
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Datei</label>
             <input type="file" id="upload-file" class="w-full border rounded-lg px-3 py-2"
-              accept=".pdf,.xlsx,.xls,.docx,.doc,.pptx,.png,.jpg,.jpeg,.txt,.csv">
+              accept=".pdf,.xlsx,.xls,.docx,.doc,.dotx,.pptx,.ppt,.odt,.ods,.odp,.png,.jpg,.jpeg,.gif,.tiff,.tif,.bmp,.txt,.csv,.zip">
           </div>
           <div id="upload-progress" class="hidden">
             <div class="flex items-center justify-between text-sm mb-1">
@@ -405,7 +405,7 @@ const RosenwegDocs = {
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Neue Datei</label>
             <input type="file" id="upload-file" class="w-full border rounded-lg px-3 py-2"
-              accept=".pdf,.xlsx,.xls,.docx,.doc,.pptx,.png,.jpg,.jpeg,.txt,.csv">
+              accept=".pdf,.xlsx,.xls,.docx,.doc,.dotx,.pptx,.ppt,.odt,.ods,.odp,.png,.jpg,.jpeg,.gif,.tiff,.tif,.bmp,.txt,.csv,.zip">
           </div>
           <input type="hidden" id="replace-path" value="${safePath}">
           <div id="upload-progress" class="hidden">
