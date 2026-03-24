@@ -3105,6 +3105,32 @@ app.get('/api/email/log/:id/status', authMiddleware, adminOnly, async (req, res)
   }
 });
 
+// SMTP2GO email quota / kontingent
+app.get('/api/email/quota', authMiddleware, adminOnly, async (req, res) => {
+  if (!SMTP2GO_API_KEY) return res.status(400).json({ error: 'SMTP2GO API-Key nicht konfiguriert' });
+  try {
+    const apiRes = await fetch(`${SMTP2GO_API_URL}/stats/email_summary`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: SMTP2GO_API_KEY }),
+    });
+    const apiData = await apiRes.json();
+    const d = apiData.data || {};
+    res.json({
+      cycle_start: d.cycle_start,
+      cycle_end: d.cycle_end,
+      used: d.cycle_used || 0,
+      remaining: d.cycle_remaining || 0,
+      max: d.cycle_max || 0,
+      opens: d.opens || 0,
+      bounces: (d.hardbounces || 0) + (d.softbounces || 0),
+    });
+  } catch (err) {
+    console.error('SMTP2GO quota error:', err);
+    res.status(500).json({ error: 'SMTP2GO-Abfrage fehlgeschlagen' });
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════════
 // PUBLIC INFO API (Ausschuss, Technischer Dienst)
 // ═══════════════════════════════════════════════════════════════════
