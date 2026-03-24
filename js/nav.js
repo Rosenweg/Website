@@ -107,6 +107,7 @@ const RosenwegNav = {
               <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
             </button>
             <div class="nav-dropdown-menu hidden absolute left-0 mt-1 w-48 bg-white rounded-lg shadow-lg border py-1 z-50">
+              <a href="${base}projekte.html" data-perm-any="eigentuemer" class="${dropA('projekte')} block px-4 py-2 text-sm">Projekte</a>
               <a href="${base}entsorgung.html" class="${dropA('entsorgung')} block px-4 py-2 text-sm">Entsorgung</a>
               <a href="${base}it-netzwerk.html" class="${dropA('it')} block px-4 py-2 text-sm">IT & Netzwerk</a>
               <a href="${base}#dokumente" class="${dropA('dokumente')} block px-4 py-2 text-sm">Dokumente</a>
