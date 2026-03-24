@@ -396,7 +396,9 @@
 
         async function loadEmailQuota() {
             try {
-                const data = await AuthentikAuth.apiFetch('/api/email/quota');
+                const resp = await AuthentikAuth.apiFetch('/api/email/quota');
+                if (!resp.ok) return;
+                const data = await resp.json();
                 const pct = data.max > 0 ? Math.round((data.used / data.max) * 100) : 0;
                 document.getElementById('quota-used').textContent = data.used;
                 document.getElementById('quota-max').textContent = data.max;
