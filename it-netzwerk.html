@@ -1157,48 +1157,59 @@
                     <div class="bg-white rounded-lg shadow p-6">
                         <h2 class="text-lg font-semibold text-gray-900 mb-4">Admin-Dienste</h2>
                         <p class="text-sm text-gray-600 mb-6">Geschützte Verwaltungsoberflächen für Administratoren.</p>
-                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="admin-services">
+                        <h3 class="text-sm font-medium text-gray-500 mb-3">Infrastruktur</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6" id="admin-services">
                             <a href="https://authentik.rosenweg4303.ch" target="_blank" class="block p-4 border rounded-lg hover:shadow-md transition hover:border-blue-300">
                                 <div class="flex items-center gap-3 mb-2">
                                     <div class="bg-blue-100 rounded-lg p-2"><svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg></div>
                                     <h3 class="font-semibold text-gray-900">Authentik SSO</h3>
                                 </div>
-                                <p class="text-sm text-gray-600">Benutzerverwaltung, Gruppen & OAuth2-Konfiguration</p>
+                                <p class="text-sm text-gray-600">Benutzerverwaltung, Gruppen & OAuth2</p>
                             </a>
-                            <a href="https://netbox.rosenweg4303.ch" target="_blank" class="block p-4 border rounded-lg hover:shadow-md transition hover:border-green-300">
+                            <a href="https://100.64.2.20:8006" target="_blank" class="block p-4 border rounded-lg hover:shadow-md transition hover:border-orange-300">
                                 <div class="flex items-center gap-3 mb-2">
-                                    <div class="bg-green-100 rounded-lg p-2"><svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"></path></svg></div>
-                                    <h3 class="font-semibold text-gray-900">NetBox DCIM</h3>
+                                    <div class="bg-orange-100 rounded-lg p-2"><svg class="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-7-4h.01"></path></svg></div>
+                                    <h3 class="font-semibold text-gray-900">Proxmox VE</h3>
                                 </div>
-                                <p class="text-sm text-gray-600">IP-Adressen, Geräte-Inventar & Netzwerk-Dokumentation</p>
+                                <p class="text-sm text-gray-600">Virtualisierung, Container & Storage</p>
                             </a>
                             <a href="https://100.64.9.1" target="_blank" class="block p-4 border rounded-lg hover:shadow-md transition hover:border-purple-300">
                                 <div class="flex items-center gap-3 mb-2">
                                     <div class="bg-purple-100 rounded-lg p-2"><svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path></svg></div>
                                     <h3 class="font-semibold text-gray-900">UniFi Controller</h3>
                                 </div>
-                                <p class="text-sm text-gray-600">Netzwerk-Management, WLAN & Firewall-Regeln</p>
+                                <p class="text-sm text-gray-600">Netzwerk, WLAN & Firewall</p>
                             </a>
-                            <a href="/stweg3/pages/admin.html" class="block p-4 border rounded-lg hover:shadow-md transition hover:border-yellow-300">
+                            <a href="https://netbox.rosenweg4303.ch" target="_blank" class="block p-4 border rounded-lg hover:shadow-md transition hover:border-green-300">
                                 <div class="flex items-center gap-3 mb-2">
-                                    <div class="bg-yellow-100 rounded-lg p-2"><svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"></path></svg></div>
-                                    <h3 class="font-semibold text-gray-900">Kontakte verwalten</h3>
+                                    <div class="bg-green-100 rounded-lg p-2"><svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"></path></svg></div>
+                                    <h3 class="font-semibold text-gray-900">NetBox DCIM</h3>
                                 </div>
-                                <p class="text-sm text-gray-600">Bewohner-Kontaktdaten bearbeiten</p>
+                                <p class="text-sm text-gray-600">IP-Adressen & Geräte-Inventar</p>
                             </a>
+                        </div>
+                        <h3 class="text-sm font-medium text-gray-500 mb-3">Verwaltung</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             <a href="/email-verteiler.html" class="block p-4 border rounded-lg hover:shadow-md transition hover:border-red-300">
                                 <div class="flex items-center gap-3 mb-2">
                                     <div class="bg-red-100 rounded-lg p-2"><svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg></div>
                                     <h3 class="font-semibold text-gray-900">E-Mail Verteiler</h3>
                                 </div>
-                                <p class="text-sm text-gray-600">Rundschreiben an Bewohner versenden</p>
+                                <p class="text-sm text-gray-600">Rundschreiben & Verteilerlisten</p>
+                            </a>
+                            <a href="/proxmox-verwaltung.html" class="block p-4 border rounded-lg hover:shadow-md transition hover:border-orange-300">
+                                <div class="flex items-center gap-3 mb-2">
+                                    <div class="bg-orange-100 rounded-lg p-2"><svg class="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg></div>
+                                    <h3 class="font-semibold text-gray-900">Proxmox Zugriffe</h3>
+                                </div>
+                                <p class="text-sm text-gray-600">VM/CT Berechtigungen verwalten</p>
                             </a>
                             <a href="/energie-monitor.html" class="block p-4 border rounded-lg hover:shadow-md transition hover:border-teal-300">
                                 <div class="flex items-center gap-3 mb-2">
                                     <div class="bg-teal-100 rounded-lg p-2"><svg class="w-6 h-6 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg></div>
                                     <h3 class="font-semibold text-gray-900">Energie-Monitor</h3>
                                 </div>
-                                <p class="text-sm text-gray-600">Zählerstand-Übersicht & Verbrauchsdaten</p>
+                                <p class="text-sm text-gray-600">Zählerstand-Übersicht & Verbrauch</p>
                             </a>
                         </div>
                     </div>
