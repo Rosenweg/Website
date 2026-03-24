@@ -24,6 +24,20 @@
         <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
             <h1 class="text-3xl font-bold mb-2">E-Mail Verteiler</h1>
             <p class="text-lg opacity-90">Nachrichten an Verteiler senden und Versand-Protokoll einsehen</p>
+            <!-- Email Quota (Technik only) -->
+            <div id="email-quota" class="hidden mt-4 bg-white/15 backdrop-blur rounded-lg px-4 py-3">
+                <div class="flex items-center justify-between text-sm">
+                    <span>E-Mail Kontingent: <strong id="quota-used">-</strong> / <strong id="quota-max">-</strong> versendet</span>
+                    <span id="quota-remaining" class="font-semibold"></span>
+                </div>
+                <div class="mt-2 w-full bg-white/20 rounded-full h-2">
+                    <div id="quota-bar" class="h-2 rounded-full transition-all" style="width:0%"></div>
+                </div>
+                <div class="flex justify-between text-xs mt-1 opacity-75">
+                    <span>Erneuerung: <span id="quota-cycle"></span></span>
+                    <span><span id="quota-opens">-</span> geöffnet · <span id="quota-bounces">-</span> Bounces</span>
+                </div>
+            </div>
         </div>
     </section>
 
@@ -281,6 +295,7 @@
                         const groups = user.groups || [];
                         if (groups.includes('Technik') || groups.includes('technik')) {
                             document.getElementById('tab-admin').classList.remove('hidden');
+                            loadEmailQuota();
                         }
                     },
                 });
@@ -376,6 +391,28 @@
         function logout() {
             if (confirm('Möchten Sie sich wirklich abmelden?')) {
                 AuthentikAuth.logout();
+            }
+        }
+
+        async function loadEmailQuota() {
+            try {
+                const data = await AuthentikAuth.apiFetch('/api/email/quota');
+                const pct = data.max > 0 ? Math.round((data.used / data.max) * 100) : 0;
+                document.getElementById('quota-used').textContent = data.used;
+                document.getElementById('quota-max').textContent = data.max;
+                document.getElementById('quota-remaining').textContent = `${data.remaining} übrig`;
+                document.getElementById('quota-opens').textContent = data.opens;
+                document.getElementById('quota-bounces').textContent = data.bounces;
+                const bar = document.getElementById('quota-bar');
+                bar.style.width = pct + '%';
+                bar.className = 'h-2 rounded-full transition-all ' + (pct > 90 ? 'bg-red-400' : pct > 70 ? 'bg-yellow-300' : 'bg-green-400');
+                // Cycle dates
+                const end = new Date(data.cycle_end);
+                const daysLeft = Math.ceil((end - new Date()) / 86400000);
+                document.getElementById('quota-cycle').textContent = `${end.toLocaleDateString('de-CH')} (in ${daysLeft} Tagen)`;
+                document.getElementById('email-quota').classList.remove('hidden');
+            } catch (e) {
+                console.warn('Quota load failed:', e);
             }
         }
 
