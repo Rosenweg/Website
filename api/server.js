@@ -3105,6 +3105,126 @@ app.get('/api/email/log/:id/status', authMiddleware, adminOnly, async (req, res)
   }
 });
 
+// DMARC Reports - parse from Gmail inbox
+app.get('/api/dmarc/reports', authMiddleware, adminOnly, async (req, res) => {
+  if (!IMAP_USER || !IMAP_PASS) return res.status(400).json({ error: 'IMAP nicht konfiguriert' });
+  try {
+    const { ImapFlow } = require('imapflow');
+    const zlib = require('zlib');
+    const client = new ImapFlow({
+      host: IMAP_HOST, port: IMAP_PORT, secure: true,
+      auth: { user: IMAP_USER, pass: IMAP_PASS }, logger: false
+    });
+    await client.connect();
+    await client.mailboxOpen('INBOX');
+
+    // Find DMARC report emails
+    const uids = [];
+    for await (const msg of client.fetch('1:*', { envelope: true })) {
+      const subj = (msg.envelope.subject || '').toLowerCase();
+      const from = msg.envelope.from?.[0]?.address || '';
+      if (subj.includes('report domain') || subj.includes('dmarc') || from.includes('dmarc')) {
+        uids.push({ uid: msg.uid, subject: msg.envelope.subject, from, date: msg.envelope.date });
+      }
+    }
+
+    const reports = [];
+    for (const info of uids.slice(-20)) { // last 20 reports
+      try {
+        const dl = await client.download(String(info.uid), undefined, { uid: true });
+        const chunks = [];
+        for await (const chunk of dl.content) chunks.push(chunk);
+        const parsed = await simpleParser(Buffer.concat(chunks));
+        const att = (parsed.attachments || [])[0];
+        if (!att) continue;
+
+        let xml;
+        const buf = att.content;
+        if (att.filename?.endsWith('.gz')) {
+          xml = zlib.gunzipSync(buf).toString();
+        } else if (att.filename?.endsWith('.zip')) {
+          // Parse ZIP local file header
+          let i = 0;
+          while (i < buf.length - 4) {
+            if (buf[i] === 0x50 && buf[i+1] === 0x4b && buf[i+2] === 0x03 && buf[i+3] === 0x04) {
+              const fnLen = buf.readUInt16LE(i + 26);
+              const exLen = buf.readUInt16LE(i + 28);
+              const compSize = buf.readUInt32LE(i + 18);
+              const dataStart = i + 30 + fnLen + exLen;
+              xml = zlib.inflateRawSync(buf.slice(dataStart, dataStart + compSize)).toString();
+              break;
+            }
+            i++;
+          }
+        } else {
+          xml = buf.toString();
+        }
+        if (!xml) continue;
+
+        // Parse XML manually (no dependency needed)
+        const getTag = (s, tag) => { const m = s.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`)); return m ? m[1].trim() : ''; };
+        const getAllTags = (s, tag) => { const r = []; let m; const re = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'g'); while ((m = re.exec(s))) r.push(m[1]); return r; };
+
+        const meta = getTag(xml, 'report_metadata');
+        const policy = getTag(xml, 'policy_published');
+        const records = getAllTags(xml, 'record');
+
+        const report = {
+          org: getTag(meta, 'org_name'),
+          reportId: getTag(meta, 'report_id'),
+          dateRange: {
+            begin: new Date(parseInt(getTag(getTag(meta, 'date_range'), 'begin')) * 1000).toISOString(),
+            end: new Date(parseInt(getTag(getTag(meta, 'date_range'), 'end')) * 1000).toISOString(),
+          },
+          domain: getTag(policy, 'domain'),
+          policy: { dkim: getTag(policy, 'adkim'), spf: getTag(policy, 'aspf'), p: getTag(policy, 'p') },
+          records: records.map(r => {
+            const row = getTag(r, 'row');
+            const pe = getTag(row, 'policy_evaluated');
+            const auth = getTag(r, 'auth_results');
+            const dkimResults = getAllTags(auth, 'dkim').map(d => ({
+              domain: getTag(d, 'domain'), result: getTag(d, 'result'), selector: getTag(d, 'selector')
+            }));
+            const spfResults = getAllTags(auth, 'spf').map(s => ({
+              domain: getTag(s, 'domain'), result: getTag(s, 'result')
+            }));
+            return {
+              sourceIp: getTag(row, 'source_ip'),
+              count: parseInt(getTag(row, 'count')) || 0,
+              disposition: getTag(pe, 'disposition'),
+              dkim: getTag(pe, 'dkim'),
+              spf: getTag(pe, 'spf'),
+              headerFrom: getTag(getTag(r, 'identifiers'), 'header_from'),
+              authDkim: dkimResults,
+              authSpf: spfResults,
+            };
+          }),
+        };
+        reports.push(report);
+      } catch (e) {
+        console.warn(`[DMARC] Failed to parse report UID ${info.uid}:`, e.message);
+      }
+    }
+
+    await client.logout();
+
+    // Summary
+    let totalPass = 0, totalFail = 0, totalMessages = 0;
+    for (const r of reports) {
+      for (const rec of r.records) {
+        totalMessages += rec.count;
+        if (rec.dkim === 'pass' || rec.spf === 'pass') totalPass += rec.count;
+        else totalFail += rec.count;
+      }
+    }
+
+    res.json({ reports: reports.reverse(), summary: { totalMessages, totalPass, totalFail, reportCount: reports.length } });
+  } catch (err) {
+    console.error('DMARC error:', err);
+    res.status(500).json({ error: 'DMARC-Reports konnten nicht geladen werden' });
+  }
+});
+
 // SMTP2GO email quota / kontingent
 app.get('/api/email/quota', authMiddleware, adminOnly, async (req, res) => {
   if (!SMTP2GO_API_KEY) return res.status(400).json({ error: 'SMTP2GO API-Key nicht konfiguriert' });
