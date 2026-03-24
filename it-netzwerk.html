@@ -1225,7 +1225,8 @@
                 onLogin(user) {
                     document.getElementById('login-screen').classList.add('hidden');
                     document.getElementById('dashboard').classList.remove('hidden');
-                    document.getElementById('user-email').textContent = user.name || user.email;
+                    const userEmailEl = document.getElementById('user-email');
+                    if (userEmailEl) userEmailEl.textContent = user.name || user.email;
 
                     // Show admin tab for admins
                     if (user.isAdmin) {
