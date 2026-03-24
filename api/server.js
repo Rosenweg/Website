@@ -569,6 +569,22 @@ function canWriteDocPath(filePath, groups) {
   return match && stwegs.has(parseInt(match[1]));
 }
 
+/** Get STWEG numbers where user is Ausschuss member */
+function getAusschussStwegs(groups) {
+  const stwegs = new Set();
+  for (const [nr, mapping] of Object.entries(STWEG_GROUPS)) {
+    if (mapping.ausschuss && groups.some(g => g.toLowerCase() === mapping.ausschuss.toLowerCase())) {
+      stwegs.add(parseInt(nr));
+    }
+  }
+  return stwegs;
+}
+
+/** Check if user is Ausschuss for any STWEG */
+function isAusschussForAny(groups) {
+  return getAusschussStwegs(groups).size > 0;
+}
+
 /** Middleware: require user to have access to the :stweg param (Technik=all, Ausschuss/Bewohner=own STWEG) */
 function requireStwegAccess(req, res, next) {
   const stweg = parseStweg(req.params.stweg);
@@ -688,6 +704,10 @@ async function getUserPermissions(groups) {
     }
   } catch (err) {
     console.error('getUserPermissions error:', err);
+  }
+  // Ausschuss members get bewohner-verwaltung access for their own STWEG
+  if (isAusschussForAny(groups) && !permissions['bewohner-verwaltung']) {
+    permissions['bewohner-verwaltung'] = 'write';
   }
   return permissions;
 }
@@ -3471,10 +3491,30 @@ async function authentikAPI(method, path, body = null) {
 }
 
 // GET /api/admin/users - List all users
-app.get('/api/admin/users', authMiddleware, requirePermission('bewohner-verwaltung', 'read'), async (req, res) => {
+app.get('/api/admin/users', authMiddleware, async (req, res) => {
+  const groups = req.user?.groups || [];
+  const isAdmin = isTechnik(groups) || isPraesident(groups);
+  const ausschussStwegs = getAusschussStwegs(groups);
+
+  if (!isAdmin && ausschussStwegs.size === 0) {
+    return res.status(403).json({ error: 'Keine Berechtigung' });
+  }
+
   try {
     const data = await authentikAPI('GET', '/core/users/?page_size=500');
-    res.json(data);
+    if (isAdmin) return res.json(data);
+
+    // Ausschuss: filter to users in their STWEGs
+    const allowedGroupNames = new Set();
+    for (const nr of ausschussStwegs) {
+      const mapping = STWEG_GROUPS[nr];
+      if (mapping) Object.values(mapping).forEach(g => allowedGroupNames.add(g.toLowerCase()));
+    }
+    const results = (data.results || data).filter(u => {
+      const userGroups = (u.groups_obj || []).map(g => g.name.toLowerCase());
+      return userGroups.some(g => allowedGroupNames.has(g));
+    });
+    res.json({ ...data, results });
   } catch (err) {
     console.error('Admin list users error:', err.message);
     res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
@@ -3518,7 +3558,10 @@ app.post('/api/admin/users', authMiddleware, requirePermission('bewohner-verwalt
 });
 
 // GET /api/admin/users/:pk - Get single user
-app.get('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verwaltung', 'read'), async (req, res) => {
+app.get('/api/admin/users/:pk', authMiddleware, async (req, res) => {
+  const groups = req.user?.groups || [];
+  const isAdmin = isTechnik(groups) || isPraesident(groups);
+  if (!isAdmin && !isAusschussForAny(groups)) return res.status(403).json({ error: 'Keine Berechtigung' });
   const pk = parseInt(req.params.pk, 10);
   if (!Number.isFinite(pk) || pk < 1) return res.status(400).json({ error: 'Ungültige User-ID' });
   try {
@@ -3580,11 +3623,37 @@ function resolveGroupHierarchy(desiredGroupPks, allGroups) {
 }
 
 // PUT /api/admin/users/:pk - Update user
-app.put('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-verwaltung', 'write'), async (req, res) => {
+app.put('/api/admin/users/:pk', authMiddleware, async (req, res) => {
+  const callerGroups = req.user?.groups || [];
+  const isAdmin = isTechnik(callerGroups) || isPraesident(callerGroups);
+  const ausschussStwegs = getAusschussStwegs(callerGroups);
+  if (!isAdmin && ausschussStwegs.size === 0) return res.status(403).json({ error: 'Keine Berechtigung' });
+
   const userPk = parseInt(req.params.pk, 10);
   if (!Number.isFinite(userPk) || userPk < 1) return res.status(400).json({ error: 'Ungültige User-ID' });
+
+  // Ausschuss: verify target user is in their STWEG
+  if (!isAdmin) {
+    try {
+      const targetUser = await authentikAPI('GET', `/core/users/${userPk}/`);
+      const targetGroups = (targetUser.groups_obj || []).map(g => g.name.toLowerCase());
+      const allowedGroupNames = new Set();
+      for (const nr of ausschussStwegs) {
+        const mapping = STWEG_GROUPS[nr];
+        if (mapping) Object.values(mapping).forEach(g => allowedGroupNames.add(g.toLowerCase()));
+      }
+      if (!targetGroups.some(g => allowedGroupNames.has(g))) {
+        return res.status(403).json({ error: 'Benutzer gehört nicht zu deiner STWEG' });
+      }
+    } catch (err) {
+      return res.status(500).json({ error: 'Berechtigungsprüfung fehlgeschlagen' });
+    }
+  }
+
   try {
     const { name, email, is_active, groups } = req.body;
+    // Ausschuss cannot modify groups
+    if (!isAdmin && groups) return res.status(403).json({ error: 'Gruppen können nur von Technik geändert werden' });
     const patchBody = {};
     if (name !== undefined) patchBody.name = name;
     if (email !== undefined) patchBody.email = email;
