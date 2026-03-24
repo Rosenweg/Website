@@ -149,6 +149,9 @@
                     <button onclick="showTab('troubleshooting')" id="tab-troubleshooting" class="tab-button border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">
                         Troubleshooting
                     </button>
+                    <button onclick="showTab('dmarc')" id="tab-dmarc" class="tab-button border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300 hidden">
+                        DMARC
+                    </button>
                     <button onclick="showTab('admin')" id="tab-admin" class="tab-button border-b-2 border-transparent py-4 px-1 text-sm font-medium text-red-500 hover:text-red-700 hover:border-red-300 hidden">
                         Admin
                     </button>
@@ -1118,6 +1121,36 @@
                 </div>
             </div>
 
+            <!-- DMARC Tab (hidden for non-admins) -->
+            <div id="content-dmarc" class="tab-content hidden">
+                <div class="space-y-6">
+                    <!-- Summary -->
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4" id="dmarc-summary">
+                        <div class="bg-white rounded-lg shadow p-4 text-center">
+                            <div class="text-2xl font-bold text-gray-800" id="dmarc-total">-</div>
+                            <div class="text-xs text-gray-500">E-Mails geprüft</div>
+                        </div>
+                        <div class="bg-white rounded-lg shadow p-4 text-center">
+                            <div class="text-2xl font-bold text-green-600" id="dmarc-pass">-</div>
+                            <div class="text-xs text-gray-500">Bestanden</div>
+                        </div>
+                        <div class="bg-white rounded-lg shadow p-4 text-center">
+                            <div class="text-2xl font-bold text-red-600" id="dmarc-fail">-</div>
+                            <div class="text-xs text-gray-500">Fehlgeschlagen</div>
+                        </div>
+                        <div class="bg-white rounded-lg shadow p-4 text-center">
+                            <div class="text-2xl font-bold text-blue-600" id="dmarc-reports-count">-</div>
+                            <div class="text-xs text-gray-500">Reports</div>
+                        </div>
+                    </div>
+
+                    <!-- Reports List -->
+                    <div id="dmarc-reports" class="space-y-4">
+                        <div class="text-sm text-gray-500 text-center py-8">Lade DMARC-Reports...</div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Admin Tab (hidden for non-admins) -->
             <div id="content-admin" class="tab-content hidden">
                 <div class="space-y-6">
@@ -1197,6 +1230,7 @@
                     // Show admin tab for admins
                     if (user.isAdmin) {
                         document.getElementById('tab-admin').classList.remove('hidden');
+                        document.getElementById('tab-dmarc').classList.remove('hidden');
                         loadSystemStatus();
                     }
 
@@ -1268,9 +1302,85 @@
             btn.textContent = 'Senden';
         }
 
+        // DMARC Reports
+        let dmarcLoaded = false;
+        async function loadDmarcReports() {
+            if (dmarcLoaded) return;
+            const el = document.getElementById('dmarc-reports');
+            try {
+                const resp = await AuthentikAuth.apiFetch('/api/dmarc/reports');
+                if (!resp.ok) throw new Error('API Fehler');
+                const data = await resp.json();
+                dmarcLoaded = true;
+
+                // Summary
+                document.getElementById('dmarc-total').textContent = data.summary.totalMessages;
+                document.getElementById('dmarc-pass').textContent = data.summary.totalPass;
+                document.getElementById('dmarc-fail').textContent = data.summary.totalFail;
+                document.getElementById('dmarc-reports-count').textContent = data.summary.reportCount;
+
+                if (data.reports.length === 0) {
+                    el.innerHTML = '<div class="text-sm text-gray-500 text-center py-8">Keine DMARC-Reports gefunden</div>';
+                    return;
+                }
+
+                el.innerHTML = data.reports.map(r => {
+                    const begin = new Date(r.dateRange.begin).toLocaleDateString('de-CH');
+                    const end = new Date(r.dateRange.end).toLocaleDateString('de-CH');
+                    const allPass = r.records.every(rec => rec.dkim === 'pass' || rec.spf === 'pass');
+                    return `
+                    <div class="bg-white rounded-lg shadow overflow-hidden">
+                        <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                            <div>
+                                <h3 class="font-semibold text-gray-900">${escapeHtml(r.org)}</h3>
+                                <p class="text-xs text-gray-500">${begin} – ${end} · Domain: ${escapeHtml(r.domain)}</p>
+                                <p class="text-xs text-gray-400">Policy: p=${escapeHtml(r.policy.p)} · DKIM=${escapeHtml(r.policy.dkim)} · SPF=${escapeHtml(r.policy.spf)}</p>
+                            </div>
+                            <span class="px-3 py-1 rounded-full text-xs font-medium ${allPass ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
+                                ${allPass ? 'Alles OK' : 'Probleme'}
+                            </span>
+                        </div>
+                        <table class="min-w-full text-sm">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Quell-IP</th>
+                                    <th class="px-4 py-2 text-center text-xs font-medium text-gray-500">Anzahl</th>
+                                    <th class="px-4 py-2 text-center text-xs font-medium text-gray-500">DKIM</th>
+                                    <th class="px-4 py-2 text-center text-xs font-medium text-gray-500">SPF</th>
+                                    <th class="px-4 py-2 text-center text-xs font-medium text-gray-500">Disposition</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Details</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-200">
+                                ${r.records.map(rec => {
+                                    const dkimOk = rec.dkim === 'pass';
+                                    const spfOk = rec.spf === 'pass';
+                                    const details = [
+                                        ...rec.authDkim.map(d => `DKIM: ${d.domain} (${d.selector}) → ${d.result}`),
+                                        ...rec.authSpf.map(s => `SPF: ${s.domain} → ${s.result}`)
+                                    ].join('<br>');
+                                    return `<tr>
+                                        <td class="px-4 py-2 font-mono text-xs">${escapeHtml(rec.sourceIp)}</td>
+                                        <td class="px-4 py-2 text-center">${rec.count}</td>
+                                        <td class="px-4 py-2 text-center"><span class="px-2 py-0.5 rounded text-xs font-medium ${dkimOk ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">${rec.dkim}</span></td>
+                                        <td class="px-4 py-2 text-center"><span class="px-2 py-0.5 rounded text-xs font-medium ${spfOk ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">${rec.spf}</span></td>
+                                        <td class="px-4 py-2 text-center text-xs">${escapeHtml(rec.disposition)}</td>
+                                        <td class="px-4 py-2 text-xs text-gray-500">${details}</td>
+                                    </tr>`;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>`;
+                }).join('');
+            } catch (e) {
+                el.innerHTML = `<div class="text-sm text-red-500 text-center py-8">Fehler beim Laden: ${escapeHtml(e.message)}</div>`;
+            }
+        }
+
         // Tab Management
         function showTab(tabName) {
             currentTab = tabName;
+            if (tabName === 'dmarc') loadDmarcReports();
 
             // Hide all tabs
             document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
