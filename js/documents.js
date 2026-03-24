@@ -222,6 +222,11 @@ const RosenwegDocs = {
             </svg>
           </a>
           ${this._canWritePath(doc.path) ? `
+          <button onclick="RosenwegDocs.showRenameDialog('${jsPath}')" class="text-gray-500 hover:text-gray-700 p-1 opacity-0 group-hover:opacity-100 transition" title="Umbenennen">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+            </svg>
+          </button>
           <button onclick="RosenwegDocs.showMoveDialog('${jsPath}')" class="text-indigo-600 hover:text-indigo-800 p-1 opacity-0 group-hover:opacity-100 transition" title="Verschieben">
             <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
@@ -481,6 +486,86 @@ const RosenwegDocs = {
       this.loadAndRender(true);
     } catch (err) {
       this._showUploadError('Fehler: ' + err.message);
+    }
+  },
+
+  showRenameDialog(path) {
+    const fileName = this.getFileName(path);
+    const folder = path.substring(0, path.lastIndexOf('/'));
+    const ext = fileName.includes('.') ? fileName.substring(fileName.lastIndexOf('.')) : '';
+    const baseName = fileName.includes('.') ? fileName.substring(0, fileName.lastIndexOf('.')) : fileName;
+
+    const modal = document.createElement('div');
+    modal.id = 'docs-upload-modal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4';
+    modal.innerHTML = `
+      <div class="bg-white rounded-xl shadow-xl max-w-sm w-full p-6">
+        <h3 class="text-lg font-bold mb-4">Datei umbenennen</h3>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Neuer Name</label>
+            <div class="flex items-center gap-1">
+              <input type="text" id="rename-input" value="${this._escapeHtml(baseName)}" class="flex-1 border rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+              <span class="text-sm text-gray-500">${this._escapeHtml(ext)}</span>
+            </div>
+          </div>
+          <input type="hidden" id="rename-source" value="${this._escapeHtml(path)}">
+          <input type="hidden" id="rename-ext" value="${this._escapeHtml(ext)}">
+          <input type="hidden" id="rename-folder" value="${this._escapeHtml(folder)}">
+          <div id="upload-error" class="text-sm text-red-600 hidden"></div>
+          <div class="flex justify-end gap-3 pt-2">
+            <button onclick="RosenwegDocs.closeModal()" class="px-4 py-2 text-gray-600 hover:text-gray-800">Abbrechen</button>
+            <button onclick="RosenwegDocs.doRename()" id="rename-btn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition">Umbenennen</button>
+          </div>
+        </div>
+      </div>`;
+    modal.addEventListener('click', (e) => { if (e.target === modal) this.closeModal(); });
+    document.body.appendChild(modal);
+    const input = document.getElementById('rename-input');
+    input.focus();
+    input.select();
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') this.doRename(); });
+  },
+
+  async doRename() {
+    const sourcePath = document.getElementById('rename-source').value;
+    const newName = document.getElementById('rename-input').value.trim();
+    const ext = document.getElementById('rename-ext').value;
+    const folder = document.getElementById('rename-folder').value;
+    const btn = document.getElementById('rename-btn');
+
+    if (!newName) {
+      this._showUploadError('Name darf nicht leer sein.');
+      return;
+    }
+
+    const sanitized = newName.replace(/[\/\\:*?"<>|]/g, '-');
+    const targetPath = `${folder}/${sanitized}${ext}`;
+
+    if (targetPath === sourcePath) {
+      this.closeModal();
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = '...';
+
+    try {
+      const resp = await AuthentikAuth.apiFetch('/api/documents/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: sourcePath, to: targetPath })
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.error || 'Umbenennen fehlgeschlagen');
+      }
+      this.closeModal();
+      this.loadAndRender(true);
+    } catch (err) {
+      this._showUploadError('Fehler: ' + err.message);
+      btn.disabled = false;
+      btn.textContent = 'Umbenennen';
     }
   },
 
