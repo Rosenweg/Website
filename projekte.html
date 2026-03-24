@@ -36,6 +36,7 @@
     <script>
     let currentProject = null;
     let canEdit = false;
+    let projectDocs = [];
 
     async function init() {
         const user = await AuthentikAuth.init({ requireAuth: true });
@@ -72,8 +73,11 @@
         const resp = await AuthentikAuth.apiFetch(`/api/projects/${slug}`);
         if (!resp.ok) return;
         currentProject = await resp.json();
+        // Load all docs once, then render
+        const docsResp = await AuthentikAuth.apiFetch('/api/documents');
+        projectDocs = docsResp.ok ? await docsResp.json() : [];
         renderProject();
-        loadProjectFiles();
+        renderProjectFiles();
     }
 
     function renderProject() {
@@ -85,6 +89,8 @@
         // Timeline
         const timelineHtml = p.timeline.map(t => {
             const done = t.erledigt;
+            const attachFolder = `projekte/${p.slug}/timeline/${t.id}/`;
+            const attachments = projectDocs.filter(f => f.path.startsWith(attachFolder));
             return `<div class="flex gap-4 items-start">
                 <div class="flex flex-col items-center">
                     <div class="w-4 h-4 rounded-full border-2 ${done ? 'bg-emerald-500 border-emerald-500' : 'bg-white border-gray-300'} ${canEdit ? 'cursor-pointer' : ''}"
@@ -100,6 +106,7 @@
                     </div>
                     <p class="font-medium ${done ? 'text-gray-500 line-through' : 'text-gray-800'}">${esc(t.titel)}</p>
                     ${t.beschreibung ? `<p class="text-sm text-gray-500">${esc(t.beschreibung)}</p>` : ''}
+                    ${renderAttachments(attachments, 'timeline', t.id)}
                 </div>
             </div>`;
         }).join('');
@@ -115,7 +122,10 @@
 
         const candidatesHtml = p.candidates.length === 0
             ? '<p class="text-gray-400 text-sm py-4">Noch keine Kandidaten erfasst.</p>'
-            : p.candidates.map(c => `
+            : p.candidates.map(c => {
+                const attachFolder = `projekte/${p.slug}/kandidaten/${c.id}/`;
+                const attachments = projectDocs.filter(f => f.path.startsWith(attachFolder));
+                return `
             <div class="border rounded-lg p-4 hover:shadow-md transition">
                 <div class="flex items-start justify-between gap-2">
                     <div class="flex-1">
@@ -133,13 +143,15 @@
                         ${c.offerte_betrag ? `<p class="mt-2 text-sm"><span class="font-medium">Offerte:</span> ${esc(c.offerte_betrag)}</p>` : ''}
                         ${c.offerte_details ? `<p class="text-sm text-gray-500">${esc(c.offerte_details)}</p>` : ''}
                         ${c.notizen ? `<p class="text-sm text-gray-400 mt-2 italic">${esc(c.notizen)}</p>` : ''}
+                        ${renderAttachments(attachments, 'kandidaten', c.id)}
                     </div>
                     ${canEdit ? `<div class="flex gap-1">
                         <button onclick="editCandidate(${c.id})" class="text-gray-400 hover:text-gray-600 p-1" title="Bearbeiten">&#9998;</button>
                         <button onclick="deleteCandidate(${c.id})" class="text-red-300 hover:text-red-500 p-1" title="Löschen">&times;</button>
                     </div>` : ''}
                 </div>
-            </div>`).join('');
+            </div>`;
+            }).join('');
 
         // Comments
         const commentsHtml = p.comments.map(c => `
@@ -352,14 +364,16 @@
     }
 
     // ── Document functions ──
-    async function loadProjectFiles() {
+    function renderProjectFiles() {
         const el = document.getElementById('project-files');
         if (!el) return;
         const folder = `projekte/${currentProject.slug}/`;
-        const resp = await AuthentikAuth.apiFetch('/api/documents');
-        if (!resp.ok) { el.textContent = 'Fehler beim Laden'; return; }
-        const allDocs = await resp.json();
-        const files = allDocs.filter(f => f.path.startsWith(folder) && !f.path.endsWith('.gitkeep'));
+        // Only show root-level files (not in timeline/ or kandidaten/ subfolders)
+        const files = projectDocs.filter(f =>
+            f.path.startsWith(folder) &&
+            !f.path.endsWith('.gitkeep') &&
+            f.path.replace(folder, '').split('/').length === 1
+        );
         if (files.length === 0) {
             el.innerHTML = '<p class="text-gray-400">Keine Dokumente vorhanden.</p>';
             return;
@@ -369,16 +383,34 @@
             const size = f.size ? ` <span class="text-gray-400">(${formatSize(f.size)})</span>` : '';
             return `<div class="flex items-center justify-between py-2 border-b last:border-0">
                 <a href="${f.url}" target="_blank" class="text-emerald-700 hover:underline flex-1 truncate">${esc(name)}${size}</a>
-                ${canEdit ? `<button onclick="deleteProjectFile('${f.path.replace(/'/g, "\\'")}')" class="text-red-300 hover:text-red-500 ml-2 text-xs" title="Löschen">&times;</button>` : ''}
+                ${canEdit ? `<button onclick="deleteDoc('${f.path.replace(/'/g, "\\'")}')" class="text-red-300 hover:text-red-500 ml-2 text-xs" title="Löschen">&times;</button>` : ''}
             </div>`;
         }).join('');
     }
 
-    async function uploadProjectFiles(fileList) {
-        const folder = `projekte/${currentProject.slug}`;
+    function renderAttachments(files, type, id) {
+        const folder = `projekte/${currentProject.slug}/${type}/${id}/`;
+        const fileList = files.length > 0 ? files.map(f => {
+            const name = f.path.split('/').pop();
+            return `<span class="inline-flex items-center gap-1">
+                <a href="${f.url}" target="_blank" class="text-emerald-600 hover:underline">${esc(name)}</a>
+                ${canEdit ? `<button onclick="deleteDoc('${f.path.replace(/'/g, "\\'")}')" class="text-red-300 hover:text-red-500">&times;</button>` : ''}
+            </span>`;
+        }).join(' ') : '';
+
+        const uploadBtn = canEdit ? `<label class="text-gray-400 hover:text-emerald-600 cursor-pointer" title="Datei anhängen">
+            &#128206;
+            <input type="file" class="hidden" multiple onchange="uploadToFolder('${folder}', this.files)">
+        </label>` : '';
+
+        if (!files.length && !canEdit) return '';
+        return `<div class="flex flex-wrap items-center gap-2 mt-1 text-xs">${fileList}${uploadBtn}</div>`;
+    }
+
+    async function uploadToFolder(folder, fileList) {
         for (const file of fileList) {
             const name = file.name.replace(/[^a-zA-Z0-9äöüÄÖÜß._\-() ]/g, '_');
-            const path = `${folder}/${name}`;
+            const path = `${folder}${name}`;
             const buffer = await file.arrayBuffer();
             const token = AuthentikAuth.getToken();
             await fetch(`/api/documents/${path}`, {
@@ -390,13 +422,18 @@
                 body: buffer
             });
         }
-        loadProjectFiles();
+        loadProject(currentProject.slug);
     }
 
-    async function deleteProjectFile(path) {
+    async function uploadProjectFiles(fileList) {
+        const folder = `projekte/${currentProject.slug}/`;
+        await uploadToFolder(folder, fileList);
+    }
+
+    async function deleteDoc(path) {
         if (!confirm('Dokument wirklich löschen?')) return;
         await AuthentikAuth.apiFetch(`/api/documents/${path}`, { method: 'DELETE' });
-        loadProjectFiles();
+        loadProject(currentProject.slug);
     }
 
     function formatSize(bytes) {
