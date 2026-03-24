@@ -4229,6 +4229,156 @@ app.post('/api/proxmox/ensure-user', authMiddleware, adminOnly, async (req, res)
   }
 });
 
+// ─── Projects API ──────────────────────────────────────────────────
+
+/** Middleware: require eigentuemer group */
+function requireEigentuemer(req, res, next) {
+  const groups = req.user?.groups || [];
+  if (isTechnik(groups) || isPraesident(groups)) return next();
+  if (groups.some(g => g.toLowerCase().includes('eigentuemer'))) return next();
+  res.status(403).json({ error: 'Nur für Eigentümer' });
+}
+
+/** Middleware: require ausschuss or technik for editing */
+function requireAusschussOrTechnik(req, res, next) {
+  const groups = req.user?.groups || [];
+  if (isTechnik(groups) || isPraesident(groups)) return next();
+  if (isAusschussForAny(groups)) return next();
+  res.status(403).json({ error: 'Nur für Ausschuss/Technik' });
+}
+
+// GET /api/projects - List projects
+app.get('/api/projects', authMiddleware, requireEigentuemer, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM projects ORDER BY created_at DESC');
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/projects/:slug - Get project with all data
+app.get('/api/projects/:slug', authMiddleware, requireEigentuemer, async (req, res) => {
+  try {
+    const { rows: [project] } = await pool.query('SELECT * FROM projects WHERE slug = $1', [req.params.slug]);
+    if (!project) return res.status(404).json({ error: 'Projekt nicht gefunden' });
+    const [candidates, timeline, comments] = await Promise.all([
+      pool.query('SELECT * FROM project_candidates WHERE project_id = $1 ORDER BY sort_order, name', [project.id]),
+      pool.query('SELECT * FROM project_timeline WHERE project_id = $1 ORDER BY datum', [project.id]),
+      pool.query('SELECT * FROM project_comments WHERE project_id = $1 ORDER BY created_at DESC', [project.id]),
+    ]);
+    res.json({ ...project, candidates: candidates.rows, timeline: timeline.rows, comments: comments.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/projects/:slug/candidates - Add candidate
+app.post('/api/projects/:slug/candidates', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+  try {
+    const { rows: [project] } = await pool.query('SELECT id FROM projects WHERE slug = $1', [req.params.slug]);
+    if (!project) return res.status(404).json({ error: 'Projekt nicht gefunden' });
+    const { name, kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung, status, notizen } = req.body;
+    const { rows: [row] } = await pool.query(
+      `INSERT INTO project_candidates (project_id, name, kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung, status, notizen)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [project.id, name, kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung || null, status || 'angefragt', notizen]);
+    res.json(row);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/projects/:slug/candidates/:id - Update candidate
+app.put('/api/projects/:slug/candidates/:id', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+  try {
+    const { name, kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung, status, notizen } = req.body;
+    const { rows: [row] } = await pool.query(
+      `UPDATE project_candidates SET name=$1, kontakt=$2, telefon=$3, email=$4, webseite=$5, offerte_betrag=$6, offerte_details=$7, bewertung=$8, status=$9, notizen=$10, updated_at=NOW()
+       WHERE id=$11 RETURNING *`,
+      [name, kontakt, telefon, email, webseite, offerte_betrag, offerte_details, bewertung || null, status, notizen, req.params.id]);
+    if (!row) return res.status(404).json({ error: 'Kandidat nicht gefunden' });
+    res.json(row);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/projects/:slug/candidates/:id
+app.delete('/api/projects/:slug/candidates/:id', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM project_candidates WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/projects/:slug/timeline - Add timeline entry
+app.post('/api/projects/:slug/timeline', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+  try {
+    const { rows: [project] } = await pool.query('SELECT id FROM projects WHERE slug = $1', [req.params.slug]);
+    if (!project) return res.status(404).json({ error: 'Projekt nicht gefunden' });
+    const { datum, titel, beschreibung, erledigt } = req.body;
+    const { rows: [row] } = await pool.query(
+      'INSERT INTO project_timeline (project_id, datum, titel, beschreibung, erledigt) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [project.id, datum, titel, beschreibung, erledigt || false]);
+    res.json(row);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/projects/:slug/timeline/:id
+app.put('/api/projects/:slug/timeline/:id', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+  try {
+    const { datum, titel, beschreibung, erledigt } = req.body;
+    const { rows: [row] } = await pool.query(
+      'UPDATE project_timeline SET datum=$1, titel=$2, beschreibung=$3, erledigt=$4 WHERE id=$5 RETURNING *',
+      [datum, titel, beschreibung, erledigt, req.params.id]);
+    if (!row) return res.status(404).json({ error: 'Eintrag nicht gefunden' });
+    res.json(row);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/projects/:slug/timeline/:id
+app.delete('/api/projects/:slug/timeline/:id', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM project_timeline WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/projects/:slug/comments - Any eigentuemer can comment
+app.post('/api/projects/:slug/comments', authMiddleware, requireEigentuemer, async (req, res) => {
+  try {
+    const { rows: [project] } = await pool.query('SELECT id FROM projects WHERE slug = $1', [req.params.slug]);
+    if (!project) return res.status(404).json({ error: 'Projekt nicht gefunden' });
+    const { text } = req.body;
+    if (!text?.trim()) return res.status(400).json({ error: 'Text erforderlich' });
+    const { rows: [row] } = await pool.query(
+      'INSERT INTO project_comments (project_id, user_name, user_email, text) VALUES ($1,$2,$3,$4) RETURNING *',
+      [project.id, req.user.name, req.user.email, text.trim()]);
+    res.json(row);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/projects/:slug/comments/:id - Ausschuss/Technik can delete
+app.delete('/api/projects/:slug/comments/:id', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM project_comments WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
