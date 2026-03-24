@@ -1277,30 +1277,6 @@
             d.textContent = str;
             return d.innerHTML;
         }
-            try {
-                const resp = await AuthentikAuth.apiFetch('/api/sms/send', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ to: toEl.value, text: textEl.value })
-                });
-                const data = await resp.json();
-                if (data.success) {
-                    statusEl.textContent = 'SMS gesendet';
-                    statusEl.className = 'text-xs mt-1 text-green-600';
-                    textEl.value = '';
-                    loadSmsInbox();
-                } else {
-                    statusEl.textContent = data.error || 'Fehler';
-                    statusEl.className = 'text-xs mt-1 text-red-500';
-                }
-            } catch (err) {
-                statusEl.textContent = 'Versand fehlgeschlagen';
-                statusEl.className = 'text-xs mt-1 text-red-500';
-            }
-            statusEl.classList.remove('hidden');
-            btn.disabled = false;
-            btn.textContent = 'Senden';
-        }
 
         // DMARC Reports
         let dmarcLoaded = false;
