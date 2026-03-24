@@ -388,23 +388,38 @@
         }).join('');
     }
 
-    function renderAttachments(files, type, id) {
+    function renderAttachments(directFiles, type, id) {
+        // Direct uploads in subfolder
         const folder = `projekte/${currentProject.slug}/${type}/${id}/`;
-        const fileList = files.length > 0 ? files.map(f => {
+        const directHtml = directFiles.map(f => {
             const name = f.path.split('/').pop();
-            return `<span class="inline-flex items-center gap-1">
+            return `<span class="inline-flex items-center gap-1 bg-gray-50 rounded px-1.5 py-0.5">
                 <a href="${f.url}" target="_blank" class="text-emerald-600 hover:underline">${esc(name)}</a>
                 ${canEdit ? `<button onclick="deleteDoc('${f.path.replace(/'/g, "\\'")}')" class="text-red-300 hover:text-red-500">&times;</button>` : ''}
             </span>`;
-        }).join(' ') : '';
+        }).join(' ');
 
-        const uploadBtn = canEdit ? `<label class="text-gray-400 hover:text-emerald-600 cursor-pointer" title="Datei anhängen">
-            &#128206;
-            <input type="file" class="hidden" multiple onchange="uploadToFolder('${folder}', this.files)">
-        </label>` : '';
+        // Linked docs from project_attachments
+        const linked = (currentProject.attachments || []).filter(a => a.target_type === type && a.target_id === id);
+        const linkedHtml = linked.map(a => {
+            const name = a.doc_path.split('/').pop();
+            const doc = projectDocs.find(d => d.path === a.doc_path);
+            const url = doc ? doc.url : `/api/documents/${a.doc_path}`;
+            return `<span class="inline-flex items-center gap-1 bg-blue-50 rounded px-1.5 py-0.5">
+                <a href="${url}" target="_blank" class="text-blue-600 hover:underline">${esc(name)}</a>
+                ${canEdit ? `<button onclick="unlinkDoc(${a.id})" class="text-red-300 hover:text-red-500" title="Verknüpfung lösen">&times;</button>` : ''}
+            </span>`;
+        }).join(' ');
 
-        if (!files.length && !canEdit) return '';
-        return `<div class="flex flex-wrap items-center gap-2 mt-1 text-xs">${fileList}${uploadBtn}</div>`;
+        const buttons = canEdit ? `
+            <label class="text-gray-400 hover:text-emerald-600 cursor-pointer" title="Neue Datei hochladen">
+                &#128206;<input type="file" class="hidden" multiple onchange="uploadToFolder('${folder}', this.files)">
+            </label>
+            <button onclick="showLinkPicker('${type}', ${id})" class="text-gray-400 hover:text-blue-600" title="Bestehendes Dokument verknüpfen">&#128279;</button>
+        ` : '';
+
+        if (!directFiles.length && !linked.length && !canEdit) return '';
+        return `<div class="flex flex-wrap items-center gap-2 mt-1 text-xs">${directHtml}${linkedHtml}${buttons}</div>`;
     }
 
     async function uploadToFolder(folder, fileList) {
@@ -433,6 +448,58 @@
     async function deleteDoc(path) {
         if (!confirm('Dokument wirklich löschen?')) return;
         await AuthentikAuth.apiFetch(`/api/documents/${path}`, { method: 'DELETE' });
+        loadProject(currentProject.slug);
+    }
+
+    function showLinkPicker(type, id) {
+        const folder = `projekte/${currentProject.slug}/`;
+        // Show all root-level project docs that aren't already linked to this target
+        const linked = (currentProject.attachments || [])
+            .filter(a => a.target_type === type && a.target_id === id)
+            .map(a => a.doc_path);
+        const available = projectDocs.filter(f =>
+            f.path.startsWith(folder) &&
+            !f.path.endsWith('.gitkeep') &&
+            f.path.replace(folder, '').split('/').length === 1 &&
+            !linked.includes(f.path)
+        );
+        if (available.length === 0) {
+            alert('Keine Dokumente zum Verknüpfen vorhanden.\nLade zuerst Dokumente im Bereich "Dokumente" hoch.');
+            return;
+        }
+        const modal = document.createElement('div');
+        modal.id = 'modal';
+        modal.className = 'fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4';
+        modal.innerHTML = `<div class="bg-white rounded-xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+            <h3 class="text-lg font-bold mb-4">Dokument verknüpfen</h3>
+            <div class="space-y-2">
+                ${available.map(f => {
+                    const name = f.path.split('/').pop();
+                    return `<button onclick="linkDoc('${type}', ${id}, '${f.path.replace(/'/g, "\\'")}')"
+                        class="w-full text-left px-3 py-2 rounded-lg hover:bg-emerald-50 text-sm text-gray-700 border hover:border-emerald-300 transition">
+                        ${esc(name)}
+                    </button>`;
+                }).join('')}
+            </div>
+            <div class="flex justify-end pt-4">
+                <button onclick="closeModal()" class="px-4 py-2 text-gray-600">Abbrechen</button>
+            </div>
+        </div>`;
+        modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+        document.body.appendChild(modal);
+    }
+
+    async function linkDoc(type, id, path) {
+        closeModal();
+        await AuthentikAuth.apiFetch(`/api/projects/${currentProject.slug}/attachments`, {
+            method: 'POST', body: { target_type: type, target_id: id, doc_path: path }
+        });
+        loadProject(currentProject.slug);
+    }
+
+    async function unlinkDoc(attachmentId) {
+        if (!confirm('Verknüpfung lösen?')) return;
+        await AuthentikAuth.apiFetch(`/api/projects/${currentProject.slug}/attachments/${attachmentId}`, { method: 'DELETE' });
         loadProject(currentProject.slug);
     }
 

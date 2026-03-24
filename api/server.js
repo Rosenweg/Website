@@ -4264,12 +4264,13 @@ app.get('/api/projects/:slug', authMiddleware, requireEigentuemer, async (req, r
   try {
     const { rows: [project] } = await pool.query('SELECT * FROM projects WHERE slug = $1', [req.params.slug]);
     if (!project) return res.status(404).json({ error: 'Projekt nicht gefunden' });
-    const [candidates, timeline, comments] = await Promise.all([
+    const [candidates, timeline, comments, attachments] = await Promise.all([
       pool.query('SELECT * FROM project_candidates WHERE project_id = $1 ORDER BY sort_order, name', [project.id]),
       pool.query('SELECT * FROM project_timeline WHERE project_id = $1 ORDER BY datum', [project.id]),
       pool.query('SELECT * FROM project_comments WHERE project_id = $1 ORDER BY created_at DESC', [project.id]),
+      pool.query('SELECT * FROM project_attachments WHERE project_slug = $1 ORDER BY created_at', [req.params.slug]),
     ]);
-    res.json({ ...project, candidates: candidates.rows, timeline: timeline.rows, comments: comments.rows });
+    res.json({ ...project, candidates: candidates.rows, timeline: timeline.rows, comments: comments.rows, attachments: attachments.rows });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -4375,6 +4376,32 @@ app.post('/api/projects/:slug/comments', authMiddleware, requireEigentuemer, asy
 app.delete('/api/projects/:slug/comments/:id', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
   try {
     await pool.query('DELETE FROM project_comments WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/projects/:slug/attachments - Link existing doc to timeline/candidate
+app.post('/api/projects/:slug/attachments', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+  try {
+    const { target_type, target_id, doc_path } = req.body;
+    if (!['timeline', 'kandidaten'].includes(target_type)) return res.status(400).json({ error: 'Ungültiger Typ' });
+    if (!target_id || !doc_path) return res.status(400).json({ error: 'target_id und doc_path erforderlich' });
+    const { rows: [row] } = await pool.query(
+      `INSERT INTO project_attachments (project_slug, target_type, target_id, doc_path)
+       VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING *`,
+      [req.params.slug, target_type, target_id, doc_path]);
+    res.json(row || { already_linked: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/projects/:slug/attachments/:id - Unlink doc
+app.delete('/api/projects/:slug/attachments/:id', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM project_attachments WHERE id = $1 AND project_slug = $2', [req.params.id, req.params.slug]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -4700,6 +4727,18 @@ async function initDB() {
         page VARCHAR(100) NOT NULL,
         access VARCHAR(10) NOT NULL DEFAULT 'none' CHECK(access IN ('none', 'read', 'write')),
         UNIQUE(group_name, page)
+      );
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS project_attachments (
+        id SERIAL PRIMARY KEY,
+        project_slug VARCHAR(100) NOT NULL,
+        target_type VARCHAR(20) NOT NULL CHECK(target_type IN ('timeline', 'kandidaten')),
+        target_id INTEGER NOT NULL,
+        doc_path TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(project_slug, target_type, target_id, doc_path)
       );
     `);
 
