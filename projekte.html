@@ -73,6 +73,7 @@
         if (!resp.ok) return;
         currentProject = await resp.json();
         renderProject();
+        loadProjectFiles();
     }
 
     function renderProject() {
@@ -174,6 +175,18 @@
                         ${editBtn(`addCandidate()`, '+ Kandidat', 'text-emerald-600 hover:text-emerald-800 text-sm font-medium')}
                     </div>
                     <div class="grid gap-3">${candidatesHtml}</div>
+                </div>
+
+                <!-- Dokumente -->
+                <div class="bg-white rounded-xl shadow p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-bold text-gray-800">Dokumente</h2>
+                        ${canEdit ? `<label class="text-emerald-600 hover:text-emerald-800 text-sm font-medium cursor-pointer">
+                            + Hochladen
+                            <input type="file" class="hidden" multiple onchange="uploadProjectFiles(this.files)">
+                        </label>` : ''}
+                    </div>
+                    <div id="project-files" class="text-sm text-gray-400">Lädt...</div>
                 </div>
 
                 <!-- Comments -->
@@ -336,6 +349,60 @@
         if (!confirm('Kommentar löschen?')) return;
         await AuthentikAuth.apiFetch(`/api/projects/${currentProject.slug}/comments/${id}`, { method: 'DELETE' });
         loadProject(currentProject.slug);
+    }
+
+    // ── Document functions ──
+    async function loadProjectFiles() {
+        const el = document.getElementById('project-files');
+        if (!el) return;
+        const folder = `projekte/${currentProject.slug}/`;
+        const resp = await AuthentikAuth.apiFetch('/api/documents');
+        if (!resp.ok) { el.textContent = 'Fehler beim Laden'; return; }
+        const allDocs = await resp.json();
+        const files = allDocs.filter(f => f.path.startsWith(folder) && !f.path.endsWith('.gitkeep'));
+        if (files.length === 0) {
+            el.innerHTML = '<p class="text-gray-400">Keine Dokumente vorhanden.</p>';
+            return;
+        }
+        el.innerHTML = files.map(f => {
+            const name = f.path.split('/').pop();
+            const size = f.size ? ` <span class="text-gray-400">(${formatSize(f.size)})</span>` : '';
+            return `<div class="flex items-center justify-between py-2 border-b last:border-0">
+                <a href="${f.url}" target="_blank" class="text-emerald-700 hover:underline flex-1 truncate">${esc(name)}${size}</a>
+                ${canEdit ? `<button onclick="deleteProjectFile('${f.path.replace(/'/g, "\\'")}')" class="text-red-300 hover:text-red-500 ml-2 text-xs" title="Löschen">&times;</button>` : ''}
+            </div>`;
+        }).join('');
+    }
+
+    async function uploadProjectFiles(fileList) {
+        const folder = `projekte/${currentProject.slug}`;
+        for (const file of fileList) {
+            const name = file.name.replace(/[^a-zA-Z0-9äöüÄÖÜß._\-() ]/g, '_');
+            const path = `${folder}/${name}`;
+            const buffer = await file.arrayBuffer();
+            const token = AuthentikAuth.getToken();
+            await fetch(`/api/documents/${path}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/octet-stream',
+                    ...(token ? { Authorization: `Bearer ${token}` } : {})
+                },
+                body: buffer
+            });
+        }
+        loadProjectFiles();
+    }
+
+    async function deleteProjectFile(path) {
+        if (!confirm('Dokument wirklich löschen?')) return;
+        await AuthentikAuth.apiFetch(`/api/documents/${path}`, { method: 'DELETE' });
+        loadProjectFiles();
+    }
+
+    function formatSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
     }
 
     function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }

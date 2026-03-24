@@ -551,6 +551,8 @@ function isDocPathAllowed(filePath, groups) {
   if (isTechnik(groups) || isPraesident(groups)) return true;
   const folder = filePath.includes('/') ? filePath.split('/')[0] : 'allgemein';
   if (folder === 'allgemein' || folder.toLowerCase() === 'scans') return true;
+  // Projekte folder: accessible to all eigentuemer
+  if (folder === 'projekte' && groups.some(g => g.toLowerCase().includes('eigentuemer'))) return true;
   const stwegs = getUserStwegs(groups);
   const match = folder.match(/^stweg(\d+)$/);
   return match && stwegs.has(parseInt(match[1]));
@@ -560,10 +562,10 @@ function isDocPathAllowed(filePath, groups) {
 function canWriteDocPath(filePath, groups) {
   if (isTechnik(groups) || isPraesident(groups)) return true;
   const folder = filePath.includes('/') ? filePath.split('/')[0] : 'allgemein';
-  // Ausschuss members can write to their own stweg + allgemein
   const isAusschuss = groups.some(g => g.toLowerCase().endsWith('-ausschuss'));
   if (!isAusschuss) return false;
-  if (folder === 'allgemein') return true;
+  // Ausschuss members can write to their own stweg + allgemein + projekte
+  if (folder === 'allgemein' || folder === 'projekte') return true;
   const stwegs = getUserStwegs(groups);
   const match = folder.match(/^stweg(\d+)$/);
   return match && stwegs.has(parseInt(match[1]));
