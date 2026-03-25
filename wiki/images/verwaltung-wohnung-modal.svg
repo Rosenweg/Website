@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 620" font-family="Inter, system-ui, sans-serif">
+  <!-- Backdrop -->
+  <rect width="480" height="620" fill="#00000066" rx="4"/>
+
+  <!-- Modal -->
+  <rect x="24" y="16" width="432" height="590" rx="12" fill="white" filter="drop-shadow(0 4px 12px rgba(0,0,0,0.15))"/>
+
+  <!-- Title -->
+  <text x="44" y="50" fill="#1f2937" font-size="16" font-weight="700">Wohnung bearbeiten</text>
+
+  <!-- Section: Wohnung -->
+  <text x="44" y="78" fill="#6b7280" font-size="10" font-weight="600" letter-spacing="0.05em">WOHNUNG</text>
+
+  <!-- Row 1: Bezeichnung + Stockwerk -->
+  <text x="44" y="100" fill="#374151" font-size="11" font-weight="500">Bezeichnung *</text>
+  <rect x="44" y="106" width="196" height="30" rx="6" fill="white" stroke="#d1d5db"/>
+  <text x="54" y="125" fill="#1f2937" font-size="12">EG.1</text>
+
+  <text x="252" y="100" fill="#374151" font-size="11" font-weight="500">Stockwerk</text>
+  <rect x="252" y="106" width="188" height="30" rx="6" fill="white" stroke="#d1d5db"/>
+  <text x="262" y="125" fill="#1f2937" font-size="12">Erdgeschoss</text>
+
+  <!-- Row 2: Zimmer + Fläche + Typ -->
+  <text x="44" y="154" fill="#374151" font-size="11" font-weight="500">Zimmer</text>
+  <rect x="44" y="160" width="120" height="30" rx="6" fill="white" stroke="#d1d5db"/>
+  <text x="54" y="179" fill="#1f2937" font-size="12">3.5</text>
+
+  <text x="176" y="154" fill="#374151" font-size="11" font-weight="500">Fläche m²</text>
+  <rect x="176" y="160" width="120" height="30" rx="6" fill="white" stroke="#d1d5db"/>
+  <text x="186" y="179" fill="#1f2937" font-size="12">78</text>
+
+  <text x="308" y="154" fill="#374151" font-size="11" font-weight="500">Typ</text>
+  <rect x="308" y="160" width="132" height="30" rx="6" fill="white" stroke="#d1d5db"/>
+  <text x="318" y="179" fill="#1f2937" font-size="12">Wohnung</text>
+
+  <!-- Besonderheiten -->
+  <text x="44" y="208" fill="#374151" font-size="11" font-weight="500">Besonderheiten</text>
+  <rect x="44" y="214" width="396" height="30" rx="6" fill="white" stroke="#d1d5db"/>
+  <text x="54" y="233" fill="#1f2937" font-size="12">Garten, Balkon</text>
+
+  <!-- Section: Bewohnung -->
+  <text x="44" y="268" fill="#6b7280" font-size="10" font-weight="600" letter-spacing="0.05em">BEWOHNUNG</text>
+
+  <!-- Radio buttons -->
+  <circle cx="56" cy="290" r="7" fill="white" stroke="#2563eb" stroke-width="2"/>
+  <circle cx="56" cy="290" r="4" fill="#2563eb"/>
+  <text x="70" y="294" fill="#1f2937" font-size="12">Selbstbewohnt</text>
+
+  <circle cx="186" cy="290" r="7" fill="white" stroke="#d1d5db" stroke-width="2"/>
+  <text x="200" y="294" fill="#1f2937" font-size="12">Vermietet</text>
+
+  <circle cx="290" cy="290" r="7" fill="white" stroke="#d1d5db" stroke-width="2"/>
+  <text x="304" y="294" fill="#1f2937" font-size="12">Leer</text>
+
+  <!-- Section: Kontakte -->
+  <text x="44" y="326" fill="#6b7280" font-size="10" font-weight="600" letter-spacing="0.05em">KONTAKTE</text>
+  <rect x="310" y="312" width="130" height="22" rx="6" fill="#eff6ff"/>
+  <text x="322" y="327" fill="#2563eb" font-size="10" font-weight="500">+ Kontakt hinzufügen</text>
+
+  <!-- Contact 1 -->
+  <rect x="44" y="340" width="396" height="86" rx="8" fill="#f9fafb" stroke="#e5e7eb"/>
+  <text x="54" y="358" fill="#6b7280" font-size="10">Rolle</text>
+  <rect x="54" y="362" width="100" height="24" rx="4" fill="white" stroke="#d1d5db"/>
+  <text x="62" y="378" fill="#1f2937" font-size="11">Eigentümer</text>
+
+  <text x="166" y="358" fill="#6b7280" font-size="10">Name</text>
+  <rect x="166" y="362" width="150" height="24" rx="4" fill="white" stroke="#d1d5db"/>
+  <text x="174" y="378" fill="#1f2937" font-size="11">Max Mustermann</text>
+
+  <text x="54" y="400" fill="#6b7280" font-size="10">Telefon</text>
+  <rect x="54" y="404" width="130" height="24" rx="4" fill="white" stroke="#d1d5db"/>
+  <text x="62" y="420" fill="#1f2937" font-size="11">079 123 45 67</text>
+
+  <text x="196" y="400" fill="#6b7280" font-size="10">E-Mail</text>
+  <rect x="196" y="404" width="180" height="24" rx="4" fill="white" stroke="#d1d5db"/>
+  <text x="204" y="420" fill="#1f2937" font-size="11">max@example.com</text>
+
+  <!-- × button -->
+  <text x="420" y="358" fill="#ef4444" font-size="16" font-weight="bold" cursor="pointer">×</text>
+
+  <!-- Contact 2 (Verwalter) -->
+  <rect x="44" y="438" width="396" height="54" rx="8" fill="#f9fafb" stroke="#e5e7eb"/>
+  <text x="54" y="456" fill="#6b7280" font-size="10">Rolle</text>
+  <rect x="54" y="460" width="100" height="24" rx="4" fill="white" stroke="#d1d5db"/>
+  <text x="62" y="476" fill="#1f2937" font-size="11">Verwalter</text>
+
+  <text x="166" y="456" fill="#6b7280" font-size="10">Name</text>
+  <rect x="166" y="460" width="150" height="24" rx="4" fill="white" stroke="#d1d5db"/>
+  <text x="174" y="476" fill="#1f2937" font-size="11">Lisa Fischer</text>
+
+  <text x="420" y="458" fill="#ef4444" font-size="16" font-weight="bold">×</text>
+
+  <!-- Section: Notizen -->
+  <text x="44" y="516" fill="#374151" font-size="11" font-weight="500">Notizen</text>
+  <rect x="44" y="522" width="396" height="36" rx="6" fill="white" stroke="#d1d5db"/>
+  <text x="54" y="544" fill="#9ca3af" font-size="11">Parkplatz Nr. 5 gehört dazu</text>
+
+  <!-- Buttons -->
+  <text x="44" y="582" fill="#ef4444" font-size="12" font-weight="500">Löschen</text>
+
+  <rect x="300" y="568" width="72" height="32" rx="6" fill="white"/>
+  <text x="316" y="588" fill="#6b7280" font-size="12">Abbrechen</text>
+
+  <rect x="380" y="568" width="60" height="32" rx="6" fill="#2563eb"/>
+  <text x="390" y="588" fill="white" font-size="12" font-weight="600">Speichern</text>
+
+  <!-- Annotations -->
+  <rect x="0" y="330" width="38" height="20" rx="4" fill="#fef3c7" stroke="#f59e0b"/>
+  <text x="6" y="344" fill="#92400e" font-size="9" font-weight="600">Tipp</text>
+</svg>
