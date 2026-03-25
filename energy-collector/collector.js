@@ -1266,8 +1266,8 @@ app.get('/api/energy/lametric', openCors, async (req, res) => {
     const surplus_available = surplus_w + heizstab;
 
     const values = {
-      surplus_w: { val: surplus_w, icon: 'i67405', label: 'Surplus' },
-      surplus_available_w: { val: surplus_available, icon: 'i67405', label: 'Verfügbar' },
+      surplus_w: { val: surplus_w, icon: 'i67405', label: 'Ueberschuss' },
+      surplus_available_w: { val: surplus_available, icon: 'i67405', label: 'Verfuegbar' },
       production_w: { val: data.production_w || 0, icon: 'i37515', label: 'Solar' },
       grid_power_w: { val: data.grid_w, icon: data.grid_w < 0 ? 'i64129' : 'i59257', label: 'Netz' },
       heizstab_w: { val: heizstab, icon: 'i52509', label: 'Heizstab' },
@@ -1281,7 +1281,7 @@ app.get('/api/energy/lametric', openCors, async (req, res) => {
       const display = Math.abs(v.val) >= 1000
         ? (v.val / 1000).toFixed(1) + ' kW'
         : v.val + ' W';
-      return { text: display, icon: v.icon };
+      return { text: v.label + ' ' + display, icon: v.icon };
     });
 
     res.json({ frames });
@@ -1289,55 +1289,6 @@ app.get('/api/energy/lametric', openCors, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-// ─── LaMetric Sky local push ─────────────────────────────────────────
-// Pushes live energy data directly to LaMetric Sky devices via local API
-// Configure via LAMETRIC_DEVICES env: "ip:apikey,ip:apikey,..."
-const LAMETRIC_DEVICES = (process.env.LAMETRIC_DEVICES || '').split(',').filter(Boolean).map(d => {
-  const [host, apikey] = d.split('::', 2);
-  return host && apikey ? { host, apikey } : null;
-}).filter(Boolean);
-const LAMETRIC_PUSH_INTERVAL = parseInt(process.env.LAMETRIC_PUSH_INTERVAL || '15') * 1000;
-
-function formatLametricValue(val) {
-  return Math.abs(val) >= 1000 ? (val / 1000).toFixed(1) + ' kW' : val + ' W';
-}
-
-async function pushToLametric() {
-  if (LAMETRIC_DEVICES.length === 0) return;
-  try {
-    const data = await getGroupLiveData('r9');
-    if (data.grid_w === null) return;
-
-    const surplus = Math.max(0, -data.grid_w);
-    const heizstab = data.heizstab_w || 0;
-    const frames = [
-      { text: formatLametricValue(surplus), icon: 'i67405' },
-      { text: formatLametricValue(data.production_w || 0), icon: 'i37515' },
-      { text: formatLametricValue(data.grid_w), icon: data.grid_w < 0 ? 'i64129' : 'i59257' },
-      { text: formatLametricValue(heizstab), icon: 'i52509' },
-    ];
-
-    const body = JSON.stringify({ model: { frames }, priority: 'info', icon_type: 'none' });
-
-    for (const dev of LAMETRIC_DEVICES) {
-      try {
-        const auth = Buffer.from('dev:' + dev.apikey).toString('base64');
-        const res = await fetch(`http://${dev.host}:8080/api/v1/dev/widget/update/com.lametric.diy.devwidget/1`, {
-          method: 'POST',
-          headers: { 'Authorization': 'Basic ' + auth, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ frames }),
-          signal: AbortSignal.timeout(5000),
-        });
-        if (!res.ok) console.log(`[LaMetric] ${dev.host}: HTTP ${res.status}`);
-      } catch (err) {
-        console.log(`[LaMetric] ${dev.host}: ${err.message}`);
-      }
-    }
-  } catch (err) {
-    console.error('[LaMetric] Push error:', err.message);
-  }
-}
 
 // ─── Comparison endpoint ────────────────────────────────────────────
 app.get('/api/energy/compare', async (req, res) => {
@@ -1538,13 +1489,6 @@ async function start() {
 
   // Cleanup old data daily at 3am
   setInterval(cleanupOldData, 24 * 60 * 60 * 1000);
-
-  // LaMetric Sky local push
-  if (LAMETRIC_DEVICES.length > 0) {
-    console.log(`LaMetric push to ${LAMETRIC_DEVICES.length} device(s) every ${LAMETRIC_PUSH_INTERVAL / 1000}s`);
-    setTimeout(pushToLametric, 10000); // first push after 10s
-    setInterval(pushToLametric, LAMETRIC_PUSH_INTERVAL);
-  }
 
   // Start API
   app.listen(API_PORT, () => {
