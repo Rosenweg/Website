@@ -1204,16 +1204,14 @@ app.get('/api/energy/surplus', async (req, res) => {
 
     const surplus_w = Math.max(0, -data.grid_w);
     const result = {
-      surplus_w: surplus_w,
-      grid_power_w: data.grid_w,
-      timestamp: data.timestamp,
-      group,
+      surplus_w, grid_power_w: data.grid_w, production_w: data.production_w,
+      heizstab_w: data.heizstab_w, consumers: data.consumers,
+      timestamp: data.timestamp, group,
     };
-    // Include detail values if requested
-    if (req.query.detail === '1' || req.query.detail === 'true') {
-      result.production_w = data.production_w;
-      result.heizstab_w = data.heizstab_w;
-      result.consumers = data.consumers;
+
+    // ?field=grid_power_w → returns just the number as plain text (for Shelly/IoT)
+    if (req.query.field && result[req.query.field] !== undefined) {
+      return res.type('text/plain').send(String(result[req.query.field]));
     }
     res.json(result);
   } catch (err) {
@@ -1231,15 +1229,13 @@ app.get('/api/energy/surplus-available', async (req, res) => {
     const heizstab = data.heizstab_w || 0;
     const surplus_w = Math.max(0, -data.grid_w) + heizstab;
     const result = {
-      surplus_w: surplus_w,
-      grid_power_w: data.grid_w,
-      heizstab_w: heizstab,
-      timestamp: data.timestamp,
-      group,
+      surplus_w, grid_power_w: data.grid_w, heizstab_w: heizstab,
+      production_w: data.production_w, consumers: data.consumers,
+      timestamp: data.timestamp, group,
     };
-    if (req.query.detail === '1' || req.query.detail === 'true') {
-      result.production_w = data.production_w;
-      result.consumers = data.consumers;
+
+    if (req.query.field && result[req.query.field] !== undefined) {
+      return res.type('text/plain').send(String(result[req.query.field]));
     }
     res.json(result);
   } catch (err) {
