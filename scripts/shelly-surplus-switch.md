@@ -21,11 +21,55 @@ Beide Endpoints geben JSON zurück:
 {
   "surplus_w": 1500,
   "grid_power_w": -1500,
-  "heizstab_w": 3000,
-  "timestamp": "2026-03-24T14:30:00Z",
+  "production_w": 3500,
+  "heizstab_w": 800,
+  "consumers": [
+    { "id": "r9-wohnung1", "name": "Wohnung 1", "power_w": 320 }
+  ],
+  "timestamp": "2026-03-25T14:30:00Z",
   "group": "r9"
 }
 ```
+
+| Feld | Beschreibung |
+|------|-------------|
+| `surplus_w` | Überschuss in Watt (>= 0) |
+| `grid_power_w` | Netz-Leistung (negativ = Einspeisung, positiv = Bezug) |
+| `production_w` | Solar-Produktion in Watt |
+| `heizstab_w` | Heizstab-Verbrauch in Watt |
+| `consumers` | Einzelne Verbraucher mit ID, Name und aktueller Leistung |
+
+### Einzelwerte abrufen
+
+Mit dem `field` Parameter kann ein einzelner Wert als Plaintext abgerufen werden. Mit `format` lässt sich die Ausgabe formatieren:
+
+```
+GET /api/energy/surplus?field=surplus_w
+→ 1500
+
+GET /api/energy/surplus?field=grid_power_w&format={val} W
+→ -1500 W
+
+GET /api/energy/surplus?field=production_w&format={val} W
+→ 3500 W
+```
+
+### LaMetric My Data
+
+In der LaMetric App unter **My Data** eine neue Datenquelle erstellen:
+
+| Einstellung | Wert |
+|------------|------|
+| **URL** | `https://rosenweg4303.ch/api/energy/surplus?field=surplus_w&format={val} W` |
+| **Methode** | GET |
+| **Poll-Intervall** | 30 Sekunden |
+
+Weitere Ideen:
+- Solar-Produktion: `?field=production_w&format={val} W`
+- Netz (Bezug/Einspeisung): `?field=grid_power_w&format={val} W`
+- Heizstab: `?field=heizstab_w&format={val} W`
+
+---
 
 ## Installation
 
@@ -43,7 +87,7 @@ Im Script die `CONFIG`-Werte anpassen:
 
 ```javascript
 let CONFIG = {
-  url: "http://rosenweg.net/api/energy/surplus",
+  url: "http://rosenweg4303.ch/api/energy/surplus",
   check_interval: 15,   // Sekunden zwischen Checks
   on_threshold: 1000,   // Watt Überschuss zum Einschalten
   off_power: 10,        // Watt unter dem abgeschaltet wird
@@ -78,7 +122,7 @@ let CONFIG = {
 
 - Shelly Gen2 Gerät (1PM, 2PM, Plus 1PM, etc.)
 - Firmware >= 1.0.0
-- Shelly muss `rosenweg.net` erreichen können (DNS + Internet oder lokales Netz)
+- Shelly muss `rosenweg4303.ch` erreichen können (DNS + Internet oder lokales Netz)
 
 ## Typische Anwendungsfälle
 
