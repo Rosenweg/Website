@@ -643,9 +643,12 @@
                     <input type="text" value="${esc(kontakt.name || '')}" placeholder="Name" class="w-full px-3 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 kontakt-name" />
                     <div class="grid grid-cols-2 gap-2">
                         <input type="email" value="${esc(kontakt.email || '')}" placeholder="E-Mail" class="w-full px-3 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 kontakt-email" />
-                        <input type="text" value="${esc(kontakt.telefon || '')}" placeholder="Telefon" class="w-full px-3 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 kontakt-telefon" />
+                        <input type="tel" value="${esc(kontakt.telefon || '')}" placeholder="+41 79 123 45 67" class="w-full px-3 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 kontakt-telefon" onblur="formatPhone(this)" />
                     </div>
-                    <input type="text" value="${esc(kontakt.adresse || '')}" placeholder="Adresse (Strasse, PLZ Ort)" class="w-full px-3 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 kontakt-adresse" />
+                    <div class="relative">
+                        <input type="text" value="${esc(kontakt.adresse || '')}" placeholder="Adresse eingeben..." class="w-full px-3 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 kontakt-adresse" oninput="searchAddress(this)" autocomplete="off" />
+                        <div class="adresse-dropdown hidden absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto"></div>
+                    </div>
                 </div>
             </div>`;
         }
@@ -670,6 +673,57 @@
             const colorMap = { green: 'border-green-300 bg-green-50', blue: 'border-blue-300 bg-blue-50', purple: 'border-purple-300 bg-purple-50', teal: 'border-teal-300 bg-teal-50', gray: 'border-gray-300 bg-gray-50' };
             Object.values(colorMap).forEach(cls => cls.split(' ').forEach(c => card.classList.remove(c)));
             (colorMap[info.color] || colorMap.gray).split(' ').forEach(c => card.classList.add(c));
+        }
+
+        // ── Telefon-Formatierung (CH) ──
+        function formatPhone(input) {
+            let val = input.value.replace(/[^\d+]/g, '');
+            if (!val) return;
+            // 07X... → +417X...
+            if (val.startsWith('0') && !val.startsWith('00')) val = '+41' + val.slice(1);
+            // 41... ohne + → +41...
+            if (val.startsWith('41') && !val.startsWith('+')) val = '+' + val;
+            // 004X → +4X
+            if (val.startsWith('00')) val = '+' + val.slice(2);
+            // Formatieren: +41 XX XXX XX XX
+            const m = val.match(/^\+41(\d{2})(\d{3})(\d{2})(\d{2})$/);
+            if (m) {
+                input.value = `+41 ${m[1]} ${m[2]} ${m[3]} ${m[4]}`;
+            } else {
+                // Ausländische oder andere Formate: mindestens Leerzeichen nach Ländervorwahl
+                const fm = val.match(/^\+(\d{2,3})(\d+)$/);
+                if (fm) input.value = `+${fm[1]} ${fm[2].replace(/(\d{3})(?=\d)/g, '$1 ')}`;
+            }
+        }
+
+        // ── Adress-Autocomplete (geo.admin.ch) ──
+        let addrSearchTimer = null;
+        function searchAddress(input) {
+            const dropdown = input.parentElement.querySelector('.adresse-dropdown');
+            const query = input.value.trim();
+            clearTimeout(addrSearchTimer);
+            if (query.length < 3) { dropdown.classList.add('hidden'); return; }
+            addrSearchTimer = setTimeout(async () => {
+                try {
+                    const url = `https://api3.geo.admin.ch/rest/services/api/SearchServer?searchText=${encodeURIComponent(query)}&type=locations&origins=address&limit=6`;
+                    const resp = await fetch(url);
+                    const data = await resp.json();
+                    if (!data.results?.length) { dropdown.classList.add('hidden'); return; }
+                    dropdown.innerHTML = data.results.map(r => {
+                        const label = r.attrs.label.replace(/<[^>]*>/g, '');
+                        return `<div class="px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0" data-addr="${esc(label)}" onmousedown="selectAddress(this)">${r.attrs.label}</div>`;
+                    }).join('');
+                    dropdown.classList.remove('hidden');
+                } catch(e) { dropdown.classList.add('hidden'); }
+            }, 250);
+            input.addEventListener('blur', () => setTimeout(() => dropdown.classList.add('hidden'), 200), { once: true });
+        }
+
+        function selectAddress(el) {
+            const card = el.closest('.kontakt-card');
+            const input = card.querySelector('.kontakt-adresse');
+            input.value = el.dataset.addr;
+            el.closest('.adresse-dropdown').classList.add('hidden');
         }
 
         function collectKontakte() {
