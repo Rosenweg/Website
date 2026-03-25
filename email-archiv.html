@@ -105,9 +105,7 @@
                             <div id="detail-attachments-list" class="flex flex-wrap gap-2"></div>
                         </div>
                         <!-- Body -->
-                        <div class="p-4">
-                            <iframe id="detail-body" sandbox="" class="w-full border-0" style="min-height: 300px;"></iframe>
-                        </div>
+                        <div id="detail-body" class="p-4 prose prose-sm max-w-none text-sm text-gray-800 overflow-auto" style="min-height: 100px; max-height: 70vh;"></div>
                         <!-- Actions -->
                         <div id="detail-actions" class="p-4 border-t flex items-center justify-between">
                             <div id="detail-deletion-info" class="text-sm text-amber-600 hidden"></div>
@@ -293,14 +291,19 @@
             document.getElementById('detail-to').textContent = email.to_addresses || '-';
             document.getElementById('detail-date').textContent = formatDate(email.email_date);
 
-            // Body in sandboxed iframe
-            const iframe = document.getElementById('detail-body');
-            const content = email.html_body || `<pre style="font-family:sans-serif;white-space:pre-wrap;">${esc(email.text_body || '')}</pre>`;
-            iframe.srcdoc = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:sans-serif;font-size:14px;color:#333;margin:8px;}</style></head><body>${content}</body></html>`;
-            // Auto-resize iframe
-            iframe.onload = () => {
-                try { iframe.style.height = (iframe.contentDocument.body.scrollHeight + 20) + 'px'; } catch {}
-            };
+            // Body - sanitize HTML (strip scripts, event handlers, iframes)
+            const bodyDiv = document.getElementById('detail-body');
+            if (email.html_body) {
+                const sanitized = email.html_body
+                    .replace(/<script[\s\S]*?<\/script>/gi, '')
+                    .replace(/<iframe[\s\S]*?<\/iframe>/gi, '')
+                    .replace(/\son\w+\s*=\s*["'][^"']*["']/gi, '')
+                    .replace(/\son\w+\s*=\s*[^\s>]*/gi, '')
+                    .replace(/javascript\s*:/gi, '');
+                bodyDiv.innerHTML = sanitized;
+            } else {
+                bodyDiv.innerHTML = `<pre style="font-family:inherit;white-space:pre-wrap;margin:0;">${esc(email.text_body || '')}</pre>`;
+            }
 
             // Attachments
             const attDiv = document.getElementById('detail-attachments');
