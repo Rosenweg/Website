@@ -56,38 +56,82 @@ GET /api/energy/surplus?field=production_w&format={val} W
 
 ### LaMetric My Data DIY
 
-Fuer die LaMetric App **My Data DIY** gibt es einen dedizierten Endpoint der das richtige JSON-Format (`frames`) direkt liefert:
+Die LaMetric App **My Data DIY** zeigt beliebige Daten von einer URL auf dem LaMetric Time Display an. Unser `/api/energy/lametric` Endpoint liefert die Daten direkt im richtigen Format.
 
+#### Beispiel 1: Solar-Ueberschuss auf dem LaMetric anzeigen
+
+Zeigt den aktuellen Ueberschuss und die Solar-Produktion als abwechselnde Frames an.
+
+**Schritt 1 — App installieren:**
+1. LaMetric Time App auf dem Smartphone oeffnen
+2. Im Store nach **My Data DIY** suchen und installieren
+3. Die App erscheint in der App-Liste des LaMetric
+
+**Schritt 2 — Datenquelle einrichten:**
+1. In der LaMetric App auf **My Data DIY** tippen → **Settings**
+2. Bei **URL** eingeben:
+   ```
+   https://rosenweg4303.ch/api/energy/lametric
+   ```
+3. **Poll frequency**: `30 seconds` (oder nach Wunsch)
+4. **Save** tippen
+
+**Ergebnis:** Das LaMetric wechselt zwischen zwei Anzeigen:
+- Frame 1: `⚡ 1.5 kW` (Ueberschuss)
+- Frame 2: `☀ 3.5 kW` (Solar-Produktion)
+
+Werte unter 1000W werden als `850 W` angezeigt, darueber als `1.5 kW`.
+
+#### Beispiel 2: Drei Werte anzeigen (Ueberschuss + Solar + Netz)
+
+**URL:**
 ```
-GET /api/energy/lametric
+https://rosenweg4303.ch/api/energy/lametric?fields=surplus_w,production_w,grid_power_w
 ```
 
-**Einrichtung in der LaMetric App:**
+**Ergebnis:** Drei rotierende Frames:
+- Frame 1: `⚡ 1.5 kW` (Ueberschuss — was ins Netz geht)
+- Frame 2: `☀ 3.5 kW` (Solar-Produktion)
+- Frame 3: `🔌 -1.5 kW` (Netz — negativ = Einspeisung, positiv = Bezug)
 
-1. LaMetric App oeffnen → **My Data DIY** installieren
-2. Datenquelle konfigurieren:
+#### Beispiel 3: Nur Solar-Produktion
 
-| Einstellung | Wert |
-|------------|------|
-| **URL** | `https://rosenweg4303.ch/api/energy/lametric` |
-| **Methode** | GET |
-| **Poll-Intervall** | 30 Sekunden |
+**URL:**
+```
+https://rosenweg4303.ch/api/energy/lametric?fields=production_w
+```
 
-Standardmaessig werden **Ueberschuss** und **Solar-Produktion** angezeigt (mit automatischer kW/W Formatierung).
+**Ergebnis:** Ein einzelner Frame: `☀ 3.5 kW`
 
-**Angezeigte Werte anpassen** mit dem `fields` Parameter:
+#### Beispiel 4: Verfuegbarer Ueberschuss (inkl. Heizstab)
 
-| URL | Anzeige |
-|-----|---------|
-| `/api/energy/lametric` | Ueberschuss + Solar (Standard) |
-| `/api/energy/lametric?fields=surplus_w` | Nur Ueberschuss |
-| `/api/energy/lametric?fields=surplus_w,production_w,grid_power_w` | Ueberschuss + Solar + Netz |
-| `/api/energy/lametric?fields=production_w,heizstab_w` | Solar + Heizstab |
-| `/api/energy/lametric?fields=surplus_available_w,production_w` | Verfuegbarer Ueberschuss + Solar |
+Zeigt was verfuegbar waere, wenn der Heizstab abgeschaltet wuerde:
 
-Verfuegbare Felder: `surplus_w`, `surplus_available_w`, `production_w`, `grid_power_w`, `heizstab_w`
+**URL:**
+```
+https://rosenweg4303.ch/api/energy/lametric?fields=surplus_available_w,heizstab_w
+```
 
-**Beispiel-Response:**
+**Ergebnis:**
+- Frame 1: `⚡ 2.3 kW` (Verfuegbarer Ueberschuss)
+- Frame 2: `🔥 800 W` (Heizstab-Verbrauch)
+
+#### Verfuegbare Felder
+
+| Feld | Icon | Beschreibung |
+|------|------|-------------|
+| `surplus_w` | ⚡ | Netto-Ueberschuss (was ins Netz geht) |
+| `surplus_available_w` | ⚡ | Verfuegbarer Ueberschuss (inkl. Heizstab) |
+| `production_w` | ☀ | Solar-Produktion |
+| `grid_power_w` | 🔌 | Netz-Leistung (negativ = Einspeisung) |
+| `heizstab_w` | 🔥 | Heizstab-Verbrauch |
+
+Mehrere Felder mit Komma trennen: `?fields=surplus_w,production_w`
+
+#### API-Response Format
+
+Der Endpoint liefert das Standard LaMetric `frames`-Format:
+
 ```json
 {
   "frames": [
@@ -97,12 +141,14 @@ Verfuegbare Felder: `surplus_w`, `surplus_available_w`, `production_w`, `grid_po
 }
 ```
 
-**Alternative: Plaintext fuer einfache Anzeige**
+#### Alternative: Plaintext fuer andere Displays
 
-Falls nur ein einzelner Wert benoetigt wird:
-- Ueberschuss: `?field=surplus_w&format={val} W`
-- Solar: `?field=production_w&format={val} W`
-- Netz: `?field=grid_power_w&format={val} W`
+Falls nur ein einzelner Wert als Text benoetigt wird (z.B. fuer andere IoT-Geraete):
+```
+/api/energy/surplus?field=surplus_w              → 1500
+/api/energy/surplus?field=surplus_w&format={val} W   → 1500 W
+/api/energy/surplus?field=production_w&format={val} W → 3500 W
+```
 
 ---
 
