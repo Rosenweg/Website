@@ -73,20 +73,34 @@ GET /api/energy/surplus?field=production_w&format={val} W
 → 3500 W
 ```
 
-### LaMetric My Data
+### LaMetric My Data DIY
 
-In der LaMetric App unter **My Data** eine neue Datenquelle erstellen:
+Dedizierter Endpoint fuer die LaMetric App **My Data DIY** mit korrektem `frames`-Format:
+
+```
+GET /api/energy/lametric
+GET /api/energy/lametric?fields=surplus_w,production_w,grid_power_w
+```
 
 | Einstellung | Wert |
 |------------|------|
-| **URL** | `https://rosenweg4303.ch/api/energy/surplus?field=surplus_w&format={val} W` |
+| **URL** | `https://rosenweg4303.ch/api/energy/lametric` |
 | **Methode** | GET |
 | **Poll-Intervall** | 30 Sekunden |
 
-Weitere Ideen:
-- Solar-Produktion: `?field=production_w&format={val} W`
-- Netz (Bezug/Einspeisung): `?field=grid_power_w&format={val} W`
-- Heizstab: `?field=heizstab_w&format={val} W`
+Verfuegbare Felder fuer `fields` Parameter: `surplus_w`, `surplus_available_w`, `production_w`, `grid_power_w`, `heizstab_w`
+
+Beispiel-Response:
+```json
+{
+  "frames": [
+    { "text": "1.5 kW", "icon": "i23396" },
+    { "text": "3.5 kW", "icon": "i3069" }
+  ]
+}
+```
+
+Werte werden automatisch als kW (>= 1000) oder W (< 1000) formatiert.
 
 ### Shelly Ueberschuss-Steuerung
 

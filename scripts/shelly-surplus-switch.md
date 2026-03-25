@@ -54,20 +54,55 @@ GET /api/energy/surplus?field=production_w&format={val} W
 → 3500 W
 ```
 
-### LaMetric My Data
+### LaMetric My Data DIY
 
-In der LaMetric App unter **My Data** eine neue Datenquelle erstellen:
+Fuer die LaMetric App **My Data DIY** gibt es einen dedizierten Endpoint der das richtige JSON-Format (`frames`) direkt liefert:
+
+```
+GET /api/energy/lametric
+```
+
+**Einrichtung in der LaMetric App:**
+
+1. LaMetric App oeffnen → **My Data DIY** installieren
+2. Datenquelle konfigurieren:
 
 | Einstellung | Wert |
 |------------|------|
-| **URL** | `https://rosenweg4303.ch/api/energy/surplus?field=surplus_w&format={val} W` |
+| **URL** | `https://rosenweg4303.ch/api/energy/lametric` |
 | **Methode** | GET |
 | **Poll-Intervall** | 30 Sekunden |
 
-Weitere Ideen:
-- Solar-Produktion: `?field=production_w&format={val} W`
-- Netz (Bezug/Einspeisung): `?field=grid_power_w&format={val} W`
-- Heizstab: `?field=heizstab_w&format={val} W`
+Standardmaessig werden **Ueberschuss** und **Solar-Produktion** angezeigt (mit automatischer kW/W Formatierung).
+
+**Angezeigte Werte anpassen** mit dem `fields` Parameter:
+
+| URL | Anzeige |
+|-----|---------|
+| `/api/energy/lametric` | Ueberschuss + Solar (Standard) |
+| `/api/energy/lametric?fields=surplus_w` | Nur Ueberschuss |
+| `/api/energy/lametric?fields=surplus_w,production_w,grid_power_w` | Ueberschuss + Solar + Netz |
+| `/api/energy/lametric?fields=production_w,heizstab_w` | Solar + Heizstab |
+| `/api/energy/lametric?fields=surplus_available_w,production_w` | Verfuegbarer Ueberschuss + Solar |
+
+Verfuegbare Felder: `surplus_w`, `surplus_available_w`, `production_w`, `grid_power_w`, `heizstab_w`
+
+**Beispiel-Response:**
+```json
+{
+  "frames": [
+    { "text": "1.5 kW", "icon": "i23396" },
+    { "text": "3.5 kW", "icon": "i3069" }
+  ]
+}
+```
+
+**Alternative: Plaintext fuer einfache Anzeige**
+
+Falls nur ein einzelner Wert benoetigt wird:
+- Ueberschuss: `?field=surplus_w&format={val} W`
+- Solar: `?field=production_w&format={val} W`
+- Netz: `?field=grid_power_w&format={val} W`
 
 ---
 
