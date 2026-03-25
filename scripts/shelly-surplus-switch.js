@@ -7,9 +7,12 @@
 // Endpoints:
 //   /api/energy/surplus           — Netto (was ins Netz geht)
 //   /api/energy/surplus-available — Inkl. Heizstab-Verbrauch (was verfügbar wäre)
+//
+// Einzelwerte: ?field=surplus_w  oder  ?field=grid_power_w&format={val} W
+// Doku: wiki/energie-api.md
 
 let CONFIG = {
-  url: "http://rosenweg.net/api/energy/surplus",
+  url: "http://rosenweg4303.ch/api/energy/surplus",
   check_interval: 15,   // Sekunden
   on_threshold: 1000,   // Watt Überschuss zum Einschalten
   off_power: 10,        // Watt am Ausgang unter dem abgeschaltet wird
