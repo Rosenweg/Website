@@ -1175,27 +1175,47 @@ app.get('/api/energy/dashboard', async (req, res) => {
 
 // ─── Surplus endpoints (open, no auth — for Shelly/IoT devices) ─────
 
+// Helper: collect all live values for a group
+async function getGroupLiveData(group) {
+  const meters = await pool.query(
+    "SELECT id, name, category FROM meters WHERE group_id = $1 AND active = true", [group]);
+
+  let grid_w = null, production_w = null, heizstab_w = null, grid_ts = null;
+  const consumers = [];
+
+  for (const m of meters.rows) {
+    const live = latestReadings.get(m.id);
+    const power = live ? Math.round(live.power_w || 0) : 0;
+    if (m.category === 'grid') { grid_w = power; grid_ts = live?.ts; }
+    else if (m.category === 'production') { production_w = Math.abs(power); }
+    else if (m.id.includes('heizstab')) { heizstab_w = power; }
+    else if (m.category === 'consumer') { consumers.push({ id: m.id, name: m.name, power_w: power }); }
+  }
+
+  return { grid_w, production_w, heizstab_w, consumers, timestamp: grid_ts };
+}
+
 // Surplus without Heizstab: actual grid export (what's going to the grid right now)
 app.get('/api/energy/surplus', async (req, res) => {
   try {
     const group = req.query.group || 'r9';
-    const gridMeter = await pool.query(
-      "SELECT id FROM meters WHERE group_id = $1 AND category = 'grid' AND active = true LIMIT 1", [group]);
-    if (gridMeter.rows.length === 0) return res.status(404).json({ error: `No grid meter for group ${group}` });
+    const data = await getGroupLiveData(group);
+    if (data.grid_w === null) return res.status(503).json({ error: 'No live data' });
 
-    const gridId = gridMeter.rows[0].id;
-    const gridLive = latestReadings.get(gridId);
-    if (!gridLive) return res.status(503).json({ error: 'No live data' });
-
-    // Negative power_w on grid = export = surplus
-    const surplus_w = Math.max(0, -(gridLive.power_w || 0));
-    res.json({
-      surplus_w: Math.round(surplus_w),
-      grid_power_w: Math.round(gridLive.power_w || 0),
-      timestamp: gridLive.ts,
+    const surplus_w = Math.max(0, -data.grid_w);
+    const result = {
+      surplus_w: surplus_w,
+      grid_power_w: data.grid_w,
+      timestamp: data.timestamp,
       group,
-      note: 'Netto-Überschuss (ohne Heizstab-Korrektur)'
-    });
+    };
+    // Include detail values if requested
+    if (req.query.detail === '1' || req.query.detail === 'true') {
+      result.production_w = data.production_w;
+      result.heizstab_w = data.heizstab_w;
+      result.consumers = data.consumers;
+    }
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1205,29 +1225,23 @@ app.get('/api/energy/surplus', async (req, res) => {
 app.get('/api/energy/surplus-available', async (req, res) => {
   try {
     const group = req.query.group || 'r9';
-    const heizstabId = req.query.heizstab || `${group}-heizstab`;
+    const data = await getGroupLiveData(group);
+    if (data.grid_w === null) return res.status(503).json({ error: 'No live data' });
 
-    const gridMeter = await pool.query(
-      "SELECT id FROM meters WHERE group_id = $1 AND category = 'grid' AND active = true LIMIT 1", [group]);
-    if (gridMeter.rows.length === 0) return res.status(404).json({ error: `No grid meter for group ${group}` });
-
-    const gridId = gridMeter.rows[0].id;
-    const gridLive = latestReadings.get(gridId);
-    if (!gridLive) return res.status(503).json({ error: 'No live data' });
-
-    const heizstabLive = latestReadings.get(heizstabId);
-    const heizstab_w = heizstabLive ? Math.max(0, heizstabLive.power_w || 0) : 0;
-
-    // Surplus = what goes to grid + what the Heizstab currently consumes
-    const surplus_w = Math.max(0, -(gridLive.power_w || 0)) + heizstab_w;
-    res.json({
-      surplus_w: Math.round(surplus_w),
-      grid_power_w: Math.round(gridLive.power_w || 0),
-      heizstab_w: Math.round(heizstab_w),
-      timestamp: gridLive.ts,
+    const heizstab = data.heizstab_w || 0;
+    const surplus_w = Math.max(0, -data.grid_w) + heizstab;
+    const result = {
+      surplus_w: surplus_w,
+      grid_power_w: data.grid_w,
+      heizstab_w: heizstab,
+      timestamp: data.timestamp,
       group,
-      note: 'Verfügbarer Überschuss (inkl. Heizstab-Verbrauch)'
-    });
+    };
+    if (req.query.detail === '1' || req.query.detail === 'true') {
+      result.production_w = data.production_w;
+      result.consumers = data.consumers;
+    }
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
