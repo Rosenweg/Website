@@ -1246,6 +1246,44 @@ app.get('/api/energy/surplus-available', async (req, res) => {
   }
 });
 
+// ─── LaMetric My Data DIY endpoint ──────────────────────────────────
+// Returns frames in LaMetric JSON format for the "My Data DIY" app
+// Usage: /api/energy/lametric?fields=surplus_w,production_w,grid_power_w
+app.get('/api/energy/lametric', async (req, res) => {
+  try {
+    const group = req.query.group || 'r9';
+    const data = await getGroupLiveData(group);
+    if (data.grid_w === null) return res.status(503).json({ error: 'No live data' });
+
+    const surplus_w = Math.max(0, -data.grid_w);
+    const heizstab = data.heizstab_w || 0;
+    const surplus_available = surplus_w + heizstab;
+
+    const values = {
+      surplus_w: { val: surplus_w, icon: 'i23396', label: 'Surplus' },
+      surplus_available_w: { val: surplus_available, icon: 'i23396', label: 'Verfügbar' },
+      production_w: { val: data.production_w || 0, icon: 'i3069', label: 'Solar' },
+      grid_power_w: { val: data.grid_w, icon: 'i2422', label: 'Netz' },
+      heizstab_w: { val: heizstab, icon: 'i2056', label: 'Heizstab' },
+    };
+
+    // Which fields to show (default: surplus + production)
+    const fields = (req.query.fields || 'surplus_w,production_w').split(',').filter(f => values[f]);
+
+    const frames = fields.map(f => {
+      const v = values[f];
+      const display = Math.abs(v.val) >= 1000
+        ? (v.val / 1000).toFixed(1) + ' kW'
+        : v.val + ' W';
+      return { text: display, icon: v.icon };
+    });
+
+    res.json({ frames });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Comparison endpoint ────────────────────────────────────────────
 app.get('/api/energy/compare', async (req, res) => {
   try {
