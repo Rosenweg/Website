@@ -2204,6 +2204,15 @@ async function pollGmailForVerteiler() {
             }
           }
 
+          // ── DMARC reports: move to dedicated folder for /api/dmarc/reports ──
+          if (verteilerAddress === `dmarc@${VERTEILER_DOMAIN}`) {
+            try {
+              try { await client.mailboxCreate('DMARC'); } catch {}
+              await client.messageMove(uid, 'DMARC', { uid: true });
+            } catch { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); }
+            continue;
+          }
+
           // ── Email Archive: intercept archiv@ before verteiler check ──
           if (verteilerAddress === `archiv@${VERTEILER_DOMAIN}`) {
             // Dedup against email_archive
@@ -3218,14 +3227,18 @@ app.get('/api/dmarc/reports', authMiddleware, adminOnly, async (req, res) => {
       auth: { user: IMAP_USER, pass: IMAP_PASS }, logger: false
     });
     await client.connect();
-    await client.mailboxOpen('INBOX');
+
+    // Try DMARC folder first (IMAP poller moves dmarc@ mails here), fallback to INBOX
+    let folderOpened = false;
+    try { await client.mailboxOpen('DMARC'); folderOpened = true; } catch {}
+    if (!folderOpened) await client.mailboxOpen('INBOX');
 
     // Find DMARC report emails
     const uids = [];
     for await (const msg of client.fetch('1:*', { envelope: true })) {
       const subj = (msg.envelope.subject || '').toLowerCase();
       const from = msg.envelope.from?.[0]?.address || '';
-      if (subj.includes('report domain') || subj.includes('dmarc') || from.includes('dmarc')) {
+      if (folderOpened || subj.includes('report domain') || subj.includes('dmarc') || from.includes('dmarc')) {
         uids.push({ uid: msg.uid, subject: msg.envelope.subject, from, date: msg.envelope.date });
       }
     }
