@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E-Mail Archiv - Rosenweg</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/nav.js?v=2"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script>RosenwegNav.init({ active: 'archiv' });</script>
+
+    <!-- Header -->
+    <section class="bg-gradient-to-r from-blue-600 to-blue-800 text-white py-12">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h1 class="text-3xl font-bold mb-2">E-Mail Archiv</h1>
+            <p class="text-blue-200">Archivierte E-Mails einsehen und verwalten</p>
+        </div>
+    </section>
+
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- Loading -->
+        <div id="loading" class="text-center py-12">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+            <p class="mt-3 text-gray-500 text-sm">Laden...</p>
+        </div>
+
+        <!-- Login -->
+        <div id="step-login" class="hidden text-center py-12">
+            <div class="bg-white rounded-xl shadow p-8 max-w-md mx-auto">
+                <h2 class="text-xl font-semibold mb-4">Anmeldung erforderlich</h2>
+                <p class="text-gray-600 mb-6">Bitte melde dich an, um das E-Mail-Archiv zu sehen.</p>
+                <div id="sso-login-container"></div>
+            </div>
+        </div>
+
+        <!-- No access -->
+        <div id="no-access" class="hidden text-center py-12">
+            <div class="bg-white rounded-xl shadow p-8 max-w-md mx-auto">
+                <p class="text-gray-600">Kein Zugriff auf das E-Mail-Archiv.</p>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div id="main-content" class="hidden">
+            <!-- Tabs -->
+            <div class="flex mb-6 bg-white rounded-lg shadow overflow-hidden">
+                <button onclick="switchTab('archiv')" id="tab-archiv"
+                    class="flex-1 px-6 py-3 text-sm font-medium text-center border-b-2 border-blue-600 text-blue-600 bg-blue-50">
+                    Archiv
+                </button>
+                <button onclick="switchTab('loeschanfragen')" id="tab-loeschanfragen"
+                    class="flex-1 px-6 py-3 text-sm font-medium text-center border-b-2 border-transparent text-gray-500 hover:text-gray-700">
+                    Löschanträge <span id="delete-badge" class="hidden ml-1 px-2 py-0.5 text-xs bg-red-100 text-red-700 rounded-full">0</span>
+                </button>
+            </div>
+
+            <!-- Tab: Archiv -->
+            <div id="panel-archiv">
+                <!-- Search -->
+                <div class="flex gap-3 mb-4">
+                    <div class="flex-1 relative">
+                        <input type="text" id="search-input" placeholder="Suchen (Betreff, Absender)..."
+                            class="w-full pl-10 pr-4 py-2.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 bg-white"
+                            oninput="debounceSearch()">
+                        <svg class="absolute left-3 top-3 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                    </div>
+                </div>
+
+                <!-- Email list -->
+                <div id="email-list" class="space-y-2"></div>
+
+                <!-- Pagination -->
+                <div id="pagination" class="hidden flex items-center justify-between mt-6">
+                    <button onclick="changePage(-1)" id="btn-prev" class="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50 disabled:opacity-50" disabled>Zurück</button>
+                    <span id="page-info" class="text-sm text-gray-500"></span>
+                    <button onclick="changePage(1)" id="btn-next" class="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50 disabled:opacity-50" disabled>Weiter</button>
+                </div>
+
+                <!-- Email detail modal -->
+                <div id="detail-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-start justify-center pt-12 px-4 overflow-y-auto">
+                    <div class="bg-white rounded-xl shadow-2xl w-full max-w-3xl mb-12">
+                        <div class="flex items-center justify-between p-4 border-b">
+                            <h3 id="detail-subject" class="text-lg font-semibold text-gray-900 truncate pr-4"></h3>
+                            <button onclick="closeDetail()" class="text-gray-400 hover:text-gray-600 p-1">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                            </button>
+                        </div>
+                        <div class="p-4 border-b bg-gray-50 text-sm space-y-1">
+                            <div><span class="text-gray-500">Von:</span> <span id="detail-from" class="font-medium"></span></div>
+                            <div><span class="text-gray-500">An:</span> <span id="detail-to"></span></div>
+                            <div><span class="text-gray-500">Datum:</span> <span id="detail-date"></span></div>
+                        </div>
+                        <!-- Attachments -->
+                        <div id="detail-attachments" class="hidden p-4 border-b bg-blue-50">
+                            <div class="text-xs font-semibold text-gray-500 uppercase mb-2">Anhänge</div>
+                            <div id="detail-attachments-list" class="flex flex-wrap gap-2"></div>
+                        </div>
+                        <!-- Body -->
+                        <div class="p-4">
+                            <iframe id="detail-body" sandbox="" class="w-full border-0" style="min-height: 300px;"></iframe>
+                        </div>
+                        <!-- Actions -->
+                        <div id="detail-actions" class="p-4 border-t flex items-center justify-between">
+                            <div id="detail-deletion-info" class="text-sm text-amber-600 hidden"></div>
+                            <button onclick="showDeleteRequestModal()" id="btn-request-delete"
+                                class="ml-auto px-4 py-2 text-sm bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition">
+                                Löschung beantragen
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Delete request modal -->
+                <div id="delete-request-modal" class="hidden fixed inset-0 bg-black/50 z-[60] flex items-center justify-center px-4">
+                    <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+                        <h3 class="text-lg font-semibold mb-4">Löschung beantragen</h3>
+                        <p class="text-sm text-gray-600 mb-3">Eine zweite Person muss die Löschung bestätigen (4-Augen-Prinzip).</p>
+                        <textarea id="delete-reason" rows="3" placeholder="Begründung für die Löschung..."
+                            class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 mb-4"></textarea>
+                        <div id="delete-request-error" class="hidden text-sm text-red-600 mb-3"></div>
+                        <div class="flex gap-3 justify-end">
+                            <button onclick="document.getElementById('delete-request-modal').classList.add('hidden')"
+                                class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Abbrechen</button>
+                            <button onclick="submitDeleteRequest()" id="btn-submit-delete"
+                                class="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 transition">Antrag stellen</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab: Löschanträge -->
+            <div id="panel-loeschanfragen" class="hidden">
+                <div id="delete-requests-list" class="space-y-3"></div>
+                <div id="no-delete-requests" class="hidden text-center py-12 text-gray-500">
+                    <p>Keine offenen Löschanträge.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    let currentUser = null;
+    let currentPage = 1;
+    let currentEmailId = null;
+    let searchTimer = null;
+
+    const esc = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '';
+
+    function formatDate(d) {
+        if (!d) return '-';
+        const dt = new Date(d);
+        return dt.toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit', year: 'numeric' }) +
+            ' ' + dt.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    // ── Auth ──
+    window.addEventListener('DOMContentLoaded', async function() {
+        try {
+            const user = await AuthentikAuth.init({
+                requireAuth: false,
+                onLogin(user) {
+                    currentUser = user;
+                    document.getElementById('loading').classList.add('hidden');
+                    const groups = user.groups || [];
+                    const hasAccess = groups.some(g => {
+                        const gl = g.toLowerCase();
+                        return gl === 'technik' || gl === 'präsident' || gl === 'praesident';
+                    }) || groups.some(g => g.toLowerCase().includes('ausschuss'));
+
+                    if (!hasAccess) {
+                        document.getElementById('no-access').classList.remove('hidden');
+                        return;
+                    }
+
+                    document.getElementById('main-content').classList.remove('hidden');
+                    loadArchive();
+                    loadDeleteRequests();
+                },
+            });
+
+            document.getElementById('loading').classList.add('hidden');
+            if (!user) {
+                document.getElementById('step-login').classList.remove('hidden');
+                AuthentikAuth.createLoginButton('sso-login-container');
+            }
+        } catch (err) {
+            console.error('Init error:', err);
+            document.getElementById('loading').innerHTML = '<p class="text-red-500">Fehler beim Laden.</p>';
+        }
+    });
+
+    // ── Tabs ──
+    function switchTab(tab) {
+        ['archiv', 'loeschanfragen'].forEach(t => {
+            const panel = document.getElementById(`panel-${t}`);
+            const btn = document.getElementById(`tab-${t}`);
+            if (panel) panel.classList.toggle('hidden', tab !== t);
+            if (btn) {
+                btn.classList.toggle('border-blue-600', tab === t);
+                btn.classList.toggle('text-blue-600', tab === t);
+                btn.classList.toggle('bg-blue-50', tab === t);
+                btn.classList.toggle('border-transparent', tab !== t);
+                btn.classList.toggle('text-gray-500', tab !== t);
+            }
+        });
+        if (tab === 'loeschanfragen') loadDeleteRequests();
+    }
+
+    // ── Archive List ──
+    function debounceSearch() {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => { currentPage = 1; loadArchive(); }, 300);
+    }
+
+    async function loadArchive() {
+        const search = document.getElementById('search-input').value.trim();
+        try {
+            const res = await AuthentikAuth.apiFetch(`/api/email-archive?search=${encodeURIComponent(search)}&page=${currentPage}&limit=20`);
+            const data = await res.json();
+            renderEmailList(data);
+        } catch (err) {
+            console.error('Load archive error:', err);
+        }
+    }
+
+    function renderEmailList(data) {
+        const list = document.getElementById('email-list');
+        if (!data.emails?.length) {
+            list.innerHTML = '<div class="text-center py-12 text-gray-500">Keine E-Mails im Archiv.</div>';
+            document.getElementById('pagination').classList.add('hidden');
+            return;
+        }
+
+        list.innerHTML = data.emails.map(e => {
+            const attachCount = (e.attachments || []).length;
+            const isPending = e.deletion_status === 'pending';
+            return `
+            <div onclick="openEmail(${e.id})" class="bg-white rounded-lg border p-4 cursor-pointer hover:shadow-md transition ${isPending ? 'border-amber-300 bg-amber-50' : ''}">
+                <div class="flex items-start justify-between gap-4">
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-2 mb-1">
+                            <span class="font-medium text-sm text-gray-900 truncate">${esc(e.from_name || e.from_email)}</span>
+                            ${isPending ? '<span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Löschantrag</span>' : ''}
+                        </div>
+                        <div class="text-sm text-gray-800 truncate">${esc(e.subject)}</div>
+                    </div>
+                    <div class="flex items-center gap-3 flex-shrink-0">
+                        ${attachCount > 0 ? `<span class="text-xs text-gray-400" title="${attachCount} Anhänge">
+                            <svg class="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
+                            ${attachCount}</span>` : ''}
+                        <span class="text-xs text-gray-400 whitespace-nowrap">${formatDate(e.email_date)}</span>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+
+        // Pagination
+        const pag = document.getElementById('pagination');
+        if (data.pages > 1) {
+            pag.classList.remove('hidden');
+            document.getElementById('page-info').textContent = `Seite ${data.page} von ${data.pages} (${data.total} E-Mails)`;
+            document.getElementById('btn-prev').disabled = data.page <= 1;
+            document.getElementById('btn-next').disabled = data.page >= data.pages;
+        } else {
+            pag.classList.add('hidden');
+        }
+    }
+
+    function changePage(delta) {
+        currentPage += delta;
+        loadArchive();
+    }
+
+    // ── Email Detail ──
+    async function openEmail(id) {
+        currentEmailId = id;
+        try {
+            const res = await AuthentikAuth.apiFetch(`/api/email-archive/${id}`);
+            const email = await res.json();
+            if (!res.ok) return;
+
+            document.getElementById('detail-subject').textContent = email.subject || '(kein Betreff)';
+            document.getElementById('detail-from').textContent = `${email.from_name || ''} <${email.from_email}>`.trim();
+            document.getElementById('detail-to').textContent = email.to_addresses || '-';
+            document.getElementById('detail-date').textContent = formatDate(email.email_date);
+
+            // Body in sandboxed iframe
+            const iframe = document.getElementById('detail-body');
+            const content = email.html_body || `<pre style="font-family:sans-serif;white-space:pre-wrap;">${esc(email.text_body || '')}</pre>`;
+            iframe.srcdoc = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:sans-serif;font-size:14px;color:#333;margin:8px;}</style></head><body>${content}</body></html>`;
+            // Auto-resize iframe
+            iframe.onload = () => {
+                try { iframe.style.height = (iframe.contentDocument.body.scrollHeight + 20) + 'px'; } catch {}
+            };
+
+            // Attachments
+            const attDiv = document.getElementById('detail-attachments');
+            const attList = document.getElementById('detail-attachments-list');
+            const attachments = email.attachments || [];
+            if (attachments.length > 0) {
+                attDiv.classList.remove('hidden');
+                attList.innerHTML = attachments.map(a => {
+                    const sizeKB = Math.round((a.size || 0) / 1024);
+                    return `<a href="/api/email-archive/${id}/attachment/${encodeURIComponent(a.stored_name)}"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border rounded-lg text-sm hover:bg-blue-50 transition" download>
+                        <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                        ${esc(a.filename)} <span class="text-gray-400">(${sizeKB} KB)</span>
+                    </a>`;
+                }).join('');
+            } else {
+                attDiv.classList.add('hidden');
+            }
+
+            // Deletion state
+            const deleteBtn = document.getElementById('btn-request-delete');
+            const deletionInfo = document.getElementById('detail-deletion-info');
+            if (email.deletion_request_status === 'pending') {
+                deleteBtn.classList.add('hidden');
+                deletionInfo.classList.remove('hidden');
+                const isOwnRequest = email.requested_by === currentUser?.email;
+                deletionInfo.textContent = isOwnRequest
+                    ? 'Dein Löschantrag wartet auf Bestätigung durch eine zweite Person.'
+                    : `Löschantrag von ${email.requested_by} - Grund: ${email.reason}`;
+            } else {
+                deleteBtn.classList.remove('hidden');
+                deletionInfo.classList.add('hidden');
+            }
+
+            document.getElementById('detail-modal').classList.remove('hidden');
+        } catch (err) {
+            console.error('Open email error:', err);
+        }
+    }
+
+    function closeDetail() {
+        document.getElementById('detail-modal').classList.add('hidden');
+        currentEmailId = null;
+    }
+
+    // Close modal on backdrop click
+    document.addEventListener('click', (e) => {
+        if (e.target.id === 'detail-modal') closeDetail();
+        if (e.target.id === 'delete-request-modal') e.target.classList.add('hidden');
+    });
+
+    // ── Delete Request ──
+    function showDeleteRequestModal() {
+        document.getElementById('delete-reason').value = '';
+        document.getElementById('delete-request-error').classList.add('hidden');
+        document.getElementById('delete-request-modal').classList.remove('hidden');
+    }
+
+    async function submitDeleteRequest() {
+        const reason = document.getElementById('delete-reason').value.trim();
+        if (!reason) {
+            const err = document.getElementById('delete-request-error');
+            err.textContent = 'Bitte Begründung eingeben.';
+            err.classList.remove('hidden');
+            return;
+        }
+
+        const btn = document.getElementById('btn-submit-delete');
+        btn.disabled = true;
+        btn.textContent = 'Wird gesendet...';
+
+        try {
+            const res = await AuthentikAuth.apiFetch(`/api/email-archive/${currentEmailId}/delete-request`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reason }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error);
+
+            document.getElementById('delete-request-modal').classList.add('hidden');
+            closeDetail();
+            loadArchive();
+            loadDeleteRequests();
+        } catch (err) {
+            const errDiv = document.getElementById('delete-request-error');
+            errDiv.textContent = err.message;
+            errDiv.classList.remove('hidden');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Antrag stellen';
+        }
+    }
+
+    // ── Delete Requests Tab ──
+    async function loadDeleteRequests() {
+        try {
+            const res = await AuthentikAuth.apiFetch('/api/email-archive/delete-requests');
+            const data = await res.json();
+            const requests = data.requests || [];
+
+            // Update badge
+            const badge = document.getElementById('delete-badge');
+            if (requests.length > 0) {
+                badge.textContent = requests.length;
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+
+            const list = document.getElementById('delete-requests-list');
+            const empty = document.getElementById('no-delete-requests');
+
+            if (requests.length === 0) {
+                list.innerHTML = '';
+                empty.classList.remove('hidden');
+                return;
+            }
+            empty.classList.add('hidden');
+
+            list.innerHTML = requests.map(r => {
+                const isOwnRequest = r.requested_by === currentUser?.email;
+                return `
+                <div class="bg-white rounded-lg border border-amber-200 p-4">
+                    <div class="flex items-start justify-between gap-4">
+                        <div class="min-w-0 flex-1">
+                            <div class="font-medium text-sm text-gray-900 mb-1">${esc(r.subject)}</div>
+                            <div class="text-xs text-gray-500 mb-2">Von: ${esc(r.from_name || r.from_email)} | ${formatDate(r.email_date)}</div>
+                            <div class="text-sm text-gray-700 mb-1"><span class="font-medium">Löschantrag von:</span> ${esc(r.requested_by)}</div>
+                            <div class="text-sm text-gray-600"><span class="font-medium">Begründung:</span> ${esc(r.reason)}</div>
+                            <div class="text-xs text-gray-400 mt-1">Beantragt am ${formatDate(r.requested_at)}</div>
+                        </div>
+                        <div class="flex gap-2 flex-shrink-0">
+                            ${isOwnRequest
+                                ? '<span class="text-xs text-gray-400 italic py-2">Eigener Antrag</span>'
+                                : `<button onclick="confirmDelete(${r.archive_id}, 'reject')"
+                                    class="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition">Ablehnen</button>
+                                   <button onclick="confirmDelete(${r.archive_id}, 'confirm')"
+                                    class="px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 transition">Bestätigen</button>`}
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+        } catch (err) {
+            console.error('Load delete requests error:', err);
+        }
+    }
+
+    async function confirmDelete(archiveId, action) {
+        const label = action === 'confirm' ? 'Löschung endgültig bestätigen?' : 'Löschantrag ablehnen?';
+        if (!confirm(label)) return;
+
+        try {
+            const res = await AuthentikAuth.apiFetch(`/api/email-archive/${archiveId}/confirm-delete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error);
+
+            loadDeleteRequests();
+            loadArchive();
+        } catch (err) {
+            alert('Fehler: ' + err.message);
+        }
+    }
+</script>
+</body>
+</html>
