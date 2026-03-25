@@ -1210,8 +1210,11 @@ app.get('/api/energy/surplus', async (req, res) => {
     };
 
     // ?field=grid_power_w → returns just the number as plain text (for Shelly/IoT)
+    // ?field=grid_power_w&format={val} W → returns "1234 W"
     if (req.query.field && result[req.query.field] !== undefined) {
-      return res.type('text/plain').send(String(result[req.query.field]));
+      const val = String(result[req.query.field]);
+      const out = req.query.format ? req.query.format.replace('{val}', val) : val;
+      return res.type('text/plain').send(out);
     }
     res.json(result);
   } catch (err) {
