@@ -1195,8 +1195,14 @@ async function getGroupLiveData(group) {
   return { grid_w, production_w, heizstab_w, consumers, timestamp: grid_ts };
 }
 
+// ─── Open CORS for IoT endpoints (Shelly, LaMetric, etc.) ──────────
+const openCors = cors({ origin: '*' });
+app.options('/api/energy/surplus', openCors);
+app.options('/api/energy/surplus-available', openCors);
+app.options('/api/energy/lametric', openCors);
+
 // Surplus without Heizstab: actual grid export (what's going to the grid right now)
-app.get('/api/energy/surplus', async (req, res) => {
+app.get('/api/energy/surplus', openCors, async (req, res) => {
   try {
     const group = req.query.group || 'r9';
     const data = await getGroupLiveData(group);
@@ -1223,7 +1229,7 @@ app.get('/api/energy/surplus', async (req, res) => {
 });
 
 // Surplus with Heizstab: available surplus if Heizstab were off
-app.get('/api/energy/surplus-available', async (req, res) => {
+app.get('/api/energy/surplus-available', openCors, async (req, res) => {
   try {
     const group = req.query.group || 'r9';
     const data = await getGroupLiveData(group);
@@ -1249,7 +1255,7 @@ app.get('/api/energy/surplus-available', async (req, res) => {
 // ─── LaMetric My Data DIY endpoint ──────────────────────────────────
 // Returns frames in LaMetric JSON format for the "My Data DIY" app
 // Usage: /api/energy/lametric?fields=surplus_w,production_w,grid_power_w
-app.get('/api/energy/lametric', async (req, res) => {
+app.get('/api/energy/lametric', openCors, async (req, res) => {
   try {
     const group = req.query.group || 'r9';
     const data = await getGroupLiveData(group);
