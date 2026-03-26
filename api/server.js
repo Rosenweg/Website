@@ -2587,7 +2587,8 @@ async function saveKontakte(client, wohnungId, kontakte, stweg) {
 }
 
 // Sync kontakte with email to Authentik as users and assign STWEG groups
-async function syncKontakteToAuthentik(stweg, kontakte) {
+// bewohntVon: 'eigentuemer' means self-occupied → Eigentümer/Verwalter also get bewohner group
+async function syncKontakteToAuthentik(stweg, kontakte, bewohntVon) {
   if (!AUTHENTIK_API_TOKEN || !kontakte || !Array.isArray(kontakte)) return;
   const withEmail = kontakte.filter(k => k.email && k.email.includes('@'));
   if (withEmail.length === 0) return;
@@ -2628,26 +2629,33 @@ async function syncKontakteToAuthentik(stweg, kontakte) {
         }
       }
 
-      // Determine which group to assign based on rolle
-      let targetGroupName = null;
+      // Determine which groups to assign based on rolle
+      const targetGroups = [];
+      const effectiveBewohntVon = k._bewohntVon || bewohntVon;
       if (k.rolle === 'eigentuemer' || k.rolle === 'verwalter') {
-        targetGroupName = stwegGroups.eigentuemer;
+        targetGroups.push(stwegGroups.eigentuemer);
+        // Self-occupied: Eigentümer/Verwalter also become Bewohner
+        if (effectiveBewohntVon === 'eigentuemer' && stwegGroups.bewohner) {
+          targetGroups.push(stwegGroups.bewohner);
+        }
       } else if (k.rolle === 'mieter' || k.rolle === 'bewohner') {
-        targetGroupName = stwegGroups.bewohner;
+        targetGroups.push(stwegGroups.bewohner);
       }
 
-      if (targetGroupName && user.pk) {
-        const group = allGroups.find(g => g.name === targetGroupName);
-        if (group) {
-          // Check if user already in group
-          const userGroups = user.groups_obj || [];
-          const alreadyInGroup = userGroups.some(g => g.pk === group.pk);
-          if (!alreadyInGroup) {
-            try {
-              await authentikAPI('POST', `/core/groups/${group.pk}/add_user/`, { pk: user.pk });
-              console.log(`[Authentik] Added ${email} to group ${targetGroupName}`);
-            } catch (err) {
-              console.error(`[Authentik] Failed to add ${email} to ${targetGroupName}:`, err.message);
+      if (user.pk) {
+        const userGroups = user.groups_obj || [];
+        for (const targetGroupName of targetGroups) {
+          if (!targetGroupName) continue;
+          const group = allGroups.find(g => g.name === targetGroupName);
+          if (group) {
+            const alreadyInGroup = userGroups.some(g => g.pk === group.pk);
+            if (!alreadyInGroup) {
+              try {
+                await authentikAPI('POST', `/core/groups/${group.pk}/add_user/`, { pk: user.pk });
+                console.log(`[Authentik] Added ${email} to group ${targetGroupName}`);
+              } catch (err) {
+                console.error(`[Authentik] Failed to add ${email} to ${targetGroupName}:`, err.message);
+              }
             }
           }
         }
@@ -2767,7 +2775,7 @@ setTimeout(processAuthentiKDeletions, 60 * 1000);
 app.post('/api/wohnungen/sync-authentik', authMiddleware, adminOnly, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT k.rolle, k.name, k.email, w.stweg
+      `SELECT k.rolle, k.name, k.email, w.stweg, w.bewohnt_von
        FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id
        WHERE k.email IS NOT NULL AND k.email != ''
        ORDER BY w.stweg`
@@ -2775,7 +2783,7 @@ app.post('/api/wohnungen/sync-authentik', authMiddleware, adminOnly, async (req,
     const byStwg = {};
     for (const row of result.rows) {
       if (!byStwg[row.stweg]) byStwg[row.stweg] = [];
-      byStwg[row.stweg].push(row);
+      byStwg[row.stweg].push({ ...row, _bewohntVon: row.bewohnt_von });
     }
     for (const [stweg, kontakte] of Object.entries(byStwg)) {
       await syncKontakteToAuthentik(parseInt(stweg), kontakte);
@@ -2879,7 +2887,7 @@ app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsver
     const wohnung = await loadWohnungMitKontakte(result.rows[0].id);
     res.status(201).json(wohnung);
     // Sync kontakte to Authentik in background (don't block response)
-    syncKontakteToAuthentik(stweg, b.kontakte).catch(() => {});
+    syncKontakteToAuthentik(stweg, b.kontakte, b.bewohnt_von).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK');
     if (err.code === '23505') return res.status(409).json({ error: 'Wohnung mit dieser Bezeichnung existiert bereits' });
@@ -2922,7 +2930,7 @@ app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
     const wohnung = await loadWohnungMitKontakte(result.rows[0].id);
     res.json(wohnung);
     // Sync kontakte to Authentik in background
-    syncKontakteToAuthentik(parseStweg(req.params.stweg), b.kontakte).catch(() => {});
+    syncKontakteToAuthentik(parseStweg(req.params.stweg), b.kontakte, b.bewohnt_von).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK');
     if (err.code === '23505') return res.status(409).json({ error: 'Wohnung mit dieser Bezeichnung existiert bereits' });
