@@ -222,11 +222,16 @@
             if (!resp.ok) throw new Error('Download fehlgeschlagen');
             const blob = await resp.blob();
             const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            a.click();
-            URL.revokeObjectURL(url);
+            // PDFs and images: open in new tab; everything else: download
+            if (blob.type === 'application/pdf' || blob.type.startsWith('image/')) {
+                window.open(url, '_blank');
+            } else {
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                a.click();
+                URL.revokeObjectURL(url);
+            }
         } catch (err) {
             alert('Download fehlgeschlagen: ' + err.message);
         }
