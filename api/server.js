@@ -818,6 +818,81 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
   });
 });
 
+// Change password (sets in both Authentik and AD)
+const AD_PASSWORD_API_URL = process.env.AD_PASSWORD_API_URL || 'http://100.64.2.30:8446/';
+const AD_PASSWORD_API_SECRET = process.env.AD_PASSWORD_API_SECRET || 'RwAdPwApi2026!';
+
+app.post('/api/change-password', authMiddleware, async (req, res) => {
+  const { old_password, new_password } = req.body;
+  if (!old_password || !new_password) {
+    return res.status(400).json({ error: 'Altes und neues Passwort erforderlich' });
+  }
+  if (new_password.length < 8) {
+    return res.status(400).json({ error: 'Neues Passwort muss mindestens 8 Zeichen haben' });
+  }
+
+  const username = req.user.username;
+
+  // Step 1: Verify old password via Authentik's OAuth token endpoint
+  try {
+    const verifyResp = await fetch(`${AUTHENTIK_EXTERNAL_URL}/application/o/token/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'password',
+        client_id: AUTHENTIK_CLIENT_ID,
+        client_secret: AUTHENTIK_CLIENT_SECRET,
+        username: username,
+        password: old_password,
+        scope: 'openid',
+      }),
+    });
+    if (!verifyResp.ok) {
+      return res.status(401).json({ error: 'Altes Passwort ist falsch' });
+    }
+  } catch (err) {
+    console.error('Password verify error:', err.message);
+    return res.status(500).json({ error: 'Passwort-Überprüfung fehlgeschlagen' });
+  }
+
+  // Step 2: Set new password in Authentik
+  try {
+    const userSearch = await authentikAPI('GET', `/core/users/?search=${encodeURIComponent(username)}`);
+    const akUser = (userSearch.results || []).find(u => u.username === username);
+    if (!akUser) {
+      return res.status(404).json({ error: 'Benutzer nicht gefunden' });
+    }
+    await authentikAPI('POST', `/core/users/${akUser.pk}/set_password/`, {
+      password: new_password,
+    });
+  } catch (err) {
+    console.error('Authentik password change error:', err.message);
+    return res.status(500).json({ error: 'Passwort konnte in Authentik nicht geändert werden' });
+  }
+
+  // Step 3: Set new password in AD
+  try {
+    const adResp = await fetch(AD_PASSWORD_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${AD_PASSWORD_API_SECRET}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ username, password: new_password }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!adResp.ok) {
+      const err = await adResp.text();
+      console.error('AD password change failed:', err);
+      // Don't fail the whole request - Authentik password is already changed
+    }
+  } catch (err) {
+    console.error('AD password sync error:', err.message);
+  }
+
+  res.json({ status: 'ok', message: 'Passwort wurde geändert' });
+});
+
 // Update own profile
 app.put('/api/auth/profile', authMiddleware, async (req, res) => {
   const userId = req.user.user_id || req.user.id;
@@ -3642,16 +3717,16 @@ app.post('/api/admin/users', authMiddleware, requirePermission('bewohner-verwalt
         await authentikAPI('POST', `/core/groups/${groupPk}/add_user/`, { pk: user.pk });
       }
     }
-    // Sync password to SMB fileserver
+    // Sync password to AD DC
     if (password && username) {
       try {
-        await fetch('http://100.64.2.28:8445/', {
+        await fetch(AD_PASSWORD_API_URL, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer RwSmbWebhook2026!' },
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${AD_PASSWORD_API_SECRET}` },
           body: JSON.stringify({ username, password }),
-          signal: AbortSignal.timeout(5000),
+          signal: AbortSignal.timeout(10000),
         });
-      } catch (e) { console.error('SMB password sync failed:', e.message); }
+      } catch (e) { console.error('AD password sync failed:', e.message); }
     }
     res.json(user);
   } catch (err) {
