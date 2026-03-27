@@ -359,9 +359,19 @@ app.get('/api/auth/callback', async (req, res) => {
       signal: AbortSignal.timeout(10000),
     });
     const tokenText = await tokenResp.text();
-    const tokenData = tokenText ? JSON.parse(tokenText) : {};
+    if (!tokenResp.ok) {
+      console.error('Token exchange failed, status:', tokenResp.status, 'body:', tokenText.substring(0, 500));
+      return res.status(400).send('Token-Austausch fehlgeschlagen');
+    }
+    let tokenData;
+    try {
+      tokenData = tokenText ? JSON.parse(tokenText) : {};
+    } catch (parseErr) {
+      console.error('Token response not JSON, status:', tokenResp.status, 'body:', tokenText.substring(0, 500));
+      return res.status(500).send('Authentik-Antwort ungültig');
+    }
     if (!tokenData.access_token) {
-      console.error('Token exchange failed, status:', tokenResp.status);
+      console.error('Token exchange: no access_token, status:', tokenResp.status, 'body:', tokenText.substring(0, 200));
       return res.status(400).send('Token-Austausch fehlgeschlagen');
     }
 
