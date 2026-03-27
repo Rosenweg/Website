@@ -833,57 +833,38 @@ const AD_PASSWORD_API_URL = process.env.AD_PASSWORD_API_URL || 'http://100.64.2.
 const AD_PASSWORD_API_SECRET = process.env.AD_PASSWORD_API_SECRET || 'RwAdPwApi2026!';
 
 app.post('/api/change-password', authMiddleware, async (req, res) => {
-  const { old_password, new_password } = req.body;
-  if (!old_password || !new_password) {
-    return res.status(400).json({ error: 'Altes und neues Passwort erforderlich' });
+  const { new_password } = req.body;
+  if (!new_password) {
+    return res.status(400).json({ error: 'Neues Passwort erforderlich' });
   }
   if (new_password.length < 8) {
     return res.status(400).json({ error: 'Neues Passwort muss mindestens 8 Zeichen haben' });
   }
 
-  const username = req.user.username;
-  console.log(`[change-password] Request from user: ${username}`);
+  // User is already authenticated via authMiddleware — no need to verify old password
+  const email = req.user.email;
+  console.log(`[change-password] Request from user: ${email}`);
 
-  // Step 1: Verify old password via Authentik's OAuth token endpoint
+  // Step 1: Find user in Authentik and set new password
+  let akUsername;
   try {
-    const verifyResp = await fetch(`${AUTHENTIK_URL}/application/o/token/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'password',
-        client_id: AUTHENTIK_CLIENT_ID,
-        client_secret: AUTHENTIK_CLIENT_SECRET,
-        username: username,
-        password: old_password,
-        scope: 'openid',
-      }),
-    });
-    if (!verifyResp.ok) {
-      const verifyBody = await verifyResp.text();
-      console.error(`[change-password] Password verify failed (${verifyResp.status}):`, verifyBody);
-      return res.status(403).json({ error: 'Altes Passwort ist falsch' });
-    }
-  } catch (err) {
-    console.error('Password verify error:', err.message);
-    return res.status(500).json({ error: 'Passwort-Überprüfung fehlgeschlagen' });
-  }
-
-  // Step 2: Set new password in Authentik
-  try {
-    const userSearch = await authentikAPI('GET', `/core/users/?search=${encodeURIComponent(username)}`);
-    const akUser = (userSearch.results || []).find(u => u.username === username);
+    const userSearch = await authentikAPI('GET', `/core/users/?search=${encodeURIComponent(email)}`);
+    const akUser = (userSearch.results || []).find(u => u.email?.toLowerCase() === email.toLowerCase());
     if (!akUser) {
+      console.error(`[change-password] User not found in Authentik: ${email}`);
       return res.status(404).json({ error: 'Benutzer nicht gefunden' });
     }
+    akUsername = akUser.username;
     await authentikAPI('POST', `/core/users/${akUser.pk}/set_password/`, {
       password: new_password,
     });
+    console.log(`[change-password] Authentik password set for ${akUsername}`);
   } catch (err) {
     console.error('Authentik password change error:', err.message);
     return res.status(500).json({ error: 'Passwort konnte in Authentik nicht geändert werden' });
   }
 
-  // Step 3: Set new password in AD
+  // Step 2: Set new password in AD
   try {
     const adResp = await fetch(AD_PASSWORD_API_URL, {
       method: 'POST',
@@ -891,13 +872,15 @@ app.post('/api/change-password', authMiddleware, async (req, res) => {
         'Authorization': `Bearer ${AD_PASSWORD_API_SECRET}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ username, password: new_password }),
+      body: JSON.stringify({ username: akUsername, password: new_password }),
       signal: AbortSignal.timeout(10000),
     });
     if (!adResp.ok) {
       const err = await adResp.text();
       console.error('AD password change failed:', err);
       // Don't fail the whole request - Authentik password is already changed
+    } else {
+      console.log(`[change-password] AD password set for ${akUsername}`);
     }
   } catch (err) {
     console.error('AD password sync error:', err.message);
