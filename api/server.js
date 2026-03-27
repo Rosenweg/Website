@@ -842,6 +842,7 @@ app.post('/api/change-password', authMiddleware, async (req, res) => {
   }
 
   const username = req.user.username;
+  console.log(`[change-password] Request from user: ${username}`);
 
   // Step 1: Verify old password via Authentik's OAuth token endpoint
   try {
@@ -858,7 +859,9 @@ app.post('/api/change-password', authMiddleware, async (req, res) => {
       }),
     });
     if (!verifyResp.ok) {
-      return res.status(401).json({ error: 'Altes Passwort ist falsch' });
+      const verifyBody = await verifyResp.text();
+      console.error(`[change-password] Password verify failed (${verifyResp.status}):`, verifyBody);
+      return res.status(403).json({ error: 'Altes Passwort ist falsch' });
     }
   } catch (err) {
     console.error('Password verify error:', err.message);
