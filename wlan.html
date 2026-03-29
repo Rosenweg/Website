@@ -175,11 +175,28 @@
             }
         }
 
-        // Init: nav.js handles auth, we just check token and load
-        if (AuthentikAuth.isLoggedIn()) {
-            loadWifi();
-        } else {
-            document.getElementById('loading').innerHTML = 'Bitte zuerst <a href="#" onclick="AuthentikAuth.login(); return false;" class="text-blue-600 underline font-semibold">einloggen</a>.';
+        // Init: check login and load
+        const _el = document.getElementById('loading');
+        try {
+            const _token = AuthentikAuth.getToken();
+            _el.textContent = 'Token: ' + (_token ? _token.substring(0, 20) + '...' : 'KEINER');
+            if (_token) {
+                _el.textContent = 'Rufe /api/wifi auf...';
+                fetch('/api/wifi', { headers: { 'Authorization': 'Bearer ' + _token } })
+                    .then(r => {
+                        _el.textContent = 'API Status: ' + r.status;
+                        return r.json();
+                    })
+                    .then(data => {
+                        _el.textContent = 'Daten erhalten: ' + JSON.stringify(data).substring(0, 200);
+                        loadWifi();
+                    })
+                    .catch(err => {
+                        _el.textContent = 'Fetch Error: ' + err.message;
+                    });
+            }
+        } catch(e) {
+            _el.textContent = 'JS Error: ' + e.message;
         }
     </script>
 </body>
