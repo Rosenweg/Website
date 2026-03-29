@@ -274,6 +274,34 @@ services:
 
 
   # ============================================
+  # Syslog Collector - FPÜV Connection Logging
+  # ============================================
+  syslog-collector:
+    image: ghcr.io/rosenweg/syslog-collector:latest
+    environment:
+      SYSLOG_PORT: "5514"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: rosenweg
+      DB_USER: rosenweg
+      DB_PASSWORD: "${DB_PASSWORD}"
+    ports:
+      - "5514:5514/udp"
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname == docker-pve1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      labels:
+        - "shepherd.enable=true"
+
+  # ============================================
   # Shepherd - Auto-update Docker Swarm services
   # ============================================
   shepherd:
