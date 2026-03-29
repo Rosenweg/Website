@@ -263,6 +263,10 @@ def main():
                 stats['parsed'] += 1
             else:
                 stats['skipped'] += 1
+                # Log first 10 unparsed messages for debugging
+                if stats['skipped'] <= 10:
+                    msg = data.decode('utf-8', errors='replace').strip()
+                    print(f'[Syslog] UNPARSED: {msg[:300]}', flush=True)
 
             # Print stats every 60s
             if time.time() - last_stats > 60:
