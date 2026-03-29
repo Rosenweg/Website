@@ -65,17 +65,20 @@
 
     <script>
         function loadQRLib() {
-            return new Promise(resolve => {
+            return new Promise((resolve, reject) => {
                 if (window.QRCode) return resolve();
                 const s = document.createElement('script');
                 s.src = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js';
                 s.onload = resolve;
+                s.onerror = () => resolve(); // Don't block if QR lib fails
                 document.head.appendChild(s);
+                setTimeout(resolve, 5000); // Timeout fallback
             });
         }
 
         function drawQR(canvas, text, size) {
-            QRCode.toCanvas(canvas, text, { width: size, margin: 2, color: { dark: '#1f2937' } });
+            if (!window.QRCode) return; // Skip if lib didn't load
+            try { QRCode.toCanvas(canvas, text, { width: size, margin: 2, color: { dark: '#1f2937' } }); } catch(e) {}
         }
 
         function escWifi(s) {
@@ -176,7 +179,11 @@
                     return r.json();
                 })
                 .then(data => renderWifi(data))
-                .catch(err => { _el.textContent = 'Fehler: ' + err.message; });
+                .catch(err => {
+                    _el.textContent = 'Fehler: ' + err.message;
+                    _el.classList.remove('hidden');
+                    console.error('WLAN Error:', err);
+                });
         } else {
             _el.innerHTML = 'Bitte zuerst <a href="#" onclick="AuthentikAuth.login(); return false;" class="text-blue-600 underline font-semibold">einloggen</a>.';
         }
