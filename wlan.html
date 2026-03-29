@@ -121,7 +121,10 @@
             const el = document.getElementById('loading');
             try {
                 el.textContent = 'WLAN-Daten werden geladen...';
-                const resp = await AuthentikAuth.apiFetch('/api/wifi');
+                const token = AuthentikAuth.getToken();
+                const resp = await fetch('/api/wifi', {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
                 if (!resp.ok) {
                     const text = await resp.text();
                     throw new Error(`API ${resp.status}: ${text}`);
