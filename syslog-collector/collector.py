@@ -40,9 +40,9 @@ VLAN_NETWORKS = {
 }
 
 # Regex patterns for UDM syslog messages
-# Firewall/NAT log: [UFW] or iptables format
+# Firewall/NAT log: [UFW ALLOW/BLOCK] or iptables format
 RE_FIREWALL = re.compile(
-    r'(?P<action>ALLOW|BLOCK|DROP|REJECT)\s+'
+    r'(?:\[UFW\s+)?(?P<action>ALLOW|BLOCK|DROP|REJECT)\]?\s*'
     r'IN=(?P<iface>\S*)\s+'
     r'.*?SRC=(?P<src_ip>\d+\.\d+\.\d+\.\d+)\s+'
     r'DST=(?P<dst_ip>\d+\.\d+\.\d+\.\d+)\s+'
