@@ -170,7 +170,15 @@
         }
 
         AuthentikAuth.init({ requireAuth: true }).then(user => {
-            if (user) loadWifi();
+            console.log('Auth result:', user);
+            if (user) {
+                loadWifi();
+            } else {
+                document.getElementById('loading').textContent = 'Nicht eingeloggt.';
+            }
+        }).catch(err => {
+            console.error('Auth init error:', err);
+            document.getElementById('loading').textContent = 'Auth-Fehler: ' + err.message;
         });
     </script>
     <script src="js/nav.js"></script>
