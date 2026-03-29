@@ -1001,6 +1001,72 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
   }
 });
 
+// ─── TV7 (Init7 IPTV) ────────────────────────────────────────────────
+const TV7_PLAYLIST_URL = 'https://api.init7.net/tvchannels.m3u';
+const UDPXY_HOST = process.env.UDPXY_HOST || 'http://tv-proxy:4022';
+let tv7ChannelsCache = null;
+let tv7CacheTime = 0;
+
+async function fetchTV7Channels() {
+  if (tv7ChannelsCache && Date.now() - tv7CacheTime < 3600000) return tv7ChannelsCache;
+  const resp = await fetch(TV7_PLAYLIST_URL, { signal: AbortSignal.timeout(10000) });
+  const text = await resp.text();
+  const channels = [];
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].startsWith('#EXTINF:')) {
+      const logoMatch = lines[i].match(/tvg-logo="([^"]+)"/);
+      const groupMatch = lines[i].match(/group-title="([^"]+)"/);
+      const nameMatch = lines[i].match(/,\s*(.+)$/);
+      const url = (lines[i + 1] || '').trim();
+      if (url.startsWith('udp://')) {
+        const mcMatch = url.match(/udp:\/\/@?([\d.]+):(\d+)/);
+        if (mcMatch) {
+          channels.push({
+            name: nameMatch ? nameMatch[1].trim() : 'Unknown',
+            logo: logoMatch ? logoMatch[1] : '',
+            group: groupMatch ? groupMatch[1] : '',
+            multicast: `${mcMatch[1]}:${mcMatch[2]}`,
+          });
+        }
+      }
+    }
+  }
+  tv7ChannelsCache = channels;
+  tv7CacheTime = Date.now();
+  return channels;
+}
+
+app.get('/api/tv/channels', authMiddleware, async (req, res) => {
+  try {
+    const channels = await fetchTV7Channels();
+    res.json(channels);
+  } catch (err) {
+    console.error('TV7 channels error:', err.message);
+    res.status(500).json({ error: 'TV7-Kanäle konnten nicht geladen werden' });
+  }
+});
+
+// Stream proxy: /api/tv/stream/233.50.230.80:5000 → udpxy
+app.get('/api/tv/stream/:multicast', authMiddleware, async (req, res) => {
+  const mc = req.params.multicast;
+  if (!/^\d+\.\d+\.\d+\.\d+:\d+$/.test(mc)) {
+    return res.status(400).json({ error: 'Invalid multicast address' });
+  }
+  const [ip, port] = mc.split(':');
+  const udpxyUrl = `${UDPXY_HOST}/udp/${ip}:${port}`;
+  try {
+    const upstream = await fetch(udpxyUrl, { signal: AbortSignal.timeout(30000) });
+    if (!upstream.ok) return res.status(502).json({ error: 'Stream nicht verfügbar' });
+    res.setHeader('Content-Type', 'video/MP2T');
+    res.setHeader('Cache-Control', 'no-cache');
+    upstream.body.pipe(res);
+  } catch (err) {
+    console.error('TV7 stream error:', err.message);
+    if (!res.headersSent) res.status(502).json({ error: 'Stream-Fehler' });
+  }
+});
+
 // Upload avatar (base64) and sync to Authentik
 app.put('/api/auth/avatar', authMiddleware, async (req, res) => {
   const userId = req.user.user_id || req.user.id;
