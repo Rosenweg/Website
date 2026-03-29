@@ -274,6 +274,24 @@ services:
 
 
   # ============================================
+  # TV Proxy - udpxy for IPTV Multicast → HTTP
+  # ============================================
+  tv-proxy:
+    image: ghcr.io/rosenweg/tv-proxy:latest
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname == docker-pve1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+      labels:
+        - "shepherd.enable=true"
+
+  # ============================================
   # Syslog Collector - FPÜV Connection Logging
   # ============================================
   syslog-collector:

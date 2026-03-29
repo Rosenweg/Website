@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TV7 — Rosenweg</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/site-config.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .channel-card { transition: all 0.15s; }
+        .channel-card:hover { transform: scale(1.02); }
+        .channel-card.active { ring: 2px; box-shadow: 0 0 0 3px rgba(59,130,246,0.5); }
+        #player-container { aspect-ratio: 16/9; }
+        .group-btn.active { background-color: #2563eb; color: white; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js?v=2"></script>
+    <script>RosenwegNav.init({ active: 'isp' });</script>
+
+    <main class="max-w-7xl mx-auto px-4 py-4">
+        <!-- Header -->
+        <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-3">
+                <a href="/isp.html" class="text-gray-400 hover:text-white transition text-sm">&larr; ISP</a>
+                <h1 class="text-xl font-bold">TV7</h1>
+                <span class="text-xs bg-blue-600 px-2 py-0.5 rounded">Init7 IPTV</span>
+            </div>
+            <div class="text-sm text-gray-400" id="status">Lade Kanäle...</div>
+        </div>
+
+        <div class="grid lg:grid-cols-3 gap-4">
+            <!-- Player -->
+            <div class="lg:col-span-2">
+                <div id="player-container" class="bg-black rounded-xl overflow-hidden relative">
+                    <video id="player" class="w-full h-full" controls autoplay>
+                        <p class="text-gray-500 text-center p-8">Wähle einen Kanal aus der Liste</p>
+                    </video>
+                    <div id="player-overlay" class="absolute inset-0 flex items-center justify-center bg-black/60">
+                        <p class="text-gray-300 text-lg">Kanal auswählen &rarr;</p>
+                    </div>
+                </div>
+                <div id="now-playing" class="mt-2 text-sm text-gray-400 hidden">
+                    <span>Aktuell: </span><span id="now-playing-name" class="text-white font-medium"></span>
+                </div>
+            </div>
+
+            <!-- Channel List -->
+            <div class="bg-gray-800 rounded-xl overflow-hidden flex flex-col" style="max-height: 70vh;">
+                <!-- Group filter -->
+                <div id="group-filter" class="flex flex-wrap gap-1 p-3 border-b border-gray-700 bg-gray-800/80 sticky top-0">
+                    <button class="group-btn active text-xs px-2 py-1 rounded bg-blue-600 text-white" data-group="all">Alle</button>
+                </div>
+                <!-- Search -->
+                <div class="p-3 border-b border-gray-700">
+                    <input type="text" id="search" placeholder="Kanal suchen..." class="w-full bg-gray-700 border-none rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 outline-none">
+                </div>
+                <!-- Channels -->
+                <div id="channel-list" class="overflow-y-auto flex-1 p-2 space-y-1"></div>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.js"></script>
+    <script>
+        const UDPXY_URL = '/api/tv/stream';  // Proxy through API
+        let channels = [];
+        let currentChannel = null;
+        let player = null;
+
+        async function loadChannels() {
+            try {
+                const resp = await fetch('/api/tv/channels');
+                if (!resp.ok) throw new Error('Fehler ' + resp.status);
+                channels = await resp.json();
+                document.getElementById('status').textContent = `${channels.length} Kanäle`;
+                renderGroups();
+                renderChannels();
+            } catch (err) {
+                document.getElementById('status').textContent = 'Fehler: ' + err.message;
+            }
+        }
+
+        function renderGroups() {
+            const groups = [...new Set(channels.map(c => c.group))].sort();
+            const container = document.getElementById('group-filter');
+            for (const g of groups) {
+                const btn = document.createElement('button');
+                btn.className = 'group-btn text-xs px-2 py-1 rounded bg-gray-700 text-gray-300 hover:bg-gray-600';
+                btn.dataset.group = g;
+                btn.textContent = g;
+                btn.addEventListener('click', () => filterGroup(g));
+                container.appendChild(btn);
+            }
+        }
+
+        function filterGroup(group) {
+            document.querySelectorAll('.group-btn').forEach(b => {
+                b.classList.toggle('active', b.dataset.group === group || (group === 'all' && b.dataset.group === 'all'));
+                if (b.dataset.group === group || (group === 'all' && b.dataset.group === 'all')) {
+                    b.classList.add('bg-blue-600', 'text-white');
+                    b.classList.remove('bg-gray-700', 'text-gray-300');
+                } else {
+                    b.classList.remove('bg-blue-600', 'text-white');
+                    b.classList.add('bg-gray-700', 'text-gray-300');
+                }
+            });
+            renderChannels(group === 'all' ? null : group);
+        }
+
+        function renderChannels(groupFilter) {
+            const search = document.getElementById('search').value.toLowerCase();
+            const list = document.getElementById('channel-list');
+            const filtered = channels.filter(c => {
+                if (groupFilter && c.group !== groupFilter) return false;
+                if (search && !c.name.toLowerCase().includes(search)) return false;
+                return true;
+            });
+
+            list.innerHTML = filtered.map((c, i) => `
+                <div class="channel-card flex items-center gap-3 p-2 rounded-lg cursor-pointer hover:bg-gray-700 ${currentChannel?.name === c.name ? 'active bg-gray-700' : ''}"
+                     onclick="playChannel(${channels.indexOf(c)})">
+                    <img src="${c.logo}" alt="" class="w-8 h-8 rounded object-contain bg-white" onerror="this.style.display='none'">
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm font-medium truncate">${c.name}</p>
+                        <p class="text-xs text-gray-500">${c.group}</p>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function playChannel(index) {
+            const ch = channels[index];
+            if (!ch) return;
+            currentChannel = ch;
+
+            const video = document.getElementById('player');
+            document.getElementById('player-overlay').classList.add('hidden');
+            document.getElementById('now-playing').classList.remove('hidden');
+            document.getElementById('now-playing-name').textContent = ch.name;
+
+            // Destroy previous player
+            if (player) {
+                player.destroy();
+                player = null;
+            }
+
+            // Use mpegts.js for MPEG-TS over HTTP (from udpxy)
+            const streamUrl = `${UDPXY_URL}/${ch.multicast}`;
+
+            if (mpegts.isSupported()) {
+                player = mpegts.createPlayer({
+                    type: 'mpegts',
+                    url: streamUrl,
+                    isLive: true,
+                });
+                player.attachMediaElement(video);
+                player.load();
+                player.play();
+            } else {
+                // Fallback: direct source
+                video.src = streamUrl;
+                video.play();
+            }
+
+            renderChannels(document.querySelector('.group-btn.active')?.dataset.group === 'all' ? null : document.querySelector('.group-btn.active')?.dataset.group);
+        }
+
+        document.getElementById('search').addEventListener('input', () => {
+            const activeGroup = document.querySelector('.group-btn.active')?.dataset.group;
+            renderChannels(activeGroup === 'all' ? null : activeGroup);
+        });
+
+        // Keyboard navigation
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT') return;
+            const idx = currentChannel ? channels.indexOf(currentChannel) : -1;
+            if (e.key === 'ArrowUp' && idx > 0) { playChannel(idx - 1); e.preventDefault(); }
+            if (e.key === 'ArrowDown' && idx < channels.length - 1) { playChannel(idx + 1); e.preventDefault(); }
+        });
+
+        // Init
+        if (AuthentikAuth.isLoggedIn()) {
+            loadChannels();
+        } else {
+            document.getElementById('status').innerHTML = '<a href="#" onclick="AuthentikAuth.login()" class="text-blue-400 underline">Einloggen</a>';
+        }
+    </script>
+</body>
+</html>
