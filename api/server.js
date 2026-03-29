@@ -5226,6 +5226,30 @@ async function initDB() {
       );
     `);
 
+    // Connection log for FPÜV compliance (6 months retention)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS connection_log (
+        id BIGSERIAL PRIMARY KEY,
+        timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        event_type VARCHAR(20) NOT NULL,
+        source VARCHAR(10) NOT NULL,
+        mac VARCHAR(17) NOT NULL,
+        ip VARCHAR(45),
+        hostname VARCHAR(255),
+        network_name VARCHAR(100),
+        vlan INT,
+        ap_name VARCHAR(100),
+        ap_mac VARCHAR(17),
+        is_wired BOOLEAN DEFAULT FALSE,
+        signal_dbm INT,
+        rx_bytes BIGINT,
+        tx_bytes BIGINT
+      );
+      CREATE INDEX IF NOT EXISTS idx_connlog_timestamp ON connection_log(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_connlog_mac ON connection_log(mac);
+      CREATE INDEX IF NOT EXISTS idx_connlog_network ON connection_log(network_name);
+    `);
+
     // Create index after migration (separate query to avoid parse errors on old schema)
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_wasch_res_times ON wasch_reservations(room_id, start_time, end_time) WHERE cancelled = false;
@@ -5308,10 +5332,142 @@ async function cleanupExpiredSessions() {
     if (sessions.rowCount > 0 || otps.rowCount > 0) {
       console.log(`Cleanup: ${sessions.rowCount} expired sessions, ${otps.rowCount} expired OTPs removed`);
     }
+    // Cleanup connection_log older than 6 months
+    const connCleanup = await pool.query("DELETE FROM connection_log WHERE timestamp < NOW() - INTERVAL '6 months'");
+    if (connCleanup.rowCount > 0) {
+      console.log(`Cleanup: ${connCleanup.rowCount} old connection_log entries removed`);
+    }
   } catch (err) {
     console.error('Session cleanup error:', err.message);
   }
 }
+
+// ─── FPÜV Connection Polling ─────────────────────────────────────────
+const CONN_POLL_INTERVAL = 5 * 60 * 1000; // 5 minutes
+
+// Track last-seen MACs to detect connect/disconnect
+let lastSeenMacs = new Set();
+
+async function pollConnections() {
+  try {
+    const resp = await fetch(`${UNIFI_HOST}/proxy/network/api/s/default/stat/sta`, {
+      headers: { 'X-API-Key': UNIFI_API_KEY },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const clients = data.data || [];
+
+    // Get network name mapping
+    const netResp = await fetch(`${UNIFI_HOST}/proxy/network/api/s/default/rest/networkconf`, {
+      headers: { 'X-API-Key': UNIFI_API_KEY },
+      signal: AbortSignal.timeout(10000),
+    });
+    const nets = (await netResp.json()).data || [];
+    const netMap = {};
+    for (const n of nets) netMap[n._id] = { name: n.name, vlan: n.vlan || null };
+
+    const currentMacs = new Set();
+    const values = [];
+    const params = [];
+    let idx = 1;
+
+    for (const c of clients) {
+      const mac = c.mac;
+      currentMacs.add(mac);
+      const net = netMap[c.network_id] || {};
+      const isNew = !lastSeenMacs.has(mac);
+
+      values.push(`($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`);
+      params.push(
+        isNew ? 'connect' : 'snapshot', 'poll',
+        mac, c.ip || null, c.hostname || c.name || null,
+        net.name || c.network || null, net.vlan || null,
+        c.ap_name || null, c.ap_mac || null,
+        !!c.is_wired, c.rssi || null,
+        c.rx_bytes || null, c.tx_bytes || null
+      );
+    }
+
+    // Detect disconnects
+    for (const mac of lastSeenMacs) {
+      if (!currentMacs.has(mac)) {
+        values.push(`($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`);
+        params.push('disconnect', 'poll', mac, null, null, null, null, null, null, false, null, null, null);
+      }
+    }
+
+    if (values.length > 0) {
+      await pool.query(
+        `INSERT INTO connection_log (event_type, source, mac, ip, hostname, network_name, vlan, ap_name, ap_mac, is_wired, signal_dbm, rx_bytes, tx_bytes)
+         VALUES ${values.join(',')}`,
+        params
+      );
+    }
+
+    lastSeenMacs = currentMacs;
+  } catch (err) {
+    console.error('[ConnPoll] Error:', err.message);
+  }
+}
+
+function startConnectionPolling() {
+  if (!UNIFI_API_KEY) {
+    console.log('[ConnPoll] No UniFi API key, polling disabled');
+    return;
+  }
+  console.log(`[ConnPoll] Polling UniFi every ${CONN_POLL_INTERVAL / 1000}s`);
+  setTimeout(pollConnections, 10000); // first poll after 10s
+  activeIntervals.push(setInterval(pollConnections, CONN_POLL_INTERVAL));
+}
+
+// ─── Connection Log API ──────────────────────────────────────────────
+app.get('/api/connections', authMiddleware, adminOnly, async (req, res) => {
+  const { mac, network, from, to, limit: lim } = req.query;
+  const conditions = [];
+  const params = [];
+  let idx = 1;
+
+  if (mac) { conditions.push(`mac ILIKE $${idx++}`); params.push(`%${mac}%`); }
+  if (network) { conditions.push(`network_name = $${idx++}`); params.push(network); }
+  if (from) { conditions.push(`timestamp >= $${idx++}`); params.push(from); }
+  if (to) { conditions.push(`timestamp <= $${idx++}`); params.push(to); }
+
+  const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
+  const limit = Math.min(parseInt(lim) || 1000, 10000);
+
+  try {
+    const result = await pool.query(
+      `SELECT * FROM connection_log ${where} ORDER BY timestamp DESC LIMIT $${idx}`,
+      [...params, limit]
+    );
+    res.json({ total: result.rowCount, entries: result.rows });
+  } catch (err) {
+    console.error('Connection log error:', err);
+    res.status(500).json({ error: 'Verbindungsdaten konnten nicht geladen werden' });
+  }
+});
+
+// Connection log stats
+app.get('/api/connections/stats', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const [total, networks, recent] = await Promise.all([
+      pool.query('SELECT COUNT(*) as count FROM connection_log'),
+      pool.query(`SELECT network_name, COUNT(DISTINCT mac) as clients, COUNT(*) as events
+                  FROM connection_log WHERE timestamp > NOW() - INTERVAL '24 hours'
+                  GROUP BY network_name ORDER BY clients DESC`),
+      pool.query(`SELECT COUNT(DISTINCT mac) as active FROM connection_log
+                  WHERE event_type != 'disconnect' AND timestamp > NOW() - INTERVAL '10 minutes'`),
+    ]);
+    res.json({
+      totalEntries: parseInt(total.rows[0].count),
+      activeClients: parseInt(recent.rows[0].active),
+      last24h: networks.rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Track intervals and server for graceful shutdown
 let server;
@@ -5325,6 +5481,8 @@ initDB()
       startWaschCron();
       // Start IMAP polling for verteiler emails
       startImapPoll();
+      // Start connection logging (FPÜV)
+      startConnectionPolling();
       // Cleanup expired sessions every hour
       activeIntervals.push(setInterval(cleanupExpiredSessions, 60 * 60 * 1000));
       setTimeout(cleanupExpiredSessions, 30 * 1000); // first cleanup after 30s

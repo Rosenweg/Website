@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verbindungsnachweis — Rosenweg ISP</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/site-config.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50">
+
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js?v=2"></script>
+    <script>RosenwegNav.init({ active: 'isp' });</script>
+
+    <section class="bg-gradient-to-r from-amber-600 to-orange-700 text-white py-8">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center gap-3">
+                <a href="/isp.html" class="text-amber-200 hover:text-white transition">&larr; ISP</a>
+                <span class="text-amber-300">|</span>
+                <h1 class="text-2xl font-bold">Verbindungsnachweis (FPÜV)</h1>
+            </div>
+            <p class="mt-1 text-amber-100 text-sm">Wer war wann mit welchem Gerät verbunden?</p>
+        </div>
+    </section>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div id="no-access" class="hidden bg-red-50 border border-red-200 rounded-xl p-6 text-center">
+            <p class="text-red-700 font-semibold">Nur für die Technik-Gruppe zugänglich.</p>
+        </div>
+
+        <div id="content" class="hidden space-y-6">
+            <!-- Search -->
+            <div class="bg-white rounded-xl shadow-sm border p-6">
+                <h2 class="text-lg font-semibold text-gray-900 mb-4">Suche</h2>
+                <form id="search-form" class="grid md:grid-cols-4 gap-4">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Von</label>
+                        <input type="date" id="f-from" class="w-full border rounded-lg px-3 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Bis</label>
+                        <input type="date" id="f-to" class="w-full border rounded-lg px-3 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">MAC-Adresse</label>
+                        <input type="text" id="f-mac" placeholder="xx:xx:xx:xx:xx:xx" class="w-full border rounded-lg px-3 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Netzwerk</label>
+                        <select id="f-network" class="w-full border rounded-lg px-3 py-2 text-sm">
+                            <option value="">Alle</option>
+                        </select>
+                    </div>
+                    <div class="md:col-span-4 flex gap-3">
+                        <button type="submit" class="bg-amber-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-amber-700 transition">Suchen</button>
+                        <button type="button" id="btn-export" class="bg-gray-100 text-gray-700 px-6 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition">CSV Export</button>
+                        <span id="result-count" class="text-sm text-gray-500 self-center ml-auto"></span>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Results -->
+            <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Zeitpunkt</th>
+                                <th class="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Event</th>
+                                <th class="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">MAC</th>
+                                <th class="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">IP</th>
+                                <th class="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Hostname</th>
+                                <th class="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">Netzwerk</th>
+                                <th class="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase">AP</th>
+                            </tr>
+                        </thead>
+                        <tbody id="results-body" class="divide-y divide-gray-100"></tbody>
+                    </table>
+                </div>
+                <div id="no-results" class="hidden text-center py-8 text-gray-400">Keine Einträge gefunden.</div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const user = AuthentikAuth.getUser();
+        if (!user?.isAdmin) {
+            document.getElementById('no-access').classList.remove('hidden');
+        } else {
+            document.getElementById('content').classList.remove('hidden');
+
+            // Set default dates (last 7 days)
+            const today = new Date();
+            const weekAgo = new Date(today - 7 * 86400000);
+            document.getElementById('f-to').value = today.toISOString().split('T')[0];
+            document.getElementById('f-from').value = weekAgo.toISOString().split('T')[0];
+
+            // Populate network dropdown from stats
+            const token = AuthentikAuth.getToken();
+            fetch('/api/connections/stats', { headers: { Authorization: 'Bearer ' + token } })
+                .then(r => r.json())
+                .then(data => {
+                    const sel = document.getElementById('f-network');
+                    data.last24h.forEach(n => {
+                        if (n.network_name) {
+                            const opt = document.createElement('option');
+                            opt.value = n.network_name;
+                            opt.textContent = `${n.network_name} (${n.clients})`;
+                            sel.appendChild(opt);
+                        }
+                    });
+                }).catch(() => {});
+
+            let lastResults = [];
+
+            async function search() {
+                const params = new URLSearchParams();
+                const from = document.getElementById('f-from').value;
+                const to = document.getElementById('f-to').value;
+                const mac = document.getElementById('f-mac').value.trim();
+                const network = document.getElementById('f-network').value;
+
+                if (from) params.set('from', from + 'T00:00:00');
+                if (to) params.set('to', to + 'T23:59:59');
+                if (mac) params.set('mac', mac);
+                if (network) params.set('network', network);
+                params.set('limit', '5000');
+
+                const resp = await fetch('/api/connections?' + params, {
+                    headers: { Authorization: 'Bearer ' + token }
+                });
+                const data = await resp.json();
+                lastResults = data.entries || [];
+
+                document.getElementById('result-count').textContent = `${lastResults.length} Einträge`;
+
+                const tbody = document.getElementById('results-body');
+                const noRes = document.getElementById('no-results');
+
+                if (lastResults.length === 0) {
+                    tbody.innerHTML = '';
+                    noRes.classList.remove('hidden');
+                    return;
+                }
+                noRes.classList.add('hidden');
+
+                const eventColors = {
+                    connect: 'bg-green-100 text-green-700',
+                    disconnect: 'bg-red-100 text-red-700',
+                    snapshot: 'bg-gray-100 text-gray-600',
+                    dhcp: 'bg-blue-100 text-blue-700',
+                };
+
+                tbody.innerHTML = lastResults.map(e => `
+                    <tr class="hover:bg-gray-50">
+                        <td class="py-2 px-4 text-xs font-mono">${new Date(e.timestamp).toLocaleString('de-CH')}</td>
+                        <td class="py-2 px-4"><span class="px-2 py-0.5 rounded text-xs font-medium ${eventColors[e.event_type] || ''}">${e.event_type}</span></td>
+                        <td class="py-2 px-4 font-mono text-xs">${e.mac || ''}</td>
+                        <td class="py-2 px-4 font-mono text-xs">${e.ip || ''}</td>
+                        <td class="py-2 px-4 text-xs">${e.hostname || ''}</td>
+                        <td class="py-2 px-4 text-xs font-medium">${e.network_name || ''}</td>
+                        <td class="py-2 px-4 text-xs">${e.ap_name || (e.is_wired ? 'Kabel' : '')}</td>
+                    </tr>
+                `).join('');
+            }
+
+            document.getElementById('search-form').addEventListener('submit', e => {
+                e.preventDefault();
+                search();
+            });
+
+            document.getElementById('btn-export').addEventListener('click', () => {
+                if (!lastResults.length) return;
+                const header = 'Zeitpunkt;Event;MAC;IP;Hostname;Netzwerk;VLAN;AP;Kabel\n';
+                const rows = lastResults.map(e =>
+                    `${e.timestamp};${e.event_type};${e.mac};${e.ip || ''};${e.hostname || ''};${e.network_name || ''};${e.vlan || ''};${e.ap_name || ''};${e.is_wired ? 'Ja' : 'Nein'}`
+                ).join('\n');
+                const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `verbindungen_${document.getElementById('f-from').value}_${document.getElementById('f-to').value}.csv`;
+                a.click();
+            });
+
+            // Auto-search on load
+            search();
+        }
+    </script>
+</body>
+</html>
