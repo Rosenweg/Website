@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rosenweg ISP — Internetzugang</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/site-config.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50">
+
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js?v=2"></script>
+    <script>RosenwegNav.init({ active: 'isp' });</script>
+
+    <!-- Header -->
+    <section class="bg-gradient-to-r from-blue-600 to-indigo-800 text-white py-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h1 class="text-3xl font-bold">Rosenweg ISP</h1>
+            <p class="mt-2 text-blue-100">Internetzugang und Netzwerk-Verwaltung</p>
+        </div>
+    </section>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+            <!-- WLAN-Zugang -->
+            <a href="/wlan.html" class="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition group">
+                <div class="flex items-center gap-4 mb-3">
+                    <div class="bg-blue-100 text-blue-600 p-3 rounded-lg group-hover:bg-blue-600 group-hover:text-white transition">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.14 0M1.394 9.393c5.857-5.858 15.355-5.858 21.213 0"/>
+                        </svg>
+                    </div>
+                    <h2 class="text-lg font-semibold text-gray-900">WLAN-Zugang</h2>
+                </div>
+                <p class="text-sm text-gray-600">Dein persönliches WLAN-Passwort und QR-Code zum Verbinden.</p>
+            </a>
+
+            <!-- Netzwerk-Status (Admin) -->
+            <div id="admin-cards" class="contents hidden">
+
+                <!-- Verbindungsnachweis -->
+                <a href="/verbindungen.html" class="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition group">
+                    <div class="flex items-center gap-4 mb-3">
+                        <div class="bg-amber-100 text-amber-600 p-3 rounded-lg group-hover:bg-amber-600 group-hover:text-white transition">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+                        </div>
+                        <h2 class="text-lg font-semibold text-gray-900">Verbindungsnachweis</h2>
+                    </div>
+                    <p class="text-sm text-gray-600">FPÜV-konforme Verbindungsprotokolle. Wer war wann verbunden?</p>
+                </a>
+
+                <!-- Netzwerk-Übersicht -->
+                <div class="bg-white rounded-xl shadow-sm border p-6">
+                    <div class="flex items-center gap-4 mb-3">
+                        <div class="bg-green-100 text-green-600 p-3 rounded-lg">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                            </svg>
+                        </div>
+                        <h2 class="text-lg font-semibold text-gray-900">Status</h2>
+                    </div>
+                    <div id="stats-content" class="text-sm text-gray-600">
+                        <p>Wird geladen...</p>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const user = AuthentikAuth.getUser();
+        if (user?.isAdmin) {
+            document.getElementById('admin-cards').classList.remove('hidden');
+
+            // Load stats
+            const token = AuthentikAuth.getToken();
+            if (token) {
+                fetch('/api/connections/stats', { headers: { Authorization: 'Bearer ' + token } })
+                    .then(r => r.ok ? r.json() : null)
+                    .then(data => {
+                        if (!data) return;
+                        const el = document.getElementById('stats-content');
+                        el.innerHTML = `
+                            <div class="space-y-2">
+                                <div class="flex justify-between"><span>Aktive Clients</span><span class="font-semibold">${data.activeClients}</span></div>
+                                <div class="flex justify-between"><span>Log-Einträge</span><span class="font-semibold">${data.totalEntries.toLocaleString()}</span></div>
+                                <hr class="my-2">
+                                <p class="text-xs text-gray-400">Letzte 24h nach Netzwerk:</p>
+                                ${data.last24h.slice(0, 5).map(n => `
+                                    <div class="flex justify-between text-xs">
+                                        <span>${n.network_name || '?'}</span>
+                                        <span>${n.clients} Clients</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        `;
+                    }).catch(() => {});
+            }
+        }
+    </script>
+</body>
+</html>
