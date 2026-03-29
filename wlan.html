@@ -5,10 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WLAN — Rosenweg</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="js/authentik-auth.js"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
-    <div id="nav-placeholder"></div>
+<body class="bg-gray-50">
+
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js?v=2"></script>
 
     <main class="max-w-2xl mx-auto px-4 py-8">
         <h1 class="text-2xl font-bold text-gray-900 mb-6">WLAN-Zugang</h1>
@@ -112,7 +118,9 @@
         }
 
         async function loadWifi() {
+            const el = document.getElementById('loading');
             try {
+                el.textContent = 'WLAN-Daten werden geladen...';
                 const resp = await AuthentikAuth.apiFetch('/api/wifi');
                 if (!resp.ok) {
                     const text = await resp.text();
@@ -121,7 +129,7 @@
                 const data = await resp.json();
                 await loadQRLib();
 
-                document.getElementById('loading').classList.add('hidden');
+                el.classList.add('hidden');
                 document.getElementById('content').classList.remove('hidden');
 
                 const container = document.getElementById('wifi-cards');
@@ -159,23 +167,17 @@
                         `).join('');
                 }
             } catch (err) {
-                document.getElementById('loading').textContent = 'Fehler: ' + err.message;
+                el.textContent = 'Fehler: ' + err.message;
                 console.error('WiFi load error:', err);
             }
         }
 
-        // Wait for login, then load WiFi data
-        const el = document.getElementById('loading');
+        // Init: nav.js handles auth, we just check token and load
         if (AuthentikAuth.isLoggedIn()) {
-            el.textContent = 'WLAN-Daten werden geladen...';
-            loadWifi().catch(err => {
-                el.textContent = 'Fehler: ' + err.message;
-                console.error(err);
-            });
+            loadWifi();
         } else {
-            el.innerHTML = 'Bitte zuerst <a href="#" onclick="AuthentikAuth.login(); return false;" class="text-blue-600 underline">einloggen</a>.';
+            document.getElementById('loading').innerHTML = 'Bitte zuerst <a href="#" onclick="AuthentikAuth.login(); return false;" class="text-blue-600 underline font-semibold">einloggen</a>.';
         }
     </script>
-    <script src="js/nav.js"></script>
 </body>
 </html>
