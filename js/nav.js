@@ -110,7 +110,7 @@ const RosenwegNav = {
             <div class="nav-dropdown-menu hidden absolute left-0 mt-1 w-48 bg-white rounded-lg shadow-lg border py-1 z-50">
               <a href="${base}projekte.html" data-perm-any="eigentuemer" class="${dropA('projekte')} block px-4 py-2 text-sm">Projekte</a>
               <a href="${base}entsorgung.html" class="${dropA('entsorgung')} block px-4 py-2 text-sm">Entsorgung</a>
-              <a href="${base}it-netzwerk.html" class="${dropA('it')} block px-4 py-2 text-sm">IT & Netzwerk</a>
+              <a href="${base}wlan.html" class="${dropA('wlan')} block px-4 py-2 text-sm">WLAN</a>
               <a href="${base}#dokumente" class="${dropA('dokumente')} block px-4 py-2 text-sm">Dokumente</a>
             </div>
           </div>
@@ -156,7 +156,7 @@ const RosenwegNav = {
 
         <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Infos</div>
         <a href="${base}entsorgung.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Entsorgung</a>
-        <a href="${base}it-netzwerk.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">IT & Netzwerk</a>
+        <a href="${base}wlan.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">WLAN</a>
         <a href="${base}#dokumente" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Dokumente</a>
 
         <hr class="my-2">

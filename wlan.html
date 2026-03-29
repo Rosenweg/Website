@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WLAN — Rosenweg</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="js/authentik-auth.js"></script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div id="nav-placeholder"></div>
+
+    <main class="max-w-2xl mx-auto px-4 py-8">
+        <h1 class="text-2xl font-bold text-gray-900 mb-6">WLAN-Zugang</h1>
+
+        <div id="loading" class="text-center py-12 text-gray-500">Laden...</div>
+        <div id="content" class="hidden space-y-6">
+            <!-- User WLANs (one card per house) -->
+            <div id="wifi-cards"></div>
+
+            <!-- No PPSK assigned -->
+            <div id="no-wifi" class="hidden bg-yellow-50 border border-yellow-200 rounded-xl p-6">
+                <h2 class="text-lg font-semibold text-yellow-800 mb-2">Kein WLAN-Zugang konfiguriert</h2>
+                <p class="text-sm text-yellow-700">Für dein Gebäude ist noch kein WLAN-Passwort hinterlegt. Bitte wende dich an die Technik-Gruppe.</p>
+            </div>
+
+            <!-- Guest WLAN -->
+            <div class="bg-white rounded-xl shadow-sm border p-6">
+                <h2 class="text-lg font-semibold text-gray-900 mb-1">Gast-WLAN</h2>
+                <p class="text-sm text-gray-500 mb-4">Offenes Netzwerk für Gäste</p>
+                <div class="flex justify-between items-center mb-4">
+                    <span class="text-sm text-gray-600">SSID</span>
+                    <span class="font-mono font-semibold text-gray-900">Rosenweg-Guest</span>
+                </div>
+                <div class="flex justify-between items-center mb-4">
+                    <span class="text-sm text-gray-600">Passwort</span>
+                    <span class="text-sm text-gray-500 italic">keins (offen)</span>
+                </div>
+                <div class="text-center">
+                    <p class="text-sm text-gray-500 mb-3">QR-Code scannen zum Verbinden</p>
+                    <canvas id="qr-guest"></canvas>
+                </div>
+            </div>
+
+            <!-- Admin: all PPSKs -->
+            <div id="admin-section" class="hidden bg-white rounded-xl shadow-sm border p-6">
+                <h2 class="text-lg font-semibold text-gray-900 mb-4">Alle WLAN-Passwörter (Admin)</h2>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="border-b">
+                                <th class="text-left py-2 px-2 text-gray-600">Netzwerk</th>
+                                <th class="text-left py-2 px-2 text-gray-600">VLAN</th>
+                                <th class="text-left py-2 px-2 text-gray-600">Passwort</th>
+                            </tr>
+                        </thead>
+                        <tbody id="admin-table"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        function loadQRLib() {
+            return new Promise(resolve => {
+                if (window.QRCode) return resolve();
+                const s = document.createElement('script');
+                s.src = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js';
+                s.onload = resolve;
+                document.head.appendChild(s);
+            });
+        }
+
+        function drawQR(canvas, text, size) {
+            QRCode.toCanvas(canvas, text, { width: size, margin: 2, color: { dark: '#1f2937' } });
+        }
+
+        function escWifi(s) {
+            return s.replace(/[\\;,":\s]/g, c => '\\' + c);
+        }
+
+        function createWifiCard(w) {
+            const div = document.createElement('div');
+            div.className = 'bg-white rounded-xl shadow-sm border p-6';
+            div.innerHTML = `
+                <h2 class="text-lg font-semibold text-gray-900 mb-1">Rosenweg ${w.hausNr}</h2>
+                <p class="text-sm text-gray-500 mb-4">WLAN-Zugang für dein Gebäude</p>
+                <div class="space-y-3 mb-6">
+                    <div class="flex justify-between items-center">
+                        <span class="text-sm text-gray-600">SSID</span>
+                        <span class="font-mono font-semibold text-gray-900">Rosenweg</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-sm text-gray-600">Passwort</span>
+                        <div class="flex items-center gap-2">
+                            <span class="font-mono font-semibold text-gray-900">${w.password}</span>
+                            <button class="copy-btn text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded transition" data-pw="${w.password}">Kopieren</button>
+                        </div>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-sm text-gray-600">Netzwerk</span>
+                        <span class="text-sm text-gray-700">${w.network}</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-sm text-gray-600">VLAN</span>
+                        <span class="text-sm text-gray-700">${w.vlan}</span>
+                    </div>
+                </div>
+                <div class="text-center">
+                    <p class="text-sm text-gray-500 mb-3">QR-Code scannen zum Verbinden</p>
+                    <canvas class="qr-wifi mx-auto" data-ssid="Rosenweg" data-pw="${w.password}"></canvas>
+                </div>
+            `;
+            return div;
+        }
+
+        async function loadWifi() {
+            try {
+                const resp = await AuthentikAuth.apiFetch('/api/wifi');
+                if (!resp.ok) throw new Error('API error');
+                const data = await resp.json();
+                await loadQRLib();
+
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('content').classList.remove('hidden');
+
+                const container = document.getElementById('wifi-cards');
+                if (data.wlans && data.wlans.length > 0) {
+                    for (const w of data.wlans.sort((a, b) => a.hausNr - b.hausNr)) {
+                        container.appendChild(createWifiCard(w));
+                    }
+                    // Draw QR codes
+                    document.querySelectorAll('.qr-wifi').forEach(canvas => {
+                        const wifiStr = `WIFI:T:WPA;S:${escWifi(canvas.dataset.ssid)};P:${escWifi(canvas.dataset.pw)};;`;
+                        drawQR(canvas, wifiStr, 200);
+                    });
+                    // Copy buttons
+                    document.querySelectorAll('.copy-btn').forEach(btn => {
+                        btn.addEventListener('click', () => {
+                            navigator.clipboard.writeText(btn.dataset.pw);
+                            btn.textContent = 'Kopiert!';
+                            setTimeout(() => btn.textContent = 'Kopieren', 2000);
+                        });
+                    });
+                } else {
+                    document.getElementById('no-wifi').classList.remove('hidden');
+                }
+
+                // Guest QR
+                drawQR(document.getElementById('qr-guest'), 'WIFI:T:nopass;S:Rosenweg-Guest;;', 200);
+
+                // Admin table
+                if (data.allPpsks) {
+                    document.getElementById('admin-section').classList.remove('hidden');
+                    document.getElementById('admin-table').innerHTML = data.allPpsks
+                        .sort((a, b) => (a.network || '').localeCompare(b.network || ''))
+                        .map(p => `
+                            <tr class="border-b hover:bg-gray-50">
+                                <td class="py-2 px-2 font-medium">${p.network || '?'}</td>
+                                <td class="py-2 px-2">${p.vlan || '—'}</td>
+                                <td class="py-2 px-2 font-mono text-xs">${p.password}</td>
+                            </tr>
+                        `).join('');
+                }
+            } catch (err) {
+                document.getElementById('loading').textContent = 'Fehler beim Laden der WLAN-Daten.';
+                console.error(err);
+            }
+        }
+
+        AuthentikAuth.init({ requireAuth: true }).then(user => {
+            if (user) loadWifi();
+        });
+    </script>
+    <script src="js/nav.js"></script>
+</body>
+</html>
