@@ -5233,7 +5233,7 @@ async function initDB() {
         timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         event_type VARCHAR(20) NOT NULL,
         source VARCHAR(10) NOT NULL,
-        mac VARCHAR(17) NOT NULL,
+        mac VARCHAR(17),
         ip VARCHAR(45),
         hostname VARCHAR(255),
         network_name VARCHAR(100),
@@ -5243,11 +5243,24 @@ async function initDB() {
         is_wired BOOLEAN DEFAULT FALSE,
         signal_dbm INT,
         rx_bytes BIGINT,
-        tx_bytes BIGINT
+        tx_bytes BIGINT,
+        dst_ip VARCHAR(45),
+        dst_port INT,
+        src_port INT,
+        proto VARCHAR(10),
+        raw_message TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_connlog_timestamp ON connection_log(timestamp);
       CREATE INDEX IF NOT EXISTS idx_connlog_mac ON connection_log(mac);
       CREATE INDEX IF NOT EXISTS idx_connlog_network ON connection_log(network_name);
+      CREATE INDEX IF NOT EXISTS idx_connlog_ip ON connection_log(ip);
+      CREATE INDEX IF NOT EXISTS idx_connlog_dst ON connection_log(dst_ip);
+      -- Add new columns if table already exists
+      ALTER TABLE connection_log ADD COLUMN IF NOT EXISTS dst_ip VARCHAR(45);
+      ALTER TABLE connection_log ADD COLUMN IF NOT EXISTS dst_port INT;
+      ALTER TABLE connection_log ADD COLUMN IF NOT EXISTS src_port INT;
+      ALTER TABLE connection_log ADD COLUMN IF NOT EXISTS proto VARCHAR(10);
+      ALTER TABLE connection_log ADD COLUMN IF NOT EXISTS raw_message TEXT;
     `);
 
     // Create index after migration (separate query to avoid parse errors on old schema)

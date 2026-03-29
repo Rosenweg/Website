@@ -10,6 +10,7 @@ env:
   API_IMAGE: ghcr.io/rosenweg/rosenweg-api
   WEBSITE_IMAGE: ghcr.io/rosenweg/rosenweg-website
   ENERGY_IMAGE: ghcr.io/rosenweg/energy-collector
+  SYSLOG_IMAGE: ghcr.io/rosenweg/syslog-collector
 
 jobs:
   build-api:
@@ -83,3 +84,27 @@ jobs:
           tags: |
             ${{ env.ENERGY_IMAGE }}:latest
             ${{ env.ENERGY_IMAGE }}:${{ github.sha }}
+
+  build-syslog-collector:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Syslog Collector
+        uses: docker/build-push-action@v6
+        with:
+          context: ./syslog-collector
+          push: true
+          tags: |
+            ${{ env.SYSLOG_IMAGE }}:latest
+            ${{ env.SYSLOG_IMAGE }}:${{ github.sha }}
