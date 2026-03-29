@@ -7,6 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/js/authentik-auth.js?v=2"></script>
     <script src="/js/site-config.js"></script>
+    <script src="/js/qrious.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; }
@@ -66,21 +67,10 @@
     </main>
 
     <script>
-        function loadQRLib() {
-            return new Promise((resolve, reject) => {
-                if (window.QRCode) return resolve();
-                const s = document.createElement('script');
-                s.src = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js';
-                s.onload = resolve;
-                s.onerror = () => resolve(); // Don't block if QR lib fails
-                document.head.appendChild(s);
-                setTimeout(resolve, 5000); // Timeout fallback
-            });
-        }
-
         function drawQR(canvas, text, size) {
-            if (!window.QRCode) return; // Skip if lib didn't load
-            try { QRCode.toCanvas(canvas, text, { width: size, margin: 2, color: { dark: '#1f2937' } }); } catch(e) {}
+            try {
+                new QRious({ element: canvas, value: text, size: size, foreground: '#1f2937', level: 'M' });
+            } catch(e) { console.error('QR error:', e); }
         }
 
         function escWifi(s) {
@@ -125,8 +115,6 @@
         async function renderWifi(data) {
             const el = document.getElementById('loading');
             try {
-                await loadQRLib();
-
                 el.classList.add('hidden');
                 document.getElementById('content').classList.remove('hidden');
 
