@@ -908,6 +908,99 @@ app.put('/api/auth/profile', authMiddleware, async (req, res) => {
   }
 });
 
+// WiFi info for authenticated users (PPSK from UniFi)
+const UNIFI_API_KEY = process.env.UNIFI_API_KEY || 'eQq7HtvQwjnAJzHwBLMrlueFDjSfmc6H';
+const UNIFI_HOST = process.env.UNIFI_HOST || 'https://100.64.2.1';
+
+app.get('/api/wifi', authMiddleware, async (req, res) => {
+  try {
+    // Get network configs (ID → name/vlan mapping)
+    const netResp = await fetch(`${UNIFI_HOST}/proxy/network/api/s/default/rest/networkconf`, {
+      headers: { 'X-API-Key': UNIFI_API_KEY },
+      signal: AbortSignal.timeout(5000),
+    });
+    const nets = (await netResp.json()).data || [];
+    const netMap = {};
+    for (const n of nets) {
+      netMap[n._id] = { name: n.name, vlan: n.vlan || null, subnet: n.ip_subnet || null };
+    }
+
+    // Get WLAN config with PPSKs
+    const wlanResp = await fetch(`${UNIFI_HOST}/proxy/network/api/s/default/rest/wlanconf`, {
+      headers: { 'X-API-Key': UNIFI_API_KEY },
+      signal: AbortSignal.timeout(5000),
+    });
+    const wlans = (await wlanResp.json()).data || [];
+    const rosenweg = wlans.find(w => w.name === 'Rosenweg' && w.enabled);
+    if (!rosenweg) return res.status(404).json({ error: 'WLAN nicht gefunden' });
+
+    // Extract house numbers from Authentik groups (e.g. "r9-bewohner", "r14-eigentuemer")
+    // bewohner groups take priority over eigentuemer
+    const groups = req.user.groups || [];
+    const bewohnerHaeuser = new Set();
+    const eigentuemerHaeuser = new Set();
+    for (const g of groups) {
+      const m = g.match(/^r(\d+)-(bewohner|eigentuemer)$/i);
+      if (m) {
+        if (m[2].toLowerCase() === 'bewohner') bewohnerHaeuser.add(parseInt(m[1]));
+        else eigentuemerHaeuser.add(parseInt(m[1]));
+      }
+    }
+    // Only show houses where user is bewohner; eigentuemer without bewohner see nothing
+    const hausNummern = bewohnerHaeuser;
+
+    // Fallback: extract from strasse field
+    if (hausNummern.size === 0) {
+      const userId = req.user.user_id || req.user.id;
+      const userRow = await pool.query('SELECT strasse FROM users WHERE id = $1', [userId]);
+      const strasse = userRow.rows[0]?.strasse || '';
+      const hausMatch = strasse.match(/rosenweg\s+(\d+)/i);
+      if (hausMatch) hausNummern.add(parseInt(hausMatch[1]));
+    }
+
+    // Find PPSKs for all user's houses
+    const userWlans = [];
+    if (rosenweg.private_preshared_keys_enabled) {
+      for (const hausNr of hausNummern) {
+        const targetNet = `RW${hausNr}-Clients`;
+        for (const ppsk of rosenweg.private_preshared_keys || []) {
+          const net = netMap[ppsk.networkconf_id];
+          if (net && net.name === targetNet) {
+            userWlans.push({
+              hausNr,
+              password: ppsk.password,
+              network: net.name,
+              vlan: net.vlan,
+              subnet: net.subnet,
+              rolle: bewohnerHaeuser.has(hausNr) ? 'bewohner' : 'eigentuemer',
+            });
+            break;
+          }
+        }
+      }
+    }
+
+    // Build all PPSKs for admins
+    let allPpsks = null;
+    if (req.user.isAdmin) {
+      allPpsks = (rosenweg.private_preshared_keys || []).map(ppsk => {
+        const net = netMap[ppsk.networkconf_id] || {};
+        return { network: net.name, vlan: net.vlan, password: ppsk.password };
+      });
+    }
+
+    res.json({
+      ssid: 'Rosenweg',
+      wlans: userWlans,
+      guest: { ssid: 'Rosenweg-Guest', password: null, security: 'open' },
+      allPpsks,
+    });
+  } catch (err) {
+    console.error('WiFi info error:', err.message);
+    res.status(500).json({ error: 'WiFi-Daten konnten nicht geladen werden' });
+  }
+});
+
 // Upload avatar (base64) and sync to Authentik
 app.put('/api/auth/avatar', authMiddleware, async (req, res) => {
   const userId = req.user.user_id || req.user.id;
