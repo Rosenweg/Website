@@ -117,19 +117,9 @@
             return div;
         }
 
-        async function loadWifi() {
+        async function renderWifi(data) {
             const el = document.getElementById('loading');
             try {
-                el.textContent = 'WLAN-Daten werden geladen...';
-                const token = AuthentikAuth.getToken();
-                const resp = await fetch('/api/wifi', {
-                    headers: { 'Authorization': 'Bearer ' + token }
-                });
-                if (!resp.ok) {
-                    const text = await resp.text();
-                    throw new Error(`API ${resp.status}: ${text}`);
-                }
-                const data = await resp.json();
                 await loadQRLib();
 
                 el.classList.add('hidden');
@@ -171,56 +161,24 @@
                 }
             } catch (err) {
                 el.textContent = 'Fehler: ' + err.message;
-                console.error('WiFi load error:', err);
+                el.classList.remove('hidden');
             }
         }
 
-        // Init: check login and load
+        // Init
         const _el = document.getElementById('loading');
-        const _dbg = document.createElement('pre');
-        _dbg.style.cssText = 'font-size:11px;color:#666;margin-top:20px;white-space:pre-wrap;word-break:break-all;';
-        _el.parentNode.appendChild(_dbg);
-        function dbg(msg) { _dbg.textContent += new Date().toLocaleTimeString() + ' ' + msg + '\n'; }
-
-        try {
-            const _token = AuthentikAuth.getToken();
-            dbg('Token: ' + (_token ? _token.substring(0, 30) + '...' : 'KEINER'));
-            dbg('isLoggedIn: ' + AuthentikAuth.isLoggedIn());
-            dbg('User: ' + JSON.stringify(AuthentikAuth.getUser()?.name || 'null'));
-
-            if (_token) {
-                _el.textContent = 'WLAN-Daten werden geladen...';
-                dbg('Starte fetch /api/wifi ...');
-
-                const controller = new AbortController();
-                setTimeout(() => { controller.abort(); dbg('TIMEOUT nach 10s!'); }, 10000);
-
-                fetch('/api/wifi', {
-                    headers: { 'Authorization': 'Bearer ' + _token },
-                    signal: controller.signal
-                }).then(r => {
-                    dbg('Response Status: ' + r.status);
-                    return r.text();
-                }).then(text => {
-                    dbg('Response Body: ' + text.substring(0, 300));
-                    try {
-                        const data = JSON.parse(text);
-                        _el.textContent = 'Daten geladen!';
-                        loadWifi();
-                    } catch(e) {
-                        _el.textContent = 'Fehler: Ungültige API-Antwort';
-                        dbg('JSON Parse Error: ' + e.message);
-                    }
-                }).catch(err => {
-                    dbg('Fetch Error: ' + err.name + ': ' + err.message);
-                    _el.textContent = 'Fehler: ' + err.message;
-                });
-            } else {
-                _el.innerHTML = 'Bitte zuerst <a href="#" onclick="AuthentikAuth.login(); return false;" class="text-blue-600 underline font-semibold">einloggen</a>.';
-            }
-        } catch(e) {
-            dbg('JS Error: ' + e.message + '\n' + e.stack);
-            _el.textContent = 'JS Fehler: ' + e.message;
+        const _token = AuthentikAuth.getToken();
+        if (_token) {
+            _el.textContent = 'WLAN-Daten werden geladen...';
+            fetch('/api/wifi', { headers: { 'Authorization': 'Bearer ' + _token } })
+                .then(r => {
+                    if (!r.ok) throw new Error('API Fehler: ' + r.status);
+                    return r.json();
+                })
+                .then(data => renderWifi(data))
+                .catch(err => { _el.textContent = 'Fehler: ' + err.message; });
+        } else {
+            _el.innerHTML = 'Bitte zuerst <a href="#" onclick="AuthentikAuth.login(); return false;" class="text-blue-600 underline font-semibold">einloggen</a>.';
         }
     </script>
 </body>
