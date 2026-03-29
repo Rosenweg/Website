@@ -165,10 +165,15 @@
         }
 
         // Wait for login, then load WiFi data
+        const el = document.getElementById('loading');
         if (AuthentikAuth.isLoggedIn()) {
-            loadWifi();
+            el.textContent = 'WLAN-Daten werden geladen...';
+            loadWifi().catch(err => {
+                el.textContent = 'Fehler: ' + err.message;
+                console.error(err);
+            });
         } else {
-            document.getElementById('loading').textContent = 'Bitte zuerst einloggen.';
+            el.innerHTML = 'Bitte zuerst <a href="#" onclick="AuthentikAuth.login(); return false;" class="text-blue-600 underline">einloggen</a>.';
         }
     </script>
     <script src="js/nav.js"></script>
