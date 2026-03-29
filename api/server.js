@@ -1048,7 +1048,13 @@ app.get('/api/tv/channels', authMiddleware, async (req, res) => {
 });
 
 // Stream proxy: /api/tv/stream/233.50.230.80:5000 → udpxy
-app.get('/api/tv/stream/:multicast', authMiddleware, async (req, res) => {
+// Accepts token as query param (for media players that can't set headers)
+app.get('/api/tv/stream/:multicast', (req, res, next) => {
+  if (!req.headers.authorization && req.query.token) {
+    req.headers.authorization = `Bearer ${req.query.token}`;
+  }
+  next();
+}, authMiddleware, async (req, res) => {
   const mc = req.params.multicast;
   if (!/^\d+\.\d+\.\d+\.\d+:\d+$/.test(mc)) {
     return res.status(400).json({ error: 'Invalid multicast address' });
