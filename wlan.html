@@ -15,16 +15,13 @@
 
         <div id="loading" class="text-center py-12 text-gray-500">Laden...</div>
         <div id="content" class="hidden space-y-6">
-            <!-- User WLANs (one card per house) -->
             <div id="wifi-cards"></div>
 
-            <!-- No PPSK assigned -->
             <div id="no-wifi" class="hidden bg-yellow-50 border border-yellow-200 rounded-xl p-6">
                 <h2 class="text-lg font-semibold text-yellow-800 mb-2">Kein WLAN-Zugang konfiguriert</h2>
                 <p class="text-sm text-yellow-700">Für dein Gebäude ist noch kein WLAN-Passwort hinterlegt. Bitte wende dich an die Technik-Gruppe.</p>
             </div>
 
-            <!-- Guest WLAN -->
             <div class="bg-white rounded-xl shadow-sm border p-6">
                 <h2 class="text-lg font-semibold text-gray-900 mb-1">Gast-WLAN</h2>
                 <p class="text-sm text-gray-500 mb-4">Offenes Netzwerk für Gäste</p>
@@ -42,7 +39,6 @@
                 </div>
             </div>
 
-            <!-- Admin: all PPSKs -->
             <div id="admin-section" class="hidden bg-white rounded-xl shadow-sm border p-6">
                 <h2 class="text-lg font-semibold text-gray-900 mb-4">Alle WLAN-Passwörter (Admin)</h2>
                 <div class="overflow-x-auto">
@@ -118,7 +114,10 @@
         async function loadWifi() {
             try {
                 const resp = await AuthentikAuth.apiFetch('/api/wifi');
-                if (!resp.ok) throw new Error('API error');
+                if (!resp.ok) {
+                    const text = await resp.text();
+                    throw new Error(`API ${resp.status}: ${text}`);
+                }
                 const data = await resp.json();
                 await loadQRLib();
 
@@ -130,12 +129,10 @@
                     for (const w of data.wlans.sort((a, b) => a.hausNr - b.hausNr)) {
                         container.appendChild(createWifiCard(w));
                     }
-                    // Draw QR codes
                     document.querySelectorAll('.qr-wifi').forEach(canvas => {
                         const wifiStr = `WIFI:T:WPA;S:${escWifi(canvas.dataset.ssid)};P:${escWifi(canvas.dataset.pw)};;`;
                         drawQR(canvas, wifiStr, 200);
                     });
-                    // Copy buttons
                     document.querySelectorAll('.copy-btn').forEach(btn => {
                         btn.addEventListener('click', () => {
                             navigator.clipboard.writeText(btn.dataset.pw);
@@ -147,10 +144,8 @@
                     document.getElementById('no-wifi').classList.remove('hidden');
                 }
 
-                // Guest QR
                 drawQR(document.getElementById('qr-guest'), 'WIFI:T:nopass;S:Rosenweg-Guest;;', 200);
 
-                // Admin table
                 if (data.allPpsks) {
                     document.getElementById('admin-section').classList.remove('hidden');
                     document.getElementById('admin-table').innerHTML = data.allPpsks
@@ -164,22 +159,17 @@
                         `).join('');
                 }
             } catch (err) {
-                document.getElementById('loading').textContent = 'Fehler beim Laden der WLAN-Daten.';
-                console.error(err);
+                document.getElementById('loading').textContent = 'Fehler: ' + err.message;
+                console.error('WiFi load error:', err);
             }
         }
 
-        AuthentikAuth.init({ requireAuth: true }).then(user => {
-            console.log('Auth result:', user);
-            if (user) {
-                loadWifi();
-            } else {
-                document.getElementById('loading').textContent = 'Nicht eingeloggt.';
-            }
-        }).catch(err => {
-            console.error('Auth init error:', err);
-            document.getElementById('loading').textContent = 'Auth-Fehler: ' + err.message;
-        });
+        // Wait for login, then load WiFi data
+        if (AuthentikAuth.isLoggedIn()) {
+            loadWifi();
+        } else {
+            document.getElementById('loading').textContent = 'Bitte zuerst einloggen.';
+        }
     </script>
     <script src="js/nav.js"></script>
 </body>
