@@ -5,6 +5,7 @@ Receives syslog messages from UDM-Pro SIEM integration,
 parses firewall/NAT/WiFi events, and stores them in PostgreSQL.
 """
 
+import json
 import os
 import re
 import socket
@@ -223,17 +224,133 @@ def flush_loop(conn_factory):
             conn = conn_factory()
 
 
+def parse_json_event(msg):
+    """Parse JSON-formatted SIEM event from UniFi."""
+    try:
+        data = json.loads(msg)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+    now = datetime.now(timezone.utc)
+    event_type = None
+    result = {'timestamp': now, 'source': 'syslog', 'raw_message': msg[:500]}
+
+    # UniFi SIEM JSON format varies — extract what we can
+    src_ip = data.get('src_ip') or data.get('srcip') or data.get('inner_alert_action', {}).get('src_ip')
+    dst_ip = data.get('dest_ip') or data.get('dstip') or data.get('dst_ip')
+    src_port = data.get('src_port') or data.get('srcport')
+    dst_port = data.get('dest_port') or data.get('dstport') or data.get('dst_port')
+    proto = data.get('proto') or data.get('protocol')
+    mac = data.get('mac') or data.get('src_mac')
+    hostname = data.get('hostname') or data.get('host')
+    action = data.get('action') or data.get('event_type') or data.get('key', '')
+    ip = data.get('ip') or src_ip
+
+    # Determine event type
+    key = str(data.get('key', data.get('event_type', data.get('_type', '')))).lower()
+    if any(k in key for k in ['fw', 'firewall', 'ips', 'threat', 'anomaly']):
+        event_type = 'firewall'
+    elif any(k in key for k in ['sta_connect', 'assoc', 'wifi', 'client']):
+        event_type = 'connect' if 'disconnect' not in key else 'disconnect'
+    elif 'dhcp' in key:
+        event_type = 'dhcp'
+    elif src_ip and dst_ip:
+        event_type = 'traffic'
+    else:
+        event_type = 'siem'
+
+    # Skip internal-only traffic
+    if src_ip and dst_ip:
+        if str(src_ip).startswith('100.64.') and str(dst_ip).startswith('100.64.'):
+            return None
+
+    if ip:
+        vlan, network = ip_to_vlan(str(ip))
+        result['vlan'] = vlan
+        result['network_name'] = network
+
+    result.update({
+        'event_type': event_type,
+        'mac': str(mac)[:17] if mac else None,
+        'ip': str(ip) if ip else (str(src_ip) if src_ip else None),
+        'hostname': str(hostname) if hostname else None,
+        'dst_ip': str(dst_ip) if dst_ip else None,
+        'src_port': int(src_port) if src_port else None,
+        'dst_port': int(dst_port) if dst_port else None,
+        'proto': str(proto).upper()[:10] if proto else None,
+    })
+    return result
+
+
+def handle_message(data, stats):
+    """Parse a received message (syslog or JSON)."""
+    msg = data.decode('utf-8', errors='replace').strip()
+
+    # Try JSON first (SIEM format)
+    event = parse_json_event(msg)
+    if event:
+        return event
+
+    # Try classic syslog
+    event = parse_syslog(data)
+    if event:
+        return event
+
+    # Unparsed
+    if stats['skipped'] <= 20:
+        print(f'[Syslog] UNPARSED: {msg[:300]}', flush=True)
+    return None
+
+
+def handle_tcp_client(conn, addr, stats):
+    """Handle a TCP connection (one or more newline-delimited messages)."""
+    buf = b''
+    conn.settimeout(5.0)
+    try:
+        while running:
+            try:
+                chunk = conn.recv(65535)
+                if not chunk:
+                    break
+                buf += chunk
+                while b'\n' in buf:
+                    line, buf = buf.split(b'\n', 1)
+                    if line.strip():
+                        stats['received'] += 1
+                        event = handle_message(line, stats)
+                        if event:
+                            with buffer_lock:
+                                event_buffer.append(event)
+                            stats['parsed'] += 1
+                        else:
+                            stats['skipped'] += 1
+            except socket.timeout:
+                continue
+    except Exception as e:
+        if running:
+            print(f'[Syslog] TCP client error: {e}', flush=True)
+    finally:
+        conn.close()
+
+
 def main():
     global running
 
-    print(f'[Syslog] Starting collector on UDP port {SYSLOG_PORT}', flush=True)
+    print(f'[Syslog] Starting collector on UDP+TCP port {SYSLOG_PORT}', flush=True)
     print(f'[Syslog] DB: {DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}', flush=True)
 
     # Create UDP socket
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(('0.0.0.0', SYSLOG_PORT))
-    sock.settimeout(1.0)
+    udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    udp_sock.bind(('0.0.0.0', SYSLOG_PORT))
+    udp_sock.settimeout(1.0)
+
+    # Create TCP socket
+    tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    tcp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    tcp_sock.bind(('0.0.0.0', SYSLOG_PORT))
+    tcp_sock.listen(5)
+    tcp_sock.settimeout(1.0)
 
     # Start flush thread
     flush_thread = threading.Thread(target=flush_loop, args=(get_db_connection,), daemon=True)
@@ -252,38 +369,46 @@ def main():
     last_stats = time.time()
 
     while running:
+        # UDP
         try:
-            data, addr = sock.recvfrom(65535)
+            data, addr = udp_sock.recvfrom(65535)
             stats['received'] += 1
-
-            event = parse_syslog(data)
+            event = handle_message(data, stats)
             if event:
                 with buffer_lock:
                     event_buffer.append(event)
                 stats['parsed'] += 1
             else:
                 stats['skipped'] += 1
-                # Log first 10 unparsed messages for debugging
-                if stats['skipped'] <= 10:
-                    msg = data.decode('utf-8', errors='replace').strip()
-                    print(f'[Syslog] UNPARSED: {msg[:300]}', flush=True)
-
-            # Print stats every 60s
-            if time.time() - last_stats > 60:
-                print(f"[Syslog] Stats: {stats['received']} received, {stats['parsed']} parsed, {stats['skipped']} skipped", flush=True)
-                last_stats = time.time()
-
         except socket.timeout:
-            continue
+            pass
         except Exception as e:
             if running:
-                print(f'[Syslog] Error: {e}', flush=True)
+                print(f'[Syslog] UDP error: {e}', flush=True)
+
+        # TCP — accept new connections
+        try:
+            conn, addr = tcp_sock.accept()
+            print(f'[Syslog] TCP connection from {addr[0]}', flush=True)
+            t = threading.Thread(target=handle_tcp_client, args=(conn, addr, stats), daemon=True)
+            t.start()
+        except socket.timeout:
+            pass
+        except Exception as e:
+            if running:
+                print(f'[Syslog] TCP accept error: {e}', flush=True)
+
+        # Stats
+        if time.time() - last_stats > 60:
+            print(f"[Syslog] Stats: {stats['received']} received, {stats['parsed']} parsed, {stats['skipped']} skipped", flush=True)
+            last_stats = time.time()
 
     # Final flush
     conn = get_db_connection()
     flush_buffer(conn)
     conn.close()
-    sock.close()
+    udp_sock.close()
+    tcp_sock.close()
     print('[Syslog] Stopped.', flush=True)
 
 
