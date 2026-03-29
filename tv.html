@@ -75,7 +75,8 @@
 
         async function loadChannels() {
             try {
-                const resp = await fetch('/api/tv/channels');
+                const token = AuthentikAuth.getToken();
+                const resp = await fetch('/api/tv/channels', { headers: { Authorization: 'Bearer ' + token } });
                 if (!resp.ok) throw new Error('Fehler ' + resp.status);
                 channels = await resp.json();
                 document.getElementById('status').textContent = `${channels.length} Kanäle`;
@@ -151,7 +152,8 @@
             }
 
             // Use mpegts.js for MPEG-TS over HTTP (from udpxy)
-            const streamUrl = `${UDPXY_URL}/${ch.multicast}`;
+            const token = AuthentikAuth.getToken();
+            const streamUrl = `${UDPXY_URL}/${ch.multicast}?token=${encodeURIComponent(token)}`;
 
             if (mpegts.isSupported()) {
                 player = mpegts.createPlayer({
