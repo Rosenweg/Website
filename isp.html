@@ -77,6 +77,32 @@
             <!-- Netzwerk-Status (Admin) -->
             <div id="admin-cards" class="contents hidden">
 
+                <!-- Netzwerk -->
+                <a href="/netzwerk.html" class="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition group">
+                    <div class="flex items-center gap-4 mb-3">
+                        <div class="bg-cyan-100 text-cyan-600 p-3 rounded-lg group-hover:bg-cyan-600 group-hover:text-white transition">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/>
+                            </svg>
+                        </div>
+                        <h2 class="text-lg font-semibold text-gray-900">Netzwerk</h2>
+                    </div>
+                    <p class="text-sm text-gray-600">UniFi Geräte, Clients, VLANs und Admin-Dienste.</p>
+                </a>
+
+                <!-- DMARC -->
+                <a href="/dmarc.html" class="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition group">
+                    <div class="flex items-center gap-4 mb-3">
+                        <div class="bg-green-100 text-green-600 p-3 rounded-lg group-hover:bg-green-600 group-hover:text-white transition">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                            </svg>
+                        </div>
+                        <h2 class="text-lg font-semibold text-gray-900">DMARC</h2>
+                    </div>
+                    <p class="text-sm text-gray-600">Email-Authentifizierung: SPF, DKIM und DMARC Reports.</p>
+                </a>
+
                 <!-- Verbindungsnachweis -->
                 <a href="/verbindungen.html" class="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition group">
                     <div class="flex items-center gap-4 mb-3">
@@ -87,23 +113,8 @@
                         </div>
                         <h2 class="text-lg font-semibold text-gray-900">Verbindungsnachweis</h2>
                     </div>
-                    <p class="text-sm text-gray-600">FPÜV-konforme Verbindungsprotokolle. Wer war wann verbunden?</p>
+                    <p class="text-sm text-gray-600">FPÜV-konforme Verbindungsprotokolle.</p>
                 </a>
-
-                <!-- Netzwerk-Übersicht -->
-                <div class="bg-white rounded-xl shadow-sm border p-6">
-                    <div class="flex items-center gap-4 mb-3">
-                        <div class="bg-green-100 text-green-600 p-3 rounded-lg">
-                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
-                            </svg>
-                        </div>
-                        <h2 class="text-lg font-semibold text-gray-900">Status</h2>
-                    </div>
-                    <div id="stats-content" class="text-sm text-gray-600">
-                        <p>Wird geladen...</p>
-                    </div>
-                </div>
 
             </div>
         </div>
@@ -114,30 +125,6 @@
         if (user?.isAdmin) {
             document.getElementById('admin-cards').classList.remove('hidden');
 
-            // Load stats
-            const token = AuthentikAuth.getToken();
-            if (token) {
-                fetch('/api/connections/stats', { headers: { Authorization: 'Bearer ' + token } })
-                    .then(r => r.ok ? r.json() : null)
-                    .then(data => {
-                        if (!data) return;
-                        const el = document.getElementById('stats-content');
-                        el.innerHTML = `
-                            <div class="space-y-2">
-                                <div class="flex justify-between"><span>Aktive Clients</span><span class="font-semibold">${data.activeClients}</span></div>
-                                <div class="flex justify-between"><span>Log-Einträge</span><span class="font-semibold">${data.totalEntries.toLocaleString()}</span></div>
-                                <hr class="my-2">
-                                <p class="text-xs text-gray-400">Letzte 24h nach Netzwerk:</p>
-                                ${data.last24h.slice(0, 5).map(n => `
-                                    <div class="flex justify-between text-xs">
-                                        <span>${n.network_name || '?'}</span>
-                                        <span>${n.clients} Clients</span>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        `;
-                    }).catch(() => {});
-            }
         }
     </script>
 </body>
