@@ -1003,7 +1003,7 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
 
 // ─── TV7 (Init7 IPTV) ────────────────────────────────────────────────
 const TV7_PLAYLIST_URL = 'https://api.init7.net/tvchannels.m3u';
-const UDPXY_HOST = process.env.UDPXY_HOST || 'http://tv-proxy:4022';
+const UDPXY_HOST = process.env.UDPXY_HOST || 'http://100.64.2.31:4022';
 let tv7ChannelsCache = null;
 let tv7CacheTime = 0;
 
