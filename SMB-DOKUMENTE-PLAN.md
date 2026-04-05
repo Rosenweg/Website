@@ -80,10 +80,21 @@ Gotenberg (Preview) ──────────────┘         /srv/d
    create mask = 0664
    directory mask = 0775
    force group = rosenweg
+
+[scans]
+   comment = Scanner Upload
+   path = /srv/documents/Scans
+   browseable = no
+   read only = no
+   valid users = scanner
+   create mask = 0664
+   directory mask = 0775
+   force group = rosenweg
 ```
 
 **Samba-User:**
 - `api-svc` — Service-Account für Docker CIFS Volume (Passwort: in `CIFS_PASSWORD` env var)
+- `scanner` — Service-Account für Netzwerkscanner (Passwort: `ScanRw2026`, nur Zugriff auf `[scans]` Share)
 - `@rosenweg` — Gruppe für End-User (noch nicht konfiguriert, braucht LDAP/Authentik-Integration)
 
 **Daten:** 140 Dateien, ~114MB in `/srv/documents/`
