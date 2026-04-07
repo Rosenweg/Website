@@ -186,6 +186,42 @@ VLAN <HausNr><Nr> = Bewohner-VLANs (VLAN-only, z.B. 911=RW9 Bew.11, 1803=RW18 Be
 | ISP | Init7 (Switzerland) Ltd. |
 | DNS | 1.1.1.1, 8.8.8.8 |
 
+## Firewall-Zonen
+
+Die UDM nutzt zonenbasierte Firewall-Regeln. Jede Zone enthält ein oder mehrere Netzwerke.
+
+| Zone | Netzwerke |
+|------|-----------|
+| Rosenweg Kooperation | Inter-Building, RK-Dienste (2), RK-Clients (9), RK-Technik (3), RK-OSPF (6), RK-BGP (7) |
+| Rosenweg 9 | RW9-Kameras (92), RW9-Dienste (91), RW9-Technik (90), RW9-Clients (99) |
+| Rosenweg 1 | RW1-Clients (19) |
+| Rosenweg 2 | RW2-Clients (29), RW2-Technik (20) |
+| Rosenweg 4 | RW4-Clients (49) |
+| Rosenweg 5 | RW5-Clients (59) |
+| Rosenweg 6 | RW6-Clients (69) |
+| Rosenweg 8 | RW8-Clients (89) |
+| Rosenweg 10 | RW10-Clients (109) |
+| Rosenweg 12 | RW12-Clients (129) |
+| Rosenweg 13 | RW13-Clients (139) |
+| Rosenweg 14 | RW14-Clients (149) |
+| Rosenweg 16 | RW16-Clients (169) |
+| Rosenweg 17 | RW17-Clients (179) |
+| Rosenweg 18 | RW18-Clients (189) |
+| External | Internet 1, Internet 2, WG-HEL1 |
+| Vpn | Rosenweg Wireguard Client |
+| Hotspot | Rosenweg-Guest (8) |
+| Internal | (leer) |
+| Gateway | (leer) |
+| Dmz | (leer) |
+
+### Benötigte Regeln für CUPS Druckserver
+
+| Von | Nach | Ports | Beschreibung |
+|-----|------|-------|-------------|
+| Rosenweg Kooperation | Rosenweg 9 | TCP 631, 9100 | CUPS → DruckerR9 |
+| Rosenweg Kooperation | Rosenweg 13 | TCP 631, 9100 | CUPS → DruckerR13 |
+| Alle Zonen | Rosenweg Kooperation | TCP 631 | Clients → CUPS Server |
+
 ## UniFi Protect
 
 - NVR integriert in UDM-Pro
