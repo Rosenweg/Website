@@ -2432,11 +2432,11 @@ async function pollGmailForVerteiler() {
             verteilerAddress = `${base}@${VERTEILER_DOMAIN}`;
           }
 
-          // To: header contains @rosenweg4303.ch address (strip +tag if present)
+          // To/Cc/Bcc: header contains @rosenweg4303.ch address (strip +tag if present)
           if (!verteilerAddress) {
-            const toMatch = headers.match(/^To:\s*.*?([a-z0-9._+-]+@rosenweg4303\.ch)/im);
-            if (toMatch) {
-              verteilerAddress = toMatch[1].toLowerCase().replace(/\+[^@]*/, '');
+            const toCcMatch = headers.match(/^(?:To|Cc|Bcc):\s*.*?([a-z0-9._+-]+@rosenweg4303\.ch)/im);
+            if (toCcMatch) {
+              verteilerAddress = toCcMatch[1].toLowerCase().replace(/\+[^@]*/, '');
             }
           }
 
