@@ -2462,15 +2462,26 @@ async function pollGmailForVerteiler() {
             if (senderEmail) {
               // Allow emails from own domain
               if (senderEmail.endsWith(`@${VERTEILER_DOMAIN}`)) authorized = true;
-              // Check DB for known users
+              // Check DB for known users (both stripped and original email)
               if (!authorized) {
-                const known = await pool.query('SELECT id FROM users WHERE LOWER(email) = $1 AND active = true', [senderEmail]);
+                const known = await pool.query(
+                  "SELECT id FROM users WHERE LOWER(email) = $1 OR LOWER(email) = $2 OR LOWER(email) LIKE $3",
+                  [senderEmail, senderEmailRaw || '', `%${senderEmail.split('@')[0]}@%`]
+                );
                 if (known.rows.length > 0) authorized = true;
               }
-              // Also check with original (tagged) email
-              if (!authorized && senderEmailRaw !== senderEmail) {
-                const known2 = await pool.query('SELECT id FROM users WHERE LOWER(email) = $1 AND active = true', [senderEmailRaw]);
-                if (known2.rows.length > 0) authorized = true;
+              // Also check Authentik users via API (cached)
+              if (!authorized && AUTHENTIK_API_TOKEN) {
+                try {
+                  const akResp = await fetch(`${AUTHENTIK_URL}/api/v3/core/users/?search=${encodeURIComponent(senderEmail)}`, {
+                    headers: { 'Authorization': `Bearer ${AUTHENTIK_API_TOKEN}` },
+                    signal: AbortSignal.timeout(5000),
+                  });
+                  if (akResp.ok) {
+                    const akData = await akResp.json();
+                    if (akData.results?.length > 0) authorized = true;
+                  }
+                } catch {}
               }
             }
             if (!authorized) {
