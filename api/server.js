@@ -1073,6 +1073,32 @@ app.get('/api/tv/stream/:multicast', (req, res, next) => {
   }
 });
 
+// ─── Print Job Pickup Confirmation ───────────────────────────────────
+app.get('/api/pickup/:token', async (req, res) => {
+  try {
+    const job = await pool.query('SELECT * FROM print_jobs WHERE token = $1', [req.params.token]);
+    if (job.rows.length === 0) return res.status(404).json({ error: 'Druckauftrag nicht gefunden' });
+    res.json(job.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/pickup/:token', async (req, res) => {
+  try {
+    const job = await pool.query('SELECT * FROM print_jobs WHERE token = $1', [req.params.token]);
+    if (job.rows.length === 0) return res.status(404).json({ error: 'Druckauftrag nicht gefunden' });
+    if (job.rows[0].status === 'picked_up') return res.json({ ...job.rows[0], message: 'Bereits abgeholt' });
+    const updated = await pool.query(
+      "UPDATE print_jobs SET status = 'picked_up', picked_up_at = NOW(), picked_up_by = $1 WHERE token = $2 RETURNING *",
+      [req.body?.name || 'Empfänger', req.params.token]
+    );
+    res.json({ ...updated.rows[0], message: 'Abholung bestätigt' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Upload avatar (base64) and sync to Authentik
 app.put('/api/auth/avatar', authMiddleware, async (req, res) => {
   const userId = req.user.user_id || req.user.id;
@@ -2505,6 +2531,10 @@ async function pollGmailForVerteiler() {
               }
             }
 
+            // Create print job with token for pickup confirmation
+            const jobToken = crypto.randomBytes(16).toString('hex');
+            const pickupUrl = `${SITE_URL}/abholung.html?token=${jobToken}`;
+
             console.log(`[IMAP] Print job for ${printer} from ${senderEmail} (UID ${uid})${recipientInfo ? ` → ${recipientInfo.name}` : ''}`);
             try {
               const dl = await client.download(String(uid), undefined, { uid: true });
@@ -2591,6 +2621,23 @@ async function pollGmailForVerteiler() {
     </tbody>
   </table>
 
+  ${recipientTag ? `
+  <h2 class="section-title">Abholung bestätigen</h2>
+  <table class="info">
+    <thead><tr><th>Funktion</th><th>Angabe</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="label">QR-Code scannen</td>
+        <td class="value" style="text-align:center;padding:15px">
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(pickupUrl)}" width="150" height="150" alt="QR">
+          <br><span style="font-size:10px;color:#888">${esc(pickupUrl)}</span>
+        </td>
+      </tr>
+      <tr><td class="label">Anleitung</td><td class="value">QR-Code mit dem Smartphone scannen und Abholung bestätigen.</td></tr>
+    </tbody>
+  </table>
+  ` : ''}
+
   <div class="footer">STWEG-Kooperation Rosenweg • Druckauftrag • 4303 Kaiseraugst • ${esc(now)}</div>
 </body></html>`;
 
@@ -2671,6 +2718,19 @@ async function pollGmailForVerteiler() {
               }
 
               console.log(`[Print] ${printed} items sent to ${printer}`);
+
+              // Save print job to DB
+              if (recipientTag) {
+                try {
+                  await pool.query(
+                    `INSERT INTO print_jobs (token, printer, recipient_name, recipient_address, recipient_wohnung, recipient_stweg, sender_email, subject, documents)
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+                    [jobToken, printer, recipientInfo?.name || recipientTag, recipientInfo?.strasse || null,
+                     recipientInfo?.wohnung || null, recipientInfo?.stweg || null,
+                     senderEmailRaw, parsed.subject, printed]
+                  );
+                } catch (dbErr) { console.error(`[Print] DB save error: ${dbErr.message}`); }
+              }
 
               // Notify Technik + Präsident if recipient was tagged
               if (recipientTag && printed > 0) {
@@ -5605,6 +5665,25 @@ async function initDB() {
       ALTER TABLE connection_log ADD COLUMN IF NOT EXISTS proto VARCHAR(10);
       ALTER TABLE connection_log ADD COLUMN IF NOT EXISTS raw_message TEXT;
       CREATE INDEX IF NOT EXISTS idx_connlog_timestamp ON connection_log(timestamp);
+
+      -- Print jobs for pickup confirmation
+      CREATE TABLE IF NOT EXISTS print_jobs (
+        id SERIAL PRIMARY KEY,
+        token VARCHAR(64) UNIQUE NOT NULL,
+        printer VARCHAR(50) NOT NULL,
+        recipient_name VARCHAR(255),
+        recipient_address VARCHAR(255),
+        recipient_wohnung VARCHAR(255),
+        recipient_stweg INT,
+        sender_email VARCHAR(255),
+        subject TEXT,
+        documents INT DEFAULT 0,
+        status VARCHAR(20) DEFAULT 'printed',
+        picked_up_at TIMESTAMPTZ,
+        picked_up_by VARCHAR(255),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_print_jobs_token ON print_jobs(token);
       CREATE INDEX IF NOT EXISTS idx_connlog_mac ON connection_log(mac);
       CREATE INDEX IF NOT EXISTS idx_connlog_network ON connection_log(network_name);
       CREATE INDEX IF NOT EXISTS idx_connlog_ip ON connection_log(ip);
