@@ -2446,12 +2446,18 @@ async function pollGmailForVerteiler() {
             const PRINT_API = process.env.PRINT_API_URL || 'http://100.64.2.32:8080';
             const PRINT_TOKEN = process.env.PRINT_API_SECRET || 'RwPrintApi2026';
 
-            // Whitelist check: only known users may print
-            const senderEmail = headers.match(/^From:\s*.*?([a-z0-9._+-]+@[a-z0-9.-]+)/im)?.[1]?.toLowerCase();
+            // Whitelist check: only known users may print (strip +tags from email)
+            const senderEmailRaw = headers.match(/^From:\s*.*?([a-z0-9._+-]+@[a-z0-9.-]+)/im)?.[1]?.toLowerCase();
+            const senderEmail = senderEmailRaw?.replace(/\+[^@]*/, ''); // strip +tag
             let authorized = false;
             if (senderEmail) {
               const known = await pool.query('SELECT id FROM users WHERE LOWER(email) = $1 AND active = true', [senderEmail]);
-              authorized = known.rows.length > 0;
+              if (known.rows.length > 0) authorized = true;
+              // Also check with original (tagged) email
+              if (!authorized && senderEmailRaw !== senderEmail) {
+                const known2 = await pool.query('SELECT id FROM users WHERE LOWER(email) = $1 AND active = true', [senderEmailRaw]);
+                if (known2.rows.length > 0) authorized = true;
+              }
             }
             if (!authorized) {
               console.log(`[Print] Rejected: ${senderEmail || 'unknown'} not whitelisted for ${printer}`);
