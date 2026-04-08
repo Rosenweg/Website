@@ -2445,7 +2445,21 @@ async function pollGmailForVerteiler() {
             const printer = verteilerAddress.startsWith('druckerr9') ? 'DruckerR9' : 'DruckerR13';
             const PRINT_API = process.env.PRINT_API_URL || 'http://100.64.2.32:8080';
             const PRINT_TOKEN = process.env.PRINT_API_SECRET || 'RwPrintApi2026';
-            console.log(`[IMAP] Print job for ${printer} from UID ${uid}`);
+
+            // Whitelist check: only known users may print
+            const senderEmail = headers.match(/^From:\s*.*?([a-z0-9._+-]+@[a-z0-9.-]+)/im)?.[1]?.toLowerCase();
+            let authorized = false;
+            if (senderEmail) {
+              const known = await pool.query('SELECT id FROM users WHERE LOWER(email) = $1 AND active = true', [senderEmail]);
+              authorized = known.rows.length > 0;
+            }
+            if (!authorized) {
+              console.log(`[Print] Rejected: ${senderEmail || 'unknown'} not whitelisted for ${printer}`);
+              await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
+              continue;
+            }
+
+            console.log(`[IMAP] Print job for ${printer} from ${senderEmail} (UID ${uid})`);
             try {
               const dl = await client.download(String(uid), undefined, { uid: true });
               const chunks = [];
