@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Abholung bestätigen — Rosenweg</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center p-4">
+    <div class="max-w-md w-full">
+        <div id="loading" class="text-center py-12 text-gray-500">Laden...</div>
+
+        <div id="job-info" class="hidden bg-white rounded-xl shadow-sm border overflow-hidden">
+            <div class="bg-red-700 text-white p-6 text-center">
+                <img src="/logo-rosenweg.png" alt="Rosenweg" class="w-16 h-16 mx-auto mb-3 rounded-full bg-white p-1">
+                <h1 class="text-xl font-bold">Druckauftrag abholen</h1>
+                <p class="text-red-200 text-sm mt-1">STWEG-Kooperation Rosenweg</p>
+            </div>
+
+            <div class="p-6 space-y-4">
+                <div class="space-y-2">
+                    <div class="flex justify-between text-sm">
+                        <span class="text-gray-500">Empfänger</span>
+                        <span id="j-name" class="font-semibold text-gray-900"></span>
+                    </div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-gray-500">Adresse</span>
+                        <span id="j-address" class="text-gray-700"></span>
+                    </div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-gray-500">Wohnung</span>
+                        <span id="j-wohnung" class="text-gray-700"></span>
+                    </div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-gray-500">Drucker</span>
+                        <span id="j-printer" class="text-gray-700"></span>
+                    </div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-gray-500">Betreff</span>
+                        <span id="j-subject" class="text-gray-700"></span>
+                    </div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-gray-500">Datum</span>
+                        <span id="j-date" class="text-gray-700"></span>
+                    </div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-gray-500">Status</span>
+                        <span id="j-status" class="font-medium"></span>
+                    </div>
+                </div>
+
+                <div id="confirm-section">
+                    <input type="text" id="pickup-name" placeholder="Ihr Name (optional)"
+                        class="w-full border rounded-lg px-4 py-2 text-sm mb-3">
+                    <button id="confirm-btn" onclick="confirmPickup()"
+                        class="w-full bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 transition">
+                        Abholung bestätigen
+                    </button>
+                </div>
+
+                <div id="already-picked" class="hidden text-center py-4">
+                    <div class="text-green-600 text-4xl mb-2">✓</div>
+                    <p class="font-semibold text-green-700">Bereits abgeholt</p>
+                    <p id="picked-info" class="text-sm text-gray-500 mt-1"></p>
+                </div>
+            </div>
+        </div>
+
+        <div id="error" class="hidden bg-red-50 border border-red-200 rounded-xl p-6 text-center">
+            <p class="text-red-700 font-semibold">Druckauftrag nicht gefunden</p>
+            <p class="text-sm text-red-500 mt-1">Der QR-Code ist ungültig oder abgelaufen.</p>
+        </div>
+    </div>
+
+    <script>
+        const token = new URLSearchParams(window.location.search).get('token');
+
+        async function loadJob() {
+            if (!token) { showError(); return; }
+            try {
+                const resp = await fetch('/api/pickup/' + token);
+                if (!resp.ok) { showError(); return; }
+                const job = await resp.json();
+                showJob(job);
+            } catch { showError(); }
+        }
+
+        function showJob(job) {
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('job-info').classList.remove('hidden');
+            document.getElementById('j-name').textContent = job.recipient_name || '—';
+            document.getElementById('j-address').textContent = job.recipient_address || '—';
+            document.getElementById('j-wohnung').textContent = job.recipient_wohnung || '—';
+            document.getElementById('j-printer').textContent = job.printer || '—';
+            document.getElementById('j-subject').textContent = job.subject || '—';
+            document.getElementById('j-date').textContent = new Date(job.created_at).toLocaleString('de-CH');
+
+            if (job.status === 'picked_up') {
+                document.getElementById('j-status').textContent = 'Abgeholt';
+                document.getElementById('j-status').classList.add('text-green-600');
+                document.getElementById('confirm-section').classList.add('hidden');
+                document.getElementById('already-picked').classList.remove('hidden');
+                document.getElementById('picked-info').textContent =
+                    `Am ${new Date(job.picked_up_at).toLocaleString('de-CH')}${job.picked_up_by ? ' von ' + job.picked_up_by : ''}`;
+            } else {
+                document.getElementById('j-status').textContent = 'Bereit zur Abholung';
+                document.getElementById('j-status').classList.add('text-amber-600');
+            }
+        }
+
+        function showError() {
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('error').classList.remove('hidden');
+        }
+
+        async function confirmPickup() {
+            const name = document.getElementById('pickup-name').value.trim() || 'Empfänger';
+            const btn = document.getElementById('confirm-btn');
+            btn.disabled = true;
+            btn.textContent = 'Wird bestätigt...';
+            try {
+                const resp = await fetch('/api/pickup/' + token, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                const result = await resp.json();
+                showJob(result);
+            } catch {
+                btn.textContent = 'Fehler — nochmal versuchen';
+                btn.disabled = false;
+            }
+        }
+
+        loadJob();
+    </script>
+</body>
+</html>
