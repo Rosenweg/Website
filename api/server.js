@@ -2542,25 +2542,56 @@ async function pollGmailForVerteiler() {
 
               const coverHtml = `<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
-  @page { size: ${printer === 'DruckerR13' ? 'A3' : 'A4'}; margin: 20mm; }
-  body { font-family: Arial, Helvetica, sans-serif; color: #333; }
-  .header { display: flex; align-items: center; gap: 20px; margin-bottom: 30px; padding-bottom: 15px; border-bottom: 3px solid #c41e1e; }
-  .header img { width: 80px; height: 80px; }
-  .header h1 { font-size: 22px; color: #c41e1e; margin: 0; }
-  .header p { font-size: 12px; color: #666; margin: 4px 0 0; }
-  .title { background: #c41e1e; color: white; padding: 12px 20px; font-size: 18px; font-weight: bold; margin: 20px 0; border-radius: 4px; }
-  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-  td.label { width: 140px; padding: 8px 12px; font-weight: bold; color: #666; font-size: 13px; vertical-align: top; }
-  td.value { padding: 8px 12px; font-size: 14px; }
-  .footer { margin-top: 40px; padding-top: 15px; border-top: 1px solid #ddd; font-size: 10px; color: #999; text-align: center; }
+  @page { size: ${printer === 'DruckerR13' ? 'A3' : 'A4'}; margin: 20mm 25mm; }
+  body { font-family: 'Times New Roman', Georgia, serif; color: #333; margin: 0; }
+  .header { display: flex; align-items: center; gap: 24px; margin-bottom: 20px; }
+  .header img { width: 90px; height: 90px; }
+  .header-text h1 { font-family: Arial, Helvetica, sans-serif; font-size: 28px; color: #000; margin: 0; font-weight: bold; }
+  .header-text p { font-size: 13px; color: #333; margin: 3px 0 0; }
+  .section-title { color: #c41e1e; font-size: 18px; font-weight: bold; margin: 30px 0 8px; font-family: Arial, Helvetica, sans-serif; }
+  table.info { width: 100%; border-collapse: collapse; border: 1px solid #ccc; }
+  table.info thead th { background: #c41e1e; color: white; padding: 6px 12px; font-size: 12px; font-weight: bold; text-align: left; font-family: Arial, sans-serif; }
+  table.info td { padding: 8px 12px; border-bottom: 1px solid #ddd; font-size: 13px; }
+  table.info td.label { font-weight: bold; width: 220px; background: #fafafa; }
+  table.info td.value { }
+  .footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 9px; color: #888; padding: 10px 0; border-top: 1px solid #ccc; }
 </style></head><body>
   <div class="header">
     <img src="https://www.rosenweg4303.ch/logo-rosenweg-ausschuss.png" alt="Rosenweg">
-    <div><h1>STWEG-Kooperation Rosenweg</h1><p>4303 Kaiseraugst</p></div>
+    <div class="header-text">
+      <h1>STWEG-Kooperation Rosenweg</h1>
+      <p>Druckauftrag</p>
+      <p>4303 Kaiseraugst</p>
+    </div>
   </div>
-  <div class="title">Druckauftrag — ${esc(printer)}</div>
-  <table>${rows}</table>
-  <div class="footer">Automatisch generiert vom Rosenweg Druckserver • ${esc(now)}</div>
+
+  <h2 class="section-title">Empfänger</h2>
+  <table class="info">
+    <thead><tr><th>Funktion</th><th>Angabe</th></tr></thead>
+    <tbody>
+      ${recipientInfo ? `
+        <tr><td class="label">Name</td><td class="value"><strong>${esc(recipientInfo.name)}</strong></td></tr>
+        ${recipientInfo.strasse ? `<tr><td class="label">Adresse</td><td class="value">${esc(recipientInfo.strasse)}</td></tr>` : ''}
+        ${recipientInfo.wohnung ? `<tr><td class="label">Wohnung / Einheit</td><td class="value">${esc(recipientInfo.wohnung)}</td></tr>` : ''}
+        ${recipientInfo.stweg ? `<tr><td class="label">STWEG Nr.</td><td class="value">${recipientInfo.stweg}</td></tr>` : ''}
+      ` : recipientTag ? `<tr><td class="label">Name</td><td class="value"><strong>${esc(recipientTag)}</strong></td></tr>` : `<tr><td class="label">Name</td><td class="value">Allgemein</td></tr>`}
+    </tbody>
+  </table>
+
+  <h2 class="section-title">Druckauftrag</h2>
+  <table class="info">
+    <thead><tr><th>Funktion</th><th>Angabe</th></tr></thead>
+    <tbody>
+      <tr><td class="label">Drucker</td><td class="value">${esc(printer)}</td></tr>
+      <tr><td class="label">Von</td><td class="value">${esc(senderEmailRaw || 'unbekannt')}</td></tr>
+      <tr><td class="label">Betreff</td><td class="value">${esc(parsed.subject || '(kein Betreff)')}</td></tr>
+      <tr><td class="label">Datum</td><td class="value">${esc(now)}</td></tr>
+      <tr><td class="label">Anzahl Dokumente</td><td class="value">${totalItems}</td></tr>
+      ${printableAtts.length > 0 ? `<tr><td class="label">Anhänge</td><td class="value">${printableAtts.map((a, i) => `${i + 1}. ${esc(a.filename)}`).join('<br>')}</td></tr>` : ''}
+    </tbody>
+  </table>
+
+  <div class="footer">STWEG-Kooperation Rosenweg • Druckauftrag • 4303 Kaiseraugst • ${esc(now)}</div>
 </body></html>`;
 
               // Convert HTML to PDF via Gotenberg
