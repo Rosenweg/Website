@@ -1002,7 +1002,7 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
 });
 
 // ─── TV7 (Init7 IPTV) ────────────────────────────────────────────────
-const TV7_PLAYLIST_URL = 'https://api.init7.net/tvchannels.m3u';
+const TV7_PLAYLIST_URL = 'https://api.init7.net/tvchannels.m3u?rp=true';
 const UDPXY_HOST = process.env.UDPXY_HOST || 'http://100.64.2.31:4022';
 let tv7ChannelsCache = null;
 let tv7CacheTime = 0;
@@ -1019,7 +1019,14 @@ async function fetchTV7Channels() {
       const groupMatch = lines[i].match(/group-title="([^"]+)"/);
       const nameMatch = lines[i].match(/,\s*(.+)$/);
       const url = (lines[i + 1] || '').trim();
-      if (url.startsWith('udp://')) {
+      if (url.startsWith('http')) {
+        channels.push({
+          name: nameMatch ? nameMatch[1].trim() : 'Unknown',
+          logo: logoMatch ? logoMatch[1] : '',
+          group: groupMatch ? groupMatch[1] : '',
+          streamUrl: url,
+        });
+      } else if (url.startsWith('udp://')) {
         const mcMatch = url.match(/udp:\/\/@?([\d.]+):(\d+)/);
         if (mcMatch) {
           channels.push({
