@@ -19,6 +19,9 @@ Obsidian Vault mit der technischen Dokumentation der Rosenweg-Kooperation.
 
 ### Pläne
 - [Proxmox Mail Gateway](plans/proxmox-mail-gateway.md) — PMG + Mailcow Setup
+- [FPÜV Verbindungsnachweis](plans/fpuev-verbindungsnachweis.md) — Syslog + Polling
+- [TV7](plans/tv7.md) — Init7 IPTV via Multicast
+- [Scan Agent](plans/scan-agent.md) — Automatische Formular-Verarbeitung
 
 ### Journal
 - [Tageseinträge](journal/) — Tägliche Arbeitsnotizen
