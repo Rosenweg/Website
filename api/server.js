@@ -2451,8 +2451,13 @@ async function pollGmailForVerteiler() {
             const senderEmail = senderEmailRaw?.replace(/\+[^@]*/, ''); // strip +tag
             let authorized = false;
             if (senderEmail) {
-              const known = await pool.query('SELECT id FROM users WHERE LOWER(email) = $1 AND active = true', [senderEmail]);
-              if (known.rows.length > 0) authorized = true;
+              // Allow emails from own domain
+              if (senderEmail.endsWith(`@${VERTEILER_DOMAIN}`)) authorized = true;
+              // Check DB for known users
+              if (!authorized) {
+                const known = await pool.query('SELECT id FROM users WHERE LOWER(email) = $1 AND active = true', [senderEmail]);
+                if (known.rows.length > 0) authorized = true;
+              }
               // Also check with original (tagged) email
               if (!authorized && senderEmailRaw !== senderEmail) {
                 const known2 = await pool.query('SELECT id FROM users WHERE LOWER(email) = $1 AND active = true', [senderEmailRaw]);
