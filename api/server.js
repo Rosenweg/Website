@@ -1054,29 +1054,68 @@ app.get('/api/tv/channels', authMiddleware, async (req, res) => {
   }
 });
 
-// Stream proxy: /api/tv/stream/233.50.230.80:5000 → udpxy
-// Accepts token as query param (for media players that can't set headers)
-app.get('/api/tv/stream/:multicast', (req, res, next) => {
+// Stream proxy: /api/tv/stream/:channelId → Init7 HLS (or udpxy for multicast)
+// Proxied because Init7 only accepts traffic from their own IPs
+app.get('/api/tv/stream/:channelId', (req, res, next) => {
   if (!req.headers.authorization && req.query.token) {
     req.headers.authorization = `Bearer ${req.query.token}`;
   }
   next();
 }, authMiddleware, async (req, res) => {
-  const mc = req.params.multicast;
-  if (!/^\d+\.\d+\.\d+\.\d+:\d+$/.test(mc)) {
-    return res.status(400).json({ error: 'Invalid multicast address' });
-  }
-  const [ip, port] = mc.split(':');
-  const udpxyUrl = `${UDPXY_HOST}/udp/${ip}:${port}`;
+  const id = req.params.channelId;
   try {
-    const upstream = await fetch(udpxyUrl, { signal: AbortSignal.timeout(30000) });
+    // HLS stream from Init7
+    const init7Url = `https://api.tv.init7.net/api/live/?channel=${encodeURIComponent(id)}`;
+    const upstream = await fetch(init7Url, { signal: AbortSignal.timeout(10000) });
     if (!upstream.ok) return res.status(502).json({ error: 'Stream nicht verfügbar' });
-    res.setHeader('Content-Type', 'video/MP2T');
+    const contentType = upstream.headers.get('content-type') || 'application/x-mpegURL';
+    res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'no-cache');
-    upstream.body.pipe(res);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    // Pipe the M3U8 playlist, rewriting segment URLs to also proxy through us
+    const body = await upstream.text();
+    // Rewrite relative/absolute segment URLs to proxy through API
+    const rewritten = body.replace(/(https?:\/\/[^\s]+)/g, (url) => {
+      return `/api/tv/proxy?url=${encodeURIComponent(url)}&token=${req.query.token || ''}`;
+    });
+    res.send(rewritten);
   } catch (err) {
     console.error('TV7 stream error:', err.message);
     if (!res.headersSent) res.status(502).json({ error: 'Stream-Fehler' });
+  }
+});
+
+// Generic proxy for TV7 segment URLs
+app.get('/api/tv/proxy', (req, res, next) => {
+  if (!req.headers.authorization && req.query.token) {
+    req.headers.authorization = `Bearer ${req.query.token}`;
+  }
+  next();
+}, authMiddleware, async (req, res) => {
+  const url = req.query.url;
+  if (!url || !url.startsWith('https://api.tv.init7.net/')) {
+    return res.status(400).json({ error: 'Invalid URL' });
+  }
+  try {
+    const upstream = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!upstream.ok) return res.status(upstream.status).end();
+    const contentType = upstream.headers.get('content-type') || 'video/MP2T';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'max-age=2');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    // If it's another M3U8, rewrite URLs
+    if (contentType.includes('mpegURL') || url.endsWith('.m3u8')) {
+      const text = buf.toString();
+      const rewritten = text.replace(/(https?:\/\/[^\s]+)/g, (u) => {
+        return `/api/tv/proxy?url=${encodeURIComponent(u)}&token=${req.query.token || ''}`;
+      });
+      res.send(rewritten);
+    } else {
+      res.send(buf);
+    }
+  } catch (err) {
+    if (!res.headersSent) res.status(502).end();
   }
 });
 

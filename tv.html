@@ -152,27 +152,32 @@
                 player = null;
             }
 
+            const token = AuthentikAuth.getToken();
             if (ch.streamUrl) {
-                // HLS/HTTP stream - use hls.js or native
-                const streamUrl = ch.streamUrl;
+                // Extract channel UUID from Init7 URL
+                const channelMatch = ch.streamUrl.match(/channel=([a-f0-9-]+)/);
+                const channelId = channelMatch ? channelMatch[1] : '';
+                const proxyUrl = `/api/tv/stream/${channelId}?token=${encodeURIComponent(token)}`;
+
                 if (Hls && Hls.isSupported()) {
-                    player = new Hls({ liveDurationInfinity: true });
-                    player.loadSource(streamUrl);
+                    player = new Hls({
+                        liveDurationInfinity: true,
+                        xhrSetup: (xhr) => {
+                            // HLS.js handles segment fetching, URLs are already rewritten by server
+                        }
+                    });
+                    player.loadSource(proxyUrl);
                     player.attachMedia(video);
                     player.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+                    player.on(Hls.Events.ERROR, (e, data) => {
+                        if (data.fatal) console.error('HLS error:', data.type, data.details);
+                    });
                 } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                    // Safari native HLS
-                    video.src = streamUrl;
-                    video.play();
-                } else {
-                    // Direct URL (might work for MPEG-TS over HTTP)
-                    video.src = streamUrl;
+                    video.src = proxyUrl;
                     video.play();
                 }
-            } else if (ch.multicast && mpegts?.isSupported()) {
-                // Fallback: MPEG-TS via udpxy (multicast proxy)
-                const token = AuthentikAuth.getToken();
-                const streamUrl = `${UDPXY_URL}/${ch.multicast}?token=${encodeURIComponent(token)}`;
+            } else if (ch.multicast && typeof mpegts !== 'undefined' && mpegts.isSupported()) {
+                const streamUrl = `/api/tv/stream/${ch.multicast}?token=${encodeURIComponent(token)}`;
                 player = mpegts.createPlayer({ type: 'mpegts', url: streamUrl, isLive: true });
                 player.attachMediaElement(video);
                 player.load();
