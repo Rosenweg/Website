@@ -2516,7 +2516,7 @@ async function pollGmailForVerteiler() {
 
               // Count total pages to print
               const printableAtts = attachments.filter(a => printableExts.has((a.filename || '').split('.').pop().toLowerCase()));
-              const hasBody = !!(parsed.text || parsed.html);
+              const hasBody = (parsed.text || '').trim().length > 10;
               const totalItems = printableAtts.length + (hasBody ? 1 : 0);
 
               // Build HTML cover page with logo
@@ -2636,8 +2636,9 @@ async function pollGmailForVerteiler() {
                 }
               } catch (e) { console.error(`[Print] Cover failed: ${e.message}`); }
 
-              // Print email body if present
-              if (hasBody) {
+              // Print email body if present and non-empty (skip empty/whitespace-only bodies)
+              const bodyText = (parsed.text || '').trim();
+              if (bodyText.length > 10) {
                 try {
                   const body = Buffer.from(parsed.text || parsed.html || '');
                   const bodyResp = await fetch(`${PRINT_API}/print/${printer}`, {
