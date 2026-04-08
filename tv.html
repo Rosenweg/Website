@@ -66,6 +66,7 @@
         </div>
     </main>
 
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.js"></script>
     <script>
         const UDPXY_URL = '/api/tv/stream';  // Proxy through API
@@ -151,23 +152,31 @@
                 player = null;
             }
 
-            // Use mpegts.js for MPEG-TS over HTTP (from udpxy)
-            const token = AuthentikAuth.getToken();
-            const streamUrl = `${UDPXY_URL}/${ch.multicast}?token=${encodeURIComponent(token)}`;
-
-            if (mpegts.isSupported()) {
-                player = mpegts.createPlayer({
-                    type: 'mpegts',
-                    url: streamUrl,
-                    isLive: true,
-                });
+            if (ch.streamUrl) {
+                // HLS/HTTP stream - use hls.js or native
+                const streamUrl = ch.streamUrl;
+                if (Hls && Hls.isSupported()) {
+                    player = new Hls({ liveDurationInfinity: true });
+                    player.loadSource(streamUrl);
+                    player.attachMedia(video);
+                    player.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                    // Safari native HLS
+                    video.src = streamUrl;
+                    video.play();
+                } else {
+                    // Direct URL (might work for MPEG-TS over HTTP)
+                    video.src = streamUrl;
+                    video.play();
+                }
+            } else if (ch.multicast && mpegts?.isSupported()) {
+                // Fallback: MPEG-TS via udpxy (multicast proxy)
+                const token = AuthentikAuth.getToken();
+                const streamUrl = `${UDPXY_URL}/${ch.multicast}?token=${encodeURIComponent(token)}`;
+                player = mpegts.createPlayer({ type: 'mpegts', url: streamUrl, isLive: true });
                 player.attachMediaElement(video);
                 player.load();
                 player.play();
-            } else {
-                // Fallback: direct source
-                video.src = streamUrl;
-                video.play();
             }
 
             renderChannels(document.querySelector('.group-btn.active')?.dataset.group === 'all' ? null : document.querySelector('.group-btn.active')?.dataset.group);
