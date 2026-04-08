@@ -2432,17 +2432,26 @@ async function pollGmailForVerteiler() {
             verteilerAddress = `${base}@${VERTEILER_DOMAIN}`;
           }
 
-          // To/Cc/Bcc: header contains @rosenweg4303.ch address (strip +tag if present)
+          // To/Cc/Bcc: header contains @rosenweg4303.ch address
           if (!verteilerAddress) {
             const toCcMatch = headers.match(/^(?:To|Cc|Bcc):\s*.*?([a-z0-9._+-]+@rosenweg4303\.ch)/im);
             if (toCcMatch) {
-              verteilerAddress = toCcMatch[1].toLowerCase().replace(/\+[^@]*/, '');
+              const fullAddr = toCcMatch[1].toLowerCase();
+              // Keep full address for drucker (need +tag), strip for others
+              if (fullAddr.startsWith('druckerr9') || fullAddr.startsWith('druckerr13')) {
+                verteilerAddress = fullAddr;
+              } else {
+                verteilerAddress = fullAddr.replace(/\+[^@]*/, '');
+              }
             }
           }
 
           // ── Print-to-Email: druckerr9@ / druckerr13@ ──
-          if (verteilerAddress === `druckerr9@${VERTEILER_DOMAIN}` || verteilerAddress === `druckerr13@${VERTEILER_DOMAIN}`) {
-            const printer = verteilerAddress.startsWith('druckerr9') ? 'DruckerR9' : 'DruckerR13';
+          const isDruckerAddr = verteilerAddress && (verteilerAddress.startsWith(`druckerr9`) || verteilerAddress.startsWith(`druckerr13`));
+          if (isDruckerAddr) {
+            // Normalize: druckerr9+tag@domain → match on druckerr9
+            const printerBase = verteilerAddress.split('+')[0].split('@')[0];
+            const printer = printerBase === 'druckerr9' ? 'DruckerR9' : 'DruckerR13';
             const PRINT_API = process.env.PRINT_API_URL || 'http://100.64.2.32:8080';
             const PRINT_TOKEN = process.env.PRINT_API_SECRET || 'RwPrintApi2026';
 
@@ -2470,7 +2479,22 @@ async function pollGmailForVerteiler() {
               continue;
             }
 
-            console.log(`[IMAP] Print job for ${printer} from ${senderEmail} (UID ${uid})`);
+            // Extract recipient tag (e.g. druckerr9+ingrid.limbach@domain → ingrid.limbach)
+            const tagMatch = verteilerAddress.match(/^drucker(?:r9|r13)\+([^@]+)@/i) ||
+                             plusMatch?.[1]?.match(/^drucker(?:r9|r13)\+(.+)/i);
+            const recipientTag = tagMatch ? tagMatch[1].replace(/\./g, ' ') : null;
+
+            // Look up recipient in DB if tag provided
+            let recipientInfo = null;
+            if (recipientTag) {
+              const nameSearch = recipientTag.split(' ').pop(); // last part = surname
+              const found = await pool.query("SELECT name, strasse, wohnung, stweg FROM users WHERE name ILIKE $1 LIMIT 1", [`%${nameSearch}%`]);
+              if (found.rows.length > 0) {
+                recipientInfo = found.rows[0];
+              }
+            }
+
+            console.log(`[IMAP] Print job for ${printer} from ${senderEmail} (UID ${uid})${recipientInfo ? ` → ${recipientInfo.name}` : ''}`);
             try {
               const dl = await client.download(String(uid), undefined, { uid: true });
               const chunks = [];
@@ -2479,46 +2503,77 @@ async function pollGmailForVerteiler() {
               const attachments = parsed.attachments || [];
               const printableExts = new Set(['pdf', 'png', 'jpg', 'jpeg', 'tiff', 'tif', 'txt']);
 
-              let printed = 0;
-              for (const att of attachments) {
-                const ext = (att.filename || '').split('.').pop().toLowerCase();
-                if (printableExts.has(ext)) {
-                  try {
-                    const printResp = await fetch(`${PRINT_API}/print/${printer}`, {
-                      method: 'POST',
-                      body: att.content,
-                      headers: {
-                        'Authorization': `Bearer ${PRINT_TOKEN}`,
-                        'X-Filename': att.filename,
-                      },
-                      signal: AbortSignal.timeout(30000),
-                    });
-                    const result = await printResp.json();
-                    console.log(`[Print] ${att.filename} → ${printer}: ${result.status} ${result.message || ''}`);
-                    printed++;
-                  } catch (printErr) {
-                    console.error(`[Print] Failed: ${att.filename}: ${printErr.message}`);
-                  }
-                }
-              }
+              // Count total pages to print
+              const printableAtts = attachments.filter(a => printableExts.has((a.filename || '').split('.').pop().toLowerCase()));
+              const hasBody = !!(parsed.text || parsed.html);
+              const totalItems = printableAtts.length + (hasBody ? 1 : 0);
 
-              if (printed === 0 && (parsed.text || parsed.html)) {
+              // Build cover page
+              const now = new Date().toLocaleString('de-CH', { timeZone: 'Europe/Zurich' });
+              let coverText = `═══════════════════════════════════════════\n`;
+              coverText += `  DRUCKAUFTRAG - ${printer}\n`;
+              coverText += `═══════════════════════════════════════════\n\n`;
+              if (recipientInfo) {
+                coverText += `  Für:      ${recipientInfo.name}\n`;
+                if (recipientInfo.strasse) coverText += `  Adresse:  ${recipientInfo.strasse}\n`;
+                if (recipientInfo.wohnung) coverText += `  Wohnung:  ${recipientInfo.wohnung}\n`;
+                if (recipientInfo.stweg) coverText += `  STWEG:    ${recipientInfo.stweg}\n`;
+              } else if (recipientTag) {
+                coverText += `  Für:      ${recipientTag}\n`;
+              }
+              coverText += `\n  Von:      ${senderEmailRaw || 'unbekannt'}\n`;
+              coverText += `  Betreff:  ${parsed.subject || '(kein Betreff)'}\n`;
+              coverText += `  Datum:    ${now}\n`;
+              coverText += `  Seiten:   ${totalItems} Dokument${totalItems !== 1 ? 'e' : ''}\n`;
+              if (printableAtts.length > 0) {
+                coverText += `\n  Anhänge:\n`;
+                printableAtts.forEach((a, i) => { coverText += `    ${i + 1}. ${a.filename}\n`; });
+              }
+              coverText += `\n═══════════════════════════════════════════\n`;
+
+              // Print cover page first
+              let printed = 0;
+              try {
+                const coverResp = await fetch(`${PRINT_API}/print/${printer}`, {
+                  method: 'POST',
+                  body: Buffer.from(coverText),
+                  headers: { 'Authorization': `Bearer ${PRINT_TOKEN}`, 'X-Filename': 'deckblatt.txt' },
+                  signal: AbortSignal.timeout(30000),
+                });
+                const coverResult = await coverResp.json();
+                console.log(`[Print] Cover page → ${printer}: ${coverResult.status}`);
+              } catch (e) { console.error(`[Print] Cover failed: ${e.message}`); }
+
+              // Print email body if present
+              if (hasBody) {
                 try {
                   const body = Buffer.from(parsed.text || parsed.html || '');
-                  const printResp = await fetch(`${PRINT_API}/print/${printer}`, {
+                  const bodyResp = await fetch(`${PRINT_API}/print/${printer}`, {
                     method: 'POST',
                     body: body,
-                    headers: {
-                      'Authorization': `Bearer ${PRINT_TOKEN}`,
-                      'X-Filename': 'email-body.txt',
-                    },
+                    headers: { 'Authorization': `Bearer ${PRINT_TOKEN}`, 'X-Filename': 'email-body.txt' },
+                    signal: AbortSignal.timeout(30000),
+                  });
+                  const bodyResult = await bodyResp.json();
+                  console.log(`[Print] Email body → ${printer}: ${bodyResult.status}`);
+                  printed++;
+                } catch (e) { console.error(`[Print] Body failed: ${e.message}`); }
+              }
+
+              // Print attachments
+              for (const att of printableAtts) {
+                try {
+                  const printResp = await fetch(`${PRINT_API}/print/${printer}`, {
+                    method: 'POST',
+                    body: att.content,
+                    headers: { 'Authorization': `Bearer ${PRINT_TOKEN}`, 'X-Filename': att.filename },
                     signal: AbortSignal.timeout(30000),
                   });
                   const result = await printResp.json();
-                  console.log(`[Print] Email body → ${printer}: ${result.status}`);
+                  console.log(`[Print] ${att.filename} → ${printer}: ${result.status} ${result.message || ''}`);
                   printed++;
                 } catch (printErr) {
-                  console.error(`[Print] Body failed: ${printErr.message}`);
+                  console.error(`[Print] Failed: ${att.filename}: ${printErr.message}`);
                 }
               }
 
