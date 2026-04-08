@@ -51,3 +51,4 @@ kiosk/deploy-key
 kiosk/deploy-key.pub
 kiosk/*.iso
 kiosk/.cached-debian-netinst.iso
+drivers/
