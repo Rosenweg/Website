@@ -2671,6 +2671,42 @@ async function pollGmailForVerteiler() {
               }
 
               console.log(`[Print] ${printed} items sent to ${printer}`);
+
+              // Notify Technik + Präsident if recipient was tagged
+              if (recipientTag && printed > 0) {
+                try {
+                  const notifyGroups = ['technik', 'Präsident'];
+                  const notifyEmails = new Set();
+                  for (const gn of notifyGroups) {
+                    const members = await pool.query(
+                      "SELECT email, groups_json FROM users WHERE active = true"
+                    );
+                    for (const row of members.rows) {
+                      try {
+                        const groups = JSON.parse(row.groups_json || '[]');
+                        if (groups.some(g => g.toLowerCase() === gn.toLowerCase()) && row.email && !row.email.includes('placeholder')) {
+                          notifyEmails.add(row.email);
+                        }
+                      } catch {}
+                    }
+                  }
+                  if (notifyEmails.size > 0) {
+                    const recipName = recipientInfo?.name || recipientTag;
+                    const recipAddr = recipientInfo?.strasse || '';
+                    const recipWohn = recipientInfo?.wohnung || '';
+                    await transporter.sendMail({
+                      from: `"Rosenweg Druckserver" <noreply@${VERTEILER_DOMAIN}>`,
+                      to: [...notifyEmails].join(', '),
+                      subject: `Druckauftrag: ${recipName} (${printer})`,
+                      text: `Druckauftrag verarbeitet\n\nEmpfänger: ${recipName}\n${recipAddr ? `Adresse: ${recipAddr}\n` : ''}${recipWohn ? `Wohnung: ${recipWohn}\n` : ''}Drucker: ${printer}\nBetreff: ${parsed.subject || '(kein Betreff)'}\nVon: ${senderEmailRaw}\nDokumente: ${printed}\nDatum: ${now}`,
+                    });
+                    console.log(`[Print] Notification sent to ${notifyEmails.size} recipients`);
+                  }
+                } catch (notifyErr) {
+                  console.error(`[Print] Notification error: ${notifyErr.message}`);
+                }
+              }
+
               try { await client.mailboxCreate('Gedruckt'); } catch {}
               await client.messageMove(uid, 'Gedruckt', { uid: true });
             } catch (printErr) {
