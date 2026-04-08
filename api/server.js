@@ -2557,7 +2557,7 @@ async function pollGmailForVerteiler() {
   .footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 9px; color: #888; padding: 10px 0; border-top: 1px solid #ccc; }
 </style></head><body>
   <div class="header">
-    <img src="https://www.rosenweg4303.ch/logo-rosenweg-ausschuss.png" alt="Rosenweg">
+    <img src="https://www.rosenweg4303.ch/logo-rosenweg.png" alt="Rosenweg">
     <div class="header-text">
       <h1>STWEG-Kooperation Rosenweg</h1>
       <p>Druckauftrag</p>
