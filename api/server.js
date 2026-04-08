@@ -2440,6 +2440,73 @@ async function pollGmailForVerteiler() {
             }
           }
 
+          // ── Print-to-Email: druckerr9@ / druckerr13@ ──
+          if (verteilerAddress === `druckerr9@${VERTEILER_DOMAIN}` || verteilerAddress === `druckerr13@${VERTEILER_DOMAIN}`) {
+            const printer = verteilerAddress.startsWith('druckerr9') ? 'DruckerR9' : 'DruckerR13';
+            const PRINT_API = process.env.PRINT_API_URL || 'http://100.64.2.32:8080';
+            const PRINT_TOKEN = process.env.PRINT_API_SECRET || 'RwPrintApi2026';
+            console.log(`[IMAP] Print job for ${printer} from UID ${uid}`);
+            try {
+              const dl = await client.download(String(uid), undefined, { uid: true });
+              const chunks = [];
+              for await (const chunk of dl.content) chunks.push(chunk);
+              const parsed = await simpleParser(Buffer.concat(chunks));
+              const attachments = parsed.attachments || [];
+              const printableExts = new Set(['pdf', 'png', 'jpg', 'jpeg', 'tiff', 'tif', 'txt']);
+
+              let printed = 0;
+              for (const att of attachments) {
+                const ext = (att.filename || '').split('.').pop().toLowerCase();
+                if (printableExts.has(ext)) {
+                  try {
+                    const printResp = await fetch(`${PRINT_API}/print/${printer}`, {
+                      method: 'POST',
+                      body: att.content,
+                      headers: {
+                        'Authorization': `Bearer ${PRINT_TOKEN}`,
+                        'X-Filename': att.filename,
+                      },
+                      signal: AbortSignal.timeout(30000),
+                    });
+                    const result = await printResp.json();
+                    console.log(`[Print] ${att.filename} → ${printer}: ${result.status} ${result.message || ''}`);
+                    printed++;
+                  } catch (printErr) {
+                    console.error(`[Print] Failed: ${att.filename}: ${printErr.message}`);
+                  }
+                }
+              }
+
+              if (printed === 0 && (parsed.text || parsed.html)) {
+                try {
+                  const body = Buffer.from(parsed.text || parsed.html || '');
+                  const printResp = await fetch(`${PRINT_API}/print/${printer}`, {
+                    method: 'POST',
+                    body: body,
+                    headers: {
+                      'Authorization': `Bearer ${PRINT_TOKEN}`,
+                      'X-Filename': 'email-body.txt',
+                    },
+                    signal: AbortSignal.timeout(30000),
+                  });
+                  const result = await printResp.json();
+                  console.log(`[Print] Email body → ${printer}: ${result.status}`);
+                  printed++;
+                } catch (printErr) {
+                  console.error(`[Print] Body failed: ${printErr.message}`);
+                }
+              }
+
+              console.log(`[Print] ${printed} items sent to ${printer}`);
+              try { await client.mailboxCreate('Gedruckt'); } catch {}
+              await client.messageMove(uid, 'Gedruckt', { uid: true });
+            } catch (printErr) {
+              console.error(`[Print] Error: ${printErr.message}`);
+              await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
+            }
+            continue;
+          }
+
           // ── DMARC reports: move to dedicated folder for /api/dmarc/reports ──
           if (verteilerAddress === `dmarc@${VERTEILER_DOMAIN}`) {
             try {
