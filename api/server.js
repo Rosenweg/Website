@@ -3017,13 +3017,10 @@ function startImapPoll() {
     return;
   }
   console.log(`[IMAP] Polling ${IMAP_USER} every ${IMAP_POLL_INTERVAL / 1000}s`);
-  setTimeout(guardedPollGmail, 10000);
-  // Use dynamic interval with backoff on consecutive errors (max 5min extra)
-  const scheduleNext = () => {
-    const backoff = Math.min(imapConsecutiveErrors * 30000, 300000);
-    setTimeout(() => { guardedPollGmail().then(scheduleNext); }, IMAP_POLL_INTERVAL + backoff);
-  };
-  guardedPollGmail().then(scheduleNext);
+  // Reliable polling: setInterval ensures polls keep running even if the chain breaks
+  setInterval(() => guardedPollGmail(), IMAP_POLL_INTERVAL);
+  // First poll after 10s (wait for DNS/network to be ready)
+  setTimeout(() => guardedPollGmail(), 10000);
 }
 
 // ─── STWEG Kontakte ─────────────────────────────────────────────────
