@@ -1059,6 +1059,27 @@ app.get('/api/tv/channels', authMiddleware, async (req, res) => {
   }
 });
 
+// TV proxy: short-lived HMAC tokens instead of leaking session tokens in URLs
+const TV_PROXY_SECRET = crypto.randomBytes(32);
+const TV_PROXY_TTL = 3600; // 1 hour
+
+function createTvProxyToken(userId) {
+  const exp = Math.floor(Date.now() / 1000) + TV_PROXY_TTL;
+  const payload = `${userId}:${exp}`;
+  const sig = crypto.createHmac('sha256', TV_PROXY_SECRET).update(payload).digest('hex').slice(0, 16);
+  return `${payload}:${sig}`;
+}
+
+function verifyTvProxyToken(token) {
+  if (!token) return false;
+  const parts = token.split(':');
+  if (parts.length !== 3) return false;
+  const [userId, exp, sig] = parts;
+  if (parseInt(exp) < Math.floor(Date.now() / 1000)) return false;
+  const expected = crypto.createHmac('sha256', TV_PROXY_SECRET).update(`${userId}:${exp}`).digest('hex').slice(0, 16);
+  return sig === expected;
+}
+
 // Stream proxy: /api/tv/stream/:channelId → Init7 HLS (or udpxy for multicast)
 // Proxied because Init7 only accepts traffic from their own IPs
 app.get('/api/tv/stream/:channelId', (req, res, next) => {
@@ -1068,6 +1089,7 @@ app.get('/api/tv/stream/:channelId', (req, res, next) => {
   next();
 }, authMiddleware, async (req, res) => {
   const id = req.params.channelId;
+  const proxyToken = createTvProxyToken(req.user.id || req.user.user_id);
   try {
     // HLS stream from Init7
     const init7Url = `https://api.tv.init7.net/api/live/?channel=${encodeURIComponent(id)}`;
@@ -1079,9 +1101,9 @@ app.get('/api/tv/stream/:channelId', (req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     // Pipe the M3U8 playlist, rewriting segment URLs to also proxy through us
     const body = await upstream.text();
-    // Rewrite relative/absolute segment URLs to proxy through API
+    // Rewrite relative/absolute segment URLs to proxy through API (short-lived HMAC token, not session)
     const rewritten = body.replace(/(https?:\/\/[^\s]+)/g, (url) => {
-      return `/api/tv/proxy?url=${encodeURIComponent(url)}&token=${req.query.token || ''}`;
+      return `/api/tv/proxy?url=${encodeURIComponent(url)}&pt=${proxyToken}`;
     });
     res.send(rewritten);
   } catch (err) {
@@ -1090,17 +1112,26 @@ app.get('/api/tv/stream/:channelId', (req, res, next) => {
   }
 });
 
-// Generic proxy for TV7 segment URLs
+// Generic proxy for TV7 segment URLs (uses short-lived HMAC token, not session token)
 app.get('/api/tv/proxy', (req, res, next) => {
-  if (!req.headers.authorization && req.query.token) {
-    req.headers.authorization = `Bearer ${req.query.token}`;
+  // Accept either session auth or HMAC proxy token
+  if (req.headers.authorization || (req.query.token && !req.query.pt)) {
+    if (!req.headers.authorization && req.query.token) {
+      req.headers.authorization = `Bearer ${req.query.token}`;
+    }
+    return authMiddleware(req, res, next);
   }
-  next();
-}, authMiddleware, async (req, res) => {
+  // Verify HMAC proxy token
+  if (req.query.pt && verifyTvProxyToken(req.query.pt)) {
+    return next();
+  }
+  res.status(401).json({ error: 'Unauthorized' });
+}, async (req, res) => {
   const url = req.query.url;
   if (!url || !url.startsWith('https://api.tv.init7.net/')) {
     return res.status(400).json({ error: 'Invalid URL' });
   }
+  const proxyToken = req.query.pt || createTvProxyToken(req.user?.id || 0);
   try {
     const upstream = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if (!upstream.ok) return res.status(upstream.status).end();
@@ -1113,7 +1144,7 @@ app.get('/api/tv/proxy', (req, res, next) => {
     if (contentType.includes('mpegURL') || url.endsWith('.m3u8')) {
       const text = buf.toString();
       const rewritten = text.replace(/(https?:\/\/[^\s]+)/g, (u) => {
-        return `/api/tv/proxy?url=${encodeURIComponent(u)}&token=${req.query.token || ''}`;
+        return `/api/tv/proxy?url=${encodeURIComponent(u)}&pt=${proxyToken}`;
       });
       res.send(rewritten);
     } else {
@@ -1202,9 +1233,14 @@ app.get('/api/users', authMiddleware, adminOnly, async (req, res) => {
 
 app.get('/api/users/:id', authMiddleware, async (req, res) => {
   try {
+    const requestedId = parseInt(req.params.id);
+    const ownId = req.user.user_id || req.user.id;
+    if (requestedId !== ownId && !req.user.isAdmin) {
+      return res.status(403).json({ error: 'Zugriff verweigert' });
+    }
     const result = await pool.query(
       'SELECT id, name, email, wohnung, stweg, role, balance FROM users WHERE id = $1',
-      [req.params.id]
+      [requestedId]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Benutzer nicht gefunden' });
     res.json(result.rows[0]);
@@ -2549,16 +2585,17 @@ async function pollGmailForVerteiler() {
                 );
                 if (known.rows.length > 0) authorized = true;
               }
-              // Also check Authentik users via API (cached)
+              // Also check Authentik users via API (exact email match)
               if (!authorized && AUTHENTIK_API_TOKEN) {
                 try {
-                  const akResp = await fetch(`${AUTHENTIK_URL}/api/v3/core/users/?search=${encodeURIComponent(senderEmail)}`, {
+                  const akResp = await fetch(`${AUTHENTIK_URL}/api/v3/core/users/?email=${encodeURIComponent(senderEmail)}`, {
                     headers: { 'Authorization': `Bearer ${AUTHENTIK_API_TOKEN}` },
                     signal: AbortSignal.timeout(5000),
                   });
                   if (akResp.ok) {
                     const akData = await akResp.json();
-                    if (akData.results?.length > 0) authorized = true;
+                    // Verify exact email match (API may return partial matches)
+                    if (akData.results?.some(u => u.email?.toLowerCase() === senderEmail)) authorized = true;
                   }
                 } catch {}
               }
@@ -3400,10 +3437,16 @@ async function processAuthentiKDeletions() {
   }
 }
 
-// Run deletion processor daily (every 24h)
-setInterval(processAuthentiKDeletions, 24 * 60 * 60 * 1000);
+// Run deletion processor daily (every 24h) with guard
+let isDeletionRunning = false;
+async function guardedProcessDeletions() {
+  if (isDeletionRunning) return;
+  isDeletionRunning = true;
+  try { await processAuthentiKDeletions(); } finally { isDeletionRunning = false; }
+}
+activeIntervals.push(setInterval(guardedProcessDeletions, 24 * 60 * 60 * 1000));
 // Also run once 60s after startup
-setTimeout(processAuthentiKDeletions, 60 * 1000);
+setTimeout(guardedProcessDeletions, 60 * 1000);
 
 // POST /api/wohnungen/sync-authentik - Bulk sync all kontakte with email to Authentik
 app.post('/api/wohnungen/sync-authentik', authMiddleware, adminOnly, async (req, res) => {
@@ -3963,7 +4006,7 @@ app.get('/api/dmarc/reports', authMiddleware, adminOnly, async (req, res) => {
       }
     }
 
-    await client.logout();
+    try { await client.logout(); } catch {} finally { try { client.close(); } catch {} }
 
     // Summary
     let totalPass = 0, totalFail = 0, totalMessages = 0;
@@ -4213,6 +4256,7 @@ async function authentikAPI(method, path, body = null) {
     },
   };
   if (body) opts.body = JSON.stringify(body);
+  opts.signal = AbortSignal.timeout(15000);
   const res = await fetch(url, opts);
   if (!res.ok) {
     const text = await res.text();
@@ -4578,8 +4622,9 @@ app.get('/api/email-archive/:id/attachment/:filename', authMiddleware, requireAr
       return res.status(400).json({ error: 'Ungültiger Pfad' });
     }
 
+    const safeAttName = (att.filename || 'attachment').replace(/["\r\n\\]/g, '_');
     res.setHeader('Content-Type', att.content_type || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename="${att.filename}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${safeAttName}"`);
     const stream = fsSync.createReadStream(filePath);
     stream.on('error', () => res.status(404).json({ error: 'Datei nicht gefunden' }));
     stream.pipe(res);
@@ -4843,8 +4888,9 @@ app.get('/api/documents/:path(*)', authMiddleware, async (req, res) => {
     };
     const fileName = filePath.split('/').pop();
 
+    const safeFileName = fileName.replace(/["\r\n\\]/g, '_');
     res.setHeader('Content-Type', contentTypes[ext] || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+    res.setHeader('Content-Disposition', `inline; filename="${safeFileName}"`);
     res.setHeader('Content-Length', stat.size);
 
     fsSync.createReadStream(fullPath).pipe(res);
@@ -4972,7 +5018,7 @@ app.put('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, re
 app.delete('/api/documents/:path(*)', authMiddleware, canManageDocs, async (req, res) => {
   try {
     const filePath = req.params.path;
-    if (filePath.includes('..') || filePath.startsWith('/')) {
+    if (filePath.includes('..') || filePath.startsWith('/') || filePath.includes('\0') || filePath.includes('\\')) {
       return res.status(400).json({ error: 'Ungültiger Pfad' });
     }
 
