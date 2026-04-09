@@ -1856,19 +1856,20 @@ async function guardedRunMonthlyBilling() {
 function startWaschCron() {
   // Process completed reservations every 5 min
   waschCronInterval = setInterval(guardedProcessReservations, 5 * 60 * 1000);
+  activeIntervals.push(waschCronInterval);
   setTimeout(guardedProcessReservations, 30 * 1000);
 
   // Door access control every minute
-  setInterval(guardedManageDoorAccess, 60 * 1000);
+  activeIntervals.push(setInterval(guardedManageDoorAccess, 60 * 1000));
   setTimeout(guardedManageDoorAccess, 10 * 1000);
 
   // Monthly billing on 1st at 08:00
-  setInterval(() => {
+  activeIntervals.push(setInterval(() => {
     const now = new Date();
     if (now.getDate() === 1 && now.getHours() === 8 && now.getMinutes() < 5) {
       guardedRunMonthlyBilling();
     }
-  }, 5 * 60 * 1000);
+  }, 5 * 60 * 1000));
 
   console.log('[Waschküche] Cron jobs started (reservations 5min, doors 1min, billing 1st@08:00)');
 }
@@ -2342,8 +2343,8 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
      JSON.stringify(recipients), 'sent', messageId || parsed.messageId || null]
   );
 
-  // Schedule delivery report to sender after 90 seconds
-  if (SMTP2GO_API_KEY && senderEmail) {
+  // Schedule delivery report to sender after 90 seconds (only for internal senders — DSGVO)
+  if (SMTP2GO_API_KEY && senderEmail && senderEmail.endsWith(`@${VERTEILER_DOMAIN}`)) {
     const logId = logResult.rows[0].id;
     setTimeout(() => sendDeliveryReport(logId, senderEmail, list.name, parsed.subject, recipients).catch(
       err => console.error('[DeliveryReport] Error:', err.message)
@@ -2459,6 +2460,7 @@ async function pollGmailForVerteiler() {
     logger: false,
     socketTimeout: 30000,
     greetingTimeout: 15000,
+    connectionTimeout: 30000,
   });
   client.on('error', (err) => {
     console.error('[IMAP] Connection error:', err.message);
@@ -2534,11 +2536,11 @@ async function pollGmailForVerteiler() {
             if (senderEmail) {
               // Allow emails from own domain
               if (senderEmail.endsWith(`@${VERTEILER_DOMAIN}`)) authorized = true;
-              // Check DB for known users (both stripped and original email)
+              // Check DB for known users (exact match on stripped and original email)
               if (!authorized) {
                 const known = await pool.query(
-                  "SELECT id FROM users WHERE LOWER(email) = $1 OR LOWER(email) = $2 OR LOWER(email) LIKE $3",
-                  [senderEmail, senderEmailRaw || '', `%${senderEmail.split('@')[0]}@%`]
+                  "SELECT id FROM users WHERE LOWER(email) = $1 OR LOWER(email) = $2",
+                  [senderEmail, senderEmailRaw || '']
                 );
                 if (known.rows.length > 0) authorized = true;
               }
@@ -3001,7 +3003,11 @@ async function guardedPollGmail() {
   if (imapPolling) return;
   imapPolling = true;
   try {
-    await pollGmailForVerteiler();
+    // Hard timeout: abort entire poll after 5 minutes to prevent hangs
+    await Promise.race([
+      pollGmailForVerteiler(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Poll timeout (5min)')), 300000)),
+    ]);
     imapConsecutiveErrors = 0;
   } catch (err) {
     imapConsecutiveErrors++;
@@ -3018,7 +3024,7 @@ function startImapPoll() {
   }
   console.log(`[IMAP] Polling ${IMAP_USER} every ${IMAP_POLL_INTERVAL / 1000}s`);
   // Reliable polling: setInterval ensures polls keep running even if the chain breaks
-  setInterval(() => guardedPollGmail(), IMAP_POLL_INTERVAL);
+  activeIntervals.push(setInterval(() => guardedPollGmail(), IMAP_POLL_INTERVAL));
   // First poll after 10s (wait for DNS/network to be ready)
   setTimeout(() => guardedPollGmail(), 10000);
 }
@@ -5838,8 +5844,12 @@ const CONN_POLL_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
 // Track last-seen MACs to detect connect/disconnect
 let lastSeenMacs = new Set();
+let connPollFirstRun = true;
+let connPolling = false;
 
 async function pollConnections() {
+  if (connPolling) return;
+  connPolling = true;
   try {
     const resp = await fetch(`${UNIFI_HOST}/proxy/network/api/s/default/stat/sta`, {
       headers: { 'X-API-Key': UNIFI_API_KEY },
@@ -5867,7 +5877,8 @@ async function pollConnections() {
       const mac = c.mac;
       currentMacs.add(mac);
       const net = netMap[c.network_id] || {};
-      const isNew = !lastSeenMacs.has(mac);
+      // First run: all clients are "snapshot" (already connected before restart)
+      const isNew = !connPollFirstRun && !lastSeenMacs.has(mac);
 
       values.push(`($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`);
       params.push(
@@ -5897,8 +5908,11 @@ async function pollConnections() {
     }
 
     lastSeenMacs = currentMacs;
+    connPollFirstRun = false;
   } catch (err) {
     console.error('[ConnPoll] Error:', err.message);
+  } finally {
+    connPolling = false;
   }
 }
 
