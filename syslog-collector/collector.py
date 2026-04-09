@@ -23,7 +23,7 @@ SYSLOG_PORT = int(os.environ.get('SYSLOG_PORT', '5514'))
 DB_HOST = os.environ.get('DB_HOST', 'postgres')
 DB_PORT = int(os.environ.get('DB_PORT', '5432'))
 DB_USER = os.environ.get('DB_USER', 'rosenweg')
-DB_PASSWORD = os.environ.get('DB_PASSWORD', 'RwDb2026')
+DB_PASSWORD = os.environ.get('DB_PASSWORD', '')
 DB_NAME = os.environ.get('DB_NAME', 'rosenweg')
 BATCH_SIZE = int(os.environ.get('BATCH_SIZE', '50'))
 FLUSH_INTERVAL = int(os.environ.get('FLUSH_INTERVAL', '10'))  # seconds
@@ -68,7 +68,8 @@ RE_CONNTRACK = re.compile(
     r'conntrack.*NEW.*src=(?P<src_ip>\d+\.\d+\.\d+\.\d+).*dst=(?P<dst_ip>\d+\.\d+\.\d+\.\d+).*sport=(?P<src_port>\d+).*dport=(?P<dst_port>\d+)'
 )
 
-# Buffer for batch inserts
+# Buffer for batch inserts (max 10000 to prevent OOM on bursts)
+MAX_BUFFER_SIZE = 10000
 event_buffer = []
 buffer_lock = threading.Lock()
 running = True
@@ -201,6 +202,11 @@ def flush_buffer(conn):
         print(f'[Syslog] Flushed {len(batch)} events', flush=True)
     except Exception as ex:
         print(f'[Syslog] DB write error: {ex}', flush=True)
+        # Re-queue failed events (up to buffer limit)
+        with buffer_lock:
+            remaining = MAX_BUFFER_SIZE - len(event_buffer)
+            if remaining > 0:
+                event_buffer.extend(batch[:remaining])
         # Reconnect on next flush
         try:
             conn.close()
@@ -320,7 +326,8 @@ def handle_tcp_client(conn, addr, stats):
                         event = handle_message(line, stats)
                         if event:
                             with buffer_lock:
-                                event_buffer.append(event)
+                                if len(event_buffer) < MAX_BUFFER_SIZE:
+                                    event_buffer.append(event)
                             stats['parsed'] += 1
                         else:
                             stats['skipped'] += 1
