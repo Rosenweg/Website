@@ -85,7 +85,7 @@ Node.js Express Server (`api/server.js`) mit folgenden Funktionen:
 | DB_HOST | postgres | PostgreSQL Host (Docker-intern) |
 | DB_PORT | 5432 | PostgreSQL Port |
 | DB_USER | rosenweg | DB Benutzer |
-| DB_PASSWORD | RwDb2026 | DB Passwort |
+| DB_PASSWORD | ****** (siehe .env) | DB Passwort |
 | DB_NAME | rosenweg | DB Name |
 
 ### Energie-DB
@@ -93,7 +93,7 @@ Node.js Express Server (`api/server.js`) mit folgenden Funktionen:
 |----------|------|-------------|
 | ENERGY_DB_HOST | energy-db | Energie-DB Host |
 | ENERGY_DB_USER | energy | Energie-DB Benutzer |
-| ENERGY_DB_PASSWORD | energy2026 | Energie-DB Passwort |
+| ENERGY_DB_PASSWORD | ****** (siehe .env) | Energie-DB Passwort |
 | ENERGY_DB_NAME | energy | Energie-DB Name |
 
 ### Authentik

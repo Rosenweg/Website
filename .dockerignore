@@ -1,0 +1,14 @@
+.git
+.github
+.claude
+.env
+.env.*
+*.md
+docs/
+node_modules/
+api/node_modules/
+energy-collector/node_modules/
+syslog-collector/__pycache__/
+drivers/
+door-signs/
+Diverses/

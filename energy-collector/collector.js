@@ -517,6 +517,15 @@ const app = express();
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://www.rosenweg4303.ch';
 app.use(cors({ origin: CORS_ORIGIN.split(',') }));
 
+// Admin auth middleware for write operations (Bearer token from main API)
+const ADMIN_API_KEY = process.env.ADMIN_API_KEY || '';
+function adminAuth(req, res, next) {
+  if (!ADMIN_API_KEY) return next(); // skip if not configured (backwards compat)
+  const auth = req.headers.authorization;
+  if (auth === `Bearer ${ADMIN_API_KEY}`) return next();
+  res.status(401).json({ error: 'Unauthorized' });
+}
+
 // Health check
 app.get('/health', async (req, res) => {
   try {
@@ -860,7 +869,7 @@ app.get('/api/energy/today/:meterId', async (req, res) => {
 app.use(express.json());
 
 // --- Meter Management ---
-app.post('/api/energy/meters', async (req, res) => {
+app.post('/api/energy/meters', adminAuth, async (req, res) => {
   const { id, name, type, host, port, unit_id, shelly_type, location, category, group_id, parent_id } = req.body;
   if (!id || !name || !host) return res.status(400).json({ error: 'id, name, host required' });
   try {
@@ -877,7 +886,7 @@ app.post('/api/energy/meters', async (req, res) => {
   }
 });
 
-app.put('/api/energy/meters/:id', async (req, res) => {
+app.put('/api/energy/meters/:id', adminAuth, async (req, res) => {
   const { name, type, host, port, unit_id, shelly_type, location, active, category, group_id } = req.body;
   try {
     const result = await pool.query(
@@ -894,7 +903,7 @@ app.put('/api/energy/meters/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/energy/meters/:id', async (req, res) => {
+app.delete('/api/energy/meters/:id', adminAuth, async (req, res) => {
   try {
     // Delete readings first
     await pool.query('DELETE FROM readings WHERE meter_id = $1', [req.params.id]);
@@ -906,7 +915,7 @@ app.delete('/api/energy/meters/:id', async (req, res) => {
 });
 
 // Test meter connection
-app.post('/api/energy/meters/:id/test', async (req, res) => {
+app.post('/api/energy/meters/:id/test', adminAuth, async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM meters WHERE id = $1', [req.params.id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
@@ -956,7 +965,7 @@ app.get('/api/energy/tariffs/current', async (req, res) => {
   res.json(result.rows);
 });
 
-app.post('/api/energy/tariffs', async (req, res) => {
+app.post('/api/energy/tariffs', adminAuth, async (req, res) => {
   const { name, price_per_kwh, description, valid_from, valid_to } = req.body;
   if (!name || price_per_kwh == null) return res.status(400).json({ error: 'name, price_per_kwh required' });
   try {
@@ -970,7 +979,7 @@ app.post('/api/energy/tariffs', async (req, res) => {
   }
 });
 
-app.put('/api/energy/tariffs/:id', async (req, res) => {
+app.put('/api/energy/tariffs/:id', adminAuth, async (req, res) => {
   const { name, price_per_kwh, description, valid_from, valid_to, active } = req.body;
   try {
     const result = await pool.query(
@@ -986,7 +995,7 @@ app.put('/api/energy/tariffs/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/energy/tariffs/:id', async (req, res) => {
+app.delete('/api/energy/tariffs/:id', adminAuth, async (req, res) => {
   try {
     await pool.query('DELETE FROM tariffs WHERE id = $1', [req.params.id]);
     res.json({ success: true });
@@ -1008,7 +1017,7 @@ app.get('/api/energy/meters/:meterId/users', async (req, res) => {
   }
 });
 
-app.post('/api/energy/meters/:meterId/users', async (req, res) => {
+app.post('/api/energy/meters/:meterId/users', adminAuth, async (req, res) => {
   const { user_email, user_name, role } = req.body;
   if (!user_email) return res.status(400).json({ error: 'user_email required' });
   try {
@@ -1025,7 +1034,7 @@ app.post('/api/energy/meters/:meterId/users', async (req, res) => {
   }
 });
 
-app.delete('/api/energy/meters/:meterId/users/:email', async (req, res) => {
+app.delete('/api/energy/meters/:meterId/users/:email', adminAuth, async (req, res) => {
   try {
     await pool.query(
       'DELETE FROM meter_users WHERE meter_id = $1 AND user_email = $2',
@@ -1050,7 +1059,7 @@ app.get('/api/energy/meters/:meterId/groups', async (req, res) => {
   }
 });
 
-app.post('/api/energy/meters/:meterId/groups', async (req, res) => {
+app.post('/api/energy/meters/:meterId/groups', adminAuth, async (req, res) => {
   const { group_name } = req.body;
   if (!group_name) return res.status(400).json({ error: 'group_name required' });
   try {
@@ -1067,7 +1076,7 @@ app.post('/api/energy/meters/:meterId/groups', async (req, res) => {
   }
 });
 
-app.delete('/api/energy/meters/:meterId/groups/:groupName', async (req, res) => {
+app.delete('/api/energy/meters/:meterId/groups/:groupName', adminAuth, async (req, res) => {
   try {
     await pool.query(
       'DELETE FROM meter_groups WHERE meter_id = $1 AND group_name = $2',

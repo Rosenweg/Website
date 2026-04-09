@@ -136,6 +136,9 @@ services:
       placement:
         constraints:
           - node.hostname == docker-pve1
+      resources:
+        limits:
+          memory: 512M
       update_config:
         parallelism: 1
         delay: 10s
@@ -168,6 +171,9 @@ services:
       - rosenweg-net
     deploy:
       replicas: 1
+      resources:
+        limits:
+          memory: 256M
       placement:
         constraints:
           - node.hostname == docker-pve1
@@ -198,6 +204,9 @@ services:
       - rosenweg-net
     deploy:
       replicas: 1
+      resources:
+        limits:
+          memory: 256M
       placement:
         constraints:
           - node.hostname == docker-pve1
@@ -229,6 +238,9 @@ services:
       - rosenweg-net
     deploy:
       replicas: 1
+      resources:
+        limits:
+          memory: 256M
       placement:
         constraints:
           - node.hostname == docker-pve1
@@ -310,6 +322,9 @@ services:
       - rosenweg-net
     deploy:
       replicas: 1
+      resources:
+        limits:
+          memory: 128M
       placement:
         constraints:
           - node.hostname == docker-pve1
