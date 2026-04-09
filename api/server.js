@@ -434,6 +434,11 @@ app.get('/api/auth/callback', async (req, res) => {
 // Cache for Authentik token introspection
 const tokenCache = new Map();
 const TOKEN_CACHE_TTL = 60 * 1000; // 1 minute
+// Purge expired entries every 5 minutes to prevent memory leak
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of tokenCache) { if (now - v.time > TOKEN_CACHE_TTL) tokenCache.delete(k); }
+}, 5 * 60 * 1000);
 
 async function validateAuthentikToken(token) {
   const cached = tokenCache.get(token);
@@ -461,7 +466,7 @@ async function validateAuthentikToken(token) {
     const result = await pool.query(
       `INSERT INTO users (email, name, role)
        VALUES ($1, $2, $3)
-       ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
+       ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role
        RETURNING id, email, name, wohnung, stweg, role`,
       [email.toLowerCase(), name, (data.groups?.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; })) ? 'admin' : 'bewohner']
     );
@@ -2493,7 +2498,7 @@ async function pollGmailForVerteiler() {
             const dateH = (headers.match(/^Date:\s*(.+)/im) || [])[1] || '';
             const subjH = (headers.match(/^Subject:\s*(.+)/im) || [])[1] || '';
             const fromH = (headers.match(/^From:\s*(.+)/im) || [])[1] || '';
-            messageId = 'gen-' + crypto.createHash('md5').update(dateH + subjH + fromH).digest('hex');
+            messageId = 'gen-' + crypto.createHash('md5').update(dateH + subjH + fromH + uid).digest('hex');
           }
 
           let verteilerAddress = null;
@@ -2942,7 +2947,7 @@ async function pollGmailForVerteiler() {
   } catch (err) {
     console.error('[IMAP] Poll error:', err.message);
   } finally {
-    client.close();
+    try { client.close(); } catch {}
   }
 }
 
@@ -6011,12 +6016,13 @@ async function gracefulShutdown(signal) {
   // Clear all intervals
   activeIntervals.forEach(id => clearInterval(id));
 
-  // Close database pool
+  // Close database pools
   try {
     await pool.end();
-    console.log('Database pool closed');
+    await energyPool.end();
+    console.log('Database pools closed');
   } catch (err) {
-    console.error('Error closing database pool:', err.message);
+    console.error('Error closing database pools:', err.message);
   }
 
   // Force exit after 10s
