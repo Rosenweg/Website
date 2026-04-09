@@ -2466,8 +2466,7 @@ async function pollGmailForVerteiler() {
 
   try {
     await client.connect();
-    // Gmail filters move emails to Verteiler/* folders — use All Mail to catch them all
-    const lock = await client.getMailboxLock('[Gmail]/Alle Nachrichten');
+    const lock = await client.getMailboxLock('INBOX');
 
     try {
       // Search all emails from last 7 days (not just unread) and check against DB
