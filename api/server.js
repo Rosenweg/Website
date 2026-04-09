@@ -220,7 +220,8 @@ app.post('/api/otp/verify', async (req, res) => {
       return res.status(400).json({ error: 'OTP-Code ist abgelaufen.' });
     }
 
-    if (row.code !== code.trim()) {
+    const codeA = Buffer.from(row.code); const codeB = Buffer.from(code.trim());
+    if (codeA.length !== codeB.length || !crypto.timingSafeEqual(codeA, codeB)) {
       return res.status(400).json({ error: 'Ungültiger OTP-Code' });
     }
 
@@ -776,6 +777,7 @@ app.put('/api/permissions', authMiddleware, requirePermission('rechteverwaltung'
 
 // Get current user from session token
 app.get('/api/auth/me', authMiddleware, async (req, res) => {
+  try {
   const userId = req.user.user_id || req.user.id;
   const result = await pool.query(
     'SELECT id, email, name, username, wohnung, stweg, role, phone, strasse, plz, ort, groups_json, avatar_url FROM users WHERE id = $1',
@@ -831,6 +833,10 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
       permissions: permissions,
     },
   });
+  } catch (err) {
+    console.error('[auth/me] Error:', err.message);
+    res.status(500).json({ error: 'Benutzerdaten konnten nicht geladen werden' });
+  }
 });
 
 // Change password (sets in both Authentik and AD)
@@ -1077,7 +1083,8 @@ function verifyTvProxyToken(token) {
   const [userId, exp, sig] = parts;
   if (parseInt(exp) < Math.floor(Date.now() / 1000)) return false;
   const expected = crypto.createHmac('sha256', TV_PROXY_SECRET).update(`${userId}:${exp}`).digest('hex').slice(0, 16);
-  return sig === expected;
+  const sigBuf = Buffer.from(sig); const expBuf = Buffer.from(expected);
+  return sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf);
 }
 
 // Stream proxy: /api/tv/stream/:channelId → Init7 HLS (or udpxy for multicast)
@@ -1439,9 +1446,12 @@ app.delete('/api/wasch/reservations/:id', authMiddleware, async (req, res) => {
 // Cancel all recurring reservations from a series (future only)
 app.delete('/api/wasch/reservations/:id/series', authMiddleware, async (req, res) => {
   try {
+    const isAdmin = req.user.isAdmin;
     const reservation = await pool.query(
-      'SELECT * FROM wasch_reservations WHERE id=$1 AND user_id=$2',
-      [req.params.id, req.user.user_id]
+      isAdmin
+        ? 'SELECT * FROM wasch_reservations WHERE id=$1'
+        : 'SELECT * FROM wasch_reservations WHERE id=$1 AND user_id=$2',
+      isAdmin ? [req.params.id] : [req.params.id, req.user.user_id]
     );
     if (reservation.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const r = reservation.rows[0];
@@ -1450,7 +1460,7 @@ app.delete('/api/wasch/reservations/:id/series', authMiddleware, async (req, res
       `UPDATE wasch_reservations SET cancelled = true
        WHERE user_id=$1 AND room_id=$2 AND recurring_until=$3
        AND start_time >= NOW() AND cancelled=false`,
-      [req.user.user_id, r.room_id, r.recurring_until]
+      [r.user_id, r.room_id, r.recurring_until]
     );
     res.json({ success: true, cancelled: result.rowCount });
   } catch (err) {
@@ -2185,7 +2195,18 @@ app.get('/api/verteiler/by-stweg/:stweg', authMiddleware, async (req, res) => {
   }
 });
 
+const verteilerSendLog = new Map(); // userId → [timestamps]
 app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
+  // Rate limit: max 10 sends per 10 minutes per user
+  const uid = req.user.user_id || req.user.id;
+  const now = Date.now();
+  const log = (verteilerSendLog.get(uid) || []).filter(t => now - t < 600000);
+  if (log.length >= 10) {
+    return res.status(429).json({ error: 'Zu viele Emails — bitte 10 Minuten warten' });
+  }
+  log.push(now);
+  verteilerSendLog.set(uid, log);
+
   const { verteiler_id, subject, body, recipients } = req.body;
   if (!subject || !body || !recipients?.length) {
     return res.status(400).json({ error: 'Betreff, Text und Empfänger erforderlich' });
@@ -3910,7 +3931,8 @@ app.get('/api/dmarc/reports', authMiddleware, adminOnly, async (req, res) => {
     const zlib = require('zlib');
     const client = new ImapFlow({
       host: IMAP_HOST, port: IMAP_PORT, secure: true,
-      auth: { user: IMAP_USER, pass: IMAP_PASS }, logger: false
+      auth: { user: IMAP_USER, pass: IMAP_PASS }, logger: false,
+      socketTimeout: 30000, greetingTimeout: 15000, connectionTimeout: 30000,
     });
     await client.connect();
 
@@ -4056,9 +4078,16 @@ app.get('/api/email/quota', authMiddleware, adminOnly, async (req, res) => {
 // PUBLIC INFO API (Ausschuss, Technischer Dienst)
 // ═══════════════════════════════════════════════════════════════════
 
+// Cache for public endpoints (prevents DoS on Authentik)
+const publicApiCache = { ausschuss: { data: null, at: 0 }, technik: { data: null, at: 0 } };
+const PUBLIC_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 // GET /api/public/ausschuss - Ausschuss-Vertreter per STWEG (from Authentik groups)
 app.get('/api/public/ausschuss', async (req, res) => {
   try {
+    if (publicApiCache.ausschuss.data && Date.now() - publicApiCache.ausschuss.at < PUBLIC_CACHE_TTL) {
+      return res.json(publicApiCache.ausschuss.data);
+    }
     const [groupsData, usersData] = await Promise.all([
       authentikAPI('GET', '/core/groups/?page_size=500'),
       authentikAPI('GET', '/core/users/?page_size=500'),
@@ -4110,6 +4139,7 @@ app.get('/api/public/ausschuss', async (req, res) => {
       }
     }
 
+    publicApiCache.ausschuss = { data: result, at: Date.now() };
     res.json(result);
   } catch (err) {
     console.error('Public ausschuss error:', err.message);
@@ -4120,6 +4150,9 @@ app.get('/api/public/ausschuss', async (req, res) => {
 // GET /api/public/technik - Technischer Dienst Mitglieder (from Authentik Technik group)
 app.get('/api/public/technik', async (req, res) => {
   try {
+    if (publicApiCache.technik.data && Date.now() - publicApiCache.technik.at < PUBLIC_CACHE_TTL) {
+      return res.json(publicApiCache.technik.data);
+    }
     const [groupsData, usersData] = await Promise.all([
       authentikAPI('GET', '/core/groups/?page_size=500'),
       authentikAPI('GET', '/core/users/?page_size=500'),
@@ -4140,10 +4173,9 @@ app.get('/api/public/technik', async (req, res) => {
         email: u.email,
       }));
 
-    res.json({
-      email: 'technik@rosenweg9.ch',
-      mitglieder,
-    });
+    const technikResult = { email: 'technik@rosenweg9.ch', mitglieder };
+    publicApiCache.technik = { data: technikResult, at: Date.now() };
+    res.json(technikResult);
   } catch (err) {
     console.error('Public technik error:', err.message);
     res.status(500).json({ error: 'Technik-Daten konnten nicht geladen werden' });
@@ -4222,7 +4254,7 @@ app.get('/api/calendar', async (req, res) => {
   try {
     const now = Date.now();
     if (!calendarCache.data || now - calendarCache.fetchedAt > 5 * 60 * 1000) {
-      const response = await fetch(GOOGLE_CALENDAR_ICS_URL);
+      const response = await fetch(GOOGLE_CALENDAR_ICS_URL, { signal: AbortSignal.timeout(10000) });
       if (!response.ok) throw new Error(`Google Calendar fetch failed: ${response.status}`);
       const icsText = await response.text();
       const allEvents = parseICS(icsText);
@@ -5046,7 +5078,7 @@ app.post('/api/documents/move', authMiddleware, canManageDocs, async (req, res) 
   try {
     const { from, to } = req.body || {};
     if (!from || !to) return res.status(400).json({ error: 'from und to erforderlich' });
-    if (from.includes('..') || to.includes('..') || from.startsWith('/') || to.startsWith('/')) {
+    if (from.includes('..') || to.includes('..') || from.startsWith('/') || to.startsWith('/') || from.includes('\0') || to.includes('\0') || from.includes('\\') || to.includes('\\')) {
       return res.status(400).json({ error: 'Ungültiger Pfad' });
     }
 
