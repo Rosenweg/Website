@@ -32,7 +32,16 @@ app.use('/api/email/inbound', express.raw({ type: '*/*', limit: '25mb' }));
 app.use('/api/documents', express.raw({ type: 'application/octet-stream', limit: '500mb' }));
 app.use('/api/scan-upload', express.raw({ type: 'application/octet-stream', limit: '500mb' }));
 app.use(express.json({ limit: '10mb' }));
-app.use(cors({ origin: true, credentials: true }));
+app.use(cors({
+  origin: (origin, cb) => {
+    // Allow requests with no origin (mobile apps, curl, server-to-server)
+    if (!origin) return cb(null, true);
+    const allowed = [SITE_URL, 'https://rosenweg4303.ch', 'https://www.rosenweg4303.ch', 'https://tv.rosenweg4303.ch'];
+    if (allowed.includes(origin) || origin.endsWith('.rosenweg4303.ch')) return cb(null, true);
+    cb(new Error('CORS not allowed'));
+  },
+  credentials: true,
+}));
 
 // ─── Database ───────────────────────────────────────────────────────
 const pool = new Pool({
@@ -2431,6 +2440,7 @@ async function sendDeliveryReport(logId, senderEmail, verteilerName, originalSub
   const apiRes = await fetch(`${SMTP2GO_API_URL}/activity/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Smtp2go-Api-Key': SMTP2GO_API_KEY },
+    signal: AbortSignal.timeout(15000),
     body: JSON.stringify({
       start_date: startDate.toISOString(),
       end_date: endDate.toISOString(),
@@ -2635,7 +2645,7 @@ async function pollGmailForVerteiler() {
             // Look up recipient in DB if tag provided
             let recipientInfo = null;
             if (recipientTag) {
-              const nameSearch = recipientTag.split(' ').pop(); // last part = surname
+              const nameSearch = recipientTag.split(' ').pop().replace(/%/g, '\\%').replace(/_/g, '\\_'); // last part = surname, escape SQL wildcards
               const found = await pool.query("SELECT name, strasse, wohnung, stweg FROM users WHERE name ILIKE $1 LIMIT 1", [`%${nameSearch}%`]);
               if (found.rows.length > 0) {
                 recipientInfo = found.rows[0];
@@ -2846,20 +2856,18 @@ async function pollGmailForVerteiler() {
               // Notify Technik + Präsident if recipient was tagged
               if (recipientTag && printed > 0) {
                 try {
-                  const notifyGroups = ['technik', 'Präsident'];
+                  const notifyGroups = ['technik', 'präsident'];
                   const notifyEmails = new Set();
-                  for (const gn of notifyGroups) {
-                    const members = await pool.query(
-                      "SELECT email, groups_json FROM users WHERE active = true"
-                    );
-                    for (const row of members.rows) {
-                      try {
-                        const groups = JSON.parse(row.groups_json || '[]');
-                        if (groups.some(g => g.toLowerCase() === gn.toLowerCase()) && row.email && !row.email.includes('placeholder')) {
-                          notifyEmails.add(row.email);
-                        }
-                      } catch {}
-                    }
+                  const members = await pool.query(
+                    "SELECT email, groups_json FROM users WHERE active = true"
+                  );
+                  for (const row of members.rows) {
+                    try {
+                      const groups = JSON.parse(row.groups_json || '[]');
+                      if (groups.some(g => notifyGroups.includes(g.toLowerCase())) && row.email && !row.email.includes('placeholder')) {
+                        notifyEmails.add(row.email);
+                      }
+                    } catch {}
                   }
                   if (notifyEmails.size > 0) {
                     const recipName = recipientInfo?.name || recipientTag;
@@ -3885,6 +3893,7 @@ app.get('/api/email/log/:id/status', authMiddleware, adminOnly, async (req, res)
     const apiRes = await fetch(`${SMTP2GO_API_URL}/activity/search`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Smtp2go-Api-Key': SMTP2GO_API_KEY },
+      signal: AbortSignal.timeout(15000),
       body: JSON.stringify({
         start_date: startDate.toISOString(),
         end_date: endDate.toISOString(),
@@ -4055,6 +4064,7 @@ app.get('/api/email/quota', authMiddleware, adminOnly, async (req, res) => {
     const apiRes = await fetch(`${SMTP2GO_API_URL}/stats/email_summary`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(10000),
       body: JSON.stringify({ api_key: SMTP2GO_API_KEY }),
     });
     const apiData = await apiRes.json();
@@ -4659,7 +4669,7 @@ app.get('/api/email-archive/:id/attachment/:filename', authMiddleware, requireAr
     res.setHeader('Content-Type', att.content_type || 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${safeAttName}"`);
     const stream = fsSync.createReadStream(filePath);
-    stream.on('error', () => res.status(404).json({ error: 'Datei nicht gefunden' }));
+    stream.on('error', () => { if (!res.headersSent) res.status(404).json({ error: 'Datei nicht gefunden' }); else res.destroy(); });
     stream.pipe(res);
   } catch (err) {
     res.status(500).json({ error: 'Fehler beim Download' });
@@ -4851,6 +4861,7 @@ app.post('/api/documents-preview', authMiddleware, async (req, res) => {
     const convertResp = await fetch(`${DOC_CONVERTER_URL}/forms/libreoffice/convert`, {
       method: 'POST',
       body: form,
+      signal: AbortSignal.timeout(60000),
     });
 
     if (!convertResp.ok) {
@@ -4860,7 +4871,12 @@ app.post('/api/documents-preview', authMiddleware, async (req, res) => {
 
     const pdfBuffer = Buffer.from(await convertResp.arrayBuffer());
 
-    // Cache the result
+    // Cache the result (skip if too large — prevent OOM)
+    if (pdfBuffer.length > 10 * 1024 * 1024) {
+      // Don't cache files > 10MB, just serve directly
+      res.setHeader('Content-Type', 'application/pdf');
+      return res.send(pdfBuffer);
+    }
     previewCache.set(filePath, { pdf: pdfBuffer, expires: now + PREVIEW_CACHE_TTL });
     if (previewCache.size > 50) {
       for (const [k, v] of previewCache) {
