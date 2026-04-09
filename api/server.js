@@ -2905,19 +2905,27 @@ async function pollGmailForVerteiler() {
           }
 
           console.log(`[IMAP] Processing: ${verteilerAddress} (UID ${uid})`);
-          const result = await processInboundEmail(source, verteilerAddress, messageId);
-          console.log(`[IMAP] Result: ${result.action} (${result.recipients || 0} recipients)`);
-
-          // Move to verteiler-named folder (e.g. "Verteiler/ausschuss")
-          const folderName = verteilerAddress.split('@')[0];
-          const targetFolder = `Verteiler/${folderName}`;
+          let processed = false;
           try {
-            try { await client.mailboxCreate(targetFolder); } catch {}
-            await client.messageMove(uid, targetFolder, { uid: true });
-          } catch (moveErr) {
-            // Fallback: just mark as read if move fails
-            console.error(`[IMAP] Move to ${targetFolder} failed:`, moveErr.message);
-            await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
+            const result = await processInboundEmail(source, verteilerAddress, messageId);
+            console.log(`[IMAP] Result: ${result.action} (${result.recipients || 0} recipients)`);
+            processed = true;
+          } catch (procErr) {
+            console.error(`[IMAP] Processing failed for UID ${uid} (${verteilerAddress}):`, procErr.message);
+            // Don't move, don't mark as read — will retry next poll
+          }
+
+          // Only move AFTER successful processing
+          if (processed) {
+            const folderName = verteilerAddress.split('@')[0];
+            const targetFolder = `Verteiler/${folderName}`;
+            try {
+              try { await client.mailboxCreate(targetFolder); } catch {}
+              await client.messageMove(uid, targetFolder, { uid: true });
+            } catch (moveErr) {
+              console.error(`[IMAP] Move to ${targetFolder} failed:`, moveErr.message);
+              await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
+            }
           }
         } catch (msgErr) {
           console.error(`[IMAP] Error processing UID ${uid}:`, msgErr.message);
