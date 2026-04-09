@@ -85,7 +85,7 @@ Wird aufgerufen von:
 - **Port**: 21
 - **Auth**: Nur lokal (kein Winbind) — eigene PAM-Config `/etc/pam.d/vsftpd`
 - **User**: `scanner` (lokaler User)
-- **Passwort**: `ScanRw2026`
+- **Passwort**: `****** (siehe .env)`
 - **Chroot**: `/srv/documents`
 - **PASV Ports**: 30000-30100
 

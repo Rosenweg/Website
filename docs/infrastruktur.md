@@ -132,7 +132,7 @@ rosenweg_rosenweg-documents
   - `api` → `/srv/documents` (valid users: ROSENWEG\api-svc)
   - `scans` → `/srv/documents/Scans` (valid users: ROSENWEG\scanner)
 - **FTP**: vsftpd, lokale Auth (kein Winbind)
-  - User: `scanner`, Passwort: `ScanRw2026`
+  - User: `scanner`, Passwort: `****** (siehe .env)`
   - Chroot: `/srv/documents`, Scanner wechselt nach `scans/`
 - **Disk**: 50GB, 5% belegt
 
@@ -209,13 +209,13 @@ rosenweg_rosenweg-documents
 
 ### rosenweg_postgres (API)
 - **User**: `rosenweg`
-- **Password**: `RwDb2026`
+- **Password**: `****** (siehe .env)`
 - **DB**: `rosenweg`
 - **Host**: `postgres` (Docker-intern)
 
 ### rosenweg_energy-db (Energie)
 - **User**: `energy`
-- **Password**: `energy2026`
+- **Password**: `****** (siehe .env)`
 - **DB**: `energy`
 - **Host**: `energy-db` (Docker-intern)
 

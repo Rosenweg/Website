@@ -27,7 +27,7 @@ API Server → Website (energie-monitor.html)
 ### Energy DB
 - **Image**: `postgres:17-alpine`
 - **User**: `energy`
-- **Password**: `energy2026`
+- **Password**: `****** (siehe .env)`
 - **DB**: `energy`
 - **Host**: `energy-db` (Docker-intern)
 
