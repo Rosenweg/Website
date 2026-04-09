@@ -3439,12 +3439,13 @@ async function processAuthentiKDeletions() {
 
 // Run deletion processor daily (every 24h) with guard
 let isDeletionRunning = false;
+let deletionInterval;
 async function guardedProcessDeletions() {
   if (isDeletionRunning) return;
   isDeletionRunning = true;
   try { await processAuthentiKDeletions(); } finally { isDeletionRunning = false; }
 }
-activeIntervals.push(setInterval(guardedProcessDeletions, 24 * 60 * 60 * 1000));
+deletionInterval = setInterval(guardedProcessDeletions, 24 * 60 * 60 * 1000);
 // Also run once 60s after startup
 setTimeout(guardedProcessDeletions, 60 * 1000);
 
@@ -6061,6 +6062,7 @@ async function gracefulShutdown(signal) {
 
   // Clear all intervals
   activeIntervals.forEach(id => clearInterval(id));
+  if (deletionInterval) clearInterval(deletionInterval);
 
   // Close database pools
   try {
