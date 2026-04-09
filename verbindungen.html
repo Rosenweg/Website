@@ -157,15 +157,16 @@
                     dhcp: 'bg-blue-100 text-blue-700',
                 };
 
+                const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
                 tbody.innerHTML = lastResults.map(e => `
                     <tr class="hover:bg-gray-50">
-                        <td class="py-2 px-4 text-xs font-mono">${new Date(e.timestamp).toLocaleString('de-CH')}</td>
-                        <td class="py-2 px-4"><span class="px-2 py-0.5 rounded text-xs font-medium ${eventColors[e.event_type] || ''}">${e.event_type}</span></td>
-                        <td class="py-2 px-4 font-mono text-xs">${e.mac || ''}</td>
-                        <td class="py-2 px-4 font-mono text-xs">${e.ip || ''}</td>
-                        <td class="py-2 px-4 text-xs">${e.hostname || ''}</td>
-                        <td class="py-2 px-4 text-xs font-medium">${e.network_name || ''}</td>
-                        <td class="py-2 px-4 text-xs">${e.ap_name || (e.is_wired ? 'Kabel' : '')}</td>
+                        <td class="py-2 px-4 text-xs font-mono">${esc(new Date(e.timestamp).toLocaleString('de-CH'))}</td>
+                        <td class="py-2 px-4"><span class="px-2 py-0.5 rounded text-xs font-medium ${eventColors[e.event_type] || ''}">${esc(e.event_type)}</span></td>
+                        <td class="py-2 px-4 font-mono text-xs">${esc(e.mac)}</td>
+                        <td class="py-2 px-4 font-mono text-xs">${esc(e.ip)}</td>
+                        <td class="py-2 px-4 text-xs">${esc(e.hostname)}</td>
+                        <td class="py-2 px-4 text-xs font-medium">${esc(e.network_name)}</td>
+                        <td class="py-2 px-4 text-xs">${esc(e.ap_name || (e.is_wired ? 'Kabel' : ''))}</td>
                     </tr>
                 `).join('');
             }

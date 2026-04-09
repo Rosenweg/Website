@@ -128,8 +128,8 @@
                                         const dkimOk = rec.dkim === 'pass';
                                         const spfOk = rec.spf === 'pass';
                                         const details = [
-                                            ...rec.authDkim.map(d => 'DKIM: ' + d.domain + ' (' + d.selector + ') → ' + d.result),
-                                            ...rec.authSpf.map(s => 'SPF: ' + s.domain + ' → ' + s.result)
+                                            ...rec.authDkim.map(d => 'DKIM: ' + esc(d.domain) + ' (' + esc(d.selector) + ') → ' + esc(d.result)),
+                                            ...rec.authSpf.map(s => 'SPF: ' + esc(s.domain) + ' → ' + esc(s.result))
                                         ].join('<br>');
                                         return '<tr>' +
                                             '<td class="px-4 py-2 font-mono text-xs">' + esc(rec.sourceIp) + '</td>' +
@@ -146,7 +146,7 @@
                     }).join('');
                 })
                 .catch(err => {
-                    document.getElementById('reports').innerHTML = '<div class="text-sm text-red-500 text-center py-8">Fehler: ' + err.message + '</div>';
+                    document.getElementById('reports').innerHTML = '<div class="text-sm text-red-500 text-center py-8">Fehler: ' + esc(err.message) + '</div>';
                 });
         }
     </script>

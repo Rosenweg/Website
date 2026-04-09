@@ -124,13 +124,14 @@
                 return true;
             });
 
+            const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
             list.innerHTML = filtered.map((c, i) => `
                 <div class="channel-card flex items-center gap-3 p-2 rounded-lg cursor-pointer hover:bg-gray-700 ${currentChannel?.name === c.name ? 'active bg-gray-700' : ''}"
                      onclick="playChannel(${channels.indexOf(c)})">
-                    <img src="${c.logo}" alt="" class="w-8 h-8 rounded object-contain bg-white" onerror="this.style.display='none'">
+                    <img src="${esc(c.logo)}" alt="" class="w-8 h-8 rounded object-contain bg-white" onerror="this.style.display='none'">
                     <div class="flex-1 min-w-0">
-                        <p class="text-sm font-medium truncate">${c.name}</p>
-                        <p class="text-xs text-gray-500">${c.group}</p>
+                        <p class="text-sm font-medium truncate">${esc(c.name)}</p>
+                        <p class="text-xs text-gray-500">${esc(c.group)}</p>
                     </div>
                 </div>
             `).join('');
