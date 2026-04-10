@@ -1980,6 +1980,22 @@ async function unifiAccessRequest(method, path, body = null) {
   }
 }
 
+// List all doors from UniFi Access
+async function listDoors() {
+  const data = await unifiAccessRequest('GET', '/doors');
+  if (!data?.data) return [];
+  return data.data.map(d => ({ id: d.unique_id || d._id, name: d.name, type: d.door_guard || d.type }));
+}
+
+app.get('/api/wasch/admin/doors/list', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const doors = await listDoors();
+    res.json(doors);
+  } catch (err) {
+    res.status(500).json({ error: 'UniFi Access nicht erreichbar' });
+  }
+});
+
 // Unlock a door temporarily (for reservation start)
 async function unlockDoor(doorId, durationSeconds = 10) {
   const enabled = await getWaschSetting('unifi_access_enabled', 'false');
