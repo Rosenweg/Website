@@ -141,7 +141,8 @@ const STWEGKontakte = (function() {
             const resp = await fetch('/api/public/ausschuss');
             if (resp.ok) {
                 const data = await resp.json();
-                const vertreter = (data.vertreter || {})[String(stwegNr)] || [];
+                const stwegData = (data.vertreter || []).find(s => s.stweg_nummer === stwegNr);
+                const vertreter = stwegData?.vertreter || [];
                 if (vertreter.length > 0) {
                     renderAusschuss(stwegNr, vertreter.map(v => ({
                         name: v.name, funktion: v.funktion || 'Vertreter',
