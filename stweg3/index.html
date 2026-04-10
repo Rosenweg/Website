@@ -171,10 +171,19 @@
                 const bewohntColor = { eigentuemer: 'green', mieter: 'blue', leer: 'gray' };
                 const bewohntLabel = { eigentuemer: 'Eigentuemer', mieter: 'Vermietet', leer: 'Leer' };
 
-                let html = units.map(w => {
+                // Calculate col-span for last row so cards fill the width
+                const remainder = units.length % 3;
+                const lastRowStart = units.length - remainder;
+
+                let html = units.map((w, i) => {
                     const bc = bewohntColor[w.bewohnt_von] || 'gray';
                     const bl = bewohntLabel[w.bewohnt_von] || '';
-                    return '<div class="bg-white p-5 rounded-lg shadow-md hover:shadow-lg transition">' +
+                    // Last row: stretch to fill width
+                    let spanClass = '';
+                    if (remainder === 1 && i === lastRowStart) spanClass = ' md:col-span-3';
+                    // 2 remaining: first gets 2 cols, second gets 1
+                    if (remainder === 2 && i === lastRowStart) spanClass = ' md:col-span-2';
+                    return '<div class="bg-white p-5 rounded-lg shadow-md hover:shadow-lg transition' + spanClass + '">' +
                         '<div class="flex items-center justify-between mb-3">' +
                             '<h3 class="text-lg font-semibold text-gray-800">' + esc(w.bezeichnung) + '</h3>' +
                             (w.zimmer ? '<span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full text-xs font-semibold">' + esc(w.zimmer) + ' Zi.</span>' : '') +
