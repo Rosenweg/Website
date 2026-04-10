@@ -506,6 +506,158 @@
     })();
     </script>
 
+    <!-- Kalender & Projekte -->
+    <section class="py-12 bg-gray-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid md:grid-cols-2 gap-8">
+
+                <!-- Kalender -->
+                <div>
+                    <h2 class="text-2xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                        Naechste Termine
+                    </h2>
+                    <div id="calendar-widget" class="space-y-3">
+                        <div class="bg-white rounded-lg p-4 text-center text-gray-400 animate-pulse">Laden...</div>
+                    </div>
+                </div>
+
+                <!-- Projekte -->
+                <div>
+                    <h2 class="text-2xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                        Aktive Projekte
+                    </h2>
+                    <div id="projects-widget" class="space-y-3">
+                        <div class="bg-white rounded-lg p-4 text-center text-gray-400 animate-pulse">Laden...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <script>
+    (function() {
+        function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+        const token = AuthentikAuth.getToken();
+
+        // Kalender (oeffentlich, kein Token noetig)
+        fetch('/api/calendar')
+            .then(r => r.json())
+            .then(data => {
+                const events = (data.events || []).slice(0, 5);
+                const el = document.getElementById('calendar-widget');
+                if (!events.length) {
+                    el.innerHTML = '<div class="bg-white rounded-lg p-6 text-center text-gray-400">Keine anstehenden Termine</div>';
+                    return;
+                }
+                el.innerHTML = events.map(e => {
+                    const d = new Date(e.start);
+                    const day = d.toLocaleDateString('de-CH', { weekday: 'short', day: 'numeric', month: 'short' });
+                    const time = e.start.includes('T') ? d.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' }) : 'Ganztaegig';
+                    return '<div class="bg-white rounded-lg p-4 border-l-4 border-blue-500 shadow-sm hover:shadow-md transition">' +
+                        '<div class="flex items-start gap-3">' +
+                            '<div class="text-center min-w-[50px]">' +
+                                '<div class="text-xs text-gray-500 uppercase">' + esc(d.toLocaleDateString('de-CH', { month: 'short' })) + '</div>' +
+                                '<div class="text-2xl font-bold text-blue-600">' + d.getDate() + '</div>' +
+                            '</div>' +
+                            '<div class="flex-1">' +
+                                '<h3 class="font-medium text-gray-800 text-sm">' + esc(e.title) + '</h3>' +
+                                '<p class="text-xs text-gray-500">' + esc(time) + (e.location ? ' &bull; ' + esc(e.location) : '') + '</p>' +
+                            '</div>' +
+                        '</div>' +
+                    '</div>';
+                }).join('');
+            })
+            .catch(() => { document.getElementById('calendar-widget').innerHTML = '<div class="bg-white rounded-lg p-4 text-center text-gray-400">Kalender nicht verfuegbar</div>'; });
+
+        // Projekte (braucht Auth + eigentuemer)
+        if (token) {
+            fetch('/api/projects', { headers: { Authorization: 'Bearer ' + token } })
+                .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+                .then(projects => {
+                    const el = document.getElementById('projects-widget');
+                    const active = (projects || []).filter(p => p.status === 'aktiv');
+                    if (!active.length) {
+                        el.innerHTML = '<div class="bg-white rounded-lg p-6 text-center text-gray-400">Keine aktiven Projekte</div>';
+                        return;
+                    }
+                    el.innerHTML = active.map(p => {
+                        const statusColor = { aktiv: 'green', abgeschlossen: 'gray', pausiert: 'yellow' };
+                        const c = statusColor[p.status] || 'gray';
+                        return '<a href="/projekte.html#' + esc(p.slug) + '" class="block bg-white rounded-lg p-4 border-l-4 border-purple-500 shadow-sm hover:shadow-md transition">' +
+                            '<div class="flex items-center justify-between">' +
+                                '<h3 class="font-medium text-gray-800 text-sm">' + esc(p.title) + '</h3>' +
+                                '<span class="px-2 py-0.5 rounded text-xs font-medium bg-' + c + '-100 text-' + c + '-700">' + esc(p.status) + '</span>' +
+                            '</div>' +
+                        '</a>';
+                    }).join('');
+                })
+                .catch(() => { document.getElementById('projects-widget').innerHTML = '<div class="bg-white rounded-lg p-4 text-center text-gray-400">Projekte nicht verfuegbar</div>'; });
+        } else {
+            document.getElementById('projects-widget').innerHTML = '';
+        }
+    })();
+    </script>
+
+    <!-- Dokumente Schnellzugriff -->
+    <section class="py-12 bg-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-2xl font-bold text-gray-800 mb-2 text-center flex items-center justify-center gap-2">
+                <svg class="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+                Aktuelle Dokumente
+            </h2>
+            <p class="text-center text-gray-500 mb-6">Zuletzt geaenderte Dateien in deiner STWEG</p>
+            <div id="docs-widget" class="space-y-2 max-w-2xl mx-auto">
+                <div class="bg-gray-50 rounded-lg p-4 text-center text-gray-400 animate-pulse">Laden...</div>
+            </div>
+        </div>
+    </section>
+
+    <script>
+    (function() {
+        const token = AuthentikAuth.getToken();
+        if (!token) { document.getElementById('docs-widget').innerHTML = ''; return; }
+        function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+        const fileIcons = {
+            pdf: '&#128196;', docx: '&#128195;', doc: '&#128195;', xlsx: '&#128202;', xls: '&#128202;',
+            png: '&#128247;', jpg: '&#128247;', jpeg: '&#128247;', txt: '&#128196;',
+        };
+
+        fetch('/api/documents', { headers: { Authorization: 'Bearer ' + token } })
+            .then(r => r.json())
+            .then(files => {
+                const stweg3 = (files || [])
+                    .filter(f => f.path.startsWith('stweg3/') && !f.path.includes('/.') && !f.path.endsWith('/'))
+                    .sort((a, b) => (b.modified || 0) - (a.modified || 0))
+                    .slice(0, 8);
+
+                const el = document.getElementById('docs-widget');
+                if (!stweg3.length) {
+                    el.innerHTML = '<div class="bg-gray-50 rounded-lg p-6 text-center text-gray-400">Keine Dokumente gefunden</div>';
+                    return;
+                }
+                el.innerHTML = stweg3.map(f => {
+                    const name = f.path.split('/').pop();
+                    const folder = f.path.split('/').slice(1, -1).join('/');
+                    const ext = name.split('.').pop().toLowerCase();
+                    const icon = fileIcons[ext] || '&#128196;';
+                    const size = f.size ? (f.size > 1048576 ? (f.size / 1048576).toFixed(1) + ' MB' : Math.round(f.size / 1024) + ' KB') : '';
+                    return '<a href="/api/documents/' + esc(f.path) + '" target="_blank" class="flex items-center gap-3 bg-gray-50 hover:bg-amber-50 rounded-lg p-3 border hover:border-amber-300 transition">' +
+                        '<span class="text-xl">' + icon + '</span>' +
+                        '<div class="flex-1 min-w-0">' +
+                            '<p class="text-sm font-medium text-gray-800 truncate">' + esc(name) + '</p>' +
+                            '<p class="text-xs text-gray-400">' + esc(folder) + (size ? ' &bull; ' + size : '') + '</p>' +
+                        '</div>' +
+                        '<svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>' +
+                    '</a>';
+                }).join('');
+            })
+            .catch(() => { document.getElementById('docs-widget').innerHTML = ''; });
+    })();
+    </script>
+
     <!-- Verwaltung & Kontakte -->
     <section class="py-12 bg-gray-50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
