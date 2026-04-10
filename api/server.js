@@ -1272,9 +1272,10 @@ app.get('/api/users/:id', authMiddleware, async (req, res) => {
 
 app.get('/api/wasch/rooms', authMiddleware, async (req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT * FROM wasch_rooms WHERE active = true ORDER BY name'
-    );
+    const stweg = req.query.stweg ? parseInt(req.query.stweg) : null;
+    const result = stweg
+      ? await pool.query('SELECT * FROM wasch_rooms WHERE active = true AND stweg = $1 ORDER BY name', [stweg])
+      : await pool.query('SELECT * FROM wasch_rooms WHERE active = true ORDER BY name');
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: 'Fehler beim Laden der Räume' });
@@ -1282,13 +1283,13 @@ app.get('/api/wasch/rooms', authMiddleware, async (req, res) => {
 });
 
 app.post('/api/wasch/rooms', authMiddleware, adminOnly, async (req, res) => {
-  const { name, location, energy_meter_id, unifi_door_id } = req.body;
+  const { name, location, stweg, energy_meter_id, unifi_door_id } = req.body;
   if (!name) return res.status(400).json({ error: 'Name erforderlich' });
   try {
     const result = await pool.query(
-      `INSERT INTO wasch_rooms (name, location, energy_meter_id, unifi_door_id)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [name, location || '', energy_meter_id || null, unifi_door_id || null]
+      `INSERT INTO wasch_rooms (name, location, stweg, energy_meter_id, unifi_door_id)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [name, location || '', stweg || null, energy_meter_id || null, unifi_door_id || null]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -5471,6 +5472,7 @@ async function initDB() {
         id SERIAL PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
         location VARCHAR(255),
+        stweg INTEGER,
         energy_meter_id VARCHAR(100),
         unifi_door_id VARCHAR(100),
         active BOOLEAN DEFAULT true,
@@ -5653,6 +5655,11 @@ async function initDB() {
 
       -- Ensure duration_minutes column exists on wasch_sessions
       ALTER TABLE wasch_sessions ADD COLUMN IF NOT EXISTS duration_minutes INTEGER;
+
+      -- Waschkueche: stweg column for per-STWEG rooms
+      ALTER TABLE wasch_rooms ADD COLUMN IF NOT EXISTS stweg INTEGER;
+      -- Migrate existing rooms to STWEG 3 (original installation)
+      UPDATE wasch_rooms SET stweg = 3 WHERE stweg IS NULL;
 
       -- Permissions table
       CREATE TABLE IF NOT EXISTS wohnungen (
