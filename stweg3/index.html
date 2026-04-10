@@ -37,7 +37,7 @@
                         }
                     });
                     </script>
-                    <p class="text-lg opacity-80">9 Wohnungen • 1 Hobbyraum • 2 Waschküchen</p>
+                    <p id="stweg-subtitle" class="text-lg opacity-80"></p>
                 </div>
                 <div class="hidden md:block">
                     <div class="bg-white bg-opacity-20 rounded-lg p-4 text-center">
@@ -49,62 +49,65 @@
         </div>
     </section>
 
-    <!-- Übersicht -->
+    <!-- Übersicht (dynamisch aus Verwaltungsdaten) -->
     <section class="py-12 bg-white">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="grid md:grid-cols-2 gap-6 mb-8">
-                <div class="bg-gradient-to-br from-blue-50 to-blue-100 p-6 rounded-lg border-2 border-blue-200">
-                    <div class="flex items-center mb-3">
-                        <svg class="h-10 w-10 text-blue-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
-                        </svg>
-                        <div>
-                            <div class="text-3xl font-bold text-blue-600">9</div>
-                            <div class="text-sm text-gray-600">Wohnungen</div>
-                        </div>
-                    </div>
-                    <p class="text-sm text-gray-700">EG: mit Garten • 1. OG: mit Balkon • 2. OG: mit Balkon unter dem Dach</p>
-                </div>
-
-                <div class="bg-gradient-to-br from-orange-50 to-orange-100 p-6 rounded-lg border-2 border-orange-200">
-                    <div class="flex items-center mb-3">
-                        <svg class="h-10 w-10 text-orange-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
-                        </svg>
-                        <div>
-                            <div class="text-3xl font-bold text-orange-600">1</div>
-                            <div class="text-sm text-gray-600">Hobbyraum</div>
-                        </div>
-                    </div>
-                    <p class="text-sm text-gray-700">Privater Hobbyraum</p>
-                </div>
-
-                <div class="bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-lg border-2 border-green-200">
-                    <div class="flex items-center mb-3">
-                        <svg class="h-10 w-10 text-green-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path>
-                        </svg>
-                        <div>
-                            <div class="text-3xl font-bold text-green-600">2</div>
-                            <div class="text-sm text-gray-600">Waschküchen</div>
-                        </div>
-                    </div>
-                    <p class="text-sm text-gray-700">Gemeinschaftliche Nutzung mit Reservation</p>
-                </div>
-
-                <div class="bg-gradient-to-br from-purple-50 to-purple-100 p-6 rounded-lg border-2 border-purple-200">
-                    <div class="flex items-center mb-3">
-                        <svg class="h-10 w-10 text-purple-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
-                        </svg>
-                        <div>
-                            <div class="text-3xl font-bold text-purple-600">2</div>
-                            <div class="text-sm text-gray-600">Ausschuss</div>
-                        </div>
-                    </div>
-                    <p class="text-sm text-gray-700">Vertreter in der Kooperation</p>
-                </div>
+            <div id="stweg-overview" class="grid md:grid-cols-2 gap-6 mb-8">
+                <!-- Wird dynamisch befuellt -->
             </div>
+            <script>
+            (function() {
+                const STWEG_NR = 3;
+                const icons = {
+                    Wohnung: { color: 'blue', svg: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>' },
+                    Hobbyraum: { color: 'orange', svg: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>' },
+                    Einstellhalle: { color: 'gray', svg: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z"/>' },
+                };
+                const token = AuthentikAuth.getToken();
+                if (!token) return;
+                fetch('/api/stweg/' + STWEG_NR + '/overview', { headers: { Authorization: 'Bearer ' + token } })
+                    .then(r => r.json())
+                    .then(data => {
+                        const cards = [];
+                        // Typ-Karten
+                        for (const [typ, anzahl] of Object.entries(data.typen || {})) {
+                            const ic = icons[typ] || icons.Wohnung;
+                            cards.push(
+                                '<div class="bg-gradient-to-br from-' + ic.color + '-50 to-' + ic.color + '-100 p-6 rounded-lg border-2 border-' + ic.color + '-200">' +
+                                    '<div class="flex items-center mb-3">' +
+                                        '<svg class="h-10 w-10 text-' + ic.color + '-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">' + ic.svg + '</svg>' +
+                                        '<div><div class="text-3xl font-bold text-' + ic.color + '-600">' + anzahl + '</div>' +
+                                        '<div class="text-sm text-gray-600">' + typ + (anzahl !== 1 ? (typ === 'Wohnung' ? 'en' : '') : '') + '</div></div>' +
+                                    '</div>' +
+                                    (typ === 'Wohnung' && data.belegung ? '<p class="text-sm text-gray-700">' + data.belegung.selbstbewohnt + ' Eigentuemer &bull; ' + data.belegung.vermietet + ' Vermietet' + (parseInt(data.belegung.leer) > 0 ? ' &bull; ' + data.belegung.leer + ' Leer' : '') + '</p>' : '') +
+                                '</div>'
+                            );
+                        }
+                        // Waschkuechen-Karte
+                        if (data.waschkuechen > 0) {
+                            cards.push(
+                                '<div class="bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-lg border-2 border-green-200">' +
+                                    '<div class="flex items-center mb-3">' +
+                                        '<svg class="h-10 w-10 text-green-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>' +
+                                        '<div><div class="text-3xl font-bold text-green-600">' + data.waschkuechen + '</div>' +
+                                        '<div class="text-sm text-gray-600">Waschkuechen</div></div>' +
+                                    '</div>' +
+                                    '<p class="text-sm text-gray-700">Gemeinschaftliche Nutzung mit Reservation</p>' +
+                                '</div>'
+                            );
+                        }
+                        document.getElementById('stweg-overview').innerHTML = cards.join('');
+                        // Update subtitle
+                        const parts = [];
+                        for (const [typ, anzahl] of Object.entries(data.typen || {})) {
+                            parts.push(anzahl + ' ' + typ + (anzahl !== 1 && typ === 'Wohnung' ? 'en' : ''));
+                        }
+                        if (data.waschkuechen > 0) parts.push(data.waschkuechen + ' Waschkuechen');
+                        const sub = document.getElementById('stweg-subtitle');
+                        if (sub) sub.textContent = parts.join(' \u2022 ');
+                    }).catch(() => {});
+            })();
+            </script>
 
             <!-- Standort Info -->
             <div class="bg-blue-50 border-l-4 border-blue-500 p-6 rounded-lg">

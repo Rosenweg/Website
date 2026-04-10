@@ -3559,6 +3559,37 @@ app.get('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverw
   }
 });
 
+// GET /api/stweg/:stweg/overview - Public summary (counts only, no personal data)
+app.get('/api/stweg/:stweg/overview', authMiddleware, async (req, res) => {
+  try {
+    const stweg = parseInt(req.params.stweg, 10);
+    if (!stweg || stweg < 1 || stweg > 8) return res.status(400).json({ error: 'Ungueltige STWEG' });
+    const counts = await pool.query(
+      `SELECT typ, COUNT(*) as anzahl FROM wohnungen WHERE stweg = $1 GROUP BY typ`, [stweg]
+    );
+    const occupancy = await pool.query(
+      `SELECT COUNT(*) as total,
+              COUNT(*) FILTER (WHERE bewohnt_von = 'eigentuemer') as selbstbewohnt,
+              COUNT(*) FILTER (WHERE bewohnt_von = 'mieter') as vermietet,
+              COUNT(*) FILTER (WHERE bewohnt_von = 'leer') as leer
+       FROM wohnungen WHERE stweg = $1`, [stweg]
+    );
+    const waschRooms = await pool.query(
+      'SELECT COUNT(*) as anzahl FROM wasch_rooms WHERE stweg = $1 AND active = true', [stweg]
+    );
+    const typCounts = {};
+    for (const r of counts.rows) typCounts[r.typ || 'Wohnung'] = parseInt(r.anzahl);
+    res.json({
+      stweg,
+      typen: typCounts,
+      belegung: occupancy.rows[0],
+      waschkuechen: parseInt(waschRooms.rows[0].anzahl),
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler beim Laden der Uebersicht' });
+  }
+});
+
 // GET /api/wohnungen/:stweg/stats - Occupancy statistics
 app.get('/api/wohnungen/:stweg/stats', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
   try {
