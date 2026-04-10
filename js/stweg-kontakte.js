@@ -135,7 +135,29 @@ const STWEGKontakte = (function() {
         container.innerHTML = html;
     }
 
-    function showLoginState(stwegNr) {
+    async function showLoginState(stwegNr) {
+        // Load public Ausschuss data even without login
+        try {
+            const resp = await fetch('/api/public/ausschuss');
+            if (resp.ok) {
+                const data = await resp.json();
+                const vertreter = (data.vertreter || {})[String(stwegNr)] || [];
+                if (vertreter.length > 0) {
+                    renderAusschuss(stwegNr, vertreter.map(v => ({
+                        name: v.name, funktion: v.funktion || 'Vertreter',
+                        email: null, telefon: null,
+                    })));
+                    // Add shared email
+                    const ac = document.getElementById('ausschuss-card');
+                    if (ac) {
+                        ac.innerHTML += `<div class="mt-3 pt-3 border-t">
+                            <p class="text-sm text-gray-600">Gemeinsame E-Mail: <a href="mailto:ausschuss@rosenweg4303.ch" class="text-blue-600 hover:underline">ausschuss@rosenweg4303.ch</a></p>
+                        </div>`;
+                    }
+                    return;
+                }
+            }
+        } catch(e) {}
         var ac = document.getElementById('ausschuss-card');
         if (ac) {
             ac.innerHTML = `
@@ -145,7 +167,7 @@ const STWEGKontakte = (function() {
                     </svg>
                     <h3 class="text-xl font-semibold">Ausschuss-Vertreter STWEG ${stwegNr}</h3>
                 </div>
-                <p class="text-sm text-gray-600">Melden Sie sich an, um die Ausschussvertreter zu sehen.</p>`;
+                <p class="text-sm text-gray-600">Ausschuss-Daten nicht verfuegbar.</p>`;
         }
         var loginEl = document.getElementById('kontakte-login');
         if (loginEl) {
