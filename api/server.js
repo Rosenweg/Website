@@ -3169,10 +3169,12 @@ function getUsersInGroups(groupPks, allUsers) {
 
 // Natural sort for wohnung (EG.1, EG.2, 1OG.1, 1OG.2, 2OG.1, ...)
 function wohnungSort(a, b) {
-  const order = { 'ug': 0, 'eg': 1, '1og': 2, '2og': 3, '3og': 4, 'dg': 5 };
+  const order = { 'ug': 0, 'eg': 1, '1og': 2, '1.og': 2, '2og': 3, '2.og': 3, '3og': 4, '3.og': 4, 'dg': 5 };
   const parseW = (w) => {
     if (!w) return { floor: 99, num: 99 };
-    const m = w.toLowerCase().match(/^(\d*[a-z]+)\.?(\d+)?$/);
+    const s = w.toLowerCase().replace(/\s+/g, '');
+    // Match formats: "EG.1", "1OG.2", "9.EG.1", "9.2OG.3", "Hobbyraum"
+    const m = s.match(/(?:\d+\.)?(ug|eg|\d+\.?og|dg)\.?(\d+)?/);
     if (!m) return { floor: 99, num: 99 };
     return { floor: order[m[1]] ?? 99, num: parseInt(m[2]) || 0 };
   };
