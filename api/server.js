@@ -2209,10 +2209,10 @@ async function resolveVerteilerRecipients(verteiler) {
   return (verteiler.members || []).map(m => m.email).filter(e => e && !e.endsWith('.invalid'));
 }
 
-app.get('/api/verteiler/by-stweg/:stweg', authMiddleware, async (req, res) => {
+app.get('/api/verteiler/by-stweg/:stweg', async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT * FROM email_verteiler WHERE stweg = $1 ORDER BY name`,
+      `SELECT id, name, email_address, stweg FROM email_verteiler WHERE stweg = $1 AND active = true ORDER BY name`,
       [parseStweg(req.params.stweg)]
     );
     res.json(result.rows);
@@ -3562,7 +3562,7 @@ app.get('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverw
 });
 
 // GET /api/stweg/:stweg/overview - Public summary (counts only, no personal data)
-app.get('/api/stweg/:stweg/overview', authMiddleware, async (req, res) => {
+app.get('/api/stweg/:stweg/overview', async (req, res) => {
   try {
     const stweg = parseInt(req.params.stweg, 10);
     if (!stweg || stweg < 1 || stweg > 8) return res.status(400).json({ error: 'Ungueltige STWEG' });

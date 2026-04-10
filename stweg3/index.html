@@ -152,10 +152,10 @@
         function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
         const token = AuthentikAuth.getToken();
-        if (!token) return;
+        const authHeaders = token ? { Authorization: 'Bearer ' + token } : {};
 
-        // Try wohnungsverwaltung API first, fallback to overview
-        fetch('/api/wohnungen/' + STWEG_NR, { headers: { Authorization: 'Bearer ' + token } })
+        // Try wohnungsverwaltung API (needs permission), fallback to overview (public)
+        fetch(token ? '/api/wohnungen/' + STWEG_NR : '/api/stweg/' + STWEG_NR + '/overview', { headers: authHeaders })
             .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
             .then(data => {
                 const wohnungen = data.wohnungen || [];
@@ -217,8 +217,25 @@
                 document.getElementById('wohnungen-grid').innerHTML = html || '<div class="col-span-3 text-center text-gray-400 py-8">Keine Wohnungen erfasst.</div>';
             })
             .catch(() => {
-                // Fallback: user hat keine wohnungsverwaltung-Permission, zeige nur Zahlen
-                document.getElementById('wohnungen-grid').innerHTML = '<div class="col-span-3 text-center text-gray-500 py-4">Detailansicht nur fuer Verwaltung sichtbar. <a href="/wohnungsverwaltung.html" class="text-blue-600 underline">Zur Verwaltung</a></div>';
+                // Fallback: load public overview (counts only)
+                fetch('/api/stweg/' + STWEG_NR + '/overview')
+                    .then(r => r.json())
+                    .then(data => {
+                        const cards = [];
+                        for (const [typ, anzahl] of Object.entries(data.typen || {})) {
+                            cards.push('<div class="bg-white p-5 rounded-lg shadow-md text-center' + (Object.keys(data.typen).length <= 2 ? ' md:col-span-' + Math.floor(3 / Object.keys(data.typen).length) : '') + '">' +
+                                '<div class="text-3xl font-bold text-blue-600">' + anzahl + '</div>' +
+                                '<div class="text-sm text-gray-600">' + esc(typ) + (anzahl !== 1 && typ === 'Wohnung' ? 'en' : '') + '</div>' +
+                                (typ === 'Wohnung' && data.belegung ? '<p class="text-xs text-gray-400 mt-1">' + data.belegung.selbstbewohnt + ' Eigentuemer &bull; ' + data.belegung.vermietet + ' Vermietet</p>' : '') +
+                            '</div>');
+                        }
+                        if (data.waschkuechen > 0) {
+                            cards.push('<div class="bg-white p-5 rounded-lg shadow-md text-center"><div class="text-3xl font-bold text-green-600">' + data.waschkuechen + '</div><div class="text-sm text-gray-600">Waschkuechen</div></div>');
+                        }
+                        document.getElementById('wohnungen-grid').innerHTML = cards.join('');
+                        document.getElementById('wohnungen-title').textContent = (data.typen?.Wohnung || '?') + ' Wohnungen im Ueberblick';
+                    })
+                    .catch(() => {});
             });
     })();
     </script>
@@ -236,8 +253,6 @@
 
     <script>
     (function() {
-        const token = AuthentikAuth.getToken();
-        if (!token) { document.getElementById('verteiler-cards').innerHTML = ''; return; }
         function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
         const icons = {
@@ -248,7 +263,7 @@
             'default': { emoji: '&#128231;', color: 'gray', desc: 'E-Mail-Verteiler' },
         };
 
-        fetch('/api/verteiler/by-stweg/3', { headers: { Authorization: 'Bearer ' + token } })
+        fetch('/api/verteiler/by-stweg/3')
             .then(r => r.json())
             .then(list => {
                 if (!list.length) { document.getElementById('verteiler-cards').innerHTML = '<div class="col-span-3 text-center text-gray-400 py-4">Keine Verteiler konfiguriert.</div>'; return; }
