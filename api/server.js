@@ -1298,13 +1298,13 @@ app.post('/api/wasch/rooms', authMiddleware, adminOnly, async (req, res) => {
 });
 
 app.put('/api/wasch/rooms/:id', authMiddleware, adminOnly, async (req, res) => {
-  const { name, location, energy_meter_id, unifi_door_id, active } = req.body;
+  const { name, location, stweg, energy_meter_id, unifi_door_id, active } = req.body;
   try {
     const result = await pool.query(
       `UPDATE wasch_rooms SET name=COALESCE($2,name), location=COALESCE($3,location),
-       energy_meter_id=$4, unifi_door_id=$5, active=COALESCE($6,active)
+       stweg=COALESCE($4,stweg), energy_meter_id=$5, unifi_door_id=$6, active=COALESCE($7,active)
        WHERE id=$1 RETURNING *`,
-      [req.params.id, name, location, energy_meter_id || null, unifi_door_id || null, active]
+      [req.params.id, name, location, stweg, energy_meter_id || null, unifi_door_id || null, active]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Raum nicht gefunden' });
     res.json(result.rows[0]);

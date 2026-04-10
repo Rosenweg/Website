@@ -284,113 +284,217 @@
     </section>
 
     <!-- Rest of the HTML remains exactly the same... -->
-    <!-- Waschküchen -->
+    <!-- Waschküchen (dynamisch aus API) -->
     <section id="waschkueche" class="py-12 bg-white">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <h2 class="text-3xl font-bold text-gray-800 mb-8 text-center">Waschküchen</h2>
-            
-            <div class="bg-gradient-to-br from-green-50 to-green-100 border-2 border-green-300 rounded-lg p-8">
-                <div class="flex items-start mb-6">
-                    <svg class="h-12 w-12 text-green-600 mr-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path>
-                    </svg>
-                    <div class="flex-1">
-                        <h3 class="text-2xl font-semibold text-green-800 mb-3">2 Gemeinschaftliche Waschküchen</h3>
-                        <p class="text-gray-700 mb-4">
-                            Die beiden Waschküchen im Untergeschoss stehen allen Bewohnern der STWEG 3 zur Verfügung. Eine Reservation ist erforderlich.
-                        </p>
+            <h2 class="text-3xl font-bold text-gray-800 mb-2 text-center">Waschkuechen</h2>
+            <p class="text-center text-gray-500 mb-8">Untergeschoss Rosenweg 9</p>
+
+            <div id="wasch-rooms-container" class="grid md:grid-cols-2 gap-6 mb-8">
+                <div class="bg-gray-100 rounded-lg p-8 text-center text-gray-400 animate-pulse">Laden...</div>
+            </div>
+
+            <!-- Admin: Raum hinzufuegen -->
+            <div id="wasch-admin-section" class="hidden mb-8">
+                <button onclick="showAddRoomModal()" class="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700">+ Raum hinzufuegen</button>
+            </div>
+
+            <!-- Nutzungsregeln -->
+            <div class="bg-gradient-to-br from-green-50 to-green-100 border border-green-200 rounded-lg p-6">
+                <div class="grid md:grid-cols-2 gap-6 text-sm text-gray-700">
+                    <div>
+                        <p class="font-semibold text-green-700 mb-2">Pflichten</p>
+                        <ul class="space-y-1">
+                            <li>&#10004; Trockner fuer Waeschetrocknung nutzen</li>
+                            <li>&#10004; Fenster geschlossen halten</li>
+                            <li>&#10004; Waschkueche nach Gebrauch reinigen</li>
+                            <li>&#10004; Reservierte Zeiten einhalten</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-red-600 mb-2">Nicht erlaubt</p>
+                        <ul class="space-y-1">
+                            <li>&#10008; Fenster oeffnen</li>
+                            <li>&#10008; Nutzung ohne Reservation</li>
+                            <li>&#10008; Ueberschreitung der Zeitfenster</li>
+                        </ul>
                     </div>
                 </div>
-
-                <div class="grid md:grid-cols-2 gap-6 mb-6">
-                    <div class="bg-white p-5 rounded-lg border-2 border-green-400">
-                        <h4 class="font-semibold text-lg text-green-700 mb-3 flex items-center">
-                            <span class="bg-green-100 text-green-800 w-8 h-8 rounded-full flex items-center justify-center mr-2 font-bold">1</span>
-                            Waschküche 1
-                        </h4>
-                        <div class="space-y-2 text-sm text-gray-700">
-                            <p><strong>Standort:</strong> Untergeschoss</p>
-                            <p><strong>Ausstattung:</strong> Waschmaschine, Trockner, Waschtisch, Wäscheleinen (fest verbaut)</p>
-                            <p><strong>Reservation:</strong> Erforderlich - in Liste eintragen</p>
-                        </div>
-                    </div>
-
-                    <div class="bg-white p-5 rounded-lg border-2 border-green-400">
-                        <h4 class="font-semibold text-lg text-green-700 mb-3 flex items-center">
-                            <span class="bg-green-100 text-green-800 w-8 h-8 rounded-full flex items-center justify-center mr-2 font-bold">2</span>
-                            Waschküche 2
-                        </h4>
-                        <div class="space-y-2 text-sm text-gray-700">
-                            <p><strong>Standort:</strong> Untergeschoss</p>
-                            <p><strong>Ausstattung:</strong> Waschmaschine, Trockner, Waschtisch, Wäscheleinen (fest verbaut)</p>
-                            <p><strong>Reservation:</strong> Erforderlich - in Liste eintragen</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="bg-white p-5 rounded-lg mb-4">
-                    <h4 class="font-semibold text-green-700 mb-3 flex items-center">
-                        <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                        </svg>
-                        Reservationssystem
-                    </h4>
-                    <ul class="space-y-2 text-sm text-gray-700">
-                        <li>• <strong>Eintragung erforderlich:</strong> Tragen Sie sich in die Reservationsliste vor Ort ein</li>
-                        <li>• <strong>Waschzeiten:</strong> [z.B. Montag - Samstag, 07:00 - 20:00 Uhr]</li>
-                        <li>• <strong>Zeitfenster:</strong> [z.B. 2-3 Stunden pro Reservation]</li>
-                        <li>• <strong>Reinigung:</strong> Nach jeder Nutzung Waschküche reinigen und aufräumen</li>
-                        <li>• <strong>Ruhezeiten beachten:</strong> Sonntags und nachts (22:00-07:00 Uhr) keine Nutzung</li>
-                    </ul>
-                </div>
-
-                <div class="bg-white p-5 rounded-lg">
-                    <h4 class="font-semibold text-green-700 mb-3">Nutzungsregeln</h4>
-                    <div class="grid md:grid-cols-2 gap-4 text-sm text-gray-700 mb-4">
-                        <div>
-                            <p class="font-semibold text-green-600 mb-2">✓ Pflichten:</p>
-                            <ul class="space-y-1 list-disc list-inside">
-                                <li>Trockner für Wäschetrocknung nutzen</li>
-                                <li>Fenster geschlossen halten</li>
-                                <li>Wäscheleinen (fest verbaut) nutzen</li>
-                                <li>Waschküche nach Gebrauch reinigen</li>
-                                <li>Waschtisch sauber hinterlassen</li>
-                            </ul>
-                        </div>
-                        <div>
-                            <p class="font-semibold text-red-600 mb-2">✗ Nicht erlaubt:</p>
-                            <ul class="space-y-1 list-disc list-inside">
-                                <li>Fenster öffnen (Fenster müssen geschlossen bleiben!)</li>
-                                <li>Nutzung ohne Reservation</li>
-                                <li>Überschreitung der Zeitfenster</li>
-                                <li>Gewerbliche Nutzung</li>
-                            </ul>
-                        </div>
-                    </div>
-                    <div class="bg-red-50 border-l-4 border-red-500 p-3 rounded">
-                        <p class="text-sm text-red-800">
-                            <strong>⚠️ Wichtige Regel:</strong> Die Fenster in der Waschküche müssen geschlossen bleiben!
-                            Zum Trocknen der Wäsche nutzen Sie bitte ausschließlich den Trockner oder die Wäscheleinen innerhalb der Waschküche.
-                        </p>
-                    </div>
-                </div>
-
-                <div class="mt-4 bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
-                    <p class="text-sm text-gray-700">
-                        <strong>Wichtig:</strong> Die Waschküchen sind nach jeder Nutzung zu reinigen und in ordentlichem Zustand zu hinterlassen. 
-                        Bitte Rücksicht auf andere Bewohner nehmen und die reservierten Zeiten einhalten.
-                    </p>
-                </div>
-
-                <div class="mt-4 bg-blue-50 border-l-4 border-blue-400 p-4 rounded">
-                    <p class="text-sm text-gray-700">
-                        <strong>Reservationsliste:</strong> Die Reservationsliste befindet sich vor Ort in jeder Waschküche. 
-                        Bitte tragen Sie Ihren Namen, Wohnung und die gewünschte Zeit ein.
-                    </p>
+                <div class="mt-4 flex flex-col sm:flex-row gap-3">
+                    <a href="/waschkueche.html?stweg=3" class="inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                        Jetzt reservieren
+                    </a>
                 </div>
             </div>
         </div>
     </section>
+
+    <!-- Raum bearbeiten Modal -->
+    <div id="roomModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg">
+            <div class="p-6 border-b">
+                <h3 id="roomModalTitle" class="text-lg font-bold">Raum bearbeiten</h3>
+            </div>
+            <div class="p-6 space-y-4">
+                <input type="hidden" id="rm-id">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                    <input type="text" id="rm-name" class="w-full border rounded-lg px-3 py-2" placeholder="z.B. Waschkueche 1">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Standort</label>
+                    <input type="text" id="rm-location" class="w-full border rounded-lg px-3 py-2" placeholder="z.B. UG Rosenweg 9">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Energiezaehler-ID</label>
+                    <select id="rm-meter" class="w-full border rounded-lg px-3 py-2">
+                        <option value="">Kein Zaehler</option>
+                    </select>
+                    <p class="text-xs text-gray-500 mt-1">Verknuepft den Raum mit einem Stromzaehler fuer die Verbrauchsabrechnung</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">UniFi Door-ID</label>
+                    <input type="text" id="rm-door" class="w-full border rounded-lg px-3 py-2" placeholder="Optional: UniFi Access Door-ID">
+                </div>
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="rm-active" checked class="rounded">
+                    <label for="rm-active" class="text-sm text-gray-700">Aktiv</label>
+                </div>
+            </div>
+            <div class="p-6 border-t flex justify-end gap-3">
+                <button onclick="closeRoomModal()" class="px-4 py-2 rounded-lg border text-gray-700 hover:bg-gray-50">Abbrechen</button>
+                <button onclick="saveRoom()" class="px-4 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700">Speichern</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        const STWEG = 3;
+        let waschRooms = [];
+        let energyMeters = [];
+        let isAdmin = false;
+
+        function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+        async function loadWaschRooms() {
+            const user = AuthentikAuth.getUser();
+            isAdmin = user?.isAdmin || false;
+            const token = AuthentikAuth.getToken();
+            if (!token) {
+                document.getElementById('wasch-rooms-container').innerHTML = '<div class="col-span-2 text-center text-gray-500 py-8">Bitte anmelden um Waschkuechen zu sehen.</div>';
+                return;
+            }
+
+            try {
+                const resp = await fetch('/api/wasch/rooms?stweg=' + STWEG, { headers: { Authorization: 'Bearer ' + token } });
+                waschRooms = await resp.json();
+            } catch(e) { waschRooms = []; }
+
+            if (isAdmin) {
+                try {
+                    const mResp = await fetch('/api/energy/meters');
+                    energyMeters = await mResp.json();
+                } catch(e) { energyMeters = []; }
+                document.getElementById('wasch-admin-section').classList.remove('hidden');
+            }
+
+            renderRooms();
+        }
+
+        function renderRooms() {
+            const c = document.getElementById('wasch-rooms-container');
+            if (!waschRooms.length) {
+                c.innerHTML = '<div class="col-span-2 text-center text-gray-400 py-8">Keine Waschkuechen fuer diese STWEG konfiguriert.</div>';
+                return;
+            }
+            c.innerHTML = waschRooms.map((r, i) => {
+                const meter = energyMeters.find(m => String(m.id) === String(r.energy_meter_id));
+                return '<div class="bg-white p-5 rounded-lg border-2 border-green-300 shadow-sm">' +
+                    '<div class="flex items-center justify-between mb-3">' +
+                        '<h4 class="font-semibold text-lg text-green-700 flex items-center">' +
+                            '<span class="bg-green-100 text-green-800 w-8 h-8 rounded-full flex items-center justify-center mr-2 font-bold">' + (i+1) + '</span>' +
+                            esc(r.name) +
+                        '</h4>' +
+                        (isAdmin ? '<button onclick="editRoom(' + r.id + ')" class="text-xs text-blue-600 hover:underline">Bearbeiten</button>' : '') +
+                    '</div>' +
+                    '<div class="space-y-1 text-sm text-gray-600">' +
+                        (r.location ? '<p><strong>Standort:</strong> ' + esc(r.location) + '</p>' : '') +
+                        '<p><strong>Ausstattung:</strong> Waschmaschine, Trockner, Waschtisch, Waescheleinen</p>' +
+                        (meter ? '<p><strong>Zaehler:</strong> <span class="text-green-700">' + esc(meter.name) + '</span></p>' : '') +
+                        (r.unifi_door_id ? '<p><strong>Tuerzugang:</strong> <span class="text-blue-600">Konfiguriert</span></p>' : '') +
+                    '</div>' +
+                '</div>';
+            }).join('');
+        }
+
+        window.editRoom = function(id) {
+            const r = waschRooms.find(x => x.id === id);
+            if (!r) return;
+            document.getElementById('roomModalTitle').textContent = 'Raum bearbeiten: ' + r.name;
+            document.getElementById('rm-id').value = r.id;
+            document.getElementById('rm-name').value = r.name || '';
+            document.getElementById('rm-location').value = r.location || '';
+            document.getElementById('rm-door').value = r.unifi_door_id || '';
+            document.getElementById('rm-active').checked = r.active !== false;
+            // Populate meter dropdown
+            const sel = document.getElementById('rm-meter');
+            sel.innerHTML = '<option value="">Kein Zaehler</option>' +
+                energyMeters.map(m => '<option value="' + m.id + '"' + (String(r.energy_meter_id) === String(m.id) ? ' selected' : '') + '>' + esc(m.name) + '</option>').join('');
+            document.getElementById('roomModal').classList.remove('hidden');
+        };
+
+        window.showAddRoomModal = function() {
+            document.getElementById('roomModalTitle').textContent = 'Neuen Raum hinzufuegen';
+            document.getElementById('rm-id').value = '';
+            document.getElementById('rm-name').value = '';
+            document.getElementById('rm-location').value = '';
+            document.getElementById('rm-door').value = '';
+            document.getElementById('rm-active').checked = true;
+            const sel = document.getElementById('rm-meter');
+            sel.innerHTML = '<option value="">Kein Zaehler</option>' +
+                energyMeters.map(m => '<option value="' + m.id + '">' + esc(m.name) + '</option>').join('');
+            document.getElementById('roomModal').classList.remove('hidden');
+        };
+
+        window.closeRoomModal = function() {
+            document.getElementById('roomModal').classList.add('hidden');
+        };
+
+        window.saveRoom = async function() {
+            const token = AuthentikAuth.getToken();
+            const id = document.getElementById('rm-id').value;
+            const body = {
+                name: document.getElementById('rm-name').value,
+                location: document.getElementById('rm-location').value,
+                stweg: STWEG,
+                energy_meter_id: document.getElementById('rm-meter').value || null,
+                unifi_door_id: document.getElementById('rm-door').value || null,
+                active: document.getElementById('rm-active').checked,
+            };
+            try {
+                const url = id ? '/api/wasch/rooms/' + id : '/api/wasch/rooms';
+                const method = id ? 'PUT' : 'POST';
+                const resp = await fetch(url, {
+                    method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+                    body: JSON.stringify(body),
+                });
+                if (!resp.ok) { const e = await resp.json(); alert(e.error || 'Fehler'); return; }
+                closeRoomModal();
+                loadWaschRooms();
+            } catch(e) { alert('Fehler: ' + e.message); }
+        };
+
+        // Load after auth is ready
+        if (AuthentikAuth.isLoggedIn()) {
+            loadWaschRooms();
+        } else {
+            document.addEventListener('authentik-auth-ready', loadWaschRooms);
+            setTimeout(loadWaschRooms, 2000);
+        }
+    })();
+    </script>
 
     <!-- Verwaltung & Kontakte -->
     <section class="py-12 bg-gray-50">
@@ -515,39 +619,6 @@
                     </div>
                     <div class="flex items-center text-yellow-600 font-semibold">
                         <span>Zur Live-Ansicht</span>
-                        <svg class="h-5 w-5 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                        </svg>
-                    </div>
-                </a>
-
-                <!-- Waschküchen-Reservierung -->
-                <a href="/waschkueche.html?stweg=3" class="block bg-white p-8 rounded-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-1">
-                    <div class="flex items-center mb-4">
-                        <div class="bg-blue-100 rounded-full p-3 mr-4">
-                            <svg class="h-10 w-10 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
-                            </svg>
-                        </div>
-                        <div>
-                            <h3 class="text-2xl font-bold text-gray-800">Waschküche</h3>
-                            <p class="text-sm text-blue-600 font-semibold">Reservierung</p>
-                        </div>
-                    </div>
-                    <p class="text-gray-600 mb-4">
-                        Online-Reservierungssystem für die 2 Waschküchen im Untergeschoss.
-                    </p>
-                    <div class="bg-blue-50 rounded-lg p-4 mb-4">
-                        <p class="text-sm text-gray-700 mb-2"><strong>📅 Funktionen:</strong></p>
-                        <ul class="text-sm text-gray-600 space-y-1">
-                            <li>• Wochenkalender-Ansicht</li>
-                            <li>• Einmalige Buchungen</li>
-                            <li>• Wiederkehrende Termine</li>
-                            <li>• Zeitslots à 6 Stunden</li>
-                        </ul>
-                    </div>
-                    <div class="flex items-center text-blue-600 font-semibold">
-                        <span>Zur Reservierung</span>
                         <svg class="h-5 w-5 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
                         </svg>
