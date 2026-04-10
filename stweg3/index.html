@@ -541,11 +541,11 @@
         function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
         const token = AuthentikAuth.getToken();
 
-        // Kalender (oeffentlich, kein Token noetig)
-        fetch('/api/calendar')
+        // Kalender (STWEG + Kooperation merged)
+        fetch(token ? '/api/stweg/3/events' : '/api/calendar', token ? { headers: { Authorization: 'Bearer ' + token } } : {})
             .then(r => r.json())
             .then(data => {
-                const events = (data.events || []).slice(0, 5);
+                const events = (Array.isArray(data) ? data : data.events || []).slice(0, 6);
                 const el = document.getElementById('calendar-widget');
                 if (!events.length) {
                     el.innerHTML = '<div class="bg-white rounded-lg p-6 text-center text-gray-400">Keine anstehenden Termine</div>';
@@ -555,7 +555,9 @@
                     const d = new Date(e.start);
                     const day = d.toLocaleDateString('de-CH', { weekday: 'short', day: 'numeric', month: 'short' });
                     const time = e.start.includes('T') ? d.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' }) : 'Ganztaegig';
-                    return '<div class="bg-white rounded-lg p-4 border-l-4 border-blue-500 shadow-sm hover:shadow-md transition">' +
+                    const isStweg = e.source === 'stweg';
+                    const borderColor = isStweg ? 'green' : 'blue';
+                    return '<div class="bg-white rounded-lg p-4 border-l-4 border-' + borderColor + '-500 shadow-sm hover:shadow-md transition">' +
                         '<div class="flex items-start gap-3">' +
                             '<div class="text-center min-w-[50px]">' +
                                 '<div class="text-xs text-gray-500 uppercase">' + esc(d.toLocaleDateString('de-CH', { month: 'short' })) + '</div>' +
@@ -570,6 +572,29 @@
                 }).join('');
             })
             .catch(() => { document.getElementById('calendar-widget').innerHTML = '<div class="bg-white rounded-lg p-4 text-center text-gray-400">Kalender nicht verfuegbar</div>'; });
+
+        // Add event button for admins
+        if (token) {
+            const user = AuthentikAuth.getUser();
+            if (user?.isAdmin) {
+                const btn = document.createElement('button');
+                btn.className = 'mt-3 text-sm text-blue-600 hover:underline flex items-center gap-1';
+                btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg> Termin hinzufuegen';
+                btn.onclick = () => {
+                    const title = prompt('Titel:');
+                    if (!title) return;
+                    const date = prompt('Datum (YYYY-MM-DD):');
+                    if (!date) return;
+                    const loc = prompt('Ort (optional):') || '';
+                    fetch('/api/stweg/3/events', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+                        body: JSON.stringify({ title, start_date: date + 'T09:00:00', all_day: true, location: loc, category: 'stweg' }),
+                    }).then(r => { if (r.ok) location.reload(); else alert('Fehler'); });
+                };
+                document.getElementById('calendar-widget').parentNode.appendChild(btn);
+            }
+        }
 
         // Projekte (braucht Auth + eigentuemer)
         if (token) {
