@@ -147,13 +147,22 @@ const STWEGKontakte = (function() {
                         name: v.name, funktion: v.funktion || 'Vertreter',
                         email: null, telefon: null,
                     })));
-                    // Add shared email
-                    const ac = document.getElementById('ausschuss-card');
-                    if (ac) {
-                        ac.innerHTML += `<div class="mt-3 pt-3 border-t">
-                            <p class="text-sm text-gray-600">Gemeinsame E-Mail: <a href="mailto:ausschuss@rosenweg4303.ch" class="text-blue-600 hover:underline">ausschuss@rosenweg4303.ch</a></p>
-                        </div>`;
-                    }
+                    // Add STWEG-specific email from verteiler
+                    try {
+                        const vResp = await fetch('/api/verteiler/by-stweg/' + stwegNr);
+                        if (vResp.ok) {
+                            const verteiler = await vResp.json();
+                            const stweg = verteiler.find(v => v.name.toLowerCase().includes('ausschuss')) || verteiler[0];
+                            if (stweg) {
+                                const ac = document.getElementById('ausschuss-card');
+                                if (ac) {
+                                    ac.innerHTML += `<div class="mt-3 pt-3 border-t">
+                                        <p class="text-sm text-gray-600">E-Mail: <a href="mailto:${esc(stweg.email_address)}" class="text-blue-600 hover:underline">${esc(stweg.email_address)}</a></p>
+                                    </div>`;
+                                }
+                            }
+                        }
+                    } catch(e) {}
                     return;
                 }
             }
