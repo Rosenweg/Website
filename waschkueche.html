@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Waschküchen-Reservierung</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/site-config.js"></script>
+    <script>
+        // STWEG from URL parameter
+        const WASCH_STWEG = parseInt(new URLSearchParams(window.location.search).get('stweg')) || 0;
+        if (!WASCH_STWEG) document.title = 'Waschküche - Rosenweg';
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+
+        /* Calendar grid */
+        .cal-col { position: relative; border-left: 1px solid #e5e7eb; }
+        .cal-col:first-child { border-left: none; }
+        .cal-col.is-today { background: #eff6ff; }
+        .cal-col.is-past { background: #f9fafb; }
+
+        .hour-line { position: absolute; left: 0; right: 0; border-top: 1px solid #f3f4f6; pointer-events: none; }
+        .hour-line.full { border-color: #e5e7eb; }
+        .hour-line.label::before {
+            content: attr(data-label);
+            position: absolute; left: -52px; top: -9px;
+            font-size: 0.7rem; color: #9ca3af; width: 46px; text-align: right;
+        }
+
+        .now-line { position: absolute; left: 0; right: 0; border-top: 2px solid #ef4444; z-index: 20; pointer-events: none; }
+        .now-line::before {
+            content: ''; position: absolute; left: -4px; top: -5px;
+            width: 8px; height: 8px; background: #ef4444; border-radius: 50%;
+        }
+
+        /* Reservation blocks */
+        .res-block {
+            position: absolute; left: 3px; right: 3px;
+            border-radius: 6px; padding: 3px 6px;
+            font-size: 0.7rem; line-height: 1.3;
+            overflow: hidden; cursor: pointer;
+            transition: box-shadow 0.15s, transform 0.15s;
+            z-index: 10; border-left: 3px solid;
+        }
+        .res-block:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.15); transform: translateY(-1px); }
+        .res-own { background: #fef9c3; border-left-color: #eab308; color: #713f12; }
+        .res-other { background: #fee2e2; border-left-color: #ef4444; color: #991b1b; }
+        .res-active { background: #d1fae5; border-left-color: #10b981; color: #065f46; animation: pulse-border 2s infinite; }
+        @keyframes pulse-border { 0%,100% { border-left-color: #10b981; } 50% { border-left-color: #6ee7b7; } }
+
+        /* Clickable empty space */
+        .cal-col-inner { position: absolute; inset: 0; cursor: crosshair; }
+        .cal-col-inner:hover { background: rgba(59, 130, 246, 0.03); }
+
+        /* Time gutter */
+        .time-gutter { width: 52px; flex-shrink: 0; position: relative; }
+
+        /* Mobile: show day view */
+        @media (max-width: 768px) {
+            .cal-grid { grid-template-columns: 1fr !important; }
+            .cal-header-grid { grid-template-columns: 1fr !important; }
+            .day-header-cell { display: none; }
+            .day-header-cell.active-day { display: block; }
+            .cal-col { display: none; }
+            .cal-col.active-day { display: block; }
+            .mobile-day-nav { display: flex !important; }
+        }
+
+        /* Smooth modal */
+        .modal-backdrop { transition: opacity 0.2s; }
+        .modal-panel { transition: transform 0.2s, opacity 0.2s; }
+
+        /* Loading skeleton */
+        .skeleton { background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%);
+            background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 4px; }
+        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Navigation -->
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js?v=2"></script>
+    <script>RosenwegNav.init({ active: WASCH_STWEG ? 'stweg' + WASCH_STWEG : 'waschkueche', basePath: '/' });</script>
+
+    <!-- SSO Login -->
+    <div id="loginSection" class="flex items-center justify-center min-h-[60vh]">
+        <div class="max-w-sm w-full mx-4 p-8 bg-white rounded-xl shadow-lg text-center">
+            <div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg class="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                </svg>
+            </div>
+            <h2 class="text-xl font-bold text-gray-800 mb-2" id="login-title">Waschküche Reservierung</h2>
+            <p class="text-gray-500 text-sm mb-6">Melden Sie sich an, um Reservierungen vorzunehmen.</p>
+            <script>
+                if (WASCH_STWEG) {
+                    SiteConfig.load().then(() => {
+                        const s = SiteConfig.getStweg(WASCH_STWEG);
+                        if (s) {
+                            document.title = 'Waschküche - ' + s.name;
+                            document.getElementById('login-title').textContent = 'Waschküche ' + s.name;
+                        }
+                    });
+                }
+            </script>
+            <div id="sso-login-container"></div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div id="mainContent" class="hidden">
+        <!-- Top Bar -->
+        <div class="bg-white border-b sticky top-[56px] z-40">
+            <div class="max-w-7xl mx-auto px-4 py-3">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <!-- Room Tabs -->
+                    <div id="roomTabs" class="flex gap-1 bg-gray-100 rounded-lg p-1">
+                        <!-- filled by JS -->
+                    </div>
+                    <!-- Actions -->
+                    <div class="flex items-center gap-3">
+                        <span class="text-sm text-gray-500 hidden sm:inline" id="userInfo"></span>
+                        <button onclick="openBookingModal()" id="bookBtn" disabled
+                                class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                            Reservieren
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="max-w-7xl mx-auto px-4 py-4">
+            <!-- Week Navigation -->
+            <div class="flex items-center justify-between mb-3">
+                <button onclick="changeWeek(-1)" class="p-2 rounded-lg hover:bg-gray-200 transition" title="Vorherige Woche">
+                    <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                </button>
+                <div class="text-center">
+                    <h2 class="font-bold text-gray-800" id="weekTitle"></h2>
+                    <button onclick="goToday()" class="text-xs text-blue-600 hover:underline mt-0.5">Heute</button>
+                </div>
+                <button onclick="changeWeek(1)" class="p-2 rounded-lg hover:bg-gray-200 transition" title="Nächste Woche">
+                    <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                </button>
+            </div>
+
+            <!-- Mobile Day Selector -->
+            <div class="mobile-day-nav hidden gap-1 mb-3 overflow-x-auto pb-1" id="mobileDayNav">
+                <!-- filled by JS -->
+            </div>
+
+            <!-- Calendar -->
+            <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
+                <!-- Day Headers -->
+                <div class="flex border-b">
+                    <div class="time-gutter border-r bg-gray-50"></div>
+                    <div class="flex-1 grid grid-cols-7 cal-header-grid" id="dayHeaders"></div>
+                </div>
+                <!-- Time Grid -->
+                <div class="flex overflow-y-auto" style="max-height: calc(100vh - 260px); min-height: 400px;" id="calendarScroll">
+                    <div class="time-gutter border-r bg-gray-50" id="timeGutter"></div>
+                    <div class="flex-1 grid grid-cols-7 cal-grid relative" id="dayColumns" style="min-height: 960px;"></div>
+                </div>
+            </div>
+
+            <!-- Legend -->
+            <div class="flex flex-wrap gap-4 mt-3 justify-center text-xs text-gray-500">
+                <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm bg-yellow-100 border-l-2 border-yellow-500"></span>Meine</span>
+                <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm bg-red-100 border-l-2 border-red-500"></span>Belegt</span>
+                <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-sm bg-green-100 border-l-2 border-green-500"></span>Aktiv</span>
+                <span class="flex items-center gap-1.5 cursor-crosshair">Klick im Kalender = Schnellbuchung</span>
+            </div>
+
+            <!-- My Reservations -->
+            <div class="mt-6 bg-white rounded-xl shadow-sm border p-4">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="font-bold text-gray-800">Meine Reservierungen</h2>
+                    <span class="text-xs text-gray-400" id="myResCount"></span>
+                </div>
+                <div id="myResList">
+                    <div class="skeleton h-12 mb-2"></div>
+                    <div class="skeleton h-12"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Booking Modal -->
+    <div id="bookingModal" class="hidden fixed inset-0 z-50">
+        <div class="modal-backdrop absolute inset-0 bg-black/40" onclick="closeBookingModal()"></div>
+        <div class="absolute inset-0 flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <div class="modal-panel bg-white rounded-t-2xl sm:rounded-xl shadow-2xl w-full sm:max-w-md max-h-[90vh] overflow-y-auto">
+                <div class="p-5">
+                    <!-- Header -->
+                    <div class="flex items-center justify-between mb-5">
+                        <h2 class="text-lg font-bold text-gray-800">Neue Reservierung</h2>
+                        <button onclick="closeBookingModal()" class="p-1 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+
+                    <form id="bookingForm" onsubmit="submitBooking(event)">
+                        <!-- Room indicator -->
+                        <div class="mb-4 p-3 bg-blue-50 rounded-lg text-sm text-blue-800">
+                            Raum: <strong id="modalRoomName"></strong>
+                        </div>
+                        <input type="hidden" id="modalRoomId">
+
+                        <!-- Booking Type -->
+                        <div class="mb-4">
+                            <div class="grid grid-cols-2 gap-2">
+                                <label class="relative flex items-center justify-center p-2.5 border-2 rounded-lg cursor-pointer transition
+                                              has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50 hover:border-gray-400">
+                                    <input type="radio" name="bookingType" value="einmalig" checked onchange="toggleBookingType()" class="sr-only">
+                                    <span class="text-sm font-medium">Einmalig</span>
+                                </label>
+                                <label class="relative flex items-center justify-center p-2.5 border-2 rounded-lg cursor-pointer transition
+                                              has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50 hover:border-gray-400">
+                                    <input type="radio" name="bookingType" value="wiederkehrend" onchange="toggleBookingType()" class="sr-only">
+                                    <span class="text-sm font-medium">Wöchentlich</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Date Fields -->
+                        <div id="einmaligFields" class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Datum</label>
+                            <input type="date" id="bookingDate" required
+                                   class="w-full px-3 py-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm">
+                        </div>
+
+                        <div id="wiederkehrendFields" class="hidden mb-4 space-y-3">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Erster Termin</label>
+                                <input type="date" id="recurringStart"
+                                       class="w-full px-3 py-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Wiederholen bis</label>
+                                <input type="date" id="recurringUntil"
+                                       class="w-full px-3 py-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500 text-sm">
+                            </div>
+                            <p class="text-xs text-gray-400">Jede Woche am gleichen Tag, zur gleichen Zeit.</p>
+                        </div>
+
+                        <!-- Time -->
+                        <div class="mb-5">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Uhrzeit</label>
+                            <div class="flex items-center gap-2">
+                                <input type="time" id="bookingStart" required step="300"
+                                       class="flex-1 px-3 py-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500 text-sm tabular-nums">
+                                <span class="text-gray-400">&ndash;</span>
+                                <input type="time" id="bookingEnd" required step="300"
+                                       class="flex-1 px-3 py-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500 text-sm tabular-nums">
+                            </div>
+                            <p class="text-xs mt-1.5" id="durationHint"></p>
+                        </div>
+
+                        <!-- Submit -->
+                        <button type="submit" id="submitBtn"
+                                class="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed text-sm">
+                            Reservierung erstellen
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Detail Modal -->
+    <div id="detailModal" class="hidden fixed inset-0 z-50">
+        <div class="modal-backdrop absolute inset-0 bg-black/40" onclick="closeDetailModal()"></div>
+        <div class="absolute inset-0 flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <div class="modal-panel bg-white rounded-t-2xl sm:rounded-xl shadow-2xl w-full sm:max-w-sm">
+                <div class="p-5">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="font-bold text-gray-800">Reservierung</h3>
+                        <button onclick="closeDetailModal()" class="p-1 rounded-lg hover:bg-gray-100 text-gray-400">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+                    <div id="detailContent"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // ═══════════════════════════════════════════════════════════════
+    // STATE
+    // ═══════════════════════════════════════════════════════════════
+    let currentUser = null;
+    let rooms = [];
+    let selectedRoomId = null;
+    let weekStart = null;        // Monday 00:00
+    let mobileDay = 0;           // 0–6 for mobile day view
+    let reservations = [];       // for displayed week + room
+    let myReservations = [];     // all upcoming for user
+    let nowLineInterval = null;
+
+    const PX_PER_HOUR = 60;
+    const HOUR_START = 6;
+    const HOUR_END = 22;
+    const TOTAL_HOURS = HOUR_END - HOUR_START;
+    const GRID_HEIGHT = TOTAL_HOURS * PX_PER_HOUR;
+
+    const DAYS_SHORT = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+    const DAYS_LONG = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
+
+    // ═══════════════════════════════════════════════════════════════
+    // HELPERS
+    // ═══════════════════════════════════════════════════════════════
+    function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    function localDateStr(d) {
+        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
+    function fmtDate(d) { return `${d.getDate()}.${d.getMonth()+1}.`; }
+    function fmtDateFull(d) { return `${d.getDate()}.${d.getMonth()+1}.${d.getFullYear()}`; }
+    function fmtTime(d) { return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
+    function fmtDayLong(d) { return `${DAYS_LONG[(d.getDay()+6)%7]}, ${fmtDateFull(d)}`; }
+    function isoWeek(d) {
+        const dt = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+        dt.setUTCDate(dt.getUTCDate() + 4 - (dt.getUTCDay() || 7));
+        const y1 = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));
+        return Math.ceil(((dt - y1) / 86400000 + 1) / 7);
+    }
+    function getMonday(d) {
+        const dt = new Date(d); dt.setHours(0,0,0,0);
+        const dow = dt.getDay();
+        dt.setDate(dt.getDate() - (dow === 0 ? 6 : dow - 1));
+        return dt;
+    }
+    function dayAt(offset) { return new Date(weekStart.getTime() + offset * 86400000); }
+    function sameDay(a, b) { return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate(); }
+
+    // ═══════════════════════════════════════════════════════════════
+    // API
+    // ═══════════════════════════════════════════════════════════════
+    async function api(path, opts = {}) {
+        const res = await AuthentikAuth.apiFetch(path, opts);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Fehler ${res.status}`);
+        }
+        return res.json();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // INIT
+    // ═══════════════════════════════════════════════════════════════
+    window.onload = async () => {
+        weekStart = getMonday(new Date());
+        mobileDay = (new Date().getDay() + 6) % 7; // 0=Mon
+
+        buildTimeGutter();
+
+        const user = await AuthentikAuth.init({
+            requireAuth: false,
+            onLogin: async (u) => {
+                currentUser = { email: u.email, name: u.name, user_id: u.user_id };
+                document.getElementById('loginSection').classList.add('hidden');
+                document.getElementById('mainContent').classList.remove('hidden');
+                document.getElementById('userInfo').textContent = u.name;
+                await loadRooms();
+                await refresh();
+                startNowLine();
+                scrollToNow();
+            },
+        });
+        if (!user) AuthentikAuth.createLoginButton('sso-login-container');
+
+        // ESC closes modals
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') { closeBookingModal(); closeDetailModal(); }
+        });
+
+        // Duration hint on time change
+        document.getElementById('bookingStart').addEventListener('input', updateDurationHint);
+        document.getElementById('bookingEnd').addEventListener('input', updateDurationHint);
+    };
+
+    // ═══════════════════════════════════════════════════════════════
+    // ROOMS
+    // ═══════════════════════════════════════════════════════════════
+    async function loadRooms() {
+        rooms = await api('/api/wasch/rooms' + (WASCH_STWEG ? '?stweg=' + WASCH_STWEG : ''));
+        const tabs = document.getElementById('roomTabs');
+        tabs.innerHTML = rooms.map(r =>
+            `<button onclick="selectRoom(${r.id})" data-room="${r.id}"
+                class="room-tab px-4 py-1.5 rounded-md text-sm font-medium transition whitespace-nowrap">${r.name}</button>`
+        ).join('');
+        if (rooms.length > 0) selectRoom(rooms[0].id);
+    }
+
+    function selectRoom(id) {
+        selectedRoomId = id;
+        document.querySelectorAll('.room-tab').forEach(t => {
+            const active = parseInt(t.dataset.room) === id;
+            t.classList.toggle('bg-white', active);
+            t.classList.toggle('shadow-sm', active);
+            t.classList.toggle('text-blue-700', active);
+            t.classList.toggle('text-gray-600', !active);
+        });
+        document.getElementById('bookBtn').disabled = false;
+        refresh();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // DATA
+    // ═══════════════════════════════════════════════════════════════
+    async function refresh() {
+        try {
+            await Promise.all([loadWeekReservations(), loadMyReservations()]);
+        } catch (err) {
+            console.error('Refresh error:', err);
+        }
+        renderCalendar();
+        renderMyReservations();
+    }
+
+    async function loadWeekReservations() {
+        if (!selectedRoomId) return;
+        const from = weekStart.toISOString();
+        const to = new Date(weekStart.getTime() + 7 * 86400000).toISOString();
+        reservations = await api(`/api/wasch/reservations?room_id=${selectedRoomId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    }
+
+    async function loadMyReservations() {
+        myReservations = await api('/api/wasch/my/reservations');
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // CALENDAR RENDER
+    // ═══════════════════════════════════════════════════════════════
+    function buildTimeGutter() {
+        const el = document.getElementById('timeGutter');
+        el.style.height = GRID_HEIGHT + 'px';
+        el.innerHTML = '';
+        for (let h = HOUR_START; h <= HOUR_END; h++) {
+            const y = (h - HOUR_START) * PX_PER_HOUR;
+            const lbl = document.createElement('div');
+            lbl.className = 'absolute text-[0.65rem] text-gray-400 text-right pr-2 leading-none';
+            lbl.style.cssText = `top:${y - 7}px; right:0; left:4px;`;
+            lbl.textContent = `${String(h).padStart(2,'0')}:00`;
+            el.appendChild(lbl);
+        }
+    }
+
+    function renderCalendar() {
+        const now = new Date();
+        const today = new Date(); today.setHours(0,0,0,0);
+        const weekEnd = dayAt(6);
+
+        // Week title
+        document.getElementById('weekTitle').textContent =
+            `KW ${isoWeek(weekStart)} \u00B7 ${fmtDate(weekStart)} \u2013 ${fmtDate(weekEnd)} ${weekEnd.getFullYear()}`;
+
+        // Day headers
+        const hdr = document.getElementById('dayHeaders');
+        hdr.innerHTML = '';
+        for (let i = 0; i < 7; i++) {
+            const d = dayAt(i);
+            const isToday = sameDay(d, today);
+            const el = document.createElement('div');
+            el.className = `day-header-cell text-center py-2 text-sm border-l first:border-l-0
+                ${isToday ? 'bg-blue-50' : ''} ${i === mobileDay ? 'active-day' : ''}`;
+            el.innerHTML = `<div class="text-xs text-gray-500">${DAYS_SHORT[i]}</div>
+                <div class="${isToday ? 'bg-blue-600 text-white w-7 h-7 rounded-full flex items-center justify-center mx-auto text-sm font-bold' : 'text-gray-800 font-medium'}">${d.getDate()}</div>`;
+            hdr.appendChild(el);
+        }
+
+        // Mobile day nav
+        const mNav = document.getElementById('mobileDayNav');
+        mNav.innerHTML = '';
+        for (let i = 0; i < 7; i++) {
+            const d = dayAt(i);
+            const isToday = sameDay(d, today);
+            const btn = document.createElement('button');
+            btn.className = `flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition
+                ${i === mobileDay ? 'bg-blue-600 text-white' : isToday ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`;
+            btn.textContent = `${DAYS_SHORT[i]} ${d.getDate()}.`;
+            btn.onclick = () => { mobileDay = i; renderCalendar(); };
+            mNav.appendChild(btn);
+        }
+
+        // Day columns
+        const cols = document.getElementById('dayColumns');
+        cols.innerHTML = '';
+        cols.style.height = GRID_HEIGHT + 'px';
+
+        for (let i = 0; i < 7; i++) {
+            const d = dayAt(i);
+            const isToday = sameDay(d, today);
+            const isPast = d < today;
+
+            const col = document.createElement('div');
+            col.className = `cal-col ${i === mobileDay ? 'active-day' : ''} ${isToday ? 'is-today' : ''} ${isPast ? 'is-past' : ''}`;
+            col.style.height = GRID_HEIGHT + 'px';
+
+            // Hour lines
+            for (let h = HOUR_START; h <= HOUR_END; h++) {
+                const line = document.createElement('div');
+                line.className = `hour-line ${h % 2 === 0 ? 'full' : ''}`;
+                line.style.top = `${(h - HOUR_START) * PX_PER_HOUR}px`;
+                col.appendChild(line);
+
+                // Half-hour line
+                if (h < HOUR_END) {
+                    const half = document.createElement('div');
+                    half.className = 'hour-line';
+                    half.style.top = `${(h - HOUR_START) * PX_PER_HOUR + PX_PER_HOUR / 2}px`;
+                    half.style.borderTopStyle = 'dotted';
+                    half.style.borderColor = '#f3f4f6';
+                    col.appendChild(half);
+                }
+            }
+
+            // Clickable area
+            const inner = document.createElement('div');
+            inner.className = 'cal-col-inner';
+            inner.addEventListener('click', (e) => {
+                if (e.target.closest('.res-block')) return;
+                const rect = inner.getBoundingClientRect();
+                const y = e.clientY - rect.top + (document.getElementById('calendarScroll').scrollTop || 0);
+                const hours = HOUR_START + y / PX_PER_HOUR;
+                const h = Math.floor(hours);
+                const m = Math.round((hours - h) * 60 / 15) * 15;
+                quickBook(d, h, m >= 60 ? 0 : m);
+            });
+            col.appendChild(inner);
+
+            // Reservations for this day
+            const dayStart = new Date(d); dayStart.setHours(0,0,0,0);
+            const dayEnd = new Date(dayStart.getTime() + 86400000);
+
+            for (const r of reservations) {
+                const rS = new Date(r.start_time);
+                const rE = new Date(r.end_time);
+                if (rS >= dayEnd || rE <= dayStart) continue;
+
+                const vStart = Math.max(rS.getHours() + rS.getMinutes()/60, HOUR_START);
+                const vEnd = Math.min(rE.getHours() + rE.getMinutes()/60 || (rE > dayStart ? 24 : 0), HOUR_END);
+                if (vEnd <= vStart) continue;
+
+                const top = (vStart - HOUR_START) * PX_PER_HOUR;
+                const height = Math.max((vEnd - vStart) * PX_PER_HOUR, 18);
+                const isOwn = r.user_id === currentUser?.user_id;
+                const isActive = now >= rS && now <= rE;
+
+                const block = document.createElement('div');
+                block.className = `res-block ${isActive ? 'res-active' : isOwn ? 'res-own' : 'res-other'}`;
+                block.style.top = top + 'px';
+                block.style.height = height + 'px';
+
+                const showName = height > 30;
+                block.innerHTML = `<div class="font-semibold">${fmtTime(rS)}\u2013${fmtTime(rE)}</div>` +
+                    (showName ? `<div class="truncate opacity-80">${esc(r.user_name)}</div>` : '');
+                block.title = `${r.user_name || '?'} ${r.wohnung ? '('+r.wohnung+')' : ''}\n${fmtTime(rS)}\u2013${fmtTime(rE)}`;
+                block.addEventListener('click', (e) => { e.stopPropagation(); showDetail(r); });
+                inner.appendChild(block);
+            }
+
+            // Now line
+            if (isToday) {
+                const nowMinutes = now.getHours() + now.getMinutes() / 60;
+                if (nowMinutes >= HOUR_START && nowMinutes <= HOUR_END) {
+                    const line = document.createElement('div');
+                    line.className = 'now-line';
+                    line.id = 'nowLine';
+                    line.style.top = `${(nowMinutes - HOUR_START) * PX_PER_HOUR}px`;
+                    col.appendChild(line);
+                }
+            }
+
+            cols.appendChild(col);
+        }
+    }
+
+    function startNowLine() {
+        if (nowLineInterval) clearInterval(nowLineInterval);
+        nowLineInterval = setInterval(() => {
+            const line = document.getElementById('nowLine');
+            if (!line) return;
+            const now = new Date();
+            const mins = now.getHours() + now.getMinutes() / 60;
+            if (mins >= HOUR_START && mins <= HOUR_END) {
+                line.style.top = `${(mins - HOUR_START) * PX_PER_HOUR}px`;
+            }
+        }, 60000);
+    }
+
+    function scrollToNow() {
+        const scroll = document.getElementById('calendarScroll');
+        const now = new Date();
+        const h = now.getHours();
+        const target = Math.max((h - 1 - HOUR_START) * PX_PER_HOUR, 0);
+        setTimeout(() => { scroll.scrollTop = target; }, 100);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // MY RESERVATIONS LIST
+    // ═══════════════════════════════════════════════════════════════
+    function renderMyReservations() {
+        const el = document.getElementById('myResList');
+        const countEl = document.getElementById('myResCount');
+        const now = new Date();
+        const upcoming = myReservations.filter(r => new Date(r.end_time) > now);
+        countEl.textContent = upcoming.length > 0 ? `${upcoming.length} Termin${upcoming.length > 1 ? 'e' : ''}` : '';
+
+        if (upcoming.length === 0) {
+            el.innerHTML = '<p class="text-gray-400 text-sm py-2">Keine kommenden Reservierungen.</p>';
+            return;
+        }
+
+        el.innerHTML = upcoming.map(r => {
+            const s = new Date(r.start_time), e = new Date(r.end_time);
+            const dur = Math.round((e - s) / 60000);
+            const isActive = now >= s && now <= e;
+            return `
+                <div class="flex items-start sm:items-center justify-between gap-3 p-3 rounded-lg border ${isActive ? 'border-green-300 bg-green-50' : 'hover:bg-gray-50'} transition">
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="font-medium text-gray-800 text-sm">${r.room_name}</span>
+                            ${isActive ? '<span class="text-[0.65rem] bg-green-200 text-green-800 px-1.5 py-0.5 rounded-full font-medium">Aktiv</span>' : ''}
+                            ${r.recurring ? '<span class="text-[0.65rem] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">Wöchentlich</span>' : ''}
+                        </div>
+                        <div class="text-sm text-gray-500 mt-0.5">
+                            ${fmtDayLong(s)} &middot; ${fmtTime(s)}\u2013${fmtTime(e)}
+                            <span class="text-gray-400">(${dur} Min.)</span>
+                        </div>
+                    </div>
+                    <div class="flex gap-1.5 flex-shrink-0">
+                        ${r.recurring ? `<button onclick="cancelSeries(${r.id})" class="text-xs px-2 py-1 rounded-md text-orange-700 hover:bg-orange-100 transition">Serie</button>` : ''}
+                        <button onclick="cancelRes(${r.id})" class="text-xs px-2 py-1 rounded-md text-red-700 hover:bg-red-100 transition">Stornieren</button>
+                    </div>
+                </div>`;
+        }).join('');
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // BOOKING MODAL
+    // ═══════════════════════════════════════════════════════════════
+    function openBookingModal(dateHint, startH, startM) {
+        const room = rooms.find(r => r.id === selectedRoomId);
+        document.getElementById('modalRoomId').value = selectedRoomId;
+        document.getElementById('modalRoomName').textContent = room?.name || '?';
+
+        const today = localDateStr(new Date());
+        const dateEl = document.getElementById('bookingDate');
+        const recStartEl = document.getElementById('recurringStart');
+        const recUntilEl = document.getElementById('recurringUntil');
+
+        dateEl.min = today;
+        recStartEl.min = today;
+
+        if (dateHint) {
+            const ds = localDateStr(dateHint);
+            dateEl.value = ds;
+            recStartEl.value = ds;
+        } else {
+            dateEl.value = today;
+            recStartEl.value = today;
+        }
+
+        const threeM = new Date(); threeM.setMonth(threeM.getMonth() + 3);
+        recUntilEl.value = localDateStr(threeM);
+        recUntilEl.min = today;
+
+        if (startH != null) {
+            document.getElementById('bookingStart').value = `${String(startH).padStart(2,'0')}:${String(startM||0).padStart(2,'0')}`;
+            const eH = startH + 2, eM = startM || 0;
+            document.getElementById('bookingEnd').value = `${String(Math.min(eH, 22)).padStart(2,'0')}:${String(eM).padStart(2,'0')}`;
+        } else {
+            document.getElementById('bookingStart').value = '08:00';
+            document.getElementById('bookingEnd').value = '10:00';
+        }
+
+        updateDurationHint();
+        // Reset type to einmalig
+        document.querySelector('input[name="bookingType"][value="einmalig"]').checked = true;
+        toggleBookingType();
+
+        document.getElementById('bookingModal').classList.remove('hidden');
+    }
+
+    function closeBookingModal() {
+        document.getElementById('bookingModal').classList.add('hidden');
+    }
+
+    function toggleBookingType() {
+        const recurring = document.querySelector('input[name="bookingType"]:checked').value === 'wiederkehrend';
+        document.getElementById('einmaligFields').classList.toggle('hidden', recurring);
+        document.getElementById('wiederkehrendFields').classList.toggle('hidden', !recurring);
+    }
+
+    function quickBook(date, h, m) {
+        openBookingModal(date, h, m);
+    }
+
+    function updateDurationHint() {
+        const s = document.getElementById('bookingStart').value;
+        const e = document.getElementById('bookingEnd').value;
+        const hint = document.getElementById('durationHint');
+        if (!s || !e) { hint.textContent = ''; return; }
+        const [sh, sm] = s.split(':').map(Number);
+        const [eh, em] = e.split(':').map(Number);
+        const mins = (eh*60+em) - (sh*60+sm);
+        if (mins <= 0) {
+            hint.textContent = 'Endzeit muss nach Startzeit liegen.';
+            hint.className = 'text-xs mt-1.5 text-red-500';
+        } else if (mins < 30) {
+            hint.textContent = `${mins} Min. \u2013 Mindestens 30 Minuten.`;
+            hint.className = 'text-xs mt-1.5 text-orange-500';
+        } else {
+            const h = Math.floor(mins/60), m = mins%60;
+            hint.textContent = `Dauer: ${h > 0 ? h+'h ' : ''}${m > 0 ? m+' Min.' : ''}`;
+            hint.className = 'text-xs mt-1.5 text-gray-400';
+        }
+    }
+
+    async function submitBooking(event) {
+        event.preventDefault();
+        const btn = document.getElementById('submitBtn');
+        btn.disabled = true; btn.textContent = 'Wird gespeichert\u2026';
+
+        try {
+            const type = document.querySelector('input[name="bookingType"]:checked').value;
+            const roomId = parseInt(document.getElementById('modalRoomId').value);
+            const startStr = document.getElementById('bookingStart').value;
+            const endStr = document.getElementById('bookingEnd').value;
+
+            let dateStr;
+            if (type === 'wiederkehrend') {
+                dateStr = document.getElementById('recurringStart').value;
+            } else {
+                dateStr = document.getElementById('bookingDate').value;
+            }
+
+            const body = {
+                room_id: roomId,
+                start_time: `${dateStr}T${startStr}:00`,
+                end_time: `${dateStr}T${endStr}:00`,
+            };
+            if (type === 'wiederkehrend') {
+                body.recurring = true;
+                body.recurring_until = document.getElementById('recurringUntil').value;
+            }
+
+            const result = await api('/api/wasch/reservations', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+
+            closeBookingModal();
+            await refresh();
+            const n = result.created || 1;
+            toast(`${n} Reservierung${n > 1 ? 'en' : ''} erstellt`);
+        } catch (err) {
+            toast(err.message, 'error');
+        } finally {
+            btn.disabled = false; btn.textContent = 'Reservierung erstellen';
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // CANCEL
+    // ═══════════════════════════════════════════════════════════════
+    async function cancelRes(id) {
+        if (!confirm('Diese Reservierung stornieren?')) return;
+        try {
+            await api(`/api/wasch/reservations/${id}`, { method: 'DELETE' });
+            await refresh();
+            toast('Reservierung storniert');
+        } catch (err) { toast(err.message, 'error'); }
+    }
+
+    async function cancelSeries(id) {
+        if (!confirm('Alle zukünftigen Termine dieser wöchentlichen Serie stornieren?')) return;
+        try {
+            const r = await api(`/api/wasch/reservations/${id}/series`, { method: 'DELETE' });
+            await refresh();
+            toast(`${r.cancelled} Termine storniert`);
+        } catch (err) { toast(err.message, 'error'); }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // DETAIL MODAL
+    // ═══════════════════════════════════════════════════════════════
+    function showDetail(r) {
+        const s = new Date(r.start_time), e = new Date(r.end_time);
+        const dur = Math.round((e - s) / 60000);
+        const isOwn = r.user_id === currentUser?.user_id;
+        const now = new Date();
+        const isActive = now >= s && now <= e;
+
+        document.getElementById('detailContent').innerHTML = `
+            <div class="space-y-3 text-sm">
+                <div class="flex items-center gap-2">
+                    ${isActive ? '<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span><span class="text-green-700 font-medium">Gerade aktiv</span>' : ''}
+                </div>
+                <div class="grid grid-cols-[80px_1fr] gap-y-2 text-sm">
+                    <span class="text-gray-400">Raum</span><span class="font-medium">${esc(r.room_name)}</span>
+                    <span class="text-gray-400">Datum</span><span>${fmtDayLong(s)}</span>
+                    <span class="text-gray-400">Uhrzeit</span><span>${fmtTime(s)} \u2013 ${fmtTime(e)} (${dur} Min.)</span>
+                    <span class="text-gray-400">Person</span><span>${esc(r.user_name || '?')} ${r.wohnung ? '('+esc(r.wohnung)+')' : ''}</span>
+                </div>
+                ${r.recurring ? '<div class="flex items-center gap-1.5 text-blue-600 text-xs"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Wöchentlich wiederkehrend</div>' : ''}
+            </div>
+            ${isOwn ? `<div class="mt-5 flex gap-2">
+                <button onclick="cancelRes(${r.id}); closeDetailModal();"
+                    class="flex-1 py-2 rounded-lg text-sm font-medium bg-red-50 text-red-700 hover:bg-red-100 transition">Stornieren</button>
+                ${r.recurring ? `<button onclick="cancelSeries(${r.id}); closeDetailModal();"
+                    class="flex-1 py-2 rounded-lg text-sm font-medium bg-orange-50 text-orange-700 hover:bg-orange-100 transition">Ganze Serie</button>` : ''}
+            </div>` : ''}`;
+        document.getElementById('detailModal').classList.remove('hidden');
+    }
+
+    function closeDetailModal() {
+        document.getElementById('detailModal').classList.add('hidden');
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // WEEK NAVIGATION
+    // ═══════════════════════════════════════════════════════════════
+    function changeWeek(dir) {
+        weekStart = new Date(weekStart.getTime() + dir * 7 * 86400000);
+        refresh();
+    }
+
+    function goToday() {
+        weekStart = getMonday(new Date());
+        mobileDay = (new Date().getDay() + 6) % 7;
+        refresh();
+        scrollToNow();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TOAST
+    // ═══════════════════════════════════════════════════════════════
+    function toast(msg, type = 'success') {
+        const t = document.createElement('div');
+        t.className = `fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-2.5 rounded-xl shadow-lg text-sm z-[60] transition-all
+            ${type === 'error' ? 'bg-red-600 text-white' : 'bg-gray-800 text-white'}`;
+        t.textContent = msg;
+        document.body.appendChild(t);
+        setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 3000);
+    }
+    </script>
+</body>
+</html>
