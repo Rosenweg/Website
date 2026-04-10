@@ -4338,6 +4338,69 @@ app.get('/api/calendar', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════
 // AUTHENTIK ADMIN PROXY API
 // ═══════════════════════════════════════════════════════════════════
+// STWEG CALENDAR
+// ═══════════════════════════════════════════════════════════════════
+
+// GET /api/stweg/:stweg/events — list events (own STWEG + kooperation events from global calendar)
+app.get('/api/stweg/:stweg/events', authMiddleware, async (req, res) => {
+  try {
+    const stweg = parseInt(req.params.stweg, 10);
+    if (!stweg || stweg < 1 || stweg > 8) return res.status(400).json({ error: 'Ungueltige STWEG' });
+    // STWEG-eigene Termine
+    const result = await pool.query(
+      `SELECT * FROM stweg_events WHERE stweg = $1 AND start_date >= NOW() - INTERVAL '7 days' ORDER BY start_date LIMIT 20`,
+      [stweg]
+    );
+    // Merge with global calendar
+    let globalEvents = [];
+    try {
+      const calResp = await fetch(`http://127.0.0.1:${PORT}/api/calendar`);
+      if (calResp.ok) {
+        const calData = await calResp.json();
+        globalEvents = (calData.events || []).slice(0, 10).map(e => ({ ...e, source: 'kooperation' }));
+      }
+    } catch {}
+    const stwegEvents = result.rows.map(e => ({
+      title: e.title, description: e.description, start: e.start_date, end: e.end_date,
+      location: e.location, category: e.category, all_day: e.all_day,
+      id: e.id, source: 'stweg',
+    }));
+    // Merge and sort by date
+    const all = [...stwegEvents, ...globalEvents].sort((a, b) => new Date(a.start) - new Date(b.start));
+    res.json(all);
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// POST /api/stweg/:stweg/events — create event (admin/ausschuss only)
+app.post('/api/stweg/:stweg/events', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const stweg = parseInt(req.params.stweg, 10);
+    const { title, description, start_date, end_date, all_day, location, category } = req.body;
+    if (!title || !start_date) return res.status(400).json({ error: 'Titel und Startdatum erforderlich' });
+    const result = await pool.query(
+      `INSERT INTO stweg_events (stweg, title, description, start_date, end_date, all_day, location, category, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [stweg, title, description || null, start_date, end_date || null, all_day || false, location || null, category || 'sonstiges', req.user.user_id || req.user.id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler beim Erstellen' });
+  }
+});
+
+// DELETE /api/stweg/:stweg/events/:id
+app.delete('/api/stweg/:stweg/events/:id', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM stweg_events WHERE id = $1 AND stweg = $2', [req.params.id, parseInt(req.params.stweg)]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
 
 async function authentikAPI(method, path, body = null) {
   const url = `${AUTHENTIK_URL}/api/v3${path}`;
@@ -5709,6 +5772,21 @@ async function initDB() {
       ALTER TABLE wasch_rooms ADD COLUMN IF NOT EXISTS stweg INTEGER;
       -- Migrate existing rooms to STWEG 3 (original installation)
       UPDATE wasch_rooms SET stweg = 3 WHERE stweg IS NULL;
+
+      -- STWEG calendar events
+      CREATE TABLE IF NOT EXISTS stweg_events (
+        id SERIAL PRIMARY KEY,
+        stweg INTEGER NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        description TEXT,
+        start_date TIMESTAMP NOT NULL,
+        end_date TIMESTAMP,
+        all_day BOOLEAN DEFAULT false,
+        location VARCHAR(255),
+        category VARCHAR(50) DEFAULT 'sonstiges',
+        created_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
 
       -- Permissions table
       CREATE TABLE IF NOT EXISTS wohnungen (
