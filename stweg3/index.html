@@ -222,6 +222,65 @@
             });
     })();
     </script>
+
+    <!-- Email-Verteiler -->
+    <section class="py-12 bg-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-3xl font-bold text-gray-800 mb-2 text-center">So erreichst du uns</h2>
+            <p class="text-center text-gray-500 mb-8">E-Mail-Verteiler fuer STWEG 3</p>
+            <div id="verteiler-cards" class="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
+                <div class="col-span-3 text-center text-gray-400 py-4 animate-pulse">Laden...</div>
+            </div>
+        </div>
+    </section>
+
+    <script>
+    (function() {
+        const token = AuthentikAuth.getToken();
+        if (!token) { document.getElementById('verteiler-cards').innerHTML = ''; return; }
+        function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+        const icons = {
+            'ausschuss': { emoji: '&#128188;', color: 'blue', desc: 'Ausschuss-Mitglieder' },
+            'bewohner': { emoji: '&#127968;', color: 'green', desc: 'Alle Bewohner' },
+            'eigentuemer': { emoji: '&#128273;', color: 'purple', desc: 'Nur Eigentuemer' },
+            'alle': { emoji: '&#128227;', color: 'orange', desc: 'Alle (Eigentuemer + Mieter)' },
+            'default': { emoji: '&#128231;', color: 'gray', desc: 'E-Mail-Verteiler' },
+        };
+
+        fetch('/api/verteiler/by-stweg/3', { headers: { Authorization: 'Bearer ' + token } })
+            .then(r => r.json())
+            .then(list => {
+                if (!list.length) { document.getElementById('verteiler-cards').innerHTML = '<div class="col-span-3 text-center text-gray-400 py-4">Keine Verteiler konfiguriert.</div>'; return; }
+
+                const remainder = list.length % 3;
+                const lastRowStart = list.length - remainder;
+
+                document.getElementById('verteiler-cards').innerHTML = list.map((v, i) => {
+                    const key = Object.keys(icons).find(k => k !== 'default' && v.name.toLowerCase().includes(k)) || 'default';
+                    const ic = icons[key];
+                    let spanClass = '';
+                    if (remainder === 1 && i === lastRowStart) spanClass = ' md:col-span-3';
+                    if (remainder === 2 && i === lastRowStart) spanClass = ' md:col-span-2';
+                    return '<div class="bg-gradient-to-br from-' + ic.color + '-50 to-white p-5 rounded-lg border-2 border-' + ic.color + '-200 hover:shadow-md transition' + spanClass + '">' +
+                        '<div class="flex items-start gap-3">' +
+                            '<span class="text-2xl mt-0.5">' + ic.emoji + '</span>' +
+                            '<div class="flex-1 min-w-0">' +
+                                '<h3 class="font-semibold text-gray-800">' + esc(v.name) + '</h3>' +
+                                '<p class="text-xs text-gray-500 mb-2">' + ic.desc + '</p>' +
+                                '<a href="mailto:' + esc(v.email_address) + '" class="inline-flex items-center gap-1 text-sm text-' + ic.color + '-600 font-mono hover:underline break-all">' +
+                                    '<svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>' +
+                                    esc(v.email_address) +
+                                '</a>' +
+                            '</div>' +
+                        '</div>' +
+                    '</div>';
+                }).join('');
+            })
+            .catch(() => { document.getElementById('verteiler-cards').innerHTML = ''; });
+    })();
+    </script>
+
     <!-- Waschküchen (dynamisch aus API) -->
     <section id="waschkueche" class="py-12 bg-white">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
