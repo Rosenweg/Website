@@ -116,6 +116,7 @@ const RosenwegNav = {
           </div>
 
           <a href="${base}rechteverwaltung.html" data-perm="rechteverwaltung" class="${a('rechte')} px-3 py-2 text-sm transition">Rechte</a>
+          <a href="${base}hilfe.html" class="${a('hilfe')} px-3 py-2 text-sm transition">Hilfe</a>
           <a href="${base}#kontakt" class="${a('kontakt')} px-3 py-2 text-sm transition">Kontakt</a>
         </div>
 
@@ -161,6 +162,7 @@ const RosenwegNav = {
 
         <hr class="my-2">
         <a href="${base}rechteverwaltung.html" data-perm="rechteverwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Rechte</a>
+        <a href="${base}hilfe.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Hilfe</a>
         <a href="${base}#kontakt" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Kontakt</a>
 
         <div id="nav-mobile-auth" class="pt-2 border-t mt-2"></div>
