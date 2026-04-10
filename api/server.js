@@ -3521,7 +3521,23 @@ app.post('/api/wohnungen/sync-authentik', authMiddleware, adminOnly, async (req,
   }
 });
 
-// GET /api/wohnungen/:stweg - List all apartments for a STWEG
+// GET /api/stweg/:stweg/wohnungen - Public apartment info (no personal data)
+app.get('/api/stweg/:stweg/wohnungen', async (req, res) => {
+  try {
+    const stweg = parseInt(req.params.stweg, 10);
+    if (!stweg || stweg < 1 || stweg > 8) return res.status(400).json({ error: 'Ungueltige STWEG' });
+    const result = await pool.query(
+      'SELECT bezeichnung, stockwerk, zimmer, flaeche_m2, typ, besonderheiten, bewohnt_von FROM wohnungen WHERE stweg = $1',
+      [stweg]
+    );
+    result.rows.sort((a, b) => wohnungSort(a.bezeichnung, b.bezeichnung));
+    res.json({ stweg, wohnungen: result.rows });
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// GET /api/wohnungen/:stweg - List all apartments for a STWEG (admin, with kontakte)
 app.get('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
   try {
     const stweg = parseStweg(req.params.stweg);
