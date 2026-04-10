@@ -3179,7 +3179,7 @@ function wohnungSort(a, b) {
     return { floor: order[m[1]] ?? 99, num: parseInt(m[2]) || 0 };
   };
   const pa = parseW(a), pb = parseW(b);
-  return pa.floor - pb.floor || pa.num - pb.num;
+  return pb.floor - pa.floor || pa.num - pb.num;
 }
 
 app.get('/api/stweg/:nr/kontakte', authMiddleware, async (req, res) => {
