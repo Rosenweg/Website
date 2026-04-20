@@ -171,6 +171,7 @@ services:
       - rosenweg-net
     deploy:
       replicas: 1
+      endpoint_mode: dnsrr
       resources:
         limits:
           memory: 256M
@@ -238,6 +239,7 @@ services:
       - rosenweg-net
     deploy:
       replicas: 1
+      endpoint_mode: dnsrr
       resources:
         limits:
           memory: 256M
