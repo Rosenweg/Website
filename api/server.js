@@ -2699,26 +2699,39 @@ async function pollGmailForVerteiler() {
           }
 
           let verteilerAddress = null;
+          let alsoArchive = false;
 
-          // Plus-tag in Delivered-To (rosenweg4303+ausschuss@gmail.com or rosenweg4303+ausschuss+tag@gmail.com)
-          const plusMatch = headers.match(/^Delivered-To:\s*[^+\r\n]+\+([^@\r\n]+)@/im);
-          if (plusMatch) {
-            // Strip sub-tags: "ausschuss+xyz" → "ausschuss"
-            const base = plusMatch[1].toLowerCase().split('+')[0];
-            verteilerAddress = `${base}@${VERTEILER_DOMAIN}`;
+          // Collect ALL @rosenweg4303.ch addresses from To/Cc/Bcc (primary source — what the sender really wrote)
+          const allAddrs = [];
+          const addrRegex = /^(?:To|Cc|Bcc):\s*([^\r\n](?:[^\r\n]|\r?\n[ \t])*)/gim;
+          let am;
+          while ((am = addrRegex.exec(headers)) !== null) {
+            const lineAddrs = am[1].match(/[a-z0-9._+-]+@rosenweg4303\.ch/gi) || [];
+            for (const a of lineAddrs) allAddrs.push(a.toLowerCase());
           }
 
-          // To/Cc/Bcc: header contains @rosenweg4303.ch address
-          if (!verteilerAddress) {
-            const toCcMatch = headers.match(/^(?:To|Cc|Bcc):\s*.*?([a-z0-9._+-]+@rosenweg4303\.ch)/im);
-            if (toCcMatch) {
-              const fullAddr = toCcMatch[1].toLowerCase();
-              // Keep full address for drucker (need +tag), strip for others
-              if (fullAddr.startsWith('druckerr9') || fullAddr.startsWith('druckerr13')) {
-                verteilerAddress = fullAddr;
-              } else {
-                verteilerAddress = fullAddr.replace(/\+[^@]*/, '');
-              }
+          // Fallback: Delivered-To plus-tag (used by Cloudflare/Gmail routing)
+          if (allAddrs.length === 0) {
+            const plusMatch = headers.match(/^Delivered-To:\s*[^+\r\n]+\+([^@\r\n]+)@/im);
+            if (plusMatch) {
+              const base = plusMatch[1].toLowerCase().split('+')[0];
+              allAddrs.push(`${base}@${VERTEILER_DOMAIN}`);
+            }
+          }
+
+          // Detect archiv@ as side-effect (separate from main delivery)
+          const archivAddr = `archiv@${VERTEILER_DOMAIN}`;
+          alsoArchive = allAddrs.includes(archivAddr);
+
+          // Pick the primary verteiler address: prefer non-archiv addresses
+          const primaryCandidates = allAddrs.filter(a => a !== archivAddr);
+          const picked = primaryCandidates.length > 0 ? primaryCandidates[0] : (allAddrs[0] || null);
+          if (picked) {
+            // Keep full address for drucker (need +tag), strip for others
+            if (picked.startsWith('druckerr9') || picked.startsWith('druckerr13')) {
+              verteilerAddress = picked;
+            } else {
+              verteilerAddress = picked.replace(/\+[^@]*/, '');
             }
           }
 
@@ -3034,7 +3047,23 @@ async function pollGmailForVerteiler() {
             continue;
           }
 
-          // ── Email Archive: intercept archiv@ before verteiler check ──
+          // ── Email Archive: archive if archiv@ was a recipient (CC) — only intercept move if archiv is the SOLE recipient ──
+          // If archiv@ is just a CC alongside another verteiler, archive AND continue with verteiler processing.
+          if (alsoArchive && verteilerAddress !== `archiv@${VERTEILER_DOMAIN}`) {
+            const archDup = await pool.query('SELECT id FROM email_archive WHERE message_id = $1', [messageId]);
+            if (archDup.rows.length === 0) {
+              let archSource = null;
+              for await (const msg of client.fetch(String(uid), { source: true }, { uid: true })) {
+                archSource = msg.source;
+              }
+              if (archSource) {
+                try { await archiveEmail(archSource, messageId); console.log(`[ARCHIVE] Also archived UID ${uid} (CC)`); }
+                catch (archErr) { console.error(`[ARCHIVE] CC archive error UID ${uid}:`, archErr.message); }
+              }
+            }
+            // DON'T continue — fall through to verteiler processing below
+          }
+
           if (verteilerAddress === `archiv@${VERTEILER_DOMAIN}`) {
             // Dedup against email_archive
             const archDup = await pool.query('SELECT id FROM email_archive WHERE message_id = $1', [messageId]);
