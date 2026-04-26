@@ -848,6 +848,62 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
   }
 });
 
+// GET /api/me/wohnungen — finds apartments where the logged-in user is a contact
+app.get('/api/me/wohnungen', authMiddleware, async (req, res) => {
+  try {
+    const email = (req.user.email || '').toLowerCase();
+    const name = req.user.name || '';
+    if (!email && !name) return res.json({ wohnungen: [] });
+
+    // Match by email (case-insensitive) OR by exact name
+    const result = await pool.query(
+      `SELECT k.id AS kontakt_id, k.name, k.email, k.telefon, k.adresse, k.rolle,
+              w.id AS wohnung_id, w.bezeichnung, w.stockwerk, w.zimmer, w.flaeche_m2,
+              w.typ, w.besonderheiten, w.bewohnt_von, w.stweg
+       FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id
+       WHERE LOWER(k.email) = $1 OR LOWER(k.name) = LOWER($2)
+       ORDER BY w.stweg, w.bezeichnung`,
+      [email, name]
+    );
+    res.json({ wohnungen: result.rows });
+  } catch (err) {
+    console.error('[me/wohnungen] error:', err.message);
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// PUT /api/me/kontakt/:id — user can only edit their own contact entry (email, telefon, adresse)
+app.put('/api/me/kontakt/:id', authMiddleware, async (req, res) => {
+  try {
+    const email = (req.user.email || '').toLowerCase();
+    const name = req.user.name || '';
+    // Verify ownership: kontakt must match user's email or name
+    const own = await pool.query(
+      `SELECT id, name, email FROM wohnungen_kontakte WHERE id = $1 AND (LOWER(email) = $2 OR LOWER(name) = LOWER($3))`,
+      [req.params.id, email, name]
+    );
+    if (own.rows.length === 0) return res.status(403).json({ error: 'Du kannst nur deine eigenen Kontaktdaten bearbeiten' });
+
+    const { email: newEmail, telefon, adresse } = req.body;
+    // Reject changing email to a different user's email
+    if (newEmail && newEmail.toLowerCase() !== email && newEmail.toLowerCase() !== (own.rows[0].email || '').toLowerCase()) {
+      // Allow updating email to a new value, but not to claim someone else's
+      const conflict = await pool.query("SELECT id FROM wohnungen_kontakte WHERE LOWER(email) = $1 AND id != $2", [newEmail.toLowerCase(), req.params.id]);
+      if (conflict.rows.length > 0) return res.status(400).json({ error: 'Email wird bereits von einem anderen Kontakt verwendet' });
+    }
+
+    const result = await pool.query(
+      `UPDATE wohnungen_kontakte SET email = COALESCE($1, email), telefon = COALESCE($2, telefon), adresse = COALESCE($3, adresse)
+       WHERE id = $4 RETURNING id, name, email, telefon, adresse`,
+      [newEmail || null, telefon || null, adresse || null, req.params.id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[me/kontakt] error:', err.message);
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
 // Change password (sets in both Authentik and AD)
 const AD_PASSWORD_API_URL = process.env.AD_PASSWORD_API_URL || 'http://100.64.2.30:8446/';
 const AD_PASSWORD_API_SECRET = process.env.AD_PASSWORD_API_SECRET || 'RwAdPwApi2026!';
