@@ -84,6 +84,37 @@
             </div>
         </div>
 
+        <!-- Edit Modal für Meine Objekte -->
+        <div id="kontakt-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-xl shadow-2xl w-full max-w-md">
+                <div class="p-6 border-b">
+                    <h3 class="text-lg font-bold text-gray-800">Kontaktdaten bearbeiten</h3>
+                    <p id="kontakt-modal-subtitle" class="text-sm text-gray-500 mt-1"></p>
+                </div>
+                <div class="p-6 space-y-4">
+                    <input type="hidden" id="km-id">
+                    <div id="km-msg" class="hidden text-sm p-3 rounded-lg"></div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">E-Mail</label>
+                        <input type="email" id="km-email" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Telefon</label>
+                        <input type="text" id="km-telefon" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="z.B. 079 123 45 67">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Kontaktadresse <span class="text-xs text-gray-400 font-normal">(optional, falls Wohnung vermietet)</span></label>
+                        <input type="text" id="km-adresse" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="z.B. Musterstrasse 12, 4000 Basel">
+                        <p class="text-xs text-gray-500 mt-1">Wenn die Wohnung selbstbewohnt ist, kann das Feld leer bleiben.</p>
+                    </div>
+                </div>
+                <div class="p-6 border-t flex justify-end gap-3">
+                    <button onclick="closeKontaktModal()" class="px-4 py-2 rounded-lg border text-gray-700 hover:bg-gray-50 text-sm">Abbrechen</button>
+                    <button id="km-save" onclick="saveKontakt()" class="px-6 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 text-sm">Speichern</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Persönliche Daten -->
         <div class="bg-white rounded-lg shadow-md p-6">
             <h2 class="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
@@ -429,7 +460,7 @@
                                     ${w.adresse ? `<div class="text-xs text-gray-500"><strong>Kontaktadresse:</strong> ${esc(w.adresse)}</div>` : ''}
                                 </div>
                             </div>
-                            <button onclick="editMyKontakt(${w.kontakt_id}, '${esc(w.email||'')}', '${esc(w.telefon||'')}', '${esc(w.adresse||'')}')" class="text-sm text-blue-600 hover:underline">Bearbeiten</button>
+                            <button onclick="editMyKontakt(${w.kontakt_id}, ${JSON.stringify(esc(w.bezeichnung))}, ${JSON.stringify(w.email||'')}, ${JSON.stringify(w.telefon||'')}, ${JSON.stringify(w.adresse||'')})" class="text-sm text-blue-600 hover:underline flex items-center gap-1 flex-shrink-0"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>Bearbeiten</button>
                         </div>
                     </div>`;
                 }).join('');
@@ -438,25 +469,59 @@
             }
         }
 
-        function editMyKontakt(id, email, telefon, adresse) {
-            const newEmail = prompt('Email-Adresse:', email);
-            if (newEmail === null) return;
-            const newTel = prompt('Telefon:', telefon);
-            if (newTel === null) return;
-            const newAdr = prompt('Kontaktadresse (z.B. wenn Wohnung vermietet ist):', adresse);
-            if (newAdr === null) return;
-
-            AuthentikAuth.apiFetch('/api/me/kontakt/' + id, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: newEmail, telefon: newTel, adresse: newAdr }),
-            }).then(r => r.json().then(d => ({ ok: r.ok, d })))
-              .then(({ ok, d }) => {
-                  if (!ok) { alert('Fehler: ' + (d.error || 'Unbekannt')); return; }
-                  loadMyWohnungen();
-              })
-              .catch(e => alert('Fehler: ' + e.message));
+        function editMyKontakt(id, bezeichnung, email, telefon, adresse) {
+            document.getElementById('km-id').value = id;
+            document.getElementById('km-email').value = email || '';
+            document.getElementById('km-telefon').value = telefon || '';
+            document.getElementById('km-adresse').value = adresse || '';
+            document.getElementById('kontakt-modal-subtitle').textContent = bezeichnung || '';
+            document.getElementById('km-msg').classList.add('hidden');
+            document.getElementById('kontakt-modal').classList.remove('hidden');
+            setTimeout(() => document.getElementById('km-email').focus(), 50);
         }
+        function closeKontaktModal() {
+            document.getElementById('kontakt-modal').classList.add('hidden');
+        }
+        async function saveKontakt() {
+            const id = document.getElementById('km-id').value;
+            const email = document.getElementById('km-email').value.trim() || null;
+            const telefon = document.getElementById('km-telefon').value.trim() || null;
+            const adresse = document.getElementById('km-adresse').value.trim() || null;
+            const msg = document.getElementById('km-msg');
+            const btn = document.getElementById('km-save');
+            btn.disabled = true; btn.textContent = 'Speichern...';
+            try {
+                const r = await AuthentikAuth.apiFetch('/api/me/kontakt/' + id, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, telefon, adresse }),
+                });
+                const d = await r.json();
+                if (!r.ok) {
+                    msg.className = 'text-sm p-3 rounded-lg bg-red-50 text-red-700';
+                    msg.textContent = 'Fehler: ' + (d.error || 'Unbekannt');
+                    msg.classList.remove('hidden');
+                } else {
+                    msg.className = 'text-sm p-3 rounded-lg bg-green-50 text-green-700';
+                    msg.textContent = 'Gespeichert.';
+                    msg.classList.remove('hidden');
+                    setTimeout(() => { closeKontaktModal(); loadMyWohnungen(); }, 800);
+                }
+            } catch(e) {
+                msg.className = 'text-sm p-3 rounded-lg bg-red-50 text-red-700';
+                msg.textContent = 'Fehler: ' + e.message;
+                msg.classList.remove('hidden');
+            } finally {
+                btn.disabled = false; btn.textContent = 'Speichern';
+            }
+        }
+        // Close modal on Escape key
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') closeKontaktModal(); });
+        // Close modal on backdrop click
+        document.addEventListener('DOMContentLoaded', () => {
+            const m = document.getElementById('kontakt-modal');
+            if (m) m.addEventListener('click', e => { if (e.target === m) closeKontaktModal(); });
+        });
 
         // Init
         AuthentikAuth.init({ requireAuth: true }).then(user => {
