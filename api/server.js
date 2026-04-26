@@ -902,38 +902,62 @@ app.put('/api/me/kontakt/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// PUT /api/me/wohnung/:id — owner can edit their own apartment fields
-// (besonderheiten, bewohnt_von, notizen, waschkueche_berechtigt — NOT bezeichnung, stweg, wertquote, flaeche)
-app.put('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
+// GET /api/me/wohnung/:id — full apartment with kontakte (like /api/wohnungen/:stweg/:id)
+app.get('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
   try {
     const email = (req.user.email || '').toLowerCase();
     const name = req.user.name || '';
-    // Verify ownership: user must be a kontakt of this wohnung
     const own = await pool.query(
-      `SELECT w.id FROM wohnungen w JOIN wohnungen_kontakte k ON k.wohnung_id = w.id
-       WHERE w.id = $1 AND (LOWER(k.email) = $2 OR LOWER(k.name) = LOWER($3))`,
+      `SELECT w.* FROM wohnungen w JOIN wohnungen_kontakte k ON k.wohnung_id = w.id
+       WHERE w.id = $1 AND (LOWER(k.email) = $2 OR LOWER(k.name) = LOWER($3)) LIMIT 1`,
+      [req.params.id, email, name]
+    );
+    if (own.rows.length === 0) return res.status(403).json({ error: 'Du kannst nur deine eigenen Wohnungen sehen' });
+    const w = own.rows[0];
+    const k = await pool.query("SELECT * FROM wohnungen_kontakte WHERE wohnung_id = $1 ORDER BY rolle, sort_order, id", [w.id]);
+    w.kontakte = k.rows;
+    res.json(w);
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// PUT /api/me/wohnung/:id — full update of own apartment (all fields + kontakte)
+// Same shape as PUT /api/wohnungen/:stweg/:id but ownership-checked instead of permission-checked
+app.put('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const email = (req.user.email || '').toLowerCase();
+    const name = req.user.name || '';
+    const own = await client.query(
+      `SELECT w.id, w.stweg FROM wohnungen w JOIN wohnungen_kontakte k ON k.wohnung_id = w.id
+       WHERE w.id = $1 AND (LOWER(k.email) = $2 OR LOWER(k.name) = LOWER($3)) LIMIT 1`,
       [req.params.id, email, name]
     );
     if (own.rows.length === 0) return res.status(403).json({ error: 'Du kannst nur deine eigenen Wohnungen bearbeiten' });
-
+    const stweg = own.rows[0].stweg;
     const b = req.body;
-    const result = await pool.query(
-      `UPDATE wohnungen SET
-        besonderheiten = COALESCE($1, besonderheiten),
-        bewohnt_von = COALESCE($2, bewohnt_von),
-        waschkueche_berechtigt = COALESCE($3, waschkueche_berechtigt),
-        notizen = COALESCE($4, notizen),
-        zimmer = COALESCE($5, zimmer),
-        stockwerk = COALESCE($6, stockwerk),
-        updated_at = NOW()
-       WHERE id = $7 RETURNING *`,
-      [b.besonderheiten ?? null, b.bewohnt_von ?? null, b.waschkueche_berechtigt ?? null,
-       b.notizen ?? null, b.zimmer ?? null, b.stockwerk ?? null, req.params.id]
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE wohnungen SET bezeichnung=COALESCE($1,bezeichnung), stockwerk=$2, zimmer=$3, flaeche_m2=$4,
+        typ=COALESCE($5,typ), besonderheiten=$6, bewohnt_von=COALESCE($7,bewohnt_von),
+        waschkueche_berechtigt=COALESCE($8,waschkueche_berechtigt), notizen=$9,
+        wertquote_zaehler=$10, wertquote_nenner=$11, updated_at=NOW()
+       WHERE id=$12 RETURNING *`,
+      [b.bezeichnung, b.stockwerk, b.zimmer, b.flaeche_m2, b.typ || 'Wohnung', b.besonderheiten,
+       b.bewohnt_von || 'eigentuemer', b.waschkueche_berechtigt !== false, b.notizen,
+       b.wertquote_zaehler || null, b.wertquote_nenner || null, req.params.id]
     );
-    res.json(result.rows[0]);
+    await saveKontakte(client, result.rows[0].id, b.kontakte, stweg);
+    await client.query('COMMIT');
+    const w = await loadWohnungMitKontakte(result.rows[0].id);
+    res.json(w);
   } catch (err) {
-    console.error('[me/wohnung] error:', err.message);
+    await client.query('ROLLBACK').catch(()=>{});
+    console.error('[me/wohnung PUT] error:', err.message);
     res.status(500).json({ error: 'Fehler' });
+  } finally {
+    client.release();
   }
 });
 
