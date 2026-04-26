@@ -2757,7 +2757,9 @@ async function pollGmailForVerteiler() {
             const PRINT_TOKEN = process.env.PRINT_API_SECRET || 'RwPrintApi2026';
 
             // Whitelist check: only known users may print (strip +tags from email)
-            const senderEmailRaw = headers.match(/^From:\s*.*?([a-z0-9._+-]+@[a-z0-9.-]+)/im)?.[1]?.toLowerCase();
+            // Unfold MIME-folded From header (continuation lines start with WSP) before extraction.
+            const headersUnfolded = headers.replace(/\r?\n[ \t]+/g, ' ');
+            const senderEmailRaw = headersUnfolded.match(/^From:\s*.*?([a-z0-9._+-]+@[a-z0-9.-]+)/im)?.[1]?.toLowerCase();
             const senderEmail = senderEmailRaw?.replace(/\+[^@]*/, ''); // strip +tag
             let authorized = false;
             if (senderEmail) {
