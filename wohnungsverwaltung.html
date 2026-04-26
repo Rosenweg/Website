@@ -540,6 +540,19 @@
                 document.getElementById('stat-selbst').textContent = stats.selbstbewohnt || 0;
                 document.getElementById('stat-vermietet').textContent = stats.vermietet || 0;
                 document.getElementById('stat-leer').textContent = stats.leer || 0;
+                // Label: if all entries are Parkplätze, show "Parkplätze" instead of "Wohnungen"
+                const typen = new Set(allWohnungen.map(w => w.typ || 'Wohnung'));
+                let label = 'Wohnungen';
+                if (typen.size === 1) {
+                    const t = [...typen][0];
+                    if (t === 'Parkplatz' || t === 'Tiefgarage-Platz') label = 'Parkplätze';
+                    else if (t === 'Hobbyraum') label = 'Hobbyräume';
+                    else if (t !== 'Wohnung') label = t + 'e';
+                } else if (typen.has('Parkplatz') || typen.has('Tiefgarage-Platz')) {
+                    label = 'Einheiten';
+                }
+                const totalLabel = document.querySelector('#stat-total + div');
+                if (totalLabel) totalLabel.textContent = label;
                 document.getElementById('stats-bar').classList.remove('hidden');
             } catch (err) {
                 console.error('Error loading wohnungen:', err);
