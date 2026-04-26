@@ -3191,75 +3191,69 @@ function wohnungSort(a, b) {
 app.get('/api/stweg/:nr/kontakte', authMiddleware, async (req, res) => {
   try {
     const nr = parseInt(req.params.nr);
-    const stwegGroups = STWEG_GROUPS[nr];
-    if (!stwegGroups) return res.status(404).json({ error: 'STWEG nicht gefunden' });
+    if (!nr || nr < 1 || nr > 8) return res.status(404).json({ error: 'STWEG nicht gefunden' });
 
-    // Check access: user must be in one of the STWEG's groups or Technik
-    const userGroups = (req.user.groups || []).map(g => g.toLowerCase());
+    // Check access: user must be in this STWEG's groups or Technik
+    const stwegGroups = STWEG_GROUPS[nr];
     const allUserGroups = await resolveAncestorGroups(req.user.groups || []);
-    const accessGroups = Object.values(stwegGroups).map(g => g.toLowerCase());
-    const hasAccess = allUserGroups.some(g => g === 'technik') ||
+    const accessGroups = stwegGroups ? Object.values(stwegGroups).map(g => g.toLowerCase()) : [];
+    const hasAccess = allUserGroups.some(g => g === 'technik' || g === 'präsident' || g === 'praesident') ||
                       allUserGroups.some(g => accessGroups.includes(g));
     if (!hasAccess) return res.status(403).json({ error: 'Kein Zugriff auf diese STWEG' });
 
-    const { groups: allGroups, users: allUsers } = await getKontakteData();
+    // Load apartments + contacts from Verwaltungs-DB
+    const wRes = await pool.query('SELECT * FROM wohnungen WHERE stweg = $1', [nr]);
+    const kRes = await pool.query(
+      `SELECT k.* FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id WHERE w.stweg = $1 ORDER BY k.rolle, k.sort_order, k.id`,
+      [nr]
+    );
 
-    // Resolve group PKs (including child groups)
-    const bewohnerPks = stwegGroups.bewohner ? resolveDescendantPks(stwegGroups.bewohner, allGroups) : new Set();
-    const eigentuemerPks = stwegGroups.eigentuemer ? resolveDescendantPks(stwegGroups.eigentuemer, allGroups) : new Set();
-    const ausschussPks = stwegGroups.ausschuss ? resolveDescendantPks(stwegGroups.ausschuss, allGroups) : new Set();
-
-    // Get all relevant users (union of all groups)
-    const allPks = new Set([...bewohnerPks, ...eigentuemerPks, ...ausschussPks]);
-    const relevantUsers = getUsersInGroups(allPks, allUsers);
-
-    // Build contact list grouped by wohnung
-    const wohnungen = {};
-    const ausschuss = [];
-
-    for (const u of relevantUsers) {
-      const userPks = u.groups_obj ? u.groups_obj.map(g => g.pk) : (u.groups || []);
-      const isEigentuemer = userPks.some(pk => eigentuemerPks.has(pk));
-      const isBewohner = userPks.some(pk => bewohnerPks.has(pk));
-      const isAusschuss = userPks.some(pk => ausschussPks.has(pk));
-
-      const attrs = u.attributes || {};
-      const person = {
-        name: u.name,
-        email: u.email,
-        telefon: attrs.telefon || null,
-        wohnung: attrs.wohnung || null,
-        rolle: isEigentuemer ? 'eigentuemer' : 'mieter',
-      };
-
-      if (isAusschuss) {
-        ausschuss.push({ ...person, funktion: attrs.funktion || 'Vertreter' });
-      }
-
-      if (person.wohnung) {
-        if (!wohnungen[person.wohnung]) wohnungen[person.wohnung] = [];
-        wohnungen[person.wohnung].push(person);
-      }
+    // Group kontakte by wohnung_id
+    const kontakteMap = {};
+    for (const k of kRes.rows) {
+      if (!kontakteMap[k.wohnung_id]) kontakteMap[k.wohnung_id] = [];
+      kontakteMap[k.wohnung_id].push({
+        name: k.name, email: k.email, telefon: k.telefon, rolle: k.rolle,
+      });
     }
 
-    // Sort wohnungen and build response
-    const sortedWohnungen = Object.keys(wohnungen)
-      .sort(wohnungSort)
-      .map(w => ({
-        bezeichnung: w,
-        bewohner: wohnungen[w].sort((a, b) => {
-          // Eigentuemer first
-          if (a.rolle === 'eigentuemer' && b.rolle !== 'eigentuemer') return -1;
-          if (a.rolle !== 'eigentuemer' && b.rolle === 'eigentuemer') return 1;
-          return 0;
-        }),
-      }));
+    // Build wohnungen array with bewohner
+    const wohnungen = wRes.rows.map(w => {
+      let bewohner = kontakteMap[w.id] || [];
+      // Fallback: flat fields if no kontakte
+      if (bewohner.length === 0 && w.eigentuemer_name) {
+        bewohner.push({ name: w.eigentuemer_name, email: w.eigentuemer_email, telefon: w.eigentuemer_telefon, rolle: 'eigentuemer' });
+      }
+      if (bewohner.length === 0 && w.mieter_name) {
+        bewohner.push({ name: w.mieter_name, email: w.mieter_email, telefon: w.mieter_telefon, rolle: 'mieter' });
+      }
+      // Eigentuemer first
+      bewohner.sort((a, b) => {
+        if (a.rolle === 'eigentuemer' && b.rolle !== 'eigentuemer') return -1;
+        if (a.rolle !== 'eigentuemer' && b.rolle === 'eigentuemer') return 1;
+        return 0;
+      });
+      return { bezeichnung: w.bezeichnung, typ: w.typ, bewohner };
+    }).filter(w => w.bewohner.length > 0);
 
-    res.json({
-      stweg: nr,
-      wohnungen: sortedWohnungen,
-      ausschuss: ausschuss,
-    });
+    wohnungen.sort((a, b) => wohnungSort(a.bezeichnung, b.bezeichnung));
+
+    // Ausschuss-Vertreter from Authentik (still group-based)
+    let ausschuss = [];
+    if (stwegGroups) {
+      try {
+        const { groups: allGroups, users: allUsers } = await getKontakteData();
+        const ausschussPks = stwegGroups.ausschuss ? resolveDescendantPks(stwegGroups.ausschuss, allGroups) : new Set();
+        const ausschussUsers = getUsersInGroups(ausschussPks, allUsers);
+        ausschuss = ausschussUsers.map(u => ({
+          name: u.name, email: u.email,
+          telefon: u.attributes?.telefon || null,
+          funktion: u.attributes?.funktion || 'Vertreter',
+        }));
+      } catch {}
+    }
+
+    res.json({ stweg: nr, wohnungen, ausschuss });
   } catch (err) {
     console.error('Kontakte error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Kontakte' });
