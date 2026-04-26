@@ -73,6 +73,17 @@
             </div>
         </div>
 
+        <!-- Meine Wohnung(en) -->
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+                Meine Wohnungen
+            </h2>
+            <div id="my-wohnungen">
+                <span class="text-sm text-gray-400">Laden...</span>
+            </div>
+        </div>
+
         <!-- Persönliche Daten -->
         <div class="bg-white rounded-lg shadow-md p-6">
             <h2 class="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
@@ -387,10 +398,71 @@
             setTimeout(() => msg.classList.add('hidden'), 6000);
         });
 
+        // ─── Meine Wohnungen ─────────────────────────────────────────
+        async function loadMyWohnungen() {
+            const container = document.getElementById('my-wohnungen');
+            try {
+                const r = await AuthentikAuth.apiFetch('/api/me/wohnungen');
+                if (!r.ok) throw new Error(r.status);
+                const data = await r.json();
+                const list = data.wohnungen || [];
+                if (!list.length) {
+                    container.innerHTML = '<p class="text-sm text-gray-400">Du bist in der Verwaltung mit deiner Email/deinem Namen nicht als Kontakt einer Wohnung erfasst. Wende dich an den Ausschuss falls das nicht stimmt.</p>';
+                    return;
+                }
+                const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+                const rolleLabel = { eigentuemer: 'Eigentuemer', mieter: 'Mieter', verwalter: 'Verwalter', vertreter: 'Vertreter' };
+                container.innerHTML = list.map(w => {
+                    const roleColor = w.rolle === 'eigentuemer' ? 'green' : w.rolle === 'mieter' ? 'blue' : 'gray';
+                    return `<div class="border rounded-lg p-4 mb-3" data-kontakt-id="${w.kontakt_id}">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 flex-wrap mb-1">
+                                    <span class="font-semibold">STWEG ${w.stweg} ${esc(w.bezeichnung)}</span>
+                                    <span class="text-xs px-2 py-0.5 rounded-full bg-${roleColor}-100 text-${roleColor}-700">${rolleLabel[w.rolle]||w.rolle}</span>
+                                    ${w.typ && w.typ !== 'Wohnung' ? `<span class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">${esc(w.typ)}</span>` : ''}
+                                </div>
+                                <div class="text-sm text-gray-600 space-y-0.5">
+                                    ${w.stockwerk ? `<div>${esc(w.stockwerk)}${w.zimmer ? ' &middot; ' + esc(w.zimmer) + ' Zi.' : ''}${w.flaeche_m2 ? ' &middot; ' + esc(w.flaeche_m2) + ' m&sup2;' : ''}</div>` : ''}
+                                    <div class="text-xs text-gray-500"><strong>Email:</strong> ${esc(w.email||'(nicht erfasst)')}</div>
+                                    <div class="text-xs text-gray-500"><strong>Telefon:</strong> ${esc(w.telefon||'(nicht erfasst)')}</div>
+                                    ${w.adresse ? `<div class="text-xs text-gray-500"><strong>Kontaktadresse:</strong> ${esc(w.adresse)}</div>` : ''}
+                                </div>
+                            </div>
+                            <button onclick="editMyKontakt(${w.kontakt_id}, '${esc(w.email||'')}', '${esc(w.telefon||'')}', '${esc(w.adresse||'')}')" class="text-sm text-blue-600 hover:underline">Bearbeiten</button>
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch(e) {
+                container.innerHTML = '<p class="text-sm text-gray-400">Wohnungsdaten nicht verfuegbar.</p>';
+            }
+        }
+
+        function editMyKontakt(id, email, telefon, adresse) {
+            const newEmail = prompt('Email-Adresse:', email);
+            if (newEmail === null) return;
+            const newTel = prompt('Telefon:', telefon);
+            if (newTel === null) return;
+            const newAdr = prompt('Kontaktadresse (z.B. wenn Wohnung vermietet ist):', adresse);
+            if (newAdr === null) return;
+
+            AuthentikAuth.apiFetch('/api/me/kontakt/' + id, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: newEmail, telefon: newTel, adresse: newAdr }),
+            }).then(r => r.json().then(d => ({ ok: r.ok, d })))
+              .then(({ ok, d }) => {
+                  if (!ok) { alert('Fehler: ' + (d.error || 'Unbekannt')); return; }
+                  loadMyWohnungen();
+              })
+              .catch(e => alert('Fehler: ' + e.message));
+        }
+
         // Init
         AuthentikAuth.init({ requireAuth: true }).then(user => {
             if (user) {
                 loadProfile();
+                loadMyWohnungen();
                 RosenwegNav.init({ active: 'profil' });
             }
         });
