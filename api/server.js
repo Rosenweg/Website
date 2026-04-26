@@ -5515,6 +5515,81 @@ function requireAusschussOrTechnik(req, res, next) {
   res.status(403).json({ error: 'Nur für Ausschuss/Technik' });
 }
 
+// ─── Public Project Access ──────────────────────────────────────────
+// GET /api/public/project/:slug — view project without login (only if public_access = true)
+app.get('/api/public/project/:slug', async (req, res) => {
+  try {
+    const { rows: [project] } = await pool.query(
+      'SELECT id, slug, title, description, status, public_access FROM projects WHERE slug = $1 AND public_access = true',
+      [req.params.slug]
+    );
+    if (!project) return res.status(404).json({ error: 'Projekt nicht gefunden oder nicht öffentlich' });
+
+    // Filter sensitive fields: omit notizen, comments, kontakt-details
+    const [candidates, timeline, attachments] = await Promise.all([
+      pool.query(`SELECT id, name, webseite, offerte_betrag, offerte_details, bewertung, status FROM project_candidates WHERE project_id = $1 ORDER BY sort_order, name`, [project.id]),
+      pool.query('SELECT id, datum, titel, beschreibung, erledigt FROM project_timeline WHERE project_id = $1 ORDER BY datum', [project.id]),
+      pool.query('SELECT id, target_type, target_id, doc_path FROM project_attachments WHERE project_slug = $1 ORDER BY created_at', [req.params.slug]),
+    ]);
+    res.json({ ...project, candidates: candidates.rows, timeline: timeline.rows, attachments: attachments.rows });
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// GET /api/public/project/:slug/document/* — serve attached documents publicly if project is public
+app.get('/api/public/project/:slug/document/:path(*)', async (req, res) => {
+  try {
+    const { rows: [project] } = await pool.query(
+      'SELECT id FROM projects WHERE slug = $1 AND public_access = true', [req.params.slug]
+    );
+    if (!project) return res.status(404).json({ error: 'Projekt nicht öffentlich' });
+
+    // Verify the requested document is actually attached to this project
+    const { rows: atts } = await pool.query(
+      'SELECT doc_path FROM project_attachments WHERE project_slug = $1 AND doc_path = $2',
+      [req.params.slug, req.params.path]
+    );
+    if (atts.length === 0) return res.status(404).json({ error: 'Dokument nicht gefunden' });
+
+    const fullPath = pathModule.join(DOCS_PATH, req.params.path);
+    if (!fullPath.startsWith(pathModule.resolve(DOCS_PATH) + '/')) return res.status(400).end();
+
+    const stat = await fs.stat(fullPath);
+    if (!stat.isFile()) return res.status(404).end();
+
+    const ext = req.params.path.split('.').pop().toLowerCase();
+    const contentTypes = {
+      pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+      docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    };
+    const fileName = req.params.path.split('/').pop().replace(/["\r\n\\]/g, '_');
+    res.setHeader('Content-Type', contentTypes[ext] || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+    res.setHeader('Content-Length', stat.size);
+    fsSync.createReadStream(fullPath).pipe(res);
+  } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'Dokument nicht gefunden' });
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// PUT /api/projects/:slug/public — toggle public access (admin only)
+app.put('/api/projects/:slug/public', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+  try {
+    const { public_access } = req.body;
+    const { rows: [row] } = await pool.query(
+      'UPDATE projects SET public_access = $1 WHERE slug = $2 RETURNING slug, public_access',
+      [!!public_access, req.params.slug]
+    );
+    if (!row) return res.status(404).json({ error: 'Projekt nicht gefunden' });
+    res.json(row);
+  } catch (err) {
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
 // GET /api/projects - List projects
 app.get('/api/projects', authMiddleware, requireEigentuemer, async (req, res) => {
   try {
@@ -5908,6 +5983,10 @@ async function initDB() {
       ALTER TABLE wasch_rooms ADD COLUMN IF NOT EXISTS stweg INTEGER;
       -- Migrate existing rooms to STWEG 3 (original installation)
       UPDATE wasch_rooms SET stweg = 3 WHERE stweg IS NULL;
+
+      -- Projects: public access flag (allows non-logged-in viewing of project)
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS public_access BOOLEAN DEFAULT false;
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS public_token VARCHAR(64);
 
       -- STWEG calendar events
       CREATE TABLE IF NOT EXISTS stweg_events (
