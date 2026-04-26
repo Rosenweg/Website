@@ -134,30 +134,70 @@ const RosenwegDocs = {
   },
 
   /** Group docs by top-level folder, then by subfolder within each */
+  _renderSubtree(node, topFolder, parentPath) {
+    let html = '';
+    const subNames = Object.keys(node._subs).sort();
+    for (const sub of subNames) {
+      const subNode = node._subs[sub];
+      const subPath = parentPath + '/' + sub;
+      const safeSub = this._escapeHtml(sub);
+      const subId = `sub-${subPath}`.replace(/[^a-zA-Z0-9-]/g, '_');
+      // Total file count incl. nested
+      const countFiles = (n) => n._root.length + Object.values(n._subs).reduce((a, x) => a + countFiles(x), 0);
+      const total = countFiles(subNode);
+      html += `
+        <div class="ml-2 border-l-2 border-blue-200">
+          <button onclick="document.getElementById('${subId}').classList.toggle('hidden'); this.querySelector('svg').classList.toggle('rotate-90')" class="flex items-center gap-2 px-3 py-2 w-full text-left hover:bg-gray-50 rounded-r transition">
+            <svg class="h-4 w-4 text-gray-400 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            <svg class="h-4 w-4 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+            <span class="font-medium text-gray-700">${safeSub}</span>
+            <span class="text-xs text-gray-400">(${total})</span>
+          </button>
+          <div id="${subId}" class="space-y-1 ml-6 mt-1 hidden">`;
+      // Render nested subfolders first
+      html += this._renderSubtree(subNode, topFolder, subPath);
+      // Then files at this level
+      if (subNode._root.length === 0 && Object.keys(subNode._subs).length === 0) {
+        html += `<p class="text-sm text-gray-400 italic px-2 py-1">Noch keine Dateien</p>`;
+        if (this._canWritePath(topFolder + '/x')) {
+          html += `<button onclick="RosenwegDocs.showUploadDialog('${subPath}')" class="text-sm text-blue-600 hover:text-blue-800 px-2 py-1 flex items-center gap-1">
+            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+            Dokument hochladen</button>`;
+        }
+      }
+      for (const doc of subNode._root) {
+        html += this._renderFileRow(doc);
+      }
+      html += `</div></div>`;
+    }
+    return html;
+  },
+
   groupByFolder() {
+    // Build recursive tree: each node has _files (docs at this level) and _subs (subfolder name -> node)
     const groups = {};
     for (const doc of this.docs) {
       const parts = doc.path.split('/');
-      const folder = parts.length > 1 ? parts[0] : 'allgemein';
-      if (!groups[folder]) groups[folder] = { _root: [], _subs: {} };
-      if (parts.length > 2) {
-        const sub = parts[1];
-        if (!groups[folder]._subs[sub]) groups[folder]._subs[sub] = [];
-        // Skip .gitkeep from display but still register the subfolder
-        if (!doc.path.endsWith('.gitkeep')) {
-          groups[folder]._subs[sub].push(doc);
-        }
-      } else if (!doc.path.endsWith('.gitkeep')) {
-        groups[folder]._root.push(doc);
+      const top = parts.length > 1 ? parts[0] : 'allgemein';
+      if (!groups[top]) groups[top] = { _root: [], _subs: {} };
+      // Walk down into sub tree, creating nodes as needed
+      let node = groups[top];
+      for (let i = 1; i < parts.length - 1; i++) {
+        const sub = parts[i];
+        if (!node._subs[sub]) node._subs[sub] = { _root: [], _subs: {} };
+        node = node._subs[sub];
+      }
+      // Place file at the deepest level (skip .gitkeep but keep folder visible)
+      if (!doc.path.endsWith('.gitkeep')) {
+        node._root.push(doc);
       }
     }
-    // Sort files alphabetically
-    for (const folder of Object.keys(groups)) {
-      groups[folder]._root.sort((a, b) => a.path.localeCompare(b.path));
-      for (const sub of Object.keys(groups[folder]._subs)) {
-        groups[folder]._subs[sub].sort((a, b) => a.path.localeCompare(b.path));
-      }
-    }
+    // Recursive sort
+    const sortNode = (node) => {
+      node._root.sort((a, b) => a.path.localeCompare(b.path));
+      for (const sub of Object.keys(node._subs)) sortNode(node._subs[sub]);
+    };
+    for (const folder of Object.keys(groups)) sortNode(groups[folder]);
     return groups;
   },
 
@@ -287,35 +327,8 @@ const RosenwegDocs = {
           </h3>
           <div class="space-y-2">`;
 
-      // Render subfolders first
-      const subNames = Object.keys(group._subs).sort();
-      for (const sub of subNames) {
-        const subFiles = group._subs[sub];
-        const safeSub = this._escapeHtml(sub);
-        const subId = `sub-${folder}-${sub}`.replace(/[^a-zA-Z0-9-]/g, '_');
-        html += `
-          <div class="ml-2 border-l-2 border-blue-200">
-            <button onclick="document.getElementById('${subId}').classList.toggle('hidden'); this.querySelector('svg').classList.toggle('rotate-90')" class="flex items-center gap-2 px-3 py-2 w-full text-left hover:bg-gray-50 rounded-r transition">
-              <svg class="h-4 w-4 text-gray-400 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-              <svg class="h-4 w-4 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
-              <span class="font-medium text-gray-700">${safeSub}</span>
-              <span class="text-xs text-gray-400">(${subFiles.length})</span>
-            </button>
-            <div id="${subId}" class="space-y-1 ml-6 mt-1 hidden">`;
-        if (subFiles.length === 0) {
-          html += `<p class="text-sm text-gray-400 italic px-2 py-1">Noch keine Dateien</p>`;
-          if (this._canWritePath(folder + '/x')) {
-            html += `<button onclick="RosenwegDocs.showUploadDialog('${folder}/${sub}')" class="text-sm text-blue-600 hover:text-blue-800 px-2 py-1 flex items-center gap-1">
-              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-              Dokument hochladen</button>`;
-          }
-        } else {
-          for (const doc of subFiles) {
-            html += this._renderFileRow(doc);
-          }
-        }
-        html += `</div></div>`;
-      }
+      // Render subfolders recursively
+      html += this._renderSubtree(group, folder, folder);
 
       // Render root files
       for (const doc of group._root) {
