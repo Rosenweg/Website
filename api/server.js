@@ -2723,12 +2723,10 @@ async function pollGmailForVerteiler() {
           }
 
           // Fallback: Delivered-To plus-tag (used by Cloudflare/Gmail routing)
-          if (allAddrs.length === 0) {
-            const plusMatch = headers.match(/^Delivered-To:\s*[^+\r\n]+\+([^@\r\n]+)@/im);
-            if (plusMatch) {
-              const base = plusMatch[1].toLowerCase().split('+')[0];
-              allAddrs.push(`${base}@${VERTEILER_DOMAIN}`);
-            }
+          const plusMatch = headers.match(/^Delivered-To:\s*[^+\r\n]+\+([^@\r\n]+)@/im);
+          if (allAddrs.length === 0 && plusMatch) {
+            const base = plusMatch[1].toLowerCase().split('+')[0];
+            allAddrs.push(`${base}@${VERTEILER_DOMAIN}`);
           }
 
           // Detect archiv@ as side-effect (separate from main delivery)
