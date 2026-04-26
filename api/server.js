@@ -3171,14 +3171,20 @@ function getUsersInGroups(groupPks, allUsers) {
 function wohnungSort(a, b) {
   const order = { 'ug': 0, 'eg': 1, '1og': 2, '1.og': 2, '2og': 3, '2.og': 3, '3og': 4, '3.og': 4, 'dg': 5 };
   const parseW = (w) => {
-    if (!w) return { floor: 99, num: 99 };
+    if (!w) return { floor: 99, num: 99, isPark: false };
     const s = w.toLowerCase().replace(/\s+/g, '');
+    // Parkplatz format: "P1", "P107" — sort numerically
+    const pm = s.match(/^p(\d+)$/);
+    if (pm) return { floor: -1, num: parseInt(pm[1]), isPark: true };
     // Match formats: "EG.1", "1OG.2", "9.EG.1", "9.2OG.3", "Hobbyraum"
     const m = s.match(/(?:\d+\.)?(ug|eg|\d+\.?og|dg)\.?(\d+)?/);
-    if (!m) return { floor: 99, num: 99 };
-    return { floor: order[m[1]] ?? 99, num: parseInt(m[2]) || 0 };
+    if (!m) return { floor: 99, num: 99, isPark: false };
+    return { floor: order[m[1]] ?? 99, num: parseInt(m[2]) || 0, isPark: false };
   };
   const pa = parseW(a), pb = parseW(b);
+  // Parkplaetze: ascending by number
+  if (pa.isPark && pb.isPark) return pa.num - pb.num;
+  // Wohnungen: top floor first, then by number ascending
   return pb.floor - pa.floor || pa.num - pb.num;
 }
 
