@@ -188,6 +188,7 @@
                         '<div class="space-y-1 text-sm text-gray-600">' +
                             (w.stockwerk ? '<p><strong>Etage:</strong> ' + esc(w.stockwerk) + '</p>' : '') +
                             (w.flaeche_m2 ? '<p><strong>Flaeche:</strong> ' + esc(w.flaeche_m2) + ' m&sup2;</p>' : '') +
+                            (w.wertquote_zaehler && w.wertquote_nenner ? '<p><strong>Wertquote:</strong> ' + w.wertquote_zaehler + '/' + w.wertquote_nenner + ' &permil;</p>' : '') +
                             (w.besonderheiten ? '<p><strong>Besonderheiten:</strong> ' + esc(w.besonderheiten) + '</p>' : '') +
                             (bl ? '<p><span class="inline-block px-2 py-0.5 rounded text-xs font-medium bg-' + bc + '-100 text-' + bc + '-700">' + bl + '</span></p>' : '') +
                         '</div>' +
@@ -206,6 +207,7 @@
                         '</div>' +
                         '<div class="space-y-1 text-sm text-gray-600">' +
                             (w.stockwerk ? '<p><strong>Etage:</strong> ' + esc(w.stockwerk) + '</p>' : '') +
+                            (w.wertquote_zaehler && w.wertquote_nenner ? '<p><strong>Wertquote:</strong> ' + w.wertquote_zaehler + '/' + w.wertquote_nenner + ' &permil;</p>' : '') +
                             (w.besonderheiten ? '<p><strong>Besonderheiten:</strong> ' + esc(w.besonderheiten) + '</p>' : '') +
                         '</div>' +
                     '</div>';
