@@ -2685,10 +2685,12 @@ async function pollGmailForVerteiler() {
     const lock = await client.getMailboxLock('INBOX');
 
     try {
-      // Search all emails from last 7 days (not just unread) and check against DB
+      // Only process UNSEEN emails from last 7 days. Seen flag is set on every
+      // outcome (success, rejection, error) so reprocessing requires explicit
+      // unflag — protects against race conditions and accidental re-runs.
       const since = new Date();
       since.setDate(since.getDate() - 7);
-      const uids = await client.search({ since }, { uid: true });
+      const uids = await client.search({ since, seen: false }, { uid: true });
       if (!uids.length) { lock.release(); return; }
 
       for (const uid of uids) {
@@ -2807,6 +2809,20 @@ async function pollGmailForVerteiler() {
               if (found.rows.length > 0) {
                 recipientInfo = found.rows[0];
               }
+            }
+
+            // Dedup: skip if (message_id, recipient) already printed (race-safe via UNIQUE index)
+            const dedupName = recipientInfo?.name || recipientTag || 'allgemein';
+            const dupCheck = await pool.query(
+              'SELECT id FROM print_jobs WHERE message_id = $1 AND recipient_name = $2',
+              [messageId, dedupName]
+            );
+            if (dupCheck.rows.length > 0) {
+              console.log(`[IMAP] Skip duplicate print: ${dedupName} (msgId=${messageId})`);
+              try { await client.mailboxCreate('Gedruckt'); } catch {}
+              try { await client.messageMove(uid, 'Gedruckt', { uid: true }); }
+              catch { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); }
+              continue;
             }
 
             // Create print job with token for pickup confirmation
@@ -2997,15 +3013,16 @@ async function pollGmailForVerteiler() {
 
               console.log(`[Print] ${printed} items sent to ${printer}`);
 
-              // Save print job to DB
+              // Save print job to DB (UNIQUE on message_id+recipient prevents race-duplicate)
               if (recipientTag) {
                 try {
                   await pool.query(
-                    `INSERT INTO print_jobs (token, printer, recipient_name, recipient_address, recipient_wohnung, recipient_stweg, sender_email, subject, documents)
-                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+                    `INSERT INTO print_jobs (token, printer, recipient_name, recipient_address, recipient_wohnung, recipient_stweg, sender_email, subject, documents, message_id)
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                     ON CONFLICT (message_id, recipient_name) WHERE message_id IS NOT NULL DO NOTHING`,
                     [jobToken, printer, recipientInfo?.name || recipientTag, recipientInfo?.strasse || null,
                      recipientInfo?.wohnung || null, recipientInfo?.stweg || null,
-                     senderEmailRaw, parsed.subject, printed]
+                     senderEmailRaw, parsed.subject, printed, messageId]
                   );
                 } catch (dbErr) { console.error(`[Print] DB save error: ${dbErr.message}`); }
               }
