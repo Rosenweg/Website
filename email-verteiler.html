@@ -235,10 +235,38 @@
                             </div>
                         </div>
                         <div class="mb-3">
-                            <label class="text-xs text-gray-500">Authentik-Gruppen (mehrere möglich)</label>
-                            <select id="vf-group" multiple class="w-full text-sm px-3 py-2 border rounded-lg" size="6">
+                            <label class="text-xs text-gray-500">Verwaltungsgruppen (live aus Wohnungsverwaltung)</label>
+                            <select id="vf-verwaltung" multiple class="w-full text-sm px-3 py-2 border rounded-lg bg-emerald-50" size="5">
+                                <option value="verwaltung:eigentuemer">Alle Eigentümer</option>
+                                <option value="verwaltung:eigentuemer:include_drucker">Alle Eigentümer (inkl. Drucker-Tags für Personen ohne Email)</option>
+                                <option value="verwaltung:verwalter">Alle Verwalter</option>
+                                <option value="verwaltung:bewohner">Alle Bewohner (Eigentümer wenn selbstbewohnt, sonst Mieter)</option>
+                                <option value="verwaltung:bewohner:include_drucker">Alle Bewohner (inkl. Drucker-Tags)</option>
+                                <option value="verwaltung:mieter">Alle Mieter</option>
+                                <option value="verwaltung:eigentuemer:stweg=1">STWEG 1 — Eigentümer</option>
+                                <option value="verwaltung:eigentuemer:stweg=2">STWEG 2 — Eigentümer</option>
+                                <option value="verwaltung:eigentuemer:stweg=3">STWEG 3 — Eigentümer</option>
+                                <option value="verwaltung:eigentuemer:stweg=4">STWEG 4 — Eigentümer</option>
+                                <option value="verwaltung:eigentuemer:stweg=5">STWEG 5 — Eigentümer</option>
+                                <option value="verwaltung:eigentuemer:stweg=6">STWEG 6 — Eigentümer</option>
+                                <option value="verwaltung:eigentuemer:stweg=7">STWEG 7 — Eigentümer</option>
+                                <option value="verwaltung:eigentuemer:stweg=8">STWEG 8 — Eigentümer</option>
+                                <option value="verwaltung:bewohner:stweg=1">STWEG 1 — Bewohner</option>
+                                <option value="verwaltung:bewohner:stweg=2">STWEG 2 — Bewohner</option>
+                                <option value="verwaltung:bewohner:stweg=3">STWEG 3 — Bewohner</option>
+                                <option value="verwaltung:bewohner:stweg=4">STWEG 4 — Bewohner</option>
+                                <option value="verwaltung:bewohner:stweg=5">STWEG 5 — Bewohner</option>
+                                <option value="verwaltung:bewohner:stweg=6">STWEG 6 — Bewohner</option>
+                                <option value="verwaltung:bewohner:stweg=7">STWEG 7 — Bewohner</option>
+                                <option value="verwaltung:bewohner:stweg=8">STWEG 8 — Bewohner</option>
                             </select>
-                            <p class="text-xs text-gray-400 mt-1">Alle Mitglieder der gewählten Gruppen und deren Untergruppen werden automatisch einbezogen. Strg/Cmd gedrückt halten für Mehrfachauswahl.</p>
+                            <p class="text-xs text-gray-400 mt-1">Live aus der Wohnungsverwaltung — Änderungen sind sofort wirksam, kein Sync nötig.</p>
+                        </div>
+                        <div class="mb-3">
+                            <label class="text-xs text-gray-500">Authentik-Gruppen (Login-basiert; alternativ oder zusätzlich)</label>
+                            <select id="vf-group" multiple class="w-full text-sm px-3 py-2 border rounded-lg" size="5">
+                            </select>
+                            <p class="text-xs text-gray-400 mt-1">Mitglieder der gewählten Gruppen + Untergruppen aus Authentik. Strg/Cmd halten für Mehrfachauswahl.</p>
                             <div id="vf-group-preview" class="mt-2"></div>
                         </div>
                         <div class="flex gap-2">
@@ -452,8 +480,23 @@
                     const statusClass = v.active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500';
                     const statusText = v.active ? 'Aktiv' : 'Inaktiv';
                     const groups = v.group_names?.length ? v.group_names : (v.group_name ? [v.group_name] : []);
+                    const formatGroupLabel = g => {
+                        if (!g.startsWith('verwaltung:')) return g;
+                        const parts = g.split(':').slice(1);
+                        const rolle = { eigentuemer: 'Eigentümer', verwalter: 'Verwalter', mieter: 'Mieter', bewohner: 'Bewohner' }[parts[0]] || parts[0];
+                        let label = `Verwaltung: ${rolle}`;
+                        for (const opt of parts.slice(1)) {
+                            if (opt.startsWith('stweg=')) label += ` (STWEG ${opt.slice(6)})`;
+                            else if (opt === 'include_drucker') label += ' +Drucker';
+                        }
+                        return label;
+                    };
                     const sourceTag = groups.length > 0
-                        ? groups.map(g => `<span class="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">${escapeHtml(g)}</span>`).join(' ')
+                        ? groups.map(g => {
+                            const isVerwaltung = g.startsWith('verwaltung:');
+                            const cls = isVerwaltung ? 'bg-emerald-100 text-emerald-700' : 'bg-purple-100 text-purple-700';
+                            return `<span class="text-xs ${cls} px-1.5 py-0.5 rounded">${escapeHtml(formatGroupLabel(g))}</span>`;
+                          }).join(' ')
                         : `<span class="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">Statisch</span>`;
                     return `
                     <div class="p-4 bg-gray-50 rounded-lg border hover:border-blue-300 cursor-pointer" onclick="editVerteiler(${v.id})">
@@ -527,6 +570,7 @@
             document.getElementById('vf-reply-to').value = 'sender';
             document.getElementById('vf-prefix').value = '';
             document.getElementById('vf-group-preview').innerHTML = '';
+            [...document.getElementById('vf-verwaltung').options].forEach(o => o.selected = false);
             populateGroupDropdown('');
         }
 
@@ -547,7 +591,12 @@
             document.getElementById('vf-reply-to').value = v.reply_to || 'sender';
             document.getElementById('vf-prefix').value = v.subject_prefix || '';
             const groups = v.group_names?.length ? v.group_names : (v.group_name ? [v.group_name] : []);
-            populateGroupDropdown(groups);
+            const verwaltungGroups = groups.filter(g => g.startsWith('verwaltung:'));
+            const authentikGroups = groups.filter(g => !g.startsWith('verwaltung:'));
+            // Set Verwaltungs-Auswahl
+            const vwSel = document.getElementById('vf-verwaltung');
+            [...vwSel.options].forEach(o => { o.selected = verwaltungGroups.includes(o.value); });
+            populateGroupDropdown(authentikGroups);
             // Show resolved members preview
             if (v.resolved_emails) {
                 document.getElementById('vf-group-preview').innerHTML = `<div class="bg-white border rounded-lg p-2 mt-1"><p class="text-xs font-medium text-green-700 mb-1">${v.resolved_emails.length} Empfänger aus ${groups.length} Gruppe(n) (inkl. Untergruppen):</p><p class="text-xs text-gray-500">${v.resolved_emails.map(e => escapeHtml(e)).join(', ')}</p></div>`;
@@ -560,9 +609,11 @@
             const id = document.getElementById('vf-id').value;
             const name = document.getElementById('vf-name').value;
             const email_address = document.getElementById('vf-email').value;
-            const group_names = [...document.getElementById('vf-group').selectedOptions].map(o => o.value);
+            const verwaltung = [...document.getElementById('vf-verwaltung').selectedOptions].map(o => o.value);
+            const authentik = [...document.getElementById('vf-group').selectedOptions].map(o => o.value);
+            const group_names = [...verwaltung, ...authentik];
             if (!name || !email_address) return alert('Name und E-Mail-Adresse erforderlich');
-            if (group_names.length === 0) return alert('Bitte mindestens eine Authentik-Gruppe wählen');
+            if (group_names.length === 0) return alert('Bitte mindestens eine Verwaltungs- oder Authentik-Gruppe wählen');
 
             const body = {
                 stweg: parseInt(document.getElementById('vf-stweg').value) || 0,
