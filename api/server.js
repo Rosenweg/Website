@@ -2319,19 +2319,73 @@ async function resolveGroupEmails(groupName) {
   }
 }
 
-// Resolve members for a verteiler (multi-group or single group or static)
+// Resolve a Verwaltungs-Gruppe (live from wohnungen_kontakte / wohnungen).
+// Spec: "verwaltung:<rolle>[:stweg=N][:include_drucker]"
+//   rolle: eigentuemer | verwalter | mieter | bewohner (= eigentuemer if bewohnt_von='eigentuemer' else mieter, per wohnung)
+//   stweg=N optional: scope to one STWEG
+//   include_drucker optional: include druckerr9+ tags as fallback when no real email
+async function resolveVerwaltungsGroup(spec) {
+  const parts = spec.split(':').slice(1); // strip "verwaltung:"
+  const rolle = parts[0];
+  let stwegFilter = null;
+  let includeDrucker = false;
+  for (const opt of parts.slice(1)) {
+    if (opt.startsWith('stweg=')) stwegFilter = parseInt(opt.slice(6));
+    else if (opt === 'include_drucker') includeDrucker = true;
+  }
+  const emails = new Set();
+  const druckerCandidates = [];
+  try {
+    if (rolle === 'bewohner') {
+      // Per-wohnung: pick the role that actually lives there (bewohnt_von)
+      const q = await pool.query(`
+        SELECT wk.email FROM wohnungen w
+        JOIN wohnungen_kontakte wk ON wk.wohnung_id = w.id AND wk.rolle = w.bewohnt_von
+        WHERE wk.email IS NOT NULL AND wk.email <> '' ${stwegFilter ? 'AND w.stweg = $1' : ''}
+      `, stwegFilter ? [stwegFilter] : []);
+      for (const r of q.rows) {
+        const e = r.email.toLowerCase();
+        if (e.startsWith('druckerr9+') || e.startsWith('druckerr13+')) druckerCandidates.push(e);
+        else emails.add(e);
+      }
+    } else {
+      const q = await pool.query(`
+        SELECT wk.email FROM wohnungen_kontakte wk
+        JOIN wohnungen w ON w.id = wk.wohnung_id
+        WHERE wk.rolle = $1 AND wk.email IS NOT NULL AND wk.email <> '' ${stwegFilter ? 'AND w.stweg = $2' : ''}
+      `, stwegFilter ? [rolle, stwegFilter] : [rolle]);
+      for (const r of q.rows) {
+        const e = r.email.toLowerCase();
+        if (e.startsWith('druckerr9+') || e.startsWith('druckerr13+')) druckerCandidates.push(e);
+        else emails.add(e);
+      }
+    }
+    if (includeDrucker) druckerCandidates.forEach(e => emails.add(e));
+  } catch (err) {
+    console.error('resolveVerwaltungsGroup error:', err.message);
+  }
+  return [...emails];
+}
+
+// Resolve members for a verteiler. groupNames entries:
+//   "verwaltung:..."  → live from Verwaltungs-DB
+//   <other>           → Authentik group (resolveGroupEmails)
 async function resolveVerteilerRecipients(verteiler) {
   const groupNames = verteiler.group_names?.length ? verteiler.group_names : (verteiler.group_name ? [verteiler.group_name] : []);
   if (groupNames.length > 0) {
     const allEmails = new Set();
     for (const gn of groupNames) {
-      const emails = await resolveGroupEmails(gn);
+      const emails = gn.startsWith('verwaltung:')
+        ? await resolveVerwaltungsGroup(gn)
+        : await resolveGroupEmails(gn);
       emails.forEach(e => allEmails.add(e));
     }
     return [...allEmails];
   }
-  // Fallback: static members list
-  return (verteiler.members || []).map(m => m.email).filter(e => e && !e.endsWith('.invalid'));
+  // Fallback: static members list (legacy — for verteilers not yet migrated)
+  return (verteiler.members || [])
+    .map(m => typeof m === 'string' ? m : m.email)
+    .filter(e => e && !e.endsWith('.invalid'));
 }
 
 app.get('/api/verteiler/by-stweg/:stweg', async (req, res) => {
@@ -3469,10 +3523,13 @@ async function saveKontakte(client, wohnungId, kontakte, stweg) {
     const k = kontakte[i];
     if (!k.name && !k.email) continue;
     const rolle = VALID_ROLLEN.includes(k.rolle) ? k.rolle : 'eigentuemer';
+    // Default authentik_zugang: true für Eigentümer/Verwalter, sonst null (opt-in via UI checkbox)
+    const authentikZugang = k.authentik_zugang !== undefined ? k.authentik_zugang
+      : (rolle === 'eigentuemer' || rolle === 'verwalter') ? true : null;
     await client.query(
-      `INSERT INTO wohnungen_kontakte (wohnung_id, rolle, name, email, telefon, adresse, sort_order)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [wohnungId, rolle, k.name || null, k.email || null, k.telefon || null, k.adresse || null, i]
+      `INSERT INTO wohnungen_kontakte (wohnung_id, rolle, name, email, telefon, adresse, sort_order, authentik_zugang)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [wohnungId, rolle, k.name || null, k.email || null, k.telefon || null, k.adresse || null, i, authentikZugang]
     );
     // Cancel pending deletion if contact is re-added
     if (k.email) cancelPendingDeletion(k.email).catch(() => {});
@@ -3486,7 +3543,13 @@ async function saveKontakte(client, wohnungId, kontakte, stweg) {
 // bewohntVon: 'eigentuemer' means self-occupied → Eigentümer/Verwalter also get bewohner group
 async function syncKontakteToAuthentik(stweg, kontakte, bewohntVon) {
   if (!AUTHENTIK_API_TOKEN || !kontakte || !Array.isArray(kontakte)) return;
-  const withEmail = kontakte.filter(k => k.email && k.email.includes('@'));
+  // Authentik-Zugang: automatisch für Eigentümer/Verwalter, opt-in für Mieter/Bewohner.
+  const withEmail = kontakte.filter(k => {
+    if (!k.email || !k.email.includes('@')) return false;
+    if (k.email.startsWith('druckerr9+') || k.email.startsWith('druckerr13+')) return false;
+    if (k.rolle === 'eigentuemer' || k.rolle === 'verwalter') return k.authentik_zugang !== false;
+    return k.authentik_zugang === true;
+  });
   if (withEmail.length === 0) return;
 
   try {
