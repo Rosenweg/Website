@@ -3649,11 +3649,12 @@ app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsver
     await client.query('BEGIN');
     const result = await client.query(
       `INSERT INTO wohnungen (stweg, bezeichnung, stockwerk, zimmer, flaeche_m2, typ, besonderheiten,
-        bewohnt_von, waschkueche_berechtigt, notizen)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        bewohnt_von, waschkueche_berechtigt, notizen, wertquote_zaehler, wertquote_nenner)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        RETURNING *`,
       [stweg, b.bezeichnung, b.stockwerk, b.zimmer, b.flaeche_m2, b.typ || 'Wohnung', b.besonderheiten,
-       b.bewohnt_von || 'eigentuemer', b.waschkueche_berechtigt !== false, b.notizen]
+       b.bewohnt_von || 'eigentuemer', b.waschkueche_berechtigt !== false, b.notizen,
+       b.wertquote_zaehler || null, b.wertquote_nenner || null]
     );
     await saveKontakte(client, result.rows[0].id, b.kontakte, stweg);
     await client.query('COMMIT');
@@ -3680,10 +3681,12 @@ app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
     await client.query('BEGIN');
     const result = await client.query(
       `UPDATE wohnungen SET bezeichnung=$1, stockwerk=$2, zimmer=$3, flaeche_m2=$4, typ=$5, besonderheiten=$6,
-        bewohnt_von=$7, waschkueche_berechtigt=$8, notizen=$9, updated_at=NOW()
-       WHERE id=$10 AND stweg=$11 RETURNING *`,
+        bewohnt_von=$7, waschkueche_berechtigt=$8, notizen=$9,
+        wertquote_zaehler=$10, wertquote_nenner=$11, updated_at=NOW()
+       WHERE id=$12 AND stweg=$13 RETURNING *`,
       [b.bezeichnung, b.stockwerk, b.zimmer, b.flaeche_m2, b.typ || 'Wohnung', b.besonderheiten,
        b.bewohnt_von || 'eigentuemer', b.waschkueche_berechtigt !== false, b.notizen,
+       b.wertquote_zaehler || null, b.wertquote_nenner || null,
        req.params.id, stweg]
     );
     if (result.rows.length === 0) {
