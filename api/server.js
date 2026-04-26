@@ -86,9 +86,21 @@ const MAIL_FROM = process.env.MAIL_FROM || 'noreply@rosenweg4303.ch';
 const SMTP2GO_API_KEY = process.env.SMTP2GO_API_KEY || '';
 const SMTP2GO_API_URL = 'https://eu-api.smtp2go.com/v3';
 
+// External sender allowlist for all rosenweg email functions (verteiler, drucker, etc.)
+// Format: comma-separated emails. Senders from VERTEILER_DOMAIN, users table, or Authentik
+// are always allowed; this covers external addresses that should be trusted.
+const EMAIL_ALLOWLIST = (process.env.EMAIL_ALLOWLIST || '')
+  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+
 // ─── Helpers ────────────────────────────────────────────────────────
 function generateOTP() {
   return crypto.randomInt(100000, 999999).toString();
+}
+
+function isAllowlistedSender(email) {
+  if (!email) return false;
+  const e = email.toLowerCase();
+  return EMAIL_ALLOWLIST.includes(e) || EMAIL_ALLOWLIST.includes(e.replace(/\+[^@]*/, ''));
 }
 
 // ─── Health ─────────────────────────────────────────────────────────
@@ -2751,6 +2763,8 @@ async function pollGmailForVerteiler() {
             if (senderEmail) {
               // Allow emails from own domain
               if (senderEmail.endsWith(`@${VERTEILER_DOMAIN}`)) authorized = true;
+              // Check general allowlist (env: EMAIL_ALLOWLIST)
+              if (!authorized && (isAllowlistedSender(senderEmail) || isAllowlistedSender(senderEmailRaw))) authorized = true;
               // Check DB for known users (exact match on stripped and original email)
               if (!authorized) {
                 const known = await pool.query(
