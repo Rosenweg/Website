@@ -3527,7 +3527,7 @@ app.get('/api/stweg/:stweg/wohnungen', async (req, res) => {
     const stweg = parseInt(req.params.stweg, 10);
     if (!stweg || stweg < 1 || stweg > 8) return res.status(400).json({ error: 'Ungueltige STWEG' });
     const result = await pool.query(
-      'SELECT bezeichnung, stockwerk, zimmer, flaeche_m2, typ, besonderheiten, bewohnt_von FROM wohnungen WHERE stweg = $1',
+      'SELECT bezeichnung, stockwerk, zimmer, flaeche_m2, typ, besonderheiten, bewohnt_von, wertquote_zaehler, wertquote_nenner FROM wohnungen WHERE stweg = $1',
       [stweg]
     );
     result.rows.sort((a, b) => wohnungSort(a.bezeichnung, b.bezeichnung));
