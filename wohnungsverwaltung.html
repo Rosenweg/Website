@@ -673,6 +673,10 @@
                         <input type="text" value="${esc(kontakt.adresse || '')}" placeholder="Adresse eingeben..." class="w-full px-3 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 kontakt-adresse" oninput="searchAddress(this)" autocomplete="off" />
                         <div class="adresse-dropdown hidden absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto"></div>
                     </div>
+                    <label class="flex items-center gap-2 text-xs text-gray-600 cursor-pointer pt-1">
+                        <input type="checkbox" class="kontakt-authentik rounded text-blue-600" ${kontakt.authentik_zugang === true ? 'checked' : ''} ${kontakt.authentik_zugang === undefined ? 'data-default-by-rolle="1"' : ''} />
+                        <span>Authentik-Zugang (Login auf der Webseite)</span>
+                    </label>
                 </div>
             </div>`;
         }
@@ -759,8 +763,16 @@
                 const email = card.querySelector('.kontakt-email')?.value?.trim() || '';
                 const telefon = card.querySelector('.kontakt-telefon')?.value?.trim() || '';
                 const adresse = card.querySelector('.kontakt-adresse')?.value?.trim() || '';
+                const authentikEl = card.querySelector('.kontakt-authentik');
+                // Eigentümer/Verwalter: default true wenn Checkbox nicht explizit geändert
+                let authentik_zugang;
+                if (authentikEl?.dataset.defaultByRolle === '1') {
+                    authentik_zugang = (rolle === 'eigentuemer' || rolle === 'verwalter') ? true : null;
+                } else {
+                    authentik_zugang = authentikEl?.checked ? true : false;
+                }
                 if (name || email) {
-                    kontakte.push({ rolle, name: name || null, email: email || null, telefon: telefon || null, adresse: adresse || null });
+                    kontakte.push({ rolle, name: name || null, email: email || null, telefon: telefon || null, adresse: adresse || null, authentik_zugang });
                 }
             });
             return kontakte;
