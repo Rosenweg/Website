@@ -917,6 +917,9 @@
             const stweg = stwegList.find(s => s.nr === currentStweg);
             const stwegName = stweg ? stweg.name : `STWEG ${currentStweg}`;
 
+            const wq = w => (w.wertquote_zaehler && w.wertquote_nenner) ? `${w.wertquote_zaehler}/${w.wertquote_nenner}` : '';
+            const wkb = w => w.waschkueche_berechtigt === false ? 'Nein' : 'Ja';
+            const bewohnungLabel = w => w.bewohnt_von === 'mieter' ? 'Vermietet' : w.bewohnt_von === 'leer' ? 'Leer' : 'Selbstbewohnt';
             const rows = [];
             for (const w of allWohnungen) {
                 const kontakte = w.kontakte || [];
@@ -924,7 +927,8 @@
                     rows.push({
                         'Bezeichnung': w.bezeichnung, 'Stockwerk': w.stockwerk || '', 'Zimmer': w.zimmer || '',
                         'Fläche m²': w.flaeche_m2 || '', 'Typ': w.typ || '',
-                        'Bewohnung': w.bewohnt_von === 'mieter' ? 'Vermietet' : w.bewohnt_von === 'leer' ? 'Leer' : 'Selbstbewohnt',
+                        'Wertquote': wq(w), 'Besonderheiten': w.besonderheiten || '',
+                        'Bewohnung': bewohnungLabel(w), 'Waschküche': wkb(w),
                         'Rolle': '', 'Name': '', 'E-Mail': '', 'Telefon': '', 'Adresse': '', 'Notizen': w.notizen || '',
                     });
                 } else {
@@ -934,7 +938,10 @@
                             'Bezeichnung': i === 0 ? w.bezeichnung : '', 'Stockwerk': i === 0 ? (w.stockwerk || '') : '',
                             'Zimmer': i === 0 ? (w.zimmer || '') : '', 'Fläche m²': i === 0 ? (w.flaeche_m2 || '') : '',
                             'Typ': i === 0 ? (w.typ || '') : '',
-                            'Bewohnung': i === 0 ? (w.bewohnt_von === 'mieter' ? 'Vermietet' : w.bewohnt_von === 'leer' ? 'Leer' : 'Selbstbewohnt') : '',
+                            'Wertquote': i === 0 ? wq(w) : '',
+                            'Besonderheiten': i === 0 ? (w.besonderheiten || '') : '',
+                            'Bewohnung': i === 0 ? bewohnungLabel(w) : '',
+                            'Waschküche': i === 0 ? wkb(w) : '',
                             'Rolle': rolleLabel, 'Name': k.name || '', 'E-Mail': k.email || '',
                             'Telefon': k.telefon || '', 'Adresse': k.adresse || '', 'Notizen': i === 0 ? (w.notizen || '') : '',
                         });
@@ -958,20 +965,24 @@
             if (!allWohnungen.length) return alert('Keine Daten zum Exportieren.');
             const stweg = stwegList.find(s => s.nr === currentStweg);
             const stwegName = stweg ? stweg.name : `STWEG ${currentStweg}`;
-            const headers = ['Bezeichnung','Stockwerk','Zimmer','Fläche m²','Typ','Bewohnung','Rolle','Name','E-Mail','Telefon','Adresse','Notizen'];
+            const headers = ['Bezeichnung','Stockwerk','Zimmer','Fläche m²','Typ','Wertquote','Besonderheiten','Bewohnung','Waschküche','Rolle','Name','E-Mail','Telefon','Adresse','Notizen'];
             const csvEsc = v => { const s = String(v ?? ''); return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g,'""')}"` : s; };
+            const wq = w => (w.wertquote_zaehler && w.wertquote_nenner) ? `${w.wertquote_zaehler}/${w.wertquote_nenner}` : '';
+            const wkb = w => w.waschkueche_berechtigt === false ? 'Nein' : 'Ja';
             const rows = [headers.map(csvEsc).join(',')];
             for (const w of allWohnungen) {
                 const kontakte = w.kontakte || [];
                 const bewohnung = w.bewohnt_von === 'mieter' ? 'Vermietet' : w.bewohnt_von === 'leer' ? 'Leer' : 'Selbstbewohnt';
                 if (kontakte.length === 0) {
-                    rows.push([w.bezeichnung, w.stockwerk||'', w.zimmer||'', w.flaeche_m2||'', w.typ||'', bewohnung, '', '', '', '', '', w.notizen||''].map(csvEsc).join(','));
+                    rows.push([w.bezeichnung, w.stockwerk||'', w.zimmer||'', w.flaeche_m2||'', w.typ||'', wq(w), w.besonderheiten||'', bewohnung, wkb(w), '', '', '', '', '', w.notizen||''].map(csvEsc).join(','));
                 } else {
                     kontakte.forEach((k, i) => {
                         const rolleLabel = ROLLEN.find(r => r.value === k.rolle)?.label || k.rolle;
                         rows.push([
                             i === 0 ? w.bezeichnung : '', i === 0 ? (w.stockwerk||'') : '', i === 0 ? (w.zimmer||'') : '',
-                            i === 0 ? (w.flaeche_m2||'') : '', i === 0 ? (w.typ||'') : '', i === 0 ? bewohnung : '',
+                            i === 0 ? (w.flaeche_m2||'') : '', i === 0 ? (w.typ||'') : '',
+                            i === 0 ? wq(w) : '', i === 0 ? (w.besonderheiten||'') : '',
+                            i === 0 ? bewohnung : '', i === 0 ? wkb(w) : '',
                             rolleLabel, k.name||'', k.email||'', k.telefon||'', k.adresse||'', i === 0 ? (w.notizen||'') : ''
                         ].map(csvEsc).join(','));
                     });
