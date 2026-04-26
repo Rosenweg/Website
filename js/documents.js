@@ -296,12 +296,12 @@ const RosenwegDocs = {
         html += `
           <div class="ml-2 border-l-2 border-blue-200">
             <button onclick="document.getElementById('${subId}').classList.toggle('hidden'); this.querySelector('svg').classList.toggle('rotate-90')" class="flex items-center gap-2 px-3 py-2 w-full text-left hover:bg-gray-50 rounded-r transition">
-              <svg class="h-4 w-4 text-gray-400 transform rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+              <svg class="h-4 w-4 text-gray-400 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
               <svg class="h-4 w-4 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
               <span class="font-medium text-gray-700">${safeSub}</span>
               <span class="text-xs text-gray-400">(${subFiles.length})</span>
             </button>
-            <div id="${subId}" class="space-y-1 ml-6 mt-1">`;
+            <div id="${subId}" class="space-y-1 ml-6 mt-1 hidden">`;
         if (subFiles.length === 0) {
           html += `<p class="text-sm text-gray-400 italic px-2 py-1">Noch keine Dateien</p>`;
           if (this._canWritePath(folder + '/x')) {
