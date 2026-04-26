@@ -460,10 +460,22 @@
                                     ${w.adresse ? `<div class="text-xs text-gray-500"><strong>Kontaktadresse:</strong> ${esc(w.adresse)}</div>` : ''}
                                 </div>
                             </div>
-                            <button onclick="editMyKontakt(${w.kontakt_id}, ${JSON.stringify(esc(w.bezeichnung))}, ${JSON.stringify(w.email||'')}, ${JSON.stringify(w.telefon||'')}, ${JSON.stringify(w.adresse||'')})" class="text-sm text-blue-600 hover:underline flex items-center gap-1 flex-shrink-0"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>Bearbeiten</button>
+                            <button data-kontakt-id="${w.kontakt_id}" data-bezeichnung="${esc(w.bezeichnung)}" data-email="${esc(w.email||'')}" data-telefon="${esc(w.telefon||'')}" data-adresse="${esc(w.adresse||'')}" class="my-edit-btn text-sm text-blue-600 hover:underline flex items-center gap-1 flex-shrink-0"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>Bearbeiten</button>
                         </div>
                     </div>`;
                 }).join('');
+                // Wire up edit buttons
+                container.querySelectorAll('.my-edit-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        editMyKontakt(
+                            btn.dataset.kontaktId,
+                            btn.dataset.bezeichnung,
+                            btn.dataset.email,
+                            btn.dataset.telefon,
+                            btn.dataset.adresse
+                        );
+                    });
+                });
             } catch(e) {
                 container.innerHTML = '<p class="text-sm text-gray-400">Wohnungsdaten nicht verfuegbar.</p>';
             }
