@@ -859,7 +859,8 @@ app.get('/api/me/wohnungen', authMiddleware, async (req, res) => {
     const result = await pool.query(
       `SELECT k.id AS kontakt_id, k.name, k.email, k.telefon, k.adresse, k.rolle,
               w.id AS wohnung_id, w.bezeichnung, w.stockwerk, w.zimmer, w.flaeche_m2,
-              w.typ, w.besonderheiten, w.bewohnt_von, w.stweg
+              w.typ, w.besonderheiten, w.bewohnt_von, w.stweg, w.notizen,
+              w.waschkueche_berechtigt, w.wertquote_zaehler, w.wertquote_nenner
        FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id
        WHERE LOWER(k.email) = $1 OR LOWER(k.name) = LOWER($2)
        ORDER BY w.stweg, w.bezeichnung`,
@@ -872,12 +873,11 @@ app.get('/api/me/wohnungen', authMiddleware, async (req, res) => {
   }
 });
 
-// PUT /api/me/kontakt/:id — user can only edit their own contact entry (email, telefon, adresse)
+// PUT /api/me/kontakt/:id — user can edit their own contact entry (email, telefon, adresse)
 app.put('/api/me/kontakt/:id', authMiddleware, async (req, res) => {
   try {
     const email = (req.user.email || '').toLowerCase();
     const name = req.user.name || '';
-    // Verify ownership: kontakt must match user's email or name
     const own = await pool.query(
       `SELECT id, name, email FROM wohnungen_kontakte WHERE id = $1 AND (LOWER(email) = $2 OR LOWER(name) = LOWER($3))`,
       [req.params.id, email, name]
@@ -885,9 +885,7 @@ app.put('/api/me/kontakt/:id', authMiddleware, async (req, res) => {
     if (own.rows.length === 0) return res.status(403).json({ error: 'Du kannst nur deine eigenen Kontaktdaten bearbeiten' });
 
     const { email: newEmail, telefon, adresse } = req.body;
-    // Reject changing email to a different user's email
     if (newEmail && newEmail.toLowerCase() !== email && newEmail.toLowerCase() !== (own.rows[0].email || '').toLowerCase()) {
-      // Allow updating email to a new value, but not to claim someone else's
       const conflict = await pool.query("SELECT id FROM wohnungen_kontakte WHERE LOWER(email) = $1 AND id != $2", [newEmail.toLowerCase(), req.params.id]);
       if (conflict.rows.length > 0) return res.status(400).json({ error: 'Email wird bereits von einem anderen Kontakt verwendet' });
     }
@@ -900,6 +898,41 @@ app.put('/api/me/kontakt/:id', authMiddleware, async (req, res) => {
     res.json(result.rows[0]);
   } catch (err) {
     console.error('[me/kontakt] error:', err.message);
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// PUT /api/me/wohnung/:id — owner can edit their own apartment fields
+// (besonderheiten, bewohnt_von, notizen, waschkueche_berechtigt — NOT bezeichnung, stweg, wertquote, flaeche)
+app.put('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
+  try {
+    const email = (req.user.email || '').toLowerCase();
+    const name = req.user.name || '';
+    // Verify ownership: user must be a kontakt of this wohnung
+    const own = await pool.query(
+      `SELECT w.id FROM wohnungen w JOIN wohnungen_kontakte k ON k.wohnung_id = w.id
+       WHERE w.id = $1 AND (LOWER(k.email) = $2 OR LOWER(k.name) = LOWER($3))`,
+      [req.params.id, email, name]
+    );
+    if (own.rows.length === 0) return res.status(403).json({ error: 'Du kannst nur deine eigenen Wohnungen bearbeiten' });
+
+    const b = req.body;
+    const result = await pool.query(
+      `UPDATE wohnungen SET
+        besonderheiten = COALESCE($1, besonderheiten),
+        bewohnt_von = COALESCE($2, bewohnt_von),
+        waschkueche_berechtigt = COALESCE($3, waschkueche_berechtigt),
+        notizen = COALESCE($4, notizen),
+        zimmer = COALESCE($5, zimmer),
+        stockwerk = COALESCE($6, stockwerk),
+        updated_at = NOW()
+       WHERE id = $7 RETURNING *`,
+      [b.besonderheiten ?? null, b.bewohnt_von ?? null, b.waschkueche_berechtigt ?? null,
+       b.notizen ?? null, b.zimmer ?? null, b.stockwerk ?? null, req.params.id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[me/wohnung] error:', err.message);
     res.status(500).json({ error: 'Fehler' });
   }
 });
