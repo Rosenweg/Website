@@ -3171,21 +3171,25 @@ function getUsersInGroups(groupPks, allUsers) {
 function wohnungSort(a, b) {
   const order = { 'ug': 0, 'eg': 1, '1og': 2, '1.og': 2, '2og': 3, '2.og': 3, '3og': 4, '3.og': 4, 'dg': 5 };
   const parseW = (w) => {
-    if (!w) return { floor: 99, num: 99, isPark: false };
+    if (!w) return { floor: -100, num: 0, isPark: false, isOther: true };
     const s = w.toLowerCase().replace(/\s+/g, '');
-    // Parkplatz format: "P1", "P107" — sort numerically
+    // Parkplatz format: "P1", "P107"
     const pm = s.match(/^p(\d+)$/);
-    if (pm) return { floor: -1, num: parseInt(pm[1]), isPark: true };
-    // Match formats: "EG.1", "1OG.2", "9.EG.1", "9.2OG.3", "Hobbyraum"
+    if (pm) return { floor: -1, num: parseInt(pm[1]), isPark: true, isOther: false };
+    // Match formats: "EG.1", "1OG.2", "9.EG.1", "9.2OG.3"
     const m = s.match(/(?:\d+\.)?(ug|eg|\d+\.?og|dg)\.?(\d+)?/);
-    if (!m) return { floor: 99, num: 99, isPark: false };
-    return { floor: order[m[1]] ?? 99, num: parseInt(m[2]) || 0, isPark: false };
+    if (!m) return { floor: -100, num: 0, isPark: false, isOther: true };
+    return { floor: order[m[1]] ?? -100, num: parseInt(m[2]) || 0, isPark: false, isOther: false };
   };
   const pa = parseW(a), pb = parseW(b);
   // Parkplaetze: ascending by number
   if (pa.isPark && pb.isPark) return pa.num - pb.num;
-  // Wohnungen: top floor first, then by number ascending
-  return pb.floor - pa.floor || pa.num - pb.num;
+  // Sonstiges (Hobbyraum etc.): always last, alphabetically among themselves
+  if (pa.isOther && !pb.isOther) return 1;
+  if (!pa.isOther && pb.isOther) return -1;
+  if (pa.isOther && pb.isOther) return String(a).localeCompare(String(b));
+  // Wohnungen: bottom floor first (EG → 1OG → 2OG), then by number ascending
+  return pa.floor - pb.floor || pa.num - pb.num;
 }
 
 app.get('/api/stweg/:nr/kontakte', authMiddleware, async (req, res) => {
