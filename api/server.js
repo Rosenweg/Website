@@ -103,6 +103,24 @@ function isAllowlistedSender(email) {
   return EMAIL_ALLOWLIST.includes(e) || EMAIL_ALLOWLIST.includes(e.replace(/\+[^@]*/, ''));
 }
 
+// Simple async semaphore to throttle Gotenberg/external converter calls.
+// Default max 3 concurrent — high enough for normal load, low enough that
+// 20+ parallel print emails don't slam the converter into timeouts.
+function createSemaphore(max) {
+  let active = 0;
+  const queue = [];
+  const next = () => {
+    if (active >= max || queue.length === 0) return;
+    active++;
+    queue.shift()();
+  };
+  return async function acquire() {
+    await new Promise(r => { queue.push(r); next(); });
+    return () => { active--; next(); };
+  };
+}
+const gotenbergSemaphore = createSemaphore(parseInt(process.env.GOTENBERG_MAX_CONCURRENT || '3'));
+
 // ─── Health ─────────────────────────────────────────────────────────
 app.get('/api/health', async (req, res) => {
   try {
@@ -3002,11 +3020,15 @@ async function pollGmailForVerteiler() {
                 formData.append('marginLeft', '0.5');
                 formData.append('marginRight', '0.5');
 
-                const pdfResp = await fetch(`${GOTENBERG}/forms/chromium/convert/html`, {
-                  method: 'POST',
-                  body: formData,
-                  signal: AbortSignal.timeout(15000),
-                });
+                const release = await gotenbergSemaphore();
+                let pdfResp;
+                try {
+                  pdfResp = await fetch(`${GOTENBERG}/forms/chromium/convert/html`, {
+                    method: 'POST',
+                    body: formData,
+                    signal: AbortSignal.timeout(30000),
+                  });
+                } finally { release(); }
 
                 if (pdfResp.ok) {
                   const pdfBuf = Buffer.from(await pdfResp.arrayBuffer());
@@ -3114,8 +3136,38 @@ async function pollGmailForVerteiler() {
                 }
               }
 
-              try { await client.mailboxCreate('Gedruckt'); } catch {}
-              await client.messageMove(uid, 'Gedruckt', { uid: true });
+              // Move to Gedruckt on success, Drucken-Fehlgeschlagen on full failure
+              const targetFolder = printed > 0 ? 'Gedruckt' : 'Drucken-Fehlgeschlagen';
+              try { await client.mailboxCreate(targetFolder); } catch {}
+              await client.messageMove(uid, targetFolder, { uid: true });
+
+              // Notify Technik on full failure (printed=0) — they can manually retry
+              if (printed === 0 && recipientTag) {
+                try {
+                  const notifyEmails = new Set();
+                  const members = await pool.query("SELECT email, groups_json FROM users WHERE active = true");
+                  for (const row of members.rows) {
+                    try {
+                      const groups = JSON.parse(row.groups_json || '[]');
+                      if (groups.some(g => g.toLowerCase() === 'technik') && row.email && !row.email.includes('placeholder')) {
+                        notifyEmails.add(row.email);
+                      }
+                    } catch {}
+                  }
+                  if (notifyEmails.size > 0) {
+                    const recipName = recipientInfo?.name || recipientTag;
+                    await transporter.sendMail({
+                      from: `"Rosenweg Druckserver" <noreply@${VERTEILER_DOMAIN}>`,
+                      to: [...notifyEmails].join(', '),
+                      subject: `[FEHLGESCHLAGEN] Druckauftrag: ${recipName} (${printer})`,
+                      text: `Druckauftrag konnte NICHT gedruckt werden.\n\nEmpfänger: ${recipName}\nDrucker: ${printer}\nBetreff: ${parsed.subject || '(kein Betreff)'}\nVon: ${senderEmailRaw}\nDatum: ${now}\n\nDie Email liegt im IMAP-Folder "Drucken-Fehlgeschlagen". Bitte manuell prüfen.`,
+                    });
+                    console.log(`[Print] Failure notification sent to ${notifyEmails.size} Technik recipients`);
+                  }
+                } catch (notifyErr) {
+                  console.error(`[Print] Failure-notification error: ${notifyErr.message}`);
+                }
+              }
             } catch (printErr) {
               console.error(`[Print] Error: ${printErr.message}`);
               await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
