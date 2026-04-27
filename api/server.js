@@ -3845,6 +3845,52 @@ app.get('/api/stweg/:stweg/wohnungen', async (req, res) => {
   }
 });
 
+// GET /api/wohnungen/eigentuemer-uebersicht — gruppiert alle Objekte nach Eigentümer
+app.get('/api/wohnungen/eigentuemer-uebersicht', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
+  try {
+    // Technik/Präsident sehen alle, Ausschuss-Mitglieder nur ihre STWEGs
+    const groups = req.user?.groups || [];
+    let stwegFilter = '';
+    let params = [];
+    if (!isTechnik(groups) && !isPraesident(groups)) {
+      const accessibleStwegs = [...getAusschussStwegs(groups)];
+      if (accessibleStwegs.length === 0) return res.json({ eigentuemer: [] });
+      stwegFilter = 'AND w.stweg = ANY($1::int[])';
+      params = [accessibleStwegs];
+    }
+    const result = await pool.query(`
+      SELECT wk.name, wk.email, wk.telefon, wk.rolle,
+             w.id AS wohnung_id, w.stweg, w.bezeichnung, w.typ,
+             w.wertquote_zaehler, w.wertquote_nenner
+      FROM wohnungen_kontakte wk
+      JOIN wohnungen w ON w.id = wk.wohnung_id
+      WHERE wk.rolle = 'eigentuemer' AND wk.name IS NOT NULL ${stwegFilter}
+      ORDER BY wk.name, w.stweg, w.bezeichnung
+    `, params);
+
+    const byName = new Map();
+    for (const r of result.rows) {
+      if (!byName.has(r.name)) {
+        byName.set(r.name, { name: r.name, email: r.email, telefon: r.telefon, objects: [] });
+      }
+      const e = byName.get(r.name);
+      // Prefer non-drucker email if multiple kontakte exist for same name
+      if (e.email?.startsWith('druckerr') && r.email && !r.email.startsWith('druckerr')) {
+        e.email = r.email;
+      }
+      if (!e.telefon && r.telefon) e.telefon = r.telefon;
+      e.objects.push({
+        wohnung_id: r.wohnung_id, stweg: r.stweg, bezeichnung: r.bezeichnung, typ: r.typ,
+        wertquote_zaehler: r.wertquote_zaehler, wertquote_nenner: r.wertquote_nenner
+      });
+    }
+    res.json({ eigentuemer: [...byName.values()].sort((a,b) => a.name.localeCompare(b.name, 'de')) });
+  } catch (err) {
+    console.error('eigentuemer-uebersicht error:', err.message);
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
 // GET /api/wohnungen/:stweg - List all apartments for a STWEG (admin, with kontakte)
 app.get('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
   try {
