@@ -5038,8 +5038,9 @@ app.get('/api/email-archive/:id/attachment/:filename', authMiddleware, requireAr
     }
 
     const safeAttName = (att.filename || 'attachment').replace(/["\r\n\\]/g, '_');
+    const safeAttAscii = safeAttName.replace(/[^\x20-\x7E]/g, '_');
     res.setHeader('Content-Type', att.content_type || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename="${safeAttName}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${safeAttAscii}"; filename*=UTF-8''${encodeURIComponent(safeAttName)}`);
     const stream = fsSync.createReadStream(filePath);
     stream.on('error', () => { if (!res.headersSent) res.status(404).json({ error: 'Datei nicht gefunden' }); else res.destroy(); });
     stream.pipe(res);
@@ -5310,8 +5311,9 @@ app.get('/api/documents/:path(*)', authMiddleware, async (req, res) => {
     const fileName = filePath.split('/').pop();
 
     const safeFileName = fileName.replace(/["\r\n\\]/g, '_');
+    const safeAscii = safeFileName.replace(/[^\x20-\x7E]/g, '_');
     res.setHeader('Content-Type', contentTypes[ext] || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `inline; filename="${safeFileName}"`);
+    res.setHeader('Content-Disposition', `inline; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(safeFileName)}`);
     res.setHeader('Content-Length', stat.size);
 
     fsSync.createReadStream(fullPath).pipe(res);
@@ -5688,8 +5690,11 @@ app.get('/api/public/project/:slug/document/:path(*)', async (req, res) => {
       xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     };
     const fileName = req.params.path.split('/').pop().replace(/["\r\n\\]/g, '_');
+    // RFC 5987: filename* for non-ASCII (UTF-8 percent-encoded), filename= as ASCII fallback
+    const fileNameAscii = fileName.replace(/[^\x20-\x7E]/g, '_');
+    const fileNameStar = encodeURIComponent(fileName);
     res.setHeader('Content-Type', contentTypes[ext] || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+    res.setHeader('Content-Disposition', `inline; filename="${fileNameAscii}"; filename*=UTF-8''${fileNameStar}`);
     res.setHeader('Content-Length', stat.size);
     fsSync.createReadStream(fullPath).pipe(res);
   } catch (err) {
