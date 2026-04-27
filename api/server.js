@@ -3864,26 +3864,29 @@ app.get('/api/wohnungen/eigentuemer-uebersicht', authMiddleware, requirePermissi
              w.wertquote_zaehler, w.wertquote_nenner
       FROM wohnungen_kontakte wk
       JOIN wohnungen w ON w.id = wk.wohnung_id
-      WHERE wk.rolle = 'eigentuemer' AND wk.name IS NOT NULL ${stwegFilter}
+      WHERE wk.rolle IN ('eigentuemer','verwalter') AND wk.name IS NOT NULL ${stwegFilter}
       ORDER BY wk.name, w.stweg, w.bezeichnung
     `, params);
 
     const byName = new Map();
     for (const r of result.rows) {
       if (!byName.has(r.name)) {
-        byName.set(r.name, { name: r.name, email: r.email, telefon: r.telefon, objects: [] });
+        byName.set(r.name, { name: r.name, email: r.email, telefon: r.telefon, rollen: new Set(), objects: [] });
       }
       const e = byName.get(r.name);
+      e.rollen.add(r.rolle);
       // Prefer non-drucker email if multiple kontakte exist for same name
       if (e.email?.startsWith('druckerr') && r.email && !r.email.startsWith('druckerr')) {
         e.email = r.email;
       }
       if (!e.telefon && r.telefon) e.telefon = r.telefon;
       e.objects.push({
-        wohnung_id: r.wohnung_id, stweg: r.stweg, bezeichnung: r.bezeichnung, typ: r.typ,
+        wohnung_id: r.wohnung_id, stweg: r.stweg, bezeichnung: r.bezeichnung, typ: r.typ, rolle: r.rolle,
         wertquote_zaehler: r.wertquote_zaehler, wertquote_nenner: r.wertquote_nenner
       });
     }
+    // Set → Array für JSON-Serialisierung
+    for (const e of byName.values()) e.rollen = [...e.rollen];
     // Sortierung nach Nachname (letztes Wort), bei Gleichheit nach Vorname
     const lastName = n => (n || '').trim().split(/\s+/).pop() || '';
     res.json({ eigentuemer: [...byName.values()].sort((a,b) => {

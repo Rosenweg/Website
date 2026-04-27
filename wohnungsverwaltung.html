@@ -50,7 +50,7 @@
                         Wohnungen
                     </button>
                     <button id="main-tab-eigentuemer" onclick="switchMainTab('eigentuemer')" class="tab-inactive border-b-2 pb-3 px-1 text-sm transition">
-                        Eigentümer
+                        Eigentümer & Verwalter
                     </button>
                     <button id="main-tab-bewohner" onclick="switchMainTab('bewohner')" class="tab-inactive border-b-2 pb-3 px-1 text-sm transition hidden">
                         Bewohner
@@ -138,6 +138,11 @@
                     <select id="eig-stweg-filter" onchange="renderEigentuemer()" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
                         <option value="">Alle STWEGs</option>
                     </select>
+                    <select id="eig-rolle-filter" onchange="renderEigentuemer()" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                        <option value="">Eigentümer + Verwalter</option>
+                        <option value="eigentuemer">Nur Eigentümer</option>
+                        <option value="verwalter">Nur Verwalter</option>
+                    </select>
                     <div class="ml-auto flex gap-2">
                         <button onclick="exportEigentuemerCSV()" class="px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50">CSV</button>
                         <button onclick="exportEigentuemerXLSX()" class="px-3 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2">
@@ -153,6 +158,7 @@
                         <thead class="bg-gray-50 text-xs uppercase text-gray-600">
                             <tr>
                                 <th class="px-3 py-2 text-left">Name</th>
+                                <th class="px-3 py-2 text-left">Rolle</th>
                                 <th class="px-3 py-2 text-left">Kontakt</th>
                                 <th class="px-3 py-2 text-left">Wohnungen</th>
                                 <th class="px-3 py-2 text-left">Parkplätze</th>
@@ -1080,8 +1086,10 @@
         function renderEigentuemer() {
             const search = document.getElementById('eig-search').value.toLowerCase();
             const stwegFilter = document.getElementById('eig-stweg-filter').value;
+            const rolleFilter = document.getElementById('eig-rolle-filter').value;
             const filtered = eigentuemerData.filter(e => {
                 if (stwegFilter && !e.objects.some(o => String(o.stweg) === stwegFilter)) return false;
+                if (rolleFilter && !(e.rollen || []).includes(rolleFilter)) return false;
                 if (search) {
                     const hay = (e.name + ' ' + (e.email||'')).toLowerCase();
                     if (!hay.includes(search)) return false;
@@ -1089,17 +1097,29 @@
                 return true;
             });
             const groupObj = (objs, typ) => objs.filter(o => o.typ === typ).map(o => `STWEG ${o.stweg} · ${o.bezeichnung}`).join(', ');
-            document.getElementById('eig-stats').textContent = `${filtered.length} Eigentümer · ${filtered.reduce((s,e)=>s+e.objects.length,0)} Objekte`;
+            const stats = {
+                eig: filtered.filter(e => (e.rollen||[]).includes('eigentuemer')).length,
+                ver: filtered.filter(e => (e.rollen||[]).includes('verwalter')).length,
+                obj: filtered.reduce((s,e)=>s+e.objects.length,0),
+            };
+            document.getElementById('eig-stats').textContent =
+                `${filtered.length} Personen (${stats.eig} Eigentümer, ${stats.ver} Verwalter) · ${stats.obj} Objekte`;
             const tbody = document.getElementById('eig-tbody');
             if (filtered.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray-400 py-6">Keine Treffer</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-gray-400 py-6">Keine Treffer</td></tr>';
                 return;
             }
+            const rolleBadge = r => {
+                const cls = r === 'eigentuemer' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700';
+                const label = r === 'eigentuemer' ? 'Eigentümer' : 'Verwalter';
+                return `<span class="inline-block text-xs ${cls} px-2 py-0.5 rounded">${label}</span>`;
+            };
             tbody.innerHTML = filtered.map(e => {
                 const wohnungen = groupObj(e.objects, 'Wohnung');
                 const parkpl = groupObj(e.objects, 'Parkplatz');
                 const sonstige = e.objects.filter(o => o.typ !== 'Wohnung' && o.typ !== 'Parkplatz').map(o => `${o.typ} (STWEG ${o.stweg} · ${o.bezeichnung})`).join(', ');
-                const wq = e.objects.reduce((sum, o) => sum + (o.wertquote_zaehler || 0), 0);
+                // Wertquoten nur über Eigentümer-Objekte zählen, nicht über Verwalter
+                const wq = e.objects.filter(o => o.rolle === 'eigentuemer').reduce((sum, o) => sum + (o.wertquote_zaehler || 0), 0);
                 const isDrucker = (e.email||'').startsWith('druckerr9+') || (e.email||'').startsWith('druckerr13+');
                 const emailHtml = e.email
                     ? (isDrucker
@@ -1108,6 +1128,7 @@
                     : '<span class="text-gray-400 italic">keine</span>';
                 return `<tr class="hover:bg-gray-50">
                     <td class="px-3 py-2 font-medium">${esc(e.name)}</td>
+                    <td class="px-3 py-2">${(e.rollen||[]).map(rolleBadge).join(' ')}</td>
                     <td class="px-3 py-2 text-xs">${emailHtml}${e.telefon ? `<br><span class="text-gray-500">${esc(e.telefon)}</span>` : ''}</td>
                     <td class="px-3 py-2 text-xs">${wohnungen || '<span class="text-gray-300">–</span>'}</td>
                     <td class="px-3 py-2 text-xs">${parkpl || '<span class="text-gray-300">–</span>'}</td>
@@ -1130,9 +1151,11 @@
                 const w = e.objects.filter(o => o.typ === 'Wohnung').map(o => `STWEG ${o.stweg} ${o.bezeichnung}`).join(', ');
                 const p = e.objects.filter(o => o.typ === 'Parkplatz').map(o => `STWEG ${o.stweg} ${o.bezeichnung}`).join(', ');
                 const s = e.objects.filter(o => o.typ !== 'Wohnung' && o.typ !== 'Parkplatz').map(o => `${o.typ} STWEG ${o.stweg} ${o.bezeichnung}`).join(', ');
-                const wq = e.objects.reduce((sum, o) => sum + (o.wertquote_zaehler || 0), 0);
+                const wq = e.objects.filter(o => o.rolle === 'eigentuemer').reduce((sum, o) => sum + (o.wertquote_zaehler || 0), 0);
+                const rollenLabel = (e.rollen||[]).map(r => r === 'eigentuemer' ? 'Eigentümer' : 'Verwalter').join(' + ');
                 return {
                     'Name': e.name,
+                    'Rolle': rollenLabel,
                     'Email': e.email || '',
                     'Telefon': e.telefon || '',
                     'Wohnungen': w,
@@ -1147,7 +1170,8 @@
             for (const e of filtered) {
                 for (const o of e.objects) {
                     detail.push({
-                        'Eigentümer': e.name,
+                        'Name': e.name,
+                        'Rolle': o.rolle === 'eigentuemer' ? 'Eigentümer' : 'Verwalter',
                         'Email': e.email || '',
                         'Telefon': e.telefon || '',
                         'STWEG': o.stweg,
@@ -1160,10 +1184,10 @@
             }
             const wb = XLSX.utils.book_new();
             const ws1 = XLSX.utils.json_to_sheet(overview);
-            ws1['!cols'] = [{wch:30},{wch:32},{wch:18},{wch:35},{wch:25},{wch:25},{wch:14},{wch:14}];
+            ws1['!cols'] = [{wch:30},{wch:22},{wch:32},{wch:18},{wch:35},{wch:25},{wch:25},{wch:14},{wch:14}];
             XLSX.utils.book_append_sheet(wb, ws1, 'Übersicht');
             const ws2 = XLSX.utils.json_to_sheet(detail);
-            ws2['!cols'] = [{wch:30},{wch:32},{wch:18},{wch:8},{wch:14},{wch:12},{wch:11},{wch:16}];
+            ws2['!cols'] = [{wch:30},{wch:14},{wch:32},{wch:18},{wch:8},{wch:14},{wch:12},{wch:11},{wch:16}];
             XLSX.utils.book_append_sheet(wb, ws2, 'Detail');
             XLSX.writeFile(wb, `eigentuemer-uebersicht-${new Date().toISOString().slice(0,10)}.xlsx`);
         }
@@ -1176,14 +1200,15 @@
                 if (search && !(e.name + ' ' + (e.email||'')).toLowerCase().includes(search)) return false;
                 return true;
             });
-            const lines = [['Name','Email','Telefon','Wohnungen','Parkplätze','Sonstige','Wertquoten'].join(';')];
+            const lines = [['Name','Rolle','Email','Telefon','Wohnungen','Parkplätze','Sonstige','Wertquoten'].join(';')];
             for (const e of rows) {
                 const w = e.objects.filter(o => o.typ === 'Wohnung').map(o => `STWEG ${o.stweg} ${o.bezeichnung}`).join(', ');
                 const p = e.objects.filter(o => o.typ === 'Parkplatz').map(o => `STWEG ${o.stweg} ${o.bezeichnung}`).join(', ');
                 const s = e.objects.filter(o => o.typ !== 'Wohnung' && o.typ !== 'Parkplatz').map(o => `${o.typ} STWEG ${o.stweg} ${o.bezeichnung}`).join(', ');
-                const wq = e.objects.reduce((sum, o) => sum + (o.wertquote_zaehler || 0), 0);
+                const wq = e.objects.filter(o => o.rolle === 'eigentuemer').reduce((sum, o) => sum + (o.wertquote_zaehler || 0), 0);
+                const rollenLabel = (e.rollen||[]).map(r => r === 'eigentuemer' ? 'Eigentümer' : 'Verwalter').join(' + ');
                 const cell = v => `"${String(v||'').replace(/"/g,'""')}"`;
-                lines.push([e.name, e.email, e.telefon, w, p, s, wq].map(cell).join(';'));
+                lines.push([e.name, rollenLabel, e.email, e.telefon, w, p, s, wq].map(cell).join(';'));
             }
             const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
             const a = document.createElement('a');
