@@ -2580,6 +2580,37 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
   const list = verteiler.rows[0];
   const senderEmail = parsed.from?.value?.[0]?.address || '';
   const senderName = parsed.from?.value?.[0]?.name || senderEmail;
+
+  // Sender-Validierung: wenn allowed_sender_groups gesetzt, muss Sender Mitglied sein
+  const allowedGroups = Array.isArray(list.allowed_sender_groups) ? list.allowed_sender_groups : [];
+  if (allowedGroups.length > 0 && senderEmail) {
+    const senderEmailLower = senderEmail.toLowerCase();
+    let allowed = false;
+    if (AUTHENTIK_API_TOKEN) {
+      try {
+        const akData = await authentikAPI('GET', `/core/users/?email=${encodeURIComponent(senderEmailLower)}`);
+        const user = akData.results?.find(u => u.email?.toLowerCase() === senderEmailLower);
+        if (user) {
+          const userGroupNames = (user.groups_obj || []).map(g => g.name.toLowerCase());
+          allowed = allowedGroups.some(g => userGroupNames.includes(g.toLowerCase()));
+        }
+      } catch (err) { console.error('[Verteiler] Sender-Auth-Check fehler:', err.message); }
+    }
+    if (!allowed) {
+      console.log(`[Verteiler] Sender ${senderEmail} nicht in erlaubten Gruppen [${allowedGroups.join(',')}] für ${toAddress} — abgelehnt`);
+      // Höflicher Bounce an Sender
+      try {
+        await transporter.sendMail({
+          from: `"Rosenweg Verteiler" <noreply@${VERTEILER_DOMAIN}>`,
+          to: senderEmail,
+          subject: `Rückläufer: Versand an ${toAddress} nicht erlaubt`,
+          text: `Hallo,\n\nIhre Email an ${toAddress} (Betreff: "${parsed.subject}") wurde nicht zugestellt — Sie sind nicht in einer der für diesen Verteiler erlaubten Gruppen (${allowedGroups.join(', ')}).\n\nBitte wenden Sie sich an den Ausschuss falls Sie hier publizieren möchten.\n\nRosenweg Verteiler`,
+        });
+      } catch (e) { console.error('[Verteiler] Bounce-Mail fehler:', e.message); }
+      return { success: true, action: 'rejected', reason: 'sender not in allowed_sender_groups' };
+    }
+  }
+
   const recipients = await resolveVerteilerRecipients(list);
 
   if (recipients.length === 0) {
@@ -3594,13 +3625,23 @@ async function saveKontakte(client, wohnungId, kontakte, stweg) {
     // Default authentik_zugang: true für Eigentümer/Verwalter, sonst null (opt-in via UI checkbox)
     const authentikZugang = k.authentik_zugang !== undefined ? k.authentik_zugang
       : (rolle === 'eigentuemer' || rolle === 'verwalter') ? true : null;
+    // Auto-Drucker-Tag wenn weder echte Email noch Authentik-Zugang gewünscht
+    let email = k.email || null;
+    if (!email && authentikZugang !== true && k.name) {
+      const slug = k.name.toLowerCase()
+        .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+        .replace(/[^a-z0-9 -]/g, '')
+        .trim()
+        .split(/\s+/).reverse().join('.'); // "Hans Müller" → "mueller.hans"
+      if (slug) email = `druckerr9+${slug}@${VERTEILER_DOMAIN}`;
+    }
     await client.query(
       `INSERT INTO wohnungen_kontakte (wohnung_id, rolle, name, email, telefon, adresse, sort_order, authentik_zugang)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [wohnungId, rolle, k.name || null, k.email || null, k.telefon || null, k.adresse || null, i, authentikZugang]
+      [wohnungId, rolle, k.name || null, email, k.telefon || null, k.adresse || null, i, authentikZugang]
     );
     // Cancel pending deletion if contact is re-added
-    if (k.email) cancelPendingDeletion(k.email).catch(() => {});
+    if (email) cancelPendingDeletion(email).catch(() => {});
   }
 
   // Track removed kontakte for delayed Authentik deletion
@@ -3804,6 +3845,89 @@ async function guardedProcessDeletions() {
 deletionInterval = setInterval(guardedProcessDeletions, 24 * 60 * 60 * 1000);
 // Also run once 60s after startup
 setTimeout(guardedProcessDeletions, 60 * 1000);
+
+// ─── Nightly Drucker-Tag-Cleanup-Warning ───────────────────────────
+// Findet Kontakte mit Drucker-Tag-Email wo derselbe Name woanders eine echte Email hat.
+// Schickt einmal pro Tag eine Zusammenfassung an Technik (nur wenn Funde vorhanden).
+async function checkStaleDruckerTags() {
+  try {
+    const result = await pool.query(`
+      WITH drucker AS (
+        SELECT wk.id, wk.name, wk.email, w.stweg, w.bezeichnung, w.typ
+        FROM wohnungen_kontakte wk JOIN wohnungen w ON w.id = wk.wohnung_id
+        WHERE wk.email LIKE 'druckerr9+%' OR wk.email LIKE 'druckerr13+%'
+      ),
+      real_for_name AS (
+        SELECT DISTINCT name FROM wohnungen_kontakte
+        WHERE email IS NOT NULL AND email <> ''
+          AND email NOT LIKE 'druckerr9+%' AND email NOT LIKE 'druckerr13+%'
+      )
+      SELECT d.* FROM drucker d
+      JOIN real_for_name r ON r.name = d.name
+      ORDER BY d.stweg, d.bezeichnung
+    `);
+    if (result.rows.length === 0) {
+      console.log('[CleanupWarn] Keine veralteten Drucker-Tags gefunden');
+      return;
+    }
+    // Adressaten: Technik
+    if (!AUTHENTIK_API_TOKEN) return;
+    const usersData = await authentikAPI('GET', '/core/users/?page_size=1000');
+    const technikGroup = (await authentikAPI('GET', '/core/groups/?page_size=500')).results
+      ?.find(g => g.name.toLowerCase() === 'technik');
+    if (!technikGroup) return;
+    const recipients = (usersData.results || [])
+      .filter(u => u.is_active && u.email && u.groups_obj?.some(g => g.pk === technikGroup.pk))
+      .map(u => u.email);
+    if (recipients.length === 0) return;
+    const rows = result.rows.map(r =>
+      `<tr><td>${r.name}</td><td><code>${r.email}</code></td><td>STWEG ${r.stweg} · ${r.typ} · ${r.bezeichnung}</td></tr>`
+    ).join('');
+    await transporter.sendMail({
+      from: `"Rosenweg Daten-Cleanup" <noreply@${VERTEILER_DOMAIN}>`,
+      to: recipients.join(', '),
+      subject: `[Cleanup] ${result.rows.length} veraltete Drucker-Tags gefunden`,
+      html: `<p>Folgende Kontakte haben einen Drucker-Tag als Email, obwohl die Person woanders eine echte Email-Adresse hat. Bitte in der Wohnungsverwaltung anpassen — die Drucker-Tags sind dann überflüssig:</p>
+<table border="1" cellpadding="6" style="border-collapse:collapse;font-family:sans-serif;font-size:13px">
+<thead><tr><th align="left">Name</th><th align="left">Drucker-Tag</th><th align="left">Objekt</th></tr></thead>
+<tbody>${rows}</tbody></table>
+<p style="color:#666;font-size:11px">Automatisch generiert · ${new Date().toLocaleString('de-CH')}</p>`,
+    });
+    console.log(`[CleanupWarn] ${result.rows.length} Funde an ${recipients.length} Technik-Mitglieder geschickt`);
+  } catch (err) {
+    console.error('[CleanupWarn] Fehler:', err.message);
+  }
+}
+
+// ─── Inverse Authentik-Sync ────────────────────────────────────────
+// Liest Authentik-User mit is_active=false und setzt für Matches in
+// wohnungen_kontakte authentik_zugang=false.
+async function syncAuthentikDeactivations() {
+  if (!AUTHENTIK_API_TOKEN) return;
+  try {
+    const data = await authentikAPI('GET', '/core/users/?is_active=false&page_size=1000');
+    const inactive = (data.results || []).filter(u => u.email);
+    if (inactive.length === 0) return;
+    const emails = inactive.map(u => u.email.toLowerCase());
+    const r = await pool.query(
+      `UPDATE wohnungen_kontakte
+       SET authentik_zugang = false
+       WHERE LOWER(email) = ANY($1) AND authentik_zugang = true
+       RETURNING name, email`,
+      [emails]
+    );
+    if (r.rows.length > 0) {
+      console.log(`[InverseSync] ${r.rows.length} Kontakte auf authentik_zugang=false gesetzt:`, r.rows.map(x => x.email).join(', '));
+    }
+  } catch (err) {
+    console.error('[InverseSync] Fehler:', err.message);
+  }
+}
+
+// Beide Jobs täglich um ~03:00 (deletion läuft 02:00 implizit)
+setInterval(checkStaleDruckerTags, 24 * 60 * 60 * 1000);
+setInterval(syncAuthentikDeactivations, 24 * 60 * 60 * 1000);
+setTimeout(() => { checkStaleDruckerTags(); syncAuthentikDeactivations(); }, 5 * 60 * 1000);
 
 // POST /api/wohnungen/sync-authentik - Bulk sync all kontakte with email to Authentik
 app.post('/api/wohnungen/sync-authentik', authMiddleware, adminOnly, async (req, res) => {
@@ -4217,14 +4341,15 @@ app.get('/api/verteiler/:id', authMiddleware, adminOnly, async (req, res) => {
 
 // Create Verteiler
 app.post('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
-  const { stweg, name, email_address, members, reply_to, subject_prefix, group_name, group_names } = req.body;
+  const { stweg, name, email_address, members, reply_to, subject_prefix, group_name, group_names, allowed_sender_groups } = req.body;
   if (!name || !email_address) return res.status(400).json({ error: 'Name und Email-Adresse erforderlich' });
   try {
     const groups = group_names?.length ? group_names : (group_name ? [group_name] : []);
+    const allowedSenders = Array.isArray(allowed_sender_groups) ? allowed_sender_groups : [];
     const result = await pool.query(
-      `INSERT INTO email_verteiler (stweg, name, email_address, members, reply_to, subject_prefix, group_name, group_names)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [stweg || 0, name, email_address, JSON.stringify(members || []), reply_to || 'sender', subject_prefix || null, groups[0] || null, JSON.stringify(groups)]
+      `INSERT INTO email_verteiler (stweg, name, email_address, members, reply_to, subject_prefix, group_name, group_names, allowed_sender_groups)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [stweg || 0, name, email_address, JSON.stringify(members || []), reply_to || 'sender', subject_prefix || null, groups[0] || null, JSON.stringify(groups), JSON.stringify(allowedSenders)]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -4235,19 +4360,65 @@ app.post('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
 
 // Update Verteiler
 app.put('/api/verteiler/:id', authMiddleware, adminOnly, async (req, res) => {
-  const { stweg, name, email_address, members, active, reply_to, subject_prefix, group_name, group_names } = req.body;
+  const { stweg, name, email_address, members, active, reply_to, subject_prefix, group_name, group_names, allowed_sender_groups } = req.body;
   try {
     const groups = group_names?.length ? group_names : (group_name ? [group_name] : []);
+    const allowedSenders = Array.isArray(allowed_sender_groups) ? allowed_sender_groups : [];
     const result = await pool.query(
       `UPDATE email_verteiler SET stweg=$1, name=$2, email_address=$3, members=$4, active=$5,
-              reply_to=$6, subject_prefix=$7, group_name=$8, group_names=$9
-       WHERE id=$10 RETURNING *`,
-      [stweg, name, email_address, JSON.stringify(members || []), active !== false, reply_to || 'sender', subject_prefix || null, groups[0] || null, JSON.stringify(groups), req.params.id]
+              reply_to=$6, subject_prefix=$7, group_name=$8, group_names=$9, allowed_sender_groups=$10
+       WHERE id=$11 RETURNING *`,
+      [stweg, name, email_address, JSON.stringify(members || []), active !== false, reply_to || 'sender', subject_prefix || null, groups[0] || null, JSON.stringify(groups), JSON.stringify(allowedSenders), req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: 'Fehler beim Aktualisieren' });
+  }
+});
+
+// POST /api/verteiler/preview-groups — Live-Auflösung von Verwaltungs/Authentik-Gruppen
+app.post('/api/verteiler/preview-groups', authMiddleware, adminOnly, async (req, res) => {
+  const { group_names } = req.body;
+  if (!Array.isArray(group_names)) return res.status(400).json({ error: 'group_names array erforderlich' });
+  try {
+    const allEmails = new Set();
+    for (const gn of group_names) {
+      const emails = gn.startsWith('verwaltung:')
+        ? await resolveVerwaltungsGroup(gn)
+        : await resolveGroupEmails(gn);
+      emails.filter(e => !/^druckerr(9|13)@/i.test(e)).forEach(e => allEmails.add(e));
+    }
+    res.json({ emails: [...allEmails].sort(), count: allEmails.size });
+  } catch (err) {
+    console.error('preview-groups error:', err.message);
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// POST /api/verteiler/:id/test-send — Test-Versand nur an aufrufenden Admin
+app.post('/api/verteiler/:id/test-send', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { rows: [list] } = await pool.query('SELECT * FROM email_verteiler WHERE id = $1', [req.params.id]);
+    if (!list) return res.status(404).json({ error: 'Verteiler nicht gefunden' });
+    const recipientEmail = req.user?.email;
+    if (!recipientEmail) return res.status(400).json({ error: 'Keine Email beim eingeloggten User' });
+    const subject = (req.body?.subject || 'Test-Email an Verteiler').slice(0, 200);
+    const recipients = await resolveVerteilerRecipients(list);
+    await transporter.sendMail({
+      from: `"Rosenweg Verteiler-Test" <noreply@${VERTEILER_DOMAIN}>`,
+      to: recipientEmail,
+      subject: `[TEST] ${subject}`,
+      html: `<p>Dies ist eine Test-Email für den Verteiler <strong>${list.name}</strong> (<code>${list.email_address}</code>).</p>
+        <p>Bei einem echten Versand würden <strong>${recipients.length} Empfänger</strong> diese Email erhalten:</p>
+        <p style="font-size:12px;color:#555;font-family:monospace">${recipients.slice(0, 100).join(', ')}${recipients.length > 100 ? ' …' : ''}</p>
+        <hr>
+        <p style="color:#888;font-size:11px">Sender-Validierung: ${list.allowed_sender_groups?.length ? 'eingeschränkt auf ' + list.allowed_sender_groups.join(', ') : 'jeder @rosenweg4303.ch-Sender'}</p>`,
+    });
+    res.json({ sent_to: recipientEmail, would_reach: recipients.length });
+  } catch (err) {
+    console.error('test-send error:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 

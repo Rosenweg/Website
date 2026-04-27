@@ -235,7 +235,10 @@
                             </div>
                         </div>
                         <div class="mb-3">
-                            <label class="text-xs text-gray-500">Verwaltungsgruppen (live aus Wohnungsverwaltung)</label>
+                            <div class="flex items-center justify-between">
+                                <label class="text-xs text-gray-500">Verwaltungsgruppen (live aus Wohnungsverwaltung)</label>
+                                <button type="button" onclick="previewVerwaltungsgruppen()" class="text-xs text-emerald-700 hover:underline">Empfänger-Vorschau →</button>
+                            </div>
                             <select id="vf-verwaltung" multiple class="w-full text-sm px-3 py-2 border rounded-lg bg-emerald-50" size="5">
                                 <option value="verwaltung:eigentuemer">Alle Eigentümer</option>
                                 <option value="verwaltung:eigentuemer:include_drucker">Alle Eigentümer (inkl. Drucker-Tags für Personen ohne Email)</option>
@@ -261,6 +264,7 @@
                                 <option value="verwaltung:bewohner:stweg=8">STWEG 8 — Bewohner</option>
                             </select>
                             <p class="text-xs text-gray-400 mt-1">Live aus der Wohnungsverwaltung — Änderungen sind sofort wirksam, kein Sync nötig.</p>
+                            <div id="vf-verwaltung-preview" class="mt-2"></div>
                         </div>
                         <div class="mb-3">
                             <label class="text-xs text-gray-500">Authentik-Gruppen (Login-basiert; alternativ oder zusätzlich)</label>
@@ -269,8 +273,14 @@
                             <p class="text-xs text-gray-400 mt-1">Mitglieder der gewählten Gruppen + Untergruppen aus Authentik. Strg/Cmd halten für Mehrfachauswahl.</p>
                             <div id="vf-group-preview" class="mt-2"></div>
                         </div>
+                        <div class="mb-3">
+                            <label class="text-xs text-gray-500">Erlaubte Sender-Gruppen (optional, leer = jeder @rosenweg4303.ch-Sender)</label>
+                            <select id="vf-allowed-senders" multiple class="w-full text-sm px-3 py-2 border rounded-lg bg-amber-50" size="4"></select>
+                            <p class="text-xs text-gray-400 mt-1">Nur Mitglieder dieser Authentik-Gruppen dürfen an diesen Verteiler senden — alle anderen Sender erhalten automatisch eine Rückläufer-Mail.</p>
+                        </div>
                         <div class="flex gap-2">
                             <button onclick="saveVerteiler()" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">Speichern</button>
+                            <button onclick="testVerteilerSend()" id="vf-test-btn" class="px-4 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700 hidden">Test an mich</button>
                             <button onclick="closeVerteilerForm()" class="px-4 py-2 bg-gray-200 text-gray-700 text-sm rounded-lg hover:bg-gray-300">Abbrechen</button>
                         </div>
                     </div>
@@ -549,6 +559,51 @@
             ).join('');
         }
 
+        function populateAllowedSendersDropdown(selectedGroups) {
+            const select = document.getElementById('vf-allowed-senders');
+            const selected = Array.isArray(selectedGroups) ? selectedGroups : [];
+            select.innerHTML = authentikGroups.map(g =>
+                `<option value="${escapeHtml(g.name)}" ${selected.includes(g.name) ? 'selected' : ''}>${escapeHtml(g.name)}</option>`
+            ).join('');
+        }
+
+        async function previewVerwaltungsgruppen() {
+            const sel = [...document.getElementById('vf-verwaltung').selectedOptions].map(o => o.value);
+            const preview = document.getElementById('vf-verwaltung-preview');
+            if (sel.length === 0) { preview.innerHTML = '<p class="text-xs text-gray-400">Keine Gruppe gewählt</p>'; return; }
+            preview.innerHTML = '<p class="text-xs text-gray-400">Lade…</p>';
+            try {
+                const res = await AuthentikAuth.apiFetch('/api/verteiler/preview-groups', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ group_names: sel })
+                });
+                const data = await res.json();
+                const emails = data.emails || [];
+                preview.innerHTML = `<div class="bg-white border rounded p-2 mt-1">
+                    <p class="text-xs font-medium text-emerald-700 mb-1">${emails.length} Empfänger live aufgelöst:</p>
+                    <p class="text-xs text-gray-600 leading-relaxed">${emails.map(e => escapeHtml(e)).join(', ') || '<em>keine</em>'}</p>
+                </div>`;
+            } catch (err) {
+                preview.innerHTML = `<p class="text-xs text-red-600">Fehler: ${escapeHtml(err.message)}</p>`;
+            }
+        }
+
+        async function testVerteilerSend() {
+            const id = document.getElementById('vf-id').value;
+            if (!id) { alert('Erst Verteiler speichern, dann testen'); return; }
+            const subject = prompt('Betreff für Test-Email:', 'Test-Email an Verteiler');
+            if (!subject) return;
+            try {
+                const res = await AuthentikAuth.apiFetch(`/api/verteiler/${id}/test-send`, {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({ subject })
+                });
+                const data = await res.json();
+                if (!res.ok) { alert('Fehler: ' + (data.error || res.status)); return; }
+                alert(`Test-Email verschickt an: ${data.sent_to}`);
+            } catch (err) { alert('Fehler: ' + err.message); }
+        }
+
         // Preview resolved group members when group selection changes
         document.addEventListener('change', async (e) => {
             if (e.target.id !== 'vf-group') return;
@@ -570,8 +625,11 @@
             document.getElementById('vf-reply-to').value = 'sender';
             document.getElementById('vf-prefix').value = '';
             document.getElementById('vf-group-preview').innerHTML = '';
+            document.getElementById('vf-verwaltung-preview').innerHTML = '';
             [...document.getElementById('vf-verwaltung').options].forEach(o => o.selected = false);
             populateGroupDropdown('');
+            populateAllowedSendersDropdown([]);
+            document.getElementById('vf-test-btn').classList.add('hidden');
         }
 
         function closeVerteilerForm() {
@@ -597,12 +655,15 @@
             const vwSel = document.getElementById('vf-verwaltung');
             [...vwSel.options].forEach(o => { o.selected = verwaltungGroups.includes(o.value); });
             populateGroupDropdown(authentikGroups);
+            populateAllowedSendersDropdown(v.allowed_sender_groups || []);
+            document.getElementById('vf-test-btn').classList.remove('hidden');
             // Show resolved members preview
             if (v.resolved_emails) {
                 document.getElementById('vf-group-preview').innerHTML = `<div class="bg-white border rounded-lg p-2 mt-1"><p class="text-xs font-medium text-green-700 mb-1">${v.resolved_emails.length} Empfänger aus ${groups.length} Gruppe(n) (inkl. Untergruppen):</p><p class="text-xs text-gray-500">${v.resolved_emails.map(e => escapeHtml(e)).join(', ')}</p></div>`;
             } else {
                 document.getElementById('vf-group-preview').innerHTML = '';
             }
+            document.getElementById('vf-verwaltung-preview').innerHTML = '';
         }
 
         async function saveVerteiler() {
@@ -612,12 +673,13 @@
             const verwaltung = [...document.getElementById('vf-verwaltung').selectedOptions].map(o => o.value);
             const authentik = [...document.getElementById('vf-group').selectedOptions].map(o => o.value);
             const group_names = [...verwaltung, ...authentik];
+            const allowed_sender_groups = [...document.getElementById('vf-allowed-senders').selectedOptions].map(o => o.value);
             if (!name || !email_address) return alert('Name und E-Mail-Adresse erforderlich');
             if (group_names.length === 0) return alert('Bitte mindestens eine Verwaltungs- oder Authentik-Gruppe wählen');
 
             const body = {
                 stweg: parseInt(document.getElementById('vf-stweg').value) || 0,
-                name, email_address, group_names,
+                name, email_address, group_names, allowed_sender_groups,
                 reply_to: document.getElementById('vf-reply-to').value,
                 subject_prefix: document.getElementById('vf-prefix').value || null,
                 active: true
