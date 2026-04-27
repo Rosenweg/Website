@@ -5694,6 +5694,7 @@ app.get('/api/public/project/:slug/document/:path(*)', async (req, res) => {
     fsSync.createReadStream(fullPath).pipe(res);
   } catch (err) {
     if (err.code === 'ENOENT') return res.status(404).json({ error: 'Dokument nicht gefunden' });
+    console.error('[public-doc] error:', err.message, 'path:', req.params.path);
     res.status(500).json({ error: 'Fehler' });
   }
 });
