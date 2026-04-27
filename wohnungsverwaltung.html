@@ -138,7 +138,13 @@
                     <select id="eig-stweg-filter" onchange="renderEigentuemer()" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
                         <option value="">Alle STWEGs</option>
                     </select>
-                    <button onclick="exportEigentuemerCSV()" class="ml-auto px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50">CSV-Export</button>
+                    <div class="ml-auto flex gap-2">
+                        <button onclick="exportEigentuemerCSV()" class="px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50">CSV</button>
+                        <button onclick="exportEigentuemerXLSX()" class="px-3 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-6h3l-3-3-3 3h3v6m-7 2a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H6a2 2 0 00-2 2v14z"/></svg>
+                            Excel
+                        </button>
+                    </div>
                 </div>
                 <div id="eig-stats" class="text-sm text-gray-500 mb-3"></div>
                 <div id="eig-loading" class="hidden text-center text-gray-400 py-8">Lade Eigentümer-Daten…</div>
@@ -1109,6 +1115,57 @@
                     <td class="px-3 py-2 text-right font-mono">${wq || ''}</td>
                 </tr>`;
             }).join('');
+        }
+
+        function exportEigentuemerXLSX() {
+            const search = document.getElementById('eig-search').value.toLowerCase();
+            const stwegFilter = document.getElementById('eig-stweg-filter').value;
+            const filtered = eigentuemerData.filter(e => {
+                if (stwegFilter && !e.objects.some(o => String(o.stweg) === stwegFilter)) return false;
+                if (search && !(e.name + ' ' + (e.email||'')).toLowerCase().includes(search)) return false;
+                return true;
+            });
+            // Sheet 1: Übersicht (eine Zeile pro Eigentümer, Objekte zusammengefasst)
+            const overview = filtered.map(e => {
+                const w = e.objects.filter(o => o.typ === 'Wohnung').map(o => `STWEG ${o.stweg} ${o.bezeichnung}`).join(', ');
+                const p = e.objects.filter(o => o.typ === 'Parkplatz').map(o => `STWEG ${o.stweg} ${o.bezeichnung}`).join(', ');
+                const s = e.objects.filter(o => o.typ !== 'Wohnung' && o.typ !== 'Parkplatz').map(o => `${o.typ} STWEG ${o.stweg} ${o.bezeichnung}`).join(', ');
+                const wq = e.objects.reduce((sum, o) => sum + (o.wertquote_zaehler || 0), 0);
+                return {
+                    'Name': e.name,
+                    'Email': e.email || '',
+                    'Telefon': e.telefon || '',
+                    'Wohnungen': w,
+                    'Parkplätze': p,
+                    'Sonstige': s,
+                    'Σ Wertquoten': wq,
+                    'Anzahl Objekte': e.objects.length,
+                };
+            });
+            // Sheet 2: Detail (eine Zeile pro Objekt, Eigentümer denormalisiert)
+            const detail = [];
+            for (const e of filtered) {
+                for (const o of e.objects) {
+                    detail.push({
+                        'Eigentümer': e.name,
+                        'Email': e.email || '',
+                        'Telefon': e.telefon || '',
+                        'STWEG': o.stweg,
+                        'Bezeichnung': o.bezeichnung,
+                        'Typ': o.typ,
+                        'Wertquote': o.wertquote_zaehler || '',
+                        'Wertquote-Nenner': o.wertquote_nenner || '',
+                    });
+                }
+            }
+            const wb = XLSX.utils.book_new();
+            const ws1 = XLSX.utils.json_to_sheet(overview);
+            ws1['!cols'] = [{wch:30},{wch:32},{wch:18},{wch:35},{wch:25},{wch:25},{wch:14},{wch:14}];
+            XLSX.utils.book_append_sheet(wb, ws1, 'Übersicht');
+            const ws2 = XLSX.utils.json_to_sheet(detail);
+            ws2['!cols'] = [{wch:30},{wch:32},{wch:18},{wch:8},{wch:14},{wch:12},{wch:11},{wch:16}];
+            XLSX.utils.book_append_sheet(wb, ws2, 'Detail');
+            XLSX.writeFile(wb, `eigentuemer-uebersicht-${new Date().toISOString().slice(0,10)}.xlsx`);
         }
 
         function exportEigentuemerCSV() {
