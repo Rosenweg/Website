@@ -52,6 +52,9 @@
                     <button id="main-tab-eigentuemer" onclick="switchMainTab('eigentuemer')" class="tab-inactive border-b-2 pb-3 px-1 text-sm transition">
                         Eigentümer & Verwalter
                     </button>
+                    <button id="main-tab-unterschriften" onclick="switchMainTab('unterschriften')" class="tab-inactive border-b-2 pb-3 px-1 text-sm transition">
+                        Unterschriftenlisten
+                    </button>
                     <button id="main-tab-bewohner" onclick="switchMainTab('bewohner')" class="tab-inactive border-b-2 pb-3 px-1 text-sm transition hidden">
                         Bewohner
                     </button>
@@ -168,6 +171,77 @@
                         </thead>
                         <tbody id="eig-tbody" class="divide-y"></tbody>
                     </table>
+                </div>
+            </div>
+
+            <!-- ═══ Unterschriftenlisten Tab ═══ -->
+            <div id="panel-unterschriften" class="hidden">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- Form -->
+                    <div class="bg-white rounded-lg border p-5">
+                        <h3 class="text-lg font-semibold text-gray-800 mb-4">Unterschriftenliste generieren</h3>
+                        <div class="space-y-3">
+                            <div>
+                                <label class="block text-xs text-gray-600 mb-1">STWEG</label>
+                                <select id="ul-stweg" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                                    <option value="1">STWEG 1 (Rosenweg 17/18)</option>
+                                    <option value="2">STWEG 2 (Rosenweg 13/14/16)</option>
+                                    <option value="3">STWEG 3 (Rosenweg 9)</option>
+                                    <option value="4">STWEG 4 (Rosenweg 10/12)</option>
+                                    <option value="5">STWEG 5 (Rosenweg 5/6/8)</option>
+                                    <option value="6">STWEG 6 (Rosenweg 1)</option>
+                                    <option value="7">STWEG 7 (Rosenweg 2/4)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-600 mb-1">Datum (Stempel auf Liste)</label>
+                                <input type="date" id="ul-datum" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-600 mb-1">Anlass-Titel</label>
+                                <input type="text" id="ul-titel" placeholder="z.B. Zirkularbeschluss — Wahl der neuen Verwaltung"
+                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-600 mb-1">Zweck / Beschreibung (mehrzeilig erlaubt)</label>
+                                <textarea id="ul-zweck" rows="4" placeholder="Erläuterung wofür unterschrieben wird&#10;z.B. Wahl Immosense AG ab 1. Juli 2026"
+                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"></textarea>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="block text-xs text-gray-600 mb-1">Rücksendung bis</label>
+                                    <input type="date" id="ul-frist" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-600 mb-1">Rücksendung an</label>
+                                    <input type="text" id="ul-an" placeholder="Stefan Müller (Rosenweg 9)"
+                                        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                                </div>
+                            </div>
+                            <div class="flex gap-2 pt-2">
+                                <button onclick="ulPreview()" class="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm font-medium">
+                                    Vorschau
+                                </button>
+                                <button onclick="ulDownload()" class="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium">
+                                    PDF herunterladen
+                                </button>
+                            </div>
+                            <p class="text-xs text-gray-500 pt-2">
+                                <strong>Format:</strong> PDF (nicht editierbar — rechtssicher).
+                                Die Liste enthält automatisch alle Eigentümer der gewählten STWEG mit Wohnung, Wertquote und Verwalter (in Vertretung).
+                                Auswärts wohnende Eigentümer werden mit Marker «Einzelbrief separat verschickt» markiert.
+                                Footer enthält Seitenzahlen + Integritäts-Hash für Manipulations-Schutz.
+                            </p>
+                        </div>
+                    </div>
+                    <!-- Preview -->
+                    <div class="bg-white rounded-lg border p-3 min-h-[600px] flex flex-col">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-sm font-medium text-gray-700">Vorschau</h3>
+                            <button onclick="ulPreview()" class="text-xs text-blue-600 hover:underline">Aktualisieren</button>
+                        </div>
+                        <iframe id="ul-preview" src="about:blank" class="flex-1 w-full border border-gray-200 rounded" style="min-height:550px"></iframe>
+                    </div>
                 </div>
             </div>
 
@@ -533,7 +607,7 @@
         // ── Top-level Tab Switching ──
         // ══════════════════════════════
         function switchMainTab(tab) {
-            ['wohnungen', 'eigentuemer', 'bewohner', 'gruppen'].forEach(t => {
+            ['wohnungen', 'eigentuemer', 'unterschriften', 'bewohner', 'gruppen'].forEach(t => {
                 const tabBtn = document.getElementById(`main-tab-${t}`);
                 const panel = document.getElementById(`panel-${t}`);
                 if (tabBtn && !tabBtn.classList.contains('hidden')) {
@@ -550,6 +624,11 @@
             if (tab === 'eigentuemer' && !eigentuemerLoaded) {
                 eigentuemerLoaded = true;
                 loadEigentuemer();
+            }
+            if (tab === 'unterschriften') {
+                // Default-Datum = heute, falls leer
+                const dEl = document.getElementById('ul-datum');
+                if (!dEl.value) dEl.value = new Date().toISOString().slice(0,10);
             }
             if ((tab === 'bewohner' || tab === 'gruppen') && !bewohnerLoaded) {
                 bewohnerLoaded = true;
@@ -1215,6 +1294,57 @@
             a.href = URL.createObjectURL(blob);
             a.download = `eigentuemer-uebersicht-${new Date().toISOString().slice(0,10)}.csv`;
             a.click();
+        }
+
+        // ══════════════════════════════
+        // ── UNTERSCHRIFTENLISTEN ──
+        // ══════════════════════════════
+        function ulBuildUrl(extra = '') {
+            const stweg = document.getElementById('ul-stweg').value;
+            const params = new URLSearchParams({
+                datum: document.getElementById('ul-datum').value || '',
+                anlass_titel: document.getElementById('ul-titel').value || '',
+                anlass_zweck: document.getElementById('ul-zweck').value || '',
+                ruecksendung_bis: document.getElementById('ul-frist').value || '',
+                ruecksendung_an: document.getElementById('ul-an').value || '',
+            });
+            if (extra) params.set('preview', extra);
+            return `/api/unterschriftenliste/${stweg}.pdf?${params.toString()}`;
+        }
+        async function ulPreview() {
+            const url = ulBuildUrl('1');
+            const iframe = document.getElementById('ul-preview');
+            // Fetch as blob (mit Auth-Header) und embed via blob:
+            iframe.src = 'about:blank';
+            try {
+                const res = await AuthentikAuth.apiFetch(url);
+                if (!res.ok) {
+                    const err = await res.text();
+                    iframe.src = `data:text/html,<body style="font-family:sans-serif;padding:20px"><h3 style="color:red">Fehler ${res.status}</h3><pre>${escapeHtml(err)}</pre></body>`;
+                    return;
+                }
+                const blob = await res.blob();
+                iframe.src = URL.createObjectURL(blob);
+            } catch (e) {
+                iframe.src = `data:text/html,<body style="font-family:sans-serif;padding:20px"><h3 style="color:red">Fehler</h3><pre>${escapeHtml(e.message)}</pre></body>`;
+            }
+        }
+        async function ulDownload() {
+            const url = ulBuildUrl();
+            const stweg = document.getElementById('ul-stweg').value;
+            const datum = document.getElementById('ul-datum').value;
+            try {
+                const res = await AuthentikAuth.apiFetch(url);
+                if (!res.ok) { alert('Fehler beim Generieren: ' + res.status); return; }
+                const blob = await res.blob();
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `unterschriftenliste-stweg${stweg}-${datum}.pdf`;
+                document.body.appendChild(a); a.click(); a.remove();
+            } catch (e) { alert('Fehler: ' + e.message); }
+        }
+        function escapeHtml(s) {
+            return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
         }
 
         // ══════════════════════════════

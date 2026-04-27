@@ -4066,6 +4066,219 @@ app.get('/api/wohnungen/eigentuemer-uebersicht', authMiddleware, requirePermissi
   }
 });
 
+// ─── Unterschriftenlisten-Generator ────────────────────────────────
+// Live aus DB generiert, PDF-only (kein DOCX) damit nicht manipulierbar.
+function escHtml(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function isAuswaerts(adresse, stwegNr) {
+  if (!adresse) return false;
+  // "Rosenweg [number] [optional comma] 4303 Kaiseraugst" → vor Ort
+  return !/Rosenweg\s+\d+[\s,]+4303\s+Kaiseraugst/i.test(adresse);
+}
+async function buildUnterschriftenlisteHTML(stweg, opts) {
+  const { datum, anlass_titel, anlass_zweck, ruecksendung_bis, ruecksendung_an } = opts;
+  // Wohnungen + Kontakte aus DB ziehen (nur Wohnungen+Hobbyräume mit wertquote — Parkplätze nicht für Zirkular)
+  const wohnungen = await pool.query(`
+    SELECT w.id, w.bezeichnung, w.typ, w.wertquote_zaehler, w.wertquote_nenner
+    FROM wohnungen w
+    WHERE w.stweg = $1 AND w.typ IN ('Wohnung','Hobbyraum')
+    ORDER BY w.bezeichnung
+  `, [stweg]);
+  const wohnungIds = wohnungen.rows.map(w => w.id);
+  const kontakte = wohnungIds.length === 0 ? { rows: [] } : await pool.query(`
+    SELECT wohnung_id, rolle, name, email, adresse, sort_order
+    FROM wohnungen_kontakte
+    WHERE wohnung_id = ANY($1::int[]) AND rolle IN ('eigentuemer','verwalter') AND name IS NOT NULL
+    ORDER BY wohnung_id, (CASE WHEN rolle='eigentuemer' THEN 0 ELSE 1 END), sort_order, id
+  `, [wohnungIds]);
+
+  // Pro Wohnung: eigentuemer + verwalter + adresse + auswaerts-Marker
+  const byWohnung = new Map();
+  for (const w of wohnungen.rows) {
+    byWohnung.set(w.id, { ...w, eigentuemer: [], verwalter: [], adressen: new Set() });
+  }
+  for (const k of kontakte.rows) {
+    const w = byWohnung.get(k.wohnung_id);
+    if (!w) continue;
+    if (k.rolle === 'eigentuemer') w.eigentuemer.push(k);
+    else if (k.rolle === 'verwalter') w.verwalter.push(k);
+    if (k.adresse) w.adressen.add(k.adresse.trim());
+  }
+
+  // Einzelbrief-Empfänger sammeln (auswärtige Eigentümer)
+  const einzelbriefe = [];
+  let totalWQ = 0, totalUnits = 0;
+  let dataRows = '';
+  for (const w of wohnungen.rows) {
+    const wInfo = byWohnung.get(w.id);
+    totalUnits++;
+    totalWQ += w.wertquote_zaehler || 0;
+    const eigNamen = wInfo.eigentuemer.map(e => e.name).filter(Boolean);
+    const verwNamen = wInfo.verwalter.map(v => v.name).filter(Boolean);
+    const wohnadressen = [...wInfo.adressen];
+    // Auswärts-Check pro Eigentümer-Adresse
+    const auswaertsAdressen = wohnadressen.filter(a => isAuswaerts(a, stweg));
+    const vorOrtAdressen = wohnadressen.filter(a => !isAuswaerts(a, stweg));
+    let nameZelle = eigNamen.join(', ') || '<em>—</em>';
+    if (verwNamen.length > 0) {
+      nameZelle += `<div class="verwalter-line">↳ in Vertretung Verwalter: <strong>${verwNamen.join(', ')}</strong></div>`;
+    }
+    let adresseZelle = wohnadressen.length > 0 ? wohnadressen.map(escHtml).join('<br>') : `Rosenweg, 4303 Kaiseraugst`;
+    if (auswaertsAdressen.length > 0) {
+      adresseZelle += `<div class="auswaerts-marker">📮 Einzelbrief separat verschickt</div>`;
+      einzelbriefe.push({ bezeichnung: w.bezeichnung, eigentuemer: eigNamen, verwalter: verwNamen, adresse: auswaertsAdressen[0] });
+    }
+    const wq = (w.wertquote_zaehler && w.wertquote_nenner) ? `${w.wertquote_zaehler}/${w.wertquote_nenner}` : '—';
+    dataRows += `<tr>
+      <td class="cell-einheit">${escHtml(w.bezeichnung)}</td>
+      <td class="cell-name">${nameZelle}</td>
+      <td class="cell-adresse">${adresseZelle}</td>
+      <td class="cell-wq">${wq}</td>
+      <td class="cell-vote">☐ JA &nbsp;&nbsp; ☐ NEIN</td>
+      <td class="cell-sig">&nbsp;</td>
+    </tr>`;
+  }
+  // Total-Zeile
+  dataRows += `<tr class="total-row">
+    <td><strong>TOTAL</strong></td>
+    <td><strong>${totalUnits} Einheiten</strong></td>
+    <td></td>
+    <td><strong>${totalWQ}/1000</strong></td>
+    <td></td><td></td>
+  </tr>`;
+
+  const einzelbriefeBlock = einzelbriefe.length === 0 ? '' : `
+    <h2 class="section-title">Einzelbriefe (auswärts wohnende Eigentümer)</h2>
+    <p class="hinweis">Folgende ${einzelbriefe.length} Eigentümer wohnen ausserhalb von Rosenweg / 4303 Kaiseraugst und haben den Brief per Einzelversand erhalten:</p>
+    <table class="info-table">
+      <thead><tr><th>Einheit</th><th>Eigentümer</th><th>Verwalter (in Vertretung)</th><th>Versand-Adresse</th></tr></thead>
+      <tbody>
+        ${einzelbriefe.map(e => `<tr>
+          <td>${escHtml(e.bezeichnung)}</td>
+          <td>${escHtml(e.eigentuemer.join(', '))}</td>
+          <td>${e.verwalter.length > 0 ? escHtml(e.verwalter.join(', ')) : '<em>—</em>'}</td>
+          <td>${escHtml(e.adresse)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+
+  // Hash für Rechtssicherheit (Datum + STWEG + Wohnungs-IDs)
+  const hashInput = `${stweg}|${datum}|${wohnungIds.join(',')}|${anlass_titel}`;
+  const hash = crypto.createHash('sha256').update(hashInput).digest('hex').substring(0, 12).toUpperCase();
+  const generatedAt = new Date().toLocaleString('de-CH', { timeZone: 'Europe/Zurich' });
+
+  return `<!DOCTYPE html><html lang="de"><head><meta charset="utf-8">
+<style>
+  @page { size: A4; margin: 18mm 16mm 24mm 16mm;
+    @bottom-center { content: "STWEG ${stweg} — Unterschriftenliste · " counter(page) " von " counter(pages) " · Stand ${escHtml(datum)} · Hash ${hash}"; font-family: sans-serif; font-size: 8pt; color: #888; } }
+  body { font-family: 'Helvetica', Arial, sans-serif; color: #222; font-size: 10pt; line-height: 1.4; margin: 0; }
+  .header { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; border-bottom: 2px solid #c41e1e; padding-bottom: 10px; }
+  .header img { width: 60px; height: 60px; }
+  .header-text h1 { font-size: 16pt; font-weight: 700; margin: 0; color: #000; }
+  .header-text p { margin: 2px 0; font-size: 9pt; color: #555; }
+  h2.section-title { color: #c41e1e; font-size: 12pt; font-weight: bold; margin: 16px 0 6px; border-bottom: 1px solid #c41e1e; padding-bottom: 2px; }
+  p.hinweis { font-size: 9pt; color: #555; margin: 4px 0; }
+  ul.zweck-list { font-size: 9.5pt; margin: 4px 0 8px 18px; }
+  table.signatur { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  table.signatur th { background: #c41e1e; color: white; padding: 6px 8px; font-size: 9pt; text-align: left; }
+  table.signatur td { padding: 6px 8px; border: 1px solid #aaa; font-size: 9.5pt; vertical-align: top; }
+  .cell-einheit { width: 12%; font-weight: 600; }
+  .cell-name { width: 28%; }
+  .cell-adresse { width: 24%; font-size: 9pt; }
+  .cell-wq { width: 8%; text-align: center; font-family: monospace; }
+  .cell-vote { width: 14%; text-align: center; }
+  .cell-sig { width: 14%; }
+  tr.total-row { background: #fce4e4; font-weight: bold; }
+  .verwalter-line { font-size: 8.5pt; color: #555; margin-top: 2px; padding-left: 8px; border-left: 2px solid #c41e1e; }
+  .auswaerts-marker { font-size: 8.5pt; color: #c41e1e; margin-top: 2px; font-weight: 600; }
+  table.info-table { width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 9pt; }
+  table.info-table th, table.info-table td { padding: 4px 6px; border: 1px solid #ccc; text-align: left; }
+  table.info-table thead th { background: #f0f0f0; }
+  .footer-legal { margin-top: 14px; padding: 8px 10px; background: #fafafa; border: 1px solid #ddd; font-size: 8.5pt; color: #444; line-height: 1.5; }
+  .signatur-block { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .signatur-block .box { border: 1px solid #888; padding: 8px 10px; min-height: 60px; }
+  .signatur-block .box label { font-size: 8.5pt; color: #555; }
+</style></head><body>
+  <div class="header">
+    <img src="https://www.rosenweg4303.ch/logo-rosenweg.png" alt="Rosenweg">
+    <div class="header-text">
+      <h1>STWEG-Kooperation Rosenweg</h1>
+      <p>STWEG ${stweg} · 4303 Kaiseraugst · Stand ${escHtml(datum)}</p>
+    </div>
+  </div>
+  <h2 class="section-title">${escHtml(anlass_titel || 'Unterschriftenliste')}</h2>
+  ${anlass_zweck ? `<p>${escHtml(anlass_zweck).replace(/\n/g, '<br>')}</p>` : ''}
+  ${ruecksendung_bis ? `<p class="hinweis"><strong>Rücksendung bis spätestens ${escHtml(ruecksendung_bis)}${ruecksendung_an ? ' an ' + escHtml(ruecksendung_an) : ''}</strong></p>` : ''}
+  <p class="hinweis">Jede/r Eigentümer/in kreuzt JA oder NEIN an und unterschreibt. Bei mehreren Eigentümern bitte alle unterschreiben. Auswärts wohnende Eigentümer haben den Brief per Einzelversand erhalten.</p>
+  <table class="signatur">
+    <thead><tr>
+      <th class="cell-einheit">Einheit</th>
+      <th class="cell-name">Eigentümer/in (bzw. Verwalter)</th>
+      <th class="cell-adresse">Wohnadresse</th>
+      <th class="cell-wq">Wertquote</th>
+      <th class="cell-vote">JA / NEIN</th>
+      <th class="cell-sig">Datum / Unterschrift</th>
+    </tr></thead>
+    <tbody>${dataRows}</tbody>
+  </table>
+  ${einzelbriefeBlock}
+  <div class="footer-legal">
+    <strong>Rechtshinweis:</strong> Diese Unterschriftenliste ist nur in Verbindung mit dem versendeten Hauptdokument gültig.
+    Die Liste wurde am ${escHtml(generatedAt)} aus der zentralen Eigentümerdatenbank der STWEG-Kooperation Rosenweg generiert
+    (Integritäts-Hash: <code>${hash}</code>). Manipulationen an dieser Liste sind unwirksam — nur das vom Original-Hash
+    bestätigte Dokument hat Beweiskraft. Verwalter mit eingetragener Vollmacht zeichnen in Vertretung der Eigentümer.
+    Bei mehreren Eigentümern in einer Einheit bedürfen Beschlüsse, sofern nicht anders geregelt, der Zustimmung aller.
+  </div>
+</body></html>`;
+}
+
+app.get('/api/unterschriftenliste/:stweg.pdf', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
+  try {
+    const stweg = parseStweg(req.params.stweg);
+    if (!stweg) return res.status(400).json({ error: 'Ungültige STWEG' });
+    const opts = {
+      datum: req.query.datum || new Date().toISOString().slice(0, 10),
+      anlass_titel: req.query.anlass_titel || 'Unterschriftenliste',
+      anlass_zweck: req.query.anlass_zweck || '',
+      ruecksendung_bis: req.query.ruecksendung_bis || '',
+      ruecksendung_an: req.query.ruecksendung_an || '',
+    };
+    const html = await buildUnterschriftenlisteHTML(stweg, opts);
+    const GOTENBERG = process.env.GOTENBERG_URL || 'http://doc-converter:3000';
+    const formData = new FormData();
+    formData.append('files', new Blob([html], { type: 'text/html' }), 'index.html');
+    formData.append('paperWidth', '8.27');
+    formData.append('paperHeight', '11.7');
+    formData.append('marginTop', '0.4');
+    formData.append('marginBottom', '0.6');
+    formData.append('marginLeft', '0.4');
+    formData.append('marginRight', '0.4');
+    formData.append('preferCssPageSize', 'true');
+    const release = await gotenbergSemaphore();
+    let pdfResp;
+    try {
+      pdfResp = await fetch(`${GOTENBERG}/forms/chromium/convert/html`, {
+        method: 'POST', body: formData, signal: AbortSignal.timeout(30000),
+      });
+    } finally { release(); }
+    if (!pdfResp.ok) {
+      const err = await pdfResp.text();
+      console.error('[Unterschriftenliste] Gotenberg error:', err.slice(0, 300));
+      return res.status(500).json({ error: 'PDF-Erstellung fehlgeschlagen' });
+    }
+    const pdfBuf = Buffer.from(await pdfResp.arrayBuffer());
+    res.setHeader('Content-Type', 'application/pdf');
+    const inline = req.query.preview === '1';
+    const fname = `unterschriftenliste-stweg${stweg}-${opts.datum}.pdf`;
+    res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${fname}"`);
+    res.send(pdfBuf);
+  } catch (err) {
+    console.error('[Unterschriftenliste] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/wohnungen/:stweg - List all apartments for a STWEG (admin, with kontakte)
 app.get('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
   try {
