@@ -2565,6 +2565,25 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
     return { success: false, error: 'No recipient found' };
   }
 
+  // Bounce-Detection: niemals als neue Verteiler-Mail prozessieren —
+  // sonst entsteht eine Endlosschleife wenn ein einzelner Empfänger bouncet
+  // und der Bounce zurück an die Verteiler-Adresse geht.
+  const senderAddrRaw = (parsed.from?.value?.[0]?.address || '').toLowerCase();
+  const subjLower = (parsed.subject || '').toLowerCase();
+  const headersStr = (parsed.headerLines || []).map(h => `${h.key}: ${h.line}`).join('\n').toLowerCase();
+  const isBounce =
+    senderAddrRaw.startsWith('mailer-daemon@') ||
+    senderAddrRaw.startsWith('postmaster@') ||
+    senderAddrRaw === '<>' || senderAddrRaw === '' && subjLower.includes('delivery') ||
+    /(undelivered|delivery failed|delivery status notification|returning message to sender|undeliverable|failure notice)/i.test(parsed.subject || '') ||
+    /^auto-submitted:\s*auto-/im.test(headersStr) ||
+    /^x-failed-recipients:/im.test(headersStr) ||
+    /^content-type:\s*multipart\/report/im.test(headersStr);
+  if (isBounce) {
+    console.log(`[Bounce] Bounce-Mail ignoriert (von ${senderAddrRaw}, Subject: ${(parsed.subject||'').substring(0,80)})`);
+    return { success: true, action: 'bounce-skipped' };
+  }
+
   console.log(`Email inbound → ${toAddress} | Subject: ${parsed.subject?.substring(0, 80)}`);
 
   const verteiler = await pool.query(
