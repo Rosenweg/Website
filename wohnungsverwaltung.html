@@ -49,6 +49,9 @@
                     <button id="main-tab-wohnungen" onclick="switchMainTab('wohnungen')" class="tab-active border-b-2 pb-3 px-1 text-sm transition">
                         Wohnungen
                     </button>
+                    <button id="main-tab-eigentuemer" onclick="switchMainTab('eigentuemer')" class="tab-inactive border-b-2 pb-3 px-1 text-sm transition">
+                        Eigentümer
+                    </button>
                     <button id="main-tab-bewohner" onclick="switchMainTab('bewohner')" class="tab-inactive border-b-2 pb-3 px-1 text-sm transition hidden">
                         Bewohner
                     </button>
@@ -125,6 +128,35 @@
                     Wohnungen werden geladen...
                 </div>
                 <div id="no-data" class="hidden text-center py-8 text-gray-400">Keine Wohnungen vorhanden.</div>
+            </div>
+
+            <!-- ═══ Eigentümer Tab ═══ -->
+            <div id="panel-eigentuemer" class="hidden">
+                <div class="flex flex-wrap items-center gap-3 mb-4">
+                    <input type="text" id="eig-search" placeholder="Name oder Email…" oninput="renderEigentuemer()"
+                        class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 w-64" />
+                    <select id="eig-stweg-filter" onchange="renderEigentuemer()" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                        <option value="">Alle STWEGs</option>
+                    </select>
+                    <button onclick="exportEigentuemerCSV()" class="ml-auto px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50">CSV-Export</button>
+                </div>
+                <div id="eig-stats" class="text-sm text-gray-500 mb-3"></div>
+                <div id="eig-loading" class="hidden text-center text-gray-400 py-8">Lade Eigentümer-Daten…</div>
+                <div id="eig-table-wrap" class="overflow-x-auto bg-white rounded-lg border">
+                    <table class="min-w-full text-sm">
+                        <thead class="bg-gray-50 text-xs uppercase text-gray-600">
+                            <tr>
+                                <th class="px-3 py-2 text-left">Name</th>
+                                <th class="px-3 py-2 text-left">Kontakt</th>
+                                <th class="px-3 py-2 text-left">Wohnungen</th>
+                                <th class="px-3 py-2 text-left">Parkplätze</th>
+                                <th class="px-3 py-2 text-left">Sonstige</th>
+                                <th class="px-3 py-2 text-right">Σ Wertquoten</th>
+                            </tr>
+                        </thead>
+                        <tbody id="eig-tbody" class="divide-y"></tbody>
+                    </table>
+                </div>
             </div>
 
             <!-- ═══ Bewohner Tab ═══ -->
@@ -355,6 +387,8 @@
         let userStweg = null;
         let userGroupPrefix = null;
         let bewohnerLoaded = false;
+        let eigentuemerLoaded = false;
+        let eigentuemerData = []; // grouped: [{ name, email, telefon, objects: [...] }]
 
         // ── Shared State ──
         let currentUser = null;
@@ -487,7 +521,7 @@
         // ── Top-level Tab Switching ──
         // ══════════════════════════════
         function switchMainTab(tab) {
-            ['wohnungen', 'bewohner', 'gruppen'].forEach(t => {
+            ['wohnungen', 'eigentuemer', 'bewohner', 'gruppen'].forEach(t => {
                 const tabBtn = document.getElementById(`main-tab-${t}`);
                 const panel = document.getElementById(`panel-${t}`);
                 if (tabBtn && !tabBtn.classList.contains('hidden')) {
@@ -500,6 +534,10 @@
 
             if (tab === 'wohnungen' && currentStweg) {
                 loadWohnungen();
+            }
+            if (tab === 'eigentuemer' && !eigentuemerLoaded) {
+                eigentuemerLoaded = true;
+                loadEigentuemer();
             }
             if ((tab === 'bewohner' || tab === 'gruppen') && !bewohnerLoaded) {
                 bewohnerLoaded = true;
@@ -1008,6 +1046,93 @@
             a.download = `Wohnungen_${stwegName.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.csv`;
             a.click();
             URL.revokeObjectURL(url);
+        }
+
+        // ══════════════════════════════
+        // ── EIGENTÜMER ──
+        // ══════════════════════════════
+        async function loadEigentuemer() {
+            document.getElementById('eig-loading').classList.remove('hidden');
+            try {
+                // Fetch all wohnungen + kontakte across STWEGs the user can access
+                const res = await AuthentikAuth.apiFetch('/api/wohnungen/eigentuemer-uebersicht');
+                if (!res.ok) throw new Error('API error ' + res.status);
+                const data = await res.json();
+                eigentuemerData = data.eigentuemer || [];
+                // Populate STWEG filter
+                const stwegs = [...new Set(eigentuemerData.flatMap(e => e.objects.map(o => o.stweg)))].sort();
+                const sel = document.getElementById('eig-stweg-filter');
+                sel.innerHTML = '<option value="">Alle STWEGs</option>' + stwegs.map(s => `<option value="${s}">STWEG ${s}</option>`).join('');
+                renderEigentuemer();
+            } catch (e) {
+                document.getElementById('eig-tbody').innerHTML = `<tr><td colspan="6" class="text-center text-red-600 py-6">Fehler: ${esc(e.message)}</td></tr>`;
+            } finally {
+                document.getElementById('eig-loading').classList.add('hidden');
+            }
+        }
+
+        function renderEigentuemer() {
+            const search = document.getElementById('eig-search').value.toLowerCase();
+            const stwegFilter = document.getElementById('eig-stweg-filter').value;
+            const filtered = eigentuemerData.filter(e => {
+                if (stwegFilter && !e.objects.some(o => String(o.stweg) === stwegFilter)) return false;
+                if (search) {
+                    const hay = (e.name + ' ' + (e.email||'')).toLowerCase();
+                    if (!hay.includes(search)) return false;
+                }
+                return true;
+            });
+            const groupObj = (objs, typ) => objs.filter(o => o.typ === typ).map(o => `STWEG ${o.stweg} · ${o.bezeichnung}`).join(', ');
+            document.getElementById('eig-stats').textContent = `${filtered.length} Eigentümer · ${filtered.reduce((s,e)=>s+e.objects.length,0)} Objekte`;
+            const tbody = document.getElementById('eig-tbody');
+            if (filtered.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-gray-400 py-6">Keine Treffer</td></tr>';
+                return;
+            }
+            tbody.innerHTML = filtered.map(e => {
+                const wohnungen = groupObj(e.objects, 'Wohnung');
+                const parkpl = groupObj(e.objects, 'Parkplatz');
+                const sonstige = e.objects.filter(o => o.typ !== 'Wohnung' && o.typ !== 'Parkplatz').map(o => `${o.typ} (STWEG ${o.stweg} · ${o.bezeichnung})`).join(', ');
+                const wq = e.objects.reduce((sum, o) => sum + (o.wertquote_zaehler || 0), 0);
+                const isDrucker = (e.email||'').startsWith('druckerr9+') || (e.email||'').startsWith('druckerr13+');
+                const emailHtml = e.email
+                    ? (isDrucker
+                        ? `<span class="text-xs text-amber-700 bg-amber-50 px-1 rounded" title="Drucker-Tag (kein direkter Empfang)">${esc(e.email)}</span>`
+                        : `<a href="mailto:${esc(e.email)}" class="text-blue-600 hover:underline">${esc(e.email)}</a>`)
+                    : '<span class="text-gray-400 italic">keine</span>';
+                return `<tr class="hover:bg-gray-50">
+                    <td class="px-3 py-2 font-medium">${esc(e.name)}</td>
+                    <td class="px-3 py-2 text-xs">${emailHtml}${e.telefon ? `<br><span class="text-gray-500">${esc(e.telefon)}</span>` : ''}</td>
+                    <td class="px-3 py-2 text-xs">${wohnungen || '<span class="text-gray-300">–</span>'}</td>
+                    <td class="px-3 py-2 text-xs">${parkpl || '<span class="text-gray-300">–</span>'}</td>
+                    <td class="px-3 py-2 text-xs">${sonstige || '<span class="text-gray-300">–</span>'}</td>
+                    <td class="px-3 py-2 text-right font-mono">${wq || ''}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        function exportEigentuemerCSV() {
+            const search = document.getElementById('eig-search').value.toLowerCase();
+            const stwegFilter = document.getElementById('eig-stweg-filter').value;
+            const rows = eigentuemerData.filter(e => {
+                if (stwegFilter && !e.objects.some(o => String(o.stweg) === stwegFilter)) return false;
+                if (search && !(e.name + ' ' + (e.email||'')).toLowerCase().includes(search)) return false;
+                return true;
+            });
+            const lines = [['Name','Email','Telefon','Wohnungen','Parkplätze','Sonstige','Wertquoten'].join(';')];
+            for (const e of rows) {
+                const w = e.objects.filter(o => o.typ === 'Wohnung').map(o => `STWEG ${o.stweg} ${o.bezeichnung}`).join(', ');
+                const p = e.objects.filter(o => o.typ === 'Parkplatz').map(o => `STWEG ${o.stweg} ${o.bezeichnung}`).join(', ');
+                const s = e.objects.filter(o => o.typ !== 'Wohnung' && o.typ !== 'Parkplatz').map(o => `${o.typ} STWEG ${o.stweg} ${o.bezeichnung}`).join(', ');
+                const wq = e.objects.reduce((sum, o) => sum + (o.wertquote_zaehler || 0), 0);
+                const cell = v => `"${String(v||'').replace(/"/g,'""')}"`;
+                lines.push([e.name, e.email, e.telefon, w, p, s, wq].map(cell).join(';'));
+            }
+            const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `eigentuemer-uebersicht-${new Date().toISOString().slice(0,10)}.csv`;
+            a.click();
         }
 
         // ══════════════════════════════
