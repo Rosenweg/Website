@@ -2604,9 +2604,14 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
     cid: att.cid || undefined,
   }));
 
-  await transporter.sendMail({
+  // DSGVO: Empfänger via BCC, damit niemand die Email-Adressen der anderen sieht.
+  // To = Verteiler-Adresse selbst (sichtbar im Header als "An: eigentuemer@rosenweg4303.ch")
+  // Drucker-Tags müssen einzeln versendet werden, damit das +tag fürs Routing erhalten bleibt
+  // (Cloudflare/Gmail würde sonst einen einzigen +tag aus BCC nicht extrahieren können).
+  const bccRecipients = recipients.filter(r => !r.startsWith('druckerr9+') && !r.startsWith('druckerr13+'));
+  const druckerRecipients = recipients.filter(r => r.startsWith('druckerr9+') || r.startsWith('druckerr13+'));
+  const baseMail = {
     from: `"${senderName} via ${list.name}" <${toAddress}>`,
-    to: recipients,
     replyTo: replyTo,
     subject: subject,
     text: parsed.text || '',
@@ -2618,8 +2623,16 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
       'X-Original-From': senderEmail,
       'X-Forwarded-By': 'Rosenweg Verteiler',
     },
-  });
-  console.log(`Distributed email to ${recipients.length} recipients for ${toAddress}`);
+  };
+  // Bulk-Versand an alle echten Empfänger via BCC
+  if (bccRecipients.length > 0) {
+    await transporter.sendMail({ ...baseMail, to: toAddress, bcc: bccRecipients });
+  }
+  // Drucker-Tags einzeln (jeder Tag braucht seine eigene To-Zeile fürs Print-Routing)
+  for (const drucker of druckerRecipients) {
+    await transporter.sendMail({ ...baseMail, to: drucker });
+  }
+  console.log(`Distributed email to ${recipients.length} recipients for ${toAddress} (${bccRecipients.length} BCC + ${druckerRecipients.length} drucker-individuell)`);
 
   const logResult = await pool.query(
     `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, status, message_id)
