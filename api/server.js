@@ -2389,6 +2389,9 @@ async function resolveVerwaltungsGroup(spec) {
 //   "verwaltung:..."  → live from Verwaltungs-DB
 //   <other>           → Authentik group (resolveGroupEmails)
 async function resolveVerteilerRecipients(verteiler) {
+  // Druckeradressen ohne +tag (z.B. "druckerr9@…") sind keine zustellbaren Empfänger —
+  // ohne tag weiss das Print-System nicht, an wen → niemals in die Verteiler-Liste lassen.
+  const isInvalidDrucker = e => /^druckerr(9|13)@/i.test(e);
   const groupNames = verteiler.group_names?.length ? verteiler.group_names : (verteiler.group_name ? [verteiler.group_name] : []);
   if (groupNames.length > 0) {
     const allEmails = new Set();
@@ -2396,14 +2399,14 @@ async function resolveVerteilerRecipients(verteiler) {
       const emails = gn.startsWith('verwaltung:')
         ? await resolveVerwaltungsGroup(gn)
         : await resolveGroupEmails(gn);
-      emails.forEach(e => allEmails.add(e));
+      emails.forEach(e => { if (!isInvalidDrucker(e)) allEmails.add(e); });
     }
     return [...allEmails];
   }
   // Fallback: static members list (legacy — for verteilers not yet migrated)
   return (verteiler.members || [])
     .map(m => typeof m === 'string' ? m : m.email)
-    .filter(e => e && !e.endsWith('.invalid'));
+    .filter(e => e && !e.endsWith('.invalid') && !isInvalidDrucker(e));
 }
 
 app.get('/api/verteiler/by-stweg/:stweg', async (req, res) => {
@@ -4118,8 +4121,11 @@ app.get('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
       if (groupNames.length > 0) {
         const allEmails = new Set();
         for (const gn of groupNames) {
-          const emails = await resolveGroupEmails(gn);
-          emails.forEach(e => allEmails.add(e));
+          const emails = gn.startsWith('verwaltung:')
+            ? await resolveVerwaltungsGroup(gn)
+            : await resolveGroupEmails(gn);
+          // Filter out base drucker addresses without +tag (kein Empfänger zugeordnet)
+          emails.filter(e => !/^druckerr(9|13)@/.test(e)).forEach(e => allEmails.add(e));
         }
         v.member_count = allEmails.size;
         v.resolved_emails = [...allEmails];
@@ -4141,8 +4147,10 @@ app.get('/api/verteiler/:id', authMiddleware, adminOnly, async (req, res) => {
     if (groupNames.length > 0) {
       const allEmails = new Set();
       for (const gn of groupNames) {
-        const emails = await resolveGroupEmails(gn);
-        emails.forEach(e => allEmails.add(e));
+        const emails = gn.startsWith('verwaltung:')
+          ? await resolveVerwaltungsGroup(gn)
+          : await resolveGroupEmails(gn);
+        emails.filter(e => !/^druckerr(9|13)@/.test(e)).forEach(e => allEmails.add(e));
       }
       v.resolved_emails = [...allEmails];
       v.member_count = allEmails.size;
