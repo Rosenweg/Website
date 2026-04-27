@@ -3884,7 +3884,12 @@ app.get('/api/wohnungen/eigentuemer-uebersicht', authMiddleware, requirePermissi
         wertquote_zaehler: r.wertquote_zaehler, wertquote_nenner: r.wertquote_nenner
       });
     }
-    res.json({ eigentuemer: [...byName.values()].sort((a,b) => a.name.localeCompare(b.name, 'de')) });
+    // Sortierung nach Nachname (letztes Wort), bei Gleichheit nach Vorname
+    const lastName = n => (n || '').trim().split(/\s+/).pop() || '';
+    res.json({ eigentuemer: [...byName.values()].sort((a,b) => {
+      const c = lastName(a.name).localeCompare(lastName(b.name), 'de');
+      return c !== 0 ? c : a.name.localeCompare(b.name, 'de');
+    }) });
   } catch (err) {
     console.error('eigentuemer-uebersicht error:', err.message);
     res.status(500).json({ error: 'Fehler' });
