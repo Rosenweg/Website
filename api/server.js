@@ -2939,14 +2939,38 @@ async function pollGmailForVerteiler() {
                              plusMatch?.[1]?.match(/^drucker(?:r9|r13)\+(.+)/i);
             const recipientTag = tagMatch ? tagMatch[1].replace(/\./g, ' ') : null;
 
-            // Look up recipient in DB if tag provided
+            // Look up recipient: zuerst über die echte Drucker-Tag-Email in
+            // wohnungen_kontakte (eindeutig), dann den Wohnungs-Kontext + alle
+            // Eigentümer kombinieren. Fallback: alte Authentik-users-Suche.
             let recipientInfo = null;
-            if (recipientTag) {
-              const nameSearch = recipientTag.split(' ').pop().replace(/%/g, '\\%').replace(/_/g, '\\_'); // last part = surname, escape SQL wildcards
+            if (verteilerAddress) {
+              const found = await pool.query(`
+                SELECT
+                  COALESCE(
+                    (SELECT string_agg(name, ', ' ORDER BY sort_order, id)
+                     FROM wohnungen_kontakte WHERE wohnung_id = w.id AND rolle = 'eigentuemer' AND name IS NOT NULL),
+                    wk.name
+                  ) AS name,
+                  COALESCE(
+                    (SELECT string_agg(DISTINCT adresse, '; ')
+                     FROM wohnungen_kontakte WHERE wohnung_id = w.id AND adresse IS NOT NULL AND adresse <> ''),
+                    wk.adresse
+                  ) AS strasse,
+                  w.bezeichnung AS wohnung,
+                  w.stweg
+                FROM wohnungen_kontakte wk
+                JOIN wohnungen w ON w.id = wk.wohnung_id
+                WHERE LOWER(wk.email) = LOWER($1)
+                ORDER BY (CASE WHEN wk.rolle='eigentuemer' THEN 0 ELSE 1 END), wk.id
+                LIMIT 1
+              `, [verteilerAddress]);
+              if (found.rows.length > 0) recipientInfo = found.rows[0];
+            }
+            // Fallback: alter Lookup über Authentik users-Tabelle (nur wenn nichts gefunden)
+            if (!recipientInfo && recipientTag) {
+              const nameSearch = recipientTag.split(' ').pop().replace(/%/g, '\\%').replace(/_/g, '\\_');
               const found = await pool.query("SELECT name, strasse, wohnung, stweg FROM users WHERE name ILIKE $1 LIMIT 1", [`%${nameSearch}%`]);
-              if (found.rows.length > 0) {
-                recipientInfo = found.rows[0];
-              }
+              if (found.rows.length > 0) recipientInfo = found.rows[0];
             }
 
             // Dedup: skip if (message_id, recipient) already printed (race-safe via UNIQUE index)
