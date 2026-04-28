@@ -218,6 +218,12 @@
                                         class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
                                 </div>
                             </div>
+                            <div>
+                                <label class="block text-xs text-gray-600 mb-1">Zeichnungsberechtigt (eine Person pro Zeile, Format: <code>Name | Funktion</code>)</label>
+                                <textarea id="ul-zeichnung" rows="3" placeholder="Stefan Müller | Präsident Ausschuss STWEG 3&#10;Jörg Herrmann | Aktuar Ausschuss STWEG 3"
+                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono"></textarea>
+                                <p class="text-xs text-gray-500 mt-1">Personen die diese Liste gegenüber Banken/Notaren verbindlich unterzeichnen können. Erscheint mit Unterschriftszeile am Ende der Hauptliste.</p>
+                            </div>
                             <div class="flex gap-2 pt-2">
                                 <button onclick="ulPreview()" class="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm font-medium">
                                     Vorschau
@@ -1307,6 +1313,7 @@
                 anlass_zweck: document.getElementById('ul-zweck').value || '',
                 ruecksendung_bis: document.getElementById('ul-frist').value || '',
                 ruecksendung_an: document.getElementById('ul-an').value || '',
+                zeichnungsberechtigt: document.getElementById('ul-zeichnung')?.value || '',
             });
             if (extra) params.set('preview', extra);
             return `/api/unterschriftenliste/${stweg}.pdf?${params.toString()}`;
