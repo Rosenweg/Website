@@ -1323,13 +1323,10 @@
             `;
             list.appendChild(row);
         }
-        // Pre-fill mit zwei Default-Zeilen wenn leer
+        // Pre-fill mit einer leeren Zeile
         document.addEventListener('DOMContentLoaded', () => {
             const list = document.getElementById('ul-zeichner-list');
-            if (list && list.children.length === 0) {
-                ulAddZeichner('Präsident', '');
-                ulAddZeichner('Aktuar', '');
-            }
+            if (list && list.children.length === 0) ulAddZeichner('', '');
         });
         function ulBuildUrl(extra = '') {
             const stweg = document.getElementById('ul-stweg').value;
