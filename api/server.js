@@ -4225,10 +4225,9 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
     opts._hash = hash;
   }
 
-  // Verify-URL für QR-Code → kann auf jedem Smartphone gescannt werden,
-  // führt zur Server-seitigen Original-Liste mit identischem Hash
-  const verifyUrl = `${SITE_URL}/api/unterschriftenliste/verify?hash=${hash}`;
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&margin=2&data=${encodeURIComponent(verifyUrl)}`;
+  // Öffentliche Echtheitsprüfungs-Seite — Hash aus der Fusszeile dort eingeben
+  const verifyUrl = `${SITE_URL}/echtheitspruefung.html?hash=${hash}`;
+  const verifyPageBase = `${SITE_URL}/echtheitspruefung.html`;
 
   const einzelbriefeUebersicht = einzelbriefe.length === 0 ? '' : `
     <h2 class="section-title">Einzelbriefe (auswärts wohnende Eigentümer)</h2>
@@ -4288,14 +4287,9 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
       </table>
       <div class="footer-legal">
         <strong>Rechtshinweis:</strong> Dieses Anschreiben gehört zur Unterschriftenliste der STWEG ${stweg} vom ${escHtml(datum)}.
-        Verifizieren Sie die Echtheit des Dokuments durch Scannen des QR-Codes oder durch Aufruf von:
-        <code style="word-break:break-all">${escHtml(verifyUrl)}</code>.
-        Integritäts-Hash: <code>${hash}</code>. Brief Nr. ${idx+1} von ${einzelbriefe.length} (Einheit ${escHtml(e.bezeichnung)}).
+        Echtheit prüfen unter <code style="word-break:break-all">${escHtml(verifyPageBase)}</code> (Hash <strong>${hash}</strong> aus der Fusszeile eingeben).
+        Brief Nr. ${idx+1} von ${einzelbriefe.length} (Einheit ${escHtml(e.bezeichnung)}).
         <strong>Vollständigkeit:</strong> Das Gesamtdokument ist nur gültig, wenn alle im Seitenzähler ausgewiesenen Seiten ("Seite X von Y") vorhanden sind — fehlt eine Seite, ist die Unterschriftenliste als ungültig zu betrachten.
-      </div>
-      <div class="qr-section">
-        <img src="${qrUrl}" alt="QR-Code zur Verifizierung" width="120" height="120">
-        <div class="qr-text">QR scannen zur<br>Echtheitsprüfung<br><strong>${hash}</strong></div>
       </div>
     </div>`;
   }).join('');
@@ -4337,8 +4331,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
   .zeichnungs-sigline { border-bottom: 1px solid #888; height: 30px; margin-top: 4px; }
   .footer-kontakte { margin-top: 14px; padding: 6px 0; border-top: 1px solid #ccc; font-size: 9pt; color: #444; }
   .footer-kontakte p { margin: 2px 0; }
-  .verify-block { display: flex; gap: 14px; align-items: center; margin-top: 12px; padding: 10px; border: 1px dashed #888; border-radius: 4px; page-break-inside: avoid; break-inside: avoid; }
-  .verify-block img { width: 110px; height: 110px; flex-shrink: 0; }
+  .verify-block { margin-top: 12px; padding: 10px; border: 1px dashed #888; border-radius: 4px; page-break-inside: avoid; break-inside: avoid; }
   .verify-block .verify-text { font-size: 9pt; color: #444; word-break: break-all; }
   .verify-block .verify-text strong { color: #c41e1e; font-family: monospace; font-size: 11pt; letter-spacing: 1px; }
   .verify-block code { word-break: break-all; }
@@ -4348,9 +4341,6 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
   .einzelbrief { padding-top: 6mm; }
   .einzelbrief .absender { font-size: 8pt; color: #555; border-bottom: 1px solid #999; padding-bottom: 2px; margin: 4mm 0 14mm 0; }
   .einzelbrief .anschrift { font-size: 11pt; line-height: 1.5; margin-bottom: 8mm; padding: 4px 0; }
-  .einzelbrief .qr-section { display: flex; align-items: center; gap: 14px; margin-top: 14px; padding: 10px; background: #fafafa; border: 1px solid #ddd; page-break-inside: avoid; break-inside: avoid; }
-  .einzelbrief .qr-text { font-size: 9pt; color: #444; }
-  .einzelbrief .qr-text strong { font-family: monospace; color: #c41e1e; }
 </style></head><body>
   <div class="header">
     <img src="https://www.rosenweg4303.ch/logo-rosenweg.png" alt="Rosenweg">
@@ -4407,23 +4397,53 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
     Verwalter mit eingetragener Vollmacht zeichnen in Vertretung der Eigentümer.
     Bei mehreren Eigentümern einer Einheit genügt die Unterschrift eines Eigentümers oder eines bevollmächtigten Vertreters.
     Die Zeichnungsberechtigten oben bestätigen die Vollständigkeit dieser Sammlung gegenüber Banken und Behörden.
-    <strong>Vollständigkeit:</strong> Das Dokument ist nur vollständig gültig, wenn alle im Seitenzähler ausgewiesenen Seiten ("Seite X von Y") vorhanden sind. Fehlt eine Seite, ist die gesamte Unterschriftenliste als ungültig zu betrachten und über die Verifizierungs-URL neu zu beziehen.
+    <strong>Vollständigkeit:</strong> Das Dokument ist nur vollständig gültig, wenn alle im Seitenzähler ausgewiesenen Seiten ("Seite X von Y") vorhanden sind. Fehlt eine Seite, ist die gesamte Unterschriftenliste als ungültig zu betrachten und über die Echtheitsprüfung neu zu beziehen.
   </div>
   <div class="verify-block">
-    <img src="${qrUrl}" alt="QR-Code zur Verifizierung">
     <div class="verify-text">
-      <p><strong>Echtheitsprüfung:</strong> QR-Code scannen oder Hash prüfen unter:<br>
-      <code style="word-break:break-all">${escHtml(verifyUrl)}</code></p>
-      <p>Integritäts-Hash: <strong>${hash}</strong> · Generiert: ${escHtml(generatedAt)}</p>
+      <p><strong>Echtheitsprüfung:</strong> Hash aus der Fusszeile eingeben unter<br>
+      <code style="word-break:break-all">${escHtml(verifyPageBase)}</code></p>
+      <p>Integritäts-Hash dieses Dokuments: <strong>${hash}</strong> · Generiert: ${escHtml(generatedAt)}</p>
     </div>
   </div>
   ${einzelbriefeSeiten}
 </body></html>`;
 }
 
-// GET /api/unterschriftenliste/verify — Echtheitsprüfung über QR-Code (öffentlich)
-// Ruft Snapshot aus DB ab und zeigt Original-Inhalt zur Vergleichsprüfung
+// GET /api/unterschriftenliste/verify-json — Öffentliche JSON-API für die Echtheitsprüfungs-Webseite
+app.get('/api/unterschriftenliste/verify-json', async (req, res) => {
+  try {
+    const claimedHash = (req.query.hash || '').toUpperCase();
+    if (!/^[A-F0-9]{12}$/.test(claimedHash)) return res.status(400).json({ error: 'Ungültiges Hash-Format', found: false });
+    const snap = await pool.query('SELECT * FROM unterschriftenliste_snapshots WHERE hash = $1', [claimedHash]);
+    if (snap.rows.length === 0) return res.json({ found: false, hash: claimedHash });
+    const s = snap.rows[0];
+    pool.query('UPDATE unterschriftenliste_snapshots SET download_count = COALESCE(download_count,0) + 1 WHERE hash = $1', [claimedHash]).catch(() => {});
+    res.json({
+      found: true,
+      hash: s.hash,
+      stweg: s.stweg,
+      datum: String(s.datum).slice(0, 10),
+      anlass_titel: s.anlass_titel,
+      generated_at: s.generated_at,
+      generated_at_local: new Date(s.generated_at).toLocaleString('de-CH', { timeZone: 'Europe/Zurich' }),
+      download_count: (s.download_count || 0) + 1,
+      snapshot: s.snapshot_data
+    });
+  } catch (err) {
+    console.error('[Verify-JSON] error:', err.message);
+    res.status(500).json({ error: err.message, found: false });
+  }
+});
+
+// GET /api/unterschriftenliste/verify — Legacy-Route (z.B. ältere QR-Codes) → Redirect zur Webseite
 app.get('/api/unterschriftenliste/verify', async (req, res) => {
+  const h = (req.query.hash || '').toUpperCase().replace(/[^A-F0-9]/g, '').slice(0, 12);
+  return res.redirect(302, h ? `/echtheitspruefung.html?hash=${h}` : '/echtheitspruefung.html');
+});
+
+// (deaktiviert) Alte server-rendered Verify-HTML — bleibt für historische Snapshots als Fallback
+app.get('/api/unterschriftenliste/verify-legacy', async (req, res) => {
   try {
     const claimedHash = (req.query.hash || '').toUpperCase();
     if (!claimedHash) return res.status(400).send('<h1>Ungültige Verify-Anfrage</h1>');
