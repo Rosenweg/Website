@@ -4092,7 +4092,7 @@ function rosenwegNrAusBezeichnung(bezeichnung) {
 }
 async function buildUnterschriftenlisteHTML(stweg, opts) {
   const { datum, anlass_titel, anlass_zweck, ruecksendung_bis, ruecksendung_an,
-          ausschussmitglieder, revisoren, praesident_kontakt, kollektiv_text } = opts;
+          zeichnungsberechtigte = [], kollektiv_text } = opts;
   // Wohnungen + Kontakte aus DB ziehen (nur Wohnungen+Hobbyräume mit wertquote — Parkplätze nicht für Zirkular)
   const wohnungen = await pool.query(`
     SELECT w.id, w.bezeichnung, w.typ, w.wertquote_zaehler, w.wertquote_nenner
@@ -4315,33 +4315,30 @@ async function buildUnterschriftenlisteHTML(stweg, opts) {
     <tbody>${dataRows}</tbody>
   </table>
   ${einzelbriefeUebersicht}
-  ${(ausschussmitglieder || revisoren) ? `
+  ${zeichnungsberechtigte.length > 0 ? `
   <h2 class="section-title">Bestätigung des Ergebnisses &amp; Zeichnungsberechtigung</h2>
-  ${ausschussmitglieder ? `<p><strong>Ausschussmitglieder:</strong> ${escHtml(ausschussmitglieder)}</p>` : ''}
-  ${revisoren ? `<p><strong>Revisor/in(nen):</strong> ${escHtml(revisoren)}</p>` : ''}
-  <p class="hinweis">${escHtml(kollektiv_text || `Unterschriftsberechtigt sind die oben genannten Ausschussmitglieder und Revisor/innen (bis zu 4 Personen). Zwei dieser Personen sind – kollektiv zu zweien – ermächtigt, im Namen der Eigentümer/innen dieser STWEG die in diesem Zirkularbeschluss vorgesehenen Handlungen vorzunehmen.`)}</p>
-  <p class="hinweis">Mit ihren Unterschriften bestätigen die beiden nachstehend zeichnenden Personen das Ergebnis des Zirkularbeschlusses und nehmen die obige Zeichnungsberechtigung an.</p>
-  <div class="zeichnungs-block">
-    <div class="zeichnungs-box">
-      <div class="zeichnungs-titel">1. Unterschrift</div>
-      <div class="zeichnungs-zeile"><span>Name:</span> <span class="line"></span></div>
-      <div class="zeichnungs-zeile"><span>Datum:</span> <span class="line short"></span></div>
-      <div class="zeichnungs-zeile"><span>Unterschrift:</span></div>
-      <div class="zeichnungs-sigline"></div>
-    </div>
-    <div class="zeichnungs-box">
-      <div class="zeichnungs-titel">2. Unterschrift</div>
-      <div class="zeichnungs-zeile"><span>Name:</span> <span class="line"></span></div>
-      <div class="zeichnungs-zeile"><span>Datum:</span> <span class="line short"></span></div>
-      <div class="zeichnungs-zeile"><span>Unterschrift:</span></div>
-      <div class="zeichnungs-sigline"></div>
-    </div>
-  </div>
+  <p class="hinweis">${escHtml(kollektiv_text || `Folgende Personen sind im Rahmen dieses Beschlusses zeichnungs- und vertretungsberechtigt für die STWEG-Kooperation Rosenweg gegenüber Banken, Notaren und Dritten. Zwei dieser Personen sind – kollektiv zu zweien – ermächtigt, im Namen der Eigentümer/innen dieser STWEG die vorgesehenen Handlungen vorzunehmen.`)}</p>
+  <p class="hinweis">Mit ihren Unterschriften bestätigen die nachstehend zeichnenden Personen das Ergebnis des Zirkularbeschlusses und nehmen die Zeichnungsberechtigung an.</p>
+  <table class="signatur" style="margin-top:10px">
+    <thead><tr>
+      <th style="width:25%">Funktion</th>
+      <th style="width:30%">Name</th>
+      <th style="width:18%">Datum</th>
+      <th style="width:27%">Unterschrift</th>
+    </tr></thead>
+    <tbody>
+      ${zeichnungsberechtigte.map(z => `<tr>
+        <td><strong>${escHtml(z.funktion || '')}</strong></td>
+        <td>${escHtml(z.name || '')}</td>
+        <td style="height:50px"></td>
+        <td></td>
+      </tr>`).join('')}
+    </tbody>
+  </table>
   ` : ''}
-  ${(ruecksendung_an || praesident_kontakt) ? `
+  ${ruecksendung_an ? `
   <div class="footer-kontakte">
-    ${ruecksendung_an ? `<p><strong>Rückgabe:</strong> ${escHtml(ruecksendung_an)}</p>` : ''}
-    ${praesident_kontakt ? `<p><strong>Kontakt Präsident:</strong> ${escHtml(praesident_kontakt)}</p>` : ''}
+    <p><strong>Rückgabe:</strong> ${escHtml(ruecksendung_an)}</p>
   </div>
   ` : ''}
   <div class="footer-legal">
@@ -4403,15 +4400,18 @@ app.get('/api/unterschriftenliste/:stweg.pdf', authMiddleware, requirePermission
   try {
     const stweg = parseStweg(req.params.stweg);
     if (!stweg) return res.status(400).json({ error: 'Ungültige STWEG' });
+    let zeichner = [];
+    if (req.query.zeichnungsberechtigte) {
+      try { zeichner = JSON.parse(req.query.zeichnungsberechtigte); } catch {}
+      if (!Array.isArray(zeichner)) zeichner = [];
+    }
     const opts = {
       datum: req.query.datum || new Date().toISOString().slice(0, 10),
       anlass_titel: req.query.anlass_titel || 'Unterschriftenliste',
       anlass_zweck: req.query.anlass_zweck || '',
       ruecksendung_bis: req.query.ruecksendung_bis || '',
       ruecksendung_an: req.query.ruecksendung_an || '',
-      ausschussmitglieder: req.query.ausschussmitglieder || '',
-      revisoren: req.query.revisoren || '',
-      praesident_kontakt: req.query.praesident_kontakt || '',
+      zeichnungsberechtigte: zeichner,
       kollektiv_text: req.query.kollektiv_text || '',
     };
     const html = await buildUnterschriftenlisteHTML(stweg, opts);
