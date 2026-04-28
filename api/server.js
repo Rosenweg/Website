@@ -4131,19 +4131,18 @@ async function buildUnterschriftenlisteHTML(stweg, opts) {
     totalWQ += w.wertquote_zaehler || 0;
     const eigNamen = wInfo.eigentuemer.map(e => e.name).filter(Boolean);
     const verwNamen = wInfo.verwalter.map(v => v.name).filter(Boolean);
-    const wohnadressen = [...wInfo.adressen];
-    // Auswärts-Check pro Eigentümer-Adresse
-    const auswaertsAdressen = wohnadressen.filter(a => isAuswaerts(a, stweg));
-    const vorOrtAdressen = wohnadressen.filter(a => !isAuswaerts(a, stweg));
+    const korrespondenzAdressen = [...wInfo.adressen];
+    // Auswärts-Check über Korrespondenz-Adressen (= Eigentümer wohnt nicht im Rosenweg)
+    const auswaertsAdressen = korrespondenzAdressen.filter(a => isAuswaerts(a, stweg));
     let nameZelle = eigNamen.join(', ') || '<em>—</em>';
     if (verwNamen.length > 0) {
       nameZelle += `<div class="verwalter-line">↳ in Vertretung Verwalter: <strong>${verwNamen.join(', ')}</strong></div>`;
     }
+    // Wohnadresse = die Adresse der Wohnung selbst (Rosenweg X, abgeleitet aus Bezeichnung)
     const hausnr = rosenwegNrAusBezeichnung(w.bezeichnung);
-    const defaultAdr = hausnr ? `Rosenweg ${hausnr}, 4303 Kaiseraugst` : '4303 Kaiseraugst';
-    let adresseZelle = wohnadressen.length > 0 ? wohnadressen.map(escHtml).join('<br>') : defaultAdr;
+    let adresseZelle = hausnr ? `Rosenweg ${hausnr}, 4303 Kaiseraugst` : '4303 Kaiseraugst';
     if (auswaertsAdressen.length > 0) {
-      adresseZelle += `<div class="auswaerts-marker">📮 Einzelbrief separat verschickt</div>`;
+      adresseZelle += `<div class="auswaerts-marker">📮 Einzelbrief an: ${escHtml(auswaertsAdressen[0])}</div>`;
       einzelbriefe.push({ bezeichnung: w.bezeichnung, eigentuemer: eigNamen, verwalter: verwNamen, adresse: auswaertsAdressen[0] });
     }
     const wq = (w.wertquote_zaehler && w.wertquote_nenner) ? `${w.wertquote_zaehler}/${w.wertquote_nenner}` : '—';
