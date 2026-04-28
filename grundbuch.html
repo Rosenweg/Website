@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grundbuch-Erfassung — Rosenweg</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="icon" href="/logo-rosenweg.png">
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div id="nav-placeholder"></div>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+        <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center">
+            <p class="text-gray-600">Lade Login-Status…</p>
+        </div>
+
+        <div id="content" class="hidden">
+            <div class="mb-6">
+                <h1 class="text-2xl font-bold text-gray-900">Grundbuch-Erfassung</h1>
+                <p class="text-sm text-gray-600 mt-1">Wir erfassen die Grundbuchauszüge aller Anteile gemeinsam. Logge dich auf <a href="https://auszug2web.ag.ch" target="_blank" class="text-blue-600 hover:underline">auszug2web.ag.ch</a> mit deiner BurgerID/AGOV ein, mache pro Anteil einen Screenshot, und lade ihn hier hoch (max. 10 Abfragen pro Tag pro Account beim Grundbuchamt).</p>
+            </div>
+
+            <!-- Stats -->
+            <div id="stats" class="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
+                <div class="bg-white rounded-lg border p-3 text-center">
+                    <div id="s-total" class="text-2xl font-bold text-gray-800">–</div>
+                    <div class="text-xs text-gray-500">Anteile total</div>
+                </div>
+                <div class="bg-white rounded-lg border p-3 text-center">
+                    <div id="s-offen" class="text-2xl font-bold text-amber-600">–</div>
+                    <div class="text-xs text-gray-500">Offen</div>
+                </div>
+                <div class="bg-white rounded-lg border p-3 text-center">
+                    <div id="s-reserviert" class="text-2xl font-bold text-blue-600">–</div>
+                    <div class="text-xs text-gray-500">In Bearbeitung</div>
+                </div>
+                <div class="bg-white rounded-lg border p-3 text-center">
+                    <div id="s-erfasst" class="text-2xl font-bold text-emerald-600">–</div>
+                    <div class="text-xs text-gray-500">Erfasst</div>
+                </div>
+                <div class="bg-white rounded-lg border p-3 text-center">
+                    <div id="s-freigegeben" class="text-2xl font-bold text-purple-600">–</div>
+                    <div class="text-xs text-gray-500">Freigegeben</div>
+                </div>
+            </div>
+
+            <!-- Progress bar -->
+            <div class="bg-white rounded-lg border p-4 mb-6">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-medium text-gray-700">Fortschritt</span>
+                    <span id="progress-pct" class="text-sm text-gray-500">0%</span>
+                </div>
+                <div class="w-full bg-gray-200 rounded-full h-3">
+                    <div id="progress-bar" class="bg-emerald-500 h-3 rounded-full transition-all" style="width: 0%"></div>
+                </div>
+                <div id="contributors" class="mt-3 text-xs text-gray-500"></div>
+            </div>
+
+            <!-- Filter bar -->
+            <div class="bg-white rounded-lg border p-3 mb-4 flex flex-wrap gap-3 items-center">
+                <select id="filter-parzelle" onchange="loadAnteile()" class="border rounded px-2 py-1 text-sm">
+                    <option value="">Alle Parzellen</option>
+                </select>
+                <select id="filter-status" onchange="loadAnteile()" class="border rounded px-2 py-1 text-sm">
+                    <option value="">Alle Status</option>
+                    <option value="offen">Offen</option>
+                    <option value="reserviert">Reserviert</option>
+                    <option value="erfasst">Erfasst</option>
+                    <option value="freigegeben">Freigegeben</option>
+                </select>
+                <label class="flex items-center gap-2 text-sm">
+                    <input type="checkbox" id="filter-mine" onchange="loadAnteile()" class="rounded">
+                    Nur meine
+                </label>
+                <button onclick="loadAnteile()" class="ml-auto px-3 py-1 text-sm bg-gray-100 border rounded hover:bg-gray-200">Aktualisieren</button>
+            </div>
+
+            <!-- Anteile-Tabelle -->
+            <div class="bg-white rounded-lg border overflow-x-auto">
+                <table class="min-w-full text-sm">
+                    <thead class="bg-gray-50 text-xs uppercase text-gray-600">
+                        <tr>
+                            <th class="px-3 py-2 text-left">Anteil</th>
+                            <th class="px-3 py-2 text-left">Eigentümer</th>
+                            <th class="px-3 py-2 text-left">Wohnadresse</th>
+                            <th class="px-3 py-2 text-left">Status</th>
+                            <th class="px-3 py-2 text-left">Erfasst von</th>
+                            <th class="px-3 py-2"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="anteile-tbody" class="divide-y"></tbody>
+                </table>
+                <div id="loading" class="text-center text-gray-400 py-6 hidden">Lade…</div>
+                <div id="empty" class="text-center text-gray-400 py-6 hidden">Keine Anteile mit diesen Filtern.</div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Edit/Upload Modal -->
+    <div id="modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+            <div class="p-5 border-b sticky top-0 bg-white flex items-center justify-between">
+                <h2 id="modal-title" class="text-lg font-bold">Anteil erfassen</h2>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="p-5">
+                <a id="m-link" href="#" target="_blank" class="block text-blue-600 text-sm hover:underline mb-4">→ Auszug2Web öffnen (Login mit AGOV)</a>
+
+                <div class="mb-3">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Bild des Auszugs hochladen (PNG/JPG/PDF)</label>
+                    <input type="file" id="m-bild" accept="image/png,image/jpeg,application/pdf" class="block w-full text-sm border rounded px-2 py-1.5">
+                    <div id="m-bild-preview" class="mt-2 hidden">
+                        <img id="m-bild-img" class="max-h-72 border rounded">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 mb-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Anteil (Zähler)</label>
+                        <input type="number" id="m-anteil" class="w-full border rounded px-2 py-1.5 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Fläche (m²)</label>
+                        <input type="number" id="m-flaeche" class="w-full border rounded px-2 py-1.5 text-sm">
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Eigentumsform</label>
+                    <select id="m-form" class="w-full border rounded px-2 py-1.5 text-sm">
+                        <option value="">-- wählen --</option>
+                        <option>Alleineigentum</option>
+                        <option>Gesamteigentum (einf. Gesellschaft)</option>
+                        <option>Miteigentum</option>
+                        <option>Stockwerkeigentum</option>
+                    </select>
+                </div>
+
+                <div class="mb-3">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Eigentümer (Name pro Zeile)</label>
+                    <textarea id="m-eigentuemer" rows="3" class="w-full border rounded px-2 py-1.5 text-sm font-mono" placeholder="Mustermann Max&#10;Mustermann Erika"></textarea>
+                </div>
+
+                <div class="mb-3">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Wohnadressen (pro Zeile, falls mehrere)</label>
+                    <textarea id="m-adressen" rows="2" class="w-full border rounded px-2 py-1.5 text-sm" placeholder="Rosenweg 17, 4303 Kaiseraugst"></textarea>
+                </div>
+
+                <div class="mb-3">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Notizen (optional)</label>
+                    <textarea id="m-notizen" rows="2" class="w-full border rounded px-2 py-1.5 text-sm"></textarea>
+                </div>
+
+                <div id="m-error" class="hidden bg-red-50 text-red-700 text-sm rounded p-2 mb-3"></div>
+
+                <div class="flex gap-2 justify-end pt-3 border-t">
+                    <button onclick="closeModal()" class="px-3 py-2 text-sm bg-gray-100 border rounded hover:bg-gray-200">Abbrechen</button>
+                    <button id="m-release" onclick="releaseReservation()" class="hidden px-3 py-2 text-sm bg-amber-100 text-amber-800 border border-amber-300 rounded hover:bg-amber-200">Reservierung freigeben</button>
+                    <button onclick="saveAnteil()" id="m-save" class="px-4 py-2 text-sm bg-emerald-600 text-white rounded hover:bg-emerald-700">Speichern</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/authentik-auth.js?v=2026-04-28"></script>
+    <script src="/js/nav.js?v=2026-04-28"></script>
+    <script>
+    const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    let me = null, anteileCache = [], current = null;
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        const ok = await AuthentikAuth.requireAuth();
+        if (!ok) return;
+        me = AuthentikAuth.getUser();
+        document.getElementById('auth-gate').classList.add('hidden');
+        document.getElementById('content').classList.remove('hidden');
+        await Promise.all([loadStats(), loadAnteile()]);
+    });
+
+    async function loadStats() {
+        try {
+            const res = await AuthentikAuth.apiFetch('/api/grundbuch/status');
+            const data = await res.json();
+            const s = data.stats;
+            document.getElementById('s-total').textContent = s.total;
+            document.getElementById('s-offen').textContent = s.offen;
+            document.getElementById('s-reserviert').textContent = s.reserviert;
+            document.getElementById('s-erfasst').textContent = s.erfasst;
+            document.getElementById('s-freigegeben').textContent = s.freigegeben;
+            const pct = Math.round(((parseInt(s.erfasst) + parseInt(s.freigegeben)) / parseInt(s.total)) * 100);
+            document.getElementById('progress-pct').textContent = pct + '%';
+            document.getElementById('progress-bar').style.width = pct + '%';
+            const top = data.top_contributors.slice(0, 5).map(c => `${esc(c.user)} (${c.anzahl})`).join(' · ');
+            document.getElementById('contributors').textContent = top ? `Top-Beiträge: ${top}` : '';
+        } catch (e) { console.error('stats', e); }
+    }
+
+    async function loadAnteile() {
+        document.getElementById('loading').classList.remove('hidden');
+        document.getElementById('empty').classList.add('hidden');
+        const params = new URLSearchParams();
+        const p = document.getElementById('filter-parzelle').value;
+        const st = document.getElementById('filter-status').value;
+        if (p) params.set('parzelle', p);
+        if (st) params.set('status', st);
+        if (document.getElementById('filter-mine').checked) params.set('mine', '1');
+        try {
+            const res = await AuthentikAuth.apiFetch('/api/grundbuch/anteile?' + params);
+            const data = await res.json();
+            anteileCache = data.anteile || [];
+            renderAnteile();
+            populateParzellenFilter();
+        } catch (e) { console.error(e); }
+        document.getElementById('loading').classList.add('hidden');
+    }
+
+    function populateParzellenFilter() {
+        const sel = document.getElementById('filter-parzelle');
+        if (sel.options.length > 1) return;
+        const parzellen = [...new Set(anteileCache.map(a => a.parzelle))].sort();
+        for (const p of parzellen) sel.add(new Option('Parzelle ' + p, p));
+    }
+
+    function statusBadge(s) {
+        const map = {
+            offen: 'bg-gray-100 text-gray-600',
+            reserviert: 'bg-blue-100 text-blue-700',
+            erfasst: 'bg-emerald-100 text-emerald-700',
+            freigegeben: 'bg-purple-100 text-purple-700',
+        };
+        return `<span class="text-xs ${map[s]||'bg-gray-100'} px-2 py-0.5 rounded">${s}</span>`;
+    }
+
+    function renderAnteile() {
+        const tbody = document.getElementById('anteile-tbody');
+        if (anteileCache.length === 0) {
+            tbody.innerHTML = '';
+            document.getElementById('empty').classList.remove('hidden');
+            return;
+        }
+        tbody.innerHTML = anteileCache.map(a => {
+            const eig = (Array.isArray(a.eigentuemer) ? a.eigentuemer.join(', ') : '') || '<span class="text-gray-300">–</span>';
+            const adr = (Array.isArray(a.wohnadressen) ? a.wohnadressen.join('; ') : '') || '<span class="text-gray-300">–</span>';
+            const erf = a.erfasst_von ? esc(a.erfasst_von) : (a.reserviert_von ? `<span class="text-blue-600">res: ${esc(a.reserviert_von)}</span>` : '');
+            const cta = a.status === 'offen' ? 'Erfassen' : (a.status === 'reserviert' ? (a.reserviert_von === me?.email ? 'Fortsetzen' : 'Reserviert') : 'Bearbeiten');
+            const disabled = a.status === 'reserviert' && a.reserviert_von !== me?.email;
+            return `<tr class="hover:bg-gray-50">
+                <td class="px-3 py-2 font-mono text-xs">${a.anteil_typ} ${a.parzelle}-${a.sub_id} · ${a.anteil_z}/${a.anteil_n}</td>
+                <td class="px-3 py-2">${eig}</td>
+                <td class="px-3 py-2">${adr}</td>
+                <td class="px-3 py-2">${statusBadge(a.status)}</td>
+                <td class="px-3 py-2 text-xs text-gray-500">${erf}</td>
+                <td class="px-3 py-2 text-right">
+                    ${a.bild_path ? `<a href="/api/grundbuch/anteile/${a.parzelle}/${a.sub_id}/bild" target="_blank" class="text-blue-600 text-xs mr-2">Bild</a>` : ''}
+                    <button onclick="openAnteil(${a.parzelle},${a.sub_id})" ${disabled?'disabled':''} class="px-2 py-1 text-xs ${disabled?'bg-gray-100 text-gray-400 cursor-not-allowed':'bg-blue-600 text-white hover:bg-blue-700'} rounded">${cta}</button>
+                </td>
+            </tr>`;
+        }).join('');
+    }
+
+    async function openAnteil(parzelle, sub_id) {
+        current = anteileCache.find(a => a.parzelle === parzelle && a.sub_id === sub_id);
+        if (!current) return;
+        document.getElementById('modal').classList.remove('hidden');
+        document.getElementById('modal-title').textContent = `${current.anteil_typ} ${parzelle}-${sub_id} · Anteil ${current.anteil_z}/${current.anteil_n}`;
+        document.getElementById('m-link').href = `https://auszug2web.ag.ch/?gem=Kaiseraugst&parzelle=${parzelle}`;
+        document.getElementById('m-anteil').value = current.anteil_z || '';
+        document.getElementById('m-flaeche').value = current.flaeche_m2 || '';
+        document.getElementById('m-form').value = current.eigentumsform || '';
+        document.getElementById('m-eigentuemer').value = (current.eigentuemer || []).join('\n');
+        document.getElementById('m-adressen').value = (current.wohnadressen || []).join('\n');
+        document.getElementById('m-notizen').value = current.notizen || '';
+        document.getElementById('m-bild-preview').classList.add('hidden');
+        document.getElementById('m-bild').value = '';
+        document.getElementById('m-error').classList.add('hidden');
+        document.getElementById('m-release').classList.toggle('hidden', !(current.status === 'reserviert' && current.reserviert_von === me?.email));
+        // Reservieren
+        if (current.status === 'offen') {
+            try {
+                await AuthentikAuth.apiFetch(`/api/grundbuch/anteile/${parzelle}/${sub_id}/reserve`, { method: 'POST' });
+            } catch (e) {}
+        }
+    }
+
+    function closeModal() {
+        document.getElementById('modal').classList.add('hidden');
+        current = null;
+        loadAnteile();
+        loadStats();
+    }
+
+    document.getElementById('m-bild').addEventListener('change', e => {
+        const f = e.target.files[0];
+        if (!f) return;
+        if (f.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onload = ev => {
+                document.getElementById('m-bild-img').src = ev.target.result;
+                document.getElementById('m-bild-preview').classList.remove('hidden');
+            };
+            reader.readAsDataURL(f);
+        }
+    });
+
+    async function saveAnteil() {
+        if (!current) return;
+        const errBox = document.getElementById('m-error');
+        errBox.classList.add('hidden');
+        const eig = document.getElementById('m-eigentuemer').value.split('\n').map(s => s.trim()).filter(Boolean);
+        const adr = document.getElementById('m-adressen').value.split('\n').map(s => s.trim()).filter(Boolean);
+        const body = {
+            anteil_z: parseInt(document.getElementById('m-anteil').value) || null,
+            flaeche_m2: parseInt(document.getElementById('m-flaeche').value) || null,
+            eigentumsform: document.getElementById('m-form').value || null,
+            eigentuemer: eig,
+            wohnadressen: adr,
+            notizen: document.getElementById('m-notizen').value || null,
+        };
+        const fileInput = document.getElementById('m-bild');
+        if (fileInput.files[0]) {
+            const f = fileInput.files[0];
+            const buf = await f.arrayBuffer();
+            const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+            body.bild_base64 = b64;
+            body.bild_filename = f.name;
+        }
+        document.getElementById('m-save').disabled = true;
+        document.getElementById('m-save').textContent = 'Speichere…';
+        try {
+            const r = await AuthentikAuth.apiFetch(`/api/grundbuch/anteile/${current.parzelle}/${current.sub_id}`, {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) {
+                const e = await r.json();
+                errBox.textContent = e.error || 'Fehler';
+                errBox.classList.remove('hidden');
+                return;
+            }
+            closeModal();
+        } catch (e) {
+            errBox.textContent = e.message;
+            errBox.classList.remove('hidden');
+        } finally {
+            document.getElementById('m-save').disabled = false;
+            document.getElementById('m-save').textContent = 'Speichern';
+        }
+    }
+
+    async function releaseReservation() {
+        if (!current) return;
+        try {
+            await AuthentikAuth.apiFetch(`/api/grundbuch/anteile/${current.parzelle}/${current.sub_id}/reserve`, { method: 'DELETE' });
+        } catch (e) {}
+        closeModal();
+    }
+    </script>
+</body>
+</html>

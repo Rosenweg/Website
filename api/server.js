@@ -5688,6 +5688,175 @@ app.post('/api/email-archive/:id/confirm-delete', authMiddleware, requireArchive
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// GRUNDBUCH-CROWDSOURCING (Eigentümer erfassen Anteile per Upload)
+// ═══════════════════════════════════════════════════════════════════
+
+const GRUNDBUCH_BILDER_DIR = 'allgemein/grundbuch-bilder';
+
+function isAusschussOrTechnik(req) {
+  const groups = req.user?.groups || [];
+  return isTechnik(groups) || isPraesident(groups) || isAusschussForAny(groups);
+}
+
+// GET /api/grundbuch/status — Übersicht-Statistik
+app.get('/api/grundbuch/status', authMiddleware, async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT
+        COUNT(*) AS total,
+        COUNT(*) FILTER (WHERE status = 'offen') AS offen,
+        COUNT(*) FILTER (WHERE status = 'reserviert') AS reserviert,
+        COUNT(*) FILTER (WHERE status = 'erfasst') AS erfasst,
+        COUNT(*) FILTER (WHERE status = 'freigegeben') AS freigegeben,
+        COUNT(DISTINCT erfasst_von) FILTER (WHERE erfasst_von IS NOT NULL) AS contributors
+      FROM grundbuch_anteile`);
+    const top = await pool.query(`
+      SELECT erfasst_von AS user, COUNT(*) AS anzahl
+      FROM grundbuch_anteile WHERE erfasst_von IS NOT NULL
+      GROUP BY erfasst_von ORDER BY anzahl DESC LIMIT 10`);
+    res.json({ stats: r.rows[0], top_contributors: top.rows });
+  } catch (err) {
+    console.error('grundbuch status err:', err.message);
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// GET /api/grundbuch/anteile — Liste mit Filtern (alle eingeloggten User)
+app.get('/api/grundbuch/anteile', authMiddleware, async (req, res) => {
+  try {
+    const where = [];
+    const params = [];
+    if (req.query.parzelle) { params.push(parseInt(req.query.parzelle)); where.push(`parzelle = $${params.length}`); }
+    if (req.query.status) { params.push(req.query.status); where.push(`status = $${params.length}`); }
+    if (req.query.mine === '1' && req.user?.email) { params.push(req.user.email); where.push(`(erfasst_von = $${params.length} OR reserviert_von = $${params.length})`); }
+    const wsql = where.length ? 'WHERE ' + where.join(' AND ') : '';
+    const r = await pool.query(`
+      SELECT parzelle, sub_id, anteil_z, anteil_n, anteil_typ, gemeinde, flaeche_m2,
+             eigentumsform, eigentuemer, wohnadressen, bild_path,
+             status, reserviert_von, reserviert_am, erfasst_von, erfasst_am,
+             verifiziert_von, verifiziert_am, notizen
+      FROM grundbuch_anteile ${wsql}
+      ORDER BY parzelle, sub_id`, params);
+    res.json({ anteile: r.rows });
+  } catch (err) {
+    console.error('grundbuch list err:', err.message);
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// POST /api/grundbuch/anteile/:parzelle/:sub_id/reserve — als „in Bearbeitung" markieren
+app.post('/api/grundbuch/anteile/:parzelle/:sub_id/reserve', authMiddleware, async (req, res) => {
+  try {
+    const p = parseInt(req.params.parzelle), s = parseInt(req.params.sub_id);
+    const me = req.user?.email || req.user?.name || 'unknown';
+    // Auto-release nach 30 Min
+    await pool.query(`
+      UPDATE grundbuch_anteile SET status='offen', reserviert_von=NULL, reserviert_am=NULL
+      WHERE status='reserviert' AND reserviert_am < now() - interval '30 minutes'`);
+    const r = await pool.query(`
+      UPDATE grundbuch_anteile
+      SET status='reserviert', reserviert_von=$1, reserviert_am=now(), updated_at=now()
+      WHERE parzelle=$2 AND sub_id=$3 AND status IN ('offen','reserviert') AND (reserviert_von IS NULL OR reserviert_von=$1)
+      RETURNING *`, [me, p, s]);
+    if (r.rows.length === 0) return res.status(409).json({ error: 'Bereits reserviert oder erfasst' });
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error('grundbuch reserve err:', err.message);
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// DELETE /api/grundbuch/anteile/:parzelle/:sub_id/reserve — Reservierung freigeben
+app.delete('/api/grundbuch/anteile/:parzelle/:sub_id/reserve', authMiddleware, async (req, res) => {
+  try {
+    const p = parseInt(req.params.parzelle), s = parseInt(req.params.sub_id);
+    const me = req.user?.email || req.user?.name || 'unknown';
+    const r = await pool.query(`
+      UPDATE grundbuch_anteile SET status='offen', reserviert_von=NULL, reserviert_am=NULL, updated_at=now()
+      WHERE parzelle=$1 AND sub_id=$2 AND reserviert_von=$3 AND status='reserviert'
+      RETURNING parzelle, sub_id`, [p, s, me]);
+    res.json({ released: r.rows.length > 0 });
+  } catch (err) { res.status(500).json({ error: 'Fehler' }); }
+});
+
+// POST /api/grundbuch/anteile/:parzelle/:sub_id — Daten + Bild speichern (multipart-base64)
+// Body: { eigentumsform, eigentuemer:[], wohnadressen:[], anteil_z?, flaeche_m2?, notizen?, bild_base64?, bild_filename? }
+app.post('/api/grundbuch/anteile/:parzelle/:sub_id', authMiddleware, async (req, res) => {
+  try {
+    const p = parseInt(req.params.parzelle), s = parseInt(req.params.sub_id);
+    const me = req.user?.email || req.user?.name || 'unknown';
+    const b = req.body || {};
+    let bildPath = null;
+    if (b.bild_base64 && b.bild_filename) {
+      const ext = (b.bild_filename.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (!['png', 'jpg', 'jpeg', 'pdf'].includes(ext)) return res.status(400).json({ error: 'Nur PNG/JPG/PDF erlaubt' });
+      const buf = Buffer.from(b.bild_base64, 'base64');
+      if (buf.length > 10 * 1024 * 1024) return res.status(400).json({ error: 'Datei zu gross (>10MB)' });
+      const dir = pathModule.join(DOCS_PATH, GRUNDBUCH_BILDER_DIR);
+      try { await fs.mkdir(dir, { recursive: true }); } catch {}
+      const az = b.anteil_z || (await pool.query('SELECT anteil_z FROM grundbuch_anteile WHERE parzelle=$1 AND sub_id=$2', [p, s])).rows[0]?.anteil_z;
+      const filename = `grundbuch_p${p}-${s}_${az || 'x'}-1000.${ext}`;
+      const fullPath = pathModule.join(dir, filename);
+      await fs.writeFile(fullPath, buf);
+      bildPath = `${GRUNDBUCH_BILDER_DIR}/${filename}`;
+    }
+    const r = await pool.query(`
+      UPDATE grundbuch_anteile
+      SET eigentumsform = COALESCE($1, eigentumsform),
+          eigentuemer = COALESCE($2::jsonb, eigentuemer),
+          wohnadressen = COALESCE($3::jsonb, wohnadressen),
+          flaeche_m2 = COALESCE($4, flaeche_m2),
+          notizen = COALESCE($5, notizen),
+          bild_path = COALESCE($6, bild_path),
+          erfasst_von = $7, erfasst_am = now(),
+          status = 'erfasst',
+          reserviert_von = NULL, reserviert_am = NULL,
+          updated_at = now()
+      WHERE parzelle = $8 AND sub_id = $9
+      RETURNING *`,
+      [b.eigentumsform || null,
+       b.eigentuemer ? JSON.stringify(b.eigentuemer) : null,
+       b.wohnadressen ? JSON.stringify(b.wohnadressen) : null,
+       b.flaeche_m2 || null, b.notizen || null,
+       bildPath, me, p, s]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Anteil nicht gefunden' });
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error('grundbuch save err:', err.message);
+    res.status(500).json({ error: 'Fehler', detail: err.message });
+  }
+});
+
+// POST /api/grundbuch/anteile/:parzelle/:sub_id/verify — Ausschuss/Technik bestätigt
+app.post('/api/grundbuch/anteile/:parzelle/:sub_id/verify', authMiddleware, async (req, res) => {
+  if (!isAusschussOrTechnik(req)) return res.status(403).json({ error: 'Nur Ausschuss/Technik darf verifizieren' });
+  try {
+    const p = parseInt(req.params.parzelle), s = parseInt(req.params.sub_id);
+    const me = req.user?.email || req.user?.name || 'unknown';
+    const r = await pool.query(`
+      UPDATE grundbuch_anteile SET status='freigegeben', verifiziert_von=$1, verifiziert_am=now(), updated_at=now()
+      WHERE parzelle=$2 AND sub_id=$3 AND status='erfasst' RETURNING *`, [me, p, s]);
+    if (r.rows.length === 0) return res.status(409).json({ error: 'Nur erfasste Anteile können verifiziert werden' });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: 'Fehler' }); }
+});
+
+// GET /api/grundbuch/anteile/:parzelle/:sub_id/bild — Auszug-Bild ausliefern
+app.get('/api/grundbuch/anteile/:parzelle/:sub_id/bild', authMiddleware, async (req, res) => {
+  try {
+    const p = parseInt(req.params.parzelle), s = parseInt(req.params.sub_id);
+    const r = await pool.query('SELECT bild_path FROM grundbuch_anteile WHERE parzelle=$1 AND sub_id=$2', [p, s]);
+    if (!r.rows[0]?.bild_path) return res.status(404).end();
+    const fullPath = pathModule.join(DOCS_PATH, r.rows[0].bild_path);
+    if (!fullPath.startsWith(pathModule.resolve(DOCS_PATH) + '/')) return res.status(400).end();
+    const ext = r.rows[0].bild_path.split('.').pop().toLowerCase();
+    const types = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', pdf: 'application/pdf' };
+    res.setHeader('Content-Type', types[ext] || 'application/octet-stream');
+    fsSync.createReadStream(fullPath).pipe(res);
+  } catch (err) { res.status(500).json({ error: 'Fehler' }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // DOCUMENTS (local fileserver, NFS-mounted or local path)
 // ═══════════════════════════════════════════════════════════════════
 
