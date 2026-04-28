@@ -4012,6 +4012,92 @@ setInterval(checkStaleDruckerTags, 24 * 60 * 60 * 1000);
 setInterval(syncAuthentikDeactivations, 24 * 60 * 60 * 1000);
 setTimeout(() => { checkStaleDruckerTags(); syncAuthentikDeactivations(); }, 5 * 60 * 1000);
 
+// ─── Pickup-Reminder für ungeholte Druckaufträge ───────────────────
+// Schickt eine Sammel-Mail an Technik+Präsident mit allen Drucksachen,
+// die seit >24h gedruckt sind, aber noch nicht abgeholt wurden.
+// Cooldown: pro Job nur alle 3 Tage erneut erinnern.
+async function sendPickupReminder() {
+  try {
+    const { rows: jobs } = await pool.query(`
+      SELECT id, token, recipient_name, recipient_address, recipient_wohnung,
+             recipient_stweg, sender_email, subject, printer, created_at, last_reminder_at
+      FROM print_jobs
+      WHERE picked_up_at IS NULL
+        AND status = 'printed'
+        AND created_at < NOW() - INTERVAL '24 hours'
+        AND (last_reminder_at IS NULL OR last_reminder_at < NOW() - INTERVAL '3 days')
+      ORDER BY created_at ASC
+    `);
+    if (jobs.length === 0) {
+      console.log('[PickupReminder] Keine offenen Druckaufträge zum Erinnern');
+      return;
+    }
+
+    // Empfänger-Liste: Technik + Präsident
+    const notifyEmails = new Set();
+    const members = await pool.query("SELECT email, groups_json FROM users WHERE active = true");
+    for (const row of members.rows) {
+      try {
+        const groups = JSON.parse(row.groups_json || '[]');
+        if (groups.some(g => ['technik', 'präsident'].includes(g.toLowerCase())) && row.email && !row.email.includes('placeholder')) {
+          notifyEmails.add(row.email);
+        }
+      } catch {}
+    }
+    if (notifyEmails.size === 0) {
+      console.log('[PickupReminder] Keine Notify-Empfänger gefunden');
+      return;
+    }
+
+    const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const rows = jobs.map(j => {
+      const ageDays = Math.floor((Date.now() - new Date(j.created_at).getTime()) / 86400000);
+      const pickupUrl = `${SITE_URL}/abholung.html?token=${j.token}`;
+      return `<tr>
+        <td style="padding:6px 8px">${esc(j.recipient_name || '—')}${j.recipient_wohnung ? `<br><span style="font-size:11px;color:#666">${esc(j.recipient_wohnung)}</span>` : ''}</td>
+        <td style="padding:6px 8px">${esc(j.printer)}</td>
+        <td style="padding:6px 8px;text-align:right;color:${ageDays > 7 ? '#c41e1e' : '#666'};font-weight:${ageDays > 7 ? '600' : 'normal'}">${ageDays} Tage</td>
+        <td style="padding:6px 8px;font-size:11px;color:#444">${esc((j.subject || '').slice(0, 50))}</td>
+        <td style="padding:6px 8px"><a href="${pickupUrl}" style="font-size:11px;color:#c41e1e">Abholung bestätigen</a></td>
+      </tr>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;max-width:800px;margin:0 auto">
+      <h2 style="color:#c41e1e">${jobs.length} Druckauftrag${jobs.length === 1 ? '' : 'e'} wartet${jobs.length === 1 ? '' : 'en'} auf Abholung</h2>
+      <p>Folgende Drucksachen liegen seit mehr als 24 Stunden bereit und sind noch nicht als abgeholt markiert:</p>
+      <table style="width:100%;border-collapse:collapse;border:1px solid #ddd">
+        <thead><tr style="background:#fafafa">
+          <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">Empfänger</th>
+          <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">Drucker</th>
+          <th style="padding:6px 8px;text-align:right;border-bottom:1px solid #ddd">Alter</th>
+          <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">Betreff</th>
+          <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">Aktion</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p style="font-size:11px;color:#888;margin-top:16px">Bitte Drucksachen verteilen und über den Link "Abholung bestätigen" oder direkt am ausgedruckten Deckblatt-QR quittieren.<br>
+      Diese Erinnerung wird pro Auftrag alle 3 Tage wiederholt, bis er abgeholt ist.</p>
+    </body></html>`;
+
+    await loggedSendMail({
+      from: `"Rosenweg Druckserver" <noreply@${VERTEILER_DOMAIN}>`,
+      to: [...notifyEmails].join(', '),
+      subject: `${jobs.length} Druckauftr${jobs.length === 1 ? 'ag wartet' : 'äge warten'} auf Abholung`,
+      html,
+    }, 'pickup-reminder');
+
+    await pool.query(
+      `UPDATE print_jobs SET last_reminder_at = NOW() WHERE id = ANY($1::int[])`,
+      [jobs.map(j => j.id)]
+    );
+    console.log(`[PickupReminder] ${jobs.length} offene Aufträge an ${notifyEmails.size} Empfänger gemeldet`);
+  } catch (err) {
+    console.error('[PickupReminder] Fehler:', err.message);
+  }
+}
+setInterval(sendPickupReminder, 24 * 60 * 60 * 1000);
+setTimeout(sendPickupReminder, 10 * 60 * 1000); // initial run nach 10min
+
 // POST /api/wohnungen/sync-authentik - Bulk sync all kontakte with email to Authentik
 app.post('/api/wohnungen/sync-authentik', authMiddleware, adminOnly, async (req, res) => {
   try {
@@ -6758,6 +6844,40 @@ function requireAusschussOrTechnik(req, res, next) {
   res.status(403).json({ error: 'Nur für Ausschuss/Technik' });
 }
 
+// ─── Email-Log (Admin-UI) ───────────────────────────────────────────
+// GET /api/email-log — letzte 500 Versand-Einträge mit Filter
+app.get('/api/email-log', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+  try {
+    const where = [];
+    const params = [];
+    if (req.query.trigger) { params.push(req.query.trigger); where.push(`trigger = $${params.length}`); }
+    if (req.query.q) {
+      params.push(`%${req.query.q}%`);
+      where.push(`(subject ILIKE $${params.length} OR to_addresses ILIKE $${params.length} OR from_email ILIKE $${params.length})`);
+    }
+    if (req.query.status) { params.push(req.query.status); where.push(`status = $${params.length}`); }
+    if (req.query.since) { params.push(req.query.since); where.push(`created_at >= $${params.length}`); }
+    const sql = `
+      SELECT id, created_at, trigger, from_email, from_name, subject, to_addresses,
+             recipients_count, has_attachments, status, message_id, error_message, verteiler_id
+      FROM email_log
+      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+      ORDER BY created_at DESC LIMIT 500
+    `;
+    const { rows } = await pool.query(sql, params);
+    // Zusätzlich: Liste aller bekannten Trigger für Filter-Dropdown
+    const { rows: triggers } = await pool.query(
+      `SELECT trigger, COUNT(*) AS cnt FROM email_log WHERE trigger IS NOT NULL
+       AND created_at > NOW() - INTERVAL '90 days'
+       GROUP BY trigger ORDER BY cnt DESC`
+    );
+    res.json({ entries: rows, triggers });
+  } catch (err) {
+    console.error('[email-log] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Public Project Access ──────────────────────────────────────────
 // GET /api/public/project/:slug — view project without login (only if public_access = true)
 app.get('/api/public/project/:slug', async (req, res) => {
@@ -7442,6 +7562,8 @@ async function initDB() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_print_jobs_token ON print_jobs(token);
+      ALTER TABLE print_jobs ADD COLUMN IF NOT EXISTS last_reminder_at TIMESTAMPTZ;
+      CREATE INDEX IF NOT EXISTS idx_print_jobs_open ON print_jobs (created_at DESC) WHERE picked_up_at IS NULL AND status = 'printed';
       CREATE INDEX IF NOT EXISTS idx_connlog_mac ON connection_log(mac);
       CREATE INDEX IF NOT EXISTS idx_connlog_network ON connection_log(network_name);
       CREATE INDEX IF NOT EXISTS idx_connlog_ip ON connection_log(ip);
