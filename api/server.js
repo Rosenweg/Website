@@ -4171,7 +4171,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts) {
 
   // Verify-URL für QR-Code → kann auf jedem Smartphone gescannt werden,
   // führt zur Server-seitigen Original-Liste mit identischem Hash
-  const verifyUrl = `${SITE_URL}/api/unterschriftenliste/verify?stweg=${stweg}&datum=${datum}&hash=${hash}`;
+  const verifyUrl = `${SITE_URL}/api/unterschriftenliste/verify?stweg=${stweg}&datum=${datum}&anlass=${encodeURIComponent(anlass_titel)}&hash=${hash}`;
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&margin=2&data=${encodeURIComponent(verifyUrl)}`;
 
   const einzelbriefeUebersicht = einzelbriefe.length === 0 ? '' : `
@@ -4280,15 +4280,18 @@ async function buildUnterschriftenlisteHTML(stweg, opts) {
   .zeichnungs-sigline { border-bottom: 1px solid #888; height: 30px; margin-top: 4px; }
   .footer-kontakte { margin-top: 14px; padding: 6px 0; border-top: 1px solid #ccc; font-size: 9pt; color: #444; }
   .footer-kontakte p { margin: 2px 0; }
-  .verify-block { display: flex; gap: 14px; align-items: center; margin-top: 12px; padding: 10px; border: 1px dashed #888; border-radius: 4px; }
+  .verify-block { display: flex; gap: 14px; align-items: center; margin-top: 12px; padding: 10px; border: 1px dashed #888; border-radius: 4px; page-break-inside: avoid; break-inside: avoid; }
   .verify-block img { width: 110px; height: 110px; flex-shrink: 0; }
-  .verify-block .verify-text { font-size: 9pt; color: #444; }
+  .verify-block .verify-text { font-size: 9pt; color: #444; word-break: break-all; }
   .verify-block .verify-text strong { color: #c41e1e; font-family: monospace; font-size: 11pt; letter-spacing: 1px; }
+  .verify-block code { word-break: break-all; }
+  .footer-legal { page-break-inside: avoid; break-inside: avoid; }
+  .zeichnungs-block, table.signatur tr { page-break-inside: avoid; break-inside: avoid; }
   .page-break { page-break-after: always; }
   .einzelbrief { padding-top: 6mm; }
   .einzelbrief .absender { font-size: 8pt; color: #555; border-bottom: 1px solid #999; padding-bottom: 2px; margin: 4mm 0 14mm 0; }
   .einzelbrief .anschrift { font-size: 11pt; line-height: 1.5; margin-bottom: 8mm; padding: 4px 0; }
-  .einzelbrief .qr-section { display: flex; align-items: center; gap: 14px; margin-top: 14px; padding: 10px; background: #fafafa; border: 1px solid #ddd; }
+  .einzelbrief .qr-section { display: flex; align-items: center; gap: 14px; margin-top: 14px; padding: 10px; background: #fafafa; border: 1px solid #ddd; page-break-inside: avoid; break-inside: avoid; }
   .einzelbrief .qr-text { font-size: 9pt; color: #444; }
   .einzelbrief .qr-text strong { font-family: monospace; color: #c41e1e; }
 </style></head><body>
@@ -4365,19 +4368,16 @@ app.get('/api/unterschriftenliste/verify', async (req, res) => {
   try {
     const stweg = parseStweg(req.query.stweg);
     const datum = req.query.datum || '';
+    const anlass = req.query.anlass || 'Unterschriftenliste';
     const claimedHash = (req.query.hash || '').toUpperCase();
     if (!stweg || !claimedHash) return res.status(400).send('<h1>Ungültige Verify-Anfrage</h1>');
-    // Hash neu berechnen
+    // Hash neu berechnen mit gleichem Algorithmus wie buildUnterschriftenlisteHTML
     const wq = await pool.query('SELECT id FROM wohnungen WHERE stweg = $1 AND typ IN (\'Wohnung\',\'Hobbyraum\') ORDER BY bezeichnung', [stweg]);
     const wohnungIds = wq.rows.map(r => r.id);
-    // Wir brauchen zusätzlich den anlass_titel für den Hash → kann nicht aus URL kommen ohne ihn. Fall back: ohne anlass_titel
-    // Konvention: wenn Hash matched, Liste war nicht manipuliert
-    const hashInput = `${stweg}|${datum}|${wohnungIds.join(',')}`;
-    const variants = [
-      crypto.createHash('sha256').update(hashInput).digest('hex').substring(0, 12).toUpperCase(),
-      crypto.createHash('sha256').update(hashInput + '|Unterschriftenliste').digest('hex').substring(0, 12).toUpperCase(),
-    ];
-    const matchHash = variants.includes(claimedHash);
+    const hashInput = `${stweg}|${datum}|${wohnungIds.join(',')}|${anlass}`;
+    const expected = crypto.createHash('sha256').update(hashInput).digest('hex').substring(0, 12).toUpperCase();
+    const matchHash = (claimedHash === expected);
+    const variants = [expected];
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(`<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>Verifizierung — Rosenweg</title>
 <style>body{font-family:system-ui,sans-serif;max-width:640px;margin:40px auto;padding:20px;color:#222;}h1{color:#c41e1e}.box{padding:18px;border-radius:8px;margin:14px 0}.ok{background:#d1fae5;border-left:4px solid #10b981}.warn{background:#fee2e2;border-left:4px solid #dc2626}code{background:#f5f5f5;padding:2px 5px;border-radius:3px;font-size:90%}</style></head><body>
