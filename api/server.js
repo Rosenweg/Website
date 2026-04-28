@@ -97,6 +97,44 @@ function generateOTP() {
   return crypto.randomInt(100000, 999999).toString();
 }
 
+// Wrapper um transporter.sendMail() der jeden Versand in email_log protokolliert.
+// trigger ist ein kurzer Slug ('print-notification', 'otp-login', ...) zur Nachvollziehbarkeit.
+async function loggedSendMail(mailOpts, trigger, extra = {}) {
+  const toRaw = mailOpts.to || '';
+  const toAddresses = Array.isArray(toRaw) ? toRaw.join(', ') : String(toRaw);
+  const recipientsCount = (toAddresses ? toAddresses.split(',').filter(s => s.trim()).length : 0);
+  const fromRaw = String(mailOpts.from || MAIL_FROM);
+  // Versuch, Name <email> aus from zu extrahieren
+  let fromEmail = fromRaw, fromName = null;
+  const m = fromRaw.match(/^"?([^"<]+?)"?\s*<([^>]+)>$/);
+  if (m) { fromName = m[1].trim(); fromEmail = m[2].trim(); }
+  let result, error;
+  try {
+    result = await transporter.sendMail(mailOpts);
+  } catch (err) {
+    error = err;
+  }
+  try {
+    await pool.query(
+      `INSERT INTO email_log (trigger, from_email, from_name, subject, to_addresses, recipients_count, has_attachments, status, message_id, error_message, verteiler_id, recipients_list)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [
+        trigger, fromEmail, fromName, mailOpts.subject || null, toAddresses, recipientsCount,
+        Array.isArray(mailOpts.attachments) && mailOpts.attachments.length > 0,
+        error ? 'failed' : 'sent',
+        result?.messageId || null,
+        error ? String(error.message || error).slice(0, 1000) : null,
+        extra.verteiler_id || null,
+        extra.recipients_list || null,
+      ]
+    );
+  } catch (logErr) {
+    console.error('[email_log] insert error:', logErr.message);
+  }
+  if (error) throw error;
+  return result;
+}
+
 function isAllowlistedSender(email) {
   if (!email) return false;
   const e = email.toLowerCase();
@@ -188,7 +226,7 @@ app.post('/api/otp/send', async (req, res) => {
     );
 
     // Send email
-    await transporter.sendMail({
+    await loggedSendMail({
       from: MAIL_FROM,
       to: email,
       subject: 'Ihr Anmeldecode - Rosenweg',
@@ -203,7 +241,7 @@ app.post('/api/otp/send', async (req, res) => {
           <p style="color: #6b7280; font-size: 14px;">Der Code ist 10 Minuten gültig.</p>
         </div>
       `,
-    });
+    }, 'otp-login');
 
     res.json({ success: true, message: 'OTP wurde per E-Mail gesendet' });
   } catch (err) {
@@ -1925,7 +1963,7 @@ async function runMonthlyBilling() {
         }).join('');
 
         try {
-          await transporter.sendMail({
+          await loggedSendMail({
             from: MAIL_FROM,
             to: user.email,
             subject: `Waschküche Abrechnung ${monthName} ${year} - STWEG 3`,
@@ -1987,7 +2025,7 @@ async function runMonthlyBilling() {
                 </p>
               </div>
             `,
-          });
+          }, 'wasch-billing');
 
           await pool.query(
             'UPDATE wasch_billing SET email_sent = true, email_sent_at = NOW() WHERE user_id = $1 AND month = $2',
@@ -2466,10 +2504,11 @@ app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
     // Log to email_log
     const status = failed.length === 0 ? 'sent' : (sent > 0 ? 'partial' : 'failed');
     await pool.query(
-      `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, failed_recipients, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, failed_recipients, status, trigger, to_addresses)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [verteiler_id || null, req.user?.email || MAIL_FROM, req.user?.name || 'Admin', subject, sent, false,
-       JSON.stringify(recipients), failed.length > 0 ? JSON.stringify(failed) : null, status]
+       JSON.stringify(recipients), failed.length > 0 ? JSON.stringify(failed) : null, status,
+       'verteiler-direct', recipients.join(', ')]
     );
 
     res.json({ success: true, sent, failed: failed.length });
@@ -2540,7 +2579,7 @@ app.post('/api/email/send', authMiddleware, adminOnly, async (req, res) => {
     return res.status(400).json({ error: 'Empfänger, Betreff und Inhalt erforderlich' });
   }
   try {
-    await transporter.sendMail({ from: MAIL_FROM, to, subject, html });
+    await loggedSendMail({ from: MAIL_FROM, to, subject, html }, 'admin-direct-mail');
     res.json({ success: true });
   } catch (err) {
     console.error('Email error:', err);
@@ -2619,12 +2658,12 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
       console.log(`[Verteiler] Sender ${senderEmail} nicht in erlaubten Gruppen [${allowedGroups.join(',')}] für ${toAddress} — abgelehnt`);
       // Höflicher Bounce an Sender
       try {
-        await transporter.sendMail({
+        await loggedSendMail({
           from: `"Rosenweg Verteiler" <noreply@${VERTEILER_DOMAIN}>`,
           to: senderEmail,
           subject: `Rückläufer: Versand an ${toAddress} nicht erlaubt`,
           text: `Hallo,\n\nIhre Email an ${toAddress} (Betreff: "${parsed.subject}") wurde nicht zugestellt — Sie sind nicht in einer der für diesen Verteiler erlaubten Gruppen (${allowedGroups.join(', ')}).\n\nBitte wenden Sie sich an den Ausschuss falls Sie hier publizieren möchten.\n\nRosenweg Verteiler`,
-        });
+        }, 'verteiler-bounce-not-allowed');
       } catch (e) { console.error('[Verteiler] Bounce-Mail fehler:', e.message); }
       return { success: true, action: 'rejected', reason: 'sender not in allowed_sender_groups' };
     }
@@ -2688,10 +2727,11 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
   console.log(`Distributed email to ${recipients.length} recipients for ${toAddress} (${bccRecipients.length} BCC + ${druckerRecipients.length} drucker-individuell)`);
 
   const logResult = await pool.query(
-    `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, status, message_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+    `INSERT INTO email_log (verteiler_id, from_email, from_name, subject, recipients_count, has_attachments, recipients_list, status, message_id, trigger, to_addresses)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
     [list.id, senderEmail, senderName, parsed.subject, recipients.length, attachments.length > 0,
-     JSON.stringify(recipients), 'sent', messageId || parsed.messageId || null]
+     JSON.stringify(recipients), 'sent', messageId || parsed.messageId || null,
+     'verteiler-batch', recipients.join(', ')]
   );
 
   // Schedule delivery report to sender after 90 seconds (only for internal senders — DSGVO)
@@ -2768,12 +2808,12 @@ async function sendDeliveryReport(logId, senderEmail, verteilerName, originalSub
       <p style="color:#6b7280;font-size:12px;margin-top:16px">Automatischer Zustellbericht von Rosenweg Verteiler. Status kann sich noch ändern (z.B. "Gesendet" → "Zugestellt").</p>
     </div>`;
 
-  await transporter.sendMail({
+  await loggedSendMail({
     from: `"Rosenweg Verteiler" <noreply@rosenweg4303.ch>`,
     to: senderEmail,
     subject: `Zustellbericht: ${originalSubject || verteilerName}`,
     html,
-  });
+  }, 'verteiler-delivery-report');
   console.log(`[DeliveryReport] Sent to ${senderEmail} for log #${logId}: ${delivered}/${recipientsList.length} delivered`);
 }
 
@@ -3213,12 +3253,12 @@ async function pollGmailForVerteiler() {
                     const recipName = recipientInfo?.name || recipientTag;
                     const recipAddr = recipientInfo?.strasse || '';
                     const recipWohn = recipientInfo?.wohnung || '';
-                    await transporter.sendMail({
+                    await loggedSendMail({
                       from: `"Rosenweg Druckserver" <noreply@${VERTEILER_DOMAIN}>`,
                       to: [...notifyEmails].join(', '),
                       subject: `Druckauftrag: ${recipName} (${printer})`,
                       text: `Druckauftrag verarbeitet\n\nEmpfänger: ${recipName}\n${recipAddr ? `Adresse: ${recipAddr}\n` : ''}${recipWohn ? `Wohnung: ${recipWohn}\n` : ''}Drucker: ${printer}\nBetreff: ${parsed.subject || '(kein Betreff)'}\nVon: ${senderEmailRaw}\nDokumente: ${printed}\nDatum: ${now}`,
-                    });
+                    }, 'print-notification');
                     console.log(`[Print] Notification sent to ${notifyEmails.size} recipients`);
                   }
                 } catch (notifyErr) {
@@ -3246,12 +3286,12 @@ async function pollGmailForVerteiler() {
                   }
                   if (notifyEmails.size > 0) {
                     const recipName = recipientInfo?.name || recipientTag;
-                    await transporter.sendMail({
+                    await loggedSendMail({
                       from: `"Rosenweg Druckserver" <noreply@${VERTEILER_DOMAIN}>`,
                       to: [...notifyEmails].join(', '),
                       subject: `[FEHLGESCHLAGEN] Druckauftrag: ${recipName} (${printer})`,
                       text: `Druckauftrag konnte NICHT gedruckt werden.\n\nEmpfänger: ${recipName}\nDrucker: ${printer}\nBetreff: ${parsed.subject || '(kein Betreff)'}\nVon: ${senderEmailRaw}\nDatum: ${now}\n\nDie Email liegt im IMAP-Folder "Drucken-Fehlgeschlagen". Bitte manuell prüfen.`,
-                    });
+                    }, 'print-failure');
                     console.log(`[Print] Failure notification sent to ${notifyEmails.size} Technik recipients`);
                   }
                 } catch (notifyErr) {
@@ -3829,7 +3869,7 @@ async function processAuthentiKDeletions() {
       try {
         const deleteDate = new Date(row.scheduled_at);
         const formattedDate = `${deleteDate.getDate()}.${deleteDate.getMonth() + 1}.${deleteDate.getFullYear()}`;
-        await transporter.sendMail({
+        await loggedSendMail({
           from: MAIL_FROM,
           to: row.email,
           subject: 'Rosenweg: Ihr Konto wird in 7 Tagen gelöscht',
@@ -3844,7 +3884,7 @@ async function processAuthentiKDeletions() {
                 STWEG-Kooperation Rosenweg, Kaiseraugst
               </p>
             </div>`,
-        });
+        }, 'authentik-deletion-reminder');
         await pool.query('UPDATE authentik_pending_deletions SET reminder_sent = true WHERE id = $1', [row.id]);
         console.log(`[Authentik] Deletion reminder sent to ${row.email}`);
       } catch (err) {
@@ -3926,7 +3966,7 @@ async function checkStaleDruckerTags() {
     const rows = result.rows.map(r =>
       `<tr><td>${r.name}</td><td><code>${r.email}</code></td><td>STWEG ${r.stweg} · ${r.typ} · ${r.bezeichnung}</td></tr>`
     ).join('');
-    await transporter.sendMail({
+    await loggedSendMail({
       from: `"Rosenweg Daten-Cleanup" <noreply@${VERTEILER_DOMAIN}>`,
       to: recipients.join(', '),
       subject: `[Cleanup] ${result.rows.length} veraltete Drucker-Tags gefunden`,
@@ -3935,7 +3975,7 @@ async function checkStaleDruckerTags() {
 <thead><tr><th align="left">Name</th><th align="left">Drucker-Tag</th><th align="left">Objekt</th></tr></thead>
 <tbody>${rows}</tbody></table>
 <p style="color:#666;font-size:11px">Automatisch generiert · ${new Date().toLocaleString('de-CH')}</p>`,
-    });
+    }, 'cleanup-stale-drucker-tags');
     console.log(`[CleanupWarn] ${result.rows.length} Funde an ${recipients.length} Technik-Mitglieder geschickt`);
   } catch (err) {
     console.error('[CleanupWarn] Fehler:', err.message);
@@ -5016,7 +5056,7 @@ app.post('/api/verteiler/:id/test-send', authMiddleware, adminOnly, async (req, 
     if (!recipientEmail) return res.status(400).json({ error: 'Keine Email beim eingeloggten User' });
     const subject = (req.body?.subject || 'Test-Email an Verteiler').slice(0, 200);
     const recipients = await resolveVerteilerRecipients(list);
-    await transporter.sendMail({
+    await loggedSendMail({
       from: `"Rosenweg Verteiler-Test" <noreply@${VERTEILER_DOMAIN}>`,
       to: recipientEmail,
       subject: `[TEST] ${subject}`,
@@ -5025,7 +5065,7 @@ app.post('/api/verteiler/:id/test-send', authMiddleware, adminOnly, async (req, 
         <p style="font-size:12px;color:#555;font-family:monospace">${recipients.slice(0, 100).join(', ')}${recipients.length > 100 ? ' …' : ''}</p>
         <hr>
         <p style="color:#888;font-size:11px">Sender-Validierung: ${list.allowed_sender_groups?.length ? 'eingeschränkt auf ' + list.allowed_sender_groups.join(', ') : 'jeder @rosenweg4303.ch-Sender'}</p>`,
-    });
+    }, 'verteiler-test');
     res.json({ sent_to: recipientEmail, would_reach: recipients.length });
   } catch (err) {
     console.error('test-send error:', err.message);
@@ -7103,6 +7143,11 @@ async function initDB() {
       ALTER TABLE email_log ADD COLUMN IF NOT EXISTS failed_recipients TEXT;
       ALTER TABLE email_log ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'sent';
       ALTER TABLE email_log ADD COLUMN IF NOT EXISTS message_id VARCHAR(500);
+      ALTER TABLE email_log ADD COLUMN IF NOT EXISTS trigger VARCHAR(80);
+      ALTER TABLE email_log ADD COLUMN IF NOT EXISTS to_addresses TEXT;
+      ALTER TABLE email_log ADD COLUMN IF NOT EXISTS error_message TEXT;
+      CREATE INDEX IF NOT EXISTS idx_email_log_trigger ON email_log (trigger, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_email_log_created ON email_log (created_at DESC);
 
       CREATE TABLE IF NOT EXISTS zaehler_config (
         id SERIAL PRIMARY KEY,
