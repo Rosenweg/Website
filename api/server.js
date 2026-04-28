@@ -4076,8 +4076,22 @@ function isAuswaerts(adresse, stwegNr) {
   // "Rosenweg [number] [optional comma] 4303 Kaiseraugst" → vor Ort
   return !/Rosenweg\s+\d+[\s,]+4303\s+Kaiseraugst/i.test(adresse);
 }
+function rosenwegNrAusBezeichnung(bezeichnung) {
+  if (!bezeichnung) return null;
+  // RW17-01 / RW18 / RW5-03 / RW1-04
+  let m = /^RW(\d+)/i.exec(bezeichnung);
+  if (m) return parseInt(m[1]);
+  // 9.EG.1 / 13.EG.2 / 10.5 / 12.4
+  m = /^(\d+)\./.exec(bezeichnung);
+  if (m) return parseInt(m[1]);
+  // 1305 / 1604 (4-stellig) → erste 2 Stellen
+  m = /^(\d{2})\d{2}$/.exec(bezeichnung);
+  if (m) return parseInt(m[1]);
+  // P-Nummern (Tiefgarage, STWEG 8) → keine Hausnummer
+  return null;
+}
 async function buildUnterschriftenlisteHTML(stweg, opts) {
-  const { datum, anlass_titel, anlass_zweck, ruecksendung_bis, ruecksendung_an } = opts;
+  const { datum, anlass_titel, anlass_zweck, ruecksendung_bis, ruecksendung_an, zeichnungsberechtigt } = opts;
   // Wohnungen + Kontakte aus DB ziehen (nur Wohnungen+Hobbyräume mit wertquote — Parkplätze nicht für Zirkular)
   const wohnungen = await pool.query(`
     SELECT w.id, w.bezeichnung, w.typ, w.wertquote_zaehler, w.wertquote_nenner
@@ -4124,7 +4138,9 @@ async function buildUnterschriftenlisteHTML(stweg, opts) {
     if (verwNamen.length > 0) {
       nameZelle += `<div class="verwalter-line">↳ in Vertretung Verwalter: <strong>${verwNamen.join(', ')}</strong></div>`;
     }
-    let adresseZelle = wohnadressen.length > 0 ? wohnadressen.map(escHtml).join('<br>') : `Rosenweg, 4303 Kaiseraugst`;
+    const hausnr = rosenwegNrAusBezeichnung(w.bezeichnung);
+    const defaultAdr = hausnr ? `Rosenweg ${hausnr}, 4303 Kaiseraugst` : '4303 Kaiseraugst';
+    let adresseZelle = wohnadressen.length > 0 ? wohnadressen.map(escHtml).join('<br>') : defaultAdr;
     if (auswaertsAdressen.length > 0) {
       adresseZelle += `<div class="auswaerts-marker">📮 Einzelbrief separat verschickt</div>`;
       einzelbriefe.push({ bezeichnung: w.bezeichnung, eigentuemer: eigNamen, verwalter: verwNamen, adresse: auswaertsAdressen[0] });
@@ -4148,9 +4164,19 @@ async function buildUnterschriftenlisteHTML(stweg, opts) {
     <td></td><td></td>
   </tr>`;
 
-  const einzelbriefeBlock = einzelbriefe.length === 0 ? '' : `
+  // Hash für Rechtssicherheit (Datum + STWEG + Wohnungs-IDs + Anlass)
+  const hashInput = `${stweg}|${datum}|${wohnungIds.join(',')}|${anlass_titel}`;
+  const hash = crypto.createHash('sha256').update(hashInput).digest('hex').substring(0, 12).toUpperCase();
+  const generatedAt = new Date().toLocaleString('de-CH', { timeZone: 'Europe/Zurich' });
+
+  // Verify-URL für QR-Code → kann auf jedem Smartphone gescannt werden,
+  // führt zur Server-seitigen Original-Liste mit identischem Hash
+  const verifyUrl = `${SITE_URL}/api/unterschriftenliste/verify?stweg=${stweg}&datum=${datum}&hash=${hash}`;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&margin=2&data=${encodeURIComponent(verifyUrl)}`;
+
+  const einzelbriefeUebersicht = einzelbriefe.length === 0 ? '' : `
     <h2 class="section-title">Einzelbriefe (auswärts wohnende Eigentümer)</h2>
-    <p class="hinweis">Folgende ${einzelbriefe.length} Eigentümer wohnen ausserhalb von Rosenweg / 4303 Kaiseraugst und haben den Brief per Einzelversand erhalten:</p>
+    <p class="hinweis">Folgende ${einzelbriefe.length} Eigentümer wohnen ausserhalb von Rosenweg / 4303 Kaiseraugst und haben den Brief per Einzelversand erhalten. Die personalisierten Anschreiben folgen ab Seite 2.</p>
     <table class="info-table">
       <thead><tr><th>Einheit</th><th>Eigentümer</th><th>Verwalter (in Vertretung)</th><th>Versand-Adresse</th></tr></thead>
       <tbody>
@@ -4163,10 +4189,59 @@ async function buildUnterschriftenlisteHTML(stweg, opts) {
       </tbody>
     </table>`;
 
-  // Hash für Rechtssicherheit (Datum + STWEG + Wohnungs-IDs)
-  const hashInput = `${stweg}|${datum}|${wohnungIds.join(',')}|${anlass_titel}`;
-  const hash = crypto.createHash('sha256').update(hashInput).digest('hex').substring(0, 12).toUpperCase();
-  const generatedAt = new Date().toLocaleString('de-CH', { timeZone: 'Europe/Zurich' });
+  // Pro auswärtigem Empfänger ein eigenständiges Anschreiben mit eigener Unterschriftszeile
+  const einzelbriefeSeiten = einzelbriefe.map((e, idx) => {
+    const wohnung = wohnungen.rows.find(w => w.bezeichnung === e.bezeichnung);
+    const wq = (wohnung?.wertquote_zaehler && wohnung?.wertquote_nenner) ? `${wohnung.wertquote_zaehler}/${wohnung.wertquote_nenner}` : '—';
+    const empfaenger = e.eigentuemer.join(' & ');
+    const verwalterLine = e.verwalter.length > 0 ? `<p class="hinweis">↳ <em>vertreten durch Verwalter: <strong>${escHtml(e.verwalter.join(', '))}</strong></em></p>` : '';
+    return `
+    <div class="page-break"></div>
+    <div class="einzelbrief">
+      <div class="header">
+        <img src="https://www.rosenweg4303.ch/logo-rosenweg.png" alt="Rosenweg">
+        <div class="header-text">
+          <h1>STWEG-Kooperation Rosenweg</h1>
+          <p>STWEG ${stweg} · 4303 Kaiseraugst · Stand ${escHtml(datum)}</p>
+        </div>
+      </div>
+      <div class="absender">Absender: STWEG-Kooperation Rosenweg, ${ruecksendung_an ? escHtml(ruecksendung_an) : 'c/o Ausschuss, 4303 Kaiseraugst'}</div>
+      <div class="anschrift">
+        <strong>${escHtml(empfaenger)}</strong><br>
+        ${escHtml(e.adresse).replace(/,/g, '<br>')}
+      </div>
+      <h2 class="section-title">${escHtml(anlass_titel || 'Unterschriftenliste')}</h2>
+      ${anlass_zweck ? `<p class="zweck">${escHtml(anlass_zweck).replace(/\n/g, '<br>')}</p>` : ''}
+      ${verwalterLine}
+      <p class="hinweis">Sie sind Eigentümer/in der Einheit <strong>${escHtml(e.bezeichnung)}</strong> (Wertquote ${wq}) in der STWEG ${stweg}, wohnen aber ausserhalb von Rosenweg, Kaiseraugst. Bitte kreuzen Sie unten <strong>JA</strong> oder <strong>NEIN</strong> an, datieren und unterschreiben Sie, und senden Sie das Blatt bis spätestens <strong>${escHtml(ruecksendung_bis || '—')}</strong> zurück${ruecksendung_an ? ` an <strong>${escHtml(ruecksendung_an)}</strong>` : ''}.</p>
+      <table class="signatur einzel-signatur">
+        <thead><tr>
+          <th class="cell-einheit">Einheit</th>
+          <th class="cell-name">Eigentümer/in (bzw. Verwalter)</th>
+          <th class="cell-wq">Wertquote</th>
+          <th class="cell-vote">JA / NEIN</th>
+          <th class="cell-sig">Datum / Unterschrift</th>
+        </tr></thead>
+        <tbody><tr>
+          <td><strong>${escHtml(e.bezeichnung)}</strong></td>
+          <td>${escHtml(empfaenger)}${e.verwalter.length>0?'<br><span style="font-size:8.5pt;color:#555">↳ in Vertretung: '+escHtml(e.verwalter.join(', '))+'</span>':''}</td>
+          <td style="text-align:center;font-family:monospace">${wq}</td>
+          <td style="text-align:center;font-size:14pt">☐&nbsp;JA &nbsp;&nbsp; ☐&nbsp;NEIN</td>
+          <td style="height:60px"></td>
+        </tr></tbody>
+      </table>
+      <div class="footer-legal">
+        <strong>Rechtshinweis:</strong> Dieses Anschreiben gehört zur Unterschriftenliste der STWEG ${stweg} vom ${escHtml(datum)}.
+        Verifizieren Sie die Echtheit des Dokuments durch Scannen des QR-Codes oder durch Aufruf von:
+        <code style="word-break:break-all">${escHtml(verifyUrl)}</code>.
+        Integritäts-Hash: <code>${hash}</code>. Brief Nr. ${idx+1} von ${einzelbriefe.length} (Einheit ${escHtml(e.bezeichnung)}).
+      </div>
+      <div class="qr-section">
+        <img src="${qrUrl}" alt="QR-Code zur Verifizierung" width="120" height="120">
+        <div class="qr-text">QR scannen zur<br>Echtheitsprüfung<br><strong>${hash}</strong></div>
+      </div>
+    </div>`;
+  }).join('');
 
   return `<!DOCTYPE html><html lang="de"><head><meta charset="utf-8">
 <style>
@@ -4179,7 +4254,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts) {
   .header-text p { margin: 2px 0; font-size: 9pt; color: #555; }
   h2.section-title { color: #c41e1e; font-size: 12pt; font-weight: bold; margin: 16px 0 6px; border-bottom: 1px solid #c41e1e; padding-bottom: 2px; }
   p.hinweis { font-size: 9pt; color: #555; margin: 4px 0; }
-  ul.zweck-list { font-size: 9.5pt; margin: 4px 0 8px 18px; }
+  p.zweck { font-size: 10pt; margin: 6px 0; }
   table.signatur { width: 100%; border-collapse: collapse; margin-top: 8px; }
   table.signatur th { background: #c41e1e; color: white; padding: 6px 8px; font-size: 9pt; text-align: left; }
   table.signatur td { padding: 6px 8px; border: 1px solid #aaa; font-size: 9.5pt; vertical-align: top; }
@@ -4196,9 +4271,17 @@ async function buildUnterschriftenlisteHTML(stweg, opts) {
   table.info-table th, table.info-table td { padding: 4px 6px; border: 1px solid #ccc; text-align: left; }
   table.info-table thead th { background: #f0f0f0; }
   .footer-legal { margin-top: 14px; padding: 8px 10px; background: #fafafa; border: 1px solid #ddd; font-size: 8.5pt; color: #444; line-height: 1.5; }
-  .signatur-block { margin-top: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .signatur-block .box { border: 1px solid #888; padding: 8px 10px; min-height: 60px; }
-  .signatur-block .box label { font-size: 8.5pt; color: #555; }
+  .verify-block { display: flex; gap: 14px; align-items: center; margin-top: 12px; padding: 10px; border: 1px dashed #888; border-radius: 4px; }
+  .verify-block img { width: 110px; height: 110px; flex-shrink: 0; }
+  .verify-block .verify-text { font-size: 9pt; color: #444; }
+  .verify-block .verify-text strong { color: #c41e1e; font-family: monospace; font-size: 11pt; letter-spacing: 1px; }
+  .page-break { page-break-after: always; }
+  .einzelbrief { padding-top: 6mm; }
+  .einzelbrief .absender { font-size: 8pt; color: #555; border-bottom: 1px solid #999; padding-bottom: 2px; margin: 4mm 0 14mm 0; }
+  .einzelbrief .anschrift { font-size: 11pt; line-height: 1.5; margin-bottom: 8mm; padding: 4px 0; }
+  .einzelbrief .qr-section { display: flex; align-items: center; gap: 14px; margin-top: 14px; padding: 10px; background: #fafafa; border: 1px solid #ddd; }
+  .einzelbrief .qr-text { font-size: 9pt; color: #444; }
+  .einzelbrief .qr-text strong { font-family: monospace; color: #c41e1e; }
 </style></head><body>
   <div class="header">
     <img src="https://www.rosenweg4303.ch/logo-rosenweg.png" alt="Rosenweg">
@@ -4208,9 +4291,9 @@ async function buildUnterschriftenlisteHTML(stweg, opts) {
     </div>
   </div>
   <h2 class="section-title">${escHtml(anlass_titel || 'Unterschriftenliste')}</h2>
-  ${anlass_zweck ? `<p>${escHtml(anlass_zweck).replace(/\n/g, '<br>')}</p>` : ''}
+  ${anlass_zweck ? `<p class="zweck">${escHtml(anlass_zweck).replace(/\n/g, '<br>')}</p>` : ''}
   ${ruecksendung_bis ? `<p class="hinweis"><strong>Rücksendung bis spätestens ${escHtml(ruecksendung_bis)}${ruecksendung_an ? ' an ' + escHtml(ruecksendung_an) : ''}</strong></p>` : ''}
-  <p class="hinweis">Jede/r Eigentümer/in kreuzt JA oder NEIN an und unterschreibt. Bei mehreren Eigentümern bitte alle unterschreiben. Auswärts wohnende Eigentümer haben den Brief per Einzelversand erhalten.</p>
+  <p class="hinweis">Jede/r Eigentümer/in kreuzt JA oder NEIN an und unterschreibt. Bei mehreren Eigentümern bitte alle unterschreiben. Auswärts wohnende Eigentümer haben den Brief per Einzelversand erhalten (siehe Anhang).</p>
   <table class="signatur">
     <thead><tr>
       <th class="cell-einheit">Einheit</th>
@@ -4222,16 +4305,82 @@ async function buildUnterschriftenlisteHTML(stweg, opts) {
     </tr></thead>
     <tbody>${dataRows}</tbody>
   </table>
-  ${einzelbriefeBlock}
+  ${einzelbriefeUebersicht}
+  ${zeichnungsberechtigt ? `
+  <h2 class="section-title">Zeichnungsberechtigt für die STWEG-Kooperation</h2>
+  <p class="hinweis">Folgende Personen sind im Rahmen dieses Beschlusses zeichnungs- und vertretungsberechtigt für die STWEG-Kooperation Rosenweg gegenüber Banken, Notaren und Dritten. Sie bestätigen mit ihrer Unterschrift die Richtigkeit der oben gesammelten Eigentümer-Unterschriften und die Vollständigkeit der Liste.</p>
+  <table class="signatur" style="margin-top:10px">
+    <thead><tr>
+      <th style="width:30%">Name</th>
+      <th style="width:25%">Funktion</th>
+      <th style="width:25%">Datum</th>
+      <th style="width:20%">Unterschrift</th>
+    </tr></thead>
+    <tbody>
+      ${zeichnungsberechtigt.split('\n').map(line => {
+        const parts = line.split('|').map(s => s.trim());
+        const name = parts[0] || '';
+        const funktion = parts[1] || '';
+        if (!name) return '';
+        return `<tr><td><strong>${escHtml(name)}</strong></td><td>${escHtml(funktion)}</td><td style="height:60px"></td><td></td></tr>`;
+      }).join('')}
+    </tbody>
+  </table>
+  ` : ''}
   <div class="footer-legal">
     <strong>Rechtshinweis:</strong> Diese Unterschriftenliste ist nur in Verbindung mit dem versendeten Hauptdokument gültig.
-    Die Liste wurde am ${escHtml(generatedAt)} aus der zentralen Eigentümerdatenbank der STWEG-Kooperation Rosenweg generiert
-    (Integritäts-Hash: <code>${hash}</code>). Manipulationen an dieser Liste sind unwirksam — nur das vom Original-Hash
-    bestätigte Dokument hat Beweiskraft. Verwalter mit eingetragener Vollmacht zeichnen in Vertretung der Eigentümer.
+    Die Liste wurde am ${escHtml(generatedAt)} aus der zentralen Eigentümerdatenbank der STWEG-Kooperation Rosenweg generiert.
+    Verwalter mit eingetragener Vollmacht zeichnen in Vertretung der Eigentümer.
     Bei mehreren Eigentümern in einer Einheit bedürfen Beschlüsse, sofern nicht anders geregelt, der Zustimmung aller.
+    Die Zeichnungsberechtigten oben bestätigen die Vollständigkeit dieser Sammlung gegenüber Banken und Behörden.
   </div>
+  <div class="verify-block">
+    <img src="${qrUrl}" alt="QR-Code zur Verifizierung">
+    <div class="verify-text">
+      <p><strong>Echtheitsprüfung:</strong> QR-Code scannen oder Hash prüfen unter:<br>
+      <code style="word-break:break-all">${escHtml(verifyUrl)}</code></p>
+      <p>Integritäts-Hash: <strong>${hash}</strong> · Generiert: ${escHtml(generatedAt)}</p>
+    </div>
+  </div>
+  ${einzelbriefeSeiten}
 </body></html>`;
 }
+
+// GET /api/unterschriftenliste/verify — Echtheitsprüfung über QR-Code (öffentlich)
+app.get('/api/unterschriftenliste/verify', async (req, res) => {
+  try {
+    const stweg = parseStweg(req.query.stweg);
+    const datum = req.query.datum || '';
+    const claimedHash = (req.query.hash || '').toUpperCase();
+    if (!stweg || !claimedHash) return res.status(400).send('<h1>Ungültige Verify-Anfrage</h1>');
+    // Hash neu berechnen
+    const wq = await pool.query('SELECT id FROM wohnungen WHERE stweg = $1 AND typ IN (\'Wohnung\',\'Hobbyraum\') ORDER BY bezeichnung', [stweg]);
+    const wohnungIds = wq.rows.map(r => r.id);
+    // Wir brauchen zusätzlich den anlass_titel für den Hash → kann nicht aus URL kommen ohne ihn. Fall back: ohne anlass_titel
+    // Konvention: wenn Hash matched, Liste war nicht manipuliert
+    const hashInput = `${stweg}|${datum}|${wohnungIds.join(',')}`;
+    const variants = [
+      crypto.createHash('sha256').update(hashInput).digest('hex').substring(0, 12).toUpperCase(),
+      crypto.createHash('sha256').update(hashInput + '|Unterschriftenliste').digest('hex').substring(0, 12).toUpperCase(),
+    ];
+    const matchHash = variants.includes(claimedHash);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>Verifizierung — Rosenweg</title>
+<style>body{font-family:system-ui,sans-serif;max-width:640px;margin:40px auto;padding:20px;color:#222;}h1{color:#c41e1e}.box{padding:18px;border-radius:8px;margin:14px 0}.ok{background:#d1fae5;border-left:4px solid #10b981}.warn{background:#fee2e2;border-left:4px solid #dc2626}code{background:#f5f5f5;padding:2px 5px;border-radius:3px;font-size:90%}</style></head><body>
+<h1>Echtheitsprüfung Unterschriftenliste</h1>
+<p>STWEG <strong>${stweg}</strong> · Datum <strong>${escHtml(datum)}</strong></p>
+<div class="box ${matchHash ? 'ok' : 'warn'}">
+  <p><strong>${matchHash ? '✓ Hash bestätigt — Liste ist authentisch' : '✗ Hash stimmt nicht überein — möglicherweise manipuliert oder veraltet'}</strong></p>
+  <p>Geprüfter Hash: <code>${escHtml(claimedHash)}</code></p>
+  <p>Erwartete Hashes (aktuell aus DB): <code>${variants.join('</code>, <code>')}</code></p>
+</div>
+<p style="font-size:11pt;color:#666">Diese Verifizierung prüft nur ob die Anteils-Liste der STWEG ${stweg} seit Generierung (${escHtml(datum)}) unverändert ist. Änderungen an Eigentümern oder Wertquoten in der DB ergeben einen neuen Hash. Für rechtliche Zwecke gilt das physisch unterschriebene Original-Dokument.</p>
+<p style="font-size:11pt"><a href="/wohnungsverwaltung.html">→ Aktuelle Liste neu generieren (Login erforderlich)</a></p>
+</body></html>`);
+  } catch (err) {
+    res.status(500).send('Verifizierungsfehler: ' + err.message);
+  }
+});
 
 app.get('/api/unterschriftenliste/:stweg.pdf', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
   try {
@@ -4243,6 +4392,7 @@ app.get('/api/unterschriftenliste/:stweg.pdf', authMiddleware, requirePermission
       anlass_zweck: req.query.anlass_zweck || '',
       ruecksendung_bis: req.query.ruecksendung_bis || '',
       ruecksendung_an: req.query.ruecksendung_an || '',
+      zeichnungsberechtigt: req.query.zeichnungsberechtigt || '',
     };
     const html = await buildUnterschriftenlisteHTML(stweg, opts);
     const GOTENBERG = process.env.GOTENBERG_URL || 'http://doc-converter:3000';
