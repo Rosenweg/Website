@@ -4164,14 +4164,46 @@ async function buildUnterschriftenlisteHTML(stweg, opts) {
     <td></td><td></td>
   </tr>`;
 
-  // Hash für Rechtssicherheit (Datum + STWEG + Wohnungs-IDs + Anlass)
-  const hashInput = `${stweg}|${datum}|${wohnungIds.join(',')}|${anlass_titel}`;
-  const hash = crypto.createHash('sha256').update(hashInput).digest('hex').substring(0, 12).toUpperCase();
+  // Strikter Hash über kompletten Snapshot der Liste-Daten — jede Änderung
+  // (Eigentümer-Name, Wertquote, Adresse) ergibt einen neuen Hash. Snapshot
+  // wird in DB persistiert, sodass die Verifizierung auch nach DB-Änderungen
+  // den Original-Inhalt zurückgeben kann (Bank/Notar scannt → sieht exakt
+  // den damaligen Stand).
+  const snapshotData = {
+    stweg, datum, anlass_titel, anlass_zweck,
+    ruecksendung_bis, ruecksendung_an,
+    zeichnungsberechtigte: zeichnungsberechtigte || [],
+    kollektiv_text: kollektiv_text || null,
+    wohnungen: wohnungen.rows.map(w => {
+      const wInfo = byWohnung.get(w.id);
+      return {
+        bezeichnung: w.bezeichnung,
+        typ: w.typ,
+        wertquote: w.wertquote_zaehler && w.wertquote_nenner ? `${w.wertquote_zaehler}/${w.wertquote_nenner}` : null,
+        eigentuemer: wInfo.eigentuemer.map(e => e.name).filter(Boolean),
+        verwalter: wInfo.verwalter.map(v => v.name).filter(Boolean),
+        korrespondenz_adressen: [...wInfo.adressen],
+      };
+    }),
+    total_units: wohnungen.rows.length,
+    total_wq: wohnungen.rows.reduce((s, w) => s + (w.wertquote_zaehler || 0), 0),
+  };
+  // Canonical JSON: stable key order via sort
+  const canonical = JSON.stringify(snapshotData, Object.keys(snapshotData).sort());
+  const hash = crypto.createHash('sha256').update(canonical).digest('hex').substring(0, 12).toUpperCase();
   const generatedAt = new Date().toLocaleString('de-CH', { timeZone: 'Europe/Zurich' });
+  // Snapshot in DB persistieren (UPSERT — gleicher Hash = gleicher Inhalt = OK)
+  try {
+    await pool.query(`
+      INSERT INTO unterschriftenliste_snapshots (hash, stweg, datum, anlass_titel, snapshot_data, generated_by)
+      VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+      ON CONFLICT (hash) DO UPDATE SET download_count = unterschriftenliste_snapshots.download_count + 1
+    `, [hash, stweg, datum, anlass_titel, JSON.stringify(snapshotData), opts.generated_by || null]);
+  } catch (e) { console.error('[Unterschriftenliste] Snapshot-Save error:', e.message); }
 
   // Verify-URL für QR-Code → kann auf jedem Smartphone gescannt werden,
   // führt zur Server-seitigen Original-Liste mit identischem Hash
-  const verifyUrl = `${SITE_URL}/api/unterschriftenliste/verify?stweg=${stweg}&datum=${datum}&anlass=${encodeURIComponent(anlass_titel)}&hash=${hash}`;
+  const verifyUrl = `${SITE_URL}/api/unterschriftenliste/verify?hash=${hash}`;
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&margin=2&data=${encodeURIComponent(verifyUrl)}`;
 
   const einzelbriefeUebersicht = einzelbriefe.length === 0 ? '' : `
@@ -4364,34 +4396,76 @@ async function buildUnterschriftenlisteHTML(stweg, opts) {
 }
 
 // GET /api/unterschriftenliste/verify — Echtheitsprüfung über QR-Code (öffentlich)
+// Ruft Snapshot aus DB ab und zeigt Original-Inhalt zur Vergleichsprüfung
 app.get('/api/unterschriftenliste/verify', async (req, res) => {
   try {
-    const stweg = parseStweg(req.query.stweg);
-    const datum = req.query.datum || '';
-    const anlass = req.query.anlass || 'Unterschriftenliste';
     const claimedHash = (req.query.hash || '').toUpperCase();
-    if (!stweg || !claimedHash) return res.status(400).send('<h1>Ungültige Verify-Anfrage</h1>');
-    // Hash neu berechnen mit gleichem Algorithmus wie buildUnterschriftenlisteHTML
-    const wq = await pool.query('SELECT id FROM wohnungen WHERE stweg = $1 AND typ IN (\'Wohnung\',\'Hobbyraum\') ORDER BY bezeichnung', [stweg]);
-    const wohnungIds = wq.rows.map(r => r.id);
-    const hashInput = `${stweg}|${datum}|${wohnungIds.join(',')}|${anlass}`;
-    const expected = crypto.createHash('sha256').update(hashInput).digest('hex').substring(0, 12).toUpperCase();
-    const matchHash = (claimedHash === expected);
-    const variants = [expected];
+    if (!claimedHash) return res.status(400).send('<h1>Ungültige Verify-Anfrage</h1>');
+    const snap = await pool.query(
+      'SELECT * FROM unterschriftenliste_snapshots WHERE hash = $1',
+      [claimedHash]
+    );
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(`<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>Verifizierung — Rosenweg</title>
-<style>body{font-family:system-ui,sans-serif;max-width:640px;margin:40px auto;padding:20px;color:#222;}h1{color:#c41e1e}.box{padding:18px;border-radius:8px;margin:14px 0}.ok{background:#d1fae5;border-left:4px solid #10b981}.warn{background:#fee2e2;border-left:4px solid #dc2626}code{background:#f5f5f5;padding:2px 5px;border-radius:3px;font-size:90%}</style></head><body>
-<h1>Echtheitsprüfung Unterschriftenliste</h1>
-<p>STWEG <strong>${stweg}</strong> · Datum <strong>${escHtml(datum)}</strong></p>
-<div class="box ${matchHash ? 'ok' : 'warn'}">
-  <p><strong>${matchHash ? '✓ Hash bestätigt — Liste ist authentisch' : '✗ Hash stimmt nicht überein — möglicherweise manipuliert oder veraltet'}</strong></p>
-  <p>Geprüfter Hash: <code>${escHtml(claimedHash)}</code></p>
-  <p>Erwartete Hashes (aktuell aus DB): <code>${variants.join('</code>, <code>')}</code></p>
+    if (snap.rows.length === 0) {
+      return res.send(`<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>Verifizierung — Rosenweg</title>
+<style>body{font-family:system-ui,sans-serif;max-width:640px;margin:40px auto;padding:20px;color:#222;}h1{color:#c41e1e}.box{padding:18px;border-radius:8px;margin:14px 0}.warn{background:#fee2e2;border-left:4px solid #dc2626}code{background:#f5f5f5;padding:2px 5px;border-radius:3px}</style></head><body>
+<h1>Echtheitsprüfung — UNGÜLTIG</h1>
+<div class="box warn">
+  <p><strong>✗ Hash <code>${escHtml(claimedHash)}</code> nicht gefunden.</strong></p>
+  <p>Diese Liste wurde entweder manipuliert, das PDF stammt nicht aus der STWEG-Kooperation Rosenweg, oder der Snapshot wurde gelöscht.</p>
 </div>
-<p style="font-size:11pt;color:#666">Diese Verifizierung prüft nur ob die Anteils-Liste der STWEG ${stweg} seit Generierung (${escHtml(datum)}) unverändert ist. Änderungen an Eigentümern oder Wertquoten in der DB ergeben einen neuen Hash. Für rechtliche Zwecke gilt das physisch unterschriebene Original-Dokument.</p>
-<p style="font-size:11pt"><a href="/wohnungsverwaltung.html">→ Aktuelle Liste neu generieren (Login erforderlich)</a></p>
+<p style="font-size:11pt;color:#666">Bei Zweifel: Wenden Sie sich an den Ausschuss der STWEG-Kooperation Rosenweg.</p>
+</body></html>`);
+    }
+    const s = snap.rows[0];
+    const data = s.snapshot_data;
+    const wohnungenHtml = (data.wohnungen || []).map(w => `<tr>
+      <td><strong>${escHtml(w.bezeichnung)}</strong></td>
+      <td>${escHtml((w.eigentuemer || []).join(', '))}${w.verwalter && w.verwalter.length>0 ? `<br><span style="font-size:9pt;color:#666">↳ Verwalter: ${escHtml(w.verwalter.join(', '))}</span>` : ''}</td>
+      <td style="text-align:center">${escHtml(w.wertquote || '—')}</td>
+      <td style="font-size:9pt">${(w.korrespondenz_adressen || []).map(escHtml).join('; ') || '<em>—</em>'}</td>
+    </tr>`).join('');
+    const zeichnerHtml = (data.zeichnungsberechtigte || []).map(z => `<tr>
+      <td><strong>${escHtml(z.funktion || '')}</strong></td>
+      <td>${escHtml(z.name || '')}</td>
+    </tr>`).join('');
+    res.send(`<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>Verifizierung Unterschriftenliste</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:900px;margin:30px auto;padding:20px;color:#222}
+h1{color:#10b981;border-bottom:3px solid #10b981;padding-bottom:8px}
+h2{color:#c41e1e;margin-top:24px}
+.box{padding:18px;border-radius:8px;margin:14px 0;background:#d1fae5;border-left:4px solid #10b981}
+.meta{background:#f0f9ff;padding:14px;border-radius:8px;margin:12px 0;font-size:11pt}
+.meta div{margin:4px 0}
+table{width:100%;border-collapse:collapse;margin:10px 0;font-size:10pt}
+th{background:#f5f5f5;padding:8px;text-align:left;border:1px solid #ddd}
+td{padding:6px 8px;border:1px solid #eee;vertical-align:top}
+code{background:#f5f5f5;padding:2px 5px;border-radius:3px;font-family:monospace}
+.hash{font-size:14pt;color:#10b981;font-weight:bold;letter-spacing:1px}
+</style></head><body>
+<h1>✓ Echtheit bestätigt</h1>
+<div class="box">
+<p><strong>Diese Unterschriftenliste ist authentisch und stammt aus der zentralen Datenbank der STWEG-Kooperation Rosenweg.</strong></p>
+<p>Hash: <span class="hash">${escHtml(s.hash)}</span></p>
+</div>
+<div class="meta">
+<div><strong>STWEG:</strong> ${s.stweg} · <strong>Datum:</strong> ${escHtml(String(s.datum).slice(0,10))}</div>
+<div><strong>Anlass:</strong> ${escHtml(s.anlass_titel)}</div>
+<div><strong>Generiert am:</strong> ${escHtml(new Date(s.generated_at).toLocaleString('de-CH', {timeZone:'Europe/Zurich'}))}${s.generated_by ? ' von '+escHtml(s.generated_by) : ''}</div>
+<div><strong>Aufrufe:</strong> ${s.download_count + 1}</div>
+</div>
+<h2>Eigentümer-Stand zum Zeitpunkt der Generierung</h2>
+<p style="font-size:10pt;color:#666">Vergleichen Sie diese Daten mit Ihrer ausgedruckten Liste. Stimmen alle ${data.wohnungen?.length||0} Einträge überein, ist die Liste unverändert.</p>
+<table>
+<thead><tr><th>Einheit</th><th>Eigentümer</th><th>Wertquote</th><th>Korrespondenz</th></tr></thead>
+<tbody>${wohnungenHtml}</tbody>
+<tfoot><tr style="background:#fce4e4;font-weight:bold"><td>TOTAL</td><td>${data.total_units||0} Einheiten</td><td>${data.total_wq||0}/1000</td><td></td></tr></tfoot>
+</table>
+${zeichnerHtml ? `<h2>Zeichnungsberechtigte</h2><table><thead><tr><th>Funktion</th><th>Name</th></tr></thead><tbody>${zeichnerHtml}</tbody></table>` : ''}
+<p style="font-size:10pt;color:#888;margin-top:30px">Diese Verifizierungsseite zeigt den Original-Stand zur Generierungszeit. Spätere Änderungen in der Datenbank haben keinen Einfluss auf diesen Snapshot. Für Rechtszwecke gilt das physisch unterschriebene Original.</p>
 </body></html>`);
   } catch (err) {
+    console.error('[Verify] error:', err.message);
     res.status(500).send('Verifizierungsfehler: ' + err.message);
   }
 });
@@ -4414,6 +4488,7 @@ app.get('/api/unterschriftenliste/:stweg.pdf', authMiddleware, requirePermission
       zeichnungsberechtigte: zeichner,
       kollektiv_text: req.query.kollektiv_text || '',
     };
+    opts.generated_by = req.user?.email || req.user?.name || null;
     const html = await buildUnterschriftenlisteHTML(stweg, opts);
     const GOTENBERG = process.env.GOTENBERG_URL || 'http://doc-converter:3000';
     const formData = new FormData();
