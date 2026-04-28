@@ -4302,7 +4302,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts) {
   <h2 class="section-title">${escHtml(anlass_titel || 'Unterschriftenliste')}</h2>
   ${anlass_zweck ? `<p class="zweck">${escHtml(anlass_zweck).replace(/\n/g, '<br>')}</p>` : ''}
   ${ruecksendung_bis ? `<p class="hinweis"><strong>Rücksendung bis spätestens ${escHtml(ruecksendung_bis)}${ruecksendung_an ? ' an ' + escHtml(ruecksendung_an) : ''}</strong></p>` : ''}
-  <p class="hinweis">Jede/r Eigentümer/in kreuzt JA oder NEIN an und unterschreibt. Bei mehreren Eigentümern bitte alle unterschreiben. Auswärts wohnende Eigentümer haben den Brief per Einzelversand erhalten (siehe Anhang).</p>
+  <p class="hinweis">Jede/r Eigentümer/in kreuzt JA oder NEIN an und unterschreibt. Bei mehreren Eigentümern genügt die Unterschrift eines Eigentümers oder eines bevollmächtigten Vertreters. Auswärts wohnende Eigentümer haben den Brief per Einzelversand erhalten (siehe Anhang).</p>
   <table class="signatur">
     <thead><tr>
       <th class="cell-einheit">Einheit</th>
@@ -4345,7 +4345,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts) {
     <strong>Rechtshinweis:</strong> Diese Unterschriftenliste ist nur in Verbindung mit dem versendeten Hauptdokument gültig.
     Die Liste wurde am ${escHtml(generatedAt)} aus der zentralen Eigentümerdatenbank der STWEG-Kooperation Rosenweg generiert.
     Verwalter mit eingetragener Vollmacht zeichnen in Vertretung der Eigentümer.
-    Bei mehreren Eigentümern in einer Einheit bedürfen Beschlüsse, sofern nicht anders geregelt, der Zustimmung aller.
+    Bei mehreren Eigentümern einer Einheit genügt die Unterschrift eines Eigentümers oder eines bevollmächtigten Vertreters.
     Die Zeichnungsberechtigten oben bestätigen die Vollständigkeit dieser Sammlung gegenüber Banken und Behörden.
   </div>
   <div class="verify-block">
