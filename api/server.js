@@ -4291,6 +4291,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
         Verifizieren Sie die Echtheit des Dokuments durch Scannen des QR-Codes oder durch Aufruf von:
         <code style="word-break:break-all">${escHtml(verifyUrl)}</code>.
         Integritäts-Hash: <code>${hash}</code>. Brief Nr. ${idx+1} von ${einzelbriefe.length} (Einheit ${escHtml(e.bezeichnung)}).
+        <strong>Vollständigkeit:</strong> Das Gesamtdokument ist nur gültig, wenn alle im Seitenzähler ausgewiesenen Seiten ("Seite X von Y") vorhanden sind — fehlt eine Seite, ist die Unterschriftenliste als ungültig zu betrachten.
       </div>
       <div class="qr-section">
         <img src="${qrUrl}" alt="QR-Code zur Verifizierung" width="120" height="120">
@@ -4406,6 +4407,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
     Verwalter mit eingetragener Vollmacht zeichnen in Vertretung der Eigentümer.
     Bei mehreren Eigentümern einer Einheit genügt die Unterschrift eines Eigentümers oder eines bevollmächtigten Vertreters.
     Die Zeichnungsberechtigten oben bestätigen die Vollständigkeit dieser Sammlung gegenüber Banken und Behörden.
+    <strong>Vollständigkeit:</strong> Das Dokument ist nur vollständig gültig, wenn alle im Seitenzähler ausgewiesenen Seiten ("Seite X von Y") vorhanden sind. Fehlt eine Seite, ist die gesamte Unterschriftenliste als ungültig zu betrachten und über die Verifizierungs-URL neu zu beziehen.
   </div>
   <div class="verify-block">
     <img src="${qrUrl}" alt="QR-Code zur Verifizierung">
@@ -4502,10 +4504,11 @@ ${zeichnerHtml ? `<h2>Zeichnungsberechtigte</h2><table><thead><tr><th>Funktion</
   }
 });
 
-// GET /api/unterschriftenliste/snapshot/:hash.pdf — Gespeichertes Original-PDF ausliefern
-app.get('/api/unterschriftenliste/snapshot/:hash.pdf', authMiddleware, async (req, res) => {
+// GET /api/unterschriftenliste/snapshot/:hash.pdf — Gespeichertes Original-PDF ausliefern (öffentlich, Hash dient als Token)
+app.get('/api/unterschriftenliste/snapshot/:hash.pdf', async (req, res) => {
   try {
     const hash = req.params.hash.toUpperCase();
+    if (!/^[A-F0-9]{12}$/.test(hash)) return res.status(400).json({ error: 'Ungültiger Hash' });
     const snap = await pool.query('SELECT stweg, datum, pdf_path FROM unterschriftenliste_snapshots WHERE hash = $1', [hash]);
     if (snap.rows.length === 0 || !snap.rows[0].pdf_path) return res.status(404).json({ error: 'PDF nicht gefunden' });
     const s = snap.rows[0];
@@ -4513,6 +4516,7 @@ app.get('/api/unterschriftenliste/snapshot/:hash.pdf', authMiddleware, async (re
     if (!fullPath.startsWith(pathModule.resolve(DOCS_PATH) + '/')) return res.status(400).end();
     const stat = await fs.stat(fullPath);
     if (!stat.isFile()) return res.status(404).end();
+    pool.query('UPDATE unterschriftenliste_snapshots SET download_count = COALESCE(download_count,0) + 1 WHERE hash = $1', [hash]).catch(() => {});
     res.setHeader('Content-Type', 'application/pdf');
     const inline = req.query.preview === '1';
     res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="unterschriftenliste-stweg${s.stweg}-${String(s.datum).slice(0,10)}-${hash}.pdf"`);
