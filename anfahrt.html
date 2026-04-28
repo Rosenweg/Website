@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anfahrt &amp; Besucherparkplätze — Rosenweg</title>
+    <meta name="description" content="Anfahrtsbeschreibung und Standort der Besucherparkplätze der Überbauung Rosenweg, 4303 Kaiseraugst.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .step-number { width: 1.6rem; height: 1.6rem; }
+        figure img { box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div id="nav-placeholder"></div>
+
+    <main class="max-w-4xl mx-auto px-4 py-10">
+        <header class="mb-8">
+            <div class="flex items-center gap-3 mb-3">
+                <img src="/logo-rosenweg.png" alt="Rosenweg" class="w-12 h-12 rounded-full bg-white p-1 border">
+                <div>
+                    <h1 class="text-3xl font-bold text-gray-900">Anfahrt &amp; Besucherparkplätze</h1>
+                    <p class="text-sm text-gray-600">STWEG-Kooperation Rosenweg · Rosenweg 1–18, 4303 Kaiseraugst</p>
+                </div>
+            </div>
+            <p class="text-gray-700 leading-relaxed">
+                Die Überbauung Rosenweg liegt im Quartier Liebrüti in Kaiseraugst.
+                Für Besucher stehen ausschliesslich gekennzeichnete Besucherparkplätze
+                am <strong>Junkholzweg</strong> zur Verfügung.
+            </p>
+        </header>
+
+        <section class="bg-white rounded-xl shadow-sm border p-5 mb-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-3">Standort auf der Karte</h2>
+            <div class="aspect-[16/10] w-full overflow-hidden rounded-lg border">
+                <iframe
+                    width="100%" height="100%" frameborder="0" scrolling="no" marginheight="0" marginwidth="0"
+                    src="https://www.openstreetmap.org/export/embed.html?bbox=7.7400%2C47.5370%2C7.7560%2C47.5440&amp;layer=mapnik&amp;marker=47.54042%2C7.74795"
+                    style="border: 0;"
+                    title="OpenStreetMap-Karte Rosenweg Kaiseraugst"></iframe>
+            </div>
+            <div class="flex flex-wrap gap-3 mt-3 text-sm">
+                <a href="https://www.openstreetmap.org/?mlat=47.54042&amp;mlon=7.74795#map=17/47.54042/7.74795"
+                   target="_blank" rel="noopener"
+                   class="inline-flex items-center gap-1.5 text-red-700 hover:text-red-800 font-medium">
+                    Grössere Karte auf openstreetmap.org öffnen →
+                </a>
+                <a href="https://www.openstreetmap.org/directions?from=&amp;to=47.54042%2C7.74795"
+                   target="_blank" rel="noopener"
+                   class="inline-flex items-center gap-1.5 text-red-700 hover:text-red-800 font-medium">
+                    Routenplaner auf OSM →
+                </a>
+            </div>
+        </section>
+
+        <section class="bg-white rounded-xl shadow-sm border p-5 mb-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-3">Übersichtsplan</h2>
+            <p class="text-sm text-gray-600 mb-3">Die grüne Linie zeigt die empfohlene Anfahrtsroute.</p>
+            <figure class="rounded-lg overflow-hidden border">
+                <img src="/img/anfahrt/anfahrtsroute.png" alt="Anfahrtsroute Rosenweg" class="w-full">
+            </figure>
+        </section>
+
+        <section class="bg-white rounded-xl shadow-sm border p-5 mb-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-3">Besucherparkplätze auf dem Areal</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <figure class="rounded-lg overflow-hidden border">
+                    <img src="/img/anfahrt/parkplatz-uebersicht.png" alt="Übersicht Besucherparkplätze Rosenweg" class="w-full">
+                    <figcaption class="bg-gray-50 px-3 py-2 text-xs text-gray-600">Übersicht Areal mit allen Besucherparkplatz-Standorten</figcaption>
+                </figure>
+                <figure class="rounded-lg overflow-hidden border">
+                    <img src="/img/anfahrt/parkplatz-detail.png" alt="Detail Besucherparkplätze Rosenweg" class="w-full">
+                    <figcaption class="bg-gray-50 px-3 py-2 text-xs text-gray-600">Detailplan Besucherparkplätze</figcaption>
+                </figure>
+            </div>
+        </section>
+
+        <section class="bg-white rounded-xl shadow-sm border p-5 mb-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-2">Anfahrt mit dem Auto</h2>
+            <p class="text-sm text-gray-600 mb-4">Von der Autobahn A2 / A3 (Basel · Bern · Zürich):</p>
+            <ol class="space-y-2 text-sm text-gray-800">
+                <li class="flex gap-3"><span class="step-number flex-none flex items-center justify-center bg-red-700 text-white text-xs font-semibold rounded-full">1</span>Ausfahrt Richtung <strong>Augst</strong> nehmen.</li>
+                <li class="flex gap-3"><span class="step-number flex-none flex items-center justify-center bg-red-700 text-white text-xs font-semibold rounded-full">2</span>Der <strong>Frenkendörferstrasse</strong> folgen bis nach Augst hinein.</li>
+                <li class="flex gap-3"><span class="step-number flex-none flex items-center justify-center bg-red-700 text-white text-xs font-semibold rounded-full">3</span>In Augst rechts auf die <strong>Hauptstrasse</strong> abbiegen. An der Kantonsgrenze BL/AG wechselt der Name zur <strong>Landstrasse</strong>.</li>
+                <li class="flex gap-3"><span class="step-number flex-none flex items-center justify-center bg-red-700 text-white text-xs font-semibold rounded-full">4</span>Der Landstrasse folgen bis zum Lichtsignal <strong>Giebenacherstrasse</strong> (Coop / Jumbo auf der rechten Seite).</li>
+                <li class="flex gap-3"><span class="step-number flex-none flex items-center justify-center bg-red-700 text-white text-xs font-semibold rounded-full">5</span>Am Lichtsignal rechts auf die Giebenacherstrasse abbiegen.</li>
+                <li class="flex gap-3"><span class="step-number flex-none flex items-center justify-center bg-red-700 text-white text-xs font-semibold rounded-full">6</span>Der Giebenacherstrasse bis zum Kreisel folgen.</li>
+                <li class="flex gap-3"><span class="step-number flex-none flex items-center justify-center bg-red-700 text-white text-xs font-semibold rounded-full">7</span>Im Kreisel die <strong>3. Ausfahrt</strong> (links) nehmen.</li>
+                <li class="flex gap-3"><span class="step-number flex-none flex items-center justify-center bg-red-700 text-white text-xs font-semibold rounded-full">8</span>Vor der Schrankenanlage rechts in den <strong>Junkholzweg</strong> abbiegen.</li>
+                <li class="flex gap-3"><span class="step-number flex-none flex items-center justify-center bg-red-700 text-white text-xs font-semibold rounded-full">9</span>Nach der zweiten Einfahrt befinden sich die ersten Besucherparkplätze auf der rechten Seite.</li>
+                <li class="flex gap-3"><span class="step-number flex-none flex items-center justify-center bg-red-700 text-white text-xs font-semibold rounded-full">10</span>Hinter der Tiefgarage und dem Containerplatz hat es weitere Besucherparkplätze auf der rechten Seite.</li>
+            </ol>
+        </section>
+
+        <section class="bg-white rounded-xl shadow-sm border p-5 mb-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-2">Anfahrt mit dem öffentlichen Verkehr</h2>
+            <ul class="space-y-2 text-sm text-gray-800">
+                <li class="flex gap-2"><span class="text-red-700 font-bold">•</span><span><strong>S-Bahn S1</strong> (Regio S-Bahn Basel): Haltestelle <strong>Kaiseraugst</strong> · ca. 5 Minuten Fussweg</span></li>
+                <li class="flex gap-2"><span class="text-red-700 font-bold">•</span><span><strong>Bus</strong>: Haltestelle an der Giebenacherstrasse</span></li>
+            </ul>
+        </section>
+
+        <section class="bg-amber-50 border border-amber-200 rounded-xl p-5 mb-6">
+            <h2 class="text-lg font-semibold text-amber-900 mb-2">Wichtige Hinweise</h2>
+            <ul class="space-y-1.5 text-sm text-amber-900">
+                <li class="flex gap-2"><span class="font-bold">•</span>Die Besucherparkplätze sind <strong>ausschliesslich für Besucher</strong> der Überbauung Rosenweg bestimmt.</li>
+                <li class="flex gap-2"><span class="font-bold">•</span>Vor den Hauseingängen gilt eine <strong>1-Stunden-Parkbegrenzung</strong> (zum Be- und Entladen).</li>
+                <li class="flex gap-2"><span class="font-bold">•</span>Die <strong>Einstellhalle</strong> (Rosenweg 17.1) ist nur für Eigentümer und Mieter mit Stellplatz zugänglich.</li>
+            </ul>
+        </section>
+
+        <section class="bg-white rounded-xl shadow-sm border p-5 mb-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-3">Reglementarische Grundlage</h2>
+            <p class="text-sm text-gray-600 mb-4">Die Nutzung der Besucherparkplätze und der Einstellhalle ist reglementarisch geregelt:</p>
+
+            <article class="border-l-4 border-red-700 bg-gray-50 px-4 py-3 mb-4">
+                <h3 class="font-semibold text-gray-800 text-sm mb-1">MEG-Reglement Gemeinschaftsanlagen · §3.2.5 Besucherparkplätze</h3>
+                <p class="text-sm text-gray-700 italic">„Die Besucherparkplätze sind als solche zu kennzeichnen und dürfen nur von Besuchern benutzt werden. Bewohnern der Überbauung Junkholz ist es untersagt, Besucherparkplätze zu belegen.&#8220;</p>
+            </article>
+
+            <article class="border-l-4 border-red-700 bg-gray-50 px-4 py-3 mb-4">
+                <h3 class="font-semibold text-gray-800 text-sm mb-1">MEG-Reglement Gemeinschaftsanlagen · §3.2.4 Platzordnung</h3>
+                <p class="text-sm text-gray-700 italic">„In einer besonderen Platzordnung können nähere Vorschriften über die Benutzung der gemeinschaftlichen Flächen, Anlagen und Einrichtungen, insbesondere der Spielplätze, Abfallbeseitigungsanlagen und Besucherparkplätze aufgestellt werden. Diese Ordnung wird auf Antrag des Verwalters durch die Versammlung der Miteigentümer mit einfacher Mehrheit beschlossen und abgeändert.&#8220;</p>
+            </article>
+
+            <article class="border-l-4 border-red-700 bg-gray-50 px-4 py-3 mb-4">
+                <h3 class="font-semibold text-gray-800 text-sm mb-1">MEG-Reglement Tiefgarage Nr. 705 · §1.3 Zweckbestimmung</h3>
+                <p class="text-sm text-gray-700 italic">„Die Tiefgarage ist zum Abstellen von Motorfahrzeugen bestimmt.&#8220;</p>
+                <p class="text-xs text-gray-500 mt-1">Nutzung nur durch Eigentümer/Mieter eines zugewiesenen Einstellplatzes (Parzelle 965, GB 1043).</p>
+            </article>
+
+            <p class="text-xs text-gray-500 mt-3">Vollständige Reglemente (PDF) sind im internen <a href="/" class="text-red-700 hover:underline">Mitgliederbereich</a> nach Anmeldung verfügbar:
+                Nutzungs- und Verwaltungsordnung MEG der Gemeinschaftsanlagen, sowie Reglement Tiefgarage (MEG Einstellhalle).</p>
+        </section>
+
+        <section class="bg-white rounded-xl shadow-sm border p-5 text-sm text-gray-700">
+            <h2 class="font-semibold text-gray-800 mb-2">Adresse für Navigationsgeräte</h2>
+            <p class="font-mono">Junkholzweg, 4303 Kaiseraugst</p>
+        </section>
+    </main>
+
+    <script src="/js/nav.js"></script>
+</body>
+</html>

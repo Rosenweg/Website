@@ -109,6 +109,7 @@ const RosenwegNav = {
             </button>
             <div class="nav-dropdown-menu hidden absolute left-0 mt-1 w-48 bg-white rounded-lg shadow-lg border py-1 z-50">
               <a href="${base}projekte.html" data-perm-any="eigentuemer" class="${dropA('projekte')} block px-4 py-2 text-sm">Projekte</a>
+              <a href="${base}anfahrt.html" class="${dropA('anfahrt')} block px-4 py-2 text-sm">Anfahrt &amp; Parken</a>
               <a href="${base}entsorgung.html" class="${dropA('entsorgung')} block px-4 py-2 text-sm">Entsorgung</a>
               <a href="${base}isp.html" class="${dropA('isp')} block px-4 py-2 text-sm">ISP / WLAN</a>
               <a href="${base}#dokumente" class="${dropA('dokumente')} block px-4 py-2 text-sm">Dokumente</a>
@@ -156,6 +157,7 @@ const RosenwegNav = {
         <a href="${base}proxmox-verwaltung.html" data-perm="proxmox-verwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Proxmox</a>
 
         <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Infos</div>
+        <a href="${base}anfahrt.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Anfahrt &amp; Parken</a>
         <a href="${base}entsorgung.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Entsorgung</a>
         <a href="${base}isp.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">ISP / WLAN</a>
         <a href="${base}#dokumente" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Dokumente</a>
