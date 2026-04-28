@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Echtheitsprüfung Unterschriftenliste — Rosenweg</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .hash-input { letter-spacing: 0.15em; font-family: 'JetBrains Mono', ui-monospace, monospace; text-transform: uppercase; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div id="nav-placeholder"></div>
+
+    <main class="max-w-3xl mx-auto px-4 py-10">
+        <header class="mb-8">
+            <div class="flex items-center gap-3 mb-3">
+                <img src="/logo-rosenweg.png" alt="Rosenweg" class="w-12 h-12 rounded-full bg-white p-1 border">
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-900">Echtheitsprüfung Unterschriftenliste</h1>
+                    <p class="text-sm text-gray-600">STWEG-Kooperation Rosenweg · 4303 Kaiseraugst</p>
+                </div>
+            </div>
+            <p class="text-gray-700 leading-relaxed">
+                Auf jeder Seite einer per Post oder E-Mail versendeten Unterschriftenliste der STWEG-Kooperation
+                Rosenweg findet sich in der Fusszeile ein <strong>12-stelliger Hash</strong>
+                (z.&nbsp;B. <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm">A1B2C3D4E5F6</code>).
+                Geben Sie diesen Hash unten ein, um die Echtheit des Dokuments zu prüfen.
+            </p>
+        </header>
+
+        <section class="bg-white rounded-xl shadow-sm border p-6 mb-6">
+            <form id="verify-form" class="space-y-4">
+                <div>
+                    <label for="hash" class="block text-sm font-medium text-gray-700 mb-1">Integritäts-Hash</label>
+                    <input type="text" id="hash" name="hash" maxlength="12" required
+                           autocomplete="off" autocapitalize="characters" spellcheck="false"
+                           pattern="[A-Fa-f0-9]{12}"
+                           placeholder="z.B. A1B2C3D4E5F6"
+                           class="hash-input w-full px-4 py-3 text-lg border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none uppercase">
+                    <p class="mt-1 text-xs text-gray-500">12 Zeichen · 0–9 und A–F · Gross-/Kleinschreibung egal</p>
+                </div>
+                <button type="submit"
+                        class="w-full bg-red-700 hover:bg-red-800 text-white font-semibold py-3 rounded-lg transition shadow-sm">
+                    Echtheit prüfen
+                </button>
+            </form>
+        </section>
+
+        <section id="result" class="hidden"></section>
+
+        <section class="bg-white border rounded-xl p-5 text-sm text-gray-600 leading-relaxed">
+            <h2 class="font-semibold text-gray-800 mb-2">Wie funktioniert die Prüfung?</h2>
+            <ul class="list-disc list-inside space-y-1">
+                <li>Der Hash wird beim Erzeugen jeder Unterschriftenliste deterministisch aus dem
+                    vollständigen Inhalt (Eigentümer, Wertquoten, Datum, Anlass) berechnet.</li>
+                <li>Die Originaldaten werden zusammen mit dem Hash in der zentralen Datenbank gespeichert
+                    und können hier abgefragt werden.</li>
+                <li>Stimmt der Hash mit einem gespeicherten Snapshot überein, ist die Liste authentisch.
+                    Sie können den Original-Stand auf dieser Seite mit Ihrem Ausdruck vergleichen.</li>
+                <li>Findet sich der Hash nicht oder weichen die Daten ab, wurde das Dokument verändert
+                    oder stammt nicht aus der Kooperation Rosenweg.</li>
+            </ul>
+        </section>
+    </main>
+
+    <script src="/js/nav.js"></script>
+    <script>
+        (function() {
+            const form = document.getElementById('verify-form');
+            const input = document.getElementById('hash');
+            const result = document.getElementById('result');
+
+            // Auto-uppercase
+            input.addEventListener('input', () => {
+                input.value = input.value.toUpperCase().replace(/[^A-F0-9]/g, '').slice(0, 12);
+            });
+
+            // Pre-fill from query string
+            const params = new URLSearchParams(window.location.search);
+            const presetHash = (params.get('hash') || '').toUpperCase().replace(/[^A-F0-9]/g, '').slice(0, 12);
+            if (presetHash) {
+                input.value = presetHash;
+                if (presetHash.length === 12) {
+                    setTimeout(() => form.requestSubmit(), 50);
+                }
+            }
+
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const hash = input.value.trim().toUpperCase();
+                if (!/^[A-F0-9]{12}$/.test(hash)) {
+                    result.className = 'mb-6 bg-amber-50 border border-amber-300 rounded-xl p-5 text-amber-900';
+                    result.innerHTML = '<strong>Ungültiges Hash-Format.</strong> Bitte 12 Zeichen 0–9 / A–F eingeben.';
+                    result.classList.remove('hidden');
+                    return;
+                }
+                history.replaceState(null, '', `?hash=${hash}`);
+                result.className = 'mb-6 bg-blue-50 border border-blue-200 rounded-xl p-5 text-blue-900';
+                result.innerHTML = '<div class="flex items-center gap-2"><svg class="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" opacity="0.25"></circle><path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" stroke-width="3" stroke-linecap="round"></path></svg>Prüfe Hash …</div>';
+                result.classList.remove('hidden');
+
+                try {
+                    const r = await fetch(`/api/unterschriftenliste/verify-json?hash=${encodeURIComponent(hash)}`, {
+                        headers: { 'Accept': 'application/json' }
+                    });
+                    const data = await r.json();
+                    if (!r.ok || !data.found) {
+                        result.className = 'mb-6 bg-red-50 border-l-4 border-red-600 rounded-xl p-5';
+                        result.innerHTML = `
+                            <h2 class="text-xl font-bold text-red-900 mb-2">✗ Hash nicht gefunden — Dokument ungültig</h2>
+                            <p class="text-red-800 mb-2">Der Hash <code class="bg-white px-2 py-0.5 rounded border">${escapeHtml(hash)}</code> ist nicht in der Datenbank registriert.</p>
+                            <p class="text-red-800 text-sm">Mögliche Ursachen: das Dokument wurde manipuliert, stammt nicht aus der STWEG-Kooperation Rosenweg, oder der Snapshot wurde gelöscht. Wenden Sie sich im Zweifelsfall an den Ausschuss.</p>`;
+                        return;
+                    }
+                    renderResult(data);
+                } catch (err) {
+                    result.className = 'mb-6 bg-red-50 border border-red-300 rounded-xl p-5 text-red-900';
+                    result.innerHTML = `<strong>Fehler bei der Prüfung:</strong> ${escapeHtml(err.message)}`;
+                }
+            });
+
+            function renderResult(d) {
+                const wohnungen = (d.snapshot.wohnungen || []).map(w => `
+                    <tr>
+                        <td class="px-3 py-2 font-semibold">${escapeHtml(w.bezeichnung)}</td>
+                        <td class="px-3 py-2">${escapeHtml((w.eigentuemer || []).join(', '))}${w.verwalter && w.verwalter.length ? `<br><span class="text-xs text-gray-500">↳ Verwalter: ${escapeHtml(w.verwalter.join(', '))}</span>` : ''}</td>
+                        <td class="px-3 py-2 text-center font-mono text-sm">${escapeHtml(w.wertquote || '—')}</td>
+                        <td class="px-3 py-2 text-xs text-gray-600">${(w.korrespondenz_adressen || []).map(escapeHtml).join('; ') || '<em>—</em>'}</td>
+                    </tr>`).join('');
+                const zeichner = (d.snapshot.zeichnungsberechtigte || []).map(z => `
+                    <tr>
+                        <td class="px-3 py-2 font-semibold">${escapeHtml(z.funktion || '')}</td>
+                        <td class="px-3 py-2">${escapeHtml(z.name || '')}</td>
+                    </tr>`).join('');
+
+                result.className = '';
+                result.innerHTML = `
+                    <div class="bg-emerald-50 border-l-4 border-emerald-600 rounded-xl p-5 mb-4">
+                        <h2 class="text-xl font-bold text-emerald-900 mb-1">✓ Echtheit bestätigt</h2>
+                        <p class="text-emerald-800">Diese Unterschriftenliste ist authentisch und stammt aus der zentralen Datenbank der STWEG-Kooperation Rosenweg.</p>
+                        <p class="mt-2 font-mono text-emerald-900 text-lg tracking-wider">${escapeHtml(d.hash)}</p>
+                    </div>
+                    <div class="bg-white border rounded-xl p-5 mb-4">
+                        <dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                            <div><dt class="text-gray-500">STWEG</dt><dd class="font-semibold">${escapeHtml(String(d.stweg))}</dd></div>
+                            <div><dt class="text-gray-500">Datum</dt><dd class="font-semibold">${escapeHtml(d.datum)}</dd></div>
+                            <div class="sm:col-span-2"><dt class="text-gray-500">Anlass</dt><dd class="font-semibold">${escapeHtml(d.anlass_titel || '—')}</dd></div>
+                            <div><dt class="text-gray-500">Generiert am</dt><dd>${escapeHtml(d.generated_at_local)}</dd></div>
+                            <div><dt class="text-gray-500">Aufrufe</dt><dd>${d.download_count}</dd></div>
+                        </dl>
+                    </div>
+                    <div class="bg-white border rounded-xl p-5 mb-4 overflow-x-auto">
+                        <h3 class="font-semibold text-gray-800 mb-2">Eigentümer-Stand zum Generierungszeitpunkt</h3>
+                        <p class="text-xs text-gray-500 mb-3">Vergleichen Sie diese Daten mit Ihrer ausgedruckten Liste — stimmen alle ${d.snapshot.wohnungen?.length || 0} Einträge überein, ist die Liste unverändert.</p>
+                        <table class="w-full text-sm">
+                            <thead class="bg-gray-50 text-left text-xs uppercase tracking-wider text-gray-600">
+                                <tr><th class="px-3 py-2">Einheit</th><th class="px-3 py-2">Eigentümer</th><th class="px-3 py-2 text-center">Wertquote</th><th class="px-3 py-2">Korrespondenz</th></tr>
+                            </thead>
+                            <tbody class="divide-y">${wohnungen}</tbody>
+                            <tfoot class="bg-red-50 font-semibold">
+                                <tr><td class="px-3 py-2">TOTAL</td><td class="px-3 py-2">${d.snapshot.total_units || 0} Einheiten</td><td class="px-3 py-2 text-center font-mono">${d.snapshot.total_wq || 0}/1000</td><td></td></tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                    ${zeichner ? `
+                    <div class="bg-white border rounded-xl p-5 mb-4">
+                        <h3 class="font-semibold text-gray-800 mb-2">Zeichnungsberechtigte</h3>
+                        <table class="w-full text-sm"><thead class="bg-gray-50 text-left text-xs uppercase text-gray-600"><tr><th class="px-3 py-2">Funktion</th><th class="px-3 py-2">Name</th></tr></thead><tbody class="divide-y">${zeichner}</tbody></table>
+                    </div>` : ''}
+                    <div class="bg-white border rounded-xl p-5">
+                        <h3 class="font-semibold text-gray-800 mb-2">Original-PDF</h3>
+                        <p class="text-sm text-gray-600 mb-3">Falls Teile des Ausdrucks verloren gegangen sind, kann das Original-PDF inhaltlich identisch erneut bezogen werden:</p>
+                        <div class="flex flex-wrap gap-2">
+                            <a href="/api/unterschriftenliste/snapshot/${encodeURIComponent(d.hash)}.pdf" class="inline-block bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-medium text-sm">📄 Original-PDF herunterladen</a>
+                            <a href="/api/unterschriftenliste/snapshot/${encodeURIComponent(d.hash)}.pdf?preview=1" target="_blank" class="inline-block bg-gray-100 hover:bg-gray-200 text-gray-800 border px-4 py-2 rounded-lg font-medium text-sm">👁 Im Browser ansehen</a>
+                        </div>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-4">Diese Verifizierungsseite zeigt den Original-Stand zur Generierungszeit. Spätere Änderungen in der Datenbank haben keinen Einfluss auf diesen Snapshot. Für Rechtszwecke gilt das physisch unterschriebene Original.</p>`;
+            }
+
+            function escapeHtml(s) {
+                return String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+            }
+        })();
+    </script>
+</body>
+</html>
