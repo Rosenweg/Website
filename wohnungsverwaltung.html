@@ -256,6 +256,14 @@
                         <iframe id="ul-preview" src="about:blank" class="flex-1 w-full border border-gray-200 rounded" style="min-height:550px"></iframe>
                     </div>
                 </div>
+                <!-- History — bisher generierte Listen -->
+                <div class="mt-6 bg-white rounded-lg border p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="text-sm font-semibold text-gray-700">Bisher generierte Unterschriftenlisten</h3>
+                        <button onclick="ulLoadHistory()" class="text-xs text-blue-600 hover:underline">Aktualisieren</button>
+                    </div>
+                    <div id="ul-history" class="text-sm text-gray-500">Lade…</div>
+                </div>
             </div>
 
             <!-- ═══ Bewohner Tab ═══ -->
@@ -642,6 +650,7 @@
                 // Default-Datum = heute, falls leer
                 const dEl = document.getElementById('ul-datum');
                 if (!dEl.value) dEl.value = new Date().toISOString().slice(0,10);
+                ulLoadHistory();
             }
             if ((tab === 'bewohner' || tab === 'gruppen') && !bewohnerLoaded) {
                 bewohnerLoaded = true;
@@ -1377,7 +1386,47 @@
                 a.href = URL.createObjectURL(blob);
                 a.download = `unterschriftenliste-stweg${stweg}-${datum}.pdf`;
                 document.body.appendChild(a); a.click(); a.remove();
+                ulLoadHistory();
             } catch (e) { alert('Fehler: ' + e.message); }
+        }
+        async function ulLoadHistory() {
+            const stweg = document.getElementById('ul-stweg').value;
+            const target = document.getElementById('ul-history');
+            target.innerHTML = '<span class="text-gray-400">Lade…</span>';
+            try {
+                const res = await AuthentikAuth.apiFetch(`/api/unterschriftenliste/history?stweg=${stweg}`);
+                const data = await res.json();
+                const list = data.snapshots || [];
+                if (list.length === 0) { target.innerHTML = '<span class="text-gray-400">Noch keine generierten Listen für STWEG ' + stweg + '</span>'; return; }
+                target.innerHTML = `<table class="w-full text-xs">
+                    <thead class="text-gray-500"><tr>
+                        <th class="text-left px-2 py-1">Datum</th>
+                        <th class="text-left px-2 py-1">Anlass</th>
+                        <th class="text-left px-2 py-1">Generiert</th>
+                        <th class="text-left px-2 py-1">Hash</th>
+                        <th class="text-right px-2 py-1">Aktionen</th>
+                    </tr></thead>
+                    <tbody class="divide-y">
+                        ${list.map(s => {
+                            const dt = String(s.datum).slice(0,10);
+                            const gen = new Date(s.generated_at).toLocaleString('de-CH', {timeZone:'Europe/Zurich'});
+                            return `<tr class="hover:bg-gray-50">
+                                <td class="px-2 py-1.5 font-mono">${escapeHtml(dt)}</td>
+                                <td class="px-2 py-1.5">${escapeHtml(s.anlass_titel || '')}</td>
+                                <td class="px-2 py-1.5 text-gray-500">${escapeHtml(gen)}<br><span class="text-gray-400">${escapeHtml(s.generated_by||'')}</span></td>
+                                <td class="px-2 py-1.5 font-mono text-emerald-700">${escapeHtml(s.hash)}</td>
+                                <td class="px-2 py-1.5 text-right whitespace-nowrap">
+                                    <a href="/api/unterschriftenliste/snapshot/${escapeHtml(s.hash)}.pdf?preview=1" target="_blank" class="text-blue-600 hover:underline text-xs mr-2">Ansehen</a>
+                                    <a href="/api/unterschriftenliste/snapshot/${escapeHtml(s.hash)}.pdf" class="text-blue-600 hover:underline text-xs mr-2">PDF</a>
+                                    <a href="/api/unterschriftenliste/verify?hash=${escapeHtml(s.hash)}" target="_blank" class="text-emerald-600 hover:underline text-xs">Verify</a>
+                                </td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>`;
+            } catch (e) {
+                target.innerHTML = '<span class="text-red-600">Fehler: ' + escapeHtml(e.message) + '</span>';
+            }
         }
         function escapeHtml(s) {
             return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');

@@ -4090,35 +4090,52 @@ function rosenwegNrAusBezeichnung(bezeichnung) {
   // P-Nummern (Tiefgarage, STWEG 8) → keine Hausnummer
   return null;
 }
-async function buildUnterschriftenlisteHTML(stweg, opts) {
+async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) {
   const { datum, anlass_titel, anlass_zweck, ruecksendung_bis, ruecksendung_an,
           zeichnungsberechtigte = [], kollektiv_text } = opts;
-  // Wohnungen + Kontakte aus DB ziehen (nur Wohnungen+Hobbyräume mit wertquote — Parkplätze nicht für Zirkular)
-  const wohnungen = await pool.query(`
-    SELECT w.id, w.bezeichnung, w.typ, w.wertquote_zaehler, w.wertquote_nenner
-    FROM wohnungen w
-    WHERE w.stweg = $1 AND w.typ IN ('Wohnung','Hobbyraum')
-    ORDER BY w.bezeichnung
-  `, [stweg]);
-  const wohnungIds = wohnungen.rows.map(w => w.id);
-  const kontakte = wohnungIds.length === 0 ? { rows: [] } : await pool.query(`
-    SELECT wohnung_id, rolle, name, email, adresse, sort_order
-    FROM wohnungen_kontakte
-    WHERE wohnung_id = ANY($1::int[]) AND rolle IN ('eigentuemer','verwalter') AND name IS NOT NULL
-    ORDER BY wohnung_id, (CASE WHEN rolle='eigentuemer' THEN 0 ELSE 1 END), sort_order, id
-  `, [wohnungIds]);
-
-  // Pro Wohnung: eigentuemer + verwalter + adresse + auswaerts-Marker
-  const byWohnung = new Map();
-  for (const w of wohnungen.rows) {
-    byWohnung.set(w.id, { ...w, eigentuemer: [], verwalter: [], adressen: new Set() });
-  }
-  for (const k of kontakte.rows) {
-    const w = byWohnung.get(k.wohnung_id);
-    if (!w) continue;
-    if (k.rolle === 'eigentuemer') w.eigentuemer.push(k);
-    else if (k.rolle === 'verwalter') w.verwalter.push(k);
-    if (k.adresse) w.adressen.add(k.adresse.trim());
+  // Daten aus Snapshot ODER live aus DB
+  let wohnungen, byWohnung;
+  if (replaySnapshot) {
+    // Replay aus gespeichertem Snapshot — Daten exakt wie damals
+    wohnungen = { rows: replaySnapshot.wohnungen.map((w, idx) => {
+      const [z, n] = (w.wertquote || '').split('/').map(s => parseInt(s) || null);
+      return { id: idx + 1, bezeichnung: w.bezeichnung, typ: w.typ, wertquote_zaehler: z, wertquote_nenner: n || 1000 };
+    })};
+    byWohnung = new Map();
+    replaySnapshot.wohnungen.forEach((w, idx) => {
+      byWohnung.set(idx + 1, {
+        id: idx + 1, bezeichnung: w.bezeichnung, typ: w.typ,
+        eigentuemer: (w.eigentuemer || []).map(name => ({ name })),
+        verwalter: (w.verwalter || []).map(name => ({ name })),
+        adressen: new Set(w.korrespondenz_adressen || []),
+      });
+    });
+  } else {
+    // Live aus DB
+    wohnungen = await pool.query(`
+      SELECT w.id, w.bezeichnung, w.typ, w.wertquote_zaehler, w.wertquote_nenner
+      FROM wohnungen w
+      WHERE w.stweg = $1 AND w.typ IN ('Wohnung','Hobbyraum')
+      ORDER BY w.bezeichnung
+    `, [stweg]);
+    const wohnungIds = wohnungen.rows.map(w => w.id);
+    const kontakte = wohnungIds.length === 0 ? { rows: [] } : await pool.query(`
+      SELECT wohnung_id, rolle, name, email, adresse, sort_order
+      FROM wohnungen_kontakte
+      WHERE wohnung_id = ANY($1::int[]) AND rolle IN ('eigentuemer','verwalter') AND name IS NOT NULL
+      ORDER BY wohnung_id, (CASE WHEN rolle='eigentuemer' THEN 0 ELSE 1 END), sort_order, id
+    `, [wohnungIds]);
+    byWohnung = new Map();
+    for (const w of wohnungen.rows) {
+      byWohnung.set(w.id, { ...w, eigentuemer: [], verwalter: [], adressen: new Set() });
+    }
+    for (const k of kontakte.rows) {
+      const w = byWohnung.get(k.wohnung_id);
+      if (!w) continue;
+      if (k.rolle === 'eigentuemer') w.eigentuemer.push(k);
+      else if (k.rolle === 'verwalter') w.verwalter.push(k);
+      if (k.adresse) w.adressen.add(k.adresse.trim());
+    }
   }
 
   // Einzelbrief-Empfänger sammeln (auswärtige Eigentümer)
@@ -4188,18 +4205,25 @@ async function buildUnterschriftenlisteHTML(stweg, opts) {
     total_units: wohnungen.rows.length,
     total_wq: wohnungen.rows.reduce((s, w) => s + (w.wertquote_zaehler || 0), 0),
   };
-  // Canonical JSON: stable key order via sort
-  const canonical = JSON.stringify(snapshotData, Object.keys(snapshotData).sort());
-  const hash = crypto.createHash('sha256').update(canonical).digest('hex').substring(0, 12).toUpperCase();
-  const generatedAt = new Date().toLocaleString('de-CH', { timeZone: 'Europe/Zurich' });
-  // Snapshot in DB persistieren (UPSERT — gleicher Hash = gleicher Inhalt = OK)
-  try {
-    await pool.query(`
-      INSERT INTO unterschriftenliste_snapshots (hash, stweg, datum, anlass_titel, snapshot_data, generated_by)
-      VALUES ($1, $2, $3, $4, $5::jsonb, $6)
-      ON CONFLICT (hash) DO UPDATE SET download_count = unterschriftenliste_snapshots.download_count + 1
-    `, [hash, stweg, datum, anlass_titel, JSON.stringify(snapshotData), opts.generated_by || null]);
-  } catch (e) { console.error('[Unterschriftenliste] Snapshot-Save error:', e.message); }
+  // Hash + Snapshot persistieren (nur bei Live-Generierung, nicht beim Replay)
+  let hash, generatedAt;
+  if (replaySnapshot) {
+    hash = replaySnapshot._hash || 'REPLAY';
+    generatedAt = new Date(replaySnapshot._generated_at || Date.now()).toLocaleString('de-CH', { timeZone: 'Europe/Zurich' });
+  } else {
+    const canonical = JSON.stringify(snapshotData, Object.keys(snapshotData).sort());
+    hash = crypto.createHash('sha256').update(canonical).digest('hex').substring(0, 12).toUpperCase();
+    generatedAt = new Date().toLocaleString('de-CH', { timeZone: 'Europe/Zurich' });
+    try {
+      await pool.query(`
+        INSERT INTO unterschriftenliste_snapshots (hash, stweg, datum, anlass_titel, snapshot_data, generated_by)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+        ON CONFLICT (hash) DO UPDATE SET download_count = unterschriftenliste_snapshots.download_count + 1
+      `, [hash, stweg, datum, anlass_titel, JSON.stringify(snapshotData), opts.generated_by || null]);
+    } catch (e) { console.error('[Unterschriftenliste] Snapshot-Save error:', e.message); }
+    // Hash für PDF-Speicherung im Endpoint zurückgeben
+    opts._hash = hash;
+  }
 
   // Verify-URL für QR-Code → kann auf jedem Smartphone gescannt werden,
   // führt zur Server-seitigen Original-Liste mit identischem Hash
@@ -4462,11 +4486,60 @@ code{background:#f5f5f5;padding:2px 5px;border-radius:3px;font-family:monospace}
 <tfoot><tr style="background:#fce4e4;font-weight:bold"><td>TOTAL</td><td>${data.total_units||0} Einheiten</td><td>${data.total_wq||0}/1000</td><td></td></tr></tfoot>
 </table>
 ${zeichnerHtml ? `<h2>Zeichnungsberechtigte</h2><table><thead><tr><th>Funktion</th><th>Name</th></tr></thead><tbody>${zeichnerHtml}</tbody></table>` : ''}
+<h2>Original-PDF</h2>
+<p>Falls Teile der ausgedruckten Liste verloren gegangen sind oder Sie eine zusätzliche Kopie brauchen — das Original-PDF kann jederzeit mit identischem Inhalt neu generiert werden:</p>
+<p style="margin:14px 0">
+  <a href="/api/unterschriftenliste/snapshot/${escHtml(s.hash)}.pdf" style="display:inline-block;padding:10px 18px;background:#10b981;color:white;border-radius:6px;text-decoration:none;font-weight:600">📄 Original-PDF herunterladen</a>
+  &nbsp;
+  <a href="/api/unterschriftenliste/snapshot/${escHtml(s.hash)}.pdf?preview=1" target="_blank" style="display:inline-block;padding:10px 18px;background:#f5f5f5;color:#333;border:1px solid #ddd;border-radius:6px;text-decoration:none">👁 Im Browser ansehen</a>
+</p>
+<p style="font-size:9pt;color:#888">Login erforderlich — Sie werden ggf. zur Authentik-Anmeldung weitergeleitet.</p>
 <p style="font-size:10pt;color:#888;margin-top:30px">Diese Verifizierungsseite zeigt den Original-Stand zur Generierungszeit. Spätere Änderungen in der Datenbank haben keinen Einfluss auf diesen Snapshot. Für Rechtszwecke gilt das physisch unterschriebene Original.</p>
 </body></html>`);
   } catch (err) {
     console.error('[Verify] error:', err.message);
     res.status(500).send('Verifizierungsfehler: ' + err.message);
+  }
+});
+
+// GET /api/unterschriftenliste/snapshot/:hash.pdf — Gespeichertes Original-PDF ausliefern
+app.get('/api/unterschriftenliste/snapshot/:hash.pdf', authMiddleware, async (req, res) => {
+  try {
+    const hash = req.params.hash.toUpperCase();
+    const snap = await pool.query('SELECT stweg, datum, pdf_path FROM unterschriftenliste_snapshots WHERE hash = $1', [hash]);
+    if (snap.rows.length === 0 || !snap.rows[0].pdf_path) return res.status(404).json({ error: 'PDF nicht gefunden' });
+    const s = snap.rows[0];
+    const fullPath = pathModule.join(DOCS_PATH, s.pdf_path);
+    if (!fullPath.startsWith(pathModule.resolve(DOCS_PATH) + '/')) return res.status(400).end();
+    const stat = await fs.stat(fullPath);
+    if (!stat.isFile()) return res.status(404).end();
+    res.setHeader('Content-Type', 'application/pdf');
+    const inline = req.query.preview === '1';
+    res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="unterschriftenliste-stweg${s.stweg}-${String(s.datum).slice(0,10)}-${hash}.pdf"`);
+    res.setHeader('Content-Length', stat.size);
+    fsSync.createReadStream(fullPath).pipe(res);
+  } catch (err) {
+    console.error('[Snapshot-PDF] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/unterschriftenliste/history — alle generierten Snapshots auflisten
+app.get('/api/unterschriftenliste/history', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
+  try {
+    const where = [];
+    const params = [];
+    if (req.query.stweg) { params.push(parseInt(req.query.stweg)); where.push(`stweg = $${params.length}`); }
+    const r = await pool.query(`
+      SELECT hash, stweg, datum, anlass_titel, generated_at, generated_by, download_count,
+             jsonb_array_length(snapshot_data->'wohnungen') AS unit_count
+      FROM unterschriftenliste_snapshots
+      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+      ORDER BY generated_at DESC LIMIT 100
+    `, params);
+    res.json({ snapshots: r.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -4513,9 +4586,22 @@ app.get('/api/unterschriftenliste/:stweg.pdf', authMiddleware, requirePermission
       return res.status(500).json({ error: 'PDF-Erstellung fehlgeschlagen' });
     }
     const pdfBuf = Buffer.from(await pdfResp.arrayBuffer());
+    // PDF persistieren — Original-Datei für späteren Re-Download
+    if (opts._hash) {
+      try {
+        const dir = pathModule.join(DOCS_PATH, 'allgemein', 'unterschriftenlisten');
+        await fs.mkdir(dir, { recursive: true });
+        const pdfPath = pathModule.join(dir, `${opts._hash}.pdf`);
+        await fs.writeFile(pdfPath, pdfBuf);
+        await pool.query(
+          'UPDATE unterschriftenliste_snapshots SET pdf_path = $1, pdf_size = $2 WHERE hash = $3',
+          [`allgemein/unterschriftenlisten/${opts._hash}.pdf`, pdfBuf.length, opts._hash]
+        );
+      } catch (e) { console.error('[Unterschriftenliste] PDF save error:', e.message); }
+    }
     res.setHeader('Content-Type', 'application/pdf');
     const inline = req.query.preview === '1';
-    const fname = `unterschriftenliste-stweg${stweg}-${opts.datum}.pdf`;
+    const fname = `unterschriftenliste-stweg${stweg}-${opts.datum}-${opts._hash || ''}.pdf`;
     res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${fname}"`);
     res.send(pdfBuf);
   } catch (err) {
