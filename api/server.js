@@ -4091,7 +4091,8 @@ function rosenwegNrAusBezeichnung(bezeichnung) {
   return null;
 }
 async function buildUnterschriftenlisteHTML(stweg, opts) {
-  const { datum, anlass_titel, anlass_zweck, ruecksendung_bis, ruecksendung_an, zeichnungsberechtigt } = opts;
+  const { datum, anlass_titel, anlass_zweck, ruecksendung_bis, ruecksendung_an,
+          ausschussmitglieder, revisoren, praesident_kontakt, kollektiv_text } = opts;
   // Wohnungen + Kontakte aus DB ziehen (nur Wohnungen+Hobbyräume mit wertquote — Parkplätze nicht für Zirkular)
   const wohnungen = await pool.query(`
     SELECT w.id, w.bezeichnung, w.typ, w.wertquote_zaehler, w.wertquote_nenner
@@ -4271,6 +4272,15 @@ async function buildUnterschriftenlisteHTML(stweg, opts) {
   table.info-table th, table.info-table td { padding: 4px 6px; border: 1px solid #ccc; text-align: left; }
   table.info-table thead th { background: #f0f0f0; }
   .footer-legal { margin-top: 14px; padding: 8px 10px; background: #fafafa; border: 1px solid #ddd; font-size: 8.5pt; color: #444; line-height: 1.5; }
+  .zeichnungs-block { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 14px; }
+  .zeichnungs-box { border: 1px solid #888; padding: 10px 12px; min-height: 100px; }
+  .zeichnungs-titel { font-weight: 700; color: #c41e1e; margin-bottom: 8px; }
+  .zeichnungs-zeile { font-size: 9.5pt; margin-bottom: 6px; display: flex; gap: 6px; align-items: baseline; }
+  .zeichnungs-zeile .line { flex: 1; border-bottom: 1px solid #888; min-height: 12pt; }
+  .zeichnungs-zeile .line.short { flex: 0 0 60%; border-bottom: 1px solid #888; min-height: 12pt; }
+  .zeichnungs-sigline { border-bottom: 1px solid #888; height: 30px; margin-top: 4px; }
+  .footer-kontakte { margin-top: 14px; padding: 6px 0; border-top: 1px solid #ccc; font-size: 9pt; color: #444; }
+  .footer-kontakte p { margin: 2px 0; }
   .verify-block { display: flex; gap: 14px; align-items: center; margin-top: 12px; padding: 10px; border: 1px dashed #888; border-radius: 4px; }
   .verify-block img { width: 110px; height: 110px; flex-shrink: 0; }
   .verify-block .verify-text { font-size: 9pt; color: #444; }
@@ -4306,26 +4316,34 @@ async function buildUnterschriftenlisteHTML(stweg, opts) {
     <tbody>${dataRows}</tbody>
   </table>
   ${einzelbriefeUebersicht}
-  ${zeichnungsberechtigt ? `
-  <h2 class="section-title">Zeichnungsberechtigt für die STWEG-Kooperation</h2>
-  <p class="hinweis">Folgende Personen sind im Rahmen dieses Beschlusses zeichnungs- und vertretungsberechtigt für die STWEG-Kooperation Rosenweg gegenüber Banken, Notaren und Dritten. Sie bestätigen mit ihrer Unterschrift die Richtigkeit der oben gesammelten Eigentümer-Unterschriften und die Vollständigkeit der Liste.</p>
-  <table class="signatur" style="margin-top:10px">
-    <thead><tr>
-      <th style="width:30%">Name</th>
-      <th style="width:25%">Funktion</th>
-      <th style="width:25%">Datum</th>
-      <th style="width:20%">Unterschrift</th>
-    </tr></thead>
-    <tbody>
-      ${zeichnungsberechtigt.split('\n').map(line => {
-        const parts = line.split('|').map(s => s.trim());
-        const name = parts[0] || '';
-        const funktion = parts[1] || '';
-        if (!name) return '';
-        return `<tr><td><strong>${escHtml(name)}</strong></td><td>${escHtml(funktion)}</td><td style="height:60px"></td><td></td></tr>`;
-      }).join('')}
-    </tbody>
-  </table>
+  ${(ausschussmitglieder || revisoren) ? `
+  <h2 class="section-title">Bestätigung des Ergebnisses &amp; Zeichnungsberechtigung</h2>
+  ${ausschussmitglieder ? `<p><strong>Ausschussmitglieder:</strong> ${escHtml(ausschussmitglieder)}</p>` : ''}
+  ${revisoren ? `<p><strong>Revisor/in(nen):</strong> ${escHtml(revisoren)}</p>` : ''}
+  <p class="hinweis">${escHtml(kollektiv_text || `Unterschriftsberechtigt sind die oben genannten Ausschussmitglieder und Revisor/innen (bis zu 4 Personen). Zwei dieser Personen sind – kollektiv zu zweien – ermächtigt, im Namen der Eigentümer/innen dieser STWEG die in diesem Zirkularbeschluss vorgesehenen Handlungen vorzunehmen.`)}</p>
+  <p class="hinweis">Mit ihren Unterschriften bestätigen die beiden nachstehend zeichnenden Personen das Ergebnis des Zirkularbeschlusses und nehmen die obige Zeichnungsberechtigung an.</p>
+  <div class="zeichnungs-block">
+    <div class="zeichnungs-box">
+      <div class="zeichnungs-titel">1. Unterschrift</div>
+      <div class="zeichnungs-zeile"><span>Name:</span> <span class="line"></span></div>
+      <div class="zeichnungs-zeile"><span>Datum:</span> <span class="line short"></span></div>
+      <div class="zeichnungs-zeile"><span>Unterschrift:</span></div>
+      <div class="zeichnungs-sigline"></div>
+    </div>
+    <div class="zeichnungs-box">
+      <div class="zeichnungs-titel">2. Unterschrift</div>
+      <div class="zeichnungs-zeile"><span>Name:</span> <span class="line"></span></div>
+      <div class="zeichnungs-zeile"><span>Datum:</span> <span class="line short"></span></div>
+      <div class="zeichnungs-zeile"><span>Unterschrift:</span></div>
+      <div class="zeichnungs-sigline"></div>
+    </div>
+  </div>
+  ` : ''}
+  ${(ruecksendung_an || praesident_kontakt) ? `
+  <div class="footer-kontakte">
+    ${ruecksendung_an ? `<p><strong>Rückgabe:</strong> ${escHtml(ruecksendung_an)}</p>` : ''}
+    ${praesident_kontakt ? `<p><strong>Kontakt Präsident:</strong> ${escHtml(praesident_kontakt)}</p>` : ''}
+  </div>
   ` : ''}
   <div class="footer-legal">
     <strong>Rechtshinweis:</strong> Diese Unterschriftenliste ist nur in Verbindung mit dem versendeten Hauptdokument gültig.
@@ -4392,7 +4410,10 @@ app.get('/api/unterschriftenliste/:stweg.pdf', authMiddleware, requirePermission
       anlass_zweck: req.query.anlass_zweck || '',
       ruecksendung_bis: req.query.ruecksendung_bis || '',
       ruecksendung_an: req.query.ruecksendung_an || '',
-      zeichnungsberechtigt: req.query.zeichnungsberechtigt || '',
+      ausschussmitglieder: req.query.ausschussmitglieder || '',
+      revisoren: req.query.revisoren || '',
+      praesident_kontakt: req.query.praesident_kontakt || '',
+      kollektiv_text: req.query.kollektiv_text || '',
     };
     const html = await buildUnterschriftenlisteHTML(stweg, opts);
     const GOTENBERG = process.env.GOTENBERG_URL || 'http://doc-converter:3000';
