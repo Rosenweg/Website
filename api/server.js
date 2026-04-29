@@ -5809,7 +5809,12 @@ app.delete('/api/stweg/:stweg/events/:id', authMiddleware, adminOnly, async (req
 // ═══════════════════════════════════════════════════════════════════
 
 async function authentikAPI(method, path, body = null) {
-  const url = `${AUTHENTIK_URL}/api/v3${path}`;
+  // WICHTIG: AUTHENTIK_EXTERNAL_URL nutzen (nicht AUTHENTIK_URL/intern), damit
+  // Authentik bei URL-aufbauenden Endpunkten (recovery_email, account-confirm,
+  // MFA-setup-link) den oeffentlichen Hostnamen in die generierten Links
+  // einsetzt. Sonst landen Links als https://authentik-server:9443/... in
+  // Mails, die fuer Empfaenger nicht klickbar sind.
+  const url = `${AUTHENTIK_EXTERNAL_URL}/api/v3${path}`;
   const opts = {
     method,
     headers: {
