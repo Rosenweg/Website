@@ -198,6 +198,20 @@
         } catch (e) { console.error('stats', e); }
     }
 
+    async function openBild(parzelle, sub_id) {
+        try {
+            const r = await AuthentikAuth.apiFetch(`/api/grundbuch/anteile/${parzelle}/${sub_id}/bild`);
+            if (!r.ok) { alert('Bild konnte nicht geladen werden (HTTP ' + r.status + ')'); return; }
+            const blob = await r.blob();
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank', 'noopener');
+            // Object-URL erst spaeter freigeben, damit der neue Tab die Daten sicher gelesen hat
+            setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        } catch (e) {
+            alert('Bild-Fehler: ' + e.message);
+        }
+    }
+
     async function loadAnteile() {
         document.getElementById('loading').classList.remove('hidden');
         document.getElementById('empty').classList.add('hidden');
@@ -254,7 +268,7 @@
                 <td class="px-3 py-2">${statusBadge(a.status)}</td>
                 <td class="px-3 py-2 text-xs text-gray-500">${erf}</td>
                 <td class="px-3 py-2 text-right">
-                    ${a.bild_path ? `<a href="/api/grundbuch/anteile/${a.parzelle}/${a.sub_id}/bild" target="_blank" class="text-blue-600 text-xs mr-2">Bild</a>` : ''}
+                    ${a.bild_path ? `<a href="javascript:void(0)" onclick="openBild(${a.parzelle}, ${a.sub_id})" class="text-blue-600 text-xs mr-2 hover:underline">Bild</a>` : ''}
                     <button onclick="openAnteil(${a.parzelle},${a.sub_id})" ${disabled?'disabled':''} class="px-2 py-1 text-xs ${disabled?'bg-gray-100 text-gray-400 cursor-not-allowed':'bg-blue-600 text-white hover:bg-blue-700'} rounded">${cta}</button>
                 </td>
             </tr>`;
