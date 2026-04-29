@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Telefonbuch — Rosenweg</title>
+    <meta name="theme-color" content="#c41e1e">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Rosenweg Tel">
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="manifest" href="/telefonbuch.webmanifest">
+    <link rel="icon" href="/logo-rosenweg.png">
+    <link rel="apple-touch-icon" href="/logo-rosenweg.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
+        .group-header { position: sticky; top: 60px; z-index: 5; }
+        @supports (padding: env(safe-area-inset-top)) {
+            .safe-top { padding-top: env(safe-area-inset-top); }
+            .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+        }
+        .deceased { opacity: 0.5; }
+        .deceased .name { font-style: italic; text-decoration: line-through; text-decoration-color: rgba(0,0,0,0.3); }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <header class="bg-red-700 text-white sticky top-0 z-10 safe-top shadow-md">
+        <div class="max-w-3xl mx-auto px-4 py-3">
+            <div class="flex items-center gap-3">
+                <img src="/logo-rosenweg.png" alt="" class="w-9 h-9 rounded-full bg-white p-0.5">
+                <div class="flex-1">
+                    <h1 class="font-bold text-base leading-tight">Telefonbuch</h1>
+                    <p class="text-xs text-red-100">STWEG-Kooperation Rosenweg</p>
+                </div>
+                <a href="/" class="text-xs text-red-100 hover:text-white">← zurück</a>
+            </div>
+            <div class="mt-2.5 relative">
+                <input id="search" type="search" autocomplete="off" placeholder="Suchen — Name, STWEG, Wohnung…"
+                    class="w-full bg-white text-gray-800 placeholder-gray-400 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300">
+                <span id="count" class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none"></span>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-3xl mx-auto safe-bottom">
+        <div id="loading" class="text-center text-gray-400 py-12 text-sm">Lade Kontakte…</div>
+        <div id="empty" class="hidden text-center text-gray-400 py-12 text-sm">Keine Treffer.</div>
+        <div id="list"></div>
+    </main>
+
+    <script src="/js/authentik-auth.js?v=2026-04-29"></script>
+    <script>
+    (async function() {
+        const user = await AuthentikAuth.init({ requireAuth: true });
+        if (!user) return;
+
+        const $ = id => document.getElementById(id);
+        const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+        const cleanTel = t => (t || '').replace(/[^0-9+]/g, '');
+
+        let allContacts = [];
+
+        async function load() {
+            try {
+                const r = await AuthentikAuth.apiFetch('/api/telefonbuch');
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const data = await r.json();
+                allContacts = data.contacts || [];
+                render('');
+            } catch (err) {
+                $('loading').textContent = 'Fehler: ' + err.message;
+            }
+        }
+
+        function rolleBadge(r) {
+            const colors = {
+                eigentuemer: 'bg-amber-100 text-amber-800',
+                verwalter: 'bg-purple-100 text-purple-800',
+                mieter: 'bg-blue-100 text-blue-800',
+                bewohner: 'bg-emerald-100 text-emerald-800',
+            };
+            const labels = { eigentuemer: 'Eig.', verwalter: 'Verw.', mieter: 'Miet.', bewohner: 'Bew.' };
+            return `<span class="inline-block px-1.5 py-0.5 rounded text-xs font-medium ${colors[r] || 'bg-gray-100 text-gray-700'}">${labels[r] || r}</span>`;
+        }
+
+        function wohnungLabel(w) {
+            return `STWEG ${w.stweg} · ${w.bezeichnung}`;
+        }
+
+        function matches(c, q) {
+            if (!q) return true;
+            const hay = (c.name + ' ' + (c.email || '') + ' ' + (c.telefon || '') + ' ' +
+                c.wohnungen.map(w => `STWEG ${w.stweg} ${w.bezeichnung}`).join(' ')).toLowerCase();
+            return q.toLowerCase().split(/\s+/).every(t => hay.includes(t));
+        }
+
+        function render(query) {
+            $('loading').style.display = 'none';
+            const filtered = allContacts.filter(c => matches(c, query));
+            $('count').textContent = filtered.length + (query ? ' / ' + allContacts.length : '');
+            if (filtered.length === 0) {
+                $('list').innerHTML = '';
+                $('empty').classList.remove('hidden');
+                return;
+            }
+            $('empty').classList.add('hidden');
+            // Gruppiere nach Anfangsbuchstabe des Nachnamens
+            const groups = new Map();
+            for (const c of filtered) {
+                const last = c.name.trim().split(/\s+/).pop() || '';
+                const letter = (last[0] || '?').toUpperCase();
+                if (!groups.has(letter)) groups.set(letter, []);
+                groups.get(letter).push(c);
+            }
+            const sortedLetters = [...groups.keys()].sort((a,b) => a.localeCompare(b, 'de'));
+            const html = sortedLetters.map(letter => {
+                const items = groups.get(letter).map(c => {
+                    const tel = cleanTel(c.telefon);
+                    const phoneLink = tel && !c.deceased ? `
+                        <a href="tel:${tel}" class="flex items-center gap-1.5 text-emerald-700 hover:text-emerald-800 text-sm">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"/></svg>
+                            ${escapeHtml(c.telefon)}
+                        </a>` : (c.telefon ? `<span class="text-gray-400 text-sm">${escapeHtml(c.telefon)}</span>` : '');
+                    const mailLink = c.email && !c.deceased ? `
+                        <a href="mailto:${escapeHtml(c.email)}" class="flex items-center gap-1.5 text-blue-700 hover:text-blue-800 text-sm break-all">
+                            <svg class="w-4 h-4 flex-none" fill="currentColor" viewBox="0 0 20 20"><path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"/><path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"/></svg>
+                            <span>${escapeHtml(c.email)}</span>
+                        </a>` : '';
+                    const wohnungenHtml = c.wohnungen.map(w => `
+                        <span class="inline-flex items-center gap-1 text-xs text-gray-500 mr-2">
+                            ${rolleBadge(w.rolle)} ${escapeHtml(wohnungLabel(w))}
+                        </span>`).join('');
+                    return `
+                        <div class="bg-white border-b border-gray-100 px-4 py-3 ${c.deceased ? 'deceased' : ''}">
+                            <div class="flex items-baseline justify-between gap-3">
+                                <h3 class="name font-semibold text-gray-900 text-base leading-tight">${escapeHtml(c.name)}${c.deceased ? ' <span class="text-xs font-normal text-gray-500">(verstorben)</span>' : ''}</h3>
+                            </div>
+                            <div class="mt-1 flex flex-wrap items-center gap-x-1 gap-y-0.5">${wohnungenHtml}</div>
+                            ${(phoneLink || mailLink) ? `<div class="mt-2 flex flex-col gap-1">${phoneLink}${mailLink}</div>` : ''}
+                        </div>`;
+                }).join('');
+                return `
+                    <div class="group-header bg-gray-100 px-4 py-1 text-xs font-bold text-gray-600 uppercase tracking-wider border-y border-gray-200">${letter}</div>
+                    ${items}`;
+            }).join('');
+            $('list').innerHTML = html;
+        }
+
+        let timer;
+        $('search').addEventListener('input', e => {
+            clearTimeout(timer);
+            timer = setTimeout(() => render(e.target.value.trim()), 100);
+        });
+
+        load();
+
+        // PWA-Service-Worker (sehr leichtgewichtig: nur App-Shell cachen)
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/telefonbuch-sw.js').catch(() => {});
+        }
+    })();
+    </script>
+</body>
+</html>

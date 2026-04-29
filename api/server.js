@@ -7085,6 +7085,66 @@ function requireAusschussOrTechnik(req, res, next) {
 
 // ─── Email-Log (Admin-UI) ───────────────────────────────────────────
 // GET /api/email-log — letzte 500 Versand-Einträge mit Filter
+// GET /api/telefonbuch — Internes Adressbuch fuer alle eingeloggten User
+// Zeigt alle Kontakte aus wohnungen_kontakte mit Telefon/Email,
+// gruppiert pro Person (Name als Schluessel), aggregiert ueber alle
+// Wohnungen die ihnen gehoeren/in denen sie wohnen.
+app.get('/api/telefonbuch', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT k.name, k.email, k.telefon, k.rolle,
+             w.id AS wohnung_id, w.stweg, w.bezeichnung, w.typ
+      FROM wohnungen_kontakte k
+      JOIN wohnungen w ON w.id = k.wohnung_id
+      WHERE k.name IS NOT NULL AND TRIM(k.name) <> ''
+      ORDER BY k.name
+    `);
+    // Drucker-Tags filtern, pro Name aggregieren
+    const byName = new Map();
+    for (const r of rows) {
+      const name = r.name.trim();
+      const isDeceased = /\(verstorben\)/i.test(name);
+      const cleanName = name.replace(/\s*\(verstorben\)\s*/i, '').trim();
+      const isDruckerTag = r.email && (r.email.startsWith('druckerr9+') || r.email.startsWith('druckerr13+'));
+      if (!byName.has(cleanName)) {
+        byName.set(cleanName, {
+          name: cleanName,
+          deceased: isDeceased,
+          email: null,
+          telefon: null,
+          rollen: new Set(),
+          wohnungen: [],
+        });
+      }
+      const e = byName.get(cleanName);
+      // Bevorzuge Nicht-Drucker-Email
+      if (!isDruckerTag && r.email && !e.email) e.email = r.email.trim();
+      if (r.telefon && !e.telefon) e.telefon = r.telefon.trim();
+      if (r.rolle) e.rollen.add(r.rolle);
+      e.wohnungen.push({
+        wohnung_id: r.wohnung_id,
+        stweg: r.stweg,
+        bezeichnung: r.bezeichnung,
+        typ: r.typ,
+        rolle: r.rolle,
+      });
+      if (isDeceased) e.deceased = true;
+    }
+    // Set → Array fuer JSON
+    for (const e of byName.values()) e.rollen = [...e.rollen];
+    // Sortierung nach Nachname (letztes Wort), dann Vorname
+    const lastName = n => (n || '').trim().split(/\s+/).pop() || '';
+    const list = [...byName.values()].sort((a, b) => {
+      const c = lastName(a.name).localeCompare(lastName(b.name), 'de');
+      return c !== 0 ? c : a.name.localeCompare(b.name, 'de');
+    });
+    res.json({ contacts: list, count: list.length });
+  } catch (err) {
+    console.error('[telefonbuch] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/email-log', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
   try {
     const where = [];
