@@ -2604,12 +2604,13 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
     return { success: false, error: 'No recipient found' };
   }
 
-  // Bounce-Detection: niemals als neue Verteiler-Mail prozessieren —
-  // sonst entsteht eine Endlosschleife wenn ein einzelner Empfänger bouncet
-  // und der Bounce zurück an die Verteiler-Adresse geht.
+  // Bounce-/Auto-Reply-/System-Loop-Detection: niemals als neue Verteiler-Mail prozessieren —
+  // sonst entsteht eine Endlosschleife wenn ein Bounce, eine Out-of-Office-Antwort oder
+  // unser eigener Zustellbericht zurück an die Verteiler-Adresse geht.
   const senderAddrRaw = (parsed.from?.value?.[0]?.address || '').toLowerCase();
   const subjLower = (parsed.subject || '').toLowerCase();
   const headersStr = (parsed.headerLines || []).map(h => `${h.key}: ${h.line}`).join('\n').toLowerCase();
+  const ourDomain = (VERTEILER_DOMAIN || 'rosenweg4303.ch').toLowerCase();
   const isBounce =
     senderAddrRaw.startsWith('mailer-daemon@') ||
     senderAddrRaw.startsWith('postmaster@') ||
@@ -2617,9 +2618,15 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
     /(undelivered|delivery failed|delivery status notification|returning message to sender|undeliverable|failure notice)/i.test(parsed.subject || '') ||
     /^auto-submitted:\s*auto-/im.test(headersStr) ||
     /^x-failed-recipients:/im.test(headersStr) ||
-    /^content-type:\s*multipart\/report/im.test(headersStr);
+    /^content-type:\s*multipart\/report/im.test(headersStr) ||
+    /^x-rosenweg-system:/im.test(headersStr) ||
+    senderAddrRaw === `noreply@${ourDomain}` ||
+    senderAddrRaw.startsWith('noreply@') ||
+    /^zustellbericht:/i.test(parsed.subject || '') ||
+    /^\[präsident\]\s*zustellbericht:/i.test(parsed.subject || '') ||
+    senderAddrRaw === toAddress; // Self-loop: Verteiler an sich selbst
   if (isBounce) {
-    console.log(`[Bounce] Bounce-Mail ignoriert (von ${senderAddrRaw}, Subject: ${(parsed.subject||'').substring(0,80)})`);
+    console.log(`[Bounce] System-Loop/Bounce ignoriert (von ${senderAddrRaw}, Subject: ${(parsed.subject||'').substring(0,80)})`);
     return { success: true, action: 'bounce-skipped' };
   }
 
@@ -2747,6 +2754,30 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
 
 // ─── Delivery Report ────────────────────────────────────────────────
 async function sendDeliveryReport(logId, senderEmail, verteilerName, originalSubject, recipientsList) {
+  // Loop-Schutz: niemals Zustellbericht an noreply, system-Adressen oder Verteiler selbst senden
+  const senderLower = (senderEmail || '').toLowerCase();
+  if (!senderLower
+      || senderLower.startsWith('noreply@')
+      || senderLower.startsWith('mailer-daemon@')
+      || senderLower.startsWith('postmaster@')
+      || senderLower === `noreply@${VERTEILER_DOMAIN}`) {
+    console.log(`[DeliveryReport] skipped — sender ${senderEmail} ist System-Adresse`);
+    return;
+  }
+  // Niemals an einen Verteiler-Empfänger als Sender zurückschreiben (Self-Loop)
+  const verteilerCheck = await pool.query(
+    'SELECT 1 FROM email_verteiler WHERE LOWER(email_address) = $1 AND active = true LIMIT 1',
+    [senderLower]
+  );
+  if (verteilerCheck.rows.length > 0) {
+    console.log(`[DeliveryReport] skipped — sender ${senderEmail} ist selbst eine Verteiler-Adresse (Loop-Schutz)`);
+    return;
+  }
+  // Niemals Zustellbericht zu Zustellbericht senden (Subject-Check)
+  if (/^zustellbericht:/i.test(originalSubject || '')) {
+    console.log(`[DeliveryReport] skipped — original subject is bereits ein Zustellbericht`);
+    return;
+  }
   const log = await pool.query('SELECT * FROM email_log WHERE id = $1', [logId]);
   if (log.rows.length === 0) return;
   const entry = log.rows[0];
@@ -2813,6 +2844,12 @@ async function sendDeliveryReport(logId, senderEmail, verteilerName, originalSub
     to: senderEmail,
     subject: `Zustellbericht: ${originalSubject || verteilerName}`,
     html,
+    headers: {
+      'Auto-Submitted': 'auto-replied',
+      'X-Auto-Response-Suppress': 'All',
+      'X-Rosenweg-System': 'verteiler-delivery-report',
+      'Precedence': 'auto_reply',
+    },
   }, 'verteiler-delivery-report');
   console.log(`[DeliveryReport] Sent to ${senderEmail} for log #${logId}: ${delivered}/${recipientsList.length} delivered`);
 }
