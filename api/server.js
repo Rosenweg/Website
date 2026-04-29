@@ -4151,6 +4151,65 @@ async function sendPickupReminder() {
 setInterval(sendPickupReminder, 24 * 60 * 60 * 1000);
 setTimeout(sendPickupReminder, 10 * 60 * 1000); // initial run nach 10min
 
+// ─── SMTP2GO-Rejection-Sync ────────────────────────────────────────
+// SMTP2GO klassifiziert Mails asynchron als 'rejected' (Suppression-Liste,
+// hard-bounce, etc). Wir pollen alle 10 Min die Activity-API und tragen
+// betroffene Mails im email_log nach (status='failed' + error_message).
+async function syncSmtp2goRejections() {
+  if (!SMTP2GO_API_KEY) return;
+  try {
+    const lookbackHours = 6;
+    const r = await fetch(`${SMTP2GO_API_URL}/activity/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Smtp2go-Api-Key': SMTP2GO_API_KEY },
+      signal: AbortSignal.timeout(20_000),
+      body: JSON.stringify({
+        start_date: new Date(Date.now() - lookbackHours * 3600 * 1000).toISOString(),
+        end_date: new Date().toISOString(),
+        event: 'rejected',
+        limit: 500,
+      }),
+    });
+    if (!r.ok) {
+      console.error('[Smtp2goSync] API error:', r.status);
+      return;
+    }
+    const data = await r.json();
+    const events = data.data?.events || [];
+    if (events.length === 0) return;
+
+    let updated = 0;
+    for (const ev of events) {
+      const recipient = (ev.recipient || ev.to || '').toLowerCase().trim();
+      const subject = ev.subject || '';
+      const reason = (ev.smtp_response || '').slice(0, 1000);
+      // Nur ECHTE Bounces (550-er) markieren — SMTP2GO klassifiziert auch
+      // "250 OK"-Antworten als 'rejected' (backscatter), das sind keine Fehler.
+      const isRealBounce = /^5\d\d/.test(reason) || /unknown|not found|unavailable|hard.{0,2}bounce/i.test(reason);
+      if (!isRealBounce) continue;
+      // Match nach Empfänger + Subject in unseren letzten Logs
+      const upd = await pool.query(
+        `UPDATE email_log
+         SET status = 'failed',
+             error_message = $1,
+             failed_recipients = COALESCE(failed_recipients, '') || CASE WHEN failed_recipients IS NULL THEN $2 ELSE ',' || $2 END
+         WHERE status = 'sent'
+           AND created_at > NOW() - INTERVAL '${lookbackHours} hours'
+           AND LOWER(to_addresses) LIKE '%' || $2 || '%'
+           AND ($3 = '' OR subject = $3 OR subject LIKE '%' || $3 || '%')
+         RETURNING id`,
+        [reason, recipient, subject]
+      );
+      updated += upd.rows.length;
+    }
+    if (updated > 0) console.log(`[Smtp2goSync] ${updated} email_log Eintraege auf failed gesetzt (von ${events.length} rejected events)`);
+  } catch (err) {
+    console.error('[Smtp2goSync] Fehler:', err.message);
+  }
+}
+setInterval(syncSmtp2goRejections, 10 * 60 * 1000); // alle 10 Min
+setTimeout(syncSmtp2goRejections, 60 * 1000); // initial run nach 1 min
+
 // POST /api/wohnungen/sync-authentik - Bulk sync all kontakte with email to Authentik
 app.post('/api/wohnungen/sync-authentik', authMiddleware, adminOnly, async (req, res) => {
   try {
