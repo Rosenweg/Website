@@ -2620,10 +2620,12 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
     /^x-failed-recipients:/im.test(headersStr) ||
     /^content-type:\s*multipart\/report/im.test(headersStr) ||
     /^x-rosenweg-system:/im.test(headersStr) ||
+    /^x-forwarded-by:\s*rosenweg verteiler/im.test(headersStr) || // Eigene Verteiler-Mail kommt zurück → Loop
     senderAddrRaw === `noreply@${ourDomain}` ||
     senderAddrRaw.startsWith('noreply@') ||
+    senderAddrRaw.endsWith(`@${ourDomain}`) || // Jede Mail von eigener Domain ist System (Verteiler/Druckserver/etc.)
     /^zustellbericht:/i.test(parsed.subject || '') ||
-    /^\[präsident\]\s*zustellbericht:/i.test(parsed.subject || '') ||
+    /zustellbericht:/i.test(parsed.subject || '') || // auch wenn prefixed
     senderAddrRaw === toAddress; // Self-loop: Verteiler an sich selbst
   if (isBounce) {
     console.log(`[Bounce] System-Loop/Bounce ignoriert (von ${senderAddrRaw}, Subject: ${(parsed.subject||'').substring(0,80)})`);
@@ -2723,9 +2725,13 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
       'X-Forwarded-By': 'Rosenweg Verteiler',
     },
   };
-  // Bulk-Versand an alle echten Empfänger via BCC
+  // Bulk-Versand an alle echten Empfänger via BCC.
+  // WICHTIG: To = "undisclosed-recipients:;" (RFC 5322 leere Group),
+  // NICHT toAddress — sonst leitet Cloudflare Email Routing die Mail
+  // an die Verteiler-Adresse selbst zurück und unser IMAP-Poll
+  // verarbeitet sie erneut (Endlosschleife).
   if (bccRecipients.length > 0) {
-    await transporter.sendMail({ ...baseMail, to: toAddress, bcc: bccRecipients });
+    await transporter.sendMail({ ...baseMail, to: 'undisclosed-recipients:;', bcc: bccRecipients });
   }
   // Drucker-Tags einzeln (jeder Tag braucht seine eigene To-Zeile fürs Print-Routing)
   for (const drucker of druckerRecipients) {
