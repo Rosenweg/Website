@@ -3456,6 +3456,9 @@ async function pollGmailForVerteiler() {
             const folderName = verteilerAddress.split('@')[0];
             const targetFolder = `Verteiler/${folderName}`;
             try {
+              // Erst als gelesen markieren, dann verschieben — damit Gmail-App keine Pop-ups
+              // mehr fuer bereits verarbeitete Verteiler-Mails zeigt.
+              try { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); } catch {}
               try { await client.mailboxCreate(targetFolder); } catch {}
               await client.messageMove(uid, targetFolder, { uid: true });
             } catch (moveErr) {
