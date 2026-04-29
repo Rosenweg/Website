@@ -4214,6 +4214,30 @@ setTimeout(syncSmtp2goRejections, 60 * 1000); // initial run nach 1 min
 // Schreibt alle Kontakte aus wohnungen_kontakte als vCards ins
 // Nextcloud-Adressbuch "rosenweg-tel". Read-only freigegeben an alle
 // Nextcloud-User → iOS native CardDAV, Android via DAVx5 oder Z-Push EAS.
+// Helper: WebDAV-Request via node:http/https (Node fetch/undici hat Probleme
+// mit Sabre/DAV PUT/MKCOL — manche Auth-Layer matchen nicht; klassisches
+// http-Modul mit Connection: close ist robuster).
+function davRequest(method, urlStr, headers, body) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(urlStr);
+    const lib = u.protocol === 'https:' ? require('https') : require('http');
+    const req = lib.request({
+      method,
+      hostname: u.hostname,
+      port: u.port || (u.protocol === 'https:' ? 443 : 80),
+      path: u.pathname + u.search,
+      headers: { 'Connection': 'close', ...headers },
+    }, res => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8'), headers: res.headers }));
+    });
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
 async function syncContactsToNextcloud() {
   const ncUrl = process.env.NEXTCLOUD_URL;
   const ncUser = process.env.NEXTCLOUD_ADMIN_USER;
@@ -4228,17 +4252,17 @@ async function syncContactsToNextcloud() {
 
   try {
     // Adressbuch erstellen wenn nicht existiert (MKCOL ist idempotent — 405 wenn exists)
-    await fetch(baseDav, { method: 'MKCOL', headers: {
+    await davRequest('MKCOL', baseDav, {
       'Authorization': auth,
       'Content-Type': 'application/xml',
-    }, body: `<?xml version="1.0" encoding="utf-8"?>
+    }, `<?xml version="1.0" encoding="utf-8"?>
 <mkcol xmlns="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
   <set><prop>
     <resourcetype><collection/><c:addressbook/></resourcetype>
     <displayname>Rosenweg Telefonbuch</displayname>
     <c:addressbook-description>Internes Adressbuch der STWEG-Kooperation Rosenweg (auto-sync)</c:addressbook-description>
   </prop></set>
-</mkcol>`}).catch(() => {});
+</mkcol>`).catch(() => {});
 
     // Aktuelle Kontakte aus DB
     const { rows } = await pool.query(`
@@ -4290,14 +4314,11 @@ async function syncContactsToNextcloud() {
     };
 
     // Bestehende vCards im Adressbuch holen (PROPFIND)
-    const propfindRes = await fetch(baseDav + '/', {
-      method: 'PROPFIND',
-      headers: { 'Authorization': auth, 'Depth': '1', 'Content-Type': 'application/xml' },
-      body: `<?xml version="1.0"?><propfind xmlns="DAV:"><prop><getetag/></prop></propfind>`,
-    });
-    const propText = await propfindRes.text();
+    const propfindRes = await davRequest('PROPFIND', baseDav + '/', {
+      'Authorization': auth, 'Depth': '1', 'Content-Type': 'application/xml',
+    }, `<?xml version="1.0"?><propfind xmlns="DAV:"><prop><getetag/></prop></propfind>`);
     const existingHrefs = new Set();
-    for (const m of propText.matchAll(/<d:href[^>]*>([^<]+)<\/d:href>/gi)) {
+    for (const m of propfindRes.body.matchAll(/<d:href[^>]*>([^<]+)<\/d:href>/gi)) {
       const href = m[1];
       if (href.endsWith('.vcf')) existingHrefs.add(decodeURIComponent(href.split('/').pop()));
     }
@@ -4308,12 +4329,10 @@ async function syncContactsToNextcloud() {
     for (const c of contacts) {
       const { uid, vcard } = buildVCard(c);
       currentUids.add(uid + '.vcf');
-      const r = await fetch(`${baseDav}/${uid}.vcf`, {
-        method: 'PUT',
-        headers: { 'Authorization': auth, 'Content-Type': 'text/vcard; charset=utf-8' },
-        body: vcard,
-      });
-      if (r.ok || r.status === 201 || r.status === 204) upserted++;
+      const r = await davRequest('PUT', `${baseDav}/${uid}.vcf`, {
+        'Authorization': auth, 'Content-Type': 'text/vcard; charset=utf-8',
+      }, vcard);
+      if (r.status === 200 || r.status === 201 || r.status === 204) upserted++;
       else console.error(`[CardDAVSync] PUT ${uid} → ${r.status}`);
     }
 
@@ -4322,8 +4341,8 @@ async function syncContactsToNextcloud() {
     for (const href of existingHrefs) {
       if (currentUids.has(href)) continue;
       if (!href.startsWith('rosenweg-')) continue; // nur unsere
-      const r = await fetch(`${baseDav}/${href}`, { method: 'DELETE', headers: { 'Authorization': auth } });
-      if (r.ok || r.status === 204) deleted++;
+      const r = await davRequest('DELETE', `${baseDav}/${href}`, { 'Authorization': auth });
+      if (r.status === 200 || r.status === 204) deleted++;
     }
     console.log(`[CardDAVSync] ${upserted} Kontakte synced (${contacts.length} aktuell, ${deleted} entfernt)`);
   } catch (err) {
