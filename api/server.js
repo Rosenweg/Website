@@ -3059,8 +3059,8 @@ async function pollGmailForVerteiler() {
             if (dupCheck.rows.length > 0) {
               console.log(`[IMAP] Skip duplicate print: ${dedupName} (msgId=${messageId})`);
               try { await client.mailboxCreate('Gedruckt'); } catch {}
-              try { await client.messageMove(uid, 'Gedruckt', { uid: true }); }
-              catch { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); }
+              try { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); } catch {}
+              try { await client.messageMove(uid, 'Gedruckt', { uid: true }); } catch {}
               continue;
             }
 
@@ -3306,6 +3306,7 @@ async function pollGmailForVerteiler() {
               // Move to Gedruckt on success, Drucken-Fehlgeschlagen on full failure
               const targetFolder = printed > 0 ? 'Gedruckt' : 'Drucken-Fehlgeschlagen';
               try { await client.mailboxCreate(targetFolder); } catch {}
+              try { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); } catch {}
               await client.messageMove(uid, targetFolder, { uid: true });
 
               // Notify Technik on full failure (printed=0) — they can manually retry
@@ -3346,6 +3347,7 @@ async function pollGmailForVerteiler() {
           if (verteilerAddress === `dmarc@${VERTEILER_DOMAIN}`) {
             try {
               try { await client.mailboxCreate('DMARC'); } catch {}
+              try { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); } catch {}
               await client.messageMove(uid, 'DMARC', { uid: true });
             } catch { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); }
             continue;
@@ -3374,6 +3376,7 @@ async function pollGmailForVerteiler() {
             if (archDup.rows.length > 0) {
               try {
                 try { await client.mailboxCreate('Archiv'); } catch {}
+                try { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); } catch {}
                 await client.messageMove(uid, 'Archiv', { uid: true });
               } catch { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); }
               continue;
@@ -3392,6 +3395,7 @@ async function pollGmailForVerteiler() {
             }
             try {
               try { await client.mailboxCreate('Archiv'); } catch {}
+              try { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); } catch {}
               await client.messageMove(uid, 'Archiv', { uid: true });
             } catch { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); }
             continue;
@@ -3401,6 +3405,7 @@ async function pollGmailForVerteiler() {
             // Not a verteiler email, move to _sonstige
             try {
               try { await client.mailboxCreate('Verteiler/_sonstige'); } catch {}
+              try { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); } catch {}
               await client.messageMove(uid, 'Verteiler/_sonstige', { uid: true });
             } catch { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); }
             continue;
@@ -3413,6 +3418,7 @@ async function pollGmailForVerteiler() {
           if (exists.rows.length === 0) {
             try {
               try { await client.mailboxCreate('Verteiler/_unbekannt'); } catch {}
+              try { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); } catch {}
               await client.messageMove(uid, 'Verteiler/_unbekannt', { uid: true });
             } catch { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); }
             continue;
@@ -3425,6 +3431,7 @@ async function pollGmailForVerteiler() {
             try {
               const folderName2 = verteilerAddress.split('@')[0];
               try { await client.mailboxCreate(`Verteiler/${folderName2}`); } catch {}
+              try { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); } catch {}
               await client.messageMove(uid, `Verteiler/${folderName2}`, { uid: true });
             } catch { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); }
             continue;
