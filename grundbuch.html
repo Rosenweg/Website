@@ -172,9 +172,9 @@
     let me = null, anteileCache = [], current = null;
 
     document.addEventListener('DOMContentLoaded', async () => {
-        const ok = await AuthentikAuth.requireAuth();
-        if (!ok) return;
-        me = AuthentikAuth.getUser();
+        const user = await AuthentikAuth.init({ requireAuth: true });
+        if (!user) return; // init() leitet bei not-logged-in selbst nach Authentik weiter
+        me = user;
         document.getElementById('auth-gate').classList.add('hidden');
         document.getElementById('content').classList.remove('hidden');
         await Promise.all([loadStats(), loadAnteile()]);
