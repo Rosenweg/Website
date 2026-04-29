@@ -4239,7 +4239,12 @@ function davRequest(method, urlStr, headers, body) {
 }
 
 async function syncContactsToNextcloud() {
-  const ncUrl = process.env.NEXTCLOUD_URL;
+  // NEXTCLOUD_URL_INTERNAL = z.B. http://nextcloud_nextcloud (Service-Discovery
+  // im Swarm) — umgeht Cloudflare-Egress-IP und damit Brute-Force-Limits, die
+  // beim ersten erfolglosen Versuch sonst alle weiteren Calls blockieren.
+  // NEXTCLOUD_URL_PUBLIC bleibt fuer trusted_domains-Validierung im Host-Header.
+  const ncUrl = process.env.NEXTCLOUD_URL_INTERNAL || process.env.NEXTCLOUD_URL;
+  const ncHost = process.env.NEXTCLOUD_URL_PUBLIC || process.env.NEXTCLOUD_URL;
   const ncUser = process.env.NEXTCLOUD_ADMIN_USER;
   const ncPass = process.env.NEXTCLOUD_ADMIN_APP_PASSWORD;
   const book = process.env.NEXTCLOUD_ADDRESSBOOK || 'rosenweg-tel';
@@ -4249,13 +4254,16 @@ async function syncContactsToNextcloud() {
   }
   const auth = 'Basic ' + Buffer.from(`${ncUser}:${ncPass}`).toString('base64');
   const baseDav = `${ncUrl.replace(/\/$/, '')}/remote.php/dav/addressbooks/users/${ncUser}/${book}`;
+  // Host-Header fuer trusted_domains; Authority aus public URL extrahiert
+  const hostHeader = (() => { try { return new URL(ncHost).host; } catch { return undefined; } })();
+  const headersWithHost = base => hostHeader ? { ...base, Host: hostHeader } : base;
 
   try {
     // Adressbuch erstellen wenn nicht existiert (MKCOL ist idempotent — 405 wenn exists)
-    await davRequest('MKCOL', baseDav, {
+    await davRequest('MKCOL', baseDav, headersWithHost({
       'Authorization': auth,
       'Content-Type': 'application/xml',
-    }, `<?xml version="1.0" encoding="utf-8"?>
+    }), `<?xml version="1.0" encoding="utf-8"?>
 <mkcol xmlns="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
   <set><prop>
     <resourcetype><collection/><c:addressbook/></resourcetype>
@@ -4314,9 +4322,9 @@ async function syncContactsToNextcloud() {
     };
 
     // Bestehende vCards im Adressbuch holen (PROPFIND)
-    const propfindRes = await davRequest('PROPFIND', baseDav + '/', {
+    const propfindRes = await davRequest('PROPFIND', baseDav + '/', headersWithHost({
       'Authorization': auth, 'Depth': '1', 'Content-Type': 'application/xml',
-    }, `<?xml version="1.0"?><propfind xmlns="DAV:"><prop><getetag/></prop></propfind>`);
+    }), `<?xml version="1.0"?><propfind xmlns="DAV:"><prop><getetag/></prop></propfind>`);
     const existingHrefs = new Set();
     for (const m of propfindRes.body.matchAll(/<d:href[^>]*>([^<]+)<\/d:href>/gi)) {
       const href = m[1];
@@ -4329,9 +4337,9 @@ async function syncContactsToNextcloud() {
     for (const c of contacts) {
       const { uid, vcard } = buildVCard(c);
       currentUids.add(uid + '.vcf');
-      const r = await davRequest('PUT', `${baseDav}/${uid}.vcf`, {
+      const r = await davRequest('PUT', `${baseDav}/${uid}.vcf`, headersWithHost({
         'Authorization': auth, 'Content-Type': 'text/vcard; charset=utf-8',
-      }, vcard);
+      }), vcard);
       if (r.status === 200 || r.status === 201 || r.status === 204) upserted++;
       else console.error(`[CardDAVSync] PUT ${uid} → ${r.status}`);
     }
@@ -4341,7 +4349,7 @@ async function syncContactsToNextcloud() {
     for (const href of existingHrefs) {
       if (currentUids.has(href)) continue;
       if (!href.startsWith('rosenweg-')) continue; // nur unsere
-      const r = await davRequest('DELETE', `${baseDav}/${href}`, { 'Authorization': auth });
+      const r = await davRequest('DELETE', `${baseDav}/${href}`, headersWithHost({ 'Authorization': auth }));
       if (r.status === 200 || r.status === 204) deleted++;
     }
     console.log(`[CardDAVSync] ${upserted} Kontakte synced (${contacts.length} aktuell, ${deleted} entfernt)`);
