@@ -4393,9 +4393,17 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
     if (verwNamen.length > 0) {
       nameZelle += `<div class="verwalter-line">↳ in Vertretung Verwalter: <strong>${verwNamen.join(', ')}</strong></div>`;
     }
-    // Wohnadresse = die Adresse der Wohnung selbst (Rosenweg X, abgeleitet aus Bezeichnung)
-    const hausnr = rosenwegNrAusBezeichnung(w.bezeichnung);
-    let adresseZelle = hausnr ? `Rosenweg ${hausnr}, 4303 Kaiseraugst` : '4303 Kaiseraugst';
+    // Wohnadresse = primaer die hinterlegte Korrespondenz-Adresse(n) der
+    // Eigentuemer (also wo sie tatsaechlich wohnen — kann ein anderes Haus
+    // im Rosenweg-Areal sein, z.B. Emini wohnen RW5 besitzen aber 9.2OG.2).
+    // Fallback wenn keine Adresse hinterlegt: aus bezeichnung ableiten.
+    let adresseZelle;
+    if (korrespondenzAdressen.length > 0) {
+      adresseZelle = korrespondenzAdressen.map(a => escHtml(a)).join('<br>');
+    } else {
+      const hausnr = rosenwegNrAusBezeichnung(w.bezeichnung);
+      adresseZelle = hausnr ? `Rosenweg ${hausnr}, 4303 Kaiseraugst` : '4303 Kaiseraugst';
+    }
     if (auswaertsAdressen.length > 0) {
       adresseZelle += `<div class="auswaerts-marker">📮 Einzelbrief an: ${escHtml(auswaertsAdressen[0])}</div>`;
       einzelbriefe.push({ bezeichnung: w.bezeichnung, eigentuemer: eigNamen, verwalter: verwNamen, adresse: auswaertsAdressen[0] });
