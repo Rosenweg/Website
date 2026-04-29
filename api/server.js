@@ -4210,6 +4210,135 @@ async function syncSmtp2goRejections() {
 setInterval(syncSmtp2goRejections, 10 * 60 * 1000); // alle 10 Min
 setTimeout(syncSmtp2goRejections, 60 * 1000); // initial run nach 1 min
 
+// ─── Nextcloud-CardDAV-Sync (Telefonbuch fuer EAS / iOS / DAVx5) ──
+// Schreibt alle Kontakte aus wohnungen_kontakte als vCards ins
+// Nextcloud-Adressbuch "rosenweg-tel". Read-only freigegeben an alle
+// Nextcloud-User → iOS native CardDAV, Android via DAVx5 oder Z-Push EAS.
+async function syncContactsToNextcloud() {
+  const ncUrl = process.env.NEXTCLOUD_URL;
+  const ncUser = process.env.NEXTCLOUD_ADMIN_USER;
+  const ncPass = process.env.NEXTCLOUD_ADMIN_APP_PASSWORD;
+  const book = process.env.NEXTCLOUD_ADDRESSBOOK || 'rosenweg-tel';
+  if (!ncUrl || !ncUser || !ncPass) {
+    console.log('[CardDAVSync] Skipped: NEXTCLOUD_URL/USER/APP_PASSWORD nicht gesetzt');
+    return;
+  }
+  const auth = 'Basic ' + Buffer.from(`${ncUser}:${ncPass}`).toString('base64');
+  const baseDav = `${ncUrl.replace(/\/$/, '')}/remote.php/dav/addressbooks/users/${ncUser}/${book}`;
+
+  try {
+    // Adressbuch erstellen wenn nicht existiert (MKCOL ist idempotent — 405 wenn exists)
+    await fetch(baseDav, { method: 'MKCOL', headers: {
+      'Authorization': auth,
+      'Content-Type': 'application/xml',
+    }, body: `<?xml version="1.0" encoding="utf-8"?>
+<mkcol xmlns="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+  <set><prop>
+    <resourcetype><collection/><c:addressbook/></resourcetype>
+    <displayname>Rosenweg Telefonbuch</displayname>
+    <c:addressbook-description>Internes Adressbuch der STWEG-Kooperation Rosenweg (auto-sync)</c:addressbook-description>
+  </prop></set>
+</mkcol>`}).catch(() => {});
+
+    // Aktuelle Kontakte aus DB
+    const { rows } = await pool.query(`
+      SELECT k.name, k.email, k.telefon,
+             json_agg(json_build_object('stweg', w.stweg, 'bezeichnung', w.bezeichnung, 'rolle', k.rolle)) AS wohnungen
+      FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id
+      WHERE k.name IS NOT NULL AND TRIM(k.name) <> ''
+      GROUP BY k.name, k.email, k.telefon
+    `);
+
+    // Dedup pro Person (Name): bevorzuge nicht-Drucker-Email + erste Telefon
+    const byName = new Map();
+    for (const r of rows) {
+      const name = r.name.replace(/\s*\(verstorben\)\s*/i, '').trim();
+      const isDeceased = /\(verstorben\)/i.test(r.name);
+      const isDruckerTag = r.email && (r.email.startsWith('druckerr9+') || r.email.startsWith('druckerr13+'));
+      if (isDeceased) continue; // Verstorbene nicht ins Adressbuch
+      if (!byName.has(name)) byName.set(name, { name, email: null, telefon: null, wohnungen: [] });
+      const e = byName.get(name);
+      if (!isDruckerTag && r.email && !e.email) e.email = r.email.trim();
+      if (r.telefon && !e.telefon) e.telefon = r.telefon.trim();
+      for (const w of (r.wohnungen || [])) {
+        if (!e.wohnungen.find(x => x.stweg === w.stweg && x.bezeichnung === w.bezeichnung)) {
+          e.wohnungen.push(w);
+        }
+      }
+    }
+    const contacts = [...byName.values()].filter(c => c.telefon || c.email); // nur Personen mit erreichbaren Daten
+
+    // vCard 3.0 generieren
+    const vcardEscape = s => String(s || '').replace(/([\\,;])/g, '\\$1').replace(/\n/g, '\\n');
+    const buildVCard = (c) => {
+      const last = c.name.trim().split(/\s+/).pop() || '';
+      const firstParts = c.name.trim().split(/\s+/).slice(0, -1).join(' ');
+      const note = c.wohnungen.map(w => `STWEG ${w.stweg} ${w.bezeichnung} (${w.rolle})`).join('; ');
+      const uid = 'rosenweg-' + crypto.createHash('sha1').update(c.name.toLowerCase()).digest('hex').slice(0, 16);
+      const lines = [
+        'BEGIN:VCARD', 'VERSION:3.0',
+        `UID:${uid}`,
+        `FN:${vcardEscape(c.name)}`,
+        `N:${vcardEscape(last)};${vcardEscape(firstParts)};;;`,
+      ];
+      if (c.telefon) lines.push(`TEL;TYPE=CELL:${vcardEscape(c.telefon)}`);
+      if (c.email) lines.push(`EMAIL;TYPE=INTERNET:${vcardEscape(c.email)}`);
+      if (note) lines.push(`NOTE:${vcardEscape(note)}`);
+      lines.push(`CATEGORIES:Rosenweg`);
+      lines.push('END:VCARD');
+      return { uid, vcard: lines.join('\r\n') + '\r\n' };
+    };
+
+    // Bestehende vCards im Adressbuch holen (PROPFIND)
+    const propfindRes = await fetch(baseDav + '/', {
+      method: 'PROPFIND',
+      headers: { 'Authorization': auth, 'Depth': '1', 'Content-Type': 'application/xml' },
+      body: `<?xml version="1.0"?><propfind xmlns="DAV:"><prop><getetag/></prop></propfind>`,
+    });
+    const propText = await propfindRes.text();
+    const existingHrefs = new Set();
+    for (const m of propText.matchAll(/<d:href[^>]*>([^<]+)<\/d:href>/gi)) {
+      const href = m[1];
+      if (href.endsWith('.vcf')) existingHrefs.add(decodeURIComponent(href.split('/').pop()));
+    }
+
+    // Aktuelle UIDs berechnen + PUT
+    const currentUids = new Set();
+    let upserted = 0;
+    for (const c of contacts) {
+      const { uid, vcard } = buildVCard(c);
+      currentUids.add(uid + '.vcf');
+      const r = await fetch(`${baseDav}/${uid}.vcf`, {
+        method: 'PUT',
+        headers: { 'Authorization': auth, 'Content-Type': 'text/vcard; charset=utf-8' },
+        body: vcard,
+      });
+      if (r.ok || r.status === 201 || r.status === 204) upserted++;
+      else console.error(`[CardDAVSync] PUT ${uid} → ${r.status}`);
+    }
+
+    // Verwaiste Eintraege loeschen
+    let deleted = 0;
+    for (const href of existingHrefs) {
+      if (currentUids.has(href)) continue;
+      if (!href.startsWith('rosenweg-')) continue; // nur unsere
+      const r = await fetch(`${baseDav}/${href}`, { method: 'DELETE', headers: { 'Authorization': auth } });
+      if (r.ok || r.status === 204) deleted++;
+    }
+    console.log(`[CardDAVSync] ${upserted} Kontakte synced (${contacts.length} aktuell, ${deleted} entfernt)`);
+  } catch (err) {
+    console.error('[CardDAVSync] Fehler:', err.message);
+  }
+}
+setInterval(syncContactsToNextcloud, 60 * 60 * 1000); // hourly
+setTimeout(syncContactsToNextcloud, 2 * 60 * 1000); // initial run nach 2 min
+
+// POST /api/internal/carddav-sync — manueller Trigger fuer Tests (admin only)
+app.post('/api/internal/carddav-sync', authMiddleware, adminOnly, async (req, res) => {
+  syncContactsToNextcloud().catch(err => console.error('[CardDAVSync] manual:', err.message));
+  res.json({ triggered: true, message: 'Sync laeuft im Hintergrund — Logs siehe API' });
+});
+
 // POST /api/wohnungen/sync-authentik - Bulk sync all kontakte with email to Authentik
 app.post('/api/wohnungen/sync-authentik', authMiddleware, adminOnly, async (req, res) => {
   try {
