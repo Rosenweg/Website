@@ -4376,7 +4376,13 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
     }
   }
 
-  // Einzelbrief-Empfänger sammeln (auswärtige Eigentümer)
+  // STWEG 8 (MEG-Tiefgarage) hat ueber 100 Eigentuemer in unterschiedlichsten
+  // Haeusern + viele Auswaertige — Sammelliste an einem Ort macht keinen Sinn.
+  // Daher generiere fuer STWEG 8 grundsaetzlich nur Einzelbriefe (jeder
+  // Eigentuemer bekommt seinen eigenen Brief mit Unterschriftszeile).
+  const einzelOnly = stweg === 8;
+
+  // Einzelbrief-Empfänger sammeln (auswärtige Eigentümer; bei einzelOnly: alle)
   const einzelbriefe = [];
   let totalWQ = 0, totalUnits = 0;
   let dataRows = '';
@@ -4404,9 +4410,14 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
       const hausnr = rosenwegNrAusBezeichnung(w.bezeichnung);
       adresseZelle = hausnr ? `Rosenweg ${hausnr}, 4303 Kaiseraugst` : '4303 Kaiseraugst';
     }
-    if (auswaertsAdressen.length > 0) {
-      adresseZelle += `<div class="auswaerts-marker">📮 Einzelbrief an: ${escHtml(auswaertsAdressen[0])}</div>`;
-      einzelbriefe.push({ bezeichnung: w.bezeichnung, eigentuemer: eigNamen, verwalter: verwNamen, adresse: auswaertsAdressen[0] });
+    // Einzelbrief: alle wenn einzelOnly, sonst nur fuer auswaerts
+    if (einzelOnly || auswaertsAdressen.length > 0) {
+      const briefAdresse = auswaertsAdressen[0] || korrespondenzAdressen[0]
+        || (rosenwegNrAusBezeichnung(w.bezeichnung) ? `Rosenweg ${rosenwegNrAusBezeichnung(w.bezeichnung)}, 4303 Kaiseraugst` : '4303 Kaiseraugst');
+      if (!einzelOnly) {
+        adresseZelle += `<div class="auswaerts-marker">📮 Einzelbrief an: ${escHtml(briefAdresse)}</div>`;
+      }
+      einzelbriefe.push({ bezeichnung: w.bezeichnung, eigentuemer: eigNamen, verwalter: verwNamen, adresse: briefAdresse });
     }
     const wq = (w.wertquote_zaehler && w.wertquote_nenner) ? `${w.wertquote_zaehler}/${w.wertquote_nenner}` : '—';
     dataRows += `<tr>
@@ -4475,7 +4486,9 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
   const verifyUrl = `${SITE_URL}/echtheitspruefung.html?hash=${hash}`;
   const verifyPageBase = `${SITE_URL}/echtheitspruefung.html`;
 
-  const einzelbriefeUebersicht = einzelbriefe.length === 0 ? '' : `
+  // Bei einzelOnly (STWEG 8) zeigt schon die Hauptseite die Tabelle;
+  // doppelte Auflistung vermeiden.
+  const einzelbriefeUebersicht = (einzelbriefe.length === 0 || einzelOnly) ? '' : `
     <h2 class="section-title">Einzelbriefe (auswärts wohnende Eigentümer)</h2>
     <p class="hinweis">Folgende ${einzelbriefe.length} Eigentümer wohnen ausserhalb von Rosenweg / 4303 Kaiseraugst und haben den Brief per Einzelversand erhalten. Die personalisierten Anschreiben folgen ab Seite 2.</p>
     <table class="info-table">
@@ -4598,6 +4611,19 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
   <h2 class="section-title">${escHtml(anlass_titel || 'Unterschriftenliste')}</h2>
   ${anlass_zweck ? `<p class="zweck">${escHtml(anlass_zweck).replace(/\n/g, '<br>')}</p>` : ''}
   ${ruecksendung_bis ? `<p class="hinweis"><strong>Rücksendung bis spätestens ${escHtml(ruecksendung_bis)}${ruecksendung_an ? ' an ' + escHtml(ruecksendung_an) : ''}</strong></p>` : ''}
+  ${einzelOnly ? `
+    <p class="hinweis">Diese Sammelseite dient als Übersicht. Aufgrund der breiten Streuung der ${totalUnits} Eigentümer der MEG-Tiefgarage über mehrere Häuser und auswärtige Adressen wird der Beschluss <strong>ausschliesslich per Einzelbrief</strong> versendet — jeder Eigentümer erhält ein eigenes Anschreiben mit Unterschriftszeile (siehe Folgeseiten).</p>
+    <table class="info-table">
+      <thead><tr><th>Einheit</th><th>Eigentümer</th><th>Wertquote</th><th>Versand-Adresse</th></tr></thead>
+      <tbody>${einzelbriefe.map((e, i) => {
+        const wq = wohnungen.rows.find(w => w.bezeichnung === e.bezeichnung);
+        const wqStr = (wq?.wertquote_zaehler && wq?.wertquote_nenner) ? `${wq.wertquote_zaehler}/${wq.wertquote_nenner}` : '—';
+        return `<tr><td><strong>${escHtml(e.bezeichnung)}</strong></td><td>${escHtml(e.eigentuemer.join(', '))}${e.verwalter.length>0?'<br><span style=\"font-size:8.5pt;color:#555\">↳ ' + escHtml(e.verwalter.join(', ')) + '</span>':''}</td><td style="text-align:center;font-family:monospace">${wqStr}</td><td style="font-size:9pt">${escHtml(e.adresse)}</td></tr>`;
+      }).join('')}
+      <tr class="total-row"><td><strong>TOTAL</strong></td><td><strong>${totalUnits} Einheiten</strong></td><td style="text-align:center"><strong>${totalWQ}/1000</strong></td><td></td></tr>
+      </tbody>
+    </table>
+  ` : `
   <p class="hinweis">Jede/r Eigentümer/in kreuzt JA oder NEIN an und unterschreibt. Bei mehreren Eigentümern genügt die Unterschrift eines Eigentümers oder eines bevollmächtigten Vertreters. Auswärts wohnende Eigentümer haben den Brief per Einzelversand erhalten (siehe Anhang).</p>
   <table class="signatur">
     <thead><tr>
@@ -4610,6 +4636,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
     </tr></thead>
     <tbody>${dataRows}</tbody>
   </table>
+  `}
   ${einzelbriefeUebersicht}
   ${zeichnungsberechtigte.length > 0 ? `
   <h2 class="section-title">Bestätigung des Ergebnisses &amp; Zeichnungsberechtigung</h2>
