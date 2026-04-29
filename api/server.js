@@ -4221,19 +4221,24 @@ function davRequest(method, urlStr, headers, body) {
   return new Promise((resolve, reject) => {
     const u = new URL(urlStr);
     const lib = u.protocol === 'https:' ? require('https') : require('http');
+    const bodyBuf = body ? Buffer.from(body, 'utf8') : null;
+    const finalHeaders = { 'Connection': 'close', ...headers };
+    // Sabre/DAV akzeptiert chunked transfer nicht zuverlaessig fuer PUT/MKCOL
+    // → explizites Content-Length setzen.
+    if (bodyBuf) finalHeaders['Content-Length'] = bodyBuf.length;
     const req = lib.request({
       method,
       hostname: u.hostname,
       port: u.port || (u.protocol === 'https:' ? 443 : 80),
       path: u.pathname + u.search,
-      headers: { 'Connection': 'close', ...headers },
+      headers: finalHeaders,
     }, res => {
       const chunks = [];
       res.on('data', c => chunks.push(c));
       res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8'), headers: res.headers }));
     });
     req.on('error', reject);
-    if (body) req.write(body);
+    if (bodyBuf) req.write(bodyBuf);
     req.end();
   });
 }
