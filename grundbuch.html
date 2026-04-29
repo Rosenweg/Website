@@ -112,6 +112,7 @@
                 <div class="mb-3">
                     <label class="block text-xs font-medium text-gray-600 mb-1">Bild des Auszugs hochladen (PNG/JPG/PDF)</label>
                     <input type="file" id="m-bild" accept="image/png,image/jpeg,application/pdf" class="block w-full text-sm border rounded px-2 py-1.5">
+                    <div id="m-ocr-status" class="text-xs text-gray-500 mt-1"></div>
                     <div id="m-bild-preview" class="mt-2 hidden">
                         <img id="m-bild-img" class="max-h-72 border rounded">
                     </div>
@@ -306,7 +307,7 @@
         loadStats();
     }
 
-    document.getElementById('m-bild').addEventListener('change', e => {
+    document.getElementById('m-bild').addEventListener('change', async e => {
         const f = e.target.files[0];
         if (!f) return;
         if (f.type.startsWith('image/')) {
@@ -317,7 +318,41 @@
             };
             reader.readAsDataURL(f);
         }
+        // Auto-OCR: Felder per Claude Vision (OpenRouter) vorausfüllen
+        await runOcr(f);
     });
+
+    async function runOcr(file) {
+        if (!file || file.type === 'application/pdf') return; // PDFs aktuell ohne Auto-OCR
+        const status = document.getElementById('m-ocr-status');
+        if (status) { status.textContent = '🔍 Lese Auszug per AI…'; status.className = 'text-xs text-blue-700 mt-1'; }
+        try {
+            const buf = await file.arrayBuffer();
+            const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+            const r = await AuthentikAuth.apiFetch('/api/grundbuch/ocr', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({ bild_base64: b64, bild_filename: file.name }),
+            });
+            if (!r.ok) {
+                const e = await r.json().catch(() => ({}));
+                if (status) { status.textContent = '⚠ OCR fehlgeschlagen: ' + (e.error || r.status) + ' — Felder bitte manuell ausfüllen'; status.className = 'text-xs text-amber-700 mt-1'; }
+                return;
+            }
+            const ocr = await r.json();
+            // Felder vorausfüllen, falls aktuell leer
+            const setIfEmpty = (id, val) => { const el = document.getElementById(id); if (el && !el.value && val) { el.value = val; el.classList.add('bg-emerald-50','border-emerald-300'); } };
+            setIfEmpty('m-anteil', ocr.anteil_z);
+            setIfEmpty('m-flaeche', ocr.flaeche_m2);
+            setIfEmpty('m-form', ocr.eigentumsform);
+            const eigEl = document.getElementById('m-eigentuemer');
+            if (eigEl && !eigEl.value && ocr.eigentuemer?.length) { eigEl.value = ocr.eigentuemer.join('\n'); eigEl.classList.add('bg-emerald-50','border-emerald-300'); }
+            const adrEl = document.getElementById('m-adressen');
+            if (adrEl && !adrEl.value && ocr.wohnadressen?.length) { adrEl.value = ocr.wohnadressen.join('\n'); adrEl.classList.add('bg-emerald-50','border-emerald-300'); }
+            if (status) { status.textContent = '✓ Felder per AI vorausgefüllt — bitte prüfen und korrigieren'; status.className = 'text-xs text-emerald-700 mt-1'; }
+        } catch (err) {
+            if (status) { status.textContent = '⚠ OCR-Fehler: ' + err.message; status.className = 'text-xs text-amber-700 mt-1'; }
+        }
+    }
 
     async function saveAnteil() {
         if (!current) return;
