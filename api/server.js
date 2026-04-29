@@ -6307,6 +6307,93 @@ app.delete('/api/grundbuch/anteile/:parzelle/:sub_id/reserve', authMiddleware, a
   } catch (err) { res.status(500).json({ error: 'Fehler' }); }
 });
 
+// POST /api/grundbuch/ocr — Grundbuchauszug-Bild via Claude Vision (OpenRouter) auslesen
+// Body: { bild_base64, bild_filename }
+// Returns: { eigentumsform?, eigentuemer:[], wohnadressen:[], anteil_z?, flaeche_m2?, raw }
+app.post('/api/grundbuch/ocr', authMiddleware, async (req, res) => {
+  try {
+    const { bild_base64, bild_filename } = req.body || {};
+    if (!bild_base64) return res.status(400).json({ error: 'bild_base64 fehlt' });
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'OPENROUTER_API_KEY nicht konfiguriert' });
+
+    const ext = (bild_filename || 'png').split('.').pop().toLowerCase();
+    const mimeMap = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', pdf: 'application/pdf' };
+    const mime = mimeMap[ext] || 'image/png';
+    const dataUrl = `data:${mime};base64,${bild_base64}`;
+
+    const systemPrompt = `Du bist ein präziser Extraktor für schweizerische Grundbuchauszüge der Gemeinde Kaiseraugst (AG).
+Lies den Grundbuchauszug aus dem Bild und extrahiere die folgenden Felder.
+Antworte AUSSCHLIESSLICH mit gültigem JSON, ohne Markdown-Codeblöcke, ohne erklärenden Text.
+
+Schema:
+{
+  "anteil_z": number|null,           // Zähler des Stockwerk-Anteils, z.B. 5 bei "5/1000"
+  "eigentumsform": string|null,      // Wörtlich aus dem Auszug, z.B. "Alleineigentum" oder "Gesamteigentum (einf. Gesellschaft)" oder "Miteigentum"
+  "eigentuemer": [string],           // Liste aller Eigentümer-Namen, je ein Eintrag pro Person, Format "Nachname Vorname". Bei Gesamteigentum alle Personen separat.
+  "wohnadressen": [string],          // Wohnadresse(n) der Eigentümer, Format "Strasse Nr, PLZ Ort". Eine Adresse pro Eigentümer ODER eine gemeinsame, wenn nur eine angegeben ist.
+  "flaeche_m2": number|null          // Quadratmeter falls aufgeführt
+}
+
+Wenn ein Feld nicht eindeutig erkennbar ist, setze null bzw. leeres Array. Korrigiere keine Namen — übernimm sie wörtlich aus dem Auszug.`;
+
+    const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://www.rosenweg4303.ch',
+        'X-Title': 'Rosenweg Grundbuch-OCR',
+      },
+      signal: AbortSignal.timeout(45_000),
+      body: JSON.stringify({
+        model: 'anthropic/claude-haiku-4.5',
+        max_tokens: 1024,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: [
+            { type: 'text', text: 'Extrahiere die Felder aus diesem Grundbuchauszug.' },
+            { type: 'image_url', image_url: { url: dataUrl } },
+          ]},
+        ],
+      }),
+    });
+
+    if (!orRes.ok) {
+      const errText = await orRes.text().catch(() => '');
+      console.error('[Grundbuch-OCR] OpenRouter error', orRes.status, errText.slice(0, 300));
+      return res.status(502).json({ error: `OCR-Service-Fehler (HTTP ${orRes.status})`, detail: errText.slice(0, 200) });
+    }
+    const orJson = await orRes.json();
+    const content = orJson.choices?.[0]?.message?.content || '';
+
+    // JSON aus dem Modell-Output extrahieren (defensiv: code-fences entfernen)
+    let jsonText = content.trim();
+    const fence = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fence) jsonText = fence[1].trim();
+
+    let parsed;
+    try { parsed = JSON.parse(jsonText); }
+    catch (e) {
+      console.error('[Grundbuch-OCR] JSON-Parse fehlgeschlagen:', jsonText.slice(0, 300));
+      return res.status(502).json({ error: 'OCR-Antwort ist kein gültiges JSON', raw: content });
+    }
+
+    // Defensive Normalisierung
+    const norm = {
+      anteil_z: Number.isFinite(parsed.anteil_z) ? parsed.anteil_z : (parseInt(parsed.anteil_z) || null),
+      eigentumsform: typeof parsed.eigentumsform === 'string' ? parsed.eigentumsform.trim() : null,
+      eigentuemer: Array.isArray(parsed.eigentuemer) ? parsed.eigentuemer.map(s => String(s).trim()).filter(Boolean) : [],
+      wohnadressen: Array.isArray(parsed.wohnadressen) ? parsed.wohnadressen.map(s => String(s).trim()).filter(Boolean) : [],
+      flaeche_m2: Number.isFinite(parsed.flaeche_m2) ? parsed.flaeche_m2 : (parseInt(parsed.flaeche_m2) || null),
+    };
+    res.json({ ...norm, model: orJson.model, usage: orJson.usage });
+  } catch (err) {
+    console.error('[Grundbuch-OCR] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/grundbuch/anteile/:parzelle/:sub_id — Daten + Bild speichern (multipart-base64)
 // Body: { eigentumsform, eigentuemer:[], wohnadressen:[], anteil_z?, flaeche_m2?, notizen?, bild_base64?, bild_filename? }
 app.post('/api/grundbuch/anteile/:parzelle/:sub_id', authMiddleware, async (req, res) => {
