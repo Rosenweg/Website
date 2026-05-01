@@ -183,7 +183,7 @@
                         <div class="space-y-3">
                             <div>
                                 <label class="block text-xs text-gray-600 mb-1">STWEG</label>
-                                <select id="ul-stweg" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                                <select id="ul-stweg" onchange="ulLoadHaeuser()" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
                                     <option value="1">STWEG 1 (Rosenweg 17/18)</option>
                                     <option value="2">STWEG 2 (Rosenweg 13/14/16)</option>
                                     <option value="3">STWEG 3 (Rosenweg 9)</option>
@@ -191,7 +191,15 @@
                                     <option value="5">STWEG 5 (Rosenweg 5/6/8)</option>
                                     <option value="6">STWEG 6 (Rosenweg 1)</option>
                                     <option value="7">STWEG 7 (Rosenweg 2/4)</option>
+                                    <option value="8">STWEG 8 (MEG-Tiefgarage)</option>
                                 </select>
+                            </div>
+                            <div id="ul-haus-wrap">
+                                <label class="block text-xs text-gray-600 mb-1">Haus-Auswahl</label>
+                                <div id="ul-haus-checks" class="flex flex-wrap gap-3 text-sm border border-gray-300 rounded-lg px-3 py-2 bg-gray-50">
+                                    <span class="text-xs text-gray-400">Lade Häuser…</span>
+                                </div>
+                                <p class="mt-1 text-xs text-gray-500">Wähle einzelne Häuser für eine separate Liste, oder lasse alle aktiviert für die gesamte STWEG.</p>
                             </div>
                             <div>
                                 <label class="block text-xs text-gray-600 mb-1">Datum (Stempel auf Liste)</label>
@@ -651,6 +659,7 @@
                 const dEl = document.getElementById('ul-datum');
                 if (!dEl.value) dEl.value = new Date().toISOString().slice(0,10);
                 ulLoadHistory();
+                ulLoadHaeuser();
             }
             if ((tab === 'bewohner' || tab === 'gruppen') && !bewohnerLoaded) {
                 bewohnerLoaded = true;
@@ -1337,6 +1346,34 @@
             const list = document.getElementById('ul-zeichner-list');
             if (list && list.children.length === 0) ulAddZeichner('', '');
         });
+        async function ulLoadHaeuser() {
+            const stweg = document.getElementById('ul-stweg').value;
+            const target = document.getElementById('ul-haus-checks');
+            const wrap = document.getElementById('ul-haus-wrap');
+            target.innerHTML = '<span class="text-xs text-gray-400">Lade Häuser…</span>';
+            try {
+                const res = await AuthentikAuth.apiFetch(`/api/unterschriftenliste/${stweg}/haeuser`);
+                if (!res.ok) { target.innerHTML = '<span class="text-xs text-red-600">Fehler ' + res.status + '</span>'; return; }
+                const data = await res.json();
+                const haeuser = data.haeuser || [];
+                if (haeuser.length === 0) { wrap.style.display = 'none'; return; }
+                wrap.style.display = '';
+                if (haeuser.length === 1) {
+                    target.innerHTML = `<span class="text-xs text-gray-500">Nur ein Haus (Rosenweg ${haeuser[0].nr}, ${haeuser[0].count} Einheiten) — Auswahl entfällt</span>`;
+                    return;
+                }
+                target.innerHTML = haeuser.map(h => `
+                    <label class="inline-flex items-center gap-1.5 cursor-pointer">
+                        <input type="checkbox" class="ul-haus-cb rounded" value="${h.nr}" checked>
+                        <span>RW ${h.nr}</span>
+                        <span class="text-xs text-gray-400">(${h.count})</span>
+                    </label>
+                `).join('');
+            } catch (e) {
+                target.innerHTML = '<span class="text-xs text-red-600">Fehler: ' + escapeHtml(e.message) + '</span>';
+            }
+        }
+
         function ulBuildUrl(extra = '') {
             const stweg = document.getElementById('ul-stweg').value;
             const zeichner = [...document.querySelectorAll('#ul-zeichner-list .ul-zeichner-row')].map(row => {
@@ -1344,6 +1381,11 @@
                 const nm = row.querySelector('.ul-zeichner-name')?.value?.trim() || '';
                 return (fn || nm) ? { funktion: fn, name: nm } : null;
             }).filter(Boolean);
+            const checks = [...document.querySelectorAll('#ul-haus-checks .ul-haus-cb')];
+            const allHaeuser = checks.map(cb => parseInt(cb.value));
+            const checkedHaeuser = checks.filter(cb => cb.checked).map(cb => parseInt(cb.value));
+            // Wenn alle gewählt sind oder keine Checkbox existiert → kein Filter (= ganze STWEG)
+            const hausFilter = (checks.length === 0 || checkedHaeuser.length === allHaeuser.length) ? '' : checkedHaeuser.join(',');
             const params = new URLSearchParams({
                 datum: document.getElementById('ul-datum').value || '',
                 anlass_titel: document.getElementById('ul-titel').value || '',
@@ -1353,6 +1395,7 @@
                 zeichnungsberechtigte: JSON.stringify(zeichner),
                 kollektiv_text: document.getElementById('ul-kollektiv')?.value || '',
             });
+            if (hausFilter) params.set('haus', hausFilter);
             if (extra) params.set('preview', extra);
             return `/api/unterschriftenliste/${stweg}.pdf?${params.toString()}`;
         }
