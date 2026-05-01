@@ -4492,6 +4492,12 @@ function rosenwegNrAusBezeichnung(bezeichnung) {
 async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) {
   const { datum, anlass_titel, anlass_zweck, ruecksendung_bis, ruecksendung_an,
           zeichnungsberechtigte = [], kollektiv_text } = opts;
+  // Optional: nur bestimmte Hausnummern (z.B. STWEG 1 = RW17+18, aber Liste
+  // soll nur fuer RW17 generiert werden). haus_filter=[17] oder [13,14].
+  // Wenn leer/null → alle Wohnungen der STWEG.
+  const hausFilter = (Array.isArray(opts.haus_filter) && opts.haus_filter.length > 0)
+    ? opts.haus_filter.map(n => parseInt(n)).filter(n => Number.isFinite(n))
+    : null;
   // Daten aus Snapshot ODER live aus DB
   let wohnungen, byWohnung;
   if (replaySnapshot) {
@@ -4517,6 +4523,13 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
       WHERE w.stweg = $1 AND w.typ IN ('Wohnung','Hobbyraum')
       ORDER BY w.bezeichnung
     `, [stweg]);
+    // Haus-Filter anwenden: Hausnummer aus bezeichnung ableiten
+    if (hausFilter) {
+      wohnungen.rows = wohnungen.rows.filter(w => {
+        const nr = rosenwegNrAusBezeichnung(w.bezeichnung);
+        return nr && hausFilter.includes(nr);
+      });
+    }
     const wohnungIds = wohnungen.rows.map(w => w.id);
     const kontakte = wohnungIds.length === 0 ? { rows: [] } : await pool.query(`
       SELECT wohnung_id, rolle, name, email, adresse, sort_order
@@ -4607,6 +4620,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
   const snapshotData = {
     stweg, datum, anlass_titel, anlass_zweck,
     ruecksendung_bis, ruecksendung_an,
+    haus_filter: hausFilter || null,
     zeichnungsberechtigte: zeichnungsberechtigte || [],
     kollektiv_text: kollektiv_text || null,
     wohnungen: wohnungen.rows.map(w => {
@@ -4844,6 +4858,23 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
 </body></html>`;
 }
 
+// GET /api/unterschriftenliste/:stweg/haeuser — Liste aller in dieser STWEG belegten Hausnummern,
+// damit das UI Auswahl-Optionen zeigen kann (z.B. "Nur RW17", "Nur RW18", "RW17+18").
+app.get('/api/unterschriftenliste/:stweg/haeuser', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
+  try {
+    const stweg = parseStweg(req.params.stweg);
+    if (!stweg) return res.status(400).json({ error: 'Ungültige STWEG' });
+    const r = await pool.query(`SELECT bezeichnung FROM wohnungen WHERE stweg=$1 AND typ IN ('Wohnung','Hobbyraum')`, [stweg]);
+    const counts = new Map();
+    for (const row of r.rows) {
+      const nr = rosenwegNrAusBezeichnung(row.bezeichnung);
+      if (nr) counts.set(nr, (counts.get(nr) || 0) + 1);
+    }
+    const haeuser = [...counts.entries()].sort((a,b) => a[0]-b[0]).map(([nr, count]) => ({ nr, count }));
+    res.json({ stweg, haeuser });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // GET /api/unterschriftenliste/verify-json — Öffentliche JSON-API für die Echtheitsprüfungs-Webseite
 app.get('/api/unterschriftenliste/verify-json', async (req, res) => {
   try {
@@ -5010,6 +5041,12 @@ app.get('/api/unterschriftenliste/:stweg.pdf', authMiddleware, requirePermission
       try { zeichner = JSON.parse(req.query.zeichnungsberechtigte); } catch {}
       if (!Array.isArray(zeichner)) zeichner = [];
     }
+    // Optionaler Haus-Filter (kommagetrennt, z.B. "17" oder "13,14")
+    let hausFilter = null;
+    if (req.query.haus) {
+      hausFilter = String(req.query.haus).split(',').map(s => parseInt(s.trim())).filter(n => Number.isFinite(n));
+      if (hausFilter.length === 0) hausFilter = null;
+    }
     const opts = {
       datum: req.query.datum || new Date().toISOString().slice(0, 10),
       anlass_titel: req.query.anlass_titel || 'Unterschriftenliste',
@@ -5018,6 +5055,7 @@ app.get('/api/unterschriftenliste/:stweg.pdf', authMiddleware, requirePermission
       ruecksendung_an: req.query.ruecksendung_an || '',
       zeichnungsberechtigte: zeichner,
       kollektiv_text: req.query.kollektiv_text || '',
+      haus_filter: hausFilter,
     };
     opts.generated_by = req.user?.email || req.user?.name || null;
     const html = await buildUnterschriftenlisteHTML(stweg, opts);
