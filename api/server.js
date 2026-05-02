@@ -4470,6 +4470,19 @@ app.get('/api/wohnungen/eigentuemer-uebersicht', authMiddleware, requirePermissi
 function escHtml(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
+// Adresse fuer Anschrift mit Zeilenumbruechen formatieren — funktioniert mit
+// und ohne Komma. Trennt vor 4-stelliger PLZ und vor "Land" (Schweiz/Deutschland/...).
+function formatAdresseAnschrift(adresseStr) {
+  if (!adresseStr) return '';
+  const esc = escHtml(adresseStr);
+  // Variante 1: Komma als Trennzeichen
+  if (esc.includes(',')) {
+    return esc.split(',').map(s => s.trim()).filter(Boolean).join('<br>');
+  }
+  // Variante 2: kein Komma → vor PLZ (4-stellig) brechen
+  // "Rosenweg 17 4303 Kaiseraugst" → "Rosenweg 17<br>4303 Kaiseraugst"
+  return esc.replace(/\s+(\d{4,5}\s+[A-ZÄÖÜ])/g, '<br>$1');
+}
 function isAuswaerts(adresse, stwegNr) {
   if (!adresse) return false;
   // "Rosenweg [number] [optional comma] 4303 Kaiseraugst" → vor Ort
@@ -4697,7 +4710,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
       <div class="absender">Absender: STWEG-Kooperation Rosenweg, ${ruecksendung_an ? escHtml(ruecksendung_an) : 'c/o Ausschuss, 4303 Kaiseraugst'}</div>
       <div class="anschrift">
         <strong>${escHtml(empfaenger)}</strong><br>
-        ${escHtml(e.adresse).replace(/,/g, '<br>')}
+        ${formatAdresseAnschrift(e.adresse)}
       </div>
       <h2 class="section-title">${escHtml(anlass_titel || 'Unterschriftenliste')}</h2>
       ${anlass_zweck ? `<p class="zweck">${escHtml(anlass_zweck).replace(/\n/g, '<br>')}</p>` : ''}
