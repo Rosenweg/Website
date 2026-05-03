@@ -4796,10 +4796,13 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
      ab 50mm Page-Top = 32mm im Print-Bereich, sodass auch bei
      2-zeiligem Absender genug Abstand bleibt.
      Mit @page-Margin (18mm/16mm) → left=109mm, top der Anschrift=37mm. */
-  .einzelbrief { position: relative; padding-top: 80mm; }
+  /* Absender single-line erzwungen, Empfaenger weiter unten (~50mm vom
+     Absender-Top entfernt). DIN 5008 Form B: Anschriftenfeld 45-85mm
+     vom Page-Top, Empfaenger ab ca. 55-60mm Page-Top empfohlen. */
+  .einzelbrief { position: relative; padding-top: 85mm; }
   .einzelbrief .header { position: absolute; top: 0; left: 0; }
-  .einzelbrief .absender { position: absolute; top: 27mm; left: 109mm; width: 85mm; font-size: 6.5pt; color: #555; border-bottom: 1px solid #999; padding-bottom: 1px; margin: 0; line-height: 1.2; }
-  .einzelbrief .anschrift { position: absolute; top: 37mm; left: 109mm; width: 85mm; height: 30mm; font-size: 11pt; line-height: 1.35; padding: 0; }
+  .einzelbrief .absender { position: absolute; top: 27mm; left: 109mm; width: 85mm; font-size: 6.5pt; color: #555; border-bottom: 1px solid #999; padding-bottom: 1px; margin: 0; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .einzelbrief .anschrift { position: absolute; top: 42mm; left: 109mm; width: 85mm; height: 25mm; font-size: 11pt; line-height: 1.35; padding: 0; }
   .einzelbrief .anschrift strong { font-weight: 600; }
 </style></head><body>
   <div class="header">
