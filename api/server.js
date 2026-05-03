@@ -4785,9 +4785,16 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
   .footer-legal { page-break-inside: avoid; break-inside: avoid; }
   .zeichnungs-block, table.signatur tr { page-break-inside: avoid; break-inside: avoid; }
   .page-break { page-break-after: always; }
-  .einzelbrief { padding-top: 6mm; }
-  .einzelbrief .absender { font-size: 8pt; color: #555; border-bottom: 1px solid #999; padding-bottom: 2px; margin: 4mm 0 14mm 0; }
-  .einzelbrief .anschrift { font-size: 11pt; line-height: 1.5; margin-bottom: 8mm; padding: 4px 0; }
+  /* C5-Couvert Rechtsfenster (DIN 5008 Form B, Schweizer Standard):
+     Anschriftenfeld 85x40mm, Position 125mm von links und 45mm von oben
+     (auf physischem A4-Papier). @page-Margin oben=18mm, links=16mm wird
+     bereits abgezogen, also Position innerhalb des Print-Bereichs:
+     left = 125-16 = 109mm, top = 45-18 = 27mm. */
+  .einzelbrief { position: relative; padding-top: 75mm; }
+  .einzelbrief .header { position: absolute; top: 0; left: 0; }
+  .einzelbrief .absender { position: absolute; top: 27mm; left: 109mm; width: 85mm; font-size: 7pt; color: #555; border-bottom: 1px solid #999; padding-bottom: 1px; margin: 0; }
+  .einzelbrief .anschrift { position: absolute; top: 32mm; left: 109mm; width: 85mm; height: 35mm; font-size: 11pt; line-height: 1.35; padding: 0; }
+  .einzelbrief .anschrift strong { font-weight: 600; }
 </style></head><body>
   <div class="header">
     <img src="https://www.rosenweg4303.ch/logo-rosenweg.png" alt="Rosenweg">
