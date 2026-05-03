@@ -1,0 +1,2054 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Objektverwaltung - STWEG Rosenweg</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/nav.js?v=2"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .tab-active { border-color: #2563eb; color: #2563eb; font-weight: 600; }
+        .tab-inactive { border-color: transparent; color: #6b7280; }
+        .tab-inactive:hover { color: #374151; border-color: #d1d5db; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen flex flex-col">
+
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script>RosenwegNav.init({ active: 'verwaltung' });</script>
+
+    <!-- Auth Gate -->
+    <div id="auth-gate" class="flex-1 flex items-center justify-center">
+        <div class="text-center text-gray-500">
+            <svg class="animate-spin h-8 w-8 mx-auto mb-3 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            <p>Wird geladen...</p>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div id="main-content" class="hidden flex-1">
+        <!-- Header -->
+        <div class="bg-gradient-to-r from-blue-600 to-blue-800 text-white">
+            <div class="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+                <h1 class="text-2xl font-bold" id="page-title">Objektverwaltung</h1>
+                <p class="text-blue-200 text-sm mt-1" id="page-subtitle">Wohnungen, Bewohner und Gruppen verwalten</p>
+            </div>
+        </div>
+
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+            <!-- Top-level Tabs -->
+            <div class="border-b border-gray-200 mb-6">
+                <nav class="flex space-x-8">
+                    <button id="main-tab-wohnungen" onclick="switchMainTab('wohnungen')" class="tab-active border-b-2 pb-3 px-1 text-sm transition">
+                        Wohnungen
+                    </button>
+                    <button id="main-tab-eigentuemer" onclick="switchMainTab('eigentuemer')" class="tab-inactive border-b-2 pb-3 px-1 text-sm transition">
+                        Eigentümer & Verwalter
+                    </button>
+                    <button id="main-tab-unterschriften" onclick="switchMainTab('unterschriften')" class="tab-inactive border-b-2 pb-3 px-1 text-sm transition">
+                        Unterschriftenlisten
+                    </button>
+                    <button id="main-tab-bewohner" onclick="switchMainTab('bewohner')" class="tab-inactive border-b-2 pb-3 px-1 text-sm transition hidden">
+                        Bewohner
+                    </button>
+                    <button id="main-tab-gruppen" onclick="switchMainTab('gruppen')" class="tab-inactive border-b-2 pb-3 px-1 text-sm transition hidden">
+                        Gruppen
+                    </button>
+                </nav>
+            </div>
+
+            <!-- ═══ Wohnungen Tab ═══ -->
+            <div id="panel-wohnungen">
+                <!-- STWEG Selector -->
+                <div class="flex flex-wrap items-center gap-3 mb-6">
+                    <label class="text-sm font-medium text-gray-700">STWEG:</label>
+                    <div id="stweg-tabs" class="flex flex-wrap gap-2"></div>
+                </div>
+
+                <!-- Stats Bar -->
+                <div id="stats-bar" class="hidden grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+                    <div class="bg-white rounded-lg border p-3 text-center">
+                        <div class="text-2xl font-bold text-gray-800" id="stat-total">0</div>
+                        <div class="text-xs text-gray-500">Wohnungen</div>
+                    </div>
+                    <div class="bg-white rounded-lg border p-3 text-center">
+                        <div class="text-2xl font-bold text-green-600" id="stat-selbst">0</div>
+                        <div class="text-xs text-gray-500">Selbstbewohnt</div>
+                    </div>
+                    <div class="bg-white rounded-lg border p-3 text-center">
+                        <div class="text-2xl font-bold text-blue-600" id="stat-vermietet">0</div>
+                        <div class="text-xs text-gray-500">Vermietet</div>
+                    </div>
+                    <div class="bg-white rounded-lg border p-3 text-center">
+                        <div class="text-2xl font-bold text-yellow-600" id="stat-leer">0</div>
+                        <div class="text-xs text-gray-500">Leer</div>
+                    </div>
+                </div>
+
+                <!-- Toolbar -->
+                <div class="flex justify-between items-center mb-4">
+                    <div class="relative">
+                        <input type="text" id="wohnung-search" placeholder="Suchen..." oninput="filterWohnungen()"
+                            class="border border-gray-300 rounded-lg pl-9 pr-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-64">
+                        <svg class="absolute left-3 top-2.5 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                    </div>
+                    <div class="flex gap-2">
+                        <button id="btn-export" onclick="exportXLSX()" class="hidden bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition flex items-center gap-2" title="Excel exportieren">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                            Excel
+                        </button>
+                        <button id="btn-csv" onclick="exportCSV()" class="hidden bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition flex items-center gap-2" title="CSV exportieren">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                            CSV
+                        </button>
+                        <button id="btn-import" onclick="importKontakte()" class="hidden bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-200 transition flex items-center gap-2" title="Aus kontakte.json importieren">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                            Import
+                        </button>
+                        <button id="btn-add" onclick="showAddModal()" class="hidden bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                            Neue Wohnung
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Wohnungen Table -->
+                <div id="wohnungen-list" class="space-y-2"></div>
+                <div id="loading" class="text-center py-12 text-gray-500">
+                    <svg class="animate-spin h-6 w-6 mx-auto mb-2 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                    </svg>
+                    Wohnungen werden geladen...
+                </div>
+                <div id="no-data" class="hidden text-center py-8 text-gray-400">Keine Wohnungen vorhanden.</div>
+            </div>
+
+            <!-- ═══ Eigentümer Tab ═══ -->
+            <div id="panel-eigentuemer" class="hidden">
+                <div class="flex flex-wrap items-center gap-3 mb-4">
+                    <input type="text" id="eig-search" placeholder="Name oder Email…" oninput="renderEigentuemer()"
+                        class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 w-64" />
+                    <select id="eig-stweg-filter" onchange="renderEigentuemer()" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                        <option value="">Alle STWEGs</option>
+                    </select>
+                    <select id="eig-rolle-filter" onchange="renderEigentuemer()" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                        <option value="">Eigentümer + Verwalter</option>
+                        <option value="eigentuemer">Nur Eigentümer</option>
+                        <option value="verwalter">Nur Verwalter</option>
+                    </select>
+                    <div class="ml-auto flex gap-2">
+                        <button onclick="exportEigentuemerCSV()" class="px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50">CSV</button>
+                        <button onclick="exportEigentuemerXLSX()" class="px-3 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-6h3l-3-3-3 3h3v6m-7 2a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H6a2 2 0 00-2 2v14z"/></svg>
+                            Excel
+                        </button>
+                    </div>
+                </div>
+                <div id="eig-stats" class="text-sm text-gray-500 mb-3"></div>
+                <div id="eig-loading" class="hidden text-center text-gray-400 py-8">Lade Eigentümer-Daten…</div>
+                <div id="eig-table-wrap" class="overflow-x-auto bg-white rounded-lg border">
+                    <table class="min-w-full text-sm">
+                        <thead class="bg-gray-50 text-xs uppercase text-gray-600">
+                            <tr>
+                                <th class="px-3 py-2 text-left">Name</th>
+                                <th class="px-3 py-2 text-left">Rolle</th>
+                                <th class="px-3 py-2 text-left">Kontakt</th>
+                                <th class="px-3 py-2 text-left">Wohnungen</th>
+                                <th class="px-3 py-2 text-left">Parkplätze</th>
+                                <th class="px-3 py-2 text-left">Sonstige</th>
+                                <th class="px-3 py-2 text-right">Σ Wertquoten</th>
+                            </tr>
+                        </thead>
+                        <tbody id="eig-tbody" class="divide-y"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- ═══ Unterschriftenlisten Tab ═══ -->
+            <div id="panel-unterschriften" class="hidden">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- Form -->
+                    <div class="bg-white rounded-lg border p-5">
+                        <h3 class="text-lg font-semibold text-gray-800 mb-4">Unterschriftenliste generieren</h3>
+                        <div class="space-y-3">
+                            <div>
+                                <label class="block text-xs text-gray-600 mb-1">STWEG</label>
+                                <select id="ul-stweg" onchange="ulLoadHaeuser()" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                                    <option value="1">STWEG 1 (Rosenweg 17/18)</option>
+                                    <option value="2">STWEG 2 (Rosenweg 13/14/16)</option>
+                                    <option value="3">STWEG 3 (Rosenweg 9)</option>
+                                    <option value="4">STWEG 4 (Rosenweg 10/12)</option>
+                                    <option value="5">STWEG 5 (Rosenweg 5/6/8)</option>
+                                    <option value="6">STWEG 6 (Rosenweg 1)</option>
+                                    <option value="7">STWEG 7 (Rosenweg 2/4)</option>
+                                    <option value="8">STWEG 8 (MEG-Tiefgarage)</option>
+                                </select>
+                            </div>
+                            <div id="ul-haus-wrap">
+                                <label class="block text-xs text-gray-600 mb-1">Haus-Auswahl</label>
+                                <div id="ul-haus-checks" class="flex flex-wrap gap-3 text-sm border border-gray-300 rounded-lg px-3 py-2 bg-gray-50">
+                                    <span class="text-xs text-gray-400">Lade Häuser…</span>
+                                </div>
+                                <p class="mt-1 text-xs text-gray-500">Wähle einzelne Häuser für eine separate Liste, oder lasse alle aktiviert für die gesamte STWEG.</p>
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-600 mb-1">Datum (Stempel auf Liste)</label>
+                                <input type="date" id="ul-datum" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-600 mb-1">Anlass-Titel</label>
+                                <input type="text" id="ul-titel" placeholder="z.B. Zirkularbeschluss — Wahl der neuen Verwaltung"
+                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-600 mb-1">Zweck / Beschreibung (mehrzeilig erlaubt)</label>
+                                <textarea id="ul-zweck" rows="4" placeholder="Erläuterung wofür unterschrieben wird&#10;z.B. Wahl Immosense AG ab 1. Juli 2026"
+                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"></textarea>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="block text-xs text-gray-600 mb-1">Rücksendung bis</label>
+                                    <input type="date" id="ul-frist" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-600 mb-1">Rücksendung an</label>
+                                    <input type="text" id="ul-an" placeholder="Stefan Müller (Rosenweg 9)"
+                                        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                                </div>
+                            </div>
+                            <div class="border-t pt-3 mt-2">
+                                <div class="flex items-center justify-between mb-2">
+                                    <h4 class="text-sm font-semibold text-gray-700">Zeichnungsberechtigte</h4>
+                                    <button type="button" onclick="ulAddZeichner()" class="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200">+ Person</button>
+                                </div>
+                                <div id="ul-zeichner-list" class="space-y-2"></div>
+                                <div class="mt-3">
+                                    <label class="block text-xs text-gray-600 mb-1">Kollektiv-Text (optional, Default vorhanden)</label>
+                                    <textarea id="ul-kollektiv" rows="2" placeholder="Zwei dieser Personen sind – kollektiv zu zweien – ermächtigt, im Namen der Eigentümer ..."
+                                        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"></textarea>
+                                </div>
+                                <p class="text-xs text-gray-500 mt-1">Liste der Personen die mit ihrer Unterschrift den Beschluss bestätigen. Erscheint am Ende der Hauptliste mit Unterschriftszeile pro Person.</p>
+                            </div>
+                            <div class="flex gap-2 pt-2">
+                                <button onclick="ulPreview()" class="flex-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm font-medium">
+                                    Vorschau
+                                </button>
+                                <button onclick="ulDownload()" class="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium">
+                                    PDF herunterladen
+                                </button>
+                            </div>
+                            <p class="text-xs text-gray-500 pt-2">
+                                <strong>Format:</strong> PDF (nicht editierbar — rechtssicher).
+                                Die Liste enthält automatisch alle Eigentümer der gewählten STWEG mit Wohnung, Wertquote und Verwalter (in Vertretung).
+                                Auswärts wohnende Eigentümer werden mit Marker «Einzelbrief separat verschickt» markiert.
+                                Footer enthält Seitenzahlen + Integritäts-Hash für Manipulations-Schutz.
+                            </p>
+                        </div>
+                    </div>
+                    <!-- Preview -->
+                    <div class="bg-white rounded-lg border p-3 min-h-[600px] flex flex-col">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-sm font-medium text-gray-700">Vorschau</h3>
+                            <button onclick="ulPreview()" class="text-xs text-blue-600 hover:underline">Aktualisieren</button>
+                        </div>
+                        <iframe id="ul-preview" src="about:blank" class="flex-1 w-full border border-gray-200 rounded" style="min-height:550px"></iframe>
+                    </div>
+                </div>
+                <!-- History — bisher generierte Listen -->
+                <div class="mt-6 bg-white rounded-lg border p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="text-sm font-semibold text-gray-700">Bisher generierte Unterschriftenlisten</h3>
+                        <button onclick="ulLoadHistory()" class="text-xs text-blue-600 hover:underline">Aktualisieren</button>
+                    </div>
+                    <div id="ul-history" class="text-sm text-gray-500">Lade…</div>
+                </div>
+            </div>
+
+            <!-- ═══ Bewohner Tab ═══ -->
+            <div id="panel-bewohner" class="hidden">
+                <div class="flex justify-between items-center mb-4">
+                    <div class="relative">
+                        <input type="text" id="user-search" placeholder="Suchen..." oninput="filterUsers()"
+                            class="border border-gray-300 rounded-lg pl-9 pr-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-64">
+                        <svg class="absolute left-3 top-2.5 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                    </div>
+                    <button id="btn-add-user" onclick="showAddForm()" class="hidden bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                        Neuer Bewohner
+                    </button>
+                </div>
+
+                <!-- User Cards -->
+                <div id="user-cards" class="space-y-3"></div>
+                <div id="users-loading" class="hidden text-center py-12 text-gray-500">
+                    <svg class="animate-spin h-6 w-6 mx-auto mb-2 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                    </svg>
+                    Bewohner werden geladen...
+                </div>
+                <div id="no-users" class="hidden text-center py-8 text-gray-400">Keine Bewohner gefunden.</div>
+            </div>
+
+            <!-- ═══ Gruppen Tab ═══ -->
+            <div id="panel-gruppen" class="hidden">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-semibold text-gray-700" id="groups-title">Gruppen</h2>
+                    <button id="btn-new-group" onclick="openNewGroupModal()" class="hidden bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm font-medium flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                        </svg>
+                        Neue Gruppe
+                    </button>
+                </div>
+                <div id="groups-list" class="space-y-1"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Wohnung Edit/Add Modal -->
+    <div id="edit-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
+            <h3 class="text-lg font-bold text-gray-800 mb-4" id="modal-title">Neue Wohnung</h3>
+            <div id="modal-error" class="hidden bg-red-50 text-red-600 text-sm p-3 rounded-lg mb-4"></div>
+            <input type="hidden" id="f-id" />
+
+            <!-- Wohnung Details -->
+            <div class="space-y-4 mb-6">
+                <h4 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Wohnung</h4>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Bezeichnung *</label>
+                        <input type="text" id="f-bezeichnung" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="z.B. EG.1" />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Stockwerk</label>
+                        <select id="f-stockwerk" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <option value="">--</option>
+                            <option>Untergeschoss</option>
+                            <option>Erdgeschoss</option>
+                            <option>1. Obergeschoss</option>
+                            <option>2. Obergeschoss</option>
+                            <option>3. Obergeschoss</option>
+                            <option>Dachgeschoss</option>
+                            <option>Sonstiges</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-cols-3 gap-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Zimmer</label>
+                        <input type="text" id="f-zimmer" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="3.5" />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Fläche m²</label>
+                        <input type="number" id="f-flaeche" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="75" />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Typ</label>
+                        <select id="f-typ" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500">
+                            <option>Wohnung</option>
+                            <option>Hobbyraum</option>
+                            <option>Tiefgarage-Platz</option>
+                            <option>Parkplatz</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Wertquote Zaehler</label>
+                        <input type="number" id="f-wertquote-zaehler" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="118" />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Wertquote Nenner</label>
+                        <input type="number" id="f-wertquote-nenner" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="1000" />
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Besonderheiten</label>
+                    <input type="text" id="f-besonderheiten" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="z.B. Garten, Balkon" />
+                </div>
+            </div>
+
+            <!-- Status -->
+            <div class="space-y-3 mb-6">
+                <h4 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Bewohnung</h4>
+                <div class="flex gap-4">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="bewohnt" value="eigentuemer" checked class="text-blue-600" />
+                        <span class="text-sm">Selbstbewohnt</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="bewohnt" value="mieter" class="text-blue-600" />
+                        <span class="text-sm">Vermietet</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="bewohnt" value="leer" class="text-blue-600" />
+                        <span class="text-sm">Leer</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Dynamic Kontakte -->
+            <div class="mb-6">
+                <div class="flex items-center justify-between mb-3">
+                    <h4 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Kontakte</h4>
+                    <button type="button" onclick="addKontakt()" class="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-3 py-1 rounded-lg font-medium transition">+ Kontakt hinzufügen</button>
+                </div>
+                <div id="kontakte-list" class="space-y-3"></div>
+                <div id="no-kontakte" class="text-center py-4 text-gray-400 text-sm">Noch keine Kontakte. Klicke "Kontakt hinzufügen" um loszulegen.</div>
+            </div>
+
+            <!-- Notizen -->
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Notizen</label>
+                <textarea id="f-notizen" rows="2" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"></textarea>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex justify-between items-center flex-wrap gap-3">
+                <div class="flex gap-4 items-center">
+                    <button id="btn-delete" onclick="deleteWohnung()" class="hidden text-red-600 hover:text-red-800 text-sm font-medium">Löschen</button>
+                    <button id="btn-historie" onclick="showHistorie()" class="hidden text-gray-600 hover:text-gray-800 text-sm font-medium">Historie</button>
+                </div>
+                <div class="flex gap-3 ml-auto">
+                    <button onclick="closeWohnungModal()" class="px-4 py-2 text-gray-600 hover:text-gray-800 text-sm">Abbrechen</button>
+                    <button onclick="saveWohnung()" class="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition">Speichern</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Historie Sub-Modal -->
+    <div id="historie-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-[60] flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl max-w-3xl w-full max-h-[85vh] overflow-y-auto p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold text-gray-800">Historie archivierter Kontakte</h3>
+                <button onclick="closeHistorie()" class="text-gray-400 hover:text-gray-600">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div id="historie-content" class="text-sm">Lade …</div>
+        </div>
+    </div>
+
+    <!-- User Edit/Add Dialog -->
+    <div id="edit-dialog" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+            <h3 class="text-lg font-bold text-gray-800 mb-4" id="dialog-title">Neuer Bewohner</h3>
+            <div class="space-y-4">
+                <input type="hidden" id="f-pk" />
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                    <input type="text" id="f-name" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="z.B. Max Mustermann" />
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">E-Mail *</label>
+                    <input type="email" id="f-email" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="name@example.com" />
+                    <p class="text-xs text-gray-400 mt-1">Der Bewohner meldet sich mit dieser E-Mail-Adresse an</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Rolle</label>
+                    <div class="flex gap-4">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="rolle" value="eigentuemer" checked class="text-blue-600" />
+                            <span class="text-sm">Eigentümer</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="rolle" value="mieter" class="text-blue-600" />
+                            <span class="text-sm">Mieter</span>
+                        </label>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Gruppen</label>
+                    <div id="f-groups" class="space-y-2 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-3"></div>
+                </div>
+                <div id="dialog-error" class="hidden bg-red-50 border-l-4 border-red-500 p-3 rounded text-sm text-red-700"></div>
+                <div class="flex gap-3 pt-2">
+                    <button onclick="saveUser()" id="save-btn" class="flex-1 bg-blue-600 text-white py-2 rounded-lg font-medium hover:bg-blue-700 transition">Speichern</button>
+                    <button onclick="closeDialog()" class="px-6 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition">Abbrechen</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Group Modal Overlay -->
+    <div id="group-modal-overlay" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div id="group-modal-content" class="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"></div>
+    </div>
+
+    <script>
+        const esc = s => s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : '';
+
+        const ROLLEN = [
+            { value: 'eigentuemer', label: 'Eigentümer', color: 'green' },
+            { value: 'mieter', label: 'Mieter', color: 'blue' },
+            { value: 'verwalter', label: 'Verwalter', color: 'purple' },
+            { value: 'bewohner', label: 'Bewohner', color: 'teal' },
+            { value: 'sonstige', label: 'Sonstige', color: 'gray' },
+        ];
+
+        const STWEG_TO_ROSENWEG = { 1: [17,18], 2: [13,14,16], 3: [9], 4: [10,12], 5: [5,6,8], 6: [1], 7: [2,4] };
+
+        // ── Wohnungen State ──
+        let allWohnungen = [];
+        let stwegList = [];
+        let currentStweg = null;
+        let canWriteWohnungen = false;
+        let kontaktCounter = 0;
+
+        // ── Bewohner/Gruppen State ──
+        let allUsers = [];
+        let allGroups = [];
+        let canWriteBewohner = false;
+        let seesAll = false;
+        let userStweg = null;
+        let userGroupPrefix = null;
+        let bewohnerLoaded = false;
+        let eigentuemerLoaded = false;
+        let eigentuemerData = []; // grouped: [{ name, email, telefon, objects: [...] }]
+
+        // ── Shared State ──
+        let currentUser = null;
+        let hasWohnungenAccess = false;
+        let hasBewohnerAccess = false;
+
+        // ══════════════════════════════
+        // ── Auth Init ──
+        // ══════════════════════════════
+        window.addEventListener('DOMContentLoaded', async () => {
+            const user = await AuthentikAuth.init({ requireAuth: false });
+
+            if (!user) {
+                document.getElementById('auth-gate').innerHTML = `
+                    <div class="text-center">
+                        <h2 class="text-xl font-semibold text-gray-800 mb-4">Anmeldung erforderlich</h2>
+                        <div id="login-container"></div>
+                    </div>`;
+                AuthentikAuth.createLoginButton('login-container');
+                return;
+            }
+
+            currentUser = user;
+            const groups = user.groups || [];
+            const isTechnik = groups.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; });
+            const isVerwaltung = groups.some(g => g.toLowerCase() === 'verwaltung');
+            const isAusschuss = groups.some(g => g.toLowerCase().endsWith('-ausschuss'));
+            window.canViewHistorie = isTechnik || isVerwaltung || isAusschuss;
+
+            // Check permissions for both areas
+            const accessWohnungen = AuthentikAuth.getPermission('wohnungsverwaltung');
+            const accessBewohner = AuthentikAuth.getPermission('bewohner-verwaltung');
+            const accessVerwaltung = AuthentikAuth.getPermission('verwaltung');
+
+            hasWohnungenAccess = accessWohnungen !== 'none';
+            hasBewohnerAccess = accessBewohner !== 'none' || accessVerwaltung !== 'none';
+
+            if (!hasWohnungenAccess && !hasBewohnerAccess) {
+                document.getElementById('auth-gate').innerHTML = `
+                    <div class="text-center">
+                        <svg class="h-12 w-12 mx-auto mb-3 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        <p class="text-lg font-medium text-gray-700">Keine Berechtigung</p>
+                    </div>`;
+                return;
+            }
+
+            canWriteWohnungen = accessWohnungen === 'write';
+            canWriteBewohner = accessBewohner === 'write' || accessVerwaltung === 'write';
+            seesAll = isTechnik || isVerwaltung;
+
+            // Determine STWEG for non-admin users (Bewohner tab)
+            if (!seesAll) {
+                const ausschussGroup = groups.find(g => g.match(/stweg\d+-ausschuss/i));
+                if (ausschussGroup) {
+                    const match = ausschussGroup.match(/stweg(\d+)/i);
+                    if (match) {
+                        userStweg = parseInt(match[1]);
+                        const rwNrs = STWEG_TO_ROSENWEG[userStweg] || [];
+                        userGroupPrefix = rwNrs.map(n => `r${n}-`);
+                    }
+                }
+            }
+
+            // Show/hide tabs based on permissions
+            const firstTab = hasWohnungenAccess ? 'wohnungen' : 'bewohner';
+
+            if (!hasWohnungenAccess) {
+                document.getElementById('main-tab-wohnungen').classList.add('hidden');
+            }
+            if (hasBewohnerAccess) {
+                document.getElementById('main-tab-bewohner').classList.remove('hidden');
+                if (canWriteBewohner) {
+                    document.getElementById('main-tab-gruppen').classList.remove('hidden');
+                    document.getElementById('btn-add-user').classList.remove('hidden');
+                    if (seesAll) {
+                        document.getElementById('btn-new-group').classList.remove('hidden');
+                        document.getElementById('groups-title').textContent = 'Alle Gruppen';
+                    }
+                }
+            }
+
+            // ── Wohnungen init ──
+            if (hasWohnungenAccess) {
+                try {
+                    const configRes = await fetch('/site-config.json');
+                    const config = await configRes.json();
+                    stwegList = config.stwegen || [];
+                } catch { stwegList = []; }
+
+                const accessibleStwegs = [];
+                for (const s of stwegList) {
+                    if (isTechnik) { accessibleStwegs.push(s); continue; }
+                    const sGroups = s.groups ? Object.values(s.groups).map(g => g.toLowerCase()) : [];
+                    if (groups.some(g => sGroups.includes(g.toLowerCase()))) accessibleStwegs.push(s);
+                }
+
+                if (accessibleStwegs.length > 0) {
+                    const tabsEl = document.getElementById('stweg-tabs');
+                    tabsEl.innerHTML = accessibleStwegs.map(s => `
+                        <button onclick="selectStweg(${s.nr})" id="stweg-tab-${s.nr}"
+                            class="px-3 py-1.5 rounded-lg text-sm font-medium border transition
+                                   ${s.nr === accessibleStwegs[0].nr ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'}">
+                            ${esc(s.name)} <span class="text-xs opacity-75">${esc(s.adressen)}</span>
+                        </button>
+                    `).join('');
+
+                    document.getElementById('btn-export').classList.remove('hidden');
+                    document.getElementById('btn-csv').classList.remove('hidden');
+                    if (canWriteWohnungen) {
+                        document.getElementById('btn-add').classList.remove('hidden');
+                        document.getElementById('btn-import').classList.remove('hidden');
+                    }
+
+                    currentStweg = accessibleStwegs[0].nr;
+                } else if (!hasBewohnerAccess) {
+                    document.getElementById('auth-gate').innerHTML = `
+                        <div class="text-center"><p class="text-lg font-medium text-gray-700">Keine STWEGs zugewiesen</p></div>`;
+                    return;
+                }
+            }
+
+            document.getElementById('auth-gate').classList.add('hidden');
+            document.getElementById('main-content').classList.remove('hidden');
+
+            // Activate first available tab
+            switchMainTab(firstTab);
+        });
+
+        // ══════════════════════════════
+        // ── Top-level Tab Switching ──
+        // ══════════════════════════════
+        function switchMainTab(tab) {
+            ['wohnungen', 'eigentuemer', 'unterschriften', 'bewohner', 'gruppen'].forEach(t => {
+                const tabBtn = document.getElementById(`main-tab-${t}`);
+                const panel = document.getElementById(`panel-${t}`);
+                if (tabBtn && !tabBtn.classList.contains('hidden')) {
+                    tabBtn.className = t === tab
+                        ? 'tab-active border-b-2 pb-3 px-1 text-sm transition'
+                        : 'tab-inactive border-b-2 pb-3 px-1 text-sm transition';
+                }
+                if (panel) panel.classList.toggle('hidden', t !== tab);
+            });
+
+            if (tab === 'wohnungen' && currentStweg) {
+                loadWohnungen();
+            }
+            if (tab === 'eigentuemer' && !eigentuemerLoaded) {
+                eigentuemerLoaded = true;
+                loadEigentuemer();
+            }
+            if (tab === 'unterschriften') {
+                // Default-Datum = heute, falls leer
+                const dEl = document.getElementById('ul-datum');
+                if (!dEl.value) dEl.value = new Date().toISOString().slice(0,10);
+                ulLoadHistory();
+                ulLoadHaeuser();
+            }
+            if ((tab === 'bewohner' || tab === 'gruppen') && !bewohnerLoaded) {
+                bewohnerLoaded = true;
+                Promise.all([loadUsers(), loadGroups()]);
+            }
+        }
+
+        // ══════════════════════════════
+        // ── WOHNUNGEN ──
+        // ══════════════════════════════
+        async function selectStweg(nr) {
+            currentStweg = nr;
+            document.querySelectorAll('#stweg-tabs button').forEach(btn => {
+                const isActive = btn.id === `stweg-tab-${nr}`;
+                btn.className = `px-3 py-1.5 rounded-lg text-sm font-medium border transition ${
+                    isActive ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'}`;
+            });
+            await loadWohnungen();
+        }
+
+        async function loadWohnungen() {
+            const loading = document.getElementById('loading');
+            const noData = document.getElementById('no-data');
+            loading.classList.remove('hidden');
+            noData.classList.add('hidden');
+            document.getElementById('wohnungen-list').innerHTML = '';
+
+            try {
+                const [wRes, sRes] = await Promise.all([
+                    AuthentikAuth.apiFetch(`/api/wohnungen/${currentStweg}`),
+                    AuthentikAuth.apiFetch(`/api/wohnungen/${currentStweg}/stats`),
+                ]);
+                const wData = await wRes.json();
+                const stats = await sRes.json();
+                allWohnungen = wData.wohnungen || [];
+
+                document.getElementById('stat-total').textContent = stats.total || 0;
+                document.getElementById('stat-selbst').textContent = stats.selbstbewohnt || 0;
+                document.getElementById('stat-vermietet').textContent = stats.vermietet || 0;
+                document.getElementById('stat-leer').textContent = stats.leer || 0;
+                // Label: if all entries are Parkplätze, show "Parkplätze" instead of "Wohnungen"
+                const typen = new Set(allWohnungen.map(w => w.typ || 'Wohnung'));
+                let label = 'Wohnungen';
+                if (typen.size === 1) {
+                    const t = [...typen][0];
+                    if (t === 'Parkplatz' || t === 'Tiefgarage-Platz') label = 'Parkplätze';
+                    else if (t === 'Hobbyraum') label = 'Hobbyräume';
+                    else if (t !== 'Wohnung') label = t + 'e';
+                } else if (typen.has('Parkplatz') || typen.has('Tiefgarage-Platz')) {
+                    label = 'Einheiten';
+                }
+                const totalLabel = document.querySelector('#stat-total + div');
+                if (totalLabel) totalLabel.textContent = label;
+                document.getElementById('stats-bar').classList.remove('hidden');
+            } catch (err) {
+                console.error('Error loading wohnungen:', err);
+                allWohnungen = [];
+            }
+
+            loading.classList.add('hidden');
+            renderWohnungen();
+        }
+
+        function getKontakte(w, rolle) {
+            return (w.kontakte || []).filter(k => k.rolle === rolle);
+        }
+
+        function getKontaktName(w, rolle) {
+            const k = getKontakte(w, rolle);
+            return k.length > 0 ? k.map(c => c.name).filter(Boolean).join(', ') : '';
+        }
+
+        function renderWohnungen() {
+            const q = (document.getElementById('wohnung-search')?.value || '').toLowerCase();
+            let filtered = allWohnungen;
+            if (q) {
+                filtered = filtered.filter(w => {
+                    const kontakteStr = (w.kontakte || []).map(k => `${k.name || ''} ${k.email || ''}`).join(' ').toLowerCase();
+                    return (w.bezeichnung || '').toLowerCase().includes(q) ||
+                        (w.stockwerk || '').toLowerCase().includes(q) ||
+                        kontakteStr.includes(q);
+                });
+            }
+
+            const noData = document.getElementById('no-data');
+            const list = document.getElementById('wohnungen-list');
+
+            if (filtered.length === 0) {
+                list.innerHTML = '';
+                noData.classList.remove('hidden');
+                return;
+            }
+            noData.classList.add('hidden');
+
+            list.innerHTML = filtered.map(w => {
+                const statusBadge = w.bewohnt_von === 'mieter'
+                    ? '<span class="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">Vermietet</span>'
+                    : w.bewohnt_von === 'leer'
+                    ? '<span class="text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700">Leer</span>'
+                    : '<span class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">Selbstbewohnt</span>';
+
+                const typBadge = w.typ && w.typ !== 'Wohnung'
+                    ? `<span class="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">${esc(w.typ)}</span>` : '';
+
+                const eigName = getKontaktName(w, 'eigentuemer');
+                const mieterName = getKontaktName(w, 'mieter');
+                const verwalterName = getKontaktName(w, 'verwalter');
+                const wq = (w.wertquote_zaehler && w.wertquote_nenner) ? `${w.wertquote_zaehler}/${w.wertquote_nenner} ‰` : '';
+                const details = [w.zimmer ? `${w.zimmer} Zi.` : '', w.flaeche_m2 ? `${w.flaeche_m2} m²` : '', wq].filter(Boolean).join(', ');
+
+                return `
+                <div class="bg-white rounded-lg border p-4 hover:shadow-sm transition cursor-pointer" onclick="editWohnung(${w.id})">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-4 min-w-0">
+                            <div class="bg-blue-50 rounded-lg w-12 h-12 flex items-center justify-center text-blue-600 font-bold text-sm flex-shrink-0">
+                                ${esc(w.bezeichnung)}
+                            </div>
+                            <div class="min-w-0">
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <span class="font-medium text-gray-900">${esc(eigName || 'Kein Eigentümer')}</span>
+                                    ${statusBadge} ${typBadge}
+                                </div>
+                                <div class="text-sm text-gray-500 flex items-center gap-3 mt-0.5">
+                                    ${w.stockwerk ? `<span>${esc(w.stockwerk)}</span>` : ''}
+                                    ${details ? `<span>${details}</span>` : ''}
+                                </div>
+                                ${mieterName ? `<div class="text-sm text-gray-600 mt-0.5"><span class="text-gray-400">Mieter:</span> ${esc(mieterName)}</div>` : ''}
+                                ${verwalterName ? `<div class="text-sm text-gray-600 mt-0.5"><span class="text-gray-400">Verwalter:</span> ${esc(verwalterName)}</div>` : ''}
+                            </div>
+                        </div>
+                        ${canWriteWohnungen ? `
+                        <div class="flex items-center gap-1 ml-2 flex-shrink-0">
+                            <button onclick="event.stopPropagation(); editWohnung(${w.id})" class="p-2 text-gray-400 hover:text-blue-600 rounded-lg hover:bg-blue-50 transition" title="Bearbeiten">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                            </button>
+                        </div>` : ''}
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function filterWohnungen() { renderWohnungen(); }
+
+        // ── Kontakt Card ──
+        function renderKontaktCard(kontakt = {}) {
+            const id = `kontakt-${kontaktCounter++}`;
+            const rolleOptions = ROLLEN.map(r =>
+                `<option value="${r.value}" ${kontakt.rolle === r.value ? 'selected' : ''}>${r.label}</option>`
+            ).join('');
+
+            const rolleInfo = ROLLEN.find(r => r.value === (kontakt.rolle || 'eigentuemer')) || ROLLEN[0];
+            const colorMap = { green: 'border-green-300 bg-green-50', blue: 'border-blue-300 bg-blue-50', purple: 'border-purple-300 bg-purple-50', teal: 'border-teal-300 bg-teal-50', gray: 'border-gray-300 bg-gray-50' };
+
+            const heute = new Date().toISOString().slice(0, 10);
+            const gueltigAbVal = kontakt.gueltig_ab ? String(kontakt.gueltig_ab).slice(0, 10) : '';
+            const isVorgemerkt = gueltigAbVal && gueltigAbVal > heute;
+            const passiveCls = isVorgemerkt ? 'opacity-60' : '';
+            const passiveBadge = isVorgemerkt
+                ? `<span class="text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-medium">vorgemerkt ab ${gueltigAbVal}</span>`
+                : '';
+
+            return `
+            <div id="${id}" data-kontakt-id="${kontakt.id || ''}" class="border rounded-lg p-3 ${colorMap[rolleInfo.color] || colorMap.gray} kontakt-card ${passiveCls}">
+                <div class="flex items-center justify-between mb-2 gap-2">
+                    <div class="flex items-center gap-2">
+                        <select onchange="updateKontaktColor(this)" class="text-sm font-medium border rounded px-2 py-1 bg-white kontakt-rolle">
+                            ${rolleOptions}
+                        </select>
+                        ${passiveBadge}
+                    </div>
+                    <button type="button" onclick="removeKontakt('${id}')" class="text-red-400 hover:text-red-600 p-1" title="Entfernen / Archivieren">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <div class="space-y-2">
+                    <input type="text" value="${esc(kontakt.name || '')}" placeholder="Name" class="w-full px-3 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 kontakt-name" />
+                    <div class="grid grid-cols-2 gap-2">
+                        <input type="email" value="${esc(kontakt.email || '')}" placeholder="E-Mail" class="w-full px-3 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 kontakt-email" />
+                        <input type="tel" value="${esc(kontakt.telefon || '')}" placeholder="+41 79 123 45 67" class="w-full px-3 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 kontakt-telefon" onblur="formatPhone(this)" />
+                    </div>
+                    <div class="relative">
+                        <input type="text" value="${esc(kontakt.adresse || '')}" placeholder="Adresse eingeben..." class="w-full px-3 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 kontakt-adresse" oninput="searchAddress(this)" autocomplete="off" />
+                        <div class="adresse-dropdown hidden absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto"></div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 items-center">
+                        <label class="text-xs text-gray-600 flex items-center gap-2">
+                            <span class="whitespace-nowrap">Gültig ab</span>
+                            <input type="date" value="${esc(gueltigAbVal)}" class="flex-1 px-2 py-1 border rounded text-xs kontakt-gueltig-ab" />
+                        </label>
+                        <label class="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+                            <input type="checkbox" class="kontakt-authentik rounded text-blue-600" ${kontakt.authentik_zugang === true ? 'checked' : ''} ${kontakt.authentik_zugang === undefined ? 'data-default-by-rolle="1"' : ''} />
+                            <span>Authentik-Zugang</span>
+                        </label>
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        function addKontakt(kontakt = {}) {
+            const list = document.getElementById('kontakte-list');
+            list.insertAdjacentHTML('beforeend', renderKontaktCard(kontakt));
+            document.getElementById('no-kontakte').classList.add('hidden');
+        }
+
+        function removeKontakt(id) {
+            document.getElementById(id)?.remove();
+            if (document.getElementById('kontakte-list').children.length === 0) {
+                document.getElementById('no-kontakte').classList.remove('hidden');
+            }
+        }
+
+        function updateKontaktColor(selectEl) {
+            const card = selectEl.closest('.kontakt-card');
+            const rolle = selectEl.value;
+            const info = ROLLEN.find(r => r.value === rolle) || ROLLEN[4];
+            const colorMap = { green: 'border-green-300 bg-green-50', blue: 'border-blue-300 bg-blue-50', purple: 'border-purple-300 bg-purple-50', teal: 'border-teal-300 bg-teal-50', gray: 'border-gray-300 bg-gray-50' };
+            Object.values(colorMap).forEach(cls => cls.split(' ').forEach(c => card.classList.remove(c)));
+            (colorMap[info.color] || colorMap.gray).split(' ').forEach(c => card.classList.add(c));
+        }
+
+        // ── Telefon-Formatierung (CH) ──
+        function formatPhone(input) {
+            let val = input.value.replace(/[^\d+]/g, '');
+            if (!val) return;
+            // 07X... → +417X...
+            if (val.startsWith('0') && !val.startsWith('00')) val = '+41' + val.slice(1);
+            // 41... ohne + → +41...
+            if (val.startsWith('41') && !val.startsWith('+')) val = '+' + val;
+            // 004X → +4X
+            if (val.startsWith('00')) val = '+' + val.slice(2);
+            // Formatieren: +41 XX XXX XX XX
+            const m = val.match(/^\+41(\d{2})(\d{3})(\d{2})(\d{2})$/);
+            if (m) {
+                input.value = `+41 ${m[1]} ${m[2]} ${m[3]} ${m[4]}`;
+            } else {
+                // Ausländische oder andere Formate: mindestens Leerzeichen nach Ländervorwahl
+                const fm = val.match(/^\+(\d{2,3})(\d+)$/);
+                if (fm) input.value = `+${fm[1]} ${fm[2].replace(/(\d{3})(?=\d)/g, '$1 ')}`;
+            }
+        }
+
+        // ── Adress-Autocomplete (geo.admin.ch) ──
+        let addrSearchTimer = null;
+        function searchAddress(input) {
+            const dropdown = input.parentElement.querySelector('.adresse-dropdown');
+            const query = input.value.trim();
+            clearTimeout(addrSearchTimer);
+            if (query.length < 3) { dropdown.classList.add('hidden'); return; }
+            addrSearchTimer = setTimeout(async () => {
+                try {
+                    const url = `https://api3.geo.admin.ch/rest/services/api/SearchServer?searchText=${encodeURIComponent(query)}&type=locations&origins=address&limit=6`;
+                    const resp = await fetch(url);
+                    const data = await resp.json();
+                    if (!data.results?.length) { dropdown.classList.add('hidden'); return; }
+                    dropdown.innerHTML = data.results.map(r => {
+                        const label = r.attrs.label.replace(/<[^>]*>/g, '');
+                        return `<div class="px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0" data-addr="${esc(label)}" onmousedown="selectAddress(this)">${r.attrs.label}</div>`;
+                    }).join('');
+                    dropdown.classList.remove('hidden');
+                } catch(e) { dropdown.classList.add('hidden'); }
+            }, 250);
+            input.addEventListener('blur', () => setTimeout(() => dropdown.classList.add('hidden'), 200), { once: true });
+        }
+
+        function selectAddress(el) {
+            const card = el.closest('.kontakt-card');
+            const input = card.querySelector('.kontakt-adresse');
+            input.value = el.dataset.addr;
+            el.closest('.adresse-dropdown').classList.add('hidden');
+        }
+
+        function collectKontakte() {
+            const cards = document.querySelectorAll('#kontakte-list .kontakt-card');
+            const kontakte = [];
+            cards.forEach(card => {
+                const idAttr = card.dataset.kontaktId;
+                const id = idAttr ? parseInt(idAttr, 10) : null;
+                const rolle = card.querySelector('.kontakt-rolle')?.value || 'eigentuemer';
+                const name = card.querySelector('.kontakt-name')?.value?.trim() || '';
+                const email = card.querySelector('.kontakt-email')?.value?.trim() || '';
+                const telefon = card.querySelector('.kontakt-telefon')?.value?.trim() || '';
+                const adresse = card.querySelector('.kontakt-adresse')?.value?.trim() || '';
+                const gueltig_ab = card.querySelector('.kontakt-gueltig-ab')?.value || null;
+                const authentikEl = card.querySelector('.kontakt-authentik');
+                let authentik_zugang;
+                if (authentikEl?.dataset.defaultByRolle === '1') {
+                    authentik_zugang = (rolle === 'eigentuemer' || rolle === 'verwalter') ? true : null;
+                } else {
+                    authentik_zugang = authentikEl?.checked ? true : false;
+                }
+                if (name || email) {
+                    const k = { rolle, name: name || null, email: email || null, telefon: telefon || null, adresse: adresse || null, authentik_zugang, gueltig_ab: gueltig_ab || null };
+                    if (id && Number.isFinite(id)) k.id = id;
+                    kontakte.push(k);
+                }
+            });
+            return kontakte;
+        }
+
+        // ── Wohnung Modal ──
+        function showAddModal() {
+            document.getElementById('modal-title').textContent = 'Neue Wohnung';
+            document.getElementById('modal-error').classList.add('hidden');
+            document.getElementById('btn-delete').classList.add('hidden');
+            document.getElementById('f-id').value = '';
+            document.getElementById('f-bezeichnung').value = '';
+            document.getElementById('f-stockwerk').value = '';
+            document.getElementById('f-zimmer').value = '';
+            document.getElementById('f-flaeche').value = '';
+            document.getElementById('f-wertquote-zaehler').value = '';
+            document.getElementById('f-wertquote-nenner').value = '';
+            document.getElementById('f-typ').value = 'Wohnung';
+            document.getElementById('f-besonderheiten').value = '';
+            document.getElementById('f-notizen').value = '';
+            document.querySelector('input[name="bewohnt"][value="eigentuemer"]').checked = true;
+            document.getElementById('kontakte-list').innerHTML = '';
+            kontaktCounter = 0;
+            addKontakt({ rolle: 'eigentuemer' });
+            document.getElementById('edit-modal').classList.remove('hidden');
+        }
+
+        function editWohnung(id) {
+            const w = allWohnungen.find(x => x.id === id);
+            if (!w) return;
+            document.getElementById('modal-title').textContent = `${w.bezeichnung} bearbeiten`;
+            document.getElementById('modal-error').classList.add('hidden');
+            document.getElementById('f-id').value = w.id;
+            document.getElementById('f-bezeichnung').value = w.bezeichnung || '';
+            document.getElementById('f-stockwerk').value = w.stockwerk || '';
+            document.getElementById('f-zimmer').value = w.zimmer || '';
+            document.getElementById('f-flaeche').value = w.flaeche_m2 || '';
+            document.getElementById('f-wertquote-zaehler').value = w.wertquote_zaehler || '';
+            document.getElementById('f-wertquote-nenner').value = w.wertquote_nenner || '';
+            document.getElementById('f-typ').value = w.typ || 'Wohnung';
+            document.getElementById('f-besonderheiten').value = w.besonderheiten || '';
+            document.getElementById('f-notizen').value = w.notizen || '';
+            const bewohnt = w.bewohnt_von || 'eigentuemer';
+            const radio = document.querySelector(`input[name="bewohnt"][value="${bewohnt}"]`);
+            if (radio) radio.checked = true;
+
+            document.getElementById('kontakte-list').innerHTML = '';
+            kontaktCounter = 0;
+            const kontakte = w.kontakte || [];
+            if (kontakte.length === 0) {
+                addKontakt({ rolle: 'eigentuemer' });
+            } else {
+                kontakte.forEach(k => addKontakt(k));
+            }
+
+            if (canWriteWohnungen) document.getElementById('btn-delete').classList.remove('hidden');
+            else document.getElementById('btn-delete').classList.add('hidden');
+
+            const histBtn = document.getElementById('btn-historie');
+            if (histBtn) histBtn.classList.toggle('hidden', !window.canViewHistorie);
+
+            window.currentWohnungIdForHistorie = w.id;
+            window.currentWohnungStwegForHistorie = w.stweg;
+            document.getElementById('edit-modal').classList.remove('hidden');
+        }
+
+        function closeWohnungModal() {
+            document.getElementById('edit-modal').classList.add('hidden');
+        }
+
+        async function showHistorie() {
+            const wId = window.currentWohnungIdForHistorie;
+            const stweg = window.currentWohnungStwegForHistorie;
+            if (!wId || !stweg) return;
+            const modal = document.getElementById('historie-modal');
+            const content = document.getElementById('historie-content');
+            content.innerHTML = '<div class="text-gray-400">Lade Historie …</div>';
+            modal.classList.remove('hidden');
+            try {
+                const r = await AuthentikAuth.apiFetch(`/api/wohnungen/${stweg}/${wId}/historie`);
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const data = await r.json();
+                const hist = data.historie || [];
+                if (hist.length === 0) {
+                    content.innerHTML = '<div class="text-gray-500 text-center py-8">Keine archivierten Eintraege.</div>';
+                    return;
+                }
+                content.innerHTML = `
+                    <table class="w-full text-sm">
+                        <thead class="border-b text-xs uppercase text-gray-500">
+                            <tr><th class="py-2 text-left">Rolle</th><th class="text-left">Name</th><th class="text-left">E-Mail</th><th class="text-left">Telefon</th><th class="text-right">Gültig ab</th><th class="text-right">Archiviert</th></tr>
+                        </thead>
+                        <tbody>
+                            ${hist.map(k => `
+                                <tr class="border-b">
+                                    <td class="py-2"><span class="text-xs px-2 py-0.5 rounded bg-gray-100">${esc(k.rolle || '')}</span></td>
+                                    <td>${esc(k.name || '')}</td>
+                                    <td>${esc(k.email || '')}</td>
+                                    <td>${esc(k.telefon || '')}</td>
+                                    <td class="text-right text-xs text-gray-500">${k.gueltig_ab ? String(k.gueltig_ab).slice(0,10) : '–'}</td>
+                                    <td class="text-right text-xs text-gray-500">${String(k.archiviert_am).slice(0,10)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>`;
+            } catch (e) {
+                content.innerHTML = `<div class="text-red-600">Fehler: ${esc(e.message)}</div>`;
+            }
+        }
+        function closeHistorie() {
+            document.getElementById('historie-modal').classList.add('hidden');
+        }
+
+        async function saveWohnung() {
+            const id = document.getElementById('f-id').value;
+            const bezeichnung = document.getElementById('f-bezeichnung').value.trim();
+            if (!bezeichnung) {
+                showWohnungError('Bezeichnung ist erforderlich');
+                return;
+            }
+
+            const body = {
+                bezeichnung,
+                stockwerk: document.getElementById('f-stockwerk').value,
+                zimmer: document.getElementById('f-zimmer').value,
+                flaeche_m2: parseFloat(document.getElementById('f-flaeche').value) || null,
+                wertquote_zaehler: parseInt(document.getElementById('f-wertquote-zaehler').value) || null,
+                wertquote_nenner: parseInt(document.getElementById('f-wertquote-nenner').value) || null,
+                typ: document.getElementById('f-typ').value,
+                besonderheiten: document.getElementById('f-besonderheiten').value,
+                bewohnt_von: document.querySelector('input[name="bewohnt"]:checked')?.value || 'eigentuemer',
+                notizen: document.getElementById('f-notizen').value || null,
+                kontakte: collectKontakte(),
+            };
+
+            try {
+                const url = id ? `/api/wohnungen/${currentStweg}/${id}` : `/api/wohnungen/${currentStweg}`;
+                const method = id ? 'PUT' : 'POST';
+                const res = await AuthentikAuth.apiFetch(url, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.error || 'Speichern fehlgeschlagen');
+                }
+                closeWohnungModal();
+                await loadWohnungen();
+            } catch (err) {
+                showWohnungError(err.message);
+            }
+        }
+
+        async function deleteWohnung() {
+            const id = document.getElementById('f-id').value;
+            if (!id || !confirm('Wohnung wirklich löschen?')) return;
+            try {
+                const res = await AuthentikAuth.apiFetch(`/api/wohnungen/${currentStweg}/${id}`, { method: 'DELETE' });
+                if (!res.ok) throw new Error('Löschen fehlgeschlagen');
+                closeWohnungModal();
+                await loadWohnungen();
+            } catch (err) {
+                showWohnungError(err.message);
+            }
+        }
+
+        async function importKontakte() {
+            if (!confirm(`Kontakte-Daten für STWEG ${currentStweg} importieren? Vorhandene Daten werden aktualisiert.`)) return;
+            try {
+                const path = `/stweg${currentStweg}/data/kontakte.json`;
+                const configRes = await fetch(path);
+                if (!configRes.ok) throw new Error(`kontakte.json nicht gefunden unter ${path}`);
+                const data = await configRes.json();
+
+                const res = await AuthentikAuth.apiFetch(`/api/wohnungen/${currentStweg}/import`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data),
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.error || 'Import fehlgeschlagen');
+                }
+                const result = await res.json();
+                alert(`${result.imported} Wohnungen importiert.`);
+                await loadWohnungen();
+            } catch (err) {
+                alert('Import-Fehler: ' + err.message);
+            }
+        }
+
+        function showWohnungError(msg) {
+            const el = document.getElementById('modal-error');
+            el.textContent = msg;
+            el.classList.remove('hidden');
+        }
+
+        // ── Excel Export ──
+        function exportXLSX() {
+            if (!allWohnungen.length) return alert('Keine Daten zum Exportieren.');
+            const stweg = stwegList.find(s => s.nr === currentStweg);
+            const stwegName = stweg ? stweg.name : `STWEG ${currentStweg}`;
+
+            const wq = w => (w.wertquote_zaehler && w.wertquote_nenner) ? `${w.wertquote_zaehler}/${w.wertquote_nenner}` : '';
+            const wkb = w => w.waschkueche_berechtigt === false ? 'Nein' : 'Ja';
+            const bewohnungLabel = w => w.bewohnt_von === 'mieter' ? 'Vermietet' : w.bewohnt_von === 'leer' ? 'Leer' : 'Selbstbewohnt';
+            const rows = [];
+            for (const w of allWohnungen) {
+                const kontakte = w.kontakte || [];
+                if (kontakte.length === 0) {
+                    rows.push({
+                        'Bezeichnung': w.bezeichnung, 'Stockwerk': w.stockwerk || '', 'Zimmer': w.zimmer || '',
+                        'Fläche m²': w.flaeche_m2 || '', 'Typ': w.typ || '',
+                        'Wertquote': wq(w), 'Besonderheiten': w.besonderheiten || '',
+                        'Bewohnung': bewohnungLabel(w), 'Waschküche': wkb(w),
+                        'Rolle': '', 'Name': '', 'E-Mail': '', 'Telefon': '', 'Adresse': '', 'Notizen': w.notizen || '',
+                    });
+                } else {
+                    kontakte.forEach((k, i) => {
+                        const rolleLabel = ROLLEN.find(r => r.value === k.rolle)?.label || k.rolle;
+                        rows.push({
+                            'Bezeichnung': i === 0 ? w.bezeichnung : '', 'Stockwerk': i === 0 ? (w.stockwerk || '') : '',
+                            'Zimmer': i === 0 ? (w.zimmer || '') : '', 'Fläche m²': i === 0 ? (w.flaeche_m2 || '') : '',
+                            'Typ': i === 0 ? (w.typ || '') : '',
+                            'Wertquote': i === 0 ? wq(w) : '',
+                            'Besonderheiten': i === 0 ? (w.besonderheiten || '') : '',
+                            'Bewohnung': i === 0 ? bewohnungLabel(w) : '',
+                            'Waschküche': i === 0 ? wkb(w) : '',
+                            'Rolle': rolleLabel, 'Name': k.name || '', 'E-Mail': k.email || '',
+                            'Telefon': k.telefon || '', 'Adresse': k.adresse || '', 'Notizen': i === 0 ? (w.notizen || '') : '',
+                        });
+                    });
+                }
+            }
+
+            const ws = XLSX.utils.json_to_sheet(rows);
+            const colWidths = Object.keys(rows[0] || {}).map(key => {
+                const maxLen = Math.max(key.length, ...rows.map(r => String(r[key] || '').length));
+                return { wch: Math.min(maxLen + 2, 40) };
+            });
+            ws['!cols'] = colWidths;
+
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, stwegName);
+            XLSX.writeFile(wb, `Wohnungen_${stwegName.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.xlsx`);
+        }
+
+        function exportCSV() {
+            if (!allWohnungen.length) return alert('Keine Daten zum Exportieren.');
+            const stweg = stwegList.find(s => s.nr === currentStweg);
+            const stwegName = stweg ? stweg.name : `STWEG ${currentStweg}`;
+            const headers = ['Bezeichnung','Stockwerk','Zimmer','Fläche m²','Typ','Wertquote','Besonderheiten','Bewohnung','Waschküche','Rolle','Name','E-Mail','Telefon','Adresse','Notizen'];
+            const csvEsc = v => { const s = String(v ?? ''); return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g,'""')}"` : s; };
+            const wq = w => (w.wertquote_zaehler && w.wertquote_nenner) ? `${w.wertquote_zaehler}/${w.wertquote_nenner}` : '';
+            const wkb = w => w.waschkueche_berechtigt === false ? 'Nein' : 'Ja';
+            const rows = [headers.map(csvEsc).join(',')];
+            for (const w of allWohnungen) {
+                const kontakte = w.kontakte || [];
+                const bewohnung = w.bewohnt_von === 'mieter' ? 'Vermietet' : w.bewohnt_von === 'leer' ? 'Leer' : 'Selbstbewohnt';
+                if (kontakte.length === 0) {
+                    rows.push([w.bezeichnung, w.stockwerk||'', w.zimmer||'', w.flaeche_m2||'', w.typ||'', wq(w), w.besonderheiten||'', bewohnung, wkb(w), '', '', '', '', '', w.notizen||''].map(csvEsc).join(','));
+                } else {
+                    kontakte.forEach((k, i) => {
+                        const rolleLabel = ROLLEN.find(r => r.value === k.rolle)?.label || k.rolle;
+                        rows.push([
+                            i === 0 ? w.bezeichnung : '', i === 0 ? (w.stockwerk||'') : '', i === 0 ? (w.zimmer||'') : '',
+                            i === 0 ? (w.flaeche_m2||'') : '', i === 0 ? (w.typ||'') : '',
+                            i === 0 ? wq(w) : '', i === 0 ? (w.besonderheiten||'') : '',
+                            i === 0 ? bewohnung : '', i === 0 ? wkb(w) : '',
+                            rolleLabel, k.name||'', k.email||'', k.telefon||'', k.adresse||'', i === 0 ? (w.notizen||'') : ''
+                        ].map(csvEsc).join(','));
+                    });
+                }
+            }
+            const bom = '\uFEFF';
+            const blob = new Blob([bom + rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Wohnungen_${stwegName.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // ══════════════════════════════
+        // ── EIGENTÜMER ──
+        // ══════════════════════════════
+        async function loadEigentuemer() {
+            document.getElementById('eig-loading').classList.remove('hidden');
+            try {
+                // Fetch all wohnungen + kontakte across STWEGs the user can access
+                const res = await AuthentikAuth.apiFetch('/api/wohnungen/eigentuemer-uebersicht');
+                if (!res.ok) throw new Error('API error ' + res.status);
+                const data = await res.json();
+                eigentuemerData = data.eigentuemer || [];
+                // Populate STWEG filter
+                const stwegs = [...new Set(eigentuemerData.flatMap(e => e.objects.map(o => o.stweg)))].sort();
+                const sel = document.getElementById('eig-stweg-filter');
+                sel.innerHTML = '<option value="">Alle STWEGs</option>' + stwegs.map(s => `<option value="${s}">STWEG ${s}</option>`).join('');
+                renderEigentuemer();
+            } catch (e) {
+                document.getElementById('eig-tbody').innerHTML = `<tr><td colspan="6" class="text-center text-red-600 py-6">Fehler: ${esc(e.message)}</td></tr>`;
+            } finally {
+                document.getElementById('eig-loading').classList.add('hidden');
+            }
+        }
+
+        function renderEigentuemer() {
+            const search = document.getElementById('eig-search').value.toLowerCase();
+            const stwegFilter = document.getElementById('eig-stweg-filter').value;
+            const rolleFilter = document.getElementById('eig-rolle-filter').value;
+            const filtered = eigentuemerData.filter(e => {
+                if (stwegFilter && !e.objects.some(o => String(o.stweg) === stwegFilter)) return false;
+                if (rolleFilter && !(e.rollen || []).includes(rolleFilter)) return false;
+                if (search) {
+                    const hay = (e.name + ' ' + (e.email||'')).toLowerCase();
+                    if (!hay.includes(search)) return false;
+                }
+                return true;
+            });
+            const groupObj = (objs, typ) => objs.filter(o => o.typ === typ).map(o => `STWEG ${o.stweg} · ${o.bezeichnung}`).join(', ');
+            const stats = {
+                eig: filtered.filter(e => (e.rollen||[]).includes('eigentuemer')).length,
+                ver: filtered.filter(e => (e.rollen||[]).includes('verwalter')).length,
+                obj: filtered.reduce((s,e)=>s+e.objects.length,0),
+            };
+            document.getElementById('eig-stats').textContent =
+                `${filtered.length} Personen (${stats.eig} Eigentümer, ${stats.ver} Verwalter) · ${stats.obj} Objekte`;
+            const tbody = document.getElementById('eig-tbody');
+            if (filtered.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-gray-400 py-6">Keine Treffer</td></tr>';
+                return;
+            }
+            const rolleBadge = r => {
+                const cls = r === 'eigentuemer' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700';
+                const label = r === 'eigentuemer' ? 'Eigentümer' : 'Verwalter';
+                return `<span class="inline-block text-xs ${cls} px-2 py-0.5 rounded">${label}</span>`;
+            };
+            tbody.innerHTML = filtered.map(e => {
+                const wohnungen = groupObj(e.objects, 'Wohnung');
+                const parkpl = groupObj(e.objects, 'Parkplatz');
+                const sonstige = e.objects.filter(o => o.typ !== 'Wohnung' && o.typ !== 'Parkplatz').map(o => `${o.typ} (STWEG ${o.stweg} · ${o.bezeichnung})`).join(', ');
+                // Wertquoten nur über Eigentümer-Objekte zählen, nicht über Verwalter
+                const wq = e.objects.filter(o => o.rolle === 'eigentuemer').reduce((sum, o) => sum + (o.wertquote_zaehler || 0), 0);
+                const isDrucker = (e.email||'').startsWith('druckerr9+') || (e.email||'').startsWith('druckerr13+');
+                const emailHtml = e.email
+                    ? (isDrucker
+                        ? `<span class="text-xs text-amber-700 bg-amber-50 px-1 rounded" title="Drucker-Tag (kein direkter Empfang)">${esc(e.email)}</span>`
+                        : `<a href="mailto:${esc(e.email)}" class="text-blue-600 hover:underline">${esc(e.email)}</a>`)
+                    : '<span class="text-gray-400 italic">keine</span>';
+                return `<tr class="hover:bg-gray-50">
+                    <td class="px-3 py-2 font-medium">${esc(e.name)}</td>
+                    <td class="px-3 py-2">${(e.rollen||[]).map(rolleBadge).join(' ')}</td>
+                    <td class="px-3 py-2 text-xs">${emailHtml}${e.telefon ? `<br><span class="text-gray-500">${esc(e.telefon)}</span>` : ''}</td>
+                    <td class="px-3 py-2 text-xs">${wohnungen || '<span class="text-gray-300">–</span>'}</td>
+                    <td class="px-3 py-2 text-xs">${parkpl || '<span class="text-gray-300">–</span>'}</td>
+                    <td class="px-3 py-2 text-xs">${sonstige || '<span class="text-gray-300">–</span>'}</td>
+                    <td class="px-3 py-2 text-right font-mono">${wq || ''}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        function exportEigentuemerXLSX() {
+            const search = document.getElementById('eig-search').value.toLowerCase();
+            const stwegFilter = document.getElementById('eig-stweg-filter').value;
+            const filtered = eigentuemerData.filter(e => {
+                if (stwegFilter && !e.objects.some(o => String(o.stweg) === stwegFilter)) return false;
+                if (search && !(e.name + ' ' + (e.email||'')).toLowerCase().includes(search)) return false;
+                return true;
+            });
+            // Sheet 1: Übersicht (eine Zeile pro Eigentümer, Objekte zusammengefasst)
+            const overview = filtered.map(e => {
+                const w = e.objects.filter(o => o.typ === 'Wohnung').map(o => `STWEG ${o.stweg} ${o.bezeichnung}`).join(', ');
+                const p = e.objects.filter(o => o.typ === 'Parkplatz').map(o => `STWEG ${o.stweg} ${o.bezeichnung}`).join(', ');
+                const s = e.objects.filter(o => o.typ !== 'Wohnung' && o.typ !== 'Parkplatz').map(o => `${o.typ} STWEG ${o.stweg} ${o.bezeichnung}`).join(', ');
+                const wq = e.objects.filter(o => o.rolle === 'eigentuemer').reduce((sum, o) => sum + (o.wertquote_zaehler || 0), 0);
+                const rollenLabel = (e.rollen||[]).map(r => r === 'eigentuemer' ? 'Eigentümer' : 'Verwalter').join(' + ');
+                return {
+                    'Name': e.name,
+                    'Rolle': rollenLabel,
+                    'Email': e.email || '',
+                    'Telefon': e.telefon || '',
+                    'Wohnungen': w,
+                    'Parkplätze': p,
+                    'Sonstige': s,
+                    'Σ Wertquoten': wq,
+                    'Anzahl Objekte': e.objects.length,
+                };
+            });
+            // Sheet 2: Detail (eine Zeile pro Objekt, Eigentümer denormalisiert)
+            const detail = [];
+            for (const e of filtered) {
+                for (const o of e.objects) {
+                    detail.push({
+                        'Name': e.name,
+                        'Rolle': o.rolle === 'eigentuemer' ? 'Eigentümer' : 'Verwalter',
+                        'Email': e.email || '',
+                        'Telefon': e.telefon || '',
+                        'STWEG': o.stweg,
+                        'Bezeichnung': o.bezeichnung,
+                        'Typ': o.typ,
+                        'Wertquote': o.wertquote_zaehler || '',
+                        'Wertquote-Nenner': o.wertquote_nenner || '',
+                    });
+                }
+            }
+            const wb = XLSX.utils.book_new();
+            const ws1 = XLSX.utils.json_to_sheet(overview);
+            ws1['!cols'] = [{wch:30},{wch:22},{wch:32},{wch:18},{wch:35},{wch:25},{wch:25},{wch:14},{wch:14}];
+            XLSX.utils.book_append_sheet(wb, ws1, 'Übersicht');
+            const ws2 = XLSX.utils.json_to_sheet(detail);
+            ws2['!cols'] = [{wch:30},{wch:14},{wch:32},{wch:18},{wch:8},{wch:14},{wch:12},{wch:11},{wch:16}];
+            XLSX.utils.book_append_sheet(wb, ws2, 'Detail');
+            XLSX.writeFile(wb, `eigentuemer-uebersicht-${new Date().toISOString().slice(0,10)}.xlsx`);
+        }
+
+        function exportEigentuemerCSV() {
+            const search = document.getElementById('eig-search').value.toLowerCase();
+            const stwegFilter = document.getElementById('eig-stweg-filter').value;
+            const rows = eigentuemerData.filter(e => {
+                if (stwegFilter && !e.objects.some(o => String(o.stweg) === stwegFilter)) return false;
+                if (search && !(e.name + ' ' + (e.email||'')).toLowerCase().includes(search)) return false;
+                return true;
+            });
+            const lines = [['Name','Rolle','Email','Telefon','Wohnungen','Parkplätze','Sonstige','Wertquoten'].join(';')];
+            for (const e of rows) {
+                const w = e.objects.filter(o => o.typ === 'Wohnung').map(o => `STWEG ${o.stweg} ${o.bezeichnung}`).join(', ');
+                const p = e.objects.filter(o => o.typ === 'Parkplatz').map(o => `STWEG ${o.stweg} ${o.bezeichnung}`).join(', ');
+                const s = e.objects.filter(o => o.typ !== 'Wohnung' && o.typ !== 'Parkplatz').map(o => `${o.typ} STWEG ${o.stweg} ${o.bezeichnung}`).join(', ');
+                const wq = e.objects.filter(o => o.rolle === 'eigentuemer').reduce((sum, o) => sum + (o.wertquote_zaehler || 0), 0);
+                const rollenLabel = (e.rollen||[]).map(r => r === 'eigentuemer' ? 'Eigentümer' : 'Verwalter').join(' + ');
+                const cell = v => `"${String(v||'').replace(/"/g,'""')}"`;
+                lines.push([e.name, rollenLabel, e.email, e.telefon, w, p, s, wq].map(cell).join(';'));
+            }
+            const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `eigentuemer-uebersicht-${new Date().toISOString().slice(0,10)}.csv`;
+            a.click();
+        }
+
+        // ══════════════════════════════
+        // ── UNTERSCHRIFTENLISTEN ──
+        // ══════════════════════════════
+        function ulAddZeichner(funktion = '', name = '') {
+            const list = document.getElementById('ul-zeichner-list');
+            const row = document.createElement('div');
+            row.className = 'ul-zeichner-row flex gap-2 items-center';
+            row.innerHTML = `
+                <input type="text" class="ul-zeichner-funktion border border-gray-300 rounded px-2 py-1.5 text-sm w-1/3" placeholder="Funktion (z.B. Präsident)" value="${escapeHtml(funktion)}">
+                <input type="text" class="ul-zeichner-name border border-gray-300 rounded px-2 py-1.5 text-sm flex-1" placeholder="Name" value="${escapeHtml(name)}">
+                <button type="button" onclick="this.parentElement.remove()" class="text-red-500 hover:text-red-700 px-2" title="Entfernen">×</button>
+            `;
+            list.appendChild(row);
+        }
+        // Pre-fill mit einer leeren Zeile
+        document.addEventListener('DOMContentLoaded', () => {
+            const list = document.getElementById('ul-zeichner-list');
+            if (list && list.children.length === 0) ulAddZeichner('', '');
+        });
+        async function ulLoadHaeuser() {
+            const stweg = document.getElementById('ul-stweg').value;
+            const target = document.getElementById('ul-haus-checks');
+            const wrap = document.getElementById('ul-haus-wrap');
+            target.innerHTML = '<span class="text-xs text-gray-400">Lade Häuser…</span>';
+            try {
+                const res = await AuthentikAuth.apiFetch(`/api/unterschriftenliste/${stweg}/haeuser`);
+                if (!res.ok) { target.innerHTML = '<span class="text-xs text-red-600">Fehler ' + res.status + '</span>'; return; }
+                const data = await res.json();
+                const haeuser = data.haeuser || [];
+                if (haeuser.length === 0) { wrap.style.display = 'none'; return; }
+                wrap.style.display = '';
+                if (haeuser.length === 1) {
+                    target.innerHTML = `<span class="text-xs text-gray-500">Nur ein Haus (Rosenweg ${haeuser[0].nr}, ${haeuser[0].count} Einheiten) — Auswahl entfällt</span>`;
+                    return;
+                }
+                target.innerHTML = haeuser.map(h => `
+                    <label class="inline-flex items-center gap-1.5 cursor-pointer">
+                        <input type="checkbox" class="ul-haus-cb rounded" value="${h.nr}" checked>
+                        <span>RW ${h.nr}</span>
+                        <span class="text-xs text-gray-400">(${h.count})</span>
+                    </label>
+                `).join('');
+            } catch (e) {
+                target.innerHTML = '<span class="text-xs text-red-600">Fehler: ' + escapeHtml(e.message) + '</span>';
+            }
+        }
+
+        function ulBuildUrl(extra = '') {
+            const stweg = document.getElementById('ul-stweg').value;
+            const zeichner = [...document.querySelectorAll('#ul-zeichner-list .ul-zeichner-row')].map(row => {
+                const fn = row.querySelector('.ul-zeichner-funktion')?.value?.trim() || '';
+                const nm = row.querySelector('.ul-zeichner-name')?.value?.trim() || '';
+                return (fn || nm) ? { funktion: fn, name: nm } : null;
+            }).filter(Boolean);
+            const checks = [...document.querySelectorAll('#ul-haus-checks .ul-haus-cb')];
+            const allHaeuser = checks.map(cb => parseInt(cb.value));
+            const checkedHaeuser = checks.filter(cb => cb.checked).map(cb => parseInt(cb.value));
+            // Wenn alle gewählt sind oder keine Checkbox existiert → kein Filter (= ganze STWEG)
+            const hausFilter = (checks.length === 0 || checkedHaeuser.length === allHaeuser.length) ? '' : checkedHaeuser.join(',');
+            const params = new URLSearchParams({
+                datum: document.getElementById('ul-datum').value || '',
+                anlass_titel: document.getElementById('ul-titel').value || '',
+                anlass_zweck: document.getElementById('ul-zweck').value || '',
+                ruecksendung_bis: document.getElementById('ul-frist').value || '',
+                ruecksendung_an: document.getElementById('ul-an').value || '',
+                zeichnungsberechtigte: JSON.stringify(zeichner),
+                kollektiv_text: document.getElementById('ul-kollektiv')?.value || '',
+            });
+            if (hausFilter) params.set('haus', hausFilter);
+            if (extra) params.set('preview', extra);
+            return `/api/unterschriftenliste/${stweg}.pdf?${params.toString()}`;
+        }
+        async function ulPreview() {
+            const url = ulBuildUrl('1');
+            const iframe = document.getElementById('ul-preview');
+            // Fetch as blob (mit Auth-Header) und embed via blob:
+            iframe.src = 'about:blank';
+            try {
+                const res = await AuthentikAuth.apiFetch(url);
+                if (!res.ok) {
+                    const err = await res.text();
+                    iframe.src = `data:text/html,<body style="font-family:sans-serif;padding:20px"><h3 style="color:red">Fehler ${res.status}</h3><pre>${escapeHtml(err)}</pre></body>`;
+                    return;
+                }
+                const blob = await res.blob();
+                iframe.src = URL.createObjectURL(blob);
+            } catch (e) {
+                iframe.src = `data:text/html,<body style="font-family:sans-serif;padding:20px"><h3 style="color:red">Fehler</h3><pre>${escapeHtml(e.message)}</pre></body>`;
+            }
+        }
+        async function ulDownload() {
+            const url = ulBuildUrl();
+            const stweg = document.getElementById('ul-stweg').value;
+            const datum = document.getElementById('ul-datum').value;
+            try {
+                const res = await AuthentikAuth.apiFetch(url);
+                if (!res.ok) { alert('Fehler beim Generieren: ' + res.status); return; }
+                const blob = await res.blob();
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `unterschriftenliste-stweg${stweg}-${datum}.pdf`;
+                document.body.appendChild(a); a.click(); a.remove();
+                ulLoadHistory();
+            } catch (e) { alert('Fehler: ' + e.message); }
+        }
+        async function ulLoadHistory() {
+            const stweg = document.getElementById('ul-stweg').value;
+            const target = document.getElementById('ul-history');
+            target.innerHTML = '<span class="text-gray-400">Lade…</span>';
+            try {
+                const res = await AuthentikAuth.apiFetch(`/api/unterschriftenliste/history?stweg=${stweg}`);
+                const data = await res.json();
+                const list = data.snapshots || [];
+                if (list.length === 0) { target.innerHTML = '<span class="text-gray-400">Noch keine generierten Listen für STWEG ' + stweg + '</span>'; return; }
+                target.innerHTML = `<table class="w-full text-xs">
+                    <thead class="text-gray-500"><tr>
+                        <th class="text-left px-2 py-1">Datum</th>
+                        <th class="text-left px-2 py-1">Anlass</th>
+                        <th class="text-left px-2 py-1">Generiert</th>
+                        <th class="text-left px-2 py-1">Hash</th>
+                        <th class="text-right px-2 py-1">Aktionen</th>
+                    </tr></thead>
+                    <tbody class="divide-y">
+                        ${list.map(s => {
+                            const dt = String(s.datum).slice(0,10);
+                            const gen = new Date(s.generated_at).toLocaleString('de-CH', {timeZone:'Europe/Zurich'});
+                            return `<tr class="hover:bg-gray-50">
+                                <td class="px-2 py-1.5 font-mono">${escapeHtml(dt)}</td>
+                                <td class="px-2 py-1.5">${escapeHtml(s.anlass_titel || '')}</td>
+                                <td class="px-2 py-1.5 text-gray-500">${escapeHtml(gen)}<br><span class="text-gray-400">${escapeHtml(s.generated_by||'')}</span></td>
+                                <td class="px-2 py-1.5 font-mono text-emerald-700">${escapeHtml(s.hash)}</td>
+                                <td class="px-2 py-1.5 text-right whitespace-nowrap">
+                                    <a href="/api/unterschriftenliste/snapshot/${escapeHtml(s.hash)}.pdf?preview=1" target="_blank" class="text-blue-600 hover:underline text-xs mr-2">Ansehen</a>
+                                    <a href="/api/unterschriftenliste/snapshot/${escapeHtml(s.hash)}.pdf" class="text-blue-600 hover:underline text-xs mr-2">PDF</a>
+                                    <a href="/api/unterschriftenliste/verify?hash=${escapeHtml(s.hash)}" target="_blank" class="text-emerald-600 hover:underline text-xs">Verify</a>
+                                </td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>`;
+            } catch (e) {
+                target.innerHTML = '<span class="text-red-600">Fehler: ' + escapeHtml(e.message) + '</span>';
+            }
+        }
+        function escapeHtml(s) {
+            return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+
+        // ══════════════════════════════
+        // ── BEWOHNER ──
+        // ══════════════════════════════
+        async function loadUsers() {
+            const loading = document.getElementById('users-loading');
+            loading.classList.remove('hidden');
+            try {
+                const res = await AuthentikAuth.apiFetch('/api/admin/users');
+                const data = await res.json();
+                allUsers = (Array.isArray(data) ? data : (data.results || []))
+                    .filter(u => u.is_active && !u.username.startsWith('ak-') && u.username !== 'akadmin' && u.username !== 'ldap-service')
+                    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+                loading.classList.add('hidden');
+                renderUsers();
+            } catch (err) {
+                loading.classList.add('hidden');
+                console.error('Error loading users:', err);
+            }
+        }
+
+        async function loadGroups() {
+            try {
+                const res = await AuthentikAuth.apiFetch('/api/admin/groups');
+                const data = await res.json();
+                allGroups = (Array.isArray(data) ? data : (data.results || []))
+                    .filter(g => !g.name.startsWith('authentik '))
+                    .sort((a, b) => a.name.localeCompare(b.name));
+                if (canWriteBewohner) renderGroups();
+            } catch (err) {
+                console.error('Error loading groups:', err);
+            }
+        }
+
+        function getVisibleGroups() {
+            if (seesAll) return allGroups;
+            if (!userGroupPrefix) return [];
+            const stwegAusschuss = userStweg ? `stweg${userStweg}-ausschuss` : '';
+            return allGroups.filter(g => {
+                const n = g.name.toLowerCase();
+                return userGroupPrefix.some(prefix => n.startsWith(prefix)) || n === stwegAusschuss;
+            });
+        }
+
+        function getFilteredUsers() {
+            let users = allUsers;
+            if (userStweg && userGroupPrefix) {
+                const stwegAusschuss = `stweg${userStweg}-ausschuss`;
+                users = users.filter(u => {
+                    const uGroups = (u.groups_obj || []).map(g => g.name.toLowerCase());
+                    return uGroups.some(g =>
+                        userGroupPrefix.some(prefix => g.startsWith(prefix)) || g === stwegAusschuss
+                    );
+                });
+            }
+            const q = (document.getElementById('user-search')?.value || '').toLowerCase();
+            if (q) {
+                users = users.filter(u =>
+                    (u.name || '').toLowerCase().includes(q) ||
+                    (u.username || '').toLowerCase().includes(q) ||
+                    (u.email || '').toLowerCase().includes(q)
+                );
+            }
+            return users;
+        }
+
+        function renderUsers() {
+            const container = document.getElementById('user-cards');
+            const empty = document.getElementById('no-users');
+            const users = getFilteredUsers();
+
+            if (users.length === 0) {
+                container.innerHTML = '';
+                empty.classList.remove('hidden');
+                return;
+            }
+            empty.classList.add('hidden');
+
+            container.innerHTML = users.map(u => {
+                const groups = (u.groups_obj || []).map(g => g.name);
+                const isAusschuss = groups.some(g => g.toLowerCase().includes('ausschuss'));
+                const isEigentuemer = groups.some(g => g.toLowerCase().includes('eigentuemer'));
+                const isMieter = !isEigentuemer && groups.some(g => g.toLowerCase().includes('bewohner'));
+
+                const tags = [];
+                if (isAusschuss) tags.push('<span class="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">Ausschuss</span>');
+                if (isEigentuemer) tags.push('<span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Eigentümer</span>');
+                if (isMieter) tags.push('<span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Mieter</span>');
+
+                const groupNames = seesAll ? groups.filter(g => {
+                    const n = g.toLowerCase();
+                    return !n.startsWith('authentik ') && n !== 'technik';
+                }).map(g => `<span class="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">${esc(g)}</span>`).join(' ') : '';
+
+                const actions = canWriteBewohner ? `
+                    <div class="flex items-center gap-1">
+                        <button onclick="editUser(${u.pk})" class="p-2 text-gray-400 hover:text-blue-600 rounded-lg hover:bg-blue-50 transition" title="Bearbeiten">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                        </button>
+                        <button onclick="removeUser(${u.pk}, '${esc(u.name || u.username)}')" class="p-2 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition" title="Entfernen">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                        </button>
+                    </div>` : '';
+
+                return `
+                <div class="bg-white rounded-lg border p-4 hover:shadow-sm transition">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-4">
+                            <div class="bg-gray-100 rounded-full w-10 h-10 flex items-center justify-center text-gray-500 font-medium text-sm">
+                                ${esc((u.name || '?')[0].toUpperCase())}
+                            </div>
+                            <div>
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <span class="font-medium text-gray-900">${esc(u.name || u.username)}</span>
+                                    ${tags.join('')}
+                                </div>
+                                <p class="text-sm text-gray-500">${esc(u.email || '')}</p>
+                                ${groupNames ? `<div class="flex flex-wrap gap-1 mt-1">${groupNames}</div>` : ''}
+                            </div>
+                        </div>
+                        ${actions}
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function filterUsers() { renderUsers(); }
+
+        // ── Add/Edit User ──
+        function showAddForm() {
+            document.getElementById('dialog-title').textContent = 'Neuer Bewohner';
+            document.getElementById('f-pk').value = '';
+            document.getElementById('f-name').value = '';
+            document.getElementById('f-email').value = '';
+            document.querySelector('input[name="rolle"][value="eigentuemer"]').checked = true;
+            document.getElementById('dialog-error').classList.add('hidden');
+            renderGroupCheckboxes([]);
+            document.getElementById('edit-dialog').classList.remove('hidden');
+        }
+
+        function editUser(pk) {
+            const u = allUsers.find(x => x.pk === pk);
+            if (!u) return;
+            document.getElementById('dialog-title').textContent = 'Bewohner bearbeiten';
+            document.getElementById('f-pk').value = u.pk;
+            document.getElementById('f-name').value = u.name || '';
+            document.getElementById('f-email').value = u.email || '';
+            document.getElementById('dialog-error').classList.add('hidden');
+
+            const groups = (u.groups_obj || []).map(g => g.name.toLowerCase());
+            if (groups.some(g => g.includes('eigentuemer'))) {
+                document.querySelector('input[name="rolle"][value="eigentuemer"]').checked = true;
+            } else {
+                document.querySelector('input[name="rolle"][value="mieter"]').checked = true;
+            }
+
+            const userGroupPks = (u.groups_obj || []).map(g => g.pk);
+            renderGroupCheckboxes(userGroupPks);
+            document.getElementById('edit-dialog').classList.remove('hidden');
+        }
+
+        function renderGroupCheckboxes(selectedPks) {
+            const container = document.getElementById('f-groups');
+            const relevantGroups = allGroups.filter(g => {
+                const n = g.name.toLowerCase();
+                return n.includes('ausschuss') || n.includes('bewohner') || n.includes('eigentuemer') || n === 'technik';
+            });
+
+            if (relevantGroups.length === 0) {
+                container.innerHTML = '<p class="text-xs text-gray-400">Keine Gruppen verfügbar</p>';
+                return;
+            }
+            container.innerHTML = relevantGroups.map(g => `
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" value="${g.pk}" ${selectedPks.includes(g.pk) ? 'checked' : ''} class="grp-cb rounded text-blue-600" />
+                    <span class="text-sm text-gray-700">${esc(g.name)}</span>
+                </label>
+            `).join('');
+        }
+
+        function closeDialog() {
+            document.getElementById('edit-dialog').classList.add('hidden');
+        }
+
+        async function saveUser() {
+            const pk = document.getElementById('f-pk').value;
+            const name = document.getElementById('f-name').value.trim();
+            const email = document.getElementById('f-email').value.trim();
+            const groups = [...document.querySelectorAll('.grp-cb:checked')].map(cb => cb.value);
+            const errorDiv = document.getElementById('dialog-error');
+
+            if (!name || !email) {
+                errorDiv.textContent = 'Bitte Name und E-Mail eingeben.';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+
+            const btn = document.getElementById('save-btn');
+            btn.disabled = true;
+            btn.textContent = 'Speichern...';
+
+            try {
+                let res;
+                if (pk) {
+                    res = await AuthentikAuth.apiFetch(`/api/admin/users/${pk}`, {
+                        method: 'PUT',
+                        body: { name, email, is_active: true, groups },
+                    });
+                } else {
+                    const username = name.toLowerCase()
+                        .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+                        .replace(/[^a-z0-9\s.-]/g, '').trim().split(/\s+/)
+                        .filter(Boolean);
+                    const uname = username.length >= 2
+                        ? username[0] + '.' + username[username.length - 1]
+                        : username[0] || 'user';
+                    res = await AuthentikAuth.apiFetch('/api/admin/users', {
+                        method: 'POST',
+                        body: { username: uname, name, email, groups },
+                    });
+                }
+
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error(data.error || `Fehler beim Speichern (HTTP ${res.status})`);
+                }
+                closeDialog();
+                await loadUsers();
+            } catch (err) {
+                errorDiv.textContent = err.message;
+                errorDiv.classList.remove('hidden');
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Speichern';
+        }
+
+        async function removeUser(pk, name) {
+            if (!confirm(`"${name}" wirklich entfernen?\n\nDer Benutzer wird deaktiviert.`)) return;
+            try {
+                await AuthentikAuth.apiFetch(`/api/admin/users/${pk}`, { method: 'DELETE' });
+                await loadUsers();
+            } catch (err) {
+                alert('Fehler: ' + err.message);
+            }
+        }
+
+        document.getElementById('edit-dialog').addEventListener('click', function(e) {
+            if (e.target === this) closeDialog();
+        });
+
+        // ══════════════════════════════
+        // ── GRUPPEN ──
+        // ══════════════════════════════
+        function renderGroups() {
+            const container = document.getElementById('groups-list');
+            const visibleGroups = getVisibleGroups();
+            const groupMap = {};
+            allGroups.forEach(g => groupMap[g.pk || g.id] = g);
+            const visibleIds = new Set(visibleGroups.map(g => g.pk || g.id));
+
+            const roots = [];
+            const children = {};
+            visibleGroups.forEach(g => {
+                const parentId = g.parent || g.parent_id || null;
+                if (parentId && visibleIds.has(parentId)) {
+                    if (!children[parentId]) children[parentId] = [];
+                    children[parentId].push(g);
+                } else {
+                    roots.push(g);
+                }
+            });
+
+            function renderGroupNode(g, depth) {
+                const id = g.pk || g.id;
+                const userCount = g.users_count ?? (g.users ? g.users.length : '?');
+                const indent = depth === 0 ? '' : depth === 1 ? 'ml-8' : 'ml-16';
+                const parentName = g.parent ? (groupMap[g.parent]?.name || g.parent_name || '') : '';
+
+                let html = `
+                <div class="bg-white rounded-lg shadow-sm border hover:shadow-md transition cursor-pointer ${indent}" onclick="openGroupDetail('${id}')">
+                    <div class="px-4 py-3 flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded-lg ${g.is_superuser ? 'bg-amber-100 text-amber-600' : 'bg-blue-100 text-blue-600'} flex items-center justify-center">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                </svg>
+                            </div>
+                            <div>
+                                <span class="font-medium text-gray-900 text-sm">${esc(g.name)}</span>
+                                ${g.is_superuser ? '<span class="ml-2 text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">Superuser</span>' : ''}
+                                ${parentName ? `<p class="text-xs text-gray-400">Elterngruppe: ${esc(parentName)}</p>` : ''}
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-4">
+                            <span class="text-sm text-gray-500">${userCount} Benutzer</span>
+                            <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                            </svg>
+                        </div>
+                    </div>
+                </div>`;
+
+                if (children[id]) {
+                    children[id].forEach(child => { html += renderGroupNode(child, depth + 1); });
+                }
+                return html;
+            }
+
+            container.innerHTML = roots.length > 0
+                ? roots.map(g => renderGroupNode(g, 0)).join('')
+                : '<p class="text-center py-8 text-gray-500">Keine Gruppen gefunden.</p>';
+        }
+
+        // ── Group Modals ──
+        function openGroupModal(html) {
+            document.getElementById('group-modal-content').innerHTML = html;
+            document.getElementById('group-modal-overlay').classList.remove('hidden');
+        }
+        function closeGroupModal() {
+            document.getElementById('group-modal-overlay').classList.add('hidden');
+        }
+        document.getElementById('group-modal-overlay').addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) closeGroupModal();
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') { closeGroupModal(); closeDialog(); closeWohnungModal(); }
+        });
+
+        async function openGroupDetail(groupId) {
+            const group = allGroups.find(g => (g.pk || g.id) === groupId);
+            if (!group) return;
+
+            let members = [];
+            try {
+                const resp = await AuthentikAuth.apiFetch(`/api/admin/groups/${groupId}`);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    members = data.users || data.members || [];
+                }
+            } catch (e) {
+                members = allUsers.filter(u => {
+                    const uGroups = (u.groups || u.groups_obj || []).map(g => typeof g === 'object' ? (g.pk || g.id) : g);
+                    return uGroups.includes(groupId);
+                });
+            }
+
+            const nonMembers = allUsers.filter(u => {
+                const uid = u.pk || u.id;
+                return !members.some(m => (m.pk || m.id) === uid);
+            });
+
+            openGroupModal(`
+                <div class="p-6">
+                    <div class="flex justify-between items-center mb-5">
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-800">${esc(group.name)}</h3>
+                            ${group.is_superuser ? '<span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded font-medium">Superuser</span>' : ''}
+                        </div>
+                        <button onclick="closeGroupModal()" class="text-gray-400 hover:text-gray-600">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <h4 class="text-sm font-semibold text-gray-600 mb-2">Mitglieder (${members.length})</h4>
+                    <div class="space-y-1 mb-5 max-h-48 overflow-y-auto">
+                        ${members.length > 0 ? members.map(m => `
+                            <div class="flex justify-between items-center bg-gray-50 rounded-lg px-3 py-2">
+                                <div>
+                                    <span class="text-sm font-medium text-gray-900">${esc(m.name || m.username)}</span>
+                                    <span class="text-xs text-gray-500 ml-2">${esc(m.username)}</span>
+                                </div>
+                                <button onclick="removeUserFromGroup(${m.pk || m.id}, '${groupId}')" class="text-red-400 hover:text-red-600 transition text-xs font-medium">Entfernen</button>
+                            </div>
+                        `).join('') : '<p class="text-sm text-gray-400 py-2">Keine Mitglieder</p>'}
+                    </div>
+                    <h4 class="text-sm font-semibold text-gray-600 mb-2">Benutzer hinzuf&uuml;gen</h4>
+                    <div class="flex gap-2">
+                        <select id="add-user-select" class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                            <option value="">-- Benutzer w&auml;hlen --</option>
+                            ${nonMembers.map(u => `<option value="${u.pk || u.id}">${esc(u.name || u.username)} (${esc(u.username)})</option>`).join('')}
+                        </select>
+                        <button onclick="addUserToGroup('${groupId}')" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition font-medium">Hinzuf&uuml;gen</button>
+                    </div>
+                    <div id="group-detail-msg" class="hidden text-sm p-3 rounded-lg mt-3"></div>
+                </div>
+            `);
+        }
+
+        async function addUserToGroup(groupId) {
+            const select = document.getElementById('add-user-select');
+            const userId = select.value;
+            if (!userId) return;
+            const msg = document.getElementById('group-detail-msg');
+            try {
+                const user = allUsers.find(u => (u.pk || u.id) == userId);
+                if (!user) return;
+                const currentGroups = (user.groups || user.groups_obj || []).map(g => typeof g === 'object' ? (g.pk || g.id) : g);
+                const newGroups = [...new Set([...currentGroups, groupId])];
+                const resp = await AuthentikAuth.apiFetch(`/api/admin/users/${userId}`, { method: 'PUT', body: { groups: newGroups } });
+                if (resp.ok) { await Promise.all([loadUsers(), loadGroups()]); openGroupDetail(groupId); }
+                else {
+                    const err = await resp.json().catch(() => ({}));
+                    msg.textContent = 'Fehler: ' + (err.detail || err.message || `HTTP ${resp.status}`);
+                    msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700 mt-3'; msg.classList.remove('hidden');
+                }
+            } catch (e) {
+                msg.textContent = 'Netzwerkfehler: ' + e.message;
+                msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700 mt-3'; msg.classList.remove('hidden');
+            }
+        }
+
+        async function removeUserFromGroup(userId, groupId) {
+            const msg = document.getElementById('group-detail-msg');
+            try {
+                const user = allUsers.find(u => (u.pk || u.id) === userId);
+                if (!user) return;
+                const currentGroups = (user.groups || user.groups_obj || []).map(g => typeof g === 'object' ? (g.pk || g.id) : g);
+                const newGroups = currentGroups.filter(gid => gid !== groupId);
+                const resp = await AuthentikAuth.apiFetch(`/api/admin/users/${userId}`, { method: 'PUT', body: { groups: newGroups } });
+                if (resp.ok) { await Promise.all([loadUsers(), loadGroups()]); openGroupDetail(groupId); }
+                else {
+                    const err = await resp.json().catch(() => ({}));
+                    msg.textContent = 'Fehler: ' + (err.detail || err.message || `HTTP ${resp.status}`);
+                    msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700 mt-3'; msg.classList.remove('hidden');
+                }
+            } catch (e) {
+                msg.textContent = 'Netzwerkfehler: ' + e.message;
+                msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700 mt-3'; msg.classList.remove('hidden');
+            }
+        }
+
+        function openNewGroupModal() {
+            openGroupModal(`
+                <div class="p-6">
+                    <div class="flex justify-between items-center mb-5">
+                        <h3 class="text-lg font-semibold text-gray-800">Neue Gruppe</h3>
+                        <button onclick="closeGroupModal()" class="text-gray-400 hover:text-gray-600">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <form id="new-group-form" onsubmit="createGroup(event)" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                            <input type="text" id="new-group-name" required
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Elterngruppe</label>
+                            <select id="new-group-parent" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                                <option value="">-- Keine --</option>
+                                ${allGroups.map(g => `<option value="${g.pk || g.id}">${esc(g.name)}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div id="new-group-msg" class="hidden text-sm p-3 rounded-lg"></div>
+                        <div class="flex justify-end gap-3 pt-2">
+                            <button type="button" onclick="closeGroupModal()" class="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition">Abbrechen</button>
+                            <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition font-medium">Erstellen</button>
+                        </div>
+                    </form>
+                </div>
+            `);
+        }
+
+        async function createGroup(e) {
+            e.preventDefault();
+            const msg = document.getElementById('new-group-msg');
+            const body = { name: document.getElementById('new-group-name').value.trim() };
+            const parent = document.getElementById('new-group-parent').value;
+            if (parent) body.parent = parent;
+            try {
+                const resp = await AuthentikAuth.apiFetch('/api/admin/groups', { method: 'POST', body });
+                if (resp.ok) {
+                    msg.textContent = 'Gruppe erstellt.'; msg.className = 'text-sm p-3 rounded-lg bg-green-100 text-green-700'; msg.classList.remove('hidden');
+                    setTimeout(() => { closeGroupModal(); loadGroups(); }, 1000);
+                } else {
+                    const err = await resp.json().catch(() => ({}));
+                    msg.textContent = 'Fehler: ' + (err.detail || err.message); msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700'; msg.classList.remove('hidden');
+                }
+            } catch (e) {
+                msg.textContent = 'Netzwerkfehler: ' + e.message; msg.className = 'text-sm p-3 rounded-lg bg-red-100 text-red-700'; msg.classList.remove('hidden');
+            }
+        }
+    </script>
+
+</body>
+</html>

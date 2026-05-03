@@ -18,7 +18,7 @@
 | Faehigkeit | Status | Ort |
 |-----------|--------|-----|
 | Benutzerverwaltung (Authentik + AD) | Implementiert | `verwaltung.html`, `/api/admin/users` |
-| Wohnungsverwaltung (pro STWEG, Import) | Implementiert | `wohnungsverwaltung.html`, `/api/wohnungen/:stweg` |
+| Wohnungsverwaltung (pro STWEG, Import) | Implementiert | `objektverwaltung.html`, `/api/wohnungen/:stweg` |
 | Authentik <-> AD Sync | Implementiert | `/api/wohnungen/sync-authentik` |
 | Rechteverwaltung (Permissions-Matrix) | Implementiert | `rechteverwaltung.html`, `/api/permissions` |
 | Kontakte pro STWEG | Implementiert | `/api/kontakte/:stweg` |
