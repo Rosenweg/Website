@@ -28,7 +28,7 @@ Statische HTML-Seiten + API Server. Kein Framework, plain HTML/CSS/JS mit Tailwi
 | Seite | Pfad | Beschreibung |
 |-------|------|-------------|
 | Verwaltung | `/verwaltung.html` | Benutzerverwaltung |
-| Wohnungsverwaltung | `/wohnungsverwaltung.html` | Wohnungen zuweisen |
+| Wohnungsverwaltung | `/objektverwaltung.html` | Wohnungen zuweisen |
 | Rechteverwaltung | `/rechteverwaltung.html` | Rollen/Rechte |
 | Email-Verteiler | `/email-verteiler.html` | Verteiler-Mails anzeigen |
 | Email-Archiv | `/email-archiv.html` | Archivierte Mails |

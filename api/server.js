@@ -613,6 +613,18 @@ function canManageDocs(req, res, next) {
   next();
 }
 
+// History-Zugriff: Technik / Präsident / Ausschuss / Verwaltung-Mitglieder
+function canViewKontakteHistory(req, res, next) {
+  const groups = req.user?.groups || [];
+  const ok = groups.some(g => {
+    const gl = g.toLowerCase();
+    return gl === 'technik' || gl === 'präsident' || gl === 'praesident'
+      || gl === 'verwaltung' || gl.endsWith('-ausschuss');
+  });
+  if (!ok) return res.status(403).json({ error: 'Historie nur fuer Technik, Praesident, Ausschuss und Verwaltung' });
+  next();
+}
+
 /** Parse and validate stweg param - returns number or null */
 function parseStweg(val) {
   const n = parseInt(val, 10);
@@ -3728,12 +3740,27 @@ app.get('/api/stweg/:nr/kontakte', authMiddleware, async (req, res) => {
 
 // ─── Wohnungsverwaltung ─────────────────────────────────────────────
 
-// Helper: load wohnung with kontakte
-async function loadWohnungMitKontakte(wohnungId) {
+// Helper: load wohnung with kontakte. Default returns aktive + zukünftige (passiv) Eintraege;
+// archivierte (history) sind ausgeblendet. opts.onlyHistory=true liefert ausschliesslich Historie.
+async function loadWohnungMitKontakte(wohnungId, opts = {}) {
   const wRes = await pool.query('SELECT * FROM wohnungen WHERE id = $1', [wohnungId]);
   if (wRes.rows.length === 0) return null;
   const w = wRes.rows[0];
-  const kRes = await pool.query('SELECT * FROM wohnungen_kontakte WHERE wohnung_id = $1 ORDER BY rolle, sort_order, id', [wohnungId]);
+  let kRes;
+  if (opts.onlyHistory) {
+    kRes = await pool.query(
+      'SELECT * FROM wohnungen_kontakte WHERE wohnung_id = $1 AND archiviert_am IS NOT NULL ORDER BY archiviert_am DESC, rolle, id',
+      [wohnungId]
+    );
+  } else {
+    // Aktiv + zukünftig: alles, was nicht archiviert ist
+    kRes = await pool.query(
+      `SELECT * FROM wohnungen_kontakte
+       WHERE wohnung_id = $1 AND archiviert_am IS NULL
+       ORDER BY rolle, sort_order, id`,
+      [wohnungId]
+    );
+  }
   w.kontakte = kRes.rows;
   // Fallback: synthesize kontakte from flat fields
   if (w.kontakte.length === 0 && w.eigentuemer_name) {
@@ -3745,43 +3772,70 @@ async function loadWohnungMitKontakte(wohnungId) {
   return w;
 }
 
-// Helper: save kontakte for a wohnung (replace all)
+// Helper: save kontakte for a wohnung. Preserves history:
+// - Existing active entries with matching id are UPDATEd
+// - Entries without id are INSERTed (gueltig_ab from input, default today)
+// - Active entries no longer in array are ARCHIVED (archiviert_am=today), not deleted
+// - Archived/historical entries are never touched
 async function saveKontakte(client, wohnungId, kontakte, stweg) {
-  // Load old kontakte before deleting (for tracking removals)
-  const oldRes = await client.query('SELECT * FROM wohnungen_kontakte WHERE wohnung_id = $1', [wohnungId]);
+  // Load currently-active kontakte (not archived) for diff
+  const oldRes = await client.query(
+    'SELECT * FROM wohnungen_kontakte WHERE wohnung_id = $1 AND archiviert_am IS NULL',
+    [wohnungId]
+  );
   const oldKontakte = oldRes.rows;
+  const incoming = Array.isArray(kontakte) ? kontakte : [];
+  const incomingIds = new Set(incoming.map(k => k.id).filter(Boolean));
 
-  await client.query('DELETE FROM wohnungen_kontakte WHERE wohnung_id = $1', [wohnungId]);
-  if (!kontakte || !Array.isArray(kontakte)) return;
+  // Archive old active entries that the frontend dropped from the list
+  const removed = oldKontakte.filter(k => !incomingIds.has(k.id));
+  if (removed.length > 0) {
+    const ids = removed.map(k => k.id);
+    await client.query(
+      `UPDATE wohnungen_kontakte SET archiviert_am = CURRENT_DATE
+       WHERE id = ANY($1::int[]) AND archiviert_am IS NULL`,
+      [ids]
+    );
+  }
+
   const VALID_ROLLEN = ['eigentuemer', 'mieter', 'verwalter', 'bewohner', 'sonstige'];
-  for (let i = 0; i < kontakte.length; i++) {
-    const k = kontakte[i];
+  for (let i = 0; i < incoming.length; i++) {
+    const k = incoming[i];
     if (!k.name && !k.email) continue;
     const rolle = VALID_ROLLEN.includes(k.rolle) ? k.rolle : 'eigentuemer';
-    // Default authentik_zugang: true für Eigentümer/Verwalter, sonst null (opt-in via UI checkbox)
     const authentikZugang = k.authentik_zugang !== undefined ? k.authentik_zugang
       : (rolle === 'eigentuemer' || rolle === 'verwalter') ? true : null;
-    // Auto-Drucker-Tag wenn weder echte Email noch Authentik-Zugang gewünscht
     let email = k.email || null;
     if (!email && authentikZugang !== true && k.name) {
       const slug = k.name.toLowerCase()
         .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
         .replace(/[^a-z0-9 -]/g, '')
         .trim()
-        .split(/\s+/).reverse().join('.'); // "Hans Müller" → "mueller.hans"
+        .split(/\s+/).reverse().join('.');
       if (slug) email = `druckerr9+${slug}@${VERTEILER_DOMAIN}`;
     }
-    await client.query(
-      `INSERT INTO wohnungen_kontakte (wohnung_id, rolle, name, email, telefon, adresse, sort_order, authentik_zugang)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [wohnungId, rolle, k.name || null, email, k.telefon || null, k.adresse || null, i, authentikZugang]
-    );
-    // Cancel pending deletion if contact is re-added
+    const gueltigAb = k.gueltig_ab || null;
+
+    if (k.id && oldKontakte.find(o => o.id === k.id)) {
+      await client.query(
+        `UPDATE wohnungen_kontakte
+            SET rolle = $1, name = $2, email = $3, telefon = $4, adresse = $5,
+                sort_order = $6, authentik_zugang = $7,
+                gueltig_ab = COALESCE($8, gueltig_ab)
+          WHERE id = $9`,
+        [rolle, k.name || null, email, k.telefon || null, k.adresse || null, i, authentikZugang, gueltigAb, k.id]
+      );
+    } else {
+      await client.query(
+        `INSERT INTO wohnungen_kontakte (wohnung_id, rolle, name, email, telefon, adresse, sort_order, authentik_zugang, gueltig_ab)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [wohnungId, rolle, k.name || null, email, k.telefon || null, k.adresse || null, i, authentikZugang, gueltigAb]
+      );
+    }
     if (email) cancelPendingDeletion(email).catch(() => {});
   }
 
-  // Track removed kontakte for delayed Authentik deletion
-  if (stweg) trackRemovedKontakte(wohnungId, stweg, oldKontakte, kontakte).catch(() => {});
+  if (stweg) trackRemovedKontakte(wohnungId, stweg, oldKontakte, incoming).catch(() => {});
 }
 
 // Sync kontakte with email to Authentik as users and assign STWEG groups
@@ -4169,6 +4223,44 @@ async function sendPickupReminder() {
 }
 setInterval(sendPickupReminder, 24 * 60 * 60 * 1000);
 setTimeout(sendPickupReminder, 10 * 60 * 1000); // initial run nach 10min
+
+// ─── Auto-Archive: Vorgemerkte Eintraege werden heute aktiv ────────
+// Wenn ein neuer Kontakt mit gueltig_ab=heute aktiv wird und ein anderer aktiver
+// Kontakt mit derselben Rolle auf derselben Wohnung existiert (gueltig_ab < neuer.gueltig_ab),
+// wird der Vorgaenger archiviert. Authentik-Zugang bleibt unveraendert (wird beim Anlegen
+// schon vergeben und bei Archivierung ueber trackRemovedKontakte verzoegert deaktiviert).
+async function autoArchiveSupersededKontakte() {
+  try {
+    // Kontakte, die heute (oder früher) effektiv geworden sind und noch keinen
+    // Vorgaenger archiviert haben
+    const sql = `
+      WITH heute_aktiv AS (
+        SELECT id, wohnung_id, rolle, gueltig_ab
+          FROM wohnungen_kontakte
+         WHERE archiviert_am IS NULL
+           AND gueltig_ab IS NOT NULL
+           AND gueltig_ab <= CURRENT_DATE
+      )
+      UPDATE wohnungen_kontakte alt
+         SET archiviert_am = CURRENT_DATE
+        FROM heute_aktiv neu
+       WHERE alt.wohnung_id = neu.wohnung_id
+         AND alt.rolle = neu.rolle
+         AND alt.id <> neu.id
+         AND alt.archiviert_am IS NULL
+         AND (alt.gueltig_ab IS NULL OR alt.gueltig_ab < neu.gueltig_ab)
+      RETURNING alt.id, alt.wohnung_id, alt.rolle, alt.email
+    `;
+    const r = await pool.query(sql);
+    if (r.rowCount > 0) {
+      console.log(`[KontakteCron] ${r.rowCount} Vorgaenger archiviert (durch vorgemerkte Eintraege superseded)`);
+    }
+  } catch (err) {
+    console.error('[KontakteCron] Auto-Archive Fehler:', err.message);
+  }
+}
+setInterval(autoArchiveSupersededKontakte, 24 * 60 * 60 * 1000);
+setTimeout(autoArchiveSupersededKontakte, 5 * 60 * 1000); // initial run 5min nach Start
 
 // ─── SMTP2GO-Rejection-Sync ────────────────────────────────────────
 // SMTP2GO klassifiziert Mails asynchron als 'rejected' (Suppression-Liste,
@@ -5476,6 +5568,48 @@ app.get('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
   } catch (err) {
     console.error('Wohnung get error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Wohnung' });
+  }
+});
+
+// GET /api/wohnungen/:stweg/:id/historie - Archivierte Kontakte (Technik/Praesident/Ausschuss/Verwaltung)
+app.get('/api/wohnungen/:stweg/:id/historie', authMiddleware, requireStwegAccess, canViewKontakteHistory, async (req, res) => {
+  try {
+    const wId = parseInt(req.params.id, 10);
+    if (!Number.isFinite(wId) || wId < 1) return res.status(400).json({ error: 'Ungültige Wohnungs-ID' });
+    const stweg = parseStweg(req.params.stweg);
+    const wRes = await pool.query('SELECT id, stweg, bezeichnung FROM wohnungen WHERE id = $1', [wId]);
+    if (wRes.rows.length === 0 || wRes.rows[0].stweg !== stweg) return res.status(404).json({ error: 'Wohnung nicht gefunden' });
+    const kRes = await pool.query(
+      `SELECT id, rolle, name, email, telefon, adresse, gueltig_ab, archiviert_am, created_at
+         FROM wohnungen_kontakte
+        WHERE wohnung_id = $1 AND archiviert_am IS NOT NULL
+        ORDER BY archiviert_am DESC, rolle, id`,
+      [wId]
+    );
+    res.json({ wohnung: wRes.rows[0], historie: kRes.rows });
+  } catch (err) {
+    console.error('Historie error:', err);
+    res.status(500).json({ error: 'Fehler beim Laden der Historie' });
+  }
+});
+
+// POST /api/wohnungen/:stweg/:id/kontakte/:kid/archive - Einzelnen Kontakt archivieren
+app.post('/api/wohnungen/:stweg/:id/kontakte/:kid/archive', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, async (req, res) => {
+  try {
+    const wId = parseInt(req.params.id, 10);
+    const kId = parseInt(req.params.kid, 10);
+    if (!Number.isFinite(wId) || !Number.isFinite(kId)) return res.status(400).json({ error: 'Ungültige IDs' });
+    const r = await pool.query(
+      `UPDATE wohnungen_kontakte SET archiviert_am = CURRENT_DATE
+         WHERE id = $1 AND wohnung_id = $2 AND archiviert_am IS NULL
+       RETURNING id`,
+      [kId, wId]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: 'Kontakt nicht gefunden oder bereits archiviert' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Archive error:', err);
+    res.status(500).json({ error: 'Fehler beim Archivieren' });
   }
 });
 
@@ -8185,9 +8319,13 @@ async function initDB() {
         telefon VARCHAR(100),
         adresse TEXT,
         sort_order INTEGER DEFAULT 0,
+        gueltig_ab DATE,
+        archiviert_am DATE,
         created_at TIMESTAMP DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_wohnungen_kontakte_wohnung ON wohnungen_kontakte(wohnung_id);
+      ALTER TABLE wohnungen_kontakte ADD COLUMN IF NOT EXISTS gueltig_ab DATE;
+      ALTER TABLE wohnungen_kontakte ADD COLUMN IF NOT EXISTS archiviert_am DATE;
     `);
 
     // Pending Authentik user deletions (30-day grace period)
