@@ -96,7 +96,7 @@ const RosenwegNav = {
               <a href="${base}email-verteiler.html" data-perm="email-verteiler" class="${dropA('verteiler')} block px-4 py-2 text-sm">E-Mail-Verteiler</a>
               <a href="${base}email-archiv.html" data-perm="email-archiv" class="${dropA('archiv')} block px-4 py-2 text-sm">E-Mail-Archiv</a>
               <a href="${base}email-log.html" data-perm-any="technik,praesident,ausschuss" class="${dropA('emaillog')} block px-4 py-2 text-sm">E-Mail-Log</a>
-              <a href="${base}wohnungsverwaltung.html" data-perm-any="wohnungsverwaltung,bewohner-verwaltung,verwaltung" class="${dropA('verwaltung')} block px-4 py-2 text-sm">Verwaltung</a>
+              <a href="${base}wohnungsverwaltung.html" data-perm-any="wohnungsverwaltung,bewohner-verwaltung,verwaltung" class="${dropA('verwaltung')} block px-4 py-2 text-sm">Objektverwaltung</a>
               <a href="${base}verwaltung-admin.html" data-perm-any="ausschuss,technik,praesident" class="${dropA('verwaltungadmin')} block px-4 py-2 text-sm">Hausverwaltung verwalten</a>
               <a href="${base}grundbuch.html" data-perm-any="eigentuemer" class="${dropA('grundbuch')} block px-4 py-2 text-sm">Grundbuch erfassen</a>
               <a href="${base}proxmox-verwaltung.html" data-perm="proxmox-verwaltung" class="${dropA('proxmox')} block px-4 py-2 text-sm">Proxmox</a>
@@ -156,7 +156,7 @@ const RosenwegNav = {
         <a href="${base}zaehler.html" data-perm="zaehler" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Zähler & Verbrauch</a>
         <a href="${base}email-verteiler.html" data-perm="email-verteiler" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">E-Mail-Verteiler</a>
         <a href="${base}email-archiv.html" data-perm="email-archiv" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">E-Mail-Archiv</a>
-        <a href="${base}wohnungsverwaltung.html" data-perm-any="wohnungsverwaltung,bewohner-verwaltung,verwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Verwaltung</a>
+        <a href="${base}wohnungsverwaltung.html" data-perm-any="wohnungsverwaltung,bewohner-verwaltung,verwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Objektverwaltung</a>
         <a href="${base}verwaltung-admin.html" data-perm-any="ausschuss,technik,praesident" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Hausverwaltung verwalten</a>
         <a href="${base}grundbuch.html" data-perm-any="eigentuemer" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Grundbuch erfassen</a>
         <a href="${base}proxmox-verwaltung.html" data-perm="proxmox-verwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Proxmox</a>
