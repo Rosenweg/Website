@@ -4617,30 +4617,39 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
       adresseZelle = hausnr ? `Rosenweg ${hausnr}, 4303 Kaiseraugst` : '4303 Kaiseraugst';
     }
     // Einzelbrief: alle wenn einzelOnly, sonst nur fuer auswaerts.
-    // Pro EIGENTÜMER ein Brief (auch bei Gesamteigentum / Ehepaaren) — jeder
-    // Eigentümer bekommt seinen eigenen Brief mit seiner persönlichen Adresse.
+    // Eigentuemer werden nach Wohnadresse gruppiert — gleiche Adresse = ein
+    // gemeinsamer Brief (Ehepaare/Gesamteigentum bekommen 1 Brief mit beiden
+    // Namen), unterschiedliche Adressen = je ein eigener Brief.
     if (einzelOnly || auswaertsAdressen.length > 0) {
       const fallbackAdresse = korrespondenzAdressen[0]
         || (rosenwegNrAusBezeichnung(w.bezeichnung) ? `Rosenweg ${rosenwegNrAusBezeichnung(w.bezeichnung)}, 4303 Kaiseraugst` : '4303 Kaiseraugst');
       const eigKontakte = wInfo.eigentuemer.filter(e => e.name);
-      // Wenn keine Eigentümer eingetragen sind, einen Sammel-Brief mit Verwalter generieren
       if (eigKontakte.length === 0) {
         einzelbriefe.push({ bezeichnung: w.bezeichnung, eigentuemer: eigNamen, verwalter: verwNamen, adresse: fallbackAdresse });
       } else {
-        // Pro Eigentümer einen eigenen Brief mit seiner persönlichen Adresse
+        // Eigentümer nach Adresse gruppieren (Normalisierung: Whitespace + Komma trimmen)
+        const normAdr = a => (a || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/,\s*/g, ', ');
+        const byAdr = new Map();
         for (const eig of eigKontakte) {
-          const persAdresse = (eig.adresse && eig.adresse.trim()) || fallbackAdresse;
+          const persAdr = (eig.adresse && eig.adresse.trim()) || fallbackAdresse;
+          const key = normAdr(persAdr);
+          if (!byAdr.has(key)) byAdr.set(key, { adresse: persAdr, namen: [] });
+          byAdr.get(key).namen.push(eig.name);
+        }
+        for (const grp of byAdr.values()) {
           einzelbriefe.push({
             bezeichnung: w.bezeichnung,
-            eigentuemer: [eig.name],
+            eigentuemer: grp.namen,
             verwalter: verwNamen,
-            adresse: persAdresse,
+            adresse: grp.adresse,
           });
         }
       }
       if (!einzelOnly) {
-        const liste = eigKontakte.length > 0 ? eigKontakte.map(e => e.name).join(' / ') : eigNamen.join(', ');
-        adresseZelle += `<div class="auswaerts-marker">📮 ${eigKontakte.length} Einzelbrief${eigKontakte.length===1?'':'e'} an: ${escHtml(liste)}</div>`;
+        const briefeFuerWohnung = einzelbriefe.slice(-Math.max(1, [...new Set(eigKontakte.map(e => (e.adresse || fallbackAdresse).trim().toLowerCase()))].length));
+        const liste = briefeFuerWohnung.map(b => b.eigentuemer.join(' & ')).join(' / ');
+        const n = briefeFuerWohnung.length;
+        adresseZelle += `<div class="auswaerts-marker">📮 ${n} Einzelbrief${n===1?'':'e'} an: ${escHtml(liste)}</div>`;
       }
     }
     const wq = (w.wertquote_zaehler && w.wertquote_nenner) ? `${w.wertquote_zaehler}/${w.wertquote_nenner}` : '—';
