@@ -210,9 +210,18 @@ const RosenwegNav = {
   _applyPermissions(user) {
     const hasPerm = (page) => {
       if (!user) return false;
-      if (user.groups?.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; })) return true;
+      const groupsLower = (user.groups || []).map(g => String(g).toLowerCase());
+      // Admin-Gruppen sehen alles
+      if (groupsLower.some(g => g === 'technik' || g === 'präsident' || g === 'praesident')) return true;
       const perms = user.permissions || {};
-      return (perms[page] === 'read' || perms[page] === 'write');
+      // 1. Permission-basiert (z.B. 'wohnungsverwaltung', 'energie-monitor')
+      if (perms[page] === 'read' || perms[page] === 'write') return true;
+      // 2. Gruppen-basiert (z.B. data-perm-any="eigentuemer" matcht Gruppe "eigentuemer")
+      const pageL = String(page).toLowerCase();
+      if (groupsLower.includes(pageL)) return true;
+      // 3. STWEG-spezifische Gruppen (z.B. data-perm-any="ausschuss" matcht "stweg2-ausschuss")
+      if (groupsLower.some(g => g === pageL || g.endsWith('-' + pageL) || g.startsWith(pageL + '-'))) return true;
+      return false;
     };
 
     // Hide individual links the user has no permission for
