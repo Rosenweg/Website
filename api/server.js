@@ -4707,7 +4707,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
           <p>STWEG ${stweg} · 4303 Kaiseraugst · Stand ${escHtml(datum)}</p>
         </div>
       </div>
-      <div class="absender">Absender: STWEG-Kooperation Rosenweg, ${ruecksendung_an ? escHtml(ruecksendung_an) : 'c/o Ausschuss, 4303 Kaiseraugst'}</div>
+      <div class="absender">${ruecksendung_an ? escHtml(ruecksendung_an) : 'STWEG-Kooperation Rosenweg · c/o Ausschuss · 4303 Kaiseraugst'}</div>
       <div class="anschrift">
         <strong>${escHtml(empfaenger)}</strong><br>
         ${formatAdresseAnschrift(e.adresse)}
@@ -4801,7 +4801,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
      vom Page-Top, Empfaenger ab ca. 55-60mm Page-Top empfohlen. */
   .einzelbrief { position: relative; padding-top: 85mm; }
   .einzelbrief .header { position: absolute; top: 0; left: 0; }
-  .einzelbrief .absender { position: absolute; top: 27mm; left: 109mm; width: 85mm; font-size: 6.5pt; color: #555; border-bottom: 1px solid #999; padding-bottom: 1px; margin: 0; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .einzelbrief .absender { position: absolute; top: 27mm; left: 109mm; width: 85mm; font-size: 8pt; color: #444; border-bottom: 1px solid #999; padding-bottom: 1px; margin: 0; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .einzelbrief .anschrift { position: absolute; top: 42mm; left: 109mm; width: 85mm; height: 25mm; font-size: 11pt; line-height: 1.35; padding: 0; }
   .einzelbrief .anschrift strong { font-weight: 600; }
 </style></head><body>
