@@ -3982,54 +3982,73 @@ deletionInterval = setInterval(guardedProcessDeletions, 24 * 60 * 60 * 1000);
 // Also run once 60s after startup
 setTimeout(guardedProcessDeletions, 60 * 1000);
 
-// ─── Nightly Drucker-Tag-Cleanup-Warning ───────────────────────────
-// Findet Kontakte mit Drucker-Tag-Email wo derselbe Name woanders eine echte Email hat.
-// Schickt einmal pro Tag eine Zusammenfassung an Technik (nur wenn Funde vorhanden).
+// ─── Nightly Drucker-Tag-Cleanup ────────────────────────────────────
+// Findet Kontakte mit Drucker-Tag-Email wo derselbe Name woanders eine echte
+// Email hat — und ersetzt den Drucker-Tag automatisch durch die echte Email.
+// Versendet Zusammenfassung an Technik UND Präsident.
 async function checkStaleDruckerTags() {
   try {
+    // Kandidaten + echte Email pro Name aufschlüsseln
     const result = await pool.query(`
       WITH drucker AS (
         SELECT wk.id, wk.name, wk.email, w.stweg, w.bezeichnung, w.typ
         FROM wohnungen_kontakte wk JOIN wohnungen w ON w.id = wk.wohnung_id
         WHERE wk.email LIKE 'druckerr9+%' OR wk.email LIKE 'druckerr13+%'
       ),
-      real_for_name AS (
-        SELECT DISTINCT name FROM wohnungen_kontakte
+      real_email_for_name AS (
+        SELECT name, MIN(email) AS real_email
+        FROM wohnungen_kontakte
         WHERE email IS NOT NULL AND email <> ''
           AND email NOT LIKE 'druckerr9+%' AND email NOT LIKE 'druckerr13+%'
+        GROUP BY name
       )
-      SELECT d.* FROM drucker d
-      JOIN real_for_name r ON r.name = d.name
+      SELECT d.id, d.name, d.email AS drucker_tag, r.real_email,
+             d.stweg, d.bezeichnung, d.typ
+      FROM drucker d
+      JOIN real_email_for_name r ON r.name = d.name
       ORDER BY d.stweg, d.bezeichnung
     `);
     if (result.rows.length === 0) {
       console.log('[CleanupWarn] Keine veralteten Drucker-Tags gefunden');
       return;
     }
-    // Adressaten: Technik
+
+    // Auto-Fix: Drucker-Tag-Email durch die echte Email ersetzen
+    const ids = result.rows.map(r => r.id);
+    await pool.query(`
+      UPDATE wohnungen_kontakte k SET email = r.real_email
+      FROM (VALUES ${result.rows.map((_, i) => `($${i*2+1}::int, $${i*2+2}::text)`).join(',')}) AS r(id, real_email)
+      WHERE k.id = r.id
+    `, result.rows.flatMap(r => [r.id, r.real_email]));
+    console.log(`[CleanupFix] ${result.rows.length} Drucker-Tags durch echte Emails ersetzt`);
+
+    // Adressaten: Technik + Präsident
     if (!AUTHENTIK_API_TOKEN) return;
     const usersData = await authentikAPI('GET', '/core/users/?page_size=1000');
-    const technikGroup = (await authentikAPI('GET', '/core/groups/?page_size=500')).results
-      ?.find(g => g.name.toLowerCase() === 'technik');
-    if (!technikGroup) return;
-    const recipients = (usersData.results || [])
-      .filter(u => u.is_active && u.email && u.groups_obj?.some(g => g.pk === technikGroup.pk))
-      .map(u => u.email);
+    const groupsData = await authentikAPI('GET', '/core/groups/?page_size=500');
+    const groupPks = (groupsData.results || [])
+      .filter(g => ['technik', 'präsident', 'praesident'].includes(g.name.toLowerCase()))
+      .map(g => g.pk);
+    if (groupPks.length === 0) return;
+    const recipients = [...new Set((usersData.results || [])
+      .filter(u => u.is_active && u.email && u.groups_obj?.some(g => groupPks.includes(g.pk)))
+      .map(u => u.email))];
     if (recipients.length === 0) return;
+
     const rows = result.rows.map(r =>
-      `<tr><td>${r.name}</td><td><code>${r.email}</code></td><td>STWEG ${r.stweg} · ${r.typ} · ${r.bezeichnung}</td></tr>`
+      `<tr><td>${r.name}</td><td><code style="color:#999;text-decoration:line-through">${r.drucker_tag}</code></td><td><code style="color:#10b981">${r.real_email}</code></td><td>STWEG ${r.stweg} · ${r.typ} · ${r.bezeichnung}</td></tr>`
     ).join('');
     await loggedSendMail({
       from: `"Rosenweg Daten-Cleanup" <noreply@${VERTEILER_DOMAIN}>`,
       to: recipients.join(', '),
-      subject: `[Cleanup] ${result.rows.length} veraltete Drucker-Tags gefunden`,
-      html: `<p>Folgende Kontakte haben einen Drucker-Tag als Email, obwohl die Person woanders eine echte Email-Adresse hat. Bitte in der Wohnungsverwaltung anpassen — die Drucker-Tags sind dann überflüssig:</p>
+      subject: `[Cleanup] ${result.rows.length} Drucker-Tags automatisch durch echte Email ersetzt`,
+      html: `<p>Folgende Kontakte hatten einen Drucker-Tag als Email, obwohl die Person woanders bereits eine echte E-Mail-Adresse hinterlegt hat. Die Drucker-Tags wurden <strong>automatisch durch die echten Adressen ersetzt</strong> — zur Information, kein Handlungsbedarf:</p>
 <table border="1" cellpadding="6" style="border-collapse:collapse;font-family:sans-serif;font-size:13px">
-<thead><tr><th align="left">Name</th><th align="left">Drucker-Tag</th><th align="left">Objekt</th></tr></thead>
+<thead><tr><th align="left">Name</th><th align="left">Alt (Drucker-Tag)</th><th align="left">Neu</th><th align="left">Objekt</th></tr></thead>
 <tbody>${rows}</tbody></table>
 <p style="color:#666;font-size:11px">Automatisch generiert · ${new Date().toLocaleString('de-CH')}</p>`,
     }, 'cleanup-stale-drucker-tags');
-    console.log(`[CleanupWarn] ${result.rows.length} Funde an ${recipients.length} Technik-Mitglieder geschickt`);
+    console.log(`[CleanupWarn] ${result.rows.length} Korrekturen an ${recipients.length} Empfänger (Technik+Präsident) geschickt`);
   } catch (err) {
     console.error('[CleanupWarn] Fehler:', err.message);
   }
