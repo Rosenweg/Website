@@ -4790,10 +4790,16 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
      (auf physischem A4-Papier). @page-Margin oben=18mm, links=16mm wird
      bereits abgezogen, also Position innerhalb des Print-Bereichs:
      left = 125-16 = 109mm, top = 45-18 = 27mm. */
-  .einzelbrief { position: relative; padding-top: 75mm; }
+  /* C5-Couvert Rechtsfenster (DIN 5008 Form B):
+     Anschriftenfeld 85x40mm bei 125mm/45mm vom Papier-Rand.
+     Absender-Mini-Zeile in den oberen 12mm, eigentliche Anschrift
+     ab 50mm Page-Top = 32mm im Print-Bereich, sodass auch bei
+     2-zeiligem Absender genug Abstand bleibt.
+     Mit @page-Margin (18mm/16mm) → left=109mm, top der Anschrift=37mm. */
+  .einzelbrief { position: relative; padding-top: 80mm; }
   .einzelbrief .header { position: absolute; top: 0; left: 0; }
-  .einzelbrief .absender { position: absolute; top: 27mm; left: 109mm; width: 85mm; font-size: 7pt; color: #555; border-bottom: 1px solid #999; padding-bottom: 1px; margin: 0; }
-  .einzelbrief .anschrift { position: absolute; top: 32mm; left: 109mm; width: 85mm; height: 35mm; font-size: 11pt; line-height: 1.35; padding: 0; }
+  .einzelbrief .absender { position: absolute; top: 27mm; left: 109mm; width: 85mm; font-size: 6.5pt; color: #555; border-bottom: 1px solid #999; padding-bottom: 1px; margin: 0; line-height: 1.2; }
+  .einzelbrief .anschrift { position: absolute; top: 37mm; left: 109mm; width: 85mm; height: 30mm; font-size: 11pt; line-height: 1.35; padding: 0; }
   .einzelbrief .anschrift strong { font-weight: 600; }
 </style></head><body>
   <div class="header">
