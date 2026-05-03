@@ -4616,14 +4616,32 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
       const hausnr = rosenwegNrAusBezeichnung(w.bezeichnung);
       adresseZelle = hausnr ? `Rosenweg ${hausnr}, 4303 Kaiseraugst` : '4303 Kaiseraugst';
     }
-    // Einzelbrief: alle wenn einzelOnly, sonst nur fuer auswaerts
+    // Einzelbrief: alle wenn einzelOnly, sonst nur fuer auswaerts.
+    // Pro EIGENTÜMER ein Brief (auch bei Gesamteigentum / Ehepaaren) — jeder
+    // Eigentümer bekommt seinen eigenen Brief mit seiner persönlichen Adresse.
     if (einzelOnly || auswaertsAdressen.length > 0) {
-      const briefAdresse = auswaertsAdressen[0] || korrespondenzAdressen[0]
+      const fallbackAdresse = korrespondenzAdressen[0]
         || (rosenwegNrAusBezeichnung(w.bezeichnung) ? `Rosenweg ${rosenwegNrAusBezeichnung(w.bezeichnung)}, 4303 Kaiseraugst` : '4303 Kaiseraugst');
-      if (!einzelOnly) {
-        adresseZelle += `<div class="auswaerts-marker">📮 Einzelbrief an: ${escHtml(briefAdresse)}</div>`;
+      const eigKontakte = wInfo.eigentuemer.filter(e => e.name);
+      // Wenn keine Eigentümer eingetragen sind, einen Sammel-Brief mit Verwalter generieren
+      if (eigKontakte.length === 0) {
+        einzelbriefe.push({ bezeichnung: w.bezeichnung, eigentuemer: eigNamen, verwalter: verwNamen, adresse: fallbackAdresse });
+      } else {
+        // Pro Eigentümer einen eigenen Brief mit seiner persönlichen Adresse
+        for (const eig of eigKontakte) {
+          const persAdresse = (eig.adresse && eig.adresse.trim()) || fallbackAdresse;
+          einzelbriefe.push({
+            bezeichnung: w.bezeichnung,
+            eigentuemer: [eig.name],
+            verwalter: verwNamen,
+            adresse: persAdresse,
+          });
+        }
       }
-      einzelbriefe.push({ bezeichnung: w.bezeichnung, eigentuemer: eigNamen, verwalter: verwNamen, adresse: briefAdresse });
+      if (!einzelOnly) {
+        const liste = eigKontakte.length > 0 ? eigKontakte.map(e => e.name).join(' / ') : eigNamen.join(', ');
+        adresseZelle += `<div class="auswaerts-marker">📮 ${eigKontakte.length} Einzelbrief${eigKontakte.length===1?'':'e'} an: ${escHtml(liste)}</div>`;
+      }
     }
     const wq = (w.wertquote_zaehler && w.wertquote_nenner) ? `${w.wertquote_zaehler}/${w.wertquote_nenner}` : '—';
     dataRows += `<tr>
