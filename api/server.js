@@ -4431,6 +4431,128 @@ app.get('/api/stweg/:stweg/wohnungen', async (req, res) => {
 });
 
 // GET /api/wohnungen/eigentuemer-uebersicht — gruppiert alle Objekte nach Eigentümer
+// ─── Verwaltungen-CRUD (Hausverwaltungs-Firmen pro STWEG) ─────────
+// Public-View: GET /api/verwaltungen/public — minimaler Datensatz fuer
+// Anzeige auf oeffentlicher /verwaltung.html (ohne Login-Daten + Notizen).
+app.get('/api/verwaltungen/public', async (req, res) => {
+  try {
+    const { rows: verw } = await pool.query(`
+      SELECT id, stweg, firma_name, adresse, telefon, email,
+             plattform_name, plattform_url
+      FROM verwaltungen WHERE aktiv = true ORDER BY stweg NULLS FIRST, firma_name
+    `);
+    const ids = verw.map(v => v.id);
+    const { rows: kontakte } = ids.length === 0 ? { rows: [] } : await pool.query(`
+      SELECT verwaltung_id, name, funktion, email, telefon
+      FROM verwaltungs_kontakte WHERE verwaltung_id = ANY($1::int[])
+      ORDER BY verwaltung_id, sort_order, id
+    `, [ids]);
+    const byVerw = new Map();
+    for (const v of verw) byVerw.set(v.id, { ...v, kontakte: [] });
+    for (const k of kontakte) byVerw.get(k.verwaltung_id)?.kontakte.push(k);
+    res.json({ verwaltungen: [...byVerw.values()] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Admin-View: alle Felder (inkl. Login-Passwoerter), nur Ausschuss/Technik
+app.get('/api/verwaltungen', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+  try {
+    const { rows: verw } = await pool.query(`SELECT * FROM verwaltungen ORDER BY stweg NULLS FIRST, aktiv DESC, firma_name`);
+    const ids = verw.map(v => v.id);
+    const { rows: kontakte } = ids.length === 0 ? { rows: [] } : await pool.query(
+      `SELECT * FROM verwaltungs_kontakte WHERE verwaltung_id = ANY($1::int[]) ORDER BY verwaltung_id, sort_order, id`,
+      [ids]
+    );
+    const byVerw = new Map();
+    for (const v of verw) byVerw.set(v.id, { ...v, kontakte: [] });
+    for (const k of kontakte) byVerw.get(k.verwaltung_id)?.kontakte.push(k);
+    res.json({ verwaltungen: [...byVerw.values()] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Create
+app.post('/api/verwaltungen', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const r = await pool.query(`
+      INSERT INTO verwaltungen
+        (stweg, firma_name, adresse, telefon, email, plattform_name, plattform_url, plattform_user, plattform_pass,
+         vertrag_von, vertrag_bis, kuendigungsfrist_monate, kuendigung_eingereicht_am, dokument_pfad, notizen, aktiv)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, COALESCE($16, true))
+      RETURNING *
+    `, [b.stweg || null, b.firma_name, b.adresse || null, b.telefon || null, b.email || null,
+        b.plattform_name || null, b.plattform_url || null, b.plattform_user || null, b.plattform_pass || null,
+        b.vertrag_von || null, b.vertrag_bis || null, b.kuendigungsfrist_monate || null, b.kuendigung_eingereicht_am || null,
+        b.dokument_pfad || null, b.notizen || null, b.aktiv]);
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Update
+app.put('/api/verwaltungen/:id', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const b = req.body || {};
+    const r = await pool.query(`
+      UPDATE verwaltungen SET
+        stweg = $1, firma_name = $2, adresse = $3, telefon = $4, email = $5,
+        plattform_name = $6, plattform_url = $7, plattform_user = $8, plattform_pass = $9,
+        vertrag_von = $10, vertrag_bis = $11, kuendigungsfrist_monate = $12, kuendigung_eingereicht_am = $13,
+        dokument_pfad = $14, notizen = $15, aktiv = $16, updated_at = NOW()
+      WHERE id = $17 RETURNING *
+    `, [b.stweg || null, b.firma_name, b.adresse || null, b.telefon || null, b.email || null,
+        b.plattform_name || null, b.plattform_url || null, b.plattform_user || null, b.plattform_pass || null,
+        b.vertrag_von || null, b.vertrag_bis || null, b.kuendigungsfrist_monate || null, b.kuendigung_eingereicht_am || null,
+        b.dokument_pfad || null, b.notizen || null, b.aktiv === false ? false : true, id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Delete (hard)
+app.delete('/api/verwaltungen/:id', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM verwaltungen WHERE id = $1', [parseInt(req.params.id)]);
+    res.json({ deleted: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Kontakt-Add
+app.post('/api/verwaltungen/:id/kontakte', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+  try {
+    const verwId = parseInt(req.params.id);
+    const b = req.body || {};
+    const r = await pool.query(
+      `INSERT INTO verwaltungs_kontakte (verwaltung_id, name, funktion, email, telefon, sort_order)
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6, 0)) RETURNING *`,
+      [verwId, b.name, b.funktion || null, b.email || null, b.telefon || null, b.sort_order || 0]
+    );
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Kontakt-Update
+app.put('/api/verwaltungen/kontakte/:kid', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const r = await pool.query(
+      `UPDATE verwaltungs_kontakte SET name=$1, funktion=$2, email=$3, telefon=$4, sort_order=$5
+       WHERE id = $6 RETURNING *`,
+      [b.name, b.funktion || null, b.email || null, b.telefon || null, b.sort_order || 0, parseInt(req.params.kid)]
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Kontakt-Delete
+app.delete('/api/verwaltungen/kontakte/:kid', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM verwaltungs_kontakte WHERE id = $1', [parseInt(req.params.kid)]);
+    res.json({ deleted: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/wohnungen/eigentuemer-uebersicht', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
   try {
     // Technik/Präsident sehen alle, Ausschuss-Mitglieder nur ihre STWEGs
@@ -4711,6 +4833,28 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
         VALUES ($1, $2, $3, $4, $5::jsonb, $6)
         ON CONFLICT (hash) DO UPDATE SET download_count = unterschriftenliste_snapshots.download_count + 1
       `, [hash, stweg, datum, anlass_titel, JSON.stringify(snapshotData), opts.generated_by || null]);
+      // Rücklauf-Einträge anlegen (1 pro Brief). Bei einzelOnly: nur Einzelbriefe.
+      // Sonst: 1 "Sammelbrief"-Eintrag pro Wohnung + 1 pro Einzelbrief.
+      const brieflist = einzelOnly
+        ? einzelbriefe.map(e => ({ brief_typ: 'einzel', einheit: e.bezeichnung, empfaenger: e.eigentuemer.join(' & '), adresse: e.adresse }))
+        : [
+            ...wohnungen.rows.map(w => {
+              const wInfo = byWohnung.get(w.id);
+              const eigName = (wInfo.eigentuemer.map(e => e.name).filter(Boolean).join(' & ')) || '—';
+              return { brief_typ: 'sammel', einheit: w.bezeichnung, empfaenger: eigName, adresse: 'Sammelliste' };
+            }),
+            ...einzelbriefe.map(e => ({ brief_typ: 'einzel', einheit: e.bezeichnung, empfaenger: e.eigentuemer.join(' & '), adresse: e.adresse })),
+          ];
+      // Erst alte Eintraege fuer diesen hash loeschen, dann neu (bei Re-Generation)
+      await pool.query('DELETE FROM unterschriftenliste_rueckläufe WHERE snapshot_hash = $1', [hash]);
+      for (let i = 0; i < brieflist.length; i++) {
+        const b = brieflist[i];
+        await pool.query(
+          `INSERT INTO unterschriftenliste_rueckläufe (snapshot_hash, brief_idx, brief_typ, einheit, empfaenger_name, empfaenger_adresse)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [hash, i + 1, b.brief_typ, b.einheit, b.empfaenger, b.adresse]
+        );
+      }
     } catch (e) { console.error('[Unterschriftenliste] Snapshot-Save error:', e.message); }
     // Hash für PDF-Speicherung im Endpoint zurückgeben
     opts._hash = hash;
@@ -5084,6 +5228,57 @@ app.get('/api/unterschriftenliste/snapshot/:hash.pdf', async (req, res) => {
     fsSync.createReadStream(fullPath).pipe(res);
   } catch (err) {
     console.error('[Snapshot-PDF] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/unterschriftenliste/:hash/rueckläufe — Liste aller Briefe + Rücklauf-Status
+app.get('/api/unterschriftenliste/:hash/rueckläufe', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
+  try {
+    const hash = req.params.hash.toUpperCase();
+    const snap = await pool.query(
+      'SELECT hash, stweg, datum, anlass_titel, generated_at FROM unterschriftenliste_snapshots WHERE hash = $1',
+      [hash]
+    );
+    if (snap.rows.length === 0) return res.status(404).json({ error: 'Snapshot nicht gefunden' });
+    const briefe = await pool.query(`
+      SELECT brief_idx, brief_typ, einheit, empfaenger_name, empfaenger_adresse,
+             retourniert_am, vote, notiz, erfasst_von, updated_at
+      FROM unterschriftenliste_rueckläufe
+      WHERE snapshot_hash = $1
+      ORDER BY brief_idx
+    `, [hash]);
+    const stats = {
+      total: briefe.rows.length,
+      retourniert: briefe.rows.filter(b => b.retourniert_am).length,
+      ja: briefe.rows.filter(b => b.vote === 'ja').length,
+      nein: briefe.rows.filter(b => b.vote === 'nein').length,
+      enthaltung: briefe.rows.filter(b => b.vote === 'enthaltung').length,
+      offen: briefe.rows.filter(b => !b.retourniert_am).length,
+    };
+    res.json({ snapshot: snap.rows[0], briefe: briefe.rows, stats });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/unterschriftenliste/:hash/rueckläufe/:idx — Rücklauf-Eintrag aktualisieren
+app.put('/api/unterschriftenliste/:hash/rueckläufe/:idx', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), async (req, res) => {
+  try {
+    const hash = req.params.hash.toUpperCase();
+    const idx = parseInt(req.params.idx);
+    const { retourniert_am, vote, notiz } = req.body;
+    const validVote = ['ja', 'nein', 'enthaltung', null].includes(vote) ? vote : null;
+    const me = req.user?.email || req.user?.name || 'unknown';
+    const r = await pool.query(`
+      UPDATE unterschriftenliste_rueckläufe
+      SET retourniert_am = $1, vote = $2, notiz = $3, erfasst_von = $4, updated_at = NOW()
+      WHERE snapshot_hash = $5 AND brief_idx = $6
+      RETURNING *
+    `, [retourniert_am || null, validVote, notiz || null, me, hash, idx]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Brief nicht gefunden' });
+    res.json(r.rows[0]);
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -8137,6 +8332,59 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_print_jobs_token ON print_jobs(token);
       ALTER TABLE print_jobs ADD COLUMN IF NOT EXISTS last_reminder_at TIMESTAMPTZ;
       CREATE INDEX IF NOT EXISTS idx_print_jobs_open ON print_jobs (created_at DESC) WHERE picked_up_at IS NULL AND status = 'printed';
+
+      CREATE TABLE IF NOT EXISTS verwaltungen (
+        id SERIAL PRIMARY KEY,
+        stweg INTEGER,
+        firma_name VARCHAR(255) NOT NULL,
+        adresse TEXT,
+        telefon VARCHAR(100),
+        email VARCHAR(255),
+        plattform_name VARCHAR(120),
+        plattform_url VARCHAR(500),
+        plattform_user VARCHAR(255),
+        plattform_pass TEXT,
+        vertrag_von DATE,
+        vertrag_bis DATE,
+        kuendigungsfrist_monate INTEGER,
+        kuendigung_eingereicht_am DATE,
+        dokument_pfad VARCHAR(500),
+        notizen TEXT,
+        aktiv BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_verwaltungen_stweg ON verwaltungen(stweg, aktiv);
+
+      CREATE TABLE IF NOT EXISTS verwaltungs_kontakte (
+        id SERIAL PRIMARY KEY,
+        verwaltung_id INTEGER NOT NULL REFERENCES verwaltungen(id) ON DELETE CASCADE,
+        name VARCHAR(255) NOT NULL,
+        funktion VARCHAR(120),
+        email VARCHAR(255),
+        telefon VARCHAR(100),
+        sort_order INTEGER DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_verwaltungs_kontakte_verw ON verwaltungs_kontakte(verwaltung_id);
+
+      CREATE TABLE IF NOT EXISTS unterschriftenliste_rueckläufe (
+        id SERIAL PRIMARY KEY,
+        snapshot_hash VARCHAR(20) NOT NULL,
+        brief_idx INTEGER NOT NULL,
+        brief_typ VARCHAR(20) NOT NULL DEFAULT 'einzel',
+        einheit VARCHAR(255),
+        empfaenger_name VARCHAR(500),
+        empfaenger_adresse TEXT,
+        retourniert_am TIMESTAMPTZ,
+        vote VARCHAR(20),
+        notiz TEXT,
+        erfasst_von VARCHAR(255),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (snapshot_hash, brief_idx)
+      );
+      CREATE INDEX IF NOT EXISTS idx_rueckl_snap ON unterschriftenliste_rueckläufe (snapshot_hash);
       CREATE INDEX IF NOT EXISTS idx_connlog_mac ON connection_log(mac);
       CREATE INDEX IF NOT EXISTS idx_connlog_network ON connection_log(network_name);
       CREATE INDEX IF NOT EXISTS idx_connlog_ip ON connection_log(ip);

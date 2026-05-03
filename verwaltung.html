@@ -2,10 +2,67 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="refresh" content="0; url=wohnungsverwaltung.html">
-    <title>Weiterleitung...</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hausverwaltung — STWEG-Kooperation Rosenweg</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
 </head>
-<body>
-    <p>Weiterleitung zu <a href="wohnungsverwaltung.html">Verwaltung</a>...</p>
+<body class="bg-gray-50 min-h-screen">
+    <div id="nav-placeholder"></div>
+
+    <main class="max-w-4xl mx-auto px-4 py-8">
+        <header class="mb-6">
+            <h1 class="text-2xl font-bold text-gray-900">Hausverwaltung</h1>
+            <p class="text-sm text-gray-600 mt-1">Kontaktdaten der zuständigen Liegenschaftsverwaltung pro STWEG</p>
+        </header>
+        <div id="loading" class="text-center text-gray-400 py-12">Lade …</div>
+        <div id="empty" class="hidden bg-white rounded-xl border p-8 text-center text-gray-500">Keine aktive Hausverwaltung erfasst.</div>
+        <div id="list" class="space-y-4"></div>
+    </main>
+
+    <script src="/js/nav.js"></script>
+    <script>
+    (async function() {
+        const $ = id => document.getElementById(id);
+        const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+        try {
+            const r = await fetch('/api/verwaltungen/public');
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const data = await r.json();
+            const v = data.verwaltungen || [];
+            $('loading').classList.add('hidden');
+            if (v.length === 0) { $('empty').classList.remove('hidden'); return; }
+            $('list').innerHTML = v.map(verw => {
+                const stwegLabel = verw.stweg ? `STWEG ${verw.stweg}` : 'STWEG-übergreifend';
+                const kontakte = (verw.kontakte || []).map(k => `
+                    <div class="flex flex-wrap gap-x-4 gap-y-1 text-sm border-l-2 border-gray-200 pl-3 mb-2">
+                        <span class="font-semibold text-gray-800">${escapeHtml(k.name)}</span>
+                        ${k.funktion ? `<span class="text-gray-500">${escapeHtml(k.funktion)}</span>` : ''}
+                        ${k.telefon ? `<a href="tel:${escapeHtml(k.telefon.replace(/\s/g,''))}" class="text-emerald-700 hover:underline">📞 ${escapeHtml(k.telefon)}</a>` : ''}
+                        ${k.email ? `<a href="mailto:${escapeHtml(k.email)}" class="text-blue-700 hover:underline">✉ ${escapeHtml(k.email)}</a>` : ''}
+                    </div>`).join('');
+                return `
+                <article class="bg-white rounded-xl shadow-sm border p-5">
+                    <div class="flex items-baseline justify-between gap-3 flex-wrap mb-3">
+                        <h2 class="text-lg font-bold text-gray-900">${escapeHtml(verw.firma_name)}</h2>
+                        <span class="inline-block px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">${escapeHtml(stwegLabel)}</span>
+                    </div>
+                    <dl class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm mb-4">
+                        ${verw.adresse ? `<div><dt class="text-gray-500 text-xs uppercase tracking-wider">Adresse</dt><dd class="text-gray-800">${escapeHtml(verw.adresse).replace(/,/g,'<br>').replace(/\n/g,'<br>')}</dd></div>` : ''}
+                        ${verw.telefon ? `<div><dt class="text-gray-500 text-xs uppercase tracking-wider">Telefon</dt><dd><a href="tel:${escapeHtml(verw.telefon.replace(/\s/g,''))}" class="text-emerald-700 hover:underline">${escapeHtml(verw.telefon)}</a></dd></div>` : ''}
+                        ${verw.email ? `<div><dt class="text-gray-500 text-xs uppercase tracking-wider">E-Mail</dt><dd><a href="mailto:${escapeHtml(verw.email)}" class="text-blue-700 hover:underline">${escapeHtml(verw.email)}</a></dd></div>` : ''}
+                        ${verw.plattform_url ? `<div><dt class="text-gray-500 text-xs uppercase tracking-wider">Online-Plattform</dt><dd><a href="${escapeHtml(verw.plattform_url)}" target="_blank" rel="noopener" class="text-blue-700 hover:underline">${escapeHtml(verw.plattform_name || verw.plattform_url)}</a></dd></div>` : ''}
+                    </dl>
+                    ${kontakte ? `<div><h3 class="text-xs uppercase tracking-wider text-gray-500 mb-2">Kontaktpersonen</h3>${kontakte}</div>` : ''}
+                </article>`;
+            }).join('');
+        } catch (err) {
+            $('loading').textContent = 'Fehler: ' + err.message;
+        }
+    })();
+    </script>
 </body>
 </html>

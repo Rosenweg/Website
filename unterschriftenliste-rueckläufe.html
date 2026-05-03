@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unterschriftenliste-Rückläufe — Rosenweg</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .row-retourniert { background: #f0fdf4; }
+        .row-offen { background: #fff; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div id="nav-placeholder"></div>
+
+    <main class="max-w-6xl mx-auto px-4 py-6">
+        <header class="mb-6">
+            <div class="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-900">Unterschriftenliste — Rückläufe</h1>
+                    <p class="text-sm text-gray-600" id="snapshot-meta">Lade…</p>
+                </div>
+                <a href="wohnungsverwaltung.html#unterschriften" class="text-sm text-red-700 hover:underline">← zurück zur Verwaltung</a>
+            </div>
+        </header>
+
+        <section id="picker" class="mb-6 bg-white border rounded-xl p-4">
+            <label class="block text-xs font-medium text-gray-600 mb-1">Generierte Liste auswählen</label>
+            <select id="snapshot-select" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                <option value="">— Bitte wählen —</option>
+            </select>
+        </section>
+
+        <section id="stats-section" class="mb-4 hidden">
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <div class="bg-white border rounded-xl p-4 text-center">
+                    <div class="text-2xl font-bold text-gray-900" id="stat-total">–</div>
+                    <div class="text-xs text-gray-500 uppercase tracking-wider">Briefe gesamt</div>
+                </div>
+                <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
+                    <div class="text-2xl font-bold text-emerald-700" id="stat-retourniert">–</div>
+                    <div class="text-xs text-emerald-700 uppercase tracking-wider">Zurück</div>
+                </div>
+                <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 text-center">
+                    <div class="text-2xl font-bold text-blue-700" id="stat-ja">–</div>
+                    <div class="text-xs text-blue-700 uppercase tracking-wider">JA</div>
+                </div>
+                <div class="bg-red-50 border border-red-200 rounded-xl p-4 text-center">
+                    <div class="text-2xl font-bold text-red-700" id="stat-nein">–</div>
+                    <div class="text-xs text-red-700 uppercase tracking-wider">NEIN</div>
+                </div>
+                <div class="bg-gray-50 border rounded-xl p-4 text-center">
+                    <div class="text-2xl font-bold text-gray-700" id="stat-offen">–</div>
+                    <div class="text-xs text-gray-600 uppercase tracking-wider">Ausstehend</div>
+                </div>
+            </div>
+            <div class="mt-3 bg-white border rounded-xl p-3">
+                <div class="flex items-center justify-between text-xs text-gray-600 mb-1">
+                    <span>Rücklauf-Fortschritt</span>
+                    <span id="progress-pct">0%</span>
+                </div>
+                <div class="w-full bg-gray-200 rounded-full h-3">
+                    <div id="progress-bar" class="bg-emerald-500 h-3 rounded-full transition-all" style="width:0%"></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="briefe-section" class="hidden bg-white border rounded-xl overflow-hidden">
+            <div class="p-3 border-b flex items-center justify-between flex-wrap gap-2">
+                <div class="flex gap-2 text-sm">
+                    <button data-filter="all" class="filter-btn px-3 py-1 rounded bg-gray-900 text-white">Alle</button>
+                    <button data-filter="offen" class="filter-btn px-3 py-1 rounded border">Offen</button>
+                    <button data-filter="retourniert" class="filter-btn px-3 py-1 rounded border">Zurück</button>
+                    <button data-filter="ja" class="filter-btn px-3 py-1 rounded border">JA</button>
+                    <button data-filter="nein" class="filter-btn px-3 py-1 rounded border">NEIN</button>
+                </div>
+                <input id="search" type="search" placeholder="Suche Name/Einheit/Adresse" class="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-72">
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50 border-b text-xs uppercase tracking-wider text-gray-600">
+                        <tr>
+                            <th class="px-3 py-2 text-left">Nr</th>
+                            <th class="px-3 py-2 text-left">Einheit</th>
+                            <th class="px-3 py-2 text-left">Empfänger</th>
+                            <th class="px-3 py-2 text-left">Adresse</th>
+                            <th class="px-3 py-2 text-center">Vote</th>
+                            <th class="px-3 py-2 text-center">Zurück am</th>
+                            <th class="px-3 py-2 text-left">Notiz</th>
+                        </tr>
+                    </thead>
+                    <tbody id="briefe-body" class="divide-y"></tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <script src="/js/authentik-auth.js"></script>
+    <script>
+    (async function() {
+        const user = await AuthentikAuth.init({ requireAuth: true });
+        if (!user) return;
+        const $ = id => document.getElementById(id);
+        const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+
+        let currentBriefe = [];
+        let currentFilter = 'all';
+        let currentSearch = '';
+        let currentHash = '';
+
+        async function loadSnapshots() {
+            const r = await AuthentikAuth.apiFetch('/api/unterschriftenliste/history');
+            if (!r.ok) return;
+            const d = await r.json();
+            const sel = $('snapshot-select');
+            const opts = ['<option value="">— Bitte wählen —</option>'];
+            for (const s of (d.snapshots || [])) {
+                const dt = new Date(s.generated_at).toLocaleString('de-CH', { timeZone: 'Europe/Zurich' });
+                opts.push(`<option value="${escapeHtml(s.hash)}">STWEG ${s.stweg} · ${escapeHtml((s.anlass_titel||'').slice(0,50))} · ${dt}</option>`);
+            }
+            sel.innerHTML = opts.join('');
+            // Pre-select via ?hash=
+            const params = new URLSearchParams(window.location.search);
+            const presetHash = params.get('hash');
+            if (presetHash) { sel.value = presetHash.toUpperCase(); sel.dispatchEvent(new Event('change')); }
+        }
+
+        async function loadBriefe(hash) {
+            currentHash = hash;
+            $('snapshot-meta').textContent = 'Lade…';
+            const r = await AuthentikAuth.apiFetch(`/api/unterschriftenliste/${hash}/rueckläufe`);
+            if (!r.ok) { $('snapshot-meta').textContent = 'Fehler beim Laden'; return; }
+            const d = await r.json();
+            const s = d.snapshot;
+            $('snapshot-meta').textContent = `STWEG ${s.stweg} · ${escapeHtml(s.anlass_titel)} · Generiert ${new Date(s.generated_at).toLocaleString('de-CH', { timeZone: 'Europe/Zurich' })} · Hash ${s.hash}`;
+            currentBriefe = d.briefe || [];
+            renderStats(d.stats);
+            renderTable();
+            $('stats-section').classList.remove('hidden');
+            $('briefe-section').classList.remove('hidden');
+            history.replaceState(null, '', `?hash=${hash}`);
+        }
+
+        function renderStats(stats) {
+            $('stat-total').textContent = stats.total;
+            $('stat-retourniert').textContent = stats.retourniert;
+            $('stat-ja').textContent = stats.ja;
+            $('stat-nein').textContent = stats.nein;
+            $('stat-offen').textContent = stats.offen;
+            const pct = stats.total > 0 ? Math.round((stats.retourniert / stats.total) * 100) : 0;
+            $('progress-bar').style.width = pct + '%';
+            $('progress-pct').textContent = pct + '%';
+        }
+
+        function renderTable() {
+            const q = currentSearch.toLowerCase();
+            const filtered = currentBriefe.filter(b => {
+                if (currentFilter === 'offen' && b.retourniert_am) return false;
+                if (currentFilter === 'retourniert' && !b.retourniert_am) return false;
+                if (currentFilter === 'ja' && b.vote !== 'ja') return false;
+                if (currentFilter === 'nein' && b.vote !== 'nein') return false;
+                if (q) {
+                    const hay = `${b.einheit} ${b.empfaenger_name} ${b.empfaenger_adresse}`.toLowerCase();
+                    if (!hay.includes(q)) return false;
+                }
+                return true;
+            });
+            const html = filtered.map(b => {
+                const ret = b.retourniert_am ? new Date(b.retourniert_am).toISOString().slice(0, 10) : '';
+                const voteClass = b.vote === 'ja' ? 'bg-blue-100 text-blue-800' : b.vote === 'nein' ? 'bg-red-100 text-red-800' : b.vote === 'enthaltung' ? 'bg-amber-100 text-amber-800' : '';
+                const rowClass = b.retourniert_am ? 'row-retourniert' : 'row-offen';
+                const typBadge = b.brief_typ === 'sammel' ? '<span class="ml-1 inline-block px-1 py-0.5 text-xxs rounded bg-purple-100 text-purple-700" style="font-size:9px">Sammel</span>' : '';
+                return `<tr class="${rowClass} hover:bg-gray-50">
+                    <td class="px-3 py-2 font-mono text-xs text-gray-500">${b.brief_idx}</td>
+                    <td class="px-3 py-2 font-semibold">${escapeHtml(b.einheit||'')}${typBadge}</td>
+                    <td class="px-3 py-2">${escapeHtml(b.empfaenger_name||'')}</td>
+                    <td class="px-3 py-2 text-xs text-gray-600">${escapeHtml(b.empfaenger_adresse||'')}</td>
+                    <td class="px-3 py-2 text-center">
+                        <select data-idx="${b.brief_idx}" class="vote-sel px-2 py-1 rounded text-xs ${voteClass}">
+                            <option value="">—</option>
+                            <option value="ja" ${b.vote==='ja'?'selected':''}>✓ JA</option>
+                            <option value="nein" ${b.vote==='nein'?'selected':''}>✗ NEIN</option>
+                            <option value="enthaltung" ${b.vote==='enthaltung'?'selected':''}>~ Enthaltung</option>
+                        </select>
+                    </td>
+                    <td class="px-3 py-2 text-center">
+                        <input type="date" data-idx="${b.brief_idx}" value="${ret}" class="date-inp px-2 py-1 border rounded text-xs">
+                    </td>
+                    <td class="px-3 py-2">
+                        <input type="text" data-idx="${b.brief_idx}" value="${escapeHtml(b.notiz||'')}" placeholder="Notiz…" class="notiz-inp px-2 py-1 border rounded text-xs w-full">
+                    </td>
+                </tr>`;
+            }).join('');
+            $('briefe-body').innerHTML = html;
+
+            // Wire change handlers (debounced for notiz)
+            $('briefe-body').querySelectorAll('.vote-sel, .date-inp').forEach(el => {
+                el.addEventListener('change', () => save(el.dataset.idx));
+            });
+            let timer;
+            $('briefe-body').querySelectorAll('.notiz-inp').forEach(el => {
+                el.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => save(el.dataset.idx), 500); });
+            });
+        }
+
+        async function save(idx) {
+            const row = $('briefe-body').querySelector(`tr [data-idx="${idx}"]`).closest('tr');
+            const vote = row.querySelector('.vote-sel').value || null;
+            const dateRaw = row.querySelector('.date-inp').value;
+            const retDate = dateRaw || (vote ? new Date().toISOString().slice(0, 10) : null);
+            const notiz = row.querySelector('.notiz-inp').value || null;
+            // Wenn Vote gesetzt aber Datum leer: heutiges Datum auto-setzen
+            if (vote && !dateRaw) {
+                row.querySelector('.date-inp').value = retDate;
+            }
+            const r = await AuthentikAuth.apiFetch(`/api/unterschriftenliste/${currentHash}/rueckläufe/${idx}`, {
+                method: 'PUT',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({ retourniert_am: retDate, vote, notiz }),
+            });
+            if (!r.ok) { alert('Speichern fehlgeschlagen'); return; }
+            // Lokal aktualisieren + Stats neu
+            const b = currentBriefe.find(x => x.brief_idx == idx);
+            if (b) { b.retourniert_am = retDate; b.vote = vote; b.notiz = notiz; }
+            recomputeStats();
+        }
+
+        function recomputeStats() {
+            const stats = {
+                total: currentBriefe.length,
+                retourniert: currentBriefe.filter(b => b.retourniert_am).length,
+                ja: currentBriefe.filter(b => b.vote === 'ja').length,
+                nein: currentBriefe.filter(b => b.vote === 'nein').length,
+                enthaltung: currentBriefe.filter(b => b.vote === 'enthaltung').length,
+                offen: currentBriefe.filter(b => !b.retourniert_am).length,
+            };
+            renderStats(stats);
+        }
+
+        $('snapshot-select').addEventListener('change', e => { if (e.target.value) loadBriefe(e.target.value); });
+        $('search').addEventListener('input', e => { currentSearch = e.target.value; renderTable(); });
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.filter-btn').forEach(b => { b.classList.remove('bg-gray-900','text-white'); b.classList.add('border'); });
+                btn.classList.add('bg-gray-900','text-white');
+                btn.classList.remove('border');
+                currentFilter = btn.dataset.filter;
+                renderTable();
+            });
+        });
+
+        loadSnapshots();
+    })();
+    </script>
+</body>
+</html>
