@@ -5,13 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hausverwaltung — STWEG-Kooperation Rosenweg</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/nav.js?v=2"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
-    <div id="nav-placeholder"></div>
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script>RosenwegNav.init({ active: 'hausverwaltung' });</script>
 
     <main class="max-w-4xl mx-auto px-4 py-8">
         <header class="mb-6">
@@ -23,7 +26,6 @@
         <div id="list" class="space-y-4"></div>
     </main>
 
-    <script src="/js/nav.js"></script>
     <script>
     (async function() {
         const $ = id => document.getElementById(id);
