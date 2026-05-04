@@ -4847,7 +4847,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
         || (rosenwegNrAusBezeichnung(w.bezeichnung) ? `Rosenweg ${rosenwegNrAusBezeichnung(w.bezeichnung)}, 4303 Kaiseraugst` : '4303 Kaiseraugst');
       const eigKontakte = wInfo.eigentuemer.filter(e => e.name);
       if (eigKontakte.length === 0) {
-        einzelbriefe.push({ bezeichnung: w.bezeichnung, eigentuemer: eigNamen, verwalter: verwNamen, adresse: fallbackAdresse });
+        einzelbriefe.push({ bezeichnung: w.bezeichnung, eigentuemer: eigNamen, verwalter: verwNamen, adresse: fallbackAdresse, wq_zaehler: w.wertquote_zaehler || 0, wq_nenner: w.wertquote_nenner || 1000 });
       } else {
         // Eigentümer nach Adresse gruppieren — aggressive Normalisierung
         // damit "Rw 18 4303 Kaiseraugst" und "Rw 18, 4303 Kaiseraugst"
@@ -4867,6 +4867,8 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
             eigentuemer: grp.namen,
             verwalter: verwNamen,
             adresse: grp.adresse,
+            wq_zaehler: w.wertquote_zaehler || 0,
+            wq_nenner: w.wertquote_nenner || 1000,
           });
         }
       }
@@ -4905,11 +4907,16 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
     for (const b of einzelbriefe) {
       const key = normNameSet(b.eigentuemer || []) + '###' + normAdr(b.adresse);
       if (!merged.has(key)) {
-        merged.set(key, { ...b, bezeichnungen: [b.bezeichnung] });
+        merged.set(key, {
+          ...b,
+          bezeichnungen: [b.bezeichnung],
+          wq_total_z: b.wq_zaehler || 0,
+          wq_nenner: b.wq_nenner || 1000,
+        });
       } else {
         const prev = merged.get(key);
         prev.bezeichnungen.push(b.bezeichnung);
-        // Verwalter-Listen vereinigen (Duplikate entfernen)
+        prev.wq_total_z += (b.wq_zaehler || 0);
         const verwSet = new Set([...(prev.verwalter || []), ...(b.verwalter || [])]);
         prev.verwalter = [...verwSet];
       }
@@ -4921,6 +4928,8 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
         eigentuemer: m.eigentuemer,
         verwalter: m.verwalter,
         adresse: m.adresse,
+        wq_zaehler: m.wq_total_z,
+        wq_nenner: m.wq_nenner,
       });
     }
   }
@@ -5024,8 +5033,13 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
 
   // Pro auswärtigem Empfänger ein eigenständiges Anschreiben mit eigener Unterschriftszeile
   const einzelbriefeSeiten = einzelbriefe.map((e, idx) => {
-    const wohnung = wohnungen.rows.find(w => w.bezeichnung === e.bezeichnung);
-    const wq = (wohnung?.wertquote_zaehler && wohnung?.wertquote_nenner) ? `${wohnung.wertquote_zaehler}/${wohnung.wertquote_nenner}` : '—';
+    // WQ kommt direkt aus dem (ggf. gemergten) Brief; bei Mehrfach-Plaetzen
+    // ist e.wq_zaehler bereits die Summe aller Einheiten dieses Haushalts.
+    const wq = (e.wq_zaehler && e.wq_nenner) ? `${e.wq_zaehler}/${e.wq_nenner}` : '—';
+    const plaetzeArr = (e.bezeichnung || '').split(',').map(s => s.trim()).filter(Boolean);
+    const einheitLabel = plaetzeArr.length > 1
+      ? `den Einheiten <strong>${escHtml(plaetzeArr.join(', '))}</strong>`
+      : `der Einheit <strong>${escHtml(e.bezeichnung)}</strong>`;
     const empfaenger = e.eigentuemer.join(' & ');
     const verwalterLine = e.verwalter.length > 0 ? `<p class="hinweis">↳ <em>vertreten durch Verwalter: <strong>${escHtml(e.verwalter.join(', '))}</strong></em></p>` : '';
     return `
@@ -5046,7 +5060,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
       <h2 class="section-title">${escHtml(anlass_titel || 'Unterschriftenliste')}</h2>
       ${anlass_zweck ? `<p class="zweck">${escHtml(anlass_zweck).replace(/\n/g, '<br>')}</p>` : ''}
       ${verwalterLine}
-      <p class="hinweis">Sie sind Eigentümer/in der Einheit <strong>${escHtml(e.bezeichnung)}</strong> (Wertquote ${wq}) in der STWEG ${stweg}, wohnen aber ausserhalb von Rosenweg, Kaiseraugst. Bitte kreuzen Sie unten <strong>JA</strong> oder <strong>NEIN</strong> an, datieren und unterschreiben Sie, und senden Sie das Blatt bis spätestens <strong>${escHtml(ruecksendung_bis || '—')}</strong> zurück${ruecksendung_an ? ` an <strong>${escHtml(ruecksendung_an)}</strong>` : ''}.</p>
+      <p class="hinweis">Sie sind Eigentümer/in ${einheitLabel} (${plaetzeArr.length > 1 ? 'gemeinsame Wertquote' : 'Wertquote'} <strong>${wq}</strong>) in der STWEG ${stweg}, wohnen aber ausserhalb von Rosenweg, Kaiseraugst. Bitte kreuzen Sie unten <strong>JA</strong> oder <strong>NEIN</strong> an, datieren und unterschreiben Sie, und senden Sie das Blatt bis spätestens <strong>${escHtml(ruecksendung_bis || '—')}</strong> zurück${ruecksendung_an ? ` an <strong>${escHtml(ruecksendung_an)}</strong>` : ''}.</p>
       <table class="signatur einzel-signatur">
         <thead><tr>
           <th class="cell-einheit">Einheit</th>
