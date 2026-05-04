@@ -4884,6 +4884,43 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
       <td class="cell-sig">&nbsp;</td>
     </tr>`;
   }
+
+  // ── Haushaltszusammenfassung über Wohnungs-Grenzen hinweg ──────
+  // Per-Wohnung haben wir oben bereits Eigentuemer mit gleicher Adresse
+  // gruppiert (Ehepaare auf demselben Platz = ein Brief). STWEG 8 hat
+  // aber haeufig denselben Haushalt auf MEHREREN Parkplaetzen (Thomas
+  // Nijs P50/P64/P70, Esther Fleig P41/P42, etc.). Wir mergen daher
+  // nach dem Sammeln noch einmal ueber alle Briefe: gleiche normalisierte
+  // Name-Menge + gleiche normalisierte Adresse → ein Brief mit allen
+  // Plaetzen kommagetrennt in `bezeichnung`.
+  if (einzelbriefe.length > 0) {
+    const normAdr = a => (a || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/,\s*/g, ', ');
+    const normName = n => (n || '').trim().toLowerCase().split(/\s+/).sort().join('|');
+    const normNameSet = arr => arr.map(normName).sort().join('||');
+    const merged = new Map();
+    for (const b of einzelbriefe) {
+      const key = normNameSet(b.eigentuemer || []) + '###' + normAdr(b.adresse);
+      if (!merged.has(key)) {
+        merged.set(key, { ...b, bezeichnungen: [b.bezeichnung] });
+      } else {
+        const prev = merged.get(key);
+        prev.bezeichnungen.push(b.bezeichnung);
+        // Verwalter-Listen vereinigen (Duplikate entfernen)
+        const verwSet = new Set([...(prev.verwalter || []), ...(b.verwalter || [])]);
+        prev.verwalter = [...verwSet];
+      }
+    }
+    einzelbriefe.length = 0;
+    for (const m of merged.values()) {
+      einzelbriefe.push({
+        bezeichnung: m.bezeichnungen.join(', '),
+        eigentuemer: m.eigentuemer,
+        verwalter: m.verwalter,
+        adresse: m.adresse,
+      });
+    }
+  }
+
   // Total-Zeile
   dataRows += `<tr class="total-row">
     <td><strong>TOTAL</strong></td>
