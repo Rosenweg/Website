@@ -13,36 +13,34 @@
     <link rel="icon" href="/logo-rosenweg.png">
     <link rel="apple-touch-icon" href="/logo-rosenweg.png">
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/nav.js?v=2"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
-        .group-header { position: sticky; top: 60px; z-index: 5; }
+        .group-header { position: sticky; top: 130px; z-index: 5; }
         @supports (padding: env(safe-area-inset-top)) {
-            .safe-top { padding-top: env(safe-area-inset-top); }
             .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
         }
         .deceased { opacity: 0.5; }
         .deceased .name { font-style: italic; text-decoration: line-through; text-decoration-color: rgba(0,0,0,0.3); }
+        .search-bar { position: sticky; top: 64px; z-index: 6; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
-    <header class="bg-red-700 text-white sticky top-0 z-10 safe-top shadow-md">
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script>RosenwegNav.init({ active: 'telefonbuch' });</script>
+
+    <div class="search-bar bg-white border-b">
         <div class="max-w-3xl mx-auto px-4 py-3">
-            <div class="flex items-center gap-3">
-                <img src="/logo-rosenweg.png" alt="" class="w-9 h-9 rounded-full bg-white p-0.5">
-                <div class="flex-1">
-                    <h1 class="font-bold text-base leading-tight">Telefonbuch</h1>
-                    <p class="text-xs text-red-100">STWEG-Kooperation Rosenweg</p>
-                </div>
-                <a href="/" class="text-xs text-red-100 hover:text-white">← zurück</a>
+            <div class="flex items-baseline justify-between mb-2">
+                <h1 class="text-xl font-bold text-gray-900">Telefonbuch</h1>
+                <span id="count" class="text-xs text-gray-400"></span>
             </div>
-            <div class="mt-2.5 relative">
-                <input id="search" type="search" autocomplete="off" placeholder="Suchen — Name, STWEG, Wohnung…"
-                    class="w-full bg-white text-gray-800 placeholder-gray-400 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300">
-                <span id="count" class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none"></span>
-            </div>
+            <input id="search" type="search" autocomplete="off" placeholder="Suchen — Name, STWEG, Wohnung…"
+                class="w-full bg-gray-100 text-gray-800 placeholder-gray-400 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
         </div>
-    </header>
+    </div>
 
     <main class="max-w-3xl mx-auto safe-bottom">
         <div id="loading" class="text-center text-gray-400 py-12 text-sm">Lade Kontakte…</div>
@@ -50,7 +48,6 @@
         <div id="list"></div>
     </main>
 
-    <script src="/js/authentik-auth.js?v=2026-04-29"></script>
     <script>
     (async function() {
         const user = await AuthentikAuth.init({ requireAuth: true });
