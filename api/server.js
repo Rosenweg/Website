@@ -4813,6 +4813,14 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
   // Einzelbrief-Empfänger sammeln (auswärtige Eigentümer; bei einzelOnly: alle)
   const einzelbriefe = [];
   let totalWQ = 0, totalUnits = 0;
+  // Nenner ist normalerweise 1000 (STWEG-Wohnungen) oder 110 (STWEG 8 Tiefgarage).
+  // Wir leiten ihn aus den vorhandenen Wohnungen ab — nimm den haeufigsten Nenner.
+  const nennerCounts = new Map();
+  for (const w of wohnungen.rows) {
+    const n = w.wertquote_nenner || 1000;
+    nennerCounts.set(n, (nennerCounts.get(n) || 0) + 1);
+  }
+  const totalWQNenner = [...nennerCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || 1000;
   let dataRows = '';
   for (const w of wohnungen.rows) {
     const wInfo = byWohnung.get(w.id);
@@ -4939,7 +4947,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
     <td><strong>TOTAL</strong></td>
     <td><strong>${totalUnits} Einheiten</strong></td>
     <td></td>
-    <td><strong>${totalWQ}/1000</strong></td>
+    <td><strong>${totalWQ}/${totalWQNenner}</strong></td>
     <td></td><td></td>
   </tr>`;
 
@@ -5165,11 +5173,12 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
     <table class="info-table">
       <thead><tr><th>Einheit</th><th>Eigentümer</th><th>Wertquote</th><th>Versand-Adresse</th></tr></thead>
       <tbody>${einzelbriefe.map((e, i) => {
-        const wq = wohnungen.rows.find(w => w.bezeichnung === e.bezeichnung);
-        const wqStr = (wq?.wertquote_zaehler && wq?.wertquote_nenner) ? `${wq.wertquote_zaehler}/${wq.wertquote_nenner}` : '—';
+        // WQ direkt aus dem (ggf. gemergten) Brief; bei Mehrfach-Plaetzen
+        // ist e.wq_zaehler die Summe aller Einheiten dieses Haushalts.
+        const wqStr = (e.wq_zaehler && e.wq_nenner) ? `${e.wq_zaehler}/${e.wq_nenner}` : '—';
         return `<tr><td><strong>${escHtml(e.bezeichnung)}</strong></td><td>${escHtml(e.eigentuemer.join(', '))}${e.verwalter.length>0?'<br><span style=\"font-size:8.5pt;color:#555\">↳ ' + escHtml(e.verwalter.join(', ')) + '</span>':''}</td><td style="text-align:center;font-family:monospace">${wqStr}</td><td style="font-size:9pt">${escHtml(e.adresse)}</td></tr>`;
       }).join('')}
-      <tr class="total-row"><td><strong>TOTAL</strong></td><td><strong>${totalUnits} Einheiten</strong></td><td style="text-align:center"><strong>${totalWQ}/1000</strong></td><td></td></tr>
+      <tr class="total-row"><td><strong>TOTAL</strong></td><td><strong>${totalUnits} Einheiten</strong></td><td style="text-align:center"><strong>${totalWQ}/${totalWQNenner}</strong></td><td></td></tr>
       </tbody>
     </table>
   ` : `
