@@ -4849,8 +4849,11 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
       if (eigKontakte.length === 0) {
         einzelbriefe.push({ bezeichnung: w.bezeichnung, eigentuemer: eigNamen, verwalter: verwNamen, adresse: fallbackAdresse });
       } else {
-        // Eigentümer nach Adresse gruppieren (Normalisierung: Whitespace + Komma trimmen)
-        const normAdr = a => (a || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/,\s*/g, ', ');
+        // Eigentümer nach Adresse gruppieren — aggressive Normalisierung
+        // damit "Rw 18 4303 Kaiseraugst" und "Rw 18, 4303 Kaiseraugst"
+        // (mit/ohne Komma) als selbe Adresse erkannt werden.
+        const normAdr = a => (a || '').trim().toLowerCase()
+          .replace(/[,;.]/g, ' ').replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
         const byAdr = new Map();
         for (const eig of eigKontakte) {
           const persAdr = (eig.adresse && eig.adresse.trim()) || fallbackAdresse;
@@ -4894,7 +4897,8 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
   // Name-Menge + gleiche normalisierte Adresse → ein Brief mit allen
   // Plaetzen kommagetrennt in `bezeichnung`.
   if (einzelbriefe.length > 0) {
-    const normAdr = a => (a || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/,\s*/g, ', ');
+    const normAdr = a => (a || '').trim().toLowerCase()
+      .replace(/[,;.]/g, ' ').replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
     const normName = n => (n || '').trim().toLowerCase().split(/\s+/).sort().join('|');
     const normNameSet = arr => arr.map(normName).sort().join('||');
     const merged = new Map();
