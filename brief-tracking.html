@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brief-Tracking — Rosenweg</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/nav.js?v=2"></script>
+    <link rel="icon" href="/logo-rosenweg.png">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script>RosenwegNav.init({ active: 'brief-tracking' });</script>
+
+    <main class="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+        <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center">
+            <p class="text-gray-600">Lade Login-Status…</p>
+        </div>
+
+        <div id="content" class="hidden">
+            <div class="mb-6">
+                <h1 class="text-2xl font-bold text-gray-900">Brief-Tracking</h1>
+                <p class="text-sm text-gray-600 mt-1">Versendete A-Post-Plus-Briefe mit Swiss-Post-Tracking. Foto vom Couvert hochladen — KI liest Empfänger und Tracking-Nummer automatisch und benennt die Datei korrekt um.</p>
+            </div>
+
+            <!-- Upload -->
+            <div class="bg-white rounded-lg shadow p-4 mb-6">
+                <label class="block">
+                    <span class="text-sm font-medium text-gray-700">Brief-Foto(s) hochladen</span>
+                    <input type="file" id="upload-input" accept="image/jpeg,image/png" multiple
+                           class="mt-2 block w-full text-sm text-gray-600 file:mr-3 file:py-2 file:px-4 file:rounded file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                </label>
+                <div id="upload-status" class="mt-3 space-y-2"></div>
+            </div>
+
+            <!-- Liste -->
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <div class="px-4 py-3 border-b flex items-center justify-between">
+                    <div>
+                        <h2 class="text-lg font-semibold text-gray-800">Versendete Briefe</h2>
+                        <p id="count" class="text-xs text-gray-500"></p>
+                    </div>
+                    <button onclick="loadBriefe()" class="text-sm text-blue-600 hover:underline">Neu laden</button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full text-sm">
+                        <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+                            <tr>
+                                <th class="px-4 py-2 text-left">Empfänger</th>
+                                <th class="px-4 py-2 text-left">Tracking</th>
+                                <th class="px-4 py-2 text-left">Datum</th>
+                                <th class="px-4 py-2 text-left">Foto</th>
+                                <th class="px-4 py-2 text-left">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody" class="divide-y divide-gray-100"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+    const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        const user = await AuthentikAuth.init({ requireAuth: true });
+        if (!user) return;
+        document.getElementById('auth-gate').classList.add('hidden');
+        document.getElementById('content').classList.remove('hidden');
+        await loadBriefe();
+    });
+
+    async function loadBriefe() {
+        const tbody = document.getElementById('tbody');
+        tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">Lade…</td></tr>';
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/briefe');
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const data = await r.json();
+            const briefe = data.briefe || [];
+            document.getElementById('count').textContent = `${briefe.length} Briefe`;
+            if (briefe.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">Noch keine Briefe erfasst.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = briefe.map(b => {
+                const date = b.mtime ? new Date(b.mtime).toLocaleDateString('de-CH') : '–';
+                const photoUrl = `/api/documents/${data.dir}/${encodeURIComponent(b.filename)}`;
+                const trackUrl = `https://service.post.ch/ekp-web/ui/entry/search/${b.trackingDotted}`;
+                return `<tr class="hover:bg-gray-50">
+                    <td class="px-4 py-2 font-medium text-gray-900">${esc(b.name)}</td>
+                    <td class="px-4 py-2 font-mono text-xs text-gray-700">${esc(b.trackingDotted)}</td>
+                    <td class="px-4 py-2 text-gray-600">${esc(date)}</td>
+                    <td class="px-4 py-2"><a href="${photoUrl}" target="_blank" class="text-blue-600 hover:underline">Anzeigen</a></td>
+                    <td class="px-4 py-2"><a href="${trackUrl}" target="_blank" class="inline-flex items-center gap-1 px-2 py-1 bg-yellow-400 hover:bg-yellow-500 text-yellow-900 rounded text-xs font-semibold">Swiss-Post-Status &nbsp;↗</a></td>
+                </tr>`;
+            }).join('');
+        } catch (e) {
+            tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-6 text-center text-red-600">Fehler beim Laden: ${esc(e.message)}</td></tr>`;
+        }
+    }
+
+    document.getElementById('upload-input').addEventListener('change', async e => {
+        const files = Array.from(e.target.files || []);
+        if (!files.length) return;
+        const status = document.getElementById('upload-status');
+        for (const f of files) {
+            const row = document.createElement('div');
+            row.className = 'text-sm text-gray-700 flex items-center gap-2';
+            row.innerHTML = `<span class="text-blue-600">⏳</span> <span class="font-medium">${esc(f.name)}</span><span class="text-gray-500" data-msg>– lese Datei…</span>`;
+            status.prepend(row);
+            const msg = row.querySelector('[data-msg]');
+            try {
+                const buf = await f.arrayBuffer();
+                let b64 = '';
+                const bytes = new Uint8Array(buf);
+                const chunk = 0x8000;
+                for (let i = 0; i < bytes.length; i += chunk) {
+                    b64 += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+                }
+                b64 = btoa(b64);
+                msg.textContent = '– sende an KI-Erkennung…';
+                const r = await AuthentikAuth.apiFetch('/api/briefe/upload', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({ bild_base64: b64, bild_filename: f.name }),
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) {
+                    row.querySelector('span').textContent = '✗';
+                    row.querySelector('span').className = 'text-red-600';
+                    msg.textContent = `– ${data.error || ('HTTP ' + r.status)}`;
+                    msg.className = 'text-red-600';
+                } else {
+                    row.querySelector('span').textContent = '✓';
+                    row.querySelector('span').className = 'text-emerald-600';
+                    msg.textContent = `→ ${data.empfaenger} (Tracking ${data.tracking5}) → ${data.filename}`;
+                    msg.className = 'text-emerald-700';
+                }
+            } catch (err) {
+                row.querySelector('span').textContent = '✗';
+                row.querySelector('span').className = 'text-red-600';
+                msg.textContent = '– ' + err.message;
+                msg.className = 'text-red-600';
+            }
+        }
+        e.target.value = '';
+        await loadBriefe();
+    });
+    </script>
+</body>
+</html>
