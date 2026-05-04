@@ -4763,12 +4763,20 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
     });
   } else {
     // Live aus DB
+    // STWEG 8 ist die MEG-Tiefgarage mit ausschliesslich typ='Parkplatz'.
+    // Fuer alle anderen STWEGen sind nur Wohnungen + Hobbyraeume relevant
+    // (Tiefgarage-Plaetze gehoeren nicht ins Stockwerkeigentum).
+    const erlaubteTypen = stweg === 8 ? ['Parkplatz'] : ['Wohnung', 'Hobbyraum'];
     wohnungen = await pool.query(`
       SELECT w.id, w.bezeichnung, w.typ, w.wertquote_zaehler, w.wertquote_nenner
       FROM wohnungen w
-      WHERE w.stweg = $1 AND w.typ IN ('Wohnung','Hobbyraum')
-      ORDER BY w.bezeichnung
-    `, [stweg]);
+      WHERE w.stweg = $1 AND w.typ = ANY($2::text[])
+      ORDER BY
+        CASE WHEN w.bezeichnung ~ '^P[0-9]+$'
+          THEN LPAD(SUBSTRING(w.bezeichnung FROM 2), 4, '0')
+          ELSE w.bezeichnung
+        END
+    `, [stweg, erlaubteTypen]);
     // Haus-Filter anwenden: Hausnummer aus bezeichnung ableiten
     if (hausFilter) {
       wohnungen.rows = wohnungen.rows.filter(w => {
