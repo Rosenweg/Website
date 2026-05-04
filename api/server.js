@@ -7611,6 +7611,186 @@ app.post('/api/documents/move', authMiddleware, canManageDocs, async (req, res) 
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════
+// BRIEFE TRACKING — Versendete Briefe, Empfaenger via OpenRouter Vision
+// ═══════════════════════════════════════════════════════════════════
+
+const BRIEFE_DIR = 'allgemein/fotos_von_versendeten_briefen';
+// WebStamp-Tracking-Format: 98.01.018499.705XXXXX (8-stellige laufende Nr, beginnt mit 705)
+const TRACKING_PREFIX_DOTTED = '98.01.018499.705';
+const TRACKING_PREFIX_PLAIN = '9801018499705';
+
+function parseBriefFilename(filename) {
+  const m = filename.match(/^(.+)-(\d{5})\.(jpe?g|png)$/i);
+  if (!m) return null;
+  const nameSlug = m[1];
+  const tracking5 = m[2];
+  const display = nameSlug
+    .replace(/-und-/g, ' & ')
+    .replace(/-/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+  return {
+    filename,
+    name: display,
+    nameSlug,
+    tracking5,
+    trackingDotted: `${TRACKING_PREFIX_DOTTED}${tracking5}`,
+    trackingPlain: `${TRACKING_PREFIX_PLAIN}${tracking5}`,
+  };
+}
+
+function nameToSlug(name) {
+  return String(name)
+    .replace(/&/g, ' und ')
+    .replace(/ä/gi, 'ae').replace(/ö/gi, 'oe').replace(/ü/gi, 'ue').replace(/ß/g, 'ss')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/-+/g, '-').replace(/^-|-$/g, '')
+    .toLowerCase();
+}
+
+// GET /api/briefe — Alle Brief-Fotos im Ordner mit geparsten Tracking-Nummern
+app.get('/api/briefe', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+  try {
+    const dir = pathModule.join(DOCS_PATH, BRIEFE_DIR);
+    let files;
+    try { files = await fs.readdir(dir); }
+    catch (e) {
+      if (e.code === 'ENOENT') return res.json({ briefe: [], dir: BRIEFE_DIR });
+      throw e;
+    }
+    const briefe = [];
+    for (const f of files) {
+      const parsed = parseBriefFilename(f);
+      if (!parsed) continue;
+      try {
+        const stat = await fs.stat(pathModule.join(dir, f));
+        briefe.push({ ...parsed, mtime: stat.mtime.toISOString(), size: stat.size });
+      } catch {}
+    }
+    briefe.sort((a, b) => b.tracking5.localeCompare(a.tracking5));
+    res.json({ briefe, dir: BRIEFE_DIR });
+  } catch (err) {
+    console.error('[Briefe-List]', err.message);
+    res.status(500).json({ error: 'Liste konnte nicht geladen werden' });
+  }
+});
+
+// POST /api/briefe/upload — Foto hochladen, OCR via Haiku 4.5, umbenennen, ablegen
+// Body: { bild_base64, bild_filename }
+app.post('/api/briefe/upload', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+  try {
+    const { bild_base64, bild_filename } = req.body || {};
+    if (!bild_base64) return res.status(400).json({ error: 'bild_base64 fehlt' });
+
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'OPENROUTER_API_KEY nicht konfiguriert' });
+
+    const ext = (bild_filename || 'jpeg').split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!['jpg', 'jpeg', 'png'].includes(ext)) return res.status(400).json({ error: 'Nur JPG/PNG erlaubt' });
+    const buf = Buffer.from(bild_base64, 'base64');
+    if (buf.length > 15 * 1024 * 1024) return res.status(400).json({ error: 'Datei zu gross (>15MB)' });
+    const mime = ext === 'png' ? 'image/png' : 'image/jpeg';
+    const dataUrl = `data:${mime};base64,${bild_base64}`;
+
+    const systemPrompt = `Du extrahierst Empfaenger und Tracking aus dem Foto eines Schweizer WebStamp-Couverts (A-Post Plus).
+Antworte AUSSCHLIESSLICH mit gueltigem JSON, keine Markdown-Codebloecke, kein erklaerender Text.
+
+Schema:
+{
+  "tracking": string|null,    // Volle Tracking-Nr unter dem Barcode, Format "98.01.018499.705XXXXX". 8 Ziffern beginnend mit 705.
+  "empfaenger": string|null,  // Vollstaendiger Empfaenger-Name (Person ODER Firma), z.B. "Roland Britt" oder "Ulrich Brueckner & Christine Brueckner" oder "Peker Holding AG"
+  "strasse": string|null,
+  "plz": string|null,
+  "ort": string|null
+}
+
+WICHTIG: Der Empfaenger ist NICHT Joerg Herrmann / Rosenweg 14 (das ist der Absender). Lies das Empfaenger-Adressfeld.
+Wenn ein Feld nicht erkennbar ist, setze null.`;
+
+    const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://www.rosenweg4303.ch',
+        'X-Title': 'Rosenweg Brief-Tracking-OCR',
+      },
+      signal: AbortSignal.timeout(45_000),
+      body: JSON.stringify({
+        model: 'anthropic/claude-haiku-4.5',
+        max_tokens: 512,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: [
+            { type: 'text', text: 'Extrahiere Empfaenger und Tracking aus diesem Brief-Foto.' },
+            { type: 'image_url', image_url: { url: dataUrl } },
+          ]},
+        ],
+      }),
+    });
+
+    if (!orRes.ok) {
+      const errText = await orRes.text().catch(() => '');
+      console.error('[Briefe-OCR] OpenRouter error', orRes.status, errText.slice(0, 300));
+      return res.status(502).json({ error: `OCR-Service-Fehler (HTTP ${orRes.status})` });
+    }
+    const orJson = await orRes.json();
+    const content = orJson.choices?.[0]?.message?.content || '';
+    let jsonText = content.trim();
+    const fence = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fence) jsonText = fence[1].trim();
+    let parsed;
+    try { parsed = JSON.parse(jsonText); }
+    catch (e) {
+      console.error('[Briefe-OCR] JSON-Parse fehlgeschlagen:', jsonText.slice(0, 300));
+      return res.status(502).json({ error: 'OCR-Antwort ist kein gueltiges JSON', raw: content });
+    }
+
+    const trackDigits = String(parsed.tracking || '').replace(/\D/g, '');
+    const tail8 = trackDigits.slice(-8);
+    if (!/^705\d{5}$/.test(tail8)) {
+      return res.status(422).json({ error: 'Tracking-Nr nicht erkannt oder Format unerwartet', ocr: parsed });
+    }
+    const tracking5 = tail8.slice(-5);
+
+    if (!parsed.empfaenger || typeof parsed.empfaenger !== 'string') {
+      return res.status(422).json({ error: 'Empfaenger nicht erkannt', ocr: parsed });
+    }
+    const nameSlug = nameToSlug(parsed.empfaenger);
+    if (!nameSlug) return res.status(422).json({ error: 'Empfaenger nicht in Dateiname konvertierbar' });
+
+    const newFilename = `${nameSlug}-${tracking5}.jpeg`;
+    const dir = pathModule.join(DOCS_PATH, BRIEFE_DIR);
+    await fs.mkdir(dir, { recursive: true });
+    const newPath = pathModule.join(dir, newFilename);
+    try {
+      await fs.access(newPath);
+      return res.status(409).json({
+        error: `Datei existiert bereits: ${newFilename}`,
+        filename: newFilename, ocr: parsed,
+      });
+    } catch {}
+
+    await fs.writeFile(newPath, buf);
+    res.json({
+      success: true,
+      filename: newFilename,
+      tracking5,
+      trackingDotted: `${TRACKING_PREFIX_DOTTED}${tracking5}`,
+      trackingPlain: `${TRACKING_PREFIX_PLAIN}${tracking5}`,
+      empfaenger: parsed.empfaenger,
+      strasse: parsed.strasse,
+      plz: parsed.plz,
+      ort: parsed.ort,
+      model: orJson.model,
+    });
+  } catch (err) {
+    console.error('[Briefe-Upload]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Proxmox VE Management ──────────────────────────────────────────
 
 async function pveAPI(method, path, body = null) {
