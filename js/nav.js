@@ -122,6 +122,10 @@ const RosenwegNav = {
           </div>
 
           <a href="${base}rechteverwaltung.html" data-perm="rechteverwaltung" class="${a('rechte')} px-3 py-2 text-sm transition">Rechte</a>
+          <a href="${base}profil.html" id="nav-profil-link" class="${a('profil')} px-3 py-2 text-sm transition hidden items-center gap-1">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+            Mein Profil
+          </a>
           <a href="${base}hilfe.html" class="${a('hilfe')} px-3 py-2 text-sm transition">Hilfe</a>
           <a href="${base}#kontakt" class="${a('kontakt')} px-3 py-2 text-sm transition">Kontakt</a>
         </div>
@@ -173,6 +177,10 @@ const RosenwegNav = {
 
         <hr class="my-2">
         <a href="${base}rechteverwaltung.html" data-perm="rechteverwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Rechte</a>
+        <a href="${base}profil.html" id="nav-profil-link-mobile" class="px-3 py-2 text-blue-700 font-medium hover:bg-blue-50 rounded text-sm hidden items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+          Mein Profil
+        </a>
         <a href="${base}hilfe.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Hilfe</a>
         <a href="${base}#kontakt" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Kontakt</a>
 
@@ -296,6 +304,9 @@ const RosenwegNav = {
         userLink.classList.remove('hidden');
         logoutBtn.classList.remove('hidden');
         logoutBtn.addEventListener('click', () => AuthentikAuth.logout());
+        // Mein-Profil Eintrag in Hauptnav (Desktop + Mobile) sichtbar machen
+        document.getElementById('nav-profil-link')?.classList.replace('hidden', 'inline-flex');
+        document.getElementById('nav-profil-link-mobile')?.classList.replace('hidden', 'flex');
 
         if (mobileAuth) {
           mobileAuth.innerHTML = `
