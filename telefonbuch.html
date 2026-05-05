@@ -15,6 +15,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/js/authentik-auth.js?v=2"></script>
     <script src="/js/nav.js?v=2"></script>
+    <script src="/js/excel-export.js?v=1"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
@@ -35,7 +36,10 @@
         <div class="max-w-3xl mx-auto px-4 py-3">
             <div class="flex items-baseline justify-between mb-2">
                 <h1 class="text-xl font-bold text-gray-900">Telefonbuch</h1>
-                <span id="count" class="text-xs text-gray-400"></span>
+                <div class="flex items-center gap-3">
+                    <span id="count" class="text-xs text-gray-400"></span>
+                    <button id="btn-excel" type="button" class="text-xs inline-flex items-center gap-1 px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700">⬇ Excel</button>
+                </div>
             </div>
             <input id="search" type="search" autocomplete="off" placeholder="Suchen — Name, STWEG, Wohnung…"
                 class="w-full bg-gray-100 text-gray-800 placeholder-gray-400 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
@@ -149,6 +153,28 @@
         $('search').addEventListener('input', e => {
             clearTimeout(timer);
             timer = setTimeout(() => render(e.target.value.trim()), 100);
+        });
+
+        $('btn-excel').addEventListener('click', async () => {
+            const q = $('search').value.trim();
+            const filtered = allContacts.filter(c => matches(c, q));
+            const flat = filtered.flatMap(c => {
+                if (c.wohnungen.length === 0) {
+                    return [{ Name: c.name, Telefon: c.telefon || '', Email: c.email || '', STWEG: '', Wohnung: '', Rolle: '', Verstorben: c.deceased ? 'ja' : '' }];
+                }
+                return c.wohnungen.map(w => ({
+                    Name: c.name,
+                    Telefon: c.telefon || '',
+                    Email: c.email || '',
+                    STWEG: w.stweg,
+                    Wohnung: w.bezeichnung,
+                    Rolle: w.rolle,
+                    Verstorben: c.deceased ? 'ja' : '',
+                }));
+            });
+            try {
+                await RosenwegExcel.fromData(flat, 'telefonbuch-{date}.xlsx', 'Kontakte');
+            } catch (err) { alert('Excel-Export fehlgeschlagen: ' + err.message); }
         });
 
         load();
