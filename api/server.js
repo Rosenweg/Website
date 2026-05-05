@@ -4874,24 +4874,29 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
       const hausnr = rosenwegNrAusBezeichnung(w.bezeichnung);
       adresseZelle = hausnr ? `Rosenweg ${hausnr}, 4303 Kaiseraugst` : '4303 Kaiseraugst';
     }
-    // Einzelbrief: alle wenn einzelOnly, sonst nur fuer auswaerts.
-    // Eigentuemer werden nach Wohnadresse gruppiert — gleiche Adresse = ein
-    // gemeinsamer Brief (Ehepaare/Gesamteigentum bekommen 1 Brief mit beiden
-    // Namen), unterschiedliche Adressen = je ein eigener Brief.
+    // Einzelbrief: bei einzelOnly (STWEG 8) ALLE Eigentuemer; sonst NUR
+    // Eigentuemer mit auswaertiger Adresse — lokale Eigentuemer derselben
+    // Einheit bleiben auf der Sammelliste. So bekommt z.B. Salvatore Cali
+    // (wohnt Rosenweg 10) keinen Einzelbrief, auch wenn Mit-Eigentuemer
+    // Filippo+Lorenza extern wohnen.
     if (einzelOnly || auswaertsAdressen.length > 0) {
       const fallbackAdresse = korrespondenzAdressen[0]
         || (rosenwegNrAusBezeichnung(w.bezeichnung) ? `Rosenweg ${rosenwegNrAusBezeichnung(w.bezeichnung)}, 4303 Kaiseraugst` : '4303 Kaiseraugst');
       const eigKontakte = wInfo.eigentuemer.filter(e => e.name);
+      const eigToProcess = einzelOnly
+        ? eigKontakte
+        : eigKontakte.filter(e => isAuswaerts((e.adresse && e.adresse.trim()) || fallbackAdresse, stweg));
+      const briefStartIdx = einzelbriefe.length;
       if (eigKontakte.length === 0) {
+        // Keine Eigentuemer hinterlegt → ein Brief an Fallback-Adresse
         einzelbriefe.push({ bezeichnung: w.bezeichnung, eigentuemer: eigNamen, verwalter: verwNamen, adresse: fallbackAdresse, wq_zaehler: w.wertquote_zaehler || 0, wq_nenner: w.wertquote_nenner || 1000 });
-      } else {
-        // Eigentümer nach Adresse gruppieren — aggressive Normalisierung
-        // damit "Rw 18 4303 Kaiseraugst" und "Rw 18, 4303 Kaiseraugst"
-        // (mit/ohne Komma) als selbe Adresse erkannt werden.
+      } else if (eigToProcess.length > 0) {
+        // Nach Adresse gruppieren — Ehepaare/Gesamteigentum mit gleicher
+        // Adresse bekommen einen gemeinsamen Brief.
         const normAdr = a => (a || '').trim().toLowerCase()
           .replace(/[,;.]/g, ' ').replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
         const byAdr = new Map();
-        for (const eig of eigKontakte) {
+        for (const eig of eigToProcess) {
           const persAdr = (eig.adresse && eig.adresse.trim()) || fallbackAdresse;
           const key = normAdr(persAdr);
           if (!byAdr.has(key)) byAdr.set(key, { adresse: persAdr, namen: [] });
@@ -4908,8 +4913,8 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
           });
         }
       }
-      if (!einzelOnly) {
-        const briefeFuerWohnung = einzelbriefe.slice(-Math.max(1, [...new Set(eigKontakte.map(e => (e.adresse || fallbackAdresse).trim().toLowerCase()))].length));
+      if (!einzelOnly && einzelbriefe.length > briefStartIdx) {
+        const briefeFuerWohnung = einzelbriefe.slice(briefStartIdx);
         const liste = briefeFuerWohnung.map(b => b.eigentuemer.join(' & ')).join(' / ');
         const n = briefeFuerWohnung.length;
         adresseZelle += `<div class="auswaerts-marker">📮 ${n} Einzelbrief${n===1?'':'e'} an: ${escHtml(liste)}</div>`;
