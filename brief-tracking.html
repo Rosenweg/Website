@@ -7,6 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/js/authentik-auth.js?v=2"></script>
     <script src="/js/nav.js?v=2"></script>
+    <script src="/js/excel-export.js?v=1"></script>
     <link rel="icon" href="/logo-rosenweg.png">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -45,10 +46,13 @@
                         <h2 class="text-lg font-semibold text-gray-800">Versendete Briefe</h2>
                         <p id="count" class="text-xs text-gray-500"></p>
                     </div>
-                    <button onclick="loadBriefe()" class="text-sm text-blue-600 hover:underline">Neu laden</button>
+                    <div class="flex items-center gap-3">
+                      <button data-excel-export data-excel-source="#briefe-table" data-excel-name="brief-tracking-{date}.xlsx" data-excel-sheet="Briefe" class="text-sm inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-700">⬇ Excel</button>
+                      <button onclick="loadBriefe()" class="text-sm text-blue-600 hover:underline">Neu laden</button>
+                    </div>
                 </div>
                 <div class="overflow-x-auto">
-                    <table class="min-w-full text-sm">
+                    <table id="briefe-table" class="min-w-full text-sm">
                         <thead class="bg-gray-50 text-xs uppercase text-gray-500">
                             <tr>
                                 <th class="px-4 py-2 text-left">Empfänger</th>
