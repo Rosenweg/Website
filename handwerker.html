@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Handwerker & Lieferanten — Rosenweg</title>
+    <meta name="theme-color" content="#c41e1e">
+    <link rel="icon" href="/logo-rosenweg.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/nav.js?v=2"></script>
+    <script src="/js/excel-export.js?v=1"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .stars { color: #f59e0b; letter-spacing: 1px; }
+        .stars-empty { color: #d1d5db; }
+        tr.archived { opacity: 0.55; }
+        tr.archived td:first-child::before { content: '🗄 '; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script>RosenwegNav.init({ active: 'handwerker' });</script>
+
+    <main class="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+        <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center">
+            <p class="text-gray-600">Lade Login-Status…</p>
+        </div>
+
+        <div id="content" class="hidden">
+            <div class="mb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-900">Handwerker & Lieferanten</h1>
+                    <p class="text-sm text-gray-600 mt-1">Zentrale Liste empfohlener Handwerker, Lieferanten und Dienstleister mit Konditionen und Bewertung.</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <button id="btn-add" class="hidden text-sm inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700">+ Neuer Eintrag</button>
+                    <button id="btn-excel" type="button" class="text-sm inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-700">⬇ Excel</button>
+                </div>
+            </div>
+
+            <!-- Filter -->
+            <div class="bg-white rounded-lg shadow p-3 mb-4 flex flex-wrap items-center gap-3">
+                <input id="search" type="search" placeholder="Suchen — Firma, Ansprechpartner, Telefon, Notiz…"
+                       class="flex-1 min-w-[200px] bg-gray-50 text-sm px-3 py-2 rounded border focus:outline-none focus:ring-2 focus:ring-blue-300">
+                <select id="filter-kategorie" class="text-sm bg-gray-50 px-3 py-2 rounded border">
+                    <option value="">Alle Kategorien</option>
+                </select>
+                <label class="text-sm text-gray-700 inline-flex items-center gap-2 px-2">
+                    <input id="show-archived" type="checkbox" class="rounded">
+                    Archivierte zeigen
+                </label>
+                <span id="count" class="text-xs text-gray-500"></span>
+            </div>
+
+            <!-- Tabelle -->
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table id="handwerker-table" class="min-w-full text-sm">
+                        <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+                            <tr>
+                                <th class="px-3 py-2 text-left">Kategorie</th>
+                                <th class="px-3 py-2 text-left">Firma</th>
+                                <th class="px-3 py-2 text-left">Kontakt</th>
+                                <th class="px-3 py-2 text-left">Telefon / E-Mail</th>
+                                <th class="px-3 py-2 text-left">Bewertung</th>
+                                <th class="px-3 py-2 text-left">Letzter Auftrag</th>
+                                <th class="px-3 py-2 text-left no-export" data-no-export>Aktionen</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbody" class="divide-y divide-gray-100"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal -->
+    <div id="modal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-start sm:items-center justify-center p-4 overflow-y-auto">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl my-4">
+            <div class="px-5 py-3 border-b flex items-center justify-between">
+                <h2 id="modal-title" class="text-lg font-semibold text-gray-900">Neuer Eintrag</h2>
+                <button id="modal-close" class="text-gray-400 hover:text-gray-700 text-xl">×</button>
+            </div>
+            <form id="modal-form" class="px-5 py-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <input type="hidden" name="id">
+                <label class="block text-sm sm:col-span-1">
+                    <span class="text-gray-700">Kategorie *</span>
+                    <input name="kategorie" list="kat-list" required class="mt-1 w-full px-3 py-2 border rounded text-sm">
+                    <datalist id="kat-list"></datalist>
+                </label>
+                <label class="block text-sm sm:col-span-1">
+                    <span class="text-gray-700">Firma *</span>
+                    <input name="firma" required class="mt-1 w-full px-3 py-2 border rounded text-sm">
+                </label>
+                <label class="block text-sm">
+                    <span class="text-gray-700">Ansprechpartner</span>
+                    <input name="ansprechpartner" class="mt-1 w-full px-3 py-2 border rounded text-sm">
+                </label>
+                <label class="block text-sm">
+                    <span class="text-gray-700">Empfohlen von</span>
+                    <input name="empfohlen_von" class="mt-1 w-full px-3 py-2 border rounded text-sm" placeholder="z.B. Ausschuss STWEG3">
+                </label>
+                <label class="block text-sm">
+                    <span class="text-gray-700">Telefon</span>
+                    <input name="telefon" class="mt-1 w-full px-3 py-2 border rounded text-sm">
+                </label>
+                <label class="block text-sm">
+                    <span class="text-gray-700">Mobile</span>
+                    <input name="mobile" class="mt-1 w-full px-3 py-2 border rounded text-sm">
+                </label>
+                <label class="block text-sm">
+                    <span class="text-gray-700">E-Mail</span>
+                    <input name="email" type="email" class="mt-1 w-full px-3 py-2 border rounded text-sm">
+                </label>
+                <label class="block text-sm">
+                    <span class="text-gray-700">Website</span>
+                    <input name="website" class="mt-1 w-full px-3 py-2 border rounded text-sm">
+                </label>
+                <label class="block text-sm sm:col-span-2">
+                    <span class="text-gray-700">Adresse</span>
+                    <input name="adresse" class="mt-1 w-full px-3 py-2 border rounded text-sm">
+                </label>
+                <label class="block text-sm">
+                    <span class="text-gray-700">PLZ</span>
+                    <input name="plz" class="mt-1 w-full px-3 py-2 border rounded text-sm">
+                </label>
+                <label class="block text-sm">
+                    <span class="text-gray-700">Ort</span>
+                    <input name="ort" class="mt-1 w-full px-3 py-2 border rounded text-sm">
+                </label>
+                <label class="block text-sm">
+                    <span class="text-gray-700">Bewertung (1–5)</span>
+                    <select name="bewertung" class="mt-1 w-full px-3 py-2 border rounded text-sm">
+                        <option value="">— keine —</option>
+                        <option value="1">★ (1)</option>
+                        <option value="2">★★ (2)</option>
+                        <option value="3">★★★ (3)</option>
+                        <option value="4">★★★★ (4)</option>
+                        <option value="5">★★★★★ (5)</option>
+                    </select>
+                </label>
+                <label class="block text-sm">
+                    <span class="text-gray-700">Letzter Auftrag</span>
+                    <input name="letzter_auftrag" type="date" class="mt-1 w-full px-3 py-2 border rounded text-sm">
+                </label>
+                <label class="block text-sm sm:col-span-2">
+                    <span class="text-gray-700">Notiz / Konditionen</span>
+                    <textarea name="notiz" rows="3" class="mt-1 w-full px-3 py-2 border rounded text-sm" placeholder="Stundensatz, Kontext, Erfahrungen…"></textarea>
+                </label>
+                <label id="archived-row" class="hidden text-sm sm:col-span-2 inline-flex items-center gap-2">
+                    <input type="checkbox" name="archiviert" class="rounded">
+                    <span class="text-gray-700">Eintrag archivieren</span>
+                </label>
+                <div class="sm:col-span-2 flex flex-wrap gap-2 justify-end pt-2 border-t mt-2">
+                    <button id="modal-delete" type="button" class="hidden mr-auto text-sm px-3 py-1.5 text-red-700 hover:bg-red-50 rounded">🗄 Archivieren</button>
+                    <button id="modal-cancel" type="button" class="text-sm px-4 py-1.5 text-gray-700 hover:bg-gray-100 rounded">Abbrechen</button>
+                    <button type="submit" class="text-sm px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700">Speichern</button>
+                </div>
+                <div id="modal-error" class="hidden sm:col-span-2 text-sm text-red-600 mt-1"></div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    const $ = id => document.getElementById(id);
+
+    let allRows = [];
+    let canWrite = false;
+
+    function stars(n) {
+        if (!n) return '<span class="text-gray-300">—</span>';
+        const filled = '★'.repeat(n);
+        const empty = '<span class="stars-empty">' + '★'.repeat(5 - n) + '</span>';
+        return `<span class="stars">${filled}</span>${empty} <span class="text-gray-400 text-xs">(${n})</span>`;
+    }
+
+    function fmtDate(d) {
+        if (!d) return '';
+        try { return new Date(d).toLocaleDateString('de-CH'); } catch { return d; }
+    }
+
+    function matches(h, q) {
+        if (!q) return true;
+        const hay = [h.kategorie, h.firma, h.ansprechpartner, h.telefon, h.mobile, h.email,
+                     h.website, h.adresse, h.plz, h.ort, h.notiz, h.empfohlen_von]
+            .filter(Boolean).join(' ').toLowerCase();
+        return q.toLowerCase().split(/\s+/).every(t => hay.includes(t));
+    }
+
+    function render() {
+        const q = $('search').value.trim();
+        const kat = $('filter-kategorie').value;
+        const showArchived = $('show-archived').checked;
+        const tbody = $('tbody');
+        const rows = allRows.filter(h =>
+            (showArchived || !h.archiviert) &&
+            (!kat || h.kategorie === kat) &&
+            matches(h, q)
+        );
+        $('count').textContent = `${rows.length} Eintrag${rows.length === 1 ? '' : 'e'}`;
+        if (rows.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400">Keine Treffer.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = rows.map(h => {
+            const tel = h.mobile || h.telefon;
+            const telLink = tel ? `<a href="tel:${esc(tel.replace(/[^0-9+]/g,''))}" class="text-blue-600 hover:underline">${esc(tel)}</a>` : '';
+            const mailLink = h.email ? `<a href="mailto:${esc(h.email)}" class="text-blue-600 hover:underline block">${esc(h.email)}</a>` : '';
+            const webLink = h.website ? `<a href="${esc(h.website.startsWith('http') ? h.website : 'https://' + h.website)}" target="_blank" rel="noopener" class="text-blue-600 hover:underline text-xs block">${esc(h.website)}</a>` : '';
+            const actions = canWrite
+                ? `<button data-edit="${h.id}" class="text-blue-600 hover:underline text-xs">Bearbeiten</button>`
+                : '';
+            return `<tr class="hover:bg-gray-50 ${h.archiviert ? 'archived' : ''}">
+                <td class="px-3 py-2 text-gray-700">${esc(h.kategorie)}</td>
+                <td class="px-3 py-2"><div class="font-medium text-gray-900">${esc(h.firma)}</div>${webLink}${h.empfohlen_von ? '<div class="text-xs text-gray-400">empf.: ' + esc(h.empfohlen_von) + '</div>' : ''}</td>
+                <td class="px-3 py-2 text-gray-700">${esc(h.ansprechpartner || '')}</td>
+                <td class="px-3 py-2 text-gray-700">${telLink}${telLink && mailLink ? '<br>' : ''}${mailLink}</td>
+                <td class="px-3 py-2">${stars(h.bewertung)}</td>
+                <td class="px-3 py-2 text-gray-600">${esc(fmtDate(h.letzter_auftrag))}</td>
+                <td class="px-3 py-2 no-export" data-no-export>${actions}</td>
+            </tr>`;
+        }).join('');
+        tbody.querySelectorAll('button[data-edit]').forEach(btn => {
+            btn.addEventListener('click', () => openModal(parseInt(btn.dataset.edit, 10)));
+        });
+    }
+
+    function fillKategorienFilter() {
+        const sel = $('filter-kategorie');
+        const datalist = $('kat-list');
+        const current = sel.value;
+        const kategorien = [...new Set(allRows.map(h => h.kategorie).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
+        sel.innerHTML = '<option value="">Alle Kategorien</option>' +
+            kategorien.map(k => `<option value="${esc(k)}" ${k === current ? 'selected' : ''}>${esc(k)}</option>`).join('');
+        datalist.innerHTML = kategorien.map(k => `<option value="${esc(k)}">`).join('');
+    }
+
+    async function loadList() {
+        $('tbody').innerHTML = '<tr><td colspan="7" class="px-4 py-6 text-center text-gray-400">Lade…</td></tr>';
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/handwerker?include_archived=1');
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const data = await r.json();
+            allRows = data.handwerker || [];
+            fillKategorienFilter();
+            render();
+        } catch (err) {
+            $('tbody').innerHTML = `<tr><td colspan="7" class="px-4 py-6 text-center text-red-600">Fehler: ${esc(err.message)}</td></tr>`;
+        }
+    }
+
+    function openModal(id) {
+        const form = $('modal-form');
+        form.reset();
+        $('modal-error').classList.add('hidden');
+        const h = id ? allRows.find(x => x.id === id) : null;
+        $('modal-title').textContent = h ? `Bearbeiten: ${h.firma}` : 'Neuer Eintrag';
+        form.elements.id.value = h?.id || '';
+        if (h) {
+            for (const k of ['kategorie','firma','ansprechpartner','telefon','mobile','email','website','adresse','plz','ort','notiz','empfohlen_von']) {
+                if (form.elements[k]) form.elements[k].value = h[k] || '';
+            }
+            form.elements.bewertung.value = h.bewertung || '';
+            form.elements.letzter_auftrag.value = h.letzter_auftrag ? h.letzter_auftrag.slice(0, 10) : '';
+            form.elements.archiviert.checked = !!h.archiviert;
+            $('archived-row').classList.remove('hidden');
+            $('modal-delete').classList.toggle('hidden', !!h.archiviert);
+            $('modal-delete').onclick = () => archiveEntry(h.id);
+        } else {
+            $('archived-row').classList.add('hidden');
+            $('modal-delete').classList.add('hidden');
+        }
+        $('modal').classList.remove('hidden');
+    }
+
+    function closeModal() {
+        $('modal').classList.add('hidden');
+    }
+
+    async function saveEntry(e) {
+        e.preventDefault();
+        const form = $('modal-form');
+        const fd = new FormData(form);
+        const body = {};
+        fd.forEach((v, k) => { body[k] = typeof v === 'string' ? v.trim() : v; });
+        body.archiviert = form.elements.archiviert.checked;
+        if (!body.bewertung) body.bewertung = null;
+        if (!body.letzter_auftrag) body.letzter_auftrag = null;
+        const id = body.id;
+        delete body.id;
+        const url = id ? `/api/handwerker/${id}` : '/api/handwerker';
+        const method = id ? 'PUT' : 'POST';
+        try {
+            const r = await AuthentikAuth.apiFetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) {
+                const err = await r.json().catch(() => ({}));
+                throw new Error(err.error || ('HTTP ' + r.status));
+            }
+            closeModal();
+            await loadList();
+        } catch (err) {
+            const e = $('modal-error');
+            e.textContent = err.message;
+            e.classList.remove('hidden');
+        }
+    }
+
+    async function archiveEntry(id) {
+        if (!confirm('Eintrag archivieren? (Kann durch "Archivierte zeigen" wiederhergestellt werden)')) return;
+        try {
+            const r = await AuthentikAuth.apiFetch(`/api/handwerker/${id}`, { method: 'DELETE' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            closeModal();
+            await loadList();
+        } catch (err) {
+            alert('Fehler: ' + err.message);
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        const user = await AuthentikAuth.init({ requireAuth: true });
+        if (!user) return;
+        if (!AuthentikAuth.hasPermission('handwerker', 'read')) {
+            $('auth-gate').innerHTML = '<p class="text-red-600">Du hast keine Berechtigung für diese Seite.</p>';
+            return;
+        }
+        canWrite = AuthentikAuth.hasPermission('handwerker', 'write');
+        $('auth-gate').classList.add('hidden');
+        $('content').classList.remove('hidden');
+        if (canWrite) $('btn-add').classList.remove('hidden');
+
+        $('search').addEventListener('input', render);
+        $('filter-kategorie').addEventListener('change', render);
+        $('show-archived').addEventListener('change', render);
+        $('btn-add').addEventListener('click', () => openModal(null));
+        $('modal-close').addEventListener('click', closeModal);
+        $('modal-cancel').addEventListener('click', closeModal);
+        $('modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
+        $('modal-form').addEventListener('submit', saveEntry);
+        $('btn-excel').addEventListener('click', async () => {
+            const hidden = [...document.querySelectorAll('.no-export')];
+            hidden.forEach(el => el.style.display = 'none');
+            const btn = $('btn-excel');
+            const orig = btn.innerHTML;
+            btn.disabled = true; btn.innerHTML = '⏳ Lade…';
+            try {
+                await RosenwegExcel.fromTable('#handwerker-table', 'handwerker-{date}.xlsx', 'Handwerker');
+            } catch (err) {
+                alert('Excel-Export fehlgeschlagen: ' + err.message);
+            } finally {
+                hidden.forEach(el => el.style.display = '');
+                btn.disabled = false; btn.innerHTML = orig;
+            }
+        });
+
+        await loadList();
+    });
+    </script>
+</body>
+</html>

@@ -748,6 +748,7 @@ const MANAGED_PAGES = [
   { id: 'rechteverwaltung', label: 'Rechteverwaltung' },
   { id: 'wohnungsverwaltung', label: 'Wohnungsverwaltung' },
   { id: 'proxmox-verwaltung', label: 'Proxmox-Verwaltung' },
+  { id: 'handwerker', label: 'Handwerker & Lieferanten' },
 ];
 
 const ACCESS_LEVELS = { none: 0, read: 1, write: 2 };
@@ -8303,6 +8304,130 @@ app.delete('/api/projects/:slug/attachments/:id', authMiddleware, requireAusschu
   }
 });
 
+// ─── Handwerker- / Lieferantenliste ────────────────────────────────
+app.get('/api/handwerker', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
+  try {
+    const includeArchived = req.query.include_archived === '1';
+    const kategorie = (req.query.kategorie || '').trim();
+    const where = [];
+    const params = [];
+    if (!includeArchived) where.push('archiviert = false');
+    if (kategorie) { params.push(kategorie); where.push(`kategorie = $${params.length}`); }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const result = await pool.query(
+      `SELECT * FROM handwerker ${whereSql} ORDER BY archiviert ASC, kategorie ASC, firma ASC`,
+      params
+    );
+    res.json({ handwerker: result.rows });
+  } catch (err) {
+    console.error('Handwerker list error:', err);
+    res.status(500).json({ error: 'Fehler beim Laden der Handwerker' });
+  }
+});
+
+app.get('/api/handwerker/kategorien', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT kategorie, COUNT(*)::int AS anzahl FROM handwerker WHERE archiviert = false GROUP BY kategorie ORDER BY kategorie`
+    );
+    res.json({ kategorien: result.rows });
+  } catch (err) {
+    console.error('Handwerker kategorien error:', err);
+    res.status(500).json({ error: 'Fehler beim Laden der Kategorien' });
+  }
+});
+
+function sanitizeHandwerker(b) {
+  const trim = (v) => (v == null ? null : String(v).trim() || null);
+  const bewertung = b.bewertung == null || b.bewertung === '' ? null : parseInt(b.bewertung, 10);
+  return {
+    kategorie: trim(b.kategorie),
+    firma: trim(b.firma),
+    ansprechpartner: trim(b.ansprechpartner),
+    telefon: trim(b.telefon),
+    mobile: trim(b.mobile),
+    email: trim(b.email),
+    website: trim(b.website),
+    adresse: trim(b.adresse),
+    plz: trim(b.plz),
+    ort: trim(b.ort),
+    notiz: trim(b.notiz),
+    bewertung: Number.isInteger(bewertung) && bewertung >= 1 && bewertung <= 5 ? bewertung : null,
+    letzter_auftrag: trim(b.letzter_auftrag),
+    empfohlen_von: trim(b.empfohlen_von),
+  };
+}
+
+app.post('/api/handwerker', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+  try {
+    const h = sanitizeHandwerker(req.body || {});
+    if (!h.kategorie || !h.firma) return res.status(400).json({ error: 'Kategorie und Firma sind Pflichtfelder' });
+    const result = await pool.query(
+      `INSERT INTO handwerker (kategorie, firma, ansprechpartner, telefon, mobile, email, website,
+         adresse, plz, ort, notiz, bewertung, letzter_auftrag, empfohlen_von)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       RETURNING *`,
+      [h.kategorie, h.firma, h.ansprechpartner, h.telefon, h.mobile, h.email, h.website,
+       h.adresse, h.plz, h.ort, h.notiz, h.bewertung, h.letzter_auftrag, h.empfohlen_von]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Handwerker create error:', err);
+    res.status(500).json({ error: 'Fehler beim Anlegen' });
+  }
+});
+
+app.put('/api/handwerker/:id', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: 'Ungültige ID' });
+    const h = sanitizeHandwerker(req.body || {});
+    if (!h.kategorie || !h.firma) return res.status(400).json({ error: 'Kategorie und Firma sind Pflichtfelder' });
+    const archivedFlag = req.body && typeof req.body.archiviert === 'boolean' ? req.body.archiviert : null;
+    const result = await pool.query(
+      `UPDATE handwerker SET
+         kategorie=$1, firma=$2, ansprechpartner=$3, telefon=$4, mobile=$5, email=$6, website=$7,
+         adresse=$8, plz=$9, ort=$10, notiz=$11, bewertung=$12, letzter_auftrag=$13, empfohlen_von=$14,
+         archiviert = COALESCE($15, archiviert),
+         updated_at = NOW()
+       WHERE id=$16 RETURNING *`,
+      [h.kategorie, h.firma, h.ansprechpartner, h.telefon, h.mobile, h.email, h.website,
+       h.adresse, h.plz, h.ort, h.notiz, h.bewertung, h.letzter_auftrag, h.empfohlen_von,
+       archivedFlag, id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Eintrag nicht gefunden' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Handwerker update error:', err);
+    res.status(500).json({ error: 'Fehler beim Aktualisieren' });
+  }
+});
+
+app.delete('/api/handwerker/:id', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: 'Ungültige ID' });
+    const hard = req.query.hard === '1';
+    if (hard) {
+      const groups = req.user?.groups || [];
+      const isTechnik = groups.some(g => g.toLowerCase() === 'technik');
+      if (!isTechnik) return res.status(403).json({ error: 'Hartes Löschen nur für Technik-Gruppe' });
+      const result = await pool.query('DELETE FROM handwerker WHERE id = $1 RETURNING id', [id]);
+      if (result.rows.length === 0) return res.status(404).json({ error: 'Eintrag nicht gefunden' });
+      return res.json({ success: true, hard_deleted: true });
+    }
+    const result = await pool.query(
+      'UPDATE handwerker SET archiviert = true, updated_at = NOW() WHERE id = $1 AND archiviert = false RETURNING id',
+      [id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Eintrag nicht gefunden oder bereits archiviert' });
+    res.json({ success: true, archived: true });
+  } catch (err) {
+    console.error('Handwerker delete error:', err);
+    res.status(500).json({ error: 'Fehler beim Löschen' });
+  }
+});
+
 // ─── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
@@ -8657,6 +8782,38 @@ async function initDB() {
         access VARCHAR(10) NOT NULL DEFAULT 'none' CHECK(access IN ('none', 'read', 'write')),
         UNIQUE(group_name, page)
       );
+    `);
+
+    // Handwerker- und Lieferantenliste
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS handwerker (
+        id SERIAL PRIMARY KEY,
+        kategorie VARCHAR(80) NOT NULL,
+        firma VARCHAR(255) NOT NULL,
+        ansprechpartner VARCHAR(255),
+        telefon VARCHAR(100),
+        mobile VARCHAR(100),
+        email VARCHAR(255),
+        website VARCHAR(255),
+        adresse TEXT,
+        plz VARCHAR(20),
+        ort VARCHAR(120),
+        notiz TEXT,
+        bewertung INTEGER CHECK (bewertung >= 1 AND bewertung <= 5),
+        letzter_auftrag DATE,
+        empfohlen_von VARCHAR(255),
+        archiviert BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_handwerker_kategorie ON handwerker(kategorie);
+      CREATE INDEX IF NOT EXISTS idx_handwerker_archiviert ON handwerker(archiviert);
+      DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM pg_proc WHERE proname='audit_trigger_fn')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_name='handwerker_audit') THEN
+          EXECUTE 'CREATE TRIGGER handwerker_audit AFTER INSERT OR UPDATE OR DELETE ON handwerker FOR EACH ROW EXECUTE FUNCTION audit_trigger_fn()';
+        END IF;
+      END $$;
     `);
 
     await client.query(`

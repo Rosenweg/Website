@@ -100,6 +100,7 @@ const RosenwegNav = {
               <a href="${base}verwaltung-admin.html" data-perm-any="ausschuss,technik,praesident" class="${dropA('verwaltungadmin')} block px-4 py-2 text-sm">Verwaltung</a>
               <a href="${base}grundbuch.html" data-perm-any="eigentuemer" class="${dropA('grundbuch')} block px-4 py-2 text-sm">Grundbuch erfassen</a>
               <a href="${base}brief-tracking.html" data-perm-any="ausschuss,technik,praesident" class="${dropA('brief-tracking')} block px-4 py-2 text-sm">Brief-Tracking</a>
+              <a href="${base}handwerker.html" data-perm="handwerker" class="${dropA('handwerker')} block px-4 py-2 text-sm">Handwerker & Lieferanten</a>
               <a href="${base}proxmox-verwaltung.html" data-perm="proxmox-verwaltung" class="${dropA('proxmox')} block px-4 py-2 text-sm">Proxmox</a>
             </div>
           </div>
@@ -165,6 +166,7 @@ const RosenwegNav = {
         <a href="${base}verwaltung-admin.html" data-perm-any="ausschuss,technik,praesident" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Verwaltung</a>
         <a href="${base}grundbuch.html" data-perm-any="eigentuemer" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Grundbuch erfassen</a>
         <a href="${base}brief-tracking.html" data-perm-any="ausschuss,technik,praesident" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Brief-Tracking</a>
+        <a href="${base}handwerker.html" data-perm="handwerker" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Handwerker & Lieferanten</a>
         <a href="${base}proxmox-verwaltung.html" data-perm="proxmox-verwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Proxmox</a>
 
         <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Infos</div>
