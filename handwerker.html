@@ -18,6 +18,8 @@
         tr.archived { opacity: 0.55; }
         tr.archived td:first-child::before { content: '🗄 '; }
         .chip { display: inline-block; padding: 1px 8px; margin: 1px 2px 1px 0; background: #eef2ff; color: #3730a3; border-radius: 999px; font-size: 11px; line-height: 16px; white-space: nowrap; }
+        .person-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; background: #f9fafb; }
+        .person-card + .person-card { margin-top: 8px; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -66,7 +68,7 @@
                             <tr>
                                 <th class="px-3 py-2 text-left">Kategorie</th>
                                 <th class="px-3 py-2 text-left">Firma / Leistungen</th>
-                                <th class="px-3 py-2 text-left">Kontakt</th>
+                                <th class="px-3 py-2 text-left">Mitarbeiter</th>
                                 <th class="px-3 py-2 text-left">Telefon / E-Mail</th>
                                 <th class="px-3 py-2 text-left">Bewertung</th>
                                 <th class="px-3 py-2 text-left">Letzter Auftrag</th>
@@ -103,16 +105,12 @@
                     <input name="leistungen" list="leistungen-list" class="mt-1 w-full px-3 py-2 border rounded text-sm">
                     <datalist id="leistungen-list"></datalist>
                 </label>
-                <label class="block text-sm">
-                    <span class="text-gray-700">Ansprechpartner</span>
-                    <input name="ansprechpartner" class="mt-1 w-full px-3 py-2 border rounded text-sm">
-                </label>
-                <label class="block text-sm">
+                <label class="block text-sm sm:col-span-2">
                     <span class="text-gray-700">Empfohlen von</span>
                     <input name="empfohlen_von" class="mt-1 w-full px-3 py-2 border rounded text-sm" placeholder="z.B. Ausschuss STWEG3">
                 </label>
                 <label class="block text-sm">
-                    <span class="text-gray-700">Telefon</span>
+                    <span class="text-gray-700">Telefon (Zentrale)</span>
                     <input name="telefon" class="mt-1 w-full px-3 py-2 border rounded text-sm">
                 </label>
                 <label class="block text-sm">
@@ -120,13 +118,33 @@
                     <input name="mobile" class="mt-1 w-full px-3 py-2 border rounded text-sm">
                 </label>
                 <label class="block text-sm">
-                    <span class="text-gray-700">E-Mail</span>
+                    <span class="text-gray-700">E-Mail (allgemein)</span>
                     <input name="email" type="email" class="mt-1 w-full px-3 py-2 border rounded text-sm">
                 </label>
                 <label class="block text-sm">
                     <span class="text-gray-700">Website</span>
                     <input name="website" class="mt-1 w-full px-3 py-2 border rounded text-sm">
                 </label>
+                <input type="hidden" name="ansprechpartner">
+
+                <!-- Personen / Mitarbeiter -->
+                <div class="sm:col-span-2 border-t pt-3 mt-1">
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="text-sm font-semibold text-gray-700">Mitarbeiter / Ansprechpartner</h3>
+                        <button id="btn-add-person" type="button" class="text-xs px-2 py-1 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded">+ Person hinzufügen</button>
+                    </div>
+                    <div id="personen-list" class="space-y-2"></div>
+                    <p id="personen-empty" class="text-xs text-gray-400 py-2">Noch keine Personen erfasst.</p>
+                    <datalist id="rolle-list">
+                        <option value="Inhaber">
+                        <option value="Geschäftsführer">
+                        <option value="Disponent">
+                        <option value="Techniker">
+                        <option value="Buchhaltung">
+                        <option value="Sekretariat">
+                        <option value="Notdienst">
+                    </datalist>
+                </div>
                 <label class="block text-sm sm:col-span-2">
                     <span class="text-gray-700">Adresse</span>
                     <input name="adresse" class="mt-1 w-full px-3 py-2 border rounded text-sm">
@@ -224,6 +242,7 @@
     let canWrite = false;
     let currentHandwerkerId = null;
     let currentAuftraege = [];
+    let personenCounter = 0;
 
     function stars(n) {
         if (!n) return '<span class="text-gray-300">—</span>';
@@ -252,8 +271,11 @@
     function matches(h, q) {
         if (!q) return true;
         const leistungen = Array.isArray(h.leistungen) ? h.leistungen.join(' ') : '';
+        const personen = Array.isArray(h.personen)
+            ? h.personen.map(p => [p.name, p.rolle, p.email, p.telefon, p.mobile].filter(Boolean).join(' ')).join(' ')
+            : '';
         const hay = [h.kategorie, h.firma, h.ansprechpartner, h.telefon, h.mobile, h.email,
-                     h.website, h.adresse, h.plz, h.ort, h.notiz, h.empfohlen_von, leistungen]
+                     h.website, h.adresse, h.plz, h.ort, h.notiz, h.empfohlen_von, leistungen, personen]
             .filter(Boolean).join(' ').toLowerCase();
         return q.toLowerCase().split(/\s+/).every(t => hay.includes(t));
     }
@@ -281,6 +303,17 @@
             const mailLink = h.email ? `<a href="mailto:${esc(h.email)}" class="text-blue-600 hover:underline block">${esc(h.email)}</a>` : '';
             const webLink = h.website ? `<a href="${esc(h.website.startsWith('http') ? h.website : 'https://' + h.website)}" target="_blank" rel="noopener" class="text-blue-600 hover:underline text-xs block">${esc(h.website)}</a>` : '';
             const chips = renderChips(h.leistungen);
+            const personen = Array.isArray(h.personen) ? h.personen : [];
+            let personenCell = '';
+            if (personen.length > 0) {
+                const first = personen[0];
+                const more = personen.length - 1;
+                const subline = first.rolle ? `<div class="text-xs text-gray-500">${esc(first.rolle)}</div>` : '';
+                const moreLine = more > 0 ? `<div class="text-xs text-gray-400">+ ${more} weitere</div>` : '';
+                personenCell = `<div class="font-medium">${esc(first.name)}</div>${subline}${moreLine}`;
+            } else if (h.ansprechpartner) {
+                personenCell = `<div class="text-gray-700">${esc(h.ansprechpartner)}</div>`;
+            }
             const actions = canWrite
                 ? `<button data-edit="${h.id}" class="text-blue-600 hover:underline text-xs">Bearbeiten</button>`
                 : '';
@@ -292,7 +325,7 @@
                     ${chips ? '<div class="mt-1">' + chips + '</div>' : ''}
                     ${h.empfohlen_von ? '<div class="text-xs text-gray-400 mt-0.5">empf.: ' + esc(h.empfohlen_von) + '</div>' : ''}
                 </td>
-                <td class="px-3 py-2 text-gray-700 align-top">${esc(h.ansprechpartner || '')}</td>
+                <td class="px-3 py-2 text-gray-700 align-top">${personenCell}</td>
                 <td class="px-3 py-2 text-gray-700 align-top">${telLink}${telLink && mailLink ? '<br>' : ''}${mailLink}</td>
                 <td class="px-3 py-2 align-top">${stars(h.bewertung)}</td>
                 <td class="px-3 py-2 text-gray-600 align-top">${esc(fmtDate(h.letzter_auftrag))}</td>
@@ -341,6 +374,7 @@
         $('modal-title').textContent = h ? `Bearbeiten: ${h.firma}` : 'Neuer Eintrag';
         form.elements.id.value = h?.id || '';
         currentHandwerkerId = h?.id || null;
+        $('personen-list').innerHTML = '';
         if (h) {
             for (const k of ['kategorie','firma','ansprechpartner','telefon','mobile','email','website','adresse','plz','ort','notiz','empfohlen_von']) {
                 if (form.elements[k]) form.elements[k].value = h[k] || '';
@@ -355,12 +389,20 @@
             $('auftraege-section').classList.remove('hidden');
             $('auftrag-add-btn').classList.toggle('hidden', !canWrite);
             loadAuftraege(h.id);
+            // Personen aus Datensatz laden, oder Fallback auf altes ansprechpartner-Feld
+            if (Array.isArray(h.personen) && h.personen.length > 0) {
+                h.personen.forEach(p => addPersonCard(p));
+            } else if (h.ansprechpartner) {
+                addPersonCard({ name: h.ansprechpartner });
+            }
         } else {
             $('archived-row').classList.add('hidden');
             $('modal-delete').classList.add('hidden');
             $('auftraege-section').classList.add('hidden');
             currentAuftraege = [];
         }
+        updatePersonenEmpty();
+        $('btn-add-person').classList.toggle('hidden', !canWrite);
         cancelAuftragForm();
         $('modal').classList.remove('hidden');
     }
@@ -381,6 +423,7 @@
         if (!body.bewertung) body.bewertung = null;
         if (!body.letzter_auftrag) body.letzter_auftrag = null;
         body.leistungen = body.leistungen ? body.leistungen.split(',').map(s => s.trim()).filter(Boolean) : [];
+        body.personen = collectPersonen();
         const id = body.id;
         delete body.id;
         const url = id ? `/api/handwerker/${id}` : '/api/handwerker';
@@ -420,6 +463,57 @@
         } catch (err) {
             alert('Fehler: ' + err.message);
         }
+    }
+
+    // ─── Personen / Mitarbeiter ─────────────────────────────────
+    function addPersonCard(p = {}) {
+        const list = $('personen-list');
+        const cardId = `person-${++personenCounter}`;
+        const html = `
+            <div id="${cardId}" data-person-id="${esc(p.id || '')}" class="person-card">
+                <div class="flex items-center justify-between gap-2 mb-2">
+                    <input type="text" list="rolle-list" value="${esc(p.rolle || '')}" placeholder="Rolle (z.B. Disponent)" class="person-rolle text-xs px-2 py-1 border rounded bg-white w-48">
+                    <button type="button" data-remove-person="${cardId}" class="text-red-400 hover:text-red-600 p-1" title="Entfernen">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input type="text" value="${esc(p.name || '')}" placeholder="Name *" class="person-name w-full px-2 py-1 border rounded text-sm sm:col-span-2" required>
+                    <input type="email" value="${esc(p.email || '')}" placeholder="E-Mail" class="person-email w-full px-2 py-1 border rounded text-sm">
+                    <input type="tel" value="${esc(p.telefon || '')}" placeholder="Telefon" class="person-telefon w-full px-2 py-1 border rounded text-sm">
+                    <input type="tel" value="${esc(p.mobile || '')}" placeholder="Mobile" class="person-mobile w-full px-2 py-1 border rounded text-sm sm:col-span-2">
+                    <input type="text" value="${esc(p.notiz || '')}" placeholder="Notiz (optional)" class="person-notiz w-full px-2 py-1 border rounded text-sm sm:col-span-2">
+                </div>
+            </div>`;
+        list.insertAdjacentHTML('beforeend', html);
+        list.querySelector(`#${cardId} button[data-remove-person]`).addEventListener('click', () => {
+            document.getElementById(cardId)?.remove();
+            updatePersonenEmpty();
+        });
+        updatePersonenEmpty();
+    }
+
+    function updatePersonenEmpty() {
+        const has = $('personen-list').children.length > 0;
+        $('personen-empty').classList.toggle('hidden', has);
+    }
+
+    function collectPersonen() {
+        const out = [];
+        $('personen-list').querySelectorAll('.person-card').forEach(card => {
+            const name = card.querySelector('.person-name')?.value?.trim() || '';
+            if (!name) return;
+            out.push({
+                id: card.dataset.personId || null,
+                rolle: card.querySelector('.person-rolle')?.value?.trim() || null,
+                name,
+                email: card.querySelector('.person-email')?.value?.trim() || null,
+                telefon: card.querySelector('.person-telefon')?.value?.trim() || null,
+                mobile: card.querySelector('.person-mobile')?.value?.trim() || null,
+                notiz: card.querySelector('.person-notiz')?.value?.trim() || null,
+            });
+        });
+        return out;
     }
 
     // ─── Auftragshistorie ───────────────────────────────────────
@@ -605,6 +699,7 @@
         $('filter-leistung').addEventListener('change', render);
         $('show-archived').addEventListener('change', render);
         $('btn-add').addEventListener('click', () => openModal(null));
+        $('btn-add-person').addEventListener('click', () => addPersonCard());
         $('modal-close').addEventListener('click', closeModal);
         $('modal-cancel').addEventListener('click', closeModal);
         $('modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
