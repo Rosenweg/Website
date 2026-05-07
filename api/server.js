@@ -6515,8 +6515,41 @@ app.get('/api/stweg/:stweg/events', authMiddleware, async (req, res) => {
       location: e.location, category: e.category, all_day: e.all_day,
       id: e.id, source: 'stweg',
     }));
+    // Wartungen als virtuelle Events einmischen (aktive Vertraege mit naechster_termin
+    // dieser STWEG oder ohne STWEG-Zuordnung, ab heute - 7 Tage bis +365)
+    let wartungEvents = [];
+    try {
+      const wartungen = await pool.query(
+        `SELECT v.id, v.titel, v.beschreibung, v.naechster_termin, v.frequenz_einheit, v.frequenz_intervall,
+                v.handwerker_id, h.firma, h.kategorie
+           FROM handwerker_vertraege v
+           JOIN handwerker h ON h.id = v.handwerker_id
+          WHERE v.status = 'aktiv'
+            AND v.naechster_termin IS NOT NULL
+            AND (v.stweg = $1 OR v.stweg IS NULL)
+            AND v.naechster_termin BETWEEN CURRENT_DATE - INTERVAL '7 days' AND CURRENT_DATE + INTERVAL '365 days'
+            AND h.archiviert = false
+          ORDER BY v.naechster_termin`,
+        [stweg]
+      );
+      wartungEvents = wartungen.rows.map(v => ({
+        id: `wartung-${v.id}`,
+        title: `🔧 ${v.titel}`,
+        description: `${v.beschreibung || ''}${v.beschreibung ? '\n' : ''}${v.firma} (${v.kategorie})`.trim(),
+        start: v.naechster_termin,
+        end: null,
+        location: null,
+        category: 'wartung',
+        all_day: true,
+        source: 'wartung',
+        handwerker_id: v.handwerker_id,
+        vertrag_id: v.id,
+      }));
+    } catch (wErr) {
+      console.error('Wartungs-Events Merge error:', wErr.message);
+    }
     // Merge and sort by date
-    const all = [...stwegEvents, ...globalEvents].sort((a, b) => new Date(a.start) - new Date(b.start));
+    const all = [...stwegEvents, ...globalEvents, ...wartungEvents].sort((a, b) => new Date(a.start) - new Date(b.start));
     res.json(all);
   } catch (err) {
     res.status(500).json({ error: 'Fehler' });
@@ -8567,6 +8600,161 @@ async function syncLetzterAuftrag(client, handwerkerId) {
   );
 }
 
+// Bei Auftrag mit vertrag_id: naechster_termin neu berechnen aus letztem Auftrag + frequenz
+const FREQUENZ_PG_UNIT = { tage: 'days', wochen: 'weeks', monate: 'months', jahre: 'years' };
+async function recomputeNaechsterTermin(client, vertragId) {
+  if (!Number.isFinite(vertragId)) return;
+  const v = await client.query('SELECT frequenz_einheit, frequenz_intervall FROM handwerker_vertraege WHERE id = $1', [vertragId]);
+  if (v.rows.length === 0) return;
+  const { frequenz_einheit, frequenz_intervall } = v.rows[0];
+  const unit = FREQUENZ_PG_UNIT[frequenz_einheit];
+  if (!unit || !frequenz_intervall || frequenz_intervall < 1) {
+    await client.query('UPDATE handwerker_vertraege SET naechster_termin = NULL WHERE id = $1', [vertragId]);
+    return;
+  }
+  const last = await client.query(
+    'SELECT MAX(datum) AS last FROM handwerker_auftraege WHERE vertrag_id = $1',
+    [vertragId]
+  );
+  if (!last.rows[0]?.last) return;
+  await client.query(
+    `UPDATE handwerker_vertraege
+        SET naechster_termin = ($1::date + $2::interval)::date,
+            updated_at = NOW()
+      WHERE id = $3`,
+    [last.rows[0].last, `${frequenz_intervall} ${unit}`, vertragId]
+  );
+}
+
+// Vertraege pro Handwerker
+function sanitizeVertrag(b) {
+  const trim = (v) => (v == null ? null : String(v).trim() || null);
+  const intvl = b.frequenz_intervall == null || b.frequenz_intervall === '' ? null : parseInt(b.frequenz_intervall, 10);
+  const kosten = b.jahres_kosten_chf == null || b.jahres_kosten_chf === '' ? null : parseFloat(b.jahres_kosten_chf);
+  const kuendFrist = b.kuendigungsfrist_tage == null || b.kuendigungsfrist_tage === '' ? null : parseInt(b.kuendigungsfrist_tage, 10);
+  const stweg = b.stweg == null || b.stweg === '' ? null : parseInt(b.stweg, 10);
+  const einheit = trim(b.frequenz_einheit);
+  return {
+    titel: trim(b.titel),
+    beschreibung: trim(b.beschreibung),
+    frequenz_einheit: einheit && FREQUENZ_PG_UNIT[einheit] ? einheit : null,
+    frequenz_intervall: Number.isFinite(intvl) && intvl >= 1 ? intvl : null,
+    naechster_termin: trim(b.naechster_termin),
+    startet_am: trim(b.startet_am),
+    endet_am: trim(b.endet_am),
+    kuendigungsfrist_tage: Number.isFinite(kuendFrist) && kuendFrist >= 0 ? kuendFrist : null,
+    jahres_kosten_chf: Number.isFinite(kosten) ? kosten : null,
+    status: ['aktiv','gekuendigt','pausiert'].includes(b.status) ? b.status : 'aktiv',
+    vertragsdokument_url: trim(b.vertragsdokument_url),
+    notiz: trim(b.notiz),
+    stweg: Number.isFinite(stweg) && stweg >= 1 && stweg <= 8 ? stweg : null,
+  };
+}
+
+app.get('/api/handwerker/:id/vertraege', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige Handwerker-ID' });
+    const result = await pool.query(
+      `SELECT * FROM handwerker_vertraege WHERE handwerker_id = $1 ORDER BY status ASC, naechster_termin NULLS LAST, titel`,
+      [id]
+    );
+    res.json({ vertraege: result.rows });
+  } catch (err) {
+    console.error('Vertraege list error:', err);
+    res.status(500).json({ error: 'Fehler beim Laden der Verträge' });
+  }
+});
+
+app.post('/api/handwerker/:id/vertraege', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige Handwerker-ID' });
+    const v = sanitizeVertrag(req.body || {});
+    if (!v.titel) return res.status(400).json({ error: 'Titel ist Pflichtfeld' });
+    const result = await pool.query(
+      `INSERT INTO handwerker_vertraege
+         (handwerker_id, titel, beschreibung, frequenz_einheit, frequenz_intervall, naechster_termin,
+          startet_am, endet_am, kuendigungsfrist_tage, jahres_kosten_chf, status,
+          vertragsdokument_url, notiz, stweg)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       RETURNING *`,
+      [id, v.titel, v.beschreibung, v.frequenz_einheit, v.frequenz_intervall, v.naechster_termin,
+       v.startet_am, v.endet_am, v.kuendigungsfrist_tage, v.jahres_kosten_chf, v.status,
+       v.vertragsdokument_url, v.notiz, v.stweg]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23503') return res.status(404).json({ error: 'Handwerker nicht gefunden' });
+    console.error('Vertrag create error:', err);
+    res.status(500).json({ error: 'Fehler beim Anlegen' });
+  }
+});
+
+app.put('/api/handwerker/:id/vertraege/:vid', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const vid = parseInt(req.params.vid, 10);
+    if (!Number.isFinite(id) || !Number.isFinite(vid)) return res.status(400).json({ error: 'Ungültige IDs' });
+    const v = sanitizeVertrag(req.body || {});
+    if (!v.titel) return res.status(400).json({ error: 'Titel ist Pflichtfeld' });
+    const result = await pool.query(
+      `UPDATE handwerker_vertraege SET
+         titel=$1, beschreibung=$2, frequenz_einheit=$3, frequenz_intervall=$4, naechster_termin=$5,
+         startet_am=$6, endet_am=$7, kuendigungsfrist_tage=$8, jahres_kosten_chf=$9, status=$10,
+         vertragsdokument_url=$11, notiz=$12, stweg=$13, updated_at=NOW()
+       WHERE id=$14 AND handwerker_id=$15 RETURNING *`,
+      [v.titel, v.beschreibung, v.frequenz_einheit, v.frequenz_intervall, v.naechster_termin,
+       v.startet_am, v.endet_am, v.kuendigungsfrist_tage, v.jahres_kosten_chf, v.status,
+       v.vertragsdokument_url, v.notiz, v.stweg, vid, id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Vertrag nicht gefunden' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Vertrag update error:', err);
+    res.status(500).json({ error: 'Fehler beim Aktualisieren' });
+  }
+});
+
+app.delete('/api/handwerker/:id/vertraege/:vid', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const vid = parseInt(req.params.vid, 10);
+    if (!Number.isFinite(id) || !Number.isFinite(vid)) return res.status(400).json({ error: 'Ungültige IDs' });
+    const result = await pool.query(
+      'DELETE FROM handwerker_vertraege WHERE id = $1 AND handwerker_id = $2 RETURNING id',
+      [vid, id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Vertrag nicht gefunden' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Vertrag delete error:', err);
+    res.status(500).json({ error: 'Fehler beim Löschen' });
+  }
+});
+
+// Anstehende Wartungen ueber alle Handwerker
+app.get('/api/handwerker-vertraege/anstehend', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
+  try {
+    const days = Math.min(365, Math.max(7, parseInt(req.query.days, 10) || 90));
+    const result = await pool.query(
+      `SELECT v.*, h.firma, h.kategorie
+         FROM handwerker_vertraege v
+         JOIN handwerker h ON h.id = v.handwerker_id
+        WHERE v.status = 'aktiv'
+          AND v.naechster_termin IS NOT NULL
+          AND v.naechster_termin <= CURRENT_DATE + ($1 || ' days')::interval
+          AND h.archiviert = false
+        ORDER BY v.naechster_termin ASC, h.firma ASC`,
+      [String(days)]
+    );
+    res.json({ vertraege: result.rows, days });
+  } catch (err) {
+    console.error('Vertraege anstehend error:', err);
+    res.status(500).json({ error: 'Fehler beim Laden der anstehenden Wartungen' });
+  }
+});
+
 app.get('/api/handwerker/:id/auftraege', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -8586,12 +8774,14 @@ function sanitizeAuftrag(b) {
   const trim = (v) => (v == null ? null : String(v).trim() || null);
   const kosten = b.kosten == null || b.kosten === '' ? null : parseFloat(b.kosten);
   const stweg = b.stweg == null || b.stweg === '' ? null : parseInt(b.stweg, 10);
+  const vertragId = b.vertrag_id == null || b.vertrag_id === '' ? null : parseInt(b.vertrag_id, 10);
   return {
     datum: trim(b.datum),
     beschreibung: trim(b.beschreibung),
     kosten: Number.isFinite(kosten) ? kosten : null,
     stweg: Number.isFinite(stweg) && stweg >= 1 && stweg <= 8 ? stweg : null,
     notiz: trim(b.notiz),
+    vertrag_id: Number.isFinite(vertragId) ? vertragId : null,
   };
 }
 
@@ -8604,11 +8794,12 @@ app.post('/api/handwerker/:id/auftraege', authMiddleware, requirePermission('han
     if (!a.datum || !a.beschreibung) return res.status(400).json({ error: 'Datum und Beschreibung sind Pflichtfelder' });
     await client.query('BEGIN');
     const result = await client.query(
-      `INSERT INTO handwerker_auftraege (handwerker_id, datum, beschreibung, kosten, stweg, notiz)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [id, a.datum, a.beschreibung, a.kosten, a.stweg, a.notiz]
+      `INSERT INTO handwerker_auftraege (handwerker_id, datum, beschreibung, kosten, stweg, notiz, vertrag_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [id, a.datum, a.beschreibung, a.kosten, a.stweg, a.notiz, a.vertrag_id]
     );
     await syncLetzterAuftrag(client, id);
+    if (a.vertrag_id) await recomputeNaechsterTermin(client, a.vertrag_id);
     await client.query('COMMIT');
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -8630,16 +8821,21 @@ app.put('/api/handwerker/:id/auftraege/:aid', authMiddleware, requirePermission(
     const a = sanitizeAuftrag(req.body || {});
     if (!a.datum || !a.beschreibung) return res.status(400).json({ error: 'Datum und Beschreibung sind Pflichtfelder' });
     await client.query('BEGIN');
+    // alten vertrag_id ermitteln, damit wir den vorherigen Vertrag ggf. auch neu rechnen
+    const before = await client.query('SELECT vertrag_id FROM handwerker_auftraege WHERE id = $1 AND handwerker_id = $2', [aid, id]);
     const result = await client.query(
-      `UPDATE handwerker_auftraege SET datum=$1, beschreibung=$2, kosten=$3, stweg=$4, notiz=$5
-       WHERE id=$6 AND handwerker_id=$7 RETURNING *`,
-      [a.datum, a.beschreibung, a.kosten, a.stweg, a.notiz, aid, id]
+      `UPDATE handwerker_auftraege SET datum=$1, beschreibung=$2, kosten=$3, stweg=$4, notiz=$5, vertrag_id=$6
+       WHERE id=$7 AND handwerker_id=$8 RETURNING *`,
+      [a.datum, a.beschreibung, a.kosten, a.stweg, a.notiz, a.vertrag_id, aid, id]
     );
     if (result.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Auftrag nicht gefunden' });
     }
     await syncLetzterAuftrag(client, id);
+    const oldVertragId = before.rows[0]?.vertrag_id;
+    if (oldVertragId && oldVertragId !== a.vertrag_id) await recomputeNaechsterTermin(client, oldVertragId);
+    if (a.vertrag_id) await recomputeNaechsterTermin(client, a.vertrag_id);
     await client.query('COMMIT');
     res.json(result.rows[0]);
   } catch (err) {
@@ -8658,6 +8854,7 @@ app.delete('/api/handwerker/:id/auftraege/:aid', authMiddleware, requirePermissi
     const aid = parseInt(req.params.aid, 10);
     if (!Number.isFinite(id) || !Number.isFinite(aid)) return res.status(400).json({ error: 'Ungültige IDs' });
     await client.query('BEGIN');
+    const before = await client.query('SELECT vertrag_id FROM handwerker_auftraege WHERE id = $1 AND handwerker_id = $2', [aid, id]);
     const result = await client.query(
       'DELETE FROM handwerker_auftraege WHERE id = $1 AND handwerker_id = $2 RETURNING id',
       [aid, id]
@@ -8667,6 +8864,8 @@ app.delete('/api/handwerker/:id/auftraege/:aid', authMiddleware, requirePermissi
       return res.status(404).json({ error: 'Auftrag nicht gefunden' });
     }
     await syncLetzterAuftrag(client, id);
+    const oldVertragId = before.rows[0]?.vertrag_id;
+    if (oldVertragId) await recomputeNaechsterTermin(client, oldVertragId);
     await client.query('COMMIT');
     res.json({ success: true });
   } catch (err) {
@@ -9283,6 +9482,38 @@ async function initDB() {
         ('Schädlingsbefall', '🪳', 'Mäuse, Ratten, Insekten',                   90),
         ('Liftstörung',      '🛗', 'Aufzug steckt, Tür schließt nicht',        100)
       ON CONFLICT (name) DO NOTHING;
+
+      CREATE TABLE IF NOT EXISTS handwerker_vertraege (
+        id SERIAL PRIMARY KEY,
+        handwerker_id INTEGER NOT NULL REFERENCES handwerker(id) ON DELETE CASCADE,
+        titel VARCHAR(255) NOT NULL,
+        beschreibung TEXT,
+        frequenz_einheit VARCHAR(20),    -- 'tage' | 'wochen' | 'monate' | 'jahre' | NULL=einmalig
+        frequenz_intervall INTEGER,
+        naechster_termin DATE,
+        startet_am DATE,
+        endet_am DATE,
+        kuendigungsfrist_tage INTEGER,
+        jahres_kosten_chf DECIMAL(10,2),
+        status VARCHAR(20) DEFAULT 'aktiv',
+        vertragsdokument_url TEXT,
+        notiz TEXT,
+        stweg INTEGER,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_handwerker_vertraege_h ON handwerker_vertraege(handwerker_id);
+      CREATE INDEX IF NOT EXISTS idx_handwerker_vertraege_naechst ON handwerker_vertraege(naechster_termin) WHERE status = 'aktiv';
+
+      ALTER TABLE handwerker_auftraege ADD COLUMN IF NOT EXISTS vertrag_id INTEGER REFERENCES handwerker_vertraege(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS idx_handwerker_auftraege_vertrag ON handwerker_auftraege(vertrag_id);
+
+      DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM pg_proc WHERE proname='audit_trigger_fn')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_name='handwerker_vertraege_audit') THEN
+          EXECUTE 'CREATE TRIGGER handwerker_vertraege_audit AFTER INSERT OR UPDATE OR DELETE ON handwerker_vertraege FOR EACH ROW EXECUTE FUNCTION audit_trigger_fn()';
+        END IF;
+      END $$;
     `);
 
     await client.query(`
