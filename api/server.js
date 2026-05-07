@@ -8305,6 +8305,71 @@ app.delete('/api/projects/:slug/attachments/:id', authMiddleware, requireAusschu
 });
 
 // ─── Handwerker- / Lieferantenliste ────────────────────────────────
+async function loadHandwerkerPersonen(handwerkerIds) {
+  if (!Array.isArray(handwerkerIds) || handwerkerIds.length === 0) return {};
+  const result = await pool.query(
+    `SELECT * FROM handwerker_personen
+       WHERE handwerker_id = ANY($1)
+       ORDER BY handwerker_id, sort_order, id`,
+    [handwerkerIds]
+  );
+  const map = {};
+  for (const p of result.rows) {
+    if (!map[p.handwerker_id]) map[p.handwerker_id] = [];
+    map[p.handwerker_id].push(p);
+  }
+  return map;
+}
+
+async function saveHandwerkerPersonen(client, handwerkerId, personen) {
+  if (!Array.isArray(personen)) return;
+  const trim = (v) => (v == null ? null : String(v).trim() || null);
+  const incoming = personen
+    .map((p, idx) => ({ ...p, _idx: idx }))
+    .filter(p => p && trim(p.name));
+
+  const exRes = await client.query(
+    'SELECT id FROM handwerker_personen WHERE handwerker_id = $1',
+    [handwerkerId]
+  );
+  const existingIds = new Set(exRes.rows.map(r => r.id));
+  const incomingIds = new Set(
+    incoming.map(p => parseInt(p.id, 10)).filter(n => Number.isFinite(n))
+  );
+  const toDelete = [...existingIds].filter(id => !incomingIds.has(id));
+  if (toDelete.length > 0) {
+    await client.query('DELETE FROM handwerker_personen WHERE id = ANY($1)', [toDelete]);
+  }
+
+  for (const p of incoming) {
+    const data = [
+      trim(p.rolle),
+      trim(p.name),
+      trim(p.email),
+      trim(p.telefon),
+      trim(p.mobile),
+      trim(p.notiz),
+      p._idx,
+    ];
+    const pid = parseInt(p.id, 10);
+    if (Number.isFinite(pid) && existingIds.has(pid)) {
+      await client.query(
+        `UPDATE handwerker_personen
+            SET rolle=$1, name=$2, email=$3, telefon=$4, mobile=$5, notiz=$6, sort_order=$7
+          WHERE id=$8 AND handwerker_id=$9`,
+        [...data, pid, handwerkerId]
+      );
+    } else {
+      await client.query(
+        `INSERT INTO handwerker_personen
+           (handwerker_id, rolle, name, email, telefon, mobile, notiz, sort_order)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [handwerkerId, ...data]
+      );
+    }
+  }
+}
+
 app.get('/api/handwerker', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
     const includeArchived = req.query.include_archived === '1';
@@ -8318,6 +8383,8 @@ app.get('/api/handwerker', authMiddleware, requirePermission('handwerker', 'read
       `SELECT * FROM handwerker ${whereSql} ORDER BY archiviert ASC, kategorie ASC, firma ASC`,
       params
     );
+    const personenMap = await loadHandwerkerPersonen(result.rows.map(r => r.id));
+    for (const r of result.rows) r.personen = personenMap[r.id] || [];
     res.json({ handwerker: result.rows });
   } catch (err) {
     console.error('Handwerker list error:', err);
@@ -8366,10 +8433,12 @@ function sanitizeHandwerker(b) {
 }
 
 app.post('/api/handwerker', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+  const client = await pool.connect();
   try {
     const h = sanitizeHandwerker(req.body || {});
     if (!h.kategorie || !h.firma) return res.status(400).json({ error: 'Kategorie und Firma sind Pflichtfelder' });
-    const result = await pool.query(
+    await client.query('BEGIN');
+    const result = await client.query(
       `INSERT INTO handwerker (kategorie, firma, ansprechpartner, telefon, mobile, email, website,
          adresse, plz, ort, notiz, bewertung, letzter_auftrag, empfohlen_von, leistungen)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
@@ -8377,21 +8446,31 @@ app.post('/api/handwerker', authMiddleware, requirePermission('handwerker', 'wri
       [h.kategorie, h.firma, h.ansprechpartner, h.telefon, h.mobile, h.email, h.website,
        h.adresse, h.plz, h.ort, h.notiz, h.bewertung, h.letzter_auftrag, h.empfohlen_von, h.leistungen]
     );
-    res.status(201).json(result.rows[0]);
+    const created = result.rows[0];
+    await saveHandwerkerPersonen(client, created.id, req.body && req.body.personen);
+    await client.query('COMMIT');
+    const personenMap = await loadHandwerkerPersonen([created.id]);
+    created.personen = personenMap[created.id] || [];
+    res.status(201).json(created);
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error('Handwerker create error:', err);
     res.status(500).json({ error: 'Fehler beim Anlegen' });
+  } finally {
+    client.release();
   }
 });
 
 app.put('/api/handwerker/:id', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+  const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: 'Ungültige ID' });
     const h = sanitizeHandwerker(req.body || {});
     if (!h.kategorie || !h.firma) return res.status(400).json({ error: 'Kategorie und Firma sind Pflichtfelder' });
     const archivedFlag = req.body && typeof req.body.archiviert === 'boolean' ? req.body.archiviert : null;
-    const result = await pool.query(
+    await client.query('BEGIN');
+    const result = await client.query(
       `UPDATE handwerker SET
          kategorie=$1, firma=$2, ansprechpartner=$3, telefon=$4, mobile=$5, email=$6, website=$7,
          adresse=$8, plz=$9, ort=$10, notiz=$11, bewertung=$12, letzter_auftrag=$13, empfohlen_von=$14,
@@ -8403,11 +8482,24 @@ app.put('/api/handwerker/:id', authMiddleware, requirePermission('handwerker', '
        h.adresse, h.plz, h.ort, h.notiz, h.bewertung, h.letzter_auftrag, h.empfohlen_von,
        h.leistungen, archivedFlag, id]
     );
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Eintrag nicht gefunden' });
-    res.json(result.rows[0]);
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Eintrag nicht gefunden' });
+    }
+    if (req.body && Array.isArray(req.body.personen)) {
+      await saveHandwerkerPersonen(client, id, req.body.personen);
+    }
+    await client.query('COMMIT');
+    const updated = result.rows[0];
+    const personenMap = await loadHandwerkerPersonen([id]);
+    updated.personen = personenMap[id] || [];
+    res.json(updated);
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error('Handwerker update error:', err);
     res.status(500).json({ error: 'Fehler beim Aktualisieren' });
+  } finally {
+    client.release();
   }
 });
 
@@ -8962,6 +9054,26 @@ async function initDB() {
         IF EXISTS (SELECT 1 FROM pg_proc WHERE proname='audit_trigger_fn')
            AND NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_name='handwerker_auftraege_audit') THEN
           EXECUTE 'CREATE TRIGGER handwerker_auftraege_audit AFTER INSERT OR UPDATE OR DELETE ON handwerker_auftraege FOR EACH ROW EXECUTE FUNCTION audit_trigger_fn()';
+        END IF;
+      END $$;
+
+      CREATE TABLE IF NOT EXISTS handwerker_personen (
+        id SERIAL PRIMARY KEY,
+        handwerker_id INTEGER NOT NULL REFERENCES handwerker(id) ON DELETE CASCADE,
+        rolle VARCHAR(80),
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(255),
+        telefon VARCHAR(100),
+        mobile VARCHAR(100),
+        notiz TEXT,
+        sort_order INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_handwerker_personen_h ON handwerker_personen(handwerker_id);
+      DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM pg_proc WHERE proname='audit_trigger_fn')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_name='handwerker_personen_audit') THEN
+          EXECUTE 'CREATE TRIGGER handwerker_personen_audit AFTER INSERT OR UPDATE OR DELETE ON handwerker_personen FOR EACH ROW EXECUTE FUNCTION audit_trigger_fn()';
         END IF;
       END $$;
     `);
