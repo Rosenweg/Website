@@ -24,6 +24,14 @@
         .zuw-card + .zuw-card { margin-top: 6px; }
         .notfall-btn { transition: transform 0.1s; }
         .notfall-btn:hover { transform: translateY(-1px); }
+        .vertrag-row { border-bottom: 1px solid #e5e7eb; }
+        .vertrag-row:last-child { border-bottom: none; }
+        .pill-aktiv { background: #dcfce7; color: #166534; }
+        .pill-pausiert { background: #fef3c7; color: #92400e; }
+        .pill-gekuendigt { background: #f3f4f6; color: #6b7280; }
+        .pill-overdue { background: #fee2e2; color: #991b1b; }
+        .pill-soon { background: #fed7aa; color: #9a3412; }
+        .pill-future { background: #dbeafe; color: #1e40af; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -45,6 +53,22 @@
                     <button id="btn-add" class="hidden text-sm inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700">+ Neuer Eintrag</button>
                     <button id="btn-excel" type="button" class="text-sm inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-700">⬇ Excel</button>
                 </div>
+            </div>
+
+            <!-- Anstehende Wartungen Banner -->
+            <div id="anstehend-banner" class="bg-amber-50 border border-amber-200 rounded-lg shadow-sm p-3 mb-4 hidden">
+                <div class="flex items-center justify-between mb-2">
+                    <h2 class="text-sm font-semibold text-amber-900 flex items-center gap-2">
+                        <span>📅</span> Anstehende Wartungen <span id="anstehend-count" class="text-xs text-amber-700 font-normal"></span>
+                    </h2>
+                    <select id="anstehend-days" class="text-xs px-2 py-1 border rounded bg-white">
+                        <option value="30">30 Tage</option>
+                        <option value="90" selected>90 Tage</option>
+                        <option value="180">6 Monate</option>
+                        <option value="365">1 Jahr</option>
+                    </select>
+                </div>
+                <div id="anstehend-list" class="space-y-1"></div>
             </div>
 
             <!-- Notfall-Banner -->
@@ -172,6 +196,95 @@
                     <div id="zuweisungen-list" class="space-y-2"></div>
                     <p id="zuweisungen-empty" class="text-xs text-gray-400 py-2">Keine Notfall-Zuordnungen.</p>
                 </div>
+
+                <!-- Laufende Vertraege -->
+                <div id="vertraege-section" class="hidden sm:col-span-2 border-t pt-3 mt-1">
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="text-sm font-semibold text-gray-700">Laufende Verträge / wiederkehrende Arbeiten</h3>
+                        <span id="vertraege-count" class="text-xs text-gray-400"></span>
+                    </div>
+                    <div id="vertrag-form-wrap" class="hidden bg-gray-50 border rounded p-3 mb-3">
+                        <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 text-sm">
+                            <input id="vertrag-id" type="hidden">
+                            <label class="sm:col-span-7">
+                                <span class="text-xs text-gray-500">Titel *</span>
+                                <input id="vertrag-titel" placeholder="z.B. Heizungswartung jährlich" class="mt-0.5 w-full px-2 py-1 border rounded">
+                            </label>
+                            <label class="sm:col-span-2">
+                                <span class="text-xs text-gray-500">Status</span>
+                                <select id="vertrag-status" class="mt-0.5 w-full px-2 py-1 border rounded bg-white">
+                                    <option value="aktiv">aktiv</option>
+                                    <option value="pausiert">pausiert</option>
+                                    <option value="gekuendigt">gekündigt</option>
+                                </select>
+                            </label>
+                            <label class="sm:col-span-3">
+                                <span class="text-xs text-gray-500">STWEG</span>
+                                <select id="vertrag-stweg" class="mt-0.5 w-full px-2 py-1 border rounded bg-white">
+                                    <option value="">— alle —</option>
+                                    <option>1</option><option>2</option><option>3</option><option>4</option>
+                                    <option>5</option><option>6</option><option>7</option><option>8</option>
+                                </select>
+                            </label>
+                            <label class="sm:col-span-12">
+                                <span class="text-xs text-gray-500">Beschreibung</span>
+                                <textarea id="vertrag-beschreibung" rows="2" class="mt-0.5 w-full px-2 py-1 border rounded"></textarea>
+                            </label>
+                            <fieldset class="sm:col-span-6 grid grid-cols-3 gap-2 border rounded p-2 bg-white">
+                                <legend class="text-xs text-gray-500 px-1">Frequenz</legend>
+                                <label class="col-span-1">
+                                    <span class="text-xs text-gray-500">jede(s)</span>
+                                    <input id="vertrag-freq-intvl" type="number" min="1" placeholder="1" class="mt-0.5 w-full px-2 py-1 border rounded">
+                                </label>
+                                <label class="col-span-2">
+                                    <span class="text-xs text-gray-500">Einheit</span>
+                                    <select id="vertrag-freq-einheit" class="mt-0.5 w-full px-2 py-1 border rounded bg-white">
+                                        <option value="">einmalig</option>
+                                        <option value="tage">Tage</option>
+                                        <option value="wochen">Wochen</option>
+                                        <option value="monate">Monate</option>
+                                        <option value="jahre" selected>Jahre</option>
+                                    </select>
+                                </label>
+                            </fieldset>
+                            <label class="sm:col-span-3">
+                                <span class="text-xs text-gray-500">Nächster Termin</span>
+                                <input id="vertrag-naechst" type="date" class="mt-0.5 w-full px-2 py-1 border rounded">
+                            </label>
+                            <label class="sm:col-span-3">
+                                <span class="text-xs text-gray-500">Jahres-Kosten (CHF)</span>
+                                <input id="vertrag-kosten" type="number" step="0.01" placeholder="0.00" class="mt-0.5 w-full px-2 py-1 border rounded">
+                            </label>
+                            <label class="sm:col-span-3">
+                                <span class="text-xs text-gray-500">Vertragsstart</span>
+                                <input id="vertrag-start" type="date" class="mt-0.5 w-full px-2 py-1 border rounded">
+                            </label>
+                            <label class="sm:col-span-3">
+                                <span class="text-xs text-gray-500">Vertragsende</span>
+                                <input id="vertrag-ende" type="date" class="mt-0.5 w-full px-2 py-1 border rounded">
+                            </label>
+                            <label class="sm:col-span-3">
+                                <span class="text-xs text-gray-500">Kündigungsfrist (Tage)</span>
+                                <input id="vertrag-kuend" type="number" min="0" class="mt-0.5 w-full px-2 py-1 border rounded">
+                            </label>
+                            <label class="sm:col-span-3">
+                                <span class="text-xs text-gray-500">Vertragsdokument (URL)</span>
+                                <input id="vertrag-doc" type="url" placeholder="https://nextcloud..." class="mt-0.5 w-full px-2 py-1 border rounded">
+                            </label>
+                            <label class="sm:col-span-12">
+                                <span class="text-xs text-gray-500">Notiz</span>
+                                <textarea id="vertrag-notiz" rows="2" class="mt-0.5 w-full px-2 py-1 border rounded"></textarea>
+                            </label>
+                        </div>
+                        <div class="flex gap-2 justify-end mt-2">
+                            <button id="vertrag-cancel" type="button" class="text-xs px-3 py-1 text-gray-600 hover:bg-gray-200 rounded">Abbrechen</button>
+                            <button id="vertrag-save" type="button" class="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">Speichern</button>
+                        </div>
+                        <div id="vertrag-error" class="hidden text-xs text-red-600 mt-1"></div>
+                    </div>
+                    <button id="vertrag-add-btn" type="button" class="hidden text-xs px-3 py-1 mb-3 bg-blue-600 text-white rounded hover:bg-blue-700">+ Neuer Vertrag</button>
+                    <div id="vertraege-list" class="text-sm"></div>
+                </div>
                 <label class="block text-sm sm:col-span-2">
                     <span class="text-gray-700">Adresse</span>
                     <input name="adresse" class="mt-1 w-full px-3 py-2 border rounded text-sm">
@@ -245,6 +358,12 @@
                             </select>
                         </label>
                         <label class="sm:col-span-6">
+                            <span class="text-xs text-gray-500">Vertrag (optional)</span>
+                            <select id="auftrag-vertrag" class="mt-0.5 w-full px-2 py-1 border rounded bg-white">
+                                <option value="">— kein Vertrag —</option>
+                            </select>
+                        </label>
+                        <label class="sm:col-span-6">
                             <span class="text-xs text-gray-500">Notiz</span>
                             <textarea id="auftrag-notiz" rows="2" class="mt-0.5 w-full px-2 py-1 border rounded text-sm"></textarea>
                         </label>
@@ -307,10 +426,28 @@
     let canWrite = false;
     let currentHandwerkerId = null;
     let currentAuftraege = [];
+    let currentVertraege = [];
     let personenCounter = 0;
     let zuwCounter = 0;
     let eventTypen = [];
     let notfallData = [];
+
+    const FREQ_LABEL = { tage: 'Tag', wochen: 'Woche', monate: 'Monat', jahre: 'Jahr' };
+    function formatFrequenz(einheit, intervall) {
+        if (!einheit || !intervall) return 'einmalig';
+        const lbl = FREQ_LABEL[einheit] || einheit;
+        const plural = intervall > 1 ? (lbl === 'Jahr' ? 'Jahre' : lbl === 'Monat' ? 'Monate' : lbl === 'Woche' ? 'Wochen' : 'Tage') : lbl;
+        return intervall === 1 ? `jede(s) ${plural}` : `alle ${intervall} ${plural}`;
+    }
+    function dateClass(dateStr) {
+        if (!dateStr) return 'pill-future';
+        const d = new Date(dateStr);
+        const today = new Date(); today.setHours(0,0,0,0);
+        const diff = Math.floor((d - today) / 86400000);
+        if (diff < 0) return 'pill-overdue';
+        if (diff <= 30) return 'pill-soon';
+        return 'pill-future';
+    }
 
     function stars(n) {
         if (!n) return '<span class="text-gray-300">—</span>';
@@ -457,7 +594,10 @@
             $('modal-delete').onclick = () => archiveEntry(h.id);
             $('auftraege-section').classList.remove('hidden');
             $('auftrag-add-btn').classList.toggle('hidden', !canWrite);
+            $('vertraege-section').classList.remove('hidden');
+            $('vertrag-add-btn').classList.toggle('hidden', !canWrite);
             loadAuftraege(h.id);
+            loadVertraege(h.id);
             // Personen aus Datensatz laden, oder Fallback auf altes ansprechpartner-Feld
             if (Array.isArray(h.personen) && h.personen.length > 0) {
                 h.personen.forEach(p => addPersonCard(p));
@@ -472,13 +612,16 @@
             $('archived-row').classList.add('hidden');
             $('modal-delete').classList.add('hidden');
             $('auftraege-section').classList.add('hidden');
+            $('vertraege-section').classList.add('hidden');
             currentAuftraege = [];
+            currentVertraege = [];
         }
         updatePersonenEmpty();
         updateZuwEmpty();
         $('btn-add-person').classList.toggle('hidden', !canWrite);
         $('btn-add-zuw').classList.toggle('hidden', !canWrite);
         cancelAuftragForm();
+        cancelVertragForm();
         $('modal').classList.remove('hidden');
     }
 
@@ -486,6 +629,7 @@
         $('modal').classList.add('hidden');
         currentHandwerkerId = null;
         currentAuftraege = [];
+        currentVertraege = [];
     }
 
     async function saveEntry(e) {
@@ -838,6 +982,219 @@
         }
     }
 
+    // ─── Laufende Vertraege ─────────────────────────────────────
+    async function loadVertraege(handwerkerId) {
+        const list = $('vertraege-list');
+        list.innerHTML = '<div class="text-gray-400 py-2">Lade…</div>';
+        try {
+            const r = await AuthentikAuth.apiFetch(`/api/handwerker/${handwerkerId}/vertraege`);
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            currentVertraege = (await r.json()).vertraege || [];
+            renderVertraege();
+            fillAuftragVertragDropdown();
+        } catch (err) {
+            list.innerHTML = `<div class="text-red-600 py-2">Fehler: ${esc(err.message)}</div>`;
+        }
+    }
+
+    function renderVertraege() {
+        const list = $('vertraege-list');
+        $('vertraege-count').textContent = currentVertraege.length === 0
+            ? 'Noch keine Verträge'
+            : `${currentVertraege.length} Vertrag${currentVertraege.length === 1 ? '' : 'e'}`;
+        if (currentVertraege.length === 0) {
+            list.innerHTML = '';
+            return;
+        }
+        list.innerHTML = currentVertraege.map(v => {
+            const statusPill = `<span class="px-2 py-0.5 rounded text-xs font-medium pill-${v.status || 'aktiv'}">${esc(v.status || 'aktiv')}</span>`;
+            const naechst = v.naechster_termin
+                ? `<span class="px-2 py-0.5 rounded text-xs ${dateClass(v.naechster_termin)}">${esc(fmtDate(v.naechster_termin))}</span>`
+                : '<span class="text-xs text-gray-400">—</span>';
+            const stweg = v.stweg ? `<span class="ml-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-xs">STWEG ${v.stweg}</span>` : '';
+            const kosten = v.jahres_kosten_chf ? `${parseFloat(v.jahres_kosten_chf).toLocaleString('de-CH', {minimumFractionDigits: 2})} CHF/J` : '';
+            const docLink = v.vertragsdokument_url ? ` · <a href="${esc(v.vertragsdokument_url)}" target="_blank" class="text-blue-600 hover:underline">Vertrag ↗</a>` : '';
+            const editBtn = canWrite ? `<button data-edit-vertrag="${v.id}" class="text-blue-600 hover:underline text-xs">✎</button>` : '';
+            const delBtn = canWrite ? `<button data-del-vertrag="${v.id}" class="text-red-600 hover:underline text-xs">×</button>` : '';
+            return `<div class="vertrag-row py-2">
+                <div class="flex items-start justify-between gap-2 flex-wrap">
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="font-medium text-gray-900">${esc(v.titel)}</span>
+                            ${statusPill}${stweg}
+                        </div>
+                        <div class="text-xs text-gray-500 mt-0.5">
+                            ${esc(formatFrequenz(v.frequenz_einheit, v.frequenz_intervall))}
+                            · nächster Termin: ${naechst}
+                            ${kosten ? '· ' + esc(kosten) : ''}
+                            ${docLink}
+                        </div>
+                        ${v.beschreibung ? `<div class="text-xs text-gray-600 mt-1">${esc(v.beschreibung)}</div>` : ''}
+                        ${v.notiz ? `<div class="text-xs text-gray-500 italic mt-0.5">${esc(v.notiz)}</div>` : ''}
+                    </div>
+                    <div class="flex gap-2 flex-shrink-0">${editBtn}${delBtn}</div>
+                </div>
+            </div>`;
+        }).join('');
+        list.querySelectorAll('button[data-edit-vertrag]').forEach(b => b.addEventListener('click', () => editVertrag(parseInt(b.dataset.editVertrag, 10))));
+        list.querySelectorAll('button[data-del-vertrag]').forEach(b => b.addEventListener('click', () => deleteVertrag(parseInt(b.dataset.delVertrag, 10))));
+    }
+
+    function showVertragForm() {
+        $('vertrag-form-wrap').classList.remove('hidden');
+        $('vertrag-add-btn').classList.add('hidden');
+        $('vertrag-error').classList.add('hidden');
+        $('vertrag-titel').focus();
+    }
+
+    function cancelVertragForm() {
+        $('vertrag-id').value = '';
+        $('vertrag-titel').value = '';
+        $('vertrag-beschreibung').value = '';
+        $('vertrag-status').value = 'aktiv';
+        $('vertrag-stweg').value = '';
+        $('vertrag-freq-intvl').value = '1';
+        $('vertrag-freq-einheit').value = 'jahre';
+        $('vertrag-naechst').value = '';
+        $('vertrag-kosten').value = '';
+        $('vertrag-start').value = '';
+        $('vertrag-ende').value = '';
+        $('vertrag-kuend').value = '';
+        $('vertrag-doc').value = '';
+        $('vertrag-notiz').value = '';
+        $('vertrag-form-wrap').classList.add('hidden');
+        $('vertrag-error').classList.add('hidden');
+        if (canWrite && currentHandwerkerId) {
+            $('vertrag-add-btn').classList.remove('hidden');
+        }
+    }
+
+    function editVertrag(vid) {
+        const v = currentVertraege.find(x => x.id === vid);
+        if (!v) return;
+        $('vertrag-id').value = v.id;
+        $('vertrag-titel').value = v.titel || '';
+        $('vertrag-beschreibung').value = v.beschreibung || '';
+        $('vertrag-status').value = v.status || 'aktiv';
+        $('vertrag-stweg').value = v.stweg || '';
+        $('vertrag-freq-intvl').value = v.frequenz_intervall || '';
+        $('vertrag-freq-einheit').value = v.frequenz_einheit || '';
+        $('vertrag-naechst').value = v.naechster_termin ? v.naechster_termin.slice(0, 10) : '';
+        $('vertrag-kosten').value = v.jahres_kosten_chf == null ? '' : v.jahres_kosten_chf;
+        $('vertrag-start').value = v.startet_am ? v.startet_am.slice(0, 10) : '';
+        $('vertrag-ende').value = v.endet_am ? v.endet_am.slice(0, 10) : '';
+        $('vertrag-kuend').value = v.kuendigungsfrist_tage || '';
+        $('vertrag-doc').value = v.vertragsdokument_url || '';
+        $('vertrag-notiz').value = v.notiz || '';
+        showVertragForm();
+    }
+
+    async function saveVertrag() {
+        if (!currentHandwerkerId) return;
+        const body = {
+            titel: $('vertrag-titel').value.trim(),
+            beschreibung: $('vertrag-beschreibung').value.trim() || null,
+            status: $('vertrag-status').value,
+            stweg: $('vertrag-stweg').value || null,
+            frequenz_intervall: $('vertrag-freq-intvl').value || null,
+            frequenz_einheit: $('vertrag-freq-einheit').value || null,
+            naechster_termin: $('vertrag-naechst').value || null,
+            jahres_kosten_chf: $('vertrag-kosten').value || null,
+            startet_am: $('vertrag-start').value || null,
+            endet_am: $('vertrag-ende').value || null,
+            kuendigungsfrist_tage: $('vertrag-kuend').value || null,
+            vertragsdokument_url: $('vertrag-doc').value.trim() || null,
+            notiz: $('vertrag-notiz').value.trim() || null,
+        };
+        if (!body.titel) {
+            const e = $('vertrag-error'); e.textContent = 'Titel ist Pflichtfeld'; e.classList.remove('hidden');
+            return;
+        }
+        const vid = $('vertrag-id').value;
+        const url = vid
+            ? `/api/handwerker/${currentHandwerkerId}/vertraege/${vid}`
+            : `/api/handwerker/${currentHandwerkerId}/vertraege`;
+        const method = vid ? 'PUT' : 'POST';
+        try {
+            const r = await AuthentikAuth.apiFetch(url, {
+                method, headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) {
+                const err = await r.json().catch(() => ({}));
+                throw new Error(err.error || ('HTTP ' + r.status));
+            }
+            cancelVertragForm();
+            await loadVertraege(currentHandwerkerId);
+            await loadAnstehend();
+        } catch (err) {
+            const e = $('vertrag-error'); e.textContent = err.message; e.classList.remove('hidden');
+        }
+    }
+
+    async function deleteVertrag(vid) {
+        if (!confirm('Vertrag wirklich löschen?')) return;
+        try {
+            const r = await AuthentikAuth.apiFetch(`/api/handwerker/${currentHandwerkerId}/vertraege/${vid}`, { method: 'DELETE' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            await loadVertraege(currentHandwerkerId);
+            await loadAnstehend();
+        } catch (err) {
+            alert('Fehler: ' + err.message);
+        }
+    }
+
+    function fillAuftragVertragDropdown() {
+        const sel = $('auftrag-vertrag');
+        const current = sel.value;
+        const opts = currentVertraege
+            .filter(v => v.status === 'aktiv')
+            .map(v => `<option value="${v.id}" ${String(v.id) === current ? 'selected' : ''}>${esc(v.titel)}</option>`)
+            .join('');
+        sel.innerHTML = '<option value="">— kein Vertrag —</option>' + opts;
+    }
+
+    // ─── Anstehende Wartungen Banner ───────────────────────────
+    async function loadAnstehend() {
+        const days = $('anstehend-days').value || '90';
+        try {
+            const r = await AuthentikAuth.apiFetch(`/api/handwerker-vertraege/anstehend?days=${days}`);
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const data = await r.json();
+            renderAnstehend(data.vertraege || []);
+        } catch {
+            $('anstehend-banner').classList.add('hidden');
+        }
+    }
+
+    function renderAnstehend(vertraege) {
+        const banner = $('anstehend-banner');
+        const list = $('anstehend-list');
+        if (vertraege.length === 0) {
+            banner.classList.add('hidden');
+            return;
+        }
+        banner.classList.remove('hidden');
+        $('anstehend-count').textContent = `· ${vertraege.length} Eintrag${vertraege.length === 1 ? '' : 'e'}`;
+        list.innerHTML = vertraege.map(v => {
+            const stweg = v.stweg ? `<span class="ml-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-xs">STWEG ${v.stweg}</span>` : '';
+            const datum = `<span class="px-2 py-0.5 rounded text-xs ${dateClass(v.naechster_termin)}">${esc(fmtDate(v.naechster_termin))}</span>`;
+            const editLink = canWrite ? `<button data-edit-handwerker="${v.handwerker_id}" class="text-xs text-blue-600 hover:underline">→</button>` : '';
+            return `<div class="flex items-center justify-between gap-2 text-sm py-1">
+                <div class="flex items-center gap-2 flex-wrap min-w-0">
+                    ${datum}
+                    <span class="font-medium text-gray-900">${esc(v.titel)}</span>
+                    <span class="text-xs text-gray-500">— ${esc(v.firma)} (${esc(v.kategorie)})</span>
+                    ${stweg}
+                </div>
+                ${editLink}
+            </div>`;
+        }).join('');
+        list.querySelectorAll('button[data-edit-handwerker]').forEach(b => {
+            b.addEventListener('click', () => openModal(parseInt(b.dataset.editHandwerker, 10)));
+        });
+    }
+
     // ─── Auftragshistorie ───────────────────────────────────────
     async function loadAuftraege(handwerkerId) {
         const list = $('auftraege-list');
@@ -910,6 +1267,7 @@
         $('auftrag-beschreibung').value = '';
         $('auftrag-kosten').value = '';
         $('auftrag-stweg').value = '';
+        $('auftrag-vertrag').value = '';
         $('auftrag-notiz').value = '';
         $('auftrag-form-wrap').classList.add('hidden');
         $('auftrag-error').classList.add('hidden');
@@ -926,6 +1284,7 @@
         $('auftrag-beschreibung').value = a.beschreibung || '';
         $('auftrag-kosten').value = a.kosten == null ? '' : a.kosten;
         $('auftrag-stweg').value = a.stweg || '';
+        $('auftrag-vertrag').value = a.vertrag_id || '';
         $('auftrag-notiz').value = a.notiz || '';
         showAuftragForm();
     }
@@ -937,6 +1296,7 @@
             beschreibung: $('auftrag-beschreibung').value.trim(),
             kosten: $('auftrag-kosten').value || null,
             stweg: $('auftrag-stweg').value || null,
+            vertrag_id: $('auftrag-vertrag').value || null,
             notiz: $('auftrag-notiz').value.trim() || null,
         };
         if (!body.datum || !body.beschreibung) {
@@ -961,22 +1321,29 @@
                 throw new Error(err.error || ('HTTP ' + r.status));
             }
             cancelAuftragForm();
-            await loadAuftraege(currentHandwerkerId);
-            // Update letzter_auftrag im Form-Feld (server hat es synchronisiert)
-            const r2 = await AuthentikAuth.apiFetch('/api/handwerker?include_archived=1');
-            if (r2.ok) {
-                const data = await r2.json();
-                allRows = data.handwerker || [];
-                const updated = allRows.find(x => x.id === currentHandwerkerId);
-                if (updated) {
-                    $('modal-form').elements.letzter_auftrag.value = updated.letzter_auftrag ? updated.letzter_auftrag.slice(0, 10) : '';
-                }
-                render();
-            }
+            await Promise.all([
+                loadAuftraege(currentHandwerkerId),
+                loadVertraege(currentHandwerkerId), // naechster_termin kann sich geaendert haben
+            ]);
+            await refreshLetzterAuftragField();
+            await loadAnstehend();
         } catch (err) {
             const e = $('auftrag-error');
             e.textContent = err.message;
             e.classList.remove('hidden');
+        }
+    }
+
+    async function refreshLetzterAuftragField() {
+        const r2 = await AuthentikAuth.apiFetch('/api/handwerker?include_archived=1');
+        if (r2.ok) {
+            const data = await r2.json();
+            allRows = data.handwerker || [];
+            const updated = allRows.find(x => x.id === currentHandwerkerId);
+            if (updated) {
+                $('modal-form').elements.letzter_auftrag.value = updated.letzter_auftrag ? updated.letzter_auftrag.slice(0, 10) : '';
+            }
+            render();
         }
     }
 
@@ -987,18 +1354,12 @@
                 method: 'DELETE',
             });
             if (!r.ok) throw new Error('HTTP ' + r.status);
-            await loadAuftraege(currentHandwerkerId);
-            // Auch hier letzter_auftrag im Form aktualisieren
-            const r2 = await AuthentikAuth.apiFetch('/api/handwerker?include_archived=1');
-            if (r2.ok) {
-                const data = await r2.json();
-                allRows = data.handwerker || [];
-                const updated = allRows.find(x => x.id === currentHandwerkerId);
-                if (updated) {
-                    $('modal-form').elements.letzter_auftrag.value = updated.letzter_auftrag ? updated.letzter_auftrag.slice(0, 10) : '';
-                }
-                render();
-            }
+            await Promise.all([
+                loadAuftraege(currentHandwerkerId),
+                loadVertraege(currentHandwerkerId),
+            ]);
+            await refreshLetzterAuftragField();
+            await loadAnstehend();
         } catch (err) {
             alert('Fehler: ' + err.message);
         }
@@ -1038,6 +1399,10 @@
         $('auftrag-add-btn').addEventListener('click', () => { cancelAuftragForm(); showAuftragForm(); });
         $('auftrag-cancel').addEventListener('click', cancelAuftragForm);
         $('auftrag-save').addEventListener('click', saveAuftrag);
+        $('vertrag-add-btn').addEventListener('click', () => { cancelVertragForm(); showVertragForm(); });
+        $('vertrag-cancel').addEventListener('click', cancelVertragForm);
+        $('vertrag-save').addEventListener('click', saveVertrag);
+        $('anstehend-days').addEventListener('change', loadAnstehend);
         $('btn-excel').addEventListener('click', async () => {
             const hidden = [...document.querySelectorAll('.no-export')];
             hidden.forEach(el => el.style.display = 'none');
@@ -1055,7 +1420,7 @@
         });
 
         await loadEventTypen();
-        await Promise.all([loadList(), loadNotfallSummary()]);
+        await Promise.all([loadList(), loadNotfallSummary(), loadAnstehend()]);
     });
     </script>
 </body>
