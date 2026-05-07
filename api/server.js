@@ -8340,6 +8340,12 @@ app.get('/api/handwerker/kategorien', authMiddleware, requirePermission('handwer
 function sanitizeHandwerker(b) {
   const trim = (v) => (v == null ? null : String(v).trim() || null);
   const bewertung = b.bewertung == null || b.bewertung === '' ? null : parseInt(b.bewertung, 10);
+  let leistungen = null;
+  if (Array.isArray(b.leistungen)) {
+    leistungen = b.leistungen.map(s => String(s).trim()).filter(Boolean);
+  } else if (typeof b.leistungen === 'string') {
+    leistungen = b.leistungen.split(',').map(s => s.trim()).filter(Boolean);
+  }
   return {
     kategorie: trim(b.kategorie),
     firma: trim(b.firma),
@@ -8355,6 +8361,7 @@ function sanitizeHandwerker(b) {
     bewertung: Number.isInteger(bewertung) && bewertung >= 1 && bewertung <= 5 ? bewertung : null,
     letzter_auftrag: trim(b.letzter_auftrag),
     empfohlen_von: trim(b.empfohlen_von),
+    leistungen: leistungen && leistungen.length > 0 ? leistungen : null,
   };
 }
 
@@ -8364,11 +8371,11 @@ app.post('/api/handwerker', authMiddleware, requirePermission('handwerker', 'wri
     if (!h.kategorie || !h.firma) return res.status(400).json({ error: 'Kategorie und Firma sind Pflichtfelder' });
     const result = await pool.query(
       `INSERT INTO handwerker (kategorie, firma, ansprechpartner, telefon, mobile, email, website,
-         adresse, plz, ort, notiz, bewertung, letzter_auftrag, empfohlen_von)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+         adresse, plz, ort, notiz, bewertung, letzter_auftrag, empfohlen_von, leistungen)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        RETURNING *`,
       [h.kategorie, h.firma, h.ansprechpartner, h.telefon, h.mobile, h.email, h.website,
-       h.adresse, h.plz, h.ort, h.notiz, h.bewertung, h.letzter_auftrag, h.empfohlen_von]
+       h.adresse, h.plz, h.ort, h.notiz, h.bewertung, h.letzter_auftrag, h.empfohlen_von, h.leistungen]
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -8388,18 +8395,141 @@ app.put('/api/handwerker/:id', authMiddleware, requirePermission('handwerker', '
       `UPDATE handwerker SET
          kategorie=$1, firma=$2, ansprechpartner=$3, telefon=$4, mobile=$5, email=$6, website=$7,
          adresse=$8, plz=$9, ort=$10, notiz=$11, bewertung=$12, letzter_auftrag=$13, empfohlen_von=$14,
-         archiviert = COALESCE($15, archiviert),
+         leistungen=$15,
+         archiviert = COALESCE($16, archiviert),
          updated_at = NOW()
-       WHERE id=$16 RETURNING *`,
+       WHERE id=$17 RETURNING *`,
       [h.kategorie, h.firma, h.ansprechpartner, h.telefon, h.mobile, h.email, h.website,
        h.adresse, h.plz, h.ort, h.notiz, h.bewertung, h.letzter_auftrag, h.empfohlen_von,
-       archivedFlag, id]
+       h.leistungen, archivedFlag, id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Eintrag nicht gefunden' });
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Handwerker update error:', err);
     res.status(500).json({ error: 'Fehler beim Aktualisieren' });
+  }
+});
+
+// Auftraege pro Handwerker
+async function syncLetzterAuftrag(client, handwerkerId) {
+  await client.query(
+    `UPDATE handwerker SET
+       letzter_auftrag = (SELECT MAX(datum) FROM handwerker_auftraege WHERE handwerker_id = $1),
+       updated_at = NOW()
+     WHERE id = $1`,
+    [handwerkerId]
+  );
+}
+
+app.get('/api/handwerker/:id/auftraege', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: 'Ungültige Handwerker-ID' });
+    const result = await pool.query(
+      'SELECT * FROM handwerker_auftraege WHERE handwerker_id = $1 ORDER BY datum DESC, id DESC',
+      [id]
+    );
+    res.json({ auftraege: result.rows });
+  } catch (err) {
+    console.error('Auftraege list error:', err);
+    res.status(500).json({ error: 'Fehler beim Laden der Aufträge' });
+  }
+});
+
+function sanitizeAuftrag(b) {
+  const trim = (v) => (v == null ? null : String(v).trim() || null);
+  const kosten = b.kosten == null || b.kosten === '' ? null : parseFloat(b.kosten);
+  const stweg = b.stweg == null || b.stweg === '' ? null : parseInt(b.stweg, 10);
+  return {
+    datum: trim(b.datum),
+    beschreibung: trim(b.beschreibung),
+    kosten: Number.isFinite(kosten) ? kosten : null,
+    stweg: Number.isFinite(stweg) && stweg >= 1 && stweg <= 8 ? stweg : null,
+    notiz: trim(b.notiz),
+  };
+}
+
+app.post('/api/handwerker/:id/auftraege', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: 'Ungültige Handwerker-ID' });
+    const a = sanitizeAuftrag(req.body || {});
+    if (!a.datum || !a.beschreibung) return res.status(400).json({ error: 'Datum und Beschreibung sind Pflichtfelder' });
+    await client.query('BEGIN');
+    const result = await client.query(
+      `INSERT INTO handwerker_auftraege (handwerker_id, datum, beschreibung, kosten, stweg, notiz)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [id, a.datum, a.beschreibung, a.kosten, a.stweg, a.notiz]
+    );
+    await syncLetzterAuftrag(client, id);
+    await client.query('COMMIT');
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (err.code === '23503') return res.status(404).json({ error: 'Handwerker nicht gefunden' });
+    console.error('Auftrag create error:', err);
+    res.status(500).json({ error: 'Fehler beim Anlegen des Auftrags' });
+  } finally {
+    client.release();
+  }
+});
+
+app.put('/api/handwerker/:id/auftraege/:aid', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id = parseInt(req.params.id, 10);
+    const aid = parseInt(req.params.aid, 10);
+    if (!Number.isFinite(id) || !Number.isFinite(aid)) return res.status(400).json({ error: 'Ungültige IDs' });
+    const a = sanitizeAuftrag(req.body || {});
+    if (!a.datum || !a.beschreibung) return res.status(400).json({ error: 'Datum und Beschreibung sind Pflichtfelder' });
+    await client.query('BEGIN');
+    const result = await client.query(
+      `UPDATE handwerker_auftraege SET datum=$1, beschreibung=$2, kosten=$3, stweg=$4, notiz=$5
+       WHERE id=$6 AND handwerker_id=$7 RETURNING *`,
+      [a.datum, a.beschreibung, a.kosten, a.stweg, a.notiz, aid, id]
+    );
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Auftrag nicht gefunden' });
+    }
+    await syncLetzterAuftrag(client, id);
+    await client.query('COMMIT');
+    res.json(result.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Auftrag update error:', err);
+    res.status(500).json({ error: 'Fehler beim Aktualisieren' });
+  } finally {
+    client.release();
+  }
+});
+
+app.delete('/api/handwerker/:id/auftraege/:aid', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id = parseInt(req.params.id, 10);
+    const aid = parseInt(req.params.aid, 10);
+    if (!Number.isFinite(id) || !Number.isFinite(aid)) return res.status(400).json({ error: 'Ungültige IDs' });
+    await client.query('BEGIN');
+    const result = await client.query(
+      'DELETE FROM handwerker_auftraege WHERE id = $1 AND handwerker_id = $2 RETURNING id',
+      [aid, id]
+    );
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Auftrag nicht gefunden' });
+    }
+    await syncLetzterAuftrag(client, id);
+    await client.query('COMMIT');
+    res.json({ success: true });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Auftrag delete error:', err);
+    res.status(500).json({ error: 'Fehler beim Löschen' });
+  } finally {
+    client.release();
   }
 });
 
@@ -8808,10 +8938,30 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_handwerker_kategorie ON handwerker(kategorie);
       CREATE INDEX IF NOT EXISTS idx_handwerker_archiviert ON handwerker(archiviert);
+      ALTER TABLE handwerker ADD COLUMN IF NOT EXISTS leistungen TEXT[];
       DO $$ BEGIN
         IF EXISTS (SELECT 1 FROM pg_proc WHERE proname='audit_trigger_fn')
            AND NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_name='handwerker_audit') THEN
           EXECUTE 'CREATE TRIGGER handwerker_audit AFTER INSERT OR UPDATE OR DELETE ON handwerker FOR EACH ROW EXECUTE FUNCTION audit_trigger_fn()';
+        END IF;
+      END $$;
+
+      CREATE TABLE IF NOT EXISTS handwerker_auftraege (
+        id SERIAL PRIMARY KEY,
+        handwerker_id INTEGER NOT NULL REFERENCES handwerker(id) ON DELETE CASCADE,
+        datum DATE NOT NULL,
+        beschreibung TEXT NOT NULL,
+        kosten DECIMAL(10,2),
+        stweg INTEGER,
+        notiz TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_handwerker_auftraege_handwerker ON handwerker_auftraege(handwerker_id);
+      CREATE INDEX IF NOT EXISTS idx_handwerker_auftraege_datum ON handwerker_auftraege(datum DESC);
+      DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM pg_proc WHERE proname='audit_trigger_fn')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_name='handwerker_auftraege_audit') THEN
+          EXECUTE 'CREATE TRIGGER handwerker_auftraege_audit AFTER INSERT OR UPDATE OR DELETE ON handwerker_auftraege FOR EACH ROW EXECUTE FUNCTION audit_trigger_fn()';
         END IF;
       END $$;
     `);

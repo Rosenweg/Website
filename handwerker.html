@@ -17,6 +17,7 @@
         .stars-empty { color: #d1d5db; }
         tr.archived { opacity: 0.55; }
         tr.archived td:first-child::before { content: '🗄 '; }
+        .chip { display: inline-block; padding: 1px 8px; margin: 1px 2px 1px 0; background: #eef2ff; color: #3730a3; border-radius: 999px; font-size: 11px; line-height: 16px; white-space: nowrap; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -32,7 +33,7 @@
             <div class="mb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
                 <div>
                     <h1 class="text-2xl font-bold text-gray-900">Handwerker & Lieferanten</h1>
-                    <p class="text-sm text-gray-600 mt-1">Zentrale Liste empfohlener Handwerker, Lieferanten und Dienstleister mit Konditionen und Bewertung.</p>
+                    <p class="text-sm text-gray-600 mt-1">Zentrale Liste empfohlener Handwerker, Lieferanten und Dienstleister mit Konditionen, Bewertung und Auftragshistorie.</p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
                     <button id="btn-add" class="hidden text-sm inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700">+ Neuer Eintrag</button>
@@ -42,10 +43,13 @@
 
             <!-- Filter -->
             <div class="bg-white rounded-lg shadow p-3 mb-4 flex flex-wrap items-center gap-3">
-                <input id="search" type="search" placeholder="Suchen — Firma, Ansprechpartner, Telefon, Notiz…"
+                <input id="search" type="search" placeholder="Suchen — Firma, Ansprechpartner, Telefon, Notiz, Leistungen…"
                        class="flex-1 min-w-[200px] bg-gray-50 text-sm px-3 py-2 rounded border focus:outline-none focus:ring-2 focus:ring-blue-300">
                 <select id="filter-kategorie" class="text-sm bg-gray-50 px-3 py-2 rounded border">
                     <option value="">Alle Kategorien</option>
+                </select>
+                <select id="filter-leistung" class="text-sm bg-gray-50 px-3 py-2 rounded border">
+                    <option value="">Alle Leistungen</option>
                 </select>
                 <label class="text-sm text-gray-700 inline-flex items-center gap-2 px-2">
                     <input id="show-archived" type="checkbox" class="rounded">
@@ -61,7 +65,7 @@
                         <thead class="bg-gray-50 text-xs uppercase text-gray-500">
                             <tr>
                                 <th class="px-3 py-2 text-left">Kategorie</th>
-                                <th class="px-3 py-2 text-left">Firma</th>
+                                <th class="px-3 py-2 text-left">Firma / Leistungen</th>
                                 <th class="px-3 py-2 text-left">Kontakt</th>
                                 <th class="px-3 py-2 text-left">Telefon / E-Mail</th>
                                 <th class="px-3 py-2 text-left">Bewertung</th>
@@ -78,7 +82,7 @@
 
     <!-- Modal -->
     <div id="modal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-start sm:items-center justify-center p-4 overflow-y-auto">
-        <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl my-4">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-3xl my-4">
             <div class="px-5 py-3 border-b flex items-center justify-between">
                 <h2 id="modal-title" class="text-lg font-semibold text-gray-900">Neuer Eintrag</h2>
                 <button id="modal-close" class="text-gray-400 hover:text-gray-700 text-xl">×</button>
@@ -93,6 +97,11 @@
                 <label class="block text-sm sm:col-span-1">
                     <span class="text-gray-700">Firma *</span>
                     <input name="firma" required class="mt-1 w-full px-3 py-2 border rounded text-sm">
+                </label>
+                <label class="block text-sm sm:col-span-2">
+                    <span class="text-gray-700">Leistungen <span class="text-gray-400 text-xs">(kommasepariert, z.B. „Notdienst, Heizungswartung, Sanitär")</span></span>
+                    <input name="leistungen" list="leistungen-list" class="mt-1 w-full px-3 py-2 border rounded text-sm">
+                    <datalist id="leistungen-list"></datalist>
                 </label>
                 <label class="block text-sm">
                     <span class="text-gray-700">Ansprechpartner</span>
@@ -142,7 +151,7 @@
                     </select>
                 </label>
                 <label class="block text-sm">
-                    <span class="text-gray-700">Letzter Auftrag</span>
+                    <span class="text-gray-700">Letzter Auftrag <span class="text-gray-400 text-xs">(wird automatisch aus Historie übernommen)</span></span>
                     <input name="letzter_auftrag" type="date" class="mt-1 w-full px-3 py-2 border rounded text-sm">
                 </label>
                 <label class="block text-sm sm:col-span-2">
@@ -160,6 +169,50 @@
                 </div>
                 <div id="modal-error" class="hidden sm:col-span-2 text-sm text-red-600 mt-1"></div>
             </form>
+
+            <!-- Auftragshistorie (nur bei Edit sichtbar) -->
+            <div id="auftraege-section" class="hidden border-t px-5 py-4 bg-gray-50/50">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-sm font-semibold text-gray-700">Auftragshistorie</h3>
+                    <span id="auftraege-count" class="text-xs text-gray-400"></span>
+                </div>
+                <div id="auftrag-form-wrap" class="hidden bg-white border rounded p-3 mb-3">
+                    <div class="grid grid-cols-1 sm:grid-cols-6 gap-2 text-sm">
+                        <input id="auftrag-id" type="hidden">
+                        <label class="sm:col-span-1">
+                            <span class="text-xs text-gray-500">Datum *</span>
+                            <input id="auftrag-datum" type="date" class="mt-0.5 w-full px-2 py-1 border rounded">
+                        </label>
+                        <label class="sm:col-span-3">
+                            <span class="text-xs text-gray-500">Beschreibung *</span>
+                            <input id="auftrag-beschreibung" placeholder="z.B. Heizungswartung Hauptleitung" class="mt-0.5 w-full px-2 py-1 border rounded">
+                        </label>
+                        <label class="sm:col-span-1">
+                            <span class="text-xs text-gray-500">Kosten (CHF)</span>
+                            <input id="auftrag-kosten" type="number" step="0.01" placeholder="0.00" class="mt-0.5 w-full px-2 py-1 border rounded">
+                        </label>
+                        <label class="sm:col-span-1">
+                            <span class="text-xs text-gray-500">STWEG</span>
+                            <select id="auftrag-stweg" class="mt-0.5 w-full px-2 py-1 border rounded">
+                                <option value="">—</option>
+                                <option>1</option><option>2</option><option>3</option><option>4</option>
+                                <option>5</option><option>6</option><option>7</option><option>8</option>
+                            </select>
+                        </label>
+                        <label class="sm:col-span-6">
+                            <span class="text-xs text-gray-500">Notiz</span>
+                            <textarea id="auftrag-notiz" rows="2" class="mt-0.5 w-full px-2 py-1 border rounded text-sm"></textarea>
+                        </label>
+                    </div>
+                    <div class="flex gap-2 justify-end mt-2">
+                        <button id="auftrag-cancel" type="button" class="text-xs px-3 py-1 text-gray-600 hover:bg-gray-100 rounded">Abbrechen</button>
+                        <button id="auftrag-save" type="button" class="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">Speichern</button>
+                    </div>
+                    <div id="auftrag-error" class="hidden text-xs text-red-600 mt-1"></div>
+                </div>
+                <button id="auftrag-add-btn" type="button" class="hidden text-xs px-3 py-1 mb-3 bg-blue-600 text-white rounded hover:bg-blue-700">+ Neuer Auftrag</button>
+                <div id="auftraege-list" class="text-xs"></div>
+            </div>
         </div>
     </div>
 
@@ -169,6 +222,8 @@
 
     let allRows = [];
     let canWrite = false;
+    let currentHandwerkerId = null;
+    let currentAuftraege = [];
 
     function stars(n) {
         if (!n) return '<span class="text-gray-300">—</span>';
@@ -182,10 +237,23 @@
         try { return new Date(d).toLocaleDateString('de-CH'); } catch { return d; }
     }
 
+    function fmtChf(v) {
+        if (v == null || v === '') return '';
+        const n = parseFloat(v);
+        if (!isFinite(n)) return '';
+        return n.toLocaleString('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' CHF';
+    }
+
+    function renderChips(items, baseClass = 'chip') {
+        if (!Array.isArray(items) || items.length === 0) return '';
+        return items.map(s => `<span class="${baseClass}">${esc(s)}</span>`).join('');
+    }
+
     function matches(h, q) {
         if (!q) return true;
+        const leistungen = Array.isArray(h.leistungen) ? h.leistungen.join(' ') : '';
         const hay = [h.kategorie, h.firma, h.ansprechpartner, h.telefon, h.mobile, h.email,
-                     h.website, h.adresse, h.plz, h.ort, h.notiz, h.empfohlen_von]
+                     h.website, h.adresse, h.plz, h.ort, h.notiz, h.empfohlen_von, leistungen]
             .filter(Boolean).join(' ').toLowerCase();
         return q.toLowerCase().split(/\s+/).every(t => hay.includes(t));
     }
@@ -193,11 +261,13 @@
     function render() {
         const q = $('search').value.trim();
         const kat = $('filter-kategorie').value;
+        const leistung = $('filter-leistung').value;
         const showArchived = $('show-archived').checked;
         const tbody = $('tbody');
         const rows = allRows.filter(h =>
             (showArchived || !h.archiviert) &&
             (!kat || h.kategorie === kat) &&
+            (!leistung || (Array.isArray(h.leistungen) && h.leistungen.includes(leistung))) &&
             matches(h, q)
         );
         $('count').textContent = `${rows.length} Eintrag${rows.length === 1 ? '' : 'e'}`;
@@ -210,17 +280,23 @@
             const telLink = tel ? `<a href="tel:${esc(tel.replace(/[^0-9+]/g,''))}" class="text-blue-600 hover:underline">${esc(tel)}</a>` : '';
             const mailLink = h.email ? `<a href="mailto:${esc(h.email)}" class="text-blue-600 hover:underline block">${esc(h.email)}</a>` : '';
             const webLink = h.website ? `<a href="${esc(h.website.startsWith('http') ? h.website : 'https://' + h.website)}" target="_blank" rel="noopener" class="text-blue-600 hover:underline text-xs block">${esc(h.website)}</a>` : '';
+            const chips = renderChips(h.leistungen);
             const actions = canWrite
                 ? `<button data-edit="${h.id}" class="text-blue-600 hover:underline text-xs">Bearbeiten</button>`
                 : '';
             return `<tr class="hover:bg-gray-50 ${h.archiviert ? 'archived' : ''}">
-                <td class="px-3 py-2 text-gray-700">${esc(h.kategorie)}</td>
-                <td class="px-3 py-2"><div class="font-medium text-gray-900">${esc(h.firma)}</div>${webLink}${h.empfohlen_von ? '<div class="text-xs text-gray-400">empf.: ' + esc(h.empfohlen_von) + '</div>' : ''}</td>
-                <td class="px-3 py-2 text-gray-700">${esc(h.ansprechpartner || '')}</td>
-                <td class="px-3 py-2 text-gray-700">${telLink}${telLink && mailLink ? '<br>' : ''}${mailLink}</td>
-                <td class="px-3 py-2">${stars(h.bewertung)}</td>
-                <td class="px-3 py-2 text-gray-600">${esc(fmtDate(h.letzter_auftrag))}</td>
-                <td class="px-3 py-2 no-export" data-no-export>${actions}</td>
+                <td class="px-3 py-2 text-gray-700 align-top">${esc(h.kategorie)}</td>
+                <td class="px-3 py-2 align-top">
+                    <div class="font-medium text-gray-900">${esc(h.firma)}</div>
+                    ${webLink}
+                    ${chips ? '<div class="mt-1">' + chips + '</div>' : ''}
+                    ${h.empfohlen_von ? '<div class="text-xs text-gray-400 mt-0.5">empf.: ' + esc(h.empfohlen_von) + '</div>' : ''}
+                </td>
+                <td class="px-3 py-2 text-gray-700 align-top">${esc(h.ansprechpartner || '')}</td>
+                <td class="px-3 py-2 text-gray-700 align-top">${telLink}${telLink && mailLink ? '<br>' : ''}${mailLink}</td>
+                <td class="px-3 py-2 align-top">${stars(h.bewertung)}</td>
+                <td class="px-3 py-2 text-gray-600 align-top">${esc(fmtDate(h.letzter_auftrag))}</td>
+                <td class="px-3 py-2 no-export align-top" data-no-export>${actions}</td>
             </tr>`;
         }).join('');
         tbody.querySelectorAll('button[data-edit]').forEach(btn => {
@@ -228,14 +304,19 @@
         });
     }
 
-    function fillKategorienFilter() {
-        const sel = $('filter-kategorie');
-        const datalist = $('kat-list');
-        const current = sel.value;
+    function fillFilters() {
         const kategorien = [...new Set(allRows.map(h => h.kategorie).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
-        sel.innerHTML = '<option value="">Alle Kategorien</option>' +
-            kategorien.map(k => `<option value="${esc(k)}" ${k === current ? 'selected' : ''}>${esc(k)}</option>`).join('');
-        datalist.innerHTML = kategorien.map(k => `<option value="${esc(k)}">`).join('');
+        const leistungen = [...new Set(allRows.flatMap(h => Array.isArray(h.leistungen) ? h.leistungen : []).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
+        const katSel = $('filter-kategorie');
+        const leistSel = $('filter-leistung');
+        const curKat = katSel.value;
+        const curLeist = leistSel.value;
+        katSel.innerHTML = '<option value="">Alle Kategorien</option>' +
+            kategorien.map(k => `<option value="${esc(k)}" ${k === curKat ? 'selected' : ''}>${esc(k)}</option>`).join('');
+        leistSel.innerHTML = '<option value="">Alle Leistungen</option>' +
+            leistungen.map(k => `<option value="${esc(k)}" ${k === curLeist ? 'selected' : ''}>${esc(k)}</option>`).join('');
+        $('kat-list').innerHTML = kategorien.map(k => `<option value="${esc(k)}">`).join('');
+        $('leistungen-list').innerHTML = leistungen.map(k => `<option value="${esc(k)}">`).join('');
     }
 
     async function loadList() {
@@ -245,7 +326,7 @@
             if (!r.ok) throw new Error('HTTP ' + r.status);
             const data = await r.json();
             allRows = data.handwerker || [];
-            fillKategorienFilter();
+            fillFilters();
             render();
         } catch (err) {
             $('tbody').innerHTML = `<tr><td colspan="7" class="px-4 py-6 text-center text-red-600">Fehler: ${esc(err.message)}</td></tr>`;
@@ -259,25 +340,35 @@
         const h = id ? allRows.find(x => x.id === id) : null;
         $('modal-title').textContent = h ? `Bearbeiten: ${h.firma}` : 'Neuer Eintrag';
         form.elements.id.value = h?.id || '';
+        currentHandwerkerId = h?.id || null;
         if (h) {
             for (const k of ['kategorie','firma','ansprechpartner','telefon','mobile','email','website','adresse','plz','ort','notiz','empfohlen_von']) {
                 if (form.elements[k]) form.elements[k].value = h[k] || '';
             }
+            form.elements.leistungen.value = Array.isArray(h.leistungen) ? h.leistungen.join(', ') : '';
             form.elements.bewertung.value = h.bewertung || '';
             form.elements.letzter_auftrag.value = h.letzter_auftrag ? h.letzter_auftrag.slice(0, 10) : '';
             form.elements.archiviert.checked = !!h.archiviert;
             $('archived-row').classList.remove('hidden');
             $('modal-delete').classList.toggle('hidden', !!h.archiviert);
             $('modal-delete').onclick = () => archiveEntry(h.id);
+            $('auftraege-section').classList.remove('hidden');
+            $('auftrag-add-btn').classList.toggle('hidden', !canWrite);
+            loadAuftraege(h.id);
         } else {
             $('archived-row').classList.add('hidden');
             $('modal-delete').classList.add('hidden');
+            $('auftraege-section').classList.add('hidden');
+            currentAuftraege = [];
         }
+        cancelAuftragForm();
         $('modal').classList.remove('hidden');
     }
 
     function closeModal() {
         $('modal').classList.add('hidden');
+        currentHandwerkerId = null;
+        currentAuftraege = [];
     }
 
     async function saveEntry(e) {
@@ -289,6 +380,7 @@
         body.archiviert = form.elements.archiviert.checked;
         if (!body.bewertung) body.bewertung = null;
         if (!body.letzter_auftrag) body.letzter_auftrag = null;
+        body.leistungen = body.leistungen ? body.leistungen.split(',').map(s => s.trim()).filter(Boolean) : [];
         const id = body.id;
         delete body.id;
         const url = id ? `/api/handwerker/${id}` : '/api/handwerker';
@@ -303,8 +395,14 @@
                 const err = await r.json().catch(() => ({}));
                 throw new Error(err.error || ('HTTP ' + r.status));
             }
-            closeModal();
+            const saved = await r.json();
             await loadList();
+            // Bei Neuanlage: Modal offen halten und auf Edit umschalten, damit Aufträge erfasst werden können
+            if (!id && saved.id) {
+                openModal(saved.id);
+            } else {
+                closeModal();
+            }
         } catch (err) {
             const e = $('modal-error');
             e.textContent = err.message;
@@ -324,6 +422,172 @@
         }
     }
 
+    // ─── Auftragshistorie ───────────────────────────────────────
+    async function loadAuftraege(handwerkerId) {
+        const list = $('auftraege-list');
+        list.innerHTML = '<div class="text-gray-400 py-2">Lade…</div>';
+        try {
+            const r = await AuthentikAuth.apiFetch(`/api/handwerker/${handwerkerId}/auftraege`);
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const data = await r.json();
+            currentAuftraege = data.auftraege || [];
+            renderAuftraege();
+        } catch (err) {
+            list.innerHTML = `<div class="text-red-600 py-2">Fehler: ${esc(err.message)}</div>`;
+        }
+    }
+
+    function renderAuftraege() {
+        const list = $('auftraege-list');
+        $('auftraege-count').textContent = currentAuftraege.length === 0
+            ? 'Noch keine Aufträge erfasst'
+            : `${currentAuftraege.length} Eintrag${currentAuftraege.length === 1 ? '' : 'e'}`;
+        if (currentAuftraege.length === 0) {
+            list.innerHTML = '';
+            return;
+        }
+        list.innerHTML = `
+            <table class="w-full">
+                <thead class="text-gray-500">
+                    <tr>
+                        <th class="text-left py-1 pr-2 font-medium">Datum</th>
+                        <th class="text-left py-1 pr-2 font-medium">Beschreibung</th>
+                        <th class="text-right py-1 pr-2 font-medium">Kosten</th>
+                        <th class="text-left py-1 pr-2 font-medium">STWEG</th>
+                        <th class="text-left py-1 pr-2 font-medium">Notiz</th>
+                        ${canWrite ? '<th class="py-1"></th>' : ''}
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    ${currentAuftraege.map(a => `
+                        <tr class="hover:bg-white">
+                            <td class="py-1 pr-2 align-top">${esc(fmtDate(a.datum))}</td>
+                            <td class="py-1 pr-2 align-top">${esc(a.beschreibung || '')}</td>
+                            <td class="py-1 pr-2 align-top text-right tabular-nums">${esc(fmtChf(a.kosten))}</td>
+                            <td class="py-1 pr-2 align-top">${a.stweg ? 'STWEG ' + esc(a.stweg) : ''}</td>
+                            <td class="py-1 pr-2 align-top text-gray-600">${esc(a.notiz || '')}</td>
+                            ${canWrite ? `<td class="py-1 align-top whitespace-nowrap">
+                                <button data-edit-auftrag="${a.id}" class="text-blue-600 hover:underline mr-2">✎</button>
+                                <button data-delete-auftrag="${a.id}" class="text-red-600 hover:underline">×</button>
+                            </td>` : ''}
+                        </tr>`).join('')}
+                </tbody>
+            </table>`;
+        list.querySelectorAll('button[data-edit-auftrag]').forEach(btn => {
+            btn.addEventListener('click', () => editAuftrag(parseInt(btn.dataset.editAuftrag, 10)));
+        });
+        list.querySelectorAll('button[data-delete-auftrag]').forEach(btn => {
+            btn.addEventListener('click', () => deleteAuftrag(parseInt(btn.dataset.deleteAuftrag, 10)));
+        });
+    }
+
+    function showAuftragForm() {
+        $('auftrag-form-wrap').classList.remove('hidden');
+        $('auftrag-add-btn').classList.add('hidden');
+        $('auftrag-error').classList.add('hidden');
+        $('auftrag-datum').focus();
+    }
+
+    function cancelAuftragForm() {
+        $('auftrag-id').value = '';
+        $('auftrag-datum').value = new Date().toISOString().slice(0, 10);
+        $('auftrag-beschreibung').value = '';
+        $('auftrag-kosten').value = '';
+        $('auftrag-stweg').value = '';
+        $('auftrag-notiz').value = '';
+        $('auftrag-form-wrap').classList.add('hidden');
+        $('auftrag-error').classList.add('hidden');
+        if (canWrite && currentHandwerkerId) {
+            $('auftrag-add-btn').classList.remove('hidden');
+        }
+    }
+
+    function editAuftrag(aid) {
+        const a = currentAuftraege.find(x => x.id === aid);
+        if (!a) return;
+        $('auftrag-id').value = a.id;
+        $('auftrag-datum').value = a.datum ? a.datum.slice(0, 10) : '';
+        $('auftrag-beschreibung').value = a.beschreibung || '';
+        $('auftrag-kosten').value = a.kosten == null ? '' : a.kosten;
+        $('auftrag-stweg').value = a.stweg || '';
+        $('auftrag-notiz').value = a.notiz || '';
+        showAuftragForm();
+    }
+
+    async function saveAuftrag() {
+        if (!currentHandwerkerId) return;
+        const body = {
+            datum: $('auftrag-datum').value || null,
+            beschreibung: $('auftrag-beschreibung').value.trim(),
+            kosten: $('auftrag-kosten').value || null,
+            stweg: $('auftrag-stweg').value || null,
+            notiz: $('auftrag-notiz').value.trim() || null,
+        };
+        if (!body.datum || !body.beschreibung) {
+            const e = $('auftrag-error');
+            e.textContent = 'Datum und Beschreibung sind Pflichtfelder';
+            e.classList.remove('hidden');
+            return;
+        }
+        const aid = $('auftrag-id').value;
+        const url = aid
+            ? `/api/handwerker/${currentHandwerkerId}/auftraege/${aid}`
+            : `/api/handwerker/${currentHandwerkerId}/auftraege`;
+        const method = aid ? 'PUT' : 'POST';
+        try {
+            const r = await AuthentikAuth.apiFetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) {
+                const err = await r.json().catch(() => ({}));
+                throw new Error(err.error || ('HTTP ' + r.status));
+            }
+            cancelAuftragForm();
+            await loadAuftraege(currentHandwerkerId);
+            // Update letzter_auftrag im Form-Feld (server hat es synchronisiert)
+            const r2 = await AuthentikAuth.apiFetch('/api/handwerker?include_archived=1');
+            if (r2.ok) {
+                const data = await r2.json();
+                allRows = data.handwerker || [];
+                const updated = allRows.find(x => x.id === currentHandwerkerId);
+                if (updated) {
+                    $('modal-form').elements.letzter_auftrag.value = updated.letzter_auftrag ? updated.letzter_auftrag.slice(0, 10) : '';
+                }
+                render();
+            }
+        } catch (err) {
+            const e = $('auftrag-error');
+            e.textContent = err.message;
+            e.classList.remove('hidden');
+        }
+    }
+
+    async function deleteAuftrag(aid) {
+        if (!confirm('Auftrag wirklich löschen?')) return;
+        try {
+            const r = await AuthentikAuth.apiFetch(`/api/handwerker/${currentHandwerkerId}/auftraege/${aid}`, {
+                method: 'DELETE',
+            });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            await loadAuftraege(currentHandwerkerId);
+            // Auch hier letzter_auftrag im Form aktualisieren
+            const r2 = await AuthentikAuth.apiFetch('/api/handwerker?include_archived=1');
+            if (r2.ok) {
+                const data = await r2.json();
+                allRows = data.handwerker || [];
+                const updated = allRows.find(x => x.id === currentHandwerkerId);
+                if (updated) {
+                    $('modal-form').elements.letzter_auftrag.value = updated.letzter_auftrag ? updated.letzter_auftrag.slice(0, 10) : '';
+                }
+                render();
+            }
+        } catch (err) {
+            alert('Fehler: ' + err.message);
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', async () => {
         const user = await AuthentikAuth.init({ requireAuth: true });
         if (!user) return;
@@ -338,12 +602,16 @@
 
         $('search').addEventListener('input', render);
         $('filter-kategorie').addEventListener('change', render);
+        $('filter-leistung').addEventListener('change', render);
         $('show-archived').addEventListener('change', render);
         $('btn-add').addEventListener('click', () => openModal(null));
         $('modal-close').addEventListener('click', closeModal);
         $('modal-cancel').addEventListener('click', closeModal);
         $('modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
         $('modal-form').addEventListener('submit', saveEntry);
+        $('auftrag-add-btn').addEventListener('click', () => { cancelAuftragForm(); showAuftragForm(); });
+        $('auftrag-cancel').addEventListener('click', cancelAuftragForm);
+        $('auftrag-save').addEventListener('click', saveAuftrag);
         $('btn-excel').addEventListener('click', async () => {
             const hidden = [...document.querySelectorAll('.no-export')];
             hidden.forEach(el => el.style.display = 'none');
