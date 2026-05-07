@@ -20,6 +20,10 @@
         .chip { display: inline-block; padding: 1px 8px; margin: 1px 2px 1px 0; background: #eef2ff; color: #3730a3; border-radius: 999px; font-size: 11px; line-height: 16px; white-space: nowrap; }
         .person-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; background: #f9fafb; }
         .person-card + .person-card { margin-top: 8px; }
+        .zuw-card { border: 1px solid #fee2e2; border-radius: 8px; padding: 8px; background: #fef2f2; }
+        .zuw-card + .zuw-card { margin-top: 6px; }
+        .notfall-btn { transition: transform 0.1s; }
+        .notfall-btn:hover { transform: translateY(-1px); }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -32,7 +36,7 @@
         </div>
 
         <div id="content" class="hidden">
-            <div class="mb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+            <div class="mb-4 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
                 <div>
                     <h1 class="text-2xl font-bold text-gray-900">Handwerker & Lieferanten</h1>
                     <p class="text-sm text-gray-600 mt-1">Zentrale Liste empfohlener Handwerker, Lieferanten und Dienstleister mit Konditionen, Bewertung und Auftragshistorie.</p>
@@ -40,6 +44,19 @@
                 <div class="flex flex-wrap items-center gap-2">
                     <button id="btn-add" class="hidden text-sm inline-flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700">+ Neuer Eintrag</button>
                     <button id="btn-excel" type="button" class="text-sm inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-700">⬇ Excel</button>
+                </div>
+            </div>
+
+            <!-- Notfall-Banner -->
+            <div id="notfall-banner" class="bg-red-50 border border-red-200 rounded-lg shadow-sm p-3 mb-4">
+                <div class="flex items-center justify-between mb-2">
+                    <h2 class="text-sm font-semibold text-red-900 flex items-center gap-2">
+                        <span>🚨</span> Notfall-Schnellzugriff
+                    </h2>
+                    <button id="btn-manage-events" class="hidden text-xs text-gray-600 hover:underline">Event-Typen verwalten</button>
+                </div>
+                <div id="notfall-buttons" class="flex flex-wrap gap-2">
+                    <span class="text-xs text-gray-400">Lade…</span>
                 </div>
             </div>
 
@@ -145,6 +162,16 @@
                         <option value="Notdienst">
                     </datalist>
                 </div>
+
+                <!-- Notfall-Zuordnungen -->
+                <div class="sm:col-span-2 border-t pt-3 mt-1">
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="text-sm font-semibold text-gray-700">Notfall-zuständig für</h3>
+                        <button id="btn-add-zuw" type="button" class="text-xs px-2 py-1 bg-red-50 text-red-700 hover:bg-red-100 rounded">+ Zuordnung</button>
+                    </div>
+                    <div id="zuweisungen-list" class="space-y-2"></div>
+                    <p id="zuweisungen-empty" class="text-xs text-gray-400 py-2">Keine Notfall-Zuordnungen.</p>
+                </div>
                 <label class="block text-sm sm:col-span-2">
                     <span class="text-gray-700">Adresse</span>
                     <input name="adresse" class="mt-1 w-full px-3 py-2 border rounded text-sm">
@@ -234,6 +261,44 @@
         </div>
     </div>
 
+    <!-- Notfall-Quick-View Modal -->
+    <div id="notfall-modal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-start sm:items-center justify-center p-4 overflow-y-auto">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-xl my-4">
+            <div class="px-5 py-3 border-b flex items-center justify-between">
+                <h2 id="notfall-modal-title" class="text-lg font-semibold text-gray-900">—</h2>
+                <button id="notfall-modal-close" type="button" class="text-gray-400 hover:text-gray-700 text-xl">×</button>
+            </div>
+            <div id="notfall-modal-body" class="px-5 py-4 max-h-[70vh] overflow-y-auto"></div>
+        </div>
+    </div>
+
+    <!-- Event-Typen-Verwaltung Modal -->
+    <div id="events-modal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-start sm:items-center justify-center p-4 overflow-y-auto">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-xl my-4">
+            <div class="px-5 py-3 border-b flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-gray-900">Event-Typen verwalten</h2>
+                <button id="events-modal-close" type="button" class="text-gray-400 hover:text-gray-700 text-xl">×</button>
+            </div>
+            <div class="px-5 py-4">
+                <div class="bg-gray-50 border rounded p-3 mb-3">
+                    <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 text-sm">
+                        <input id="evt-id" type="hidden">
+                        <input id="evt-icon" placeholder="🚨" class="sm:col-span-2 px-2 py-1 border rounded text-center">
+                        <input id="evt-name" placeholder="Name (z.B. Wasserschaden)" class="sm:col-span-7 px-2 py-1 border rounded">
+                        <input id="evt-sort" type="number" placeholder="Reihenfolge" class="sm:col-span-3 px-2 py-1 border rounded">
+                        <textarea id="evt-beschreibung" rows="2" placeholder="Beschreibung (optional)" class="sm:col-span-12 px-2 py-1 border rounded"></textarea>
+                    </div>
+                    <div class="flex gap-2 justify-end mt-2">
+                        <button id="evt-cancel" type="button" class="hidden text-xs px-3 py-1 text-gray-600 hover:bg-gray-200 rounded">Abbrechen</button>
+                        <button id="evt-save" type="button" class="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">+ Hinzufügen</button>
+                    </div>
+                    <div id="evt-error" class="hidden text-xs text-red-600 mt-1"></div>
+                </div>
+                <div id="events-list" class="text-sm divide-y"></div>
+            </div>
+        </div>
+    </div>
+
     <script>
     const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
     const $ = id => document.getElementById(id);
@@ -243,6 +308,9 @@
     let currentHandwerkerId = null;
     let currentAuftraege = [];
     let personenCounter = 0;
+    let zuwCounter = 0;
+    let eventTypen = [];
+    let notfallData = [];
 
     function stars(n) {
         if (!n) return '<span class="text-gray-300">—</span>';
@@ -375,6 +443,7 @@
         form.elements.id.value = h?.id || '';
         currentHandwerkerId = h?.id || null;
         $('personen-list').innerHTML = '';
+        $('zuweisungen-list').innerHTML = '';
         if (h) {
             for (const k of ['kategorie','firma','ansprechpartner','telefon','mobile','email','website','adresse','plz','ort','notiz','empfohlen_von']) {
                 if (form.elements[k]) form.elements[k].value = h[k] || '';
@@ -395,6 +464,10 @@
             } else if (h.ansprechpartner) {
                 addPersonCard({ name: h.ansprechpartner });
             }
+            // Notfall-Zuweisungen
+            if (Array.isArray(h.event_zuweisungen)) {
+                h.event_zuweisungen.forEach(z => addZuweisungCard(z));
+            }
         } else {
             $('archived-row').classList.add('hidden');
             $('modal-delete').classList.add('hidden');
@@ -402,7 +475,9 @@
             currentAuftraege = [];
         }
         updatePersonenEmpty();
+        updateZuwEmpty();
         $('btn-add-person').classList.toggle('hidden', !canWrite);
+        $('btn-add-zuw').classList.toggle('hidden', !canWrite);
         cancelAuftragForm();
         $('modal').classList.remove('hidden');
     }
@@ -424,6 +499,7 @@
         if (!body.letzter_auftrag) body.letzter_auftrag = null;
         body.leistungen = body.leistungen ? body.leistungen.split(',').map(s => s.trim()).filter(Boolean) : [];
         body.personen = collectPersonen();
+        body.event_zuweisungen = collectZuweisungen();
         const id = body.id;
         delete body.id;
         const url = id ? `/api/handwerker/${id}` : '/api/handwerker';
@@ -440,6 +516,7 @@
             }
             const saved = await r.json();
             await loadList();
+            await loadNotfallSummary();
             // Bei Neuanlage: Modal offen halten und auf Edit umschalten, damit Aufträge erfasst werden können
             if (!id && saved.id) {
                 openModal(saved.id);
@@ -459,7 +536,7 @@
             const r = await AuthentikAuth.apiFetch(`/api/handwerker/${id}`, { method: 'DELETE' });
             if (!r.ok) throw new Error('HTTP ' + r.status);
             closeModal();
-            await loadList();
+            await Promise.all([loadList(), loadNotfallSummary()]);
         } catch (err) {
             alert('Fehler: ' + err.message);
         }
@@ -514,6 +591,251 @@
             });
         });
         return out;
+    }
+
+    // ─── Notfall-Zuordnungen ────────────────────────────────────
+    function addZuweisungCard(z = {}) {
+        const list = $('zuweisungen-list');
+        const cardId = `zuw-${++zuwCounter}`;
+        const opts = eventTypen.map(e =>
+            `<option value="${e.id}" ${e.id === z.event_typ_id ? 'selected' : ''}>${esc(e.icon || '🚨')} ${esc(e.name)}</option>`
+        ).join('');
+        const stwegOpts = [1,2,3,4,5,6,7,8].map(s =>
+            `<option value="${s}" ${s === z.stweg ? 'selected' : ''}>STWEG ${s}</option>`
+        ).join('');
+        const html = `
+            <div id="${cardId}" class="zuw-card grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+                <select class="zuw-event sm:col-span-5 px-2 py-1 border rounded text-sm bg-white">
+                    <option value="">— Event wählen —</option>
+                    ${opts}
+                </select>
+                <select class="zuw-prio sm:col-span-2 px-2 py-1 border rounded text-sm bg-white">
+                    <option value="1" ${(z.prioritaet || 1) === 1 ? 'selected' : ''}>primär</option>
+                    <option value="2" ${z.prioritaet === 2 ? 'selected' : ''}>Reserve</option>
+                    <option value="3" ${z.prioritaet === 3 ? 'selected' : ''}>3</option>
+                    <option value="4" ${z.prioritaet === 4 ? 'selected' : ''}>4</option>
+                </select>
+                <select class="zuw-stweg sm:col-span-3 px-2 py-1 border rounded text-sm bg-white">
+                    <option value="">alle STWEGs</option>
+                    ${stwegOpts}
+                </select>
+                <button type="button" data-remove-zuw="${cardId}" class="sm:col-span-2 text-red-400 hover:text-red-600 text-xs text-right">× Entfernen</button>
+                <input type="text" placeholder="Hinweis (optional, z.B. 'zuerst Hausverwaltung anrufen')" value="${esc(z.hinweis || '')}" class="zuw-hinweis sm:col-span-12 px-2 py-1 border rounded text-sm">
+            </div>`;
+        list.insertAdjacentHTML('beforeend', html);
+        list.querySelector(`#${cardId} button[data-remove-zuw]`).addEventListener('click', () => {
+            document.getElementById(cardId)?.remove();
+            updateZuwEmpty();
+        });
+        updateZuwEmpty();
+    }
+
+    function updateZuwEmpty() {
+        const has = $('zuweisungen-list').children.length > 0;
+        $('zuweisungen-empty').classList.toggle('hidden', has);
+    }
+
+    function collectZuweisungen() {
+        const out = [];
+        $('zuweisungen-list').querySelectorAll('.zuw-card').forEach(card => {
+            const eventId = parseInt(card.querySelector('.zuw-event').value, 10);
+            if (!Number.isFinite(eventId)) return;
+            out.push({
+                event_typ_id: eventId,
+                prioritaet: parseInt(card.querySelector('.zuw-prio').value, 10) || 1,
+                stweg: card.querySelector('.zuw-stweg').value || null,
+                hinweis: card.querySelector('.zuw-hinweis').value.trim() || null,
+            });
+        });
+        return out;
+    }
+
+    // ─── Notfall-Banner + Quick-View ────────────────────────────
+    async function loadEventTypen() {
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/handwerker-events');
+            if (r.ok) eventTypen = (await r.json()).event_typen || [];
+        } catch {}
+    }
+
+    async function loadNotfallSummary() {
+        const c = $('notfall-buttons');
+        c.innerHTML = '<span class="text-xs text-gray-400">Lade…</span>';
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/handwerker-notfall');
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            notfallData = (await r.json()).events || [];
+            renderNotfallButtons();
+        } catch (err) {
+            c.innerHTML = `<span class="text-xs text-red-600">Fehler: ${esc(err.message)}</span>`;
+        }
+    }
+
+    function renderNotfallButtons() {
+        const c = $('notfall-buttons');
+        if (notfallData.length === 0) {
+            c.innerHTML = '<span class="text-xs text-gray-400">Keine Event-Typen vorhanden.</span>';
+            return;
+        }
+        c.innerHTML = notfallData.map(e => {
+            const count = (e.zuweisungen || []).length;
+            const cls = count === 0
+                ? 'bg-gray-50 text-gray-400 border-gray-200'
+                : 'bg-white text-red-700 border-red-200 hover:bg-red-100';
+            return `<button data-event-id="${e.id}" class="notfall-btn px-3 py-2 rounded border text-sm flex items-center gap-2 ${cls}" title="${esc(e.beschreibung || '')}">
+                <span class="text-lg">${esc(e.icon || '🚨')}</span>
+                <span class="font-medium">${esc(e.name)}</span>
+                <span class="text-xs ${count === 0 ? 'text-gray-400' : 'text-red-500'}">${count > 0 ? count : 'kein Kontakt'}</span>
+            </button>`;
+        }).join('');
+        c.querySelectorAll('button[data-event-id]').forEach(btn => {
+            btn.addEventListener('click', () => openNotfallModal(parseInt(btn.dataset.eventId, 10)));
+        });
+    }
+
+    function openNotfallModal(eventId) {
+        const e = notfallData.find(x => x.id === eventId);
+        if (!e) return;
+        $('notfall-modal-title').textContent = `${e.icon || '🚨'} ${e.name}`;
+        const body = $('notfall-modal-body');
+        const zuw = e.zuweisungen || [];
+        if (zuw.length === 0) {
+            body.innerHTML = `
+                <p class="text-gray-500 mb-4">${esc(e.beschreibung || 'Noch keine Handwerker für diesen Event-Typ zugewiesen.')}</p>
+                <p class="text-sm text-gray-600">Bearbeite einen Handwerker und füge unter „Notfall-zuständig für" eine Zuordnung hinzu.</p>`;
+        } else {
+            body.innerHTML = (e.beschreibung ? `<p class="text-sm text-gray-600 mb-3">${esc(e.beschreibung)}</p>` : '') +
+                zuw.map(z => {
+                    const prio = z.prioritaet === 1
+                        ? '<span class="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs font-medium">primär</span>'
+                        : z.prioritaet === 2
+                            ? '<span class="px-2 py-0.5 bg-orange-100 text-orange-700 rounded text-xs font-medium">Reserve</span>'
+                            : `<span class="px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-xs">Prio ${z.prioritaet}</span>`;
+                    const stwegBadge = z.stweg ? `<span class="ml-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">STWEG ${z.stweg}</span>` : '';
+                    const tel = z.h_mobile || z.h_telefon;
+                    const telLink = tel ? `<a href="tel:${esc(tel.replace(/[^0-9+]/g,''))}" class="inline-flex items-center gap-1 px-2 py-1 bg-emerald-600 text-white rounded text-xs hover:bg-emerald-700">📞 ${esc(tel)}</a>` : '';
+                    const mailLink = z.h_email ? `<a href="mailto:${esc(z.h_email)}" class="inline-flex items-center gap-1 px-2 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">✉ E-Mail</a>` : '';
+                    const personen = (z.personen || []).map(p => {
+                        const ptel = p.mobile || p.telefon;
+                        const ptelLink = ptel ? ` · <a href="tel:${esc(ptel.replace(/[^0-9+]/g,''))}" class="text-blue-600 hover:underline">${esc(ptel)}</a>` : '';
+                        const pmail = p.email ? ` · <a href="mailto:${esc(p.email)}" class="text-blue-600 hover:underline">${esc(p.email)}</a>` : '';
+                        return `<div class="text-xs text-gray-600">${esc(p.name)}${p.rolle ? ' (' + esc(p.rolle) + ')' : ''}${ptelLink}${pmail}</div>`;
+                    }).join('');
+                    return `<div class="border rounded-lg p-3 mb-2">
+                        <div class="flex items-center justify-between gap-2 flex-wrap">
+                            <div>
+                                <div class="font-semibold text-gray-900">${esc(z.firma)}</div>
+                                <div class="text-xs text-gray-500">${esc(z.kategorie)}</div>
+                            </div>
+                            <div>${prio}${stwegBadge}</div>
+                        </div>
+                        ${z.hinweis ? `<div class="mt-2 px-2 py-1 bg-amber-50 border-l-2 border-amber-400 text-xs text-amber-900">⚠ ${esc(z.hinweis)}</div>` : ''}
+                        ${personen ? `<div class="mt-2 space-y-0.5">${personen}</div>` : ''}
+                        <div class="mt-2 flex flex-wrap gap-2">${telLink}${mailLink}</div>
+                    </div>`;
+                }).join('');
+        }
+        $('notfall-modal').classList.remove('hidden');
+    }
+
+    // ─── Event-Typen Verwaltung ────────────────────────────────
+    function openEventsModal() {
+        $('events-modal').classList.remove('hidden');
+        resetEventForm();
+        renderEventsList();
+    }
+    function closeEventsModal() { $('events-modal').classList.add('hidden'); }
+
+    function resetEventForm() {
+        $('evt-id').value = '';
+        $('evt-icon').value = '';
+        $('evt-name').value = '';
+        $('evt-sort').value = '';
+        $('evt-beschreibung').value = '';
+        $('evt-cancel').classList.add('hidden');
+        $('evt-save').textContent = '+ Hinzufügen';
+        $('evt-error').classList.add('hidden');
+    }
+
+    function renderEventsList() {
+        const list = $('events-list');
+        if (eventTypen.length === 0) {
+            list.innerHTML = '<div class="text-gray-400 py-2">Keine Event-Typen vorhanden.</div>';
+            return;
+        }
+        list.innerHTML = eventTypen.map(e => `
+            <div class="flex items-center justify-between gap-2 py-2">
+                <div class="flex items-center gap-2 flex-1 min-w-0">
+                    <span class="text-lg">${esc(e.icon || '🚨')}</span>
+                    <div class="min-w-0">
+                        <div class="font-medium truncate">${esc(e.name)}</div>
+                        ${e.beschreibung ? `<div class="text-xs text-gray-500 truncate">${esc(e.beschreibung)}</div>` : ''}
+                    </div>
+                </div>
+                <div class="flex gap-2 flex-shrink-0">
+                    <button data-edit-evt="${e.id}" class="text-xs text-blue-600 hover:underline">✎</button>
+                    <button data-del-evt="${e.id}" class="text-xs text-red-600 hover:underline">×</button>
+                </div>
+            </div>`).join('');
+        list.querySelectorAll('button[data-edit-evt]').forEach(b => b.addEventListener('click', () => editEvent(parseInt(b.dataset.editEvt, 10))));
+        list.querySelectorAll('button[data-del-evt]').forEach(b => b.addEventListener('click', () => deleteEvent(parseInt(b.dataset.delEvt, 10))));
+    }
+
+    function editEvent(id) {
+        const e = eventTypen.find(x => x.id === id);
+        if (!e) return;
+        $('evt-id').value = e.id;
+        $('evt-icon').value = e.icon || '';
+        $('evt-name').value = e.name;
+        $('evt-sort').value = e.sort_order || '';
+        $('evt-beschreibung').value = e.beschreibung || '';
+        $('evt-cancel').classList.remove('hidden');
+        $('evt-save').textContent = 'Speichern';
+    }
+
+    async function saveEvent() {
+        const id = $('evt-id').value;
+        const body = {
+            icon: $('evt-icon').value.trim() || null,
+            name: $('evt-name').value.trim(),
+            sort_order: $('evt-sort').value || null,
+            beschreibung: $('evt-beschreibung').value.trim() || null,
+        };
+        if (!body.name) {
+            const e = $('evt-error'); e.textContent = 'Name ist Pflichtfeld'; e.classList.remove('hidden');
+            return;
+        }
+        try {
+            const url = id ? `/api/handwerker-events/${id}` : '/api/handwerker-events';
+            const r = await AuthentikAuth.apiFetch(url, {
+                method: id ? 'PUT' : 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body),
+            });
+            if (!r.ok) {
+                const err = await r.json().catch(() => ({}));
+                throw new Error(err.error || ('HTTP ' + r.status));
+            }
+            await loadEventTypen();
+            await loadNotfallSummary();
+            resetEventForm();
+            renderEventsList();
+        } catch (err) {
+            const e = $('evt-error'); e.textContent = err.message; e.classList.remove('hidden');
+        }
+    }
+
+    async function deleteEvent(id) {
+        if (!confirm('Event-Typ wirklich löschen? Alle Zuordnungen werden mit gelöscht.')) return;
+        try {
+            const r = await AuthentikAuth.apiFetch(`/api/handwerker-events/${id}`, { method: 'DELETE' });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            await loadEventTypen();
+            await loadNotfallSummary();
+            renderEventsList();
+        } catch (err) {
+            alert('Fehler: ' + err.message);
+        }
     }
 
     // ─── Auftragshistorie ───────────────────────────────────────
@@ -700,6 +1022,15 @@
         $('show-archived').addEventListener('change', render);
         $('btn-add').addEventListener('click', () => openModal(null));
         $('btn-add-person').addEventListener('click', () => addPersonCard());
+        $('btn-add-zuw').addEventListener('click', () => addZuweisungCard());
+        $('notfall-modal-close').addEventListener('click', () => $('notfall-modal').classList.add('hidden'));
+        $('notfall-modal').addEventListener('click', e => { if (e.target.id === 'notfall-modal') $('notfall-modal').classList.add('hidden'); });
+        $('btn-manage-events').addEventListener('click', openEventsModal);
+        $('events-modal-close').addEventListener('click', closeEventsModal);
+        $('events-modal').addEventListener('click', e => { if (e.target.id === 'events-modal') closeEventsModal(); });
+        $('evt-save').addEventListener('click', saveEvent);
+        $('evt-cancel').addEventListener('click', resetEventForm);
+        if (canWrite) $('btn-manage-events').classList.remove('hidden');
         $('modal-close').addEventListener('click', closeModal);
         $('modal-cancel').addEventListener('click', closeModal);
         $('modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
@@ -723,7 +1054,8 @@
             }
         });
 
-        await loadList();
+        await loadEventTypen();
+        await Promise.all([loadList(), loadNotfallSummary()]);
     });
     </script>
 </body>

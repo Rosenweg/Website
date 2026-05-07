@@ -8305,6 +8305,44 @@ app.delete('/api/projects/:slug/attachments/:id', authMiddleware, requireAusschu
 });
 
 // ─── Handwerker- / Lieferantenliste ────────────────────────────────
+async function loadHandwerkerEventZuweisungen(handwerkerIds) {
+  if (!Array.isArray(handwerkerIds) || handwerkerIds.length === 0) return {};
+  const result = await pool.query(
+    `SELECT z.*, t.name AS event_name, t.icon AS event_icon
+       FROM handwerker_event_zuweisungen z
+       JOIN handwerker_event_typen t ON t.id = z.event_typ_id
+      WHERE z.handwerker_id = ANY($1)
+      ORDER BY z.handwerker_id, t.sort_order, t.name, z.prioritaet`,
+    [handwerkerIds]
+  );
+  const map = {};
+  for (const z of result.rows) {
+    if (!map[z.handwerker_id]) map[z.handwerker_id] = [];
+    map[z.handwerker_id].push(z);
+  }
+  return map;
+}
+
+async function saveHandwerkerEventZuweisungen(client, handwerkerId, zuweisungen) {
+  if (!Array.isArray(zuweisungen)) return;
+  const trim = (v) => (v == null ? null : String(v).trim() || null);
+  await client.query('DELETE FROM handwerker_event_zuweisungen WHERE handwerker_id = $1', [handwerkerId]);
+  for (const z of zuweisungen) {
+    const eventId = parseInt(z.event_typ_id, 10);
+    if (!Number.isFinite(eventId)) continue;
+    const prio = parseInt(z.prioritaet, 10);
+    const stweg = z.stweg == null || z.stweg === '' ? null : parseInt(z.stweg, 10);
+    await client.query(
+      `INSERT INTO handwerker_event_zuweisungen (event_typ_id, handwerker_id, prioritaet, stweg, hinweis)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [eventId, handwerkerId,
+       Number.isFinite(prio) && prio >= 1 ? prio : 1,
+       Number.isFinite(stweg) && stweg >= 1 && stweg <= 8 ? stweg : null,
+       trim(z.hinweis)]
+    );
+  }
+}
+
 async function loadHandwerkerPersonen(handwerkerIds) {
   if (!Array.isArray(handwerkerIds) || handwerkerIds.length === 0) return {};
   const result = await pool.query(
@@ -8383,8 +8421,13 @@ app.get('/api/handwerker', authMiddleware, requirePermission('handwerker', 'read
       `SELECT * FROM handwerker ${whereSql} ORDER BY archiviert ASC, kategorie ASC, firma ASC`,
       params
     );
-    const personenMap = await loadHandwerkerPersonen(result.rows.map(r => r.id));
-    for (const r of result.rows) r.personen = personenMap[r.id] || [];
+    const ids = result.rows.map(r => r.id);
+    const personenMap = await loadHandwerkerPersonen(ids);
+    const zuwMap = await loadHandwerkerEventZuweisungen(ids);
+    for (const r of result.rows) {
+      r.personen = personenMap[r.id] || [];
+      r.event_zuweisungen = zuwMap[r.id] || [];
+    }
     res.json({ handwerker: result.rows });
   } catch (err) {
     console.error('Handwerker list error:', err);
@@ -8448,9 +8491,14 @@ app.post('/api/handwerker', authMiddleware, requirePermission('handwerker', 'wri
     );
     const created = result.rows[0];
     await saveHandwerkerPersonen(client, created.id, req.body && req.body.personen);
+    if (req.body && Array.isArray(req.body.event_zuweisungen)) {
+      await saveHandwerkerEventZuweisungen(client, created.id, req.body.event_zuweisungen);
+    }
     await client.query('COMMIT');
     const personenMap = await loadHandwerkerPersonen([created.id]);
+    const zuwMap = await loadHandwerkerEventZuweisungen([created.id]);
     created.personen = personenMap[created.id] || [];
+    created.event_zuweisungen = zuwMap[created.id] || [];
     res.status(201).json(created);
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -8489,10 +8537,15 @@ app.put('/api/handwerker/:id', authMiddleware, requirePermission('handwerker', '
     if (req.body && Array.isArray(req.body.personen)) {
       await saveHandwerkerPersonen(client, id, req.body.personen);
     }
+    if (req.body && Array.isArray(req.body.event_zuweisungen)) {
+      await saveHandwerkerEventZuweisungen(client, id, req.body.event_zuweisungen);
+    }
     await client.query('COMMIT');
     const updated = result.rows[0];
     const personenMap = await loadHandwerkerPersonen([id]);
+    const zuwMap = await loadHandwerkerEventZuweisungen([id]);
     updated.personen = personenMap[id] || [];
+    updated.event_zuweisungen = zuwMap[id] || [];
     res.json(updated);
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -8622,6 +8675,115 @@ app.delete('/api/handwerker/:id/auftraege/:aid', authMiddleware, requirePermissi
     res.status(500).json({ error: 'Fehler beim Löschen' });
   } finally {
     client.release();
+  }
+});
+
+// Event-Typen (Notfall-Kategorien) CRUD
+app.get('/api/handwerker-events', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM handwerker_event_typen ORDER BY sort_order, name');
+    res.json({ event_typen: result.rows });
+  } catch (err) {
+    console.error('Event-Typen list error:', err);
+    res.status(500).json({ error: 'Fehler beim Laden der Event-Typen' });
+  }
+});
+
+app.post('/api/handwerker-events', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+  try {
+    const trim = (v) => (v == null ? null : String(v).trim() || null);
+    const name = trim(req.body?.name);
+    if (!name) return res.status(400).json({ error: 'Name ist Pflichtfeld' });
+    const sortOrder = parseInt(req.body?.sort_order, 10);
+    const result = await pool.query(
+      `INSERT INTO handwerker_event_typen (name, icon, beschreibung, sort_order)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [name, trim(req.body?.icon), trim(req.body?.beschreibung), Number.isFinite(sortOrder) ? sortOrder : 999]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Event-Typ mit diesem Namen existiert bereits' });
+    console.error('Event-Typ create error:', err);
+    res.status(500).json({ error: 'Fehler beim Anlegen' });
+  }
+});
+
+app.put('/api/handwerker-events/:id', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige ID' });
+    const trim = (v) => (v == null ? null : String(v).trim() || null);
+    const name = trim(req.body?.name);
+    if (!name) return res.status(400).json({ error: 'Name ist Pflichtfeld' });
+    const sortOrder = parseInt(req.body?.sort_order, 10);
+    const result = await pool.query(
+      `UPDATE handwerker_event_typen
+          SET name=$1, icon=$2, beschreibung=$3, sort_order=$4
+        WHERE id=$5 RETURNING *`,
+      [name, trim(req.body?.icon), trim(req.body?.beschreibung),
+       Number.isFinite(sortOrder) ? sortOrder : 999, id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Event-Typ nicht gefunden' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Event-Typ mit diesem Namen existiert bereits' });
+    console.error('Event-Typ update error:', err);
+    res.status(500).json({ error: 'Fehler beim Aktualisieren' });
+  }
+});
+
+app.delete('/api/handwerker-events/:id', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige ID' });
+    const result = await pool.query('DELETE FROM handwerker_event_typen WHERE id = $1 RETURNING id', [id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Event-Typ nicht gefunden' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Event-Typ delete error:', err);
+    res.status(500).json({ error: 'Fehler beim Löschen' });
+  }
+});
+
+// Notfall-Übersicht: alle Event-Typen mit zugeordneten Handwerkern (sortiert nach Priorität)
+app.get('/api/handwerker-notfall', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
+  try {
+    const stwegFilter = req.query.stweg ? parseInt(req.query.stweg, 10) : null;
+    const events = await pool.query('SELECT * FROM handwerker_event_typen ORDER BY sort_order, name');
+    const zuws = await pool.query(`
+      SELECT z.*, h.firma, h.kategorie, h.telefon AS h_telefon, h.mobile AS h_mobile, h.email AS h_email,
+             h.archiviert AS h_archiviert
+        FROM handwerker_event_zuweisungen z
+        JOIN handwerker h ON h.id = z.handwerker_id
+       WHERE h.archiviert = false
+       ORDER BY z.event_typ_id, z.prioritaet, h.firma`);
+    const personen = await pool.query(`
+      SELECT p.* FROM handwerker_personen p
+        JOIN handwerker_event_zuweisungen z ON z.handwerker_id = p.handwerker_id
+       ORDER BY p.handwerker_id, p.sort_order, p.id`);
+    const personenByHandwerker = {};
+    for (const p of personen.rows) {
+      if (!personenByHandwerker[p.handwerker_id]) personenByHandwerker[p.handwerker_id] = [];
+      personenByHandwerker[p.handwerker_id].push(p);
+    }
+    const zuwsByEvent = {};
+    for (const z of zuws.rows) {
+      // STWEG-Filter: leere stweg = gilt fuer alle, sonst nur passend
+      if (stwegFilter && z.stweg && z.stweg !== stwegFilter) continue;
+      if (!zuwsByEvent[z.event_typ_id]) zuwsByEvent[z.event_typ_id] = [];
+      zuwsByEvent[z.event_typ_id].push({
+        ...z,
+        personen: personenByHandwerker[z.handwerker_id] || [],
+      });
+    }
+    const result = events.rows.map(e => ({
+      ...e,
+      zuweisungen: zuwsByEvent[e.id] || [],
+    }));
+    res.json({ events: result });
+  } catch (err) {
+    console.error('Notfall summary error:', err);
+    res.status(500).json({ error: 'Fehler beim Laden der Notfall-Übersicht' });
   }
 });
 
@@ -9076,6 +9238,51 @@ async function initDB() {
           EXECUTE 'CREATE TRIGGER handwerker_personen_audit AFTER INSERT OR UPDATE OR DELETE ON handwerker_personen FOR EACH ROW EXECUTE FUNCTION audit_trigger_fn()';
         END IF;
       END $$;
+
+      CREATE TABLE IF NOT EXISTS handwerker_event_typen (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(120) NOT NULL UNIQUE,
+        icon VARCHAR(8),
+        beschreibung TEXT,
+        sort_order INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS handwerker_event_zuweisungen (
+        id SERIAL PRIMARY KEY,
+        event_typ_id INTEGER NOT NULL REFERENCES handwerker_event_typen(id) ON DELETE CASCADE,
+        handwerker_id INTEGER NOT NULL REFERENCES handwerker(id) ON DELETE CASCADE,
+        prioritaet INTEGER DEFAULT 1,
+        stweg INTEGER,
+        hinweis TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_handwerker_event_zuw_event ON handwerker_event_zuweisungen(event_typ_id);
+      CREATE INDEX IF NOT EXISTS idx_handwerker_event_zuw_handwerker ON handwerker_event_zuweisungen(handwerker_id);
+
+      DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM pg_proc WHERE proname='audit_trigger_fn')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_name='handwerker_event_typen_audit') THEN
+          EXECUTE 'CREATE TRIGGER handwerker_event_typen_audit AFTER INSERT OR UPDATE OR DELETE ON handwerker_event_typen FOR EACH ROW EXECUTE FUNCTION audit_trigger_fn()';
+        END IF;
+        IF EXISTS (SELECT 1 FROM pg_proc WHERE proname='audit_trigger_fn')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_name='handwerker_event_zuw_audit') THEN
+          EXECUTE 'CREATE TRIGGER handwerker_event_zuw_audit AFTER INSERT OR UPDATE OR DELETE ON handwerker_event_zuweisungen FOR EACH ROW EXECUTE FUNCTION audit_trigger_fn()';
+        END IF;
+      END $$;
+
+      INSERT INTO handwerker_event_typen (name, icon, beschreibung, sort_order) VALUES
+        ('Wasserschaden',    '💧', 'Rohrbruch, Leck, eindringendes Wasser',     10),
+        ('Heizungsausfall',  '🔥', 'Heizung defekt, kein warmes Wasser',        20),
+        ('Stromausfall',     '⚡', 'Strom- oder Sicherungsprobleme',            30),
+        ('Schlüsseldienst',  '🔑', 'Ausgesperrt, Schloss defekt',               40),
+        ('Glasbruch',        '🪟', 'Fensterscheibe oder Glastür beschädigt',    50),
+        ('Sturmschaden',     '🌪', 'Sturmschäden an Dach, Fassade, Bäumen',     60),
+        ('Dachschaden',      '🏠', 'Undichtes Dach, lose Ziegel',               70),
+        ('Kanalverstopfung', '🚽', 'Abfluss, Toilette, Kanalisation verstopft', 80),
+        ('Schädlingsbefall', '🪳', 'Mäuse, Ratten, Insekten',                   90),
+        ('Liftstörung',      '🛗', 'Aufzug steckt, Tür schließt nicht',        100)
+      ON CONFLICT (name) DO NOTHING;
     `);
 
     await client.query(`
