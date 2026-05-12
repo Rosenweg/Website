@@ -2950,44 +2950,47 @@ async function pollGmailForVerteiler() {
       // UID-Watermark statt UNSEEN-Filter: robust gegen versehentliches Lesen
       // im Gmail-Webclient (Mail bleibt "seen" → wuerde sonst nie verarbeitet).
       // Wir tracken die hoechste verarbeitete UID pro Mailbox in der DB.
-      // Wenn UIDVALIDITY sich aendert (Mailbox-Rebuild), wird der Watermark
-      // resettet — wir ueberspringen dann historische Mails (verhindert Massensendung).
-      const mbox = client.mailbox; // { uidValidity, uidNext, exists, ... }
+      const mbox = client.mailbox;
+      // STATUS holt uidValidity/uidNext explizit (mbox-Werte sind manchmal stale)
+      const status = await client.status('INBOX', { uidValidity: true, uidNext: true });
+      const currentValidity = String(status.uidValidity ?? mbox.uidValidity ?? '0');
+      const currentUidNext = Number(status.uidNext ?? mbox.uidNext ?? 1);
       const stateRes = await pool.query(
-        'SELECT uid_validity, last_uid FROM imap_state WHERE mailbox = $1', ['INBOX']
+        'SELECT uid_validity::text AS uid_validity, last_uid::text AS last_uid FROM imap_state WHERE mailbox = $1',
+        ['INBOX']
       );
-      const currentValidity = BigInt(mbox.uidValidity);
-      const currentUidNext = Number(mbox.uidNext || 1);
       let lastUid = 0;
       if (stateRes.rows.length === 0) {
-        // Erster Lauf: nur neue Mails ab jetzt verarbeiten (kein Massenversand
-        // historischer Mails). Watermark = aktuelle uidNext-1.
         lastUid = Math.max(0, currentUidNext - 1);
         await pool.query(
           'INSERT INTO imap_state (mailbox, uid_validity, last_uid) VALUES ($1, $2, $3)',
-          ['INBOX', mbox.uidValidity, lastUid]
+          ['INBOX', currentValidity, lastUid]
         );
-        console.log(`[IMAP] First run, watermark initialized at UID ${lastUid}`);
-      } else if (BigInt(stateRes.rows[0].uid_validity) !== currentValidity) {
-        // UIDVALIDITY-Wechsel = Mailbox wurde rebuilt. Watermark zuruecksetzen,
-        // historische Mails ueberspringen.
+        console.log(`[IMAP] First run, watermark initialized at UID ${lastUid} (uidValidity=${currentValidity}, uidNext=${currentUidNext})`);
+      } else if (stateRes.rows[0].uid_validity !== currentValidity) {
         lastUid = Math.max(0, currentUidNext - 1);
         await pool.query(
           'UPDATE imap_state SET uid_validity = $1, last_uid = $2, updated_at = NOW() WHERE mailbox = $3',
-          [mbox.uidValidity, lastUid, 'INBOX']
+          [currentValidity, lastUid, 'INBOX']
         );
-        console.warn(`[IMAP] UIDVALIDITY changed (${stateRes.rows[0].uid_validity} → ${mbox.uidValidity}), watermark reset to ${lastUid}`);
+        console.warn(`[IMAP] UIDVALIDITY changed (${stateRes.rows[0].uid_validity} → ${currentValidity}), watermark reset to ${lastUid}`);
       } else {
         lastUid = Number(stateRes.rows[0].last_uid);
       }
 
-      // Search alle UIDs > lastUid
-      const uids = await client.search({ uid: `${lastUid + 1}:*` }, { uid: true });
-      // Sort ascending damit Watermark monoton waechst
-      uids.sort((a, b) => a - b);
+      // Robust: ALLE UIDs holen, in JS auf > lastUid filtern.
+      // (Gmail-IMAP gibt bei '590:*' wenn uidNext=590 manchmal die hoechste UID
+      // zurueck, auch wenn sie < 590 ist — daher zusaetzlicher JS-Filter.)
+      const allUids = await client.search({ all: true }, { uid: true });
+      const uids = (allUids || []).filter(u => Number(u) > lastUid).sort((a, b) => a - b);
       if (!uids.length) { lock.release(); return; }
+      console.log(`[IMAP] Processing ${uids.length} new UIDs above watermark ${lastUid}: ${uids.slice(0, 10).join(',')}${uids.length > 10 ? '...' : ''}`);
 
       for (const uid of uids) {
+        if (Number(uid) <= lastUid) {
+          console.warn(`[IMAP] Defensive: skip UID ${uid} (<= watermark ${lastUid})`);
+          continue;
+        }
         let advancedWatermark = false;
         const advanceWatermark = async () => {
           if (advancedWatermark) return;
