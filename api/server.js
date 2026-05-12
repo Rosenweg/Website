@@ -2947,15 +2947,58 @@ async function pollGmailForVerteiler() {
     const lock = await client.getMailboxLock('INBOX');
 
     try {
-      // Only process UNSEEN emails from last 7 days. Seen flag is set on every
-      // outcome (success, rejection, error) so reprocessing requires explicit
-      // unflag — protects against race conditions and accidental re-runs.
-      const since = new Date();
-      since.setDate(since.getDate() - 7);
-      const uids = await client.search({ since, seen: false }, { uid: true });
+      // UID-Watermark statt UNSEEN-Filter: robust gegen versehentliches Lesen
+      // im Gmail-Webclient (Mail bleibt "seen" → wuerde sonst nie verarbeitet).
+      // Wir tracken die hoechste verarbeitete UID pro Mailbox in der DB.
+      // Wenn UIDVALIDITY sich aendert (Mailbox-Rebuild), wird der Watermark
+      // resettet — wir ueberspringen dann historische Mails (verhindert Massensendung).
+      const mbox = client.mailbox; // { uidValidity, uidNext, exists, ... }
+      const stateRes = await pool.query(
+        'SELECT uid_validity, last_uid FROM imap_state WHERE mailbox = $1', ['INBOX']
+      );
+      const currentValidity = BigInt(mbox.uidValidity);
+      const currentUidNext = Number(mbox.uidNext || 1);
+      let lastUid = 0;
+      if (stateRes.rows.length === 0) {
+        // Erster Lauf: nur neue Mails ab jetzt verarbeiten (kein Massenversand
+        // historischer Mails). Watermark = aktuelle uidNext-1.
+        lastUid = Math.max(0, currentUidNext - 1);
+        await pool.query(
+          'INSERT INTO imap_state (mailbox, uid_validity, last_uid) VALUES ($1, $2, $3)',
+          ['INBOX', mbox.uidValidity, lastUid]
+        );
+        console.log(`[IMAP] First run, watermark initialized at UID ${lastUid}`);
+      } else if (BigInt(stateRes.rows[0].uid_validity) !== currentValidity) {
+        // UIDVALIDITY-Wechsel = Mailbox wurde rebuilt. Watermark zuruecksetzen,
+        // historische Mails ueberspringen.
+        lastUid = Math.max(0, currentUidNext - 1);
+        await pool.query(
+          'UPDATE imap_state SET uid_validity = $1, last_uid = $2, updated_at = NOW() WHERE mailbox = $3',
+          [mbox.uidValidity, lastUid, 'INBOX']
+        );
+        console.warn(`[IMAP] UIDVALIDITY changed (${stateRes.rows[0].uid_validity} → ${mbox.uidValidity}), watermark reset to ${lastUid}`);
+      } else {
+        lastUid = Number(stateRes.rows[0].last_uid);
+      }
+
+      // Search alle UIDs > lastUid
+      const uids = await client.search({ uid: `${lastUid + 1}:*` }, { uid: true });
+      // Sort ascending damit Watermark monoton waechst
+      uids.sort((a, b) => a - b);
       if (!uids.length) { lock.release(); return; }
 
       for (const uid of uids) {
+        let advancedWatermark = false;
+        const advanceWatermark = async () => {
+          if (advancedWatermark) return;
+          advancedWatermark = true;
+          try {
+            await pool.query(
+              'UPDATE imap_state SET last_uid = $1, updated_at = NOW() WHERE mailbox = $2 AND last_uid < $1',
+              [uid, 'INBOX']
+            );
+          } catch (e) { console.error('[IMAP] Watermark update failed:', e.message); }
+        };
         try {
           // Fetch headers only first (fast, small)
           let headers = null;
@@ -3522,7 +3565,13 @@ async function pollGmailForVerteiler() {
           }
         } catch (msgErr) {
           console.error(`[IMAP] Error processing UID ${uid}:`, msgErr.message);
-          // Don't mark as read on error - will retry next poll
+          // Mit UID-watermark wird die Mail trotzdem als "behandelt" markiert
+          // (sonst Endlos-Retry-Loop). Message-ID-Dedup schuetzt vor
+          // versehentlicher Doppel-Verarbeitung wenn UID-Reset noetig waere.
+        } finally {
+          // Auch bei `continue` aus dem try-Block: Watermark immer vorruecken,
+          // damit alte/uebersprungene UIDs nicht endlos re-gescannt werden.
+          await advanceWatermark();
         }
       }
     } finally {
@@ -9482,6 +9531,13 @@ async function initDB() {
         ('Schädlingsbefall', '🪳', 'Mäuse, Ratten, Insekten',                   90),
         ('Liftstörung',      '🛗', 'Aufzug steckt, Tür schließt nicht',        100)
       ON CONFLICT (name) DO NOTHING;
+
+      CREATE TABLE IF NOT EXISTS imap_state (
+        mailbox VARCHAR(120) PRIMARY KEY,
+        uid_validity BIGINT NOT NULL,
+        last_uid BIGINT NOT NULL DEFAULT 0,
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
 
       CREATE TABLE IF NOT EXISTS handwerker_vertraege (
         id SERIAL PRIMARY KEY,
