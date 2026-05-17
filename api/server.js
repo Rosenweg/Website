@@ -1003,10 +1003,24 @@ app.put('/api/me/kontakt/:id', authMiddleware, async (req, res) => {
 
     const result = await pool.query(
       `UPDATE wohnungen_kontakte SET email = COALESCE($1, email), telefon = COALESCE($2, telefon), adresse = COALESCE($3, adresse)
-       WHERE id = $4 RETURNING id, name, email, telefon, adresse`,
+       WHERE id = $4 RETURNING id, name, email, telefon, adresse, wohnung_id`,
       [newEmail || null, telefon || null, adresse || null, req.params.id]
     );
     res.json(result.rows[0]);
+    // Verwaltung informieren ueber Kontaktdaten-Aenderung
+    try {
+      const wId = result.rows[0].wohnung_id;
+      const w = await pool.query('SELECT stweg, bezeichnung FROM wohnungen WHERE id = $1', [wId]);
+      const stweg = w.rows[0]?.stweg;
+      const bez = w.rows[0]?.bezeichnung || `Wohnung ${wId}`;
+      const changes = [];
+      if (newEmail) changes.push('E-Mail → ' + newEmail);
+      if (telefon) changes.push('Tel → ' + telefon);
+      if (adresse) changes.push('Adresse → ' + String(adresse).slice(0, 80));
+      if (changes.length > 0) {
+        recordObjektChange(stweg, `${result.rows[0].name} (${bez}) hat eigene Kontaktdaten aktualisiert: ${changes.join(', ')}`, req.user.email).catch(() => {});
+      }
+    } catch {}
   } catch (err) {
     console.error('[me/kontakt] error:', err.message);
     res.status(500).json({ error: 'Fehler' });
@@ -1063,6 +1077,7 @@ app.put('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
     await client.query('COMMIT');
     const w = await loadWohnungMitKontakte(result.rows[0].id);
     res.json(w);
+    recordObjektChange(stweg, `Eigentuemer-Self-Service: Wohnung "${w.bezeichnung}" aktualisiert`, req.user.email).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK').catch(()=>{});
     console.error('[me/wohnung PUT] error:', err.message);
@@ -5811,9 +5826,12 @@ app.get('/api/wohnungen/:stweg/:id/historie', authMiddleware, requireStwegAccess
 // POST /api/wohnungen/:stweg/:id/kontakte/:kid/archive - Einzelnen Kontakt archivieren
 app.post('/api/wohnungen/:stweg/:id/kontakte/:kid/archive', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, async (req, res) => {
   try {
+    const stweg = parseStweg(req.params.stweg);
     const wId = parseInt(req.params.id, 10);
     const kId = parseInt(req.params.kid, 10);
     if (!Number.isFinite(wId) || !Number.isFinite(kId)) return res.status(400).json({ error: 'Ungültige IDs' });
+    const k = await pool.query('SELECT k.name, k.rolle, w.bezeichnung FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id WHERE k.id = $1', [kId]);
+    const info = k.rows[0] || {};
     const r = await pool.query(
       `UPDATE wohnungen_kontakte SET archiviert_am = CURRENT_DATE
          WHERE id = $1 AND wohnung_id = $2 AND archiviert_am IS NULL
@@ -5822,6 +5840,7 @@ app.post('/api/wohnungen/:stweg/:id/kontakte/:kid/archive', authMiddleware, requ
     );
     if (r.rowCount === 0) return res.status(404).json({ error: 'Kontakt nicht gefunden oder bereits archiviert' });
     res.json({ ok: true });
+    recordObjektChange(stweg, `${info.rolle === 'eigentuemer' ? 'Eigentuemer' : 'Mieter'} "${info.name}" aus Wohnung "${info.bezeichnung}" archiviert (Wegzug)`, req.user.email).catch(() => {});
   } catch (err) {
     console.error('Archive error:', err);
     res.status(500).json({ error: 'Fehler beim Archivieren' });
@@ -5850,6 +5869,8 @@ app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsver
     res.status(201).json(wohnung);
     // Sync kontakte to Authentik in background (don't block response)
     syncKontakteToAuthentik(stweg, b.kontakte, b.bewohnt_von).catch(() => {});
+    // Verwaltung informieren
+    recordObjektChange(stweg, `Neue Wohnung "${wohnung.bezeichnung}" angelegt`, req.user.email).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK');
     if (err.code === '23505') return res.status(409).json({ error: 'Wohnung mit dieser Bezeichnung existiert bereits' });
@@ -5895,6 +5916,8 @@ app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
     res.json(wohnung);
     // Sync kontakte to Authentik in background
     syncKontakteToAuthentik(parseStweg(req.params.stweg), b.kontakte, b.bewohnt_von).catch(() => {});
+    // Verwaltung informieren
+    recordObjektChange(stweg, `Wohnung "${wohnung.bezeichnung}" aktualisiert (Bewohner/Daten)`, req.user.email).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK');
     if (err.code === '23505') return res.status(409).json({ error: 'Wohnung mit dieser Bezeichnung existiert bereits' });
@@ -5908,9 +5931,13 @@ app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
 // DELETE /api/wohnungen/:stweg/:id - Delete apartment
 app.delete('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, async (req, res) => {
   try {
-    const result = await pool.query('DELETE FROM wohnungen WHERE id = $1 AND stweg = $2 RETURNING id', [req.params.id, req.params.stweg]);
+    const stweg = parseStweg(req.params.stweg);
+    const w = await pool.query('SELECT bezeichnung FROM wohnungen WHERE id = $1 AND stweg = $2', [req.params.id, stweg]);
+    const bez = w.rows[0]?.bezeichnung || `#${req.params.id}`;
+    const result = await pool.query('DELETE FROM wohnungen WHERE id = $1 AND stweg = $2 RETURNING id', [req.params.id, stweg]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Wohnung nicht gefunden' });
     res.json({ success: true });
+    recordObjektChange(stweg, `Wohnung "${bez}" geloescht`, req.user.email).catch(() => {});
   } catch (err) {
     console.error('Wohnung delete error:', err);
     res.status(500).json({ error: 'Fehler beim Löschen der Wohnung' });
@@ -9460,6 +9487,78 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
   } catch (err) {
     console.error('[auslagen] Auszahlungs-Mail Fehler:', err);
     return { ok: false, reason: err.message };
+  }
+}
+
+// Objektverwaltungs-Aenderungen an die Verwaltung melden.
+// Coalescing: solange ein pending Queue-Eintrag fuer den STWEG existiert,
+// wird er um die neue Aenderung erweitert (eine Sammel-Mail pro STWEG).
+// Bei Ausschuss-Fallback wird gar nichts gemacht (Ausschuss kennt die Aenderungen).
+async function recordObjektChange(stweg, line, changedBy) {
+  try {
+    const stwegInt = parseInt(stweg, 10);
+    const stwegVal = Number.isFinite(stwegInt) && stwegInt >= 1 && stwegInt <= 8 ? stwegInt : null;
+    const verw = await findVerwaltungForStweg(stwegVal);
+    if (!verw || verw.fallback) return; // keine wirksame Verwaltung → ueberspringen
+
+    const stwegLabel = stwegVal ? `STWEG ${stwegVal}` : 'STWEG-uebergreifend';
+    const stamp = new Date().toLocaleString('de-CH');
+    const newLine = `  • ${stamp} (${changedBy || 'unbekannt'}): ${line}`;
+
+    const existing = await pool.query(
+      `SELECT id, body_text FROM verwaltung_mail_queue
+        WHERE source_type = 'objekt-aenderung'
+          AND source_id = $1
+          AND status = 'pending'
+        LIMIT 1`,
+      [stwegVal || 0],
+    );
+
+    if (existing.rows.length > 0) {
+      // Bestehenden pending Eintrag erweitern (keine erneute Notification)
+      await pool.query(
+        `UPDATE verwaltung_mail_queue
+            SET body_text = body_text || E'\\n' || $1
+          WHERE id = $2`,
+        [newLine, existing.rows[0].id],
+      );
+      return;
+    }
+
+    // Neuen Sammel-Eintrag in die Queue stellen
+    const subject = `Objektverwaltungs-Aenderungen ${stwegLabel} (${new Date().toLocaleDateString('de-CH')})`;
+    const body = [
+      `Sehr geehrte Damen und Herren`,
+      ``,
+      `folgende Aenderungen wurden in der Objektverwaltung der STWEG-Kooperation`,
+      `erfasst und sind fuer Ihre Unterlagen relevant:`,
+      ``,
+      `── Aenderungen (${stwegLabel}) ──`,
+      newLine,
+      ``,
+      `Diese Mail wird automatisch um weitere Aenderungen erweitert, solange sie`,
+      `noch nicht freigegeben ist. Sobald Technik oder Praesident die Mail`,
+      `freigibt, geht sie an Sie raus.`,
+      ``,
+      `Bitte aktualisieren Sie Ihre Stamm- und Kontaktdaten entsprechend.`,
+      ``,
+      `Mit freundlichen Gruessen`,
+      `STWEG-Kooperation Rosenweg`,
+    ].join('\n');
+
+    await enqueueVerwaltungMail({
+      source_type: 'objekt-aenderung',
+      source_id: stwegVal || 0,
+      mailTo: verw.mailTo,
+      mailCc: verw.mailCc,
+      mailReplyTo: null,
+      subject,
+      bodyText: body,
+      attachments: [],
+      createdBy: changedBy || 'system',
+    });
+  } catch (err) {
+    console.warn('[objekt-aenderung] recordObjektChange Fehler:', err.message);
   }
 }
 

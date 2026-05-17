@@ -35,7 +35,8 @@
             <div class="font-semibold mb-1">⚙ Diese Daten werden automatisch verwendet</div>
             <p>Folgende Funktionen ermitteln die zuständige Verwaltung dynamisch aus dieser Liste (Reihenfolge: <em>STWEG-spezifisch → STWEG-übergreifend → Fallback an Ausschuss</em>):</p>
             <ul class="list-disc list-inside mt-2 space-y-0.5">
-                <li><a href="/auslagen.html" class="underline hover:text-amber-700">Auslagen / Vorschüsse</a> — bei Freigabe geht eine fertige Auszahlungs-E-Mail mit Beleg-Anhang an die Verwaltung (To: <code class="bg-amber-100 px-1 rounded">Firmen-E-Mail</code>, CC: alle Kontakt-E-Mails)</li>
+                <li><a href="/auslagen.html" class="underline hover:text-amber-700">Auslagen / Vorschüsse</a> — bei Freigabe geht eine fertige Auszahlungs-E-Mail mit Beleg-Anhang an die Verwaltung (zur Kontrolle via <a href="/verwaltung-mail-outbox.html" class="underline">Mail-Outbox</a>)</li>
+                <li><a href="/objektverwaltung.html" class="underline hover:text-amber-700">Objektverwaltung</a> — Änderungen an Wohnungen, Bewohnern und Eigentümer-Kontaktdaten werden gesammelt als Mail an die Verwaltung geschickt (eine Sammel-Mail pro STWEG, solange noch nicht freigegeben)</li>
                 <li>Startseite (<a href="/index.html" class="underline hover:text-amber-700">/index.html</a>) sowie alle STWEG-Übersichten (Hausverwaltungs-Kachel) und <a href="/stweg3/pages/waschkueche-management-info.html" class="underline hover:text-amber-700">Waschküchen-Info</a> — laden Firma, Adresse, Telefon, E-Mail, Website und Öffnungszeiten dynamisch von hier</li>
             </ul>
             <p class="mt-2 text-xs text-amber-800">→ Pro <strong>aktiver</strong> Verwaltung mindestens <strong>Firmenname</strong> und eine <strong>E-Mail</strong> (oder ein Kontakt mit E-Mail) hinterlegen.</p>
