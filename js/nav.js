@@ -109,6 +109,7 @@ const RosenwegNav = {
               </a>
               <a href="${base}mail-empfaenger-admin.html" data-perm="mail-empfaenger" class="${dropA('mail-empfaenger')} block px-4 py-2 text-sm">Mail-Empfänger Stammdaten</a>
               <a href="${base}mail-compose.html" data-perm="mail-compose" class="${dropA('mail-compose')} block px-4 py-2 text-sm">Mail schreiben (Ad-hoc)</a>
+              <a href="${base}mail-approval-config.html" data-perm-any="technik,praesident" class="${dropA('mail-approval-config')} block px-4 py-2 text-sm">Mail-Freigabe-Regeln</a>
               <a href="${base}proxmox-verwaltung.html" data-perm="proxmox-verwaltung" class="${dropA('proxmox')} block px-4 py-2 text-sm">Proxmox</a>
             </div>
           </div>
@@ -183,6 +184,7 @@ const RosenwegNav = {
         </a>
         <a href="${base}mail-empfaenger-admin.html" data-perm="mail-empfaenger" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Mail-Empfänger Stammdaten</a>
         <a href="${base}mail-compose.html" data-perm="mail-compose" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Mail schreiben (Ad-hoc)</a>
+        <a href="${base}mail-approval-config.html" data-perm-any="technik,praesident" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Mail-Freigabe-Regeln</a>
         <a href="${base}proxmox-verwaltung.html" data-perm="proxmox-verwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Proxmox</a>
 
         <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Infos</div>

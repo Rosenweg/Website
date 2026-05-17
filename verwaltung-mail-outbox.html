@@ -163,6 +163,23 @@
     if (m.abgelehnt_von) meta.push(`<span class="text-red-700">✗ Abgelehnt</span> von <b>${esc(m.abgelehnt_von)}</b> am ${esc(fmtDt(m.abgelehnt_am))}: <em>${esc(m.abgelehnt_grund)}</em>`);
     if (m.send_error) meta.push(`<span class="text-red-700">⚠ Send-Fehler:</span> ${esc(m.send_error)}`);
 
+    // Approval-Stand
+    const rule = m._approval_rule;
+    const approvals = m._approvals || [];
+    let approvalBox = '';
+    if (rule && m.status === 'pending') {
+      const required = rule.min_approvers || 1;
+      const done = m._approvals_count || 0;
+      const remaining = Math.max(0, required - done);
+      const list = approvals.map(a => `<li>✓ ${esc(a.approver_email)} <span class="text-gray-400">(${esc(fmtDt(a.approved_at))})</span></li>`).join('');
+      approvalBox = `<div class="text-xs bg-blue-50 border border-blue-200 rounded p-2 mt-3">
+        <div class="font-semibold text-blue-900">Freigabe-Regel: ${esc(rule.source_type_pattern)} → ${esc(rule.required_groups)}, ${required}-Augen-Prinzip</div>
+        <div class="text-blue-800 mt-1">${done} / ${required} Freigaben${remaining > 0 ? `, noch ${remaining} benötigt` : ' — bereit zum Versand'}</div>
+        ${list ? `<ul class="mt-1 text-blue-700">${list}</ul>` : ''}
+        ${m._already_approved_by_me ? '<div class="text-amber-700 mt-1">⚠ Du hast bereits freigegeben.</div>' : ''}
+      </div>`;
+    }
+
     document.getElementById('detail').innerHTML = `
       <div class="flex items-center justify-between mb-3">
         <div>
@@ -196,6 +213,7 @@
           <textarea id="f-body" rows="14" ${editable} class="${editableCls} mt-1 w-full border rounded px-2 py-1.5 text-sm mono-body">${esc(m.body_text)}</textarea>
         </label>
         ${attRows ? `<div><div class="text-xs text-gray-500 mb-1">Anhänge</div>${attRows}</div>` : ''}
+        ${approvalBox}
         ${meta.length > 0 ? `<div class="text-xs text-gray-600 border-t pt-2 mt-2 space-y-1">${meta.map(x => '<div>' + x + '</div>').join('')}</div>` : ''}
         ${m.original_snapshot
           ? `<details class="text-xs text-gray-500 border-t pt-2"><summary class="cursor-pointer">Original (vor Edit) anzeigen</summary>
@@ -238,12 +256,18 @@
 
   async function freigeben() {
     if (!CURRENT) return;
-    if (!confirm('Mail jetzt freigeben und an die Verwaltung versenden?\n\nAn: ' + CURRENT.mail_to + '\nBetreff: ' + CURRENT.subject)) return;
+    if (!confirm('Mail freigeben?\n\nAn: ' + CURRENT.mail_to + '\nBetreff: ' + CURRENT.subject + '\n\n(Bei 4-Augen-Prinzip wird der Versand erst beim letzten Approver ausgelöst.)')) return;
     try {
       const r = await AuthentikAuth.apiFetch('/api/verwaltung-mail-queue/' + CURRENT.id + '/freigeben', { method: 'POST' });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
-      alert(data.sent ? 'Mail freigegeben und versendet.' : 'Mail freigegeben.');
+      if (data.sent) {
+        alert(`Mail freigegeben und versendet (${data.approvals}/${data.required} Freigaben).`);
+      } else if (data.awaiting_more_approvers) {
+        alert(`Freigabe verbucht (${data.approvals}/${data.required}). Es werden noch ${data.required - data.approvals} weitere Freigaben aus der Gruppe "${data.required_groups}" benötigt.`);
+      } else {
+        alert('Mail freigegeben.');
+      }
       await loadList();
       await openDetail(CURRENT.id);
     } catch (e) { alert('Fehler: ' + e.message); }
