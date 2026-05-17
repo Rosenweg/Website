@@ -88,7 +88,7 @@
                         <p><strong>Anzahl STWEGs:</strong> 8 eigenständige Einheiten</p>
                         <p><strong>STWEG 1-7:</strong> Wohngebäude</p>
                         <p><strong>STWEG 8:</strong> Tiefgarage (gemeinschaftlich)</p>
-                        <p><strong>Verwaltung:</strong> LangPartners Immobilien AG</p>
+                        <p><strong>Verwaltung:</strong> <span id="verw-firma-short">…</span></p>
                         <p><strong>Gegründet:</strong> [Jahr eintragen]</p>
                     </div>
                 </div>
@@ -542,23 +542,29 @@
 
     <!-- Config-basierte Daten laden -->
     <script>
-    SiteConfig.load().then(() => {
-        const v = SiteConfig.getVerwaltung();
+    SiteConfig.load().then(async () => {
+        // Verwaltung dynamisch aus DB (api/verwaltungen/public), Fallback auf site-config.json
+        const v = await SiteConfig.getVerwaltungForStweg(null);
         if (v) {
             document.getElementById('verw-firma').textContent = v.firma;
-            document.getElementById('verw-strasse').textContent = v.strasse;
-            document.getElementById('verw-plz').textContent = v.plz_ort;
+            // Adresse aufteilen falls "Strasse, PLZ Ort"
+            const addrParts = (v.adresse || '').split(',').map(s => s.trim());
+            document.getElementById('verw-strasse').textContent = addrParts[0] || '';
+            document.getElementById('verw-plz').textContent = addrParts.slice(1).join(', ');
             const tel = document.getElementById('verw-tel');
-            tel.textContent = v.telefon;
-            tel.href = 'tel:' + v.telefon.replace(/\s/g, '');
+            if (v.telefon) { tel.textContent = v.telefon; tel.href = 'tel:' + v.telefon.replace(/\s/g, ''); }
             const email = document.getElementById('verw-email');
-            email.textContent = v.email;
-            email.href = 'mailto:' + v.email;
+            if (v.email) { email.textContent = v.email; email.href = 'mailto:' + v.email; }
             const web = document.getElementById('verw-web');
-            web.textContent = v.website;
-            web.href = 'https://' + v.website;
-            document.getElementById('verw-oeffnung').textContent = v.oeffnungszeiten;
-            document.getElementById('footer-verwaltung').textContent = 'Verwaltung: ' + v.firma + ', ' + v.plz_ort.split(' ').pop();
+            if (v.website) {
+                web.textContent = v.website;
+                web.href = v.website.startsWith('http') ? v.website : 'https://' + v.website;
+            }
+            document.getElementById('verw-oeffnung').textContent = v.oeffnungszeiten || '';
+            const ortLast = (addrParts.slice(-1)[0] || '').split(' ').pop();
+            document.getElementById('footer-verwaltung').textContent = 'Verwaltung: ' + v.firma + (ortLast ? ', ' + ortLast : '');
+            const short = document.getElementById('verw-firma-short');
+            if (short) short.textContent = v.firma;
         }
         const t = SiteConfig.getTechnik();
         if (t) {
