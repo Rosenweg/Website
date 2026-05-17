@@ -59,6 +59,12 @@
             <option value="pruefen">Nur zu prüfen</option>
           </select>
         </label>
+        <label class="text-sm">
+          <span class="text-gray-600 mr-1">Projekt:</span>
+          <select id="filter-projekt" class="border rounded px-2 py-1 text-sm">
+            <option value="">alle</option>
+          </select>
+        </label>
         <button onclick="loadAuslagen()" class="ml-auto text-sm text-blue-600 hover:underline">Neu laden</button>
       </div>
 
@@ -119,6 +125,12 @@
             </select>
           </label>
         </div>
+        <label class="block text-sm">
+          <span class="text-gray-700">Projekt (optional, fürs Budget-Tracking)</span>
+          <select id="f-projekt" class="mt-1 block w-full border rounded px-2 py-1.5">
+            <option value="">— keinem Projekt zuordnen —</option>
+          </select>
+        </label>
         <label class="block text-sm">
           <span class="text-gray-700">Beschreibung *</span>
           <textarea id="f-beschreibung" rows="3" required class="mt-1 block w-full border rounded px-2 py-1.5"
@@ -220,6 +232,7 @@
     document.getElementById('form-auslage').addEventListener('submit', onSubmit);
     document.getElementById('filter-status').addEventListener('change', loadAuslagen);
     document.getElementById('filter-scope').addEventListener('change', render);
+    document.getElementById('filter-projekt').addEventListener('change', loadAuslagen);
     document.querySelectorAll('#modal-review .r-btn').forEach(b => b.addEventListener('click', () => onReviewAction(b.dataset.act)));
     // Multi-Beleg + KI-Scan Hooks
     document.getElementById('f-beleg').addEventListener('change', e => {
@@ -249,6 +262,15 @@
       (STATE.kategorien || []).map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
   }
 
+  function populateProjektSelects() {
+    const projekte = STATE.projekte || [];
+    const opts = '<option value="">— keinem Projekt zuordnen —</option>' +
+      projekte.map(p => `<option value="${esc(p.slug)}">${esc(p.title)}</option>`).join('');
+    document.getElementById('f-projekt').innerHTML = opts;
+    document.getElementById('filter-projekt').innerHTML = '<option value="">alle</option>' +
+      projekte.map(p => `<option value="${esc(p.slug)}">${esc(p.title)}</option>`).join('');
+  }
+
   async function loadAuslagen() {
     const tbody = document.getElementById('tbody');
     tbody.innerHTML = '<tr><td colspan="9" class="px-4 py-6 text-center text-gray-400">Lade…</td></tr>';
@@ -256,6 +278,8 @@
       const q = new URLSearchParams();
       const st = document.getElementById('filter-status').value;
       if (st) q.set('status', st);
+      const projektSel = document.getElementById('filter-projekt');
+      if (projektSel && projektSel.value) q.set('projekt', projektSel.value);
       const r = await AuthentikAuth.apiFetch('/api/auslagen?' + q.toString());
       if (!r.ok) {
         const e = await r.json().catch(() => ({}));
@@ -264,6 +288,12 @@
       }
       STATE = await r.json();
       populateKategorienSelect();
+      populateProjektSelects();
+      // Deep-Link aus Projekt-Seite: ?projekt=slug pre-select
+      const urlProjekt = new URLSearchParams(location.search).get('projekt');
+      if (urlProjekt && document.getElementById('filter-projekt').value !== urlProjekt) {
+        document.getElementById('filter-projekt').value = urlProjekt;
+      }
       document.getElementById('filter-scope-wrap').style.display = STATE.can_review ? '' : 'none';
       render();
     } catch (e) {
@@ -313,11 +343,14 @@
       if (aktionen.length === 0) {
         aktionen.push(`<button onclick="openReview(${a.id})" class="text-gray-600 hover:underline">Detail</button>`);
       }
+      const projektBadge = a.projekt_slug
+        ? `<div class="text-xs"><span class="bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded">📁 ${esc(a.projekt_title || a.projekt_slug)}</span></div>`
+        : '';
       return `<tr class="hover:bg-gray-50">
         <td class="px-3 py-2 text-gray-700 whitespace-nowrap">${esc(fmtDate(a.datum))}</td>
         <td class="px-3 py-2 text-gray-700">${esc(a.user_name)}</td>
         <td class="px-3 py-2 text-gray-700 whitespace-nowrap">${esc(stwegLabel)}</td>
-        <td class="px-3 py-2 text-gray-700">${esc(a.beschreibung)}</td>
+        <td class="px-3 py-2 text-gray-700">${esc(a.beschreibung)}${projektBadge}</td>
         <td class="px-3 py-2 text-gray-700">${esc(a.kategorie || '—')}</td>
         <td class="px-3 py-2 text-gray-900 text-right font-mono whitespace-nowrap">${esc(fmtCHF(a.betrag_chf))}</td>
         <td class="px-3 py-2">${beleg}</td>
@@ -475,6 +508,7 @@
     document.getElementById('form-auslage').reset();
     document.getElementById('f-id').value = '';
     document.getElementById('f-datum').value = new Date().toISOString().slice(0, 10);
+    document.getElementById('f-projekt').value = document.getElementById('filter-projekt')?.value || '';
     document.getElementById('form-error').classList.add('hidden');
     POSITIONEN = []; renderPositionen();
     BELEGE = []; renderBelege();
@@ -496,6 +530,7 @@
     document.getElementById('f-beschreibung').value = a.beschreibung || '';
     document.getElementById('f-iban').value = a.iban || '';
     document.getElementById('f-bemerkung').value = a.bemerkung_eigentuemer || '';
+    document.getElementById('f-projekt').value = a.projekt_slug || '';
     document.getElementById('f-beleg').value = '';
     document.getElementById('form-error').classList.add('hidden');
     document.getElementById('btn-scan').disabled = true;
@@ -628,6 +663,7 @@
         beschreibung: document.getElementById('f-beschreibung').value.trim(),
         iban: ibanRaw || null,
         bemerkung_eigentuemer: document.getElementById('f-bemerkung').value.trim() || null,
+        projekt_slug: document.getElementById('f-projekt').value || null,
       };
       if (firstPending) {
         payload.beleg_base64 = firstPending.beleg_base64;

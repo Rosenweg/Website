@@ -8447,16 +8447,60 @@ app.get('/api/projects/:slug', authMiddleware, requireEigentuemer, async (req, r
   try {
     const { rows: [project] } = await pool.query('SELECT * FROM projects WHERE slug = $1', [req.params.slug]);
     if (!project) return res.status(404).json({ error: 'Projekt nicht gefunden' });
-    const [candidates, timeline, comments, attachments] = await Promise.all([
+    const [candidates, timeline, comments, attachments, auslagenSumme] = await Promise.all([
       pool.query('SELECT * FROM project_candidates WHERE project_id = $1 ORDER BY sort_order, name', [project.id]),
       pool.query('SELECT * FROM project_timeline WHERE project_id = $1 ORDER BY datum', [project.id]),
       pool.query('SELECT * FROM project_comments WHERE project_id = $1 ORDER BY created_at DESC', [project.id]),
       pool.query('SELECT * FROM project_attachments WHERE project_slug = $1 ORDER BY created_at', [req.params.slug]),
+      pool.query(
+        `SELECT status, COUNT(*)::int AS n, COALESCE(SUM(betrag_chf), 0)::numeric AS summe
+           FROM auslagen WHERE projekt_slug = $1 GROUP BY status`,
+        [req.params.slug],
+      ),
     ]);
-    res.json({ ...project, candidates: candidates.rows, timeline: timeline.rows, comments: comments.rows, attachments: attachments.rows });
+    const auslagenStat = { total_count: 0, total_chf: 0, by_status: {} };
+    for (const r of auslagenSumme.rows) {
+      auslagenStat.by_status[r.status] = { count: r.n, summe: Number(r.summe) };
+      auslagenStat.total_count += r.n;
+      auslagenStat.total_chf += Number(r.summe);
+    }
+    res.json({
+      ...project,
+      candidates: candidates.rows, timeline: timeline.rows, comments: comments.rows, attachments: attachments.rows,
+      auslagen_stat: auslagenStat,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// GET /api/projects/:slug/auslagen — alle Auslagen eines Projekts mit Summen
+app.get('/api/projects/:slug/auslagen', authMiddleware, requireEigentuemer, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT a.id, a.user_email, a.user_name, a.stweg, a.datum, a.kategorie, a.beschreibung,
+              a.betrag_chf, a.status, a.bearbeitet_am, a.ausbezahlt_am, a.created_at
+         FROM auslagen a WHERE a.projekt_slug = $1
+        ORDER BY a.created_at DESC`,
+      [req.params.slug],
+    );
+    const summe = await pool.query(
+      `SELECT status, COUNT(*)::int AS n, COALESCE(SUM(betrag_chf), 0)::numeric AS s
+         FROM auslagen WHERE projekt_slug = $1 GROUP BY status`,
+      [req.params.slug],
+    );
+    const by_status = {};
+    for (const row of summe.rows) by_status[row.status] = { count: row.n, summe: Number(row.s) };
+    res.json({ auslagen: r.rows, by_status });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/projects-mini — kompakte Liste fuer Dropdowns (kein Eigentuemer-Check, alle eingeloggten User)
+app.get('/api/projects-mini', authMiddleware, async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT slug, title FROM projects WHERE COALESCE(status,'aktiv') != 'archiviert' ORDER BY title`);
+    res.json({ projekte: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // POST /api/projects/:slug/candidates - Add candidate
@@ -9502,6 +9546,11 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
       console.warn(`[auslagen] Keine Verwaltung mit E-Mail fuer STWEG ${auslage.stweg || '-'} hinterlegt`);
       return { ok: false, reason: 'keine Verwaltung mit E-Mail hinterlegt' };
     }
+    // Projekt-Titel nachladen (auslage hat nur slug)
+    if (auslage.projekt_slug && !auslage.projekt_title) {
+      const p = await pool.query('SELECT title FROM projects WHERE slug = $1', [auslage.projekt_slug]);
+      auslage.projekt_title = p.rows[0]?.title || null;
+    }
     const stwegLabel = auslage.stweg ? `STWEG ${auslage.stweg}` : 'STWEG-uebergreifend (Kooperation)';
     const betrag = Number(auslage.betrag_chf).toFixed(2);
     const datum = auslage.datum ? new Date(auslage.datum).toLocaleDateString('de-CH') : '-';
@@ -9548,6 +9597,7 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
         stweg_label: stwegLabel, datum: datum, today: today, betrag: betrag,
         freigeber: freigebender, freigabe_am: freigabeAm,
         verwaltung: { firma: verw.firma },
+        projekt: auslage.projekt_slug ? { slug: auslage.projekt_slug, title: auslage.projekt_title } : null,
         nachgereicht: isNachgereicht,
         has_attachment: hasAttachment,
         site_url: SITE_URL, ausschuss_email: ausschussEmail,
@@ -9579,6 +9629,7 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
       `── Auftrag ──`,
       `STWEG:           ${stwegLabel}`,
       `Auslage-Nr:      ${auslage.id}`,
+      auslage.projekt_slug ? `Projekt:         ${auslage.projekt_title || auslage.projekt_slug}` : null,
       `Eingereicht von: ${auslage.user_name} <${auslage.user_email}>`,
       `Beleg-Datum:     ${datum}`,
       `Kategorie:       ${auslage.kategorie || '-'}`,
@@ -9860,22 +9911,32 @@ app.get('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'), 
       params.push(stwegFilter);
       where += ` AND stweg = $${params.length}`;
     }
+    const projektFilter = String(req.query.projekt || '').trim();
+    if (projektFilter) {
+      params.push(projektFilter);
+      where += ` AND projekt_slug = $${params.length}`;
+    }
     const result = await pool.query(
       `SELECT a.id, a.user_email, a.user_name, a.stweg, a.datum, a.kategorie, a.beschreibung, a.betrag_chf,
               a.iban, a.beleg_path, a.beleg_filename, a.status, a.bemerkung_eigentuemer, a.bemerkung_ausschuss,
               a.bearbeitet_von, a.bearbeitet_am, a.ausbezahlt_am, a.created_at, a.updated_at,
+              a.projekt_slug, p.title AS projekt_title,
               COALESCE((SELECT COUNT(*) FROM auslagen_belege WHERE auslage_id = a.id),
                        CASE WHEN a.beleg_path IS NOT NULL THEN 1 ELSE 0 END) AS belege_count,
               COALESCE((SELECT COUNT(*) FROM auslagen_positionen WHERE auslage_id = a.id), 0) AS positionen_count
          FROM auslagen a
-        WHERE ${where.replace(/(?<!\.)(\bstatus\b|\bstweg\b|\buser_email\b)/g, 'a.$1')}
+         LEFT JOIN projects p ON p.slug = a.projekt_slug
+        WHERE ${where.replace(/(?<!\.)(\bstatus\b|\bstweg\b|\buser_email\b|\bprojekt_slug\b)/g, 'a.$1')}
         ORDER BY a.created_at DESC
         LIMIT 500`,
       params,
     );
+    // Aktive Projekte fuer Dropdown
+    const projektsRes = await pool.query(`SELECT slug, title FROM projects WHERE COALESCE(status,'aktiv') != 'archiviert' ORDER BY title`);
     res.json({
       auslagen: result.rows,
       kategorien: AUSLAGEN_KATEGORIEN,
+      projekte: projektsRes.rows,
       can_review: isAdmin || ausschussStwegs.length > 0,
       can_mark_paid: canMarkPaid(req.user),
       review_stwegs: isAdmin ? 'all' : ausschussStwegs,
@@ -9889,7 +9950,7 @@ app.get('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'), 
 // POST /api/auslagen — neue Auslage einreichen (Eigentuemer)
 app.post('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
   try {
-    const { datum, kategorie, beschreibung, betrag_chf, iban, stweg, bemerkung_eigentuemer, beleg_base64, beleg_filename } = req.body || {};
+    const { datum, kategorie, beschreibung, betrag_chf, iban, stweg, bemerkung_eigentuemer, beleg_base64, beleg_filename, projekt_slug } = req.body || {};
     if (!datum || !beschreibung || betrag_chf == null) {
       return res.status(400).json({ error: 'datum, beschreibung und betrag_chf sind Pflichtfelder' });
     }
@@ -9925,16 +9986,25 @@ app.post('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'),
       belegFilename = beleg_filename || finalName;
     }
 
+    // Projekt-Validierung: muss existieren falls angegeben
+    let projektSlug = null;
+    if (projekt_slug) {
+      const pr = await pool.query('SELECT slug FROM projects WHERE slug = $1', [String(projekt_slug).slice(0, 100)]);
+      if (pr.rows.length === 0) return res.status(400).json({ error: `Projekt '${projekt_slug}' nicht gefunden` });
+      projektSlug = pr.rows[0].slug;
+    }
+
     const userEmail = req.user.email;
     const userName = req.user.name || req.user.email;
     const result = await pool.query(
       `INSERT INTO auslagen
          (user_email, user_name, stweg, datum, kategorie, beschreibung, betrag_chf, iban,
-          beleg_path, beleg_filename, bemerkung_eigentuemer, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'eingereicht')
+          beleg_path, beleg_filename, bemerkung_eigentuemer, projekt_slug, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'eingereicht')
        RETURNING *`,
       [userEmail, userName, stwegVal, datum, kat, String(beschreibung).slice(0, 2000), betrag,
-       ibanClean, belegPath, belegFilename, bemerkung_eigentuemer ? String(bemerkung_eigentuemer).slice(0, 1000) : null],
+       ibanClean, belegPath, belegFilename,
+       bemerkung_eigentuemer ? String(bemerkung_eigentuemer).slice(0, 1000) : null, projektSlug],
     );
 
     // Ausschuss informieren (Best-Effort, kein Fehler wenn Mail scheitert)
@@ -10013,6 +10083,14 @@ app.put('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'read
       if (req.body.stweg !== undefined) {
         const s = parseInt(req.body.stweg, 10);
         push('stweg', Number.isFinite(s) && s >= 1 && s <= 8 ? s : null);
+      }
+      if (req.body.projekt_slug !== undefined) {
+        let ps = req.body.projekt_slug ? String(req.body.projekt_slug).slice(0, 100) : null;
+        if (ps) {
+          const pr = await pool.query('SELECT 1 FROM projects WHERE slug = $1', [ps]);
+          if (pr.rows.length === 0) return res.status(400).json({ error: `Projekt '${ps}' nicht gefunden` });
+        }
+        push('projekt_slug', ps);
       }
     }
 
@@ -12466,6 +12544,16 @@ async function initDB() {
       ALTER TABLE auslagen ADD COLUMN IF NOT EXISTS auszahlung_mail_verwaltung_id INTEGER;
       ALTER TABLE auslagen ADD COLUMN IF NOT EXISTS auszahlung_mail_count INTEGER DEFAULT 0;
       CREATE INDEX IF NOT EXISTS idx_auslagen_offen_fallback ON auslagen(status, auszahlung_mail_fallback) WHERE status = 'genehmigt';
+
+      -- Optional: Auslage einem Projekt zuordnen (Budget-Tracking)
+      ALTER TABLE auslagen ADD COLUMN IF NOT EXISTS projekt_slug VARCHAR(100);
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'auslagen_projekt_fk') THEN
+          ALTER TABLE auslagen ADD CONSTRAINT auslagen_projekt_fk
+            FOREIGN KEY (projekt_slug) REFERENCES projects(slug) ON DELETE SET NULL;
+        END IF;
+      END $$;
+      CREATE INDEX IF NOT EXISTS idx_auslagen_projekt ON auslagen(projekt_slug) WHERE projekt_slug IS NOT NULL;
 
       -- L1+L6: CHECK-Constraints nachtraeglich hinzufuegen (CREATE TABLE IF NOT EXISTS
       -- fuegt neue Constraints nicht zu existierender Tabelle hinzu)
