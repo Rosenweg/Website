@@ -9508,9 +9508,20 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
     const today = new Date().toLocaleDateString('de-CH');
     const isNachgereicht = !!opts.nachgereicht;
 
-    // Beleg-Anhang als Referenz (wird beim eigentlichen Versand live aus DOCS gelesen)
+    // Belege als Anhaenge: alle aus auslagen_belege, mit Fallback auf Legacy-beleg_path
     const queueAttachments = [];
-    if (auslage.beleg_path) {
+    const belegeRows = await pool.query(
+      'SELECT beleg_path, beleg_filename FROM auslagen_belege WHERE auslage_id = $1 ORDER BY sort_order, id',
+      [auslage.id],
+    );
+    for (const b of belegeRows.rows) {
+      queueAttachments.push({
+        filename: b.beleg_filename || pathModule.basename(b.beleg_path),
+        docs_path: b.beleg_path,
+      });
+    }
+    // Legacy: wenn keine multi-belege aber alte beleg_path noch da
+    if (queueAttachments.length === 0 && auslage.beleg_path) {
       queueAttachments.push({
         filename: auslage.beleg_filename || pathModule.basename(auslage.beleg_path),
         docs_path: auslage.beleg_path,
@@ -9850,12 +9861,15 @@ app.get('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'), 
       where += ` AND stweg = $${params.length}`;
     }
     const result = await pool.query(
-      `SELECT id, user_email, user_name, stweg, datum, kategorie, beschreibung, betrag_chf,
-              iban, beleg_path, beleg_filename, status, bemerkung_eigentuemer, bemerkung_ausschuss,
-              bearbeitet_von, bearbeitet_am, ausbezahlt_am, created_at, updated_at
-         FROM auslagen
-        WHERE ${where}
-        ORDER BY created_at DESC
+      `SELECT a.id, a.user_email, a.user_name, a.stweg, a.datum, a.kategorie, a.beschreibung, a.betrag_chf,
+              a.iban, a.beleg_path, a.beleg_filename, a.status, a.bemerkung_eigentuemer, a.bemerkung_ausschuss,
+              a.bearbeitet_von, a.bearbeitet_am, a.ausbezahlt_am, a.created_at, a.updated_at,
+              COALESCE((SELECT COUNT(*) FROM auslagen_belege WHERE auslage_id = a.id),
+                       CASE WHEN a.beleg_path IS NOT NULL THEN 1 ELSE 0 END) AS belege_count,
+              COALESCE((SELECT COUNT(*) FROM auslagen_positionen WHERE auslage_id = a.id), 0) AS positionen_count
+         FROM auslagen a
+        WHERE ${where.replace(/(?<!\.)(\bstatus\b|\bstweg\b|\buser_email\b)/g, 'a.$1')}
+        ORDER BY a.created_at DESC
         LIMIT 500`,
       params,
     );
@@ -10118,6 +10132,7 @@ app.delete('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'r
 });
 
 // GET /api/auslagen/:id/beleg — Beleg-Datei ausliefern
+// Legacy: ersten Beleg ausliefern (Backward-Compat). Bevorzugt /api/auslagen/:id/belege/:bid
 app.get('/api/auslagen/:id/beleg', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -10126,8 +10141,14 @@ app.get('/api/auslagen/:id/beleg', authMiddleware, requirePermission('auslagen',
     if (r.rows.length === 0) return res.status(404).end();
     const row = r.rows[0];
     if (!canSeeAuslage(row, req.user)) return res.status(403).end();
-    if (!row.beleg_path) return res.status(404).json({ error: 'Kein Beleg vorhanden' });
-    const full = pathModule.join(DOCS_PATH, row.beleg_path);
+    // Erst Multi-Beleg-Tabelle versuchen, dann Legacy-Spalte
+    const beleg = await pool.query(
+      'SELECT beleg_path FROM auslagen_belege WHERE auslage_id = $1 ORDER BY sort_order, id LIMIT 1',
+      [id],
+    );
+    const path = beleg.rows[0]?.beleg_path || row.beleg_path;
+    if (!path) return res.status(404).json({ error: 'Kein Beleg vorhanden' });
+    const full = pathModule.join(DOCS_PATH, path);
     if (!full.startsWith(pathModule.resolve(DOCS_PATH) + '/')) return res.status(400).end();
     res.sendFile(full, (err) => { if (err && !res.headersSent) res.status(404).end(); });
   } catch (err) {
@@ -10136,10 +10157,131 @@ app.get('/api/auslagen/:id/beleg', authMiddleware, requirePermission('auslagen',
   }
 });
 
-// ─── Auslagen: Positionen + KI-Belegleser + Stundensatz ─────────────
+// Multi-Belege: list, download, upload, delete
+app.get('/api/auslagen/:id/belege', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const aus = await pool.query('SELECT * FROM auslagen WHERE id = $1', [id]);
+    if (aus.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    if (!canSeeAuslage(aus.rows[0], req.user)) return res.status(403).json({ error: 'Kein Zugriff' });
+    const r = await pool.query(
+      `SELECT id, beleg_filename, size_bytes, waehrung_original, wechselkurs_chf, kurs_quelle, sort_order, created_at
+         FROM auslagen_belege WHERE auslage_id = $1 ORDER BY sort_order, id`,
+      [id],
+    );
+    res.json({ belege: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/auslagen/:id/belege/:bid', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const bid = parseInt(req.params.bid, 10);
+    const aus = await pool.query('SELECT * FROM auslagen WHERE id = $1', [id]);
+    if (aus.rows.length === 0) return res.status(404).end();
+    if (!canSeeAuslage(aus.rows[0], req.user)) return res.status(403).end();
+    const r = await pool.query('SELECT beleg_path, beleg_filename FROM auslagen_belege WHERE id = $1 AND auslage_id = $2', [bid, id]);
+    if (r.rows.length === 0) return res.status(404).end();
+    const full = pathModule.join(DOCS_PATH, r.rows[0].beleg_path);
+    if (!full.startsWith(pathModule.resolve(DOCS_PATH) + '/')) return res.status(400).end();
+    res.sendFile(full, (err) => { if (err && !res.headersSent) res.status(404).end(); });
+  } catch (err) { res.status(500).end(); }
+});
+
+app.post('/api/auslagen/:id/belege', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const aus = await pool.query('SELECT * FROM auslagen WHERE id = $1', [id]);
+    if (aus.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const row = aus.rows[0];
+    const isOwner = row.user_email.toLowerCase() === (req.user.email || '').toLowerCase();
+    if (!(isOwner && row.status === 'eingereicht') && !canEditAuslageStatus(row, req.user)) {
+      return res.status(403).json({ error: 'Belege hinzufuegen nur bei eigener eingereichter Auslage oder Ausschuss' });
+    }
+    const { beleg_base64, beleg_filename, waehrung_original, wechselkurs_chf, kurs_quelle } = req.body || {};
+    if (!beleg_base64) return res.status(400).json({ error: 'beleg_base64 fehlt' });
+    const ext = (beleg_filename || 'pdf').split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!['pdf','jpg','jpeg','png','webp','heic'].includes(ext)) {
+      return res.status(400).json({ error: 'Nur PDF/JPG/PNG/WEBP/HEIC erlaubt' });
+    }
+    const buf = Buffer.from(beleg_base64, 'base64');
+    if (buf.length > 15 * 1024 * 1024) return res.status(400).json({ error: 'Beleg > 15 MB' });
+    const folder = auslagenStwegFolder(row.stweg);
+    const dir = pathModule.join(DOCS_PATH, folder, 'auslagen');
+    await fs.mkdir(dir, { recursive: true });
+    const safe = String(beleg_filename || 'beleg').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80) || 'beleg';
+    const finalName = `${Date.now()}_${safe}${safe.toLowerCase().endsWith('.' + ext) ? '' : '.' + ext}`;
+    await fs.writeFile(pathModule.join(dir, finalName), buf);
+    const belegPath = `${folder}/auslagen/${finalName}`;
+    const sortMax = await pool.query('SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM auslagen_belege WHERE auslage_id = $1', [id]);
+    const r = await pool.query(
+      `INSERT INTO auslagen_belege (auslage_id, beleg_path, beleg_filename, size_bytes, waehrung_original, wechselkurs_chf, kurs_quelle, sort_order)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [id, belegPath, beleg_filename || finalName, buf.length,
+       waehrung_original || null, wechselkurs_chf || null, kurs_quelle || null, sortMax.rows[0].n],
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (err) {
+    console.error('Beleg upload error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/auslagen/:id/belege/:bid', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const bid = parseInt(req.params.bid, 10);
+    const aus = await pool.query('SELECT * FROM auslagen WHERE id = $1', [id]);
+    if (aus.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const row = aus.rows[0];
+    const isOwner = row.user_email.toLowerCase() === (req.user.email || '').toLowerCase();
+    if (!(isOwner && row.status === 'eingereicht') && !canEditAuslageStatus(row, req.user)) {
+      return res.status(403).json({ error: 'Loeschen nur bei eigener eingereichter Auslage oder Ausschuss' });
+    }
+    const beleg = await pool.query('SELECT beleg_path FROM auslagen_belege WHERE id = $1 AND auslage_id = $2', [bid, id]);
+    if (beleg.rows.length === 0) return res.status(404).json({ error: 'Beleg nicht gefunden' });
+    try {
+      const full = pathModule.join(DOCS_PATH, beleg.rows[0].beleg_path);
+      if (full.startsWith(pathModule.resolve(DOCS_PATH) + '/')) await fs.unlink(full).catch(() => {});
+    } catch {}
+    await pool.query('DELETE FROM auslagen_belege WHERE id = $1', [bid]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Beleg delete error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Auslagen: Positionen + KI-Belegleser + Stundensatz + Multi-Belege + FX ─────
+
+// FX-Helper: holt Wechselkurs am Datum von exchangerate.host (kostenlos, kein Key).
+// Cache: 24h pro (Datum + Waehrung) damit nicht jeder Scan ein Hit ist.
+const _fxCache = new Map();
+async function getWechselkursChf(waehrung, datum) {
+  const wkn = String(waehrung || 'CHF').toUpperCase();
+  if (wkn === 'CHF' || !wkn) return { kurs: 1, quelle: null };
+  const dat = (datum && /^\d{4}-\d{2}-\d{2}$/.test(datum)) ? datum : new Date().toISOString().slice(0, 10);
+  const cacheKey = `${dat}:${wkn}`;
+  const cached = _fxCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < 24 * 3600 * 1000) return cached.value;
+  try {
+    const url = `https://api.exchangerate.host/${dat}?base=${wkn}&symbols=CHF`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    const kurs = data?.rates?.CHF;
+    if (!Number.isFinite(kurs) || kurs <= 0) throw new Error('Kein gueltiger Kurs');
+    const value = { kurs: Number(kurs), quelle: `exchangerate.host ${dat}` };
+    _fxCache.set(cacheKey, { value, fetchedAt: Date.now() });
+    return value;
+  } catch (e) {
+    console.warn(`[fx] Kurs ${wkn}→CHF am ${dat} nicht verfuegbar:`, e.message);
+    return { kurs: 1, quelle: `fallback 1:1 (Kurs nicht verfuegbar)` };
+  }
+}
 
 // POST /api/auslagen/scan-beleg — Foto/PDF eines Belegs hochladen, KI extrahiert
-// Positionen, Datum, Total. Returns {datum, lieferant, positionen[], total_chf}.
+// Positionen, Datum, Total. Returns {datum, lieferant, positionen[], total_chf, waehrung, kurs}.
 app.post('/api/auslagen/scan-beleg', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
   try {
     // Rate-Limit: max 30 Scans/h pro User (KI-Kosten)
@@ -10229,20 +10371,30 @@ WICHTIG:
       console.error('[auslagen-scan] JSON-Parse failed:', jsonText.slice(0, 300));
       return res.status(502).json({ error: 'OCR-Antwort kein gueltiges JSON', raw: content.slice(0, 500) });
     }
+    const waehrung = String(parsed.waehrung || 'CHF').toUpperCase();
+    const fx = await getWechselkursChf(waehrung, parsed.datum);
+    const conv = (v) => Number.isFinite(v) ? Math.round(v * fx.kurs * 100) / 100 : v;
     res.json({
       datum: parsed.datum || null,
       lieferant: parsed.lieferant || null,
-      waehrung: parsed.waehrung || 'CHF',
+      waehrung,
+      wechselkurs_chf: fx.kurs,
+      kurs_quelle: fx.quelle,
       positionen: Array.isArray(parsed.positionen) ? parsed.positionen.map(p => ({
         beschreibung: String(p.beschreibung || '').slice(0, 500),
         menge: Number(p.menge) || 1,
         einheit: p.einheit ? String(p.einheit).slice(0, 20) : null,
-        einzelpreis: Number(p.einzelpreis) || null,
-        gesamt: Number(p.gesamt) || 0,
+        einzelpreis_original: Number(p.einzelpreis) || null,
+        einzelpreis: conv(Number(p.einzelpreis)) || null, // umgerechnet in CHF
+        gesamt_original: Number(p.gesamt) || 0,
+        gesamt: conv(Number(p.gesamt) || 0),              // umgerechnet in CHF
       })) : [],
-      subtotal: Number(parsed.subtotal) || null,
-      mwst: Number(parsed.mwst) || null,
-      total: Number(parsed.total) || 0,
+      subtotal_original: Number(parsed.subtotal) || null,
+      subtotal: Number(parsed.subtotal) ? conv(Number(parsed.subtotal)) : null,
+      mwst_original: Number(parsed.mwst) || null,
+      mwst: Number(parsed.mwst) ? conv(Number(parsed.mwst)) : null,
+      total_original: Number(parsed.total) || 0,
+      total: conv(Number(parsed.total) || 0),
     });
   } catch (err) {
     console.error('Auslagen-scan error:', err);
@@ -12332,7 +12484,35 @@ async function initDB() {
         END IF;
       END $$;
 
+      -- Mehrere Belege pro Auslage. Migration: bestehendes auslagen.beleg_path
+      -- wird beim ersten Start in auslagen_belege als erster Eintrag uebernommen.
+      CREATE TABLE IF NOT EXISTS auslagen_belege (
+        id SERIAL PRIMARY KEY,
+        auslage_id INTEGER NOT NULL REFERENCES auslagen(id) ON DELETE CASCADE,
+        beleg_path TEXT NOT NULL,             -- relativer Pfad im DOCS-Volume
+        beleg_filename VARCHAR(255),
+        size_bytes INTEGER,
+        waehrung_original VARCHAR(3),         -- z.B. EUR, CHF (vom Scan extrahiert)
+        wechselkurs_chf NUMERIC(10,6) DEFAULT 1, -- 1 X = Y CHF, am Beleg-Datum
+        kurs_quelle VARCHAR(60),              -- z.B. 'exchangerate.host 2026-05-10'
+        sort_order INTEGER DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_auslagen_belege_auslage ON auslagen_belege(auslage_id, sort_order);
+
+      -- Migration: bestehende beleg_path-Werte in neue Tabelle uebernehmen
+      DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM auslagen WHERE beleg_path IS NOT NULL
+                    AND NOT EXISTS (SELECT 1 FROM auslagen_belege WHERE auslage_id = auslagen.id)) THEN
+          INSERT INTO auslagen_belege (auslage_id, beleg_path, beleg_filename, sort_order)
+          SELECT id, beleg_path, beleg_filename, 0 FROM auslagen
+           WHERE beleg_path IS NOT NULL
+             AND NOT EXISTS (SELECT 1 FROM auslagen_belege WHERE auslage_id = auslagen.id);
+        END IF;
+      END $$;
+
       -- Detaillierte Positionen pro Auslage (KI-Belegleser-Output oder manuell)
+      -- Positionen koennen einem konkreten Beleg zugeordnet sein (beleg_id)
       CREATE TABLE IF NOT EXISTS auslagen_positionen (
         id SERIAL PRIMARY KEY,
         auslage_id INTEGER NOT NULL REFERENCES auslagen(id) ON DELETE CASCADE,
@@ -12348,6 +12528,9 @@ async function initDB() {
         CONSTRAINT auslagen_pos_gesamt_chk CHECK (gesamt_chf >= 0)
       );
       CREATE INDEX IF NOT EXISTS idx_auslagen_pos_auslage ON auslagen_positionen(auslage_id, sort_order);
+      ALTER TABLE auslagen_positionen ADD COLUMN IF NOT EXISTS beleg_id INTEGER REFERENCES auslagen_belege(id) ON DELETE SET NULL;
+      ALTER TABLE auslagen_positionen ADD COLUMN IF NOT EXISTS waehrung_original VARCHAR(3);
+      ALTER TABLE auslagen_positionen ADD COLUMN IF NOT EXISTS gesamt_original NUMERIC(10,2);
 
       -- Stundensatz-Config: pro STWEG oder uebergreifend (stweg=NULL).
       -- Wird beim KI-Belegleser bei "Arbeitszeit"-Positionen automatisch fuer
