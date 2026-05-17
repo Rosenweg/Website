@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verwaltungs-Mail Outbox — Rosenweg</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/nav.js?v=2"></script>
+  <link rel="icon" href="/logo-rosenweg.png">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    .badge-pending     { background:#fef3c7; color:#92400e; }
+    .badge-freigegeben { background:#dbeafe; color:#1e40af; }
+    .badge-gesendet    { background:#d1fae5; color:#065f46; }
+    .badge-abgelehnt   { background:#fee2e2; color:#991b1b; }
+    .badge-fehler      { background:#fecaca; color:#7f1d1d; }
+    .mono-body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+  <script>RosenwegNav.init({ active: 'verwaltung-mail-outbox' });</script>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+    <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center">
+      <p class="text-gray-600">Lade Login-Status…</p>
+    </div>
+
+    <div id="content" class="hidden">
+      <div class="mb-6">
+        <h1 class="text-2xl font-bold text-gray-900">Verwaltungs-Mail Outbox</h1>
+        <p class="text-sm text-gray-600 mt-1">Alle Mails an die externe Verwaltung warten hier auf manuelle Freigabe durch Technik oder Präsident. Inhalt kann vor dem Versand korrigiert werden.</p>
+      </div>
+
+      <div class="bg-white rounded-lg shadow p-3 mb-4 flex flex-wrap gap-3 items-center">
+        <label class="text-sm">
+          <span class="text-gray-600 mr-1">Status:</span>
+          <select id="filter-status" class="border rounded px-2 py-1 text-sm">
+            <option value="pending" selected>Pending</option>
+            <option value="">alle</option>
+            <option value="freigegeben">Freigegeben</option>
+            <option value="gesendet">Gesendet</option>
+            <option value="abgelehnt">Abgelehnt</option>
+            <option value="fehler">Fehler</option>
+          </select>
+        </label>
+        <span id="pending-stat" class="text-sm text-amber-700 font-medium"></span>
+        <button onclick="loadList()" class="ml-auto text-sm text-blue-600 hover:underline">Neu laden</button>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-4">
+        <!-- Liste -->
+        <div class="bg-white rounded-lg shadow overflow-hidden">
+          <div class="px-4 py-2 border-b text-xs uppercase text-gray-500">Mails</div>
+          <ul id="mail-list" class="divide-y divide-gray-100 max-h-[70vh] overflow-y-auto"></ul>
+        </div>
+
+        <!-- Detail -->
+        <div id="detail" class="bg-white rounded-lg shadow p-4 text-sm text-gray-400">
+          Eine Mail aus der Liste wählen zur Ansicht/Bearbeitung.
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const fmtDt = s => s ? new Date(s).toLocaleString('de-CH') : '';
+
+  let CURRENT = null;
+  let LIST = [];
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    const user = await AuthentikAuth.init({ requireAuth: true });
+    if (!user) return;
+    document.getElementById('auth-gate').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+    document.getElementById('filter-status').addEventListener('change', loadList);
+    await loadList();
+  });
+
+  async function loadList() {
+    const ul = document.getElementById('mail-list');
+    ul.innerHTML = '<li class="px-4 py-6 text-center text-gray-400">Lade…</li>';
+    try {
+      const status = document.getElementById('filter-status').value;
+      const q = status ? '?status=' + encodeURIComponent(status) : '';
+      const r = await AuthentikAuth.apiFetch('/api/verwaltung-mail-queue' + q);
+      if (r.status === 403) {
+        ul.innerHTML = '<li class="px-4 py-6 text-center text-red-600">Kein Zugriff (nur Technik / Präsident)</li>';
+        return;
+      }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      LIST = data.mails || [];
+      document.getElementById('pending-stat').textContent = data.pending_count
+        ? `⚠ ${data.pending_count} Mail${data.pending_count === 1 ? '' : 's'} zur Freigabe`
+        : '✓ Keine pending Mails';
+      renderList();
+    } catch (e) {
+      ul.innerHTML = `<li class="px-4 py-6 text-center text-red-600">Fehler: ${esc(e.message)}</li>`;
+    }
+  }
+
+  function renderList() {
+    const ul = document.getElementById('mail-list');
+    if (LIST.length === 0) {
+      ul.innerHTML = '<li class="px-4 py-6 text-center text-gray-400">Keine Mails.</li>';
+      return;
+    }
+    ul.innerHTML = LIST.map(m => {
+      const sel = CURRENT && CURRENT.id === m.id;
+      return `<li onclick="openDetail(${m.id})" class="px-4 py-3 cursor-pointer hover:bg-gray-50 ${sel ? 'bg-blue-50' : ''}">
+        <div class="flex items-center justify-between gap-2">
+          <span class="badge-${esc(m.status)} text-xs px-2 py-0.5 rounded font-medium">${esc(m.status)}</span>
+          <span class="text-xs text-gray-400">${esc(fmtDt(m.created_at))}</span>
+        </div>
+        <div class="mt-1 font-medium text-gray-900 text-sm truncate">${esc(m.subject)}</div>
+        <div class="text-xs text-gray-500 mt-0.5 truncate">→ ${esc(m.mail_to)}</div>
+        <div class="text-xs text-gray-400 mt-0.5">
+          ${esc(m.source_type)}${m.source_id ? ' #' + m.source_id : ''}
+          ${m.attachment_count > 0 ? ` · 📎 ${m.attachment_count}` : ''}
+          ${m.edited_by ? ` · ✎ editiert` : ''}
+        </div>
+      </li>`;
+    }).join('');
+  }
+
+  async function openDetail(id) {
+    const det = document.getElementById('detail');
+    det.innerHTML = '<div class="text-gray-400">Lade…</div>';
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/verwaltung-mail-queue/' + id);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      CURRENT = await r.json();
+      renderList(); // highlight
+      renderDetail();
+    } catch (e) {
+      det.innerHTML = `<div class="text-red-600">Fehler: ${esc(e.message)}</div>`;
+    }
+  }
+
+  function renderDetail() {
+    const m = CURRENT;
+    if (!m) return;
+    const isPending = m.status === 'pending';
+    const attRows = (m.attachments || []).map((a, i) => `
+      <div class="flex items-center gap-2 text-xs py-1">
+        <span class="text-gray-500">📎</span>
+        <a href="/api/verwaltung-mail-queue/${m.id}/attachment/${i}" target="_blank" class="text-blue-600 hover:underline">${esc(a.filename || 'Anhang ' + (i+1))}</a>
+        ${a.size ? `<span class="text-gray-400">(${Math.round(a.size / 1024)} KB)</span>` : ''}
+        ${a.docs_path ? `<span class="text-gray-400">· live aus ${esc(a.docs_path)}</span>` : ''}
+      </div>`).join('');
+    const editable = isPending ? '' : 'readonly disabled';
+    const editableCls = isPending ? '' : 'bg-gray-50';
+    const meta = [];
+    if (m.created_by) meta.push(`Eingestellt von <b>${esc(m.created_by)}</b> am ${esc(fmtDt(m.created_at))}`);
+    if (m.edited_by) meta.push(`<span class="text-amber-700">✎ Editiert</span> von <b>${esc(m.edited_by)}</b> am ${esc(fmtDt(m.edited_at))}`);
+    if (m.freigegeben_von) meta.push(`<span class="text-blue-700">✓ Freigegeben</span> von <b>${esc(m.freigegeben_von)}</b> am ${esc(fmtDt(m.freigegeben_am))}`);
+    if (m.sent_at) meta.push(`<span class="text-emerald-700">✉ Gesendet</span> am ${esc(fmtDt(m.sent_at))}`);
+    if (m.abgelehnt_von) meta.push(`<span class="text-red-700">✗ Abgelehnt</span> von <b>${esc(m.abgelehnt_von)}</b> am ${esc(fmtDt(m.abgelehnt_am))}: <em>${esc(m.abgelehnt_grund)}</em>`);
+    if (m.send_error) meta.push(`<span class="text-red-700">⚠ Send-Fehler:</span> ${esc(m.send_error)}`);
+
+    document.getElementById('detail').innerHTML = `
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <span class="badge-${esc(m.status)} text-xs px-2 py-0.5 rounded font-medium">${esc(m.status)}</span>
+          <span class="text-xs text-gray-400 ml-2">${esc(m.source_type)}${m.source_id ? ' #' + m.source_id : ''}</span>
+        </div>
+        ${m.source_type.startsWith('auslage') && m.source_id
+          ? `<a href="/auslagen.html" class="text-xs text-blue-600 hover:underline">→ zur Auslage</a>`
+          : ''}
+      </div>
+
+      <div class="space-y-3 text-sm">
+        <label class="block">
+          <span class="text-xs text-gray-500">An (To)</span>
+          <input id="f-to" type="text" value="${esc(m.mail_to)}" ${editable} class="${editableCls} mt-1 w-full border rounded px-2 py-1.5 text-sm">
+        </label>
+        <label class="block">
+          <span class="text-xs text-gray-500">CC</span>
+          <input id="f-cc" type="text" value="${esc(m.mail_cc || '')}" ${editable} class="${editableCls} mt-1 w-full border rounded px-2 py-1.5 text-sm">
+        </label>
+        <label class="block">
+          <span class="text-xs text-gray-500">Reply-To</span>
+          <input id="f-reply" type="text" value="${esc(m.mail_reply_to || '')}" ${editable} class="${editableCls} mt-1 w-full border rounded px-2 py-1.5 text-sm">
+        </label>
+        <label class="block">
+          <span class="text-xs text-gray-500">Betreff</span>
+          <input id="f-subject" type="text" value="${esc(m.subject)}" ${editable} class="${editableCls} mt-1 w-full border rounded px-2 py-1.5 text-sm">
+        </label>
+        <label class="block">
+          <span class="text-xs text-gray-500">Body (text/plain)</span>
+          <textarea id="f-body" rows="14" ${editable} class="${editableCls} mt-1 w-full border rounded px-2 py-1.5 text-sm mono-body">${esc(m.body_text)}</textarea>
+        </label>
+        ${attRows ? `<div><div class="text-xs text-gray-500 mb-1">Anhänge</div>${attRows}</div>` : ''}
+        ${meta.length > 0 ? `<div class="text-xs text-gray-600 border-t pt-2 mt-2 space-y-1">${meta.map(x => '<div>' + x + '</div>').join('')}</div>` : ''}
+        ${m.original_snapshot
+          ? `<details class="text-xs text-gray-500 border-t pt-2"><summary class="cursor-pointer">Original (vor Edit) anzeigen</summary>
+              <pre class="bg-gray-50 p-2 rounded mt-2 overflow-x-auto">${esc(JSON.stringify(m.original_snapshot, null, 2))}</pre>
+             </details>`
+          : ''}
+      </div>
+
+      ${isPending ? `
+        <div class="flex flex-wrap justify-end gap-2 pt-4 border-t mt-4">
+          <button onclick="saveEdit()" class="px-3 py-1.5 text-gray-700 hover:bg-gray-100 rounded text-sm border">Änderungen speichern</button>
+          <button onclick="ablehnen()" class="px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 text-sm">Ablehnen</button>
+          <button onclick="freigeben()" class="px-3 py-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-700 text-sm font-medium">Freigeben &amp; Senden</button>
+        </div>
+      ` : ''}
+    `;
+  }
+
+  async function saveEdit() {
+    if (!CURRENT) return;
+    const payload = {
+      mail_to: document.getElementById('f-to').value.trim(),
+      mail_cc: document.getElementById('f-cc').value.trim() || null,
+      mail_reply_to: document.getElementById('f-reply').value.trim() || null,
+      subject: document.getElementById('f-subject').value.trim(),
+      body_text: document.getElementById('f-body').value,
+    };
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/verwaltung-mail-queue/' + CURRENT.id, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+      CURRENT = data;
+      await loadList();
+      renderDetail();
+      alert('Änderungen gespeichert.');
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+
+  async function freigeben() {
+    if (!CURRENT) return;
+    if (!confirm('Mail jetzt freigeben und an die Verwaltung versenden?\n\nAn: ' + CURRENT.mail_to + '\nBetreff: ' + CURRENT.subject)) return;
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/verwaltung-mail-queue/' + CURRENT.id + '/freigeben', { method: 'POST' });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+      alert(data.sent ? 'Mail freigegeben und versendet.' : 'Mail freigegeben.');
+      await loadList();
+      await openDetail(CURRENT.id);
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+
+  async function ablehnen() {
+    if (!CURRENT) return;
+    const grund = prompt('Grund für die Ablehnung?');
+    if (!grund || !grund.trim()) return;
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/verwaltung-mail-queue/' + CURRENT.id + '/ablehnen', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ grund: grund.trim() }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+      alert('Mail abgelehnt.');
+      await loadList();
+      await openDetail(CURRENT.id);
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+  </script>
+</body>
+</html>
