@@ -4,11 +4,105 @@
  * Include via: <script src="/js/nav.js"></script>
  * Then call: RosenwegNav.init({ active: 'services' })
  */
+// Services-Menu: kategorisierte Gruppen. Wird identisch fuer Desktop-Mega-Menu
+// und Mobile-Akkordion gerendert. Permissions: perm = data-perm, permAny = data-perm-any.
+const SERVICES_GROUPS = [
+  {
+    title: 'Verwaltung & Objekte',
+    icon: '🏠',
+    items: [
+      { label: 'Objektverwaltung', href: 'objektverwaltung.html', activeKey: 'verwaltung', permAny: 'wohnungsverwaltung,bewohner-verwaltung,verwaltung' },
+      { label: 'Personen (Stammdaten)', href: 'personen.html', activeKey: 'personen', permAny: 'wohnungsverwaltung' },
+      { label: 'Grundbuch erfassen', href: 'grundbuch.html', activeKey: 'grundbuch', permAny: 'eigentuemer' },
+      { label: 'Verwaltung', href: 'verwaltung-admin.html', activeKey: 'verwaltungadmin', permAny: 'ausschuss,technik,praesident' },
+      { label: 'Brief-Tracking', href: 'brief-tracking.html', activeKey: 'brief-tracking', permAny: 'ausschuss,technik,praesident' },
+    ],
+  },
+  {
+    title: 'E-Mail',
+    icon: '✉',
+    items: [
+      { label: 'E-Mail-Verteiler', href: 'email-verteiler.html', activeKey: 'verteiler', perm: 'email-verteiler' },
+      { label: 'E-Mail-Archiv', href: 'email-archiv.html', activeKey: 'archiv', perm: 'email-archiv' },
+      { label: 'E-Mail-Log', href: 'email-log.html', activeKey: 'emaillog', permAny: 'technik,praesident,ausschuss' },
+    ],
+  },
+  {
+    title: 'Mail-Outbox (Genehmigung)',
+    icon: '🟡',
+    items: [
+      { label: 'Mail Outbox', href: 'verwaltung-mail-outbox.html', activeKey: 'verwaltung-mail-outbox', permAny: 'technik,praesident', badgeIds: ['nav-vmq-badge', 'nav-vmq-badge-mobile'] },
+      { label: 'Mail schreiben (Ad-hoc)', href: 'mail-compose.html', activeKey: 'mail-compose', perm: 'mail-compose' },
+      { label: 'Empfänger-Stammdaten', href: 'mail-empfaenger-admin.html', activeKey: 'mail-empfaenger', perm: 'mail-empfaenger' },
+      { label: 'Freigabe-Regeln', href: 'mail-approval-config.html', activeKey: 'mail-approval-config', permAny: 'technik,praesident' },
+      { label: 'Templates', href: 'mail-templates.html', activeKey: 'mail-templates', permAny: 'technik,praesident' },
+    ],
+  },
+  {
+    title: 'Betrieb & Admin',
+    icon: '⚙',
+    items: [
+      { label: 'Energie-Monitor', href: 'energie-monitor.html', activeKey: 'energie', perm: 'energie-monitor' },
+      { label: 'Zähler & Verbrauch', href: 'zaehler.html', activeKey: 'zaehler', perm: 'zaehler' },
+      { label: 'Auslagen / Vorschüsse', href: 'auslagen.html', activeKey: 'auslagen', perm: 'auslagen' },
+      { label: 'Handwerker & Lieferanten', href: 'handwerker.html', activeKey: 'handwerker', perm: 'handwerker' },
+      { label: 'Proxmox', href: 'proxmox-verwaltung.html', activeKey: 'proxmox', perm: 'proxmox-verwaltung' },
+    ],
+  },
+];
+
 const RosenwegNav = {
   _config: null,
 
   _esc(str) {
     return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  },
+
+  _renderServiceItem(item, base, active, isMobile) {
+    const permAttr = item.perm
+      ? `data-perm="${this._esc(item.perm)}"`
+      : item.permAny ? `data-perm-any="${this._esc(item.permAny)}"` : '';
+    const activeClass = active === item.activeKey
+      ? (isMobile ? 'bg-blue-50 text-blue-700 font-medium' : 'bg-blue-50 text-blue-600')
+      : 'text-gray-700 hover:bg-gray-50 hover:text-blue-600';
+    const cls = isMobile
+      ? `block px-3 py-2 rounded text-sm ${activeClass}`
+      : `block px-3 py-1.5 rounded text-sm ${activeClass}`;
+    const badge = (item.badgeIds || []).length > 0
+      ? `<span id="${item.badgeIds[isMobile ? 1 : 0] || item.badgeIds[0]}" class="hidden bg-amber-100 text-amber-800 text-xs px-1.5 py-0.5 rounded-full font-semibold ml-2"></span>`
+      : '';
+    const flex = badge ? 'flex items-center justify-between' : '';
+    return `<a href="${base}${item.href}" ${permAttr} class="${cls} ${flex}"><span>${this._esc(item.label)}</span>${badge}</a>`;
+  },
+
+  _renderServicesMegaMenu(active, base) {
+    const cols = SERVICES_GROUPS.map(g => `
+      <div class="nav-mega-col" data-mega-col="${this._esc(g.title)}">
+        <h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mb-2 px-3 flex items-center gap-1.5">
+          <span class="text-base">${g.icon}</span>${this._esc(g.title)}
+        </h3>
+        <div class="space-y-0.5">
+          ${g.items.map(it => this._renderServiceItem(it, base, active, false)).join('\n          ')}
+        </div>
+      </div>`).join('');
+    return `
+      <div class="nav-dropdown-menu hidden absolute left-0 mt-1 bg-white rounded-xl shadow-2xl border border-gray-200 p-5 z-50" style="width: min(960px, calc(100vw - 2rem));">
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-3">
+          ${cols}
+        </div>
+      </div>`;
+  },
+
+  _renderServicesMobile(active, base) {
+    return SERVICES_GROUPS.map((g, i) => `
+      <details class="nav-mobile-group" data-mobile-group="${this._esc(g.title)}"${i === 0 ? ' open' : ''}>
+        <summary class="px-3 py-2 text-xs font-semibold text-gray-500 uppercase cursor-pointer flex items-center gap-1.5 hover:bg-gray-50 rounded">
+          <span>${g.icon}</span>${this._esc(g.title)}
+        </summary>
+        <div class="pl-2 space-y-0.5">
+          ${g.items.map(it => this._renderServiceItem(it, base, active, true)).join('\n          ')}
+        </div>
+      </details>`).join('');
   },
 
   async init(opts = {}) {
@@ -84,35 +178,13 @@ const RosenwegNav = {
             </div>
           </div>
 
-          <!-- Services Dropdown -->
+          <!-- Services Mega-Menu -->
           <div class="relative nav-dropdown nav-perm-group" data-perm-group="services">
             <button class="${a('services')} px-3 py-2 text-sm transition flex items-center gap-1">
               Services
               <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
             </button>
-            <div class="nav-dropdown-menu hidden absolute left-0 mt-1 w-56 bg-white rounded-lg shadow-lg border py-1 z-50">
-              <a href="${base}energie-monitor.html" data-perm="energie-monitor" class="${dropA('energie')} block px-4 py-2 text-sm">Energie-Monitor</a>
-              <a href="${base}zaehler.html" data-perm="zaehler" class="${dropA('zaehler')} block px-4 py-2 text-sm">Zähler & Verbrauch</a>
-              <a href="${base}email-verteiler.html" data-perm="email-verteiler" class="${dropA('verteiler')} block px-4 py-2 text-sm">E-Mail-Verteiler</a>
-              <a href="${base}email-archiv.html" data-perm="email-archiv" class="${dropA('archiv')} block px-4 py-2 text-sm">E-Mail-Archiv</a>
-              <a href="${base}email-log.html" data-perm-any="technik,praesident,ausschuss" class="${dropA('emaillog')} block px-4 py-2 text-sm">E-Mail-Log</a>
-              <a href="${base}objektverwaltung.html" data-perm-any="wohnungsverwaltung,bewohner-verwaltung,verwaltung" class="${dropA('verwaltung')} block px-4 py-2 text-sm">Objektverwaltung</a>
-              <a href="${base}personen.html" data-perm-any="wohnungsverwaltung" class="${dropA('personen')} block px-4 py-2 text-sm">Personen (Stammdaten)</a>
-              <a href="${base}verwaltung-admin.html" data-perm-any="ausschuss,technik,praesident" class="${dropA('verwaltungadmin')} block px-4 py-2 text-sm">Verwaltung</a>
-              <a href="${base}grundbuch.html" data-perm-any="eigentuemer" class="${dropA('grundbuch')} block px-4 py-2 text-sm">Grundbuch erfassen</a>
-              <a href="${base}brief-tracking.html" data-perm-any="ausschuss,technik,praesident" class="${dropA('brief-tracking')} block px-4 py-2 text-sm">Brief-Tracking</a>
-              <a href="${base}handwerker.html" data-perm="handwerker" class="${dropA('handwerker')} block px-4 py-2 text-sm">Handwerker & Lieferanten</a>
-              <a href="${base}auslagen.html" data-perm="auslagen" class="${dropA('auslagen')} block px-4 py-2 text-sm">Auslagen / Vorschüsse</a>
-              <a href="${base}verwaltung-mail-outbox.html" data-perm-any="technik,praesident" class="${dropA('verwaltung-mail-outbox')} block px-4 py-2 text-sm flex items-center justify-between">
-                <span>Verwaltungs-Mail Outbox</span>
-                <span id="nav-vmq-badge" class="hidden bg-amber-100 text-amber-800 text-xs px-1.5 py-0.5 rounded-full font-semibold"></span>
-              </a>
-              <a href="${base}mail-empfaenger-admin.html" data-perm="mail-empfaenger" class="${dropA('mail-empfaenger')} block px-4 py-2 text-sm">Mail-Empfänger Stammdaten</a>
-              <a href="${base}mail-compose.html" data-perm="mail-compose" class="${dropA('mail-compose')} block px-4 py-2 text-sm">Mail schreiben (Ad-hoc)</a>
-              <a href="${base}mail-approval-config.html" data-perm-any="technik,praesident" class="${dropA('mail-approval-config')} block px-4 py-2 text-sm">Mail-Freigabe-Regeln</a>
-              <a href="${base}mail-templates.html" data-perm-any="technik,praesident" class="${dropA('mail-templates')} block px-4 py-2 text-sm">Mail-Templates</a>
-              <a href="${base}proxmox-verwaltung.html" data-perm="proxmox-verwaltung" class="${dropA('proxmox')} block px-4 py-2 text-sm">Proxmox</a>
-            </div>
+            ${this._renderServicesMegaMenu(active, base)}
           </div>
 
           <!-- Infos Dropdown -->
@@ -168,26 +240,9 @@ const RosenwegNav = {
         </div>
 
         <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase nav-perm-section" data-perm-section="services">Services</div>
-        <a href="${base}energie-monitor.html" data-perm="energie-monitor" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Energie-Monitor</a>
-        <a href="${base}zaehler.html" data-perm="zaehler" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Zähler & Verbrauch</a>
-        <a href="${base}email-verteiler.html" data-perm="email-verteiler" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">E-Mail-Verteiler</a>
-        <a href="${base}email-archiv.html" data-perm="email-archiv" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">E-Mail-Archiv</a>
-        <a href="${base}objektverwaltung.html" data-perm-any="wohnungsverwaltung,bewohner-verwaltung,verwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Objektverwaltung</a>
-        <a href="${base}personen.html" data-perm-any="wohnungsverwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Personen (Stammdaten)</a>
-        <a href="${base}verwaltung-admin.html" data-perm-any="ausschuss,technik,praesident" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Verwaltung</a>
-        <a href="${base}grundbuch.html" data-perm-any="eigentuemer" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Grundbuch erfassen</a>
-        <a href="${base}brief-tracking.html" data-perm-any="ausschuss,technik,praesident" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Brief-Tracking</a>
-        <a href="${base}handwerker.html" data-perm="handwerker" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Handwerker & Lieferanten</a>
-        <a href="${base}auslagen.html" data-perm="auslagen" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Auslagen / Vorschüsse</a>
-        <a href="${base}verwaltung-mail-outbox.html" data-perm-any="technik,praesident" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm flex items-center justify-between">
-          <span>Verwaltungs-Mail Outbox</span>
-          <span id="nav-vmq-badge-mobile" class="hidden bg-amber-100 text-amber-800 text-xs px-1.5 py-0.5 rounded-full font-semibold"></span>
-        </a>
-        <a href="${base}mail-empfaenger-admin.html" data-perm="mail-empfaenger" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Mail-Empfänger Stammdaten</a>
-        <a href="${base}mail-compose.html" data-perm="mail-compose" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Mail schreiben (Ad-hoc)</a>
-        <a href="${base}mail-approval-config.html" data-perm-any="technik,praesident" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Mail-Freigabe-Regeln</a>
-        <a href="${base}mail-templates.html" data-perm-any="technik,praesident" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Mail-Templates</a>
-        <a href="${base}proxmox-verwaltung.html" data-perm="proxmox-verwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Proxmox</a>
+        <div class="space-y-1 px-1">
+          ${this._renderServicesMobile(active, base)}
+        </div>
 
         <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Infos</div>
         <a href="${base}telefonbuch.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Telefonbuch</a>
@@ -276,27 +331,34 @@ const RosenwegNav = {
       }
     });
 
-    // Hide "Services" dropdown entirely if no service links are visible
-    document.querySelectorAll('[data-perm-group="services"]').forEach(group => {
-      const visibleLinks = group.querySelectorAll('[data-perm]:not([style*="display: none"])');
-      const unpermLinks = group.querySelectorAll('a:not([data-perm])');
-      if (visibleLinks.length === 0 && unpermLinks.length === 0) {
-        group.style.display = 'none';
-      }
+    // Mega-Menu: pro Spalte pruefen ob alle Links versteckt → Spalte verstecken
+    document.querySelectorAll('.nav-mega-col').forEach(col => {
+      const links = col.querySelectorAll('a');
+      const anyVisible = Array.from(links).some(a => a.style.display !== 'none');
+      if (!anyVisible) col.style.display = 'none';
+    });
+    // Mobile-Akkordion: pro details-Gruppe analog
+    document.querySelectorAll('.nav-mobile-group').forEach(grp => {
+      const links = grp.querySelectorAll('a');
+      const anyVisible = Array.from(links).some(a => a.style.display !== 'none');
+      if (!anyVisible) grp.style.display = 'none';
     });
 
-    // Hide mobile "Services" section header if no service links visible
+    // Hide "Services" Trigger ganz wenn keine Spalte sichtbar
+    document.querySelectorAll('[data-perm-group="services"]').forEach(group => {
+      const visibleCols = group.querySelectorAll('.nav-mega-col:not([style*="display: none"])');
+      if (visibleCols.length === 0) group.style.display = 'none';
+    });
+
+    // Hide mobile "Services" section header wenn keine Gruppe sichtbar
     document.querySelectorAll('[data-perm-section="services"]').forEach(header => {
-      let next = header.nextElementSibling;
-      let anyVisible = false;
-      while (next && !next.classList?.contains('nav-perm-section') && next.tagName !== 'HR' && !next.textContent.includes('Infos')) {
-        if (next.tagName === 'A' && next.style.display !== 'none') {
-          anyVisible = true;
-          break;
-        }
-        next = next.nextElementSibling;
+      const container = header.nextElementSibling;
+      if (!container) return;
+      const visibleGroups = container.querySelectorAll('.nav-mobile-group:not([style*="display: none"])');
+      if (visibleGroups.length === 0) {
+        header.style.display = 'none';
+        container.style.display = 'none';
       }
-      if (!anyVisible) header.style.display = 'none';
     });
 
     // Pending-Badge fuer Technik/Praesident: Anzahl Mails in der Verwaltungs-Mail-Queue
