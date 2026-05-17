@@ -4610,10 +4610,16 @@ app.get('/api/stweg/:stweg/wohnungen', async (req, res) => {
 // Anzeige auf oeffentlicher /verwaltung.html (ohne Login-Daten + Notizen).
 app.get('/api/verwaltungen/public', async (req, res) => {
   try {
+    // "Wirksam" = aktiv UND (kein Startdatum ODER Startdatum erreicht)
+    //                  UND (kein Enddatum ODER Enddatum noch nicht vorbei)
     const { rows: verw } = await pool.query(`
       SELECT id, stweg, firma_name, adresse, telefon, email, website, oeffnungszeiten,
-             plattform_name, plattform_url
-      FROM verwaltungen WHERE aktiv = true ORDER BY stweg NULLS FIRST, firma_name
+             plattform_name, plattform_url, vertrag_von, vertrag_bis
+      FROM verwaltungen
+      WHERE aktiv = true
+        AND (vertrag_von IS NULL OR vertrag_von <= CURRENT_DATE)
+        AND (vertrag_bis IS NULL OR vertrag_bis >= CURRENT_DATE)
+      ORDER BY stweg NULLS FIRST, firma_name
     `);
     const ids = verw.map(v => v.id);
     const { rows: kontakte } = ids.length === 0 ? { rows: [] } : await pool.query(`
@@ -9091,11 +9097,15 @@ function auslagenStwegFolder(stweg) {
 async function findVerwaltungForStweg(stweg) {
   const stwegInt = parseInt(stweg, 10);
   const stwegVal = Number.isFinite(stwegInt) ? stwegInt : null;
+  // Wirksam: aktiv UND innerhalb Vertragszeitraum (Start erreicht, Ende noch nicht ueberschritten)
+  const wirksamWhere = `aktiv = true
+    AND (vertrag_von IS NULL OR vertrag_von <= CURRENT_DATE)
+    AND (vertrag_bis IS NULL OR vertrag_bis >= CURRENT_DATE)`;
   let r = stwegVal
-    ? await pool.query('SELECT * FROM verwaltungen WHERE aktiv = true AND stweg = $1 ORDER BY id LIMIT 1', [stwegVal])
+    ? await pool.query(`SELECT * FROM verwaltungen WHERE ${wirksamWhere} AND stweg = $1 ORDER BY id LIMIT 1`, [stwegVal])
     : { rows: [] };
   if (r.rows.length === 0) {
-    r = await pool.query('SELECT * FROM verwaltungen WHERE aktiv = true AND stweg IS NULL ORDER BY id LIMIT 1');
+    r = await pool.query(`SELECT * FROM verwaltungen WHERE ${wirksamWhere} AND stweg IS NULL ORDER BY id LIMIT 1`);
   }
   if (r.rows.length > 0) {
     const v = r.rows[0];
