@@ -38,7 +38,8 @@
                 <li><a href="/auslagen.html" class="underline hover:text-amber-700">Auslagen / Vorschüsse</a> — bei Freigabe geht eine fertige Auszahlungs-E-Mail mit Beleg-Anhang an die Verwaltung (To: <code class="bg-amber-100 px-1 rounded">Firmen-E-Mail</code>, CC: alle Kontakt-E-Mails)</li>
                 <li>Startseite (<a href="/index.html" class="underline hover:text-amber-700">/index.html</a>) sowie alle STWEG-Übersichten (Hausverwaltungs-Kachel) und <a href="/stweg3/pages/waschkueche-management-info.html" class="underline hover:text-amber-700">Waschküchen-Info</a> — laden Firma, Adresse, Telefon, E-Mail, Website und Öffnungszeiten dynamisch von hier</li>
             </ul>
-            <p class="mt-2 text-xs text-amber-800">→ Pro <strong>aktiver</strong> Verwaltung mindestens <strong>Firmenname</strong> und eine <strong>E-Mail</strong> (oder ein Kontakt mit E-Mail) hinterlegen. Wenn die Tabelle leer ist, wird übergangsweise die statische <code>site-config.json</code> verwendet.</p>
+            <p class="mt-2 text-xs text-amber-800">→ Pro <strong>aktiver</strong> Verwaltung mindestens <strong>Firmenname</strong> und eine <strong>E-Mail</strong> (oder ein Kontakt mit E-Mail) hinterlegen.</p>
+            <p class="mt-1 text-xs text-amber-800">→ <strong>Startdatum/Enddatum</strong> steuert ab/bis wann die Verwaltung systemweit wirksam ist — eine neue Verwaltung kann mit Startdatum in der Zukunft erfasst werden und wird automatisch wirksam, sobald das Datum erreicht ist. Bis dahin greift der Ausschuss-Fallback.</p>
         </div>
 
         <div id="loading" class="text-center text-gray-400 py-12">Lade …</div>
@@ -128,14 +129,17 @@
                 </fieldset>
                 <fieldset class="border rounded-lg p-3">
                     <legend class="text-xs font-semibold text-gray-700 px-2">Vertrag</legend>
+                    <p class="text-xs text-gray-500 mb-2">Die Verwaltung ist nur zwischen <em>Startdatum</em> und <em>Enddatum</em> systemweit wirksam (Anzeige + Auszahlungs-Mails). Vor dem Start oder nach dem Ende greift automatisch der Ausschuss-Fallback.</p>
                     <div class="grid grid-cols-2 gap-3 mt-2">
                         <div>
-                            <label class="block text-xs font-medium text-gray-600 mb-1">Vertrag von</label>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Startdatum (wirksam ab)</label>
                             <input type="date" id="m-vertrag-von" class="w-full border border-gray-300 rounded px-3 py-1.5">
+                            <p class="text-xs text-gray-400 mt-0.5">leer = sofort wirksam</p>
                         </div>
                         <div>
-                            <label class="block text-xs font-medium text-gray-600 mb-1">Vertrag bis</label>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Enddatum (wirksam bis)</label>
                             <input type="date" id="m-vertrag-bis" class="w-full border border-gray-300 rounded px-3 py-1.5">
+                            <p class="text-xs text-gray-400 mt-0.5">leer = unbefristet</p>
                         </div>
                         <div>
                             <label class="block text-xs font-medium text-gray-600 mb-1">Kündigungsfrist (Monate)</label>
@@ -205,12 +209,24 @@
             list.innerHTML = '<div class="bg-white rounded-xl border p-8 text-center text-gray-500">Noch keine Verwaltungen erfasst. <button onclick="addNew()" class="text-red-700 hover:underline">Erste anlegen →</button></div>';
             return;
         }
+        const today = new Date().toISOString().slice(0, 10);
         list.innerHTML = allVerw.map(v => {
             const stwegL = v.stweg ? `STWEG ${v.stweg}` : 'STWEG-übergreifend';
-            const aktiv = v.aktiv ? '<span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-xs font-medium">Aktiv</span>'
-                                   : '<span class="px-2 py-0.5 rounded bg-gray-100 text-gray-600 text-xs">Beendet</span>';
-            const vertrag = (v.vertrag_von || v.vertrag_bis) ? `${v.vertrag_von || '?'} – ${v.vertrag_bis || 'unbefristet'}` : '';
-            const kuendigung = v.kuendigung_eingereicht_am ? `<span class="text-amber-700">⚠ Gekündigt ${v.kuendigung_eingereicht_am}</span>` : '';
+            const vFrom = v.vertrag_von ? String(v.vertrag_von).slice(0, 10) : null;
+            const vTo = v.vertrag_bis ? String(v.vertrag_bis).slice(0, 10) : null;
+            // Status-Badge: Aktiv / Beendet / Geplant (start in Zukunft) / Abgelaufen (Ende vorbei)
+            let statusBadge;
+            if (!v.aktiv) {
+                statusBadge = '<span class="px-2 py-0.5 rounded bg-gray-100 text-gray-600 text-xs">Beendet</span>';
+            } else if (vFrom && vFrom > today) {
+                statusBadge = `<span class="px-2 py-0.5 rounded bg-blue-100 text-blue-800 text-xs font-medium">📅 Geplant ab ${vFrom}</span>`;
+            } else if (vTo && vTo < today) {
+                statusBadge = `<span class="px-2 py-0.5 rounded bg-orange-100 text-orange-800 text-xs font-medium">Abgelaufen seit ${vTo}</span>`;
+            } else {
+                statusBadge = '<span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-xs font-medium">Wirksam</span>';
+            }
+            const vertrag = (vFrom || vTo) ? `${vFrom || '?'} – ${vTo || 'unbefristet'}` : '';
+            const kuendigung = v.kuendigung_eingereicht_am ? `<span class="text-amber-700">⚠ Gekündigt ${String(v.kuendigung_eingereicht_am).slice(0,10)}</span>` : '';
             return `
             <article class="verw-card bg-white rounded-xl border p-4 cursor-pointer" onclick="edit(${v.id})">
                 <div class="flex items-baseline justify-between gap-3 flex-wrap">
@@ -218,7 +234,7 @@
                         <h3 class="font-bold text-gray-900">${escapeHtml(v.firma_name)}</h3>
                         <div class="text-xs text-gray-500 mt-0.5">${escapeHtml(stwegL)}${vertrag ? ' · '+escapeHtml(vertrag) : ''}</div>
                     </div>
-                    <div class="flex items-center gap-2">${aktiv}${kuendigung}</div>
+                    <div class="flex items-center gap-2">${statusBadge}${kuendigung}</div>
                 </div>
                 <div class="mt-2 text-xs text-gray-600 flex flex-wrap gap-x-4 gap-y-1">
                     ${v.email ? `📧 ${escapeHtml(v.email)}` : ''}
