@@ -9538,6 +9538,8 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
           } catch {}
         }
       }
+      // C1-Fix: nur tracken wenn Mail wirklich raus ist — sonst weiss der
+      // Eigentuemer nicht, dass der Versand fehlgeschlagen ist.
       try {
         await loggedSendMail({
           from: MAIL_FROM,
@@ -9550,6 +9552,7 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
         }, 'auslage-auszahlung-ausschuss-fallback');
       } catch (e) {
         console.error('[auslagen] Ausschuss-Direktversand Fehler:', e.message);
+        return { ok: false, reason: 'Mail-Versand an Ausschuss-Fallback fehlgeschlagen: ' + e.message, fallback: 'ausschuss', queued: false };
       }
       await pool.query(
         `UPDATE auslagen
@@ -10781,15 +10784,24 @@ app.get('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesi
   }
 });
 
-// Edit (To/CC/Subject/Body) — nur solange pending
+// Edit (To/CC/Subject/Body) — nur solange pending.
+// C2-Fix: Bei jeder inhaltlichen Aenderung werden alle bisherigen Approvals
+// invalidiert, damit das 4-Augen-Prinzip nicht durch nachtraegliches Editieren
+// umgangen werden kann.
 app.put('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
-    const cur = await pool.query('SELECT * FROM verwaltung_mail_queue WHERE id = $1', [id]);
-    if (cur.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    await client.query('BEGIN');
+    const cur = await client.query('SELECT * FROM verwaltung_mail_queue WHERE id = $1 FOR UPDATE', [id]);
+    if (cur.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Nicht gefunden' });
+    }
     const row = cur.rows[0];
     if (row.status !== 'pending') {
+      await client.query('ROLLBACK');
       return res.status(409).json({ error: `Editieren nur bei Status 'pending' moeglich (aktuell: ${row.status})` });
     }
     // Beim ersten Edit Original-Snapshot speichern
@@ -10804,24 +10816,59 @@ app.put('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesi
     const updates = [];
     const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
-    if (b.mail_to !== undefined) push('mail_to', String(b.mail_to).slice(0, 2000));
-    if (b.mail_cc !== undefined) push('mail_cc', b.mail_cc ? String(b.mail_cc).slice(0, 2000) : null);
-    if (b.mail_reply_to !== undefined) push('mail_reply_to', b.mail_reply_to ? String(b.mail_reply_to).slice(0, 255) : null);
-    if (b.subject !== undefined) push('subject', String(b.subject).slice(0, 500));
-    if (b.body_text !== undefined) push('body_text', String(b.body_text).slice(0, 100000));
-    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    // Pruefen ob inhaltliche Aenderung vorliegt (fuer Approval-Reset)
+    let contentChanged = false;
+    const isDifferent = (a, b) => (a == null ? '' : String(a)) !== (b == null ? '' : String(b));
+    if (b.mail_to !== undefined) {
+      const v = String(b.mail_to).slice(0, 2000);
+      if (isDifferent(v, row.mail_to)) contentChanged = true;
+      push('mail_to', v);
+    }
+    if (b.mail_cc !== undefined) {
+      const v = b.mail_cc ? String(b.mail_cc).slice(0, 2000) : null;
+      if (isDifferent(v, row.mail_cc)) contentChanged = true;
+      push('mail_cc', v);
+    }
+    if (b.mail_reply_to !== undefined) {
+      const v = b.mail_reply_to ? String(b.mail_reply_to).slice(0, 255) : null;
+      if (isDifferent(v, row.mail_reply_to)) contentChanged = true;
+      push('mail_reply_to', v);
+    }
+    if (b.subject !== undefined) {
+      const v = String(b.subject).slice(0, 500);
+      if (isDifferent(v, row.subject)) contentChanged = true;
+      push('subject', v);
+    }
+    if (b.body_text !== undefined) {
+      const v = String(b.body_text).slice(0, 100000);
+      if (isDifferent(v, row.body_text)) contentChanged = true;
+      push('body_text', v);
+    }
+    if (updates.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Keine Aenderungen' });
+    }
     push('original_snapshot', JSON.stringify(snapshot));
     push('edited_by', req.user.email);
     push('edited_at', new Date());
     params.push(id);
-    const r = await pool.query(
+    const r = await client.query(
       `UPDATE verwaltung_mail_queue SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`,
       params,
     );
-    res.json(r.rows[0]);
+    let invalidatedApprovals = 0;
+    if (contentChanged) {
+      const del = await client.query('DELETE FROM mail_approval_log WHERE queue_id = $1 RETURNING id', [id]);
+      invalidatedApprovals = del.rowCount;
+    }
+    await client.query('COMMIT');
+    res.json({ ...r.rows[0], _invalidated_approvals: invalidatedApprovals });
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error('Mail-Queue edit error:', err);
     res.status(500).json({ error: 'Fehler beim Speichern' });
+  } finally {
+    client.release();
   }
 });
 

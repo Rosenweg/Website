@@ -250,7 +250,11 @@
       CURRENT = data;
       await loadList();
       renderDetail();
-      alert('Änderungen gespeichert.');
+      if (data._invalidated_approvals > 0) {
+        alert('Änderungen gespeichert.\n\n⚠ ' + data._invalidated_approvals + ' bisherige Freigabe(n) wurden zurückgesetzt, da der Inhalt geändert wurde. Die Mail muss neu freigegeben werden.');
+      } else {
+        alert('Änderungen gespeichert.');
+      }
     } catch (e) { alert('Fehler: ' + e.message); }
   }
 
