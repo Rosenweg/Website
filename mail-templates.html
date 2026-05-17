@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mail-Templates — Rosenweg</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/nav.js?v=2"></script>
+  <link rel="icon" href="/logo-rosenweg.png">
+  <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'); body { font-family: 'Inter', sans-serif; } .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+  <script>RosenwegNav.init({ active: 'mail-templates' });</script>
+
+  <main class="max-w-6xl mx-auto px-4 py-6">
+    <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center"><p class="text-gray-600">Lade…</p></div>
+
+    <div id="content" class="hidden">
+      <div class="mb-4 flex justify-between items-end gap-3 flex-wrap">
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900">Mail-Templates</h1>
+          <p class="text-sm text-gray-600 mt-1">Konfigurierbare Subject/Body-Templates pro <code>source_type</code> + optional <code>empfaenger_kategorie</code>. Wenn kein Template aktiv ist, wird der hartcodierte Default verwendet.</p>
+        </div>
+        <button id="btn-new" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">+ Neues Template</button>
+      </div>
+
+      <div class="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-900 mb-4">
+        <strong>Platzhalter-Syntax:</strong> <code class="mono">{{path.to.field}}</code>, mit Helpers <code class="mono">{{chf auslage.betrag_chf}}</code>, <code class="mono">{{date auslage.datum}}</code>, <code class="mono">{{upper x}}</code>. Bedingung: <code class="mono">{{#if auslage.iban}}…{{/if}}</code>.
+        <br><strong>Verfügbare Source-Types:</strong> <code class="mono">auslage-auszahlung</code>, <code class="mono">auslage-auszahlung-nachgereicht</code>, <code class="mono">objekt-aenderung</code>.
+        <br><strong>Context-Beispiel auslage-auszahlung:</strong> <code class="mono">auslage.id</code>, <code class="mono">auslage.user_name</code>, <code class="mono">auslage.user_email</code>, <code class="mono">auslage.betrag_chf</code>, <code class="mono">auslage.iban</code>, <code class="mono">auslage.beschreibung</code>, <code class="mono">auslage.kategorie</code>, <code class="mono">stweg_label</code>, <code class="mono">betrag</code>, <code class="mono">datum</code>, <code class="mono">freigeber</code>, <code class="mono">verwaltung.firma</code>, <code class="mono">site_url</code>, <code class="mono">ausschuss_email</code>.
+      </div>
+
+      <div id="list" class="space-y-2"></div>
+    </div>
+  </main>
+
+  <div id="modal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-start justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-xl shadow-xl max-w-4xl w-full p-6 my-8">
+      <div class="flex items-center justify-between mb-4">
+        <h2 id="m-title" class="text-xl font-bold text-gray-900">Template</h2>
+        <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+      </div>
+      <form id="form" class="space-y-3 text-sm">
+        <input type="hidden" id="m-id">
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block">
+            <span class="text-xs text-gray-600">Source-Type *</span>
+            <input type="text" id="m-source" required placeholder="auslage-auszahlung" class="mono mt-1 block w-full border rounded px-2 py-1.5">
+          </label>
+          <label class="block">
+            <span class="text-xs text-gray-600">Empfänger-Kategorie (optional, sonst gilt für alle)</span>
+            <select id="m-kat" class="mt-1 block w-full border rounded px-2 py-1.5">
+              <option value="">— alle Kategorien —</option>
+              <option value="verwaltung">verwaltung</option>
+              <option value="anwalt">anwalt</option><option value="bank">bank</option>
+              <option value="versicherung">versicherung</option><option value="behoerde">behoerde</option>
+              <option value="energie">energie</option><option value="handwerker">handwerker</option>
+              <option value="lieferant">lieferant</option><option value="sonstige">sonstige</option>
+            </select>
+          </label>
+        </div>
+        <label class="block">
+          <span class="text-xs text-gray-600">Subject-Template *</span>
+          <input type="text" id="m-subject" required class="mono mt-1 block w-full border rounded px-2 py-1.5"
+                 placeholder="Auszahlungsauftrag {{stweg_label}}: {{auslage.user_name}} – {{chf auslage.betrag_chf}}">
+        </label>
+        <label class="block">
+          <span class="text-xs text-gray-600">Body-Template *</span>
+          <textarea id="m-body" rows="14" required class="mono mt-1 block w-full border rounded px-2 py-1.5"
+                    placeholder="Sehr geehrte Damen und Herren,&#10;&#10;Der Ausschuss hat die Auslage Nr. {{auslage.id}} freigegeben.&#10;&#10;Betrag: {{chf auslage.betrag_chf}}&#10;IBAN: {{auslage.iban}}&#10;..."></textarea>
+        </label>
+        <label class="block">
+          <span class="text-xs text-gray-600">Notiz</span>
+          <input type="text" id="m-notiz" class="mt-1 block w-full border rounded px-2 py-1.5">
+        </label>
+        <label class="flex items-center gap-2"><input type="checkbox" id="m-aktiv" checked><span>Aktiv</span></label>
+
+        <div class="border-t pt-3">
+          <button type="button" onclick="preview()" class="text-sm text-blue-600 hover:underline">↻ Vorschau mit Beispieldaten</button>
+          <div id="preview" class="hidden mt-2 bg-gray-50 border rounded p-3 text-sm">
+            <div class="text-xs text-gray-500">Betreff:</div>
+            <div id="prev-subj" class="font-semibold mb-2"></div>
+            <div class="text-xs text-gray-500">Body:</div>
+            <pre id="prev-body" class="mono text-xs whitespace-pre-wrap"></pre>
+          </div>
+        </div>
+
+        <div id="m-err" class="text-sm text-red-600 hidden"></div>
+        <div class="flex justify-between gap-2 pt-3 border-t mt-3">
+          <button type="button" id="m-del" onclick="del()" class="hidden px-3 py-1.5 text-red-600 hover:bg-red-50 rounded text-sm">Löschen</button>
+          <div class="flex gap-2 ml-auto">
+            <button type="button" onclick="closeModal()" class="px-3 py-1.5 text-gray-600 hover:bg-gray-100 rounded">Abbrechen</button>
+            <button type="submit" class="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700">Speichern</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  let LIST = [];
+  const SAMPLE_CTX = {
+    auslage: { id: 42, user_name: 'Hans Muster', user_email: 'hans@example.ch', betrag_chf: 1234.50, iban: 'CH00 0000 0000 0000 0000 0', datum: '2026-05-10', beschreibung: 'Material Reinigungsmittel', kategorie: 'Material' },
+    stweg_label: 'STWEG 3', betrag: '1234.50', datum: '10.05.2026', today: '17.05.2026',
+    freigeber: 'praesident@rosenweg4303.ch', freigabe_am: '17.05.2026',
+    verwaltung: { firma: 'Beispiel Verwaltungs AG' },
+    nachgereicht: false, has_attachment: true,
+    site_url: 'https://www.rosenweg4303.ch', ausschuss_email: 'ausschuss@rosenweg4303.ch',
+    erste_aenderung: '  • 17.05.2026 (admin@…): Wohnung "EG.1" aktualisiert',
+    today_de: '17.05.2026',
+  };
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    const u = await AuthentikAuth.init({ requireAuth: true });
+    if (!u) return;
+    document.getElementById('auth-gate').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+    document.getElementById('btn-new').addEventListener('click', openNew);
+    document.getElementById('form').addEventListener('submit', save);
+    await loadList();
+  });
+
+  async function loadList() {
+    const list = document.getElementById('list');
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/mail-templates');
+      if (r.status === 403) { list.innerHTML = '<div class="text-red-600">Kein Zugriff</div>'; return; }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      LIST = d.templates || [];
+      render();
+    } catch (e) {
+      list.innerHTML = `<div class="text-red-600">Fehler: ${esc(e.message)}</div>`;
+    }
+  }
+
+  function render() {
+    const list = document.getElementById('list');
+    if (LIST.length === 0) {
+      list.innerHTML = '<div class="bg-white rounded-lg shadow p-8 text-center text-gray-500">Keine Templates erfasst. Hartcodierte Defaults werden verwendet.</div>';
+      return;
+    }
+    list.innerHTML = LIST.map(t => {
+      const status = t.aktiv ? '<span class="text-emerald-700 text-xs px-2 py-0.5 bg-emerald-100 rounded">Aktiv</span>' : '<span class="text-gray-500 text-xs px-2 py-0.5 bg-gray-100 rounded">Inaktiv</span>';
+      const kat = t.empfaenger_kategorie ? `Kategorie: <code>${esc(t.empfaenger_kategorie)}</code>` : 'alle Kategorien';
+      return `<article class="bg-white rounded-lg border p-3 cursor-pointer hover:shadow" onclick="edit(${t.id})">
+        <div class="flex items-baseline justify-between gap-3 flex-wrap">
+          <div>
+            <h3 class="font-mono text-gray-900">${esc(t.source_type)}</h3>
+            <div class="text-xs text-gray-500 mt-0.5">${kat}</div>
+          </div>
+          ${status}
+        </div>
+        <div class="mt-2 text-xs text-gray-700"><strong>Betreff:</strong> <code class="mono">${esc(t.subject_template.slice(0, 200))}</code></div>
+      </article>`;
+    }).join('');
+  }
+
+  function openNew() {
+    document.getElementById('m-title').textContent = 'Neues Template';
+    document.getElementById('form').reset();
+    document.getElementById('m-id').value = '';
+    document.getElementById('m-aktiv').checked = true;
+    document.getElementById('m-del').classList.add('hidden');
+    document.getElementById('preview').classList.add('hidden');
+    document.getElementById('m-err').classList.add('hidden');
+    document.getElementById('modal').classList.remove('hidden');
+  }
+
+  function edit(id) {
+    const t = LIST.find(x => x.id === id);
+    if (!t) return;
+    document.getElementById('m-title').textContent = 'Bearbeiten — ' + t.source_type;
+    document.getElementById('m-id').value = t.id;
+    document.getElementById('m-source').value = t.source_type;
+    document.getElementById('m-kat').value = t.empfaenger_kategorie || '';
+    document.getElementById('m-subject').value = t.subject_template;
+    document.getElementById('m-body').value = t.body_template;
+    document.getElementById('m-notiz').value = t.notiz || '';
+    document.getElementById('m-aktiv').checked = t.aktiv !== false;
+    document.getElementById('m-del').classList.remove('hidden');
+    document.getElementById('preview').classList.add('hidden');
+    document.getElementById('m-err').classList.add('hidden');
+    document.getElementById('modal').classList.remove('hidden');
+  }
+
+  function closeModal() { document.getElementById('modal').classList.add('hidden'); }
+
+  async function preview() {
+    const payload = {
+      subject_template: document.getElementById('m-subject').value,
+      body_template: document.getElementById('m-body').value,
+      context: SAMPLE_CTX,
+    };
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/mail-templates/preview', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      const d = await r.json();
+      document.getElementById('prev-subj').textContent = d.subject;
+      document.getElementById('prev-body').textContent = d.body;
+      document.getElementById('preview').classList.remove('hidden');
+    } catch (e) { alert('Preview-Fehler: ' + e.message); }
+  }
+
+  async function save(ev) {
+    ev.preventDefault();
+    const id = document.getElementById('m-id').value;
+    const payload = {
+      source_type: document.getElementById('m-source').value.trim(),
+      empfaenger_kategorie: document.getElementById('m-kat').value || null,
+      subject_template: document.getElementById('m-subject').value,
+      body_template: document.getElementById('m-body').value,
+      notiz: document.getElementById('m-notiz').value.trim() || null,
+      aktiv: document.getElementById('m-aktiv').checked,
+    };
+    try {
+      const r = await AuthentikAuth.apiFetch(id ? `/api/mail-templates/${id}` : '/api/mail-templates', {
+        method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+      closeModal(); await loadList();
+    } catch (e) {
+      const el = document.getElementById('m-err'); el.textContent = e.message; el.classList.remove('hidden');
+    }
+  }
+
+  async function del() {
+    const id = document.getElementById('m-id').value;
+    if (!id || !confirm('Template wirklich löschen? (Hartcodierter Default wird wieder verwendet.)')) return;
+    await AuthentikAuth.apiFetch('/api/mail-templates/' + id, { method: 'DELETE' });
+    closeModal(); await loadList();
+  }
+  </script>
+</body>
+</html>
