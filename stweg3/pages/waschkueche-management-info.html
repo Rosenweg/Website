@@ -266,10 +266,18 @@ npm start</code></pre>
         </div>
     </section>
 
-    <!-- Verwaltungsdaten dynamisch aus DB (Fallback: site-config.json) -->
+    <!-- Verwaltungsdaten dynamisch aus DB; bei keiner aktiven Verwaltung uebernimmt der Ausschuss -->
     <script>
     SiteConfig.getVerwaltungForStweg(3).then(v => {
         if (!v) return;
+        if (v.ausschuss_fallback) {
+            document.getElementById('wk-verw-firma').textContent = 'Ausschuss STWEG 3 (keine externe Verwaltung beauftragt)';
+            document.getElementById('wk-verw-tel').textContent = '—';
+            document.getElementById('wk-verw-email').textContent = v.email || '';
+            const k = document.getElementById('wk-verw-kontakt');
+            if (k) k.textContent = '• Kontakt aktuell: ' + (v.email || '–');
+            return;
+        }
         document.getElementById('wk-verw-firma').textContent = v.firma;
         document.getElementById('wk-verw-tel').textContent = v.telefon || '';
         document.getElementById('wk-verw-email').textContent = v.email || '';
