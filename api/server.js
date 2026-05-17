@@ -751,6 +751,7 @@ const MANAGED_PAGES = [
   { id: 'handwerker', label: 'Handwerker & Lieferanten' },
   { id: 'auslagen', label: 'Auslagen / Vorschuesse' },
   { id: 'verwaltung-mail-outbox', label: 'Verwaltungs-Mail Outbox' },
+  { id: 'personen', label: 'Personen (Eigentuemer/Bewohner)' },
 ];
 
 const ACCESS_LEVELS = { none: 0, read: 1, write: 2 };
@@ -985,40 +986,72 @@ app.get('/api/me/wohnungen', authMiddleware, async (req, res) => {
 });
 
 // PUT /api/me/kontakt/:id — user can edit their own contact entry (email, telefon, adresse)
+// Wenn der Kontakt eine person_id hat, wird die Person aktualisiert → Trigger
+// propagiert auf alle Wohnungen der Person. Dadurch ist die Aenderung "sticky"
+// fuer den User: er sieht sie ueberall.
 app.put('/api/me/kontakt/:id', authMiddleware, async (req, res) => {
   try {
     const email = (req.user.email || '').toLowerCase();
     const name = req.user.name || '';
     const own = await pool.query(
-      `SELECT id, name, email FROM wohnungen_kontakte WHERE id = $1 AND (LOWER(email) = $2 OR LOWER(name) = LOWER($3))`,
+      `SELECT id, name, email, person_id, wohnung_id FROM wohnungen_kontakte
+        WHERE id = $1 AND (LOWER(email) = $2 OR LOWER(name) = LOWER($3))`,
       [req.params.id, email, name]
     );
     if (own.rows.length === 0) return res.status(403).json({ error: 'Du kannst nur deine eigenen Kontaktdaten bearbeiten' });
+    const cur = own.rows[0];
 
     const { email: newEmail, telefon, adresse } = req.body;
-    if (newEmail && newEmail.toLowerCase() !== email && newEmail.toLowerCase() !== (own.rows[0].email || '').toLowerCase()) {
-      const conflict = await pool.query("SELECT id FROM wohnungen_kontakte WHERE LOWER(email) = $1 AND id != $2", [newEmail.toLowerCase(), req.params.id]);
-      if (conflict.rows.length > 0) return res.status(400).json({ error: 'Email wird bereits von einem anderen Kontakt verwendet' });
+    if (newEmail && newEmail.toLowerCase() !== email && newEmail.toLowerCase() !== (cur.email || '').toLowerCase()) {
+      // Konfliktcheck nur gegen andere Personen, nicht gegen Family-Sharing
+      const conflict = await pool.query(
+        `SELECT k.id FROM wohnungen_kontakte k
+          WHERE LOWER(k.email) = $1 AND k.id != $2
+            AND (k.person_id IS NULL OR k.person_id != $3)`,
+        [newEmail.toLowerCase(), req.params.id, cur.person_id || -1]
+      );
+      if (conflict.rows.length > 0) return res.status(400).json({ error: 'Email wird bereits von einer anderen Person verwendet' });
     }
 
-    const result = await pool.query(
-      `UPDATE wohnungen_kontakte SET email = COALESCE($1, email), telefon = COALESCE($2, telefon), adresse = COALESCE($3, adresse)
-       WHERE id = $4 RETURNING id, name, email, telefon, adresse, wohnung_id`,
-      [newEmail || null, telefon || null, adresse || null, req.params.id]
-    );
-    res.json(result.rows[0]);
-    // Verwaltung informieren ueber Kontaktdaten-Aenderung
+    if (cur.person_id) {
+      // Sauberer Pfad: Person aktualisieren → Trigger propagiert auf alle Wohnungen
+      const updates = [];
+      const params = [];
+      if (newEmail !== undefined) { params.push(newEmail || null); updates.push(`email = $${params.length}`); }
+      if (telefon !== undefined)  { params.push(telefon || null);  updates.push(`telefon = $${params.length}`); }
+      if (adresse !== undefined)  { params.push(adresse || null);  updates.push(`adresse = $${params.length}`); }
+      if (updates.length > 0) {
+        params.push(cur.person_id);
+        await pool.query(`UPDATE personen SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${params.length}`, params);
+      }
+    } else {
+      // Legacy: keine person_id → direkt Kontakt aktualisieren
+      await pool.query(
+        `UPDATE wohnungen_kontakte SET email = COALESCE($1, email), telefon = COALESCE($2, telefon), adresse = COALESCE($3, adresse)
+          WHERE id = $4`,
+        [newEmail || null, telefon || null, adresse || null, req.params.id]
+      );
+    }
+    const r = await pool.query(`SELECT id, name, email, telefon, adresse, wohnung_id, person_id FROM wohnungen_kontakte WHERE id = $1`, [req.params.id]);
+    res.json(r.rows[0]);
+    // Verwaltung informieren — pro betroffenem STWEG einmal
     try {
-      const wId = result.rows[0].wohnung_id;
-      const w = await pool.query('SELECT stweg, bezeichnung FROM wohnungen WHERE id = $1', [wId]);
-      const stweg = w.rows[0]?.stweg;
-      const bez = w.rows[0]?.bezeichnung || `Wohnung ${wId}`;
+      const wRes = cur.person_id
+        ? await pool.query(
+            `SELECT DISTINCT w.stweg, w.bezeichnung FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id
+              WHERE k.person_id = $1 AND k.archiviert_am IS NULL`, [cur.person_id])
+        : await pool.query(`SELECT stweg, bezeichnung FROM wohnungen WHERE id = $1`, [cur.wohnung_id]);
       const changes = [];
-      if (newEmail) changes.push('E-Mail → ' + newEmail);
-      if (telefon) changes.push('Tel → ' + telefon);
-      if (adresse) changes.push('Adresse → ' + String(adresse).slice(0, 80));
+      if (newEmail !== undefined) changes.push('E-Mail → ' + (newEmail || '∅'));
+      if (telefon !== undefined) changes.push('Tel → ' + (telefon || '∅'));
+      if (adresse !== undefined) changes.push('Adresse → ' + String(adresse || '∅').slice(0, 80));
       if (changes.length > 0) {
-        recordObjektChange(stweg, `${result.rows[0].name} (${bez}) hat eigene Kontaktdaten aktualisiert: ${changes.join(', ')}`, req.user.email).catch(() => {});
+        const where = wRes.rows.length === 1
+          ? wRes.rows[0].bezeichnung
+          : `${wRes.rows.length} Wohnungen der Person`;
+        for (const row of wRes.rows) {
+          recordObjektChange(row.stweg, `${cur.name} (${where}) hat Kontaktdaten aktualisiert: ${changes.join(', ')}`, req.user.email).catch(() => {});
+        }
       }
     } catch {}
   } catch (err) {
@@ -3875,6 +3908,38 @@ async function loadWohnungMitKontakte(wohnungId, opts = {}) {
 // - Entries without id are INSERTed (gueltig_ab from input, default today)
 // - Active entries no longer in array are ARCHIVED (archiviert_am=today), not deleted
 // - Archived/historical entries are never touched
+// Findet eine bestehende Person via Name+Email oder legt sie neu an.
+// Liefert person_id zurueck. Email-Sharing zwischen Familienmitgliedern wird
+// respektiert: Match nur wenn Name UND Email uebereinstimmen.
+async function findOrCreatePerson(client, name, email, telefon, adresse) {
+  if (!name && !email) return null;
+  const nameNorm = (name || '').toLowerCase().trim();
+  const emailNorm = (email || '').toLowerCase().trim();
+  const r = await client.query(
+    `SELECT id FROM personen
+      WHERE LOWER(TRIM(COALESCE(name,''))) = $1
+        AND LOWER(TRIM(COALESCE(email,''))) = $2
+      ORDER BY id LIMIT 1`,
+    [nameNorm, emailNorm],
+  );
+  if (r.rows.length > 0) return r.rows[0].id;
+  // Fallback: nur per Name (wenn dieser eindeutig in personen ist)
+  if (name && !email) {
+    const byName = await client.query(
+      `SELECT id, COUNT(*) OVER () AS total
+         FROM personen WHERE LOWER(TRIM(name)) = $1 LIMIT 2`,
+      [nameNorm],
+    );
+    if (byName.rows.length === 1) return byName.rows[0].id;
+  }
+  // Neu anlegen
+  const ins = await client.query(
+    `INSERT INTO personen (name, email, telefon, adresse) VALUES ($1, $2, $3, $4) RETURNING id`,
+    [name || null, email || null, telefon || null, adresse || null],
+  );
+  return ins.rows[0].id;
+}
+
 async function saveKontakte(client, wohnungId, kontakte, stweg) {
   // Load currently-active kontakte (not archived) for diff
   const oldRes = await client.query(
@@ -3913,21 +3978,26 @@ async function saveKontakte(client, wohnungId, kontakte, stweg) {
       if (slug) email = `druckerr9+${slug}@${VERTEILER_DOMAIN}`;
     }
     const gueltigAb = k.gueltig_ab || null;
+    // Person-ID ermitteln (explizit mitgegeben, oder via find/create)
+    const personId = Number.isFinite(parseInt(k.person_id, 10))
+      ? parseInt(k.person_id, 10)
+      : await findOrCreatePerson(client, k.name || null, email, k.telefon || null, k.adresse || null);
 
     if (k.id && oldKontakte.find(o => o.id === k.id)) {
       await client.query(
         `UPDATE wohnungen_kontakte
             SET rolle = $1, name = $2, email = $3, telefon = $4, adresse = $5,
                 sort_order = $6, authentik_zugang = $7,
-                gueltig_ab = COALESCE($8, gueltig_ab)
+                gueltig_ab = COALESCE($8, gueltig_ab),
+                person_id = COALESCE($10, person_id)
           WHERE id = $9`,
-        [rolle, k.name || null, email, k.telefon || null, k.adresse || null, i, authentikZugang, gueltigAb, k.id]
+        [rolle, k.name || null, email, k.telefon || null, k.adresse || null, i, authentikZugang, gueltigAb, k.id, personId]
       );
     } else {
       await client.query(
-        `INSERT INTO wohnungen_kontakte (wohnung_id, rolle, name, email, telefon, adresse, sort_order, authentik_zugang, gueltig_ab)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [wohnungId, rolle, k.name || null, email, k.telefon || null, k.adresse || null, i, authentikZugang, gueltigAb]
+        `INSERT INTO wohnungen_kontakte (wohnung_id, rolle, name, email, telefon, adresse, sort_order, authentik_zugang, gueltig_ab, person_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [wohnungId, rolle, k.name || null, email, k.telefon || null, k.adresse || null, i, authentikZugang, gueltigAb, personId]
       );
     }
     if (email) cancelPendingDeletion(email).catch(() => {});
@@ -9945,6 +10015,213 @@ app.get('/api/auslagen/:id/beleg', authMiddleware, requirePermission('auslagen',
   }
 });
 
+// ─── Personen-API ────────────────────────────────────────────────────
+// Personen sind die Single Source of Truth fuer Kontaktdaten. Aenderungen
+// werden automatisch via DB-Trigger auf alle verknuepften wohnungen_kontakte
+// propagiert.
+
+// Lese-Zugriff: alle die wohnungsverwaltung lesen koennen
+function requireWohnungsverwaltungRead(req, res, next) {
+  return requirePermission('wohnungsverwaltung', 'read')(req, res, next);
+}
+function requireWohnungsverwaltungWrite(req, res, next) {
+  return requirePermission('wohnungsverwaltung', 'write')(req, res, next);
+}
+
+// GET /api/personen — Liste aller Personen mit ihren Wohnungen
+app.get('/api/personen', authMiddleware, requireWohnungsverwaltungRead, async (req, res) => {
+  try {
+    const search = String(req.query.search || '').trim().toLowerCase();
+    const params = [];
+    let where = 'TRUE';
+    if (search) {
+      params.push(`%${search}%`);
+      where = `(LOWER(p.name) LIKE $1 OR LOWER(COALESCE(p.email,'')) LIKE $1)`;
+    }
+    const r = await pool.query(
+      `SELECT p.*,
+              (SELECT COUNT(*) FROM wohnungen_kontakte k WHERE k.person_id = p.id AND k.archiviert_am IS NULL) AS n_wohnungen,
+              (SELECT json_agg(json_build_object(
+                 'wohnung_id', w.id, 'stweg', w.stweg, 'bezeichnung', w.bezeichnung,
+                 'rolle', k.rolle, 'kontakt_id', k.id, 'archiviert_am', k.archiviert_am
+               ) ORDER BY w.stweg, w.bezeichnung)
+                 FROM wohnungen_kontakte k
+                 JOIN wohnungen w ON w.id = k.wohnung_id
+                WHERE k.person_id = p.id AND k.archiviert_am IS NULL) AS wohnungen
+         FROM personen p
+        WHERE ${where}
+        ORDER BY p.name LIMIT 1000`,
+      params,
+    );
+    res.json({ personen: r.rows });
+  } catch (err) {
+    console.error('Personen list error:', err);
+    res.status(500).json({ error: 'Fehler beim Laden' });
+  }
+});
+
+// GET /api/personen/:id — eine Person mit Details
+app.get('/api/personen/:id', authMiddleware, requireWohnungsverwaltungRead, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
+    const r = await pool.query(
+      `SELECT p.*,
+              (SELECT json_agg(json_build_object(
+                 'wohnung_id', w.id, 'stweg', w.stweg, 'bezeichnung', w.bezeichnung,
+                 'rolle', k.rolle, 'kontakt_id', k.id, 'archiviert_am', k.archiviert_am
+               ) ORDER BY w.stweg, w.bezeichnung)
+                 FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id
+                WHERE k.person_id = p.id) AS wohnungen
+         FROM personen p WHERE p.id = $1`,
+      [id],
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    res.json(r.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/personen/:id — Person aktualisieren (Trigger propagiert auf alle Kontakte)
+app.put('/api/personen/:id', authMiddleware, requireWohnungsverwaltungWrite, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
+    const b = req.body || {};
+    const updates = [];
+    const params = [];
+    const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
+    if (b.name !== undefined) push('name', String(b.name).slice(0, 255).trim() || null);
+    if (b.vorname !== undefined) push('vorname', b.vorname ? String(b.vorname).slice(0, 120) : null);
+    if (b.nachname !== undefined) push('nachname', b.nachname ? String(b.nachname).slice(0, 120) : null);
+    if (b.anrede !== undefined) push('anrede', b.anrede ? String(b.anrede).slice(0, 20) : null);
+    if (b.email !== undefined) push('email', b.email ? String(b.email).trim().slice(0, 255) : null);
+    if (b.telefon !== undefined) push('telefon', b.telefon ? String(b.telefon).slice(0, 60) : null);
+    if (b.mobile !== undefined) push('mobile', b.mobile ? String(b.mobile).slice(0, 60) : null);
+    if (b.adresse !== undefined) push('adresse', b.adresse || null);
+    if (b.geburtsdatum !== undefined) push('geburtsdatum', b.geburtsdatum || null);
+    if (b.notiz !== undefined) push('notiz', b.notiz || null);
+    if (b.review_needed !== undefined) push('review_needed', !!b.review_needed);
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    params.push(id);
+    const r = await pool.query(
+      `UPDATE personen SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`,
+      params,
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+
+    // Verwaltung informieren wenn Email/Telefon/Adresse geaendert
+    const relevantChanged = ['email', 'telefon', 'adresse'].some(f => b[f] !== undefined);
+    if (relevantChanged) {
+      try {
+        const wRes = await pool.query(
+          `SELECT DISTINCT w.stweg FROM wohnungen_kontakte k
+             JOIN wohnungen w ON w.id = k.wohnung_id
+            WHERE k.person_id = $1 AND k.archiviert_am IS NULL`,
+          [id],
+        );
+        for (const row of wRes.rows) {
+          const summary = `Kontaktdaten von ${r.rows[0].name} aktualisiert (gilt fuer alle ${wRes.rows.length} Wohnung(en) der Person)`;
+          recordObjektChange(row.stweg, summary, req.user.email).catch(() => {});
+        }
+      } catch {}
+    }
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error('Personen update error:', err);
+    res.status(500).json({ error: 'Fehler beim Aktualisieren' });
+  }
+});
+
+// POST /api/personen — neue Person anlegen
+app.post('/api/personen', authMiddleware, requireWohnungsverwaltungWrite, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.name || !String(b.name).trim()) return res.status(400).json({ error: 'Name erforderlich' });
+    const r = await pool.query(
+      `INSERT INTO personen (name, vorname, nachname, anrede, email, telefon, mobile, adresse, geburtsdatum, notiz)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [String(b.name).trim().slice(0,255), b.vorname || null, b.nachname || null, b.anrede || null,
+       b.email || null, b.telefon || null, b.mobile || null, b.adresse || null, b.geburtsdatum || null, b.notiz || null],
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/personen-dedup/kandidaten — moegliche Duplikate vorschlagen
+// Strategie: gleicher Name aber unterschiedliche Email, ODER aehnliche Namen
+app.get('/api/personen-dedup/kandidaten', authMiddleware, requireWohnungsverwaltungWrite, async (req, res) => {
+  try {
+    const r = await pool.query(`
+      WITH name_dups AS (
+        SELECT LOWER(TRIM(name)) AS name_key, array_agg(id ORDER BY id) AS ids, COUNT(*) AS n
+          FROM personen
+         GROUP BY LOWER(TRIM(name))
+        HAVING COUNT(*) > 1
+      )
+      SELECT 'name' AS art, name_key AS schluessel, ids, n,
+             (SELECT json_agg(json_build_object('id', p.id, 'name', p.name, 'email', p.email, 'telefon', p.telefon))
+                FROM personen p WHERE p.id = ANY(ids)) AS personen
+        FROM name_dups
+       ORDER BY n DESC LIMIT 100
+    `);
+    res.json({ kandidaten: r.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/personen/merge — zwei Personen zusammenfuehren
+// body: { keep_id, merge_id } — alle Kontakte von merge_id werden auf keep_id umgehaengt,
+// merge_id wird geloescht. Daten aus merge_id ueberschreiben die in keep_id nur wenn keep_id-Feld leer ist.
+app.post('/api/personen/merge', authMiddleware, requireWohnungsverwaltungWrite, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const keepId = parseInt(req.body?.keep_id, 10);
+    const mergeId = parseInt(req.body?.merge_id, 10);
+    if (!Number.isFinite(keepId) || !Number.isFinite(mergeId) || keepId === mergeId) {
+      return res.status(400).json({ error: 'keep_id und merge_id (verschieden) erforderlich' });
+    }
+    await client.query('BEGIN');
+    const k = await client.query('SELECT * FROM personen WHERE id = $1', [keepId]);
+    const m = await client.query('SELECT * FROM personen WHERE id = $1', [mergeId]);
+    if (k.rows.length === 0 || m.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Person(en) nicht gefunden' });
+    }
+    // Fields aus merge → keep falls keep leer
+    const fields = ['vorname','nachname','anrede','email','telefon','mobile','adresse','geburtsdatum','notiz'];
+    const updates = [];
+    const params = [];
+    for (const f of fields) {
+      if (!k.rows[0][f] && m.rows[0][f]) {
+        params.push(m.rows[0][f]);
+        updates.push(`${f} = $${params.length}`);
+      }
+    }
+    if (updates.length > 0) {
+      params.push(keepId);
+      await client.query(`UPDATE personen SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${params.length}`, params);
+    }
+    // Alle Kontakte umhaengen
+    const reassigned = await client.query(
+      `UPDATE wohnungen_kontakte SET person_id = $1 WHERE person_id = $2`,
+      [keepId, mergeId],
+    );
+    // Merge-Person loeschen
+    await client.query('DELETE FROM personen WHERE id = $1', [mergeId]);
+    await client.query('COMMIT');
+    res.json({ success: true, reassigned_kontakte: reassigned.rowCount });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Personen merge error:', err);
+    res.status(500).json({ error: 'Merge fehlgeschlagen: ' + err.message });
+  } finally {
+    client.release();
+  }
+});
+
 // ─── Verwaltungs-Mail-Outbox API ────────────────────────────────────
 // Nur Technik + Praesident duerfen die Queue sehen/bearbeiten/freigeben.
 function requireTechnikOrPraesident(req, res, next) {
@@ -10848,6 +11125,93 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_auslagen_stweg_status ON auslagen(stweg, status);
       CREATE INDEX IF NOT EXISTS idx_auslagen_created ON auslagen(created_at DESC);
 
+      -- Personen-Entitaet (Single Source of Truth fuer Kontaktdaten).
+      -- Eine Person kann mehrere Wohnungen besitzen/bewohnen. Aenderungen an
+      -- Email/Telefon/Adresse propagieren automatisch via Trigger auf alle
+      -- verknuepften wohnungen_kontakte-Zeilen.
+      CREATE TABLE IF NOT EXISTS personen (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,           -- Anzeigename (z.B. "Stefan Mueller")
+        vorname VARCHAR(120),                  -- optional, fuer strukturierte Anzeige
+        nachname VARCHAR(120),                 -- optional
+        email VARCHAR(255),
+        telefon VARCHAR(60),
+        mobile VARCHAR(60),
+        adresse TEXT,
+        geburtsdatum DATE,
+        anrede VARCHAR(20),                    -- Herr / Frau / Familie / etc.
+        notiz TEXT,
+        review_needed BOOLEAN DEFAULT false,   -- markiert moegliche Duplikate fuer Dedup
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_personen_email ON personen(LOWER(email));
+      CREATE INDEX IF NOT EXISTS idx_personen_name ON personen(LOWER(name));
+
+      ALTER TABLE wohnungen_kontakte ADD COLUMN IF NOT EXISTS person_id INTEGER REFERENCES personen(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS idx_wk_person ON wohnungen_kontakte(person_id);
+
+      -- Trigger: bei UPDATE personen → email/telefon/adresse/name auf alle
+      -- aktiven wohnungen_kontakte mit dieser person_id propagieren.
+      CREATE OR REPLACE FUNCTION personen_propagate_to_kontakte() RETURNS TRIGGER AS $$
+      BEGIN
+        IF NEW.name IS DISTINCT FROM OLD.name
+           OR NEW.email IS DISTINCT FROM OLD.email
+           OR NEW.telefon IS DISTINCT FROM OLD.telefon
+           OR NEW.adresse IS DISTINCT FROM OLD.adresse THEN
+          UPDATE wohnungen_kontakte
+             SET name = NEW.name,
+                 email = NEW.email,
+                 telefon = NEW.telefon,
+                 adresse = NEW.adresse
+           WHERE person_id = NEW.id AND archiviert_am IS NULL;
+        END IF;
+        NEW.updated_at = NOW();
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS trg_personen_propagate ON personen;
+      CREATE TRIGGER trg_personen_propagate
+        BEFORE UPDATE ON personen
+        FOR EACH ROW EXECUTE FUNCTION personen_propagate_to_kontakte();
+
+      -- Trigger: bei UPDATE wohnungen_kontakte mit person_id → die Person
+      -- (master) aktualisieren. Damit alte Code-Pfade (saveKontakte etc.)
+      -- transparent weiterhin funktionieren. Schutz vor Rekursion via
+      -- session_replication_role-Check (Trigger feuert nur einmal).
+      CREATE OR REPLACE FUNCTION kontakte_propagate_to_person() RETURNS TRIGGER AS $$
+      DECLARE
+        propagating BOOLEAN;
+      BEGIN
+        BEGIN
+          propagating := current_setting('rosenweg.person_sync', true) = 'on';
+        EXCEPTION WHEN OTHERS THEN
+          propagating := false;
+        END;
+        IF propagating THEN RETURN NEW; END IF;
+        IF NEW.person_id IS NULL THEN RETURN NEW; END IF;
+        IF NEW.name IS DISTINCT FROM OLD.name
+           OR NEW.email IS DISTINCT FROM OLD.email
+           OR NEW.telefon IS DISTINCT FROM OLD.telefon
+           OR NEW.adresse IS DISTINCT FROM OLD.adresse THEN
+          PERFORM set_config('rosenweg.person_sync', 'on', true);
+          UPDATE personen
+             SET name = COALESCE(NEW.name, name),
+                 email = NEW.email,
+                 telefon = NEW.telefon,
+                 adresse = NEW.adresse,
+                 updated_at = NOW()
+           WHERE id = NEW.person_id;
+          PERFORM set_config('rosenweg.person_sync', 'off', true);
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS trg_kontakte_propagate ON wohnungen_kontakte;
+      CREATE TRIGGER trg_kontakte_propagate
+        AFTER UPDATE ON wohnungen_kontakte
+        FOR EACH ROW EXECUTE FUNCTION kontakte_propagate_to_person();
+
       -- Verwaltungs-Mail-Genehmigungs-Queue
       -- Alle ausgehenden Mails an externe Verwaltung werden zuerst hier
       -- abgelegt und brauchen Freigabe durch Technik oder Praesident
@@ -10978,6 +11342,57 @@ async function initDB() {
       INSERT INTO permissions (group_name, page, access) VALUES ('eigentuemer', 'auslagen', 'read')
       ON CONFLICT (group_name, page) DO NOTHING
     `);
+
+    // ─── Einmalige Personen-Migration ──────────────────────────────
+    // Wenn die personen-Tabelle leer ist UND es aktive Kontakte gibt,
+    // konsolidieren wir die Kontakte zu Personen via (Name + Email).
+    // Email-Sharing (Ehepaare) bleibt erhalten — die Person wird ueber
+    // person_id eindeutig referenziert, nicht ueber die Email.
+    try {
+      const personCount = await client.query('SELECT COUNT(*) AS cnt FROM personen');
+      const kontaktCount = await client.query('SELECT COUNT(*) AS cnt FROM wohnungen_kontakte WHERE archiviert_am IS NULL AND person_id IS NULL');
+      if (parseInt(personCount.rows[0].cnt) === 0 && parseInt(kontaktCount.rows[0].cnt) > 0) {
+        console.log('[personen-migration] Konsolidiere wohnungen_kontakte → personen ...');
+        // Cluster: (name_norm, email_norm) → einen Person-Eintrag pro Cluster.
+        // Repraesentative Werte: most-recent telefon/adresse pro Cluster.
+        const inserted = await client.query(`
+          WITH active AS (
+            SELECT id, name, email, telefon, adresse,
+                   LOWER(TRIM(COALESCE(name, ''))) AS name_norm,
+                   LOWER(TRIM(COALESCE(email, ''))) AS email_norm,
+                   ROW_NUMBER() OVER (
+                     PARTITION BY LOWER(TRIM(COALESCE(name,''))), LOWER(TRIM(COALESCE(email,'')))
+                     ORDER BY (CASE WHEN telefon IS NOT NULL THEN 0 ELSE 1 END),
+                              (CASE WHEN adresse IS NOT NULL THEN 0 ELSE 1 END),
+                              id DESC
+                   ) AS rn
+              FROM wohnungen_kontakte
+             WHERE archiviert_am IS NULL
+          ),
+          inserted AS (
+            INSERT INTO personen (name, email, telefon, adresse)
+            SELECT name, email, telefon, adresse FROM active WHERE rn = 1
+            RETURNING id, LOWER(TRIM(COALESCE(name,''))) AS name_norm, LOWER(TRIM(COALESCE(email,''))) AS email_norm
+          )
+          SELECT COUNT(*) AS n FROM inserted
+        `);
+        console.log(`[personen-migration] ${inserted.rows[0].n} Personen angelegt`);
+
+        // person_id auf alle aktiven Kontakte mappen (per name_norm + email_norm)
+        const linked = await client.query(`
+          UPDATE wohnungen_kontakte k
+             SET person_id = p.id
+            FROM personen p
+           WHERE k.archiviert_am IS NULL
+             AND k.person_id IS NULL
+             AND LOWER(TRIM(COALESCE(k.name,'')))  = LOWER(TRIM(COALESCE(p.name,'')))
+             AND LOWER(TRIM(COALESCE(k.email,''))) = LOWER(TRIM(COALESCE(p.email,'')))
+        `);
+        console.log(`[personen-migration] ${linked.rowCount} Kontakte mit person_id verknuepft`);
+      }
+    } catch (e) {
+      console.warn('[personen-migration] uebersprungen:', e.message);
+    }
 
     // Einmaliger Seed: wenn verwaltungen-Tabelle leer ist, statische Verwaltung
     // aus site-config.json als STWEG-uebergreifender Eintrag importieren.
