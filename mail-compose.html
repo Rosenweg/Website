@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mail schreiben — Rosenweg</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/nav.js?v=2"></script>
+  <link rel="icon" href="/logo-rosenweg.png">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    .mono-body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+  <script>RosenwegNav.init({ active: 'mail-compose' });</script>
+
+  <main class="max-w-4xl mx-auto px-4 py-6">
+    <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center">
+      <p class="text-gray-600">Lade Login-Status…</p>
+    </div>
+
+    <div id="content" class="hidden">
+      <div class="mb-4">
+        <h1 class="text-2xl font-bold text-gray-900">Mail schreiben</h1>
+        <p class="text-sm text-gray-600 mt-1">Ad-hoc-Brief an externe Empfänger (Anwalt, Bank, Versicherung, …). Wird automatisch in die <a href="/verwaltung-mail-outbox.html" class="text-blue-600 underline">Mail-Outbox</a> gestellt und braucht Freigabe von Technik oder Präsident vor dem Versand. Empfänger kann aus Stammdaten gewählt oder direkt eingegeben werden.</p>
+      </div>
+
+      <form id="form" class="bg-white rounded-lg shadow p-4 space-y-3 text-sm">
+        <div class="grid grid-cols-3 gap-3 items-end">
+          <label class="block col-span-2">
+            <span class="text-xs text-gray-600">Empfänger aus Stammdaten (optional)</span>
+            <select id="f-empfaenger" class="mt-1 block w-full border rounded px-2 py-1.5">
+              <option value="">— manuell unten eingeben —</option>
+            </select>
+          </label>
+          <label class="block">
+            <span class="text-xs text-gray-600">STWEG-Bezug (Filter)</span>
+            <select id="f-stweg" class="mt-1 block w-full border rounded px-2 py-1.5">
+              <option value="">alle</option>
+              <option value="1">STWEG 1</option><option value="2">STWEG 2</option>
+              <option value="3">STWEG 3</option><option value="4">STWEG 4</option>
+              <option value="5">STWEG 5</option><option value="6">STWEG 6</option>
+              <option value="7">STWEG 7</option><option value="8">STWEG 8</option>
+            </select>
+          </label>
+        </div>
+        <label class="block">
+          <span class="text-xs text-gray-600">An (To) *</span>
+          <input type="text" id="f-to" required class="mt-1 block w-full border rounded px-2 py-1.5" placeholder="empfaenger@beispiel.ch">
+        </label>
+        <label class="block">
+          <span class="text-xs text-gray-600">CC</span>
+          <input type="text" id="f-cc" class="mt-1 block w-full border rounded px-2 py-1.5" placeholder="cc1@x.ch, cc2@y.ch">
+        </label>
+        <label class="block">
+          <span class="text-xs text-gray-600">Reply-To (optional, sonst Standard-Absender)</span>
+          <input type="email" id="f-reply" class="mt-1 block w-full border rounded px-2 py-1.5">
+        </label>
+        <label class="block">
+          <span class="text-xs text-gray-600">Betreff *</span>
+          <input type="text" id="f-subject" required class="mt-1 block w-full border rounded px-2 py-1.5">
+        </label>
+        <label class="block">
+          <span class="text-xs text-gray-600">Text *</span>
+          <textarea id="f-body" rows="16" required class="mono-body mt-1 block w-full border rounded px-2 py-1.5" placeholder="Sehr geehrte Damen und Herren,&#10;&#10;…&#10;&#10;Mit freundlichen Grüssen&#10;STWEG-Kooperation Rosenweg"></textarea>
+        </label>
+        <label class="block">
+          <span class="text-xs text-gray-600">Anhänge (mehrere möglich, max 20 MB pro Datei)</span>
+          <input type="file" id="f-files" multiple class="mt-1 block w-full text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-blue-50 file:text-blue-700">
+          <ul id="file-list" class="mt-2 text-xs text-gray-600 space-y-1"></ul>
+        </label>
+
+        <div class="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-900">
+          <span id="approval-info">Die Mail wird in die <strong>Outbox</strong> gestellt und braucht Freigabe (Technik / Präsident) vor dem Versand.</span>
+        </div>
+
+        <div id="form-err" class="text-sm text-red-600 hidden"></div>
+        <div class="flex justify-end gap-2 pt-3 border-t mt-3">
+          <a href="/verwaltung-mail-outbox.html" class="px-3 py-1.5 text-gray-600 hover:bg-gray-100 rounded">→ zur Outbox</a>
+          <button type="submit" id="btn-send" class="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700">In Outbox stellen</button>
+        </div>
+      </form>
+    </div>
+  </main>
+
+  <script>
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const KAT_LABEL = {
+    verwaltung: 'Verwaltung', anwalt: 'Anwalt/Notar', bank: 'Bank',
+    versicherung: 'Versicherung', behoerde: 'Behörde',
+    energie: 'Energieversorger', handwerker: 'Handwerker', lieferant: 'Lieferant', sonstige: 'Sonstige',
+  };
+  let EMPFAENGER = [];
+  let SELECTED_FILES = [];
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    const u = await AuthentikAuth.init({ requireAuth: true });
+    if (!u) return;
+    document.getElementById('auth-gate').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+    await loadEmpfaenger();
+    document.getElementById('f-stweg').addEventListener('change', loadEmpfaenger);
+    document.getElementById('f-empfaenger').addEventListener('change', applyEmpfaenger);
+    document.getElementById('f-files').addEventListener('change', onFiles);
+    document.getElementById('form').addEventListener('submit', send);
+  });
+
+  async function loadEmpfaenger() {
+    try {
+      const stweg = document.getElementById('f-stweg').value;
+      const q = stweg ? '?stweg=' + stweg : '';
+      const r = await AuthentikAuth.apiFetch('/api/mail-empfaenger' + q);
+      if (!r.ok) return;
+      const data = await r.json();
+      EMPFAENGER = (data.empfaenger || []).filter(e => e.aktiv);
+      const sel = document.getElementById('f-empfaenger');
+      sel.innerHTML = '<option value="">— manuell unten eingeben —</option>' +
+        EMPFAENGER.map(e => `<option value="${e.id}">${esc(KAT_LABEL[e.kategorie] || e.kategorie)} · ${esc(e.name)}${e.stweg ? ' (STWEG '+e.stweg+')' : ''}</option>`).join('');
+    } catch {}
+  }
+
+  function applyEmpfaenger() {
+    const id = parseInt(document.getElementById('f-empfaenger').value, 10);
+    if (!id) return;
+    const e = EMPFAENGER.find(x => x.id === id);
+    if (!e) return;
+    document.getElementById('f-to').value = e.email || '';
+    const ccParts = [
+      ...(e.default_cc || '').split(',').map(s => s.trim()).filter(Boolean),
+      ...(e.kontakte || []).map(k => k.email).filter(Boolean),
+    ].filter((v, i, a) => v && a.indexOf(v) === i);
+    document.getElementById('f-cc').value = ccParts.join(', ');
+    document.getElementById('f-reply').value = e.default_reply_to || '';
+    document.getElementById('approval-info').innerHTML = e.requires_approval !== false
+      ? 'Die Mail wird in die <strong>Outbox</strong> gestellt und braucht Freigabe (Technik / Präsident) vor dem Versand.'
+      : '✓ Dieser Empfänger ist als <strong>Direktversand</strong> konfiguriert — die Mail geht ohne Freigabe sofort raus.';
+  }
+
+  function onFiles(e) {
+    SELECTED_FILES = Array.from(e.target.files || []);
+    const ul = document.getElementById('file-list');
+    if (SELECTED_FILES.length === 0) { ul.innerHTML = ''; return; }
+    ul.innerHTML = SELECTED_FILES.map(f => `<li>📎 ${esc(f.name)} (${Math.round(f.size / 1024)} KB)</li>`).join('');
+  }
+
+  async function fileToBase64(file) {
+    const buf = await file.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let bin = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return btoa(bin);
+  }
+
+  async function send(ev) {
+    ev.preventDefault();
+    const btn = document.getElementById('btn-send');
+    btn.disabled = true; const oldText = btn.textContent; btn.textContent = 'Sende…';
+    const err = document.getElementById('form-err'); err.classList.add('hidden');
+    try {
+      const attachments = [];
+      for (const f of SELECTED_FILES) {
+        if (f.size > 20 * 1024 * 1024) throw new Error(`Anhang ${f.name} ist > 20 MB`);
+        attachments.push({ filename: f.name, content_base64: await fileToBase64(f) });
+      }
+      const empfId = document.getElementById('f-empfaenger').value;
+      const payload = {
+        empfaenger_id: empfId ? parseInt(empfId, 10) : null,
+        mail_to: document.getElementById('f-to').value.trim(),
+        mail_cc: document.getElementById('f-cc').value.trim() || null,
+        mail_reply_to: document.getElementById('f-reply').value.trim() || null,
+        subject: document.getElementById('f-subject').value.trim(),
+        body_text: document.getElementById('f-body').value,
+        attachments,
+      };
+      const r = await AuthentikAuth.apiFetch('/api/mail-compose', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+      if (data.queued) {
+        alert('Mail in die Outbox gestellt. Wartet auf Freigabe.');
+        window.location.href = '/verwaltung-mail-outbox.html';
+      } else {
+        alert('Mail wurde direkt versendet.');
+        document.getElementById('form').reset();
+        SELECTED_FILES = []; document.getElementById('file-list').innerHTML = '';
+      }
+    } catch (e) {
+      err.textContent = e.message; err.classList.remove('hidden');
+    } finally {
+      btn.disabled = false; btn.textContent = oldText;
+    }
+  }
+  </script>
+</body>
+</html>

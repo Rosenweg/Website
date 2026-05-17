@@ -753,6 +753,7 @@ const MANAGED_PAGES = [
   { id: 'verwaltung-mail-outbox', label: 'Verwaltungs-Mail Outbox' },
   { id: 'personen', label: 'Personen (Eigentuemer/Bewohner)' },
   { id: 'mail-empfaenger', label: 'Mail-Empfaenger (Stammdaten)' },
+  { id: 'mail-compose', label: 'Mail schreiben (Ad-hoc)' },
 ];
 
 const ACCESS_LEVELS = { none: 0, read: 1, write: 2 };
@@ -10356,6 +10357,95 @@ app.post('/api/personen/merge', authMiddleware, requireWohnungsverwaltungWrite, 
   }
 });
 
+// ─── Ad-hoc Mail-Composer ─────────────────────────────────────────────
+// Erlaubt das Schreiben einer freien Mail an einen beliebigen Empfaenger
+// (entweder direkt eingegeben oder aus mail_empfaenger-Stammdaten gewaehlt).
+// Geht durch den gleichen Genehmigungs-Workflow wie automatische Mails.
+// Attachments werden inline base64 in der Queue gespeichert.
+app.post('/api/mail-compose', authMiddleware, requirePermission('mail-compose', 'write'), async (req, res) => {
+  try {
+    const b = req.body || {};
+
+    // Empfaenger entweder direkt (mail_to) oder via Stammdaten (empfaenger_id)
+    let mailTo = b.mail_to;
+    let mailCc = b.mail_cc;
+    let mailReplyTo = b.mail_reply_to;
+    let requiresApproval = b.requires_approval !== false;
+    let sourceType = 'ad-hoc';
+    let sourceId = null;
+    let firma = null;
+
+    if (b.empfaenger_id) {
+      const empfId = parseInt(b.empfaenger_id, 10);
+      const er = await pool.query('SELECT * FROM mail_empfaenger WHERE id = $1 AND aktiv = true', [empfId]);
+      if (er.rows.length === 0) return res.status(404).json({ error: 'Empfaenger nicht gefunden oder inaktiv' });
+      const e = er.rows[0];
+      firma = e.name;
+      sourceType = `ad-hoc-${e.kategorie}`;
+      sourceId = e.id;
+      if (!mailTo) mailTo = e.email ? [e.email] : [];
+      if (!mailCc) {
+        const kontaktEmails = (e.kontakte || []).map(k => k.email).filter(Boolean);
+        const def = (e.default_cc || '').split(',').map(s => s.trim()).filter(Boolean);
+        mailCc = [...def, ...kontaktEmails].filter((v, i, a) => v && a.indexOf(v) === i);
+      }
+      if (!mailReplyTo) mailReplyTo = e.default_reply_to || null;
+      if (b.requires_approval === undefined) requiresApproval = e.requires_approval !== false;
+    }
+
+    if (!mailTo || (Array.isArray(mailTo) ? mailTo.length === 0 : !String(mailTo).trim())) {
+      return res.status(400).json({ error: 'Empfaenger (mail_to oder empfaenger_id) erforderlich' });
+    }
+    if (!b.subject || !String(b.subject).trim()) return res.status(400).json({ error: 'Betreff erforderlich' });
+    if (!b.body_text || !String(b.body_text).trim()) return res.status(400).json({ error: 'Text erforderlich' });
+
+    // Attachments: erwarten Liste [{filename, content_base64}]
+    const attachments = [];
+    for (const a of (b.attachments || [])) {
+      if (!a.filename || !a.content_base64) continue;
+      const sizeApprox = Math.floor(a.content_base64.length * 0.75);
+      if (sizeApprox > 20 * 1024 * 1024) return res.status(400).json({ error: `Anhang ${a.filename} > 20 MB` });
+      attachments.push({
+        filename: String(a.filename).slice(0, 255),
+        size: sizeApprox,
+        content_base64: a.content_base64,
+        docs_path: null,
+      });
+    }
+
+    if (requiresApproval) {
+      const queueId = await enqueueVerwaltungMail({
+        source_type: sourceType,
+        source_id: sourceId,
+        mailTo, mailCc, mailReplyTo,
+        subject: String(b.subject).trim().slice(0, 500),
+        bodyText: String(b.body_text).slice(0, 100000),
+        attachments,
+        createdBy: req.user.email,
+      });
+      res.json({ ok: true, queued: true, queue_id: queueId, firma, requires_approval: true });
+    } else {
+      // Direktversand ohne Freigabe (z.B. an interne Empfaenger)
+      const toStr = Array.isArray(mailTo) ? mailTo.join(', ') : String(mailTo);
+      const ccStr = Array.isArray(mailCc) ? mailCc.join(', ') : (mailCc ? String(mailCc) : undefined);
+      const liveAttachments = attachments.map(a => ({
+        filename: a.filename,
+        content: Buffer.from(a.content_base64, 'base64'),
+      }));
+      await loggedSendMail({
+        from: MAIL_FROM, to: toStr, cc: ccStr, replyTo: mailReplyTo || undefined,
+        subject: String(b.subject).trim(),
+        text: String(b.body_text),
+        attachments: liveAttachments,
+      }, sourceType);
+      res.json({ ok: true, queued: false, firma, requires_approval: false });
+    }
+  } catch (err) {
+    console.error('Mail-compose error:', err);
+    res.status(500).json({ error: 'Fehler beim Einstellen/Versand: ' + err.message });
+  }
+});
+
 // ─── Verwaltungs-Mail-Outbox API ────────────────────────────────────
 // Nur Technik + Praesident duerfen die Queue sehen/bearbeiten/freigeben.
 function requireTechnikOrPraesident(req, res, next) {
@@ -11514,9 +11604,14 @@ async function initDB() {
     `);
 
     // Mail-Empfaenger Stammdaten: Ausschuss read, Technik/Praesident sowieso write via isTechnik/isPraesident
+    // Mail-Compose: Ausschuss write (kann Mails entwerfen, aber Freigabe macht Technik/Praesident)
     for (const groupName of ausschussGroups) {
       await client.query(`
         INSERT INTO permissions (group_name, page, access) VALUES ($1, 'mail-empfaenger', 'read')
+        ON CONFLICT (group_name, page) DO NOTHING
+      `, [groupName]);
+      await client.query(`
+        INSERT INTO permissions (group_name, page, access) VALUES ($1, 'mail-compose', 'write')
         ON CONFLICT (group_name, page) DO NOTHING
       `, [groupName]);
     }
