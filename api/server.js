@@ -210,6 +210,31 @@ setInterval(() => {
   }
 }, 60 * 1000);
 
+// Generischer Rate-Limit-Helper fuer beliebige Endpoints.
+// Verwendung: rateLimitGuard(name, key, maxCount, windowMs) → {ok:true|false, retryAfter?}
+const rateLimitBuckets = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of rateLimitBuckets) {
+    if (now - v.first > v.windowMs) rateLimitBuckets.delete(k);
+  }
+}, 5 * 60 * 1000);
+
+function rateLimitGuard(name, key, maxCount, windowMs) {
+  const bucketKey = `${name}:${key}`;
+  const now = Date.now();
+  const entry = rateLimitBuckets.get(bucketKey);
+  if (entry && now - entry.first < windowMs) {
+    if (entry.count >= maxCount) {
+      return { ok: false, retryAfter: Math.ceil((windowMs - (now - entry.first)) / 1000) };
+    }
+    entry.count++;
+    return { ok: true };
+  }
+  rateLimitBuckets.set(bucketKey, { first: now, count: 1, windowMs });
+  return { ok: true };
+}
+
 app.post('/api/otp/send', async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'E-Mail erforderlich' });
@@ -3936,12 +3961,26 @@ async function findOrCreatePerson(client, name, email, telefon, adresse) {
     );
     if (byName.rows.length === 1) return byName.rows[0].id;
   }
-  // Neu anlegen
+  // H2: Race-safe INSERT via UNIQUE-Index (uq_personen_name_email).
+  // ON CONFLICT → DO NOTHING gibt keine ID zurueck, daher fallback SELECT.
   const ins = await client.query(
-    `INSERT INTO personen (name, email, telefon, adresse) VALUES ($1, $2, $3, $4) RETURNING id`,
+    `INSERT INTO personen (name, email, telefon, adresse)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (LOWER(TRIM(COALESCE(name,''))), LOWER(TRIM(COALESCE(email,''))))
+       DO NOTHING
+     RETURNING id`,
     [name || null, email || null, telefon || null, adresse || null],
   );
-  return ins.rows[0].id;
+  if (ins.rows.length > 0) return ins.rows[0].id;
+  // Conflict → parallele Anlage; lese die existierende Person
+  const again = await client.query(
+    `SELECT id FROM personen
+      WHERE LOWER(TRIM(COALESCE(name,''))) = $1
+        AND LOWER(TRIM(COALESCE(email,''))) = $2
+      LIMIT 1`,
+    [nameNorm, emailNorm],
+  );
+  return again.rows[0]?.id || null;
 }
 
 async function saveKontakte(client, wohnungId, kontakte, stweg) {
@@ -10195,6 +10234,24 @@ function requireWohnungsverwaltungWrite(req, res, next) {
   return requirePermission('wohnungsverwaltung', 'write')(req, res, next);
 }
 
+// H4: Pruefe ob User berechtigt ist, eine Person zu editieren.
+// Technik/Praesident: alle Personen. Ausschuss: nur Personen aus dem eigenen STWEG
+// (mind. eine wohnungen_kontakte-Zeile zu einer Wohnung im STWEG des Users).
+async function userCanEditPerson(user, personId) {
+  const groups = user?.groups || [];
+  if (isTechnik(groups) || isPraesident(groups)) return true;
+  const ausschussStwegs = [...getAusschussStwegs(groups)];
+  if (ausschussStwegs.length === 0) return false;
+  const r = await pool.query(
+    `SELECT 1 FROM wohnungen_kontakte k
+       JOIN wohnungen w ON w.id = k.wohnung_id
+      WHERE k.person_id = $1 AND w.stweg = ANY($2::int[])
+      LIMIT 1`,
+    [personId, ausschussStwegs],
+  );
+  return r.rows.length > 0;
+}
+
 // GET /api/personen — Liste aller Personen mit ihren Wohnungen
 app.get('/api/personen', authMiddleware, requireWohnungsverwaltungRead, async (req, res) => {
   try {
@@ -10255,6 +10312,9 @@ app.put('/api/personen/:id', authMiddleware, requireWohnungsverwaltungWrite, asy
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
+    // H4: STWEG-Scope-Check: Ausschuss darf nur Personen aus eigenem STWEG editieren
+    const allowed = await userCanEditPerson(req.user, id);
+    if (!allowed) return res.status(403).json({ error: 'Diese Person gehoert nicht zu einem STWEG fuer den du Ausschuss-Berechtigung hast' });
     const b = req.body || {};
     const updates = [];
     const params = [];
@@ -10350,6 +10410,13 @@ app.post('/api/personen/merge', authMiddleware, requireWohnungsverwaltungWrite, 
     if (!Number.isFinite(keepId) || !Number.isFinite(mergeId) || keepId === mergeId) {
       return res.status(400).json({ error: 'keep_id und merge_id (verschieden) erforderlich' });
     }
+    // H4: beide Personen muessen im Scope sein
+    const [canKeep, canMerge] = await Promise.all([
+      userCanEditPerson(req.user, keepId), userCanEditPerson(req.user, mergeId),
+    ]);
+    if (!canKeep || !canMerge) {
+      return res.status(403).json({ error: 'Mindestens eine Person gehoert nicht zu deinem STWEG-Scope' });
+    }
     await client.query('BEGIN');
     const k = await client.query('SELECT * FROM personen WHERE id = $1', [keepId]);
     const m = await client.query('SELECT * FROM personen WHERE id = $1', [mergeId]);
@@ -10396,6 +10463,11 @@ app.post('/api/personen/merge', authMiddleware, requireWohnungsverwaltungWrite, 
 // Attachments werden inline base64 in der Queue gespeichert.
 app.post('/api/mail-compose', authMiddleware, requirePermission('mail-compose', 'write'), async (req, res) => {
   try {
+    // H1: Rate-Limit gegen Mail-Spam-Abuse — 50 Mails / Stunde pro User
+    const rl = rateLimitGuard('mail-compose', (req.user.email || 'anon').toLowerCase(), 50, 60 * 60 * 1000);
+    if (!rl.ok) {
+      return res.status(429).json({ error: `Rate-Limit erreicht (max 50 Mails/h). Bitte ${Math.ceil(rl.retryAfter / 60)} Min warten.` });
+    }
     const b = req.body || {};
 
     // Empfaenger entweder direkt (mail_to) oder via Stammdaten (empfaenger_id)
@@ -10874,45 +10946,56 @@ app.put('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesi
 
 // Freigeben (Multi-Approver-faehig). Bei 4-Augen-Prinzip braucht's
 // >= min_approvers verschiedene User aus required_groups. Erst dann Versand.
+// H3-Fix: Race-Safe durch SELECT ... FOR UPDATE auf queue-Row im selben
+// Transaktionsblock. Status-Wechsel auf 'freigegeben' atomar mit COUNT.
 app.post('/api/verwaltung-mail-queue/:id/freigeben', authMiddleware, async (req, res) => {
+  const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
-    const cur = await pool.query('SELECT * FROM verwaltung_mail_queue WHERE id = $1', [id]);
-    if (cur.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    await client.query('BEGIN');
+    // Lock die queue-Row → andere parallele Freigaben warten
+    const cur = await client.query('SELECT * FROM verwaltung_mail_queue WHERE id = $1 FOR UPDATE', [id]);
+    if (cur.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Nicht gefunden' }); }
     if (cur.rows[0].status !== 'pending') {
+      await client.query('ROLLBACK');
       return res.status(409).json({ error: `Status ist '${cur.rows[0].status}', erwartet 'pending'` });
     }
     const rule = await getApprovalRuleForQueueItem(cur.rows[0]);
     if (!userHasAnyGroup(req.user, rule.required_groups)) {
+      await client.query('ROLLBACK');
       return res.status(403).json({ error: `Freigabe erfordert eine der Gruppen: ${rule.required_groups}` });
     }
     // Approval logen (UNIQUE constraint verhindert Doppel-Freigabe vom gleichen User)
     try {
-      await pool.query(
+      await client.query(
         `INSERT INTO mail_approval_log (queue_id, approver_email) VALUES ($1, $2)`,
         [id, req.user.email],
       );
     } catch (e) {
+      await client.query('ROLLBACK');
       if (String(e.code) === '23505') {
         return res.status(409).json({ error: 'Du hast bereits freigegeben — fuer ' + rule.min_approvers + '-Augen-Prinzip braucht es weitere Approver' });
       }
       throw e;
     }
-    const cnt = await pool.query('SELECT COUNT(*) AS n FROM mail_approval_log WHERE queue_id = $1', [id]);
+    const cnt = await client.query('SELECT COUNT(*) AS n FROM mail_approval_log WHERE queue_id = $1', [id]);
     const approvalsSoFar = parseInt(cnt.rows[0].n, 10);
     if (approvalsSoFar < rule.min_approvers) {
+      await client.query('COMMIT');
       return res.json({
         success: true, sent: false, awaiting_more_approvers: true,
         approvals: approvalsSoFar, required: rule.min_approvers,
         required_groups: rule.required_groups,
       });
     }
-    // Genug Approver → freigeben + senden
-    await pool.query(
+    // Genug Approver → status freigegeben innerhalb der Transaktion (atomic mit COUNT)
+    await client.query(
       `UPDATE verwaltung_mail_queue SET status = 'freigegeben', freigegeben_von = $1, freigegeben_am = NOW() WHERE id = $2`,
       [req.user.email, id],
     );
+    await client.query('COMMIT');
+    // Mail-Versand erst NACH COMMIT (sendVerwaltungMailFromQueue nutzt eigene Connection)
     try {
       await sendVerwaltungMailFromQueue(id, req.user.email);
       res.json({ success: true, sent: true, approvals: approvalsSoFar, required: rule.min_approvers });
@@ -10921,7 +11004,11 @@ app.post('/api/verwaltung-mail-queue/:id/freigeben', authMiddleware, async (req,
       res.status(500).json({ success: false, error: 'Freigegeben, aber Versand schlug fehl: ' + sendErr.message });
     }
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Mail-Queue freigeben error:', err);
     res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 
@@ -11740,6 +11827,9 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_personen_email ON personen(LOWER(email));
       CREATE INDEX IF NOT EXISTS idx_personen_name ON personen(LOWER(name));
+      -- H2: Eindeutigkeits-Index gegen parallele Duplikate (findOrCreatePerson Race)
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_personen_name_email
+        ON personen (LOWER(TRIM(COALESCE(name, ''))), LOWER(TRIM(COALESCE(email, ''))));
 
       ALTER TABLE wohnungen_kontakte ADD COLUMN IF NOT EXISTS person_id INTEGER REFERENCES personen(id) ON DELETE SET NULL;
       CREATE INDEX IF NOT EXISTS idx_wk_person ON wohnungen_kontakte(person_id);
