@@ -9969,6 +9969,120 @@ function canMarkPaid(user, row = null) {
 }
 
 // GET /api/auslagen — Liste (eigene + ggf. STWEG-Auslagen falls Ausschuss/Technik)
+// GET /api/dashboard — aggregierte Daten fuer Startseite je nach Rolle
+app.get('/api/dashboard', authMiddleware, async (req, res) => {
+  try {
+    const email = (req.user.email || '').toLowerCase();
+    const groups = req.user.groups || [];
+    const isAdmin = isTechnik(groups) || isPraesident(groups);
+    const ausschussStwegs = [...getAusschussStwegs(groups)];
+    const canReview = isAdmin || ausschussStwegs.length > 0;
+    const widgets = {};
+
+    // 1) Eigene Auslagen-Status
+    try {
+      const r = await pool.query(
+        `SELECT status, COUNT(*)::int AS n, COALESCE(SUM(betrag_chf),0)::numeric AS s
+           FROM auslagen WHERE LOWER(user_email) = $1 GROUP BY status`,
+        [email],
+      );
+      const by = {};
+      for (const row of r.rows) by[row.status] = { count: row.n, summe: Number(row.s) };
+      widgets.meine_auslagen = by;
+    } catch {}
+
+    // 2) Auslagen zu pruefen (fuer Ausschuss/Technik)
+    if (canReview) {
+      try {
+        const stwegFilter = isAdmin ? 'TRUE' : `stweg = ANY($1::int[])`;
+        const params = isAdmin ? [] : [ausschussStwegs];
+        const r = await pool.query(
+          `SELECT id, user_name, stweg, beschreibung, betrag_chf, created_at
+             FROM auslagen
+            WHERE status = 'eingereicht' AND ${stwegFilter}
+              AND LOWER(user_email) != $${params.length + 1}
+            ORDER BY created_at LIMIT 10`,
+          [...params, email],
+        );
+        widgets.auslagen_zu_pruefen = r.rows;
+      } catch {}
+    }
+
+    // 3) Mail-Outbox pending (nur Technik/Praesident)
+    if (isAdmin) {
+      try {
+        const r = await pool.query(
+          `SELECT id, source_type, subject, mail_to, created_at FROM verwaltung_mail_queue
+            WHERE status = 'pending' ORDER BY created_at DESC LIMIT 10`,
+        );
+        widgets.mail_outbox_pending = r.rows;
+      } catch {}
+    }
+
+    // 4) Anstehende Handwerker-Vertraege (alle die Berechtigung haben)
+    try {
+      const r = await pool.query(
+        `SELECT v.id, v.titel, v.naechster_termin, v.stweg, h.firma
+           FROM handwerker_vertraege v JOIN handwerker h ON h.id = v.handwerker_id
+          WHERE v.status = 'aktiv' AND v.naechster_termin IS NOT NULL
+            AND v.naechster_termin <= CURRENT_DATE + INTERVAL '30 days'
+          ORDER BY v.naechster_termin LIMIT 10`,
+      );
+      widgets.anstehende_vertraege = r.rows;
+    } catch {}
+
+    // 5) Verwaltungs-Vertragskuendigungen anstehend (innerhalb 90 Tage Vertrag-Ende)
+    try {
+      const r = await pool.query(
+        `SELECT id, firma_name, stweg, vertrag_bis, kuendigungsfrist_monate
+           FROM verwaltungen
+          WHERE aktiv = true
+            AND vertrag_bis IS NOT NULL AND vertrag_bis <= CURRENT_DATE + INTERVAL '180 days'
+          ORDER BY vertrag_bis LIMIT 5`,
+      );
+      widgets.verwaltungs_vertraege = r.rows;
+    } catch {}
+
+    // 6) Projekt-Budget-Status (alle aktiven Projekte)
+    try {
+      const r = await pool.query(`
+        SELECT p.slug, p.title, p.budget_chf, p.budget_warnung_pct,
+               COALESCE((SELECT SUM(betrag_chf) FROM auslagen WHERE projekt_slug = p.slug), 0) AS verbraucht
+          FROM projects p WHERE COALESCE(p.status,'aktiv') != 'archiviert'
+         ORDER BY p.title
+      `);
+      widgets.projekt_budgets = r.rows
+        .filter(p => Number(p.budget_chf) > 0 || Number(p.verbraucht) > 0)
+        .map(p => ({
+          ...p,
+          budget_chf: Number(p.budget_chf) || 0,
+          verbraucht: Number(p.verbraucht) || 0,
+        }));
+    } catch {}
+
+    // 7) Genehmigt aber nicht ausbezahlt (lange offen — Reminder-Liste)
+    if (canReview) {
+      try {
+        const r = await pool.query(`
+          SELECT id, user_name, stweg, beschreibung, betrag_chf, bearbeitet_am,
+                 EXTRACT(DAY FROM NOW() - bearbeitet_am)::int AS tage_offen
+            FROM auslagen
+           WHERE status = 'genehmigt' AND bearbeitet_am < NOW() - INTERVAL '14 days'
+           ORDER BY bearbeitet_am LIMIT 10
+        `);
+        widgets.auszahlung_offen = r.rows;
+      } catch {}
+    }
+
+    res.json({
+      user: { email: req.user.email, name: req.user.name, isAdmin, ausschussStwegs },
+      widgets,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
   try {
     const groups = req.user.groups || [];

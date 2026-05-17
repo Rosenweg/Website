@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard — Rosenweg</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/nav.js?v=2"></script>
+  <link rel="icon" href="/logo-rosenweg.png">
+  <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'); body { font-family: 'Inter', sans-serif; }</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+  <script>RosenwegNav.init({ active: 'dashboard' });</script>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+    <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center"><p class="text-gray-600">Lade…</p></div>
+
+    <div id="content" class="hidden">
+      <h1 class="text-2xl font-bold text-gray-900 mb-1">Dashboard</h1>
+      <p id="hello" class="text-sm text-gray-600 mb-6"></p>
+
+      <div id="widgets" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+    </div>
+  </main>
+
+  <script>
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const fmtCHF = n => 'CHF ' + Number(n || 0).toLocaleString('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtDate = s => s ? new Date(s).toLocaleDateString('de-CH') : '';
+  const daysUntil = (s) => Math.ceil((new Date(s).getTime() - Date.now()) / 86400000);
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    const user = await AuthentikAuth.init({ requireAuth: true });
+    if (!user) return;
+    document.getElementById('auth-gate').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+    document.getElementById('hello').textContent = `Hallo ${user.name || user.email}, hier deine Übersicht.`;
+    await load();
+  });
+
+  async function load() {
+    const r = await AuthentikAuth.apiFetch('/api/dashboard');
+    if (!r.ok) {
+      document.getElementById('widgets').innerHTML = '<div class="text-red-600">Fehler beim Laden</div>';
+      return;
+    }
+    const { widgets, user } = await r.json();
+    const cards = [];
+
+    // Meine Auslagen
+    if (widgets.meine_auslagen) {
+      const ma = widgets.meine_auslagen;
+      const sum = (k) => ma[k]?.summe || 0;
+      const cnt = (k) => ma[k]?.count || 0;
+      const totalCnt = Object.values(ma).reduce((s, v) => s + v.count, 0);
+      cards.push(card('💰 Meine Auslagen', '/auslagen.html?scope=eigene', totalCnt === 0
+        ? '<p class="text-sm text-gray-500">Noch keine eigenen Auslagen erfasst.</p>'
+        : `<div class="grid grid-cols-2 gap-2 text-sm">
+            ${miniBox('Eingereicht', cnt('eingereicht'), sum('eingereicht'), 'yellow')}
+            ${miniBox('Genehmigt', cnt('genehmigt'), sum('genehmigt'), 'blue')}
+            ${miniBox('Ausbezahlt', cnt('ausbezahlt'), sum('ausbezahlt'), 'emerald')}
+            ${miniBox('Abgelehnt', cnt('abgelehnt'), sum('abgelehnt'), 'red')}
+          </div>`));
+    }
+
+    // Auslagen zu pruefen
+    if (widgets.auslagen_zu_pruefen) {
+      const list = widgets.auslagen_zu_pruefen;
+      cards.push(card(`🔔 Auslagen zu prüfen (${list.length})`, '/auslagen.html?scope=pruefen',
+        list.length === 0
+          ? '<p class="text-sm text-emerald-600">✓ Keine offenen Prüfungen.</p>'
+          : '<ul class="text-sm space-y-1">' + list.map(a => `<li class="flex justify-between gap-2">
+              <span class="truncate">${esc(a.user_name)} · ${esc(a.beschreibung)}</span>
+              <span class="font-mono text-gray-700 whitespace-nowrap">${fmtCHF(a.betrag_chf)}</span>
+            </li>`).join('') + '</ul>'));
+    }
+
+    // Mail-Outbox pending
+    if (widgets.mail_outbox_pending) {
+      const list = widgets.mail_outbox_pending;
+      cards.push(card(`📨 Mail-Outbox Pending (${list.length})`, '/verwaltung-mail-outbox.html',
+        list.length === 0
+          ? '<p class="text-sm text-emerald-600">✓ Keine Mails warten auf Freigabe.</p>'
+          : '<ul class="text-sm space-y-1">' + list.map(m => `<li class="truncate">
+              <span class="text-xs text-gray-500">${esc(m.source_type)}</span> · ${esc(m.subject)}
+            </li>`).join('') + '</ul>'));
+    }
+
+    // Auszahlung offen (lange)
+    if (widgets.auszahlung_offen) {
+      const list = widgets.auszahlung_offen;
+      cards.push(card(`⏰ Auszahlungen offen >14 Tage (${list.length})`, '/auslagen.html?status=genehmigt',
+        list.length === 0
+          ? '<p class="text-sm text-emerald-600">✓ Keine alten offenen Auszahlungen.</p>'
+          : '<ul class="text-sm space-y-1">' + list.map(a => `<li class="flex justify-between">
+              <span class="truncate">${esc(a.user_name)} <span class="text-amber-700">(${a.tage_offen} Tage)</span></span>
+              <span class="font-mono">${fmtCHF(a.betrag_chf)}</span>
+            </li>`).join('') + '</ul>'));
+    }
+
+    // Anstehende Handwerker-Vertraege
+    if (widgets.anstehende_vertraege) {
+      const list = widgets.anstehende_vertraege;
+      cards.push(card(`🔧 Anstehende Wartungen (${list.length})`, '/handwerker.html',
+        list.length === 0
+          ? '<p class="text-sm text-gray-500">Keine Termine in den nächsten 30 Tagen.</p>'
+          : '<ul class="text-sm space-y-1">' + list.map(v => {
+              const tage = daysUntil(v.naechster_termin);
+              const cls = tage <= 7 ? 'text-red-700 font-medium' : tage <= 14 ? 'text-amber-700' : 'text-gray-700';
+              return `<li class="flex justify-between gap-2">
+                <span class="truncate">${esc(v.titel)} · ${esc(v.firma)}</span>
+                <span class="${cls} whitespace-nowrap">${fmtDate(v.naechster_termin)} <span class="text-xs">(in ${tage}d)</span></span>
+              </li>`;
+            }).join('') + '</ul>'));
+    }
+
+    // Verwaltungs-Vertraege
+    if (widgets.verwaltungs_vertraege?.length > 0) {
+      const list = widgets.verwaltungs_vertraege;
+      cards.push(card(`📋 Verwaltungs-Verträge enden bald`, '/verwaltung-admin.html',
+        '<ul class="text-sm space-y-1">' + list.map(v => {
+          const tage = daysUntil(v.vertrag_bis);
+          const cls = tage <= 90 ? 'text-red-700' : 'text-amber-700';
+          return `<li class="flex justify-between gap-2">
+            <span class="truncate">${esc(v.firma_name)} ${v.stweg ? '(STWEG ' + v.stweg + ')' : ''}</span>
+            <span class="${cls}">${fmtDate(v.vertrag_bis)} <span class="text-xs">(in ${tage}d)</span></span>
+          </li>`;
+        }).join('') + '</ul>'));
+    }
+
+    // Projekt-Budgets
+    if (widgets.projekt_budgets?.length > 0) {
+      const list = widgets.projekt_budgets;
+      cards.push(card(`📁 Projekt-Budgets`, '/projekte.html',
+        '<div class="space-y-2 text-sm">' + list.map(p => {
+          const pct = p.budget_chf > 0 ? Math.min(100, Math.round(p.verbraucht / p.budget_chf * 100)) : 0;
+          const isOver = p.verbraucht > p.budget_chf && p.budget_chf > 0;
+          const color = isOver ? 'red' : pct >= (p.budget_warnung_pct || 80) ? 'amber' : 'emerald';
+          return `<div>
+            <div class="flex justify-between mb-0.5">
+              <span class="truncate">${esc(p.title)}</span>
+              <span class="text-xs ${isOver ? 'text-red-700 font-bold' : 'text-gray-600'}">${fmtCHF(p.verbraucht)} / ${p.budget_chf > 0 ? fmtCHF(p.budget_chf) : '∞'}</span>
+            </div>
+            ${p.budget_chf > 0 ? `<div class="w-full bg-gray-200 rounded-full h-1.5"><div class="bg-${color}-500 h-1.5 rounded-full" style="width:${pct}%"></div></div>` : ''}
+          </div>`;
+        }).join('') + '</div>'));
+    }
+
+    document.getElementById('widgets').innerHTML = cards.join('') || '<div class="col-span-3 text-gray-500 text-center py-12">Keine Widgets verfügbar.</div>';
+  }
+
+  function card(title, link, body) {
+    return `<div class="bg-white rounded-lg shadow p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold text-gray-800">${title}</h2>
+        <a href="${link}" class="text-xs text-blue-600 hover:underline">→</a>
+      </div>
+      ${body}
+    </div>`;
+  }
+
+  function miniBox(label, count, summe, cls) {
+    return `<div class="bg-${cls}-50 rounded p-2 text-center">
+      <div class="text-xs text-${cls}-700 uppercase">${label}</div>
+      <div class="font-bold text-${cls}-900 text-sm">${fmtCHF(summe)}</div>
+      <div class="text-xs text-${cls}-600">${count} Eintr.</div>
+    </div>`;
+  }
+  </script>
+</body>
+</html>
