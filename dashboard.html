@@ -88,6 +88,28 @@
             </li>`).join('') + '</ul>'));
     }
 
+    // Mails an Verwaltung (letzte 14 Tage gesendet)
+    if (widgets.mails_an_verwaltung) {
+      const list = widgets.mails_an_verwaltung;
+      cards.push(card(`📬 An Verwaltung gesendet (14 Tage)`, '/verwaltung-mail-outbox.html?status=gesendet',
+        list.length === 0
+          ? '<p class="text-sm text-gray-500">In den letzten 14 Tagen wurden keine Mails an die Verwaltung versendet.</p>'
+          : '<ul class="text-sm space-y-1 max-h-64 overflow-y-auto">' + list.map(m => {
+              const srcShort = m.source_type.startsWith('auslage-auszahlung') ? '💰 Auszahlung'
+                            : m.source_type === 'objekt-aenderung' ? '🏠 Objekt'
+                            : m.source_type.startsWith('ad-hoc') ? '✏️ Ad-hoc'
+                            : '✉ ' + esc(m.source_type);
+              return `<li class="border-b last:border-0 pb-1">
+                <div class="flex justify-between gap-2">
+                  <span class="text-xs ${m.source_type.includes('auslage') ? 'text-emerald-700' : 'text-blue-700'}">${srcShort}</span>
+                  <span class="text-xs text-gray-400">${fmtDate(m.sent_at)}</span>
+                </div>
+                <div class="truncate text-gray-800">${esc(m.subject)}</div>
+                <div class="text-xs text-gray-500 truncate">→ ${esc(m.mail_to)}</div>
+              </li>`;
+            }).join('') + '</ul>'));
+    }
+
     // Auszahlung offen (lange)
     if (widgets.auszahlung_offen) {
       const list = widgets.auszahlung_offen;

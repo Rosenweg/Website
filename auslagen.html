@@ -87,6 +87,7 @@
                 <th class="px-3 py-2 text-right">Betrag</th>
                 <th class="px-3 py-2 text-left">Beleg</th>
                 <th class="px-3 py-2 text-left">Status</th>
+                <th class="px-3 py-2 text-left" title="Mail an Verwaltung">📨</th>
                 <th class="px-3 py-2 text-left">Aktionen</th>
               </tr>
             </thead>
@@ -278,7 +279,7 @@
 
   async function loadAuslagen() {
     const tbody = document.getElementById('tbody');
-    tbody.innerHTML = '<tr><td colspan="9" class="px-4 py-6 text-center text-gray-400">Lade…</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" class="px-4 py-6 text-center text-gray-400">Lade…</td></tr>';
     try {
       const q = new URLSearchParams();
       const st = document.getElementById('filter-status').value;
@@ -288,7 +289,7 @@
       const r = await AuthentikAuth.apiFetch('/api/auslagen?' + q.toString());
       if (!r.ok) {
         const e = await r.json().catch(() => ({}));
-        tbody.innerHTML = `<tr><td colspan="9" class="px-4 py-6 text-center text-red-600">${esc(e.error || 'HTTP ' + r.status)}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" class="px-4 py-6 text-center text-red-600">${esc(e.error || 'HTTP ' + r.status)}</td></tr>`;
         return;
       }
       STATE = await r.json();
@@ -302,7 +303,7 @@
       document.getElementById('filter-scope-wrap').style.display = STATE.can_review ? '' : 'none';
       render();
     } catch (e) {
-      tbody.innerHTML = `<tr><td colspan="9" class="px-4 py-6 text-center text-red-600">Fehler: ${esc(e.message)}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="10" class="px-4 py-6 text-center text-red-600">Fehler: ${esc(e.message)}</td></tr>`;
     }
   }
 
@@ -319,7 +320,7 @@
     renderSummary(list);
 
     if (list.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="9" class="px-4 py-6 text-center text-gray-400">Keine Auslagen.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="10" class="px-4 py-6 text-center text-gray-400">Keine Auslagen.</td></tr>';
       return;
     }
     tbody.innerHTML = list.map(a => {
@@ -351,6 +352,25 @@
       const projektBadge = a.projekt_slug
         ? `<div class="text-xs"><span class="bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded">📁 ${esc(a.projekt_title || a.projekt_slug)}</span></div>`
         : '';
+      // Mail-Status-Spalte: was wurde an Verwaltung gemailt?
+      let mailCell;
+      if (a.mail_queue_status === 'pending') {
+        mailCell = '<span class="text-amber-700 text-xs" title="In Outbox, wartet auf Freigabe">⏳ Outbox</span>';
+      } else if (a.mail_queue_status === 'freigegeben') {
+        mailCell = '<span class="text-blue-700 text-xs" title="Freigegeben, wird versendet">✓ Freigeben.</span>';
+      } else if (a.mail_queue_status === 'abgelehnt') {
+        mailCell = '<span class="text-red-700 text-xs" title="Outbox-Mail abgelehnt">✗ Abgel.</span>';
+      } else if (a.mail_queue_status === 'fehler') {
+        mailCell = '<span class="text-red-700 text-xs" title="Versand fehlgeschlagen">⚠ Fehler</span>';
+      } else if (a.mail_queue_status === 'gesendet' || (a.auszahlung_mail_at && !a.auszahlung_mail_fallback)) {
+        const dt = a.auszahlung_mail_at ? fmtDate(a.auszahlung_mail_at) : '';
+        mailCell = `<span class="text-emerald-700 text-xs" title="Versendet an: ${esc(a.auszahlung_mail_to || '')}${dt ? ' am ' + dt : ''}">📨 Verw.${a.auszahlung_mail_count > 1 ? ' ×' + a.auszahlung_mail_count : ''}</span>`;
+      } else if (a.auszahlung_mail_fallback) {
+        const dt = a.auszahlung_mail_at ? fmtDate(a.auszahlung_mail_at) : '';
+        mailCell = `<span class="text-amber-700 text-xs" title="An Ausschuss-Fallback gesendet${dt ? ' am ' + dt : ''}">📨 Aus.</span>`;
+      } else {
+        mailCell = '<span class="text-gray-300 text-xs" title="Noch keine Mail an Verwaltung">—</span>';
+      }
       return `<tr class="hover:bg-gray-50">
         <td class="px-3 py-2 text-gray-700 whitespace-nowrap">${esc(fmtDate(a.datum))}</td>
         <td class="px-3 py-2 text-gray-700">${esc(a.user_name)}</td>
@@ -360,6 +380,7 @@
         <td class="px-3 py-2 text-gray-900 text-right font-mono whitespace-nowrap">${esc(fmtCHF(a.betrag_chf))}</td>
         <td class="px-3 py-2">${beleg}</td>
         <td class="px-3 py-2"><span class="status-${esc(a.status)} px-2 py-0.5 rounded text-xs font-medium">${esc(a.status)}</span></td>
+        <td class="px-3 py-2 whitespace-nowrap">${mailCell}</td>
         <td class="px-3 py-2 whitespace-nowrap space-x-3">${aktionen.join('')}</td>
       </tr>`;
     }).join('');
