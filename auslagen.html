@@ -133,15 +133,18 @@
           <span class="text-gray-700">Bemerkung (optional)</span>
           <textarea id="f-bemerkung" rows="2" class="mt-1 block w-full border rounded px-2 py-1.5"></textarea>
         </label>
-        <label class="block text-sm">
-          <span class="text-gray-700">Beleg / Quittung (PDF, JPG, PNG, max 15 MB)</span>
-          <div class="flex gap-2 mt-1">
+        <!-- Belege (Multi-Upload) -->
+        <fieldset class="border rounded-lg p-3">
+          <legend class="text-xs font-semibold text-gray-700 px-2">Belege (mehrere möglich, max 15 MB pro Datei)</legend>
+          <div id="belege-list" class="space-y-1 mt-1 text-xs"></div>
+          <div class="flex gap-2 mt-2">
             <input type="file" id="f-beleg" accept=".pdf,image/jpeg,image/png,image/webp,image/heic"
                    class="flex-1 block text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
-            <button type="button" id="btn-scan" disabled class="px-3 py-1.5 bg-purple-600 text-white text-sm rounded hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed" title="KI extrahiert Positionen aus dem Beleg">🤖 Scannen</button>
+            <button type="button" id="btn-scan" disabled class="px-3 py-1.5 bg-purple-600 text-white text-sm rounded hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed" title="KI extrahiert Positionen — bei Fremdwährung wird automatisch in CHF umgerechnet">🤖 Scan + zur Liste</button>
+            <button type="button" id="btn-beleg-add" disabled class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed">+ Nur hinzufügen</button>
           </div>
-          <p id="f-beleg-info" class="text-xs text-gray-500 mt-1">Tipp: Beleg-Foto hochladen → "Scannen" → Positionen werden automatisch befüllt.</p>
-        </label>
+          <p class="text-xs text-gray-500 mt-1">Bei Fremdwährungs-Belegen (EUR, USD, …) rechnet "Scannen" automatisch zum Tageskurs in CHF um.</p>
+        </fieldset>
 
         <!-- Positionen-Editor -->
         <fieldset class="border rounded-lg p-3">
@@ -218,11 +221,14 @@
     document.getElementById('filter-status').addEventListener('change', loadAuslagen);
     document.getElementById('filter-scope').addEventListener('change', render);
     document.querySelectorAll('#modal-review .r-btn').forEach(b => b.addEventListener('click', () => onReviewAction(b.dataset.act)));
-    // KI-Belegleser Hooks
+    // Multi-Beleg + KI-Scan Hooks
     document.getElementById('f-beleg').addEventListener('change', e => {
-      document.getElementById('btn-scan').disabled = !e.target.files[0];
+      const hasFile = !!e.target.files[0];
+      document.getElementById('btn-scan').disabled = !hasFile;
+      document.getElementById('btn-beleg-add').disabled = !hasFile;
     });
-    document.getElementById('btn-scan').addEventListener('click', scanBeleg);
+    document.getElementById('btn-scan').addEventListener('click', () => addBelegFromInput(true));
+    document.getElementById('btn-beleg-add').addEventListener('click', () => addBelegFromInput(false));
     document.getElementById('f-stweg').addEventListener('change', refreshStundensatz);
     await loadAuslagen();
   });
@@ -287,8 +293,9 @@
       const canReviewThis = STATE.can_review && !isMine;
       const canOwnerConfirm = isMine && a.status === 'genehmigt';
       const stwegLabel = a.stweg ? `STWEG ${a.stweg}` : '—';
-      const beleg = a.beleg_path
-        ? `<a href="/api/auslagen/${a.id}/beleg" target="_blank" class="text-blue-600 hover:underline">${esc(a.beleg_filename || 'öffnen')}</a>`
+      const belegCount = Number(a.belege_count || 0);
+      const beleg = belegCount > 0
+        ? `<a href="/api/auslagen/${a.id}/beleg" target="_blank" class="text-blue-600 hover:underline">📎 ${belegCount}</a>`
         : '<span class="text-gray-400">–</span>';
       const aktionen = [];
       if (canEditOwn) {
@@ -338,17 +345,142 @@
 
   let POSITIONEN = [];
   let STUNDENSATZ_AKT = null;
+  let BELEGE = []; // bei neuer Auslage: pending uploads; bei edit: existing aus DB
+  let LAST_SCAN_FX = null; // { waehrung, kurs, quelle } für letzten Scan
+
+  function renderBelege() {
+    const el = document.getElementById('belege-list');
+    if (BELEGE.length === 0) {
+      el.innerHTML = '<p class="text-gray-400 italic">Noch keine Belege.</p>';
+      return;
+    }
+    el.innerHTML = BELEGE.map((b, i) => {
+      const fx = b.waehrung_original && b.waehrung_original !== 'CHF'
+        ? ` · ${esc(b.waehrung_original)} → CHF @ ${Number(b.wechselkurs_chf || 1).toFixed(4)}`
+        : '';
+      const link = b.id
+        ? `<a href="/api/auslagen/${document.getElementById('f-id').value}/belege/${b.id}" target="_blank" class="text-blue-600 hover:underline">${esc(b.beleg_filename)}</a>`
+        : esc(b.beleg_filename) + ' <span class="text-amber-600">(noch nicht gespeichert)</span>';
+      return `<div class="flex items-center justify-between bg-gray-50 rounded px-2 py-1">
+        <span>📎 ${link}${fx}</span>
+        <button type="button" onclick="removeBeleg(${i})" class="text-red-600 hover:underline">×</button>
+      </div>`;
+    }).join('');
+  }
+
+  async function removeBeleg(i) {
+    const b = BELEGE[i];
+    if (b.id) {
+      const id = document.getElementById('f-id').value;
+      if (!confirm('Diesen Beleg unwiderruflich löschen?')) return;
+      try {
+        const r = await AuthentikAuth.apiFetch(`/api/auslagen/${id}/belege/${b.id}`, { method: 'DELETE' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+      } catch (e) { alert('Fehler: ' + e.message); return; }
+    }
+    BELEGE.splice(i, 1);
+    renderBelege();
+  }
+
+  async function addBelegFromInput(withScan) {
+    const file = document.getElementById('f-beleg').files[0];
+    if (!file) return;
+    if (file.size > 15 * 1024 * 1024) { alert('Datei > 15 MB'); return; }
+    const base64 = await fileToBase64(file);
+    let scanData = null;
+    if (withScan) {
+      const btn = document.getElementById('btn-scan');
+      btn.disabled = true; const old = btn.textContent; btn.textContent = '🤖 Scannt…';
+      try {
+        const r = await AuthentikAuth.apiFetch('/api/auslagen/scan-beleg', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bild_base64: base64, bild_filename: file.name }),
+        });
+        scanData = await r.json();
+        if (!r.ok) throw new Error(scanData.error || 'HTTP ' + r.status);
+      } catch (e) {
+        alert('Scan fehlgeschlagen: ' + e.message);
+        btn.disabled = false; btn.textContent = old;
+        return;
+      }
+      btn.disabled = false; btn.textContent = old;
+      // Datum/Lieferant nur befuellen wenn leer
+      if (scanData.datum && !document.getElementById('f-datum').value) {
+        document.getElementById('f-datum').value = scanData.datum;
+      }
+      if (scanData.lieferant && !document.getElementById('f-beschreibung').value) {
+        document.getElementById('f-beschreibung').value = scanData.lieferant;
+      }
+      // Positionen anhaengen (NICHT ersetzen — mehrere Belege kumulieren)
+      const newPos = (scanData.positionen || []).map(p => ({
+        position_typ: 'material',
+        beschreibung: p.beschreibung,
+        menge: p.menge, einheit: p.einheit || 'Stk',
+        einzelpreis_chf: p.einzelpreis,
+        gesamt_chf: p.gesamt,
+        waehrung_original: scanData.waehrung,
+        gesamt_original: p.gesamt_original,
+      }));
+      POSITIONEN = POSITIONEN.concat(newPos);
+      renderPositionen();
+      LAST_SCAN_FX = {
+        waehrung: scanData.waehrung,
+        kurs: scanData.wechselkurs_chf,
+        quelle: scanData.kurs_quelle,
+      };
+      if (scanData.waehrung !== 'CHF') {
+        alert(`Beleg in ${scanData.waehrung}: ${(scanData.total_original || 0).toFixed(2)} ${scanData.waehrung} × ${scanData.wechselkurs_chf.toFixed(4)} = CHF ${(scanData.total || 0).toFixed(2)} (${scanData.kurs_quelle}). Positionen wurden in CHF umgerechnet.`);
+      } else {
+        alert(`KI hat ${newPos.length} Position(en) erkannt. Total: CHF ${(scanData.total || 0).toFixed(2)}. Bitte überprüfen.`);
+      }
+    }
+
+    // Beleg in Liste — wenn Auslage schon gespeichert, sofort hochladen
+    const id = document.getElementById('f-id').value;
+    if (id) {
+      // direkter Upload an existierende Auslage
+      try {
+        const r = await AuthentikAuth.apiFetch(`/api/auslagen/${id}/belege`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            beleg_base64: base64, beleg_filename: file.name,
+            waehrung_original: scanData?.waehrung || null,
+            wechselkurs_chf: scanData?.wechselkurs_chf || null,
+            kurs_quelle: scanData?.kurs_quelle || null,
+          }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+        BELEGE.push(data);
+        renderBelege();
+      } catch (e) { alert('Upload fehlgeschlagen: ' + e.message); return; }
+    } else {
+      // pending — wird beim Speichern hochgeladen
+      BELEGE.push({
+        _pending: true, beleg_base64: base64, beleg_filename: file.name,
+        waehrung_original: scanData?.waehrung || null,
+        wechselkurs_chf: scanData?.wechselkurs_chf || null,
+        kurs_quelle: scanData?.kurs_quelle || null,
+      });
+      renderBelege();
+    }
+    // Reset input
+    document.getElementById('f-beleg').value = '';
+    document.getElementById('btn-scan').disabled = true;
+    document.getElementById('btn-beleg-add').disabled = true;
+  }
 
   function openNew() {
     document.getElementById('modal-title').textContent = 'Neue Auslage';
     document.getElementById('form-auslage').reset();
     document.getElementById('f-id').value = '';
     document.getElementById('f-datum').value = new Date().toISOString().slice(0, 10);
-    document.getElementById('f-beleg-info').textContent = '';
     document.getElementById('form-error').classList.add('hidden');
     POSITIONEN = []; renderPositionen();
+    BELEGE = []; renderBelege();
     refreshStundensatz();
     document.getElementById('btn-scan').disabled = true;
+    document.getElementById('btn-beleg-add').disabled = true;
     document.getElementById('modal').classList.remove('hidden');
   }
 
@@ -365,15 +497,19 @@
     document.getElementById('f-iban').value = a.iban || '';
     document.getElementById('f-bemerkung').value = a.bemerkung_eigentuemer || '';
     document.getElementById('f-beleg').value = '';
-    document.getElementById('f-beleg-info').textContent = a.beleg_filename ? `Aktuell hinterlegt: ${a.beleg_filename} (zum Austauschen neue Datei wählen)` : '';
     document.getElementById('form-error').classList.add('hidden');
     document.getElementById('btn-scan').disabled = true;
-    // Positionen nachladen
+    document.getElementById('btn-beleg-add').disabled = true;
+    // Positionen + Belege nachladen
     POSITIONEN = [];
+    BELEGE = [];
     try {
-      const r = await AuthentikAuth.apiFetch('/api/auslagen/' + id + '/positionen');
-      if (r.ok) {
-        const data = await r.json();
+      const [posR, belR] = await Promise.all([
+        AuthentikAuth.apiFetch('/api/auslagen/' + id + '/positionen'),
+        AuthentikAuth.apiFetch('/api/auslagen/' + id + '/belege'),
+      ]);
+      if (posR.ok) {
+        const data = await posR.json();
         POSITIONEN = (data.positionen || []).map(p => ({
           position_typ: p.position_typ, beschreibung: p.beschreibung,
           menge: Number(p.menge), einheit: p.einheit,
@@ -381,8 +517,13 @@
           gesamt_chf: Number(p.gesamt_chf),
         }));
       }
+      if (belR.ok) {
+        const data = await belR.json();
+        BELEGE = data.belege || [];
+      }
     } catch {}
     renderPositionen();
+    renderBelege();
     refreshStundensatz();
     document.getElementById('modal').classList.remove('hidden');
   }
@@ -455,39 +596,7 @@
     renderPositionen();
   }
 
-  async function scanBeleg() {
-    const file = document.getElementById('f-beleg').files[0];
-    if (!file) return;
-    const btn = document.getElementById('btn-scan');
-    btn.disabled = true; const old = btn.textContent; btn.textContent = '🤖 Scannt…';
-    try {
-      const base64 = await fileToBase64(file);
-      const r = await AuthentikAuth.apiFetch('/api/auslagen/scan-beleg', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bild_base64: base64, bild_filename: file.name }),
-      });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
-      // Befuelle Felder
-      if (data.datum) document.getElementById('f-datum').value = data.datum;
-      if (data.lieferant && !document.getElementById('f-beschreibung').value) {
-        document.getElementById('f-beschreibung').value = data.lieferant;
-      }
-      POSITIONEN = (data.positionen || []).map(p => ({
-        position_typ: 'material',
-        beschreibung: p.beschreibung,
-        menge: p.menge, einheit: p.einheit || 'Stk',
-        einzelpreis_chf: p.einzelpreis, gesamt_chf: p.gesamt,
-      }));
-      renderPositionen();
-      if (data.total) document.getElementById('f-betrag').value = data.total.toFixed(2);
-      alert(`KI hat ${POSITIONEN.length} Position(en) erkannt. Total laut Beleg: CHF ${(data.total || 0).toFixed(2)}. Bitte überprüfen und ggf. korrigieren.`);
-    } catch (e) {
-      alert('Scan fehlgeschlagen: ' + e.message);
-    } finally {
-      btn.disabled = false; btn.textContent = old;
-    }
-  }
+  // scanBeleg() ist jetzt addBelegFromInput(true) — siehe oben
 
   function closeModal() {
     document.getElementById('modal').classList.add('hidden');
@@ -501,13 +610,6 @@
     errEl.classList.add('hidden');
     try {
       const id = document.getElementById('f-id').value;
-      const file = document.getElementById('f-beleg').files[0];
-      let beleg_base64 = null, beleg_filename = null;
-      if (file) {
-        if (file.size > 15 * 1024 * 1024) throw new Error('Beleg ist größer als 15 MB');
-        beleg_base64 = await fileToBase64(file);
-        beleg_filename = file.name;
-      }
       // L5: Client-Validierung IBAN + Betrag bevor request raus geht
       const ibanRaw = document.getElementById('f-iban').value.replace(/\s+/g, '').toUpperCase();
       if (ibanRaw && !/^[A-Z]{2}\d{2}[A-Z0-9]{4,30}$/.test(ibanRaw)) {
@@ -516,6 +618,8 @@
       const betrag = parseFloat(document.getElementById('f-betrag').value);
       if (!Number.isFinite(betrag) || betrag <= 0) throw new Error('Betrag muss > 0 sein');
       if (betrag > 100000) throw new Error('Betrag > 100\'000 CHF ist nicht plausibel');
+      // Erster pending Beleg (legacy) als beleg_base64/filename, restliche via /belege POST
+      const firstPending = BELEGE.find(b => b._pending);
       const payload = {
         datum: document.getElementById('f-datum').value,
         betrag_chf: betrag,
@@ -525,7 +629,10 @@
         iban: ibanRaw || null,
         bemerkung_eigentuemer: document.getElementById('f-bemerkung').value.trim() || null,
       };
-      if (beleg_base64) { payload.beleg_base64 = beleg_base64; payload.beleg_filename = beleg_filename; }
+      if (firstPending) {
+        payload.beleg_base64 = firstPending.beleg_base64;
+        payload.beleg_filename = firstPending.beleg_filename;
+      }
       const url = id ? `/api/auslagen/${id}` : '/api/auslagen';
       const method = id ? 'PUT' : 'POST';
       const r = await AuthentikAuth.apiFetch(url, {
@@ -533,8 +640,19 @@
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
-      // Positionen speichern (separater Endpoint)
       const savedId = data.auslage?.id || id;
+      // Weitere pending Belege hochladen (alle ausser dem ersten, der bereits via Auslage erstellt wurde)
+      const restPending = BELEGE.filter(b => b._pending && b !== firstPending);
+      for (const b of restPending) {
+        await AuthentikAuth.apiFetch(`/api/auslagen/${savedId}/belege`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            beleg_base64: b.beleg_base64, beleg_filename: b.beleg_filename,
+            waehrung_original: b.waehrung_original, wechselkurs_chf: b.wechselkurs_chf, kurs_quelle: b.kurs_quelle,
+          }),
+        });
+      }
+      // Positionen speichern (separater Endpoint)
       if (savedId && POSITIONEN.length > 0) {
         await AuthentikAuth.apiFetch(`/api/auslagen/${savedId}/positionen`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
