@@ -107,6 +107,7 @@ const RosenwegNav = {
                 <span>Verwaltungs-Mail Outbox</span>
                 <span id="nav-vmq-badge" class="hidden bg-amber-100 text-amber-800 text-xs px-1.5 py-0.5 rounded-full font-semibold"></span>
               </a>
+              <a href="${base}mail-empfaenger-admin.html" data-perm="mail-empfaenger" class="${dropA('mail-empfaenger')} block px-4 py-2 text-sm">Mail-Empfänger Stammdaten</a>
               <a href="${base}proxmox-verwaltung.html" data-perm="proxmox-verwaltung" class="${dropA('proxmox')} block px-4 py-2 text-sm">Proxmox</a>
             </div>
           </div>
@@ -179,6 +180,7 @@ const RosenwegNav = {
           <span>Verwaltungs-Mail Outbox</span>
           <span id="nav-vmq-badge-mobile" class="hidden bg-amber-100 text-amber-800 text-xs px-1.5 py-0.5 rounded-full font-semibold"></span>
         </a>
+        <a href="${base}mail-empfaenger-admin.html" data-perm="mail-empfaenger" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Mail-Empfänger Stammdaten</a>
         <a href="${base}proxmox-verwaltung.html" data-perm="proxmox-verwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Proxmox</a>
 
         <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Infos</div>
