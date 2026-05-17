@@ -10339,9 +10339,17 @@ async function initDB() {
     try {
       const verwExists = await client.query('SELECT COUNT(*) AS cnt FROM verwaltungen');
       if (parseInt(verwExists.rows[0].cnt) === 0) {
-        const cfgPath = pathModule.join(__dirname, '..', 'site-config.json');
-        const cfgRaw = await fs.readFile(cfgPath, 'utf8').catch(() => null);
-        if (cfgRaw) {
+        const candidates = [
+          pathModule.join(__dirname, 'site-config.json'),
+          pathModule.join(__dirname, '..', 'site-config.json'),
+        ];
+        let cfgRaw = null;
+        for (const p of candidates) {
+          try { cfgRaw = await fs.readFile(p, 'utf8'); break; } catch {}
+        }
+        if (!cfgRaw) {
+          console.warn(`[Verwaltungen-Seed] site-config.json nicht gefunden (gesucht: ${candidates.join(', ')})`);
+        } else {
           const cfg = JSON.parse(cfgRaw);
           const v = cfg.verwaltung;
           if (v && v.firma) {
@@ -10351,12 +10359,14 @@ async function initDB() {
                 (stweg, firma_name, adresse, telefon, email, website, oeffnungszeiten, aktiv)
               VALUES (NULL, $1, $2, $3, $4, $5, $6, true)
             `, [v.firma, adresse || null, v.telefon || null, v.email || null, v.website || null, v.oeffnungszeiten || null]);
-            console.log(`Seeded verwaltungen from site-config.json: ${v.firma}`);
+            console.log(`[Verwaltungen-Seed] Importiert aus site-config.json: ${v.firma}`);
+          } else {
+            console.warn('[Verwaltungen-Seed] site-config.json hat keine verwaltung.firma');
           }
         }
       }
     } catch (e) {
-      console.warn('Verwaltungen-Seed uebersprungen:', e.message);
+      console.warn('[Verwaltungen-Seed] Fehler:', e.message);
     }
 
     console.log('Database schema initialized');
