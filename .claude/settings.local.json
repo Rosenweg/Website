@@ -58,7 +58,14 @@
       "Bash(pandoc /tmp/netzwerkscanner-anleitung-update.md -o /tmp/netzwerkscanner-anleitung.pdf --pdf-engine=pdflatex)",
       "Bash(pandoc /tmp/netzwerkscanner-anleitung-update.md -o /tmp/netzwerkscanner-anleitung.docx)",
       "Bash(ssh root@100.64.2.24 \"docker service ls --format '{{.Name}} {{.Replicas}}' | grep '0/'\")",
-      "Bash(ssh root@100.64.2.24 \"docker service ls\")"
+      "Bash(ssh root@100.64.2.24 \"docker service ls\")",
+      "Bash(ssh root@100.64.2.22 'pct create 113 local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst \\\\:*)",
+      "Bash(python3 -c \"import json,sys;d=json.load\\(sys.stdin\\);print\\(d.get\\('description','?'\\)\\);print\\('Latest:',list\\(d.get\\('dist-tags',{}\\).values\\(\\)\\)[:1]\\)\")",
+      "Bash(ssh root@100.64.2.28 \"ls /srv/samba/rosenweg/anleitungen/ 2>&1 || echo 'DIR_NOT_FOUND'\")",
+      "Bash(ssh root@100.64.2.20 \"pct exec 106 -- ls /srv/samba/rosenweg/anleitungen/ 2>&1 || echo 'NOT_FOUND'\")",
+      "Bash(ssh root@100.64.2.24 'API=$\\(docker ps --format '\\\\''{{.Names}}'\\\\'' | grep rosenweg_api | head -1\\); docker exec $API node -e '\\\\'' *)",
+      "Bash(ssh root@100.64.2.24 'docker exec $\\(docker ps --format \"{{.Names}}\" | grep rosenweg_postgres | head -1\\) bash -c \"psql -U \\\\$POSTGRES_USER -d \\\\$POSTGRES_DB -c \\\\\"SELECT w.id, w.bezeichnung, w.wertquote_zaehler AS wq, string_agg\\(k.name, '\\\\''; '\\\\'' ORDER BY k.name\\) AS eig, string_agg\\(DISTINCT k.adresse, '\\\\'' | '\\\\''\\) AS adressen FROM wohnungen w LEFT JOIN wohnungen_kontakte k ON k.wohnung_id=w.id AND k.rolle='\\\\''eigentuemer'\\\\'' WHERE w.stweg=2 GROUP BY w.id, w.bezeichnung, w.wertquote_zaehler ORDER BY w.bezeichnung;\\\\\"\"')",
+      "Bash(ssh root@100.64.2.24 *)"
     ]
   }
 }

@@ -7,6 +7,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="/js/authentik-auth.js?v=2"></script>
   <script src="/js/nav.js?v=2"></script>
+  <script src="/js/modal-helpers.js?v=1"></script>
   <link rel="icon" href="/logo-rosenweg.png">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -47,7 +48,7 @@
 
   <!-- Modal -->
   <div id="modal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-start justify-center p-4 overflow-y-auto">
-    <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full p-6 my-8">
+    <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between mb-4">
         <h2 id="m-title" class="text-xl font-bold text-gray-900">Empfänger</h2>
         <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
