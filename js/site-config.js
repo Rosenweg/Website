@@ -48,8 +48,11 @@ const SiteConfig = {
   },
 
   // Liefert die zustaendige Verwaltung fuer einen STWEG.
-  // Reihenfolge: STWEG-spezifisch (aktiv) → STWEG-uebergreifend (stweg=null) → static site-config.json
-  // Normalisiert auf {firma, adresse, telefon, email, website, oeffnungszeiten, kontakte}.
+  // Reihenfolge:
+  //   1) Aktive Verwaltung mit passendem stweg
+  //   2) Aktive Verwaltung mit stweg=null (uebergreifend)
+  //   3) Ausschuss-Fallback (ausschuss_fallback: true) — der Ausschuss uebernimmt
+  //      die Verwaltungsaufgaben bis eine neue Verwaltung bestimmt ist
   async getVerwaltungForStweg(nr) {
     await this.load();
     const list = await this._loadVerwaltungen();
@@ -65,21 +68,31 @@ const SiteConfig = {
         website: v.website || '',
         oeffnungszeiten: v.oeffnungszeiten || '',
         kontakte: v.kontakte || [],
+        ausschuss_fallback: false,
         _source: 'api',
       };
     }
-    // Fallback: statische site-config.json (Legacy)
-    const s = this._data?.verwaltung;
-    if (!s) return null;
+    // Keine aktive Verwaltung in der DB → Ausschuss uebernimmt
+    return this._buildAusschussFallback(stwegNr);
+  },
+
+  _buildAusschussFallback(stwegNr) {
+    const stweg = this._data?.stwegen?.find(s => s.nr === stwegNr);
+    const stwegEmail = stweg?.email || null;
+    const ausschuss = this._data?.ausschuss || {};
+    const ausschussEmail = ausschuss.email || 'ausschuss@rosenweg4303.ch';
     return {
-      firma: s.firma,
-      adresse: [s.strasse, s.plz_ort].filter(Boolean).join(', '),
-      telefon: s.telefon || '',
-      email: s.email || '',
-      website: s.website || '',
-      oeffnungszeiten: s.oeffnungszeiten || '',
+      firma: 'Ausschuss (aktuell keine externe Verwaltung beauftragt)',
+      adresse: '',
+      telefon: '',
+      email: stwegEmail || ausschussEmail,
+      ausschuss_general_email: ausschussEmail,
+      praesident_email: ausschuss.praesident_email || null,
+      website: '',
+      oeffnungszeiten: '',
       kontakte: [],
-      _source: 'site-config',
+      ausschuss_fallback: true,
+      _source: 'ausschuss-fallback',
     };
   },
 

@@ -20,6 +20,23 @@ const STWEGKontakte = (function() {
                 el.innerHTML = '<p class="text-sm text-gray-500">Keine Hausverwaltung hinterlegt.</p>';
                 return;
             }
+            if (v.ausschuss_fallback) {
+                el.innerHTML = `
+                    <div class="flex items-center mb-4">
+                        <svg class="h-8 w-8 text-amber-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                        </svg>
+                        <h3 class="text-xl font-semibold">Hausverwaltung</h3>
+                    </div>
+                    <div class="bg-amber-50 border border-amber-200 rounded p-3 mb-3">
+                        <p class="text-sm text-amber-900 font-medium mb-1">Aktuell keine externe Verwaltung beauftragt</p>
+                        <p class="text-xs text-amber-800">Der Ausschuss STWEG ${stwegNr} übernimmt vorübergehend die Verwaltungsaufgaben.</p>
+                    </div>
+                    <p class="text-gray-600 text-sm mb-2"><strong>Ausschuss STWEG ${stwegNr}:</strong> <a href="mailto:${esc(v.email)}" class="text-blue-600 hover:underline">${esc(v.email)}</a></p>
+                    ${v.ausschuss_general_email && v.ausschuss_general_email !== v.email ? `<p class="text-gray-600 text-sm mb-2"><strong>Gesamtausschuss:</strong> <a href="mailto:${esc(v.ausschuss_general_email)}" class="text-blue-600 hover:underline">${esc(v.ausschuss_general_email)}</a></p>` : ''}
+                    ${v.praesident_email ? `<p class="text-gray-600 text-sm"><strong>Präsident:</strong> <a href="mailto:${esc(v.praesident_email)}" class="text-blue-600 hover:underline">${esc(v.praesident_email)}</a></p>` : ''}`;
+                return;
+            }
             const telDigits = (v.telefon || '').replace(/\s/g, '');
             const webHref = v.website ? (v.website.startsWith('http') ? v.website : 'https://' + v.website) : '';
             el.innerHTML = `

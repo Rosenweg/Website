@@ -543,9 +543,24 @@
     <!-- Config-basierte Daten laden -->
     <script>
     SiteConfig.load().then(async () => {
-        // Verwaltung dynamisch aus DB (api/verwaltungen/public), Fallback auf site-config.json
+        // Verwaltung dynamisch aus DB; Ausschuss-Fallback wenn keine aktive vorhanden
         const v = await SiteConfig.getVerwaltungForStweg(null);
-        if (v) {
+        if (v && v.ausschuss_fallback) {
+            // Ausschuss uebernimmt aktuell die Verwaltungsaufgaben
+            document.getElementById('verw-firma').textContent = 'Ausschuss (aktuell keine externe Verwaltung beauftragt)';
+            document.getElementById('verw-strasse').textContent = '';
+            document.getElementById('verw-plz').textContent = '';
+            const tel = document.getElementById('verw-tel');
+            if (tel) { tel.textContent = ''; tel.removeAttribute('href'); }
+            const email = document.getElementById('verw-email');
+            if (email && v.email) { email.textContent = v.email; email.href = 'mailto:' + v.email; }
+            const web = document.getElementById('verw-web');
+            if (web) { web.textContent = ''; web.removeAttribute('href'); }
+            document.getElementById('verw-oeffnung').textContent = '';
+            document.getElementById('footer-verwaltung').textContent = 'Verwaltung: aktuell Ausschuss (keine externe Verwaltung beauftragt)';
+            const short = document.getElementById('verw-firma-short');
+            if (short) short.textContent = 'Ausschuss (vakant)';
+        } else if (v) {
             document.getElementById('verw-firma').textContent = v.firma;
             // Adresse aufteilen falls "Strasse, PLZ Ort"
             const addrParts = (v.adresse || '').split(',').map(s => s.trim());

@@ -965,6 +965,10 @@
         SiteConfig.getVerwaltungForStweg(3).then(v => {
             const el = document.getElementById('footer-verwaltung-line');
             if (!el || !v) return;
+            if (v.ausschuss_fallback) {
+                el.textContent = 'Verwaltung: aktuell Ausschuss STWEG 3 (keine externe Verwaltung beauftragt)';
+                return;
+            }
             const ortLast = (v.adresse || '').split(',').slice(-1)[0].trim().split(' ').pop();
             el.textContent = 'Verwaltung: ' + v.firma + (ortLast ? ', ' + ortLast : '');
         });
