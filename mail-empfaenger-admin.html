@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mail-Empfänger Stammdaten — Rosenweg</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/nav.js?v=2"></script>
+  <link rel="icon" href="/logo-rosenweg.png">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+  <script>RosenwegNav.init({ active: 'mail-empfaenger' });</script>
+
+  <main class="max-w-5xl mx-auto px-4 py-6">
+    <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center">
+      <p class="text-gray-600">Lade Login-Status…</p>
+    </div>
+
+    <div id="content" class="hidden">
+      <div class="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900">Mail-Empfänger Stammdaten</h1>
+          <p class="text-sm text-gray-600 mt-1">Adressbuch für externe Mail-Empfänger (Anwalt, Bank, Versicherung, Handwerker, Behörden, etc.). Wird vom Mail-Composer und automatischen Workflows verwendet. Die Verwaltung wird unter <a href="/verwaltung-admin.html" class="text-blue-600 underline">Verwaltung</a> separat gepflegt.</p>
+        </div>
+        <button id="btn-new" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">+ Neuer Empfänger</button>
+      </div>
+
+      <div class="bg-white rounded-lg shadow p-3 mb-4 flex flex-wrap gap-3 items-center">
+        <label class="text-sm">
+          <span class="text-gray-600 mr-1">Kategorie:</span>
+          <select id="filter-kat" class="border rounded px-2 py-1 text-sm">
+            <option value="">alle</option>
+          </select>
+        </label>
+        <button onclick="loadList()" class="ml-auto text-sm text-blue-600 hover:underline">Neu laden</button>
+      </div>
+
+      <div id="list" class="space-y-2"></div>
+    </div>
+  </main>
+
+  <!-- Modal -->
+  <div id="modal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-start justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full p-6 my-8">
+      <div class="flex items-center justify-between mb-4">
+        <h2 id="m-title" class="text-xl font-bold text-gray-900">Empfänger</h2>
+        <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+      </div>
+      <form id="form" class="space-y-3 text-sm">
+        <input type="hidden" id="m-id">
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block">
+            <span class="text-xs text-gray-600">Kategorie *</span>
+            <select id="m-kat" required class="mt-1 block w-full border rounded px-2 py-1.5"></select>
+          </label>
+          <label class="block">
+            <span class="text-xs text-gray-600">STWEG (leer = übergreifend)</span>
+            <select id="m-stweg" class="mt-1 block w-full border rounded px-2 py-1.5">
+              <option value="">— alle STWEGs —</option>
+              <option value="1">STWEG 1</option><option value="2">STWEG 2</option>
+              <option value="3">STWEG 3</option><option value="4">STWEG 4</option>
+              <option value="5">STWEG 5</option><option value="6">STWEG 6</option>
+              <option value="7">STWEG 7</option><option value="8">STWEG 8</option>
+            </select>
+          </label>
+        </div>
+        <label class="block">
+          <span class="text-xs text-gray-600">Firma / Name *</span>
+          <input type="text" id="m-name" required class="mt-1 block w-full border rounded px-2 py-1.5">
+        </label>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block">
+            <span class="text-xs text-gray-600">Haupt-E-Mail</span>
+            <input type="email" id="m-email" class="mt-1 block w-full border rounded px-2 py-1.5">
+          </label>
+          <label class="block">
+            <span class="text-xs text-gray-600">Telefon</span>
+            <input type="text" id="m-tel" class="mt-1 block w-full border rounded px-2 py-1.5">
+          </label>
+        </div>
+        <label class="block">
+          <span class="text-xs text-gray-600">Adresse</span>
+          <textarea id="m-adresse" rows="2" class="mt-1 block w-full border rounded px-2 py-1.5"></textarea>
+        </label>
+        <label class="block">
+          <span class="text-xs text-gray-600">Website</span>
+          <input type="text" id="m-web" class="mt-1 block w-full border rounded px-2 py-1.5">
+        </label>
+
+        <fieldset class="border rounded-lg p-3">
+          <legend class="text-xs font-semibold text-gray-700 px-2">Kontaktpersonen</legend>
+          <div id="kontakte-list" class="space-y-2 mt-2"></div>
+          <button type="button" onclick="addKontakt()" class="mt-2 text-xs text-blue-600 hover:underline">+ Kontaktperson</button>
+        </fieldset>
+
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block">
+            <span class="text-xs text-gray-600">Default-CC (Komma)</span>
+            <input type="text" id="m-cc" placeholder="cc1@x.ch, cc2@y.ch" class="mt-1 block w-full border rounded px-2 py-1.5">
+          </label>
+          <label class="block">
+            <span class="text-xs text-gray-600">Default Reply-To</span>
+            <input type="email" id="m-replyto" class="mt-1 block w-full border rounded px-2 py-1.5">
+          </label>
+        </div>
+        <label class="block">
+          <span class="text-xs text-gray-600">Notiz</span>
+          <textarea id="m-notiz" rows="2" class="mt-1 block w-full border rounded px-2 py-1.5"></textarea>
+        </label>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" id="m-req-approval" checked>
+            <span>Outbox-Freigabe erforderlich (Standard: ja)</span>
+          </label>
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" id="m-aktiv" checked>
+            <span>Aktiv (wird automatisch verwendet)</span>
+          </label>
+        </div>
+        <div id="m-err" class="text-sm text-red-600 hidden"></div>
+        <div class="flex justify-between gap-2 pt-3 border-t mt-3">
+          <button type="button" id="m-del" onclick="del()" class="hidden px-3 py-1.5 text-red-600 hover:bg-red-50 rounded text-sm">Löschen</button>
+          <div class="flex gap-2 ml-auto">
+            <button type="button" onclick="closeModal()" class="px-3 py-1.5 text-gray-600 hover:bg-gray-100 rounded">Abbrechen</button>
+            <button type="submit" id="m-save" class="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700">Speichern</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const KAT_LABEL = {
+    verwaltung: 'Verwaltung', anwalt: 'Anwalt/Notar', bank: 'Bank',
+    versicherung: 'Versicherung', behoerde: 'Behörde',
+    energie: 'Energieversorger', handwerker: 'Handwerker', lieferant: 'Lieferant', sonstige: 'Sonstige',
+  };
+  let LIST = [];
+  let KATS = [];
+  let pendingKontakte = [];
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    const u = await AuthentikAuth.init({ requireAuth: true });
+    if (!u) return;
+    document.getElementById('auth-gate').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+    document.getElementById('btn-new').addEventListener('click', openNew);
+    document.getElementById('form').addEventListener('submit', save);
+    document.getElementById('filter-kat').addEventListener('change', loadList);
+    await loadList();
+  });
+
+  function fillKatSelect(el, includeAll) {
+    const editable = KATS.filter(k => k !== 'verwaltung');
+    if (includeAll) el.innerHTML = '<option value="">alle</option>' + editable.map(k => `<option value="${esc(k)}">${esc(KAT_LABEL[k] || k)}</option>`).join('');
+    else el.innerHTML = editable.map(k => `<option value="${esc(k)}">${esc(KAT_LABEL[k] || k)}</option>`).join('');
+  }
+
+  async function loadList() {
+    const list = document.getElementById('list');
+    list.innerHTML = '<div class="text-gray-400 text-center py-8">Lade…</div>';
+    try {
+      const kat = document.getElementById('filter-kat').value;
+      const q = kat ? '?kategorie=' + encodeURIComponent(kat) : '';
+      const r = await AuthentikAuth.apiFetch('/api/mail-empfaenger' + q);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      LIST = data.empfaenger || [];
+      KATS = data.kategorien || [];
+      fillKatSelect(document.getElementById('filter-kat'), true);
+      fillKatSelect(document.getElementById('m-kat'), false);
+      render();
+    } catch (e) {
+      list.innerHTML = `<div class="text-red-600 text-center py-8">Fehler: ${esc(e.message)}</div>`;
+    }
+  }
+
+  function render() {
+    const list = document.getElementById('list');
+    if (LIST.length === 0) {
+      list.innerHTML = '<div class="bg-white rounded-lg shadow p-8 text-center text-gray-500">Noch keine Empfänger erfasst.</div>';
+      return;
+    }
+    list.innerHTML = LIST.map(e => {
+      const kontakte = (e.kontakte || []).map(k => `${esc(k.name)} (${esc(k.email || '–')})`).join(', ');
+      const stweg = e.stweg ? `STWEG ${e.stweg}` : 'übergreifend';
+      const status = e.aktiv ? '<span class="text-emerald-700 text-xs px-2 py-0.5 bg-emerald-100 rounded">Aktiv</span>' : '<span class="text-gray-500 text-xs px-2 py-0.5 bg-gray-100 rounded">Inaktiv</span>';
+      const approval = e.requires_approval ? '<span class="text-amber-700 text-xs px-2 py-0.5 bg-amber-100 rounded">Freigabe-pflichtig</span>' : '<span class="text-green-700 text-xs px-2 py-0.5 bg-green-100 rounded">Direktversand</span>';
+      return `<article class="bg-white rounded-lg border p-3 cursor-pointer hover:shadow" onclick="edit(${e.id})">
+        <div class="flex items-baseline justify-between gap-3 flex-wrap">
+          <div>
+            <h3 class="font-semibold text-gray-900">${esc(e.name)}</h3>
+            <div class="text-xs text-gray-500 mt-0.5">${esc(KAT_LABEL[e.kategorie] || e.kategorie)} · ${esc(stweg)}</div>
+          </div>
+          <div class="flex items-center gap-2">${status}${approval}</div>
+        </div>
+        <div class="mt-2 text-xs text-gray-600 flex flex-wrap gap-x-3 gap-y-1">
+          ${e.email ? `📧 ${esc(e.email)}` : ''}
+          ${e.telefon ? `📞 ${esc(e.telefon)}` : ''}
+          ${kontakte ? `👤 ${esc(kontakte)}` : ''}
+        </div>
+      </article>`;
+    }).join('');
+  }
+
+  function openNew() {
+    document.getElementById('m-title').textContent = 'Neuer Empfänger';
+    document.getElementById('form').reset();
+    document.getElementById('m-id').value = '';
+    document.getElementById('m-aktiv').checked = true;
+    document.getElementById('m-req-approval').checked = true;
+    document.getElementById('m-del').classList.add('hidden');
+    pendingKontakte = [];
+    renderKontakte();
+    document.getElementById('m-err').classList.add('hidden');
+    document.getElementById('modal').classList.remove('hidden');
+  }
+
+  function edit(id) {
+    const e = LIST.find(x => x.id === id);
+    if (!e) return;
+    document.getElementById('m-title').textContent = 'Bearbeiten — ' + e.name;
+    document.getElementById('m-id').value = e.id;
+    document.getElementById('m-kat').value = e.kategorie;
+    document.getElementById('m-stweg').value = e.stweg || '';
+    document.getElementById('m-name').value = e.name || '';
+    document.getElementById('m-email').value = e.email || '';
+    document.getElementById('m-tel').value = e.telefon || '';
+    document.getElementById('m-adresse').value = e.adresse || '';
+    document.getElementById('m-web').value = e.website || '';
+    document.getElementById('m-cc').value = e.default_cc || '';
+    document.getElementById('m-replyto').value = e.default_reply_to || '';
+    document.getElementById('m-notiz').value = e.notiz || '';
+    document.getElementById('m-req-approval').checked = e.requires_approval !== false;
+    document.getElementById('m-aktiv').checked = e.aktiv !== false;
+    document.getElementById('m-del').classList.remove('hidden');
+    pendingKontakte = (e.kontakte || []).map(k => ({ ...k }));
+    renderKontakte();
+    document.getElementById('m-err').classList.add('hidden');
+    document.getElementById('modal').classList.remove('hidden');
+  }
+
+  function renderKontakte() {
+    document.getElementById('kontakte-list').innerHTML = pendingKontakte.map((k, i) => `
+      <div class="grid grid-cols-12 gap-2 items-start">
+        <input type="text" placeholder="Name" value="${esc(k.name||'')}" oninput="pendingKontakte[${i}].name=this.value" class="col-span-3 border rounded px-2 py-1 text-sm">
+        <input type="text" placeholder="Funktion" value="${esc(k.funktion||'')}" oninput="pendingKontakte[${i}].funktion=this.value" class="col-span-3 border rounded px-2 py-1 text-sm">
+        <input type="email" placeholder="Email" value="${esc(k.email||'')}" oninput="pendingKontakte[${i}].email=this.value" class="col-span-3 border rounded px-2 py-1 text-sm">
+        <input type="text" placeholder="Tel" value="${esc(k.telefon||'')}" oninput="pendingKontakte[${i}].telefon=this.value" class="col-span-2 border rounded px-2 py-1 text-sm">
+        <button type="button" onclick="pendingKontakte.splice(${i},1); renderKontakte()" class="col-span-1 text-red-600 text-xs hover:underline">×</button>
+      </div>`).join('') || '<p class="text-xs text-gray-400">Keine Kontaktpersonen.</p>';
+  }
+  function addKontakt() { pendingKontakte.push({ name:'', funktion:'', email:'', telefon:'' }); renderKontakte(); }
+
+  function closeModal() { document.getElementById('modal').classList.add('hidden'); }
+
+  async function save(ev) {
+    ev.preventDefault();
+    const id = document.getElementById('m-id').value;
+    const payload = {
+      kategorie: document.getElementById('m-kat').value,
+      stweg: document.getElementById('m-stweg').value || null,
+      name: document.getElementById('m-name').value.trim(),
+      email: document.getElementById('m-email').value.trim() || null,
+      telefon: document.getElementById('m-tel').value.trim() || null,
+      adresse: document.getElementById('m-adresse').value.trim() || null,
+      website: document.getElementById('m-web').value.trim() || null,
+      default_cc: document.getElementById('m-cc').value.trim() || null,
+      default_reply_to: document.getElementById('m-replyto').value.trim() || null,
+      notiz: document.getElementById('m-notiz').value.trim() || null,
+      requires_approval: document.getElementById('m-req-approval').checked,
+      aktiv: document.getElementById('m-aktiv').checked,
+      kontakte: pendingKontakte.filter(k => k.name || k.email),
+    };
+    try {
+      const url = id ? `/api/mail-empfaenger/${id}` : '/api/mail-empfaenger';
+      const r = await AuthentikAuth.apiFetch(url, {
+        method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+      closeModal(); await loadList();
+    } catch (e) {
+      const el = document.getElementById('m-err');
+      el.textContent = e.message; el.classList.remove('hidden');
+    }
+  }
+
+  async function del() {
+    const id = document.getElementById('m-id').value;
+    if (!id || !confirm('Empfänger wirklich löschen?')) return;
+    const r = await AuthentikAuth.apiFetch('/api/mail-empfaenger/' + id, { method: 'DELETE' });
+    if (!r.ok) { alert('Löschen fehlgeschlagen'); return; }
+    closeModal(); await loadList();
+  }
+  </script>
+</body>
+</html>

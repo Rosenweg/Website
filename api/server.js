@@ -752,6 +752,7 @@ const MANAGED_PAGES = [
   { id: 'auslagen', label: 'Auslagen / Vorschuesse' },
   { id: 'verwaltung-mail-outbox', label: 'Verwaltungs-Mail Outbox' },
   { id: 'personen', label: 'Personen (Eigentuemer/Bewohner)' },
+  { id: 'mail-empfaenger', label: 'Mail-Empfaenger (Stammdaten)' },
 ];
 
 const ACCESS_LEVELS = { none: 0, read: 1, write: 2 };
@@ -10015,6 +10016,139 @@ app.get('/api/auslagen/:id/beleg', authMiddleware, requirePermission('auslagen',
   }
 });
 
+// ─── Mail-Empfaenger Stammdaten ──────────────────────────────────────
+// Generische Stammdaten fuer Mail-Adressaten (Anwalt, Bank, Versicherung,
+// Handwerker, Behoerde, Energieversorger etc.). Wird genutzt von der
+// Ad-hoc-Compose-Funktion und kann von automatischen Workflows referenziert
+// werden ueber findEmpfaenger(kategorie, stweg).
+
+const EMPFAENGER_KATEGORIEN = [
+  'verwaltung',     // virtuell — sucht in verwaltungen-Tabelle
+  'anwalt',
+  'bank',
+  'versicherung',
+  'behoerde',
+  'energie',
+  'handwerker',
+  'lieferant',
+  'sonstige',
+];
+
+// Liefert die zustaendigen Empfaenger fuer (kategorie, stweg).
+// Reihenfolge: STWEG-spezifisch → STWEG-uebergreifend. Mehrere Treffer moeglich (alle).
+async function findEmpfaenger(kategorie, stweg) {
+  if (kategorie === 'verwaltung') {
+    const verw = await findVerwaltungForStweg(stweg);
+    if (!verw) return [];
+    return [{
+      id: verw.id, name: verw.firma, mailTo: verw.mailTo, mailCc: verw.mailCc,
+      replyTo: null, requires_approval: true, fallback: verw.fallback,
+    }];
+  }
+  const stwegInt = parseInt(stweg, 10);
+  const stwegVal = Number.isFinite(stwegInt) && stwegInt >= 1 && stwegInt <= 8 ? stwegInt : null;
+  // STWEG-spezifisch zuerst
+  let r = stwegVal
+    ? await pool.query(
+        'SELECT * FROM mail_empfaenger WHERE aktiv = true AND kategorie = $1 AND stweg = $2 ORDER BY id',
+        [kategorie, stwegVal])
+    : { rows: [] };
+  if (r.rows.length === 0) {
+    r = await pool.query(
+      'SELECT * FROM mail_empfaenger WHERE aktiv = true AND kategorie = $1 AND stweg IS NULL ORDER BY id',
+      [kategorie]);
+  }
+  return r.rows.map(e => {
+    const kontaktEmails = (e.kontakte || []).map(k => k.email).filter(Boolean);
+    const ccList = [...(e.default_cc || '').split(',').map(s => s.trim()).filter(Boolean), ...kontaktEmails]
+      .filter((v, i, a) => v && a.indexOf(v) === i);
+    return {
+      id: e.id, name: e.name, mailTo: e.email ? [e.email] : [],
+      mailCc: ccList, replyTo: e.default_reply_to || null,
+      requires_approval: e.requires_approval !== false, fallback: null,
+    };
+  });
+}
+
+// CRUD-API
+app.get('/api/mail-empfaenger', authMiddleware, requirePermission('mail-empfaenger', 'read'), async (req, res) => {
+  try {
+    const kategorie = String(req.query.kategorie || '').trim();
+    const stwegFilter = parseInt(req.query.stweg, 10);
+    const params = [];
+    let where = 'TRUE';
+    if (kategorie) { params.push(kategorie); where += ` AND kategorie = $${params.length}`; }
+    if (Number.isFinite(stwegFilter)) { params.push(stwegFilter); where += ` AND (stweg = $${params.length} OR stweg IS NULL)`; }
+    const r = await pool.query(
+      `SELECT * FROM mail_empfaenger WHERE ${where} ORDER BY aktiv DESC, kategorie, stweg NULLS FIRST, name`,
+      params,
+    );
+    res.json({ empfaenger: r.rows, kategorien: EMPFAENGER_KATEGORIEN });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/mail-empfaenger', authMiddleware, requirePermission('mail-empfaenger', 'write'), async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.kategorie || !EMPFAENGER_KATEGORIEN.includes(b.kategorie)) {
+      return res.status(400).json({ error: 'Ungueltige Kategorie' });
+    }
+    if (b.kategorie === 'verwaltung') {
+      return res.status(400).json({ error: 'Kategorie "verwaltung" bitte in der Verwaltungs-Stammdaten-Verwaltung pflegen' });
+    }
+    if (!b.name || !String(b.name).trim()) return res.status(400).json({ error: 'Name erforderlich' });
+    const r = await pool.query(
+      `INSERT INTO mail_empfaenger
+         (kategorie, name, email, telefon, adresse, website, stweg, kontakte,
+          default_cc, default_reply_to, requires_approval, notiz, aktiv)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10, COALESCE($11, true), $12, COALESCE($13, true))
+       RETURNING *`,
+      [b.kategorie, String(b.name).trim().slice(0, 255), b.email || null, b.telefon || null,
+       b.adresse || null, b.website || null, b.stweg || null,
+       JSON.stringify(b.kontakte || []),
+       b.default_cc || null, b.default_reply_to || null, b.requires_approval, b.notiz || null, b.aktiv],
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/mail-empfaenger/:id', authMiddleware, requirePermission('mail-empfaenger', 'write'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
+    const b = req.body || {};
+    if (b.kategorie && !EMPFAENGER_KATEGORIEN.includes(b.kategorie)) {
+      return res.status(400).json({ error: 'Ungueltige Kategorie' });
+    }
+    const r = await pool.query(
+      `UPDATE mail_empfaenger SET
+         kategorie = COALESCE($1, kategorie),
+         name = COALESCE($2, name),
+         email = $3, telefon = $4, adresse = $5, website = $6,
+         stweg = $7, kontakte = COALESCE($8::jsonb, kontakte),
+         default_cc = $9, default_reply_to = $10,
+         requires_approval = COALESCE($11, requires_approval),
+         notiz = $12, aktiv = COALESCE($13, aktiv), updated_at = NOW()
+       WHERE id = $14 RETURNING *`,
+      [b.kategorie || null, b.name ? String(b.name).trim().slice(0, 255) : null,
+       b.email || null, b.telefon || null, b.adresse || null, b.website || null,
+       b.stweg || null,
+       b.kontakte !== undefined ? JSON.stringify(b.kontakte) : null,
+       b.default_cc || null, b.default_reply_to || null,
+       b.requires_approval, b.notiz || null, b.aktiv, id],
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/mail-empfaenger/:id', authMiddleware, requirePermission('mail-empfaenger', 'write'), async (req, res) => {
+  try {
+    await pool.query('DELETE FROM mail_empfaenger WHERE id = $1', [parseInt(req.params.id, 10)]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ─── Personen-API ────────────────────────────────────────────────────
 // Personen sind die Single Source of Truth fuer Kontaktdaten. Aenderungen
 // werden automatisch via DB-Trigger auf alle verknuepften wohnungen_kontakte
@@ -11125,6 +11259,31 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_auslagen_stweg_status ON auslagen(stweg, status);
       CREATE INDEX IF NOT EXISTS idx_auslagen_created ON auslagen(created_at DESC);
 
+      -- Generische Mail-Empfaenger-Stammdaten (Anwalt, Bank, Versicherung,
+      -- Handwerker, Behoerde, Energieversorger etc.). Die "Verwaltung" bleibt
+      -- in eigener verwaltungen-Tabelle (Vertrag/Plattform-Felder), wird aber
+      -- von Empfaenger-Helper-Funktion als Kategorie 'verwaltung' mit-gequeried.
+      CREATE TABLE IF NOT EXISTS mail_empfaenger (
+        id SERIAL PRIMARY KEY,
+        kategorie VARCHAR(60) NOT NULL,        -- 'anwalt','bank','versicherung','behoerde','energie','handwerker','sonstige', ...
+        name VARCHAR(255) NOT NULL,             -- Firmen-/Personenname
+        email VARCHAR(255),
+        telefon VARCHAR(60),
+        adresse TEXT,
+        website VARCHAR(255),
+        stweg INTEGER,                          -- NULL = STWEG-uebergreifend
+        kontakte JSONB DEFAULT '[]'::jsonb,    -- [{name, funktion, email, telefon}, ...]
+        default_cc TEXT,                        -- automatisch immer mit-CCen (Komma-Liste)
+        default_reply_to VARCHAR(255),
+        requires_approval BOOLEAN DEFAULT true, -- Outbox-Freigabe-Pflicht?
+        notiz TEXT,
+        aktiv BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_mail_empf_kategorie ON mail_empfaenger(kategorie, aktiv);
+      CREATE INDEX IF NOT EXISTS idx_mail_empf_stweg ON mail_empfaenger(stweg, aktiv);
+
       -- Personen-Entitaet (Single Source of Truth fuer Kontaktdaten).
       -- Eine Person kann mehrere Wohnungen besitzen/bewohnen. Aenderungen an
       -- Email/Telefon/Adresse propagieren automatisch via Trigger auf alle
@@ -11353,6 +11512,14 @@ async function initDB() {
       INSERT INTO permissions (group_name, page, access) VALUES ('eigentuemer', 'auslagen', 'read')
       ON CONFLICT (group_name, page) DO NOTHING
     `);
+
+    // Mail-Empfaenger Stammdaten: Ausschuss read, Technik/Praesident sowieso write via isTechnik/isPraesident
+    for (const groupName of ausschussGroups) {
+      await client.query(`
+        INSERT INTO permissions (group_name, page, access) VALUES ($1, 'mail-empfaenger', 'read')
+        ON CONFLICT (group_name, page) DO NOTHING
+      `, [groupName]);
+    }
 
     // ─── Einmalige Personen-Migration ──────────────────────────────
     // Wenn die personen-Tabelle leer ist UND es aktive Kontakte gibt,
