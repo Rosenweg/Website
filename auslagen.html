@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Auslagen / Vorschüsse — Rosenweg</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/nav.js?v=2"></script>
+  <link rel="icon" href="/logo-rosenweg.png">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    .status-eingereicht { background:#fef3c7; color:#92400e; }
+    .status-genehmigt   { background:#dbeafe; color:#1e40af; }
+    .status-abgelehnt   { background:#fee2e2; color:#991b1b; }
+    .status-ausbezahlt  { background:#d1fae5; color:#065f46; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+  <script>RosenwegNav.init({ active: 'auslagen' });</script>
+
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+    <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center">
+      <p class="text-gray-600">Lade Login-Status…</p>
+    </div>
+
+    <div id="content" class="hidden">
+      <div class="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900">Auslagen &amp; Vorschüsse</h1>
+          <p class="text-sm text-gray-600 mt-1">Reiche Beträge zur Rückerstattung ein, die du für die STWEG vorausgelegt hast. Ausschuss prüft, Verwaltung zahlt aus.</p>
+        </div>
+        <button id="btn-new" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">+ Neue Auslage</button>
+      </div>
+
+      <!-- Summen -->
+      <div id="summary" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6"></div>
+
+      <!-- Filter -->
+      <div class="bg-white rounded-lg shadow p-3 mb-4 flex flex-wrap gap-3 items-center">
+        <label class="text-sm">
+          <span class="text-gray-600 mr-1">Status:</span>
+          <select id="filter-status" class="border rounded px-2 py-1 text-sm">
+            <option value="">alle</option>
+            <option value="eingereicht">eingereicht</option>
+            <option value="genehmigt">genehmigt</option>
+            <option value="abgelehnt">abgelehnt</option>
+            <option value="ausbezahlt">ausbezahlt</option>
+          </select>
+        </label>
+        <label class="text-sm" id="filter-scope-wrap" style="display:none">
+          <span class="text-gray-600 mr-1">Ansicht:</span>
+          <select id="filter-scope" class="border rounded px-2 py-1 text-sm">
+            <option value="alle">Alle (eigene + Prüfung)</option>
+            <option value="eigene">Nur meine</option>
+            <option value="pruefen">Nur zu prüfen</option>
+          </select>
+        </label>
+        <button onclick="loadAuslagen()" class="ml-auto text-sm text-blue-600 hover:underline">Neu laden</button>
+      </div>
+
+      <!-- Tabelle -->
+      <div class="bg-white rounded-lg shadow overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+              <tr>
+                <th class="px-3 py-2 text-left">Datum</th>
+                <th class="px-3 py-2 text-left">Eingereicht von</th>
+                <th class="px-3 py-2 text-left">STWEG</th>
+                <th class="px-3 py-2 text-left">Beschreibung</th>
+                <th class="px-3 py-2 text-left">Kategorie</th>
+                <th class="px-3 py-2 text-right">Betrag</th>
+                <th class="px-3 py-2 text-left">Beleg</th>
+                <th class="px-3 py-2 text-left">Status</th>
+                <th class="px-3 py-2 text-left">Aktionen</th>
+              </tr>
+            </thead>
+            <tbody id="tbody" class="divide-y divide-gray-100"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Modal: Neue / Bearbeiten -->
+  <div id="modal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-start justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-lg shadow-xl max-w-xl w-full p-6 my-8">
+      <div class="flex items-center justify-between mb-4">
+        <h2 id="modal-title" class="text-xl font-bold text-gray-900">Neue Auslage</h2>
+        <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+      </div>
+      <form id="form-auslage" class="space-y-3">
+        <input type="hidden" id="f-id">
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block text-sm">
+            <span class="text-gray-700">Datum *</span>
+            <input type="date" id="f-datum" required class="mt-1 block w-full border rounded px-2 py-1.5">
+          </label>
+          <label class="block text-sm">
+            <span class="text-gray-700">Betrag CHF *</span>
+            <input type="number" step="0.05" min="0.05" id="f-betrag" required class="mt-1 block w-full border rounded px-2 py-1.5">
+          </label>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block text-sm">
+            <span class="text-gray-700">STWEG (optional)</span>
+            <select id="f-stweg" class="mt-1 block w-full border rounded px-2 py-1.5">
+              <option value="">STWEG-übergreifend</option>
+            </select>
+          </label>
+          <label class="block text-sm">
+            <span class="text-gray-700">Kategorie</span>
+            <select id="f-kategorie" class="mt-1 block w-full border rounded px-2 py-1.5">
+              <option value="">– bitte wählen –</option>
+            </select>
+          </label>
+        </div>
+        <label class="block text-sm">
+          <span class="text-gray-700">Beschreibung *</span>
+          <textarea id="f-beschreibung" rows="3" required class="mt-1 block w-full border rounded px-2 py-1.5"
+                    placeholder="Was wurde gekauft / bezahlt und wofür?"></textarea>
+        </label>
+        <label class="block text-sm">
+          <span class="text-gray-700">IBAN für Rückzahlung (optional)</span>
+          <input type="text" id="f-iban" maxlength="40" placeholder="CH00 0000 0000 0000 0000 0"
+                 class="mt-1 block w-full border rounded px-2 py-1.5 font-mono text-xs">
+        </label>
+        <label class="block text-sm">
+          <span class="text-gray-700">Bemerkung (optional)</span>
+          <textarea id="f-bemerkung" rows="2" class="mt-1 block w-full border rounded px-2 py-1.5"></textarea>
+        </label>
+        <label class="block text-sm">
+          <span class="text-gray-700">Beleg / Quittung (PDF, JPG, PNG, max 15 MB)</span>
+          <input type="file" id="f-beleg" accept=".pdf,image/jpeg,image/png,image/webp,image/heic"
+                 class="mt-1 block w-full text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+          <p id="f-beleg-info" class="text-xs text-gray-500 mt-1"></p>
+        </label>
+        <div id="form-error" class="text-sm text-red-600 hidden"></div>
+        <div class="flex justify-end gap-2 pt-2">
+          <button type="button" onclick="closeModal()" class="px-3 py-1.5 text-gray-600 hover:bg-gray-100 rounded">Abbrechen</button>
+          <button type="submit" id="btn-save" class="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700">Speichern</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Prüfen (Ausschuss) -->
+  <div id="modal-review" class="hidden fixed inset-0 bg-black/40 z-50 flex items-start justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-lg shadow-xl max-w-xl w-full p-6 my-8">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-bold text-gray-900">Auslage prüfen</h2>
+        <button onclick="closeReview()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+      </div>
+      <div id="review-detail" class="text-sm space-y-2 mb-4"></div>
+      <label class="block text-sm">
+        <span class="text-gray-700">Bemerkung Ausschuss (optional)</span>
+        <textarea id="r-bemerkung" rows="2" class="mt-1 block w-full border rounded px-2 py-1.5"></textarea>
+      </label>
+      <div id="r-paid-row" class="mt-3 text-sm hidden">
+        <label class="block">
+          <span class="text-gray-700">Auszahlungsdatum</span>
+          <input type="date" id="r-paid-date" class="mt-1 border rounded px-2 py-1.5">
+        </label>
+      </div>
+      <div id="review-info" class="text-xs text-gray-500 mt-3 bg-gray-50 rounded p-2 hidden">
+        ℹ Bei Klick auf <em>Genehmigen</em> geht eine fertige Auszahlungs-Mail mit allen Details und dem Beleg als Anhang automatisch an die zuständige Verwaltung des STWEGs (Stammdaten unter <a href="/verwaltung-admin.html" class="underline">Verwaltung</a>).
+      </div>
+      <div id="review-error" class="text-sm text-red-600 hidden mt-2"></div>
+      <div class="flex flex-wrap justify-end gap-2 pt-4 border-t mt-4">
+        <button type="button" onclick="closeReview()" class="px-3 py-1.5 text-gray-600 hover:bg-gray-100 rounded">Schließen</button>
+        <button data-act="abgelehnt" class="r-btn px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700">Ablehnen</button>
+        <button data-act="genehmigt" class="r-btn px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700">Genehmigen</button>
+        <button data-act="ausbezahlt" id="r-btn-paid" class="r-btn px-3 py-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-700">Als ausbezahlt markieren</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const fmtCHF = n => 'CHF ' + Number(n).toLocaleString('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtDate = s => s ? new Date(s).toLocaleDateString('de-CH') : '';
+
+  let ME = null;
+  let STATE = { auslagen: [], can_review: false, can_mark_paid: false, kategorien: [], review_stwegs: [] };
+  let SITE_CONFIG = null;
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    ME = await AuthentikAuth.init({ requireAuth: true });
+    if (!ME) return;
+    document.getElementById('auth-gate').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+    try {
+      const c = await fetch('/site-config.json');
+      SITE_CONFIG = await c.json();
+    } catch { SITE_CONFIG = { stwegen: [] }; }
+    populateStwegSelect();
+    document.getElementById('btn-new').addEventListener('click', () => openNew());
+    document.getElementById('form-auslage').addEventListener('submit', onSubmit);
+    document.getElementById('filter-status').addEventListener('change', loadAuslagen);
+    document.getElementById('filter-scope').addEventListener('change', render);
+    document.querySelectorAll('#modal-review .r-btn').forEach(b => b.addEventListener('click', () => onReviewAction(b.dataset.act)));
+    await loadAuslagen();
+  });
+
+  function populateStwegSelect() {
+    const sel = document.getElementById('f-stweg');
+    for (const s of (SITE_CONFIG.stwegen || [])) {
+      const opt = document.createElement('option');
+      opt.value = s.nr;
+      opt.textContent = `STWEG ${s.nr} — ${s.adressen}`;
+      sel.appendChild(opt);
+    }
+  }
+
+  function populateKategorienSelect() {
+    const sel = document.getElementById('f-kategorie');
+    sel.innerHTML = '<option value="">– bitte wählen –</option>' +
+      (STATE.kategorien || []).map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
+  }
+
+  async function loadAuslagen() {
+    const tbody = document.getElementById('tbody');
+    tbody.innerHTML = '<tr><td colspan="9" class="px-4 py-6 text-center text-gray-400">Lade…</td></tr>';
+    try {
+      const q = new URLSearchParams();
+      const st = document.getElementById('filter-status').value;
+      if (st) q.set('status', st);
+      const r = await AuthentikAuth.apiFetch('/api/auslagen?' + q.toString());
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        tbody.innerHTML = `<tr><td colspan="9" class="px-4 py-6 text-center text-red-600">${esc(e.error || 'HTTP ' + r.status)}</td></tr>`;
+        return;
+      }
+      STATE = await r.json();
+      populateKategorienSelect();
+      document.getElementById('filter-scope-wrap').style.display = STATE.can_review ? '' : 'none';
+      render();
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="9" class="px-4 py-6 text-center text-red-600">Fehler: ${esc(e.message)}</td></tr>`;
+    }
+  }
+
+  function render() {
+    const tbody = document.getElementById('tbody');
+    const scope = document.getElementById('filter-scope').value || 'alle';
+    const myEmail = (ME.email || '').toLowerCase();
+    let list = STATE.auslagen.slice();
+    if (STATE.can_review) {
+      if (scope === 'eigene') list = list.filter(a => (a.user_email || '').toLowerCase() === myEmail);
+      else if (scope === 'pruefen') list = list.filter(a => (a.user_email || '').toLowerCase() !== myEmail && a.status === 'eingereicht');
+    }
+
+    renderSummary(list);
+
+    if (list.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="9" class="px-4 py-6 text-center text-gray-400">Keine Auslagen.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = list.map(a => {
+      const isMine = (a.user_email || '').toLowerCase() === myEmail;
+      const canEditOwn = isMine && a.status === 'eingereicht';
+      const canReviewThis = STATE.can_review && !isMine;
+      const canOwnerConfirm = isMine && a.status === 'genehmigt';
+      const stwegLabel = a.stweg ? `STWEG ${a.stweg}` : '—';
+      const beleg = a.beleg_path
+        ? `<a href="/api/auslagen/${a.id}/beleg" target="_blank" class="text-blue-600 hover:underline">${esc(a.beleg_filename || 'öffnen')}</a>`
+        : '<span class="text-gray-400">–</span>';
+      const aktionen = [];
+      if (canEditOwn) {
+        aktionen.push(`<button onclick="openEdit(${a.id})" class="text-blue-600 hover:underline">bearbeiten</button>`);
+        aktionen.push(`<button onclick="deleteAuslage(${a.id})" class="text-red-600 hover:underline">löschen</button>`);
+      }
+      if (canOwnerConfirm) {
+        aktionen.push(`<button onclick="openReview(${a.id})" class="text-emerald-700 hover:underline font-medium">Erhalt bestätigen</button>`);
+      }
+      if (canReviewThis) {
+        aktionen.push(`<button onclick="openReview(${a.id})" class="text-emerald-700 hover:underline font-medium">prüfen</button>`);
+      } else if (STATE.can_review && a.status !== 'ausbezahlt' && a.status !== 'abgelehnt') {
+        aktionen.push(`<button onclick="openReview(${a.id})" class="text-gray-600 hover:underline">Detail</button>`);
+      }
+      if (aktionen.length === 0) {
+        aktionen.push(`<button onclick="openReview(${a.id})" class="text-gray-600 hover:underline">Detail</button>`);
+      }
+      return `<tr class="hover:bg-gray-50">
+        <td class="px-3 py-2 text-gray-700 whitespace-nowrap">${esc(fmtDate(a.datum))}</td>
+        <td class="px-3 py-2 text-gray-700">${esc(a.user_name)}</td>
+        <td class="px-3 py-2 text-gray-700 whitespace-nowrap">${esc(stwegLabel)}</td>
+        <td class="px-3 py-2 text-gray-700">${esc(a.beschreibung)}</td>
+        <td class="px-3 py-2 text-gray-700">${esc(a.kategorie || '—')}</td>
+        <td class="px-3 py-2 text-gray-900 text-right font-mono whitespace-nowrap">${esc(fmtCHF(a.betrag_chf))}</td>
+        <td class="px-3 py-2">${beleg}</td>
+        <td class="px-3 py-2"><span class="status-${esc(a.status)} px-2 py-0.5 rounded text-xs font-medium">${esc(a.status)}</span></td>
+        <td class="px-3 py-2 whitespace-nowrap space-x-3">${aktionen.join('')}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  function renderSummary(list) {
+    const sum = (st) => list.filter(a => a.status === st).reduce((s, a) => s + Number(a.betrag_chf || 0), 0);
+    const cnt = (st) => list.filter(a => a.status === st).length;
+    const box = (label, value, count, cls) => `
+      <div class="bg-white rounded-lg shadow p-3">
+        <div class="text-xs uppercase ${cls}">${esc(label)}</div>
+        <div class="text-xl font-bold text-gray-900 mt-1">${esc(fmtCHF(value))}</div>
+        <div class="text-xs text-gray-500">${count} Einträge</div>
+      </div>`;
+    document.getElementById('summary').innerHTML =
+      box('Eingereicht', sum('eingereicht'), cnt('eingereicht'), 'text-yellow-700') +
+      box('Genehmigt', sum('genehmigt'), cnt('genehmigt'), 'text-blue-700') +
+      box('Abgelehnt', sum('abgelehnt'), cnt('abgelehnt'), 'text-red-700') +
+      box('Ausbezahlt', sum('ausbezahlt'), cnt('ausbezahlt'), 'text-emerald-700');
+  }
+
+  function openNew() {
+    document.getElementById('modal-title').textContent = 'Neue Auslage';
+    document.getElementById('form-auslage').reset();
+    document.getElementById('f-id').value = '';
+    document.getElementById('f-datum').value = new Date().toISOString().slice(0, 10);
+    document.getElementById('f-beleg-info').textContent = '';
+    document.getElementById('form-error').classList.add('hidden');
+    document.getElementById('modal').classList.remove('hidden');
+  }
+
+  function openEdit(id) {
+    const a = STATE.auslagen.find(x => x.id === id);
+    if (!a) return;
+    document.getElementById('modal-title').textContent = 'Auslage bearbeiten';
+    document.getElementById('f-id').value = a.id;
+    document.getElementById('f-datum').value = (a.datum || '').slice(0, 10);
+    document.getElementById('f-betrag').value = a.betrag_chf;
+    document.getElementById('f-stweg').value = a.stweg || '';
+    document.getElementById('f-kategorie').value = a.kategorie || '';
+    document.getElementById('f-beschreibung').value = a.beschreibung || '';
+    document.getElementById('f-iban').value = a.iban || '';
+    document.getElementById('f-bemerkung').value = a.bemerkung_eigentuemer || '';
+    document.getElementById('f-beleg').value = '';
+    document.getElementById('f-beleg-info').textContent = a.beleg_filename ? `Aktuell hinterlegt: ${a.beleg_filename} (zum Austauschen neue Datei wählen)` : '';
+    document.getElementById('form-error').classList.add('hidden');
+    document.getElementById('modal').classList.remove('hidden');
+  }
+
+  function closeModal() {
+    document.getElementById('modal').classList.add('hidden');
+  }
+
+  async function onSubmit(ev) {
+    ev.preventDefault();
+    const btn = document.getElementById('btn-save');
+    btn.disabled = true; btn.textContent = 'Speichere…';
+    const errEl = document.getElementById('form-error');
+    errEl.classList.add('hidden');
+    try {
+      const id = document.getElementById('f-id').value;
+      const file = document.getElementById('f-beleg').files[0];
+      let beleg_base64 = null, beleg_filename = null;
+      if (file) {
+        if (file.size > 15 * 1024 * 1024) throw new Error('Beleg ist größer als 15 MB');
+        beleg_base64 = await fileToBase64(file);
+        beleg_filename = file.name;
+      }
+      const payload = {
+        datum: document.getElementById('f-datum').value,
+        betrag_chf: parseFloat(document.getElementById('f-betrag').value),
+        stweg: document.getElementById('f-stweg').value || null,
+        kategorie: document.getElementById('f-kategorie').value || null,
+        beschreibung: document.getElementById('f-beschreibung').value.trim(),
+        iban: document.getElementById('f-iban').value.trim() || null,
+        bemerkung_eigentuemer: document.getElementById('f-bemerkung').value.trim() || null,
+      };
+      if (beleg_base64) { payload.beleg_base64 = beleg_base64; payload.beleg_filename = beleg_filename; }
+      const url = id ? `/api/auslagen/${id}` : '/api/auslagen';
+      const method = id ? 'PUT' : 'POST';
+      const r = await AuthentikAuth.apiFetch(url, {
+        method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+      closeModal();
+      await loadAuslagen();
+    } catch (e) {
+      errEl.textContent = e.message;
+      errEl.classList.remove('hidden');
+    } finally {
+      btn.disabled = false; btn.textContent = 'Speichern';
+    }
+  }
+
+  async function fileToBase64(file) {
+    const buf = await file.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let bin = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return btoa(bin);
+  }
+
+  async function deleteAuslage(id) {
+    if (!confirm('Diese Auslage wirklich löschen?')) return;
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/auslagen/${id}`, { method: 'DELETE' });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        throw new Error(e.error || 'HTTP ' + r.status);
+      }
+      await loadAuslagen();
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+
+  let REVIEW_ID = null;
+  function openReview(id) {
+    const a = STATE.auslagen.find(x => x.id === id);
+    if (!a) return;
+    REVIEW_ID = id;
+    const stwegLabel = a.stweg ? `STWEG ${a.stweg}` : 'STWEG-übergreifend';
+    const beleg = a.beleg_path
+      ? `<a href="/api/auslagen/${a.id}/beleg" target="_blank" class="text-blue-600 hover:underline">${esc(a.beleg_filename || 'öffnen')}</a>`
+      : '<span class="text-gray-400">kein Beleg</span>';
+    document.getElementById('review-detail').innerHTML = `
+      <div><span class="text-gray-500">Eingereicht von:</span> <span class="font-medium">${esc(a.user_name)}</span> &lt;${esc(a.user_email)}&gt;</div>
+      <div><span class="text-gray-500">STWEG:</span> ${esc(stwegLabel)}</div>
+      <div><span class="text-gray-500">Datum:</span> ${esc(fmtDate(a.datum))}</div>
+      <div><span class="text-gray-500">Kategorie:</span> ${esc(a.kategorie || '—')}</div>
+      <div><span class="text-gray-500">Betrag:</span> <span class="font-mono font-semibold">${esc(fmtCHF(a.betrag_chf))}</span></div>
+      <div><span class="text-gray-500">Beschreibung:</span> ${esc(a.beschreibung)}</div>
+      ${a.bemerkung_eigentuemer ? `<div><span class="text-gray-500">Bemerkung Eigentümer:</span> ${esc(a.bemerkung_eigentuemer)}</div>` : ''}
+      <div><span class="text-gray-500">IBAN:</span> ${a.iban ? `<span class="font-mono">${esc(a.iban)}</span>` : '<span class="text-gray-400">nicht angegeben</span>'}</div>
+      <div><span class="text-gray-500">Beleg:</span> ${beleg}</div>
+      <div><span class="text-gray-500">Status:</span> <span class="status-${esc(a.status)} px-2 py-0.5 rounded text-xs">${esc(a.status)}</span></div>
+      ${a.bemerkung_ausschuss ? `<div class="pt-2 border-t mt-2"><span class="text-gray-500">Bisherige Bemerkung Ausschuss:</span> ${esc(a.bemerkung_ausschuss)}</div>` : ''}
+      ${a.bearbeitet_von ? `<div class="text-xs text-gray-400">Zuletzt bearbeitet von ${esc(a.bearbeitet_von)} am ${esc(fmtDate(a.bearbeitet_am))}${a.ausbezahlt_am ? ' · ausbezahlt am ' + esc(fmtDate(a.ausbezahlt_am)) : ''}</div>` : ''}
+    `;
+    document.getElementById('r-bemerkung').value = a.bemerkung_ausschuss || '';
+    document.getElementById('r-paid-date').value = a.ausbezahlt_am ? a.ausbezahlt_am.slice(0, 10) : new Date().toISOString().slice(0, 10);
+    document.getElementById('r-paid-row').classList.add('hidden');
+    document.getElementById('review-error').classList.add('hidden');
+
+    const isMine = (a.user_email || '').toLowerCase() === (ME.email || '').toLowerCase();
+    const canReviewThis = STATE.can_review && !isMine;
+    const isOwnerConfirmCase = isMine && a.status === 'genehmigt';
+
+    // Bemerkung-Feld nur fuer Reviewer
+    document.getElementById('r-bemerkung').disabled = !canReviewThis;
+    document.getElementById('r-bemerkung').classList.toggle('bg-gray-100', !canReviewThis);
+
+    document.getElementById('review-info').classList.toggle('hidden', !(canReviewThis && a.status === 'eingereicht'));
+    document.querySelectorAll('#modal-review .r-btn').forEach(b => {
+      const act = b.dataset.act;
+      let visible = false, enabled = true;
+      if (canReviewThis) {
+        // Ausschuss/Tech/Praesident-Workflow
+        if (act === 'genehmigt' || act === 'abgelehnt') visible = true;
+        if (act === 'ausbezahlt') visible = STATE.can_mark_paid;
+      } else if (isOwnerConfirmCase) {
+        // Owner bestaetigt Erhalt
+        if (act === 'ausbezahlt') visible = true;
+      }
+      if (visible && act === a.status) enabled = false;
+      b.style.display = visible ? '' : 'none';
+      b.disabled = !enabled;
+      b.classList.toggle('opacity-50', !enabled);
+      b.classList.toggle('cursor-not-allowed', !enabled);
+      if (act === 'ausbezahlt') {
+        b.textContent = isOwnerConfirmCase && !canReviewThis ? 'Erhalt bestätigen' : 'Als ausbezahlt markieren';
+      }
+    });
+
+    document.getElementById('modal-review').classList.remove('hidden');
+  }
+
+  function closeReview() {
+    REVIEW_ID = null;
+    document.getElementById('modal-review').classList.add('hidden');
+  }
+
+  async function onReviewAction(action) {
+    if (!REVIEW_ID) return;
+    if (action === 'ausbezahlt') {
+      const row = document.getElementById('r-paid-row');
+      if (row.classList.contains('hidden')) {
+        row.classList.remove('hidden');
+        return;
+      }
+    }
+    const payload = {
+      status: action,
+      bemerkung_ausschuss: document.getElementById('r-bemerkung').value.trim() || null,
+    };
+    if (action === 'ausbezahlt') payload.ausbezahlt_am = document.getElementById('r-paid-date').value;
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/auslagen/${REVIEW_ID}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+      closeReview();
+      if (data.auszahlung_mail) {
+        const m = data.auszahlung_mail;
+        if (m.ok && m.fallback === 'ausschuss') {
+          alert('Genehmigt — ABER: für diesen STWEG ist keine aktive Verwaltung mit E-Mail hinterlegt. Die Auszahlungs-Mail ging ersatzweise an den Ausschuss. Bitte unter "Verwaltung" die Stammdaten pflegen.');
+        } else if (m.ok) {
+          alert('Genehmigt. Auszahlungs-Mail mit allen Details (inkl. Beleg-Anhang) wurde an "' + (m.firma || '') + '" geschickt: ' + (m.to || []).join(', '));
+        } else {
+          alert('Genehmigt, aber Auszahlungs-Mail schlug fehl: ' + (m.reason || 'unbekannter Fehler') + '.\n\nBitte Verwaltung manuell informieren.');
+        }
+      }
+      await loadAuslagen();
+    } catch (e) {
+      const el = document.getElementById('review-error');
+      el.textContent = e.message; el.classList.remove('hidden');
+    }
+  }
+  </script>
+</body>
+</html>

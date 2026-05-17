@@ -13,10 +13,15 @@ const STWEGKontakte = (function() {
 
     async function loadHausverwaltung(stwegNr) {
         try {
-            const cfg = await (await fetch('/site-config.json')).json();
-            const v = cfg.verwaltung;
+            const v = await SiteConfig.getVerwaltungForStweg(stwegNr);
             const el = document.getElementById('hausverwaltung-card');
             if (!el) return;
+            if (!v) {
+                el.innerHTML = '<p class="text-sm text-gray-500">Keine Hausverwaltung hinterlegt.</p>';
+                return;
+            }
+            const telDigits = (v.telefon || '').replace(/\s/g, '');
+            const webHref = v.website ? (v.website.startsWith('http') ? v.website : 'https://' + v.website) : '';
             el.innerHTML = `
                 <div class="flex items-center mb-4">
                     <svg class="h-8 w-8 text-blue-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -25,13 +30,12 @@ const STWEGKontakte = (function() {
                     <h3 class="text-xl font-semibold">Hausverwaltung</h3>
                 </div>
                 <p class="text-gray-700 mb-2 font-semibold text-lg">${esc(v.firma)}</p>
-                <p class="text-gray-600 text-sm mb-2">${esc(v.strasse)}</p>
-                <p class="text-gray-600 text-sm mb-3">${esc(v.plz_ort)}</p>
-                <p class="text-gray-600 text-sm mb-2"><strong>Tel:</strong> <a href="tel:${esc(v.telefon?.replace(/\s/g,''))}" class="text-blue-600 hover:underline">${esc(v.telefon)}</a></p>
-                <p class="text-gray-600 text-sm mb-2"><strong>E-Mail:</strong> <a href="mailto:${esc(v.email)}" class="text-blue-600 hover:underline">${esc(v.email)}</a></p>
-                <p class="text-gray-600 text-sm mb-3"><strong>Web:</strong> <a href="https://${esc(v.website)}" target="_blank" class="text-blue-600 hover:underline">${esc(v.website)}</a></p>
-                <p class="text-gray-600 text-sm"><strong>Öffnungszeiten:</strong><br>${esc(v.oeffnungszeiten)}</p>`;
-        } catch(e) { console.error('Config load error:', e); }
+                ${v.adresse ? `<p class="text-gray-600 text-sm mb-3 whitespace-pre-line">${esc(v.adresse)}</p>` : ''}
+                ${v.telefon ? `<p class="text-gray-600 text-sm mb-2"><strong>Tel:</strong> <a href="tel:${esc(telDigits)}" class="text-blue-600 hover:underline">${esc(v.telefon)}</a></p>` : ''}
+                ${v.email ? `<p class="text-gray-600 text-sm mb-2"><strong>E-Mail:</strong> <a href="mailto:${esc(v.email)}" class="text-blue-600 hover:underline">${esc(v.email)}</a></p>` : ''}
+                ${v.website ? `<p class="text-gray-600 text-sm mb-3"><strong>Web:</strong> <a href="${esc(webHref)}" target="_blank" class="text-blue-600 hover:underline">${esc(v.website)}</a></p>` : ''}
+                ${v.oeffnungszeiten ? `<p class="text-gray-600 text-sm"><strong>Öffnungszeiten:</strong><br>${esc(v.oeffnungszeiten)}</p>` : ''}`;
+        } catch(e) { console.error('Verwaltung load error:', e); }
     }
 
     async function loadKontakte(stwegNr, user) {

@@ -266,16 +266,15 @@ npm start</code></pre>
         </div>
     </section>
 
-    <!-- Config-basierte Verwaltungsdaten laden -->
+    <!-- Verwaltungsdaten dynamisch aus DB (Fallback: site-config.json) -->
     <script>
-    SiteConfig.load().then(() => {
-        const v = SiteConfig.getVerwaltung();
-        if (v) {
-            document.getElementById('wk-verw-firma').textContent = v.firma;
-            document.getElementById('wk-verw-tel').textContent = v.telefon;
-            document.getElementById('wk-verw-email').textContent = v.email;
-            document.getElementById('wk-verw-kontakt').textContent = '• Kontakt: ' + v.email + ' oder ' + v.telefon;
-        }
+    SiteConfig.getVerwaltungForStweg(3).then(v => {
+        if (!v) return;
+        document.getElementById('wk-verw-firma').textContent = v.firma;
+        document.getElementById('wk-verw-tel').textContent = v.telefon || '';
+        document.getElementById('wk-verw-email').textContent = v.email || '';
+        const k = document.getElementById('wk-verw-kontakt');
+        if (k) k.textContent = '• Kontakt: ' + (v.email || '–') + (v.telefon ? ' oder ' + v.telefon : '');
     });
     </script>
 

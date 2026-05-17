@@ -29,6 +29,18 @@
             </div>
             <button onclick="addNew()" class="bg-red-700 hover:bg-red-800 text-white text-sm px-4 py-2 rounded-lg font-medium">+ Neue Verwaltung</button>
         </header>
+
+        <!-- Hinweis: automatische Nutzung der Verwaltungs-Stammdaten -->
+        <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 text-sm text-amber-900">
+            <div class="font-semibold mb-1">⚙ Diese Daten werden automatisch verwendet</div>
+            <p>Folgende Funktionen ermitteln die zuständige Verwaltung dynamisch aus dieser Liste (Reihenfolge: <em>STWEG-spezifisch → STWEG-übergreifend → Fallback an Ausschuss</em>):</p>
+            <ul class="list-disc list-inside mt-2 space-y-0.5">
+                <li><a href="/auslagen.html" class="underline hover:text-amber-700">Auslagen / Vorschüsse</a> — bei Freigabe geht eine fertige Auszahlungs-E-Mail mit Beleg-Anhang an die Verwaltung (To: <code class="bg-amber-100 px-1 rounded">Firmen-E-Mail</code>, CC: alle Kontakt-E-Mails)</li>
+                <li>Startseite (<a href="/index.html" class="underline hover:text-amber-700">/index.html</a>) sowie alle STWEG-Übersichten (Hausverwaltungs-Kachel) und <a href="/stweg3/pages/waschkueche-management-info.html" class="underline hover:text-amber-700">Waschküchen-Info</a> — laden Firma, Adresse, Telefon, E-Mail, Website und Öffnungszeiten dynamisch von hier</li>
+            </ul>
+            <p class="mt-2 text-xs text-amber-800">→ Pro <strong>aktiver</strong> Verwaltung mindestens <strong>Firmenname</strong> und eine <strong>E-Mail</strong> (oder ein Kontakt mit E-Mail) hinterlegen. Wenn die Tabelle leer ist, wird übergangsweise die statische <code>site-config.json</code> verwendet.</p>
+        </div>
+
         <div id="loading" class="text-center text-gray-400 py-12">Lade …</div>
         <div id="list" class="space-y-3"></div>
     </main>
@@ -81,6 +93,16 @@
                     <div>
                         <label class="block text-xs font-medium text-gray-600 mb-1">E-Mail (allgemein)</label>
                         <input type="email" id="m-email" class="w-full border border-gray-300 rounded px-3 py-1.5">
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Website</label>
+                        <input type="text" id="m-website" placeholder="langpartners.ch" class="w-full border border-gray-300 rounded px-3 py-1.5">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Öffnungszeiten</label>
+                        <input type="text" id="m-oeffnung" placeholder="Mo–Fr 09:00–12:00" class="w-full border border-gray-300 rounded px-3 py-1.5">
                     </div>
                 </div>
                 <fieldset class="border rounded-lg p-3">
@@ -236,6 +258,8 @@
         document.getElementById('m-adresse').value = v.adresse || '';
         document.getElementById('m-telefon').value = v.telefon || '';
         document.getElementById('m-email').value = v.email || '';
+        document.getElementById('m-website').value = v.website || '';
+        document.getElementById('m-oeffnung').value = v.oeffnungszeiten || '';
         document.getElementById('m-platt-name').value = v.plattform_name || '';
         document.getElementById('m-platt-url').value = v.plattform_url || '';
         document.getElementById('m-platt-user').value = v.plattform_user || '';
@@ -271,6 +295,8 @@
             adresse: document.getElementById('m-adresse').value.trim() || null,
             telefon: document.getElementById('m-telefon').value.trim() || null,
             email: document.getElementById('m-email').value.trim() || null,
+            website: document.getElementById('m-website').value.trim() || null,
+            oeffnungszeiten: document.getElementById('m-oeffnung').value.trim() || null,
             plattform_name: document.getElementById('m-platt-name').value.trim() || null,
             plattform_url: document.getElementById('m-platt-url').value.trim() || null,
             plattform_user: document.getElementById('m-platt-user').value.trim() || null,

@@ -749,6 +749,7 @@ const MANAGED_PAGES = [
   { id: 'wohnungsverwaltung', label: 'Wohnungsverwaltung' },
   { id: 'proxmox-verwaltung', label: 'Proxmox-Verwaltung' },
   { id: 'handwerker', label: 'Handwerker & Lieferanten' },
+  { id: 'auslagen', label: 'Auslagen / Vorschuesse' },
 ];
 
 const ACCESS_LEVELS = { none: 0, read: 1, write: 2 };
@@ -4610,7 +4611,7 @@ app.get('/api/stweg/:stweg/wohnungen', async (req, res) => {
 app.get('/api/verwaltungen/public', async (req, res) => {
   try {
     const { rows: verw } = await pool.query(`
-      SELECT id, stweg, firma_name, adresse, telefon, email,
+      SELECT id, stweg, firma_name, adresse, telefon, email, website, oeffnungszeiten,
              plattform_name, plattform_url
       FROM verwaltungen WHERE aktiv = true ORDER BY stweg NULLS FIRST, firma_name
     `);
@@ -4649,11 +4650,13 @@ app.post('/api/verwaltungen', authMiddleware, requireAusschussOrTechnik, async (
     const b = req.body || {};
     const r = await pool.query(`
       INSERT INTO verwaltungen
-        (stweg, firma_name, adresse, telefon, email, plattform_name, plattform_url, plattform_user, plattform_pass,
+        (stweg, firma_name, adresse, telefon, email, website, oeffnungszeiten,
+         plattform_name, plattform_url, plattform_user, plattform_pass,
          vertrag_von, vertrag_bis, kuendigungsfrist_monate, kuendigung_eingereicht_am, dokument_pfad, notizen, aktiv)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, COALESCE($16, true))
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, COALESCE($18, true))
       RETURNING *
     `, [b.stweg || null, b.firma_name, b.adresse || null, b.telefon || null, b.email || null,
+        b.website || null, b.oeffnungszeiten || null,
         b.plattform_name || null, b.plattform_url || null, b.plattform_user || null, b.plattform_pass || null,
         b.vertrag_von || null, b.vertrag_bis || null, b.kuendigungsfrist_monate || null, b.kuendigung_eingereicht_am || null,
         b.dokument_pfad || null, b.notizen || null, b.aktiv]);
@@ -4669,11 +4672,13 @@ app.put('/api/verwaltungen/:id', authMiddleware, requireAusschussOrTechnik, asyn
     const r = await pool.query(`
       UPDATE verwaltungen SET
         stweg = $1, firma_name = $2, adresse = $3, telefon = $4, email = $5,
-        plattform_name = $6, plattform_url = $7, plattform_user = $8, plattform_pass = $9,
-        vertrag_von = $10, vertrag_bis = $11, kuendigungsfrist_monate = $12, kuendigung_eingereicht_am = $13,
-        dokument_pfad = $14, notizen = $15, aktiv = $16, updated_at = NOW()
-      WHERE id = $17 RETURNING *
+        website = $6, oeffnungszeiten = $7,
+        plattform_name = $8, plattform_url = $9, plattform_user = $10, plattform_pass = $11,
+        vertrag_von = $12, vertrag_bis = $13, kuendigungsfrist_monate = $14, kuendigung_eingereicht_am = $15,
+        dokument_pfad = $16, notizen = $17, aktiv = $18, updated_at = NOW()
+      WHERE id = $19 RETURNING *
     `, [b.stweg || null, b.firma_name, b.adresse || null, b.telefon || null, b.email || null,
+        b.website || null, b.oeffnungszeiten || null,
         b.plattform_name || null, b.plattform_url || null, b.plattform_user || null, b.plattform_pass || null,
         b.vertrag_von || null, b.vertrag_bis || null, b.kuendigungsfrist_monate || null, b.kuendigung_eingereicht_am || null,
         b.dokument_pfad || null, b.notizen || null, b.aktiv === false ? false : true, id]);
@@ -9063,6 +9068,489 @@ app.delete('/api/handwerker/:id', authMiddleware, requirePermission('handwerker'
   }
 });
 
+// ─── Auslagen / Vorschuesse ────────────────────────────────────────────
+// Eigentuemer reichen verauslagte Betraege ein; Ausschuss/Technik genehmigt
+// und markiert als ausbezahlt. Belege werden als Dateien im DOCS-Volume
+// unter <stweg-folder>/auslagen/ abgelegt.
+
+const AUSLAGEN_KATEGORIEN = ['Material', 'Reparatur', 'Porto/Versand', 'Verpflegung', 'Reinigung', 'Reisekosten', 'Sonstiges'];
+const AUSLAGEN_STATUS = ['eingereicht', 'genehmigt', 'abgelehnt', 'ausbezahlt'];
+
+function auslagenStwegFolder(stweg) {
+  const n = parseInt(stweg, 10);
+  if (Number.isFinite(n) && n >= 1 && n <= 8) return `stweg${n}`;
+  return 'allgemein';
+}
+
+// Sucht die zustaendige Verwaltung fuer einen STWEG.
+// Reihenfolge:
+//   1) Aktive Verwaltung mit passendem stweg
+//   2) Aktive Verwaltung mit stweg IS NULL (Kooperations-weit)
+//   3) Fallback: Ausschuss des STWEGs (+ Technik) — mit Hinweis "keine Verwaltung hinterlegt"
+// Liefert { firma, mailTo, mailCc, fallback }
+async function findVerwaltungForStweg(stweg) {
+  const stwegInt = parseInt(stweg, 10);
+  const stwegVal = Number.isFinite(stwegInt) ? stwegInt : null;
+  let r = stwegVal
+    ? await pool.query('SELECT * FROM verwaltungen WHERE aktiv = true AND stweg = $1 ORDER BY id LIMIT 1', [stwegVal])
+    : { rows: [] };
+  if (r.rows.length === 0) {
+    r = await pool.query('SELECT * FROM verwaltungen WHERE aktiv = true AND stweg IS NULL ORDER BY id LIMIT 1');
+  }
+  if (r.rows.length > 0) {
+    const v = r.rows[0];
+    const k = await pool.query(
+      'SELECT name, email FROM verwaltungs_kontakte WHERE verwaltung_id = $1 AND email IS NOT NULL AND email <> \'\' ORDER BY sort_order, id',
+      [v.id],
+    );
+    const mailTo = [];
+    if (v.email) mailTo.push(v.email);
+    const mailCc = k.rows.map(x => x.email).filter(e => e && !mailTo.includes(e));
+    if (mailTo.length === 0 && mailCc.length === 0) {
+      // Verwaltung existiert, hat aber keine E-Mail — auf Fallback gehen
+    } else {
+      return { firma: v.firma_name, mailTo, mailCc, fallback: null };
+    }
+  }
+  // Fallback: Ausschuss des STWEGs (+ Technik-Gruppe). Aus users.groups_json
+  const groupNames = [];
+  if (stwegVal && STWEG_GROUPS[stwegVal]?.ausschuss) groupNames.push(STWEG_GROUPS[stwegVal].ausschuss);
+  groupNames.push('technik');
+  const u = await pool.query(
+    `SELECT DISTINCT email FROM users
+      WHERE active = true AND email IS NOT NULL AND email <> ''
+        AND EXISTS (
+          SELECT 1 FROM jsonb_array_elements_text(COALESCE(groups_json::jsonb, '[]'::jsonb)) g
+          WHERE LOWER(g) = ANY($1::text[])
+        )`,
+    [groupNames.map(g => g.toLowerCase())],
+  );
+  const emails = u.rows.map(x => x.email).filter(Boolean);
+  if (emails.length === 0) return null;
+  return {
+    firma: `Ausschuss ${stwegVal ? 'STWEG ' + stwegVal : 'Kooperation'} (KEINE Verwaltung hinterlegt!)`,
+    mailTo: emails,
+    mailCc: [],
+    fallback: 'ausschuss',
+  };
+}
+
+// Fertige Auszahlungs-E-Mail an die Verwaltung mit allen Details + Beleg-Attachment.
+async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName) {
+  try {
+    const verw = await findVerwaltungForStweg(auslage.stweg);
+    if (!verw || verw.mailTo.length === 0) {
+      console.warn(`[auslagen] Keine Verwaltung mit E-Mail fuer STWEG ${auslage.stweg || '-'} hinterlegt`);
+      return { ok: false, reason: 'keine Verwaltung mit E-Mail hinterlegt' };
+    }
+    const stwegLabel = auslage.stweg ? `STWEG ${auslage.stweg}` : 'STWEG-uebergreifend (Kooperation)';
+    const betrag = Number(auslage.betrag_chf).toFixed(2);
+    const datum = auslage.datum ? new Date(auslage.datum).toLocaleDateString('de-CH') : '-';
+    const today = new Date().toLocaleDateString('de-CH');
+
+    // Beleg ggf. als Attachment anhaengen (Verwaltung hat keinen Login)
+    const attachments = [];
+    if (auslage.beleg_path) {
+      try {
+        const full = pathModule.join(DOCS_PATH, auslage.beleg_path);
+        if (full.startsWith(pathModule.resolve(DOCS_PATH) + '/')) {
+          const buf = await fs.readFile(full);
+          attachments.push({
+            filename: auslage.beleg_filename || pathModule.basename(auslage.beleg_path),
+            content: buf,
+          });
+        }
+      } catch (e) {
+        console.warn('[auslagen] Beleg konnte nicht angehaengt werden:', e.message);
+      }
+    }
+
+    const subjectPrefix = verw.fallback ? '⚠ KEINE VERWALTUNG HINTERLEGT — ' : '';
+    const subject = `${subjectPrefix}Auszahlungsauftrag ${stwegLabel}: ${auslage.user_name} – CHF ${betrag} (Auslage ${auslage.id})`;
+    const text = [
+      verw.fallback === 'ausschuss'
+        ? `ACHTUNG: Fuer ${stwegLabel} ist KEINE aktive Verwaltung mit E-Mail-Adresse hinterlegt.\n`
+          + `Diese Auszahlungs-Aufforderung geht deshalb ersatzweise an den Ausschuss.\n`
+          + `Bitte unter ${SITE_URL}/verwaltung-admin.html die Verwaltung pflegen, danach geht die Mail kuenftig automatisch dorthin.\n`
+          + `\n────────────────────────────────────────\n`
+        : '',
+      `Sehr geehrte Damen und Herren`,
+      ``,
+      `der Ausschuss hat folgende Auslage geprueft und zur Auszahlung freigegeben.`,
+      `Bitte ueberweisen Sie den Betrag an die unten angegebene IBAN.`,
+      ``,
+      `── Auftrag ──`,
+      `STWEG:           ${stwegLabel}`,
+      `Auslage-Nr:      ${auslage.id}`,
+      `Eingereicht von: ${auslage.user_name} <${auslage.user_email}>`,
+      `Beleg-Datum:     ${datum}`,
+      `Kategorie:       ${auslage.kategorie || '-'}`,
+      `Betrag:          CHF ${betrag}`,
+      `IBAN:            ${auslage.iban || '⚠ NICHT angegeben – bitte beim Eigentuemer erfragen'}`,
+      ``,
+      `── Beschreibung ──`,
+      auslage.beschreibung || '-',
+      ``,
+      auslage.bemerkung_eigentuemer ? `── Bemerkung Eigentuemer ──\n${auslage.bemerkung_eigentuemer}\n` : '',
+      auslage.bemerkung_ausschuss ? `── Bemerkung Ausschuss ──\n${auslage.bemerkung_ausschuss}\n` : '',
+      `── Freigabe ──`,
+      `Geprueft und freigegeben durch: ${ausschussName || ausschussEmail} (${ausschussEmail}) am ${today}`,
+      ``,
+      attachments.length > 0
+        ? `Der Beleg ist als Anhang beigefuegt.`
+        : `Achtung: kein Beleg hinterlegt.`,
+      ``,
+      `Nach erfolgter Ueberweisung bitte als Bestaetigung kurze Rueckmeldung an ${ausschussEmail}, der Eigentuemer markiert die Auslage selbst als "erhalten" auf:`,
+      `${SITE_URL}/auslagen.html`,
+      ``,
+      `Freundliche Gruesse`,
+      `STWEG-Kooperation Rosenweg`,
+    ].filter(Boolean).join('\n');
+
+    await loggedSendMail({
+      from: MAIL_FROM,
+      to: verw.mailTo.join(', '),
+      cc: [...verw.mailCc, auslage.user_email, ausschussEmail].filter((v, i, a) => v && a.indexOf(v) === i).join(', '),
+      replyTo: ausschussEmail,
+      subject,
+      text,
+      attachments,
+    }, 'auslage-auszahlung');
+    return { ok: true, to: verw.mailTo, firma: verw.firma };
+  } catch (err) {
+    console.error('[auslagen] Auszahlungs-Mail Fehler:', err);
+    return { ok: false, reason: err.message };
+  }
+}
+
+function canSeeAuslage(row, user) {
+  const groups = user?.groups || [];
+  if (isTechnik(groups) || isPraesident(groups)) return true;
+  if (row.user_email && row.user_email.toLowerCase() === (user.email || '').toLowerCase()) return true;
+  // Ausschuss seines STWEGs sieht alles
+  if (row.stweg && getAusschussStwegs(groups).has(parseInt(row.stweg, 10))) return true;
+  return false;
+}
+
+function canEditAuslageStatus(row, user) {
+  const groups = user?.groups || [];
+  if (isTechnik(groups) || isPraesident(groups)) return true;
+  if (row.stweg && getAusschussStwegs(groups).has(parseInt(row.stweg, 10))) return true;
+  // Auslagen ohne STWEG-Bezug duerfen alle Ausschuss-Mitglieder bearbeiten
+  if (!row.stweg && isAusschussForAny(groups)) return true;
+  return false;
+}
+
+// "Ausbezahlt" / "erhalten" duerfen setzen:
+// - Verwaltung / Technik / Praesident (offizielle Auszahlung)
+// - der einreichende Eigentuemer selbst (Bestaetigung "Geld erhalten")
+function canMarkPaid(user, row = null) {
+  const groups = user?.groups || [];
+  if (isTechnik(groups) || isPraesident(groups)) return true;
+  if (groups.some(g => g.toLowerCase() === 'verwaltung')) return true;
+  if (row && row.user_email && row.user_email.toLowerCase() === (user.email || '').toLowerCase()) return true;
+  return false;
+}
+
+// GET /api/auslagen — Liste (eigene + ggf. STWEG-Auslagen falls Ausschuss/Technik)
+app.get('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
+  try {
+    const groups = req.user.groups || [];
+    const isAdmin = isTechnik(groups) || isPraesident(groups);
+    const ausschussStwegs = [...getAusschussStwegs(groups)];
+    const email = (req.user.email || '').toLowerCase();
+    const params = [];
+    let where;
+    if (isAdmin) {
+      where = 'TRUE';
+    } else if (ausschussStwegs.length > 0) {
+      params.push(email, ausschussStwegs);
+      where = `LOWER(user_email) = $1 OR stweg = ANY($2::int[])`;
+    } else {
+      params.push(email);
+      where = `LOWER(user_email) = $1`;
+    }
+    const statusFilter = String(req.query.status || '').trim();
+    if (statusFilter && AUSLAGEN_STATUS.includes(statusFilter)) {
+      params.push(statusFilter);
+      where += ` AND status = $${params.length}`;
+    }
+    const stwegFilter = parseInt(req.query.stweg, 10);
+    if (Number.isFinite(stwegFilter)) {
+      params.push(stwegFilter);
+      where += ` AND stweg = $${params.length}`;
+    }
+    const result = await pool.query(
+      `SELECT id, user_email, user_name, stweg, datum, kategorie, beschreibung, betrag_chf,
+              iban, beleg_path, beleg_filename, status, bemerkung_eigentuemer, bemerkung_ausschuss,
+              bearbeitet_von, bearbeitet_am, ausbezahlt_am, created_at, updated_at
+         FROM auslagen
+        WHERE ${where}
+        ORDER BY created_at DESC
+        LIMIT 500`,
+      params,
+    );
+    res.json({
+      auslagen: result.rows,
+      kategorien: AUSLAGEN_KATEGORIEN,
+      can_review: isAdmin || ausschussStwegs.length > 0,
+      can_mark_paid: canMarkPaid(req.user),
+      review_stwegs: isAdmin ? 'all' : ausschussStwegs,
+    });
+  } catch (err) {
+    console.error('Auslagen list error:', err);
+    res.status(500).json({ error: 'Fehler beim Laden der Auslagen' });
+  }
+});
+
+// POST /api/auslagen — neue Auslage einreichen (Eigentuemer)
+app.post('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
+  try {
+    const { datum, kategorie, beschreibung, betrag_chf, iban, stweg, bemerkung_eigentuemer, beleg_base64, beleg_filename } = req.body || {};
+    if (!datum || !beschreibung || betrag_chf == null) {
+      return res.status(400).json({ error: 'datum, beschreibung und betrag_chf sind Pflichtfelder' });
+    }
+    const betrag = Number(betrag_chf);
+    if (!Number.isFinite(betrag) || betrag <= 0) return res.status(400).json({ error: 'Ungueltiger Betrag' });
+    if (betrag > 100000) return res.status(400).json({ error: 'Betrag > 100000 CHF nicht plausibel' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(datum))) return res.status(400).json({ error: 'Datum muss YYYY-MM-DD sein' });
+    const kat = kategorie && AUSLAGEN_KATEGORIEN.includes(kategorie) ? kategorie : null;
+    const stwegInt = parseInt(stweg, 10);
+    const stwegVal = Number.isFinite(stwegInt) && stwegInt >= 1 && stwegInt <= 8 ? stwegInt : null;
+    const ibanClean = iban ? String(iban).replace(/\s+/g, '').toUpperCase().slice(0, 40) : null;
+    if (ibanClean && !/^[A-Z]{2}\d{2}[A-Z0-9]{4,30}$/.test(ibanClean)) {
+      return res.status(400).json({ error: 'IBAN-Format ungueltig' });
+    }
+
+    let belegPath = null, belegFilename = null;
+    if (beleg_base64) {
+      const ext = (beleg_filename || 'pdf').split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (!['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic'].includes(ext)) {
+        return res.status(400).json({ error: 'Beleg muss PDF, JPG, PNG, WEBP oder HEIC sein' });
+      }
+      const buf = Buffer.from(beleg_base64, 'base64');
+      if (buf.length > 15 * 1024 * 1024) return res.status(400).json({ error: 'Beleg > 15MB' });
+      const folder = auslagenStwegFolder(stwegVal);
+      const dir = pathModule.join(DOCS_PATH, folder, 'auslagen');
+      await fs.mkdir(dir, { recursive: true });
+      const safeName = String(beleg_filename || 'beleg').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80) || 'beleg';
+      const stamp = Date.now();
+      const finalName = `${stamp}_${safeName}${safeName.toLowerCase().endsWith('.' + ext) ? '' : '.' + ext}`;
+      const fullPath = pathModule.join(dir, finalName);
+      await fs.writeFile(fullPath, buf);
+      belegPath = `${folder}/auslagen/${finalName}`;
+      belegFilename = beleg_filename || finalName;
+    }
+
+    const userEmail = req.user.email;
+    const userName = req.user.name || req.user.email;
+    const result = await pool.query(
+      `INSERT INTO auslagen
+         (user_email, user_name, stweg, datum, kategorie, beschreibung, betrag_chf, iban,
+          beleg_path, beleg_filename, bemerkung_eigentuemer, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'eingereicht')
+       RETURNING *`,
+      [userEmail, userName, stwegVal, datum, kat, String(beschreibung).slice(0, 2000), betrag,
+       ibanClean, belegPath, belegFilename, bemerkung_eigentuemer ? String(bemerkung_eigentuemer).slice(0, 1000) : null],
+    );
+
+    // Ausschuss informieren (Best-Effort, kein Fehler wenn Mail scheitert)
+    try {
+      const stwegLabel = stwegVal ? `STWEG ${stwegVal}` : 'STWEG-uebergreifend';
+      const adminEmails = [];
+      if (stwegVal && STWEG_GROUPS[stwegVal]?.ausschuss) {
+        const ausschussRes = await pool.query(
+          `SELECT DISTINCT u.email FROM users u
+            WHERE u.active = true AND u.groups_json::jsonb ? $1`,
+          [STWEG_GROUPS[stwegVal].ausschuss],
+        );
+        for (const r of ausschussRes.rows) if (r.email) adminEmails.push(r.email);
+      }
+      if (adminEmails.length > 0) {
+        await loggedSendMail({
+          from: MAIL_FROM,
+          to: adminEmails.join(', '),
+          subject: `Neue Auslage von ${userName} (${stwegLabel}, CHF ${betrag.toFixed(2)})`,
+          text: `${userName} (${userEmail}) hat eine Auslage zur Pruefung eingereicht.\n\n`
+            + `STWEG: ${stwegLabel}\nDatum: ${datum}\nKategorie: ${kat || '-'}\nBetrag: CHF ${betrag.toFixed(2)}\n`
+            + `Beschreibung: ${beschreibung}\n\nZum Pruefen: ${SITE_URL}/auslagen.html`,
+        }, 'auslage-neu');
+      }
+    } catch (mailErr) {
+      console.warn('[auslagen] Notification mail failed:', mailErr.message);
+    }
+
+    res.json({ success: true, auslage: result.rows[0] });
+  } catch (err) {
+    console.error('Auslagen create error:', err);
+    res.status(500).json({ error: 'Fehler beim Speichern' });
+  }
+});
+
+// PUT /api/auslagen/:id — Aendern (Eigentuemer nur eigene+eingereicht; Ausschuss Status/Bemerkung)
+app.put('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
+    const cur = await pool.query('SELECT * FROM auslagen WHERE id = $1', [id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const row = cur.rows[0];
+    if (!canSeeAuslage(row, req.user)) return res.status(403).json({ error: 'Kein Zugriff' });
+
+    const groups = req.user.groups || [];
+    const isOwner = row.user_email.toLowerCase() === (req.user.email || '').toLowerCase();
+    const canReview = canEditAuslageStatus(row, req.user);
+
+    const updates = [];
+    const params = [];
+    const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
+
+    if (isOwner && row.status === 'eingereicht') {
+      if (req.body.datum !== undefined) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(req.body.datum))) return res.status(400).json({ error: 'Datum YYYY-MM-DD' });
+        push('datum', req.body.datum);
+      }
+      if (req.body.kategorie !== undefined) {
+        push('kategorie', AUSLAGEN_KATEGORIEN.includes(req.body.kategorie) ? req.body.kategorie : null);
+      }
+      if (req.body.beschreibung !== undefined) push('beschreibung', String(req.body.beschreibung).slice(0, 2000));
+      if (req.body.betrag_chf !== undefined) {
+        const b = Number(req.body.betrag_chf);
+        if (!Number.isFinite(b) || b <= 0 || b > 100000) return res.status(400).json({ error: 'Ungueltiger Betrag' });
+        push('betrag_chf', b);
+      }
+      if (req.body.iban !== undefined) {
+        const ibn = req.body.iban ? String(req.body.iban).replace(/\s+/g, '').toUpperCase().slice(0, 40) : null;
+        if (ibn && !/^[A-Z]{2}\d{2}[A-Z0-9]{4,30}$/.test(ibn)) return res.status(400).json({ error: 'IBAN ungueltig' });
+        push('iban', ibn);
+      }
+      if (req.body.bemerkung_eigentuemer !== undefined) {
+        push('bemerkung_eigentuemer', req.body.bemerkung_eigentuemer ? String(req.body.bemerkung_eigentuemer).slice(0, 1000) : null);
+      }
+      if (req.body.stweg !== undefined) {
+        const s = parseInt(req.body.stweg, 10);
+        push('stweg', Number.isFinite(s) && s >= 1 && s <= 8 ? s : null);
+      }
+    }
+
+    // Status-Aenderung: Ausschuss/Technik/Praesident voll;
+    // Eigentuemer darf eigene "genehmigte" Auslage als "ausbezahlt" (erhalten) bestaetigen.
+    if (req.body.status !== undefined) {
+      const newStatus = req.body.status;
+      if (!AUSLAGEN_STATUS.includes(newStatus)) return res.status(400).json({ error: 'Ungueltiger Status' });
+      const isOwnerConfirmPaid = isOwner && newStatus === 'ausbezahlt' && row.status === 'genehmigt';
+      if (canReview) {
+        if (newStatus === 'ausbezahlt' && !canMarkPaid(req.user, row)) {
+          return res.status(403).json({ error: '"Ausbezahlt" duerfen nur Verwaltung, Technik, Praesident oder der einreichende Eigentuemer (nach Genehmigung) setzen' });
+        }
+      } else if (!isOwnerConfirmPaid) {
+        return res.status(403).json({ error: 'Keine Berechtigung fuer diese Status-Aenderung' });
+      }
+      push('status', newStatus);
+      push('bearbeitet_von', req.user.email);
+      push('bearbeitet_am', new Date());
+      if (newStatus === 'ausbezahlt') {
+        push('ausbezahlt_am', req.body.ausbezahlt_am && /^\d{4}-\d{2}-\d{2}$/.test(req.body.ausbezahlt_am)
+          ? req.body.ausbezahlt_am
+          : new Date().toISOString().slice(0, 10));
+      }
+    }
+    if (canReview && req.body.bemerkung_ausschuss !== undefined) {
+      push('bemerkung_ausschuss', req.body.bemerkung_ausschuss ? String(req.body.bemerkung_ausschuss).slice(0, 1000) : null);
+    }
+
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine erlaubten Aenderungen' });
+    params.push(id);
+    updates.push('updated_at = NOW()');
+    const result = await pool.query(
+      `UPDATE auslagen SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`,
+      params,
+    );
+
+    const updated = result.rows[0];
+
+    // Mail an Eigentuemer bei Status-Wechsel
+    try {
+      if (req.body.status && req.body.status !== row.status) {
+        const labelMap = { genehmigt: 'genehmigt', abgelehnt: 'abgelehnt', ausbezahlt: 'als ausbezahlt markiert', eingereicht: 'wieder eroeffnet' };
+        const label = labelMap[req.body.status] || req.body.status;
+        // Eigentuemer-Bestaetigung "erhalten" → keine Mail an sich selbst
+        const skipOwnerMail = (req.body.status === 'ausbezahlt' && isOwner && !canReview);
+        if (!skipOwnerMail) {
+          await loggedSendMail({
+            from: MAIL_FROM,
+            to: row.user_email,
+            subject: `Auslage ${label}: CHF ${Number(row.betrag_chf).toFixed(2)} (${row.beschreibung.slice(0, 60)})`,
+            text: `Hallo ${row.user_name},\n\n`
+              + `deine Auslage vom ${row.datum} ueber CHF ${Number(row.betrag_chf).toFixed(2)} wurde ${label}.\n`
+              + (req.body.bemerkung_ausschuss ? `\nBemerkung Ausschuss: ${req.body.bemerkung_ausschuss}\n` : '')
+              + `\nDetails: ${SITE_URL}/auslagen.html`,
+          }, 'auslage-status');
+        }
+      }
+    } catch (mailErr) {
+      console.warn('[auslagen] Status-Mail failed:', mailErr.message);
+    }
+
+    // Bei Freigabe (genehmigt) → fertige Auszahlungs-Mail an die zustaendige Verwaltung
+    let auszahlungInfo = null;
+    if (canReview && req.body.status === 'genehmigt' && row.status !== 'genehmigt') {
+      auszahlungInfo = await sendAuszahlungsMail(updated, req.user.email, req.user.name);
+    }
+
+    res.json({ success: true, auslage: updated, auszahlung_mail: auszahlungInfo });
+  } catch (err) {
+    console.error('Auslagen update error:', err);
+    res.status(500).json({ error: 'Fehler beim Aktualisieren' });
+  }
+});
+
+// DELETE /api/auslagen/:id — eigener Entwurf (eingereicht) oder Ausschuss/Technik
+app.delete('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
+    const cur = await pool.query('SELECT * FROM auslagen WHERE id = $1', [id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const row = cur.rows[0];
+    const isOwner = row.user_email.toLowerCase() === (req.user.email || '').toLowerCase();
+    const canReview = canEditAuslageStatus(row, req.user);
+    if (!canReview && !(isOwner && row.status === 'eingereicht')) {
+      return res.status(403).json({ error: 'Loeschen nur fuer eigene eingereichte Auslagen oder Ausschuss/Technik' });
+    }
+    if (row.beleg_path) {
+      try {
+        const full = pathModule.join(DOCS_PATH, row.beleg_path);
+        if (full.startsWith(pathModule.resolve(DOCS_PATH) + '/')) await fs.unlink(full).catch(() => {});
+      } catch {}
+    }
+    await pool.query('DELETE FROM auslagen WHERE id = $1', [id]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Auslagen delete error:', err);
+    res.status(500).json({ error: 'Fehler beim Loeschen' });
+  }
+});
+
+// GET /api/auslagen/:id/beleg — Beleg-Datei ausliefern
+app.get('/api/auslagen/:id/beleg', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).end();
+    const r = await pool.query('SELECT * FROM auslagen WHERE id = $1', [id]);
+    if (r.rows.length === 0) return res.status(404).end();
+    const row = r.rows[0];
+    if (!canSeeAuslage(row, req.user)) return res.status(403).end();
+    if (!row.beleg_path) return res.status(404).json({ error: 'Kein Beleg vorhanden' });
+    const full = pathModule.join(DOCS_PATH, row.beleg_path);
+    if (!full.startsWith(pathModule.resolve(DOCS_PATH) + '/')) return res.status(400).end();
+    res.sendFile(full, (err) => { if (err && !res.headersSent) res.status(404).end(); });
+  } catch (err) {
+    console.error('Auslagen beleg error:', err);
+    res.status(500).end();
+  }
+});
+
 // ─── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
@@ -9694,6 +10182,8 @@ async function initDB() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_verwaltungen_stweg ON verwaltungen(stweg, aktiv);
+      ALTER TABLE verwaltungen ADD COLUMN IF NOT EXISTS website VARCHAR(255);
+      ALTER TABLE verwaltungen ADD COLUMN IF NOT EXISTS oeffnungszeiten TEXT;
 
       CREATE TABLE IF NOT EXISTS verwaltungs_kontakte (
         id SERIAL PRIMARY KEY,
@@ -9728,6 +10218,32 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_connlog_network ON connection_log(network_name);
       CREATE INDEX IF NOT EXISTS idx_connlog_ip ON connection_log(ip);
       CREATE INDEX IF NOT EXISTS idx_connlog_dst ON connection_log(dst_ip);
+
+      CREATE TABLE IF NOT EXISTS auslagen (
+        id SERIAL PRIMARY KEY,
+        user_email VARCHAR(255) NOT NULL,
+        user_name VARCHAR(255) NOT NULL,
+        stweg INTEGER,
+        datum DATE NOT NULL,
+        kategorie VARCHAR(50),
+        beschreibung TEXT NOT NULL,
+        betrag_chf DECIMAL(10,2) NOT NULL,
+        iban VARCHAR(40),
+        beleg_path TEXT,
+        beleg_filename VARCHAR(255),
+        status VARCHAR(20) NOT NULL DEFAULT 'eingereicht',
+        bemerkung_eigentuemer TEXT,
+        bemerkung_ausschuss TEXT,
+        bearbeitet_von VARCHAR(255),
+        bearbeitet_am TIMESTAMPTZ,
+        ausbezahlt_am DATE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        CONSTRAINT auslagen_status_chk CHECK (status IN ('eingereicht','genehmigt','abgelehnt','ausbezahlt'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_auslagen_user ON auslagen(user_email);
+      CREATE INDEX IF NOT EXISTS idx_auslagen_stweg_status ON auslagen(stweg, status);
+      CREATE INDEX IF NOT EXISTS idx_auslagen_created ON auslagen(created_at DESC);
     `);
 
     // Create index after migration (separate query to avoid parse errors on old schema)
@@ -9796,6 +10312,51 @@ async function initDB() {
         INSERT INTO permissions (group_name, page, access) VALUES ($1, 'email-archiv', 'read')
         ON CONFLICT (group_name, page) DO NOTHING
       `, [groupName]);
+      // Ausschuss kann Auslagen seines STWEGs pruefen/freigeben
+      await client.query(`
+        INSERT INTO permissions (group_name, page, access) VALUES ($1, 'auslagen', 'write')
+        ON CONFLICT (group_name, page) DO NOTHING
+      `, [groupName]);
+    }
+
+    // Seed auslagen read fuer alle Eigentuemer-Gruppen (eigene Auslagen einsehen/einreichen)
+    const eigentuemerGroups = Object.values(STWEG_GROUPS).map(g => g.eigentuemer).filter(Boolean);
+    for (const groupName of eigentuemerGroups) {
+      await client.query(`
+        INSERT INTO permissions (group_name, page, access) VALUES ($1, 'auslagen', 'read')
+        ON CONFLICT (group_name, page) DO NOTHING
+      `, [groupName]);
+    }
+    // Generische "eigentuemer" Gruppe (Authentik Hierarchy Parent) auch
+    await client.query(`
+      INSERT INTO permissions (group_name, page, access) VALUES ('eigentuemer', 'auslagen', 'read')
+      ON CONFLICT (group_name, page) DO NOTHING
+    `);
+
+    // Einmaliger Seed: wenn verwaltungen-Tabelle leer ist, statische Verwaltung
+    // aus site-config.json als STWEG-uebergreifender Eintrag importieren.
+    // Damit nach Deploy keine Seite ohne Verwaltungsdaten dasteht.
+    try {
+      const verwExists = await client.query('SELECT COUNT(*) AS cnt FROM verwaltungen');
+      if (parseInt(verwExists.rows[0].cnt) === 0) {
+        const cfgPath = pathModule.join(__dirname, '..', 'site-config.json');
+        const cfgRaw = await fs.readFile(cfgPath, 'utf8').catch(() => null);
+        if (cfgRaw) {
+          const cfg = JSON.parse(cfgRaw);
+          const v = cfg.verwaltung;
+          if (v && v.firma) {
+            const adresse = [v.strasse, v.plz_ort].filter(Boolean).join(', ');
+            await client.query(`
+              INSERT INTO verwaltungen
+                (stweg, firma_name, adresse, telefon, email, website, oeffnungszeiten, aktiv)
+              VALUES (NULL, $1, $2, $3, $4, $5, $6, true)
+            `, [v.firma, adresse || null, v.telefon || null, v.email || null, v.website || null, v.oeffnungszeiten || null]);
+            console.log(`Seeded verwaltungen from site-config.json: ${v.firma}`);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Verwaltungen-Seed uebersprungen:', e.message);
     }
 
     console.log('Database schema initialized');
