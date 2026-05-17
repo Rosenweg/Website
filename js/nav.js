@@ -167,6 +167,7 @@ const RosenwegNav = {
         <!-- Desktop Nav -->
         <div class="hidden lg:flex items-center space-x-1">
           <a href="${base}#home" class="${a('home')} px-3 py-2 text-sm transition">Start</a>
+          <a href="${base}dashboard.html" class="${a('dashboard')} px-3 py-2 text-sm transition">📊 Dashboard</a>
 
           <!-- Gebäude Dropdown -->
           <div class="relative nav-dropdown">
@@ -234,6 +235,7 @@ const RosenwegNav = {
     <div id="nav-mobile-menu" class="hidden lg:hidden bg-white border-t">
       <div class="px-4 py-3 space-y-1">
         <a href="${base}#home" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded">Start</a>
+        <a href="${base}dashboard.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded">📊 Dashboard</a>
 
         <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Gebäude</div>
         <div class="grid grid-cols-2 gap-1 px-3">
