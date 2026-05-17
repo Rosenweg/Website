@@ -102,6 +102,10 @@ const RosenwegNav = {
               <a href="${base}brief-tracking.html" data-perm-any="ausschuss,technik,praesident" class="${dropA('brief-tracking')} block px-4 py-2 text-sm">Brief-Tracking</a>
               <a href="${base}handwerker.html" data-perm="handwerker" class="${dropA('handwerker')} block px-4 py-2 text-sm">Handwerker & Lieferanten</a>
               <a href="${base}auslagen.html" data-perm="auslagen" class="${dropA('auslagen')} block px-4 py-2 text-sm">Auslagen / Vorschüsse</a>
+              <a href="${base}verwaltung-mail-outbox.html" data-perm-any="technik,praesident" class="${dropA('verwaltung-mail-outbox')} block px-4 py-2 text-sm flex items-center justify-between">
+                <span>Verwaltungs-Mail Outbox</span>
+                <span id="nav-vmq-badge" class="hidden bg-amber-100 text-amber-800 text-xs px-1.5 py-0.5 rounded-full font-semibold"></span>
+              </a>
               <a href="${base}proxmox-verwaltung.html" data-perm="proxmox-verwaltung" class="${dropA('proxmox')} block px-4 py-2 text-sm">Proxmox</a>
             </div>
           </div>
@@ -169,6 +173,10 @@ const RosenwegNav = {
         <a href="${base}brief-tracking.html" data-perm-any="ausschuss,technik,praesident" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Brief-Tracking</a>
         <a href="${base}handwerker.html" data-perm="handwerker" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Handwerker & Lieferanten</a>
         <a href="${base}auslagen.html" data-perm="auslagen" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Auslagen / Vorschüsse</a>
+        <a href="${base}verwaltung-mail-outbox.html" data-perm-any="technik,praesident" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm flex items-center justify-between">
+          <span>Verwaltungs-Mail Outbox</span>
+          <span id="nav-vmq-badge-mobile" class="hidden bg-amber-100 text-amber-800 text-xs px-1.5 py-0.5 rounded-full font-semibold"></span>
+        </a>
         <a href="${base}proxmox-verwaltung.html" data-perm="proxmox-verwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Proxmox</a>
 
         <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Infos</div>
@@ -280,6 +288,35 @@ const RosenwegNav = {
       }
       if (!anyVisible) header.style.display = 'none';
     });
+
+    // Pending-Badge fuer Technik/Praesident: Anzahl Mails in der Verwaltungs-Mail-Queue
+    const groupsLower = (user?.groups || []).map(g => String(g).toLowerCase());
+    if (groupsLower.some(g => g === 'technik' || g === 'präsident' || g === 'praesident')) {
+      this._updateMailQueueBadge();
+      // Alle 60s neu pruefen
+      if (!this._vmqInterval) {
+        this._vmqInterval = setInterval(() => this._updateMailQueueBadge(), 60000);
+      }
+    }
+  },
+
+  async _updateMailQueueBadge() {
+    try {
+      const r = await fetch('/api/verwaltung-mail-queue/pending-count', { credentials: 'include' });
+      if (!r.ok) return;
+      const data = await r.json();
+      const count = data.count || 0;
+      ['nav-vmq-badge', 'nav-vmq-badge-mobile'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (count > 0) {
+          el.textContent = count;
+          el.classList.remove('hidden');
+        } else {
+          el.classList.add('hidden');
+        }
+      });
+    } catch {}
   },
 
   _setupAuth(base) {

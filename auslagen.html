@@ -166,7 +166,7 @@
         </label>
       </div>
       <div id="review-info" class="text-xs text-gray-500 mt-3 bg-gray-50 rounded p-2 hidden">
-        ℹ Bei Klick auf <em>Genehmigen</em> geht eine fertige Auszahlungs-Mail mit allen Details und dem Beleg als Anhang automatisch an die zuständige Verwaltung des STWEGs (Stammdaten unter <a href="/verwaltung-admin.html" class="underline">Verwaltung</a>).
+        ℹ Bei Klick auf <em>Genehmigen</em> wird die fertige Auszahlungs-Mail (mit allen Details + Beleg als Anhang) in die <a href="/verwaltung-mail-outbox.html" class="underline">Verwaltungs-Mail-Outbox</a> gestellt und wartet auf Freigabe durch Technik oder Präsident, bevor sie an die zuständige Verwaltung des STWEGs verschickt wird (Stammdaten unter <a href="/verwaltung-admin.html" class="underline">Verwaltung</a>). Bei Ausschuss-Fallback geht die Mail direkt raus (keine Freigabe nötig).
       </div>
       <div id="review-error" class="text-sm text-red-600 hidden mt-2"></div>
       <div class="flex flex-wrap justify-end gap-2 pt-4 border-t mt-4">
@@ -501,9 +501,11 @@
       if (data.auszahlung_mail) {
         const m = data.auszahlung_mail;
         if (m.ok && m.fallback === 'ausschuss') {
-          alert('Genehmigt — ABER: für diesen STWEG ist keine aktive Verwaltung mit E-Mail hinterlegt. Die Auszahlungs-Mail ging ersatzweise an den Ausschuss. Bitte unter "Verwaltung" die Stammdaten pflegen.');
+          alert('Genehmigt — ABER: für diesen STWEG ist keine aktive Verwaltung mit E-Mail hinterlegt. Die Auszahlungs-Mail ging direkt an den Ausschuss. Bitte unter "Verwaltung" die Stammdaten pflegen.');
+        } else if (m.ok && m.queued) {
+          alert('Genehmigt. Auszahlungs-Mail wurde in die Verwaltungs-Mail-Outbox gestellt und wartet auf Freigabe durch Technik oder Präsident, bevor sie an "' + (m.firma || 'die Verwaltung') + '" verschickt wird.');
         } else if (m.ok) {
-          alert('Genehmigt. Auszahlungs-Mail mit allen Details (inkl. Beleg-Anhang) wurde an "' + (m.firma || '') + '" geschickt: ' + (m.to || []).join(', '));
+          alert('Genehmigt. Auszahlungs-Mail an "' + (m.firma || '') + '" verschickt: ' + (m.to || []).join(', '));
         } else {
           alert('Genehmigt, aber Auszahlungs-Mail schlug fehl: ' + (m.reason || 'unbekannter Fehler') + '.\n\nBitte Verwaltung manuell informieren.');
         }

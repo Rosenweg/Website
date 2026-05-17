@@ -750,6 +750,7 @@ const MANAGED_PAGES = [
   { id: 'proxmox-verwaltung', label: 'Proxmox-Verwaltung' },
   { id: 'handwerker', label: 'Handwerker & Lieferanten' },
   { id: 'auslagen', label: 'Auslagen / Vorschuesse' },
+  { id: 'verwaltung-mail-outbox', label: 'Verwaltungs-Mail Outbox' },
 ];
 
 const ACCESS_LEVELS = { none: 0, read: 1, write: 2 };
@@ -9191,9 +9192,140 @@ async function findVerwaltungForStweg(stweg) {
   };
 }
 
+// ─── Verwaltungs-Mail-Genehmigungs-Queue ─────────────────────────────
+// Jede Mail an die externe Verwaltung muss erst von Technik oder Praesident
+// freigegeben werden. Inhalt ist in der Queue editierbar.
+
+async function enqueueVerwaltungMail({
+  source_type, source_id, mailTo, mailCc, mailReplyTo, subject, bodyText, attachments, createdBy,
+}) {
+  const toStr = Array.isArray(mailTo) ? mailTo.join(', ') : String(mailTo || '');
+  const ccStr = Array.isArray(mailCc) ? mailCc.join(', ') : (mailCc ? String(mailCc) : null);
+  // Attachments: speichere Metadaten + base64 (klein) ODER source-referenz (Pfad in DOCS)
+  const attMeta = (attachments || []).map(a => ({
+    filename: a.filename,
+    size: a.size || (a.content_base64 ? Math.floor(a.content_base64.length * 0.75) : null),
+    content_base64: a.content_base64 || null,
+    docs_path: a.docs_path || null,
+  }));
+  const r = await pool.query(
+    `INSERT INTO verwaltung_mail_queue
+       (source_type, source_id, mail_to, mail_cc, mail_reply_to, subject, body_text, attachments, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+     RETURNING id`,
+    [source_type, source_id || null, toStr, ccStr, mailReplyTo || null, subject, bodyText, JSON.stringify(attMeta), createdBy || null],
+  );
+  const queueId = r.rows[0].id;
+
+  // Notification an Technik + Praesident: "Neue Mail wartet auf Freigabe"
+  try {
+    const approvers = await pool.query(
+      `SELECT DISTINCT email FROM users
+        WHERE active = true AND email IS NOT NULL AND email <> ''
+          AND EXISTS (
+            SELECT 1 FROM jsonb_array_elements_text(COALESCE(groups_json::jsonb, '[]'::jsonb)) g
+            WHERE LOWER(g) IN ('technik','präsident','praesident')
+          )`,
+    );
+    const recipients = approvers.rows.map(r => r.email).filter(Boolean);
+    if (recipients.length > 0) {
+      const pendingCount = await pool.query(`SELECT COUNT(*) AS cnt FROM verwaltung_mail_queue WHERE status = 'pending'`);
+      const cnt = pendingCount.rows[0].cnt;
+      await loggedSendMail({
+        from: MAIL_FROM,
+        to: recipients.join(', '),
+        subject: `Verwaltungs-Mail wartet auf Freigabe: ${subject.slice(0, 80)}`,
+        text:
+          `Eine ausgehende Mail an die Verwaltung wartet auf deine Freigabe.\n\n`
+          + `Quelle:   ${source_type}${source_id ? ' #' + source_id : ''}\n`
+          + `An:       ${toStr}\n`
+          + (ccStr ? `CC:       ${ccStr}\n` : '')
+          + `Betreff:  ${subject}\n`
+          + `Eingestellt von: ${createdBy || 'system'}\n\n`
+          + `Aktuell ${cnt} Mail${cnt === '1' ? '' : 's'} pending.\n\n`
+          + `Zur Freigabe / Bearbeitung / Ablehnung:\n${SITE_URL}/verwaltung-mail-outbox.html`,
+      }, 'verwaltung-mail-pending');
+    }
+  } catch (err) {
+    console.warn('[verwaltung-mail-queue] Notification fehlgeschlagen:', err.message);
+  }
+
+  return queueId;
+}
+
+// Sendet eine freigegebene Mail aus der Queue.
+async function sendVerwaltungMailFromQueue(queueId, approverEmail) {
+  const r = await pool.query('SELECT * FROM verwaltung_mail_queue WHERE id = $1', [queueId]);
+  if (r.rows.length === 0) throw new Error('Queue-Eintrag nicht gefunden');
+  const q = r.rows[0];
+  if (q.status !== 'freigegeben') throw new Error(`Status ist '${q.status}', erwartet 'freigegeben'`);
+
+  // Attachments rekonstruieren (entweder aus base64 oder aus DOCS-Pfad live lesen)
+  const attachments = [];
+  for (const a of (q.attachments || [])) {
+    if (a.content_base64) {
+      attachments.push({ filename: a.filename, content: Buffer.from(a.content_base64, 'base64') });
+    } else if (a.docs_path) {
+      try {
+        const full = pathModule.join(DOCS_PATH, a.docs_path);
+        if (full.startsWith(pathModule.resolve(DOCS_PATH) + '/')) {
+          const buf = await fs.readFile(full);
+          attachments.push({ filename: a.filename || pathModule.basename(a.docs_path), content: buf });
+        }
+      } catch (e) {
+        console.warn(`[verwaltung-mail-queue ${queueId}] Anhang ${a.docs_path} konnte nicht gelesen werden:`, e.message);
+      }
+    }
+  }
+
+  try {
+    await loggedSendMail({
+      from: MAIL_FROM,
+      to: q.mail_to,
+      cc: q.mail_cc || undefined,
+      replyTo: q.mail_reply_to || undefined,
+      subject: q.subject,
+      text: q.body_text,
+      attachments,
+    }, `vmq-${q.source_type}`);
+    await pool.query(
+      `UPDATE verwaltung_mail_queue SET status = 'gesendet', sent_at = NOW() WHERE id = $1`,
+      [queueId],
+    );
+
+    // Source-spezifisches Tracking nachziehen
+    if (q.source_type === 'auslage-auszahlung' && q.source_id) {
+      const auslageR = await pool.query('SELECT * FROM auslagen WHERE id = $1', [q.source_id]);
+      if (auslageR.rows.length > 0) {
+        const verw = await findVerwaltungForStweg(auslageR.rows[0].stweg);
+        await pool.query(
+          `UPDATE auslagen
+              SET auszahlung_mail_at = NOW(),
+                  auszahlung_mail_to = $1,
+                  auszahlung_mail_fallback = $2,
+                  auszahlung_mail_verwaltung_id = $3,
+                  auszahlung_mail_count = COALESCE(auszahlung_mail_count, 0) + 1,
+                  updated_at = NOW()
+            WHERE id = $4`,
+          [q.mail_to, !!(verw && verw.fallback), verw?.id || null, q.source_id],
+        );
+      }
+    }
+
+    return { ok: true };
+  } catch (err) {
+    await pool.query(
+      `UPDATE verwaltung_mail_queue SET status = 'fehler', send_error = $1 WHERE id = $2`,
+      [String(err.message || err).slice(0, 1000), queueId],
+    );
+    throw err;
+  }
+}
+
 // Fertige Auszahlungs-E-Mail an die Verwaltung mit allen Details + Beleg-Attachment.
 // opts.nachgereicht=true → Betreff/Body markieren als Nach-Reichung an die neue Verwaltung
 //                          nach Ende einer Vakanz-Phase.
+// Statt direkt zu senden, wird die Mail in die Genehmigungs-Queue gestellt.
 async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts = {}) {
   try {
     const verw = await findVerwaltungForStweg(auslage.stweg);
@@ -9207,22 +9339,15 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
     const today = new Date().toLocaleDateString('de-CH');
     const isNachgereicht = !!opts.nachgereicht;
 
-    // Beleg ggf. als Attachment anhaengen (Verwaltung hat keinen Login)
-    const attachments = [];
+    // Beleg-Anhang als Referenz (wird beim eigentlichen Versand live aus DOCS gelesen)
+    const queueAttachments = [];
     if (auslage.beleg_path) {
-      try {
-        const full = pathModule.join(DOCS_PATH, auslage.beleg_path);
-        if (full.startsWith(pathModule.resolve(DOCS_PATH) + '/')) {
-          const buf = await fs.readFile(full);
-          attachments.push({
-            filename: auslage.beleg_filename || pathModule.basename(auslage.beleg_path),
-            content: buf,
-          });
-        }
-      } catch (e) {
-        console.warn('[auslagen] Beleg konnte nicht angehaengt werden:', e.message);
-      }
+      queueAttachments.push({
+        filename: auslage.beleg_filename || pathModule.basename(auslage.beleg_path),
+        docs_path: auslage.beleg_path,
+      });
     }
+    const hasAttachment = queueAttachments.length > 0;
 
     let subjectPrefix = '';
     if (verw.fallback) subjectPrefix = '⚠ KEINE VERWALTUNG HINTERLEGT — ';
@@ -9271,7 +9396,7 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
       `── Freigabe ──`,
       `Geprueft und freigegeben durch: ${freigebender} am ${freigabeAm}`,
       ``,
-      attachments.length > 0
+      hasAttachment
         ? `Der Beleg ist als Anhang beigefuegt.`
         : `Achtung: kein Beleg hinterlegt.`,
       ``,
@@ -9282,34 +9407,56 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
       `STWEG-Kooperation Rosenweg`,
     ].filter(Boolean).join('\n');
 
-    await loggedSendMail({
-      from: MAIL_FROM,
-      to: verw.mailTo.join(', '),
-      cc: [...verw.mailCc, auslage.user_email, ausschussEmail].filter((v, i, a) => v && a.indexOf(v) === i).join(', '),
-      replyTo: ausschussEmail,
-      subject,
-      text,
-      attachments,
-    }, isNachgereicht ? 'auslage-auszahlung-nachgereicht' : 'auslage-auszahlung');
-
-    // Tracking auf der Auslage aktualisieren (Outbox)
-    try {
+    // Beim Ausschuss-Fallback (keine Verwaltung) → direkt an Ausschuss senden ohne Queue,
+    // weil Ausschuss-interne Mails keine Freigabe brauchen.
+    if (verw.fallback === 'ausschuss') {
+      const liveAtt = [];
+      for (const a of queueAttachments) {
+        if (a.docs_path) {
+          try {
+            const buf = await fs.readFile(pathModule.join(DOCS_PATH, a.docs_path));
+            liveAtt.push({ filename: a.filename, content: buf });
+          } catch {}
+        }
+      }
+      try {
+        await loggedSendMail({
+          from: MAIL_FROM,
+          to: verw.mailTo.join(', '),
+          cc: [auslage.user_email].filter(v => v).join(', '),
+          replyTo: ausschussEmail,
+          subject,
+          text,
+          attachments: liveAtt,
+        }, 'auslage-auszahlung-ausschuss-fallback');
+      } catch (e) {
+        console.error('[auslagen] Ausschuss-Direktversand Fehler:', e.message);
+      }
       await pool.query(
         `UPDATE auslagen
-            SET auszahlung_mail_at = NOW(),
-                auszahlung_mail_to = $1,
-                auszahlung_mail_fallback = $2,
-                auszahlung_mail_verwaltung_id = $3,
-                auszahlung_mail_count = COALESCE(auszahlung_mail_count, 0) + 1,
-                updated_at = NOW()
-          WHERE id = $4`,
-        [verw.mailTo.join(', '), !!verw.fallback, verw.id || null, auslage.id],
+            SET auszahlung_mail_at = NOW(), auszahlung_mail_to = $1,
+                auszahlung_mail_fallback = true, auszahlung_mail_verwaltung_id = NULL,
+                auszahlung_mail_count = COALESCE(auszahlung_mail_count, 0) + 1, updated_at = NOW()
+          WHERE id = $2`,
+        [verw.mailTo.join(', '), auslage.id],
       );
-    } catch (e) {
-      console.warn('[auslagen] Mail-Tracking konnte nicht gespeichert werden:', e.message);
+      return { ok: true, to: verw.mailTo, firma: verw.firma, fallback: 'ausschuss', queued: false, direct: true, nachgereicht: isNachgereicht };
     }
 
-    return { ok: true, to: verw.mailTo, firma: verw.firma, fallback: verw.fallback, nachgereicht: isNachgereicht };
+    // Externe Verwaltung → in Genehmigungs-Queue stellen
+    const ccList = [...verw.mailCc, auslage.user_email, ausschussEmail].filter((v, i, a) => v && a.indexOf(v) === i);
+    const queueId = await enqueueVerwaltungMail({
+      source_type: isNachgereicht ? 'auslage-auszahlung-nachgereicht' : 'auslage-auszahlung',
+      source_id: auslage.id,
+      mailTo: verw.mailTo,
+      mailCc: ccList,
+      mailReplyTo: ausschussEmail,
+      subject,
+      bodyText: text,
+      attachments: queueAttachments,
+      createdBy: ausschussEmail || 'system',
+    });
+    return { ok: true, to: verw.mailTo, firma: verw.firma, fallback: null, queued: true, queue_id: queueId, nachgereicht: isNachgereicht };
   } catch (err) {
     console.error('[auslagen] Auszahlungs-Mail Fehler:', err);
     return { ok: false, reason: err.message };
@@ -9338,6 +9485,12 @@ async function resendOffeneAuszahlungenFuerWirksameVerwaltung(stwegOrNull) {
         WHERE status = 'genehmigt'
           AND COALESCE(auszahlung_mail_fallback, false) = true
           AND ${stwegFilter}
+          AND NOT EXISTS (
+            SELECT 1 FROM verwaltung_mail_queue vmq
+             WHERE vmq.source_id = auslagen.id
+               AND vmq.source_type LIKE 'auslage-auszahlung%'
+               AND vmq.status IN ('pending','freigegeben')
+          )
         ORDER BY id`,
       params,
     );
@@ -9354,7 +9507,7 @@ async function resendOffeneAuszahlungenFuerWirksameVerwaltung(stwegOrNull) {
         null,
         { nachgereicht: true },
       );
-      results.push({ id: auslage.id, ok: res.ok, to: res.to, reason: res.reason });
+      results.push({ id: auslage.id, ok: res.ok, to: res.to, queued: res.queued, reason: res.reason });
     }
     const resent = results.filter(r => r.ok).length;
     if (resent > 0) console.log(`[auslagen] ${resent} offene Auslagen an neue Verwaltung nachgereicht (STWEG ${stwegOrNull || '*'})`);
@@ -9689,6 +9842,215 @@ app.get('/api/auslagen/:id/beleg', authMiddleware, requirePermission('auslagen',
     res.sendFile(full, (err) => { if (err && !res.headersSent) res.status(404).end(); });
   } catch (err) {
     console.error('Auslagen beleg error:', err);
+    res.status(500).end();
+  }
+});
+
+// ─── Verwaltungs-Mail-Outbox API ────────────────────────────────────
+// Nur Technik + Praesident duerfen die Queue sehen/bearbeiten/freigeben.
+function requireTechnikOrPraesident(req, res, next) {
+  const groups = req.user?.groups || [];
+  if (isTechnik(groups) || isPraesident(groups)) return next();
+  return res.status(403).json({ error: 'Nur fuer Technik oder Praesident' });
+}
+
+// Liste aller Mails in der Queue (mit Filter)
+app.get('/api/verwaltung-mail-queue', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const status = String(req.query.status || '').trim();
+    const params = [];
+    let where = 'TRUE';
+    if (status && ['pending','freigegeben','abgelehnt','gesendet','fehler'].includes(status)) {
+      params.push(status);
+      where = `status = $${params.length}`;
+    }
+    const r = await pool.query(
+      `SELECT id, source_type, source_id, mail_to, mail_cc, mail_reply_to,
+              subject, status, created_by, created_at, edited_by, edited_at,
+              freigegeben_von, freigegeben_am, abgelehnt_von, abgelehnt_am, abgelehnt_grund,
+              sent_at, send_error,
+              jsonb_array_length(COALESCE(attachments, '[]'::jsonb)) AS attachment_count,
+              LENGTH(body_text) AS body_size
+         FROM verwaltung_mail_queue
+        WHERE ${where}
+        ORDER BY CASE WHEN status='pending' THEN 0 WHEN status='freigegeben' THEN 1 WHEN status='fehler' THEN 2 ELSE 3 END,
+                 created_at DESC
+        LIMIT 500`,
+      params,
+    );
+    const pendingCount = await pool.query(`SELECT COUNT(*) AS cnt FROM verwaltung_mail_queue WHERE status = 'pending'`);
+    res.json({ mails: r.rows, pending_count: parseInt(pendingCount.rows[0].cnt, 10) });
+  } catch (err) {
+    console.error('Mail-Queue list error:', err);
+    res.status(500).json({ error: 'Fehler beim Laden' });
+  }
+});
+
+// Anzahl pending (fuer Nav-Badge)
+app.get('/api/verwaltung-mail-queue/pending-count', authMiddleware, async (req, res) => {
+  try {
+    const groups = req.user?.groups || [];
+    if (!isTechnik(groups) && !isPraesident(groups)) return res.json({ count: 0 });
+    const r = await pool.query(`SELECT COUNT(*) AS cnt FROM verwaltung_mail_queue WHERE status = 'pending'`);
+    res.json({ count: parseInt(r.rows[0].cnt, 10) });
+  } catch (err) {
+    res.json({ count: 0 });
+  }
+});
+
+// Detail (volle Mail inkl. body_text)
+app.get('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
+    const r = await pool.query('SELECT * FROM verwaltung_mail_queue WHERE id = $1', [id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    res.json(r.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Edit (To/CC/Subject/Body) — nur solange pending
+app.put('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
+    const cur = await pool.query('SELECT * FROM verwaltung_mail_queue WHERE id = $1', [id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const row = cur.rows[0];
+    if (row.status !== 'pending') {
+      return res.status(409).json({ error: `Editieren nur bei Status 'pending' moeglich (aktuell: ${row.status})` });
+    }
+    // Beim ersten Edit Original-Snapshot speichern
+    let snapshot = row.original_snapshot;
+    if (!snapshot) {
+      snapshot = {
+        mail_to: row.mail_to, mail_cc: row.mail_cc, mail_reply_to: row.mail_reply_to,
+        subject: row.subject, body_text: row.body_text,
+      };
+    }
+    const b = req.body || {};
+    const updates = [];
+    const params = [];
+    const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
+    if (b.mail_to !== undefined) push('mail_to', String(b.mail_to).slice(0, 2000));
+    if (b.mail_cc !== undefined) push('mail_cc', b.mail_cc ? String(b.mail_cc).slice(0, 2000) : null);
+    if (b.mail_reply_to !== undefined) push('mail_reply_to', b.mail_reply_to ? String(b.mail_reply_to).slice(0, 255) : null);
+    if (b.subject !== undefined) push('subject', String(b.subject).slice(0, 500));
+    if (b.body_text !== undefined) push('body_text', String(b.body_text).slice(0, 100000));
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    push('original_snapshot', JSON.stringify(snapshot));
+    push('edited_by', req.user.email);
+    push('edited_at', new Date());
+    params.push(id);
+    const r = await pool.query(
+      `UPDATE verwaltung_mail_queue SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`,
+      params,
+    );
+    res.json(r.rows[0]);
+  } catch (err) {
+    console.error('Mail-Queue edit error:', err);
+    res.status(500).json({ error: 'Fehler beim Speichern' });
+  }
+});
+
+// Freigeben + sofort senden
+app.post('/api/verwaltung-mail-queue/:id/freigeben', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
+    const cur = await pool.query('SELECT status FROM verwaltung_mail_queue WHERE id = $1', [id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    if (cur.rows[0].status !== 'pending') {
+      return res.status(409).json({ error: `Status ist '${cur.rows[0].status}', erwartet 'pending'` });
+    }
+    await pool.query(
+      `UPDATE verwaltung_mail_queue SET status = 'freigegeben', freigegeben_von = $1, freigegeben_am = NOW() WHERE id = $2`,
+      [req.user.email, id],
+    );
+    try {
+      await sendVerwaltungMailFromQueue(id, req.user.email);
+      res.json({ success: true, sent: true });
+    } catch (sendErr) {
+      console.error(`[mail-queue ${id}] Send error:`, sendErr);
+      res.status(500).json({ success: false, error: 'Mail freigegeben, aber Versand schlug fehl: ' + sendErr.message });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Ablehnen mit Grund
+app.post('/api/verwaltung-mail-queue/:id/ablehnen', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
+    const grund = String(req.body?.grund || '').slice(0, 1000);
+    if (!grund.trim()) return res.status(400).json({ error: 'Grund erforderlich' });
+    const cur = await pool.query('SELECT status, source_type, source_id, subject FROM verwaltung_mail_queue WHERE id = $1', [id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    if (cur.rows[0].status !== 'pending') {
+      return res.status(409).json({ error: `Status ist '${cur.rows[0].status}', erwartet 'pending'` });
+    }
+    await pool.query(
+      `UPDATE verwaltung_mail_queue
+          SET status = 'abgelehnt', abgelehnt_von = $1, abgelehnt_am = NOW(), abgelehnt_grund = $2
+        WHERE id = $3`,
+      [req.user.email, grund, id],
+    );
+    // Optional: bei source=auslage-auszahlung den Ausschuss informieren damit die Auslage neu bewertet werden kann
+    try {
+      const row = cur.rows[0];
+      if (row.source_type.startsWith('auslage-auszahlung') && row.source_id) {
+        const aR = await pool.query('SELECT user_email, user_name, bearbeitet_von FROM auslagen WHERE id = $1', [row.source_id]);
+        if (aR.rows.length > 0) {
+          const a = aR.rows[0];
+          const cc = [a.user_email, a.bearbeitet_von].filter(v => v).join(', ');
+          await loggedSendMail({
+            from: MAIL_FROM,
+            to: a.bearbeitet_von || a.user_email,
+            cc,
+            subject: `Auszahlungs-Mail abgelehnt: ${row.subject.slice(0, 80)}`,
+            text:
+              `Die Auszahlungs-Mail an die Verwaltung wurde von ${req.user.email} abgelehnt.\n\n`
+              + `Grund: ${grund}\n\n`
+              + `Auslage: ${SITE_URL}/auslagen.html\n`
+              + `Mail-Queue: ${SITE_URL}/verwaltung-mail-outbox.html`,
+          }, 'verwaltung-mail-abgelehnt');
+        }
+      }
+    } catch (mailErr) {
+      console.warn('[mail-queue] Ablehn-Notification fehlgeschlagen:', mailErr.message);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Attachment-Download zur Vorschau
+app.get('/api/verwaltung-mail-queue/:id/attachment/:idx', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const idx = parseInt(req.params.idx, 10);
+    if (!Number.isFinite(id) || !Number.isFinite(idx)) return res.status(400).end();
+    const r = await pool.query('SELECT attachments FROM verwaltung_mail_queue WHERE id = $1', [id]);
+    if (r.rows.length === 0) return res.status(404).end();
+    const att = (r.rows[0].attachments || [])[idx];
+    if (!att) return res.status(404).end();
+    res.setHeader('Content-Disposition', `inline; filename="${(att.filename || 'beleg').replace(/[^A-Za-z0-9._-]/g, '_')}"`);
+    if (att.content_base64) {
+      res.send(Buffer.from(att.content_base64, 'base64'));
+      return;
+    }
+    if (att.docs_path) {
+      const full = pathModule.join(DOCS_PATH, att.docs_path);
+      if (!full.startsWith(pathModule.resolve(DOCS_PATH) + '/')) return res.status(400).end();
+      return res.sendFile(full, (err) => { if (err && !res.headersSent) res.status(404).end(); });
+    }
+    res.status(404).end();
+  } catch (err) {
     res.status(500).end();
   }
 });
@@ -10386,6 +10748,38 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_auslagen_user ON auslagen(user_email);
       CREATE INDEX IF NOT EXISTS idx_auslagen_stweg_status ON auslagen(stweg, status);
       CREATE INDEX IF NOT EXISTS idx_auslagen_created ON auslagen(created_at DESC);
+
+      -- Verwaltungs-Mail-Genehmigungs-Queue
+      -- Alle ausgehenden Mails an externe Verwaltung werden zuerst hier
+      -- abgelegt und brauchen Freigabe durch Technik oder Praesident
+      -- bevor sie versendet werden. Inhalt kann editiert werden.
+      CREATE TABLE IF NOT EXISTS verwaltung_mail_queue (
+        id SERIAL PRIMARY KEY,
+        source_type VARCHAR(60) NOT NULL,
+        source_id INTEGER,
+        mail_to TEXT NOT NULL,
+        mail_cc TEXT,
+        mail_reply_to VARCHAR(255),
+        subject TEXT NOT NULL,
+        body_text TEXT NOT NULL,
+        attachments JSONB DEFAULT '[]'::jsonb,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        created_by VARCHAR(255),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        original_snapshot JSONB,
+        edited_by VARCHAR(255),
+        edited_at TIMESTAMPTZ,
+        freigegeben_von VARCHAR(255),
+        freigegeben_am TIMESTAMPTZ,
+        abgelehnt_von VARCHAR(255),
+        abgelehnt_am TIMESTAMPTZ,
+        abgelehnt_grund TEXT,
+        sent_at TIMESTAMPTZ,
+        send_error TEXT,
+        CONSTRAINT vmq_status_chk CHECK (status IN ('pending','freigegeben','abgelehnt','gesendet','fehler'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_vmq_pending ON verwaltung_mail_queue(status, created_at) WHERE status = 'pending';
+      CREATE INDEX IF NOT EXISTS idx_vmq_source ON verwaltung_mail_queue(source_type, source_id);
 
       -- Outbox-Tracking: wann ging die letzte Auszahlungs-Mail an wen?
       -- Damit koennen wir genehmigte Auslagen, die waehrend einer Vakanz
