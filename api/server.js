@@ -9287,30 +9287,36 @@ function auslagenStwegFolder(stweg) {
 async function findVerwaltungForStweg(stweg) {
   const stwegInt = parseInt(stweg, 10);
   const stwegVal = Number.isFinite(stwegInt) ? stwegInt : null;
-  // Wirksam: aktiv UND innerhalb Vertragszeitraum (Start erreicht, Ende noch nicht ueberschritten)
-  const wirksamWhere = `aktiv = true
-    AND (vertrag_von IS NULL OR vertrag_von <= CURRENT_DATE)
-    AND (vertrag_bis IS NULL OR vertrag_bis >= CURRENT_DATE)`;
-  let r = stwegVal
-    ? await pool.query(`SELECT * FROM verwaltungen WHERE ${wirksamWhere} AND stweg = $1 ORDER BY id LIMIT 1`, [stwegVal])
-    : { rows: [] };
-  if (r.rows.length === 0) {
-    r = await pool.query(`SELECT * FROM verwaltungen WHERE ${wirksamWhere} AND stweg IS NULL ORDER BY id LIMIT 1`);
-  }
+  // L9: kombinierte Query mit LEFT JOIN auf Kontakte. Eine Query statt 2-3.
+  // Praezedenz: stweg-spezifisch (rank=1) → uebergreifend (rank=2) → leer (Fallback)
+  const r = await pool.query(`
+    WITH ranked AS (
+      SELECT v.id, v.firma_name, v.email AS firma_email,
+             CASE WHEN v.stweg = $1 THEN 1 ELSE 2 END AS rk
+        FROM verwaltungen v
+       WHERE v.aktiv = true
+         AND (v.vertrag_von IS NULL OR v.vertrag_von <= CURRENT_DATE)
+         AND (v.vertrag_bis IS NULL OR v.vertrag_bis >= CURRENT_DATE)
+         AND ($1::int IS NULL AND v.stweg IS NULL OR v.stweg = $1 OR v.stweg IS NULL)
+    ),
+    chosen AS (SELECT * FROM ranked ORDER BY rk, id LIMIT 1)
+    SELECT c.id, c.firma_name, c.firma_email,
+           COALESCE((
+             SELECT array_agg(k.email ORDER BY k.sort_order, k.id)
+               FROM verwaltungs_kontakte k
+              WHERE k.verwaltung_id = c.id AND k.email IS NOT NULL AND k.email <> ''
+           ), ARRAY[]::text[]) AS kontakt_emails
+      FROM chosen c
+  `, [stwegVal]);
   if (r.rows.length > 0) {
     const v = r.rows[0];
-    const k = await pool.query(
-      'SELECT name, email FROM verwaltungs_kontakte WHERE verwaltung_id = $1 AND email IS NOT NULL AND email <> \'\' ORDER BY sort_order, id',
-      [v.id],
-    );
     const mailTo = [];
-    if (v.email) mailTo.push(v.email);
-    const mailCc = k.rows.map(x => x.email).filter(e => e && !mailTo.includes(e));
-    if (mailTo.length === 0 && mailCc.length === 0) {
-      // Verwaltung existiert, hat aber keine E-Mail — auf Fallback gehen
-    } else {
+    if (v.firma_email) mailTo.push(v.firma_email);
+    const mailCc = (v.kontakt_emails || []).filter(e => e && !mailTo.includes(e));
+    if (mailTo.length > 0 || mailCc.length > 0) {
       return { id: v.id, firma: v.firma_name, mailTo, mailCc, fallback: null };
     }
+    // Verwaltung existiert, hat aber keine E-Mail → Fallback
   }
   // Fallback: Ausschuss des STWEGs (+ Technik-Gruppe). Aus users.groups_json
   const groupNames = [];
@@ -11837,7 +11843,11 @@ async function initDB() {
         ausbezahlt_am DATE,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW(),
-        CONSTRAINT auslagen_status_chk CHECK (status IN ('eingereicht','genehmigt','abgelehnt','ausbezahlt'))
+        CONSTRAINT auslagen_status_chk CHECK (status IN ('eingereicht','genehmigt','abgelehnt','ausbezahlt')),
+        CONSTRAINT auslagen_betrag_chk CHECK (betrag_chf > 0 AND betrag_chf <= 100000),
+        CONSTRAINT auslagen_beschreibung_len CHECK (LENGTH(beschreibung) <= 2000),
+        CONSTRAINT auslagen_bem_eig_len CHECK (bemerkung_eigentuemer IS NULL OR LENGTH(bemerkung_eigentuemer) <= 2000),
+        CONSTRAINT auslagen_bem_aus_len CHECK (bemerkung_ausschuss IS NULL OR LENGTH(bemerkung_ausschuss) <= 2000)
       );
       CREATE INDEX IF NOT EXISTS idx_auslagen_user ON auslagen(user_email);
       CREATE INDEX IF NOT EXISTS idx_auslagen_stweg_status ON auslagen(stweg, status);

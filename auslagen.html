@@ -7,6 +7,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="/js/authentik-auth.js?v=2"></script>
   <script src="/js/nav.js?v=2"></script>
+  <script src="/js/modal-helpers.js?v=1"></script>
   <link rel="icon" href="/logo-rosenweg.png">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -87,7 +88,7 @@
 
   <!-- Modal: Neue / Bearbeiten -->
   <div id="modal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-start justify-center p-4 overflow-y-auto">
-    <div class="bg-white rounded-lg shadow-xl max-w-xl w-full p-6 my-8">
+    <div class="bg-white rounded-lg shadow-xl max-w-xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between mb-4">
         <h2 id="modal-title" class="text-xl font-bold text-gray-900">Neue Auslage</h2>
         <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
@@ -149,7 +150,7 @@
 
   <!-- Modal: Prüfen (Ausschuss) -->
   <div id="modal-review" class="hidden fixed inset-0 bg-black/40 z-50 flex items-start justify-center p-4 overflow-y-auto">
-    <div class="bg-white rounded-lg shadow-xl max-w-xl w-full p-6 my-8">
+    <div class="bg-white rounded-lg shadow-xl max-w-xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-xl font-bold text-gray-900">Auslage prüfen</h2>
         <button onclick="closeReview()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
@@ -361,13 +362,21 @@
         beleg_base64 = await fileToBase64(file);
         beleg_filename = file.name;
       }
+      // L5: Client-Validierung IBAN + Betrag bevor request raus geht
+      const ibanRaw = document.getElementById('f-iban').value.replace(/\s+/g, '').toUpperCase();
+      if (ibanRaw && !/^[A-Z]{2}\d{2}[A-Z0-9]{4,30}$/.test(ibanRaw)) {
+        throw new Error('IBAN-Format ungültig (z.B. CH00 0000 0000 0000 0000 0)');
+      }
+      const betrag = parseFloat(document.getElementById('f-betrag').value);
+      if (!Number.isFinite(betrag) || betrag <= 0) throw new Error('Betrag muss > 0 sein');
+      if (betrag > 100000) throw new Error('Betrag > 100\'000 CHF ist nicht plausibel');
       const payload = {
         datum: document.getElementById('f-datum').value,
-        betrag_chf: parseFloat(document.getElementById('f-betrag').value),
+        betrag_chf: betrag,
         stweg: document.getElementById('f-stweg').value || null,
         kategorie: document.getElementById('f-kategorie').value || null,
         beschreibung: document.getElementById('f-beschreibung').value.trim(),
-        iban: document.getElementById('f-iban').value.trim() || null,
+        iban: ibanRaw || null,
         bemerkung_eigentuemer: document.getElementById('f-bemerkung').value.trim() || null,
       };
       if (beleg_base64) { payload.beleg_base64 = beleg_base64; payload.beleg_filename = beleg_filename; }

@@ -364,10 +364,14 @@ const RosenwegNav = {
     // Pending-Badge fuer Technik/Praesident: Anzahl Mails in der Verwaltungs-Mail-Queue
     const groupsLower = (user?.groups || []).map(g => String(g).toLowerCase());
     if (groupsLower.some(g => g === 'technik' || g === 'präsident' || g === 'praesident')) {
-      this._updateMailQueueBadge();
-      // Alle 60s neu pruefen
+      // L7: nur pollen wenn Tab sichtbar (spart Strom/Requests bei Hintergrund-Tabs)
       if (!this._vmqInterval) {
-        this._vmqInterval = setInterval(() => this._updateMailQueueBadge(), 60000);
+        if (typeof window !== 'undefined' && typeof window.intervalWhenVisible === 'function') {
+          this._vmqInterval = window.intervalWhenVisible(() => this._updateMailQueueBadge(), 60000);
+        } else {
+          this._updateMailQueueBadge();
+          this._vmqInterval = setInterval(() => this._updateMailQueueBadge(), 60000);
+        }
       }
     }
   },
