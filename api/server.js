@@ -755,6 +755,7 @@ const MANAGED_PAGES = [
   { id: 'mail-empfaenger', label: 'Mail-Empfaenger (Stammdaten)' },
   { id: 'mail-compose', label: 'Mail schreiben (Ad-hoc)' },
   { id: 'mail-approval-config', label: 'Mail-Freigabe-Regeln' },
+  { id: 'mail-templates', label: 'Mail-Templates' },
 ];
 
 const ACCESS_LEVELS = { none: 0, read: 1, write: 2 };
@@ -9452,14 +9453,31 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
     let subjectPrefix = '';
     if (verw.fallback) subjectPrefix = '⚠ KEINE VERWALTUNG HINTERLEGT — ';
     else if (isNachgereicht) subjectPrefix = '[NACHGEREICHT] ';
-    const subject = `${subjectPrefix}Auszahlungsauftrag ${stwegLabel}: ${auslage.user_name} – CHF ${betrag} (Auslage ${auslage.id})`;
 
     const freigabeAm = auslage.bearbeitet_am
       ? new Date(auslage.bearbeitet_am).toLocaleDateString('de-CH')
       : today;
     const freigebender = auslage.bearbeitet_von || ausschussEmail;
 
-    const text = [
+    // Template aus DB versuchen (source_type = 'auslage-auszahlung' bzw. -nachgereicht)
+    const sourceTypeForTpl = isNachgereicht ? 'auslage-auszahlung-nachgereicht' : 'auslage-auszahlung';
+    const tpl = await findMailTemplate(sourceTypeForTpl, 'verwaltung');
+    let subject, text;
+    if (tpl) {
+      const tplContext = {
+        auslage: { ...auslage, betrag_chf: Number(auslage.betrag_chf) },
+        stweg_label: stwegLabel, datum: datum, today: today, betrag: betrag,
+        freigeber: freigebender, freigabe_am: freigabeAm,
+        verwaltung: { firma: verw.firma },
+        nachgereicht: isNachgereicht,
+        has_attachment: hasAttachment,
+        site_url: SITE_URL, ausschuss_email: ausschussEmail,
+      };
+      subject = subjectPrefix + renderTemplate(tpl.subject_template, tplContext);
+      text = renderTemplate(tpl.body_template, tplContext);
+    } else {
+      subject = `${subjectPrefix}Auszahlungsauftrag ${stwegLabel}: ${auslage.user_name} – CHF ${betrag} (Auslage ${auslage.id})`;
+      text = [
       verw.fallback === 'ausschuss'
         ? `ACHTUNG: Fuer ${stwegLabel} ist KEINE aktive Verwaltung mit E-Mail-Adresse hinterlegt.\n`
           + `Diese Auszahlungs-Aufforderung geht deshalb ersatzweise an den Ausschuss.\n`
@@ -9505,7 +9523,8 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
       ``,
       `Freundliche Gruesse`,
       `STWEG-Kooperation Rosenweg`,
-    ].filter(Boolean).join('\n');
+      ].filter(Boolean).join('\n');
+    }
 
     // Beim Ausschuss-Fallback (keine Verwaltung) → direkt an Ausschuss senden ohne Queue,
     // weil Ausschuss-interne Mails keine Freigabe brauchen.
@@ -9598,26 +9617,35 @@ async function recordObjektChange(stweg, line, changedBy) {
       return;
     }
 
-    // Neuen Sammel-Eintrag in die Queue stellen
-    const subject = `Objektverwaltungs-Aenderungen ${stwegLabel} (${new Date().toLocaleDateString('de-CH')})`;
-    const body = [
-      `Sehr geehrte Damen und Herren`,
-      ``,
-      `folgende Aenderungen wurden in der Objektverwaltung der STWEG-Kooperation`,
-      `erfasst und sind fuer Ihre Unterlagen relevant:`,
-      ``,
-      `── Aenderungen (${stwegLabel}) ──`,
-      newLine,
-      ``,
-      `Diese Mail wird automatisch um weitere Aenderungen erweitert, solange sie`,
-      `noch nicht freigegeben ist. Sobald Technik oder Praesident die Mail`,
-      `freigibt, geht sie an Sie raus.`,
-      ``,
-      `Bitte aktualisieren Sie Ihre Stamm- und Kontaktdaten entsprechend.`,
-      ``,
-      `Mit freundlichen Gruessen`,
-      `STWEG-Kooperation Rosenweg`,
-    ].join('\n');
+    // Neuen Sammel-Eintrag in die Queue stellen — Template aus DB versuchen
+    const tpl = await findMailTemplate('objekt-aenderung', 'verwaltung');
+    const tplContext = {
+      stweg_label: stwegLabel, stweg: stwegVal, today_de: new Date().toLocaleDateString('de-CH'),
+      erste_aenderung: newLine, site_url: SITE_URL,
+    };
+    const subject = tpl
+      ? renderTemplate(tpl.subject_template, tplContext)
+      : `Objektverwaltungs-Aenderungen ${stwegLabel} (${new Date().toLocaleDateString('de-CH')})`;
+    const body = tpl
+      ? renderTemplate(tpl.body_template, tplContext)
+      : [
+          `Sehr geehrte Damen und Herren`,
+          ``,
+          `folgende Aenderungen wurden in der Objektverwaltung der STWEG-Kooperation`,
+          `erfasst und sind fuer Ihre Unterlagen relevant:`,
+          ``,
+          `── Aenderungen (${stwegLabel}) ──`,
+          newLine,
+          ``,
+          `Diese Mail wird automatisch um weitere Aenderungen erweitert, solange sie`,
+          `noch nicht freigegeben ist. Sobald Technik oder Praesident die Mail`,
+          `freigibt, geht sie an Sie raus.`,
+          ``,
+          `Bitte aktualisieren Sie Ihre Stamm- und Kontaktdaten entsprechend.`,
+          ``,
+          `Mit freundlichen Gruessen`,
+          `STWEG-Kooperation Rosenweg`,
+        ].join('\n');
 
     await enqueueVerwaltungMail({
       source_type: 'objekt-aenderung',
@@ -10445,6 +10473,136 @@ app.post('/api/mail-compose', authMiddleware, requirePermission('mail-compose', 
     console.error('Mail-compose error:', err);
     res.status(500).json({ error: 'Fehler beim Einstellen/Versand: ' + err.message });
   }
+});
+
+// ─── Mail-Templates ────────────────────────────────────────────────
+// Erlaubt es, Subject/Body fuer ausgehende Mails pro source_type
+// (+ optional Empfaenger-Kategorie) zu konfigurieren statt hartcodiert.
+// Platzhalter-Syntax: {{path.to.field}}, z.B. {{auslage.betrag_chf}}.
+// Erweiterte Helpers: {{#if x}}…{{/if}}, {{date x}}, {{chf x}}.
+
+function tplGet(obj, path) {
+  if (!path) return '';
+  const parts = String(path).split('.');
+  let cur = obj;
+  for (const p of parts) {
+    if (cur == null) return '';
+    cur = cur[p];
+  }
+  return cur == null ? '' : cur;
+}
+
+function tplFormat(value, helper) {
+  if (value == null) return '';
+  switch (helper) {
+    case 'chf':
+      return 'CHF ' + Number(value).toLocaleString('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    case 'date':
+      try { return new Date(value).toLocaleDateString('de-CH'); } catch { return String(value); }
+    case 'datetime':
+      try { return new Date(value).toLocaleString('de-CH'); } catch { return String(value); }
+    case 'upper':
+      return String(value).toUpperCase();
+    case 'lower':
+      return String(value).toLowerCase();
+    default:
+      return String(value);
+  }
+}
+
+function renderTemplate(template, context) {
+  if (!template) return '';
+  // {{#if path}}…{{/if}} — einfacher Bedingungsblock (nur top-level, kein nested)
+  let out = template.replace(/\{\{#if\s+([^}]+?)\s*\}\}([\s\S]*?)\{\{\/if\}\}/g, (m, path, body) => {
+    return tplGet(context, path.trim()) ? body : '';
+  });
+  // {{helper path}} oder {{path}}
+  out = out.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (m, expr) => {
+    const parts = expr.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      // helper path
+      return tplFormat(tplGet(context, parts.slice(1).join(' ')), parts[0]);
+    }
+    return tplFormat(tplGet(context, parts[0]), null);
+  });
+  return out;
+}
+
+// Findet Template-Match. Reihenfolge: source_type + kategorie spezifisch,
+// dann source_type allgemein. Returns null wenn kein Template aktiv.
+async function findMailTemplate(sourceType, empfaengerKategorie) {
+  const r = await pool.query(
+    `SELECT * FROM mail_templates
+      WHERE aktiv = true
+        AND source_type = $1
+        AND (empfaenger_kategorie = $2 OR empfaenger_kategorie IS NULL)
+      ORDER BY (empfaenger_kategorie = $2) DESC NULLS LAST
+      LIMIT 1`,
+    [sourceType, empfaengerKategorie || null],
+  );
+  return r.rows[0] || null;
+}
+
+// CRUD fuer Templates (Technik/Praesident)
+app.get('/api/mail-templates', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM mail_templates ORDER BY source_type, empfaenger_kategorie NULLS LAST');
+    res.json({ templates: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/mail-templates', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.source_type || !b.subject_template || !b.body_template) {
+      return res.status(400).json({ error: 'source_type, subject_template und body_template erforderlich' });
+    }
+    const r = await pool.query(
+      `INSERT INTO mail_templates (source_type, empfaenger_kategorie, subject_template, body_template, notiz, aktiv)
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6, true)) RETURNING *`,
+      [String(b.source_type).trim().slice(0, 120), b.empfaenger_kategorie || null,
+       b.subject_template, b.body_template, b.notiz || null, b.aktiv],
+    );
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/mail-templates/:id', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const b = req.body || {};
+    const r = await pool.query(
+      `UPDATE mail_templates SET
+         source_type = COALESCE($1, source_type),
+         empfaenger_kategorie = $2,
+         subject_template = COALESCE($3, subject_template),
+         body_template = COALESCE($4, body_template),
+         notiz = $5, aktiv = COALESCE($6, aktiv), updated_at = NOW()
+       WHERE id = $7 RETURNING *`,
+      [b.source_type || null, b.empfaenger_kategorie || null,
+       b.subject_template || null, b.body_template || null,
+       b.notiz || null, b.aktiv, id],
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/mail-templates/:id', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM mail_templates WHERE id = $1', [parseInt(req.params.id, 10)]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Preview-Endpoint: rendert Template gegen ein Beispiel-Context oder echte source_id
+app.post('/api/mail-templates/preview', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const subj = renderTemplate(b.subject_template || '', b.context || {});
+    const body = renderTemplate(b.body_template || '', b.context || {});
+    res.json({ subject: subj, body });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ─── Mail-Approval-Config + 4-Augen-Logik ──────────────────────────
@@ -11671,6 +11829,23 @@ async function initDB() {
         UNIQUE (queue_id, approver_email)
       );
       CREATE INDEX IF NOT EXISTS idx_mal_queue ON mail_approval_log(queue_id);
+
+      -- Mail-Templates pro source_type + optional Empfaenger-Kategorie.
+      -- Platzhalter im Format {{path.to.field}} (z.B. {{auslage.betrag_chf}}).
+      -- Wenn kein Template gefunden wird, wird der hartcodierte Default verwendet.
+      CREATE TABLE IF NOT EXISTS mail_templates (
+        id SERIAL PRIMARY KEY,
+        source_type VARCHAR(120) NOT NULL,                -- z.B. 'auslage-auszahlung', 'objekt-aenderung'
+        empfaenger_kategorie VARCHAR(60),                  -- z.B. 'verwaltung', 'bank', NULL = alle
+        subject_template TEXT NOT NULL,
+        body_template TEXT NOT NULL,
+        notiz TEXT,
+        aktiv BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_templates ON mail_templates (source_type, COALESCE(empfaenger_kategorie, '_all'));
+      CREATE INDEX IF NOT EXISTS idx_templates_source ON mail_templates(source_type, aktiv);
 
       -- Outbox-Tracking: wann ging die letzte Auszahlungs-Mail an wen?
       -- Damit koennen wir genehmigte Auslagen, die waehrend einer Vakanz
