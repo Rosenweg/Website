@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Auslagen-Stundensatz — Rosenweg</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/nav.js?v=2"></script>
+  <script src="/js/modal-helpers.js?v=1"></script>
+  <link rel="icon" href="/logo-rosenweg.png">
+  <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'); body { font-family: 'Inter', sans-serif; }</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+  <script>RosenwegNav.init({ active: 'auslagen-stundensatz' });</script>
+
+  <main class="max-w-4xl mx-auto px-4 py-6">
+    <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center"><p class="text-gray-600">Lade…</p></div>
+
+    <div id="content" class="hidden">
+      <div class="mb-4">
+        <h1 class="text-2xl font-bold text-gray-900">Stundensätze (Auslagen / Eigenleistung)</h1>
+        <p class="text-sm text-gray-600 mt-1">Stundensatz pro STWEG oder STWEG-übergreifend. Wird beim Erfassen einer Arbeitszeit-Position in <a href="/auslagen.html" class="text-blue-600 underline">Auslagen</a> automatisch vorgeschlagen. Lookup-Reihenfolge: STWEG-spezifisch → übergreifend.</p>
+      </div>
+
+      <div class="bg-white rounded-lg shadow p-4 mb-4">
+        <h2 class="text-sm font-semibold mb-3">Neuen Satz erfassen / aktualisieren</h2>
+        <form id="form" class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end text-sm">
+          <label class="block">
+            <span class="text-xs text-gray-600">STWEG</span>
+            <select id="f-stweg" class="mt-1 block w-full border rounded px-2 py-1.5">
+              <option value="">— übergreifend —</option>
+              <option value="1">STWEG 1</option><option value="2">STWEG 2</option>
+              <option value="3">STWEG 3</option><option value="4">STWEG 4</option>
+              <option value="5">STWEG 5</option><option value="6">STWEG 6</option>
+              <option value="7">STWEG 7</option><option value="8">STWEG 8</option>
+            </select>
+          </label>
+          <label class="block">
+            <span class="text-xs text-gray-600">Satz CHF / Stunde *</span>
+            <input type="number" step="0.5" min="0.5" max="500" id="f-satz" required class="mt-1 block w-full border rounded px-2 py-1.5">
+          </label>
+          <label class="block">
+            <span class="text-xs text-gray-600">Gültig ab</span>
+            <input type="date" id="f-ab" class="mt-1 block w-full border rounded px-2 py-1.5">
+          </label>
+          <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700">Speichern</button>
+          <label class="md:col-span-4">
+            <span class="text-xs text-gray-600">Beschreibung / Notiz</span>
+            <input type="text" id="f-notiz" class="mt-1 block w-full border rounded px-2 py-1.5" placeholder="z.B. Eigenleistung Eigentümer">
+          </label>
+        </form>
+        <div id="form-err" class="text-sm text-red-600 hidden mt-2"></div>
+      </div>
+
+      <div class="bg-white rounded-lg shadow overflow-hidden">
+        <table class="min-w-full text-sm">
+          <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+            <tr>
+              <th class="px-3 py-2 text-left">STWEG</th>
+              <th class="px-3 py-2 text-right">Satz</th>
+              <th class="px-3 py-2 text-left">Gültig ab</th>
+              <th class="px-3 py-2 text-left">Notiz</th>
+              <th class="px-3 py-2"></th>
+            </tr>
+          </thead>
+          <tbody id="tbody" class="divide-y divide-gray-100"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script>
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  let LIST = [];
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    const u = await AuthentikAuth.init({ requireAuth: true });
+    if (!u) return;
+    document.getElementById('auth-gate').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+    document.getElementById('form').addEventListener('submit', save);
+    await loadList();
+  });
+
+  async function loadList() {
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/auslagen-stundensatz');
+      const d = await r.json();
+      LIST = d.saetze || [];
+      render();
+    } catch (e) {
+      document.getElementById('tbody').innerHTML = `<tr><td colspan="5" class="text-red-600 px-4 py-4">${esc(e.message)}</td></tr>`;
+    }
+  }
+
+  function render() {
+    const tbody = document.getElementById('tbody');
+    if (LIST.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">Noch keine Sätze erfasst.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = LIST.map(s => `<tr>
+      <td class="px-3 py-2">${s.stweg ? 'STWEG ' + s.stweg : '<em class="text-gray-500">übergreifend</em>'}</td>
+      <td class="px-3 py-2 text-right font-mono">CHF ${Number(s.satz_chf).toFixed(2)}/h</td>
+      <td class="px-3 py-2 text-gray-700">${s.gueltig_ab ? esc(String(s.gueltig_ab).slice(0,10)) : '—'}</td>
+      <td class="px-3 py-2 text-gray-600 text-xs">${esc(s.beschreibung || '')}</td>
+      <td class="px-3 py-2 text-right">
+        <button onclick="del(${s.id})" class="text-red-600 text-xs hover:underline">löschen</button>
+      </td>
+    </tr>`).join('');
+  }
+
+  async function save(ev) {
+    ev.preventDefault();
+    const err = document.getElementById('form-err'); err.classList.add('hidden');
+    try {
+      const payload = {
+        stweg: document.getElementById('f-stweg').value || null,
+        satz_chf: parseFloat(document.getElementById('f-satz').value),
+        gueltig_ab: document.getElementById('f-ab').value || null,
+        beschreibung: document.getElementById('f-notiz').value.trim() || null,
+      };
+      const r = await AuthentikAuth.apiFetch('/api/auslagen-stundensatz', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+      document.getElementById('form').reset();
+      await loadList();
+    } catch (e) {
+      err.textContent = e.message; err.classList.remove('hidden');
+    }
+  }
+
+  async function del(id) {
+    if (!confirm('Wirklich löschen?')) return;
+    await AuthentikAuth.apiFetch('/api/auslagen-stundensatz/' + id, { method: 'DELETE' });
+    await loadList();
+  }
+  </script>
+</body>
+</html>
