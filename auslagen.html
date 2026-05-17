@@ -88,7 +88,7 @@
 
   <!-- Modal: Neue / Bearbeiten -->
   <div id="modal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-start justify-center p-4 overflow-y-auto">
-    <div class="bg-white rounded-lg shadow-xl max-w-xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
+    <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 my-8 max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between mb-4">
         <h2 id="modal-title" class="text-xl font-bold text-gray-900">Neue Auslage</h2>
         <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
@@ -135,10 +135,25 @@
         </label>
         <label class="block text-sm">
           <span class="text-gray-700">Beleg / Quittung (PDF, JPG, PNG, max 15 MB)</span>
-          <input type="file" id="f-beleg" accept=".pdf,image/jpeg,image/png,image/webp,image/heic"
-                 class="mt-1 block w-full text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
-          <p id="f-beleg-info" class="text-xs text-gray-500 mt-1"></p>
+          <div class="flex gap-2 mt-1">
+            <input type="file" id="f-beleg" accept=".pdf,image/jpeg,image/png,image/webp,image/heic"
+                   class="flex-1 block text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+            <button type="button" id="btn-scan" disabled class="px-3 py-1.5 bg-purple-600 text-white text-sm rounded hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed" title="KI extrahiert Positionen aus dem Beleg">🤖 Scannen</button>
+          </div>
+          <p id="f-beleg-info" class="text-xs text-gray-500 mt-1">Tipp: Beleg-Foto hochladen → "Scannen" → Positionen werden automatisch befüllt.</p>
         </label>
+
+        <!-- Positionen-Editor -->
+        <fieldset class="border rounded-lg p-3">
+          <legend class="text-xs font-semibold text-gray-700 px-2">Positionen (optional, ersetzt Gesamt-Betrag)</legend>
+          <div id="positionen-list" class="space-y-2 mt-2"></div>
+          <div class="flex gap-2 mt-2 text-xs">
+            <button type="button" onclick="addPosition('material')" class="text-blue-600 hover:underline">+ Material/Artikel</button>
+            <button type="button" onclick="addPosition('arbeitszeit')" class="text-blue-600 hover:underline">+ Arbeitszeit</button>
+            <span class="ml-auto text-gray-600">Summe Positionen: <strong id="pos-total">CHF 0.00</strong></span>
+          </div>
+          <p id="stundensatz-info" class="text-xs text-gray-500 mt-2"></p>
+        </fieldset>
         <div id="form-error" class="text-sm text-red-600 hidden"></div>
         <div class="flex justify-end gap-2 pt-2">
           <button type="button" onclick="closeModal()" class="px-3 py-1.5 text-gray-600 hover:bg-gray-100 rounded">Abbrechen</button>
@@ -203,6 +218,12 @@
     document.getElementById('filter-status').addEventListener('change', loadAuslagen);
     document.getElementById('filter-scope').addEventListener('change', render);
     document.querySelectorAll('#modal-review .r-btn').forEach(b => b.addEventListener('click', () => onReviewAction(b.dataset.act)));
+    // KI-Belegleser Hooks
+    document.getElementById('f-beleg').addEventListener('change', e => {
+      document.getElementById('btn-scan').disabled = !e.target.files[0];
+    });
+    document.getElementById('btn-scan').addEventListener('click', scanBeleg);
+    document.getElementById('f-stweg').addEventListener('change', refreshStundensatz);
     await loadAuslagen();
   });
 
@@ -315,6 +336,9 @@
       box('Ausbezahlt', sum('ausbezahlt'), cnt('ausbezahlt'), 'text-emerald-700');
   }
 
+  let POSITIONEN = [];
+  let STUNDENSATZ_AKT = null;
+
   function openNew() {
     document.getElementById('modal-title').textContent = 'Neue Auslage';
     document.getElementById('form-auslage').reset();
@@ -322,10 +346,13 @@
     document.getElementById('f-datum').value = new Date().toISOString().slice(0, 10);
     document.getElementById('f-beleg-info').textContent = '';
     document.getElementById('form-error').classList.add('hidden');
+    POSITIONEN = []; renderPositionen();
+    refreshStundensatz();
+    document.getElementById('btn-scan').disabled = true;
     document.getElementById('modal').classList.remove('hidden');
   }
 
-  function openEdit(id) {
+  async function openEdit(id) {
     const a = STATE.auslagen.find(x => x.id === id);
     if (!a) return;
     document.getElementById('modal-title').textContent = 'Auslage bearbeiten';
@@ -340,7 +367,126 @@
     document.getElementById('f-beleg').value = '';
     document.getElementById('f-beleg-info').textContent = a.beleg_filename ? `Aktuell hinterlegt: ${a.beleg_filename} (zum Austauschen neue Datei wählen)` : '';
     document.getElementById('form-error').classList.add('hidden');
+    document.getElementById('btn-scan').disabled = true;
+    // Positionen nachladen
+    POSITIONEN = [];
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/auslagen/' + id + '/positionen');
+      if (r.ok) {
+        const data = await r.json();
+        POSITIONEN = (data.positionen || []).map(p => ({
+          position_typ: p.position_typ, beschreibung: p.beschreibung,
+          menge: Number(p.menge), einheit: p.einheit,
+          einzelpreis_chf: p.einzelpreis_chf != null ? Number(p.einzelpreis_chf) : null,
+          gesamt_chf: Number(p.gesamt_chf),
+        }));
+      }
+    } catch {}
+    renderPositionen();
+    refreshStundensatz();
     document.getElementById('modal').classList.remove('hidden');
+  }
+
+  async function refreshStundensatz() {
+    const stweg = document.getElementById('f-stweg').value;
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/auslagen-stundensatz/aktuell' + (stweg ? '?stweg=' + stweg : ''));
+      if (!r.ok) return;
+      STUNDENSATZ_AKT = await r.json();
+      const el = document.getElementById('stundensatz-info');
+      if (STUNDENSATZ_AKT.satz_chf) {
+        el.textContent = `Aktueller Stundensatz: CHF ${Number(STUNDENSATZ_AKT.satz_chf).toFixed(2)}/h ${STUNDENSATZ_AKT.stweg ? '(STWEG ' + STUNDENSATZ_AKT.stweg + ')' : '(STWEG-übergreifend)'}`;
+      } else {
+        el.textContent = 'Kein Stundensatz hinterlegt. Bitte unter "Stundensatz" konfigurieren.';
+      }
+    } catch {}
+  }
+
+  function renderPositionen() {
+    const el = document.getElementById('positionen-list');
+    if (POSITIONEN.length === 0) {
+      el.innerHTML = '<p class="text-xs text-gray-400 italic">Keine Positionen (Gesamt-Betrag oben verwenden).</p>';
+      document.getElementById('pos-total').textContent = 'CHF 0.00';
+      return;
+    }
+    el.innerHTML = POSITIONEN.map((p, i) => {
+      const isZeit = p.position_typ === 'arbeitszeit';
+      const einheitLabel = isZeit ? 'Std' : (p.einheit || 'Stk');
+      return `<div class="grid grid-cols-12 gap-2 items-center text-xs ${isZeit ? 'bg-purple-50 p-2 rounded' : ''}">
+        <input type="text" placeholder="${isZeit ? 'Tätigkeit' : 'Beschreibung'}" value="${esc(p.beschreibung || '')}"
+               oninput="POSITIONEN[${i}].beschreibung=this.value" class="col-span-5 border rounded px-2 py-1">
+        <input type="number" step="0.01" min="0" placeholder="Menge" value="${p.menge ?? ''}"
+               oninput="POSITIONEN[${i}].menge=parseFloat(this.value)||0; recalcPos(${i})" class="col-span-1 border rounded px-2 py-1">
+        <span class="col-span-1 text-gray-500">${einheitLabel}</span>
+        <input type="number" step="0.01" min="0" placeholder="${isZeit ? 'CHF/h' : 'CHF/Stk'}" value="${p.einzelpreis_chf ?? ''}"
+               oninput="POSITIONEN[${i}].einzelpreis_chf=parseFloat(this.value)||null; recalcPos(${i})" class="col-span-2 border rounded px-2 py-1">
+        <input type="number" step="0.01" min="0" placeholder="Total CHF" value="${p.gesamt_chf ?? 0}"
+               oninput="POSITIONEN[${i}].gesamt_chf=parseFloat(this.value)||0; updatePosTotal()" class="col-span-2 border rounded px-2 py-1 font-medium">
+        <button type="button" onclick="POSITIONEN.splice(${i},1); renderPositionen()" class="col-span-1 text-red-600">×</button>
+      </div>`;
+    }).join('');
+    updatePosTotal();
+  }
+
+  function recalcPos(i) {
+    const p = POSITIONEN[i];
+    if (p && Number.isFinite(p.menge) && Number.isFinite(p.einzelpreis_chf)) {
+      p.gesamt_chf = Math.round(p.menge * p.einzelpreis_chf * 100) / 100;
+      renderPositionen();
+    }
+  }
+
+  function updatePosTotal() {
+    const total = POSITIONEN.reduce((s, p) => s + (Number(p.gesamt_chf) || 0), 0);
+    document.getElementById('pos-total').textContent = 'CHF ' + total.toFixed(2);
+    if (POSITIONEN.length > 0) document.getElementById('f-betrag').value = total.toFixed(2);
+  }
+
+  function addPosition(typ) {
+    const einzelpreis = (typ === 'arbeitszeit' && STUNDENSATZ_AKT?.satz_chf) ? Number(STUNDENSATZ_AKT.satz_chf) : null;
+    POSITIONEN.push({
+      position_typ: typ,
+      beschreibung: typ === 'arbeitszeit' ? '' : '',
+      menge: typ === 'arbeitszeit' ? 1 : 1,
+      einheit: typ === 'arbeitszeit' ? 'h' : 'Stk',
+      einzelpreis_chf: einzelpreis,
+      gesamt_chf: einzelpreis || 0,
+    });
+    renderPositionen();
+  }
+
+  async function scanBeleg() {
+    const file = document.getElementById('f-beleg').files[0];
+    if (!file) return;
+    const btn = document.getElementById('btn-scan');
+    btn.disabled = true; const old = btn.textContent; btn.textContent = '🤖 Scannt…';
+    try {
+      const base64 = await fileToBase64(file);
+      const r = await AuthentikAuth.apiFetch('/api/auslagen/scan-beleg', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bild_base64: base64, bild_filename: file.name }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+      // Befuelle Felder
+      if (data.datum) document.getElementById('f-datum').value = data.datum;
+      if (data.lieferant && !document.getElementById('f-beschreibung').value) {
+        document.getElementById('f-beschreibung').value = data.lieferant;
+      }
+      POSITIONEN = (data.positionen || []).map(p => ({
+        position_typ: 'material',
+        beschreibung: p.beschreibung,
+        menge: p.menge, einheit: p.einheit || 'Stk',
+        einzelpreis_chf: p.einzelpreis, gesamt_chf: p.gesamt,
+      }));
+      renderPositionen();
+      if (data.total) document.getElementById('f-betrag').value = data.total.toFixed(2);
+      alert(`KI hat ${POSITIONEN.length} Position(en) erkannt. Total laut Beleg: CHF ${(data.total || 0).toFixed(2)}. Bitte überprüfen und ggf. korrigieren.`);
+    } catch (e) {
+      alert('Scan fehlgeschlagen: ' + e.message);
+    } finally {
+      btn.disabled = false; btn.textContent = old;
+    }
   }
 
   function closeModal() {
@@ -387,6 +533,14 @@
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+      // Positionen speichern (separater Endpoint)
+      const savedId = data.auslage?.id || id;
+      if (savedId && POSITIONEN.length > 0) {
+        await AuthentikAuth.apiFetch(`/api/auslagen/${savedId}/positionen`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ positionen: POSITIONEN }),
+        });
+      }
       closeModal();
       await loadAuslagen();
     } catch (e) {

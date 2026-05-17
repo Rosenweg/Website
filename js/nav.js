@@ -45,6 +45,7 @@ const SERVICES_GROUPS = [
       { label: 'Energie-Monitor', href: 'energie-monitor.html', activeKey: 'energie', perm: 'energie-monitor' },
       { label: 'Zähler & Verbrauch', href: 'zaehler.html', activeKey: 'zaehler', perm: 'zaehler' },
       { label: 'Auslagen / Vorschüsse', href: 'auslagen.html', activeKey: 'auslagen', perm: 'auslagen' },
+      { label: 'Stundensatz (Auslagen)', href: 'auslagen-stundensatz.html', activeKey: 'auslagen-stundensatz', perm: 'auslagen-stundensatz' },
       { label: 'Handwerker & Lieferanten', href: 'handwerker.html', activeKey: 'handwerker', perm: 'handwerker' },
       { label: 'Proxmox', href: 'proxmox-verwaltung.html', activeKey: 'proxmox', perm: 'proxmox-verwaltung' },
     ],

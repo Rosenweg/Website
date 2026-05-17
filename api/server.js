@@ -781,6 +781,7 @@ const MANAGED_PAGES = [
   { id: 'mail-compose', label: 'Mail schreiben (Ad-hoc)' },
   { id: 'mail-approval-config', label: 'Mail-Freigabe-Regeln' },
   { id: 'mail-templates', label: 'Mail-Templates' },
+  { id: 'auslagen-stundensatz', label: 'Auslagen-Stundensatz' },
 ];
 
 const ACCESS_LEVELS = { none: 0, read: 1, write: 2 };
@@ -10135,6 +10136,236 @@ app.get('/api/auslagen/:id/beleg', authMiddleware, requirePermission('auslagen',
   }
 });
 
+// ─── Auslagen: Positionen + KI-Belegleser + Stundensatz ─────────────
+
+// POST /api/auslagen/scan-beleg — Foto/PDF eines Belegs hochladen, KI extrahiert
+// Positionen, Datum, Total. Returns {datum, lieferant, positionen[], total_chf}.
+app.post('/api/auslagen/scan-beleg', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
+  try {
+    // Rate-Limit: max 30 Scans/h pro User (KI-Kosten)
+    const rl = rateLimitGuard('auslagen-scan', (req.user.email || 'anon').toLowerCase(), 30, 60 * 60 * 1000);
+    if (!rl.ok) return res.status(429).json({ error: `Zu viele Scans. Bitte ${Math.ceil(rl.retryAfter / 60)} Min warten.` });
+
+    const { bild_base64, bild_filename } = req.body || {};
+    if (!bild_base64) return res.status(400).json({ error: 'bild_base64 fehlt' });
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'OPENROUTER_API_KEY nicht konfiguriert' });
+
+    const ext = (bild_filename || 'jpeg').split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!['jpg', 'jpeg', 'png', 'webp', 'pdf'].includes(ext)) {
+      return res.status(400).json({ error: 'Nur JPG/PNG/WEBP/PDF erlaubt' });
+    }
+    const buf = Buffer.from(bild_base64, 'base64');
+    if (buf.length > 15 * 1024 * 1024) return res.status(400).json({ error: 'Datei > 15 MB' });
+    const mime = ext === 'png' ? 'image/png'
+               : ext === 'webp' ? 'image/webp'
+               : ext === 'pdf' ? 'application/pdf'
+               : 'image/jpeg';
+    const dataUrl = `data:${mime};base64,${bild_base64}`;
+
+    const systemPrompt = `Du extrahierst Positionen aus einem Beleg (Kassenbon, Rechnung, Quittung).
+Antworte AUSSCHLIESSLICH mit gueltigem JSON, keine Markdown-Codebloecke.
+
+Schema:
+{
+  "datum": "YYYY-MM-DD" | null,
+  "lieferant": string | null,        // Geschaeft, Firma
+  "waehrung": "CHF" | "EUR" | null,
+  "positionen": [
+    {
+      "beschreibung": string,       // Artikelname / Leistung
+      "menge": number,              // Stueckzahl/Menge, default 1
+      "einheit": string | null,     // "Stk", "kg", "l", "h", "m", ...
+      "einzelpreis": number | null, // pro Einheit, optional
+      "gesamt": number              // total fuer diese Position
+    }
+  ],
+  "subtotal": number | null,         // ohne MWST, falls erkennbar
+  "mwst": number | null,             // Mehrwertsteuer
+  "total": number                    // Endbetrag des Belegs
+}
+
+WICHTIG:
+- Alle Betraege als Zahlen in der Waehrung (z.B. 12.50 fuer 12.50 CHF)
+- Wenn Datum nicht erkennbar: null
+- Mengen und Einheiten so genau wie moeglich extrahieren
+- Bei Restaurant-Beleg: jede Speise/Getraenk als eigene Position
+- Bei Baumarkt-Rechnung: jeden Artikel separat`;
+
+    const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://www.rosenweg4303.ch',
+        'X-Title': 'Rosenweg Auslagen-Belegleser',
+      },
+      signal: AbortSignal.timeout(60_000),
+      body: JSON.stringify({
+        model: 'anthropic/claude-haiku-4.5',
+        max_tokens: 4096,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: [
+            { type: 'text', text: 'Extrahiere die Positionen aus diesem Beleg.' },
+            { type: 'image_url', image_url: { url: dataUrl } },
+          ]},
+        ],
+      }),
+    });
+    if (!orRes.ok) {
+      const errText = await orRes.text().catch(() => '');
+      console.error('[auslagen-scan] OpenRouter error', orRes.status, errText.slice(0, 300));
+      return res.status(502).json({ error: `OCR-Service-Fehler (HTTP ${orRes.status})` });
+    }
+    const orJson = await orRes.json();
+    const content = orJson.choices?.[0]?.message?.content || '';
+    let jsonText = content.trim();
+    const fence = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fence) jsonText = fence[1].trim();
+    let parsed;
+    try { parsed = JSON.parse(jsonText); }
+    catch (e) {
+      console.error('[auslagen-scan] JSON-Parse failed:', jsonText.slice(0, 300));
+      return res.status(502).json({ error: 'OCR-Antwort kein gueltiges JSON', raw: content.slice(0, 500) });
+    }
+    res.json({
+      datum: parsed.datum || null,
+      lieferant: parsed.lieferant || null,
+      waehrung: parsed.waehrung || 'CHF',
+      positionen: Array.isArray(parsed.positionen) ? parsed.positionen.map(p => ({
+        beschreibung: String(p.beschreibung || '').slice(0, 500),
+        menge: Number(p.menge) || 1,
+        einheit: p.einheit ? String(p.einheit).slice(0, 20) : null,
+        einzelpreis: Number(p.einzelpreis) || null,
+        gesamt: Number(p.gesamt) || 0,
+      })) : [],
+      subtotal: Number(parsed.subtotal) || null,
+      mwst: Number(parsed.mwst) || null,
+      total: Number(parsed.total) || 0,
+    });
+  } catch (err) {
+    console.error('Auslagen-scan error:', err);
+    res.status(500).json({ error: 'Scan fehlgeschlagen: ' + err.message });
+  }
+});
+
+// CRUD Positionen
+app.get('/api/auslagen/:id/positionen', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const aus = await pool.query('SELECT * FROM auslagen WHERE id = $1', [id]);
+    if (aus.rows.length === 0) return res.status(404).json({ error: 'Auslage nicht gefunden' });
+    if (!canSeeAuslage(aus.rows[0], req.user)) return res.status(403).json({ error: 'Kein Zugriff' });
+    const r = await pool.query('SELECT * FROM auslagen_positionen WHERE auslage_id = $1 ORDER BY sort_order, id', [id]);
+    res.json({ positionen: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/auslagen/:id/positionen', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const id = parseInt(req.params.id, 10);
+    const aus = await client.query('SELECT * FROM auslagen WHERE id = $1', [id]);
+    if (aus.rows.length === 0) return res.status(404).json({ error: 'Auslage nicht gefunden' });
+    const row = aus.rows[0];
+    const isOwner = row.user_email.toLowerCase() === (req.user.email || '').toLowerCase();
+    if (!(isOwner && row.status === 'eingereicht') && !canEditAuslageStatus(row, req.user)) {
+      return res.status(403).json({ error: 'Positionen nur bei eigener eingereichter Auslage oder Ausschuss editierbar' });
+    }
+    const positionen = Array.isArray(req.body?.positionen) ? req.body.positionen : [];
+    await client.query('BEGIN');
+    await client.query('DELETE FROM auslagen_positionen WHERE auslage_id = $1', [id]);
+    let total = 0;
+    for (let i = 0; i < positionen.length; i++) {
+      const p = positionen[i];
+      const typ = (p.position_typ === 'arbeitszeit') ? 'arbeitszeit' : 'material';
+      const menge = Number(p.menge) || 1;
+      const einzelpreis = Number(p.einzelpreis);
+      const gesamt = Number(p.gesamt_chf);
+      const finalGesamt = Number.isFinite(gesamt) ? gesamt
+                       : Number.isFinite(einzelpreis) ? menge * einzelpreis : 0;
+      if (finalGesamt < 0) continue;
+      total += finalGesamt;
+      await client.query(
+        `INSERT INTO auslagen_positionen
+           (auslage_id, position_typ, beschreibung, menge, einheit, einzelpreis_chf, gesamt_chf, sort_order)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [id, typ, String(p.beschreibung || '').slice(0, 500), menge,
+         p.einheit ? String(p.einheit).slice(0, 20) : null,
+         Number.isFinite(einzelpreis) ? einzelpreis : null,
+         finalGesamt, i],
+      );
+    }
+    // Aktualisiere auslagen.betrag_chf wenn aktuell noch nicht gleich Summe
+    if (positionen.length > 0 && Math.abs(Number(row.betrag_chf) - total) > 0.01) {
+      await client.query('UPDATE auslagen SET betrag_chf = $1, updated_at = NOW() WHERE id = $2', [total, id]);
+    }
+    await client.query('COMMIT');
+    res.json({ success: true, total_chf: total, positionen_count: positionen.length });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Positionen update error:', err);
+    res.status(500).json({ error: err.message });
+  } finally { client.release(); }
+});
+
+// Stundensatz-Config
+app.get('/api/auslagen-stundensatz', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM auslagen_stundensatz ORDER BY stweg NULLS FIRST');
+    res.json({ saetze: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/auslagen-stundensatz', authMiddleware, requirePermission('auslagen-stundensatz', 'write'), async (req, res) => {
+  try {
+    const b = req.body || {};
+    const stwegInt = b.stweg === null || b.stweg === '' ? null : parseInt(b.stweg, 10);
+    if (b.stweg !== null && b.stweg !== '' && (!Number.isFinite(stwegInt) || stwegInt < 1 || stwegInt > 8)) {
+      return res.status(400).json({ error: 'Ungueltiger STWEG' });
+    }
+    const satz = Number(b.satz_chf);
+    if (!Number.isFinite(satz) || satz <= 0 || satz > 500) return res.status(400).json({ error: 'Stundensatz muss 0 < satz <= 500' });
+    const r = await pool.query(
+      `INSERT INTO auslagen_stundensatz (stweg, satz_chf, beschreibung, gueltig_ab)
+       VALUES ($1, $2, $3, COALESCE($4::date, CURRENT_DATE))
+       ON CONFLICT (COALESCE(stweg, -1))
+         DO UPDATE SET satz_chf = EXCLUDED.satz_chf, beschreibung = EXCLUDED.beschreibung,
+                       gueltig_ab = EXCLUDED.gueltig_ab, updated_at = NOW()
+       RETURNING *`,
+      [stwegInt, satz, b.beschreibung || null, b.gueltig_ab || null],
+    );
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/auslagen-stundensatz/:id', authMiddleware, requirePermission('auslagen-stundensatz', 'write'), async (req, res) => {
+  try {
+    await pool.query('DELETE FROM auslagen_stundensatz WHERE id = $1', [parseInt(req.params.id, 10)]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Helper-API: liefert den gueltigen Stundensatz fuer einen STWEG (mit Fallback auf uebergreifend)
+app.get('/api/auslagen-stundensatz/aktuell', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
+  try {
+    const stwegInt = parseInt(req.query.stweg, 10);
+    const stwegVal = Number.isFinite(stwegInt) && stwegInt >= 1 && stwegInt <= 8 ? stwegInt : null;
+    const r = await pool.query(
+      `SELECT * FROM auslagen_stundensatz
+        WHERE (stweg = $1) OR (stweg IS NULL)
+        ORDER BY (stweg = $1) DESC NULLS LAST, stweg NULLS LAST LIMIT 1`,
+      [stwegVal],
+    );
+    if (r.rows.length === 0) return res.json({ satz_chf: null });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Seed: Auslagen-Stundensatz read fuer Ausschuss + Eigentuemer (zum Anzeigen)
+// → wird im initDB-Seed unten ergaenzt
+
 // ─── Mail-Empfaenger Stammdaten ──────────────────────────────────────
 // Generische Stammdaten fuer Mail-Adressaten (Anwalt, Bank, Versicherung,
 // Handwerker, Behoerde, Energieversorger etc.). Wird genutzt von der
@@ -12083,6 +12314,39 @@ async function initDB() {
       ALTER TABLE auslagen ADD COLUMN IF NOT EXISTS auszahlung_mail_verwaltung_id INTEGER;
       ALTER TABLE auslagen ADD COLUMN IF NOT EXISTS auszahlung_mail_count INTEGER DEFAULT 0;
       CREATE INDEX IF NOT EXISTS idx_auslagen_offen_fallback ON auslagen(status, auszahlung_mail_fallback) WHERE status = 'genehmigt';
+
+      -- Detaillierte Positionen pro Auslage (KI-Belegleser-Output oder manuell)
+      CREATE TABLE IF NOT EXISTS auslagen_positionen (
+        id SERIAL PRIMARY KEY,
+        auslage_id INTEGER NOT NULL REFERENCES auslagen(id) ON DELETE CASCADE,
+        position_typ VARCHAR(20) NOT NULL DEFAULT 'material',   -- 'material' | 'arbeitszeit'
+        beschreibung TEXT NOT NULL,
+        menge NUMERIC(10,3) DEFAULT 1,                          -- Stueck / Stunden / Liter etc.
+        einheit VARCHAR(20),                                    -- 'Stk', 'h', 'kg', 'l', 'm', ...
+        einzelpreis_chf NUMERIC(10,2),                          -- pro Einheit
+        gesamt_chf NUMERIC(10,2) NOT NULL,                      -- berechnet oder manuell
+        sort_order INTEGER DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        CONSTRAINT auslagen_pos_typ_chk CHECK (position_typ IN ('material','arbeitszeit')),
+        CONSTRAINT auslagen_pos_gesamt_chk CHECK (gesamt_chf >= 0)
+      );
+      CREATE INDEX IF NOT EXISTS idx_auslagen_pos_auslage ON auslagen_positionen(auslage_id, sort_order);
+
+      -- Stundensatz-Config: pro STWEG oder uebergreifend (stweg=NULL).
+      -- Wird beim KI-Belegleser bei "Arbeitszeit"-Positionen automatisch fuer
+      -- die Berechnung genutzt.
+      CREATE TABLE IF NOT EXISTS auslagen_stundensatz (
+        id SERIAL PRIMARY KEY,
+        stweg INTEGER UNIQUE,                                   -- NULL = uebergreifend
+        satz_chf NUMERIC(10,2) NOT NULL,
+        beschreibung TEXT,
+        gueltig_ab DATE DEFAULT CURRENT_DATE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        CONSTRAINT auslagen_satz_chk CHECK (satz_chf > 0 AND satz_chf <= 500)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_auslagen_satz_stweg
+        ON auslagen_stundensatz (COALESCE(stweg, -1));
     `);
 
     // Create index after migration (separate query to avoid parse errors on old schema)
@@ -12171,6 +12435,14 @@ async function initDB() {
       INSERT INTO permissions (group_name, page, access) VALUES ('eigentuemer', 'auslagen', 'read')
       ON CONFLICT (group_name, page) DO NOTHING
     `);
+
+    // Auslagen-Stundensatz: Ausschuss write fuer den eigenen STWEG (vereinfacht: alle Ausschuss write)
+    for (const groupName of ausschussGroups) {
+      await client.query(`
+        INSERT INTO permissions (group_name, page, access) VALUES ($1, 'auslagen-stundensatz', 'write')
+        ON CONFLICT (group_name, page) DO NOTHING
+      `, [groupName]);
+    }
 
     // Default Approval-Regel: technik ODER praesident, 1 Freigabe genuegt.
     await client.query(`
