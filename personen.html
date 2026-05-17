@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Personen — Rosenweg</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/nav.js?v=2"></script>
+  <link rel="icon" href="/logo-rosenweg.png">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+  <script>RosenwegNav.init({ active: 'personen' });</script>
+
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+    <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center">
+      <p class="text-gray-600">Lade Login-Status…</p>
+    </div>
+
+    <div id="content" class="hidden">
+      <div class="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900">Personen</h1>
+          <p class="text-sm text-gray-600 mt-1">Eigentümer, Mieter und Verwalter — zentrale Stammdaten. Eine Änderung hier wird automatisch auf <strong>alle Wohnungen der Person</strong> übernommen.</p>
+        </div>
+        <div class="flex gap-2">
+          <button id="btn-dedup" class="px-3 py-1.5 bg-amber-600 text-white rounded hover:bg-amber-700 text-sm">🔍 Duplikate prüfen</button>
+          <button id="btn-new" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">+ Neue Person</button>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-lg shadow p-3 mb-4 flex flex-wrap gap-3 items-center">
+        <input id="search" type="text" placeholder="Suche Name oder E-Mail …"
+               class="flex-1 min-w-[200px] border rounded px-3 py-1.5 text-sm">
+        <span id="stat" class="text-xs text-gray-500"></span>
+        <button onclick="loadList()" class="text-sm text-blue-600 hover:underline">Neu laden</button>
+      </div>
+
+      <div class="bg-white rounded-lg shadow overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+              <tr>
+                <th class="px-3 py-2 text-left">Name</th>
+                <th class="px-3 py-2 text-left">E-Mail</th>
+                <th class="px-3 py-2 text-left">Telefon</th>
+                <th class="px-3 py-2 text-left">Wohnungen</th>
+                <th class="px-3 py-2 text-right">Aktionen</th>
+              </tr>
+            </thead>
+            <tbody id="tbody" class="divide-y divide-gray-100"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Edit-Modal -->
+  <div id="modal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-start justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full p-6 my-8">
+      <div class="flex items-center justify-between mb-4">
+        <h2 id="m-title" class="text-xl font-bold text-gray-900">Person bearbeiten</h2>
+        <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+      </div>
+      <form id="form" class="space-y-3 text-sm">
+        <input type="hidden" id="m-id">
+        <div class="grid grid-cols-3 gap-3">
+          <label class="block">
+            <span class="text-xs text-gray-600">Anrede</span>
+            <select id="m-anrede" class="mt-1 block w-full border rounded px-2 py-1.5">
+              <option value="">—</option>
+              <option>Herr</option><option>Frau</option><option>Familie</option><option>Firma</option>
+            </select>
+          </label>
+          <label class="block">
+            <span class="text-xs text-gray-600">Vorname</span>
+            <input type="text" id="m-vorname" class="mt-1 block w-full border rounded px-2 py-1.5">
+          </label>
+          <label class="block">
+            <span class="text-xs text-gray-600">Nachname</span>
+            <input type="text" id="m-nachname" class="mt-1 block w-full border rounded px-2 py-1.5">
+          </label>
+        </div>
+        <label class="block">
+          <span class="text-xs text-gray-600">Anzeigename (für alle Wohnungen) *</span>
+          <input type="text" id="m-name" required class="mt-1 block w-full border rounded px-2 py-1.5">
+        </label>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block">
+            <span class="text-xs text-gray-600">E-Mail</span>
+            <input type="email" id="m-email" class="mt-1 block w-full border rounded px-2 py-1.5">
+          </label>
+          <label class="block">
+            <span class="text-xs text-gray-600">Telefon (Festnetz)</span>
+            <input type="text" id="m-telefon" class="mt-1 block w-full border rounded px-2 py-1.5">
+          </label>
+          <label class="block">
+            <span class="text-xs text-gray-600">Mobile</span>
+            <input type="text" id="m-mobile" class="mt-1 block w-full border rounded px-2 py-1.5">
+          </label>
+          <label class="block">
+            <span class="text-xs text-gray-600">Geburtsdatum</span>
+            <input type="date" id="m-geb" class="mt-1 block w-full border rounded px-2 py-1.5">
+          </label>
+        </div>
+        <label class="block">
+          <span class="text-xs text-gray-600">Adresse</span>
+          <textarea id="m-adresse" rows="2" class="mt-1 block w-full border rounded px-2 py-1.5"></textarea>
+        </label>
+        <label class="block">
+          <span class="text-xs text-gray-600">Notiz</span>
+          <textarea id="m-notiz" rows="2" class="mt-1 block w-full border rounded px-2 py-1.5"></textarea>
+        </label>
+        <div id="m-wohnungen" class="bg-blue-50 border border-blue-200 rounded p-3 text-xs"></div>
+        <div id="m-err" class="text-sm text-red-600 hidden"></div>
+        <div class="flex justify-end gap-2 pt-3 border-t mt-3">
+          <button type="button" onclick="closeModal()" class="px-3 py-1.5 text-gray-600 hover:bg-gray-100 rounded">Abbrechen</button>
+          <button type="submit" id="m-save" class="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700">Speichern (propagiert auf alle Wohnungen)</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Dedup-Modal -->
+  <div id="dedup" class="hidden fixed inset-0 bg-black/40 z-50 flex items-start justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-xl shadow-xl max-w-3xl w-full p-6 my-8">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-bold text-gray-900">Mögliche Duplikate</h2>
+        <button onclick="closeDedup()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+      </div>
+      <p class="text-sm text-gray-600 mb-3">Personen mit gleichem Namen aber unterschiedlichen Daten — meistens echte Duplikate die zusammengeführt werden sollten. <strong>Merge</strong> übernimmt alle Wohnungen der "Merge"-Person auf die "Behalten"-Person und löscht den Merge-Datensatz.</p>
+      <div id="dedup-list" class="space-y-3"></div>
+    </div>
+  </div>
+
+  <script>
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  let LIST = [];
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    const user = await AuthentikAuth.init({ requireAuth: true });
+    if (!user) return;
+    document.getElementById('auth-gate').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+    document.getElementById('btn-new').addEventListener('click', openNew);
+    document.getElementById('btn-dedup').addEventListener('click', openDedup);
+    document.getElementById('form').addEventListener('submit', save);
+    let t;
+    document.getElementById('search').addEventListener('input', () => { clearTimeout(t); t = setTimeout(loadList, 250); });
+    await loadList();
+  });
+
+  async function loadList() {
+    const tbody = document.getElementById('tbody');
+    tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">Lade…</td></tr>';
+    try {
+      const q = document.getElementById('search').value.trim();
+      const r = await AuthentikAuth.apiFetch('/api/personen' + (q ? '?search=' + encodeURIComponent(q) : ''));
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      LIST = data.personen || [];
+      document.getElementById('stat').textContent = `${LIST.length} Personen`;
+      render();
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-6 text-center text-red-600">Fehler: ${esc(e.message)}</td></tr>`;
+    }
+  }
+
+  function render() {
+    const tbody = document.getElementById('tbody');
+    if (LIST.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">Keine Personen.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = LIST.map(p => {
+      const wList = (p.wohnungen || []).map(w => `STWEG ${w.stweg} · ${esc(w.bezeichnung)}`).join('<br>');
+      return `<tr class="hover:bg-gray-50 cursor-pointer" onclick="openEdit(${p.id})">
+        <td class="px-3 py-2 font-medium text-gray-900">${esc(p.name)}</td>
+        <td class="px-3 py-2 text-gray-700">${esc(p.email || '—')}</td>
+        <td class="px-3 py-2 text-gray-700">${esc(p.telefon || '—')}</td>
+        <td class="px-3 py-2 text-xs text-gray-600">${wList || '<em class="text-gray-400">keine</em>'}</td>
+        <td class="px-3 py-2 text-right"><span class="text-blue-600 text-xs">bearbeiten →</span></td>
+      </tr>`;
+    }).join('');
+  }
+
+  function openNew() {
+    document.getElementById('m-title').textContent = 'Neue Person';
+    document.getElementById('form').reset();
+    document.getElementById('m-id').value = '';
+    document.getElementById('m-wohnungen').innerHTML = '<em>Wohnungen können erst nach dem Anlegen in der Objektverwaltung verknüpft werden.</em>';
+    document.getElementById('m-err').classList.add('hidden');
+    document.getElementById('modal').classList.remove('hidden');
+  }
+
+  function openEdit(id) {
+    const p = LIST.find(x => x.id === id);
+    if (!p) return;
+    document.getElementById('m-title').textContent = 'Person bearbeiten — ' + p.name;
+    document.getElementById('m-id').value = p.id;
+    document.getElementById('m-anrede').value = p.anrede || '';
+    document.getElementById('m-vorname').value = p.vorname || '';
+    document.getElementById('m-nachname').value = p.nachname || '';
+    document.getElementById('m-name').value = p.name || '';
+    document.getElementById('m-email').value = p.email || '';
+    document.getElementById('m-telefon').value = p.telefon || '';
+    document.getElementById('m-mobile').value = p.mobile || '';
+    document.getElementById('m-geb').value = p.geburtsdatum ? String(p.geburtsdatum).slice(0,10) : '';
+    document.getElementById('m-adresse').value = p.adresse || '';
+    document.getElementById('m-notiz').value = p.notiz || '';
+    const wList = (p.wohnungen || []).map(w => `<div>STWEG ${w.stweg} · ${esc(w.bezeichnung)} (${esc(w.rolle)})</div>`).join('');
+    document.getElementById('m-wohnungen').innerHTML = wList
+      ? `<div class="font-semibold mb-1">⚙ Änderungen werden auf folgende ${p.wohnungen.length} Wohnung(en) übernommen:</div>${wList}`
+      : '<em>Diese Person hat keine aktiven Wohnungen.</em>';
+    document.getElementById('m-err').classList.add('hidden');
+    document.getElementById('modal').classList.remove('hidden');
+  }
+
+  function closeModal() { document.getElementById('modal').classList.add('hidden'); }
+
+  async function save(ev) {
+    ev.preventDefault();
+    const id = document.getElementById('m-id').value;
+    const payload = {
+      anrede: document.getElementById('m-anrede').value || null,
+      vorname: document.getElementById('m-vorname').value.trim() || null,
+      nachname: document.getElementById('m-nachname').value.trim() || null,
+      name: document.getElementById('m-name').value.trim(),
+      email: document.getElementById('m-email').value.trim() || null,
+      telefon: document.getElementById('m-telefon').value.trim() || null,
+      mobile: document.getElementById('m-mobile').value.trim() || null,
+      geburtsdatum: document.getElementById('m-geb').value || null,
+      adresse: document.getElementById('m-adresse').value.trim() || null,
+      notiz: document.getElementById('m-notiz').value.trim() || null,
+    };
+    try {
+      const url = id ? `/api/personen/${id}` : '/api/personen';
+      const r = await AuthentikAuth.apiFetch(url, {
+        method: id ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+      closeModal();
+      await loadList();
+    } catch (e) {
+      const el = document.getElementById('m-err');
+      el.textContent = e.message; el.classList.remove('hidden');
+    }
+  }
+
+  async function openDedup() {
+    document.getElementById('dedup-list').innerHTML = '<div class="text-gray-400">Lade…</div>';
+    document.getElementById('dedup').classList.remove('hidden');
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/personen-dedup/kandidaten');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      const k = data.kandidaten || [];
+      if (k.length === 0) {
+        document.getElementById('dedup-list').innerHTML = '<div class="text-emerald-700 text-sm">✓ Keine Duplikat-Kandidaten gefunden.</div>';
+        return;
+      }
+      document.getElementById('dedup-list').innerHTML = k.map(c => `
+        <div class="border rounded-lg p-3">
+          <div class="text-xs text-gray-500 mb-2">Schlüssel: <code>${esc(c.schluessel)}</code> · ${c.n} Personen</div>
+          <table class="w-full text-xs">
+            <thead><tr class="text-gray-500 text-left">
+              <th class="py-1">Name</th><th>E-Mail</th><th>Tel</th><th class="text-right">Aktion</th>
+            </tr></thead>
+            <tbody>
+              ${(c.personen || []).map(p => `
+                <tr class="border-t">
+                  <td class="py-1.5">${esc(p.name)}</td>
+                  <td>${esc(p.email || '—')}</td>
+                  <td>${esc(p.telefon || '—')}</td>
+                  <td class="text-right">
+                    <button onclick="mergeOptions(${p.id}, ${JSON.stringify(c.ids).replace(/"/g,'&quot;')})" class="text-blue-600 hover:underline">in andere mergen…</button>
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      `).join('');
+    } catch (e) {
+      document.getElementById('dedup-list').innerHTML = `<div class="text-red-600">Fehler: ${esc(e.message)}</div>`;
+    }
+  }
+
+  function closeDedup() { document.getElementById('dedup').classList.add('hidden'); }
+
+  async function mergeOptions(mergeId, allIds) {
+    const others = allIds.filter(x => x !== mergeId);
+    if (others.length === 0) return;
+    const choice = others.length === 1
+      ? others[0]
+      : parseInt(prompt('Welche Person soll behalten werden (ID)?\n\nIDs: ' + others.join(', ')), 10);
+    if (!choice || !others.includes(choice)) return;
+    if (!confirm(`Person #${mergeId} in Person #${choice} mergen?\n\nAlle Wohnungen werden umgehängt, der Merge-Datensatz wird gelöscht.`)) return;
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/personen/merge', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keep_id: choice, merge_id: mergeId }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+      alert(`Merge erfolgreich: ${data.reassigned_kontakte} Kontakte umgehängt.`);
+      await openDedup();
+      await loadList();
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+  </script>
+</body>
+</html>
