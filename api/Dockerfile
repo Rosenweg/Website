@@ -2,10 +2,12 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-COPY package.json ./
+COPY api/package.json ./
 RUN npm install --production
 
-COPY server.js ./
+COPY api/server.js ./
+# site-config.json wird vom Auto-Seed gelesen (legacy Verwaltung -> DB)
+COPY site-config.json ./
 
 EXPOSE 3000
 
