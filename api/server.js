@@ -11655,9 +11655,11 @@ async function initDB() {
         notiz TEXT,
         aktiv BOOLEAN DEFAULT true,
         created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW(),
-        UNIQUE (source_type_pattern, COALESCE(min_betrag_chf, 0))
+        updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+      -- Eindeutigkeit: Pattern + (Betrag oder kein Betrag) - via expression index
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_mac_pattern_betrag
+        ON mail_approval_config (source_type_pattern, COALESCE(min_betrag_chf, 0));
       CREATE INDEX IF NOT EXISTS idx_mac_pattern ON mail_approval_config(source_type_pattern, aktiv);
 
       -- Log einzelner Freigaben (4-Augen-Audit). Eine Mail kann mehrere Approver brauchen.
@@ -11772,8 +11774,8 @@ async function initDB() {
     // Default Approval-Regel: technik ODER praesident, 1 Freigabe genuegt.
     await client.query(`
       INSERT INTO mail_approval_config (source_type_pattern, required_groups, min_approvers, sort_order, notiz)
-      VALUES ('default', 'technik,praesident', 1, 100, 'Standard: 1 Freigabe von Technik oder Praesident')
-      ON CONFLICT (source_type_pattern, COALESCE(min_betrag_chf, 0)) DO NOTHING
+      SELECT 'default', 'technik,praesident', 1, 100, 'Standard: 1 Freigabe von Technik oder Praesident'
+      WHERE NOT EXISTS (SELECT 1 FROM mail_approval_config WHERE source_type_pattern = 'default' AND min_betrag_chf IS NULL)
     `);
 
     // Mail-Empfaenger Stammdaten: Ausschuss read, Technik/Praesident sowieso write via isTechnik/isPraesident
