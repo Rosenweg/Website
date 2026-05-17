@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mail-Freigabe-Regeln — Rosenweg</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/nav.js?v=2"></script>
+  <link rel="icon" href="/logo-rosenweg.png">
+  <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'); body { font-family: 'Inter', sans-serif; }</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+  <script>RosenwegNav.init({ active: 'mail-approval-config' });</script>
+
+  <main class="max-w-5xl mx-auto px-4 py-6">
+    <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center"><p class="text-gray-600">Lade…</p></div>
+
+    <div id="content" class="hidden">
+      <div class="mb-4 flex flex-wrap justify-between items-end gap-3">
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900">Mail-Freigabe-Regeln</h1>
+          <p class="text-sm text-gray-600 mt-1">Welche Gruppen und wie viele Personen müssen eine Mail freigeben, bevor sie an die Verwaltung verschickt wird? Bei <strong>Auslagen</strong>-Mails kann zusätzlich ein Mindestbetrag konfiguriert werden (z.B. ab 5000 CHF nur Präsident).</p>
+        </div>
+        <button id="btn-new" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">+ Neue Regel</button>
+      </div>
+
+      <div class="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-900 mb-4">
+        <strong>Lookup-Reihenfolge:</strong> erst exakter <code>source_type_pattern</code>-Match mit höchstem <code>min_betrag_chf</code> ≤ aktuellem Betrag, dann ohne Betrag-Bedingung, schließlich <code>'default'</code>.
+        <br><strong>Source-Types:</strong> <code>auslage-auszahlung</code>, <code>auslage-auszahlung-nachgereicht</code>, <code>objekt-aenderung</code>, <code>ad-hoc</code>, <code>ad-hoc-anwalt</code>, <code>ad-hoc-bank</code> usw.
+      </div>
+
+      <div id="list" class="space-y-2"></div>
+    </div>
+  </main>
+
+  <div id="modal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-start justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-xl shadow-xl max-w-xl w-full p-6 my-8">
+      <div class="flex items-center justify-between mb-4">
+        <h2 id="m-title" class="text-xl font-bold text-gray-900">Freigabe-Regel</h2>
+        <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+      </div>
+      <form id="form" class="space-y-3 text-sm">
+        <input type="hidden" id="m-id">
+        <label class="block">
+          <span class="text-xs text-gray-600">Source-Type-Pattern * (z.B. <code>auslage-auszahlung</code> oder <code>default</code>)</span>
+          <input type="text" id="m-pattern" required class="mt-1 block w-full border rounded px-2 py-1.5 font-mono">
+        </label>
+        <label class="block">
+          <span class="text-xs text-gray-600">Mindest-Betrag CHF (optional, nur für Auslagen)</span>
+          <input type="number" step="0.01" min="0" id="m-betrag" class="mt-1 block w-full border rounded px-2 py-1.5" placeholder="leer = jeder Betrag">
+        </label>
+        <label class="block">
+          <span class="text-xs text-gray-600">Erlaubte Approver-Gruppen * (Komma-Liste, z.B. <code>technik,praesident</code>)</span>
+          <input type="text" id="m-groups" required class="mt-1 block w-full border rounded px-2 py-1.5 font-mono">
+        </label>
+        <label class="block">
+          <span class="text-xs text-gray-600">Min. Approver (1 = single, 2 = 4-Augen, 3 = 6-Augen) *</span>
+          <input type="number" id="m-min" min="1" max="5" value="1" required class="mt-1 block w-full border rounded px-2 py-1.5">
+        </label>
+        <label class="block">
+          <span class="text-xs text-gray-600">Sortierung (niedriger = höhere Priorität)</span>
+          <input type="number" id="m-sort" value="0" class="mt-1 block w-full border rounded px-2 py-1.5">
+        </label>
+        <label class="block">
+          <span class="text-xs text-gray-600">Notiz</span>
+          <textarea id="m-notiz" rows="2" class="mt-1 block w-full border rounded px-2 py-1.5"></textarea>
+        </label>
+        <label class="flex items-center gap-2 text-sm">
+          <input type="checkbox" id="m-aktiv" checked>
+          <span>Aktiv</span>
+        </label>
+        <div id="m-err" class="text-sm text-red-600 hidden"></div>
+        <div class="flex justify-between gap-2 pt-3 border-t mt-3">
+          <button type="button" id="m-del" onclick="del()" class="hidden px-3 py-1.5 text-red-600 hover:bg-red-50 rounded text-sm">Löschen</button>
+          <div class="flex gap-2 ml-auto">
+            <button type="button" onclick="closeModal()" class="px-3 py-1.5 text-gray-600 hover:bg-gray-100 rounded">Abbrechen</button>
+            <button type="submit" class="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700">Speichern</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  let LIST = [];
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    const u = await AuthentikAuth.init({ requireAuth: true });
+    if (!u) return;
+    document.getElementById('auth-gate').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+    document.getElementById('btn-new').addEventListener('click', openNew);
+    document.getElementById('form').addEventListener('submit', save);
+    await loadList();
+  });
+
+  async function loadList() {
+    const list = document.getElementById('list');
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/mail-approval-config');
+      if (r.status === 403) { list.innerHTML = '<div class="text-red-600">Kein Zugriff</div>'; return; }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      LIST = d.regeln || [];
+      render();
+    } catch (e) {
+      list.innerHTML = `<div class="text-red-600">Fehler: ${esc(e.message)}</div>`;
+    }
+  }
+
+  function render() {
+    const list = document.getElementById('list');
+    if (LIST.length === 0) { list.innerHTML = '<div class="bg-white rounded-lg shadow p-8 text-center text-gray-500">Keine Regeln.</div>'; return; }
+    list.innerHTML = LIST.map(r => {
+      const min = r.min_betrag_chf ? `ab CHF ${Number(r.min_betrag_chf).toFixed(2)}` : 'jeder Betrag';
+      const status = r.aktiv ? '<span class="text-emerald-700 text-xs px-2 py-0.5 bg-emerald-100 rounded">Aktiv</span>' : '<span class="text-gray-500 text-xs px-2 py-0.5 bg-gray-100 rounded">Inaktiv</span>';
+      return `<article class="bg-white rounded-lg border p-3 cursor-pointer hover:shadow" onclick="edit(${r.id})">
+        <div class="flex items-baseline justify-between gap-3 flex-wrap">
+          <div>
+            <h3 class="font-mono text-gray-900">${esc(r.source_type_pattern)}</h3>
+            <div class="text-xs text-gray-500 mt-0.5">${esc(min)} · Sort ${r.sort_order}</div>
+          </div>
+          <div class="flex items-center gap-2">${status}</div>
+        </div>
+        <div class="mt-2 text-sm">
+          <strong class="text-blue-700">${r.min_approvers}-Augen-Prinzip:</strong>
+          ${r.min_approvers > 1 ? r.min_approvers + ' verschiedene Personen aus ' : '1 Person aus '}
+          <code class="bg-gray-100 px-1 rounded">${esc(r.required_groups)}</code>
+        </div>
+        ${r.notiz ? `<div class="text-xs text-gray-600 mt-1">${esc(r.notiz)}</div>` : ''}
+      </article>`;
+    }).join('');
+  }
+
+  function openNew() {
+    document.getElementById('m-title').textContent = 'Neue Regel';
+    document.getElementById('form').reset();
+    document.getElementById('m-id').value = '';
+    document.getElementById('m-min').value = 1;
+    document.getElementById('m-sort').value = 0;
+    document.getElementById('m-aktiv').checked = true;
+    document.getElementById('m-del').classList.add('hidden');
+    document.getElementById('m-err').classList.add('hidden');
+    document.getElementById('modal').classList.remove('hidden');
+  }
+
+  function edit(id) {
+    const r = LIST.find(x => x.id === id);
+    if (!r) return;
+    document.getElementById('m-title').textContent = 'Regel — ' + r.source_type_pattern;
+    document.getElementById('m-id').value = r.id;
+    document.getElementById('m-pattern').value = r.source_type_pattern;
+    document.getElementById('m-betrag').value = r.min_betrag_chf || '';
+    document.getElementById('m-groups').value = r.required_groups;
+    document.getElementById('m-min').value = r.min_approvers;
+    document.getElementById('m-sort').value = r.sort_order;
+    document.getElementById('m-notiz').value = r.notiz || '';
+    document.getElementById('m-aktiv').checked = r.aktiv !== false;
+    document.getElementById('m-del').classList.remove('hidden');
+    document.getElementById('m-err').classList.add('hidden');
+    document.getElementById('modal').classList.remove('hidden');
+  }
+
+  function closeModal() { document.getElementById('modal').classList.add('hidden'); }
+
+  async function save(ev) {
+    ev.preventDefault();
+    const id = document.getElementById('m-id').value;
+    const payload = {
+      source_type_pattern: document.getElementById('m-pattern').value.trim(),
+      min_betrag_chf: document.getElementById('m-betrag').value ? parseFloat(document.getElementById('m-betrag').value) : null,
+      required_groups: document.getElementById('m-groups').value.trim(),
+      min_approvers: parseInt(document.getElementById('m-min').value, 10),
+      sort_order: parseInt(document.getElementById('m-sort').value, 10) || 0,
+      notiz: document.getElementById('m-notiz').value.trim() || null,
+      aktiv: document.getElementById('m-aktiv').checked,
+    };
+    try {
+      const r = await AuthentikAuth.apiFetch(id ? `/api/mail-approval-config/${id}` : '/api/mail-approval-config', {
+        method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+      closeModal(); await loadList();
+    } catch (e) {
+      const el = document.getElementById('m-err'); el.textContent = e.message; el.classList.remove('hidden');
+    }
+  }
+
+  async function del() {
+    const id = document.getElementById('m-id').value;
+    if (!id || !confirm('Regel wirklich löschen?')) return;
+    await AuthentikAuth.apiFetch('/api/mail-approval-config/' + id, { method: 'DELETE' });
+    closeModal(); await loadList();
+  }
+  </script>
+</body>
+</html>

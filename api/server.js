@@ -754,6 +754,7 @@ const MANAGED_PAGES = [
   { id: 'personen', label: 'Personen (Eigentuemer/Bewohner)' },
   { id: 'mail-empfaenger', label: 'Mail-Empfaenger (Stammdaten)' },
   { id: 'mail-compose', label: 'Mail schreiben (Ad-hoc)' },
+  { id: 'mail-approval-config', label: 'Mail-Freigabe-Regeln' },
 ];
 
 const ACCESS_LEVELS = { none: 0, read: 1, write: 2 };
@@ -10446,6 +10447,104 @@ app.post('/api/mail-compose', authMiddleware, requirePermission('mail-compose', 
   }
 });
 
+// ─── Mail-Approval-Config + 4-Augen-Logik ──────────────────────────
+// Pro source_type-Pattern eine Regel. Bei Auslagen-Auszahlung auch
+// betrags-abhaengig (z.B. >5000 CHF nur Praesident).
+
+async function getApprovalRuleForQueueItem(queueRow) {
+  // Betrag ermitteln (nur fuer auslage-auszahlung relevant)
+  let betrag = 0;
+  if (queueRow.source_type.startsWith('auslage-auszahlung') && queueRow.source_id) {
+    const a = await pool.query('SELECT betrag_chf FROM auslagen WHERE id = $1', [queueRow.source_id]);
+    if (a.rows[0]) betrag = Number(a.rows[0].betrag_chf) || 0;
+  }
+  // Suche passende Regel: zuerst source_type-spezifisch + betrag, dann ohne betrag, dann default
+  const r = await pool.query(
+    `SELECT * FROM mail_approval_config
+      WHERE aktiv = true
+        AND (source_type_pattern = $1 OR source_type_pattern = 'default')
+        AND (min_betrag_chf IS NULL OR $2 >= min_betrag_chf)
+      ORDER BY (source_type_pattern = $1) DESC,
+               (min_betrag_chf IS NOT NULL) DESC,
+               COALESCE(min_betrag_chf, 0) DESC,
+               sort_order
+      LIMIT 1`,
+    [queueRow.source_type, betrag],
+  );
+  if (r.rows.length === 0) {
+    // Fallback Default falls niemand was gepflegt hat
+    return { required_groups: 'technik,praesident', min_approvers: 1, source_type_pattern: 'fallback' };
+  }
+  return r.rows[0];
+}
+
+function userHasAnyGroup(user, groupsCsv) {
+  const userGroups = (user.groups || []).map(g => String(g).toLowerCase());
+  const required = String(groupsCsv || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  return required.some(g => userGroups.includes(g));
+}
+
+// CRUD fuer Approval-Config (nur Technik/Praesident)
+app.get('/api/mail-approval-config', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM mail_approval_config ORDER BY sort_order, source_type_pattern');
+    res.json({ regeln: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/mail-approval-config', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.source_type_pattern || !String(b.source_type_pattern).trim()) return res.status(400).json({ error: 'source_type_pattern erforderlich' });
+    if (!b.required_groups || !String(b.required_groups).trim()) return res.status(400).json({ error: 'required_groups erforderlich (Komma-Liste)' });
+    const minApprovers = parseInt(b.min_approvers, 10);
+    const r = await pool.query(
+      `INSERT INTO mail_approval_config
+         (source_type_pattern, min_betrag_chf, required_groups, min_approvers, sort_order, notiz, aktiv)
+       VALUES ($1, $2, $3, $4, COALESCE($5, 0), $6, COALESCE($7, true))
+       RETURNING *`,
+      [String(b.source_type_pattern).trim().slice(0, 120),
+       b.min_betrag_chf || null,
+       String(b.required_groups).trim(),
+       Number.isFinite(minApprovers) && minApprovers >= 1 ? minApprovers : 1,
+       b.sort_order, b.notiz || null, b.aktiv],
+    );
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/mail-approval-config/:id', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const b = req.body || {};
+    const minApprovers = parseInt(b.min_approvers, 10);
+    const r = await pool.query(
+      `UPDATE mail_approval_config SET
+         source_type_pattern = COALESCE($1, source_type_pattern),
+         min_betrag_chf = $2,
+         required_groups = COALESCE($3, required_groups),
+         min_approvers = COALESCE($4, min_approvers),
+         sort_order = COALESCE($5, sort_order),
+         notiz = $6,
+         aktiv = COALESCE($7, aktiv),
+         updated_at = NOW()
+       WHERE id = $8 RETURNING *`,
+      [b.source_type_pattern || null, b.min_betrag_chf || null, b.required_groups || null,
+       Number.isFinite(minApprovers) ? minApprovers : null,
+       b.sort_order, b.notiz || null, b.aktiv, id],
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/mail-approval-config/:id', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM mail_approval_config WHERE id = $1', [parseInt(req.params.id, 10)]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ─── Verwaltungs-Mail-Outbox API ────────────────────────────────────
 // Nur Technik + Praesident duerfen die Queue sehen/bearbeiten/freigeben.
 function requireTechnikOrPraesident(req, res, next) {
@@ -10498,14 +10597,27 @@ app.get('/api/verwaltung-mail-queue/pending-count', authMiddleware, async (req, 
   }
 });
 
-// Detail (volle Mail inkl. body_text)
+// Detail (volle Mail inkl. body_text + Approval-Info)
 app.get('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
     const r = await pool.query('SELECT * FROM verwaltung_mail_queue WHERE id = $1', [id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
-    res.json(r.rows[0]);
+    const row = r.rows[0];
+    const rule = await getApprovalRuleForQueueItem(row);
+    const approvals = await pool.query(
+      `SELECT approver_email, approved_at FROM mail_approval_log WHERE queue_id = $1 ORDER BY approved_at`,
+      [id],
+    );
+    res.json({
+      ...row,
+      _approval_rule: rule,
+      _approvals: approvals.rows,
+      _approvals_count: approvals.rows.length,
+      _can_approve: userHasAnyGroup(req.user, rule.required_groups),
+      _already_approved_by_me: approvals.rows.some(a => a.approver_email === req.user.email),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -10555,26 +10667,53 @@ app.put('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesi
   }
 });
 
-// Freigeben + sofort senden
-app.post('/api/verwaltung-mail-queue/:id/freigeben', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+// Freigeben (Multi-Approver-faehig). Bei 4-Augen-Prinzip braucht's
+// >= min_approvers verschiedene User aus required_groups. Erst dann Versand.
+app.post('/api/verwaltung-mail-queue/:id/freigeben', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
-    const cur = await pool.query('SELECT status FROM verwaltung_mail_queue WHERE id = $1', [id]);
+    const cur = await pool.query('SELECT * FROM verwaltung_mail_queue WHERE id = $1', [id]);
     if (cur.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     if (cur.rows[0].status !== 'pending') {
       return res.status(409).json({ error: `Status ist '${cur.rows[0].status}', erwartet 'pending'` });
     }
+    const rule = await getApprovalRuleForQueueItem(cur.rows[0]);
+    if (!userHasAnyGroup(req.user, rule.required_groups)) {
+      return res.status(403).json({ error: `Freigabe erfordert eine der Gruppen: ${rule.required_groups}` });
+    }
+    // Approval logen (UNIQUE constraint verhindert Doppel-Freigabe vom gleichen User)
+    try {
+      await pool.query(
+        `INSERT INTO mail_approval_log (queue_id, approver_email) VALUES ($1, $2)`,
+        [id, req.user.email],
+      );
+    } catch (e) {
+      if (String(e.code) === '23505') {
+        return res.status(409).json({ error: 'Du hast bereits freigegeben — fuer ' + rule.min_approvers + '-Augen-Prinzip braucht es weitere Approver' });
+      }
+      throw e;
+    }
+    const cnt = await pool.query('SELECT COUNT(*) AS n FROM mail_approval_log WHERE queue_id = $1', [id]);
+    const approvalsSoFar = parseInt(cnt.rows[0].n, 10);
+    if (approvalsSoFar < rule.min_approvers) {
+      return res.json({
+        success: true, sent: false, awaiting_more_approvers: true,
+        approvals: approvalsSoFar, required: rule.min_approvers,
+        required_groups: rule.required_groups,
+      });
+    }
+    // Genug Approver → freigeben + senden
     await pool.query(
       `UPDATE verwaltung_mail_queue SET status = 'freigegeben', freigegeben_von = $1, freigegeben_am = NOW() WHERE id = $2`,
       [req.user.email, id],
     );
     try {
       await sendVerwaltungMailFromQueue(id, req.user.email);
-      res.json({ success: true, sent: true });
+      res.json({ success: true, sent: true, approvals: approvalsSoFar, required: rule.min_approvers });
     } catch (sendErr) {
       console.error(`[mail-queue ${id}] Send error:`, sendErr);
-      res.status(500).json({ success: false, error: 'Mail freigegeben, aber Versand schlug fehl: ' + sendErr.message });
+      res.status(500).json({ success: false, error: 'Freigegeben, aber Versand schlug fehl: ' + sendErr.message });
     }
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -11504,6 +11643,33 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_vmq_pending ON verwaltung_mail_queue(status, created_at) WHERE status = 'pending';
       CREATE INDEX IF NOT EXISTS idx_vmq_source ON verwaltung_mail_queue(source_type, source_id);
 
+      -- Freigabe-Regeln pro source_type-Pattern. Praezedenz: spezifischer
+      -- source_type vor 'default'. Erste passende Regel gilt.
+      CREATE TABLE IF NOT EXISTS mail_approval_config (
+        id SERIAL PRIMARY KEY,
+        source_type_pattern VARCHAR(120) NOT NULL,        -- z.B. 'auslage-auszahlung', 'ad-hoc-anwalt', 'objekt-aenderung' oder 'default'
+        min_betrag_chf NUMERIC(10,2),                     -- optional, gilt nur fuer Auslagen ueber diesem Betrag
+        required_groups TEXT NOT NULL,                    -- Komma-Liste, z.B. 'technik,praesident'
+        min_approvers INTEGER NOT NULL DEFAULT 1,         -- Anzahl Freigaben fuer Versand (4-Augen-Prinzip ab 2)
+        sort_order INTEGER DEFAULT 0,                     -- bei mehreren passenden zaehlt niedrigster sort_order zuerst
+        notiz TEXT,
+        aktiv BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (source_type_pattern, COALESCE(min_betrag_chf, 0))
+      );
+      CREATE INDEX IF NOT EXISTS idx_mac_pattern ON mail_approval_config(source_type_pattern, aktiv);
+
+      -- Log einzelner Freigaben (4-Augen-Audit). Eine Mail kann mehrere Approver brauchen.
+      CREATE TABLE IF NOT EXISTS mail_approval_log (
+        id SERIAL PRIMARY KEY,
+        queue_id INTEGER NOT NULL REFERENCES verwaltung_mail_queue(id) ON DELETE CASCADE,
+        approver_email VARCHAR(255) NOT NULL,
+        approved_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (queue_id, approver_email)
+      );
+      CREATE INDEX IF NOT EXISTS idx_mal_queue ON mail_approval_log(queue_id);
+
       -- Outbox-Tracking: wann ging die letzte Auszahlungs-Mail an wen?
       -- Damit koennen wir genehmigte Auslagen, die waehrend einer Vakanz
       -- nur an den Ausschuss gingen, automatisch an eine neue Verwaltung
@@ -11601,6 +11767,13 @@ async function initDB() {
     await client.query(`
       INSERT INTO permissions (group_name, page, access) VALUES ('eigentuemer', 'auslagen', 'read')
       ON CONFLICT (group_name, page) DO NOTHING
+    `);
+
+    // Default Approval-Regel: technik ODER praesident, 1 Freigabe genuegt.
+    await client.query(`
+      INSERT INTO mail_approval_config (source_type_pattern, required_groups, min_approvers, sort_order, notiz)
+      VALUES ('default', 'technik,praesident', 1, 100, 'Standard: 1 Freigabe von Technik oder Praesident')
+      ON CONFLICT (source_type_pattern, COALESCE(min_betrag_chf, 0)) DO NOTHING
     `);
 
     // Mail-Empfaenger Stammdaten: Ausschuss read, Technik/Praesident sowieso write via isTechnik/isPraesident
