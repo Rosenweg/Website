@@ -202,12 +202,16 @@
                     <div id="project-files" class="text-sm text-gray-400">Lädt...</div>
                 </div>
 
-                <!-- Auslagen-Übersicht -->
+                <!-- Auslagen-Übersicht + Budget -->
                 <div class="bg-white rounded-xl shadow p-6">
                     <div class="flex items-center justify-between mb-3">
-                        <h2 class="text-lg font-bold text-gray-800">💰 Auslagen für dieses Projekt</h2>
-                        <a href="/auslagen.html?projekt=${esc(p.slug)}" class="text-xs text-blue-600 hover:underline">→ in Auslagen-Liste</a>
+                        <h2 class="text-lg font-bold text-gray-800">💰 Auslagen &amp; Budget</h2>
+                        <div class="flex gap-3 items-center">
+                            ${canEdit ? `<button onclick="editBudget()" class="text-xs text-gray-500 hover:text-gray-700">Budget bearbeiten</button>` : ''}
+                            <a href="/auslagen.html?projekt=${esc(p.slug)}" class="text-xs text-blue-600 hover:underline">→ in Auslagen-Liste</a>
+                        </div>
                     </div>
+                    ${renderBudgetBar(p)}
                     ${renderAuslagenStat(p.auslagen_stat)}
                     <div id="auslagen-list" class="mt-3 text-sm">${renderAuslagenList(p.slug)}</div>
                 </div>
@@ -225,6 +229,58 @@
 
         // Auslagen-Liste asynchron nachladen
         loadProjektAuslagen(p.slug);
+    }
+
+    function renderBudgetBar(p) {
+      const budget = Number(p.budget_chf) || 0;
+      const verbraucht = (p.auslagen_stat?.total_chf || 0); // alle Status (eingereicht inkl.)
+      const ausbezahlt = p.auslagen_stat?.by_status?.ausbezahlt?.summe || 0;
+      const fmt = (n) => 'CHF ' + Number(n).toLocaleString('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      if (budget <= 0) {
+        return `<div class="bg-gray-50 border border-gray-200 rounded p-3 mb-3 text-sm text-gray-600">
+          Kein Budget definiert. Bisherige Auslagen: <strong>${fmt(verbraucht)}</strong>
+          ${canEdit ? `<button onclick="editBudget()" class="ml-2 text-blue-600 hover:underline text-xs">Budget setzen</button>` : ''}
+        </div>`;
+      }
+      const pct = Math.min(100, Math.round((verbraucht / budget) * 100));
+      const warnPct = Number(p.budget_warnung_pct) || 80;
+      const isOver = verbraucht > budget;
+      const isWarn = pct >= warnPct;
+      const barColor = isOver ? 'bg-red-500' : isWarn ? 'bg-amber-500' : 'bg-emerald-500';
+      const textColor = isOver ? 'text-red-700' : isWarn ? 'text-amber-700' : 'text-emerald-700';
+      const restCHF = budget - verbraucht;
+      return `<div class="bg-gray-50 rounded p-3 mb-3">
+        <div class="flex justify-between text-sm mb-1">
+          <span class="text-gray-700"><strong>Budget:</strong> ${fmt(budget)}</span>
+          <span class="${textColor} font-semibold">${pct}% verbraucht ${isOver ? '⚠ ÜBERSCHRITTEN' : isWarn ? '⚠ knapp' : ''}</span>
+        </div>
+        <div class="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+          <div class="${barColor} h-3 transition-all" style="width: ${pct}%"></div>
+        </div>
+        <div class="flex justify-between text-xs text-gray-600 mt-1">
+          <span>Verbraucht (alle Status): ${fmt(verbraucht)} · davon ausbezahlt: ${fmt(ausbezahlt)}</span>
+          <span class="${isOver ? 'text-red-600' : ''}">
+            ${isOver ? `Überschreitung: ${fmt(verbraucht - budget)}` : `Verfügbar: ${fmt(restCHF)}`}
+          </span>
+        </div>
+      </div>`;
+    }
+
+    function editBudget() {
+      const cur = currentProject;
+      const budget = prompt('Budget in CHF (leer = kein Budget):', cur.budget_chf || '');
+      if (budget === null) return; // Abbruch
+      const warnung = budget !== '' ? prompt('Warnung-Schwelle in % (Standard 80):', cur.budget_warnung_pct || 80) : 80;
+      AuthentikAuth.apiFetch(`/api/projects/${cur.slug}/budget`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          budget_chf: budget === '' ? null : parseFloat(budget),
+          budget_warnung_pct: warnung ? parseInt(warnung, 10) : 80,
+        }),
+      }).then(r => r.json()).then(d => {
+        if (d.error) { alert('Fehler: ' + d.error); return; }
+        loadProject(cur.slug);
+      });
     }
 
     function renderAuslagenStat(stat) {

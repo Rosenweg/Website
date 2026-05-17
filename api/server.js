@@ -4282,6 +4282,67 @@ setInterval(runAuslagenOutboxDaily, 60 * 60 * 1000);
 // Initial 90s nach Start (nach initDB)
 setTimeout(runAuslagenOutboxDaily, 90 * 1000);
 
+// ─── Reminder: genehmigte Auslagen ohne Auszahlung > 30 Tage ─────────
+// Taeglich pruefen + Reminder an Verwaltung (CC Ausschuss + Eigentuemer)
+// Damit keine genehmigte Auszahlung versehentlich vergessen wird.
+let lastAuszahlungReminderDay = null;
+async function runAuszahlungReminderDaily() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (lastAuszahlungReminderDay === today) return;
+  lastAuszahlungReminderDay = today;
+  try {
+    // Genehmigte Auslagen die > 30 Tage alt sind und noch nicht ausbezahlt
+    // bearbeitet_am = Zeitpunkt der letzten Status-Aenderung (z.B. → genehmigt)
+    // Nur 1× pro Auslage pro 14 Tage erinnern (via auszahlung_reminder_at)
+    const r = await pool.query(`
+      SELECT * FROM auslagen
+       WHERE status = 'genehmigt'
+         AND bearbeitet_am < NOW() - INTERVAL '30 days'
+         AND (auszahlung_reminder_at IS NULL OR auszahlung_reminder_at < NOW() - INTERVAL '14 days')
+       ORDER BY bearbeitet_am
+       LIMIT 100
+    `);
+    if (r.rows.length === 0) return;
+    let reminded = 0;
+    for (const a of r.rows) {
+      try {
+        const verw = await findVerwaltungForStweg(a.stweg);
+        const stwegLabel = a.stweg ? `STWEG ${a.stweg}` : 'Kooperation';
+        const tage = Math.floor((Date.now() - new Date(a.bearbeitet_am).getTime()) / (1000 * 60 * 60 * 24));
+        const betrag = Number(a.betrag_chf).toFixed(2);
+        const to = (verw && verw.mailTo.length > 0) ? verw.mailTo.join(', ') : a.bearbeitet_von || a.user_email;
+        const ausschussCc = [a.user_email, a.bearbeitet_von].filter((v, i, ar) => v && ar.indexOf(v) === i);
+        await loggedSendMail({
+          from: MAIL_FROM,
+          to,
+          cc: ausschussCc.join(', '),
+          subject: `⏰ Erinnerung: Auszahlung offen seit ${tage} Tagen — ${stwegLabel}, CHF ${betrag} (Auslage ${a.id})`,
+          text:
+            `Diese Auslage wurde vor ${tage} Tagen genehmigt, aber noch nicht als ausbezahlt markiert.\n\n`
+            + `── Auslage ${a.id} ──\n`
+            + `STWEG:           ${stwegLabel}\n`
+            + `Eingereicht von: ${a.user_name} <${a.user_email}>\n`
+            + `Beschreibung:    ${a.beschreibung}\n`
+            + `Betrag:          CHF ${betrag}\n`
+            + `IBAN:            ${a.iban || '— nicht angegeben —'}\n`
+            + `Genehmigt am:    ${new Date(a.bearbeitet_am).toLocaleDateString('de-CH')} (vor ${tage} Tagen)\n\n`
+            + `Bitte Auszahlung pruefen / durchfuehren und im System als "ausbezahlt" markieren:\n${SITE_URL}/auslagen.html\n\n`
+            + `(Diese Erinnerung wird alle 14 Tage automatisch wiederholt, bis die Auslage als ausbezahlt markiert ist.)`,
+        }, 'auslage-auszahlung-reminder');
+        await pool.query('UPDATE auslagen SET auszahlung_reminder_at = NOW() WHERE id = $1', [a.id]);
+        reminded++;
+      } catch (e) {
+        console.warn(`[reminder] Auslage ${a.id} Mail fehlgeschlagen:`, e.message);
+      }
+    }
+    if (reminded > 0) console.log(`[reminder] ${reminded} Auszahlungs-Reminder verschickt`);
+  } catch (e) {
+    console.error('[reminder] Lauf fehlgeschlagen:', e.message);
+  }
+}
+setInterval(runAuszahlungReminderDaily, 60 * 60 * 1000);
+setTimeout(runAuszahlungReminderDaily, 120 * 1000);
+
 // ─── Nightly Drucker-Tag-Cleanup ────────────────────────────────────
 // Findet Kontakte mit Drucker-Tag-Email wo derselbe Name woanders eine echte
 // Email hat — und ersetzt den Drucker-Tag automatisch durch die echte Email.
@@ -8432,6 +8493,30 @@ app.put('/api/projects/:slug/public', authMiddleware, requireAusschussOrTechnik,
   }
 });
 
+// PUT /api/projects/:slug/budget — Budget setzen (Ausschuss/Technik)
+app.put('/api/projects/:slug/budget', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
+  try {
+    const budget = req.body?.budget_chf;
+    const warnPct = req.body?.budget_warnung_pct;
+    const budgetVal = budget === null || budget === '' ? null : Number(budget);
+    if (budgetVal !== null && (!Number.isFinite(budgetVal) || budgetVal < 0)) {
+      return res.status(400).json({ error: 'budget_chf muss >= 0 oder null sein' });
+    }
+    const warnVal = warnPct === null || warnPct === undefined || warnPct === '' ? 80 : parseInt(warnPct, 10);
+    if (!Number.isFinite(warnVal) || warnVal < 0 || warnVal > 100) {
+      return res.status(400).json({ error: 'budget_warnung_pct muss 0-100 sein' });
+    }
+    const { rows: [row] } = await pool.query(
+      'UPDATE projects SET budget_chf = $1, budget_warnung_pct = $2, updated_at = NOW() WHERE slug = $3 RETURNING slug, budget_chf, budget_warnung_pct',
+      [budgetVal, warnVal, req.params.slug],
+    );
+    if (!row) return res.status(404).json({ error: 'Projekt nicht gefunden' });
+    res.json(row);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/projects - List projects
 app.get('/api/projects', authMiddleware, requireEigentuemer, async (req, res) => {
   try {
@@ -12543,7 +12628,12 @@ async function initDB() {
       ALTER TABLE auslagen ADD COLUMN IF NOT EXISTS auszahlung_mail_fallback BOOLEAN DEFAULT false;
       ALTER TABLE auslagen ADD COLUMN IF NOT EXISTS auszahlung_mail_verwaltung_id INTEGER;
       ALTER TABLE auslagen ADD COLUMN IF NOT EXISTS auszahlung_mail_count INTEGER DEFAULT 0;
+      ALTER TABLE auslagen ADD COLUMN IF NOT EXISTS auszahlung_reminder_at TIMESTAMPTZ;
       CREATE INDEX IF NOT EXISTS idx_auslagen_offen_fallback ON auslagen(status, auszahlung_mail_fallback) WHERE status = 'genehmigt';
+
+      -- Projekt-Budget (Soll-Wert) fuer Budget-Tracking
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS budget_chf NUMERIC(12,2);
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS budget_warnung_pct INTEGER DEFAULT 80;
 
       -- Optional: Auslage einem Projekt zuordnen (Budget-Tracking)
       ALTER TABLE auslagen ADD COLUMN IF NOT EXISTS projekt_slug VARCHAR(100);
