@@ -4118,6 +4118,36 @@ deletionInterval = setInterval(guardedProcessDeletions, 24 * 60 * 60 * 1000);
 // Also run once 60s after startup
 setTimeout(guardedProcessDeletions, 60 * 1000);
 
+// ─── Taegliche Auslagen-Outbox: nachreichen an neu-wirksame Verwaltungen ──
+// Wenn eine Verwaltung mit Startdatum in der Zukunft erfasst wurde,
+// wird sie zum Stichtag automatisch wirksam — hier reichen wir alle
+// genehmigten Auslagen, die waehrend der Vakanz nur an den Ausschuss gingen,
+// jetzt an die neue Verwaltung nach.
+let lastOutboxRunDay = null;
+async function runAuslagenOutboxDaily() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (lastOutboxRunDay === today) return;
+  lastOutboxRunDay = today;
+  try {
+    // Pro STWEG + uebergreifend pruefen
+    const stwegs = [null, 1, 2, 3, 4, 5, 6, 7, 8];
+    let totalResent = 0;
+    for (const s of stwegs) {
+      const res = await resendOffeneAuszahlungenFuerWirksameVerwaltung(s);
+      if (res && res.resent) totalResent += res.resent;
+    }
+    if (totalResent > 0) {
+      console.log(`[auslagen-outbox] ${totalResent} offene Auslagen heute an wirksam gewordene Verwaltungen nachgereicht`);
+    }
+  } catch (e) {
+    console.error('[auslagen-outbox] Lauf fehlgeschlagen:', e.message);
+  }
+}
+// Stuendlich pruefen ob heute schon gelaufen — robust ggue Restarts.
+setInterval(runAuslagenOutboxDaily, 60 * 60 * 1000);
+// Initial 90s nach Start (nach initDB)
+setTimeout(runAuslagenOutboxDaily, 90 * 1000);
+
 // ─── Nightly Drucker-Tag-Cleanup ────────────────────────────────────
 // Findet Kontakte mit Drucker-Tag-Email wo derselbe Name woanders eine echte
 // Email hat — und ersetzt den Drucker-Tag automatisch durch die echte Email.
@@ -4666,9 +4696,21 @@ app.post('/api/verwaltungen', authMiddleware, requireAusschussOrTechnik, async (
         b.plattform_name || null, b.plattform_url || null, b.plattform_user || null, b.plattform_pass || null,
         b.vertrag_von || null, b.vertrag_bis || null, b.kuendigungsfrist_monate || null, b.kuendigung_eingereicht_am || null,
         b.dokument_pfad || null, b.notizen || null, b.aktiv]);
-    res.json(r.rows[0]);
+    const created = r.rows[0];
+    // Wenn die neue Verwaltung sofort wirksam ist, offene Auslagen nachreichen
+    const resent = await maybeResendForVerwaltung(created);
+    res.json({ ...created, _nachgereicht: resent });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// Hilfsfunktion: prueft ob eine Verwaltung wirksam ist und reicht offene Auslagen nach.
+async function maybeResendForVerwaltung(v) {
+  if (!v || v.aktiv === false) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  if (v.vertrag_von && String(v.vertrag_von).slice(0, 10) > today) return null;
+  if (v.vertrag_bis && String(v.vertrag_bis).slice(0, 10) < today) return null;
+  return await resendOffeneAuszahlungenFuerWirksameVerwaltung(v.stweg);
+}
 
 // Update
 app.put('/api/verwaltungen/:id', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
@@ -4689,7 +4731,10 @@ app.put('/api/verwaltungen/:id', authMiddleware, requireAusschussOrTechnik, asyn
         b.vertrag_von || null, b.vertrag_bis || null, b.kuendigungsfrist_monate || null, b.kuendigung_eingereicht_am || null,
         b.dokument_pfad || null, b.notizen || null, b.aktiv === false ? false : true, id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
-    res.json(r.rows[0]);
+    const updated = r.rows[0];
+    // Wenn die Verwaltung jetzt wirksam ist, offene Auslagen nachreichen
+    const resent = await maybeResendForVerwaltung(updated);
+    res.json({ ...updated, _nachgereicht: resent });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -9119,7 +9164,7 @@ async function findVerwaltungForStweg(stweg) {
     if (mailTo.length === 0 && mailCc.length === 0) {
       // Verwaltung existiert, hat aber keine E-Mail — auf Fallback gehen
     } else {
-      return { firma: v.firma_name, mailTo, mailCc, fallback: null };
+      return { id: v.id, firma: v.firma_name, mailTo, mailCc, fallback: null };
     }
   }
   // Fallback: Ausschuss des STWEGs (+ Technik-Gruppe). Aus users.groups_json
@@ -9138,6 +9183,7 @@ async function findVerwaltungForStweg(stweg) {
   const emails = u.rows.map(x => x.email).filter(Boolean);
   if (emails.length === 0) return null;
   return {
+    id: null,
     firma: `Ausschuss ${stwegVal ? 'STWEG ' + stwegVal : 'Kooperation'} (KEINE Verwaltung hinterlegt!)`,
     mailTo: emails,
     mailCc: [],
@@ -9146,7 +9192,9 @@ async function findVerwaltungForStweg(stweg) {
 }
 
 // Fertige Auszahlungs-E-Mail an die Verwaltung mit allen Details + Beleg-Attachment.
-async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName) {
+// opts.nachgereicht=true → Betreff/Body markieren als Nach-Reichung an die neue Verwaltung
+//                          nach Ende einer Vakanz-Phase.
+async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts = {}) {
   try {
     const verw = await findVerwaltungForStweg(auslage.stweg);
     if (!verw || verw.mailTo.length === 0) {
@@ -9157,6 +9205,7 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName) {
     const betrag = Number(auslage.betrag_chf).toFixed(2);
     const datum = auslage.datum ? new Date(auslage.datum).toLocaleDateString('de-CH') : '-';
     const today = new Date().toLocaleDateString('de-CH');
+    const isNachgereicht = !!opts.nachgereicht;
 
     // Beleg ggf. als Attachment anhaengen (Verwaltung hat keinen Login)
     const attachments = [];
@@ -9175,8 +9224,16 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName) {
       }
     }
 
-    const subjectPrefix = verw.fallback ? '⚠ KEINE VERWALTUNG HINTERLEGT — ' : '';
+    let subjectPrefix = '';
+    if (verw.fallback) subjectPrefix = '⚠ KEINE VERWALTUNG HINTERLEGT — ';
+    else if (isNachgereicht) subjectPrefix = '[NACHGEREICHT] ';
     const subject = `${subjectPrefix}Auszahlungsauftrag ${stwegLabel}: ${auslage.user_name} – CHF ${betrag} (Auslage ${auslage.id})`;
+
+    const freigabeAm = auslage.bearbeitet_am
+      ? new Date(auslage.bearbeitet_am).toLocaleDateString('de-CH')
+      : today;
+    const freigebender = auslage.bearbeitet_von || ausschussEmail;
+
     const text = [
       verw.fallback === 'ausschuss'
         ? `ACHTUNG: Fuer ${stwegLabel} ist KEINE aktive Verwaltung mit E-Mail-Adresse hinterlegt.\n`
@@ -9184,9 +9241,17 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName) {
           + `Bitte unter ${SITE_URL}/verwaltung-admin.html die Verwaltung pflegen, danach geht die Mail kuenftig automatisch dorthin.\n`
           + `\n────────────────────────────────────────\n`
         : '',
+      isNachgereicht
+        ? `HINWEIS: Diese Auslage wurde bereits am ${freigabeAm} vom Ausschuss zur Auszahlung freigegeben,\n`
+          + `als noch keine externe Verwaltung beauftragt war (Vakanz). Da Sie nun als zustaendige\n`
+          + `Verwaltung wirksam sind, wird der Auftrag automatisch an Sie nachgereicht.\n`
+          + `\n────────────────────────────────────────\n`
+        : '',
       `Sehr geehrte Damen und Herren`,
       ``,
-      `der Ausschuss hat folgende Auslage geprueft und zur Auszahlung freigegeben.`,
+      isNachgereicht
+        ? `der Ausschuss hat folgende Auslage waehrend der Vakanz-Phase geprueft und freigegeben.`
+        : `der Ausschuss hat folgende Auslage geprueft und zur Auszahlung freigegeben.`,
       `Bitte ueberweisen Sie den Betrag an die unten angegebene IBAN.`,
       ``,
       `── Auftrag ──`,
@@ -9204,7 +9269,7 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName) {
       auslage.bemerkung_eigentuemer ? `── Bemerkung Eigentuemer ──\n${auslage.bemerkung_eigentuemer}\n` : '',
       auslage.bemerkung_ausschuss ? `── Bemerkung Ausschuss ──\n${auslage.bemerkung_ausschuss}\n` : '',
       `── Freigabe ──`,
-      `Geprueft und freigegeben durch: ${ausschussName || ausschussEmail} (${ausschussEmail}) am ${today}`,
+      `Geprueft und freigegeben durch: ${freigebender} am ${freigabeAm}`,
       ``,
       attachments.length > 0
         ? `Der Beleg ist als Anhang beigefuegt.`
@@ -9225,11 +9290,78 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName) {
       subject,
       text,
       attachments,
-    }, 'auslage-auszahlung');
-    return { ok: true, to: verw.mailTo, firma: verw.firma };
+    }, isNachgereicht ? 'auslage-auszahlung-nachgereicht' : 'auslage-auszahlung');
+
+    // Tracking auf der Auslage aktualisieren (Outbox)
+    try {
+      await pool.query(
+        `UPDATE auslagen
+            SET auszahlung_mail_at = NOW(),
+                auszahlung_mail_to = $1,
+                auszahlung_mail_fallback = $2,
+                auszahlung_mail_verwaltung_id = $3,
+                auszahlung_mail_count = COALESCE(auszahlung_mail_count, 0) + 1,
+                updated_at = NOW()
+          WHERE id = $4`,
+        [verw.mailTo.join(', '), !!verw.fallback, verw.id || null, auslage.id],
+      );
+    } catch (e) {
+      console.warn('[auslagen] Mail-Tracking konnte nicht gespeichert werden:', e.message);
+    }
+
+    return { ok: true, to: verw.mailTo, firma: verw.firma, fallback: verw.fallback, nachgereicht: isNachgereicht };
   } catch (err) {
     console.error('[auslagen] Auszahlungs-Mail Fehler:', err);
     return { ok: false, reason: err.message };
+  }
+}
+
+// Wird aufgerufen, wenn eine Verwaltung neu wirksam wird (Anlage / Update / Cron).
+// Reicht alle genehmigten, noch nicht ausbezahlten Auslagen, deren letzte Auszahlungs-Mail
+// nur an den Ausschuss ging (auszahlung_mail_fallback = true), automatisch an die nun
+// zustaendige Verwaltung nach.
+async function resendOffeneAuszahlungenFuerWirksameVerwaltung(stwegOrNull) {
+  try {
+    const stwegInt = parseInt(stwegOrNull, 10);
+    const params = [];
+    let stwegFilter;
+    if (Number.isFinite(stwegInt) && stwegInt >= 1 && stwegInt <= 8) {
+      params.push(stwegInt);
+      // Stweg-spezifische Verwaltung: schlaegt fuer Auslagen DIESES Stwegs zu
+      stwegFilter = `stweg = $${params.length}`;
+    } else {
+      // Uebergreifende Verwaltung: schlaegt fuer Auslagen ohne Verwaltung des eigenen Stwegs zu
+      stwegFilter = `TRUE`;
+    }
+    const offene = await pool.query(
+      `SELECT * FROM auslagen
+        WHERE status = 'genehmigt'
+          AND COALESCE(auszahlung_mail_fallback, false) = true
+          AND ${stwegFilter}
+        ORDER BY id`,
+      params,
+    );
+    if (offene.rows.length === 0) return { resent: 0, results: [] };
+
+    const results = [];
+    for (const auslage of offene.rows) {
+      // Doppelt sicher: nur weiter wenn die nun aufgelaufene Verwaltung NICHT mehr Fallback ist
+      const verw = await findVerwaltungForStweg(auslage.stweg);
+      if (!verw || verw.fallback) continue;
+      const res = await sendAuszahlungsMail(
+        auslage,
+        auslage.bearbeitet_von || 'ausschuss@rosenweg4303.ch',
+        null,
+        { nachgereicht: true },
+      );
+      results.push({ id: auslage.id, ok: res.ok, to: res.to, reason: res.reason });
+    }
+    const resent = results.filter(r => r.ok).length;
+    if (resent > 0) console.log(`[auslagen] ${resent} offene Auslagen an neue Verwaltung nachgereicht (STWEG ${stwegOrNull || '*'})`);
+    return { resent, results };
+  } catch (err) {
+    console.error('[auslagen] Resend-Fehler:', err);
+    return { resent: 0, error: err.message };
   }
 }
 
@@ -10254,6 +10386,17 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_auslagen_user ON auslagen(user_email);
       CREATE INDEX IF NOT EXISTS idx_auslagen_stweg_status ON auslagen(stweg, status);
       CREATE INDEX IF NOT EXISTS idx_auslagen_created ON auslagen(created_at DESC);
+
+      -- Outbox-Tracking: wann ging die letzte Auszahlungs-Mail an wen?
+      -- Damit koennen wir genehmigte Auslagen, die waehrend einer Vakanz
+      -- nur an den Ausschuss gingen, automatisch an eine neue Verwaltung
+      -- nachreichen, sobald diese wirksam wird.
+      ALTER TABLE auslagen ADD COLUMN IF NOT EXISTS auszahlung_mail_at TIMESTAMPTZ;
+      ALTER TABLE auslagen ADD COLUMN IF NOT EXISTS auszahlung_mail_to TEXT;
+      ALTER TABLE auslagen ADD COLUMN IF NOT EXISTS auszahlung_mail_fallback BOOLEAN DEFAULT false;
+      ALTER TABLE auslagen ADD COLUMN IF NOT EXISTS auszahlung_mail_verwaltung_id INTEGER;
+      ALTER TABLE auslagen ADD COLUMN IF NOT EXISTS auszahlung_mail_count INTEGER DEFAULT 0;
+      CREATE INDEX IF NOT EXISTS idx_auslagen_offen_fallback ON auslagen(status, auszahlung_mail_fallback) WHERE status = 'genehmigt';
     `);
 
     // Create index after migration (separate query to avoid parse errors on old schema)
