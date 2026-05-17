@@ -10060,6 +10060,19 @@ app.get('/api/dashboard', authMiddleware, async (req, res) => {
         }));
     } catch {}
 
+    // 7a) Mails die an die Verwaltung rausgegangen sind (gesendet, letzte 14 Tage)
+    if (isAdmin || ausschussStwegs.length > 0) {
+      try {
+        const r = await pool.query(`
+          SELECT id, source_type, source_id, subject, mail_to, sent_at, freigegeben_von
+            FROM verwaltung_mail_queue
+           WHERE status = 'gesendet' AND sent_at >= NOW() - INTERVAL '14 days'
+           ORDER BY sent_at DESC LIMIT 15
+        `);
+        widgets.mails_an_verwaltung = r.rows;
+      } catch {}
+    }
+
     // 7) Genehmigt aber nicht ausbezahlt (lange offen — Reminder-Liste)
     if (canReview) {
       try {
@@ -10120,9 +10133,13 @@ app.get('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'), 
               a.iban, a.beleg_path, a.beleg_filename, a.status, a.bemerkung_eigentuemer, a.bemerkung_ausschuss,
               a.bearbeitet_von, a.bearbeitet_am, a.ausbezahlt_am, a.created_at, a.updated_at,
               a.projekt_slug, p.title AS projekt_title,
+              a.auszahlung_mail_at, a.auszahlung_mail_to, a.auszahlung_mail_fallback, a.auszahlung_mail_count,
               COALESCE((SELECT COUNT(*) FROM auslagen_belege WHERE auslage_id = a.id),
                        CASE WHEN a.beleg_path IS NOT NULL THEN 1 ELSE 0 END) AS belege_count,
-              COALESCE((SELECT COUNT(*) FROM auslagen_positionen WHERE auslage_id = a.id), 0) AS positionen_count
+              COALESCE((SELECT COUNT(*) FROM auslagen_positionen WHERE auslage_id = a.id), 0) AS positionen_count,
+              (SELECT status FROM verwaltung_mail_queue
+                 WHERE source_type LIKE 'auslage-auszahlung%' AND source_id = a.id
+                 ORDER BY created_at DESC LIMIT 1) AS mail_queue_status
          FROM auslagen a
          LEFT JOIN projects p ON p.slug = a.projekt_slug
         WHERE ${where.replace(/(?<!\.)(\bstatus\b|\bstweg\b|\buser_email\b|\bprojekt_slug\b)/g, 'a.$1')}
