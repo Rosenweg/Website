@@ -261,6 +261,8 @@
   async function freigeben() {
     if (!CURRENT) return;
     if (!confirm('Mail freigeben?\n\nAn: ' + CURRENT.mail_to + '\nBetreff: ' + CURRENT.subject + '\n\n(Bei 4-Augen-Prinzip wird der Versand erst beim letzten Approver ausgelöst.)')) return;
+    const btns = document.querySelectorAll('#detail button');
+    btns.forEach(b => b.disabled = true);
     try {
       const r = await AuthentikAuth.apiFetch('/api/verwaltung-mail-queue/' + CURRENT.id + '/freigeben', { method: 'POST' });
       const data = await r.json().catch(() => ({}));
@@ -274,13 +276,18 @@
       }
       await loadList();
       await openDetail(CURRENT.id);
-    } catch (e) { alert('Fehler: ' + e.message); }
+    } catch (e) {
+      alert('Fehler: ' + e.message);
+      btns.forEach(b => b.disabled = false);
+    }
   }
 
   async function ablehnen() {
     if (!CURRENT) return;
     const grund = prompt('Grund für die Ablehnung?');
     if (!grund || !grund.trim()) return;
+    const btns = document.querySelectorAll('#detail button');
+    btns.forEach(b => b.disabled = true);
     try {
       const r = await AuthentikAuth.apiFetch('/api/verwaltung-mail-queue/' + CURRENT.id + '/ablehnen', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -291,7 +298,10 @@
       alert('Mail abgelehnt.');
       await loadList();
       await openDetail(CURRENT.id);
-    } catch (e) { alert('Fehler: ' + e.message); }
+    } catch (e) {
+      alert('Fehler: ' + e.message);
+      btns.forEach(b => b.disabled = false);
+    }
   }
   </script>
 </body>

@@ -298,22 +298,67 @@
   async function mergeOptions(mergeId, allIds) {
     const others = allIds.filter(x => x !== mergeId);
     if (others.length === 0) return;
-    const choice = others.length === 1
-      ? others[0]
-      : parseInt(prompt('Welche Person soll behalten werden (ID)?\n\nIDs: ' + others.join(', ')), 10);
-    if (!choice || !others.includes(choice)) return;
-    if (!confirm(`Person #${mergeId} in Person #${choice} mergen?\n\nAlle Wohnungen werden umgehängt, der Merge-Datensatz wird gelöscht.`)) return;
+    // M4: Modal statt prompt() — Liste der Optionen mit Details
+    const mergeRow = await fetchPersonShort(mergeId);
+    const optionsHtml = await Promise.all(others.map(async id => {
+      const p = await fetchPersonShort(id);
+      return `<label class="flex items-start gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer border">
+        <input type="radio" name="keep-id" value="${id}" class="mt-1">
+        <div class="flex-1">
+          <div class="font-medium text-gray-900">#${id} — ${esc(p.name)}</div>
+          <div class="text-xs text-gray-600">${esc(p.email || '—')} · ${esc(p.telefon || '—')}${p.n_wohnungen ? ` · ${p.n_wohnungen} Wohnung(en)` : ''}</div>
+        </div>
+      </label>`;
+    }));
+    const dialog = document.createElement('div');
+    dialog.className = 'fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4';
+    dialog.innerHTML = `
+      <div class="bg-white rounded-xl shadow-xl max-w-lg w-full p-5">
+        <h3 class="text-lg font-bold mb-2">Person mergen</h3>
+        <p class="text-sm text-gray-600 mb-3">Welche Person soll <strong>behalten</strong> werden? Alle Wohnungen von <strong>#${mergeId} — ${esc(mergeRow.name)}</strong> werden auf die gewählte Person umgehängt, der Quell-Datensatz wird gelöscht.</p>
+        <div class="space-y-1 mb-4 max-h-72 overflow-y-auto">${optionsHtml.join('')}</div>
+        <div id="merge-err" class="text-sm text-red-600 hidden mb-2"></div>
+        <div class="flex justify-end gap-2">
+          <button type="button" id="merge-cancel" class="px-3 py-1.5 text-gray-600 hover:bg-gray-100 rounded">Abbrechen</button>
+          <button type="button" id="merge-do" class="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">Mergen</button>
+        </div>
+      </div>`;
+    document.body.appendChild(dialog);
+    const close = () => dialog.remove();
+    dialog.querySelector('#merge-cancel').onclick = close;
+    dialog.addEventListener('click', (e) => { if (e.target === dialog) close(); });
+    dialog.querySelector('#merge-do').onclick = async () => {
+      const chosen = dialog.querySelector('input[name="keep-id"]:checked');
+      const errEl = dialog.querySelector('#merge-err');
+      if (!chosen) { errEl.textContent = 'Bitte eine Person auswählen.'; errEl.classList.remove('hidden'); return; }
+      const keepId = parseInt(chosen.value, 10);
+      const btn = dialog.querySelector('#merge-do');
+      btn.disabled = true; btn.textContent = 'Merge …';
+      try {
+        const r = await AuthentikAuth.apiFetch('/api/personen/merge', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ keep_id: keepId, merge_id: mergeId }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+        close();
+        alert(`Merge erfolgreich: ${data.reassigned_kontakte} Kontakte umgehängt.`);
+        await openDedup();
+        await loadList();
+      } catch (e) {
+        errEl.textContent = e.message; errEl.classList.remove('hidden');
+        btn.disabled = false; btn.textContent = 'Mergen';
+      }
+    };
+  }
+
+  async function fetchPersonShort(id) {
     try {
-      const r = await AuthentikAuth.apiFetch('/api/personen/merge', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keep_id: choice, merge_id: mergeId }),
-      });
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
-      alert(`Merge erfolgreich: ${data.reassigned_kontakte} Kontakte umgehängt.`);
-      await openDedup();
-      await loadList();
-    } catch (e) { alert('Fehler: ' + e.message); }
+      const r = await AuthentikAuth.apiFetch('/api/personen/' + id);
+      if (!r.ok) return { name: 'Unbekannt', email: null, telefon: null };
+      const p = await r.json();
+      return { name: p.name, email: p.email, telefon: p.telefon, n_wohnungen: (p.wohnungen || []).filter(w => !w.archiviert_am).length };
+    } catch { return { name: '?', email: null, telefon: null }; }
   }
   </script>
 </body>

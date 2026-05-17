@@ -4252,6 +4252,10 @@ setTimeout(guardedProcessDeletions, 60 * 1000);
 // wird sie zum Stichtag automatisch wirksam — hier reichen wir alle
 // genehmigten Auslagen, die waehrend der Vakanz nur an den Ausschuss gingen,
 // jetzt an die neue Verwaltung nach.
+//
+// ACHTUNG: lastOutboxRunDay ist In-Memory, deshalb nur sicher mit 1 API-Replica.
+// Bei Scale-up auf >1 Replica: replace mit DB-backed Lock (z.B. advisory_lock
+// oder Tabelle outbox_runs(run_date PRIMARY KEY)).
 let lastOutboxRunDay = null;
 async function runAuslagenOutboxDaily() {
   const today = new Date().toISOString().slice(0, 10);
@@ -9341,11 +9345,12 @@ async function enqueueVerwaltungMail({
 }) {
   const toStr = Array.isArray(mailTo) ? mailTo.join(', ') : String(mailTo || '');
   const ccStr = Array.isArray(mailCc) ? mailCc.join(', ') : (mailCc ? String(mailCc) : null);
-  // Attachments: speichere Metadaten + base64 (klein) ODER source-referenz (Pfad in DOCS)
+  // M7: Attachments in separater Tabelle statt JSONB inline (Skalierbarkeit).
+  // Legacy attachments-JSONB-Spalte wird mit minimalen Metadaten gefuellt fuer
+  // Backward-Compat des GET-Endpoints.
   const attMeta = (attachments || []).map(a => ({
     filename: a.filename,
     size: a.size || (a.content_base64 ? Math.floor(a.content_base64.length * 0.75) : null),
-    content_base64: a.content_base64 || null,
     docs_path: a.docs_path || null,
   }));
   const r = await pool.query(
@@ -9356,6 +9361,18 @@ async function enqueueVerwaltungMail({
     [source_type, source_id || null, toStr, ccStr, mailReplyTo || null, subject, bodyText, JSON.stringify(attMeta), createdBy || null],
   );
   const queueId = r.rows[0].id;
+  // Real Attachments in separate Tabelle
+  for (let i = 0; i < (attachments || []).length; i++) {
+    const a = attachments[i];
+    if (!a || (!a.docs_path && !a.content_base64)) continue;
+    await pool.query(
+      `INSERT INTO verwaltung_mail_attachments (queue_id, filename, size_bytes, docs_path, content_base64, sort_order)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [queueId, a.filename || `anhang-${i+1}`,
+       a.size || (a.content_base64 ? Math.floor(a.content_base64.length * 0.75) : null),
+       a.docs_path || null, a.content_base64 || null, i],
+    );
+  }
 
   // Notification an Technik + Praesident: "Neue Mail wartet auf Freigabe"
   try {
@@ -9400,9 +9417,14 @@ async function sendVerwaltungMailFromQueue(queueId, approverEmail) {
   const q = r.rows[0];
   if (q.status !== 'freigegeben') throw new Error(`Status ist '${q.status}', erwartet 'freigegeben'`);
 
-  // Attachments rekonstruieren (entweder aus base64 oder aus DOCS-Pfad live lesen)
+  // M7: Attachments aus separater Tabelle lesen, mit Fallback auf Legacy-JSONB
   const attachments = [];
-  for (const a of (q.attachments || [])) {
+  const attRows = await pool.query(
+    'SELECT * FROM verwaltung_mail_attachments WHERE queue_id = $1 ORDER BY sort_order, id',
+    [queueId],
+  );
+  const attSources = attRows.rows.length > 0 ? attRows.rows : (q.attachments || []);
+  for (const a of attSources) {
     if (a.content_base64) {
       attachments.push({ filename: a.filename, content: Buffer.from(a.content_base64, 'base64') });
     } else if (a.docs_path) {
@@ -9764,8 +9786,11 @@ function canSeeAuslage(row, user) {
   const groups = user?.groups || [];
   if (isTechnik(groups) || isPraesident(groups)) return true;
   if (row.user_email && row.user_email.toLowerCase() === (user.email || '').toLowerCase()) return true;
-  // Ausschuss seines STWEGs sieht alles
+  // Ausschuss seines STWEGs sieht Auslagen seines STWEGs
   if (row.stweg && getAusschussStwegs(groups).has(parseInt(row.stweg, 10))) return true;
+  // M6: STWEG-uebergreifende Auslagen (stweg=NULL) sind fuer alle Ausschuss-Mitglieder sichtbar
+  // — analog zu canEditAuslageStatus
+  if (!row.stweg && isAusschussForAny(groups)) return true;
   return false;
 }
 
@@ -10061,8 +10086,24 @@ app.delete('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'r
         if (full.startsWith(pathModule.resolve(DOCS_PATH) + '/')) await fs.unlink(full).catch(() => {});
       } catch {}
     }
+    // M1: Verwaiste Mail-Queue-Eintraege vorher cleanen (FK-Referenz wird sonst broken)
+    // Pending + freigegebene Auszahlungs-Mails dieser Auslage abbrechen
+    const qDel = await pool.query(
+      `DELETE FROM verwaltung_mail_queue
+        WHERE source_type LIKE 'auslage-auszahlung%' AND source_id = $1
+          AND status IN ('pending', 'freigegeben')
+        RETURNING id`,
+      [id],
+    );
+    // Bei bereits gesendeten Mails source_id auf NULL setzen (Audit-Trail erhalten)
+    await pool.query(
+      `UPDATE verwaltung_mail_queue SET source_id = NULL
+        WHERE source_type LIKE 'auslage-auszahlung%' AND source_id = $1
+          AND status IN ('gesendet', 'abgelehnt', 'fehler')`,
+      [id],
+    );
     await pool.query('DELETE FROM auslagen WHERE id = $1', [id]);
-    res.json({ success: true });
+    res.json({ success: true, cancelled_queue_mails: qDel.rowCount });
   } catch (err) {
     console.error('Auslagen delete error:', err);
     res.status(500).json({ error: 'Fehler beim Loeschen' });
@@ -10801,7 +10842,8 @@ app.get('/api/verwaltung-mail-queue', authMiddleware, requireTechnikOrPraesident
               subject, status, created_by, created_at, edited_by, edited_at,
               freigegeben_von, freigegeben_am, abgelehnt_von, abgelehnt_am, abgelehnt_grund,
               sent_at, send_error,
-              jsonb_array_length(COALESCE(attachments, '[]'::jsonb)) AS attachment_count,
+              COALESCE((SELECT COUNT(*) FROM verwaltung_mail_attachments WHERE queue_id = verwaltung_mail_queue.id),
+                       jsonb_array_length(COALESCE(attachments, '[]'::jsonb))) AS attachment_count,
               LENGTH(body_text) AS body_size
          FROM verwaltung_mail_queue
         WHERE ${where}
@@ -10843,8 +10885,16 @@ app.get('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesi
       `SELECT approver_email, approved_at FROM mail_approval_log WHERE queue_id = $1 ORDER BY approved_at`,
       [id],
     );
+    // M7: separate Attachments-Tabelle bevorzugen, sonst Legacy-JSONB
+    const sepAtt = await pool.query(
+      `SELECT filename, size_bytes AS size, docs_path FROM verwaltung_mail_attachments
+        WHERE queue_id = $1 ORDER BY sort_order, id`,
+      [id],
+    );
+    const attachmentsOut = sepAtt.rows.length > 0 ? sepAtt.rows : (row.attachments || []);
     res.json({
       ...row,
+      attachments: attachmentsOut,
       _approval_rule: rule,
       _approvals: approvals.rows,
       _approvals_count: approvals.rows.length,
@@ -11066,11 +11116,24 @@ app.get('/api/verwaltung-mail-queue/:id/attachment/:idx', authMiddleware, requir
     const id = parseInt(req.params.id, 10);
     const idx = parseInt(req.params.idx, 10);
     if (!Number.isFinite(id) || !Number.isFinite(idx)) return res.status(400).end();
-    const r = await pool.query('SELECT attachments FROM verwaltung_mail_queue WHERE id = $1', [id]);
-    if (r.rows.length === 0) return res.status(404).end();
-    const att = (r.rows[0].attachments || [])[idx];
+    // M7: separate Attachments-Tabelle, mit Fallback auf Legacy-JSONB
+    let att = null;
+    const sep = await pool.query(
+      `SELECT filename, docs_path, content_base64 FROM verwaltung_mail_attachments
+        WHERE queue_id = $1 ORDER BY sort_order, id OFFSET $2 LIMIT 1`,
+      [id, idx],
+    );
+    if (sep.rows.length > 0) {
+      att = sep.rows[0];
+    } else {
+      const r = await pool.query('SELECT attachments FROM verwaltung_mail_queue WHERE id = $1', [id]);
+      if (r.rows.length === 0) return res.status(404).end();
+      att = (r.rows[0].attachments || [])[idx];
+    }
     if (!att) return res.status(404).end();
-    res.setHeader('Content-Disposition', `inline; filename="${(att.filename || 'beleg').replace(/[^A-Za-z0-9._-]/g, '_')}"`);
+    // L4-Bonus: Safe filename + Null-Byte-Filter
+    const safeFilename = (att.filename || 'beleg').replace(/[^A-Za-z0-9._-]/g, '_').replace(/\.+/g, '.').slice(0, 200) || 'beleg';
+    res.setHeader('Content-Disposition', `inline; filename="${safeFilename}"`);
     if (att.content_base64) {
       res.send(Buffer.from(att.content_base64, 'base64'));
       return;
@@ -11938,6 +12001,22 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_vmq_pending ON verwaltung_mail_queue(status, created_at) WHERE status = 'pending';
       CREATE INDEX IF NOT EXISTS idx_vmq_source ON verwaltung_mail_queue(source_type, source_id);
 
+      -- M7: Separate Tabelle fuer Mail-Attachments. Inline-base64 in JSONB skaliert
+      -- nicht (20 MB Anhang × 100 Mails = 2 GB Tabelle). Hier nur Metadaten +
+      -- Referenz auf Disk-Pfad (docs_path) ODER kleine inline content_base64.
+      CREATE TABLE IF NOT EXISTS verwaltung_mail_attachments (
+        id SERIAL PRIMARY KEY,
+        queue_id INTEGER NOT NULL REFERENCES verwaltung_mail_queue(id) ON DELETE CASCADE,
+        filename VARCHAR(255) NOT NULL,
+        size_bytes INTEGER,
+        docs_path TEXT,                       -- live aus DOCS_PATH lesen (Standard fuer Belege)
+        content_base64 TEXT,                  -- inline (fuer Ad-hoc-Compose-Uploads)
+        sort_order INTEGER DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        CONSTRAINT vma_source_chk CHECK (docs_path IS NOT NULL OR content_base64 IS NOT NULL)
+      );
+      CREATE INDEX IF NOT EXISTS idx_vma_queue ON verwaltung_mail_attachments(queue_id, sort_order);
+
       -- Freigabe-Regeln pro source_type-Pattern. Praezedenz: spezifischer
       -- source_type vor 'default'. Erste passende Regel gilt.
       CREATE TABLE IF NOT EXISTS mail_approval_config (
@@ -12113,15 +12192,23 @@ async function initDB() {
       const kontaktCount = await client.query('SELECT COUNT(*) AS cnt FROM wohnungen_kontakte WHERE archiviert_am IS NULL AND person_id IS NULL');
       if (parseInt(personCount.rows[0].cnt) === 0 && parseInt(kontaktCount.rows[0].cnt) > 0) {
         console.log('[personen-migration] Konsolidiere wohnungen_kontakte → personen ...');
-        // Cluster: (name_norm, email_norm) → einen Person-Eintrag pro Cluster.
-        // Repraesentative Werte: most-recent telefon/adresse pro Cluster.
+        // M8: Cluster-Strategie geschaerft:
+        //   - Wenn Email vorhanden: cluster per (name_norm, email_norm) — Ehepaare mit
+        //     shared Email werden korrekt als getrennte Personen behandelt
+        //   - Wenn KEINE Email: jeder Kontakt bekommt eigene Person (per id partition),
+        //     statt versehentlich verschiedene "Hans Mueller" zusammenzufuehren.
+        //     Admin kann spaeter per Merge-Tool zusammenfuehren wenn gewollt.
         const inserted = await client.query(`
           WITH active AS (
             SELECT id, name, email, telefon, adresse,
                    LOWER(TRIM(COALESCE(name, ''))) AS name_norm,
                    LOWER(TRIM(COALESCE(email, ''))) AS email_norm,
+                   CASE WHEN email IS NOT NULL AND email <> '' THEN 'mit-email' ELSE 'ohne-email' END AS bucket,
                    ROW_NUMBER() OVER (
-                     PARTITION BY LOWER(TRIM(COALESCE(name,''))), LOWER(TRIM(COALESCE(email,'')))
+                     PARTITION BY
+                       LOWER(TRIM(COALESCE(name,''))),
+                       -- ohne email: id als zusaetzlichen Partition-Key → jeder Kontakt eigene Person
+                       CASE WHEN email IS NOT NULL AND email <> '' THEN LOWER(TRIM(email)) ELSE id::text END
                      ORDER BY (CASE WHEN telefon IS NOT NULL THEN 0 ELSE 1 END),
                               (CASE WHEN adresse IS NOT NULL THEN 0 ELSE 1 END),
                               id DESC
@@ -12138,17 +12225,34 @@ async function initDB() {
         `);
         console.log(`[personen-migration] ${inserted.rows[0].n} Personen angelegt`);
 
-        // person_id auf alle aktiven Kontakte mappen (per name_norm + email_norm)
-        const linked = await client.query(`
+        // person_id auf Kontakte mit Email mappen (eindeutig via name+email)
+        const linkedMitEmail = await client.query(`
           UPDATE wohnungen_kontakte k
              SET person_id = p.id
             FROM personen p
            WHERE k.archiviert_am IS NULL
              AND k.person_id IS NULL
-             AND LOWER(TRIM(COALESCE(k.name,'')))  = LOWER(TRIM(COALESCE(p.name,'')))
-             AND LOWER(TRIM(COALESCE(k.email,''))) = LOWER(TRIM(COALESCE(p.email,'')))
+             AND k.email IS NOT NULL AND k.email <> ''
+             AND LOWER(TRIM(k.name))  = LOWER(TRIM(COALESCE(p.name,'')))
+             AND LOWER(TRIM(k.email)) = LOWER(TRIM(COALESCE(p.email,'')))
         `);
-        console.log(`[personen-migration] ${linked.rowCount} Kontakte mit person_id verknuepft`);
+        // person_id fuer Email-lose Kontakte: jeder Kontakt wurde als eigene Person
+        // eingefuegt → einzeln matchen ueber name + name+telefon+adresse Heuristik nicht
+        // moeglich; daher: pro Kontakt INSERT (oder Subquery) wenn nicht gemappt.
+        // Da Migration nur einmal laeuft und alle ohne-email Personen 1:1 mit Kontakten
+        // korrespondieren, einfache nachgelagerte Logik:
+        const orphan = await client.query(
+          `SELECT id, name FROM wohnungen_kontakte WHERE archiviert_am IS NULL AND person_id IS NULL`,
+        );
+        for (const row of orphan.rows) {
+          // Erstelle eine eigene Person (kein Match-Versuch um Cluster-Bug zu vermeiden)
+          const p = await client.query(
+            `INSERT INTO personen (name) VALUES ($1) RETURNING id`,
+            [row.name || null],
+          );
+          await client.query('UPDATE wohnungen_kontakte SET person_id = $1 WHERE id = $2', [p.rows[0].id, row.id]);
+        }
+        console.log(`[personen-migration] ${linkedMitEmail.rowCount} Email-Kontakte + ${orphan.rows.length} Email-lose verknuepft`);
       }
     } catch (e) {
       console.warn('[personen-migration] uebersprungen:', e.message);
