@@ -12315,6 +12315,23 @@ async function initDB() {
       ALTER TABLE auslagen ADD COLUMN IF NOT EXISTS auszahlung_mail_count INTEGER DEFAULT 0;
       CREATE INDEX IF NOT EXISTS idx_auslagen_offen_fallback ON auslagen(status, auszahlung_mail_fallback) WHERE status = 'genehmigt';
 
+      -- L1+L6: CHECK-Constraints nachtraeglich hinzufuegen (CREATE TABLE IF NOT EXISTS
+      -- fuegt neue Constraints nicht zu existierender Tabelle hinzu)
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'auslagen_betrag_chk' AND conrelid = 'auslagen'::regclass) THEN
+          ALTER TABLE auslagen ADD CONSTRAINT auslagen_betrag_chk CHECK (betrag_chf > 0 AND betrag_chf <= 100000);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'auslagen_beschreibung_len' AND conrelid = 'auslagen'::regclass) THEN
+          ALTER TABLE auslagen ADD CONSTRAINT auslagen_beschreibung_len CHECK (LENGTH(beschreibung) <= 2000);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'auslagen_bem_eig_len' AND conrelid = 'auslagen'::regclass) THEN
+          ALTER TABLE auslagen ADD CONSTRAINT auslagen_bem_eig_len CHECK (bemerkung_eigentuemer IS NULL OR LENGTH(bemerkung_eigentuemer) <= 2000);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'auslagen_bem_aus_len' AND conrelid = 'auslagen'::regclass) THEN
+          ALTER TABLE auslagen ADD CONSTRAINT auslagen_bem_aus_len CHECK (bemerkung_ausschuss IS NULL OR LENGTH(bemerkung_ausschuss) <= 2000);
+        END IF;
+      END $$;
+
       -- Detaillierte Positionen pro Auslage (KI-Belegleser-Output oder manuell)
       CREATE TABLE IF NOT EXISTS auslagen_positionen (
         id SERIAL PRIMARY KEY,
