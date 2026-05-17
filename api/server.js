@@ -11153,43 +11153,54 @@ async function initDB() {
 
       -- Trigger: bei UPDATE personen → email/telefon/adresse/name auf alle
       -- aktiven wohnungen_kontakte mit dieser person_id propagieren.
+      -- AFTER UPDATE (statt BEFORE) damit der reverse Trigger nicht
+      -- die selbe Person-Zeile mid-update modifiziert. Recursion-Schutz
+      -- via session-Setting rosenweg.person_sync = 'on'.
       CREATE OR REPLACE FUNCTION personen_propagate_to_kontakte() RETURNS TRIGGER AS $$
+      DECLARE
+        is_syncing BOOLEAN;
       BEGIN
+        BEGIN
+          is_syncing := current_setting('rosenweg.person_sync', true) = 'on';
+        EXCEPTION WHEN OTHERS THEN
+          is_syncing := false;
+        END;
+        IF is_syncing THEN RETURN NULL; END IF;
         IF NEW.name IS DISTINCT FROM OLD.name
            OR NEW.email IS DISTINCT FROM OLD.email
            OR NEW.telefon IS DISTINCT FROM OLD.telefon
            OR NEW.adresse IS DISTINCT FROM OLD.adresse THEN
+          PERFORM set_config('rosenweg.person_sync', 'on', true);
           UPDATE wohnungen_kontakte
              SET name = NEW.name,
                  email = NEW.email,
                  telefon = NEW.telefon,
                  adresse = NEW.adresse
            WHERE person_id = NEW.id AND archiviert_am IS NULL;
+          PERFORM set_config('rosenweg.person_sync', 'off', true);
         END IF;
-        NEW.updated_at = NOW();
-        RETURN NEW;
+        RETURN NULL;
       END;
       $$ LANGUAGE plpgsql;
       DROP TRIGGER IF EXISTS trg_personen_propagate ON personen;
       CREATE TRIGGER trg_personen_propagate
-        BEFORE UPDATE ON personen
+        AFTER UPDATE ON personen
         FOR EACH ROW EXECUTE FUNCTION personen_propagate_to_kontakte();
 
       -- Trigger: bei UPDATE wohnungen_kontakte mit person_id → die Person
       -- (master) aktualisieren. Damit alte Code-Pfade (saveKontakte etc.)
-      -- transparent weiterhin funktionieren. Schutz vor Rekursion via
-      -- session_replication_role-Check (Trigger feuert nur einmal).
+      -- transparent weiterhin funktionieren. Gleicher Rekursions-Schutz.
       CREATE OR REPLACE FUNCTION kontakte_propagate_to_person() RETURNS TRIGGER AS $$
       DECLARE
-        propagating BOOLEAN;
+        is_syncing BOOLEAN;
       BEGIN
         BEGIN
-          propagating := current_setting('rosenweg.person_sync', true) = 'on';
+          is_syncing := current_setting('rosenweg.person_sync', true) = 'on';
         EXCEPTION WHEN OTHERS THEN
-          propagating := false;
+          is_syncing := false;
         END;
-        IF propagating THEN RETURN NEW; END IF;
-        IF NEW.person_id IS NULL THEN RETURN NEW; END IF;
+        IF is_syncing THEN RETURN NULL; END IF;
+        IF NEW.person_id IS NULL THEN RETURN NULL; END IF;
         IF NEW.name IS DISTINCT FROM OLD.name
            OR NEW.email IS DISTINCT FROM OLD.email
            OR NEW.telefon IS DISTINCT FROM OLD.telefon
@@ -11204,7 +11215,7 @@ async function initDB() {
            WHERE id = NEW.person_id;
           PERFORM set_config('rosenweg.person_sync', 'off', true);
         END IF;
-        RETURN NEW;
+        RETURN NULL;
       END;
       $$ LANGUAGE plpgsql;
       DROP TRIGGER IF EXISTS trg_kontakte_propagate ON wohnungen_kontakte;
