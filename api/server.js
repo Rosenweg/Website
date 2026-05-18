@@ -985,6 +985,16 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
     permissions['energie-monitor'] = 'read';
   }
 
+  // WhatsApp-Opt-In aus personen-Tabelle (via email lookup)
+  let whatsappOptIn = false;
+  try {
+    const pRes = await pool.query(
+      `SELECT whatsapp_opt_in FROM personen WHERE LOWER(email) = LOWER($1) LIMIT 1`,
+      [u.email || '']
+    );
+    whatsappOptIn = !!pRes.rows[0]?.whatsapp_opt_in;
+  } catch { /* personen table may not exist yet */ }
+
   res.json({
     user: {
       id: u.id,
@@ -1003,6 +1013,7 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
       groups: groups,
       meters: meters,
       permissions: permissions,
+      whatsapp_opt_in: whatsappOptIn,
     },
   });
   } catch (err) {
@@ -1248,6 +1259,48 @@ app.put('/api/auth/profile', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('Profile update error:', err);
     res.status(500).json({ error: 'Profil konnte nicht gespeichert werden' });
+  }
+});
+
+// PUT /api/me/whatsapp-optin — Toggle WhatsApp-Opt-In am Personen-Datensatz
+// Body: { enabled: bool }
+// Liefert Status zurueck: { ok, enabled, phone, reason? }
+app.put('/api/me/whatsapp-optin', authMiddleware, async (req, res) => {
+  const email = (req.user.email || '').toLowerCase();
+  if (!email) return res.status(400).json({ error: 'Keine E-Mail' });
+  const enabled = !!req.body?.enabled;
+  try {
+    const person = await pool.query(
+      `SELECT id, name, telefon, mobile, telefone, whatsapp_opt_in
+         FROM personen WHERE LOWER(email) = $1 LIMIT 1`,
+      [email]
+    );
+    if (!person.rows[0]) {
+      return res.status(404).json({
+        error: 'Kein Personen-Eintrag fuer diese E-Mail gefunden',
+        hint: 'Bitte zuerst Telefonnummer in der Objektverwaltung hinterlegen lassen.',
+      });
+    }
+    const p = person.rows[0];
+    // Pick a usable phone: mobile -> telefon -> telefone[0].nummer
+    let phone = p.mobile || p.telefon || null;
+    if (!phone && Array.isArray(p.telefone) && p.telefone.length > 0) {
+      phone = p.telefone[0]?.nummer || null;
+    }
+    if (enabled && !phone) {
+      return res.status(400).json({
+        error: 'Keine Telefonnummer hinterlegt',
+        hint: 'WhatsApp-Benachrichtigungen benoetigen eine Telefonnummer im Profil.',
+      });
+    }
+    await pool.query(
+      `UPDATE personen SET whatsapp_opt_in = $1, updated_at = NOW() WHERE id = $2`,
+      [enabled, p.id]
+    );
+    res.json({ ok: true, enabled, phone });
+  } catch (err) {
+    console.error('[whatsapp-optin] error:', err.message);
+    res.status(500).json({ error: 'Fehler beim Speichern' });
   }
 });
 
@@ -4350,6 +4403,11 @@ async function runAuszahlungReminderDaily() {
             + `Bitte Auszahlung pruefen / durchfuehren und im System als "ausbezahlt" markieren:\n${SITE_URL}/auslagen.html\n\n`
             + `(Diese Erinnerung wird alle 14 Tage automatisch wiederholt, bis die Auslage als ausbezahlt markiert ist.)`,
         }, 'auslage-auszahlung-reminder');
+        // WhatsApp-Push an Eigentuemer + bearbeitet_von (Approver) bei Opt-In
+        pushWhatsappBroadcast({
+          emails: ausschussCc, sourceType: 'auslage-auszahlung-reminder', sourceId: a.id,
+          body: `⏰ *Auszahlung offen seit ${tage} Tagen*\n${stwegLabel} · CHF ${betrag}\n${a.beschreibung.slice(0, 80)}\n\n${SITE_URL}/auslagen.html`,
+        }).catch(() => {});
         await pool.query('UPDATE auslagen SET auszahlung_reminder_at = NOW() WHERE id = $1', [a.id]);
         reminded++;
       } catch (e) {
@@ -9559,6 +9617,11 @@ async function enqueueVerwaltungMail({
           + `Aktuell ${cnt} Mail${cnt === '1' ? '' : 's'} pending.\n\n`
           + `Zur Freigabe / Bearbeitung / Ablehnung:\n${SITE_URL}/verwaltung-mail-outbox.html`,
       }, 'verwaltung-mail-pending');
+      // WhatsApp-Push an Approver (kuerzer)
+      pushWhatsappBroadcast({
+        emails: recipients, sourceType: 'verwaltung-mail-pending', sourceId: queueId,
+        body: `📨 *Outbox: ${cnt} Mail${cnt === '1' ? '' : 's'} pending*\n${source_type}${source_id ? ' #' + source_id : ''}\n→ ${subject.slice(0, 80)}\n\nFreigabe: ${SITE_URL}/verwaltung-mail-outbox.html`,
+      }).catch(() => {});
     }
   } catch (err) {
     console.warn('[verwaltung-mail-queue] Notification fehlgeschlagen:', err.message);
@@ -10108,6 +10171,24 @@ app.get('/api/dashboard', authMiddleware, async (req, res) => {
       } catch {}
     }
 
+    // 8) WhatsApp-Outbox-Status (Technik/Praesident)
+    if (isAdmin) {
+      try {
+        const r = await pool.query(`
+          SELECT
+            COUNT(*) FILTER (WHERE direction='outbound' AND status='pending')::int     AS pending,
+            COUNT(*) FILTER (WHERE direction='outbound' AND status='failed')::int      AS failed,
+            COUNT(*) FILTER (WHERE direction='outbound' AND status='sent'
+                              AND sent_at >= NOW() - INTERVAL '24 hours')::int        AS sent_24h,
+            COUNT(*) FILTER (WHERE direction='inbound'
+                              AND created_at >= NOW() - INTERVAL '24 hours')::int     AS inbound_24h,
+            (SELECT COUNT(*) FROM personen WHERE whatsapp_opt_in = true)::int          AS opt_in_count
+          FROM whatsapp_messages
+        `);
+        widgets.whatsapp_outbox = r.rows[0];
+      } catch {}
+    }
+
     res.json({
       user: { email: req.user.email, name: req.user.name, isAdmin, ausschussStwegs },
       widgets,
@@ -10265,6 +10346,11 @@ app.post('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'),
             + `STWEG: ${stwegLabel}\nDatum: ${datum}\nKategorie: ${kat || '-'}\nBetrag: CHF ${betrag.toFixed(2)}\n`
             + `Beschreibung: ${beschreibung}\n\nZum Pruefen: ${SITE_URL}/auslagen.html`,
         }, 'auslage-neu');
+        // WhatsApp-Push an Approver mit Opt-In
+        pushWhatsappBroadcast({
+          emails: adminEmails, sourceType: 'auslage-neu', sourceId: result.rows[0].id,
+          body: `🔔 *Neue Auslage zur Prüfung*\n${userName}, ${stwegLabel}\nCHF ${betrag.toFixed(2)} — ${beschreibung.slice(0, 100)}\n\n${SITE_URL}/auslagen.html`,
+        }).catch(() => {});
       }
     } catch (mailErr) {
       console.warn('[auslagen] Notification mail failed:', mailErr.message);
@@ -10384,6 +10470,14 @@ app.put('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'read
               + (req.body.bemerkung_ausschuss ? `\nBemerkung Ausschuss: ${req.body.bemerkung_ausschuss}\n` : '')
               + `\nDetails: ${SITE_URL}/auslagen.html`,
           }, 'auslage-status');
+          // WhatsApp-Push an Eigentuemer
+          const emoji = req.body.status === 'genehmigt' ? '✅' : req.body.status === 'ausbezahlt' ? '💰' : req.body.status === 'abgelehnt' ? '❌' : '🔄';
+          pushWhatsappIfOptIn({
+            email: row.user_email, sourceType: 'auslage-status', sourceId: row.id,
+            body: `${emoji} *Auslage ${label}*\nCHF ${Number(row.betrag_chf).toFixed(2)} — ${row.beschreibung.slice(0, 80)}`
+              + (req.body.bemerkung_ausschuss ? `\n\n_Bemerkung:_ ${req.body.bemerkung_ausschuss}` : '')
+              + `\n\n${SITE_URL}/auslagen.html`,
+          }).catch(() => {});
         }
       }
     } catch (mailErr) {
@@ -11849,6 +11943,12 @@ app.post('/api/verwaltung-mail-queue/:id/ablehnen', authMiddleware, requireTechn
               + `Auslage: ${SITE_URL}/auslagen.html\n`
               + `Mail-Queue: ${SITE_URL}/verwaltung-mail-outbox.html`,
           }, 'verwaltung-mail-abgelehnt');
+          // WhatsApp an Eigentuemer + Freigeber
+          pushWhatsappBroadcast({
+            emails: [a.user_email, a.bearbeitet_von].filter(v => v),
+            sourceType: 'verwaltung-mail-abgelehnt', sourceId: row.source_id,
+            body: `❌ *Auszahlungs-Mail abgelehnt* von ${req.user.email}\nAuslage: ${row.subject.slice(0, 80)}\n\n_Grund:_ ${grund}\n\n${SITE_URL}/auslagen.html`,
+          }).catch(() => {});
         }
       }
     } catch (mailErr) {
@@ -11937,6 +12037,47 @@ async function findPersonByPhone(phoneInput) {
     [normNoSpace],
   );
   return r.rows[0] || null;
+}
+
+// Universelle Notification: wenn die Person Opt-In hat und eine Nummer
+// hinterlegt ist, wird zusaetzlich zur (bereits versandten) Email eine
+// WhatsApp-Nachricht in die Outbox gestellt. Lookup via Email ODER Person-ID.
+// Nimmt nur kompakten body (kein subject — wird vom Aufrufer integriert).
+async function pushWhatsappIfOptIn({ email, personId, body, sourceType, sourceId }) {
+  try {
+    let person = null;
+    if (personId) {
+      const r = await pool.query('SELECT * FROM personen WHERE id = $1', [personId]);
+      person = r.rows[0] || null;
+    } else if (email) {
+      const r = await pool.query('SELECT * FROM personen WHERE LOWER(email) = LOWER($1) LIMIT 1', [email]);
+      person = r.rows[0] || null;
+    }
+    if (!person || !person.whatsapp_opt_in) return false;
+    // Bevorzugt mobile, sonst telefon, sonst erste Nummer in telefone[]
+    let phone = person.mobile || person.telefon;
+    if (!phone && Array.isArray(person.telefone) && person.telefone.length > 0) {
+      phone = person.telefone[0].nummer;
+    }
+    if (!phone) return false;
+    await queueWhatsappMessage({
+      phone, body, sourceType: sourceType || 'notification', sourceId, personId: person.id,
+    });
+    return true;
+  } catch (err) {
+    console.warn('[pushWhatsapp] Fehler:', err.message);
+    return false;
+  }
+}
+
+// Variante: an mehrere Empfaenger (Emails-Array)
+async function pushWhatsappBroadcast({ emails, body, sourceType, sourceId }) {
+  if (!Array.isArray(emails) || emails.length === 0) return 0;
+  let n = 0;
+  for (const e of emails) {
+    if (await pushWhatsappIfOptIn({ email: e, body, sourceType, sourceId })) n++;
+  }
+  return n;
 }
 
 // Queue eine ausgehende Nachricht. Bot-Service holt sie und versendet.
@@ -12036,6 +12177,10 @@ ${SITE_URL}/verwaltung.html`;
           subject: `📝 Reklamation #${ins.rows[0].id} (${stwegLabel}): ${beschreibung.slice(0, 60)}`,
           text: `Neue Reklamation via WhatsApp:\n\nVon: ${person.name} (${person.email || '-'})\nSTWEG: ${stwegLabel}\nBeschreibung:\n${beschreibung}\n\nVerwalten: ${SITE_URL}/reklamationen.html`,
         }, 'reklamation-whatsapp');
+        pushWhatsappBroadcast({
+          emails: adminEmails, sourceType: 'reklamation-neu', sourceId: ins.rows[0].id,
+          body: `📝 *Neue Reklamation #${ins.rows[0].id}*\n${person.name} · ${stwegLabel}\n${beschreibung.slice(0, 100)}\n\n${SITE_URL}/reklamationen.html`,
+        }).catch(() => {});
       }
     } catch (e) { console.warn('[whatsapp] Reklamation Mail Fehler:', e.message); }
     return `✓ Reklamation #${ins.rows[0].id} aufgenommen und an den Ausschuss weitergeleitet. Du wirst über den Status informiert.`;
@@ -12189,7 +12334,33 @@ app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamation
       params,
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
-    res.json(r.rows[0]);
+    const updated = r.rows[0];
+    // Notification an Melder bei Status-Wechsel
+    if (b.status && updated.person_id) {
+      try {
+        const p = await pool.query('SELECT name, email FROM personen WHERE id = $1', [updated.person_id]);
+        if (p.rows[0]) {
+          const labelMap = { weitergeleitet: 'an Handwerker weitergeleitet', erledigt: 'als erledigt markiert', abgewiesen: 'abgewiesen', offen: 'wieder geoeffnet' };
+          const label = labelMap[b.status] || b.status;
+          if (p.rows[0].email) {
+            await loggedSendMail({
+              from: MAIL_FROM, to: p.rows[0].email,
+              subject: `Deine Reklamation #${updated.id} wurde ${label}`,
+              text: `Hallo ${p.rows[0].name},\n\ndeine Reklamation "${(updated.beschreibung || '').slice(0, 100)}" wurde ${label}.\n`
+                + (b.notiz ? `\nBemerkung: ${b.notiz}\n` : '')
+                + `\nDetails: ${SITE_URL}/reklamationen.html`,
+            }, 'reklamation-status');
+          }
+          const emoji = b.status === 'erledigt' ? '✅' : b.status === 'abgewiesen' ? '❌' : b.status === 'weitergeleitet' ? '➡️' : '🔄';
+          pushWhatsappIfOptIn({
+            personId: updated.person_id, sourceType: 'reklamation-status', sourceId: updated.id,
+            body: `${emoji} *Reklamation #${updated.id} ${label}*\n${(updated.beschreibung || '').slice(0, 80)}`
+              + (b.notiz ? `\n\n_Bemerkung:_ ${b.notiz}` : ''),
+          }).catch(() => {});
+        }
+      } catch (e) { console.warn('[reklamation] Status-Mail:', e.message); }
+    }
+    res.json(updated);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
