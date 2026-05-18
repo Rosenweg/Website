@@ -8,6 +8,9 @@
 
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
+const qrPng = require('qrcode');
+const fs = require('fs');
+const path = require('path');
 
 const API_BASE   = process.env.API_BASE   || 'http://api:3000';
 const WA_SECRET  = process.env.WHATSAPP_SHARED_SECRET;
@@ -29,14 +32,22 @@ const client = new Client({
 
 let isReady = false;
 
-client.on('qr', (qr) => {
+const QR_PNG_PATH = path.join(DATA_DIR, 'qr.png');
+client.on('qr', async (qr) => {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('SCAN QR CODE mit WhatsApp → Einstellungen → Verknüpfte Geräte:');
+  console.log(`(QR als PNG verfuegbar unter ${QR_PNG_PATH} im Container)`);
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   qrcode.generate(qr, { small: true });
+  try {
+    await qrPng.toFile(QR_PNG_PATH, qr, { width: 512, margin: 2 });
+  } catch (e) { console.warn('[WA] QR-PNG schreiben fehlgeschlagen:', e.message); }
 });
 
-client.on('authenticated', () => console.log('[WA] Authentifiziert'));
+client.on('authenticated', () => {
+  console.log('[WA] Authentifiziert');
+  try { fs.unlinkSync(QR_PNG_PATH); } catch {}
+});
 client.on('auth_failure', (m) => console.error('[WA] Auth fehlgeschlagen:', m));
 client.on('disconnected', (r) => { console.warn('[WA] Disconnected:', r); isReady = false; });
 
