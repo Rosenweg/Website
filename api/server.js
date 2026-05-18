@@ -697,6 +697,25 @@ function getUserStwegs(groups) {
 }
 
 /** Check if user is Technik (full access to all folders) */
+// Sanftes Telefon-Normalisieren: 079 X → +41 79 X X X, 00CC… → +CC…, sonst belassen.
+// Mischformate (mit Buchstaben/Doppelpunkten) werden nicht angefasst.
+function normalizePhone(val) {
+  if (!val) return null;
+  let s = String(val).trim();
+  if (!s) return null;
+  if (/[a-zA-ZäöüÄÖÜ:]/.test(s)) return s;
+  s = s.replace(/[^\d+]/g, '');
+  if (!s) return null;
+  if (s.startsWith('00')) s = '+' + s.slice(2);
+  if (s.startsWith('0') && !s.startsWith('00')) s = '+41' + s.slice(1);
+  if (s.startsWith('41') && !s.startsWith('+')) s = '+' + s;
+  const ch = s.match(/^\+41(\d{2})(\d{3})(\d{2})(\d{2})$/);
+  if (ch) return `+41 ${ch[1]} ${ch[2]} ${ch[3]} ${ch[4]}`;
+  const intl = s.match(/^\+(\d{1,3})(\d+)$/);
+  if (intl) return `+${intl[1]} ${intl[2].replace(/(\d{3})(?=\d)/g, '$1 ')}`;
+  return s;
+}
+
 function isTechnik(groups) {
   return groups.some(g => g.toLowerCase() === 'technik');
 }
@@ -1048,7 +1067,7 @@ app.put('/api/me/kontakt/:id', authMiddleware, async (req, res) => {
       const updates = [];
       const params = [];
       if (newEmail !== undefined) { params.push(newEmail || null); updates.push(`email = $${params.length}`); }
-      if (telefon !== undefined)  { params.push(telefon || null);  updates.push(`telefon = $${params.length}`); }
+      if (telefon !== undefined)  { params.push(normalizePhone(telefon));  updates.push(`telefon = $${params.length}`); }
       if (adresse !== undefined)  { params.push(adresse || null);  updates.push(`adresse = $${params.length}`); }
       if (updates.length > 0) {
         params.push(cur.person_id);
@@ -1059,7 +1078,7 @@ app.put('/api/me/kontakt/:id', authMiddleware, async (req, res) => {
       await pool.query(
         `UPDATE wohnungen_kontakte SET email = COALESCE($1, email), telefon = COALESCE($2, telefon), adresse = COALESCE($3, adresse)
           WHERE id = $4`,
-        [newEmail || null, telefon || null, adresse || null, req.params.id]
+        [newEmail || null, normalizePhone(telefon), adresse || null, req.params.id]
       );
     }
     const r = await pool.query(`SELECT id, name, email, telefon, adresse, wohnung_id, person_id FROM wohnungen_kontakte WHERE id = $1`, [req.params.id]);
@@ -4025,7 +4044,7 @@ async function saveKontakte(client, wohnungId, kontakte, stweg) {
     // Person-ID ermitteln (explizit mitgegeben, oder via find/create)
     const personId = Number.isFinite(parseInt(k.person_id, 10))
       ? parseInt(k.person_id, 10)
-      : await findOrCreatePerson(client, k.name || null, email, k.telefon || null, k.adresse || null);
+      : await findOrCreatePerson(client, k.name || null, email, normalizePhone(k.telefon), k.adresse || null);
 
     if (k.id && oldKontakte.find(o => o.id === k.id)) {
       await client.query(
@@ -4035,13 +4054,13 @@ async function saveKontakte(client, wohnungId, kontakte, stweg) {
                 gueltig_ab = COALESCE($8, gueltig_ab),
                 person_id = COALESCE($10, person_id)
           WHERE id = $9`,
-        [rolle, k.name || null, email, k.telefon || null, k.adresse || null, i, authentikZugang, gueltigAb, k.id, personId]
+        [rolle, k.name || null, email, normalizePhone(k.telefon), k.adresse || null, i, authentikZugang, gueltigAb, k.id, personId]
       );
     } else {
       await client.query(
         `INSERT INTO wohnungen_kontakte (wohnung_id, rolle, name, email, telefon, adresse, sort_order, authentik_zugang, gueltig_ab, person_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [wohnungId, rolle, k.name || null, email, k.telefon || null, k.adresse || null, i, authentikZugang, gueltigAb, personId]
+        [wohnungId, rolle, k.name || null, email, normalizePhone(k.telefon), k.adresse || null, i, authentikZugang, gueltigAb, personId]
       );
     }
     if (email) cancelPendingDeletion(email).catch(() => {});
@@ -4886,7 +4905,7 @@ app.post('/api/verwaltungen', authMiddleware, requireAusschussOrTechnik, async (
          vertrag_von, vertrag_bis, kuendigungsfrist_monate, kuendigung_eingereicht_am, dokument_pfad, notizen, aktiv)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, COALESCE($18, true))
       RETURNING *
-    `, [b.stweg || null, b.firma_name, b.adresse || null, b.telefon || null, b.email || null,
+    `, [b.stweg || null, b.firma_name, b.adresse || null, normalizePhone(b.telefon), b.email || null,
         b.website || null, b.oeffnungszeiten || null,
         b.plattform_name || null, b.plattform_url || null, b.plattform_user || null, b.plattform_pass || null,
         b.vertrag_von || null, b.vertrag_bis || null, b.kuendigungsfrist_monate || null, b.kuendigung_eingereicht_am || null,
@@ -4920,7 +4939,7 @@ app.put('/api/verwaltungen/:id', authMiddleware, requireAusschussOrTechnik, asyn
         vertrag_von = $12, vertrag_bis = $13, kuendigungsfrist_monate = $14, kuendigung_eingereicht_am = $15,
         dokument_pfad = $16, notizen = $17, aktiv = $18, updated_at = NOW()
       WHERE id = $19 RETURNING *
-    `, [b.stweg || null, b.firma_name, b.adresse || null, b.telefon || null, b.email || null,
+    `, [b.stweg || null, b.firma_name, b.adresse || null, normalizePhone(b.telefon), b.email || null,
         b.website || null, b.oeffnungszeiten || null,
         b.plattform_name || null, b.plattform_url || null, b.plattform_user || null, b.plattform_pass || null,
         b.vertrag_von || null, b.vertrag_bis || null, b.kuendigungsfrist_monate || null, b.kuendigung_eingereicht_am || null,
@@ -4949,7 +4968,7 @@ app.post('/api/verwaltungen/:id/kontakte', authMiddleware, requireAusschussOrTec
     const r = await pool.query(
       `INSERT INTO verwaltungs_kontakte (verwaltung_id, name, funktion, email, telefon, sort_order)
        VALUES ($1, $2, $3, $4, $5, COALESCE($6, 0)) RETURNING *`,
-      [verwId, b.name, b.funktion || null, b.email || null, b.telefon || null, b.sort_order || 0]
+      [verwId, b.name, b.funktion || null, b.email || null, normalizePhone(b.telefon), b.sort_order || 0]
     );
     res.json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -4962,7 +4981,7 @@ app.put('/api/verwaltungen/kontakte/:kid', authMiddleware, requireAusschussOrTec
     const r = await pool.query(
       `UPDATE verwaltungs_kontakte SET name=$1, funktion=$2, email=$3, telefon=$4, sort_order=$5
        WHERE id = $6 RETURNING *`,
-      [b.name, b.funktion || null, b.email || null, b.telefon || null, b.sort_order || 0, parseInt(req.params.kid)]
+      [b.name, b.funktion || null, b.email || null, normalizePhone(b.telefon), b.sort_order || 0, parseInt(req.params.kid)]
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     res.json(r.rows[0]);
@@ -10899,7 +10918,7 @@ app.post('/api/mail-empfaenger', authMiddleware, requirePermission('mail-empfaen
           default_cc, default_reply_to, requires_approval, notiz, aktiv)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10, COALESCE($11, true), $12, COALESCE($13, true))
        RETURNING *`,
-      [b.kategorie, String(b.name).trim().slice(0, 255), b.email || null, b.telefon || null,
+      [b.kategorie, String(b.name).trim().slice(0, 255), b.email || null, normalizePhone(b.telefon),
        b.adresse || null, b.website || null, b.stweg || null,
        JSON.stringify(b.kontakte || []),
        b.default_cc || null, b.default_reply_to || null, b.requires_approval, b.notiz || null, b.aktiv],
@@ -10927,7 +10946,7 @@ app.put('/api/mail-empfaenger/:id', authMiddleware, requirePermission('mail-empf
          notiz = $12, aktiv = COALESCE($13, aktiv), updated_at = NOW()
        WHERE id = $14 RETURNING *`,
       [b.kategorie || null, b.name ? String(b.name).trim().slice(0, 255) : null,
-       b.email || null, b.telefon || null, b.adresse || null, b.website || null,
+       b.email || null, normalizePhone(b.telefon), b.adresse || null, b.website || null,
        b.stweg || null,
        b.kontakte !== undefined ? JSON.stringify(b.kontakte) : null,
        b.default_cc || null, b.default_reply_to || null,
@@ -11048,8 +11067,16 @@ app.put('/api/personen/:id', authMiddleware, requireWohnungsverwaltungWrite, asy
     if (b.nachname !== undefined) push('nachname', b.nachname ? String(b.nachname).slice(0, 120) : null);
     if (b.anrede !== undefined) push('anrede', b.anrede ? String(b.anrede).slice(0, 20) : null);
     if (b.email !== undefined) push('email', b.email ? String(b.email).trim().slice(0, 255) : null);
-    if (b.telefon !== undefined) push('telefon', b.telefon ? String(b.telefon).slice(0, 60) : null);
-    if (b.mobile !== undefined) push('mobile', b.mobile ? String(b.mobile).slice(0, 60) : null);
+    if (b.telefon !== undefined) push('telefon', normalizePhone(b.telefon ? String(b.telefon).slice(0, 60) : null));
+    if (b.mobile !== undefined) push('mobile', normalizePhone(b.mobile ? String(b.mobile).slice(0, 60) : null));
+    if (b.telefone !== undefined) {
+      const t = Array.isArray(b.telefone) ? b.telefone.map(x => ({
+        typ: String(x.typ || 'sonstige').slice(0, 30),
+        label: x.label ? String(x.label).slice(0, 80) : null,
+        nummer: normalizePhone(String(x.nummer || '').slice(0, 60)),
+      })).filter(x => x.nummer) : [];
+      push('telefone', JSON.stringify(t));
+    }
     if (b.adresse !== undefined) push('adresse', b.adresse || null);
     if (b.geburtsdatum !== undefined) push('geburtsdatum', b.geburtsdatum || null);
     if (b.notiz !== undefined) push('notiz', b.notiz || null);
@@ -11094,7 +11121,7 @@ app.post('/api/personen', authMiddleware, requireWohnungsverwaltungWrite, async 
       `INSERT INTO personen (name, vorname, nachname, anrede, email, telefon, mobile, adresse, geburtsdatum, notiz)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
       [String(b.name).trim().slice(0,255), b.vorname || null, b.nachname || null, b.anrede || null,
-       b.email || null, b.telefon || null, b.mobile || null, b.adresse || null, b.geburtsdatum || null, b.notiz || null],
+       b.email || null, normalizePhone(b.telefon), normalizePhone(b.mobile), b.adresse || null, b.geburtsdatum || null, b.notiz || null],
     );
     res.status(201).json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -12582,6 +12609,10 @@ async function initDB() {
         ON personen (LOWER(TRIM(COALESCE(name, ''))), LOWER(TRIM(COALESCE(email, ''))));
 
       ALTER TABLE wohnungen_kontakte ADD COLUMN IF NOT EXISTS person_id INTEGER REFERENCES personen(id) ON DELETE SET NULL;
+      ALTER TABLE wohnungen_kontakte ADD COLUMN IF NOT EXISTS mobile VARCHAR(60);
+      -- Multiple weitere Telefonnummern pro Person als JSONB
+      -- Format: [{typ: 'mobile2'|'festnetz2'|'geschaeft'|'sonstige', label?: string, nummer: string}]
+      ALTER TABLE personen ADD COLUMN IF NOT EXISTS telefone JSONB DEFAULT '[]'::jsonb;
       CREATE INDEX IF NOT EXISTS idx_wk_person ON wohnungen_kontakte(person_id);
 
       -- Trigger: bei UPDATE personen → email/telefon/adresse/name auf alle
@@ -13083,6 +13114,49 @@ async function initDB() {
       }
     } catch (e) {
       console.warn('[Verwaltungen-Seed] Fehler:', e.message);
+    }
+
+    // Einmalige Telefon-Normalisierung (idempotent via app_config-Flag)
+    try {
+      await client.query(`CREATE TABLE IF NOT EXISTS app_config (key VARCHAR(100) PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ DEFAULT NOW())`);
+      const flag = await client.query("SELECT value FROM app_config WHERE key = 'phone_normalize_v1'");
+      if (flag.rows.length === 0) {
+        console.log('[phone-normalize] Starte einmalige Bereinigung...');
+        const tables = [
+          { table: 'personen', cols: ['telefon', 'mobile'] },
+          { table: 'wohnungen_kontakte', cols: ['telefon', 'mobile'] },
+          { table: 'handwerker', cols: ['telefon', 'mobile', 'notfall_telefon'] },
+          { table: 'handwerker_personen', cols: ['telefon', 'mobile'] },
+          { table: 'mail_empfaenger', cols: ['telefon'] },
+          { table: 'verwaltungen', cols: ['telefon'] },
+          { table: 'verwaltungs_kontakte', cols: ['telefon'] },
+        ];
+        let totalUpdated = 0;
+        for (const { table, cols } of tables) {
+          for (const col of cols) {
+            try {
+              const exists = await client.query(
+                `SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2`,
+                [table, col],
+              );
+              if (exists.rows.length === 0) continue;
+              const rows = await client.query(`SELECT id, ${col} AS val FROM ${table} WHERE ${col} IS NOT NULL AND ${col} <> ''`);
+              for (const r of rows.rows) {
+                const norm = normalizePhone(r.val);
+                if (norm && norm !== r.val) {
+                  await client.query(`UPDATE ${table} SET ${col} = $1 WHERE id = $2`, [norm, r.id]);
+                  totalUpdated++;
+                }
+              }
+            } catch (e) { console.warn(`[phone-normalize] ${table}.${col}:`, e.message); }
+          }
+        }
+        await client.query(`INSERT INTO app_config (key, value) VALUES ('phone_normalize_v1', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+          [`done ${new Date().toISOString()}, updated ${totalUpdated}`]);
+        console.log(`[phone-normalize] ${totalUpdated} Telefonnummern bereinigt`);
+      }
+    } catch (e) {
+      console.warn('[phone-normalize] Fehler:', e.message);
     }
 
     console.log('Database schema initialized');
