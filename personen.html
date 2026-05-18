@@ -8,6 +8,7 @@
   <script src="/js/authentik-auth.js?v=2"></script>
   <script src="/js/nav.js?v=2"></script>
   <script src="/js/modal-helpers.js?v=1"></script>
+  <script src="/js/phone-helpers.js?v=1"></script>
   <link rel="icon" href="/logo-rosenweg.png">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -98,17 +99,22 @@
           </label>
           <label class="block">
             <span class="text-xs text-gray-600">Telefon (Festnetz)</span>
-            <input type="text" id="m-telefon" class="mt-1 block w-full border rounded px-2 py-1.5">
+            <input type="tel" id="m-telefon" data-phone-format placeholder="+41 61 …" class="mt-1 block w-full border rounded px-2 py-1.5">
           </label>
           <label class="block">
             <span class="text-xs text-gray-600">Mobile</span>
-            <input type="text" id="m-mobile" class="mt-1 block w-full border rounded px-2 py-1.5">
+            <input type="tel" id="m-mobile" data-phone-format placeholder="+41 79 …" class="mt-1 block w-full border rounded px-2 py-1.5">
           </label>
           <label class="block">
             <span class="text-xs text-gray-600">Geburtsdatum</span>
             <input type="date" id="m-geb" class="mt-1 block w-full border rounded px-2 py-1.5">
           </label>
         </div>
+        <fieldset class="border rounded-lg p-3">
+          <legend class="text-xs font-semibold text-gray-700 px-2">Weitere Telefonnummern</legend>
+          <div id="m-telefone" class="space-y-2"></div>
+          <button type="button" onclick="addTelefon()" class="mt-2 text-xs text-blue-600 hover:underline">+ Nummer hinzufügen</button>
+        </fieldset>
         <label class="block">
           <span class="text-xs text-gray-600">Adresse</span>
           <textarea id="m-adresse" rows="2" class="mt-1 block w-full border rounded px-2 py-1.5"></textarea>
@@ -142,6 +148,30 @@
   <script>
   const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   let LIST = [];
+  let TELEFONE = []; // weitere Nummern (zusätzlich zu Festnetz+Mobile)
+
+  const TELEFON_TYPEN = [
+    { key: 'mobile2', label: 'Mobile (zweite)' },
+    { key: 'festnetz2', label: 'Festnetz (zweite)' },
+    { key: 'geschaeft', label: 'Geschäft' },
+    { key: 'whatsapp', label: 'WhatsApp' },
+    { key: 'fax', label: 'Fax' },
+    { key: 'sonstige', label: 'Sonstige' },
+  ];
+
+  function renderTelefone() {
+    document.getElementById('m-telefone').innerHTML = TELEFONE.length === 0
+      ? '<p class="text-xs text-gray-400 italic">Keine weiteren Nummern.</p>'
+      : TELEFONE.map((t, i) => `<div class="grid grid-cols-12 gap-2 items-center">
+          <select class="col-span-3 border rounded px-2 py-1 text-xs" oninput="TELEFONE[${i}].typ=this.value">
+            ${TELEFON_TYPEN.map(x => `<option value="${esc(x.key)}" ${t.typ === x.key ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}
+          </select>
+          <input type="text" placeholder="Label (optional)" value="${esc(t.label || '')}" oninput="TELEFONE[${i}].label=this.value" class="col-span-3 border rounded px-2 py-1 text-xs">
+          <input type="tel" data-phone-format placeholder="+41 …" value="${esc(t.nummer || '')}" oninput="TELEFONE[${i}].nummer=this.value" onblur="PhoneHelpers.format(this); TELEFONE[${i}].nummer=this.value" class="col-span-5 border rounded px-2 py-1 text-xs">
+          <button type="button" onclick="TELEFONE.splice(${i},1); renderTelefone()" class="col-span-1 text-red-600 text-xs">×</button>
+        </div>`).join('');
+  }
+  function addTelefon() { TELEFONE.push({ typ: 'mobile2', label: '', nummer: '' }); renderTelefone(); }
 
   document.addEventListener('DOMContentLoaded', async () => {
     const user = await AuthentikAuth.init({ requireAuth: true });
@@ -183,7 +213,7 @@
       return `<tr class="hover:bg-gray-50 cursor-pointer" onclick="openEdit(${p.id})">
         <td class="px-3 py-2 font-medium text-gray-900">${esc(p.name)}</td>
         <td class="px-3 py-2 text-gray-700">${esc(p.email || '—')}</td>
-        <td class="px-3 py-2 text-gray-700">${esc(p.telefon || '—')}</td>
+        <td class="px-3 py-2 text-gray-700">${esc(p.telefon || p.mobile || '—')}${(p.telefone && p.telefone.length) ? `<span class="text-xs text-blue-600 ml-1" title="${esc(p.telefone.length)} weitere Nummer(n)">+${p.telefone.length}</span>` : ''}</td>
         <td class="px-3 py-2 text-xs text-gray-600">${wList || '<em class="text-gray-400">keine</em>'}</td>
         <td class="px-3 py-2 text-right"><span class="text-blue-600 text-xs">bearbeiten →</span></td>
       </tr>`;
@@ -194,6 +224,7 @@
     document.getElementById('m-title').textContent = 'Neue Person';
     document.getElementById('form').reset();
     document.getElementById('m-id').value = '';
+    TELEFONE = []; renderTelefone();
     document.getElementById('m-wohnungen').innerHTML = '<em>Wohnungen können erst nach dem Anlegen in der Objektverwaltung verknüpft werden.</em>';
     document.getElementById('m-err').classList.add('hidden');
     document.getElementById('modal').classList.remove('hidden');
@@ -214,6 +245,8 @@
     document.getElementById('m-geb').value = p.geburtsdatum ? String(p.geburtsdatum).slice(0,10) : '';
     document.getElementById('m-adresse').value = p.adresse || '';
     document.getElementById('m-notiz').value = p.notiz || '';
+    TELEFONE = Array.isArray(p.telefone) ? p.telefone.slice() : [];
+    renderTelefone();
     const wList = (p.wohnungen || []).map(w => `<div>STWEG ${w.stweg} · ${esc(w.bezeichnung)} (${esc(w.rolle)})</div>`).join('');
     document.getElementById('m-wohnungen').innerHTML = wList
       ? `<div class="font-semibold mb-1">⚙ Änderungen werden auf folgende ${p.wohnungen.length} Wohnung(en) übernommen:</div>${wList}`
@@ -235,6 +268,7 @@
       email: document.getElementById('m-email').value.trim() || null,
       telefon: document.getElementById('m-telefon').value.trim() || null,
       mobile: document.getElementById('m-mobile').value.trim() || null,
+      telefone: TELEFONE.filter(t => t.nummer && t.nummer.trim()),
       geburtsdatum: document.getElementById('m-geb').value || null,
       adresse: document.getElementById('m-adresse').value.trim() || null,
       notiz: document.getElementById('m-notiz').value.trim() || null,

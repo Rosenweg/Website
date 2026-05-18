@@ -8,6 +8,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/js/authentik-auth.js?v=2"></script>
     <script src="/js/nav.js?v=2"></script>
+    <script src="/js/phone-helpers.js?v=1"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; }
@@ -91,7 +92,7 @@
                 <div class="grid grid-cols-2 gap-3">
                     <div>
                         <label class="block text-xs font-medium text-gray-600 mb-1">Telefon</label>
-                        <input type="text" id="m-telefon" class="w-full border border-gray-300 rounded px-3 py-1.5">
+                        <input type="tel" id="m-telefon" data-phone-format placeholder="+41 …" class="w-full border border-gray-300 rounded px-3 py-1.5">
                     </div>
                     <div>
                         <label class="block text-xs font-medium text-gray-600 mb-1">E-Mail (allgemein)</label>
