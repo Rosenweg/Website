@@ -131,6 +131,22 @@
                     </div>
                 </div>
 
+                <!-- WhatsApp-Benachrichtigungen Opt-In -->
+                <div class="mt-4 bg-green-50 border border-green-200 rounded-lg p-4">
+                    <label class="flex items-start gap-3 cursor-pointer">
+                        <input type="checkbox" id="f-whatsapp-optin" class="mt-1 h-5 w-5 text-green-600 rounded">
+                        <div class="flex-1">
+                            <div class="font-medium text-gray-800">💬 WhatsApp-Benachrichtigungen aktivieren</div>
+                            <p class="text-sm text-gray-600 mt-1">
+                                Erhalte zusätzlich zu E-Mails Push-Nachrichten via WhatsApp bei
+                                Auslagen-Statuswechseln, Reklamations-Updates und Erinnerungen.
+                                Verwendet wird die oben hinterlegte Telefonnummer (bevorzugt Mobile).
+                            </p>
+                            <p id="whatsapp-status" class="text-xs mt-2"></p>
+                        </div>
+                    </label>
+                </div>
+
                 <hr class="my-6">
                 <h3 class="text-lg font-semibold text-gray-700">Adresse</h3>
 
@@ -274,6 +290,15 @@
             document.getElementById('f-strasse').value = currentUser.strasse || '';
             document.getElementById('f-plz').value = currentUser.plz || '';
             document.getElementById('f-ort').value = currentUser.ort || '';
+
+            // WhatsApp-Opt-In
+            const waBox = document.getElementById('f-whatsapp-optin');
+            const waStatus = document.getElementById('whatsapp-status');
+            waBox.checked = !!currentUser.whatsapp_opt_in;
+            waStatus.textContent = waBox.checked
+                ? '✓ Aktiv — Benachrichtigungen werden zusaetzlich per WhatsApp gesendet.'
+                : '';
+            waStatus.className = 'text-xs mt-2 ' + (waBox.checked ? 'text-green-700' : 'text-gray-500');
         }
 
         async function uploadAvatar(event) {
@@ -450,6 +475,39 @@
         }
         // Close modal on Escape
         document.addEventListener('keydown', e => { if (e.key === 'Escape') closeWohnungModal(); });
+
+        // WhatsApp-Opt-In Toggle (instant save)
+        document.getElementById('f-whatsapp-optin').addEventListener('change', async (e) => {
+            const cb = e.target;
+            const status = document.getElementById('whatsapp-status');
+            const desired = cb.checked;
+            cb.disabled = true;
+            status.textContent = 'Wird gespeichert…';
+            status.className = 'text-xs mt-2 text-gray-500';
+            try {
+                const resp = await AuthentikAuth.apiFetch('/api/me/whatsapp-optin', {
+                    method: 'PUT',
+                    body: { enabled: desired },
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (resp.ok) {
+                    status.textContent = desired
+                        ? `✓ Aktiv — Nummer: ${data.phone || '(unbekannt)'}`
+                        : '✗ Deaktiviert — nur Email-Benachrichtigungen.';
+                    status.className = 'text-xs mt-2 ' + (desired ? 'text-green-700' : 'text-gray-500');
+                } else {
+                    cb.checked = !desired;
+                    status.textContent = `⚠ ${data.error || 'Fehler'}${data.hint ? ' — ' + data.hint : ''}`;
+                    status.className = 'text-xs mt-2 text-red-700';
+                }
+            } catch (err) {
+                cb.checked = !desired;
+                status.textContent = '⚠ Netzwerkfehler.';
+                status.className = 'text-xs mt-2 text-red-700';
+            } finally {
+                cb.disabled = false;
+            }
+        });
 
         // Init
         AuthentikAuth.init({ requireAuth: true }).then(user => {

@@ -152,6 +152,33 @@
         }).join('') + '</ul>'));
     }
 
+    // WhatsApp-Outbox-Status (Technik/Praesident)
+    if (widgets.whatsapp_outbox) {
+      const w = widgets.whatsapp_outbox;
+      const hasIssue = (w.pending || 0) > 5 || (w.failed || 0) > 0;
+      const ringCls = hasIssue ? 'ring-2 ring-red-300' : '';
+      cards.push(card(`💬 WhatsApp-Bot${(w.failed||0) > 0 ? ' ⚠' : ''}`, '/whatsapp-bot-admin.html',
+        `<div class="grid grid-cols-2 gap-2 text-sm ${ringCls} rounded p-1">
+          <div class="bg-amber-50 rounded p-2 text-center">
+            <div class="text-xs text-amber-700 uppercase">Pending</div>
+            <div class="font-bold text-amber-900">${w.pending || 0}</div>
+          </div>
+          <div class="bg-red-50 rounded p-2 text-center">
+            <div class="text-xs text-red-700 uppercase">Failed</div>
+            <div class="font-bold text-red-900">${w.failed || 0}</div>
+          </div>
+          <div class="bg-emerald-50 rounded p-2 text-center">
+            <div class="text-xs text-emerald-700 uppercase">Sent 24h</div>
+            <div class="font-bold text-emerald-900">${w.sent_24h || 0}</div>
+          </div>
+          <div class="bg-blue-50 rounded p-2 text-center">
+            <div class="text-xs text-blue-700 uppercase">Inbox 24h</div>
+            <div class="font-bold text-blue-900">${w.inbound_24h || 0}</div>
+          </div>
+        </div>
+        <div class="text-xs text-gray-500 mt-2">${w.opt_in_count || 0} Personen mit Opt-In</div>`));
+    }
+
     // Projekt-Budgets
     if (widgets.projekt_budgets?.length > 0) {
       const list = widgets.projekt_budgets;
