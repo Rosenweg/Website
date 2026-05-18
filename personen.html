@@ -302,27 +302,45 @@
         document.getElementById('dedup-list').innerHTML = '<div class="text-emerald-700 text-sm">✓ Keine Duplikat-Kandidaten gefunden.</div>';
         return;
       }
-      document.getElementById('dedup-list').innerHTML = k.map(c => `
-        <div class="border rounded-lg p-3">
-          <div class="text-xs text-gray-500 mb-2">Schlüssel: <code>${esc(c.schluessel)}</code> · ${c.n} Personen</div>
-          <table class="w-full text-xs">
-            <thead><tr class="text-gray-500 text-left">
-              <th class="py-1">Name</th><th>E-Mail</th><th>Tel</th><th class="text-right">Aktion</th>
-            </tr></thead>
-            <tbody>
-              ${(c.personen || []).map(p => `
-                <tr class="border-t">
-                  <td class="py-1.5">${esc(p.name)}</td>
-                  <td>${esc(p.email || '—')}</td>
-                  <td>${esc(p.telefon || '—')}</td>
-                  <td class="text-right">
-                    <button onclick="mergeOptions(${p.id}, ${JSON.stringify(c.ids).replace(/"/g,'&quot;')})" class="text-blue-600 hover:underline">in andere mergen…</button>
-                  </td>
-                </tr>`).join('')}
-            </tbody>
-          </table>
-        </div>
-      `).join('');
+      // Gruppiert nach Art mit erklaerendem Header
+      const groups = { exakt: [], token: [], email: [] };
+      for (const c of k) (groups[c.art] || []).push(c);
+      const sectionMeta = {
+        exakt: { title: '🎯 Exakte Dubletten', desc: 'Gleicher Name (Tippfehler-frei) — fast immer echte Duplikate.', color: 'red' },
+        token: { title: '🔄 Vor-/Nachname vertauscht', desc: 'Token-Set identisch (z.B. "Sara Weigt" vs "Weigt Sara") — typischerweise mergen.', color: 'amber' },
+        email: { title: '✉ Gleiche Email, ähnlicher Name', desc: 'Könnten Tippfehler-Varianten sein oder echte Familienmitglieder mit unterschiedlichen Namen — bitte einzeln prüfen.', color: 'blue' },
+      };
+      const html = ['exakt', 'token', 'email'].map(art => {
+        const items = groups[art];
+        if (!items || items.length === 0) return '';
+        const meta = sectionMeta[art];
+        return `<section class="mb-4">
+          <h3 class="text-sm font-bold text-${meta.color}-800 mb-1">${meta.title} (${items.length})</h3>
+          <p class="text-xs text-gray-600 mb-2">${meta.desc}</p>
+          ${items.map(c => `
+            <div class="border border-${meta.color}-200 bg-${meta.color}-50 rounded-lg p-3 mb-2">
+              <div class="text-xs text-gray-500 mb-2">Schlüssel: <code>${esc(c.schluessel)}</code> · ${c.n} Personen</div>
+              <table class="w-full text-xs">
+                <thead><tr class="text-gray-500 text-left">
+                  <th class="py-1">Name</th><th>E-Mail</th><th>Tel</th><th>Wohnungen</th><th class="text-right">Aktion</th>
+                </tr></thead>
+                <tbody>
+                  ${(c.personen || []).map(p => `
+                    <tr class="border-t border-${meta.color}-200">
+                      <td class="py-1.5 font-medium">${esc(p.name)}</td>
+                      <td>${esc(p.email || '—')}</td>
+                      <td>${esc(p.telefon || p.mobile || '—')}</td>
+                      <td class="text-center">${p.n_wohnungen || 0}</td>
+                      <td class="text-right">
+                        <button onclick="mergeOptions(${p.id}, ${JSON.stringify(c.ids).replace(/"/g,'&quot;')})" class="text-blue-600 hover:underline">in andere mergen…</button>
+                      </td>
+                    </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>`).join('')}
+        </section>`;
+      }).filter(Boolean).join('');
+      document.getElementById('dedup-list').innerHTML = html;
     } catch (e) {
       document.getElementById('dedup-list').innerHTML = `<div class="text-red-600">Fehler: ${esc(e.message)}</div>`;
     }

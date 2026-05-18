@@ -11127,22 +11127,60 @@ app.post('/api/personen', authMiddleware, requireWohnungsverwaltungWrite, async 
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// GET /api/personen-dedup/kandidaten — moegliche Duplikate vorschlagen
-// Strategie: gleicher Name aber unterschiedliche Email, ODER aehnliche Namen
+// GET /api/personen-dedup/kandidaten — moegliche Duplikate vorschlagen.
+// Drei Heuristiken:
+//   1. 'exakt': gleicher Name (LOWER+TRIM) → klare Dubletten
+//   2. 'token': gleicher Token-Set (Vorname Nachname vs Nachname Vorname)
+//   3. 'email': gleiche Email aber sehr aehnliche Namen
 app.get('/api/personen-dedup/kandidaten', authMiddleware, requireWohnungsverwaltungWrite, async (req, res) => {
   try {
     const r = await pool.query(`
-      WITH name_dups AS (
-        SELECT LOWER(TRIM(name)) AS name_key, array_agg(id ORDER BY id) AS ids, COUNT(*) AS n
+      WITH normed AS (
+        SELECT id, name, email, telefon,
+               LOWER(TRIM(name)) AS name_norm,
+               -- Token-Set: alphabetisch sortierte Woerter (lower-case)
+               (SELECT string_agg(t, ' ' ORDER BY t)
+                  FROM unnest(string_to_array(LOWER(TRIM(name)), ' ')) AS t
+                 WHERE t <> '') AS token_key
           FROM personen
-         GROUP BY LOWER(TRIM(name))
-        HAVING COUNT(*) > 1
+      ),
+      exakt AS (
+        SELECT 'exakt' AS art, name_norm AS schluessel, 1 AS sort,
+               array_agg(id ORDER BY id) AS ids, COUNT(*) AS n
+          FROM normed GROUP BY name_norm HAVING COUNT(*) > 1
+      ),
+      token AS (
+        -- Nur wenn Token-Set duplikat ist UND exakte Form nicht greift (sonst doppelte Anzeige)
+        SELECT 'token' AS art, token_key AS schluessel, 2 AS sort,
+               array_agg(id ORDER BY id) AS ids, COUNT(*) AS n
+          FROM normed
+         WHERE token_key IS NOT NULL
+         GROUP BY token_key HAVING COUNT(*) > 1
+            AND COUNT(DISTINCT name_norm) > 1
+      ),
+      gleich_email AS (
+        -- Email-Duplikate (Familien) mit unterschiedlichem Namen — kein Merge-Hinweis,
+        -- nur als Info ob es echte Dubletten geben koennte (z.B. Tippfehler im Namen)
+        SELECT 'email' AS art, LOWER(TRIM(email)) AS schluessel, 3 AS sort,
+               array_agg(id ORDER BY id) AS ids, COUNT(*) AS n
+          FROM normed
+         WHERE email IS NOT NULL AND email <> ''
+         GROUP BY LOWER(TRIM(email))
+        HAVING COUNT(*) > 1 AND COUNT(DISTINCT name_norm) > 1
+      ),
+      all_dups AS (
+        SELECT * FROM exakt UNION ALL SELECT * FROM token UNION ALL SELECT * FROM gleich_email
       )
-      SELECT 'name' AS art, name_key AS schluessel, ids, n,
-             (SELECT json_agg(json_build_object('id', p.id, 'name', p.name, 'email', p.email, 'telefon', p.telefon))
+      SELECT art, schluessel, ids, n,
+             (SELECT json_agg(json_build_object(
+                'id', p.id, 'name', p.name, 'email', p.email, 'telefon', p.telefon, 'mobile', p.mobile,
+                'n_wohnungen', (SELECT COUNT(*) FROM wohnungen_kontakte k
+                                  WHERE k.person_id = p.id AND k.archiviert_am IS NULL)
+              ) ORDER BY p.id)
                 FROM personen p WHERE p.id = ANY(ids)) AS personen
-        FROM name_dups
-       ORDER BY n DESC LIMIT 100
+        FROM all_dups
+       ORDER BY sort, n DESC, schluessel
+       LIMIT 200
     `);
     res.json({ kandidaten: r.rows });
   } catch (err) {
