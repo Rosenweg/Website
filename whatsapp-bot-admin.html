@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WhatsApp-Bot — Rosenweg</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/nav.js?v=2"></script>
+  <script src="/js/phone-helpers.js?v=1"></script>
+  <link rel="icon" href="/logo-rosenweg.png">
+  <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'); body { font-family: 'Inter', sans-serif; }</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+  <script>RosenwegNav.init({ active: 'whatsapp-bot' });</script>
+
+  <main class="max-w-5xl mx-auto px-4 py-6">
+    <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center"><p class="text-gray-600">Lade…</p></div>
+
+    <div id="content" class="hidden">
+      <h1 class="text-2xl font-bold text-gray-900 mb-1">WhatsApp-Bot</h1>
+      <p class="text-sm text-gray-600 mb-6">Status, Outbox-Queue und Test-Versand. Service: <code>rosenweg_whatsapp-bot</code></p>
+
+      <div id="status" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6"></div>
+
+      <div class="bg-white rounded-lg shadow p-4 mb-6">
+        <h2 class="text-lg font-bold mb-3">Test-Nachricht senden</h2>
+        <form id="form-test" class="grid grid-cols-12 gap-2">
+          <input type="tel" id="t-phone" data-phone-format placeholder="+41 79 …" required class="col-span-4 border rounded px-2 py-1.5 text-sm">
+          <input type="text" id="t-body" placeholder="Nachricht-Text" required class="col-span-6 border rounded px-2 py-1.5 text-sm">
+          <button type="submit" class="col-span-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">Senden</button>
+        </form>
+        <p id="t-result" class="text-xs mt-2"></p>
+      </div>
+
+      <div class="bg-white rounded-lg shadow overflow-hidden">
+        <div class="px-4 py-2 border-b flex justify-between items-center">
+          <h2 class="font-semibold">Letzte 30 Nachrichten</h2>
+          <button onclick="load()" class="text-sm text-blue-600 hover:underline">Neu laden</button>
+        </div>
+        <table class="min-w-full text-sm">
+          <thead class="bg-gray-50 text-xs uppercase text-gray-500">
+            <tr>
+              <th class="px-3 py-2 text-left">Zeit</th>
+              <th class="px-3 py-2 text-left">Richtung</th>
+              <th class="px-3 py-2 text-left">Nummer</th>
+              <th class="px-3 py-2 text-left">Person</th>
+              <th class="px-3 py-2 text-left">Text</th>
+              <th class="px-3 py-2 text-left">Status</th>
+            </tr>
+          </thead>
+          <tbody id="tbody" class="divide-y divide-gray-100"></tbody>
+        </table>
+      </div>
+
+      <div class="mt-6 bg-amber-50 border border-amber-200 rounded p-4 text-sm text-amber-900">
+        <h3 class="font-semibold mb-2">🔧 Einrichtung</h3>
+        <ol class="list-decimal list-inside space-y-1 text-xs">
+          <li><code>WHATSAPP_SHARED_SECRET</code> in <code>.env</code> setzen (gleicher Wert wie bei API)</li>
+          <li>Service starten / neu starten: <code>docker service update --force rosenweg_whatsapp-bot</code></li>
+          <li>QR-Code aus Logs holen: <code>docker service logs -f rosenweg_whatsapp-bot</code></li>
+          <li>Auf einem Smartphone mit gewünschter WhatsApp-Nummer: Einstellungen → Verknüpfte Geräte → Gerät verknüpfen → QR scannen</li>
+          <li>Bot ist bereit, sobald "[WA] Bot ist bereit" im Log erscheint</li>
+        </ol>
+      </div>
+    </div>
+  </main>
+
+  <script>
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const fmtDt = s => s ? new Date(s).toLocaleString('de-CH') : '';
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    const u = await AuthentikAuth.init({ requireAuth: true });
+    if (!u) return;
+    document.getElementById('auth-gate').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+    document.getElementById('form-test').addEventListener('submit', sendTest);
+    await load();
+  });
+
+  async function load() {
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/whatsapp/admin/status');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      const stat = document.getElementById('status');
+      const box = (label, value, cls) => `<div class="bg-white rounded-lg shadow p-3 text-center">
+        <div class="text-xs ${cls} uppercase">${label}</div><div class="text-xl font-bold mt-1">${value}</div></div>`;
+      stat.innerHTML =
+        box('Bot-Secret', d.bot_secret_configured ? '✓ OK' : '⚠ fehlt', d.bot_secret_configured ? 'text-emerald-700' : 'text-red-700') +
+        box('Outbox pending', d.outbox_pending, 'text-amber-700') +
+        box('Aktive Personen', d.total_persons_active, 'text-blue-700') +
+        box('Opt-In Personen', d.opt_in_count, 'text-indigo-700');
+      const tbody = document.getElementById('tbody');
+      tbody.innerHTML = (d.recent_messages || []).map(m => `<tr class="hover:bg-gray-50">
+        <td class="px-3 py-2 text-xs text-gray-500">${esc(fmtDt(m.created_at))}</td>
+        <td class="px-3 py-2"><span class="text-xs ${m.direction === 'inbound' ? 'text-blue-700' : 'text-emerald-700'}">${m.direction === 'inbound' ? '⬅ ein' : '➡ aus'}</span></td>
+        <td class="px-3 py-2 font-mono text-xs">${esc(m.phone)}</td>
+        <td class="px-3 py-2 text-xs">${m.person_id ? '#' + m.person_id : '<span class="text-gray-400">—</span>'}</td>
+        <td class="px-3 py-2 text-sm truncate max-w-md">${esc((m.body || '').slice(0, 100))}</td>
+        <td class="px-3 py-2"><span class="text-xs px-2 py-0.5 rounded ${m.status === 'sent' ? 'bg-emerald-100 text-emerald-800' : m.status === 'queued' ? 'bg-amber-100 text-amber-800' : m.status === 'failed' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-700'}">${esc(m.status)}</span></td>
+      </tr>`).join('') || '<tr><td colspan="6" class="px-3 py-6 text-center text-gray-400">Keine Nachrichten.</td></tr>';
+    } catch (e) {
+      document.getElementById('status').innerHTML = `<div class="col-span-4 text-red-600">Fehler: ${esc(e.message)}</div>`;
+    }
+  }
+
+  async function sendTest(ev) {
+    ev.preventDefault();
+    const phone = document.getElementById('t-phone').value;
+    const body = document.getElementById('t-body').value;
+    const res = document.getElementById('t-result');
+    res.textContent = 'Sende …'; res.className = 'text-xs mt-2 text-gray-600';
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/whatsapp/admin/send', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, body }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+      res.textContent = `✓ In Outbox gestellt (id ${d.message_id}). Bot sendet beim nächsten Poll (max 15s).`;
+      res.className = 'text-xs mt-2 text-emerald-700';
+      document.getElementById('form-test').reset();
+      setTimeout(load, 18000);
+    } catch (e) {
+      res.textContent = '⚠ ' + e.message;
+      res.className = 'text-xs mt-2 text-red-600';
+    }
+  }
+  </script>
+</body>
+</html>

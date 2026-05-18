@@ -12,6 +12,7 @@ env:
   ENERGY_IMAGE: ghcr.io/rosenweg/energy-collector
   SYSLOG_IMAGE: ghcr.io/rosenweg/syslog-collector
   TV_PROXY_IMAGE: ghcr.io/rosenweg/tv-proxy
+  WHATSAPP_BOT_IMAGE: ghcr.io/rosenweg/rosenweg-whatsapp-bot
 
 jobs:
   build-api:
@@ -134,3 +135,27 @@ jobs:
           tags: |
             ${{ env.TV_PROXY_IMAGE }}:latest
             ${{ env.TV_PROXY_IMAGE }}:${{ github.sha }}
+
+  build-whatsapp-bot:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push WhatsApp-Bot
+        uses: docker/build-push-action@v6
+        with:
+          context: ./whatsapp-bot
+          push: true
+          tags: |
+            ${{ env.WHATSAPP_BOT_IMAGE }}:latest
+            ${{ env.WHATSAPP_BOT_IMAGE }}:${{ github.sha }}

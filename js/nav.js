@@ -39,6 +39,14 @@ const SERVICES_GROUPS = [
     ],
   },
   {
+    title: 'WhatsApp & Meldungen',
+    icon: '💬',
+    items: [
+      { label: 'WhatsApp-Bot Admin', href: 'whatsapp-bot-admin.html', activeKey: 'whatsapp-bot', perm: 'whatsapp-bot' },
+      { label: 'Reklamationen', href: 'reklamationen.html', activeKey: 'reklamationen', perm: 'reklamationen' },
+    ],
+  },
+  {
     title: 'Betrieb & Admin',
     icon: '⚙',
     items: [
@@ -87,8 +95,8 @@ const RosenwegNav = {
         </div>
       </div>`).join('');
     return `
-      <div class="nav-dropdown-menu hidden absolute left-0 mt-1 bg-white rounded-xl shadow-2xl border border-gray-200 p-5 z-50" style="width: min(960px, calc(100vw - 2rem));">
-        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-3">
+      <div class="nav-dropdown-menu hidden absolute left-0 mt-1 bg-white rounded-xl shadow-2xl border border-gray-200 p-5 z-50" style="width: min(1100px, calc(100vw - 2rem));">
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-x-4 gap-y-3">
           ${cols}
         </div>
       </div>`;

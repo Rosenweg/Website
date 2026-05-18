@@ -107,6 +107,7 @@ services:
       SMTP_PASS: "${SMTP_PASS}"
       SMTP2GO_API_KEY: "${SMTP2GO_API_KEY}"
       MAIL_FROM: "noreply@rosenweg4303.ch"
+      WHATSAPP_SHARED_SECRET: "${WHATSAPP_SHARED_SECRET}"
       PORT: "3000"
       AUTHENTIK_URL: "https://server:9443"
       AUTHENTIK_EXTERNAL_URL: "https://authentik.rosenweg4303.ch"
@@ -306,6 +307,35 @@ services:
         - "shepherd.enable=true"
 
   # ============================================
+  # WhatsApp-Bot - bridged Bewohner-Bot via whatsapp-web.js
+  # ============================================
+  # Setup:
+  #   1. WHATSAPP_SHARED_SECRET in .env setzen (gleicher Wert wie api)
+  #   2. Service starten: docker service logs rosenweg_whatsapp-bot → QR scannen
+  #   3. Session wird im Volume rosenweg-whatsapp-data persistiert
+  # Deaktivieren: replicas auf 0 setzen oder ganzen Service entfernen
+  whatsapp-bot:
+    image: ghcr.io/rosenweg/rosenweg-whatsapp-bot:latest
+    environment:
+      API_BASE: http://api:3000
+      WHATSAPP_SHARED_SECRET: "${WHATSAPP_SHARED_SECRET}"
+      WA_POLL_MS: "15000"
+    volumes:
+      - whatsapp-data:/data
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname == docker-pve1
+      restart_policy:
+        condition: on-failure
+        delay: 30s
+      labels:
+        - "shepherd.enable=true"
+
+  # ============================================
   # Syslog Collector - FPÜV Connection Logging
   # ============================================
   syslog-collector:
@@ -367,6 +397,7 @@ volumes:
   traefik-logs:
   rosenweg-pgdata:
   energy-pgdata:
+  whatsapp-data:
   rosenweg-documents:
     driver: local
     driver_opts:
