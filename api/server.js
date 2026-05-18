@@ -13159,6 +13159,83 @@ async function initDB() {
       console.warn('[phone-normalize] Fehler:', e.message);
     }
 
+    // V2: Misch-Strings "Mobil: X / Festnetz: Y" splitten + E-Mail-in-Tel-Felder leeren
+    try {
+      const flag = await client.query("SELECT value FROM app_config WHERE key = 'phone_cleanup_v2'");
+      if (flag.rows.length === 0) {
+        console.log('[phone-cleanup-v2] Starte Misch-String-Split + Email-Fehler-Cleanup...');
+        const splitRegex = /^Mobil(?:e)?:\s*(.+?)\s*\/\s*Festnetz:\s*(.+?)\s*$/i;
+        let splitOk = 0, emailFix = 0;
+
+        // 1) personen: Misch-String → mobile + telefon
+        const pRows = await client.query(
+          `SELECT id, telefon FROM personen WHERE telefon ~* '^Mobil'`,
+        );
+        for (const r of pRows.rows) {
+          const m = String(r.telefon).match(splitRegex);
+          if (m) {
+            await client.query(
+              `UPDATE personen SET mobile = $1, telefon = $2 WHERE id = $3`,
+              [normalizePhone(m[1]), normalizePhone(m[2]), r.id],
+            );
+            splitOk++;
+          }
+        }
+
+        // wohnungen_kontakte: gleicher Split (fuer Eintraege ohne person_id; mit person_id
+        // wird durch Trigger automatisch ueberschrieben sobald personen.telefon/mobile sich
+        // aendert; aber falls noch nicht propagiert, sicherheitshalber direkt)
+        const wkRows = await client.query(
+          `SELECT id, telefon FROM wohnungen_kontakte WHERE telefon ~* '^Mobil' AND archiviert_am IS NULL`,
+        );
+        for (const r of wkRows.rows) {
+          const m = String(r.telefon).match(splitRegex);
+          if (m) {
+            await client.query(
+              `UPDATE wohnungen_kontakte SET mobile = $1, telefon = $2 WHERE id = $3`,
+              [normalizePhone(m[1]), normalizePhone(m[2]), r.id],
+            );
+            splitOk++;
+          }
+        }
+
+        // 2) E-Mail-in-Tel-Felder bereinigen: '@' in Tel-Spalte → leeren (in alle relevanten Tabellen)
+        const emailInTelTargets = [
+          { table: 'personen', cols: ['telefon', 'mobile'] },
+          { table: 'wohnungen_kontakte', cols: ['telefon', 'mobile'] },
+          { table: 'handwerker', cols: ['telefon', 'mobile'] },
+          { table: 'handwerker_personen', cols: ['telefon', 'mobile'] },
+          { table: 'mail_empfaenger', cols: ['telefon'] },
+          { table: 'verwaltungen', cols: ['telefon'] },
+          { table: 'verwaltungs_kontakte', cols: ['telefon'] },
+        ];
+        for (const { table, cols } of emailInTelTargets) {
+          for (const col of cols) {
+            try {
+              const exists = await client.query(
+                `SELECT 1 FROM information_schema.columns WHERE table_name = $1 AND column_name = $2`,
+                [table, col],
+              );
+              if (exists.rows.length === 0) continue;
+              const r = await client.query(
+                `UPDATE ${table} SET ${col} = NULL WHERE ${col} LIKE '%@%' AND ${col} ~ '\\..{2,}' RETURNING id`,
+              );
+              emailFix += r.rowCount || 0;
+            } catch (e) { console.warn(`[phone-cleanup-v2] ${table}.${col}:`, e.message); }
+          }
+        }
+
+        await client.query(
+          `INSERT INTO app_config (key, value) VALUES ('phone_cleanup_v2', $1)
+           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+          [`done ${new Date().toISOString()}, split ${splitOk}, email-fix ${emailFix}`],
+        );
+        console.log(`[phone-cleanup-v2] ${splitOk} Misch-Strings gesplittet, ${emailFix} Email-in-Tel-Felder geleert`);
+      }
+    } catch (e) {
+      console.warn('[phone-cleanup-v2] Fehler:', e.message);
+    }
+
     console.log('Database schema initialized');
   } finally {
     client.release();
