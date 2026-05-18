@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reklamationen — Rosenweg</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/nav.js?v=2"></script>
+  <link rel="icon" href="/logo-rosenweg.png">
+  <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'); body { font-family: 'Inter', sans-serif; }
+    .s-offen { background:#fef3c7; color:#92400e; }
+    .s-weitergeleitet { background:#dbeafe; color:#1e40af; }
+    .s-erledigt { background:#d1fae5; color:#065f46; }
+    .s-abgewiesen { background:#fee2e2; color:#991b1b; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+  <script>RosenwegNav.init({ active: 'reklamationen' });</script>
+
+  <main class="max-w-6xl mx-auto px-4 py-6">
+    <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center"><p class="text-gray-600">Lade…</p></div>
+
+    <div id="content" class="hidden">
+      <h1 class="text-2xl font-bold text-gray-900 mb-1">📝 Reklamationen / Schadensmeldungen</h1>
+      <p class="text-sm text-gray-600 mb-4">Eingegangen via WhatsApp-Bot (Befehl <code>/reklamation &lt;Text&gt;</code>) oder Web-Formular.</p>
+
+      <div class="bg-white rounded-lg shadow p-3 mb-4 flex gap-3 items-center">
+        <label class="text-sm"><span class="text-gray-600 mr-1">Status:</span>
+          <select id="filter-status" class="border rounded px-2 py-1 text-sm">
+            <option value="">alle</option>
+            <option value="offen" selected>offen</option>
+            <option value="weitergeleitet">weitergeleitet</option>
+            <option value="erledigt">erledigt</option>
+            <option value="abgewiesen">abgewiesen</option>
+          </select>
+        </label>
+        <button onclick="load()" class="ml-auto text-sm text-blue-600 hover:underline">Neu laden</button>
+      </div>
+
+      <div class="bg-white rounded-lg shadow overflow-hidden">
+        <table class="min-w-full text-sm">
+          <thead class="bg-gray-50 text-xs uppercase text-gray-500"><tr>
+            <th class="px-3 py-2 text-left">Zeit</th>
+            <th class="px-3 py-2 text-left">Person</th>
+            <th class="px-3 py-2 text-left">STWEG</th>
+            <th class="px-3 py-2 text-left">Beschreibung</th>
+            <th class="px-3 py-2 text-left">Handwerker</th>
+            <th class="px-3 py-2 text-left">Status</th>
+            <th class="px-3 py-2 text-left">Aktionen</th>
+          </tr></thead>
+          <tbody id="tbody" class="divide-y divide-gray-100"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script>
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const fmtDt = s => s ? new Date(s).toLocaleString('de-CH') : '';
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    const u = await AuthentikAuth.init({ requireAuth: true });
+    if (!u) return;
+    document.getElementById('auth-gate').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+    document.getElementById('filter-status').addEventListener('change', load);
+    await load();
+  });
+
+  async function load() {
+    const status = document.getElementById('filter-status').value;
+    const r = await AuthentikAuth.apiFetch('/api/reklamationen' + (status ? '?status=' + status : ''));
+    if (!r.ok) { document.getElementById('tbody').innerHTML = `<tr><td colspan="7" class="text-red-600 p-4">${r.status}</td></tr>`; return; }
+    const d = await r.json();
+    const list = d.reklamationen || [];
+    if (list.length === 0) {
+      document.getElementById('tbody').innerHTML = '<tr><td colspan="7" class="text-gray-400 text-center p-6">Keine Reklamationen.</td></tr>';
+      return;
+    }
+    document.getElementById('tbody').innerHTML = list.map(r => `<tr class="hover:bg-gray-50">
+      <td class="px-3 py-2 text-xs text-gray-500">${esc(fmtDt(r.created_at))}</td>
+      <td class="px-3 py-2 text-sm">${esc(r.person_name || '—')}</td>
+      <td class="px-3 py-2 text-sm">${r.stweg ? 'STWEG ' + r.stweg : '—'}</td>
+      <td class="px-3 py-2 text-sm">${esc(r.beschreibung || '')}</td>
+      <td class="px-3 py-2 text-xs">${esc(r.handwerker_firma || '—')}</td>
+      <td class="px-3 py-2"><span class="s-${esc(r.status)} text-xs px-2 py-0.5 rounded">${esc(r.status)}</span></td>
+      <td class="px-3 py-2 whitespace-nowrap text-xs space-x-2">
+        <button onclick="setStatus(${r.id}, 'weitergeleitet')" class="text-blue-600 hover:underline">→ weiter</button>
+        <button onclick="setStatus(${r.id}, 'erledigt')" class="text-emerald-700 hover:underline">✓ erledigt</button>
+        <button onclick="setStatus(${r.id}, 'abgewiesen')" class="text-red-600 hover:underline">✗ ablehnen</button>
+      </td>
+    </tr>`).join('');
+  }
+
+  async function setStatus(id, status) {
+    if (!confirm(`Status auf "${status}" setzen?`)) return;
+    const r = await AuthentikAuth.apiFetch('/api/reklamationen/' + id, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    if (!r.ok) { alert('Fehler: ' + r.status); return; }
+    await load();
+  }
+  </script>
+</body>
+</html>

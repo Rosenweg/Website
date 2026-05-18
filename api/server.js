@@ -801,6 +801,8 @@ const MANAGED_PAGES = [
   { id: 'mail-approval-config', label: 'Mail-Freigabe-Regeln' },
   { id: 'mail-templates', label: 'Mail-Templates' },
   { id: 'auslagen-stundensatz', label: 'Auslagen-Stundensatz' },
+  { id: 'whatsapp-bot', label: 'WhatsApp-Bot' },
+  { id: 'reklamationen', label: 'Reklamationen' },
 ];
 
 const ACCESS_LEVELS = { none: 0, read: 1, write: 2 };
@@ -11897,6 +11899,300 @@ app.get('/api/verwaltung-mail-queue/:id/attachment/:idx', authMiddleware, requir
   }
 });
 
+// ─── WhatsApp-Bot Integration ────────────────────────────────────────
+// Schnittstellen-Design: agnostisch zur Provider-Wahl (whatsapp-web.js,
+// Cloud API, etc.). Bot-Service ruft /api/whatsapp/inbound auf, holt
+// ausgehende Mails via /api/whatsapp/outbox-poll oder erhaelt sie per
+// /api/whatsapp/send (intern).
+//
+// Authentifizierung Webhook: Shared-Secret im Header X-WA-Secret.
+// User-Identifikation: Telefonnummer → personen via findPersonByPhone().
+
+const WHATSAPP_SHARED_SECRET = process.env.WHATSAPP_SHARED_SECRET || '';
+
+function requireWhatsappSecret(req, res, next) {
+  const provided = req.headers['x-wa-secret'] || req.query.secret;
+  if (!WHATSAPP_SHARED_SECRET) return res.status(503).json({ error: 'WHATSAPP_SHARED_SECRET nicht konfiguriert' });
+  if (provided !== WHATSAPP_SHARED_SECRET) return res.status(401).json({ error: 'Unauthorized' });
+  next();
+}
+
+// Sucht eine Person via Telefonnummer (gegen normalisierte telefon/mobile/telefone-JSONB).
+// Liefert null wenn nicht gefunden. Match auch wenn Bot-Nummer mit/ohne '+', mit/ohne Leerzeichen.
+async function findPersonByPhone(phoneInput) {
+  if (!phoneInput) return null;
+  const norm = normalizePhone(phoneInput);
+  if (!norm) return null;
+  const normNoSpace = norm.replace(/\s/g, '');
+  // 1) Exakt match auf telefon, mobile oder JSONB telefone[].nummer
+  const r = await pool.query(
+    `SELECT * FROM personen
+      WHERE REPLACE(COALESCE(telefon,''), ' ', '') = $1
+         OR REPLACE(COALESCE(mobile,''),  ' ', '') = $1
+         OR EXISTS (
+              SELECT 1 FROM jsonb_array_elements(COALESCE(telefone, '[]'::jsonb)) t
+               WHERE REPLACE(COALESCE(t->>'nummer',''), ' ', '') = $1
+            )
+      LIMIT 1`,
+    [normNoSpace],
+  );
+  return r.rows[0] || null;
+}
+
+// Queue eine ausgehende Nachricht. Bot-Service holt sie und versendet.
+async function queueWhatsappMessage({ phone, body, attachments, sourceType, sourceId, personId }) {
+  const norm = normalizePhone(phone);
+  if (!norm) throw new Error('Ungueltige Telefonnummer');
+  const r = await pool.query(
+    `INSERT INTO whatsapp_messages
+       (direction, phone, body, attachments, person_id, source_type, source_id, status)
+     VALUES ('outbound', $1, $2, $3::jsonb, $4, $5, $6, 'queued')
+     RETURNING id`,
+    [norm, body || '', JSON.stringify(attachments || []), personId || null, sourceType || null, sourceId || null],
+  );
+  return r.rows[0].id;
+}
+
+// Command-Handler: parst Body und antwortet entsprechend.
+async function handleWhatsappCommand(person, body) {
+  const text = String(body || '').trim();
+  const lower = text.toLowerCase();
+  // Hilfe
+  if (lower === '/hilfe' || lower === '/help' || lower === '?') {
+    return `🤖 *Rosenweg-Bot — Befehle*
+
+/meineauslagen — Deine eingereichten Auslagen
+/notfall — Notfall-Kontakte
+/handwerker — Handwerker-Übersicht
+/reklamation <text> — Schaden melden
+/hilfe — diese Liste
+
+Du kannst auch einfach beschreiben was du brauchst, oder einen Beleg als Foto schicken.`;
+  }
+  if (lower === '/meineauslagen' || lower === '/auslagen') {
+    if (!person) return '⚠ Du bist nicht in der Personen-Datenbank — bitte beim Ausschuss melden, damit deine Nummer hinterlegt wird.';
+    const r = await pool.query(
+      `SELECT status, COUNT(*) AS n, COALESCE(SUM(betrag_chf), 0) AS summe
+         FROM auslagen WHERE LOWER(user_email) = LOWER($1) GROUP BY status`,
+      [person.email || ''],
+    );
+    if (r.rows.length === 0) return '📋 Du hast aktuell keine Auslagen erfasst.\n\nNeue Auslage einreichen: ' + SITE_URL + '/auslagen.html';
+    const lines = r.rows.map(row => `• ${row.status}: ${row.n}× = CHF ${Number(row.summe).toFixed(2)}`);
+    return `📋 *Deine Auslagen:*\n${lines.join('\n')}\n\n${SITE_URL}/auslagen.html`;
+  }
+  if (lower === '/notfall') {
+    const cfg = await fs.readFile(pathModule.join(__dirname, 'site-config.json'), 'utf8').then(JSON.parse).catch(() => ({}));
+    const n = cfg.notfall || {};
+    return `🚨 *Notfall-Kontakte:*
+
+🚓 Polizei: ${n.polizei || '117'}
+🚒 Feuerwehr: ${n.feuerwehr || '118'}
+🚑 Sanität: ${n.sanitaet || '144'}
+🆘 Vergiftung: ${n.vergiftung || '145'}
+
+Hausverwaltung / Technik:
+${SITE_URL}/verwaltung.html`;
+  }
+  if (lower === '/handwerker') {
+    const r = await pool.query(
+      `SELECT firma, telefon, mobile, kategorie FROM handwerker
+        WHERE archiviert = false AND notfall_24_7 = true
+        ORDER BY kategorie, firma LIMIT 10`,
+    ).catch(() => ({ rows: [] }));
+    if (r.rows.length === 0) return '🔧 Keine Notfall-Handwerker hinterlegt. Übersicht: ' + SITE_URL + '/handwerker.html';
+    const lines = r.rows.map(h => `• ${h.firma} (${h.kategorie || '?'}): ${h.mobile || h.telefon || 'kein Tel'}`);
+    return `🔧 *Notfall-Handwerker:*\n${lines.join('\n')}\n\nVolle Liste: ${SITE_URL}/handwerker.html`;
+  }
+  if (lower.startsWith('/reklamation') || lower.startsWith('/schaden')) {
+    const beschreibung = text.replace(/^\/(reklamation|schaden)\s*/i, '').trim();
+    if (!beschreibung) return '📝 Bitte gib eine Beschreibung an, z.B.: `/reklamation Aufzug im Haus 9 steht still`';
+    if (!person) return '⚠ Du bist nicht in der Personen-Datenbank — bitte beim Ausschuss melden, damit dein Anliegen zugeordnet werden kann.';
+    // STWEG aus erster verknuepfter Wohnung der Person
+    const wRes = await pool.query(
+      `SELECT w.stweg FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id
+        WHERE k.person_id = $1 AND k.archiviert_am IS NULL LIMIT 1`,
+      [person.id],
+    );
+    const stweg = wRes.rows[0]?.stweg || null;
+    const ins = await pool.query(
+      `INSERT INTO reklamationen (person_id, stweg, beschreibung, eingang_kanal)
+       VALUES ($1, $2, $3, 'whatsapp') RETURNING id`,
+      [person.id, stweg, beschreibung.slice(0, 2000)],
+    );
+    // Ausschuss per Mail-Outbox informieren (Direktversand intern)
+    try {
+      const stwegLabel = stweg ? `STWEG ${stweg}` : 'STWEG-uebergreifend';
+      const adminEmails = stweg && STWEG_GROUPS[stweg]?.ausschuss
+        ? (await pool.query(
+            `SELECT DISTINCT email FROM users u
+              WHERE active = true AND email IS NOT NULL AND email <> ''
+                AND u.groups_json::jsonb ? $1`,
+            [STWEG_GROUPS[stweg].ausschuss],
+          )).rows.map(r => r.email).filter(Boolean)
+        : [];
+      if (adminEmails.length > 0) {
+        await loggedSendMail({
+          from: MAIL_FROM, to: adminEmails.join(', '),
+          subject: `📝 Reklamation #${ins.rows[0].id} (${stwegLabel}): ${beschreibung.slice(0, 60)}`,
+          text: `Neue Reklamation via WhatsApp:\n\nVon: ${person.name} (${person.email || '-'})\nSTWEG: ${stwegLabel}\nBeschreibung:\n${beschreibung}\n\nVerwalten: ${SITE_URL}/reklamationen.html`,
+        }, 'reklamation-whatsapp');
+      }
+    } catch (e) { console.warn('[whatsapp] Reklamation Mail Fehler:', e.message); }
+    return `✓ Reklamation #${ins.rows[0].id} aufgenommen und an den Ausschuss weitergeleitet. Du wirst über den Status informiert.`;
+  }
+  return null; // Kein Befehl — leer = keine Antwort, oder Default-Help
+}
+
+// Webhook fuer eingehende Nachrichten (vom Bot-Service aufgerufen)
+app.post('/api/whatsapp/inbound', requireWhatsappSecret, async (req, res) => {
+  try {
+    const { phone, body, whatsapp_msg_id, attachments } = req.body || {};
+    if (!phone) return res.status(400).json({ error: 'phone fehlt' });
+    const person = await findPersonByPhone(phone);
+    // Speichern
+    const ins = await pool.query(
+      `INSERT INTO whatsapp_messages (direction, phone, whatsapp_msg_id, body, attachments, person_id, status)
+       VALUES ('inbound', $1, $2, $3, $4::jsonb, $5, 'received') RETURNING id`,
+      [normalizePhone(phone), whatsapp_msg_id || null, body || '', JSON.stringify(attachments || []), person?.id || null],
+    );
+    // Letzte-Aktivitaet auf Person
+    if (person) {
+      await pool.query('UPDATE personen SET whatsapp_letzte_aktivitaet = NOW() WHERE id = $1', [person.id]);
+    }
+    // Command-Handler
+    let reply = await handleWhatsappCommand(person, body);
+    if (!reply && body && String(body).startsWith('/')) {
+      reply = 'Unbekannter Befehl. Schreibe `/hilfe` für die Liste.';
+    }
+    if (reply) {
+      const repliedId = await queueWhatsappMessage({
+        phone, body: reply, sourceType: 'command-response', sourceId: ins.rows[0].id, personId: person?.id,
+      });
+      return res.json({ ok: true, message_id: ins.rows[0].id, reply_queued: repliedId });
+    }
+    res.json({ ok: true, message_id: ins.rows[0].id });
+  } catch (err) {
+    console.error('WhatsApp inbound error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Outbox-Poll: Bot-Service holt anstehende Nachrichten
+app.get('/api/whatsapp/outbox-poll', requireWhatsappSecret, async (req, res) => {
+  try {
+    const limit = Math.min(50, parseInt(req.query.limit, 10) || 20);
+    const r = await pool.query(
+      `UPDATE whatsapp_messages SET status = 'sent', sent_at = NOW()
+        WHERE id IN (
+          SELECT id FROM whatsapp_messages
+           WHERE direction = 'outbound' AND status = 'queued'
+           ORDER BY created_at LIMIT $1
+           FOR UPDATE SKIP LOCKED
+        )
+        RETURNING id, phone, body, attachments`,
+      [limit],
+    );
+    res.json({ messages: r.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Send-Status-Update vom Bot (falls Versand fehlschlaegt)
+app.post('/api/whatsapp/status', requireWhatsappSecret, async (req, res) => {
+  try {
+    const { message_id, status, error_message, whatsapp_msg_id } = req.body || {};
+    await pool.query(
+      `UPDATE whatsapp_messages SET status = COALESCE($1, status),
+                                    error_message = COALESCE($2, error_message),
+                                    whatsapp_msg_id = COALESCE($3, whatsapp_msg_id)
+        WHERE id = $4`,
+      [status, error_message, whatsapp_msg_id, message_id],
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Admin-API fuer UI: Status + letzte Nachrichten + Outbox
+app.get('/api/whatsapp/admin/status', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const [pending, recent, byPerson, optIn] = await Promise.all([
+      pool.query(`SELECT COUNT(*)::int AS n FROM whatsapp_messages WHERE direction = 'outbound' AND status = 'queued'`),
+      pool.query(`SELECT id, direction, phone, body, status, person_id, created_at FROM whatsapp_messages ORDER BY created_at DESC LIMIT 30`),
+      pool.query(`SELECT COUNT(DISTINCT person_id)::int AS n FROM whatsapp_messages WHERE person_id IS NOT NULL`),
+      pool.query(`SELECT COUNT(*)::int AS n FROM personen WHERE whatsapp_opt_in = true`),
+    ]);
+    res.json({
+      bot_secret_configured: !!WHATSAPP_SHARED_SECRET,
+      outbox_pending: pending.rows[0].n,
+      total_persons_active: byPerson.rows[0].n,
+      opt_in_count: optIn.rows[0].n,
+      recent_messages: recent.rows,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Manuelle Test-Nachricht senden (Admin)
+app.post('/api/whatsapp/admin/send', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const { phone, body } = req.body || {};
+    if (!phone || !body) return res.status(400).json({ error: 'phone + body erforderlich' });
+    const id = await queueWhatsappMessage({ phone, body, sourceType: 'admin-test' });
+    res.json({ ok: true, message_id: id });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── Reklamationen-API ───────────────────────────────────────────────
+app.get('/api/reklamationen', authMiddleware, requirePermission('reklamationen', 'read'), async (req, res) => {
+  try {
+    const groups = req.user.groups || [];
+    const isAdmin = isTechnik(groups) || isPraesident(groups);
+    const ausschussStwegs = [...getAusschussStwegs(groups)];
+    const params = [];
+    let where = isAdmin ? 'TRUE' : (ausschussStwegs.length > 0 ? `r.stweg = ANY($${params.push(ausschussStwegs)}::int[]) OR r.stweg IS NULL` : `r.person_id = (SELECT id FROM personen WHERE LOWER(email) = LOWER($${params.push(req.user.email)}) LIMIT 1)`);
+    const status = String(req.query.status || '').trim();
+    if (status && ['offen','weitergeleitet','erledigt','abgewiesen'].includes(status)) {
+      params.push(status); where += ` AND r.status = $${params.length}`;
+    }
+    const r = await pool.query(
+      `SELECT r.*, p.name AS person_name, p.email AS person_email, h.firma AS handwerker_firma
+         FROM reklamationen r
+         LEFT JOIN personen p ON p.id = r.person_id
+         LEFT JOIN handwerker h ON h.id = r.handwerker_id
+        WHERE ${where} ORDER BY r.created_at DESC LIMIT 500`,
+      params,
+    );
+    res.json({ reklamationen: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamationen', 'write'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const b = req.body || {};
+    const updates = []; const params = [];
+    const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
+    if (b.status !== undefined) {
+      if (!['offen','weitergeleitet','erledigt','abgewiesen'].includes(b.status)) return res.status(400).json({ error: 'Ungueltiger Status' });
+      push('status', b.status);
+      if (b.status === 'erledigt') push('erledigt_am', new Date());
+    }
+    if (b.kategorie !== undefined) push('kategorie', b.kategorie ? String(b.kategorie).slice(0, 60) : null);
+    if (b.handwerker_id !== undefined) push('handwerker_id', b.handwerker_id || null);
+    if (b.zugewiesen_an !== undefined) push('zugewiesen_an', b.zugewiesen_an || null);
+    if (b.notiz !== undefined) push('notiz', b.notiz || null);
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    push('updated_at', new Date());
+    params.push(id);
+    const r = await pool.query(
+      `UPDATE reklamationen SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`,
+      params,
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ─── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
@@ -12651,6 +12947,51 @@ async function initDB() {
       -- Multiple weitere Telefonnummern pro Person als JSONB
       -- Format: [{typ: 'mobile2'|'festnetz2'|'geschaeft'|'sonstige', label?: string, nummer: string}]
       ALTER TABLE personen ADD COLUMN IF NOT EXISTS telefone JSONB DEFAULT '[]'::jsonb;
+      ALTER TABLE personen ADD COLUMN IF NOT EXISTS whatsapp_opt_in BOOLEAN DEFAULT false;
+      ALTER TABLE personen ADD COLUMN IF NOT EXISTS whatsapp_letzte_aktivitaet TIMESTAMPTZ;
+
+      -- WhatsApp-Bot: ein-/ausgehende Nachrichten
+      CREATE TABLE IF NOT EXISTS whatsapp_messages (
+        id SERIAL PRIMARY KEY,
+        direction VARCHAR(10) NOT NULL,             -- 'inbound' | 'outbound'
+        phone VARCHAR(60) NOT NULL,                 -- normalisierte Nummer
+        whatsapp_msg_id VARCHAR(120),               -- ID vom WA-Provider
+        body TEXT,
+        attachments JSONB DEFAULT '[]'::jsonb,      -- [{type, url, mimetype, caption?}]
+        person_id INTEGER REFERENCES personen(id) ON DELETE SET NULL,
+        source_type VARCHAR(60),                    -- z.B. 'auslage-status' | 'reklamation-bestaetigung' | 'command-response'
+        source_id INTEGER,
+        status VARCHAR(20) DEFAULT 'received',      -- received | queued | sent | failed | bounced
+        error_message TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        sent_at TIMESTAMPTZ,
+        CONSTRAINT wa_msg_dir_chk CHECK (direction IN ('inbound', 'outbound'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_wa_msg_phone ON whatsapp_messages(phone, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_wa_msg_pending ON whatsapp_messages(status, created_at)
+        WHERE direction = 'outbound' AND status = 'queued';
+      CREATE INDEX IF NOT EXISTS idx_wa_msg_person ON whatsapp_messages(person_id, created_at DESC);
+
+      -- Reklamationen / Schadensmeldungen via WhatsApp
+      CREATE TABLE IF NOT EXISTS reklamationen (
+        id SERIAL PRIMARY KEY,
+        person_id INTEGER REFERENCES personen(id) ON DELETE SET NULL,
+        stweg INTEGER,
+        kategorie VARCHAR(60),                      -- 'aufzug' | 'heizung' | 'wasser' | 'tuer' | 'reinigung' | 'sonstige'
+        beschreibung TEXT NOT NULL,
+        bild_pfad TEXT,                             -- Pfad im DOCS-Volume falls Foto mitgeschickt
+        status VARCHAR(20) DEFAULT 'offen',         -- offen | weitergeleitet | erledigt | abgewiesen
+        eingang_kanal VARCHAR(20) DEFAULT 'whatsapp', -- whatsapp | web | mail
+        handwerker_id INTEGER REFERENCES handwerker(id) ON DELETE SET NULL,
+        zugewiesen_an VARCHAR(255),
+        erledigt_am TIMESTAMPTZ,
+        notiz TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        CONSTRAINT rekl_status_chk CHECK (status IN ('offen','weitergeleitet','erledigt','abgewiesen'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_rekl_status ON reklamationen(status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_rekl_person ON reklamationen(person_id);
       CREATE INDEX IF NOT EXISTS idx_wk_person ON wohnungen_kontakte(person_id);
 
       -- Trigger: bei UPDATE personen → email/telefon/adresse/name auf alle
@@ -13018,6 +13359,11 @@ async function initDB() {
     for (const groupName of ausschussGroups) {
       await client.query(`
         INSERT INTO permissions (group_name, page, access) VALUES ($1, 'auslagen-stundensatz', 'write')
+        ON CONFLICT (group_name, page) DO NOTHING
+      `, [groupName]);
+      // Reklamationen: Ausschuss kann verwalten
+      await client.query(`
+        INSERT INTO permissions (group_name, page, access) VALUES ($1, 'reklamationen', 'write')
         ON CONFLICT (group_name, page) DO NOTHING
       `, [groupName]);
     }
