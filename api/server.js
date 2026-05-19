@@ -1262,6 +1262,103 @@ app.put('/api/auth/profile', authMiddleware, async (req, res) => {
   }
 });
 
+// GET /api/me/person-data — liefert das personen-Datenset des eingeloggten Users
+// (zusaetzliche Telefonnummern + Email-Aliasse, die nicht in users gepflegt sind)
+app.get('/api/me/person-data', authMiddleware, async (req, res) => {
+  const email = (req.user.email || '').toLowerCase();
+  if (!email) return res.json({ found: false, telefone: [], emails: [] });
+  try {
+    const r = await pool.query(
+      `SELECT id, name, email, telefon, mobile, telefone, emails, whatsapp_opt_in
+         FROM personen
+        WHERE LOWER(email) = $1
+           OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(emails,'[]'::jsonb)) e WHERE LOWER(e) = $1)
+        LIMIT 1`,
+      [email],
+    );
+    if (!r.rows[0]) return res.json({ found: false, telefone: [], emails: [] });
+    const p = r.rows[0];
+    res.json({
+      found: true,
+      person_id: p.id,
+      person_name: p.name,
+      person_email: p.email,
+      primary_phone: p.mobile || p.telefon || null,
+      telefone: Array.isArray(p.telefone) ? p.telefone : [],
+      emails: Array.isArray(p.emails) ? p.emails : [],
+      whatsapp_opt_in: !!p.whatsapp_opt_in,
+    });
+  } catch (err) {
+    console.error('[me/person-data] error:', err.message);
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
+// PUT /api/me/phones — Zusatznummern (telefone JSONB) verwalten
+// Body: { telefone: [{ typ, label?, nummer, whatsapp? }, ...] }
+app.put('/api/me/phones', authMiddleware, async (req, res) => {
+  const email = (req.user.email || '').toLowerCase();
+  if (!email) return res.status(400).json({ error: 'Keine E-Mail' });
+  const raw = Array.isArray(req.body?.telefone) ? req.body.telefone : [];
+  // Validierung + Normalisierung
+  const cleaned = [];
+  for (const t of raw.slice(0, 10)) {
+    const nummer = String(t?.nummer || '').trim();
+    if (!nummer) continue;
+    cleaned.push({
+      typ: String(t?.typ || 'sonstige').slice(0, 30),
+      label: t?.label ? String(t.label).slice(0, 50) : undefined,
+      nummer,
+      whatsapp: !!t?.whatsapp,
+    });
+  }
+  try {
+    const r = await pool.query(
+      `UPDATE personen SET telefone = $1::jsonb, updated_at = NOW()
+         WHERE LOWER(email) = $2
+            OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(emails,'[]'::jsonb)) e WHERE LOWER(e) = $2)
+      RETURNING id, telefone`,
+      [JSON.stringify(cleaned), email],
+    );
+    if (!r.rows[0]) return res.status(404).json({ error: 'Kein personen-Eintrag fuer diese E-Mail' });
+    res.json({ ok: true, telefone: r.rows[0].telefone });
+  } catch (err) {
+    console.error('[me/phones] error:', err.message);
+    res.status(500).json({ error: 'Fehler beim Speichern' });
+  }
+});
+
+// PUT /api/me/emails — Email-Aliasse verwalten (emails JSONB)
+// Body: { emails: ["alias1@x.com", ...] }
+app.put('/api/me/emails', authMiddleware, async (req, res) => {
+  const email = (req.user.email || '').toLowerCase();
+  if (!email) return res.status(400).json({ error: 'Keine E-Mail' });
+  const raw = Array.isArray(req.body?.emails) ? req.body.emails : [];
+  // Validierung: nur korrekt aussehende Emails behalten
+  const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const cleaned = [];
+  for (const e of raw.slice(0, 10)) {
+    const s = String(e || '').trim().toLowerCase();
+    if (!s || !emailRe.test(s)) continue;
+    if (cleaned.includes(s)) continue;
+    cleaned.push(s);
+  }
+  try {
+    const r = await pool.query(
+      `UPDATE personen SET emails = $1::jsonb, updated_at = NOW()
+         WHERE LOWER(email) = $2
+            OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(emails,'[]'::jsonb)) e WHERE LOWER(e) = $2)
+      RETURNING id, emails`,
+      [JSON.stringify(cleaned), email],
+    );
+    if (!r.rows[0]) return res.status(404).json({ error: 'Kein personen-Eintrag fuer diese E-Mail' });
+    res.json({ ok: true, emails: r.rows[0].emails });
+  } catch (err) {
+    console.error('[me/emails] error:', err.message);
+    res.status(500).json({ error: 'Fehler beim Speichern' });
+  }
+});
+
 // PUT /api/me/whatsapp-optin — Toggle WhatsApp-Opt-In am Personen-Datensatz
 // Body: { enabled: bool }
 // Liefert Status zurueck: { ok, enabled, phone, reason? }
@@ -12375,6 +12472,107 @@ app.get('/api/whatsapp/qr-status', authMiddleware, requireTechnikOrPraesident, (
     age_seconds: waCurrentQrAt ? Math.round((Date.now() - waCurrentQrAt.getTime()) / 1000) : null,
   });
 });
+
+// Admin-API: Broadcast-Recipients-Preview
+// Query: target=all | stweg:<N> | group:<authentik-group>
+app.get('/api/whatsapp/admin/recipients', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  const target = String(req.query.target || 'all');
+  try {
+    const list = await resolveBroadcastRecipients(target);
+    res.json({
+      target,
+      count: list.length,
+      recipients: list.slice(0, 50).map(p => ({ id: p.id, name: p.name, phone: p.phone })),
+      truncated: list.length > 50,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Admin-API: Broadcast senden
+// Body: { target, body }
+app.post('/api/whatsapp/admin/broadcast', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  const target = String(req.body?.target || '');
+  const body   = String(req.body?.body   || '').slice(0, 2000);
+  if (!target || !body) return res.status(400).json({ error: 'target und body erforderlich' });
+  try {
+    const list = await resolveBroadcastRecipients(target);
+    let queued = 0;
+    for (const p of list) {
+      try {
+        await queueWhatsappMessage({
+          phone: p.phone, body, personId: p.id,
+          sourceType: 'admin-broadcast', sourceId: null,
+        });
+        queued++;
+      } catch (err) { console.warn('[broadcast] queue Fehler:', err.message); }
+    }
+    res.json({ ok: true, queued, total: list.length, target });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Hilfs-Funktion: aufloesen welche Personen welcher Zielgruppe entsprechen.
+// Liefert [{id, name, phone}] mit allen WA-faehigen Nummern pro Person.
+async function resolveBroadcastRecipients(target) {
+  let personSqlFilter = 'p.whatsapp_opt_in = true';
+  const params = [];
+  if (target.startsWith('stweg:')) {
+    const stwegNr = parseInt(target.slice(6), 10);
+    if (!Number.isFinite(stwegNr)) throw new Error('Ungueltiger STWEG-Filter');
+    // Personen ueber wohnungen_kontakte zu STWEG zugeordnet
+    params.push(stwegNr);
+    personSqlFilter += ` AND EXISTS (
+      SELECT 1 FROM wohnungen_kontakte wk
+        JOIN wohnungen w ON w.id = wk.wohnung_id
+       WHERE wk.person_id = p.id AND w.stweg = $${params.length}
+    )`;
+  } else if (target.startsWith('group:')) {
+    const groupName = target.slice(6);
+    if (!groupName) throw new Error('Ungueltiger Gruppen-Filter');
+    // Personen sind via Email mit users-Tabelle verknuepft, dort liegt die Gruppe
+    params.push(groupName);
+    personSqlFilter += ` AND EXISTS (
+      SELECT 1 FROM users u
+       WHERE u.active = true
+         AND u.groups_json::jsonb ? $${params.length}
+         AND (
+              LOWER(u.email) = LOWER(p.email)
+           OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(p.emails,'[]'::jsonb)) e
+                       WHERE LOWER(e) = LOWER(u.email))
+         )
+    )`;
+  } else if (target !== 'all') {
+    throw new Error('Unbekannter Target-Typ. Erwartet: all | stweg:<N> | group:<name>');
+  }
+  const r = await pool.query(
+    `SELECT p.id, p.name, p.mobile, p.telefon, p.telefone
+       FROM personen p
+      WHERE ${personSqlFilter}
+      ORDER BY p.name`,
+    params,
+  );
+  // Flatten: pro Person eine Liste von Empfaengernummern (primary + alle whatsapp:true im Array)
+  const result = [];
+  const seen = new Set();
+  for (const p of r.rows) {
+    const phones = [];
+    const primary = p.mobile || p.telefon;
+    if (primary) phones.push(primary);
+    if (Array.isArray(p.telefone)) for (const t of p.telefone) if (t?.whatsapp && t?.nummer) phones.push(t.nummer);
+    for (const ph of phones) {
+      const key = String(ph).replace(/\D/g, '');
+      if (!key) continue;
+      const dedupKey = `${p.id}:${key}`;
+      if (seen.has(dedupKey)) continue;
+      seen.add(dedupKey);
+      result.push({ id: p.id, name: p.name, phone: ph });
+    }
+  }
+  return result;
+}
 
 // Admin-API fuer UI: Status + letzte Nachrichten + Outbox
 app.get('/api/whatsapp/admin/status', authMiddleware, requireTechnikOrPraesident, async (req, res) => {

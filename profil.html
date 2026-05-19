@@ -140,11 +140,35 @@
                             <p class="text-sm text-gray-600 mt-1">
                                 Erhalte zusätzlich zu E-Mails Push-Nachrichten via WhatsApp bei
                                 Auslagen-Statuswechseln, Reklamations-Updates und Erinnerungen.
-                                Verwendet wird die oben hinterlegte Telefonnummer (bevorzugt Mobile).
                             </p>
                             <p id="whatsapp-status" class="text-xs mt-2"></p>
                         </div>
                     </label>
+                </div>
+
+                <hr class="my-6">
+                <h3 class="text-lg font-semibold text-gray-700">Weitere Kontaktdaten</h3>
+                <p class="text-xs text-gray-500 mb-3">Zusätzliche Telefonnummern und E-Mail-Adressen. Per-Nummer WhatsApp-Flag steuert, ob diese Nummer Push-Nachrichten erhält.</p>
+
+                <!-- Zusatznummern -->
+                <div class="bg-gray-50 rounded-lg p-4 mb-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-sm font-medium text-gray-700">📞 Weitere Telefonnummern</span>
+                        <button type="button" id="btn-add-phone" class="text-xs bg-blue-600 text-white rounded px-3 py-1 hover:bg-blue-700">+ Nummer</button>
+                    </div>
+                    <div id="extra-phones" class="space-y-2"></div>
+                    <p id="phones-status" class="text-xs mt-2"></p>
+                </div>
+
+                <!-- Email-Aliasse -->
+                <div class="bg-gray-50 rounded-lg p-4 mb-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-sm font-medium text-gray-700">✉ Weitere E-Mail-Adressen</span>
+                        <button type="button" id="btn-add-email" class="text-xs bg-blue-600 text-white rounded px-3 py-1 hover:bg-blue-700">+ E-Mail</button>
+                    </div>
+                    <div id="extra-emails" class="space-y-2"></div>
+                    <p class="text-xs text-gray-500 mt-2">Wird für die Zuordnung von Notifications verwendet, falls deine Authentik-Login-Adresse anders ist als die hinterlegte Hauptadresse.</p>
+                    <p id="emails-status" class="text-xs mt-2"></p>
                 </div>
 
                 <hr class="my-6">
@@ -299,6 +323,133 @@
                 ? '✓ Aktiv — Benachrichtigungen werden zusaetzlich per WhatsApp gesendet.'
                 : '';
             waStatus.className = 'text-xs mt-2 ' + (waBox.checked ? 'text-green-700' : 'text-gray-500');
+
+            // Personen-Daten laden (Zusatznummern + Aliasse)
+            await loadPersonData();
+        }
+
+        // ─── Multi-Nummern + Multi-Emails Verwaltung ──────────────────────
+        let personData = { telefone: [], emails: [], primary_phone: null, person_email: null };
+
+        async function loadPersonData() {
+            try {
+                const r = await AuthentikAuth.apiFetch('/api/me/person-data');
+                if (!r.ok) return;
+                personData = await r.json();
+                renderPhones();
+                renderEmails();
+            } catch {}
+        }
+
+        function renderPhones() {
+            const container = document.getElementById('extra-phones');
+            const list = personData.telefone || [];
+            const primary = personData.primary_phone;
+            const primaryRow = primary
+                ? `<div class="text-xs text-gray-500 px-2 py-1 bg-blue-50 rounded">
+                     Primär (oben gepflegt): <span class="font-mono">${primary}</span>
+                     ${personData.whatsapp_opt_in ? '· <span class="text-green-700">erhält WhatsApp</span>' : ''}
+                   </div>`
+                : '';
+            const rows = list.map((t, i) => `
+                <div class="flex flex-wrap items-center gap-2 bg-white rounded p-2 border border-gray-200">
+                    <select data-i="${i}" data-k="typ" class="phone-fld border rounded px-2 py-1 text-xs">
+                        ${['mobile2','festnetz2','geschaeft','sonstige'].map(o =>
+                            `<option value="${o}"${t.typ === o ? ' selected' : ''}>${o}</option>`).join('')}
+                    </select>
+                    <input data-i="${i}" data-k="label" type="text" placeholder="Label (optional)" value="${esc(t.label || '')}" class="phone-fld border rounded px-2 py-1 text-xs flex-1 min-w-[100px]">
+                    <input data-i="${i}" data-k="nummer" type="tel" placeholder="+41 …" value="${esc(t.nummer || '')}" class="phone-fld border rounded px-2 py-1 text-sm font-mono flex-1 min-w-[140px]">
+                    <label class="text-xs flex items-center gap-1 cursor-pointer">
+                        <input data-i="${i}" data-k="whatsapp" type="checkbox"${t.whatsapp ? ' checked' : ''} class="phone-fld">💬 WA
+                    </label>
+                    <button type="button" data-i="${i}" class="phone-del text-xs text-red-600 hover:bg-red-50 rounded px-2 py-1">✕</button>
+                </div>
+            `).join('');
+            container.innerHTML = primaryRow + rows + (list.length === 0 ? '<p class="text-xs text-gray-400 italic">Noch keine Zusatznummern.</p>' : '');
+            // Wire-up Event-Handler
+            container.querySelectorAll('.phone-fld').forEach(el => el.addEventListener('change', onPhoneChange));
+            container.querySelectorAll('.phone-del').forEach(b => b.addEventListener('click', () => {
+                personData.telefone.splice(parseInt(b.dataset.i), 1);
+                renderPhones();
+                savePhones();
+            }));
+        }
+
+        function onPhoneChange(e) {
+            const i = parseInt(e.target.dataset.i);
+            const k = e.target.dataset.k;
+            personData.telefone[i] = personData.telefone[i] || {};
+            personData.telefone[i][k] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+            savePhones();
+        }
+
+        async function savePhones() {
+            const status = document.getElementById('phones-status');
+            status.textContent = 'Speichern…';
+            status.className = 'text-xs mt-2 text-gray-500';
+            try {
+                const r = await AuthentikAuth.apiFetch('/api/me/phones', {
+                    method: 'PUT', body: { telefone: personData.telefone },
+                });
+                if (r.ok) {
+                    status.textContent = '✓ Gespeichert';
+                    status.className = 'text-xs mt-2 text-green-700';
+                    setTimeout(() => status.textContent = '', 3000);
+                } else {
+                    const d = await r.json().catch(() => ({}));
+                    status.textContent = '⚠ ' + (d.error || 'Fehler');
+                    status.className = 'text-xs mt-2 text-red-700';
+                }
+            } catch { status.textContent = '⚠ Netzwerkfehler'; status.className = 'text-xs mt-2 text-red-700'; }
+        }
+
+        function renderEmails() {
+            const container = document.getElementById('extra-emails');
+            const list = personData.emails || [];
+            const primary = personData.person_email;
+            const primaryRow = primary
+                ? `<div class="text-xs text-gray-500 px-2 py-1 bg-blue-50 rounded">Primär (in Objektverwaltung): <span class="font-mono">${primary}</span></div>`
+                : '';
+            const rows = list.map((e, i) => `
+                <div class="flex items-center gap-2 bg-white rounded p-2 border border-gray-200">
+                    <input data-i="${i}" type="email" value="${esc(e)}" class="email-fld border rounded px-2 py-1 text-sm font-mono flex-1">
+                    <button type="button" data-i="${i}" class="email-del text-xs text-red-600 hover:bg-red-50 rounded px-2 py-1">✕</button>
+                </div>
+            `).join('');
+            container.innerHTML = primaryRow + rows + (list.length === 0 ? '<p class="text-xs text-gray-400 italic">Noch keine Aliasse.</p>' : '');
+            container.querySelectorAll('.email-fld').forEach(el => el.addEventListener('change', e => {
+                personData.emails[parseInt(e.target.dataset.i)] = e.target.value.trim().toLowerCase();
+                saveEmails();
+            }));
+            container.querySelectorAll('.email-del').forEach(b => b.addEventListener('click', () => {
+                personData.emails.splice(parseInt(b.dataset.i), 1);
+                renderEmails();
+                saveEmails();
+            }));
+        }
+
+        async function saveEmails() {
+            const status = document.getElementById('emails-status');
+            status.textContent = 'Speichern…';
+            status.className = 'text-xs mt-2 text-gray-500';
+            try {
+                const r = await AuthentikAuth.apiFetch('/api/me/emails', {
+                    method: 'PUT', body: { emails: personData.emails },
+                });
+                if (r.ok) {
+                    status.textContent = '✓ Gespeichert';
+                    status.className = 'text-xs mt-2 text-green-700';
+                    setTimeout(() => status.textContent = '', 3000);
+                } else {
+                    const d = await r.json().catch(() => ({}));
+                    status.textContent = '⚠ ' + (d.error || 'Fehler');
+                    status.className = 'text-xs mt-2 text-red-700';
+                }
+            } catch { status.textContent = '⚠ Netzwerkfehler'; status.className = 'text-xs mt-2 text-red-700'; }
+        }
+
+        function esc(s) {
+            return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         }
 
         async function uploadAvatar(event) {
@@ -507,6 +658,18 @@
             } finally {
                 cb.disabled = false;
             }
+        });
+
+        // Add-Buttons
+        document.getElementById('btn-add-phone').addEventListener('click', () => {
+            personData.telefone = personData.telefone || [];
+            personData.telefone.push({ typ: 'mobile2', label: '', nummer: '', whatsapp: false });
+            renderPhones();
+        });
+        document.getElementById('btn-add-email').addEventListener('click', () => {
+            personData.emails = personData.emails || [];
+            personData.emails.push('');
+            renderEmails();
         });
 
         // Init
