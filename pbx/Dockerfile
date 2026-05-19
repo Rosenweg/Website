@@ -1,30 +1,20 @@
-FROM debian:bookworm
+FROM mlan/asterisk:base-bookworm
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Asterisk + Tools fuer Voicemail-Transkription
+# Tools fuer das Voicemail-Transcribe-AGI-Script
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    asterisk \
-    ca-certificates \
-    curl \
-    jq \
     python3 \
     python3-requests \
+    curl \
+    jq \
     sox \
-    dumb-init \
   && rm -rf /var/lib/apt/lists/*
 
-# Asterisk Default-Config wegraeumen, eigene Config wird gemounted
-RUN rm -rf /etc/asterisk/*.conf /etc/asterisk/extensions.d /etc/asterisk/pjsip.d 2>/dev/null || true \
-  && mkdir -p /var/lib/asterisk/sounds/de /var/spool/asterisk/voicemail \
-  && chown -R asterisk:asterisk /etc/asterisk /var/lib/asterisk /var/spool/asterisk /var/log/asterisk /var/run/asterisk
-
+# Eigene Config drueberkopieren (Image-Defaults werden ueberschrieben)
 COPY asterisk-config/ /etc/asterisk/
 COPY agi/ /var/lib/asterisk/agi-bin/
-RUN chmod +x /var/lib/asterisk/agi-bin/*.sh /var/lib/asterisk/agi-bin/*.py 2>/dev/null || true
+RUN chmod +x /var/lib/asterisk/agi-bin/*.py 2>/dev/null || true \
+  && chown -R asterisk:asterisk /etc/asterisk /var/lib/asterisk /var/spool/asterisk \
+  && mkdir -p /var/spool/asterisk/voicemail/recordings \
+  && chown -R asterisk:asterisk /var/spool/asterisk/voicemail
 
-USER asterisk
 EXPOSE 5060/udp 5060/tcp 5061/tcp 10000-10100/udp
-
-ENTRYPOINT ["/usr/bin/dumb-init", "--"]
-CMD ["asterisk", "-f", "-vvv"]
