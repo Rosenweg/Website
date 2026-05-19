@@ -24,6 +24,27 @@
 
       <div id="status" class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6"></div>
 
+      <!-- QR-Pairing-Box: nur sichtbar wenn Bot einen QR pusht (= nicht gepairt) -->
+      <div id="qr-box" class="hidden bg-white rounded-lg shadow p-4 mb-6 border-2 border-amber-300">
+        <h2 class="text-lg font-bold mb-2">📱 WhatsApp-Pairing erforderlich</h2>
+        <p class="text-sm text-gray-600 mb-3">
+          Scanne den QR-Code mit dem Smartphone: WhatsApp → Einstellungen → Verknuepfte Geraete → Geraet verknuepfen.
+          <span id="qr-age" class="text-xs text-amber-700"></span>
+        </p>
+        <div class="flex flex-col md:flex-row items-center gap-4">
+          <img id="qr-img" alt="QR-Code" class="border rounded bg-white" style="width:320px;height:320px;">
+          <div class="text-sm text-gray-700">
+            <p class="font-medium mb-1">Hinweise:</p>
+            <ul class="list-disc list-inside text-xs space-y-1">
+              <li>QR rotiert alle ~60s automatisch.</li>
+              <li>Diese Seite refresht den QR alle 10s.</li>
+              <li>Sobald gepairt, verschwindet die Box.</li>
+            </ul>
+            <button onclick="loadQr(true)" class="mt-3 text-sm bg-blue-600 text-white rounded px-3 py-1 hover:bg-blue-700">QR jetzt erneuern</button>
+          </div>
+        </div>
+      </div>
+
       <div class="bg-white rounded-lg shadow p-4 mb-6">
         <h2 class="text-lg font-bold mb-3">Test-Nachricht senden</h2>
         <form id="form-test" class="grid grid-cols-12 gap-2">
@@ -78,7 +99,37 @@
     document.getElementById('content').classList.remove('hidden');
     document.getElementById('form-test').addEventListener('submit', sendTest);
     await load();
+    await loadQr();
+    setInterval(loadQr, 10000); // alle 10s QR aktualisieren
   });
+
+  let _qrUrl = null;
+  async function loadQr(forceFresh = false) {
+    try {
+      const st = await AuthentikAuth.apiFetch('/api/whatsapp/qr-status');
+      if (!st.ok) return;
+      const meta = await st.json();
+      const box = document.getElementById('qr-box');
+      const img = document.getElementById('qr-img');
+      const age = document.getElementById('qr-age');
+      if (!meta.available) {
+        box.classList.add('hidden');
+        if (_qrUrl) { URL.revokeObjectURL(_qrUrl); _qrUrl = null; }
+        return;
+      }
+      // QR holen (PNG-Bytes via Bearer-fetch, dann ObjectURL)
+      const r = await AuthentikAuth.apiFetch('/api/whatsapp/qr.png');
+      if (!r.ok) return;
+      const blob = await r.blob();
+      if (_qrUrl) URL.revokeObjectURL(_qrUrl);
+      _qrUrl = URL.createObjectURL(blob);
+      img.src = _qrUrl;
+      box.classList.remove('hidden');
+      age.textContent = meta.age_seconds != null
+        ? `(QR ist ${meta.age_seconds}s alt — laeuft in ${Math.max(0, 60 - meta.age_seconds)}s ab)`
+        : '';
+    } catch {}
+  }
 
   async function load() {
     try {
