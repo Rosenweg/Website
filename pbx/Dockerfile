@@ -5,12 +5,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Asterisk + Tools fuer Voicemail-Transkription
 RUN apt-get update && apt-get install -y --no-install-recommends \
     asterisk \
-    asterisk-modules \
+    asterisk-config \
+    asterisk-voicemail \
     ca-certificates \
     curl \
     jq \
     python3 \
-    python3-pip \
     python3-requests \
     sox \
     dumb-init \
