@@ -337,46 +337,9 @@ services:
 
   # ============================================
   # Syslog Collector - FPÜV Connection Logging
-  # ============================================
-  # PBX - Asterisk SIP-Server fuer peoplefone-Trunk
-  # Phase 1: Time-conditional Routing + AI-Voicemail-Transkription
-  # Phase 2 (TODO): AudioSocket-Bridge fuer Echtzeit-AI-Konversation
-  #
-  # Aktivierung: nach Setzen der PJSIP_USER/PJSIP_PASS/PJSIP_SERVER
-  # in .env und replicas: 1 hochziehen
-  # ============================================
-  pbx:
-    image: ghcr.io/rosenweg/rosenweg-pbx:latest
-    environment:
-      API_BASE: http://api:3000
-      PBX_SHARED_SECRET: "${PBX_SHARED_SECRET}"
-      PJSIP_USER: "${PJSIP_USER:-}"
-      PJSIP_PASS: "${PJSIP_PASS:-}"
-      PJSIP_SERVER: "${PJSIP_SERVER:-sip.peoplefone.ch}"
-      EXTERNAL_IP: "${PBX_EXTERNAL_IP:-100.64.2.27}"
-      TECHNIK_NUMBERS: "${TECHNIK_NUMBERS:-+41765199970&+41795350856}"
-    ports:
-      # SIP-Signaling
-      - target: 5060
-        published: 5060
-        protocol: udp
-        mode: host
-      # RTP-Audio
-      - target: 10000
-        published: 10000
-        protocol: udp
-        mode: host
-    volumes:
-      - pbx-voicemail:/var/spool/asterisk/voicemail
-    networks:
-      - rosenweg-net
-    deploy:
-      replicas: 0
-      restart_policy:
-        condition: on-failure
-        delay: 30s
-      labels:
-        - "shepherd.enable=true"
+  # PBX (Asterisk) laeuft NICHT in Docker — eigenes LXC CT 220 auf pve2.
+  # Configs unter pbx/ im Repo sind Source-of-Truth, werden via scp/Ansible
+  # nach /etc/asterisk/ im LXC deployed. Siehe pbx/README.md.
 
   # ============================================
   syslog-collector:
@@ -436,7 +399,6 @@ volumes:
   rosenweg-pgdata:
   energy-pgdata:
   whatsapp-data:
-  pbx-voicemail:
   rosenweg-documents:
     driver: local
     driver_opts:
