@@ -12050,7 +12050,19 @@ async function pushWhatsappIfOptIn({ email, personId, body, sourceType, sourceId
       const r = await pool.query('SELECT * FROM personen WHERE id = $1', [personId]);
       person = r.rows[0] || null;
     } else if (email) {
-      const r = await pool.query('SELECT * FROM personen WHERE LOWER(email) = LOWER($1) LIMIT 1', [email]);
+      // Matcht primary email ODER irgendeinen Alias im emails JSONB-Array.
+      // Erst exakt-primary, dann Alias (deterministisch, primary gewinnt).
+      const r = await pool.query(
+        `SELECT * FROM personen
+          WHERE LOWER(email) = LOWER($1)
+             OR EXISTS (
+                  SELECT 1 FROM jsonb_array_elements_text(COALESCE(emails, '[]'::jsonb)) e
+                   WHERE LOWER(e) = LOWER($1)
+                )
+          ORDER BY (LOWER(email) = LOWER($1)) DESC
+          LIMIT 1`,
+        [email],
+      );
       person = r.rows[0] || null;
     }
     if (!person || !person.whatsapp_opt_in) return false;
@@ -13213,6 +13225,12 @@ async function initDB() {
       ALTER TABLE personen ADD COLUMN IF NOT EXISTS telefone JSONB DEFAULT '[]'::jsonb;
       ALTER TABLE personen ADD COLUMN IF NOT EXISTS whatsapp_opt_in BOOLEAN DEFAULT false;
       ALTER TABLE personen ADD COLUMN IF NOT EXISTS whatsapp_letzte_aktivitaet TIMESTAMPTZ;
+      -- Mehrfach-Emails pro Person (Alias-Adressen, z.B. privat + geschaeft).
+      -- Format: ["alias1@example.com","alias2@example.com"]. Primary bleibt
+      -- in der email-Spalte. Lookup matcht email OR irgendeinen Eintrag hier.
+      ALTER TABLE personen ADD COLUMN IF NOT EXISTS emails JSONB DEFAULT '[]'::jsonb;
+      -- GIN-Index fuer schnellen JSONB-Array-Contains-Lookup
+      CREATE INDEX IF NOT EXISTS idx_personen_emails_gin ON personen USING gin (emails);
 
       -- WhatsApp-Bot: ein-/ausgehende Nachrichten
       CREATE TABLE IF NOT EXISTS whatsapp_messages (
