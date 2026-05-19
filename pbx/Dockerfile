@@ -1,4 +1,4 @@
-FROM mlan/asterisk:base-bookworm
+FROM mlan/asterisk:xtra-1.1.13
 
 # Tools fuer das Voicemail-Transcribe-AGI-Script
 RUN apt-get update && apt-get install -y --no-install-recommends \
