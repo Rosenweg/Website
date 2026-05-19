@@ -12066,16 +12066,35 @@ async function pushWhatsappIfOptIn({ email, personId, body, sourceType, sourceId
       person = r.rows[0] || null;
     }
     if (!person || !person.whatsapp_opt_in) return false;
-    // Bevorzugt mobile, sonst telefon, sonst erste Nummer in telefone[]
-    let phone = person.mobile || person.telefon;
-    if (!phone && Array.isArray(person.telefone) && person.telefone.length > 0) {
-      phone = person.telefone[0].nummer;
+    // Sammle alle Empfaengernummern:
+    //   - primary (mobile bevorzugt, sonst telefon)
+    //   - jede telefone[]-Entry mit explizitem whatsapp:true Flag
+    // Dedupliziert ueber Ziffer-Normalisierung (verhindert Doppel-Sends
+    // wenn jemand dieselbe Nummer doppelt eintraegt).
+    const targets = [];
+    const seen = new Set();
+    const addPhone = (raw) => {
+      if (!raw) return;
+      const key = String(raw).replace(/\D/g, '');
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      targets.push(raw);
+    };
+    addPhone(person.mobile || person.telefon);
+    if (Array.isArray(person.telefone)) {
+      for (const t of person.telefone) if (t?.whatsapp) addPhone(t.nummer);
     }
-    if (!phone) return false;
-    await queueWhatsappMessage({
-      phone, body, sourceType: sourceType || 'notification', sourceId, personId: person.id,
-    });
-    return true;
+    if (targets.length === 0) return false;
+    let success = false;
+    for (const phone of targets) {
+      try {
+        await queueWhatsappMessage({
+          phone, body, sourceType: sourceType || 'notification', sourceId, personId: person.id,
+        });
+        success = true;
+      } catch (err) { console.warn('[pushWhatsapp] queue Fehler:', err.message); }
+    }
+    return success;
   } catch (err) {
     console.warn('[pushWhatsapp] Fehler:', err.message);
     return false;
