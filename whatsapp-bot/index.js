@@ -11,11 +11,15 @@ const qrcode = require('qrcode-terminal');
 const qrPng = require('qrcode');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
 
-const API_BASE   = process.env.API_BASE   || 'http://api:3000';
-const WA_SECRET  = process.env.WHATSAPP_SHARED_SECRET;
-const POLL_MS    = parseInt(process.env.WA_POLL_MS, 10) || 15_000;
-const DATA_DIR   = process.env.WA_DATA_DIR || '/data';
+const API_BASE       = process.env.API_BASE       || 'http://api:3000';
+const WA_SECRET      = process.env.WHATSAPP_SHARED_SECRET;
+const POLL_MS        = parseInt(process.env.WA_POLL_MS, 10)        || 15_000;
+const HEARTBEAT_MS   = parseInt(process.env.WA_HEARTBEAT_MS, 10)   || 30_000;
+const HEALTH_PORT    = parseInt(process.env.WA_HEALTH_PORT, 10)    || 8080;
+const RECONNECT_MS   = parseInt(process.env.WA_RECONNECT_MS, 10)   || 30_000;
+const DATA_DIR       = process.env.WA_DATA_DIR || '/data';
 
 if (!WA_SECRET) {
   console.error('FATAL: WHATSAPP_SHARED_SECRET env var fehlt');
@@ -76,10 +80,38 @@ client.on('authenticated', async () => {
   } catch {}
 });
 client.on('auth_failure', (m) => console.error('[WA] Auth fehlgeschlagen:', m));
-client.on('disconnected', (r) => { console.warn('[WA] Disconnected:', r); isReady = false; });
 
+// Auto-Reconnect bei Disconnect: ohne diesen Mechanismus bleibt der Bot
+// nach z.B. WiFi-Hickups oder WhatsApp-Server-Wartung permanent offline,
+// bis der Container neugestartet wird. Wir reinitialisieren den Client
+// nach einer kurzen Pause; LocalAuth-Session im /data-Volume sorgt dafuer
+// dass kein neuer QR-Scan noetig ist.
+let reconnectScheduled = false;
+client.on('disconnected', async (reason) => {
+  console.warn('[WA] Disconnected:', reason);
+  isReady = false;
+  if (reconnectScheduled) return;
+  reconnectScheduled = true;
+  setTimeout(async () => {
+    reconnectScheduled = false;
+    console.log('[WA] Auto-Reconnect-Versuch …');
+    try {
+      try { await client.destroy(); } catch {}
+      cleanupChromiumLocks();
+      await client.initialize();
+    } catch (err) {
+      console.error('[WA] Reconnect fehlgeschlagen:', err.message);
+      // Bei wiederholtem Fehlschlag: Prozess beenden → Swarm restart_policy
+      // startet neuen Container (sauberer State als haengender Browser).
+      process.exit(1);
+    }
+  }, RECONNECT_MS);
+});
+
+let readyAt = null;
 client.on('ready', () => {
   isReady = true;
+  readyAt = new Date();
   console.log('[WA] Bot ist bereit, Nummer:', client.info?.wid?.user);
 });
 
@@ -158,8 +190,50 @@ async function pollOutbox() {
 
 setInterval(pollOutbox, POLL_MS);
 
+// Heartbeat an API: damit der Admin sieht ob der Bot lebt und gepairt ist.
+// Stale-Heartbeats (>5min) → API alarmiert Technik/Praesident.
+async function sendHeartbeat() {
+  try {
+    await fetch(`${API_BASE}/api/whatsapp/heartbeat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-WA-Secret': WA_SECRET },
+      body: JSON.stringify({
+        is_ready: isReady,
+        ready_at: readyAt,
+        phone: client.info?.wid?.user || null,
+        pid: process.pid,
+        uptime_seconds: Math.round(process.uptime()),
+      }),
+    });
+  } catch (err) { /* API kurz unerreichbar → nicht crashen */ }
+}
+setInterval(sendHeartbeat, HEARTBEAT_MS);
+
+// HTTP-Healthcheck: Docker Swarm pingt das, restartet Container wenn down.
+// Liefert 200 nur wenn Bot "ready" ist; 503 wenn (noch) nicht.
+const healthServer = http.createServer((req, res) => {
+  if (req.url === '/health') {
+    if (isReady) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ready', phone: client.info?.wid?.user, uptime: process.uptime() }));
+    } else {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'not_ready' }));
+    }
+  } else {
+    res.writeHead(404); res.end();
+  }
+});
+healthServer.listen(HEALTH_PORT, () => console.log('[WA] Healthcheck-HTTP auf Port', HEALTH_PORT));
+
 client.initialize().catch(err => { console.error('Init-Fehler:', err); process.exit(1); });
 
 // Graceful shutdown
-process.on('SIGTERM', async () => { try { await client.destroy(); } catch {} process.exit(0); });
-process.on('SIGINT',  async () => { try { await client.destroy(); } catch {} process.exit(0); });
+async function shutdown() {
+  console.log('[WA] Shutdown …');
+  try { healthServer.close(); } catch {}
+  try { await client.destroy(); } catch {}
+  process.exit(0);
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT',  shutdown);
