@@ -12258,6 +12258,63 @@ app.post('/api/whatsapp/status', requireWhatsappSecret, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Bot-Heartbeat: in-memory, alarmiert Admins wenn stale (>5min).
+let waBotHeartbeat = null; // { is_ready, ready_at, phone, pid, uptime_seconds, received_at }
+let waBotStaleAlertSent = false; // verhindert Alert-Spam
+app.post('/api/whatsapp/heartbeat', requireWhatsappSecret, (req, res) => {
+  waBotHeartbeat = {
+    ...req.body,
+    received_at: new Date(),
+  };
+  waBotStaleAlertSent = false; // Bot lebt → Alert-Sperre aufheben
+  res.json({ ok: true });
+});
+
+// Stale-Detector: wenn der letzte Heartbeat > 5min her ist, einmal Alarm
+// an Technik/Praesident senden (direkt-Email + WA falls Opt-In).
+async function checkBotHeartbeat() {
+  const STALE_MS = 5 * 60 * 1000;
+  const lastHb = waBotHeartbeat?.received_at;
+  if (!lastHb) return; // noch nie ein Heartbeat → Bot startet vielleicht gerade
+  const age = Date.now() - new Date(lastHb).getTime();
+  if (age < STALE_MS || waBotStaleAlertSent) return;
+  waBotStaleAlertSent = true;
+  const ageMin = Math.round(age / 60000);
+  console.warn(`[WA-Watchdog] Bot stale seit ${ageMin}min — Alarm.`);
+  try {
+    // Technik + Praesident-Emails sammeln
+    const r = await pool.query(
+      `SELECT DISTINCT email FROM users
+        WHERE active = true AND email IS NOT NULL
+          AND (groups_json::jsonb ? 'technik' OR groups_json::jsonb ? 'Präsident')`,
+    );
+    const adminEmails = r.rows.map(x => x.email).filter(Boolean);
+    if (adminEmails.length === 0) return;
+    const lastReady = waBotHeartbeat?.is_ready ? 'ready' : 'nicht ready';
+    const phone = waBotHeartbeat?.phone || '(unbekannt)';
+    await loggedSendMail({
+      from: MAIL_FROM,
+      to: adminEmails.join(', '),
+      subject: '⚠ WhatsApp-Bot reagiert nicht',
+      text: `Der WhatsApp-Bot hat seit ${ageMin} Minuten keinen Heartbeat gesendet.\n\n`
+        + `Letzte Meldung: ${new Date(lastHb).toLocaleString('de-CH')}\n`
+        + `Letzter Status: ${lastReady}\n`
+        + `Telefon: ${phone}\n\n`
+        + `Pruefen: docker service ps rosenweg_whatsapp-bot\n`
+        + `Logs:    docker service logs rosenweg_whatsapp-bot --tail 50\n`
+        + `Admin-UI: ${SITE_URL}/whatsapp-bot-admin.html`,
+    }, 'whatsapp-bot-stale').catch(() => {});
+    pushWhatsappBroadcast({
+      emails: adminEmails,
+      sourceType: 'bot-watchdog',
+      body: `⚠ *WhatsApp-Bot stale*\nKein Heartbeat seit ${ageMin}min.\nDocker-Logs pruefen.`,
+    }).catch(() => {});
+  } catch (err) {
+    console.warn('[WA-Watchdog] Alarm konnte nicht gesendet werden:', err.message);
+  }
+}
+setInterval(checkBotHeartbeat, 60_000); // jede Minute pruefen
+
 // QR-Code-Bridge: Bot pusht den aktuellen QR; Admin holt ihn als PNG.
 // In-Memory (volatile, kein DB-Stoerfaktor; QR rotiert eh alle 60s).
 let waCurrentQrPng = null;
@@ -12297,12 +12354,18 @@ app.get('/api/whatsapp/admin/status', authMiddleware, requireTechnikOrPraesident
       pool.query(`SELECT COUNT(DISTINCT person_id)::int AS n FROM whatsapp_messages WHERE person_id IS NOT NULL`),
       pool.query(`SELECT COUNT(*)::int AS n FROM personen WHERE whatsapp_opt_in = true`),
     ]);
+    const hbAgeSec = waBotHeartbeat?.received_at
+      ? Math.round((Date.now() - new Date(waBotHeartbeat.received_at).getTime()) / 1000)
+      : null;
     res.json({
       bot_secret_configured: !!WHATSAPP_SHARED_SECRET,
       outbox_pending: pending.rows[0].n,
       total_persons_active: byPerson.rows[0].n,
       opt_in_count: optIn.rows[0].n,
       recent_messages: recent.rows,
+      bot_heartbeat: waBotHeartbeat,
+      bot_heartbeat_age_seconds: hbAgeSec,
+      bot_alive: hbAgeSec !== null && hbAgeSec < 90, // grosszuegig: 3x Intervall
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
