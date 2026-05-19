@@ -31,6 +31,8 @@ const app = express();
 app.use('/api/email/inbound', express.raw({ type: '*/*', limit: '25mb' }));
 app.use('/api/documents', express.raw({ type: 'application/octet-stream', limit: '500mb' }));
 app.use('/api/scan-upload', express.raw({ type: 'application/octet-stream', limit: '500mb' }));
+// PBX-Voicemail-Upload: Asterisk-AGI laedt das WAV als Raw-Body hoch
+app.use('/api/pbx/voicemail', express.raw({ type: 'audio/wav', limit: '50mb' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(cors({
   origin: (origin, cb) => {
@@ -12093,6 +12095,135 @@ app.get('/api/verwaltung-mail-queue/:id/attachment/:idx', authMiddleware, requir
     res.status(404).end();
   } catch (err) {
     res.status(500).end();
+  }
+});
+
+// ─── PBX / Voicemail Integration ─────────────────────────────────────
+// Asterisk-AGI laedt aufgenommene Voicemails hier hoch. Wir transkribieren
+// via OpenRouter (Whisper-1), erstellen mit Claude eine kurze Zusammenfassung
+// und mailen Audio + Transkript + Summary an Technik+Praesident.
+//
+// Authentifizierung: gleiches Pattern wie WhatsApp-Bot — Shared-Secret im
+// X-PBX-Secret-Header, der mit PBX_SHARED_SECRET env var matched.
+
+const PBX_SHARED_SECRET = process.env.PBX_SHARED_SECRET || '';
+
+function requirePbxSecret(req, res, next) {
+  if (!PBX_SHARED_SECRET) return res.status(503).json({ error: 'PBX_SHARED_SECRET nicht konfiguriert' });
+  const provided = req.headers['x-pbx-secret'];
+  if (provided !== PBX_SHARED_SECRET) return res.status(401).json({ error: 'Unauthorized' });
+  next();
+}
+
+async function transcribeWhisper(audioBuf, mimeType = 'audio/wav') {
+  // OpenRouter unterstuetzt Whisper-large-v3 ueber den /audio/transcriptions endpoint.
+  // Falls OPENROUTER_API_KEY fehlt → leerer Transkript als Fallback.
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return { text: '', error: 'OPENROUTER_API_KEY nicht gesetzt' };
+  const form = new FormData();
+  form.append('file', new Blob([audioBuf], { type: mimeType }), 'voicemail.wav');
+  form.append('model', 'openai/whisper-1');
+  form.append('language', 'de');
+  try {
+    const r = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+    });
+    if (!r.ok) return { text: '', error: `Whisper ${r.status}: ${await r.text().catch(() => '')}` };
+    const data = await r.json();
+    return { text: data.text || '', error: null };
+  } catch (e) { return { text: '', error: e.message }; }
+}
+
+async function summarizeVoicemail(transcript, callerId) {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey || !transcript) return '';
+  try {
+    const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'anthropic/claude-haiku-4.5',
+        max_tokens: 300,
+        messages: [
+          {
+            role: 'system',
+            content: 'Du fasst Anrufbeantworter-Nachrichten der Rosenweg-STWEG zusammen. Liefere genau drei Zeilen: (1) Anliegen in 1 Satz, (2) Dringlichkeit niedrig/mittel/hoch, (3) Vorgeschlagene Aktion. Knapp, keine Hoeflichkeitsfloskeln.',
+          },
+          { role: 'user', content: `Anrufer: ${callerId}\nTranskript:\n${transcript}` },
+        ],
+      }),
+    });
+    if (!r.ok) return '';
+    const data = await r.json();
+    return data.choices?.[0]?.message?.content || '';
+  } catch { return ''; }
+}
+
+app.post('/api/pbx/voicemail', requirePbxSecret, async (req, res) => {
+  try {
+    const audioBuf = req.body;
+    if (!Buffer.isBuffer(audioBuf) || audioBuf.length < 1024) {
+      return res.status(400).json({ error: 'Audio-Body fehlt oder zu klein' });
+    }
+    const callerId = String(req.headers['x-caller-id'] || 'unbekannt').slice(0, 50);
+    const uniqueid = String(req.headers['x-unique-id'] || Date.now()).slice(0, 60);
+    console.log(`[pbx-voicemail] empfangen: caller=${callerId} uid=${uniqueid} size=${audioBuf.length}`);
+
+    // Transkription (parallel mit Mail-Vorbereitung)
+    const { text: transcript, error: whErr } = await transcribeWhisper(audioBuf);
+    if (whErr) console.warn('[pbx-voicemail] Whisper-Fehler:', whErr);
+    const summary = await summarizeVoicemail(transcript, callerId);
+
+    // Empfaenger: Technik + Praesident
+    const r = await pool.query(
+      `SELECT DISTINCT email FROM users
+        WHERE active = true AND email IS NOT NULL
+          AND (groups_json::jsonb ? 'technik' OR groups_json::jsonb ? 'Präsident')`,
+    );
+    const adminEmails = r.rows.map(x => x.email).filter(Boolean);
+
+    // Audio als Attachment + Text-Email
+    const subject = transcript
+      ? `📞 Voicemail von ${callerId} — ${transcript.slice(0, 60).replace(/\n/g, ' ')}…`
+      : `📞 Voicemail von ${callerId} (keine Transkription)`;
+    const body = [
+      `Eingang einer Voicemail an der Rosenweg-Nummer.`,
+      ``,
+      `Anrufer: ${callerId}`,
+      `Zeit: ${new Date().toLocaleString('de-CH')}`,
+      ``,
+      `── KI-Zusammenfassung ──`,
+      summary || '(keine Zusammenfassung verfuegbar)',
+      ``,
+      `── Volltranskript ──`,
+      transcript || '(keine Transkription verfuegbar)',
+      ``,
+      whErr ? `(Whisper-Fehler: ${whErr})` : '',
+    ].join('\n');
+
+    if (adminEmails.length > 0) {
+      await loggedSendMail({
+        from: MAIL_FROM,
+        to: adminEmails.join(', '),
+        subject,
+        text: body,
+        attachments: [{ filename: `voicemail-${uniqueid}.wav`, content: audioBuf, contentType: 'audio/wav' }],
+      }, 'pbx-voicemail').catch(err => console.warn('[pbx-voicemail] Mail-Fehler:', err.message));
+
+      // WhatsApp-Push an Admins mit Opt-In: kompakte Variante
+      pushWhatsappBroadcast({
+        emails: adminEmails,
+        sourceType: 'pbx-voicemail',
+        body: `📞 *Voicemail* von ${callerId}\n${summary ? summary.split('\n').slice(0,2).join('\n') : (transcript ? transcript.slice(0, 200) : '(keine Transkription)')}\n\nDetails per Email.`,
+      }).catch(() => {});
+    }
+
+    res.json({ ok: true, transcript_len: transcript.length, summary_present: !!summary });
+  } catch (err) {
+    console.error('[pbx-voicemail] error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
