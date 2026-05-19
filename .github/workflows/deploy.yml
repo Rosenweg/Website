@@ -13,6 +13,7 @@ env:
   SYSLOG_IMAGE: ghcr.io/rosenweg/syslog-collector
   TV_PROXY_IMAGE: ghcr.io/rosenweg/tv-proxy
   WHATSAPP_BOT_IMAGE: ghcr.io/rosenweg/rosenweg-whatsapp-bot
+  PBX_IMAGE: ghcr.io/rosenweg/rosenweg-pbx
 
 jobs:
   build-api:
@@ -159,3 +160,25 @@ jobs:
           tags: |
             ${{ env.WHATSAPP_BOT_IMAGE }}:latest
             ${{ env.WHATSAPP_BOT_IMAGE }}:${{ github.sha }}
+
+  build-pbx:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push PBX (Asterisk)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./pbx
+          push: true
+          tags: |
+            ${{ env.PBX_IMAGE }}:latest
+            ${{ env.PBX_IMAGE }}:${{ github.sha }}
