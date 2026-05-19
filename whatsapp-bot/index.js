@@ -22,6 +22,17 @@ if (!WA_SECRET) {
   process.exit(1);
 }
 
+// Chromium SingletonLock-Cleanup: nach Crash/SIGKILL bleiben Lock-Files
+// im Profil zurueck (Hostname-spezifisch); naechster Start kann das Profil
+// dann nicht oeffnen → permanenter Crashloop. Defensiv vor jedem Start.
+function cleanupChromiumLocks() {
+  const sessionDir = path.join(DATA_DIR, 'session');
+  for (const f of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+    try { fs.unlinkSync(path.join(sessionDir, f)); console.log('[WA] entferntes Lock:', f); } catch {}
+  }
+}
+cleanupChromiumLocks();
+
 const client = new Client({
   authStrategy: new LocalAuth({ dataPath: DATA_DIR }),
   puppeteer: {
@@ -36,17 +47,33 @@ const QR_PNG_PATH = path.join(DATA_DIR, 'qr.png');
 client.on('qr', async (qr) => {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('SCAN QR CODE mit WhatsApp → Einstellungen → Verknüpfte Geräte:');
-  console.log(`(QR als PNG verfuegbar unter ${QR_PNG_PATH} im Container)`);
+  console.log(`(QR als PNG: ${QR_PNG_PATH} im Container | URL: /api/whatsapp/qr.png)`);
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   qrcode.generate(qr, { small: true });
   try {
     await qrPng.toFile(QR_PNG_PATH, qr, { width: 512, margin: 2 });
   } catch (e) { console.warn('[WA] QR-PNG schreiben fehlgeschlagen:', e.message); }
+  // Auch an die API pushen, damit Admin den QR via Browser holen kann
+  try {
+    const png = await qrPng.toBuffer(qr, { width: 512, margin: 2 });
+    await fetch(`${API_BASE}/api/whatsapp/qr`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-WA-Secret': WA_SECRET },
+      body: JSON.stringify({ png_base64: png.toString('base64') }),
+    });
+  } catch (e) { console.warn('[WA] QR an API pushen fehlgeschlagen:', e.message); }
 });
 
-client.on('authenticated', () => {
+client.on('authenticated', async () => {
   console.log('[WA] Authentifiziert');
   try { fs.unlinkSync(QR_PNG_PATH); } catch {}
+  // QR aus API loeschen (paired)
+  try {
+    await fetch(`${API_BASE}/api/whatsapp/qr`, {
+      method: 'DELETE',
+      headers: { 'X-WA-Secret': WA_SECRET },
+    });
+  } catch {}
 });
 client.on('auth_failure', (m) => console.error('[WA] Auth fehlgeschlagen:', m));
 client.on('disconnected', (r) => { console.warn('[WA] Disconnected:', r); isReady = false; });

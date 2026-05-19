@@ -12258,6 +12258,36 @@ app.post('/api/whatsapp/status', requireWhatsappSecret, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// QR-Code-Bridge: Bot pusht den aktuellen QR; Admin holt ihn als PNG.
+// In-Memory (volatile, kein DB-Stoerfaktor; QR rotiert eh alle 60s).
+let waCurrentQrPng = null;
+let waCurrentQrAt  = null;
+app.post('/api/whatsapp/qr', requireWhatsappSecret, (req, res) => {
+  const b64 = req.body?.png_base64;
+  if (!b64) return res.status(400).json({ error: 'png_base64 fehlt' });
+  waCurrentQrPng = Buffer.from(b64, 'base64');
+  waCurrentQrAt  = new Date();
+  res.json({ ok: true, bytes: waCurrentQrPng.length });
+});
+app.delete('/api/whatsapp/qr', requireWhatsappSecret, (_req, res) => {
+  waCurrentQrPng = null;
+  waCurrentQrAt  = null;
+  res.json({ ok: true });
+});
+app.get('/api/whatsapp/qr.png', authMiddleware, requireTechnikOrPraesident, (_req, res) => {
+  if (!waCurrentQrPng) return res.status(404).json({ error: 'Kein QR aktiv. Bot ist entweder gepairt oder nicht bereit.' });
+  res.set('Content-Type', 'image/png');
+  res.set('Cache-Control', 'no-store');
+  res.send(waCurrentQrPng);
+});
+app.get('/api/whatsapp/qr-status', authMiddleware, requireTechnikOrPraesident, (_req, res) => {
+  res.json({
+    available: !!waCurrentQrPng,
+    received_at: waCurrentQrAt,
+    age_seconds: waCurrentQrAt ? Math.round((Date.now() - waCurrentQrAt.getTime()) / 1000) : null,
+  });
+});
+
 // Admin-API fuer UI: Status + letzte Nachrichten + Outbox
 app.get('/api/whatsapp/admin/status', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
   try {
