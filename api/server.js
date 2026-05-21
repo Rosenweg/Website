@@ -12286,6 +12286,70 @@ app.delete('/api/pbx/ring-members/:id', authMiddleware, requireTechnikOrPraeside
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── PBX Config (Geschaeftszeiten + Ring-Timeout) ─────────────────────────
+app.get('/api/pbx/config', authMiddleware, requireTechnikOrPraesident, async (_req, res) => {
+  try {
+    const r = await pool.query(`SELECT key, value, updated_at, updated_by FROM pbx_config ORDER BY key`);
+    const config = {};
+    for (const row of r.rows) config[row.key] = { value: row.value, updated_at: row.updated_at, updated_by: row.updated_by };
+    res.json({ config });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/pbx/config', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  const updates = req.body || {};
+  const allowed = ['hours_open_from', 'hours_open_to', 'ring_timeout', 'weekdays'];
+  // Validation
+  const hhmm = /^([01]\d|2[0-3]):[0-5]\d$/;
+  for (const [k, v] of Object.entries(updates)) {
+    if (!allowed.includes(k)) return res.status(400).json({ error: `Unbekannter Key: ${k}` });
+    if ((k === 'hours_open_from' || k === 'hours_open_to') && !hhmm.test(v)) {
+      return res.status(400).json({ error: `${k} muss HH:MM sein` });
+    }
+    if (k === 'ring_timeout' && (!Number.isFinite(+v) || +v < 5 || +v > 120)) {
+      return res.status(400).json({ error: 'ring_timeout muss 5-120 Sekunden sein' });
+    }
+  }
+  try {
+    for (const [k, v] of Object.entries(updates)) {
+      await pool.query(
+        `INSERT INTO pbx_config (key, value, updated_by) VALUES ($1, $2, $3)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+        [k, String(v), req.user.email || req.user.name],
+      );
+    }
+    res.json({ ok: true, updated: Object.keys(updates) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// AGI-Endpoint: liefert ob jetzt Geschaeftszeit ist (timezone Europe/Zurich)
+app.get('/api/pbx/hours/check', requirePbxSecret, async (_req, res) => {
+  try {
+    const r = await pool.query(`SELECT key, value FROM pbx_config WHERE key IN ('hours_open_from','hours_open_to','weekdays')`);
+    const cfg = {};
+    for (const row of r.rows) cfg[row.key] = row.value;
+    const from = cfg.hours_open_from || '06:00';
+    const to   = cfg.hours_open_to   || '20:00';
+    // Aktuelle Schweizer Zeit
+    const now = new Date();
+    const fmt = new Intl.DateTimeFormat('de-CH', {
+      timeZone: 'Europe/Zurich', hour: '2-digit', minute: '2-digit', weekday: 'short', hour12: false,
+    }).formatToParts(now);
+    const hh = fmt.find(p => p.type === 'hour').value;
+    const mm = fmt.find(p => p.type === 'minute').value;
+    const wd = fmt.find(p => p.type === 'weekday').value.toLowerCase(); // mo,di,…
+    const nowHM = `${hh}:${mm}`;
+    const inHours = nowHM >= from && nowHM < to;
+    res.json({
+      is_open: inHours, // simpler: ignoriert weekdays vorerst
+      now_local: nowHM,
+      weekday: wd,
+      from, to,
+      ring_timeout: parseInt(cfg.ring_timeout || '30', 10),
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Aktive Liste fuer AGI-Lookup: nur enabled + nicht abgelaufen, geordnet
 app.get('/api/pbx/ring-members/active', requirePbxSecret, async (_req, res) => {
   try {
@@ -12297,6 +12361,113 @@ app.get('/api/pbx/ring-members/active', requirePbxSecret, async (_req, res) => {
     );
     res.json({ members: r.rows });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── PBX Call-Log Events (von Asterisk-AGI gepostet) ─────────────────────
+// Body: { event: 'start' | 'answer' | 'end', direction, caller_id, dialed,
+//          uniqueid, answered_by, hangup_cause, started_at, answered_at, ended_at }
+app.post('/api/pbx/call-event', requirePbxSecret, async (req, res) => {
+  const { event, direction, caller_id, dialed, uniqueid, answered_by, hangup_cause,
+          started_at, answered_at, ended_at, meta } = req.body || {};
+  if (!event || !uniqueid) return res.status(400).json({ error: 'event + uniqueid erforderlich' });
+  try {
+    if (event === 'start') {
+      await pool.query(
+        `INSERT INTO pbx_calls (direction, caller_id, dialed, uniqueid, started_at, meta)
+         VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz, NOW()), $6::jsonb)
+         ON CONFLICT (uniqueid) DO NOTHING`,
+        [direction || 'inbound', caller_id, dialed, uniqueid, started_at || null, JSON.stringify(meta || {})],
+      );
+    } else if (event === 'answer') {
+      await pool.query(
+        `UPDATE pbx_calls SET answered_at = COALESCE($2::timestamptz, NOW()), answered_by = $3 WHERE uniqueid = $1`,
+        [uniqueid, answered_at || null, answered_by || null],
+      );
+    } else if (event === 'end') {
+      await pool.query(
+        `UPDATE pbx_calls SET ended_at = COALESCE($2::timestamptz, NOW()),
+                              hangup_cause = $3,
+                              duration_seconds = CASE WHEN answered_at IS NOT NULL THEN
+                                EXTRACT(EPOCH FROM (COALESCE($2::timestamptz, NOW()) - answered_at))::int
+                              END
+          WHERE uniqueid = $1`,
+        [uniqueid, ended_at || null, hangup_cause || null],
+      );
+    }
+    res.json({ ok: true });
+  } catch (err) { console.error('[pbx-call-event]', err); res.status(500).json({ error: err.message }); }
+});
+
+// ── PBX Call-Log (Admin-View) ────────────────────────────────────────────
+app.get('/api/pbx/calls', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+  try {
+    const r = await pool.query(
+      `SELECT id, direction, caller_id, dialed, started_at, answered_at, ended_at,
+              answered_by, duration_seconds, hangup_cause,
+              voicemail_transcript, voicemail_summary
+         FROM pbx_calls ORDER BY started_at DESC LIMIT $1`,
+      [limit],
+    );
+    res.json({ calls: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── PBX Test-Outbound (Sandbox) + Trunk-Status ─────────────────────────────
+// Asterisk-Manager-Interface auf 100.64.2.29:5038 (siehe manager.conf in pbx/)
+const PBX_HOST = process.env.PBX_HOST || '100.64.2.29';
+const PBX_AMI_USER = process.env.PBX_AMI_USER || 'rosenweg';
+const PBX_AMI_SECRET = process.env.PBX_AMI_SECRET || '';
+
+function amiCommand(action, extraFields = {}) {
+  return new Promise((resolve, reject) => {
+    const net = require('net');
+    const client = net.connect(5038, PBX_HOST, () => {
+      client.write(`Action: Login\r\nUsername: ${PBX_AMI_USER}\r\nSecret: ${PBX_AMI_SECRET}\r\n\r\n`);
+      const fields = Object.entries(extraFields).map(([k, v]) => `${k}: ${v}`).join('\r\n');
+      client.write(`Action: ${action}\r\n${fields}\r\nActionID: rw1\r\n\r\n`);
+      client.write(`Action: Logoff\r\n\r\n`);
+    });
+    let buf = '';
+    client.on('data', d => buf += d.toString());
+    client.on('end', () => resolve(buf));
+    client.on('error', reject);
+    setTimeout(() => { try { client.destroy(); } catch {} reject(new Error('AMI-Timeout')); }, 8000);
+  });
+}
+
+app.get('/api/pbx/trunk-status', authMiddleware, requireTechnikOrPraesident, async (_req, res) => {
+  try {
+    const out = await amiCommand('Command', { Command: 'pjsip show registrations' });
+    const reg = /Registered\s+\(exp\.\s+(\d+)s\)/.exec(out);
+    res.json({
+      registered: !!reg,
+      expires_in_seconds: reg ? parseInt(reg[1], 10) : null,
+      raw: out.slice(0, 2000),
+    });
+  } catch (err) {
+    res.status(503).json({ error: 'PBX nicht erreichbar (AMI): ' + err.message });
+  }
+});
+
+app.post('/api/pbx/test-call', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  const phone = String(req.body?.phone || '').trim();
+  const normalized = normalizePhone(phone);
+  if (!normalized) return res.status(400).json({ error: 'phone erforderlich (intl Format)' });
+  try {
+    const out = await amiCommand('Originate', {
+      Channel: `PJSIP/${normalized}@peoplefone`,
+      Context: 'internal',
+      Exten: '1000',
+      Priority: '1',
+      CallerID: 'Rosenweg <90765821559>',
+      Async: 'true',
+      Timeout: '30000',
+    });
+    res.json({ ok: true, dialed: normalized, raw: out.slice(0, 500) });
+  } catch (err) {
+    res.status(503).json({ error: 'AMI-Fehler: ' + err.message });
+  }
 });
 
 // ─── WhatsApp-Bot Integration ────────────────────────────────────────
