@@ -76,14 +76,22 @@ def main():
 
     if not members:
         log('Keine aktiven Members')
-        set_var('RING_DIAL', '')
+        set_var('RING_LEVELS', '0')
         return
 
-    # Build Dial-String: "PJSIP/+41xxx@peoplefone&PJSIP/+41yyy@peoplefone"
-    dial_parts = [f"PJSIP/{m['phone']}@peoplefone" for m in members]
-    dial_str = '&'.join(dial_parts)
-    log(f'{len(members)} Members: {", ".join(m["name"] for m in members)}')
-    set_var('RING_DIAL', dial_str)
+    # Gruppiere Members nach priority. Gleiche Prio = parallel, unterschiedliche = sequenziell.
+    by_prio = {}
+    for m in members:
+        by_prio.setdefault(int(m.get('priority', 100)), []).append(m)
+
+    # Sortiere Levels: kleinste Prio zuerst. Max 4 Levels.
+    levels = sorted(by_prio.keys())[:4]
+    set_var('RING_LEVELS', str(len(levels)))
+    for idx, prio in enumerate(levels, start=1):
+        ms = by_prio[prio]
+        dial_str = '&'.join(f"PJSIP/{m['phone']}@peoplefone" for m in ms)
+        set_var(f'RING_DIAL_{idx}', dial_str)
+        log(f"Level {idx} (Prio {prio}): {', '.join(m['name'] for m in ms)}")
 
 if __name__ == '__main__':
     main()
