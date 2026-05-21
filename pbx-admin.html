@@ -77,7 +77,11 @@
           <button onclick="openAddModal()" class="text-sm bg-blue-600 text-white rounded px-3 py-1.5 hover:bg-blue-700">+ Mitglied</button>
         </div>
         <div class="p-4">
-          <p class="text-xs text-gray-600 mb-3">Aktive Mitglieder klingeln parallel bei eingehenden Anrufen waehrend Geschaeftszeit. Temporaere Mitglieder werden nach Ablauf automatisch deaktiviert. Wenn keine Member aktiv ist, geht der Anruf direkt auf die KI-Voicemail.</p>
+          <p class="text-xs text-gray-600 mb-3">
+            Cascading-Klingeln: <strong>gleiche Prio = parallel</strong>, <strong>niedrigere Prio zuerst</strong>.
+            Beispiel: Stefan + Andreas Prio 10 (parallel 15s) → bei No-Answer → Marc Prio 20 (15s) → Voicemail.
+            Ring-Timeout wird auf die Stufen aufgeteilt. Temporaere Mitglieder werden nach Ablauf automatisch deaktiviert.
+          </p>
           <table class="min-w-full text-sm">
             <thead class="text-xs text-gray-500 uppercase border-b">
               <tr>
