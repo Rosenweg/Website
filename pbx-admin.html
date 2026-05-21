@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PBX-Admin — Rosenweg</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/nav.js?v=2"></script>
+  <script src="/js/phone-helpers.js?v=1"></script>
+  <link rel="icon" href="/logo-rosenweg.png">
+  <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'); body { font-family: 'Inter', sans-serif; }</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+  <script>RosenwegNav.init({ active: 'pbx-admin' });</script>
+
+  <main class="max-w-5xl mx-auto px-4 py-6">
+    <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center"><p class="text-gray-600">Lade…</p></div>
+
+    <div id="content" class="hidden">
+      <h1 class="text-2xl font-bold text-gray-900 mb-1">📞 PBX (Telefonanlage)</h1>
+      <p class="text-sm text-gray-600 mb-6">Asterisk auf CT 220. Trunk: <code>sips.peoplefone.ch</code>. Rosenweg-Nummer: <strong>+41 61 551 01 52</strong>.</p>
+
+      <!-- Ring-Group-Mitglieder -->
+      <div class="bg-white rounded-lg shadow mb-6">
+        <div class="px-4 py-3 border-b flex justify-between items-center">
+          <h2 class="text-lg font-semibold">🔔 Ring-Group Mitglieder</h2>
+          <button onclick="openAddModal()" class="text-sm bg-blue-600 text-white rounded px-3 py-1.5 hover:bg-blue-700">+ Mitglied</button>
+        </div>
+        <div class="p-4">
+          <p class="text-xs text-gray-600 mb-3">Aktive Mitglieder klingeln parallel bei eingehenden Anrufen waehrend Geschaeftszeit. Temporaere Mitglieder werden nach Ablauf automatisch deaktiviert. Wenn keine Member aktiv ist, geht der Anruf direkt auf die KI-Voicemail.</p>
+          <table class="min-w-full text-sm">
+            <thead class="text-xs text-gray-500 uppercase border-b">
+              <tr>
+                <th class="text-left py-2">Aktiv</th>
+                <th class="text-left py-2">Name</th>
+                <th class="text-left py-2 font-mono">Nummer</th>
+                <th class="text-left py-2">Typ</th>
+                <th class="text-left py-2">Gueltig bis</th>
+                <th class="text-left py-2">Prio</th>
+                <th class="text-left py-2">Hinzugefuegt</th>
+                <th class="text-right py-2">Aktionen</th>
+              </tr>
+            </thead>
+            <tbody id="members-tbody" class="divide-y divide-gray-100"></tbody>
+          </table>
+          <p id="members-status" class="text-xs mt-3"></p>
+        </div>
+      </div>
+
+      <!-- Add/Edit Modal -->
+      <div id="member-modal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+          <h3 id="modal-title" class="text-lg font-bold mb-4">Mitglied hinzufuegen</h3>
+          <form id="member-form" class="space-y-3">
+            <input type="hidden" id="m-id">
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Name</label>
+              <input type="text" id="m-name" required class="w-full border rounded px-2 py-1.5 text-sm">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Telefonnummer</label>
+              <input type="tel" id="m-phone" data-phone-format placeholder="+41 79 …" required class="w-full border rounded px-2 py-1.5 text-sm font-mono">
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-sm font-medium text-gray-700">Prioritaet</label>
+                <input type="number" id="m-priority" value="100" min="1" max="999" class="w-full border rounded px-2 py-1.5 text-sm">
+                <p class="text-xs text-gray-500 mt-0.5">Niedriger = zuerst</p>
+              </div>
+              <div>
+                <label class="flex items-center gap-2 mt-6">
+                  <input type="checkbox" id="m-temp"> <span class="text-sm">Temporaer</span>
+                </label>
+              </div>
+            </div>
+            <div id="valid-until-wrap" class="hidden">
+              <label class="block text-sm font-medium text-gray-700">Gueltig bis</label>
+              <input type="datetime-local" id="m-valid-until" class="w-full border rounded px-2 py-1.5 text-sm">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Notiz (optional)</label>
+              <input type="text" id="m-notiz" class="w-full border rounded px-2 py-1.5 text-sm">
+            </div>
+            <div class="flex justify-end gap-2 pt-2">
+              <button type="button" onclick="closeMemberModal()" class="text-sm px-3 py-1.5 text-gray-600 hover:bg-gray-100 rounded">Abbrechen</button>
+              <button type="submit" class="text-sm bg-blue-600 text-white rounded px-4 py-1.5 hover:bg-blue-700">Speichern</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const fmtDt = s => s ? new Date(s).toLocaleString('de-CH', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+  const isExpired = (s) => s && new Date(s) <= new Date();
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    const u = await AuthentikAuth.init({ requireAuth: true });
+    if (!u) return;
+    document.getElementById('auth-gate').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+    document.getElementById('member-form').addEventListener('submit', saveMember);
+    document.getElementById('m-temp').addEventListener('change', e => {
+      document.getElementById('valid-until-wrap').classList.toggle('hidden', !e.target.checked);
+    });
+    await loadMembers();
+  });
+
+  async function loadMembers() {
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/pbx/ring-members');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const { members } = await r.json();
+      const tbody = document.getElementById('members-tbody');
+      if (members.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-6 text-gray-400 italic">Noch keine Mitglieder — Anrufe gehen direkt auf KI-Voicemail.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = members.map(m => {
+        const expired = isExpired(m.valid_until);
+        const isActive = m.enabled && !expired;
+        return `<tr class="hover:bg-gray-50 ${expired ? 'opacity-50' : ''}">
+          <td class="py-2"><label class="inline-flex items-center"><input type="checkbox" ${m.enabled ? 'checked' : ''} onchange="toggleMember(${m.id}, this.checked)" class="h-4 w-4 rounded text-blue-600"></label></td>
+          <td class="py-2 font-medium">${esc(m.name)}</td>
+          <td class="py-2 font-mono">${esc(m.phone)}</td>
+          <td class="py-2">${m.is_temporary ? '<span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded">temp</span>' : '<span class="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded">perm</span>'}</td>
+          <td class="py-2 text-xs ${expired ? 'text-red-600 font-bold' : 'text-gray-600'}">${m.valid_until ? fmtDt(m.valid_until) + (expired ? ' (abgelaufen)' : '') : '—'}</td>
+          <td class="py-2 text-xs">${m.priority}</td>
+          <td class="py-2 text-xs text-gray-500">${esc(m.added_by || '')}<br>${fmtDt(m.created_at)}</td>
+          <td class="py-2 text-right">
+            <button onclick='editMember(${JSON.stringify(m)})' class="text-xs text-blue-600 hover:underline">Bearbeiten</button>
+            <button onclick="delMember(${m.id}, '${esc(m.name)}')" class="text-xs text-red-600 hover:underline ml-2">Loeschen</button>
+          </td>
+        </tr>`;
+      }).join('');
+    } catch (e) {
+      document.getElementById('members-tbody').innerHTML = `<tr><td colspan="8" class="text-red-600 py-3">Fehler: ${esc(e.message)}</td></tr>`;
+    }
+  }
+
+  async function toggleMember(id, enabled) {
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/pbx/ring-members/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      document.getElementById('members-status').textContent = `✓ ${enabled ? 'Aktiviert' : 'Deaktiviert'}`;
+      document.getElementById('members-status').className = 'text-xs mt-3 text-green-700';
+      setTimeout(loadMembers, 200);
+    } catch (e) {
+      document.getElementById('members-status').textContent = '⚠ ' + e.message;
+      document.getElementById('members-status').className = 'text-xs mt-3 text-red-700';
+      loadMembers(); // revert
+    }
+  }
+
+  function openAddModal() {
+    document.getElementById('modal-title').textContent = 'Mitglied hinzufuegen';
+    document.getElementById('member-form').reset();
+    document.getElementById('m-id').value = '';
+    document.getElementById('valid-until-wrap').classList.add('hidden');
+    document.getElementById('member-modal').classList.remove('hidden');
+  }
+
+  function editMember(m) {
+    document.getElementById('modal-title').textContent = 'Mitglied bearbeiten';
+    document.getElementById('m-id').value = m.id;
+    document.getElementById('m-name').value = m.name;
+    document.getElementById('m-phone').value = m.phone;
+    document.getElementById('m-priority').value = m.priority;
+    document.getElementById('m-temp').checked = m.is_temporary;
+    document.getElementById('m-notiz').value = m.notiz || '';
+    document.getElementById('valid-until-wrap').classList.toggle('hidden', !m.is_temporary);
+    if (m.valid_until) {
+      // Convert ISO to local datetime-input format
+      const d = new Date(m.valid_until);
+      const pad = n => String(n).padStart(2, '0');
+      document.getElementById('m-valid-until').value =
+        `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+    document.getElementById('member-modal').classList.remove('hidden');
+  }
+
+  function closeMemberModal() {
+    document.getElementById('member-modal').classList.add('hidden');
+  }
+
+  async function saveMember(ev) {
+    ev.preventDefault();
+    const id = document.getElementById('m-id').value;
+    const body = {
+      name: document.getElementById('m-name').value.trim(),
+      phone: document.getElementById('m-phone').value.trim(),
+      priority: parseInt(document.getElementById('m-priority').value, 10),
+      is_temporary: document.getElementById('m-temp').checked,
+      notiz: document.getElementById('m-notiz').value.trim() || null,
+    };
+    if (body.is_temporary) {
+      const vu = document.getElementById('m-valid-until').value;
+      if (vu) body.valid_until = new Date(vu).toISOString();
+    } else {
+      body.valid_until = null;
+    }
+    const method = id ? 'PUT' : 'POST';
+    const url = id ? `/api/pbx/ring-members/${id}` : '/api/pbx/ring-members';
+    try {
+      const r = await AuthentikAuth.apiFetch(url, {
+        method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error((await r.json()).error || 'HTTP ' + r.status);
+      closeMemberModal();
+      await loadMembers();
+    } catch (e) {
+      alert('Fehler: ' + e.message);
+    }
+  }
+
+  async function delMember(id, name) {
+    if (!confirm(`Mitglied "${name}" wirklich loeschen?`)) return;
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/pbx/ring-members/${id}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      await loadMembers();
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+  </script>
+</body>
+</html>

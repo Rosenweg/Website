@@ -43,6 +43,7 @@ const SERVICES_GROUPS = [
     icon: '💬',
     items: [
       { label: 'WhatsApp-Bot Admin', href: 'whatsapp-bot-admin.html', activeKey: 'whatsapp-bot', perm: 'whatsapp-bot' },
+      { label: 'PBX (Telefonanlage)', href: 'pbx-admin.html', activeKey: 'pbx-admin', perm: 'pbx-admin' },
       { label: 'Reklamationen', href: 'reklamationen.html', activeKey: 'reklamationen', perm: 'reklamationen' },
     ],
   },
