@@ -12227,6 +12227,78 @@ app.post('/api/pbx/voicemail', requirePbxSecret, async (req, res) => {
   }
 });
 
+// ── PBX Ring-Members: Admin-Verwaltung der Empfaengerliste ─────────────
+// Asterisk-AGI holt die aktive Liste live via /active-Endpoint.
+
+app.get('/api/pbx/ring-members', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT id, name, phone, enabled, is_temporary, valid_until, priority, person_id, added_by, notiz, created_at, updated_at
+         FROM pbx_ring_members
+        ORDER BY priority, name`
+    );
+    res.json({ members: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/pbx/ring-members', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  const { name, phone, is_temporary, valid_until, priority, person_id, notiz } = req.body || {};
+  if (!name || !phone) return res.status(400).json({ error: 'name + phone erforderlich' });
+  const normalized = normalizePhone(phone);
+  if (!normalized) return res.status(400).json({ error: 'Telefonnummer ungueltig' });
+  try {
+    const r = await pool.query(
+      `INSERT INTO pbx_ring_members (name, phone, is_temporary, valid_until, priority, person_id, notiz, added_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [name, normalized, !!is_temporary, valid_until || null, priority || 100, person_id || null, notiz || null, req.user.email || req.user.name],
+    );
+    res.json({ member: r.rows[0] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/pbx/ring-members/:id', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const fields = ['name', 'phone', 'enabled', 'is_temporary', 'valid_until', 'priority', 'notiz'];
+  const updates = [];
+  const params = [];
+  for (const f of fields) {
+    if (req.body[f] !== undefined) {
+      params.push(f === 'phone' ? (normalizePhone(req.body[f]) || req.body[f]) : req.body[f]);
+      updates.push(`${f} = $${params.length}`);
+    }
+  }
+  if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderung' });
+  params.push(id);
+  try {
+    const r = await pool.query(
+      `UPDATE pbx_ring_members SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${params.length} RETURNING *`,
+      params,
+    );
+    if (!r.rows[0]) return res.status(404).json({ error: 'Nicht gefunden' });
+    res.json({ member: r.rows[0] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/pbx/ring-members/:id', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    await pool.query(`DELETE FROM pbx_ring_members WHERE id = $1`, [parseInt(req.params.id, 10)]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Aktive Liste fuer AGI-Lookup: nur enabled + nicht abgelaufen, geordnet
+app.get('/api/pbx/ring-members/active', requirePbxSecret, async (_req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT id, name, phone, priority FROM pbx_ring_members
+        WHERE enabled = true
+          AND (valid_until IS NULL OR valid_until > NOW())
+        ORDER BY priority, name`
+    );
+    res.json({ members: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ─── WhatsApp-Bot Integration ────────────────────────────────────────
 // Schnittstellen-Design: agnostisch zur Provider-Wahl (whatsapp-web.js,
 // Cloud API, etc.). Bot-Service ruft /api/whatsapp/inbound auf, holt
@@ -13573,6 +13645,56 @@ async function initDB() {
       ALTER TABLE personen ADD COLUMN IF NOT EXISTS telefone JSONB DEFAULT '[]'::jsonb;
       ALTER TABLE personen ADD COLUMN IF NOT EXISTS whatsapp_opt_in BOOLEAN DEFAULT false;
       ALTER TABLE personen ADD COLUMN IF NOT EXISTS whatsapp_letzte_aktivitaet TIMESTAMPTZ;
+
+      -- PBX (Asterisk) Konfiguration + Call-Log
+      CREATE TABLE IF NOT EXISTS pbx_ring_members (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(120) NOT NULL,
+        phone VARCHAR(60) NOT NULL,             -- internationales Format z.B. +41765199970
+        enabled BOOLEAN DEFAULT true,           -- Toggle (auch fuer permanente)
+        is_temporary BOOLEAN DEFAULT false,     -- Vertretung
+        valid_until TIMESTAMPTZ,                -- NULL = permanent, sonst Ablauf
+        priority INTEGER DEFAULT 100,           -- niedrigere zuerst, gleiche parallel
+        person_id INTEGER REFERENCES personen(id) ON DELETE SET NULL,
+        added_by VARCHAR(255),
+        notiz TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_pbx_ring_enabled ON pbx_ring_members(enabled) WHERE enabled = true;
+
+      CREATE TABLE IF NOT EXISTS pbx_config (
+        key VARCHAR(60) PRIMARY KEY,
+        value TEXT,
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_by VARCHAR(255)
+      );
+      INSERT INTO pbx_config (key, value) VALUES
+        ('hours_open_from', '06:00'),
+        ('hours_open_to', '20:00'),
+        ('ring_timeout', '30'),
+        ('weekdays', 'mon-sun')
+      ON CONFLICT (key) DO NOTHING;
+
+      CREATE TABLE IF NOT EXISTS pbx_calls (
+        id SERIAL PRIMARY KEY,
+        direction VARCHAR(10) NOT NULL,         -- 'inbound' | 'outbound'
+        caller_id VARCHAR(60),
+        dialed VARCHAR(60),
+        uniqueid VARCHAR(60) UNIQUE,            -- Asterisk Channel UniqueID
+        started_at TIMESTAMPTZ DEFAULT NOW(),
+        answered_at TIMESTAMPTZ,
+        ended_at TIMESTAMPTZ,
+        answered_by VARCHAR(60),                -- welche Ring-Group-Nummer abgenommen hat
+        duration_seconds INTEGER,
+        hangup_cause VARCHAR(40),               -- z.B. 'NORMAL', 'NOANSWER', 'BUSY'
+        voicemail_path TEXT,                    -- Pfad zur WAV im CT 220
+        voicemail_transcript TEXT,
+        voicemail_summary TEXT,
+        meta JSONB DEFAULT '{}'::jsonb
+      );
+      CREATE INDEX IF NOT EXISTS idx_pbx_calls_started ON pbx_calls(started_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_pbx_calls_direction ON pbx_calls(direction);
       -- Mehrfach-Emails pro Person (Alias-Adressen, z.B. privat + geschaeft).
       -- Format: ["alias1@example.com","alias2@example.com"]. Primary bleibt
       -- in der email-Spalte. Lookup matcht email OR irgendeinen Eintrag hier.
