@@ -19,8 +19,23 @@ except ImportError:
     print('VERBOSE "[get-ring] requests-Modul fehlt" 1')
     sys.exit(0)
 
-API_BASE   = os.environ.get('API_BASE', 'http://100.64.2.27:3000')
-PBX_SECRET = os.environ.get('PBX_SHARED_SECRET', '')
+# ENV aus /etc/default/asterisk-env lesen wenn nicht im Prozess-ENV
+# (Asterisk-Start via init.d reicht EnvironmentFile nicht durch)
+def _load_env_file(path='/etc/default/asterisk-env'):
+    env = {}
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'): continue
+                if '=' in line:
+                    k, v = line.split('=', 1)
+                    env[k.strip()] = v.strip().strip('"').strip("'")
+    except FileNotFoundError: pass
+    return env
+_envfile = _load_env_file()
+API_BASE   = os.environ.get('API_BASE')   or _envfile.get('API_BASE',   'http://100.64.2.27:3000')
+PBX_SECRET = os.environ.get('PBX_SHARED_SECRET') or _envfile.get('PBX_SHARED_SECRET', '')
 
 # AGI-Protokoll: stdin liest Header bis Leerzeile, dann Commands auf stdout
 def consume_agi_env():

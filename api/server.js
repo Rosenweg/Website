@@ -14120,6 +14120,14 @@ async function initDB() {
       `, [groupName]);
     }
 
+    // PBX-Admin (Asterisk-Konfiguration): nur Technik + Praesident
+    await client.query(`
+      INSERT INTO permissions (group_name, page, access) VALUES
+      ('technik', 'pbx-admin', 'write'),
+      ('Präsident', 'pbx-admin', 'write')
+      ON CONFLICT (group_name, page) DO NOTHING
+    `);
+
     // Default Approval-Regel: technik ODER praesident, 1 Freigabe genuegt.
     await client.query(`
       INSERT INTO mail_approval_config (source_type_pattern, required_groups, min_approvers, sort_order, notiz)
