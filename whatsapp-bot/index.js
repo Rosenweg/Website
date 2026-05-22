@@ -119,7 +119,9 @@ client.on('ready', () => {
 client.on('message', async (msg) => {
   try {
     if (msg.fromMe) return;
-    if (!msg.from.endsWith('@c.us')) return; // nur 1:1 Chats, keine Gruppen
+    // Gruppen-Nachrichten ignorieren wir nach wie vor fuer Commands
+    // (sonst wuerde der Bot in Gruppen auf alles reagieren). Nur 1:1.
+    if (!msg.from.endsWith('@c.us')) return;
     const phone = '+' + msg.from.replace('@c.us', '');
     const body = msg.body || '';
     const attachments = [];
@@ -157,7 +159,12 @@ async function pollOutbox() {
     const { messages } = await res.json();
     for (const m of (messages || [])) {
       try {
-        const chatId = m.phone.replace(/\D/g, '') + '@c.us';
+        // Group-Chat: phone-Feld kann eine Group-JID enthalten (Format: "<num>-<num>@g.us"
+        // oder "<num>@g.us"). Wir erkennen das anhand des @g.us-Suffix und nutzen
+        // die JID direkt als chatId. Sonst klassischer 1:1-Chat via Nummer.
+        const chatId = m.phone.endsWith('@g.us')
+          ? m.phone
+          : m.phone.replace(/\D/g, '') + '@c.us';
         // Anhaenge (falls vorhanden) als MessageMedia
         let mediaSent = false;
         for (const a of (m.attachments || [])) {
@@ -209,9 +216,8 @@ async function sendHeartbeat() {
 }
 setInterval(sendHeartbeat, HEARTBEAT_MS);
 
-// HTTP-Healthcheck: Docker Swarm pingt das, restartet Container wenn down.
-// Liefert 200 nur wenn Bot "ready" ist; 503 wenn (noch) nicht.
-const healthServer = http.createServer((req, res) => {
+// HTTP-Healthcheck + Groups-Endpoint
+const healthServer = http.createServer(async (req, res) => {
   if (req.url === '/health') {
     if (isReady) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -220,9 +226,29 @@ const healthServer = http.createServer((req, res) => {
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: 'not_ready' }));
     }
-  } else {
-    res.writeHead(404); res.end();
+    return;
   }
+  if (req.url === '/groups') {
+    if (req.headers['x-wa-secret'] !== WA_SECRET) {
+      res.writeHead(401); res.end('Unauthorized'); return;
+    }
+    if (!isReady) { res.writeHead(503); res.end('not_ready'); return; }
+    try {
+      const chats = await client.getChats();
+      const groups = chats.filter(c => c.isGroup).map(c => ({
+        id: c.id._serialized,
+        name: c.name,
+        participants: (c.groupMetadata?.participants || []).length,
+      }));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ groups }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+  res.writeHead(404); res.end();
 });
 healthServer.listen(HEALTH_PORT, () => console.log('[WA] Healthcheck-HTTP auf Port', HEALTH_PORT));
 
