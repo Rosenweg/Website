@@ -862,13 +862,39 @@
                         <strong>&#128218; Vollstaendige Berechtigungsmatrix:</strong> Welche Rolle auf welchen einzelnen Bereich Lese- oder Schreibzugriff hat &mdash; mit allen Sonderfaellen.
                     </p>
                     <div class="mt-3 flex flex-wrap gap-2">
-                        <a href="documents.html?path=allgemein/berechtigungen.pdf" class="inline-flex items-center gap-2 bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-700">
+                        <button onclick="downloadDoc('allgemein/berechtigungen.pdf')" class="inline-flex items-center gap-2 bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-700">
                             &#128196; PDF herunterladen
-                        </a>
-                        <a href="documents.html?path=allgemein/berechtigungen.md" class="inline-flex items-center gap-2 bg-gray-200 text-gray-800 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-300">
+                        </button>
+                        <button onclick="downloadDoc('allgemein/berechtigungen.md')" class="inline-flex items-center gap-2 bg-gray-200 text-gray-800 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-300">
                             &#128221; Markdown-Quelle
+                        </button>
+                        <a href="/#dokumente" class="inline-flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-100">
+                            &#128194; Alle Dokumente
                         </a>
                     </div>
+                    <script>
+                    async function downloadDoc(path) {
+                        try {
+                            if (!window.AuthentikAuth || !AuthentikAuth.apiFetch) {
+                                alert('Bitte zuerst einloggen, dann erneut probieren.');
+                                return;
+                            }
+                            const resp = await AuthentikAuth.apiFetch('/api/documents/' + path);
+                            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                            const blob = await resp.blob();
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = path.split('/').pop();
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            URL.revokeObjectURL(url);
+                        } catch (err) {
+                            alert('Download fehlgeschlagen: ' + err.message + '\n\nMoeglicherweise musst du erst einloggen.');
+                        }
+                    }
+                    </script>
                     <p class="text-xs text-gray-500 mt-2">Beide Dateien liegen unter <code>/allgemein/</code> auf dem Dokumente-Server. Erreichbar fuer alle eingeloggten User.</p>
                 </div>
 
