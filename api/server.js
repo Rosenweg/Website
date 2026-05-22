@@ -4337,6 +4337,52 @@ async function trackRemovedKontakte(wohnungId, stweg, oldKontakte, newKontakte) 
   }
 }
 
+// ─── Admin-API fuer Pending Deletions (UI in loeschungen.html) ────────
+app.get('/api/admin/pending-deletions', authMiddleware, requireTechnikOrPraesident, async (_req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT d.id, d.email, d.name, d.stweg, d.scheduled_at, d.reminder_sent, d.cancelled, d.created_at,
+              EXTRACT(DAY FROM (d.scheduled_at - NOW()))::int AS days_until,
+              EXISTS(SELECT 1 FROM wohnungen_kontakte wk WHERE LOWER(wk.email) = LOWER(d.email)) AS still_in_kontakte
+         FROM authentik_pending_deletions d
+        ORDER BY d.scheduled_at ASC`
+    );
+    res.json({ deletions: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/admin/pending-deletions/:id/cancel', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `UPDATE authentik_pending_deletions SET cancelled = true WHERE id = $1 RETURNING email, cancelled`,
+      [parseInt(req.params.id, 10)],
+    );
+    if (!r.rows[0]) return res.status(404).json({ error: 'Nicht gefunden' });
+    console.log(`[Authentik] Pending-Deletion cancelled by ${req.user.email}: ${r.rows[0].email}`);
+    res.json({ ok: true, ...r.rows[0] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/admin/pending-deletions/:id/reactivate', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `UPDATE authentik_pending_deletions SET cancelled = false, reminder_sent = false,
+                                              scheduled_at = NOW() + INTERVAL '30 days'
+        WHERE id = $1 RETURNING email`,
+      [parseInt(req.params.id, 10)],
+    );
+    if (!r.rows[0]) return res.status(404).json({ error: 'Nicht gefunden' });
+    res.json({ ok: true, email: r.rows[0].email });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/admin/pending-deletions/:id', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    await pool.query(`DELETE FROM authentik_pending_deletions WHERE id = $1`, [parseInt(req.params.id, 10)]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Cancel pending deletion if contact is re-added
 async function cancelPendingDeletion(email) {
   if (!email) return;
@@ -14296,6 +14342,14 @@ async function initDB() {
       INSERT INTO permissions (group_name, page, access) VALUES
       ('technik', 'pbx-admin', 'write'),
       ('Präsident', 'pbx-admin', 'write')
+      ON CONFLICT (group_name, page) DO NOTHING
+    `);
+
+    // Loeschungen-Admin (Pending Authentik-Deletions): Technik + Praesident
+    await client.query(`
+      INSERT INTO permissions (group_name, page, access) VALUES
+      ('technik', 'loeschungen', 'write'),
+      ('Präsident', 'loeschungen', 'write')
       ON CONFLICT (group_name, page) DO NOTHING
     `);
 
