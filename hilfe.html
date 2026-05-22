@@ -83,6 +83,10 @@
                 <div class="text-3xl mb-2">&#127970;</div>
                 <span class="text-sm font-medium text-gray-700">Verwaltung</span>
             </a>
+            <a href="#berechtigungen" class="guide-card bg-white rounded-xl p-4 text-center shadow-md">
+                <div class="text-3xl mb-2">&#128274;</div>
+                <span class="text-sm font-medium text-gray-700">Berechtigungen</span>
+            </a>
         </div>
     </div>
 
@@ -821,6 +825,65 @@
 
         <!-- Hilfe-Kontakt -->
         <div class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-2xl p-8 text-center border border-blue-100">
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- BERECHTIGUNGEN -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="berechtigungen" class="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div class="bg-gradient-to-r from-slate-700 to-slate-900 text-white p-6">
+                <h2 class="text-2xl font-bold flex items-center gap-3">
+                    <span class="text-3xl">&#128274;</span> Berechtigungen &amp; Rollen
+                </h2>
+                <p class="mt-1 opacity-90">Wer auf der Plattform was darf</p>
+            </div>
+            <div class="p-6 md:p-8">
+                <p class="text-gray-600 mb-4">Die Plattform unterscheidet mehrere Rollen, die ueber die Authentik-Gruppen-Zuweisung festgelegt werden. Die folgende Kurzuebersicht erklaert die wichtigsten Stufen &mdash; das vollstaendige Dokument mit Berechtigungsmatrix steht zum Download bereit.</p>
+
+                <table class="min-w-full text-sm mb-6">
+                    <thead class="text-xs text-gray-500 uppercase border-b">
+                        <tr>
+                            <th class="text-left py-2">Rolle</th>
+                            <th class="text-left py-2">Wer das ist</th>
+                            <th class="text-left py-2">Kurzbeschreibung</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                        <tr><td class="py-2 font-medium">Technik</td><td class="py-2 text-gray-600">IT-Verantwortlicher</td><td class="py-2 text-gray-600">Voller Admin-Zugriff &mdash; alle Bereiche.</td></tr>
+                        <tr><td class="py-2 font-medium">Praesident</td><td class="py-2 text-gray-600">Vorstands-Praesident</td><td class="py-2 text-gray-600">Wie Technik &mdash; voller Zugriff.</td></tr>
+                        <tr><td class="py-2 font-medium">Verwaltung</td><td class="py-2 text-gray-600">Externe Hausverwaltungs-Firma</td><td class="py-2 text-gray-600">Mail-Empfaenger &amp; Lese-Zugriff (aktuell kein Web-Login).</td></tr>
+                        <tr><td class="py-2 font-medium">Ausschuss</td><td class="py-2 text-gray-600">Pro STWEG (1&ndash;8)</td><td class="py-2 text-gray-600">Operatives Tagesgeschaeft des eigenen STWEGs: Auslagen genehmigen, Reklamationen bearbeiten, Wohnungsverwaltung.</td></tr>
+                        <tr><td class="py-2 font-medium">Eigentuemer</td><td class="py-2 text-gray-600">Wohnungsbesitzer</td><td class="py-2 text-gray-600">Eigene Wohnungsdaten + STWEG-Uebersicht (lesend). Kann Auslagen einreichen.</td></tr>
+                        <tr><td class="py-2 font-medium">Verwalter (pro Wohnung)</td><td class="py-2 text-gray-600">Eigentuemer-Vertreter</td><td class="py-2 text-gray-600">Identisch zu Eigentuemer, z.B. bei Auslands-Eigentuemern.</td></tr>
+                        <tr><td class="py-2 font-medium">Bewohner / Mieter</td><td class="py-2 text-gray-600">Nicht-besitzende Bewohner</td><td class="py-2 text-gray-600">Reservierung Waschkueche, eigene Zaehler, Reklamation melden.</td></tr>
+                    </tbody>
+                </table>
+
+                <div class="info-box p-4 rounded mb-4">
+                    <p class="text-sm text-blue-900">
+                        <strong>&#128218; Vollstaendige Berechtigungsmatrix:</strong> Welche Rolle auf welchen einzelnen Bereich Lese- oder Schreibzugriff hat &mdash; mit allen Sonderfaellen.
+                    </p>
+                    <div class="mt-3 flex flex-wrap gap-2">
+                        <a href="documents.html?path=allgemein/berechtigungen.odt" class="inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">
+                            &#128190; ODT herunterladen
+                        </a>
+                        <a href="documents.html?path=allgemein/berechtigungen.md" class="inline-flex items-center gap-2 bg-gray-200 text-gray-800 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-300">
+                            &#128196; Markdown ansehen
+                        </a>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-2">Beide Dateien liegen unter <code>/allgemein/</code> auf dem Dokumente-Server. Erreichbar fuer alle eingeloggten User.</p>
+                </div>
+
+                <div class="warn-box p-4 rounded">
+                    <p class="text-sm text-amber-900">
+                        <strong>&#128737; Berechtigungen aendern:</strong> Tech / Praesident koennen ueber die <a href="rechteverwaltung.html" class="underline">Rechteverwaltung</a> Permissions pro Gruppe togglen. Gruppen-Zuweisung selbst geschieht in <a href="https://authentik.rosenweg4303.ch" class="underline" target="_blank">Authentik</a>.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- KONTAKT -->
+        <!-- ═══════════════════════════════════════════ -->
+        <div class="bg-white rounded-2xl shadow-md p-8 text-center">
             <div class="text-4xl mb-3">&#129309;</div>
             <h2 class="text-xl font-bold text-gray-900 mb-2">Noch Fragen?</h2>
             <p class="text-gray-600 mb-4">Wir helfen Ihnen gerne weiter!</p>
