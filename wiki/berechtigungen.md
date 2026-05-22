@@ -10,11 +10,13 @@ Authentifizierung via Authentik (OIDC). Die Rollen sind reine Gruppen-Memberscha
 |---|---|---|
 | **Technik** | `technik` | Stefan (IT-Verantwortlicher) — voller Admin-Zugriff |
 | **Präsident** | `Präsident` | Vorstands-Präsident — analog Technik, plus Repräsentation |
-| **Verwaltung** (Firma) | `Verwaltung` (aktuell **kein User in dieser Gruppe** — siehe unten) | Externe Hausverwaltung als Firma. Mail-Empfänger-Rolle, kein Web-Login |
-| **Verwalter** (Person) | — (keine Authentik-Gruppe, nur DB-Eintrag in `verwaltungs_kontakte`) | Konkreter Sachbearbeiter der Verwaltungs-Firma (Funktion: "Verwalter", "Buchhaltung", "Sekretariat") — nur als Mail-Empfänger gepflegt |
+| **Verwaltung** (Hausverwaltungs-Firma) | `Verwaltung` (aktuell **kein User in dieser Gruppe**) | Externe Hausverwaltung als Firma. Mail-Empfänger-Rolle, kein Web-Login |
+| **Sachbearbeiter der Verwaltungs-Firma** | — (DB-Eintrag in `verwaltungs_kontakte` mit `funktion`-Feld) | Konkrete Person der Verwaltungs-Firma (Funktion: "Verwalter", "Buchhaltung", "Sekretariat") — nur als Mail-Empfänger gepflegt |
+| **Verwalter** (Objektverwaltung, pro Wohnung) | Wird wie Eigentümer behandelt: `stwegN-eigentuemer` + ggf. `rX-eigentuemer` | Eigentümer-Vertreter pro Wohnung (z.B. wenn Eigentümer im Ausland wohnt). In `wohnungen_kontakte` mit `rolle = 'verwalter'`. Voller Web-Login, Permissions identisch zu Eigentümer |
 | **Ausschuss** | `ausschuss` (generisch) + `stwegN-ausschuss` (pro STWEG 1–8) | Ausschuss-Mitglieder pro STWEG — operatives Tagesgeschäft |
 | **Eigentümer** | `eigentuemer` + `stwegN-eigentuemer` + `rX-eigentuemer` (Rosenweg-Hausnummern) | Wohnungsbesitzer — sieht eigene Daten + STWEG-übergreifend lesend |
-| **Bewohner** | `bewohner` + `stwegN-bewohner` + `rX-bewohner` | Mieter / nicht-besitzende Bewohner — eingeschränkter Lesezugriff |
+| **Bewohner** | `bewohner` + `stwegN-bewohner` + `rX-bewohner` | Nicht-besitzende Bewohner (z.B. Familienmitglied im Eigentümer-Haushalt) — eingeschränkter Lesezugriff |
+| **Mieter** (Objektverwaltung) | Wird wie Bewohner behandelt: `stwegN-bewohner` | Rolle in `wohnungen_kontakte` für Mietverhältnisse. Authentik-Sync = Bewohner. 6 Einträge aktuell |
 
 Hierarchie via Authentik-Group-Hierarchy: `r9-eigentuemer` ist automatisch auch in `eigentuemer` (z.B.).
 
@@ -76,13 +78,22 @@ Legende: ✅ Vollzugriff (Write) · 👁 Nur Lesen · — kein Zugriff · 🅢 n
 - Kann CIFS-Documents direkt via Samba mounten (separater Mechanismus außerhalb der Web-UI, eigene SMB-Credentials).
 - **Wirksamkeit-Datum:** Bei Verwaltungs-Wechsel werden gecachte Mails ab `wirksam_ab`-Datum an die neue Verwaltung umgeleitet (siehe Verwaltungsverwaltung).
 
-### Verwalter (einzelner Sachbearbeiter der Verwaltungs-Firma)
+### Sachbearbeiter der Verwaltungs-Firma (verwaltungs_kontakte)
 - **Keine Authentik-Gruppe**, sondern Eintrag in DB-Tabelle `verwaltungs_kontakte` mit:
   - `name`, `funktion` (z.B. "Verwalter", "Buchhaltung", "Sekretariat"), `email`, `telefon`
   - Zugeordnet einer `verwaltung_id` (Firma)
-- Wird als **Mail-Empfänger** verwendet — alle Outbound-Mails an die Verwaltung gehen an die Email-Adressen aller Verwalter-Kontakte der aktiven Firma.
+- Wird als **Mail-Empfänger** verwendet — alle Outbound-Mails an die Verwaltung gehen an die Email-Adressen aller Kontakte der aktiven Firma.
 - Loggt sich nicht im Rosenweg-System ein.
-- **UI-Verwaltung:** in der Verwaltungsverwaltung (`verwaltung-admin.html`) — Tech/Präsident kann Verwalter-Personen pflegen.
+- **UI-Verwaltung:** in der Verwaltungsverwaltung (`verwaltung-admin.html`) — Tech/Präsident kann Personen pflegen.
+
+### Verwalter in der Objektverwaltung (wohnungen_kontakte)
+- **Rolle in `wohnungen_kontakte`** neben eigentuemer/mieter/bewohner/sonstige (12 Einträge aktuell).
+- Use-Case: Eigentümer wohnt im Ausland oder verstorben → ein Verwalter (z.B. Familienmitglied, Anwalt, Property-Manager) handelt für ihn.
+- **Authentik-Behandlung:** wird beim Sync in dieselben Gruppen wie ein Eigentümer gelegt (`stwegN-eigentuemer`, `rX-eigentuemer`).
+- **`authentik_zugang` Default = true** (analog Eigentümer) → erhält automatisch Login-Account.
+- **Permissions identisch zu Eigentümer:** Auslagen einreichen, eigene Wohnungsdaten sehen, Energie-Monitor, Waschküche, Eigentümer-Übersichten.
+- **Unterschied zu echtem Eigentümer:** nur **Bezeichnung im UI** + kein Stimmrecht in der Eigentümer-Versammlung (das wird ausserhalb des Systems entschieden).
+- **Pflege:** in der Wohnungs-Verwaltung (`wohnungsverwaltung.html` o.ä.) als Kontakt einer Wohnung mit `rolle = 'verwalter'`.
 
 ### Ausschuss (pro STWEG)
 - Pro STWEG eigene Gruppe `stwegN-ausschuss` (für N = 1..8).
@@ -104,6 +115,21 @@ Legende: ✅ Vollzugriff (Write) · 👁 Nur Lesen · — kein Zugriff · 🅢 n
 - Reklamationen melden via WhatsApp-Bot oder Web-Form.
 - Eigene Zähler im Energie-Monitor.
 - Waschküche-Reservation.
+
+### Mieter (Objektverwaltung, wohnungen_kontakte)
+- **Rolle in `wohnungen_kontakte`** für formale Mietverhältnisse.
+- **Authentik-Behandlung:** identisch zu Bewohner — wird in `stwegN-bewohner` gelegt.
+- **`authentik_zugang` Default = null** (manuell entscheiden) — d.h. nicht automatisch ein Account, aber kann aktiviert werden.
+- **Permissions identisch zu Bewohner**: Reservierung Waschküche, eigene Zähler, Notfall melden.
+
+### Übersicht der 4 wohnungen_kontakte-Rollen
+
+| Rolle | Anzahl | Authentik-Zugang Default | Authentik-Gruppe(n) | Permissions |
+|---|---|---|---|---|
+| `eigentuemer` | 313 | true | `stwegN-eigentuemer` + `rX-eigentuemer` | Voll Eigentümer |
+| `verwalter` | 12 | true | `stwegN-eigentuemer` + `rX-eigentuemer` | Identisch zu Eigentümer |
+| `mieter` | 6 | null (manuell) | `stwegN-bewohner` | Identisch zu Bewohner |
+| `bewohner` | 4 | null (manuell) | `stwegN-bewohner` | Identisch zu Bewohner |
 
 ---
 
