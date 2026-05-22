@@ -10,7 +10,8 @@ Authentifizierung via Authentik (OIDC). Die Rollen sind reine Gruppen-Memberscha
 |---|---|---|
 | **Technik** | `technik` | Stefan (IT-Verantwortlicher) — voller Admin-Zugriff |
 | **Präsident** | `Präsident` | Vorstands-Präsident — analog Technik, plus Repräsentation |
-| **Verwaltung** | `Verwaltung` | Externe Hausverwaltung (z.B. LangPartners) — Lesezugriff, Mail-Empfänger für offizielle Anfragen |
+| **Verwaltung** (Firma) | `Verwaltung` (aktuell **kein User in dieser Gruppe** — siehe unten) | Externe Hausverwaltung als Firma. Mail-Empfänger-Rolle, kein Web-Login |
+| **Verwalter** (Person) | — (keine Authentik-Gruppe, nur DB-Eintrag in `verwaltungs_kontakte`) | Konkreter Sachbearbeiter der Verwaltungs-Firma (Funktion: "Verwalter", "Buchhaltung", "Sekretariat") — nur als Mail-Empfänger gepflegt |
 | **Ausschuss** | `ausschuss` (generisch) + `stwegN-ausschuss` (pro STWEG 1–8) | Ausschuss-Mitglieder pro STWEG — operatives Tagesgeschäft |
 | **Eigentümer** | `eigentuemer` + `stwegN-eigentuemer` + `rX-eigentuemer` (Rosenweg-Hausnummern) | Wohnungsbesitzer — sieht eigene Daten + STWEG-übergreifend lesend |
 | **Bewohner** | `bewohner` + `stwegN-bewohner` + `rX-bewohner` | Mieter / nicht-besitzende Bewohner — eingeschränkter Lesezugriff |
@@ -68,11 +69,20 @@ Legende: ✅ Vollzugriff (Write) · 👁 Nur Lesen · — kein Zugriff · 🅢 n
 - **WhatsApp-Bot:** Komplette Admin-UI inkl. Broadcast, QR-Re-Pairing.
 - **PBX:** Komplette Telefonanlagen-Steuerung (Ring-Group, Geschäftszeiten, Test-Anrufe).
 
-### Verwaltung (externe Hausverwaltung)
+### Verwaltung (externe Hausverwaltung) — Firma als Ganzes
 - Reine **Empfänger-Rolle** für alle offiziellen Mails (Auslagen-Auszahlung, Objekt-Änderungen, etc.).
-- Lesezugriff auf Bewohner-/Wohnungsdaten, Verteiler, Verwaltungs-Stammdaten, Energie-Monitor, Handwerker, Kontakte, Zähler.
-- Kann CIFS-Documents direkt via Samba mounten (separater Mechanismus außerhalb der Web-UI).
+- Aktuell **keine User-Accounts** in der Authentik-Gruppe `Verwaltung` — kein Web-Login.
+- Permissions in der DB sind vorbereitet (read auf bewohner-verwaltung, kontakte, verteiler, energie, handwerker, verwaltung, zaehler), greifen aber erst sobald ein User in der Gruppe hinzugefügt wird.
+- Kann CIFS-Documents direkt via Samba mounten (separater Mechanismus außerhalb der Web-UI, eigene SMB-Credentials).
 - **Wirksamkeit-Datum:** Bei Verwaltungs-Wechsel werden gecachte Mails ab `wirksam_ab`-Datum an die neue Verwaltung umgeleitet (siehe Verwaltungsverwaltung).
+
+### Verwalter (einzelner Sachbearbeiter der Verwaltungs-Firma)
+- **Keine Authentik-Gruppe**, sondern Eintrag in DB-Tabelle `verwaltungs_kontakte` mit:
+  - `name`, `funktion` (z.B. "Verwalter", "Buchhaltung", "Sekretariat"), `email`, `telefon`
+  - Zugeordnet einer `verwaltung_id` (Firma)
+- Wird als **Mail-Empfänger** verwendet — alle Outbound-Mails an die Verwaltung gehen an die Email-Adressen aller Verwalter-Kontakte der aktiven Firma.
+- Loggt sich nicht im Rosenweg-System ein.
+- **UI-Verwaltung:** in der Verwaltungsverwaltung (`verwaltung-admin.html`) — Tech/Präsident kann Verwalter-Personen pflegen.
 
 ### Ausschuss (pro STWEG)
 - Pro STWEG eigene Gruppe `stwegN-ausschuss` (für N = 1..8).
