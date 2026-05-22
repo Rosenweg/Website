@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loeschungs-Verwaltung — Rosenweg</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/nav.js?v=2"></script>
+  <link rel="icon" href="/logo-rosenweg.png">
+  <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'); body { font-family: 'Inter', sans-serif; }</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+  <script>RosenwegNav.init({ active: 'loeschungen' });</script>
+
+  <main class="max-w-6xl mx-auto px-4 py-6">
+    <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center"><p class="text-gray-600">Lade…</p></div>
+
+    <div id="content" class="hidden">
+      <h1 class="text-2xl font-bold text-gray-900 mb-1">🗑 Geplante Konto-Loeschungen</h1>
+      <p class="text-sm text-gray-600 mb-6">
+        Authentik-Accounts werden 30 Tage nach Entfernen aus den Wohnungs-Kontakten geloescht.
+        Hier kannst du Loeschungen vorzeitig stoppen (cancellen) oder den Timer zuruecksetzen.
+      </p>
+
+      <div class="bg-white rounded-lg shadow overflow-hidden">
+        <div class="px-4 py-3 border-b flex justify-between items-center">
+          <h2 class="text-lg font-semibold">Liste</h2>
+          <button onclick="load()" class="text-xs text-blue-600 hover:underline">Neu laden</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead class="text-xs text-gray-500 uppercase border-b">
+              <tr>
+                <th class="px-3 py-2 text-left">Name</th>
+                <th class="px-3 py-2 text-left">E-Mail</th>
+                <th class="px-3 py-2 text-left">STWEG</th>
+                <th class="px-3 py-2 text-left">Geplant</th>
+                <th class="px-3 py-2 text-left">Status</th>
+                <th class="px-3 py-2 text-left">In Kontakten?</th>
+                <th class="px-3 py-2 text-right">Aktion</th>
+              </tr>
+            </thead>
+            <tbody id="tbody" class="divide-y divide-gray-100"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="mt-6 bg-blue-50 border border-blue-200 rounded p-4 text-sm text-blue-900">
+        <p><strong>So funktioniert's:</strong></p>
+        <ul class="list-disc list-inside mt-2 space-y-1 text-xs">
+          <li><strong>Cancellen:</strong> Loeschung wird gestoppt. Eintrag bleibt in der Liste (cancelled=true), Authentik-Account bleibt aktiv.</li>
+          <li><strong>Timer +30 Tage:</strong> Reaktiviert die Loeschung, schiebt das Datum 30 Tage in die Zukunft. Reminder wird neu gesendet.</li>
+          <li><strong>Entfernen:</strong> Loescht den Eintrag aus der Liste komplett — kein automatischer Job mehr fuer diesen User.</li>
+        </ul>
+      </div>
+    </div>
+  </main>
+
+  <script>
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const fmtDt = s => s ? new Date(s).toLocaleString('de-CH', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    const u = await AuthentikAuth.init({ requireAuth: true });
+    if (!u) return;
+    document.getElementById('auth-gate').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+    await load();
+  });
+
+  async function load() {
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/admin/pending-deletions');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const { deletions } = await r.json();
+      const tbody = document.getElementById('tbody');
+      if (deletions.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8 text-gray-400 italic">Keine geplanten Loeschungen.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = deletions.map(d => {
+        const status = d.cancelled
+          ? '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">cancelled</span>'
+          : d.reminder_sent
+          ? '<span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded">Reminder raus</span>'
+          : '<span class="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded">geplant</span>';
+        const days = d.days_until;
+        const daysCls = d.cancelled ? 'text-gray-500' : days <= 3 ? 'text-red-700 font-bold' : days <= 7 ? 'text-amber-700' : 'text-gray-700';
+        const stillIn = d.still_in_kontakte
+          ? '<span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">✓ neu eingetragen</span>'
+          : '<span class="text-xs text-gray-400">—</span>';
+        return `<tr class="hover:bg-gray-50">
+          <td class="px-3 py-2 font-medium">${esc(d.name || '?')}</td>
+          <td class="px-3 py-2 font-mono text-xs">${esc(d.email)}</td>
+          <td class="px-3 py-2">${d.stweg ? 'STWEG ' + d.stweg : '—'}</td>
+          <td class="px-3 py-2 text-xs"><div>${fmtDt(d.scheduled_at)}</div><div class="${daysCls}">in ${days} Tagen</div></td>
+          <td class="px-3 py-2">${status}</td>
+          <td class="px-3 py-2">${stillIn}</td>
+          <td class="px-3 py-2 text-right space-x-2 whitespace-nowrap">
+            ${!d.cancelled ? `<button onclick="cancelDel(${d.id})" class="text-xs bg-green-600 text-white rounded px-2 py-1 hover:bg-green-700">Cancellen</button>` : ''}
+            ${d.cancelled ? `<button onclick="reactivate(${d.id})" class="text-xs bg-amber-600 text-white rounded px-2 py-1 hover:bg-amber-700">Timer +30T</button>` : ''}
+            <button onclick="removeDel(${d.id}, '${esc(d.email)}')" class="text-xs text-red-600 hover:underline">Entfernen</button>
+          </td>
+        </tr>`;
+      }).join('');
+    } catch (e) {
+      document.getElementById('tbody').innerHTML = `<tr><td colspan="7" class="text-red-600 py-3">Fehler: ${esc(e.message)}</td></tr>`;
+    }
+  }
+
+  async function cancelDel(id) {
+    if (!confirm('Loeschung cancellen? Authentik-Account bleibt aktiv.')) return;
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/admin/pending-deletions/${id}/cancel`, { method: 'PUT' });
+      if (!r.ok) throw new Error(await r.text());
+      await load();
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+
+  async function reactivate(id) {
+    if (!confirm('Timer reaktivieren? Loeschung wird in 30 Tagen erfolgen.')) return;
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/admin/pending-deletions/${id}/reactivate`, { method: 'PUT' });
+      if (!r.ok) throw new Error(await r.text());
+      await load();
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+
+  async function removeDel(id, email) {
+    if (!confirm(`Eintrag fuer ${email} aus der Liste entfernen?\nBeachte: der Authentik-Account wird NICHT geloescht, aber kein automatischer Job mehr ueberwacht ihn.`)) return;
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/admin/pending-deletions/${id}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error(await r.text());
+      await load();
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+  </script>
+</body>
+</html>
