@@ -3041,6 +3041,29 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
      'verteiler-batch', recipients.join(', ')]
   );
 
+  // Mirror in WhatsApp-Gruppe wenn fuer diesen Verteiler eine Group-ID hinterlegt ist.
+  // KI-Aufbereitung: Claude Haiku formatiert + kuerzt fuer WhatsApp-Lesbarkeit.
+  if (list.whatsapp_group_id) {
+    try {
+      const rawBody = (parsed.text || parsed.html?.replace(/<[^>]+>/g, ' ') || '').trim();
+      const waBody = await reformatEmailForWhatsapp({
+        subject: parsed.subject || '(kein Betreff)',
+        senderName,
+        body: rawBody,
+        attachmentCount: attachments.length,
+      });
+      await queueWhatsappMessage({
+        phone: list.whatsapp_group_id,
+        body: waBody,
+        sourceType: 'verteiler-mirror',
+        sourceId: logResult.rows[0].id,
+      });
+      console.log(`[Verteiler] Mirror in WA-Gruppe ${list.whatsapp_group_name || list.whatsapp_group_id} fuer ${toAddress}`);
+    } catch (err) {
+      console.warn('[Verteiler] WA-Mirror fehlgeschlagen:', err.message);
+    }
+  }
+
   // Schedule delivery report to sender after 90 seconds (only for internal senders — DSGVO)
   if (SMTP2GO_API_KEY && senderEmail && senderEmail.endsWith(`@${VERTEILER_DOMAIN}`)) {
     const logId = logResult.rows[0].id;
@@ -6492,15 +6515,19 @@ app.post('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
 
 // Update Verteiler
 app.put('/api/verteiler/:id', authMiddleware, adminOnly, async (req, res) => {
-  const { stweg, name, email_address, members, active, reply_to, subject_prefix, group_name, group_names, allowed_sender_groups } = req.body;
+  const { stweg, name, email_address, members, active, reply_to, subject_prefix, group_name, group_names, allowed_sender_groups,
+          whatsapp_group_id, whatsapp_group_name } = req.body;
   try {
     const groups = group_names?.length ? group_names : (group_name ? [group_name] : []);
     const allowedSenders = Array.isArray(allowed_sender_groups) ? allowed_sender_groups : [];
     const result = await pool.query(
       `UPDATE email_verteiler SET stweg=$1, name=$2, email_address=$3, members=$4, active=$5,
-              reply_to=$6, subject_prefix=$7, group_name=$8, group_names=$9, allowed_sender_groups=$10
-       WHERE id=$11 RETURNING *`,
-      [stweg, name, email_address, JSON.stringify(members || []), active !== false, reply_to || 'sender', subject_prefix || null, groups[0] || null, JSON.stringify(groups), JSON.stringify(allowedSenders), req.params.id]
+              reply_to=$6, subject_prefix=$7, group_name=$8, group_names=$9, allowed_sender_groups=$10,
+              whatsapp_group_id=$11, whatsapp_group_name=$12
+       WHERE id=$13 RETURNING *`,
+      [stweg, name, email_address, JSON.stringify(members || []), active !== false, reply_to || 'sender', subject_prefix || null, groups[0] || null, JSON.stringify(groups), JSON.stringify(allowedSenders),
+       whatsapp_group_id || null, whatsapp_group_name || null,
+       req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     res.json(result.rows[0]);
@@ -12182,6 +12209,64 @@ async function transcribeWhisper(audioBuf, mimeType = 'audio/wav') {
   } catch (e) { return { text: '', error: e.message }; }
 }
 
+// Formatiert eine Verteiler-Email fuer WhatsApp-Gruppen-Mirror:
+// - kompakter Titel (Subject)
+// - 2-4 Bullet-Points mit Kernaussage
+// - Action-Items wenn erkennbar
+// - WhatsApp-Markdown (*fett* _kursiv_)
+// Fallback: gestripptes Plain-Text wenn OpenRouter nicht verfuegbar
+async function reformatEmailForWhatsapp({ subject, senderName, body, attachmentCount }) {
+  const fallback = () => {
+    const clipped = (body || '').slice(0, 1200);
+    const attHint = attachmentCount > 0 ? `\n\n📎 ${attachmentCount} Anhang${attachmentCount > 1 ? 'e' : ''} per Email.` : '';
+    return `📧 *${subject}*\nvon: ${senderName}\n\n${clipped}${attHint}`;
+  };
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey || !body) return fallback();
+  try {
+    const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'anthropic/claude-haiku-4.5',
+        max_tokens: 600,
+        messages: [
+          {
+            role: 'system',
+            content: `Du formatierst Emails fuer einen WhatsApp-Gruppen-Mirror der Rosenweg-STWEG.
+Liefere eine WhatsApp-gerechte Kurzfassung in genau diesem Format:
+📧 *<Titel mit max 60 Zeichen, evtl. gekuerzt>*
+_von: <Absender>_
+
+<2-4 Bullet-Points mit • am Anfang, jede Zeile max 100 Zeichen, Kernaussagen>
+
+<Wenn klare Aktion verlangt: 👉 *Aktion:* <ein Satz>>
+
+Regeln: WhatsApp-Markdown (*fett*, _kursiv_, kein Markdown-#). Maximal 1500 Zeichen Total. Keine Floskeln, keine Footer/Disclaimer/Signatur, keine HTML-Reste. Auf Deutsch.`,
+          },
+          {
+            role: 'user',
+            content: `Absender: ${senderName}\nSubject: ${subject}\nAnhaenge: ${attachmentCount}\n\nEmail-Body:\n${body.slice(0, 4000)}`,
+          },
+        ],
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!r.ok) return fallback();
+    const data = await r.json();
+    const txt = data.choices?.[0]?.message?.content?.trim();
+    if (!txt || txt.length < 20) return fallback();
+    // Anhang-Hint anhaengen falls nicht schon drin
+    if (attachmentCount > 0 && !/📎/.test(txt)) {
+      return txt + `\n\n📎 ${attachmentCount} Anhang${attachmentCount > 1 ? 'e' : ''} per Email.`;
+    }
+    return txt;
+  } catch (err) {
+    console.warn('[Verteiler-AI] Reformat fehlgeschlagen:', err.message);
+    return fallback();
+  }
+}
+
 async function summarizeVoicemail(transcript, callerId) {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey || !transcript) return '';
@@ -12994,6 +13079,23 @@ async function resolveBroadcastRecipients(target) {
   return result;
 }
 
+// Admin-API: Liste der WhatsApp-Gruppen in denen der Bot Mitglied ist.
+// Proxy zum Bot-HTTP-Endpoint /groups (Bot laeuft auf 100.64.2.29 in CT 220 ... NEIN,
+// Bot laeuft im Docker-Swarm). Wir koennen den Bot via Docker-Service-Namen erreichen.
+app.get('/api/whatsapp/admin/groups', authMiddleware, requireTechnikOrPraesident, async (_req, res) => {
+  try {
+    const r = await fetch('http://whatsapp-bot:8080/groups', {
+      headers: { 'X-WA-Secret': WHATSAPP_SHARED_SECRET },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) return res.status(r.status).json({ error: await r.text() });
+    const data = await r.json();
+    res.json(data);
+  } catch (err) {
+    res.status(503).json({ error: 'Bot nicht erreichbar: ' + err.message });
+  }
+});
+
 // Admin-API fuer UI: Status + letzte Nachrichten + Outbox
 app.get('/api/whatsapp/admin/status', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
   try {
@@ -13282,6 +13384,10 @@ async function initDB() {
       ALTER TABLE email_verteiler ADD COLUMN IF NOT EXISTS subject_prefix VARCHAR(100);
       ALTER TABLE email_verteiler ADD COLUMN IF NOT EXISTS group_name VARCHAR(255);
       ALTER TABLE email_verteiler ADD COLUMN IF NOT EXISTS group_names JSONB DEFAULT '[]';
+      -- WhatsApp-Gruppen-Mirror: wenn gesetzt, wird jede an die Verteiler-Adresse
+      -- gehende Mail zusaetzlich in die hinterlegte WhatsApp-Gruppe gepostet.
+      ALTER TABLE email_verteiler ADD COLUMN IF NOT EXISTS whatsapp_group_id VARCHAR(120);
+      ALTER TABLE email_verteiler ADD COLUMN IF NOT EXISTS whatsapp_group_name VARCHAR(255);
       -- Migrate single group_name to group_names array
       UPDATE email_verteiler SET group_names = jsonb_build_array(group_name)
         WHERE group_name IS NOT NULL AND group_name != '' AND (group_names IS NULL OR group_names = '[]'::jsonb);
