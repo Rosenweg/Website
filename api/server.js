@@ -13400,6 +13400,370 @@ app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamation
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ─── Vollmachten ────────────────────────────────────────────────────
+// Eigentuemer erteilt Vollmacht an Verwalter/Mieter/andere Person.
+// Berechtigung 'vollmachten-eigene' (jeder Eigentuemer) zum Erfassen
+// eigener Vollmachten; 'vollmachten-admin' (technik/praesident/verwaltung)
+// um alle zu sehen/widerrufen. Auto-Status-Update: Vollmachten mit
+// gueltig_bis < heute werden bei jedem List-Call als 'abgelaufen' markiert.
+
+function vmEscapeHtml(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function buildVollmachtHtml(v) {
+  const artLabel = { generell: 'Generelle Vertretungs-Vollmacht', spezifisch: 'Spezifische Vollmacht (Einzel-Geschaeft)', auskunft: 'Datenschutz- / Auskunfts-Vollmacht' }[v.art] || v.art;
+  const typLabel = { eigentuemer: 'Miteigentuemer/in', verwaltung: 'Verwaltung', mieter: 'Mieter/in der Liegenschaft', extern: 'Externe Person' }[v.bevollmaechtigter_typ] || v.bevollmaechtigter_typ;
+  const fmtDate = d => d ? new Date(d).toLocaleDateString('de-CH', { year: 'numeric', month: 'long', day: 'numeric' }) : '—';
+  const gueltigBis = v.gueltig_bis ? fmtDate(v.gueltig_bis) : '<em>bis Widerruf</em>';
+  const sigBlock = v.signatur_typ === 'digital' && v.digital_signed_at
+    ? `<div style="margin-top:30px;padding:15px;border:2px solid #16a34a;background:#f0fdf4;border-radius:8px;">
+         <p style="font-weight:bold;color:#15803d;margin:0 0 8px 0;">✓ Elektronisch signiert (einfache elektronische Signatur nach ZertES Art.2)</p>
+         <p style="margin:2px 0;font-size:11pt;"><strong>Signiert am:</strong> ${fmtDate(v.digital_signed_at)} ${new Date(v.digital_signed_at).toLocaleTimeString('de-CH')}</p>
+         <p style="margin:2px 0;font-size:11pt;"><strong>Identitaet:</strong> ${vmEscapeHtml(v.vollmachtgeber_email || '')} (Authentik-Login)</p>
+         <p style="margin:2px 0;font-size:11pt;"><strong>IP-Adresse:</strong> ${vmEscapeHtml(v.digital_signed_ip || '—')}</p>
+         <p style="margin:2px 0;font-size:11pt;"><strong>Dokument-ID:</strong> #${v.id}</p>
+       </div>`
+    : `<div style="margin-top:60px;">
+         <p style="border-top:1px solid #000;padding-top:5px;width:300px;">Ort, Datum</p>
+         <div style="margin-top:60px;">
+           <p style="border-top:1px solid #000;padding-top:5px;width:300px;">Unterschrift Vollmachtgeber</p>
+         </div>
+       </div>`;
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Vollmacht #${v.id}</title>
+<style>
+  body { font-family: Helvetica, Arial, sans-serif; padding: 40px; color: #1f2937; line-height: 1.55; font-size: 11pt; }
+  h1 { font-size: 22pt; margin: 0 0 4px 0; }
+  h2 { font-size: 13pt; margin: 24px 0 8px 0; color: #1e40af; border-bottom: 2px solid #e5e7eb; padding-bottom: 4px; }
+  .meta { color: #6b7280; font-size: 10pt; }
+  table.kv { width: 100%; border-collapse: collapse; margin: 8px 0; }
+  table.kv td { padding: 4px 8px; vertical-align: top; }
+  table.kv td.lbl { color: #6b7280; width: 35%; font-size: 10pt; }
+  .box { border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px 16px; margin: 8px 0; background: #f9fafb; }
+  .footer { margin-top: 40px; padding-top: 12px; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 9pt; }
+</style></head>
+<body>
+  <h1>Vollmachtserklaerung</h1>
+  <p class="meta">${artLabel} · Dokument-ID: ${v.id} · Erstellt: ${fmtDate(v.created_at)}</p>
+
+  <h2>Vollmachtgeber/in</h2>
+  <div class="box">
+    <table class="kv">
+      <tr><td class="lbl">Name</td><td><strong>${vmEscapeHtml(v.vollmachtgeber_name)}</strong></td></tr>
+      ${v.vollmachtgeber_adresse ? `<tr><td class="lbl">Adresse</td><td>${vmEscapeHtml(v.vollmachtgeber_adresse).replace(/\n/g,'<br>')}</td></tr>` : ''}
+      ${v.vollmachtgeber_email ? `<tr><td class="lbl">E-Mail</td><td>${vmEscapeHtml(v.vollmachtgeber_email)}</td></tr>` : ''}
+    </table>
+  </div>
+
+  <h2>Bevollmaechtigte/r (${typLabel})</h2>
+  <div class="box">
+    <table class="kv">
+      <tr><td class="lbl">Name</td><td><strong>${vmEscapeHtml(v.bevollmaechtigter_name)}</strong></td></tr>
+      ${v.bevollmaechtigter_adresse ? `<tr><td class="lbl">Adresse</td><td>${vmEscapeHtml(v.bevollmaechtigter_adresse).replace(/\n/g,'<br>')}</td></tr>` : ''}
+      ${v.bevollmaechtigter_email ? `<tr><td class="lbl">E-Mail</td><td>${vmEscapeHtml(v.bevollmaechtigter_email)}</td></tr>` : ''}
+      ${v.bevollmaechtigter_telefon ? `<tr><td class="lbl">Telefon</td><td>${vmEscapeHtml(v.bevollmaechtigter_telefon)}</td></tr>` : ''}
+    </table>
+  </div>
+
+  <h2>Umfang der Vollmacht</h2>
+  <div class="box">
+    <p><strong>Art:</strong> ${artLabel}</p>
+    ${v.wohnung_id ? `<p><strong>Bezogen auf:</strong> Wohnung-ID ${v.wohnung_id}${v.stweg ? ` (STWEG ${v.stweg})` : ''}</p>` : (v.stweg ? `<p><strong>Bezogen auf:</strong> STWEG ${v.stweg}</p>` : '')}
+    ${v.geltungsbereich ? `<p><strong>Geltungsbereich / Inhalt:</strong></p><p style="white-space:pre-wrap;">${vmEscapeHtml(v.geltungsbereich)}</p>` : '<p><em>(kein spezifischer Geltungsbereich angegeben)</em></p>'}
+  </div>
+
+  <h2>Gueltigkeit</h2>
+  <div class="box">
+    <table class="kv">
+      <tr><td class="lbl">Gueltig ab</td><td>${fmtDate(v.gueltig_ab)}</td></tr>
+      <tr><td class="lbl">Gueltig bis</td><td>${gueltigBis}</td></tr>
+    </table>
+  </div>
+
+  <p style="margin-top:30px;">
+    Hiermit erteile ich, <strong>${vmEscapeHtml(v.vollmachtgeber_name)}</strong>,
+    der/dem oben genannten Bevollmaechtigten die hier beschriebene Vollmacht in den angegebenen Grenzen.
+    Die Vollmacht ist jederzeit schriftlich widerrufbar.
+  </p>
+
+  ${sigBlock}
+
+  <div class="footer">
+    STWEG-Kooperation Rosenweg · Rosenweg 1-18, 4303 Kaiseraugst · Generiert ${new Date().toLocaleString('de-CH')}
+  </div>
+</body></html>`;
+}
+
+async function generateVollmachtPdf(v) {
+  const html = buildVollmachtHtml(v);
+  const form = new FormData();
+  form.append('files', new Blob([html], { type: 'text/html' }), 'index.html');
+  const r = await fetch(`${DOC_CONVERTER_URL}/forms/chromium/convert/html`, {
+    method: 'POST', body: form, signal: AbortSignal.timeout(30000),
+  });
+  if (!r.ok) throw new Error(`PDF-Converter Fehler ${r.status}: ${await r.text().catch(() => '')}`);
+  return Buffer.from(await r.arrayBuffer());
+}
+
+// Lookup-Helper fuer das Vollmachten-Formular (jeder eingeloggte User darf
+// lesen — limitierte Felder, kein PII-Leak).
+app.get('/api/vollmachten/lookup/verwaltungen', authMiddleware, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT id, firma_name, stweg, email, telefon, adresse FROM verwaltungen
+        WHERE aktiv = true ORDER BY stweg NULLS FIRST, firma_name`,
+    );
+    res.json({ verwaltungen: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/vollmachten/lookup/personen', authMiddleware, async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (q.length < 2) return res.json({ personen: [] });
+    const r = await pool.query(
+      `SELECT id, name, email, telefon, mobile, adresse FROM personen
+        WHERE LOWER(name) LIKE LOWER($1) OR LOWER(email) LIKE LOWER($1)
+        ORDER BY name LIMIT 10`,
+      ['%' + q + '%'],
+    );
+    res.json({ personen: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/vollmachten/lookup/my-wohnungen', authMiddleware, async (req, res) => {
+  try {
+    const email = req.user.email || '';
+    const r = await pool.query(
+      `SELECT DISTINCT w.id, w.bezeichnung, w.stweg
+         FROM wohnungen w
+         JOIN wohnungen_kontakte k ON k.wohnung_id = w.id
+         JOIN personen p ON p.id = k.person_id
+        WHERE LOWER(p.email) = LOWER($1) AND k.archiviert_am IS NULL
+        ORDER BY w.stweg, w.bezeichnung`,
+      [email],
+    );
+    res.json({ wohnungen: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Liste Vollmachten — Admin sieht alle, sonst nur eigene (vergeben + erhalten)
+app.get('/api/vollmachten', authMiddleware, async (req, res) => {
+  try {
+    const groups = req.user.groups || [];
+    const isAdmin = isTechnik(groups) || isPraesident(groups) || groups.some(g => g.toLowerCase() === 'verwaltung');
+    const email = req.user.email || '';
+    // Status-Auto-Update: abgelaufene aktiv → abgelaufen
+    await pool.query(
+      `UPDATE vollmachten SET status='abgelaufen', updated_at=NOW()
+        WHERE status='aktiv' AND gueltig_bis IS NOT NULL AND gueltig_bis < CURRENT_DATE`,
+    );
+    const params = [];
+    let where;
+    if (isAdmin) {
+      where = 'TRUE';
+    } else {
+      params.push(email);
+      where = `LOWER(v.vollmachtgeber_email) = LOWER($1) OR LOWER(v.bevollmaechtigter_email) = LOWER($1)
+               OR v.vollmachtgeber_person_id = (SELECT id FROM personen WHERE LOWER(email) = LOWER($1) LIMIT 1)
+               OR v.bevollmaechtigter_person_id = (SELECT id FROM personen WHERE LOWER(email) = LOWER($1) LIMIT 1)`;
+    }
+    const r = await pool.query(
+      `SELECT v.*, w.bezeichnung AS wohnung_bezeichnung, vw.firma_name AS verwaltung_firma
+         FROM vollmachten v
+         LEFT JOIN wohnungen w ON w.id = v.wohnung_id
+         LEFT JOIN verwaltungen vw ON vw.id = v.bevollmaechtigter_verwaltung_id
+        WHERE ${where}
+        ORDER BY (CASE v.status WHEN 'aktiv' THEN 0 WHEN 'entwurf' THEN 1 WHEN 'abgelaufen' THEN 2 ELSE 3 END), v.created_at DESC
+        LIMIT 500`,
+      params,
+    );
+    res.json({ vollmachten: r.rows, is_admin: isAdmin });
+  } catch (err) { console.error('[vollmachten] list:', err); res.status(500).json({ error: err.message }); }
+});
+
+// Neue Vollmacht erfassen (status='entwurf')
+app.post('/api/vollmachten', authMiddleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.vollmachtgeber_name || !b.bevollmaechtigter_name || !b.bevollmaechtigter_typ || !b.art) {
+      return res.status(400).json({ error: 'Pflichtfelder: vollmachtgeber_name, bevollmaechtigter_name, bevollmaechtigter_typ, art' });
+    }
+    if (!['eigentuemer','verwaltung','mieter','extern'].includes(b.bevollmaechtigter_typ)) {
+      return res.status(400).json({ error: 'Ungueltiger bevollmaechtigter_typ' });
+    }
+    if (!['generell','spezifisch','auskunft'].includes(b.art)) {
+      return res.status(400).json({ error: 'Ungueltige art' });
+    }
+    // Standard-Berechtigung: jeder eingeloggte User darf Vollmachten erfassen
+    // (in der Regel fuer sich selbst als Vollmachtgeber)
+    const r = await pool.query(
+      `INSERT INTO vollmachten (
+         vollmachtgeber_person_id, vollmachtgeber_name, vollmachtgeber_email, vollmachtgeber_adresse,
+         bevollmaechtigter_typ, bevollmaechtigter_person_id, bevollmaechtigter_verwaltung_id,
+         bevollmaechtigter_name, bevollmaechtigter_email, bevollmaechtigter_adresse, bevollmaechtigter_telefon,
+         art, geltungsbereich, wohnung_id, stweg, gueltig_ab, gueltig_bis,
+         status, created_by_user_email
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'entwurf',$18)
+       RETURNING *`,
+      [
+        b.vollmachtgeber_person_id || null, b.vollmachtgeber_name, b.vollmachtgeber_email || null, b.vollmachtgeber_adresse || null,
+        b.bevollmaechtigter_typ, b.bevollmaechtigter_person_id || null, b.bevollmaechtigter_verwaltung_id || null,
+        b.bevollmaechtigter_name, b.bevollmaechtigter_email || null, b.bevollmaechtigter_adresse || null, b.bevollmaechtigter_telefon || null,
+        b.art, b.geltungsbereich || null, b.wohnung_id || null, b.stweg || null,
+        b.gueltig_ab || new Date().toISOString().slice(0, 10), b.gueltig_bis || null,
+        req.user.email || null,
+      ],
+    );
+    res.json(r.rows[0]);
+  } catch (err) { console.error('[vollmachten] create:', err); res.status(500).json({ error: err.message }); }
+});
+
+// Vollmacht bearbeiten (nur Entwurf)
+app.put('/api/vollmachten/:id', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const b = req.body || {};
+    const existing = await pool.query('SELECT * FROM vollmachten WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = existing.rows[0];
+    const groups = req.user.groups || [];
+    const isAdmin = isTechnik(groups) || isPraesident(groups);
+    const isOwner = (v.vollmachtgeber_email || '').toLowerCase() === (req.user.email || '').toLowerCase()
+                 || (v.created_by_user_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    if (!isAdmin && !isOwner) return res.status(403).json({ error: 'Nur Vollmachtgeber oder Admin' });
+    if (v.status !== 'entwurf') return res.status(400).json({ error: 'Nur Entwuerfe sind editierbar (Status: ' + v.status + ')' });
+    const updates = []; const params = [];
+    const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
+    const allowed = ['vollmachtgeber_name','vollmachtgeber_email','vollmachtgeber_adresse',
+      'bevollmaechtigter_typ','bevollmaechtigter_person_id','bevollmaechtigter_verwaltung_id',
+      'bevollmaechtigter_name','bevollmaechtigter_email','bevollmaechtigter_adresse','bevollmaechtigter_telefon',
+      'art','geltungsbereich','wohnung_id','stweg','gueltig_ab','gueltig_bis'];
+    for (const k of allowed) {
+      if (b[k] !== undefined) push(k, b[k] === '' ? null : b[k]);
+    }
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    push('updated_at', new Date());
+    params.push(id);
+    const r = await pool.query(
+      `UPDATE vollmachten SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params,
+    );
+    res.json(r.rows[0]);
+  } catch (err) { console.error('[vollmachten] update:', err); res.status(500).json({ error: err.message }); }
+});
+
+// Digital signieren — setzt status='aktiv' + Audit-Daten. Nur Vollmachtgeber selbst.
+app.post('/api/vollmachten/:id/sign-digital', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const existing = await pool.query('SELECT * FROM vollmachten WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = existing.rows[0];
+    const userEmail = (req.user.email || '').toLowerCase();
+    if ((v.vollmachtgeber_email || '').toLowerCase() !== userEmail) {
+      return res.status(403).json({ error: 'Nur der Vollmachtgeber selbst kann digital signieren' });
+    }
+    if (v.status !== 'entwurf') return res.status(400).json({ error: 'Nur Entwuerfe koennen signiert werden' });
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || req.socket.remoteAddress;
+    const ua = req.headers['user-agent'] || null;
+    const sub = req.user.sub || req.user.id || null;
+    const r = await pool.query(
+      `UPDATE vollmachten SET status='aktiv', signatur_typ='digital',
+         digital_signed_at=NOW(), digital_signed_ip=$1, digital_signed_user_agent=$2,
+         digital_signed_authentik_sub=$3, updated_at=NOW()
+        WHERE id=$4 RETURNING *`,
+      [ip, ua, sub ? String(sub) : null, id],
+    );
+    res.json(r.rows[0]);
+  } catch (err) { console.error('[vollmachten] sign:', err); res.status(500).json({ error: err.message }); }
+});
+
+// Aktivieren mit Papier-Signatur (Status setzen; Upload des Scans separat ueber Documents)
+app.post('/api/vollmachten/:id/activate-paper', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { papier_pdf_path } = req.body || {};
+    const existing = await pool.query('SELECT * FROM vollmachten WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = existing.rows[0];
+    const groups = req.user.groups || [];
+    const isAdmin = isTechnik(groups) || isPraesident(groups) || groups.some(g => g.toLowerCase() === 'verwaltung');
+    const userEmail = (req.user.email || '').toLowerCase();
+    if (!isAdmin && (v.vollmachtgeber_email || '').toLowerCase() !== userEmail) {
+      return res.status(403).json({ error: 'Nur Vollmachtgeber oder Admin' });
+    }
+    if (v.status !== 'entwurf') return res.status(400).json({ error: 'Nur Entwuerfe koennen aktiviert werden' });
+    const r = await pool.query(
+      `UPDATE vollmachten SET status='aktiv', signatur_typ='papier',
+         papier_pdf_path=$1, updated_at=NOW() WHERE id=$2 RETURNING *`,
+      [papier_pdf_path || null, id],
+    );
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Widerrufen
+app.post('/api/vollmachten/:id/revoke', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { grund } = req.body || {};
+    const existing = await pool.query('SELECT * FROM vollmachten WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = existing.rows[0];
+    const groups = req.user.groups || [];
+    const isAdmin = isTechnik(groups) || isPraesident(groups);
+    const userEmail = (req.user.email || '').toLowerCase();
+    const isGeber = (v.vollmachtgeber_email || '').toLowerCase() === userEmail;
+    if (!isAdmin && !isGeber) return res.status(403).json({ error: 'Nur Vollmachtgeber oder Admin' });
+    if (v.status === 'widerrufen') return res.status(400).json({ error: 'Bereits widerrufen' });
+    const r = await pool.query(
+      `UPDATE vollmachten SET status='widerrufen', widerrufen_am=NOW(),
+         widerrufen_von_user_email=$1, widerrufen_grund=$2, updated_at=NOW()
+        WHERE id=$3 RETURNING *`,
+      [req.user.email || null, grund || null, id],
+    );
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PDF
+app.get('/api/vollmachten/:id/pdf', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const r = await pool.query('SELECT * FROM vollmachten WHERE id = $1', [id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = r.rows[0];
+    const groups = req.user.groups || [];
+    const isAdmin = isTechnik(groups) || isPraesident(groups) || groups.some(g => g.toLowerCase() === 'verwaltung');
+    const userEmail = (req.user.email || '').toLowerCase();
+    const involved = (v.vollmachtgeber_email || '').toLowerCase() === userEmail
+                  || (v.bevollmaechtigter_email || '').toLowerCase() === userEmail;
+    if (!isAdmin && !involved) return res.status(403).json({ error: 'Kein Zugriff' });
+    const pdf = await generateVollmachtPdf(v);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="vollmacht-${id}.pdf"`);
+    res.send(pdf);
+  } catch (err) { console.error('[vollmachten] pdf:', err); res.status(500).json({ error: err.message }); }
+});
+
+// Loeschen (nur Entwurf)
+app.delete('/api/vollmachten/:id', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const existing = await pool.query('SELECT * FROM vollmachten WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = existing.rows[0];
+    const groups = req.user.groups || [];
+    const isAdmin = isTechnik(groups) || isPraesident(groups);
+    const isOwner = (v.vollmachtgeber_email || '').toLowerCase() === (req.user.email || '').toLowerCase()
+                 || (v.created_by_user_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    if (!isAdmin && !isOwner) return res.status(403).json({ error: 'Nur Vollmachtgeber oder Admin' });
+    if (v.status !== 'entwurf' && !isAdmin) return res.status(400).json({ error: 'Nur Entwuerfe koennen geloescht werden (Admin darf alle)' });
+    await pool.query('DELETE FROM vollmachten WHERE id = $1', [id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ─── Start ──────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 
@@ -14268,6 +14632,67 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_rekl_status ON reklamationen(status, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_rekl_person ON reklamationen(person_id);
       CREATE INDEX IF NOT EXISTS idx_wk_person ON wohnungen_kontakte(person_id);
+
+      -- Vollmachten: Eigentuemer bevollmaechtigt Verwalter/Mieter/andere
+      -- Person zur Vertretung in laufender Verwaltung, Einzel-Geschaeft
+      -- oder Datenschutz-Auskunft. Schweizer ZertES Art.2: digital signiert
+      -- per Authentik-Login = einfache elektronische Signatur (mit
+      -- Audit-Log: timestamp, IP, user-agent). Papier-Pfad fuer
+      -- gedruckt+unterschrieben+gescannt.
+      CREATE TABLE IF NOT EXISTS vollmachten (
+        id SERIAL PRIMARY KEY,
+        -- Vollmachtgeber (= Eigentuemer/Berechtigter, der die Vollmacht erteilt)
+        vollmachtgeber_person_id INTEGER REFERENCES personen(id) ON DELETE SET NULL,
+        vollmachtgeber_name TEXT NOT NULL,
+        vollmachtgeber_email TEXT,
+        vollmachtgeber_adresse TEXT,
+        -- Bevollmaechtigter
+        bevollmaechtigter_typ VARCHAR(20) NOT NULL,    -- 'eigentuemer' | 'verwaltung' | 'mieter' | 'extern'
+        bevollmaechtigter_person_id INTEGER REFERENCES personen(id) ON DELETE SET NULL,
+        bevollmaechtigter_verwaltung_id INTEGER REFERENCES verwaltungen(id) ON DELETE SET NULL,
+        bevollmaechtigter_name TEXT NOT NULL,
+        bevollmaechtigter_email TEXT,
+        bevollmaechtigter_adresse TEXT,
+        bevollmaechtigter_telefon TEXT,
+        -- Geltungsbereich
+        art VARCHAR(20) NOT NULL,                       -- 'generell' | 'spezifisch' | 'auskunft'
+        geltungsbereich TEXT,                           -- Freitext: was darf der Bevollmaechtigte
+        wohnung_id INTEGER REFERENCES wohnungen(id) ON DELETE SET NULL,
+        stweg INTEGER,
+        -- Zeit
+        gueltig_ab DATE NOT NULL DEFAULT CURRENT_DATE,
+        gueltig_bis DATE,                               -- NULL = bis Widerruf
+        -- Signatur
+        signatur_typ VARCHAR(20),                       -- 'digital' | 'papier'
+        digital_signed_at TIMESTAMPTZ,
+        digital_signed_ip TEXT,
+        digital_signed_user_agent TEXT,
+        digital_signed_authentik_sub TEXT,              -- Authentik User-Sub als Identitaets-Anker
+        papier_pdf_path TEXT,                           -- Pfad im /documents/Vollmachten/
+        -- Status
+        status VARCHAR(20) DEFAULT 'entwurf',           -- 'entwurf' | 'aktiv' | 'widerrufen' | 'abgelaufen'
+        widerrufen_am TIMESTAMPTZ,
+        widerrufen_von_user_email TEXT,
+        widerrufen_grund TEXT,
+        -- Audit
+        created_by_user_email TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        CONSTRAINT vm_art_chk CHECK (art IN ('generell','spezifisch','auskunft')),
+        CONSTRAINT vm_typ_chk CHECK (bevollmaechtigter_typ IN ('eigentuemer','verwaltung','mieter','extern')),
+        CONSTRAINT vm_status_chk CHECK (status IN ('entwurf','aktiv','widerrufen','abgelaufen')),
+        CONSTRAINT vm_signatur_chk CHECK (signatur_typ IS NULL OR signatur_typ IN ('digital','papier'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_vm_geber ON vollmachten(vollmachtgeber_person_id, status);
+      CREATE INDEX IF NOT EXISTS idx_vm_nehmer ON vollmachten(bevollmaechtigter_person_id, status);
+      CREATE INDEX IF NOT EXISTS idx_vm_status ON vollmachten(status, gueltig_bis);
+      CREATE INDEX IF NOT EXISTS idx_vm_wohnung ON vollmachten(wohnung_id) WHERE wohnung_id IS NOT NULL;
+      DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM pg_proc WHERE proname='audit_trigger_fn')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_name='vollmachten_audit') THEN
+          EXECUTE 'CREATE TRIGGER vollmachten_audit AFTER INSERT OR UPDATE OR DELETE ON vollmachten FOR EACH ROW EXECUTE FUNCTION audit_trigger_fn()';
+        END IF;
+      END $$;
 
       -- Trigger: bei UPDATE personen → email/telefon/adresse/name auf alle
       -- aktiven wohnungen_kontakte mit dieser person_id propagieren.

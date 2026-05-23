@@ -16,6 +16,7 @@ const SERVICES_GROUPS = [
       { label: 'Grundbuch erfassen', href: 'grundbuch.html', activeKey: 'grundbuch', permAny: 'eigentuemer' },
       { label: 'Verwaltung', href: 'verwaltung-admin.html', activeKey: 'verwaltungadmin', permAny: 'ausschuss,technik,praesident' },
       { label: 'Brief-Tracking', href: 'brief-tracking.html', activeKey: 'brief-tracking', permAny: 'ausschuss,technik,praesident' },
+      { label: 'Vollmachten', href: 'vollmachten.html', activeKey: 'vollmachten', permAny: 'eigentuemer,ausschuss,technik,praesident,verwaltung,bewohner' },
     ],
   },
   {

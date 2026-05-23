@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vollmachten — Rosenweg</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/nav.js?v=2"></script>
+  <link rel="icon" href="/logo-rosenweg.png">
+  <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'); body { font-family: 'Inter', sans-serif; }</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+  <script>RosenwegNav.init({ active: 'vollmachten' });</script>
+
+  <main class="max-w-6xl mx-auto px-4 py-6">
+    <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center"><p class="text-gray-600">Lade…</p></div>
+
+    <div id="content" class="hidden">
+      <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-4">
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900">📜 Vollmachten</h1>
+          <p class="text-sm text-gray-600">Eigentuemer koennen Verwalter, Mieter oder Dritte bevollmaechtigen, sie zu vertreten.</p>
+        </div>
+        <button onclick="openCreateModal()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium whitespace-nowrap">+ Neue Vollmacht erteilen</button>
+      </div>
+
+      <!-- Tabs -->
+      <div class="border-b border-gray-200 mb-4 overflow-x-auto -mx-4 px-4">
+        <nav class="flex space-x-4 sm:space-x-6 whitespace-nowrap">
+          <button data-tab="meine" class="tab-btn py-2 px-1 text-sm border-b-2 border-blue-600 text-blue-600 font-medium">Meine erteilten</button>
+          <button data-tab="erhalten" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">Mich betreffend</button>
+          <button data-tab="alle" id="tab-alle-btn" class="hidden tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">Alle (Admin)</button>
+        </nav>
+      </div>
+
+      <div id="liste" class="space-y-2"></div>
+      <div id="empty" class="hidden bg-white border rounded-lg p-8 text-center text-gray-400 italic">Keine Vollmachten in dieser Kategorie.</div>
+    </div>
+  </main>
+
+  <!-- Erstellen/Bearbeiten Modal -->
+  <div id="modal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-start justify-center p-4 overflow-y-auto">
+    <div class="bg-white w-full max-w-2xl rounded-xl shadow-xl my-8">
+      <div class="px-5 py-3 border-b flex items-center justify-between">
+        <h2 id="modal-title" class="font-bold">Neue Vollmacht</h2>
+        <button onclick="closeModal()" class="text-gray-500 hover:text-gray-700 text-2xl leading-none">×</button>
+      </div>
+      <div class="p-5 space-y-4 text-sm">
+        <input type="hidden" id="m-id">
+
+        <fieldset class="border rounded-lg p-3">
+          <legend class="text-xs font-semibold text-gray-700 px-2">Vollmachtgeber (Sie selbst, falls Sie der Eigentuemer sind)</legend>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+            <div>
+              <label class="block text-xs font-medium text-gray-600 mb-1">Name *</label>
+              <input type="text" id="m-vg-name" required class="w-full border rounded px-3 py-1.5">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 mb-1">E-Mail</label>
+              <input type="email" id="m-vg-email" class="w-full border rounded px-3 py-1.5">
+            </div>
+          </div>
+          <div class="mt-2">
+            <label class="block text-xs font-medium text-gray-600 mb-1">Adresse</label>
+            <textarea id="m-vg-adresse" rows="2" class="w-full border rounded px-3 py-1.5" placeholder="Strasse Hausnummer&#10;PLZ Ort"></textarea>
+          </div>
+        </fieldset>
+
+        <fieldset class="border rounded-lg p-3">
+          <legend class="text-xs font-semibold text-gray-700 px-2">Bevollmaechtigter</legend>
+          <div class="mt-2">
+            <label class="block text-xs font-medium text-gray-600 mb-1">Typ *</label>
+            <select id="m-bv-typ" required onchange="onBvTypChange()" class="w-full border rounded px-3 py-1.5">
+              <option value="">— bitte waehlen —</option>
+              <option value="eigentuemer">Anderer Miteigentuemer/in</option>
+              <option value="verwaltung">Verwaltung (Firma)</option>
+              <option value="mieter">Mieter/in meiner Wohnung</option>
+              <option value="extern">Externe Person (Anwalt, Familie, etc.)</option>
+            </select>
+          </div>
+          <div id="m-bv-verwaltung-row" class="hidden mt-2">
+            <label class="block text-xs font-medium text-gray-600 mb-1">Verwaltung waehlen</label>
+            <select id="m-bv-verwaltung" onchange="onVerwaltungChange()" class="w-full border rounded px-3 py-1.5">
+              <option value="">— Verwaltung waehlen —</option>
+            </select>
+          </div>
+          <div id="m-bv-person-row" class="hidden mt-2">
+            <label class="block text-xs font-medium text-gray-600 mb-1">Person aus Datenbank waehlen <span class="text-gray-400">(optional)</span></label>
+            <input type="text" id="m-bv-person-search" placeholder="Name oder E-Mail eingeben…" class="w-full border rounded px-3 py-1.5">
+            <div id="m-bv-person-results" class="hidden bg-white border rounded mt-1 max-h-32 overflow-y-auto text-xs"></div>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+            <div>
+              <label class="block text-xs font-medium text-gray-600 mb-1">Name *</label>
+              <input type="text" id="m-bv-name" required class="w-full border rounded px-3 py-1.5">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 mb-1">E-Mail</label>
+              <input type="email" id="m-bv-email" class="w-full border rounded px-3 py-1.5">
+            </div>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+            <div>
+              <label class="block text-xs font-medium text-gray-600 mb-1">Telefon</label>
+              <input type="tel" id="m-bv-telefon" data-phone-format class="w-full border rounded px-3 py-1.5">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 mb-1">Adresse</label>
+              <input type="text" id="m-bv-adresse" placeholder="(bei externen Pflicht)" class="w-full border rounded px-3 py-1.5">
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset class="border rounded-lg p-3">
+          <legend class="text-xs font-semibold text-gray-700 px-2">Umfang der Vollmacht</legend>
+          <div class="mt-2">
+            <label class="block text-xs font-medium text-gray-600 mb-1">Art *</label>
+            <select id="m-art" required class="w-full border rounded px-3 py-1.5">
+              <option value="">— bitte waehlen —</option>
+              <option value="generell">Generelle Vertretung (laufende Verwaltung, bis Widerruf)</option>
+              <option value="spezifisch">Spezifische Vollmacht (Einzel-Geschaeft, befristet)</option>
+              <option value="auskunft">Datenschutz-/Auskunft-Vollmacht (nur Einsicht, keine Entscheidung)</option>
+            </select>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+            <div>
+              <label class="block text-xs font-medium text-gray-600 mb-1">Bezogen auf Wohnung <span class="text-gray-400">(optional)</span></label>
+              <select id="m-wohnung" class="w-full border rounded px-3 py-1.5">
+                <option value="">— ohne Wohnungs-Bezug —</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 mb-1">STWEG <span class="text-gray-400">(optional)</span></label>
+              <select id="m-stweg" class="w-full border rounded px-3 py-1.5">
+                <option value="">—</option>
+                <option value="1">STWEG 1</option><option value="2">STWEG 2</option>
+                <option value="3">STWEG 3</option><option value="4">STWEG 4</option>
+                <option value="5">STWEG 5</option><option value="6">STWEG 6</option>
+                <option value="7">STWEG 7</option><option value="8">STWEG 8</option>
+              </select>
+            </div>
+          </div>
+          <div class="mt-2">
+            <label class="block text-xs font-medium text-gray-600 mb-1">Geltungsbereich / konkrete Befugnisse</label>
+            <textarea id="m-geltung" rows="4" class="w-full border rounded px-3 py-1.5" placeholder="z.B.: Vertretung gegenueber der Verwaltung in allen Belangen meiner Eigentumswohnung; Empfang von Post; Beauftragung kleinerer Reparaturen bis CHF 500."></textarea>
+            <p class="text-xs text-gray-400 mt-1">Je praeziser, desto rechtssicherer. Bei "generell" reicht ein Satz, bei "spezifisch" sollte das konkrete Geschaeft genannt sein.</p>
+          </div>
+        </fieldset>
+
+        <fieldset class="border rounded-lg p-3">
+          <legend class="text-xs font-semibold text-gray-700 px-2">Gueltigkeit</legend>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+            <div>
+              <label class="block text-xs font-medium text-gray-600 mb-1">Gueltig ab</label>
+              <input type="date" id="m-ab" class="w-full border rounded px-3 py-1.5">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 mb-1">Gueltig bis <span class="text-gray-400">(leer = bis Widerruf)</span></label>
+              <input type="date" id="m-bis" class="w-full border rounded px-3 py-1.5">
+            </div>
+          </div>
+        </fieldset>
+      </div>
+      <div class="px-5 py-3 border-t flex flex-col sm:flex-row sm:justify-end gap-2">
+        <button onclick="closeModal()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200">Abbrechen</button>
+        <button onclick="saveDraft()" class="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-800">Als Entwurf speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const fmtD = s => s ? new Date(s).toLocaleDateString('de-CH') : '—';
+  const fmtDt = s => s ? new Date(s).toLocaleString('de-CH') : '—';
+
+  let allVollmachten = [];
+  let isAdmin = false;
+  let currentTab = 'meine';
+  let myEmail = '';
+  let verwaltungenCache = [];
+  let myWohnungen = [];
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    const u = await AuthentikAuth.init({ requireAuth: true });
+    if (!u) return;
+    myEmail = (u.email || '').toLowerCase();
+    document.getElementById('auth-gate').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+    // Tab-Handler
+    document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+    await load();
+    // Modal: typ-change
+    loadVerwaltungenForSelect();
+    setupPersonSearch();
+  });
+
+  async function load() {
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/vollmachten');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      allVollmachten = d.vollmachten || [];
+      isAdmin = d.is_admin;
+      if (isAdmin) document.getElementById('tab-alle-btn').classList.remove('hidden');
+      renderList();
+    } catch (e) {
+      document.getElementById('liste').innerHTML = `<div class="bg-red-50 text-red-700 p-4 rounded">Fehler: ${esc(e.message)}</div>`;
+    }
+  }
+
+  function switchTab(tab) {
+    currentTab = tab;
+    document.querySelectorAll('.tab-btn').forEach(b => {
+      const active = b.dataset.tab === tab;
+      b.classList.toggle('border-blue-600', active);
+      b.classList.toggle('text-blue-600', active);
+      b.classList.toggle('font-medium', active);
+      b.classList.toggle('border-transparent', !active);
+      b.classList.toggle('text-gray-500', !active);
+    });
+    renderList();
+  }
+
+  function filterByTab(v) {
+    const vgEmail = (v.vollmachtgeber_email || '').toLowerCase();
+    const bvEmail = (v.bevollmaechtigter_email || '').toLowerCase();
+    if (currentTab === 'alle') return true;
+    if (currentTab === 'meine') return vgEmail === myEmail;
+    if (currentTab === 'erhalten') return bvEmail === myEmail;
+    return true;
+  }
+
+  function statusBadge(s) {
+    const map = {
+      entwurf: ['bg-gray-100 text-gray-700', 'Entwurf'],
+      aktiv: ['bg-green-100 text-green-800', 'Aktiv'],
+      widerrufen: ['bg-red-100 text-red-800', 'Widerrufen'],
+      abgelaufen: ['bg-amber-100 text-amber-800', 'Abgelaufen'],
+    }[s] || ['bg-gray-100 text-gray-700', s];
+    return `<span class="text-xs ${map[0]} px-2 py-0.5 rounded">${map[1]}</span>`;
+  }
+
+  function artLabel(a) {
+    return { generell: 'Generell', spezifisch: 'Spezifisch', auskunft: 'Auskunft' }[a] || a;
+  }
+
+  function typLabel(t) {
+    return { eigentuemer: 'Miteigentuemer', verwaltung: 'Verwaltung', mieter: 'Mieter', extern: 'Extern' }[t] || t;
+  }
+
+  function renderList() {
+    const list = allVollmachten.filter(filterByTab);
+    const wrap = document.getElementById('liste');
+    const empty = document.getElementById('empty');
+    if (list.length === 0) {
+      wrap.innerHTML = '';
+      empty.classList.remove('hidden');
+      return;
+    }
+    empty.classList.add('hidden');
+    wrap.innerHTML = list.map(v => {
+      const canSign = v.status === 'entwurf' && (v.vollmachtgeber_email || '').toLowerCase() === myEmail;
+      const canEdit = v.status === 'entwurf';
+      const canRevoke = v.status === 'aktiv' && ((v.vollmachtgeber_email || '').toLowerCase() === myEmail || isAdmin);
+      return `<div class="bg-white border rounded-lg p-4 hover:shadow-md transition">
+        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+          <div class="flex-1 min-w-0">
+            <div class="flex flex-wrap items-center gap-2 mb-1">
+              ${statusBadge(v.status)}
+              <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">${artLabel(v.art)}</span>
+              <span class="text-xs text-gray-400">#${v.id}</span>
+            </div>
+            <p class="text-sm">
+              <strong>${esc(v.vollmachtgeber_name)}</strong>
+              <span class="text-gray-500">bevollmaechtigt</span>
+              <strong>${esc(v.bevollmaechtigter_name)}</strong>
+              <span class="text-gray-400">(${typLabel(v.bevollmaechtigter_typ)})</span>
+            </p>
+            ${v.geltungsbereich ? `<p class="text-xs text-gray-600 mt-1 line-clamp-2">${esc(v.geltungsbereich)}</p>` : ''}
+            <div class="text-xs text-gray-500 mt-2 flex flex-wrap gap-x-4 gap-y-1">
+              <span>📅 ${fmtD(v.gueltig_ab)} → ${v.gueltig_bis ? fmtD(v.gueltig_bis) : 'bis Widerruf'}</span>
+              ${v.wohnung_bezeichnung ? `<span>🏠 ${esc(v.wohnung_bezeichnung)}</span>` : (v.stweg ? `<span>🏠 STWEG ${v.stweg}</span>` : '')}
+              ${v.signatur_typ === 'digital' ? `<span>✍ Digital signiert ${fmtDt(v.digital_signed_at)}</span>` : ''}
+              ${v.signatur_typ === 'papier' ? `<span>📄 Papier-Signatur</span>` : ''}
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-2 shrink-0">
+            <a href="/api/vollmachten/${v.id}/pdf" target="_blank" class="text-xs bg-blue-100 text-blue-700 rounded px-3 py-1.5 hover:bg-blue-200">📄 PDF</a>
+            ${canEdit ? `<button onclick="editVollmacht(${v.id})" class="text-xs bg-gray-100 text-gray-700 rounded px-3 py-1.5 hover:bg-gray-200">✎ Bearbeiten</button>` : ''}
+            ${canSign ? `<button onclick="signDigital(${v.id})" class="text-xs bg-green-600 text-white rounded px-3 py-1.5 hover:bg-green-700">✓ Digital signieren</button>` : ''}
+            ${canSign ? `<button onclick="activatePaper(${v.id})" class="text-xs bg-amber-600 text-white rounded px-3 py-1.5 hover:bg-amber-700">📄 Papier-Signatur erfasst</button>` : ''}
+            ${canRevoke ? `<button onclick="revoke(${v.id})" class="text-xs bg-red-600 text-white rounded px-3 py-1.5 hover:bg-red-700">Widerrufen</button>` : ''}
+            ${canEdit ? `<button onclick="deleteEntry(${v.id})" class="text-xs text-red-600 hover:underline">Loeschen</button>` : ''}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // === Modal ===
+  async function openCreateModal() {
+    document.getElementById('modal-title').textContent = 'Neue Vollmacht';
+    document.getElementById('m-id').value = '';
+    // Defaults aus aktuellem User
+    const user = AuthentikAuth.getUser();
+    document.getElementById('m-vg-name').value = user?.name || '';
+    document.getElementById('m-vg-email').value = user?.email || '';
+    document.getElementById('m-vg-adresse').value = '';
+    document.getElementById('m-bv-typ').value = '';
+    document.getElementById('m-bv-name').value = '';
+    document.getElementById('m-bv-email').value = '';
+    document.getElementById('m-bv-telefon').value = '';
+    document.getElementById('m-bv-adresse').value = '';
+    document.getElementById('m-art').value = '';
+    document.getElementById('m-wohnung').value = '';
+    document.getElementById('m-stweg').value = '';
+    document.getElementById('m-geltung').value = '';
+    document.getElementById('m-ab').value = new Date().toISOString().slice(0, 10);
+    document.getElementById('m-bis').value = '';
+    onBvTypChange();
+    await loadMyWohnungen();
+    document.getElementById('modal').classList.remove('hidden');
+  }
+
+  function closeModal() { document.getElementById('modal').classList.add('hidden'); }
+
+  function onBvTypChange() {
+    const typ = document.getElementById('m-bv-typ').value;
+    document.getElementById('m-bv-verwaltung-row').classList.toggle('hidden', typ !== 'verwaltung');
+    document.getElementById('m-bv-person-row').classList.toggle('hidden', !(typ === 'eigentuemer' || typ === 'mieter'));
+  }
+
+  async function loadVerwaltungenForSelect() {
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/vollmachten/lookup/verwaltungen');
+      if (!r.ok) return;
+      const d = await r.json();
+      verwaltungenCache = d.verwaltungen || [];
+      const sel = document.getElementById('m-bv-verwaltung');
+      sel.innerHTML = '<option value="">— Verwaltung waehlen —</option>' +
+        verwaltungenCache.map(v => `<option value="${v.id}">${esc(v.firma_name)}${v.stweg ? ' (STWEG ' + v.stweg + ')' : ''}</option>`).join('');
+    } catch (e) { console.warn('Verwaltungen-Load:', e.message); }
+  }
+
+  function onVerwaltungChange() {
+    const sel = document.getElementById('m-bv-verwaltung');
+    const id = parseInt(sel.value, 10);
+    const v = verwaltungenCache.find(x => x.id === id);
+    if (!v) return;
+    document.getElementById('m-bv-name').value = v.firma_name || '';
+    document.getElementById('m-bv-email').value = v.email || '';
+    document.getElementById('m-bv-telefon').value = v.telefon || '';
+    document.getElementById('m-bv-adresse').value = v.adresse || '';
+  }
+
+  function setupPersonSearch() {
+    const input = document.getElementById('m-bv-person-search');
+    const results = document.getElementById('m-bv-person-results');
+    let t;
+    input.addEventListener('input', () => {
+      clearTimeout(t);
+      const q = input.value.trim();
+      if (q.length < 2) { results.classList.add('hidden'); return; }
+      t = setTimeout(async () => {
+        try {
+          const r = await AuthentikAuth.apiFetch('/api/vollmachten/lookup/personen?q=' + encodeURIComponent(q));
+          if (!r.ok) return;
+          const d = await r.json();
+          const list = d.personen || d || [];
+          if (list.length === 0) {
+            results.innerHTML = '<div class="p-2 text-gray-400 italic">Keine Treffer</div>';
+          } else {
+            results.innerHTML = list.map(p => `<div class="p-2 hover:bg-blue-50 cursor-pointer border-b last:border-b-0" onclick='pickPerson(${JSON.stringify(p).replace(/'/g, "&apos;")})'><strong>${esc(p.name)}</strong><br><span class="text-gray-500">${esc(p.email || '—')}</span></div>`).join('');
+          }
+          results.classList.remove('hidden');
+        } catch (e) { console.warn('Person-Search:', e.message); }
+      }, 250);
+    });
+  }
+
+  function pickPerson(p) {
+    document.getElementById('m-bv-name').value = p.name || '';
+    document.getElementById('m-bv-email').value = p.email || '';
+    document.getElementById('m-bv-telefon').value = p.telefon || p.mobile || '';
+    document.getElementById('m-bv-adresse').value = p.adresse || '';
+    document.getElementById('m-bv-person-search').value = p.name || '';
+    document.getElementById('m-bv-person-results').classList.add('hidden');
+  }
+
+  async function loadMyWohnungen() {
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/vollmachten/lookup/my-wohnungen');
+      if (!r.ok) return;
+      const d = await r.json();
+      myWohnungen = d.wohnungen || [];
+      const sel = document.getElementById('m-wohnung');
+      sel.innerHTML = '<option value="">— ohne Wohnungs-Bezug —</option>' +
+        myWohnungen.map(w => `<option value="${w.id}">${esc(w.bezeichnung || ('Wohnung #' + w.id))}${w.stweg ? ' (STWEG ' + w.stweg + ')' : ''}</option>`).join('');
+    } catch (e) { /* endpoint optional */ }
+  }
+
+  async function saveDraft() {
+    const body = {
+      vollmachtgeber_name: document.getElementById('m-vg-name').value.trim(),
+      vollmachtgeber_email: document.getElementById('m-vg-email').value.trim() || null,
+      vollmachtgeber_adresse: document.getElementById('m-vg-adresse').value.trim() || null,
+      bevollmaechtigter_typ: document.getElementById('m-bv-typ').value,
+      bevollmaechtigter_verwaltung_id: parseInt(document.getElementById('m-bv-verwaltung').value, 10) || null,
+      bevollmaechtigter_name: document.getElementById('m-bv-name').value.trim(),
+      bevollmaechtigter_email: document.getElementById('m-bv-email').value.trim() || null,
+      bevollmaechtigter_telefon: document.getElementById('m-bv-telefon').value.trim() || null,
+      bevollmaechtigter_adresse: document.getElementById('m-bv-adresse').value.trim() || null,
+      art: document.getElementById('m-art').value,
+      geltungsbereich: document.getElementById('m-geltung').value.trim() || null,
+      wohnung_id: parseInt(document.getElementById('m-wohnung').value, 10) || null,
+      stweg: parseInt(document.getElementById('m-stweg').value, 10) || null,
+      gueltig_ab: document.getElementById('m-ab').value || null,
+      gueltig_bis: document.getElementById('m-bis').value || null,
+    };
+    if (!body.vollmachtgeber_name || !body.bevollmaechtigter_name || !body.bevollmaechtigter_typ || !body.art) {
+      alert('Bitte Pflichtfelder (Vollmachtgeber-Name, Bevollmaechtigter-Name + Typ, Art) ausfuellen.');
+      return;
+    }
+    const id = document.getElementById('m-id').value;
+    try {
+      const url = id ? `/api/vollmachten/${id}` : '/api/vollmachten';
+      const method = id ? 'PUT' : 'POST';
+      const r = await AuthentikAuth.apiFetch(url, {
+        method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      closeModal();
+      await load();
+      alert('Entwurf gespeichert. Du kannst ihn jetzt digital signieren oder ein PDF zum Drucken erzeugen.');
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+
+  async function editVollmacht(id) {
+    const v = allVollmachten.find(x => x.id === id);
+    if (!v) return;
+    document.getElementById('modal-title').textContent = 'Vollmacht bearbeiten';
+    document.getElementById('m-id').value = v.id;
+    document.getElementById('m-vg-name').value = v.vollmachtgeber_name || '';
+    document.getElementById('m-vg-email').value = v.vollmachtgeber_email || '';
+    document.getElementById('m-vg-adresse').value = v.vollmachtgeber_adresse || '';
+    document.getElementById('m-bv-typ').value = v.bevollmaechtigter_typ || '';
+    document.getElementById('m-bv-verwaltung').value = v.bevollmaechtigter_verwaltung_id || '';
+    document.getElementById('m-bv-name').value = v.bevollmaechtigter_name || '';
+    document.getElementById('m-bv-email').value = v.bevollmaechtigter_email || '';
+    document.getElementById('m-bv-telefon').value = v.bevollmaechtigter_telefon || '';
+    document.getElementById('m-bv-adresse').value = v.bevollmaechtigter_adresse || '';
+    document.getElementById('m-art').value = v.art || '';
+    document.getElementById('m-wohnung').value = v.wohnung_id || '';
+    document.getElementById('m-stweg').value = v.stweg || '';
+    document.getElementById('m-geltung').value = v.geltungsbereich || '';
+    document.getElementById('m-ab').value = v.gueltig_ab ? v.gueltig_ab.slice(0, 10) : '';
+    document.getElementById('m-bis').value = v.gueltig_bis ? v.gueltig_bis.slice(0, 10) : '';
+    onBvTypChange();
+    await loadMyWohnungen();
+    document.getElementById('modal').classList.remove('hidden');
+  }
+
+  async function signDigital(id) {
+    if (!confirm('Vollmacht digital signieren?\n\nDies entspricht einer einfachen elektronischen Signatur (ZertES Art.2). Login-Zeit, IP-Adresse und Identitaet werden im Dokument festgehalten.\n\nNach Signatur ist die Vollmacht AKTIV und nicht mehr editierbar — nur Widerruf moeglich.')) return;
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}/sign-digital`, { method: 'POST' });
+      if (!r.ok) throw new Error(await r.text());
+      await load();
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+
+  async function activatePaper(id) {
+    if (!confirm('Vollmacht mit Papier-Signatur aktivieren?\n\nVoraussetzung: Du hast das PDF gedruckt, unterschrieben und kannst es bei Bedarf vorlegen. Du kannst den Scan spaeter im Dokumente-Bereich hochladen.\n\nNach Aktivierung ist die Vollmacht AKTIV und nicht mehr editierbar — nur Widerruf moeglich.')) return;
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}/activate-paper`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      if (!r.ok) throw new Error(await r.text());
+      await load();
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+
+  async function revoke(id) {
+    const grund = prompt('Grund fuer Widerruf (optional):');
+    if (grund === null) return;
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}/revoke`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grund: grund || null }) });
+      if (!r.ok) throw new Error(await r.text());
+      await load();
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+
+  async function deleteEntry(id) {
+    if (!confirm('Entwurf wirklich loeschen?')) return;
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error(await r.text());
+      await load();
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+  </script>
+</body>
+</html>
