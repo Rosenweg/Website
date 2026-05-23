@@ -12810,15 +12810,17 @@ async function pushWhatsappBroadcast({ emails, body, sourceType, sourceId }) {
 }
 
 // Queue eine ausgehende Nachricht. Bot-Service holt sie und versendet.
-async function queueWhatsappMessage({ phone, body, attachments, sourceType, sourceId, personId }) {
-  const norm = normalizePhone(phone);
+async function queueWhatsappMessage({ phone, body, attachments, sourceType, sourceId, personId, chatId }) {
+  // chatId hat Vorrang: bei LID-Privacy-Chats ist die echte Nummer
+  // nicht aufloesbar, dann muessen wir die @lid-JID direkt zurueck-routen.
+  const norm = chatId || normalizePhone(phone);
   if (!norm) throw new Error('Ungueltige Telefonnummer');
   const r = await pool.query(
     `INSERT INTO whatsapp_messages
-       (direction, phone, body, attachments, person_id, source_type, source_id, status)
-     VALUES ('outbound', $1, $2, $3::jsonb, $4, $5, $6, 'queued')
+       (direction, phone, chat_id, body, attachments, person_id, source_type, source_id, status)
+     VALUES ('outbound', $1, $2, $3, $4::jsonb, $5, $6, $7, 'queued')
      RETURNING id`,
-    [norm, body || '', JSON.stringify(attachments || []), personId || null, sourceType || null, sourceId || null],
+    [norm, chatId || null, body || '', JSON.stringify(attachments || []), personId || null, sourceType || null, sourceId || null],
   );
   return r.rows[0].id;
 }
@@ -13014,14 +13016,14 @@ ${SITE_URL}/verwaltung.html`;
 // Webhook fuer eingehende Nachrichten (vom Bot-Service aufgerufen)
 app.post('/api/whatsapp/inbound', requireWhatsappSecret, async (req, res) => {
   try {
-    const { phone, body, whatsapp_msg_id, attachments } = req.body || {};
+    const { phone, chat_id, body, whatsapp_msg_id, attachments } = req.body || {};
     if (!phone) return res.status(400).json({ error: 'phone fehlt' });
     const person = await findPersonByPhone(phone);
     // Speichern
     const ins = await pool.query(
-      `INSERT INTO whatsapp_messages (direction, phone, whatsapp_msg_id, body, attachments, person_id, status)
-       VALUES ('inbound', $1, $2, $3, $4::jsonb, $5, 'received') RETURNING id`,
-      [normalizePhone(phone), whatsapp_msg_id || null, body || '', JSON.stringify(attachments || []), person?.id || null],
+      `INSERT INTO whatsapp_messages (direction, phone, chat_id, whatsapp_msg_id, body, attachments, person_id, status)
+       VALUES ('inbound', $1, $2, $3, $4, $5::jsonb, $6, 'received') RETURNING id`,
+      [normalizePhone(phone) || phone, chat_id || null, whatsapp_msg_id || null, body || '', JSON.stringify(attachments || []), person?.id || null],
     );
     // Letzte-Aktivitaet auf Person
     if (person) {
@@ -13034,7 +13036,7 @@ app.post('/api/whatsapp/inbound', requireWhatsappSecret, async (req, res) => {
     }
     if (reply) {
       const repliedId = await queueWhatsappMessage({
-        phone, body: reply, sourceType: 'command-response', sourceId: ins.rows[0].id, personId: person?.id,
+        phone, chatId: chat_id, body: reply, sourceType: 'command-response', sourceId: ins.rows[0].id, personId: person?.id,
       });
       return res.json({ ok: true, message_id: ins.rows[0].id, reply_queued: repliedId });
     }
@@ -13057,7 +13059,7 @@ app.get('/api/whatsapp/outbox-poll', requireWhatsappSecret, async (req, res) => 
            ORDER BY created_at LIMIT $1
            FOR UPDATE SKIP LOCKED
         )
-        RETURNING id, phone, body, attachments`,
+        RETURNING id, phone, chat_id, body, attachments`,
       [limit],
     );
     res.json({ messages: r.rows });
@@ -14241,6 +14243,9 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_wa_msg_pending ON whatsapp_messages(status, created_at)
         WHERE direction = 'outbound' AND status = 'queued';
       CREATE INDEX IF NOT EXISTS idx_wa_msg_person ON whatsapp_messages(person_id, created_at DESC);
+      -- chat_id (WhatsApp JID: <id>@c.us, <id>@lid, <id>@g.us) — fuer Reply
+      -- an LID-Privacy-Chats, wo die echte Nummer nicht aufgeloest werden kann.
+      ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS chat_id VARCHAR(120);
 
       -- Reklamationen / Schadensmeldungen via WhatsApp
       CREATE TABLE IF NOT EXISTS reklamationen (

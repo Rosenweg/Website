@@ -143,6 +143,7 @@ client.on('message_create', async (msg) => {
       return;
     }
     console.log(`[WA] Inbound von ${phone} (${msg.from}): ${(msg.body||'').slice(0,80)}`);
+    const chatId = msg.from; // echte Chat-ID (@c.us oder @lid) fuer Reply
     const body = msg.body || '';
     const attachments = [];
     if (msg.hasMedia) {
@@ -160,7 +161,7 @@ client.on('message_create', async (msg) => {
     const res = await fetch(`${API_BASE}/api/whatsapp/inbound`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-WA-Secret': WA_SECRET },
-      body: JSON.stringify({ phone, body, whatsapp_msg_id: msg.id?._serialized, attachments }),
+      body: JSON.stringify({ phone, chat_id: chatId, body, whatsapp_msg_id: msg.id?._serialized, attachments }),
     });
     if (!res.ok) console.warn('[WA] API inbound rejected:', res.status, await res.text().catch(() => ''));
   } catch (err) {
@@ -179,12 +180,14 @@ async function pollOutbox() {
     const { messages } = await res.json();
     for (const m of (messages || [])) {
       try {
-        // Group-Chat: phone-Feld kann eine Group-JID enthalten (Format: "<num>-<num>@g.us"
-        // oder "<num>@g.us"). Wir erkennen das anhand des @g.us-Suffix und nutzen
-        // die JID direkt als chatId. Sonst klassischer 1:1-Chat via Nummer.
-        const chatId = m.phone.endsWith('@g.us')
-          ? m.phone
-          : m.phone.replace(/\D/g, '') + '@c.us';
+        // Wenn die API einen chat_id mitliefert (Reply auf Inbound mit @lid oder @c.us),
+        // nutzen wir den direkt. Sonst Fallback: phone-Feld auswerten (kann @g.us-Group-JID
+        // enthalten, sonst Nummer → @c.us).
+        const chatId = m.chat_id
+          ? m.chat_id
+          : (m.phone.endsWith('@g.us') || m.phone.endsWith('@lid') || m.phone.endsWith('@c.us')
+              ? m.phone
+              : m.phone.replace(/\D/g, '') + '@c.us');
         // Anhaenge (falls vorhanden) als MessageMedia
         let mediaSent = false;
         for (const a of (m.attachments || [])) {
