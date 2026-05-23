@@ -12824,13 +12824,73 @@ async function queueWhatsappMessage({ phone, body, attachments, sourceType, sour
 }
 
 // Command-Handler: parst Body und antwortet entsprechend.
+function buildWhatsappMenu(person) {
+  const first = (person?.name || '').split(' ')[0] || '';
+  const greet = first ? `Hallo ${first}! 👋` : 'Hallo! 👋';
+  return `🌹 *Rosenweg-Bot — Hauptmenue*
+
+${greet}
+
+Antworte mit der *Zahl* oder dem *Befehl*:
+
+1️⃣  Notfall-Kontakte (Polizei, Feuerwehr, Verwaltung)
+2️⃣  Notfall-Handwerker (24/7)
+3️⃣  Meine Auslagen anzeigen
+4️⃣  Schaden / Reklamation melden
+5️⃣  Webseite oeffnen
+6️⃣  Alle Befehle (Hilfe)
+
+Tipp: Du kannst auch einfach in eigenen Worten beschreiben, was du brauchst — oder einen Beleg als Foto senden. Schreib *menu* fuer dieses Menue jederzeit erneut.`;
+}
+
 async function handleWhatsappCommand(person, body) {
   const text = String(body || '').trim();
   const lower = text.toLowerCase();
+  // Menue-Trigger: Begruessung oder explizit "menu/start"
+  const MENU_TRIGGERS = ['start', '/start', 'menu', '/menu', 'menü', '/menü',
+    'hi', 'hallo', 'hey', 'hoi', 'salü', 'salu', 'guten tag', 'gruezi', 'grüezi', 'moin'];
+  if (MENU_TRIGGERS.includes(lower)) {
+    return buildWhatsappMenu(person);
+  }
+  // Numerische Menue-Auswahl: "1", "1.", "1)", "1 "
+  const numMatch = lower.match(/^([1-6])[\s.)]*$/);
+  if (numMatch) {
+    const choice = numMatch[1];
+    if (choice === '1') return handleWhatsappCommand(person, '/notfall');
+    if (choice === '2') return handleWhatsappCommand(person, '/handwerker');
+    if (choice === '3') return handleWhatsappCommand(person, '/meineauslagen');
+    if (choice === '4') {
+      return `📝 *Schaden / Reklamation melden*
+
+Schreibe in einer Nachricht was passiert ist — am besten mit *Ort* und *was los ist*. Z.B.:
+
+\`/reklamation Aufzug im Haus 9 steht still seit heute morgen\`
+
+Oder schick ein Foto vom Schaden mit kurzer Beschreibung als Bildunterschrift.
+
+Der Ausschuss bekommt sofort eine Mail und WhatsApp-Push.
+
+🔙 Zurueck zum Menue: *menu*`;
+    }
+    if (choice === '5') {
+      return `🌐 *Webseite Rosenweg*
+
+${SITE_URL}
+
+• Auslagen einreichen: ${SITE_URL}/auslagen.html
+• Reservationen: ${SITE_URL}/reservationen.html
+• Hilfe & FAQ: ${SITE_URL}/hilfe.html
+• Verwaltung: ${SITE_URL}/verwaltung.html
+
+🔙 Zurueck zum Menue: *menu*`;
+    }
+    if (choice === '6') return handleWhatsappCommand(person, '/hilfe');
+  }
   // Hilfe
   if (lower === '/hilfe' || lower === '/help' || lower === '?') {
     return `🤖 *Rosenweg-Bot — Befehle*
 
+/menu — Hauptmenue (numerische Auswahl)
 /meineauslagen — Deine eingereichten Auslagen
 /notfall — Notfall-Kontakte
 /handwerker — Handwerker-Übersicht
@@ -12936,7 +12996,7 @@ app.post('/api/whatsapp/inbound', requireWhatsappSecret, async (req, res) => {
     // Command-Handler
     let reply = await handleWhatsappCommand(person, body);
     if (!reply && body && String(body).startsWith('/')) {
-      reply = 'Unbekannter Befehl. Schreibe `/hilfe` für die Liste.';
+      reply = 'Unbekannter Befehl. Schreibe `/menu` fuer das Hauptmenue oder `/hilfe` fuer die Befehls-Liste.';
     }
     if (reply) {
       const repliedId = await queueWhatsappMessage({
