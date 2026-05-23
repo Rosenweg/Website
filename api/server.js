@@ -12834,7 +12834,7 @@ ${greet}
 Antworte mit der *Zahl* oder dem *Befehl*:
 
 1️⃣  Notfall-Kontakte (Polizei, Feuerwehr, Verwaltung)
-2️⃣  Notfall-Handwerker (24/7)
+2️⃣  Handwerker-Liste (alle Kategorien)
 3️⃣  Meine Auslagen anzeigen
 4️⃣  Schaden / Reklamation melden
 5️⃣  Webseite oeffnen
@@ -12893,7 +12893,8 @@ ${SITE_URL}
 /menu — Hauptmenue (numerische Auswahl)
 /meineauslagen — Deine eingereichten Auslagen
 /notfall — Notfall-Kontakte
-/handwerker — Handwerker-Übersicht
+/handwerker — Handwerker-Liste (alle Kategorien)
+/handwerker <kategorie> — z.B. /handwerker sanitaer
 /reklamation <text> — Schaden melden
 /hilfe — diese Liste
 
@@ -12923,15 +12924,48 @@ Du kannst auch einfach beschreiben was du brauchst, oder einen Beleg als Foto sc
 Hausverwaltung / Technik:
 ${SITE_URL}/verwaltung.html`;
   }
-  if (lower === '/handwerker') {
+  if (lower === '/handwerker' || lower.startsWith('/handwerker ')) {
+    const kategorieArg = text.replace(/^\/handwerker\s*/i, '').trim();
+    if (kategorieArg) {
+      const r = await pool.query(
+        `SELECT firma, telefon, mobile, ansprechpartner, kategorie, bewertung FROM handwerker
+          WHERE archiviert = false AND LOWER(kategorie) LIKE LOWER($1)
+          ORDER BY bewertung DESC NULLS LAST, firma LIMIT 20`,
+        ['%' + kategorieArg + '%'],
+      ).catch(() => ({ rows: [] }));
+      if (r.rows.length === 0) {
+        return `🔧 Keine Handwerker zur Kategorie "${kategorieArg}" gefunden.\n\nAlle Kategorien: \`/handwerker\`\nVolle Liste: ${SITE_URL}/handwerker.html`;
+      }
+      const lines = r.rows.map(h => {
+        const stars = h.bewertung ? ' ' + '⭐'.repeat(h.bewertung) : '';
+        const ap = h.ansprechpartner ? ` (${h.ansprechpartner})` : '';
+        return `• *${h.firma}*${stars}\n  📞 ${h.mobile || h.telefon || '—'}${ap}`;
+      });
+      return `🔧 *Handwerker — ${kategorieArg}* (${r.rows.length})\n\n${lines.join('\n\n')}\n\nVolle Liste mit Details: ${SITE_URL}/handwerker.html\n🔙 Menue: *menu*`;
+    }
+    // Komplette Uebersicht, gruppiert
     const r = await pool.query(
-      `SELECT firma, telefon, mobile, kategorie FROM handwerker
-        WHERE archiviert = false AND notfall_24_7 = true
-        ORDER BY kategorie, firma LIMIT 10`,
+      `SELECT firma, telefon, mobile, kategorie, bewertung FROM handwerker
+        WHERE archiviert = false
+        ORDER BY kategorie, bewertung DESC NULLS LAST, firma`,
     ).catch(() => ({ rows: [] }));
-    if (r.rows.length === 0) return '🔧 Keine Notfall-Handwerker hinterlegt. Übersicht: ' + SITE_URL + '/handwerker.html';
-    const lines = r.rows.map(h => `• ${h.firma} (${h.kategorie || '?'}): ${h.mobile || h.telefon || 'kein Tel'}`);
-    return `🔧 *Notfall-Handwerker:*\n${lines.join('\n')}\n\nVolle Liste: ${SITE_URL}/handwerker.html`;
+    if (r.rows.length === 0) {
+      return '🔧 Keine Handwerker hinterlegt.\n\n' + SITE_URL + '/handwerker.html';
+    }
+    const grouped = {};
+    for (const h of r.rows) {
+      const k = h.kategorie || 'Sonstige';
+      (grouped[k] = grouped[k] || []).push(h);
+    }
+    const parts = [];
+    for (const [kat, list] of Object.entries(grouped)) {
+      const top = list.slice(0, 2).map(h =>
+        `  • ${h.firma} — 📞 ${h.mobile || h.telefon || '—'}`
+      ).join('\n');
+      const more = list.length > 2 ? `\n  _+${list.length - 2} weitere_` : '';
+      parts.push(`*${kat}* (${list.length})\n${top}${more}`);
+    }
+    return `🔧 *Handwerker-Uebersicht* (${r.rows.length} Eintraege)\n\n${parts.join('\n\n')}\n\nFilter nach Kategorie: \`/handwerker sanitaer\`\nVolle Liste mit Bewertungen: ${SITE_URL}/handwerker.html\n🔙 Menue: *menu*`;
   }
   if (lower.startsWith('/reklamation') || lower.startsWith('/schaden')) {
     const beschreibung = text.replace(/^\/(reklamation|schaden)\s*/i, '').trim();
