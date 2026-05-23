@@ -32,10 +32,12 @@
   }
 }
 
-/* Modals/Dialoge: max-w-2xl/3xl/4xl sind auf Mobile zu schmal — auf 95vw
-   skalieren. Tailwind setzt max-width-Klassen ueber alle Breakpoints, wir
-   uebersteuern nur klein. */
+/* Modals/Dialoge: max-w-md/lg/xl/2xl/3xl/4xl/5xl sind auf Mobile zu schmal
+   — auf 95vw skalieren. Tailwind setzt max-width-Klassen ueber alle
+   Breakpoints, wir uebersteuern nur klein. */
 @media (max-width: 640px) {
+  .max-w-md,
+  .max-w-lg,
   .max-w-xl,
   .max-w-2xl,
   .max-w-3xl,
@@ -48,6 +50,12 @@
   .fixed.inset-0 > div,
   .fixed.inset-0 > .bg-white {
     max-height: 95vh;
+  }
+  /* Modal-Body-Grids: innerhalb von Modals werden grid-cols-2 auch zu
+     einspaltig auf sehr kleinen Screens — Inputs werden sonst unbenutzbar
+     schmal (Datepicker, Phone, Email). */
+  .fixed.inset-0 .grid.grid-cols-2:not([class*="sm:grid-cols"]):not([class*="md:grid-cols-1"]) {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
   }
 }
 
@@ -90,13 +98,48 @@ html { scroll-behavior: smooth; }
    verwendet wurden. Wir koennen das nicht per CSS retro-fitten ohne
    alle Seiten anzufassen — aber wir helfen wo es schmerzt: */
 @media (max-width: 640px) {
-  /* grid-cols-3/4 ohne responsive prefix → auf Mobile aufbrechen */
-  .grid.grid-cols-3:not(.sm\:grid-cols-1):not(.md\:grid-cols-1) {
+  /* grid-cols-3/4/6/12 ohne responsive prefix → auf Mobile aufbrechen.
+     Selektor schliesst Klassen mit sm:/md:-Prefix aus, damit bewusst
+     responsive gestaltete Grids nicht beruehrt werden. */
+  .grid.grid-cols-3:not([class*="sm:grid-cols"]):not([class*="md:grid-cols-1"]) {
     grid-template-columns: repeat(1, minmax(0, 1fr));
   }
-  .grid.grid-cols-4:not(.sm\:grid-cols-1):not(.sm\:grid-cols-2):not(.md\:grid-cols-2) {
+  .grid.grid-cols-4:not([class*="sm:grid-cols"]):not([class*="md:grid-cols"]) {
     grid-template-columns: repeat(1, minmax(0, 1fr));
   }
+  .grid.grid-cols-6:not([class*="sm:grid-cols"]):not([class*="md:grid-cols"]) {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+  /* grid-cols-12 wird fuer Inline-Form-Reihen (Telefon, Adresse, Kontakt)
+     benutzt — auf Mobile mit col-span-3 etc. werden Inputs ~25px breit.
+     Mobile: ein Stack. */
+  .grid.grid-cols-12:not([class*="sm:grid-cols"]):not([class*="md:grid-cols"]) {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+}
+
+/* &lt;code&gt;-Snippets ohne Whitespace (SPF-Records, Hashes, URLs) sprengen
+   sonst den Container horizontal. Auf Mobile lieber harten Umbruch. */
+@media (max-width: 640px) {
+  code, pre {
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+}
+
+/* Hero-Sections mit text-4xl/5xl/6xl sind auf 320er Screens wuchtig und
+   nehmen 25-30% der Hoehe ein, bevor Content sichtbar ist. Auf sehr
+   kleinen Devices etwas kleiner. */
+@media (max-width: 480px) {
+  h1.text-4xl, .text-4xl h1 { font-size: 1.875rem; line-height: 2.25rem; } /* → text-3xl */
+  h1.text-5xl, .text-5xl h1 { font-size: 2.25rem; line-height: 2.5rem; }   /* → text-4xl */
+  h1.text-6xl, .text-6xl h1 { font-size: 2.5rem; line-height: 2.75rem; }
+}
+
+/* Sehr breite Hero-Padding (py-12+) auf Mobile reduzieren */
+@media (max-width: 640px) {
+  section.py-12, .bg-gradient-to-r.py-12 { padding-top: 2rem; padding-bottom: 2rem; }
+  section.py-16, .bg-gradient-to-r.py-16 { padding-top: 2.5rem; padding-bottom: 2.5rem; }
 }
 
 /* Buttons: nicht abschneiden wenn Container schmal ist */

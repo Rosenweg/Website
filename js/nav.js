@@ -130,6 +130,43 @@ const RosenwegNav = {
     this._setupDropdowns();
     this._setupAuth(basePath);
     this._wrapLooseTables();
+    this._observeDynamicTables();
+    this._publishNavHeight(nav);
+  },
+
+  // Nav-Hoehe als CSS-Variable veroeffentlichen, damit Seiten mit
+  // position:sticky;top:Npx nicht auf hartgecodete Pixel angewiesen sind.
+  // Beispiel: .search-bar { position: sticky; top: var(--rosenweg-nav-h, 64px); }
+  _publishNavHeight(nav) {
+    const set = () => {
+      const h = nav.offsetHeight || 64;
+      document.documentElement.style.setProperty('--rosenweg-nav-h', h + 'px');
+    };
+    set();
+    // Bei Viewport-Wechsel (Hamburger oeffnen/schliessen) neu messen
+    window.addEventListener('resize', set);
+    new ResizeObserver(set).observe(nav);
+  },
+
+  // MutationObserver: viele Seiten rendern Tabellen dynamisch via
+  // el.innerHTML = '&lt;table&gt;...'. Diese werden vom initialen Wrap nicht
+  // erfasst. Wir beobachten body fuer neue Tabellen und wrappen sie
+  // nachtraeglich.
+  _observeDynamicTables() {
+    const obs = new MutationObserver(muts => {
+      let hasNewTable = false;
+      for (const m of muts) {
+        for (const n of m.addedNodes) {
+          if (n.nodeType !== 1) continue;
+          if (n.tagName === 'TABLE' || n.querySelector?.('table')) {
+            hasNewTable = true; break;
+          }
+        }
+        if (hasNewTable) break;
+      }
+      if (hasNewTable) this._wrapLooseTables();
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
   },
 
   // Mobile-Optimization Layer: laedt /css/mobile.css einmal global, setzt
