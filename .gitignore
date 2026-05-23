@@ -53,3 +53,4 @@ kiosk/*.iso
 kiosk/.cached-debian-netinst.iso
 drivers/
 whatsapp-qr.png
+.claude/
