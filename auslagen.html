@@ -375,7 +375,7 @@
         <td class="px-3 py-2 text-gray-700 whitespace-nowrap">${esc(fmtDate(a.datum))}</td>
         <td class="px-3 py-2 text-gray-700">${esc(a.user_name)}</td>
         <td class="px-3 py-2 text-gray-700 whitespace-nowrap">${esc(stwegLabel)}</td>
-        <td class="px-3 py-2 text-gray-700">${esc(a.beschreibung)}${projektBadge}</td>
+        <td class="px-3 py-2 text-gray-700"><div class="max-w-[220px] sm:max-w-md line-clamp-2" title="${esc(a.beschreibung)}">${esc(a.beschreibung)}</div>${projektBadge}</td>
         <td class="px-3 py-2 text-gray-700">${esc(a.kategorie || '—')}</td>
         <td class="px-3 py-2 text-gray-900 text-right font-mono whitespace-nowrap">${esc(fmtCHF(a.betrag_chf))}</td>
         <td class="px-3 py-2">${beleg}</td>

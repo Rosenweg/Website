@@ -240,43 +240,19 @@
                                 <label class="text-xs text-gray-500">Verwaltungsgruppen (live aus Wohnungsverwaltung)</label>
                                 <button type="button" onclick="previewVerwaltungsgruppen()" class="text-xs text-emerald-700 hover:underline">Empfänger-Vorschau →</button>
                             </div>
-                            <select id="vf-verwaltung" multiple class="w-full text-sm px-3 py-2 border rounded-lg bg-emerald-50" size="5">
-                                <option value="verwaltung:eigentuemer">Alle Eigentümer</option>
-                                <option value="verwaltung:eigentuemer:include_drucker">Alle Eigentümer (inkl. Drucker-Tags für Personen ohne Email)</option>
-                                <option value="verwaltung:verwalter">Alle Verwalter</option>
-                                <option value="verwaltung:bewohner">Alle Bewohner (Eigentümer wenn selbstbewohnt, sonst Mieter)</option>
-                                <option value="verwaltung:bewohner:include_drucker">Alle Bewohner (inkl. Drucker-Tags)</option>
-                                <option value="verwaltung:mieter">Alle Mieter</option>
-                                <option value="verwaltung:eigentuemer:stweg=1">STWEG 1 — Eigentümer</option>
-                                <option value="verwaltung:eigentuemer:stweg=2">STWEG 2 — Eigentümer</option>
-                                <option value="verwaltung:eigentuemer:stweg=3">STWEG 3 — Eigentümer</option>
-                                <option value="verwaltung:eigentuemer:stweg=4">STWEG 4 — Eigentümer</option>
-                                <option value="verwaltung:eigentuemer:stweg=5">STWEG 5 — Eigentümer</option>
-                                <option value="verwaltung:eigentuemer:stweg=6">STWEG 6 — Eigentümer</option>
-                                <option value="verwaltung:eigentuemer:stweg=7">STWEG 7 — Eigentümer</option>
-                                <option value="verwaltung:eigentuemer:stweg=8">STWEG 8 — Eigentümer</option>
-                                <option value="verwaltung:bewohner:stweg=1">STWEG 1 — Bewohner</option>
-                                <option value="verwaltung:bewohner:stweg=2">STWEG 2 — Bewohner</option>
-                                <option value="verwaltung:bewohner:stweg=3">STWEG 3 — Bewohner</option>
-                                <option value="verwaltung:bewohner:stweg=4">STWEG 4 — Bewohner</option>
-                                <option value="verwaltung:bewohner:stweg=5">STWEG 5 — Bewohner</option>
-                                <option value="verwaltung:bewohner:stweg=6">STWEG 6 — Bewohner</option>
-                                <option value="verwaltung:bewohner:stweg=7">STWEG 7 — Bewohner</option>
-                                <option value="verwaltung:bewohner:stweg=8">STWEG 8 — Bewohner</option>
-                            </select>
+                            <div id="vf-verwaltung" class="w-full text-sm border rounded-lg bg-emerald-50 max-h-48 overflow-y-auto p-1"></div>
                             <p class="text-xs text-gray-400 mt-1">Live aus der Wohnungsverwaltung — Änderungen sind sofort wirksam, kein Sync nötig.</p>
                             <div id="vf-verwaltung-preview" class="mt-2"></div>
                         </div>
                         <div class="mb-3">
                             <label class="text-xs text-gray-500">Authentik-Gruppen (Login-basiert; alternativ oder zusätzlich)</label>
-                            <select id="vf-group" multiple class="w-full text-sm px-3 py-2 border rounded-lg" size="5">
-                            </select>
-                            <p class="text-xs text-gray-400 mt-1">Mitglieder der gewählten Gruppen + Untergruppen aus Authentik. Strg/Cmd halten für Mehrfachauswahl.</p>
+                            <div id="vf-group" class="w-full text-sm border rounded-lg bg-white max-h-48 overflow-y-auto p-1"></div>
+                            <p class="text-xs text-gray-400 mt-1">Mitglieder der gewählten Gruppen + Untergruppen aus Authentik.</p>
                             <div id="vf-group-preview" class="mt-2"></div>
                         </div>
                         <div class="mb-3">
                             <label class="text-xs text-gray-500">Erlaubte Sender-Gruppen (optional, leer = jeder @rosenweg4303.ch-Sender)</label>
-                            <select id="vf-allowed-senders" multiple class="w-full text-sm px-3 py-2 border rounded-lg bg-amber-50" size="4"></select>
+                            <div id="vf-allowed-senders" class="w-full text-sm border rounded-lg bg-amber-50 max-h-48 overflow-y-auto p-1"></div>
                             <p class="text-xs text-gray-400 mt-1">Nur Mitglieder dieser Authentik-Gruppen dürfen an diesen Verteiler senden — alle anderen Sender erhalten automatisch eine Rückläufer-Mail.</p>
                         </div>
                         <div class="mb-3 bg-green-50 border border-green-200 rounded-lg p-3">
@@ -324,6 +300,36 @@
         let currentUser = null;
         let verteilerList = [];
         let adminVerteilerData = [];
+
+        // Multi-Checkbox-Helper: ersetzt &lt;select multiple&gt; mit Checkbox-Liste,
+        // damit Touch-Devices Mehrfachauswahl bedienen koennen (kein Strg/Cmd).
+        const multiCb = {
+            populate(id, items, selected) {
+                const el = document.getElementById(id);
+                if (!el) return;
+                const sel = new Set(Array.isArray(selected) ? selected : (selected ? [selected] : []));
+                el.innerHTML = items.map(it => {
+                    const v = typeof it === 'string' ? it : it.value;
+                    const l = typeof it === 'string' ? it : (it.label || it.value);
+                    return `&lt;label class="flex items-start gap-2 py-1 px-2 hover:bg-white/50 rounded cursor-pointer text-sm"&gt;`
+                         + `&lt;input type="checkbox" value="${escapeHtml(v)}" ${sel.has(v) ? 'checked' : ''} class="mt-0.5 flex-shrink-0"&gt;`
+                         + `&lt;span&gt;${escapeHtml(l)}&lt;/span&gt;`
+                         + `&lt;/label&gt;`;
+                }).join('');
+            },
+            getValues(id) {
+                const el = document.getElementById(id);
+                if (!el) return [];
+                return [...el.querySelectorAll('input[type=checkbox]:checked')].map(c => c.value);
+            },
+            setValues(id, arr) {
+                const el = document.getElementById(id);
+                if (!el) return;
+                const sel = new Set(arr || []);
+                el.querySelectorAll('input[type=checkbox]').forEach(c => { c.checked = sel.has(c.value); });
+            },
+            clear(id) { this.setValues(id, []); },
+        };
 
         // INITIALISIERUNG
         window.addEventListener('DOMContentLoaded', async function() {
@@ -561,24 +567,32 @@
             }
         }
 
+        // Verwaltungsgruppen sind statisch (im Code definiert)
+        const VERWALTUNG_OPTIONS = [
+            { value: 'verwaltung:eigentuemer', label: 'Alle Eigentümer' },
+            { value: 'verwaltung:eigentuemer:include_drucker', label: 'Alle Eigentümer (inkl. Drucker-Tags für Personen ohne Email)' },
+            { value: 'verwaltung:verwalter', label: 'Alle Verwalter' },
+            { value: 'verwaltung:bewohner', label: 'Alle Bewohner (Eigentümer wenn selbstbewohnt, sonst Mieter)' },
+            { value: 'verwaltung:bewohner:include_drucker', label: 'Alle Bewohner (inkl. Drucker-Tags)' },
+            { value: 'verwaltung:mieter', label: 'Alle Mieter' },
+            ...[1,2,3,4,5,6,7,8].map(n => ({ value: `verwaltung:eigentuemer:stweg=${n}`, label: `STWEG ${n} — Eigentümer` })),
+            ...[1,2,3,4,5,6,7,8].map(n => ({ value: `verwaltung:bewohner:stweg=${n}`, label: `STWEG ${n} — Bewohner` })),
+        ];
+
+        function populateVerwaltungDropdown(selectedGroups) {
+            multiCb.populate('vf-verwaltung', VERWALTUNG_OPTIONS, selectedGroups || []);
+        }
+
         function populateGroupDropdown(selectedGroups) {
-            const select = document.getElementById('vf-group');
-            const selected = Array.isArray(selectedGroups) ? selectedGroups : (selectedGroups ? [selectedGroups] : []);
-            select.innerHTML = authentikGroups.map(g =>
-                `<option value="${escapeHtml(g.name)}" ${selected.includes(g.name) ? 'selected' : ''}>${escapeHtml(g.name)}</option>`
-            ).join('');
+            multiCb.populate('vf-group', authentikGroups.map(g => g.name), selectedGroups);
         }
 
         function populateAllowedSendersDropdown(selectedGroups) {
-            const select = document.getElementById('vf-allowed-senders');
-            const selected = Array.isArray(selectedGroups) ? selectedGroups : [];
-            select.innerHTML = authentikGroups.map(g =>
-                `<option value="${escapeHtml(g.name)}" ${selected.includes(g.name) ? 'selected' : ''}>${escapeHtml(g.name)}</option>`
-            ).join('');
+            multiCb.populate('vf-allowed-senders', authentikGroups.map(g => g.name), selectedGroups);
         }
 
         async function previewVerwaltungsgruppen() {
-            const sel = [...document.getElementById('vf-verwaltung').selectedOptions].map(o => o.value);
+            const sel = multiCb.getValues('vf-verwaltung');
             const preview = document.getElementById('vf-verwaltung-preview');
             if (sel.length === 0) { preview.innerHTML = '<p class="text-xs text-gray-400">Keine Gruppe gewählt</p>'; return; }
             preview.innerHTML = '<p class="text-xs text-gray-400">Lade…</p>';
@@ -615,10 +629,11 @@
         }
 
         // Preview resolved group members when group selection changes
+        // (Checkbox-Liste statt select multiple — event bubbling von input checkboxes)
         document.addEventListener('change', async (e) => {
-            if (e.target.id !== 'vf-group') return;
+            if (!e.target.matches('#vf-group input[type=checkbox]')) return;
             const preview = document.getElementById('vf-group-preview');
-            const selectedGroups = [...e.target.selectedOptions].map(o => o.value);
+            const selectedGroups = multiCb.getValues('vf-group');
             if (selectedGroups.length === 0) { preview.innerHTML = ''; return; }
             preview.innerHTML = `<p class="text-xs text-blue-600 mt-1">${selectedGroups.length} Gruppe(n) gewählt – Empfänger werden beim Senden aufgelöst (inkl. Untergruppen)</p>`;
         });
@@ -636,7 +651,7 @@
             document.getElementById('vf-prefix').value = '';
             document.getElementById('vf-group-preview').innerHTML = '';
             document.getElementById('vf-verwaltung-preview').innerHTML = '';
-            [...document.getElementById('vf-verwaltung').options].forEach(o => o.selected = false);
+            populateVerwaltungDropdown([]);
             populateGroupDropdown('');
             populateAllowedSendersDropdown([]);
             document.getElementById('vf-test-btn').classList.add('hidden');
@@ -684,8 +699,7 @@
             const verwaltungGroups = groups.filter(g => g.startsWith('verwaltung:'));
             const authentikGroups = groups.filter(g => !g.startsWith('verwaltung:'));
             // Set Verwaltungs-Auswahl
-            const vwSel = document.getElementById('vf-verwaltung');
-            [...vwSel.options].forEach(o => { o.selected = verwaltungGroups.includes(o.value); });
+            populateVerwaltungDropdown(verwaltungGroups);
             populateGroupDropdown(authentikGroups);
             populateAllowedSendersDropdown(v.allowed_sender_groups || []);
             document.getElementById('vf-test-btn').classList.remove('hidden');
@@ -717,10 +731,10 @@
             const id = document.getElementById('vf-id').value;
             const name = document.getElementById('vf-name').value;
             const email_address = document.getElementById('vf-email').value;
-            const verwaltung = [...document.getElementById('vf-verwaltung').selectedOptions].map(o => o.value);
-            const authentik = [...document.getElementById('vf-group').selectedOptions].map(o => o.value);
+            const verwaltung = multiCb.getValues('vf-verwaltung');
+            const authentik = multiCb.getValues('vf-group');
             const group_names = [...verwaltung, ...authentik];
-            const allowed_sender_groups = [...document.getElementById('vf-allowed-senders').selectedOptions].map(o => o.value);
+            const allowed_sender_groups = multiCb.getValues('vf-allowed-senders');
             if (!name || !email_address) return alert('Name und E-Mail-Adresse erforderlich');
             if (group_names.length === 0) return alert('Bitte mindestens eine Verwaltungs- oder Authentik-Gruppe wählen');
 

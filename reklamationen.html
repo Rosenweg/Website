@@ -85,7 +85,7 @@
       <td class="px-3 py-2 text-xs text-gray-500">${esc(fmtDt(r.created_at))}</td>
       <td class="px-3 py-2 text-sm">${esc(r.person_name || '—')}</td>
       <td class="px-3 py-2 text-sm">${r.stweg ? 'STWEG ' + r.stweg : '—'}</td>
-      <td class="px-3 py-2 text-sm">${esc(r.beschreibung || '')}</td>
+      <td class="px-3 py-2 text-sm"><div class="max-w-[260px] sm:max-w-md line-clamp-2" title="${esc(r.beschreibung || '')}">${esc(r.beschreibung || '')}</div></td>
       <td class="px-3 py-2 text-xs">${esc(r.handwerker_firma || '—')}</td>
       <td class="px-3 py-2"><span class="s-${esc(r.status)} text-xs px-2 py-0.5 rounded">${esc(r.status)}</span></td>
       <td class="px-3 py-2 whitespace-nowrap text-xs space-x-2">
