@@ -14,6 +14,7 @@
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
     body { font-family: 'Inter', sans-serif; }
   </style>
+  <script src="/js/excel-export.js?v=1" defer></script>
 </head>
 <body class="bg-gray-50 min-h-screen">
   <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
@@ -41,6 +42,7 @@
           </select>
         </label>
         <button onclick="loadList()" class="ml-auto text-sm text-blue-600 hover:underline">Neu laden</button>
+        <button onclick="exportEmpfaenger()" class="text-sm inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-700">⬇ Excel</button>
       </div>
 
       <div id="list" class="space-y-2"></div>
@@ -163,6 +165,29 @@
     const editable = KATS.filter(k => k !== 'verwaltung');
     if (includeAll) el.innerHTML = '<option value="">alle</option>' + editable.map(k => `<option value="${esc(k)}">${esc(KAT_LABEL[k] || k)}</option>`).join('');
     else el.innerHTML = editable.map(k => `<option value="${esc(k)}">${esc(KAT_LABEL[k] || k)}</option>`).join('');
+  }
+
+  async function exportEmpfaenger() {
+    if (!LIST.length) { alert('Keine Empfaenger.'); return; }
+    const rows = LIST.flatMap(e => {
+      const kontakte = e.kontakte && e.kontakte.length ? e.kontakte : [{}];
+      return kontakte.map(k => ({
+        'Kategorie': e.kategorie || '',
+        'Name': e.name || '',
+        'Email': e.email || '',
+        'Telefon': e.telefon || '',
+        'Adresse': e.adresse || '',
+        'Website': e.website || '',
+        'STWEG': e.stweg || '',
+        'Kontakt-Name': k.name || '',
+        'Kontakt-Funktion': k.funktion || '',
+        'Kontakt-Email': k.email || '',
+        'Kontakt-Telefon': k.telefon || '',
+        'Aktiv': e.aktiv === false ? 'nein' : 'ja',
+        'Notiz': e.notiz || '',
+      }));
+    });
+    await RosenwegExcel.fromData(rows, 'mail-empfaenger-{date}.xlsx', 'Empfänger');
   }
 
   async function loadList() {

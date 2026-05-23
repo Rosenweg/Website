@@ -79,6 +79,7 @@
             background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 4px; }
         @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
     </style>
+    <script src="/js/excel-export.js?v=1" defer></script>
 </head>
 <body class="bg-gray-50 min-h-screen">
     <!-- Navigation -->
@@ -180,7 +181,10 @@
             <div class="mt-6 bg-white rounded-xl shadow-sm border p-4">
                 <div class="flex items-center justify-between mb-3">
                     <h2 class="font-bold text-gray-800">Meine Reservierungen</h2>
-                    <span class="text-xs text-gray-400" id="myResCount"></span>
+                    <div class="flex items-center gap-3">
+                        <span class="text-xs text-gray-400" id="myResCount"></span>
+                        <button onclick="exportMyRes()" class="text-xs inline-flex items-center gap-1 px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700">⬇ Excel</button>
+                    </div>
                 </div>
                 <div id="myResList">
                     <div class="skeleton h-12 mb-2"></div>
@@ -428,6 +432,18 @@
         const from = weekStart.toISOString();
         const to = new Date(weekStart.getTime() + 7 * 86400000).toISOString();
         reservations = await api(`/api/wasch/reservations?room_id=${selectedRoomId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    }
+
+    async function exportMyRes() {
+        if (!myReservations || !myReservations.length) { alert('Keine Reservierungen.'); return; }
+        const rows = myReservations.map(r => ({
+            'Start': r.start_time ? new Date(r.start_time).toLocaleString('de-CH') : '',
+            'Ende': r.end_time ? new Date(r.end_time).toLocaleString('de-CH') : '',
+            'Raum': r.room_name || r.room_id || '',
+            'Wiederholung': r.recurring ? 'ja' : 'nein',
+            'Notiz': r.notiz || '',
+        }));
+        await RosenwegExcel.fromData(rows, 'waschkueche-reservierungen-{date}.xlsx', 'Reservierungen');
     }
 
     async function loadMyReservations() {
