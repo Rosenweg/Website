@@ -116,8 +116,14 @@ client.on('ready', () => {
 });
 
 // Eingehende Nachrichten → an API
+// Debug-Hook: 'message_create' feuert fuer ALLE (inkl. fromMe + selbst-gesendete)
+// damit wir bei Stille tracen koennen, ob ueberhaupt etwas reinkommt.
+client.on('message_create', (m) => {
+  console.log(`[WA-RAW] message_create from=${m.from} to=${m.to} fromMe=${m.fromMe} type=${m.type} body=${JSON.stringify((m.body||'').slice(0,80))}`);
+});
 client.on('message', async (msg) => {
   try {
+    console.log(`[WA-RAW] message    from=${msg.from} fromMe=${msg.fromMe} type=${msg.type} body=${JSON.stringify((msg.body||'').slice(0,80))}`);
     if (msg.fromMe) return;
     // Gruppen-Nachrichten ignorieren wir nach wie vor fuer Commands
     // (sonst wuerde der Bot in Gruppen auf alles reagieren). Nur 1:1.
