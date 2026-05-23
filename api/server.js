@@ -12310,24 +12310,39 @@ async function reformatEmailForWhatsapp({ subject, senderName, body, attachmentC
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'anthropic/claude-haiku-4.5',
-        max_tokens: 600,
+        max_tokens: 1400,
         messages: [
           {
             role: 'system',
             content: `Du formatierst Emails fuer einen WhatsApp-Gruppen-Mirror der Rosenweg-STWEG.
-Liefere eine WhatsApp-gerechte Kurzfassung in genau diesem Format:
-📧 *<Titel mit max 60 Zeichen, evtl. gekuerzt>*
+Liefere eine WhatsApp-gerechte, AUSFUEHRLICHE Zusammenfassung in genau diesem Format:
+📧 *<Titel mit max 70 Zeichen, evtl. gekuerzt>*
 _von: <Absender>_
 
-<2-4 Bullet-Points mit • am Anfang, jede Zeile max 100 Zeichen, Kernaussagen>
+📝 *Worum geht's:*
+<2-3 Saetze Kontext: was ist der Anlass, wer ist betroffen, worauf bezieht sich die Mail>
 
-<Wenn klare Aktion verlangt: 👉 *Aktion:* <ein Satz>>
+🔑 *Die wichtigsten Punkte:*
+• <Bullet 1 — konkret, mit Zahlen/Daten/Namen wenn vorhanden, max 180 Zeichen>
+• <Bullet 2>
+• <Bullet 3>
+• <weitere Bullets nach Bedarf, insgesamt 4-8 Stueck>
 
-Regeln: WhatsApp-Markdown (*fett*, _kursiv_, kein Markdown-#). Maximal 1500 Zeichen Total. Keine Floskeln, keine Footer/Disclaimer/Signatur, keine HTML-Reste. Auf Deutsch.`,
+<Wenn Termine/Fristen erwaehnt: 📅 *Termine:* <Auflistung Datum/Frist>>
+<Wenn Geldbetraege erwaehnt: 💰 *Betraege:* <Liste mit Posten + CHF>>
+<Wenn klare Aktion verlangt: 👉 *Was ist zu tun:* <konkret, 1-2 Saetze, wer/was/wann>>
+
+Regeln:
+- WhatsApp-Markdown (*fett*, _kursiv_, kein Markdown-#)
+- Maximal 3500 Zeichen Total — lieber ausfuehrlich als zu knapp
+- Alle inhaltlich relevanten Details aus der Mail uebernehmen (Zahlen, Daten, Namen, Beschluesse, Begruendungen)
+- Keine Floskeln, keine Gruessformeln, keine Signatur, keine Footer/Disclaimer, keine HTML-Reste
+- Bei laengeren Mails: lieber 6-8 Bullets als alles in 3 zu quetschen
+- Auf Deutsch (Schweizer Hochdeutsch, kein ß)`,
           },
           {
             role: 'user',
-            content: `Absender: ${senderName}\nSubject: ${subject}\nAnhaenge: ${attachmentCount}\n\nEmail-Body:\n${body.slice(0, 4000)}`,
+            content: `Absender: ${senderName}\nSubject: ${subject}\nAnhaenge: ${attachmentCount}\n\nEmail-Body:\n${body.slice(0, 8000)}`,
           },
         ],
       }),
