@@ -12,15 +12,19 @@
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; }
     </style>
+    <script src="/js/excel-export.js?v=1" defer></script>
 </head>
 <body class="bg-gray-50">
     <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
     <script>RosenwegNav.init({ active: 'projekte' });</script>
 
     <section class="bg-gradient-to-r from-emerald-600 to-emerald-800 text-white py-12">
-        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-            <h1 class="text-3xl font-bold mb-2">Projekte</h1>
-            <p class="text-lg opacity-90">Laufende und geplante Projekte der STWEG-Kooperation</p>
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-start">
+            <div>
+                <h1 class="text-3xl font-bold mb-2">Projekte</h1>
+                <p class="text-lg opacity-90">Laufende und geplante Projekte der STWEG-Kooperation</p>
+            </div>
+            <button onclick="exportProjects()" class="text-sm bg-white/20 hover:bg-white/30 text-white px-3 py-1.5 rounded">⬇ Excel</button>
         </div>
     </section>
 
@@ -48,6 +52,27 @@
             return gl === 'technik' || gl.endsWith('-ausschuss') || gl === 'präsident';
         });
         loadProjects();
+    }
+
+    async function exportProjects() {
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/projects');
+            const projects = await r.json();
+            if (!projects.length) { alert('Keine Projekte.'); return; }
+            const rows = projects.map(p => ({
+                'Titel': p.title || '',
+                'Slug': p.slug || '',
+                'Status': p.status || '',
+                'Budget CHF': Number(p.budget_chf || 0).toFixed(2),
+                'Verbraucht CHF': Number(p.verbraucht || 0).toFixed(2),
+                'Auslastung %': p.budget_chf > 0 ? Math.round((p.verbraucht / p.budget_chf) * 100) : 0,
+                'Warnung ab %': p.budget_warnung_pct || '',
+                'Start': p.start_date || '',
+                'Ende geplant': p.end_date || '',
+                'Beschreibung': p.beschreibung || '',
+            }));
+            await RosenwegExcel.fromData(rows, 'projekte-{date}.xlsx', 'Projekte');
+        } catch (e) { alert('Fehler: ' + e.message); }
     }
 
     async function loadProjects() {

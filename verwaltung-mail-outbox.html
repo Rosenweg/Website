@@ -19,6 +19,7 @@
     .badge-fehler      { background:#fecaca; color:#7f1d1d; }
     .mono-body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
   </style>
+  <script src="/js/excel-export.js?v=1" defer></script>
 </head>
 <body class="bg-gray-50 min-h-screen">
   <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
@@ -49,6 +50,7 @@
         </label>
         <span id="pending-stat" class="text-sm text-amber-700 font-medium"></span>
         <button onclick="loadList()" class="ml-auto text-sm text-blue-600 hover:underline">Neu laden</button>
+        <button onclick="exportMailOutbox()" class="text-sm inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-700">⬇ Excel</button>
       </div>
 
       <div class="grid lg:grid-cols-2 gap-4">
@@ -127,6 +129,23 @@
         </div>
       </li>`;
     }).join('');
+  }
+
+  async function exportMailOutbox() {
+    if (!LIST.length) { alert('Keine Mails zum Exportieren.'); return; }
+    const rows = LIST.map(m => ({
+      'Erstellt': fmtDt(m.created_at) || '',
+      'Status': m.status || '',
+      'Source-Type': m.source_type || '',
+      'Source-ID': m.source_id || '',
+      'Subject': m.subject || '',
+      'An': m.mail_to || '',
+      'Freigegeben von': m.freigegeben_von || '',
+      'Gesendet': fmtDt(m.sent_at) || '',
+      'Anhänge': m.attachment_count || 0,
+      'Editiert': m.edited_by ? 'Ja (' + m.edited_by + ')' : 'Nein',
+    }));
+    await RosenwegExcel.fromData(rows, 'verwaltung-mail-outbox-{date}.xlsx', 'Outbox');
   }
 
   async function openDetail(id) {

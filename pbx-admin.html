@@ -10,6 +10,7 @@
   <script src="/js/phone-helpers.js?v=1"></script>
   <link rel="icon" href="/logo-rosenweg.png">
   <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'); body { font-family: 'Inter', sans-serif; }</style>
+  <script src="/js/excel-export.js?v=1" defer></script>
 </head>
 <body class="bg-gray-50 min-h-screen">
   <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
@@ -74,7 +75,10 @@
       <div class="bg-white rounded-lg shadow mb-6">
         <div class="px-4 py-3 border-b flex justify-between items-center">
           <h2 class="text-lg font-semibold">🔔 Ring-Group Mitglieder</h2>
-          <button onclick="openAddModal()" class="text-sm bg-blue-600 text-white rounded px-3 py-1.5 hover:bg-blue-700">+ Mitglied</button>
+          <div class="flex gap-2">
+            <button data-excel-export data-excel-source="#members-table" data-excel-name="pbx-ring-members-{date}.xlsx" data-excel-sheet="Ring-Members" class="text-sm inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-700">⬇ Excel</button>
+            <button onclick="openAddModal()" class="text-sm bg-blue-600 text-white rounded px-3 py-1.5 hover:bg-blue-700">+ Mitglied</button>
+          </div>
         </div>
         <div class="p-4">
           <p class="text-xs text-gray-600 mb-3">
@@ -82,7 +86,7 @@
             Beispiel: Stefan + Andreas Prio 10 (parallel 15s) → bei No-Answer → Marc Prio 20 (15s) → Voicemail.
             Ring-Timeout wird auf die Stufen aufgeteilt. Temporaere Mitglieder werden nach Ablauf automatisch deaktiviert.
           </p>
-          <table class="min-w-full text-sm">
+          <table id="members-table" class="min-w-full text-sm">
             <thead class="text-xs text-gray-500 uppercase border-b">
               <tr>
                 <th class="text-left py-2">Aktiv</th>
@@ -105,11 +109,14 @@
       <div class="bg-white rounded-lg shadow mb-6">
         <div class="px-4 py-3 border-b flex justify-between items-center">
           <h2 class="text-lg font-semibold">📜 Anruf-Log</h2>
-          <button onclick="loadCalls()" class="text-xs text-blue-600 hover:underline">Neu laden</button>
+          <div class="flex gap-2">
+            <button data-excel-export data-excel-source="#calls-table" data-excel-name="pbx-anruf-log-{date}.xlsx" data-excel-sheet="Anruf-Log" class="text-xs inline-flex items-center gap-1 px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700">⬇ Excel</button>
+            <button onclick="loadCalls()" class="text-xs text-blue-600 hover:underline">Neu laden</button>
+          </div>
         </div>
         <div class="p-4">
           <p class="text-xs text-gray-600 mb-3">Letzte 50 Anrufe. Voicemail-Aufnahmen + Transkripte werden direkt hier eingebunden.</p>
-          <table class="min-w-full text-sm">
+          <table id="calls-table" class="min-w-full text-sm">
             <thead class="text-xs text-gray-500 uppercase border-b">
               <tr>
                 <th class="text-left py-2">Zeit</th>

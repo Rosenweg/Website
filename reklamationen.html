@@ -14,6 +14,7 @@
     .s-erledigt { background:#d1fae5; color:#065f46; }
     .s-abgewiesen { background:#fee2e2; color:#991b1b; }
   </style>
+  <script src="/js/excel-export.js?v=1" defer></script>
 </head>
 <body class="bg-gray-50 min-h-screen">
   <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
@@ -37,10 +38,11 @@
           </select>
         </label>
         <button onclick="load()" class="ml-auto text-sm text-blue-600 hover:underline">Neu laden</button>
+        <button data-excel-export data-excel-source="#reklamationen-table" data-excel-name="reklamationen-{date}.xlsx" data-excel-sheet="Reklamationen" class="text-sm inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-700">⬇ Excel</button>
       </div>
 
       <div class="bg-white rounded-lg shadow overflow-hidden">
-        <table class="min-w-full text-sm">
+        <table id="reklamationen-table" class="min-w-full text-sm">
           <thead class="bg-gray-50 text-xs uppercase text-gray-500"><tr>
             <th class="px-3 py-2 text-left">Zeit</th>
             <th class="px-3 py-2 text-left">Person</th>
