@@ -2919,10 +2919,14 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
     /^x-forwarded-by:\s*rosenweg verteiler/im.test(headersStr) || // Eigene Verteiler-Mail kommt zurück → Loop
     senderAddrRaw === `noreply@${ourDomain}` ||
     senderAddrRaw.startsWith('noreply@') ||
-    senderAddrRaw.endsWith(`@${ourDomain}`) || // Jede Mail von eigener Domain ist System (Verteiler/Druckserver/etc.)
     /^zustellbericht:/i.test(parsed.subject || '') ||
     /zustellbericht:/i.test(parsed.subject || '') || // auch wenn prefixed
     senderAddrRaw === toAddress; // Self-loop: Verteiler an sich selbst
+  // Frueher hier: senderAddrRaw.endsWith('@'+ourDomain) als Pauschal-Block.
+  // Zu breit — blockte legitime Mails von Funktions-Adressen wie
+  // praesident@ → ausschuss@ oder technik@ → bewohner@. Spezifische
+  // System-Markierungen (noreply@, X-Rosenweg-System, X-Forwarded-By,
+  // self-loop) sind eindeutig genug.
   if (isBounce) {
     console.log(`[Bounce] System-Loop/Bounce ignoriert (von ${senderAddrRaw}, Subject: ${(parsed.subject||'').substring(0,80)})`);
     return { success: true, action: 'bounce-skipped' };
