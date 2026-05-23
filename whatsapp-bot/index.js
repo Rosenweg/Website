@@ -116,19 +116,33 @@ client.on('ready', () => {
 });
 
 // Eingehende Nachrichten → an API
-// Debug-Hook: 'message_create' feuert fuer ALLE (inkl. fromMe + selbst-gesendete)
-// damit wir bei Stille tracen koennen, ob ueberhaupt etwas reinkommt.
-client.on('message_create', (m) => {
-  console.log(`[WA-RAW] message_create from=${m.from} to=${m.to} fromMe=${m.fromMe} type=${m.type} body=${JSON.stringify((m.body||'').slice(0,80))}`);
-});
-client.on('message', async (msg) => {
+// WhatsApp hat seit ~2026 das @lid-Format (Linked-ID) fuer Privacy: viele
+// 1:1-Chats kommen als from=<lid>@lid statt <phone>@c.us. Das alte 'message'-
+// Event feuert dafuer teilweise nicht — wir hoeren auf 'message_create' und
+// filtern fromMe selbst. Die echte Telefonnummer holen wir via getContact().
+client.on('message_create', async (msg) => {
   try {
-    console.log(`[WA-RAW] message    from=${msg.from} fromMe=${msg.fromMe} type=${msg.type} body=${JSON.stringify((msg.body||'').slice(0,80))}`);
     if (msg.fromMe) return;
-    // Gruppen-Nachrichten ignorieren wir nach wie vor fuer Commands
-    // (sonst wuerde der Bot in Gruppen auf alles reagieren). Nur 1:1.
-    if (!msg.from.endsWith('@c.us')) return;
-    const phone = '+' + msg.from.replace('@c.us', '');
+    // Gruppen ignorieren (sonst antwortet Bot auf alles in jeder Gruppe).
+    if (msg.from.endsWith('@g.us')) return;
+    // Nur 1:1 (klassisch @c.us oder neu @lid)
+    if (!msg.from.endsWith('@c.us') && !msg.from.endsWith('@lid')) return;
+    // Phone via Contact aufloesen (bei @lid ist im from-Feld die echte
+    // Nummer maskiert; getContact() liefert die tatsaechliche Nummer).
+    let phone = null;
+    try {
+      const contact = await msg.getContact();
+      if (contact?.number) phone = '+' + contact.number;
+      else if (contact?.id?.user) phone = '+' + contact.id.user;
+    } catch (e) { /* fallback unten */ }
+    if (!phone && msg.from.endsWith('@c.us')) {
+      phone = '+' + msg.from.replace('@c.us', '');
+    }
+    if (!phone) {
+      console.warn(`[WA] Inbound ohne aufloesbare Nummer: from=${msg.from}`);
+      return;
+    }
+    console.log(`[WA] Inbound von ${phone} (${msg.from}): ${(msg.body||'').slice(0,80)}`);
     const body = msg.body || '';
     const attachments = [];
     if (msg.hasMedia) {
