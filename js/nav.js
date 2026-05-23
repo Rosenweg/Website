@@ -123,11 +123,67 @@ const RosenwegNav = {
     const active = opts.active || '';
     const basePath = opts.basePath || this._detectBasePath();
 
+    this._injectMobileAssets(basePath);
     await this._loadConfig(basePath);
     nav.innerHTML = this._render(active, basePath);
     this._setupMobile();
     this._setupDropdowns();
     this._setupAuth(basePath);
+    this._wrapLooseTables();
+  },
+
+  // Mobile-Optimization Layer: laedt /css/mobile.css einmal global, setzt
+  // theme-color und apple-touch-icon damit die Seite als PWA-Vorstufe
+  // ordentlich aussieht auf iPhone-Home-Screen.
+  _injectMobileAssets(base) {
+    if (document.getElementById('rosenweg-mobile-css')) return;
+    const head = document.head;
+    // CSS
+    const link = document.createElement('link');
+    link.id = 'rosenweg-mobile-css';
+    link.rel = 'stylesheet';
+    link.href = base + 'css/mobile.css?v=1';
+    head.appendChild(link);
+    // theme-color (Browser-UI faerben)
+    if (!document.querySelector('meta[name="theme-color"]')) {
+      const tc = document.createElement('meta');
+      tc.name = 'theme-color';
+      tc.content = '#1e40af'; // Tailwind blue-800
+      head.appendChild(tc);
+    }
+    // Apple Touch Icon
+    if (!document.querySelector('link[rel="apple-touch-icon"]')) {
+      const ai = document.createElement('link');
+      ai.rel = 'apple-touch-icon';
+      ai.href = base + 'logo-rosenweg.png';
+      head.appendChild(ai);
+    }
+    // Apple Mobile Web App fuer 'Add to Home Screen'-Erlebnis
+    if (!document.querySelector('meta[name="apple-mobile-web-app-capable"]')) {
+      const am = document.createElement('meta');
+      am.name = 'apple-mobile-web-app-capable';
+      am.content = 'yes';
+      head.appendChild(am);
+    }
+  },
+
+  // Tabellen ohne overflow-x-auto-Wrapper bekommen automatisch einen,
+  // damit sie auf Mobile horizontal scrollen statt das Layout zu sprengen.
+  _wrapLooseTables() {
+    const tables = document.querySelectorAll('table');
+    tables.forEach(t => {
+      const parent = t.parentElement;
+      if (!parent) return;
+      // Hat schon einen Scroll-Wrapper? Dann nichts tun.
+      const pc = parent.className || '';
+      if (/overflow-x-auto|overflow-auto|table-mobile-wrap/.test(pc)) return;
+      // Tabellen in Modal-Dialogen mit fixer Hoehe ueberspringen
+      if (parent.closest('.fixed.inset-0')) return;
+      const wrap = document.createElement('div');
+      wrap.className = 'table-mobile-wrap';
+      parent.insertBefore(wrap, t);
+      wrap.appendChild(t);
+    });
   },
 
   async _loadConfig(base) {
