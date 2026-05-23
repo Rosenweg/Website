@@ -1,0 +1,105 @@
+/*
+ * Rosenweg Mobile-Optimization Layer
+ * Wird global via js/nav.js geladen — wirkt auf allen Seiten.
+ * Wir aendern NUR Verhalten unter 640px (sm-Breakpoint von Tailwind),
+ * damit Desktop-Layouts unangetastet bleiben.
+ */
+
+/* iOS Zoom-Verhinderung: Eingabefelder mit <16px Schrift loesen iOS-Zoom
+   beim Fokussieren aus. 16px ist Mindestmass. */
+@media (max-width: 640px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Touch-Targets >= 40px Hoehe auf Mobile (Apple HIG empfiehlt 44px, wir
+   nehmen 40px damit kompakte Toolbars nicht aufblaehen). Wir bezielen
+   eingabe-/aktions-elemente; reine Inline-Links (<a> ohne Hintergrund)
+   bleiben unangetastet. */
+@media (max-width: 640px) {
+  button:not(.no-mobile-touch),
+  input[type="submit"]:not(.no-mobile-touch),
+  input[type="button"]:not(.no-mobile-touch),
+  select:not(.no-mobile-touch) {
+    min-height: 40px;
+  }
+  /* Toolbar-Buttons in Tabellenzellen behalten kompakte Hoehe */
+  td button, th button {
+    min-height: 32px;
+  }
+}
+
+/* Modals/Dialoge: max-w-2xl/3xl/4xl sind auf Mobile zu schmal — auf 95vw
+   skalieren. Tailwind setzt max-width-Klassen ueber alle Breakpoints, wir
+   uebersteuern nur klein. */
+@media (max-width: 640px) {
+  .max-w-xl,
+  .max-w-2xl,
+  .max-w-3xl,
+  .max-w-4xl,
+  .max-w-5xl {
+    max-width: 95vw !important;
+  }
+  /* Modals sind oft .fixed .inset-0 mit Centering — die inneren Karten
+     duerfen die ganze Bildschirmhoehe nutzen */
+  .fixed.inset-0 > div,
+  .fixed.inset-0 > .bg-white {
+    max-height: 95vh;
+  }
+}
+
+/* Schrift-Lesbarkeit: text-xs ist auf Mobile zu klein, vor allem in
+   Datentabellen. Auf Mobile leicht groesser. */
+@media (max-width: 640px) {
+  .text-xs { font-size: 0.8125rem; line-height: 1.125rem; }
+}
+
+/* Tabellen: bekommen horizontal-scroll wenn sie zu breit werden.
+   nav.js wrappt alle losen <table>-Tags automatisch in einen
+   .table-mobile-wrap-Container. Hier definieren wir nur den Container-
+   Stil; wer die <table> schon manuell in overflow-x-auto wrapped,
+   bekommt keinen doppelten Wrapper. */
+.table-mobile-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 -1rem; /* bricht durch Seitenrand fuer mehr Platz */
+  padding: 0 1rem;
+}
+@media (min-width: 641px) {
+  .table-mobile-wrap { margin: 0; padding: 0; }
+}
+
+/* iOS Tap-Highlight dezenter machen */
+* {
+  -webkit-tap-highlight-color: rgba(59, 130, 246, 0.15); /* blue-500 @ 15% */
+}
+
+/* Verhindern dass iOS automatisch Text vergroessert (text size adjust) */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Smooth Scroll bei Anker-Navigation */
+html { scroll-behavior: smooth; }
+
+/* Forms: einspaltige Grids unter 640px wenn 3+ Spalten ohne sm:-Prefix
+   verwendet wurden. Wir koennen das nicht per CSS retro-fitten ohne
+   alle Seiten anzufassen — aber wir helfen wo es schmerzt: */
+@media (max-width: 640px) {
+  /* grid-cols-3/4 ohne responsive prefix → auf Mobile aufbrechen */
+  .grid.grid-cols-3:not(.sm\:grid-cols-1):not(.md\:grid-cols-1) {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+  .grid.grid-cols-4:not(.sm\:grid-cols-1):not(.sm\:grid-cols-2):not(.md\:grid-cols-2) {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+  }
+}
+
+/* Buttons: nicht abschneiden wenn Container schmal ist */
+@media (max-width: 640px) {
+  button, .btn { word-wrap: break-word; max-width: 100%; }
+}
