@@ -3201,6 +3201,10 @@ const IMAP_PORT = parseInt(process.env.IMAP_PORT || '993');
 const IMAP_USER = process.env.IMAP_USER || '';
 const IMAP_PASS = process.env.IMAP_PASS || '';  // Gmail App Password
 const IMAP_POLL_INTERVAL = parseInt(process.env.IMAP_POLL_INTERVAL || '60') * 1000;
+// Welche Mailboxen werden gepolled — INBOX + Spam wegen Cloudflare Spam-Heuristik
+// die manche Mails (z.B. von externen Mailservern mit komischen DKIM) in den
+// Spam-Folder forwardet. Sender-Auth-Check unten verhindert echte Spam-Forwards.
+const IMAP_MAILBOXES = (process.env.IMAP_MAILBOXES || 'INBOX,[Gmail]/Spam').split(',').map(s => s.trim()).filter(Boolean);
 const VERTEILER_DOMAIN = process.env.VERTEILER_DOMAIN || 'rosenweg4303.ch';
 
 async function pollGmailForVerteiler() {
@@ -3221,9 +3225,12 @@ async function pollGmailForVerteiler() {
     console.error('[IMAP] Connection error:', err.message);
   });
 
-  try {
-    await client.connect();
-    const lock = await client.getMailboxLock('INBOX');
+  // Helper: einer Mailbox per Loop polled, behaelt eigenen Watermark in DB.
+  // Wird einmal pro IMAP_MAILBOXES-Eintrag aufgerufen (INBOX + Spam).
+  async function processOneMailbox(MAILBOX) {
+    let lock;
+    try { lock = await client.getMailboxLock(MAILBOX); }
+    catch (e) { console.warn(`[IMAP] Cannot open ${MAILBOX}: ${e.message}`); return; }
 
     try {
       // UID-Watermark statt UNSEEN-Filter: robust gegen versehentliches Lesen
@@ -3231,28 +3238,28 @@ async function pollGmailForVerteiler() {
       // Wir tracken die hoechste verarbeitete UID pro Mailbox in der DB.
       const mbox = client.mailbox;
       // STATUS holt uidValidity/uidNext explizit (mbox-Werte sind manchmal stale)
-      const status = await client.status('INBOX', { uidValidity: true, uidNext: true });
+      const status = await client.status(MAILBOX, { uidValidity: true, uidNext: true });
       const currentValidity = String(status.uidValidity ?? mbox.uidValidity ?? '0');
       const currentUidNext = Number(status.uidNext ?? mbox.uidNext ?? 1);
       const stateRes = await pool.query(
         'SELECT uid_validity::text AS uid_validity, last_uid::text AS last_uid FROM imap_state WHERE mailbox = $1',
-        ['INBOX']
+        [MAILBOX]
       );
       let lastUid = 0;
       if (stateRes.rows.length === 0) {
         lastUid = Math.max(0, currentUidNext - 1);
         await pool.query(
           'INSERT INTO imap_state (mailbox, uid_validity, last_uid) VALUES ($1, $2, $3)',
-          ['INBOX', currentValidity, lastUid]
+          [MAILBOX, currentValidity, lastUid]
         );
-        console.log(`[IMAP] First run, watermark initialized at UID ${lastUid} (uidValidity=${currentValidity}, uidNext=${currentUidNext})`);
+        console.log(`[IMAP/${MAILBOX}] First run, watermark initialized at UID ${lastUid} (uidValidity=${currentValidity}, uidNext=${currentUidNext})`);
       } else if (stateRes.rows[0].uid_validity !== currentValidity) {
         lastUid = Math.max(0, currentUidNext - 1);
         await pool.query(
           'UPDATE imap_state SET uid_validity = $1, last_uid = $2, updated_at = NOW() WHERE mailbox = $3',
-          [currentValidity, lastUid, 'INBOX']
+          [currentValidity, lastUid, MAILBOX]
         );
-        console.warn(`[IMAP] UIDVALIDITY changed (${stateRes.rows[0].uid_validity} → ${currentValidity}), watermark reset to ${lastUid}`);
+        console.warn(`[IMAP/${MAILBOX}] UIDVALIDITY changed (${stateRes.rows[0].uid_validity} → ${currentValidity}), watermark reset to ${lastUid}`);
       } else {
         lastUid = Number(stateRes.rows[0].last_uid);
       }
@@ -3871,7 +3878,14 @@ async function pollGmailForVerteiler() {
     } finally {
       lock.release();
     }
+  } // end of inner processOneMailbox
 
+  try {
+    await client.connect();
+    for (const mb of IMAP_MAILBOXES) {
+      try { await processOneMailbox(mb); }
+      catch (e) { console.error(`[IMAP/${mb}] processOneMailbox error:`, e.message); }
+    }
     await client.logout();
   } catch (err) {
     console.error('[IMAP] Poll error:', err.message);
