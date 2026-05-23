@@ -148,54 +148,19 @@ client.on('message_create', async (msg) => {
         phone = '+' + contact.number;
       }
     } catch (e) { /* fallback unten */ }
-    // Bei @lid versuchen ueber WhatsApp-Web Store die echte Phone Number zu finden
+    // Bei @lid: offizielle whatsapp-web.js API client.getContactLidAndPhone()
+    // (ab v1.34) liefert [{lid, pn}] zurueck. pn ist die echte Telefonnummer
+    // als JID-User-Teil oder ganzer JID.
     if (!phone && msg.from.endsWith('@lid')) {
       try {
-        const storeInfo = await client.pupPage.evaluate(async (lidJid) => {
-          const out = { tries: [] };
-          const Store = window.Store || {};
-          // 1) Direct get
-          let c = Store.Contact?.get?.(lidJid);
-          if (c) out.tries.push({ method: 'Contact.get', hit: true });
-          // 2) Iterate all contacts: lid._serialized match
-          if (!c && Store.Contact?.getModelsArray) {
-            const all = Store.Contact.getModelsArray();
-            out.tries.push({ method: 'iterate', count: all.length });
-            c = all.find(x => {
-              if (x.lid?._serialized === lidJid) return true;
-              if (x.id?._serialized === lidJid) return true;
-              if (x.alternativeId?._serialized === lidJid) return true;
-              return false;
-            });
-            if (c) out.tries.push({ method: 'iterate', hit: true });
-          }
-          // 3) Try LidUtils / LidsCollection
-          if (!c && Store.LidUtils?.getPhoneNumber) {
-            try {
-              const p = await Store.LidUtils.getPhoneNumber(lidJid);
-              if (p) { out.tries.push({ method: 'LidUtils.getPhoneNumber', phone: p }); return { ...out, phoneNumber: p }; }
-            } catch (e) { out.tries.push({ method: 'LidUtils', err: e.message }); }
-          }
-          if (!c) return { ...out, found: false };
-          out.found = true;
-          out.fields = {
-            phoneNumber: c.phoneNumber,
-            lidOrigPhone: c.lidOrigPhone,
-            id: c.id?._serialized,
-            lid: c.lid?._serialized,
-            pn: c.pn?._serialized,
-            alternativeId: c.alternativeId?._serialized,
-            mentionName: c.mentionName,
-          };
-          return out;
-        }, msg.from).catch(err => ({ error: err.message }));
-        console.log(`[WA-LID] store-lookup for ${msg.from}:`, JSON.stringify(storeInfo));
-        const f = storeInfo?.fields || {};
-        const candidate = storeInfo?.phoneNumber || f.phoneNumber || f.lidOrigPhone
-                       || (f.pn || '').split('@')[0]
-                       || (f.alternativeId || '').split('@')[0];
-        if (candidate && /^\d{8,15}$/.test(candidate)) phone = '+' + candidate;
-      } catch (e) { console.warn('[WA-LID] store-eval Fehler:', e.message); }
+        const arr = await client.getContactLidAndPhone([msg.from]);
+        const entry = Array.isArray(arr) ? arr[0] : arr;
+        console.log(`[WA-LID] getContactLidAndPhone(${msg.from}):`, JSON.stringify(entry));
+        const pn = entry?.pn || '';
+        // pn kann '<digits>' oder '<digits>@s.whatsapp.net' oder '<digits>@c.us' sein
+        const digits = String(pn).split('@')[0].replace(/^\+/, '');
+        if (/^\d{8,15}$/.test(digits)) phone = '+' + digits;
+      } catch (e) { console.warn('[WA-LID] getContactLidAndPhone Fehler:', e.message); }
     }
     if (!phone && msg.from.endsWith('@c.us')) {
       phone = '+' + msg.from.replace('@c.us', '');
