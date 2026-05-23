@@ -146,8 +146,8 @@ async function loggedSendMail(mailOpts, trigger, extra = {}) {
   }
   try {
     await pool.query(
-      `INSERT INTO email_log (trigger, from_email, from_name, subject, to_addresses, recipients_count, has_attachments, status, message_id, error_message, verteiler_id, recipients_list)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      `INSERT INTO email_log (trigger, from_email, from_name, subject, to_addresses, recipients_count, has_attachments, status, message_id, error_message, verteiler_id, recipients_list, parent_message_id, parent_source)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
       [
         trigger, fromEmail, fromName, mailOpts.subject || null, toAddresses, recipientsCount,
         Array.isArray(mailOpts.attachments) && mailOpts.attachments.length > 0,
@@ -156,6 +156,8 @@ async function loggedSendMail(mailOpts, trigger, extra = {}) {
         error ? String(error.message || error).slice(0, 1000) : null,
         extra.verteiler_id || null,
         extra.recipients_list || null,
+        extra.parent_message_id || null,
+        extra.parent_source || null,
       ]
     );
   } catch (logErr) {
@@ -3067,7 +3069,8 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
   // Schedule delivery report to sender after 90 seconds (only for internal senders — DSGVO)
   if (SMTP2GO_API_KEY && senderEmail && senderEmail.endsWith(`@${VERTEILER_DOMAIN}`)) {
     const logId = logResult.rows[0].id;
-    setTimeout(() => sendDeliveryReport(logId, senderEmail, list.name, parsed.subject, recipients).catch(
+    const parentMsgId = messageId || parsed.messageId || null;
+    setTimeout(() => sendDeliveryReport(logId, senderEmail, list.name, parsed.subject, recipients, parentMsgId).catch(
       err => console.error('[DeliveryReport] Error:', err.message)
     ), 90_000);
   }
@@ -3076,7 +3079,7 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
 }
 
 // ─── Delivery Report ────────────────────────────────────────────────
-async function sendDeliveryReport(logId, senderEmail, verteilerName, originalSubject, recipientsList) {
+async function sendDeliveryReport(logId, senderEmail, verteilerName, originalSubject, recipientsList, parentMessageId) {
   // Loop-Schutz: niemals Zustellbericht an noreply, system-Adressen oder Verteiler selbst senden
   const senderLower = (senderEmail || '').toLowerCase();
   if (!senderLower
@@ -3173,7 +3176,7 @@ async function sendDeliveryReport(logId, senderEmail, verteilerName, originalSub
       'X-Rosenweg-System': 'verteiler-delivery-report',
       'Precedence': 'auto_reply',
     },
-  }, 'verteiler-delivery-report');
+  }, 'verteiler-delivery-report', { parent_message_id: parentMessageId || null, parent_source: `verteiler ${verteilerName} (log #${logId})` });
   console.log(`[DeliveryReport] Sent to ${senderEmail} for log #${logId}: ${delivered}/${recipientsList.length} delivered`);
 }
 
@@ -3676,7 +3679,7 @@ async function pollGmailForVerteiler() {
                       to: [...notifyEmails].join(', '),
                       subject: `Druckauftrag: ${recipName} (${printer})`,
                       text: `Druckauftrag verarbeitet\n\nEmpfänger: ${recipName}\n${recipAddr ? `Adresse: ${recipAddr}\n` : ''}${recipWohn ? `Wohnung: ${recipWohn}\n` : ''}Drucker: ${printer}\nBetreff: ${parsed.subject || '(kein Betreff)'}\nVon: ${senderEmailRaw}\nDokumente: ${printed}\nDatum: ${now}`,
-                    }, 'print-notification');
+                    }, 'print-notification', { parent_message_id: messageId || null, parent_source: `inbound-mail to ${verteilerAddress}` });
                     console.log(`[Print] Notification sent to ${notifyEmails.size} recipients`);
                   }
                 } catch (notifyErr) {
@@ -3710,7 +3713,7 @@ async function pollGmailForVerteiler() {
                       to: [...notifyEmails].join(', '),
                       subject: `[FEHLGESCHLAGEN] Druckauftrag: ${recipName} (${printer})`,
                       text: `Druckauftrag konnte NICHT gedruckt werden.\n\nEmpfänger: ${recipName}\nDrucker: ${printer}\nBetreff: ${parsed.subject || '(kein Betreff)'}\nVon: ${senderEmailRaw}\nDatum: ${now}\n\nDie Email liegt im IMAP-Folder "Drucken-Fehlgeschlagen". Bitte manuell prüfen.`,
-                    }, 'print-failure');
+                    }, 'print-failure', { parent_message_id: messageId || null, parent_source: `inbound-mail to ${verteilerAddress}` });
                     console.log(`[Print] Failure notification sent to ${notifyEmails.size} Technik recipients`);
                   }
                 } catch (notifyErr) {
@@ -4376,6 +4379,41 @@ async function trackRemovedKontakte(wohnungId, stweg, oldKontakte, newKontakte) 
 }
 
 // ─── Admin-API fuer Pending Deletions (UI in loeschungen.html) ────────
+// Mail-Chain: liefert eine flache Liste aller Mails + ihre Folge-Mails (rekursiv)
+// fuer eine gegebene message_id oder source.
+app.get('/api/admin/mail-chain', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  const messageId = String(req.query.message_id || '').trim();
+  const source = String(req.query.source_contains || '').trim();
+  if (!messageId && !source) return res.status(400).json({ error: 'message_id ODER source_contains erforderlich' });
+  try {
+    let rootCondition, rootParams;
+    if (messageId) {
+      rootCondition = `message_id = $1`;
+      rootParams = [messageId];
+    } else {
+      rootCondition = `parent_source ILIKE $1`;
+      rootParams = [`%${source}%`];
+    }
+    // Recursive CTE: alle Mails wo message_id matched + alle wo parent_message_id einer
+    // Mail aus dem matched set entspricht (Level 1+).
+    const r = await pool.query(
+      `WITH RECURSIVE chain AS (
+         SELECT 0 AS depth, id, message_id, parent_message_id, parent_source, trigger,
+                subject, from_email, to_addresses, recipients_count, status, created_at
+           FROM email_log WHERE ${rootCondition}
+         UNION ALL
+         SELECT c.depth + 1, e.id, e.message_id, e.parent_message_id, e.parent_source, e.trigger,
+                e.subject, e.from_email, e.to_addresses, e.recipients_count, e.status, e.created_at
+           FROM email_log e JOIN chain c ON e.parent_message_id = c.message_id
+          WHERE c.depth < 5
+       )
+       SELECT * FROM chain ORDER BY created_at ASC LIMIT 200`,
+      rootParams,
+    );
+    res.json({ chain: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/admin/pending-deletions', authMiddleware, requireTechnikOrPraesident, async (_req, res) => {
   try {
     const r = await pool.query(
@@ -4469,7 +4507,7 @@ async function processAuthentiKDeletions() {
                 STWEG-Kooperation Rosenweg, Kaiseraugst
               </p>
             </div>`,
-        }, 'authentik-deletion-reminder');
+        }, 'authentik-deletion-reminder', { parent_source: `authentik_pending_deletions #${row.id} (${row.email})` });
         await pool.query('UPDATE authentik_pending_deletions SET reminder_sent = true WHERE id = $1', [row.id]);
         console.log(`[Authentik] Deletion reminder sent to ${row.email}`);
       } catch (err) {
@@ -13383,8 +13421,13 @@ async function initDB() {
       ALTER TABLE email_log ADD COLUMN IF NOT EXISTS trigger VARCHAR(80);
       ALTER TABLE email_log ADD COLUMN IF NOT EXISTS to_addresses TEXT;
       ALTER TABLE email_log ADD COLUMN IF NOT EXISTS error_message TEXT;
+      -- Mail-Chain-Visibility: Verkettung von Folge-Mails (z.B. Print-Notifications
+      -- aus inbound-Mail an druckerr+, Delivery-Report aus Verteiler-Batch, etc.)
+      ALTER TABLE email_log ADD COLUMN IF NOT EXISTS parent_message_id VARCHAR(500);
+      ALTER TABLE email_log ADD COLUMN IF NOT EXISTS parent_source TEXT;
       CREATE INDEX IF NOT EXISTS idx_email_log_trigger ON email_log (trigger, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_email_log_created ON email_log (created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_email_log_parent ON email_log (parent_message_id) WHERE parent_message_id IS NOT NULL;
 
       CREATE TABLE IF NOT EXISTS zaehler_config (
         id SERIAL PRIMARY KEY,
