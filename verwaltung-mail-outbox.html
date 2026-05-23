@@ -233,6 +233,7 @@
           <textarea id="f-body" rows="14" ${editable} class="${editableCls} mt-1 w-full border rounded px-2 py-1.5 text-sm mono-body">${esc(m.body_text)}</textarea>
         </label>
         ${attRows ? `<div><div class="text-xs text-gray-500 mb-1">Anhänge</div>${attRows}</div>` : ''}
+        ${m.sent_message_id ? `<div class="border-t pt-2"><button onclick="loadChain('${esc(m.sent_message_id)}', this)" class="text-xs text-blue-600 hover:underline">📨 Folge-Mails dieser Mail anzeigen</button><div id="chain-out" class="mt-2"></div></div>` : ''}
         ${approvalBox}
         ${meta.length > 0 ? `<div class="text-xs text-gray-600 border-t pt-2 mt-2 space-y-1">${meta.map(x => '<div>' + x + '</div>').join('')}</div>` : ''}
         ${m.original_snapshot

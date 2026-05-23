@@ -99,6 +99,7 @@
           <td class="px-3 py-2">${status}</td>
           <td class="px-3 py-2">${stillIn}</td>
           <td class="px-3 py-2 text-right space-x-2 whitespace-nowrap">
+            <button onclick="showChain(${d.id}, '${esc(d.email)}')" class="text-xs bg-blue-100 text-blue-700 rounded px-2 py-1 hover:bg-blue-200" title="Mail-Verlauf">📨 Chain</button>
             ${!d.cancelled ? `<button onclick="cancelDel(${d.id})" class="text-xs bg-green-600 text-white rounded px-2 py-1 hover:bg-green-700">Cancellen</button>` : ''}
             ${d.cancelled ? `<button onclick="reactivate(${d.id})" class="text-xs bg-amber-600 text-white rounded px-2 py-1 hover:bg-amber-700">Timer +30T</button>` : ''}
             <button onclick="removeDel(${d.id}, '${esc(d.email)}')" class="text-xs text-red-600 hover:underline">Entfernen</button>
@@ -134,6 +135,34 @@
       const r = await AuthentikAuth.apiFetch(`/api/admin/pending-deletions/${id}`, { method: 'DELETE' });
       if (!r.ok) throw new Error(await r.text());
       await load();
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+
+  async function showChain(id, email) {
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/admin/mail-chain?source_contains=${encodeURIComponent('authentik_pending_deletions #' + id)}`);
+      const { chain } = await r.json();
+      if (!chain.length) { alert('Keine Mail-Eintraege fuer diesen Loesch-Vermerk gefunden.'); return; }
+      const html = `
+        <div class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onclick="this.remove()">
+          <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[80vh] overflow-y-auto">
+            <div class="p-4 border-b flex justify-between items-center">
+              <h3 class="font-bold">Mail-Chain fuer ${esc(email)}</h3>
+              <button onclick="this.closest('.fixed').remove()" class="text-gray-400 hover:text-gray-700">✕</button>
+            </div>
+            <div class="p-4 space-y-2 text-sm">
+              ${chain.map(c => `
+                <div class="border-l-4 ${c.parent_message_id ? 'border-amber-300 bg-amber-50' : 'border-blue-300 bg-blue-50'} pl-3 py-2 rounded-r">
+                  <div class="text-xs text-gray-500">${fmtDt(c.created_at)} · <span class="font-mono">${esc(c.trigger || '')}</span> · ${c.status}</div>
+                  <div class="font-medium">${esc(c.subject || '(kein Subject)')}</div>
+                  <div class="text-xs text-gray-600">von <span class="font-mono">${esc(c.from_email || '')}</span> → <span class="font-mono">${esc(c.to_addresses || '')}</span> (${c.recipients_count || 0})</div>
+                  ${c.parent_source ? `<div class="text-xs text-amber-700 italic">↑ ausgeloest durch: ${esc(c.parent_source)}</div>` : ''}
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>`;
+      document.body.insertAdjacentHTML('beforeend', html);
     } catch (e) { alert('Fehler: ' + e.message); }
   }
   </script>
