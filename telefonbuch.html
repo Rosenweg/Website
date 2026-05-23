@@ -19,13 +19,13 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
-        .group-header { position: sticky; top: 130px; z-index: 5; }
+        .group-header { position: sticky; top: calc(var(--rosenweg-nav-h, 64px) + 66px); z-index: 5; }
         @supports (padding: env(safe-area-inset-top)) {
             .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
         }
         .deceased { opacity: 0.5; }
         .deceased .name { font-style: italic; text-decoration: line-through; text-decoration-color: rgba(0,0,0,0.3); }
-        .search-bar { position: sticky; top: 64px; z-index: 6; }
+        .search-bar { position: sticky; top: var(--rosenweg-nav-h, 64px); z-index: 6; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
