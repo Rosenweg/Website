@@ -98,17 +98,29 @@
           <td class="px-3 py-2 text-xs"><div>${fmtDt(d.scheduled_at)}</div><div class="${daysCls}">in ${days} Tagen</div></td>
           <td class="px-3 py-2">${status}</td>
           <td class="px-3 py-2">${stillIn}</td>
-          <td class="px-3 py-2 text-right space-x-2 whitespace-nowrap">
-            <button onclick="showChain(${d.id}, '${esc(d.email)}')" class="text-xs bg-blue-100 text-blue-700 rounded px-2 py-1 hover:bg-blue-200" title="Mail-Verlauf">📨 Chain</button>
-            ${!d.cancelled ? `<button onclick="cancelDel(${d.id})" class="text-xs bg-green-600 text-white rounded px-2 py-1 hover:bg-green-700">Cancellen</button>` : ''}
-            ${d.cancelled ? `<button onclick="reactivate(${d.id})" class="text-xs bg-amber-600 text-white rounded px-2 py-1 hover:bg-amber-700">Timer +30T</button>` : ''}
-            <button onclick="removeDel(${d.id}, '${esc(d.email)}')" class="text-xs text-red-600 hover:underline">Entfernen</button>
+          <td class="px-3 py-2 text-right whitespace-nowrap">
+            <select onchange="handleAction(this, ${d.id}, '${esc(d.email)}')" class="text-xs border rounded px-2 py-1 bg-white">
+              <option value="">⋯ Aktion</option>
+              <option value="chain">📨 Mail-Chain anzeigen</option>
+              ${!d.cancelled ? '<option value="cancel">✕ Loeschung cancellen</option>' : ''}
+              ${d.cancelled ? '<option value="reactivate">⏱ Timer +30 Tage</option>' : ''}
+              <option value="remove">🗑 Eintrag entfernen</option>
+            </select>
           </td>
         </tr>`;
       }).join('');
     } catch (e) {
       document.getElementById('tbody').innerHTML = `<tr><td colspan="7" class="text-red-600 py-3">Fehler: ${esc(e.message)}</td></tr>`;
     }
+  }
+
+  function handleAction(sel, id, email) {
+    const action = sel.value;
+    sel.value = '';
+    if (action === 'chain') return showChain(id, email);
+    if (action === 'cancel') return cancelDel(id);
+    if (action === 'reactivate') return reactivate(id);
+    if (action === 'remove') return removeDel(id, email);
   }
 
   async function cancelDel(id) {

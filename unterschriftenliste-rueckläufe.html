@@ -74,14 +74,14 @@
 
         <section id="briefe-section" class="hidden bg-white border rounded-xl overflow-hidden">
             <div class="p-3 border-b flex items-center justify-between flex-wrap gap-2">
-                <div class="flex gap-2 text-sm">
+                <div class="flex flex-wrap gap-2 text-sm">
                     <button data-filter="all" class="filter-btn px-3 py-1 rounded bg-gray-900 text-white">Alle</button>
                     <button data-filter="offen" class="filter-btn px-3 py-1 rounded border">Offen</button>
                     <button data-filter="retourniert" class="filter-btn px-3 py-1 rounded border">Zurück</button>
                     <button data-filter="ja" class="filter-btn px-3 py-1 rounded border">JA</button>
                     <button data-filter="nein" class="filter-btn px-3 py-1 rounded border">NEIN</button>
                 </div>
-                <input id="search" type="search" placeholder="Suche Name/Einheit/Adresse" class="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-72">
+                <input id="search" type="search" placeholder="Suche Name/Einheit/Adresse" class="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-full sm:w-72">
                 <button data-excel-export data-excel-source="#briefe-table" data-excel-name="unterschriftenliste-rueckläufe-{date}.xlsx" data-excel-sheet="Briefe" class="ml-2 text-sm inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-700">⬇ Excel</button>
             </div>
             <div class="overflow-x-auto">
