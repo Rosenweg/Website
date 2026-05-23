@@ -305,7 +305,10 @@ services:
   whatsapp-bot:
     image: ghcr.io/rosenweg/rosenweg-whatsapp-bot:latest
     environment:
-      API_BASE: http://api:3000
+      # Node.js fetch (undici) toleriert Underscores im Hostnamen,
+      # aber das interne Docker-Swarm-DNS resolved den Service unter
+      # Stack-Prefix-Namen. 'api' alone wuerde nur klappen mit network alias.
+      API_BASE: http://rosenweg_api:3000
       WHATSAPP_SHARED_SECRET: "${WHATSAPP_SHARED_SECRET}"
       WA_POLL_MS: "15000"
       WA_HEARTBEAT_MS: "30000"
