@@ -3345,6 +3345,18 @@ async function pollGmailForVerteiler() {
             const headersUnfolded = headers.replace(/\r?\n[ \t]+/g, ' ');
             const senderEmailRaw = headersUnfolded.match(/^From:\s*.*?([a-z0-9._+-]+@[a-z0-9.-]+)/im)?.[1]?.toLowerCase();
             const senderEmail = senderEmailRaw?.replace(/\+[^@]*/, ''); // strip +tag
+
+            // System-Mail-Guard: noreply@…, Auto-Submitted-Header oder explizites
+            // X-Rosenweg-No-Print blockieren Print-Loop (z.B. Konto-Loesch-Reminder
+            // an druckerr+ wuerden sonst Print-Notification an Admins triggern).
+            const isAutoSubmitted = /^Auto-Submitted:\s*(auto-generated|auto-replied)/im.test(headers);
+            const isNoPrint = /^X-Rosenweg-No-Print:\s*true/im.test(headers);
+            const isSystemSender = senderEmail === `noreply@${VERTEILER_DOMAIN}` || senderEmail === `mailer-daemon@${VERTEILER_DOMAIN}`;
+            if (isAutoSubmitted || isNoPrint || isSystemSender) {
+              console.log(`[Print] Skipped System-Mail (auto=${isAutoSubmitted} noprint=${isNoPrint} sysSender=${isSystemSender}) from=${senderEmailRaw} to=${verteilerAddress}`);
+              await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
+              continue;
+            }
             let authorized = false;
             if (senderEmail) {
               // Allow emails from own domain
@@ -4343,6 +4355,9 @@ async function trackRemovedKontakte(wohnungId, stweg, oldKontakte, newKontakte) 
   // Check if the email still exists in another wohnung
   for (const k of removedWithEmail) {
     const email = k.email.toLowerCase().trim();
+    // Drucker-Aliasse (druckerr9+name@…, druckerr13+…) sind technische
+    // Print-to-Mail-Adressen — keine echten User-Accounts → niemals scheduling.
+    if (/^druckerr\d+\+/i.test(email)) continue;
     const stillExists = await pool.query(
       `SELECT COUNT(*) as cnt FROM wohnungen_kontakte WHERE LOWER(email) = $1 AND wohnung_id != $2`,
       [email, wohnungId]
@@ -4420,11 +4435,15 @@ async function processAuthentiKDeletions() {
   if (!AUTHENTIK_API_TOKEN) return;
   try {
     // 1. Send reminders (7 days before deletion, i.e. scheduled_at - 7 days <= NOW)
+    // Drucker-Aliasse (druckerr<N>+name@…) ueberspringen — die sind keine
+    // echten User-Accounts und der Reminder wuerde via Print-Notification
+    // an Admins zurueckschlagen.
     const reminders = await pool.query(
       `SELECT * FROM authentik_pending_deletions
        WHERE cancelled = false AND reminder_sent = false
        AND scheduled_at - INTERVAL '7 days' <= NOW()
-       AND scheduled_at > NOW()`
+       AND scheduled_at > NOW()
+       AND email !~* '^druckerr\\d+\\+'`
     );
     for (const row of reminders.rows) {
       try {
@@ -4434,6 +4453,11 @@ async function processAuthentiKDeletions() {
           from: MAIL_FROM,
           to: row.email,
           subject: 'Rosenweg: Ihr Konto wird in 7 Tagen gelöscht',
+          headers: {
+            'Auto-Submitted': 'auto-generated',
+            'X-Rosenweg-No-Print': 'true',
+            'X-Auto-Response-Suppress': 'All',
+          },
           html: `
             <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
               <h2 style="color: #1e40af;">Rosenweg Kooperation</h2>
@@ -4453,10 +4477,11 @@ async function processAuthentiKDeletions() {
       }
     }
 
-    // 2. Delete users past their scheduled date
+    // 2. Delete users past their scheduled date — Drucker-Aliasse ebenfalls auslassen
     const deletions = await pool.query(
       `SELECT * FROM authentik_pending_deletions
-       WHERE cancelled = false AND scheduled_at <= NOW()`
+       WHERE cancelled = false AND scheduled_at <= NOW()
+       AND email !~* '^druckerr\\d+\\+'`
     );
     for (const row of deletions.rows) {
       try {
