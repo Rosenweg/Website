@@ -152,23 +152,48 @@ client.on('message_create', async (msg) => {
     if (!phone && msg.from.endsWith('@lid')) {
       try {
         const storeInfo = await client.pupPage.evaluate(async (lidJid) => {
+          const out = { tries: [] };
           const Store = window.Store || {};
-          const c = Store.Contact?.get?.(lidJid) || Store.Contact?.find?.(lidJid);
-          if (!c) return { found: false };
-          return {
-            found: true,
+          // 1) Direct get
+          let c = Store.Contact?.get?.(lidJid);
+          if (c) out.tries.push({ method: 'Contact.get', hit: true });
+          // 2) Iterate all contacts: lid._serialized match
+          if (!c && Store.Contact?.getModelsArray) {
+            const all = Store.Contact.getModelsArray();
+            out.tries.push({ method: 'iterate', count: all.length });
+            c = all.find(x => {
+              if (x.lid?._serialized === lidJid) return true;
+              if (x.id?._serialized === lidJid) return true;
+              if (x.alternativeId?._serialized === lidJid) return true;
+              return false;
+            });
+            if (c) out.tries.push({ method: 'iterate', hit: true });
+          }
+          // 3) Try LidUtils / LidsCollection
+          if (!c && Store.LidUtils?.getPhoneNumber) {
+            try {
+              const p = await Store.LidUtils.getPhoneNumber(lidJid);
+              if (p) { out.tries.push({ method: 'LidUtils.getPhoneNumber', phone: p }); return { ...out, phoneNumber: p }; }
+            } catch (e) { out.tries.push({ method: 'LidUtils', err: e.message }); }
+          }
+          if (!c) return { ...out, found: false };
+          out.found = true;
+          out.fields = {
             phoneNumber: c.phoneNumber,
             lidOrigPhone: c.lidOrigPhone,
             id: c.id?._serialized,
-            altId: c.alternativeId?._serialized,
-            cphone: c.cphone,
+            lid: c.lid?._serialized,
             pn: c.pn?._serialized,
+            alternativeId: c.alternativeId?._serialized,
+            mentionName: c.mentionName,
           };
+          return out;
         }, msg.from).catch(err => ({ error: err.message }));
         console.log(`[WA-LID] store-lookup for ${msg.from}:`, JSON.stringify(storeInfo));
-        const candidate = storeInfo?.phoneNumber || storeInfo?.lidOrigPhone || storeInfo?.cphone
-                       || (storeInfo?.pn || '').split('@')[0]
-                       || (storeInfo?.altId || '').split('@')[0];
+        const f = storeInfo?.fields || {};
+        const candidate = storeInfo?.phoneNumber || f.phoneNumber || f.lidOrigPhone
+                       || (f.pn || '').split('@')[0]
+                       || (f.alternativeId || '').split('@')[0];
         if (candidate && /^\d{8,15}$/.test(candidate)) phone = '+' + candidate;
       } catch (e) { console.warn('[WA-LID] store-eval Fehler:', e.message); }
     }
