@@ -127,20 +127,58 @@ client.on('message_create', async (msg) => {
     if (msg.from.endsWith('@g.us')) return;
     // Nur 1:1 (klassisch @c.us oder neu @lid)
     if (!msg.from.endsWith('@c.us') && !msg.from.endsWith('@lid')) return;
-    // Phone via Contact aufloesen (bei @lid ist im from-Feld die echte
-    // Nummer maskiert; getContact() liefert die tatsaechliche Nummer).
+    // Phone aufloesen — bei @lid liefert getContact() typischerweise nur
+    // die LID. Die echte Nummer steckt im Store.Contact (in-page WhatsApp
+    // Web State) unter Feldern wie phoneNumber/lidOrigPhone. Wir greifen
+    // via puppeteer-evaluate darauf zu.
     let phone = null;
+    let contactDebug = {};
     try {
       const contact = await msg.getContact();
-      if (contact?.number) phone = '+' + contact.number;
-      else if (contact?.id?.user) phone = '+' + contact.id.user;
+      contactDebug = {
+        id: contact?.id?._serialized,
+        number: contact?.number,
+        pushname: contact?.pushname,
+        name: contact?.name,
+        shortName: contact?.shortName,
+        verifiedName: contact?.verifiedName,
+        isMyContact: contact?.isMyContact,
+      };
+      if (contact?.number && /^\d{8,15}$/.test(contact.number) && !msg.from.startsWith(contact.number)) {
+        phone = '+' + contact.number;
+      }
     } catch (e) { /* fallback unten */ }
+    // Bei @lid versuchen ueber WhatsApp-Web Store die echte Phone Number zu finden
+    if (!phone && msg.from.endsWith('@lid')) {
+      try {
+        const storeInfo = await client.pupPage.evaluate(async (lidJid) => {
+          const Store = window.Store || {};
+          const c = Store.Contact?.get?.(lidJid) || Store.Contact?.find?.(lidJid);
+          if (!c) return { found: false };
+          return {
+            found: true,
+            phoneNumber: c.phoneNumber,
+            lidOrigPhone: c.lidOrigPhone,
+            id: c.id?._serialized,
+            altId: c.alternativeId?._serialized,
+            cphone: c.cphone,
+            pn: c.pn?._serialized,
+          };
+        }, msg.from).catch(err => ({ error: err.message }));
+        console.log(`[WA-LID] store-lookup for ${msg.from}:`, JSON.stringify(storeInfo));
+        const candidate = storeInfo?.phoneNumber || storeInfo?.lidOrigPhone || storeInfo?.cphone
+                       || (storeInfo?.pn || '').split('@')[0]
+                       || (storeInfo?.altId || '').split('@')[0];
+        if (candidate && /^\d{8,15}$/.test(candidate)) phone = '+' + candidate;
+      } catch (e) { console.warn('[WA-LID] store-eval Fehler:', e.message); }
+    }
     if (!phone && msg.from.endsWith('@c.us')) {
       phone = '+' + msg.from.replace('@c.us', '');
     }
+    // Letzter Fallback: LID-Nummer mit Hinweis (Person-Match wird scheitern)
     if (!phone) {
-      console.warn(`[WA] Inbound ohne aufloesbare Nummer: from=${msg.from}`);
-      return;
+      phone = '+' + msg.from.replace(/@(lid|c\.us)$/, '');
+      console.warn(`[WA] Inbound ohne aufloesbare echte Nummer, fallback=${phone} debug=`, contactDebug);
     }
     console.log(`[WA] Inbound von ${phone} (${msg.from}): ${(msg.body||'').slice(0,80)}`);
     const chatId = msg.from; // echte Chat-ID (@c.us oder @lid) fuer Reply
