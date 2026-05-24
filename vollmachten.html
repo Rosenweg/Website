@@ -86,8 +86,12 @@
               <option value="">— Verwaltung waehlen —</option>
             </select>
           </div>
+          <div id="m-bv-quick-row" class="hidden mt-2">
+            <label class="block text-xs font-medium text-gray-600 mb-1">📋 Aus meinen Wohnungen uebernehmen <span class="text-gray-400">(direkt aus der Objektverwaltung)</span></label>
+            <div id="m-bv-quick-list" class="bg-blue-50 border border-blue-200 rounded p-2 space-y-1 max-h-40 overflow-y-auto text-xs"></div>
+          </div>
           <div id="m-bv-person-row" class="hidden mt-2">
-            <label class="block text-xs font-medium text-gray-600 mb-1">Person aus Datenbank waehlen <span class="text-gray-400">(optional)</span></label>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Person aus Datenbank waehlen <span class="text-gray-400">(oder oben Quick-Pick)</span></label>
             <input type="text" id="m-bv-person-search" placeholder="Name oder E-Mail eingeben…" class="w-full border rounded px-3 py-1.5">
             <div id="m-bv-person-results" class="hidden bg-white border rounded mt-1 max-h-32 overflow-y-auto text-xs"></div>
           </div>
@@ -329,7 +333,41 @@
   function onBvTypChange() {
     const typ = document.getElementById('m-bv-typ').value;
     document.getElementById('m-bv-verwaltung-row').classList.toggle('hidden', typ !== 'verwaltung');
-    document.getElementById('m-bv-person-row').classList.toggle('hidden', !(typ === 'eigentuemer' || typ === 'mieter'));
+    document.getElementById('m-bv-person-row').classList.toggle('hidden', !(typ === 'eigentuemer' || typ === 'mieter' || typ === 'verwaltung'));
+    document.getElementById('m-bv-quick-row').classList.toggle('hidden', !['verwaltung','mieter','eigentuemer'].includes(typ));
+    if (['verwaltung','mieter','eigentuemer'].includes(typ)) loadMyKontakte(typ);
+  }
+
+  async function loadMyKontakte(rolle) {
+    const lookupRolle = rolle === 'verwaltung' ? 'verwalter' : rolle;
+    const wrap = document.getElementById('m-bv-quick-list');
+    wrap.innerHTML = '<div class="text-gray-400 italic p-1">Lade…</div>';
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/vollmachten/lookup/my-kontakte?rolle=' + lookupRolle);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const { kontakte } = await r.json();
+      if (!kontakte || kontakte.length === 0) {
+        wrap.innerHTML = '<div class="text-gray-400 italic p-1">Keine ' + lookupRolle + '-Kontakte in deinen Wohnungen — du kannst unten Person manuell eingeben.</div>';
+        return;
+      }
+      wrap.innerHTML = kontakte.map(k => `<button type="button" onclick='pickKontakt(${JSON.stringify(k).replace(/'/g, "&apos;")})' class="block w-full text-left p-2 bg-white border border-blue-100 rounded hover:bg-blue-100 transition">
+        <div class="font-medium">${esc(k.name)}</div>
+        <div class="text-gray-500 text-xs">${esc(k.email || '')}${k.telefon ? ' · ' + esc(k.telefon) : ''}</div>
+        <div class="text-gray-400 text-xs">aus ${esc(k.wohnung_bezeichnung || 'Wohnung #' + k.wohnung_id)} (STWEG ${k.stweg})</div>
+      </button>`).join('');
+    } catch (e) { wrap.innerHTML = '<div class="text-red-500 p-1">Fehler: ' + esc(e.message) + '</div>'; }
+  }
+
+  function pickKontakt(k) {
+    document.getElementById('m-bv-name').value = k.name || '';
+    document.getElementById('m-bv-email').value = k.email || '';
+    document.getElementById('m-bv-telefon').value = k.telefon || '';
+    document.getElementById('m-bv-adresse').value = k.adresse || '';
+    // Wenn der Kontakt aus einer bestimmten Wohnung kommt, gleich vorbelegen
+    if (k.wohnung_id && !document.getElementById('m-wohnung').value) {
+      document.getElementById('m-wohnung').value = k.wohnung_id;
+      document.getElementById('m-stweg').value = k.stweg || '';
+    }
   }
 
   async function loadVerwaltungenForSelect() {
