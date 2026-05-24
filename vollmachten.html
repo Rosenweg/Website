@@ -294,7 +294,8 @@
             <button onclick="openPdf(${v.id})" class="text-xs bg-blue-100 text-blue-700 rounded px-3 py-1.5 hover:bg-blue-200">📄 PDF</button>
             ${canEdit ? `<button onclick="editVollmacht(${v.id})" class="text-xs bg-gray-100 text-gray-700 rounded px-3 py-1.5 hover:bg-gray-200">✎ Bearbeiten</button>` : ''}
             ${canSign ? `<button onclick="signDigital(${v.id})" class="text-xs bg-green-600 text-white rounded px-3 py-1.5 hover:bg-green-700">✓ Digital signieren</button>` : ''}
-            ${canSign ? `<button onclick="activatePaper(${v.id})" class="text-xs bg-amber-600 text-white rounded px-3 py-1.5 hover:bg-amber-700">📄 Papier-Signatur erfasst</button>` : ''}
+            ${canSign ? `<button onclick="triggerUpload(${v.id})" class="text-xs bg-amber-600 text-white rounded px-3 py-1.5 hover:bg-amber-700">📤 Signierte PDF hochladen</button>` : ''}
+            ${v.papier_pdf_path ? `<button onclick="verifyAi(${v.id})" class="text-xs bg-purple-600 text-white rounded px-3 py-1.5 hover:bg-purple-700">🤖 KI-Pruefung</button>` : ''}
             ${canRevoke ? `<button onclick="revoke(${v.id})" class="text-xs bg-red-600 text-white rounded px-3 py-1.5 hover:bg-red-700">Widerrufen</button>` : ''}
             ${canEdit ? `<button onclick="deleteEntry(${v.id})" class="text-xs text-red-600 hover:underline">Loeschen</button>` : ''}
           </div>
@@ -542,13 +543,76 @@
     } catch (e) { alert('Fehler: ' + e.message); }
   }
 
-  async function activatePaper(id) {
-    if (!confirm('Vollmacht mit Papier-Signatur aktivieren?\n\nVoraussetzung: Du hast das PDF gedruckt, unterschrieben und kannst es bei Bedarf vorlegen. Du kannst den Scan spaeter im Dokumente-Bereich hochladen.\n\nNach Aktivierung ist die Vollmacht AKTIV und nicht mehr editierbar — nur Widerruf moeglich.')) return;
+  function triggerUpload(id) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/pdf,.pdf';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      if (file.size > 20 * 1024 * 1024) { alert('Datei zu gross (max 20 MB)'); return; }
+      try {
+        const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}/upload-signed`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/pdf' },
+          body: file,
+        });
+        if (!r.ok) throw new Error(await r.text());
+        const d = await r.json();
+        if (confirm(`✓ Signierte PDF hochgeladen (${Math.round(d.size_bytes/1024)} KB). Status: ${d.status}.\n\nJetzt automatisch von der KI pruefen lassen?`)) {
+          await verifyAi(id);
+        }
+        await load();
+      } catch (e) { alert('Fehler beim Upload: ' + e.message); }
+    };
+    input.click();
+  }
+
+  async function verifyAi(id) {
+    const wrap = document.createElement('div');
+    wrap.className = 'fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4';
+    wrap.innerHTML = '<div class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full text-center"><p class="text-gray-700 mb-2">🤖 KI prueft die signierte PDF…</p><p class="text-xs text-gray-400">Das kann bis zu 60 Sekunden dauern.</p></div>';
+    document.body.appendChild(wrap);
     try {
-      const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}/activate-paper`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
-      if (!r.ok) throw new Error(await r.text());
-      await load();
-    } catch (e) { alert('Fehler: ' + e.message); }
+      const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}/verify-ai`, { method: 'POST' });
+      const d = await r.json();
+      wrap.remove();
+      if (!r.ok) { alert('KI-Fehler: ' + (d.error || r.status)); return; }
+      const farbe = d.gesamtbewertung === 'ok' ? 'green' : (d.gesamtbewertung === 'warnung' ? 'amber' : 'red');
+      const icon = d.gesamtbewertung === 'ok' ? '✓' : (d.gesamtbewertung === 'warnung' ? '⚠' : '✕');
+      const html = `<div class="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 overflow-y-auto" onclick="this.remove()">
+        <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-lg w-full my-8">
+          <div class="px-5 py-3 border-b flex items-center justify-between bg-${farbe}-50">
+            <h3 class="font-bold text-${farbe}-900">${icon} KI-Pruefung — ${esc(d.gesamtbewertung || 'unbekannt').toUpperCase()}</h3>
+            <button onclick="this.closest('.fixed').remove()" class="text-gray-400 hover:text-gray-700">✕</button>
+          </div>
+          <div class="p-5 space-y-3 text-sm">
+            ${d.kommentar ? `<p class="bg-gray-50 p-3 rounded border-l-4 border-${farbe}-500">${esc(d.kommentar)}</p>` : ''}
+            <div class="grid grid-cols-2 gap-3">
+              <div class="bg-gray-50 p-3 rounded">
+                <div class="text-xs text-gray-500 mb-1">Dokument-Hash gefunden</div>
+                <div class="font-semibold">${d.hash_gefunden ? '✓ Ja' : '✕ Nein'}</div>
+              </div>
+              <div class="bg-gray-50 p-3 rounded">
+                <div class="text-xs text-gray-500 mb-1">Alle Namen gefunden</div>
+                <div class="font-semibold">${d.alle_namen_gefunden ? '✓ Ja' : '✕ Nein'}</div>
+              </div>
+              <div class="bg-gray-50 p-3 rounded">
+                <div class="text-xs text-gray-500 mb-1">Unterschriften-Indikatoren</div>
+                <div class="font-semibold">${d.unterschriften_indikatoren ?? '—'}</div>
+              </div>
+            </div>
+            ${(d.fehlende_namen || []).length ? `<div class="bg-red-50 p-3 rounded"><div class="text-xs font-semibold text-red-800 mb-1">Fehlende Namen:</div><ul class="list-disc list-inside text-xs">${d.fehlende_namen.map(n => `<li>${esc(n)}</li>`).join('')}</ul></div>` : ''}
+            ${(d.auffaelligkeiten || []).length ? `<div class="bg-amber-50 p-3 rounded"><div class="text-xs font-semibold text-amber-800 mb-1">Auffaelligkeiten:</div><ul class="list-disc list-inside text-xs">${d.auffaelligkeiten.map(a => `<li>${esc(a)}</li>`).join('')}</ul></div>` : ''}
+            ${d.raw ? `<details><summary class="text-xs text-gray-500 cursor-pointer">Rohausgabe (Parse-Fehler)</summary><pre class="text-xs bg-gray-100 p-2 rounded mt-2 overflow-auto">${esc(d.raw)}</pre></details>` : ''}
+          </div>
+        </div>
+      </div>`;
+      document.body.insertAdjacentHTML('beforeend', html);
+    } catch (e) {
+      wrap.remove();
+      alert('KI-Fehler: ' + e.message);
+    }
   }
 
   async function revoke(id) {
