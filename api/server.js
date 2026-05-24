@@ -13670,9 +13670,7 @@ function buildVollmachtHtml(v) {
     <div class="doc-meta">
       <span class="badge">${artLabel}</span>
       <span>Erstellt: ${fmtDate(v.created_at)}</span>
-      ${v.status === 'entwurf' ? '<span style="color:#92400e;font-weight:500;">⚠ Entwurf — noch nicht signiert</span>' : ''}
-      ${v.status === 'aktiv' ? '<span style="color:#15803d;font-weight:500;">✓ Aktiv</span>' : ''}
-      ${v.status === 'widerrufen' ? '<span style="color:#991b1b;font-weight:500;">✕ Widerrufen</span>' : ''}
+      ${v.status === 'widerrufen' ? '<span style="color:#991b1b;font-weight:500;">✕ WIDERRUFEN am ' + fmtDate(v.widerrufen_am) + '</span>' : ''}
     </div>
 
     <h2><span class="icon">👤</span>Vollmachtgeber/in${vgList.length > 1 ? ` <span style="font-weight:400;font-size:9.5pt;color:#6b7280;">(${vgList.length} Miteigentümer)</span>` : ''}</h2>
@@ -14244,9 +14242,22 @@ app.get('/api/vollmachten/:id/pdf', authMiddleware, async (req, res) => {
     const involved = (v.vollmachtgeber_email || '').toLowerCase() === userEmail
                   || (v.bevollmaechtigter_email || '').toLowerCase() === userEmail;
     if (!isGlobalAdmin && !isAusschussForStweg && !involved) return res.status(403).json({ error: 'Kein Zugriff' });
+    // Wenn signierte Papier-Version hochgeladen wurde und nicht explizit
+    // ?template=1 angefordert ist, die hochgeladene ausliefern.
+    if (v.papier_pdf_path && !req.query.template) {
+      const fullPath = pathModule.join(DOCS_PATH, v.papier_pdf_path);
+      try {
+        const fileBuf = await fs.readFile(fullPath);
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="vollmacht-${v.doc_hash || id}-signed.pdf"`);
+        return res.send(fileBuf);
+      } catch (e) {
+        console.warn('[vollmachten] papier-PDF nicht lesbar, fallback auf Template:', e.message);
+      }
+    }
     const pdf = await generateVollmachtPdf(v);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="vollmacht-${id}.pdf"`);
+    res.setHeader('Content-Disposition', `inline; filename="vollmacht-${v.doc_hash || id}.pdf"`);
     res.send(pdf);
   } catch (err) { console.error('[vollmachten] pdf:', err); res.status(500).json({ error: err.message }); }
 });
