@@ -387,10 +387,13 @@
   }
 
   function filterByTab(v) {
-    const vgEmail = (v.vollmachtgeber_email || '').toLowerCase();
+    // Alle Vollmachtgeber-Emails (Primaer + Liste aus vollmachten_vollmachtgeber)
+    const vgEmails = new Set();
+    if (v.vollmachtgeber_email) vgEmails.add(v.vollmachtgeber_email.toLowerCase());
+    (v.vollmachtgeber_liste || []).forEach(g => { if (g.email) vgEmails.add(g.email.toLowerCase()); });
     const bvEmail = (v.bevollmaechtigter_email || '').toLowerCase();
     if (currentTab === 'alle') return true;
-    if (currentTab === 'meine') return vgEmail === myEmail;
+    if (currentTab === 'meine') return vgEmails.has(myEmail);
     if (currentTab === 'erhalten') return bvEmail === myEmail;
     return true;
   }
