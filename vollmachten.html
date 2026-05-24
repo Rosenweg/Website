@@ -74,11 +74,11 @@
             <label class="block text-xs font-medium text-gray-600 mb-1">Typ *</label>
             <select id="m-bv-typ" required onchange="onBvTypChange()" class="w-full border rounded px-3 py-1.5">
               <option value="">— bitte waehlen —</option>
-              <option value="eigentuemer">Anderer Miteigentuemer/in</option>
-              <option value="verwaltung">Verwaltung (Firma)</option>
-              <option value="mieter">Mieter/in meiner Wohnung</option>
-              <option value="extern">Externe Person (Anwalt, Familie, etc.)</option>
+              <option value="person">Person aus Objektverwaltung (Eigentuemer, Mieter, Familie, etc.)</option>
+              <option value="verwaltung">Verwaltung (Firma / professioneller Verwalter)</option>
+              <option value="extern">Externe Person (Anwalt, Bekannter, etc.)</option>
             </select>
+            <input type="hidden" id="m-bv-actual-typ">
           </div>
           <div id="m-bv-verwaltung-row" class="hidden mt-2">
             <label class="block text-xs font-medium text-gray-600 mb-1">Verwaltung waehlen</label>
@@ -313,6 +313,7 @@
     document.getElementById('m-vg-email').value = user?.email || '';
     document.getElementById('m-vg-adresse').value = '';
     document.getElementById('m-bv-typ').value = '';
+    document.getElementById('m-bv-actual-typ').value = '';
     document.getElementById('m-bv-name').value = '';
     document.getElementById('m-bv-email').value = '';
     document.getElementById('m-bv-telefon').value = '';
@@ -333,28 +334,42 @@
   function onBvTypChange() {
     const typ = document.getElementById('m-bv-typ').value;
     document.getElementById('m-bv-verwaltung-row').classList.toggle('hidden', typ !== 'verwaltung');
-    document.getElementById('m-bv-person-row').classList.toggle('hidden', !(typ === 'eigentuemer' || typ === 'mieter' || typ === 'verwaltung'));
-    document.getElementById('m-bv-quick-row').classList.toggle('hidden', !['verwaltung','mieter','eigentuemer'].includes(typ));
-    if (['verwaltung','mieter','eigentuemer'].includes(typ)) loadMyKontakte(typ);
+    document.getElementById('m-bv-person-row').classList.toggle('hidden', typ === 'extern');
+    document.getElementById('m-bv-quick-row').classList.toggle('hidden', !['person','verwaltung'].includes(typ));
+    if (typ === 'person') loadMyKontakte(null); // alle Rollen
+    else if (typ === 'verwaltung') loadMyKontakte('verwalter');
+    // bei extern oder verwaltung-firma: actual_typ direkt setzen
+    if (typ === 'verwaltung') document.getElementById('m-bv-actual-typ').value = 'verwaltung';
+    else if (typ === 'extern') document.getElementById('m-bv-actual-typ').value = 'extern';
+    else document.getElementById('m-bv-actual-typ').value = ''; // wird beim Quick-Pick gesetzt
   }
 
   async function loadMyKontakte(rolle) {
-    const lookupRolle = rolle === 'verwaltung' ? 'verwalter' : rolle;
     const wrap = document.getElementById('m-bv-quick-list');
     wrap.innerHTML = '<div class="text-gray-400 italic p-1">Lade…</div>';
     try {
-      const r = await AuthentikAuth.apiFetch('/api/vollmachten/lookup/my-kontakte?rolle=' + lookupRolle);
+      const url = '/api/vollmachten/lookup/my-kontakte' + (rolle ? '?rolle=' + rolle : '');
+      const r = await AuthentikAuth.apiFetch(url);
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const { kontakte } = await r.json();
       if (!kontakte || kontakte.length === 0) {
-        wrap.innerHTML = '<div class="text-gray-400 italic p-1">Keine ' + lookupRolle + '-Kontakte in deinen Wohnungen — du kannst unten Person manuell eingeben.</div>';
+        wrap.innerHTML = '<div class="text-gray-400 italic p-1">Keine Kontakte in deinen Wohnungen — du kannst unten Person manuell eingeben.</div>';
         return;
       }
-      wrap.innerHTML = kontakte.map(k => `<button type="button" onclick='pickKontakt(${JSON.stringify(k).replace(/'/g, "&apos;")})' class="block w-full text-left p-2 bg-white border border-blue-100 rounded hover:bg-blue-100 transition">
-        <div class="font-medium">${esc(k.name)}</div>
-        <div class="text-gray-500 text-xs">${esc(k.email || '')}${k.telefon ? ' · ' + esc(k.telefon) : ''}</div>
-        <div class="text-gray-400 text-xs">aus ${esc(k.wohnung_bezeichnung || 'Wohnung #' + k.wohnung_id)} (STWEG ${k.stweg})</div>
-      </button>`).join('');
+      const roleLabels = { eigentuemer: 'Miteigentuemer', mieter: 'Mieter', verwalter: 'Verwalter', bewohner: 'Bewohner' };
+      const roleColors = { eigentuemer: 'bg-blue-100 text-blue-800', mieter: 'bg-amber-100 text-amber-800', verwalter: 'bg-purple-100 text-purple-800', bewohner: 'bg-green-100 text-green-800' };
+      wrap.innerHTML = kontakte.map(k => {
+        const rolleLabel = roleLabels[k.rolle] || k.rolle;
+        const rolleClass = roleColors[k.rolle] || 'bg-gray-100 text-gray-700';
+        return `<button type="button" onclick='pickKontakt(${JSON.stringify(k).replace(/'/g, "&apos;")})' class="block w-full text-left p-2 bg-white border border-blue-100 rounded hover:bg-blue-100 transition">
+          <div class="flex items-center justify-between gap-2">
+            <div class="font-medium">${esc(k.name)}</div>
+            <span class="text-xs px-2 py-0.5 rounded ${rolleClass} flex-shrink-0">${rolleLabel}</span>
+          </div>
+          <div class="text-gray-500 text-xs">${esc(k.email || '')}${k.telefon ? ' · ' + esc(k.telefon) : ''}</div>
+          <div class="text-gray-400 text-xs">aus ${esc(k.wohnung_bezeichnung || 'Wohnung #' + k.wohnung_id)} (STWEG ${k.stweg})</div>
+        </button>`;
+      }).join('');
     } catch (e) { wrap.innerHTML = '<div class="text-red-500 p-1">Fehler: ' + esc(e.message) + '</div>'; }
   }
 
@@ -363,7 +378,9 @@
     document.getElementById('m-bv-email').value = k.email || '';
     document.getElementById('m-bv-telefon').value = k.telefon || '';
     document.getElementById('m-bv-adresse').value = k.adresse || '';
-    // Wenn der Kontakt aus einer bestimmten Wohnung kommt, gleich vorbelegen
+    // DB-Typ aus der Kontakt-Rolle ableiten (bevollmaechtigter_typ-Constraint)
+    const typMap = { eigentuemer: 'eigentuemer', mieter: 'mieter', verwalter: 'verwaltung', bewohner: 'mieter' };
+    document.getElementById('m-bv-actual-typ').value = typMap[k.rolle] || 'extern';
     if (k.wohnung_id && !document.getElementById('m-wohnung').value) {
       document.getElementById('m-wohnung').value = k.wohnung_id;
       document.getElementById('m-stweg').value = k.stweg || '';
@@ -444,7 +461,7 @@
       vollmachtgeber_name: document.getElementById('m-vg-name').value.trim(),
       vollmachtgeber_email: document.getElementById('m-vg-email').value.trim() || null,
       vollmachtgeber_adresse: document.getElementById('m-vg-adresse').value.trim() || null,
-      bevollmaechtigter_typ: document.getElementById('m-bv-typ').value,
+      bevollmaechtigter_typ: document.getElementById('m-bv-actual-typ').value || document.getElementById('m-bv-typ').value,
       bevollmaechtigter_verwaltung_id: parseInt(document.getElementById('m-bv-verwaltung').value, 10) || null,
       bevollmaechtigter_name: document.getElementById('m-bv-name').value.trim(),
       bevollmaechtigter_email: document.getElementById('m-bv-email').value.trim() || null,
@@ -483,7 +500,12 @@
     document.getElementById('m-vg-name').value = v.vollmachtgeber_name || '';
     document.getElementById('m-vg-email').value = v.vollmachtgeber_email || '';
     document.getElementById('m-vg-adresse').value = v.vollmachtgeber_adresse || '';
-    document.getElementById('m-bv-typ').value = v.bevollmaechtigter_typ || '';
+    // UI-Typ vom DB-Typ ableiten (eigentuemer/mieter → person)
+    const uiTyp = v.bevollmaechtigter_typ === 'verwaltung' ? 'verwaltung'
+                : v.bevollmaechtigter_typ === 'extern' ? 'extern'
+                : 'person';
+    document.getElementById('m-bv-typ').value = uiTyp;
+    document.getElementById('m-bv-actual-typ').value = v.bevollmaechtigter_typ || '';
     document.getElementById('m-bv-verwaltung').value = v.bevollmaechtigter_verwaltung_id || '';
     document.getElementById('m-bv-name').value = v.bevollmaechtigter_name || '';
     document.getElementById('m-bv-email').value = v.bevollmaechtigter_email || '';
