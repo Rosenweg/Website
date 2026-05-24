@@ -4294,43 +4294,58 @@ async function autoCreateVollmachtForVerwalter(client, wohnungId, stweg, kontakt
   if (verwalter.length === 0) return;
   // Alle Eigentuemer dieser Wohnung holen (aus DB, inkl. die nicht im incoming)
   const eigRes = await client.query(
-    `SELECT name, email FROM wohnungen_kontakte
+    `SELECT name, email, adresse, person_id FROM wohnungen_kontakte
       WHERE wohnung_id = $1 AND rolle = 'eigentuemer' AND archiviert_am IS NULL AND email IS NOT NULL`,
     [wohnungId],
   );
   if (eigRes.rows.length === 0) return; // ohne Eigentuemer keine Vollmacht
+  const eigentuemerEmails = eigRes.rows.map(e => (e.email || '').toLowerCase());
   for (const v of verwalter) {
-    for (const eig of eigRes.rows) {
-      if ((eig.email || '').toLowerCase() === (v.email || '').toLowerCase()) continue;
-      // Existiert schon eine aktive/Entwurfs-Vollmacht zwischen dem Paar?
-      const exists = await client.query(
-        `SELECT 1 FROM vollmachten
-          WHERE LOWER(vollmachtgeber_email) = LOWER($1)
-            AND LOWER(bevollmaechtigter_email) = LOWER($2)
-            AND status IN ('entwurf','aktiv')
-          LIMIT 1`,
-        [eig.email, v.email],
+    if (eigentuemerEmails.includes((v.email || '').toLowerCase())) continue;
+    // Existiert schon eine aktive/Entwurfs-Vollmacht zwischen dieser Eigentuemer-
+    // Gruppe (alle Emails) und diesem Verwalter? Wir definieren das als: jede
+    // Vollmacht an diesen Verwalter, die alle aktuellen Eigentuemer abdeckt.
+    const exists = await client.query(
+      `SELECT v.id FROM vollmachten v
+        WHERE LOWER(v.bevollmaechtigter_email) = LOWER($1)
+          AND v.wohnung_id = $2
+          AND v.status IN ('entwurf','aktiv')
+        LIMIT 1`,
+      [v.email, wohnungId],
+    );
+    if (exists.rows.length > 0) continue;
+    // Vollmacht-Haupt-Record (vollmachtgeber_* = primaerer Eigentuemer)
+    const primary = eigRes.rows[0];
+    const sql = h => `INSERT INTO vollmachten (
+         doc_hash,
+         vollmachtgeber_name, vollmachtgeber_email, vollmachtgeber_adresse,
+         bevollmaechtigter_typ, bevollmaechtigter_name, bevollmaechtigter_email,
+         bevollmaechtigter_telefon, bevollmaechtigter_adresse,
+         art, geltungsbereich, wohnung_id, stweg,
+         gueltig_ab, status, created_by_user_email
+       ) VALUES ($1,$2,$3,$4,'verwaltung',$5,$6,$7,$8,'generell',$9,$10,$11,CURRENT_DATE,'entwurf','system:auto-verwalter')
+       RETURNING id`;
+    const eigSuffix = eigRes.rows.length > 1 ? ' und ' + (eigRes.rows.length - 1) + ' weitere/r Eigentuemer/in' : '';
+    const ins = await vmInsertWithRetry(client, sql, [
+      primary.name, primary.email, primary.adresse || null,
+      v.name, v.email, v.telefon || null, v.adresse || null,
+      'Automatisch erzeugter Entwurf aus Objektverwaltung: Verwalter '
+        + v.name + ' vertritt ' + primary.name + eigSuffix + ' in allen Belangen der Wohnung. '
+        + 'Bitte pruefen, anpassen und signieren (digital oder Papier). Bei Miteigentum muessen ALLE eingetragenen Vollmachtgeber separat signieren.',
+      wohnungId, stweg,
+    ]);
+    const vollmachtId = ins.rows[0].id;
+    // Alle Eigentuemer als separate Vollmachtgeber-Zeilen anlegen (jeder
+    // muss einzeln signieren)
+    for (let i = 0; i < eigRes.rows.length; i++) {
+      const e = eigRes.rows[i];
+      await client.query(
+        `INSERT INTO vollmachten_vollmachtgeber (vollmacht_id, person_id, name, email, adresse, sort_order)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [vollmachtId, e.person_id || null, e.name, e.email, e.adresse || null, i],
       );
-      if (exists.rows.length > 0) continue;
-      const sql = h => `INSERT INTO vollmachten (
-           doc_hash,
-           vollmachtgeber_name, vollmachtgeber_email,
-           bevollmaechtigter_typ, bevollmaechtigter_name, bevollmaechtigter_email,
-           bevollmaechtigter_telefon, bevollmaechtigter_adresse,
-           art, geltungsbereich, wohnung_id, stweg,
-           gueltig_ab, status, created_by_user_email
-         ) VALUES ($1,$2,$3,'verwaltung',$4,$5,$6,$7,'generell',$8,$9,$10,CURRENT_DATE,'entwurf','system:auto-verwalter')`;
-      await vmInsertWithRetry(client, sql, [
-        eig.name, eig.email,
-        v.name, v.email,
-        v.telefon || null, v.adresse || null,
-        'Automatisch erzeugter Entwurf aus Objektverwaltung: Verwalter '
-          + v.name + ' vertritt ' + eig.name + ' in allen Belangen der Wohnung. '
-          + 'Bitte vom Eigentuemer pruefen, anpassen und signieren (digital oder Papier).',
-        wohnungId, stweg,
-      ]);
-      console.log('[vollmacht-auto] Entwurf erstellt: Eigentuemer=' + eig.email + ' Verwalter=' + v.email + ' Wohnung=' + wohnungId);
     }
+    console.log('[vollmacht-auto] Entwurf #' + vollmachtId + ' erstellt: ' + eigRes.rows.length + ' Eigentuemer → Verwalter=' + v.email + ' Wohnung=' + wohnungId);
   }
 }
 
@@ -13496,43 +13511,68 @@ function buildVollmachtHtml(v) {
   const artLabel = { generell: 'Generelle Vertretungs-Vollmacht', spezifisch: 'Spezifische Vollmacht (Einzelgeschäft)', auskunft: 'Datenschutz- / Auskunfts-Vollmacht' }[v.art] || v.art;
   const typLabel = { eigentuemer: 'Miteigentümer/in', verwaltung: 'Verwaltung', mieter: 'Mieter/in der Liegenschaft', extern: 'Externe Person' }[v.bevollmaechtigter_typ] || v.bevollmaechtigter_typ;
   const fmtDate = d => d ? new Date(d).toLocaleDateString('de-CH', { year: 'numeric', month: 'long', day: 'numeric' }) : '—';
+  const fmtTime = d => d ? new Date(d).toLocaleTimeString('de-CH') : '';
   const gueltigBis = v.gueltig_bis ? fmtDate(v.gueltig_bis) : '<em>bis Widerruf</em>';
-  const sigBlock = v.signatur_typ === 'digital' && v.digital_signed_at
-    ? `<div class="sig-digital">
-         <div class="sig-badge">✓ Elektronisch signiert</div>
-         <p style="margin:8px 0 4px 0;font-size:9.5pt;color:#166534;">Einfache elektronische Signatur nach ZertES Art.2</p>
-         <table class="kv" style="margin-top:6px;">
-           <tr><td class="lbl">Signiert am</td><td>${fmtDate(v.digital_signed_at)} · ${new Date(v.digital_signed_at).toLocaleTimeString('de-CH')}</td></tr>
-           <tr><td class="lbl">Identität</td><td>${vmEscapeHtml(v.vollmachtgeber_email || '')} <span style="color:#6b7280;">(Authentik-Login)</span></td></tr>
-           <tr><td class="lbl">IP-Adresse</td><td>${vmEscapeHtml(v.digital_signed_ip || '—')}</td></tr>
-           <tr><td class="lbl">Dokument-ID</td><td>#${v.id}</td></tr>
-         </table>
-       </div>`
-    : `<div class="sig-paper">
-         <p style="font-size:10pt;color:#92400e;margin:0 0 24px 0;"><strong>Hinweis:</strong> Dieses Dokument ist noch nicht signiert. Bitte ausdrucken, unterschreiben und der/dem Bevollmächtigten aushändigen.</p>
-         <table style="width:100%;border-collapse:collapse;margin-top:48px;">
-           <tr>
-             <td style="width:50%;vertical-align:bottom;padding-right:30px;">
-               <div style="border-top:1px solid #1f2937;padding-top:6px;font-size:9.5pt;color:#6b7280;">Ort, Datum</div>
-             </td>
-             <td style="width:50%;vertical-align:bottom;">
-               <div style="border-top:1px solid #1f2937;padding-top:6px;font-size:9.5pt;color:#6b7280;">Unterschrift Vollmachtgeber/in</div>
-             </td>
-           </tr>
-         </table>
-       </div>`;
-  return `<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>Vollmacht #${v.id}</title>
+  // Vollmachtgeber-Liste (kann mehrere bei Miteigentum sein)
+  const vgList = Array.isArray(v.vollmachtgeber_liste) && v.vollmachtgeber_liste.length > 0
+    ? v.vollmachtgeber_liste
+    : [{ name: v.vollmachtgeber_name, email: v.vollmachtgeber_email, adresse: v.vollmachtgeber_adresse, signatur_typ: v.signatur_typ, signed_at: v.digital_signed_at, signed_ip: v.digital_signed_ip }];
+  // Pro Vollmachtgeber ein Signatur-Block (digital = audit-info, sonst Unterschriftsfeld)
+  const sigBlocks = vgList.map(g => {
+    if (g.signatur_typ === 'digital' && g.signed_at) {
+      return `<div class="sig-digital">
+        <div class="sig-badge">✓ Elektronisch signiert — ${vmEscapeHtml(g.name)}</div>
+        <p style="margin:6px 0 4px 0;font-size:9pt;color:#166534;">Einfache elektronische Signatur nach ZertES Art.2</p>
+        <table class="kv" style="margin-top:4px;">
+          <tr><td class="lbl">Signiert am</td><td>${fmtDate(g.signed_at)} · ${fmtTime(g.signed_at)}</td></tr>
+          <tr><td class="lbl">Identität</td><td>${vmEscapeHtml(g.email || '')}</td></tr>
+          <tr><td class="lbl">IP-Adresse</td><td>${vmEscapeHtml(g.signed_ip || '—')}</td></tr>
+        </table>
+      </div>`;
+    }
+    return `<div class="sig-paper">
+      <div style="font-weight:600;color:#1f2937;margin-bottom:4px;">${vmEscapeHtml(g.name)}</div>
+      ${g.email ? `<div style="font-size:9pt;color:#6b7280;margin-bottom:24px;">${vmEscapeHtml(g.email)}</div>` : '<div style="height:24px;"></div>'}
+      <table style="width:100%;border-collapse:collapse;">
+        <tr>
+          <td style="width:50%;vertical-align:bottom;padding-right:18px;">
+            <div style="border-top:1px solid #1f2937;padding-top:5px;font-size:8.5pt;color:#6b7280;">Ort, Datum</div>
+          </td>
+          <td style="width:50%;vertical-align:bottom;">
+            <div style="border-top:1px solid #1f2937;padding-top:5px;font-size:8.5pt;color:#6b7280;">Unterschrift</div>
+          </td>
+        </tr>
+      </table>
+    </div>`;
+  }).join('');
+  const sigSection = vgList.length === 1
+    ? sigBlocks
+    : `<div style="margin-top:8px;padding:10px 14px;background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;font-size:9.5pt;color:#92400e;">
+         <strong>Wichtig:</strong> Bei Miteigentum müssen <strong>alle ${vgList.length} Vollmachtgeber</strong> einzeln unterzeichnen. Erst dann wird die Vollmacht wirksam.
+       </div>` + sigBlocks;
+  // Vollmachtgeber-Cards (Anzeige)
+  const vgCards = vgList.map((g, i) => `
+    <div class="card" style="${i > 0 ? 'margin-top:6px;' : ''}">
+      <table class="kv">
+        <tr><td class="lbl">Name</td><td><strong>${vmEscapeHtml(g.name)}</strong>${vgList.length > 1 ? ` <span style="color:#6b7280;font-weight:400;">(Miteigentümer/in ${i + 1} von ${vgList.length})</span>` : ''}</td></tr>
+        ${g.adresse ? `<tr><td class="lbl">Adresse</td><td>${vmEscapeHtml(g.adresse).replace(/\n/g,'<br>')}</td></tr>` : ''}
+        ${g.email ? `<tr><td class="lbl">E-Mail</td><td>${vmEscapeHtml(g.email)}</td></tr>` : ''}
+      </table>
+    </div>`).join('');
+  return `<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>Vollmacht ${v.doc_hash || v.id}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  @page { size: A4; margin: 0; }
+  /* A4 mit sicheren Druckraendern: 15mm rundum (Standard auch fuer
+     Tintenstrahler ohne randlos-Druck). Header-bar ist KEIN full-bleed
+     mehr, sondern als Karte innerhalb des Satzspiegels. */
+  @page { size: A4; margin: 15mm; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; color: #1f2937; font-size: 10.5pt; line-height: 1.55; }
-  .page { padding: 0 18mm 18mm 18mm; }
   .header-bar {
     background: linear-gradient(90deg, #2563eb 0%, #1e40af 100%);
-    color: #fff; padding: 22px 18mm; display: flex; align-items: center; gap: 18px;
-    margin-bottom: 22px;
+    color: #fff; padding: 18px 22px; display: flex; align-items: center; gap: 18px;
+    margin-bottom: 18px; border-radius: 8px;
   }
   .header-bar img { width: 56px; height: 56px; background: #fff; padding: 4px; border-radius: 50%; object-fit: cover; }
   .header-bar .title { flex: 1; }
@@ -13618,7 +13658,7 @@ function buildVollmachtHtml(v) {
     </div>
   </div>
 
-  <div class="page">
+  <div>
     <div class="doc-meta">
       <span class="badge">${artLabel}</span>
       <span>Erstellt: ${fmtDate(v.created_at)}</span>
@@ -13627,14 +13667,8 @@ function buildVollmachtHtml(v) {
       ${v.status === 'widerrufen' ? '<span style="color:#991b1b;font-weight:500;">✕ Widerrufen</span>' : ''}
     </div>
 
-    <h2><span class="icon">👤</span>Vollmachtgeber/in</h2>
-    <div class="card">
-      <table class="kv">
-        <tr><td class="lbl">Name</td><td><strong>${vmEscapeHtml(v.vollmachtgeber_name)}</strong></td></tr>
-        ${v.vollmachtgeber_adresse ? `<tr><td class="lbl">Adresse</td><td>${vmEscapeHtml(v.vollmachtgeber_adresse).replace(/\n/g,'<br>')}</td></tr>` : ''}
-        ${v.vollmachtgeber_email ? `<tr><td class="lbl">E-Mail</td><td>${vmEscapeHtml(v.vollmachtgeber_email)}</td></tr>` : ''}
-      </table>
-    </div>
+    <h2><span class="icon">👤</span>Vollmachtgeber/in${vgList.length > 1 ? ` <span style="font-weight:400;font-size:9.5pt;color:#6b7280;">(${vgList.length} Miteigentümer)</span>` : ''}</h2>
+    ${vgCards}
 
     <h2><span class="icon">🤝</span>Bevollmächtigte/r <span style="font-weight:400;font-size:9.5pt;color:#6b7280;">(${typLabel})</span></h2>
     <div class="card">
@@ -13707,12 +13741,15 @@ function buildVollmachtHtml(v) {
     </div>
 
     <div class="declaration">
-      Hiermit erteile ich, <strong>${vmEscapeHtml(v.vollmachtgeber_name)}</strong>,
+      ${vgList.length > 1
+        ? 'Hiermit erteilen wir, die oben genannten Miteigentümer/innen, gemeinsam'
+        : `Hiermit erteile ich, <strong>${vmEscapeHtml(vgList[0].name)}</strong>,`}
       der/dem oben genannten Bevollmächtigten die hier beschriebene Vollmacht im angegebenen Umfang.
       Die Vollmacht ist jederzeit schriftlich widerrufbar.
     </div>
 
-    ${sigBlock}
+    <h2 style="margin-top:18px;"><span class="icon">✍</span>Unterschrift${vgList.length > 1 ? 'en' : ''}</h2>
+    ${sigSection}
 
     <div class="footer">
       <span>STWEG-Kooperation Rosenweg · www.rosenweg4303.ch</span>
@@ -13775,6 +13812,40 @@ app.get('/api/vollmachten/lookup/my-wohnungen', authMiddleware, async (req, res)
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Kontakte (Verwalter / Mieter / Miteigentuemer) aus den Wohnungen des aktuellen
+// Users — fuer Quick-Pick im Vollmachten-Modal. So muss der Eigentuemer nicht
+// die Daten nochmal eintippen die schon in der Objektverwaltung stehen.
+app.get('/api/vollmachten/lookup/my-kontakte', authMiddleware, async (req, res) => {
+  try {
+    const email = req.user.email || '';
+    const role = String(req.query.rolle || '').trim(); // 'verwalter' | 'mieter' | 'eigentuemer' | ''
+    const params = [email];
+    let roleClause = '';
+    if (['verwalter','mieter','eigentuemer'].includes(role)) {
+      params.push(role);
+      roleClause = `AND k.rolle = $${params.length}`;
+    }
+    const r = await pool.query(
+      `SELECT DISTINCT ON (LOWER(k.email))
+              k.rolle, k.name, k.email, k.telefon, k.adresse, k.person_id,
+              w.id AS wohnung_id, w.bezeichnung AS wohnung_bezeichnung, w.stweg
+         FROM wohnungen_kontakte k
+         JOIN wohnungen w ON w.id = k.wohnung_id
+        WHERE k.archiviert_am IS NULL
+          AND k.email IS NOT NULL AND k.email <> ''
+          AND k.wohnung_id IN (
+            SELECT DISTINCT k2.wohnung_id FROM wohnungen_kontakte k2
+              JOIN personen p ON p.id = k2.person_id
+             WHERE LOWER(p.email) = LOWER($1) AND k2.archiviert_am IS NULL
+          )
+          ${roleClause}
+        ORDER BY LOWER(k.email), k.rolle`,
+      params,
+    );
+    res.json({ kontakte: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Liste Vollmachten — Admin sieht alle, sonst nur eigene (vergeben + erhalten)
 app.get('/api/vollmachten', authMiddleware, async (req, res) => {
   try {
@@ -13797,7 +13868,11 @@ app.get('/api/vollmachten', authMiddleware, async (req, res) => {
                OR v.bevollmaechtigter_person_id = (SELECT id FROM personen WHERE LOWER(email) = LOWER($1) LIMIT 1)`;
     }
     const r = await pool.query(
-      `SELECT v.*, w.bezeichnung AS wohnung_bezeichnung, vw.firma_name AS verwaltung_firma
+      `SELECT v.*, w.bezeichnung AS wohnung_bezeichnung, vw.firma_name AS verwaltung_firma,
+              (SELECT COALESCE(json_agg(vg.* ORDER BY vg.sort_order, vg.id), '[]'::json)
+                 FROM vollmachten_vollmachtgeber vg WHERE vg.vollmacht_id = v.id) AS vollmachtgeber_liste,
+              (SELECT COUNT(*) FROM vollmachten_vollmachtgeber vg WHERE vg.vollmacht_id = v.id) AS vg_total,
+              (SELECT COUNT(*) FROM vollmachten_vollmachtgeber vg WHERE vg.vollmacht_id = v.id AND vg.signed_at IS NOT NULL) AS vg_signed
          FROM vollmachten v
          LEFT JOIN wohnungen w ON w.id = v.wohnung_id
          LEFT JOIN verwaltungen vw ON vw.id = v.bevollmaechtigter_verwaltung_id
@@ -13842,7 +13917,21 @@ app.post('/api/vollmachten', authMiddleware, async (req, res) => {
       b.gueltig_ab || new Date().toISOString().slice(0, 10), b.gueltig_bis || null,
       req.user.email || null,
     ]);
-    res.json(r.rows[0]);
+    const vollmacht = r.rows[0];
+    // Vollmachtgeber-Liste: aus body.vollmachtgeber wenn vorhanden, sonst
+    // implizit aus den vollmachtgeber_*-Feldern (Backward-Compat: Einzel-Eigentuemer)
+    const vgList = Array.isArray(b.vollmachtgeber) && b.vollmachtgeber.length > 0
+      ? b.vollmachtgeber
+      : [{ person_id: b.vollmachtgeber_person_id || null, name: b.vollmachtgeber_name, email: b.vollmachtgeber_email || null, adresse: b.vollmachtgeber_adresse || null }];
+    for (let i = 0; i < vgList.length; i++) {
+      const g = vgList[i];
+      await pool.query(
+        `INSERT INTO vollmachten_vollmachtgeber (vollmacht_id, person_id, name, email, adresse, sort_order)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [vollmacht.id, g.person_id || null, g.name, g.email || null, g.adresse || null, i],
+      );
+    }
+    res.json(vollmacht);
   } catch (err) { console.error('[vollmachten] create:', err); res.status(500).json({ error: err.message }); }
 });
 
@@ -13879,29 +13968,58 @@ app.put('/api/vollmachten/:id', authMiddleware, async (req, res) => {
   } catch (err) { console.error('[vollmachten] update:', err); res.status(500).json({ error: err.message }); }
 });
 
-// Digital signieren — setzt status='aktiv' + Audit-Daten. Nur Vollmachtgeber selbst.
+// Digital signieren — signiert die eigene Vollmachtgeber-Zeile (per Email-Match).
+// Status wird auf 'aktiv' gesetzt sobald ALLE Vollmachtgeber signiert haben.
+// Bei Miteigentum (z.B. Ehepaar) muss jeder einzeln einloggen und signieren.
 app.post('/api/vollmachten/:id/sign-digital', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const existing = await pool.query('SELECT * FROM vollmachten WHERE id = $1', [id]);
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = existing.rows[0];
+    if (v.status !== 'entwurf') return res.status(400).json({ error: 'Nur Entwuerfe koennen signiert werden (Status: ' + v.status + ')' });
     const userEmail = (req.user.email || '').toLowerCase();
-    if ((v.vollmachtgeber_email || '').toLowerCase() !== userEmail) {
-      return res.status(403).json({ error: 'Nur der Vollmachtgeber selbst kann digital signieren' });
+    // Eigene Vollmachtgeber-Zeile finden
+    const my = await pool.query(
+      'SELECT * FROM vollmachten_vollmachtgeber WHERE vollmacht_id = $1 AND LOWER(email) = $2',
+      [id, userEmail],
+    );
+    if (my.rows.length === 0) {
+      return res.status(403).json({ error: 'Du bist nicht als Vollmachtgeber dieser Vollmacht eingetragen' });
     }
-    if (v.status !== 'entwurf') return res.status(400).json({ error: 'Nur Entwuerfe koennen signiert werden' });
+    if (my.rows[0].signed_at) {
+      return res.status(400).json({ error: 'Du hast bereits signiert' });
+    }
     const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || req.socket.remoteAddress;
     const ua = req.headers['user-agent'] || null;
     const sub = req.user.sub || req.user.id || null;
-    const r = await pool.query(
-      `UPDATE vollmachten SET status='aktiv', signatur_typ='digital',
-         digital_signed_at=NOW(), digital_signed_ip=$1, digital_signed_user_agent=$2,
-         digital_signed_authentik_sub=$3, updated_at=NOW()
-        WHERE id=$4 RETURNING *`,
-      [ip, ua, sub ? String(sub) : null, id],
+    await pool.query(
+      `UPDATE vollmachten_vollmachtgeber
+         SET signatur_typ='digital', signed_at=NOW(), signed_ip=$1, signed_user_agent=$2, signed_authentik_sub=$3
+        WHERE id=$4`,
+      [ip, ua, sub ? String(sub) : null, my.rows[0].id],
     );
-    res.json(r.rows[0]);
+    // Pruefen ob ALLE signiert haben → Status aktiv
+    const counts = await pool.query(
+      `SELECT COUNT(*) AS total, COUNT(signed_at) AS signed
+         FROM vollmachten_vollmachtgeber WHERE vollmacht_id = $1`,
+      [id],
+    );
+    const allSigned = counts.rows[0].total > 0 && counts.rows[0].total === counts.rows[0].signed;
+    if (allSigned) {
+      await pool.query(
+        `UPDATE vollmachten SET status='aktiv', signatur_typ='digital',
+           digital_signed_at=NOW(), updated_at=NOW() WHERE id=$1`,
+        [id],
+      );
+    }
+    const updated = await pool.query('SELECT * FROM vollmachten WHERE id = $1', [id]);
+    res.json({
+      ...updated.rows[0],
+      signed_by_me: true,
+      all_signed: allSigned,
+      signatures_remaining: Number(counts.rows[0].total) - Number(counts.rows[0].signed),
+    });
   } catch (err) { console.error('[vollmachten] sign:', err); res.status(500).json({ error: err.message }); }
 });
 
@@ -13963,7 +14081,9 @@ app.get('/api/vollmachten/:id/pdf', authMiddleware, async (req, res) => {
               w.stockwerk AS wohnung_stockwerk,
               w.zimmer AS wohnung_zimmer,
               w.flaeche_m2 AS wohnung_flaeche,
-              w.typ AS wohnung_typ
+              w.typ AS wohnung_typ,
+              (SELECT COALESCE(json_agg(vg.* ORDER BY vg.sort_order, vg.id), '[]'::json)
+                 FROM vollmachten_vollmachtgeber vg WHERE vg.vollmacht_id = v.id) AS vollmachtgeber_liste
          FROM vollmachten v
          LEFT JOIN wohnungen w ON w.id = v.wohnung_id
         WHERE v.id = $1`,
@@ -14932,6 +15052,41 @@ async function initDB() {
       -- Hash fuer Bestands-Vollmachten nachgenerieren
       UPDATE vollmachten SET doc_hash = SUBSTRING(MD5(id::TEXT || created_at::TEXT) FROM 1 FOR 8)
         WHERE doc_hash IS NULL;
+
+      -- CH-Recht: bei Miteigentum (Ehepaar, Erbengemeinschaft, etc.) muessen
+      -- ALLE Vollmachtgeber unterschreiben damit die Vollmacht gueltig ist.
+      -- Separate Tabelle pro Vollmachtgeber mit eigener Signatur. Die alte
+      -- vollmachtgeber_*-Spalten im Haupt-Record bleiben als 'Primaer-Vollmachtgeber'
+      -- (Snapshot, fuer Anzeige in Listen + Backward-Compatibility).
+      CREATE TABLE IF NOT EXISTS vollmachten_vollmachtgeber (
+        id SERIAL PRIMARY KEY,
+        vollmacht_id INTEGER NOT NULL REFERENCES vollmachten(id) ON DELETE CASCADE,
+        person_id INTEGER REFERENCES personen(id) ON DELETE SET NULL,
+        name TEXT NOT NULL,
+        email TEXT,
+        adresse TEXT,
+        sort_order INTEGER DEFAULT 0,
+        -- Individuelle Signatur pro Vollmachtgeber
+        signatur_typ VARCHAR(20),                  -- 'digital' | 'papier' | NULL (offen)
+        signed_at TIMESTAMPTZ,
+        signed_ip TEXT,
+        signed_user_agent TEXT,
+        signed_authentik_sub TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        CONSTRAINT vmvg_sig_chk CHECK (signatur_typ IS NULL OR signatur_typ IN ('digital','papier'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_vmvg_vollmacht ON vollmachten_vollmachtgeber(vollmacht_id);
+      CREATE INDEX IF NOT EXISTS idx_vmvg_email ON vollmachten_vollmachtgeber(LOWER(email));
+
+      -- Migration: Bestands-Vollmachten bekommen den Primaer-Vollmachtgeber
+      -- als ersten Eintrag in der Liste, falls noch keiner existiert.
+      INSERT INTO vollmachten_vollmachtgeber (vollmacht_id, person_id, name, email, adresse, sort_order, signatur_typ, signed_at, signed_ip, signed_user_agent, signed_authentik_sub)
+      SELECT v.id, v.vollmachtgeber_person_id, v.vollmachtgeber_name, v.vollmachtgeber_email, v.vollmachtgeber_adresse,
+             0, v.signatur_typ,
+             CASE WHEN v.signatur_typ = 'digital' THEN v.digital_signed_at ELSE NULL END,
+             v.digital_signed_ip, v.digital_signed_user_agent, v.digital_signed_authentik_sub
+        FROM vollmachten v
+       WHERE NOT EXISTS (SELECT 1 FROM vollmachten_vollmachtgeber vg WHERE vg.vollmacht_id = v.id);
       DO $$ BEGIN
         IF EXISTS (SELECT 1 FROM pg_proc WHERE proname='audit_trigger_fn')
            AND NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_name='vollmachten_audit') THEN
