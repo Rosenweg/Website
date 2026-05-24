@@ -270,7 +270,7 @@
             <div class="flex flex-wrap items-center gap-2 mb-1">
               ${statusBadge(v.status)}
               <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">${artLabel(v.art)}</span>
-              <span class="text-xs text-gray-400">#${v.id}</span>
+              <span class="text-xs text-gray-500 font-mono">${esc(v.doc_hash || '#' + v.id)}</span>
             </div>
             <p class="text-sm">
               <strong>${esc(v.vollmachtgeber_name)}</strong>

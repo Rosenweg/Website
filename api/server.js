@@ -4312,24 +4312,23 @@ async function autoCreateVollmachtForVerwalter(client, wohnungId, stweg, kontakt
         [eig.email, v.email],
       );
       if (exists.rows.length > 0) continue;
-      await client.query(
-        `INSERT INTO vollmachten (
+      const sql = h => `INSERT INTO vollmachten (
+           doc_hash,
            vollmachtgeber_name, vollmachtgeber_email,
            bevollmaechtigter_typ, bevollmaechtigter_name, bevollmaechtigter_email,
            bevollmaechtigter_telefon, bevollmaechtigter_adresse,
            art, geltungsbereich, wohnung_id, stweg,
            gueltig_ab, status, created_by_user_email
-         ) VALUES ($1,$2,'verwaltung',$3,$4,$5,$6,'generell',$7,$8,$9,CURRENT_DATE,'entwurf','system:auto-verwalter')`,
-        [
-          eig.name, eig.email,
-          v.name, v.email,
-          v.telefon || null, v.adresse || null,
-          'Automatisch erzeugter Entwurf aus Objektverwaltung: Verwalter '
-            + v.name + ' vertritt ' + eig.name + ' in allen Belangen der Wohnung. '
-            + 'Bitte vom Eigentuemer pruefen, anpassen und signieren (digital oder Papier).',
-          wohnungId, stweg,
-        ],
-      );
+         ) VALUES ($1,$2,$3,'verwaltung',$4,$5,$6,$7,'generell',$8,$9,$10,CURRENT_DATE,'entwurf','system:auto-verwalter')`;
+      await vmInsertWithRetry(client, sql, [
+        eig.name, eig.email,
+        v.name, v.email,
+        v.telefon || null, v.adresse || null,
+        'Automatisch erzeugter Entwurf aus Objektverwaltung: Verwalter '
+          + v.name + ' vertritt ' + eig.name + ' in allen Belangen der Wohnung. '
+          + 'Bitte vom Eigentuemer pruefen, anpassen und signieren (digital oder Papier).',
+        wohnungId, stweg,
+      ]);
       console.log('[vollmacht-auto] Entwurf erstellt: Eigentuemer=' + eig.email + ' Verwalter=' + v.email + ' Wohnung=' + wohnungId);
     }
   }
@@ -13467,6 +13466,32 @@ function vmEscapeHtml(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// Lesefreundliches Doc-Token: 8 Zeichen, kryptografisch sicher gezogen,
+// nur Buchstaben/Ziffern ohne verwechselbare 0/O/1/I/L. 31^8 = ~852G
+// Kombinationen — Kollision praktisch ausgeschlossen, UNIQUE-Constraint
+// faengt theoretischen Restfall auf (siehe Retry-Loop bei INSERT).
+function vmGenerateDocHash() {
+  const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const bytes = crypto.randomBytes(8);
+  let s = '';
+  for (let i = 0; i < 8; i++) s += alphabet[bytes[i] % alphabet.length];
+  return s;
+}
+
+async function vmInsertWithRetry(client, sqlBuilder, params) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const hash = vmGenerateDocHash();
+      const r = await (client || pool).query(sqlBuilder(hash), [hash, ...params]);
+      return r;
+    } catch (e) {
+      if (e.code === '23505' && e.constraint && e.constraint.includes('doc_hash')) continue;
+      throw e;
+    }
+  }
+  throw new Error('Konnte keinen eindeutigen Doc-Hash erzeugen (5 Versuche)');
+}
+
 function buildVollmachtHtml(v) {
   const artLabel = { generell: 'Generelle Vertretungs-Vollmacht', spezifisch: 'Spezifische Vollmacht (Einzelgeschäft)', auskunft: 'Datenschutz- / Auskunfts-Vollmacht' }[v.art] || v.art;
   const typLabel = { eigentuemer: 'Miteigentümer/in', verwaltung: 'Verwaltung', mieter: 'Mieter/in der Liegenschaft', extern: 'Externe Person' }[v.bevollmaechtigter_typ] || v.bevollmaechtigter_typ;
@@ -13552,6 +13577,23 @@ function buildVollmachtHtml(v) {
     margin-top: 28px; padding-top: 10px; border-top: 1px solid #e5e7eb;
     color: #9ca3af; font-size: 8.5pt; display: flex; justify-content: space-between;
   }
+  .validity {
+    display: flex; align-items: stretch; gap: 12px; margin: 8px 0;
+  }
+  .validity-block {
+    flex: 1; padding: 14px 18px; border: 1px solid #bfdbfe;
+    border-radius: 8px; background: #eff6ff;
+  }
+  .validity-label {
+    color: #1e40af; font-size: 8.5pt; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5pt; margin-bottom: 4px;
+  }
+  .validity-value {
+    font-size: 13pt; font-weight: 600; color: #1f2937;
+  }
+  .validity-arrow {
+    display: flex; align-items: center; color: #1e40af; font-size: 20pt; font-weight: 300;
+  }
 </style></head>
 <body>
   <div class="header-bar">
@@ -13561,7 +13603,7 @@ function buildVollmachtHtml(v) {
       <div class="sub">STWEG-Kooperation Rosenweg · Rosenweg 1–18, 4303 Kaiseraugst</div>
     </div>
     <div class="doc-id">
-      Dokument-Nr.<br><strong>#${v.id}</strong>
+      Dokument-Nr.<br><strong style="font-family:'JetBrains Mono','Courier New',monospace;letter-spacing:0.5pt;">${vmEscapeHtml(v.doc_hash || ('#' + v.id))}</strong>
     </div>
   </div>
 
@@ -13605,11 +13647,16 @@ function buildVollmachtHtml(v) {
     </div>
 
     <h2><span class="icon">📅</span>Gültigkeit</h2>
-    <div class="card">
-      <table class="kv">
-        <tr><td class="lbl">Gültig ab</td><td>${fmtDate(v.gueltig_ab)}</td></tr>
-        <tr><td class="lbl">Gültig bis</td><td>${gueltigBis}</td></tr>
-      </table>
+    <div class="validity">
+      <div class="validity-block">
+        <div class="validity-label">Gültig ab</div>
+        <div class="validity-value">${fmtDate(v.gueltig_ab)}</div>
+      </div>
+      <div class="validity-arrow">→</div>
+      <div class="validity-block">
+        <div class="validity-label">Gültig bis</div>
+        <div class="validity-value">${v.gueltig_bis ? fmtDate(v.gueltig_bis) : 'bis auf Widerruf'}</div>
+      </div>
     </div>
 
     <div class="declaration">
@@ -13731,24 +13778,23 @@ app.post('/api/vollmachten', authMiddleware, async (req, res) => {
     }
     // Standard-Berechtigung: jeder eingeloggte User darf Vollmachten erfassen
     // (in der Regel fuer sich selbst als Vollmachtgeber)
-    const r = await pool.query(
-      `INSERT INTO vollmachten (
+    const sql = h => `INSERT INTO vollmachten (
+         doc_hash,
          vollmachtgeber_person_id, vollmachtgeber_name, vollmachtgeber_email, vollmachtgeber_adresse,
          bevollmaechtigter_typ, bevollmaechtigter_person_id, bevollmaechtigter_verwaltung_id,
          bevollmaechtigter_name, bevollmaechtigter_email, bevollmaechtigter_adresse, bevollmaechtigter_telefon,
          art, geltungsbereich, wohnung_id, stweg, gueltig_ab, gueltig_bis,
          status, created_by_user_email
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'entwurf',$18)
-       RETURNING *`,
-      [
-        b.vollmachtgeber_person_id || null, b.vollmachtgeber_name, b.vollmachtgeber_email || null, b.vollmachtgeber_adresse || null,
-        b.bevollmaechtigter_typ, b.bevollmaechtigter_person_id || null, b.bevollmaechtigter_verwaltung_id || null,
-        b.bevollmaechtigter_name, b.bevollmaechtigter_email || null, b.bevollmaechtigter_adresse || null, b.bevollmaechtigter_telefon || null,
-        b.art, b.geltungsbereich || null, b.wohnung_id || null, b.stweg || null,
-        b.gueltig_ab || new Date().toISOString().slice(0, 10), b.gueltig_bis || null,
-        req.user.email || null,
-      ],
-    );
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'entwurf',$19)
+       RETURNING *`;
+    const r = await vmInsertWithRetry(null, sql, [
+      b.vollmachtgeber_person_id || null, b.vollmachtgeber_name, b.vollmachtgeber_email || null, b.vollmachtgeber_adresse || null,
+      b.bevollmaechtigter_typ, b.bevollmaechtigter_person_id || null, b.bevollmaechtigter_verwaltung_id || null,
+      b.bevollmaechtigter_name, b.bevollmaechtigter_email || null, b.bevollmaechtigter_adresse || null, b.bevollmaechtigter_telefon || null,
+      b.art, b.geltungsbereich || null, b.wohnung_id || null, b.stweg || null,
+      b.gueltig_ab || new Date().toISOString().slice(0, 10), b.gueltig_bis || null,
+      req.user.email || null,
+    ]);
     res.json(r.rows[0]);
   } catch (err) { console.error('[vollmachten] create:', err); res.status(500).json({ error: err.message }); }
 });
@@ -14821,6 +14867,14 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_vm_nehmer ON vollmachten(bevollmaechtigter_person_id, status);
       CREATE INDEX IF NOT EXISTS idx_vm_status ON vollmachten(status, gueltig_bis);
       CREATE INDEX IF NOT EXISTS idx_vm_wohnung ON vollmachten(wohnung_id) WHERE wohnung_id IS NOT NULL;
+      -- Oeffentliches, zufaelliges Dokumentenkennzeichen (8 Zeichen base32-aehnlich)
+      -- statt aufsteigender ID, damit Vollmachts-Nummer keine Mengenrueckschluesse
+      -- erlaubt und bei Drucken nicht verwechselbar ist.
+      ALTER TABLE vollmachten ADD COLUMN IF NOT EXISTS doc_hash VARCHAR(16) UNIQUE;
+      CREATE INDEX IF NOT EXISTS idx_vm_doc_hash ON vollmachten(doc_hash);
+      -- Hash fuer Bestands-Vollmachten nachgenerieren
+      UPDATE vollmachten SET doc_hash = SUBSTRING(MD5(id::TEXT || created_at::TEXT) FROM 1 FOR 8)
+        WHERE doc_hash IS NULL;
       DO $$ BEGIN
         IF EXISTS (SELECT 1 FROM pg_proc WHERE proname='audit_trigger_fn')
            AND NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_name='vollmachten_audit') THEN
