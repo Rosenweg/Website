@@ -51,20 +51,14 @@
         <input type="hidden" id="m-id">
 
         <fieldset class="border rounded-lg p-3">
-          <legend class="text-xs font-semibold text-gray-700 px-2">Vollmachtgeber (Sie selbst, falls Sie der Eigentuemer sind)</legend>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
-            <div>
-              <label class="block text-xs font-medium text-gray-600 mb-1">Name *</label>
-              <input type="text" id="m-vg-name" required class="w-full border rounded px-3 py-1.5">
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-gray-600 mb-1">E-Mail</label>
-              <input type="email" id="m-vg-email" class="w-full border rounded px-3 py-1.5">
-            </div>
+          <legend class="text-xs font-semibold text-gray-700 px-2">Vollmachtgeber <span class="text-amber-700">(bei Miteigentum: ALLE Eigentuemer eintragen — jeder muss einzeln signieren)</span></legend>
+          <div id="m-vg-list" class="space-y-2 mt-2"></div>
+          <div class="flex flex-col sm:flex-row gap-2 mt-3">
+            <button type="button" onclick="addVgManual()" class="text-xs bg-gray-100 text-gray-700 rounded px-3 py-1.5 hover:bg-gray-200">+ Person manuell hinzufuegen</button>
+            <button type="button" onclick="toggleVgQuickPick()" class="text-xs bg-blue-100 text-blue-700 rounded px-3 py-1.5 hover:bg-blue-200">📋 Aus Objektverwaltung uebernehmen</button>
           </div>
-          <div class="mt-2">
-            <label class="block text-xs font-medium text-gray-600 mb-1">Adresse</label>
-            <textarea id="m-vg-adresse" rows="2" class="w-full border rounded px-3 py-1.5" placeholder="Strasse Hausnummer&#10;PLZ Ort"></textarea>
+          <div id="m-vg-quick-row" class="hidden mt-2 bg-blue-50 border border-blue-200 rounded p-2 max-h-48 overflow-y-auto">
+            <div id="m-vg-quick-list" class="space-y-1 text-xs"></div>
           </div>
         </fieldset>
 
@@ -304,15 +298,91 @@
     }).join('');
   }
 
+  // === Vollmachtgeber-Liste (Multi-Eigentuemer) ===
+  let vgList = []; // [{name, email, adresse, person_id}]
+
+  function renderVgList() {
+    const wrap = document.getElementById('m-vg-list');
+    if (vgList.length === 0) {
+      wrap.innerHTML = '<div class="text-gray-400 italic text-xs p-2 border border-dashed rounded">Noch kein Vollmachtgeber — Buttons unten verwenden.</div>';
+      return;
+    }
+    wrap.innerHTML = vgList.map((vg, i) => `
+      <div class="border rounded p-2 bg-gray-50">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-xs text-gray-500 font-medium">Vollmachtgeber/in ${i + 1}${vgList.length > 1 ? ' von ' + vgList.length : ''}</span>
+          <button type="button" onclick="removeVg(${i})" class="text-xs text-red-600 hover:underline">Entfernen</button>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <input type="text" placeholder="Name *" value="${esc(vg.name || '')}" oninput="vgList[${i}].name=this.value" class="border rounded px-2 py-1 text-sm" required>
+          <input type="email" placeholder="E-Mail" value="${esc(vg.email || '')}" oninput="vgList[${i}].email=this.value" class="border rounded px-2 py-1 text-sm">
+        </div>
+        <input type="text" placeholder="Adresse (optional)" value="${esc(vg.adresse || '')}" oninput="vgList[${i}].adresse=this.value" class="w-full border rounded px-2 py-1 text-sm mt-1">
+      </div>
+    `).join('');
+  }
+
+  function addVgManual() {
+    vgList.push({ name: '', email: '', adresse: '', person_id: null });
+    renderVgList();
+  }
+
+  function removeVg(i) {
+    vgList.splice(i, 1);
+    renderVgList();
+  }
+
+  async function toggleVgQuickPick() {
+    const row = document.getElementById('m-vg-quick-row');
+    if (!row.classList.contains('hidden')) { row.classList.add('hidden'); return; }
+    row.classList.remove('hidden');
+    const wrap = document.getElementById('m-vg-quick-list');
+    wrap.innerHTML = '<div class="text-gray-400 italic p-1">Lade…</div>';
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/vollmachten/lookup/my-kontakte');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const { kontakte } = await r.json();
+      if (!kontakte || kontakte.length === 0) {
+        wrap.innerHTML = '<div class="text-gray-400 italic p-1">Keine Kontakte in deinen Wohnungen.</div>';
+        return;
+      }
+      const roleLabels = { eigentuemer: 'Miteigentuemer', mieter: 'Mieter', verwalter: 'Verwalter', bewohner: 'Bewohner' };
+      const roleColors = { eigentuemer: 'bg-blue-100 text-blue-800', mieter: 'bg-amber-100 text-amber-800', verwalter: 'bg-purple-100 text-purple-800', bewohner: 'bg-green-100 text-green-800' };
+      wrap.innerHTML = kontakte.map(k => {
+        const alreadyAdded = vgList.some(v => (v.email || '').toLowerCase() === (k.email || '').toLowerCase());
+        return `<button type="button" ${alreadyAdded ? 'disabled' : ''} onclick='addVgFromKontakt(${JSON.stringify(k).replace(/'/g, "&apos;")})' class="block w-full text-left p-2 bg-white border border-blue-100 rounded ${alreadyAdded ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-100'} transition">
+          <div class="flex items-center justify-between gap-2">
+            <div class="font-medium">${esc(k.name)}${alreadyAdded ? ' <span class="text-xs text-gray-400">(bereits hinzugefuegt)</span>' : ''}</div>
+            <span class="text-xs px-2 py-0.5 rounded ${roleColors[k.rolle] || 'bg-gray-100 text-gray-700'} flex-shrink-0">${roleLabels[k.rolle] || k.rolle}</span>
+          </div>
+          <div class="text-gray-500 text-xs">${esc(k.email || '')}</div>
+          <div class="text-gray-400 text-xs">aus ${esc(k.wohnung_bezeichnung || 'Wohnung #' + k.wohnung_id)} (STWEG ${k.stweg})</div>
+        </button>`;
+      }).join('');
+    } catch (e) { wrap.innerHTML = '<div class="text-red-500 p-1">Fehler: ' + esc(e.message) + '</div>'; }
+  }
+
+  function addVgFromKontakt(k) {
+    if (vgList.some(v => (v.email || '').toLowerCase() === (k.email || '').toLowerCase())) return;
+    vgList.push({ name: k.name || '', email: k.email || '', adresse: k.adresse || '', person_id: k.person_id || null });
+    // Wohnung vorbelegen wenn noch nicht gesetzt
+    if (k.wohnung_id && !document.getElementById('m-wohnung').value) {
+      document.getElementById('m-wohnung').value = k.wohnung_id;
+      document.getElementById('m-stweg').value = k.stweg || '';
+    }
+    renderVgList();
+    toggleVgQuickPick();
+  }
+
   // === Modal ===
   async function openCreateModal() {
     document.getElementById('modal-title').textContent = 'Neue Vollmacht';
     document.getElementById('m-id').value = '';
-    // Defaults aus aktuellem User
+    // Defaults aus aktuellem User: erster VG = ich selbst
     const user = AuthentikAuth.getUser();
-    document.getElementById('m-vg-name').value = user?.name || '';
-    document.getElementById('m-vg-email').value = user?.email || '';
-    document.getElementById('m-vg-adresse').value = '';
+    vgList = [{ name: user?.name || '', email: user?.email || '', adresse: '', person_id: null }];
+    renderVgList();
+    document.getElementById('m-vg-quick-row').classList.add('hidden');
     document.getElementById('m-bv-typ').value = '';
     document.getElementById('m-bv-actual-typ').value = '';
     document.getElementById('m-bv-name').value = '';
@@ -458,10 +528,24 @@
   }
 
   async function saveDraft() {
+    // Saubere VG-Liste: keine leeren Eintraege, Pflicht: Name
+    const cleanVg = vgList.map(v => ({
+      name: (v.name || '').trim(),
+      email: (v.email || '').trim() || null,
+      adresse: (v.adresse || '').trim() || null,
+      person_id: v.person_id || null,
+    })).filter(v => v.name);
+    if (cleanVg.length === 0) {
+      alert('Mindestens ein Vollmachtgeber mit Name muss eingetragen werden.');
+      return;
+    }
     const body = {
-      vollmachtgeber_name: document.getElementById('m-vg-name').value.trim(),
-      vollmachtgeber_email: document.getElementById('m-vg-email').value.trim() || null,
-      vollmachtgeber_adresse: document.getElementById('m-vg-adresse').value.trim() || null,
+      // Primaer-Vollmachtgeber (erster aus Liste) — fuer Backward-Compat
+      vollmachtgeber_person_id: cleanVg[0].person_id,
+      vollmachtgeber_name: cleanVg[0].name,
+      vollmachtgeber_email: cleanVg[0].email,
+      vollmachtgeber_adresse: cleanVg[0].adresse,
+      vollmachtgeber: cleanVg, // ganze Liste fuer vollmachten_vollmachtgeber-Tabelle
       bevollmaechtigter_typ: document.getElementById('m-bv-actual-typ').value || document.getElementById('m-bv-typ').value,
       bevollmaechtigter_verwaltung_id: parseInt(document.getElementById('m-bv-verwaltung').value, 10) || null,
       bevollmaechtigter_name: document.getElementById('m-bv-name').value.trim(),
@@ -475,8 +559,8 @@
       gueltig_ab: document.getElementById('m-ab').value || null,
       gueltig_bis: document.getElementById('m-bis').value || null,
     };
-    if (!body.vollmachtgeber_name || !body.bevollmaechtigter_name || !body.bevollmaechtigter_typ || !body.art) {
-      alert('Bitte Pflichtfelder (Vollmachtgeber-Name, Bevollmaechtigter-Name + Typ, Art) ausfuellen.');
+    if (!body.bevollmaechtigter_name || !body.bevollmaechtigter_typ || !body.art) {
+      alert('Bitte Pflichtfelder (Bevollmaechtigter-Name + Typ, Art) ausfuellen.');
       return;
     }
     const id = document.getElementById('m-id').value;
@@ -498,9 +582,12 @@
     if (!v) return;
     document.getElementById('modal-title').textContent = 'Vollmacht bearbeiten';
     document.getElementById('m-id').value = v.id;
-    document.getElementById('m-vg-name').value = v.vollmachtgeber_name || '';
-    document.getElementById('m-vg-email').value = v.vollmachtgeber_email || '';
-    document.getElementById('m-vg-adresse').value = v.vollmachtgeber_adresse || '';
+    // VG-Liste: bevorzugt vollmachtgeber_liste, fallback auf Primaer-Felder
+    vgList = Array.isArray(v.vollmachtgeber_liste) && v.vollmachtgeber_liste.length > 0
+      ? v.vollmachtgeber_liste.map(g => ({ name: g.name || '', email: g.email || '', adresse: g.adresse || '', person_id: g.person_id || null }))
+      : [{ name: v.vollmachtgeber_name || '', email: v.vollmachtgeber_email || '', adresse: v.vollmachtgeber_adresse || '', person_id: v.vollmachtgeber_person_id || null }];
+    renderVgList();
+    document.getElementById('m-vg-quick-row').classList.add('hidden');
     // UI-Typ vom DB-Typ ableiten (eigentuemer/mieter → person)
     const uiTyp = v.bevollmaechtigter_typ === 'verwaltung' ? 'verwaltung'
                 : v.bevollmaechtigter_typ === 'extern' ? 'extern'

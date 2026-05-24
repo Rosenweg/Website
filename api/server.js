@@ -13974,13 +13974,27 @@ app.put('/api/vollmachten/:id', authMiddleware, async (req, res) => {
     for (const k of allowed) {
       if (b[k] !== undefined) push(k, b[k] === '' ? null : b[k]);
     }
-    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
-    push('updated_at', new Date());
-    params.push(id);
-    const r = await pool.query(
-      `UPDATE vollmachten SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params,
-    );
-    res.json(r.rows[0]);
+    if (updates.length === 0 && !Array.isArray(b.vollmachtgeber)) return res.status(400).json({ error: 'Keine Aenderungen' });
+    if (updates.length > 0) {
+      push('updated_at', new Date());
+      params.push(id);
+      await pool.query(`UPDATE vollmachten SET ${updates.join(', ')} WHERE id = $${params.length}`, params);
+    }
+    // Vollmachtgeber-Array komplett ersetzen wenn mitgegeben
+    if (Array.isArray(b.vollmachtgeber)) {
+      await pool.query('DELETE FROM vollmachten_vollmachtgeber WHERE vollmacht_id = $1', [id]);
+      for (let i = 0; i < b.vollmachtgeber.length; i++) {
+        const g = b.vollmachtgeber[i];
+        if (!g.name) continue;
+        await pool.query(
+          `INSERT INTO vollmachten_vollmachtgeber (vollmacht_id, person_id, name, email, adresse, sort_order)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [id, g.person_id || null, g.name, g.email || null, g.adresse || null, i],
+        );
+      }
+    }
+    const final = await pool.query('SELECT * FROM vollmachten WHERE id = $1', [id]);
+    res.json(final.rows[0]);
   } catch (err) { console.error('[vollmachten] update:', err); res.status(500).json({ error: err.message }); }
 });
 
