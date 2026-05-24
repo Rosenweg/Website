@@ -31,6 +31,7 @@ const app = express();
 app.use('/api/email/inbound', express.raw({ type: '*/*', limit: '25mb' }));
 app.use('/api/documents', express.raw({ type: 'application/octet-stream', limit: '500mb' }));
 app.use('/api/scan-upload', express.raw({ type: 'application/octet-stream', limit: '500mb' }));
+app.use('/api/vollmachten/:id/upload-signed', express.raw({ type: 'application/pdf', limit: '20mb' }));
 // PBX-Voicemail-Upload: Asterisk-AGI laedt das WAV als Raw-Body hoch
 app.use('/api/pbx/voicemail', express.raw({ type: 'audio/wav', limit: '50mb' }));
 app.use(express.json({ limit: '10mb' }));
@@ -14062,6 +14063,134 @@ app.post('/api/vollmachten/:id/activate-paper', authMiddleware, async (req, res)
     );
     res.json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Signierte PDF hochladen — speichert nach /documents/Vollmachten/<doc_hash>.pdf,
+// setzt papier_pdf_path und Status auf 'aktiv'. Akzeptiert nur application/pdf
+// als Body (express.raw oben). Optional anschliessend KI-Check (siehe verify-ai).
+app.post('/api/vollmachten/:id/upload-signed', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const r = await pool.query('SELECT * FROM vollmachten WHERE id = $1', [id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = r.rows[0];
+    const groups = req.user.groups || [];
+    const isAdmin = isTechnik(groups) || isPraesident(groups);
+    const userEmail = (req.user.email || '').toLowerCase();
+    const isGeber = (v.vollmachtgeber_email || '').toLowerCase() === userEmail;
+    if (!isAdmin && !isGeber) return res.status(403).json({ error: 'Nur Vollmachtgeber oder Admin' });
+    if (!Buffer.isBuffer(req.body) || req.body.length < 100) {
+      return res.status(400).json({ error: 'Keine PDF-Datei im Body (Content-Type: application/pdf)' });
+    }
+    if (!req.body.slice(0, 5).toString().startsWith('%PDF-')) {
+      return res.status(400).json({ error: 'Datei ist kein PDF (Magic-Bytes fehlen)' });
+    }
+    // Pfad: /documents/Vollmachten/<doc_hash>-signed.pdf
+    const dir = pathModule.join(DOCS_PATH, 'Vollmachten');
+    await fs.mkdir(dir, { recursive: true });
+    const fileName = (v.doc_hash || ('id-' + v.id)) + '-signed.pdf';
+    const fullPath = pathModule.join(dir, fileName);
+    await fs.writeFile(fullPath, req.body);
+    const relPath = 'Vollmachten/' + fileName;
+    // Status auf aktiv falls noch entwurf
+    const newStatus = v.status === 'entwurf' ? 'aktiv' : v.status;
+    await pool.query(
+      `UPDATE vollmachten SET papier_pdf_path = $1, signatur_typ = 'papier',
+         status = $2, updated_at = NOW() WHERE id = $3`,
+      [relPath, newStatus, id],
+    );
+    // Alle Vollmachtgeber-Zeilen als papier-signiert markieren
+    await pool.query(
+      `UPDATE vollmachten_vollmachtgeber SET signatur_typ='papier', signed_at=NOW()
+        WHERE vollmacht_id=$1 AND signed_at IS NULL`,
+      [id],
+    );
+    res.json({ ok: true, papier_pdf_path: relPath, status: newStatus, size_bytes: req.body.length });
+  } catch (err) { console.error('[vollmachten] upload:', err); res.status(500).json({ error: err.message }); }
+});
+
+// KI-Check der signierten PDF: pruefe ob der Doc-Hash gefunden wird,
+// ob die Vollmachtgeber-Namen vorkommen, ob Unterschriften-Indikatoren da
+// sind. Reine Text-Analyse (PDF → Text via Gotenberg).
+app.post('/api/vollmachten/:id/verify-ai', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const r = await pool.query(
+      `SELECT v.*, (SELECT json_agg(vg.* ORDER BY vg.sort_order) FROM vollmachten_vollmachtgeber vg WHERE vg.vollmacht_id = v.id) AS vollmachtgeber_liste
+         FROM vollmachten v WHERE v.id = $1`,
+      [id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = r.rows[0];
+    if (!v.papier_pdf_path) return res.status(400).json({ error: 'Keine signierte PDF hochgeladen' });
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'OPENROUTER_API_KEY nicht konfiguriert' });
+
+    // PDF laden + an Gotenberg fuer PDF→PNG-Konversion senden (Vision-Check)
+    const fullPath = pathModule.join(DOCS_PATH, v.papier_pdf_path);
+    const pdfBuf = await fs.readFile(fullPath);
+
+    // Gotenberg: /forms/libreoffice/convert kann Office-Dateien zu PDF, fuer
+    // PDF→PNG nutzen wir /forms/pdfengines/convert mit Format-Header. Falls
+    // nicht verfuegbar: fallback auf PDF-Text-Extraktion.
+    // Erstmal direkter Versuch: PDF als data-URL an Claude (unterstuetzt direkt
+    // application/pdf via 'document'-content-type bei OpenRouter Claude-Modellen).
+    const pdfBase64 = pdfBuf.toString('base64');
+    const expectedNames = (v.vollmachtgeber_liste || []).map(g => g.name);
+    const expectedHash = v.doc_hash || ('#' + v.id);
+
+    const systemPrompt = `Du pruefst eine unterschriebene Vollmacht-PDF. Antworte in JSON.
+
+Erwartete Daten:
+- Dokument-Nr (Hash): ${expectedHash}
+- Vollmachtgeber: ${expectedNames.join(', ')}
+
+Pruefe und liefere JSON mit folgenden Feldern:
+{
+  "hash_gefunden": boolean,         // Dokument-Hash kommt im PDF vor
+  "alle_namen_gefunden": boolean,   // alle erwarteten Vollmachtgeber-Namen finden sich
+  "fehlende_namen": [string],       // Namen aus Erwartung die NICHT im PDF zu finden sind
+  "unterschriften_indikatoren": number, // Anzahl Signaturfelder/Hinweise auf Unterschriften
+  "auffaelligkeiten": [string],     // freie Hinweise: gestrichene Stellen, abweichender Text, etc.
+  "gesamtbewertung": "ok" | "warnung" | "problem",
+  "kommentar": string               // 1-2 Saetze Zusammenfassung
+}`;
+
+    const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://www.rosenweg4303.ch',
+        'X-Title': 'Rosenweg Vollmacht-Verify',
+      },
+      signal: AbortSignal.timeout(60_000),
+      body: JSON.stringify({
+        model: 'anthropic/claude-sonnet-4-6',
+        max_tokens: 1024,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: [
+            { type: 'text', text: 'Pruefe diese unterschriebene Vollmacht.' },
+            { type: 'file', file: { filename: 'vollmacht.pdf', file_data: 'data:application/pdf;base64,' + pdfBase64 } },
+          ]},
+        ],
+      }),
+    });
+    if (!orRes.ok) {
+      const errText = await orRes.text().catch(() => '');
+      return res.status(502).json({ error: 'KI-Service-Fehler ' + orRes.status, detail: errText.slice(0, 300) });
+    }
+    const orJson = await orRes.json();
+    const content = orJson.choices?.[0]?.message?.content || '';
+    let parsed;
+    try {
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      parsed = JSON.parse(jsonMatch ? jsonMatch[0] : content);
+    } catch (e) {
+      parsed = { raw: content, parse_error: e.message };
+    }
+    res.json(parsed);
+  } catch (err) { console.error('[vollmachten] verify-ai:', err); res.status(500).json({ error: err.message }); }
 });
 
 // Widerrufen
