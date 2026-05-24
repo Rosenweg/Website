@@ -13594,6 +13594,17 @@ function buildVollmachtHtml(v) {
   .validity-arrow {
     display: flex; align-items: center; color: #1e40af; font-size: 20pt; font-weight: 300;
   }
+  .objekt-card {
+    display: flex; gap: 14px; align-items: flex-start;
+    padding: 14px 18px; margin: 8px 0;
+    border: 2px solid #1e40af; background: #eff6ff; border-radius: 8px;
+  }
+  .objekt-card.objekt-warn { border-color: #f59e0b; background: #fffbeb; }
+  .objekt-icon { font-size: 22pt; line-height: 1; flex-shrink: 0; padding-top: 2px; }
+  .objekt-info { flex: 1; }
+  .objekt-titel { font-size: 12pt; font-weight: 600; color: #1f2937; }
+  .objekt-adresse { font-size: 10pt; color: #4b5563; margin-top: 3px; }
+  .objekt-details { font-size: 9.5pt; color: #6b7280; margin-top: 4px; }
 </style></head>
 <body>
   <div class="header-bar">
@@ -13635,11 +13646,47 @@ function buildVollmachtHtml(v) {
       </table>
     </div>
 
+    <h2><span class="icon">🏠</span>Vertretene Objekte</h2>
+    ${(() => {
+        if (v.wohnung_id && v.wohnung_bezeichnung) {
+          const stwegHaeuser = { 1: 'Rosenweg 17/18', 2: 'Rosenweg 13/14/16', 3: 'Rosenweg 9', 4: 'Rosenweg 10/12', 5: 'Rosenweg 5/6/8', 6: 'Rosenweg 1', 7: 'Rosenweg 2/4', 8: 'Tiefgarage' };
+          const haus = stwegHaeuser[v.stweg] || '';
+          const details = [];
+          if (v.wohnung_stockwerk) details.push(v.wohnung_stockwerk);
+          if (v.wohnung_zimmer) details.push(v.wohnung_zimmer + ' Zimmer');
+          if (v.wohnung_flaeche) details.push(v.wohnung_flaeche + ' m²');
+          return `<div class="objekt-card">
+            <div class="objekt-icon">🏠</div>
+            <div class="objekt-info">
+              <div class="objekt-titel">${vmEscapeHtml(v.wohnung_typ || 'Wohnung')} — ${vmEscapeHtml(v.wohnung_bezeichnung)}</div>
+              <div class="objekt-adresse">${vmEscapeHtml(haus)}${v.stweg ? ` &middot; STWEG ${v.stweg}` : ''}, 4303 Kaiseraugst</div>
+              ${details.length ? `<div class="objekt-details">${vmEscapeHtml(details.join(' &middot; '))}</div>` : ''}
+            </div>
+          </div>`;
+        }
+        if (v.stweg) {
+          const stwegHaeuser = { 1: 'Rosenweg 17/18', 2: 'Rosenweg 13/14/16', 3: 'Rosenweg 9', 4: 'Rosenweg 10/12', 5: 'Rosenweg 5/6/8', 6: 'Rosenweg 1', 7: 'Rosenweg 2/4', 8: 'Tiefgarage' };
+          return `<div class="objekt-card">
+            <div class="objekt-icon">🏘</div>
+            <div class="objekt-info">
+              <div class="objekt-titel">Alle Wohnungen im Stockwerkeigentum des Vollmachtgebers</div>
+              <div class="objekt-adresse">STWEG ${v.stweg} &middot; ${vmEscapeHtml(stwegHaeuser[v.stweg] || '')}, 4303 Kaiseraugst</div>
+            </div>
+          </div>`;
+        }
+        return `<div class="objekt-card objekt-warn">
+            <div class="objekt-icon">⚠</div>
+            <div class="objekt-info">
+              <div class="objekt-titel">Keine Objekt-Einschränkung</div>
+              <div class="objekt-adresse">Diese Vollmacht ist nicht auf eine bestimmte Wohnung oder STWEG beschränkt — sie gilt allgemein im durch den Geltungsbereich beschriebenen Umfang.</div>
+            </div>
+          </div>`;
+      })()}
+
     <h2><span class="icon">📋</span>Umfang der Vollmacht</h2>
     <div class="card">
       <table class="kv">
         <tr><td class="lbl">Art</td><td>${artLabel}</td></tr>
-        ${v.wohnung_id ? `<tr><td class="lbl">Bezogen auf</td><td>Wohnung-ID ${v.wohnung_id}${v.stweg ? ` (STWEG ${v.stweg})` : ''}</td></tr>` : (v.stweg ? `<tr><td class="lbl">Bezogen auf</td><td>STWEG ${v.stweg}</td></tr>` : '')}
       </table>
       ${v.geltungsbereich
         ? `<div style="margin-top:10px;"><div style="color:#6b7280;font-size:9pt;font-weight:500;margin-bottom:4px;">Geltungsbereich / konkrete Befugnisse</div><div class="geltung">${vmEscapeHtml(v.geltungsbereich)}</div></div>`
@@ -13910,7 +13957,17 @@ app.post('/api/vollmachten/:id/revoke', authMiddleware, async (req, res) => {
 app.get('/api/vollmachten/:id/pdf', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const r = await pool.query('SELECT * FROM vollmachten WHERE id = $1', [id]);
+    const r = await pool.query(
+      `SELECT v.*,
+              w.bezeichnung AS wohnung_bezeichnung,
+              w.stockwerk AS wohnung_stockwerk,
+              w.zimmer AS wohnung_zimmer,
+              w.flaeche_m2 AS wohnung_flaeche,
+              w.typ AS wohnung_typ
+         FROM vollmachten v
+         LEFT JOIN wohnungen w ON w.id = v.wohnung_id
+        WHERE v.id = $1`,
+      [id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = r.rows[0];
     const groups = req.user.groups || [];
