@@ -13468,84 +13468,162 @@ function vmEscapeHtml(s) {
 }
 
 function buildVollmachtHtml(v) {
-  const artLabel = { generell: 'Generelle Vertretungs-Vollmacht', spezifisch: 'Spezifische Vollmacht (Einzel-Geschaeft)', auskunft: 'Datenschutz- / Auskunfts-Vollmacht' }[v.art] || v.art;
-  const typLabel = { eigentuemer: 'Miteigentuemer/in', verwaltung: 'Verwaltung', mieter: 'Mieter/in der Liegenschaft', extern: 'Externe Person' }[v.bevollmaechtigter_typ] || v.bevollmaechtigter_typ;
+  const artLabel = { generell: 'Generelle Vertretungs-Vollmacht', spezifisch: 'Spezifische Vollmacht (Einzelgeschäft)', auskunft: 'Datenschutz- / Auskunfts-Vollmacht' }[v.art] || v.art;
+  const typLabel = { eigentuemer: 'Miteigentümer/in', verwaltung: 'Verwaltung', mieter: 'Mieter/in der Liegenschaft', extern: 'Externe Person' }[v.bevollmaechtigter_typ] || v.bevollmaechtigter_typ;
   const fmtDate = d => d ? new Date(d).toLocaleDateString('de-CH', { year: 'numeric', month: 'long', day: 'numeric' }) : '—';
   const gueltigBis = v.gueltig_bis ? fmtDate(v.gueltig_bis) : '<em>bis Widerruf</em>';
   const sigBlock = v.signatur_typ === 'digital' && v.digital_signed_at
-    ? `<div style="margin-top:30px;padding:15px;border:2px solid #16a34a;background:#f0fdf4;border-radius:8px;">
-         <p style="font-weight:bold;color:#15803d;margin:0 0 8px 0;">✓ Elektronisch signiert (einfache elektronische Signatur nach ZertES Art.2)</p>
-         <p style="margin:2px 0;font-size:11pt;"><strong>Signiert am:</strong> ${fmtDate(v.digital_signed_at)} ${new Date(v.digital_signed_at).toLocaleTimeString('de-CH')}</p>
-         <p style="margin:2px 0;font-size:11pt;"><strong>Identitaet:</strong> ${vmEscapeHtml(v.vollmachtgeber_email || '')} (Authentik-Login)</p>
-         <p style="margin:2px 0;font-size:11pt;"><strong>IP-Adresse:</strong> ${vmEscapeHtml(v.digital_signed_ip || '—')}</p>
-         <p style="margin:2px 0;font-size:11pt;"><strong>Dokument-ID:</strong> #${v.id}</p>
+    ? `<div class="sig-digital">
+         <div class="sig-badge">✓ Elektronisch signiert</div>
+         <p style="margin:8px 0 4px 0;font-size:9.5pt;color:#166534;">Einfache elektronische Signatur nach ZertES Art.2</p>
+         <table class="kv" style="margin-top:6px;">
+           <tr><td class="lbl">Signiert am</td><td>${fmtDate(v.digital_signed_at)} · ${new Date(v.digital_signed_at).toLocaleTimeString('de-CH')}</td></tr>
+           <tr><td class="lbl">Identität</td><td>${vmEscapeHtml(v.vollmachtgeber_email || '')} <span style="color:#6b7280;">(Authentik-Login)</span></td></tr>
+           <tr><td class="lbl">IP-Adresse</td><td>${vmEscapeHtml(v.digital_signed_ip || '—')}</td></tr>
+           <tr><td class="lbl">Dokument-ID</td><td>#${v.id}</td></tr>
+         </table>
        </div>`
-    : `<div style="margin-top:60px;">
-         <p style="border-top:1px solid #000;padding-top:5px;width:300px;">Ort, Datum</p>
-         <div style="margin-top:60px;">
-           <p style="border-top:1px solid #000;padding-top:5px;width:300px;">Unterschrift Vollmachtgeber</p>
-         </div>
+    : `<div class="sig-paper">
+         <p style="font-size:10pt;color:#92400e;margin:0 0 24px 0;"><strong>Hinweis:</strong> Dieses Dokument ist noch nicht signiert. Bitte ausdrucken, unterschreiben und der/dem Bevollmächtigten aushändigen.</p>
+         <table style="width:100%;border-collapse:collapse;margin-top:48px;">
+           <tr>
+             <td style="width:50%;vertical-align:bottom;padding-right:30px;">
+               <div style="border-top:1px solid #1f2937;padding-top:6px;font-size:9.5pt;color:#6b7280;">Ort, Datum</div>
+             </td>
+             <td style="width:50%;vertical-align:bottom;">
+               <div style="border-top:1px solid #1f2937;padding-top:6px;font-size:9.5pt;color:#6b7280;">Unterschrift Vollmachtgeber/in</div>
+             </td>
+           </tr>
+         </table>
        </div>`;
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Vollmacht #${v.id}</title>
+  return `<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>Vollmacht #${v.id}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  body { font-family: Helvetica, Arial, sans-serif; padding: 40px; color: #1f2937; line-height: 1.55; font-size: 11pt; }
-  h1 { font-size: 22pt; margin: 0 0 4px 0; }
-  h2 { font-size: 13pt; margin: 24px 0 8px 0; color: #1e40af; border-bottom: 2px solid #e5e7eb; padding-bottom: 4px; }
-  .meta { color: #6b7280; font-size: 10pt; }
-  table.kv { width: 100%; border-collapse: collapse; margin: 8px 0; }
-  table.kv td { padding: 4px 8px; vertical-align: top; }
-  table.kv td.lbl { color: #6b7280; width: 35%; font-size: 10pt; }
-  .box { border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px 16px; margin: 8px 0; background: #f9fafb; }
-  .footer { margin-top: 40px; padding-top: 12px; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 9pt; }
+  @page { size: A4; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; color: #1f2937; font-size: 10.5pt; line-height: 1.55; }
+  .page { padding: 0 18mm 18mm 18mm; }
+  .header-bar {
+    background: linear-gradient(90deg, #2563eb 0%, #1e40af 100%);
+    color: #fff; padding: 22px 18mm; display: flex; align-items: center; gap: 18px;
+    margin-bottom: 22px;
+  }
+  .header-bar img { width: 56px; height: 56px; background: #fff; padding: 4px; border-radius: 50%; object-fit: cover; }
+  .header-bar .title { flex: 1; }
+  .header-bar h1 { font-size: 18pt; margin: 0; font-weight: 700; letter-spacing: -0.3pt; }
+  .header-bar .sub { font-size: 9.5pt; opacity: 0.85; margin-top: 2px; }
+  .header-bar .doc-id { font-size: 9pt; opacity: 0.7; text-align: right; }
+  .doc-meta { color: #6b7280; font-size: 9pt; margin-bottom: 22px; display: flex; gap: 16px; flex-wrap: wrap; }
+  .doc-meta .badge { background: #dbeafe; color: #1e40af; padding: 3px 10px; border-radius: 12px; font-weight: 500; font-size: 8.5pt; }
+  h2 {
+    font-size: 11.5pt; font-weight: 600; color: #1e40af;
+    margin: 22px 0 8px 0; padding-bottom: 4px;
+    border-bottom: 2px solid #dbeafe;
+    display: flex; align-items: center; gap: 6px;
+  }
+  h2 .icon { font-size: 13pt; }
+  .card {
+    border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 16px;
+    background: #f9fafb; margin: 8px 0;
+  }
+  table.kv { width: 100%; border-collapse: collapse; }
+  table.kv td { padding: 3px 0; vertical-align: top; font-size: 10pt; }
+  table.kv td.lbl { color: #6b7280; width: 30%; font-size: 9pt; font-weight: 500; }
+  .geltung { white-space: pre-wrap; background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px 14px; margin-top: 6px; font-size: 10pt; line-height: 1.6; }
+  .declaration {
+    margin: 24px 0; padding: 16px 18px;
+    border-left: 4px solid #1e40af; background: #eff6ff;
+    font-size: 10pt; line-height: 1.7;
+  }
+  .sig-digital {
+    margin-top: 22px; padding: 14px 16px;
+    border: 2px solid #16a34a; background: #f0fdf4; border-radius: 8px;
+  }
+  .sig-badge {
+    display: inline-block; background: #16a34a; color: #fff;
+    padding: 4px 10px; border-radius: 12px; font-size: 9pt; font-weight: 600;
+  }
+  .sig-paper {
+    margin-top: 28px; padding: 16px 18px;
+    border: 1px dashed #f59e0b; background: #fffbeb; border-radius: 8px;
+  }
+  .footer {
+    margin-top: 28px; padding-top: 10px; border-top: 1px solid #e5e7eb;
+    color: #9ca3af; font-size: 8.5pt; display: flex; justify-content: space-between;
+  }
 </style></head>
 <body>
-  <h1>Vollmachtserklaerung</h1>
-  <p class="meta">${artLabel} · Dokument-ID: ${v.id} · Erstellt: ${fmtDate(v.created_at)}</p>
-
-  <h2>Vollmachtgeber/in</h2>
-  <div class="box">
-    <table class="kv">
-      <tr><td class="lbl">Name</td><td><strong>${vmEscapeHtml(v.vollmachtgeber_name)}</strong></td></tr>
-      ${v.vollmachtgeber_adresse ? `<tr><td class="lbl">Adresse</td><td>${vmEscapeHtml(v.vollmachtgeber_adresse).replace(/\n/g,'<br>')}</td></tr>` : ''}
-      ${v.vollmachtgeber_email ? `<tr><td class="lbl">E-Mail</td><td>${vmEscapeHtml(v.vollmachtgeber_email)}</td></tr>` : ''}
-    </table>
+  <div class="header-bar">
+    <img src="https://www.rosenweg4303.ch/logo-rosenweg.png" alt="">
+    <div class="title">
+      <h1>Vollmachtserklärung</h1>
+      <div class="sub">STWEG-Kooperation Rosenweg · Rosenweg 1–18, 4303 Kaiseraugst</div>
+    </div>
+    <div class="doc-id">
+      Dokument-Nr.<br><strong>#${v.id}</strong>
+    </div>
   </div>
 
-  <h2>Bevollmaechtigte/r (${typLabel})</h2>
-  <div class="box">
-    <table class="kv">
-      <tr><td class="lbl">Name</td><td><strong>${vmEscapeHtml(v.bevollmaechtigter_name)}</strong></td></tr>
-      ${v.bevollmaechtigter_adresse ? `<tr><td class="lbl">Adresse</td><td>${vmEscapeHtml(v.bevollmaechtigter_adresse).replace(/\n/g,'<br>')}</td></tr>` : ''}
-      ${v.bevollmaechtigter_email ? `<tr><td class="lbl">E-Mail</td><td>${vmEscapeHtml(v.bevollmaechtigter_email)}</td></tr>` : ''}
-      ${v.bevollmaechtigter_telefon ? `<tr><td class="lbl">Telefon</td><td>${vmEscapeHtml(v.bevollmaechtigter_telefon)}</td></tr>` : ''}
-    </table>
-  </div>
+  <div class="page">
+    <div class="doc-meta">
+      <span class="badge">${artLabel}</span>
+      <span>Erstellt: ${fmtDate(v.created_at)}</span>
+      ${v.status === 'entwurf' ? '<span style="color:#92400e;font-weight:500;">⚠ Entwurf — noch nicht signiert</span>' : ''}
+      ${v.status === 'aktiv' ? '<span style="color:#15803d;font-weight:500;">✓ Aktiv</span>' : ''}
+      ${v.status === 'widerrufen' ? '<span style="color:#991b1b;font-weight:500;">✕ Widerrufen</span>' : ''}
+    </div>
 
-  <h2>Umfang der Vollmacht</h2>
-  <div class="box">
-    <p><strong>Art:</strong> ${artLabel}</p>
-    ${v.wohnung_id ? `<p><strong>Bezogen auf:</strong> Wohnung-ID ${v.wohnung_id}${v.stweg ? ` (STWEG ${v.stweg})` : ''}</p>` : (v.stweg ? `<p><strong>Bezogen auf:</strong> STWEG ${v.stweg}</p>` : '')}
-    ${v.geltungsbereich ? `<p><strong>Geltungsbereich / Inhalt:</strong></p><p style="white-space:pre-wrap;">${vmEscapeHtml(v.geltungsbereich)}</p>` : '<p><em>(kein spezifischer Geltungsbereich angegeben)</em></p>'}
-  </div>
+    <h2><span class="icon">👤</span>Vollmachtgeber/in</h2>
+    <div class="card">
+      <table class="kv">
+        <tr><td class="lbl">Name</td><td><strong>${vmEscapeHtml(v.vollmachtgeber_name)}</strong></td></tr>
+        ${v.vollmachtgeber_adresse ? `<tr><td class="lbl">Adresse</td><td>${vmEscapeHtml(v.vollmachtgeber_adresse).replace(/\n/g,'<br>')}</td></tr>` : ''}
+        ${v.vollmachtgeber_email ? `<tr><td class="lbl">E-Mail</td><td>${vmEscapeHtml(v.vollmachtgeber_email)}</td></tr>` : ''}
+      </table>
+    </div>
 
-  <h2>Gueltigkeit</h2>
-  <div class="box">
-    <table class="kv">
-      <tr><td class="lbl">Gueltig ab</td><td>${fmtDate(v.gueltig_ab)}</td></tr>
-      <tr><td class="lbl">Gueltig bis</td><td>${gueltigBis}</td></tr>
-    </table>
-  </div>
+    <h2><span class="icon">🤝</span>Bevollmächtigte/r <span style="font-weight:400;font-size:9.5pt;color:#6b7280;">(${typLabel})</span></h2>
+    <div class="card">
+      <table class="kv">
+        <tr><td class="lbl">Name</td><td><strong>${vmEscapeHtml(v.bevollmaechtigter_name)}</strong></td></tr>
+        ${v.bevollmaechtigter_adresse ? `<tr><td class="lbl">Adresse</td><td>${vmEscapeHtml(v.bevollmaechtigter_adresse).replace(/\n/g,'<br>')}</td></tr>` : ''}
+        ${v.bevollmaechtigter_email ? `<tr><td class="lbl">E-Mail</td><td>${vmEscapeHtml(v.bevollmaechtigter_email)}</td></tr>` : ''}
+        ${v.bevollmaechtigter_telefon ? `<tr><td class="lbl">Telefon</td><td>${vmEscapeHtml(v.bevollmaechtigter_telefon)}</td></tr>` : ''}
+      </table>
+    </div>
 
-  <p style="margin-top:30px;">
-    Hiermit erteile ich, <strong>${vmEscapeHtml(v.vollmachtgeber_name)}</strong>,
-    der/dem oben genannten Bevollmaechtigten die hier beschriebene Vollmacht in den angegebenen Grenzen.
-    Die Vollmacht ist jederzeit schriftlich widerrufbar.
-  </p>
+    <h2><span class="icon">📋</span>Umfang der Vollmacht</h2>
+    <div class="card">
+      <table class="kv">
+        <tr><td class="lbl">Art</td><td>${artLabel}</td></tr>
+        ${v.wohnung_id ? `<tr><td class="lbl">Bezogen auf</td><td>Wohnung-ID ${v.wohnung_id}${v.stweg ? ` (STWEG ${v.stweg})` : ''}</td></tr>` : (v.stweg ? `<tr><td class="lbl">Bezogen auf</td><td>STWEG ${v.stweg}</td></tr>` : '')}
+      </table>
+      ${v.geltungsbereich
+        ? `<div style="margin-top:10px;"><div style="color:#6b7280;font-size:9pt;font-weight:500;margin-bottom:4px;">Geltungsbereich / konkrete Befugnisse</div><div class="geltung">${vmEscapeHtml(v.geltungsbereich)}</div></div>`
+        : '<p style="color:#9ca3af;font-style:italic;margin:8px 0 0;">(kein spezifischer Geltungsbereich angegeben)</p>'}
+    </div>
 
-  ${sigBlock}
+    <h2><span class="icon">📅</span>Gültigkeit</h2>
+    <div class="card">
+      <table class="kv">
+        <tr><td class="lbl">Gültig ab</td><td>${fmtDate(v.gueltig_ab)}</td></tr>
+        <tr><td class="lbl">Gültig bis</td><td>${gueltigBis}</td></tr>
+      </table>
+    </div>
 
-  <div class="footer">
-    STWEG-Kooperation Rosenweg · Rosenweg 1-18, 4303 Kaiseraugst · Generiert ${new Date().toLocaleString('de-CH')}
+    <div class="declaration">
+      Hiermit erteile ich, <strong>${vmEscapeHtml(v.vollmachtgeber_name)}</strong>,
+      der/dem oben genannten Bevollmächtigten die hier beschriebene Vollmacht im angegebenen Umfang.
+      Die Vollmacht ist jederzeit schriftlich widerrufbar.
+    </div>
+
+    ${sigBlock}
+
+    <div class="footer">
+      <span>STWEG-Kooperation Rosenweg · www.rosenweg4303.ch</span>
+      <span>Generiert ${new Date().toLocaleString('de-CH')}</span>
+    </div>
   </div>
 </body></html>`;
 }
