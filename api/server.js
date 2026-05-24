@@ -13471,6 +13471,71 @@ app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamation
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ─── Vollmachten-Templates ──────────────────────────────────────────
+function canEditTemplates(groups) {
+  return isTechnik(groups) || isPraesident(groups) || isAusschussForAny(groups);
+}
+
+app.get('/api/vollmachten/templates', authMiddleware, async (req, res) => {
+  try {
+    const r = await pool.query(
+      'SELECT * FROM vollmachten_templates ORDER BY art, titel',
+    );
+    res.json({ templates: r.rows, can_edit: canEditTemplates(req.user.groups || []) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/vollmachten/templates', authMiddleware, async (req, res) => {
+  try {
+    if (!canEditTemplates(req.user.groups || [])) return res.status(403).json({ error: 'Nur Technik/Praesident/Ausschuss' });
+    const b = req.body || {};
+    if (!b.titel || !b.art || !b.geltungsbereich) return res.status(400).json({ error: 'titel, art, geltungsbereich Pflicht' });
+    if (!['generell','spezifisch','auskunft'].includes(b.art)) return res.status(400).json({ error: 'Ungueltige art' });
+    const r = await pool.query(
+      `INSERT INTO vollmachten_templates (titel, beschreibung, art, geltungsbereich, gueltigkeit_default, created_by_user_email)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [b.titel.slice(0, 200), b.beschreibung || null, b.art, b.geltungsbereich, b.gueltigkeit_default || null, req.user.email || null],
+    );
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/vollmachten/templates/:id', authMiddleware, async (req, res) => {
+  try {
+    if (!canEditTemplates(req.user.groups || [])) return res.status(403).json({ error: 'Nur Technik/Praesident/Ausschuss' });
+    const id = parseInt(req.params.id, 10);
+    const b = req.body || {};
+    const updates = []; const params = [];
+    const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
+    if (b.titel !== undefined) push('titel', String(b.titel).slice(0, 200));
+    if (b.beschreibung !== undefined) push('beschreibung', b.beschreibung || null);
+    if (b.art !== undefined) {
+      if (!['generell','spezifisch','auskunft'].includes(b.art)) return res.status(400).json({ error: 'Ungueltige art' });
+      push('art', b.art);
+    }
+    if (b.geltungsbereich !== undefined) push('geltungsbereich', b.geltungsbereich);
+    if (b.gueltigkeit_default !== undefined) push('gueltigkeit_default', b.gueltigkeit_default || null);
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    push('updated_at', new Date());
+    params.push(id);
+    const r = await pool.query(
+      `UPDATE vollmachten_templates SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`,
+      params,
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/vollmachten/templates/:id', authMiddleware, async (req, res) => {
+  try {
+    if (!canEditTemplates(req.user.groups || [])) return res.status(403).json({ error: 'Nur Technik/Praesident/Ausschuss' });
+    const id = parseInt(req.params.id, 10);
+    await pool.query('DELETE FROM vollmachten_templates WHERE id = $1', [id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ─── Vollmachten ────────────────────────────────────────────────────
 // Eigentuemer erteilt Vollmacht an Verwalter/Mieter/andere Person.
 // Berechtigung 'vollmachten-eigene' (jeder Eigentuemer) zum Erfassen
@@ -15250,6 +15315,23 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_vmvg_vollmacht ON vollmachten_vollmachtgeber(vollmacht_id);
       CREATE INDEX IF NOT EXISTS idx_vmvg_email ON vollmachten_vollmachtgeber(LOWER(email));
+
+      -- Vorlagen-Tabelle: vorgefertigte Geltungsbereich-Texte fuer haeufige
+      -- Faelle (z.B. 'generelle Verwalter-Vollmacht', 'Vermietungs-Vollmacht'),
+      -- damit nicht jeder Eigentuemer den gleichen Text neu formulieren muss.
+      -- Anlage durch technik/praesident/ausschuss, Lese-Zugriff fuer alle.
+      CREATE TABLE IF NOT EXISTS vollmachten_templates (
+        id SERIAL PRIMARY KEY,
+        titel VARCHAR(200) NOT NULL,
+        beschreibung TEXT,
+        art VARCHAR(20) NOT NULL,           -- 'generell' | 'spezifisch' | 'auskunft'
+        geltungsbereich TEXT NOT NULL,
+        gueltigkeit_default VARCHAR(20),    -- 'unbefristet' | '1jahr' | 'einmalig'
+        created_by_user_email TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        CONSTRAINT vmt_art_chk CHECK (art IN ('generell','spezifisch','auskunft'))
+      );
 
       -- Migration: Bestands-Vollmachten bekommen den Primaer-Vollmachtgeber
       -- als ersten Eintrag in der Liste, falls noch keiner existiert.

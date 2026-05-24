@@ -32,11 +32,24 @@
           <button data-tab="meine" class="tab-btn py-2 px-1 text-sm border-b-2 border-blue-600 text-blue-600 font-medium">Meine erteilten</button>
           <button data-tab="erhalten" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">Mich betreffend</button>
           <button data-tab="alle" id="tab-alle-btn" class="hidden tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">Alle (Admin)</button>
+          <button data-tab="vorlagen" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">📝 Vorlagen</button>
         </nav>
       </div>
 
       <div id="liste" class="space-y-2"></div>
       <div id="empty" class="hidden bg-white border rounded-lg p-8 text-center text-gray-400 italic">Keine Vollmachten in dieser Kategorie.</div>
+
+      <!-- Vorlagen-Tab Content -->
+      <div id="vorlagen-view" class="hidden">
+        <div id="vorlagen-admin-bar" class="hidden mb-3 flex justify-end">
+          <button onclick="openTemplateModal()" class="bg-purple-600 text-white px-3 py-1.5 rounded hover:bg-purple-700 text-sm">+ Neue Vorlage</button>
+        </div>
+        <div id="vorlagen-info" class="bg-blue-50 border border-blue-200 rounded p-3 text-sm text-blue-900 mb-3">
+          ℹ Vorlagen sind vorgefertigte Geltungsbereich-Texte fuer haeufige Vollmacht-Faelle. Bei der Erfassung einer neuen Vollmacht kann eine Vorlage uebernommen und angepasst werden.
+        </div>
+        <div id="vorlagen-liste" class="space-y-2"></div>
+        <div id="vorlagen-empty" class="hidden bg-white border rounded-lg p-8 text-center text-gray-400 italic">Noch keine Vorlagen erfasst.</div>
+      </div>
     </div>
   </main>
 
@@ -141,8 +154,13 @@
             </div>
           </div>
           <div class="mt-2">
-            <label class="block text-xs font-medium text-gray-600 mb-1">Geltungsbereich / konkrete Befugnisse</label>
-            <textarea id="m-geltung" rows="4" class="w-full border rounded px-3 py-1.5" placeholder="z.B.: Vertretung gegenueber der Verwaltung in allen Belangen meiner Eigentumswohnung; Empfang von Post; Beauftragung kleinerer Reparaturen bis CHF 500."></textarea>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-xs font-medium text-gray-600">Geltungsbereich / konkrete Befugnisse</label>
+              <select id="m-template-pick" onchange="applyTemplate()" class="text-xs border rounded px-2 py-0.5 bg-purple-50">
+                <option value="">📝 Vorlage uebernehmen…</option>
+              </select>
+            </div>
+            <textarea id="m-geltung" rows="6" class="w-full border rounded px-3 py-1.5" placeholder="z.B.: Vertretung gegenueber der Verwaltung in allen Belangen meiner Eigentumswohnung; Empfang von Post; Beauftragung kleinerer Reparaturen bis CHF 500."></textarea>
             <p class="text-xs text-gray-400 mt-1">Je praeziser, desto rechtssicherer. Bei "generell" reicht ein Satz, bei "spezifisch" sollte das konkrete Geschaeft genannt sein.</p>
           </div>
         </fieldset>
@@ -168,6 +186,45 @@
     </div>
   </div>
 
+  <!-- Vorlagen-Modal -->
+  <div id="template-modal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-start justify-center p-4 overflow-y-auto">
+    <div class="bg-white w-full max-w-xl rounded-xl shadow-xl my-8">
+      <div class="px-5 py-3 border-b flex items-center justify-between">
+        <h2 id="t-title" class="font-bold">Neue Vorlage</h2>
+        <button onclick="closeTemplateModal()" class="text-gray-500 hover:text-gray-700 text-2xl leading-none">×</button>
+      </div>
+      <div class="p-5 space-y-3 text-sm">
+        <input type="hidden" id="t-id">
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Titel *</label>
+          <input type="text" id="t-titel" required placeholder="z.B. Generelle Verwalter-Vollmacht" class="w-full border rounded px-3 py-1.5">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Beschreibung <span class="text-gray-400">(wofuer diese Vorlage gedacht ist)</span></label>
+          <textarea id="t-beschreibung" rows="2" class="w-full border rounded px-3 py-1.5" placeholder="z.B. Standard-Vollmacht fuer professionelle Liegenschaftsverwaltung; deckt Mietverhaeltnisse, Reparaturen bis CHF 1'000 ab."></textarea>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Art *</label>
+          <select id="t-art" required class="w-full border rounded px-3 py-1.5">
+            <option value="">— bitte waehlen —</option>
+            <option value="generell">Generell (laufende Verwaltung)</option>
+            <option value="spezifisch">Spezifisch (Einzelgeschaeft)</option>
+            <option value="auskunft">Auskunft (nur Einsicht)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Geltungsbereich-Text *</label>
+          <textarea id="t-geltung" rows="8" required class="w-full border rounded px-3 py-1.5 font-mono text-xs" placeholder="Der Bevollmaechtigte ist befugt: 1. ..."></textarea>
+          <p class="text-xs text-gray-500 mt-1">Wird beim Verwenden 1:1 in den Geltungsbereich-Felder uebernommen und kann dort angepasst werden.</p>
+        </div>
+      </div>
+      <div class="px-5 py-3 border-t flex flex-col sm:flex-row sm:justify-end gap-2">
+        <button onclick="closeTemplateModal()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded">Abbrechen</button>
+        <button onclick="saveTemplate()" class="px-4 py-2 bg-purple-600 text-white rounded">Speichern</button>
+      </div>
+    </div>
+  </div>
+
   <script>
   const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const fmtD = s => s ? new Date(s).toLocaleDateString('de-CH') : '—';
@@ -179,6 +236,8 @@
   let myEmail = '';
   let verwaltungenCache = [];
   let myWohnungen = [];
+  let templates = [];
+  let canEditTemplates = false;
 
   document.addEventListener('DOMContentLoaded', async () => {
     const u = await AuthentikAuth.init({ requireAuth: true });
@@ -218,7 +277,113 @@
       b.classList.toggle('border-transparent', !active);
       b.classList.toggle('text-gray-500', !active);
     });
-    renderList();
+    const isVorlagen = tab === 'vorlagen';
+    document.getElementById('vorlagen-view').classList.toggle('hidden', !isVorlagen);
+    document.getElementById('liste').classList.toggle('hidden', isVorlagen);
+    document.getElementById('empty').classList.toggle('hidden', isVorlagen);
+    if (isVorlagen) loadTemplates();
+    else renderList();
+  }
+
+  // === Vorlagen ===
+  async function loadTemplates() {
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/vollmachten/templates');
+      const d = await r.json();
+      templates = d.templates || [];
+      canEditTemplates = d.can_edit;
+      document.getElementById('vorlagen-admin-bar').classList.toggle('hidden', !canEditTemplates);
+      renderTemplates();
+    } catch (e) {
+      document.getElementById('vorlagen-liste').innerHTML = `<div class="bg-red-50 text-red-700 p-3 rounded">Fehler: ${esc(e.message)}</div>`;
+    }
+  }
+
+  function renderTemplates() {
+    const wrap = document.getElementById('vorlagen-liste');
+    const empty = document.getElementById('vorlagen-empty');
+    if (templates.length === 0) {
+      wrap.innerHTML = '';
+      empty.classList.remove('hidden');
+      return;
+    }
+    empty.classList.add('hidden');
+    const artColor = { generell: 'bg-blue-100 text-blue-800', spezifisch: 'bg-amber-100 text-amber-800', auskunft: 'bg-green-100 text-green-800' };
+    wrap.innerHTML = templates.map(t => `<div class="bg-white border rounded-lg p-4 hover:shadow-md transition">
+      <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-2">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="text-xs ${artColor[t.art] || 'bg-gray-100'} px-2 py-0.5 rounded">${esc(t.art)}</span>
+            <h3 class="font-semibold">${esc(t.titel)}</h3>
+          </div>
+          ${t.beschreibung ? `<p class="text-xs text-gray-600">${esc(t.beschreibung)}</p>` : ''}
+        </div>
+        <div class="flex flex-wrap gap-1 shrink-0">
+          ${canEditTemplates ? `<button onclick="editTemplate(${t.id})" class="text-xs bg-gray-100 rounded px-2 py-1 hover:bg-gray-200">Bearbeiten</button>` : ''}
+          ${canEditTemplates ? `<button onclick="deleteTemplate(${t.id})" class="text-xs text-red-600 hover:underline">Loeschen</button>` : ''}
+        </div>
+      </div>
+      <details class="text-xs"><summary class="cursor-pointer text-gray-500 hover:text-gray-700">Geltungsbereich-Text anzeigen</summary>
+        <pre class="bg-gray-50 border rounded p-2 mt-1 whitespace-pre-wrap font-mono text-xs">${esc(t.geltungsbereich)}</pre>
+      </details>
+    </div>`).join('');
+  }
+
+  function openTemplateModal() {
+    document.getElementById('t-title').textContent = 'Neue Vorlage';
+    document.getElementById('t-id').value = '';
+    document.getElementById('t-titel').value = '';
+    document.getElementById('t-beschreibung').value = '';
+    document.getElementById('t-art').value = '';
+    document.getElementById('t-geltung').value = '';
+    document.getElementById('template-modal').classList.remove('hidden');
+  }
+
+  function closeTemplateModal() { document.getElementById('template-modal').classList.add('hidden'); }
+
+  function editTemplate(id) {
+    const t = templates.find(x => x.id === id);
+    if (!t) return;
+    document.getElementById('t-title').textContent = 'Vorlage bearbeiten';
+    document.getElementById('t-id').value = t.id;
+    document.getElementById('t-titel').value = t.titel || '';
+    document.getElementById('t-beschreibung').value = t.beschreibung || '';
+    document.getElementById('t-art').value = t.art || '';
+    document.getElementById('t-geltung').value = t.geltungsbereich || '';
+    document.getElementById('template-modal').classList.remove('hidden');
+  }
+
+  async function saveTemplate() {
+    const body = {
+      titel: document.getElementById('t-titel').value.trim(),
+      beschreibung: document.getElementById('t-beschreibung').value.trim() || null,
+      art: document.getElementById('t-art').value,
+      geltungsbereich: document.getElementById('t-geltung').value.trim(),
+    };
+    if (!body.titel || !body.art || !body.geltungsbereich) {
+      alert('Titel, Art und Geltungsbereich sind Pflicht.');
+      return;
+    }
+    const id = document.getElementById('t-id').value;
+    try {
+      const r = await AuthentikAuth.apiFetch(id ? `/api/vollmachten/templates/${id}` : '/api/vollmachten/templates', {
+        method: id ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      closeTemplateModal();
+      await loadTemplates();
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+
+  async function deleteTemplate(id) {
+    if (!confirm('Vorlage loeschen?')) return;
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/vollmachten/templates/${id}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error(await r.text());
+      await loadTemplates();
+    } catch (e) { alert('Fehler: ' + e.message); }
   }
 
   function filterByTab(v) {
@@ -375,6 +540,24 @@
   }
 
   // === Modal ===
+  function applyTemplate() {
+    const sel = document.getElementById('m-template-pick');
+    const id = parseInt(sel.value, 10);
+    sel.value = '';
+    if (!id) return;
+    const t = templates.find(x => x.id === id);
+    if (!t) return;
+    if (document.getElementById('m-geltung').value.trim() && !confirm('Bestehender Geltungsbereich-Text wird ueberschrieben — wirklich Vorlage uebernehmen?')) return;
+    document.getElementById('m-geltung').value = t.geltungsbereich;
+    if (!document.getElementById('m-art').value) document.getElementById('m-art').value = t.art;
+  }
+
+  function populateTemplatePicker() {
+    const sel = document.getElementById('m-template-pick');
+    sel.innerHTML = '<option value="">📝 Vorlage uebernehmen…</option>' +
+      templates.map(t => `<option value="${t.id}">${esc(t.titel)} (${esc(t.art)})</option>`).join('');
+  }
+
   async function openCreateModal() {
     document.getElementById('modal-title').textContent = 'Neue Vollmacht';
     document.getElementById('m-id').value = '';
@@ -397,6 +580,16 @@
     document.getElementById('m-bis').value = '';
     onBvTypChange();
     await loadMyWohnungen();
+    // Templates fuer Picker laden falls noch nicht geschehen
+    if (templates.length === 0) {
+      try {
+        const r = await AuthentikAuth.apiFetch('/api/vollmachten/templates');
+        const d = await r.json();
+        templates = d.templates || [];
+        canEditTemplates = d.can_edit;
+      } catch {}
+    }
+    populateTemplatePicker();
     document.getElementById('modal').classList.remove('hidden');
   }
 
@@ -607,6 +800,7 @@
     document.getElementById('m-bis').value = v.gueltig_bis ? v.gueltig_bis.slice(0, 10) : '';
     onBvTypChange();
     await loadMyWohnungen();
+    populateTemplatePicker();
     document.getElementById('modal').classList.remove('hidden');
   }
 
