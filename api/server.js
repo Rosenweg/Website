@@ -13559,6 +13559,17 @@ function vmGenerateDocHash() {
   return s;
 }
 
+async function vmIsUserVollmachtgeber(vollmachtId, userEmail, primaryEmail) {
+  if (!userEmail) return false;
+  const lower = userEmail.toLowerCase();
+  if ((primaryEmail || '').toLowerCase() === lower) return true;
+  const r = await pool.query(
+    'SELECT 1 FROM vollmachten_vollmachtgeber WHERE vollmacht_id = $1 AND LOWER(email) = $2 LIMIT 1',
+    [vollmachtId, lower]
+  );
+  return r.rows.length > 0;
+}
+
 async function vmInsertWithRetry(client, sqlBuilder, params) {
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
@@ -13940,7 +13951,9 @@ app.get('/api/vollmachten', authMiddleware, async (req, res) => {
       params.push(email);
       const ownClause = `LOWER(v.vollmachtgeber_email) = LOWER($1) OR LOWER(v.bevollmaechtigter_email) = LOWER($1)
                OR v.vollmachtgeber_person_id = (SELECT id FROM personen WHERE LOWER(email) = LOWER($1) LIMIT 1)
-               OR v.bevollmaechtigter_person_id = (SELECT id FROM personen WHERE LOWER(email) = LOWER($1) LIMIT 1)`;
+               OR v.bevollmaechtigter_person_id = (SELECT id FROM personen WHERE LOWER(email) = LOWER($1) LIMIT 1)
+               OR EXISTS (SELECT 1 FROM vollmachten_vollmachtgeber vg
+                           WHERE vg.vollmacht_id = v.id AND LOWER(vg.email) = LOWER($1))`;
       if (isAusschuss) {
         params.push(ausschussStwegs);
         where = `(${ownClause}) OR v.stweg = ANY($${params.length}::int[])`;
@@ -14026,7 +14039,7 @@ app.put('/api/vollmachten/:id', authMiddleware, async (req, res) => {
     const v = existing.rows[0];
     const groups = req.user.groups || [];
     const isAdmin = isTechnik(groups) || isPraesident(groups);
-    const isOwner = (v.vollmachtgeber_email || '').toLowerCase() === (req.user.email || '').toLowerCase()
+    const isOwner = await vmIsUserVollmachtgeber(id, req.user.email, v.vollmachtgeber_email)
                  || (v.created_by_user_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
     if (!isAdmin && !isOwner) return res.status(403).json({ error: 'Nur Vollmachtgeber oder Admin' });
     if (v.status !== 'entwurf') return res.status(400).json({ error: 'Nur Entwuerfe sind editierbar (Status: ' + v.status + ')' });
@@ -14128,8 +14141,7 @@ app.post('/api/vollmachten/:id/activate-paper', authMiddleware, async (req, res)
     const v = existing.rows[0];
     const groups = req.user.groups || [];
     const isAdmin = isTechnik(groups) || isPraesident(groups) || groups.some(g => g.toLowerCase() === 'verwaltung');
-    const userEmail = (req.user.email || '').toLowerCase();
-    if (!isAdmin && (v.vollmachtgeber_email || '').toLowerCase() !== userEmail) {
+    if (!isAdmin && !(await vmIsUserVollmachtgeber(id, req.user.email, v.vollmachtgeber_email))) {
       return res.status(403).json({ error: 'Nur Vollmachtgeber oder Admin' });
     }
     if (v.status !== 'entwurf') return res.status(400).json({ error: 'Nur Entwuerfe koennen aktiviert werden' });
@@ -14153,8 +14165,7 @@ app.post('/api/vollmachten/:id/upload-signed', authMiddleware, async (req, res) 
     const v = r.rows[0];
     const groups = req.user.groups || [];
     const isAdmin = isTechnik(groups) || isPraesident(groups);
-    const userEmail = (req.user.email || '').toLowerCase();
-    const isGeber = (v.vollmachtgeber_email || '').toLowerCase() === userEmail;
+    const isGeber = await vmIsUserVollmachtgeber(id, req.user.email, v.vollmachtgeber_email);
     if (!isAdmin && !isGeber) return res.status(403).json({ error: 'Nur Vollmachtgeber oder Admin' });
     if (!Buffer.isBuffer(req.body) || req.body.length < 100) {
       return res.status(400).json({ error: 'Keine PDF-Datei im Body (Content-Type: application/pdf)' });
@@ -14280,8 +14291,7 @@ app.post('/api/vollmachten/:id/revoke', authMiddleware, async (req, res) => {
     const v = existing.rows[0];
     const groups = req.user.groups || [];
     const isAdmin = isTechnik(groups) || isPraesident(groups);
-    const userEmail = (req.user.email || '').toLowerCase();
-    const isGeber = (v.vollmachtgeber_email || '').toLowerCase() === userEmail;
+    const isGeber = await vmIsUserVollmachtgeber(id, req.user.email, v.vollmachtgeber_email);
     if (!isAdmin && !isGeber) return res.status(403).json({ error: 'Nur Vollmachtgeber oder Admin' });
     if (v.status === 'widerrufen') return res.status(400).json({ error: 'Bereits widerrufen' });
     const r = await pool.query(
@@ -14318,7 +14328,7 @@ app.get('/api/vollmachten/:id/pdf', authMiddleware, async (req, res) => {
     const ausschussStwegs = getAusschussStwegs(groups);
     const isAusschussForStweg = v.stweg && ausschussStwegs.has(v.stweg);
     const userEmail = (req.user.email || '').toLowerCase();
-    const involved = (v.vollmachtgeber_email || '').toLowerCase() === userEmail
+    const involved = await vmIsUserVollmachtgeber(id, req.user.email, v.vollmachtgeber_email)
                   || (v.bevollmaechtigter_email || '').toLowerCase() === userEmail;
     if (!isGlobalAdmin && !isAusschussForStweg && !involved) return res.status(403).json({ error: 'Kein Zugriff' });
     // Wenn signierte Papier-Version hochgeladen wurde und nicht explizit
@@ -14350,7 +14360,7 @@ app.delete('/api/vollmachten/:id', authMiddleware, async (req, res) => {
     const v = existing.rows[0];
     const groups = req.user.groups || [];
     const isAdmin = isTechnik(groups) || isPraesident(groups);
-    const isOwner = (v.vollmachtgeber_email || '').toLowerCase() === (req.user.email || '').toLowerCase()
+    const isOwner = await vmIsUserVollmachtgeber(id, req.user.email, v.vollmachtgeber_email)
                  || (v.created_by_user_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
     if (!isAdmin && !isOwner) return res.status(403).json({ error: 'Nur Vollmachtgeber oder Admin' });
     if (v.status !== 'entwurf' && !isAdmin) return res.status(400).json({ error: 'Nur Entwuerfe koennen geloescht werden (Admin darf alle)' });
