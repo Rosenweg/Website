@@ -13586,11 +13586,13 @@ function buildVollmachtHtml(v) {
     margin: 22px 0 8px 0; padding-bottom: 4px;
     border-bottom: 2px solid #dbeafe;
     display: flex; align-items: center; gap: 6px;
+    page-break-after: avoid; break-after: avoid;
   }
   h2 .icon { font-size: 13pt; }
   .card {
     border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 16px;
     background: #f9fafb; margin: 8px 0;
+    page-break-inside: avoid; break-inside: avoid;
   }
   table.kv { width: 100%; border-collapse: collapse; }
   table.kv td { padding: 3px 0; vertical-align: top; font-size: 10pt; }
@@ -13600,18 +13602,21 @@ function buildVollmachtHtml(v) {
     margin: 24px 0; padding: 16px 18px;
     border-left: 4px solid #1e40af; background: #eff6ff;
     font-size: 10pt; line-height: 1.7;
+    page-break-inside: avoid; break-inside: avoid;
   }
   .sig-digital {
-    margin-top: 22px; padding: 14px 16px;
+    margin-top: 14px; padding: 14px 16px;
     border: 2px solid #16a34a; background: #f0fdf4; border-radius: 8px;
+    page-break-inside: avoid; break-inside: avoid;
   }
   .sig-badge {
     display: inline-block; background: #16a34a; color: #fff;
     padding: 4px 10px; border-radius: 12px; font-size: 9pt; font-weight: 600;
   }
   .sig-paper {
-    margin-top: 28px; padding: 16px 18px;
+    margin-top: 14px; padding: 16px 18px;
     border: 1px dashed #f59e0b; background: #fffbeb; border-radius: 8px;
+    page-break-inside: avoid; break-inside: avoid;
   }
   .footer {
     margin-top: 28px; padding-top: 10px; border-top: 1px solid #e5e7eb;
@@ -13619,6 +13624,7 @@ function buildVollmachtHtml(v) {
   }
   .validity {
     display: flex; align-items: stretch; gap: 12px; margin: 8px 0;
+    page-break-inside: avoid; break-inside: avoid;
   }
   .validity-block {
     flex: 1; padding: 14px 18px; border: 1px solid #bfdbfe;
@@ -13638,6 +13644,7 @@ function buildVollmachtHtml(v) {
     display: flex; gap: 14px; align-items: flex-start;
     padding: 14px 18px; margin: 8px 0;
     border: 2px solid #1e40af; background: #eff6ff; border-radius: 8px;
+    page-break-inside: avoid; break-inside: avoid;
   }
   .objekt-card.objekt-warn { border-color: #f59e0b; background: #fffbeb; }
   .objekt-icon { font-size: 22pt; line-height: 1; flex-shrink: 0; padding-top: 2px; }
