@@ -4277,6 +4277,62 @@ async function saveKontakte(client, wohnungId, kontakte, stweg) {
   }
 
   if (stweg) trackRemovedKontakte(wohnungId, stweg, oldKontakte, incoming).catch(() => {});
+
+  // Auto-Vollmacht-Entwurf fuer Verwalter: bei jedem neuen oder
+  // aktualisierten Verwalter-Kontakt wird ein Entwurf erzeugt, falls
+  // noch keine aktive/Entwurfs-Vollmacht zwischen Eigentuemer und
+  // Verwalter existiert. CH-Recht: Vertretung braucht Schriftform,
+  // daher MUSS der Eigentuemer noch signieren bevor der Verwalter
+  // tatsaechlich vertreten darf.
+  autoCreateVollmachtForVerwalter(client, wohnungId, stweg, incoming).catch(err =>
+    console.warn('[vollmacht-auto] saveKontakte:', err.message),
+  );
+}
+
+async function autoCreateVollmachtForVerwalter(client, wohnungId, stweg, kontakte) {
+  const verwalter = kontakte.filter(k => k.rolle === 'verwalter' && k.email && k.name);
+  if (verwalter.length === 0) return;
+  // Alle Eigentuemer dieser Wohnung holen (aus DB, inkl. die nicht im incoming)
+  const eigRes = await client.query(
+    `SELECT name, email FROM wohnungen_kontakte
+      WHERE wohnung_id = $1 AND rolle = 'eigentuemer' AND archiviert_am IS NULL AND email IS NOT NULL`,
+    [wohnungId],
+  );
+  if (eigRes.rows.length === 0) return; // ohne Eigentuemer keine Vollmacht
+  for (const v of verwalter) {
+    for (const eig of eigRes.rows) {
+      if ((eig.email || '').toLowerCase() === (v.email || '').toLowerCase()) continue;
+      // Existiert schon eine aktive/Entwurfs-Vollmacht zwischen dem Paar?
+      const exists = await client.query(
+        `SELECT 1 FROM vollmachten
+          WHERE LOWER(vollmachtgeber_email) = LOWER($1)
+            AND LOWER(bevollmaechtigter_email) = LOWER($2)
+            AND status IN ('entwurf','aktiv')
+          LIMIT 1`,
+        [eig.email, v.email],
+      );
+      if (exists.rows.length > 0) continue;
+      await client.query(
+        `INSERT INTO vollmachten (
+           vollmachtgeber_name, vollmachtgeber_email,
+           bevollmaechtigter_typ, bevollmaechtigter_name, bevollmaechtigter_email,
+           bevollmaechtigter_telefon, bevollmaechtigter_adresse,
+           art, geltungsbereich, wohnung_id, stweg,
+           gueltig_ab, status, created_by_user_email
+         ) VALUES ($1,$2,'verwaltung',$3,$4,$5,$6,'generell',$7,$8,$9,CURRENT_DATE,'entwurf','system:auto-verwalter')`,
+        [
+          eig.name, eig.email,
+          v.name, v.email,
+          v.telefon || null, v.adresse || null,
+          'Automatisch erzeugter Entwurf aus Objektverwaltung: Verwalter '
+            + v.name + ' vertritt ' + eig.name + ' in allen Belangen der Wohnung. '
+            + 'Bitte vom Eigentuemer pruefen, anpassen und signieren (digital oder Papier).',
+          wohnungId, stweg,
+        ],
+      );
+      console.log('[vollmacht-auto] Entwurf erstellt: Eigentuemer=' + eig.email + ' Verwalter=' + v.email + ' Wohnung=' + wohnungId);
+    }
+  }
 }
 
 // Sync kontakte with email to Authentik as users and assign STWEG groups
