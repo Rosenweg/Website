@@ -13857,7 +13857,11 @@ app.get('/api/vollmachten/lookup/my-kontakte', authMiddleware, async (req, res) 
 app.get('/api/vollmachten', authMiddleware, async (req, res) => {
   try {
     const groups = req.user.groups || [];
-    const isAdmin = isTechnik(groups) || isPraesident(groups) || groups.some(g => g.toLowerCase() === 'verwaltung');
+    const isGlobalAdmin = isTechnik(groups) || isPraesident(groups) || groups.some(g => g.toLowerCase() === 'verwaltung');
+    const ausschussStwegs = [...getAusschussStwegs(groups)];
+    const isAusschuss = ausschussStwegs.length > 0;
+    // Im UI: 'Alle (Admin)' Tab fuer alle die mindestens stweg-scoped sehen
+    const isAdmin = isGlobalAdmin || isAusschuss;
     const email = req.user.email || '';
     // Status-Auto-Update: abgelaufene aktiv → abgelaufen
     await pool.query(
@@ -13866,13 +13870,19 @@ app.get('/api/vollmachten', authMiddleware, async (req, res) => {
     );
     const params = [];
     let where;
-    if (isAdmin) {
+    if (isGlobalAdmin) {
       where = 'TRUE';
     } else {
       params.push(email);
-      where = `LOWER(v.vollmachtgeber_email) = LOWER($1) OR LOWER(v.bevollmaechtigter_email) = LOWER($1)
+      const ownClause = `LOWER(v.vollmachtgeber_email) = LOWER($1) OR LOWER(v.bevollmaechtigter_email) = LOWER($1)
                OR v.vollmachtgeber_person_id = (SELECT id FROM personen WHERE LOWER(email) = LOWER($1) LIMIT 1)
                OR v.bevollmaechtigter_person_id = (SELECT id FROM personen WHERE LOWER(email) = LOWER($1) LIMIT 1)`;
+      if (isAusschuss) {
+        params.push(ausschussStwegs);
+        where = `(${ownClause}) OR v.stweg = ANY($${params.length}::int[])`;
+      } else {
+        where = ownClause;
+      }
     }
     const r = await pool.query(
       `SELECT v.*, w.bezeichnung AS wohnung_bezeichnung, vw.firma_name AS verwaltung_firma,
@@ -14098,11 +14108,13 @@ app.get('/api/vollmachten/:id/pdf', authMiddleware, async (req, res) => {
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = r.rows[0];
     const groups = req.user.groups || [];
-    const isAdmin = isTechnik(groups) || isPraesident(groups) || groups.some(g => g.toLowerCase() === 'verwaltung');
+    const isGlobalAdmin = isTechnik(groups) || isPraesident(groups) || groups.some(g => g.toLowerCase() === 'verwaltung');
+    const ausschussStwegs = getAusschussStwegs(groups);
+    const isAusschussForStweg = v.stweg && ausschussStwegs.has(v.stweg);
     const userEmail = (req.user.email || '').toLowerCase();
     const involved = (v.vollmachtgeber_email || '').toLowerCase() === userEmail
                   || (v.bevollmaechtigter_email || '').toLowerCase() === userEmail;
-    if (!isAdmin && !involved) return res.status(403).json({ error: 'Kein Zugriff' });
+    if (!isGlobalAdmin && !isAusschussForStweg && !involved) return res.status(403).json({ error: 'Kein Zugriff' });
     const pdf = await generateVollmachtPdf(v);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="vollmacht-${id}.pdf"`);
