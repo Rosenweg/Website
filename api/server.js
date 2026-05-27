@@ -14145,6 +14145,62 @@ app.get('/api/vollmachten/lookup/my-kontakte', authMiddleware, async (req, res) 
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Batch-Erfassung: fuer alle existierenden Verwalter-Kontakte in der
+// Objektverwaltung Entwurfs-Vollmachten anlegen. Nur fuer Admins.
+// Idempotent: legt nur an wo noch keine aktive/Entwurf-Vollmacht existiert.
+app.post('/api/vollmachten/bootstrap-verwalter', authMiddleware, async (req, res) => {
+  try {
+    const groups = req.user.groups || [];
+    if (!(isTechnik(groups) || isPraesident(groups) || req.user.isAdmin)) {
+      return res.status(403).json({ error: 'Nur Technik/Praesident' });
+    }
+    // Alle Wohnungen finden die einen verwalter-Kontakt haben
+    const wohnungenMitVerwalter = await pool.query(
+      `SELECT DISTINCT w.id, w.stweg
+         FROM wohnungen w
+         JOIN wohnungen_kontakte k ON k.wohnung_id = w.id
+        WHERE k.rolle = 'verwalter' AND k.archiviert_am IS NULL
+          AND k.email IS NOT NULL AND k.email <> ''
+        ORDER BY w.stweg, w.id`,
+    );
+    const results = { processed: 0, created: 0, skipped: 0, details: [] };
+    const client = await pool.connect();
+    try {
+      for (const w of wohnungenMitVerwalter.rows) {
+        // Aktuelle Verwalter + Eigentuemer dieser Wohnung holen
+        const k = await client.query(
+          `SELECT rolle, name, email, telefon, adresse, person_id
+             FROM wohnungen_kontakte
+            WHERE wohnung_id = $1 AND archiviert_am IS NULL
+              AND rolle IN ('verwalter','eigentuemer')
+              AND email IS NOT NULL AND email <> ''`,
+          [w.id],
+        );
+        const kontakte = k.rows;
+        // beforeCount = aktive+entwurf Vollmachten zu dieser Wohnung+Verwalter-Paaren
+        const beforeCount = (await client.query(
+          `SELECT COUNT(*) AS n FROM vollmachten WHERE wohnung_id = $1 AND status IN ('entwurf','aktiv')`,
+          [w.id],
+        )).rows[0].n;
+        await autoCreateVollmachtForVerwalter(client, w.id, w.stweg, kontakte);
+        const afterCount = (await client.query(
+          `SELECT COUNT(*) AS n FROM vollmachten WHERE wohnung_id = $1 AND status IN ('entwurf','aktiv')`,
+          [w.id],
+        )).rows[0].n;
+        const newOnes = Number(afterCount) - Number(beforeCount);
+        results.processed++;
+        if (newOnes > 0) {
+          results.created += newOnes;
+          results.details.push({ wohnung_id: w.id, stweg: w.stweg, new_drafts: newOnes });
+        } else {
+          results.skipped++;
+        }
+      }
+    } finally { client.release(); }
+    res.json(results);
+  } catch (err) { console.error('[vollmachten] bootstrap:', err); res.status(500).json({ error: err.message }); }
+});
+
 // Liste Vollmachten — Admin sieht alle, sonst nur eigene (vergeben + erhalten)
 app.get('/api/vollmachten', authMiddleware, async (req, res) => {
   try {
