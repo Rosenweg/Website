@@ -224,6 +224,84 @@
             </form>
         </div>
 
+        <!-- API-Tokens (Personal Access Tokens) -->
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-2 flex items-center gap-2">
+                🔑 API-Tokens
+            </h2>
+            <p class="text-sm text-gray-500 mb-4">Persönliche Zugriffstokens für KI-Agents, Mobile-Apps oder eigene Skripte. Token handelt im Namen des Users mit dessen Rechten. Sicher behandeln — wie ein Passwort.</p>
+
+            <div id="pat-new-banner" class="hidden mb-4 p-4 rounded-lg bg-green-50 border border-green-300">
+                <p class="text-sm font-semibold text-green-800 mb-2">✓ Token erstellt — JETZT kopieren, wird nur einmal angezeigt!</p>
+                <div class="flex items-center gap-2">
+                    <input id="pat-new-plain" type="text" readonly class="flex-1 font-mono text-sm border rounded px-3 py-2 bg-white">
+                    <button onclick="copyPatToken()" class="bg-green-600 text-white px-3 py-2 rounded hover:bg-green-700 text-sm">📋 Kopieren</button>
+                </div>
+                <button onclick="document.getElementById('pat-new-banner').classList.add('hidden')" class="text-xs text-green-700 hover:underline mt-2">Verstanden, ausblenden</button>
+            </div>
+
+            <div class="flex justify-end mb-3">
+                <button onclick="openPatModal()" class="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 text-sm">+ Neuen Token erstellen</button>
+            </div>
+            <div id="pat-list" class="space-y-2"></div>
+            <div id="pat-empty" class="hidden text-gray-400 italic text-sm text-center py-6 border border-dashed rounded">Noch keine API-Tokens erstellt.</div>
+            <details class="mt-4">
+                <summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-700">Wie verwende ich einen Token?</summary>
+                <div class="text-xs text-gray-600 mt-2 space-y-1 bg-gray-50 p-3 rounded">
+                    <p>Sende den Token als <code class="bg-white px-1">Authorization: Bearer rw_pat_…</code> Header bei jedem API-Aufruf.</p>
+                    <p>Beispiel: <code class="bg-white px-1">curl -H "Authorization: Bearer rw_pat_xxx" https://www.rosenweg4303.ch/api/me</code></p>
+                    <p>Für MCP/Hermes/OpenClaw: Token in der Agent-Konfiguration eintragen, der Agent setzt den Header automatisch.</p>
+                </div>
+            </details>
+        </div>
+
+    </div>
+
+    <!-- PAT Create Modal -->
+    <div id="pat-modal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+            <h3 class="text-lg font-bold mb-4">Neuen API-Token erstellen</h3>
+            <div class="space-y-3 text-sm">
+                <div>
+                    <label class="block text-xs font-medium text-gray-700 mb-1">Name *</label>
+                    <input id="pat-name" type="text" placeholder="z.B. Hermes Mobile, OpenClaw Desktop, MCP-Claude" class="w-full border rounded px-3 py-2">
+                    <p class="text-xs text-gray-500 mt-1">Frei wählbar — hilft dir, später zu wissen wofür der Token ist.</p>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-700 mb-1">Gueltigkeit</label>
+                    <select id="pat-expires" class="w-full border rounded px-3 py-2">
+                        <option value="">Unbegrenzt (bis Widerruf)</option>
+                        <option value="7">7 Tage</option>
+                        <option value="30">30 Tage</option>
+                        <option value="90">90 Tage</option>
+                        <option value="365">1 Jahr</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-700 mb-1">Scopes <span class="text-gray-400">(optional, leer = alle Rechte)</span></label>
+                    <div id="pat-scopes" class="border rounded p-2 max-h-48 overflow-y-auto bg-gray-50 space-y-1">
+                        <label class="flex items-center gap-2"><input type="checkbox" value="*" id="pat-scope-all" onchange="onPatScopeAll(this)"> <span class="font-medium">* — Alle Endpoints (volle Rechte)</span></label>
+                        <hr>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="vollmachten:read"> vollmachten:read</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="vollmachten:write"> vollmachten:write</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="auslagen:read"> auslagen:read</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="auslagen:write"> auslagen:write</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="reklamationen:read"> reklamationen:read</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="reklamationen:write"> reklamationen:write</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="personen:read"> personen:read</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="wohnungen:read"> wohnungen:read</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="handwerker:read"> handwerker:read</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="documents:read"> documents:read</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="me:read"> me:read (immer empfohlen)</label>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-1">Server lehnt Endpoints ohne passenden Scope mit 403 ab.</p>
+                </div>
+            </div>
+            <div class="flex justify-end gap-2 mt-5">
+                <button onclick="closePatModal()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded">Abbrechen</button>
+                <button onclick="createPat()" class="px-4 py-2 bg-purple-600 text-white rounded">Token erstellen</button>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -968,6 +1046,134 @@
                 btn.disabled = false; btn.textContent = 'Speichern';
             }
         }
+
+        // === Personal Access Tokens ===
+        async function loadPats() {
+            try {
+                const r = await AuthentikAuth.apiFetch('/api/me/tokens');
+                if (!r.ok) {
+                    document.getElementById('pat-list').innerHTML = `<div class="text-red-600 text-sm p-2">Fehler beim Laden: HTTP ${r.status}</div>`;
+                    return;
+                }
+                const { tokens } = await r.json();
+                const wrap = document.getElementById('pat-list');
+                const empty = document.getElementById('pat-empty');
+                if (!tokens || tokens.length === 0) {
+                    wrap.innerHTML = '';
+                    empty.classList.remove('hidden');
+                    return;
+                }
+                empty.classList.add('hidden');
+                const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                const fmtDt = s => s ? new Date(s).toLocaleString('de-CH') : '—';
+                wrap.innerHTML = tokens.map(t => {
+                    const revoked = !!t.revoked_at;
+                    const expired = t.expires_at && new Date(t.expires_at) < new Date();
+                    const scopeBadges = Array.isArray(t.scopes) && t.scopes.length > 0
+                        ? t.scopes.map(s => `<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded">${esc(s)}</span>`).join(' ')
+                        : '<span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">alle Rechte</span>';
+                    const statusBadge = revoked
+                        ? '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded">widerrufen</span>'
+                        : (expired ? '<span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded">abgelaufen</span>'
+                            : '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">aktiv</span>');
+                    return `<div class="border rounded p-3 ${revoked || expired ? 'bg-gray-50 opacity-60' : 'bg-white'}">
+                        <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-1">
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <span class="font-semibold">${esc(t.name)}</span>
+                                    ${statusBadge}
+                                </div>
+                                <div class="text-xs text-gray-500 font-mono">${esc(t.token_prefix)}…</div>
+                                <div class="mt-1 flex flex-wrap gap-1">${scopeBadges}</div>
+                            </div>
+                            ${!revoked ? `<button onclick="revokePat(${t.id})" class="text-xs text-red-600 hover:underline shrink-0">Widerrufen</button>` : ''}
+                        </div>
+                        <div class="text-xs text-gray-500 grid grid-cols-1 sm:grid-cols-3 gap-1 mt-2 pt-2 border-t">
+                            <div><span class="text-gray-400">Erstellt:</span> ${fmtDt(t.created_at)}</div>
+                            <div><span class="text-gray-400">Letzte Nutzung:</span> ${fmtDt(t.last_used_at)}${t.last_used_ip ? ' · ' + esc(t.last_used_ip) : ''}</div>
+                            <div><span class="text-gray-400">Ablauf:</span> ${t.expires_at ? fmtDt(t.expires_at) : 'nie'}</div>
+                        </div>
+                        ${revoked ? `<div class="text-xs text-red-700 mt-1">Widerrufen ${fmtDt(t.revoked_at)}${t.revoked_reason ? ' · ' + esc(t.revoked_reason) : ''}</div>` : ''}
+                    </div>`;
+                }).join('');
+            } catch (e) {
+                document.getElementById('pat-list').innerHTML = `<div class="text-red-600 text-sm p-2">Fehler: ${e.message}</div>`;
+            }
+        }
+
+        function openPatModal() {
+            document.getElementById('pat-name').value = '';
+            document.getElementById('pat-expires').value = '';
+            document.querySelectorAll('#pat-scopes input[type=checkbox]').forEach(c => c.checked = false);
+            document.getElementById('pat-modal').classList.remove('hidden');
+        }
+        function closePatModal() { document.getElementById('pat-modal').classList.add('hidden'); }
+
+        function onPatScopeAll(cb) {
+            // 'Alle' → andere abwählen
+            if (cb.checked) {
+                document.querySelectorAll('#pat-scopes input[type=checkbox]').forEach(other => {
+                    if (other !== cb) other.checked = false;
+                });
+            }
+        }
+
+        async function createPat() {
+            const name = document.getElementById('pat-name').value.trim();
+            if (!name) { alert('Name erforderlich'); return; }
+            const expires_days = parseInt(document.getElementById('pat-expires').value, 10) || null;
+            const scopes = [...document.querySelectorAll('#pat-scopes input[type=checkbox]:checked')].map(c => c.value);
+            const body = { name, expires_days };
+            if (scopes.length > 0 && !scopes.includes('*')) body.scopes = scopes;
+            try {
+                const r = await AuthentikAuth.apiFetch('/api/me/tokens', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!r.ok) throw new Error(await r.text());
+                const d = await r.json();
+                closePatModal();
+                // Plain-Token ins Banner einsetzen
+                document.getElementById('pat-new-plain').value = d.token;
+                document.getElementById('pat-new-banner').classList.remove('hidden');
+                document.getElementById('pat-new-banner').scrollIntoView({ behavior: 'smooth' });
+                await loadPats();
+            } catch (e) { alert('Fehler: ' + e.message); }
+        }
+
+        function copyPatToken() {
+            const inp = document.getElementById('pat-new-plain');
+            inp.select(); inp.setSelectionRange(0, 99999);
+            navigator.clipboard.writeText(inp.value).then(() => {
+                alert('In Zwischenablage kopiert.');
+            }).catch(() => {
+                document.execCommand('copy');
+                alert('Kopiert (Fallback).');
+            });
+        }
+
+        async function revokePat(id) {
+            const reason = prompt('Grund des Widerrufs (optional):');
+            if (reason === null) return;
+            try {
+                const r = await AuthentikAuth.apiFetch(`/api/me/tokens/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reason: reason || null }),
+                });
+                if (!r.ok) throw new Error(await r.text());
+                await loadPats();
+            } catch (e) { alert('Fehler: ' + e.message); }
+        }
+
+        // Initial laden wenn User eingeloggt
+        document.addEventListener('DOMContentLoaded', () => {
+            const tryLoad = () => {
+                if (window.AuthentikAuth?.getToken && AuthentikAuth.getToken()) loadPats();
+                else setTimeout(tryLoad, 500);
+            };
+            tryLoad();
+        });
     </script>
 </body>
 </html>
