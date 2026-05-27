@@ -1024,25 +1024,28 @@ app.post('/api/ki-search', authMiddleware, async (req, res) => {
     const q = String(req.body?.q || req.query.q || '').trim();
     if (q.length < 2) return res.json({ q, hits: [], answer: 'Suchbegriff zu kurz.' });
     const groups = req.user.groups || [];
-    const isAdmin = isTechnik(groups) || isPraesident(groups) || groups.some(g => g.toLowerCase() === 'verwaltung');
+    const isAdmin = isTechnik(groups) || isPraesident(groups) || groups.some(g => g.toLowerCase() === 'verwaltung') || req.user.isAdmin;
     const userEmail = (req.user.email || '').toLowerCase();
     const ausschussStwegs = [...getAusschussStwegs(groups)];
+    // Umlaut-invariante Suche via de_norm() SQL-Function (siehe initDB).
+    // Normalisiert Spalten + Query auf ae/oe/ue/ss lowercase, sodass
+    // 'Müller' und 'Mueller' beide gefunden werden.
     const like = '%' + q.replace(/[%_]/g, '\\$&') + '%';
     const hits = [];
 
     // Parallel-Suche ueber alle relevanten Domains
     const searches = await Promise.allSettled([
       // Personen (nur fuer wohnungsverwaltung-Berechtigte)
-      groups.some(g => g.toLowerCase() === 'technik' || g.toLowerCase() === 'praesident' || g.toLowerCase() === 'präsident' || g.toLowerCase() === 'verwaltung')
-        ? pool.query('SELECT id, name, email, telefon FROM personen WHERE LOWER(name) LIKE LOWER($1) OR LOWER(email) LIKE LOWER($1) LIMIT 5', [like])
+      groups.some(g => g.toLowerCase() === 'technik' || g.toLowerCase() === 'praesident' || g.toLowerCase() === 'präsident' || g.toLowerCase() === 'verwaltung') || isAdmin
+        ? pool.query('SELECT id, name, email, telefon FROM personen WHERE de_norm(name) LIKE de_norm($1) OR de_norm(email) LIKE de_norm($1) LIMIT 5', [like])
         : { rows: [] },
       // Handwerker (alle eingeloggten User)
-      pool.query('SELECT id, firma, kategorie, telefon, mobile, email FROM handwerker WHERE archiviert = false AND (LOWER(firma) LIKE LOWER($1) OR LOWER(kategorie) LIKE LOWER($1) OR LOWER(COALESCE(leistungen::text,\'\')) LIKE LOWER($1)) LIMIT 5', [like]),
+      pool.query('SELECT id, firma, kategorie, telefon, mobile, email FROM handwerker WHERE archiviert = false AND (de_norm(firma) LIKE de_norm($1) OR de_norm(kategorie) LIKE de_norm($1) OR de_norm(COALESCE(leistungen::text,\'\')) LIKE de_norm($1)) LIMIT 5', [like]),
       // Vollmachten (eigene + Ausschuss-stweg + admin)
       isAdmin
-        ? pool.query('SELECT id, doc_hash, vollmachtgeber_name, bevollmaechtigter_name, status, art FROM vollmachten WHERE LOWER(vollmachtgeber_name) LIKE LOWER($1) OR LOWER(bevollmaechtigter_name) LIKE LOWER($1) OR LOWER(COALESCE(geltungsbereich,\'\')) LIKE LOWER($1) ORDER BY created_at DESC LIMIT 5', [like])
+        ? pool.query('SELECT id, doc_hash, vollmachtgeber_name, bevollmaechtigter_name, status, art FROM vollmachten WHERE de_norm(vollmachtgeber_name) LIKE de_norm($1) OR de_norm(bevollmaechtigter_name) LIKE de_norm($1) OR de_norm(COALESCE(geltungsbereich,\'\')) LIKE de_norm($1) ORDER BY created_at DESC LIMIT 5', [like])
         : pool.query(`SELECT v.id, v.doc_hash, v.vollmachtgeber_name, v.bevollmaechtigter_name, v.status, v.art FROM vollmachten v
-                       WHERE (LOWER(v.vollmachtgeber_name) LIKE LOWER($1) OR LOWER(v.bevollmaechtigter_name) LIKE LOWER($1) OR LOWER(COALESCE(v.geltungsbereich,'')) LIKE LOWER($1))
+                       WHERE (de_norm(v.vollmachtgeber_name) LIKE de_norm($1) OR de_norm(v.bevollmaechtigter_name) LIKE de_norm($1) OR de_norm(COALESCE(v.geltungsbereich,'')) LIKE de_norm($1))
                          AND (LOWER(v.vollmachtgeber_email) = LOWER($2) OR LOWER(v.bevollmaechtigter_email) = LOWER($2)
                               OR EXISTS (SELECT 1 FROM vollmachten_vollmachtgeber vg WHERE vg.vollmacht_id = v.id AND LOWER(vg.email) = LOWER($2))
                               ${ausschussStwegs.length > 0 ? `OR v.stweg = ANY($3::int[])` : ''})
@@ -1050,16 +1053,16 @@ app.post('/api/ki-search', authMiddleware, async (req, res) => {
                      ausschussStwegs.length > 0 ? [like, userEmail, ausschussStwegs] : [like, userEmail]),
       // Reklamationen
       isAdmin || ausschussStwegs.length > 0
-        ? pool.query('SELECT r.id, r.beschreibung, r.status, r.stweg, p.name AS person_name FROM reklamationen r LEFT JOIN personen p ON p.id = r.person_id WHERE LOWER(r.beschreibung) LIKE LOWER($1) ORDER BY r.created_at DESC LIMIT 5', [like])
-        : pool.query('SELECT r.id, r.beschreibung, r.status, r.stweg FROM reklamationen r JOIN personen p ON p.id = r.person_id WHERE LOWER(r.beschreibung) LIKE LOWER($1) AND LOWER(p.email) = LOWER($2) ORDER BY r.created_at DESC LIMIT 5', [like, userEmail]),
-      // Email-Archiv (nur archiv-permission)
-      pool.query('SELECT id, subject, from_email, to_addresses, created_at FROM email_log WHERE LOWER(COALESCE(subject,\'\')) LIKE LOWER($1) OR LOWER(COALESCE(from_email,\'\')) LIKE LOWER($1) ORDER BY created_at DESC LIMIT 5', [like]).catch(() => ({ rows: [] })),
+        ? pool.query('SELECT r.id, r.beschreibung, r.status, r.stweg, p.name AS person_name FROM reklamationen r LEFT JOIN personen p ON p.id = r.person_id WHERE de_norm(r.beschreibung) LIKE de_norm($1) ORDER BY r.created_at DESC LIMIT 5', [like])
+        : pool.query('SELECT r.id, r.beschreibung, r.status, r.stweg FROM reklamationen r JOIN personen p ON p.id = r.person_id WHERE de_norm(r.beschreibung) LIKE de_norm($1) AND LOWER(p.email) = LOWER($2) ORDER BY r.created_at DESC LIMIT 5', [like, userEmail]),
+      // Email-Archiv
+      pool.query('SELECT id, subject, from_email, to_addresses, created_at FROM email_log WHERE de_norm(COALESCE(subject,\'\')) LIKE de_norm($1) OR de_norm(COALESCE(from_email,\'\')) LIKE de_norm($1) ORDER BY created_at DESC LIMIT 5', [like]).catch(() => ({ rows: [] })),
       // Verwaltungen
-      pool.query('SELECT id, firma_name, stweg, telefon, email FROM verwaltungen WHERE aktiv = true AND (LOWER(firma_name) LIKE LOWER($1) OR LOWER(COALESCE(email,\'\')) LIKE LOWER($1)) LIMIT 3', [like]).catch(() => ({ rows: [] })),
-      // Wohnungen (alle stwegs die der user sehen darf — Admin sieht alle)
-      pool.query('SELECT id, bezeichnung, stweg, eigentuemer_name, mieter_name FROM wohnungen WHERE LOWER(bezeichnung) LIKE LOWER($1) OR LOWER(COALESCE(eigentuemer_name,\'\')) LIKE LOWER($1) OR LOWER(COALESCE(mieter_name,\'\')) LIKE LOWER($1) LIMIT 5', [like]).catch(() => ({ rows: [] })),
+      pool.query('SELECT id, firma_name, stweg, telefon, email FROM verwaltungen WHERE aktiv = true AND (de_norm(firma_name) LIKE de_norm($1) OR de_norm(COALESCE(email,\'\')) LIKE de_norm($1)) LIMIT 3', [like]).catch(() => ({ rows: [] })),
+      // Wohnungen
+      pool.query('SELECT id, bezeichnung, stweg, eigentuemer_name, mieter_name FROM wohnungen WHERE de_norm(bezeichnung) LIKE de_norm($1) OR de_norm(COALESCE(eigentuemer_name,\'\')) LIKE de_norm($1) OR de_norm(COALESCE(mieter_name,\'\')) LIKE de_norm($1) LIMIT 5', [like]).catch(() => ({ rows: [] })),
       // Projekte
-      pool.query('SELECT slug, titel, status FROM projects WHERE LOWER(titel) LIKE LOWER($1) OR LOWER(COALESCE(beschreibung,\'\')) LIKE LOWER($1) LIMIT 3', [like]).catch(() => ({ rows: [] })),
+      pool.query('SELECT slug, titel, status FROM projects WHERE de_norm(titel) LIKE de_norm($1) OR de_norm(COALESCE(beschreibung,\'\')) LIKE de_norm($1) LIMIT 3', [like]).catch(() => ({ rows: [] })),
     ]);
 
     const [personen, handwerker, vollmachten, reklamationen, mails, verwaltungen, wohnungen, projekte] = searches.map(s => s.status === 'fulfilled' ? (s.value?.rows || []) : []);
@@ -15539,6 +15542,14 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_vmvg_vollmacht ON vollmachten_vollmachtgeber(vollmacht_id);
       CREATE INDEX IF NOT EXISTS idx_vmvg_email ON vollmachten_vollmachtgeber(LOWER(email));
+
+      -- Umlaut-invariante Such-Funktion (fuer KI-Suche etc.)
+      -- 'Müller' und 'Mueller' werden beide auf 'mueller' normalisiert.
+      CREATE OR REPLACE FUNCTION de_norm(t text) RETURNS text
+        LANGUAGE sql IMMUTABLE AS $$
+          SELECT LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(t, ''),
+            'ä','ae'),'ö','oe'),'ü','ue'),'Ä','ae'),'Ö','oe'),'Ü','ue'),'ß','ss'))
+        $$;
 
       -- Personal Access Tokens (PAT) fuer M2M / KI-Agent-Zugriff.
       -- User erstellt im Profil Token, kopiert ihn einmal, traegt in
