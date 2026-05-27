@@ -1,0 +1,22 @@
+{
+  "name": "rosenweg-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for Rosenweg STWEG management — gives AI agents access to user-facing functions via Personal Access Token (PAT)",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "rosenweg-mcp": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "private": true
+}
