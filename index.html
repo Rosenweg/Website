@@ -227,7 +227,8 @@
                         <h3 class="text-xl font-semibold">Technischer Dienst</h3>
                     </div>
                     <div class="bg-blue-50 p-4 rounded-lg mb-4">
-                        <p class="text-sm text-blue-800 mb-2"><strong>E-Mail:</strong> <a id="technik-email" href="#" class="text-blue-600 hover:underline"></a></p>
+                        <p class="text-sm text-blue-800 mb-1"><strong>E-Mail:</strong> <a id="technik-email" href="#" class="text-blue-600 hover:underline"></a></p>
+                        <p class="text-sm text-blue-800 mb-2"><strong>Telefon:</strong> <a id="technik-telefon" href="#" class="text-blue-600 hover:underline"></a></p>
                         <p class="text-xs text-gray-600">Zuständig für technische Angelegenheiten der STWEG-Kooperation</p>
                     </div>
                     <div id="tech-dienst-mitglieder" class="grid md:grid-cols-3 gap-4">
@@ -588,6 +589,11 @@
             te.href = 'mailto:' + t.email;
             const nt = document.getElementById('notfall-technik');
             nt.href = 'mailto:' + t.email;
+            const tt = document.getElementById('technik-telefon');
+            if (tt && t.telefon) {
+                tt.textContent = t.telefon;
+                tt.href = 'tel:' + t.telefon.replace(/\s/g, '');
+            }
         }
         const n = SiteConfig.getNotfall();
         if (n) {
