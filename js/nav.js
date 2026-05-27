@@ -321,6 +321,9 @@ const RosenwegNav = {
 
         <!-- Auth + Mobile -->
         <div class="flex items-center gap-2">
+          <button id="nav-ki-search-btn" onclick="RosenwegSearch.open()" class="hidden p-2 text-gray-600 hover:text-blue-600 rounded-full hover:bg-gray-100" title="KI-Suche (Strg+K)" aria-label="KI-Suche">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 4a7 7 0 100 14 7 7 0 000-14z"/></svg>
+          </button>
           <div id="nav-auth" class="hidden sm:flex items-center gap-2">
             <a href="${base}profil.html" id="nav-user-link" class="text-sm text-gray-600 hover:text-blue-600 hidden"></a>
             <button id="nav-login-btn" class="text-sm bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition hidden">Anmelden</button>
@@ -539,6 +542,8 @@ const RosenwegNav = {
         }
 
         this._applyPermissions(user);
+        // KI-Such-Lupe nur fuer eingeloggte User anzeigen
+        document.getElementById('nav-ki-search-btn')?.classList.remove('hidden');
       },
     }).then(user => {
       if (!user) {
@@ -554,3 +559,106 @@ const RosenwegNav = {
     });
   },
 };
+
+// ─── KI-Suche (globales Modul, ueber RosenwegSearch.open() aufrufbar) ───
+const RosenwegSearch = {
+  _modal: null,
+  _esc(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); },
+  init() {
+    if (this._modal) return;
+    const wrap = document.createElement('div');
+    wrap.id = 'rw-ki-search-modal';
+    wrap.className = 'hidden fixed inset-0 z-[100] bg-black/40 flex items-start justify-center pt-12 sm:pt-20 px-4';
+    wrap.innerHTML = `
+      <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col" onclick="event.stopPropagation()">
+        <div class="px-4 py-3 border-b flex items-center gap-3">
+          <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 4a7 7 0 100 14 7 7 0 000-14z"/></svg>
+          <input id="rw-ki-search-input" type="search" placeholder="Suche nach Person, Handwerker, Vollmacht, Mail, ..." autocomplete="off" class="flex-1 outline-none text-sm py-1.5">
+          <kbd class="hidden sm:inline text-xs text-gray-400 border rounded px-1.5 py-0.5">ESC</kbd>
+        </div>
+        <div id="rw-ki-search-status" class="hidden px-4 py-2 text-xs text-gray-500"></div>
+        <div id="rw-ki-search-answer" class="hidden px-4 py-3 bg-blue-50 border-b text-sm text-blue-900"></div>
+        <div id="rw-ki-search-hits" class="overflow-y-auto"></div>
+        <div class="px-4 py-2 border-t text-xs text-gray-400 flex justify-between">
+          <span>Powered by Claude Haiku 4.5</span>
+          <span>Strg+K / Cmd+K zum Oeffnen</span>
+        </div>
+      </div>`;
+    wrap.addEventListener('click', () => this.close());
+    document.body.appendChild(wrap);
+    this._modal = wrap;
+    const input = document.getElementById('rw-ki-search-input');
+    let t;
+    input.addEventListener('input', () => {
+      clearTimeout(t);
+      t = setTimeout(() => this._run(input.value), 350);
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'k' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); this.open(); }
+      if (e.key === 'Escape' && !this._modal.classList.contains('hidden')) this.close();
+    });
+  },
+  open() {
+    this.init();
+    this._modal.classList.remove('hidden');
+    setTimeout(() => document.getElementById('rw-ki-search-input')?.focus(), 20);
+  },
+  close() {
+    this._modal?.classList.add('hidden');
+    document.getElementById('rw-ki-search-input').value = '';
+    document.getElementById('rw-ki-search-hits').innerHTML = '';
+    document.getElementById('rw-ki-search-answer').classList.add('hidden');
+    document.getElementById('rw-ki-search-status').classList.add('hidden');
+  },
+  async _run(q) {
+    const stat = document.getElementById('rw-ki-search-status');
+    const ans = document.getElementById('rw-ki-search-answer');
+    const hits = document.getElementById('rw-ki-search-hits');
+    if (!q || q.trim().length < 2) {
+      stat.classList.add('hidden'); ans.classList.add('hidden'); hits.innerHTML = '';
+      return;
+    }
+    stat.classList.remove('hidden'); stat.textContent = 'Suche & KI-Auswertung…';
+    ans.classList.add('hidden');
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/ki-search', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q }),
+      });
+      const d = await r.json();
+      stat.classList.add('hidden');
+      if (d.answer) {
+        ans.textContent = d.answer;
+        ans.classList.remove('hidden');
+      }
+      const typColors = {
+        Person: 'bg-blue-100 text-blue-800',
+        Handwerker: 'bg-purple-100 text-purple-800',
+        Vollmacht: 'bg-amber-100 text-amber-800',
+        Reklamation: 'bg-red-100 text-red-800',
+        'E-Mail': 'bg-gray-100 text-gray-700',
+        Verwaltung: 'bg-emerald-100 text-emerald-800',
+        Wohnung: 'bg-indigo-100 text-indigo-800',
+        Projekt: 'bg-pink-100 text-pink-800',
+      };
+      if (!d.hits || d.hits.length === 0) {
+        hits.innerHTML = '<div class="p-8 text-center text-gray-400 italic">Keine Treffer.</div>';
+        return;
+      }
+      hits.innerHTML = d.hits.map(h => `
+        <a href="${this._esc(h.url)}" class="flex items-start gap-3 px-4 py-3 border-b hover:bg-blue-50 transition">
+          <span class="text-xs ${typColors[h.typ] || 'bg-gray-100 text-gray-700'} px-2 py-0.5 rounded shrink-0 mt-0.5">${this._esc(h.typ)}</span>
+          <div class="flex-1 min-w-0">
+            <div class="font-medium text-sm text-gray-900 truncate">${this._esc(h.titel)}</div>
+            ${h.sub ? `<div class="text-xs text-gray-500 truncate">${this._esc(h.sub)}</div>` : ''}
+          </div>
+          <svg class="w-4 h-4 text-gray-300 shrink-0 mt-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+        </a>
+      `).join('');
+    } catch (e) {
+      stat.classList.remove('hidden');
+      stat.textContent = 'Fehler: ' + e.message;
+    }
+  },
+};
+window.RosenwegSearch = RosenwegSearch;
