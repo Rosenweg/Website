@@ -626,6 +626,42 @@ async function authMiddleware(req, res, next) {
   if (!token) return res.status(401).json({ error: 'Nicht authentifiziert' });
 
   try {
+    // 0. Personal Access Token (PAT) — prefix-erkennbar, fuer M2M/AI-Agents
+    //    Wirkt als 'login als der User der den Token erstellt hat'.
+    if (token.startsWith('rw_pat_')) {
+      const hash = crypto.createHash('sha256').update(token).digest('hex');
+      const r = await pool.query(
+        `SELECT t.*, u.id AS user_id, u.name, u.email, u.role, u.wohnung, u.stweg, u.groups_json
+           FROM api_tokens t
+           LEFT JOIN users u ON LOWER(u.email) = LOWER(t.user_email)
+          WHERE t.token_hash = $1 AND t.revoked_at IS NULL
+            AND (t.expires_at IS NULL OR t.expires_at > NOW())
+          LIMIT 1`,
+        [hash],
+      );
+      if (r.rows.length === 0) return res.status(401).json({ error: 'PAT ungueltig oder widerrufen' });
+      const row = r.rows[0];
+      req.user = {
+        id: row.user_id, user_id: row.user_id,
+        name: row.name, email: row.user_email, role: row.role,
+        wohnung: row.wohnung, stweg: row.stweg,
+        groups: (() => { try { return JSON.parse(row.groups_json || '[]'); } catch { return []; } })(),
+      };
+      req.user.isAdmin = req.user.role === 'admin' || req.user.groups.some(g => g.toLowerCase() === 'technik');
+      req.pat = { id: row.id, name: row.name, scopes: row.scopes };
+      // Scope-Check: wenn token.scopes gesetzt, pruefen ob aktueller Endpoint erlaubt
+      if (Array.isArray(row.scopes) && row.scopes.length > 0) {
+        const need = req.method === 'GET' ? 'read' : 'write';
+        const path = req.path.replace(/\/api\//, '').split('/')[0] || 'root';
+        const allowed = row.scopes.some(s => s === '*' || s === path + ':*' || s === path + ':' + need || s === 'all:' + need);
+        if (!allowed) return res.status(403).json({ error: `PAT-Scope fehlt: ${path}:${need}` });
+      }
+      // last_used async (kein await damit Antwort nicht blockiert)
+      const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || req.socket.remoteAddress;
+      pool.query('UPDATE api_tokens SET last_used_at=NOW(), last_used_ip=$1 WHERE id=$2', [ip, row.id]).catch(() => {});
+      return auditCtx.run({ userEmail: req.user.email || 'pat:' + row.id }, next);
+    }
+
     // 1. Try local session token first
     const result = await pool.query(
       `SELECT s.user_id, u.name, u.email, u.role, u.wohnung, u.stweg, u.groups_json
@@ -652,6 +688,7 @@ async function authMiddleware(req, res, next) {
 
     return res.status(401).json({ error: 'Session abgelaufen' });
   } catch (err) {
+    console.error('[auth] error:', err.message);
     res.status(500).json({ error: 'Auth-Fehler' });
   }
 }
@@ -906,6 +943,77 @@ async function getUserPermissions(groups) {
   }
   return permissions;
 }
+
+// ─── Personal Access Tokens (PAT) ────────────────────────────────────
+// PATs werden NUR via Authentik-/Session-Login erstellt/widerrufen (nicht
+// via PAT selbst), damit ein kompromittierter PAT keine neuen PATs anlegen
+// oder andere widerrufen kann. Wir checken req.pat (gesetzt durch PAT-Auth)
+// und lehnen ab.
+function requireUserLogin(req, res, next) {
+  if (req.pat) return res.status(403).json({ error: 'Token-Verwaltung nur via Browser-Login (Authentik) moeglich' });
+  next();
+}
+
+app.get('/api/me/tokens', authMiddleware, requireUserLogin, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT id, name, token_prefix, scopes, last_used_at, last_used_ip,
+              created_at, expires_at, revoked_at, revoked_reason
+         FROM api_tokens
+        WHERE LOWER(user_email) = LOWER($1)
+        ORDER BY revoked_at NULLS FIRST, created_at DESC`,
+      [req.user.email],
+    );
+    res.json({ tokens: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/me/tokens', authMiddleware, requireUserLogin, async (req, res) => {
+  try {
+    const { name, scopes, expires_days } = req.body || {};
+    if (!name || typeof name !== 'string' || name.length < 2) {
+      return res.status(400).json({ error: 'Name (min 2 Zeichen) erforderlich' });
+    }
+    const plain = 'rw_pat_' + crypto.randomBytes(32).toString('hex');
+    const hash = crypto.createHash('sha256').update(plain).digest('hex');
+    const prefix = plain.slice(0, 12);
+    const expires = expires_days && Number.isFinite(parseInt(expires_days, 10))
+      ? new Date(Date.now() + parseInt(expires_days, 10) * 86400_000) : null;
+    const scopesArr = Array.isArray(scopes) && scopes.length > 0 ? scopes : null;
+    const r = await pool.query(
+      `INSERT INTO api_tokens (user_email, name, token_hash, token_prefix, scopes, expires_at)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6) RETURNING id, name, token_prefix, scopes, created_at, expires_at`,
+      [req.user.email, name.slice(0, 100), hash, prefix, scopesArr ? JSON.stringify(scopesArr) : null, expires],
+    );
+    res.json({ ...r.rows[0], token: plain, hint: 'Dieser Token wird nur EINMAL angezeigt — sicher kopieren und in den Agent eintragen.' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/me/tokens/:id', authMiddleware, requireUserLogin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const r = await pool.query(
+      `UPDATE api_tokens SET revoked_at = NOW(), revoked_reason = $1
+        WHERE id = $2 AND LOWER(user_email) = LOWER($3) AND revoked_at IS NULL
+        RETURNING id`,
+      [req.body?.reason || 'manuell widerrufen', id, req.user.email],
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden oder bereits widerrufen' });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Endpoint fuer Agent: 'wer bin ich, was kann ich' — fuer Discovery/Onboarding.
+app.get('/api/me', authMiddleware, async (req, res) => {
+  res.json({
+    email: req.user.email,
+    name: req.user.name,
+    groups: req.user.groups || [],
+    is_admin: req.user.isAdmin,
+    via_pat: !!req.pat,
+    pat: req.pat ? { id: req.pat.id, name: req.pat.name, scopes: req.pat.scopes } : null,
+  });
+});
 
 // ─── Permission API ─────────────────────────────────────────────────
 app.get('/api/permissions/pages', authMiddleware, requirePermission('rechteverwaltung', 'read'), (req, res) => {
@@ -15325,6 +15433,29 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_vmvg_vollmacht ON vollmachten_vollmachtgeber(vollmacht_id);
       CREATE INDEX IF NOT EXISTS idx_vmvg_email ON vollmachten_vollmachtgeber(LOWER(email));
+
+      -- Personal Access Tokens (PAT) fuer M2M / KI-Agent-Zugriff.
+      -- User erstellt im Profil Token, kopiert ihn einmal, traegt in
+      -- Agent (Hermes, OpenClaw, MCP-Client) ein. Wirkt im API als
+      -- 'login als dieser User' mit gleichen Permissions wie Browser-Login.
+      -- Scopes optional: NULL = volle User-Rechte; ['vollmachten:read', ...]
+      -- restringiert. Audit-Log haelt token_id fuer Nachverfolgbarkeit.
+      CREATE TABLE IF NOT EXISTS api_tokens (
+        id SERIAL PRIMARY KEY,
+        user_email TEXT NOT NULL,
+        name TEXT NOT NULL,                 -- vom User vergeben (z.B. 'Hermes Mobile')
+        token_hash TEXT NOT NULL UNIQUE,    -- sha256(plain_token)
+        token_prefix VARCHAR(16) NOT NULL,  -- erste 12 Zeichen fuer Anzeige
+        scopes JSONB,                       -- NULL = alle User-Rechte
+        last_used_at TIMESTAMPTZ,
+        last_used_ip TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        expires_at TIMESTAMPTZ,             -- NULL = nie
+        revoked_at TIMESTAMPTZ,
+        revoked_reason TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(LOWER(user_email), revoked_at);
+      CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash) WHERE revoked_at IS NULL;
 
       -- Vorlagen-Tabelle: vorgefertigte Geltungsbereich-Texte fuer haeufige
       -- Faelle (z.B. 'generelle Verwalter-Vollmacht', 'Vermietungs-Vollmacht'),
