@@ -1015,6 +1015,112 @@ app.get('/api/me', authMiddleware, async (req, res) => {
   });
 });
 
+// ─── KI-Suche ───────────────────────────────────────────────────────
+// Parallel SQL-Search ueber relevante Tabellen, Treffer + Query an
+// Claude Haiku 4.5 fuer Ranking + 1-Satz-Antwort + 3-5 Quicklinks.
+// Berechtigungs-Filter: nur was der User auch sonst sehen darf.
+app.post('/api/ki-search', authMiddleware, async (req, res) => {
+  try {
+    const q = String(req.body?.q || req.query.q || '').trim();
+    if (q.length < 2) return res.json({ q, hits: [], answer: 'Suchbegriff zu kurz.' });
+    const groups = req.user.groups || [];
+    const isAdmin = isTechnik(groups) || isPraesident(groups) || groups.some(g => g.toLowerCase() === 'verwaltung');
+    const userEmail = (req.user.email || '').toLowerCase();
+    const ausschussStwegs = [...getAusschussStwegs(groups)];
+    const like = '%' + q.replace(/[%_]/g, '\\$&') + '%';
+    const hits = [];
+
+    // Parallel-Suche ueber alle relevanten Domains
+    const searches = await Promise.allSettled([
+      // Personen (nur fuer wohnungsverwaltung-Berechtigte)
+      groups.some(g => g.toLowerCase() === 'technik' || g.toLowerCase() === 'praesident' || g.toLowerCase() === 'präsident' || g.toLowerCase() === 'verwaltung')
+        ? pool.query('SELECT id, name, email, telefon FROM personen WHERE LOWER(name) LIKE LOWER($1) OR LOWER(email) LIKE LOWER($1) LIMIT 5', [like])
+        : { rows: [] },
+      // Handwerker (alle eingeloggten User)
+      pool.query('SELECT id, firma, kategorie, telefon, mobile, email FROM handwerker WHERE archiviert = false AND (LOWER(firma) LIKE LOWER($1) OR LOWER(kategorie) LIKE LOWER($1) OR LOWER(COALESCE(leistungen::text,\'\')) LIKE LOWER($1)) LIMIT 5', [like]),
+      // Vollmachten (eigene + Ausschuss-stweg + admin)
+      isAdmin
+        ? pool.query('SELECT id, doc_hash, vollmachtgeber_name, bevollmaechtigter_name, status, art FROM vollmachten WHERE LOWER(vollmachtgeber_name) LIKE LOWER($1) OR LOWER(bevollmaechtigter_name) LIKE LOWER($1) OR LOWER(COALESCE(geltungsbereich,\'\')) LIKE LOWER($1) ORDER BY created_at DESC LIMIT 5', [like])
+        : pool.query(`SELECT v.id, v.doc_hash, v.vollmachtgeber_name, v.bevollmaechtigter_name, v.status, v.art FROM vollmachten v
+                       WHERE (LOWER(v.vollmachtgeber_name) LIKE LOWER($1) OR LOWER(v.bevollmaechtigter_name) LIKE LOWER($1) OR LOWER(COALESCE(v.geltungsbereich,'')) LIKE LOWER($1))
+                         AND (LOWER(v.vollmachtgeber_email) = LOWER($2) OR LOWER(v.bevollmaechtigter_email) = LOWER($2)
+                              OR EXISTS (SELECT 1 FROM vollmachten_vollmachtgeber vg WHERE vg.vollmacht_id = v.id AND LOWER(vg.email) = LOWER($2))
+                              ${ausschussStwegs.length > 0 ? `OR v.stweg = ANY($3::int[])` : ''})
+                       ORDER BY v.created_at DESC LIMIT 5`,
+                     ausschussStwegs.length > 0 ? [like, userEmail, ausschussStwegs] : [like, userEmail]),
+      // Reklamationen
+      isAdmin || ausschussStwegs.length > 0
+        ? pool.query('SELECT r.id, r.beschreibung, r.status, r.stweg, p.name AS person_name FROM reklamationen r LEFT JOIN personen p ON p.id = r.person_id WHERE LOWER(r.beschreibung) LIKE LOWER($1) ORDER BY r.created_at DESC LIMIT 5', [like])
+        : pool.query('SELECT r.id, r.beschreibung, r.status, r.stweg FROM reklamationen r JOIN personen p ON p.id = r.person_id WHERE LOWER(r.beschreibung) LIKE LOWER($1) AND LOWER(p.email) = LOWER($2) ORDER BY r.created_at DESC LIMIT 5', [like, userEmail]),
+      // Email-Archiv (nur archiv-permission)
+      pool.query('SELECT id, subject, from_email, to_addresses, created_at FROM email_log WHERE LOWER(COALESCE(subject,\'\')) LIKE LOWER($1) OR LOWER(COALESCE(from_email,\'\')) LIKE LOWER($1) ORDER BY created_at DESC LIMIT 5', [like]).catch(() => ({ rows: [] })),
+      // Verwaltungen
+      pool.query('SELECT id, firma_name, stweg, telefon, email FROM verwaltungen WHERE aktiv = true AND (LOWER(firma_name) LIKE LOWER($1) OR LOWER(COALESCE(email,\'\')) LIKE LOWER($1)) LIMIT 3', [like]).catch(() => ({ rows: [] })),
+      // Wohnungen (alle stwegs die der user sehen darf — Admin sieht alle)
+      pool.query('SELECT id, bezeichnung, stweg, eigentuemer_name, mieter_name FROM wohnungen WHERE LOWER(bezeichnung) LIKE LOWER($1) OR LOWER(COALESCE(eigentuemer_name,\'\')) LIKE LOWER($1) OR LOWER(COALESCE(mieter_name,\'\')) LIKE LOWER($1) LIMIT 5', [like]).catch(() => ({ rows: [] })),
+      // Projekte
+      pool.query('SELECT slug, titel, status FROM projects WHERE LOWER(titel) LIKE LOWER($1) OR LOWER(COALESCE(beschreibung,\'\')) LIKE LOWER($1) LIMIT 3', [like]).catch(() => ({ rows: [] })),
+    ]);
+
+    const [personen, handwerker, vollmachten, reklamationen, mails, verwaltungen, wohnungen, projekte] = searches.map(s => s.status === 'fulfilled' ? (s.value?.rows || []) : []);
+
+    // Treffer normalisieren
+    for (const p of personen) hits.push({ typ: 'Person', titel: p.name, sub: p.email || p.telefon || '', url: '/personen.html', meta: p });
+    for (const h of handwerker) hits.push({ typ: 'Handwerker', titel: h.firma, sub: (h.kategorie || '') + (h.mobile ? ' · ' + h.mobile : ''), url: '/handwerker.html#' + h.id, meta: h });
+    for (const v of vollmachten) hits.push({ typ: 'Vollmacht', titel: v.vollmachtgeber_name + ' → ' + v.bevollmaechtigter_name, sub: `${v.art} · ${v.status} · ${v.doc_hash}`, url: '/vollmachten.html', meta: v });
+    for (const r of reklamationen) hits.push({ typ: 'Reklamation', titel: (r.beschreibung || '').slice(0, 80), sub: `STWEG ${r.stweg || '—'} · ${r.status}`, url: '/reklamationen.html', meta: r });
+    for (const m of mails) hits.push({ typ: 'E-Mail', titel: m.subject || '(kein Subject)', sub: 'von ' + (m.from_email || '—'), url: '/email-archiv.html', meta: m });
+    for (const v of verwaltungen) hits.push({ typ: 'Verwaltung', titel: v.firma_name, sub: (v.stweg ? 'STWEG ' + v.stweg : 'allgemein') + (v.email ? ' · ' + v.email : ''), url: '/verwaltung-admin.html', meta: v });
+    for (const w of wohnungen) hits.push({ typ: 'Wohnung', titel: w.bezeichnung + ' (STWEG ' + w.stweg + ')', sub: [w.eigentuemer_name && 'Eig: ' + w.eigentuemer_name, w.mieter_name && 'Mt: ' + w.mieter_name].filter(Boolean).join(' · '), url: '/objektverwaltung.html', meta: w });
+    for (const p of projekte) hits.push({ typ: 'Projekt', titel: p.titel, sub: p.status, url: '/projekte.html?slug=' + encodeURIComponent(p.slug), meta: p });
+
+    // Ohne Treffer: direkt zurueck
+    if (hits.length === 0) return res.json({ q, hits: [], answer: 'Keine Treffer fuer „' + q + '".' });
+
+    // KI: rank + 1-Satz-Antwort
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+      return res.json({ q, hits: hits.slice(0, 8), answer: `${hits.length} Treffer fuer „${q}". (KI-Ranking nicht verfuegbar, keine OPENROUTER_API_KEY.)` });
+    }
+    try {
+      const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(15000),
+        body: JSON.stringify({
+          model: 'anthropic/claude-haiku-4.5',
+          max_tokens: 400,
+          messages: [
+            { role: 'system', content: `Du bist die Suchhilfe der STWEG-Kooperation Rosenweg. Beantworte die User-Suche kurz (1-2 Saetze), nenne die wichtigsten 1-3 Treffer beim Namen. Wenn unklar was der User will, frag nach. Bei keinen relevanten Treffern: sag das ehrlich.
+
+Antworte als JSON:
+{
+  "answer": "1-2 Saetze. Bei Personen/Handwerkern: nenne Name + wichtigstes Detail. Bei Vollmachten: nenne wer-an-wen + Status.",
+  "top_indices": [0, 2, 5]   // Array der Hit-Indizes (max 5) die am relevantesten sind, nach Relevanz sortiert
+}` },
+            { role: 'user', content: `User-Suche: "${q}"\n\nGefundene Treffer:\n` + hits.map((h, i) => `[${i}] ${h.typ}: ${h.titel}${h.sub ? ' (' + h.sub + ')' : ''}`).join('\n') },
+          ],
+        }),
+      });
+      if (orRes.ok) {
+        const d = await orRes.json();
+        const txt = d.choices?.[0]?.message?.content || '';
+        try {
+          const json = JSON.parse(txt.match(/\{[\s\S]*\}/)?.[0] || txt);
+          const topIdx = Array.isArray(json.top_indices) ? json.top_indices.filter(i => Number.isInteger(i) && i >= 0 && i < hits.length) : [];
+          const sortedHits = topIdx.length > 0
+            ? [...topIdx.map(i => hits[i]), ...hits.filter((_, i) => !topIdx.includes(i))].slice(0, 8)
+            : hits.slice(0, 8);
+          return res.json({ q, hits: sortedHits, answer: json.answer || `${hits.length} Treffer fuer „${q}".`, total: hits.length });
+        } catch {
+          return res.json({ q, hits: hits.slice(0, 8), answer: txt.slice(0, 300) || `${hits.length} Treffer fuer „${q}".`, total: hits.length });
+        }
+      }
+    } catch (e) { console.warn('[ki-search] LLM fail:', e.message); }
+    res.json({ q, hits: hits.slice(0, 8), answer: `${hits.length} Treffer fuer „${q}".`, total: hits.length });
+  } catch (err) { console.error('[ki-search] error:', err); res.status(500).json({ error: err.message }); }
+});
+
 // ─── Permission API ─────────────────────────────────────────────────
 app.get('/api/permissions/pages', authMiddleware, requirePermission('rechteverwaltung', 'read'), (req, res) => {
   res.json({ pages: MANAGED_PAGES });
