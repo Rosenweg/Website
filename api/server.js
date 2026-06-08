@@ -14064,6 +14064,157 @@ app.delete('/api/isp/reverse-proxy/:id', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// === Redirects ===
+app.get('/api/isp/redirects', authMiddleware, async (req, res) => {
+  try {
+    const admin = ispIsAdmin(req);
+    const email = (req.user.email || '').toLowerCase();
+    const r = admin
+      ? await pool.query(`SELECT r.*, w.bezeichnung AS wohnung_bezeichnung, w.stweg FROM isp_redirects r
+                           LEFT JOIN wohnungen w ON w.id = r.wohnung_id
+                           ORDER BY r.active DESC, r.source_host, r.source_path`)
+      : await pool.query(`SELECT r.*, w.bezeichnung AS wohnung_bezeichnung, w.stweg FROM isp_redirects r
+                           LEFT JOIN wohnungen w ON w.id = r.wohnung_id
+                           WHERE LOWER(r.owner_email) = $1
+                           ORDER BY r.active DESC, r.source_host`, [email]);
+    res.json({ redirects: r.rows, is_admin: admin });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/isp/redirects', authMiddleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.source_host || !b.target_url) return res.status(400).json({ error: 'source_host + target_url Pflicht' });
+    const owner = b.owner_email || req.user.email;
+    if (!ispIsAdmin(req) && (owner || '').toLowerCase() !== (req.user.email || '').toLowerCase()) {
+      return res.status(403).json({ error: 'Du kannst nur eigene Redirects anlegen' });
+    }
+    const r = await pool.query(
+      `INSERT INTO isp_redirects (source_host, source_path, target_url, http_code, preserve_path,
+                                   owner_email, wohnung_id, active, notizen)
+       VALUES ($1,$2,$3,COALESCE($4,301),COALESCE($5,false),$6,$7,COALESCE($8,true),$9) RETURNING *`,
+      [b.source_host.toLowerCase(), b.source_path || '/', b.target_url, b.http_code, b.preserve_path,
+       owner, b.wohnung_id || null, b.active, b.notizen || null],
+    );
+    res.json(r.rows[0]);
+  } catch (err) {
+    if (String(err.message).includes('duplicate key')) return res.status(409).json({ error: 'source_host+path bereits vergeben' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/isp/redirects/:id', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const existing = await pool.query('SELECT * FROM isp_redirects WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = existing.rows[0];
+    const admin = ispIsAdmin(req);
+    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Owner oder Admin' });
+    const b = req.body || {};
+    const updates = []; const params = [];
+    const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
+    const allowed = ['source_host','source_path','target_url','http_code','preserve_path','active','notizen','owner_email','wohnung_id'];
+    for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    push('updated_at', new Date());
+    params.push(id);
+    const r = await pool.query(`UPDATE isp_redirects SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/isp/redirects/:id', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const existing = await pool.query('SELECT * FROM isp_redirects WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = existing.rows[0];
+    const admin = ispIsAdmin(req);
+    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Owner oder Admin' });
+    await pool.query('DELETE FROM isp_redirects WHERE id = $1', [id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// === Traefik-Provider-Endpoint ===
+// Liefert die dynamic-config fuer Traefik (http-provider). Kein authMiddleware
+// noetig — der Endpoint laeuft nur ueber das interne Docker-Netz, Traefik
+// pollt im 30s-Takt. Output: JSON (Traefik akzeptiert YAML+JSON).
+app.get('/api/isp/traefik-config', async (req, res) => {
+  try {
+    const routes = (await pool.query(`SELECT * FROM isp_reverse_proxy_routes WHERE active = true`)).rows;
+    const redirects = (await pool.query(`SELECT * FROM isp_redirects WHERE active = true`)).rows;
+    const config = { http: { routers: {}, services: {}, middlewares: {} } };
+
+    // Reverse-Proxy-Routen
+    routes.forEach((r, i) => {
+      const id = 'rp_' + r.id;
+      const middlewares = [];
+      if (r.auth_required) {
+        // Authentik-Forward-Auth Middleware (intern, expects auth.rosenweg4303.ch)
+        config.http.middlewares['auth_' + r.id] = {
+          forwardAuth: {
+            address: 'https://auth.rosenweg4303.ch/outpost.goauthentik.io/auth/traefik',
+            trustForwardHeader: true,
+            authResponseHeaders: ['X-authentik-username','X-authentik-groups','X-authentik-email','X-authentik-name','X-authentik-uid'],
+          },
+        };
+        middlewares.push('auth_' + r.id);
+      }
+      if (r.rate_limit_per_min) {
+        config.http.middlewares['rl_' + r.id] = {
+          rateLimit: { average: r.rate_limit_per_min, period: '1m', burst: r.rate_limit_per_min * 2 },
+        };
+        middlewares.push('rl_' + r.id);
+      }
+      config.http.routers[id] = {
+        rule: `Host(\`${r.hostname}\`)`,
+        service: id,
+        entryPoints: ['websecure'],
+        middlewares,
+        ...(r.ssl ? { tls: r.ssl_method === 'letsencrypt' ? { certResolver: 'letsencrypt' } : {} } : {}),
+      };
+      config.http.services[id] = { loadBalancer: { servers: [{ url: r.backend_url }] } };
+    });
+
+    // Redirects (HTTP code 301/302) als Middleware + Router pattern
+    redirects.forEach(rd => {
+      const id = 'rd_' + rd.id;
+      const ruleParts = [`Host(\`${rd.source_host}\`)`];
+      if (rd.source_path && rd.source_path !== '/') ruleParts.push(`PathPrefix(\`${rd.source_path}\`)`);
+      // Redirect-Middleware
+      const regex = rd.preserve_path
+        ? `^https?://${rd.source_host.replace(/\./g, '\\.')}/(.*)$`
+        : `^https?://${rd.source_host.replace(/\./g, '\\.')}.*$`;
+      const replacement = rd.preserve_path
+        ? `${rd.target_url}/\${1}`
+        : rd.target_url;
+      config.http.middlewares[id] = {
+        redirectRegex: { regex, replacement, permanent: rd.http_code === 301 || rd.http_code === 308 },
+      };
+      config.http.routers[id] = {
+        rule: ruleParts.join(' && '),
+        service: 'noop@internal', // dummy, der wird wegen redirect nie aufgerufen
+        entryPoints: ['websecure'],
+        middlewares: [id],
+        tls: { certResolver: 'letsencrypt' },
+      };
+      // Auch HTTP (port 80) Router fuer redirect (ohne TLS)
+      config.http.routers[id + '_http'] = {
+        rule: ruleParts.join(' && '),
+        service: 'noop@internal',
+        entryPoints: ['web'],
+        middlewares: [id],
+      };
+    });
+
+    res.json(config);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // === Mailboxes (PMG-Vorbereitung) ===
 app.get('/api/isp/mailboxes', authMiddleware, async (req, res) => {
   try {
@@ -16122,6 +16273,27 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_isp_vlanreq_status ON isp_vlan_requests(status);
       CREATE INDEX IF NOT EXISTS idx_isp_vlanreq_user ON isp_vlan_requests(LOWER(antragsteller_email));
+
+      -- Adress-Umleitungen (HTTP 301/302). Source-Host -> Target-URL.
+      -- z.B. 'alt.rosenweg4303.ch' -> 'https://www.rosenweg4303.ch/neu-Pfad'
+      CREATE TABLE IF NOT EXISTS isp_redirects (
+        id SERIAL PRIMARY KEY,
+        source_host VARCHAR(255) NOT NULL,
+        source_path VARCHAR(500) DEFAULT '/',    -- z.B. '/foo' oder '/' fuer alles
+        target_url VARCHAR(1000) NOT NULL,
+        http_code INTEGER DEFAULT 301,           -- 301 permanent | 302 temporaer
+        preserve_path BOOLEAN DEFAULT false,     -- /foo/bar wird an target/foo/bar haengt
+        owner_email TEXT,
+        wohnung_id INTEGER REFERENCES wohnungen(id) ON DELETE SET NULL,
+        active BOOLEAN DEFAULT true,
+        notizen TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (source_host, source_path),
+        CONSTRAINT isp_redir_code_chk CHECK (http_code IN (301,302,307,308))
+      );
+      CREATE INDEX IF NOT EXISTS idx_isp_redir_owner ON isp_redirects(LOWER(owner_email));
+      CREATE INDEX IF NOT EXISTS idx_isp_redir_active ON isp_redirects(active);
 
       -- Zentraler Reverse-Proxy (Traefik/Nginx) — alle Web-Services
       -- (intern + extern) laufen hierueber: zentrale SSL-Terminierung,
