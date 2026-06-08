@@ -58,6 +58,14 @@
             <p class="text-xs text-gray-500 mt-4">Das Netzwerk und WLAN wird primär für die technischen Anlagen am Rosenweg betrieben und den Bewohnern ohne Entgelt zur Verfügung gestellt. Die Erschliessung neuer Standorte (Verkabelung, Access Points) wird nach Aufwand verrechnet.</p>
         </div>
 
+        <!-- Mein Anschluss (Customer-Sicht) -->
+        <div id="mein-anschluss" class="hidden bg-white rounded-xl shadow-sm border p-6 mb-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                <span>🏠</span> Mein Anschluss
+            </h2>
+            <div id="mein-anschluss-body" class="text-sm text-gray-600">Lade...</div>
+        </div>
+
         <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
 
             <!-- WLAN-Zugang -->
@@ -84,6 +92,17 @@
                     <h2 class="text-lg font-semibold text-gray-900">TV7</h2>
                 </div>
                 <p class="text-sm text-gray-600">Init7 IPTV — über 250 Sender live im Browser schauen.</p>
+            </a>
+
+            <!-- VPN-Zugang (jeder User) -->
+            <a href="/isp-mein-zugang.html" class="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition group">
+                <div class="flex items-center gap-4 mb-3">
+                    <div class="bg-indigo-100 text-indigo-600 p-3 rounded-lg group-hover:bg-indigo-600 group-hover:text-white transition">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                    </div>
+                    <h2 class="text-lg font-semibold text-gray-900">Mein Zugang</h2>
+                </div>
+                <p class="text-sm text-gray-600">VPN-Konfiguration, eigene VLAN-Antraege, Reverse-Proxy-Routen.</p>
             </a>
 
             <!-- Netzwerk-Status (Admin) -->
@@ -128,6 +147,17 @@
                     <p class="text-sm text-gray-600">FPÜV-konforme Verbindungsprotokolle.</p>
                 </a>
 
+                <!-- ISP-Admin (Erschliessung, VLANs, Fix-IPs, RP, Mailboxes) -->
+                <a href="/isp-admin.html" class="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition group">
+                    <div class="flex items-center gap-4 mb-3">
+                        <div class="bg-rose-100 text-rose-600 p-3 rounded-lg group-hover:bg-rose-600 group-hover:text-white transition">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
+                        </div>
+                        <h2 class="text-lg font-semibold text-gray-900">ISP-Admin</h2>
+                    </div>
+                    <p class="text-sm text-gray-600">Erschliessung, VLANs, Fix-IPs, Reverse-Proxy, Mailserver/PMG.</p>
+                </a>
+
             </div>
         </div>
     </main>
@@ -136,8 +166,37 @@
         const user = AuthentikAuth.getUser();
         if (user?.isAdmin) {
             document.getElementById('admin-cards').classList.remove('hidden');
-
         }
+        // Mein Anschluss laden
+        async function loadMeinAnschluss() {
+            if (!user) return;
+            try {
+                const r = await AuthentikAuth.apiFetch('/api/isp/subscribers/me');
+                if (!r.ok) return;
+                const { subscribers } = await r.json();
+                if (!subscribers || subscribers.length === 0) return;
+                const box = document.getElementById('mein-anschluss');
+                const body = document.getElementById('mein-anschluss-body');
+                box.classList.remove('hidden');
+                const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                body.innerHTML = subscribers.map(s => `
+                    <div class="border rounded-lg p-3 mb-2 bg-gray-50">
+                        <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+                            <strong>${esc(s.wohnung_bezeichnung || ('Wohnung #' + s.wohnung_id))} <span class="text-xs text-gray-500">STWEG ${s.stweg}</span></strong>
+                            <span class="text-xs ${s.status === 'aktiv' ? 'bg-green-100 text-green-800' : s.status === 'geplant' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-700'} px-2 py-0.5 rounded">${esc(s.status)}</span>
+                        </div>
+                        <div class="grid sm:grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                            ${s.anschluss_typ ? `<div><span class="text-gray-500">Typ:</span> ${esc(s.anschluss_typ)}</div>` : ''}
+                            ${s.bandbreite_down_mbps ? `<div><span class="text-gray-500">Down:</span> ${s.bandbreite_down_mbps} Mbps</div>` : ''}
+                            ${s.bandbreite_up_mbps ? `<div><span class="text-gray-500">Up:</span> ${s.bandbreite_up_mbps} Mbps</div>` : ''}
+                            ${s.vlan ? `<div><span class="text-gray-500">VLAN:</span> ${s.vlan}</div>` : ''}
+                            ${s.switch_name ? `<div><span class="text-gray-500">Switch:</span> ${esc(s.switch_name)} Port ${esc(s.switch_port || '?')}</div>` : ''}
+                            ${s.eigenleistung_chf ? `<div><span class="text-gray-500">Eigenleistung:</span> CHF ${Number(s.eigenleistung_chf).toFixed(2)}</div>` : ''}
+                        </div>
+                    </div>`).join('');
+            } catch (err) { console.warn('Mein Anschluss:', err.message); }
+        }
+        document.addEventListener('DOMContentLoaded', loadMeinAnschluss);
     </script>
 </body>
 </html>
