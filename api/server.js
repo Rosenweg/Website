@@ -13688,6 +13688,288 @@ app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamation
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ─── ISP / Anschluss / VPN / Fix-IPs / Mailboxes ─────────────────────
+// Berechtigungs-Helper: nur technik/praesident sind voll-admin auf ISP.
+function ispIsAdmin(req) {
+  const g = req.user?.groups || [];
+  return isTechnik(g) || isPraesident(g) || req.user?.isAdmin;
+}
+
+// Hilfsfunktion: hat user die Wohnung X als Eigentuemer/Mieter/Bewohner?
+async function userOwnsWohnung(email, wohnungId) {
+  if (!email || !wohnungId) return false;
+  const r = await pool.query(
+    `SELECT 1 FROM wohnungen_kontakte k
+       JOIN personen p ON p.id = k.person_id
+      WHERE k.wohnung_id = $1 AND LOWER(p.email) = LOWER($2)
+        AND k.archiviert_am IS NULL LIMIT 1`,
+    [wohnungId, email],
+  );
+  return r.rows.length > 0;
+}
+
+// === Subscribers (Wohnungs-Anschluesse) ===
+app.get('/api/isp/subscribers', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Praesident' });
+    const r = await pool.query(
+      `SELECT s.*, w.bezeichnung AS wohnung_bezeichnung, w.stweg
+         FROM isp_subscribers s
+         LEFT JOIN wohnungen w ON w.id = s.wohnung_id
+        ORDER BY w.stweg, w.bezeichnung`,
+    );
+    res.json({ subscribers: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/isp/subscribers/me', authMiddleware, async (req, res) => {
+  try {
+    const email = (req.user.email || '').toLowerCase();
+    const r = await pool.query(
+      `SELECT s.*, w.bezeichnung AS wohnung_bezeichnung, w.stweg
+         FROM isp_subscribers s
+         JOIN wohnungen w ON w.id = s.wohnung_id
+        WHERE w.id IN (
+          SELECT DISTINCT k.wohnung_id FROM wohnungen_kontakte k
+            JOIN personen p ON p.id = k.person_id
+           WHERE LOWER(p.email) = $1 AND k.archiviert_am IS NULL
+        )
+        ORDER BY w.stweg, w.bezeichnung`,
+      [email],
+    );
+    res.json({ subscribers: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/isp/subscribers', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Praesident' });
+    const b = req.body || {};
+    if (!b.wohnung_id) return res.status(400).json({ error: 'wohnung_id Pflicht' });
+    const r = await pool.query(
+      `INSERT INTO isp_subscribers (wohnung_id, status, anschluss_typ, switch_name, switch_port, vlan,
+                                     bandbreite_down_mbps, bandbreite_up_mbps, mac_dot1x,
+                                     eigenleistung_chf, eigenleistung_datum, notizen)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      [b.wohnung_id, b.status || 'geplant', b.anschluss_typ || null, b.switch_name || null, b.switch_port || null,
+       b.vlan || null, b.bandbreite_down_mbps || null, b.bandbreite_up_mbps || null, b.mac_dot1x || null,
+       b.eigenleistung_chf || null, b.eigenleistung_datum || null, b.notizen || null],
+    );
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/isp/subscribers/:id', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Praesident' });
+    const id = parseInt(req.params.id, 10);
+    const b = req.body || {};
+    const updates = []; const params = [];
+    const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
+    for (const col of ['status','anschluss_typ','switch_name','switch_port','vlan','bandbreite_down_mbps','bandbreite_up_mbps','mac_dot1x','eigenleistung_chf','eigenleistung_datum','notizen']) {
+      if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
+    }
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    push('updated_at', new Date());
+    params.push(id);
+    const r = await pool.query(`UPDATE isp_subscribers SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/isp/subscribers/:id', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Praesident' });
+    await pool.query('DELETE FROM isp_subscribers WHERE id = $1', [parseInt(req.params.id, 10)]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// === Fix-IPs ===
+app.get('/api/isp/fixed-ips', authMiddleware, async (req, res) => {
+  try {
+    const admin = ispIsAdmin(req);
+    const email = (req.user.email || '').toLowerCase();
+    const r = admin
+      ? await pool.query(`SELECT ip.*, w.bezeichnung AS wohnung_bezeichnung, w.stweg FROM isp_fixed_ips ip
+                           LEFT JOIN wohnungen w ON w.id = ip.wohnung_id
+                           ORDER BY ip.ip_typ, ip.ip_address`)
+      : await pool.query(`SELECT ip.*, w.bezeichnung AS wohnung_bezeichnung, w.stweg FROM isp_fixed_ips ip
+                           JOIN wohnungen w ON w.id = ip.wohnung_id
+                           WHERE w.id IN (
+                             SELECT DISTINCT k.wohnung_id FROM wohnungen_kontakte k
+                               JOIN personen p ON p.id = k.person_id
+                              WHERE LOWER(p.email) = $1 AND k.archiviert_am IS NULL
+                           ) ORDER BY ip.ip_typ, ip.ip_address`, [email]);
+    res.json({ fixed_ips: r.rows, is_admin: admin });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/isp/fixed-ips', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Praesident' });
+    const b = req.body || {};
+    if (!b.ip_address || !b.ip_typ) return res.status(400).json({ error: 'ip_address + ip_typ Pflicht' });
+    if (!b.wohnung_id && !b.service_name) return res.status(400).json({ error: 'wohnung_id ODER service_name Pflicht' });
+    const r = await pool.query(
+      `INSERT INTO isp_fixed_ips (ip_address, ip_typ, wohnung_id, service_name, zweck, mac_address, hostname, notizen)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [b.ip_address, b.ip_typ, b.wohnung_id || null, b.service_name || null, b.zweck || null,
+       b.mac_address || null, b.hostname || null, b.notizen || null],
+    );
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/isp/fixed-ips/:id', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Praesident' });
+    const id = parseInt(req.params.id, 10);
+    const b = req.body || {};
+    const updates = []; const params = [];
+    const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
+    for (const col of ['ip_address','ip_typ','wohnung_id','service_name','zweck','mac_address','hostname','notizen']) {
+      if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
+    }
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    push('updated_at', new Date());
+    params.push(id);
+    const r = await pool.query(`UPDATE isp_fixed_ips SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/isp/fixed-ips/:id', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Praesident' });
+    await pool.query('DELETE FROM isp_fixed_ips WHERE id = $1', [parseInt(req.params.id, 10)]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// === VPN-Konten ===
+app.get('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
+  try {
+    const admin = ispIsAdmin(req);
+    const email = (req.user.email || '').toLowerCase();
+    const r = admin
+      ? await pool.query('SELECT * FROM isp_vpn_accounts ORDER BY active DESC, user_email, backend')
+      : await pool.query('SELECT * FROM isp_vpn_accounts WHERE LOWER(user_email) = $1 ORDER BY active DESC, backend', [email]);
+    res.json({ vpn_accounts: r.rows, is_admin: admin });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.backend) return res.status(400).json({ error: 'backend Pflicht' });
+    // User darf nur fuer sich selbst anlegen, Admin fuer beliebige
+    const target = b.user_email || req.user.email;
+    if (!ispIsAdmin(req) && (target || '').toLowerCase() !== (req.user.email || '').toLowerCase()) {
+      return res.status(403).json({ error: 'Du kannst nur eigene VPN-Konten anlegen' });
+    }
+    const r = await pool.query(
+      `INSERT INTO isp_vpn_accounts (user_email, backend, username, public_key, assigned_ip, config_path, active, notizen)
+       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,true),$8) RETURNING *`,
+      [target, b.backend, b.username || null, b.public_key || null, b.assigned_ip || null,
+       b.config_path || null, b.active, b.notizen || null],
+    );
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/isp/vpn-accounts/:id', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const existing = await pool.query('SELECT * FROM isp_vpn_accounts WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = existing.rows[0];
+    if (!ispIsAdmin(req) && (v.user_email || '').toLowerCase() !== (req.user.email || '').toLowerCase()) {
+      return res.status(403).json({ error: 'Nur Owner oder Admin' });
+    }
+    const b = req.body || {};
+    const updates = []; const params = [];
+    const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
+    const allowed = ['backend','username','public_key','assigned_ip','config_path','active','notizen'];
+    for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    push('updated_at', new Date());
+    params.push(id);
+    const r = await pool.query(`UPDATE isp_vpn_accounts SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/isp/vpn-accounts/:id', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const existing = await pool.query('SELECT * FROM isp_vpn_accounts WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = existing.rows[0];
+    if (!ispIsAdmin(req) && (v.user_email || '').toLowerCase() !== (req.user.email || '').toLowerCase()) {
+      return res.status(403).json({ error: 'Nur Owner oder Admin' });
+    }
+    await pool.query('DELETE FROM isp_vpn_accounts WHERE id = $1', [id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// === Mailboxes (PMG-Vorbereitung) ===
+app.get('/api/isp/mailboxes', authMiddleware, async (req, res) => {
+  try {
+    const admin = ispIsAdmin(req);
+    const email = (req.user.email || '').toLowerCase();
+    const r = admin
+      ? await pool.query(`SELECT m.*, w.bezeichnung AS wohnung_bezeichnung, w.stweg FROM isp_mailboxes m
+                           LEFT JOIN wohnungen w ON w.id = m.wohnung_id
+                           ORDER BY m.domain, m.local_part`)
+      : await pool.query('SELECT * FROM isp_mailboxes WHERE LOWER(owner_user_email) = $1 ORDER BY domain, local_part', [email]);
+    res.json({ mailboxes: r.rows, is_admin: admin });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/isp/mailboxes', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Praesident' });
+    const b = req.body || {};
+    if (!b.local_part || !b.domain) return res.status(400).json({ error: 'local_part + domain Pflicht' });
+    const r = await pool.query(
+      `INSERT INTO isp_mailboxes (local_part, domain, owner_user_email, wohnung_id, aliases, quota_mb, active)
+       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,true)) RETURNING *`,
+      [b.local_part.toLowerCase(), b.domain.toLowerCase(), b.owner_user_email || null,
+       b.wohnung_id || null, Array.isArray(b.aliases) ? b.aliases : null, b.quota_mb || null, b.active],
+    );
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/isp/mailboxes/:id', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Praesident' });
+    const id = parseInt(req.params.id, 10);
+    const b = req.body || {};
+    const updates = []; const params = [];
+    const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
+    for (const col of ['local_part','domain','owner_user_email','wohnung_id','aliases','quota_mb','active','notizen']) {
+      if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
+    }
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    push('updated_at', new Date());
+    params.push(id);
+    const r = await pool.query(`UPDATE isp_mailboxes SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/isp/mailboxes/:id', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Praesident' });
+    await pool.query('DELETE FROM isp_mailboxes WHERE id = $1', [parseInt(req.params.id, 10)]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ─── Vollmachten-Templates ──────────────────────────────────────────
 function canEditTemplates(groups) {
   return isTechnik(groups) || isPraesident(groups) || isAusschussForAny(groups);
@@ -15598,6 +15880,95 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_vmvg_vollmacht ON vollmachten_vollmachtgeber(vollmacht_id);
       CREATE INDEX IF NOT EXISTS idx_vmvg_email ON vollmachten_vollmachtgeber(LOWER(email));
+
+      -- ───── ISP / Anschluss-Verwaltung ─────
+      -- Pro Wohnung ein Anschluss-Datensatz (Status, Switch-Port, Bandbreite,
+      -- VLAN, Erschliessungs-Kosten). Sichtbar fuer Bewohner als
+      -- 'Mein Anschluss', voll editierbar fuer technik/praesident.
+      CREATE TABLE IF NOT EXISTS isp_subscribers (
+        id SERIAL PRIMARY KEY,
+        wohnung_id INTEGER REFERENCES wohnungen(id) ON DELETE CASCADE,
+        status VARCHAR(20) DEFAULT 'aktiv',     -- 'aktiv' | 'inaktiv' | 'geplant' | 'gekuendigt'
+        anschluss_typ VARCHAR(30),               -- 'glasfaser' | 'lan' | 'wlan-only' | 'tv-only'
+        switch_name VARCHAR(120),                -- z.B. 'switch-rosenweg-9'
+        switch_port VARCHAR(20),                 -- z.B. '12'
+        vlan INTEGER,
+        bandbreite_down_mbps INTEGER,
+        bandbreite_up_mbps INTEGER,
+        mac_dot1x VARCHAR(20),                   -- bei 802.1X Auth
+        eigenleistung_chf DECIMAL(10,2),         -- vom Bewohner getragen
+        eigenleistung_datum DATE,
+        notizen TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (wohnung_id),
+        CONSTRAINT isp_sub_status_chk CHECK (status IN ('aktiv','inaktiv','geplant','gekuendigt'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_isp_sub_status ON isp_subscribers(status);
+      CREATE INDEX IF NOT EXISTS idx_isp_sub_wohnung ON isp_subscribers(wohnung_id);
+
+      -- Fix-IP-Zuteilungen (oeffentlich oder intern). Kann an
+      -- Subscriber gebunden sein (= eine Wohnung) oder an Service
+      -- (= kein wohnung_id, dafuer service_name).
+      CREATE TABLE IF NOT EXISTS isp_fixed_ips (
+        id SERIAL PRIMARY KEY,
+        ip_address INET NOT NULL,
+        ip_typ VARCHAR(20) NOT NULL,             -- 'public_v4' | 'public_v6' | 'lan' | 'mgmt'
+        wohnung_id INTEGER REFERENCES wohnungen(id) ON DELETE SET NULL,
+        service_name VARCHAR(120),               -- bei service-IPs (z.B. 'pmg', 'website')
+        zweck TEXT,                              -- Freitext
+        mac_address VARCHAR(20),                 -- DHCP-Reservation, optional
+        hostname VARCHAR(120),
+        notizen TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (ip_address),
+        CONSTRAINT isp_ip_typ_chk CHECK (ip_typ IN ('public_v4','public_v6','lan','mgmt')),
+        CONSTRAINT isp_ip_target_chk CHECK (wohnung_id IS NOT NULL OR service_name IS NOT NULL)
+      );
+      CREATE INDEX IF NOT EXISTS idx_isp_ip_wohnung ON isp_fixed_ips(wohnung_id) WHERE wohnung_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_isp_ip_service ON isp_fixed_ips(service_name) WHERE service_name IS NOT NULL;
+
+      -- VPN-Konten pro User (Authentik-email-basiert).
+      -- Backend kann WireGuard, Netbird, Tailscale o.ae. sein.
+      CREATE TABLE IF NOT EXISTS isp_vpn_accounts (
+        id SERIAL PRIMARY KEY,
+        user_email TEXT NOT NULL,
+        backend VARCHAR(20) NOT NULL DEFAULT 'wireguard', -- 'wireguard' | 'netbird' | 'tailscale'
+        username VARCHAR(120),                   -- bei Tools mit User-Namen
+        public_key TEXT,                         -- WireGuard
+        assigned_ip INET,
+        config_path TEXT,                        -- wenn Konfig-File generiert wird
+        active BOOLEAN DEFAULT true,
+        last_connect_at TIMESTAMPTZ,
+        notizen TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_isp_vpn_user ON isp_vpn_accounts(LOWER(user_email));
+      CREATE INDEX IF NOT EXISTS idx_isp_vpn_active ON isp_vpn_accounts(active);
+
+      -- PMG-Mailboxes-Cache (Datenmodell vorbereitet, fuellt sich erst
+      -- wenn PMG-API-Sync aktiv ist). Mailbox = Postfach auf eigenem
+      -- Mailserver, gehoert zu einem User oder Service.
+      CREATE TABLE IF NOT EXISTS isp_mailboxes (
+        id SERIAL PRIMARY KEY,
+        local_part VARCHAR(120) NOT NULL,        -- vor @
+        domain VARCHAR(120) NOT NULL,            -- nach @
+        owner_user_email TEXT,                   -- Wem gehoert das Postfach
+        wohnung_id INTEGER REFERENCES wohnungen(id) ON DELETE SET NULL,
+        aliases TEXT[],                          -- weitere Adressen die dahin gehen
+        quota_mb INTEGER,
+        used_mb INTEGER,
+        active BOOLEAN DEFAULT true,
+        pmg_id VARCHAR(60),                      -- ID in PMG-System
+        last_synced_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (local_part, domain)
+      );
+      CREATE INDEX IF NOT EXISTS idx_isp_mb_owner ON isp_mailboxes(LOWER(owner_user_email));
+      CREATE INDEX IF NOT EXISTS idx_isp_mb_domain ON isp_mailboxes(domain);
 
       -- Umlaut-invariante Such-Funktion (fuer KI-Suche etc.)
       -- 'Müller' und 'Mueller' werden beide auf 'mueller' normalisiert.
