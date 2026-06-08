@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mein Zugang — Rosenweg ISP</title>
+  <link rel="icon" href="/logo-rosenweg.png">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/nav.js?v=2"></script>
+  <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'); body { font-family: 'Inter', sans-serif; }</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+  <script>RosenwegNav.init({ active: 'isp' });</script>
+
+  <main class="max-w-4xl mx-auto px-4 py-6">
+    <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center"><p class="text-gray-600">Lade…</p></div>
+
+    <div id="content" class="hidden space-y-6">
+      <div>
+        <a href="/isp.html" class="text-sm text-blue-600 hover:underline">← ISP-Uebersicht</a>
+        <h1 class="text-2xl font-bold text-gray-900 mt-2">🔑 Mein Zugang</h1>
+        <p class="text-sm text-gray-600">VPN-Konten, eigene VLAN-Antraege und Reverse-Proxy-Routen.</p>
+      </div>
+
+      <!-- VPN-Konten -->
+      <section class="bg-white rounded-lg shadow p-5">
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <h2 class="text-lg font-semibold">🔒 VPN-Konten</h2>
+          <button onclick="openVpnModal()" class="text-sm bg-indigo-600 text-white px-3 py-1.5 rounded">+ Neues VPN-Konto</button>
+        </div>
+        <div id="vpn-list" class="space-y-2"></div>
+      </section>
+
+      <!-- VLAN-Anträge -->
+      <section class="bg-white rounded-lg shadow p-5">
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <h2 class="text-lg font-semibold">🌐 Meine VLAN-Antraege</h2>
+          <button onclick="openVlanModal()" class="text-sm bg-blue-600 text-white px-3 py-1.5 rounded">+ VLAN beantragen</button>
+        </div>
+        <div id="vlan-list" class="space-y-2"></div>
+      </section>
+
+      <!-- Reverse-Proxy-Routen -->
+      <section class="bg-white rounded-lg shadow p-5">
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <h2 class="text-lg font-semibold">🔁 Reverse-Proxy-Routen</h2>
+          <button onclick="openRpModal()" class="text-sm bg-emerald-600 text-white px-3 py-1.5 rounded">+ Route hinzufuegen</button>
+        </div>
+        <p class="text-xs text-gray-500 mb-2">Eigene Web-Services via Rosenweg-Reverse-Proxy zugaenglich machen. SSL/Authentik-Auth wird zentral vorgelagert.</p>
+        <div id="rp-list" class="space-y-2"></div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const fmtDt = s => s ? new Date(s).toLocaleString('de-CH') : '—';
+  let vpnAccounts = [], vlanRequests = [], rpRoutes = [];
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    const u = await AuthentikAuth.init({ requireAuth: true });
+    if (!u) return;
+    document.getElementById('auth-gate').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+    loadVpn(); loadVlan(); loadRp();
+  });
+
+  // VPN
+  async function loadVpn() {
+    const r = await AuthentikAuth.apiFetch('/api/isp/vpn-accounts');
+    if (!r.ok) return;
+    vpnAccounts = (await r.json()).vpn_accounts || [];
+    renderVpn();
+  }
+  function renderVpn() {
+    const wrap = document.getElementById('vpn-list');
+    if (vpnAccounts.length === 0) { wrap.innerHTML = '<p class="text-gray-400 italic text-sm">Noch kein VPN-Konto.</p>'; return; }
+    wrap.innerHTML = vpnAccounts.map(v => `
+      <div class="border rounded p-3 bg-gray-50">
+        <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
+          <div><span class="text-xs bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded">${esc(v.backend)}</span>
+            ${v.username ? `<span class="ml-2 font-mono text-sm">${esc(v.username)}</span>` : ''}
+            ${v.active ? '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded ml-2">aktiv</span>' : '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-2">inaktiv</span>'}
+          </div>
+          <button onclick="delVpn(${v.id})" class="text-xs text-red-600 hover:underline">Loeschen</button>
+        </div>
+        ${v.assigned_ip ? `<div class="text-xs"><span class="text-gray-500">IP:</span> <span class="font-mono">${esc(v.assigned_ip)}</span></div>` : ''}
+        ${v.public_key ? `<details class="mt-1"><summary class="text-xs text-gray-500 cursor-pointer">Public-Key anzeigen</summary><pre class="bg-white border rounded p-2 mt-1 text-xs overflow-auto">${esc(v.public_key)}</pre></details>` : ''}
+        <div class="text-xs text-gray-500 mt-1">Letzter Connect: ${fmtDt(v.last_connect_at)}</div>
+      </div>`).join('');
+  }
+  function openVpnModal() {
+    const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
+      <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5">
+        <h2 class="font-bold mb-3">Neues VPN-Konto</h2>
+        <div class="space-y-2 text-sm">
+          <div><label class="block text-xs text-gray-600">Backend</label><select id="v-backend" class="w-full border rounded px-2 py-1">
+            <option value="wireguard">WireGuard</option><option value="netbird">Netbird</option><option value="tailscale">Tailscale</option>
+          </select></div>
+          <div><label class="block text-xs text-gray-600">Public-Key <span class="text-gray-400">(WireGuard, optional)</span></label><textarea id="v-pub" rows="2" class="w-full border rounded px-2 py-1 font-mono text-xs"></textarea></div>
+          <div><label class="block text-xs text-gray-600">Notizen</label><input id="v-notiz" class="w-full border rounded px-2 py-1"></div>
+        </div>
+        <div class="flex justify-end gap-2 mt-3">
+          <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Abbrechen</button>
+          <button onclick="saveVpn()" class="px-3 py-1.5 bg-indigo-600 text-white rounded text-sm">Erstellen</button>
+        </div>
+      </div></div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+  }
+  async function saveVpn() {
+    const body = {
+      backend: document.getElementById('v-backend').value,
+      public_key: document.getElementById('v-pub').value.trim() || null,
+      notizen: document.getElementById('v-notiz').value || null,
+    };
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/vpn-accounts', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error(await r.text());
+      document.querySelector('.fixed')?.remove();
+      await loadVpn();
+      alert('VPN-Konto erstellt. Technik wird die Konfiguration zuteilen.');
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+  async function delVpn(id) {
+    if (!confirm('VPN-Konto loeschen?')) return;
+    await AuthentikAuth.apiFetch('/api/isp/vpn-accounts/' + id, { method: 'DELETE' });
+    await loadVpn();
+  }
+
+  // VLAN
+  async function loadVlan() {
+    const r = await AuthentikAuth.apiFetch('/api/isp/vlan-requests');
+    if (!r.ok) return;
+    vlanRequests = (await r.json()).vlan_requests || [];
+    renderVlan();
+  }
+  function renderVlan() {
+    const wrap = document.getElementById('vlan-list');
+    if (vlanRequests.length === 0) { wrap.innerHTML = '<p class="text-gray-400 italic text-sm">Keine Antraege.</p>'; return; }
+    wrap.innerHTML = vlanRequests.map(v => `
+      <div class="border rounded p-3 bg-gray-50">
+        <div class="flex items-start justify-between flex-wrap gap-2 mb-1">
+          <div>
+            <span class="text-xs ${v.status === 'pending' ? 'bg-amber-100 text-amber-800' : v.status === 'approved' ? 'bg-blue-100 text-blue-800' : v.status === 'deployed' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'} px-2 py-0.5 rounded">${esc(v.status)}</span>
+            <strong class="ml-2 text-sm">${esc(v.gewuenschter_name || 'unbenannt')}</strong>
+          </div>
+          ${v.status === 'pending' ? `<button onclick="delVlan(${v.id})" class="text-xs text-red-600 hover:underline">Zurueckziehen</button>` : ''}
+        </div>
+        <p class="text-sm mb-1">${esc(v.zweck)}</p>
+        <div class="text-xs text-gray-600">
+          ${v.vlan_id ? `<span class="font-mono">VLAN ${v.vlan_id}</span>` : ''}
+          ${v.subnet_v4 ? ` · <span class="font-mono">${esc(v.subnet_v4)}</span>` : ''}
+          ${v.ablehnung_grund ? ` · <span class="text-red-700">Ablehnung: ${esc(v.ablehnung_grund)}</span>` : ''}
+        </div>
+      </div>`).join('');
+  }
+  function openVlanModal() {
+    const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
+      <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5 max-h-[90vh] overflow-y-auto">
+        <h2 class="font-bold mb-3">VLAN beantragen</h2>
+        <div class="space-y-2 text-sm">
+          <div><label class="block text-xs text-gray-600">Wunsch-Name</label><input id="vl-name" placeholder="z.B. Smart-Home" class="w-full border rounded px-2 py-1"></div>
+          <div><label class="block text-xs text-gray-600">Zweck *</label><textarea id="vl-zweck" rows="3" placeholder="Wofuer wird das VLAN gebraucht?" class="w-full border rounded px-2 py-1"></textarea></div>
+          <div class="grid grid-cols-2 gap-2">
+            <div><label class="block text-xs text-gray-600">Groesse</label><select id="vl-grosse" class="w-full border rounded px-2 py-1">
+              <option value="">—</option><option value="/29">/29 (6 IPs)</option><option value="/28">/28 (14 IPs)</option><option value="/27">/27 (30 IPs)</option><option value="/24">/24 (254 IPs)</option>
+            </select></div>
+            <div><label class="block text-xs text-gray-600">Geraete-Anzahl</label><input id="vl-anz" type="number" class="w-full border rounded px-2 py-1"></div>
+          </div>
+          <div><label class="flex items-center gap-2 text-sm"><input id="vl-inet" type="checkbox" checked class="rounded"> Internet-Zugriff</label></div>
+          <div><label class="flex items-center gap-2 text-sm"><input id="vl-cross" type="checkbox" class="rounded"> Zugriff auf andere VLANs</label></div>
+        </div>
+        <div class="flex justify-end gap-2 mt-3">
+          <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Abbrechen</button>
+          <button onclick="saveVlan()" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm">Antrag stellen</button>
+        </div>
+      </div></div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+  }
+  async function saveVlan() {
+    const body = {
+      gewuenschter_name: document.getElementById('vl-name').value || null,
+      zweck: document.getElementById('vl-zweck').value.trim(),
+      gewuenschte_groesse: document.getElementById('vl-grosse').value || null,
+      geraete_anzahl: parseInt(document.getElementById('vl-anz').value, 10) || null,
+      internet_zugriff: document.getElementById('vl-inet').checked,
+      andere_vlans_zugriff: document.getElementById('vl-cross').checked,
+    };
+    if (!body.zweck) { alert('Zweck Pflicht.'); return; }
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/vlan-requests', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error(await r.text());
+      document.querySelector('.fixed')?.remove();
+      await loadVlan();
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+  async function delVlan(id) {
+    if (!confirm('Antrag zurueckziehen?')) return;
+    await AuthentikAuth.apiFetch('/api/isp/vlan-requests/' + id, { method: 'DELETE' });
+    await loadVlan();
+  }
+
+  // Reverse-Proxy
+  async function loadRp() {
+    const r = await AuthentikAuth.apiFetch('/api/isp/reverse-proxy');
+    if (!r.ok) return;
+    rpRoutes = (await r.json()).routes || [];
+    renderRp();
+  }
+  function renderRp() {
+    const wrap = document.getElementById('rp-list');
+    if (rpRoutes.length === 0) { wrap.innerHTML = '<p class="text-gray-400 italic text-sm">Keine Routen.</p>'; return; }
+    wrap.innerHTML = rpRoutes.map(r => `
+      <div class="border rounded p-3 bg-gray-50">
+        <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
+          <div><strong class="font-mono text-sm">${esc(r.hostname)}</strong>
+            ${r.public ? '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded ml-2">public</span>' : '<span class="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded ml-2">intern</span>'}
+            ${r.ssl ? '<span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded ml-1">SSL</span>' : ''}
+            ${r.auth_required ? '<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded ml-1">auth</span>' : ''}
+            ${!r.active ? '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-1">inaktiv</span>' : ''}
+          </div>
+          <button onclick="delRp(${r.id})" class="text-xs text-red-600 hover:underline">Loeschen</button>
+        </div>
+        <div class="text-xs text-gray-600">→ <span class="font-mono">${esc(r.backend_url)}</span></div>
+      </div>`).join('');
+  }
+  function openRpModal() {
+    const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
+      <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5 max-h-[90vh] overflow-y-auto">
+        <h2 class="font-bold mb-3">Reverse-Proxy-Route</h2>
+        <div class="space-y-2 text-sm">
+          <div><label class="block text-xs text-gray-600">Hostname * <span class="text-gray-400">(z.B. cloud.dein-name.rosenweg4303.ch)</span></label><input id="r-host" class="w-full border rounded px-2 py-1"></div>
+          <div><label class="block text-xs text-gray-600">Backend-URL *</label><input id="r-be" placeholder="http://10.0.50.5:8080" class="w-full border rounded px-2 py-1"></div>
+          <div><label class="flex items-center gap-2 text-sm"><input id="r-public" type="checkbox" class="rounded"> public (Internet via CF-Tunnel)</label></div>
+          <div><label class="flex items-center gap-2 text-sm"><input id="r-auth" type="checkbox" class="rounded"> Authentik-Auth davor schalten</label></div>
+          <div><label class="block text-xs text-gray-600">Notizen</label><textarea id="r-notiz" rows="2" class="w-full border rounded px-2 py-1"></textarea></div>
+        </div>
+        <div class="flex justify-end gap-2 mt-3">
+          <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Abbrechen</button>
+          <button onclick="saveRp()" class="px-3 py-1.5 bg-emerald-600 text-white rounded text-sm">Speichern</button>
+        </div>
+      </div></div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+  }
+  async function saveRp() {
+    const body = {
+      hostname: document.getElementById('r-host').value.trim(),
+      backend_url: document.getElementById('r-be').value.trim(),
+      public: document.getElementById('r-public').checked,
+      auth_required: document.getElementById('r-auth').checked,
+      notizen: document.getElementById('r-notiz').value || null,
+    };
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/reverse-proxy', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error(await r.text());
+      document.querySelector('.fixed')?.remove();
+      await loadRp();
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+  async function delRp(id) {
+    if (!confirm('Route loeschen?')) return;
+    await AuthentikAuth.apiFetch('/api/isp/reverse-proxy/' + id, { method: 'DELETE' });
+    await loadRp();
+  }
+  </script>
+</body>
+</html>

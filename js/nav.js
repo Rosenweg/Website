@@ -58,6 +58,7 @@ const SERVICES_GROUPS = [
       { label: 'Stundensatz (Auslagen)', href: 'auslagen-stundensatz.html', activeKey: 'auslagen-stundensatz', perm: 'auslagen-stundensatz' },
       { label: 'Handwerker & Lieferanten', href: 'handwerker.html', activeKey: 'handwerker', perm: 'handwerker' },
       { label: 'Proxmox', href: 'proxmox-verwaltung.html', activeKey: 'proxmox', perm: 'proxmox-verwaltung' },
+      { label: 'ISP-Admin', href: 'isp-admin.html', activeKey: 'isp-admin', permAny: 'technik,praesident' },
       { label: 'Konto-Loeschungen', href: 'loeschungen.html', activeKey: 'loeschungen', perm: 'loeschungen' },
     ],
   },
