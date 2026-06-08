@@ -212,24 +212,53 @@
   function renderRp() {
     const wrap = document.getElementById('rp-list');
     if (rpRoutes.length === 0) { wrap.innerHTML = '<p class="text-gray-400 italic text-sm">Keine Routen.</p>'; return; }
+    const statusBadge = (s) => ({
+      approved: '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded ml-1">aktiv</span>',
+      pending_dns: '<span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded ml-1">DNS prueft</span>',
+      pending_admin: '<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded ml-1">Admin-Pruefung</span>',
+      rejected: '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-1">abgelehnt</span>',
+    })[s] || '';
     wrap.innerHTML = rpRoutes.map(r => `
       <div class="border rounded p-3 bg-gray-50">
         <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
           <div><strong class="font-mono text-sm">${esc(r.hostname)}</strong>
-            ${r.public ? '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded ml-2">public</span>' : '<span class="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded ml-2">intern</span>'}
+            ${statusBadge(r.approval_status)}
+            ${r.public ? '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded ml-1">public</span>' : '<span class="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded ml-1">intern</span>'}
             ${r.ssl ? '<span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded ml-1">SSL</span>' : ''}
             ${r.auth_required ? '<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded ml-1">auth</span>' : ''}
-            ${!r.active ? '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-1">inaktiv</span>' : ''}
           </div>
-          <button onclick="delRp(${r.id})" class="text-xs text-red-600 hover:underline">Loeschen</button>
+          <div class="flex gap-1">
+            ${r.approval_status === 'pending_dns' ? `<button onclick="recheckRp(${r.id})" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">DNS pruefen</button>` : ''}
+            <button onclick="delRp(${r.id})" class="text-xs text-red-600 hover:underline">Loeschen</button>
+          </div>
         </div>
         <div class="text-xs text-gray-600">→ <span class="font-mono">${esc(r.backend_url)}</span></div>
+        ${r.approval_reason ? `<div class="text-xs text-gray-500 mt-1 italic">${esc(r.approval_reason)}</div>` : ''}
       </div>`).join('');
   }
-  function openRpModal() {
+  async function recheckRp(id) {
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/reverse-proxy/' + id + '/recheck-dns', { method: 'POST' });
+      const d = await r.json();
+      if (d.matches) alert('✓ DNS verifiziert — Route ist jetzt aktiv.');
+      else alert('⚠ DNS zeigt noch nicht auf uns.\n\nA: ' + JSON.stringify(d.a) + '\nAAAA: ' + JSON.stringify(d.aaaa) + '\nCNAME: ' + JSON.stringify(d.cname) + '\n\nErwartet: ' + JSON.stringify(d.target));
+      await loadRp();
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+  async function openRpModal() {
+    // DNS-Info holen
+    let dnsInfo = {};
+    try { dnsInfo = await (await AuthentikAuth.apiFetch('/api/isp/dns-info')).json(); } catch {}
     const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5 max-h-[90vh] overflow-y-auto">
         <h2 class="font-bold mb-3">Reverse-Proxy-Route</h2>
+        <div class="bg-blue-50 border border-blue-200 rounded p-3 mb-3 text-xs space-y-1">
+          <p class="font-semibold text-blue-900">📋 DNS-Konfig bei deinem Provider:</p>
+          ${dnsInfo.public_ipv4 ? `<p><strong>A:</strong> <code class="bg-white px-1 rounded">${dnsInfo.public_ipv4}</code></p>` : ''}
+          ${dnsInfo.public_ipv6 ? `<p><strong>AAAA:</strong> <code class="bg-white px-1 rounded">${dnsInfo.public_ipv6}</code></p>` : ''}
+          ${dnsInfo.cname_target ? `<p><strong>CNAME (Alternative):</strong> <code class="bg-white px-1 rounded">${dnsInfo.cname_target}</code></p>` : ''}
+          <p class="text-blue-700 pt-1">Sobald DNS gesetzt ist, prueft das System automatisch alle 5 Min. Bei Sub-Domains die "rosenweg"/"r&lt;Nummer&gt;." enthalten ist Admin-Pruefung Pflicht.</p>
+        </div>
         <div class="space-y-2 text-sm">
           <div><label class="block text-xs text-gray-600">Hostname * <span class="text-gray-400">(z.B. cloud.dein-name.rosenweg4303.ch)</span></label><input id="r-host" class="w-full border rounded px-2 py-1"></div>
           <div><label class="block text-xs text-gray-600">Backend-URL *</label><input id="r-be" placeholder="http://10.0.50.5:8080" class="w-full border rounded px-2 py-1"></div>
