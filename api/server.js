@@ -13799,6 +13799,72 @@ app.get('/api/isp/dns-info', authMiddleware, (req, res) => {
 });
 
 // Endpoint: DNS-Check on-demand
+// DynDNS-Endpoint fuer UniFi / UDM-Pro:
+// Format: GET /api/cf-ddns?hostname=public&myip=37.17.232.133
+// Auth: HTTP Basic (user:pass via header) — pass = env CF_DDNS_TOKEN
+// Update Cloudflare-A-Record fuer die gegebene Subdomain auf myip
+app.get('/api/cf-ddns', async (req, res) => {
+  try {
+    const expectedToken = process.env.CF_DDNS_TOKEN;
+    if (!expectedToken) return res.status(500).send('badconfig');
+    const auth = req.headers.authorization || '';
+    let providedPass = '';
+    if (auth.startsWith('Basic ')) {
+      try {
+        const decoded = Buffer.from(auth.slice(6), 'base64').toString();
+        providedPass = decoded.split(':').slice(1).join(':');
+      } catch {}
+    } else if (req.query.password) {
+      providedPass = String(req.query.password);
+    }
+    if (providedPass !== expectedToken) return res.status(401).send('badauth');
+
+    const hostname = String(req.query.hostname || '').trim().toLowerCase();
+    const myip = String(req.query.myip || req.query.ip || '').trim();
+    if (!hostname || !myip) return res.status(400).send('911');
+    if (!/^[\d.]+$|^[\da-f:]+$/i.test(myip)) return res.status(400).send('badip');
+
+    const cfToken = process.env.CLOUDFLARE_API_TOKEN;
+    const cfZone = process.env.CLOUDFLARE_ZONE_ID || '0b113bed342ed868b4b42c09149ea2b5';
+    if (!cfToken) return res.status(500).send('badconfig');
+
+    // Allowlist: erlaubte Hostnames die per DDNS aktualisiert werden duerfen
+    const allowlist = (process.env.CF_DDNS_ALLOWLIST || 'public').toLowerCase().split(',').map(s => s.trim());
+    const shortName = hostname.replace('.rosenweg4303.ch', '');
+    if (!allowlist.includes(shortName) && !allowlist.includes(hostname)) {
+      return res.status(403).send('badhost:' + shortName);
+    }
+    const fqdn = hostname.includes('.') ? hostname : hostname + '.rosenweg4303.ch';
+
+    // Record ID holen
+    const isV6 = myip.includes(':');
+    const recType = isV6 ? 'AAAA' : 'A';
+    const list = await fetch(`https://api.cloudflare.com/client/v4/zones/${cfZone}/dns_records?name=${fqdn}&type=${recType}`, {
+      headers: { Authorization: 'Bearer ' + cfToken },
+    }).then(r => r.json());
+    const existing = list.result?.[0];
+    if (existing && existing.content === myip) return res.send('nochg ' + myip);
+
+    if (existing) {
+      const up = await fetch(`https://api.cloudflare.com/client/v4/zones/${cfZone}/dns_records/${existing.id}`, {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer ' + cfToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: myip, comment: 'DDNS auto-updated ' + new Date().toISOString().slice(0,19) }),
+      }).then(r => r.json());
+      if (!up.success) { console.error('[ddns] CF patch fail:', up.errors); return res.status(502).send('dnserr'); }
+    } else {
+      const cr = await fetch(`https://api.cloudflare.com/client/v4/zones/${cfZone}/dns_records`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + cfToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: recType, name: fqdn, content: myip, ttl: 300, proxied: false, comment: 'DDNS auto-created' }),
+      }).then(r => r.json());
+      if (!cr.success) return res.status(502).send('dnserr');
+    }
+    console.log('[ddns] Updated ' + fqdn + ' → ' + myip);
+    res.send('good ' + myip);
+  } catch (err) { console.error('[ddns]', err); res.status(500).send('911'); }
+});
+
 app.get('/api/isp/check-dns', authMiddleware, async (req, res) => {
   const host = String(req.query.host || '').trim().toLowerCase();
   if (!host) return res.status(400).json({ error: 'host param Pflicht' });
