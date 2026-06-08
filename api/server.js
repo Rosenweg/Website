@@ -4959,6 +4959,42 @@ async function runAuszahlungReminderDaily() {
 setInterval(runAuszahlungReminderDaily, 60 * 60 * 1000);
 setTimeout(runAuszahlungReminderDaily, 120 * 1000);
 
+// ─── ISP DNS-Re-Check fuer pending Routes/Redirects (alle 5min) ─────
+async function ispRecheckPendingDns() {
+  try {
+    // Reverse-Proxy-Routen
+    const rps = await pool.query(`SELECT id, hostname FROM isp_reverse_proxy_routes WHERE approval_status = 'pending_dns'`).catch(() => ({ rows: [] }));
+    for (const r of rps.rows) {
+      try {
+        const check = await ispCheckDns(r.hostname);
+        if (check.matches) {
+          await pool.query(`UPDATE isp_reverse_proxy_routes SET approval_status='approved', dns_verified_at=NOW(),
+                             last_dns_check_at=NOW(), active=true, approval_reason='DNS verifiziert (auto-Re-Check)' WHERE id=$1`, [r.id]);
+          console.log('[isp-dns] Reverse-Proxy ' + r.id + ' (' + r.hostname + ') → approved');
+        } else {
+          await pool.query(`UPDATE isp_reverse_proxy_routes SET last_dns_check_at=NOW() WHERE id=$1`, [r.id]);
+        }
+      } catch (e) { /* DNS-Fehler ignoreieren */ }
+    }
+    // Redirects
+    const rds = await pool.query(`SELECT id, source_host FROM isp_redirects WHERE approval_status = 'pending_dns'`).catch(() => ({ rows: [] }));
+    for (const r of rds.rows) {
+      try {
+        const check = await ispCheckDns(r.source_host);
+        if (check.matches) {
+          await pool.query(`UPDATE isp_redirects SET approval_status='approved', dns_verified_at=NOW(),
+                             last_dns_check_at=NOW(), active=true, approval_reason='DNS verifiziert (auto-Re-Check)' WHERE id=$1`, [r.id]);
+          console.log('[isp-dns] Redirect ' + r.id + ' (' + r.source_host + ') → approved');
+        } else {
+          await pool.query(`UPDATE isp_redirects SET last_dns_check_at=NOW() WHERE id=$1`, [r.id]);
+        }
+      } catch (e) { /* DNS-Fehler ignoreieren */ }
+    }
+  } catch (err) { console.warn('[isp-dns] re-check fail:', err.message); }
+}
+setInterval(ispRecheckPendingDns, 5 * 60 * 1000);
+setTimeout(ispRecheckPendingDns, 60 * 1000);
+
 // ─── Nightly Drucker-Tag-Cleanup ────────────────────────────────────
 // Findet Kontakte mit Drucker-Tag-Email wo derselbe Name woanders eine echte
 // Email hat — und ersetzt den Drucker-Tag automatisch durch die echte Email.
@@ -13708,6 +13744,112 @@ async function userOwnsWohnung(email, wohnungId) {
   return r.rows.length > 0;
 }
 
+// === Hostname-Auto-Approval-Logik ===
+// Hostnames die wie Rosenweg-Eigene aussehen brauchen Admin-Pruefung,
+// damit niemand z.B. 'rosenweg4303.com' oder 'r12.rosenweg.ch' anlegt
+// und damit Bewohner faked.
+function hostNeedsAdminApproval(hostname) {
+  const h = (hostname || '').toLowerCase();
+  if (h.includes('rosenweg')) return 'enthaelt "rosenweg"';
+  // r-prefix: rNN. (wie r9., r17., ...) waere Verwechslung mit STWEG-Konvention
+  if (/^r\d+\./.test(h)) return 'r<Nummer>. Pattern reserviert (Hausnummern)';
+  if (h.endsWith('.rosenweg4303.ch') || h.endsWith('.rosenweg9.ch')) return 'unsere Domain';
+  return null;
+}
+
+function ispResolveTarget() {
+  return {
+    public_ipv4: process.env.ROSENWEG_PUBLIC_IPV4 || null,
+    public_ipv6: process.env.ROSENWEG_PUBLIC_IPV6 || null,
+    cname_target: process.env.ROSENWEG_DNS_CNAME_TARGET || 'public.rosenweg4303.ch',
+  };
+}
+
+// DNS-Check: prueft ob hostname's A/AAAA/CNAME auf uns zeigt
+async function ispCheckDns(hostname) {
+  const target = ispResolveTarget();
+  const dns = (await import('node:dns/promises')).default;
+  const out = { hostname, target, a: null, aaaa: null, cname: null, matches: false, error: null };
+  try { out.a = await dns.resolve4(hostname).catch(() => null); } catch {}
+  try { out.aaaa = await dns.resolve6(hostname).catch(() => null); } catch {}
+  try { out.cname = await dns.resolveCname(hostname).catch(() => null); } catch {}
+  if (target.public_ipv4 && Array.isArray(out.a) && out.a.includes(target.public_ipv4)) out.matches = true;
+  if (target.public_ipv6 && Array.isArray(out.aaaa) && out.aaaa.includes(target.public_ipv6)) out.matches = true;
+  if (Array.isArray(out.cname) && out.cname.some(c => c.toLowerCase().replace(/\.$/, '') === target.cname_target.toLowerCase())) out.matches = true;
+  return out;
+}
+
+// Auto-Approval-Entscheidung bei Erfassung
+async function ispDecideApproval(hostname) {
+  const adminReason = hostNeedsAdminApproval(hostname);
+  if (adminReason) return { approval_status: 'pending_admin', approval_reason: adminReason, active: false };
+  // Sofort DNS pruefen
+  const dnsCheck = await ispCheckDns(hostname).catch(() => null);
+  if (dnsCheck && dnsCheck.matches) {
+    return { approval_status: 'approved', approval_reason: 'Auto-Approval: DNS zeigt auf uns', active: true,
+             dns_verified_at: new Date(), last_dns_check_at: new Date() };
+  }
+  return { approval_status: 'pending_dns', approval_reason: 'DNS zeigt noch nicht auf uns', active: false,
+           last_dns_check_at: new Date() };
+}
+
+// Endpoint: DNS-Info (zeigt Customer was er konfigurieren muss)
+app.get('/api/isp/dns-info', authMiddleware, (req, res) => {
+  res.json(ispResolveTarget());
+});
+
+// Endpoint: DNS-Check on-demand
+app.get('/api/isp/check-dns', authMiddleware, async (req, res) => {
+  const host = String(req.query.host || '').trim().toLowerCase();
+  if (!host) return res.status(400).json({ error: 'host param Pflicht' });
+  res.json(await ispCheckDns(host));
+});
+
+// Endpoint: re-check eines Eintrags (von Customer ausgeloest)
+app.post('/api/isp/redirects/:id/recheck-dns', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const e = await pool.query('SELECT * FROM isp_redirects WHERE id = $1', [id]);
+    if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = e.rows[0];
+    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    if (!isOwner && !ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Owner oder Admin' });
+    const check = await ispCheckDns(v.source_host);
+    const upd = check.matches
+      ? { approval_status: 'approved', dns_verified_at: new Date(), last_dns_check_at: new Date(), active: true, approval_reason: 'DNS verifiziert' }
+      : { last_dns_check_at: new Date() };
+    await pool.query(
+      `UPDATE isp_redirects SET approval_status = COALESCE($1, approval_status),
+         dns_verified_at = COALESCE($2, dns_verified_at), last_dns_check_at = $3,
+         active = COALESCE($4, active), approval_reason = COALESCE($5, approval_reason) WHERE id = $6`,
+      [upd.approval_status, upd.dns_verified_at, upd.last_dns_check_at, upd.active, upd.approval_reason, id],
+    );
+    res.json({ ...check, updated: upd });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/isp/reverse-proxy/:id/recheck-dns', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const e = await pool.query('SELECT * FROM isp_reverse_proxy_routes WHERE id = $1', [id]);
+    if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = e.rows[0];
+    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    if (!isOwner && !ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Owner oder Admin' });
+    const check = await ispCheckDns(v.hostname);
+    const upd = check.matches
+      ? { approval_status: 'approved', dns_verified_at: new Date(), last_dns_check_at: new Date(), active: true, approval_reason: 'DNS verifiziert' }
+      : { last_dns_check_at: new Date() };
+    await pool.query(
+      `UPDATE isp_reverse_proxy_routes SET approval_status = COALESCE($1, approval_status),
+         dns_verified_at = COALESCE($2, dns_verified_at), last_dns_check_at = $3,
+         active = COALESCE($4, active), approval_reason = COALESCE($5, approval_reason) WHERE id = $6`,
+      [upd.approval_status, upd.dns_verified_at, upd.last_dns_check_at, upd.active, upd.approval_reason, id],
+    );
+    res.json({ ...check, updated: upd });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // === Subscribers (Wohnungs-Anschluesse) ===
 app.get('/api/isp/subscribers', authMiddleware, async (req, res) => {
   try {
@@ -14011,15 +14153,21 @@ app.post('/api/isp/reverse-proxy', authMiddleware, async (req, res) => {
     if (!ispIsAdmin(req) && (owner || '').toLowerCase() !== (req.user.email || '').toLowerCase()) {
       return res.status(403).json({ error: 'Du kannst nur eigene Routen anlegen' });
     }
+    // Auto-Approval (Admin uebersteuert mit b.skip_approval)
+    const decision = ispIsAdmin(req) && b.skip_approval
+      ? { approval_status: 'approved', approval_reason: 'Admin-Bypass', active: true }
+      : await ispDecideApproval(b.hostname);
     const r = await pool.query(
       `INSERT INTO isp_reverse_proxy_routes (hostname, backend_url, owner_email, wohnung_id, ssl, ssl_method,
-                                              public, auth_required, rate_limit_per_min, active, notizen)
-       VALUES ($1,$2,$3,$4,COALESCE($5,true),$6,COALESCE($7,false),COALESCE($8,false),$9,COALESCE($10,true),$11) RETURNING *`,
+                                              public, auth_required, rate_limit_per_min, active, notizen,
+                                              approval_status, approval_reason, dns_verified_at, last_dns_check_at)
+       VALUES ($1,$2,$3,$4,COALESCE($5,true),$6,COALESCE($7,false),COALESCE($8,false),$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
       [b.hostname.toLowerCase(), b.backend_url, owner, b.wohnung_id || null,
        b.ssl, b.ssl_method || 'letsencrypt', b.public, b.auth_required,
-       b.rate_limit_per_min || null, b.active, b.notizen || null],
+       b.rate_limit_per_min || null, decision.active, b.notizen || null,
+       decision.approval_status, decision.approval_reason, decision.dns_verified_at || null, decision.last_dns_check_at || null],
     );
-    res.json(r.rows[0]);
+    res.json({ ...r.rows[0], dns_info: ispResolveTarget() });
   } catch (err) {
     if (String(err.message).includes('duplicate key')) return res.status(409).json({ error: 'Hostname bereits vergeben' });
     res.status(500).json({ error: err.message });
@@ -14089,14 +14237,19 @@ app.post('/api/isp/redirects', authMiddleware, async (req, res) => {
     if (!ispIsAdmin(req) && (owner || '').toLowerCase() !== (req.user.email || '').toLowerCase()) {
       return res.status(403).json({ error: 'Du kannst nur eigene Redirects anlegen' });
     }
+    const decision = ispIsAdmin(req) && b.skip_approval
+      ? { approval_status: 'approved', approval_reason: 'Admin-Bypass', active: true }
+      : await ispDecideApproval(b.source_host);
     const r = await pool.query(
       `INSERT INTO isp_redirects (source_host, source_path, target_url, http_code, preserve_path,
-                                   owner_email, wohnung_id, active, notizen)
-       VALUES ($1,$2,$3,COALESCE($4,301),COALESCE($5,false),$6,$7,COALESCE($8,true),$9) RETURNING *`,
+                                   owner_email, wohnung_id, active, notizen,
+                                   approval_status, approval_reason, dns_verified_at, last_dns_check_at)
+       VALUES ($1,$2,$3,COALESCE($4,301),COALESCE($5,false),$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
       [b.source_host.toLowerCase(), b.source_path || '/', b.target_url, b.http_code, b.preserve_path,
-       owner, b.wohnung_id || null, b.active, b.notizen || null],
+       owner, b.wohnung_id || null, decision.active, b.notizen || null,
+       decision.approval_status, decision.approval_reason, decision.dns_verified_at || null, decision.last_dns_check_at || null],
     );
-    res.json(r.rows[0]);
+    res.json({ ...r.rows[0], dns_info: ispResolveTarget() });
   } catch (err) {
     if (String(err.message).includes('duplicate key')) return res.status(409).json({ error: 'source_host+path bereits vergeben' });
     res.status(500).json({ error: err.message });
@@ -16274,6 +16427,19 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_isp_vlanreq_status ON isp_vlan_requests(status);
       CREATE INDEX IF NOT EXISTS idx_isp_vlanreq_user ON isp_vlan_requests(LOWER(antragsteller_email));
 
+      -- Approval-Workflow fuer Reverse-Proxy + Redirects:
+      -- 1. Customer beantragt mit beliebigem Hostname (z.B. test.abc.ch)
+      -- 2. System checkt ob 'rosenweg' o.ae. drin → pending_admin
+      -- 3. Sonst: System checkt ob DNS bereits auf uns zeigt → approved+active
+      -- 4. Background-Job re-checkt DNS alle 5 Min fuer pending_dns
+      DO $$ BEGIN
+        ALTER TABLE isp_reverse_proxy_routes
+          ADD COLUMN IF NOT EXISTS approval_status VARCHAR(20) DEFAULT 'pending_dns',
+          ADD COLUMN IF NOT EXISTS dns_verified_at TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS approval_reason TEXT,
+          ADD COLUMN IF NOT EXISTS last_dns_check_at TIMESTAMPTZ;
+      EXCEPTION WHEN OTHERS THEN NULL; END $$;
+
       -- Adress-Umleitungen (HTTP 301/302). Source-Host -> Target-URL.
       -- z.B. 'alt.rosenweg4303.ch' -> 'https://www.rosenweg4303.ch/neu-Pfad'
       CREATE TABLE IF NOT EXISTS isp_redirects (
@@ -16294,6 +16460,13 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_isp_redir_owner ON isp_redirects(LOWER(owner_email));
       CREATE INDEX IF NOT EXISTS idx_isp_redir_active ON isp_redirects(active);
+      DO $$ BEGIN
+        ALTER TABLE isp_redirects
+          ADD COLUMN IF NOT EXISTS approval_status VARCHAR(20) DEFAULT 'pending_dns',
+          ADD COLUMN IF NOT EXISTS dns_verified_at TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS approval_reason TEXT,
+          ADD COLUMN IF NOT EXISTS last_dns_check_at TIMESTAMPTZ;
+      EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
       -- Zentraler Reverse-Proxy (Traefik/Nginx) — alle Web-Services
       -- (intern + extern) laufen hierueber: zentrale SSL-Terminierung,

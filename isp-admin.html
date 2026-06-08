@@ -27,6 +27,7 @@
           <button data-tab="vlan" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">🌐 VLAN-Antraege <span id="vlan-pending-badge" class="hidden text-xs bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">0</span></button>
           <button data-tab="ips" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">📍 Fix-IPs</button>
           <button data-tab="rp" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">🔁 Reverse-Proxy</button>
+          <button data-tab="redir" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">↪ Umleitungen</button>
           <button data-tab="vpn" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">🔒 VPN-Konten</button>
           <button data-tab="mail" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">✉ Mailserver/PMG</button>
         </nav>
@@ -56,6 +57,12 @@
         <div id="rp-list" class="space-y-2"></div>
       </div>
 
+      <!-- Umleitungen -->
+      <div id="tab-redir" class="tab-view hidden">
+        <div class="flex justify-end mb-2"><button onclick="openRedirModal()" class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm">+ Umleitung erstellen</button></div>
+        <div id="redir-list" class="space-y-2"></div>
+      </div>
+
       <!-- VPN-Konten -->
       <div id="tab-vpn" class="tab-view hidden">
         <div id="vpn-list" class="bg-white rounded-lg shadow overflow-x-auto"></div>
@@ -80,7 +87,7 @@
   const fmtDt = s => s ? new Date(s).toLocaleString('de-CH') : '—';
 
   let user = null;
-  let subscribers = [], vlanRequests = [], fixedIps = [], rpRoutes = [], vpnAccounts = [], mailboxes = [];
+  let subscribers = [], vlanRequests = [], fixedIps = [], rpRoutes = [], vpnAccounts = [], mailboxes = [], redirects = [];
 
   document.addEventListener('DOMContentLoaded', async () => {
     user = AuthentikAuth.getUser() || await AuthentikAuth.init({ requireAuth: true });
@@ -92,7 +99,7 @@
     document.getElementById('auth-gate').classList.add('hidden');
     document.getElementById('content').classList.remove('hidden');
     document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
-    loadSubs(); loadVlans(); loadIps(); loadRp(); loadVpns(); loadMb();
+    loadSubs(); loadVlans(); loadIps(); loadRp(); loadVpns(); loadMb(); loadRedir();
   });
 
   function switchTab(t) {
@@ -429,6 +436,77 @@
     if (!confirm('Route loeschen?')) return;
     await AuthentikAuth.apiFetch('/api/isp/reverse-proxy/' + id, { method: 'DELETE' });
     await loadRp();
+  }
+
+  // === Redirects ===
+  async function loadRedir() {
+    const r = await AuthentikAuth.apiFetch('/api/isp/redirects');
+    if (!r.ok) return;
+    redirects = (await r.json()).redirects || [];
+    renderRedir();
+  }
+  function renderRedir() {
+    const wrap = document.getElementById('redir-list');
+    if (redirects.length === 0) { wrap.innerHTML = '<p class="bg-white p-6 text-gray-400 italic text-center rounded">Noch keine Umleitungen erfasst.</p>'; return; }
+    wrap.innerHTML = redirects.map(r => `
+      <div class="bg-white border rounded-lg p-3">
+        <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
+          <div>
+            <span class="font-mono text-sm">${esc(r.source_host)}${esc(r.source_path === '/' ? '' : r.source_path)}</span>
+            <span class="mx-2 text-gray-400">→</span>
+            <span class="font-mono text-sm">${esc(r.target_url)}</span>
+            <span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded ml-2">${r.http_code}</span>
+            ${r.preserve_path ? '<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded ml-1">preserve-path</span>' : ''}
+            ${!r.active ? '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-1">inaktiv</span>' : ''}
+          </div>
+          <button onclick="delRedir(${r.id})" class="text-xs text-red-600 hover:underline">Loeschen</button>
+        </div>
+        <div class="text-xs text-gray-500">${esc(r.owner_email || 'system')}${r.wohnung_bezeichnung ? ' · ' + esc(r.wohnung_bezeichnung) : ''}</div>
+      </div>`).join('');
+  }
+  function openRedirModal() {
+    const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
+      <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5 max-h-[90vh] overflow-y-auto">
+        <h2 class="font-bold mb-3">Umleitung erstellen</h2>
+        <div class="space-y-2 text-sm">
+          <div><label class="block text-xs text-gray-600">Source-Host *</label><input id="rd-host" placeholder="alt.rosenweg4303.ch" class="w-full border rounded px-2 py-1"></div>
+          <div><label class="block text-xs text-gray-600">Source-Path</label><input id="rd-path" value="/" class="w-full border rounded px-2 py-1"></div>
+          <div><label class="block text-xs text-gray-600">Target-URL *</label><input id="rd-target" placeholder="https://www.rosenweg4303.ch/neu" class="w-full border rounded px-2 py-1"></div>
+          <div class="grid grid-cols-2 gap-2">
+            <div><label class="block text-xs text-gray-600">HTTP-Code</label><select id="rd-code" class="w-full border rounded px-2 py-1">
+              <option value="301">301 (permanent)</option><option value="302">302 (temporaer)</option><option value="307">307</option><option value="308">308</option>
+            </select></div>
+            <div class="flex items-end"><label class="flex items-center gap-2 text-sm pb-1"><input id="rd-preserve" type="checkbox" class="rounded"> Path erhalten</label></div>
+          </div>
+          <div><label class="block text-xs text-gray-600">Owner-Email</label><input id="rd-owner" class="w-full border rounded px-2 py-1"></div>
+        </div>
+        <div class="flex justify-end gap-2 mt-3">
+          <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Abbrechen</button>
+          <button onclick="saveRedir()" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm">Speichern</button>
+        </div>
+      </div></div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+  }
+  async function saveRedir() {
+    const body = {
+      source_host: document.getElementById('rd-host').value.trim(),
+      source_path: document.getElementById('rd-path').value.trim() || '/',
+      target_url: document.getElementById('rd-target').value.trim(),
+      http_code: parseInt(document.getElementById('rd-code').value, 10),
+      preserve_path: document.getElementById('rd-preserve').checked,
+      owner_email: document.getElementById('rd-owner').value.trim() || null,
+    };
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/redirects', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error(await r.text());
+      document.querySelector('.fixed')?.remove();
+      await loadRedir();
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+  async function delRedir(id) {
+    if (!confirm('Umleitung loeschen?')) return;
+    await AuthentikAuth.apiFetch('/api/isp/redirects/' + id, { method: 'DELETE' });
+    await loadRedir();
   }
 
   // === VPN-Konten ===
