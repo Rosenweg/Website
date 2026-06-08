@@ -13915,6 +13915,155 @@ app.delete('/api/isp/vpn-accounts/:id', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// === VLAN-Requests ===
+app.get('/api/isp/vlan-requests', authMiddleware, async (req, res) => {
+  try {
+    const admin = ispIsAdmin(req);
+    const email = (req.user.email || '').toLowerCase();
+    const r = admin
+      ? await pool.query(`SELECT v.*, w.bezeichnung AS wohnung_bezeichnung, w.stweg FROM isp_vlan_requests v
+                           LEFT JOIN wohnungen w ON w.id = v.wohnung_id
+                           ORDER BY CASE v.status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 WHEN 'deployed' THEN 2 ELSE 3 END, v.created_at DESC`)
+      : await pool.query(`SELECT v.*, w.bezeichnung AS wohnung_bezeichnung, w.stweg FROM isp_vlan_requests v
+                           LEFT JOIN wohnungen w ON w.id = v.wohnung_id
+                           WHERE LOWER(v.antragsteller_email) = $1 ORDER BY v.created_at DESC`, [email]);
+    res.json({ vlan_requests: r.rows, is_admin: admin });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/isp/vlan-requests', authMiddleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.zweck) return res.status(400).json({ error: 'zweck Pflicht (wofuer wird das VLAN gebraucht)' });
+    const r = await pool.query(
+      `INSERT INTO isp_vlan_requests (antragsteller_email, wohnung_id, zweck, gewuenschter_name,
+                                       gewuenschte_groesse, geraete_anzahl, internet_zugriff, andere_vlans_zugriff)
+       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,true),COALESCE($8,false)) RETURNING *`,
+      [req.user.email, b.wohnung_id || null, b.zweck, b.gewuenschter_name || null,
+       b.gewuenschte_groesse || null, b.geraete_anzahl || null, b.internet_zugriff, b.andere_vlans_zugriff],
+    );
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/isp/vlan-requests/:id', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const existing = await pool.query('SELECT * FROM isp_vlan_requests WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = existing.rows[0];
+    const admin = ispIsAdmin(req);
+    const isOwner = (v.antragsteller_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Antragsteller oder Admin' });
+    // Antragsteller darf nur eigene Felder editieren waehrend pending
+    const b = req.body || {};
+    const updates = []; const params = [];
+    const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
+    const userFields = ['zweck','gewuenschter_name','gewuenschte_groesse','geraete_anzahl','internet_zugriff','andere_vlans_zugriff'];
+    const adminFields = ['status','vlan_id','subnet_v4','ablehnung_grund','notizen_technik','deployed_at'];
+    const allowed = admin ? [...userFields, ...adminFields] : userFields;
+    if (!admin && v.status !== 'pending') return res.status(400).json({ error: 'Nur in Status pending editierbar' });
+    for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    push('updated_at', new Date());
+    params.push(id);
+    const r = await pool.query(`UPDATE isp_vlan_requests SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/isp/vlan-requests/:id', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const existing = await pool.query('SELECT * FROM isp_vlan_requests WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = existing.rows[0];
+    const admin = ispIsAdmin(req);
+    const isOwner = (v.antragsteller_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Antragsteller oder Admin' });
+    await pool.query('DELETE FROM isp_vlan_requests WHERE id = $1', [id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// === Reverse-Proxy-Routen ===
+app.get('/api/isp/reverse-proxy', authMiddleware, async (req, res) => {
+  try {
+    const admin = ispIsAdmin(req);
+    const email = (req.user.email || '').toLowerCase();
+    const r = admin
+      ? await pool.query(`SELECT r.*, w.bezeichnung AS wohnung_bezeichnung, w.stweg FROM isp_reverse_proxy_routes r
+                           LEFT JOIN wohnungen w ON w.id = r.wohnung_id
+                           ORDER BY r.active DESC, r.hostname`)
+      : await pool.query(`SELECT r.*, w.bezeichnung AS wohnung_bezeichnung, w.stweg FROM isp_reverse_proxy_routes r
+                           LEFT JOIN wohnungen w ON w.id = r.wohnung_id
+                           WHERE LOWER(r.owner_email) = $1 OR r.public = true ORDER BY r.active DESC, r.hostname`, [email]);
+    res.json({ routes: r.rows, is_admin: admin });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/isp/reverse-proxy', authMiddleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.hostname || !b.backend_url) return res.status(400).json({ error: 'hostname + backend_url Pflicht' });
+    // User darf eigene Routen anlegen, Admin alles
+    const owner = b.owner_email || req.user.email;
+    if (!ispIsAdmin(req) && (owner || '').toLowerCase() !== (req.user.email || '').toLowerCase()) {
+      return res.status(403).json({ error: 'Du kannst nur eigene Routen anlegen' });
+    }
+    const r = await pool.query(
+      `INSERT INTO isp_reverse_proxy_routes (hostname, backend_url, owner_email, wohnung_id, ssl, ssl_method,
+                                              public, auth_required, rate_limit_per_min, active, notizen)
+       VALUES ($1,$2,$3,$4,COALESCE($5,true),$6,COALESCE($7,false),COALESCE($8,false),$9,COALESCE($10,true),$11) RETURNING *`,
+      [b.hostname.toLowerCase(), b.backend_url, owner, b.wohnung_id || null,
+       b.ssl, b.ssl_method || 'letsencrypt', b.public, b.auth_required,
+       b.rate_limit_per_min || null, b.active, b.notizen || null],
+    );
+    res.json(r.rows[0]);
+  } catch (err) {
+    if (String(err.message).includes('duplicate key')) return res.status(409).json({ error: 'Hostname bereits vergeben' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/isp/reverse-proxy/:id', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const existing = await pool.query('SELECT * FROM isp_reverse_proxy_routes WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = existing.rows[0];
+    const admin = ispIsAdmin(req);
+    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Owner oder Admin' });
+    const b = req.body || {};
+    const updates = []; const params = [];
+    const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
+    const userFields = ['backend_url','ssl','auth_required','rate_limit_per_min','active','notizen'];
+    const adminFields = ['hostname','owner_email','wohnung_id','ssl_method','public'];
+    const allowed = admin ? [...userFields, ...adminFields] : userFields;
+    for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    push('updated_at', new Date());
+    params.push(id);
+    const r = await pool.query(`UPDATE isp_reverse_proxy_routes SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/isp/reverse-proxy/:id', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const existing = await pool.query('SELECT * FROM isp_reverse_proxy_routes WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = existing.rows[0];
+    const admin = ispIsAdmin(req);
+    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Owner oder Admin' });
+    await pool.query('DELETE FROM isp_reverse_proxy_routes WHERE id = $1', [id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // === Mailboxes (PMG-Vorbereitung) ===
 app.get('/api/isp/mailboxes', authMiddleware, async (req, res) => {
   try {
@@ -15947,6 +16096,56 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_isp_vpn_user ON isp_vpn_accounts(LOWER(user_email));
       CREATE INDEX IF NOT EXISTS idx_isp_vpn_active ON isp_vpn_accounts(active);
+
+      -- VLAN-Requests: Bewohner kann eigenes VLAN beantragen (z.B. fuer
+      -- Smart-Home, Server, Gaming). Antrag → status pending → Technik
+      -- genehmigt + traegt vlan_id ein → Erschliessung.
+      CREATE TABLE IF NOT EXISTS isp_vlan_requests (
+        id SERIAL PRIMARY KEY,
+        antragsteller_email TEXT NOT NULL,
+        wohnung_id INTEGER REFERENCES wohnungen(id) ON DELETE SET NULL,
+        zweck TEXT NOT NULL,                     -- Freitext: wofuer
+        gewuenschter_name VARCHAR(80),           -- Wunsch-Bezeichnung
+        gewuenschte_groesse VARCHAR(20),         -- /29, /28, /24
+        geraete_anzahl INTEGER,
+        internet_zugriff BOOLEAN DEFAULT true,
+        andere_vlans_zugriff BOOLEAN DEFAULT false,
+        status VARCHAR(20) DEFAULT 'pending',    -- pending|approved|rejected|deployed
+        vlan_id INTEGER,                         -- zugewiesen nach approval
+        subnet_v4 CIDR,                          -- z.B. 10.0.50.0/28
+        ablehnung_grund TEXT,
+        notizen_technik TEXT,
+        deployed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        CONSTRAINT isp_vlanreq_status_chk CHECK (status IN ('pending','approved','rejected','deployed'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_isp_vlanreq_status ON isp_vlan_requests(status);
+      CREATE INDEX IF NOT EXISTS idx_isp_vlanreq_user ON isp_vlan_requests(LOWER(antragsteller_email));
+
+      -- Zentraler Reverse-Proxy (Traefik/Nginx) — alle Web-Services
+      -- (intern + extern) laufen hierueber: zentrale SSL-Terminierung,
+      -- Cloudflare-Tunnel-Anbindung, Auth-Forwarding. User kann eigene
+      -- Backend-Routen beantragen (z.B. eigener Home-Server).
+      CREATE TABLE IF NOT EXISTS isp_reverse_proxy_routes (
+        id SERIAL PRIMARY KEY,
+        hostname VARCHAR(255) NOT NULL,          -- z.B. cloud.user.rosenweg4303.ch
+        backend_url VARCHAR(500) NOT NULL,       -- http://10.0.50.5:8080
+        owner_email TEXT,
+        wohnung_id INTEGER REFERENCES wohnungen(id) ON DELETE SET NULL,
+        ssl BOOLEAN DEFAULT true,
+        ssl_method VARCHAR(30) DEFAULT 'letsencrypt', -- letsencrypt|cloudflare-origin|manual
+        public BOOLEAN DEFAULT false,            -- intern only oder via CF-Tunnel oeffentlich?
+        auth_required BOOLEAN DEFAULT false,     -- Authentik-Auth davor schalten
+        rate_limit_per_min INTEGER,
+        active BOOLEAN DEFAULT true,
+        notizen TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (hostname)
+      );
+      CREATE INDEX IF NOT EXISTS idx_isp_rp_owner ON isp_reverse_proxy_routes(LOWER(owner_email));
+      CREATE INDEX IF NOT EXISTS idx_isp_rp_active ON isp_reverse_proxy_routes(active);
 
       -- PMG-Mailboxes-Cache (Datenmodell vorbereitet, fuellt sich erst
       -- wenn PMG-API-Sync aktiv ist). Mailbox = Postfach auf eigenem
