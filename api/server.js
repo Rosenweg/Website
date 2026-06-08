@@ -14434,7 +14434,114 @@ app.get('/api/isp/traefik-config', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// === Mailboxes (PMG-Vorbereitung) ===
+// === Mail-Relays (PMG-Domains) ===
+app.get('/api/isp/mail-relays', authMiddleware, async (req, res) => {
+  try {
+    const admin = ispIsAdmin(req);
+    const email = (req.user.email || '').toLowerCase();
+    const r = admin
+      ? await pool.query(`SELECT * FROM isp_mail_relays ORDER BY active DESC, domain`)
+      : await pool.query('SELECT * FROM isp_mail_relays WHERE LOWER(owner_email) = $1 ORDER BY domain', [email]);
+    res.json({ mail_relays: r.rows, is_admin: admin });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/isp/mail-relays', authMiddleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.domain || !b.target_host) return res.status(400).json({ error: 'domain + target_host Pflicht' });
+    const owner = b.owner_email || req.user.email;
+    if (!ispIsAdmin(req) && (owner || '').toLowerCase() !== (req.user.email || '').toLowerCase()) {
+      return res.status(403).json({ error: 'Nur eigene Domains' });
+    }
+    // Hostname-Check (gleiche Logik wie redirects/rp — eigene Domains brauchen Admin)
+    const decision = ispIsAdmin(req) && b.skip_approval
+      ? { approval_status: 'approved', approval_reason: 'Admin-Bypass', active: true }
+      : await ispDecideApproval(b.domain);
+    const r = await pool.query(
+      `INSERT INTO isp_mail_relays (domain, target_host, target_port, target_use_mx,
+                                     owner_email, wohnung_id, dkim_selector,
+                                     approval_status, approval_reason, dns_verified_at,
+                                     last_dns_check_at, active, notizen)
+       VALUES ($1,$2,COALESCE($3,25),COALESCE($4,false),$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+      [b.domain.toLowerCase(), b.target_host, b.target_port, b.target_use_mx,
+       owner, b.wohnung_id || null, b.dkim_selector || null,
+       decision.approval_status, decision.approval_reason,
+       decision.dns_verified_at || null, decision.last_dns_check_at || null,
+       decision.active, b.notizen || null],
+    );
+    res.json({ ...r.rows[0], dns_info: ispResolveTarget() });
+  } catch (err) {
+    if (String(err.message).includes('duplicate key')) return res.status(409).json({ error: 'Domain bereits registriert' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/isp/mail-relays/:id', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const e = await pool.query('SELECT * FROM isp_mail_relays WHERE id = $1', [id]);
+    if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = e.rows[0];
+    const admin = ispIsAdmin(req);
+    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Owner oder Admin' });
+    const b = req.body || {};
+    const updates = []; const params = [];
+    const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
+    const userFields = ['target_host','target_port','target_use_mx','dkim_selector','active','notizen'];
+    const adminFields = ['domain','owner_email','wohnung_id','approval_status','approval_reason','dkim_private_key'];
+    const allowed = admin ? [...userFields, ...adminFields] : userFields;
+    for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    push('updated_at', new Date());
+    params.push(id);
+    const r = await pool.query(`UPDATE isp_mail_relays SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/isp/mail-relays/:id', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const e = await pool.query('SELECT * FROM isp_mail_relays WHERE id = $1', [id]);
+    if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = e.rows[0];
+    const admin = ispIsAdmin(req);
+    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Owner oder Admin' });
+    await pool.query('DELETE FROM isp_mail_relays WHERE id = $1', [id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/isp/mail-relays/:id/recheck-dns', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const e = await pool.query('SELECT * FROM isp_mail_relays WHERE id = $1', [id]);
+    if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = e.rows[0];
+    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    if (!isOwner && !ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Owner oder Admin' });
+    // Bei Mail-Relays pruefen wir MX statt A/AAAA
+    const dns = (await import('node:dns/promises')).default;
+    let mx = null;
+    try { mx = await dns.resolveMx(v.domain).catch(() => null); } catch {}
+    const target = ispResolveTarget();
+    const matches = Array.isArray(mx) && mx.some(m => m.exchange?.toLowerCase().includes(target.cname_target.toLowerCase()) || m.exchange?.toLowerCase() === 'pmg.rosenweg4303.ch');
+    const upd = matches
+      ? { approval_status: 'approved', dns_verified_at: new Date(), last_dns_check_at: new Date(), active: true, approval_reason: 'MX zeigt auf PMG' }
+      : { last_dns_check_at: new Date() };
+    await pool.query(
+      `UPDATE isp_mail_relays SET approval_status=COALESCE($1,approval_status), dns_verified_at=COALESCE($2,dns_verified_at),
+         last_dns_check_at=$3, active=COALESCE($4,active), approval_reason=COALESCE($5,approval_reason) WHERE id=$6`,
+      [upd.approval_status, upd.dns_verified_at, upd.last_dns_check_at, upd.active, upd.approval_reason, id],
+    );
+    res.json({ mx, target, matches, updated: upd });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// === Mailboxes (DEPRECATED, isp_mail_relays nutzen) ===
 app.get('/api/isp/mailboxes', authMiddleware, async (req, res) => {
   try {
     const admin = ispIsAdmin(req);
@@ -16558,9 +16665,35 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_isp_rp_owner ON isp_reverse_proxy_routes(LOWER(owner_email));
       CREATE INDEX IF NOT EXISTS idx_isp_rp_active ON isp_reverse_proxy_routes(active);
 
-      -- PMG-Mailboxes-Cache (Datenmodell vorbereitet, fuellt sich erst
-      -- wenn PMG-API-Sync aktiv ist). Mailbox = Postfach auf eigenem
-      -- Mailserver, gehoert zu einem User oder Service.
+      -- Mail-Relay-Domains: User traegt seine Domain ein, PMG nimmt
+      -- Mail dafuer an, filtert (SpamAssassin/ClamAV), leitet sie dann
+      -- an den eigenen SMTP-Server des Users weiter (z.B. Bluewin, eigenes
+      -- Postfix, Microsoft 365 etc.). PMG hat KEINE eigenen Mailboxen.
+      CREATE TABLE IF NOT EXISTS isp_mail_relays (
+        id SERIAL PRIMARY KEY,
+        domain VARCHAR(255) NOT NULL UNIQUE,    -- z.B. example.ch
+        target_host VARCHAR(255) NOT NULL,      -- wo PMG nach Filterung hinleitet
+        target_port INTEGER DEFAULT 25,
+        target_use_mx BOOLEAN DEFAULT false,    -- statt target_host MX-Lookup machen
+        owner_email TEXT,
+        wohnung_id INTEGER REFERENCES wohnungen(id) ON DELETE SET NULL,
+        dkim_selector VARCHAR(60),
+        dkim_private_key TEXT,                   -- optional, PMG-DKIM-Sign vor Forward
+        approval_status VARCHAR(20) DEFAULT 'pending_dns',
+        dns_verified_at TIMESTAMPTZ,
+        approval_reason TEXT,
+        last_dns_check_at TIMESTAMPTZ,
+        active BOOLEAN DEFAULT false,
+        notizen TEXT,
+        pmg_synced_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_isp_mr_owner ON isp_mail_relays(LOWER(owner_email));
+      CREATE INDEX IF NOT EXISTS idx_isp_mr_active ON isp_mail_relays(active);
+
+      -- isp_mailboxes ist veraltet (PMG hat keine eigenen Mailboxes).
+      -- Tabelle bleibt fuer Backward-Compat, wird nicht mehr benutzt.
       CREATE TABLE IF NOT EXISTS isp_mailboxes (
         id SERIAL PRIMARY KEY,
         local_part VARCHAR(120) NOT NULL,        -- vor @
