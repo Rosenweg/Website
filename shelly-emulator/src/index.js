@@ -23,10 +23,11 @@
  */
 import http from 'node:http';
 import os from 'node:os';
-import { Bonjour } from 'bonjour-service';
+import bonjourPkg from 'bonjour-service';
+const Bonjour = bonjourPkg.Bonjour || bonjourPkg.default?.Bonjour || bonjourPkg.default || bonjourPkg;
 
 const PORT = parseInt(process.env.PORT, 10) || 80;
-const BACKEND = process.env.BACKEND_URL || 'https://energy.rosenweg4303.ch/api/energy/shelly';
+const BACKEND = process.env.BACKEND_URL || 'https://www.rosenweg4303.ch/api/energy/shelly';
 const POLL_MS = parseInt(process.env.POLL_MS, 10) || 10_000;
 const GROUP = process.env.ENERGY_GROUP || 'r9';
 
