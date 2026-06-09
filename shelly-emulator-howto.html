@@ -103,21 +103,50 @@ npm install --omit=dev</code></pre>
 
     <!-- ─── Schritt 2: Datenquelle anpassen ─── -->
     <section class="bg-white rounded-xl shadow-sm border p-6">
-      <h2 class="text-xl font-semibold mb-3">2️⃣ Datenquelle anpassen</h2>
-      <p class="text-sm mb-3">Der Emulator erwartet einen JSON-Endpoint der diese Felder liefert (alle in Watt):</p>
+      <h2 class="text-xl font-semibold mb-3">2️⃣ Datenquelle (BACKEND_URL) anpassen</h2>
+
+      <div class="bg-emerald-50 border-2 border-emerald-300 rounded-lg p-4 mb-4">
+        <p class="font-semibold text-emerald-900 mb-2">🚀 Rosenweg Solar-Daten (PV-Anlage STWEG3): ready-to-use</p>
+        <p class="text-emerald-800 text-xs mb-2">Wenn du die Rosenweg-Solar-Werte nutzen willst, kannst du eine dieser Backend-URLs <strong>direkt</strong> in dein <code>systemd</code>-File schreiben — kein eigenes Backend bauen, kein Mapping nötig.</p>
+        <div class="space-y-2">
+          <div>
+            <p class="font-semibold text-emerald-900 text-xs">⚡ PV-Überschuss</p>
+            <pre class="bg-gray-900 text-green-300 p-2 rounded text-xs overflow-x-auto select-all">https://www.rosenweg4303.ch/api/energy/shelly?variant=surplus</pre>
+            <p class="text-emerald-700 text-xs">A = ohne Boiler · B = mit Boiler · C = Heizstab-Last</p>
+          </div>
+          <div>
+            <p class="font-semibold text-emerald-900 text-xs">☀ Produktion + Verbrauch</p>
+            <pre class="bg-gray-900 text-green-300 p-2 rounded text-xs overflow-x-auto select-all">https://www.rosenweg4303.ch/api/energy/shelly?variant=production</pre>
+            <p class="text-emerald-700 text-xs">A = Solar-Produktion · B = Haus-Verbrauch · C = Netz-Bezug</p>
+          </div>
+          <div>
+            <p class="font-semibold text-emerald-900 text-xs">🔌 Netz-Flussrichtung</p>
+            <pre class="bg-gray-900 text-green-300 p-2 rounded text-xs overflow-x-auto select-all">https://www.rosenweg4303.ch/api/energy/shelly?variant=grid</pre>
+            <p class="text-emerald-700 text-xs">A = Einspeisung · B = Bezug · C = Netto-Bilanz</p>
+          </div>
+        </div>
+      </div>
+
+      <p class="text-sm mb-3"><strong>Für andere Datenquellen</strong> (eigene Solaranlage, Wallbox, Inverter, Sensor): Der Emulator erwartet einen JSON-Endpoint der diese Felder liefert (alle in Watt):</p>
       <pre class="bg-gray-900 text-gray-100 p-4 rounded text-xs overflow-x-auto"><code>{
-  "surplus_without_boiler_w": 1500,   // → Phase A
-  "surplus_with_boiler_w":    3200,   // → Phase B
-  "heizstab_w":                700    // → Phase C
+  "phase_a_label": "Mein Wert 1",
+  "phase_a_w": 1500,
+  "phase_b_label": "Mein Wert 2",
+  "phase_b_w": 3200,
+  "phase_c_label": "Mein Wert 3",
+  "phase_c_w": 700
 }</code></pre>
-      <p class="text-sm mt-3">Du brauchst <strong>nicht alle drei</strong> — die anderen werden zu 0. Beispiel-Endpoints für andere Use-Cases:</p>
+      <p class="text-xs text-gray-600 mt-2">Die <code class="bg-gray-100 px-1">_label</code>-Felder sind optional und werden in der HTML-Statusseite des Emulators angezeigt. Wenn du sie weglässt, heißt es einfach &bdquo;Phase A&ldquo; / &bdquo;Phase B&ldquo; / &bdquo;Phase C&ldquo;.</p>
+
+      <p class="text-sm mt-3"><strong>Beispiel-Quellen die sich gut eignen:</strong></p>
       <ul class="text-sm mt-2 space-y-1 list-disc list-inside text-gray-700">
-        <li>Solar-Inverter (z.B. Fronius, Huawei, SMA) hat oft eine <code class="bg-gray-100 px-1">/solar_api/...</code> JSON-API → kleines Mapping-Script davor</li>
-        <li>Wallbox (Easee, go-e, ABL) hat eine HTTP-API mit Leistung-Werten</li>
-        <li>Home-Assistant mit Template-Sensor und REST-Endpoint</li>
-        <li>Static-File auf einem Webserver wenn Werte konstant sind</li>
+        <li>Solar-Inverter (Fronius, Huawei, SMA, Solaredge) → kleines Mapping-Script in Python/Node davor</li>
+        <li>Wallbox-APIs (Easee, go-e, ABL Wallbox)</li>
+        <li>Home-Assistant mit REST-Sensor → <code class="bg-gray-100 px-1">/api/states/sensor.foo</code></li>
+        <li>Eigene MQTT-zu-HTTP Bridge</li>
+        <li>Static-File auf Webserver wenn Werte konstant sind</li>
       </ul>
-      <p class="text-sm mt-3">Du sagst dem Emulator wo deine Quelle ist via Environment-Variable <code class="bg-gray-100 px-1">BACKEND_URL</code>.</p>
+      <p class="text-sm mt-3">Du sagst dem Emulator wo seine Quelle ist via Environment-Variable <code class="bg-gray-100 px-1">BACKEND_URL</code>.</p>
     </section>
 
     <!-- ─── Schritt 3: systemd-Service ─── -->

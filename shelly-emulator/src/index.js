@@ -47,8 +47,11 @@ function generateMac(seed) {
 // ─── Backend-Cache ──────────────────────────────────────────────────
 let cache = {
   ts: 0,
-  surplus_without_boiler_w: 0,
-  surplus_with_boiler_w: 0,
+  // Generische Phasen (vom Backend variant-spezifisch befuellt)
+  phase_a_w: 0, phase_a_label: '',
+  phase_b_w: 0, phase_b_label: '',
+  phase_c_w: 0, phase_c_label: '',
+  // Backward-compat Felder
   heizstab_w: 0,
   production_w: 0,
   grid_w: 0,
@@ -58,7 +61,10 @@ let cache = {
 
 async function poll() {
   try {
-    const r = await fetch(BACKEND + '?group=' + encodeURIComponent(GROUP), {
+    // Backend-URL kann schon ?variant=...&group=... enthalten; sonst defaults anhaengen
+    const sep = BACKEND.includes('?') ? '&' : '?';
+    const fullUrl = BACKEND.includes('group=') ? BACKEND : BACKEND + sep + 'group=' + encodeURIComponent(GROUP);
+    const r = await fetch(fullUrl, {
       headers: { 'User-Agent': 'rosenweg-shelly-emu/1.0' },
       signal: AbortSignal.timeout(8000),
     });
@@ -66,8 +72,13 @@ async function poll() {
     const d = await r.json();
     cache = {
       ts: Date.now(),
-      surplus_without_boiler_w: Math.round(d.surplus_without_boiler_w || 0),
-      surplus_with_boiler_w: Math.round(d.surplus_with_boiler_w || 0),
+      // Bevorzugt generische Phasen, sonst Fallback auf surplus-Felder
+      phase_a_w: Math.round(d.phase_a_w ?? d.surplus_without_boiler_w ?? 0),
+      phase_a_label: d.phase_a_label || 'Phase A',
+      phase_b_w: Math.round(d.phase_b_w ?? d.surplus_with_boiler_w ?? 0),
+      phase_b_label: d.phase_b_label || 'Phase B',
+      phase_c_w: Math.round(d.phase_c_w ?? d.heizstab_w ?? 0),
+      phase_c_label: d.phase_c_label || 'Phase C',
       heizstab_w: Math.round(d.heizstab_w || 0),
       production_w: Math.round(d.production_w || 0),
       grid_w: Math.round(d.grid_w || 0),
@@ -151,32 +162,19 @@ function rpcShellyGetStatus() {
 // active power (W). Voltage 230V fix.
 function rpcEmGetStatus() {
   const stale = (Date.now() - cache.ts) > POLL_MS * 3;
-  const c = stale ? { surplus_without_boiler_w: 0, surplus_with_boiler_w: 0, heizstab_w: 0 } : cache;
+  const a = stale ? 0 : cache.phase_a_w;
+  const b = stale ? 0 : cache.phase_b_w;
+  const c = stale ? 0 : cache.phase_c_w;
   const V = 230;
   return {
     id: 0,
-    a_current: c.surplus_without_boiler_w / V,
-    a_voltage: V,
-    a_act_power: c.surplus_without_boiler_w,
-    a_aprt_power: c.surplus_without_boiler_w,
-    a_pf: 1.0,
-    a_freq: 50.0,
-    b_current: c.surplus_with_boiler_w / V,
-    b_voltage: V,
-    b_act_power: c.surplus_with_boiler_w,
-    b_aprt_power: c.surplus_with_boiler_w,
-    b_pf: 1.0,
-    b_freq: 50.0,
-    c_current: c.heizstab_w / V,
-    c_voltage: V,
-    c_act_power: c.heizstab_w,
-    c_aprt_power: c.heizstab_w,
-    c_pf: 1.0,
-    c_freq: 50.0,
+    a_current: a / V, a_voltage: V, a_act_power: a, a_aprt_power: Math.abs(a), a_pf: 1.0, a_freq: 50.0,
+    b_current: b / V, b_voltage: V, b_act_power: b, b_aprt_power: Math.abs(b), b_pf: 1.0, b_freq: 50.0,
+    c_current: c / V, c_voltage: V, c_act_power: c, c_aprt_power: Math.abs(c), c_pf: 1.0, c_freq: 50.0,
     n_current: null,
-    total_current: (c.surplus_without_boiler_w + c.surplus_with_boiler_w + c.heizstab_w) / V,
-    total_act_power: c.surplus_without_boiler_w + c.surplus_with_boiler_w + c.heizstab_w,
-    total_aprt_power: c.surplus_without_boiler_w + c.surplus_with_boiler_w + c.heizstab_w,
+    total_current: (a + b + c) / V,
+    total_act_power: a + b + c,
+    total_aprt_power: Math.abs(a) + Math.abs(b) + Math.abs(c),
     user_calibrated_phase: [],
   };
 }
@@ -251,14 +249,15 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     return res.end(`<!DOCTYPE html><html><head><title>Rosenweg PV Emulator</title></head>
 <body style="font-family:sans-serif;padding:20px;">
-<h1>Rosenweg 9 — PV Ueberschuss (virtueller Shelly Pro 3EM)</h1>
-<p>Emuliert ein Shelly Pro 3EM Gen2. Datenpunkte:</p>
+<h1>Rosenweg 9 — virtueller Shelly Pro 3EM</h1>
+<p>Emuliert ein Shelly Pro 3EM Gen2. Aktuelles Mapping:</p>
 <ul>
-  <li><strong>Phase A</strong> = Ueberschuss <em>OHNE</em> Boiler: ${cache.surplus_without_boiler_w} W</li>
-  <li><strong>Phase B</strong> = Ueberschuss <em>MIT</em> Boiler: ${cache.surplus_with_boiler_w} W</li>
-  <li><strong>Phase C</strong> = Heizstab-Verbrauch: ${cache.heizstab_w} W</li>
+  <li><strong>Phase A</strong> = ${cache.phase_a_label}: ${cache.phase_a_w} W</li>
+  <li><strong>Phase B</strong> = ${cache.phase_b_label}: ${cache.phase_b_w} W</li>
+  <li><strong>Phase C</strong> = ${cache.phase_c_label}: ${cache.phase_c_w} W</li>
 </ul>
-<p>Last update: ${cache.ts ? new Date(cache.ts).toLocaleString('de-CH') : 'never'}<br>
+<p>Backend: <code>${BACKEND}</code><br>
+Last update: ${cache.ts ? new Date(cache.ts).toLocaleString('de-CH') : 'never'}<br>
 MAC: ${MAC.toUpperCase()}<br>
 Hostname: ${HOSTNAME}</p>
 <p><a href="/rpc/Shelly.GetDeviceInfo">/rpc/Shelly.GetDeviceInfo</a> · <a href="/rpc/EM.GetStatus?id=0">/rpc/EM.GetStatus</a> · <a href="/health">/health</a></p>

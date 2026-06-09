@@ -1311,20 +1311,55 @@ app.options('/api/energy/shelly', openCors);
 app.get('/api/energy/shelly', openCors, async (req, res) => {
   try {
     const group = req.query.group || 'r9';
+    const variant = (req.query.variant || 'surplus').toLowerCase();
     const data = await getGroupLiveData(group);
     if (data.grid_w === null) return res.status(503).json({ error: 'No live data' });
     const surplus_w = Math.max(0, -data.grid_w);
     const heizstab_w = data.heizstab_w || 0;
     const surplus_available_w = surplus_w + heizstab_w;
+    const production_w = data.production_w || 0;
+    const consumption_w = data.consumption_w || 0;
+
+    // Variant-spezifisches Mapping fuer Phasen A/B/C des virtuellen Shelly:
+    // surplus  (default) — A=Ueberschuss ohne Boiler, B=Ueberschuss mit Boiler, C=Heizstab
+    // production         — A=Solar-Produktion,        B=Verbrauch,              C=Netz-Bezug (>0 vom Netz)
+    // grid               — A=Netz-Einspeisung (>0),   B=Netz-Bezug (>0),        C=Netto-Bilanz
+    const variants = {
+      surplus: {
+        a: { label: 'Ueberschuss ohne Boiler', w: surplus_w },
+        b: { label: 'Ueberschuss mit Boiler',  w: surplus_available_w },
+        c: { label: 'Heizstab',                w: heizstab_w },
+      },
+      production: {
+        a: { label: 'Solar-Produktion', w: production_w },
+        b: { label: 'Verbrauch',        w: consumption_w },
+        c: { label: 'Netz-Bezug',       w: Math.max(0, data.grid_w) },
+      },
+      grid: {
+        a: { label: 'Einspeisung',  w: Math.max(0, -data.grid_w) },
+        b: { label: 'Netz-Bezug',   w: Math.max(0, data.grid_w) },
+        c: { label: 'Netto-Bilanz', w: data.grid_w },
+      },
+    };
+    const v = variants[variant] || variants.surplus;
+
     res.json({
       group,
+      variant: variants[variant] ? variant : 'surplus',
       timestamp: new Date().toISOString(),
-      // Hauptwerte fuer Shelly-Virtual-Components
+      // Variant-Mapping fuer Shelly Pro 3EM (Phasen)
+      phase_a_label: v.a.label,
+      phase_a_w: v.a.w,
+      phase_b_label: v.b.label,
+      phase_b_w: v.b.w,
+      phase_c_label: v.c.label,
+      phase_c_w: v.c.w,
+      // Backward-Compat: alte Felder behalten (variant=surplus default)
       surplus_without_boiler_w: surplus_w,
       surplus_with_boiler_w: surplus_available_w,
-      // Zusatz-Werte fuer mehr Komfort
-      production_w: data.production_w || 0,
-      consumption_w: data.consumption_w || 0,
+      // Rohwerte fuer eigene Mappings
+      production_w,
+      consumption_w,
       grid_w: data.grid_w,
       heizstab_w,
       battery_soc: data.battery_soc != null ? data.battery_soc : null,

@@ -1903,17 +1903,81 @@ CNAME (Alternative): public.rosenweg4303.ch</pre>
                 <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128268;</span> Virtuelles Shelly (PV-Ueberschuss)</h2>
                 <p class="mt-1 opacity-90">Smart-Home-Steuerung anhand des Solar-Ueberschusses</p>
             </div>
-            <div class="p-6 space-y-3 text-sm">
+            <div class="p-6 space-y-4 text-sm">
                 <div class="bg-purple-50 border-l-4 border-purple-500 p-4 rounded">
-                    <p class="font-semibold text-purple-900 mb-1">&#128161; Wofuer?</p>
-                    <p class="text-purple-800">Die Solaranlage von STWEG3 (Rosenweg 9) liefert zwei Datenpunkte als virtuelles Shelly Pro 3EM ins Heimnetz: <strong>Ueberschuss ohne Boiler</strong> und <strong>Ueberschuss mit Boiler</strong> (theoretisch verfuegbar wenn Heizstab aus). Damit kannst du z.B. deine Wallbox, Klimaanlage oder Pool-Pumpe automatisch zuschalten wenn die Sonne scheint.</p>
+                    <p class="font-semibold text-purple-900 mb-1">&#128161; Wofuer ist das?</p>
+                    <p class="text-purple-800">Die Solaranlage von STWEG3 (Rosenweg 9) liefert Live-Daten als <strong>virtuelles Shelly Pro 3EM Energiemessgeraet</strong> ins Heimnetz. Damit kannst du in der Shelly-App, Home-Assistant, Node-RED etc. Automationen anlegen: Wallbox laden wenn Ueberschuss da ist, Klima nur wenn Solar laeuft, Pool-Pumpe ueberschuss-gesteuert &mdash; ohne dass du selbst eine Solar-API anzapfen musst.</p>
                 </div>
-                <p>Zwei Varianten:</p>
-                <ul class="list-disc list-inside space-y-1 text-gray-700">
-                    <li><strong>Variante A</strong> &mdash; mJS-Skript auf einem deiner Shelly Plus/Pro pollt die Werte und legt sie als Virtual-Number-Components ab</li>
-                    <li><strong>Variante B</strong> &mdash; standalone Emulator-Geraet (laeuft schon zentral als <code class="bg-gray-100 px-1">shellypvrosenweg9</code> @ 100.64.90.200, mDNS-Discovery)</li>
-                </ul>
-                <p class="text-gray-700"><strong>Anleitung mit allen Schritten + Code:</strong> <a href="/shelly-emulator-howto.html" class="text-blue-600 hover:underline">/shelly-emulator-howto.html</a></p>
+
+                <div class="bg-emerald-50 border-2 border-emerald-300 rounded p-4">
+                    <p class="font-semibold text-emerald-900 mb-2">&#128640; Ready-to-Use Backend-URLs</p>
+                    <p class="text-emerald-800 text-xs mb-2">Diese URLs kannst du direkt in deinem Shelly-Script (Variante A) oder Emulator (Variante B) als <code class="bg-white px-1">BACKEND_URL</code> eintragen. Jede Variante mappt 3 Werte auf die 3 Phasen des virtuellen Geraets:</p>
+
+                    <div class="space-y-2">
+                        <div class="bg-white rounded p-3 border border-emerald-200">
+                            <p class="font-semibold text-emerald-900 mb-1">&#9889; PV-Ueberschuss (Default)</p>
+                            <pre class="bg-gray-900 text-green-300 p-2 rounded text-xs overflow-x-auto select-all">https://www.rosenweg4303.ch/api/energy/shelly?variant=surplus</pre>
+                            <ul class="text-emerald-900 text-xs mt-1 space-y-0.5 list-disc list-inside">
+                                <li><strong>Phase A</strong> = Ueberschuss <em>ohne Boiler</em> (was real ins Netz geht)</li>
+                                <li><strong>Phase B</strong> = Ueberschuss <em>mit Boiler</em> (was verfuegbar waere wenn Heizstab aus)</li>
+                                <li><strong>Phase C</strong> = aktuelle Heizstab-Last</li>
+                            </ul>
+                            <p class="text-emerald-700 text-xs mt-1 italic">Typischer Use-Case: Wallbox/Klima nur einschalten wenn Phase B > Schwellwert.</p>
+                        </div>
+
+                        <div class="bg-white rounded p-3 border border-emerald-200">
+                            <p class="font-semibold text-emerald-900 mb-1">&#9728; Solar-Produktion &amp; Verbrauch</p>
+                            <pre class="bg-gray-900 text-green-300 p-2 rounded text-xs overflow-x-auto select-all">https://www.rosenweg4303.ch/api/energy/shelly?variant=production</pre>
+                            <ul class="text-emerald-900 text-xs mt-1 space-y-0.5 list-disc list-inside">
+                                <li><strong>Phase A</strong> = Solar-Produktion in Watt</li>
+                                <li><strong>Phase B</strong> = Verbrauch im Haus</li>
+                                <li><strong>Phase C</strong> = Netz-Bezug (nur Bezug, ohne Einspeisung)</li>
+                            </ul>
+                            <p class="text-emerald-700 text-xs mt-1 italic">Typischer Use-Case: Dashboard das anzeigt &bdquo;produzierst du gerade mehr als du verbrauchst?&ldquo;</p>
+                        </div>
+
+                        <div class="bg-white rounded p-3 border border-emerald-200">
+                            <p class="font-semibold text-emerald-900 mb-1">&#128268; Netz-Flussrichtung (Einspeisung/Bezug)</p>
+                            <pre class="bg-gray-900 text-green-300 p-2 rounded text-xs overflow-x-auto select-all">https://www.rosenweg4303.ch/api/energy/shelly?variant=grid</pre>
+                            <ul class="text-emerald-900 text-xs mt-1 space-y-0.5 list-disc list-inside">
+                                <li><strong>Phase A</strong> = Einspeisung ins Netz (W, immer &ge;0)</li>
+                                <li><strong>Phase B</strong> = Netz-Bezug (W, immer &ge;0)</li>
+                                <li><strong>Phase C</strong> = Netto-Bilanz (positiv = Bezug, negativ = Einspeisung)</li>
+                            </ul>
+                            <p class="text-emerald-700 text-xs mt-1 italic">Typischer Use-Case: Reine Netz-Bilanz visualisieren ohne Zwischenrechnung.</p>
+                        </div>
+                    </div>
+
+                    <p class="text-emerald-800 text-xs mt-3"><strong>Direkt anschauen was kommt:</strong> URL in den Browser kopieren &rarr; JSON-Antwort. Update-Frequenz: ~5 Sekunden im Backend, du pollst alle 10-30s.</p>
+                </div>
+
+                <p class="font-semibold text-gray-800">Zwei Varianten wie du's nutzt</p>
+                <div class="grid sm:grid-cols-2 gap-3">
+                    <div class="border rounded-lg p-3 bg-blue-50">
+                        <p class="font-semibold text-blue-900 mb-1">A. mJS-Skript auf eigenem Shelly</p>
+                        <p class="text-blue-800 text-xs mb-2">Du hast schon einen <strong>Shelly Plus/Pro</strong> mit Script-Support (FW &ge; 1.4). Ein 30-Zeilen-Skript pollt die Backend-URL und schreibt die Werte in Virtual-Number-Components des Geraets. Funktioniert ohne extra Server.</p>
+                        <p class="text-blue-700 text-xs">Komplette Anleitung mit Code: <a href="/shelly-emulator-howto.html#variante-a" class="text-blue-700 underline">Variante A</a>.</p>
+                    </div>
+                    <div class="border rounded-lg p-3 bg-purple-50">
+                        <p class="font-semibold text-purple-900 mb-1">B. Standalone-Emulator (laeuft schon!)</p>
+                        <p class="text-purple-800 text-xs mb-2">Eigenes virtuelles Pro-3EM-Geraet im Netz, das sich via mDNS automatisch in der Shelly-App meldet. Laeuft zentral als <code class="bg-white px-1">shellypvrosenweg9</code> auf 100.64.90.200 (VLAN 90) &mdash; in deiner Shelly-App einfach &bdquo;Geraet hinzufuegen&ldquo; klicken.</p>
+                        <p class="text-purple-700 text-xs">DIY-Anleitung um einen eigenen aufzusetzen: <a href="/shelly-emulator-howto.html" class="text-purple-700 underline">Variante B</a>.</p>
+                    </div>
+                </div>
+
+                <div class="bg-gray-50 border rounded p-4">
+                    <p class="font-semibold text-gray-800 mb-2">&#127919; Beispiel: Wallbox via Ueberschuss steuern</p>
+                    <ol class="text-gray-700 text-sm space-y-1.5 list-decimal list-inside">
+                        <li>Variante B nutzen — virtuelles Pro-3EM ist schon da, in Shelly-App hinzufuegen</li>
+                        <li>Shelly Smart Control App &rarr; <em>Scenes</em> &rarr; <em>+ Neue Scene</em></li>
+                        <li>Trigger: <em>&bdquo;Wenn Phase B (Ueberschuss mit Boiler) &gt; 6000 W fuer 5 Minuten&ldquo;</em></li>
+                        <li>Aktion: <em>&bdquo;Schalte Wallbox-Shelly (Shelly Plus 1PM in deiner Garage) EIN&ldquo;</em></li>
+                        <li>Gegen-Scene fuer Aus: <em>&bdquo;Wenn Phase A (Ueberschuss ohne Boiler) &lt; 500 W &rarr; Wallbox AUS&ldquo;</em></li>
+                    </ol>
+                    <p class="text-gray-600 text-xs mt-2">Resultat: dein Auto laedt nur wenn die Sonne mehr produziert als der Haushalt + Boiler braucht. Automatisch, ohne dass du selbst Werte vergleichst.</p>
+                </div>
+
+                <p class="text-gray-600 italic">&#128279; Komplette technische Anleitung (mJS-Code, systemd-Service, Troubleshooting): <a href="/shelly-emulator-howto.html" class="text-blue-600 hover:underline">/shelly-emulator-howto.html</a>.</p>
             </div>
         </section>
 
