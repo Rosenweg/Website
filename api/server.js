@@ -12744,7 +12744,7 @@ async function resolveTechnikWhatsappGroupId() {
   }
   try {
     const r = await fetch('http://rosenweg_whatsapp-bot:8080/groups', {
-      headers: { 'X-WA-Secret': process.env.WA_BOT_SECRET || '' },
+      headers: { 'X-WA-Secret': process.env.WHATSAPP_SHARED_SECRET || '' },
       signal: AbortSignal.timeout(5000),
     });
     if (!r.ok) return null;
