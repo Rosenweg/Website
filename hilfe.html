@@ -953,20 +953,101 @@
                 <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128272;</span> API-Tokens (PAT)</h2>
                 <p class="mt-1 opacity-90">KI-Agents, Mobile-Apps oder Skripte im eigenen Namen handeln lassen</p>
             </div>
-            <div class="p-6 space-y-3 text-sm">
+            <div class="p-6 space-y-4 text-sm">
                 <div class="bg-purple-50 border-l-4 border-purple-500 p-4 rounded">
                     <p class="font-semibold text-purple-900 mb-1">&#128161; Wofuer ist das?</p>
-                    <p class="text-purple-800">Wenn du z.B. Claude Desktop, Hermes, OpenClaw oder ein eigenes Skript hast, das fuer dich Dinge auf der Plattform machen soll (Reklamationen erfassen, Auslagen abfragen, Vollmachten anlegen etc.), erstellst du hier einen <strong>Personal Access Token</strong>. Der Token handelt dann im Namen deines Users mit deinen Rechten — kein Cloud-Account noetig, kein Passwort-Sharing.</p>
+                    <p class="text-purple-800">Wenn du Anwendungen wie <strong>Claude Desktop</strong>, <strong>Hermes</strong>, <strong>OpenClaw</strong>, <strong>n8n</strong>, ein selbst geschriebenes Skript oder eine Mobile-App hast, die fuer dich Dinge auf der Plattform erledigen soll (Reklamationen erfassen, Auslagen abfragen, Vollmachten anlegen, …), brauchst du einen Weg, dich dort einzuloggen ohne Authentik-Browser-Login. Genau dafuer sind <strong>Personal Access Tokens (PAT)</strong>. Der Token wirkt wie ein Passwort, aber speziell fuer Maschinen — und im Gegensatz zum Passwort kannst du beliebig viele anlegen, jedes mit eigenem Namen, eigenen Rechten und einzeln widerrufbar.</p>
                 </div>
-                <p><strong>Wie es geht:</strong></p>
-                <ol class="list-decimal list-inside space-y-1 text-gray-700">
-                    <li>Profil &rarr; Section &bdquo;&#128272; API-Tokens&ldquo; &rarr; <em>+ Neuen Token erstellen</em></li>
-                    <li>Name vergeben (z.B. „Claude Desktop"), optional Ablauf + Scopes</li>
-                    <li>Token wird <strong>nur einmal angezeigt</strong> — Copy-Button drueckt, sicher aufbewahren</li>
-                    <li>Im Agent eintragen als <code class="bg-gray-100 px-1">Authorization: Bearer rw_pat_...</code></li>
+
+                <div class="bg-blue-50 border border-blue-200 rounded p-4">
+                    <p class="font-semibold text-blue-900 mb-2">&#127919; Typische Use-Cases</p>
+                    <ul class="text-blue-900 space-y-1.5 text-sm list-disc list-inside">
+                        <li><strong>Claude Desktop</strong> via MCP — du fragst &bdquo;Wer ist der Sanitaer-Handwerker?&ldquo; und Claude antwortet mit den Daten aus dem Handwerker-Verzeichnis</li>
+                        <li><strong>Mobile-App / Shortcuts</strong> — &bdquo;Hey Siri, melde Schaden &lsquo;Aufzug Haus 9 steht still&rsquo;&ldquo; legt eine Reklamation an</li>
+                        <li><strong>Eigenes Dashboard</strong> auf einem Raspberry Pi das alle 5 Min die offenen Reklamationen zeigt</li>
+                        <li><strong>n8n / Zapier-Automation</strong> die bei jeder neuen Auslage eine Telegram-Meldung schickt</li>
+                        <li><strong>Mini-Skript</strong> das nachts deine Wohnungs-Stromverbraeuche ausliest und in eine Excel-Tabelle schreibt</li>
+                    </ul>
+                </div>
+
+                <p class="font-semibold text-gray-800">Schritt-fuer-Schritt: Token erstellen</p>
+                <ol class="list-decimal list-inside space-y-3 text-gray-700">
+                    <li>
+                        <strong>Profil oeffnen</strong> &rarr; <a href="profil.html" class="text-blue-600 hover:underline">profil.html</a> &rarr; zur Sektion <em>&#128272; API-Tokens</em> scrollen.
+                    </li>
+                    <li>
+                        <strong>+ Neuen Token erstellen</strong> klicken &rarr; Modal oeffnet sich. Du siehst:
+                        <div class="bg-gray-50 border rounded p-3 ml-6 mt-2 space-y-1 text-xs">
+                            <div><span class="text-gray-500">Name *</span> &mdash; z.B. <em>&bdquo;Claude Desktop&ldquo;</em>, <em>&bdquo;n8n Auslagen-Bot&ldquo;</em>, <em>&bdquo;Mein Pi Dashboard&ldquo;</em></div>
+                            <div><span class="text-gray-500">Gueltigkeit</span> &mdash; 7 Tage / 30 / 90 / 365 / unbegrenzt</div>
+                            <div><span class="text-gray-500">Scopes</span> &mdash; was darf der Token? Default leer = <strong>alle deine Rechte</strong>. Sonst Checkboxen wie <code class="bg-white px-1">vollmachten:read</code>, <code class="bg-white px-1">handwerker:read</code> etc.</div>
+                        </div>
+                    </li>
+                    <li>
+                        <strong>Erstellen</strong> &rarr; der Token erscheint in einem gruenen Banner:<br>
+                        <code class="block bg-gray-900 text-green-300 p-2 mt-2 rounded text-xs">rw_pat_5ec5161fe155adf583de1182bce7948b17570e6c35e6d1fb862c3a370998ee84</code>
+                        <span class="text-red-600 font-semibold">&#9888; Wird NUR EINMAL angezeigt</span> &mdash; Copy-Button druecken, dann in deinen Passwort-Manager oder direkt in die Agent-Config einkleben.
+                    </li>
+                    <li>
+                        <strong>Im Agent verwenden:</strong> jedes API-Tool akzeptiert den Token als HTTP-Header:
+                        <code class="block bg-gray-900 text-green-300 p-2 mt-2 rounded text-xs">Authorization: Bearer rw_pat_5ec5161fe...</code>
+                    </li>
                 </ol>
-                <p class="text-sm text-gray-700"><strong>Sicherheit:</strong> Token verloren → sofort widerrufen, neuen erstellen. Jeder Token kann einzeln widerrufen werden, „letzter Zugriff" zeigt verdaechtige Nutzung.</p>
-                <p class="text-sm text-gray-700"><strong>MCP-Server:</strong> Im Repo unter <code class="bg-gray-100 px-1">mcp/</code> gibt's einen fertigen MCP-Server der 52 Tools fuer Claude Desktop / Cursor bereitstellt. README im Verzeichnis.</p>
+
+                <div class="bg-emerald-50 border border-emerald-200 rounded p-4">
+                    <p class="font-semibold text-emerald-900 mb-2">&#129302; Quick-Setup: Claude Desktop mit MCP-Server</p>
+                    <p class="text-emerald-900 text-sm mb-2">Im Repo gibt's einen fertigen MCP-Server der <strong>52 typisierte Tools</strong> bereitstellt &mdash; Vollmachten, Auslagen, Reklamationen, Handwerker, Wohnungen, Mail, Energie etc. Setup:</p>
+                    <ol class="list-decimal list-inside text-emerald-900 text-xs space-y-1 mb-2">
+                        <li>Repo clonen: <code class="bg-white px-1">git clone https://github.com/Rosenweg/Website</code></li>
+                        <li><code class="bg-white px-1">cd Website/mcp &amp;&amp; npm install</code></li>
+                        <li><code class="bg-white px-1">~/Library/Application Support/Claude/claude_desktop_config.json</code> bearbeiten:</li>
+                    </ol>
+                    <pre class="bg-gray-900 text-gray-100 p-3 rounded text-xs overflow-x-auto">{
+  "mcpServers": {
+    "rosenweg": {
+      "command": "node",
+      "args": ["/Pfad/zu/Website/mcp/src/index.js"],
+      "env": {
+        "ROSENWEG_TOKEN": "rw_pat_DEIN_TOKEN_HIER"
+      }
+    }
+  }
+}</pre>
+                    <p class="text-emerald-900 text-xs mt-2">Claude Desktop neu starten &rarr; im Tools-Menue siehst du die Rosenweg-Tools. Dann z.B. fragen: <em>&bdquo;Welche offenen Reklamationen gibt es in STWEG 3?&ldquo;</em></p>
+                </div>
+
+                <div class="bg-red-50 border border-red-200 rounded p-4">
+                    <p class="font-semibold text-red-900 mb-2">&#128737; Sicherheits-Regeln (wichtig!)</p>
+                    <ul class="text-red-900 text-sm space-y-1 list-disc list-inside">
+                        <li><strong>Token sind Passwoerter</strong> &mdash; nie in Chat, Git-Repos oder ungeschuetzten Configs ablegen</li>
+                        <li><strong>Bei Verlust</strong> sofort im Profil widerrufen (roter Button) und neuen Token erstellen</li>
+                        <li><strong>&bdquo;Letzte Nutzung&ldquo;</strong> regelmaessig pruefen &mdash; ungewoehnliche IP oder Zeit? &rarr; widerrufen</li>
+                        <li><strong>Scopes</strong> nutzen wenn moeglich &mdash; ein Read-Only-Token kann keinen Schaden anrichten</li>
+                        <li><strong>Ablauf</strong> setzen wenn der Use-Case begrenzt ist (z.B. nur 30 Tage fuer einen einmaligen Datenexport)</li>
+                    </ul>
+                </div>
+
+                <div class="bg-gray-50 border rounded p-4">
+                    <p class="font-semibold text-gray-800 mb-2">&#10067; Haeufige Fragen</p>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Kann der Token mehr als ich?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">Nein. Der Token bekommt exakt die Rechte deines Authentik-Accounts. Du bist Bewohner ohne Ausschuss-Rechte? Dann kann der Token auch keine Reklamationen anderer User aendern.</p>
+                    </details>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Warum Scopes wenn ich der Token-Besitzer eh alles kann?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">Damit ein kompromittierter Token NICHT alles kann. Beispiel: dein MCP-Token kann nur <code>handwerker:read</code> &mdash; wird er geklaut, kann der Angreifer keine Vollmacht in deinem Namen erstellen.</p>
+                    </details>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Ich sehe in &bdquo;Letzte Nutzung&ldquo; eine fremde IP &mdash; was tun?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">SOFORT widerrufen (roter Button). Pruef ob du den Token versehentlich exponiert hast (Git-Commit, Screenshot, etc.). Authentik-Passwort vorsichtshalber auch aendern. Bei Verdacht auf Missbrauch: <code>technik@rosenweg4303.ch</code> informieren &mdash; wir sehen im Audit-Log was passiert ist.</p>
+                    </details>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Wie viele Tokens darf ich haben?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">Keine harte Grenze. Pro Anwendung einen eigenen Token ist Best-Practice (besser nachvollziehbar wer wann was tat).</p>
+                    </details>
+                </div>
+
+                <p class="text-gray-600 italic">&#128279; Verwandte Bereiche: <a href="#ki-suche" class="text-blue-600 hover:underline">KI-Suche</a>, <a href="#whatsapp" class="text-blue-600 hover:underline">WhatsApp-Bot</a>.</p>
             </div>
         </section>
 
@@ -978,19 +1059,75 @@
                 <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128270;</span> KI-Suche</h2>
                 <p class="mt-1 opacity-90">Globale Suche ueber alle Daten mit Claude-Antworten</p>
             </div>
-            <div class="p-6 space-y-3 text-sm">
+            <div class="p-6 space-y-4 text-sm">
                 <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
-                    <p class="font-semibold text-blue-900 mb-1">&#128161; Wofuer?</p>
-                    <p class="text-blue-800">Du suchst eine bestimmte E-Mail, einen Handwerker, eine Vollmacht oder erinnerst dich an einen Namen — du tippst einfach den Begriff und die KI sortiert die Treffer nach Relevanz und gibt dir einen Ein-Satz-Kontext.</p>
+                    <p class="font-semibold text-blue-900 mb-1">&#128161; Wofuer ist das?</p>
+                    <p class="text-blue-800">Stell dir vor du suchst eine bestimmte E-Mail, einen Handwerker oder die Vollmacht von vor 3 Monaten &mdash; statt 4 verschiedene Seiten aufzurufen und in jeder zu filtern, tippst du <kbd>Strg+K</kbd>, schreibst was du suchst und Claude sortiert dir die Treffer nach Relevanz und liefert einen Satz Kontext oben drauf. Es ist <em>der schnellste Weg</em> zu einer Information wenn du nicht genau weisst wo sie liegt.</p>
                 </div>
-                <p><strong>Wie:</strong></p>
-                <ul class="list-disc list-inside space-y-1 text-gray-700">
-                    <li><kbd class="bg-gray-200 px-2 py-1 rounded text-xs">Strg</kbd> + <kbd class="bg-gray-200 px-2 py-1 rounded text-xs">K</kbd> (Mac: <kbd class="bg-gray-200 px-2 py-1 rounded text-xs">Cmd</kbd> + <kbd class="bg-gray-200 px-2 py-1 rounded text-xs">K</kbd>) auf jeder Seite</li>
-                    <li>Oder das &#128270;-Lupensymbol oben rechts in der Nav</li>
-                    <li>Suche durchsucht parallel: Personen, Handwerker, Vollmachten, Reklamationen, E-Mails, Verwaltung, Wohnungen, Projekte</li>
-                </ul>
-                <p class="text-gray-700"><strong>Wichtig:</strong> Berechtigungs-aware — du siehst nur Treffer fuer Daten auf die du auch sonst Zugriff hast. Die KI bekommt nicht mehr zu sehen als du selbst.</p>
-                <p class="text-gray-700"><strong>Umlaut-tolerant:</strong> „mueller" findet auch „Mueller" und „Mueller" findet auch „mueller".</p>
+
+                <div class="bg-gray-50 border rounded p-4">
+                    <p class="font-semibold text-gray-800 mb-2">&#128640; So oeffnest du die Suche</p>
+                    <ul class="text-gray-700 space-y-1.5">
+                        <li><kbd class="bg-gray-200 px-2 py-1 rounded text-xs font-mono">Strg</kbd> + <kbd class="bg-gray-200 px-2 py-1 rounded text-xs font-mono">K</kbd> (Mac: <kbd class="bg-gray-200 px-2 py-1 rounded text-xs font-mono">Cmd</kbd> + <kbd class="bg-gray-200 px-2 py-1 rounded text-xs font-mono">K</kbd>) auf <strong>jeder Seite</strong> der Rosenweg-Website</li>
+                        <li>Oder klick auf das <strong>&#128270; Lupen-Icon</strong> oben rechts in der Navigation</li>
+                        <li><kbd class="bg-gray-200 px-2 py-1 rounded text-xs font-mono">Esc</kbd> schliesst die Suche wieder</li>
+                    </ul>
+                </div>
+
+                <div class="bg-emerald-50 border border-emerald-200 rounded p-4">
+                    <p class="font-semibold text-emerald-900 mb-2">&#9989; Was wird parallel durchsucht?</p>
+                    <ul class="text-emerald-900 grid grid-cols-2 gap-1.5 text-sm">
+                        <li>&#128100; Personen (Name, E-Mail, Tel)</li>
+                        <li>&#128295; Handwerker (Firma, Kategorie, Leistungen)</li>
+                        <li>&#128221; Vollmachten (Geltungsbereich, Beteiligte)</li>
+                        <li>&#128736; Reklamationen (Beschreibung)</li>
+                        <li>&#128231; E-Mail-Archiv (Subject, Absender)</li>
+                        <li>&#127970; Verwaltungen (Firma)</li>
+                        <li>&#127968; Wohnungen (Bezeichnung, Eigentuemer, Mieter)</li>
+                        <li>&#128203; Projekte (Titel, Beschreibung)</li>
+                    </ul>
+                </div>
+
+                <p class="font-semibold text-gray-800">Konkrete Suchbeispiele</p>
+                <div class="space-y-2.5">
+                    <div class="bg-white border rounded p-3">
+                        <p class="text-xs text-gray-500 mb-1">Du suchst…</p>
+                        <p class="font-mono text-sm">Wasserrechnung</p>
+                        <p class="text-xs text-gray-600 mt-1">&rarr; KI: <em>&bdquo;Es gibt eine Wasserrechnung vom Praesidenten an alle Ausschussmitglieder vom 23. Mai. Original-Mail unter E-Mail-Archiv.&ldquo;</em></p>
+                    </div>
+                    <div class="bg-white border rounded p-3">
+                        <p class="text-xs text-gray-500 mb-1">Du suchst…</p>
+                        <p class="font-mono text-sm">muller</p>
+                        <p class="text-xs text-gray-600 mt-1">&rarr; findet <em>Elisabeth Mueller, Hans Beat Mueller-Eichin, Stefan Mueller</em> &mdash; auch wenn du ohne Umlaut tippst.</p>
+                    </div>
+                    <div class="bg-white border rounded p-3">
+                        <p class="text-xs text-gray-500 mb-1">Du suchst…</p>
+                        <p class="font-mono text-sm">langpartners</p>
+                        <p class="text-xs text-gray-600 mt-1">&rarr; findet die Verwaltungs-Firma + verlinkte Vollmacht + Verteiler-Mails an sie. Klick &rarr; direkt zur Detail-Seite.</p>
+                    </div>
+                    <div class="bg-white border rounded p-3">
+                        <p class="text-xs text-gray-500 mb-1">Du suchst…</p>
+                        <p class="font-mono text-sm">aufzug stillstand</p>
+                        <p class="text-xs text-gray-600 mt-1">&rarr; findet die Reklamation samt Status &bdquo;weitergeleitet&ldquo; und den zugewiesenen Handwerker. Inkl. KI-Zusammenfassung des Verlaufs.</p>
+                    </div>
+                </div>
+
+                <div class="bg-amber-50 border border-amber-200 rounded p-4">
+                    <p class="font-semibold text-amber-900 mb-2">&#128737; Datenschutz-Hinweis</p>
+                    <p class="text-amber-900 text-sm">Die Suche ist <strong>berechtigungs-aware</strong> &mdash; du siehst NUR Treffer fuer Daten auf die du auch sonst Zugriff haettest. Bist du Bewohner ohne Ausschuss-Rolle? Dann zeigt die Suche dir nur deine eigenen Vollmachten, deine eigenen Reklamationen etc. Andere Bewohner werden nicht gelistet. <strong>Claude sieht nur die Treffer-Liste, nicht den ganzen Datenbestand</strong> &mdash; Anfragen an OpenRouter werden ohne personenbezogene Identifier weitergeleitet.</p>
+                </div>
+
+                <div class="bg-gray-50 border rounded p-4">
+                    <p class="font-semibold text-gray-800 mb-2">&#10067; Wenn die Suche nichts findet</p>
+                    <ul class="text-gray-700 text-sm space-y-1.5 list-disc list-inside">
+                        <li><strong>Versuche andere Begriffe</strong> &mdash; &bdquo;Heizung kalt&ldquo; statt &bdquo;Waerme weg&ldquo;</li>
+                        <li><strong>Umlaute spielen keine Rolle</strong> &mdash; &bdquo;mueller&ldquo; und &bdquo;Mueller&ldquo; finden beides</li>
+                        <li><strong>Substring-Suche</strong> &mdash; auch &bdquo;heiz&ldquo; reicht (findet Heizung, Heizstab, Heizoel)</li>
+                        <li><strong>Kein Treffer trotz vorhanden?</strong> Pruef ob du eingeloggt bist und ob du Zugriff auf den entsprechenden Bereich hast</li>
+                    </ul>
+                </div>
+
+                <p class="text-gray-600 italic">&#128279; Verwandt: <a href="#api-tokens" class="text-blue-600 hover:underline">API-Tokens fuer KI-Agents</a> (wenn du die Suche programmatisch nutzen willst).</p>
             </div>
         </section>
 
@@ -1002,21 +1139,100 @@
                 <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128241;</span> WhatsApp-Bot</h2>
                 <p class="mt-1 opacity-90">Reklamationen melden, Auslagen abfragen, Handwerker finden — per WhatsApp</p>
             </div>
-            <div class="p-6 space-y-3 text-sm">
+            <div class="p-6 space-y-4 text-sm">
                 <div class="bg-green-50 border-l-4 border-green-500 p-4 rounded">
-                    <p class="font-semibold text-green-900 mb-1">&#128161; Wofuer?</p>
-                    <p class="text-green-800">Du kannst per WhatsApp mit der Rosenweg-Verwaltung interagieren ohne ueberhaupt die Website aufrufen zu muessen. Bot-Nummer: <strong>+41 76 519 99 70</strong>. Einfach „<em>hi</em>" oder „<em>menu</em>" schreiben.</p>
+                    <p class="font-semibold text-green-900 mb-1">&#128161; Wofuer ist das?</p>
+                    <p class="text-green-800">Du brauchst nicht jedes Mal die Website auf zumachen wenn dir eine Lampe ausfaellt oder du wissen willst was der Sanitaer fuer eine Nummer hat. Schreib dem <strong>Rosenweg-Bot per WhatsApp</strong> und er macht's fuer dich. Das System weiss wer du bist (anhand deiner Tel-Nummer), legt Reklamationen direkt mit deinem Namen an, holt Handwerker aus der Datenbank, etc.</p>
                 </div>
-                <p><strong>Befehle:</strong></p>
-                <ul class="list-disc list-inside space-y-1 text-gray-700">
-                    <li><code class="bg-gray-100 px-1">/menu</code> &mdash; Hauptmenue mit Zahlen-Auswahl (1-6)</li>
-                    <li><code class="bg-gray-100 px-1">/notfall</code> &mdash; Notfall-Kontakte</li>
-                    <li><code class="bg-gray-100 px-1">/handwerker</code> &mdash; Handwerker-Liste, optional <code class="bg-gray-100 px-1">/handwerker sanitaer</code></li>
-                    <li><code class="bg-gray-100 px-1">/reklamation &lt;text&gt;</code> &mdash; Schaden melden, geht direkt an den Ausschuss</li>
-                    <li><code class="bg-gray-100 px-1">/meineauslagen</code> &mdash; eigene Auslagen-Uebersicht</li>
-                </ul>
-                <p class="text-gray-700">Du kannst auch ein Foto vom Schaden schicken — der Bot leitet's weiter. Voraussetzung: deine Telefon-Nummer ist im Profil hinterlegt und du hast WhatsApp-Opt-In aktiviert.</p>
-                <p class="text-gray-700"><strong>E-Mail-Mirror:</strong> Mails an bewohner@/ausschuss@ landen optional auch in der entsprechenden WhatsApp-Gruppe — KI fasst zusammen.</p>
+
+                <div class="bg-emerald-50 border border-emerald-200 rounded p-4">
+                    <p class="font-semibold text-emerald-900 mb-2">&#128722; Erstes Mal? So legst du los</p>
+                    <ol class="text-emerald-900 text-sm space-y-1.5 list-decimal list-inside">
+                        <li>WhatsApp oeffnen, Nummer <strong class="font-mono">+41 61 551 01 42</strong> als Kontakt speichern (z.B. „Rosenweg")</li>
+                        <li>Eine Nachricht <em>&bdquo;hi&ldquo;</em> oder <em>&bdquo;menu&ldquo;</em> oder <em>&bdquo;hallo&ldquo;</em> schicken</li>
+                        <li>Du bekommst ein Menue mit Zahlen-Optionen 1-6 zurueck</li>
+                        <li>Antworte mit der Zahl oder einem konkreten Befehl</li>
+                    </ol>
+                    <p class="text-emerald-800 text-xs mt-2"><strong>Voraussetzung:</strong> deine Telefonnummer ist im <a href="profil.html" class="text-emerald-700 underline">Profil</a> hinterlegt und WhatsApp-Opt-In ist aktiviert. Sonst weiss der Bot nicht wer du bist und antwortet nur generisch.</p>
+                </div>
+
+                <p class="font-semibold text-gray-800">Befehls-Referenz</p>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs border">
+                        <thead class="bg-gray-100">
+                            <tr><th class="px-2 py-2 text-left">Befehl</th><th class="px-2 py-2 text-left">Was passiert</th></tr>
+                        </thead>
+                        <tbody class="divide-y">
+                            <tr><td class="px-2 py-2 font-mono"><code>/menu</code></td><td class="px-2 py-2">Hauptmenue erneut anzeigen</td></tr>
+                            <tr><td class="px-2 py-2 font-mono"><code>/notfall</code></td><td class="px-2 py-2">Notfall-Kontakte (Polizei, Feuerwehr, Hausverwaltung, Technik)</td></tr>
+                            <tr><td class="px-2 py-2 font-mono"><code>/handwerker</code></td><td class="px-2 py-2">Top-Handwerker pro Kategorie (max 2 pro Kat) mit Tel-Nr</td></tr>
+                            <tr><td class="px-2 py-2 font-mono"><code>/handwerker &lt;kategorie&gt;</code></td><td class="px-2 py-2">Gefilterte Liste, z.B. <code class="bg-gray-100 px-1">/handwerker sanitaer</code> &mdash; sortiert nach Bewertung</td></tr>
+                            <tr><td class="px-2 py-2 font-mono"><code>/reklamation &lt;text&gt;</code></td><td class="px-2 py-2">Schaden melden &mdash; geht direkt an den Ausschuss deiner STWEG. Beispiel: <code class="bg-gray-100 px-1">/reklamation Lift Haus 9 steht still</code></td></tr>
+                            <tr><td class="px-2 py-2 font-mono"><code>/meineauslagen</code></td><td class="px-2 py-2">Status deiner eingereichten Auslagen (eingereicht / genehmigt / ausbezahlt)</td></tr>
+                            <tr><td class="px-2 py-2 font-mono"><code>/hilfe</code></td><td class="px-2 py-2">Diese Befehlsliste</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <p class="font-semibold text-gray-800">Beispiel-Konversationen</p>
+                <div class="space-y-3">
+                    <div class="bg-gray-50 border rounded p-3 max-w-md">
+                        <p class="text-xs text-gray-500 mb-2">Schaden mit Foto melden</p>
+                        <div class="space-y-1.5 text-xs">
+                            <div class="bg-green-100 rounded p-2 inline-block">[Foto vom undichten Rohr] + Caption: <em>&bdquo;Rohr im Keller Haus 9 leckt&ldquo;</em></div>
+                            <div></div>
+                            <div class="bg-white border rounded p-2 inline-block">&#129302; <em>&bdquo;Reklamation #87 aufgenommen. Foto gespeichert, Ausschuss STWEG3 ist informiert. Du erhaeltst Status-Updates per WhatsApp.&ldquo;</em></div>
+                        </div>
+                    </div>
+
+                    <div class="bg-gray-50 border rounded p-3 max-w-md">
+                        <p class="text-xs text-gray-500 mb-2">Handwerker suchen</p>
+                        <div class="space-y-1.5 text-xs">
+                            <div class="bg-green-100 rounded p-2 inline-block"><code>/handwerker elektriker</code></div>
+                            <div></div>
+                            <div class="bg-white border rounded p-2 inline-block">&#129302; <em>&bdquo;&#127942; <strong>Elektro Meier AG</strong> &#9733;&#9733;&#9733;&#9733; +41 61 855 12 34<br>&#127942; <strong>Strom-Profi Frenkendorf</strong> &#9733;&#9733;&#9733; +41 61 901 22 55&ldquo;</em></div>
+                        </div>
+                    </div>
+
+                    <div class="bg-gray-50 border rounded p-3 max-w-md">
+                        <p class="text-xs text-gray-500 mb-2">Menue ueber Zahl</p>
+                        <div class="space-y-1.5 text-xs">
+                            <div class="bg-green-100 rounded p-2 inline-block">hi</div>
+                            <div></div>
+                            <div class="bg-white border rounded p-2 inline-block">&#129302; <em>&bdquo;Hallo Elisabeth&#33; Was kann ich tun?<br>1) Reklamation melden<br>2) Handwerker finden<br>3) Meine Auslagen<br>4) Notfall-Kontakte<br>5) Hilfe&ldquo;</em></div>
+                            <div class="bg-green-100 rounded p-2 inline-block">3</div>
+                            <div></div>
+                            <div class="bg-white border rounded p-2 inline-block">&#129302; <em>&bdquo;Du hast 2 eingereichte Auslagen, davon 1 genehmigt (CHF 124.50), 1 noch in Pruefung.&ldquo;</em></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-blue-50 border border-blue-200 rounded p-4">
+                    <p class="font-semibold text-blue-900 mb-2">&#128231; E-Mail-Mirror in WhatsApp-Gruppen</p>
+                    <p class="text-blue-900 text-sm">Mails an bestimmte Verteiler (<code class="bg-white px-1">bewohner@</code>, <code class="bg-white px-1">ausschuss@</code> ...) koennen <strong>automatisch in der entsprechenden WhatsApp-Gruppe gepostet werden</strong>. Claude Haiku fasst die Mail in 1-2 Saetzen zusammen damit's in WhatsApp lesbar bleibt. Konfiguriert wird das pro Verteiler in der <a href="email-verteiler.html" class="text-blue-700 underline">Verteiler-Admin</a>.</p>
+                </div>
+
+                <div class="bg-gray-50 border rounded p-4">
+                    <p class="font-semibold text-gray-800 mb-2">&#10067; Probleme &amp; Loesungen</p>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Bot antwortet nicht / antwortet generisch ohne meinen Namen</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">Deine Telefonnummer ist noch nicht im Profil hinterlegt. &rarr; <a href="profil.html" class="text-blue-600 hover:underline">Profil oeffnen</a>, Telefonnummer eintragen, WhatsApp-Opt-In aktivieren. Eine Mitteilung an <code>technik@rosenweg4303.ch</code> wenn's auch danach nicht geht.</p>
+                    </details>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Bot meldet sich seit Tagen nicht</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">Eventuell ist die WhatsApp-Web-Session abgelaufen (passiert ~alle 2 Wochen). Technik bekommt eine Mitteilung wenn der Bot &gt;5 Min nicht antwortet und pairt ihn neu.</p>
+                    </details>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Ich will keine Bot-Mitteilungen mehr bekommen</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">Im <a href="profil.html" class="text-blue-600 hover:underline">Profil</a> WhatsApp-Opt-In abschalten. Du kannst dem Bot weiterhin schreiben (befohlsbasierte Anfragen wie <code>/handwerker</code> funktionieren), aber passive Pushes (Status-Updates, Verteiler-Mirrors) gehen dann nicht mehr an dich.</p>
+                    </details>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Wer kann meine WhatsApp-Nachrichten lesen?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">Der Bot speichert alle Inbound-Nachrichten in der Datenbank (fuer Audit / Wiederherstellung). Lese-Zugriff haben Technik und Praesident. Bei Reklamationen sieht der Ausschuss deiner STWEG den Text. Du selbst siehst deinen WhatsApp-Verlauf nur in deiner App.</p>
+                    </details>
+                </div>
+
+                <p class="text-gray-600 italic">&#128279; Verwandt: <a href="#reklamationen" class="text-blue-600 hover:underline">Reklamationen</a>, <a href="#handwerker" class="text-blue-600 hover:underline">Handwerker-Verzeichnis</a>, <a href="#auslagen" class="text-blue-600 hover:underline">Auslagen</a>.</p>
             </div>
         </section>
 
@@ -1095,28 +1311,131 @@
                 <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128221;</span> Vollmachten</h2>
                 <p class="mt-1 opacity-90">Verwalter, Mieter oder Dritte rechtsverbindlich bevollmaechtigen</p>
             </div>
-            <div class="p-6 space-y-3 text-sm">
+            <div class="p-6 space-y-4 text-sm">
                 <div class="bg-amber-50 border-l-4 border-amber-500 p-4 rounded">
-                    <p class="font-semibold text-amber-900 mb-1">&#128161; Wofuer?</p>
-                    <p class="text-amber-800">Als Eigentuemer kannst du Personen schriftlich beauftragen, dich in bestimmten Belangen zu vertreten — z.B. die Hausverwaltung in laufenden Verwaltungs-Sachen, einen Mieter fuer Schluesselverwaltung oder einen Anwalt fuer Einzelgeschaefte. In der Schweiz braucht's dafuer Schriftform.</p>
+                    <p class="font-semibold text-amber-900 mb-1">&#128161; Wofuer ist das?</p>
+                    <p class="text-amber-800">Im Stockwerkeigentum gibt es viele Situationen wo du als Eigentuemer nicht selbst handelst, sondern jemand fuer dich handeln soll &mdash; die <strong>Hausverwaltung</strong> in laufender Verwaltung, ein <strong>Mieter</strong> der die Schluesselverwaltung uebernimmt, ein <strong>Anwalt</strong> fuer einen Vertragsabschluss, ein <strong>Familienmitglied</strong> wenn du im Spital bist. In der Schweiz braucht jede Vollmacht <strong>Schriftform</strong> &mdash; entweder handschriftlich unterzeichnet auf Papier oder qualifizierte elektronische Signatur. Diese Plattform unterstuetzt beide Wege.</p>
                 </div>
-                <p><strong>Arten von Vollmachten:</strong></p>
-                <ul class="list-disc list-inside space-y-1 text-gray-700">
-                    <li><strong>Generell</strong> &mdash; laufende Verwaltung, unbefristet bis Widerruf</li>
-                    <li><strong>Spezifisch</strong> &mdash; nur ein konkretes Geschaeft (z.B. Verkauf)</li>
-                    <li><strong>Auskunft</strong> &mdash; nur Belegeinsicht, kein Entscheidungsrecht</li>
-                </ul>
-                <p><strong>Workflow:</strong></p>
-                <ol class="list-decimal list-inside space-y-1 text-gray-700">
-                    <li>Erfassen mit „<em>+ Neue Vollmacht erteilen</em>" (Quick-Pick aus Objektverwaltung-Kontakten oder Verwaltungs-Firmen)</li>
-                    <li>Vorlage aus dem Vorlagen-Tab uebernehmen (Geltungsbereich-Texte vom Praesidium vorgegeben)</li>
-                    <li><strong>Digital signieren</strong> via Authentik-Login (ZertES Art.2 einfache el. Signatur) <em>ODER</em></li>
-                    <li>PDF drucken &rarr; unterschreiben &rarr; scannen &rarr; <em>Signierte PDF hochladen</em></li>
-                    <li>Optionale <strong>KI-Pruefung</strong>: Claude prueft ob alle Namen unterschrieben sind und nichts manipuliert wurde</li>
+
+                <div class="bg-blue-50 border border-blue-200 rounded p-4">
+                    <p class="font-semibold text-blue-900 mb-2">&#128218; Die drei Arten im Detail</p>
+                    <div class="space-y-3">
+                        <div>
+                            <p class="font-semibold text-blue-900">1. Generelle Vertretungs-Vollmacht</p>
+                            <p class="text-blue-800 text-sm">Bevollmaechtigter darf dich in <strong>allen Belangen</strong> der laufenden Verwaltung vertreten. Typisch fuer die Hausverwaltung: Mietvertraege abschliessen, Reparaturen bis CHF X beauftragen, Mietzins entgegen nehmen, Korrespondenz fuehren. Gilt bis Widerruf. <em>Was NICHT erlaubt ist: Verkauf der Wohnung, ausserordentliche Aufwendungen ueber Limit, Stimmrecht an STWEG-Versammlung (dafuer brauchst du eine separate Stimmrechtsvollmacht).</em></p>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-blue-900">2. Spezifische Vollmacht (Einzelgeschaeft)</p>
+                            <p class="text-blue-800 text-sm">Nur fuer eine einzelne klar definierte Sache. Z.B. <em>&bdquo;Anwalt darf den Mietvertrag mit Familie XY abschliessen&ldquo;</em> oder <em>&bdquo;Familienmitglied darf einmalig den Schluessel uebergeben&ldquo;</em>. Sobald die Sache erledigt ist, ist die Vollmacht ausgeschoepft.</p>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-blue-900">3. Datenschutz- / Auskunftsvollmacht</p>
+                            <p class="text-blue-800 text-sm">Bevollmaechtigter darf nur <strong>Einsicht</strong> in deine Belege, Abrechnungen und Vertraege nehmen &mdash; <strong>keine Entscheidungen</strong> in deinem Namen. Typisch wenn du jemandem Zugang zu deinem Fall geben willst (z.B. Steuerberater, neugieriger Verwandter) ohne ihm Handlungsmacht zu geben.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <p class="font-semibold text-gray-800">Workflow: Vollmacht erstellen</p>
+                <ol class="list-decimal list-inside space-y-3 text-gray-700">
+                    <li>
+                        <strong>Auf <a href="vollmachten.html" class="text-blue-600 hover:underline">/vollmachten.html</a></strong> &rarr; <em>+ Neue Vollmacht erteilen</em>
+                    </li>
+                    <li>
+                        <strong>Bevollmaechtigter waehlen</strong> &mdash; drei Optionen:
+                        <ul class="list-disc list-inside ml-6 mt-1 text-gray-600 text-sm">
+                            <li><em>Person aus Objektverwaltung</em> &mdash; Quick-Pick zeigt alle Kontakte deiner Wohnungen (Miteigentuemer, Mieter, Verwalter etc.) farbig nach Rolle. Klick &rarr; Daten autom. uebernommen.</li>
+                            <li><em>Verwaltung (Firma)</em> &mdash; Dropdown mit hinterlegten Hausverwaltungen (z.B. langPartners)</li>
+                            <li><em>Externe Person</em> &mdash; manuell Name/E-Mail/Adresse eintragen (z.B. Anwalt aus Basel)</li>
+                        </ul>
+                    </li>
+                    <li>
+                        <strong>Art &amp; Geltungsbereich</strong> &mdash; Art auswaehlen (generell / spezifisch / auskunft). Im Geltungsbereich-Textfeld konkret beschreiben was erlaubt ist. <strong>Tipp:</strong> Im Tab &bdquo;Vorlagen&ldquo; gibt es vorbereitete Standard-Texte vom Praesidium (z.B. &bdquo;Generelle Verwalter-Vollmacht mit CHF 1'000 Limit&ldquo;) &mdash; einfach uebernehmen und ggf. anpassen.
+                    </li>
+                    <li>
+                        <strong>Wohnungsbezug</strong> (optional aber empfohlen) &mdash; eine bestimmte Wohnung deiner Liste oder eine ganze STWEG. Damit ist klar fuer welches Objekt die Vollmacht gilt.
+                    </li>
+                    <li>
+                        <strong>Gueltigkeit</strong> &mdash; Datum von / bis. Bei &bdquo;bis&ldquo; leer = unbefristet bis Widerruf.
+                    </li>
+                    <li>
+                        <strong>Als Entwurf speichern</strong> &mdash; jetzt ist die Vollmacht angelegt, aber NOCH NICHT GUELTIG. Erst die Signatur macht sie wirksam.
+                    </li>
                 </ol>
-                <p class="text-gray-700"><strong>Bei Miteigentum:</strong> ALLE Eigentuemer muessen einzeln signieren — wird im PDF mit eigenem Unterschriftsfeld geklaert.</p>
-                <p class="text-gray-700"><strong>Auto-Vorbereitung:</strong> Wenn ein Verwalter in der Objektverwaltung als Kontakt hinzukommt, wird automatisch ein Vollmachts-Entwurf erstellt. Du musst nur noch signieren.</p>
-                <p class="text-gray-600 italic">&#128279; <a href="vollmachten.html" class="text-blue-600 hover:underline">Vollmachten-Verwaltung &rarr;</a></p>
+
+                <div class="bg-red-50 border border-red-200 rounded p-4">
+                    <p class="font-semibold text-red-900 mb-2">&#9888; Wichtig: Miteigentum</p>
+                    <p class="text-red-900 text-sm mb-2">Schweizer Recht: bei <strong>mehreren Eigentuemern</strong> (Ehepaar, Erbengemeinschaft, GbR, …) muessen <strong>ALLE</strong> einzeln signieren, damit die Vollmacht wirksam ist.</p>
+                    <p class="text-red-800 text-sm">Im Modal kannst du beliebig viele Vollmachtgeber hinzufuegen &mdash; entweder per Quick-Pick aus den Objektverwaltungs-Kontakten oder manuell. Im generierten PDF erscheint pro Person ein eigenes Unterschriftsfeld + ein Hinweis &bdquo;Bei Miteigentum muessen alle X Vollmachtgeber unterschreiben&ldquo;. Sobald die letzte fehlende Person signiert hat, wird der Status automatisch auf &bdquo;aktiv&ldquo; gesetzt.</p>
+                </div>
+
+                <p class="font-semibold text-gray-800">Signatur-Optionen</p>
+                <div class="grid sm:grid-cols-2 gap-3">
+                    <div class="border rounded-lg p-3 bg-green-50">
+                        <p class="font-semibold text-green-900 mb-1">&#9989; Digital signieren</p>
+                        <p class="text-green-800 text-xs mb-2">Im Eintrag auf <em>&bdquo;Digital signieren&ldquo;</em> klicken. Du wirst gefragt ob du sicher bist &mdash; bestaetigen. Das System schreibt deinen Authentik-Login + Zeitstempel + IP-Adresse + User-Agent als Beweis in die Vollmacht.</p>
+                        <p class="text-green-800 text-xs"><strong>Rechtsgrundlage:</strong> ZertES Art.2 einfache elektronische Signatur. Reicht fuer formfreie Geschaefte. Fuer Grundbuch-Geschaefte: separate qualifizierte Signatur erforderlich.</p>
+                    </div>
+                    <div class="border rounded-lg p-3 bg-amber-50">
+                        <p class="font-semibold text-amber-900 mb-1">&#128196; Papier-Signatur</p>
+                        <p class="text-amber-800 text-xs mb-2">PDF herunterladen (Button &bdquo;PDF&ldquo;), ausdrucken, von allen Vollmachtgebern unterschreiben lassen, scannen oder fotografieren, dann <em>&bdquo;Signierte PDF hochladen&ldquo;</em> klicken.</p>
+                        <p class="text-amber-800 text-xs"><strong>Vorteil:</strong> beweisstark vor Gericht, klassisch. <strong>Nachteil:</strong> aufwendiger, Scans muessen lesbar sein.</p>
+                    </div>
+                </div>
+
+                <div class="bg-purple-50 border border-purple-200 rounded p-4">
+                    <p class="font-semibold text-purple-900 mb-2">&#129302; Optionale KI-Pruefung</p>
+                    <p class="text-purple-900 text-sm">Nach Hochladen einer signierten PDF kannst du die <em>&bdquo;KI-Pruefung&ldquo;</em> ausloesen &mdash; Claude Sonnet 4.6 prueft visuell:</p>
+                    <ul class="text-purple-900 text-sm list-disc list-inside mt-1.5 space-y-0.5">
+                        <li>Ist der Dokument-Hash auf dem PDF (gegen Manipulation)?</li>
+                        <li>Sind alle Vollmachtgeber-Namen aufgefuehrt?</li>
+                        <li>Sind Unterschriften-Indikatoren (Linien, handschriftliche Marken) vorhanden?</li>
+                        <li>Auffaelligkeiten (gestrichene Stellen, abweichender Text, etc.)?</li>
+                    </ul>
+                    <p class="text-purple-800 text-xs mt-2">Ergebnis als farbiges Modal: gruen (alles OK), amber (warnung &mdash; sieh nach), rot (problem). <strong>Ersetzt KEINE notarielle Pruefung</strong> sondern ist Sanity-Check fuer offensichtliche Fehler.</p>
+                </div>
+
+                <div class="bg-blue-50 border border-blue-200 rounded p-4">
+                    <p class="font-semibold text-blue-900 mb-2">&#128221; Auto-Entwurf bei Verwalter-Kontakt</p>
+                    <p class="text-blue-900 text-sm">Wenn der Ausschuss oder ein Eigentuemer in der <a href="objektverwaltung.html" class="text-blue-700 underline">Objektverwaltung</a> einen neuen <strong>Verwalter-Kontakt</strong> in einer Wohnung hinzufuegt, wird automatisch ein Vollmachts-<strong>Entwurf</strong> erstellt: alle Eigentuemer der Wohnung werden als Vollmachtgeber eingetragen, der Verwalter als Bevollmaechtigter, Art generell, Geltungsbereich-Text aus der Standard-Vorlage. Du musst dann nur noch signieren. Das spart 80% der Tipparbeit.</p>
+                </div>
+
+                <p class="font-semibold text-gray-800">Status &amp; Widerruf</p>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs border">
+                        <thead class="bg-gray-100">
+                            <tr><th class="px-2 py-2 text-left">Status</th><th class="px-2 py-2 text-left">Bedeutung</th><th class="px-2 py-2 text-left">Was kannst du tun?</th></tr>
+                        </thead>
+                        <tbody class="divide-y">
+                            <tr><td class="px-2 py-2"><span class="bg-gray-200 px-2 py-0.5 rounded">Entwurf</span></td><td class="px-2 py-2">Erstellt, nicht signiert</td><td class="px-2 py-2">Bearbeiten, signieren, loeschen</td></tr>
+                            <tr><td class="px-2 py-2"><span class="bg-green-100 text-green-800 px-2 py-0.5 rounded">Aktiv</span></td><td class="px-2 py-2">Vollmacht ist gueltig</td><td class="px-2 py-2">PDF herunterladen, widerrufen</td></tr>
+                            <tr><td class="px-2 py-2"><span class="bg-red-100 text-red-800 px-2 py-0.5 rounded">Widerrufen</span></td><td class="px-2 py-2">Bewusst beendet vom Vollmachtgeber</td><td class="px-2 py-2">PDF abrufen (mit Widerruf-Vermerk)</td></tr>
+                            <tr><td class="px-2 py-2"><span class="bg-amber-100 text-amber-800 px-2 py-0.5 rounded">Abgelaufen</span></td><td class="px-2 py-2">gueltig_bis erreicht</td><td class="px-2 py-2">PDF zur Archivierung abrufen</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="text-gray-700 text-xs"><strong>Widerruf:</strong> jederzeit moeglich durch jeden Vollmachtgeber (oder Admin). Optional mit Grund (wird im Audit-Log gespeichert). Das PDF bekommt einen roten &bdquo;WIDERRUFEN am DATUM&ldquo;-Vermerk im Header.</p>
+
+                <div class="bg-gray-50 border rounded p-4">
+                    <p class="font-semibold text-gray-800 mb-2">&#10067; FAQ</p>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Brauche ich einen Notar?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">Fuer die hier erfassbaren Vollmachten <strong>nein</strong>. Schriftform reicht. Nur fuer Grundbuch-Geschaefte (Kauf, Verkauf, Belastung) braucht's einen Notar &mdash; das laeuft komplett ueber andere Wege.</p>
+                    </details>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Was ist mit Stimmrechtsvollmachten fuer die STWEG-Versammlung?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">Das ist eine separate Vollmacht, in der Praxis oft auf einem eigenen Formular vor jeder Versammlung. Diese Plattform deckt sie aktuell NICHT ab &mdash; geplant fuer 2026. Bis dahin: Versammlungsleiter fragen wegen Formular.</p>
+                    </details>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Wer kann meine Vollmachten sehen?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">Nur du selbst (als Vollmachtgeber), der Bevollmaechtigter, Ausschuss-Mitglieder deiner STWEG (begrenzt) und Technik/Praesident (alle, fuer Audit-Zwecke). Externe sehen nur was du ihnen zeigst (PDF-Download).</p>
+                    </details>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Kann der Bevollmaechtigte eine Untervollmacht erteilen?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">Nur wenn das im Geltungsbereich-Text explizit erlaubt ist. Standard-Vorlage erlaubt es NICHT. Wenn du das willst: in den Vorlagen-Tab gehen + Text anpassen oder den Geltungsbereich manuell um &bdquo;inkl. Recht auf Untervollmacht&ldquo; ergaenzen.</p>
+                    </details>
+                </div>
+
+                <p class="text-gray-600 italic">&#128279; Verwandt: <a href="#verwaltung" class="text-blue-600 hover:underline">Objektverwaltung</a> (wo Verwalter-Kontakte erfasst werden), <a href="#berechtigungen" class="text-blue-600 hover:underline">Berechtigungen</a> (wer darf was sehen). <a href="vollmachten.html" class="text-blue-600 hover:underline">&rarr; Direkt zur Vollmachten-Seite</a>.</p>
             </div>
         </section>
 
