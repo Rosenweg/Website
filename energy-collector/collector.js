@@ -1340,6 +1340,20 @@ app.get('/api/energy/shelly', openCors, async (req, res) => {
         b: { label: 'Netz-Bezug',   w: Math.max(0, data.grid_w) },
         c: { label: 'Netto-Bilanz', w: data.grid_w },
       },
+      // Single-Wert Varianten fuer Shelly Plus 1PM Emulation
+      // (jeweils nur Phase A populiert, B+C = 0)
+      'ohne-boiler': {
+        a: { label: 'Ueberschuss ohne Boiler', w: surplus_w },
+        b: { label: '', w: 0 },
+        c: { label: '', w: 0 },
+        single: true,
+      },
+      'mit-boiler': {
+        a: { label: 'Ueberschuss mit Boiler', w: surplus_available_w },
+        b: { label: '', w: 0 },
+        c: { label: '', w: 0 },
+        single: true,
+      },
     };
     const v = variants[variant] || variants.surplus;
 

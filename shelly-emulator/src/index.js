@@ -35,7 +35,19 @@ const GROUP = process.env.ENERGY_GROUP || 'r9';
 const HOSTNAME = process.env.SHELLY_HOSTNAME || `shellypvrosenweg9`;
 const MAC = (process.env.SHELLY_MAC || generateMac(HOSTNAME + GROUP)).toLowerCase().replace(/:/g, '');
 const FW = '1.4.4';
-const APP = 'Pro3EM';
+// Geraetemodell — pro3em (3 Phasen) oder plus1pm (1 Phase, 1 PM)
+const MODEL = (process.env.SHELLY_MODEL || 'pro3em').toLowerCase();
+// STWEG-Label aus Group ableiten (r9 -> 'Rosenweg 9'). Generisch 'Rosenweg'
+// vermeiden, da spaeter weitere STWEGs eigene Anlagen haben koennten.
+const STWEG_LABEL = (() => {
+  const m = GROUP.match(/^r(\d+)$/i);
+  return m ? `Rosenweg ${m[1]}` : `Rosenweg (${GROUP})`;
+})();
+const DEVICE_NAME = process.env.SHELLY_DEVICE_NAME || (MODEL === 'plus1pm'
+  ? `${STWEG_LABEL} PV (virtual)`
+  : `${STWEG_LABEL} PV-Ueberschuss (virtual)`);
+const APP = MODEL === 'plus1pm' ? 'Switch' : 'Pro3EM';
+const MODEL_ID = MODEL === 'plus1pm' ? 'SNSW-001P16EU' : 'SPEM-003CEBEU';
 
 function generateMac(seed) {
   let h = 0;
@@ -96,10 +108,10 @@ await poll();
 // ─── Shelly-RPC Response-Builder ────────────────────────────────────
 function rpcGetDeviceInfo() {
   return {
-    name: 'Rosenweg 9 PV-Ueberschuss (virtual)',
+    name: DEVICE_NAME,
     id: HOSTNAME + '-' + MAC.slice(-6),
     mac: MAC.toUpperCase(),
-    model: 'SPEM-003CEBEU',
+    model: MODEL_ID,
     gen: 2,
     fw_id: '20251015-' + FW,
     ver: FW,
@@ -110,15 +122,56 @@ function rpcGetDeviceInfo() {
   };
 }
 
-function rpcShellyGetConfig() {
+// Shelly Plus 1PM: Switch + PowerMeter Komponenten
+function rpcSwitchGetStatus() {
+  const stale = (Date.now() - cache.ts) > POLL_MS * 3;
+  const power = stale ? 0 : cache.phase_a_w;
+  const V = 230;
   return {
+    id: 0,
+    source: 'init',
+    output: false,        // wir steuern nichts, nur Messung
+    apower: power,
+    voltage: V,
+    current: power / V,
+    aenergy: { total: 0, by_minute: [0,0,0], minute_ts: Math.floor(Date.now()/60000)*60 },
+    ret_aenergy: { total: 0, by_minute: [0,0,0], minute_ts: Math.floor(Date.now()/60000)*60 },
+    temperature: { tC: 25, tF: 77 },
+    freq: 50.0,
+    pf: 1.0,
+  };
+}
+
+function rpcSwitchGetConfig() {
+  return {
+    id: 0,
+    name: DEVICE_NAME,
+    in_mode: 'follow',
+    initial_state: 'off',
+    auto_on: false,
+    auto_on_delay: 60.0,
+    auto_off: false,
+    auto_off_delay: 60.0,
+    power_limit: 4480,
+    voltage_limit: 280,
+    current_limit: 16,
+  };
+}
+
+function rpcShellyGetConfig() {
+  const cfg = {
     ble: { enable: false, rpc: { enable: false } },
     cloud: { enable: false, server: null },
-    em: { 0: rpcEmGetConfig() },
     mqtt: { enable: false },
-    sys: { device: { name: 'Rosenweg 9 PV-Ueberschuss', mac: MAC.toUpperCase() }, location: { tz: 'Europe/Zurich' } },
+    sys: { device: { name: DEVICE_NAME, mac: MAC.toUpperCase() }, location: { tz: 'Europe/Zurich' } },
     wifi: { ap: { enable: false }, sta: { enable: true } },
   };
+  if (MODEL === 'plus1pm') {
+    cfg['switch:0'] = rpcSwitchGetConfig();
+  } else {
+    cfg.em = { 0: rpcEmGetConfig() };
+  }
+  return cfg;
 }
 
 function rpcEmGetConfig() {
@@ -134,8 +187,7 @@ function rpcEmGetConfig() {
 }
 
 function rpcShellyGetStatus() {
-  return {
-    'em:0': rpcEmGetStatus(),
+  const status = {
     'sys': {
       mac: MAC.toUpperCase(),
       restart_required: false,
@@ -155,6 +207,12 @@ function rpcShellyGetStatus() {
     'cloud': { connected: false },
     'wifi': { sta_ip: null, status: 'got ip', ssid: 'rosenweg-internal', rssi: -50 },
   };
+  if (MODEL === 'plus1pm') {
+    status['switch:0'] = rpcSwitchGetStatus();
+  } else {
+    status['em:0'] = rpcEmGetStatus();
+  }
+  return status;
 }
 
 // EM-Status liefert pro Phase: voltage, current, power, pf, freq.
@@ -181,6 +239,19 @@ function rpcEmGetStatus() {
 
 // Gen1-Legacy /shelly Endpoint fuer Discovery
 function legacyShelly() {
+  if (MODEL === 'plus1pm') {
+    return {
+      type: 'SNSW-001P16EU',
+      mac: MAC.toUpperCase(),
+      auth: false,
+      fw: FW,
+      discoverable: true,
+      longid: 1,
+      num_outputs: 1,
+      num_meters: 1,
+      num_emeters: 0,
+    };
+  }
   return {
     type: 'SPEM-003CEBEU',
     mac: MAC.toUpperCase(),
@@ -195,13 +266,24 @@ function legacyShelly() {
 }
 
 // ─── RPC-Dispatcher ─────────────────────────────────────────────────
-const RPC = {
-  'Shelly.GetDeviceInfo': () => rpcGetDeviceInfo(),
-  'Shelly.GetStatus': () => rpcShellyGetStatus(),
-  'Shelly.GetConfig': () => rpcShellyGetConfig(),
-  'EM.GetStatus': (p) => rpcEmGetStatus(p),
-  'EM.GetConfig': (p) => rpcEmGetConfig(p),
-};
+const RPC = MODEL === 'plus1pm'
+  ? {
+      'Shelly.GetDeviceInfo': () => rpcGetDeviceInfo(),
+      'Shelly.GetStatus': () => rpcShellyGetStatus(),
+      'Shelly.GetConfig': () => rpcShellyGetConfig(),
+      'Switch.GetStatus': () => rpcSwitchGetStatus(),
+      'Switch.GetConfig': () => rpcSwitchGetConfig(),
+      // Hilfsendpoints damit Discovery nicht failt
+      'EM.GetStatus': () => rpcEmGetStatus(),
+      'EM.GetConfig': () => rpcEmGetConfig(),
+    }
+  : {
+      'Shelly.GetDeviceInfo': () => rpcGetDeviceInfo(),
+      'Shelly.GetStatus': () => rpcShellyGetStatus(),
+      'Shelly.GetConfig': () => rpcShellyGetConfig(),
+      'EM.GetStatus': (p) => rpcEmGetStatus(p),
+      'EM.GetConfig': (p) => rpcEmGetConfig(p),
+    };
 
 // ─── HTTP-Server ────────────────────────────────────────────────────
 const server = http.createServer(async (req, res) => {
@@ -247,20 +329,32 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    return res.end(`<!DOCTYPE html><html><head><title>Rosenweg PV Emulator</title></head>
-<body style="font-family:sans-serif;padding:20px;">
-<h1>Rosenweg 9 — virtueller Shelly Pro 3EM</h1>
-<p>Emuliert ein Shelly Pro 3EM Gen2. Aktuelles Mapping:</p>
-<ul>
+    const modelLine = MODEL === 'plus1pm'
+      ? 'Emuliert einen Shelly Plus 1PM Gen2 (1 Kanal, 1 PM).'
+      : 'Emuliert ein Shelly Pro 3EM Gen2 (3 Phasen).';
+    const mapping = MODEL === 'plus1pm'
+      ? `<ul>
+  <li><strong>Switch:0</strong> = ${cache.phase_a_label || 'Power'}: ${cache.phase_a_w} W</li>
+</ul>`
+      : `<ul>
   <li><strong>Phase A</strong> = ${cache.phase_a_label}: ${cache.phase_a_w} W</li>
   <li><strong>Phase B</strong> = ${cache.phase_b_label}: ${cache.phase_b_w} W</li>
   <li><strong>Phase C</strong> = ${cache.phase_c_label}: ${cache.phase_c_w} W</li>
-</ul>
+</ul>`;
+    const rpcLink = MODEL === 'plus1pm'
+      ? '<a href="/rpc/Switch.GetStatus">/rpc/Switch.GetStatus</a>'
+      : '<a href="/rpc/EM.GetStatus?id=0">/rpc/EM.GetStatus</a>';
+    return res.end(`<!DOCTYPE html><html><head><title>${DEVICE_NAME}</title></head>
+<body style="font-family:sans-serif;padding:20px;">
+<h1>${DEVICE_NAME}</h1>
+<p>${modelLine} Aktuelles Mapping:</p>
+${mapping}
 <p>Backend: <code>${BACKEND}</code><br>
 Last update: ${cache.ts ? new Date(cache.ts).toLocaleString('de-CH') : 'never'}<br>
+Model: ${MODEL_ID} (${APP})<br>
 MAC: ${MAC.toUpperCase()}<br>
 Hostname: ${HOSTNAME}</p>
-<p><a href="/rpc/Shelly.GetDeviceInfo">/rpc/Shelly.GetDeviceInfo</a> · <a href="/rpc/EM.GetStatus?id=0">/rpc/EM.GetStatus</a> · <a href="/health">/health</a></p>
+<p><a href="/rpc/Shelly.GetDeviceInfo">/rpc/Shelly.GetDeviceInfo</a> · ${rpcLink} · <a href="/health">/health</a></p>
 </body></html>`);
   }
 
