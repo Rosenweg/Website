@@ -928,20 +928,50 @@
                 <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128100;</span> Mein Profil</h2>
                 <p class="mt-1 opacity-90">Persoenliche Daten, mehrere Telefonnummern und E-Mail-Aliasse, Avatar</p>
             </div>
-            <div class="p-6 space-y-3 text-sm">
+            <div class="p-6 space-y-4 text-sm">
                 <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
                     <p class="font-semibold text-blue-900 mb-1">&#128161; Wofuer ist die Profil-Seite?</p>
-                    <p class="text-blue-800">Hier kannst du selbst deine Stammdaten pflegen — Name, Adresse, mehrere Telefonnummern (Festnetz/Mobil/Geschaeft), E-Mail-Aliasse und einen Avatar. Was du hier eintraegst landet automatisch in der Personen-DB und wird ueberall verwendet wo dein Name/Kontakt benoetigt wird (Verteiler, Reklamationen, Vollmachten etc.).</p>
+                    <p class="text-blue-800">Deine Profil-Seite ist die <strong>einzige Stelle wo deine persoenlichen Stammdaten gepflegt werden</strong>. Was du hier eintraegst (Name, Telefon, E-Mail, Adresse, Avatar) wird ueberall verwendet: in der Personen-Datenbank, in Verteiler-Mails an dich, in Reklamationen, in Vollmachten, im Telefonbuch, sogar im WhatsApp-Bot fuer die Wer-bist-du-Erkennung. Du wirst hier auch dein <strong>Passwort</strong> aendern, deine <strong>API-Tokens</strong> verwalten und entscheiden ob der WhatsApp-Bot dich <strong>kontaktieren darf</strong>.</p>
                 </div>
-                <p><strong>Was geht da:</strong></p>
-                <ul class="list-disc list-inside space-y-1 text-gray-700">
-                    <li>Mehrere Telefonnummern pro Person (mit Label „Privat", „Geschaeft", „Notfall")</li>
-                    <li>Mehrere E-Mail-Adressen + Auswahl der Primaeradresse fuer Benachrichtigungen</li>
-                    <li>WhatsApp-Opt-In Toggle — entscheidet ob der Bot dir Mitteilungen schicken darf</li>
-                    <li>Passwort aendern (gleichzeitig Website + Netzwerk-Zugang)</li>
-                    <li>API-Tokens fuer KI-Agents verwalten (siehe naechste Sektion)</li>
-                </ul>
-                <p class="text-gray-600 italic">&#128279; <a href="profil.html" class="text-blue-600 hover:underline">Direkt zum Profil &rarr;</a></p>
+
+                <p class="font-semibold text-gray-800">Was du auf der Profil-Seite findest</p>
+                <div class="space-y-3">
+                    <div class="border rounded-lg p-3">
+                        <p class="font-semibold text-gray-800">&#128247; Avatar &amp; Stammdaten</p>
+                        <p class="text-gray-600 text-xs mb-1">Click auf den Avatar-Kreis &rarr; Bild hochladen (max 2 MB, JPG/PNG). Wird ueberall als dein „Gesicht" angezeigt. Name + Adresse stehen darunter, vom Ausschuss gepflegt &mdash; bei Aenderungswunsch: <code class="bg-gray-100 px-1">technik@rosenweg4303.ch</code>.</p>
+                    </div>
+                    <div class="border rounded-lg p-3">
+                        <p class="font-semibold text-gray-800">&#128222; Telefonnummern (mehrere)</p>
+                        <p class="text-gray-600 text-xs mb-1">Du kannst beliebig viele Nummern hinterlegen. Pro Nummer: <em>Typ</em> (Privat/Geschaeft/Mobil/Festnetz/Notfall) + <em>Label</em> (Freitext, optional) + <em>Nummer</em> im Format <code>+41 79 ...</code>. Wenn der Bot dich kennen soll: <strong>WhatsApp-Nummer hier eintragen</strong> + Opt-In aktivieren.</p>
+                    </div>
+                    <div class="border rounded-lg p-3">
+                        <p class="font-semibold text-gray-800">&#9993; E-Mail-Adressen (mehrere)</p>
+                        <p class="text-gray-600 text-xs mb-1">Primaere Adresse fuer Authentik + Benachrichtigungen, dazu beliebig viele Aliasse. Beispiel: <em>Stefan privat: stefan@gmail.com</em>, <em>Stefan geschaeftlich: stefan@firma.ch</em>. Mails an Verteiler gehen an die Primaere.</p>
+                    </div>
+                    <div class="border rounded-lg p-3">
+                        <p class="font-semibold text-gray-800">&#128241; WhatsApp-Opt-In Toggle</p>
+                        <p class="text-gray-600 text-xs mb-1">An: der Bot darf dir passive Pushes schicken (Status-Updates fuer deine Reklamationen, Verteiler-Mirrors, Auslagen-Genehmigungen). Aus: nur explizite Anfragen von DIR werden beantwortet, kein Push.</p>
+                    </div>
+                    <div class="border rounded-lg p-3">
+                        <p class="font-semibold text-gray-800">&#128272; Passwort aendern</p>
+                        <p class="text-gray-600 text-xs mb-1">Neues Passwort eingeben (min 8 Zeichen) + Bestaetigung &rarr; aendert <strong>gleichzeitig</strong> Website-Zugang (Authentik) UND Netzwerk-Zugang (Samba/Active Directory). Wirksam beim naechsten Login.</p>
+                    </div>
+                    <div class="border rounded-lg p-3">
+                        <p class="font-semibold text-gray-800">&#128272; API-Tokens (PAT)</p>
+                        <p class="text-gray-600 text-xs">Siehe eigene Section <a href="#api-tokens" class="text-blue-600 hover:underline">API-Tokens</a> &mdash; fuer Agents/Apps die in deinem Namen handeln sollen.</p>
+                    </div>
+                </div>
+
+                <div class="bg-amber-50 border border-amber-200 rounded p-4">
+                    <p class="font-semibold text-amber-900 mb-2">&#9888; Was du NICHT selbst aendern kannst</p>
+                    <ul class="text-amber-900 text-sm list-disc list-inside space-y-1">
+                        <li><strong>Name</strong> &mdash; aus rechtlichen Gruenden (Vollmachten etc.). Aenderung bei Heirat/Scheidung: an Ausschuss melden.</li>
+                        <li><strong>Authentik-Gruppen</strong> &mdash; was du darfst, entscheidet die Mitgliedschaft in Gruppen wie <code>technik</code>, <code>r9-eigentuemer</code> etc. Verwaltet Praesident/Technik.</li>
+                        <li><strong>Wohnungs-Zuordnung</strong> &mdash; wer wo wohnt, pflegt der Ausschuss in der Objektverwaltung.</li>
+                    </ul>
+                </div>
+
+                <p class="text-gray-600 italic">&#128279; Verwandt: <a href="#api-tokens" class="text-blue-600 hover:underline">API-Tokens</a>, <a href="#passwort" class="text-blue-600 hover:underline">Passwort</a>, <a href="#whatsapp" class="text-blue-600 hover:underline">WhatsApp-Bot</a>. <a href="profil.html" class="text-blue-600 hover:underline">&rarr; Direkt zum Profil</a>.</p>
             </div>
         </section>
 
@@ -1262,18 +1292,110 @@
                 <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128736;</span> Reklamationen / Schadensmeldungen</h2>
                 <p class="mt-1 opacity-90">Defekte, Maengel und Reparatur-Anliegen erfassen</p>
             </div>
-            <div class="p-6 space-y-3 text-sm">
+            <div class="p-6 space-y-4 text-sm">
                 <div class="bg-red-50 border-l-4 border-red-500 p-4 rounded">
-                    <p class="font-semibold text-red-900 mb-1">&#128161; Wofuer?</p>
-                    <p class="text-red-800">Aufzug steht still, Wasserhahn tropft, Tuerschloss klemmt — alles was repariert oder beauftragt werden muss landet hier. Der Ausschuss bekommt automatisch eine E-Mail und WhatsApp-Push, kann den passenden Handwerker zuweisen und den Status verfolgen.</p>
+                    <p class="font-semibold text-red-900 mb-1">&#128161; Wofuer ist das?</p>
+                    <p class="text-red-800">Aufzug steht still, Wasserhahn tropft, Tuerschloss klemmt, der Garten vor deinem Haus braucht Mahd, das Treppenlicht funktioniert nicht &mdash; alles was repariert oder beauftragt werden muss, kommt hier rein. Der Ausschuss deiner STWEG bekommt automatisch eine E-Mail UND einen WhatsApp-Push, kann den richtigen Handwerker zuweisen und den Status verfolgen. Du als Melder bleibst informiert ueber jeden Status-Schritt.</p>
                 </div>
-                <p><strong>Wie meldest du eine Reklamation?</strong></p>
-                <ol class="list-decimal list-inside space-y-1 text-gray-700">
-                    <li>Website: <a href="reklamationen.html" class="text-blue-600 hover:underline">/reklamationen.html</a> &rarr; <em>+ Neue Reklamation</em></li>
-                    <li>WhatsApp: <code class="bg-gray-100 px-1">/reklamation Aufzug Haus 9 steht still</code></li>
-                    <li>Optional: Foto vom Schaden mitschicken</li>
-                </ol>
-                <p class="text-gray-700"><strong>Status-Verfolgung:</strong> offen &rarr; weitergeleitet (an Handwerker) &rarr; erledigt / abgewiesen. Du bekommst E-Mail-Benachrichtigung bei jedem Statuswechsel.</p>
+
+                <div class="bg-blue-50 border border-blue-200 rounded p-4">
+                    <p class="font-semibold text-blue-900 mb-2">&#128640; Drei Wege eine Reklamation zu melden</p>
+                    <div class="space-y-2 text-blue-900">
+                        <div class="border-l-4 border-blue-400 pl-3">
+                            <p class="font-semibold">1. WhatsApp (schnellste Methode)</p>
+                            <p class="text-sm">Bot anschreiben mit <code class="bg-white px-1">/reklamation &lt;dein-text&gt;</code>. Optional Foto direkt anhaengen. Beispiel: <em>&bdquo;/reklamation Schiebetuer Haus 12 quietscht stark beim Oeffnen&ldquo;</em> + Foto. Bot bestaetigt mit Reklamations-Nr.</p>
+                        </div>
+                        <div class="border-l-4 border-blue-400 pl-3">
+                            <p class="font-semibold">2. Website-Formular</p>
+                            <p class="text-sm">Auf <a href="reklamationen.html" class="text-blue-700 underline">/reklamationen.html</a> &rarr; <em>+ Neue Reklamation</em>. Du fuellst Kategorie, Beschreibung und optional Foto/STWEG aus.</p>
+                        </div>
+                        <div class="border-l-4 border-blue-400 pl-3">
+                            <p class="font-semibold">3. E-Mail (Notfall-Fallback)</p>
+                            <p class="text-sm">An <code class="bg-white px-1">technik@rosenweg4303.ch</code> oder direkt an <code class="bg-white px-1">ausschuss@rosenweg4303.ch</code>. Wird manuell erfasst &mdash; daher langsamer.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <p class="font-semibold text-gray-800">Was du beim Melden eingibst</p>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs border">
+                        <thead class="bg-gray-100">
+                            <tr><th class="px-2 py-2 text-left">Feld</th><th class="px-2 py-2 text-left">Pflicht?</th><th class="px-2 py-2 text-left">Was eintragen</th></tr>
+                        </thead>
+                        <tbody class="divide-y">
+                            <tr><td class="px-2 py-2 font-semibold">Beschreibung</td><td class="px-2 py-2">Ja</td><td class="px-2 py-2">So konkret wie moeglich: <strong>WO + WAS + WIE</strong>. Beispiel: &bdquo;Haupteingang Rosenweg 9, Magnetschloss reagiert verzoegert, manchmal gar nicht&ldquo;.</td></tr>
+                            <tr><td class="px-2 py-2 font-semibold">STWEG</td><td class="px-2 py-2">Empfohlen</td><td class="px-2 py-2">Welche STWEG ist betroffen (1-8). Wenn nicht klar &rarr; leer lassen, Ausschuss klaert.</td></tr>
+                            <tr><td class="px-2 py-2 font-semibold">Kategorie</td><td class="px-2 py-2">Nein</td><td class="px-2 py-2">Aufzug / Heizung / Wasser / Tuer / Reinigung / Sonstige. Hilft beim Sortieren.</td></tr>
+                            <tr><td class="px-2 py-2 font-semibold">Foto / Bild</td><td class="px-2 py-2">Nein</td><td class="px-2 py-2">Bei sichtbaren Schaeden sehr hilfreich. Wird im Dokumente-Server abgelegt.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <p class="font-semibold text-gray-800">Lebenszyklus einer Reklamation</p>
+                <div class="space-y-2">
+                    <div class="flex items-start gap-3 bg-gray-50 border rounded p-3">
+                        <span class="bg-amber-100 text-amber-800 px-2 py-1 rounded text-xs font-semibold shrink-0">1. offen</span>
+                        <div class="text-xs">
+                            <p class="font-semibold">Frisch eingegangen.</p>
+                            <p class="text-gray-600">Ausschuss sieht's, hat Push-Mitteilung bekommen. Pruefung was zu tun ist.</p>
+                        </div>
+                    </div>
+                    <div class="flex items-start gap-3 bg-gray-50 border rounded p-3">
+                        <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-semibold shrink-0">2. weitergeleitet</span>
+                        <div class="text-xs">
+                            <p class="font-semibold">An Handwerker / Spezialisten beauftragt.</p>
+                            <p class="text-gray-600">Wird per Mail an den zugewiesenen Handwerker geschickt. Du bekommst eine Mitteilung wer's bearbeitet. Optional: Notiz an Reklamation (z.B. &bdquo;Termin am 12. April vereinbart&ldquo;).</p>
+                        </div>
+                    </div>
+                    <div class="flex items-start gap-3 bg-gray-50 border rounded p-3">
+                        <span class="bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-semibold shrink-0">3. erledigt</span>
+                        <div class="text-xs">
+                            <p class="font-semibold">Reparatur durchgefuehrt.</p>
+                            <p class="text-gray-600">Ausschuss markiert als erledigt. Du bekommst Bestaetigung. Falls die Reparatur Auslagen verursacht: separater Auslagen-Eintrag wird erfasst.</p>
+                        </div>
+                    </div>
+                    <div class="flex items-start gap-3 bg-gray-50 border rounded p-3">
+                        <span class="bg-red-100 text-red-800 px-2 py-1 rounded text-xs font-semibold shrink-0">4. abgewiesen</span>
+                        <div class="text-xs">
+                            <p class="font-semibold">Reklamation abgelehnt &mdash; nicht im Verantwortungsbereich der STWEG.</p>
+                            <p class="text-gray-600">Z.B. Schaden in privatem Wohnungs-Bereich, Verschulden des Bewohners, etc. Mit Begruendung. Bei Widerspruch: direkt an Ausschuss / Praesident.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-amber-50 border border-amber-200 rounded p-4">
+                    <p class="font-semibold text-amber-900 mb-2">&#128694; Beispiel-Reklamation: Aufzug-Stillstand</p>
+                    <div class="text-amber-900 text-sm space-y-2">
+                        <p><em>Mo 09:14:</em> Bewohner Maria schreibt WhatsApp: <code class="bg-white px-1">/reklamation Aufzug Haus 9 reagiert nicht auf Knopfdruck</code> + Foto vom Display</p>
+                        <p><em>Mo 09:14:</em> Bot bestaetigt: <em>&bdquo;Reklamation #87 aufgenommen. Ausschuss STWEG3 ist informiert.&ldquo;</em></p>
+                        <p><em>Mo 09:15:</em> Ausschuss STWEG3 bekommt E-Mail + WhatsApp-Push</p>
+                        <p><em>Mo 10:02:</em> Ausschuss weist Handwerker <em>SchindlerAG</em> zu, Status &rarr; weitergeleitet. Maria bekommt Push: <em>&bdquo;Reklamation #87 wurde an SchindlerAG weitergeleitet (Tel: 058 ..)&ldquo;</em></p>
+                        <p><em>Di 14:30:</em> SchindlerAG repariert, schickt Rechnung an Ausschuss. Ausschuss markiert als <strong>erledigt</strong>, Maria bekommt finale Bestaetigung mit Notiz.</p>
+                        <p><em>Mi 08:00:</em> Auslagen-Eintrag fuer die Rechnung wird automatisch vorbereitet, Ausschuss genehmigt im Auslagen-Tool.</p>
+                    </div>
+                </div>
+
+                <div class="bg-gray-50 border rounded p-4">
+                    <p class="font-semibold text-gray-800 mb-2">&#10067; FAQ</p>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Was ist ein Schaden in der STWEG vs. in meiner Wohnung?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300"><strong>Gemeinschaftsbereich</strong> (Treppe, Aufzug, Heizung, Fassade, Dach, Garten, Tiefgarage): STWEG-Reklamation. <strong>In deiner Wohnung</strong> (Wasserhahn, Steckdose, Boden): grundsaetzlich Eigentuemer-Sache. Im Zweifel: trotzdem melden, der Ausschuss klaert.</p>
+                    </details>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Wie schnell wird reagiert?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">Notfaelle (Wasserschaden, Aufzug, Heizungsausfall im Winter): innerhalb von 1-2 Stunden. Normale Reklamationen: 1-3 Tage. Sehr klein (Lampe ersetzen): kann auch laenger dauern. Bei Notfall ZUSAETZLICH zur Reklamation den Bereitschaftsdienst-Handwerker direkt anrufen &mdash; Nummern via <code class="bg-gray-100 px-1">/notfall</code> im WhatsApp-Bot.</p>
+                    </details>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Kann ich eine Reklamation zurueckziehen?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">Nicht direkt, aber du kannst dem Ausschuss schreiben (E-Mail an <code>ausschuss@rosenweg4303.ch</code> oder Kommentar), dann markieren sie's als abgewiesen mit Grund &bdquo;zurueckgezogen vom Melder&ldquo;.</p>
+                    </details>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Wer sieht meine Reklamation?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">Der Ausschuss deiner STWEG, Praesident, Technik und der zugewiesene Handwerker (nur Text + Foto, kein Person-Match). Andere Bewohner sehen Reklamationen NICHT, auch nicht in der KI-Suche.</p>
+                    </details>
+                </div>
+
+                <p class="text-gray-600 italic">&#128279; Verwandt: <a href="#handwerker" class="text-blue-600 hover:underline">Handwerker-Verzeichnis</a>, <a href="#auslagen" class="text-blue-600 hover:underline">Auslagen</a>, <a href="#whatsapp" class="text-blue-600 hover:underline">WhatsApp-Bot</a>. <a href="reklamationen.html" class="text-blue-600 hover:underline">&rarr; Direkt zur Reklamationen-Seite</a>.</p>
             </div>
         </section>
 
@@ -1285,21 +1407,109 @@
                 <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128176;</span> Auslagen einreichen</h2>
                 <p class="mt-1 opacity-90">Selbst bezahlte STWEG-Kosten zurueckholen</p>
             </div>
-            <div class="p-6 space-y-3 text-sm">
+            <div class="p-6 space-y-4 text-sm">
                 <div class="bg-emerald-50 border-l-4 border-emerald-500 p-4 rounded">
-                    <p class="font-semibold text-emerald-900 mb-1">&#128161; Wofuer?</p>
-                    <p class="text-emerald-800">Du hast aus eigener Tasche etwas fuer die STWEG bezahlt (Material, Lampe ersetzt, Schluesseldienst, Eigenleistung mit Stundensatz)? Hier reichst du es ein, der Ausschuss genehmigt, dann wird's am Ende des Quartals/Jahres ausbezahlt.</p>
+                    <p class="font-semibold text-emerald-900 mb-1">&#128161; Wofuer ist das?</p>
+                    <p class="text-emerald-800">Du hast etwas fuer die STWEG bezahlt &mdash; Material aus dem Baumarkt, Schluesseldienst weil jemand den Eingang nicht oeffnen konnte, Garten-Werkzeug, oder du hast Eigenleistung erbracht (Treppenreinigung, Hauswart-Aufgabe). Hier reichst du das ein, der Ausschuss prueft + genehmigt, am Ende des Quartals/Jahres wird's auf dein Konto ausbezahlt. Es gibt drei Typen: <strong>Material/Drittkosten mit Beleg</strong>, <strong>Eigenleistung mit Stundensatz</strong> und <strong>kleinere Sachen ohne Beleg</strong> (limitiert).</p>
                 </div>
-                <p><strong>Was du brauchst:</strong></p>
-                <ul class="list-disc list-inside space-y-1 text-gray-700">
-                    <li>Datum, Beschreibung, Betrag (CHF)</li>
-                    <li>STWEG (welcher Geld kommen soll)</li>
-                    <li>Kategorie (Material, Reinigung, Eigenleistung, ...)</li>
-                    <li>Beleg als Foto/PDF (optional fuer Kleinbetraege, Pflicht ab CHF 50)</li>
-                    <li>Bei Eigenleistung: Positionen einzeln mit Stundensatz aus Konfig</li>
-                </ul>
-                <p class="text-gray-700"><strong>Status:</strong> eingereicht &rarr; genehmigt &rarr; ausbezahlt. WhatsApp-Status-Updates pro Wechsel.</p>
-                <p class="text-gray-600 italic">&#128279; <a href="auslagen.html" class="text-blue-600 hover:underline">Auslagen-Seite &rarr;</a></p>
+
+                <p class="font-semibold text-gray-800">Drei Typen von Auslagen</p>
+                <div class="grid sm:grid-cols-3 gap-3">
+                    <div class="border rounded-lg p-3 bg-blue-50">
+                        <p class="font-semibold text-blue-900 mb-1">&#128722; Material / Dritt-Kosten</p>
+                        <p class="text-blue-900 text-xs">Du bist im Baumarkt, kaufst eine Lampe, einen Eimer Farbe, eine Schraubenkiste. Eingang Beleg/Quittung. <strong>Pflicht ab CHF 50.</strong> Wird 1:1 zurueckgezahlt.</p>
+                    </div>
+                    <div class="border rounded-lg p-3 bg-emerald-50">
+                        <p class="font-semibold text-emerald-900 mb-1">&#9201; Eigenleistung (Stundenarbeit)</p>
+                        <p class="text-emerald-900 text-xs">Du hast 2 Stunden die Tiefgarage geputzt, weil der Reinigungsdienst kurzfristig ausgefallen ist. Stundensatz aus Konfig (verschieden pro STWEG). Positionen einzeln einragen.</p>
+                    </div>
+                    <div class="border rounded-lg p-3 bg-amber-50">
+                        <p class="font-semibold text-amber-900 mb-1">&#128184; Kleinbetraege ohne Beleg</p>
+                        <p class="text-amber-900 text-xs">Bis CHF 50 darfst du auch ohne Beleg einreichen (z.B. Trinkgeld an den Handwerker, kleine Anschaffung). Beschreibung muss aber klar sein.</p>
+                    </div>
+                </div>
+
+                <p class="font-semibold text-gray-800">Schritt fuer Schritt</p>
+                <ol class="list-decimal list-inside space-y-2 text-gray-700">
+                    <li><strong>Auf <a href="auslagen.html" class="text-blue-600 hover:underline">/auslagen.html</a></strong> &rarr; <em>+ Neue Auslage</em></li>
+                    <li>
+                        <strong>Stamm-Daten ausfuellen:</strong>
+                        <ul class="list-disc list-inside ml-6 mt-1 text-gray-600 text-sm">
+                            <li><em>Datum</em> &mdash; wann du die Auslage hattest</li>
+                            <li><em>STWEG</em> &mdash; auf wessen Kosten geht's? (1-8, oder STWEG-uebergreifend)</li>
+                            <li><em>Kategorie</em> &mdash; Material, Reinigung, Eigenleistung, Sonstiges</li>
+                            <li><em>Beschreibung</em> &mdash; was hast du gemacht/gekauft</li>
+                            <li><em>Projekt</em> (optional) &mdash; wenn die Auslage zu einem laufenden Projekt gehoert</li>
+                        </ul>
+                    </li>
+                    <li>
+                        <strong>Positionen erfassen</strong> (mehrere moeglich):
+                        <ul class="list-disc list-inside ml-6 mt-1 text-gray-600 text-sm">
+                            <li>Beschreibung pro Position</li>
+                            <li>Menge × Einheit (z.B. 2.5 h, 3 Stk, 1 Paket)</li>
+                            <li>Preis pro Einheit (bei Eigenleistung: Stundensatz vorgefuellt aus Konfig)</li>
+                            <li>System berechnet Total automatisch</li>
+                        </ul>
+                    </li>
+                    <li>
+                        <strong>Belege hochladen</strong> &mdash; per Drag&amp;Drop oder File-Picker. Quittung als Foto reicht. Mehrere Belege moeglich (z.B. mehrere Kassenzettel aus einem Einkauf).
+                    </li>
+                    <li>
+                        <strong>Einreichen</strong> &mdash; Status &rarr; eingereicht. Ausschuss bekommt Mitteilung.
+                    </li>
+                </ol>
+
+                <div class="bg-blue-50 border border-blue-200 rounded p-4">
+                    <p class="font-semibold text-blue-900 mb-2">&#9201; Stundensatz fuer Eigenleistung</p>
+                    <p class="text-blue-900 text-sm mb-2">Pro STWEG ist ein <strong>Standard-Stundensatz</strong> hinterlegt (z.B. CHF 35/h). Wenn du Eigenleistung einreichst, wird der Satz automatisch in deinen Positionen vorgefuellt. Du kannst per Position individuell abweichen wenn's begruendet ist (z.B. Spezial-Arbeit).</p>
+                    <p class="text-blue-900 text-sm"><strong>Stundensaetze ansehen:</strong> <a href="auslagen-stundensatz.html" class="text-blue-700 underline">/auslagen-stundensatz.html</a> &mdash; nur lesend fuer Bewohner, Pflege durch Praesident.</p>
+                </div>
+
+                <p class="font-semibold text-gray-800">Status-Lebenszyklus</p>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs border">
+                        <thead class="bg-gray-100">
+                            <tr><th class="px-2 py-2 text-left">Status</th><th class="px-2 py-2 text-left">Wer macht's</th><th class="px-2 py-2 text-left">Was passiert</th></tr>
+                        </thead>
+                        <tbody class="divide-y">
+                            <tr><td class="px-2 py-2"><span class="bg-gray-200 px-2 py-0.5 rounded">eingereicht</span></td><td class="px-2 py-2">Du</td><td class="px-2 py-2">Du hast das Formular abgeschickt. Wartet auf Pruefung.</td></tr>
+                            <tr><td class="px-2 py-2"><span class="bg-green-100 text-green-800 px-2 py-0.5 rounded">genehmigt</span></td><td class="px-2 py-2">Ausschuss</td><td class="px-2 py-2">Pruefer hat die Auslage akzeptiert. Du bekommst eine Mitteilung mit allenfalls Anpassungen.</td></tr>
+                            <tr><td class="px-2 py-2"><span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded">ausbezahlt</span></td><td class="px-2 py-2">Praesident</td><td class="px-2 py-2">Per Bank ueberwiesen. Quartal- oder Jahresende. Du erhaeltst die Auszahlungs-Bestaetigung per E-Mail.</td></tr>
+                            <tr><td class="px-2 py-2"><span class="bg-red-100 text-red-800 px-2 py-0.5 rounded">abgelehnt</span></td><td class="px-2 py-2">Ausschuss</td><td class="px-2 py-2">Mit Begruendung (z.B. Beleg fehlt, Kategorie falsch, nicht im STWEG-Bereich). Du kannst korrigieren und erneut einreichen.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="bg-emerald-50 border border-emerald-200 rounded p-4">
+                    <p class="font-semibold text-emerald-900 mb-2">&#128241; Tipp: Auslagen ueber WhatsApp pruefen</p>
+                    <p class="text-emerald-900 text-sm">Schreib dem Bot <code class="bg-white px-1">/meineauslagen</code> &mdash; du bekommst alle deine Eintraege gruppiert nach Status + Total-Summe der noch nicht ausbezahlten Auslagen. Praktisch zum schnellen Check unterwegs.</p>
+                </div>
+
+                <div class="bg-gray-50 border rounded p-4">
+                    <p class="font-semibold text-gray-800 mb-2">&#10067; FAQ</p>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Wann wird ausbezahlt?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">Quartalsweise (Maerz/Juni/Sep/Dez) oder bei groesseren Betraegen auch ad-hoc. Bei Notfall (du hast jetzt-jetzt was vorgestreckt): direkt mit Praesident sprechen.</p>
+                    </details>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Brauche ich fuer alles einen Beleg?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">Bis CHF 50 ohne, ab CHF 50 mit Beleg (Pflicht). Eigenleistung braucht nie einen Beleg (du bist ja deine eigene Quelle), aber genaue Stundenangabe + Beschreibung. Bei Unsicherheit: Beleg lieber mitschicken.</p>
+                    </details>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Wer prueft die Auslagen?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">Ausschuss-Mitglieder deiner STWEG (genehmigen). Praesident kontrolliert + zahlt aus. Vier-Augen-Prinzip.</p>
+                    </details>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Kann ich Auslagen fuer jemand anderen einreichen?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">Grundsaetzlich nein &mdash; die Auszahlung geht auf die Bankverbindung des Einreichers. Wenn du fuer einen anderen Bewohner gezahlt hast (z.B. Notfall): der andere reicht's selber ein, oder du machst es klar in der Beschreibung + Bankverbindung des anderen separat anhaengen.</p>
+                    </details>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Mein Beleg ist eine Mail, kein Foto?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">PDF-Export der E-Mail erstellen (in Mail-App &bdquo;Drucken &rarr; PDF&ldquo;) und hochladen. Oder Screenshot.</p>
+                    </details>
+                </div>
+
+                <p class="text-gray-600 italic">&#128279; Verwandt: <a href="#projekte" class="text-blue-600 hover:underline">Projekte</a> (Auslagen koennen einem Projekt zugeordnet sein), <a href="#reklamationen" class="text-blue-600 hover:underline">Reklamationen</a> (oft folgt Auslage). <a href="auslagen.html" class="text-blue-600 hover:underline">&rarr; Direkt zur Auslagen-Seite</a>.</p>
             </div>
         </section>
 
@@ -1466,18 +1676,135 @@
                 <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128272;</span> Mein Zugang (ISP)</h2>
                 <p class="mt-1 opacity-90">VPN-Konten, eigene VLAN-Antraege, Reverse-Proxy-Routen</p>
             </div>
-            <div class="p-6 space-y-3 text-sm">
+            <div class="p-6 space-y-4 text-sm">
                 <div class="bg-indigo-50 border-l-4 border-indigo-500 p-4 rounded">
-                    <p class="font-semibold text-indigo-900 mb-1">&#128161; Wofuer?</p>
-                    <p class="text-indigo-800">Die Rosenweg-Kooperation betreibt ihr eigenes Internet/Netzwerk (Init7-Glasfaser, UDM-Pro). Als Bewohner kannst du dir Remote-Zugriff (VPN) einrichten, eigene VLANs beantragen (fuer Smart-Home, Server, Lab) oder eigene Web-Services via unseren zentralen Reverse-Proxy ins Internet stellen lassen.</p>
+                    <p class="font-semibold text-indigo-900 mb-1">&#128161; Wofuer ist das?</p>
+                    <p class="text-indigo-800">Die Rosenweg-Kooperation betreibt ihr eigenes <strong>Internet (Init7-Glasfaser)</strong> + <strong>Netzwerk (UDM-Pro)</strong> &mdash; also nicht nur einen normalen Anschluss vom Standard-Provider. Das eroeffnet Moeglichkeiten die du bei Sunrise/Swisscom nicht hast: eigene VLANs anlegen, deine private Domain durch unseren zentralen Reverse-Proxy ins Internet bringen, VPN-Zugang einrichten ohne separaten Anbieter, Smart-Home-Geraete in einem isolierten Netz halten. Auf <em>&bdquo;Mein Zugang&ldquo;</em> verwaltest du diese drei Bereiche.</p>
                 </div>
-                <p>Bereiche:</p>
-                <ul class="list-disc list-inside space-y-1 text-gray-700">
-                    <li><strong>VPN-Konten</strong> &mdash; selbst anlegen, WireGuard/Netbird/Tailscale. Konfiguration zurueckverlangen via Antrag.</li>
-                    <li><strong>VLAN beantragen</strong> &mdash; eigenes Subnetz mit konfigurierbarer Groesse (/29 bis /24), Internet-Zugriff togglen, Status-Verfolgung</li>
-                    <li><strong>Reverse-Proxy-Routen</strong> &mdash; eigene Domain durch unseren zentralen Proxy schicken, Authentik-Auth dazwischen schalten optional</li>
-                </ul>
-                <p class="text-gray-600 italic">&#128279; <a href="isp-mein-zugang.html" class="text-blue-600 hover:underline">Mein Zugang &rarr;</a></p>
+
+                <div class="bg-gray-50 border rounded p-4">
+                    <p class="font-semibold text-gray-800 mb-2">&#128313; Wer kann das nutzen?</p>
+                    <p class="text-gray-700 text-sm">Alle eingeloggten Bewohner. Bei kostenpflichtigen Erweiterungen (z.B. eigene Erschliessung) gilt die Aufwand-Verrechnung gemaess <a href="isp.html" class="text-blue-600 hover:underline">ISP-Seite</a>. Eigene VPN-Konten sind kostenlos, VLAN-Antraege haengen vom Aufwand ab.</p>
+                </div>
+
+                <p class="font-semibold text-gray-800 text-lg pt-2">&#128272; 1. VPN-Konten</p>
+                <div class="bg-purple-50 border border-purple-200 rounded p-4">
+                    <p class="font-semibold text-purple-900 mb-2">&#128161; Wofuer?</p>
+                    <p class="text-purple-900 text-sm mb-2">Du bist im Urlaub und willst von ueberall auf deinen Home-Server zugreifen? Oder auf interne Rosenweg-Dienste die nicht oeffentlich erreichbar sind? Ein VPN macht's moeglich.</p>
+                    <p class="text-purple-900 text-sm">Drei Backends unterstuetzt:</p>
+                    <ul class="list-disc list-inside text-purple-900 text-sm ml-3 mt-1 space-y-0.5">
+                        <li><strong>WireGuard</strong> &mdash; modern, schnell, am wenigsten Setup. Empfohlen wenn du selbst deinen Key generieren kannst.</li>
+                        <li><strong>Netbird</strong> &mdash; Mesh-VPN, einfaches Onboarding via App, ueberlebt Netzwechsel</li>
+                        <li><strong>Tailscale</strong> &mdash; auch Mesh, kommerziell, sehr poliert. Eigener Account erforderlich.</li>
+                    </ul>
+                </div>
+                <p class="text-gray-700"><strong>Workflow:</strong></p>
+                <ol class="list-decimal list-inside text-gray-700 space-y-1">
+                    <li>Auf <a href="isp-mein-zugang.html" class="text-blue-600 hover:underline">/isp-mein-zugang.html</a> &rarr; <em>+ Neues VPN-Konto</em></li>
+                    <li>Backend waehlen (WireGuard / Netbird / Tailscale)</li>
+                    <li>Bei WireGuard: Public-Key generieren (auf eigenem Geraet mit <code class="bg-gray-100 px-1">wg genkey | tee privatekey | wg pubkey</code>) und eintragen. Private-Key behaeltst DU.</li>
+                    <li>Speichern. Technik konfiguriert serverseitig und teilt dir IP zu.</li>
+                    <li>Du bekommst per E-Mail die Konfig (WireGuard: <code class="bg-gray-100 px-1">.conf</code>-File, Netbird: Invite-Link, Tailscale: ACL-Eintrag).</li>
+                    <li>Konfig auf deinem Geraet importieren &rarr; verbunden.</li>
+                </ol>
+
+                <p class="font-semibold text-gray-800 text-lg pt-2">&#127760; 2. VLAN beantragen</p>
+                <div class="bg-blue-50 border border-blue-200 rounded p-4">
+                    <p class="font-semibold text-blue-900 mb-2">&#128161; Wofuer?</p>
+                    <p class="text-blue-900 text-sm mb-2">Ein VLAN (Virtual LAN) ist ein eigenes isoliertes Sub-Netz. Konkrete Use-Cases:</p>
+                    <ul class="list-disc list-inside text-blue-900 text-sm ml-3 space-y-1">
+                        <li><strong>Smart-Home VLAN</strong> &mdash; alle deine Shellys, Lampen, Thermostate in einem eigenen Netz das nicht ins Internet darf (Privacy + Security)</li>
+                        <li><strong>Gaming-VLAN</strong> &mdash; alle Konsolen, weniger UPnP-Chaos im Haupt-Netz, optional QoS-Priorisierung</li>
+                        <li><strong>Lab-VLAN</strong> &mdash; du bastelst an Servern, willst Crashes nicht auf dein normales Netz auswirken</li>
+                        <li><strong>Mieter-VLAN</strong> &mdash; getrennter Internet-Zugang fuer Untermieter ohne Zugriff auf dein eigenes Netz</li>
+                    </ul>
+                </div>
+                <p class="text-gray-700"><strong>Antrag stellen:</strong></p>
+                <ol class="list-decimal list-inside text-gray-700 space-y-1">
+                    <li><em>+ VLAN beantragen</em> klicken &rarr; Formular mit:</li>
+                    <li><strong>Zweck</strong> (Pflicht) &mdash; ein Satz wofuer du das brauchst. Beispiel: <em>&bdquo;Smart-Home-Geraete getrennt vom Haupt-Netz halten, mit Internet aber ohne Zugriff aufs Privat-VLAN.&ldquo;</em></li>
+                    <li><strong>Wunsch-Name</strong> &mdash; freiwillig (z.B. „SmartHome")</li>
+                    <li><strong>Gewuenschte Groesse</strong> &mdash; /29 (6 nutzbare IPs), /28 (14), /27 (30), /24 (254). Wenn du nicht sicher bist: /29 reicht meistens fuer Smart-Home.</li>
+                    <li><strong>Geraete-Anzahl</strong> &mdash; grobe Schaetzung</li>
+                    <li><strong>Internet-Zugriff</strong> (Checkbox)</li>
+                    <li><strong>Andere VLANs</strong> (Checkbox) &mdash; soll dein VLAN auf andere zugreifen koennen (z.B. dein Haupt-Netz)?</li>
+                </ol>
+
+                <p class="font-semibold text-gray-800">Antrags-Lebenszyklus</p>
+                <div class="space-y-2">
+                    <div class="flex items-start gap-3 bg-gray-50 border rounded p-3">
+                        <span class="bg-amber-100 text-amber-800 px-2 py-1 rounded text-xs font-semibold shrink-0">1. pending</span>
+                        <p class="text-xs">Antrag eingereicht, Technik prueft. Du wartest auf Entscheidung.</p>
+                    </div>
+                    <div class="flex items-start gap-3 bg-gray-50 border rounded p-3">
+                        <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-semibold shrink-0">2. approved</span>
+                        <p class="text-xs">Technik hat genehmigt, VLAN-ID + Subnet zugewiesen. Wartet auf Deployment.</p>
+                    </div>
+                    <div class="flex items-start gap-3 bg-gray-50 border rounded p-3">
+                        <span class="bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-semibold shrink-0">3. deployed</span>
+                        <p class="text-xs">VLAN ist auf UDM-Pro konfiguriert + auf den Switches. Du bekommst die Anbindungs-Anleitung (Port auf welchem Switch, welcher Tag).</p>
+                    </div>
+                    <div class="flex items-start gap-3 bg-gray-50 border rounded p-3">
+                        <span class="bg-red-100 text-red-800 px-2 py-1 rounded text-xs font-semibold shrink-0">rejected</span>
+                        <p class="text-xs">Mit Begruendung (z.B. Konflikt, Sicherheitsbedenken). Du kannst angepasst neu beantragen.</p>
+                    </div>
+                </div>
+
+                <p class="font-semibold text-gray-800 text-lg pt-2">&#128257; 3. Reverse-Proxy-Routen</p>
+                <div class="bg-emerald-50 border border-emerald-200 rounded p-4">
+                    <p class="font-semibold text-emerald-900 mb-2">&#128161; Wofuer?</p>
+                    <p class="text-emerald-900 text-sm mb-2">Du hostest zu Hause eine <strong>Nextcloud</strong>, einen <strong>Home-Assistant</strong>, <strong>Bitwarden</strong>, ein <strong>Game-Server-Dashboard</strong> oder eine <strong>persoenliche Webseite</strong> und willst's von ausserhalb erreichbar machen &mdash; ohne selbst Domain, SSL-Zertifikat, Firewall-Regeln und Authentik-Integration basteln zu muessen. Du gibst nur deinen internen Backend-URL an, der Rest ist automatisch.</p>
+                </div>
+
+                <div class="bg-gray-50 border rounded p-4">
+                    <p class="font-semibold text-gray-800 mb-2">&#128313; Auto-Approval mit Hostname-Pruefung</p>
+                    <p class="text-gray-700 text-sm mb-2">Bei Antrag prueft das System den Hostname:</p>
+                    <ul class="text-gray-700 text-sm list-disc list-inside ml-3 space-y-1">
+                        <li><strong>Enthaelt &bdquo;rosenweg&ldquo;</strong> oder Pattern <code class="bg-white px-1">r&lt;Nummer&gt;.</code> (wie r9., r17.) &rarr; <span class="text-amber-700">pending_admin</span> &mdash; Technik muss manuell pruefen</li>
+                        <li><strong>Endet auf rosenweg4303.ch / rosenweg9.ch</strong> &rarr; <span class="text-amber-700">pending_admin</span></li>
+                        <li><strong>Beliebige andere Domain</strong> &rarr; sofortiger DNS-Check, bei Match &rarr; <span class="text-green-700">automatisch aktiviert</span></li>
+                    </ul>
+                </div>
+
+                <p class="text-gray-700"><strong>So konfigurierst du eine Route fuer eigene Domain (z.B. test.abc.ch):</strong></p>
+                <ol class="list-decimal list-inside text-gray-700 space-y-1.5">
+                    <li><em>+ Route hinzufuegen</em> &rarr; Modal oeffnet sich</li>
+                    <li>System zeigt dir die <strong>DNS-Konfig die du machen musst</strong>:
+                        <pre class="bg-gray-900 text-green-300 p-2 mt-1 rounded text-xs">A:    37.17.232.133
+CNAME (Alternative): public.rosenweg4303.ch</pre>
+                        Diese Werte trag bei deinem Domain-Provider (Cloudflare, Infomaniak, Hostpoint etc.) ein.
+                    </li>
+                    <li>In Modal: Hostname (z.B. <code class="bg-gray-100 px-1">test.abc.ch</code>), Backend-URL (z.B. <code class="bg-gray-100 px-1">http://10.0.50.5:8080</code>), Optionen public/SSL/Auth-required.</li>
+                    <li>Speichern &rarr; System prueft DNS sofort. Wenn dein DNS-Record bereits korrekt zeigt: sofort aktiviert. Sonst: pending_dns, System prueft alle 5 Minuten erneut.</li>
+                    <li>Sobald DNS passt + Approval ok: dein Backend ist via <code class="bg-gray-100 px-1">https://test.abc.ch</code> erreichbar, SSL-Cert von Let's Encrypt automatisch.</li>
+                </ol>
+
+                <div class="bg-blue-50 border border-blue-200 rounded p-4">
+                    <p class="font-semibold text-blue-900 mb-2">&#128737; Optional: Authentik-Auth davor</p>
+                    <p class="text-blue-900 text-sm">Wenn du <em>&bdquo;auth_required&ldquo;</em> aktivierst, wird vor deinem Backend ein Authentik-Login geschaltet. Nur authentifizierte Rosenweg-User koennen zugreifen. Praktisch wenn du z.B. dein internes Wiki teilen willst aber nicht der ganzen Welt.</p>
+                </div>
+
+                <p class="font-semibold text-gray-800">FAQ ueber alle drei Bereiche</p>
+                <div class="bg-gray-50 border rounded p-4">
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Kostet das was?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">VPN-Konten: gratis. VLAN-Antraege: gratis (Aufwand bei komplexen Erschliessungs-Aenderungen nach Aufwand). Reverse-Proxy-Routen: gratis. Externe Domain-Registrierung musst du selbst bezahlen.</p>
+                    </details>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Wie schnell wird ein VLAN deployed?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">Approval idR 1-3 Tage. Deployment je nach Komplexitaet: einfache VLAN-Hinzunahme ueber Nacht, mit Switch-Anbindung kann's eine Woche dauern (Hardware-Konfiguration).</p>
+                    </details>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Was passiert wenn ich auszieh?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">VPN-Konten + Reverse-Proxy-Routen werden inaktiv geschaltet, nach 30 Tagen geloescht (analog Authentik-Konto). VLAN bleibt bestehen falls noch Bewohner es nutzen, sonst aufgeloest.</p>
+                    </details>
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-700 font-medium py-1">Wie wird Missbrauch verhindert?</summary>
+                        <p class="text-gray-600 mt-1 pl-3 border-l-2 border-gray-300">Rate-Limiting auf Reverse-Proxy-Routen einstellbar. Verdaechtige Aktivitaet wird im Cloudflare/Traefik-Log sichtbar. Bei Missbrauch sperrt Technik die Route.</p>
+                    </details>
+                </div>
+
+                <p class="text-gray-600 italic">&#128279; Verwandt: <a href="#vlan-antrag" class="text-blue-600 hover:underline">VLAN-Detail</a>, <a href="#reverse-proxy" class="text-blue-600 hover:underline">Reverse-Proxy-Detail</a>, <a href="#umleitung" class="text-blue-600 hover:underline">Adress-Umleitungen</a>. <a href="isp-mein-zugang.html" class="text-blue-600 hover:underline">&rarr; Direkt zu Mein Zugang</a>.</p>
             </div>
         </section>
 
