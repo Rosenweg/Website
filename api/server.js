@@ -12598,14 +12598,25 @@ async function transcribeWhisper(audioBuf, mimeType = 'audio/wav') {
   // Falls OPENROUTER_API_KEY fehlt → leerer Transkript als Fallback.
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return { text: '', error: 'OPENROUTER_API_KEY nicht gesetzt' };
+  // OpenRouter's audio-transcriptions endpoint rejects undici-FormData boundary.
+  // Workaround: nutze direkt OpenAI-Whisper kompatible Groq-API (kostenlos,
+  // schneller, whisper-large-v3). Wenn GROQ_API_KEY fehlt → leerer Transkript.
+  const groqKey = process.env.GROQ_API_KEY;
+  const endpoint = groqKey
+    ? { url: 'https://api.groq.com/openai/v1/audio/transcriptions', key: groqKey, model: 'whisper-large-v3' }
+    : { url: 'https://openrouter.ai/api/v1/audio/transcriptions', key: apiKey, model: 'openai/whisper-1' };
   const form = new FormData();
   form.append('file', new Blob([audioBuf], { type: mimeType }), 'voicemail.wav');
-  form.append('model', 'openai/whisper-1');
+  form.append('model', endpoint.model);
   form.append('language', 'de');
   try {
-    const r = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
+    const r = await fetch(endpoint.url, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}` },
+      headers: {
+        Authorization: `Bearer ${endpoint.key}`,
+        // OpenRouter verlangt HTTP-Referer/X-Title fuer Attribution
+        ...(endpoint.url.includes('openrouter') ? { 'HTTP-Referer': 'https://www.rosenweg4303.ch', 'X-Title': 'Rosenweg PBX' } : {}),
+      },
       body: form,
     });
     if (!r.ok) return { text: '', error: `Whisper ${r.status}: ${await r.text().catch(() => '')}` };
@@ -12743,9 +12754,10 @@ async function resolveTechnikWhatsappGroupId() {
     return _technikWaCache.id;
   }
   try {
-    const r = await fetch('http://rosenweg_whatsapp-bot:8080/groups', {
+    // tasks.* statt VIP weil Docker Swarm IPVS auf unserem Setup zickt
+    const r = await fetch('http://tasks.rosenweg_whatsapp-bot:8080/groups', {
       headers: { 'X-WA-Secret': process.env.WHATSAPP_SHARED_SECRET || '' },
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(8000),
     });
     if (!r.ok) return null;
     const { groups } = await r.json();
