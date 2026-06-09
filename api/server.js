@@ -12712,6 +12712,34 @@ async function summarizeVoicemail(transcript, callerId) {
   } catch { return ''; }
 }
 
+// Cache fuer WA-Group-ID "Rosenweg Technik" (5 Min TTL)
+let _technikWaCache = { id: null, fetched_at: 0 };
+async function resolveTechnikWhatsappGroupId() {
+  const TTL_MS = 5 * 60 * 1000;
+  if (_technikWaCache.id && (Date.now() - _technikWaCache.fetched_at) < TTL_MS) {
+    return _technikWaCache.id;
+  }
+  try {
+    const r = await fetch('http://rosenweg_whatsapp-bot:8080/groups', {
+      headers: { 'X-WA-Secret': process.env.WA_BOT_SECRET || '' },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!r.ok) return null;
+    const { groups } = await r.json();
+    // Match: enthält "rosenweg" UND "technik" (case-insensitive)
+    const found = (groups || []).find(g => {
+      const n = (g.name || '').toLowerCase();
+      return n.includes('rosenweg') && n.includes('technik');
+    });
+    if (found) {
+      _technikWaCache = { id: found.id, fetched_at: Date.now() };
+      console.log(`[pbx-voicemail] Group "${found.name}" -> ${found.id}`);
+      return found.id;
+    }
+  } catch (e) { console.warn('[pbx-voicemail] /groups Fehler:', e.message); }
+  return null;
+}
+
 app.post('/api/pbx/voicemail', requirePbxSecret, async (req, res) => {
   try {
     const audioBuf = req.body;
@@ -12762,13 +12790,42 @@ app.post('/api/pbx/voicemail', requirePbxSecret, async (req, res) => {
         text: body,
         attachments: [{ filename: `voicemail-${uniqueid}.wav`, content: audioBuf, contentType: 'audio/wav' }],
       }, 'pbx-voicemail').catch(err => console.warn('[pbx-voicemail] Mail-Fehler:', err.message));
+    }
 
-      // WhatsApp-Push an Admins mit Opt-In: kompakte Variante
-      pushWhatsappBroadcast({
-        emails: adminEmails,
-        sourceType: 'pbx-voicemail',
-        body: `📞 *Voicemail* von ${callerId}\n${summary ? summary.split('\n').slice(0,2).join('\n') : (transcript ? transcript.slice(0, 200) : '(keine Transkription)')}\n\nDetails per Email.`,
-      }).catch(() => {});
+    // WhatsApp-Group "Rosenweg Technik": Audio + Transkript + Zusammenfassung
+    try {
+      const groupId = await resolveTechnikWhatsappGroupId();
+      if (groupId) {
+        const waBody = [
+          `📞 *Voicemail* von ${callerId}`,
+          `🕒 ${new Date().toLocaleString('de-CH')}`,
+          '',
+          summary ? `*Zusammenfassung:*\n${summary}` : null,
+          transcript ? `*Transkript:*\n${transcript}` : '(keine Transkription verfuegbar)',
+        ].filter(Boolean).join('\n\n').slice(0, 3500);
+        await queueWhatsappMessage({
+          chatId: groupId,
+          phone: groupId,
+          body: waBody,
+          attachments: [{
+            mimetype: 'audio/wav',
+            data_base64: audioBuf.toString('base64'),
+            filename: `voicemail-${callerId}-${uniqueid}.wav`,
+          }],
+          sourceType: 'pbx-voicemail',
+          sourceId: uniqueid,
+        });
+        console.log(`[pbx-voicemail] WA an Gruppe ${groupId} gequeued`);
+      } else {
+        // Fallback: Opt-In Broadcast an Admin-Einzelnutzer (Text-only, kein Audio)
+        pushWhatsappBroadcast({
+          emails: adminEmails,
+          sourceType: 'pbx-voicemail',
+          body: `📞 *Voicemail* von ${callerId}\n${summary ? summary.split('\n').slice(0,2).join('\n') : (transcript ? transcript.slice(0, 200) : '(keine Transkription)')}\n\n(Gruppe "Rosenweg Technik" nicht gefunden — Details per Email.)`,
+        }).catch(() => {});
+      }
+    } catch (waErr) {
+      console.warn('[pbx-voicemail] WA-Send-Fehler:', waErr.message);
     }
 
     res.json({ ok: true, transcript_len: transcript.length, summary_present: !!summary });
