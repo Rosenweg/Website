@@ -357,7 +357,7 @@ services:
   shelly-emulator:
     image: ghcr.io/rosenweg/shelly-emulator:latest
     environment:
-      BACKEND_URL: "https://energy.rosenweg4303.ch/api/energy/shelly"
+      BACKEND_URL: "https://www.rosenweg4303.ch/api/energy/shelly"
       POLL_MS: "10000"
       ENERGY_GROUP: "r9"
       SHELLY_HOSTNAME: "shellypvrosenweg9"

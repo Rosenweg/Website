@@ -8,7 +8,7 @@ können dann ganz normal darauf reagieren.
 ## Datenquelle
 
 ```
-GET https://energy.rosenweg4303.ch/api/energy/shelly
+GET https://www.rosenweg4303.ch/api/energy/shelly
 ```
 
 Liefert (auszugsweise):
@@ -62,7 +62,7 @@ Lege zwei `Number` Components an:
 // Holt alle 30s die zwei Ueberschuss-Werte vom Backend und updated
 // die Virtual-Number-Components 200 und 201.
 
-let URL = "https://energy.rosenweg4303.ch/api/energy/shelly";
+let URL = "https://www.rosenweg4303.ch/api/energy/shelly";
 let INTERVAL_MS = 30 * 1000;
 let COMP_OHNE_BOILER = "number:200";
 let COMP_MIT_BOILER  = "number:201";

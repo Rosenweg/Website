@@ -57,7 +57,7 @@ Env-Vars:
 
 | Var | Default | Bedeutung |
 |---|---|---|
-| `BACKEND_URL` | `https://energy.rosenweg4303.ch/api/energy/shelly` | Datenquelle |
+| `BACKEND_URL` | `https://www.rosenweg4303.ch/api/energy/shelly` | Datenquelle |
 | `POLL_MS` | `10000` | Polling-Intervall in ms |
 | `ENERGY_GROUP` | `r9` | Gruppe im Energy-Collector |
 | `SHELLY_HOSTNAME` | `shellypvrosenweg9` | Hostname für mDNS |
