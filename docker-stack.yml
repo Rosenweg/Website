@@ -74,15 +74,16 @@ services:
         - "traefik.http.routers.rosenweg.entrypoints=websecure"
         - "traefik.http.routers.rosenweg.tls.certresolver=letsencrypt"
         - "traefik.http.services.rosenweg.loadbalancer.server.port=80"
-        - "traefik.http.middlewares.rosenweg-www.redirectregex.regex=^https://rosenweg4303\\.ch/(.*)"
+        # Hinweis: Cloudflare→Origin laeuft als HTTP (Flexible SSL), darum https? im regex.
+        - "traefik.http.middlewares.rosenweg-www.redirectregex.regex=^https?://rosenweg4303\\.ch/(.*)"
         - "traefik.http.middlewares.rosenweg-www.redirectregex.replacement=https://www.rosenweg4303.ch/$${1}"
         - "traefik.http.middlewares.rosenweg-www.redirectregex.permanent=true"
         # Saubere URLs ohne .html (z.B. /reklamationen -> /reklamationen.html)
-        - "traefik.http.middlewares.rosenweg-clean-urls.redirectregex.regex=^https://www\\.rosenweg4303\\.ch/(reklamationen|vollmachten|telefonbuch|handwerker|profil|hilfe|netzwerk|abholung|anfahrt|auslagen|brief-tracking|dashboard|dmarc|echtheitspruefung|email-archiv|email-log|email-verteiler|energie-config|energie-monitor|entsorgung|grundbuch|isp|loeschungen|mail-compose|mail-templates|objektverwaltung|personen|projekte|proxmox-verwaltung|rechteverwaltung|tv|verbindungen|verwaltung|verwaltung-admin|verwaltung-2026|waschkueche|whatsapp-bot-admin|wlan|wohnungsverwaltung|zaehler|isp-mein-zugang|isp-admin|pbx-admin|mail-approval-config|mail-empfaenger-admin|shelly-emulator-howto|auslagen-stundensatz|verwaltung-mail-outbox)$$"
+        - "traefik.http.middlewares.rosenweg-clean-urls.redirectregex.regex=^https?://www\\.rosenweg4303\\.ch/(reklamationen|vollmachten|telefonbuch|handwerker|profil|hilfe|netzwerk|abholung|anfahrt|auslagen|brief-tracking|dashboard|dmarc|echtheitspruefung|email-archiv|email-log|email-verteiler|energie-config|energie-monitor|entsorgung|grundbuch|isp|loeschungen|mail-compose|mail-templates|objektverwaltung|personen|projekte|proxmox-verwaltung|rechteverwaltung|tv|verbindungen|verwaltung|verwaltung-admin|verwaltung-2026|waschkueche|whatsapp-bot-admin|wlan|wohnungsverwaltung|zaehler|isp-mein-zugang|isp-admin|pbx-admin|mail-approval-config|mail-empfaenger-admin|shelly-emulator-howto|auslagen-stundensatz|verwaltung-mail-outbox)/?$$"
         - "traefik.http.middlewares.rosenweg-clean-urls.redirectregex.replacement=https://www.rosenweg4303.ch/$${1}.html"
         - "traefik.http.middlewares.rosenweg-clean-urls.redirectregex.permanent=true"
         # Freundliche Alias-URL: /defekt-melden -> /reklamationen.html
-        - "traefik.http.middlewares.rosenweg-alias-defekt.redirectregex.regex=^https://www\\.rosenweg4303\\.ch/defekt-melden/?$$"
+        - "traefik.http.middlewares.rosenweg-alias-defekt.redirectregex.regex=^https?://www\\.rosenweg4303\\.ch/defekt-melden/?$$"
         - "traefik.http.middlewares.rosenweg-alias-defekt.redirectregex.replacement=https://www.rosenweg4303.ch/reklamationen.html"
         - "traefik.http.middlewares.rosenweg-alias-defekt.redirectregex.permanent=false"
         - "traefik.http.routers.rosenweg.middlewares=rosenweg-www,rosenweg-clean-urls,rosenweg-alias-defekt"
@@ -148,6 +149,12 @@ services:
       - authentik_authentik-net
     deploy:
       replicas: 1
+      # CIFS-Mount zum Fileserver (LXC 106 auf PVE1) ist nur von
+      # docker-pve1 stabil (selber Host). Auf den anderen Nodes
+      # scheitert der Mount mit input/output error.
+      placement:
+        constraints:
+          - node.hostname == docker-pve1
       resources:
         limits:
           memory: 512M
