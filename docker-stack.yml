@@ -77,7 +77,15 @@ services:
         - "traefik.http.middlewares.rosenweg-www.redirectregex.regex=^https://rosenweg4303\\.ch/(.*)"
         - "traefik.http.middlewares.rosenweg-www.redirectregex.replacement=https://www.rosenweg4303.ch/$${1}"
         - "traefik.http.middlewares.rosenweg-www.redirectregex.permanent=true"
-        - "traefik.http.routers.rosenweg.middlewares=rosenweg-www"
+        # Saubere URLs ohne .html (z.B. /reklamationen -> /reklamationen.html)
+        - "traefik.http.middlewares.rosenweg-clean-urls.redirectregex.regex=^https://www\\.rosenweg4303\\.ch/(reklamationen|vollmachten|telefonbuch|handwerker|profil|hilfe|netzwerk|abholung|anfahrt|auslagen|brief-tracking|dashboard|dmarc|echtheitspruefung|email-archiv|email-log|email-verteiler|energie-config|energie-monitor|entsorgung|grundbuch|isp|loeschungen|mail-compose|mail-templates|objektverwaltung|personen|projekte|proxmox-verwaltung|rechteverwaltung|tv|verbindungen|verwaltung|verwaltung-admin|verwaltung-2026|waschkueche|whatsapp-bot-admin|wlan|wohnungsverwaltung|zaehler|isp-mein-zugang|isp-admin|pbx-admin|mail-approval-config|mail-empfaenger-admin|shelly-emulator-howto|auslagen-stundensatz|verwaltung-mail-outbox)$$"
+        - "traefik.http.middlewares.rosenweg-clean-urls.redirectregex.replacement=https://www.rosenweg4303.ch/$${1}.html"
+        - "traefik.http.middlewares.rosenweg-clean-urls.redirectregex.permanent=true"
+        # Freundliche Alias-URL: /defekt-melden -> /reklamationen.html
+        - "traefik.http.middlewares.rosenweg-alias-defekt.redirectregex.regex=^https://www\\.rosenweg4303\\.ch/defekt-melden/?$$"
+        - "traefik.http.middlewares.rosenweg-alias-defekt.redirectregex.replacement=https://www.rosenweg4303.ch/reklamationen.html"
+        - "traefik.http.middlewares.rosenweg-alias-defekt.redirectregex.permanent=false"
+        - "traefik.http.routers.rosenweg.middlewares=rosenweg-www,rosenweg-clean-urls,rosenweg-alias-defekt"
         # rosenweg9.ch → /stweg3/
         - "traefik.http.routers.rosenweg9.rule=Host(`www.rosenweg9.ch`) || Host(`rosenweg9.ch`)"
         - "traefik.http.routers.rosenweg9.entrypoints=websecure"
@@ -131,6 +139,8 @@ services:
       PVE_API_URL: https://100.64.2.20:8006
       PVE_API_TOKEN: "${PVE_API_TOKEN}"
       DOCS_PATH: /documents
+      WG_CONTROL_URL: "${WG_CONTROL_URL:-http://100.64.2.29:3001}"
+      WG_CONTROL_TOKEN: "${WG_CONTROL_TOKEN}"
     volumes:
       - rosenweg-documents:/documents
     networks:
