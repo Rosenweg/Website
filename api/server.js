@@ -14095,26 +14095,52 @@ function vpnRwFromBezeichnung(bez) {
   if (m) { const rw = parseInt(m[1], 10); if (rw >= 10 && rw <= 18) return rw; }
   return null;
 }
-async function resolveHomeVlanForEmail(email) {
-  if (!email) return null;
+// Klassifiziert einen Wohnungs-Eintrag in Kategorie + VLAN.
+// Reihenfolge bei Default-Pick: wohnung (0) -> hobbyraum (1) -> parkplatz (2)
+function classifyVpnEntry(bezeichnung) {
+  const b = bezeichnung || '';
+  // Hobbyraum: explizit oder mit Hausnummer-Prefix
+  if (/hobbyraum/i.test(b)) {
+    const rw = vpnRwFromBezeichnung(b);
+    return { kind: 'hobbyraum', kindOrder: 1, vlan: (rw && VPN_RW_TO_VLAN[rw]) || null };
+  }
+  // Parkplatz: P\d+
+  if (/^P\d+/i.test(b)) return { kind: 'parkplatz', kindOrder: 2, vlan: 9 };
+  // Wohnung: alles mit erkennbarer Hausnummer
+  const rw = vpnRwFromBezeichnung(b);
+  if (rw && VPN_RW_TO_VLAN[rw]) return { kind: 'wohnung', kindOrder: 0, vlan: VPN_RW_TO_VLAN[rw] };
+  return { kind: 'unbekannt', kindOrder: 9, vlan: null };
+}
+
+async function getUserVlanOptions(email) {
+  if (!email) return [];
   const r = await pool.query(
-    `SELECT w.bezeichnung
+    `SELECT w.id AS wohnung_id, w.bezeichnung, w.stweg
        FROM wohnungen_kontakte wk
        JOIN wohnungen w ON w.id = wk.wohnung_id
        JOIN personen p  ON p.id = wk.person_id
       WHERE wk.archiviert_am IS NULL
         AND ( LOWER(p.email) = LOWER($1)
               OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(p.emails,'[]'::jsonb)) e
-                          WHERE LOWER(e) = LOWER($1)) )
-      ORDER BY w.bezeichnung`,
+                          WHERE LOWER(e) = LOWER($1)) )`,
     [email],
   );
-  for (const row of r.rows) {
-    const rw = vpnRwFromBezeichnung(row.bezeichnung);
-    if (rw && VPN_RW_TO_VLAN[rw]) return VPN_RW_TO_VLAN[rw];
-  }
-  if (r.rows.some(row => /^P\d+/i.test(row.bezeichnung || ''))) return 9;
-  return null;
+  const opts = r.rows
+    .map(row => ({ ...row, ...classifyVpnEntry(row.bezeichnung) }))
+    .filter(o => o.vlan);
+  // Dedup: gleiche (kind, vlan, wohnung_id)
+  const seen = new Set();
+  const dedup = opts.filter(o => {
+    const k = `${o.kind}:${o.vlan}:${o.wohnung_id}`;
+    if (seen.has(k)) return false; seen.add(k); return true;
+  });
+  dedup.sort((a, b) => a.kindOrder - b.kindOrder || (a.bezeichnung || '').localeCompare(b.bezeichnung || ''));
+  return dedup;
+}
+
+async function resolveHomeVlanForEmail(email) {
+  const opts = await getUserVlanOptions(email);
+  return opts.length > 0 ? opts[0].vlan : null;
 }
 
 app.get('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
@@ -14128,6 +14154,18 @@ app.get('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Liefert die moeglichen VLAN-Optionen fuer den User (sortiert nach Wohnung→Hobbyraum→Parkplatz)
+app.get('/api/isp/vpn-accounts/options', authMiddleware, async (req, res) => {
+  try {
+    const target = (req.query.user_email || req.user.email || '').toLowerCase();
+    if (!ispIsAdmin(req) && target !== (req.user.email || '').toLowerCase()) {
+      return res.status(403).json({ error: 'Du kannst nur eigene Optionen abfragen' });
+    }
+    const options = await getUserVlanOptions(target);
+    res.json({ options, default: options[0]?.vlan || null });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
   try {
     if (!WG_CONTROL_TOKEN) return res.status(503).json({ error: 'wg-control nicht konfiguriert (WG_CONTROL_TOKEN fehlt)' });
@@ -14137,9 +14175,13 @@ app.post('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
     if (!ispIsAdmin(req) && target !== (req.user.email || '').toLowerCase()) {
       return res.status(403).json({ error: 'Du kannst nur eigene VPN-Konten anlegen' });
     }
-    // VLAN auto aus Objektverwaltung; Admin darf override per body.vlan
+    // VLAN-Wahl: Admin darf alles; User darf nur aus eigenen Optionen (Wohnung/Hobbyraum/Parkplatz)
     let vlan = parseInt(b.vlan, 10);
-    if (!vlan) vlan = await resolveHomeVlanForEmail(target);
+    const userOpts = await getUserVlanOptions(target);
+    if (!vlan) vlan = userOpts[0]?.vlan || null;
+    if (vlan && !ispIsAdmin(req) && !userOpts.some(o => o.vlan === vlan)) {
+      return res.status(403).json({ error: 'Dieses VLAN gehoert nicht zu deinen zugewiesenen Einheiten' });
+    }
     if (!vlan) return res.status(400).json({ error: 'Keine Heim-Wohnung in der Objektverwaltung — VLAN nicht ermittelbar' });
 
     const wgResp = await wgControl('POST', '/peers', {

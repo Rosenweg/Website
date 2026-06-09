@@ -101,25 +101,43 @@
         <div class="text-xs text-gray-500 mt-1">Letzter Connect: ${fmtDt(v.last_connect_at)}</div>
       </div>`).join('');
   }
-  function openVpnModal() {
+  async function openVpnModal() {
+    let opts = [];
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/vpn-accounts/options');
+      if (r.ok) opts = (await r.json()).options || [];
+    } catch {}
+    const kindIcon = { wohnung: '🏠', hobbyraum: '🔧', parkplatz: '🅿️' };
+    const kindLabel = { wohnung: 'Wohnung', hobbyraum: 'Hobbyraum', parkplatz: 'Parkplatz' };
+    const optHtml = opts.length === 0
+      ? `<p class="text-xs text-red-600 italic">Keine zugewiesene Wohnung/Hobbyraum/Parkplatz in der Objektverwaltung gefunden. Bitte Verwalter kontaktieren.</p>`
+      : opts.length === 1
+        ? `<p class="text-xs text-gray-500 italic">Heim-Netz: ${kindIcon[opts[0].kind]||''} ${esc(opts[0].bezeichnung)} (VLAN ${opts[0].vlan})</p><input type="hidden" id="v-vlan" value="${opts[0].vlan}">`
+        : `<div><label class="block text-xs text-gray-600">Heim-Netz auswaehlen (Wohnung > Hobbyraum > Parkplatz)</label>
+            <select id="v-vlan" class="w-full border rounded px-2 py-1">
+              ${opts.map((o,i) => `<option value="${o.vlan}"${i===0?' selected':''}>${kindIcon[o.kind]||''} ${esc(o.bezeichnung)} — ${kindLabel[o.kind]||o.kind} (VLAN ${o.vlan})</option>`).join('')}
+            </select></div>`;
     const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5">
         <h2 class="font-bold mb-3">Neues WireGuard-Konto</h2>
         <p class="text-xs text-gray-500 mb-3">Konto wird automatisch generiert (Server-seitig Private-Key + IP). Public-Key nur fuer eigenes Geraet ausfuellen, sonst leer lassen.</p>
         <div class="space-y-2 text-sm">
+          ${optHtml}
           <div><label class="block text-xs text-gray-600">Public-Key <span class="text-gray-400">(optional)</span></label><textarea id="v-pub" rows="2" class="w-full border rounded px-2 py-1 font-mono text-xs" placeholder="z.B. xTI...= (sonst leer)"></textarea></div>
           <div><label class="block text-xs text-gray-600">Notizen</label><input id="v-notiz" class="w-full border rounded px-2 py-1" placeholder="z.B. Laptop privat"></div>
         </div>
         <div class="flex justify-end gap-2 mt-3">
           <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Abbrechen</button>
-          <button onclick="saveVpn()" class="px-3 py-1.5 bg-indigo-600 text-white rounded text-sm">Erstellen</button>
+          <button onclick="saveVpn()" class="px-3 py-1.5 bg-indigo-600 text-white rounded text-sm"${opts.length===0?' disabled':''}>Erstellen</button>
         </div>
       </div></div>`;
     document.body.insertAdjacentHTML('beforeend', html);
   }
   async function saveVpn() {
+    const vlanEl = document.getElementById('v-vlan');
     const body = {
       backend: 'wireguard',
+      vlan: vlanEl ? parseInt(vlanEl.value, 10) : undefined,
       public_key: document.getElementById('v-pub').value.trim() || null,
       notizen: document.getElementById('v-notiz').value || null,
     };
