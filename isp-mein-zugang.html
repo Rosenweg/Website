@@ -51,20 +51,30 @@
         <p class="text-xs text-gray-500 mb-2">Eigene Web-Services via Rosenweg-Reverse-Proxy zugaenglich machen. SSL/Authentik-Auth wird zentral vorgelagert.</p>
         <div id="rp-list" class="space-y-2"></div>
       </section>
+
+      <!-- Mail-Relays -->
+      <section class="bg-white rounded-lg shadow p-5">
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <h2 class="text-lg font-semibold">✉ Mail-Relays</h2>
+          <button onclick="openRelayModal()" class="text-sm bg-blue-600 text-white px-3 py-1.5 rounded">+ Domain hinzufuegen</button>
+        </div>
+        <p class="text-xs text-gray-500 mb-2">Eigene Mail-Domain durch PMG filtern lassen und an deinen eigenen Mailserver weiterleiten. MX auf <code class="bg-gray-100 px-1 rounded">pmg.rosenweg4303.ch</code> setzen.</p>
+        <div id="relay-list" class="space-y-2"></div>
+      </section>
     </div>
   </main>
 
   <script>
   const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const fmtDt = s => s ? new Date(s).toLocaleString('de-CH') : '—';
-  let vpnAccounts = [], vlanRequests = [], rpRoutes = [];
+  let vpnAccounts = [], vlanRequests = [], rpRoutes = [], mailRelays = [];
 
   document.addEventListener('DOMContentLoaded', async () => {
     const u = await AuthentikAuth.init({ requireAuth: true });
     if (!u) return;
     document.getElementById('auth-gate').classList.add('hidden');
     document.getElementById('content').classList.remove('hidden');
-    loadVpn(); loadVlan(); loadRp();
+    loadVpn(); loadVlan(); loadRp(); loadRelays();
   });
 
   // VPN
@@ -292,6 +302,98 @@
     if (!confirm('Route loeschen?')) return;
     await AuthentikAuth.apiFetch('/api/isp/reverse-proxy/' + id, { method: 'DELETE' });
     await loadRp();
+  }
+
+  // Mail-Relays
+  async function loadRelays() {
+    const r = await AuthentikAuth.apiFetch('/api/isp/mail-relays');
+    if (!r.ok) return;
+    mailRelays = (await r.json()).mail_relays || [];
+    renderRelays();
+  }
+  function renderRelays() {
+    const wrap = document.getElementById('relay-list');
+    if (mailRelays.length === 0) { wrap.innerHTML = '<p class="text-gray-400 italic text-sm">Keine Mail-Relays.</p>'; return; }
+    const sb = s => ({
+      approved: '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded ml-1">aktiv</span>',
+      pending_dns: '<span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded ml-1">MX prueft</span>',
+      pending_admin: '<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded ml-1">Admin-Pruefung</span>',
+      rejected: '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-1">abgelehnt</span>',
+    })[s] || '';
+    wrap.innerHTML = mailRelays.map(m => `
+      <div class="border rounded p-3 bg-gray-50">
+        <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
+          <div><strong class="font-mono text-sm">${esc(m.domain)}</strong>${sb(m.approval_status)}
+            ${m.active ? '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded ml-1">aktiv</span>' : ''}
+          </div>
+          <div class="flex gap-1">
+            ${m.approval_status === 'pending_dns' ? `<button onclick="recheckRelay(${m.id})" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">MX pruefen</button>` : ''}
+            <button onclick="delRelay(${m.id})" class="text-xs text-red-600 hover:underline">Loeschen</button>
+          </div>
+        </div>
+        <div class="text-xs text-gray-600">→ <span class="font-mono">${esc(m.target_host)}:${m.target_port || 25}</span>${m.target_use_mx ? ' <span class="bg-blue-100 text-blue-700 px-1 rounded">MX-Lookup</span>' : ''}</div>
+        ${m.approval_reason ? `<div class="text-xs text-gray-500 italic mt-1">${esc(m.approval_reason)}</div>` : ''}
+      </div>`).join('');
+  }
+  async function openRelayModal() {
+    let dnsInfo = {};
+    try { dnsInfo = await (await AuthentikAuth.apiFetch('/api/isp/dns-info')).json(); } catch {}
+    const pmgMx = dnsInfo.pmg_hostname || 'pmg.rosenweg4303.ch';
+    const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
+      <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5 max-h-[90vh] overflow-y-auto">
+        <h2 class="font-bold mb-3">Mail-Relay erfassen</h2>
+        <div class="bg-blue-50 border border-blue-200 rounded p-3 mb-3 text-xs space-y-1">
+          <p class="font-semibold text-blue-900">📋 DNS-Konfig fuer deine Domain:</p>
+          <p><strong>MX 10:</strong> <code class="bg-white px-1 rounded">${esc(pmgMx)}.</code></p>
+          <p class="text-blue-700 pt-1">PMG nimmt Mails an, filtert (Spam/Antivirus) und reicht weiter an dein <code>Ziel-Host</code>. Pruefung alle 5 Min.</p>
+        </div>
+        <div class="space-y-2 text-sm">
+          <div><label class="block text-xs text-gray-600">Domain *</label><input id="rel-dom" placeholder="meinedomain.ch" class="w-full border rounded px-2 py-1"></div>
+          <div class="grid grid-cols-3 gap-2">
+            <div class="col-span-2"><label class="block text-xs text-gray-600">Ziel-Host *</label><input id="rel-host" placeholder="mail.meinedomain.ch" class="w-full border rounded px-2 py-1"></div>
+            <div><label class="block text-xs text-gray-600">Port</label><input id="rel-port" type="number" value="25" class="w-full border rounded px-2 py-1"></div>
+          </div>
+          <div><label class="flex items-center gap-2 text-sm"><input id="rel-mx" type="checkbox" class="rounded"> MX-Lookup statt Direct-Host</label></div>
+          <div><label class="block text-xs text-gray-600">DKIM-Selector <span class="text-gray-400">(optional)</span></label><input id="rel-dkim" placeholder="default" class="w-full border rounded px-2 py-1"></div>
+          <div><label class="block text-xs text-gray-600">Notizen</label><textarea id="rel-notiz" rows="2" class="w-full border rounded px-2 py-1"></textarea></div>
+        </div>
+        <div class="flex justify-end gap-2 mt-3">
+          <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Abbrechen</button>
+          <button onclick="saveRelay()" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm">Speichern</button>
+        </div>
+      </div></div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+  }
+  async function saveRelay() {
+    const body = {
+      domain: document.getElementById('rel-dom').value.trim().toLowerCase(),
+      target_host: document.getElementById('rel-host').value.trim(),
+      target_port: parseInt(document.getElementById('rel-port').value, 10) || 25,
+      target_use_mx: document.getElementById('rel-mx').checked,
+      dkim_selector: document.getElementById('rel-dkim').value.trim() || null,
+      notizen: document.getElementById('rel-notiz').value || null,
+    };
+    if (!body.domain || !body.target_host) { alert('Domain + Ziel-Host Pflicht.'); return; }
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/mail-relays', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error(await r.text());
+      document.querySelector('.fixed')?.remove();
+      await loadRelays();
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+  async function recheckRelay(id) {
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/mail-relays/' + id + '/recheck-dns', { method: 'POST' });
+      const d = await r.json();
+      if (d.matches) alert('✓ MX verifiziert — Relay ist jetzt aktiv.');
+      else alert('⚠ MX zeigt nicht auf PMG.\n\nMX: ' + JSON.stringify(d.mx) + '\nErwartet: ' + d.target);
+      await loadRelays();
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+  async function delRelay(id) {
+    if (!confirm('Mail-Relay loeschen?')) return;
+    await AuthentikAuth.apiFetch('/api/isp/mail-relays/' + id, { method: 'DELETE' });
+    await loadRelays();
   }
   </script>
 </body>
