@@ -3506,7 +3506,7 @@ async function pollGmailForVerteiler() {
           try {
             await pool.query(
               'UPDATE imap_state SET last_uid = $1, updated_at = NOW() WHERE mailbox = $2 AND last_uid < $1',
-              [uid, 'INBOX']
+              [uid, MAILBOX]
             );
           } catch (e) { console.error('[IMAP] Watermark update failed:', e.message); }
         };
