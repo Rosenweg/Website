@@ -12687,29 +12687,52 @@ Regeln:
   }
 }
 
-async function summarizeVoicemail(transcript, callerId) {
+// Analysiert eine Voicemail-Transkription: Zusammenfassung + Defekt-Klassifikation
+async function analyzeVoicemail(transcript, callerId) {
   const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey || !transcript) return '';
+  const empty = { summary: '', urgency: null, action: '', is_defekt: false, defekt_stweg: null, defekt_beschreibung: '' };
+  if (!apiKey || !transcript) return empty;
   try {
     const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'anthropic/claude-haiku-4.5',
-        max_tokens: 300,
+        max_tokens: 500,
+        response_format: { type: 'json_object' },
         messages: [
           {
             role: 'system',
-            content: 'Du fasst Anrufbeantworter-Nachrichten der Rosenweg-STWEG zusammen. Liefere genau drei Zeilen: (1) Anliegen in 1 Satz, (2) Dringlichkeit niedrig/mittel/hoch, (3) Vorgeschlagene Aktion. Knapp, keine Hoeflichkeitsfloskeln.',
+            content: `Du analysierst Anrufbeantworter-Nachrichten der Rosenweg-STWEG (Schweizer Stockwerkeigentum, 8 STWEGs, Hausnummern 1/2/4/5/6/8/9/10/12/13/14/16/17/18). Antworte STRIKT als JSON mit folgenden Feldern:
+{
+  "summary": string,              // 1-2 Sätze Kern-Anliegen, knapp, ohne Floskeln
+  "urgency": "niedrig" | "mittel" | "hoch",
+  "action": string,               // 1 Satz vorgeschlagene naechste Handlung
+  "is_defekt": boolean,           // true wenn ein Schaden/Defekt/Reparaturbedarf gemeldet wird
+  "defekt_stweg": number | null,  // STWEG-Nummer 1-8 (wenn ein Haus oder eine Hausnummer genannt wird), sonst null
+  "defekt_beschreibung": string   // saubere Defektbeschreibung (1-3 Saetze) falls is_defekt, sonst ""
+}
+STWEG-Mapping: Rosenweg 17/18 = STWEG 1, RW13/14/16 = STWEG 2, RW9/10/12 = STWEG 3, RW5/6/8 = STWEG 4, RW1/2/4 = STWEG 5, ...`,
           },
           { role: 'user', content: `Anrufer: ${callerId}\nTranskript:\n${transcript}` },
         ],
       }),
     });
-    if (!r.ok) return '';
+    if (!r.ok) return empty;
     const data = await r.json();
-    return data.choices?.[0]?.message?.content || '';
-  } catch { return ''; }
+    const raw = data.choices?.[0]?.message?.content || '{}';
+    try {
+      const j = JSON.parse(raw);
+      return {
+        summary: j.summary || '',
+        urgency: j.urgency || null,
+        action: j.action || '',
+        is_defekt: !!j.is_defekt,
+        defekt_stweg: Number.isInteger(j.defekt_stweg) && j.defekt_stweg >= 1 && j.defekt_stweg <= 8 ? j.defekt_stweg : null,
+        defekt_beschreibung: j.defekt_beschreibung || '',
+      };
+    } catch { return empty; }
+  } catch { return empty; }
 }
 
 // Cache fuer WA-Group-ID "Rosenweg Technik" (5 Min TTL)
@@ -12750,58 +12773,58 @@ app.post('/api/pbx/voicemail', requirePbxSecret, async (req, res) => {
     const uniqueid = String(req.headers['x-unique-id'] || Date.now()).slice(0, 60);
     console.log(`[pbx-voicemail] empfangen: caller=${callerId} uid=${uniqueid} size=${audioBuf.length}`);
 
-    // Transkription (parallel mit Mail-Vorbereitung)
+    // Transkription + KI-Analyse (Zusammenfassung + Defekt-Klassifikation)
     const { text: transcript, error: whErr } = await transcribeWhisper(audioBuf);
     if (whErr) console.warn('[pbx-voicemail] Whisper-Fehler:', whErr);
-    const summary = await summarizeVoicemail(transcript, callerId);
+    const analysis = await analyzeVoicemail(transcript, callerId);
 
-    // Empfaenger: Technik + Praesident
-    const r = await pool.query(
-      `SELECT DISTINCT email FROM users
-        WHERE active = true AND email IS NOT NULL
-          AND (groups_json::jsonb ? 'technik' OR groups_json::jsonb ? 'Präsident')`,
-    );
-    const adminEmails = r.rows.map(x => x.email).filter(Boolean);
-
-    // Audio als Attachment + Text-Email
-    const subject = transcript
-      ? `📞 Voicemail von ${callerId} — ${transcript.slice(0, 60).replace(/\n/g, ' ')}…`
-      : `📞 Voicemail von ${callerId} (keine Transkription)`;
-    const body = [
-      `Eingang einer Voicemail an der Rosenweg-Nummer.`,
-      ``,
-      `Anrufer: ${callerId}`,
-      `Zeit: ${new Date().toLocaleString('de-CH')}`,
-      ``,
-      `── KI-Zusammenfassung ──`,
-      summary || '(keine Zusammenfassung verfuegbar)',
-      ``,
-      `── Volltranskript ──`,
-      transcript || '(keine Transkription verfuegbar)',
-      ``,
-      whErr ? `(Whisper-Fehler: ${whErr})` : '',
-    ].join('\n');
-
-    if (adminEmails.length > 0) {
-      await loggedSendMail({
-        from: MAIL_FROM,
-        to: adminEmails.join(', '),
-        subject,
-        text: body,
-        attachments: [{ filename: `voicemail-${uniqueid}.wav`, content: audioBuf, contentType: 'audio/wav' }],
-      }, 'pbx-voicemail').catch(err => console.warn('[pbx-voicemail] Mail-Fehler:', err.message));
+    // Auto-Reklamation wenn KI einen Defekt erkennt
+    let reklamationId = null;
+    if (analysis.is_defekt && analysis.defekt_beschreibung) {
+      try {
+        // Anrufer-Person via Telefon-Nummer matchen (normalisiert)
+        const normCaller = normalizePhone(callerId);
+        let personId = null;
+        if (normCaller) {
+          const pr = await pool.query(
+            `SELECT id FROM personen
+              WHERE telefon = $1
+                 OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(telefone,'[]'::jsonb)) t WHERE t = $1)
+              LIMIT 1`,
+            [normCaller],
+          );
+          if (pr.rows[0]) personId = pr.rows[0].id;
+        }
+        const ins = await pool.query(
+          `INSERT INTO reklamationen (person_id, stweg, beschreibung, eingang_kanal)
+           VALUES ($1, $2, $3, 'pbx-voicemail') RETURNING id`,
+          [personId, analysis.defekt_stweg, analysis.defekt_beschreibung.slice(0, 2000)],
+        );
+        reklamationId = ins.rows[0].id;
+        console.log(`[pbx-voicemail] Reklamation #${reklamationId} auto-erstellt (stweg=${analysis.defekt_stweg}, person=${personId})`);
+      } catch (rekErr) {
+        console.warn('[pbx-voicemail] Auto-Reklamation Fehler:', rekErr.message);
+      }
     }
 
-    // WhatsApp-Group "Rosenweg Technik": Audio + Transkript + Zusammenfassung
+    // WhatsApp-Group "Rosenweg Technik": Audio + Transkript + Zusammenfassung + ggf. Reklamation-Link
     try {
       const groupId = await resolveTechnikWhatsappGroupId();
       if (groupId) {
+        const summaryLine = analysis.summary ? `*Zusammenfassung:* ${analysis.summary}` : null;
+        const urgLine = analysis.urgency ? `*Dringlichkeit:* ${analysis.urgency}` : null;
+        const actLine = analysis.action ? `*Naechster Schritt:* ${analysis.action}` : null;
+        const rekLine = reklamationId
+          ? `✅ *Auto-Reklamation #${reklamationId} erstellt* (STWEG ${analysis.defekt_stweg || '—'})\n${SITE_URL}/reklamationen.html#${reklamationId}`
+          : null;
         const waBody = [
           `📞 *Voicemail* von ${callerId}`,
           `🕒 ${new Date().toLocaleString('de-CH')}`,
-          '',
-          summary ? `*Zusammenfassung:*\n${summary}` : null,
-          transcript ? `*Transkript:*\n${transcript}` : '(keine Transkription verfuegbar)',
+          summaryLine,
+          urgLine,
+          actLine,
+          rekLine,
+          transcript ? `*Transkript:*\n${transcript}` : null,
         ].filter(Boolean).join('\n\n').slice(0, 3500);
         await queueWhatsappMessage({
           chatId: groupId,
@@ -12813,22 +12836,23 @@ app.post('/api/pbx/voicemail', requirePbxSecret, async (req, res) => {
             filename: `voicemail-${callerId}-${uniqueid}.wav`,
           }],
           sourceType: 'pbx-voicemail',
-          sourceId: uniqueid,
+          sourceId: String(reklamationId || uniqueid),
         });
         console.log(`[pbx-voicemail] WA an Gruppe ${groupId} gequeued`);
       } else {
-        // Fallback: Opt-In Broadcast an Admin-Einzelnutzer (Text-only, kein Audio)
-        pushWhatsappBroadcast({
-          emails: adminEmails,
-          sourceType: 'pbx-voicemail',
-          body: `📞 *Voicemail* von ${callerId}\n${summary ? summary.split('\n').slice(0,2).join('\n') : (transcript ? transcript.slice(0, 200) : '(keine Transkription)')}\n\n(Gruppe "Rosenweg Technik" nicht gefunden — Details per Email.)`,
-        }).catch(() => {});
+        console.warn('[pbx-voicemail] WA-Group "Rosenweg Technik" nicht gefunden — Voicemail bleibt in DB');
       }
     } catch (waErr) {
       console.warn('[pbx-voicemail] WA-Send-Fehler:', waErr.message);
     }
 
-    res.json({ ok: true, transcript_len: transcript.length, summary_present: !!summary });
+    res.json({
+      ok: true,
+      transcript_len: transcript.length,
+      summary_present: !!analysis.summary,
+      defekt: analysis.is_defekt,
+      reklamation_id: reklamationId,
+    });
   } catch (err) {
     console.error('[pbx-voicemail] error:', err);
     res.status(500).json({ error: err.message });
