@@ -104,13 +104,11 @@
   function openVpnModal() {
     const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5">
-        <h2 class="font-bold mb-3">Neues VPN-Konto</h2>
+        <h2 class="font-bold mb-3">Neues WireGuard-Konto</h2>
+        <p class="text-xs text-gray-500 mb-3">Konto wird automatisch generiert (Server-seitig Private-Key + IP). Public-Key nur fuer eigenes Geraet ausfuellen, sonst leer lassen.</p>
         <div class="space-y-2 text-sm">
-          <div><label class="block text-xs text-gray-600">Backend</label><select id="v-backend" class="w-full border rounded px-2 py-1">
-            <option value="wireguard">WireGuard</option><option value="netbird">Netbird</option><option value="tailscale">Tailscale</option>
-          </select></div>
-          <div><label class="block text-xs text-gray-600">Public-Key <span class="text-gray-400">(WireGuard, optional)</span></label><textarea id="v-pub" rows="2" class="w-full border rounded px-2 py-1 font-mono text-xs"></textarea></div>
-          <div><label class="block text-xs text-gray-600">Notizen</label><input id="v-notiz" class="w-full border rounded px-2 py-1"></div>
+          <div><label class="block text-xs text-gray-600">Public-Key <span class="text-gray-400">(optional)</span></label><textarea id="v-pub" rows="2" class="w-full border rounded px-2 py-1 font-mono text-xs" placeholder="z.B. xTI...= (sonst leer)"></textarea></div>
+          <div><label class="block text-xs text-gray-600">Notizen</label><input id="v-notiz" class="w-full border rounded px-2 py-1" placeholder="z.B. Laptop privat"></div>
         </div>
         <div class="flex justify-end gap-2 mt-3">
           <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Abbrechen</button>
@@ -121,7 +119,7 @@
   }
   async function saveVpn() {
     const body = {
-      backend: document.getElementById('v-backend').value,
+      backend: 'wireguard',
       public_key: document.getElementById('v-pub').value.trim() || null,
       notizen: document.getElementById('v-notiz').value || null,
     };
