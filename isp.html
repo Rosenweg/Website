@@ -29,17 +29,6 @@
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
-        <!-- Wartungshinweis -->
-        <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex items-start gap-3">
-            <svg class="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/>
-            </svg>
-            <div>
-                <p class="text-sm font-semibold text-amber-800">Geplante Wartung: Freitag 03.04.2026, 02:00 – 02:30 Uhr</p>
-                <p class="text-xs text-amber-700 mt-1">Neustart des Netzwerk-Gateways (UDM-Pro) zur Aktivierung von TV7 (IPTV). Kurzer Unterbruch des Internets und WLANs für ca. 5–10 Minuten.</p>
-            </div>
-        </div>
-
         <!-- Info -->
         <div class="bg-white rounded-xl shadow-sm border p-6 mb-8">
             <h2 class="text-lg font-semibold text-gray-900 mb-3">Internet-Anschluss</h2>
@@ -102,8 +91,28 @@
                     </div>
                     <h2 class="text-lg font-semibold text-gray-900">Mein Zugang</h2>
                 </div>
-                <p class="text-sm text-gray-600">VPN-Konfiguration, eigene VLAN-Antraege, Reverse-Proxy-Routen.</p>
+                <p class="text-sm text-gray-600">VPN, VLANs, Reverse-Proxy, eigene Mail-Domain via PMG filtern.</p>
             </a>
+
+            <!-- Mailserver-Status (alle User) -->
+            <div class="bg-white rounded-xl shadow-sm border p-6 sm:col-span-2 lg:col-span-3">
+                <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
+                    <h2 class="text-lg font-semibold text-gray-900 flex items-center gap-2">✉ Mailserver-Dienste</h2>
+                    <a href="/dmarc.html" class="text-xs text-blue-600 hover:underline">DMARC-Reports →</a>
+                </div>
+                <div class="grid sm:grid-cols-2 gap-3 text-sm">
+                    <div class="bg-emerald-50 border border-emerald-200 rounded p-3">
+                        <p class="font-semibold text-emerald-900 flex items-center gap-2">🛡 PMG (Filter-Relay) <span class="text-xs bg-emerald-600 text-white px-2 py-0.5 rounded">live</span></p>
+                        <p class="text-xs text-emerald-800 mt-1">Proxmox Mail Gateway 8.2.11 — Spam-/Virus-Filter fuer alle registrierten Domains, leitet an deinen eigenen Mailserver weiter.</p>
+                        <p class="text-xs mt-1">MX: <code class="bg-white px-1 rounded">pmg.rosenweg4303.ch</code> · <a href="/isp-mein-zugang.html#mail" class="underline">Eigene Domain registrieren</a></p>
+                    </div>
+                    <div class="bg-blue-50 border border-blue-200 rounded p-3" id="mailcow-card">
+                        <p class="font-semibold text-blue-900 flex items-center gap-2">📬 Mailcow (Vollstack rosenweg9.ch) <span id="mailcow-card-badge" class="text-xs bg-amber-500 text-white px-2 py-0.5 rounded">in Setup</span></p>
+                        <p class="text-xs text-blue-800 mt-1">Postfaecher fuer <code class="bg-white px-1 rounded">rosenweg9.ch</code>: SOGo Webmail, IMAP/SMTP, DKIM/DMARC out-of-the-box.</p>
+                        <p class="text-xs mt-1">Host: <code class="bg-white px-1 rounded">mailcow.rosenweg9.ch</code></p>
+                    </div>
+                </div>
+            </div>
 
             <!-- Netzwerk-Status (Admin) -->
             <div id="admin-cards" class="contents hidden">
@@ -197,6 +206,17 @@
             } catch (err) { console.warn('Mein Anschluss:', err.message); }
         }
         document.addEventListener('DOMContentLoaded', loadMeinAnschluss);
+
+        // Mailcow Live-Check
+        (async () => {
+          try {
+            const ctrl = new AbortController();
+            setTimeout(() => ctrl.abort(), 4000);
+            await fetch('https://mailcow.rosenweg9.ch/api/v1/get/status/version', { signal: ctrl.signal, mode: 'no-cors' });
+            const b = document.getElementById('mailcow-card-badge');
+            if (b) { b.textContent = 'live'; b.className = 'text-xs bg-emerald-600 text-white px-2 py-0.5 rounded'; }
+          } catch {}
+        })();
     </script>
 </body>
 </html>
