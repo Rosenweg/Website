@@ -349,6 +349,37 @@ services:
   # nach /etc/asterisk/ im LXC deployed. Siehe pbx/README.md.
 
   # ============================================
+  # Shelly Pro 3EM Emulator (PV-Ueberschuss Rosenweg 9)
+  # Emuliert ein virtuelles Shelly-Geraet das die zwei PV-Ueberschuss-
+  # Datenpunkte als Phase-Leistungen ausspielt. mDNS-Announce fuer
+  # Auto-Discovery in der Shelly-App.
+  # ============================================
+  shelly-emulator:
+    image: ghcr.io/rosenweg/shelly-emulator:latest
+    environment:
+      BACKEND_URL: "https://energy.rosenweg4303.ch/api/energy/shelly"
+      POLL_MS: "10000"
+      ENERGY_GROUP: "r9"
+      SHELLY_HOSTNAME: "shellypvrosenweg9"
+      PORT: "8089"
+    ports:
+      - target: 8089
+        published: 8089
+        mode: host
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.hostname == docker-pve1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+      labels:
+        - "shepherd.enable=true"
+
+  # ============================================
   syslog-collector:
     image: ghcr.io/rosenweg/syslog-collector:latest
     environment:

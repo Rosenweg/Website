@@ -1299,6 +1299,41 @@ app.get('/api/energy/lametric', openCors, async (req, res) => {
   }
 });
 
+// ─── Shelly virtual device endpoint ─────────────────────────────────
+// Liefert die zwei PV-Ueberschuss-Werte (mit + ohne Boiler) in einem
+// kompakten JSON, optimiert fuer:
+//   - Variante A: mJS-Script auf einem Shelly Plus/Pro, das das alle 30s
+//     pollt und Virtual-Number-Components updated
+//   - Variante B: standalone Shelly-Emulator-Service der das als virtuelles
+//     Energiemessgeraet ausspielt
+// CORS offen damit der Shelly direkt zugreifen kann.
+app.options('/api/energy/shelly', openCors);
+app.get('/api/energy/shelly', openCors, async (req, res) => {
+  try {
+    const group = req.query.group || 'r9';
+    const data = await getGroupLiveData(group);
+    if (data.grid_w === null) return res.status(503).json({ error: 'No live data' });
+    const surplus_w = Math.max(0, -data.grid_w);
+    const heizstab_w = data.heizstab_w || 0;
+    const surplus_available_w = surplus_w + heizstab_w;
+    res.json({
+      group,
+      timestamp: new Date().toISOString(),
+      // Hauptwerte fuer Shelly-Virtual-Components
+      surplus_without_boiler_w: surplus_w,
+      surplus_with_boiler_w: surplus_available_w,
+      // Zusatz-Werte fuer mehr Komfort
+      production_w: data.production_w || 0,
+      consumption_w: data.consumption_w || 0,
+      grid_w: data.grid_w,
+      heizstab_w,
+      battery_soc: data.battery_soc != null ? data.battery_soc : null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Comparison endpoint ────────────────────────────────────────────
 app.get('/api/energy/compare', async (req, res) => {
   try {
