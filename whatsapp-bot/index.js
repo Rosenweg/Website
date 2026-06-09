@@ -233,11 +233,13 @@ async function pollOutbox() {
           body: JSON.stringify({ message_id: m.id, status: 'sent' }),
         });
       } catch (err) {
-        console.error(`[WA] Send fehler msg=${m.id}:`, err.message);
+        // err.message kann bei whatsapp-web.js single-char sein; stack mitloggen
+        const detailedErr = err.stack || `${err.name || ''}: ${err.message || ''}` || String(err);
+        console.error(`[WA] Send fehler msg=${m.id} (chatId=${chatId}):`, detailedErr.slice(0, 1500));
         await fetch(`${API_BASE}/api/whatsapp/status`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-WA-Secret': WA_SECRET },
-          body: JSON.stringify({ message_id: m.id, status: 'failed', error_message: String(err.message).slice(0, 500) }),
+          body: JSON.stringify({ message_id: m.id, status: 'failed', error_message: detailedErr.slice(0, 500) }),
         }).catch(() => {});
       }
     }
