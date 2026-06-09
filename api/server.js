@@ -14297,11 +14297,19 @@ app.post('/api/isp/vlan-requests', authMiddleware, async (req, res) => {
   try {
     const b = req.body || {};
     if (!b.zweck) return res.status(400).json({ error: 'zweck Pflicht (wofuer wird das VLAN gebraucht)' });
+    // User-Wahl validieren: wohnung_id muss zu eigenen Einheiten gehoeren (Admin darf alles)
+    let wohnungId = b.wohnung_id || null;
+    if (wohnungId && !ispIsAdmin(req)) {
+      const ownOpts = await getUserVlanOptions(req.user.email);
+      if (!ownOpts.some(o => o.wohnung_id === parseInt(wohnungId, 10))) {
+        return res.status(403).json({ error: 'Dieses Objekt gehoert nicht zu deinen zugewiesenen Einheiten' });
+      }
+    }
     const r = await pool.query(
       `INSERT INTO isp_vlan_requests (antragsteller_email, wohnung_id, zweck, gewuenschter_name,
                                        gewuenschte_groesse, geraete_anzahl, internet_zugriff, andere_vlans_zugriff)
        VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,true),COALESCE($8,false)) RETURNING *`,
-      [req.user.email, b.wohnung_id || null, b.zweck, b.gewuenschter_name || null,
+      [req.user.email, wohnungId, b.zweck, b.gewuenschter_name || null,
        b.gewuenschte_groesse || null, b.geraete_anzahl || null, b.internet_zugriff, b.andere_vlans_zugriff],
     );
     res.json(r.rows[0]);
@@ -14343,9 +14351,19 @@ app.get('/api/isp/vlan-requests/:id/suggest', authMiddleware, async (req, res) =
     const e = await pool.query('SELECT * FROM isp_vlan_requests WHERE id = $1', [id]);
     if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = e.rows[0];
-    // Haus aus User-Wohnung ableiten (Wohnung > Hobbyraum > Parkplatz Priorität)
-    const opts = await getUserVlanOptions(v.antragsteller_email);
-    const home = opts.find(o => o.kind === 'wohnung') || opts[0];
+    // 1. Wenn Antragsteller eine wohnung_id explizit angegeben hat, diese verwenden
+    let home = null;
+    if (v.wohnung_id) {
+      const wq = await pool.query('SELECT id AS wohnung_id, bezeichnung, stweg FROM wohnungen WHERE id = $1', [v.wohnung_id]);
+      if (wq.rows.length > 0) {
+        home = { ...wq.rows[0], ...classifyVpnEntry(wq.rows[0].bezeichnung) };
+      }
+    }
+    // 2. Fallback: erste verfuegbare User-Wohnung (Wohnung > Hobbyraum > Parkplatz)
+    if (!home) {
+      const opts = await getUserVlanOptions(v.antragsteller_email);
+      home = opts.find(o => o.kind === 'wohnung') || opts[0];
+    }
     if (!home) return res.status(400).json({ error: 'Antragsteller hat keine zugewiesene Haus-Einheit' });
     const hausNr = vpnRwFromBezeichnung(home.bezeichnung);
     if (!hausNr) return res.status(400).json({ error: `Haus-Nummer aus "${home.bezeichnung}" nicht ermittelbar` });

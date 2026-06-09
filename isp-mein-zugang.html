@@ -246,7 +246,22 @@
         </div>
       </div>`).join('');
   }
-  function openVlanModal() {
+  async function openVlanModal() {
+    let opts = [];
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/vpn-accounts/options');
+      if (r.ok) opts = (await r.json()).options || [];
+    } catch {}
+    const kindIcon = { wohnung: '🏠', hobbyraum: '🔧', parkplatz: '🅿️' };
+    const kindLabel = { wohnung: 'Wohnung', hobbyraum: 'Hobbyraum', parkplatz: 'Parkplatz' };
+    const optHtml = opts.length === 0
+      ? `<p class="text-xs text-red-600 italic">Keine zugewiesene Einheit gefunden. Bitte Verwalter kontaktieren.</p>`
+      : `<div><label class="block text-xs text-gray-600">Objekt-Zuordnung *</label>
+          <select id="vl-wohnung" class="w-full border rounded px-2 py-1">
+            ${opts.map((o,i) => `<option value="${o.wohnung_id}" data-haus="${o.kind==='wohnung'?(o.vlan/10|0):''}"${i===0?' selected':''}>${kindIcon[o.kind]||''} ${esc(o.bezeichnung)} — ${kindLabel[o.kind]||o.kind}</option>`).join('')}
+          </select>
+          <p class="text-xs text-gray-500 mt-1">VLAN-ID wird im Schema dieses Objekts vergeben.</p>
+        </div>`;
     const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5 max-h-[90vh] overflow-y-auto">
         <h2 class="font-bold mb-3">VLAN beantragen</h2>
@@ -260,6 +275,7 @@
           <p class="text-blue-700 mt-1 italic">Genaue ID weist Technik bei der Genehmigung nach naechstem freiem Slot zu.</p>
         </div>
         <div class="space-y-2 text-sm">
+          ${optHtml}
           <div><label class="block text-xs text-gray-600">Wunsch-Name</label><input id="vl-name" placeholder="z.B. Smart-Home" class="w-full border rounded px-2 py-1"></div>
           <div><label class="block text-xs text-gray-600">Zweck *</label><textarea id="vl-zweck" rows="3" placeholder="Wofuer wird das VLAN gebraucht?" class="w-full border rounded px-2 py-1"></textarea></div>
           <div class="grid grid-cols-2 gap-2">
@@ -279,7 +295,9 @@
     document.body.insertAdjacentHTML('beforeend', html);
   }
   async function saveVlan() {
+    const wohnungEl = document.getElementById('vl-wohnung');
     const body = {
+      wohnung_id: wohnungEl ? parseInt(wohnungEl.value, 10) || null : null,
       gewuenschter_name: document.getElementById('vl-name').value || null,
       zweck: document.getElementById('vl-zweck').value.trim(),
       gewuenschte_groesse: document.getElementById('vl-grosse').value || null,
