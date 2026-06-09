@@ -105,8 +105,21 @@
         <div class="text-xs text-gray-500 mt-1">Letzter Connect: ${fmtDt(v.last_connect_at)}</div>
       </div>`).join('');
   }
+  async function loadQrIntoImg(id, imgId) {
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/vpn-accounts/' + id + '/qr');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const blob = await r.blob();
+      const img = document.getElementById(imgId);
+      if (img) img.src = URL.createObjectURL(blob);
+    } catch (e) {
+      const img = document.getElementById(imgId);
+      if (img) img.outerHTML = `<p class="text-xs text-red-600">QR-Code konnte nicht geladen werden (${esc(e.message)})</p>`;
+    }
+  }
   function showCreatedConfig(v) {
     const cfg = v.config || '';
+    const qrImgId = 'qr-img-' + v.id + '-' + Math.random().toString(36).slice(2, 8);
     const modal = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-2xl w-full p-5 max-h-[90vh] overflow-y-auto">
         <h2 class="font-bold mb-2">VPN-Konto — IP ${esc(v.assigned_ip || '?')}${v.vlan ? ' (VLAN ' + v.vlan + ')' : ''}</h2>
@@ -121,7 +134,7 @@
           </div>
           <div class="text-center">
             <label class="block text-xs text-gray-600 mb-1">QR-Code fuer Mobile-App</label>
-            <img src="/api/isp/vpn-accounts/${v.id}/qr" alt="QR" class="inline-block border rounded max-w-full">
+            <img id="${qrImgId}" alt="QR" class="inline-block border rounded max-w-full" style="min-width:160px;min-height:160px;background:#f9fafb">
             <p class="text-xs text-gray-500 mt-2">Im WireGuard-App: "Aus QR-Code hinzufuegen"</p>
           </div>
         </div>
@@ -130,6 +143,7 @@
         </div>
       </div></div>`;
     document.body.insertAdjacentHTML('beforeend', modal);
+    loadQrIntoImg(v.id, qrImgId);
   }
   async function showVpnConfig(id) {
     const r = await AuthentikAuth.apiFetch('/api/isp/vpn-accounts/' + id + '/config');
@@ -139,13 +153,15 @@
     showCreatedConfig({ ...v, config: cfg });
   }
   function showVpnQr(id) {
+    const qrImgId = 'qr-img-' + id + '-' + Math.random().toString(36).slice(2, 8);
     const modal = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl p-5 text-center">
         <h2 class="font-bold mb-3">QR-Code</h2>
-        <img src="/api/isp/vpn-accounts/${id}/qr" alt="QR" class="border rounded">
+        <img id="${qrImgId}" alt="QR" class="border rounded" style="min-width:200px;min-height:200px;background:#f9fafb">
         <button onclick="this.closest('.fixed').remove()" class="mt-3 bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Schliessen</button>
       </div></div>`;
     document.body.insertAdjacentHTML('beforeend', modal);
+    loadQrIntoImg(id, qrImgId);
   }
   async function openVpnModal() {
     let opts = [];
