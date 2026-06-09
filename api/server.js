@@ -12848,7 +12848,8 @@ app.post('/api/pbx/voicemail', requirePbxSecret, async (req, res) => {
             filename: `voicemail-${callerId}-${uniqueid}.wav`,
           }],
           sourceType: 'pbx-voicemail',
-          sourceId: String(reklamationId || uniqueid),
+          // source_id ist INT — reklamationId nutzen falls vorhanden, sonst null
+          sourceId: reklamationId || null,
         });
         console.log(`[pbx-voicemail] WA an Gruppe ${groupId} gequeued`);
       } else {
