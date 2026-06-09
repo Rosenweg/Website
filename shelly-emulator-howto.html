@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DIY: Virtuelles Shelly Pro 3EM bauen</title>
+  <meta name="description" content="Anleitung: ein eigenes virtuelles Shelly-Energiemessgerät auf einem kleinen Linux-Server oder Raspberry Pi bauen, das beliebige Datenquellen als Shelly-Gerät im Heimnetz anbietet.">
+  <link rel="icon" href="/logo-rosenweg.png">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/nav.js?v=2"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    pre { font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace; }
+    .copy-btn { transition: background-color 0.15s; }
+    .copy-btn:active { background-color: #10b981; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+  <script>RosenwegNav.init({ active: 'isp' });</script>
+
+  <section class="bg-gradient-to-r from-indigo-700 to-purple-800 text-white py-12">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+      <a href="/isp.html" class="text-indigo-200 hover:text-white text-sm">← ISP</a>
+      <h1 class="text-3xl sm:text-4xl font-bold mt-2">🔌 Bau dir dein eigenes virtuelles Shelly</h1>
+      <p class="mt-2 text-indigo-100 max-w-3xl">Schritt-für-Schritt: ein Linux-Container, Raspberry Pi oder VM verwandelt sich in ein virtuelles <strong>Shelly Pro 3EM</strong> Energiemessgerät, das beliebige Datenpunkte (PV-Überschuss, Wetterdaten, Verbrauch eines Geräts, …) als „echtes" Shelly im Netz anbietet. Andere Shellys, die Shelly Smart Control App und Home Assistant sehen es ganz normal.</p>
+    </div>
+  </section>
+
+  <main class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+
+    <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm">
+      <p class="font-semibold text-amber-900">⚠ Was das ist — und was nicht</p>
+      <p class="text-amber-800 mt-1">Das hier ist <strong>kein Hack</strong> der echten Shellys, sondern eine <em>Reimplementierung</em> der öffentlich dokumentierten Shelly-Gen2-RPC-API in Node.js. Andere Geräte / Apps fragen via HTTP nach Werten, du lieferst sie. Funktioniert komplett lokal, kein Cloud-Account nötig, kein Reverse-Engineering involviert.</p>
+    </div>
+
+    <!-- ─── Voraussetzungen ─── -->
+    <section class="bg-white rounded-xl shadow-sm border p-6">
+      <h2 class="text-xl font-semibold mb-3">📋 Was du brauchst</h2>
+      <ul class="space-y-2 text-sm">
+        <li>✅ <strong>Linux-Host</strong>: Raspberry Pi 3/4/5, alter Mini-PC, LXC-Container, VM, NAS-Docker — egal, Hauptsache Linux mit Internet</li>
+        <li>✅ <strong>Node.js ≥ 20</strong> (kommt in der Anleitung mit)</li>
+        <li>✅ <strong>Netzwerk im gleichen VLAN/Subnetz</strong> wie die Shellys oder Konsumenten (mDNS braucht Layer-2-Connectivity)</li>
+        <li>✅ <strong>Eine Datenquelle</strong> die als JSON erreichbar ist (Wallbox-API, Solar-Inverter, eigene Excel-Tabelle als Static-File, …)</li>
+        <li>🟡 Optional: 5-10 Minuten Geduld</li>
+      </ul>
+    </section>
+
+    <!-- ─── Architektur ─── -->
+    <section class="bg-white rounded-xl shadow-sm border p-6">
+      <h2 class="text-xl font-semibold mb-3">🧩 Wie es funktioniert</h2>
+      <pre class="bg-gray-900 text-green-300 p-4 rounded text-xs overflow-x-auto">
+   ┌────────────────────┐
+   │  deine Datenquelle │  z.B. Solar-API, Wallbox, Sensor
+   │  (liefert JSON)    │
+   └─────────┬──────────┘
+             │ HTTP-Poll (alle 10s)
+             ▼
+   ┌──────────────────────┐
+   │  emulator (Node.js)  │  ← läuft als systemd-Service
+   │  - /shelly           │
+   │  - /rpc/Shelly.*     │  ← Shelly Gen2 RPC API
+   │  - /rpc/EM.GetStatus │
+   │  - mDNS announce     │
+   └──────────┬───────────┘
+              │ /rpc/... (via HTTP)
+   ┌──────────┼──────────────────┐
+   ▼          ▼                  ▼
+ Shelly      Shelly         Home Assistant /
+ Smart       Pro/Plus       Node-RED / ioBroker
+ Control     mit Script     / eigene Tools</pre>
+      <p class="text-xs text-gray-600 mt-3">Das Gerät meldet sich via <strong>mDNS</strong> als <code class="bg-gray-100 px-1">_shelly._tcp.local</code> im Netz. Andere Shellys und die Smart Control App finden es automatisch (Voraussetzung: gleiches Layer-2-Netz, also kein Router/VLAN dazwischen).</p>
+    </section>
+
+    <!-- ─── Schritt 1: Source-Code ─── -->
+    <section class="bg-white rounded-xl shadow-sm border p-6">
+      <h2 class="text-xl font-semibold mb-3">1️⃣ Source-Code holen</h2>
+      <p class="text-sm mb-3">Wir nutzen die Implementierung aus dem Rosenweg-Repo (MIT-Lizenz, frei verwendbar). Komplett in JavaScript / Node.js, ein einziges File mit ~250 Zeilen plus eine Dependency.</p>
+      <div class="space-y-3">
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs font-medium text-gray-600">Auf deinem Server einloggen und:</span>
+            <button onclick="copyCode(this)" class="copy-btn text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded hover:bg-indigo-200">📋 Kopieren</button>
+          </div>
+          <pre class="bg-gray-900 text-gray-100 p-4 rounded text-xs overflow-x-auto"><code>mkdir -p /opt/shelly-emulator
+cd /opt/shelly-emulator
+
+# Source-Code von GitHub
+curl -fsSL https://raw.githubusercontent.com/Rosenweg/Website/main/shelly-emulator/src/index.js -o index.js
+curl -fsSL https://raw.githubusercontent.com/Rosenweg/Website/main/shelly-emulator/package.json -o package.json
+
+# Node.js installieren (falls noch nicht da)
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+apt-get install -y nodejs
+
+# Dependencies (nur bonjour-service fuer mDNS)
+npm install --omit=dev</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── Schritt 2: Datenquelle anpassen ─── -->
+    <section class="bg-white rounded-xl shadow-sm border p-6">
+      <h2 class="text-xl font-semibold mb-3">2️⃣ Datenquelle anpassen</h2>
+      <p class="text-sm mb-3">Der Emulator erwartet einen JSON-Endpoint der diese Felder liefert (alle in Watt):</p>
+      <pre class="bg-gray-900 text-gray-100 p-4 rounded text-xs overflow-x-auto"><code>{
+  "surplus_without_boiler_w": 1500,   // → Phase A
+  "surplus_with_boiler_w":    3200,   // → Phase B
+  "heizstab_w":                700    // → Phase C
+}</code></pre>
+      <p class="text-sm mt-3">Du brauchst <strong>nicht alle drei</strong> — die anderen werden zu 0. Beispiel-Endpoints für andere Use-Cases:</p>
+      <ul class="text-sm mt-2 space-y-1 list-disc list-inside text-gray-700">
+        <li>Solar-Inverter (z.B. Fronius, Huawei, SMA) hat oft eine <code class="bg-gray-100 px-1">/solar_api/...</code> JSON-API → kleines Mapping-Script davor</li>
+        <li>Wallbox (Easee, go-e, ABL) hat eine HTTP-API mit Leistung-Werten</li>
+        <li>Home-Assistant mit Template-Sensor und REST-Endpoint</li>
+        <li>Static-File auf einem Webserver wenn Werte konstant sind</li>
+      </ul>
+      <p class="text-sm mt-3">Du sagst dem Emulator wo deine Quelle ist via Environment-Variable <code class="bg-gray-100 px-1">BACKEND_URL</code>.</p>
+    </section>
+
+    <!-- ─── Schritt 3: systemd-Service ─── -->
+    <section class="bg-white rounded-xl shadow-sm border p-6">
+      <h2 class="text-xl font-semibold mb-3">3️⃣ systemd-Service einrichten</h2>
+      <p class="text-sm mb-3">Damit der Emulator automatisch beim Boot startet und nach Crash neu lädt:</p>
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-xs font-medium text-gray-600">Datei <code class="bg-gray-100 px-1">/etc/systemd/system/shelly-emulator.service</code>:</span>
+        <button onclick="copyCode(this)" class="copy-btn text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded hover:bg-indigo-200">📋 Kopieren</button>
+      </div>
+      <pre class="bg-gray-900 text-gray-100 p-4 rounded text-xs overflow-x-auto"><code>[Unit]
+Description=Virtual Shelly Pro 3EM Emulator
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/shelly-emulator
+
+# === HIER ANPASSEN ===
+Environment=PORT=80
+Environment=BACKEND_URL=https://example.com/api/dein-endpoint
+Environment=POLL_MS=10000
+Environment=SHELLY_HOSTNAME=shellyvirtual1
+
+ExecStart=/usr/bin/node /opt/shelly-emulator/index.js
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+      <p class="text-sm mt-3">Aktivieren:</p>
+      <pre class="bg-gray-900 text-gray-100 p-3 rounded text-xs overflow-x-auto mt-2"><code>systemctl daemon-reload
+systemctl enable --now shelly-emulator
+systemctl status shelly-emulator    # check ob er läuft</code></pre>
+    </section>
+
+    <!-- ─── Schritt 4: Verifizieren ─── -->
+    <section class="bg-white rounded-xl shadow-sm border p-6">
+      <h2 class="text-xl font-semibold mb-3">4️⃣ Verifizieren</h2>
+      <p class="text-sm mb-3">Vom Server selbst oder einem anderen Gerät im selben Netz:</p>
+      <pre class="bg-gray-900 text-gray-100 p-3 rounded text-xs overflow-x-auto"><code># Browser oder curl auf http://&lt;server-ip&gt;/
+curl http://192.168.1.50/rpc/Shelly.GetDeviceInfo
+# Erwartete Antwort:
+# {"name":"Rosenweg 9 PV-Ueberschuss (virtual)","model":"SPEM-003CEBEU",
+#  "gen":2,"fw_id":"20251015-1.4.4","ver":"1.4.4","app":"Pro3EM",...}
+
+curl http://192.168.1.50/rpc/EM.GetStatus?id=0
+# {"a_act_power": 1500, "b_act_power": 3200, "c_act_power": 700, ...}</code></pre>
+      <p class="text-sm mt-3">Wenn das funktioniert: <strong>Shelly Smart Control App</strong> öffnen → <em>Gerät hinzufügen</em> → <em>Im Netzwerk suchen</em>. Das virtuelle Gerät sollte erscheinen. Wenn nicht: manuell mit IP-Adresse hinzufügen.</p>
+    </section>
+
+    <!-- ─── Schritt 5: Benutzen ─── -->
+    <section class="bg-white rounded-xl shadow-sm border p-6">
+      <h2 class="text-xl font-semibold mb-3">5️⃣ Was du jetzt machen kannst</h2>
+      <ul class="text-sm space-y-2 list-disc list-inside text-gray-700">
+        <li>In der <strong>Shelly Smart Control App</strong> Scenes anlegen: <em>„wenn Phase A Power &gt; 1500 W für 5 min → Wallbox ein"</em></li>
+        <li>In <strong>Home Assistant</strong> die Shelly-Integration aktivieren — das virtuelle Gerät wird automatisch erkannt und liefert Sensor-Entitäten</li>
+        <li>In <strong>Node-RED</strong> einen Shelly-Node verwenden um auf Werte zu reagieren</li>
+        <li>In <strong>ioBroker</strong> als Shelly-Adapter hinzufügen für Visualisierung in VIS</li>
+        <li>Andere Shelly Plus/Pro-Geräte können via mJS-Script die Werte des virtuellen Geräts lesen (z.B. ein Shelly Plus 1PM steuert den Boiler basierend auf Überschuss)</li>
+      </ul>
+    </section>
+
+    <!-- ─── Troubleshooting ─── -->
+    <section class="bg-white rounded-xl shadow-sm border p-6">
+      <h2 class="text-xl font-semibold mb-3">🔧 Troubleshooting</h2>
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50">
+          <tr class="text-left text-xs uppercase text-gray-500"><th class="px-2 py-2">Symptom</th><th class="px-2 py-2">Ursache</th><th class="px-2 py-2">Fix</th></tr>
+        </thead>
+        <tbody class="divide-y">
+          <tr><td class="px-2 py-2">App findet Gerät nicht</td><td class="px-2 py-2">Anderes VLAN / Subnetz</td><td class="px-2 py-2">Server im gleichen Layer-2-Netz wie die Shellys betreiben; oder manuelle IP-Add</td></tr>
+          <tr><td class="px-2 py-2">Werte bleiben auf 0</td><td class="px-2 py-2">BACKEND_URL falsch oder Quelle down</td><td class="px-2 py-2"><code class="bg-gray-100 px-1">curl $BACKEND_URL</code> testen, Logs mit <code class="bg-gray-100 px-1">journalctl -u shelly-emulator -f</code></td></tr>
+          <tr><td class="px-2 py-2">Port 80 schon belegt</td><td class="px-2 py-2">Anderer Webserver läuft</td><td class="px-2 py-2">Environment <code class="bg-gray-100 px-1">PORT=8089</code> nutzen, App findet's trotzdem via mDNS</td></tr>
+          <tr><td class="px-2 py-2">Shelly-App zeigt „nicht erreichbar"</td><td class="px-2 py-2">Firewall blockt</td><td class="px-2 py-2">Port (default 80) öffnen, oder UFW/iptables prüfen</td></tr>
+          <tr><td class="px-2 py-2">mDNS-Announce fehlt</td><td class="px-2 py-2">Netzwerk-Modus „bridge" im Docker / kein L2</td><td class="px-2 py-2">Host-Network nutzen oder als LXC mit Bridge auf VLAN laufen lassen</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ─── Erweitern ─── -->
+    <section class="bg-white rounded-xl shadow-sm border p-6">
+      <h2 class="text-xl font-semibold mb-3">🚀 Eigene Datenpunkte einbauen</h2>
+      <p class="text-sm mb-3">Im <code class="bg-gray-100 px-1">index.js</code> ist die Phase-Belegung im <code class="bg-gray-100 px-1">rpcEmGetStatus()</code> definiert. Du kannst:</p>
+      <ul class="text-sm space-y-1 list-disc list-inside text-gray-700 mb-3">
+        <li>Phase A/B/C umbiegen auf andere Werte aus deinem JSON</li>
+        <li>Voltage / Frequency / PF anpassen (default: 230V / 50Hz / 1.0)</li>
+        <li>Mehrere virtuelle EM-Devices auf einem Server starten (verschiedene Ports + Hostnames)</li>
+        <li>Andere Shelly-Profile emulieren: <code class="bg-gray-100 px-1">SPSW-201X</code> für Switch, <code class="bg-gray-100 px-1">SHEM-3</code> für 3-Phasen-EM Gen1</li>
+      </ul>
+      <p class="text-sm">Vorlagen für andere Shelly-Modelle findest du in der <a href="https://shelly-api-docs.shelly.cloud" target="_blank" class="text-indigo-600 hover:underline">offiziellen Shelly-API-Dokumentation</a>.</p>
+    </section>
+
+    <!-- ─── Sicherheit ─── -->
+    <section class="bg-white rounded-xl shadow-sm border p-6 border-red-200 bg-red-50">
+      <h2 class="text-xl font-semibold mb-3 text-red-900">🛡 Sicherheits-Hinweise</h2>
+      <ul class="text-sm text-red-800 space-y-1 list-disc list-inside">
+        <li>Der Emulator hat <strong>keine Authentifizierung</strong> — jeder im Netz kann die Werte lesen. Bei sensiblen Daten: vor das Gerät einen Reverse-Proxy mit Auth setzen, oder im strikten IoT-VLAN ohne Internet halten.</li>
+        <li><strong>Niemals direkt ins Internet</strong> stellen. Wenn Remote-Zugriff nötig: VPN nutzen.</li>
+        <li>Die <code class="bg-gray-100 px-1">BACKEND_URL</code> kann Secrets enthalten — Service-Datei nur mit <code class="bg-gray-100 px-1">chmod 600</code> lesbar machen.</li>
+        <li>Wenn du Cloud-Anbindung an Shelly Cloud willst: das geht nur wenn du die echte Shelly-Cloud-Authentifizierung implementierst (komplex). Standalone funktioniert problemlos.</li>
+      </ul>
+    </section>
+
+    <!-- ─── Lizenz ─── -->
+    <section class="bg-white rounded-xl shadow-sm border p-6">
+      <h2 class="text-xl font-semibold mb-3">📜 Lizenz & Quelle</h2>
+      <p class="text-sm">Source-Code: <a href="https://github.com/Rosenweg/Website/tree/main/shelly-emulator" target="_blank" class="text-indigo-600 hover:underline">github.com/Rosenweg/Website/tree/main/shelly-emulator</a> · MIT-Lizenz · Issues und Pull-Requests willkommen.</p>
+      <p class="text-sm mt-2 text-gray-600">Gebaut von der STWEG-Kooperation Rosenweg in Kaiseraugst. Wenn dir die Anleitung geholfen hat: einen Link zu uns setzen oder eine Postkarte schicken freut uns.</p>
+    </section>
+
+  </main>
+
+  <footer class="bg-gray-800 text-white text-center py-4 text-sm">
+    <a href="/isp.html" class="text-indigo-300 hover:text-white">← zurück zur ISP-Seite</a>
+  </footer>
+
+  <script>
+    function copyCode(btn) {
+      const pre = btn.closest('section').querySelector('pre');
+      const text = pre.innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        const orig = btn.innerText;
+        btn.innerText = '✓ Kopiert';
+        setTimeout(() => { btn.innerText = orig; }, 1500);
+      });
+    }
+  </script>
+</body>
+</html>
