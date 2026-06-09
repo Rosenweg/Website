@@ -305,9 +305,23 @@
       </div>`).join('');
   }
   async function vlanApprove(id) {
-    const vlanId = prompt('VLAN-ID zuweisen:');
+    // Vorschlag nach Schema <HausNr><NN> holen
+    let suggested = '', reasoning = '';
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/vlan-requests/' + id + '/suggest');
+      if (r.ok) {
+        const s = await r.json();
+        suggested = String(s.suggested_vlan_id || '');
+        reasoning = s.reasoning || '';
+      } else {
+        const err = await r.json().catch(() => ({}));
+        if (err.error) reasoning = '⚠ Auto-Vorschlag fehlgeschlagen: ' + err.error;
+      }
+    } catch {}
+    const promptLabel = reasoning ? reasoning + '\n\nVLAN-ID zuweisen:' : 'VLAN-ID zuweisen:';
+    const vlanId = prompt(promptLabel, suggested);
     if (!vlanId) return;
-    const subnet = prompt('Subnet (CIDR, z.B. 10.0.50.0/28):');
+    const subnet = prompt('Subnet (CIDR, z.B. 10.0.50.0/28) — leer fuer VLAN-only:', '');
     await AuthentikAuth.apiFetch('/api/isp/vlan-requests/' + id, {
       method: 'PUT', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ status: 'approved', vlan_id: parseInt(vlanId, 10), subnet_v4: subnet || null }),

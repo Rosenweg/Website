@@ -14334,6 +14334,43 @@ app.put('/api/isp/vlan-requests/:id', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Vorschlag fuer naechste freie VLAN-ID nach Schema <HausNr><NN>
+// Schema: docs/unifi.md — RW9 Bewohner -> 9XX (z.B. 911), RW18 -> 18XX (z.B. 1803)
+app.get('/api/isp/vlan-requests/:id/suggest', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Admin' });
+    const id = parseInt(req.params.id, 10);
+    const e = await pool.query('SELECT * FROM isp_vlan_requests WHERE id = $1', [id]);
+    if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = e.rows[0];
+    // Haus aus User-Wohnung ableiten (Wohnung > Hobbyraum > Parkplatz Priorität)
+    const opts = await getUserVlanOptions(v.antragsteller_email);
+    const home = opts.find(o => o.kind === 'wohnung') || opts[0];
+    if (!home) return res.status(400).json({ error: 'Antragsteller hat keine zugewiesene Haus-Einheit' });
+    const hausNr = vpnRwFromBezeichnung(home.bezeichnung);
+    if (!hausNr) return res.status(400).json({ error: `Haus-Nummer aus "${home.bezeichnung}" nicht ermittelbar` });
+    // Verwendete VLAN-IDs aus DB (approved + deployed)
+    const used = await pool.query(
+      "SELECT vlan_id FROM isp_vlan_requests WHERE vlan_id IS NOT NULL AND status IN ('approved','deployed')"
+    );
+    const usedSet = new Set(used.rows.map(r => r.vlan_id));
+    // Iteriere <Haus>01 .. <Haus>99 (z.B. 901..999 fuer RW9, 1801..1899 fuer RW18)
+    const hausStr = String(hausNr);
+    for (let seq = 1; seq <= 99; seq++) {
+      const candidate = parseInt(hausStr + String(seq).padStart(2, '0'), 10);
+      if (!usedSet.has(candidate)) {
+        return res.json({
+          haus: hausNr,
+          haus_bezeichnung: home.bezeichnung,
+          suggested_vlan_id: candidate,
+          reasoning: `Schema <HausNr><NN>: naechste freie ID fuer RW${hausNr} = ${candidate}`,
+        });
+      }
+    }
+    res.status(409).json({ error: `Keine freie VLAN-ID im RW${hausNr}-Bereich (alle 01-99 belegt)` });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.delete('/api/isp/vlan-requests/:id', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);

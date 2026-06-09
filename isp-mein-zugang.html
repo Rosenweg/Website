@@ -250,6 +250,15 @@
     const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5 max-h-[90vh] overflow-y-auto">
         <h2 class="font-bold mb-3">VLAN beantragen</h2>
+        <div class="bg-blue-50 border border-blue-200 rounded p-3 mb-3 text-xs">
+          <p class="font-semibold text-blue-900 mb-1">📋 Numerierungs-Schema</p>
+          <p class="text-blue-800">Bewohner-VLANs werden nach <code class="bg-white px-1 rounded">&lt;HausNr&gt;&lt;NN&gt;</code> vergeben:</p>
+          <ul class="text-blue-800 mt-1 list-disc ml-4">
+            <li>RW9 → 901-999 (z.B. 911, 912, ...)</li>
+            <li>RW13 → 1301-1399, RW18 → 1801-1899</li>
+          </ul>
+          <p class="text-blue-700 mt-1 italic">Genaue ID weist Technik bei der Genehmigung nach naechstem freiem Slot zu.</p>
+        </div>
         <div class="space-y-2 text-sm">
           <div><label class="block text-xs text-gray-600">Wunsch-Name</label><input id="vl-name" placeholder="z.B. Smart-Home" class="w-full border rounded px-2 py-1"></div>
           <div><label class="block text-xs text-gray-600">Zweck *</label><textarea id="vl-zweck" rows="3" placeholder="Wofuer wird das VLAN gebraucht?" class="w-full border rounded px-2 py-1"></textarea></div>
