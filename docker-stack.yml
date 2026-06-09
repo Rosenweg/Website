@@ -140,7 +140,7 @@ services:
       PVE_API_URL: https://100.64.2.20:8006
       PVE_API_TOKEN: "${PVE_API_TOKEN}"
       DOCS_PATH: /documents
-      WG_CONTROL_URL: "${WG_CONTROL_URL:-http://100.64.2.29:3001}"
+      WG_CONTROL_URL: "${WG_CONTROL_URL:-http://100.64.2.34:3001}"
       WG_CONTROL_TOKEN: "${WG_CONTROL_TOKEN}"
     volumes:
       - rosenweg-documents:/documents

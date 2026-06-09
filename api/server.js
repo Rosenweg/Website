@@ -14059,10 +14059,10 @@ app.delete('/api/isp/fixed-ips/:id', authMiddleware, async (req, res) => {
 // === VPN-Konten ===
 //
 // VPN-Backend: kleiner Steuerdienst `wg-control` auf der vpn-wg-LXC
-// (100.64.2.29:3001). Erzeugt Peer-Keypair, hängt ihn in wg0 ein,
+// (CT 113, 100.64.2.34:3001). Erzeugt Peer-Keypair, hängt ihn in wg0 ein,
 // macht per-Peer-NAT in das Heim-VLAN des Users und liefert die
 // fertige Client-.conf + QR-Code zurück.
-const WG_CONTROL_URL   = process.env.WG_CONTROL_URL   || 'http://100.64.2.29:3001';
+const WG_CONTROL_URL   = process.env.WG_CONTROL_URL   || 'http://100.64.2.34:3001';
 const WG_CONTROL_TOKEN = process.env.WG_CONTROL_TOKEN || '';
 
 async function wgControl(method, path, body) {
