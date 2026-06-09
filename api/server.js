@@ -8737,7 +8737,7 @@ Antworte AUSSCHLIESSLICH mit gueltigem JSON, keine Markdown-Codebloecke, kein er
 Schema:
 {
   "tracking": string|null,    // Volle Tracking-Nr unter dem Barcode, Format "98.01.018499.705XXXXX". 8 Ziffern beginnend mit 705.
-  "empfaenger": string|null,  // Vollstaendiger Empfaenger-Name (Person ODER Firma), z.B. "Roland Britt" oder "Ulrich Brueckner & Christine Brueckner" oder "Peker Holding AG"
+  "empfaenger": string|null,  // Vollstaendiger Empfaenger-Name (Person ODER Firma), z.B. "Roland Britt" oder "Ulrich Brueckner & Christine Brueckner" oder "Mehmet Peker AG"
   "strasse": string|null,
   "plz": string|null,
   "ort": string|null
@@ -14057,6 +14057,66 @@ app.delete('/api/isp/fixed-ips/:id', authMiddleware, async (req, res) => {
 });
 
 // === VPN-Konten ===
+//
+// VPN-Backend: kleiner Steuerdienst `wg-control` auf der vpn-wg-LXC
+// (100.64.2.29:3001). Erzeugt Peer-Keypair, hängt ihn in wg0 ein,
+// macht per-Peer-NAT in das Heim-VLAN des Users und liefert die
+// fertige Client-.conf + QR-Code zurück.
+const WG_CONTROL_URL   = process.env.WG_CONTROL_URL   || 'http://100.64.2.29:3001';
+const WG_CONTROL_TOKEN = process.env.WG_CONTROL_TOKEN || '';
+
+async function wgControl(method, path, body) {
+  const r = await fetch(WG_CONTROL_URL + path, {
+    method,
+    headers: {
+      'Authorization': 'Bearer ' + WG_CONTROL_TOKEN,
+      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!r.ok) {
+    const txt = await r.text().catch(() => '');
+    const e = new Error(`wg-control ${method} ${path} -> ${r.status}: ${txt}`);
+    e.status = r.status >= 500 ? 502 : r.status;
+    throw e;
+  }
+  return r;
+}
+
+// Rosenweg-Nr → VLAN (synchron mit /opt/wg-control/server.js)
+const VPN_RW_TO_VLAN = {1:19,2:29,4:49,5:59,6:69,8:89,9:99,10:109,12:129,13:139,14:149,16:169,17:179,18:189};
+function vpnRwFromBezeichnung(bez) {
+  if (!bez) return null;
+  let m = bez.match(/^RW(\d+)/i);
+  if (m) return parseInt(m[1], 10);
+  m = bez.match(/^(\d+)[\.\-]/);
+  if (m) return parseInt(m[1], 10);
+  m = bez.match(/^(\d{2})(\d{2})$/);
+  if (m) { const rw = parseInt(m[1], 10); if (rw >= 10 && rw <= 18) return rw; }
+  return null;
+}
+async function resolveHomeVlanForEmail(email) {
+  if (!email) return null;
+  const r = await pool.query(
+    `SELECT w.bezeichnung
+       FROM wohnungen_kontakte wk
+       JOIN wohnungen w ON w.id = wk.wohnung_id
+       JOIN personen p  ON p.id = wk.person_id
+      WHERE wk.archiviert_am IS NULL
+        AND ( LOWER(p.email) = LOWER($1)
+              OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(p.emails,'[]'::jsonb)) e
+                          WHERE LOWER(e) = LOWER($1)) )
+      ORDER BY w.bezeichnung`,
+    [email],
+  );
+  for (const row of r.rows) {
+    const rw = vpnRwFromBezeichnung(row.bezeichnung);
+    if (rw && VPN_RW_TO_VLAN[rw]) return VPN_RW_TO_VLAN[rw];
+  }
+  if (r.rows.some(row => /^P\d+/i.test(row.bezeichnung || ''))) return 9;
+  return null;
+}
+
 app.get('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
   try {
     const admin = ispIsAdmin(req);
@@ -14070,21 +14130,36 @@ app.get('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
 
 app.post('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
   try {
+    if (!WG_CONTROL_TOKEN) return res.status(503).json({ error: 'wg-control nicht konfiguriert (WG_CONTROL_TOKEN fehlt)' });
     const b = req.body || {};
-    if (!b.backend) return res.status(400).json({ error: 'backend Pflicht' });
-    // User darf nur fuer sich selbst anlegen, Admin fuer beliebige
-    const target = b.user_email || req.user.email;
-    if (!ispIsAdmin(req) && (target || '').toLowerCase() !== (req.user.email || '').toLowerCase()) {
+    const target = (b.user_email || req.user.email || '').toLowerCase();
+    if (!target) return res.status(400).json({ error: 'user_email fehlt' });
+    if (!ispIsAdmin(req) && target !== (req.user.email || '').toLowerCase()) {
       return res.status(403).json({ error: 'Du kannst nur eigene VPN-Konten anlegen' });
     }
+    // VLAN auto aus Objektverwaltung; Admin darf override per body.vlan
+    let vlan = parseInt(b.vlan, 10);
+    if (!vlan) vlan = await resolveHomeVlanForEmail(target);
+    if (!vlan) return res.status(400).json({ error: 'Keine Heim-Wohnung in der Objektverwaltung — VLAN nicht ermittelbar' });
+
+    const wgResp = await wgControl('POST', '/peers', {
+      name: (b.name || target).slice(0, 80),
+      email: target,
+      vlan,
+    });
+    const peer = await wgResp.json();
+
     const r = await pool.query(
       `INSERT INTO isp_vpn_accounts (user_email, backend, username, public_key, assigned_ip, config_path, active, notizen)
-       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,true),$8) RETURNING *`,
-      [target, b.backend, b.username || null, b.public_key || null, b.assigned_ip || null,
-       b.config_path || null, b.active, b.notizen || null],
+       VALUES ($1, 'wireguard', $2, $3, $4, $5, true, $6) RETURNING *`,
+      [target, peer.id, peer.public_key, peer.assigned_ip, `wg-control/${peer.id}`,
+       `vlan=${vlan} name=${peer.name}`],
     );
-    res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    res.json({ ...r.rows[0], config: peer.config, vlan });
+  } catch (err) {
+    console.error('[isp-vpn-create]', err.message);
+    res.status(err.status || 500).json({ error: err.message });
+  }
 });
 
 app.put('/api/isp/vpn-accounts/:id', authMiddleware, async (req, res) => {
@@ -14118,9 +14193,46 @@ app.delete('/api/isp/vpn-accounts/:id', authMiddleware, async (req, res) => {
     if (!ispIsAdmin(req) && (v.user_email || '').toLowerCase() !== (req.user.email || '').toLowerCase()) {
       return res.status(403).json({ error: 'Nur Owner oder Admin' });
     }
+    if (v.username && WG_CONTROL_TOKEN) {
+      try { await wgControl('DELETE', `/peers/${encodeURIComponent(v.username)}`); }
+      catch (e) { console.warn('[isp-vpn-delete] wg-control:', e.message); }
+    }
     await pool.query('DELETE FROM isp_vpn_accounts WHERE id = $1', [id]);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Re-Download Client-Config (proxy zu wg-control)
+app.get('/api/isp/vpn-accounts/:id/config', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const existing = await pool.query('SELECT * FROM isp_vpn_accounts WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = existing.rows[0];
+    if (!ispIsAdmin(req) && (v.user_email || '').toLowerCase() !== (req.user.email || '').toLowerCase()) {
+      return res.status(403).json({ error: 'Nur Owner oder Admin' });
+    }
+    if (!v.username) return res.status(404).json({ error: 'Keine wg-control-Referenz' });
+    const r = await wgControl('GET', `/peers/${encodeURIComponent(v.username)}/config`);
+    res.type('text/plain; charset=utf-8').send(await r.text());
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
+// QR-Code (PNG)
+app.get('/api/isp/vpn-accounts/:id/qr', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const existing = await pool.query('SELECT * FROM isp_vpn_accounts WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = existing.rows[0];
+    if (!ispIsAdmin(req) && (v.user_email || '').toLowerCase() !== (req.user.email || '').toLowerCase()) {
+      return res.status(403).json({ error: 'Nur Owner oder Admin' });
+    }
+    if (!v.username) return res.status(404).json({ error: 'Keine wg-control-Referenz' });
+    const r = await wgControl('GET', `/peers/${encodeURIComponent(v.username)}/qr`);
+    const buf = Buffer.from(await r.arrayBuffer());
+    res.type('image/png').send(buf);
+  } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
 
 // === VLAN-Requests ===

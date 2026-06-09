@@ -65,6 +65,10 @@
 
       <!-- VPN-Konten -->
       <div id="tab-vpn" class="tab-view hidden">
+        <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+          <p class="text-xs text-gray-500">WireGuard-Konten — werden in das Heim-VLAN des Users genatet. Heim-VLAN wird automatisch aus der Objektverwaltung ermittelt.</p>
+          <button onclick="openVpnModal()" class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm">+ VPN-Konto anlegen</button>
+        </div>
         <div id="vpn-list" class="bg-white rounded-lg shadow overflow-x-auto"></div>
       </div>
 
@@ -551,24 +555,123 @@
     vpnAccounts = (await r.json()).vpn_accounts || [];
     renderVpns();
   }
+  function vpnVlanFromNotizen(n) {
+    const m = (n || '').match(/vlan=(\d+)/);
+    return m ? m[1] : '—';
+  }
   function renderVpns() {
     const wrap = document.getElementById('vpn-list');
     if (vpnAccounts.length === 0) { wrap.innerHTML = '<p class="p-6 text-gray-400 italic text-center">Keine VPN-Konten.</p>'; return; }
     wrap.innerHTML = `<table class="min-w-full text-sm">
-      <thead class="bg-gray-50 text-xs uppercase text-gray-500"><tr><th class="px-3 py-2 text-left">User</th><th class="px-3 py-2 text-left">Backend</th><th class="px-3 py-2 text-left">IP</th><th class="px-3 py-2 text-left">Status</th><th class="px-3 py-2 text-left">Letzter Connect</th><th class="px-3 py-2 text-right">Aktion</th></tr></thead>
+      <thead class="bg-gray-50 text-xs uppercase text-gray-500"><tr>
+        <th class="px-3 py-2 text-left">User</th>
+        <th class="px-3 py-2 text-left">Heim-VLAN</th>
+        <th class="px-3 py-2 text-left">IP</th>
+        <th class="px-3 py-2 text-left">Status</th>
+        <th class="px-3 py-2 text-left">Letzter Handshake</th>
+        <th class="px-3 py-2 text-right">Aktion</th>
+      </tr></thead>
       <tbody class="divide-y">${vpnAccounts.map(v => `
         <tr><td class="px-3 py-2 text-xs">${esc(v.user_email)}</td>
-          <td class="px-3 py-2"><span class="text-xs bg-gray-100 px-2 py-0.5 rounded">${esc(v.backend)}</span></td>
+          <td class="px-3 py-2 text-xs"><span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-mono">${vpnVlanFromNotizen(v.notizen)}</span></td>
           <td class="px-3 py-2 font-mono text-xs">${esc(v.assigned_ip || '—')}</td>
           <td class="px-3 py-2"><span class="text-xs ${v.active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'} px-2 py-0.5 rounded">${v.active ? 'aktiv' : 'inaktiv'}</span></td>
           <td class="px-3 py-2 text-xs">${fmtDt(v.last_connect_at)}</td>
-          <td class="px-3 py-2 text-right"><button onclick="delVpn(${v.id})" class="text-xs text-red-600 hover:underline">Loeschen</button></td>
+          <td class="px-3 py-2 text-right space-x-2">
+            <button onclick="showVpnConfig(${v.id})" class="text-xs text-blue-600 hover:underline">.conf</button>
+            <button onclick="showVpnQr(${v.id})" class="text-xs text-blue-600 hover:underline">QR</button>
+            <button onclick="delVpn(${v.id})" class="text-xs text-red-600 hover:underline">Loeschen</button>
+          </td>
         </tr>`).join('')}</tbody></table>`;
   }
   async function delVpn(id) {
-    if (!confirm('VPN-Konto loeschen?')) return;
+    if (!confirm('VPN-Konto loeschen? Der Peer wird sofort vom WG-Server entfernt.')) return;
     await AuthentikAuth.apiFetch('/api/isp/vpn-accounts/' + id, { method: 'DELETE' });
     await loadVpns();
+  }
+  function openVpnModal() {
+    const isAdmin = vpnAccounts.is_admin || true; // Best-effort; backend lehnt sonst ab
+    const modal = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
+      <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5">
+        <h2 class="font-bold mb-3">Neues VPN-Konto</h2>
+        <div class="space-y-2 text-sm">
+          <div>
+            <label class="block text-xs text-gray-600">Geraete-Name *</label>
+            <input id="vpn-name" type="text" placeholder="z.B. iPhone Stefan" class="w-full border rounded px-2 py-1">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-600">User-E-Mail (leer = du selbst; Admin darf fuer andere)</label>
+            <input id="vpn-email" type="email" placeholder="optional" class="w-full border rounded px-2 py-1">
+          </div>
+          <p class="text-xs text-gray-500 italic">Heim-VLAN wird automatisch aus der Objektverwaltung ermittelt (anhand der Wohnung des Users).</p>
+        </div>
+        <div class="flex justify-end gap-2 mt-4">
+          <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 text-sm text-gray-600">Abbrechen</button>
+          <button onclick="createVpn()" class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Erzeugen</button>
+        </div>
+      </div></div>`;
+    document.body.insertAdjacentHTML('beforeend', modal);
+  }
+  async function createVpn() {
+    const name = document.getElementById('vpn-name').value.trim();
+    const email = document.getElementById('vpn-email').value.trim();
+    if (!name) { alert('Geraete-Name fehlt'); return; }
+    const r = await AuthentikAuth.apiFetch('/api/isp/vpn-accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, ...(email ? { user_email: email } : {}) }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      alert('Fehler: ' + (err.error || r.statusText));
+      return;
+    }
+    const created = await r.json();
+    document.querySelector('.fixed.inset-0')?.remove();
+    showCreatedConfig(created);
+    await loadVpns();
+  }
+  function showCreatedConfig(v) {
+    const cfg = v.config || '';
+    const modal = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
+      <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-2xl w-full p-5 max-h-[90vh] overflow-y-auto">
+        <h2 class="font-bold mb-2">VPN-Konto erstellt — IP ${esc(v.assigned_ip)} (VLAN ${esc(String(v.vlan || vpnVlanFromNotizen(v.notizen)))})</h2>
+        <p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mb-3">
+          ⚠ Die Client-Config enthaelt den Private-Key des Geraets. Speichere sie sicher oder importiere sie sofort in den WG-Client. Sie ist auch danach via "<strong>.conf</strong>" / "<strong>QR</strong>" wieder abrufbar.
+        </p>
+        <div class="grid md:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs text-gray-600 mb-1">Config-Text</label>
+            <textarea readonly class="w-full border rounded px-2 py-1 font-mono text-xs h-72" onclick="this.select()">${esc(cfg)}</textarea>
+            <button onclick="navigator.clipboard.writeText(\`${cfg.replace(/`/g, '\\`')}\`); this.textContent='Kopiert!'" class="mt-1 text-xs text-blue-600 hover:underline">In Zwischenablage</button>
+          </div>
+          <div class="text-center">
+            <label class="block text-xs text-gray-600 mb-1">QR-Code fuer Mobile-App</label>
+            <img src="/api/isp/vpn-accounts/${v.id}/qr" alt="QR" class="inline-block border rounded max-w-full">
+            <p class="text-xs text-gray-500 mt-2">Im WireGuard-App: "Aus QR-Code hinzufuegen"</p>
+          </div>
+        </div>
+        <div class="flex justify-end mt-4">
+          <button onclick="this.closest('.fixed').remove()" class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Schliessen</button>
+        </div>
+      </div></div>`;
+    document.body.insertAdjacentHTML('beforeend', modal);
+  }
+  async function showVpnConfig(id) {
+    const r = await AuthentikAuth.apiFetch('/api/isp/vpn-accounts/' + id + '/config');
+    if (!r.ok) { alert('Fehler: ' + r.statusText); return; }
+    const cfg = await r.text();
+    const v = vpnAccounts.find(x => x.id === id) || {};
+    showCreatedConfig({ ...v, config: cfg });
+  }
+  function showVpnQr(id) {
+    const modal = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
+      <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl p-5 text-center">
+        <h2 class="font-bold mb-3">QR-Code</h2>
+        <img src="/api/isp/vpn-accounts/${id}/qr" alt="QR" class="border rounded">
+        <button onclick="this.closest('.fixed').remove()" class="mt-3 bg-blue-600 text-white px-3 py-1.5 rounded text-sm">Schliessen</button>
+      </div></div>`;
+    document.body.insertAdjacentHTML('beforeend', modal);
   }
 
   // === Mailboxes ===
