@@ -40,54 +40,70 @@
     <script>RosenwegNav.init({ active: 'hilfe', basePath: '/' });</script>
 
     <!-- Hero -->
-    <section class="bg-gradient-to-r from-indigo-600 to-blue-600 text-white py-16">
+    <section class="bg-gradient-to-r from-indigo-600 to-blue-600 text-white py-12">
         <div class="max-w-4xl mx-auto px-4 text-center">
-            <div class="text-6xl mb-4">&#128218;</div>
-            <h1 class="text-4xl font-bold mb-3">Hilfe & Anleitungen</h1>
-            <p class="text-xl opacity-90">Schritt-fuer-Schritt Anleitungen fuer die Rosenweg-Website</p>
+            <div class="text-6xl mb-3">&#128218;</div>
+            <h1 class="text-3xl sm:text-4xl font-bold mb-3">Hilfe & Anleitungen</h1>
+            <p class="text-lg sm:text-xl opacity-90 max-w-2xl mx-auto">Alle Funktionen der Rosenweg-Website erklaert — was ist es, wofuer wird es genutzt, wie macht man's. Klicke eine Kachel an oder scrolle durch.</p>
+            <p class="text-sm opacity-75 mt-3">Letzte Aktualisierung: Juni 2026 · 25+ Bereiche dokumentiert</p>
         </div>
     </section>
 
-    <!-- Quick Links -->
-    <div class="max-w-4xl mx-auto px-4 -mt-8 relative z-10">
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <a href="#anmelden" class="guide-card bg-white rounded-xl p-4 text-center shadow-md">
-                <div class="text-3xl mb-2">&#128274;</div>
-                <span class="text-sm font-medium text-gray-700">Anmelden</span>
-            </a>
-            <a href="#passwort" class="guide-card bg-white rounded-xl p-4 text-center shadow-md">
-                <div class="text-3xl mb-2">&#128273;</div>
-                <span class="text-sm font-medium text-gray-700">Passwort</span>
-            </a>
-            <a href="#waschkueche" class="guide-card bg-white rounded-xl p-4 text-center shadow-md">
-                <div class="text-3xl mb-2">&#129529;</div>
-                <span class="text-sm font-medium text-gray-700">Waschkueche</span>
-            </a>
-            <a href="#dokumente" class="guide-card bg-white rounded-xl p-4 text-center shadow-md">
-                <div class="text-3xl mb-2">&#128196;</div>
-                <span class="text-sm font-medium text-gray-700">Dokumente</span>
-            </a>
-            <a href="#energie" class="guide-card bg-white rounded-xl p-4 text-center shadow-md">
-                <div class="text-3xl mb-2">&#9889;</div>
-                <span class="text-sm font-medium text-gray-700">Strom</span>
-            </a>
-            <a href="#wlan" class="guide-card bg-white rounded-xl p-4 text-center shadow-md">
-                <div class="text-3xl mb-2">&#128246;</div>
-                <span class="text-sm font-medium text-gray-700">WLAN</span>
-            </a>
-            <a href="#drucken" class="guide-card bg-white rounded-xl p-4 text-center shadow-md">
-                <div class="text-3xl mb-2">&#128424;</div>
-                <span class="text-sm font-medium text-gray-700">Drucken</span>
-            </a>
-            <a href="#verwaltung" class="guide-card bg-white rounded-xl p-4 text-center shadow-md">
-                <div class="text-3xl mb-2">&#127970;</div>
-                <span class="text-sm font-medium text-gray-700">Verwaltung</span>
-            </a>
-            <a href="#berechtigungen" class="guide-card bg-white rounded-xl p-4 text-center shadow-md">
-                <div class="text-3xl mb-2">&#128274;</div>
-                <span class="text-sm font-medium text-gray-700">Berechtigungen</span>
-            </a>
+    <!-- Quick Links: gruppiert nach Themen -->
+    <div class="max-w-5xl mx-auto px-4 -mt-6 relative z-10">
+
+        <div class="bg-white rounded-xl shadow-md p-5 mb-3">
+            <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">&#128100; Mein Konto &amp; Alltag</h2>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <a href="#anmelden" class="guide-card bg-blue-50 hover:bg-blue-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128274;</div><span class="text-xs font-medium text-gray-700">Anmelden</span></a>
+                <a href="#passwort" class="guide-card bg-blue-50 hover:bg-blue-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128273;</div><span class="text-xs font-medium text-gray-700">Passwort</span></a>
+                <a href="#profil" class="guide-card bg-blue-50 hover:bg-blue-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128100;</div><span class="text-xs font-medium text-gray-700">Profil</span></a>
+                <a href="#api-tokens" class="guide-card bg-blue-50 hover:bg-blue-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128272;</div><span class="text-xs font-medium text-gray-700">API-Tokens</span></a>
+                <a href="#ki-suche" class="guide-card bg-blue-50 hover:bg-blue-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128270;</div><span class="text-xs font-medium text-gray-700">KI-Suche</span></a>
+                <a href="#whatsapp" class="guide-card bg-blue-50 hover:bg-blue-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128241;</div><span class="text-xs font-medium text-gray-700">WhatsApp-Bot</span></a>
+                <a href="#telefonbuch" class="guide-card bg-blue-50 hover:bg-blue-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128222;</div><span class="text-xs font-medium text-gray-700">Telefonbuch</span></a>
+                <a href="#wlan" class="guide-card bg-blue-50 hover:bg-blue-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128246;</div><span class="text-xs font-medium text-gray-700">WLAN</span></a>
+            </div>
         </div>
+
+        <div class="bg-white rounded-xl shadow-md p-5 mb-3">
+            <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">&#127968; Wohnung &amp; Verwaltung</h2>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <a href="#waschkueche" class="guide-card bg-emerald-50 hover:bg-emerald-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#129529;</div><span class="text-xs font-medium text-gray-700">Waschkueche</span></a>
+                <a href="#dokumente" class="guide-card bg-emerald-50 hover:bg-emerald-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128196;</div><span class="text-xs font-medium text-gray-700">Dokumente</span></a>
+                <a href="#energie" class="guide-card bg-emerald-50 hover:bg-emerald-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#9889;</div><span class="text-xs font-medium text-gray-700">Energie</span></a>
+                <a href="#drucken" class="guide-card bg-emerald-50 hover:bg-emerald-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128424;</div><span class="text-xs font-medium text-gray-700">Drucken</span></a>
+                <a href="#reklamationen" class="guide-card bg-emerald-50 hover:bg-emerald-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128736;</div><span class="text-xs font-medium text-gray-700">Reklamationen</span></a>
+                <a href="#auslagen" class="guide-card bg-emerald-50 hover:bg-emerald-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128176;</div><span class="text-xs font-medium text-gray-700">Auslagen</span></a>
+                <a href="#vollmachten" class="guide-card bg-emerald-50 hover:bg-emerald-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128221;</div><span class="text-xs font-medium text-gray-700">Vollmachten</span></a>
+                <a href="#handwerker" class="guide-card bg-emerald-50 hover:bg-emerald-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128295;</div><span class="text-xs font-medium text-gray-700">Handwerker</span></a>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-md p-5 mb-3">
+            <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">&#127760; ISP / Netzwerk / Mailserver</h2>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <a href="#mein-zugang" class="guide-card bg-indigo-50 hover:bg-indigo-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128272;</div><span class="text-xs font-medium text-gray-700">Mein Zugang</span></a>
+                <a href="#vlan-antrag" class="guide-card bg-indigo-50 hover:bg-indigo-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#127760;</div><span class="text-xs font-medium text-gray-700">VLAN beantragen</span></a>
+                <a href="#reverse-proxy" class="guide-card bg-indigo-50 hover:bg-indigo-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128257;</div><span class="text-xs font-medium text-gray-700">Reverse-Proxy</span></a>
+                <a href="#umleitung" class="guide-card bg-indigo-50 hover:bg-indigo-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#8618;</div><span class="text-xs font-medium text-gray-700">Adress-Umleitung</span></a>
+                <a href="#mailserver" class="guide-card bg-indigo-50 hover:bg-indigo-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#9993;</div><span class="text-xs font-medium text-gray-700">Mailserver/PMG</span></a>
+                <a href="#shelly-diy" class="guide-card bg-indigo-50 hover:bg-indigo-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128268;</div><span class="text-xs font-medium text-gray-700">Shelly DIY</span></a>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-md p-5 mb-3">
+            <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">&#127970; Ausschuss / Admin</h2>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <a href="#verwaltung" class="guide-card bg-amber-50 hover:bg-amber-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#127970;</div><span class="text-xs font-medium text-gray-700">Objekt-Verw.</span></a>
+                <a href="#projekte" class="guide-card bg-amber-50 hover:bg-amber-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128203;</div><span class="text-xs font-medium text-gray-700">Projekte</span></a>
+                <a href="#brief-tracking" class="guide-card bg-amber-50 hover:bg-amber-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#9993;</div><span class="text-xs font-medium text-gray-700">Brief-Tracking</span></a>
+                <a href="#email-verteiler" class="guide-card bg-amber-50 hover:bg-amber-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128231;</div><span class="text-xs font-medium text-gray-700">E-Mail-Verteiler</span></a>
+                <a href="#berechtigungen" class="guide-card bg-amber-50 hover:bg-amber-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128274;</div><span class="text-xs font-medium text-gray-700">Berechtigungen</span></a>
+                <a href="#loeschungen" class="guide-card bg-amber-50 hover:bg-amber-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128465;</div><span class="text-xs font-medium text-gray-700">Konto-Loeschen</span></a>
+            </div>
+        </div>
+
     </div>
 
     <main class="max-w-4xl mx-auto px-4 py-12 space-y-12">
@@ -823,8 +839,6 @@
             </div>
         </section>
 
-        <!-- Hilfe-Kontakt -->
-        <div class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-2xl p-8 text-center border border-blue-100">
         <!-- ═══════════════════════════════════════════ -->
         <!-- BERECHTIGUNGEN -->
         <!-- ═══════════════════════════════════════════ -->
@@ -903,6 +917,434 @@
                         <strong>&#128737; Berechtigungen aendern:</strong> Tech / Praesident koennen ueber die <a href="rechteverwaltung.html" class="underline">Rechteverwaltung</a> Permissions pro Gruppe togglen. Gruppen-Zuweisung selbst geschieht in <a href="https://authentik.rosenweg4303.ch" class="underline" target="_blank">Authentik</a>.
                     </p>
                 </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- PROFIL -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="profil" class="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div class="bg-blue-600 text-white px-6 py-4">
+                <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128100;</span> Mein Profil</h2>
+                <p class="mt-1 opacity-90">Persoenliche Daten, mehrere Telefonnummern und E-Mail-Aliasse, Avatar</p>
+            </div>
+            <div class="p-6 space-y-3 text-sm">
+                <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
+                    <p class="font-semibold text-blue-900 mb-1">&#128161; Wofuer ist die Profil-Seite?</p>
+                    <p class="text-blue-800">Hier kannst du selbst deine Stammdaten pflegen — Name, Adresse, mehrere Telefonnummern (Festnetz/Mobil/Geschaeft), E-Mail-Aliasse und einen Avatar. Was du hier eintraegst landet automatisch in der Personen-DB und wird ueberall verwendet wo dein Name/Kontakt benoetigt wird (Verteiler, Reklamationen, Vollmachten etc.).</p>
+                </div>
+                <p><strong>Was geht da:</strong></p>
+                <ul class="list-disc list-inside space-y-1 text-gray-700">
+                    <li>Mehrere Telefonnummern pro Person (mit Label „Privat", „Geschaeft", „Notfall")</li>
+                    <li>Mehrere E-Mail-Adressen + Auswahl der Primaeradresse fuer Benachrichtigungen</li>
+                    <li>WhatsApp-Opt-In Toggle — entscheidet ob der Bot dir Mitteilungen schicken darf</li>
+                    <li>Passwort aendern (gleichzeitig Website + Netzwerk-Zugang)</li>
+                    <li>API-Tokens fuer KI-Agents verwalten (siehe naechste Sektion)</li>
+                </ul>
+                <p class="text-gray-600 italic">&#128279; <a href="profil.html" class="text-blue-600 hover:underline">Direkt zum Profil &rarr;</a></p>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- API-TOKENS -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="api-tokens" class="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div class="bg-purple-600 text-white px-6 py-4">
+                <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128272;</span> API-Tokens (PAT)</h2>
+                <p class="mt-1 opacity-90">KI-Agents, Mobile-Apps oder Skripte im eigenen Namen handeln lassen</p>
+            </div>
+            <div class="p-6 space-y-3 text-sm">
+                <div class="bg-purple-50 border-l-4 border-purple-500 p-4 rounded">
+                    <p class="font-semibold text-purple-900 mb-1">&#128161; Wofuer ist das?</p>
+                    <p class="text-purple-800">Wenn du z.B. Claude Desktop, Hermes, OpenClaw oder ein eigenes Skript hast, das fuer dich Dinge auf der Plattform machen soll (Reklamationen erfassen, Auslagen abfragen, Vollmachten anlegen etc.), erstellst du hier einen <strong>Personal Access Token</strong>. Der Token handelt dann im Namen deines Users mit deinen Rechten — kein Cloud-Account noetig, kein Passwort-Sharing.</p>
+                </div>
+                <p><strong>Wie es geht:</strong></p>
+                <ol class="list-decimal list-inside space-y-1 text-gray-700">
+                    <li>Profil &rarr; Section &bdquo;&#128272; API-Tokens&ldquo; &rarr; <em>+ Neuen Token erstellen</em></li>
+                    <li>Name vergeben (z.B. „Claude Desktop"), optional Ablauf + Scopes</li>
+                    <li>Token wird <strong>nur einmal angezeigt</strong> — Copy-Button drueckt, sicher aufbewahren</li>
+                    <li>Im Agent eintragen als <code class="bg-gray-100 px-1">Authorization: Bearer rw_pat_...</code></li>
+                </ol>
+                <p class="text-sm text-gray-700"><strong>Sicherheit:</strong> Token verloren → sofort widerrufen, neuen erstellen. Jeder Token kann einzeln widerrufen werden, „letzter Zugriff" zeigt verdaechtige Nutzung.</p>
+                <p class="text-sm text-gray-700"><strong>MCP-Server:</strong> Im Repo unter <code class="bg-gray-100 px-1">mcp/</code> gibt's einen fertigen MCP-Server der 52 Tools fuer Claude Desktop / Cursor bereitstellt. README im Verzeichnis.</p>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- KI-SUCHE -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="ki-suche" class="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div class="bg-blue-600 text-white px-6 py-4">
+                <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128270;</span> KI-Suche</h2>
+                <p class="mt-1 opacity-90">Globale Suche ueber alle Daten mit Claude-Antworten</p>
+            </div>
+            <div class="p-6 space-y-3 text-sm">
+                <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
+                    <p class="font-semibold text-blue-900 mb-1">&#128161; Wofuer?</p>
+                    <p class="text-blue-800">Du suchst eine bestimmte E-Mail, einen Handwerker, eine Vollmacht oder erinnerst dich an einen Namen — du tippst einfach den Begriff und die KI sortiert die Treffer nach Relevanz und gibt dir einen Ein-Satz-Kontext.</p>
+                </div>
+                <p><strong>Wie:</strong></p>
+                <ul class="list-disc list-inside space-y-1 text-gray-700">
+                    <li><kbd class="bg-gray-200 px-2 py-1 rounded text-xs">Strg</kbd> + <kbd class="bg-gray-200 px-2 py-1 rounded text-xs">K</kbd> (Mac: <kbd class="bg-gray-200 px-2 py-1 rounded text-xs">Cmd</kbd> + <kbd class="bg-gray-200 px-2 py-1 rounded text-xs">K</kbd>) auf jeder Seite</li>
+                    <li>Oder das &#128270;-Lupensymbol oben rechts in der Nav</li>
+                    <li>Suche durchsucht parallel: Personen, Handwerker, Vollmachten, Reklamationen, E-Mails, Verwaltung, Wohnungen, Projekte</li>
+                </ul>
+                <p class="text-gray-700"><strong>Wichtig:</strong> Berechtigungs-aware — du siehst nur Treffer fuer Daten auf die du auch sonst Zugriff hast. Die KI bekommt nicht mehr zu sehen als du selbst.</p>
+                <p class="text-gray-700"><strong>Umlaut-tolerant:</strong> „mueller" findet auch „Mueller" und „Mueller" findet auch „mueller".</p>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- WHATSAPP-BOT -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="whatsapp" class="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div class="bg-green-600 text-white px-6 py-4">
+                <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128241;</span> WhatsApp-Bot</h2>
+                <p class="mt-1 opacity-90">Reklamationen melden, Auslagen abfragen, Handwerker finden — per WhatsApp</p>
+            </div>
+            <div class="p-6 space-y-3 text-sm">
+                <div class="bg-green-50 border-l-4 border-green-500 p-4 rounded">
+                    <p class="font-semibold text-green-900 mb-1">&#128161; Wofuer?</p>
+                    <p class="text-green-800">Du kannst per WhatsApp mit der Rosenweg-Verwaltung interagieren ohne ueberhaupt die Website aufrufen zu muessen. Bot-Nummer: <strong>+41 76 519 99 70</strong>. Einfach „<em>hi</em>" oder „<em>menu</em>" schreiben.</p>
+                </div>
+                <p><strong>Befehle:</strong></p>
+                <ul class="list-disc list-inside space-y-1 text-gray-700">
+                    <li><code class="bg-gray-100 px-1">/menu</code> &mdash; Hauptmenue mit Zahlen-Auswahl (1-6)</li>
+                    <li><code class="bg-gray-100 px-1">/notfall</code> &mdash; Notfall-Kontakte</li>
+                    <li><code class="bg-gray-100 px-1">/handwerker</code> &mdash; Handwerker-Liste, optional <code class="bg-gray-100 px-1">/handwerker sanitaer</code></li>
+                    <li><code class="bg-gray-100 px-1">/reklamation &lt;text&gt;</code> &mdash; Schaden melden, geht direkt an den Ausschuss</li>
+                    <li><code class="bg-gray-100 px-1">/meineauslagen</code> &mdash; eigene Auslagen-Uebersicht</li>
+                </ul>
+                <p class="text-gray-700">Du kannst auch ein Foto vom Schaden schicken — der Bot leitet's weiter. Voraussetzung: deine Telefon-Nummer ist im Profil hinterlegt und du hast WhatsApp-Opt-In aktiviert.</p>
+                <p class="text-gray-700"><strong>E-Mail-Mirror:</strong> Mails an bewohner@/ausschuss@ landen optional auch in der entsprechenden WhatsApp-Gruppe — KI fasst zusammen.</p>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- TELEFONBUCH -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="telefonbuch" class="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div class="bg-blue-600 text-white px-6 py-4">
+                <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128222;</span> Telefonbuch</h2>
+                <p class="mt-1 opacity-90">Alle Bewohner mit Kontaktdaten auf einen Blick</p>
+            </div>
+            <div class="p-6 space-y-3 text-sm">
+                <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
+                    <p class="font-semibold text-blue-900 mb-1">&#128161; Wofuer?</p>
+                    <p class="text-blue-800">Schnellauskunft wer im Rosenweg wohnt, wo, und wie er erreichbar ist. Nach STWEG und Hausnummer gruppiert.</p>
+                </div>
+                <p>Suche nach Name oder Wohnung filtert die Liste. Klick auf Telefon oeffnet den Anruf, Klick auf E-Mail oeffnet das Mailprogramm. Verstorbene werden mit durchgestrichener Schrift angezeigt aber bleiben fuer Vergangenheits-Recherchen sichtbar.</p>
+                <p class="text-gray-600 italic">&#128279; <a href="telefonbuch.html" class="text-blue-600 hover:underline">Zum Telefonbuch &rarr;</a></p>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- REKLAMATIONEN -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="reklamationen" class="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div class="bg-red-600 text-white px-6 py-4">
+                <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128736;</span> Reklamationen / Schadensmeldungen</h2>
+                <p class="mt-1 opacity-90">Defekte, Maengel und Reparatur-Anliegen erfassen</p>
+            </div>
+            <div class="p-6 space-y-3 text-sm">
+                <div class="bg-red-50 border-l-4 border-red-500 p-4 rounded">
+                    <p class="font-semibold text-red-900 mb-1">&#128161; Wofuer?</p>
+                    <p class="text-red-800">Aufzug steht still, Wasserhahn tropft, Tuerschloss klemmt — alles was repariert oder beauftragt werden muss landet hier. Der Ausschuss bekommt automatisch eine E-Mail und WhatsApp-Push, kann den passenden Handwerker zuweisen und den Status verfolgen.</p>
+                </div>
+                <p><strong>Wie meldest du eine Reklamation?</strong></p>
+                <ol class="list-decimal list-inside space-y-1 text-gray-700">
+                    <li>Website: <a href="reklamationen.html" class="text-blue-600 hover:underline">/reklamationen.html</a> &rarr; <em>+ Neue Reklamation</em></li>
+                    <li>WhatsApp: <code class="bg-gray-100 px-1">/reklamation Aufzug Haus 9 steht still</code></li>
+                    <li>Optional: Foto vom Schaden mitschicken</li>
+                </ol>
+                <p class="text-gray-700"><strong>Status-Verfolgung:</strong> offen &rarr; weitergeleitet (an Handwerker) &rarr; erledigt / abgewiesen. Du bekommst E-Mail-Benachrichtigung bei jedem Statuswechsel.</p>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- AUSLAGEN -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="auslagen" class="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div class="bg-emerald-600 text-white px-6 py-4">
+                <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128176;</span> Auslagen einreichen</h2>
+                <p class="mt-1 opacity-90">Selbst bezahlte STWEG-Kosten zurueckholen</p>
+            </div>
+            <div class="p-6 space-y-3 text-sm">
+                <div class="bg-emerald-50 border-l-4 border-emerald-500 p-4 rounded">
+                    <p class="font-semibold text-emerald-900 mb-1">&#128161; Wofuer?</p>
+                    <p class="text-emerald-800">Du hast aus eigener Tasche etwas fuer die STWEG bezahlt (Material, Lampe ersetzt, Schluesseldienst, Eigenleistung mit Stundensatz)? Hier reichst du es ein, der Ausschuss genehmigt, dann wird's am Ende des Quartals/Jahres ausbezahlt.</p>
+                </div>
+                <p><strong>Was du brauchst:</strong></p>
+                <ul class="list-disc list-inside space-y-1 text-gray-700">
+                    <li>Datum, Beschreibung, Betrag (CHF)</li>
+                    <li>STWEG (welcher Geld kommen soll)</li>
+                    <li>Kategorie (Material, Reinigung, Eigenleistung, ...)</li>
+                    <li>Beleg als Foto/PDF (optional fuer Kleinbetraege, Pflicht ab CHF 50)</li>
+                    <li>Bei Eigenleistung: Positionen einzeln mit Stundensatz aus Konfig</li>
+                </ul>
+                <p class="text-gray-700"><strong>Status:</strong> eingereicht &rarr; genehmigt &rarr; ausbezahlt. WhatsApp-Status-Updates pro Wechsel.</p>
+                <p class="text-gray-600 italic">&#128279; <a href="auslagen.html" class="text-blue-600 hover:underline">Auslagen-Seite &rarr;</a></p>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- VOLLMACHTEN -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="vollmachten" class="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div class="bg-amber-600 text-white px-6 py-4">
+                <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128221;</span> Vollmachten</h2>
+                <p class="mt-1 opacity-90">Verwalter, Mieter oder Dritte rechtsverbindlich bevollmaechtigen</p>
+            </div>
+            <div class="p-6 space-y-3 text-sm">
+                <div class="bg-amber-50 border-l-4 border-amber-500 p-4 rounded">
+                    <p class="font-semibold text-amber-900 mb-1">&#128161; Wofuer?</p>
+                    <p class="text-amber-800">Als Eigentuemer kannst du Personen schriftlich beauftragen, dich in bestimmten Belangen zu vertreten — z.B. die Hausverwaltung in laufenden Verwaltungs-Sachen, einen Mieter fuer Schluesselverwaltung oder einen Anwalt fuer Einzelgeschaefte. In der Schweiz braucht's dafuer Schriftform.</p>
+                </div>
+                <p><strong>Arten von Vollmachten:</strong></p>
+                <ul class="list-disc list-inside space-y-1 text-gray-700">
+                    <li><strong>Generell</strong> &mdash; laufende Verwaltung, unbefristet bis Widerruf</li>
+                    <li><strong>Spezifisch</strong> &mdash; nur ein konkretes Geschaeft (z.B. Verkauf)</li>
+                    <li><strong>Auskunft</strong> &mdash; nur Belegeinsicht, kein Entscheidungsrecht</li>
+                </ul>
+                <p><strong>Workflow:</strong></p>
+                <ol class="list-decimal list-inside space-y-1 text-gray-700">
+                    <li>Erfassen mit „<em>+ Neue Vollmacht erteilen</em>" (Quick-Pick aus Objektverwaltung-Kontakten oder Verwaltungs-Firmen)</li>
+                    <li>Vorlage aus dem Vorlagen-Tab uebernehmen (Geltungsbereich-Texte vom Praesidium vorgegeben)</li>
+                    <li><strong>Digital signieren</strong> via Authentik-Login (ZertES Art.2 einfache el. Signatur) <em>ODER</em></li>
+                    <li>PDF drucken &rarr; unterschreiben &rarr; scannen &rarr; <em>Signierte PDF hochladen</em></li>
+                    <li>Optionale <strong>KI-Pruefung</strong>: Claude prueft ob alle Namen unterschrieben sind und nichts manipuliert wurde</li>
+                </ol>
+                <p class="text-gray-700"><strong>Bei Miteigentum:</strong> ALLE Eigentuemer muessen einzeln signieren — wird im PDF mit eigenem Unterschriftsfeld geklaert.</p>
+                <p class="text-gray-700"><strong>Auto-Vorbereitung:</strong> Wenn ein Verwalter in der Objektverwaltung als Kontakt hinzukommt, wird automatisch ein Vollmachts-Entwurf erstellt. Du musst nur noch signieren.</p>
+                <p class="text-gray-600 italic">&#128279; <a href="vollmachten.html" class="text-blue-600 hover:underline">Vollmachten-Verwaltung &rarr;</a></p>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- HANDWERKER -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="handwerker" class="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div class="bg-emerald-600 text-white px-6 py-4">
+                <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128295;</span> Handwerker &amp; Lieferanten</h2>
+                <p class="mt-1 opacity-90">Verzeichnis aller bekannter Dienstleister</p>
+            </div>
+            <div class="p-6 space-y-3 text-sm">
+                <div class="bg-emerald-50 border-l-4 border-emerald-500 p-4 rounded">
+                    <p class="font-semibold text-emerald-900 mb-1">&#128161; Wofuer?</p>
+                    <p class="text-emerald-800">Wenn du einen Handwerker brauchst (Sanitaer, Elektriker, etc.) und wissen willst, wer schon gut war, gehst du hierhin. Pro Eintrag: Kategorie, Kontaktdaten, Bewertung, Notfall-24/7-Flag, letzter Auftrag, Empfehlung-von, optional Vertraege (Wartungsverträge etc.).</p>
+                </div>
+                <p>Per WhatsApp: <code class="bg-gray-100 px-1">/handwerker</code> liefert die Top-Kategorien, <code class="bg-gray-100 px-1">/handwerker sanitaer</code> filtert.</p>
+                <p class="text-gray-700"><strong>Wer darf pflegen:</strong> Ausschuss kann neue Eintraege erfassen und bewerten. Alle Bewohner duerfen lesen.</p>
+                <p class="text-gray-600 italic">&#128279; <a href="handwerker.html" class="text-blue-600 hover:underline">Handwerker-Verzeichnis &rarr;</a></p>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- MEIN ZUGANG (ISP) -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="mein-zugang" class="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div class="bg-indigo-600 text-white px-6 py-4">
+                <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128272;</span> Mein Zugang (ISP)</h2>
+                <p class="mt-1 opacity-90">VPN-Konten, eigene VLAN-Antraege, Reverse-Proxy-Routen</p>
+            </div>
+            <div class="p-6 space-y-3 text-sm">
+                <div class="bg-indigo-50 border-l-4 border-indigo-500 p-4 rounded">
+                    <p class="font-semibold text-indigo-900 mb-1">&#128161; Wofuer?</p>
+                    <p class="text-indigo-800">Die Rosenweg-Kooperation betreibt ihr eigenes Internet/Netzwerk (Init7-Glasfaser, UDM-Pro). Als Bewohner kannst du dir Remote-Zugriff (VPN) einrichten, eigene VLANs beantragen (fuer Smart-Home, Server, Lab) oder eigene Web-Services via unseren zentralen Reverse-Proxy ins Internet stellen lassen.</p>
+                </div>
+                <p>Bereiche:</p>
+                <ul class="list-disc list-inside space-y-1 text-gray-700">
+                    <li><strong>VPN-Konten</strong> &mdash; selbst anlegen, WireGuard/Netbird/Tailscale. Konfiguration zurueckverlangen via Antrag.</li>
+                    <li><strong>VLAN beantragen</strong> &mdash; eigenes Subnetz mit konfigurierbarer Groesse (/29 bis /24), Internet-Zugriff togglen, Status-Verfolgung</li>
+                    <li><strong>Reverse-Proxy-Routen</strong> &mdash; eigene Domain durch unseren zentralen Proxy schicken, Authentik-Auth dazwischen schalten optional</li>
+                </ul>
+                <p class="text-gray-600 italic">&#128279; <a href="isp-mein-zugang.html" class="text-blue-600 hover:underline">Mein Zugang &rarr;</a></p>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- VLAN BEANTRAGEN -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="vlan-antrag" class="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div class="bg-indigo-600 text-white px-6 py-4">
+                <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#127760;</span> VLAN beantragen</h2>
+                <p class="mt-1 opacity-90">Eigenes Netz-Segment fuer Smart-Home, Server, Gaming etc.</p>
+            </div>
+            <div class="p-6 space-y-3 text-sm">
+                <div class="bg-indigo-50 border-l-4 border-indigo-500 p-4 rounded">
+                    <p class="font-semibold text-indigo-900 mb-1">&#128161; Wofuer?</p>
+                    <p class="text-indigo-800">Du willst deine IoT-Geraete vom Rest deines Netzes trennen? Einen Server betreiben? Mehrere Gaming-Konsolen ohne UPnP-Chaos? Ein eigenes VLAN ist die saubere Loesung.</p>
+                </div>
+                <p><strong>Antrag stellen:</strong></p>
+                <ol class="list-decimal list-inside space-y-1 text-gray-700">
+                    <li>Auf <a href="isp-mein-zugang.html" class="text-blue-600 hover:underline">Mein Zugang</a> &rarr; „VLAN beantragen"</li>
+                    <li>Zweck angeben (Pflicht — wofuer wird's gebraucht), Wunsch-Name, Groesse (Geraeteanzahl), Internet-Zugriff ja/nein</li>
+                    <li>Technik prueft + entscheidet. Bei Genehmigung: VLAN-ID + Subnetz zugewiesen, deployed.</li>
+                </ol>
+                <p class="text-gray-700"><strong>Status:</strong> pending &rarr; approved (mit VLAN-ID) &rarr; deployed. Bei Ablehnung gibt's einen Grund.</p>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- REVERSE-PROXY -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="reverse-proxy" class="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div class="bg-indigo-600 text-white px-6 py-4">
+                <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128257;</span> Reverse-Proxy</h2>
+                <p class="mt-1 opacity-90">Eigene Web-Services ins Internet veroeffentlichen</p>
+            </div>
+            <div class="p-6 space-y-3 text-sm">
+                <div class="bg-indigo-50 border-l-4 border-indigo-500 p-4 rounded">
+                    <p class="font-semibold text-indigo-900 mb-1">&#128161; Wofuer?</p>
+                    <p class="text-indigo-800">Du hostest zu Hause eine Nextcloud, einen Home-Assistant, Bitwarden oder ein Game-Server-Dashboard und willst es von ausserhalb erreichbar machen — ohne dass du selbst Domain, SSL und Firewall basteln musst. Du gibst nur deinen internen Backend-URL an, der Rest ist automatisch (Let's-Encrypt-Cert, Cloudflare-Tunnel optional, Authentik-Auth optional).</p>
+                </div>
+                <p><strong>Workflow:</strong></p>
+                <ol class="list-decimal list-inside space-y-1 text-gray-700">
+                    <li>Antrag mit gewuenschtem Hostname (z.B. <code class="bg-gray-100 px-1">cloud.mein-name.rosenweg4303.ch</code> oder externe Domain) + Backend-URL</li>
+                    <li>System checkt: wenn Hostname „rosenweg" enthaelt &rarr; Admin-Pruefung; sonst <strong>Auto-Approval per DNS-Check</strong></li>
+                    <li>Bei externer Domain: DNS auf <code class="bg-gray-100 px-1">public.rosenweg4303.ch</code> setzen (CNAME) oder die public IP (A). System prueft alle 5 Min, sobald korrekt &rarr; auto-aktiv.</li>
+                </ol>
+                <p class="text-gray-700"><strong>Features:</strong> SSL via Let's Encrypt, optional Authentik-Auth davor (Login-Pflicht), Rate-Limiting, public via Cloudflare-Tunnel oder intern-only.</p>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- UMLEITUNG -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="umleitung" class="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div class="bg-indigo-600 text-white px-6 py-4">
+                <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#8618;</span> Adress-Umleitung</h2>
+                <p class="mt-1 opacity-90">HTTP 301/302 von einer URL zur anderen</p>
+            </div>
+            <div class="p-6 space-y-3 text-sm">
+                <div class="bg-indigo-50 border-l-4 border-indigo-500 p-4 rounded">
+                    <p class="font-semibold text-indigo-900 mb-1">&#128161; Wofuer?</p>
+                    <p class="text-indigo-800">Du hast eine alte Domain die auf eine neue zeigen soll (<code class="bg-gray-100 px-1">alt.example.ch</code> &rarr; <code class="bg-gray-100 px-1">new.example.ch</code>) oder willst eine bestimmte URL auf eine andere weiterleiten. Anstatt selbst einen Webserver zu betreiben, traegst du's hier ein und der zentrale Proxy macht das fuer dich.</p>
+                </div>
+                <p>Antrag: Source-Host + Target-URL + HTTP-Code (301 dauerhaft / 302 temporaer) + „Path erhalten?" (ob /foo auch an target/foo angehaengt wird). DNS-Check + Auto-Approval wie bei Reverse-Proxy.</p>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- MAILSERVER -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="mailserver" class="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div class="bg-indigo-600 text-white px-6 py-4">
+                <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#9993;</span> Mailserver &amp; PMG</h2>
+                <p class="mt-1 opacity-90">Eigene Domain durch Proxmox-Mail-Gateway filtern lassen</p>
+            </div>
+            <div class="p-6 space-y-3 text-sm">
+                <div class="bg-indigo-50 border-l-4 border-indigo-500 p-4 rounded">
+                    <p class="font-semibold text-indigo-900 mb-1">&#128161; Wofuer?</p>
+                    <p class="text-indigo-800">Du betreibst selbst einen Mailserver (Mailcow, dovecot, Microsoft 365 etc.) und willst von Rosenweg's <strong>Proxmox Mail Gateway</strong> die Spam- und Virus-Filterung uebernehmen lassen. Bei uns wird gefiltert, bei dir wird ausgeliefert. PMG hat <em>keine eigenen Mailboxen</em> — er ist nur Filter.</p>
+                </div>
+                <p><strong>Setup:</strong></p>
+                <ol class="list-decimal list-inside space-y-1 text-gray-700">
+                    <li>Im ISP-Admin / „Mailserver/PMG"-Tab deine Domain eintragen + Target-Host (wohin PMG nach Filterung weiterleitet)</li>
+                    <li>DNS-MX-Record fuer deine Domain auf <code class="bg-gray-100 px-1">public.rosenweg4303.ch</code> setzen</li>
+                    <li>Auto-Check prueft den MX-Record, wenn korrekt &rarr; aktiviert</li>
+                    <li>Optional: DKIM-Selector + Key fuer Signing on the way out</li>
+                </ol>
+                <p class="text-gray-700"><strong>Status PMG:</strong> aufgesetzt im LXC CT 230 (100.64.2.31), Web-UI verfuegbar. Filter-Schaerfe konservativ eingestellt (eher durchlassen).</p>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- SHELLY DIY -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="shelly-diy" class="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div class="bg-purple-600 text-white px-6 py-4">
+                <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128268;</span> Virtuelles Shelly (PV-Ueberschuss)</h2>
+                <p class="mt-1 opacity-90">Smart-Home-Steuerung anhand des Solar-Ueberschusses</p>
+            </div>
+            <div class="p-6 space-y-3 text-sm">
+                <div class="bg-purple-50 border-l-4 border-purple-500 p-4 rounded">
+                    <p class="font-semibold text-purple-900 mb-1">&#128161; Wofuer?</p>
+                    <p class="text-purple-800">Die Solaranlage von STWEG3 (Rosenweg 9) liefert zwei Datenpunkte als virtuelles Shelly Pro 3EM ins Heimnetz: <strong>Ueberschuss ohne Boiler</strong> und <strong>Ueberschuss mit Boiler</strong> (theoretisch verfuegbar wenn Heizstab aus). Damit kannst du z.B. deine Wallbox, Klimaanlage oder Pool-Pumpe automatisch zuschalten wenn die Sonne scheint.</p>
+                </div>
+                <p>Zwei Varianten:</p>
+                <ul class="list-disc list-inside space-y-1 text-gray-700">
+                    <li><strong>Variante A</strong> &mdash; mJS-Skript auf einem deiner Shelly Plus/Pro pollt die Werte und legt sie als Virtual-Number-Components ab</li>
+                    <li><strong>Variante B</strong> &mdash; standalone Emulator-Geraet (laeuft schon zentral als <code class="bg-gray-100 px-1">shellypvrosenweg9</code> @ 100.64.90.200, mDNS-Discovery)</li>
+                </ul>
+                <p class="text-gray-700"><strong>Anleitung mit allen Schritten + Code:</strong> <a href="/shelly-emulator-howto.html" class="text-blue-600 hover:underline">/shelly-emulator-howto.html</a></p>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- PROJEKTE -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="projekte" class="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div class="bg-amber-600 text-white px-6 py-4">
+                <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128203;</span> Projekte</h2>
+                <p class="mt-1 opacity-90">STWEG-uebergreifende Vorhaben dokumentieren</p>
+            </div>
+            <div class="p-6 space-y-3 text-sm">
+                <div class="bg-amber-50 border-l-4 border-amber-500 p-4 rounded">
+                    <p class="font-semibold text-amber-900 mb-1">&#128161; Wofuer?</p>
+                    <p class="text-amber-800">Sanierung, Neuanstrich, Heizungsersatz, Fassadendaemmung — alles was groesser ist als „mal eben reparieren". Pro Projekt: Timeline, Offerten von verschiedenen Anbietern vergleichen, Kommentare, Auslagen-Buchungen, Budget vs. Ist.</p>
+                </div>
+                <p class="text-gray-700"><strong>Wer:</strong> Eigentuemer-Lese-Zugriff, Ausschuss/Technik Schreib-Zugriff. Tabs pro Projekt-Phase.</p>
+                <p class="text-gray-600 italic">&#128279; <a href="projekte.html" class="text-blue-600 hover:underline">Projekte-Uebersicht &rarr;</a></p>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- BRIEF-TRACKING -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="brief-tracking" class="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div class="bg-amber-600 text-white px-6 py-4">
+                <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#9993;</span> Brief-Tracking</h2>
+                <p class="mt-1 opacity-90">A-Post-Tracking-IDs zentral verfolgen</p>
+            </div>
+            <div class="p-6 space-y-3 text-sm">
+                <div class="bg-amber-50 border-l-4 border-amber-500 p-4 rounded">
+                    <p class="font-semibold text-amber-900 mb-1">&#128161; Wofuer?</p>
+                    <p class="text-amber-800">Wenn der Ausschuss eingeschriebene Briefe verschickt (z.B. an Eigentuemer fuer Versammlungs-Einladung), wird die Sendungsverfolgung hier dokumentiert. Foto vom Beleg per OCR &rarr; automatisch Tracking-Nr und Empfaenger erfasst. Bei jedem Status-Update der Post (zugestellt, nicht abgeholt, etc.) bekommt der Ausschuss eine Benachrichtigung.</p>
+                </div>
+                <p class="text-gray-600 italic">&#128279; <a href="brief-tracking.html" class="text-blue-600 hover:underline">Brief-Tracking &rarr;</a></p>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- E-MAIL VERTEILER -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="email-verteiler" class="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div class="bg-amber-600 text-white px-6 py-4">
+                <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128231;</span> E-Mail-Verteiler</h2>
+                <p class="mt-1 opacity-90">Gruppen-E-Mails verwalten (bewohner@, ausschuss@, ...)</p>
+            </div>
+            <div class="p-6 space-y-3 text-sm">
+                <div class="bg-amber-50 border-l-4 border-amber-500 p-4 rounded">
+                    <p class="font-semibold text-amber-900 mb-1">&#128161; Wofuer?</p>
+                    <p class="text-amber-800">Verteiler-Mails wie <code class="bg-gray-100 px-1">bewohner@rosenweg4303.ch</code>, <code class="bg-gray-100 px-1">ausschuss@</code>, <code class="bg-gray-100 px-1">technik@</code> sammeln Empfaenger live aus der Wohnungsverwaltung (Eigentuemer, Mieter, Bewohner je nach Auswahl). Was du an die Verteiler-Adresse schickst, geht automatisch an alle aktuell zugeordneten Personen.</p>
+                </div>
+                <p>Optionen:</p>
+                <ul class="list-disc list-inside space-y-1 text-gray-700">
+                    <li>Empfaenger-Quelle: Live aus Wohnungsverwaltung (z.B. „alle Eigentuemer STWEG 3") <em>oder</em> Authentik-Gruppe</li>
+                    <li>Erlaubte Sender beschraenken (sonst Bounce-Mail)</li>
+                    <li>Optional Mirror in WhatsApp-Gruppe — KI fasst Mail zusammen</li>
+                </ul>
+                <p class="text-gray-600 italic">&#128279; <a href="email-verteiler.html" class="text-blue-600 hover:underline">Verteiler-Verwaltung &rarr;</a></p>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- KONTO-LOESCHEN -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="loeschungen" class="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div class="bg-amber-600 text-white px-6 py-4">
+                <h2 class="text-2xl font-bold flex items-center gap-3"><span class="text-3xl">&#128465;</span> Konto-Loeschungen</h2>
+                <p class="mt-1 opacity-90">Authentik-Accounts nach Auszug automatisch entsorgen</p>
+            </div>
+            <div class="p-6 space-y-3 text-sm">
+                <div class="bg-amber-50 border-l-4 border-amber-500 p-4 rounded">
+                    <p class="font-semibold text-amber-900 mb-1">&#128161; Wofuer?</p>
+                    <p class="text-amber-800">Wenn jemand aus dem Rosenweg auszieht (aus den Kontakten entfernt wird), wird sein Authentik-Account nicht sofort geloescht, sondern 30 Tage als „pending" markiert. Das gibt Zeit fuer Korrekturen (Umzug innerhalb, neuer Vertrag etc.). Hier siehst du als Admin alle anstehenden Loeschungen und kannst sie cancellen oder verlaengern.</p>
+                </div>
+                <p>Aktionen pro Eintrag: 📨 Chain (welche Mails wurden geschickt?) · Cancellen · Timer +30T · Entfernen.</p>
+                <p class="text-gray-700"><strong>Wer:</strong> Technik / Praesident.</p>
+                <p class="text-gray-600 italic">&#128279; <a href="loeschungen.html" class="text-blue-600 hover:underline">Loeschungs-Verwaltung &rarr;</a></p>
             </div>
         </section>
 
