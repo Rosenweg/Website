@@ -1,0 +1,86 @@
+$ORIGIN rosenweg9.ch.
+$TTL 300
+
+; ====================================================================
+;  Cloudflare-Import fuer rosenweg9.ch
+;  Multi-Tenant-Architektur (Rosenweg-Kooperation):
+;    25       -> PMG (CT 230) — Inbound-Filter, per-domain Routing
+;    587/465  -> PMG          — Submission Multi-Tenant SASL-Proxy
+;    993      -> Traefik VIP  — SNI-Passthrough zu Mailcow CT 240
+;    443      -> CF Tunnel    — Webmail via Public Hostname
+;
+;  IMPORT:
+;    CF Dashboard -> rosenweg9.ch -> DNS -> Records -> Import and Export
+;      -> Import -> Datei waehlen -> "Proxy" Default = OFF
+;    Mail-Ports (25/587/465/993) gehen NIE durch CF-Proxy!
+; ====================================================================
+
+; --- Mail Routing ---
+@                  IN  MX   10  pmg.rosenweg4303.ch.
+
+; --- A-Records (alle Mail-Hostnames zeigen auf die public WAN-IP) ---
+;     Submission/IMAP landen ueber Port-Forward bei PMG bzw. Traefik-SNI
+mailcow            IN  A    37.17.232.133
+autodiscover       IN  A    37.17.232.133
+autoconfig         IN  A    37.17.232.133
+
+; --- SPF: nur MX (= PMG) ist legitimer Absender ---
+@                  IN  TXT  "v=spf1 mx -all"
+
+; --- DMARC: Quarantine bei Fail, strikt ---
+_dmarc             IN  TXT  "v=DMARC1; p=quarantine; rua=mailto:dmarc@rosenweg9.ch; aspf=s; adkim=s"
+
+; --- CAA: nur Let's Encrypt ---
+@                  IN  CAA  0 issue "letsencrypt.org"
+@                  IN  CAA  0 issuewild "letsencrypt.org"
+
+; --- MUA-Autoconfig SRV ---
+;     IMAPS landet ueber Traefik-SNI bei mailcow (CT 240)
+_imaps._tcp        IN  SRV  10 1 993 mailcow.rosenweg9.ch.
+;     Submission geht zentral ueber PMG (multi-tenant Auth-Proxy)
+_submission._tcp   IN  SRV  10 1 587 pmg.rosenweg4303.ch.
+
+; --- DKIM (Wert kommt aus Mailcow, nachtragen!) ---
+;dkim._domainkey   IN  TXT  "v=DKIM1; k=rsa; p=<KEY_FROM_MAILCOW>"
+
+; ====================================================================
+;  WEBMAIL via CF-TUNNEL  (kein DNS-Record in dieser Zone -- Auto-CNAME)
+;
+;  CF Zero Trust -> Networks -> Tunnels -> bestehenden Tunnel
+;    Public Hostnames -> Add:
+;      Subdomain : webmail
+;      Domain    : rosenweg9.ch
+;      Service   : HTTPS  https://100.64.2.33:443
+;      Additional settings:
+;        TLS "No TLS Verify" = ON  (Mailcow self-signed)
+;        HTTP Host Header   = mailcow.rosenweg9.ch
+;
+;  -> CF erstellt automatisch CNAME 'webmail' -> <uuid>.cfargotunnel.com (proxied)
+;  -> Webmail unter https://webmail.rosenweg9.ch
+; ====================================================================
+
+; ====================================================================
+;  NACH IMPORT + DNS-PROPAGATION (~5min):
+;
+;  1. Mailcow Login: https://mailcow.rosenweg9.ch  (Direct-A geht jetzt)
+;     ODER ueber CF-Tunnel: https://webmail.rosenweg9.ch
+;     Default: admin / moohoo -> SOFORT Admin-PW aendern!
+;
+;  2. Domain anlegen:
+;     Configuration -> Mail setup -> Domains -> Add Domain
+;       Domain: rosenweg9.ch  Aliases: 100  Mailboxes: 50
+;
+;  3. DKIM-Key:
+;     Configuration -> ARC/DKIM Keys -> Add key
+;       Domain: rosenweg9.ch  Selector: dkim  Key Size: 2048
+;     -> kopiere TXT-Wert, trage in CF nach als:
+;        dkim._domainkey IN TXT "v=DKIM1; k=rsa; p=..."
+;
+;  4. Mailbox:
+;     Mail setup -> Mailboxes -> Add: test@rosenweg9.ch
+;
+;  5. Outbound via PMG (alle ausgehenden Mails durch PMG-Filter):
+;     Configuration -> Routing -> Sender-dependent transports
+;       Sender domain : rosenweg9.ch
+;       Smarthost     : pmg.rosenweg4303.ch:26
+; ====================================================================
