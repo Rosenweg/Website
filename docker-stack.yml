@@ -12,7 +12,7 @@ services:
       - "--providers.swarm.exposedByDefault=false"
       # HTTP-Provider: liest dynamic config (Routes/Redirects/Middlewares)
       # alle 30s aus dem API. Befuellt via isp-admin.html + isp-mein-zugang.html.
-      - "--providers.http.endpoint=http://rosenweg_api:3000/api/isp/traefik-config"
+      - "--providers.http.endpoint=http://tasks.rosenweg_api:3000/api/isp/traefik-config"
       - "--providers.http.pollInterval=30s"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
