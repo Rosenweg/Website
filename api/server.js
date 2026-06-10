@@ -14779,6 +14779,15 @@ app.get('/api/isp/traefik-config', async (req, res) => {
       }
     });
 
+    // Leere Sub-Maps entfernen — Traefik weigert sich sonst beim Parsen
+    // ("middlewares cannot be a standalone element").
+    for (const top of ['http', 'tcp']) {
+      if (!config[top]) continue;
+      for (const sub of ['routers','services','middlewares']) {
+        if (config[top][sub] && Object.keys(config[top][sub]).length === 0) delete config[top][sub];
+      }
+      if (Object.keys(config[top]).length === 0) delete config[top];
+    }
     res.json(config);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
