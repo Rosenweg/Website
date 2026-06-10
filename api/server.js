@@ -12838,17 +12838,25 @@ app.post('/api/pbx/voicemail', requirePbxSecret, async (req, res) => {
           rekLine,
           transcript ? `*Transkript:*\n${transcript}` : null,
         ].filter(Boolean).join('\n\n').slice(0, 3500);
+        // 1. Text-Nachricht mit Zusammenfassung + ggf. Reklamation
         await queueWhatsappMessage({
           chatId: groupId,
           phone: groupId,
           body: waBody,
+          sourceType: 'pbx-voicemail',
+          sourceId: reklamationId || null,
+        });
+        // 2. Audio als separate Sprachnachricht (Play-Button im WA-UI)
+        await queueWhatsappMessage({
+          chatId: groupId,
+          phone: groupId,
+          body: '',
           attachments: [{
             mimetype: 'audio/wav',
             data_base64: audioBuf.toString('base64'),
             filename: `voicemail-${callerId}-${uniqueid}.wav`,
           }],
           sourceType: 'pbx-voicemail',
-          // source_id ist INT — reklamationId nutzen falls vorhanden, sonst null
           sourceId: reklamationId || null,
         });
         console.log(`[pbx-voicemail] WA an Gruppe ${groupId} gequeued`);
