@@ -569,11 +569,11 @@
       </div>`).join('');
   }
   async function openMailboxModal() {
-    // Nur Mailcow-managed Relays auflisten
+    // Nur Domains fuer die der User berechtigt ist
     let relays = [];
     try {
-      const r = await AuthentikAuth.apiFetch('/api/isp/mail-relays');
-      relays = ((await r.json()).mail_relays || []).filter(r => r.mailcow_managed);
+      const r = await AuthentikAuth.apiFetch('/api/isp/mailbox-eligible-relays');
+      relays = (await r.json()).relays || [];
     } catch {}
     const relayOpts = relays.length === 0
       ? `<p class="text-xs text-red-600 italic">Keine von Rosenweg verwaltete Mail-Domain verfuegbar. (Wenn dies falsch ist, Admin kontaktieren.)</p>`

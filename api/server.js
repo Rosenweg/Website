@@ -14815,6 +14815,20 @@ async function mailcowApi(method, path, body) {
 // User auf isp-mein-zugang sieht/beantragt Mailboxes fuer eigene Mail-Relays
 // mit mailcow_managed=true. Admin auf isp-admin approved + provisioniert.
 
+// GET: Liste der Domains fuer die der User Mailboxes beantragen darf
+// (mailcow_managed + allowed_groups matchen User-Gruppen)
+app.get('/api/isp/mailbox-eligible-relays', authMiddleware, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT id, domain, allowed_groups FROM isp_mail_relays
+        WHERE active = true AND mailcow_managed = true
+        ORDER BY domain`,
+    );
+    const eligible = r.rows.filter(rel => ispIsAdmin(req) || isAllowedForRelay(req.user, rel));
+    res.json({ relays: eligible.map(r => ({ id: r.id, domain: r.domain })) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // GET: eigene Antraege + bestehende Mailcow-Mailboxes pro Relay
 app.get('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
   try {
@@ -14839,6 +14853,15 @@ app.get('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Prueft ob der User berechtigt ist Mailboxes fuer das Relay zu beantragen.
+// allowed_groups = NULL -> jeder. Sonst muss min. eine Gruppe matchen
+// (Authentik-Hierarchie: r9-eigentuemer impliziert eigentuemer etc.).
+function isAllowedForRelay(user, relay) {
+  if (!relay.allowed_groups || relay.allowed_groups.length === 0) return true;
+  const userGroups = (user.groups || []).map(g => g.toLowerCase());
+  return relay.allowed_groups.some(g => userGroups.includes(g.toLowerCase()));
+}
+
 // POST: neuer Antrag (status=pending)
 app.post('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
   try {
@@ -14847,10 +14870,13 @@ app.post('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
     const lp = String(b.local_part).toLowerCase().replace(/[^a-z0-9._-]/g, '');
     if (!lp) return res.status(400).json({ error: 'local_part ungueltig (nur a-z0-9._-)' });
     // Relay muss existieren + mailcow_managed sein
-    const rel = await pool.query('SELECT id, domain, owner_email, mailcow_managed FROM isp_mail_relays WHERE id = $1', [b.relay_id]);
+    const rel = await pool.query('SELECT id, domain, owner_email, mailcow_managed, allowed_groups FROM isp_mail_relays WHERE id = $1', [b.relay_id]);
     if (rel.rows.length === 0) return res.status(404).json({ error: 'Mail-Relay nicht gefunden' });
     if (!rel.rows[0].mailcow_managed && !ispIsAdmin(req)) {
       return res.status(400).json({ error: 'Diese Domain wird nicht von Rosenweg verwaltet — Mailbox-Provisionierung beim Domain-Owner' });
+    }
+    if (!ispIsAdmin(req) && !isAllowedForRelay(req.user, rel.rows[0])) {
+      return res.status(403).json({ error: `Mailboxen fuer ${rel.rows[0].domain} sind nur fuer berechtigte STWEG-Mitglieder verfuegbar` });
     }
     const ins = await pool.query(
       `INSERT INTO mailbox_requests
@@ -17248,6 +17274,10 @@ async function initDB() {
       -- mailcow_managed=true: Rosenweg betreibt die Mailcow-Instanz fuer diese Domain,
       -- d.h. wir koennen via Mailcow-API Mailboxes anlegen/loeschen/Passwort setzen.
       ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS mailcow_managed BOOLEAN DEFAULT false;
+      -- allowed_groups: Authentik-Gruppen die Mailboxes fuer diese Domain beantragen
+      -- duerfen. NULL = jeder eingeloggte User. Beispiel rosenweg9.ch:
+      -- ['r9-eigentuemer','r9-bewohner','stweg3-eigentuemer','stweg3-bewohner','stweg3-ausschuss']
+      ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS allowed_groups TEXT[];
 
       -- Mailbox-Onboarding: User-Antraege fuer rosenweg-managed Domains.
       -- Status: pending (Admin pruefen) -> approved (provisioniert in Mailcow)
