@@ -1,0 +1,59 @@
+;;
+;; Domain:     rosenweg9.ch.
+;; Exported:   2026-06-09 19:13:37
+;;
+;; This file is intended for use for informational and archival
+;; purposes ONLY and MUST be edited before use on a production
+;; DNS server.  In particular, you must:
+;;   -- update the SOA record with the correct authoritative name server
+;;   -- update the SOA record with the contact e-mail address information
+;;   -- update the NS record(s) with the authoritative name servers for this domain.
+;;
+;; For further information, please consult the BIND documentation
+;; located on the following website:
+;;
+;; http://www.isc.org/
+;;
+;; And RFC 1035:
+;;
+;; http://www.ietf.org/rfc/rfc1035.txt
+;;
+;; Please note that we do NOT offer technical support for any use
+;; of this zone data, the BIND name server, or any other third-party
+;; DNS software.
+;;
+;; Use at your own risk.
+;; SOA Record
+rosenweg9.ch	3600	IN	SOA	matt.ns.cloudflare.com. dns.cloudflare.com. 2053269901 10000 2400 604800 3600
+
+;; NS Records
+rosenweg9.ch.	86400	IN	NS	matt.ns.cloudflare.com.
+rosenweg9.ch.	86400	IN	NS	sloan.ns.cloudflare.com.
+
+;; A Records
+autoconfig.rosenweg9.ch.	300	IN	A	37.17.232.133 ; cf_tags=cf-proxied:false
+autodiscover.rosenweg9.ch.	300	IN	A	37.17.232.133 ; cf_tags=cf-proxied:false
+mailcow.rosenweg9.ch.	300	IN	A	37.17.232.133 ; cf_tags=cf-proxied:false
+smartfox.rosenweg9.ch.	1	IN	A	100.64.90.62 ; cf_tags=cf-proxied:false
+
+;; CAA Records
+rosenweg9.ch.	300	IN	CAA	0 issue "letsencrypt.org"
+rosenweg9.ch.	300	IN	CAA	0 issuewild "letsencrypt.org"
+
+;; CNAME Records
+admin.rosenweg9.ch.	1	IN	CNAME	38e113ea-e986-4bd0-b2fe-a2bdd7ad0575.cfargotunnel.com. ; cf_tags=cf-proxied:true
+nextcloud.rosenweg9.ch.	1	IN	CNAME	nextcloud.rosenweg4303.ch. ; cf_tags=cf-proxied:false
+rosenweg9.ch.	1	IN	CNAME	af2dc45e-2d4e-47cf-9d72-ac4ce71d96ec.cfargotunnel.com. ; cf_tags=cf-proxied:true
+webmail.rosenweg9.ch.	1	IN	CNAME	af2dc45e-2d4e-47cf-9d72-ac4ce71d96ec.cfargotunnel.com. ; Mailcow Webmail via CF Tunnel cf_tags=cf-proxied:true
+www.rosenweg9.ch.	1	IN	CNAME	af2dc45e-2d4e-47cf-9d72-ac4ce71d96ec.cfargotunnel.com. ; cf_tags=cf-proxied:true
+
+;; MX Records
+rosenweg9.ch.	300	IN	MX	10 pmg.rosenweg4303.ch.
+
+;; SRV Records
+_imaps._tcp.rosenweg9.ch.	300	IN	SRV	10 1 993 mailcow.rosenweg9.ch.
+_submission._tcp.rosenweg9.ch.	300	IN	SRV	10 1 587 pmg.rosenweg4303.ch.
+
+;; TXT Records
+_dmarc.rosenweg9.ch.	300	IN	TXT	"v=DMARC1; p=quarantine; rua=mailto:dmarc@rosenweg9.ch; aspf=s; adkim=s"
+rosenweg9.ch.	300	IN	TXT	"v=spf1 mx -all"
