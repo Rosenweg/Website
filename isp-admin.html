@@ -722,56 +722,91 @@
       pending_admin: '<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded">Admin-Pruefung</span>',
       rejected: '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded">abgelehnt</span>',
     })[s] || '';
-    wrap.innerHTML = mailRelays.map(m => `
+    wrap.innerHTML = mailRelays.map(m => {
+      const tcpInfo = [];
+      if (m.imap_sni_hostname) tcpInfo.push(`IMAPS <code>${esc(m.imap_sni_hostname)}</code> → <code>${esc(m.imap_host)}:${m.imap_port || 993}</code>`);
+      if (m.smtps_sni_hostname) tcpInfo.push(`SMTPS <code>${esc(m.smtps_sni_hostname)}</code> → <code>${esc(m.smtps_host)}:${m.smtps_port || 465}</code>`);
+      return `
       <div class="bg-white border rounded p-3">
         <div class="flex items-start justify-between flex-wrap gap-2 mb-1">
           <div>
             <strong class="font-mono">${esc(m.domain)}</strong>
             ${statusBadge(m.approval_status)}
             ${m.active ? '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded ml-1">aktiv</span>' : '<span class="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded ml-1">inaktiv</span>'}
+            ${m.mailcow_managed ? '<span class="text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded ml-1">Rosenweg-managed</span>' : ''}
             <span class="text-xs text-gray-500 ml-1">Owner: ${esc(m.owner_email || '—')}</span>
           </div>
           <div class="flex gap-1">
             ${m.approval_status === 'pending_dns' ? `<button onclick="recheckRelay(${m.id})" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">MX pruefen</button>` : ''}
+            <button onclick="openRelayModal(${m.id})" class="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded hover:bg-gray-200">Bearbeiten</button>
             <button onclick="delRelay(${m.id})" class="text-xs text-red-600 hover:underline px-2">Loeschen</button>
           </div>
         </div>
         <div class="text-xs text-gray-600">→ <span class="font-mono">${esc(m.target_host)}:${m.target_port || 25}</span>${m.target_use_mx ? ' <span class="bg-blue-100 text-blue-700 px-1 rounded">MX-Lookup</span>' : ''}</div>
         ${m.dkim_selector ? `<div class="text-xs text-gray-500">DKIM-Selector: <code>${esc(m.dkim_selector)}</code></div>` : ''}
+        ${tcpInfo.length ? `<div class="text-xs text-gray-500 mt-1">${tcpInfo.join(' · ')}</div>` : ''}
+        ${(m.allowed_groups && m.allowed_groups.length) ? `<div class="text-xs text-gray-500 mt-1">Erlaubte Gruppen: ${m.allowed_groups.map(g => `<code class="bg-gray-100 px-1 rounded">${esc(g)}</code>`).join(' ')}</div>` : ''}
         ${m.approval_reason ? `<div class="text-xs text-gray-500 italic mt-1">${esc(m.approval_reason)}</div>` : ''}
-      </div>`).join('');
+      </div>`;
+    }).join('');
   }
-  async function openRelayModal() {
+  async function openRelayModal(editId = null) {
     let dnsInfo = {};
     try { dnsInfo = await (await AuthentikAuth.apiFetch('/api/isp/dns-info')).json(); } catch {}
     const pmgMx = dnsInfo.pmg_hostname || 'pmg.rosenweg4303.ch';
+    const m = editId ? (mailRelays.find(x => x.id === editId) || {}) : {};
+    const isEdit = !!editId;
+    const allowedGroupsCsv = (m.allowed_groups || []).join(', ');
     const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5 max-h-[90vh] overflow-y-auto">
-        <h2 class="font-bold mb-3">Mail-Relay erfassen</h2>
-        <div class="bg-blue-50 border border-blue-200 rounded p-3 mb-3 text-xs space-y-1">
+        <h2 class="font-bold mb-3">${isEdit ? 'Mail-Relay bearbeiten' : 'Mail-Relay erfassen'}</h2>
+        ${isEdit ? '' : `<div class="bg-blue-50 border border-blue-200 rounded p-3 mb-3 text-xs space-y-1">
           <p class="font-semibold text-blue-900">📋 DNS-Konfig fuer deine Domain:</p>
           <p><strong>MX 10:</strong> <code class="bg-white px-1 rounded">${esc(pmgMx)}.</code></p>
           <p class="text-blue-700 pt-1">PMG nimmt Mails an, filtert (Spam/Antivirus) und reicht weiter an dein <code>target_host</code>. Pruefung alle 5 Min.</p>
-        </div>
+        </div>`}
         <div class="space-y-2 text-sm">
-          <div><label class="block text-xs text-gray-600">Domain *</label><input id="rel-dom" placeholder="meinedomain.ch" class="w-full border rounded px-2 py-1"></div>
+          <div><label class="block text-xs text-gray-600">Domain *</label><input id="rel-dom" value="${esc(m.domain || '')}" ${isEdit && !user?.isAdmin ? 'disabled' : ''} placeholder="meinedomain.ch" class="w-full border rounded px-2 py-1"></div>
           <div class="grid grid-cols-3 gap-2">
-            <div class="col-span-2"><label class="block text-xs text-gray-600">Ziel-Host *</label><input id="rel-host" placeholder="mail.meinedomain.ch" class="w-full border rounded px-2 py-1"></div>
-            <div><label class="block text-xs text-gray-600">Port</label><input id="rel-port" type="number" value="25" class="w-full border rounded px-2 py-1"></div>
+            <div class="col-span-2"><label class="block text-xs text-gray-600">Ziel-Host *</label><input id="rel-host" value="${esc(m.target_host || '')}" placeholder="mail.meinedomain.ch" class="w-full border rounded px-2 py-1"></div>
+            <div><label class="block text-xs text-gray-600">Port</label><input id="rel-port" type="number" value="${m.target_port || 25}" class="w-full border rounded px-2 py-1"></div>
           </div>
-          <div><label class="flex items-center gap-2 text-sm"><input id="rel-mx" type="checkbox" class="rounded"> MX-Lookup statt Direct-Host</label></div>
-          <div><label class="block text-xs text-gray-600">DKIM-Selector <span class="text-gray-400">(optional)</span></label><input id="rel-dkim" placeholder="default" class="w-full border rounded px-2 py-1"></div>
-          ${user?.isAdmin ? `<div><label class="block text-xs text-gray-600">Owner-Email <span class="text-gray-400">(Admin)</span></label><input id="rel-owner" placeholder="user@..." class="w-full border rounded px-2 py-1"></div>` : ''}
-          <div><label class="block text-xs text-gray-600">Notizen</label><textarea id="rel-notiz" rows="2" class="w-full border rounded px-2 py-1"></textarea></div>
+          <div><label class="flex items-center gap-2 text-sm"><input id="rel-mx" type="checkbox" class="rounded"${m.target_use_mx ? ' checked' : ''}> MX-Lookup statt Direct-Host</label></div>
+          <div><label class="block text-xs text-gray-600">DKIM-Selector <span class="text-gray-400">(optional)</span></label><input id="rel-dkim" value="${esc(m.dkim_selector || '')}" placeholder="default" class="w-full border rounded px-2 py-1"></div>
+          ${user?.isAdmin ? `<div><label class="block text-xs text-gray-600">Owner-Email <span class="text-gray-400">(Admin)</span></label><input id="rel-owner" value="${esc(m.owner_email || '')}" placeholder="user@..." class="w-full border rounded px-2 py-1"></div>` : ''}
+          <div><label class="block text-xs text-gray-600">Notizen</label><textarea id="rel-notiz" rows="2" class="w-full border rounded px-2 py-1">${esc(m.notizen || '')}</textarea></div>
+
+          ${user?.isAdmin ? `
+          <details class="border rounded p-2 bg-gray-50" ${(m.imap_sni_hostname || m.smtps_sni_hostname || m.mailcow_managed) ? 'open' : ''}>
+            <summary class="cursor-pointer text-xs font-semibold text-gray-700">⚙ TCP-Relay (IMAPS/SMTPS) + Rosenweg-managed (Admin)</summary>
+            <div class="mt-2 space-y-2">
+              <p class="text-xs text-gray-500">Traefik routet :993/:465 per SNI-Passthrough an deinen Ziel-Host. Felder leer → kein TCP-Routing.</p>
+              <div class="grid grid-cols-3 gap-2">
+                <div class="col-span-2"><label class="block text-xs text-gray-600">IMAPS SNI-Hostname</label><input id="rel-imap-sni" value="${esc(m.imap_sni_hostname || '')}" placeholder="imap.meinedomain.ch" class="w-full border rounded px-2 py-1 text-xs"></div>
+                <div><label class="block text-xs text-gray-600">Port</label><input id="rel-imap-port" type="number" value="${m.imap_port || 993}" class="w-full border rounded px-2 py-1 text-xs"></div>
+              </div>
+              <div><label class="block text-xs text-gray-600">IMAPS Ziel-Host</label><input id="rel-imap-host" value="${esc(m.imap_host || '')}" placeholder="100.64.2.33" class="w-full border rounded px-2 py-1 text-xs"></div>
+              <div class="grid grid-cols-3 gap-2">
+                <div class="col-span-2"><label class="block text-xs text-gray-600">SMTPS SNI-Hostname</label><input id="rel-smtps-sni" value="${esc(m.smtps_sni_hostname || '')}" placeholder="smtp.meinedomain.ch" class="w-full border rounded px-2 py-1 text-xs"></div>
+                <div><label class="block text-xs text-gray-600">Port</label><input id="rel-smtps-port" type="number" value="${m.smtps_port || 465}" class="w-full border rounded px-2 py-1 text-xs"></div>
+              </div>
+              <div><label class="block text-xs text-gray-600">SMTPS Ziel-Host</label><input id="rel-smtps-host" value="${esc(m.smtps_host || '')}" placeholder="100.64.2.33" class="w-full border rounded px-2 py-1 text-xs"></div>
+              <hr class="my-2">
+              <div><label class="flex items-center gap-2 text-sm"><input id="rel-managed" type="checkbox" class="rounded"${m.mailcow_managed ? ' checked' : ''}> Rosenweg-managed (Mailboxes via Mailcow)</label></div>
+              <div><label class="block text-xs text-gray-600">Erlaubte Authentik-Gruppen <span class="text-gray-400">(komma-getrennt; leer = jeder mit Mailcow-Zugriff)</span></label><input id="rel-groups" value="${esc(allowedGroupsCsv)}" placeholder="r9-eigentuemer, stweg3-eigentuemer" class="w-full border rounded px-2 py-1 text-xs"></div>
+            </div>
+          </details>` : ''}
         </div>
         <div class="flex justify-end gap-2 mt-3">
           <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Abbrechen</button>
-          <button onclick="saveRelay()" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm">Speichern</button>
+          <button onclick="saveRelay(${editId || 'null'})" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm">Speichern</button>
         </div>
       </div></div>`;
     document.body.insertAdjacentHTML('beforeend', html);
   }
-  async function saveRelay() {
+  async function saveRelay(editId = null) {
+    const groupsCsv = document.getElementById('rel-groups')?.value || '';
+    const groups = groupsCsv.split(',').map(s => s.trim()).filter(Boolean);
     const body = {
       domain: document.getElementById('rel-dom').value.trim().toLowerCase(),
       target_host: document.getElementById('rel-host').value.trim(),
@@ -780,10 +815,20 @@
       dkim_selector: document.getElementById('rel-dkim').value.trim() || null,
       owner_email: document.getElementById('rel-owner')?.value.trim() || null,
       notizen: document.getElementById('rel-notiz').value || null,
+      imap_sni_hostname: document.getElementById('rel-imap-sni')?.value.trim() || null,
+      imap_host:         document.getElementById('rel-imap-host')?.value.trim() || null,
+      imap_port:         parseInt(document.getElementById('rel-imap-port')?.value, 10) || 993,
+      smtps_sni_hostname: document.getElementById('rel-smtps-sni')?.value.trim() || null,
+      smtps_host:         document.getElementById('rel-smtps-host')?.value.trim() || null,
+      smtps_port:         parseInt(document.getElementById('rel-smtps-port')?.value, 10) || 465,
+      mailcow_managed: !!document.getElementById('rel-managed')?.checked,
+      allowed_groups: groups.length ? groups : null,
     };
     if (!body.domain || !body.target_host) { alert('Domain + Ziel-Host Pflicht.'); return; }
     try {
-      const r = await AuthentikAuth.apiFetch('/api/isp/mail-relays', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const url = editId ? '/api/isp/mail-relays/' + editId : '/api/isp/mail-relays';
+      const method = editId ? 'PUT' : 'POST';
+      const r = await AuthentikAuth.apiFetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
       if (!r.ok) throw new Error(await r.text());
       document.querySelector('.fixed')?.remove();
       await loadRelays();

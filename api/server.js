@@ -15240,22 +15240,29 @@ app.post('/api/isp/mail-relays', authMiddleware, async (req, res) => {
     const decision = ispIsAdmin(req) && b.skip_approval
       ? { approval_status: 'approved', approval_reason: 'Admin-Bypass', active: true }
       : await ispDecideApproval(b.domain);
+    // mailcow_managed + allowed_groups nur fuer Admin (sonst koennte sich jeder
+    // selbst eine "Rosenweg-verwaltete" Domain anlegen).
+    const mailcowManaged = ispIsAdmin(req) ? !!b.mailcow_managed : false;
+    const allowedGroups = (ispIsAdmin(req) && Array.isArray(b.allowed_groups) && b.allowed_groups.length)
+      ? b.allowed_groups : null;
     const r = await pool.query(
       `INSERT INTO isp_mail_relays (domain, target_host, target_port, target_use_mx,
                                      owner_email, wohnung_id, dkim_selector,
                                      approval_status, approval_reason, dns_verified_at,
                                      last_dns_check_at, active, notizen,
                                      imap_sni_hostname, imap_host, imap_port,
-                                     smtps_sni_hostname, smtps_host, smtps_port)
+                                     smtps_sni_hostname, smtps_host, smtps_port,
+                                     mailcow_managed, allowed_groups)
        VALUES ($1,$2,COALESCE($3,25),COALESCE($4,false),$5,$6,$7,$8,$9,$10,$11,$12,$13,
-               $14,$15,COALESCE($16,993),$17,$18,COALESCE($19,465)) RETURNING *`,
+               $14,$15,COALESCE($16,993),$17,$18,COALESCE($19,465),$20,$21) RETURNING *`,
       [b.domain.toLowerCase(), b.target_host, b.target_port, b.target_use_mx,
        owner, b.wohnung_id || null, b.dkim_selector || null,
        decision.approval_status, decision.approval_reason,
        decision.dns_verified_at || null, decision.last_dns_check_at || null,
        decision.active, b.notizen || null,
        b.imap_sni_hostname || null, b.imap_host || null, b.imap_port,
-       b.smtps_sni_hostname || null, b.smtps_host || null, b.smtps_port],
+       b.smtps_sni_hostname || null, b.smtps_host || null, b.smtps_port,
+       mailcowManaged, allowedGroups],
     );
     res.json({ ...r.rows[0], dns_info: ispResolveTarget() });
   } catch (err) {
@@ -15279,7 +15286,8 @@ app.put('/api/isp/mail-relays/:id', authMiddleware, async (req, res) => {
     const userFields = ['target_host','target_port','target_use_mx','dkim_selector','active','notizen',
                         'imap_sni_hostname','imap_host','imap_port',
                         'smtps_sni_hostname','smtps_host','smtps_port'];
-    const adminFields = ['domain','owner_email','wohnung_id','approval_status','approval_reason','dkim_private_key'];
+    const adminFields = ['domain','owner_email','wohnung_id','approval_status','approval_reason','dkim_private_key',
+                         'mailcow_managed','allowed_groups'];
     const allowed = admin ? [...userFields, ...adminFields] : userFields;
     for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
     if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
