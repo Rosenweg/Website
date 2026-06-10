@@ -462,6 +462,22 @@
           </div>
           <div><label class="flex items-center gap-2 text-sm"><input id="rel-mx" type="checkbox" class="rounded"> MX-Lookup statt Direct-Host</label></div>
           <div><label class="block text-xs text-gray-600">DKIM-Selector <span class="text-gray-400">(optional)</span></label><input id="rel-dkim" placeholder="default" class="w-full border rounded px-2 py-1"></div>
+
+          <details class="border rounded p-2 bg-gray-50">
+            <summary class="text-xs text-gray-700 font-semibold cursor-pointer">📡 Optional: User-Submission &amp; IMAP via Rosenweg-Infrastruktur</summary>
+            <p class="text-xs text-gray-500 mt-2">User connecten dann zu unserer Public-IP statt direkt zu deinem Server. Voraussetzung: dein Server hat ein gueltiges TLS-Zert (das wird durch TLS-Passthrough zum User durchgereicht).</p>
+            <div class="grid grid-cols-3 gap-2 mt-2">
+              <div class="col-span-2"><label class="block text-xs text-gray-600">IMAPS Hostname (SNI)</label><input id="rel-imap-sni" placeholder="mail.meinedomain.ch" class="w-full border rounded px-2 py-1"></div>
+              <div><label class="block text-xs text-gray-600">Port</label><input id="rel-imap-port" type="number" value="993" class="w-full border rounded px-2 py-1"></div>
+            </div>
+            <div><label class="block text-xs text-gray-600 mt-1">IMAPS Backend-Host</label><input id="rel-imap-host" placeholder="z.B. 10.0.5.10 oder mail.meinedomain.ch" class="w-full border rounded px-2 py-1"></div>
+            <div class="grid grid-cols-3 gap-2 mt-2">
+              <div class="col-span-2"><label class="block text-xs text-gray-600">SMTPS Hostname (SNI)</label><input id="rel-smtps-sni" placeholder="mail.meinedomain.ch" class="w-full border rounded px-2 py-1"></div>
+              <div><label class="block text-xs text-gray-600">Port</label><input id="rel-smtps-port" type="number" value="465" class="w-full border rounded px-2 py-1"></div>
+            </div>
+            <div><label class="block text-xs text-gray-600 mt-1">SMTPS Backend-Host</label><input id="rel-smtps-host" placeholder="z.B. 10.0.5.10 oder mail.meinedomain.ch" class="w-full border rounded px-2 py-1"></div>
+          </details>
+
           <div><label class="block text-xs text-gray-600">Notizen</label><textarea id="rel-notiz" rows="2" class="w-full border rounded px-2 py-1"></textarea></div>
         </div>
         <div class="flex justify-end gap-2 mt-3">
@@ -478,6 +494,12 @@
       target_port: parseInt(document.getElementById('rel-port').value, 10) || 25,
       target_use_mx: document.getElementById('rel-mx').checked,
       dkim_selector: document.getElementById('rel-dkim').value.trim() || null,
+      imap_sni_hostname: document.getElementById('rel-imap-sni')?.value.trim() || null,
+      imap_host:         document.getElementById('rel-imap-host')?.value.trim() || null,
+      imap_port:         parseInt(document.getElementById('rel-imap-port')?.value, 10) || 993,
+      smtps_sni_hostname: document.getElementById('rel-smtps-sni')?.value.trim() || null,
+      smtps_host:         document.getElementById('rel-smtps-host')?.value.trim() || null,
+      smtps_port:         parseInt(document.getElementById('rel-smtps-port')?.value, 10) || 465,
       notizen: document.getElementById('rel-notiz').value || null,
     };
     if (!body.domain || !body.target_host) { alert('Domain + Ziel-Host Pflicht.'); return; }

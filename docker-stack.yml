@@ -16,6 +16,10 @@ services:
       - "--providers.http.pollInterval=30s"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
+      # TCP-Entrypoint fuer Multi-Tenant IMAPS via HostSNI passthrough
+      - "--entrypoints.imaps.address=:993"
+      # SMTPS (Submission ueber TLS) — als Vorbereitung fuer Phase-2 multi-tenant
+      - "--entrypoints.smtps.address=:465"
       - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
       - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
@@ -28,6 +32,8 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      - "993:993"
+      - "465:465"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - traefik-certs:/letsencrypt
