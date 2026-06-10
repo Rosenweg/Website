@@ -286,6 +286,10 @@ async function pollOutbox() {
           headers: { 'Content-Type': 'application/json', 'X-WA-Secret': WA_SECRET },
           body: JSON.stringify({ message_id: m.id, status: 'sent' }),
         });
+        // 800ms Pause zwischen Outbox-Sends damit WhatsApp die Reihenfolge
+        // einhaelt — sonst ueberholt eine schnell-hochgeladene Voice-Note
+        // gerne die noch zustellende Text-Nachricht.
+        await new Promise(r => setTimeout(r, 800));
       } catch (err) {
         // err.message kann bei whatsapp-web.js single-char sein; stack mitloggen
         const detailedErr = err.stack || `${err.name || ''}: ${err.message || ''}` || String(err);
