@@ -15205,7 +15205,10 @@ app.delete('/api/isp/mailbox-requests/:id', authMiddleware, async (req, res) => 
       try { await mailcowApi('POST', '/delete/mailbox', [`${mr.local_part}@${mr.domain}`]); }
       catch (mcErr) { console.warn('[mailbox-delete] Mailcow:', mcErr.message); }
     }
-    await pool.query(`UPDATE mailbox_requests SET status='deleted', initial_password=NULL, updated_at=NOW() WHERE id=$1`, [id]);
+    // Hard-delete: Zeile entfernen, damit der Local-Part wieder
+    // verfuegbar ist (UNIQUE-Constraint blockiert sonst Neu-Anlage).
+    // Audit-Trail laeuft ueber den WA-Notify-Eintrag.
+    await pool.query(`DELETE FROM mailbox_requests WHERE id=$1`, [id]);
     notifyTechnikMailbox(
       `🗑 *Mailbox geloescht*\n${mr.local_part}@${mr.domain}\nvon ${ownerEmail || '—'}\ndurch ${req.user.email}`,
     );
@@ -17524,6 +17527,9 @@ async function initDB() {
       -- Backfill: bestehende Antraege ohne assigned_user_email = persoenlich.
       UPDATE mailbox_requests SET assigned_user_email = antragsteller_email
        WHERE assigned_user_email IS NULL AND antragsteller_email IS NOT NULL;
+      -- Alt-Zeilen mit status='deleted' raeumen (waren Soft-Deletes, blockten
+      -- die UNIQUE-Constraint fuer neue Antraege).
+      DELETE FROM mailbox_requests WHERE status='deleted';
 
       -- isp_mailboxes ist veraltet (PMG hat keine eigenen Mailboxes).
       -- Tabelle bleibt fuer Backward-Compat, wird nicht mehr benutzt.
