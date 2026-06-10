@@ -14677,7 +14677,8 @@ app.get('/api/isp/traefik-config', async (req, res) => {
   try {
     const routes = (await pool.query(`SELECT * FROM isp_reverse_proxy_routes WHERE active = true`)).rows;
     const redirects = (await pool.query(`SELECT * FROM isp_redirects WHERE active = true`)).rows;
-    const config = { http: { routers: {}, services: {}, middlewares: {} } };
+    const mailRelays = (await pool.query(`SELECT * FROM isp_mail_relays WHERE active = true`)).rows;
+    const config = { http: { routers: {}, services: {}, middlewares: {} }, tcp: { routers: {}, services: {} } };
 
     // Reverse-Proxy-Routen
     routes.forEach((r, i) => {
@@ -14741,6 +14742,43 @@ app.get('/api/isp/traefik-config', async (req, res) => {
       };
     });
 
+    // TCP-Router: Multi-Tenant IMAPS/SMTPS via SNI-Passthrough
+    // Pro Mail-Relay mit konfiguriertem imap_host bzw. smtps_host wird ein
+    // TCP-Router angelegt, der TLS NICHT terminiert (passthrough). Der Client
+    // sieht das End-Zertifikat des Backend-Servers direkt.
+    mailRelays.forEach(mr => {
+      // IMAPS (port 993)
+      if (mr.imap_host && mr.imap_sni_hostname) {
+        const id = 'imaps_' + mr.id;
+        config.tcp.routers[id] = {
+          entryPoints: ['imaps'],
+          rule: `HostSNI(\`${mr.imap_sni_hostname}\`)`,
+          service: id,
+          tls: { passthrough: true },
+        };
+        config.tcp.services[id] = {
+          loadBalancer: {
+            servers: [{ address: `${mr.imap_host}:${mr.imap_port || 993}` }],
+          },
+        };
+      }
+      // SMTPS (port 465)
+      if (mr.smtps_host && mr.smtps_sni_hostname) {
+        const id = 'smtps_' + mr.id;
+        config.tcp.routers[id] = {
+          entryPoints: ['smtps'],
+          rule: `HostSNI(\`${mr.smtps_sni_hostname}\`)`,
+          service: id,
+          tls: { passthrough: true },
+        };
+        config.tcp.services[id] = {
+          loadBalancer: {
+            servers: [{ address: `${mr.smtps_host}:${mr.smtps_port || 465}` }],
+          },
+        };
+      }
+    });
+
     res.json(config);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -14773,13 +14811,18 @@ app.post('/api/isp/mail-relays', authMiddleware, async (req, res) => {
       `INSERT INTO isp_mail_relays (domain, target_host, target_port, target_use_mx,
                                      owner_email, wohnung_id, dkim_selector,
                                      approval_status, approval_reason, dns_verified_at,
-                                     last_dns_check_at, active, notizen)
-       VALUES ($1,$2,COALESCE($3,25),COALESCE($4,false),$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+                                     last_dns_check_at, active, notizen,
+                                     imap_sni_hostname, imap_host, imap_port,
+                                     smtps_sni_hostname, smtps_host, smtps_port)
+       VALUES ($1,$2,COALESCE($3,25),COALESCE($4,false),$5,$6,$7,$8,$9,$10,$11,$12,$13,
+               $14,$15,COALESCE($16,993),$17,$18,COALESCE($19,465)) RETURNING *`,
       [b.domain.toLowerCase(), b.target_host, b.target_port, b.target_use_mx,
        owner, b.wohnung_id || null, b.dkim_selector || null,
        decision.approval_status, decision.approval_reason,
        decision.dns_verified_at || null, decision.last_dns_check_at || null,
-       decision.active, b.notizen || null],
+       decision.active, b.notizen || null,
+       b.imap_sni_hostname || null, b.imap_host || null, b.imap_port,
+       b.smtps_sni_hostname || null, b.smtps_host || null, b.smtps_port],
     );
     res.json({ ...r.rows[0], dns_info: ispResolveTarget() });
   } catch (err) {
@@ -14800,7 +14843,9 @@ app.put('/api/isp/mail-relays/:id', authMiddleware, async (req, res) => {
     const b = req.body || {};
     const updates = []; const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
-    const userFields = ['target_host','target_port','target_use_mx','dkim_selector','active','notizen'];
+    const userFields = ['target_host','target_port','target_use_mx','dkim_selector','active','notizen',
+                        'imap_sni_hostname','imap_host','imap_port',
+                        'smtps_sni_hostname','smtps_host','smtps_port'];
     const adminFields = ['domain','owner_email','wohnung_id','approval_status','approval_reason','dkim_private_key'];
     const allowed = admin ? [...userFields, ...adminFields] : userFields;
     for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
@@ -17002,6 +17047,14 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_isp_mr_owner ON isp_mail_relays(LOWER(owner_email));
       CREATE INDEX IF NOT EXISTS idx_isp_mr_active ON isp_mail_relays(active);
+
+      -- Multi-Tenant IMAPS/SMTPS Backend (TCP-Passthrough via Traefik HostSNI auf :993/:465)
+      ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS imap_sni_hostname VARCHAR(255);
+      ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS imap_host VARCHAR(255);
+      ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS imap_port INTEGER DEFAULT 993;
+      ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS smtps_sni_hostname VARCHAR(255);
+      ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS smtps_host VARCHAR(255);
+      ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS smtps_port INTEGER DEFAULT 465;
 
       -- isp_mailboxes ist veraltet (PMG hat keine eigenen Mailboxes).
       -- Tabelle bleibt fuer Backward-Compat, wird nicht mehr benutzt.
