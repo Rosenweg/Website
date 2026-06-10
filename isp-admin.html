@@ -98,19 +98,12 @@
 
         <div class="flex items-center justify-between mb-2 mt-6 flex-wrap gap-2">
           <div>
-            <h3 class="font-semibold text-gray-800">Mailbox-Antraege <span id="mbq-pending-badge" class="hidden text-xs bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded ml-1">0</span></h3>
-            <p class="text-xs text-gray-500">Self-Service-Antraege fuer Rosenweg-managed Mail-Domains (rosenweg9.ch etc.). Approve provisioniert in Mailcow.</p>
+            <h3 class="font-semibold text-gray-800">Mailbox-Antraege &amp; Mailboxen <span id="mbq-pending-badge" class="hidden text-xs bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded ml-1">0</span></h3>
+            <p class="text-xs text-gray-500">Self-Service-Antraege + von Admin direkt angelegte Mailboxen (Rosenweg-managed Domains).</p>
           </div>
+          <button onclick="openAdminCreateMbModal()" class="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm">+ Mailbox direkt erstellen</button>
         </div>
         <div id="mbq-list" class="space-y-2"></div>
-
-        <details class="mt-6">
-          <summary class="text-xs text-gray-500 cursor-pointer">Legacy: Mailboxes (deprecated)</summary>
-          <div class="mt-2">
-            <div class="flex justify-end mb-2"><button onclick="openMbModal()" class="bg-gray-500 text-white px-3 py-1.5 rounded text-sm">+ Mailbox erfassen</button></div>
-            <div id="mb-list" class="bg-white rounded-lg shadow overflow-x-auto"></div>
-          </div>
-        </details>
       </div>
     </div>
   </main>
@@ -123,7 +116,7 @@
   const fmtDt = s => s ? new Date(s).toLocaleString('de-CH') : '—';
 
   let user = null;
-  let subscribers = [], vlanRequests = [], fixedIps = [], rpRoutes = [], vpnAccounts = [], mailboxes = [], redirects = [], mailRelays = [];
+  let subscribers = [], vlanRequests = [], fixedIps = [], rpRoutes = [], vpnAccounts = [], redirects = [], mailRelays = [];
 
   document.addEventListener('DOMContentLoaded', async () => {
     user = AuthentikAuth.getUser() || await AuthentikAuth.init({ requireAuth: true });
@@ -135,7 +128,7 @@
     document.getElementById('auth-gate').classList.add('hidden');
     document.getElementById('content').classList.remove('hidden');
     document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
-    loadSubs(); loadVlans(); loadIps(); loadRp(); loadVpns(); loadMb(); loadRedir(); loadRelays(); loadMailboxRequests(); checkMailcow();
+    loadSubs(); loadVlans(); loadIps(); loadRp(); loadVpns(); loadRedir(); loadRelays(); loadMailboxRequests(); checkMailcow();
   });
 
   // Mailcow Live-Check (zeigt Badge "live" wenn /SOGo erreichbar)
@@ -835,13 +828,29 @@
       rejected: '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded">abgelehnt</span>',
       deleted:  '<span class="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded">geloescht</span>',
     })[s] || '';
-    wrap.innerHTML = mailboxRequests.map(m => `
+    wrap.innerHTML = mailboxRequests.map(m => {
+      const shared = !m.assigned_user_email;
+      const sharedBadge = shared && m.status === 'approved'
+        ? '<span class="text-xs bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded ml-1">Shared</span>' : '';
+      const autoBadge = m.auto_approved
+        ? '<span class="text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded ml-1">auto</span>' : '';
+      // PW im Admin NUR wenn Shared (kein User zugeordnet).
+      const pwBlock = (shared && m.initial_password)
+        ? `<div class="mt-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs">
+             <div class="font-semibold text-amber-800">Initial-Passwort (Shared-Mailbox)</div>
+             <div class="font-mono mt-1 select-all">${esc(m.initial_password)}</div>
+             <button onclick="clearMbqPw(${m.id})" class="mt-1 text-xs text-amber-800 underline">Notiert — verbergen</button>
+           </div>` : '';
+      const personalPwHint = (!shared && m.has_initial_password && m.status === 'approved')
+        ? '<div class="text-xs text-gray-500 italic mt-1">Initial-PW liegt fuer den User bereit (Admin sieht es nicht).</div>' : '';
+      return `
       <div class="bg-white border rounded p-3">
         <div class="flex items-start justify-between flex-wrap gap-2 mb-1">
           <div>
-            ${sb(m.status)}
+            ${sb(m.status)}${autoBadge}${sharedBadge}
             <strong class="ml-2 font-mono text-sm">${esc(m.local_part)}@${esc(m.domain)}</strong>
-            <span class="text-xs text-gray-500 ml-1">von ${esc(m.antragsteller_email)}</span>
+            <span class="text-xs text-gray-500 ml-1">Antragsteller: ${esc(m.antragsteller_email)}</span>
+            ${m.assigned_user_email && m.assigned_user_email !== m.antragsteller_email ? `<span class="text-xs text-gray-500 ml-1">· zugeordnet: ${esc(m.assigned_user_email)}</span>` : ''}
           </div>
           <div class="flex gap-1">
             ${m.status === 'pending' ? `<button onclick="approveMbq(${m.id})" class="text-xs bg-green-600 text-white px-2 py-1 rounded">Approve</button><button onclick="rejectMbq(${m.id})" class="text-xs bg-red-600 text-white px-2 py-1 rounded">Reject</button>` : ''}
@@ -851,24 +860,29 @@
         </div>
         <div class="text-xs text-gray-600">
           ${m.full_name ? `Name: ${esc(m.full_name)} · ` : ''}Quota: ${m.quota_mb || 1024} MB
-          ${m.approved_by ? ` · Bearbeitet von ${esc(m.approved_by)}` : ''}
+          ${m.approved_by ? ` · Bearbeitet: ${esc(m.approved_by)}` : ''}
           ${m.notizen ? `<div class="italic">${esc(m.notizen)}</div>` : ''}
           ${m.approval_reason ? `<div class="italic text-red-700">Grund: ${esc(m.approval_reason)}</div>` : ''}
         </div>
-      </div>`).join('');
+        ${pwBlock}${personalPwHint}
+      </div>`;
+    }).join('');
   }
   async function approveMbq(id) {
-    const pw = prompt('Optionales Initial-Passwort (leer = auto-generieren):', '');
-    if (pw === null) return;
     const reason = prompt('Notiz (optional):', '') || '';
     try {
       const r = await AuthentikAuth.apiFetch('/api/isp/mailbox-requests/' + id + '/approve', {
         method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ password: pw || null, reason }),
+        body: JSON.stringify({ reason }),
       });
       if (!r.ok) throw new Error(await r.text());
       const d = await r.json();
-      prompt(`✓ Mailbox ${d.username} angelegt. Initial-Passwort:`, d.initial_password);
+      if (d.initial_password) {
+        // Shared-Mailbox: Admin sieht PW.
+        prompt(`✓ Mailbox ${d.username} angelegt (Shared). Initial-Passwort:`, d.initial_password);
+      } else {
+        alert(`✓ Mailbox ${d.username} angelegt. Das Initial-PW liegt fuer den User unter "Meine Mailboxen" bereit.`);
+      }
       await loadMailboxRequests();
     } catch (e) { alert('Fehler: ' + e.message); }
   }
@@ -885,7 +899,14 @@
     const r = await AuthentikAuth.apiFetch('/api/isp/mailbox-requests/' + id + '/reset-password', { method: 'POST' });
     if (!r.ok) { alert('Fehler: ' + await r.text()); return; }
     const d = await r.json();
-    prompt('Neues Passwort:', d.new_password);
+    if (d.new_password) prompt('Neues Passwort:', d.new_password);
+    else alert(d.msg || 'PW gesetzt. User sieht es im Self-Service.');
+    await loadMailboxRequests();
+  }
+  async function clearMbqPw(id) {
+    if (!confirm('PW aus Anzeige entfernen?')) return;
+    await AuthentikAuth.apiFetch('/api/isp/mailbox-requests/' + id + '/clear-password', { method: 'POST' });
+    await loadMailboxRequests();
   }
   async function delMbq(id) {
     if (!confirm('Mailbox + Antrag loeschen? In Mailcow wird die Mailbox geloescht.')) return;
@@ -893,65 +914,54 @@
     await loadMailboxRequests();
   }
 
-  async function loadMb() {
-    const r = await AuthentikAuth.apiFetch('/api/isp/mailboxes');
-    if (!r.ok) return;
-    mailboxes = (await r.json()).mailboxes || [];
-    renderMb();
-  }
-  function renderMb() {
-    const wrap = document.getElementById('mb-list');
-    if (mailboxes.length === 0) { wrap.innerHTML = '<p class="p-6 text-gray-400 italic text-center">Noch keine Mailboxes erfasst.</p>'; return; }
-    wrap.innerHTML = `<table class="min-w-full text-sm">
-      <thead class="bg-gray-50 text-xs uppercase text-gray-500"><tr><th class="px-3 py-2 text-left">E-Mail</th><th class="px-3 py-2 text-left">Owner</th><th class="px-3 py-2 text-left">Aliase</th><th class="px-3 py-2 text-left">Quota</th><th class="px-3 py-2 text-left">Status</th><th class="px-3 py-2 text-right">Aktion</th></tr></thead>
-      <tbody class="divide-y">${mailboxes.map(m => `
-        <tr><td class="px-3 py-2 font-mono text-xs">${esc(m.local_part)}@${esc(m.domain)}</td>
-          <td class="px-3 py-2 text-xs">${esc(m.owner_user_email || '—')}</td>
-          <td class="px-3 py-2 text-xs">${(m.aliases || []).map(esc).join(', ') || '—'}</td>
-          <td class="px-3 py-2 text-xs">${m.used_mb != null && m.quota_mb ? m.used_mb + '/' + m.quota_mb + ' MB' : (m.quota_mb ? m.quota_mb + ' MB' : '—')}</td>
-          <td class="px-3 py-2"><span class="text-xs ${m.active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'} px-2 py-0.5 rounded">${m.active ? 'aktiv' : 'inaktiv'}</span></td>
-          <td class="px-3 py-2 text-right"><button onclick="delMb(${m.id})" class="text-xs text-red-600 hover:underline">Loeschen</button></td>
-        </tr>`).join('')}</tbody></table>`;
-  }
-  function openMbModal() {
+  // Admin legt Mailbox direkt an (optional einem User zuweisen).
+  async function openAdminCreateMbModal() {
+    let relays = [];
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/mailbox-eligible-relays');
+      relays = (await r.json()).relays || [];
+    } catch {}
+    const opts = relays.map(r => `<option value="${r.id}">${esc(r.domain)}</option>`).join('');
     const modal = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5">
-        <h2 class="font-bold mb-3">Mailbox erfassen</h2>
+        <h2 class="font-bold mb-3">Mailbox direkt erstellen</h2>
+        <p class="text-xs text-gray-500 mb-3">Ohne User-Zuordnung = Shared-Mailbox (Du siehst das Initial-PW). Mit Zuordnung = persoenlich, das PW landet beim User unter "Meine Mailboxen".</p>
         <div class="space-y-2 text-sm">
-          <div class="grid grid-cols-2 gap-2">
-            <div><label class="block text-xs text-gray-600">Local-Part *</label><input id="mb-local" placeholder="info" class="w-full border rounded px-2 py-1"></div>
-            <div><label class="block text-xs text-gray-600">Domain *</label><input id="mb-dom" placeholder="rosenweg4303.ch" class="w-full border rounded px-2 py-1"></div>
-          </div>
-          <div><label class="block text-xs text-gray-600">Owner-Email</label><input id="mb-owner" class="w-full border rounded px-2 py-1"></div>
-          <div><label class="block text-xs text-gray-600">Aliase (kommagetrennt)</label><input id="mb-al" class="w-full border rounded px-2 py-1"></div>
-          <div><label class="block text-xs text-gray-600">Quota MB</label><input id="mb-quota" type="number" class="w-full border rounded px-2 py-1"></div>
+          <div><label class="block text-xs text-gray-600">Domain *</label><select id="acm-relay" class="w-full border rounded px-2 py-1">${opts}</select></div>
+          <div><label class="block text-xs text-gray-600">Local-Part * (vor @)</label><input id="acm-local" placeholder="info" class="w-full border rounded px-2 py-1"></div>
+          <div><label class="block text-xs text-gray-600">Anzeigename</label><input id="acm-name" placeholder="Info-Postfach Rosenweg 9" class="w-full border rounded px-2 py-1"></div>
+          <div><label class="block text-xs text-gray-600">User zuweisen (optional, Email)</label><input id="acm-user" placeholder="leer = Shared-Mailbox" class="w-full border rounded px-2 py-1"></div>
+          <div><label class="block text-xs text-gray-600">Quota MB</label><input id="acm-quota" type="number" value="1024" class="w-full border rounded px-2 py-1"></div>
+          <div><label class="block text-xs text-gray-600">Notiz</label><input id="acm-note" class="w-full border rounded px-2 py-1"></div>
         </div>
         <div class="flex justify-end gap-2 mt-3">
           <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Abbrechen</button>
-          <button onclick="saveMb()" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm">Speichern</button>
+          <button onclick="saveAdminCreateMb()" class="px-3 py-1.5 bg-emerald-600 text-white rounded text-sm"${relays.length === 0 ? ' disabled' : ''}>Erstellen</button>
         </div>
       </div></div>`;
     document.body.insertAdjacentHTML('beforeend', modal);
   }
-  async function saveMb() {
+  async function saveAdminCreateMb() {
     const body = {
-      local_part: document.getElementById('mb-local').value.trim(),
-      domain: document.getElementById('mb-dom').value.trim(),
-      owner_user_email: document.getElementById('mb-owner').value.trim() || null,
-      aliases: document.getElementById('mb-al').value.split(',').map(s => s.trim()).filter(Boolean),
-      quota_mb: parseInt(document.getElementById('mb-quota').value, 10) || null,
+      relay_id: parseInt(document.getElementById('acm-relay').value, 10),
+      local_part: document.getElementById('acm-local').value.trim(),
+      full_name: document.getElementById('acm-name').value.trim() || null,
+      assigned_user_email: document.getElementById('acm-user').value.trim() || null,
+      quota_mb: parseInt(document.getElementById('acm-quota').value, 10) || 1024,
+      notizen: document.getElementById('acm-note').value.trim() || null,
     };
+    if (!body.relay_id || !body.local_part) { alert('Domain + Local-Part Pflicht'); return; }
     try {
-      const r = await AuthentikAuth.apiFetch('/api/isp/mailboxes', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const r = await AuthentikAuth.apiFetch('/api/isp/admin-create-mailbox', {
+        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body),
+      });
       if (!r.ok) throw new Error(await r.text());
+      const d = await r.json();
       document.querySelector('.fixed')?.remove();
-      await loadMb();
+      if (d.initial_password) prompt(`✓ Shared-Mailbox ${d.username} angelegt. Initial-Passwort:`, d.initial_password);
+      else alert(`✓ Mailbox ${d.username} angelegt. Initial-PW liegt fuer den zugeordneten User bereit.`);
+      await loadMailboxRequests();
     } catch (e) { alert('Fehler: ' + e.message); }
-  }
-  async function delMb(id) {
-    if (!confirm('Mailbox loeschen?')) return;
-    await AuthentikAuth.apiFetch('/api/isp/mailboxes/' + id, { method: 'DELETE' });
-    await loadMb();
   }
   </script>
 </body>

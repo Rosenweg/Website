@@ -14815,6 +14815,48 @@ async function mailcowApi(method, path, body) {
 // User auf isp-mein-zugang sieht/beantragt Mailboxes fuer eigene Mail-Relays
 // mit mailcow_managed=true. Admin auf isp-admin approved + provisioniert.
 
+// Notification an die WA-Gruppe "Rosenweg Technik" bei allen Mailbox-Vorgaengen.
+// Wirft nicht — Notify-Fehler darf den eigentlichen Vorgang nicht blockieren.
+async function notifyTechnikMailbox(text) {
+  try {
+    const groupId = await resolveTechnikWhatsappGroupId();
+    if (!groupId) { console.warn('[mailbox-notify] keine Technik-Group gefunden'); return; }
+    await queueWhatsappMessage({
+      chatId: groupId,
+      body: text.slice(0, 3500),
+      sourceType: 'mailbox-event',
+    });
+  } catch (e) { console.warn('[mailbox-notify]', e.message); }
+}
+
+// Generiert ein zufaelliges, sprechbares Initial-Passwort (16 Zeichen, alnum).
+function generateMailboxPassword() {
+  return crypto.randomBytes(12).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 16);
+}
+
+// Standard-Antrag = darf auto-approved werden (kein Custom-Quota, keine Notiz).
+function isStandardMailboxRequest(b) {
+  const q = b.quota_mb == null ? 1024 : parseInt(b.quota_mb, 10);
+  const note = (b.notizen || '').trim();
+  return q === 1024 && note.length === 0;
+}
+
+// Provisioniert Mailbox in Mailcow. Wirft bei Fehler.
+async function provisionMailcowMailbox({ local_part, domain, full_name, quota_mb, password }) {
+  await mailcowApi('POST', '/add/mailbox', {
+    local_part,
+    domain,
+    name: full_name || local_part,
+    quota: quota_mb || 1024,
+    password,
+    password2: password,
+    active: '1',
+    force_pw_update: '1',
+    tls_enforce_in: '1',
+    tls_enforce_out: '1',
+  });
+}
+
 // GET: Liste der Domains fuer die der User Mailboxes beantragen darf
 // (mailcow_managed + allowed_groups matchen User-Gruppen)
 app.get('/api/isp/mailbox-eligible-relays', authMiddleware, async (req, res) => {
@@ -14829,7 +14871,10 @@ app.get('/api/isp/mailbox-eligible-relays', authMiddleware, async (req, res) => 
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// GET: eigene Antraege + bestehende Mailcow-Mailboxes pro Relay
+// GET: Liste der Antraege/Mailboxen.
+// initial_password wird NUR ausgeliefert wenn der Caller berechtigt ist:
+//   - Shared-Mailbox (keinem User zugeordnet) -> Admin sieht PW
+//   - persoenliche Mailbox -> NUR der zugeordnete User sieht PW (Admin nicht)
 app.get('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
   try {
     const admin = ispIsAdmin(req);
@@ -14846,10 +14891,20 @@ app.get('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
              FROM mailbox_requests mr
              LEFT JOIN isp_mail_relays r ON r.id = mr.relay_id
             WHERE LOWER(mr.antragsteller_email) = $1
+               OR LOWER(COALESCE(mr.assigned_user_email,'')) = $1
             ORDER BY mr.created_at DESC`,
           [email],
         );
-    res.json({ requests: r.rows, is_admin: admin });
+    const rows = r.rows.map(row => {
+      const ownerEmail = (row.assigned_user_email || row.antragsteller_email || '').toLowerCase();
+      const isOwner = email === ownerEmail;
+      const shared = !row.assigned_user_email;
+      // PW sichtbar fuer: Owner immer; Admin nur bei Shared-Mailboxen.
+      const canSeePw = isOwner || (admin && shared);
+      if (!canSeePw) return { ...row, initial_password: null, has_initial_password: !!row.initial_password };
+      return { ...row, has_initial_password: !!row.initial_password };
+    });
+    res.json({ requests: rows, is_admin: admin });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -14862,14 +14917,17 @@ function isAllowedForRelay(user, relay) {
   return relay.allowed_groups.some(g => userGroups.includes(g.toLowerCase()));
 }
 
-// POST: neuer Antrag (status=pending)
+// POST: neuer Antrag.
+// Standardantrag (quota=1024, keine Notiz) -> Auto-Approve + sofortige
+// Provisionierung in Mailcow. PW wird in initial_password gespeichert,
+// damit der User es im UI sehen kann. assigned_user_email = User selbst
+// (= persoenliche Zuordnung -> Admin sieht das PW NICHT).
 app.post('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
   try {
     const b = req.body || {};
     if (!b.relay_id || !b.local_part) return res.status(400).json({ error: 'relay_id + local_part Pflicht' });
     const lp = String(b.local_part).toLowerCase().replace(/[^a-z0-9._-]/g, '');
     if (!lp) return res.status(400).json({ error: 'local_part ungueltig (nur a-z0-9._-)' });
-    // Relay muss existieren + mailcow_managed sein
     const rel = await pool.query('SELECT id, domain, owner_email, mailcow_managed, allowed_groups FROM isp_mail_relays WHERE id = $1', [b.relay_id]);
     if (rel.rows.length === 0) return res.status(404).json({ error: 'Mail-Relay nicht gefunden' });
     if (!rel.rows[0].mailcow_managed && !ispIsAdmin(req)) {
@@ -14878,27 +14936,55 @@ app.post('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
     if (!ispIsAdmin(req) && !isAllowedForRelay(req.user, rel.rows[0])) {
       return res.status(403).json({ error: `Mailboxen fuer ${rel.rows[0].domain} sind nur fuer berechtigte STWEG-Mitglieder verfuegbar` });
     }
+    const standard = isStandardMailboxRequest(b);
+    const username = `${lp}@${rel.rows[0].domain}`;
+
+    if (standard) {
+      // Auto-Approve: PW generieren, in Mailcow anlegen, in DB mit
+      // status=approved + initial_password speichern.
+      const password = generateMailboxPassword();
+      try {
+        await provisionMailcowMailbox({
+          local_part: lp,
+          domain: rel.rows[0].domain,
+          full_name: b.full_name || null,
+          quota_mb: 1024,
+          password,
+        });
+      } catch (mcErr) {
+        return res.status(502).json({ error: 'Mailcow-Provisionierung fehlgeschlagen: ' + mcErr.message });
+      }
+      const ins = await pool.query(
+        `INSERT INTO mailbox_requests
+           (relay_id, antragsteller_email, assigned_user_email, local_part, full_name, quota_mb,
+            status, auto_approved, approved_by, approved_at, mailcow_synced_at, initial_password)
+         VALUES ($1,$2,$2,$3,$4,1024,'approved',true,'auto',NOW(),NOW(),$5) RETURNING *`,
+        [b.relay_id, req.user.email, lp, b.full_name || null, password],
+      );
+      notifyTechnikMailbox(
+        `📬 *Mailbox auto-erstellt*\n${username}\nfuer ${req.user.email}${b.full_name ? ` (${b.full_name})` : ''}`,
+      );
+      // PW IM Response: persoenliche Mailbox -> User darf es sehen.
+      return res.json({
+        ...ins.rows[0],
+        auto_approved: true,
+        initial_password: password,
+        username,
+      });
+    }
+
+    // Custom-Antrag -> pending; Admin muss approven.
     const ins = await pool.query(
       `INSERT INTO mailbox_requests
-         (relay_id, antragsteller_email, local_part, full_name, quota_mb, notizen)
-       VALUES ($1,$2,$3,$4,COALESCE($5,1024),$6) RETURNING *`,
+         (relay_id, antragsteller_email, assigned_user_email, local_part, full_name, quota_mb, notizen)
+       VALUES ($1,$2,$2,$3,$4,COALESCE($5,1024),$6) RETURNING *`,
       [b.relay_id, req.user.email, lp, b.full_name || null, b.quota_mb || null, b.notizen || null],
     );
-    // Admins benachrichtigen
-    try {
-      const adminEmails = (await pool.query(
-        `SELECT DISTINCT email FROM users WHERE active=true AND email IS NOT NULL
-          AND (groups_json::jsonb ? 'technik' OR groups_json::jsonb ? 'Präsident')`,
-      )).rows.map(r => r.email).filter(Boolean);
-      if (adminEmails.length) {
-        pushWhatsappBroadcast({
-          emails: adminEmails,
-          sourceType: 'mailbox-request',
-          sourceId: ins.rows[0].id,
-          body: `📧 Neue Mailbox-Anfrage: *${lp}@${rel.rows[0].domain}*\nvon ${req.user.email}\n${SITE_URL}/isp-admin.html#mail`,
-        }).catch(() => {});
-      }
-    } catch {}
+    notifyTechnikMailbox(
+      `📧 *Neuer Mailbox-Antrag* (pending)\n${username}\nvon ${req.user.email}` +
+      `\nQuota: ${b.quota_mb || 1024} MB${b.notizen ? `\nNotiz: ${b.notizen}` : ''}` +
+      `\n${SITE_URL}/isp-admin.html#mail`,
+    );
     res.json(ins.rows[0]);
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Diese Mailbox existiert bereits oder ist beantragt' });
@@ -14906,7 +14992,75 @@ app.post('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
   }
 });
 
-// POST: Approve + Mailcow-Provisionierung (Admin only)
+// POST: Admin legt direkt eine Mailbox an, optional einem User zugeordnet.
+// Ohne assigned_user_email -> Shared-Mailbox (Admin sieht PW).
+// Mit assigned_user_email -> persoenlich (PW nur fuer User sichtbar).
+app.post('/api/isp/admin-create-mailbox', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.relay_id || !b.local_part) return res.status(400).json({ error: 'relay_id + local_part Pflicht' });
+    const lp = String(b.local_part).toLowerCase().replace(/[^a-z0-9._-]/g, '');
+    if (!lp) return res.status(400).json({ error: 'local_part ungueltig' });
+    const rel = await pool.query('SELECT id, domain, mailcow_managed FROM isp_mail_relays WHERE id = $1', [b.relay_id]);
+    if (rel.rows.length === 0) return res.status(404).json({ error: 'Mail-Relay nicht gefunden' });
+    if (!rel.rows[0].mailcow_managed) return res.status(400).json({ error: 'Domain nicht von Rosenweg verwaltet' });
+    const assigned = (b.assigned_user_email || '').trim().toLowerCase() || null;
+    const username = `${lp}@${rel.rows[0].domain}`;
+    const password = generateMailboxPassword();
+    try {
+      await provisionMailcowMailbox({
+        local_part: lp,
+        domain: rel.rows[0].domain,
+        full_name: b.full_name || null,
+        quota_mb: b.quota_mb || 1024,
+        password,
+      });
+    } catch (mcErr) {
+      return res.status(502).json({ error: 'Mailcow-Provisionierung fehlgeschlagen: ' + mcErr.message });
+    }
+    const ins = await pool.query(
+      `INSERT INTO mailbox_requests
+         (relay_id, antragsteller_email, assigned_user_email, local_part, full_name, quota_mb,
+          status, approved_by, approved_at, mailcow_synced_at, initial_password, notizen)
+       VALUES ($1,$2,$3,$4,$5,COALESCE($6,1024),'approved',$7,NOW(),NOW(),$8,$9) RETURNING *`,
+      [b.relay_id, req.user.email, assigned, lp, b.full_name || null, b.quota_mb || null,
+       req.user.email, password, b.notizen || null],
+    );
+    notifyTechnikMailbox(
+      `🛠 *Mailbox angelegt (Admin)*\n${username}\n` +
+      (assigned ? `zugeordnet: ${assigned}` : `Shared-Mailbox (keinem User zugeordnet)`) +
+      `\ndurch ${req.user.email}`,
+    );
+    // PW NUR im Response wenn keinem User zugeordnet (Admin = Antragsteller = Owner).
+    const showPw = !assigned;
+    res.json({
+      ...ins.rows[0],
+      username,
+      ...(showPw ? { initial_password: password } : {}),
+    });
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Diese Mailbox existiert bereits' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST: User markiert PW als gesichert -> initial_password=NULL.
+app.post('/api/isp/mailbox-requests/:id/clear-password', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const e = await pool.query('SELECT * FROM mailbox_requests WHERE id = $1', [id]);
+    if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const mr = e.rows[0];
+    const isOwner = (mr.assigned_user_email || mr.antragsteller_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    if (!isOwner && !ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Owner oder Admin' });
+    await pool.query('UPDATE mailbox_requests SET initial_password=NULL, updated_at=NOW() WHERE id=$1', [id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST: Approve + Mailcow-Provisionierung (Admin only).
+// PW im Response NUR wenn keinem User zugeordnet (Shared-Mailbox); sonst
+// landet das PW in initial_password und der User holt es sich im Self-Service.
 app.post('/api/isp/mailbox-requests/:id/approve', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -14918,21 +15072,15 @@ app.post('/api/isp/mailbox-requests/:id/approve', authMiddleware, requireTechnik
     if (mr.status === 'approved') return res.status(400).json({ error: 'Bereits approved' });
     if (!mr.mailcow_managed) return res.status(400).json({ error: 'Domain nicht von Rosenweg verwaltet' });
 
-    // Initial-Passwort vom Admin gesetzt oder generiert
-    const password = (req.body?.password && String(req.body.password)) || crypto.randomBytes(12).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 16);
+    const password = generateMailboxPassword();
     const username = `${mr.local_part}@${mr.domain}`;
     try {
-      await mailcowApi('POST', '/add/mailbox', {
+      await provisionMailcowMailbox({
         local_part: mr.local_part,
         domain: mr.domain,
-        name: mr.full_name || mr.local_part,
-        quota: mr.quota_mb || 1024,
+        full_name: mr.full_name,
+        quota_mb: mr.quota_mb || 1024,
         password,
-        password2: password,
-        active: '1',
-        force_pw_update: '1',  // bei erstem Login PW aendern
-        tls_enforce_in: '1',
-        tls_enforce_out: '1',
       });
     } catch (mcErr) {
       return res.status(502).json({ error: 'Mailcow-Provisionierung fehlgeschlagen: ' + mcErr.message });
@@ -14940,11 +15088,22 @@ app.post('/api/isp/mailbox-requests/:id/approve', authMiddleware, requireTechnik
     await pool.query(
       `UPDATE mailbox_requests
           SET status='approved', approved_by=$1, approved_at=NOW(),
-              approval_reason=$2, mailcow_synced_at=NOW(), updated_at=NOW()
-        WHERE id=$3`,
-      [req.user.email, req.body?.reason || null, id]
+              approval_reason=$2, mailcow_synced_at=NOW(),
+              initial_password=$3, updated_at=NOW()
+        WHERE id=$4`,
+      [req.user.email, req.body?.reason || null, password, id]
     );
-    res.json({ ok: true, username, initial_password: password });
+    notifyTechnikMailbox(
+      `✅ *Mailbox-Antrag genehmigt*\n${username}\nfuer ${mr.assigned_user_email || mr.antragsteller_email}\ndurch ${req.user.email}`,
+    );
+    const isAssigned = !!mr.assigned_user_email;
+    res.json({
+      ok: true,
+      username,
+      assigned: isAssigned,
+      // Shared (keinem User zugeordnet) -> Admin sieht PW. Sonst nur Hinweis.
+      ...(isAssigned ? { msg: 'Initial-PW liegt fuer den User unter "Meine Mailboxen" bereit' } : { initial_password: password }),
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -14952,15 +15111,26 @@ app.post('/api/isp/mailbox-requests/:id/approve', authMiddleware, requireTechnik
 app.post('/api/isp/mailbox-requests/:id/reject', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
+    const e = await pool.query('SELECT mr.*, r.domain FROM mailbox_requests mr LEFT JOIN isp_mail_relays r ON r.id = mr.relay_id WHERE mr.id=$1', [id]);
+    if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const mr = e.rows[0];
     await pool.query(
       `UPDATE mailbox_requests SET status='rejected', approved_by=$1, approved_at=NOW(), approval_reason=$2, updated_at=NOW() WHERE id=$3`,
       [req.user.email, req.body?.reason || null, id]
+    );
+    notifyTechnikMailbox(
+      `❌ *Mailbox-Antrag abgelehnt*\n${mr.local_part}@${mr.domain}\nvon ${mr.antragsteller_email}` +
+      `${req.body?.reason ? `\nGrund: ${req.body.reason}` : ''}\ndurch ${req.user.email}`,
     );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// POST: Passwort-Reset (User darf eigene, Admin alle)
+// POST: Passwort-Reset. User+Admin duerfen. Visibility wie bei Approve:
+//   - Mailbox keinem User zugeordnet -> Caller sieht PW
+//   - Mailbox einem User zugeordnet  -> PW landet in initial_password,
+//                                       Admin bekommt KEIN PW im Response,
+//                                       User (Owner) bekommt das PW direkt.
 app.post('/api/isp/mailbox-requests/:id/reset-password', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -14970,31 +15140,57 @@ app.post('/api/isp/mailbox-requests/:id/reset-password', authMiddleware, async (
     if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const mr = e.rows[0];
     if (mr.status !== 'approved') return res.status(400).json({ error: 'Mailbox ist nicht aktiv' });
-    if (!ispIsAdmin(req) && (mr.antragsteller_email || '').toLowerCase() !== (req.user.email || '').toLowerCase()) {
-      return res.status(403).json({ error: 'Nur Owner oder Admin' });
-    }
-    const password = crypto.randomBytes(12).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 16);
+    const callerEmail = (req.user.email || '').toLowerCase();
+    const ownerEmail = (mr.assigned_user_email || mr.antragsteller_email || '').toLowerCase();
+    const admin = ispIsAdmin(req);
+    const isOwner = callerEmail === ownerEmail;
+    if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Owner oder Admin' });
+
+    const password = generateMailboxPassword();
+    const username = `${mr.local_part}@${mr.domain}`;
     await mailcowApi('POST', '/edit/mailbox', {
-      items: [`${mr.local_part}@${mr.domain}`],
+      items: [username],
       attr: { password, password2: password, force_pw_update: '1' },
     });
-    res.json({ ok: true, new_password: password });
+    await pool.query('UPDATE mailbox_requests SET initial_password=$1, updated_at=NOW() WHERE id=$2', [password, id]);
+    notifyTechnikMailbox(
+      `🔑 *Passwort zurueckgesetzt*\n${username}\ndurch ${req.user.email}` +
+      (admin && !isOwner ? ` (Admin-Reset fuer ${ownerEmail || '—'})` : ''),
+    );
+    // Visibility-Regel: Shared-Mailbox ODER Owner selber -> PW im Response.
+    // Admin-Reset einer persoenlichen Mailbox -> KEIN PW im Response.
+    const showPw = !mr.assigned_user_email || isOwner;
+    res.json({
+      ok: true,
+      ...(showPw ? { new_password: password } : { msg: 'Neues PW liegt fuer den User unter "Meine Mailboxen" bereit' }),
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// DELETE: Mailbox loeschen (Admin)
-app.delete('/api/isp/mailbox-requests/:id', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+// DELETE: Mailbox loeschen. Owner darf pending zuruecknehmen, Admin darf
+// alles. Approved -> Mailbox wird in Mailcow geloescht.
+app.delete('/api/isp/mailbox-requests/:id', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const e = await pool.query(
       `SELECT mr.*, r.domain FROM mailbox_requests mr LEFT JOIN isp_mail_relays r ON r.id = mr.relay_id WHERE mr.id = $1`, [id]);
     if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const mr = e.rows[0];
+    const admin = ispIsAdmin(req);
+    const callerEmail = (req.user.email || '').toLowerCase();
+    const ownerEmail = (mr.assigned_user_email || mr.antragsteller_email || '').toLowerCase();
+    const isOwner = callerEmail === ownerEmail;
+    if (!admin && !(isOwner && mr.status === 'pending')) {
+      return res.status(403).json({ error: 'Nur Admin (alle) bzw. Owner (nur pending)' });
+    }
     if (mr.status === 'approved') {
       try { await mailcowApi('POST', '/delete/mailbox', [`${mr.local_part}@${mr.domain}`]); }
       catch (mcErr) { console.warn('[mailbox-delete] Mailcow:', mcErr.message); }
     }
-    await pool.query(`UPDATE mailbox_requests SET status='deleted', updated_at=NOW() WHERE id=$1`, [id]);
+    await pool.query(`UPDATE mailbox_requests SET status='deleted', initial_password=NULL, updated_at=NOW() WHERE id=$1`, [id]);
+    notifyTechnikMailbox(
+      `🗑 *Mailbox geloescht*\n${mr.local_part}@${mr.domain}\nvon ${ownerEmail || '—'}\ndurch ${req.user.email}`,
+    );
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -17301,6 +17497,15 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_mbr_antragsteller ON mailbox_requests(LOWER(antragsteller_email));
       CREATE INDEX IF NOT EXISTS idx_mbr_status ON mailbox_requests(status);
+      -- assigned_user_email NULL = Shared-Mailbox (Admin sieht PW),
+      --                    gesetzt = personl. zugeordnet (NUR User sieht PW).
+      ALTER TABLE mailbox_requests ADD COLUMN IF NOT EXISTS assigned_user_email TEXT;
+      -- initial_password = Klartext, NUR bis User auf "notiert" klickt.
+      ALTER TABLE mailbox_requests ADD COLUMN IF NOT EXISTS initial_password TEXT;
+      ALTER TABLE mailbox_requests ADD COLUMN IF NOT EXISTS auto_approved BOOLEAN DEFAULT false;
+      -- Backfill: bestehende Antraege ohne assigned_user_email = persoenlich.
+      UPDATE mailbox_requests SET assigned_user_email = antragsteller_email
+       WHERE assigned_user_email IS NULL AND antragsteller_email IS NOT NULL;
 
       -- isp_mailboxes ist veraltet (PMG hat keine eigenen Mailboxes).
       -- Tabelle bleibt fuer Backward-Compat, wird nicht mehr benutzt.
