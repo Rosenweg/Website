@@ -225,16 +225,24 @@ client.on('message_create', async (msg) => {
 
 // Wartet bis die Nachricht den gewuenschten ACK-Level erreicht hat.
 // ACK: -1=fehler, 0=pending, 1=server-ack, 2=device-ack, 3=read.
-// Pollt sentMsg.ack — message_ack-Event feuert in wwebjs nicht zuverlaessig
-// fuer eigene outbound messages.
-async function waitForAck(msg, minAck = 1, timeoutMs = 6000) {
+// wwebjs aktualisiert die ursprung. Message-Property nicht automatisch —
+// wir muessen via getMessageById neu lesen.
+async function waitForAck(msg, minAck = 1, timeoutMs = 8000) {
   if (!msg) return;
+  const id = msg.id?._serialized;
+  if (!id) return;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if ((msg.ack ?? 0) >= minAck) return;
-    await new Promise(r => setTimeout(r, 200));
+    try {
+      const fresh = await client.getMessageById(id);
+      if (fresh && (fresh.ack ?? 0) >= minAck) {
+        console.log(`[WA] ack=${fresh.ack} fuer ${id}`);
+        return;
+      }
+    } catch {}
+    await new Promise(r => setTimeout(r, 400));
   }
-  console.log(`[WA] ACK-Timeout fuer ${msg.id?._serialized}, ack=${msg.ack ?? '?'}`);
+  console.log(`[WA] ACK-Timeout fuer ${id}`);
 }
 
 // Outbox-Polling
