@@ -930,7 +930,11 @@
           <div><label class="block text-xs text-gray-600">Domain *</label><select id="acm-relay" class="w-full border rounded px-2 py-1">${opts}</select></div>
           <div><label class="block text-xs text-gray-600">Local-Part * (vor @)</label><input id="acm-local" placeholder="info" class="w-full border rounded px-2 py-1"></div>
           <div><label class="block text-xs text-gray-600">Anzeigename</label><input id="acm-name" placeholder="Info-Postfach Rosenweg 9" class="w-full border rounded px-2 py-1"></div>
-          <div><label class="block text-xs text-gray-600">User zuweisen (optional, Email)</label><input id="acm-user" placeholder="leer = Shared-Mailbox" class="w-full border rounded px-2 py-1"></div>
+          <div class="relative">
+            <label class="block text-xs text-gray-600">User zuweisen (optional)</label>
+            <input id="acm-user" autocomplete="off" placeholder="leer = Shared-Mailbox" class="w-full border rounded px-2 py-1" oninput="acmUserSearch(this.value)" onfocus="acmUserSearch(this.value)" onblur="setTimeout(()=>document.getElementById('acm-user-list').classList.add('hidden'), 200)">
+            <div id="acm-user-list" class="hidden absolute z-10 left-0 right-0 mt-1 bg-white border rounded shadow max-h-48 overflow-auto text-sm"></div>
+          </div>
           <div><label class="block text-xs text-gray-600">Quota MB</label><input id="acm-quota" type="number" value="1024" class="w-full border rounded px-2 py-1"></div>
           <div><label class="block text-xs text-gray-600">Notiz</label><input id="acm-note" class="w-full border rounded px-2 py-1"></div>
         </div>
@@ -940,6 +944,32 @@
         </div>
       </div></div>`;
     document.body.insertAdjacentHTML('beforeend', modal);
+  }
+  let _acmUserDebounce = null;
+  async function acmUserSearch(q) {
+    const list = document.getElementById('acm-user-list');
+    if (!list) return;
+    clearTimeout(_acmUserDebounce);
+    _acmUserDebounce = setTimeout(async () => {
+      const term = (q || '').trim();
+      if (term.length < 2) { list.classList.add('hidden'); list.innerHTML = ''; return; }
+      try {
+        const r = await AuthentikAuth.apiFetch('/api/isp/user-search?q=' + encodeURIComponent(term));
+        const users = (await r.json()).users || [];
+        if (users.length === 0) { list.classList.add('hidden'); return; }
+        list.innerHTML = users.map(u =>
+          `<button type="button" onmousedown="event.preventDefault();acmUserPick('${esc(u.email)}')" class="w-full text-left px-2 py-1 hover:bg-blue-50 border-b last:border-b-0">
+            <div class="text-xs">${esc(u.name || '—')}</div>
+            <div class="text-xs text-gray-500 font-mono">${esc(u.email)}</div>
+          </button>`).join('');
+        list.classList.remove('hidden');
+      } catch { list.classList.add('hidden'); }
+    }, 200);
+  }
+  function acmUserPick(email) {
+    const inp = document.getElementById('acm-user');
+    if (inp) inp.value = email;
+    document.getElementById('acm-user-list')?.classList.add('hidden');
   }
   async function saveAdminCreateMb() {
     const body = {

@@ -14992,6 +14992,24 @@ app.post('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
   }
 });
 
+// GET: User-Autocomplete fuer Admin-UI (Mailbox-Zuweisung). Liefert
+// max. 20 Treffer aus users (active=true), gesucht in name + email.
+app.get('/api/isp/user-search', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim().toLowerCase();
+    if (q.length < 2) return res.json({ users: [] });
+    const r = await pool.query(
+      `SELECT email, name FROM users
+        WHERE active = true AND email IS NOT NULL
+          AND (LOWER(email) LIKE $1 OR LOWER(COALESCE(name,'')) LIKE $1)
+        ORDER BY name NULLS LAST, email
+        LIMIT 20`,
+      [`%${q}%`],
+    );
+    res.json({ users: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // POST: Admin legt direkt eine Mailbox an, optional einem User zugeordnet.
 // Ohne assigned_user_email -> Shared-Mailbox (Admin sieht PW).
 // Mit assigned_user_email -> persoenlich (PW nur fuer User sichtbar).
