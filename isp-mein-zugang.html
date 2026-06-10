@@ -552,12 +552,21 @@
       rejected: '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-1">abgelehnt</span>',
       deleted:  '<span class="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded ml-1">geloescht</span>',
     })[s] || '';
-    wrap.innerHTML = mailboxRequests.map(m => `
+    wrap.innerHTML = mailboxRequests.map(m => {
+      const pwBlock = m.initial_password
+        ? `<div class="mt-2 p-2 bg-emerald-50 border border-emerald-200 rounded text-xs">
+             <div class="font-semibold text-emerald-800">🔐 Dein Initial-Passwort — bitte jetzt notieren!</div>
+             <div class="font-mono text-sm mt-1 select-all bg-white border rounded px-2 py-1">${esc(m.initial_password)}</div>
+             <div class="text-emerald-700 mt-1">Login: <span class="font-mono">${esc(m.local_part)}@${esc(m.domain)}</span> · Webmail: <a href="https://webmail.rosenweg9.ch" target="_blank" class="underline">webmail.rosenweg9.ch</a></div>
+             <button onclick="clearMailboxPw(${m.id})" class="mt-1 text-xs text-emerald-800 underline">Hab ich notiert — verbergen</button>
+           </div>` : '';
+      return `
       <div class="border rounded p-3 bg-gray-50">
         <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
           <div>
             <strong class="font-mono text-sm">${esc(m.local_part)}@${esc(m.domain)}</strong>
             ${sb(m.status)}
+            ${m.auto_approved ? '<span class="text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded ml-1">auto</span>' : ''}
             ${m.full_name ? `<span class="text-xs text-gray-500 ml-1">${esc(m.full_name)}</span>` : ''}
           </div>
           <div class="flex gap-1">
@@ -566,10 +575,11 @@
           </div>
         </div>
         <div class="text-xs text-gray-600">Quota: ${m.quota_mb || 1024} MB${m.approval_reason ? ` · ${esc(m.approval_reason)}` : ''}</div>
-      </div>`).join('');
+        ${pwBlock}
+      </div>`;
+    }).join('');
   }
   async function openMailboxModal() {
-    // Nur Domains fuer die der User berechtigt ist
     let relays = [];
     try {
       const r = await AuthentikAuth.apiFetch('/api/isp/mailbox-eligible-relays');
@@ -578,17 +588,25 @@
     const relayOpts = relays.length === 0
       ? `<p class="text-xs text-red-600 italic">Keine von Rosenweg verwaltete Mail-Domain verfuegbar. (Wenn dies falsch ist, Admin kontaktieren.)</p>`
       : `<select id="mb-relay" class="w-full border rounded px-2 py-1">${relays.map(r => `<option value="${r.id}">@${esc(r.domain)}</option>`).join('')}</select>`;
+    // Vor-/Nachname aus Authentik vorbelegen, Local-Part-Vorschlag daraus ableiten.
+    const u = AuthentikAuth.getUser() || {};
+    const fullNameDefault = u.name || '';
+    const localDefault = fullNameDefault
+      ? fullNameDefault.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'')
+          .replace(/ß/g,'ss').replace(/[^a-z0-9 .-]/g,'').trim().replace(/\s+/g,'.')
+      : '';
     const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5">
         <h2 class="font-bold mb-3">Mailbox beantragen</h2>
+        <p class="text-xs text-gray-500 mb-3">Mit Standard-Vorgaben (1024 MB Quota, ohne Notiz) wird die Mailbox <strong>sofort</strong> angelegt — du siehst das Initial-Passwort direkt nach dem Antrag.</p>
         <div class="space-y-2 text-sm">
           <div><label class="block text-xs text-gray-600">Domain *</label>${relayOpts}</div>
-          <div><label class="block text-xs text-gray-600">Local-Part *</label><div class="flex items-center gap-1"><input id="mb-local" placeholder="z.B. stefan" class="flex-1 border rounded px-2 py-1"><span class="text-xs text-gray-500">@&lt;domain&gt;</span></div></div>
-          <div><label class="block text-xs text-gray-600">Anzeigename</label><input id="mb-name" placeholder="z.B. Stefan Mueller" class="w-full border rounded px-2 py-1"></div>
+          <div><label class="block text-xs text-gray-600">Anzeigename (Vor- und Nachname)</label><input id="mb-name" value="${esc(fullNameDefault)}" class="w-full border rounded px-2 py-1"></div>
+          <div><label class="block text-xs text-gray-600">Local-Part * (vor @)</label><div class="flex items-center gap-1"><input id="mb-local" value="${esc(localDefault)}" placeholder="z.B. vorname.nachname" class="flex-1 border rounded px-2 py-1"><span class="text-xs text-gray-500">@&lt;domain&gt;</span></div></div>
           <div class="grid grid-cols-2 gap-2">
             <div><label class="block text-xs text-gray-600">Quota MB</label><input id="mb-quota" type="number" value="1024" class="w-full border rounded px-2 py-1"></div>
           </div>
-          <div><label class="block text-xs text-gray-600">Notizen</label><textarea id="mb-notiz" rows="2" class="w-full border rounded px-2 py-1"></textarea></div>
+          <div><label class="block text-xs text-gray-600">Notizen (nur falls Quota oder Sonderwunsch)</label><textarea id="mb-notiz" rows="2" class="w-full border rounded px-2 py-1" placeholder="Standard: leer lassen — dann wird auto-genehmigt"></textarea></div>
         </div>
         <div class="flex justify-end gap-2 mt-3">
           <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Abbrechen</button>
@@ -603,15 +621,20 @@
       local_part: document.getElementById('mb-local').value.trim().toLowerCase(),
       full_name: document.getElementById('mb-name').value.trim() || null,
       quota_mb: parseInt(document.getElementById('mb-quota').value, 10) || 1024,
-      notizen: document.getElementById('mb-notiz').value || null,
+      notizen: document.getElementById('mb-notiz').value.trim() || null,
     };
     if (!body.relay_id || !body.local_part) { alert('Domain + Local-Part Pflicht.'); return; }
     try {
       const r = await AuthentikAuth.apiFetch('/api/isp/mailbox-requests', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
       if (!r.ok) throw new Error(await r.text());
+      const d = await r.json();
       document.querySelector('.fixed')?.remove();
       await loadMailboxes();
-      alert('Antrag eingereicht. Du wirst informiert sobald die Mailbox bereit ist.');
+      if (d.auto_approved && d.initial_password) {
+        alert(`✓ Mailbox ${d.username} wurde sofort eingerichtet. Dein Initial-Passwort steht unter "Meine Mailboxen" zum Notieren bereit.`);
+      } else {
+        alert('Antrag eingereicht (custom Quota/Notiz). Du wirst informiert sobald die Mailbox bereit ist.');
+      }
     } catch (e) { alert('Fehler: ' + e.message); }
   }
   async function resetMailboxPw(id) {
@@ -619,7 +642,13 @@
     const r = await AuthentikAuth.apiFetch('/api/isp/mailbox-requests/' + id + '/reset-password', { method: 'POST' });
     if (!r.ok) { alert('Fehler: ' + await r.text()); return; }
     const d = await r.json();
-    prompt('Dein neues Initial-Passwort (bitte sofort aendern):', d.new_password);
+    if (d.new_password) alert(`Dein neues Initial-Passwort steht unter "Meine Mailboxen" — bitte notieren und beim ersten Webmail-Login aendern.`);
+    await loadMailboxes();
+  }
+  async function clearMailboxPw(id) {
+    if (!confirm('Passwort aus Anzeige entfernen? (Mailbox bleibt aktiv)')) return;
+    await AuthentikAuth.apiFetch('/api/isp/mailbox-requests/' + id + '/clear-password', { method: 'POST' });
+    await loadMailboxes();
   }
   async function delMailboxReq(id) {
     if (!confirm('Antrag zuruecknehmen?')) return;
