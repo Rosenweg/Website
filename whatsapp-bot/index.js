@@ -235,7 +235,7 @@ async function pollOutbox() {
       } catch (err) {
         // err.message kann bei whatsapp-web.js single-char sein; stack mitloggen
         const detailedErr = err.stack || `${err.name || ''}: ${err.message || ''}` || String(err);
-        console.error(`[WA] Send fehler msg=${m.id} (chatId=${chatId}):`, detailedErr.slice(0, 1500));
+        console.error(`[WA] Send fehler msg=${m.id}:`, detailedErr.slice(0, 1500));
         await fetch(`${API_BASE}/api/whatsapp/status`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-WA-Secret': WA_SECRET },
