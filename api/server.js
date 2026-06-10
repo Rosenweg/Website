@@ -14792,6 +14792,187 @@ app.get('/api/isp/traefik-config', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ─── Mailcow-API Client ────────────────────────────────────────────────
+// Ruft die Mailcow REST-API (https://mailcow.docs.apiary.io/) ueber den
+// per /etc/default/asterisk-env oder docker-service-env gesetzten Key auf.
+async function mailcowApi(method, path, body) {
+  const base = process.env.MAILCOW_API_BASE;
+  const key  = process.env.MAILCOW_API_KEY;
+  if (!base || !key) throw new Error('MAILCOW_API_BASE/KEY nicht konfiguriert');
+  const r = await fetch(`${base}/api/v1${path}`, {
+    method,
+    headers: { 'X-API-Key': key, 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+    // self-signed cert auf mailcow tolerieren
+    signal: AbortSignal.timeout(15000),
+  });
+  const text = await r.text();
+  if (!r.ok) throw new Error(`Mailcow ${r.status}: ${text.slice(0,300)}`);
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+// ─── Mailbox-Onboarding-Workflow ──────────────────────────────────────
+// User auf isp-mein-zugang sieht/beantragt Mailboxes fuer eigene Mail-Relays
+// mit mailcow_managed=true. Admin auf isp-admin approved + provisioniert.
+
+// GET: eigene Antraege + bestehende Mailcow-Mailboxes pro Relay
+app.get('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
+  try {
+    const admin = ispIsAdmin(req);
+    const email = (req.user.email || '').toLowerCase();
+    const r = admin
+      ? await pool.query(
+          `SELECT mr.*, r.domain, r.mailcow_managed
+             FROM mailbox_requests mr
+             LEFT JOIN isp_mail_relays r ON r.id = mr.relay_id
+            ORDER BY CASE mr.status WHEN 'pending' THEN 0 ELSE 1 END, mr.created_at DESC`,
+        )
+      : await pool.query(
+          `SELECT mr.*, r.domain, r.mailcow_managed
+             FROM mailbox_requests mr
+             LEFT JOIN isp_mail_relays r ON r.id = mr.relay_id
+            WHERE LOWER(mr.antragsteller_email) = $1
+            ORDER BY mr.created_at DESC`,
+          [email],
+        );
+    res.json({ requests: r.rows, is_admin: admin });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST: neuer Antrag (status=pending)
+app.post('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.relay_id || !b.local_part) return res.status(400).json({ error: 'relay_id + local_part Pflicht' });
+    const lp = String(b.local_part).toLowerCase().replace(/[^a-z0-9._-]/g, '');
+    if (!lp) return res.status(400).json({ error: 'local_part ungueltig (nur a-z0-9._-)' });
+    // Relay muss existieren + mailcow_managed sein
+    const rel = await pool.query('SELECT id, domain, owner_email, mailcow_managed FROM isp_mail_relays WHERE id = $1', [b.relay_id]);
+    if (rel.rows.length === 0) return res.status(404).json({ error: 'Mail-Relay nicht gefunden' });
+    if (!rel.rows[0].mailcow_managed && !ispIsAdmin(req)) {
+      return res.status(400).json({ error: 'Diese Domain wird nicht von Rosenweg verwaltet — Mailbox-Provisionierung beim Domain-Owner' });
+    }
+    const ins = await pool.query(
+      `INSERT INTO mailbox_requests
+         (relay_id, antragsteller_email, local_part, full_name, quota_mb, notizen)
+       VALUES ($1,$2,$3,$4,COALESCE($5,1024),$6) RETURNING *`,
+      [b.relay_id, req.user.email, lp, b.full_name || null, b.quota_mb || null, b.notizen || null],
+    );
+    // Admins benachrichtigen
+    try {
+      const adminEmails = (await pool.query(
+        `SELECT DISTINCT email FROM users WHERE active=true AND email IS NOT NULL
+          AND (groups_json::jsonb ? 'technik' OR groups_json::jsonb ? 'Präsident')`,
+      )).rows.map(r => r.email).filter(Boolean);
+      if (adminEmails.length) {
+        pushWhatsappBroadcast({
+          emails: adminEmails,
+          sourceType: 'mailbox-request',
+          sourceId: ins.rows[0].id,
+          body: `📧 Neue Mailbox-Anfrage: *${lp}@${rel.rows[0].domain}*\nvon ${req.user.email}\n${SITE_URL}/isp-admin.html#mail`,
+        }).catch(() => {});
+      }
+    } catch {}
+    res.json(ins.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Diese Mailbox existiert bereits oder ist beantragt' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST: Approve + Mailcow-Provisionierung (Admin only)
+app.post('/api/isp/mailbox-requests/:id/approve', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const e = await pool.query(
+      `SELECT mr.*, r.domain, r.mailcow_managed FROM mailbox_requests mr
+         LEFT JOIN isp_mail_relays r ON r.id = mr.relay_id WHERE mr.id = $1`, [id]);
+    if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const mr = e.rows[0];
+    if (mr.status === 'approved') return res.status(400).json({ error: 'Bereits approved' });
+    if (!mr.mailcow_managed) return res.status(400).json({ error: 'Domain nicht von Rosenweg verwaltet' });
+
+    // Initial-Passwort vom Admin gesetzt oder generiert
+    const password = (req.body?.password && String(req.body.password)) || crypto.randomBytes(12).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 16);
+    const username = `${mr.local_part}@${mr.domain}`;
+    try {
+      await mailcowApi('POST', '/add/mailbox', {
+        local_part: mr.local_part,
+        domain: mr.domain,
+        name: mr.full_name || mr.local_part,
+        quota: mr.quota_mb || 1024,
+        password,
+        password2: password,
+        active: '1',
+        force_pw_update: '1',  // bei erstem Login PW aendern
+        tls_enforce_in: '1',
+        tls_enforce_out: '1',
+      });
+    } catch (mcErr) {
+      return res.status(502).json({ error: 'Mailcow-Provisionierung fehlgeschlagen: ' + mcErr.message });
+    }
+    await pool.query(
+      `UPDATE mailbox_requests
+          SET status='approved', approved_by=$1, approved_at=NOW(),
+              approval_reason=$2, mailcow_synced_at=NOW(), updated_at=NOW()
+        WHERE id=$3`,
+      [req.user.email, req.body?.reason || null, id]
+    );
+    res.json({ ok: true, username, initial_password: password });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST: Reject
+app.post('/api/isp/mailbox-requests/:id/reject', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    await pool.query(
+      `UPDATE mailbox_requests SET status='rejected', approved_by=$1, approved_at=NOW(), approval_reason=$2, updated_at=NOW() WHERE id=$3`,
+      [req.user.email, req.body?.reason || null, id]
+    );
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST: Passwort-Reset (User darf eigene, Admin alle)
+app.post('/api/isp/mailbox-requests/:id/reset-password', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const e = await pool.query(
+      `SELECT mr.*, r.domain, r.mailcow_managed FROM mailbox_requests mr
+         LEFT JOIN isp_mail_relays r ON r.id = mr.relay_id WHERE mr.id = $1`, [id]);
+    if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const mr = e.rows[0];
+    if (mr.status !== 'approved') return res.status(400).json({ error: 'Mailbox ist nicht aktiv' });
+    if (!ispIsAdmin(req) && (mr.antragsteller_email || '').toLowerCase() !== (req.user.email || '').toLowerCase()) {
+      return res.status(403).json({ error: 'Nur Owner oder Admin' });
+    }
+    const password = crypto.randomBytes(12).toString('base64').replace(/[^a-zA-Z0-9]/g, '').slice(0, 16);
+    await mailcowApi('POST', '/edit/mailbox', {
+      items: [`${mr.local_part}@${mr.domain}`],
+      attr: { password, password2: password, force_pw_update: '1' },
+    });
+    res.json({ ok: true, new_password: password });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE: Mailbox loeschen (Admin)
+app.delete('/api/isp/mailbox-requests/:id', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const e = await pool.query(
+      `SELECT mr.*, r.domain FROM mailbox_requests mr LEFT JOIN isp_mail_relays r ON r.id = mr.relay_id WHERE mr.id = $1`, [id]);
+    if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const mr = e.rows[0];
+    if (mr.status === 'approved') {
+      try { await mailcowApi('POST', '/delete/mailbox', [`${mr.local_part}@${mr.domain}`]); }
+      catch (mcErr) { console.warn('[mailbox-delete] Mailcow:', mcErr.message); }
+    }
+    await pool.query(`UPDATE mailbox_requests SET status='deleted', updated_at=NOW() WHERE id=$1`, [id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // === Mail-Relays (PMG-Domains) ===
 app.get('/api/isp/mail-relays', authMiddleware, async (req, res) => {
   try {
@@ -17064,6 +17245,32 @@ async function initDB() {
       ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS smtps_sni_hostname VARCHAR(255);
       ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS smtps_host VARCHAR(255);
       ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS smtps_port INTEGER DEFAULT 465;
+      -- mailcow_managed=true: Rosenweg betreibt die Mailcow-Instanz fuer diese Domain,
+      -- d.h. wir koennen via Mailcow-API Mailboxes anlegen/loeschen/Passwort setzen.
+      ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS mailcow_managed BOOLEAN DEFAULT false;
+
+      -- Mailbox-Onboarding: User-Antraege fuer rosenweg-managed Domains.
+      -- Status: pending (Admin pruefen) -> approved (provisioniert in Mailcow)
+      --                                  -> rejected (Antrag abgelehnt)
+      CREATE TABLE IF NOT EXISTS mailbox_requests (
+        id SERIAL PRIMARY KEY,
+        relay_id INTEGER REFERENCES isp_mail_relays(id) ON DELETE CASCADE,
+        antragsteller_email TEXT NOT NULL,
+        local_part VARCHAR(120) NOT NULL,      -- vor @
+        full_name VARCHAR(255),                -- Anzeigename
+        quota_mb INTEGER DEFAULT 1024,
+        notizen TEXT,
+        status VARCHAR(20) DEFAULT 'pending',  -- pending | approved | rejected | deleted
+        approved_by TEXT,
+        approved_at TIMESTAMPTZ,
+        approval_reason TEXT,
+        mailcow_synced_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (relay_id, local_part)
+      );
+      CREATE INDEX IF NOT EXISTS idx_mbr_antragsteller ON mailbox_requests(LOWER(antragsteller_email));
+      CREATE INDEX IF NOT EXISTS idx_mbr_status ON mailbox_requests(status);
 
       -- isp_mailboxes ist veraltet (PMG hat keine eigenen Mailboxes).
       -- Tabelle bleibt fuer Backward-Compat, wird nicht mehr benutzt.
