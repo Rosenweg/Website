@@ -7,6 +7,32 @@
 //   3. Bot polled API stündlich für ausgehende Nachrichten
 
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
+const { spawn } = require('node:child_process');
+
+// Konvertiert audio/wav -> audio/ogg (opus) via ffmpeg.
+// WhatsApp Web verarbeitet WAV in Gruppen oft nicht (silent drop bei Upload),
+// OGG Opus ist das native Format und wird zuverlaessig akzeptiert.
+async function convertWavToOgg(base64Wav) {
+  return new Promise((resolve, reject) => {
+    const wav = Buffer.from(base64Wav, 'base64');
+    const ff = spawn('ffmpeg', [
+      '-loglevel', 'error',
+      '-f', 'wav', '-i', 'pipe:0',
+      '-c:a', 'libopus', '-b:a', '32k', '-ar', '16000', '-ac', '1',
+      '-f', 'ogg', 'pipe:1',
+    ]);
+    const out = [];
+    let err = '';
+    ff.stdout.on('data', c => out.push(c));
+    ff.stderr.on('data', c => err += c.toString());
+    ff.on('error', reject);
+    ff.on('close', code => {
+      if (code !== 0) return reject(new Error(`ffmpeg ${code}: ${err.slice(0, 200)}`));
+      resolve(Buffer.concat(out).toString('base64'));
+    });
+    ff.stdin.end(wav);
+  });
+}
 const qrcode = require('qrcode-terminal');
 const qrPng = require('qrcode');
 const fs = require('fs');
@@ -229,8 +255,20 @@ async function pollOutbox() {
         for (const a of (m.attachments || [])) {
           if (a.docs_path) continue; // Disk-Pfade waeren spezielle Behandlung — vorerst skippen
           if (a.data_base64) {
-            const media = new MessageMedia(a.mimetype || 'image/jpeg', a.data_base64, a.filename || 'beleg');
-            const opts = { caption: m.body || a.caption || '', sendMediaAsDocument: (a.mimetype || '').startsWith('audio/wav') };
+            let mime = a.mimetype || 'image/jpeg';
+            let dataB64 = a.data_base64;
+            let filename = a.filename || 'beleg';
+            // WAV -> OGG opus konvertieren fuer Voicemails (zuverlaessigere Zustellung)
+            if (mime === 'audio/wav' || mime === 'audio/wave' || mime === 'audio/x-wav') {
+              try {
+                dataB64 = await convertWavToOgg(a.data_base64);
+                mime = 'audio/ogg; codecs=opus';
+                filename = filename.replace(/\.wav$/i, '.ogg');
+                console.log(`[WA] msg=${m.id} WAV -> OGG konvertiert (${a.data_base64.length} -> ${dataB64.length} bytes b64)`);
+              } catch (e) { console.warn(`[WA] msg=${m.id} ffmpeg-Konvertierung fehlgeschlagen, sende WAV: ${e.message}`); }
+            }
+            const media = new MessageMedia(mime, dataB64, filename);
+            const opts = { caption: m.body || a.caption || '', sendAudioAsVoice: mime.startsWith('audio/ogg') };
             sentMsg = chat
               ? await chat.sendMessage(media, opts)
               : await client.sendMessage(chatId, media, opts);
