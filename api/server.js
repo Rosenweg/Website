@@ -14851,7 +14851,11 @@ async function provisionMailcowMailbox({ local_part, domain, full_name, quota_mb
     password,
     password2: password,
     active: '1',
-    force_pw_update: '1',
+    // force_pw_update=1 blockt unter SOGo+manchen IMAP-Backends den ersten
+    // Login bis ein PW-Wechsel im UI passiert — fuer Auto-Approve nicht
+    // praktikabel (User loggt sich direkt im Mail-Client an, nicht in SOGo).
+    // Stattdessen den User im UI auffordern, das Initial-PW zu aendern.
+    force_pw_update: '0',
     tls_enforce_in: '1',
     tls_enforce_out: '1',
   });
@@ -15168,7 +15172,7 @@ app.post('/api/isp/mailbox-requests/:id/reset-password', authMiddleware, async (
     const username = `${mr.local_part}@${mr.domain}`;
     await mailcowApi('POST', '/edit/mailbox', {
       items: [username],
-      attr: { password, password2: password, force_pw_update: '1' },
+      attr: { password, password2: password, force_pw_update: '0' },
     });
     await pool.query('UPDATE mailbox_requests SET initial_password=$1, updated_at=NOW() WHERE id=$2', [password, id]);
     notifyTechnikMailbox(
