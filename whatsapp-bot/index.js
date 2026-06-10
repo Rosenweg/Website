@@ -223,6 +223,29 @@ client.on('message_create', async (msg) => {
   }
 });
 
+// Wartet bis die Nachricht den gewuenschten ACK-Level erreicht hat.
+// ACK: -1=fehler, 0=pending, 1=server-ack, 2=device-ack, 3=read.
+async function waitForAck(msg, minAck = 1, timeoutMs = 6000) {
+  if (!msg) return;
+  if ((msg.ack ?? 0) >= minAck) return;
+  const id = msg.id?._serialized;
+  return new Promise(resolve => {
+    const onAck = (m) => {
+      if (m.id?._serialized === id && (m.ack ?? 0) >= minAck) {
+        client.removeListener('message_ack', onAck);
+        clearTimeout(t);
+        resolve();
+      }
+    };
+    const t = setTimeout(() => {
+      client.removeListener('message_ack', onAck);
+      console.log(`[WA] ACK-Timeout fuer ${id}, weiter ohne ack`);
+      resolve();
+    }, timeoutMs);
+    client.on('message_ack', onAck);
+  });
+}
+
 // Outbox-Polling
 async function pollOutbox() {
   if (!isReady) return;
@@ -286,10 +309,11 @@ async function pollOutbox() {
           headers: { 'Content-Type': 'application/json', 'X-WA-Secret': WA_SECRET },
           body: JSON.stringify({ message_id: m.id, status: 'sent' }),
         });
-        // 800ms Pause zwischen Outbox-Sends damit WhatsApp die Reihenfolge
-        // einhaelt — sonst ueberholt eine schnell-hochgeladene Voice-Note
-        // gerne die noch zustellende Text-Nachricht.
-        await new Promise(r => setTimeout(r, 800));
+        // Warten bis die Nachricht WIRKLICH beim WA-Server angekommen ist
+        // (ack >= 1 = server-ack) bevor die naechste rausgeht — sonst
+        // ueberholt eine schnell hochgeladene Voice-Note die noch nicht
+        // bestaetigte Text-Nachricht.
+        await waitForAck(sentMsg, 1, 6000);
       } catch (err) {
         // err.message kann bei whatsapp-web.js single-char sein; stack mitloggen
         const detailedErr = err.stack || `${err.name || ''}: ${err.message || ''}` || String(err);
