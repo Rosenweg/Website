@@ -61,6 +61,16 @@
         <p class="text-xs text-gray-500 mb-2">Eigene Mail-Domain durch PMG filtern lassen und an deinen eigenen Mailserver weiterleiten. MX auf <code class="bg-gray-100 px-1 rounded">pmg.rosenweg4303.ch</code> setzen.</p>
         <div id="relay-list" class="space-y-2"></div>
       </section>
+
+      <!-- Mailboxen (nur fuer Rosenweg-managed Domains) -->
+      <section class="bg-white rounded-lg shadow p-5">
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <h2 class="text-lg font-semibold">📬 Meine Mailboxen</h2>
+          <button onclick="openMailboxModal()" class="text-sm bg-emerald-600 text-white px-3 py-1.5 rounded">+ Mailbox beantragen</button>
+        </div>
+        <p class="text-xs text-gray-500 mb-2">Mailboxen fuer Domains die Rosenweg verwaltet (z.B. <code class="bg-gray-100 px-1 rounded">rosenweg9.ch</code>). Antrag geht an die Technik, nach Approval Initial-PW per Sicheres-Medium.</p>
+        <div id="mailbox-list" class="space-y-2"></div>
+      </section>
     </div>
   </main>
 
@@ -74,7 +84,7 @@
     if (!u) return;
     document.getElementById('auth-gate').classList.add('hidden');
     document.getElementById('content').classList.remove('hidden');
-    loadVpn(); loadVlan(); loadRp(); loadRelays();
+    loadVpn(); loadVlan(); loadRp(); loadRelays(); loadMailboxes();
   });
 
   // VPN
@@ -523,6 +533,98 @@
     if (!confirm('Mail-Relay loeschen?')) return;
     await AuthentikAuth.apiFetch('/api/isp/mail-relays/' + id, { method: 'DELETE' });
     await loadRelays();
+  }
+
+  // Mailboxen
+  let mailboxRequests = [];
+  async function loadMailboxes() {
+    const r = await AuthentikAuth.apiFetch('/api/isp/mailbox-requests');
+    if (!r.ok) return;
+    mailboxRequests = (await r.json()).requests || [];
+    renderMailboxes();
+  }
+  function renderMailboxes() {
+    const wrap = document.getElementById('mailbox-list');
+    if (mailboxRequests.length === 0) { wrap.innerHTML = '<p class="text-gray-400 italic text-sm">Keine Mailboxen.</p>'; return; }
+    const sb = s => ({
+      approved: '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded ml-1">aktiv</span>',
+      pending:  '<span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded ml-1">in Pruefung</span>',
+      rejected: '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-1">abgelehnt</span>',
+      deleted:  '<span class="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded ml-1">geloescht</span>',
+    })[s] || '';
+    wrap.innerHTML = mailboxRequests.map(m => `
+      <div class="border rounded p-3 bg-gray-50">
+        <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
+          <div>
+            <strong class="font-mono text-sm">${esc(m.local_part)}@${esc(m.domain)}</strong>
+            ${sb(m.status)}
+            ${m.full_name ? `<span class="text-xs text-gray-500 ml-1">${esc(m.full_name)}</span>` : ''}
+          </div>
+          <div class="flex gap-1">
+            ${m.status === 'approved' ? `<button onclick="resetMailboxPw(${m.id})" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">Passwort-Reset</button>` : ''}
+            ${m.status === 'pending' ? `<button onclick="delMailboxReq(${m.id})" class="text-xs text-red-600 hover:underline px-2">Zuruecknehmen</button>` : ''}
+          </div>
+        </div>
+        <div class="text-xs text-gray-600">Quota: ${m.quota_mb || 1024} MB${m.approval_reason ? ` · ${esc(m.approval_reason)}` : ''}</div>
+      </div>`).join('');
+  }
+  async function openMailboxModal() {
+    // Nur Mailcow-managed Relays auflisten
+    let relays = [];
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/mail-relays');
+      relays = ((await r.json()).mail_relays || []).filter(r => r.mailcow_managed);
+    } catch {}
+    const relayOpts = relays.length === 0
+      ? `<p class="text-xs text-red-600 italic">Keine von Rosenweg verwaltete Mail-Domain verfuegbar. (Wenn dies falsch ist, Admin kontaktieren.)</p>`
+      : `<select id="mb-relay" class="w-full border rounded px-2 py-1">${relays.map(r => `<option value="${r.id}">@${esc(r.domain)}</option>`).join('')}</select>`;
+    const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
+      <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5">
+        <h2 class="font-bold mb-3">Mailbox beantragen</h2>
+        <div class="space-y-2 text-sm">
+          <div><label class="block text-xs text-gray-600">Domain *</label>${relayOpts}</div>
+          <div><label class="block text-xs text-gray-600">Local-Part *</label><div class="flex items-center gap-1"><input id="mb-local" placeholder="z.B. stefan" class="flex-1 border rounded px-2 py-1"><span class="text-xs text-gray-500">@&lt;domain&gt;</span></div></div>
+          <div><label class="block text-xs text-gray-600">Anzeigename</label><input id="mb-name" placeholder="z.B. Stefan Mueller" class="w-full border rounded px-2 py-1"></div>
+          <div class="grid grid-cols-2 gap-2">
+            <div><label class="block text-xs text-gray-600">Quota MB</label><input id="mb-quota" type="number" value="1024" class="w-full border rounded px-2 py-1"></div>
+          </div>
+          <div><label class="block text-xs text-gray-600">Notizen</label><textarea id="mb-notiz" rows="2" class="w-full border rounded px-2 py-1"></textarea></div>
+        </div>
+        <div class="flex justify-end gap-2 mt-3">
+          <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Abbrechen</button>
+          <button onclick="saveMailbox()" class="px-3 py-1.5 bg-emerald-600 text-white rounded text-sm"${relays.length === 0 ? ' disabled' : ''}>Antrag stellen</button>
+        </div>
+      </div></div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+  }
+  async function saveMailbox() {
+    const body = {
+      relay_id: parseInt(document.getElementById('mb-relay').value, 10),
+      local_part: document.getElementById('mb-local').value.trim().toLowerCase(),
+      full_name: document.getElementById('mb-name').value.trim() || null,
+      quota_mb: parseInt(document.getElementById('mb-quota').value, 10) || 1024,
+      notizen: document.getElementById('mb-notiz').value || null,
+    };
+    if (!body.relay_id || !body.local_part) { alert('Domain + Local-Part Pflicht.'); return; }
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/mailbox-requests', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error(await r.text());
+      document.querySelector('.fixed')?.remove();
+      await loadMailboxes();
+      alert('Antrag eingereicht. Du wirst informiert sobald die Mailbox bereit ist.');
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+  async function resetMailboxPw(id) {
+    if (!confirm('Passwort zuruecksetzen? Du bekommst ein neues Initial-Passwort.')) return;
+    const r = await AuthentikAuth.apiFetch('/api/isp/mailbox-requests/' + id + '/reset-password', { method: 'POST' });
+    if (!r.ok) { alert('Fehler: ' + await r.text()); return; }
+    const d = await r.json();
+    prompt('Dein neues Initial-Passwort (bitte sofort aendern):', d.new_password);
+  }
+  async function delMailboxReq(id) {
+    if (!confirm('Antrag zuruecknehmen?')) return;
+    await AuthentikAuth.apiFetch('/api/isp/mailbox-requests/' + id, { method: 'DELETE' });
+    await loadMailboxes();
   }
   </script>
 </body>
