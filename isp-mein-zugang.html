@@ -68,7 +68,11 @@
           <h2 class="text-lg font-semibold">📬 Meine Mailboxen</h2>
           <button onclick="openMailboxModal()" class="text-sm bg-emerald-600 text-white px-3 py-1.5 rounded">+ Mailbox beantragen</button>
         </div>
-        <p class="text-xs text-gray-500 mb-2">Mailboxen fuer Domains die Rosenweg verwaltet (z.B. <code class="bg-gray-100 px-1 rounded">rosenweg9.ch</code>). Antrag geht an die Technik, nach Approval Initial-PW per Sicheres-Medium.</p>
+        <p class="text-xs text-gray-500 mb-2">Mailboxen fuer Domains die Rosenweg verwaltet (z.B. <code class="bg-gray-100 px-1 rounded">rosenweg9.ch</code>). Standardantrag (1024 MB, ohne Notiz) wird automatisch genehmigt — Initial-PW erscheint direkt unten.</p>
+        <div class="flex flex-wrap gap-2 mb-3 text-xs">
+          <a href="https://webmail.rosenweg9.ch" target="_blank" rel="noopener" class="inline-flex items-center gap-1 bg-blue-50 hover:bg-blue-100 text-blue-800 px-2 py-1 rounded border border-blue-200">📨 Webmail</a>
+          <a href="https://quarantine.rosenweg9.ch/quarantine" target="_blank" rel="noopener" class="inline-flex items-center gap-1 bg-amber-50 hover:bg-amber-100 text-amber-800 px-2 py-1 rounded border border-amber-200" title="Mails die als Spam einbehalten wurden ansehen / freigeben (Login-Link kommt per Mail)">🛡 Spam-Quarantaene</a>
+        </div>
         <div id="mailbox-list" class="space-y-2"></div>
       </section>
     </div>
