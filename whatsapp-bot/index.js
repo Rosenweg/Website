@@ -216,17 +216,33 @@ async function pollOutbox() {
           : (m.phone.endsWith('@g.us') || m.phone.endsWith('@lid') || m.phone.endsWith('@c.us')
               ? m.phone
               : m.phone.replace(/\D/g, '') + '@c.us');
+
+        // Bei Gruppen: chat erst laden — client.sendMessage schlaegt sonst
+        // gerne ohne Fehler "sent" zurueck ohne tatsaechliche Zustellung.
+        const isGroup = chatId.endsWith('@g.us');
+        const chat = isGroup ? await client.getChatById(chatId) : null;
+        const sendVia = chat || client; // chat.sendMessage(content) bzw. client.sendMessage(chatId, content)
+
         // Anhaenge (falls vorhanden) als MessageMedia
         let mediaSent = false;
+        let sentMsg = null;
         for (const a of (m.attachments || [])) {
           if (a.docs_path) continue; // Disk-Pfade waeren spezielle Behandlung — vorerst skippen
           if (a.data_base64) {
             const media = new MessageMedia(a.mimetype || 'image/jpeg', a.data_base64, a.filename || 'beleg');
-            await client.sendMessage(chatId, media, { caption: m.body || a.caption || '' });
+            const opts = { caption: m.body || a.caption || '', sendMediaAsDocument: (a.mimetype || '').startsWith('audio/wav') };
+            sentMsg = chat
+              ? await chat.sendMessage(media, opts)
+              : await client.sendMessage(chatId, media, opts);
             mediaSent = true;
           }
         }
-        if (!mediaSent && m.body) await client.sendMessage(chatId, m.body);
+        if (!mediaSent && m.body) {
+          sentMsg = chat ? await chat.sendMessage(m.body) : await client.sendMessage(chatId, m.body);
+        }
+        // Verifizieren dass die Nachricht tatsaechlich akzeptiert wurde
+        if (!sentMsg) throw new Error('sendMessage liefert null/undefined');
+        console.log(`[WA] msg=${m.id} -> ${chatId} (id=${sentMsg.id?._serialized || '?'}, ack=${sentMsg.ack ?? '?'})`);
         await fetch(`${API_BASE}/api/whatsapp/status`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-WA-Secret': WA_SECRET },
