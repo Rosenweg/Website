@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libdrm2 libgbm1 libgtk-3-0 libnspr4 libnss3 libxcomposite1 \
     libxdamage1 libxfixes3 libxkbcommon0 libxrandr2 libxshmfence1 \
     ca-certificates dumb-init wget \
+    ffmpeg \
   && rm -rf /var/lib/apt/lists/*
 
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
