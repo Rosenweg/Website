@@ -415,15 +415,31 @@ setInterval(() => {
 }, 60 * 1000);
 
 // Returns the Authentik authorize URL for the frontend to redirect to
+// Welche Hosts duerfen als OAuth-Redirect dienen. Muss mit den in Authentik
+// hinterlegten Redirect-URIs uebereinstimmen. Whitelist verhindert dass
+// jemand ueber Host-Header einen open redirect ausloest.
+const OAUTH_ALLOWED_HOSTS = new Set([
+  'www.rosenweg4303.ch',
+  'rosenweg4303.ch',
+  'isp.rosenweg4303.ch',
+]);
+function oauthRedirectUri(req) {
+  const host = req.headers['x-forwarded-host'] || req.headers.host || '';
+  const proto = (req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim();
+  if (OAUTH_ALLOWED_HOSTS.has(host)) return `${proto}://${host}/api/auth/callback`;
+  return `${SITE_URL}/api/auth/callback`;
+}
+
 app.get('/api/auth/login', (req, res) => {
   const { redirect } = req.query;
   const state = crypto.randomBytes(16).toString('hex');
-  const redirectUri = `${SITE_URL}/api/auth/callback`;
+  const redirectUri = oauthRedirectUri(req);
 
   // Sanitize redirect: only allow relative paths to prevent open redirect
   const safeRedirect = (redirect && redirect.startsWith('/') && !redirect.startsWith('//')) ? redirect : '/';
-  // Store state for CSRF validation in callback
-  oauthStates.set(state, { redirect: safeRedirect, created: Date.now() });
+  // Store state for CSRF validation in callback (inkl. redirect_uri damit
+  // der Callback auf demselben Host kommt wie der Login-Start)
+  oauthStates.set(state, { redirect: safeRedirect, redirect_uri: redirectUri, created: Date.now() });
 
   const params = new URLSearchParams({
     response_type: 'code',
@@ -479,12 +495,13 @@ app.get('/api/auth/callback', async (req, res) => {
   if (!redirectPath.startsWith('/') || redirectPath.startsWith('//')) redirectPath = '/';
 
   try {
-    // Exchange code for token
+    // Exchange code for token. redirect_uri MUSS exakt zum Login-Start
+    // passen (Authentik prueft das), deshalb aus dem State holen.
     const tokenUrl = `${AUTHENTIK_URL}/application/o/token/`;
     const tokenBody = new URLSearchParams({
       grant_type: 'authorization_code',
       code,
-      redirect_uri: `${SITE_URL}/api/auth/callback`,
+      redirect_uri: storedState.redirect_uri || `${SITE_URL}/api/auth/callback`,
       client_id: AUTHENTIK_CLIENT_ID,
       client_secret: AUTHENTIK_CLIENT_SECRET,
     }).toString();
