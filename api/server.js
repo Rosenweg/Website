@@ -1762,6 +1762,9 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
 const TV7_PLAYLIST_URL = 'https://api.init7.net/tvchannels.m3u?rp=true';
 const UDPXY_HOST = process.env.UDPXY_HOST || 'http://100.64.9.200:4022';
 const TV7_STREAMER_URL = process.env.TV7_STREAMER_URL || 'http://100.64.9.250:3000';
+// Public-URL die der Browser direkt anspricht (via CF Tunnel → LXC 250).
+// Setzt den Doppel-Hop (Browser → API → LXC) aus.
+const TV7_PUBLIC_URL = process.env.TV7_PUBLIC_URL || 'https://tv.rosenweg9.ch';
 const TV7_HMAC_SECRET = process.env.TV7_HMAC_SECRET || '';
 const TV7_TOKEN_TTL = 3600; // 1 hour
 
@@ -1815,6 +1818,20 @@ app.get('/api/tv/channels', authMiddleware, async (req, res) => {
     console.error('TV7 channels error:', err.message);
     res.status(500).json({ error: 'TV7-Kanäle konnten nicht geladen werden' });
   }
+});
+
+// Browser holt sich hier nur den Token + die public Stream-URL — keine
+// MPEG-TS-Bytes mehr durch die API. Player verbindet sich direkt mit dem
+// LXC via CF Tunnel.
+app.get('/api/tv/stream-url/:channelId', authMiddleware, (req, res) => {
+  const id = req.params.channelId;
+  if (!/^[a-f0-9-]+$/i.test(id)) return res.status(400).json({ error: 'Invalid channel id' });
+  if (!TV7_HMAC_SECRET) return res.status(500).json({ error: 'TV7 streamer secret nicht konfiguriert' });
+  const token = createTv7StreamerToken(req.user.id || req.user.user_id || 0);
+  res.json({
+    url: `${TV7_PUBLIC_URL}/stream/${id}?token=${encodeURIComponent(token)}`,
+    expires_in: TV7_TOKEN_TTL,
+  });
 });
 
 // HMAC-Token kompatibel mit tv7-streamer/server.js verifyToken().
