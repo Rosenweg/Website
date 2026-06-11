@@ -14792,6 +14792,57 @@ app.get('/api/isp/traefik-config', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ─── SMTP2GO-API Client ────────────────────────────────────────────────
+// Sender-Domain-Verifikation (DKIM + Return-Path-CNAMEs) damit Outbound
+// ueber unseren Smarthost mit DMARC-Alignment rausgeht.
+// API-Doku: https://developers.smtp2go.com/llms.txt
+async function smtp2goApi(path, body) {
+  const key = process.env.SMTP2GO_API_KEY;
+  if (!key) throw new Error('SMTP2GO_API_KEY nicht konfiguriert');
+  const r = await fetch(`https://api.smtp2go.com/v3${path}`, {
+    method: 'POST',
+    headers: { 'X-Smtp2go-Api-Key': key, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+    signal: AbortSignal.timeout(15000),
+  });
+  const text = await r.text();
+  if (!r.ok) throw new Error(`SMTP2GO ${r.status}: ${text.slice(0,300)}`);
+  const j = JSON.parse(text);
+  if (j.data?.error) throw new Error(`SMTP2GO: ${j.data.error}`);
+  return j.data;
+}
+
+// Holt aktuellen Verifikationsstatus + erwartete DNS-Records fuer eine Domain.
+// Nutzt /v3/domain/verify (forciert sofortigen Recheck) statt /v3/domain/view.
+async function smtp2goGetDomainStatus(domain) {
+  const data = await smtp2goApi('/domain/verify', { domain });
+  const entry = (data.domains || [])[0];
+  if (!entry) return null;
+  const d = entry.domain;
+  const dkim_fqdn = `${d.dkim_selector}._domainkey.${d.fulldomain}`;
+  const rpath_fqdn = `${d.rpath_selector}.${d.fulldomain}`;
+  return {
+    domain: d.fulldomain,
+    dkim_verified: d.dkim_verified,
+    rpath_verified: d.rpath_verified,
+    records: [
+      { type: 'CNAME', name: dkim_fqdn,  value: d.dkim_expected,  purpose: 'DKIM' },
+      { type: 'CNAME', name: rpath_fqdn, value: d.rpath_expected, purpose: 'Return-Path' },
+    ],
+  };
+}
+
+// Domain bei SMTP2GO als Sender-Domain registrieren. Idempotent — ein
+// "already exists" wird erfolgreich behandelt + per /verify nachgezogen.
+async function smtp2goEnsureDomain(domain) {
+  try {
+    await smtp2goApi('/domain/add', { domain, returnpath_subdomain: 'em' });
+  } catch (e) {
+    if (!/already exists/i.test(e.message)) throw e;
+  }
+  return smtp2goGetDomainStatus(domain);
+}
+
 // ─── Mailcow-API Client ────────────────────────────────────────────────
 // Ruft die Mailcow REST-API (https://mailcow.docs.apiary.io/) ueber den
 // per /etc/default/asterisk-env oder docker-service-env gesetzten Key auf.
@@ -15313,6 +15364,64 @@ app.delete('/api/isp/mail-relays/:id', authMiddleware, async (req, res) => {
     if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     await pool.query('DELETE FROM isp_mail_relays WHERE id = $1', [id]);
     res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── Outbound-Smarthost (PMG → SMTP2GO) pro Mail-Relay ─────────────────
+// Admin aktiviert "Outbound via Smarthost" pro Domain → wir registrieren
+// die Domain bei SMTP2GO + liefern die noetigen CNAMEs (DKIM + Return-Path).
+app.post('/api/isp/mail-relays/:id/smarthost', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const enable = !!req.body?.enable;
+    const e = await pool.query('SELECT * FROM isp_mail_relays WHERE id = $1', [id]);
+    if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = e.rows[0];
+
+    if (!enable) {
+      // Disable: Domain in SMTP2GO bleibt, wird nur entkoppelt. Wenn ganz raus
+      // gewuenscht, kann Admin /domain/remove separat machen.
+      await pool.query(
+        `UPDATE isp_mail_relays SET outbound_via_smarthost=false, updated_at=NOW() WHERE id=$1`,
+        [id]);
+      return res.json({ ok: true, outbound_via_smarthost: false });
+    }
+
+    // Enable: bei SMTP2GO registrieren + Status holen
+    let status;
+    try { status = await smtp2goEnsureDomain(v.domain); }
+    catch (err) { return res.status(502).json({ error: 'SMTP2GO: ' + err.message }); }
+    await pool.query(
+      `UPDATE isp_mail_relays SET
+         outbound_via_smarthost=true,
+         smtp2go_dkim_verified=$1, smtp2go_rpath_verified=$2,
+         smtp2go_dns_records=$3, smtp2go_last_verify_at=NOW(), updated_at=NOW()
+       WHERE id=$4`,
+      [status.dkim_verified, status.rpath_verified, JSON.stringify(status.records), id]);
+    res.json({ ok: true, outbound_via_smarthost: true, status });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Recheck-Status via SMTP2GO. Owner + Admin duerfen.
+app.post('/api/isp/mail-relays/:id/smarthost/recheck', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const e = await pool.query('SELECT * FROM isp_mail_relays WHERE id = $1', [id]);
+    if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = e.rows[0];
+    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    if (!isOwner && !ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Owner oder Admin' });
+    if (!v.outbound_via_smarthost) return res.status(400).json({ error: 'Smarthost ist fuer diese Domain nicht aktiviert' });
+    let status;
+    try { status = await smtp2goGetDomainStatus(v.domain); }
+    catch (err) { return res.status(502).json({ error: 'SMTP2GO: ' + err.message }); }
+    if (!status) return res.status(404).json({ error: 'Domain nicht in SMTP2GO gefunden' });
+    await pool.query(
+      `UPDATE isp_mail_relays SET smtp2go_dkim_verified=$1, smtp2go_rpath_verified=$2,
+         smtp2go_dns_records=$3, smtp2go_last_verify_at=NOW(), updated_at=NOW()
+       WHERE id=$4`,
+      [status.dkim_verified, status.rpath_verified, JSON.stringify(status.records), id]);
+    res.json({ status });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -17507,6 +17616,16 @@ async function initDB() {
       -- duerfen. NULL = jeder eingeloggte User. Beispiel rosenweg9.ch:
       -- ['r9-eigentuemer','r9-bewohner','stweg3-eigentuemer','stweg3-bewohner','stweg3-ausschuss']
       ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS allowed_groups TEXT[];
+      -- Outbound-Smarthost via PMG (→ SMTP2GO) fuer Kunden mit eigenem
+      -- Mailserver in unserem Netz. Wenn aktiv:
+      --   * Kunde konfiguriert seinen Postfix mit relayhost = [pmg.rosenweg4303.ch]:25
+      --   * Wir verifizieren die Sender-Domain bei SMTP2GO (DKIM + Return-Path)
+      --   * Outbound bekommt unsere SMTP2GO-Reputation, getrackt im Monatsvolumen
+      ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS outbound_via_smarthost BOOLEAN DEFAULT false;
+      ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS smtp2go_dkim_verified BOOLEAN DEFAULT false;
+      ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS smtp2go_rpath_verified BOOLEAN DEFAULT false;
+      ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS smtp2go_last_verify_at TIMESTAMPTZ;
+      ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS smtp2go_dns_records JSONB;
 
       -- Mailbox-Onboarding: User-Antraege fuer rosenweg-managed Domains.
       -- Status: pending (Admin pruefen) -> approved (provisioniert in Mailcow)
