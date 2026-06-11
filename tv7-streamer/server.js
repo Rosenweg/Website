@@ -99,11 +99,16 @@ function startFfmpeg(channelId) {
   log('[ffmpeg]', channelId, 'start', init7Url);
   const args = [
     '-hide_banner', '-loglevel', 'warning',
-    '-fflags', '+nobuffer+genpts+discardcorrupt',
-    '-rw_timeout', '8000000',  // 8s WAN-read-Timeout (microseconds)
+    '-fflags', '+nobuffer+genpts+discardcorrupt+igndts',
+    '-err_detect', 'ignore_err',
+    '-reconnect', '1',
+    '-reconnect_streamed', '1',
+    '-reconnect_delay_max', '4',
     '-i', init7Url,
-    '-map', '0:v:0',
-    '-map', '0:a:0',
+    // Erster Video- + Audio-Stream — manche Init7-Channels haben mehrere
+    // Audio-Tracks (deu/eng/...), wir nehmen Track 0.
+    '-map', '0:v:0?',
+    '-map', '0:a:0?',
     '-c:v', 'copy',
     '-c:a', 'aac', '-b:a', '128k', '-ac', '2',
     '-f', 'mpegts',
