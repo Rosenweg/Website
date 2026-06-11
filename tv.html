@@ -175,14 +175,16 @@
                     hasAudio: true,
                     hasVideo: true,
                 }, {
-                    // Defaults sind fuer Live-TV in der Regel ok.
-                    // Nur eine moderate Latenz-Begrenzung damit der Buffer
-                    // nicht ueber Minuten wachst (5s ist generoes genug).
+                    // Live-TV: einfach abspielen. Kein Latency-Chasing —
+                    // das hatte bei 20s-Sessions den Browser disconnecten
+                    // lassen. Lieber ein bisschen Lag als Aussetzer.
                     enableStashBuffer: true,
-                    liveBufferLatencyChasing: true,
-                    liveBufferLatencyMaxLatency: 5.0,
-                    liveBufferLatencyMinRemain: 1.0,
+                    stashInitialSize: 384,
+                    liveBufferLatencyChasing: false,
                     lazyLoad: false,
+                    autoCleanupSourceBuffer: true,
+                    autoCleanupMaxBackwardDuration: 30,
+                    autoCleanupMinBackwardDuration: 10,
                 });
                 player.attachMediaElement(video);
                 player.on(mpegts.Events.ERROR, (type, detail, info) => {
