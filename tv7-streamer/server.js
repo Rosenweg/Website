@@ -99,12 +99,18 @@ function startFfmpeg(channelId) {
   log('[ffmpeg]', channelId, 'start', init7Url);
   const args = [
     '-hide_banner', '-loglevel', 'warning',
+    '-fflags', '+nobuffer+genpts+discardcorrupt',
+    '-rw_timeout', '8000000',  // 8s WAN-read-Timeout (microseconds)
     '-i', init7Url,
     '-map', '0:v:0',
     '-map', '0:a:0',
     '-c:v', 'copy',
     '-c:a', 'aac', '-b:a', '128k', '-ac', '2',
-    '-f', 'mpegts', '-mpegts_copyts', '1',
+    '-f', 'mpegts',
+    '-mpegts_flags', '+pat_pmt_at_frames+resend_headers',
+    '-pat_period', '0.2',
+    '-pmt_period', '0.2',
+    '-flush_packets', '1',
     'pipe:1',
   ];
   const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
