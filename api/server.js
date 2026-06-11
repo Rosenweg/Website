@@ -579,7 +579,16 @@ app.get('/api/auth/callback', async (req, res) => {
         permissions: permissions,
       },
     }));
-    res.redirect(`${SITE_URL}${redirectPath}#auth=${userData}`);
+    // Final-Redirect zur gleichen Origin von der der Login gestartet wurde
+    // (z.B. isp.rosenweg4303.ch) — sonst landet der ISP-User auf www.
+    let originBase = SITE_URL;
+    try {
+      if (storedState.redirect_uri) {
+        const u = new URL(storedState.redirect_uri);
+        originBase = `${u.protocol}//${u.host}`;
+      }
+    } catch {}
+    res.redirect(`${originBase}${redirectPath}#auth=${userData}`);
   } catch (err) {
     console.error('OAuth2 callback error:', err);
     res.status(500).send('Anmeldung fehlgeschlagen');
