@@ -15390,10 +15390,26 @@ function requireTrackerSecret(req, res, next) {
   next();
 }
 
+// SMTP2GO Free-Tier: 1000/Monat. Schwellen fuer WA-Alert: 80%, 100%
+// und danach in 500er-Schritten (1500, 2000, ...) damit wir bei
+// kostenpflichtiger Nutzung jeweils dokumentiert werden.
+const SMTP2GO_FREE_LIMIT = 1000;
+function quotaThresholdsCrossed(prevTotal, newTotal) {
+  // Erstmal die "weichen" Schwellen 80% und 100% des Free-Tiers
+  const fixed = [Math.floor(SMTP2GO_FREE_LIMIT * 0.8), SMTP2GO_FREE_LIMIT];
+  // Dann alle 500er ueber dem Free-Tier
+  const beyond = [];
+  for (let t = SMTP2GO_FREE_LIMIT + 500; t <= 50000; t += 500) beyond.push(t);
+  return [...fixed, ...beyond].filter(t => prevTotal < t && newTotal >= t);
+}
+
 app.post('/api/isp/outbound-usage/ingest', requireTrackerSecret, async (req, res) => {
   try {
     const events = Array.isArray(req.body?.events) ? req.body.events : [];
     if (events.length === 0) return res.json({ ok: true, processed: 0 });
+    // Quota-Pruefung pro betroffenem Monat: zuerst Vorher-Total holen,
+    // dann nach UPSERT Nachher-Total und Schwellen vergleichen.
+    const monthsTouched = new Set();
     let processed = 0;
     for (const ev of events) {
       const d = String(ev.sender_domain || '').toLowerCase().trim();
@@ -15409,7 +15425,47 @@ app.post('/api/isp/outbound-usage/ingest', requireTrackerSecret, async (req, res
         [d, ym, delta],
       );
       processed++;
+      monthsTouched.add(ym);
     }
+
+    // Quota-Alerts pruefen + ggf. WA-Notify
+    for (const ym of monthsTouched) {
+      try {
+        const totalRow = await pool.query(
+          `SELECT COALESCE(SUM(count),0)::int AS total FROM isp_outbound_usage WHERE year_month=$1`, [ym]);
+        const newTotal = totalRow.rows[0].total;
+        // Schwellen die VOR diesem Ingest noch nicht ueberschritten waren
+        // (wir kennen das exakte Delta nicht — schaetzen ueber sum(delta) ueber alle Events)
+        const deltaSum = events
+          .filter(e => e.year_month === ym && parseInt(e.count_delta,10) > 0)
+          .reduce((a, e) => a + parseInt(e.count_delta, 10), 0);
+        const prevTotal = Math.max(0, newTotal - deltaSum);
+        const crossed = quotaThresholdsCrossed(prevTotal, newTotal);
+        for (const threshold of crossed) {
+          // Nur einmal pro Schwelle pro Monat alerten
+          const ins = await pool.query(
+            `INSERT INTO isp_outbound_quota_alerts (year_month, threshold)
+             VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING id`,
+            [ym, threshold]);
+          if (ins.rows.length === 0) continue;
+          // Top 5 Sender-Domains anhaengen damit man sieht wer's verbraucht
+          const top = (await pool.query(
+            `SELECT sender_domain, count FROM isp_outbound_usage
+              WHERE year_month=$1 ORDER BY count DESC LIMIT 5`, [ym])).rows;
+          const topList = top.map(t => `  • ${t.sender_domain}: ${t.count}`).join('\n');
+          const pct = Math.round(newTotal / SMTP2GO_FREE_LIMIT * 100);
+          const emoji = threshold >= SMTP2GO_FREE_LIMIT ? '🚨' : '⚠';
+          notifyTechnikMailbox(
+            `${emoji} *SMTP2GO Quota-Schwelle erreicht*\n` +
+            `Monat ${ym}: ${newTotal} Mails (${pct}% des Free-Tiers)\n` +
+            `Schwelle: ${threshold}${threshold >= SMTP2GO_FREE_LIMIT ? ' ⇒ ab jetzt kostenpflichtig' : ''}\n` +
+            `\nTop-Sender:\n${topList}\n\n` +
+            `Stand: ${SITE_URL}/isp-admin.html#mail`,
+          );
+        }
+      } catch (qe) { console.warn('[outbound-usage] quota-alert:', qe.message); }
+    }
+
     res.json({ ok: true, processed });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -17708,6 +17764,16 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_outbound_usage_domain ON isp_outbound_usage(sender_domain);
       CREATE INDEX IF NOT EXISTS idx_outbound_usage_month ON isp_outbound_usage(year_month);
+
+      -- Tracking welche Quota-Schwellen wir diesen Monat bereits an die
+      -- Tech-WA-Gruppe gemeldet haben — damit wir nicht spammen.
+      CREATE TABLE IF NOT EXISTS isp_outbound_quota_alerts (
+        id SERIAL PRIMARY KEY,
+        year_month CHAR(7) NOT NULL,
+        threshold INTEGER NOT NULL,
+        sent_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (year_month, threshold)
+      );
 
       -- Mailbox-Onboarding: User-Antraege fuer rosenweg-managed Domains.
       -- Status: pending (Admin pruefen) -> approved (provisioniert in Mailcow)
