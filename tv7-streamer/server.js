@@ -137,8 +137,9 @@ function startFfmpeg(channelId) {
       ffmpegSessions.delete(channelId);
     }
   });
-  const sess = { proc, clients: new Set(), lastClient: Date.now() };
+  const sess = { proc, clients: new Set(), lastClient: Date.now(), lastByte: Date.now() };
   proc.stdout.on('data', chunk => {
+    sess.lastByte = Date.now();
     for (const c of sess.clients) try {
       c.write(chunk);
       if (c._tv7meta) c._tv7meta.bytes += chunk.length;
@@ -148,8 +149,19 @@ function startFfmpeg(channelId) {
   return sess;
 }
 
+// Wenn die bestehende ffmpeg-Session schon laenger keinen Output produziert
+// hat (Init7-Verbindung tot, Prozess haengt), verwerfen wir sie und starten
+// neu. Sonst wuerden Clients sich an einen toten Prozess heften und nach
+// 10s mit bytes=0 disconnecten (Browser-Timeout).
+const STALE_SESSION_MS = 12000;
 function attachClient(channelId, res) {
   let sess = ffmpegSessions.get(channelId);
+  if (sess && Date.now() - sess.lastByte > STALE_SESSION_MS) {
+    log('[ffmpeg]', channelId, 'stale (no output for ' + Math.round((Date.now()-sess.lastByte)/1000) + 's) — restart');
+    try { sess.proc.kill('SIGKILL'); } catch {}
+    ffmpegSessions.delete(channelId);
+    sess = null;
+  }
   if (!sess) sess = startFfmpeg(channelId);
   sess.clients.add(res);
   sess.lastClient = Date.now();
