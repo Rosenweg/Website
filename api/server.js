@@ -1841,28 +1841,42 @@ app.get('/api/tv/stream/:channelId', (req, res, next) => {
   if (!TV7_HMAC_SECRET) return res.status(500).json({ error: 'TV7 streamer secret nicht konfiguriert' });
   const token = createTv7StreamerToken(req.user.id || req.user.user_id || 0);
   const streamUrl = `${TV7_STREAMER_URL}/stream/${id}?token=${encodeURIComponent(token)}`;
+  // Connection-Timeout nur fuer die initialen Headers — danach soll der Stream
+  // beliebig lange laufen. AbortSignal.timeout() wuerde auch den Body killen.
+  const ctrl = new AbortController();
+  const connTimer = setTimeout(() => ctrl.abort(), 10000);
+  let upstream;
   try {
-    const upstream = await fetch(streamUrl, { signal: AbortSignal.timeout(15000) });
-    if (!upstream.ok) {
-      console.error('TV7 streamer status:', upstream.status);
-      return res.status(502).json({ error: 'Streamer nicht erreichbar' });
-    }
-    res.setHeader('Content-Type', upstream.headers.get('content-type') || 'video/MP2T');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    // Pipe MPEG-TS chunks via WHATWG-Stream Reader (Node 18+ fetch)
-    const reader = upstream.body.getReader();
-    req.on('close', () => { try { reader.cancel(); } catch {} });
+    upstream = await fetch(streamUrl, { signal: ctrl.signal });
+  } catch (err) {
+    clearTimeout(connTimer);
+    console.error('TV7 stream fetch failed:', err.message);
+    if (!res.headersSent) res.status(502).json({ error: 'Streamer nicht erreichbar' });
+    return;
+  }
+  clearTimeout(connTimer);
+  if (!upstream.ok) {
+    console.error('TV7 streamer status:', upstream.status);
+    return res.status(502).json({ error: 'Streamer nicht erreichbar' });
+  }
+  res.setHeader('Content-Type', upstream.headers.get('content-type') || 'video/MP2T');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const reader = upstream.body.getReader();
+  req.on('close', () => { try { reader.cancel(); } catch {} });
+  try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       if (!res.write(Buffer.from(value))) await new Promise(r => res.once('drain', r));
     }
-    res.end();
   } catch (err) {
-    console.error('TV7 stream proxy error:', err.message);
-    if (!res.headersSent) res.status(502).json({ error: 'Stream-Fehler' });
+    // Client hat abgebrochen — normal bei Channel-Wechsel
+    if (err.code !== 'ABORT_ERR' && err.name !== 'AbortError') {
+      console.error('TV7 stream pipe error:', err.message);
+    }
   }
+  try { res.end(); } catch {}
 });
 
 // ─── Print Job Pickup Confirmation ───────────────────────────────────
