@@ -108,8 +108,7 @@ function startFfmpeg(channelId) {
     '-c:a', 'aac', '-b:a', '128k', '-ac', '2',
     '-f', 'mpegts',
     '-mpegts_flags', '+pat_pmt_at_frames+resend_headers',
-    '-pat_period', '0.2',
-    '-pmt_period', '0.2',
+    '-pat_period', '0.1',
     '-flush_packets', '1',
     'pipe:1',
   ];
