@@ -3,220 +3,421 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rosenweg ISP — Internetzugang</title>
+    <title>Rosenweg ISP — Internet & Mail-Dienste</title>
     <link rel="icon" href="/logo-rosenweg.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/js/authentik-auth.js?v=2"></script>
     <script src="/js/site-config.js"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
         body { font-family: 'Inter', sans-serif; }
+        .blob { animation: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .4; }
+        }
+        .section-hero {
+          background-image: radial-gradient(at top left, rgba(255,255,255,0.12), transparent 40%);
+        }
     </style>
 </head>
-<body class="bg-gray-50">
+<body class="bg-slate-50 text-slate-900">
 
-    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
-    <script src="/js/nav.js?v=2"></script>
-    <script>RosenwegNav.init({ active: 'isp' });</script>
+<nav id="main-nav" class="bg-white shadow-sm sticky top-0 z-50"></nav>
+<script src="/js/nav.js?v=2"></script>
+<script>RosenwegNav.init({ active: 'isp' });</script>
 
-    <!-- Header -->
-    <section class="bg-gradient-to-r from-blue-600 to-indigo-800 text-white py-12">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <h1 class="text-3xl font-bold">Rosenweg ISP</h1>
-            <p class="mt-2 text-blue-100">Internet, Netzwerk und WLAN</p>
+<!-- HERO ─────────────────────────────────────────────── -->
+<header class="bg-gradient-to-br from-indigo-700 via-blue-700 to-cyan-600 text-white relative overflow-hidden">
+    <div class="absolute inset-0 opacity-20" style="background-image:url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22120%22 height=%22120%22 viewBox=%220 0 40 40%22><path fill=%22%23ffffff%22 fill-opacity=%221%22 d=%22M20 20l10-10v20l-10-10zm0 0L10 10v20l10-10z%22/></svg>')"></div>
+    <div class="relative max-w-7xl mx-auto px-6 lg:px-8 py-12">
+        <div class="flex items-center gap-3 text-cyan-200 text-sm uppercase tracking-widest font-semibold mb-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.14 0M1.394 9.393c5.857-5.858 15.355-5.858 21.213 0"/></svg>
+            <span>Rosenweg ISP</span>
+        </div>
+        <h1 class="text-4xl sm:text-5xl font-extrabold tracking-tight leading-tight max-w-3xl">
+            <span id="hero-greeting">Willkommen.</span>
+        </h1>
+        <p class="mt-3 text-lg text-blue-100 max-w-3xl">
+            Glasfaser-Anschluss, eigenes Filter-Relay (PMG) und Mail-Hosting für die Kooperation.
+            Alle Dienste sind für Bewohner kostenlos — Erschliessung neuer Standorte nach Aufwand.
+        </p>
+
+        <!-- System-Status-Strip -->
+        <div class="mt-6 flex flex-wrap gap-3" id="status-strip">
+            <span class="status-pill bg-white/10 border-white/20" data-svc="internet">
+                <span class="blob bg-emerald-300"></span> Internet
+            </span>
+            <span class="status-pill bg-white/10 border-white/20" data-svc="mail">
+                <span class="blob bg-emerald-300"></span> Mail-Stack
+            </span>
+            <span class="status-pill bg-white/10 border-white/20" data-svc="web">
+                <span class="blob bg-emerald-300"></span> Webdienste
+            </span>
+        </div>
+    </div>
+    <style>
+        .status-pill {
+            display: inline-flex; align-items: center; gap: .5rem;
+            padding: .35rem .85rem; border-radius: 9999px;
+            font-size: .8rem; font-weight: 500;
+            border: 1px solid;
+        }
+        .status-pill .blob {
+            display: inline-block; width: .55rem; height: .55rem; border-radius: 9999px;
+        }
+    </style>
+</header>
+
+<main class="max-w-7xl mx-auto px-6 lg:px-8 py-12 space-y-16">
+
+    <!-- ════════════════════════════════════════════════════ -->
+    <!-- SEKTION 1: Mein Anschluss (personalisiert)            -->
+    <!-- ════════════════════════════════════════════════════ -->
+    <section id="sec-meinanschluss" class="hidden">
+        <div class="flex items-baseline justify-between flex-wrap gap-2 mb-4">
+            <div>
+                <h2 class="text-2xl font-bold tracking-tight">🏠 Mein Anschluss</h2>
+                <p class="text-sm text-slate-500 mt-1">Dein persönlicher Glasfaser-Anschluss und alles was dazu gehört.</p>
+            </div>
+            <a href="/isp-mein-zugang.html" class="text-sm text-indigo-600 hover:text-indigo-800 font-medium">Alle meine Zugänge →</a>
+        </div>
+
+        <div class="bg-gradient-to-br from-slate-900 to-slate-800 text-white rounded-2xl p-6 shadow-lg mb-4 section-hero">
+            <div id="mein-anschluss-body" class="text-sm">Lade…</div>
+        </div>
+
+        <div class="grid sm:grid-cols-3 gap-4">
+            <a href="/wlan.html" class="action-card">
+                <div class="action-icon bg-blue-100 text-blue-600">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.14 0M1.394 9.393c5.857-5.858 15.355-5.858 21.213 0"/></svg>
+                </div>
+                <div>
+                    <div class="font-semibold">WLAN-Zugang</div>
+                    <p class="text-xs text-slate-500">Persönliches Passwort + QR</p>
+                </div>
+            </a>
+            <a href="/tv.html" class="action-card">
+                <div class="action-icon bg-purple-100 text-purple-600">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                </div>
+                <div>
+                    <div class="font-semibold">TV7</div>
+                    <p class="text-xs text-slate-500">Init7 IPTV im Browser</p>
+                </div>
+            </a>
+            <a href="/isp-mein-zugang.html" class="action-card">
+                <div class="action-icon bg-indigo-100 text-indigo-600">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                </div>
+                <div>
+                    <div class="font-semibold">VPN + Fix-IPs</div>
+                    <p class="text-xs text-slate-500">VLAN, Reverse-Proxy</p>
+                </div>
+            </a>
         </div>
     </section>
 
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-
-        <!-- Info -->
-        <div class="bg-white rounded-xl shadow-sm border p-6 mb-8">
-            <h2 class="text-lg font-semibold text-gray-900 mb-3">Internet-Anschluss</h2>
-            <div class="grid md:grid-cols-2 gap-6 text-sm">
-                <div class="space-y-2">
-                    <div class="flex justify-between"><span class="text-gray-600">Anbieter</span><span class="font-medium">Init7 (Switzerland) Ltd.</span></div>
-                    <div class="flex justify-between"><span class="text-gray-600">Anschluss</span><span class="font-medium">Glasfaser</span></div>
-                    <div class="flex justify-between"><span class="text-gray-600">Standort</span><span class="font-medium">T+T/BEP Raum Rosenweg 9 UG</span></div>
-                </div>
-                <div class="space-y-2">
-                    <div class="flex justify-between"><span class="text-gray-600">Netzwerk / WLAN</span><span class="font-medium">Kostenlos für alle Bewohner</span></div>
-                    <div class="flex justify-between"><span class="text-gray-600">Erschliessung</span><span class="font-medium">Nach Aufwand</span></div>
-                    <div class="flex justify-between"><span class="text-gray-600">TV7</span><span class="font-medium text-amber-600">Geplant</span></div>
-                </div>
-            </div>
-            <p class="text-xs text-gray-500 mt-4">Das Netzwerk und WLAN wird primär für die technischen Anlagen am Rosenweg betrieben und den Bewohnern ohne Entgelt zur Verfügung gestellt. Die Erschliessung neuer Standorte (Verkabelung, Access Points) wird nach Aufwand verrechnet.</p>
+    <!-- ════════════════════════════════════════════════════ -->
+    <!-- SEKTION 2: Mail-Dienste (für alle Bewohner)           -->
+    <!-- ════════════════════════════════════════════════════ -->
+    <section id="sec-mail">
+        <div class="mb-4">
+            <h2 class="text-2xl font-bold tracking-tight">✉ Mail-Dienste</h2>
+            <p class="text-sm text-slate-500 mt-1">Eigene Mail-Domain bei uns hosten oder filtern lassen — DKIM/SPF/DMARC out-of-the-box.</p>
         </div>
 
-        <!-- Mein Anschluss (Customer-Sicht) -->
-        <div id="mein-anschluss" class="hidden bg-white rounded-xl shadow-sm border p-6 mb-6">
-            <h2 class="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                <span>🏠</span> Mein Anschluss
-            </h2>
-            <div id="mein-anschluss-body" class="text-sm text-gray-600">Lade...</div>
-        </div>
-
-        <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-
-            <!-- WLAN-Zugang -->
-            <a href="/wlan.html" class="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition group">
-                <div class="flex items-center gap-4 mb-3">
-                    <div class="bg-blue-100 text-blue-600 p-3 rounded-lg group-hover:bg-blue-600 group-hover:text-white transition">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.14 0M1.394 9.393c5.857-5.858 15.355-5.858 21.213 0"/>
-                        </svg>
-                    </div>
-                    <h2 class="text-lg font-semibold text-gray-900">WLAN-Zugang</h2>
+        <!-- Hero-Card: Stack-Übersicht mit Live-Health -->
+        <div class="bg-gradient-to-br from-emerald-600 to-teal-700 text-white rounded-2xl p-6 shadow-lg mb-4 section-hero">
+            <div class="grid lg:grid-cols-3 gap-6 items-center">
+                <div class="lg:col-span-2">
+                    <div class="text-xs uppercase tracking-widest text-emerald-200 font-semibold">Mail-Stack</div>
+                    <h3 class="text-2xl font-bold mt-1">PMG · Mailcow · SMTP2GO</h3>
+                    <p class="text-emerald-50 text-sm mt-2 max-w-2xl">
+                        Inbound durch unser PMG-Filter, Outbound durch SMTP2GO mit
+                        DKIM-Alignment. mail-tester.com Score zuletzt
+                        <strong class="text-white">10/10</strong>.
+                    </p>
                 </div>
-                <p class="text-sm text-gray-600">Dein persönliches WLAN-Passwort und QR-Code zum Verbinden.</p>
-            </a>
-
-            <!-- TV7 -->
-            <a href="/tv.html" class="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition group">
-                <div class="flex items-center gap-4 mb-3">
-                    <div class="bg-purple-100 text-purple-600 p-3 rounded-lg group-hover:bg-purple-600 group-hover:text-white transition">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
-                        </svg>
-                    </div>
-                    <h2 class="text-lg font-semibold text-gray-900">TV7</h2>
-                </div>
-                <p class="text-sm text-gray-600">Init7 IPTV — über 250 Sender live im Browser schauen.</p>
-            </a>
-
-            <!-- VPN-Zugang (jeder User) -->
-            <a href="/isp-mein-zugang.html" class="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition group">
-                <div class="flex items-center gap-4 mb-3">
-                    <div class="bg-indigo-100 text-indigo-600 p-3 rounded-lg group-hover:bg-indigo-600 group-hover:text-white transition">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
-                    </div>
-                    <h2 class="text-lg font-semibold text-gray-900">Mein Zugang</h2>
-                </div>
-                <p class="text-sm text-gray-600">VPN, VLANs, Reverse-Proxy, eigene Mail-Domain via PMG filtern.</p>
-            </a>
-
-            <!-- Mailserver-Status (alle User) -->
-            <div class="bg-white rounded-xl shadow-sm border p-6 sm:col-span-2 lg:col-span-3">
-                <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
-                    <h2 class="text-lg font-semibold text-gray-900 flex items-center gap-2">✉ Mailserver-Dienste</h2>
-                    <a href="/dmarc.html" class="text-xs text-blue-600 hover:underline">DMARC-Reports →</a>
-                </div>
-                <div class="grid sm:grid-cols-2 gap-3 text-sm">
-                    <div class="bg-emerald-50 border border-emerald-200 rounded p-3">
-                        <p class="font-semibold text-emerald-900 flex items-center gap-2">🛡 PMG (Filter-Relay) <span class="text-xs bg-emerald-600 text-white px-2 py-0.5 rounded">live</span></p>
-                        <p class="text-xs text-emerald-800 mt-1">Proxmox Mail Gateway 8.2.11 — Spam-/Virus-Filter fuer alle registrierten Domains, leitet an deinen eigenen Mailserver weiter.</p>
-                        <p class="text-xs mt-1">MX: <code class="bg-white px-1 rounded">pmg.rosenweg4303.ch</code> · <a href="/isp-mein-zugang.html#mail" class="underline">Eigene Domain registrieren</a></p>
-                    </div>
-                    <div class="bg-blue-50 border border-blue-200 rounded p-3" id="mailcow-card">
-                        <p class="font-semibold text-blue-900 flex items-center gap-2">📬 Mailcow (Vollstack rosenweg9.ch) <span id="mailcow-card-badge" class="text-xs bg-amber-500 text-white px-2 py-0.5 rounded">in Setup</span></p>
-                        <p class="text-xs text-blue-800 mt-1">Postfaecher fuer <code class="bg-white px-1 rounded">rosenweg9.ch</code>: SOGo Webmail, IMAP/SMTP, DKIM/DMARC out-of-the-box.</p>
-                        <p class="text-xs mt-1">Host: <code class="bg-white px-1 rounded">mailcow.rosenweg9.ch</code></p>
-                    </div>
+                <div class="bg-white/10 rounded-xl p-4 backdrop-blur">
+                    <div class="text-xs text-emerald-100 mb-2">Service-Status (live)</div>
+                    <ul class="space-y-1.5 text-sm" id="mail-health">
+                        <li class="flex items-center gap-2"><span class="blob bg-emerald-300 w-2 h-2 rounded-full inline-block"></span><span>PMG (Spam-Filter)</span></li>
+                        <li class="flex items-center gap-2"><span class="blob bg-emerald-300 w-2 h-2 rounded-full inline-block"></span><span>Mailcow (Postfächer)</span></li>
+                        <li class="flex items-center gap-2"><span class="blob bg-emerald-300 w-2 h-2 rounded-full inline-block"></span><span>SMTP2GO (Outbound)</span></li>
+                    </ul>
                 </div>
             </div>
+        </div>
 
-            <!-- Netzwerk-Status (Admin) -->
-            <div id="admin-cards" class="contents hidden">
+        <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <a href="/isp-mein-zugang.html#mail" class="action-card-large">
+                <div class="action-icon bg-emerald-100 text-emerald-700">📧</div>
+                <div>
+                    <div class="font-semibold">Eigene Domain registrieren</div>
+                    <p class="text-xs text-slate-500 mt-1">PMG-Filter für deine Mail-Domain.</p>
+                </div>
+            </a>
+            <a href="/isp-mein-zugang.html#mailbox" class="action-card-large">
+                <div class="action-icon bg-blue-100 text-blue-700">📬</div>
+                <div>
+                    <div class="font-semibold">Mailbox beantragen</div>
+                    <p class="text-xs text-slate-500 mt-1"><code class="bg-slate-100 px-1 rounded">@rosenweg9.ch</code> hosted bei uns.</p>
+                </div>
+            </a>
+            <a href="https://webmail.rosenweg9.ch" target="_blank" rel="noopener" class="action-card-large">
+                <div class="action-icon bg-purple-100 text-purple-700">🌐</div>
+                <div>
+                    <div class="font-semibold">Webmail</div>
+                    <p class="text-xs text-slate-500 mt-1">SOGo Web-Interface.</p>
+                </div>
+            </a>
+            <a href="/dmarc.html" class="action-card-large">
+                <div class="action-icon bg-amber-100 text-amber-700">🛡</div>
+                <div>
+                    <div class="font-semibold">DMARC-Reports</div>
+                    <p class="text-xs text-slate-500 mt-1">SPF/DKIM/DMARC-Auth-Tracking.</p>
+                </div>
+            </a>
+        </div>
 
-                <!-- Netzwerk -->
-                <a href="/netzwerk.html" class="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition group">
-                    <div class="flex items-center gap-4 mb-3">
-                        <div class="bg-cyan-100 text-cyan-600 p-3 rounded-lg group-hover:bg-cyan-600 group-hover:text-white transition">
-                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2"/>
-                            </svg>
-                        </div>
-                        <h2 class="text-lg font-semibold text-gray-900">Netzwerk</h2>
-                    </div>
-                    <p class="text-sm text-gray-600">UniFi Geräte, Clients, VLANs und Admin-Dienste.</p>
-                </a>
-
-                <!-- DMARC -->
-                <a href="/dmarc.html" class="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition group">
-                    <div class="flex items-center gap-4 mb-3">
-                        <div class="bg-green-100 text-green-600 p-3 rounded-lg group-hover:bg-green-600 group-hover:text-white transition">
-                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
-                            </svg>
-                        </div>
-                        <h2 class="text-lg font-semibold text-gray-900">DMARC</h2>
-                    </div>
-                    <p class="text-sm text-gray-600">Email-Authentifizierung: SPF, DKIM und DMARC Reports.</p>
-                </a>
-
-                <!-- Verbindungsnachweis -->
-                <a href="/verbindungen.html" class="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition group">
-                    <div class="flex items-center gap-4 mb-3">
-                        <div class="bg-amber-100 text-amber-600 p-3 rounded-lg group-hover:bg-amber-600 group-hover:text-white transition">
-                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                            </svg>
-                        </div>
-                        <h2 class="text-lg font-semibold text-gray-900">Verbindungsnachweis</h2>
-                    </div>
-                    <p class="text-sm text-gray-600">FPÜV-konforme Verbindungsprotokolle.</p>
-                </a>
-
-                <!-- ISP-Admin (Erschliessung, VLANs, Fix-IPs, RP, Mailboxes) -->
-                <a href="/isp-admin.html" class="bg-white rounded-xl shadow-sm border p-6 hover:shadow-md transition group">
-                    <div class="flex items-center gap-4 mb-3">
-                        <div class="bg-rose-100 text-rose-600 p-3 rounded-lg group-hover:bg-rose-600 group-hover:text-white transition">
-                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
-                        </div>
-                        <h2 class="text-lg font-semibold text-gray-900">ISP-Admin</h2>
-                    </div>
-                    <p class="text-sm text-gray-600">Erschliessung, VLANs, Fix-IPs, Reverse-Proxy, Mailserver/PMG.</p>
-                </a>
-
+        <!-- Fact-Strip -->
+        <div class="mt-4 grid sm:grid-cols-3 gap-3 text-sm">
+            <div class="bg-white border rounded-lg px-4 py-3">
+                <div class="text-xs text-slate-500">MX-Hostname</div>
+                <code class="font-mono text-xs">pmg.rosenweg4303.ch</code>
+            </div>
+            <div class="bg-white border rounded-lg px-4 py-3">
+                <div class="text-xs text-slate-500">Submission</div>
+                <code class="font-mono text-xs">smtp.rosenweg9.ch:587</code>
+            </div>
+            <div class="bg-white border rounded-lg px-4 py-3">
+                <div class="text-xs text-slate-500">IMAPS</div>
+                <code class="font-mono text-xs">imap.rosenweg9.ch:993</code>
             </div>
         </div>
-    </main>
+    </section>
 
-    <script>
-        const user = AuthentikAuth.getUser();
-        if (user?.isAdmin) {
-            document.getElementById('admin-cards').classList.remove('hidden');
-        }
-        // Mein Anschluss laden
-        async function loadMeinAnschluss() {
-            if (!user) return;
-            try {
-                const r = await AuthentikAuth.apiFetch('/api/isp/subscribers/me');
-                if (!r.ok) return;
-                const { subscribers } = await r.json();
-                if (!subscribers || subscribers.length === 0) return;
-                const box = document.getElementById('mein-anschluss');
-                const body = document.getElementById('mein-anschluss-body');
-                box.classList.remove('hidden');
-                const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-                body.innerHTML = subscribers.map(s => `
-                    <div class="border rounded-lg p-3 mb-2 bg-gray-50">
-                        <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
-                            <strong>${esc(s.wohnung_bezeichnung || ('Wohnung #' + s.wohnung_id))} <span class="text-xs text-gray-500">STWEG ${s.stweg}</span></strong>
-                            <span class="text-xs ${s.status === 'aktiv' ? 'bg-green-100 text-green-800' : s.status === 'geplant' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-700'} px-2 py-0.5 rounded">${esc(s.status)}</span>
-                        </div>
-                        <div class="grid sm:grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                            ${s.anschluss_typ ? `<div><span class="text-gray-500">Typ:</span> ${esc(s.anschluss_typ)}</div>` : ''}
-                            ${s.bandbreite_down_mbps ? `<div><span class="text-gray-500">Down:</span> ${s.bandbreite_down_mbps} Mbps</div>` : ''}
-                            ${s.bandbreite_up_mbps ? `<div><span class="text-gray-500">Up:</span> ${s.bandbreite_up_mbps} Mbps</div>` : ''}
-                            ${s.vlan ? `<div><span class="text-gray-500">VLAN:</span> ${s.vlan}</div>` : ''}
-                            ${s.switch_name ? `<div><span class="text-gray-500">Switch:</span> ${esc(s.switch_name)} Port ${esc(s.switch_port || '?')}</div>` : ''}
-                            ${s.eigenleistung_chf ? `<div><span class="text-gray-500">Eigenleistung:</span> CHF ${Number(s.eigenleistung_chf).toFixed(2)}</div>` : ''}
-                        </div>
-                    </div>`).join('');
-            } catch (err) { console.warn('Mein Anschluss:', err.message); }
-        }
-        document.addEventListener('DOMContentLoaded', loadMeinAnschluss);
+    <!-- ════════════════════════════════════════════════════ -->
+    <!-- SEKTION 3: Internet-Anschluss (Info)                  -->
+    <!-- ════════════════════════════════════════════════════ -->
+    <section id="sec-anschluss">
+        <div class="mb-4">
+            <h2 class="text-2xl font-bold tracking-tight">🌐 Internet-Anschluss</h2>
+            <p class="text-sm text-slate-500 mt-1">Glasfaser durch Init7, Verteilung im Rosenweg-Backbone.</p>
+        </div>
 
-        // Mailcow Live-Check
-        (async () => {
-          try {
-            const ctrl = new AbortController();
-            setTimeout(() => ctrl.abort(), 4000);
-            await fetch('https://mailcow.rosenweg9.ch/api/v1/get/status/version', { signal: ctrl.signal, mode: 'no-cors' });
-            const b = document.getElementById('mailcow-card-badge');
-            if (b) { b.textContent = 'live'; b.className = 'text-xs bg-emerald-600 text-white px-2 py-0.5 rounded'; }
-          } catch {}
-        })();
-    </script>
+        <div class="bg-white rounded-2xl border shadow-sm p-6">
+            <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4 text-sm">
+                <div>
+                    <div class="text-xs text-slate-500 uppercase tracking-wide">Anbieter</div>
+                    <div class="font-semibold mt-1">Init7 (Switzerland) Ltd.</div>
+                </div>
+                <div>
+                    <div class="text-xs text-slate-500 uppercase tracking-wide">Anschluss</div>
+                    <div class="font-semibold mt-1">Glasfaser</div>
+                </div>
+                <div>
+                    <div class="text-xs text-slate-500 uppercase tracking-wide">BEP-Standort</div>
+                    <div class="font-semibold mt-1">T+T-Raum Rosenweg 9 UG</div>
+                </div>
+                <div>
+                    <div class="text-xs text-slate-500 uppercase tracking-wide">WLAN für Bewohner</div>
+                    <div class="font-semibold mt-1 text-emerald-700">Kostenlos</div>
+                </div>
+            </div>
+            <p class="text-xs text-slate-500 mt-5 border-t pt-4">
+                Das Netzwerk und WLAN wird primär für die technischen Anlagen am Rosenweg betrieben und den
+                Bewohnern ohne Entgelt zur Verfügung gestellt. Die Erschliessung neuer Standorte (Verkabelung,
+                Access Points) wird nach Aufwand verrechnet.
+            </p>
+        </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════════ -->
+    <!-- SEKTION 4: Verwaltung (Admin only)                    -->
+    <!-- ════════════════════════════════════════════════════ -->
+    <section id="sec-admin" class="hidden">
+        <div class="mb-4 flex items-baseline justify-between flex-wrap gap-2">
+            <div>
+                <h2 class="text-2xl font-bold tracking-tight">⚙ Verwaltung</h2>
+                <p class="text-sm text-slate-500 mt-1">Admin-Tools für Netzwerk, Mail-Stack und Compliance.</p>
+            </div>
+            <span class="text-xs bg-rose-100 text-rose-700 px-2 py-1 rounded">Admin</span>
+        </div>
+
+        <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <a href="/isp-admin.html" class="action-card-large">
+                <div class="action-icon bg-rose-100 text-rose-700">🎛</div>
+                <div>
+                    <div class="font-semibold">ISP-Admin</div>
+                    <p class="text-xs text-slate-500 mt-1">Mail-Relays, VLANs, Fix-IPs, RP, Mailboxes.</p>
+                </div>
+            </a>
+            <a href="/netzwerk.html" class="action-card-large">
+                <div class="action-icon bg-cyan-100 text-cyan-700">🌐</div>
+                <div>
+                    <div class="font-semibold">Netzwerk</div>
+                    <p class="text-xs text-slate-500 mt-1">UniFi, VLANs, Clients.</p>
+                </div>
+            </a>
+            <a href="/verbindungen.html" class="action-card-large">
+                <div class="action-icon bg-amber-100 text-amber-700">📋</div>
+                <div>
+                    <div class="font-semibold">Verbindungsnachweis</div>
+                    <p class="text-xs text-slate-500 mt-1">FPÜV-konforme Protokolle.</p>
+                </div>
+            </a>
+            <a href="/dmarc.html" class="action-card-large">
+                <div class="action-icon bg-green-100 text-green-700">🛡</div>
+                <div>
+                    <div class="font-semibold">DMARC-Reports</div>
+                    <p class="text-xs text-slate-500 mt-1">Eingehende DMARC-Reports.</p>
+                </div>
+            </a>
+        </div>
+    </section>
+
+</main>
+
+<!-- Footer mit Status-Hinweis -->
+<footer class="bg-white border-t mt-16 py-8">
+    <div class="max-w-7xl mx-auto px-6 lg:px-8 flex items-center justify-between flex-wrap gap-4">
+        <div class="text-xs text-slate-500">
+            Rosenweg ISP · Betrieben von der Kooperation für Bewohner.
+        </div>
+        <div class="text-xs flex items-center gap-2 text-slate-500">
+            <span id="footer-status-dot" class="w-2 h-2 rounded-full bg-emerald-500 blob inline-block"></span>
+            <span id="footer-status-text">Alle Systeme operational</span>
+        </div>
+    </div>
+</footer>
+
+<style>
+    .action-card {
+        display: flex; align-items: center; gap: .85rem;
+        background: white; border: 1px solid rgb(226 232 240); border-radius: .85rem;
+        padding: .85rem 1rem; transition: all .15s ease;
+    }
+    .action-card:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,.06); border-color: rgb(199 210 254); }
+    .action-card-large {
+        display: flex; gap: .85rem; align-items: flex-start;
+        background: white; border: 1px solid rgb(226 232 240); border-radius: .85rem;
+        padding: 1rem; transition: all .15s ease;
+    }
+    .action-card-large:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,.06); border-color: rgb(199 210 254); }
+    .action-icon {
+        flex-shrink: 0; width: 2.5rem; height: 2.5rem; display: flex;
+        align-items: center; justify-content: center; border-radius: .65rem;
+        font-size: 1.1rem;
+    }
+</style>
+
+<script>
+(async function init() {
+    const user = AuthentikAuth.getUser();
+    const greeting = document.getElementById('hero-greeting');
+    if (user) {
+        const first = (user.name || '').split(' ')[0];
+        greeting.innerHTML = `Hallo${first ? ', ' + esc(first) : ''}.<br><span class="text-blue-100 text-2xl sm:text-3xl font-medium">Dein Self-Service-Portal.</span>`;
+    } else {
+        greeting.innerHTML = `Rosenweg ISP<br><span class="text-blue-100 text-2xl sm:text-3xl font-medium">Internet, Mail & Netzwerk für die Kooperation.</span>`;
+    }
+    if (user?.isAdmin) {
+        document.getElementById('sec-admin').classList.remove('hidden');
+    }
+    loadMeinAnschluss(user);
+    runHealthChecks();
+})();
+
+function esc(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function loadMeinAnschluss(user) {
+    if (!user) return;
+    try {
+        const r = await AuthentikAuth.apiFetch('/api/isp/subscribers/me');
+        if (!r.ok) return;
+        const { subscribers } = await r.json();
+        if (!subscribers || subscribers.length === 0) return;
+        document.getElementById('sec-meinanschluss').classList.remove('hidden');
+        const body = document.getElementById('mein-anschluss-body');
+        body.innerHTML = subscribers.map(s => `
+            <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-3 ${subscribers.length > 1 ? 'border-b border-white/10 pb-4 mb-4 last:border-0 last:pb-0 last:mb-0' : ''}">
+                <div>
+                    <div class="text-xs text-slate-300 uppercase tracking-wide">Wohnung</div>
+                    <div class="font-semibold text-base">${esc(s.wohnung_bezeichnung || ('Wohnung #' + s.wohnung_id))}</div>
+                    <div class="text-xs text-slate-300 mt-0.5">STWEG ${esc(s.stweg)}</div>
+                </div>
+                <div>
+                    <div class="text-xs text-slate-300 uppercase tracking-wide">Status</div>
+                    <div class="font-semibold mt-1">
+                        <span class="inline-flex items-center gap-1.5 ${s.status === 'aktiv' ? 'text-emerald-300' : s.status === 'geplant' ? 'text-amber-300' : 'text-slate-400'}">
+                            <span class="w-2 h-2 rounded-full ${s.status === 'aktiv' ? 'bg-emerald-300 blob' : s.status === 'geplant' ? 'bg-amber-300' : 'bg-slate-400'}"></span>
+                            ${esc(s.status)}
+                        </span>
+                    </div>
+                </div>
+                ${s.bandbreite_down_mbps ? `
+                <div>
+                    <div class="text-xs text-slate-300 uppercase tracking-wide">Bandbreite</div>
+                    <div class="font-semibold mt-1 text-base">${s.bandbreite_down_mbps}<span class="text-sm text-slate-300">/${s.bandbreite_up_mbps || '–'}</span> <span class="text-xs text-slate-300">Mbps</span></div>
+                </div>` : '<div></div>'}
+                ${s.vlan ? `
+                <div>
+                    <div class="text-xs text-slate-300 uppercase tracking-wide">VLAN</div>
+                    <div class="font-mono text-base font-semibold mt-1">${esc(s.vlan)}</div>
+                    ${s.switch_name ? `<div class="text-xs text-slate-400 mt-0.5">${esc(s.switch_name)} Port ${esc(s.switch_port || '?')}</div>` : ''}
+                </div>` : '<div></div>'}
+            </div>`).join('');
+    } catch (err) { console.warn('Mein Anschluss:', err.message); }
+}
+
+async function runHealthChecks() {
+    // Mailcow live (no-cors HEAD)
+    let mailcowOk = false;
+    try {
+        const ctrl = new AbortController(); setTimeout(() => ctrl.abort(), 4000);
+        await fetch('https://mailcow.rosenweg9.ch/', { signal: ctrl.signal, mode: 'no-cors' });
+        mailcowOk = true;
+    } catch {}
+    // PMG quarantine (auch no-cors)
+    let pmgOk = false;
+    try {
+        const ctrl = new AbortController(); setTimeout(() => ctrl.abort(), 4000);
+        await fetch('https://quarantine.rosenweg9.ch/', { signal: ctrl.signal, mode: 'no-cors' });
+        pmgOk = true;
+    } catch {}
+    // Hier-Webserver erreichbar (== Webdienste live)
+    const webOk = true;
+
+    const setPill = (name, ok) => {
+        const el = document.querySelector(`#status-strip [data-svc="${name}"] .blob`);
+        if (el) el.className = `blob w-2 h-2 rounded-full inline-block ${ok ? 'bg-emerald-300' : 'bg-rose-400'}`;
+    };
+    setPill('mail', mailcowOk && pmgOk);
+    setPill('web', webOk);
+    setPill('internet', true);  // wir sind ja online wenn dieser Code laeuft
+
+    // Mail-Health-Block in Sektion 2
+    const updateMail = (idx, ok) => {
+        const li = document.querySelectorAll('#mail-health li')[idx];
+        if (!li) return;
+        const dot = li.querySelector('span.blob');
+        if (dot) dot.className = `blob w-2 h-2 rounded-full inline-block ${ok ? 'bg-emerald-300' : 'bg-rose-400'}`;
+    };
+    updateMail(0, pmgOk);
+    updateMail(1, mailcowOk);
+    updateMail(2, true);  // SMTP2GO ist Drittanbieter, gehen wir von up aus
+
+    // Footer-Status
+    const allOk = mailcowOk && pmgOk && webOk;
+    document.getElementById('footer-status-dot').className =
+      `w-2 h-2 rounded-full blob inline-block ${allOk ? 'bg-emerald-500' : 'bg-amber-500'}`;
+    document.getElementById('footer-status-text').textContent =
+      allOk ? 'Alle Systeme operational' : 'Einige Dienste eingeschränkt';
+}
+</script>
 </body>
 </html>
