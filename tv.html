@@ -67,7 +67,7 @@
         </div>
     </main>
 
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
+    <!-- tv7-streamer (LXC 250) liefert MPEG-TS — mpegts.js spielt das ab. -->
     <script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.js"></script>
     <script>
         const UDPXY_URL = '/api/tv/stream';  // Proxy through API
@@ -155,35 +155,34 @@
             }
 
             const token = AuthentikAuth.getToken();
-            if (ch.streamUrl) {
-                // Extract channel UUID from Init7 URL
-                const channelMatch = ch.streamUrl.match(/channel=([a-f0-9-]+)/);
-                const channelId = channelMatch ? channelMatch[1] : '';
-                const proxyUrl = `/api/tv/stream/${channelId}?token=${encodeURIComponent(token)}`;
+            // Backend (rosenweg_api → tv7-streamer LXC) liefert immer
+            // transcodes MPEG-TS (Video copy, Audio AC-3→AAC). Player =
+            // mpegts.js fuer alle Channels.
+            const channelId = ch.id || (ch.streamUrl ? (ch.streamUrl.match(/channel=([a-f0-9-]+)/) || [])[1] : '');
+            if (!channelId) { console.error('Channel ohne ID:', ch); return; }
+            const streamUrl = `/api/tv/stream/${channelId}?token=${encodeURIComponent(token)}`;
 
-                if (Hls && Hls.isSupported()) {
-                    player = new Hls({
-                        liveDurationInfinity: true,
-                        xhrSetup: (xhr) => {
-                            // HLS.js handles segment fetching, URLs are already rewritten by server
-                        }
-                    });
-                    player.loadSource(proxyUrl);
-                    player.attachMedia(video);
-                    player.on(Hls.Events.MANIFEST_PARSED, () => video.play());
-                    player.on(Hls.Events.ERROR, (e, data) => {
-                        if (data.fatal) console.error('HLS error:', data.type, data.details);
-                    });
-                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                    video.src = proxyUrl;
-                    video.play();
-                }
-            } else if (ch.multicast && typeof mpegts !== 'undefined' && mpegts.isSupported()) {
-                const streamUrl = `/api/tv/stream/${ch.multicast}?token=${encodeURIComponent(token)}`;
-                player = mpegts.createPlayer({ type: 'mpegts', url: streamUrl, isLive: true });
+            if (typeof mpegts !== 'undefined' && mpegts.isSupported()) {
+                player = mpegts.createPlayer({
+                    type: 'mpegts',
+                    url: streamUrl,
+                    isLive: true,
+                    hasAudio: true,
+                    hasVideo: true,
+                }, {
+                    enableStashBuffer: false,
+                    liveBufferLatencyChasing: true,
+                    liveBufferLatencyMaxLatency: 3.0,
+                    liveBufferLatencyMinRemain: 0.5,
+                });
                 player.attachMediaElement(video);
+                player.on(mpegts.Events.ERROR, (type, detail, info) => {
+                    console.error('mpegts error:', type, detail, info);
+                });
                 player.load();
-                player.play();
+                player.play().catch(e => console.warn('autoplay blocked:', e.message));
+            } else {
+                console.error('mpegts.js nicht unterstuetzt — Browser kann den Stream nicht abspielen');
             }
 
             renderChannels(document.querySelector('.group-btn.active')?.dataset.group === 'all' ? null : document.querySelector('.group-btn.active')?.dataset.group);
