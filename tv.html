@@ -80,8 +80,13 @@
                 const token = AuthentikAuth.getToken();
                 const resp = await fetch('/api/tv/channels', { headers: { Authorization: 'Bearer ' + token } });
                 if (!resp.ok) throw new Error('Fehler ' + resp.status);
-                channels = await resp.json();
-                document.getElementById('status').textContent = `${channels.length} Kanäle`;
+                const all = await resp.json();
+                // Filtere Channels ohne id (Multicast-only — aktuell keine
+                // UDM-Multicast-Allow-Regel, nicht spielbar) und ohne streamUrl.
+                channels = all.filter(c => c.id || c.streamUrl);
+                const skipped = all.length - channels.length;
+                document.getElementById('status').textContent =
+                    skipped > 0 ? `${channels.length} Kanäle (${skipped} Multicast-only ausgeblendet)` : `${channels.length} Kanäle`;
                 renderGroups();
                 renderChannels();
             } catch (err) {
@@ -170,15 +175,24 @@
                     hasAudio: true,
                     hasVideo: true,
                 }, {
-                    enableStashBuffer: false,
+                    // Defaults sind fuer Live-TV in der Regel ok.
+                    // Nur eine moderate Latenz-Begrenzung damit der Buffer
+                    // nicht ueber Minuten wachst (5s ist generoes genug).
+                    enableStashBuffer: true,
                     liveBufferLatencyChasing: true,
-                    liveBufferLatencyMaxLatency: 3.0,
-                    liveBufferLatencyMinRemain: 0.5,
+                    liveBufferLatencyMaxLatency: 5.0,
+                    liveBufferLatencyMinRemain: 1.0,
+                    lazyLoad: false,
                 });
                 player.attachMediaElement(video);
                 player.on(mpegts.Events.ERROR, (type, detail, info) => {
                     console.error('mpegts error:', type, detail, info);
+                    // Reconnect-Versuch bei NetworkError
+                    if (type === mpegts.ErrorTypes.NETWORK_ERROR && player) {
+                        try { player.unload(); player.load(); player.play(); } catch (e) {}
+                    }
                 });
+                player.on(mpegts.Events.LOADING_COMPLETE, () => console.log('mpegts: loading complete'));
                 player.load();
                 player.play().catch(e => console.warn('autoplay blocked:', e.message));
             } else {
