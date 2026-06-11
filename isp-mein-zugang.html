@@ -441,11 +441,35 @@
       pending_admin: '<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded ml-1">Admin-Pruefung</span>',
       rejected: '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-1">abgelehnt</span>',
     })[s] || '';
-    wrap.innerHTML = mailRelays.map(m => `
+    wrap.innerHTML = mailRelays.map(m => {
+      const records = m.smtp2go_dns_records || [];
+      const allOk = m.smtp2go_dkim_verified && m.smtp2go_rpath_verified;
+      const recRows = records.map(r => `
+        <tr><td class="pr-2 font-semibold">${esc(r.purpose)}</td>
+            <td class="pr-2 font-mono text-[10px]">${esc(r.type)}</td>
+            <td class="pr-2 font-mono text-[10px] break-all">${esc(r.name)}</td>
+            <td class="font-mono text-[10px] break-all">→ ${esc(r.value)}</td></tr>`).join('');
+      const shBlock = m.outbound_via_smarthost ? `
+        <div class="mt-2 p-2 rounded border ${allOk ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}">
+          <div class="flex items-center justify-between gap-2">
+            <div class="text-xs font-semibold ${allOk ? 'text-emerald-800' : 'text-amber-800'}">
+              📤 Outbound-Smarthost (PMG → SMTP2GO) ·
+              DKIM: ${m.smtp2go_dkim_verified ? '✓' : '⏳'} ·
+              Return-Path: ${m.smtp2go_rpath_verified ? '✓' : '⏳'}
+            </div>
+            <button onclick="recheckRelaySmarthost(${m.id})" class="text-[11px] bg-white border border-gray-300 px-2 py-0.5 rounded hover:bg-gray-50">Recheck</button>
+          </div>
+          ${!allOk && records.length ? `
+            <p class="text-[11px] text-amber-700 mt-1">Trag diese CNAMEs in deiner DNS-Zone ein:</p>
+            <table class="mt-1 text-[11px] w-full"><tbody>${recRows}</tbody></table>` : `
+            <p class="text-[11px] text-gray-600 mt-1">Auf deinem Mailserver: <code class="bg-white px-1 rounded">relayhost = [pmg.rosenweg4303.ch]:25</code></p>`}
+        </div>` : '';
+      return `
       <div class="border rounded p-3 bg-gray-50">
         <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
           <div><strong class="font-mono text-sm">${esc(m.domain)}</strong>${sb(m.approval_status)}
             ${m.active ? '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded ml-1">aktiv</span>' : ''}
+            ${typeof m.outbound_this_month === 'number' && m.outbound_via_smarthost ? `<span class="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded ml-1" title="Outbound diesen Monat">📤 ${m.outbound_this_month}</span>` : ''}
           </div>
           <div class="flex gap-1">
             ${m.approval_status === 'pending_dns' ? `<button onclick="recheckRelay(${m.id})" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">MX pruefen</button>` : ''}
@@ -454,7 +478,16 @@
         </div>
         <div class="text-xs text-gray-600">→ <span class="font-mono">${esc(m.target_host)}:${m.target_port || 25}</span>${m.target_use_mx ? ' <span class="bg-blue-100 text-blue-700 px-1 rounded">MX-Lookup</span>' : ''}</div>
         ${m.approval_reason ? `<div class="text-xs text-gray-500 italic mt-1">${esc(m.approval_reason)}</div>` : ''}
-      </div>`).join('');
+        ${shBlock}
+      </div>`;
+    }).join('');
+  }
+  async function recheckRelaySmarthost(id) {
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/mail-relays/' + id + '/smarthost/recheck', { method: 'POST' });
+      if (!r.ok) throw new Error(await r.text());
+      await loadRelays();
+    } catch (e) { alert('Fehler: ' + e.message); }
   }
   async function openRelayModal() {
     let dnsInfo = {};
