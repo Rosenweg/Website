@@ -425,8 +425,10 @@ const OAUTH_ALLOWED_HOSTS = new Set([
 ]);
 function oauthRedirectUri(req) {
   const host = req.headers['x-forwarded-host'] || req.headers.host || '';
-  const proto = (req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim();
-  if (OAUTH_ALLOWED_HOSTS.has(host)) return `${proto}://${host}/api/auth/callback`;
+  // Whitelisted hosts werden in Production immer ueber HTTPS bedient
+  // (CF/Traefik). X-Forwarded-Proto ist intern oft "http" und wuerde
+  // sonst falsche Callback-URLs erzeugen.
+  if (OAUTH_ALLOWED_HOSTS.has(host)) return `https://${host}/api/auth/callback`;
   return `${SITE_URL}/api/auth/callback`;
 }
 
