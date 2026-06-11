@@ -13990,6 +13990,108 @@ app.get('/api/isp/noc/dashboard', authMiddleware, requireTechnikOrPraesident, as
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// UniFi-Metriken fuer NOC-Cockpit (Geraete, Clients, WAN, WLANs, Top-APs)
+async function unifiGet(path, timeoutMs = 4000) {
+  const r = await fetch(`${UNIFI_HOST}/proxy/network/api/s/default/${path}`, {
+    headers: { 'X-API-Key': UNIFI_API_KEY },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!r.ok) throw new Error(`unifi ${path} -> ${r.status}`);
+  return r.json();
+}
+
+app.get('/api/isp/noc/unifi', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  const out = {
+    reachable: false,
+    devices: { total: 0, online: 0, offline: 0, by_type: {} },
+    clients: { total: 0, wireless: 0, wired: 0, guest: 0 },
+    wlans: { total: 0, enabled: 0 },
+    wan: { up: false, ip: null, uptime_s: null, gw_name: null },
+    top_aps: [],
+    health: [],
+    error: null,
+  };
+  try {
+    // Site-Health (subsystems: wlan, lan, wan, www, vpn) — gibt Status pro Subsystem
+    try {
+      const h = await unifiGet('stat/health');
+      out.health = (h.data || []).map(x => ({
+        subsystem: x.subsystem,
+        status: x.status,
+        num_user: x.num_user || 0,
+        num_guest: x.num_guest || 0,
+        num_ap: x.num_ap || 0,
+        num_sw: x.num_sw || 0,
+        num_gw: x.num_gw || 0,
+        wan_ip: x.wan_ip || null,
+        gw_name: x.gw_name || null,
+        uptime: x.uptime || null,
+        'rx_bytes-r': x['rx_bytes-r'] || 0,
+        'tx_bytes-r': x['tx_bytes-r'] || 0,
+      }));
+      const wan = out.health.find(x => x.subsystem === 'wan');
+      if (wan) {
+        out.wan.up = wan.status === 'ok';
+        out.wan.ip = wan.wan_ip;
+        out.wan.uptime_s = wan.uptime;
+        out.wan.gw_name = wan.gw_name;
+      }
+      const www = out.health.find(x => x.subsystem === 'www');
+      if (www && !out.wan.up) out.wan.up = www.status === 'ok';
+    } catch (e) { /* health-fehler nicht fatal */ }
+
+    // Devices
+    const d = await unifiGet('stat/device-basic').catch(() => unifiGet('stat/device'));
+    const devs = d.data || [];
+    out.reachable = true;
+    out.devices.total = devs.length;
+    for (const dev of devs) {
+      const t = (dev.type || 'unknown').toLowerCase(); // uap, usw, ugw, udm, uxg
+      const online = (dev.state === 1) || (dev.state === '1');
+      if (online) out.devices.online++; else out.devices.offline++;
+      const tk = ({uap:'ap', usw:'switch', ugw:'gateway', udm:'gateway', uxg:'gateway'})[t] || t;
+      out.devices.by_type[tk] = out.devices.by_type[tk] || { total: 0, online: 0 };
+      out.devices.by_type[tk].total++;
+      if (online) out.devices.by_type[tk].online++;
+    }
+    // Top-APs nach Client-Count (nur wenn full device-Info verfuegbar)
+    try {
+      const full = await unifiGet('stat/device');
+      const aps = (full.data || []).filter(x => (x.type || '').toLowerCase() === 'uap' && x.state === 1);
+      aps.sort((a, b) => (b.num_sta || 0) - (a.num_sta || 0));
+      out.top_aps = aps.slice(0, 5).map(a => ({
+        name: a.name || a.mac,
+        num_sta: a.num_sta || 0,
+        model: a.model || null,
+      }));
+    } catch {}
+
+    // Clients (active)
+    try {
+      const c = await unifiGet('stat/sta');
+      const clients = c.data || [];
+      out.clients.total = clients.length;
+      for (const cl of clients) {
+        if (cl.is_wired) out.clients.wired++; else out.clients.wireless++;
+        if (cl.is_guest) out.clients.guest++;
+      }
+    } catch {}
+
+    // WLANs
+    try {
+      const w = await unifiGet('rest/wlanconf');
+      const wlans = w.data || [];
+      out.wlans.total = wlans.length;
+      out.wlans.enabled = wlans.filter(x => x.enabled).length;
+    } catch {}
+
+    res.json(out);
+  } catch (err) {
+    out.error = err.message;
+    res.json(out);
+  }
+});
+
 app.get('/api/isp/dns-info', authMiddleware, (req, res) => {
   res.json(ispResolveTarget());
 });
