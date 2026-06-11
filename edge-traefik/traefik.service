@@ -1,0 +1,22 @@
+[Unit]
+Description=Rosenweg Edge Traefik
+Documentation=https://doc.traefik.io
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/default/traefik
+ExecStart=/usr/local/bin/traefik --configfile=/etc/traefik/traefik.yml
+Restart=always
+RestartSec=5
+User=root
+LimitNOFILE=131072
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/traefik /var/log/traefik /etc/traefik
+
+[Install]
+WantedBy=multi-user.target

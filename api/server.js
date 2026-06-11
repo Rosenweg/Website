@@ -14108,6 +14108,101 @@ app.get('/api/isp/noc/unifi', authMiddleware, requireTechnikOrPraesident, async 
   }
 });
 
+// ─── Edge-Traefik Dynamic-Config-Provider ──────────────────────────────
+// Wird vom Traefik in LXC 245 alle 15s gepollt (HTTP-Provider). Liefert
+// die aktuelle Route-Liste als Traefik-JSON-Schema. KEIN authMiddleware —
+// nur erreichbar im internen LAN, und Traefik kennt keinen Auth-Header.
+function safeId(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, ''); }
+
+async function buildTraefikDynamicConfig() {
+  const cfg = { http: { routers: {}, services: {}, middlewares: {} }, tcp: { routers: {}, services: {} } };
+
+  // 1) HTTP-Routes aus isp_reverse_proxy_routes
+  const rps = await pool.query(
+    `SELECT * FROM isp_reverse_proxy_routes
+      WHERE active = true AND COALESCE(protocol,'http') = 'http'
+      ORDER BY id`).catch(() => ({ rows: [] }));
+  for (const r of rps.rows) {
+    const id = safeId(`rp-${r.id}-${r.hostname}`);
+    const svc = id + '-svc';
+    cfg.http.routers[id] = {
+      rule: `Host(\`${r.hostname}\`)`,
+      entryPoints: [r.entry_point || 'websecure'],
+      service: svc,
+    };
+    if (r.ssl !== false) {
+      cfg.http.routers[id].tls = { certResolver: r.cert_resolver || 'cf' };
+    }
+    if (r.strip_prefix) {
+      const mw = id + '-strip';
+      cfg.http.middlewares[mw] = { stripPrefix: { prefixes: [r.strip_prefix] } };
+      cfg.http.routers[id].middlewares = [mw];
+    }
+    cfg.http.services[svc] = {
+      loadBalancer: {
+        servers: [{ url: r.backend_url }],
+        passHostHeader: r.preserve_host !== false,
+      },
+    };
+    if (r.read_timeout_s > 0) {
+      cfg.http.services[svc].loadBalancer.serversTransport = id + '-transport';
+    }
+  }
+
+  // 2) TCP-SNI-Passthrough fuer Mail-Relays
+  const mrs = await pool.query(
+    `SELECT * FROM isp_mail_relays
+      WHERE active = true
+        AND (imap_sni_hostname IS NOT NULL OR smtps_sni_hostname IS NOT NULL)
+      ORDER BY id`).catch(() => ({ rows: [] }));
+  for (const m of mrs.rows) {
+    if (m.imap_sni_hostname && m.imap_host) {
+      const id = safeId(`imaps-${m.id}-${m.imap_sni_hostname}`);
+      const svc = id + '-svc';
+      cfg.tcp.routers[id] = {
+        rule: `HostSNI(\`${m.imap_sni_hostname}\`)`,
+        entryPoints: ['imaps'],
+        service: svc,
+        tls: { passthrough: true },
+      };
+      cfg.tcp.services[svc] = {
+        loadBalancer: { servers: [{ address: `${m.imap_host}:${m.imap_port || 993}` }] },
+      };
+    }
+    if (m.smtps_sni_hostname && m.smtps_host) {
+      const id = safeId(`smtps-${m.id}-${m.smtps_sni_hostname}`);
+      const svc = id + '-svc';
+      cfg.tcp.routers[id] = {
+        rule: `HostSNI(\`${m.smtps_sni_hostname}\`)`,
+        entryPoints: ['smtps'],
+        service: svc,
+        tls: { passthrough: true },
+      };
+      cfg.tcp.services[svc] = {
+        loadBalancer: { servers: [{ address: `${m.smtps_host}:${m.smtps_port || 465}` }] },
+      };
+    }
+  }
+
+  return cfg;
+}
+
+app.get('/api/traefik/dynamic', async (req, res) => {
+  // Nur internes Netz (100.64.x.x) erlauben — sonst koennten Externe das
+  // Routing kartieren.
+  const xff = (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  const remote = xff || req.socket.remoteAddress || '';
+  const isInternal = /^(127\.|::1|::ffff:127\.|10\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[01]\.|192\.168\.|100\.64\.|::ffff:100\.64\.|::ffff:10\.)/.test(remote);
+  if (!isInternal) return res.status(403).json({ error: 'Only internal' });
+  try {
+    const cfg = await buildTraefikDynamicConfig();
+    res.json(cfg);
+  } catch (err) {
+    console.error('[traefik/dynamic]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/isp/dns-info', authMiddleware, (req, res) => {
   res.json(ispResolveTarget());
 });
@@ -17959,6 +18054,21 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_isp_rp_owner ON isp_reverse_proxy_routes(LOWER(owner_email));
       CREATE INDEX IF NOT EXISTS idx_isp_rp_active ON isp_reverse_proxy_routes(active);
+
+      -- Edge-Traefik Migration: pro Route Protokoll definieren.
+      --   http       — Layer7 HTTP-Proxy mit TLS-Termination am Edge
+      --   tcp_sni    — TCP-Passthrough via HostSNI, TLS bleibt zum Backend
+      --   tcp_raw    — Raw-TCP-Forward (z.B. PMG SMTP :25)
+      DO $$ BEGIN
+        ALTER TABLE isp_reverse_proxy_routes
+          ADD COLUMN IF NOT EXISTS protocol VARCHAR(16) DEFAULT 'http',
+          ADD COLUMN IF NOT EXISTS entry_point VARCHAR(32),     -- websecure/smtps/imaps/...
+          ADD COLUMN IF NOT EXISTS cert_resolver VARCHAR(32) DEFAULT 'cf',
+          ADD COLUMN IF NOT EXISTS strip_prefix VARCHAR(255),   -- optionaler Pfad-Prefix der ausgeschnitten wird
+          ADD COLUMN IF NOT EXISTS preserve_host BOOLEAN DEFAULT true,
+          ADD COLUMN IF NOT EXISTS read_timeout_s INTEGER DEFAULT 0,  -- 0 = unbegrenzt (streaming)
+          ADD COLUMN IF NOT EXISTS pass_through_tls BOOLEAN DEFAULT false;
+      EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
       -- Mail-Relay-Domains: User traegt seine Domain ein, PMG nimmt
       -- Mail dafuer an, filtert (SpamAssassin/ClamAV), leitet sie dann

@@ -1,0 +1,89 @@
+# Rosenweg Edge-Traefik (LXC 245 @ 100.64.2.40)
+# Statische Konfiguration. Routes selbst kommen ueber den HTTP-Provider
+# vom rosenweg_api Service (/api/traefik/dynamic).
+
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+log:
+  level: INFO
+  filePath: /var/log/traefik/traefik.log
+
+accessLog:
+  filePath: /var/log/traefik/access.log
+  format: json
+  bufferingSize: 100
+
+api:
+  dashboard: true
+  insecure: false   # Dashboard ueber separaten Router exponieren wenn gewuenscht
+
+ping:
+  entryPoint: web
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: ":443"
+    http:
+      tls:
+        certResolver: cf
+    transport:
+      respondingTimeouts:
+        readTimeout: 0      # Streaming-freundlich
+        writeTimeout: 0
+        idleTimeout: 600s
+  # TCP-SNI-Passthrough Entrypoints fuer Mail-Relays
+  smtps:
+    address: ":465"
+  imaps:
+    address: ":993"
+  submission:
+    address: ":587"
+  smtp:
+    address: ":25"
+  # Metrics (intern, nicht WAN-exposed)
+  metrics:
+    address: "127.0.0.1:8082"
+
+providers:
+  # 1) HTTP-Provider: holt dynamische Routes vom API-Service (DB-backed).
+  http:
+    endpoint: "http://100.64.2.27:3000/api/traefik/dynamic"
+    pollInterval: 15s
+    pollTimeout: 10s
+
+  # 2) File-Provider: fuer Notfall-Override und initial-seed bevor API steht.
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+certificatesResolvers:
+  cf:
+    acme:
+      email: stefan.mueller.1694@gmail.com
+      storage: /var/lib/traefik/acme.json
+      dnsChallenge:
+        provider: cloudflare
+        resolvers:
+          - "1.1.1.1:53"
+          - "8.8.8.8:53"
+        propagation:
+          delayBeforeChecks: 30s
+
+metrics:
+  prometheus:
+    entryPoint: metrics
+    addEntryPointsLabels: true
+    addServicesLabels: true
+
+experimental:
+  # Reserviert fuer eventuelle Plugins (Crowdsec etc.) — aktuell aus.
