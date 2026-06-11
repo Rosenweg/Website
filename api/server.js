@@ -1869,8 +1869,14 @@ app.get('/api/tv/proxy', (req, res, next) => {
   }
   res.status(401).json({ error: 'Unauthorized' });
 }, async (req, res) => {
+  // Init7 verteilt Segmente ueber per-Channel CDN-Subdomains:
+  //   Playlists: https://api.tv.init7.net/api/live/?channel=...
+  //   Sub-Playlists + .ts: https://<channel>-ch.cache.tv.init7.net/...
+  // Alle *.tv.init7.net Hosts sind legitim (eigenes Init7-Netz).
   const url = req.query.url;
-  if (!url || !url.startsWith('https://api.tv.init7.net/')) {
+  let parsed;
+  try { parsed = new URL(url); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
+  if (parsed.protocol !== 'https:' || !/(^|\.)tv\.init7\.net$/i.test(parsed.hostname)) {
     return res.status(400).json({ error: 'Invalid URL' });
   }
   const proxyToken = req.query.pt || createTvProxyToken(req.user?.id || 0);
