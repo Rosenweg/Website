@@ -761,6 +761,7 @@
             ${m.active ? '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded ml-1">aktiv</span>' : '<span class="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded ml-1">inaktiv</span>'}
             ${m.mailcow_managed ? '<span class="text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded ml-1">Rosenweg-managed</span>' : ''}
             ${m.outbound_via_smarthost ? '<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded ml-1">Smarthost</span>' : ''}
+            ${typeof m.outbound_this_month === 'number' ? `<span class="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded ml-1" title="Outbound-Mails diesen Monat (via PMG -> SMTP2GO)">📤 ${m.outbound_this_month}</span>` : ''}
             <span class="text-xs text-gray-500 ml-1">Owner: ${esc(m.owner_email || '—')}</span>
           </div>
           <div class="flex gap-1">

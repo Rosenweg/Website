@@ -15276,10 +15276,22 @@ app.get('/api/isp/mail-relays', authMiddleware, async (req, res) => {
   try {
     const admin = ispIsAdmin(req);
     const email = (req.user.email || '').toLowerCase();
+    const ym = new Date().toISOString().slice(0, 7);  // '2026-06'
     const r = admin
-      ? await pool.query(`SELECT * FROM isp_mail_relays ORDER BY active DESC, domain`)
-      : await pool.query('SELECT * FROM isp_mail_relays WHERE LOWER(owner_email) = $1 ORDER BY domain', [email]);
-    res.json({ mail_relays: r.rows, is_admin: admin });
+      ? await pool.query(
+          `SELECT r.*, COALESCE(u.count, 0) AS outbound_this_month
+             FROM isp_mail_relays r
+             LEFT JOIN isp_outbound_usage u
+               ON LOWER(u.sender_domain) = LOWER(r.domain) AND u.year_month = $1
+            ORDER BY r.active DESC, r.domain`, [ym])
+      : await pool.query(
+          `SELECT r.*, COALESCE(u.count, 0) AS outbound_this_month
+             FROM isp_mail_relays r
+             LEFT JOIN isp_outbound_usage u
+               ON LOWER(u.sender_domain) = LOWER(r.domain) AND u.year_month = $1
+            WHERE LOWER(r.owner_email) = $2
+            ORDER BY r.domain`, [ym, email]);
+    res.json({ mail_relays: r.rows, is_admin: admin, current_month: ym });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -15364,6 +15376,62 @@ app.delete('/api/isp/mail-relays/:id', authMiddleware, async (req, res) => {
     if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     await pool.query('DELETE FROM isp_mail_relays WHERE id = $1', [id]);
     res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── Outbound-Usage-Tracking ───────────────────────────────────────────
+// PMG-Postfix-Logs werden vom /usr/local/sbin/pmg-usage-tracker.py geparst
+// und per POST hier hingeschickt. Wir aggregieren pro (sender_domain, monat).
+function requireTrackerSecret(req, res, next) {
+  const expected = process.env.TRACKER_SHARED_SECRET || '';
+  if (!expected || req.headers['x-tracker-secret'] !== expected) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  next();
+}
+
+app.post('/api/isp/outbound-usage/ingest', requireTrackerSecret, async (req, res) => {
+  try {
+    const events = Array.isArray(req.body?.events) ? req.body.events : [];
+    if (events.length === 0) return res.json({ ok: true, processed: 0 });
+    let processed = 0;
+    for (const ev of events) {
+      const d = String(ev.sender_domain || '').toLowerCase().trim();
+      const ym = String(ev.year_month || '').trim();
+      const delta = parseInt(ev.count_delta, 10) || 0;
+      if (!d || !/^\d{4}-\d{2}$/.test(ym) || delta <= 0) continue;
+      await pool.query(
+        `INSERT INTO isp_outbound_usage (sender_domain, year_month, count)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (sender_domain, year_month) DO UPDATE
+           SET count = isp_outbound_usage.count + EXCLUDED.count,
+               last_updated_at = NOW()`,
+        [d, ym, delta],
+      );
+      processed++;
+    }
+    res.json({ ok: true, processed });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET: Monatsverlauf fuer eine Sender-Domain (Owner + Admin).
+app.get('/api/isp/outbound-usage/:domain', authMiddleware, async (req, res) => {
+  try {
+    const domain = String(req.params.domain || '').toLowerCase();
+    const months = Math.min(Math.max(parseInt(req.query.months, 10) || 12, 1), 36);
+    // Authz: Owner (gegen isp_mail_relays) oder Admin
+    const rel = await pool.query('SELECT owner_email FROM isp_mail_relays WHERE LOWER(domain)=$1', [domain]);
+    const ownerEmail = rel.rows[0]?.owner_email?.toLowerCase() || '';
+    if (!ispIsAdmin(req) && ownerEmail !== (req.user.email || '').toLowerCase()) {
+      return res.status(403).json({ error: 'Nur Owner oder Admin' });
+    }
+    const r = await pool.query(
+      `SELECT year_month, count FROM isp_outbound_usage
+        WHERE sender_domain = $1
+        ORDER BY year_month DESC LIMIT $2`,
+      [domain, months],
+    );
+    res.json({ domain, months: r.rows });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -17626,6 +17694,20 @@ async function initDB() {
       ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS smtp2go_rpath_verified BOOLEAN DEFAULT false;
       ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS smtp2go_last_verify_at TIMESTAMPTZ;
       ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS smtp2go_dns_records JSONB;
+
+      -- Outbound-Usage-Tracking: PMG-Postfix-Logs werden alle paar Minuten
+      -- pro Sender-Domain in dieser Tabelle aggregiert. UI zeigt das
+      -- Monats-Volumen pro Mail-Relay.
+      CREATE TABLE IF NOT EXISTS isp_outbound_usage (
+        id SERIAL PRIMARY KEY,
+        sender_domain VARCHAR(255) NOT NULL,
+        year_month CHAR(7) NOT NULL,                 -- '2026-06'
+        count INTEGER DEFAULT 0,
+        last_updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (sender_domain, year_month)
+      );
+      CREATE INDEX IF NOT EXISTS idx_outbound_usage_domain ON isp_outbound_usage(sender_domain);
+      CREATE INDEX IF NOT EXISTS idx_outbound_usage_month ON isp_outbound_usage(year_month);
 
       -- Mailbox-Onboarding: User-Antraege fuer rosenweg-managed Domains.
       -- Status: pending (Admin pruefen) -> approved (provisioniert in Mailcow)
