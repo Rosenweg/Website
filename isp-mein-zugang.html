@@ -243,14 +243,20 @@
   function renderVlan() {
     const wrap = document.getElementById('vlan-list');
     if (vlanRequests.length === 0) { wrap.innerHTML = '<p class="text-gray-400 italic text-sm">Keine Antraege.</p>'; return; }
-    wrap.innerHTML = vlanRequests.map(v => `
+    wrap.innerHTML = vlanRequests.map(v => {
+      const mits = Array.isArray(v.mitnutzer_emails) ? v.mitnutzer_emails : [];
+      const sharedBadge = v.is_mitnutzer && !v.is_owner
+        ? '<span class="ml-2 text-[10px] bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded">Mitnutzer</span>'
+        : (mits.length > 0 && v.is_owner ? `<span class="ml-2 text-[10px] bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded">geteilt · ${mits.length}</span>` : '');
+      return `
       <div class="border rounded p-3 bg-gray-50">
         <div class="flex items-start justify-between flex-wrap gap-2 mb-1">
           <div>
             <span class="text-xs ${v.status === 'pending' ? 'bg-amber-100 text-amber-800' : v.status === 'approved' ? 'bg-blue-100 text-blue-800' : v.status === 'deployed' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'} px-2 py-0.5 rounded">${esc(v.status)}</span>
             <strong class="ml-2 text-sm">${esc(v.gewuenschter_name || 'unbenannt')}</strong>
+            ${sharedBadge}
           </div>
-          ${v.status === 'pending' ? `<button onclick="delVlan(${v.id})" class="text-xs text-red-600 hover:underline">Zurueckziehen</button>` : ''}
+          ${v.is_owner || v.is_mitnutzer ? `<button onclick="delVlan(${v.id})" class="text-xs text-red-600 hover:underline">Zurueckziehen</button>` : ''}
         </div>
         <p class="text-sm mb-1">${esc(v.zweck)}</p>
         <div class="text-xs text-gray-600">
@@ -258,7 +264,24 @@
           ${v.subnet_v4 ? ` · <span class="font-mono">${esc(v.subnet_v4)}</span>` : ''}
           ${v.ablehnung_grund ? ` · <span class="text-red-700">Ablehnung: ${esc(v.ablehnung_grund)}</span>` : ''}
         </div>
-      </div>`).join('');
+        ${mits.length > 0 ? `<div class="text-xs text-gray-500 mt-1">Mitnutzer: ${mits.map(e => `<span class="font-mono">${esc(e)}</span>`).join(', ')}</div>` : ''}
+        ${v.is_owner && v.status === 'pending' ? `<div class="mt-2"><button onclick="editVlanMitnutzer(${v.id})" class="text-xs text-blue-600 hover:underline">✎ Mitnutzer bearbeiten</button></div>` : ''}
+      </div>`;
+    }).join('');
+  }
+  async function editVlanMitnutzer(id) {
+    const v = vlanRequests.find(x => x.id === id);
+    if (!v) return;
+    const current = (v.mitnutzer_emails || []).join(', ');
+    const next = prompt('Mitnutzer-Emails (kommagetrennt) — sehen das VLAN und koennen es auch zurueckziehen:', current);
+    if (next === null) return;
+    const list = next.split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
+    const r = await AuthentikAuth.apiFetch('/api/isp/vlan-requests/' + id, {
+      method: 'PUT', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ mitnutzer_emails: list }),
+    });
+    if (!r.ok) { alert('Fehler: ' + await r.text()); return; }
+    await loadVlan();
   }
   async function openVlanModal() {
     let opts = [];
@@ -300,6 +323,11 @@
           </div>
           <div><label class="flex items-center gap-2 text-sm"><input id="vl-inet" type="checkbox" checked class="rounded"> Internet-Zugriff</label></div>
           <div><label class="flex items-center gap-2 text-sm"><input id="vl-cross" type="checkbox" class="rounded"> Zugriff auf andere VLANs</label></div>
+          <div>
+            <label class="block text-xs text-gray-600">Mitnutzer (optional)</label>
+            <input id="vl-mitnutzer" placeholder="bewohner1@…, bewohner2@…" class="w-full border rounded px-2 py-1 font-mono text-xs">
+            <p class="text-xs text-gray-500 mt-1">Kommagetrennte Emails. Mitnutzer sehen das VLAN in <em>Mein Zugang</em> und koennen es ebenfalls zurueckziehen.</p>
+          </div>
         </div>
         <div class="flex justify-end gap-2 mt-3">
           <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Abbrechen</button>
@@ -310,6 +338,10 @@
   }
   async function saveVlan() {
     const wohnungEl = document.getElementById('vl-wohnung');
+    const mitnutzerRaw = (document.getElementById('vl-mitnutzer')?.value || '').trim();
+    const mitnutzer = mitnutzerRaw
+      ? mitnutzerRaw.split(/[,;\s]+/).map(s => s.trim()).filter(Boolean)
+      : [];
     const body = {
       wohnung_id: wohnungEl ? parseInt(wohnungEl.value, 10) || null : null,
       gewuenschter_name: document.getElementById('vl-name').value || null,
@@ -318,6 +350,7 @@
       geraete_anzahl: parseInt(document.getElementById('vl-anz').value, 10) || null,
       internet_zugriff: document.getElementById('vl-inet').checked,
       andere_vlans_zugriff: document.getElementById('vl-cross').checked,
+      mitnutzer_emails: mitnutzer,
     };
     if (!body.zweck) { alert('Zweck Pflicht.'); return; }
     try {

@@ -14583,6 +14583,23 @@ app.get('/api/isp/vpn-accounts/:id/qr', authMiddleware, async (req, res) => {
 });
 
 // === VLAN-Requests ===
+// Mitnutzer-Emails normalisieren: lowercase, getrimmt, dedupe, ohne Antragsteller, basic Format-Check.
+function normalizeMitnutzerEmails(input, antragstellerEmail) {
+  if (!input) return [];
+  const arr = Array.isArray(input)
+    ? input
+    : String(input).split(/[,;\s]+/);
+  const ant = (antragstellerEmail || '').toLowerCase().trim();
+  const out = new Set();
+  for (const raw of arr) {
+    const e = String(raw || '').toLowerCase().trim();
+    if (!e || e === ant) continue;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) continue;
+    out.add(e);
+  }
+  return Array.from(out);
+}
+
 app.get('/api/isp/vlan-requests', authMiddleware, async (req, res) => {
   try {
     const admin = ispIsAdmin(req);
@@ -14593,8 +14610,15 @@ app.get('/api/isp/vlan-requests', authMiddleware, async (req, res) => {
                            ORDER BY CASE v.status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 WHEN 'deployed' THEN 2 ELSE 3 END, v.created_at DESC`)
       : await pool.query(`SELECT v.*, w.bezeichnung AS wohnung_bezeichnung, w.stweg FROM isp_vlan_requests v
                            LEFT JOIN wohnungen w ON w.id = v.wohnung_id
-                           WHERE LOWER(v.antragsteller_email) = $1 ORDER BY v.created_at DESC`, [email]);
-    res.json({ vlan_requests: r.rows, is_admin: admin });
+                           WHERE LOWER(v.antragsteller_email) = $1
+                              OR $1 = ANY(COALESCE(v.mitnutzer_emails, ARRAY[]::TEXT[]))
+                           ORDER BY v.created_at DESC`, [email]);
+    const rows = r.rows.map(v => ({
+      ...v,
+      is_owner: (v.antragsteller_email || '').toLowerCase() === email,
+      is_mitnutzer: (v.mitnutzer_emails || []).map(x => String(x).toLowerCase()).includes(email),
+    }));
+    res.json({ vlan_requests: rows, is_admin: admin });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -14610,12 +14634,15 @@ app.post('/api/isp/vlan-requests', authMiddleware, async (req, res) => {
         return res.status(403).json({ error: 'Dieses Objekt gehoert nicht zu deinen zugewiesenen Einheiten' });
       }
     }
+    const mitnutzer = normalizeMitnutzerEmails(b.mitnutzer_emails, req.user.email);
     const r = await pool.query(
       `INSERT INTO isp_vlan_requests (antragsteller_email, wohnung_id, zweck, gewuenschter_name,
-                                       gewuenschte_groesse, geraete_anzahl, internet_zugriff, andere_vlans_zugriff)
-       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,true),COALESCE($8,false)) RETURNING *`,
+                                       gewuenschte_groesse, geraete_anzahl, internet_zugriff, andere_vlans_zugriff,
+                                       mitnutzer_emails)
+       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,true),COALESCE($8,false),$9) RETURNING *`,
       [req.user.email, wohnungId, b.zweck, b.gewuenschter_name || null,
-       b.gewuenschte_groesse || null, b.geraete_anzahl || null, b.internet_zugriff, b.andere_vlans_zugriff],
+       b.gewuenschte_groesse || null, b.geraete_anzahl || null, b.internet_zugriff, b.andere_vlans_zugriff,
+       mitnutzer],
     );
     res.json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -14628,17 +14655,28 @@ app.put('/api/isp/vlan-requests/:id', authMiddleware, async (req, res) => {
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = existing.rows[0];
     const admin = ispIsAdmin(req);
-    const isOwner = (v.antragsteller_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
-    if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Antragsteller oder Admin' });
-    // Antragsteller darf nur eigene Felder editieren waehrend pending
+    const email = (req.user.email || '').toLowerCase();
+    const isOwner = (v.antragsteller_email || '').toLowerCase() === email;
+    const isMitnutzer = (v.mitnutzer_emails || []).map(x => String(x).toLowerCase()).includes(email);
+    if (!admin && !isOwner && !isMitnutzer) return res.status(403).json({ error: 'Nur Antragsteller, Mitnutzer oder Admin' });
+    // Mitnutzer-Felder duerfen nur Owner editieren; ansonsten User-Felder waehrend pending
     const b = req.body || {};
     const updates = []; const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
     const userFields = ['zweck','gewuenschter_name','gewuenschte_groesse','geraete_anzahl','internet_zugriff','andere_vlans_zugriff'];
+    const ownerOnlyFields = ['mitnutzer_emails'];
     const adminFields = ['status','vlan_id','subnet_v4','ablehnung_grund','notizen_technik','deployed_at'];
-    const allowed = admin ? [...userFields, ...adminFields] : userFields;
+    const allowed = admin ? [...userFields, ...ownerOnlyFields, ...adminFields]
+                          : (isOwner ? [...userFields, ...ownerOnlyFields] : []);
     if (!admin && v.status !== 'pending') return res.status(400).json({ error: 'Nur in Status pending editierbar' });
-    for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
+    if (!admin && !isOwner && allowed.length === 0) return res.status(403).json({ error: 'Mitnutzer koennen Antrag nur zurueckziehen, nicht editieren' });
+    for (const col of allowed) if (b[col] !== undefined) {
+      if (col === 'mitnutzer_emails') {
+        push(col, normalizeMitnutzerEmails(b[col], v.antragsteller_email));
+      } else {
+        push(col, b[col] === '' ? null : b[col]);
+      }
+    }
     if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
     push('updated_at', new Date());
     params.push(id);
@@ -14701,8 +14739,10 @@ app.delete('/api/isp/vlan-requests/:id', authMiddleware, async (req, res) => {
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = existing.rows[0];
     const admin = ispIsAdmin(req);
-    const isOwner = (v.antragsteller_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
-    if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Antragsteller oder Admin' });
+    const email = (req.user.email || '').toLowerCase();
+    const isOwner = (v.antragsteller_email || '').toLowerCase() === email;
+    const isMitnutzer = (v.mitnutzer_emails || []).map(x => String(x).toLowerCase()).includes(email);
+    if (!admin && !isOwner && !isMitnutzer) return res.status(403).json({ error: 'Nur Antragsteller, Mitnutzer oder Admin' });
     await pool.query('DELETE FROM isp_vlan_requests WHERE id = $1', [id]);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -17836,6 +17876,15 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_isp_vlanreq_status ON isp_vlan_requests(status);
       CREATE INDEX IF NOT EXISTS idx_isp_vlanreq_user ON isp_vlan_requests(LOWER(antragsteller_email));
+
+      -- Mitnutzer: zusaetzliche Bewohner-Emails (lowercase, deduped), die das
+      -- VLAN ebenfalls sehen + zurueckziehen koennen.
+      DO $$ BEGIN
+        ALTER TABLE isp_vlan_requests
+          ADD COLUMN IF NOT EXISTS mitnutzer_emails TEXT[] DEFAULT ARRAY[]::TEXT[];
+      EXCEPTION WHEN OTHERS THEN NULL; END $$;
+      CREATE INDEX IF NOT EXISTS idx_isp_vlanreq_mitnutzer
+        ON isp_vlan_requests USING GIN (mitnutzer_emails);
 
       -- Approval-Workflow fuer Reverse-Proxy + Redirects:
       -- 1. Customer beantragt mit beliebigem Hostname (z.B. test.abc.ch)
