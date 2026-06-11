@@ -1194,45 +1194,54 @@
   }
 
   async function loadNocUnifi() {
+    const led = document.getElementById('noc-led-unifi');
+    const errEl = document.getElementById('noc-unifi-err');
+    let d;
     try {
       const r = await AuthentikAuth.apiFetch('/api/isp/noc/unifi');
-      if (!r.ok) return;
-      const d = await r.json();
-      const led = document.getElementById('noc-led-unifi');
-      const errEl = document.getElementById('noc-unifi-err');
-      if (!d.reachable) {
-        led.className = 'noc-led led-red';
-        errEl.textContent = d.error ? ('UDM unreachable · ' + d.error) : 'UDM unreachable';
-      } else {
-        led.className = 'noc-led led-green';
-        errEl.textContent = '';
-      }
-      // Devices
-      document.getElementById('noc-uf-dev-online').textContent = d.devices.online;
-      document.getElementById('noc-uf-dev-total').textContent = d.devices.total;
-      const by = d.devices.by_type || {};
+      if (!r.ok) { if (led) led.className = 'noc-led led-red'; return; }
+      d = await r.json();
+    } catch (e) { if (led) led.className = 'noc-led led-red'; console.warn('NOC UniFi fetch:', e.message); return; }
+    // Section-wise rendering — one Defekt killt nicht den Rest
+    const safe = (fn, lbl) => { try { fn(); } catch (e) { console.warn('NOC UniFi ' + lbl + ':', e.message); } };
+    safe(() => {
+      if (led) led.className = 'noc-led ' + (d.reachable ? 'led-green' : 'led-red');
+      if (errEl) errEl.textContent = d.reachable ? '' : ('UDM unreachable' + (d.error ? ' · ' + d.error : ''));
+    }, 'led');
+    safe(() => {
+      const dev = d.devices || {};
+      document.getElementById('noc-uf-dev-online').textContent = dev.online ?? 0;
+      document.getElementById('noc-uf-dev-total').textContent = dev.total ?? 0;
+      const by = dev.by_type || {};
       document.getElementById('noc-uf-ap').textContent = (by.ap?.online || 0) + '/' + (by.ap?.total || 0);
       document.getElementById('noc-uf-sw').textContent = (by.switch?.online || 0) + '/' + (by.switch?.total || 0);
       document.getElementById('noc-uf-gw').textContent = (by.gateway?.online || 0) + '/' + (by.gateway?.total || 0);
-      // Clients
-      document.getElementById('noc-uf-cli-total').textContent = d.clients.total;
-      document.getElementById('noc-uf-cli-wifi').textContent = d.clients.wireless;
-      document.getElementById('noc-uf-cli-wired').textContent = d.clients.wired;
-      document.getElementById('noc-uf-cli-guest').textContent = d.clients.guest;
-      // WAN
+    }, 'devices');
+    safe(() => {
+      const c = d.clients || {};
+      document.getElementById('noc-uf-cli-total').textContent = c.total ?? 0;
+      document.getElementById('noc-uf-cli-wifi').textContent = c.wireless ?? 0;
+      document.getElementById('noc-uf-cli-wired').textContent = c.wired ?? 0;
+      document.getElementById('noc-uf-cli-guest').textContent = c.guest ?? 0;
+    }, 'clients');
+    safe(() => {
+      const w = d.wan || {};
       const wanState = document.getElementById('noc-uf-wan-state');
-      wanState.textContent = d.wan.up ? 'UP' : 'DOWN';
-      wanState.className = 'noc-big ' + (d.wan.up ? 'text-emerald-300' : 'text-rose-400');
-      document.getElementById('noc-uf-wan-gw').textContent = d.wan.gw_name || '—';
-      document.getElementById('noc-uf-wanip').textContent = d.wan.ip ? '· ' + d.wan.ip : '';
-      const upS = d.wan.uptime_s || 0;
+      wanState.textContent = w.up ? 'UP' : 'DOWN';
+      wanState.className = 'noc-big ' + (w.up ? 'text-emerald-300' : 'text-rose-400');
+      document.getElementById('noc-uf-wan-gw').textContent = w.gw_name || '—';
+      document.getElementById('noc-uf-wanip').textContent = w.ip ? '· ' + w.ip : '';
+      const upS = w.uptime_s || 0;
       const days = Math.floor(upS / 86400);
       const hours = Math.floor((upS % 86400) / 3600);
       document.getElementById('noc-uf-wan-uptime').textContent = upS > 0 ? `uptime ${days}d ${hours}h` : '—';
-      // WLANs
-      document.getElementById('noc-uf-wlan-enabled').textContent = d.wlans.enabled;
-      document.getElementById('noc-uf-wlan-total').textContent = d.wlans.total;
-      // Top APs
+    }, 'wan');
+    safe(() => {
+      const wl = d.wlans || {};
+      document.getElementById('noc-uf-wlan-enabled').textContent = wl.enabled ?? 0;
+      document.getElementById('noc-uf-wlan-total').textContent = wl.total ?? 0;
+    }, 'wlans');
+    safe(() => {
       const aps = d.top_aps || [];
       const maxSta = Math.max(1, ...aps.map(a => a.num_sta || 0));
       document.getElementById('noc-uf-aps-meta').textContent = aps.length ? aps.length + ' APs gelistet' : 'keine Daten';
@@ -1246,7 +1255,8 @@
               <div class="h-full bg-cyan-500" style="width: ${(a.num_sta / maxSta * 100).toFixed(1)}%"></div>
             </div>
           </div>`).join('');
-      // Subsystems
+    }, 'top_aps');
+    safe(() => {
       const subEl = document.getElementById('noc-uf-subs');
       const subs = d.health || [];
       subEl.innerHTML = subs.length === 0
@@ -1258,11 +1268,7 @@
               <span class="text-[10px] font-mono uppercase text-slate-300">${esc(s.subsystem)}</span>
             </span>`;
           }).join('');
-    } catch (e) {
-      const led = document.getElementById('noc-led-unifi');
-      if (led) led.className = 'noc-led led-red';
-      console.warn('NOC UniFi:', e.message);
-    }
+    }, 'subsystems');
   }
 
   async function runNocHealthChecks() {
