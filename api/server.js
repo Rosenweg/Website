@@ -13896,6 +13896,72 @@ async function ispDecideApproval(hostname) {
 }
 
 // Endpoint: DNS-Info (zeigt Customer was er konfigurieren muss)
+// ─── NOC Dashboard ─────────────────────────────────────────────────────
+// Aggregierte Echtzeit-Metriken fuer das ISP-Admin-NOC-Cockpit.
+// Admin-only — die Daten umfassen Quota-Stand, Top-Sender und Gesamt-
+// Volumen ueber alle Sender-Domains.
+app.get('/api/isp/noc/dashboard', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const ym = new Date().toISOString().slice(0, 7);
+    // Outbound Monatstotal + Top-Sender
+    const out = await pool.query(
+      `SELECT sender_domain, count FROM isp_outbound_usage
+        WHERE year_month=$1 ORDER BY count DESC`, [ym]);
+    const monthlyTotal = out.rows.reduce((a, r) => a + r.count, 0);
+    const topSenders = out.rows.slice(0, 5);
+
+    // Quota-Schwelle (SMTP2GO Free-Tier = 1000)
+    const QUOTA = 1000;
+    const quotaPct = QUOTA > 0 ? Math.min(999, Math.round(monthlyTotal / QUOTA * 100)) : 0;
+
+    // Aktive Mail-Relays + Smarthost-Anzahl
+    const relays = await pool.query(
+      `SELECT COUNT(*) FILTER (WHERE active) AS active_count,
+              COUNT(*) FILTER (WHERE outbound_via_smarthost) AS smarthost_count,
+              COUNT(*) FILTER (WHERE mailcow_managed) AS managed_count,
+              COUNT(*) AS total FROM isp_mail_relays`);
+    const relayStats = relays.rows[0];
+
+    // Pending Mailbox-Antraege
+    const pending = (await pool.query(
+      `SELECT COUNT(*)::int AS n FROM mailbox_requests WHERE status='pending'`)).rows[0].n;
+
+    // Pending VLAN-Antraege
+    let pendingVlan = 0;
+    try {
+      pendingVlan = (await pool.query(
+        `SELECT COUNT(*)::int AS n FROM isp_vlan_requests WHERE status='pending'`)).rows[0].n;
+    } catch {}
+
+    // Aktive VPN-Konten
+    let vpnActive = 0;
+    try {
+      vpnActive = (await pool.query(
+        `SELECT COUNT(*)::int AS n FROM isp_vpn_accounts WHERE active=true`)).rows[0].n;
+    } catch {}
+
+    // Aktive Subscribers (Erschliessungen)
+    let subsActive = 0;
+    try {
+      subsActive = (await pool.query(
+        `SELECT COUNT(*)::int AS n FROM isp_subscribers WHERE status='aktiv'`)).rows[0].n;
+    } catch {}
+
+    res.json({
+      year_month: ym,
+      outbound: {
+        monthly_total: monthlyTotal,
+        quota_limit: QUOTA,
+        quota_pct: quotaPct,
+        top_senders: topSenders,
+      },
+      relays: relayStats,
+      pending: { mailbox_requests: pending, vlan_requests: pendingVlan },
+      counts: { vpn_active: vpnActive, subscribers_active: subsActive },
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/isp/dns-info', authMiddleware, (req, res) => {
   res.json(ispResolveTarget());
 });
