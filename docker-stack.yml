@@ -110,6 +110,41 @@ services:
       start_period: 10s
 
   # ============================================
+  # ISP Frontend (isp.rosenweg4303.ch) — Frontend-only, /api/* wird im
+  # nginx.isp.conf auf das geteilte api-Service weitergeleitet.
+  # ============================================
+  isp:
+    image: ghcr.io/rosenweg/rosenweg-isp:latest
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 2
+      placement:
+        preferences:
+          - spread: node.hostname
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - traefik.enable=true
+        - "traefik.http.routers.rosenweg-isp.rule=Host(`isp.rosenweg4303.ch`)"
+        - traefik.http.routers.rosenweg-isp.entrypoints=websecure
+        - traefik.http.routers.rosenweg-isp.tls.certresolver=letsencrypt
+        - traefik.http.services.rosenweg-isp.loadbalancer.server.port=80
+        - shepherd.enable=true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # ============================================
   # API Backend - Node.js/Express
   # ============================================
   api:
