@@ -27,7 +27,7 @@ const RosenwegNav = {
           <div class="flex justify-between items-center h-14">
             <!-- Brand -->
             <a href="/" class="flex items-center gap-2 text-white">
-              <svg class="w-6 h-6 text-cyan-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.14 0M1.394 9.393c5.857-5.858 15.355-5.858 21.213 0"/></svg>
+              <img src="/logo-rosenweg-isp.png" alt="Rosenweg ISP" class="w-8 h-8 rounded-full bg-white p-0.5">
               <span class="font-bold tracking-tight">Rosenweg ISP</span>
             </a>
 

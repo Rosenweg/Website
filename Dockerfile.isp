@@ -26,8 +26,9 @@ COPY js/ js/
 # bleiben (laden weiterhin /js/nav.js) und nur der Inhalt anders ist.
 RUN cp js/nav-isp.js js/nav.js && rm js/nav-isp.js
 
-# Statische Assets
+# Statische Assets — ISP-spezifisches Logo + fallback Rosenweg-Logo
 COPY logo-rosenweg.png .
+COPY logo-rosenweg-isp.png .
 COPY site-config.json .
 
 # Default-Index ersetzen — nginx-image bringt eine eigene mit.
