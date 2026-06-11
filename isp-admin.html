@@ -21,6 +21,171 @@
       <h1 class="text-2xl font-bold text-gray-900 mb-1">🛠 ISP-Admin</h1>
       <p class="text-sm text-gray-600 mb-4">Erschliessung, VLANs, Fix-IPs, Reverse-Proxy, Mailserver/PMG.</p>
 
+      <!-- ═══════════ NOC COCKPIT (Dark) ═══════════ -->
+      <section class="noc-cockpit -mx-4 px-4 sm:mx-0 sm:px-0 sm:rounded-2xl mb-6">
+        <div class="noc-inner">
+          <div class="flex items-center justify-between flex-wrap gap-2 mb-4">
+            <div class="flex items-center gap-3">
+              <span class="noc-led" id="noc-led-overall"></span>
+              <h2 class="text-lg font-bold text-slate-100 tracking-wide">NETWORK · OPS · COCKPIT</h2>
+              <span class="text-xs text-slate-400 font-mono" id="noc-time">—</span>
+            </div>
+            <div class="flex items-center gap-2 text-xs text-slate-400">
+              <span>Auto-Refresh 30s</span>
+              <button onclick="loadNocDashboard()" class="text-slate-200 hover:text-white border border-slate-600 hover:border-slate-400 px-2 py-0.5 rounded font-mono">↻ NOW</button>
+            </div>
+          </div>
+
+          <!-- Service Health Strip -->
+          <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-4" id="noc-services">
+            <div class="noc-svc" data-svc="pmg">
+              <span class="noc-led led-amber"></span>
+              <span class="text-xs text-slate-300">PMG</span>
+            </div>
+            <div class="noc-svc" data-svc="mailcow">
+              <span class="noc-led led-amber"></span>
+              <span class="text-xs text-slate-300">Mailcow</span>
+            </div>
+            <div class="noc-svc" data-svc="smtp2go">
+              <span class="noc-led led-amber"></span>
+              <span class="text-xs text-slate-300">SMTP2GO</span>
+            </div>
+            <div class="noc-svc" data-svc="quarantine">
+              <span class="noc-led led-amber"></span>
+              <span class="text-xs text-slate-300">Quarantine</span>
+            </div>
+            <div class="noc-svc" data-svc="webmail">
+              <span class="noc-led led-amber"></span>
+              <span class="text-xs text-slate-300">Webmail</span>
+            </div>
+          </div>
+
+          <!-- Tile Grid -->
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+
+            <!-- Outbound Quota -->
+            <div class="noc-tile noc-tile-wide">
+              <div class="noc-label">Outbound · <span id="noc-month">—</span></div>
+              <div class="flex items-baseline gap-2">
+                <span class="noc-big" id="noc-monthly-total">—</span>
+                <span class="text-xs text-slate-400">/ <span id="noc-quota-limit">1000</span> free</span>
+              </div>
+              <div class="mt-2">
+                <div class="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                  <div id="noc-quota-bar" class="h-full bg-emerald-500 transition-all" style="width:0%"></div>
+                </div>
+                <div class="flex justify-between text-[10px] text-slate-400 font-mono mt-1">
+                  <span><span id="noc-quota-pct">0</span>%</span>
+                  <span id="noc-quota-state">OK</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Mail-Relays -->
+            <div class="noc-tile">
+              <div class="noc-label">Mail-Relays</div>
+              <div class="noc-big" id="noc-relays-active">—</div>
+              <div class="text-[10px] text-slate-400 font-mono mt-1">
+                <span id="noc-relays-managed">0</span> managed · <span id="noc-relays-smarthost">0</span> smarthost
+              </div>
+            </div>
+
+            <!-- Subscribers + VPN -->
+            <div class="noc-tile">
+              <div class="noc-label">Anschlüsse</div>
+              <div class="noc-big" id="noc-subs">—</div>
+              <div class="text-[10px] text-slate-400 font-mono mt-1">
+                aktive VPN: <span id="noc-vpn">0</span>
+              </div>
+            </div>
+
+            <!-- Top Sender (full width) -->
+            <div class="noc-tile noc-tile-wide lg:col-span-2">
+              <div class="noc-label flex justify-between">
+                <span>Top Sender (Monat)</span>
+                <span class="text-[10px] text-slate-400" id="noc-top-total">—</span>
+              </div>
+              <div id="noc-top-list" class="space-y-1 mt-1">
+                <div class="text-xs text-slate-500 font-mono">lade…</div>
+              </div>
+            </div>
+
+            <!-- Pending-Approvals -->
+            <div class="noc-tile">
+              <div class="noc-label">Pending</div>
+              <div class="flex items-baseline gap-2">
+                <span class="noc-big" id="noc-pending-total">—</span>
+              </div>
+              <div class="text-[10px] text-slate-400 font-mono mt-1 space-y-0.5">
+                <div><span id="noc-pending-mbq">0</span> Mailbox-Anträge</div>
+                <div><span id="noc-pending-vlan">0</span> VLAN-Anträge</div>
+              </div>
+            </div>
+
+            <!-- Mail-Pfade Quick-Reference -->
+            <div class="noc-tile">
+              <div class="noc-label">Pfade · live</div>
+              <div class="text-[10px] font-mono text-slate-300 space-y-0.5 mt-1">
+                <div>:25 → PMG inbound</div>
+                <div>:587/465 → submission</div>
+                <div>:993 → IMAPS passthrough</div>
+                <div class="text-slate-500">→ SMTP2GO outbound</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <style>
+        .noc-cockpit {
+          background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+          border: 1px solid #334155;
+          color: #cbd5e1;
+          position: relative;
+          overflow: hidden;
+        }
+        .noc-cockpit::before {
+          content: '';
+          position: absolute; inset: 0;
+          background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.04) 1px, transparent 0);
+          background-size: 24px 24px;
+          pointer-events: none;
+        }
+        .noc-inner { position: relative; padding: 1.25rem; }
+        .noc-tile {
+          background: rgba(15, 23, 42, 0.6);
+          border: 1px solid #334155;
+          border-radius: .65rem;
+          padding: .85rem;
+        }
+        .noc-tile-wide { /* no extra constraints, just narrower placeholder */ }
+        .noc-label {
+          font-family: ui-monospace, SFMono-Regular, monospace;
+          font-size: .65rem; letter-spacing: .08em; text-transform: uppercase;
+          color: #94a3b8;
+          margin-bottom: .25rem;
+        }
+        .noc-big {
+          font-size: 1.85rem; font-weight: 700; color: #f1f5f9;
+          font-variant-numeric: tabular-nums;
+          line-height: 1.1;
+        }
+        .noc-svc {
+          display: flex; align-items: center; gap: .5rem;
+          background: rgba(15,23,42,0.5); border: 1px solid #334155;
+          padding: .4rem .6rem; border-radius: .5rem;
+        }
+        .noc-led {
+          width: .55rem; height: .55rem; border-radius: 50%;
+          background: #94a3b8; box-shadow: 0 0 6px rgba(148,163,184,0.5);
+          display: inline-block; flex-shrink: 0;
+        }
+        .led-green  { background: #34d399; box-shadow: 0 0 8px #34d399; animation: noc-pulse 2s infinite; }
+        .led-amber  { background: #fbbf24; box-shadow: 0 0 8px #fbbf24; }
+        .led-red    { background: #f87171; box-shadow: 0 0 8px #f87171; animation: noc-pulse 1s infinite; }
+        @keyframes noc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+      </style>
+
       <div class="border-b border-gray-200 mb-4 overflow-x-auto -mx-4 px-4">
         <nav class="flex space-x-3 sm:space-x-6 whitespace-nowrap">
           <button data-tab="erschliessung" class="tab-btn py-2 px-1 text-sm border-b-2 border-blue-600 text-blue-600 font-medium">🏠 Erschliessung</button>
@@ -129,6 +294,8 @@
     document.getElementById('content').classList.remove('hidden');
     document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
     loadSubs(); loadVlans(); loadIps(); loadRp(); loadVpns(); loadRedir(); loadRelays(); loadMailboxRequests(); checkMailcow();
+    loadNocDashboard(); runNocHealthChecks(); setInterval(loadNocDashboard, 30000); setInterval(runNocHealthChecks, 60000);
+    setInterval(() => { document.getElementById('noc-time').textContent = new Date().toLocaleTimeString('de-CH'); }, 1000);
   });
 
   // Mailcow Live-Check (zeigt Badge "live" wenn /SOGo erreichbar)
@@ -909,6 +1076,80 @@
     if (!confirm('Mail-Relay loeschen?')) return;
     await AuthentikAuth.apiFetch('/api/isp/mail-relays/' + id, { method: 'DELETE' });
     await loadRelays();
+  }
+
+  // === NOC Cockpit ===
+  async function loadNocDashboard() {
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/noc/dashboard');
+      if (!r.ok) return;
+      const d = await r.json();
+      document.getElementById('noc-month').textContent = d.year_month;
+      document.getElementById('noc-monthly-total').textContent = d.outbound.monthly_total.toLocaleString('de-CH');
+      document.getElementById('noc-quota-limit').textContent = d.outbound.quota_limit;
+      const pct = Math.min(100, d.outbound.quota_pct);
+      const bar = document.getElementById('noc-quota-bar');
+      bar.style.width = pct + '%';
+      bar.className = 'h-full transition-all ' + (
+        d.outbound.quota_pct >= 100 ? 'bg-rose-500' :
+        d.outbound.quota_pct >= 80  ? 'bg-amber-500' : 'bg-emerald-500');
+      document.getElementById('noc-quota-pct').textContent = d.outbound.quota_pct;
+      document.getElementById('noc-quota-state').textContent =
+        d.outbound.quota_pct >= 100 ? 'ÜBER LIMIT' :
+        d.outbound.quota_pct >= 80  ? 'WARN' : 'OK';
+      document.getElementById('noc-relays-active').textContent = d.relays.active_count || '0';
+      document.getElementById('noc-relays-managed').textContent = d.relays.managed_count || '0';
+      document.getElementById('noc-relays-smarthost').textContent = d.relays.smarthost_count || '0';
+      document.getElementById('noc-subs').textContent = d.counts.subscribers_active || '0';
+      document.getElementById('noc-vpn').textContent = d.counts.vpn_active || '0';
+      const pendingTotal = (d.pending.mailbox_requests || 0) + (d.pending.vlan_requests || 0);
+      document.getElementById('noc-pending-total').textContent = pendingTotal;
+      document.getElementById('noc-pending-mbq').textContent = d.pending.mailbox_requests || 0;
+      document.getElementById('noc-pending-vlan').textContent = d.pending.vlan_requests || 0;
+      // Top-Sender Bars
+      const top = d.outbound.top_senders || [];
+      const maxC = Math.max(1, ...top.map(t => t.count));
+      const listEl = document.getElementById('noc-top-list');
+      document.getElementById('noc-top-total').textContent = top.length ? top.length + ' Domains' : 'keine Sender';
+      listEl.innerHTML = top.length === 0
+        ? '<div class="text-xs text-slate-500 font-mono">Diesen Monat noch keine Outbound-Mails</div>'
+        : top.map(t => `
+          <div class="grid grid-cols-[1fr_auto] gap-2 items-center text-xs">
+            <div class="truncate font-mono text-slate-300" title="${esc(t.sender_domain)}">${esc(t.sender_domain)}</div>
+            <div class="text-slate-200 font-mono tabular-nums">${t.count}</div>
+            <div class="col-span-2 h-1 bg-slate-700 rounded-full overflow-hidden">
+              <div class="h-full bg-cyan-500" style="width: ${(t.count / maxC * 100).toFixed(1)}%"></div>
+            </div>
+          </div>`).join('');
+    } catch (e) { console.warn('NOC:', e.message); }
+  }
+
+  async function runNocHealthChecks() {
+    const checks = [
+      { svc: 'pmg',        url: 'https://quarantine.rosenweg9.ch/' },
+      { svc: 'mailcow',    url: 'https://mailcow.rosenweg9.ch/' },
+      { svc: 'webmail',    url: 'https://webmail.rosenweg9.ch/' },
+      { svc: 'quarantine', url: 'https://quarantine.rosenweg9.ch/quarantine' },
+      { svc: 'smtp2go',    url: 'https://status.smtp2go.com/api/v2/status.json' },
+    ];
+    for (const c of checks) {
+      let ok = false;
+      try {
+        const ctrl = new AbortController(); setTimeout(() => ctrl.abort(), 4000);
+        await fetch(c.url, { signal: ctrl.signal, mode: 'no-cors' });
+        ok = true;
+      } catch {}
+      const tile = document.querySelector(`[data-svc="${c.svc}"]`);
+      if (!tile) continue;
+      const led = tile.querySelector('.noc-led');
+      if (led) led.className = 'noc-led ' + (ok ? 'led-green' : 'led-red');
+    }
+    // Overall-LED
+    const all = document.querySelectorAll('#noc-services .noc-led');
+    const allOk = Array.from(all).every(l => l.classList.contains('led-green'));
+    const someBad = Array.from(all).some(l => l.classList.contains('led-red'));
+    const overall = document.getElementById('noc-led-overall');
+    overall.className = 'noc-led ' + (allOk ? 'led-green' : someBad ? 'led-red' : 'led-amber');
   }
 
   // === Mailbox-Antraege (Self-Service Rosenweg-managed Domains) ===
