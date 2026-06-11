@@ -14029,15 +14029,22 @@ app.get('/api/isp/noc/unifi', authMiddleware, requireTechnikOrPraesident, async 
         'rx_bytes-r': x['rx_bytes-r'] || 0,
         'tx_bytes-r': x['tx_bytes-r'] || 0,
       }));
-      const wan = out.health.find(x => x.subsystem === 'wan');
-      if (wan) {
-        out.wan.up = wan.status === 'ok';
-        out.wan.ip = wan.wan_ip;
-        out.wan.uptime_s = wan.uptime;
-        out.wan.gw_name = wan.gw_name;
+      // WAN-Daten aus health-Response — UDM legt uptime in uptime_stats.WAN.uptime,
+      // www-subsystem hat top-level uptime (Internet-uplink).
+      const rawWan = (h.data || []).find(x => x.subsystem === 'wan');
+      if (rawWan) {
+        out.wan.up = rawWan.status === 'ok';
+        out.wan.ip = rawWan.wan_ip || null;
+        out.wan.gw_name = rawWan.gw_name || null;
+        out.wan.uptime_s =
+          rawWan?.uptime_stats?.WAN?.uptime ||
+          rawWan?.['gw_system-stats']?.uptime || null;
       }
-      const www = out.health.find(x => x.subsystem === 'www');
-      if (www && !out.wan.up) out.wan.up = www.status === 'ok';
+      const rawWww = (h.data || []).find(x => x.subsystem === 'www');
+      if (rawWww) {
+        if (!out.wan.up) out.wan.up = rawWww.status === 'ok';
+        if (!out.wan.uptime_s) out.wan.uptime_s = rawWww.uptime || null;
+      }
     } catch (e) { /* health-fehler nicht fatal */ }
 
     // Devices
