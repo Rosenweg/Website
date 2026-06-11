@@ -143,7 +143,7 @@
             `).join('');
         }
 
-        function playChannel(index) {
+        async function playChannel(index) {
             const ch = channels[index];
             if (!ch) return;
             currentChannel = ch;
@@ -159,13 +159,21 @@
                 player = null;
             }
 
-            const token = AuthentikAuth.getToken();
-            // Backend (rosenweg_api → tv7-streamer LXC) liefert immer
-            // transcodes MPEG-TS (Video copy, Audio AC-3→AAC). Player =
-            // mpegts.js fuer alle Channels.
             const channelId = ch.id || (ch.streamUrl ? (ch.streamUrl.match(/channel=([a-f0-9-]+)/) || [])[1] : '');
             if (!channelId) { console.error('Channel ohne ID:', ch); return; }
-            const streamUrl = `/api/tv/stream/${channelId}?token=${encodeURIComponent(token)}`;
+            // 1. Token + Public-URL vom API holen — kein Stream-Hop ueber API.
+            //    Player verbindet sich direkt mit dem tv7-streamer (LXC 250) via
+            //    Cloudflare Tunnel auf tv.rosenweg9.ch.
+            let streamUrl;
+            try {
+                const tokenResp = await AuthentikAuth.apiFetch('/api/tv/stream-url/' + channelId);
+                if (!tokenResp.ok) throw new Error('HTTP ' + tokenResp.status);
+                const data = await tokenResp.json();
+                streamUrl = data.url;
+            } catch (e) {
+                console.error('Stream-URL konnte nicht geholt werden:', e.message);
+                return;
+            }
 
             if (typeof mpegts !== 'undefined' && mpegts.isSupported()) {
                 player = mpegts.createPlayer({
