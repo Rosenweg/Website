@@ -515,18 +515,22 @@
     const wrap = document.getElementById('vlan-list');
     if (vlanRequests.length === 0) { document.getElementById('vlan-empty').classList.remove('hidden'); wrap.innerHTML=''; return; }
     document.getElementById('vlan-empty').classList.add('hidden');
-    wrap.innerHTML = vlanRequests.map(v => `
+    wrap.innerHTML = vlanRequests.map(v => {
+      const mits = Array.isArray(v.mitnutzer_emails) ? v.mitnutzer_emails : [];
+      return `
       <div class="bg-white border rounded-lg p-4">
         <div class="flex items-start justify-between flex-wrap gap-2 mb-2">
           <div>
             <span class="text-xs ${v.status === 'pending' ? 'bg-amber-100 text-amber-800' : v.status === 'approved' ? 'bg-blue-100 text-blue-800' : v.status === 'deployed' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'} px-2 py-0.5 rounded">${esc(v.status)}</span>
             <span class="ml-2 font-semibold text-sm">${esc(v.gewuenschter_name || 'unbenannt')}</span>
             <span class="ml-2 text-xs text-gray-500">von ${esc(v.antragsteller_email)}</span>
+            ${mits.length > 0 ? `<span class="ml-2 text-[10px] bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded">+${mits.length} Mitnutzer</span>` : ''}
           </div>
           <div class="flex gap-1">
             ${v.status === 'pending' ? `<button onclick="vlanApprove(${v.id})" class="text-xs bg-green-600 text-white px-2 py-1 rounded">Genehmigen</button>
               <button onclick="vlanReject(${v.id})" class="text-xs bg-red-600 text-white px-2 py-1 rounded">Ablehnen</button>` : ''}
             ${v.status === 'approved' ? `<button onclick="vlanDeploy(${v.id})" class="text-xs bg-blue-600 text-white px-2 py-1 rounded">Deployed markieren</button>` : ''}
+            <button onclick="vlanEditMitnutzer(${v.id})" class="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded" title="Mitnutzer bearbeiten">👥 Mitnutzer</button>
           </div>
         </div>
         <p class="text-sm mb-1"><strong>Zweck:</strong> ${esc(v.zweck)}</p>
@@ -539,7 +543,23 @@
           ${v.subnet_v4 ? `<div>Subnet: ${esc(v.subnet_v4)}</div>` : ''}
           ${v.ablehnung_grund ? `<div class="text-red-700">Ablehnung: ${esc(v.ablehnung_grund)}</div>` : ''}
         </div>
-      </div>`).join('');
+        ${mits.length > 0 ? `<div class="mt-2 text-xs text-gray-500">Mitnutzer: ${mits.map(e => `<span class="font-mono">${esc(e)}</span>`).join(', ')}</div>` : ''}
+      </div>`;
+    }).join('');
+  }
+  async function vlanEditMitnutzer(id) {
+    const v = vlanRequests.find(x => x.id === id);
+    if (!v) return;
+    const current = (v.mitnutzer_emails || []).join(', ');
+    const next = prompt('Mitnutzer-Emails (kommagetrennt) — sehen das VLAN und koennen es zurueckziehen:', current);
+    if (next === null) return;
+    const list = next.split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
+    const r = await AuthentikAuth.apiFetch('/api/isp/vlan-requests/' + id, {
+      method: 'PUT', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ mitnutzer_emails: list }),
+    });
+    if (!r.ok) { alert('Fehler: ' + await r.text()); return; }
+    await loadVlans();
   }
   async function vlanApprove(id) {
     // Vorschlag nach Schema <HausNr><NN> holen
