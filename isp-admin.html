@@ -32,7 +32,7 @@
             </div>
             <div class="flex items-center gap-2 text-xs text-slate-400">
               <span>Auto-Refresh 30s</span>
-              <button onclick="loadNocDashboard()" class="text-slate-200 hover:text-white border border-slate-600 hover:border-slate-400 px-2 py-0.5 rounded font-mono">↻ NOW</button>
+              <button onclick="loadNocDashboard(); loadNocUnifi(); runNocHealthChecks();" class="text-slate-200 hover:text-white border border-slate-600 hover:border-slate-400 px-2 py-0.5 rounded font-mono">↻ NOW</button>
             </div>
           </div>
 
@@ -130,6 +130,74 @@
                 <div>:587/465 → submission</div>
                 <div>:993 → IMAPS passthrough</div>
                 <div class="text-slate-500">→ SMTP2GO outbound</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- UniFi-Subgrid -->
+          <div class="flex items-center justify-between mt-5 mb-2">
+            <div class="flex items-center gap-2">
+              <span class="noc-led led-amber" id="noc-led-unifi"></span>
+              <span class="text-[11px] font-mono uppercase tracking-wider text-slate-300">UniFi · Site Default</span>
+              <span class="text-[10px] text-slate-500 font-mono" id="noc-unifi-wanip"></span>
+            </div>
+            <span class="text-[10px] text-slate-500 font-mono" id="noc-unifi-err"></span>
+          </div>
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <!-- Geraete -->
+            <div class="noc-tile">
+              <div class="noc-label">Geräte online</div>
+              <div class="flex items-baseline gap-2">
+                <span class="noc-big" id="noc-uf-dev-online">—</span>
+                <span class="text-xs text-slate-400">/ <span id="noc-uf-dev-total">0</span></span>
+              </div>
+              <div class="text-[10px] text-slate-400 font-mono mt-1 space-y-0.5">
+                <div><span id="noc-uf-ap">0</span> APs · <span id="noc-uf-sw">0</span> Switches · <span id="noc-uf-gw">0</span> GW</div>
+              </div>
+            </div>
+            <!-- Clients -->
+            <div class="noc-tile">
+              <div class="noc-label">Clients</div>
+              <div class="noc-big" id="noc-uf-cli-total">—</div>
+              <div class="text-[10px] text-slate-400 font-mono mt-1">
+                <span id="noc-uf-cli-wifi">0</span> WiFi · <span id="noc-uf-cli-wired">0</span> wired · <span id="noc-uf-cli-guest">0</span> guest
+              </div>
+            </div>
+            <!-- WAN -->
+            <div class="noc-tile">
+              <div class="noc-label">WAN</div>
+              <div class="flex items-baseline gap-2">
+                <span class="noc-big" id="noc-uf-wan-state">—</span>
+              </div>
+              <div class="text-[10px] text-slate-400 font-mono mt-1 space-y-0.5">
+                <div id="noc-uf-wan-gw">—</div>
+                <div id="noc-uf-wan-uptime">—</div>
+              </div>
+            </div>
+            <!-- WLANs -->
+            <div class="noc-tile">
+              <div class="noc-label">WLANs</div>
+              <div class="flex items-baseline gap-2">
+                <span class="noc-big" id="noc-uf-wlan-enabled">—</span>
+                <span class="text-xs text-slate-400">/ <span id="noc-uf-wlan-total">0</span> total</span>
+              </div>
+              <div class="text-[10px] text-slate-400 font-mono mt-1">aktiv broadcast</div>
+            </div>
+            <!-- Top APs (wide) -->
+            <div class="noc-tile noc-tile-wide lg:col-span-2">
+              <div class="noc-label flex justify-between">
+                <span>Top APs (nach Clients)</span>
+                <span class="text-[10px] text-slate-400" id="noc-uf-aps-meta">—</span>
+              </div>
+              <div id="noc-uf-aps-list" class="space-y-1 mt-1">
+                <div class="text-xs text-slate-500 font-mono">lade…</div>
+              </div>
+            </div>
+            <!-- Subsystems -->
+            <div class="noc-tile noc-tile-wide lg:col-span-2">
+              <div class="noc-label">Subsystems</div>
+              <div id="noc-uf-subs" class="flex flex-wrap gap-1.5 mt-1">
+                <span class="text-xs text-slate-500 font-mono">lade…</span>
               </div>
             </div>
           </div>
@@ -294,7 +362,8 @@
     document.getElementById('content').classList.remove('hidden');
     document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
     loadSubs(); loadVlans(); loadIps(); loadRp(); loadVpns(); loadRedir(); loadRelays(); loadMailboxRequests(); checkMailcow();
-    loadNocDashboard(); runNocHealthChecks(); setInterval(loadNocDashboard, 30000); setInterval(runNocHealthChecks, 60000);
+    loadNocDashboard(); runNocHealthChecks(); loadNocUnifi();
+    setInterval(loadNocDashboard, 30000); setInterval(runNocHealthChecks, 60000); setInterval(loadNocUnifi, 30000);
     setInterval(() => { document.getElementById('noc-time').textContent = new Date().toLocaleTimeString('de-CH'); }, 1000);
   });
 
@@ -1122,6 +1191,78 @@
             </div>
           </div>`).join('');
     } catch (e) { console.warn('NOC:', e.message); }
+  }
+
+  async function loadNocUnifi() {
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/noc/unifi');
+      if (!r.ok) return;
+      const d = await r.json();
+      const led = document.getElementById('noc-led-unifi');
+      const errEl = document.getElementById('noc-unifi-err');
+      if (!d.reachable) {
+        led.className = 'noc-led led-red';
+        errEl.textContent = d.error ? ('UDM unreachable · ' + d.error) : 'UDM unreachable';
+      } else {
+        led.className = 'noc-led led-green';
+        errEl.textContent = '';
+      }
+      // Devices
+      document.getElementById('noc-uf-dev-online').textContent = d.devices.online;
+      document.getElementById('noc-uf-dev-total').textContent = d.devices.total;
+      const by = d.devices.by_type || {};
+      document.getElementById('noc-uf-ap').textContent = (by.ap?.online || 0) + '/' + (by.ap?.total || 0);
+      document.getElementById('noc-uf-sw').textContent = (by.switch?.online || 0) + '/' + (by.switch?.total || 0);
+      document.getElementById('noc-uf-gw').textContent = (by.gateway?.online || 0) + '/' + (by.gateway?.total || 0);
+      // Clients
+      document.getElementById('noc-uf-cli-total').textContent = d.clients.total;
+      document.getElementById('noc-uf-cli-wifi').textContent = d.clients.wireless;
+      document.getElementById('noc-uf-cli-wired').textContent = d.clients.wired;
+      document.getElementById('noc-uf-cli-guest').textContent = d.clients.guest;
+      // WAN
+      const wanState = document.getElementById('noc-uf-wan-state');
+      wanState.textContent = d.wan.up ? 'UP' : 'DOWN';
+      wanState.className = 'noc-big ' + (d.wan.up ? 'text-emerald-300' : 'text-rose-400');
+      document.getElementById('noc-uf-wan-gw').textContent = d.wan.gw_name || '—';
+      document.getElementById('noc-uf-wanip').textContent = d.wan.ip ? '· ' + d.wan.ip : '';
+      const upS = d.wan.uptime_s || 0;
+      const days = Math.floor(upS / 86400);
+      const hours = Math.floor((upS % 86400) / 3600);
+      document.getElementById('noc-uf-wan-uptime').textContent = upS > 0 ? `uptime ${days}d ${hours}h` : '—';
+      // WLANs
+      document.getElementById('noc-uf-wlan-enabled').textContent = d.wlans.enabled;
+      document.getElementById('noc-uf-wlan-total').textContent = d.wlans.total;
+      // Top APs
+      const aps = d.top_aps || [];
+      const maxSta = Math.max(1, ...aps.map(a => a.num_sta || 0));
+      document.getElementById('noc-uf-aps-meta').textContent = aps.length ? aps.length + ' APs gelistet' : 'keine Daten';
+      document.getElementById('noc-uf-aps-list').innerHTML = aps.length === 0
+        ? '<div class="text-xs text-slate-500 font-mono">keine aktiven APs</div>'
+        : aps.map(a => `
+          <div class="grid grid-cols-[1fr_auto] gap-2 items-center text-xs">
+            <div class="truncate font-mono text-slate-300" title="${esc(a.name)} (${esc(a.model||'')})">${esc(a.name)}</div>
+            <div class="text-slate-200 font-mono tabular-nums">${a.num_sta} Cli</div>
+            <div class="col-span-2 h-1 bg-slate-700 rounded-full overflow-hidden">
+              <div class="h-full bg-cyan-500" style="width: ${(a.num_sta / maxSta * 100).toFixed(1)}%"></div>
+            </div>
+          </div>`).join('');
+      // Subsystems
+      const subEl = document.getElementById('noc-uf-subs');
+      const subs = d.health || [];
+      subEl.innerHTML = subs.length === 0
+        ? '<span class="text-xs text-slate-500 font-mono">keine Daten</span>'
+        : subs.map(s => {
+            const color = s.status === 'ok' ? 'led-green' : (s.status === 'warning' ? 'led-amber' : 'led-red');
+            return `<span class="inline-flex items-center gap-1.5 bg-slate-900/60 border border-slate-700 rounded px-2 py-0.5">
+              <span class="noc-led ${color}"></span>
+              <span class="text-[10px] font-mono uppercase text-slate-300">${esc(s.subsystem)}</span>
+            </span>`;
+          }).join('');
+    } catch (e) {
+      const led = document.getElementById('noc-led-unifi');
+      if (led) led.className = 'noc-led led-red';
+      console.warn('NOC UniFi:', e.message);
+    }
   }
 
   async function runNocHealthChecks() {
