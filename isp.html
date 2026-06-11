@@ -331,18 +331,20 @@
         document.getElementById('sec-admin').classList.remove('hidden');
     }
     loadMeinAnschluss(user);
-    loadWlan(user);
+    loadWlan();
     runHealthChecks();
 })();
 
 function escWifi(s) { return String(s || '').replace(/[\\;,":\s]/g, c => '\\' + c); }
 
-async function loadWlan(user) {
-    if (!user) return;
+async function loadWlan() {
+    // wlan-Endpoint ist tokenbasiert — User-Objekt kann noch null sein
+    // (Auth-Setup laeuft async). Reicht der Token, machen wir den Call.
+    const token = AuthentikAuth.getToken && AuthentikAuth.getToken();
+    if (!token) return;
     try {
-        const token = AuthentikAuth.getToken();
         const r = await fetch('/api/wifi', { headers: { 'Authorization': 'Bearer ' + token } });
-        if (!r.ok) return;
+        if (!r.ok) { console.warn('WLAN API ' + r.status); return; }
         const data = await r.json();
         const wlans = (data.wlans || []).sort((a, b) => a.hausNr - b.hausNr);
         if (!wlans.length) return;
