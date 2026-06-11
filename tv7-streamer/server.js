@@ -99,20 +99,30 @@ function startFfmpeg(channelId) {
   log('[ffmpeg]', channelId, 'start', init7Url);
   const args = [
     '-hide_banner', '-loglevel', 'warning',
+    // Input-Toleranz: kaputte Packets droppen, DTS/PTS regenerieren, kein
+    // Reorder-Buffer warten lassen. analyzeduration/probesize klein damit
+    // ffmpeg nicht 5s lang auf saubere Codec-Erkennung wartet.
     '-fflags', '+nobuffer+genpts+discardcorrupt+igndts',
     '-err_detect', 'ignore_err',
+    '-analyzeduration', '2000000',  // 2s analyze
+    '-probesize', '1000000',        // 1 MB probe
     '-reconnect', '1',
     '-reconnect_streamed', '1',
     '-reconnect_delay_max', '4',
     '-i', init7Url,
-    // Erster Video- + Audio-Stream — manche Init7-Channels haben mehrere
-    // Audio-Tracks (deu/eng/...), wir nehmen Track 0.
     '-map', '0:v:0?',
     '-map', '0:a:0?',
     '-c:v', 'copy',
-    '-c:a', 'aac', '-b:a', '128k', '-ac', '2',
+    // Audio immer reencoden — egal ob AC-3 (SRF) oder MP2 (ZDF/ARD). AAC ist
+    // universell Browser-fest. -bsf:a aac_adtstoasc nur wenn ADTS reinkaeme;
+    // hier reicht der reencode aus.
+    '-c:a', 'aac', '-b:a', '128k', '-ac', '2', '-ar', '48000',
+    // Output-Stabilitaet: Audio darf bei Video-Drops nicht stehenbleiben,
+    // PCR/PTS sauber regenerieren falls Quelle bricht.
+    '-af', 'aresample=async=1:first_pts=0',
+    '-vsync', 'passthrough',
     '-f', 'mpegts',
-    '-mpegts_flags', '+pat_pmt_at_frames+resend_headers',
+    '-mpegts_flags', '+pat_pmt_at_frames+resend_headers+initial_discontinuity',
     '-pat_period', '0.1',
     '-flush_packets', '1',
     'pipe:1',
@@ -129,7 +139,10 @@ function startFfmpeg(channelId) {
   });
   const sess = { proc, clients: new Set(), lastClient: Date.now() };
   proc.stdout.on('data', chunk => {
-    for (const c of sess.clients) try { c.write(chunk); } catch {}
+    for (const c of sess.clients) try {
+      c.write(chunk);
+      if (c._tv7meta) c._tv7meta.bytes += chunk.length;
+    } catch {}
   });
   ffmpegSessions.set(channelId, sess);
   return sess;
@@ -140,9 +153,13 @@ function attachClient(channelId, res) {
   if (!sess) sess = startFfmpeg(channelId);
   sess.clients.add(res);
   sess.lastClient = Date.now();
+  const meta = { connectedAt: Date.now(), bytes: 0 };
+  res._tv7meta = meta;
+  log('[client] connect', channelId, 'total=' + sess.clients.size);
   res.on('close', () => {
     sess.clients.delete(res);
-    log('[client] disconnect', channelId, 'remaining=' + sess.clients.size);
+    const elapsed = Math.round((Date.now() - meta.connectedAt) / 100) / 10;
+    log('[client] disconnect', channelId, 'remaining=' + sess.clients.size, 'after=' + elapsed + 's bytes=' + meta.bytes);
     if (sess.clients.size === 0) {
       setTimeout(() => {
         const cur = ffmpegSessions.get(channelId);
