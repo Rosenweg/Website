@@ -18,8 +18,13 @@ COPY netzwerk.html .
 COPY verbindungen.html .
 COPY dmarc.html .
 
-# Shared JS-Module (Auth, Nav, Site-Config, QR, etc.)
+# Shared JS-Module (Auth, Site-Config, QR, etc.)
 COPY js/ js/
+
+# Auf isp.rosenweg4303.ch: ISP-only-Nav statt der grossen Hauptseiten-Nav.
+# Wir UEBERLAGERN nav.js mit nav-isp.js, damit die html-Files unveraendert
+# bleiben (laden weiterhin /js/nav.js) und nur der Inhalt anders ist.
+RUN cp js/nav-isp.js js/nav.js && rm js/nav-isp.js
 
 # Statische Assets
 COPY logo-rosenweg.png .

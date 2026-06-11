@@ -29,6 +29,20 @@ RUN rm -f /usr/share/nginx/html/Dockerfile \
               /usr/share/nginx/html/stweg3/README.md \
               /usr/share/nginx/html/door-signs/README.md
 
+# ISP-Frontend lebt in seinem eigenen Container (isp.rosenweg4303.ch).
+# Hauptseite serviert diese Files NICHT — saubere Trennung.
+RUN rm -f /usr/share/nginx/html/isp.html \
+          /usr/share/nginx/html/isp-admin.html \
+          /usr/share/nginx/html/isp-mein-zugang.html \
+          /usr/share/nginx/html/wlan.html \
+          /usr/share/nginx/html/tv.html \
+          /usr/share/nginx/html/netzwerk.html \
+          /usr/share/nginx/html/verbindungen.html \
+          /usr/share/nginx/html/dmarc.html \
+          /usr/share/nginx/html/Dockerfile.isp \
+          /usr/share/nginx/html/nginx.isp.conf \
+          /usr/share/nginx/html/js/nav-isp.js
+
 EXPOSE 80
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
