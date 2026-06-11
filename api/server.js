@@ -1762,9 +1762,11 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
 const TV7_PLAYLIST_URL = 'https://api.init7.net/tvchannels.m3u?rp=true';
 const UDPXY_HOST = process.env.UDPXY_HOST || 'http://100.64.9.200:4022';
 const TV7_STREAMER_URL = process.env.TV7_STREAMER_URL || 'http://100.64.9.250:3000';
-// Public-URL die der Browser direkt anspricht (via CF Tunnel → LXC 250).
-// Setzt den Doppel-Hop (Browser → API → LXC) aus.
-const TV7_PUBLIC_URL = process.env.TV7_PUBLIC_URL || 'https://tv.rosenweg9.ch';
+// Public-Pfad den der Browser fuer den Stream anspricht. Default ist ein
+// relativer Pfad — die nginx der ISP-Seite proxyt /tv-stream/* direkt zum
+// LXC 250, kein API-Hop. Wenn ein voller URL gesetzt ist (z.B. via CF
+// Tunnel auf tv.rosenweg9.ch), wird der genommen.
+const TV7_PUBLIC_URL = process.env.TV7_PUBLIC_URL || '/tv-stream';
 const TV7_HMAC_SECRET = process.env.TV7_HMAC_SECRET || '';
 const TV7_TOKEN_TTL = 3600; // 1 hour
 
@@ -1828,10 +1830,15 @@ app.get('/api/tv/stream-url/:channelId', authMiddleware, (req, res) => {
   if (!/^[a-f0-9-]+$/i.test(id)) return res.status(400).json({ error: 'Invalid channel id' });
   if (!TV7_HMAC_SECRET) return res.status(500).json({ error: 'TV7 streamer secret nicht konfiguriert' });
   const token = createTv7StreamerToken(req.user.id || req.user.user_id || 0);
-  res.json({
-    url: `${TV7_PUBLIC_URL}/stream/${id}?token=${encodeURIComponent(token)}`,
-    expires_in: TV7_TOKEN_TTL,
-  });
+  // Pfad-Variante (default /tv-stream): nginx rewrite haengt /<id> direkt
+  // an, also Endpunkt ist `${TV7_PUBLIC_URL}/<id>?token=...`.
+  // Full-URL-Variante (z.B. https://tv.rosenweg9.ch): LXC erwartet
+  // `/stream/<id>?token=...`.
+  const isFullUrl = /^https?:\/\//i.test(TV7_PUBLIC_URL);
+  const url = isFullUrl
+    ? `${TV7_PUBLIC_URL}/stream/${id}?token=${encodeURIComponent(token)}`
+    : `${TV7_PUBLIC_URL}/${id}?token=${encodeURIComponent(token)}`;
+  res.json({ url, expires_in: TV7_TOKEN_TTL });
 });
 
 // HMAC-Token kompatibel mit tv7-streamer/server.js verifyToken().
