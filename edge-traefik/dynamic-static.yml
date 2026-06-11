@@ -1,0 +1,39 @@
+# Static Override-Config fuer Edge-Traefik (File-Provider).
+# Liegt im LXC unter /etc/traefik/dynamic/static.yml.
+#
+# Zweck: Notfall-Routes die nicht von der DB-API kommen sollen
+# (z.B. wenn die API selbst gerade neu deployed wird und nicht erreichbar
+# ist). Auch fuer Traefik-Dashboard-Auth.
+
+http:
+  middlewares:
+    # Generischer Auth-Middleware fuer interne Dashboards
+    # (Passwort separat per htpasswd erzeugen + in /etc/traefik/.htpasswd)
+    admin-auth:
+      basicAuth:
+        usersFile: /etc/traefik/.htpasswd
+        realm: "Rosenweg Edge"
+
+    # Sicherheits-Header fuer alle HTML-Antworten
+    sec-headers:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: "strict-origin-when-cross-origin"
+        customResponseHeaders:
+          X-Powered-By: ""
+
+  routers:
+    # Traefik-Dashboard (intern). Nur erreichbar wenn auth.rosenweg4303.ch
+    # in DNS auf den Edge zeigt. Wenn nicht: tunnels.* sperren oder
+    # /api Pfad-praefix nutzen.
+    traefik-dashboard:
+      rule: "Host(`traefik.rosenweg4303.ch`)"
+      entryPoints: [websecure]
+      service: api@internal
+      middlewares: [admin-auth]
+      tls:
+        certResolver: cf
