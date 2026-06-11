@@ -58,7 +58,6 @@ const SERVICES_GROUPS = [
       { label: 'Stundensatz (Auslagen)', href: 'auslagen-stundensatz.html', activeKey: 'auslagen-stundensatz', perm: 'auslagen-stundensatz' },
       { label: 'Handwerker & Lieferanten', href: 'handwerker.html', activeKey: 'handwerker', perm: 'handwerker' },
       { label: 'Proxmox', href: 'proxmox-verwaltung.html', activeKey: 'proxmox', perm: 'proxmox-verwaltung' },
-      { label: 'ISP-Admin', href: 'isp-admin.html', activeKey: 'isp-admin', permAny: 'technik,praesident' },
       { label: 'Konto-Loeschungen', href: 'loeschungen.html', activeKey: 'loeschungen', perm: 'loeschungen' },
     ],
   },
@@ -306,7 +305,7 @@ const RosenwegNav = {
               <a href="${base}verwaltung.html" class="${dropA('hausverwaltung')} block px-4 py-2 text-sm">Hausverwaltung</a>
               <a href="${base}anfahrt.html" class="${dropA('anfahrt')} block px-4 py-2 text-sm">Anfahrt &amp; Parken</a>
               <a href="${base}entsorgung.html" class="${dropA('entsorgung')} block px-4 py-2 text-sm">Entsorgung</a>
-              <a href="${base}isp.html" class="${dropA('isp')} block px-4 py-2 text-sm">ISP / WLAN</a>
+              <a href="https://isp.rosenweg4303.ch/" class="block px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">ISP / WLAN ↗</a>
               <a href="${base}#dokumente" class="${dropA('dokumente')} block px-4 py-2 text-sm">Dokumente</a>
             </div>
           </div>
@@ -360,7 +359,7 @@ const RosenwegNav = {
         <a href="${base}verwaltung.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Hausverwaltung</a>
         <a href="${base}anfahrt.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Anfahrt &amp; Parken</a>
         <a href="${base}entsorgung.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Entsorgung</a>
-        <a href="${base}isp.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">ISP / WLAN</a>
+        <a href="https://isp.rosenweg4303.ch/" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">ISP / WLAN ↗</a>
         <a href="${base}#dokumente" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Dokumente</a>
 
         <hr class="my-2">

@@ -85,7 +85,9 @@ services:
         - "traefik.http.middlewares.rosenweg-www.redirectregex.replacement=https://www.rosenweg4303.ch/$${1}"
         - "traefik.http.middlewares.rosenweg-www.redirectregex.permanent=true"
         # Saubere URLs ohne .html (z.B. /reklamationen -> /reklamationen.html)
-        - "traefik.http.middlewares.rosenweg-clean-urls.redirectregex.regex=^https?://www\\.rosenweg4303\\.ch/(reklamationen|vollmachten|telefonbuch|handwerker|profil|hilfe|netzwerk|abholung|anfahrt|auslagen|brief-tracking|dashboard|dmarc|echtheitspruefung|email-archiv|email-log|email-verteiler|energie-config|energie-monitor|entsorgung|grundbuch|isp|loeschungen|mail-compose|mail-templates|objektverwaltung|personen|projekte|proxmox-verwaltung|rechteverwaltung|tv|verbindungen|verwaltung|verwaltung-admin|verwaltung-2026|waschkueche|whatsapp-bot-admin|wlan|wohnungsverwaltung|zaehler|isp-mein-zugang|isp-admin|pbx-admin|mail-approval-config|mail-empfaenger-admin|shelly-emulator-howto|auslagen-stundensatz|verwaltung-mail-outbox)/?$$"
+        # ISP-Pfade (isp, isp-admin, isp-mein-zugang, wlan, tv, netzwerk,
+        # verbindungen, dmarc) bewusst raus — die leben auf isp.rosenweg4303.ch.
+        - "traefik.http.middlewares.rosenweg-clean-urls.redirectregex.regex=^https?://www\\.rosenweg4303\\.ch/(reklamationen|vollmachten|telefonbuch|handwerker|profil|hilfe|abholung|anfahrt|auslagen|brief-tracking|dashboard|echtheitspruefung|email-archiv|email-log|email-verteiler|energie-config|energie-monitor|entsorgung|grundbuch|loeschungen|mail-compose|mail-templates|objektverwaltung|personen|projekte|proxmox-verwaltung|rechteverwaltung|verwaltung|verwaltung-admin|verwaltung-2026|waschkueche|whatsapp-bot-admin|wohnungsverwaltung|zaehler|pbx-admin|mail-approval-config|mail-empfaenger-admin|shelly-emulator-howto|auslagen-stundensatz|verwaltung-mail-outbox)/?$$"
         - "traefik.http.middlewares.rosenweg-clean-urls.redirectregex.replacement=https://www.rosenweg4303.ch/$${1}.html"
         - "traefik.http.middlewares.rosenweg-clean-urls.redirectregex.permanent=true"
         # Freundliche Alias-URL: /defekt-melden -> /reklamationen.html
