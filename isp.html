@@ -341,13 +341,21 @@ async function loadWlan() {
     // wlan-Endpoint ist tokenbasiert — User-Objekt kann noch null sein
     // (Auth-Setup laeuft async). Reicht der Token, machen wir den Call.
     const token = AuthentikAuth.getToken && AuthentikAuth.getToken();
-    if (!token) return;
+    if (!token) { console.warn('[WLAN] kein Token vorhanden — nicht eingeloggt?'); return; }
     try {
         const r = await fetch('/api/wifi', { headers: { 'Authorization': 'Bearer ' + token } });
-        if (!r.ok) { console.warn('WLAN API ' + r.status); return; }
+        if (!r.ok) {
+          const body = await r.text().catch(()=>'');
+          console.warn('[WLAN] API ' + r.status + ': ' + body.slice(0,200));
+          return;
+        }
         const data = await r.json();
         const wlans = (data.wlans || []).sort((a, b) => a.hausNr - b.hausNr);
-        if (!wlans.length) return;
+        console.info('[WLAN] response wlans:', wlans.length, wlans.map(w => 'RW'+w.hausNr).join(','));
+        if (!wlans.length) {
+          console.warn('[WLAN] /api/wifi liefert keine wlans — pruefe Authentik-Gruppen (r{N}-bewohner) oder users.strasse');
+          return;
+        }
         const wrap = document.getElementById('wlan-cards');
         wrap.innerHTML = wlans.map((w, idx) => `
           <div class="bg-white border rounded-2xl shadow-sm p-5 grid grid-cols-[1fr_auto] gap-4 items-center">
