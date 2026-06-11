@@ -680,40 +680,73 @@
   function renderRp() {
     const wrap = document.getElementById('rp-list');
     if (rpRoutes.length === 0) { wrap.innerHTML = '<p class="bg-white p-6 text-gray-400 italic text-center rounded">Noch keine Routen erfasst.</p>'; return; }
-    wrap.innerHTML = rpRoutes.map(r => `
+    wrap.innerHTML = rpRoutes.map(r => {
+      const protoBadge = {
+        http: '<span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded ml-1">HTTP</span>',
+        tcp_sni: '<span class="text-xs bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded ml-1">TCP-SNI</span>',
+        tcp_raw: '<span class="text-xs bg-violet-100 text-violet-800 px-2 py-0.5 rounded ml-1">TCP</span>',
+      }[r.protocol || 'http'];
+      return `
       <div class="bg-white border rounded-lg p-3">
         <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
           <div><strong class="font-mono text-sm">${esc(r.hostname)}</strong>
-            ${r.public ? '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded ml-2">public</span>' : '<span class="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded ml-2">intern</span>'}
-            ${r.ssl ? `<span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded ml-1">${esc(r.ssl_method)}</span>` : ''}
+            ${protoBadge}
+            ${r.entry_point ? `<span class="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded ml-1 font-mono">${esc(r.entry_point)}</span>` : ''}
+            ${r.ssl ? `<span class="text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded ml-1">TLS</span>` : ''}
             ${r.auth_required ? '<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded ml-1">auth</span>' : ''}
             ${!r.active ? '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-1">inaktiv</span>' : ''}
           </div>
-          <button onclick="delRp(${r.id})" class="text-xs text-red-600 hover:underline">Loeschen</button>
+          <div class="flex gap-2">
+            <button onclick="editRp(${r.id})" class="text-xs text-blue-600 hover:underline">Bearbeiten</button>
+            <button onclick="delRp(${r.id})" class="text-xs text-red-600 hover:underline">Loeschen</button>
+          </div>
         </div>
         <div class="text-xs text-gray-600">→ <span class="font-mono">${esc(r.backend_url)}</span></div>
         <div class="text-xs text-gray-500 mt-1">${esc(r.owner_email || 'system')}${r.wohnung_bezeichnung ? ' · ' + esc(r.wohnung_bezeichnung) : ''}${r.rate_limit_per_min ? ' · ' + r.rate_limit_per_min + '/min' : ''}</div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   }
-  function openRpModal() {
+  function openRpModal(existing) {
+    const r = existing || {};
     const modal = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
-      <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5 max-h-[90vh] overflow-y-auto">
-        <h2 class="font-bold mb-3">Route hinzufuegen</h2>
+      <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-lg w-full p-5 max-h-[90vh] overflow-y-auto">
+        <h2 class="font-bold mb-3">${existing ? 'Route bearbeiten' : 'Route hinzufuegen'}</h2>
+        <input type="hidden" id="rp-id" value="${r.id || ''}">
         <div class="space-y-2 text-sm">
-          <div><label class="block text-xs text-gray-600">Hostname * <span class="text-gray-400">(z.B. tool.rosenweg4303.ch)</span></label><input id="rp-host" class="w-full border rounded px-2 py-1"></div>
-          <div><label class="block text-xs text-gray-600">Backend-URL * <span class="text-gray-400">(z.B. http://10.0.50.5:8080)</span></label><input id="rp-be" class="w-full border rounded px-2 py-1"></div>
-          <div><label class="block text-xs text-gray-600">Owner-Email <span class="text-gray-400">(leer = ich)</span></label><input id="rp-owner" class="w-full border rounded px-2 py-1"></div>
           <div class="grid grid-cols-2 gap-2">
-            <div><label class="flex items-center gap-2 text-xs"><input id="rp-public" type="checkbox" class="rounded"> public (CF-Tunnel)</label></div>
-            <div><label class="flex items-center gap-2 text-xs"><input id="rp-ssl" type="checkbox" checked class="rounded"> SSL</label></div>
-            <div><label class="flex items-center gap-2 text-xs"><input id="rp-auth" type="checkbox" class="rounded"> Authentik-Auth</label></div>
-            <div><label class="flex items-center gap-2 text-xs"><input id="rp-active" type="checkbox" checked class="rounded"> aktiv</label></div>
+            <div><label class="block text-xs text-gray-600">Protokoll</label><select id="rp-proto" class="w-full border rounded px-2 py-1" onchange="rpProtoChange()">
+              <option value="http"${(r.protocol||'http')==='http'?' selected':''}>HTTP (Layer 7, TLS-Termination am Edge)</option>
+              <option value="tcp_sni"${r.protocol==='tcp_sni'?' selected':''}>TCP SNI-Passthrough (Mail/IMAPS)</option>
+              <option value="tcp_raw"${r.protocol==='tcp_raw'?' selected':''}>Raw TCP (SMTP :25)</option>
+            </select></div>
+            <div><label class="block text-xs text-gray-600">EntryPoint</label><select id="rp-ep" class="w-full border rounded px-2 py-1">
+              <option value="">(default)</option>
+              <option value="websecure"${r.entry_point==='websecure'?' selected':''}>websecure :443</option>
+              <option value="smtps"${r.entry_point==='smtps'?' selected':''}>smtps :465</option>
+              <option value="imaps"${r.entry_point==='imaps'?' selected':''}>imaps :993</option>
+              <option value="submission"${r.entry_point==='submission'?' selected':''}>submission :587</option>
+              <option value="smtp"${r.entry_point==='smtp'?' selected':''}>smtp :25</option>
+            </select></div>
           </div>
-          <div><label class="block text-xs text-gray-600">SSL-Methode</label><select id="rp-sslm" class="w-full border rounded px-2 py-1">
-            <option value="letsencrypt">letsencrypt</option><option value="cloudflare-origin">cloudflare-origin</option><option value="manual">manual</option>
-          </select></div>
-          <div><label class="block text-xs text-gray-600">Rate-Limit /min</label><input id="rp-rate" type="number" class="w-full border rounded px-2 py-1"></div>
-          <div><label class="block text-xs text-gray-600">Notizen</label><textarea id="rp-notiz" rows="2" class="w-full border rounded px-2 py-1"></textarea></div>
+          <div><label class="block text-xs text-gray-600">Hostname * <span class="text-gray-400">(z.B. tool.rosenweg4303.ch)</span></label><input id="rp-host" class="w-full border rounded px-2 py-1" value="${esc(r.hostname||'')}"></div>
+          <div><label class="block text-xs text-gray-600">Backend-URL * <span class="text-gray-400">HTTP: http://1.2.3.4:8080 · TCP: 1.2.3.4:993</span></label><input id="rp-be" class="w-full border rounded px-2 py-1" value="${esc(r.backend_url||'')}"></div>
+          <div><label class="block text-xs text-gray-600">Owner-Email <span class="text-gray-400">(leer = ich)</span></label><input id="rp-owner" class="w-full border rounded px-2 py-1" value="${esc(r.owner_email||'')}"></div>
+          <div class="grid grid-cols-2 gap-2">
+            <div><label class="flex items-center gap-2 text-xs"><input id="rp-ssl" type="checkbox" ${r.ssl!==false?'checked':''} class="rounded"> SSL/TLS</label></div>
+            <div><label class="flex items-center gap-2 text-xs"><input id="rp-active" type="checkbox" ${r.active!==false?'checked':''} class="rounded"> aktiv</label></div>
+            <div><label class="flex items-center gap-2 text-xs"><input id="rp-preserve" type="checkbox" ${r.preserve_host!==false?'checked':''} class="rounded"> Host-Header beibehalten</label></div>
+            <div><label class="flex items-center gap-2 text-xs"><input id="rp-auth" type="checkbox" ${r.auth_required?'checked':''} class="rounded"> Authentik-Auth (HTTP only)</label></div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div><label class="block text-xs text-gray-600">SSL-Resolver</label><select id="rp-resolver" class="w-full border rounded px-2 py-1">
+              <option value="cf"${(r.cert_resolver||'cf')==='cf'?' selected':''}>cf (Cloudflare DNS-01)</option>
+              <option value="">(kein, manual cert)</option>
+            </select></div>
+            <div><label class="block text-xs text-gray-600">Read-Timeout (s, 0=Stream)</label><input id="rp-timeout" type="number" class="w-full border rounded px-2 py-1" value="${r.read_timeout_s||0}"></div>
+          </div>
+          <div><label class="block text-xs text-gray-600">Strip-Prefix <span class="text-gray-400">(optional, z.B. /api)</span></label><input id="rp-strip" class="w-full border rounded px-2 py-1" value="${esc(r.strip_prefix||'')}"></div>
+          <div><label class="block text-xs text-gray-600">Rate-Limit /min</label><input id="rp-rate" type="number" class="w-full border rounded px-2 py-1" value="${r.rate_limit_per_min||''}"></div>
+          <div><label class="block text-xs text-gray-600">Notizen</label><textarea id="rp-notiz" rows="2" class="w-full border rounded px-2 py-1">${esc(r.notizen||'')}</textarea></div>
         </div>
         <div class="flex justify-end gap-2 mt-3">
           <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Abbrechen</button>
@@ -721,26 +754,54 @@
         </div>
       </div></div>`;
     document.body.insertAdjacentHTML('beforeend', modal);
+    rpProtoChange();
+  }
+  function rpProtoChange() {
+    const proto = document.getElementById('rp-proto')?.value;
+    const ep = document.getElementById('rp-ep');
+    const auth = document.getElementById('rp-auth');
+    const strip = document.getElementById('rp-strip');
+    if (!ep) return;
+    // HTTP: websecure default; TCP_SNI: smtps/imaps; TCP_RAW: smtp/submission
+    if (proto === 'http' && !ep.value) ep.value = 'websecure';
+    if (proto && proto !== 'http') {
+      auth.disabled = true; auth.checked = false;
+      strip.disabled = true; strip.value = '';
+    } else {
+      auth.disabled = false;
+      strip.disabled = false;
+    }
   }
   async function saveRp() {
+    const id = document.getElementById('rp-id').value;
     const body = {
+      protocol: document.getElementById('rp-proto').value,
+      entry_point: document.getElementById('rp-ep').value || null,
       hostname: document.getElementById('rp-host').value.trim(),
       backend_url: document.getElementById('rp-be').value.trim(),
       owner_email: document.getElementById('rp-owner').value.trim() || null,
-      public: document.getElementById('rp-public').checked,
       ssl: document.getElementById('rp-ssl').checked,
       auth_required: document.getElementById('rp-auth').checked,
       active: document.getElementById('rp-active').checked,
-      ssl_method: document.getElementById('rp-sslm').value,
+      preserve_host: document.getElementById('rp-preserve').checked,
+      cert_resolver: document.getElementById('rp-resolver').value || null,
+      read_timeout_s: parseInt(document.getElementById('rp-timeout').value, 10) || 0,
+      strip_prefix: document.getElementById('rp-strip').value.trim() || null,
       rate_limit_per_min: parseInt(document.getElementById('rp-rate').value, 10) || null,
       notizen: document.getElementById('rp-notiz').value || null,
     };
     try {
-      const r = await AuthentikAuth.apiFetch('/api/isp/reverse-proxy', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      const url = id ? '/api/isp/reverse-proxy/' + id : '/api/isp/reverse-proxy';
+      const method = id ? 'PUT' : 'POST';
+      const r = await AuthentikAuth.apiFetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
       if (!r.ok) throw new Error(await r.text());
       document.querySelector('.fixed')?.remove();
       await loadRp();
     } catch (e) { alert('Fehler: ' + e.message); }
+  }
+  function editRp(id) {
+    const r = rpRoutes.find(x => x.id === id);
+    if (r) openRpModal(r);
   }
   async function delRp(id) {
     if (!confirm('Route loeschen?')) return;

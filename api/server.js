@@ -14884,12 +14884,18 @@ app.post('/api/isp/reverse-proxy', authMiddleware, async (req, res) => {
     const r = await pool.query(
       `INSERT INTO isp_reverse_proxy_routes (hostname, backend_url, owner_email, wohnung_id, ssl, ssl_method,
                                               public, auth_required, rate_limit_per_min, active, notizen,
-                                              approval_status, approval_reason, dns_verified_at, last_dns_check_at)
-       VALUES ($1,$2,$3,$4,COALESCE($5,true),$6,COALESCE($7,false),COALESCE($8,false),$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
+                                              approval_status, approval_reason, dns_verified_at, last_dns_check_at,
+                                              protocol, entry_point, cert_resolver, strip_prefix, preserve_host,
+                                              read_timeout_s, pass_through_tls)
+       VALUES ($1,$2,$3,$4,COALESCE($5,true),$6,COALESCE($7,false),COALESCE($8,false),$9,$10,$11,$12,$13,$14,$15,
+               COALESCE($16,'http'),$17,COALESCE($18,'cf'),$19,COALESCE($20,true),COALESCE($21,0),COALESCE($22,false))
+       RETURNING *`,
       [b.hostname.toLowerCase(), b.backend_url, owner, b.wohnung_id || null,
        b.ssl, b.ssl_method || 'letsencrypt', b.public, b.auth_required,
        b.rate_limit_per_min || null, decision.active, b.notizen || null,
-       decision.approval_status, decision.approval_reason, decision.dns_verified_at || null, decision.last_dns_check_at || null],
+       decision.approval_status, decision.approval_reason, decision.dns_verified_at || null, decision.last_dns_check_at || null,
+       b.protocol || null, b.entry_point || null, b.cert_resolver || null,
+       b.strip_prefix || null, b.preserve_host, b.read_timeout_s || null, b.pass_through_tls],
     );
     res.json({ ...r.rows[0], dns_info: ispResolveTarget() });
   } catch (err) {
@@ -14910,7 +14916,9 @@ app.put('/api/isp/reverse-proxy/:id', authMiddleware, async (req, res) => {
     const b = req.body || {};
     const updates = []; const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
-    const userFields = ['backend_url','ssl','auth_required','rate_limit_per_min','active','notizen'];
+    const userFields = ['backend_url','ssl','auth_required','rate_limit_per_min','active','notizen',
+                        'protocol','entry_point','cert_resolver','strip_prefix','preserve_host',
+                        'read_timeout_s','pass_through_tls'];
     const adminFields = ['hostname','owner_email','wohnung_id','ssl_method','public'];
     const allowed = admin ? [...userFields, ...adminFields] : userFields;
     for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
