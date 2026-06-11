@@ -1745,11 +1745,26 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
 });
 
 // ─── TV7 (Init7 IPTV) ────────────────────────────────────────────────
+//
+// Architektur (Stand 2026-06-11):
+//   Browser → /api/tv/channels       (API, Authentik-Session)
+//   Browser → /api/tv/stream/<id>    (API, Authentik-Session)
+//             ↓ pipe MPEG-TS
+//          tv7-streamer (LXC 250, 100.64.9.250:3000)
+//             ↓ spawn ffmpeg
+//          api.tv.init7.net (HLS, AC-3 audio)
+//
+// Warum eigener LXC: ffmpeg-Transcode (AC-3 → AAC) ist CPU-intensiv und
+// gehoert nicht in den rosenweg_api-Container.
+//
+// udpxy fuer Multicast laeuft in LXC 109 (100.64.9.200:4022) — aktuell
+// blockiert die UDM-Firewall den Init7-Multicast-Inflow, deshalb HLS-Pfad.
 const TV7_PLAYLIST_URL = 'https://api.init7.net/tvchannels.m3u?rp=true';
-// udpxy laeuft in LXC 109 (tv-proxy) auf VLAN 9 (Init7-Multicast).
-// Docker-Overlay leitet kein Multicast — daher MUSS udpxy ausserhalb des Swarms
-// im LAN sitzen wo IGMP/Multicast tatsaechlich ankommt.
 const UDPXY_HOST = process.env.UDPXY_HOST || 'http://100.64.9.200:4022';
+const TV7_STREAMER_URL = process.env.TV7_STREAMER_URL || 'http://100.64.9.250:3000';
+const TV7_HMAC_SECRET = process.env.TV7_HMAC_SECRET || '';
+const TV7_TOKEN_TTL = 3600; // 1 hour
+
 let tv7ChannelsCache = null;
 let tv7CacheTime = 0;
 
@@ -1766,7 +1781,9 @@ async function fetchTV7Channels() {
       const nameMatch = lines[i].match(/,\s*(.+)$/);
       const url = (lines[i + 1] || '').trim();
       if (url.startsWith('http')) {
+        const idMatch = url.match(/channel=([a-f0-9-]+)/i);
         channels.push({
+          id: idMatch ? idMatch[1] : null,
           name: nameMatch ? nameMatch[1].trim() : 'Unknown',
           logo: logoMatch ? logoMatch[1] : '',
           group: groupMatch ? groupMatch[1] : '',
@@ -1800,30 +1817,19 @@ app.get('/api/tv/channels', authMiddleware, async (req, res) => {
   }
 });
 
-// TV proxy: short-lived HMAC tokens instead of leaking session tokens in URLs
-const TV_PROXY_SECRET = crypto.randomBytes(32);
-const TV_PROXY_TTL = 3600; // 1 hour
-
-function createTvProxyToken(userId) {
-  const exp = Math.floor(Date.now() / 1000) + TV_PROXY_TTL;
-  const payload = `${userId}:${exp}`;
-  const sig = crypto.createHmac('sha256', TV_PROXY_SECRET).update(payload).digest('hex').slice(0, 16);
-  return `${payload}:${sig}`;
+// HMAC-Token kompatibel mit tv7-streamer/server.js verifyToken().
+// Format: base64url(payload).hex16(sig)   payload = {user, exp}
+function createTv7StreamerToken(userId) {
+  if (!TV7_HMAC_SECRET) throw new Error('TV7_HMAC_SECRET nicht konfiguriert');
+  const payloadObj = { user: userId, exp: Math.floor(Date.now() / 1000) + TV7_TOKEN_TTL };
+  const payload = Buffer.from(JSON.stringify(payloadObj)).toString('base64url');
+  const sig = crypto.createHmac('sha256', TV7_HMAC_SECRET).update(payload).digest('hex').slice(0, 16);
+  return `${payload}.${sig}`;
 }
 
-function verifyTvProxyToken(token) {
-  if (!token) return false;
-  const parts = token.split(':');
-  if (parts.length !== 3) return false;
-  const [userId, exp, sig] = parts;
-  if (parseInt(exp) < Math.floor(Date.now() / 1000)) return false;
-  const expected = crypto.createHmac('sha256', TV_PROXY_SECRET).update(`${userId}:${exp}`).digest('hex').slice(0, 16);
-  const sigBuf = Buffer.from(sig); const expBuf = Buffer.from(expected);
-  return sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf);
-}
-
-// Stream proxy: /api/tv/stream/:channelId → Init7 HLS (or udpxy for multicast)
-// Proxied because Init7 only accepts traffic from their own IPs
+// Stream-Endpoint: Browser holt sich hier den MPEG-TS via API,
+// API proxyt durch zum tv7-streamer im LXC. Doppel-Hop ist akzeptabel
+// (~12 Mbps pro Zuschauer), spart aber CORS/DNS-Komplexitaet im Browser.
 app.get('/api/tv/stream/:channelId', (req, res, next) => {
   if (!req.headers.authorization && req.query.token) {
     req.headers.authorization = `Bearer ${req.query.token}`;
@@ -1831,75 +1837,31 @@ app.get('/api/tv/stream/:channelId', (req, res, next) => {
   next();
 }, authMiddleware, async (req, res) => {
   const id = req.params.channelId;
-  const proxyToken = createTvProxyToken(req.user.id || req.user.user_id);
+  if (!/^[a-f0-9-]+$/i.test(id)) return res.status(400).json({ error: 'Invalid channel id' });
+  if (!TV7_HMAC_SECRET) return res.status(500).json({ error: 'TV7 streamer secret nicht konfiguriert' });
+  const token = createTv7StreamerToken(req.user.id || req.user.user_id || 0);
+  const streamUrl = `${TV7_STREAMER_URL}/stream/${id}?token=${encodeURIComponent(token)}`;
   try {
-    // HLS stream from Init7
-    const init7Url = `https://api.tv.init7.net/api/live/?channel=${encodeURIComponent(id)}`;
-    const upstream = await fetch(init7Url, { signal: AbortSignal.timeout(10000) });
-    if (!upstream.ok) return res.status(502).json({ error: 'Stream nicht verfügbar' });
-    const contentType = upstream.headers.get('content-type') || 'application/x-mpegURL';
-    res.setHeader('Content-Type', contentType);
+    const upstream = await fetch(streamUrl, { signal: AbortSignal.timeout(15000) });
+    if (!upstream.ok) {
+      console.error('TV7 streamer status:', upstream.status);
+      return res.status(502).json({ error: 'Streamer nicht erreichbar' });
+    }
+    res.setHeader('Content-Type', upstream.headers.get('content-type') || 'video/MP2T');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Access-Control-Allow-Origin', '*');
-    // Pipe the M3U8 playlist, rewriting segment URLs to also proxy through us
-    const body = await upstream.text();
-    // Rewrite relative/absolute segment URLs to proxy through API (short-lived HMAC token, not session)
-    const rewritten = body.replace(/(https?:\/\/[^\s]+)/g, (url) => {
-      return `/api/tv/proxy?url=${encodeURIComponent(url)}&pt=${proxyToken}`;
-    });
-    res.send(rewritten);
+    // Pipe MPEG-TS chunks via WHATWG-Stream Reader (Node 18+ fetch)
+    const reader = upstream.body.getReader();
+    req.on('close', () => { try { reader.cancel(); } catch {} });
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!res.write(Buffer.from(value))) await new Promise(r => res.once('drain', r));
+    }
+    res.end();
   } catch (err) {
-    console.error('TV7 stream error:', err.message);
+    console.error('TV7 stream proxy error:', err.message);
     if (!res.headersSent) res.status(502).json({ error: 'Stream-Fehler' });
-  }
-});
-
-// Generic proxy for TV7 segment URLs (uses short-lived HMAC token, not session token)
-app.get('/api/tv/proxy', (req, res, next) => {
-  // Accept either session auth or HMAC proxy token
-  if (req.headers.authorization || (req.query.token && !req.query.pt)) {
-    if (!req.headers.authorization && req.query.token) {
-      req.headers.authorization = `Bearer ${req.query.token}`;
-    }
-    return authMiddleware(req, res, next);
-  }
-  // Verify HMAC proxy token
-  if (req.query.pt && verifyTvProxyToken(req.query.pt)) {
-    return next();
-  }
-  res.status(401).json({ error: 'Unauthorized' });
-}, async (req, res) => {
-  // Init7 verteilt Segmente ueber per-Channel CDN-Subdomains:
-  //   Playlists: https://api.tv.init7.net/api/live/?channel=...
-  //   Sub-Playlists + .ts: https://<channel>-ch.cache.tv.init7.net/...
-  // Alle *.tv.init7.net Hosts sind legitim (eigenes Init7-Netz).
-  const url = req.query.url;
-  let parsed;
-  try { parsed = new URL(url); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
-  if (parsed.protocol !== 'https:' || !/(^|\.)tv\.init7\.net$/i.test(parsed.hostname)) {
-    return res.status(400).json({ error: 'Invalid URL' });
-  }
-  const proxyToken = req.query.pt || createTvProxyToken(req.user?.id || 0);
-  try {
-    const upstream = await fetch(url, { signal: AbortSignal.timeout(10000) });
-    if (!upstream.ok) return res.status(upstream.status).end();
-    const contentType = upstream.headers.get('content-type') || 'video/MP2T';
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', 'max-age=2');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    const buf = Buffer.from(await upstream.arrayBuffer());
-    // If it's another M3U8, rewrite URLs
-    if (contentType.includes('mpegURL') || url.endsWith('.m3u8')) {
-      const text = buf.toString();
-      const rewritten = text.replace(/(https?:\/\/[^\s]+)/g, (u) => {
-        return `/api/tv/proxy?url=${encodeURIComponent(u)}&pt=${proxyToken}`;
-      });
-      res.send(rewritten);
-    } else {
-      res.send(buf);
-    }
-  } catch (err) {
-    if (!res.headersSent) res.status(502).end();
   }
 });
 

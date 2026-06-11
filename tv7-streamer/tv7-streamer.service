@@ -1,0 +1,19 @@
+[Unit]
+Description=Rosenweg TV7 HLS Streamer (Init7 AC-3 -> AAC transcode)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/etc/default/tv7-streamer
+WorkingDirectory=/opt/tv7-streamer
+ExecStart=/usr/bin/node /opt/tv7-streamer/server.js
+Restart=always
+RestartSec=3
+LimitNOFILE=8192
+# Etwas hartere Limits damit ein crashender ffmpeg den Server nicht killt
+TasksMax=200
+
+[Install]
+WantedBy=multi-user.target
