@@ -84,7 +84,8 @@
             <a href="/isp-mein-zugang.html" class="text-sm text-indigo-600 hover:text-indigo-800 font-medium">Alle meine Zugänge →</a>
         </div>
 
-        <div class="bg-gradient-to-br from-slate-900 to-slate-800 text-white rounded-2xl p-6 shadow-lg mb-4 section-hero">
+        <!-- Subscriber-Card nur wenn /api/isp/subscribers/me Daten liefert -->
+        <div id="subscriber-card" class="bg-gradient-to-br from-slate-900 to-slate-800 text-white rounded-2xl p-6 shadow-lg mb-4 section-hero hidden">
             <div id="mein-anschluss-body" class="text-sm">Lade…</div>
         </div>
 
@@ -356,6 +357,9 @@ async function loadWlan() {
           console.warn('[WLAN] /api/wifi liefert keine wlans — pruefe Authentik-Gruppen (r{N}-bewohner) oder users.strasse');
           return;
         }
+        // Mein-Anschluss-Sektion unhidden falls noch nicht passiert (Subscribers
+        // koennten leer sein, aber WLAN gehoert in dieselbe Sektion).
+        document.getElementById('sec-meinanschluss').classList.remove('hidden');
         const wrap = document.getElementById('wlan-cards');
         wrap.innerHTML = wlans.map((w, idx) => `
           <div class="bg-white border rounded-2xl shadow-sm p-5 grid grid-cols-[1fr_auto] gap-4 items-center">
@@ -410,6 +414,7 @@ async function loadMeinAnschluss(user) {
         const { subscribers } = await r.json();
         if (!subscribers || subscribers.length === 0) return;
         document.getElementById('sec-meinanschluss').classList.remove('hidden');
+        document.getElementById('subscriber-card').classList.remove('hidden');
         const body = document.getElementById('mein-anschluss-body');
         body.innerHTML = subscribers.map(s => `
             <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-3 ${subscribers.length > 1 ? 'border-b border-white/10 pb-4 mb-4 last:border-0 last:pb-0 last:mb-0' : ''}">
