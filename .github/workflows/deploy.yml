@@ -11,7 +11,6 @@ env:
   WEBSITE_IMAGE: ghcr.io/rosenweg/rosenweg-website
   ENERGY_IMAGE: ghcr.io/rosenweg/energy-collector
   SYSLOG_IMAGE: ghcr.io/rosenweg/syslog-collector
-  TV_PROXY_IMAGE: ghcr.io/rosenweg/tv-proxy
   WHATSAPP_BOT_IMAGE: ghcr.io/rosenweg/rosenweg-whatsapp-bot
   SHELLY_EMULATOR_IMAGE: ghcr.io/rosenweg/shelly-emulator
   ISP_IMAGE: ghcr.io/rosenweg/rosenweg-isp
@@ -138,30 +137,6 @@ jobs:
           tags: |
             ${{ env.SYSLOG_IMAGE }}:latest
             ${{ env.SYSLOG_IMAGE }}:${{ github.sha }}
-
-  build-tv-proxy:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push TV Proxy
-        uses: docker/build-push-action@v6
-        with:
-          context: ./tv
-          push: true
-          tags: |
-            ${{ env.TV_PROXY_IMAGE }}:latest
-            ${{ env.TV_PROXY_IMAGE }}:${{ github.sha }}
 
   build-whatsapp-bot:
     runs-on: ubuntu-latest

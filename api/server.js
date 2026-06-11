@@ -1746,7 +1746,10 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
 
 // ─── TV7 (Init7 IPTV) ────────────────────────────────────────────────
 const TV7_PLAYLIST_URL = 'https://api.init7.net/tvchannels.m3u?rp=true';
-const UDPXY_HOST = process.env.UDPXY_HOST || 'http://100.64.2.31:4022';
+// udpxy laeuft in LXC 109 (tv-proxy) auf VLAN 9 (Init7-Multicast).
+// Docker-Overlay leitet kein Multicast — daher MUSS udpxy ausserhalb des Swarms
+// im LAN sitzen wo IGMP/Multicast tatsaechlich ankommt.
+const UDPXY_HOST = process.env.UDPXY_HOST || 'http://100.64.9.200:4022';
 let tv7ChannelsCache = null;
 let tv7CacheTime = 0;
 

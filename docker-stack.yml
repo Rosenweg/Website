@@ -344,19 +344,11 @@ services:
 
 
   # ============================================
-  # TV Proxy - udpxy for IPTV Multicast → HTTP
+  # TV Proxy (udpxy) ist BEWUSST nicht hier — Docker-Overlay leitet kein
+  # Multicast durch (VXLAN dropt IGMP). udpxy laeuft in LXC 109 auf pve1
+  # (100.64.9.200:4022, VLAN 9 = Init7-WAN). API-Default-UDPXY_HOST in
+  # api/server.js zeigt direkt dorthin.
   # ============================================
-  tv-proxy:
-    image: ghcr.io/rosenweg/tv-proxy:latest
-    networks:
-      - rosenweg-net
-    deploy:
-      replicas: 1
-      restart_policy:
-        condition: on-failure
-        delay: 10s
-      labels:
-        - "shepherd.enable=true"
 
   # ============================================
   # WhatsApp-Bot - bridged Bewohner-Bot via whatsapp-web.js
