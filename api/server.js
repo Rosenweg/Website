@@ -15191,6 +15191,71 @@ async function unifiAddPpskToRosenwegWlan(networkconf_id, password) {
   return { wlan_id: rosenweg._id, ppsk_count: psks.length };
 }
 
+// Router-LXC Mgmt-IP: pro CT eine IP in VLAN 3 (RK-Technik), Schema 100.64.3.<lxc-400>.
+function routerLxcMgmtIp(lxcId) { return `100.64.3.${lxcId - 400}`; }
+// Shared Bearer-Token aus Docker-Secret /run/secrets/router_api_token.
+function routerApiToken() {
+  try { return require('fs').readFileSync('/run/secrets/router_api_token', 'utf8').trim(); }
+  catch { return process.env.ROUTER_API_TOKEN || ''; }
+}
+// HTTP-Call gegen die Router-LXC-API (lauscht auf eth1 in VLAN 3, Port 8080).
+async function routerApiCall(lxcId, method, path, body) {
+  const ip = routerLxcMgmtIp(lxcId);
+  const token = routerApiToken();
+  if (!token) throw new Error('ROUTER_API_TOKEN/Secret nicht konfiguriert');
+  const opts = {
+    method,
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(15000),
+  };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const r = await fetch(`http://${ip}:8080${path}`, opts);
+  const text = await r.text();
+  let json;
+  try { json = JSON.parse(text); } catch { json = { raw: text }; }
+  if (!r.ok) throw new Error(`router-api ${ip} ${method} ${path} -> ${r.status} ${text.slice(0, 200)}`);
+  return json;
+}
+
+// Router-LXC live-provisionieren via HTTP-API (laeuft im LXC auf eth1:8080).
+// Setzt voraus dass net0.trunks die User-VLAN-ID enthaelt — sonst kommt der
+// Tag nicht durch eth0. Trunks-Update via PVE-API (hot-apply via PUT /config).
+async function pveProvisionRouterLxc(v, router) {
+  // Welcher Node hostet den CT? Brauchen wir fuer die Trunk-Config.
+  const resources = await pveAPI('GET', '/cluster/resources?type=vm');
+  const ct = (resources || []).find(x => x.type === 'lxc' && x.vmid === router.lxc_id);
+  if (!ct) throw new Error(`CT ${router.lxc_id} nicht im Cluster gefunden`);
+  if (ct.status !== 'running') throw new Error(`CT ${router.lxc_id} ist ${ct.status}`);
+
+  const userVlan = Number(v.vlan_id);
+  const cidr = parseCidr(v.subnet_v4);
+  if (!cidr) throw new Error('subnet_v4 ungueltig');
+
+  // 1) Trunks im net0 sicherstellen (PVE-API PUT /config). Aenderungen am bridge
+  //    werden vom Kernel meist hot-applied; falls nicht, hat es spaetestens beim
+  //    naechsten CT-Reboot Wirkung. Idempotent: nur PUT wenn was zu aendern.
+  const cfg = await pveAPI('GET', `/nodes/${ct.node}/lxc/${router.lxc_id}/config`);
+  const net0Parts = String(cfg.net0 || '').split(',');
+  const trunksIdx = net0Parts.findIndex(p => p.startsWith('trunks='));
+  let trunks = trunksIdx === -1 ? [] : net0Parts[trunksIdx].slice('trunks='.length).split(';').filter(Boolean).map(Number);
+  if (!trunks.includes(userVlan)) {
+    trunks.push(userVlan);
+    if (trunksIdx === -1) net0Parts.push(`trunks=${trunks.join(';')}`);
+    else net0Parts[trunksIdx] = `trunks=${trunks.join(';')}`;
+    await pveAPI('PUT', `/nodes/${ct.node}/lxc/${router.lxc_id}/config`, { net0: net0Parts.join(',') });
+  }
+
+  // 2) Router-LXC API anfunken: legt ip-link / dnsmasq.d / nft-Regeln idempotent an.
+  const result = await routerApiCall(router.lxc_id, 'POST', '/vlans', {
+    vlan: userVlan,
+    gateway: v.dhcp_gateway,
+    mask: cidr.mask,
+    dhcp_from: v.dhcp_range_from,
+    dhcp_to: v.dhcp_range_to,
+  });
+  return { node: ct.node, lxc_id: router.lxc_id, user_vlan: userVlan, router_api: result };
+}
+
 // Bash-Skript fuer manuelles Provisioning auf dem Router-LXC.
 // Wird vom Admin auf einem PVE-Host ausgefuehrt (er hat root + pct).
 function buildRouterLxcProvisionScript(v, router) {
@@ -15354,9 +15419,22 @@ async function runProvisioning(id) {
     result.steps.push({ step: 'ppsk', ok: true, skipped: 'already_set' });
   }
 
-  // 3) Router-LXC-Script generieren (manuelle Ausfuehrung durch Admin bis SSH-Auto da ist)
-  const script = (v.kind === 'subnet' && router) ? buildRouterLxcProvisionScript(v, router) : null;
-  if (script) result.steps.push({ step: 'router_lxc_script', ok: true, run_manually: true });
+  // 3) Router-LXC live-provisionieren via dessen HTTP-API (eth1 in VLAN 3).
+  //    Fallback: wenn API nicht erreichbar, Script generieren das der Admin
+  //    auf dem passenden PVE-Host laufen lassen kann.
+  let script = null;
+  if (v.kind === 'subnet' && router && unifiNetId) {
+    try {
+      const rlxc = await pveProvisionRouterLxc(v, router);
+      result.steps.push({ step: 'router_lxc', ok: true, node: rlxc.node, lxc_id: rlxc.lxc_id });
+    } catch (err) {
+      result.errors.push({ step: 'router_lxc', error: err.message });
+      // Fallback-Script fuer manuelle Ausfuehrung
+      script = buildRouterLxcProvisionScript(v, router);
+    }
+  } else if (v.kind === 'subnet' && router) {
+    script = buildRouterLxcProvisionScript(v, router);
+  }
 
   // 4) DB updaten
   const updates = []; const params = [];
