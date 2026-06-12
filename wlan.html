@@ -81,9 +81,28 @@
         function createWifiCard(w) {
             const div = document.createElement('div');
             div.className = 'bg-white rounded-xl shadow-sm border p-6';
+            const isUserVlan = !!w.isUserVlan;
+            const title = isUserVlan
+                ? `${w.network || ('VLAN ' + w.vlan)}`
+                : `Rosenweg ${w.hausNr}`;
+            const subtitle = isUserVlan
+                ? (w.rolle === 'antragsteller'
+                    ? 'Dein eigenes Netzwerk — du bist Antragsteller'
+                    : `Mitnutzer-Zugang (Antragsteller: ${w.ownerEmail || '?'})`)
+                : 'WLAN-Zugang für dein Gebäude';
+            const banner = isUserVlan
+                ? `<div class="mb-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded p-2 text-xs">
+                       🔒 Privates Netz: nur du und deine Mitnutzer hier drin, isoliert von den anderen Bewohnern.
+                   </div>`
+                : `<div class="mb-3 bg-amber-50 border border-amber-200 text-amber-900 rounded p-2 text-xs">
+                       ⚠ Achtung: dieses WLAN ist <strong>mit allen anderen Bewohnern deines Hauses geteilt</strong>.
+                       Geräte sehen sich gegenseitig im Netz. Für private Geräte (z.B. NAS, Smart-Home) lieber ein
+                       <a href="/isp-mein-zugang.html" class="underline">eigenes Netzwerk beantragen</a>.
+                   </div>`;
             div.innerHTML = `
-                <h2 class="text-lg font-semibold text-gray-900 mb-1">Rosenweg ${w.hausNr}</h2>
-                <p class="text-sm text-gray-500 mb-4">WLAN-Zugang für dein Gebäude</p>
+                <h2 class="text-lg font-semibold text-gray-900 mb-1">${title}</h2>
+                <p class="text-sm text-gray-500 mb-3">${subtitle}</p>
+                ${banner}
                 <div class="space-y-3 mb-6">
                     <div class="flex justify-between items-center">
                         <span class="text-sm text-gray-600">SSID</span>
@@ -121,9 +140,13 @@
 
                 const container = document.getElementById('wifi-cards');
                 if (data.wlans && data.wlans.length > 0) {
-                    for (const w of data.wlans.sort((a, b) => a.hausNr - b.hausNr)) {
-                        container.appendChild(createWifiCard(w));
-                    }
+                    // Haus-WLANs zuerst (nach Hausnummer), dann User-VLANs (nach VLAN-ID)
+                    const sorted = data.wlans.slice().sort((a, b) => {
+                        if (a.isUserVlan !== b.isUserVlan) return a.isUserVlan ? 1 : -1;
+                        if (a.isUserVlan) return (a.vlan || 0) - (b.vlan || 0);
+                        return (a.hausNr || 0) - (b.hausNr || 0);
+                    });
+                    for (const w of sorted) container.appendChild(createWifiCard(w));
                     document.querySelectorAll('.qr-wifi').forEach(canvas => {
                         const wifiStr = `WIFI:T:WPA;S:${escWifi(canvas.dataset.ssid)};P:${escWifi(canvas.dataset.pw)};;`;
                         drawQR(canvas, wifiStr, 200);
