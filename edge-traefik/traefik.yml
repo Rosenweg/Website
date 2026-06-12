@@ -38,8 +38,8 @@ entryPoints:
         certResolver: cf
     transport:
       respondingTimeouts:
-        readTimeout: 0      # Streaming-freundlich
-        writeTimeout: 0
+        readTimeout: 0s      # Streaming-freundlich
+        writeTimeout: 0s
         idleTimeout: 600s
   # TCP-SNI-Passthrough Entrypoints fuer Mail-Relays
   smtps:
@@ -55,13 +55,11 @@ entryPoints:
     address: "127.0.0.1:8082"
 
 providers:
-  # 1) HTTP-Provider: holt dynamische Routes vom API-Service (DB-backed).
-  http:
-    endpoint: "http://100.64.2.27:3000/api/traefik/dynamic"
-    pollInterval: 15s
-    pollTimeout: 10s
-
-  # 2) File-Provider: fuer Notfall-Override und initial-seed bevor API steht.
+  # File-Provider: einziger Provider. Holt die dynamischen Routes aus
+  # /etc/traefik/dynamic/*.{yml,json}. Der API-Sync schreibt dort die
+  # generierte JSON via systemd-Timer (traefik-sync.service). Traefik's
+  # HTTP-Provider kennt keinen Custom-Host-Header und braeuchte einen
+  # eigenen DNS-Eintrag — File-Provider ist einfacher und robuster.
   file:
     directory: /etc/traefik/dynamic
     watch: true

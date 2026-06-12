@@ -1,0 +1,9 @@
+[Unit]
+Description=Sync Traefik dynamic config from rosenweg_api
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/traefik-sync.sh
+User=root

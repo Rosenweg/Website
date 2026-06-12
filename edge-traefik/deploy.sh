@@ -15,7 +15,7 @@ ssh "$PVE" "pct exec $CT -- bash -c '
 '"
 
 echo "[deploy] push files"
-for f in traefik.yml traefik.service dynamic-static.yml; do
+for f in traefik.yml traefik.service dynamic-static.yml traefik-sync.sh traefik-sync.service traefik-sync.timer; do
   scp -q "$SRC/$f" "$PVE":/tmp/"$f"
 done
 
@@ -23,7 +23,13 @@ ssh "$PVE" "
   pct push $CT /tmp/traefik.yml /etc/traefik/traefik.yml
   pct push $CT /tmp/dynamic-static.yml /etc/traefik/dynamic/static.yml
   pct push $CT /tmp/traefik.service /etc/systemd/system/traefik.service
+  pct push $CT /tmp/traefik-sync.sh /usr/local/sbin/traefik-sync.sh
+  pct push $CT /tmp/traefik-sync.service /etc/systemd/system/traefik-sync.service
+  pct push $CT /tmp/traefik-sync.timer /etc/systemd/system/traefik-sync.timer
+  pct exec $CT -- chmod +x /usr/local/sbin/traefik-sync.sh
   pct exec $CT -- systemctl daemon-reload
+  pct exec $CT -- systemctl enable --now traefik-sync.timer
+  pct exec $CT -- systemctl start traefik-sync.service
 "
 
 # Check if CF token configured
