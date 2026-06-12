@@ -16392,8 +16392,9 @@ async function maintHandleDeviceUpdate({ key, name, model, isOnline, upgradable,
   _maintLastDeviceState.set(key, isOnline ? 1 : 0);
   const haus = hausFromDeviceName(name);
   const scope = haus ? { houses: [haus] } : { all: true };
-  const productLabel = source === 'protect' ? 'UniFi-Protect-Geraet'
-                     : source === 'access'  ? 'UniFi-Access-Geraet'
+  const productLabel = source === 'protect'    ? 'UniFi-Protect-Geraet'
+                     : source === 'access'     ? 'UniFi-Access-Geraet'
+                     : source === 'controller' ? 'UniFi-Controller'
                      : 'UniFi-Network-Geraet';
 
   // 1) Pre-Detection: upgradable + noch online + noch keine Wartung → "planned"
@@ -16511,6 +16512,38 @@ async function maintPollUnifiDevices() {
       });
     }
   } catch (err) { console.warn('[Maint-Auto/Network] poll error:', err.message); }
+}
+
+// Controller-Health-Watcher: pingt Network/Protect/Access Controller-APIs.
+// Wenn ein Controller waehrend einer Applikations-Auto-Update-Runde neu startet
+// (1 AM Access/Protect, 2 AM Network laut UniFi-Settings), liefert sein
+// Health-Endpoint kurzfristig 5xx / Timeout. Wir registrieren das als active
+// Wartung und schliessen sie wieder sobald der Controller antwortet.
+async function maintPollControllers() {
+  const baseHost = UNIFI_HOST.replace(/\/$/, '');
+  const checks = [
+    { key: 'controller-network', name: 'UniFi Network Controller', path: 'proxy/network/api/s/default/stat/health' },
+    { key: 'controller-protect', name: 'UniFi Protect Controller', path: 'proxy/protect/integration/v1/cameras' },
+    { key: 'controller-access',  name: 'UniFi Access Controller',  path: 'proxy/access/api/v2/devices' },
+  ];
+  for (const c of checks) {
+    let isOnline = false;
+    try {
+      const r = await fetch(`${baseHost}/${c.path}`, {
+        headers: { 'X-API-Key': UNIFI_API_KEY },
+        signal: AbortSignal.timeout(5000),
+      });
+      isOnline = r.ok;
+    } catch { isOnline = false; }
+    await maintHandleDeviceUpdate({
+      key: c.key,
+      name: c.name,
+      model: 'Controller (UDM-App)',
+      isOnline,
+      upgradable: false,    // Controller-Updates kuendigen sich nicht im Voraus an
+      source: 'controller',
+    });
+  }
 }
 
 async function maintPollUnifiAccess() {
@@ -20919,14 +20952,16 @@ initDB()
       setTimeout(cleanupExpiredSessions, 30 * 1000); // first cleanup after 30s
       // Wartungs-Notification-Cron (1min)
       activeIntervals.push(setInterval(maintProcessScheduledNotifications, 60 * 1000));
-      // UniFi-Geraete-State-Watcher: Network + Protect + Access
+      // UniFi-Geraete-State-Watcher: Network + Protect + Access + Controller
       setTimeout(maintPollUnifiDevices, 30 * 1000);
       setTimeout(maintPollUnifiProtect, 35 * 1000);
       setTimeout(maintPollUnifiAccess,  40 * 1000);
+      setTimeout(maintPollControllers,  45 * 1000);
       activeIntervals.push(setInterval(maintPollUnifiDevices, 60 * 1000));
       activeIntervals.push(setInterval(maintPollUnifiProtect, 60 * 1000));
       activeIntervals.push(setInterval(maintPollUnifiAccess,  60 * 1000));
-      console.log('[Maint] notification cron + unifi (network+protect+access) device watcher gestartet');
+      activeIntervals.push(setInterval(maintPollControllers,  60 * 1000));
+      console.log('[Maint] notification cron + unifi (network+protect+access+controllers) watcher gestartet');
     });
   })
   .catch((err) => {
