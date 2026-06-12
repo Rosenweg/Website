@@ -533,10 +533,11 @@
             <span class="ml-2 text-xs text-gray-500">von ${esc(v.antragsteller_email)}</span>
             ${mits.length > 0 ? `<span class="ml-2 text-[10px] bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded">+${mits.length} Mitnutzer</span>` : ''}
           </div>
-          <div class="flex gap-1">
+          <div class="flex gap-1 flex-wrap">
             ${v.status === 'pending' ? `<button onclick="vlanApprove(${v.id})" class="text-xs bg-green-600 text-white px-2 py-1 rounded">Genehmigen</button>
               <button onclick="vlanReject(${v.id})" class="text-xs bg-red-600 text-white px-2 py-1 rounded">Ablehnen</button>` : ''}
-            ${v.status === 'approved' ? `<button onclick="vlanDeploy(${v.id})" class="text-xs bg-blue-600 text-white px-2 py-1 rounded">Deployed markieren</button>` : ''}
+            ${(v.status === 'approved' || v.status === 'deployed') ? `<button onclick="vlanProvision(${v.id})" class="text-xs bg-indigo-600 text-white px-2 py-1 rounded" title="UniFi + Router-LXC auto-provisionieren">⚡ Provisionieren</button>` : ''}
+            ${v.status === 'approved' ? `<button onclick="vlanDeploy(${v.id})" class="text-xs bg-blue-600 text-white px-2 py-1 rounded" title="Manuell als deployed markieren">✓ Manuell deployed</button>` : ''}
             <button onclick="vlanEditMitnutzer(${v.id})" class="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded" title="Mitnutzer bearbeiten">👥 Mitnutzer</button>
           </div>
         </div>
@@ -640,6 +641,67 @@
     });
     if (!r.ok) { alert('Fehler: ' + await r.text()); return; }
     await loadVlans();
+  }
+  async function vlanProvision(id) {
+    // 1. Plan holen
+    const r = await AuthentikAuth.apiFetch(`/api/isp/vlan-requests/${id}/provision-plan`);
+    if (!r.ok) { alert('Plan-Fehler: ' + await r.text()); return; }
+    const plan = await r.json();
+    const issuesHtml = plan.issues.length
+      ? `<div class="bg-red-50 border border-red-200 rounded p-2 text-sm"><p class="font-semibold text-red-800 mb-1">⚠ Voraussetzungen fehlen:</p><ul class="list-disc list-inside text-xs text-red-700">${plan.issues.map(i => `<li>${esc(i)}</li>`).join('')}</ul></div>`
+      : '<div class="bg-emerald-50 border border-emerald-200 rounded p-2 text-xs text-emerald-800">✓ Alle Voraussetzungen erfüllt.</div>';
+    const planSummary = `
+      <div class="grid sm:grid-cols-2 gap-2 text-xs mb-3">
+        <div class="bg-gray-50 rounded p-2"><strong>UniFi-Network:</strong> ${plan.unifi_network_will_be_created ? '<span class="text-blue-700">→ wird angelegt</span>' : '<span class="text-gray-500">bereits vorhanden</span>'}</div>
+        <div class="bg-gray-50 rounded p-2"><strong>WLAN-PPSK:</strong> ${plan.ppsk_will_be_added ? '<span class="text-blue-700">→ wird hinzugefügt</span>' : (plan.request.with_wlan ? '<span class="text-gray-500">PW bereits gesetzt</span>' : '<span class="text-gray-400">kein WLAN beantragt</span>')}</div>
+        <div class="bg-gray-50 rounded p-2 sm:col-span-2"><strong>Router-LXC:</strong> ${plan.router ? `LXC ${esc(plan.router.lxc_id)} (Client-VLAN ${esc(plan.router.client_vlan_id)})` : '<span class="text-amber-700">— kein Router zugewiesen</span>'}</div>
+      </div>`;
+    const scriptBlock = plan.router_lxc_script
+      ? `<details class="mt-3"><summary class="cursor-pointer text-sm font-semibold text-gray-700">📜 Router-LXC Provisionierungs-Script (manuell auf PVE-Host ausführen)</summary>
+          <textarea readonly class="w-full mt-2 border rounded p-2 text-xs font-mono bg-gray-50" rows="14">${esc(plan.router_lxc_script)}</textarea>
+          <button onclick="navigator.clipboard.writeText(this.previousElementSibling.value); this.textContent='✓ Kopiert'" class="mt-1 text-xs bg-gray-200 px-2 py-1 rounded">📋 In Zwischenablage</button>
+        </details>`
+      : '';
+    const canRun = plan.issues.length === 0;
+    const modal = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
+      <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-2xl w-full p-5 max-h-[90vh] overflow-y-auto">
+        <h2 class="font-bold mb-3">⚡ Provisionierung Antrag #${id}</h2>
+        ${issuesHtml}
+        ${planSummary}
+        <div id="provision-result" class="mb-3"></div>
+        ${scriptBlock}
+        <div class="flex justify-end gap-2 mt-4">
+          <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Schliessen</button>
+          ${canRun ? `<button onclick="vlanProvisionRun(${id}, this)" class="px-3 py-1.5 bg-indigo-600 text-white rounded text-sm">⚡ UniFi + PPSK jetzt provisionieren</button>` : ''}
+        </div>
+      </div></div>`;
+    document.body.insertAdjacentHTML('beforeend', modal);
+  }
+  async function vlanProvisionRun(id, btn) {
+    btn.disabled = true; btn.textContent = '⏳ läuft...';
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/isp/vlan-requests/${id}/provision`, { method: 'POST' });
+      const data = await r.json();
+      const resultEl = document.getElementById('provision-result');
+      const stepsHtml = (data.steps || []).map(s => {
+        const icon = s.ok ? '✓' : '✗';
+        const col = s.ok ? 'text-emerald-700' : 'text-red-700';
+        return `<div class="text-xs ${col}">${icon} ${esc(s.step)}${s.skipped ? ` (${esc(s.skipped)})` : ''}${s.unifi_network_id ? ` — net=${esc(s.unifi_network_id)}` : ''}${s.run_manually ? ' — manuell ausführen (Script unten)' : ''}</div>`;
+      }).join('');
+      const errsHtml = (data.errors || []).map(e => `<div class="text-xs text-red-700">✗ ${esc(e.step)}: ${esc(e.error)}</div>`).join('');
+      const pw = data.wlan_password ? `<div class="text-xs mt-1">🔑 WLAN-Passwort: <code class="bg-yellow-50 px-1 rounded">${esc(data.wlan_password)}</code></div>` : '';
+      resultEl.innerHTML = `<div class="bg-${data.ok ? 'emerald' : 'amber'}-50 border border-${data.ok ? 'emerald' : 'amber'}-200 rounded p-2">
+        <p class="font-semibold text-${data.ok ? 'emerald' : 'amber'}-800 text-sm mb-1">${data.ok ? '✓ Provisionierung erfolgreich' : '⚠ Teilweise erfolgreich'}</p>
+        ${stepsHtml}${errsHtml}${pw}
+      </div>`;
+      btn.textContent = '⚡ Erneut laufen lassen';
+      btn.disabled = false;
+      await loadVlans();
+    } catch (e) {
+      document.getElementById('provision-result').innerHTML = `<div class="bg-red-50 border border-red-200 rounded p-2 text-sm text-red-800">Fehler: ${esc(e.message)}</div>`;
+      btn.disabled = false;
+      btn.textContent = '⚡ Nochmal versuchen';
+    }
   }
 
   // === Fix-IPs ===
