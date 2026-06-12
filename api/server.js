@@ -15470,8 +15470,10 @@ async function pveWaitForTask(node, upid, timeoutMs = 120000) {
 async function bootstrapOneRouterLxc(router, targetNode) {
   if (await pveCtExists(router.lxc_id)) return { vmid: router.lxc_id, skipped: 'already_exists' };
   const cvlan = router.client_vlan_id;
-  const haus = Math.floor(cvlan / 10);
-  const hostname = `router-rw${haus}-clients`;
+  // Hostname: VLAN 9 ist Rosenweg-Kooperation (RK), >9 ist pro Haus (HausNr = cvlan/10).
+  const hostname = cvlan === 9
+    ? 'rk-usernetze-router'
+    : `rw${Math.floor(cvlan / 10)}-usernetze-router`;
   // mgmt_ip in /24 (Client-VLAN-Subnet 100.64.<vlan>.0/24 ist konventional)
   const ip = router.mgmt_ip ? router.mgmt_ip.split('/')[0] : `100.64.${cvlan}.9`;
   const gw = router.upstream_gateway ? router.upstream_gateway.split('/')[0] : `100.64.${cvlan}.1`;
