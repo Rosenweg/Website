@@ -70,9 +70,11 @@
     <!-- Subscriber / Anschlüsse -->
     <div class="bg-slate-900/50 border border-slate-700 rounded-xl p-5">
       <div class="text-xs uppercase tracking-wider text-slate-400 mb-2">Anschlüsse</div>
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-3 gap-3">
         <div><div class="text-[10px] uppercase text-slate-500">Subscriber aktiv</div><div id="d-sub" class="noc-mid text-slate-100">—</div></div>
         <div><div class="text-[10px] uppercase text-slate-500">VPN aktiv</div><div id="d-vpn" class="noc-mid text-slate-100">—</div></div>
+        <div><div class="text-[10px] uppercase text-slate-500">VPN connected</div><div id="d-vpn-conn" class="noc-mid text-emerald-300">—</div></div>
+        <div><div class="text-[10px] uppercase text-slate-500">VPN pending</div><div id="d-vpn-pen" class="noc-mid text-amber-300">—</div></div>
         <div><div class="text-[10px] uppercase text-slate-500">Mailbox pending</div><div id="d-mb" class="noc-mid text-amber-300">—</div></div>
         <div><div class="text-[10px] uppercase text-slate-500">VLAN pending</div><div id="d-vlan" class="noc-mid text-amber-300">—</div></div>
       </div>
@@ -172,6 +174,8 @@
         // Dashboard
         document.getElementById('d-sub').textContent = d.counts?.subscribers_active ?? '—';
         document.getElementById('d-vpn').textContent = d.counts?.vpn_active ?? '—';
+        document.getElementById('d-vpn-conn').textContent = d.counts?.vpn_connected ?? '—';
+        document.getElementById('d-vpn-pen').textContent = d.counts?.vpn_pending ?? '0';
         document.getElementById('d-mb').textContent = d.pending?.mailbox_requests ?? '0';
         document.getElementById('d-vlan').textContent = d.pending?.vlan_requests ?? '0';
 
