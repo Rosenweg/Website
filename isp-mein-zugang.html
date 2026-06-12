@@ -290,6 +290,8 @@
     await loadVlan();
   }
   async function openVlanModal() {
+    // Falls schon ein VLAN-Modal offen ist: erst dieses raus, sonst doppelte IDs.
+    document.querySelectorAll('[data-modal="vlan-antrag"]').forEach(el => el.remove());
     let opts = [];
     try {
       const r = await AuthentikAuth.apiFetch('/api/isp/vpn-accounts/options');
@@ -305,7 +307,7 @@
           </select>
           <p class="text-xs text-gray-500 mt-1">VLAN-ID wird im Schema dieses Objekts vergeben.</p>
         </div>`;
-    const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
+    const html = `<div data-modal="vlan-antrag" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5 max-h-[90vh] overflow-y-auto">
         <h2 class="font-bold mb-3">Netzwerk beantragen</h2>
         <div class="bg-blue-50 border border-blue-200 rounded p-3 mb-3 text-xs">
@@ -357,21 +359,24 @@
     // Heute nur Hinweistext — kann spaeter konditionale Felder ein/ausblenden.
   }
   async function saveVlan() {
-    const wohnungEl = document.getElementById('vl-wohnung');
-    const mitnutzerRaw = (document.getElementById('vl-mitnutzer')?.value || '').trim();
+    // Aus dem aktuell sichtbaren Modal lesen, nicht global.
+    const modal = document.querySelector('[data-modal="vlan-antrag"]') || document;
+    const get = id => modal.querySelector('#' + id);
+    const wohnungEl = get('vl-wohnung');
+    const mitnutzerRaw = (get('vl-mitnutzer')?.value || '').trim();
     const mitnutzer = mitnutzerRaw
       ? mitnutzerRaw.split(/[,;\s]+/).map(s => s.trim()).filter(Boolean)
       : [];
     const body = {
       wohnung_id: wohnungEl ? parseInt(wohnungEl.value, 10) || null : null,
-      gewuenschter_name: document.getElementById('vl-name').value || null,
-      zweck: document.getElementById('vl-zweck').value.trim(),
-      gewuenschte_groesse: document.getElementById('vl-grosse').value || null,
-      geraete_anzahl: parseInt(document.getElementById('vl-anz').value, 10) || null,
-      internet_zugriff: document.getElementById('vl-inet').checked,
+      gewuenschter_name: get('vl-name').value || null,
+      zweck: get('vl-zweck').value.trim(),
+      gewuenschte_groesse: get('vl-grosse').value || null,
+      geraete_anzahl: parseInt(get('vl-anz').value, 10) || null,
+      internet_zugriff: get('vl-inet').checked,
       andere_vlans_zugriff: false,
-      kind: document.getElementById('vl-kind').value,
-      with_wlan: document.getElementById('vl-wlan').checked,
+      kind: get('vl-kind').value,
+      with_wlan: get('vl-wlan').checked,
       mitnutzer_emails: mitnutzer,
     };
     if (!body.zweck) { alert('Zweck Pflicht.'); return; }
