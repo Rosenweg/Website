@@ -14669,7 +14669,12 @@ app.get('/api/isp/subscribers/me', authMiddleware, async (req, res) => {
         WHERE w.id IN (
           SELECT DISTINCT k.wohnung_id FROM wohnungen_kontakte k
             JOIN personen p ON p.id = k.person_id
-           WHERE LOWER(p.email) = $1 AND k.archiviert_am IS NULL
+           WHERE k.archiviert_am IS NULL
+             AND ( LOWER(p.email) = $1
+                   OR EXISTS (
+                     SELECT 1 FROM jsonb_array_elements_text(COALESCE(p.emails, '[]'::jsonb)) e
+                      WHERE LOWER(e) = $1
+                   ) )
         )
         ORDER BY w.stweg, w.bezeichnung`,
       [email],
