@@ -512,7 +512,7 @@
           <div>
             <label class="block text-xs text-gray-600">MAC (802.1X)</label>
             <input id="s-mac" type="text" value="${esc(s.mac_dot1x || '')}" placeholder="aa:bb:cc:dd:ee:ff" class="w-full border rounded px-2 py-1 font-mono" oninput="normalizeMacInput(this)">
-            <p class="text-xs text-gray-400 mt-0.5">Optional: MAC-basierte Port-Authentifizierung. Nur Geräte mit dieser MAC dürfen sich am Switch-Port anmelden. Format wird automatisch normalisiert.</p>
+            <p class="text-xs text-gray-400 mt-0.5">Optional: nur dieses Gerät darf am gewählten Switch-Port. Beim Speichern wird Port-Security via UniFi-API aktiviert (`port_security_mac_address`). Leer = keine MAC-Bindung. Format wird automatisch normalisiert.</p>
           </div>
           <div><label class="block text-xs text-gray-600">Notizen</label><textarea id="s-notiz" rows="2" class="w-full border rounded px-2 py-1">${esc(s.notizen || '')}</textarea></div>
         </div>
