@@ -14823,11 +14823,12 @@ app.post('/api/isp/vlan-requests', authMiddleware, async (req, res) => {
     const r = await pool.query(
       `INSERT INTO isp_vlan_requests (antragsteller_email, wohnung_id, zweck, gewuenschter_name,
                                        gewuenschte_groesse, geraete_anzahl, internet_zugriff, andere_vlans_zugriff,
-                                       mitnutzer_emails)
-       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,true),COALESCE($8,false),$9) RETURNING *`,
+                                       mitnutzer_emails, kind, with_wlan)
+       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,true),COALESCE($8,false),$9,
+               COALESCE($10,'vlan'),COALESCE($11,false)) RETURNING *`,
       [req.user.email, wohnungId, b.zweck, b.gewuenschter_name || null,
        b.gewuenschte_groesse || null, b.geraete_anzahl || null, b.internet_zugriff, b.andere_vlans_zugriff,
-       mitnutzer],
+       mitnutzer, b.kind || null, b.with_wlan],
     );
     res.json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -14848,9 +14849,10 @@ app.put('/api/isp/vlan-requests/:id', authMiddleware, async (req, res) => {
     const b = req.body || {};
     const updates = []; const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
-    const userFields = ['zweck','gewuenschter_name','gewuenschte_groesse','geraete_anzahl','internet_zugriff','andere_vlans_zugriff'];
+    const userFields = ['zweck','gewuenschter_name','gewuenschte_groesse','geraete_anzahl','internet_zugriff','andere_vlans_zugriff','kind','with_wlan'];
     const ownerOnlyFields = ['mitnutzer_emails'];
-    const adminFields = ['status','vlan_id','subnet_v4','ablehnung_grund','notizen_technik','deployed_at'];
+    const adminFields = ['status','vlan_id','subnet_v4','ablehnung_grund','notizen_technik','deployed_at',
+                         'wlan_password','dhcp_range_from','dhcp_range_to','dhcp_gateway','unifi_network_id'];
     const allowed = admin ? [...userFields, ...ownerOnlyFields, ...adminFields]
                           : (isOwner ? [...userFields, ...ownerOnlyFields] : []);
     if (!admin && v.status !== 'pending') return res.status(400).json({ error: 'Nur in Status pending editierbar' });
@@ -18082,6 +18084,23 @@ async function initDB() {
       EXCEPTION WHEN OTHERS THEN NULL; END $$;
       CREATE INDEX IF NOT EXISTS idx_isp_vlanreq_mitnutzer
         ON isp_vlan_requests USING GIN (mitnutzer_emails);
+
+      -- Netzwerk-Antrag erweitert um 'Kind' + WLAN-Option:
+      --   vlan      → klassischer VLAN-Tag-Antrag (user macht eigenes Routing)
+      --   subnet    → wir richten DHCP/Gateway via UDM ein, kabel-only
+      --   subnet+wlan → zusaetzlich PPSK im Rosenweg-WLAN auto-erstellt
+      DO $$ BEGIN
+        ALTER TABLE isp_vlan_requests
+          ADD COLUMN IF NOT EXISTS kind VARCHAR(20) DEFAULT 'vlan',
+          ADD COLUMN IF NOT EXISTS with_wlan BOOLEAN DEFAULT false,
+          ADD COLUMN IF NOT EXISTS wlan_password TEXT,             -- nach UniFi-Provisionierung
+          ADD COLUMN IF NOT EXISTS dhcp_range_from INET,
+          ADD COLUMN IF NOT EXISTS dhcp_range_to INET,
+          ADD COLUMN IF NOT EXISTS dhcp_gateway INET,              -- DHCP-Default-Gateway den User-Geraete sehen
+          ADD COLUMN IF NOT EXISTS unifi_network_id VARCHAR(40);   -- UniFi-NetworkConf _id nach Provisionierung
+        ALTER TABLE isp_vlan_requests
+          ADD CONSTRAINT isp_vlanreq_kind_chk CHECK (kind IN ('vlan','subnet'));
+      EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
       -- Approval-Workflow fuer Reverse-Proxy + Redirects:
       -- 1. Customer beantragt mit beliebigem Hostname (z.B. test.abc.ch)
