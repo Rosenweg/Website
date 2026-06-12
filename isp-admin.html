@@ -464,9 +464,25 @@
     const switchOpts = ['<option value="">— wählen —</option>',
       ...(ufi.switches || []).map(sw => `<option value="${esc(sw.name)}" ${s.switch_name === sw.name ? 'selected' : ''}>${esc(sw.name)} (${esc(sw.model)})</option>`)
     ].join('');
-    const vlanOpts = ['<option value="">— wählen —</option>',
-      ...(ufi.vlans || []).map(v => `<option value="${v.vlan}" ${Number(s.vlan) === v.vlan ? 'selected' : ''}>${v.vlan} — ${esc(v.name)}</option>`)
-    ].join('');
+    // Dropdown enthaelt beide Welten: einfache VLAN-Tags + UniFi-Port-Profile.
+    // Value-Format: "vlan:<id>" oder "profile:<_id>". Bei Save zerlegen wir's.
+    const currentSel = s.port_profile_id ? `profile:${s.port_profile_id}` : (s.vlan ? `vlan:${s.vlan}` : '');
+    const vlanOptsLines = ['<option value="">— wählen —</option>'];
+    if ((ufi.vlans || []).length) {
+      vlanOptsLines.push('<optgroup label="VLAN-Tag (Native VLAN)">');
+      for (const v of ufi.vlans) {
+        vlanOptsLines.push(`<option value="vlan:${v.vlan}" ${currentSel === `vlan:${v.vlan}` ? 'selected' : ''}>VLAN ${v.vlan} — ${esc(v.name)}</option>`);
+      }
+      vlanOptsLines.push('</optgroup>');
+    }
+    if ((ufi.port_profiles || []).length) {
+      vlanOptsLines.push('<optgroup label="Port-Profile (UniFi)">');
+      for (const p of ufi.port_profiles) {
+        vlanOptsLines.push(`<option value="profile:${esc(p.id)}" ${currentSel === `profile:${p.id}` ? 'selected' : ''}>📋 ${esc(p.name)}</option>`);
+      }
+      vlanOptsLines.push('</optgroup>');
+    }
+    const vlanOpts = vlanOptsLines.join('');
     const modal = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-xl w-full p-5 max-h-[90vh] overflow-y-auto">
         <h2 class="font-bold mb-3">${s.id ? 'Anschluss bearbeiten' : 'Neuen Anschluss erfassen'}</h2>
@@ -509,10 +525,17 @@
             <div><label class="block text-xs text-gray-600">Eigenleistung CHF</label><input id="s-eig" type="number" step="0.01" value="${s.eigenleistung_chf || ''}" class="w-full border rounded px-2 py-1"></div>
             <div><label class="block text-xs text-gray-600">Datum</label><input id="s-eig-d" type="date" value="${s.eigenleistung_datum ? s.eigenleistung_datum.slice(0,10) : ''}" class="w-full border rounded px-2 py-1"></div>
           </div>
-          <div>
-            <label class="block text-xs text-gray-600">MAC (802.1X)</label>
-            <input id="s-mac" type="text" value="${esc(s.mac_dot1x || '')}" placeholder="aa:bb:cc:dd:ee:ff" class="w-full border rounded px-2 py-1 font-mono" oninput="normalizeMacInput(this)">
-            <p class="text-xs text-gray-400 mt-0.5">Optional: nur dieses Gerät darf am gewählten Switch-Port. Beim Speichern wird Port-Security via UniFi-API aktiviert (`port_security_mac_address`). Leer = keine MAC-Bindung. Format wird automatisch normalisiert.</p>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-xs text-gray-600">MAC (802.1X)</label>
+              <input id="s-mac" type="text" value="${esc(s.mac_dot1x || '')}" placeholder="aa:bb:cc:dd:ee:ff" class="w-full border rounded px-2 py-1 font-mono" oninput="normalizeMacInput(this)">
+              <p class="text-xs text-gray-400 mt-0.5">Nur dieses Gerät am Port — UniFi Port-Security wird automatisch gesetzt.</p>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-600">Fixe IP (optional)</label>
+              <input id="s-fixip" type="text" value="${esc(s.fixed_ip || '')}" placeholder="z.B. 100.64.99.50" class="w-full border rounded px-2 py-1 font-mono">
+              <p class="text-xs text-gray-400 mt-0.5">Wenn gesetzt + MAC: UniFi schreibt statische DHCP-Reservation.</p>
+            </div>
           </div>
           <div><label class="block text-xs text-gray-600">Notizen</label><textarea id="s-notiz" rows="2" class="w-full border rounded px-2 py-1">${esc(s.notizen || '')}</textarea></div>
         </div>
@@ -550,13 +573,18 @@
     ].join('');
   }
   async function saveSub(id) {
+    const vsel = document.getElementById('s-vlan').value || '';
+    const isProfile = vsel.startsWith('profile:');
+    const isVlan = vsel.startsWith('vlan:');
     const body = {
       wohnung_id: parseInt(document.getElementById('s-wohnung').value, 10) || null,
       status: document.getElementById('s-status').value,
       anschluss_typ: document.getElementById('s-typ').value || null,
       switch_name: document.getElementById('s-switch').value || null,
       switch_port: document.getElementById('s-port').value || null,
-      vlan: parseInt(document.getElementById('s-vlan').value, 10) || null,
+      vlan: isVlan ? parseInt(vsel.slice(5), 10) : null,
+      port_profile_id: isProfile ? vsel.slice(8) : null,
+      fixed_ip: document.getElementById('s-fixip').value.trim() || null,
       bandbreite_down_mbps: parseInt(document.getElementById('s-down').value, 10) || null,
       bandbreite_up_mbps: parseInt(document.getElementById('s-up').value, 10) || null,
       eigenleistung_chf: parseFloat(document.getElementById('s-eig').value) || null,

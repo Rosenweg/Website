@@ -14515,9 +14515,15 @@ app.get('/api/isp/unifi-options', authMiddleware, async (req, res) => {
       const n = await unifiGet('rest/networkconf');
       out.vlans = (n.data || [])
         .filter(x => x.vlan && x.enabled !== false)
-        .map(x => ({ vlan: x.vlan, name: x.name, purpose: x.purpose }))
+        .map(x => ({ vlan: x.vlan, name: x.name, purpose: x.purpose, networkconf_id: x._id }))
         .sort((a, b) => a.vlan - b.vlan);
     } catch (e) { out.vlans_error = e.message; }
+    try {
+      const p = await unifiGet('rest/portconf');
+      out.port_profiles = (p.data || [])
+        .map(x => ({ id: x._id, name: x.name, native_networkconf_id: x.native_networkconf_id }))
+        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    } catch (e) { out.port_profiles_error = e.message; }
     res.json(out);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -14534,20 +14540,20 @@ app.get('/api/isp/wohnungen-options', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// UniFi: Port-Security (MAC-Bindung) auf einem Switch-Port setzen oder leeren.
-// switchName: UniFi-Device-Name (z.B. "PoE-Switch1 R9 Heizungsraum")
-// portIdx: 1-basierte Port-Nummer
-// mac: lowercase aa:bb:cc:dd:ee:ff, oder null/leer = Port-Security deaktivieren
-async function unifiSetPortMacBinding(switchName, portIdx, mac) {
+// UniFi: Port-Konfiguration (Port-Security MAC, Native-VLAN, Port-Profile)
+// auf einem Switch-Port aendern oder zuruecksetzen.
+async function unifiSetPortConfig(switchName, portIdx, { mac, vlan, portProfileId } = {}) {
   if (!switchName || !portIdx) return { skipped: 'no_switch_or_port' };
   const idx = parseInt(portIdx, 10);
   if (!Number.isInteger(idx) || idx < 1) throw new Error('port_idx ungueltig');
-  const d = await unifiGet('stat/device');
+  const [d, n] = await Promise.all([unifiGet('stat/device'), unifiGet('rest/networkconf').catch(() => ({ data: [] }))]);
   const sw = (d.data || []).find(x => x.type === 'usw' && x.name === switchName);
   if (!sw) throw new Error(`Switch "${switchName}" nicht in UniFi gefunden`);
   const overrides = Array.isArray(sw.port_overrides) ? sw.port_overrides.map(o => ({ ...o })) : [];
   let entry = overrides.find(o => o.port_idx === idx);
   if (!entry) { entry = { port_idx: idx }; overrides.push(entry); }
+
+  // MAC-Bindung (Port-Security)
   if (mac && /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/i.test(mac)) {
     entry.port_security_enabled = true;
     entry.port_security_mac_address = [mac.toLowerCase()];
@@ -14555,25 +14561,78 @@ async function unifiSetPortMacBinding(switchName, portIdx, mac) {
     entry.port_security_enabled = false;
     entry.port_security_mac_address = [];
   }
+
+  // VLAN / Port-Profile sind alternativ: Profile gewinnt wenn beides gesetzt.
+  if (portProfileId) {
+    entry.portconf_id = portProfileId;
+    delete entry.native_networkconf_id;
+  } else if (vlan) {
+    const net = (n.data || []).find(x => Number(x.vlan) === Number(vlan));
+    if (net) entry.native_networkconf_id = net._id;
+    delete entry.portconf_id;
+  } else {
+    delete entry.portconf_id;
+    delete entry.native_networkconf_id;
+  }
+
   await unifiCall('PUT', `rest/device/${sw._id}`, { port_overrides: overrides });
-  return { ok: true, switch: switchName, port: idx, mac: mac || null };
+  return { ok: true, switch: switchName, port: idx, mac: mac || null, vlan: vlan || null, portProfileId: portProfileId || null };
+}
+
+// UniFi: Static-DHCP-Reservation fuer eine MAC. UniFi-User-Record patchen.
+async function unifiSetStaticDhcp(mac, fixedIp, networkconfId) {
+  if (!mac || !/^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/i.test(mac)) return { skipped: 'mac_invalid' };
+  const macLower = mac.toLowerCase();
+  // User-Record existiert evtl. schon — sonst anlegen
+  const list = await unifiGet(`rest/user?mac=${macLower}`).catch(() => null);
+  const found = list?.data?.find(u => u.mac === macLower);
+  const body = fixedIp
+    ? { mac: macLower, use_fixedip: true, fixed_ip: fixedIp, ...(networkconfId ? { network_id: networkconfId } : {}) }
+    : { mac: macLower, use_fixedip: false };
+  if (found) {
+    await unifiCall('PUT', `rest/user/${found._id}`, body);
+  } else if (fixedIp) {
+    await unifiCall('POST', 'rest/user', body);
+  }
+  return { ok: true, mac: macLower, fixed_ip: fixedIp || null };
 }
 
 // Hilfs-Wrapper: vergleicht alten + neuen Sub-Eintrag und propagiert Aenderungen
-// an UniFi (Port-Security). Wenn switch/port geaendert hat, wird der alte Port
-// geleert und der neue gesetzt. Fehler werden geloggt aber nicht zur Anfrage
-// durchgereicht (kein 500 wenn UniFi mal unreachable).
+// an UniFi. Fehler werden geloggt aber nicht zur Anfrage durchgereicht.
 async function syncSubscriberToUnifi(oldRow, newRow) {
   try {
     const oldSw = oldRow?.switch_name; const oldPort = oldRow?.switch_port;
     const newSw = newRow?.switch_name; const newPort = newRow?.switch_port;
     const newMac = newRow?.mac_dot1x;
-    // Wenn der Switch/Port-Slot wechselt, alten leeren (falls Port-Security gesetzt war)
-    if (oldRow?.mac_dot1x && (oldSw !== newSw || String(oldPort) !== String(newPort)) && oldSw && oldPort) {
-      await unifiSetPortMacBinding(oldSw, oldPort, null).catch(e => console.warn('[UniFi-Sync] clear-old:', e.message));
+    const newVlan = newRow?.vlan;
+    const newProfile = newRow?.port_profile_id;
+    const newFixedIp = newRow?.fixed_ip;
+
+    // Switch/Port wechselt -> alten Port-Override leeren
+    if (oldSw && oldPort && (oldSw !== newSw || String(oldPort) !== String(newPort))) {
+      await unifiSetPortConfig(oldSw, oldPort, {}).catch(e => console.warn('[UniFi-Sync] clear-old port:', e.message));
     }
     if (newSw && newPort) {
-      await unifiSetPortMacBinding(newSw, newPort, newMac).catch(e => console.warn('[UniFi-Sync] set-new:', e.message));
+      await unifiSetPortConfig(newSw, newPort, { mac: newMac, vlan: newVlan, portProfileId: newProfile })
+        .catch(e => console.warn('[UniFi-Sync] set-new port:', e.message));
+    }
+
+    // Alte MAC weg / geaendert -> alte Static-DHCP loeschen
+    if (oldRow?.mac_dot1x && oldRow.mac_dot1x !== newMac) {
+      await unifiSetStaticDhcp(oldRow.mac_dot1x, null, null).catch(e => console.warn('[UniFi-Sync] clear-old dhcp:', e.message));
+    }
+    // Neue MAC + neue IP -> Static-DHCP-Reservation
+    if (newMac && newFixedIp) {
+      let networkconfId = null;
+      try {
+        const n = await unifiGet('rest/networkconf');
+        const net = (n.data || []).find(x => Number(x.vlan) === Number(newVlan));
+        if (net) networkconfId = net._id;
+      } catch {}
+      await unifiSetStaticDhcp(newMac, newFixedIp, networkconfId)
+        .catch(e => console.warn('[UniFi-Sync] set-dhcp:', e.message));
+    } else if (newMac && !newFixedIp && oldRow?.fixed_ip) {
+      await unifiSetStaticDhcp(newMac, null, null).catch(() => {});
     }
   } catch (e) { console.warn('[UniFi-Sync] fail:', e.message); }
 }
@@ -14619,11 +14678,13 @@ app.post('/api/isp/subscribers', authMiddleware, async (req, res) => {
     const r = await pool.query(
       `INSERT INTO isp_subscribers (wohnung_id, status, anschluss_typ, switch_name, switch_port, vlan,
                                      bandbreite_down_mbps, bandbreite_up_mbps, mac_dot1x,
-                                     eigenleistung_chf, eigenleistung_datum, notizen)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+                                     eigenleistung_chf, eigenleistung_datum, notizen,
+                                     port_profile_id, fixed_ip)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
       [b.wohnung_id, b.status || 'geplant', b.anschluss_typ || null, b.switch_name || null, b.switch_port || null,
        b.vlan || null, b.bandbreite_down_mbps || null, b.bandbreite_up_mbps || null, b.mac_dot1x || null,
-       b.eigenleistung_chf || null, b.eigenleistung_datum || null, b.notizen || null],
+       b.eigenleistung_chf || null, b.eigenleistung_datum || null, b.notizen || null,
+       b.port_profile_id || null, b.fixed_ip || null],
     );
     const row = r.rows[0];
     // UniFi-Sync (fire-and-forget, blockt aber den Response)
@@ -14641,7 +14702,7 @@ app.put('/api/isp/subscribers/:id', authMiddleware, async (req, res) => {
     if (oldQ.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const updates = []; const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
-    for (const col of ['status','anschluss_typ','switch_name','switch_port','vlan','bandbreite_down_mbps','bandbreite_up_mbps','mac_dot1x','eigenleistung_chf','eigenleistung_datum','notizen']) {
+    for (const col of ['status','anschluss_typ','switch_name','switch_port','vlan','bandbreite_down_mbps','bandbreite_up_mbps','mac_dot1x','eigenleistung_chf','eigenleistung_datum','notizen','port_profile_id','fixed_ip']) {
       if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
     }
     if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
@@ -19082,6 +19143,13 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_isp_sub_status ON isp_subscribers(status);
       CREATE INDEX IF NOT EXISTS idx_isp_sub_wohnung ON isp_subscribers(wohnung_id);
+      -- Port-Profile (UniFi portconf _id) als Alternative zu plain VLAN-Tag,
+      -- und optionale Static-DHCP-Reservation fuer das MAC-gebundene Geraet.
+      DO $$ BEGIN
+        ALTER TABLE isp_subscribers
+          ADD COLUMN IF NOT EXISTS port_profile_id VARCHAR(40),
+          ADD COLUMN IF NOT EXISTS fixed_ip INET;
+      EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
       -- Fix-IP-Zuteilungen (oeffentlich oder intern). Kann an
       -- Subscriber gebunden sein (= eine Wohnung) oder an Service
