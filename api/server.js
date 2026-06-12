@@ -14152,6 +14152,39 @@ async function buildTraefikDynamicConfig() {
     }
   }
 
+  // 1b) HTTP-Redirects aus isp_redirects (301/302/307/308 am Edge)
+  const redirs = await pool.query(
+    `SELECT * FROM isp_redirects
+      WHERE active = true AND COALESCE(approval_status,'approved') = 'approved'
+      ORDER BY id`).catch(() => ({ rows: [] }));
+  for (const r of redirs.rows) {
+    const id = safeId(`redir-${r.id}-${r.source_host}`);
+    const mw = id + '-mw';
+    const path = r.source_path || '/';
+    // Rule: Host + optional PathPrefix (wenn nicht "/")
+    const rule = path === '/' ? `Host(\`${r.source_host}\`)` : `Host(\`${r.source_host}\`) && PathPrefix(\`${path}\`)`;
+    // RedirectRegex: ^https?://<host><path>(/.*)? → target_url($1) wenn preserve_path
+    const escHost = r.source_host.replace(/\./g, '\\.');
+    const escPath = path.replace(/\./g, '\\.');
+    const regex = r.preserve_path
+      ? `^https?://${escHost}${escPath === '/' ? '' : escPath}(/.*)?$`
+      : `^https?://${escHost}.*$`;
+    const replacement = r.preserve_path
+      ? `${r.target_url.replace(/\/$/, '')}\${1}`
+      : r.target_url;
+    cfg.http.middlewares[mw] = {
+      redirectRegex: { regex, replacement, permanent: (r.http_code === 301 || r.http_code === 308) },
+    };
+    cfg.http.routers[id] = {
+      rule,
+      entryPoints: ['websecure'],
+      service: 'noop@internal',  // wird durch middleware abgefangen, kein backend noetig
+      middlewares: [mw],
+      tls: { certResolver: 'cf' },
+      priority: 100,  // hoeher als sonstige routes damit Redirect zuerst greift
+    };
+  }
+
   // 2) TCP-SNI-Passthrough fuer Mail-Relays
   const mrs = await pool.query(
     `SELECT * FROM isp_mail_relays
