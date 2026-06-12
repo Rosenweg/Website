@@ -14009,6 +14009,21 @@ async function unifiGet(path, timeoutMs = 4000) {
   return r.json();
 }
 
+async function unifiCall(method, path, body, timeoutMs = 8000) {
+  const opts = {
+    method,
+    headers: { 'X-API-Key': UNIFI_API_KEY, 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(timeoutMs),
+  };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const r = await fetch(`${UNIFI_HOST}/proxy/network/api/s/default/${path}`, opts);
+  const text = await r.text();
+  let json;
+  try { json = JSON.parse(text); } catch { json = { raw: text }; }
+  if (!r.ok) throw new Error(`unifi ${method} ${path} -> ${r.status} ${text.slice(0, 200)}`);
+  return json;
+}
+
 app.get('/api/isp/noc/unifi', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
   const out = {
     reachable: false,
@@ -14940,6 +14955,272 @@ app.delete('/api/isp/vlan-requests/:id', authMiddleware, async (req, res) => {
     if (!admin && !isOwner && !isMitnutzer) return res.status(403).json({ error: 'Nur Antragsteller, Mitnutzer oder Admin' });
     await pool.query('DELETE FROM isp_vlan_requests WHERE id = $1', [id]);
     res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// === Phase 3: Auto-Provisioning (UniFi + Router-LXC + PPSK) ===
+
+// CIDR-Helper: subnet "10.0.50.0/28" -> { mask: 28, mask_octets: "255.255.255.240", broadcast: "10.0.50.15" }
+function parseCidr(cidr) {
+  if (!cidr || typeof cidr !== 'string' || !cidr.includes('/')) return null;
+  const [ip, m] = cidr.split('/');
+  const mask = parseInt(m, 10);
+  if (!Number.isInteger(mask) || mask < 8 || mask > 32) return null;
+  const parts = ip.split('.').map(Number);
+  if (parts.length !== 4 || parts.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return null;
+  const ipNum = (parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3];
+  const maskNum = mask === 0 ? 0 : ((~0) << (32 - mask)) >>> 0;
+  const netNum = (ipNum & maskNum) >>> 0;
+  const bcNum = (netNum | (~maskNum >>> 0)) >>> 0;
+  const toIp = n => [(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff].join('.');
+  const mo = toIp(maskNum);
+  return { mask, mask_octets: mo, network: toIp(netNum), broadcast: toIp(bcNum), first_host: toIp(netNum + 1), last_host: toIp(bcNum - 1) };
+}
+
+// Zufaelliges Passwort fuer PPSK (12 chars, alphanum)
+function generatePpskPassword() {
+  const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const l = 'abcdefghjkmnpqrstuvwxyz';
+  const n = '23456789';
+  const all = a + l + n;
+  let out = a[Math.floor(Math.random() * a.length)] + l[Math.floor(Math.random() * l.length)] + n[Math.floor(Math.random() * n.length)];
+  for (let i = 0; i < 9; i++) out += all[Math.floor(Math.random() * all.length)];
+  return out.split('').sort(() => Math.random() - 0.5).join('');
+}
+
+// UniFi Network-Conf fuer User-VLAN anlegen.
+// Wichtig: disable_l3 / vlan_only-Modus, weil das Routing der Router-LXC macht,
+// nicht die UDM. UniFi propagiert nur den VLAN-Tag auf APs/Ports.
+async function unifiCreateUserNetwork(v) {
+  const cidr = parseCidr(v.subnet_v4);
+  const body = {
+    name: v.gewuenschter_name || `vlan-${v.vlan_id}`,
+    purpose: 'corporate',
+    enabled: true,
+    vlan_enabled: true,
+    vlan: v.vlan_id,
+    networkgroup: 'LAN',
+    // UDM macht KEIN L3, KEIN DHCP — das ist Router-LXC-Sache:
+    dhcpd_enabled: false,
+    dhcp_relay_enabled: false,
+    ipv6_interface_type: 'none',
+    ...(cidr ? { ip_subnet: `${cidr.first_host}/${cidr.mask}` } : {}),
+    // Reine VLAN-Propagierung:
+    is_nat: false,
+    auto_scale_network: false,
+  };
+  const r = await unifiCall('POST', 'rest/networkconf', body);
+  const created = (r.data || [])[0] || r;
+  return created;
+}
+
+// PPSK zur Rosenweg-WLAN hinzufuegen, networkconf_id zeigt auf User-Netz.
+async function unifiAddPpskToRosenwegWlan(networkconf_id, password) {
+  const wl = await unifiGet('rest/wlanconf');
+  const rosenweg = (wl.data || []).find(w => w.name === 'Rosenweg');
+  if (!rosenweg) throw new Error('WLAN "Rosenweg" nicht in UniFi gefunden');
+  const psks = Array.isArray(rosenweg.private_preshared_keys) ? rosenweg.private_preshared_keys.slice() : [];
+  psks.push({ password, networkconf_id });
+  const body = {
+    private_preshared_keys: psks,
+    private_preshared_keys_enabled: true,
+  };
+  await unifiCall('PUT', `rest/wlanconf/${rosenweg._id}`, body);
+  return { wlan_id: rosenweg._id, ppsk_count: psks.length };
+}
+
+// Bash-Skript fuer manuelles Provisioning auf dem Router-LXC.
+// Wird vom Admin auf einem PVE-Host ausgefuehrt (er hat root + pct).
+function buildRouterLxcProvisionScript(v, router) {
+  const cidr = parseCidr(v.subnet_v4);
+  const mask = cidr ? cidr.mask : 28;
+  const gw = v.dhcp_gateway || (cidr ? cidr.first_host : '');
+  const dhcpFrom = v.dhcp_range_from || '';
+  const dhcpTo = v.dhcp_range_to || '';
+  const lxcId = router?.lxc_id || '<LXC>';
+  const userVlan = v.vlan_id || '<VLAN>';
+  const clientVlan = router?.client_vlan_id || '<CLIENT_VLAN>';
+  const clientIf = `eth0.${clientVlan}`;
+  const userIf = `eth0.${userVlan}`;
+  return `#!/usr/bin/env bash
+# Provisioning fuer Netzwerk-Antrag #${v.id} (${v.gewuenschter_name || ''})
+#   User-VLAN:    ${userVlan}
+#   Subnet:       ${v.subnet_v4}
+#   Gateway:      ${gw}/${mask}
+#   DHCP-Range:   ${dhcpFrom} - ${dhcpTo}
+#   Router-LXC:   ${lxcId}  (Client-VLAN ${clientVlan})
+#
+# Auf einem PVE-Host ausfuehren wo CT ${lxcId} laeuft:
+#   ssh root@pveN  bash <(curl -s ...)   oder copy/paste.
+
+set -euo pipefail
+LXC=${lxcId}
+USER_VLAN=${userVlan}
+USER_IF=${userIf}
+USER_NET=${v.subnet_v4}
+USER_GW=${gw}
+MASK=${mask}
+DHCP_FROM=${dhcpFrom}
+DHCP_TO=${dhcpTo}
+CLIENT_VLAN=${clientVlan}
+CLIENT_IF=${clientIf}
+
+# 1. VLAN-Subinterface auf eth0 (sollte VLAN-aware sein)
+pct exec $LXC -- bash -c "
+  ip link show $USER_IF >/dev/null 2>&1 || ip link add link eth0 name $USER_IF type vlan id $USER_VLAN
+  ip link set $USER_IF up
+  ip addr replace \\\$USER_GW/$MASK dev $USER_IF
+" 2>&1 | sed 's/^/  /'
+
+# 2. dnsmasq-Config fuer dieses User-VLAN
+pct exec $LXC -- bash -c "
+  mkdir -p /etc/dnsmasq.d
+  cat > /etc/dnsmasq.d/vlan-$USER_VLAN.conf <<EOF
+interface=$USER_IF
+bind-interfaces
+dhcp-range=$DHCP_FROM,$DHCP_TO,12h
+dhcp-option=tag:$USER_IF,3,$USER_GW
+dhcp-option=tag:$USER_IF,6,1.1.1.1,1.0.0.1
+EOF
+  systemctl restart dnsmasq
+" 2>&1 | sed 's/^/  /'
+
+# 3. nftables: Isolation + Internet via Client-VLAN
+pct exec $LXC -- bash -c "
+  nft add table inet rosenweg 2>/dev/null || true
+  nft add chain inet rosenweg forward '{ type filter hook forward priority 0; policy drop; }' 2>/dev/null || true
+  nft add chain inet rosenweg nat_post '{ type nat hook postrouting priority 100; }' 2>/dev/null || true
+
+  # Forward: User-VLAN <-> Client-VLAN (Richtung Uplink) erlauben
+  nft add rule inet rosenweg forward iifname \\\"$USER_IF\\\" oifname \\\"$CLIENT_IF\\\" accept
+  nft add rule inet rosenweg forward iifname \\\"$CLIENT_IF\\\" oifname \\\"$USER_IF\\\" ct state established,related accept
+
+  # MASQUERADE Richtung Client-VLAN
+  nft add rule inet rosenweg nat_post oifname \\\"$CLIENT_IF\\\" masquerade
+" 2>&1 | sed 's/^/  /'
+
+echo
+echo \"[OK] VLAN $USER_VLAN auf CT \$LXC eingerichtet.\"
+echo \"     Teste DHCP von einem Geraet im VLAN $USER_VLAN.\"
+`;
+}
+
+// Vorschau ohne tatsaechlich zu provisionieren.
+app.get('/api/isp/vlan-requests/:id/provision-plan', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Admin' });
+    const id = parseInt(req.params.id, 10);
+    const ex = await pool.query(`
+      SELECT v.*, cr.client_vlan_id AS router_client_vlan_id, cr.lxc_id AS router_lxc_id,
+             cr.bezeichnung AS router_bezeichnung, cr.mgmt_ip AS router_mgmt_ip
+        FROM isp_vlan_requests v
+        LEFT JOIN isp_client_vlan_routers cr ON cr.id = v.assigned_router_id
+        WHERE v.id = $1`, [id]);
+    if (ex.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = ex.rows[0];
+    const router = v.assigned_router_id ? {
+      lxc_id: v.router_lxc_id,
+      client_vlan_id: v.router_client_vlan_id,
+      bezeichnung: v.router_bezeichnung,
+      mgmt_ip: v.router_mgmt_ip,
+    } : null;
+    const issues = [];
+    if (!v.vlan_id) issues.push('vlan_id fehlt (Antrag noch nicht approved?)');
+    if (v.kind === 'subnet' && !v.subnet_v4) issues.push('subnet_v4 fehlt (CIDR z.B. 100.64.99.16/28)');
+    if (v.kind === 'subnet' && !v.dhcp_range_from) issues.push('dhcp_range_from fehlt');
+    if (v.kind === 'subnet' && !v.dhcp_range_to) issues.push('dhcp_range_to fehlt');
+    if (v.kind === 'subnet' && !v.dhcp_gateway) issues.push('dhcp_gateway fehlt');
+    if (v.kind === 'subnet' && !v.assigned_router_id) issues.push('assigned_router_id fehlt (Tab "Router zuweisen")');
+    const script = (v.kind === 'subnet' && router) ? buildRouterLxcProvisionScript(v, router) : null;
+    res.json({
+      request: v,
+      router,
+      issues,
+      unifi_network_will_be_created: !v.unifi_network_id,
+      ppsk_will_be_added: v.with_wlan && !v.wlan_password,
+      router_lxc_script: script,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Tatsaechliches Provisioning: UniFi + PPSK live anlegen, Router-LXC-Script generieren.
+app.post('/api/isp/vlan-requests/:id/provision', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Admin' });
+    const id = parseInt(req.params.id, 10);
+    const ex = await pool.query(`
+      SELECT v.*, cr.client_vlan_id AS router_client_vlan_id, cr.lxc_id AS router_lxc_id,
+             cr.bezeichnung AS router_bezeichnung
+        FROM isp_vlan_requests v
+        LEFT JOIN isp_client_vlan_routers cr ON cr.id = v.assigned_router_id
+        WHERE v.id = $1`, [id]);
+    if (ex.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = ex.rows[0];
+    if (v.status !== 'approved' && v.status !== 'deployed') {
+      return res.status(400).json({ error: `Status "${v.status}" — Antrag muss zuerst approved sein` });
+    }
+    if (!v.vlan_id) return res.status(400).json({ error: 'vlan_id fehlt' });
+    const router = v.assigned_router_id ? {
+      lxc_id: v.router_lxc_id, client_vlan_id: v.router_client_vlan_id, bezeichnung: v.router_bezeichnung,
+    } : null;
+    const result = { steps: [], errors: [] };
+
+    // 1) UniFi Network anlegen (falls noch nicht passiert)
+    let unifiNetId = v.unifi_network_id;
+    if (!unifiNetId) {
+      try {
+        const created = await unifiCreateUserNetwork(v);
+        unifiNetId = created._id || created.id || null;
+        if (!unifiNetId) throw new Error('UniFi Response ohne _id: ' + JSON.stringify(created).slice(0, 200));
+        result.steps.push({ step: 'unifi_network', ok: true, unifi_network_id: unifiNetId });
+      } catch (err) {
+        result.errors.push({ step: 'unifi_network', error: err.message });
+      }
+    } else {
+      result.steps.push({ step: 'unifi_network', ok: true, skipped: 'already_exists', unifi_network_id: unifiNetId });
+    }
+
+    // 2) PPSK auf Rosenweg-WLAN (wenn with_wlan und noch kein Passwort)
+    let wlanPw = v.wlan_password;
+    if (v.with_wlan && !wlanPw && unifiNetId) {
+      try {
+        wlanPw = generatePpskPassword();
+        await unifiAddPpskToRosenwegWlan(unifiNetId, wlanPw);
+        result.steps.push({ step: 'ppsk', ok: true });
+      } catch (err) {
+        wlanPw = null;
+        result.errors.push({ step: 'ppsk', error: err.message });
+      }
+    } else if (v.with_wlan && wlanPw) {
+      result.steps.push({ step: 'ppsk', ok: true, skipped: 'already_set' });
+    }
+
+    // 3) Router-LXC-Script generieren (manuelle Ausfuehrung durch Admin bis SSH-Auto da ist)
+    const script = (v.kind === 'subnet' && router) ? buildRouterLxcProvisionScript(v, router) : null;
+    if (script) result.steps.push({ step: 'router_lxc_script', ok: true, run_manually: true });
+
+    // 4) DB updaten
+    const updates = []; const params = [];
+    const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
+    if (unifiNetId && unifiNetId !== v.unifi_network_id) push('unifi_network_id', unifiNetId);
+    if (wlanPw && wlanPw !== v.wlan_password) push('wlan_password', wlanPw);
+    if (result.errors.length === 0 && v.status === 'approved') {
+      push('status', 'deployed');
+      push('deployed_at', new Date());
+    }
+    if (updates.length > 0) {
+      push('updated_at', new Date());
+      params.push(id);
+      await pool.query(`UPDATE isp_vlan_requests SET ${updates.join(', ')} WHERE id = $${params.length}`, params);
+    }
+
+    res.json({
+      ok: result.errors.length === 0,
+      unifi_network_id: unifiNetId,
+      wlan_password: wlanPw,
+      router_lxc_script: script,
+      ...result,
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
