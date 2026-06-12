@@ -2068,20 +2068,20 @@
       subEl.innerHTML = subs.length === 0
         ? '<span class="text-xs text-slate-500 font-mono">keine Daten</span>'
         : (() => {
-            const items = subs.slice();
-            if (u.routers && u.routers.total > 0) {
-              items.push({
-                subsystem: `router (${u.routers.ok}/${u.routers.total})`,
-                status: u.routers.status,
-              });
-            }
-            return items.map(s => {
+            const dots = subs.map(s => {
               const color = s.status === 'ok' ? 'led-green' : (s.status === 'warning' ? 'led-amber' : 'led-red');
               return `<span class="inline-flex items-center gap-1.5 bg-slate-900/60 border border-slate-700 rounded px-2 py-0.5">
                 <span class="noc-led ${color}"></span>
                 <span class="text-[10px] font-mono uppercase text-slate-300">${esc(s.subsystem)}</span>
               </span>`;
-            }).join('');
+            });
+            for (const r of (u.routers || [])) {
+              dots.push(`<span class="inline-flex items-center gap-1.5 bg-slate-900/60 border border-slate-700 rounded px-2 py-0.5" title="CT ${r.lxc_id} · VLAN ${r.client_vlan}">
+                <span class="noc-led ${r.ok ? 'led-green' : 'led-red'}"></span>
+                <span class="text-[10px] font-mono uppercase text-slate-300">${esc(r.label)}</span>
+              </span>`);
+            }
+            return dots.join('');
           })();
     }, 'subsystems');
   }
