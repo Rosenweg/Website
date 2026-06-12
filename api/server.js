@@ -16185,6 +16185,140 @@ function hausFromDeviceName(name) {
 // Mail mit, damit das Gremium informiert bleibt.
 const MAINT_AUSSCHUSS_EMAIL = 'ausschuss@rosenweg4303.ch';
 
+// Per-Empfaenger-Throttle mit Combine-Puffer: max 1 Maintenance-Notification
+// pro MAINT_NOTIFY_THROTTLE_MIN (default 30 Min). Was waehrend des Fensters
+// reinkommt wird gepuffert und am Ende als Sammelmeldung verschickt.
+// Ausschuss-Verteiler ist immer ausgenommen.
+const MAINT_NOTIFY_THROTTLE_MIN = parseInt(process.env.MAINT_NOTIFY_THROTTLE_MIN || '30', 10);
+const isAusschussEmail = r => r && r.toLowerCase() === MAINT_AUSSCHUSS_EMAIL;
+
+// Kernroutine: liefert eine Maintenance-Notification an alle Empfaenger.
+//   - direkt-Sender bekommen sofort `body` (via `sendFn(directList, body)`)
+//   - gethrottelte Empfaenger werden mit `body` in pending_lines gepuffert,
+//     subject in pending_subjects. Spaeter flusht maintFlushNotifyPending.
+// Rueckgabe: { sent, throttled }.
+async function deliverMaintNotify({ channel, recipients, body, subject, sendFn }) {
+  if (!Array.isArray(recipients) || recipients.length === 0) return { sent: 0, throttled: 0 };
+  const list = recipients.filter(Boolean);
+  if (MAINT_NOTIFY_THROTTLE_MIN <= 0) {
+    const n = await sendFn(list, body);
+    return { sent: n, throttled: 0 };
+  }
+  const candidates = list.filter(r => !isAusschussEmail(r));
+  const exempt = list.filter(isAusschussEmail);
+  let blocked = new Set();
+  if (candidates.length) {
+    const r = await pool.query(
+      `SELECT recipient FROM isp_maint_notify_throttle
+        WHERE channel = $1
+          AND recipient = ANY($2::text[])
+          AND last_at > NOW() - ($3 || ' minutes')::interval`,
+      [channel, candidates.map(c => c.toLowerCase()), String(MAINT_NOTIFY_THROTTLE_MIN)],
+    );
+    blocked = new Set(r.rows.map(x => x.recipient));
+  }
+  const direct = [...exempt];
+  const throttled = [];
+  for (const c of candidates) {
+    if (blocked.has(c.toLowerCase())) throttled.push(c);
+    else direct.push(c);
+  }
+  let sent = 0;
+  if (direct.length) {
+    try { sent = await sendFn(direct, body) || direct.length; } catch (e) {
+      console.warn('[maint-notify] sendFn error:', e.message);
+    }
+    // Direct-Sender bekommen jetzt eine Nachricht → last_at refreshen.
+    // Ausschuss wird ausgespart (kein Throttle).
+    const lowered = direct.filter(r => !isAusschussEmail(r)).map(r => r.toLowerCase());
+    if (lowered.length) {
+      await pool.query(
+        `INSERT INTO isp_maint_notify_throttle (recipient, channel, last_at, pending_lines, pending_subjects)
+         SELECT u, $1, NOW(), '[]'::jsonb, '[]'::jsonb FROM unnest($2::text[]) AS u
+         ON CONFLICT (recipient, channel) DO UPDATE SET last_at = NOW()`,
+        [channel, lowered],
+      );
+    }
+  }
+  if (throttled.length) {
+    const lowered = throttled.map(r => r.toLowerCase());
+    // Append (body, subject) zu pending_lines / pending_subjects pro Empfaenger.
+    // Doppelte body-Lines unterdruecken (jsonb_array contains) – sonst wuerde
+    // ein zweites pre+start+end fuer dieselbe Maintenance dreimal angehaengt.
+    await pool.query(
+      `INSERT INTO isp_maint_notify_throttle (recipient, channel, last_at, pending_lines, pending_subjects)
+       SELECT u, $1, NOW() - ($4 || ' minutes')::interval,
+              jsonb_build_array($2::text), jsonb_build_array($3::text)
+         FROM unnest($5::text[]) AS u
+       ON CONFLICT (recipient, channel) DO UPDATE SET
+         pending_lines = CASE
+           WHEN isp_maint_notify_throttle.pending_lines @> jsonb_build_array($2::text)
+             THEN isp_maint_notify_throttle.pending_lines
+           ELSE isp_maint_notify_throttle.pending_lines || jsonb_build_array($2::text)
+         END,
+         pending_subjects = CASE
+           WHEN isp_maint_notify_throttle.pending_subjects @> jsonb_build_array($3::text)
+             THEN isp_maint_notify_throttle.pending_subjects
+           ELSE isp_maint_notify_throttle.pending_subjects || jsonb_build_array($3::text)
+         END`,
+      [channel, body, subject || '', String(MAINT_NOTIFY_THROTTLE_MIN), lowered],
+    );
+  }
+  return { sent, throttled: throttled.length };
+}
+
+// Cron: flusht gebufferte pending_lines fuer Empfaenger deren Throttle
+// abgelaufen ist. Kombiniert mehrere bodies zu einer Sammelmeldung.
+async function maintFlushNotifyPending() {
+  try {
+    const r = await pool.query(
+      `SELECT recipient, channel, pending_lines, pending_subjects
+         FROM isp_maint_notify_throttle
+        WHERE jsonb_array_length(pending_lines) > 0
+          AND last_at < NOW() - ($1 || ' minutes')::interval`,
+      [String(MAINT_NOTIFY_THROTTLE_MIN)],
+    );
+    for (const row of r.rows) {
+      const lines = Array.isArray(row.pending_lines) ? row.pending_lines : [];
+      const subjects = Array.isArray(row.pending_subjects) ? row.pending_subjects : [];
+      if (!lines.length) continue;
+      try {
+        if (row.channel === 'whatsapp') {
+          const header = lines.length > 1
+            ? `🔔 *Rosenweg ISP — Sammelmeldung* (${lines.length} Wartungen)\n\n`
+            : '';
+          const body = header + lines.join('\n\n— — —\n\n');
+          await pushWhatsappBroadcast({
+            emails: [row.recipient], body,
+            sourceType: 'isp_maintenance', sourceId: 'flush',
+          });
+        } else if (row.channel === 'email') {
+          const subj = subjects.length > 1
+            ? `[Rosenweg ISP] Sammelmeldung: ${subjects.length} Wartungen`
+            : (subjects[0] || '[Rosenweg ISP] Wartungs-Update');
+          const body = (lines.length > 1
+            ? `Hallo,\n\nmehrere Wartungs-Ereignisse wurden im selben Zeitraum gemeldet — hier die Sammelmeldung:\n\n`
+            : '')
+            + lines.join('\n\n------------------------------\n\n');
+          await sendEmail({ to: row.recipient, subject: subj, text: body });
+        }
+        // last_at NICHT updaten — die Flush-Nachricht startet ein neues
+        // Throttle-Fenster. pending_lines leeren.
+        await pool.query(
+          `UPDATE isp_maint_notify_throttle
+              SET pending_lines = '[]'::jsonb, pending_subjects = '[]'::jsonb, last_at = NOW()
+            WHERE recipient = $1 AND channel = $2`,
+          [row.recipient, row.channel],
+        );
+      } catch (e) {
+        console.warn(`[maint-notify-flush] ${row.channel} ${row.recipient}:`, e.message);
+      }
+    }
+  } catch (e) {
+    console.warn('[maint-notify-flush] error:', e.message);
+  }
+}
+
 // Email-Recipients: Subscriber-Bewohner im scope + Ausschuss-Verteiler.
 async function maintRecipientsForScope(scope) {
   const subs = await maintSubscriberRecipientsForScope(scope);
@@ -16228,7 +16362,10 @@ async function maintSubscriberRecipientsForScope(scope) {
   return r.rows.map(x => x.email).filter(Boolean);
 }
 
-// WhatsApp-Broadcast an Subscriber-Bewohner im scope.
+// WhatsApp-Broadcast an Subscriber-Bewohner im scope. Mit Throttle+Combine:
+// mehrere Wartungs-Events fuer denselben Empfaenger werden gepuffert und
+// am Ende des 30-Min-Fensters als Sammelmeldung versendet (siehe
+// deliverMaintNotify / maintFlushNotifyPending).
 async function sendMaintenanceWhatsApp(maint, kind) {
   const recipients = await maintSubscriberRecipientsForScope(maint.scope || {});
   if (recipients.length === 0) return { sent: 0, skipped: 'no_recipients' };
@@ -16240,8 +16377,16 @@ async function sendMaintenanceWhatsApp(maint, kind) {
     ? `${sev} *Rosenweg ISP*\n*${maint.title}* beginnt JETZT.\n\nVoraussichtl. Ende: ${fmt(maint.end_at)}\n\n${maint.description || ''}`
     : `✓ *Rosenweg ISP*\n*${maint.title}* — Wartung abgeschlossen, Dienste wieder verfuegbar.`;
   try {
-    const n = await pushWhatsappBroadcast({ emails: recipients, body, sourceType: 'isp_maintenance', sourceId: String(maint.id) });
-    return { sent: n, recipients: recipients.length };
+    const r = await deliverMaintNotify({
+      channel: 'whatsapp',
+      recipients,
+      body,
+      subject: maint.title,
+      sendFn: async (list, b) => pushWhatsappBroadcast({
+        emails: list, body: b, sourceType: 'isp_maintenance', sourceId: String(maint.id),
+      }),
+    });
+    return { sent: r.sent, throttled: r.throttled, recipients: recipients.length };
   } catch (e) {
     console.warn('[Maint-WhatsApp] error:', e.message);
     return { sent: 0, error: e.message };
@@ -16270,22 +16415,44 @@ async function sendMaintenanceMail(maint, kind /* 'pre'|'start'|'end' */) {
     `\nFuer Rueckfragen: technik@rosenweg4303.ch`,
     `\nRosenweg ISP`,
   ].filter(Boolean).join('\n');
-  // BCC alle Empfaenger
-  let sent = 0;
+  // Mit Throttle+Combine pro Empfaenger. Direct-Sender bekommen sofort eine
+  // BCC-Mail; gethrottelte Empfaenger werden in pending_lines gesammelt und
+  // spaeter vom Flush-Cron als Einzel-Mail (Sammelmeldung) versendet.
   try {
-    await transporter.sendMail({
-      from: process.env.SMTP_FROM || 'isp@rosenweg4303.ch',
-      to: 'isp@rosenweg4303.ch',
-      bcc: recipients,
+    const r = await deliverMaintNotify({
+      channel: 'email',
+      recipients,
+      body,
       subject,
-      text: body,
+      sendFn: async (list, b) => {
+        if (!list.length) return 0;
+        await transporter.sendMail({
+          from: process.env.SMTP_FROM || 'isp@rosenweg4303.ch',
+          to: 'isp@rosenweg4303.ch',
+          bcc: list,
+          subject,
+          text: b,
+        });
+        return list.length;
+      },
     });
-    sent = recipients.length;
+    return { sent: r.sent, throttled: r.throttled };
   } catch (e) {
     console.warn('[Maint-Mail] error:', e.message);
     return { sent: 0, error: e.message };
   }
-  return { sent };
+}
+
+// Helper fuer den Flush-Cron — einzelne Mail (nicht BCC, weil pro Empfaenger
+// separat geflusht wird). Ausschuss ist nie im Flush, der bekam die Mails
+// schon direkt im ersten Send.
+async function sendEmail({ to, subject, text }) {
+  if (!to) return false;
+  await transporter.sendMail({
+    from: process.env.SMTP_FROM || 'isp@rosenweg4303.ch',
+    to, subject, text,
+  });
+  return true;
 }
 
 // SCHEMA: jeder Endpoint joint die Counts der zu sendenden Notifs nicht — wir
@@ -19784,6 +19951,30 @@ async function initDB() {
         ON isp_maintenance(source_device_id)
         WHERE auto_source = 'unifi_device_update' AND status IN ('planned','active');
 
+      -- Per-Empfaenger-Throttle + Combine-Puffer fuer Maintenance-
+      -- Notifications. Statt User mit 3-5 WA/Mails zu bombardieren wenn
+      -- mehrere Wartungen parallel laufen (Beispiel: 3 Switch-Updates
+      -- gleichzeitig im 3-Uhr-Slot, jeweils Pre+Start+End):
+      --   - innerhalb MAINT_NOTIFY_THROTTLE_MIN (default 30 Min) ab letzter
+      --     gesendeter Nachricht werden weitere Bodies in pending_lines
+      --     gepuffert statt sofort gesendet
+      --   - sobald das Fenster ablaeuft, flusht ein Cron die pending_lines
+      --     als eine kombinierte Sammelmeldung
+      --   - subject_lines tracked die einzelnen Titel-Praefixe fuer den
+      --     Mail-Subject ("[Rosenweg ISP] 3 Wartungen: X, Y, Z")
+      CREATE TABLE IF NOT EXISTS isp_maint_notify_throttle (
+        recipient TEXT NOT NULL,
+        channel VARCHAR(20) NOT NULL,
+        last_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        pending_lines JSONB DEFAULT '[]'::JSONB,
+        pending_subjects JSONB DEFAULT '[]'::JSONB,
+        PRIMARY KEY (recipient, channel)
+      );
+      ALTER TABLE isp_maint_notify_throttle
+        ADD COLUMN IF NOT EXISTS pending_lines JSONB DEFAULT '[]'::JSONB;
+      ALTER TABLE isp_maint_notify_throttle
+        ADD COLUMN IF NOT EXISTS pending_subjects JSONB DEFAULT '[]'::JSONB;
+
       CREATE TABLE IF NOT EXISTS isp_subscribers (
         id SERIAL PRIMARY KEY,
         wohnung_id INTEGER REFERENCES wohnungen(id) ON DELETE CASCADE,
@@ -21037,6 +21228,9 @@ initDB()
       setTimeout(cleanupExpiredSessions, 30 * 1000); // first cleanup after 30s
       // Wartungs-Notification-Cron (1min)
       activeIntervals.push(setInterval(maintProcessScheduledNotifications, 60 * 1000));
+      // Throttle-Flush: gepufferte Sammelmeldungen versenden sobald deren
+      // 30-Min-Fenster abgelaufen ist (1min granularitaet).
+      activeIntervals.push(setInterval(maintFlushNotifyPending, 60 * 1000));
       // UniFi-Geraete-State-Watcher: Network + Protect + Access + Controller
       setTimeout(maintPollUnifiDevices, 30 * 1000);
       setTimeout(maintPollUnifiProtect, 35 * 1000);
