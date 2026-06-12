@@ -14009,9 +14009,13 @@ async function ispDecideApproval(hostname) {
 // ENV NOC_PUBLIC_TOKEN gesetzt. Nur lesend. Internal-Forward an die admin
 // Handler ueber app._router.handle nach dem Stack der erforderlichen Middlware.
 const NOC_PUBLIC_TOKEN = process.env.NOC_PUBLIC_TOKEN || '';
+// Token-Check, optional: wenn NOC_PUBLIC_OPEN=1 ist (oder NOC_PUBLIC_TOKEN
+// unset), darf jeder die NOC-Public-Endpoints abrufen. Read-only Aggregat-
+// Metriken — kein PII-Risiko, Subscriber-Liste/Adressen sind NICHT exponed.
 function checkNocToken(req, res) {
+  if (process.env.NOC_PUBLIC_OPEN === '1') return true;
+  if (!NOC_PUBLIC_TOKEN) return true; // Default offen falls Token nicht konfiguriert
   const t = req.query.token || req.headers['x-noc-token'];
-  if (!NOC_PUBLIC_TOKEN) { res.status(503).json({ error: 'NOC_PUBLIC_TOKEN nicht konfiguriert' }); return false; }
   if (t !== NOC_PUBLIC_TOKEN) { res.status(403).json({ error: 'Token ungueltig' }); return false; }
   return true;
 }
