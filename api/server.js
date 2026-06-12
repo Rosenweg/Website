@@ -16358,75 +16358,183 @@ async function maintProcessScheduledNotifications() {
   } catch (err) { console.warn('[Maint-Notify] error:', err.message); }
 }
 
-// ─── Cron 2: UniFi-Device-State-Watcher ─────────────────────────────
-// Erkennt automatisch wenn UniFi-Geraete in Update gehen oder offline.
-const _maintLastDeviceState = new Map(); // mac -> state
+// ─── Cron 2: UniFi-Device-State-Watcher (Network + Protect) ─────────
+// 1. Pre-Detect: wenn dev.upgradable=true und noch keine Wartung existiert,
+//    legen wir eine "planned" Wartung an + senden Vorab-Info.
+// 2. Real-time: state 1->!=1 (Network) bzw. CONNECTED->!CONNECTED (Protect):
+//    bestehende planned->active oder neue active + Start-Notif.
+// 3. Recovery: state zurueck auf online: active->completed + All-Clear.
+const _maintLastDeviceState = new Map(); // device-id -> state
+
+// Gemeinsamer Handler fuer ein Device aus Network ODER Protect.
+//   key:        eindeutiger Identifier (mac fuer Network, id fuer Protect)
+//   name:       Anzeige-Name
+//   model:      Geraete-Modell-String
+//   isOnline:   bool — true wenn aktuell betriebsbereit
+//   upgradable: bool — true wenn Firmware-Update bekannt verfuegbar
+//   upgradeTo:  string — Ziel-Firmware-Version (optional)
+//   source:     'network'|'protect' (fuer den Titel)
+async function maintHandleDeviceUpdate({ key, name, model, isOnline, upgradable, upgradeTo, source }) {
+  const prev = _maintLastDeviceState.get(key);
+  _maintLastDeviceState.set(key, isOnline ? 1 : 0);
+  const haus = hausFromDeviceName(name);
+  const scope = haus ? { houses: [haus] } : { all: true };
+  const productLabel = source === 'protect' ? 'UniFi-Protect-Geraet' : 'UniFi-Network-Geraet';
+
+  // 1) Pre-Detection: upgradable + noch online + noch keine Wartung → "planned"
+  if (upgradable && isOnline) {
+    const title = `Firmware-Update verfuegbar: ${name || model || key}`;
+    const desc = `${productLabel} "${name || ''}" (${model || ''}) ` +
+                 `hat ein Firmware-Update auf ${upgradeTo || 'neuere Version'} bereit. ` +
+                 `UniFi installiert das beim naechsten Auto-Upgrade-Zyklus — der Anschluss ` +
+                 `wird waehrend dieser Zeit kurz unterbrochen sein.`;
+    try {
+      const ins = await pool.query(
+        `INSERT INTO isp_maintenance
+           (title, description, severity, scope, status, start_at,
+            notify_email, notify_whatsapp, notify_lead_time_minutes,
+            auto_source, source_device_id, source_device_name)
+         VALUES ($1,$2,'info',$3::JSONB,'planned',NOW() + interval '24 hours',
+                 true, true, 0,
+                 'unifi_device_update', $4, $5)
+         ON CONFLICT (source_device_id)
+           WHERE auto_source = 'unifi_device_update' AND status IN ('planned','active')
+         DO NOTHING
+         RETURNING *`,
+        [title, desc, JSON.stringify(scope), key, name || null],
+      );
+      if (ins.rows[0]) {
+        console.log(`[Maint-Auto] pre: ${title}`);
+        const mail = await sendMaintenanceMail(ins.rows[0], 'pre');
+        const wa = await sendMaintenanceWhatsApp(ins.rows[0], 'pre');
+        await pool.query('UPDATE isp_maintenance SET notify_email_pre_at = NOW() WHERE id = $1', [ins.rows[0].id]);
+        console.log(`[Maint-Auto] pre-notify: email=${mail.sent} wa=${wa.sent}`);
+      }
+    } catch (e) { console.warn('[Maint-Auto] pre-insert:', e.message); }
+  }
+
+  if (prev === undefined) return; // erster Poll: keine Transitions
+
+  // 2) Online -> Offline/Update: bestehende planned -> active hochstufen,
+  //    oder neue Wartung anlegen wenn keine vorbereitet war.
+  if (prev === 1 && !isOnline) {
+    try {
+      const planned = await pool.query(
+        `UPDATE isp_maintenance
+            SET status='active', start_at=NOW(), notify_start_at=NOW(),
+                severity='warning', updated_at=NOW()
+          WHERE auto_source='unifi_device_update' AND source_device_id=$1
+            AND status='planned'
+          RETURNING *`,
+        [key],
+      );
+      let row = planned.rows[0];
+      if (!row) {
+        const title = `Geraete-Update: ${name || model || key}`;
+        const desc = `${productLabel} "${name || ''}" (${model || ''}) fuehrt gerade ein Update durch oder ist offline. ` +
+                     `Der Anschluss kann waehrend dieser Zeit kurz unterbrochen sein.`;
+        const ins = await pool.query(
+          `INSERT INTO isp_maintenance
+             (title, description, severity, scope, status, start_at,
+              notify_email, notify_whatsapp, notify_lead_time_minutes,
+              notify_start_at,
+              auto_source, source_device_id, source_device_name)
+           VALUES ($1,$2,'warning',$3::JSONB,'active',NOW(),
+                   true,true,0, NOW(),
+                   'unifi_device_update', $4, $5)
+           ON CONFLICT (source_device_id)
+             WHERE auto_source = 'unifi_device_update' AND status IN ('planned','active')
+           DO NOTHING
+           RETURNING *`,
+          [title, desc, JSON.stringify(scope), key, name || null],
+        );
+        row = ins.rows[0];
+      }
+      if (row) {
+        console.log(`[Maint-Auto] start: #${row.id} ${row.title}`);
+        const mail = await sendMaintenanceMail(row, 'start');
+        const wa = await sendMaintenanceWhatsApp(row, 'start');
+        console.log(`[Maint-Auto] start-notify: email=${mail.sent} wa=${wa.sent}`);
+      }
+    } catch (e) { console.warn('[Maint-Auto] start error:', e.message); }
+  }
+
+  // 3) Offline/Update -> wieder online: active -> completed + All-Clear.
+  if (prev === 0 && isOnline) {
+    try {
+      const close = await pool.query(
+        `UPDATE isp_maintenance
+            SET status='completed', end_at=NOW(), notify_end_at=NOW(), updated_at=NOW()
+          WHERE auto_source='unifi_device_update' AND source_device_id=$1
+            AND status='active'
+          RETURNING *`,
+        [key],
+      );
+      if (close.rows[0]) {
+        const row = close.rows[0];
+        console.log(`[Maint-Auto] end: #${row.id} ${row.title}`);
+        const mail = await sendMaintenanceMail(row, 'end');
+        const wa = await sendMaintenanceWhatsApp(row, 'end');
+        console.log(`[Maint-Auto] end-notify: email=${mail.sent} wa=${wa.sent}`);
+      }
+    } catch (e) { console.warn('[Maint-Auto] close error:', e.message); }
+  }
+}
+
 async function maintPollUnifiDevices() {
   try {
     const d = await unifiGet('stat/device', 4000);
-    const devs = (d.data || []).filter(x => x.mac);
-    for (const dev of devs) {
-      const mac = dev.mac;
-      const stateNow = dev.state; // 1=online, 2=upgrade, andere=problem/offline
-      const prev = _maintLastDeviceState.get(mac);
-      _maintLastDeviceState.set(mac, stateNow);
-      if (prev === undefined) continue; // erster Poll
-
-      // Online -> Update/Offline: Wartungseintrag anlegen (idempotent via UNIQUE)
-      if (prev === 1 && stateNow !== 1) {
-        const haus = hausFromDeviceName(dev.name);
-        const scope = haus ? { houses: [haus] } : { all: true };
-        const title = `Geraete-Update: ${dev.name || dev.model || mac}`;
-        const desc = `UniFi-Geraet ${dev.name || ''} (${dev.model || ''}) ` +
-                     (stateNow === 2 ? 'fuehrt ein Firmware-Update durch.' : 'ist nicht mehr online (state=' + stateNow + ').') +
-                     ' Der Anschluss kann waehrend dieser Zeit kurzfristig unterbrochen sein.';
-        try {
-          const ins = await pool.query(
-            `INSERT INTO isp_maintenance
-               (title, description, severity, scope, status, start_at,
-                notify_email, notify_lead_time_minutes,
-                auto_source, source_device_id, source_device_name)
-             VALUES ($1,$2,'warning',$3::JSONB,'active',NOW(),
-                     true, 0,
-                     'unifi_device_update', $4, $5)
-             ON CONFLICT (source_device_id) WHERE auto_source = 'unifi_device_update' AND status IN ('planned','active')
-             DO NOTHING
-             RETURNING *`,
-            [title, desc, JSON.stringify(scope), mac, dev.name || null],
-          );
-          if (ins.rows[0]) {
-            console.log(`[Maint-Auto] erkannt: ${title}`);
-            const mail = await sendMaintenanceMail(ins.rows[0], 'start');
-            const wa = await sendMaintenanceWhatsApp(ins.rows[0], 'start');
-            await pool.query('UPDATE isp_maintenance SET notify_start_at = NOW(), notify_whatsapp = true WHERE id = $1', [ins.rows[0].id]);
-            console.log(`[Maint-Auto] start-notify: email=${mail.sent} wa=${wa.sent}`);
-          }
-        } catch (e) { console.warn('[Maint-Auto] insert error:', e.message); }
-      }
-      // Update/Offline -> wieder online
-      if (prev !== 1 && stateNow === 1) {
-        try {
-          const open = await pool.query(
-            `SELECT * FROM isp_maintenance
-              WHERE auto_source = 'unifi_device_update' AND source_device_id = $1
-                AND status = 'active'`,
-            [mac],
-          );
-          if (open.rows[0]) {
-            await pool.query(
-              "UPDATE isp_maintenance SET status='completed', end_at=NOW(), notify_end_at=NOW() WHERE id=$1",
-              [open.rows[0].id],
-            );
-            console.log(`[Maint-Auto] erledigt: #${open.rows[0].id}`);
-            const closed = { ...open.rows[0], status: 'completed', end_at: new Date() };
-            const mail = await sendMaintenanceMail(closed, 'end');
-            const wa = await sendMaintenanceWhatsApp(closed, 'end');
-            console.log(`[Maint-Auto] all-clear: email=${mail.sent} wa=${wa.sent}`);
-          }
-        } catch (e) { console.warn('[Maint-Auto] close error:', e.message); }
-      }
+    for (const dev of (d.data || []).filter(x => x.mac)) {
+      await maintHandleDeviceUpdate({
+        key: dev.mac,
+        name: dev.name,
+        model: dev.model,
+        isOnline: dev.state === 1,
+        upgradable: dev.upgradable === true,
+        upgradeTo: dev.upgrade_to_firmware,
+        source: 'network',
+      });
     }
-  } catch (err) { console.warn('[Maint-Auto] poll error:', err.message); }
+  } catch (err) { console.warn('[Maint-Auto/Network] poll error:', err.message); }
+}
+
+async function maintPollUnifiProtect() {
+  try {
+    const baseHost = UNIFI_HOST.replace(/\/$/, '');
+    const fetchProtect = async (path) => {
+      const r = await fetch(`${baseHost}/proxy/protect/integration/v1/${path}`, {
+        headers: { 'X-API-Key': UNIFI_API_KEY },
+        signal: AbortSignal.timeout(4000),
+      });
+      if (!r.ok) throw new Error(`protect ${path} -> ${r.status}`);
+      return r.json();
+    };
+    const cams = await fetchProtect('cameras').catch(() => []);
+    for (const c of (Array.isArray(cams) ? cams : [])) {
+      const stateStr = String(c.state || '').toUpperCase();
+      await maintHandleDeviceUpdate({
+        key: 'protect-cam-' + c.id,
+        name: c.name,
+        model: 'Camera ' + (c.modelKey || ''),
+        isOnline: stateStr === 'CONNECTED',
+        upgradable: false, // Protect-API liefert das nicht klar — wir nutzen nur state changes
+        source: 'protect',
+      });
+    }
+    // NVR (Recording-Geraet, typischerweise das UDM selbst)
+    const nvrs = await fetchProtect('nvrs').catch(() => null);
+    const nvrList = Array.isArray(nvrs) ? nvrs : (nvrs ? [nvrs] : []);
+    for (const n of nvrList) {
+      await maintHandleDeviceUpdate({
+        key: 'protect-nvr-' + n.id,
+        name: n.name,
+        model: 'NVR',
+        isOnline: !!n.id, // wenn das Objekt da ist, geht's
+        upgradable: false,
+        source: 'protect',
+      });
+    }
+  } catch (err) { console.warn('[Maint-Auto/Protect] poll error:', err.message); }
 }
 
 // === Reverse-Proxy-Routen ===
@@ -20770,10 +20878,12 @@ initDB()
       setTimeout(cleanupExpiredSessions, 30 * 1000); // first cleanup after 30s
       // Wartungs-Notification-Cron (1min)
       activeIntervals.push(setInterval(maintProcessScheduledNotifications, 60 * 1000));
-      // UniFi-Geraete-State-Watcher (1min, erstmal 30s nach Start)
+      // UniFi-Geraete-State-Watcher: Network + Protect (1min, erstmal 30s nach Start)
       setTimeout(maintPollUnifiDevices, 30 * 1000);
+      setTimeout(maintPollUnifiProtect, 35 * 1000);
       activeIntervals.push(setInterval(maintPollUnifiDevices, 60 * 1000));
-      console.log('[Maint] notification cron + unifi device watcher gestartet');
+      activeIntervals.push(setInterval(maintPollUnifiProtect, 60 * 1000));
+      console.log('[Maint] notification cron + unifi (network+protect) device watcher gestartet');
     });
   })
   .catch((err) => {
