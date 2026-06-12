@@ -697,6 +697,7 @@
             ${!r.active ? '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-1">inaktiv</span>' : ''}
           </div>
           <div class="flex gap-2">
+            ${r.approval_status && r.approval_status !== 'approved' ? `<button onclick="approveRp(${r.id})" class="text-xs bg-emerald-600 text-white px-2 py-1 rounded">Genehmigen</button>` : ''}
             <button onclick="editRp(${r.id})" class="text-xs text-blue-600 hover:underline">Bearbeiten</button>
             <button onclick="delRp(${r.id})" class="text-xs text-red-600 hover:underline">Loeschen</button>
           </div>
@@ -813,6 +814,15 @@
   function editRp(id) {
     const r = rpRoutes.find(x => x.id === id);
     if (r) openRpModal(r);
+  }
+  async function approveRp(id) {
+    if (!confirm('Route genehmigen und aktiv schalten?')) return;
+    const r = await AuthentikAuth.apiFetch('/api/isp/reverse-proxy/' + id, {
+      method: 'PUT', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ approval_status: 'approved', active: true }),
+    });
+    if (!r.ok) { alert('Fehler: ' + await r.text()); return; }
+    await loadRp();
   }
   async function delRp(id) {
     if (!confirm('Route loeschen?')) return;
