@@ -2075,7 +2075,7 @@
                 <span class="text-[10px] font-mono uppercase text-slate-300">${esc(s.subsystem)}</span>
               </span>`;
             });
-            for (const r of (u.routers || [])) {
+            for (const r of (d.routers || [])) {
               dots.push(`<span class="inline-flex items-center gap-1.5 bg-slate-900/60 border border-slate-700 rounded px-2 py-0.5" title="CT ${r.lxc_id} · VLAN ${r.client_vlan}">
                 <span class="noc-led ${r.ok ? 'led-green' : 'led-red'}"></span>
                 <span class="text-[10px] font-mono uppercase text-slate-300">${esc(r.label)}</span>

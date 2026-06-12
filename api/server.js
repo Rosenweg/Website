@@ -14005,7 +14005,28 @@ async function ispDecideApproval(hostname) {
 // Aggregierte Echtzeit-Metriken für das ISP-Admin-NOC-Cockpit.
 // Admin-only — die Daten umfassen Quota-Stand, Top-Sender und Gesamt-
 // Volumen über alle Sender-Domains.
-app.get('/api/isp/noc/dashboard', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+// Public-NOC: Wallboard/Kiosk-Modus via Token-Param (?token=). Token wird im
+// ENV NOC_PUBLIC_TOKEN gesetzt. Nur lesend. Internal-Forward an die admin
+// Handler ueber app._router.handle nach dem Stack der erforderlichen Middlware.
+const NOC_PUBLIC_TOKEN = process.env.NOC_PUBLIC_TOKEN || '';
+function checkNocToken(req, res) {
+  const t = req.query.token || req.headers['x-noc-token'];
+  if (!NOC_PUBLIC_TOKEN) { res.status(503).json({ error: 'NOC_PUBLIC_TOKEN nicht konfiguriert' }); return false; }
+  if (t !== NOC_PUBLIC_TOKEN) { res.status(403).json({ error: 'Token ungueltig' }); return false; }
+  return true;
+}
+
+// Public-Variante: alle Daten read-only, Token-gegated.
+app.get('/api/isp/noc/public/dashboard', async (req, res) => {
+  if (!checkNocToken(req, res)) return;
+  return nocDashboardHandler(req, res);
+});
+app.get('/api/isp/noc/public/unifi', async (req, res) => {
+  if (!checkNocToken(req, res)) return;
+  return nocUnifiHandler(req, res);
+});
+
+async function nocDashboardHandler(req, res) {
   try {
     const ym = new Date().toISOString().slice(0, 7);
     // Outbound Monatstotal + Top-Sender
@@ -14065,7 +14086,8 @@ app.get('/api/isp/noc/dashboard', authMiddleware, requireTechnikOrPraesident, as
       counts: { vpn_active: vpnActive, subscribers_active: subsActive },
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
-});
+}
+app.get('/api/isp/noc/dashboard', authMiddleware, requireTechnikOrPraesident, nocDashboardHandler);
 
 // UniFi-Metriken für NOC-Cockpit (Geräte, Clients, WAN, WLANs, Top-APs)
 async function unifiGet(path, timeoutMs = 4000) {
@@ -14092,7 +14114,7 @@ async function unifiCall(method, path, body, timeoutMs = 8000) {
   return json;
 }
 
-app.get('/api/isp/noc/unifi', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+async function nocUnifiHandler(req, res) {
   const out = {
     reachable: false,
     devices: { total: 0, online: 0, offline: 0, by_type: {} },
@@ -14212,7 +14234,8 @@ app.get('/api/isp/noc/unifi', authMiddleware, requireTechnikOrPraesident, async 
     out.error = err.message;
     res.json(out);
   }
-});
+}
+app.get('/api/isp/noc/unifi', authMiddleware, requireTechnikOrPraesident, nocUnifiHandler);
 
 // ─── Edge-Traefik Dynamic-Config-Provider ──────────────────────────────
 // Wird vom Traefik in LXC 245 alle 15s gepollt (HTTP-Provider). Liefert

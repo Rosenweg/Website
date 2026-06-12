@@ -17,6 +17,7 @@ COPY tv.html .
 COPY netzwerk.html .
 COPY verbindungen.html .
 COPY dmarc.html .
+COPY noc-fullscreen.html .
 
 # Shared JS-Module (Auth, Site-Config, QR, etc.)
 COPY js/ js/
