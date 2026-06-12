@@ -14115,6 +14115,9 @@ app.get('/api/isp/noc/unifi', authMiddleware, requireTechnikOrPraesident, async 
 function safeId(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, ''); }
 
 async function buildTraefikDynamicConfig() {
+  // WICHTIG: leere sections (z.B. middlewares: {}) lassen Traefik file-provider
+  // mit "middlewares cannot be a standalone element" abbrechen. Wir fuellen
+  // unten und cleanen am Ende.
   const cfg = { http: { routers: {}, services: {}, middlewares: {} }, tcp: { routers: {}, services: {} } };
 
   // 1) HTTP-Routes aus isp_reverse_proxy_routes
@@ -14184,6 +14187,16 @@ async function buildTraefikDynamicConfig() {
     }
   }
 
+  // Cleanup: strip leere sub-objekte damit Traefik-File-Provider nicht
+  // ueber "middlewares cannot be a standalone element" stolpert.
+  for (const proto of ['http', 'tcp']) {
+    for (const key of Object.keys(cfg[proto])) {
+      if (!cfg[proto][key] || Object.keys(cfg[proto][key]).length === 0) {
+        delete cfg[proto][key];
+      }
+    }
+    if (Object.keys(cfg[proto]).length === 0) delete cfg[proto];
+  }
   return cfg;
 }
 

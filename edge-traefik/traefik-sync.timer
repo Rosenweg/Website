@@ -1,0 +1,10 @@
+[Unit]
+Description=Sync Traefik dynamic config every 15s
+
+[Timer]
+OnBootSec=10s
+OnUnitInactiveSec=15s
+AccuracySec=2s
+
+[Install]
+WantedBy=timers.target
