@@ -14890,9 +14890,12 @@ app.post('/api/isp/reverse-proxy', authMiddleware, async (req, res) => {
     if (!ispIsAdmin(req) && (owner || '').toLowerCase() !== (req.user.email || '').toLowerCase()) {
       return res.status(403).json({ error: 'Du kannst nur eigene Routen anlegen' });
     }
-    // Auto-Approval (Admin uebersteuert mit b.skip_approval)
-    const decision = ispIsAdmin(req) && b.skip_approval
-      ? { approval_status: 'approved', approval_reason: 'Admin-Bypass', active: true }
+    // Auto-Approval: Admin-Erstellung aus dem Admin-Tab umgeht die
+    // Approval-Pruefung automatisch (Admin koennen nicht durch ihre eigene
+    // Logik blockiert sein). Sonst greift die normale DNS-Pruefung.
+    const decision = ispIsAdmin(req)
+      ? { approval_status: 'approved', approval_reason: 'Admin-erstellt', active: true,
+          dns_verified_at: null, last_dns_check_at: null }
       : await ispDecideApproval(b.hostname);
     const r = await pool.query(
       `INSERT INTO isp_reverse_proxy_routes (hostname, backend_url, owner_email, wohnung_id, ssl, ssl_method,
@@ -14932,7 +14935,8 @@ app.put('/api/isp/reverse-proxy/:id', authMiddleware, async (req, res) => {
     const userFields = ['backend_url','ssl','auth_required','rate_limit_per_min','active','notizen',
                         'protocol','entry_point','cert_resolver','strip_prefix','preserve_host',
                         'read_timeout_s','pass_through_tls'];
-    const adminFields = ['hostname','owner_email','wohnung_id','ssl_method','public'];
+    const adminFields = ['hostname','owner_email','wohnung_id','ssl_method','public',
+                         'approval_status','approval_reason'];
     const allowed = admin ? [...userFields, ...adminFields] : userFields;
     for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
     if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
