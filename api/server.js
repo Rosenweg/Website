@@ -16379,7 +16379,9 @@ async function maintHandleDeviceUpdate({ key, name, model, isOnline, upgradable,
   _maintLastDeviceState.set(key, isOnline ? 1 : 0);
   const haus = hausFromDeviceName(name);
   const scope = haus ? { houses: [haus] } : { all: true };
-  const productLabel = source === 'protect' ? 'UniFi-Protect-Geraet' : 'UniFi-Network-Geraet';
+  const productLabel = source === 'protect' ? 'UniFi-Protect-Geraet'
+                     : source === 'access'  ? 'UniFi-Access-Geraet'
+                     : 'UniFi-Network-Geraet';
 
   // 1) Pre-Detection: upgradable + noch online + noch keine Wartung → "planned"
   if (upgradable && isOnline) {
@@ -16496,6 +16498,32 @@ async function maintPollUnifiDevices() {
       });
     }
   } catch (err) { console.warn('[Maint-Auto/Network] poll error:', err.message); }
+}
+
+async function maintPollUnifiAccess() {
+  try {
+    const baseHost = UNIFI_HOST.replace(/\/$/, '');
+    const r = await fetch(`${baseHost}/proxy/access/api/v2/devices`, {
+      headers: { 'X-API-Key': UNIFI_API_KEY },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!r.ok) return;
+    const json = await r.json();
+    const devs = Array.isArray(json.data) ? json.data : [];
+    for (const d of devs) {
+      await maintHandleDeviceUpdate({
+        key: 'access-' + (d.unique_id || d.id || d.name),
+        name: d.alias || d.name,
+        model: d.display_model || d.model || 'Access',
+        isOnline: d.is_online === true,
+        // Access-API hat kein klares 'upgradable'-Flag in v2 — wir
+        // verlassen uns auf den is_online-Wechsel (Update startet
+        // typischerweise mit offline-Phase).
+        upgradable: false,
+        source: 'access',
+      });
+    }
+  } catch (err) { console.warn('[Maint-Auto/Access] poll error:', err.message); }
 }
 
 async function maintPollUnifiProtect() {
@@ -20878,12 +20906,14 @@ initDB()
       setTimeout(cleanupExpiredSessions, 30 * 1000); // first cleanup after 30s
       // Wartungs-Notification-Cron (1min)
       activeIntervals.push(setInterval(maintProcessScheduledNotifications, 60 * 1000));
-      // UniFi-Geraete-State-Watcher: Network + Protect (1min, erstmal 30s nach Start)
+      // UniFi-Geraete-State-Watcher: Network + Protect + Access
       setTimeout(maintPollUnifiDevices, 30 * 1000);
       setTimeout(maintPollUnifiProtect, 35 * 1000);
+      setTimeout(maintPollUnifiAccess,  40 * 1000);
       activeIntervals.push(setInterval(maintPollUnifiDevices, 60 * 1000));
       activeIntervals.push(setInterval(maintPollUnifiProtect, 60 * 1000));
-      console.log('[Maint] notification cron + unifi (network+protect) device watcher gestartet');
+      activeIntervals.push(setInterval(maintPollUnifiAccess,  60 * 1000));
+      console.log('[Maint] notification cron + unifi (network+protect+access) device watcher gestartet');
     });
   })
   .catch((err) => {
