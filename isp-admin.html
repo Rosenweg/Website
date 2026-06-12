@@ -843,7 +843,11 @@
           <td class="px-3 py-2 text-right"><button onclick="delIp(${ip.id})" class="text-xs text-red-600 hover:underline">Löschen</button></td>
         </tr>`).join('')}</tbody></table>`;
   }
-  function openIpModal() {
+  async function openIpModal() {
+    const opts = await loadWohnungenOptions();
+    const optsHtml = ['<option value="">— keine (Service unten) —</option>',
+      ...opts.map(o => `<option value="${o.id}">STWEG ${esc(o.stweg)} · ${esc(o.bezeichnung)}</option>`)
+    ].join('');
     const modal = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5">
         <h2 class="font-bold mb-3">Fix-IP erfassen</h2>
@@ -853,9 +857,10 @@
             <option value="lan">lan (intern)</option><option value="public_v4">public_v4</option>
             <option value="public_v6">public_v6</option><option value="mgmt">mgmt</option>
           </select></div>
-          <div><label class="block text-xs text-gray-600">Wohnung-ID (oder Service-Name) *</label>
-            <input id="ip-wohnung" type="number" placeholder="Wohnung-ID" class="w-full border rounded px-2 py-1 mb-1">
-            <input id="ip-service" type="text" placeholder="ODER Service-Name (pmg, traefik, ...)" class="w-full border rounded px-2 py-1"></div>
+          <div><label class="block text-xs text-gray-600">Wohnung *</label>
+            <select id="ip-wohnung" class="w-full border rounded px-2 py-1 mb-1">${optsHtml}</select>
+            <input id="ip-service" type="text" placeholder="ODER Service-Name (pmg, traefik, ...)" class="w-full border rounded px-2 py-1">
+            <p class="text-xs text-gray-400 mt-0.5">Eines von beiden — entweder Wohnung wählen oder Service-Name eintragen.</p></div>
           <div><label class="block text-xs text-gray-600">Hostname</label><input id="ip-host" type="text" class="w-full border rounded px-2 py-1"></div>
           <div><label class="block text-xs text-gray-600">MAC (DHCP-Reservation)</label><input id="ip-mac" type="text" class="w-full border rounded px-2 py-1"></div>
           <div><label class="block text-xs text-gray-600">Zweck</label><input id="ip-zweck" type="text" class="w-full border rounded px-2 py-1"></div>
