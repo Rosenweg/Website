@@ -433,14 +433,31 @@
       </tbody></table>`;
   }
 
-  function openSubModal() { showSubModal({}); }
-  function editSub(id) { showSubModal(subscribers.find(s => s.id === id) || {}); }
-  function showSubModal(s) {
+  let wohnungenOptionsCache = null;
+  async function loadWohnungenOptions() {
+    if (wohnungenOptionsCache) return wohnungenOptionsCache;
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/wohnungen-options');
+      if (r.ok) wohnungenOptionsCache = (await r.json()).wohnungen || [];
+      else wohnungenOptionsCache = [];
+    } catch { wohnungenOptionsCache = []; }
+    return wohnungenOptionsCache;
+  }
+  async function openSubModal() { await showSubModal({}); }
+  async function editSub(id) { await showSubModal(subscribers.find(s => s.id === id) || {}); }
+  async function showSubModal(s) {
+    const opts = await loadWohnungenOptions();
+    const optsHtml = ['<option value="">— wählen —</option>',
+      ...opts.map(o => `<option value="${o.id}" ${s.wohnung_id === o.id ? 'selected' : ''}>STWEG ${esc(o.stweg)} · ${esc(o.bezeichnung)}</option>`)
+    ].join('');
     const modal = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-xl w-full p-5 max-h-[90vh] overflow-y-auto">
         <h2 class="font-bold mb-3">${s.id ? 'Anschluss bearbeiten' : 'Neuen Anschluss erfassen'}</h2>
         <div class="space-y-2 text-sm">
-          <div><label class="block text-xs text-gray-600">Wohnung-ID *</label><input id="s-wohnung" type="number" value="${s.wohnung_id || ''}" class="w-full border rounded px-2 py-1"></div>
+          <div>
+            <label class="block text-xs text-gray-600">Wohnung *</label>
+            <select id="s-wohnung" class="w-full border rounded px-2 py-1">${optsHtml}</select>
+          </div>
           <div class="grid grid-cols-2 gap-2">
             <div><label class="block text-xs text-gray-600">Status</label><select id="s-status" class="w-full border rounded px-2 py-1">
               <option value="geplant" ${s.status === 'geplant' ? 'selected' : ''}>geplant</option>
