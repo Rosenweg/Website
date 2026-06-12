@@ -14954,11 +14954,19 @@ app.get('/api/isp/vlan-requests/:id/suggest', authMiddleware, async (req, res) =
     if (!home) return res.status(400).json({ error: 'Antragsteller hat keine zugewiesene Haus-Einheit' });
     const hausNr = vpnRwFromBezeichnung(home.bezeichnung);
     if (!hausNr) return res.status(400).json({ error: `Haus-Nummer aus "${home.bezeichnung}" nicht ermittelbar` });
-    // Verwendete VLAN-IDs aus DB (approved + deployed)
+    // Verwendete VLAN-IDs aus DB (approved + deployed) UND aus UniFi (live).
+    // Wer im UniFi-Controller von Hand ein VLAN angelegt hat, soll uns nicht
+    // dieselbe ID vorgeschlagen bekommen.
     const used = await pool.query(
       "SELECT vlan_id FROM isp_vlan_requests WHERE vlan_id IS NOT NULL AND status IN ('approved','deployed')"
     );
     const usedSet = new Set(used.rows.map(r => r.vlan_id));
+    let unifiUsed = [];
+    try {
+      const uw = await unifiGet('rest/networkconf', 3500);
+      unifiUsed = (uw.data || []).map(n => Number(n.vlan)).filter(Number.isFinite);
+      for (const v of unifiUsed) usedSet.add(v);
+    } catch {}
     // Iteriere <Haus>01 .. <Haus>99 (z.B. 901..999 fuer RW9, 1801..1899 fuer RW18)
     const hausStr = String(hausNr);
     for (let seq = 1; seq <= 99; seq++) {
@@ -14969,6 +14977,7 @@ app.get('/api/isp/vlan-requests/:id/suggest', authMiddleware, async (req, res) =
           haus_bezeichnung: home.bezeichnung,
           suggested_vlan_id: candidate,
           reasoning: `Schema <HausNr><NN>: naechste freie ID fuer RW${hausNr} = ${candidate}`,
+          unifi_used_count: unifiUsed.length,
         });
       }
     }
