@@ -1721,6 +1721,34 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
           }
         }
       }
+
+      // Plus alle user-VLANs aus isp_vlan_requests wo der User Antragsteller
+      // oder Mitnutzer ist UND with_wlan=true UND status=deployed.
+      const email = (req.user.email || '').toLowerCase();
+      const myVlans = await pool.query(`
+        SELECT vlan_id, gewuenschter_name, subnet_v4, with_wlan, wlan_password,
+               unifi_network_id, antragsteller_email,
+               LOWER(antragsteller_email) = $1 AS is_owner
+          FROM isp_vlan_requests
+         WHERE status = 'deployed'
+           AND with_wlan = true
+           AND wlan_password IS NOT NULL
+           AND (LOWER(antragsteller_email) = $1
+                OR $1 = ANY(COALESCE(mitnutzer_emails, ARRAY[]::TEXT[])))
+      `, [email]);
+      for (const row of myVlans.rows) {
+        const net = row.unifi_network_id ? netMap[row.unifi_network_id] : null;
+        userWlans.push({
+          hausNr: null,
+          isUserVlan: true,
+          password: row.wlan_password,
+          network: net?.name || row.gewuenschter_name || `vlan-${row.vlan_id}`,
+          vlan: row.vlan_id,
+          subnet: row.subnet_v4,
+          rolle: row.is_owner ? 'antragsteller' : 'mitnutzer',
+          ownerEmail: row.is_owner ? null : row.antragsteller_email,
+        });
+      }
     }
 
     // Build all PPSKs for admins
