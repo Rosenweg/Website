@@ -6,7 +6,7 @@
     <title>WLAN — Rosenweg ISP</title>
     <link rel="icon" href="/logo-rosenweg-isp.png">
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="/js/authentik-auth.js?v=3"></script>
+    <script src="/js/authentik-auth.js?v=4"></script>
     <script src="/js/site-config.js"></script>
     <script src="/js/qrious.min.js"></script>
     <style>
@@ -161,6 +161,11 @@
 
         // Init
         const _el = document.getElementById('loading');
+        // AuthentikAuth.init() parsed den #auth=...-Hash aus OAuth-Callback.
+        // Ohne init() bleibt localStorage leer und getToken() returnt null.
+        (async () => {
+        await AuthentikAuth.init({ requireAuth: false });
+        try { RosenwegNav._wireAuth?.(); RosenwegNav._wirePermissions?.(); } catch {}
         const _token = AuthentikAuth.getToken();
         if (_token) {
             _el.textContent = 'WLAN-Daten werden geladen...';
@@ -178,6 +183,7 @@
         } else {
             _el.innerHTML = 'Bitte zuerst <a href="#" onclick="AuthentikAuth.login(); return false;" class="text-blue-600 underline font-semibold">einloggen</a>.';
         }
+        })();
     </script>
 </body>
 </html>
