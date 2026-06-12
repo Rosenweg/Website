@@ -14192,6 +14192,34 @@ async function buildTraefikDynamicConfig() {
     };
   }
 
+  // 1c) TCP-SNI / TCP-RAW aus isp_reverse_proxy_routes
+  // protocol='tcp_sni': HostSNI mit TLS-Passthrough (Backend liefert Cert)
+  // protocol='tcp_raw': reines TCP-Forward ohne SNI (Backend braucht's nicht)
+  const rpsTcp = await pool.query(
+    `SELECT * FROM isp_reverse_proxy_routes
+      WHERE active = true AND protocol IN ('tcp_sni','tcp_raw')
+      ORDER BY id`).catch(() => ({ rows: [] }));
+  for (const r of rpsTcp.rows) {
+    const id = safeId(`rp-${r.id}-${r.hostname}`);
+    const svc = id + '-svc';
+    // backend_url: erwarteter Form "host:port" (kein scheme); fallback http://
+    let addr = r.backend_url || '';
+    addr = addr.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    cfg.tcp.routers[id] = {
+      rule: r.protocol === 'tcp_sni'
+        ? `HostSNI(\`${r.hostname}\`)`
+        : `HostSNI(\`*\`)`,  // raw TCP: matches all SNI (entrypoint-spezifisch)
+      entryPoints: [r.entry_point || 'websecure'],
+      service: svc,
+    };
+    if (r.protocol === 'tcp_sni') {
+      cfg.tcp.routers[id].tls = { passthrough: true };
+    }
+    cfg.tcp.services[svc] = {
+      loadBalancer: { servers: [{ address: addr }] },
+    };
+  }
+
   // 2) TCP-SNI-Passthrough fuer Mail-Relays
   const mrs = await pool.query(
     `SELECT * FROM isp_mail_relays
