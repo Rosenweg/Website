@@ -326,6 +326,9 @@
     // → User landete nach Login wieder auf "Anmelden".
     // requireAuth:false damit Nicht-eingeloggte die Landing-Page sehen koennen.
     await AuthentikAuth.init({ requireAuth: false });
+    // Nav wurde schon vor auth.init() gerendert — Anmelden/Logout-Buttons
+    // bzw. permissionen muessen jetzt nochmal angewendet werden.
+    try { RosenwegNav._wireAuth?.(); RosenwegNav._wirePermissions?.(); } catch {}
     const user = AuthentikAuth.getUser();
     const greeting = document.getElementById('hero-greeting');
     if (user) {
