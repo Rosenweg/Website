@@ -443,12 +443,29 @@
     } catch { wohnungenOptionsCache = []; }
     return wohnungenOptionsCache;
   }
+  let unifiOptionsCache = null;
+  async function loadUnifiOptions() {
+    if (unifiOptionsCache) return unifiOptionsCache;
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/unifi-options');
+      if (r.ok) unifiOptionsCache = await r.json();
+      else unifiOptionsCache = { switches: [], vlans: [] };
+    } catch { unifiOptionsCache = { switches: [], vlans: [] }; }
+    return unifiOptionsCache;
+  }
   async function openSubModal() { await showSubModal({}); }
   async function editSub(id) { await showSubModal(subscribers.find(s => s.id === id) || {}); }
   async function showSubModal(s) {
     const opts = await loadWohnungenOptions();
+    const ufi = await loadUnifiOptions();
     const optsHtml = ['<option value="">— wählen —</option>',
       ...opts.map(o => `<option value="${o.id}" ${s.wohnung_id === o.id ? 'selected' : ''}>STWEG ${esc(o.stweg)} · ${esc(o.bezeichnung)}</option>`)
+    ].join('');
+    const switchOpts = ['<option value="">— wählen —</option>',
+      ...(ufi.switches || []).map(sw => `<option value="${esc(sw.name)}" ${s.switch_name === sw.name ? 'selected' : ''}>${esc(sw.name)} (${esc(sw.model)})</option>`)
+    ].join('');
+    const vlanOpts = ['<option value="">— wählen —</option>',
+      ...(ufi.vlans || []).map(v => `<option value="${v.vlan}" ${Number(s.vlan) === v.vlan ? 'selected' : ''}>${v.vlan} — ${esc(v.name)}</option>`)
     ].join('');
     const modal = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-xl w-full p-5 max-h-[90vh] overflow-y-auto">
@@ -474,11 +491,17 @@
             </select></div>
           </div>
           <div class="grid grid-cols-2 gap-2">
-            <div><label class="block text-xs text-gray-600">Switch</label><input id="s-switch" type="text" value="${esc(s.switch_name || '')}" class="w-full border rounded px-2 py-1"></div>
-            <div><label class="block text-xs text-gray-600">Port</label><input id="s-port" type="text" value="${esc(s.switch_port || '')}" class="w-full border rounded px-2 py-1"></div>
+            <div><label class="block text-xs text-gray-600">Switch</label>
+              <select id="s-switch" class="w-full border rounded px-2 py-1" onchange="updatePortDropdown()">${switchOpts}</select>
+            </div>
+            <div><label class="block text-xs text-gray-600">Port</label>
+              <select id="s-port" class="w-full border rounded px-2 py-1" data-selected="${esc(s.switch_port || '')}"><option value="">— wählen —</option></select>
+            </div>
           </div>
           <div class="grid grid-cols-3 gap-2">
-            <div><label class="block text-xs text-gray-600">VLAN</label><input id="s-vlan" type="number" value="${s.vlan || ''}" class="w-full border rounded px-2 py-1"></div>
+            <div><label class="block text-xs text-gray-600">VLAN</label>
+              <select id="s-vlan" class="w-full border rounded px-2 py-1">${vlanOpts}</select>
+            </div>
             <div><label class="block text-xs text-gray-600">Down (Mbps)</label><input id="s-down" type="number" value="${s.bandbreite_down_mbps || ''}" class="w-full border rounded px-2 py-1"></div>
             <div><label class="block text-xs text-gray-600">Up (Mbps)</label><input id="s-up" type="number" value="${s.bandbreite_up_mbps || ''}" class="w-full border rounded px-2 py-1"></div>
           </div>
@@ -496,6 +519,18 @@
       </div>
     </div>`;
     document.body.insertAdjacentHTML('beforeend', modal);
+    updatePortDropdown(); // initial Port-Liste fuer den ggf. vorausgewaehlten Switch
+  }
+  function updatePortDropdown() {
+    const sel = document.getElementById('s-switch')?.value || '';
+    const portSel = document.getElementById('s-port');
+    if (!portSel) return;
+    const preset = portSel.dataset.selected || '';
+    const sw = (unifiOptionsCache?.switches || []).find(x => x.name === sel);
+    const ports = sw?.ports || [];
+    portSel.innerHTML = ['<option value="">— wählen —</option>',
+      ...ports.map(p => `<option value="${p.idx}" ${String(preset) === String(p.idx) ? 'selected' : ''}>${p.idx}: ${esc(p.name)} ${p.media ? '['+esc(p.media)+']' : ''}</option>`)
+    ].join('');
   }
   async function saveSub(id) {
     const body = {

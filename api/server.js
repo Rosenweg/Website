@@ -14489,6 +14489,39 @@ app.post('/api/isp/reverse-proxy/:id/recheck-dns', authMiddleware, async (req, r
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Liefert UniFi-Switches mit Ports + alle VLAN-Netze fuer Admin-Dropdowns
+// im Anschluss-erfassen-Modal. Admin-only, kein Caching (live).
+app.get('/api/isp/unifi-options', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Präsident' });
+    const out = { switches: [], vlans: [] };
+    try {
+      const d = await unifiGet('stat/device');
+      out.switches = (d.data || [])
+        .filter(x => x.type === 'usw')
+        .map(x => ({
+          name: x.name,
+          model: x.model,
+          mac: x.mac,
+          ports: (x.port_table || []).map(p => ({
+            idx: p.port_idx,
+            name: p.name || p.port_name || `Port ${p.port_idx}`,
+            media: p.media,
+          })),
+        }))
+        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    } catch (e) { out.switches_error = e.message; }
+    try {
+      const n = await unifiGet('rest/networkconf');
+      out.vlans = (n.data || [])
+        .filter(x => x.vlan && x.enabled !== false)
+        .map(x => ({ vlan: x.vlan, name: x.name, purpose: x.purpose }))
+        .sort((a, b) => a.vlan - b.vlan);
+    } catch (e) { out.vlans_error = e.message; }
+    res.json(out);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Liefert alle Wohnungen (id, bezeichnung, stweg) als flache Liste fuer
 // Admin-Dropdowns im ISP-Tab. Admin-only.
 app.get('/api/isp/wohnungen-options', authMiddleware, async (req, res) => {
