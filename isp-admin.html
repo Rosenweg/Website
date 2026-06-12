@@ -259,8 +259,7 @@
           <button data-tab="erschliessung" class="tab-btn py-2 px-1 text-sm border-b-2 border-blue-600 text-blue-600 font-medium">🏠 Erschliessung</button>
           <button data-tab="vlan" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">🌐 VLAN-Antraege <span id="vlan-pending-badge" class="hidden text-xs bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">0</span></button>
           <button data-tab="ips" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">📍 Fix-IPs</button>
-          <button data-tab="rp" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">🔁 Reverse-Proxy</button>
-          <button data-tab="redir" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">↪ Umleitungen</button>
+          <button data-tab="rp" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">🔁 Routing</button>
           <button data-tab="vpn" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">🔒 VPN-Konten</button>
           <button data-tab="mail" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">✉ Mailserver/PMG</button>
         </nav>
@@ -284,16 +283,13 @@
         <div id="ip-list" class="bg-white rounded-lg shadow overflow-x-auto"></div>
       </div>
 
-      <!-- Reverse-Proxy -->
+      <!-- Routing (Reverse-Proxy + Umleitungen vereint) -->
       <div id="tab-rp" class="tab-view hidden">
-        <div class="flex justify-end mb-2"><button onclick="openRpModal()" class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm">+ Route hinzufuegen</button></div>
+        <div class="flex justify-end gap-2 mb-2">
+          <button onclick="openRpModal()" class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm">+ Reverse-Proxy</button>
+          <button onclick="openRedirModal()" class="bg-violet-600 text-white px-3 py-1.5 rounded text-sm">+ Umleitung</button>
+        </div>
         <div id="rp-list" class="space-y-2"></div>
-      </div>
-
-      <!-- Umleitungen -->
-      <div id="tab-redir" class="tab-view hidden">
-        <div class="flex justify-end mb-2"><button onclick="openRedirModal()" class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm">+ Umleitung erstellen</button></div>
-        <div id="redir-list" class="space-y-2"></div>
       </div>
 
       <!-- VPN-Konten -->
@@ -361,7 +357,7 @@
     document.getElementById('auth-gate').classList.add('hidden');
     document.getElementById('content').classList.remove('hidden');
     document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
-    loadSubs(); loadVlans(); loadIps(); loadRp(); loadVpns(); loadRedir(); loadRelays(); loadMailboxRequests(); checkMailcow();
+    loadSubs(); loadVlans(); loadIps(); loadRp(); loadVpns(); loadRelays(); loadMailboxRequests(); checkMailcow();
     loadNocDashboard(); runNocHealthChecks(); loadNocUnifi();
     setInterval(loadNocDashboard, 30000); setInterval(runNocHealthChecks, 60000); setInterval(loadNocUnifi, 30000);
     setInterval(() => { document.getElementById('noc-time').textContent = new Date().toLocaleTimeString('de-CH'); }, 1000);
@@ -672,15 +668,37 @@
 
   // === Reverse-Proxy ===
   async function loadRp() {
-    const r = await AuthentikAuth.apiFetch('/api/isp/reverse-proxy');
-    if (!r.ok) return;
-    rpRoutes = (await r.json()).routes || [];
+    const [rpR, rdR] = await Promise.all([
+      AuthentikAuth.apiFetch('/api/isp/reverse-proxy'),
+      AuthentikAuth.apiFetch('/api/isp/redirects'),
+    ]);
+    if (rpR.ok) rpRoutes = (await rpR.json()).routes || [];
+    if (rdR.ok) redirects = (await rdR.json()).redirects || [];
     renderRp();
   }
   function renderRp() {
     const wrap = document.getElementById('rp-list');
-    if (rpRoutes.length === 0) { wrap.innerHTML = '<p class="bg-white p-6 text-gray-400 italic text-center rounded">Noch keine Routen erfasst.</p>'; return; }
-    wrap.innerHTML = rpRoutes.map(r => {
+    if (rpRoutes.length === 0 && redirects.length === 0) {
+      wrap.innerHTML = '<p class="bg-white p-6 text-gray-400 italic text-center rounded">Noch keine Routen oder Umleitungen erfasst.</p>';
+      return;
+    }
+    const redirRows = redirects.map(r => `
+      <div class="bg-white border-l-4 border-violet-500 rounded-lg p-3">
+        <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
+          <div>
+            <span class="text-xs bg-violet-100 text-violet-800 px-2 py-0.5 rounded mr-1">UMLEITUNG</span>
+            <span class="font-mono text-sm">${esc(r.source_host)}${esc(r.source_path === '/' ? '' : r.source_path)}</span>
+            <span class="mx-2 text-gray-400">→</span>
+            <span class="font-mono text-sm">${esc(r.target_url)}</span>
+            <span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded ml-2">${r.http_code}</span>
+            ${r.preserve_path ? '<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded ml-1">preserve-path</span>' : ''}
+            ${!r.active ? '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-1">inaktiv</span>' : ''}
+          </div>
+          <button onclick="delRedir(${r.id})" class="text-xs text-red-600 hover:underline">Loeschen</button>
+        </div>
+        <div class="text-xs text-gray-500">${esc(r.owner_email || 'system')}${r.wohnung_bezeichnung ? ' · ' + esc(r.wohnung_bezeichnung) : ''}</div>
+      </div>`).join('');
+    const rpRows = rpRoutes.map(r => {
       const protoBadge = {
         http: '<span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded ml-1">HTTP</span>',
         tcp_sni: '<span class="text-xs bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded ml-1">TCP-SNI</span>',
@@ -706,6 +724,7 @@
         <div class="text-xs text-gray-500 mt-1">${esc(r.owner_email || 'system')}${r.wohnung_bezeichnung ? ' · ' + esc(r.wohnung_bezeichnung) : ''}${r.rate_limit_per_min ? ' · ' + r.rate_limit_per_min + '/min' : ''}</div>
       </div>`;
     }).join('');
+    wrap.innerHTML = rpRows + redirRows;
   }
   function openRpModal(existing) {
     const r = existing || {};
@@ -892,7 +911,7 @@
       const r = await AuthentikAuth.apiFetch('/api/isp/redirects', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
       if (!r.ok) throw new Error(await r.text());
       document.querySelector('.fixed')?.remove();
-      await loadRedir();
+      await loadRp();
     } catch (e) { alert('Fehler: ' + e.message); }
   }
   async function delRedir(id) {
