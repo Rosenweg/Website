@@ -42,13 +42,19 @@
         <div id="vlan-list" class="space-y-2"></div>
       </section>
 
-      <!-- Reverse-Proxy-Routen -->
+      <!-- Web-Routing (Reverse-Proxy + Umleitungen) -->
       <section class="bg-white rounded-lg shadow p-5">
         <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <h2 class="text-lg font-semibold">🔁 Reverse-Proxy-Routen</h2>
-          <button onclick="openRpModal()" class="text-sm bg-emerald-600 text-white px-3 py-1.5 rounded">+ Route hinzufuegen</button>
+          <h2 class="text-lg font-semibold">🔁 Web-Routing</h2>
+          <div class="flex gap-2">
+            <button onclick="openRpModal()" class="text-sm bg-emerald-600 text-white px-3 py-1.5 rounded">+ Reverse-Proxy</button>
+            <button onclick="openRedirModal()" class="text-sm bg-violet-600 text-white px-3 py-1.5 rounded">+ Umleitung</button>
+          </div>
         </div>
-        <p class="text-xs text-gray-500 mb-2">Eigene Web-Services via Rosenweg-Reverse-Proxy zugaenglich machen. SSL/Authentik-Auth wird zentral vorgelagert.</p>
+        <div class="bg-gray-50 border border-gray-200 rounded p-3 mb-3 text-xs text-gray-700 space-y-1">
+          <p><strong>Reverse-Proxy</strong> = wir holen den Inhalt von deinem Server (intern oder extern) und liefern ihn unter deiner Wunsch-Subdomain aus. TLS, Auth und Caching erledigen wir am Edge. Der Backend-Server muss nicht oeffentlich erreichbar sein.</p>
+          <p><strong>Umleitung</strong> = Browser bekommt nur einen 301/302 zu einer anderen URL. Schnell fuer Marketing-Links oder Domain-Umzug. Backend bleibt direkt vom User erreichbar.</p>
+        </div>
         <div id="rp-list" class="space-y-2"></div>
       </section>
 
@@ -367,25 +373,34 @@
   }
 
   // Reverse-Proxy
+  let redirects = [];
   async function loadRp() {
-    const r = await AuthentikAuth.apiFetch('/api/isp/reverse-proxy');
-    if (!r.ok) return;
-    rpRoutes = (await r.json()).routes || [];
+    const [rpR, rdR] = await Promise.all([
+      AuthentikAuth.apiFetch('/api/isp/reverse-proxy'),
+      AuthentikAuth.apiFetch('/api/isp/redirects'),
+    ]);
+    if (rpR.ok) rpRoutes = (await rpR.json()).routes || [];
+    if (rdR.ok) redirects = (await rdR.json()).redirects || [];
     renderRp();
   }
   function renderRp() {
     const wrap = document.getElementById('rp-list');
-    if (rpRoutes.length === 0) { wrap.innerHTML = '<p class="text-gray-400 italic text-sm">Keine Routen.</p>'; return; }
+    if (rpRoutes.length === 0 && redirects.length === 0) {
+      wrap.innerHTML = '<p class="text-gray-400 italic text-sm">Noch keine Routen oder Umleitungen.</p>';
+      return;
+    }
     const statusBadge = (s) => ({
       approved: '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded ml-1">aktiv</span>',
       pending_dns: '<span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded ml-1">DNS prueft</span>',
       pending_admin: '<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded ml-1">Admin-Pruefung</span>',
       rejected: '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-1">abgelehnt</span>',
     })[s] || '';
-    wrap.innerHTML = rpRoutes.map(r => `
+    const rpRows = rpRoutes.map(r => `
       <div class="border rounded p-3 bg-gray-50">
         <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
-          <div><strong class="font-mono text-sm">${esc(r.hostname)}</strong>
+          <div>
+            <span class="text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded mr-1">PROXY</span>
+            <strong class="font-mono text-sm">${esc(r.hostname)}</strong>
             ${statusBadge(r.approval_status)}
             ${r.public ? '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded ml-1">public</span>' : '<span class="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded ml-1">intern</span>'}
             ${r.ssl ? '<span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded ml-1">SSL</span>' : ''}
@@ -399,6 +414,20 @@
         <div class="text-xs text-gray-600">→ <span class="font-mono">${esc(r.backend_url)}</span></div>
         ${r.approval_reason ? `<div class="text-xs text-gray-500 mt-1 italic">${esc(r.approval_reason)}</div>` : ''}
       </div>`).join('');
+    const redirRows = redirects.map(r => `
+      <div class="border-l-4 border-violet-500 border rounded p-3 bg-gray-50">
+        <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
+          <div>
+            <span class="text-xs bg-violet-100 text-violet-800 px-2 py-0.5 rounded mr-1">UMLEITUNG</span>
+            <span class="font-mono text-sm">${esc(r.source_host)}${esc(r.source_path === '/' ? '' : r.source_path)}</span>
+            <span class="mx-2 text-gray-400">→</span>
+            <span class="font-mono text-sm">${esc(r.target_url)}</span>
+            <span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded ml-2">${r.http_code}</span>
+          </div>
+          <button onclick="delRedir(${r.id})" class="text-xs text-red-600 hover:underline">Loeschen</button>
+        </div>
+      </div>`).join('');
+    wrap.innerHTML = rpRows + redirRows;
   }
   async function recheckRp(id) {
     try {
@@ -423,16 +452,33 @@
           ${dnsInfo.cname_target ? `<p><strong>CNAME (Alternative):</strong> <code class="bg-white px-1 rounded">${dnsInfo.cname_target}</code></p>` : ''}
           <p class="text-blue-700 pt-1">Sobald DNS gesetzt ist, prueft das System automatisch alle 5 Min. Bei Sub-Domains die "rosenweg"/"r&lt;Nummer&gt;." enthalten ist Admin-Pruefung Pflicht.</p>
         </div>
-        <div class="space-y-2 text-sm">
-          <div><label class="block text-xs text-gray-600">Hostname * <span class="text-gray-400">(z.B. cloud.dein-name.rosenweg4303.ch)</span></label><input id="r-host" class="w-full border rounded px-2 py-1"></div>
-          <div><label class="block text-xs text-gray-600">Backend-URL *</label><input id="r-be" placeholder="http://10.0.50.5:8080" class="w-full border rounded px-2 py-1"></div>
-          <div><label class="flex items-center gap-2 text-sm"><input id="r-public" type="checkbox" class="rounded"> public (Internet via CF-Tunnel)</label></div>
-          <div><label class="flex items-center gap-2 text-sm"><input id="r-auth" type="checkbox" class="rounded"> Authentik-Auth davor schalten</label></div>
-          <div><label class="block text-xs text-gray-600">Notizen</label><textarea id="r-notiz" rows="2" class="w-full border rounded px-2 py-1"></textarea></div>
+        <div class="space-y-3 text-sm">
+          <div>
+            <label class="block text-xs font-medium text-gray-700">Hostname *</label>
+            <input id="r-host" placeholder="cloud.dein-name.rosenweg4303.ch" class="w-full border rounded px-2 py-1">
+            <p class="text-xs text-gray-500 mt-0.5">Die Adresse die der User in den Browser tippt. Wenn die Subdomain "rosenweg" oder "r&lt;Nr&gt;." enthaelt geht's in Admin-Pruefung.</p>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-700">Backend-URL *</label>
+            <input id="r-be" placeholder="http://10.0.50.5:8080" class="w-full border rounded px-2 py-1">
+            <p class="text-xs text-gray-500 mt-0.5">Wohin der Verkehr geht. Intern (z.B. http://10.x.x.x:port) oder extern (https://...). Muss vom Edge-Traefik erreichbar sein.</p>
+          </div>
+          <div>
+            <label class="flex items-center gap-2 text-sm"><input id="r-public" type="checkbox" class="rounded"> Im Internet erreichbar</label>
+            <p class="text-xs text-gray-500 mt-0.5 ml-6">Aus = nur intern via VPN. An = oeffentlich via WAN (Edge-Traefik macht TLS).</p>
+          </div>
+          <div>
+            <label class="flex items-center gap-2 text-sm"><input id="r-auth" type="checkbox" class="rounded"> Authentik-Login verlangen</label>
+            <p class="text-xs text-gray-500 mt-0.5 ml-6">Vor dem Zugriff muss sich der User mit seinem Rosenweg-Account anmelden.</p>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-700">Notizen</label>
+            <textarea id="r-notiz" rows="2" class="w-full border rounded px-2 py-1"></textarea>
+          </div>
         </div>
         <div class="flex justify-end gap-2 mt-3">
           <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Abbrechen</button>
-          <button onclick="saveRp()" class="px-3 py-1.5 bg-emerald-600 text-white rounded text-sm">Speichern</button>
+          <button onclick="saveRp()" class="px-3 py-1.5 bg-emerald-600 text-white rounded text-sm">Route anlegen</button>
         </div>
       </div></div>`;
     document.body.insertAdjacentHTML('beforeend', html);
@@ -455,6 +501,76 @@
   async function delRp(id) {
     if (!confirm('Route loeschen?')) return;
     await AuthentikAuth.apiFetch('/api/isp/reverse-proxy/' + id, { method: 'DELETE' });
+    await loadRp();
+  }
+
+  // Umleitungen
+  async function openRedirModal() {
+    const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
+      <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5 max-h-[90vh] overflow-y-auto">
+        <h2 class="font-bold mb-3">Umleitung erstellen</h2>
+        <div class="bg-violet-50 border border-violet-200 rounded p-3 mb-3 text-xs text-violet-800">
+          Der Browser bekommt eine HTTP-Antwort (301/302) und navigiert dann selbst zur Ziel-URL. Die URL-Leiste aendert sich sichtbar.
+        </div>
+        <div class="space-y-3 text-sm">
+          <div>
+            <label class="block text-xs font-medium text-gray-700">Source-Host *</label>
+            <input id="rd-host" placeholder="alt.rosenweg4303.ch" class="w-full border rounded px-2 py-1">
+            <p class="text-xs text-gray-500 mt-0.5">Adresse die User aufruft. Bei Subdomains mit "rosenweg"/"r&lt;Nr&gt;." geht's in Admin-Pruefung.</p>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-700">Source-Path</label>
+            <input id="rd-path" value="/" class="w-full border rounded px-2 py-1">
+            <p class="text-xs text-gray-500 mt-0.5">Welcher Pfad weitergeleitet wird. "/" = alles, "/alte-url" = nur dieser eine Pfad.</p>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-700">Target-URL *</label>
+            <input id="rd-target" placeholder="https://www.rosenweg4303.ch/neu" class="w-full border rounded px-2 py-1">
+            <p class="text-xs text-gray-500 mt-0.5">Wohin der Browser umgeleitet wird (vollstaendige URL mit https://).</p>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-gray-700">HTTP-Code</label>
+              <select id="rd-code" class="w-full border rounded px-2 py-1">
+                <option value="301">301 permanent</option>
+                <option value="302">302 temporaer</option>
+                <option value="307">307 (POST-safe temp)</option>
+                <option value="308">308 (POST-safe perm)</option>
+              </select>
+              <p class="text-xs text-gray-500 mt-0.5">301/308 wird vom Browser gecached. 302/307 fuer Tests.</p>
+            </div>
+            <div>
+              <label class="flex items-center gap-2 text-xs mt-4"><input id="rd-preserve" type="checkbox" class="rounded"> Path erhalten</label>
+              <p class="text-xs text-gray-500 mt-0.5 ml-6">/foo/bar wird an Target/foo/bar angehaengt.</p>
+            </div>
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 mt-3">
+          <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Abbrechen</button>
+          <button onclick="saveRedir()" class="px-3 py-1.5 bg-violet-600 text-white rounded text-sm">Umleitung anlegen</button>
+        </div>
+      </div></div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+  }
+  async function saveRedir() {
+    const body = {
+      source_host: document.getElementById('rd-host').value.trim(),
+      source_path: document.getElementById('rd-path').value.trim() || '/',
+      target_url: document.getElementById('rd-target').value.trim(),
+      http_code: parseInt(document.getElementById('rd-code').value, 10),
+      preserve_path: document.getElementById('rd-preserve').checked,
+    };
+    if (!body.source_host || !body.target_url) { alert('Source-Host und Target-URL Pflicht.'); return; }
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/redirects', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error(await r.text());
+      document.querySelector('.fixed')?.remove();
+      await loadRp();
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+  async function delRedir(id) {
+    if (!confirm('Umleitung loeschen?')) return;
+    await AuthentikAuth.apiFetch('/api/isp/redirects/' + id, { method: 'DELETE' });
     await loadRp();
   }
 
@@ -534,14 +650,33 @@
           <p><strong>MX 10:</strong> <code class="bg-white px-1 rounded">${esc(pmgMx)}.</code></p>
           <p class="text-blue-700 pt-1">PMG nimmt Mails an, filtert (Spam/Antivirus) und reicht weiter an dein <code>Ziel-Host</code>. Pruefung alle 5 Min.</p>
         </div>
-        <div class="space-y-2 text-sm">
-          <div><label class="block text-xs text-gray-600">Domain *</label><input id="rel-dom" placeholder="meinedomain.ch" class="w-full border rounded px-2 py-1"></div>
-          <div class="grid grid-cols-3 gap-2">
-            <div class="col-span-2"><label class="block text-xs text-gray-600">Ziel-Host *</label><input id="rel-host" placeholder="mail.meinedomain.ch" class="w-full border rounded px-2 py-1"></div>
-            <div><label class="block text-xs text-gray-600">Port</label><input id="rel-port" type="number" value="25" class="w-full border rounded px-2 py-1"></div>
+        <div class="space-y-3 text-sm">
+          <div>
+            <label class="block text-xs font-medium text-gray-700">Domain *</label>
+            <input id="rel-dom" placeholder="meinedomain.ch" class="w-full border rounded px-2 py-1">
+            <p class="text-xs text-gray-500 mt-0.5">Die Domain fuer die wir Mails empfangen sollen. Setze den MX-Record dieser Domain auf <code class="bg-gray-100 px-1 rounded">${esc(pmgMx)}</code>.</p>
           </div>
-          <div><label class="flex items-center gap-2 text-sm"><input id="rel-mx" type="checkbox" class="rounded"> MX-Lookup statt Direct-Host</label></div>
-          <div><label class="block text-xs text-gray-600">DKIM-Selector <span class="text-gray-400">(optional)</span></label><input id="rel-dkim" placeholder="default" class="w-full border rounded px-2 py-1"></div>
+          <div class="grid grid-cols-3 gap-2">
+            <div class="col-span-2">
+              <label class="block text-xs font-medium text-gray-700">Ziel-Host *</label>
+              <input id="rel-host" placeholder="mail.meinedomain.ch" class="w-full border rounded px-2 py-1">
+              <p class="text-xs text-gray-500 mt-0.5">Wohin PMG die gefilterten Mails weiterreicht (dein eigener Server).</p>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-700">Port</label>
+              <input id="rel-port" type="number" value="25" class="w-full border rounded px-2 py-1">
+              <p class="text-xs text-gray-500 mt-0.5">25 normal, 587 wenn STARTTLS.</p>
+            </div>
+          </div>
+          <div>
+            <label class="flex items-center gap-2 text-sm"><input id="rel-mx" type="checkbox" class="rounded"> MX-Lookup statt Direct-Host</label>
+            <p class="text-xs text-gray-500 mt-0.5 ml-6">An: PMG schaut den MX-Record der Domain im DNS nach (Failover). Aus: nur an Ziel-Host.</p>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-700">DKIM-Selector <span class="text-gray-400 font-normal">(optional)</span></label>
+            <input id="rel-dkim" placeholder="default" class="w-full border rounded px-2 py-1">
+            <p class="text-xs text-gray-500 mt-0.5">Wenn du DKIM-Signing willst: hier Selector + Private-Key in den naechsten Schritt. Leer = kein DKIM-Sign.</p>
+          </div>
 
           <details class="border rounded p-2 bg-gray-50">
             <summary class="text-xs text-gray-700 font-semibold cursor-pointer">📡 Optional: User-Submission &amp; IMAP via Rosenweg-Infrastruktur</summary>
@@ -558,11 +693,11 @@
             <div><label class="block text-xs text-gray-600 mt-1">SMTPS Backend-Host</label><input id="rel-smtps-host" placeholder="z.B. 10.0.5.10 oder mail.meinedomain.ch" class="w-full border rounded px-2 py-1"></div>
           </details>
 
-          <div><label class="block text-xs text-gray-600">Notizen</label><textarea id="rel-notiz" rows="2" class="w-full border rounded px-2 py-1"></textarea></div>
+          <div><label class="block text-xs font-medium text-gray-700">Notizen</label><textarea id="rel-notiz" rows="2" class="w-full border rounded px-2 py-1"></textarea></div>
         </div>
         <div class="flex justify-end gap-2 mt-3">
           <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Abbrechen</button>
-          <button onclick="saveRelay()" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm">Speichern</button>
+          <button onclick="saveRelay()" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm">Mail-Relay erfassen</button>
         </div>
       </div></div>`;
     document.body.insertAdjacentHTML('beforeend', html);
