@@ -1723,16 +1723,17 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
         }
       }
 
-      // Parkplatz-Bewohner sehen zusaetzlich das RK-Clients-WLAN (VLAN 9), weil
-      // sie ihre Garagengeraete dort haben. Nur wenn der User mindestens eine
-      // Parkplatz-Wohnung zugewiesen hat — sonst nicht.
+      // RK-Clients-WLAN nur fuer reine Parkplatz-User (kein wohnung/hobbyraum
+      // bezogen). Wer auch eine Wohnung oder Hobbyraum hat, sieht stattdessen
+      // sein normales Haus-WLAN — die brauchen RK-Clients nicht.
       const userEmail = (req.user.email || '').toLowerCase();
-      let hasParkplatz = false;
+      let showRk = false;
       try {
         const opts = await getUserVlanOptions(userEmail);
-        hasParkplatz = opts.some(o => o.kind === 'parkplatz');
+        const kinds = new Set(opts.map(o => o.kind));
+        showRk = kinds.has('parkplatz') && !kinds.has('wohnung') && !kinds.has('hobbyraum');
       } catch {}
-      if (hasParkplatz) {
+      if (showRk) {
         for (const ppsk of rosenweg.private_preshared_keys || []) {
           const net = netMap[ppsk.networkconf_id];
           if (net && net.name === 'RK-Clients') {
