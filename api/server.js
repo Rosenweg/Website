@@ -15429,6 +15429,185 @@ app.put('/api/isp/client-vlan-routers/:id', authMiddleware, async (req, res) => 
   }
 });
 
+// ── Phase 3a: CT-Bootstrap via PVE-API ────────────────────────────────
+const PVE_LXC_DEFAULTS = {
+  ostemplate: 'local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst',
+  storage: 'lxcs',
+  rootfs_gb: 4,
+  cores: 1,
+  memory: 256,
+  swap: 256,
+  bridge: 'vmbr1',
+};
+
+// Liste der PVE-Nodes aus /nodes (fuer Round-Robin).
+async function pveNodes() {
+  const data = await pveAPI('GET', '/nodes');
+  return (data || []).filter(n => n.status === 'online').map(n => n.node);
+}
+
+// Existiert CT bereits irgendwo im Cluster?
+async function pveCtExists(vmid) {
+  const data = await pveAPI('GET', '/cluster/resources?type=vm');
+  return (data || []).some(x => x.type === 'lxc' && x.vmid === vmid);
+}
+
+// Auf PVE-Task warten (UPID), poll status.
+async function pveWaitForTask(node, upid, timeoutMs = 120000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const s = await pveAPI('GET', `/nodes/${node}/tasks/${encodeURIComponent(upid)}/status`);
+    if (s && s.status === 'stopped') {
+      if (s.exitstatus && s.exitstatus !== 'OK') throw new Error(`PVE-Task fehlgeschlagen: ${s.exitstatus}`);
+      return s;
+    }
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  throw new Error(`PVE-Task ${upid} timeout`);
+}
+
+// Eine Router-LXC anlegen + starten. Inner-Setup folgt per Script.
+async function bootstrapOneRouterLxc(router, targetNode) {
+  if (await pveCtExists(router.lxc_id)) return { vmid: router.lxc_id, skipped: 'already_exists' };
+  const cvlan = router.client_vlan_id;
+  const haus = Math.floor(cvlan / 10);
+  const hostname = `router-rw${haus}-clients`;
+  // mgmt_ip in /24 (Client-VLAN-Subnet 100.64.<vlan>.0/24 ist konventional)
+  const ip = router.mgmt_ip ? router.mgmt_ip.split('/')[0] : `100.64.${cvlan}.9`;
+  const gw = router.upstream_gateway ? router.upstream_gateway.split('/')[0] : `100.64.${cvlan}.1`;
+  const body = {
+    vmid: router.lxc_id,
+    ostemplate: PVE_LXC_DEFAULTS.ostemplate,
+    hostname,
+    storage: PVE_LXC_DEFAULTS.storage,
+    rootfs: `${PVE_LXC_DEFAULTS.storage}:${PVE_LXC_DEFAULTS.rootfs_gb}`,
+    cores: PVE_LXC_DEFAULTS.cores,
+    memory: PVE_LXC_DEFAULTS.memory,
+    swap: PVE_LXC_DEFAULTS.swap,
+    net0: `name=eth0,bridge=${PVE_LXC_DEFAULTS.bridge},ip=${ip}/24,gw=${gw},tag=${cvlan}`,
+    unprivileged: 1,
+    features: 'nesting=1',
+    onboot: 1,
+    start: 1,
+    description: `Auto-erstellt vom isp-admin fuer Client-VLAN ${cvlan} (${router.bezeichnung || ''})`,
+    // password: zufaellig, wir koennen via pct enter rein wenn noetig
+    password: Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2),
+  };
+  const upid = await pveAPI('POST', `/nodes/${targetNode}/lxc`, body);
+  await pveWaitForTask(targetNode, upid, 180000);
+  return { vmid: router.lxc_id, node: targetNode, hostname, ip: `${ip}/24`, gw, upid };
+}
+
+// Bash-Skript fuer Inner-Install: apt + dnsmasq + nftables-Grundgeruest.
+// Wird einmal pro neuer LXC vom Admin via "pct exec" ausgefuehrt.
+function buildRouterLxcInitScript(router) {
+  return `#!/usr/bin/env bash
+# Inner-Setup fuer Router-LXC ${router.lxc_id} (Client-VLAN ${router.client_vlan_id})
+# Ausfuehren auf dem PVE-Host wo CT laeuft:  bash <(curl -s ...)  oder copy/paste.
+set -euo pipefail
+LXC=${router.lxc_id}
+
+pct exec $LXC -- bash -c '
+  set -e
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -q
+  apt-get install -y -q dnsmasq nftables iproute2
+  mkdir -p /etc/dnsmasq.d
+  # leere dnsmasq.d-Configs: dnsmasq nur fuer User-VLANs (je nach Antrag)
+  > /etc/dnsmasq.conf  # vorhandene globale Defaults raus
+  echo "conf-dir=/etc/dnsmasq.d,*.conf" > /etc/dnsmasq.conf
+  systemctl enable dnsmasq nftables
+  # nftables-Grundgeruest: Tabelle + leere Chains (Regeln pro User-VLAN spaeter)
+  cat > /etc/nftables.conf <<EOF
+flush ruleset
+table inet rosenweg {
+  chain forward { type filter hook forward priority 0; policy drop; }
+  chain nat_post { type nat hook postrouting priority 100; policy accept; }
+  chain input { type filter hook input priority 0; policy accept; }
+}
+EOF
+  systemctl restart nftables dnsmasq
+  echo "[OK] Router-LXC $LXC fertig: dnsmasq + nftables aktiv"
+'
+
+# HA-Resource registrieren (falls nicht schon)
+if ! ha-manager status | grep -q "ct:$LXC"; then
+  ha-manager add ct:$LXC --max_relocate 2 --max_restart 1 --state started
+  echo "[OK] HA-Resource ct:$LXC registriert"
+fi
+`;
+}
+
+// Einen einzelnen Router-LXC bootstrappen.
+app.post('/api/isp/client-vlan-routers/:id/bootstrap', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Admin' });
+    const id = parseInt(req.params.id, 10);
+    const rr = await pool.query('SELECT * FROM isp_client_vlan_routers WHERE id = $1', [id]);
+    if (rr.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const router = rr.rows[0];
+    if (!router.lxc_id || router.lxc_id < 100) return res.status(400).json({ error: 'lxc_id ungueltig' });
+    const nodes = await pveNodes();
+    if (nodes.length === 0) return res.status(500).json({ error: 'Keine PVE-Nodes online' });
+    // Round-robin via lxc_id modulo Node-Anzahl
+    const targetNode = nodes[router.lxc_id % nodes.length];
+    const result = await bootstrapOneRouterLxc(router, targetNode);
+    const initScript = buildRouterLxcInitScript(router);
+    res.json({ ok: true, ...result, init_script: initScript });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Alle fehlenden Router-LXCs bootstrappen.
+app.post('/api/isp/client-vlan-routers/bootstrap-all', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Admin' });
+    const rr = await pool.query('SELECT * FROM isp_client_vlan_routers WHERE active = true ORDER BY client_vlan_id');
+    const nodes = await pveNodes();
+    if (nodes.length === 0) return res.status(500).json({ error: 'Keine PVE-Nodes online' });
+    const results = [];
+    for (const router of rr.rows) {
+      try {
+        const targetNode = nodes[router.lxc_id % nodes.length];
+        const r = await bootstrapOneRouterLxc(router, targetNode);
+        results.push({ router_id: router.id, lxc_id: router.lxc_id, ok: true, ...r });
+      } catch (err) {
+        results.push({ router_id: router.id, lxc_id: router.lxc_id, ok: false, error: err.message });
+      }
+    }
+    // Globales Init-Script fuer ALLE auf einmal
+    const initScript = `#!/usr/bin/env bash
+# Inner-Setup fuer ALLE Router-LXCs in einem Rutsch.
+# Auf jedem PVE-Host ausfuehren wo CTs liegen — pct exec funktioniert nur lokal.
+set -euo pipefail
+for LXC in ${rr.rows.map(r => r.lxc_id).join(' ')}; do
+  pct status $LXC >/dev/null 2>&1 || { echo "[skip] CT $LXC nicht hier"; continue; }
+  echo "=== Init CT $LXC ==="
+  pct exec $LXC -- bash -c '
+    set -e
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -q
+    apt-get install -y -q dnsmasq nftables iproute2
+    mkdir -p /etc/dnsmasq.d
+    echo "conf-dir=/etc/dnsmasq.d,*.conf" > /etc/dnsmasq.conf
+    cat > /etc/nftables.conf <<EOF
+flush ruleset
+table inet rosenweg {
+  chain forward { type filter hook forward priority 0; policy drop; }
+  chain nat_post { type nat hook postrouting priority 100; policy accept; }
+  chain input { type filter hook input priority 0; policy accept; }
+}
+EOF
+    systemctl enable nftables dnsmasq
+    systemctl restart nftables dnsmasq
+  '
+  ha-manager status 2>/dev/null | grep -q "ct:$LXC" || ha-manager add ct:$LXC --max_relocate 2 --max_restart 1 --state started || true
+done
+echo "[OK] Alle CTs initialisiert"
+`;
+    res.json({ results, init_script: initScript });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.delete('/api/isp/client-vlan-routers/:id', authMiddleware, async (req, res) => {
   try {
     if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Admin' });

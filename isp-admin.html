@@ -299,7 +299,10 @@
           <p class="font-semibold">Router-LXC pro Client-VLAN</p>
           <p class="text-xs mt-1">Pro offiziellem Client-VLAN (z.B. 9, 99, 139) ein dedizierter LXC, der als Default-Gateway + DHCP für alle dort registrierten User-Subnets dient. Die LXC-IDs werden hier manuell hinterlegt — Provisionierung folgt automatisch via Phase 3.</p>
         </div>
-        <div class="flex justify-end mb-2"><button onclick="openRouterModal()" class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm">+ Router-LXC</button></div>
+        <div class="flex justify-end gap-2 mb-2">
+          <button onclick="bootstrapAllRouters()" class="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm" title="Alle fehlenden CTs anlegen + starten">🚀 Fehlende anlegen</button>
+          <button onclick="openRouterModal()" class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm">+ Router-LXC</button>
+        </div>
         <div id="router-list" class="bg-white rounded-lg shadow overflow-x-auto"></div>
       </div>
 
@@ -894,7 +897,8 @@
           <td class="px-3 py-2 text-xs">${r.active ? '<span class="bg-green-100 text-green-700 px-2 py-0.5 rounded">ja</span>' : '<span class="bg-gray-100 text-gray-500 px-2 py-0.5 rounded">nein</span>'}</td>
           <td class="px-3 py-2 text-xs">${r.assigned_count || 0}</td>
           <td class="px-3 py-2 text-right whitespace-nowrap">
-            <button onclick='editRouter(${r.id})' class="text-xs text-blue-600 hover:underline">Bearbeiten</button>
+            ${r.live_status === 'missing' || !r.live_status ? `<button onclick='bootstrapRouter(${r.id})' class="text-xs text-emerald-700 hover:underline" title="CT via PVE-API anlegen + starten">🚀 Anlegen</button>` : ''}
+            <button onclick='editRouter(${r.id})' class="text-xs text-blue-600 hover:underline ml-2">Bearbeiten</button>
             <button onclick='delRouter(${r.id})' class="text-xs text-red-600 hover:underline ml-2">Löschen</button>
           </td>
         </tr>`).join('')}</tbody></table>`;
@@ -983,6 +987,63 @@
     const r = await AuthentikAuth.apiFetch('/api/isp/client-vlan-routers/' + id, { method: 'DELETE' });
     if (!r.ok) { alert('Fehler: ' + ((await r.json()).error || r.statusText)); return; }
     await loadRouters();
+  }
+  async function bootstrapRouter(id) {
+    const router = clientVlanRouters.find(x => x.id === id);
+    if (!confirm(`CT ${router?.lxc_id} für Client-VLAN ${router?.client_vlan_id} via PVE-API anlegen + starten?`)) return;
+    const btn = event.target; const t0 = btn.textContent;
+    btn.textContent = '⏳...'; btn.disabled = true;
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/isp/client-vlan-routers/${id}/bootstrap`, { method: 'POST' });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || r.statusText);
+      showBootstrapResult([{ ok: true, lxc_id: data.vmid, node: data.node, hostname: data.hostname, ...(data.skipped ? { skipped: data.skipped } : {}) }], data.init_script);
+      await loadRouters();
+    } catch (e) {
+      alert('Bootstrap-Fehler: ' + e.message);
+      btn.textContent = t0; btn.disabled = false;
+    }
+  }
+  async function bootstrapAllRouters() {
+    if (!confirm('Alle aktiven Router-LXCs anlegen die noch fehlen?\n\nLaeuft via PVE-API, kann pro CT ~30-60s dauern (Debian-13-Download + Boot).')) return;
+    const btn = event.target; const t0 = btn.textContent;
+    btn.textContent = '⏳ läuft...'; btn.disabled = true;
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/client-vlan-routers/bootstrap-all', { method: 'POST' });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || r.statusText);
+      showBootstrapResult(data.results || [], data.init_script);
+      await loadRouters();
+    } catch (e) {
+      alert('Bootstrap-All-Fehler: ' + e.message);
+    } finally { btn.textContent = t0; btn.disabled = false; }
+  }
+  function showBootstrapResult(results, initScript) {
+    const ok = results.filter(r => r.ok && !r.skipped).length;
+    const skipped = results.filter(r => r.skipped).length;
+    const fail = results.filter(r => !r.ok).length;
+    const rowsHtml = results.map(r => {
+      const ic = r.ok ? (r.skipped ? '⚪' : '✓') : '✗';
+      const col = r.ok ? (r.skipped ? 'text-gray-500' : 'text-emerald-700') : 'text-red-700';
+      return `<div class="text-xs ${col}">${ic} CT ${esc(r.lxc_id)}${r.node ? ' auf ' + esc(r.node) : ''}${r.hostname ? ' ('+esc(r.hostname)+')' : ''}${r.skipped ? ' — '+esc(r.skipped) : ''}${r.error ? ' — '+esc(r.error) : ''}</div>`;
+    }).join('');
+    const modal = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
+      <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-2xl w-full p-5 max-h-[90vh] overflow-y-auto">
+        <h2 class="font-bold mb-3">🚀 Bootstrap-Ergebnis</h2>
+        <div class="grid grid-cols-3 gap-2 mb-3 text-sm">
+          <div class="bg-emerald-50 rounded p-2 text-center"><div class="font-bold text-emerald-700">${ok}</div><div class="text-xs">neu angelegt</div></div>
+          <div class="bg-gray-50 rounded p-2 text-center"><div class="font-bold text-gray-600">${skipped}</div><div class="text-xs">existierten schon</div></div>
+          <div class="bg-red-50 rounded p-2 text-center"><div class="font-bold text-red-700">${fail}</div><div class="text-xs">fehlgeschlagen</div></div>
+        </div>
+        <div class="mb-3 space-y-1 max-h-48 overflow-y-auto">${rowsHtml}</div>
+        <details class="mt-3" open><summary class="cursor-pointer text-sm font-semibold text-gray-700">📜 Inner-Init-Script (apt + dnsmasq + nftables + HA — auf jedem PVE-Host ausführen)</summary>
+          <textarea readonly class="w-full mt-2 border rounded p-2 text-xs font-mono bg-gray-50" rows="16">${esc(initScript || '')}</textarea>
+          <button onclick="navigator.clipboard.writeText(this.previousElementSibling.value); this.textContent='✓ Kopiert'" class="mt-1 text-xs bg-gray-200 px-2 py-1 rounded">📋 In Zwischenablage</button>
+          <p class="text-xs text-gray-500 mt-1">Hinweis: pct exec funktioniert nur lokal — Script auf jedem der 3 PVE-Hosts ausführen, es überspringt CTs die nicht dort liegen.</p>
+        </details>
+        <div class="flex justify-end mt-3"><button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Schliessen</button></div>
+      </div></div>`;
+    document.body.insertAdjacentHTML('beforeend', modal);
   }
 
   // === Reverse-Proxy ===
