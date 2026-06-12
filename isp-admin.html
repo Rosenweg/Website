@@ -597,8 +597,14 @@
         method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       if (!r.ok) throw new Error(await r.text());
+      const data = await r.json();
       document.querySelector('.fixed')?.remove();
       await loadSubs();
+      // Wenn UniFi-Sync gehapert hat, dem Admin sagen
+      if (data.unifi_sync && !data.unifi_sync.ok) {
+        const errs = (data.unifi_sync.errors || []).map(e => `• ${e.step}: ${e.error}`).join('\n');
+        alert(`Gespeichert, aber UniFi-Sync nicht vollständig — Status wurde auf 'geplant' zurückgesetzt:\n\n${errs}`);
+      }
     } catch (e) { alert('Fehler: ' + e.message); }
   }
   async function delSub(id) {

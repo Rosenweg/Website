@@ -14598,8 +14598,10 @@ async function unifiSetStaticDhcp(mac, fixedIp, networkconfId) {
 }
 
 // Hilfs-Wrapper: vergleicht alten + neuen Sub-Eintrag und propagiert Aenderungen
-// an UniFi. Fehler werden geloggt aber nicht zur Anfrage durchgereicht.
+// an UniFi. Liefert pro Schritt OK/Error zurueck damit der Handler entscheiden
+// kann ob status='aktiv' wirklich gerechtfertigt ist.
 async function syncSubscriberToUnifi(oldRow, newRow) {
+  const result = { ok: true, steps: [], errors: [] };
   try {
     const oldSw = oldRow?.switch_name; const oldPort = oldRow?.switch_port;
     const newSw = newRow?.switch_name; const newPort = newRow?.switch_port;
@@ -14608,20 +14610,21 @@ async function syncSubscriberToUnifi(oldRow, newRow) {
     const newProfile = newRow?.port_profile_id;
     const newFixedIp = newRow?.fixed_ip;
 
-    // Switch/Port wechselt -> alten Port-Override leeren
     if (oldSw && oldPort && (oldSw !== newSw || String(oldPort) !== String(newPort))) {
-      await unifiSetPortConfig(oldSw, oldPort, {}).catch(e => console.warn('[UniFi-Sync] clear-old port:', e.message));
+      try { await unifiSetPortConfig(oldSw, oldPort, {}); result.steps.push('clear_old_port'); }
+      catch (e) { result.errors.push({ step: 'clear_old_port', error: e.message }); }
     }
     if (newSw && newPort) {
-      await unifiSetPortConfig(newSw, newPort, { mac: newMac, vlan: newVlan, portProfileId: newProfile })
-        .catch(e => console.warn('[UniFi-Sync] set-new port:', e.message));
+      try {
+        await unifiSetPortConfig(newSw, newPort, { mac: newMac, vlan: newVlan, portProfileId: newProfile });
+        result.steps.push('port_config');
+      } catch (e) { result.errors.push({ step: 'port_config', error: e.message }); }
     }
 
-    // Alte MAC weg / geaendert -> alte Static-DHCP loeschen
     if (oldRow?.mac_dot1x && oldRow.mac_dot1x !== newMac) {
-      await unifiSetStaticDhcp(oldRow.mac_dot1x, null, null).catch(e => console.warn('[UniFi-Sync] clear-old dhcp:', e.message));
+      try { await unifiSetStaticDhcp(oldRow.mac_dot1x, null, null); result.steps.push('clear_old_dhcp'); }
+      catch (e) { result.errors.push({ step: 'clear_old_dhcp', error: e.message }); }
     }
-    // Neue MAC + neue IP -> Static-DHCP-Reservation
     if (newMac && newFixedIp) {
       let networkconfId = null;
       try {
@@ -14629,12 +14632,17 @@ async function syncSubscriberToUnifi(oldRow, newRow) {
         const net = (n.data || []).find(x => Number(x.vlan) === Number(newVlan));
         if (net) networkconfId = net._id;
       } catch {}
-      await unifiSetStaticDhcp(newMac, newFixedIp, networkconfId)
-        .catch(e => console.warn('[UniFi-Sync] set-dhcp:', e.message));
+      try { await unifiSetStaticDhcp(newMac, newFixedIp, networkconfId); result.steps.push('dhcp_reservation'); }
+      catch (e) { result.errors.push({ step: 'dhcp_reservation', error: e.message }); }
     } else if (newMac && !newFixedIp && oldRow?.fixed_ip) {
-      await unifiSetStaticDhcp(newMac, null, null).catch(() => {});
+      try { await unifiSetStaticDhcp(newMac, null, null); result.steps.push('clear_old_dhcp_keep_user'); }
+      catch (e) { /* nicht-kritisch */ }
     }
-  } catch (e) { console.warn('[UniFi-Sync] fail:', e.message); }
+  } catch (e) {
+    result.errors.push({ step: 'sync', error: e.message });
+  }
+  result.ok = result.errors.length === 0;
+  return result;
 }
 
 // === Subscribers (Wohnungs-Anschluesse) ===
@@ -14686,10 +14694,14 @@ app.post('/api/isp/subscribers', authMiddleware, async (req, res) => {
        b.eigenleistung_chf || null, b.eigenleistung_datum || null, b.notizen || null,
        b.port_profile_id || null, b.fixed_ip || null],
     );
-    const row = r.rows[0];
-    // UniFi-Sync (fire-and-forget, blockt aber den Response)
-    await syncSubscriberToUnifi(null, row);
-    res.json(row);
+    let row = r.rows[0];
+    const sync = await syncSubscriberToUnifi(null, row);
+    if (row.status === 'aktiv' && !sync.ok) {
+      // Bei Sync-Fehler nicht 'aktiv' lassen — auf 'geplant' downgraden.
+      const dg = await pool.query("UPDATE isp_subscribers SET status='geplant', updated_at=NOW() WHERE id=$1 RETURNING *", [row.id]);
+      row = dg.rows[0];
+    }
+    res.json({ ...row, unifi_sync: sync });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -14709,8 +14721,13 @@ app.put('/api/isp/subscribers/:id', authMiddleware, async (req, res) => {
     push('updated_at', new Date());
     params.push(id);
     const r = await pool.query(`UPDATE isp_subscribers SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
-    await syncSubscriberToUnifi(oldQ.rows[0], r.rows[0]);
-    res.json(r.rows[0]);
+    let row = r.rows[0];
+    const sync = await syncSubscriberToUnifi(oldQ.rows[0], row);
+    if (row.status === 'aktiv' && !sync.ok) {
+      const dg = await pool.query("UPDATE isp_subscribers SET status='geplant', updated_at=NOW() WHERE id=$1 RETURNING *", [row.id]);
+      row = dg.rows[0];
+    }
+    res.json({ ...row, unifi_sync: sync });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
