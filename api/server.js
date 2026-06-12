@@ -16188,9 +16188,8 @@ const MAINT_AUSSCHUSS_EMAIL = 'ausschuss@rosenweg4303.ch';
 // Per-Empfaenger-Throttle mit Combine-Puffer: max 1 Maintenance-Notification
 // pro MAINT_NOTIFY_THROTTLE_MIN (default 30 Min). Was waehrend des Fensters
 // reinkommt wird gepuffert und am Ende als Sammelmeldung verschickt.
-// Ausschuss-Verteiler ist immer ausgenommen.
+// Gilt fuer alle Empfaenger inkl. Ausschuss-Verteiler.
 const MAINT_NOTIFY_THROTTLE_MIN = parseInt(process.env.MAINT_NOTIFY_THROTTLE_MIN || '30', 10);
-const isAusschussEmail = r => r && r.toLowerCase() === MAINT_AUSSCHUSS_EMAIL;
 
 // Kernroutine: liefert eine Maintenance-Notification an alle Empfaenger.
 //   - direkt-Sender bekommen sofort `body` (via `sendFn(directList, body)`)
@@ -16204,22 +16203,20 @@ async function deliverMaintNotify({ channel, recipients, body, subject, sendFn }
     const n = await sendFn(list, body);
     return { sent: n, throttled: 0 };
   }
-  const candidates = list.filter(r => !isAusschussEmail(r));
-  const exempt = list.filter(isAusschussEmail);
   let blocked = new Set();
-  if (candidates.length) {
+  {
     const r = await pool.query(
       `SELECT recipient FROM isp_maint_notify_throttle
         WHERE channel = $1
           AND recipient = ANY($2::text[])
           AND last_at > NOW() - ($3 || ' minutes')::interval`,
-      [channel, candidates.map(c => c.toLowerCase()), String(MAINT_NOTIFY_THROTTLE_MIN)],
+      [channel, list.map(c => c.toLowerCase()), String(MAINT_NOTIFY_THROTTLE_MIN)],
     );
     blocked = new Set(r.rows.map(x => x.recipient));
   }
-  const direct = [...exempt];
+  const direct = [];
   const throttled = [];
-  for (const c of candidates) {
+  for (const c of list) {
     if (blocked.has(c.toLowerCase())) throttled.push(c);
     else direct.push(c);
   }
@@ -16228,17 +16225,13 @@ async function deliverMaintNotify({ channel, recipients, body, subject, sendFn }
     try { sent = await sendFn(direct, body) || direct.length; } catch (e) {
       console.warn('[maint-notify] sendFn error:', e.message);
     }
-    // Direct-Sender bekommen jetzt eine Nachricht → last_at refreshen.
-    // Ausschuss wird ausgespart (kein Throttle).
-    const lowered = direct.filter(r => !isAusschussEmail(r)).map(r => r.toLowerCase());
-    if (lowered.length) {
-      await pool.query(
-        `INSERT INTO isp_maint_notify_throttle (recipient, channel, last_at, pending_lines, pending_subjects)
-         SELECT u, $1, NOW(), '[]'::jsonb, '[]'::jsonb FROM unnest($2::text[]) AS u
-         ON CONFLICT (recipient, channel) DO UPDATE SET last_at = NOW()`,
-        [channel, lowered],
-      );
-    }
+    const lowered = direct.map(r => r.toLowerCase());
+    await pool.query(
+      `INSERT INTO isp_maint_notify_throttle (recipient, channel, last_at, pending_lines, pending_subjects)
+       SELECT u, $1, NOW(), '[]'::jsonb, '[]'::jsonb FROM unnest($2::text[]) AS u
+       ON CONFLICT (recipient, channel) DO UPDATE SET last_at = NOW()`,
+      [channel, lowered],
+    );
   }
   if (throttled.length) {
     const lowered = throttled.map(r => r.toLowerCase());
