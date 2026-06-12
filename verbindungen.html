@@ -6,7 +6,7 @@
     <title>Verbindungsnachweis — Rosenweg ISP</title>
     <link rel="icon" href="/logo-rosenweg-isp.png">
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="/js/authentik-auth.js?v=3"></script>
+    <script src="/js/authentik-auth.js?v=4"></script>
     <script src="/js/site-config.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -92,6 +92,10 @@
     </main>
 
     <script>
+        (async () => {
+        // Init parsed OAuth-Callback-Hash → Token in localStorage.
+        await AuthentikAuth.init({ requireAuth: false });
+        try { RosenwegNav._wireAuth?.(); RosenwegNav._wirePermissions?.(); } catch {}
         const user = AuthentikAuth.getUser();
         if (!user?.isAdmin) {
             document.getElementById('no-access').classList.remove('hidden');
@@ -195,6 +199,7 @@
             // Auto-search on load
             search();
         }
+        })();
     </script>
 </body>
 </html>
