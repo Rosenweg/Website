@@ -794,7 +794,18 @@
       const url = id ? '/api/isp/reverse-proxy/' + id : '/api/isp/reverse-proxy';
       const method = id ? 'PUT' : 'POST';
       const r = await AuthentikAuth.apiFetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
-      if (!r.ok) throw new Error(await r.text());
+      if (!r.ok) {
+        // API-Fehler ist JSON; wenn HTML zurueckkommt war's Session/Auth-
+        // Redirect statt API-Antwort.
+        const ct = r.headers.get('content-type') || '';
+        if (ct.includes('html')) {
+          alert('Session abgelaufen oder Auth-Problem — bitte Seite neu laden und neu einloggen.');
+          return;
+        }
+        let msg = await r.text();
+        try { const j = JSON.parse(msg); msg = j.error || msg; } catch {}
+        throw new Error(msg.slice(0, 300));
+      }
       document.querySelector('.fixed')?.remove();
       await loadRp();
     } catch (e) { alert('Fehler: ' + e.message); }
