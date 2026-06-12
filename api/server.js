@@ -15355,7 +15355,28 @@ app.get('/api/isp/client-vlan-routers', authMiddleware, async (req, res) => {
                 WHERE v.assigned_router_id = cr.id AND v.status IN ('approved','deployed')) AS assigned_count
         FROM isp_client_vlan_routers cr
         ORDER BY cr.client_vlan_id`);
-    res.json({ client_vlan_routers: r.rows });
+
+    // Live-PVE-Lookup: pve_host + status werden aus dem Cluster gezogen, nicht
+    // aus der DB (HA-Failover macht stored Host sofort stale). Wenn PVE-API
+    // nicht erreichbar ist, bleibt live_node leer und das UI zeigt "—".
+    let live = {};
+    let pveError = null;
+    try {
+      const resources = await pveAPI('GET', '/cluster/resources?type=vm');
+      for (const x of resources || []) {
+        if (x.type === 'lxc' && Number.isInteger(x.vmid)) {
+          live[x.vmid] = { node: x.node, status: x.status, name: x.name, uptime: x.uptime };
+        }
+      }
+    } catch (err) { pveError = err.message; }
+
+    const rows = r.rows.map(row => ({
+      ...row,
+      live_node: live[row.lxc_id]?.node || null,
+      live_status: live[row.lxc_id]?.status || (Object.keys(live).length > 0 ? 'missing' : null),
+      live_name: live[row.lxc_id]?.name || null,
+    }));
+    res.json({ client_vlan_routers: rows, pve_error: pveError });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

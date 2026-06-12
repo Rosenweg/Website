@@ -847,10 +847,13 @@
   }
 
   // === Router-LXC pro Client-VLAN ===
+  let routersPveError = null;
   async function loadRouters() {
     const r = await AuthentikAuth.apiFetch('/api/isp/client-vlan-routers');
     if (!r.ok) return;
-    clientVlanRouters = (await r.json()).client_vlan_routers || [];
+    const data = await r.json();
+    clientVlanRouters = data.client_vlan_routers || [];
+    routersPveError = data.pve_error || null;
     renderRouters();
   }
   function renderRouters() {
@@ -859,12 +862,21 @@
       wrap.innerHTML = '<p class="p-6 text-gray-400 italic text-center">Noch keine Router-LXCs hinterlegt.</p>';
       return;
     }
-    wrap.innerHTML = `<table class="min-w-full text-sm">
+    const pveBanner = routersPveError
+      ? `<div class="bg-amber-50 border-b border-amber-200 px-3 py-2 text-xs text-amber-800">⚠ PVE-Cluster nicht abfragbar (${esc(routersPveError)}). Setze <code>PVE_API_TOKEN</code> auf rosenweg_api, um Live-Host + Status zu sehen.</div>`
+      : '';
+    const statusBadge = s => {
+      if (s === 'running')  return '<span class="bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-[10px]">running</span>';
+      if (s === 'stopped')  return '<span class="bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded text-[10px]">stopped</span>';
+      if (s === 'missing')  return '<span class="bg-red-100 text-red-700 px-1.5 py-0.5 rounded text-[10px]" title="CT existiert noch nicht im Cluster">fehlt</span>';
+      return '';
+    };
+    wrap.innerHTML = `${pveBanner}<table class="min-w-full text-sm">
       <thead class="bg-gray-50 text-xs uppercase text-gray-500"><tr>
         <th class="px-3 py-2 text-left">Client-VLAN</th>
         <th class="px-3 py-2 text-left">Bezeichnung</th>
         <th class="px-3 py-2 text-left">LXC</th>
-        <th class="px-3 py-2 text-left">PVE-Host</th>
+        <th class="px-3 py-2 text-left">PVE-Host (live)</th>
         <th class="px-3 py-2 text-left">Mgmt-IP</th>
         <th class="px-3 py-2 text-left">Upstream-GW</th>
         <th class="px-3 py-2 text-left">Aktiv</th>
@@ -876,7 +888,7 @@
           <td class="px-3 py-2 font-mono">${esc(r.client_vlan_id)}</td>
           <td class="px-3 py-2">${esc(r.bezeichnung || '—')}</td>
           <td class="px-3 py-2 font-mono">${esc(r.lxc_id)}</td>
-          <td class="px-3 py-2 text-xs">${esc(r.pve_host || '—')}</td>
+          <td class="px-3 py-2 text-xs whitespace-nowrap">${r.live_node ? esc(r.live_node) + ' ' + statusBadge(r.live_status) : statusBadge(r.live_status) || '<span class="text-gray-400">—</span>'}</td>
           <td class="px-3 py-2 font-mono text-xs">${esc(r.mgmt_ip || '—')}</td>
           <td class="px-3 py-2 font-mono text-xs">${esc(r.upstream_gateway || '—')}</td>
           <td class="px-3 py-2 text-xs">${r.active ? '<span class="bg-green-100 text-green-700 px-2 py-0.5 rounded">ja</span>' : '<span class="bg-gray-100 text-gray-500 px-2 py-0.5 rounded">nein</span>'}</td>
