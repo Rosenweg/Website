@@ -509,7 +509,11 @@
             <div><label class="block text-xs text-gray-600">Eigenleistung CHF</label><input id="s-eig" type="number" step="0.01" value="${s.eigenleistung_chf || ''}" class="w-full border rounded px-2 py-1"></div>
             <div><label class="block text-xs text-gray-600">Datum</label><input id="s-eig-d" type="date" value="${s.eigenleistung_datum ? s.eigenleistung_datum.slice(0,10) : ''}" class="w-full border rounded px-2 py-1"></div>
           </div>
-          <div><label class="block text-xs text-gray-600">MAC (802.1X)</label><input id="s-mac" type="text" value="${esc(s.mac_dot1x || '')}" class="w-full border rounded px-2 py-1"></div>
+          <div>
+            <label class="block text-xs text-gray-600">MAC (802.1X)</label>
+            <input id="s-mac" type="text" value="${esc(s.mac_dot1x || '')}" placeholder="aa:bb:cc:dd:ee:ff" class="w-full border rounded px-2 py-1 font-mono" oninput="normalizeMacInput(this)">
+            <p class="text-xs text-gray-400 mt-0.5">Optional: MAC-basierte Port-Authentifizierung. Nur Geräte mit dieser MAC dürfen sich am Switch-Port anmelden. Format wird automatisch normalisiert.</p>
+          </div>
           <div><label class="block text-xs text-gray-600">Notizen</label><textarea id="s-notiz" rows="2" class="w-full border rounded px-2 py-1">${esc(s.notizen || '')}</textarea></div>
         </div>
         <div class="flex justify-end gap-2 mt-3">
@@ -520,6 +524,19 @@
     </div>`;
     document.body.insertAdjacentHTML('beforeend', modal);
     updatePortDropdown(); // initial Port-Liste fuer den ggf. vorausgewaehlten Switch
+  }
+  function normalizeMacInput(el) {
+    // Akzeptiert aa:bb:cc:dd:ee:ff, AA-BB-CC-DD-EE-FF, aabb.ccdd.eeff, aabbccddeeff
+    // und liefert lowercase aa:bb:cc:dd:ee:ff zurueck, sobald 12 Hex-Zeichen da sind.
+    const hex = (el.value || '').toLowerCase().replace(/[^0-9a-f]/g, '');
+    if (hex.length > 12) { el.value = hex.slice(0, 12).match(/.{1,2}/g).join(':'); return; }
+    if (hex.length === 12) { el.value = hex.match(/.{2}/g).join(':'); el.classList.remove('border-red-400'); return; }
+    if (hex.length > 0 && hex.length < 12) {
+      el.value = hex.match(/.{1,2}/g).join(':');
+      el.classList.add('border-red-400');
+      return;
+    }
+    el.classList.remove('border-red-400');
   }
   function updatePortDropdown() {
     const sel = document.getElementById('s-switch')?.value || '';
