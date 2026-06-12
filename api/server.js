@@ -16366,6 +16366,19 @@ async function maintProcessScheduledNotifications() {
 // 3. Recovery: state zurueck auf online: active->completed + All-Clear.
 const _maintLastDeviceState = new Map(); // device-id -> state
 
+// Naechstes UniFi-Device-Update-Fenster (3 AM Europe/Zurich, robust gegen DST).
+function nextDeviceUpdateSlot(hour = 3) {
+  const now = Date.now();
+  for (let i = 1; i <= 48; i++) {
+    const cand = new Date(now + i * 60 * 60 * 1000);
+    const h = +new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Zurich', hour: '2-digit', hour12: false,
+    }).formatToParts(cand).find(p => p.type === 'hour').value;
+    if (h === hour) { cand.setMinutes(0, 0, 0); return cand; }
+  }
+  return new Date(now + 24 * 60 * 60 * 1000);
+}
+
 // Gemeinsamer Handler fuer ein Device aus Network ODER Protect.
 //   key:        eindeutiger Identifier (mac fuer Network, id fuer Protect)
 //   name:       Anzeige-Name
@@ -16384,33 +16397,33 @@ async function maintHandleDeviceUpdate({ key, name, model, isOnline, upgradable,
                      : 'UniFi-Network-Geraet';
 
   // 1) Pre-Detection: upgradable + noch online + noch keine Wartung → "planned"
+  //    start_at = naechstes 3 AM Zurich (UniFi-Device-Auto-Upgrade-Slot), Pre-
+  //    Mail 30min vorher. Bei Access (in-Progress-Signal) gehen wir sofort an.
   if (upgradable && isOnline) {
-    const title = `Firmware-Update verfuegbar: ${name || model || key}`;
+    const slot = nextDeviceUpdateSlot(3);
+    const title = `Firmware-Update geplant: ${name || model || key}`;
     const desc = `${productLabel} "${name || ''}" (${model || ''}) ` +
-                 `hat ein Firmware-Update auf ${upgradeTo || 'neuere Version'} bereit. ` +
-                 `UniFi installiert das beim naechsten Auto-Upgrade-Zyklus — der Anschluss ` +
-                 `wird waehrend dieser Zeit kurz unterbrochen sein.`;
+                 `bekommt ein Firmware-Update${upgradeTo ? ' auf ' + upgradeTo : ''}. ` +
+                 `UniFi installiert das automatisch im naechsten Device-Update-Fenster ` +
+                 `(taeglich 3 Uhr nachts). Der Anschluss kann waehrend dieser Zeit kurz ` +
+                 `unterbrochen sein.`;
     try {
       const ins = await pool.query(
         `INSERT INTO isp_maintenance
            (title, description, severity, scope, status, start_at,
             notify_email, notify_whatsapp, notify_lead_time_minutes,
             auto_source, source_device_id, source_device_name)
-         VALUES ($1,$2,'info',$3::JSONB,'planned',NOW() + interval '24 hours',
-                 true, true, 0,
-                 'unifi_device_update', $4, $5)
+         VALUES ($1,$2,'info',$3::JSONB,'planned',$4,
+                 true, true, 30,
+                 'unifi_device_update', $5, $6)
          ON CONFLICT (source_device_id)
            WHERE auto_source = 'unifi_device_update' AND status IN ('planned','active')
          DO NOTHING
          RETURNING *`,
-        [title, desc, JSON.stringify(scope), key, name || null],
+        [title, desc, JSON.stringify(scope), slot, key, name || null],
       );
       if (ins.rows[0]) {
-        console.log(`[Maint-Auto] pre: ${title}`);
-        const mail = await sendMaintenanceMail(ins.rows[0], 'pre');
-        const wa = await sendMaintenanceWhatsApp(ins.rows[0], 'pre');
-        await pool.query('UPDATE isp_maintenance SET notify_email_pre_at = NOW() WHERE id = $1', [ins.rows[0].id]);
-        console.log(`[Maint-Auto] pre-notify: email=${mail.sent} wa=${wa.sent}`);
+        console.log(`[Maint-Auto] pre: ${title} (slot=${slot.toISOString()})`);
       }
     } catch (e) { console.warn('[Maint-Auto] pre-insert:', e.message); }
   }
