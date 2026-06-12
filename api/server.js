@@ -16092,6 +16092,367 @@ app.delete('/api/isp/client-vlan-routers/:id', authMiddleware, async (req, res) 
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// === ISP-Wartungen / Stoerungen / Auto-Updates ===
+
+// Permission: Technik OR Ausschuss (analog requireAusschussOrTechnik).
+function ispMaintCanWrite(req) {
+  const groups = (req.user?.groups || []).map(g => String(g || '').toLowerCase());
+  return groups.some(g => g === 'technik' || g === 'ausschuss');
+}
+
+// Aus Geraete-Name HausNr extrahieren (z.B. "PoE-Switch1 R9 Heizungsraum" -> 9)
+function hausFromDeviceName(name) {
+  const m = String(name || '').match(/\bR(\d{1,2})\b/i);
+  if (!m) return null;
+  const h = parseInt(m[1], 10);
+  return (h >= 1 && h <= 18) ? h : null;
+}
+
+// Empfaenger-Resolver: liefert Email-Liste fuer ein scope-Objekt.
+async function maintRecipientsForScope(scope) {
+  const allBewohner = !!scope?.all;
+  const houses = Array.isArray(scope?.houses) ? scope.houses.map(Number).filter(Number.isFinite) : [];
+  const vlans = Array.isArray(scope?.vlans) ? scope.vlans.map(Number).filter(Number.isFinite) : [];
+  // VLANs -> Hausnummern via VPN_RW_TO_VLAN (reverse)
+  const reverseMap = Object.fromEntries(Object.entries(VPN_RW_TO_VLAN).map(([h, v]) => [v, parseInt(h, 10)]));
+  for (const v of vlans) { const h = reverseMap[v]; if (h) houses.push(h); }
+  const unique = Array.from(new Set(houses));
+  let q, params;
+  if (allBewohner || unique.length === 0) {
+    q = `SELECT DISTINCT LOWER(p.email) AS email FROM personen p
+           JOIN wohnungen_kontakte k ON k.person_id = p.id
+          WHERE k.archiviert_am IS NULL AND p.email IS NOT NULL AND p.email <> ''`;
+    params = [];
+  } else {
+    // Wohnungen filtern: bezeichnung beginnt mit der Haus-Nummer (z.B. "9.2OG.3")
+    // ODER ist parkplatz/hobbyraum dieser Haus-Nummer (klassifyVpnEntry-Logik).
+    q = `SELECT DISTINCT LOWER(p.email) AS email
+           FROM personen p
+           JOIN wohnungen_kontakte k ON k.person_id = p.id
+           JOIN wohnungen w ON w.id = k.wohnung_id
+          WHERE k.archiviert_am IS NULL
+            AND p.email IS NOT NULL AND p.email <> ''
+            AND (
+              w.bezeichnung ~ ('^(' || $1::text || ')[\\.\\-]')
+              OR (w.bezeichnung ~* '^RW(' || $1::text || ')-')
+            )`;
+    params = [unique.join('|')];
+  }
+  const r = await pool.query(q, params);
+  return r.rows.map(x => x.email).filter(Boolean);
+}
+
+// Wie maintRecipientsForScope, aber nur Personen deren Wohnung auch einen
+// isp_subscribers-Eintrag hat (= aktive Anschluss-Kunden). Fuer WhatsApp-Broadcast.
+async function maintSubscriberRecipientsForScope(scope) {
+  const allBewohner = !!scope?.all;
+  const houses = Array.isArray(scope?.houses) ? scope.houses.map(Number).filter(Number.isFinite) : [];
+  const vlans = Array.isArray(scope?.vlans) ? scope.vlans.map(Number).filter(Number.isFinite) : [];
+  const reverseMap = Object.fromEntries(Object.entries(VPN_RW_TO_VLAN).map(([h, v]) => [v, parseInt(h, 10)]));
+  for (const v of vlans) { const h = reverseMap[v]; if (h) houses.push(h); }
+  const unique = Array.from(new Set(houses));
+  let q, params;
+  if (allBewohner || unique.length === 0) {
+    q = `SELECT DISTINCT LOWER(p.email) AS email
+           FROM personen p
+           JOIN wohnungen_kontakte k ON k.person_id = p.id
+           JOIN isp_subscribers s ON s.wohnung_id = k.wohnung_id
+          WHERE k.archiviert_am IS NULL AND p.email IS NOT NULL AND p.email <> ''
+            AND s.status IN ('aktiv','geplant')`;
+    params = [];
+  } else {
+    q = `SELECT DISTINCT LOWER(p.email) AS email
+           FROM personen p
+           JOIN wohnungen_kontakte k ON k.person_id = p.id
+           JOIN wohnungen w ON w.id = k.wohnung_id
+           JOIN isp_subscribers s ON s.wohnung_id = w.id
+          WHERE k.archiviert_am IS NULL
+            AND p.email IS NOT NULL AND p.email <> ''
+            AND s.status IN ('aktiv','geplant')
+            AND (
+              w.bezeichnung ~ ('^(' || $1::text || ')[\\.\\-]')
+              OR (w.bezeichnung ~* '^RW(' || $1::text || ')-')
+            )`;
+    params = [unique.join('|')];
+  }
+  const r = await pool.query(q, params);
+  return r.rows.map(x => x.email).filter(Boolean);
+}
+
+// WhatsApp-Broadcast an Subscriber-Bewohner im scope.
+async function sendMaintenanceWhatsApp(maint, kind) {
+  const recipients = await maintSubscriberRecipientsForScope(maint.scope || {});
+  if (recipients.length === 0) return { sent: 0, skipped: 'no_recipients' };
+  const sev = maint.severity === 'critical' ? '⚠⚠' : (maint.severity === 'warning' ? '⚠' : 'ℹ');
+  const fmt = d => d ? new Date(d).toLocaleString('de-CH', { timeZone: 'Europe/Zurich', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '?';
+  const body = kind === 'pre'
+    ? `${sev} *Rosenweg ISP*\n*${maint.title}*\n\nGeplante Wartung: ${fmt(maint.start_at)} - ${fmt(maint.end_at)}\n\n${maint.description || ''}`
+    : kind === 'start'
+    ? `${sev} *Rosenweg ISP*\n*${maint.title}* beginnt JETZT.\n\nVoraussichtl. Ende: ${fmt(maint.end_at)}\n\n${maint.description || ''}`
+    : `✓ *Rosenweg ISP*\n*${maint.title}* — Wartung abgeschlossen, Dienste wieder verfuegbar.`;
+  try {
+    const n = await pushWhatsappBroadcast({ emails: recipients, body, sourceType: 'isp_maintenance', sourceId: String(maint.id) });
+    return { sent: n, recipients: recipients.length };
+  } catch (e) {
+    console.warn('[Maint-WhatsApp] error:', e.message);
+    return { sent: 0, error: e.message };
+  }
+}
+
+// Sendet eine Wartungs-Mail an scope-Empfaenger. Body als Markdown -> simple Plain.
+async function sendMaintenanceMail(maint, kind /* 'pre'|'start'|'end' */) {
+  const recipients = await maintRecipientsForScope(maint.scope || {});
+  if (recipients.length === 0) return { sent: 0, skipped: 'no_recipients' };
+  const sevPrefix = maint.severity === 'critical' ? '⚠ DRINGEND' : (maint.severity === 'warning' ? '⚠' : 'ℹ');
+  const kindLabel = kind === 'pre' ? 'Erinnerung' : (kind === 'start' ? 'beginnt jetzt' : 'beendet');
+  const subject = `${sevPrefix} [Rosenweg ISP] ${maint.title} — ${kindLabel}`;
+  const fmt = d => d ? new Date(d).toLocaleString('de-CH', { timeZone: 'Europe/Zurich' }) : '?';
+  const body = [
+    `Hallo,`,
+    ``,
+    kind === 'pre' ? `eine Wartung ist in Kuerze geplant:` :
+    kind === 'start' ? `eine Wartung beginnt JETZT:` :
+    `die Wartung ist abgeschlossen:`,
+    ``,
+    `Titel: ${maint.title}`,
+    `Zeitraum: ${fmt(maint.start_at)} - ${fmt(maint.end_at)}`,
+    maint.description ? `\nBeschreibung:\n${maint.description}` : '',
+    maint.auto_source === 'unifi_device_update' ? '\n(Diese Meldung wurde automatisch durch ein UniFi-Geraete-Update ausgeloest.)' : '',
+    `\nFuer Rueckfragen: technik@rosenweg4303.ch`,
+    `\nRosenweg ISP`,
+  ].filter(Boolean).join('\n');
+  // BCC alle Empfaenger
+  let sent = 0;
+  try {
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM || 'isp@rosenweg4303.ch',
+      to: 'isp@rosenweg4303.ch',
+      bcc: recipients,
+      subject,
+      text: body,
+    });
+    sent = recipients.length;
+  } catch (e) {
+    console.warn('[Maint-Mail] error:', e.message);
+    return { sent: 0, error: e.message };
+  }
+  return { sent };
+}
+
+// SCHEMA: jeder Endpoint joint die Counts der zu sendenden Notifs nicht — wir
+// halten es flach. Public-Liste nur das was Banner braucht.
+
+app.get('/api/isp/maintenance', authMiddleware, async (req, res) => {
+  try {
+    const admin = ispIsAdmin(req) || ispMaintCanWrite(req);
+    const r = await pool.query(
+      admin
+        ? `SELECT * FROM isp_maintenance ORDER BY
+             CASE status WHEN 'active' THEN 0 WHEN 'planned' THEN 1 WHEN 'completed' THEN 2 ELSE 3 END,
+             start_at DESC NULLS LAST`
+        : `SELECT id, title, description, severity, scope, status, start_at, end_at, auto_source
+             FROM isp_maintenance
+            WHERE status IN ('planned','active')
+              AND (end_at IS NULL OR end_at > NOW() - interval '1 day')
+            ORDER BY start_at NULLS FIRST`,
+    );
+    res.json({ maintenance: r.rows, can_write: admin });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Oeffentliche Banner-Liste (keine Auth) — nur was JETZT relevant ist.
+app.get('/api/isp/maintenance/public', async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT id, title, description, severity, scope, status, start_at, end_at, auto_source
+         FROM isp_maintenance
+        WHERE status IN ('planned','active')
+          AND (start_at IS NULL OR start_at < NOW() + interval '24 hours')
+          AND (end_at IS NULL OR end_at > NOW() - interval '1 hour')
+        ORDER BY
+          CASE status WHEN 'active' THEN 0 WHEN 'planned' THEN 1 ELSE 2 END,
+          start_at NULLS FIRST`,
+    );
+    res.json({ maintenance: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/isp/maintenance', authMiddleware, async (req, res) => {
+  try {
+    if (!ispMaintCanWrite(req)) return res.status(403).json({ error: 'Nur Technik oder Ausschuss' });
+    const b = req.body || {};
+    if (!b.title) return res.status(400).json({ error: 'title Pflicht' });
+    const r = await pool.query(
+      `INSERT INTO isp_maintenance
+         (title, description, severity, scope, status, start_at, end_at,
+          notify_email, notify_whatsapp, notify_lead_time_minutes,
+          auto_source, created_by_email)
+       VALUES ($1,$2,COALESCE($3,'info'),COALESCE($4,'{}'::JSONB),COALESCE($5,'planned'),
+               $6,$7,COALESCE($8,true),COALESCE($9,false),COALESCE($10,60),
+               COALESCE($11,'manual'),$12) RETURNING *`,
+      [b.title, b.description || null, b.severity || null, b.scope ? JSON.stringify(b.scope) : null,
+       b.status || null, b.start_at || null, b.end_at || null,
+       b.notify_email, b.notify_whatsapp, b.notify_lead_time_minutes,
+       b.auto_source || null, req.user.email || null],
+    );
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/isp/maintenance/:id', authMiddleware, async (req, res) => {
+  try {
+    if (!ispMaintCanWrite(req)) return res.status(403).json({ error: 'Nur Technik oder Ausschuss' });
+    const id = parseInt(req.params.id, 10);
+    const b = req.body || {};
+    const updates = []; const params = [];
+    const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
+    for (const col of ['title','description','severity','status','start_at','end_at',
+                       'notify_email','notify_whatsapp','notify_lead_time_minutes']) {
+      if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
+    }
+    if (b.scope !== undefined) push('scope', JSON.stringify(b.scope || {}));
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
+    push('updated_at', new Date());
+    params.push(id);
+    const r = await pool.query(`UPDATE isp_maintenance SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/isp/maintenance/:id', authMiddleware, async (req, res) => {
+  try {
+    if (!ispMaintCanWrite(req)) return res.status(403).json({ error: 'Nur Technik oder Ausschuss' });
+    await pool.query('DELETE FROM isp_maintenance WHERE id = $1', [parseInt(req.params.id, 10)]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Manuelles Ausloesen einer Notification (z.B. fuer Spontan-Ausfall).
+app.post('/api/isp/maintenance/:id/notify', authMiddleware, async (req, res) => {
+  try {
+    if (!ispMaintCanWrite(req)) return res.status(403).json({ error: 'Nur Technik oder Ausschuss' });
+    const id = parseInt(req.params.id, 10);
+    const r = await pool.query('SELECT * FROM isp_maintenance WHERE id = $1', [id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const kind = (req.query.kind || 'pre');
+    if (!['pre','start','end'].includes(kind)) return res.status(400).json({ error: 'kind muss pre|start|end sein' });
+    const m = r.rows[0];
+    const result = { email: { sent: 0 }, whatsapp: { sent: 0 } };
+    if (m.notify_email) result.email = await sendMaintenanceMail(m, kind);
+    if (m.notify_whatsapp) result.whatsapp = await sendMaintenanceWhatsApp(m, kind);
+    const col = kind === 'pre' ? 'notify_email_pre_at' : (kind === 'start' ? 'notify_start_at' : 'notify_end_at');
+    await pool.query(`UPDATE isp_maintenance SET ${col} = NOW(), updated_at = NOW() WHERE id = $1`, [id]);
+    res.json({ ok: true, kind, ...result });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── Cron 1: scheduled-notification-Engine ──────────────────────────
+// Jede Minute: pre-/start-/end-Mails versenden wenn faellig.
+async function maintProcessScheduledNotifications() {
+  try {
+    const now = new Date();
+    const all = await pool.query(`
+      SELECT * FROM isp_maintenance
+       WHERE status IN ('planned','active') AND notify_email = true
+    `);
+    for (const m of all.rows) {
+      const fire = async (kind) => {
+        const e = m.notify_email ? await sendMaintenanceMail(m, kind) : { sent: 0 };
+        const w = m.notify_whatsapp ? await sendMaintenanceWhatsApp(m, kind) : { sent: 0 };
+        console.log(`[Maint-Notify] ${kind} #${m.id}: email=${e.sent} wa=${w.sent}`);
+      };
+      if (m.start_at && !m.notify_email_pre_at) {
+        const lead = (m.notify_lead_time_minutes || 60) * 60 * 1000;
+        const due = new Date(m.start_at).getTime() - lead;
+        if (now.getTime() >= due) {
+          await fire('pre');
+          await pool.query('UPDATE isp_maintenance SET notify_email_pre_at = NOW() WHERE id = $1', [m.id]);
+        }
+      }
+      if (m.start_at && m.status === 'planned' && now >= new Date(m.start_at)) {
+        await pool.query("UPDATE isp_maintenance SET status='active', notify_start_at=NOW() WHERE id=$1", [m.id]);
+        await fire('start');
+      }
+      if (m.end_at && (m.status === 'active' || m.status === 'planned') && now >= new Date(m.end_at)) {
+        await pool.query("UPDATE isp_maintenance SET status='completed', notify_end_at=NOW() WHERE id=$1", [m.id]);
+        await fire('end');
+      }
+    }
+  } catch (err) { console.warn('[Maint-Notify] error:', err.message); }
+}
+
+// ─── Cron 2: UniFi-Device-State-Watcher ─────────────────────────────
+// Erkennt automatisch wenn UniFi-Geraete in Update gehen oder offline.
+const _maintLastDeviceState = new Map(); // mac -> state
+async function maintPollUnifiDevices() {
+  try {
+    const d = await unifiGet('stat/device', 4000);
+    const devs = (d.data || []).filter(x => x.mac);
+    for (const dev of devs) {
+      const mac = dev.mac;
+      const stateNow = dev.state; // 1=online, 2=upgrade, andere=problem/offline
+      const prev = _maintLastDeviceState.get(mac);
+      _maintLastDeviceState.set(mac, stateNow);
+      if (prev === undefined) continue; // erster Poll
+
+      // Online -> Update/Offline: Wartungseintrag anlegen (idempotent via UNIQUE)
+      if (prev === 1 && stateNow !== 1) {
+        const haus = hausFromDeviceName(dev.name);
+        const scope = haus ? { houses: [haus] } : { all: true };
+        const title = `Geraete-Update: ${dev.name || dev.model || mac}`;
+        const desc = `UniFi-Geraet ${dev.name || ''} (${dev.model || ''}) ` +
+                     (stateNow === 2 ? 'fuehrt ein Firmware-Update durch.' : 'ist nicht mehr online (state=' + stateNow + ').') +
+                     ' Der Anschluss kann waehrend dieser Zeit kurzfristig unterbrochen sein.';
+        try {
+          const ins = await pool.query(
+            `INSERT INTO isp_maintenance
+               (title, description, severity, scope, status, start_at,
+                notify_email, notify_lead_time_minutes,
+                auto_source, source_device_id, source_device_name)
+             VALUES ($1,$2,'warning',$3::JSONB,'active',NOW(),
+                     true, 0,
+                     'unifi_device_update', $4, $5)
+             ON CONFLICT (source_device_id) WHERE auto_source = 'unifi_device_update' AND status IN ('planned','active')
+             DO NOTHING
+             RETURNING *`,
+            [title, desc, JSON.stringify(scope), mac, dev.name || null],
+          );
+          if (ins.rows[0]) {
+            console.log(`[Maint-Auto] erkannt: ${title}`);
+            const mail = await sendMaintenanceMail(ins.rows[0], 'start');
+            const wa = await sendMaintenanceWhatsApp(ins.rows[0], 'start');
+            await pool.query('UPDATE isp_maintenance SET notify_start_at = NOW(), notify_whatsapp = true WHERE id = $1', [ins.rows[0].id]);
+            console.log(`[Maint-Auto] start-notify: email=${mail.sent} wa=${wa.sent}`);
+          }
+        } catch (e) { console.warn('[Maint-Auto] insert error:', e.message); }
+      }
+      // Update/Offline -> wieder online
+      if (prev !== 1 && stateNow === 1) {
+        try {
+          const open = await pool.query(
+            `SELECT * FROM isp_maintenance
+              WHERE auto_source = 'unifi_device_update' AND source_device_id = $1
+                AND status = 'active'`,
+            [mac],
+          );
+          if (open.rows[0]) {
+            await pool.query(
+              "UPDATE isp_maintenance SET status='completed', end_at=NOW(), notify_end_at=NOW() WHERE id=$1",
+              [open.rows[0].id],
+            );
+            console.log(`[Maint-Auto] erledigt: #${open.rows[0].id}`);
+            const closed = { ...open.rows[0], status: 'completed', end_at: new Date() };
+            const mail = await sendMaintenanceMail(closed, 'end');
+            const wa = await sendMaintenanceWhatsApp(closed, 'end');
+            console.log(`[Maint-Auto] all-clear: email=${mail.sent} wa=${wa.sent}`);
+          }
+        } catch (e) { console.warn('[Maint-Auto] close error:', e.message); }
+      }
+    }
+  } catch (err) { console.warn('[Maint-Auto] poll error:', err.message); }
+}
+
 // === Reverse-Proxy-Routen ===
 app.get('/api/isp/reverse-proxy', authMiddleware, async (req, res) => {
   try {
@@ -19144,6 +19505,42 @@ async function initDB() {
       -- Pro Wohnung ein Anschluss-Datensatz (Status, Switch-Port, Bandbreite,
       -- VLAN, Erschliessungs-Kosten). Sichtbar für Bewohner als
       -- 'Mein Anschluss', voll editierbar für technik/praesident.
+      -- Wartungen / Stoerungen (geplant + spontan).
+      -- scope JSONB: { all: bool, houses: [9,13], vlans: [99,139] }
+      -- auto_source: 'manual' | 'unifi_device_update' (automatisch erkannt)
+      CREATE TABLE IF NOT EXISTS isp_maintenance (
+        id SERIAL PRIMARY KEY,
+        title VARCHAR(200) NOT NULL,
+        description TEXT,
+        severity VARCHAR(20) DEFAULT 'info',          -- 'info' | 'warning' | 'critical'
+        scope JSONB DEFAULT '{}'::JSONB,
+        status VARCHAR(20) DEFAULT 'planned',         -- 'planned' | 'active' | 'completed' | 'cancelled'
+        start_at TIMESTAMPTZ,
+        end_at TIMESTAMPTZ,
+        notify_email BOOLEAN DEFAULT true,
+        notify_whatsapp BOOLEAN DEFAULT false,
+        notify_lead_time_minutes INTEGER DEFAULT 60,
+        notify_email_pre_at TIMESTAMPTZ,
+        notify_start_at TIMESTAMPTZ,
+        notify_end_at TIMESTAMPTZ,
+        auto_source VARCHAR(40) DEFAULT 'manual',
+        source_device_id VARCHAR(40),
+        source_device_name VARCHAR(200),
+        created_by_email TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        CONSTRAINT isp_maint_status_chk CHECK (status IN ('planned','active','completed','cancelled')),
+        CONSTRAINT isp_maint_severity_chk CHECK (severity IN ('info','warning','critical'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_isp_maint_status ON isp_maintenance(status);
+      CREATE INDEX IF NOT EXISTS idx_isp_maint_start ON isp_maintenance(start_at);
+      CREATE INDEX IF NOT EXISTS idx_isp_maint_source ON isp_maintenance(auto_source, source_device_id);
+      -- Verhindert dass UniFi-Auto-Detection mehrfach das gleiche Device
+      -- gleichzeitig als laufende Wartung registriert
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_isp_maint_active_device
+        ON isp_maintenance(source_device_id)
+        WHERE auto_source = 'unifi_device_update' AND status IN ('planned','active');
+
       CREATE TABLE IF NOT EXISTS isp_subscribers (
         id SERIAL PRIMARY KEY,
         wohnung_id INTEGER REFERENCES wohnungen(id) ON DELETE CASCADE,
@@ -20395,6 +20792,12 @@ initDB()
       // Cleanup expired sessions every hour
       activeIntervals.push(setInterval(cleanupExpiredSessions, 60 * 60 * 1000));
       setTimeout(cleanupExpiredSessions, 30 * 1000); // first cleanup after 30s
+      // Wartungs-Notification-Cron (1min)
+      activeIntervals.push(setInterval(maintProcessScheduledNotifications, 60 * 1000));
+      // UniFi-Geraete-State-Watcher (1min, erstmal 30s nach Start)
+      setTimeout(maintPollUnifiDevices, 30 * 1000);
+      activeIntervals.push(setInterval(maintPollUnifiDevices, 60 * 1000));
+      console.log('[Maint] notification cron + unifi device watcher gestartet');
     });
   })
   .catch((err) => {
