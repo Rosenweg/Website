@@ -14988,16 +14988,38 @@ app.get('/api/isp/vlan-requests/:id/suggest', authMiddleware, async (req, res) =
 app.delete('/api/isp/vlan-requests/:id', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const existing = await pool.query('SELECT * FROM isp_vlan_requests WHERE id = $1', [id]);
-    if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
-    const v = existing.rows[0];
+    const ex = await pool.query(`
+      SELECT v.*, cr.client_vlan_id AS router_client_vlan_id, cr.lxc_id AS router_lxc_id,
+             cr.bezeichnung AS router_bezeichnung
+        FROM isp_vlan_requests v
+        LEFT JOIN isp_client_vlan_routers cr ON cr.id = v.assigned_router_id
+        WHERE v.id = $1`, [id]);
+    if (ex.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = ex.rows[0];
     const admin = ispIsAdmin(req);
     const email = (req.user.email || '').toLowerCase();
     const isOwner = (v.antragsteller_email || '').toLowerCase() === email;
     const isMitnutzer = (v.mitnutzer_emails || []).map(x => String(x).toLowerCase()).includes(email);
     if (!admin && !isOwner && !isMitnutzer) return res.status(403).json({ error: 'Nur Antragsteller, Mitnutzer oder Admin' });
+
+    // Wenn der Antrag schon provisioniert war (approved/deployed mit
+    // unifi_network_id), erst aufraeumen: Router-LXC API + Trunks + PPSK +
+    // UniFi-Network. Sonst lassen wir Leaks zurueck.
+    let deprovisioning = null;
+    const wasProvisioned = (v.status === 'approved' || v.status === 'deployed') && (v.unifi_network_id || v.vlan_id);
+    if (wasProvisioned) {
+      const router = v.assigned_router_id ? {
+        lxc_id: v.router_lxc_id, client_vlan_id: v.router_client_vlan_id, bezeichnung: v.router_bezeichnung,
+      } : null;
+      try {
+        deprovisioning = await runDeprovisioning(v, router);
+      } catch (e) {
+        deprovisioning = { ok: false, errors: [{ step: 'deprovision', error: e.message }] };
+      }
+    }
+
     await pool.query('DELETE FROM isp_vlan_requests WHERE id = $1', [id]);
-    res.json({ ok: true });
+    res.json({ ok: true, deprovisioning });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -15205,6 +15227,86 @@ async function routerApiCall(lxcId, method, path, body) {
   try { json = JSON.parse(text); } catch { json = { raw: text }; }
   if (!r.ok) throw new Error(`router-api ${ip} ${method} ${path} -> ${r.status} ${text.slice(0, 200)}`);
   return json;
+}
+
+// PPSK fuer eine bestimmte networkconf_id wieder aus der Rosenweg-WLAN raus.
+async function unifiRemovePpskForNetwork(networkconf_id) {
+  const wl = await unifiGet('rest/wlanconf');
+  const rosenweg = (wl.data || []).find(w => w.name === 'Rosenweg');
+  if (!rosenweg) return { skipped: 'wlan_not_found' };
+  const before = Array.isArray(rosenweg.private_preshared_keys) ? rosenweg.private_preshared_keys : [];
+  const after = before.filter(p => p.networkconf_id !== networkconf_id);
+  if (after.length === before.length) return { skipped: 'no_ppsk_for_network' };
+  await unifiCall('PUT', `rest/wlanconf/${rosenweg._id}`, {
+    private_preshared_keys: after,
+    private_preshared_keys_enabled: after.length > 0,
+  });
+  return { removed: before.length - after.length };
+}
+
+// UniFi-Network loeschen
+async function unifiDeleteNetwork(networkconf_id) {
+  return await unifiCall('DELETE', `rest/networkconf/${networkconf_id}`);
+}
+
+// VLAN aus net0.trunks der Router-LXC entfernen
+async function pveRemoveTrunkFromRouter(router, userVlan) {
+  const resources = await pveAPI('GET', '/cluster/resources?type=vm');
+  const ct = (resources || []).find(x => x.type === 'lxc' && x.vmid === router.lxc_id);
+  if (!ct) return { skipped: 'ct_not_found' };
+  const cfg = await pveAPI('GET', `/nodes/${ct.node}/lxc/${router.lxc_id}/config`);
+  const parts = String(cfg.net0 || '').split(',');
+  const idx = parts.findIndex(p => p.startsWith('trunks='));
+  if (idx === -1) return { skipped: 'no_trunks' };
+  const cur = parts[idx].slice('trunks='.length).split(';').filter(Boolean).map(Number);
+  const after = cur.filter(v => v !== Number(userVlan));
+  if (after.length === cur.length) return { skipped: 'vlan_not_in_trunks' };
+  if (after.length === 0) parts.splice(idx, 1);
+  else parts[idx] = `trunks=${after.join(';')}`;
+  await pveAPI('PUT', `/nodes/${ct.node}/lxc/${router.lxc_id}/config`, { net0: parts.join(',') });
+  return { removed: userVlan, remaining: after.length };
+}
+
+// Vollstaendiges Deprovisioning: Router-LXC API + Trunk + PPSK + UniFi-Network
+async function runDeprovisioning(v, router) {
+  const result = { steps: [], errors: [] };
+  // 1) Router-LXC-API: DELETE /vlans/<id>
+  if (router && v.vlan_id) {
+    try {
+      const r = await routerApiCall(router.lxc_id, 'DELETE', `/vlans/${v.vlan_id}`);
+      result.steps.push({ step: 'router_lxc', ok: true, lxc_id: router.lxc_id, detail: r });
+    } catch (err) {
+      result.errors.push({ step: 'router_lxc', error: err.message });
+    }
+  }
+  // 2) Trunks im pct.conf raus
+  if (router && v.vlan_id) {
+    try {
+      const r = await pveRemoveTrunkFromRouter(router, v.vlan_id);
+      result.steps.push({ step: 'pve_trunks', ok: true, detail: r });
+    } catch (err) {
+      result.errors.push({ step: 'pve_trunks', error: err.message });
+    }
+  }
+  // 3) PPSK raus
+  if (v.unifi_network_id) {
+    try {
+      const r = await unifiRemovePpskForNetwork(v.unifi_network_id);
+      result.steps.push({ step: 'ppsk', ok: true, detail: r });
+    } catch (err) {
+      result.errors.push({ step: 'ppsk', error: err.message });
+    }
+  }
+  // 4) UniFi-Network loeschen
+  if (v.unifi_network_id) {
+    try {
+      await unifiDeleteNetwork(v.unifi_network_id);
+      result.steps.push({ step: 'unifi_network', ok: true });
+    } catch (err) {
+      result.errors.push({ step: 'unifi_network', error: err.message });
+    }
+  }
+  return result;
 }
 
 // Router-LXC live-provisionieren via HTTP-API (laeuft im LXC auf eth1:8080).
