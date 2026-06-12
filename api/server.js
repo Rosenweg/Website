@@ -1692,6 +1692,22 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
     // Only show houses where user is bewohner; eigentuemer without bewohner see nothing
     const hausNummern = bewohnerHaeuser;
 
+    // Plus: Häuser aus den zugewiesenen Wohnungen ableiten (Wohnung oder
+    // Hobbyraum in irgendeinem Haus). So sieht jemand mit Wohnung RW9 +
+    // Hobbyraum RW2 auch das RW2-Clients-WLAN, nicht nur RW9.
+    const userEmailForHaus = (req.user.email || '').toLowerCase();
+    let userWohnungen = [];
+    try {
+      userWohnungen = await getUserVlanOptions(userEmailForHaus);
+      for (const opt of userWohnungen) {
+        if (opt.kind === 'wohnung' || opt.kind === 'hobbyraum') {
+          // VLAN-Schema: <HausNr>*10+9 → HausNr = (vlan-9)/10
+          const haus = opt.vlan ? Math.round((opt.vlan - 9) / 10) : null;
+          if (haus && haus >= 1 && haus <= 18) hausNummern.add(haus);
+        }
+      }
+    } catch {}
+
     // Fallback: extract from strasse field
     if (hausNummern.size === 0) {
       const userId = req.user.user_id || req.user.id;
@@ -1726,13 +1742,8 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
       // RK-Clients-WLAN nur fuer reine Parkplatz-User (kein wohnung/hobbyraum
       // bezogen). Wer auch eine Wohnung oder Hobbyraum hat, sieht stattdessen
       // sein normales Haus-WLAN — die brauchen RK-Clients nicht.
-      const userEmail = (req.user.email || '').toLowerCase();
-      let showRk = false;
-      try {
-        const opts = await getUserVlanOptions(userEmail);
-        const kinds = new Set(opts.map(o => o.kind));
-        showRk = kinds.has('parkplatz') && !kinds.has('wohnung') && !kinds.has('hobbyraum');
-      } catch {}
+      const kinds = new Set(userWohnungen.map(o => o.kind));
+      const showRk = kinds.has('parkplatz') && !kinds.has('wohnung') && !kinds.has('hobbyraum');
       if (showRk) {
         for (const ppsk of rosenweg.private_preshared_keys || []) {
           const net = netMap[ppsk.networkconf_id];
