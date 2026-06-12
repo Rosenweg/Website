@@ -370,19 +370,28 @@ async function loadWlan() {
         // koennten leer sein, aber WLAN gehoert in dieselbe Sektion).
         document.getElementById('sec-meinanschluss').classList.remove('hidden');
         const wrap = document.getElementById('wlan-cards');
-        // Haus-WLAN zuerst, dann private User-VLAN-WLANs
+        // Reihenfolge: Haus-WLAN, dann RK-Clients (Parkplatz), dann private User-VLANs
+        const order = w => w.isUserVlan ? 2 : (w.isRkClients ? 1 : 0);
         const sortedWlans = wlans.slice().sort((a, b) => {
-          if (!!a.isUserVlan !== !!b.isUserVlan) return a.isUserVlan ? 1 : -1;
-          return a.isUserVlan ? (a.vlan || 0) - (b.vlan || 0) : (a.hausNr || 0) - (b.hausNr || 0);
+          const oa = order(a), ob = order(b);
+          if (oa !== ob) return oa - ob;
+          if (a.isUserVlan) return (a.vlan || 0) - (b.vlan || 0);
+          return (a.hausNr || 0) - (b.hausNr || 0);
         });
         wrap.innerHTML = sortedWlans.map((w, idx) => {
           const isPriv = !!w.isUserVlan;
-          const header = isPriv
-            ? `🔒 Mein WLAN — ${esc(w.network || ('VLAN ' + w.vlan))}`
-            : `🏠 Haus WLAN — Rosenweg ${esc(w.hausNr)}`;
-          const banner = isPriv
-            ? `<div class="text-[10px] bg-emerald-50 border border-emerald-200 text-emerald-800 rounded px-2 py-1">🔒 Privates Netz: nur du${w.rolle === 'mitnutzer' ? ' (Mitnutzer)' : ''} + deine Mitnutzer, isoliert von anderen Bewohnern.</div>`
-            : `<div class="text-[10px] bg-amber-50 border border-amber-200 text-amber-900 rounded px-2 py-1">⚠ Mit allen Bewohnern deines Hauses geteilt — Geräte sehen sich gegenseitig. Privat? <a href="/isp-mein-zugang.html" class="underline">eigenes Netzwerk beantragen</a>.</div>`;
+          const isRk = !!w.isRkClients;
+          let header, banner;
+          if (isPriv) {
+            header = `🔒 Mein WLAN — ${esc(w.network || ('VLAN ' + w.vlan))}`;
+            banner = `<div class="text-[10px] bg-emerald-50 border border-emerald-200 text-emerald-800 rounded px-2 py-1">🔒 Privates Netz: nur du${w.rolle === 'mitnutzer' ? ' (Mitnutzer)' : ''} + deine Mitnutzer, isoliert von anderen Bewohnern.</div>`;
+          } else if (isRk) {
+            header = `🅿️ Kooperations-WLAN — RK-Clients`;
+            banner = `<div class="text-[10px] bg-amber-50 border border-amber-200 text-amber-900 rounded px-2 py-1">⚠ Geteiltes Koop-Netz für Tiefgarage & allgemeine Geräte — sichtbar für alle Parkplatzbesitzer.</div>`;
+          } else {
+            header = `🏠 Haus WLAN — Rosenweg ${esc(w.hausNr)}`;
+            banner = `<div class="text-[10px] bg-amber-50 border border-amber-200 text-amber-900 rounded px-2 py-1">⚠ Mit allen Bewohnern deines Hauses geteilt — Geräte sehen sich gegenseitig. Privat? <a href="/isp-mein-zugang.html" class="underline">eigenes Netzwerk beantragen</a>.</div>`;
+          }
           return `
           <div class="bg-white border rounded-2xl shadow-sm p-5 grid grid-cols-[1fr_auto] gap-4 items-center">
             <div class="space-y-2">

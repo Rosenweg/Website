@@ -1701,7 +1701,8 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
       if (hausMatch) hausNummern.add(parseInt(hausMatch[1]));
     }
 
-    // Find PPSKs for all user's houses
+    // Find PPSKs for all user's houses (still nur falls vorhanden — nicht jedes
+    // Haus muss eine eigene PPSK-Konfiguration haben).
     const userWlans = [];
     if (rosenweg.private_preshared_keys_enabled) {
       for (const hausNr of hausNummern) {
@@ -1716,6 +1717,33 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
               vlan: net.vlan,
               subnet: net.subnet,
               rolle: bewohnerHaeuser.has(hausNr) ? 'bewohner' : 'eigentuemer',
+            });
+            break;
+          }
+        }
+      }
+
+      // Parkplatz-Bewohner sehen zusaetzlich das RK-Clients-WLAN (VLAN 9), weil
+      // sie ihre Garagengeraete dort haben. Nur wenn der User mindestens eine
+      // Parkplatz-Wohnung zugewiesen hat — sonst nicht.
+      const userEmail = (req.user.email || '').toLowerCase();
+      let hasParkplatz = false;
+      try {
+        const opts = await getUserVlanOptions(userEmail);
+        hasParkplatz = opts.some(o => o.kind === 'parkplatz');
+      } catch {}
+      if (hasParkplatz) {
+        for (const ppsk of rosenweg.private_preshared_keys || []) {
+          const net = netMap[ppsk.networkconf_id];
+          if (net && net.name === 'RK-Clients') {
+            userWlans.push({
+              hausNr: null,
+              isRkClients: true,
+              password: ppsk.password,
+              network: net.name,
+              vlan: net.vlan,
+              subnet: net.subnet,
+              rolle: 'parkplatz',
             });
             break;
           }
