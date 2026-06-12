@@ -65,10 +65,10 @@
           </div>`));
     }
 
-    // Auslagen zu pruefen
+    // Auslagen zu prüfen
     if (widgets.auslagen_zu_pruefen) {
       const list = widgets.auslagen_zu_pruefen;
-      cards.push(card(`🔔 Auslagen zu prüfen (${list.length})`, '/auslagen.html?scope=pruefen',
+      cards.push(card(`🔔 Auslagen zu prüfen (${list.length})`, '/auslagen.html?scope=prüfen',
         list.length === 0
           ? '<p class="text-sm text-emerald-600">✓ Keine offenen Prüfungen.</p>'
           : '<ul class="text-sm space-y-1">' + list.map(a => `<li class="flex justify-between gap-2">
@@ -96,7 +96,7 @@
           ? '<p class="text-sm text-gray-500">In den letzten 14 Tagen wurden keine Mails an die Verwaltung versendet.</p>'
           : '<ul class="text-sm space-y-1 max-h-64 overflow-y-auto">' + list.map(m => {
               const srcShort = m.source_type.startsWith('auslage-auszahlung') ? '💰 Auszahlung'
-                            : m.source_type === 'objekt-aenderung' ? '🏠 Objekt'
+                            : m.source_type === 'objekt-änderung' ? '🏠 Objekt'
                             : m.source_type.startsWith('ad-hoc') ? '✏️ Ad-hoc'
                             : '✉ ' + esc(m.source_type);
               return `<li class="border-b last:border-0 pb-1">
@@ -122,7 +122,7 @@
             </li>`).join('') + '</ul>'));
     }
 
-    // Anstehende Handwerker-Vertraege
+    // Anstehende Handwerker-Verträge
     if (widgets.anstehende_vertraege) {
       const list = widgets.anstehende_vertraege;
       cards.push(card(`🔧 Anstehende Wartungen (${list.length})`, '/handwerker.html',
@@ -138,7 +138,7 @@
             }).join('') + '</ul>'));
     }
 
-    // Verwaltungs-Vertraege
+    // Verwaltungs-Verträge
     if (widgets.verwaltungs_vertraege?.length > 0) {
       const list = widgets.verwaltungs_vertraege;
       cards.push(card(`📋 Verwaltungs-Verträge enden bald`, '/verwaltung-admin.html',
@@ -152,7 +152,7 @@
         }).join('') + '</ul>'));
     }
 
-    // WhatsApp-Outbox-Status (Technik/Praesident)
+    // WhatsApp-Outbox-Status (Technik/Präsident)
     if (widgets.whatsapp_outbox) {
       const w = widgets.whatsapp_outbox;
       const hasIssue = (w.pending || 0) > 5 || (w.failed || 0) > 0;

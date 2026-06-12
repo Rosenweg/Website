@@ -134,7 +134,7 @@
                     </div>
                     <div>
                         <label class="block text-xs font-medium text-gray-600 mb-1">Fläche (m²)</label>
-                        <input type="number" id="m-flaeche" class="w-full border rounded px-2 py-1.5 text-sm">
+                        <input type="number" id="m-fläche" class="w-full border rounded px-2 py-1.5 text-sm">
                     </div>
                 </div>
 
@@ -213,7 +213,7 @@
             const blob = await r.blob();
             const url = URL.createObjectURL(blob);
             window.open(url, '_blank', 'noopener');
-            // Object-URL erst spaeter freigeben, damit der neue Tab die Daten sicher gelesen hat
+            // Object-URL erst später freigeben, damit der neue Tab die Daten sicher gelesen hat
             setTimeout(() => URL.revokeObjectURL(url), 60_000);
         } catch (e) {
             alert('Bild-Fehler: ' + e.message);
@@ -290,7 +290,7 @@
         document.getElementById('modal-title').textContent = `${current.anteil_typ} ${parzelle}-${sub_id} · Anteil ${current.anteil_z}/${current.anteil_n}`;
         document.getElementById('m-link').href = `https://auszug2web.ag.ch/?gem=Kaiseraugst&parzelle=${parzelle}`;
         document.getElementById('m-anteil').value = current.anteil_z || '';
-        document.getElementById('m-flaeche').value = current.flaeche_m2 || '';
+        document.getElementById('m-fläche').value = current.flaeche_m2 || '';
         document.getElementById('m-form').value = current.eigentumsform || '';
         document.getElementById('m-eigentuemer').value = (current.eigentuemer || []).join('\n');
         document.getElementById('m-adressen').value = (current.wohnadressen || []).join('\n');
@@ -349,7 +349,7 @@
             // Felder vorausfüllen, falls aktuell leer
             const setIfEmpty = (id, val) => { const el = document.getElementById(id); if (el && !el.value && val) { el.value = val; el.classList.add('bg-emerald-50','border-emerald-300'); } };
             setIfEmpty('m-anteil', ocr.anteil_z);
-            setIfEmpty('m-flaeche', ocr.flaeche_m2);
+            setIfEmpty('m-fläche', ocr.flaeche_m2);
             setIfEmpty('m-form', ocr.eigentumsform);
             const eigEl = document.getElementById('m-eigentuemer');
             if (eigEl && !eigEl.value && ocr.eigentuemer?.length) { eigEl.value = ocr.eigentuemer.join('\n'); eigEl.classList.add('bg-emerald-50','border-emerald-300'); }
@@ -369,7 +369,7 @@
         const adr = document.getElementById('m-adressen').value.split('\n').map(s => s.trim()).filter(Boolean);
         const body = {
             anteil_z: parseInt(document.getElementById('m-anteil').value) || null,
-            flaeche_m2: parseInt(document.getElementById('m-flaeche').value) || null,
+            flaeche_m2: parseInt(document.getElementById('m-fläche').value) || null,
             eigentumsform: document.getElementById('m-form').value || null,
             eigentuemer: eig,
             wohnadressen: adr,

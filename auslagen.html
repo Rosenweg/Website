@@ -57,7 +57,7 @@
           <select id="filter-scope" class="border rounded px-2 py-1 text-sm">
             <option value="alle">Alle (eigene + Prüfung)</option>
             <option value="eigene">Nur meine</option>
-            <option value="pruefen">Nur zu prüfen</option>
+            <option value="prüfen">Nur zu prüfen</option>
           </select>
         </label>
         <label class="text-sm">
@@ -314,7 +314,7 @@
     let list = STATE.auslagen.slice();
     if (STATE.can_review) {
       if (scope === 'eigene') list = list.filter(a => (a.user_email || '').toLowerCase() === myEmail);
-      else if (scope === 'pruefen') list = list.filter(a => (a.user_email || '').toLowerCase() !== myEmail && a.status === 'eingereicht');
+      else if (scope === 'prüfen') list = list.filter(a => (a.user_email || '').toLowerCase() !== myEmail && a.status === 'eingereicht');
     }
 
     renderSummary(list);
@@ -405,7 +405,7 @@
   let POSITIONEN = [];
   let STUNDENSATZ_AKT = null;
   let BELEGE = []; // bei neuer Auslage: pending uploads; bei edit: existing aus DB
-  let LAST_SCAN_FX = null; // { waehrung, kurs, quelle } für letzten Scan
+  let LAST_SCAN_FX = null; // { währung, kurs, quelle } für letzten Scan
 
   function renderBelege() {
     const el = document.getElementById('belege-list');
@@ -470,25 +470,25 @@
       if (scanData.lieferant && !document.getElementById('f-beschreibung').value) {
         document.getElementById('f-beschreibung').value = scanData.lieferant;
       }
-      // Positionen anhaengen (NICHT ersetzen — mehrere Belege kumulieren)
+      // Positionen anhängen (NICHT ersetzen — mehrere Belege kumulieren)
       const newPos = (scanData.positionen || []).map(p => ({
         position_typ: 'material',
         beschreibung: p.beschreibung,
         menge: p.menge, einheit: p.einheit || 'Stk',
         einzelpreis_chf: p.einzelpreis,
         gesamt_chf: p.gesamt,
-        waehrung_original: scanData.waehrung,
+        waehrung_original: scanData.währung,
         gesamt_original: p.gesamt_original,
       }));
       POSITIONEN = POSITIONEN.concat(newPos);
       renderPositionen();
       LAST_SCAN_FX = {
-        waehrung: scanData.waehrung,
+        währung: scanData.währung,
         kurs: scanData.wechselkurs_chf,
         quelle: scanData.kurs_quelle,
       };
-      if (scanData.waehrung !== 'CHF') {
-        alert(`Beleg in ${scanData.waehrung}: ${(scanData.total_original || 0).toFixed(2)} ${scanData.waehrung} × ${scanData.wechselkurs_chf.toFixed(4)} = CHF ${(scanData.total || 0).toFixed(2)} (${scanData.kurs_quelle}). Positionen wurden in CHF umgerechnet.`);
+      if (scanData.währung !== 'CHF') {
+        alert(`Beleg in ${scanData.währung}: ${(scanData.total_original || 0).toFixed(2)} ${scanData.währung} × ${scanData.wechselkurs_chf.toFixed(4)} = CHF ${(scanData.total || 0).toFixed(2)} (${scanData.kurs_quelle}). Positionen wurden in CHF umgerechnet.`);
       } else {
         alert(`KI hat ${newPos.length} Position(en) erkannt. Total: CHF ${(scanData.total || 0).toFixed(2)}. Bitte überprüfen.`);
       }
@@ -503,7 +503,7 @@
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             beleg_base64: base64, beleg_filename: file.name,
-            waehrung_original: scanData?.waehrung || null,
+            waehrung_original: scanData?.währung || null,
             wechselkurs_chf: scanData?.wechselkurs_chf || null,
             kurs_quelle: scanData?.kurs_quelle || null,
           }),
@@ -517,7 +517,7 @@
       // pending — wird beim Speichern hochgeladen
       BELEGE.push({
         _pending: true, beleg_base64: base64, beleg_filename: file.name,
-        waehrung_original: scanData?.waehrung || null,
+        waehrung_original: scanData?.währung || null,
         wechselkurs_chf: scanData?.wechselkurs_chf || null,
         kurs_quelle: scanData?.kurs_quelle || null,
       });
@@ -786,7 +786,7 @@
     const canReviewThis = STATE.can_review && !isMine;
     const isOwnerConfirmCase = isMine && a.status === 'genehmigt';
 
-    // Bemerkung-Feld nur fuer Reviewer
+    // Bemerkung-Feld nur für Reviewer
     document.getElementById('r-bemerkung').disabled = !canReviewThis;
     document.getElementById('r-bemerkung').classList.toggle('bg-gray-100', !canReviewThis);
 
@@ -795,11 +795,11 @@
       const act = b.dataset.act;
       let visible = false, enabled = true;
       if (canReviewThis) {
-        // Ausschuss/Tech/Praesident-Workflow
+        // Ausschuss/Tech/Präsident-Workflow
         if (act === 'genehmigt' || act === 'abgelehnt') visible = true;
         if (act === 'ausbezahlt') visible = STATE.can_mark_paid;
       } else if (isOwnerConfirmCase) {
-        // Owner bestaetigt Erhalt
+        // Owner bestätigt Erhalt
         if (act === 'ausbezahlt') visible = true;
       }
       if (visible && act === a.status) enabled = false;

@@ -85,7 +85,7 @@
     <!-- Navigation -->
     <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
     <script src="/js/nav.js?v=2"></script>
-    <script>RosenwegNav.init({ active: WASCH_STWEG ? 'stweg' + WASCH_STWEG : 'waschkueche', basePath: '/' });</script>
+    <script>RosenwegNav.init({ active: WASCH_STWEG ? 'stweg' + WASCH_STWEG : 'waschküche', basePath: '/' });</script>
 
     <!-- SSO Login -->
     <div id="loginSection" class="flex items-center justify-center min-h-[60vh]">
@@ -443,7 +443,7 @@
             'Wiederholung': r.recurring ? 'ja' : 'nein',
             'Notiz': r.notiz || '',
         }));
-        await RosenwegExcel.fromData(rows, 'waschkueche-reservierungen-{date}.xlsx', 'Reservierungen');
+        await RosenwegExcel.fromData(rows, 'waschküche-reservierungen-{date}.xlsx', 'Reservierungen');
     }
 
     async function loadMyReservations() {

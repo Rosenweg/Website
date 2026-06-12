@@ -161,7 +161,7 @@
 
             const channelId = ch.id || (ch.streamUrl ? (ch.streamUrl.match(/channel=([a-f0-9-]+)/) || [])[1] : '');
             if (!channelId) { console.error('Channel ohne ID:', ch); return; }
-            // 1. Token + Public-URL vom API holen — kein Stream-Hop ueber API.
+            // 1. Token + Public-URL vom API holen — kein Stream-Hop über API.
             //    Player verbindet sich direkt mit dem tv7-streamer (LXC 250) via
             //    Cloudflare Tunnel auf tv.rosenweg9.ch.
             let streamUrl;

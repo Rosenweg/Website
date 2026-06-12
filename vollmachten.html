@@ -21,7 +21,7 @@
       <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-4">
         <div>
           <h1 class="text-2xl font-bold text-gray-900">📜 Vollmachten</h1>
-          <p class="text-sm text-gray-600">Eigentuemer koennen Verwalter, Mieter oder Dritte bevollmaechtigen, sie zu vertreten.</p>
+          <p class="text-sm text-gray-600">Eigentümer können Verwalter, Mieter oder Dritte bevollmaechtigen, sie zu vertreten.</p>
         </div>
         <button onclick="openCreateModal()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium whitespace-nowrap">+ Neue Vollmacht erteilen</button>
       </div>
@@ -45,7 +45,7 @@
           <button onclick="openTemplateModal()" class="bg-purple-600 text-white px-3 py-1.5 rounded hover:bg-purple-700 text-sm">+ Neue Vorlage</button>
         </div>
         <div id="vorlagen-info" class="bg-blue-50 border border-blue-200 rounded p-3 text-sm text-blue-900 mb-3">
-          ℹ Vorlagen sind vorgefertigte Geltungsbereich-Texte fuer haeufige Vollmacht-Faelle. Bei der Erfassung einer neuen Vollmacht kann eine Vorlage uebernommen und angepasst werden.
+          ℹ Vorlagen sind vorgefertigte Geltungsbereich-Texte für haeufige Vollmacht-Fälle. Bei der Erfassung einer neuen Vollmacht kann eine Vorlage übernommen und angepasst werden.
         </div>
         <div id="vorlagen-liste" class="space-y-2"></div>
         <div id="vorlagen-empty" class="hidden bg-white border rounded-lg p-8 text-center text-gray-400 italic">Noch keine Vorlagen erfasst.</div>
@@ -64,11 +64,11 @@
         <input type="hidden" id="m-id">
 
         <fieldset class="border rounded-lg p-3">
-          <legend class="text-xs font-semibold text-gray-700 px-2">Vollmachtgeber <span class="text-amber-700">(bei Miteigentum: ALLE Eigentuemer eintragen — jeder muss einzeln signieren)</span></legend>
+          <legend class="text-xs font-semibold text-gray-700 px-2">Vollmachtgeber <span class="text-amber-700">(bei Miteigentum: ALLE Eigentümer eintragen — jeder muss einzeln signieren)</span></legend>
           <div id="m-vg-list" class="space-y-2 mt-2"></div>
           <div class="flex flex-col sm:flex-row gap-2 mt-3">
-            <button type="button" onclick="addVgManual()" class="text-xs bg-gray-100 text-gray-700 rounded px-3 py-1.5 hover:bg-gray-200">+ Person manuell hinzufuegen</button>
-            <button type="button" onclick="toggleVgQuickPick()" class="text-xs bg-blue-100 text-blue-700 rounded px-3 py-1.5 hover:bg-blue-200">📋 Aus Objektverwaltung uebernehmen</button>
+            <button type="button" onclick="addVgManual()" class="text-xs bg-gray-100 text-gray-700 rounded px-3 py-1.5 hover:bg-gray-200">+ Person manuell hinzufügen</button>
+            <button type="button" onclick="toggleVgQuickPick()" class="text-xs bg-blue-100 text-blue-700 rounded px-3 py-1.5 hover:bg-blue-200">📋 Aus Objektverwaltung übernehmen</button>
           </div>
           <div id="m-vg-quick-row" class="hidden mt-2 bg-blue-50 border border-blue-200 rounded p-2 max-h-48 overflow-y-auto">
             <div id="m-vg-quick-list" class="space-y-1 text-xs"></div>
@@ -76,29 +76,29 @@
         </fieldset>
 
         <fieldset class="border rounded-lg p-3">
-          <legend class="text-xs font-semibold text-gray-700 px-2">Bevollmaechtigter</legend>
+          <legend class="text-xs font-semibold text-gray-700 px-2">Bevollmächtigter</legend>
           <div class="mt-2">
             <label class="block text-xs font-medium text-gray-600 mb-1">Typ *</label>
             <select id="m-bv-typ" required onchange="onBvTypChange()" class="w-full border rounded px-3 py-1.5">
-              <option value="">— bitte waehlen —</option>
-              <option value="person">Person aus Objektverwaltung (Eigentuemer, Mieter, Familie, etc.)</option>
+              <option value="">— bitte wählen —</option>
+              <option value="person">Person aus Objektverwaltung (Eigentümer, Mieter, Familie, etc.)</option>
               <option value="verwaltung">Verwaltung (Firma / professioneller Verwalter)</option>
               <option value="extern">Externe Person (Anwalt, Bekannter, etc.)</option>
             </select>
             <input type="hidden" id="m-bv-actual-typ">
           </div>
           <div id="m-bv-verwaltung-row" class="hidden mt-2">
-            <label class="block text-xs font-medium text-gray-600 mb-1">Verwaltung waehlen</label>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Verwaltung wählen</label>
             <select id="m-bv-verwaltung" onchange="onVerwaltungChange()" class="w-full border rounded px-3 py-1.5">
-              <option value="">— Verwaltung waehlen —</option>
+              <option value="">— Verwaltung wählen —</option>
             </select>
           </div>
           <div id="m-bv-quick-row" class="hidden mt-2">
-            <label class="block text-xs font-medium text-gray-600 mb-1">📋 Aus meinen Wohnungen uebernehmen <span class="text-gray-400">(direkt aus der Objektverwaltung)</span></label>
+            <label class="block text-xs font-medium text-gray-600 mb-1">📋 Aus meinen Wohnungen übernehmen <span class="text-gray-400">(direkt aus der Objektverwaltung)</span></label>
             <div id="m-bv-quick-list" class="bg-blue-50 border border-blue-200 rounded p-2 space-y-1 max-h-40 overflow-y-auto text-xs"></div>
           </div>
           <div id="m-bv-person-row" class="hidden mt-2">
-            <label class="block text-xs font-medium text-gray-600 mb-1">Person aus Datenbank waehlen <span class="text-gray-400">(oder oben Quick-Pick)</span></label>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Person aus Datenbank wählen <span class="text-gray-400">(oder oben Quick-Pick)</span></label>
             <input type="text" id="m-bv-person-search" placeholder="Name oder E-Mail eingeben…" class="w-full border rounded px-3 py-1.5">
             <div id="m-bv-person-results" class="hidden bg-white border rounded mt-1 max-h-32 overflow-y-auto text-xs"></div>
           </div>
@@ -129,7 +129,7 @@
           <div class="mt-2">
             <label class="block text-xs font-medium text-gray-600 mb-1">Art *</label>
             <select id="m-art" required class="w-full border rounded px-3 py-1.5">
-              <option value="">— bitte waehlen —</option>
+              <option value="">— bitte wählen —</option>
               <option value="generell">Generelle Vertretung (laufende Verwaltung, bis Widerruf)</option>
               <option value="spezifisch">Spezifische Vollmacht (Einzel-Geschaeft, befristet)</option>
               <option value="auskunft">Datenschutz-/Auskunft-Vollmacht (nur Einsicht, keine Entscheidung)</option>
@@ -157,7 +157,7 @@
             <div class="flex items-center justify-between mb-1">
               <label class="block text-xs font-medium text-gray-600">Geltungsbereich / konkrete Befugnisse</label>
               <select id="m-template-pick" onchange="applyTemplate()" class="text-xs border rounded px-2 py-0.5 bg-purple-50">
-                <option value="">📝 Vorlage uebernehmen…</option>
+                <option value="">📝 Vorlage übernehmen…</option>
               </select>
             </div>
             <textarea id="m-geltung" rows="6" class="w-full border rounded px-3 py-1.5" placeholder="z.B.: Vertretung gegenueber der Verwaltung in allen Belangen meiner Eigentumswohnung; Empfang von Post; Beauftragung kleinerer Reparaturen bis CHF 500."></textarea>
@@ -166,14 +166,14 @@
         </fieldset>
 
         <fieldset class="border rounded-lg p-3">
-          <legend class="text-xs font-semibold text-gray-700 px-2">Gueltigkeit</legend>
+          <legend class="text-xs font-semibold text-gray-700 px-2">Gültigkeit</legend>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
             <div>
-              <label class="block text-xs font-medium text-gray-600 mb-1">Gueltig ab</label>
+              <label class="block text-xs font-medium text-gray-600 mb-1">Gültig ab</label>
               <input type="date" id="m-ab" class="w-full border rounded px-3 py-1.5">
             </div>
             <div>
-              <label class="block text-xs font-medium text-gray-600 mb-1">Gueltig bis <span class="text-gray-400">(leer = bis Widerruf)</span></label>
+              <label class="block text-xs font-medium text-gray-600 mb-1">Gültig bis <span class="text-gray-400">(leer = bis Widerruf)</span></label>
               <input type="date" id="m-bis" class="w-full border rounded px-3 py-1.5">
             </div>
           </div>
@@ -200,13 +200,13 @@
           <input type="text" id="t-titel" required placeholder="z.B. Generelle Verwalter-Vollmacht" class="w-full border rounded px-3 py-1.5">
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Beschreibung <span class="text-gray-400">(wofuer diese Vorlage gedacht ist)</span></label>
-          <textarea id="t-beschreibung" rows="2" class="w-full border rounded px-3 py-1.5" placeholder="z.B. Standard-Vollmacht fuer professionelle Liegenschaftsverwaltung; deckt Mietverhaeltnisse, Reparaturen bis CHF 1'000 ab."></textarea>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Beschreibung <span class="text-gray-400">(wofür diese Vorlage gedacht ist)</span></label>
+          <textarea id="t-beschreibung" rows="2" class="w-full border rounded px-3 py-1.5" placeholder="z.B. Standard-Vollmacht für professionelle Liegenschaftsverwaltung; deckt Mietverhaeltnisse, Reparaturen bis CHF 1'000 ab."></textarea>
         </div>
         <div>
           <label class="block text-xs font-medium text-gray-600 mb-1">Art *</label>
           <select id="t-art" required class="w-full border rounded px-3 py-1.5">
-            <option value="">— bitte waehlen —</option>
+            <option value="">— bitte wählen —</option>
             <option value="generell">Generell (laufende Verwaltung)</option>
             <option value="spezifisch">Spezifisch (Einzelgeschaeft)</option>
             <option value="auskunft">Auskunft (nur Einsicht)</option>
@@ -215,7 +215,7 @@
         <div>
           <label class="block text-xs font-medium text-gray-600 mb-1">Geltungsbereich-Text *</label>
           <textarea id="t-geltung" rows="8" required class="w-full border rounded px-3 py-1.5 font-mono text-xs" placeholder="Der Bevollmaechtigte ist befugt: 1. ..."></textarea>
-          <p class="text-xs text-gray-500 mt-1">Wird beim Verwenden 1:1 in den Geltungsbereich-Felder uebernommen und kann dort angepasst werden.</p>
+          <p class="text-xs text-gray-500 mt-1">Wird beim Verwenden 1:1 in den Geltungsbereich-Felder übernommen und kann dort angepasst werden.</p>
         </div>
       </div>
       <div class="px-5 py-3 border-t flex flex-col sm:flex-row sm:justify-end gap-2">
@@ -320,7 +320,7 @@
         </div>
         <div class="flex flex-wrap gap-1 shrink-0">
           ${canEditTemplates ? `<button onclick="editTemplate(${t.id})" class="text-xs bg-gray-100 rounded px-2 py-1 hover:bg-gray-200">Bearbeiten</button>` : ''}
-          ${canEditTemplates ? `<button onclick="deleteTemplate(${t.id})" class="text-xs text-red-600 hover:underline">Loeschen</button>` : ''}
+          ${canEditTemplates ? `<button onclick="deleteTemplate(${t.id})" class="text-xs text-red-600 hover:underline">Löschen</button>` : ''}
         </div>
       </div>
       <details class="text-xs"><summary class="cursor-pointer text-gray-500 hover:text-gray-700">Geltungsbereich-Text anzeigen</summary>
@@ -378,7 +378,7 @@
   }
 
   async function deleteTemplate(id) {
-    if (!confirm('Vorlage loeschen?')) return;
+    if (!confirm('Vorlage löschen?')) return;
     try {
       const r = await AuthentikAuth.apiFetch(`/api/vollmachten/templates/${id}`, { method: 'DELETE' });
       if (!r.ok) throw new Error(await r.text());
@@ -457,16 +457,16 @@
             ${canEdit ? `<button onclick="editVollmacht(${v.id})" class="text-xs bg-gray-100 text-gray-700 rounded px-3 py-1.5 hover:bg-gray-200">✎ Bearbeiten</button>` : ''}
             ${canSign ? `<button onclick="signDigital(${v.id})" class="text-xs bg-green-600 text-white rounded px-3 py-1.5 hover:bg-green-700">✓ Digital signieren</button>` : ''}
             ${canSign ? `<button onclick="triggerUpload(${v.id})" class="text-xs bg-amber-600 text-white rounded px-3 py-1.5 hover:bg-amber-700">📤 Signierte PDF hochladen</button>` : ''}
-            ${v.papier_pdf_path ? `<button onclick="verifyAi(${v.id})" class="text-xs bg-purple-600 text-white rounded px-3 py-1.5 hover:bg-purple-700">🤖 KI-Pruefung</button>` : ''}
+            ${v.papier_pdf_path ? `<button onclick="verifyAi(${v.id})" class="text-xs bg-purple-600 text-white rounded px-3 py-1.5 hover:bg-purple-700">🤖 KI-Prüfung</button>` : ''}
             ${canRevoke ? `<button onclick="revoke(${v.id})" class="text-xs bg-red-600 text-white rounded px-3 py-1.5 hover:bg-red-700">Widerrufen</button>` : ''}
-            ${canEdit ? `<button onclick="deleteEntry(${v.id})" class="text-xs text-red-600 hover:underline">Loeschen</button>` : ''}
+            ${canEdit ? `<button onclick="deleteEntry(${v.id})" class="text-xs text-red-600 hover:underline">Löschen</button>` : ''}
           </div>
         </div>
       </div>`;
     }).join('');
   }
 
-  // === Vollmachtgeber-Liste (Multi-Eigentuemer) ===
+  // === Vollmachtgeber-Liste (Multi-Eigentümer) ===
   let vgList = []; // [{name, email, adresse, person_id}]
 
   function renderVgList() {
@@ -550,14 +550,14 @@
     if (!id) return;
     const t = templates.find(x => x.id === id);
     if (!t) return;
-    if (document.getElementById('m-geltung').value.trim() && !confirm('Bestehender Geltungsbereich-Text wird ueberschrieben — wirklich Vorlage uebernehmen?')) return;
+    if (document.getElementById('m-geltung').value.trim() && !confirm('Bestehender Geltungsbereich-Text wird ueberschrieben — wirklich Vorlage übernehmen?')) return;
     document.getElementById('m-geltung').value = t.geltungsbereich;
     if (!document.getElementById('m-art').value) document.getElementById('m-art').value = t.art;
   }
 
   function populateTemplatePicker() {
     const sel = document.getElementById('m-template-pick');
-    sel.innerHTML = '<option value="">📝 Vorlage uebernehmen…</option>' +
+    sel.innerHTML = '<option value="">📝 Vorlage übernehmen…</option>' +
       templates.map(t => `<option value="${t.id}">${esc(t.titel)} (${esc(t.art)})</option>`).join('');
   }
 
@@ -583,7 +583,7 @@
     document.getElementById('m-bis').value = '';
     onBvTypChange();
     await loadMyWohnungen();
-    // Templates fuer Picker laden falls noch nicht geschehen
+    // Templates für Picker laden falls noch nicht geschehen
     if (templates.length === 0) {
       try {
         const r = await AuthentikAuth.apiFetch('/api/vollmachten/templates');
@@ -661,7 +661,7 @@
       const d = await r.json();
       verwaltungenCache = d.verwaltungen || [];
       const sel = document.getElementById('m-bv-verwaltung');
-      sel.innerHTML = '<option value="">— Verwaltung waehlen —</option>' +
+      sel.innerHTML = '<option value="">— Verwaltung wählen —</option>' +
         verwaltungenCache.map(v => `<option value="${v.id}">${esc(v.firma_name)}${v.stweg ? ' (STWEG ' + v.stweg + ')' : ''}</option>`).join('');
     } catch (e) { console.warn('Verwaltungen-Load:', e.message); }
   }
@@ -736,12 +736,12 @@
       return;
     }
     const body = {
-      // Primaer-Vollmachtgeber (erster aus Liste) — fuer Backward-Compat
+      // Primaer-Vollmachtgeber (erster aus Liste) — für Backward-Compat
       vollmachtgeber_person_id: cleanVg[0].person_id,
       vollmachtgeber_name: cleanVg[0].name,
       vollmachtgeber_email: cleanVg[0].email,
       vollmachtgeber_adresse: cleanVg[0].adresse,
-      vollmachtgeber: cleanVg, // ganze Liste fuer vollmachten_vollmachtgeber-Tabelle
+      vollmachtgeber: cleanVg, // ganze Liste für vollmachten_vollmachtgeber-Tabelle
       bevollmaechtigter_typ: document.getElementById('m-bv-actual-typ').value || document.getElementById('m-bv-typ').value,
       bevollmaechtigter_verwaltung_id: parseInt(document.getElementById('m-bv-verwaltung').value, 10) || null,
       bevollmaechtigter_name: document.getElementById('m-bv-name').value.trim(),
@@ -756,7 +756,7 @@
       gueltig_bis: document.getElementById('m-bis').value || null,
     };
     if (!body.bevollmaechtigter_name || !body.bevollmaechtigter_typ || !body.art) {
-      alert('Bitte Pflichtfelder (Bevollmaechtigter-Name + Typ, Art) ausfuellen.');
+      alert('Bitte Pflichtfelder (Bevollmächtigter-Name + Typ, Art) ausfuellen.');
       return;
     }
     const id = document.getElementById('m-id').value;
@@ -819,7 +819,7 @@
   }
 
   async function signDigital(id) {
-    if (!confirm('Vollmacht digital signieren?\n\nDies entspricht einer einfachen elektronischen Signatur (ZertES Art.2). Login-Zeit, IP-Adresse und Identitaet werden im Dokument festgehalten.\n\nNach Signatur ist die Vollmacht AKTIV und nicht mehr editierbar — nur Widerruf moeglich.')) return;
+    if (!confirm('Vollmacht digital signieren?\n\nDies entspricht einer einfachen elektronischen Signatur (ZertES Art.2). Login-Zeit, IP-Adresse und Identitaet werden im Dokument festgehalten.\n\nNach Signatur ist die Vollmacht AKTIV und nicht mehr editierbar — nur Widerruf möglich.')) return;
     try {
       const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}/sign-digital`, { method: 'POST' });
       if (!r.ok) throw new Error(await r.text());
@@ -843,7 +843,7 @@
         });
         if (!r.ok) throw new Error(await r.text());
         const d = await r.json();
-        if (confirm(`✓ Signierte PDF hochgeladen (${Math.round(d.size_bytes/1024)} KB). Status: ${d.status}.\n\nJetzt automatisch von der KI pruefen lassen?`)) {
+        if (confirm(`✓ Signierte PDF hochgeladen (${Math.round(d.size_bytes/1024)} KB). Status: ${d.status}.\n\nJetzt automatisch von der KI prüfen lassen?`)) {
           await verifyAi(id);
         }
         await load();
@@ -855,7 +855,7 @@
   async function verifyAi(id) {
     const wrap = document.createElement('div');
     wrap.className = 'fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4';
-    wrap.innerHTML = '<div class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full text-center"><p class="text-gray-700 mb-2">🤖 KI prueft die signierte PDF…</p><p class="text-xs text-gray-400">Das kann bis zu 60 Sekunden dauern.</p></div>';
+    wrap.innerHTML = '<div class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full text-center"><p class="text-gray-700 mb-2">🤖 KI prüft die signierte PDF…</p><p class="text-xs text-gray-400">Das kann bis zu 60 Sekunden dauern.</p></div>';
     document.body.appendChild(wrap);
     try {
       const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}/verify-ai`, { method: 'POST' });
@@ -867,7 +867,7 @@
       const html = `<div class="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 overflow-y-auto" onclick="this.remove()">
         <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-lg w-full my-8">
           <div class="px-5 py-3 border-b flex items-center justify-between bg-${farbe}-50">
-            <h3 class="font-bold text-${farbe}-900">${icon} KI-Pruefung — ${esc(d.gesamtbewertung || 'unbekannt').toUpperCase()}</h3>
+            <h3 class="font-bold text-${farbe}-900">${icon} KI-Prüfung — ${esc(d.gesamtbewertung || 'unbekannt').toUpperCase()}</h3>
             <button onclick="this.closest('.fixed').remove()" class="text-gray-400 hover:text-gray-700">✕</button>
           </div>
           <div class="p-5 space-y-3 text-sm">
@@ -900,7 +900,7 @@
   }
 
   async function revoke(id) {
-    const grund = prompt('Grund fuer Widerruf (optional):');
+    const grund = prompt('Grund für Widerruf (optional):');
     if (grund === null) return;
     try {
       const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}/revoke`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grund: grund || null }) });
@@ -910,7 +910,7 @@
   }
 
   async function deleteEntry(id) {
-    if (!confirm('Entwurf wirklich loeschen?')) return;
+    if (!confirm('Entwurf wirklich löschen?')) return;
     try {
       const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}`, { method: 'DELETE' });
       if (!r.ok) throw new Error(await r.text());

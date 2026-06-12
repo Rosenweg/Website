@@ -324,10 +324,10 @@
     // aus dem OAuth-Callback geparst und der Token in localStorage gespeichert
     // wird. Vorher hat isp.html nur getUser() aufgerufen → Hash blieb unverarbeitet
     // → User landete nach Login wieder auf "Anmelden".
-    // requireAuth:false damit Nicht-eingeloggte die Landing-Page sehen koennen.
+    // requireAuth:false damit Nicht-eingeloggte die Landing-Page sehen können.
     await AuthentikAuth.init({ requireAuth: false });
     // Nav wurde schon vor auth.init() gerendert — Anmelden/Logout-Buttons
-    // bzw. permissionen muessen jetzt nochmal angewendet werden.
+    // bzw. permissionen müssen jetzt nochmal angewendet werden.
     try { RosenwegNav._wireAuth?.(); RosenwegNav._wirePermissions?.(); } catch {}
     const user = AuthentikAuth.getUser();
     const greeting = document.getElementById('hero-greeting');
@@ -367,7 +367,7 @@ async function loadWlan() {
           return;
         }
         // Mein-Anschluss-Sektion unhidden falls noch nicht passiert (Subscribers
-        // koennten leer sein, aber WLAN gehoert in dieselbe Sektion).
+        // könnten leer sein, aber WLAN gehört in dieselbe Sektion).
         document.getElementById('sec-meinanschluss').classList.remove('hidden');
         const wrap = document.getElementById('wlan-cards');
         // Reihenfolge: Haus-WLAN, dann RK-Clients (Parkplatz), dann private User-VLANs

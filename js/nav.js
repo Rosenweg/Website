@@ -4,7 +4,7 @@
  * Include via: <script src="/js/nav.js"></script>
  * Then call: RosenwegNav.init({ active: 'services' })
  */
-// Services-Menu: kategorisierte Gruppen. Wird identisch fuer Desktop-Mega-Menu
+// Services-Menu: kategorisierte Gruppen. Wird identisch für Desktop-Mega-Menu
 // und Mobile-Akkordion gerendert. Permissions: perm = data-perm, permAny = data-perm-any.
 const SERVICES_GROUPS = [
   {
@@ -34,7 +34,7 @@ const SERVICES_GROUPS = [
     items: [
       { label: 'Mail Outbox', href: 'verwaltung-mail-outbox.html', activeKey: 'verwaltung-mail-outbox', permAny: 'technik,praesident', badgeIds: ['nav-vmq-badge', 'nav-vmq-badge-mobile'] },
       { label: 'Mail schreiben (Ad-hoc)', href: 'mail-compose.html', activeKey: 'mail-compose', perm: 'mail-compose' },
-      { label: 'Empfänger-Stammdaten', href: 'mail-empfaenger-admin.html', activeKey: 'mail-empfaenger', perm: 'mail-empfaenger' },
+      { label: 'Empfänger-Stammdaten', href: 'mail-empfänger-admin.html', activeKey: 'mail-empfänger', perm: 'mail-empfänger' },
       { label: 'Freigabe-Regeln', href: 'mail-approval-config.html', activeKey: 'mail-approval-config', permAny: 'technik,praesident' },
       { label: 'Templates', href: 'mail-templates.html', activeKey: 'mail-templates', permAny: 'technik,praesident' },
     ],
@@ -53,7 +53,7 @@ const SERVICES_GROUPS = [
     icon: '⚙',
     items: [
       { label: 'Energie-Monitor', href: 'energie-monitor.html', activeKey: 'energie', perm: 'energie-monitor' },
-      { label: 'Zähler & Verbrauch', href: 'zaehler.html', activeKey: 'zaehler', perm: 'zaehler' },
+      { label: 'Zähler & Verbrauch', href: 'zähler.html', activeKey: 'zähler', perm: 'zähler' },
       { label: 'Auslagen / Vorschüsse', href: 'auslagen.html', activeKey: 'auslagen', perm: 'auslagen' },
       { label: 'Stundensatz (Auslagen)', href: 'auslagen-stundensatz.html', activeKey: 'auslagen-stundensatz', perm: 'auslagen-stundensatz' },
       { label: 'Handwerker & Lieferanten', href: 'handwerker.html', activeKey: 'handwerker', perm: 'handwerker' },
@@ -135,7 +135,7 @@ const RosenwegNav = {
     this._publishNavHeight(nav);
   },
 
-  // Nav-Hoehe als CSS-Variable veroeffentlichen, damit Seiten mit
+  // Nav-Höhe als CSS-Variable veroeffentlichen, damit Seiten mit
   // position:sticky;top:Npx nicht auf hartgecodete Pixel angewiesen sind.
   // Beispiel: .search-bar { position: sticky; top: var(--rosenweg-nav-h, 64px); }
   _publishNavHeight(nav) {
@@ -151,7 +151,7 @@ const RosenwegNav = {
 
   // MutationObserver: viele Seiten rendern Tabellen dynamisch via
   // el.innerHTML = '&lt;table&gt;...'. Diese werden vom initialen Wrap nicht
-  // erfasst. Wir beobachten body fuer neue Tabellen und wrappen sie
+  // erfasst. Wir beobachten body für neue Tabellen und wrappen sie
   // nachtraeglich.
   _observeDynamicTables() {
     const obs = new MutationObserver(muts => {
@@ -196,7 +196,7 @@ const RosenwegNav = {
       ai.href = base + 'logo-rosenweg.png';
       head.appendChild(ai);
     }
-    // Apple Mobile Web App fuer 'Add to Home Screen'-Erlebnis
+    // Apple Mobile Web App für 'Add to Home Screen'-Erlebnis
     if (!document.querySelector('meta[name="apple-mobile-web-app-capable"]')) {
       const am = document.createElement('meta');
       am.name = 'apple-mobile-web-app-capable';
@@ -215,7 +215,7 @@ const RosenwegNav = {
       // Hat schon einen Scroll-Wrapper? Dann nichts tun.
       const pc = parent.className || '';
       if (/overflow-x-auto|overflow-auto|table-mobile-wrap/.test(pc)) return;
-      // Tabellen in Modal-Dialogen mit fixer Hoehe ueberspringen
+      // Tabellen in Modal-Dialogen mit fixer Höhe ueberspringen
       if (parent.closest('.fixed.inset-0')) return;
       const wrap = document.createElement('div');
       wrap.className = 'table-mobile-wrap';
@@ -441,7 +441,7 @@ const RosenwegNav = {
       }
     });
 
-    // Mega-Menu: pro Spalte pruefen ob alle Links versteckt → Spalte verstecken
+    // Mega-Menu: pro Spalte prüfen ob alle Links versteckt → Spalte verstecken
     document.querySelectorAll('.nav-mega-col').forEach(col => {
       const links = col.querySelectorAll('a');
       const anyVisible = Array.from(links).some(a => a.style.display !== 'none');
@@ -471,7 +471,7 @@ const RosenwegNav = {
       }
     });
 
-    // Pending-Badge fuer Technik/Praesident: Anzahl Mails in der Verwaltungs-Mail-Queue
+    // Pending-Badge für Technik/Präsident: Anzahl Mails in der Verwaltungs-Mail-Queue
     const groupsLower = (user?.groups || []).map(g => String(g).toLowerCase());
     if (groupsLower.some(g => g === 'technik' || g === 'präsident' || g === 'praesident')) {
       // L7: nur pollen wenn Tab sichtbar (spart Strom/Requests bei Hintergrund-Tabs)
@@ -542,7 +542,7 @@ const RosenwegNav = {
         }
 
         this._applyPermissions(user);
-        // KI-Such-Lupe nur fuer eingeloggte User anzeigen
+        // KI-Such-Lupe nur für eingeloggte User anzeigen
         document.getElementById('nav-ki-search-btn')?.classList.remove('hidden');
       },
     }).then(user => {
@@ -560,7 +560,7 @@ const RosenwegNav = {
   },
 };
 
-// ─── KI-Suche (globales Modul, ueber RosenwegSearch.open() aufrufbar) ───
+// ─── KI-Suche (globales Modul, über RosenwegSearch.open() aufrufbar) ───
 const RosenwegSearch = {
   _modal: null,
   _esc(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); },
