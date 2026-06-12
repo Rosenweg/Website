@@ -120,7 +120,16 @@ const AuthentikAuth = {
       options.body = JSON.stringify(options.body);
     }
     const resp = await fetch(url, { ...options, headers });
-    if (resp.status === 401) {
+    // Session abgelaufen kann sich auf zwei Arten zeigen:
+    //   a) API antwortet direkt mit 401 (sauberer Fall)
+    //   b) Irgendwer in der Kette (CF, nginx, Authentik-Outpost) macht
+    //      ein 302 auf die Authentik-Login-Seite. fetch() folgt dem
+    //      Redirect automatisch → resp.status=200, Content-Type=text/html.
+    //   Beide Faelle → logout + Login-Redirect.
+    const ct = resp.headers.get('content-type') || '';
+    const looksLikeLoginPage = resp.status === 401 ||
+      (ct.includes('text/html') && !url.endsWith('.html'));
+    if (looksLikeLoginPage) {
       this.logout();
       return resp;
     }
