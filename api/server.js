@@ -14118,7 +14118,12 @@ async function buildTraefikDynamicConfig() {
   // WICHTIG: leere sections (z.B. middlewares: {}) lassen Traefik file-provider
   // mit "middlewares cannot be a standalone element" abbrechen. Wir fuellen
   // unten und cleanen am Ende.
-  const cfg = { http: { routers: {}, services: {}, middlewares: {} }, tcp: { routers: {}, services: {} } };
+  const cfg = { http: { routers: {}, services: {}, middlewares: {}, serversTransports: {} }, tcp: { routers: {}, services: {} } };
+  // ServersTransport fuer HTTPS-Backends mit Self-Signed / Mismatched Certs
+  // (typisch fuer interne Services wie Mailcow, NCP etc.). InsecureSkipVerify
+  // ist hier sicher weil der Hop Edge-Traefik → Backend ueber das interne
+  // LAN laeuft, kein WAN dazwischen.
+  cfg.http.serversTransports['insecure-internal'] = { insecureSkipVerify: true };
 
   // 1) HTTP-Routes aus isp_reverse_proxy_routes
   const rps = await pool.query(
@@ -14147,8 +14152,10 @@ async function buildTraefikDynamicConfig() {
         passHostHeader: r.preserve_host !== false,
       },
     };
-    if (r.read_timeout_s > 0) {
-      cfg.http.services[svc].loadBalancer.serversTransport = id + '-transport';
+    // HTTPS-Backend → insecureSkipVerify damit interne Self-Signed/
+    // Mismatched Certs (z.B. Mailcow's eigenes Cert) nicht zum 502 fuehren.
+    if (/^https:\/\//i.test(r.backend_url || '')) {
+      cfg.http.services[svc].loadBalancer.serversTransport = 'insecure-internal';
     }
   }
 
