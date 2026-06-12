@@ -15150,26 +15150,16 @@ function generatePpskPassword() {
   return out.split('').sort(() => Math.random() - 0.5).join('');
 }
 
-// UniFi Network-Conf fuer User-VLAN anlegen.
-// Wichtig: disable_l3 / vlan_only-Modus, weil das Routing der Router-LXC macht,
-// nicht die UDM. UniFi propagiert nur den VLAN-Tag auf APs/Ports.
+// UniFi Network-Conf fuer User-VLAN anlegen. purpose='vlan-only' = reine
+// VLAN-Tag-Propagation auf APs/Switches, KEIN UDM-Gateway, KEIN DHCP.
+// Routing+DHCP macht die Router-LXC auf VLAN <id> via eth0.<vlan>.
 async function unifiCreateUserNetwork(v) {
-  const cidr = parseCidr(v.subnet_v4);
   const body = {
     name: v.gewuenschter_name || `vlan-${v.vlan_id}`,
-    purpose: 'corporate',
+    purpose: 'vlan-only',
     enabled: true,
     vlan_enabled: true,
     vlan: v.vlan_id,
-    networkgroup: 'LAN',
-    // UDM macht KEIN L3, KEIN DHCP — das ist Router-LXC-Sache:
-    dhcpd_enabled: false,
-    dhcp_relay_enabled: false,
-    ipv6_interface_type: 'none',
-    ...(cidr ? { ip_subnet: `${cidr.first_host}/${cidr.mask}` } : {}),
-    // Reine VLAN-Propagierung:
-    is_nat: false,
-    auto_scale_network: false,
   };
   const r = await unifiCall('POST', 'rest/networkconf', body);
   const created = (r.data || [])[0] || r;
