@@ -14790,11 +14790,18 @@ app.get('/api/isp/vlan-requests', authMiddleware, async (req, res) => {
     const admin = ispIsAdmin(req);
     const email = (req.user.email || '').toLowerCase();
     const r = admin
-      ? await pool.query(`SELECT v.*, w.bezeichnung AS wohnung_bezeichnung, w.stweg FROM isp_vlan_requests v
+      ? await pool.query(`SELECT v.*, w.bezeichnung AS wohnung_bezeichnung, w.stweg,
+                                  cr.client_vlan_id AS router_client_vlan_id, cr.bezeichnung AS router_bezeichnung,
+                                  cr.lxc_id AS router_lxc_id
+                           FROM isp_vlan_requests v
                            LEFT JOIN wohnungen w ON w.id = v.wohnung_id
+                           LEFT JOIN isp_client_vlan_routers cr ON cr.id = v.assigned_router_id
                            ORDER BY CASE v.status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 WHEN 'deployed' THEN 2 ELSE 3 END, v.created_at DESC`)
-      : await pool.query(`SELECT v.*, w.bezeichnung AS wohnung_bezeichnung, w.stweg FROM isp_vlan_requests v
+      : await pool.query(`SELECT v.*, w.bezeichnung AS wohnung_bezeichnung, w.stweg,
+                                  cr.client_vlan_id AS router_client_vlan_id, cr.bezeichnung AS router_bezeichnung
+                           FROM isp_vlan_requests v
                            LEFT JOIN wohnungen w ON w.id = v.wohnung_id
+                           LEFT JOIN isp_client_vlan_routers cr ON cr.id = v.assigned_router_id
                            WHERE LOWER(v.antragsteller_email) = $1
                               OR $1 = ANY(COALESCE(v.mitnutzer_emails, ARRAY[]::TEXT[]))
                            ORDER BY v.created_at DESC`, [email]);
@@ -14852,7 +14859,8 @@ app.put('/api/isp/vlan-requests/:id', authMiddleware, async (req, res) => {
     const userFields = ['zweck','gewuenschter_name','gewuenschte_groesse','geraete_anzahl','internet_zugriff','andere_vlans_zugriff','kind','with_wlan'];
     const ownerOnlyFields = ['mitnutzer_emails'];
     const adminFields = ['status','vlan_id','subnet_v4','ablehnung_grund','notizen_technik','deployed_at',
-                         'wlan_password','dhcp_range_from','dhcp_range_to','dhcp_gateway','unifi_network_id'];
+                         'wlan_password','dhcp_range_from','dhcp_range_to','dhcp_gateway','unifi_network_id',
+                         'assigned_router_id'];
     const allowed = admin ? [...userFields, ...ownerOnlyFields, ...adminFields]
                           : (isOwner ? [...userFields, ...ownerOnlyFields] : []);
     if (!admin && v.status !== 'pending') return res.status(400).json({ error: 'Nur in Status pending editierbar' });
@@ -14931,6 +14939,85 @@ app.delete('/api/isp/vlan-requests/:id', authMiddleware, async (req, res) => {
     const isMitnutzer = (v.mitnutzer_emails || []).map(x => String(x).toLowerCase()).includes(email);
     if (!admin && !isOwner && !isMitnutzer) return res.status(403).json({ error: 'Nur Antragsteller, Mitnutzer oder Admin' });
     await pool.query('DELETE FROM isp_vlan_requests WHERE id = $1', [id]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// === Router-LXC pro Client-VLAN (Phase 2) ===
+// Admin-only Verwaltung der LXCs die als Default-Gateway + DHCP fuer
+// Netzwerk-Subnet-Antraege dienen. Auto-Provisioning ist Phase 3.
+app.get('/api/isp/client-vlan-routers', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Admin' });
+    const r = await pool.query(`
+      SELECT cr.*,
+             (SELECT COUNT(*)::int FROM isp_vlan_requests v
+                WHERE v.assigned_router_id = cr.id AND v.status IN ('approved','deployed')) AS assigned_count
+        FROM isp_client_vlan_routers cr
+        ORDER BY cr.client_vlan_id`);
+    res.json({ client_vlan_routers: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/isp/client-vlan-routers', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Admin' });
+    const b = req.body || {};
+    if (b.client_vlan_id == null || !b.lxc_id) {
+      return res.status(400).json({ error: 'client_vlan_id und lxc_id sind Pflicht' });
+    }
+    const cvi = parseInt(b.client_vlan_id, 10);
+    const lxc = parseInt(b.lxc_id, 10);
+    if (!Number.isInteger(cvi) || cvi < 1 || cvi > 4094) return res.status(400).json({ error: 'client_vlan_id muss 1-4094 sein' });
+    if (!Number.isInteger(lxc) || lxc < 100 || lxc > 99999) return res.status(400).json({ error: 'lxc_id muss eine valide CT-ID sein' });
+    const r = await pool.query(
+      `INSERT INTO isp_client_vlan_routers
+         (client_vlan_id, bezeichnung, lxc_id, pve_host, mgmt_ip, upstream_gateway, active, notizen)
+       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,true),$8)
+       RETURNING *`,
+      [cvi, b.bezeichnung || null, lxc, b.pve_host || null,
+       b.mgmt_ip || null, b.upstream_gateway || null, b.active, b.notizen || null],
+    );
+    res.json(r.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Client-VLAN bereits vergeben' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/isp/client-vlan-routers/:id', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Admin' });
+    const id = parseInt(req.params.id, 10);
+    const ex = await pool.query('SELECT * FROM isp_client_vlan_routers WHERE id = $1', [id]);
+    if (ex.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const b = req.body || {};
+    const allowed = ['client_vlan_id','bezeichnung','lxc_id','pve_host','mgmt_ip','upstream_gateway','active','notizen'];
+    const updates = []; const params = [];
+    const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
+    for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    push('updated_at', new Date());
+    params.push(id);
+    const r = await pool.query(`UPDATE isp_client_vlan_routers SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
+    res.json(r.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Client-VLAN bereits vergeben' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/isp/client-vlan-routers/:id', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Admin' });
+    const id = parseInt(req.params.id, 10);
+    const used = await pool.query(
+      "SELECT COUNT(*)::int AS n FROM isp_vlan_requests WHERE assigned_router_id = $1 AND status IN ('approved','deployed')",
+      [id]);
+    if (used.rows[0].n > 0) {
+      return res.status(409).json({ error: `Router wird noch von ${used.rows[0].n} aktiven Antraegen benutzt — erst neu zuweisen` });
+    }
+    await pool.query('DELETE FROM isp_client_vlan_routers WHERE id = $1', [id]);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -18100,6 +18187,33 @@ async function initDB() {
           ADD COLUMN IF NOT EXISTS unifi_network_id VARCHAR(40);   -- UniFi-NetworkConf _id nach Provisionierung
         ALTER TABLE isp_vlan_requests
           ADD CONSTRAINT isp_vlanreq_kind_chk CHECK (kind IN ('vlan','subnet'));
+      EXCEPTION WHEN OTHERS THEN NULL; END $$;
+
+      -- Phase 2: Router-LXC pro Client-VLAN.
+      -- Architektur: pro offiziellem Client-VLAN (9, 99, 139, 179, ...) ein
+      -- dedizierter LXC der als Default-Gateway + DHCP fuer alle User-Subnets
+      -- in diesem Client-VLAN dient. LXC-IDs vergibt der Admin manuell.
+      -- Phase 2 verwaltet nur den Datensatz; Provisionierung kommt in Phase 3.
+      CREATE TABLE IF NOT EXISTS isp_client_vlan_routers (
+        id SERIAL PRIMARY KEY,
+        client_vlan_id INTEGER NOT NULL UNIQUE,    -- z.B. 9, 99, 139
+        bezeichnung VARCHAR(80),                   -- z.B. "RW9 Bewohner-Sammel"
+        lxc_id INTEGER NOT NULL,                   -- Proxmox-CT-ID (Admin-defined)
+        pve_host VARCHAR(20),                      -- pve1|pve2|pve3
+        mgmt_ip INET,                              -- Mgmt-IP fuer SSH/Provisioning
+        upstream_gateway INET,                     -- Default-Route in den Client-VLAN
+        active BOOLEAN DEFAULT true,
+        notizen TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_isp_cvr_active ON isp_client_vlan_routers(active);
+
+      -- Verknuepfung Netzwerk-Antrag -> Router-LXC (welcher LXC routet das?)
+      DO $$ BEGIN
+        ALTER TABLE isp_vlan_requests
+          ADD COLUMN IF NOT EXISTS assigned_router_id INTEGER
+            REFERENCES isp_client_vlan_routers(id) ON DELETE SET NULL;
       EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
       -- Approval-Workflow fuer Reverse-Proxy + Redirects:
