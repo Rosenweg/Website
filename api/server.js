@@ -14489,6 +14489,18 @@ app.post('/api/isp/reverse-proxy/:id/recheck-dns', authMiddleware, async (req, r
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Liefert alle Wohnungen (id, bezeichnung, stweg) als flache Liste fuer
+// Admin-Dropdowns im ISP-Tab. Admin-only.
+app.get('/api/isp/wohnungen-options', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Präsident' });
+    const r = await pool.query(
+      `SELECT id, bezeichnung, stweg FROM wohnungen ORDER BY stweg, bezeichnung`
+    );
+    res.json({ wohnungen: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // === Subscribers (Wohnungs-Anschluesse) ===
 app.get('/api/isp/subscribers', authMiddleware, async (req, res) => {
   try {
