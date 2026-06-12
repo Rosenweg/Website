@@ -16580,18 +16580,27 @@ async function maintPollUnifiAccess() {
     const json = await r.json();
     const devs = Array.isArray(json.data) ? json.data : [];
     for (const d of devs) {
-      // Access-Geraet "weiss" via update.device_version_ugprade_status (typo
-      // im UniFi-Feldnamen!) ob ein Update wartet, vorbereitet oder laeuft.
-      const us = (d.update && d.update.device_version_ugprade_status) ||
+      // Access erkennt anstehende Updates auf zwei Wegen:
+      // 1) Versionsvergleich: update.device_current_version != update.device_version.version
+      //    bedeutet eine neuere Firmware ist bereits gestaged (downloaded=true)
+      //    und wartet auf das naechste Auto-Upgrade-Fenster.
+      // 2) Status-Flags is_waiting/is_preparing/is_upgrading (Tippfehler im UniFi-
+      //    Feldnamen: device_version_ugprade_status).
+      const upd = d.update || {};
+      const currentVer = upd.device_current_version || d.firmware || '';
+      const targetVer = upd.device_version?.version || '';
+      const versionMismatch = !!(currentVer && targetVer && currentVer !== targetVer);
+      const us = upd.device_version_ugprade_status ||
                  (d.update_manual && d.update_manual.device_version_upgrade_status) ||
                  {};
-      const updatePending = !!(us.is_waiting || us.is_preparing || us.is_upgrading);
+      const statusFlag = !!(us.is_waiting || us.is_preparing || us.is_upgrading);
       await maintHandleDeviceUpdate({
         key: 'access-' + (d.unique_id || d.id || d.name),
         name: d.alias || d.name,
         model: d.display_model || d.model || 'Access',
         isOnline: d.is_online === true,
-        upgradable: updatePending,
+        upgradable: versionMismatch || statusFlag,
+        upgradeTo: targetVer || undefined,
         source: 'access',
       });
     }
