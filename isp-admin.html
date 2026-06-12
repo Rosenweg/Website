@@ -118,7 +118,7 @@
               </div>
               <div class="text-[10px] text-slate-400 font-mono mt-1 space-y-0.5">
                 <div><span id="noc-pending-mbq">0</span> Mailbox-Anträge</div>
-                <div><span id="noc-pending-vlan">0</span> VLAN-Anträge</div>
+                <div><span id="noc-pending-vlan">0</span> Netzwerk-Anträge</div>
               </div>
             </div>
 
@@ -257,7 +257,7 @@
       <div class="border-b border-gray-200 mb-4 overflow-x-auto -mx-4 px-4">
         <nav class="flex space-x-3 sm:space-x-6 whitespace-nowrap">
           <button data-tab="erschliessung" class="tab-btn py-2 px-1 text-sm border-b-2 border-blue-600 text-blue-600 font-medium">🏠 Erschliessung</button>
-          <button data-tab="vlan" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">🌐 VLAN-Antraege <span id="vlan-pending-badge" class="hidden text-xs bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">0</span></button>
+          <button data-tab="vlan" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">🌐 Netzwerk-Antraege <span id="vlan-pending-badge" class="hidden text-xs bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">0</span></button>
           <button data-tab="ips" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">📍 Fix-IPs</button>
           <button data-tab="rp" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">🔁 Routing</button>
           <button data-tab="vpn" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">🔒 VPN-Konten</button>
@@ -271,10 +271,10 @@
         <div id="sub-list" class="bg-white rounded-lg shadow overflow-x-auto"></div>
       </div>
 
-      <!-- VLAN-Anträge -->
+      <!-- Netzwerk-Anträge -->
       <div id="tab-vlan" class="tab-view hidden">
         <div id="vlan-list" class="space-y-2"></div>
-        <div id="vlan-empty" class="hidden bg-white border rounded-lg p-8 text-center text-gray-400 italic">Keine offenen VLAN-Antraege.</div>
+        <div id="vlan-empty" class="hidden bg-white border rounded-lg p-8 text-center text-gray-400 italic">Keine offenen Netzwerk-Antraege.</div>
       </div>
 
       <!-- Fix-IPs -->
@@ -529,14 +529,21 @@
             <button onclick="vlanEditMitnutzer(${v.id})" class="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded" title="Mitnutzer bearbeiten">👥 Mitnutzer</button>
           </div>
         </div>
+        <div class="flex flex-wrap gap-1 mb-1">
+          <span class="text-xs bg-${(v.kind||'vlan')==='subnet'?'indigo':'gray'}-100 text-${(v.kind||'vlan')==='subnet'?'indigo':'gray'}-800 px-2 py-0.5 rounded font-semibold">${(v.kind||'vlan').toUpperCase()}</span>
+          ${v.with_wlan ? '<span class="text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded">📶 WLAN</span>' : ''}
+        </div>
         <p class="text-sm mb-1"><strong>Zweck:</strong> ${esc(v.zweck)}</p>
         <div class="text-xs text-gray-600 grid sm:grid-cols-3 gap-2">
           ${v.wohnung_bezeichnung ? `<div>Wohnung: ${esc(v.wohnung_bezeichnung)} (STWEG ${v.stweg})</div>` : ''}
           ${v.gewuenschte_groesse ? `<div>Groesse: ${esc(v.gewuenschte_groesse)}</div>` : ''}
           ${v.geraete_anzahl ? `<div>Geraete: ${v.geraete_anzahl}</div>` : ''}
-          <div>Internet: ${v.internet_zugriff ? 'ja' : 'nein'} · Andere VLANs: ${v.andere_vlans_zugriff ? 'ja' : 'nein'}</div>
+          <div>Internet: ${v.internet_zugriff ? 'ja' : 'nein'}</div>
           ${v.vlan_id ? `<div>VLAN-ID: ${v.vlan_id}</div>` : ''}
           ${v.subnet_v4 ? `<div>Subnet: ${esc(v.subnet_v4)}</div>` : ''}
+          ${v.dhcp_gateway ? `<div>DHCP-GW: ${esc(v.dhcp_gateway)}</div>` : ''}
+          ${v.unifi_network_id ? `<div>UniFi-Net: <span class="font-mono">${esc(v.unifi_network_id.slice(-8))}</span></div>` : ''}
+          ${v.wlan_password ? `<div>WLAN-PW: <code class="bg-yellow-50 px-1 rounded">${esc(v.wlan_password)}</code></div>` : ''}
           ${v.ablehnung_grund ? `<div class="text-red-700">Ablehnung: ${esc(v.ablehnung_grund)}</div>` : ''}
         </div>
         ${mits.length > 0 ? `<div class="mt-2 text-xs text-gray-500">Mitnutzer: ${mits.map(e => `<span class="font-mono">${esc(e)}</span>`).join(', ')}</div>` : ''}

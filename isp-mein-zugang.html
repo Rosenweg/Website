@@ -21,7 +21,7 @@
       <div>
         <a href="/isp.html" class="text-sm text-blue-600 hover:underline">← ISP-Uebersicht</a>
         <h1 class="text-2xl font-bold text-gray-900 mt-2">🔑 Mein Zugang</h1>
-        <p class="text-sm text-gray-600">VPN-Konten, eigene VLAN-Antraege und Reverse-Proxy-Routen.</p>
+        <p class="text-sm text-gray-600">VPN-Konten, eigene Netzwerk-Antraege und Reverse-Proxy-Routen.</p>
       </div>
 
       <!-- VPN-Konten -->
@@ -33,10 +33,10 @@
         <div id="vpn-list" class="space-y-2"></div>
       </section>
 
-      <!-- VLAN-Anträge -->
+      <!-- Netzwerk-Anträge -->
       <section class="bg-white rounded-lg shadow p-5">
         <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <h2 class="text-lg font-semibold">🌐 Meine VLAN-Antraege</h2>
+          <h2 class="text-lg font-semibold">🌐 Meine Netzwerk-Antraege</h2>
           <button onclick="openVlanModal()" class="text-sm bg-blue-600 text-white px-3 py-1.5 rounded">+ VLAN beantragen</button>
         </div>
         <div id="vlan-list" class="space-y-2"></div>
@@ -307,32 +307,43 @@
         </div>`;
     const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5 max-h-[90vh] overflow-y-auto">
-        <h2 class="font-bold mb-3">VLAN beantragen</h2>
+        <h2 class="font-bold mb-3">Netzwerk beantragen</h2>
         <div class="bg-blue-50 border border-blue-200 rounded p-3 mb-3 text-xs">
           <p class="font-semibold text-blue-900 mb-1">📋 Numerierungs-Schema</p>
-          <p class="text-blue-800">Bewohner-VLANs werden nach <code class="bg-white px-1 rounded">&lt;HausNr&gt;&lt;NN&gt;</code> vergeben:</p>
+          <p class="text-blue-800">User-VLANs nach <code class="bg-white px-1 rounded">&lt;HausNr&gt;&lt;NN&gt;</code>:</p>
           <ul class="text-blue-800 mt-1 list-disc ml-4">
             <li>RW9 → 901-999 (z.B. 911, 912, ...)</li>
             <li>RW13 → 1301-1399, RW18 → 1801-1899</li>
           </ul>
-          <p class="text-blue-700 mt-1 italic">Genaue ID weist Technik bei der Genehmigung nach naechstem freiem Slot zu.</p>
+          <p class="text-blue-700 mt-1 italic">Genaue ID weist Technik bei der Genehmigung zu.</p>
         </div>
-        <div class="space-y-2 text-sm">
+        <div class="space-y-3 text-sm">
           ${optHtml}
-          <div><label class="block text-xs text-gray-600">Wunsch-Name</label><input id="vl-name" placeholder="z.B. Smart-Home" class="w-full border rounded px-2 py-1"></div>
-          <div><label class="block text-xs text-gray-600">Zweck *</label><textarea id="vl-zweck" rows="3" placeholder="Wofuer wird das VLAN gebraucht?" class="w-full border rounded px-2 py-1"></textarea></div>
+          <div>
+            <label class="block text-xs font-medium text-gray-700">Art *</label>
+            <select id="vl-kind" class="w-full border rounded px-2 py-1" onchange="vlKindChange()">
+              <option value="vlan">VLAN-Tag — du machst Router/DHCP selbst</option>
+              <option value="subnet">Subnet mit Router+DHCP — wir machen das fuer dich</option>
+            </select>
+            <p class="text-xs text-gray-500 mt-0.5">VLAN-Tag = nur der Tag, du verwaltest Router/DHCP. Subnet = wir betreiben einen Router-LXC fuer dich mit DHCP+NAT, du steckst nur Geraete rein.</p>
+          </div>
+          <div>
+            <label class="flex items-center gap-2 text-sm"><input id="vl-wlan" type="checkbox" class="rounded"> WLAN-Passwort fuer dieses Netz</label>
+            <p class="text-xs text-gray-500 mt-0.5 ml-6">An: ein PPSK wird im 'Rosenweg'-WLAN angelegt, Geraete die's tippen landen in deinem Netz. Aus: nur Kabel/Switch-Port.</p>
+          </div>
+          <div><label class="block text-xs font-medium text-gray-700">Wunsch-Name</label><input id="vl-name" placeholder="z.B. Smart-Home" class="w-full border rounded px-2 py-1"></div>
+          <div><label class="block text-xs font-medium text-gray-700">Zweck *</label><textarea id="vl-zweck" rows="2" placeholder="Wofuer wird das Netz gebraucht?" class="w-full border rounded px-2 py-1"></textarea></div>
           <div class="grid grid-cols-2 gap-2">
-            <div><label class="block text-xs text-gray-600">Groesse</label><select id="vl-grosse" class="w-full border rounded px-2 py-1">
+            <div><label class="block text-xs font-medium text-gray-700">Groesse</label><select id="vl-grosse" class="w-full border rounded px-2 py-1">
               <option value="">—</option><option value="/29">/29 (6 IPs)</option><option value="/28">/28 (14 IPs)</option><option value="/27">/27 (30 IPs)</option><option value="/24">/24 (254 IPs)</option>
             </select></div>
-            <div><label class="block text-xs text-gray-600">Geraete-Anzahl</label><input id="vl-anz" type="number" class="w-full border rounded px-2 py-1"></div>
+            <div><label class="block text-xs font-medium text-gray-700">Geraete-Anzahl</label><input id="vl-anz" type="number" class="w-full border rounded px-2 py-1"></div>
           </div>
           <div><label class="flex items-center gap-2 text-sm"><input id="vl-inet" type="checkbox" checked class="rounded"> Internet-Zugriff</label></div>
-          <div><label class="flex items-center gap-2 text-sm"><input id="vl-cross" type="checkbox" class="rounded"> Zugriff auf andere VLANs</label></div>
           <div>
-            <label class="block text-xs text-gray-600">Mitnutzer (optional)</label>
+            <label class="block text-xs font-medium text-gray-700">Mitnutzer (optional)</label>
             <input id="vl-mitnutzer" placeholder="bewohner1@…, bewohner2@…" class="w-full border rounded px-2 py-1 font-mono text-xs">
-            <p class="text-xs text-gray-500 mt-1">Kommagetrennte Emails. Mitnutzer sehen das VLAN in <em>Mein Zugang</em> und koennen es ebenfalls zurueckziehen.</p>
+            <p class="text-xs text-gray-500 mt-0.5">Kommagetrennte Emails. Mitnutzer sehen das Netz und koennen's zurueckziehen.</p>
           </div>
         </div>
         <div class="flex justify-end gap-2 mt-3">
@@ -341,6 +352,9 @@
         </div>
       </div></div>`;
     document.body.insertAdjacentHTML('beforeend', html);
+  }
+  function vlKindChange() {
+    // Heute nur Hinweistext — kann spaeter konditionale Felder ein/ausblenden.
   }
   async function saveVlan() {
     const wohnungEl = document.getElementById('vl-wohnung');
@@ -355,7 +369,9 @@
       gewuenschte_groesse: document.getElementById('vl-grosse').value || null,
       geraete_anzahl: parseInt(document.getElementById('vl-anz').value, 10) || null,
       internet_zugriff: document.getElementById('vl-inet').checked,
-      andere_vlans_zugriff: document.getElementById('vl-cross').checked,
+      andere_vlans_zugriff: false,
+      kind: document.getElementById('vl-kind').value,
+      with_wlan: document.getElementById('vl-wlan').checked,
       mitnutzer_emails: mitnutzer,
     };
     if (!body.zweck) { alert('Zweck Pflicht.'); return; }
