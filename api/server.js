@@ -16108,38 +16108,14 @@ function hausFromDeviceName(name) {
   return (h >= 1 && h <= 18) ? h : null;
 }
 
-// Empfaenger-Resolver: liefert Email-Liste fuer ein scope-Objekt.
+// Email-Verteiler-Adresse des Ausschusses (statisch). Bekommt jede Wartungs-
+// Mail mit, damit das Gremium informiert bleibt.
+const MAINT_AUSSCHUSS_EMAIL = 'ausschuss@rosenweg4303.ch';
+
+// Email-Recipients: Subscriber-Bewohner im scope + Ausschuss-Verteiler.
 async function maintRecipientsForScope(scope) {
-  const allBewohner = !!scope?.all;
-  const houses = Array.isArray(scope?.houses) ? scope.houses.map(Number).filter(Number.isFinite) : [];
-  const vlans = Array.isArray(scope?.vlans) ? scope.vlans.map(Number).filter(Number.isFinite) : [];
-  // VLANs -> Hausnummern via VPN_RW_TO_VLAN (reverse)
-  const reverseMap = Object.fromEntries(Object.entries(VPN_RW_TO_VLAN).map(([h, v]) => [v, parseInt(h, 10)]));
-  for (const v of vlans) { const h = reverseMap[v]; if (h) houses.push(h); }
-  const unique = Array.from(new Set(houses));
-  let q, params;
-  if (allBewohner || unique.length === 0) {
-    q = `SELECT DISTINCT LOWER(p.email) AS email FROM personen p
-           JOIN wohnungen_kontakte k ON k.person_id = p.id
-          WHERE k.archiviert_am IS NULL AND p.email IS NOT NULL AND p.email <> ''`;
-    params = [];
-  } else {
-    // Wohnungen filtern: bezeichnung beginnt mit der Haus-Nummer (z.B. "9.2OG.3")
-    // ODER ist parkplatz/hobbyraum dieser Haus-Nummer (klassifyVpnEntry-Logik).
-    q = `SELECT DISTINCT LOWER(p.email) AS email
-           FROM personen p
-           JOIN wohnungen_kontakte k ON k.person_id = p.id
-           JOIN wohnungen w ON w.id = k.wohnung_id
-          WHERE k.archiviert_am IS NULL
-            AND p.email IS NOT NULL AND p.email <> ''
-            AND (
-              w.bezeichnung ~ ('^(' || $1::text || ')[\\.\\-]')
-              OR (w.bezeichnung ~* '^RW(' || $1::text || ')-')
-            )`;
-    params = [unique.join('|')];
-  }
-  const r = await pool.query(q, params);
-  return r.rows.map(x => x.email).filter(Boolean);
+  const subs = await maintSubscriberRecipientsForScope(scope);
+  return Array.from(new Set([...subs, MAINT_AUSSCHUSS_EMAIL]));
 }
 
 // Wie maintRecipientsForScope, aber nur Personen deren Wohnung auch einen
