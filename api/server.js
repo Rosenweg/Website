@@ -14063,12 +14063,30 @@ async function nocDashboardHandler(req, res) {
         `SELECT COUNT(*)::int AS n FROM isp_vlan_requests WHERE status='pending'`)).rows[0].n;
     } catch {}
 
-    // Aktive VPN-Konten
-    let vpnActive = 0;
+    // Aktive VPN-Konten (active=true) + pending (active=false) + jetzt verbunden
+    // (Handshake innerhalb der letzten 3 Min — WireGuard-Standard fuer eine
+    // lebende Session, jenseits davon gilt der Peer als idle/disconnected).
+    let vpnActive = 0, vpnPending = 0, vpnConnected = 0;
     try {
-      vpnActive = (await pool.query(
-        `SELECT COUNT(*)::int AS n FROM isp_vpn_accounts WHERE active=true`)).rows[0].n;
+      const r = await pool.query(
+        `SELECT COUNT(*) FILTER (WHERE active) AS act,
+                COUNT(*) FILTER (WHERE NOT active) AS pen
+           FROM isp_vpn_accounts`);
+      vpnActive = parseInt(r.rows[0].act, 10) || 0;
+      vpnPending = parseInt(r.rows[0].pen, 10) || 0;
     } catch {}
+    if (WG_CONTROL_TOKEN) {
+      try {
+        const r = await wgControl('GET', '/peers');
+        const body = await r.json();
+        const peers = Array.isArray(body) ? body : (body.peers || []);
+        const cutoff = Date.now() - 3 * 60 * 1000;
+        vpnConnected = peers.filter(p => {
+          const h = p.latest_handshake ? new Date(p.latest_handshake).getTime() : 0;
+          return h > cutoff;
+        }).length;
+      } catch {}
+    }
 
     // Aktive Subscribers (Erschliessungen)
     let subsActive = 0;
@@ -14087,7 +14105,12 @@ async function nocDashboardHandler(req, res) {
       },
       relays: relayStats,
       pending: { mailbox_requests: pending, vlan_requests: pendingVlan },
-      counts: { vpn_active: vpnActive, subscribers_active: subsActive },
+      counts: {
+        vpn_active: vpnActive,
+        vpn_pending: vpnPending,
+        vpn_connected: vpnConnected,
+        subscribers_active: subsActive,
+      },
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
