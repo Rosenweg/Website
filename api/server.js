@@ -14907,7 +14907,25 @@ app.put('/api/isp/vlan-requests/:id', authMiddleware, async (req, res) => {
     push('updated_at', new Date());
     params.push(id);
     const r = await pool.query(`UPDATE isp_vlan_requests SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
-    res.json(r.rows[0]);
+    const updated = r.rows[0];
+
+    // Auto-Deploy: wenn admin gerade status -> approved gesetzt hat, Antrag ist
+    // 'subnet'-kind und hat alle Felder, fahren wir die Provisionierung direkt
+    // an. Bei kind='vlan' nicht (da gibt's nichts zu provisionieren) und auch
+    // nicht wenn der Antrag schon deployed war.
+    let provisioning = null;
+    const becameApproved = admin && b.status === 'approved' && v.status !== 'approved' && v.status !== 'deployed';
+    const isSubnet = (updated.kind || 'vlan') === 'subnet';
+    const hasRequiredFields = updated.vlan_id && updated.subnet_v4 && updated.dhcp_gateway && updated.dhcp_range_from && updated.dhcp_range_to && updated.assigned_router_id;
+    if (becameApproved && isSubnet && hasRequiredFields) {
+      try {
+        provisioning = await runProvisioning(id);
+      } catch (e) { provisioning = { ok: false, errors: [{ step: 'auto_provision', error: e.message }] }; }
+      // Aktualisierte Row nochmal lesen (status koennte jetzt 'deployed' sein)
+      const final = await pool.query('SELECT * FROM isp_vlan_requests WHERE id = $1', [id]);
+      return res.json({ ...final.rows[0], provisioning });
+    }
+    res.json(updated);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -15278,84 +15296,90 @@ app.get('/api/isp/vlan-requests/:id/provision-plan', authMiddleware, async (req,
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Provisioning-Kern, wiederverwendbar von POST /provision und vom PUT auto-deploy.
+async function runProvisioning(id) {
+  const ex = await pool.query(`
+    SELECT v.*, cr.client_vlan_id AS router_client_vlan_id, cr.lxc_id AS router_lxc_id,
+           cr.bezeichnung AS router_bezeichnung
+      FROM isp_vlan_requests v
+      LEFT JOIN isp_client_vlan_routers cr ON cr.id = v.assigned_router_id
+      WHERE v.id = $1`, [id]);
+  if (ex.rows.length === 0) throw new Error('Nicht gefunden');
+  const v = ex.rows[0];
+  if (v.status !== 'approved' && v.status !== 'deployed') {
+    throw new Error(`Status "${v.status}" — Antrag muss zuerst approved sein`);
+  }
+  if (!v.vlan_id) throw new Error('vlan_id fehlt');
+  const router = v.assigned_router_id ? {
+    lxc_id: v.router_lxc_id, client_vlan_id: v.router_client_vlan_id, bezeichnung: v.router_bezeichnung,
+  } : null;
+  const result = { steps: [], errors: [] };
+
+  // 1) UniFi Network anlegen (falls noch nicht passiert)
+  let unifiNetId = v.unifi_network_id;
+  if (!unifiNetId) {
+    try {
+      const created = await unifiCreateUserNetwork(v);
+      unifiNetId = created._id || created.id || null;
+      if (!unifiNetId) throw new Error('UniFi Response ohne _id: ' + JSON.stringify(created).slice(0, 200));
+      result.steps.push({ step: 'unifi_network', ok: true, unifi_network_id: unifiNetId });
+    } catch (err) {
+      result.errors.push({ step: 'unifi_network', error: err.message });
+    }
+  } else {
+    result.steps.push({ step: 'unifi_network', ok: true, skipped: 'already_exists', unifi_network_id: unifiNetId });
+  }
+
+  // 2) PPSK auf Rosenweg-WLAN (wenn with_wlan und noch kein Passwort)
+  let wlanPw = v.wlan_password;
+  if (v.with_wlan && !wlanPw && unifiNetId) {
+    try {
+      wlanPw = generatePpskPassword();
+      await unifiAddPpskToRosenwegWlan(unifiNetId, wlanPw);
+      result.steps.push({ step: 'ppsk', ok: true });
+    } catch (err) {
+      wlanPw = null;
+      result.errors.push({ step: 'ppsk', error: err.message });
+    }
+  } else if (v.with_wlan && wlanPw) {
+    result.steps.push({ step: 'ppsk', ok: true, skipped: 'already_set' });
+  }
+
+  // 3) Router-LXC-Script generieren (manuelle Ausfuehrung durch Admin bis SSH-Auto da ist)
+  const script = (v.kind === 'subnet' && router) ? buildRouterLxcProvisionScript(v, router) : null;
+  if (script) result.steps.push({ step: 'router_lxc_script', ok: true, run_manually: true });
+
+  // 4) DB updaten
+  const updates = []; const params = [];
+  const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
+  if (unifiNetId && unifiNetId !== v.unifi_network_id) push('unifi_network_id', unifiNetId);
+  if (wlanPw && wlanPw !== v.wlan_password) push('wlan_password', wlanPw);
+  if (result.errors.length === 0 && v.status === 'approved') {
+    push('status', 'deployed');
+    push('deployed_at', new Date());
+  }
+  if (updates.length > 0) {
+    push('updated_at', new Date());
+    params.push(id);
+    await pool.query(`UPDATE isp_vlan_requests SET ${updates.join(', ')} WHERE id = $${params.length}`, params);
+  }
+
+  return {
+    ok: result.errors.length === 0,
+    unifi_network_id: unifiNetId,
+    wlan_password: wlanPw,
+    router_lxc_script: script,
+    ...result,
+  };
+}
+
 // Tatsaechliches Provisioning: UniFi + PPSK live anlegen, Router-LXC-Script generieren.
 app.post('/api/isp/vlan-requests/:id/provision', authMiddleware, async (req, res) => {
   try {
     if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Admin' });
     const id = parseInt(req.params.id, 10);
-    const ex = await pool.query(`
-      SELECT v.*, cr.client_vlan_id AS router_client_vlan_id, cr.lxc_id AS router_lxc_id,
-             cr.bezeichnung AS router_bezeichnung
-        FROM isp_vlan_requests v
-        LEFT JOIN isp_client_vlan_routers cr ON cr.id = v.assigned_router_id
-        WHERE v.id = $1`, [id]);
-    if (ex.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
-    const v = ex.rows[0];
-    if (v.status !== 'approved' && v.status !== 'deployed') {
-      return res.status(400).json({ error: `Status "${v.status}" — Antrag muss zuerst approved sein` });
-    }
-    if (!v.vlan_id) return res.status(400).json({ error: 'vlan_id fehlt' });
-    const router = v.assigned_router_id ? {
-      lxc_id: v.router_lxc_id, client_vlan_id: v.router_client_vlan_id, bezeichnung: v.router_bezeichnung,
-    } : null;
-    const result = { steps: [], errors: [] };
-
-    // 1) UniFi Network anlegen (falls noch nicht passiert)
-    let unifiNetId = v.unifi_network_id;
-    if (!unifiNetId) {
-      try {
-        const created = await unifiCreateUserNetwork(v);
-        unifiNetId = created._id || created.id || null;
-        if (!unifiNetId) throw new Error('UniFi Response ohne _id: ' + JSON.stringify(created).slice(0, 200));
-        result.steps.push({ step: 'unifi_network', ok: true, unifi_network_id: unifiNetId });
-      } catch (err) {
-        result.errors.push({ step: 'unifi_network', error: err.message });
-      }
-    } else {
-      result.steps.push({ step: 'unifi_network', ok: true, skipped: 'already_exists', unifi_network_id: unifiNetId });
-    }
-
-    // 2) PPSK auf Rosenweg-WLAN (wenn with_wlan und noch kein Passwort)
-    let wlanPw = v.wlan_password;
-    if (v.with_wlan && !wlanPw && unifiNetId) {
-      try {
-        wlanPw = generatePpskPassword();
-        await unifiAddPpskToRosenwegWlan(unifiNetId, wlanPw);
-        result.steps.push({ step: 'ppsk', ok: true });
-      } catch (err) {
-        wlanPw = null;
-        result.errors.push({ step: 'ppsk', error: err.message });
-      }
-    } else if (v.with_wlan && wlanPw) {
-      result.steps.push({ step: 'ppsk', ok: true, skipped: 'already_set' });
-    }
-
-    // 3) Router-LXC-Script generieren (manuelle Ausfuehrung durch Admin bis SSH-Auto da ist)
-    const script = (v.kind === 'subnet' && router) ? buildRouterLxcProvisionScript(v, router) : null;
-    if (script) result.steps.push({ step: 'router_lxc_script', ok: true, run_manually: true });
-
-    // 4) DB updaten
-    const updates = []; const params = [];
-    const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
-    if (unifiNetId && unifiNetId !== v.unifi_network_id) push('unifi_network_id', unifiNetId);
-    if (wlanPw && wlanPw !== v.wlan_password) push('wlan_password', wlanPw);
-    if (result.errors.length === 0 && v.status === 'approved') {
-      push('status', 'deployed');
-      push('deployed_at', new Date());
-    }
-    if (updates.length > 0) {
-      push('updated_at', new Date());
-      params.push(id);
-      await pool.query(`UPDATE isp_vlan_requests SET ${updates.join(', ')} WHERE id = $${params.length}`, params);
-    }
-
-    res.json({
-      ok: result.errors.length === 0,
-      unifi_network_id: unifiNetId,
-      wlan_password: wlanPw,
-      router_lxc_script: script,
-      ...result,
-    });
+    const r = await runProvisioning(id);
+    res.json(r);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

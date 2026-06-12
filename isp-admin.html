@@ -638,13 +638,10 @@
           </div>
         </div>
         <div class="flex justify-between items-center gap-2 mt-4">
-          <label class="flex items-center gap-1 text-xs text-gray-600">
-            <input id="ap-and-provision" type="checkbox" ${kind === 'subnet' ? 'checked' : ''}>
-            anschließend gleich provisionieren (UniFi + PPSK)
-          </label>
+          ${kind === 'subnet' ? '<p class="text-xs text-emerald-700">⚡ UniFi + PPSK werden automatisch provisioniert</p>' : '<p class="text-xs text-gray-500">VLAN-only — nur Tag-Reservierung</p>'}
           <div class="flex gap-2">
             <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Abbrechen</button>
-            <button onclick="vlanApproveSubmit(${id})" class="px-3 py-1.5 bg-green-600 text-white rounded text-sm">Genehmigen</button>
+            <button onclick="vlanApproveSubmit(${id})" class="px-3 py-1.5 bg-green-600 text-white rounded text-sm">Genehmigen ${kind === 'subnet' ? '& Deployen' : ''}</button>
           </div>
         </div>
       </div></div>`;
@@ -659,7 +656,6 @@
     const dhcpFrom = document.getElementById('ap-from')?.value.trim() || null;
     const dhcpTo = document.getElementById('ap-to')?.value.trim() || null;
     const notes = document.getElementById('ap-notes').value.trim() || null;
-    const andProvision = document.getElementById('ap-and-provision').checked;
     const body = {
       status: 'approved',
       vlan_id: vlanId,
@@ -670,14 +666,42 @@
       dhcp_range_from: dhcpFrom,
       dhcp_range_to: dhcpTo,
     };
+    const btn = event.target; const t0 = btn.textContent;
+    btn.disabled = true; btn.textContent = '⏳...';
     const r = await AuthentikAuth.apiFetch('/api/isp/vlan-requests/' + id, {
       method: 'PUT', headers: {'Content-Type':'application/json'},
       body: JSON.stringify(body),
     });
-    if (!r.ok) { alert('Fehler: ' + await r.text()); return; }
+    if (!r.ok) { alert('Fehler: ' + await r.text()); btn.disabled = false; btn.textContent = t0; return; }
+    const data = await r.json();
     document.querySelector('.fixed')?.remove();
     await loadVlans();
-    if (andProvision) vlanProvision(id);
+    // Server hat ggf. direkt provisioniert (subnet+vollstaendig). Ergebnis zeigen.
+    if (data.provisioning) showProvisioningResult(id, data.provisioning);
+  }
+  function showProvisioningResult(id, data) {
+    const stepsHtml = (data.steps || []).map(s => {
+      const icon = s.ok ? '✓' : '✗';
+      const col = s.ok ? 'text-emerald-700' : 'text-red-700';
+      return `<div class="text-xs ${col}">${icon} ${esc(s.step)}${s.skipped ? ` (${esc(s.skipped)})` : ''}${s.unifi_network_id ? ` — net=${esc(s.unifi_network_id).slice(-8)}` : ''}${s.run_manually ? ' — Script unten zur Ausführung kopieren' : ''}</div>`;
+    }).join('');
+    const errsHtml = (data.errors || []).map(e => `<div class="text-xs text-red-700">✗ ${esc(e.step)}: ${esc(e.error)}</div>`).join('');
+    const pw = data.wlan_password ? `<div class="text-xs mt-1">🔑 WLAN-Passwort: <code class="bg-yellow-50 px-1 rounded">${esc(data.wlan_password)}</code></div>` : '';
+    const scriptBlock = data.router_lxc_script
+      ? `<details class="mt-3" open><summary class="cursor-pointer text-sm font-semibold text-gray-700">📜 Router-LXC Script (auf passendem PVE-Host ausführen)</summary>
+          <textarea readonly class="w-full mt-2 border rounded p-2 text-xs font-mono bg-gray-50" rows="14">${esc(data.router_lxc_script)}</textarea>
+          <button onclick="navigator.clipboard.writeText(this.previousElementSibling.value); this.textContent='✓ Kopiert'" class="mt-1 text-xs bg-gray-200 px-2 py-1 rounded">📋 In Zwischenablage</button>
+        </details>` : '';
+    const modal = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
+      <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-2xl w-full p-5 max-h-[90vh] overflow-y-auto">
+        <h2 class="font-bold mb-3">${data.ok ? '✓ Genehmigt & Auto-Deployed' : '⚠ Genehmigt, Deploy teilweise erfolgreich'}</h2>
+        <div class="bg-${data.ok ? 'emerald' : 'amber'}-50 border border-${data.ok ? 'emerald' : 'amber'}-200 rounded p-2 mb-3">
+          ${stepsHtml}${errsHtml}${pw}
+        </div>
+        ${scriptBlock}
+        <div class="flex justify-end mt-3"><button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Schliessen</button></div>
+      </div></div>`;
+    document.body.insertAdjacentHTML('beforeend', modal);
   }
   async function vlanReject(id) {
     const reason = prompt('Ablehnungsgrund:');
