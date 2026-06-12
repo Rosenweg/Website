@@ -54,3 +54,8 @@ kiosk/.cached-debian-netinst.iso
 drivers/
 whatsapp-qr.png
 .claude/
+
+# Lokale Dateien die nicht ins Repo gehoeren
+/*.docx
+/*.pdf
+/*.xlsx
