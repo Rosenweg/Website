@@ -18,7 +18,7 @@
 </head>
 <body class="bg-gray-50 min-h-screen">
   <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
-  <script>RosenwegNav.init({ active: 'mail-empfaenger' });</script>
+  <script>RosenwegNav.init({ active: 'mail-empfänger' });</script>
 
   <main class="max-w-5xl mx-auto px-4 py-6">
     <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center">
@@ -168,7 +168,7 @@
   }
 
   async function exportEmpfaenger() {
-    if (!LIST.length) { alert('Keine Empfaenger.'); return; }
+    if (!LIST.length) { alert('Keine Empfänger.'); return; }
     const rows = LIST.flatMap(e => {
       const kontakte = e.kontakte && e.kontakte.length ? e.kontakte : [{}];
       return kontakte.map(k => ({
@@ -187,7 +187,7 @@
         'Notiz': e.notiz || '',
       }));
     });
-    await RosenwegExcel.fromData(rows, 'mail-empfaenger-{date}.xlsx', 'Empfänger');
+    await RosenwegExcel.fromData(rows, 'mail-empfänger-{date}.xlsx', 'Empfänger');
   }
 
   async function loadList() {
@@ -196,10 +196,10 @@
     try {
       const kat = document.getElementById('filter-kat').value;
       const q = kat ? '?kategorie=' + encodeURIComponent(kat) : '';
-      const r = await AuthentikAuth.apiFetch('/api/mail-empfaenger' + q);
+      const r = await AuthentikAuth.apiFetch('/api/mail-empfänger' + q);
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const data = await r.json();
-      LIST = data.empfaenger || [];
+      LIST = data.empfänger || [];
       KATS = data.kategorien || [];
       fillKatSelect(document.getElementById('filter-kat'), true);
       fillKatSelect(document.getElementById('m-kat'), false);
@@ -307,7 +307,7 @@
       kontakte: pendingKontakte.filter(k => k.name || k.email),
     };
     try {
-      const url = id ? `/api/mail-empfaenger/${id}` : '/api/mail-empfaenger';
+      const url = id ? `/api/mail-empfänger/${id}` : '/api/mail-empfänger';
       const r = await AuthentikAuth.apiFetch(url, {
         method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -324,7 +324,7 @@
   async function del() {
     const id = document.getElementById('m-id').value;
     if (!id || !confirm('Empfänger wirklich löschen?')) return;
-    const r = await AuthentikAuth.apiFetch('/api/mail-empfaenger/' + id, { method: 'DELETE' });
+    const r = await AuthentikAuth.apiFetch('/api/mail-empfänger/' + id, { method: 'DELETE' });
     if (!r.ok) { alert('Löschen fehlgeschlagen'); return; }
     closeModal(); await loadList();
   }

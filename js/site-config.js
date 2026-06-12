@@ -33,7 +33,7 @@ const SiteConfig = {
     return this._data?.verwaltung;
   },
 
-  // Cache fuer dynamische Verwaltungs-Liste aus /api/verwaltungen/public
+  // Cache für dynamische Verwaltungs-Liste aus /api/verwaltungen/public
   _verwPromise: null,
   _verwData: null,
 
@@ -47,7 +47,7 @@ const SiteConfig = {
     return this._verwPromise;
   },
 
-  // Liefert die zustaendige Verwaltung fuer einen STWEG.
+  // Liefert die zustaendige Verwaltung für einen STWEG.
   // Reihenfolge:
   //   1) Aktive Verwaltung mit passendem stweg
   //   2) Aktive Verwaltung mit stweg=null (uebergreifend)

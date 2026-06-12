@@ -34,7 +34,7 @@
           <div class="mt-3 pt-3 border-t">
             <h3 class="text-sm font-semibold mb-2">🔧 Test-Outbound (Sandbox)</h3>
             <div class="bg-amber-50 border border-amber-200 rounded p-2 text-xs text-amber-800 mb-2">
-              ⚠ <strong>Achtung Kosten:</strong> Outbound-Calls werden ueber peoplefone faktiriert. Bei Roaming-Nummern oder internationalen Zielen koennen Kosten entstehen.
+              ⚠ <strong>Achtung Kosten:</strong> Outbound-Calls werden über peoplefone faktiriert. Bei Roaming-Nummern oder internationalen Zielen können Kosten entstehen.
             </div>
             <form id="test-call-form" class="flex gap-2">
               <input type="tel" id="tc-phone" data-phone-format placeholder="+41 …" required class="flex-1 border rounded px-2 py-1.5 text-sm font-mono">
@@ -51,7 +51,7 @@
           <h2 class="text-lg font-semibold">⏰ Geschaeftszeiten</h2>
         </div>
         <div class="p-4">
-          <p class="text-xs text-gray-600 mb-3">Waehrend dieser Zeit klingelt die Ring-Group. Ausserhalb gehen Anrufe direkt auf KI-Voicemail. Zeit ist Europe/Zurich.</p>
+          <p class="text-xs text-gray-600 mb-3">Während dieser Zeit klingelt die Ring-Group. Ausserhalb gehen Anrufe direkt auf KI-Voicemail. Zeit ist Europe/Zurich.</p>
           <form id="hours-form" class="grid grid-cols-2 md:grid-cols-3 gap-3 items-end">
             <div>
               <label class="block text-sm font-medium text-gray-700">Von</label>
@@ -93,7 +93,7 @@
                 <th class="text-left py-2">Name</th>
                 <th class="text-left py-2 font-mono">Nummer</th>
                 <th class="text-left py-2">Typ</th>
-                <th class="text-left py-2">Gueltig bis</th>
+                <th class="text-left py-2">Gültig bis</th>
                 <th class="text-left py-2">Prio</th>
                 <th class="text-left py-2">Hinzugefuegt</th>
                 <th class="text-right py-2">Aktionen</th>
@@ -135,7 +135,7 @@
       <!-- Add/Edit Modal -->
       <div id="member-modal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
         <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
-          <h3 id="modal-title" class="text-lg font-bold mb-4">Mitglied hinzufuegen</h3>
+          <h3 id="modal-title" class="text-lg font-bold mb-4">Mitglied hinzufügen</h3>
           <form id="member-form" class="space-y-3">
             <input type="hidden" id="m-id">
             <div>
@@ -159,7 +159,7 @@
               </div>
             </div>
             <div id="valid-until-wrap" class="hidden">
-              <label class="block text-sm font-medium text-gray-700">Gueltig bis</label>
+              <label class="block text-sm font-medium text-gray-700">Gültig bis</label>
               <input type="datetime-local" id="m-valid-until" class="w-full border rounded px-2 py-1.5 text-sm">
             </div>
             <div>
@@ -254,7 +254,7 @@
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
-      result.textContent = `✓ Originate ausgeloest fuer ${d.dialed}`; result.className = 'text-xs mt-2 text-green-700';
+      result.textContent = `✓ Originate ausgeloest für ${d.dialed}`; result.className = 'text-xs mt-2 text-green-700';
       setTimeout(loadCalls, 5000);
     } catch (e) {
       result.textContent = '⚠ ' + e.message; result.className = 'text-xs mt-2 text-red-700';
@@ -319,7 +319,7 @@
           <td class="py-2 text-xs text-gray-500">${esc(m.added_by || '')}<br>${fmtDt(m.created_at)}</td>
           <td class="py-2 text-right">
             <button onclick='editMember(${JSON.stringify(m)})' class="text-xs text-blue-600 hover:underline">Bearbeiten</button>
-            <button onclick="delMember(${m.id}, '${esc(m.name)}')" class="text-xs text-red-600 hover:underline ml-2">Loeschen</button>
+            <button onclick="delMember(${m.id}, '${esc(m.name)}')" class="text-xs text-red-600 hover:underline ml-2">Löschen</button>
           </td>
         </tr>`;
       }).join('');
@@ -347,7 +347,7 @@
   }
 
   function openAddModal() {
-    document.getElementById('modal-title').textContent = 'Mitglied hinzufuegen';
+    document.getElementById('modal-title').textContent = 'Mitglied hinzufügen';
     document.getElementById('member-form').reset();
     document.getElementById('m-id').value = '';
     document.getElementById('valid-until-wrap').classList.add('hidden');
@@ -408,7 +408,7 @@
   }
 
   async function delMember(id, name) {
-    if (!confirm(`Mitglied "${name}" wirklich loeschen?`)) return;
+    if (!confirm(`Mitglied "${name}" wirklich löschen?`)) return;
     try {
       const r = await AuthentikAuth.apiFetch(`/api/pbx/ring-members/${id}`, { method: 'DELETE' });
       if (!r.ok) throw new Error('HTTP ' + r.status);

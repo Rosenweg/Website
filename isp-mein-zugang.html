@@ -19,9 +19,9 @@
 
     <div id="content" class="hidden space-y-6">
       <div>
-        <a href="/isp.html" class="text-sm text-blue-600 hover:underline">← ISP-Uebersicht</a>
+        <a href="/isp.html" class="text-sm text-blue-600 hover:underline">← ISP-Übersicht</a>
         <h1 class="text-2xl font-bold text-gray-900 mt-2">🔑 Mein Zugang</h1>
-        <p class="text-sm text-gray-600">VPN-Konten, eigene Netzwerk-Antraege und Reverse-Proxy-Routen.</p>
+        <p class="text-sm text-gray-600">VPN-Konten, eigene Netzwerk-Anträge und Reverse-Proxy-Routen.</p>
       </div>
 
       <!-- VPN-Konten -->
@@ -36,7 +36,7 @@
       <!-- Netzwerk-Anträge -->
       <section class="bg-white rounded-lg shadow p-5">
         <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <h2 class="text-lg font-semibold">🌐 Meine Netzwerk-Antraege</h2>
+          <h2 class="text-lg font-semibold">🌐 Meine Netzwerk-Anträge</h2>
           <button onclick="openVlanModal()" class="text-sm bg-blue-600 text-white px-3 py-1.5 rounded">+ VLAN beantragen</button>
         </div>
         <div id="vlan-list" class="space-y-2"></div>
@@ -53,7 +53,7 @@
         </div>
         <div class="bg-gray-50 border border-gray-200 rounded p-3 mb-3 text-xs text-gray-700 space-y-1">
           <p><strong>Reverse-Proxy</strong> = wir holen den Inhalt von deinem Server (intern oder extern) und liefern ihn unter deiner Wunsch-Subdomain aus. TLS, Auth und Caching erledigen wir am Edge. Der Backend-Server muss nicht oeffentlich erreichbar sein.</p>
-          <p><strong>Umleitung</strong> = Browser bekommt nur einen 301/302 zu einer anderen URL. Schnell fuer Marketing-Links oder Domain-Umzug. Backend bleibt direkt vom User erreichbar.</p>
+          <p><strong>Umleitung</strong> = Browser bekommt nur einen 301/302 zu einer anderen URL. Schnell für Marketing-Links oder Domain-Umzug. Backend bleibt direkt vom User erreichbar.</p>
         </div>
         <div id="rp-list" class="space-y-2"></div>
       </section>
@@ -62,19 +62,19 @@
       <section class="bg-white rounded-lg shadow p-5">
         <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
           <h2 class="text-lg font-semibold">✉ Mail-Relays</h2>
-          <button onclick="openRelayModal()" class="text-sm bg-blue-600 text-white px-3 py-1.5 rounded">+ Domain hinzufuegen</button>
+          <button onclick="openRelayModal()" class="text-sm bg-blue-600 text-white px-3 py-1.5 rounded">+ Domain hinzufügen</button>
         </div>
         <p class="text-xs text-gray-500 mb-2">Eigene Mail-Domain durch PMG filtern lassen und an deinen eigenen Mailserver weiterleiten. MX auf <code class="bg-gray-100 px-1 rounded">pmg.rosenweg4303.ch</code> setzen.</p>
         <div id="relay-list" class="space-y-2"></div>
       </section>
 
-      <!-- Mailboxen (nur fuer Rosenweg-managed Domains) -->
+      <!-- Mailboxen (nur für Rosenweg-managed Domains) -->
       <section class="bg-white rounded-lg shadow p-5">
         <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
           <h2 class="text-lg font-semibold">📬 Meine Mailboxen</h2>
           <button onclick="openMailboxModal()" class="text-sm bg-emerald-600 text-white px-3 py-1.5 rounded">+ Mailbox beantragen</button>
         </div>
-        <p class="text-xs text-gray-500 mb-2">Mailboxen fuer Domains die Rosenweg verwaltet (z.B. <code class="bg-gray-100 px-1 rounded">rosenweg9.ch</code>). Standardantrag (1024 MB, ohne Notiz) wird automatisch genehmigt — Initial-PW erscheint direkt unten.</p>
+        <p class="text-xs text-gray-500 mb-2">Mailboxen für Domains die Rosenweg verwaltet (z.B. <code class="bg-gray-100 px-1 rounded">rosenweg9.ch</code>). Standardantrag (1024 MB, ohne Notiz) wird automatisch genehmigt — Initial-PW erscheint direkt unten.</p>
         <div class="flex flex-wrap gap-2 mb-3 text-xs">
           <a href="https://webmail.rosenweg9.ch" target="_blank" rel="noopener" class="inline-flex items-center gap-1 bg-blue-50 hover:bg-blue-100 text-blue-800 px-2 py-1 rounded border border-blue-200">📨 Webmail</a>
           <a href="https://quarantine.rosenweg9.ch/quarantine" target="_blank" rel="noopener" class="inline-flex items-center gap-1 bg-amber-50 hover:bg-amber-100 text-amber-800 px-2 py-1 rounded border border-amber-200" title="Mails die als Spam einbehalten wurden ansehen / freigeben (Login-Link kommt per Mail)">🛡 Spam-Quarantaene</a>
@@ -117,7 +117,7 @@
           <div class="flex gap-1">
             <button onclick="showVpnConfig(${v.id})" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">.conf</button>
             <button onclick="showVpnQr(${v.id})" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">QR</button>
-            <button onclick="delVpn(${v.id})" class="text-xs text-red-600 hover:underline px-2">Loeschen</button>
+            <button onclick="delVpn(${v.id})" class="text-xs text-red-600 hover:underline px-2">Löschen</button>
           </div>
         </div>
         ${v.assigned_ip ? `<div class="text-xs"><span class="text-gray-500">IP:</span> <span class="font-mono">${esc(v.assigned_ip)}</span></div>` : ''}
@@ -153,9 +153,9 @@
             <button onclick="navigator.clipboard.writeText(\`${cfg.replace(/`/g, '\\`')}\`); this.textContent='Kopiert!'" class="mt-1 text-xs text-blue-600 hover:underline">In Zwischenablage</button>
           </div>
           <div class="text-center">
-            <label class="block text-xs text-gray-600 mb-1">QR-Code fuer Mobile-App</label>
+            <label class="block text-xs text-gray-600 mb-1">QR-Code für Mobile-App</label>
             <img id="${qrImgId}" alt="QR" class="inline-block border rounded max-w-full" style="min-width:160px;min-height:160px;background:#f9fafb">
-            <p class="text-xs text-gray-500 mt-2">Im WireGuard-App: "Aus QR-Code hinzufuegen"</p>
+            <p class="text-xs text-gray-500 mt-2">Im WireGuard-App: "Aus QR-Code hinzufügen"</p>
           </div>
         </div>
         <div class="flex justify-end mt-4">
@@ -202,7 +202,7 @@
     const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5">
         <h2 class="font-bold mb-3">Neues WireGuard-Konto</h2>
-        <p class="text-xs text-gray-500 mb-3">Konto wird automatisch generiert (Server-seitig Private-Key + IP). Public-Key nur fuer eigenes Geraet ausfuellen, sonst leer lassen.</p>
+        <p class="text-xs text-gray-500 mb-3">Konto wird automatisch generiert (Server-seitig Private-Key + IP). Public-Key nur für eigenes Gerät ausfuellen, sonst leer lassen.</p>
         <div class="space-y-2 text-sm">
           ${optHtml}
           <div><label class="block text-xs text-gray-600">Public-Key <span class="text-gray-400">(optional)</span></label><textarea id="v-pub" rows="2" class="w-full border rounded px-2 py-1 font-mono text-xs" placeholder="z.B. xTI...= (sonst leer)"></textarea></div>
@@ -234,7 +234,7 @@
     } catch (e) { alert('Fehler: ' + e.message); }
   }
   async function delVpn(id) {
-    if (!confirm('VPN-Konto loeschen?')) return;
+    if (!confirm('VPN-Konto löschen?')) return;
     await AuthentikAuth.apiFetch('/api/isp/vpn-accounts/' + id, { method: 'DELETE' });
     await loadVpn();
   }
@@ -248,7 +248,7 @@
   }
   function renderVlan() {
     const wrap = document.getElementById('vlan-list');
-    if (vlanRequests.length === 0) { wrap.innerHTML = '<p class="text-gray-400 italic text-sm">Keine Antraege.</p>'; return; }
+    if (vlanRequests.length === 0) { wrap.innerHTML = '<p class="text-gray-400 italic text-sm">Keine Anträge.</p>'; return; }
     wrap.innerHTML = vlanRequests.map(v => {
       const mits = Array.isArray(v.mitnutzer_emails) ? v.mitnutzer_emails : [];
       const sharedBadge = v.is_mitnutzer && !v.is_owner
@@ -279,7 +279,7 @@
     const v = vlanRequests.find(x => x.id === id);
     if (!v) return;
     const current = (v.mitnutzer_emails || []).join(', ');
-    const next = prompt('Mitnutzer-Emails (kommagetrennt) — sehen das VLAN und koennen es auch zurueckziehen:', current);
+    const next = prompt('Mitnutzer-Emails (kommagetrennt) — sehen das VLAN und können es auch zurückziehen:', current);
     if (next === null) return;
     const list = next.split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
     const r = await AuthentikAuth.apiFetch('/api/isp/vlan-requests/' + id, {
@@ -325,27 +325,27 @@
             <label class="block text-xs font-medium text-gray-700">Art *</label>
             <select id="vl-kind" class="w-full border rounded px-2 py-1" onchange="vlKindChange()">
               <option value="vlan">VLAN-Tag — du machst Router/DHCP selbst</option>
-              <option value="subnet">Subnet mit Router+DHCP — wir machen das fuer dich</option>
+              <option value="subnet">Subnet mit Router+DHCP — wir machen das für dich</option>
             </select>
-            <p class="text-xs text-gray-500 mt-0.5">VLAN-Tag = nur der Tag, du verwaltest Router/DHCP. Subnet = wir betreiben einen Router-LXC fuer dich mit DHCP+NAT, du steckst nur Geraete rein.</p>
+            <p class="text-xs text-gray-500 mt-0.5">VLAN-Tag = nur der Tag, du verwaltest Router/DHCP. Subnet = wir betreiben einen Router-LXC für dich mit DHCP+NAT, du steckst nur Geräte rein.</p>
           </div>
           <div>
-            <label class="flex items-center gap-2 text-sm"><input id="vl-wlan" type="checkbox" class="rounded"> WLAN-Passwort fuer dieses Netz</label>
-            <p class="text-xs text-gray-500 mt-0.5 ml-6">An: ein PPSK wird im 'Rosenweg'-WLAN angelegt, Geraete die's tippen landen in deinem Netz. Aus: nur Kabel/Switch-Port.</p>
+            <label class="flex items-center gap-2 text-sm"><input id="vl-wlan" type="checkbox" class="rounded"> WLAN-Passwort für dieses Netz</label>
+            <p class="text-xs text-gray-500 mt-0.5 ml-6">An: ein PPSK wird im 'Rosenweg'-WLAN angelegt, Geräte die's tippen landen in deinem Netz. Aus: nur Kabel/Switch-Port.</p>
           </div>
           <div><label class="block text-xs font-medium text-gray-700">Wunsch-Name</label><input id="vl-name" placeholder="z.B. Smart-Home" class="w-full border rounded px-2 py-1"></div>
-          <div><label class="block text-xs font-medium text-gray-700">Zweck *</label><textarea id="vl-zweck" rows="2" placeholder="Wofuer wird das Netz gebraucht?" class="w-full border rounded px-2 py-1"></textarea></div>
+          <div><label class="block text-xs font-medium text-gray-700">Zweck *</label><textarea id="vl-zweck" rows="2" placeholder="Wofür wird das Netz gebraucht?" class="w-full border rounded px-2 py-1"></textarea></div>
           <div class="grid grid-cols-2 gap-2">
             <div><label class="block text-xs font-medium text-gray-700">Groesse</label><select id="vl-grosse" class="w-full border rounded px-2 py-1">
               <option value="">—</option><option value="/29">/29 (6 IPs)</option><option value="/28">/28 (14 IPs)</option><option value="/27">/27 (30 IPs)</option><option value="/24">/24 (254 IPs)</option>
             </select></div>
-            <div><label class="block text-xs font-medium text-gray-700">Geraete-Anzahl</label><input id="vl-anz" type="number" class="w-full border rounded px-2 py-1"></div>
+            <div><label class="block text-xs font-medium text-gray-700">Geräte-Anzahl</label><input id="vl-anz" type="number" class="w-full border rounded px-2 py-1"></div>
           </div>
           <div><label class="flex items-center gap-2 text-sm"><input id="vl-inet" type="checkbox" checked class="rounded"> Internet-Zugriff</label></div>
           <div>
             <label class="block text-xs font-medium text-gray-700">Mitnutzer (optional)</label>
             <input id="vl-mitnutzer" placeholder="bewohner1@…, bewohner2@…" class="w-full border rounded px-2 py-1 font-mono text-xs">
-            <p class="text-xs text-gray-500 mt-0.5">Kommagetrennte Emails. Mitnutzer sehen das Netz und koennen's zurueckziehen.</p>
+            <p class="text-xs text-gray-500 mt-0.5">Kommagetrennte Emails. Mitnutzer sehen das Netz und können's zurückziehen.</p>
           </div>
         </div>
         <div class="flex justify-end gap-2 mt-3">
@@ -356,7 +356,7 @@
     document.body.insertAdjacentHTML('beforeend', html);
   }
   function vlKindChange() {
-    // Heute nur Hinweistext — kann spaeter konditionale Felder ein/ausblenden.
+    // Heute nur Hinweistext — kann später konditionale Felder ein/ausblenden.
   }
   async function saveVlan() {
     // Aus dem aktuell sichtbaren Modal lesen, nicht global.
@@ -388,7 +388,7 @@
     } catch (e) { alert('Fehler: ' + e.message); }
   }
   async function delVlan(id) {
-    if (!confirm('Antrag zurueckziehen?')) return;
+    if (!confirm('Antrag zurückziehen?')) return;
     await AuthentikAuth.apiFetch('/api/isp/vlan-requests/' + id, { method: 'DELETE' });
     await loadVlan();
   }
@@ -412,8 +412,8 @@
     }
     const statusBadge = (s) => ({
       approved: '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded ml-1">aktiv</span>',
-      pending_dns: '<span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded ml-1">DNS prueft</span>',
-      pending_admin: '<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded ml-1">Admin-Pruefung</span>',
+      pending_dns: '<span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded ml-1">DNS prüft</span>',
+      pending_admin: '<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded ml-1">Admin-Prüfung</span>',
       rejected: '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-1">abgelehnt</span>',
     })[s] || '';
     const rpRows = rpRoutes.map(r => `
@@ -428,8 +428,8 @@
             ${r.auth_required ? '<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded ml-1">auth</span>' : ''}
           </div>
           <div class="flex gap-1">
-            ${r.approval_status === 'pending_dns' ? `<button onclick="recheckRp(${r.id})" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">DNS pruefen</button>` : ''}
-            <button onclick="delRp(${r.id})" class="text-xs text-red-600 hover:underline">Loeschen</button>
+            ${r.approval_status === 'pending_dns' ? `<button onclick="recheckRp(${r.id})" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">DNS prüfen</button>` : ''}
+            <button onclick="delRp(${r.id})" class="text-xs text-red-600 hover:underline">Löschen</button>
           </div>
         </div>
         <div class="text-xs text-gray-600">→ <span class="font-mono">${esc(r.backend_url)}</span></div>
@@ -445,7 +445,7 @@
             <span class="font-mono text-sm">${esc(r.target_url)}</span>
             <span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded ml-2">${r.http_code}</span>
           </div>
-          <button onclick="delRedir(${r.id})" class="text-xs text-red-600 hover:underline">Loeschen</button>
+          <button onclick="delRedir(${r.id})" class="text-xs text-red-600 hover:underline">Löschen</button>
         </div>
       </div>`).join('');
     wrap.innerHTML = rpRows + redirRows;
@@ -471,13 +471,13 @@
           ${dnsInfo.public_ipv4 ? `<p><strong>A:</strong> <code class="bg-white px-1 rounded">${dnsInfo.public_ipv4}</code></p>` : ''}
           ${dnsInfo.public_ipv6 ? `<p><strong>AAAA:</strong> <code class="bg-white px-1 rounded">${dnsInfo.public_ipv6}</code></p>` : ''}
           ${dnsInfo.cname_target ? `<p><strong>CNAME (Alternative):</strong> <code class="bg-white px-1 rounded">${dnsInfo.cname_target}</code></p>` : ''}
-          <p class="text-blue-700 pt-1">Sobald DNS gesetzt ist, prueft das System automatisch alle 5 Min. Bei Sub-Domains die "rosenweg"/"r&lt;Nummer&gt;." enthalten ist Admin-Pruefung Pflicht.</p>
+          <p class="text-blue-700 pt-1">Sobald DNS gesetzt ist, prüft das System automatisch alle 5 Min. Bei Sub-Domains die "rosenweg"/"r&lt;Nummer&gt;." enthalten ist Admin-Prüfung Pflicht.</p>
         </div>
         <div class="space-y-3 text-sm">
           <div>
             <label class="block text-xs font-medium text-gray-700">Hostname *</label>
             <input id="r-host" placeholder="cloud.dein-name.rosenweg4303.ch" class="w-full border rounded px-2 py-1">
-            <p class="text-xs text-gray-500 mt-0.5">Die Adresse die der User in den Browser tippt. Wenn die Subdomain "rosenweg" oder "r&lt;Nr&gt;." enthaelt geht's in Admin-Pruefung.</p>
+            <p class="text-xs text-gray-500 mt-0.5">Die Adresse die der User in den Browser tippt. Wenn die Subdomain "rosenweg" oder "r&lt;Nr&gt;." enthaelt geht's in Admin-Prüfung.</p>
           </div>
           <div>
             <label class="block text-xs font-medium text-gray-700">Backend-URL *</label>
@@ -520,7 +520,7 @@
     } catch (e) { alert('Fehler: ' + e.message); }
   }
   async function delRp(id) {
-    if (!confirm('Route loeschen?')) return;
+    if (!confirm('Route löschen?')) return;
     await AuthentikAuth.apiFetch('/api/isp/reverse-proxy/' + id, { method: 'DELETE' });
     await loadRp();
   }
@@ -537,7 +537,7 @@
           <div>
             <label class="block text-xs font-medium text-gray-700">Source-Host *</label>
             <input id="rd-host" placeholder="alt.rosenweg4303.ch" class="w-full border rounded px-2 py-1">
-            <p class="text-xs text-gray-500 mt-0.5">Adresse die User aufruft. Bei Subdomains mit "rosenweg"/"r&lt;Nr&gt;." geht's in Admin-Pruefung.</p>
+            <p class="text-xs text-gray-500 mt-0.5">Adresse die User aufruft. Bei Subdomains mit "rosenweg"/"r&lt;Nr&gt;." geht's in Admin-Prüfung.</p>
           </div>
           <div>
             <label class="block text-xs font-medium text-gray-700">Source-Path</label>
@@ -558,7 +558,7 @@
                 <option value="307">307 (POST-safe temp)</option>
                 <option value="308">308 (POST-safe perm)</option>
               </select>
-              <p class="text-xs text-gray-500 mt-0.5">301/308 wird vom Browser gecached. 302/307 fuer Tests.</p>
+              <p class="text-xs text-gray-500 mt-0.5">301/308 wird vom Browser gecached. 302/307 für Tests.</p>
             </div>
             <div>
               <label class="flex items-center gap-2 text-xs mt-4"><input id="rd-preserve" type="checkbox" class="rounded"> Path erhalten</label>
@@ -590,7 +590,7 @@
     } catch (e) { alert('Fehler: ' + e.message); }
   }
   async function delRedir(id) {
-    if (!confirm('Umleitung loeschen?')) return;
+    if (!confirm('Umleitung löschen?')) return;
     await AuthentikAuth.apiFetch('/api/isp/redirects/' + id, { method: 'DELETE' });
     await loadRp();
   }
@@ -607,8 +607,8 @@
     if (mailRelays.length === 0) { wrap.innerHTML = '<p class="text-gray-400 italic text-sm">Keine Mail-Relays.</p>'; return; }
     const sb = s => ({
       approved: '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded ml-1">aktiv</span>',
-      pending_dns: '<span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded ml-1">MX prueft</span>',
-      pending_admin: '<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded ml-1">Admin-Pruefung</span>',
+      pending_dns: '<span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded ml-1">MX prüft</span>',
+      pending_admin: '<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded ml-1">Admin-Prüfung</span>',
       rejected: '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-1">abgelehnt</span>',
     })[s] || '';
     wrap.innerHTML = mailRelays.map(m => {
@@ -642,8 +642,8 @@
             ${typeof m.outbound_this_month === 'number' && m.outbound_via_smarthost ? `<span class="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded ml-1" title="Outbound diesen Monat">📤 ${m.outbound_this_month}</span>` : ''}
           </div>
           <div class="flex gap-1">
-            ${m.approval_status === 'pending_dns' ? `<button onclick="recheckRelay(${m.id})" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">MX pruefen</button>` : ''}
-            <button onclick="delRelay(${m.id})" class="text-xs text-red-600 hover:underline">Loeschen</button>
+            ${m.approval_status === 'pending_dns' ? `<button onclick="recheckRelay(${m.id})" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">MX prüfen</button>` : ''}
+            <button onclick="delRelay(${m.id})" class="text-xs text-red-600 hover:underline">Löschen</button>
           </div>
         </div>
         <div class="text-xs text-gray-600">→ <span class="font-mono">${esc(m.target_host)}:${m.target_port || 25}</span>${m.target_use_mx ? ' <span class="bg-blue-100 text-blue-700 px-1 rounded">MX-Lookup</span>' : ''}</div>
@@ -667,15 +667,15 @@
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5 max-h-[90vh] overflow-y-auto">
         <h2 class="font-bold mb-3">Mail-Relay erfassen</h2>
         <div class="bg-blue-50 border border-blue-200 rounded p-3 mb-3 text-xs space-y-1">
-          <p class="font-semibold text-blue-900">📋 DNS-Konfig fuer deine Domain:</p>
+          <p class="font-semibold text-blue-900">📋 DNS-Konfig für deine Domain:</p>
           <p><strong>MX 10:</strong> <code class="bg-white px-1 rounded">${esc(pmgMx)}.</code></p>
-          <p class="text-blue-700 pt-1">PMG nimmt Mails an, filtert (Spam/Antivirus) und reicht weiter an dein <code>Ziel-Host</code>. Pruefung alle 5 Min.</p>
+          <p class="text-blue-700 pt-1">PMG nimmt Mails an, filtert (Spam/Antivirus) und reicht weiter an dein <code>Ziel-Host</code>. Prüfung alle 5 Min.</p>
         </div>
         <div class="space-y-3 text-sm">
           <div>
             <label class="block text-xs font-medium text-gray-700">Domain *</label>
             <input id="rel-dom" placeholder="meinedomain.ch" class="w-full border rounded px-2 py-1">
-            <p class="text-xs text-gray-500 mt-0.5">Die Domain fuer die wir Mails empfangen sollen. Setze den MX-Record dieser Domain auf <code class="bg-gray-100 px-1 rounded">${esc(pmgMx)}</code>.</p>
+            <p class="text-xs text-gray-500 mt-0.5">Die Domain für die wir Mails empfangen sollen. Setze den MX-Record dieser Domain auf <code class="bg-gray-100 px-1 rounded">${esc(pmgMx)}</code>.</p>
           </div>
           <div class="grid grid-cols-3 gap-2">
             <div class="col-span-2">
@@ -696,7 +696,7 @@
           <div>
             <label class="block text-xs font-medium text-gray-700">DKIM-Selector <span class="text-gray-400 font-normal">(optional)</span></label>
             <input id="rel-dkim" placeholder="default" class="w-full border rounded px-2 py-1">
-            <p class="text-xs text-gray-500 mt-0.5">Wenn du DKIM-Signing willst: hier Selector + Private-Key in den naechsten Schritt. Leer = kein DKIM-Sign.</p>
+            <p class="text-xs text-gray-500 mt-0.5">Wenn du DKIM-Signing willst: hier Selector + Private-Key in den nächsten Schritt. Leer = kein DKIM-Sign.</p>
           </div>
 
           <details class="border rounded p-2 bg-gray-50">
@@ -756,7 +756,7 @@
     } catch (e) { alert('Fehler: ' + e.message); }
   }
   async function delRelay(id) {
-    if (!confirm('Mail-Relay loeschen?')) return;
+    if (!confirm('Mail-Relay löschen?')) return;
     await AuthentikAuth.apiFetch('/api/isp/mail-relays/' + id, { method: 'DELETE' });
     await loadRelays();
   }
@@ -774,7 +774,7 @@
     if (mailboxRequests.length === 0) { wrap.innerHTML = '<p class="text-gray-400 italic text-sm">Keine Mailboxen.</p>'; return; }
     const sb = s => ({
       approved: '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded ml-1">aktiv</span>',
-      pending:  '<span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded ml-1">in Pruefung</span>',
+      pending:  '<span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded ml-1">in Prüfung</span>',
       rejected: '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-1">abgelehnt</span>',
       deleted:  '<span class="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded ml-1">geloescht</span>',
     })[s] || '';
@@ -864,11 +864,11 @@
     } catch (e) { alert('Fehler: ' + e.message); }
   }
   async function resetMailboxPw(id) {
-    if (!confirm('Passwort zuruecksetzen? Du bekommst ein neues Initial-Passwort.')) return;
+    if (!confirm('Passwort zurücksetzen? Du bekommst ein neues Initial-Passwort.')) return;
     const r = await AuthentikAuth.apiFetch('/api/isp/mailbox-requests/' + id + '/reset-password', { method: 'POST' });
     if (!r.ok) { alert('Fehler: ' + await r.text()); return; }
     const d = await r.json();
-    if (d.new_password) alert(`Dein neues Initial-Passwort steht unter "Meine Mailboxen" — bitte notieren und beim ersten Webmail-Login aendern.`);
+    if (d.new_password) alert(`Dein neues Initial-Passwort steht unter "Meine Mailboxen" — bitte notieren und beim ersten Webmail-Login ändern.`);
     await loadMailboxes();
   }
   async function clearMailboxPw(id) {

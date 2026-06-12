@@ -21,7 +21,7 @@
       <h1 class="text-2xl font-bold text-gray-900 mb-1">🗑 Geplante Konto-Loeschungen</h1>
       <p class="text-sm text-gray-600 mb-6">
         Authentik-Accounts werden 30 Tage nach Entfernen aus den Wohnungs-Kontakten geloescht.
-        Hier kannst du Loeschungen vorzeitig stoppen (cancellen) oder den Timer zuruecksetzen.
+        Hier kannst du Loeschungen vorzeitig stoppen (cancellen) oder den Timer zurücksetzen.
       </p>
 
       <div class="bg-white rounded-lg shadow overflow-hidden">
@@ -52,7 +52,7 @@
         <ul class="list-disc list-inside mt-2 space-y-1 text-xs">
           <li><strong>Cancellen:</strong> Loeschung wird gestoppt. Eintrag bleibt in der Liste (cancelled=true), Authentik-Account bleibt aktiv.</li>
           <li><strong>Timer +30 Tage:</strong> Reaktiviert die Loeschung, schiebt das Datum 30 Tage in die Zukunft. Reminder wird neu gesendet.</li>
-          <li><strong>Entfernen:</strong> Loescht den Eintrag aus der Liste komplett — kein automatischer Job mehr fuer diesen User.</li>
+          <li><strong>Entfernen:</strong> Loescht den Eintrag aus der Liste komplett — kein automatischer Job mehr für diesen User.</li>
         </ul>
       </div>
     </div>
@@ -142,7 +142,7 @@
   }
 
   async function removeDel(id, email) {
-    if (!confirm(`Eintrag fuer ${email} aus der Liste entfernen?\nBeachte: der Authentik-Account wird NICHT geloescht, aber kein automatischer Job mehr ueberwacht ihn.`)) return;
+    if (!confirm(`Eintrag für ${email} aus der Liste entfernen?\nBeachte: der Authentik-Account wird NICHT geloescht, aber kein automatischer Job mehr ueberwacht ihn.`)) return;
     try {
       const r = await AuthentikAuth.apiFetch(`/api/admin/pending-deletions/${id}`, { method: 'DELETE' });
       if (!r.ok) throw new Error(await r.text());
@@ -154,12 +154,12 @@
     try {
       const r = await AuthentikAuth.apiFetch(`/api/admin/mail-chain?source_contains=${encodeURIComponent('authentik_pending_deletions #' + id)}`);
       const { chain } = await r.json();
-      if (!chain.length) { alert('Keine Mail-Eintraege fuer diesen Loesch-Vermerk gefunden.'); return; }
+      if (!chain.length) { alert('Keine Mail-Eintraege für diesen Loesch-Vermerk gefunden.'); return; }
       const html = `
         <div class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onclick="this.remove()">
           <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[80vh] overflow-y-auto">
             <div class="p-4 border-b flex justify-between items-center">
-              <h3 class="font-bold">Mail-Chain fuer ${esc(email)}</h3>
+              <h3 class="font-bold">Mail-Chain für ${esc(email)}</h3>
               <button onclick="this.closest('.fixed').remove()" class="text-gray-400 hover:text-gray-700">✕</button>
             </div>
             <div class="p-4 space-y-2 text-sm">

@@ -124,7 +124,7 @@ const AuthentikAuth = {
     //   a) API antwortet direkt mit 401 (sauberer Fall)
     //   b) fetch() folgt einem 302 zur Authentik-Login-Seite → resp.url
     //      zeigt dann auf Authentik. resp.redirected ist true.
-    // NUR diese beiden Faelle triggern logout, NICHT pauschal HTML.
+    // NUR diese beiden Fälle triggern logout, NICHT pauschal HTML.
     const isAuthRedirect = resp.redirected && /authentik|\/application\/o\//i.test(resp.url || '');
     if (resp.status === 401 || isAuthRedirect) {
       this.logout();

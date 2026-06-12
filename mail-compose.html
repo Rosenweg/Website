@@ -34,7 +34,7 @@
         <div class="grid grid-cols-3 gap-3 items-end">
           <label class="block col-span-2">
             <span class="text-xs text-gray-600">Empfänger aus Stammdaten (optional)</span>
-            <select id="f-empfaenger" class="mt-1 block w-full border rounded px-2 py-1.5">
+            <select id="f-empfänger" class="mt-1 block w-full border rounded px-2 py-1.5">
               <option value="">— manuell unten eingeben —</option>
             </select>
           </label>
@@ -51,7 +51,7 @@
         </div>
         <label class="block">
           <span class="text-xs text-gray-600">An (To) *</span>
-          <input type="text" id="f-to" required class="mt-1 block w-full border rounded px-2 py-1.5" placeholder="empfaenger@beispiel.ch">
+          <input type="text" id="f-to" required class="mt-1 block w-full border rounded px-2 py-1.5" placeholder="empfänger@beispiel.ch">
         </label>
         <label class="block">
           <span class="text-xs text-gray-600">CC</span>
@@ -105,7 +105,7 @@
     document.getElementById('content').classList.remove('hidden');
     await loadEmpfaenger();
     document.getElementById('f-stweg').addEventListener('change', loadEmpfaenger);
-    document.getElementById('f-empfaenger').addEventListener('change', applyEmpfaenger);
+    document.getElementById('f-empfänger').addEventListener('change', applyEmpfaenger);
     document.getElementById('f-files').addEventListener('change', onFiles);
     document.getElementById('form').addEventListener('submit', send);
   });
@@ -114,18 +114,18 @@
     try {
       const stweg = document.getElementById('f-stweg').value;
       const q = stweg ? '?stweg=' + stweg : '';
-      const r = await AuthentikAuth.apiFetch('/api/mail-empfaenger' + q);
+      const r = await AuthentikAuth.apiFetch('/api/mail-empfänger' + q);
       if (!r.ok) return;
       const data = await r.json();
-      EMPFAENGER = (data.empfaenger || []).filter(e => e.aktiv);
-      const sel = document.getElementById('f-empfaenger');
+      EMPFAENGER = (data.empfänger || []).filter(e => e.aktiv);
+      const sel = document.getElementById('f-empfänger');
       sel.innerHTML = '<option value="">— manuell unten eingeben —</option>' +
         EMPFAENGER.map(e => `<option value="${e.id}">${esc(KAT_LABEL[e.kategorie] || e.kategorie)} · ${esc(e.name)}${e.stweg ? ' (STWEG '+e.stweg+')' : ''}</option>`).join('');
     } catch {}
   }
 
   function applyEmpfaenger() {
-    const id = parseInt(document.getElementById('f-empfaenger').value, 10);
+    const id = parseInt(document.getElementById('f-empfänger').value, 10);
     if (!id) return;
     const e = EMPFAENGER.find(x => x.id === id);
     if (!e) return;
@@ -170,7 +170,7 @@
         if (f.size > 20 * 1024 * 1024) throw new Error(`Anhang ${f.name} ist > 20 MB`);
         attachments.push({ filename: f.name, content_base64: await fileToBase64(f) });
       }
-      const empfId = document.getElementById('f-empfaenger').value;
+      const empfId = document.getElementById('f-empfänger').value;
       const payload = {
         empfaenger_id: empfId ? parseInt(empfId, 10) : null,
         mail_to: document.getElementById('f-to').value.trim(),

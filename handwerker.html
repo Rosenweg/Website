@@ -198,11 +198,11 @@
                     <p id="zuweisungen-empty" class="text-xs text-gray-400 py-2">Keine Notfall-Zuordnungen.</p>
                 </div>
 
-                <!-- Laufende Vertraege -->
-                <div id="vertraege-section" class="hidden sm:col-span-2 border-t pt-3 mt-1">
+                <!-- Laufende Verträge -->
+                <div id="verträge-section" class="hidden sm:col-span-2 border-t pt-3 mt-1">
                     <div class="flex items-center justify-between mb-2">
                         <h3 class="text-sm font-semibold text-gray-700">Laufende Verträge / wiederkehrende Arbeiten</h3>
-                        <span id="vertraege-count" class="text-xs text-gray-400"></span>
+                        <span id="verträge-count" class="text-xs text-gray-400"></span>
                     </div>
                     <div id="vertrag-form-wrap" class="hidden bg-gray-50 border rounded p-3 mb-3">
                         <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 text-sm">
@@ -284,7 +284,7 @@
                         <div id="vertrag-error" class="hidden text-xs text-red-600 mt-1"></div>
                     </div>
                     <button id="vertrag-add-btn" type="button" class="hidden text-xs px-3 py-1 mb-3 bg-blue-600 text-white rounded hover:bg-blue-700">+ Neuer Vertrag</button>
-                    <div id="vertraege-list" class="text-sm"></div>
+                    <div id="verträge-list" class="text-sm"></div>
                 </div>
                 <label class="block text-sm sm:col-span-2">
                     <span class="text-gray-700">Adresse</span>
@@ -330,10 +330,10 @@
             </form>
 
             <!-- Auftragshistorie (nur bei Edit sichtbar) -->
-            <div id="auftraege-section" class="hidden border-t px-5 py-4 bg-gray-50/50">
+            <div id="aufträge-section" class="hidden border-t px-5 py-4 bg-gray-50/50">
                 <div class="flex items-center justify-between mb-3">
                     <h3 class="text-sm font-semibold text-gray-700">Auftragshistorie</h3>
-                    <span id="auftraege-count" class="text-xs text-gray-400"></span>
+                    <span id="aufträge-count" class="text-xs text-gray-400"></span>
                 </div>
                 <div id="auftrag-form-wrap" class="hidden bg-white border rounded p-3 mb-3">
                     <div class="grid grid-cols-1 sm:grid-cols-6 gap-2 text-sm">
@@ -376,7 +376,7 @@
                     <div id="auftrag-error" class="hidden text-xs text-red-600 mt-1"></div>
                 </div>
                 <button id="auftrag-add-btn" type="button" class="hidden text-xs px-3 py-1 mb-3 bg-blue-600 text-white rounded hover:bg-blue-700">+ Neuer Auftrag</button>
-                <div id="auftraege-list" class="text-xs"></div>
+                <div id="aufträge-list" class="text-xs"></div>
             </div>
         </div>
     </div>
@@ -593,9 +593,9 @@
             $('archived-row').classList.remove('hidden');
             $('modal-delete').classList.toggle('hidden', !!h.archiviert);
             $('modal-delete').onclick = () => archiveEntry(h.id);
-            $('auftraege-section').classList.remove('hidden');
+            $('aufträge-section').classList.remove('hidden');
             $('auftrag-add-btn').classList.toggle('hidden', !canWrite);
-            $('vertraege-section').classList.remove('hidden');
+            $('verträge-section').classList.remove('hidden');
             $('vertrag-add-btn').classList.toggle('hidden', !canWrite);
             loadAuftraege(h.id);
             loadVertraege(h.id);
@@ -612,8 +612,8 @@
         } else {
             $('archived-row').classList.add('hidden');
             $('modal-delete').classList.add('hidden');
-            $('auftraege-section').classList.add('hidden');
-            $('vertraege-section').classList.add('hidden');
+            $('aufträge-section').classList.add('hidden');
+            $('verträge-section').classList.add('hidden');
             currentAuftraege = [];
             currentVertraege = [];
         }
@@ -983,14 +983,14 @@
         }
     }
 
-    // ─── Laufende Vertraege ─────────────────────────────────────
+    // ─── Laufende Verträge ─────────────────────────────────────
     async function loadVertraege(handwerkerId) {
-        const list = $('vertraege-list');
+        const list = $('verträge-list');
         list.innerHTML = '<div class="text-gray-400 py-2">Lade…</div>';
         try {
-            const r = await AuthentikAuth.apiFetch(`/api/handwerker/${handwerkerId}/vertraege`);
+            const r = await AuthentikAuth.apiFetch(`/api/handwerker/${handwerkerId}/verträge`);
             if (!r.ok) throw new Error('HTTP ' + r.status);
-            currentVertraege = (await r.json()).vertraege || [];
+            currentVertraege = (await r.json()).verträge || [];
             renderVertraege();
             fillAuftragVertragDropdown();
         } catch (err) {
@@ -999,8 +999,8 @@
     }
 
     function renderVertraege() {
-        const list = $('vertraege-list');
-        $('vertraege-count').textContent = currentVertraege.length === 0
+        const list = $('verträge-list');
+        $('verträge-count').textContent = currentVertraege.length === 0
             ? 'Noch keine Verträge'
             : `${currentVertraege.length} Vertrag${currentVertraege.length === 1 ? '' : 'e'}`;
         if (currentVertraege.length === 0) {
@@ -1113,8 +1113,8 @@
         }
         const vid = $('vertrag-id').value;
         const url = vid
-            ? `/api/handwerker/${currentHandwerkerId}/vertraege/${vid}`
-            : `/api/handwerker/${currentHandwerkerId}/vertraege`;
+            ? `/api/handwerker/${currentHandwerkerId}/verträge/${vid}`
+            : `/api/handwerker/${currentHandwerkerId}/verträge`;
         const method = vid ? 'PUT' : 'POST';
         try {
             const r = await AuthentikAuth.apiFetch(url, {
@@ -1136,7 +1136,7 @@
     async function deleteVertrag(vid) {
         if (!confirm('Vertrag wirklich löschen?')) return;
         try {
-            const r = await AuthentikAuth.apiFetch(`/api/handwerker/${currentHandwerkerId}/vertraege/${vid}`, { method: 'DELETE' });
+            const r = await AuthentikAuth.apiFetch(`/api/handwerker/${currentHandwerkerId}/verträge/${vid}`, { method: 'DELETE' });
             if (!r.ok) throw new Error('HTTP ' + r.status);
             await loadVertraege(currentHandwerkerId);
             await loadAnstehend();
@@ -1159,25 +1159,25 @@
     async function loadAnstehend() {
         const days = $('anstehend-days').value || '90';
         try {
-            const r = await AuthentikAuth.apiFetch(`/api/handwerker-vertraege/anstehend?days=${days}`);
+            const r = await AuthentikAuth.apiFetch(`/api/handwerker-verträge/anstehend?days=${days}`);
             if (!r.ok) throw new Error('HTTP ' + r.status);
             const data = await r.json();
-            renderAnstehend(data.vertraege || []);
+            renderAnstehend(data.verträge || []);
         } catch {
             $('anstehend-banner').classList.add('hidden');
         }
     }
 
-    function renderAnstehend(vertraege) {
+    function renderAnstehend(verträge) {
         const banner = $('anstehend-banner');
         const list = $('anstehend-list');
-        if (vertraege.length === 0) {
+        if (verträge.length === 0) {
             banner.classList.add('hidden');
             return;
         }
         banner.classList.remove('hidden');
-        $('anstehend-count').textContent = `· ${vertraege.length} Eintrag${vertraege.length === 1 ? '' : 'e'}`;
-        list.innerHTML = vertraege.map(v => {
+        $('anstehend-count').textContent = `· ${verträge.length} Eintrag${verträge.length === 1 ? '' : 'e'}`;
+        list.innerHTML = verträge.map(v => {
             const stweg = v.stweg ? `<span class="ml-1 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-xs">STWEG ${v.stweg}</span>` : '';
             const datum = `<span class="px-2 py-0.5 rounded text-xs ${dateClass(v.naechster_termin)}">${esc(fmtDate(v.naechster_termin))}</span>`;
             const editLink = canWrite ? `<button data-edit-handwerker="${v.handwerker_id}" class="text-xs text-blue-600 hover:underline">→</button>` : '';
@@ -1198,13 +1198,13 @@
 
     // ─── Auftragshistorie ───────────────────────────────────────
     async function loadAuftraege(handwerkerId) {
-        const list = $('auftraege-list');
+        const list = $('aufträge-list');
         list.innerHTML = '<div class="text-gray-400 py-2">Lade…</div>';
         try {
-            const r = await AuthentikAuth.apiFetch(`/api/handwerker/${handwerkerId}/auftraege`);
+            const r = await AuthentikAuth.apiFetch(`/api/handwerker/${handwerkerId}/aufträge`);
             if (!r.ok) throw new Error('HTTP ' + r.status);
             const data = await r.json();
-            currentAuftraege = data.auftraege || [];
+            currentAuftraege = data.aufträge || [];
             renderAuftraege();
         } catch (err) {
             list.innerHTML = `<div class="text-red-600 py-2">Fehler: ${esc(err.message)}</div>`;
@@ -1212,8 +1212,8 @@
     }
 
     function renderAuftraege() {
-        const list = $('auftraege-list');
-        $('auftraege-count').textContent = currentAuftraege.length === 0
+        const list = $('aufträge-list');
+        $('aufträge-count').textContent = currentAuftraege.length === 0
             ? 'Noch keine Aufträge erfasst'
             : `${currentAuftraege.length} Eintrag${currentAuftraege.length === 1 ? '' : 'e'}`;
         if (currentAuftraege.length === 0) {
@@ -1308,8 +1308,8 @@
         }
         const aid = $('auftrag-id').value;
         const url = aid
-            ? `/api/handwerker/${currentHandwerkerId}/auftraege/${aid}`
-            : `/api/handwerker/${currentHandwerkerId}/auftraege`;
+            ? `/api/handwerker/${currentHandwerkerId}/aufträge/${aid}`
+            : `/api/handwerker/${currentHandwerkerId}/aufträge`;
         const method = aid ? 'PUT' : 'POST';
         try {
             const r = await AuthentikAuth.apiFetch(url, {
@@ -1351,7 +1351,7 @@
     async function deleteAuftrag(aid) {
         if (!confirm('Auftrag wirklich löschen?')) return;
         try {
-            const r = await AuthentikAuth.apiFetch(`/api/handwerker/${currentHandwerkerId}/auftraege/${aid}`, {
+            const r = await AuthentikAuth.apiFetch(`/api/handwerker/${currentHandwerkerId}/aufträge/${aid}`, {
                 method: 'DELETE',
             });
             if (!r.ok) throw new Error('HTTP ' + r.status);

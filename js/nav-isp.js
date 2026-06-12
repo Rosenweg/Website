@@ -2,7 +2,7 @@
  * Rosenweg ISP — dedizierte Nav für isp.rosenweg4303.ch
  *
  * Wird im Dockerfile.isp als /js/nav.js ueberlagert, damit alle ISP-html
- * weiterhin `<script src="/js/nav.js">` referenzieren koennen aber im ISP-
+ * weiterhin `<script src="/js/nav.js">` referenzieren können aber im ISP-
  * Container eine ISP-only-Navigation bekommen.
  *
  * Exportiert das gleiche `RosenwegNav.init(...)` Interface wie das normale

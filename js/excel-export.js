@@ -1,4 +1,4 @@
-// RosenwegExcel — kleine Helper-Library fuer Excel/.xlsx-Export
+// RosenwegExcel — kleine Helper-Library für Excel/.xlsx-Export
 // Lazy-loaded SheetJS (xlsx.js) von CDN beim ersten Export-Aufruf.
 // Verwendung:
 //   RosenwegExcel.fromTable(tableEl, 'telefonbuch.xlsx', 'Kontakte');
@@ -91,7 +91,7 @@
   }
 
   // Daten-Array -> xlsx. rows = [{col1: val, col2: val}, ...] oder [[a,b,c],...]
-  // headers optional fuer Array-of-Arrays
+  // headers optional für Array-of-Arrays
   async function fromData(rows, filename, sheetName, headers) {
     const XLSX = await loadSheetJS();
     if (!Array.isArray(rows) || rows.length === 0) throw new Error('Keine Daten');
@@ -142,7 +142,7 @@
   } else {
     autoBind();
   }
-  // Beobachte spaeter eingefuegte Buttons (fuer Single-Page-Listen)
+  // Beobachte später eingefuegte Buttons (für Single-Page-Listen)
   if (window.MutationObserver) {
     new MutationObserver(autoBind).observe(document.body, { childList: true, subtree: true });
   }

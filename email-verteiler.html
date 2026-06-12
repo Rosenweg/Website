@@ -302,7 +302,7 @@
         let adminVerteilerData = [];
 
         // Multi-Checkbox-Helper: ersetzt &lt;select multiple&gt; mit Checkbox-Liste,
-        // damit Touch-Devices Mehrfachauswahl bedienen koennen (kein Strg/Cmd).
+        // damit Touch-Devices Mehrfachauswahl bedienen können (kein Strg/Cmd).
         const multiCb = {
             populate(id, items, selected) {
                 const el = document.getElementById(id);
@@ -707,7 +707,7 @@
             if (!whatsappGroupsCache) await loadWhatsappGroups();
             const waSel = document.getElementById('vf-whatsapp-group');
             if (v.whatsapp_group_id) {
-                // Falls die Group-ID nicht in der aktuellen Liste ist, zumindest hinzufuegen
+                // Falls die Group-ID nicht in der aktuellen Liste ist, zumindest hinzufügen
                 if (![...waSel.options].some(o => o.value === v.whatsapp_group_id)) {
                     const opt = document.createElement('option');
                     opt.value = v.whatsapp_group_id;

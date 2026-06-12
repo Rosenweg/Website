@@ -215,7 +215,7 @@ setInterval(() => {
   }
 }, 60 * 1000);
 
-// Generischer Rate-Limit-Helper fuer beliebige Endpoints.
+// Generischer Rate-Limit-Helper für beliebige Endpoints.
 // Verwendung: rateLimitGuard(name, key, maxCount, windowMs) → {ok:true|false, retryAfter?}
 const rateLimitBuckets = new Map();
 setInterval(() => {
@@ -415,9 +415,9 @@ setInterval(() => {
 }, 60 * 1000);
 
 // Returns the Authentik authorize URL for the frontend to redirect to
-// Welche Hosts duerfen als OAuth-Redirect dienen. Muss mit den in Authentik
+// Welche Hosts dürfen als OAuth-Redirect dienen. Muss mit den in Authentik
 // hinterlegten Redirect-URIs uebereinstimmen. Whitelist verhindert dass
-// jemand ueber Host-Header einen open redirect ausloest.
+// jemand über Host-Header einen open redirect ausloest.
 const OAUTH_ALLOWED_HOSTS = new Set([
   'www.rosenweg4303.ch',
   'rosenweg4303.ch',
@@ -425,7 +425,7 @@ const OAUTH_ALLOWED_HOSTS = new Set([
 ]);
 function oauthRedirectUri(req) {
   const host = req.headers['x-forwarded-host'] || req.headers.host || '';
-  // Whitelisted hosts werden in Production immer ueber HTTPS bedient
+  // Whitelisted hosts werden in Production immer über HTTPS bedient
   // (CF/Traefik). X-Forwarded-Proto ist intern oft "http" und wuerde
   // sonst falsche Callback-URLs erzeugen.
   if (OAUTH_ALLOWED_HOSTS.has(host)) return `https://${host}/api/auth/callback`;
@@ -498,7 +498,7 @@ app.get('/api/auth/callback', async (req, res) => {
 
   try {
     // Exchange code for token. redirect_uri MUSS exakt zum Login-Start
-    // passen (Authentik prueft das), deshalb aus dem State holen.
+    // passen (Authentik prüft das), deshalb aus dem State holen.
     const tokenUrl = `${AUTHENTIK_URL}/application/o/token/`;
     const tokenBody = new URLSearchParams({
       grant_type: 'authorization_code',
@@ -654,7 +654,7 @@ async function authMiddleware(req, res, next) {
   if (!token) return res.status(401).json({ error: 'Nicht authentifiziert' });
 
   try {
-    // 0. Personal Access Token (PAT) — prefix-erkennbar, fuer M2M/AI-Agents
+    // 0. Personal Access Token (PAT) — prefix-erkennbar, für M2M/AI-Agents
     //    Wirkt als 'login als der User der den Token erstellt hat'.
     if (token.startsWith('rw_pat_')) {
       const hash = crypto.createHash('sha256').update(token).digest('hex');
@@ -677,7 +677,7 @@ async function authMiddleware(req, res, next) {
       };
       req.user.isAdmin = req.user.role === 'admin' || req.user.groups.some(g => g.toLowerCase() === 'technik');
       req.pat = { id: row.id, name: row.name, scopes: row.scopes };
-      // Scope-Check: wenn token.scopes gesetzt, pruefen ob aktueller Endpoint erlaubt
+      // Scope-Check: wenn token.scopes gesetzt, prüfen ob aktueller Endpoint erlaubt
       if (Array.isArray(row.scopes) && row.scopes.length > 0) {
         const need = req.method === 'GET' ? 'read' : 'write';
         const path = req.path.replace(/\/api\//, '').split('/')[0] || 'root';
@@ -744,7 +744,7 @@ function canViewKontakteHistory(req, res, next) {
     return gl === 'technik' || gl === 'präsident' || gl === 'praesident'
       || gl === 'verwaltung' || gl.endsWith('-ausschuss');
   });
-  if (!ok) return res.status(403).json({ error: 'Historie nur fuer Technik, Praesident, Ausschuss und Verwaltung' });
+  if (!ok) return res.status(403).json({ error: 'Historie nur für Technik, Präsident, Ausschuss und Verwaltung' });
   next();
 }
 
@@ -854,9 +854,9 @@ const MANAGED_PAGES = [
   { id: 'energie-monitor', label: 'Energie-Monitor' },
   { id: 'energie-config', label: 'Energie-Konfiguration' },
   { id: 'email-verteiler', label: 'E-Mail-Verteiler' },
-  { id: 'zaehler', label: 'Zähler & Verbrauch' },
-  { id: 'waschkueche', label: 'Waschküche' },
-  { id: 'waschkueche-admin', label: 'Waschküche-Admin' },
+  { id: 'zähler', label: 'Zähler & Verbrauch' },
+  { id: 'waschküche', label: 'Waschküche' },
+  { id: 'waschküche-admin', label: 'Waschküche-Admin' },
   { id: 'kontakte', label: 'Kontakte' },
   { id: 'verwaltung', label: 'Verwaltung' },
   { id: 'rechteverwaltung', label: 'Rechteverwaltung' },
@@ -865,8 +865,8 @@ const MANAGED_PAGES = [
   { id: 'handwerker', label: 'Handwerker & Lieferanten' },
   { id: 'auslagen', label: 'Auslagen / Vorschuesse' },
   { id: 'verwaltung-mail-outbox', label: 'Verwaltungs-Mail Outbox' },
-  { id: 'personen', label: 'Personen (Eigentuemer/Bewohner)' },
-  { id: 'mail-empfaenger', label: 'Mail-Empfaenger (Stammdaten)' },
+  { id: 'personen', label: 'Personen (Eigentümer/Bewohner)' },
+  { id: 'mail-empfänger', label: 'Mail-Empfänger (Stammdaten)' },
   { id: 'mail-compose', label: 'Mail schreiben (Ad-hoc)' },
   { id: 'mail-approval-config', label: 'Mail-Freigabe-Regeln' },
   { id: 'mail-templates', label: 'Mail-Templates' },
@@ -978,7 +978,7 @@ async function getUserPermissions(groups) {
 // oder andere widerrufen kann. Wir checken req.pat (gesetzt durch PAT-Auth)
 // und lehnen ab.
 function requireUserLogin(req, res, next) {
-  if (req.pat) return res.status(403).json({ error: 'Token-Verwaltung nur via Browser-Login (Authentik) moeglich' });
+  if (req.pat) return res.status(403).json({ error: 'Token-Verwaltung nur via Browser-Login (Authentik) möglich' });
   next();
 }
 
@@ -1031,7 +1031,7 @@ app.delete('/api/me/tokens/:id', authMiddleware, requireUserLogin, async (req, r
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Endpoint fuer Agent: 'wer bin ich, was kann ich' — fuer Discovery/Onboarding.
+// Endpoint für Agent: 'wer bin ich, was kann ich' — für Discovery/Onboarding.
 app.get('/api/me', authMiddleware, async (req, res) => {
   res.json({
     email: req.user.email,
@@ -1044,8 +1044,8 @@ app.get('/api/me', authMiddleware, async (req, res) => {
 });
 
 // ─── KI-Suche ───────────────────────────────────────────────────────
-// Parallel SQL-Search ueber relevante Tabellen, Treffer + Query an
-// Claude Haiku 4.5 fuer Ranking + 1-Satz-Antwort + 3-5 Quicklinks.
+// Parallel SQL-Search über relevante Tabellen, Treffer + Query an
+// Claude Haiku 4.5 für Ranking + 1-Satz-Antwort + 3-5 Quicklinks.
 // Berechtigungs-Filter: nur was der User auch sonst sehen darf.
 app.post('/api/ki-search', authMiddleware, async (req, res) => {
   try {
@@ -1061,9 +1061,9 @@ app.post('/api/ki-search', authMiddleware, async (req, res) => {
     const like = '%' + q.replace(/[%_]/g, '\\$&') + '%';
     const hits = [];
 
-    // Parallel-Suche ueber alle relevanten Domains
+    // Parallel-Suche über alle relevanten Domains
     const searches = await Promise.allSettled([
-      // Personen (nur fuer wohnungsverwaltung-Berechtigte)
+      // Personen (nur für wohnungsverwaltung-Berechtigte)
       groups.some(g => g.toLowerCase() === 'technik' || g.toLowerCase() === 'praesident' || g.toLowerCase() === 'präsident' || g.toLowerCase() === 'verwaltung') || isAdmin
         ? pool.query('SELECT id, name, email, telefon FROM personen WHERE de_norm(name) LIKE de_norm($1) OR de_norm(email) LIKE de_norm($1) LIMIT 5', [like])
         : { rows: [] },
@@ -1105,13 +1105,13 @@ app.post('/api/ki-search', authMiddleware, async (req, res) => {
     for (const w of wohnungen) hits.push({ typ: 'Wohnung', titel: w.bezeichnung + ' (STWEG ' + w.stweg + ')', sub: [w.eigentuemer_name && 'Eig: ' + w.eigentuemer_name, w.mieter_name && 'Mt: ' + w.mieter_name].filter(Boolean).join(' · '), url: '/objektverwaltung.html', meta: w });
     for (const p of projekte) hits.push({ typ: 'Projekt', titel: p.titel, sub: p.status, url: '/projekte.html?slug=' + encodeURIComponent(p.slug), meta: p });
 
-    // Ohne Treffer: direkt zurueck
-    if (hits.length === 0) return res.json({ q, hits: [], answer: 'Keine Treffer fuer „' + q + '".' });
+    // Ohne Treffer: direkt zurück
+    if (hits.length === 0) return res.json({ q, hits: [], answer: 'Keine Treffer für „' + q + '".' });
 
     // KI: rank + 1-Satz-Antwort
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) {
-      return res.json({ q, hits: hits.slice(0, 8), answer: `${hits.length} Treffer fuer „${q}". (KI-Ranking nicht verfuegbar, keine OPENROUTER_API_KEY.)` });
+      return res.json({ q, hits: hits.slice(0, 8), answer: `${hits.length} Treffer für „${q}". (KI-Ranking nicht verfuegbar, keine OPENROUTER_API_KEY.)` });
     }
     try {
       const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -1122,11 +1122,11 @@ app.post('/api/ki-search', authMiddleware, async (req, res) => {
           model: 'anthropic/claude-haiku-4.5',
           max_tokens: 400,
           messages: [
-            { role: 'system', content: `Du bist die Suchhilfe der STWEG-Kooperation Rosenweg. Beantworte die User-Suche kurz (1-2 Saetze), nenne die wichtigsten 1-3 Treffer beim Namen. Wenn unklar was der User will, frag nach. Bei keinen relevanten Treffern: sag das ehrlich.
+            { role: 'system', content: `Du bist die Suchhilfe der STWEG-Kooperation Rosenweg. Beantworte die User-Suche kurz (1-2 Sätze), nenne die wichtigsten 1-3 Treffer beim Namen. Wenn unklar was der User will, frag nach. Bei keinen relevanten Treffern: sag das ehrlich.
 
 Antworte als JSON:
 {
-  "answer": "1-2 Saetze. Bei Personen/Handwerkern: nenne Name + wichtigstes Detail. Bei Vollmachten: nenne wer-an-wen + Status.",
+  "answer": "1-2 Sätze. Bei Personen/Handwerkern: nenne Name + wichtigstes Detail. Bei Vollmachten: nenne wer-an-wen + Status.",
   "top_indices": [0, 2, 5]   // Array der Hit-Indizes (max 5) die am relevantesten sind, nach Relevanz sortiert
 }` },
             { role: 'user', content: `User-Suche: "${q}"\n\nGefundene Treffer:\n` + hits.map((h, i) => `[${i}] ${h.typ}: ${h.titel}${h.sub ? ' (' + h.sub + ')' : ''}`).join('\n') },
@@ -1142,13 +1142,13 @@ Antworte als JSON:
           const sortedHits = topIdx.length > 0
             ? [...topIdx.map(i => hits[i]), ...hits.filter((_, i) => !topIdx.includes(i))].slice(0, 8)
             : hits.slice(0, 8);
-          return res.json({ q, hits: sortedHits, answer: json.answer || `${hits.length} Treffer fuer „${q}".`, total: hits.length });
+          return res.json({ q, hits: sortedHits, answer: json.answer || `${hits.length} Treffer für „${q}".`, total: hits.length });
         } catch {
-          return res.json({ q, hits: hits.slice(0, 8), answer: txt.slice(0, 300) || `${hits.length} Treffer fuer „${q}".`, total: hits.length });
+          return res.json({ q, hits: hits.slice(0, 8), answer: txt.slice(0, 300) || `${hits.length} Treffer für „${q}".`, total: hits.length });
         }
       }
     } catch (e) { console.warn('[ki-search] LLM fail:', e.message); }
-    res.json({ q, hits: hits.slice(0, 8), answer: `${hits.length} Treffer fuer „${q}".`, total: hits.length });
+    res.json({ q, hits: hits.slice(0, 8), answer: `${hits.length} Treffer für „${q}".`, total: hits.length });
   } catch (err) { console.error('[ki-search] error:', err); res.status(500).json({ error: err.message }); }
 });
 
@@ -1299,8 +1299,8 @@ app.get('/api/me/wohnungen', authMiddleware, async (req, res) => {
 
 // PUT /api/me/kontakt/:id — user can edit their own contact entry (email, telefon, adresse)
 // Wenn der Kontakt eine person_id hat, wird die Person aktualisiert → Trigger
-// propagiert auf alle Wohnungen der Person. Dadurch ist die Aenderung "sticky"
-// fuer den User: er sieht sie ueberall.
+// propagiert auf alle Wohnungen der Person. Dadurch ist die Änderung "sticky"
+// für den User: er sieht sie ueberall.
 app.put('/api/me/kontakt/:id', authMiddleware, async (req, res) => {
   try {
     const email = (req.user.email || '').toLowerCase();
@@ -1422,7 +1422,7 @@ app.put('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
     await client.query('COMMIT');
     const w = await loadWohnungMitKontakte(result.rows[0].id);
     res.json(w);
-    recordObjektChange(stweg, `Eigentuemer-Self-Service: Wohnung "${w.bezeichnung}" aktualisiert`, req.user.email).catch(() => {});
+    recordObjektChange(stweg, `Eigentümer-Self-Service: Wohnung "${w.bezeichnung}" aktualisiert`, req.user.email).catch(() => {});
   } catch (err) {
     await client.query('ROLLBACK').catch(()=>{});
     console.error('[me/wohnung PUT] error:', err.message);
@@ -1513,7 +1513,7 @@ app.put('/api/auth/profile', authMiddleware, async (req, res) => {
 });
 
 // GET /api/me/person-data — liefert das personen-Datenset des eingeloggten Users
-// (zusaetzliche Telefonnummern + Email-Aliasse, die nicht in users gepflegt sind)
+// (zusätzliche Telefonnummern + Email-Aliasse, die nicht in users gepflegt sind)
 app.get('/api/me/person-data', authMiddleware, async (req, res) => {
   const email = (req.user.email || '').toLowerCase();
   if (!email) return res.json({ found: false, telefone: [], emails: [] });
@@ -1570,7 +1570,7 @@ app.put('/api/me/phones', authMiddleware, async (req, res) => {
       RETURNING id, telefone`,
       [JSON.stringify(cleaned), email],
     );
-    if (!r.rows[0]) return res.status(404).json({ error: 'Kein personen-Eintrag fuer diese E-Mail' });
+    if (!r.rows[0]) return res.status(404).json({ error: 'Kein personen-Eintrag für diese E-Mail' });
     res.json({ ok: true, telefone: r.rows[0].telefone });
   } catch (err) {
     console.error('[me/phones] error:', err.message);
@@ -1601,7 +1601,7 @@ app.put('/api/me/emails', authMiddleware, async (req, res) => {
       RETURNING id, emails`,
       [JSON.stringify(cleaned), email],
     );
-    if (!r.rows[0]) return res.status(404).json({ error: 'Kein personen-Eintrag fuer diese E-Mail' });
+    if (!r.rows[0]) return res.status(404).json({ error: 'Kein personen-Eintrag für diese E-Mail' });
     res.json({ ok: true, emails: r.rows[0].emails });
   } catch (err) {
     console.error('[me/emails] error:', err.message);
@@ -1611,7 +1611,7 @@ app.put('/api/me/emails', authMiddleware, async (req, res) => {
 
 // PUT /api/me/whatsapp-optin — Toggle WhatsApp-Opt-In am Personen-Datensatz
 // Body: { enabled: bool }
-// Liefert Status zurueck: { ok, enabled, phone, reason? }
+// Liefert Status zurück: { ok, enabled, phone, reason? }
 app.put('/api/me/whatsapp-optin', authMiddleware, async (req, res) => {
   const email = (req.user.email || '').toLowerCase();
   if (!email) return res.status(400).json({ error: 'Keine E-Mail' });
@@ -1624,7 +1624,7 @@ app.put('/api/me/whatsapp-optin', authMiddleware, async (req, res) => {
     );
     if (!person.rows[0]) {
       return res.status(404).json({
-        error: 'Kein Personen-Eintrag fuer diese E-Mail gefunden',
+        error: 'Kein Personen-Eintrag für diese E-Mail gefunden',
         hint: 'Bitte zuerst Telefonnummer in der Objektverwaltung hinterlegen lassen.',
       });
     }
@@ -1637,7 +1637,7 @@ app.put('/api/me/whatsapp-optin', authMiddleware, async (req, res) => {
     if (enabled && !phone) {
       return res.status(400).json({
         error: 'Keine Telefonnummer hinterlegt',
-        hint: 'WhatsApp-Benachrichtigungen benoetigen eine Telefonnummer im Profil.',
+        hint: 'WhatsApp-Benachrichtigungen benötigen eine Telefonnummer im Profil.',
       });
     }
     await pool.query(
@@ -1739,7 +1739,7 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
         }
       }
 
-      // RK-Clients-WLAN nur fuer reine Parkplatz-User (kein wohnung/hobbyraum
+      // RK-Clients-WLAN nur für reine Parkplatz-User (kein wohnung/hobbyraum
       // bezogen). Wer auch eine Wohnung oder Hobbyraum hat, sieht stattdessen
       // sein normales Haus-WLAN — die brauchen RK-Clients nicht.
       const kinds = new Set(userWohnungen.map(o => o.kind));
@@ -1823,14 +1823,14 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
 //          api.tv.init7.net (HLS, AC-3 audio)
 //
 // Warum eigener LXC: ffmpeg-Transcode (AC-3 → AAC) ist CPU-intensiv und
-// gehoert nicht in den rosenweg_api-Container.
+// gehört nicht in den rosenweg_api-Container.
 //
-// udpxy fuer Multicast laeuft in LXC 109 (100.64.9.200:4022) — aktuell
+// udpxy für Multicast laeuft in LXC 109 (100.64.9.200:4022) — aktuell
 // blockiert die UDM-Firewall den Init7-Multicast-Inflow, deshalb HLS-Pfad.
 const TV7_PLAYLIST_URL = 'https://api.init7.net/tvchannels.m3u?rp=true';
 const UDPXY_HOST = process.env.UDPXY_HOST || 'http://100.64.9.200:4022';
 const TV7_STREAMER_URL = process.env.TV7_STREAMER_URL || 'http://100.64.9.250:3000';
-// Public-Pfad den der Browser fuer den Stream anspricht. Default ist ein
+// Public-Pfad den der Browser für den Stream anspricht. Default ist ein
 // relativer Pfad — die nginx der ISP-Seite proxyt /tv-stream/* direkt zum
 // LXC 250, kein API-Hop. Wenn ein voller URL gesetzt ist (z.B. via CF
 // Tunnel auf tv.rosenweg9.ch), wird der genommen.
@@ -1933,7 +1933,7 @@ app.get('/api/tv/stream/:channelId', (req, res, next) => {
   if (!TV7_HMAC_SECRET) return res.status(500).json({ error: 'TV7 streamer secret nicht konfiguriert' });
   const token = createTv7StreamerToken(req.user.id || req.user.user_id || 0);
   const streamUrl = `${TV7_STREAMER_URL}/stream/${id}?token=${encodeURIComponent(token)}`;
-  // Connection-Timeout nur fuer die initialen Headers — danach soll der Stream
+  // Connection-Timeout nur für die initialen Headers — danach soll der Stream
   // beliebig lange laufen. AbortSignal.timeout() wuerde auch den Body killen.
   const ctrl = new AbortController();
   const connTimer = setTimeout(() => ctrl.abort(), 10000);
@@ -3138,10 +3138,10 @@ app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// ENERGIE/ZÄHLER (replaces n8n zaehler webhooks)
+// ENERGIE/ZÄHLER (replaces n8n zähler webhooks)
 // ═══════════════════════════════════════════════════════════════════
 
-app.post('/api/zaehler/benutzer', authMiddleware, adminOnly, async (req, res) => {
+app.post('/api/zähler/benutzer', authMiddleware, adminOnly, async (req, res) => {
   const { email, name, wohnung, stweg, zugriff } = req.body;
   try {
     const result = await pool.query(
@@ -3157,7 +3157,7 @@ app.post('/api/zaehler/benutzer', authMiddleware, adminOnly, async (req, res) =>
   }
 });
 
-app.post('/api/zaehler/daten', authMiddleware, async (req, res) => {
+app.post('/api/zähler/daten', authMiddleware, async (req, res) => {
   // Receives meter data from ioBroker/webhook
   const { zaehler_id, wert, timestamp } = req.body;
   if (!zaehler_id || wert == null) return res.status(400).json({ error: 'zaehler_id und wert erforderlich' });
@@ -3173,7 +3173,7 @@ app.post('/api/zaehler/daten', authMiddleware, async (req, res) => {
   }
 });
 
-app.get('/api/zaehler/daten/:zaehler_id', authMiddleware, async (req, res) => {
+app.get('/api/zähler/daten/:zaehler_id', authMiddleware, async (req, res) => {
   const { von, bis } = req.query;
   try {
     const result = await pool.query(
@@ -3370,8 +3370,8 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
      'verteiler-batch', recipients.join(', ')]
   );
 
-  // Mirror in WhatsApp-Gruppe wenn fuer diesen Verteiler eine Group-ID hinterlegt ist.
-  // KI-Aufbereitung: Claude Haiku formatiert + kuerzt fuer WhatsApp-Lesbarkeit.
+  // Mirror in WhatsApp-Gruppe wenn für diesen Verteiler eine Group-ID hinterlegt ist.
+  // KI-Aufbereitung: Claude Haiku formatiert + kuerzt für WhatsApp-Lesbarkeit.
   if (list.whatsapp_group_id) {
     try {
       const rawBody = (parsed.text || parsed.html?.replace(/<[^>]+>/g, ' ') || '').trim();
@@ -3387,7 +3387,7 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
         sourceType: 'verteiler-mirror',
         sourceId: logResult.rows[0].id,
       });
-      console.log(`[Verteiler] Mirror in WA-Gruppe ${list.whatsapp_group_name || list.whatsapp_group_id} fuer ${toAddress}`);
+      console.log(`[Verteiler] Mirror in WA-Gruppe ${list.whatsapp_group_name || list.whatsapp_group_id} für ${toAddress}`);
     } catch (err) {
       console.warn('[Verteiler] WA-Mirror fehlgeschlagen:', err.message);
     }
@@ -3593,7 +3593,7 @@ async function pollGmailForVerteiler() {
 
       // Robust: ALLE UIDs holen, in JS auf > lastUid filtern.
       // (Gmail-IMAP gibt bei '590:*' wenn uidNext=590 manchmal die hoechste UID
-      // zurueck, auch wenn sie < 590 ist — daher zusaetzlicher JS-Filter.)
+      // zurück, auch wenn sie < 590 ist — daher zusaetzlicher JS-Filter.)
       const allUids = await client.search({ all: true }, { uid: true });
       const uids = (allUids || []).filter(u => Number(u) > lastUid).sort((a, b) => a - b);
       if (!uids.length) { lock.release(); return; }
@@ -4182,7 +4182,7 @@ async function pollGmailForVerteiler() {
             const targetFolder = `Verteiler/${folderName}`;
             try {
               // Erst als gelesen markieren, dann verschieben — damit Gmail-App keine Pop-ups
-              // mehr fuer bereits verarbeitete Verteiler-Mails zeigt.
+              // mehr für bereits verarbeitete Verteiler-Mails zeigt.
               try { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); } catch {}
               try { await client.mailboxCreate(targetFolder); } catch {}
               await client.messageMove(uid, targetFolder, { uid: true });
@@ -4195,7 +4195,7 @@ async function pollGmailForVerteiler() {
           console.error(`[IMAP] Error processing UID ${uid}:`, msgErr.message);
           // Mit UID-watermark wird die Mail trotzdem als "behandelt" markiert
           // (sonst Endlos-Retry-Loop). Message-ID-Dedup schuetzt vor
-          // versehentlicher Doppel-Verarbeitung wenn UID-Reset noetig waere.
+          // versehentlicher Doppel-Verarbeitung wenn UID-Reset nötig wäre.
         } finally {
           // Auch bei `continue` aus dem try-Block: Watermark immer vorruecken,
           // damit alte/uebersprungene UIDs nicht endlos re-gescannt werden.
@@ -4418,7 +4418,7 @@ app.get('/api/stweg/:nr/kontakte', authMiddleware, async (req, res) => {
       if (bewohner.length === 0 && w.mieter_name) {
         bewohner.push({ name: w.mieter_name, email: w.mieter_email, telefon: w.mieter_telefon, rolle: 'mieter' });
       }
-      // Eigentuemer first
+      // Eigentümer first
       bewohner.sort((a, b) => {
         if (a.rolle === 'eigentuemer' && b.rolle !== 'eigentuemer') return -1;
         if (a.rolle !== 'eigentuemer' && b.rolle === 'eigentuemer') return 1;
@@ -4491,7 +4491,7 @@ async function loadWohnungMitKontakte(wohnungId, opts = {}) {
 // - Active entries no longer in array are ARCHIVED (archiviert_am=today), not deleted
 // - Archived/historical entries are never touched
 // Findet eine bestehende Person via Name+Email oder legt sie neu an.
-// Liefert person_id zurueck. Email-Sharing zwischen Familienmitgliedern wird
+// Liefert person_id zurück. Email-Sharing zwischen Familienmitgliedern wird
 // respektiert: Match nur wenn Name UND Email uebereinstimmen.
 async function findOrCreatePerson(client, name, email, telefon, adresse) {
   if (!name && !email) return null;
@@ -4515,7 +4515,7 @@ async function findOrCreatePerson(client, name, email, telefon, adresse) {
     if (byName.rows.length === 1) return byName.rows[0].id;
   }
   // H2: Race-safe INSERT via UNIQUE-Index (uq_personen_name_email).
-  // ON CONFLICT → DO NOTHING gibt keine ID zurueck, daher fallback SELECT.
+  // ON CONFLICT → DO NOTHING gibt keine ID zurück, daher fallback SELECT.
   const ins = await client.query(
     `INSERT INTO personen (name, email, telefon, adresse)
      VALUES ($1, $2, $3, $4)
@@ -4601,11 +4601,11 @@ async function saveKontakte(client, wohnungId, kontakte, stweg) {
 
   if (stweg) trackRemovedKontakte(wohnungId, stweg, oldKontakte, incoming).catch(() => {});
 
-  // Auto-Vollmacht-Entwurf fuer Verwalter: bei jedem neuen oder
+  // Auto-Vollmacht-Entwurf für Verwalter: bei jedem neuen oder
   // aktualisierten Verwalter-Kontakt wird ein Entwurf erzeugt, falls
-  // noch keine aktive/Entwurfs-Vollmacht zwischen Eigentuemer und
+  // noch keine aktive/Entwurfs-Vollmacht zwischen Eigentümer und
   // Verwalter existiert. CH-Recht: Vertretung braucht Schriftform,
-  // daher MUSS der Eigentuemer noch signieren bevor der Verwalter
+  // daher MUSS der Eigentümer noch signieren bevor der Verwalter
   // tatsaechlich vertreten darf.
   autoCreateVollmachtForVerwalter(client, wohnungId, stweg, incoming).catch(err =>
     console.warn('[vollmacht-auto] saveKontakte:', err.message),
@@ -4615,19 +4615,19 @@ async function saveKontakte(client, wohnungId, kontakte, stweg) {
 async function autoCreateVollmachtForVerwalter(client, wohnungId, stweg, kontakte) {
   const verwalter = kontakte.filter(k => k.rolle === 'verwalter' && k.email && k.name);
   if (verwalter.length === 0) return;
-  // Alle Eigentuemer dieser Wohnung holen (aus DB, inkl. die nicht im incoming)
+  // Alle Eigentümer dieser Wohnung holen (aus DB, inkl. die nicht im incoming)
   const eigRes = await client.query(
     `SELECT name, email, adresse, person_id FROM wohnungen_kontakte
       WHERE wohnung_id = $1 AND rolle = 'eigentuemer' AND archiviert_am IS NULL AND email IS NOT NULL`,
     [wohnungId],
   );
-  if (eigRes.rows.length === 0) return; // ohne Eigentuemer keine Vollmacht
+  if (eigRes.rows.length === 0) return; // ohne Eigentümer keine Vollmacht
   const eigentuemerEmails = eigRes.rows.map(e => (e.email || '').toLowerCase());
   for (const v of verwalter) {
     if (eigentuemerEmails.includes((v.email || '').toLowerCase())) continue;
-    // Existiert schon eine aktive/Entwurfs-Vollmacht zwischen dieser Eigentuemer-
+    // Existiert schon eine aktive/Entwurfs-Vollmacht zwischen dieser Eigentümer-
     // Gruppe (alle Emails) und diesem Verwalter? Wir definieren das als: jede
-    // Vollmacht an diesen Verwalter, die alle aktuellen Eigentuemer abdeckt.
+    // Vollmacht an diesen Verwalter, die alle aktuellen Eigentümer abdeckt.
     const exists = await client.query(
       `SELECT v.id FROM vollmachten v
         WHERE LOWER(v.bevollmaechtigter_email) = LOWER($1)
@@ -4637,7 +4637,7 @@ async function autoCreateVollmachtForVerwalter(client, wohnungId, stweg, kontakt
       [v.email, wohnungId],
     );
     if (exists.rows.length > 0) continue;
-    // Vollmacht-Haupt-Record (vollmachtgeber_* = primaerer Eigentuemer)
+    // Vollmacht-Haupt-Record (vollmachtgeber_* = primaerer Eigentümer)
     const primary = eigRes.rows[0];
     const sql = h => `INSERT INTO vollmachten (
          doc_hash,
@@ -4648,17 +4648,17 @@ async function autoCreateVollmachtForVerwalter(client, wohnungId, stweg, kontakt
          gueltig_ab, status, created_by_user_email
        ) VALUES ($1,$2,$3,$4,'verwaltung',$5,$6,$7,$8,'generell',$9,$10,$11,CURRENT_DATE,'entwurf','system:auto-verwalter')
        RETURNING id`;
-    const eigSuffix = eigRes.rows.length > 1 ? ' und ' + (eigRes.rows.length - 1) + ' weitere/r Eigentuemer/in' : '';
+    const eigSuffix = eigRes.rows.length > 1 ? ' und ' + (eigRes.rows.length - 1) + ' weitere/r Eigentümer/in' : '';
     const ins = await vmInsertWithRetry(client, sql, [
       primary.name, primary.email, primary.adresse || null,
       v.name, v.email, v.telefon || null, v.adresse || null,
       'Automatisch erzeugter Entwurf aus Objektverwaltung: Verwalter '
         + v.name + ' vertritt ' + primary.name + eigSuffix + ' in allen Belangen der Wohnung. '
-        + 'Bitte pruefen, anpassen und signieren (digital oder Papier). Bei Miteigentum muessen ALLE eingetragenen Vollmachtgeber separat signieren.',
+        + 'Bitte prüfen, anpassen und signieren (digital oder Papier). Bei Miteigentum müssen ALLE eingetragenen Vollmachtgeber separat signieren.',
       wohnungId, stweg,
     ]);
     const vollmachtId = ins.rows[0].id;
-    // Alle Eigentuemer als separate Vollmachtgeber-Zeilen anlegen (jeder
+    // Alle Eigentümer als separate Vollmachtgeber-Zeilen anlegen (jeder
     // muss einzeln signieren)
     for (let i = 0; i < eigRes.rows.length; i++) {
       const e = eigRes.rows[i];
@@ -4668,7 +4668,7 @@ async function autoCreateVollmachtForVerwalter(client, wohnungId, stweg, kontakt
         [vollmachtId, e.person_id || null, e.name, e.email, e.adresse || null, i],
       );
     }
-    console.log('[vollmacht-auto] Entwurf #' + vollmachtId + ' erstellt: ' + eigRes.rows.length + ' Eigentuemer → Verwalter=' + v.email + ' Wohnung=' + wohnungId);
+    console.log('[vollmacht-auto] Entwurf #' + vollmachtId + ' erstellt: ' + eigRes.rows.length + ' Eigentümer → Verwalter=' + v.email + ' Wohnung=' + wohnungId);
   }
 }
 
@@ -4789,9 +4789,9 @@ async function trackRemovedKontakte(wohnungId, stweg, oldKontakte, newKontakte) 
   }
 }
 
-// ─── Admin-API fuer Pending Deletions (UI in loeschungen.html) ────────
+// ─── Admin-API für Pending Deletions (UI in loeschungen.html) ────────
 // Mail-Chain: liefert eine flache Liste aller Mails + ihre Folge-Mails (rekursiv)
-// fuer eine gegebene message_id oder source.
+// für eine gegebene message_id oder source.
 app.get('/api/admin/mail-chain', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
   const messageId = String(req.query.message_id || '').trim();
   const source = String(req.query.source_contains || '').trim();
@@ -4967,7 +4967,7 @@ setTimeout(guardedProcessDeletions, 60 * 1000);
 // ─── Taegliche Auslagen-Outbox: nachreichen an neu-wirksame Verwaltungen ──
 // Wenn eine Verwaltung mit Startdatum in der Zukunft erfasst wurde,
 // wird sie zum Stichtag automatisch wirksam — hier reichen wir alle
-// genehmigten Auslagen, die waehrend der Vakanz nur an den Ausschuss gingen,
+// genehmigten Auslagen, die während der Vakanz nur an den Ausschuss gingen,
 // jetzt an die neue Verwaltung nach.
 //
 // ACHTUNG: lastOutboxRunDay ist In-Memory, deshalb nur sicher mit 1 API-Replica.
@@ -4979,7 +4979,7 @@ async function runAuslagenOutboxDaily() {
   if (lastOutboxRunDay === today) return;
   lastOutboxRunDay = today;
   try {
-    // Pro STWEG + uebergreifend pruefen
+    // Pro STWEG + uebergreifend prüfen
     const stwegs = [null, 1, 2, 3, 4, 5, 6, 7, 8];
     let totalResent = 0;
     for (const s of stwegs) {
@@ -4993,13 +4993,13 @@ async function runAuslagenOutboxDaily() {
     console.error('[auslagen-outbox] Lauf fehlgeschlagen:', e.message);
   }
 }
-// Stuendlich pruefen ob heute schon gelaufen — robust ggue Restarts.
+// Stuendlich prüfen ob heute schon gelaufen — robust ggue Restarts.
 setInterval(runAuslagenOutboxDaily, 60 * 60 * 1000);
 // Initial 90s nach Start (nach initDB)
 setTimeout(runAuslagenOutboxDaily, 90 * 1000);
 
 // ─── Reminder: genehmigte Auslagen ohne Auszahlung > 30 Tage ─────────
-// Taeglich pruefen + Reminder an Verwaltung (CC Ausschuss + Eigentuemer)
+// Taeglich prüfen + Reminder an Verwaltung (CC Ausschuss + Eigentümer)
 // Damit keine genehmigte Auszahlung versehentlich vergessen wird.
 let lastAuszahlungReminderDay = null;
 async function runAuszahlungReminderDaily() {
@@ -5008,7 +5008,7 @@ async function runAuszahlungReminderDaily() {
   lastAuszahlungReminderDay = today;
   try {
     // Genehmigte Auslagen die > 30 Tage alt sind und noch nicht ausbezahlt
-    // bearbeitet_am = Zeitpunkt der letzten Status-Aenderung (z.B. → genehmigt)
+    // bearbeitet_am = Zeitpunkt der letzten Status-Änderung (z.B. → genehmigt)
     // Nur 1× pro Auslage pro 14 Tage erinnern (via auszahlung_reminder_at)
     const r = await pool.query(`
       SELECT * FROM auslagen
@@ -5042,10 +5042,10 @@ async function runAuszahlungReminderDaily() {
             + `Betrag:          CHF ${betrag}\n`
             + `IBAN:            ${a.iban || '— nicht angegeben —'}\n`
             + `Genehmigt am:    ${new Date(a.bearbeitet_am).toLocaleDateString('de-CH')} (vor ${tage} Tagen)\n\n`
-            + `Bitte Auszahlung pruefen / durchfuehren und im System als "ausbezahlt" markieren:\n${SITE_URL}/auslagen.html\n\n`
+            + `Bitte Auszahlung prüfen / durchfuehren und im System als "ausbezahlt" markieren:\n${SITE_URL}/auslagen.html\n\n`
             + `(Diese Erinnerung wird alle 14 Tage automatisch wiederholt, bis die Auslage als ausbezahlt markiert ist.)`,
         }, 'auslage-auszahlung-reminder');
-        // WhatsApp-Push an Eigentuemer + bearbeitet_von (Approver) bei Opt-In
+        // WhatsApp-Push an Eigentümer + bearbeitet_von (Approver) bei Opt-In
         pushWhatsappBroadcast({
           emails: ausschussCc, sourceType: 'auslage-auszahlung-reminder', sourceId: a.id,
           body: `⏰ *Auszahlung offen seit ${tage} Tagen*\n${stwegLabel} · CHF ${betrag}\n${a.beschreibung.slice(0, 80)}\n\n${SITE_URL}/auslagen.html`,
@@ -5064,7 +5064,7 @@ async function runAuszahlungReminderDaily() {
 setInterval(runAuszahlungReminderDaily, 60 * 60 * 1000);
 setTimeout(runAuszahlungReminderDaily, 120 * 1000);
 
-// ─── ISP DNS-Re-Check fuer pending Routes/Redirects (alle 5min) ─────
+// ─── ISP DNS-Re-Check für pending Routes/Redirects (alle 5min) ─────
 async function ispRecheckPendingDns() {
   try {
     // Reverse-Proxy-Routen
@@ -5292,7 +5292,7 @@ setTimeout(sendPickupReminder, 10 * 60 * 1000); // initial run nach 10min
 // Wenn ein neuer Kontakt mit gueltig_ab=heute aktiv wird und ein anderer aktiver
 // Kontakt mit derselben Rolle auf derselben Wohnung existiert (gueltig_ab < neuer.gueltig_ab),
 // wird der Vorgaenger archiviert. Authentik-Zugang bleibt unveraendert (wird beim Anlegen
-// schon vergeben und bei Archivierung ueber trackRemovedKontakte verzoegert deaktiviert).
+// schon vergeben und bei Archivierung über trackRemovedKontakte verzoegert deaktiviert).
 async function autoArchiveSupersededKontakte() {
   try {
     // Kontakte, die heute (oder früher) effektiv geworden sind und noch keinen
@@ -5385,7 +5385,7 @@ async function syncSmtp2goRejections() {
 setInterval(syncSmtp2goRejections, 10 * 60 * 1000); // alle 10 Min
 setTimeout(syncSmtp2goRejections, 60 * 1000); // initial run nach 1 min
 
-// ─── Nextcloud-CardDAV-Sync (Telefonbuch fuer EAS / iOS / DAVx5) ──
+// ─── Nextcloud-CardDAV-Sync (Telefonbuch für EAS / iOS / DAVx5) ──
 // Schreibt alle Kontakte aus wohnungen_kontakte als vCards ins
 // Nextcloud-Adressbuch "rosenweg-tel". Read-only freigegeben an alle
 // Nextcloud-User → iOS native CardDAV, Android via DAVx5 oder Z-Push EAS.
@@ -5398,7 +5398,7 @@ function davRequest(method, urlStr, headers, body) {
     const lib = u.protocol === 'https:' ? require('https') : require('http');
     const bodyBuf = body ? Buffer.from(body, 'utf8') : null;
     const finalHeaders = { 'Connection': 'close', ...headers };
-    // Sabre/DAV akzeptiert chunked transfer nicht zuverlaessig fuer PUT/MKCOL
+    // Sabre/DAV akzeptiert chunked transfer nicht zuverlaessig für PUT/MKCOL
     // → explizites Content-Length setzen.
     if (bodyBuf) finalHeaders['Content-Length'] = bodyBuf.length;
     const req = lib.request({
@@ -5422,7 +5422,7 @@ async function syncContactsToNextcloud() {
   // NEXTCLOUD_URL_INTERNAL = z.B. http://nextcloud_nextcloud (Service-Discovery
   // im Swarm) — umgeht Cloudflare-Egress-IP und damit Brute-Force-Limits, die
   // beim ersten erfolglosen Versuch sonst alle weiteren Calls blockieren.
-  // NEXTCLOUD_URL_PUBLIC bleibt fuer trusted_domains-Validierung im Host-Header.
+  // NEXTCLOUD_URL_PUBLIC bleibt für trusted_domains-Validierung im Host-Header.
   const ncUrl = process.env.NEXTCLOUD_URL_INTERNAL || process.env.NEXTCLOUD_URL;
   const ncHost = process.env.NEXTCLOUD_URL_PUBLIC || process.env.NEXTCLOUD_URL;
   const ncUser = process.env.NEXTCLOUD_ADMIN_USER;
@@ -5434,7 +5434,7 @@ async function syncContactsToNextcloud() {
   }
   const auth = 'Basic ' + Buffer.from(`${ncUser}:${ncPass}`).toString('base64');
   const baseDav = `${ncUrl.replace(/\/$/, '')}/remote.php/dav/addressbooks/users/${ncUser}/${book}`;
-  // Host-Header fuer trusted_domains; Authority aus public URL extrahiert
+  // Host-Header für trusted_domains; Authority aus public URL extrahiert
   const hostHeader = (() => { try { return new URL(ncHost).host; } catch { return undefined; } })();
   const headersWithHost = base => hostHeader ? { ...base, Host: hostHeader } : base;
 
@@ -5524,7 +5524,7 @@ async function syncContactsToNextcloud() {
       else console.error(`[CardDAVSync] PUT ${uid} → ${r.status}`);
     }
 
-    // Verwaiste Eintraege loeschen
+    // Verwaiste Eintraege löschen
     let deleted = 0;
     for (const href of existingHrefs) {
       if (currentUids.has(href)) continue;
@@ -5540,7 +5540,7 @@ async function syncContactsToNextcloud() {
 setInterval(syncContactsToNextcloud, 60 * 60 * 1000); // hourly
 setTimeout(syncContactsToNextcloud, 2 * 60 * 1000); // initial run nach 2 min
 
-// POST /api/internal/carddav-sync — manueller Trigger fuer Tests (admin only)
+// POST /api/internal/carddav-sync — manueller Trigger für Tests (admin only)
 app.post('/api/internal/carddav-sync', authMiddleware, adminOnly, async (req, res) => {
   syncContactsToNextcloud().catch(err => console.error('[CardDAVSync] manual:', err.message));
   res.json({ triggered: true, message: 'Sync laeuft im Hintergrund — Logs siehe API' });
@@ -5586,9 +5586,9 @@ app.get('/api/stweg/:stweg/wohnungen', async (req, res) => {
   }
 });
 
-// GET /api/wohnungen/eigentuemer-uebersicht — gruppiert alle Objekte nach Eigentümer
+// GET /api/wohnungen/eigentuemer-übersicht — gruppiert alle Objekte nach Eigentümer
 // ─── Verwaltungen-CRUD (Hausverwaltungs-Firmen pro STWEG) ─────────
-// Public-View: GET /api/verwaltungen/public — minimaler Datensatz fuer
+// Public-View: GET /api/verwaltungen/public — minimaler Datensatz für
 // Anzeige auf oeffentlicher /verwaltung.html (ohne Login-Daten + Notizen).
 app.get('/api/verwaltungen/public', async (req, res) => {
   try {
@@ -5655,7 +5655,7 @@ app.post('/api/verwaltungen', authMiddleware, requireAusschussOrTechnik, async (
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Hilfsfunktion: prueft ob eine Verwaltung wirksam ist und reicht offene Auslagen nach.
+// Hilfsfunktion: prüft ob eine Verwaltung wirksam ist und reicht offene Auslagen nach.
 async function maybeResendForVerwaltung(v) {
   if (!v || v.aktiv === false) return null;
   const today = new Date().toISOString().slice(0, 10);
@@ -5734,7 +5734,7 @@ app.delete('/api/verwaltungen/kontakte/:kid', authMiddleware, requireAusschussOr
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/wohnungen/eigentuemer-uebersicht', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
+app.get('/api/wohnungen/eigentuemer-übersicht', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
   try {
     // Technik/Präsident sehen alle, Ausschuss-Mitglieder nur ihre STWEGs
     const groups = req.user?.groups || [];
@@ -5782,7 +5782,7 @@ app.get('/api/wohnungen/eigentuemer-uebersicht', authMiddleware, requirePermissi
       return c !== 0 ? c : a.name.localeCompare(b.name, 'de');
     }) });
   } catch (err) {
-    console.error('eigentuemer-uebersicht error:', err.message);
+    console.error('eigentuemer-übersicht error:', err.message);
     res.status(500).json({ error: 'Fehler' });
   }
 });
@@ -5792,7 +5792,7 @@ app.get('/api/wohnungen/eigentuemer-uebersicht', authMiddleware, requirePermissi
 function escHtml(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
-// Adresse fuer Anschrift mit Zeilenumbruechen formatieren — funktioniert mit
+// Adresse für Anschrift mit Zeilenumbruechen formatieren — funktioniert mit
 // und ohne Komma. Trennt vor 4-stelliger PLZ und vor "Land" (Schweiz/Deutschland/...).
 function formatAdresseAnschrift(adresseStr) {
   if (!adresseStr) return '';
@@ -5828,7 +5828,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
   const { datum, anlass_titel, anlass_zweck, ruecksendung_bis, ruecksendung_an,
           zeichnungsberechtigte = [], kollektiv_text } = opts;
   // Optional: nur bestimmte Hausnummern (z.B. STWEG 1 = RW17+18, aber Liste
-  // soll nur fuer RW17 generiert werden). haus_filter=[17] oder [13,14].
+  // soll nur für RW17 generiert werden). haus_filter=[17] oder [13,14].
   // Wenn leer/null → alle Wohnungen der STWEG.
   const hausFilter = (Array.isArray(opts.haus_filter) && opts.haus_filter.length > 0)
     ? opts.haus_filter.map(n => parseInt(n)).filter(n => Number.isFinite(n))
@@ -5853,8 +5853,8 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
   } else {
     // Live aus DB
     // STWEG 8 ist die MEG-Tiefgarage mit ausschliesslich typ='Parkplatz'.
-    // Fuer alle anderen STWEGen sind nur Wohnungen + Hobbyraeume relevant
-    // (Tiefgarage-Plaetze gehoeren nicht ins Stockwerkeigentum).
+    // Für alle anderen STWEGen sind nur Wohnungen + Hobbyraeume relevant
+    // (Tiefgarage-Plaetze gehören nicht ins Stockwerkeigentum).
     const erlaubteTypen = stweg === 8 ? ['Parkplatz'] : ['Wohnung', 'Hobbyraum'];
     wohnungen = await pool.query(`
       SELECT w.id, w.bezeichnung, w.typ, w.wertquote_zaehler, w.wertquote_nenner
@@ -5893,10 +5893,10 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
     }
   }
 
-  // STWEG 8 (MEG-Tiefgarage) hat ueber 100 Eigentuemer in unterschiedlichsten
+  // STWEG 8 (MEG-Tiefgarage) hat über 100 Eigentümer in unterschiedlichsten
   // Haeusern + viele Auswaertige — Sammelliste an einem Ort macht keinen Sinn.
-  // Daher generiere fuer STWEG 8 grundsaetzlich nur Einzelbriefe (jeder
-  // Eigentuemer bekommt seinen eigenen Brief mit Unterschriftszeile).
+  // Daher generiere für STWEG 8 grundsätzlich nur Einzelbriefe (jeder
+  // Eigentümer bekommt seinen eigenen Brief mit Unterschriftszeile).
   const einzelOnly = stweg === 8;
 
   // Einzelbrief-Empfänger sammeln (auswärtige Eigentümer; bei einzelOnly: alle)
@@ -5925,7 +5925,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
       nameZelle += `<div class="verwalter-line">↳ in Vertretung Verwalter: <strong>${verwNamen.join(', ')}</strong></div>`;
     }
     // Wohnadresse = primaer die hinterlegte Korrespondenz-Adresse(n) der
-    // Eigentuemer (also wo sie tatsaechlich wohnen — kann ein anderes Haus
+    // Eigentümer (also wo sie tatsaechlich wohnen — kann ein anderes Haus
     // im Rosenweg-Areal sein, z.B. Emini wohnen RW5 besitzen aber 9.2OG.2).
     // Fallback wenn keine Adresse hinterlegt: aus bezeichnung ableiten.
     let adresseZelle;
@@ -5935,10 +5935,10 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
       const hausnr = rosenwegNrAusBezeichnung(w.bezeichnung);
       adresseZelle = hausnr ? `Rosenweg ${hausnr}, 4303 Kaiseraugst` : '4303 Kaiseraugst';
     }
-    // Einzelbrief: bei einzelOnly (STWEG 8) ALLE Eigentuemer; sonst NUR
-    // Eigentuemer mit auswaertiger Adresse — lokale Eigentuemer derselben
+    // Einzelbrief: bei einzelOnly (STWEG 8) ALLE Eigentümer; sonst NUR
+    // Eigentümer mit auswaertiger Adresse — lokale Eigentümer derselben
     // Einheit bleiben auf der Sammelliste. So bekommt z.B. Salvatore Cali
-    // (wohnt Rosenweg 10) keinen Einzelbrief, auch wenn Mit-Eigentuemer
+    // (wohnt Rosenweg 10) keinen Einzelbrief, auch wenn Mit-Eigentümer
     // Filippo+Lorenza extern wohnen.
     if (einzelOnly || auswaertsAdressen.length > 0) {
       const fallbackAdresse = korrespondenzAdressen[0]
@@ -5949,7 +5949,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
         : eigKontakte.filter(e => isAuswaerts((e.adresse && e.adresse.trim()) || fallbackAdresse, stweg));
       const briefStartIdx = einzelbriefe.length;
       if (eigKontakte.length === 0) {
-        // Keine Eigentuemer hinterlegt → ein Brief an Fallback-Adresse
+        // Keine Eigentümer hinterlegt → ein Brief an Fallback-Adresse
         einzelbriefe.push({ bezeichnung: w.bezeichnung, eigentuemer: eigNamen, verwalter: verwNamen, adresse: fallbackAdresse, wq_zaehler: w.wertquote_zaehler || 0, wq_nenner: w.wertquote_nenner || 1000 });
       } else if (eigToProcess.length > 0) {
         // Nach Adresse gruppieren — Ehepaare/Gesamteigentum mit gleicher
@@ -5993,11 +5993,11 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
   }
 
   // ── Haushaltszusammenfassung über Wohnungs-Grenzen hinweg ──────
-  // Per-Wohnung haben wir oben bereits Eigentuemer mit gleicher Adresse
+  // Per-Wohnung haben wir oben bereits Eigentümer mit gleicher Adresse
   // gruppiert (Ehepaare auf demselben Platz = ein Brief). STWEG 8 hat
-  // aber haeufig denselben Haushalt auf MEHREREN Parkplaetzen (Thomas
+  // aber häufig denselben Haushalt auf MEHREREN Parkplaetzen (Thomas
   // Nijs P50/P64/P70, Esther Fleig P41/P42, etc.). Wir mergen daher
-  // nach dem Sammeln noch einmal ueber alle Briefe: gleiche normalisierte
+  // nach dem Sammeln noch einmal über alle Briefe: gleiche normalisierte
   // Name-Menge + gleiche normalisierte Adresse → ein Brief mit allen
   // Plaetzen kommagetrennt in `bezeichnung`.
   if (einzelbriefe.length > 0) {
@@ -6088,23 +6088,23 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
       // Rücklauf-Einträge anlegen (1 pro Brief). Bei einzelOnly: nur Einzelbriefe.
       // Sonst: 1 "Sammelbrief"-Eintrag pro Wohnung + 1 pro Einzelbrief.
       const brieflist = einzelOnly
-        ? einzelbriefe.map(e => ({ brief_typ: 'einzel', einheit: e.bezeichnung, empfaenger: e.eigentuemer.join(' & '), adresse: e.adresse }))
+        ? einzelbriefe.map(e => ({ brief_typ: 'einzel', einheit: e.bezeichnung, empfänger: e.eigentuemer.join(' & '), adresse: e.adresse }))
         : [
             ...wohnungen.rows.map(w => {
               const wInfo = byWohnung.get(w.id);
               const eigName = (wInfo.eigentuemer.map(e => e.name).filter(Boolean).join(' & ')) || '—';
-              return { brief_typ: 'sammel', einheit: w.bezeichnung, empfaenger: eigName, adresse: 'Sammelliste' };
+              return { brief_typ: 'sammel', einheit: w.bezeichnung, empfänger: eigName, adresse: 'Sammelliste' };
             }),
-            ...einzelbriefe.map(e => ({ brief_typ: 'einzel', einheit: e.bezeichnung, empfaenger: e.eigentuemer.join(' & '), adresse: e.adresse })),
+            ...einzelbriefe.map(e => ({ brief_typ: 'einzel', einheit: e.bezeichnung, empfänger: e.eigentuemer.join(' & '), adresse: e.adresse })),
           ];
-      // Erst alte Eintraege fuer diesen hash loeschen, dann neu (bei Re-Generation)
+      // Erst alte Eintraege für diesen hash löschen, dann neu (bei Re-Generation)
       await pool.query('DELETE FROM unterschriftenliste_rueckläufe WHERE snapshot_hash = $1', [hash]);
       for (let i = 0; i < brieflist.length; i++) {
         const b = brieflist[i];
         await pool.query(
           `INSERT INTO unterschriftenliste_rueckläufe (snapshot_hash, brief_idx, brief_typ, einheit, empfaenger_name, empfaenger_adresse)
            VALUES ($1, $2, $3, $4, $5, $6)`,
-          [hash, i + 1, b.brief_typ, b.einheit, b.empfaenger, b.adresse]
+          [hash, i + 1, b.brief_typ, b.einheit, b.empfänger, b.adresse]
         );
       }
     } catch (e) { console.error('[Unterschriftenliste] Snapshot-Save error:', e.message); }
@@ -6142,7 +6142,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
     const einheitLabel = plaetzeArr.length > 1
       ? `den Einheiten <strong>${escHtml(plaetzeArr.join(', '))}</strong>`
       : `der Einheit <strong>${escHtml(e.bezeichnung)}</strong>`;
-    const empfaenger = e.eigentuemer.join(' & ');
+    const empfänger = e.eigentuemer.join(' & ');
     const verwalterLine = e.verwalter.length > 0 ? `<p class="hinweis">↳ <em>vertreten durch Verwalter: <strong>${escHtml(e.verwalter.join(', '))}</strong></em></p>` : '';
     return `
     <div class="page-break"></div>
@@ -6156,7 +6156,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
       </div>
       <div class="absender">${ruecksendung_an ? escHtml(ruecksendung_an) : 'STWEG-Kooperation Rosenweg · c/o Ausschuss · 4303 Kaiseraugst'}</div>
       <div class="anschrift">
-        <strong>${escHtml(empfaenger)}</strong><br>
+        <strong>${escHtml(empfänger)}</strong><br>
         ${formatAdresseAnschrift(e.adresse)}
       </div>
       <h2 class="section-title">${escHtml(anlass_titel || 'Unterschriftenliste')}</h2>
@@ -6173,7 +6173,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
         </tr></thead>
         <tbody><tr>
           <td><strong>${escHtml(e.bezeichnung)}</strong></td>
-          <td>${escHtml(empfaenger)}${e.verwalter.length>0?'<br><span style="font-size:8.5pt;color:#555">↳ in Vertretung: '+escHtml(e.verwalter.join(', '))+'</span>':''}</td>
+          <td>${escHtml(empfänger)}${e.verwalter.length>0?'<br><span style="font-size:8.5pt;color:#555">↳ in Vertretung: '+escHtml(e.verwalter.join(', '))+'</span>':''}</td>
           <td style="text-align:center;font-family:monospace">${wq}</td>
           <td style="text-align:center;font-size:14pt">☐&nbsp;JA &nbsp;&nbsp; ☐&nbsp;NEIN</td>
           <td style="height:60px"></td>
@@ -6243,9 +6243,9 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
      ab 50mm Page-Top = 32mm im Print-Bereich, sodass auch bei
      2-zeiligem Absender genug Abstand bleibt.
      Mit @page-Margin (18mm/16mm) → left=109mm, top der Anschrift=37mm. */
-  /* Absender single-line erzwungen, Empfaenger weiter unten (~50mm vom
+  /* Absender single-line erzwungen, Empfänger weiter unten (~50mm vom
      Absender-Top entfernt). DIN 5008 Form B: Anschriftenfeld 45-85mm
-     vom Page-Top, Empfaenger ab ca. 55-60mm Page-Top empfohlen. */
+     vom Page-Top, Empfänger ab ca. 55-60mm Page-Top empfohlen. */
   .einzelbrief { position: relative; padding-top: 85mm; }
   .einzelbrief .header { position: absolute; top: 0; left: 0; }
   .einzelbrief .absender { position: absolute; top: 27mm; left: 109mm; width: 85mm; font-size: 7.5pt; color: #444; border-bottom: 1px solid #999; padding-bottom: 1px; margin: 0; line-height: 1.2; max-height: 11mm; overflow: hidden; }
@@ -6701,7 +6701,7 @@ app.get('/api/stweg/:stweg/overview', async (req, res) => {
       waschkuechen: parseInt(waschRooms.rows[0].anzahl),
     });
   } catch (err) {
-    res.status(500).json({ error: 'Fehler beim Laden der Uebersicht' });
+    res.status(500).json({ error: 'Fehler beim Laden der Übersicht' });
   }
 });
 
@@ -6737,7 +6737,7 @@ app.get('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
   }
 });
 
-// GET /api/wohnungen/:stweg/:id/historie - Archivierte Kontakte (Technik/Praesident/Ausschuss/Verwaltung)
+// GET /api/wohnungen/:stweg/:id/historie - Archivierte Kontakte (Technik/Präsident/Ausschuss/Verwaltung)
 app.get('/api/wohnungen/:stweg/:id/historie', authMiddleware, requireStwegAccess, canViewKontakteHistory, async (req, res) => {
   try {
     const wId = parseInt(req.params.id, 10);
@@ -6776,7 +6776,7 @@ app.post('/api/wohnungen/:stweg/:id/kontakte/:kid/archive', authMiddleware, requ
     );
     if (r.rowCount === 0) return res.status(404).json({ error: 'Kontakt nicht gefunden oder bereits archiviert' });
     res.json({ ok: true });
-    recordObjektChange(stweg, `${info.rolle === 'eigentuemer' ? 'Eigentuemer' : 'Mieter'} "${info.name}" aus Wohnung "${info.bezeichnung}" archiviert (Wegzug)`, req.user.email).catch(() => {});
+    recordObjektChange(stweg, `${info.rolle === 'eigentuemer' ? 'Eigentümer' : 'Mieter'} "${info.name}" aus Wohnung "${info.bezeichnung}" archiviert (Wegzug)`, req.user.email).catch(() => {});
   } catch (err) {
     console.error('Archive error:', err);
     res.status(500).json({ error: 'Fehler beim Archivieren' });
@@ -7591,7 +7591,7 @@ app.get('/api/stweg/:stweg/events', authMiddleware, async (req, res) => {
       location: e.location, category: e.category, all_day: e.all_day,
       id: e.id, source: 'stweg',
     }));
-    // Wartungen als virtuelle Events einmischen (aktive Vertraege mit naechster_termin
+    // Wartungen als virtuelle Events einmischen (aktive Verträge mit naechster_termin
     // dieser STWEG oder ohne STWEG-Zuordnung, ab heute - 7 Tage bis +365)
     let wartungEvents = [];
     try {
@@ -7666,7 +7666,7 @@ async function authentikAPI(method, path, body = null) {
   // Authentik bei URL-aufbauenden Endpunkten (recovery_email, account-confirm,
   // MFA-setup-link) den oeffentlichen Hostnamen in die generierten Links
   // einsetzt. Sonst landen Links als https://authentik-server:9443/... in
-  // Mails, die fuer Empfaenger nicht klickbar sind.
+  // Mails, die für Empfänger nicht klickbar sind.
   const url = `${AUTHENTIK_EXTERNAL_URL}/api/v3${path}`;
   const opts = {
     method,
@@ -8755,7 +8755,7 @@ app.post('/api/documents/move', authMiddleware, canManageDocs, async (req, res) 
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// BRIEFE TRACKING — Versendete Briefe, Empfaenger via OpenRouter Vision
+// BRIEFE TRACKING — Versendete Briefe, Empfänger via OpenRouter Vision
 // ═══════════════════════════════════════════════════════════════════
 
 const BRIEFE_DIR = 'allgemein/fotos_von_versendeten_briefen';
@@ -8836,19 +8836,19 @@ app.post('/api/briefe/upload', authMiddleware, requireAusschussOrTechnik, async 
     const mime = ext === 'png' ? 'image/png' : 'image/jpeg';
     const dataUrl = `data:${mime};base64,${bild_base64}`;
 
-    const systemPrompt = `Du extrahierst Empfaenger und Tracking aus dem Foto eines Schweizer WebStamp-Couverts (A-Post Plus).
+    const systemPrompt = `Du extrahierst Empfänger und Tracking aus dem Foto eines Schweizer WebStamp-Couverts (A-Post Plus).
 Antworte AUSSCHLIESSLICH mit gueltigem JSON, keine Markdown-Codebloecke, kein erklaerender Text.
 
 Schema:
 {
   "tracking": string|null,    // Volle Tracking-Nr unter dem Barcode, Format "98.01.018499.705XXXXX". 8 Ziffern beginnend mit 705.
-  "empfaenger": string|null,  // Vollstaendiger Empfaenger-Name (Person ODER Firma), z.B. "Roland Britt" oder "Ulrich Brueckner & Christine Brueckner" oder "Mehmet Peker AG"
+  "empfänger": string|null,  // Vollstaendiger Empfänger-Name (Person ODER Firma), z.B. "Roland Britt" oder "Ulrich Brueckner & Christine Brueckner" oder "Mehmet Peker AG"
   "strasse": string|null,
   "plz": string|null,
   "ort": string|null
 }
 
-WICHTIG: Der Empfaenger ist NICHT Joerg Herrmann / Rosenweg 14 (das ist der Absender). Lies das Empfaenger-Adressfeld.
+WICHTIG: Der Empfänger ist NICHT Joerg Herrmann / Rosenweg 14 (das ist der Absender). Lies das Empfänger-Adressfeld.
 Wenn ein Feld nicht erkennbar ist, setze null.`;
 
     const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -8866,7 +8866,7 @@ Wenn ein Feld nicht erkennbar ist, setze null.`;
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: [
-            { type: 'text', text: 'Extrahiere Empfaenger und Tracking aus diesem Brief-Foto.' },
+            { type: 'text', text: 'Extrahiere Empfänger und Tracking aus diesem Brief-Foto.' },
             { type: 'image_url', image_url: { url: dataUrl } },
           ]},
         ],
@@ -8897,11 +8897,11 @@ Wenn ein Feld nicht erkennbar ist, setze null.`;
     }
     const tracking5 = tail8.slice(-5);
 
-    if (!parsed.empfaenger || typeof parsed.empfaenger !== 'string') {
-      return res.status(422).json({ error: 'Empfaenger nicht erkannt', ocr: parsed });
+    if (!parsed.empfänger || typeof parsed.empfänger !== 'string') {
+      return res.status(422).json({ error: 'Empfänger nicht erkannt', ocr: parsed });
     }
-    const nameSlug = nameToSlug(parsed.empfaenger);
-    if (!nameSlug) return res.status(422).json({ error: 'Empfaenger nicht in Dateiname konvertierbar' });
+    const nameSlug = nameToSlug(parsed.empfänger);
+    if (!nameSlug) return res.status(422).json({ error: 'Empfänger nicht in Dateiname konvertierbar' });
 
     const newFilename = `${nameSlug}-${tracking5}.jpeg`;
     const dir = pathModule.join(DOCS_PATH, BRIEFE_DIR);
@@ -8922,7 +8922,7 @@ Wenn ein Feld nicht erkennbar ist, setze null.`;
       tracking5,
       trackingDotted: `${TRACKING_PREFIX_DOTTED}${tracking5}`,
       trackingPlain: `${TRACKING_PREFIX_PLAIN}${tracking5}`,
-      empfaenger: parsed.empfaenger,
+      empfänger: parsed.empfänger,
       strasse: parsed.strasse,
       plz: parsed.plz,
       ort: parsed.ort,
@@ -9083,10 +9083,10 @@ function requireAusschussOrTechnik(req, res, next) {
 
 // ─── Email-Log (Admin-UI) ───────────────────────────────────────────
 // GET /api/email-log — letzte 500 Versand-Einträge mit Filter
-// GET /api/telefonbuch — Internes Adressbuch fuer alle eingeloggten User
+// GET /api/telefonbuch — Internes Adressbuch für alle eingeloggten User
 // Zeigt alle Kontakte aus wohnungen_kontakte mit Telefon/Email,
-// gruppiert pro Person (Name als Schluessel), aggregiert ueber alle
-// Wohnungen die ihnen gehoeren/in denen sie wohnen.
+// gruppiert pro Person (Name als Schlüssel), aggregiert über alle
+// Wohnungen die ihnen gehören/in denen sie wohnen.
 app.get('/api/telefonbuch', authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(`
@@ -9128,7 +9128,7 @@ app.get('/api/telefonbuch', authMiddleware, async (req, res) => {
       });
       if (isDeceased) e.deceased = true;
     }
-    // Set → Array fuer JSON
+    // Set → Array für JSON
     for (const e of byName.values()) e.rollen = [...e.rollen];
     // Sortierung nach Nachname (letztes Wort), dann Vorname
     const lastName = n => (n || '').trim().split(/\s+/).pop() || '';
@@ -9341,7 +9341,7 @@ app.get('/api/projects/:slug/auslagen', authMiddleware, requireEigentuemer, asyn
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// GET /api/projects-mini — kompakte Liste fuer Dropdowns (kein Eigentuemer-Check, alle eingeloggten User)
+// GET /api/projects-mini — kompakte Liste für Dropdowns (kein Eigentümer-Check, alle eingeloggten User)
 app.get('/api/projects-mini', authMiddleware, async (req, res) => {
   try {
     const r = await pool.query(`SELECT slug, title FROM projects WHERE COALESCE(status,'aktiv') != 'archiviert' ORDER BY title`);
@@ -9733,7 +9733,7 @@ app.put('/api/handwerker/:id', authMiddleware, requirePermission('handwerker', '
   }
 });
 
-// Auftraege pro Handwerker
+// Aufträge pro Handwerker
 async function syncLetzterAuftrag(client, handwerkerId) {
   await client.query(
     `UPDATE handwerker SET
@@ -9770,7 +9770,7 @@ async function recomputeNaechsterTermin(client, vertragId) {
   );
 }
 
-// Vertraege pro Handwerker
+// Verträge pro Handwerker
 function sanitizeVertrag(b) {
   const trim = (v) => (v == null ? null : String(v).trim() || null);
   const intvl = b.frequenz_intervall == null || b.frequenz_intervall === '' ? null : parseInt(b.frequenz_intervall, 10);
@@ -9795,7 +9795,7 @@ function sanitizeVertrag(b) {
   };
 }
 
-app.get('/api/handwerker/:id/vertraege', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
+app.get('/api/handwerker/:id/verträge', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige Handwerker-ID' });
@@ -9803,14 +9803,14 @@ app.get('/api/handwerker/:id/vertraege', authMiddleware, requirePermission('hand
       `SELECT * FROM handwerker_vertraege WHERE handwerker_id = $1 ORDER BY status ASC, naechster_termin NULLS LAST, titel`,
       [id]
     );
-    res.json({ vertraege: result.rows });
+    res.json({ verträge: result.rows });
   } catch (err) {
-    console.error('Vertraege list error:', err);
+    console.error('Verträge list error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Verträge' });
   }
 });
 
-app.post('/api/handwerker/:id/vertraege', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.post('/api/handwerker/:id/verträge', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige Handwerker-ID' });
@@ -9835,7 +9835,7 @@ app.post('/api/handwerker/:id/vertraege', authMiddleware, requirePermission('han
   }
 });
 
-app.put('/api/handwerker/:id/vertraege/:vid', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.put('/api/handwerker/:id/verträge/:vid', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const vid = parseInt(req.params.vid, 10);
@@ -9860,7 +9860,7 @@ app.put('/api/handwerker/:id/vertraege/:vid', authMiddleware, requirePermission(
   }
 });
 
-app.delete('/api/handwerker/:id/vertraege/:vid', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.delete('/api/handwerker/:id/verträge/:vid', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const vid = parseInt(req.params.vid, 10);
@@ -9877,8 +9877,8 @@ app.delete('/api/handwerker/:id/vertraege/:vid', authMiddleware, requirePermissi
   }
 });
 
-// Anstehende Wartungen ueber alle Handwerker
-app.get('/api/handwerker-vertraege/anstehend', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
+// Anstehende Wartungen über alle Handwerker
+app.get('/api/handwerker-verträge/anstehend', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
     const days = Math.min(365, Math.max(7, parseInt(req.query.days, 10) || 90));
     const result = await pool.query(
@@ -9892,14 +9892,14 @@ app.get('/api/handwerker-vertraege/anstehend', authMiddleware, requirePermission
         ORDER BY v.naechster_termin ASC, h.firma ASC`,
       [String(days)]
     );
-    res.json({ vertraege: result.rows, days });
+    res.json({ verträge: result.rows, days });
   } catch (err) {
-    console.error('Vertraege anstehend error:', err);
+    console.error('Verträge anstehend error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der anstehenden Wartungen' });
   }
 });
 
-app.get('/api/handwerker/:id/auftraege', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
+app.get('/api/handwerker/:id/aufträge', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: 'Ungültige Handwerker-ID' });
@@ -9907,9 +9907,9 @@ app.get('/api/handwerker/:id/auftraege', authMiddleware, requirePermission('hand
       'SELECT * FROM handwerker_auftraege WHERE handwerker_id = $1 ORDER BY datum DESC, id DESC',
       [id]
     );
-    res.json({ auftraege: result.rows });
+    res.json({ aufträge: result.rows });
   } catch (err) {
-    console.error('Auftraege list error:', err);
+    console.error('Aufträge list error:', err);
     res.status(500).json({ error: 'Fehler beim Laden der Aufträge' });
   }
 });
@@ -9929,7 +9929,7 @@ function sanitizeAuftrag(b) {
   };
 }
 
-app.post('/api/handwerker/:id/auftraege', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.post('/api/handwerker/:id/aufträge', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
@@ -9956,7 +9956,7 @@ app.post('/api/handwerker/:id/auftraege', authMiddleware, requirePermission('han
   }
 });
 
-app.put('/api/handwerker/:id/auftraege/:aid', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.put('/api/handwerker/:id/aufträge/:aid', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
@@ -9991,7 +9991,7 @@ app.put('/api/handwerker/:id/auftraege/:aid', authMiddleware, requirePermission(
   }
 });
 
-app.delete('/api/handwerker/:id/auftraege/:aid', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.delete('/api/handwerker/:id/aufträge/:aid', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
@@ -10111,7 +10111,7 @@ app.get('/api/handwerker-notfall', authMiddleware, requirePermission('handwerker
     }
     const zuwsByEvent = {};
     for (const z of zuws.rows) {
-      // STWEG-Filter: leere stweg = gilt fuer alle, sonst nur passend
+      // STWEG-Filter: leere stweg = gilt für alle, sonst nur passend
       if (stwegFilter && z.stweg && z.stweg !== stwegFilter) continue;
       if (!zuwsByEvent[z.event_typ_id]) zuwsByEvent[z.event_typ_id] = [];
       zuwsByEvent[z.event_typ_id].push({
@@ -10156,7 +10156,7 @@ app.delete('/api/handwerker/:id', authMiddleware, requirePermission('handwerker'
 });
 
 // ─── Auslagen / Vorschuesse ────────────────────────────────────────────
-// Eigentuemer reichen verauslagte Betraege ein; Ausschuss/Technik genehmigt
+// Eigentümer reichen verauslagte Betraege ein; Ausschuss/Technik genehmigt
 // und markiert als ausbezahlt. Belege werden als Dateien im DOCS-Volume
 // unter <stweg-folder>/auslagen/ abgelegt.
 
@@ -10169,7 +10169,7 @@ function auslagenStwegFolder(stweg) {
   return 'allgemein';
 }
 
-// Sucht die zustaendige Verwaltung fuer einen STWEG.
+// Sucht die zustaendige Verwaltung für einen STWEG.
 // Reihenfolge:
 //   1) Aktive Verwaltung mit passendem stweg
 //   2) Aktive Verwaltung mit stweg IS NULL (Kooperations-weit)
@@ -10234,7 +10234,7 @@ async function findVerwaltungForStweg(stweg) {
 }
 
 // ─── Verwaltungs-Mail-Genehmigungs-Queue ─────────────────────────────
-// Jede Mail an die externe Verwaltung muss erst von Technik oder Praesident
+// Jede Mail an die externe Verwaltung muss erst von Technik oder Präsident
 // freigegeben werden. Inhalt ist in der Queue editierbar.
 
 async function enqueueVerwaltungMail({
@@ -10243,7 +10243,7 @@ async function enqueueVerwaltungMail({
   const toStr = Array.isArray(mailTo) ? mailTo.join(', ') : String(mailTo || '');
   const ccStr = Array.isArray(mailCc) ? mailCc.join(', ') : (mailCc ? String(mailCc) : null);
   // M7: Attachments in separater Tabelle statt JSONB inline (Skalierbarkeit).
-  // Legacy attachments-JSONB-Spalte wird mit minimalen Metadaten gefuellt fuer
+  // Legacy attachments-JSONB-Spalte wird mit minimalen Metadaten gefuellt für
   // Backward-Compat des GET-Endpoints.
   const attMeta = (attachments || []).map(a => ({
     filename: a.filename,
@@ -10271,7 +10271,7 @@ async function enqueueVerwaltungMail({
     );
   }
 
-  // Notification an Technik + Praesident: "Neue Mail wartet auf Freigabe"
+  // Notification an Technik + Präsident: "Neue Mail wartet auf Freigabe"
   try {
     const approvers = await pool.query(
       `SELECT DISTINCT email FROM users
@@ -10394,7 +10394,7 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
   try {
     const verw = await findVerwaltungForStweg(auslage.stweg);
     if (!verw || verw.mailTo.length === 0) {
-      console.warn(`[auslagen] Keine Verwaltung mit E-Mail fuer STWEG ${auslage.stweg || '-'} hinterlegt`);
+      console.warn(`[auslagen] Keine Verwaltung mit E-Mail für STWEG ${auslage.stweg || '-'} hinterlegt`);
       return { ok: false, reason: 'keine Verwaltung mit E-Mail hinterlegt' };
     }
     // Projekt-Titel nachladen (auslage hat nur slug)
@@ -10459,7 +10459,7 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
       subject = `${subjectPrefix}Auszahlungsauftrag ${stwegLabel}: ${auslage.user_name} – CHF ${betrag} (Auslage ${auslage.id})`;
       text = [
       verw.fallback === 'ausschuss'
-        ? `ACHTUNG: Fuer ${stwegLabel} ist KEINE aktive Verwaltung mit E-Mail-Adresse hinterlegt.\n`
+        ? `ACHTUNG: Für ${stwegLabel} ist KEINE aktive Verwaltung mit E-Mail-Adresse hinterlegt.\n`
           + `Diese Auszahlungs-Aufforderung geht deshalb ersatzweise an den Ausschuss.\n`
           + `Bitte unter ${SITE_URL}/verwaltung-admin.html die Verwaltung pflegen, danach geht die Mail kuenftig automatisch dorthin.\n`
           + `\n────────────────────────────────────────\n`
@@ -10473,7 +10473,7 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
       `Sehr geehrte Damen und Herren`,
       ``,
       isNachgereicht
-        ? `der Ausschuss hat folgende Auslage waehrend der Vakanz-Phase geprueft und freigegeben.`
+        ? `der Ausschuss hat folgende Auslage während der Vakanz-Phase geprueft und freigegeben.`
         : `der Ausschuss hat folgende Auslage geprueft und zur Auszahlung freigegeben.`,
       `Bitte ueberweisen Sie den Betrag an die unten angegebene IBAN.`,
       ``,
@@ -10485,12 +10485,12 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
       `Beleg-Datum:     ${datum}`,
       `Kategorie:       ${auslage.kategorie || '-'}`,
       `Betrag:          CHF ${betrag}`,
-      `IBAN:            ${auslage.iban || '⚠ NICHT angegeben – bitte beim Eigentuemer erfragen'}`,
+      `IBAN:            ${auslage.iban || '⚠ NICHT angegeben – bitte beim Eigentümer erfragen'}`,
       ``,
       `── Beschreibung ──`,
       auslage.beschreibung || '-',
       ``,
-      auslage.bemerkung_eigentuemer ? `── Bemerkung Eigentuemer ──\n${auslage.bemerkung_eigentuemer}\n` : '',
+      auslage.bemerkung_eigentuemer ? `── Bemerkung Eigentümer ──\n${auslage.bemerkung_eigentuemer}\n` : '',
       auslage.bemerkung_ausschuss ? `── Bemerkung Ausschuss ──\n${auslage.bemerkung_ausschuss}\n` : '',
       `── Freigabe ──`,
       `Geprueft und freigegeben durch: ${freigebender} am ${freigabeAm}`,
@@ -10499,7 +10499,7 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
         ? `Der Beleg ist als Anhang beigefuegt.`
         : `Achtung: kein Beleg hinterlegt.`,
       ``,
-      `Nach erfolgter Ueberweisung bitte als Bestaetigung kurze Rueckmeldung an ${ausschussEmail}, der Eigentuemer markiert die Auslage selbst als "erhalten" auf:`,
+      `Nach erfolgter Überweisung bitte als Bestätigung kurze Rueckmeldung an ${ausschussEmail}, der Eigentümer markiert die Auslage selbst als "erhalten" auf:`,
       `${SITE_URL}/auslagen.html`,
       ``,
       `Freundliche Gruesse`,
@@ -10520,7 +10520,7 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
         }
       }
       // C1-Fix: nur tracken wenn Mail wirklich raus ist — sonst weiss der
-      // Eigentuemer nicht, dass der Versand fehlgeschlagen ist.
+      // Eigentümer nicht, dass der Versand fehlgeschlagen ist.
       try {
         await loggedSendMail({
           from: MAIL_FROM,
@@ -10566,10 +10566,10 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
   }
 }
 
-// Objektverwaltungs-Aenderungen an die Verwaltung melden.
-// Coalescing: solange ein pending Queue-Eintrag fuer den STWEG existiert,
-// wird er um die neue Aenderung erweitert (eine Sammel-Mail pro STWEG).
-// Bei Ausschuss-Fallback wird gar nichts gemacht (Ausschuss kennt die Aenderungen).
+// Objektverwaltungs-Änderungen an die Verwaltung melden.
+// Coalescing: solange ein pending Queue-Eintrag für den STWEG existiert,
+// wird er um die neue Änderung erweitert (eine Sammel-Mail pro STWEG).
+// Bei Ausschuss-Fallback wird gar nichts gemacht (Ausschuss kennt die Änderungen).
 async function recordObjektChange(stweg, line, changedBy) {
   try {
     const stwegInt = parseInt(stweg, 10);
@@ -10583,7 +10583,7 @@ async function recordObjektChange(stweg, line, changedBy) {
 
     const existing = await pool.query(
       `SELECT id, body_text FROM verwaltung_mail_queue
-        WHERE source_type = 'objekt-aenderung'
+        WHERE source_type = 'objekt-änderung'
           AND source_id = $1
           AND status = 'pending'
         LIMIT 1`,
@@ -10602,27 +10602,27 @@ async function recordObjektChange(stweg, line, changedBy) {
     }
 
     // Neuen Sammel-Eintrag in die Queue stellen — Template aus DB versuchen
-    const tpl = await findMailTemplate('objekt-aenderung', 'verwaltung');
+    const tpl = await findMailTemplate('objekt-änderung', 'verwaltung');
     const tplContext = {
       stweg_label: stwegLabel, stweg: stwegVal, today_de: new Date().toLocaleDateString('de-CH'),
       erste_aenderung: newLine, site_url: SITE_URL,
     };
     const subject = tpl
       ? renderTemplate(tpl.subject_template, tplContext)
-      : `Objektverwaltungs-Aenderungen ${stwegLabel} (${new Date().toLocaleDateString('de-CH')})`;
+      : `Objektverwaltungs-Änderungen ${stwegLabel} (${new Date().toLocaleDateString('de-CH')})`;
     const body = tpl
       ? renderTemplate(tpl.body_template, tplContext)
       : [
           `Sehr geehrte Damen und Herren`,
           ``,
-          `folgende Aenderungen wurden in der Objektverwaltung der STWEG-Kooperation`,
-          `erfasst und sind fuer Ihre Unterlagen relevant:`,
+          `folgende Änderungen wurden in der Objektverwaltung der STWEG-Kooperation`,
+          `erfasst und sind für Ihre Unterlagen relevant:`,
           ``,
-          `── Aenderungen (${stwegLabel}) ──`,
+          `── Änderungen (${stwegLabel}) ──`,
           newLine,
           ``,
-          `Diese Mail wird automatisch um weitere Aenderungen erweitert, solange sie`,
-          `noch nicht freigegeben ist. Sobald Technik oder Praesident die Mail`,
+          `Diese Mail wird automatisch um weitere Änderungen erweitert, solange sie`,
+          `noch nicht freigegeben ist. Sobald Technik oder Präsident die Mail`,
           `freigibt, geht sie an Sie raus.`,
           ``,
           `Bitte aktualisieren Sie Ihre Stamm- und Kontaktdaten entsprechend.`,
@@ -10632,7 +10632,7 @@ async function recordObjektChange(stweg, line, changedBy) {
         ].join('\n');
 
     await enqueueVerwaltungMail({
-      source_type: 'objekt-aenderung',
+      source_type: 'objekt-änderung',
       source_id: stwegVal || 0,
       mailTo: verw.mailTo,
       mailCc: verw.mailCc,
@@ -10643,7 +10643,7 @@ async function recordObjektChange(stweg, line, changedBy) {
       createdBy: changedBy || 'system',
     });
   } catch (err) {
-    console.warn('[objekt-aenderung] recordObjektChange Fehler:', err.message);
+    console.warn('[objekt-änderung] recordObjektChange Fehler:', err.message);
   }
 }
 
@@ -10658,10 +10658,10 @@ async function resendOffeneAuszahlungenFuerWirksameVerwaltung(stwegOrNull) {
     let stwegFilter;
     if (Number.isFinite(stwegInt) && stwegInt >= 1 && stwegInt <= 8) {
       params.push(stwegInt);
-      // Stweg-spezifische Verwaltung: schlaegt fuer Auslagen DIESES Stwegs zu
+      // Stweg-spezifische Verwaltung: schlaegt für Auslagen DIESES Stwegs zu
       stwegFilter = `stweg = $${params.length}`;
     } else {
-      // Uebergreifende Verwaltung: schlaegt fuer Auslagen ohne Verwaltung des eigenen Stwegs zu
+      // Uebergreifende Verwaltung: schlaegt für Auslagen ohne Verwaltung des eigenen Stwegs zu
       stwegFilter = `TRUE`;
     }
     const offene = await pool.query(
@@ -10708,7 +10708,7 @@ function canSeeAuslage(row, user) {
   if (row.user_email && row.user_email.toLowerCase() === (user.email || '').toLowerCase()) return true;
   // Ausschuss seines STWEGs sieht Auslagen seines STWEGs
   if (row.stweg && getAusschussStwegs(groups).has(parseInt(row.stweg, 10))) return true;
-  // M6: STWEG-uebergreifende Auslagen (stweg=NULL) sind fuer alle Ausschuss-Mitglieder sichtbar
+  // M6: STWEG-uebergreifende Auslagen (stweg=NULL) sind für alle Ausschuss-Mitglieder sichtbar
   // — analog zu canEditAuslageStatus
   if (!row.stweg && isAusschussForAny(groups)) return true;
   return false;
@@ -10718,14 +10718,14 @@ function canEditAuslageStatus(row, user) {
   const groups = user?.groups || [];
   if (isTechnik(groups) || isPraesident(groups)) return true;
   if (row.stweg && getAusschussStwegs(groups).has(parseInt(row.stweg, 10))) return true;
-  // Auslagen ohne STWEG-Bezug duerfen alle Ausschuss-Mitglieder bearbeiten
+  // Auslagen ohne STWEG-Bezug dürfen alle Ausschuss-Mitglieder bearbeiten
   if (!row.stweg && isAusschussForAny(groups)) return true;
   return false;
 }
 
-// "Ausbezahlt" / "erhalten" duerfen setzen:
-// - Verwaltung / Technik / Praesident (offizielle Auszahlung)
-// - der einreichende Eigentuemer selbst (Bestaetigung "Geld erhalten")
+// "Ausbezahlt" / "erhalten" dürfen setzen:
+// - Verwaltung / Technik / Präsident (offizielle Auszahlung)
+// - der einreichende Eigentümer selbst (Bestätigung "Geld erhalten")
 function canMarkPaid(user, row = null) {
   const groups = user?.groups || [];
   if (isTechnik(groups) || isPraesident(groups)) return true;
@@ -10735,7 +10735,7 @@ function canMarkPaid(user, row = null) {
 }
 
 // GET /api/auslagen — Liste (eigene + ggf. STWEG-Auslagen falls Ausschuss/Technik)
-// GET /api/dashboard — aggregierte Daten fuer Startseite je nach Rolle
+// GET /api/dashboard — aggregierte Daten für Startseite je nach Rolle
 app.get('/api/dashboard', authMiddleware, async (req, res) => {
   try {
     const email = (req.user.email || '').toLowerCase();
@@ -10757,7 +10757,7 @@ app.get('/api/dashboard', authMiddleware, async (req, res) => {
       widgets.meine_auslagen = by;
     } catch {}
 
-    // 2) Auslagen zu pruefen (fuer Ausschuss/Technik)
+    // 2) Auslagen zu prüfen (für Ausschuss/Technik)
     if (canReview) {
       try {
         const stwegFilter = isAdmin ? 'TRUE' : `stweg = ANY($1::int[])`;
@@ -10774,7 +10774,7 @@ app.get('/api/dashboard', authMiddleware, async (req, res) => {
       } catch {}
     }
 
-    // 3) Mail-Outbox pending (nur Technik/Praesident)
+    // 3) Mail-Outbox pending (nur Technik/Präsident)
     if (isAdmin) {
       try {
         const r = await pool.query(
@@ -10785,7 +10785,7 @@ app.get('/api/dashboard', authMiddleware, async (req, res) => {
       } catch {}
     }
 
-    // 4) Anstehende Handwerker-Vertraege (alle die Berechtigung haben)
+    // 4) Anstehende Handwerker-Verträge (alle die Berechtigung haben)
     try {
       const r = await pool.query(
         `SELECT v.id, v.titel, v.naechster_termin, v.stweg, h.firma
@@ -10853,7 +10853,7 @@ app.get('/api/dashboard', authMiddleware, async (req, res) => {
       } catch {}
     }
 
-    // 8) WhatsApp-Outbox-Status (Technik/Praesident)
+    // 8) WhatsApp-Outbox-Status (Technik/Präsident)
     if (isAdmin) {
       try {
         const r = await pool.query(`
@@ -10931,7 +10931,7 @@ app.get('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'), 
         LIMIT 500`,
       params,
     );
-    // Aktive Projekte fuer Dropdown
+    // Aktive Projekte für Dropdown
     const projektsRes = await pool.query(`SELECT slug, title FROM projects WHERE COALESCE(status,'aktiv') != 'archiviert' ORDER BY title`);
     res.json({
       auslagen: result.rows,
@@ -10947,7 +10947,7 @@ app.get('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'), 
   }
 });
 
-// POST /api/auslagen — neue Auslage einreichen (Eigentuemer)
+// POST /api/auslagen — neue Auslage einreichen (Eigentümer)
 app.post('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
   try {
     const { datum, kategorie, beschreibung, betrag_chf, iban, stweg, bemerkung_eigentuemer, beleg_base64, beleg_filename, projekt_slug } = req.body || {};
@@ -11024,9 +11024,9 @@ app.post('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'),
           from: MAIL_FROM,
           to: adminEmails.join(', '),
           subject: `Neue Auslage von ${userName} (${stwegLabel}, CHF ${betrag.toFixed(2)})`,
-          text: `${userName} (${userEmail}) hat eine Auslage zur Pruefung eingereicht.\n\n`
+          text: `${userName} (${userEmail}) hat eine Auslage zur Prüfung eingereicht.\n\n`
             + `STWEG: ${stwegLabel}\nDatum: ${datum}\nKategorie: ${kat || '-'}\nBetrag: CHF ${betrag.toFixed(2)}\n`
-            + `Beschreibung: ${beschreibung}\n\nZum Pruefen: ${SITE_URL}/auslagen.html`,
+            + `Beschreibung: ${beschreibung}\n\nZum Prüfen: ${SITE_URL}/auslagen.html`,
         }, 'auslage-neu');
         // WhatsApp-Push an Approver mit Opt-In
         pushWhatsappBroadcast({
@@ -11045,7 +11045,7 @@ app.post('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'),
   }
 });
 
-// PUT /api/auslagen/:id — Aendern (Eigentuemer nur eigene+eingereicht; Ausschuss Status/Bemerkung)
+// PUT /api/auslagen/:id — Ändern (Eigentümer nur eigene+eingereicht; Ausschuss Status/Bemerkung)
 app.put('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -11099,18 +11099,18 @@ app.put('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'read
       }
     }
 
-    // Status-Aenderung: Ausschuss/Technik/Praesident voll;
-    // Eigentuemer darf eigene "genehmigte" Auslage als "ausbezahlt" (erhalten) bestaetigen.
+    // Status-Änderung: Ausschuss/Technik/Präsident voll;
+    // Eigentümer darf eigene "genehmigte" Auslage als "ausbezahlt" (erhalten) bestätigen.
     if (req.body.status !== undefined) {
       const newStatus = req.body.status;
       if (!AUSLAGEN_STATUS.includes(newStatus)) return res.status(400).json({ error: 'Ungueltiger Status' });
       const isOwnerConfirmPaid = isOwner && newStatus === 'ausbezahlt' && row.status === 'genehmigt';
       if (canReview) {
         if (newStatus === 'ausbezahlt' && !canMarkPaid(req.user, row)) {
-          return res.status(403).json({ error: '"Ausbezahlt" duerfen nur Verwaltung, Technik, Praesident oder der einreichende Eigentuemer (nach Genehmigung) setzen' });
+          return res.status(403).json({ error: '"Ausbezahlt" dürfen nur Verwaltung, Technik, Präsident oder der einreichende Eigentümer (nach Genehmigung) setzen' });
         }
       } else if (!isOwnerConfirmPaid) {
-        return res.status(403).json({ error: 'Keine Berechtigung fuer diese Status-Aenderung' });
+        return res.status(403).json({ error: 'Keine Berechtigung für diese Status-Änderung' });
       }
       push('status', newStatus);
       push('bearbeitet_von', req.user.email);
@@ -11125,7 +11125,7 @@ app.put('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'read
       push('bemerkung_ausschuss', req.body.bemerkung_ausschuss ? String(req.body.bemerkung_ausschuss).slice(0, 1000) : null);
     }
 
-    if (updates.length === 0) return res.status(400).json({ error: 'Keine erlaubten Aenderungen' });
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine erlaubten Änderungen' });
     params.push(id);
     updates.push('updated_at = NOW()');
     const result = await pool.query(
@@ -11135,12 +11135,12 @@ app.put('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'read
 
     const updated = result.rows[0];
 
-    // Mail an Eigentuemer bei Status-Wechsel
+    // Mail an Eigentümer bei Status-Wechsel
     try {
       if (req.body.status && req.body.status !== row.status) {
         const labelMap = { genehmigt: 'genehmigt', abgelehnt: 'abgelehnt', ausbezahlt: 'als ausbezahlt markiert', eingereicht: 'wieder eroeffnet' };
         const label = labelMap[req.body.status] || req.body.status;
-        // Eigentuemer-Bestaetigung "erhalten" → keine Mail an sich selbst
+        // Eigentümer-Bestätigung "erhalten" → keine Mail an sich selbst
         const skipOwnerMail = (req.body.status === 'ausbezahlt' && isOwner && !canReview);
         if (!skipOwnerMail) {
           await loggedSendMail({
@@ -11148,11 +11148,11 @@ app.put('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'read
             to: row.user_email,
             subject: `Auslage ${label}: CHF ${Number(row.betrag_chf).toFixed(2)} (${row.beschreibung.slice(0, 60)})`,
             text: `Hallo ${row.user_name},\n\n`
-              + `deine Auslage vom ${row.datum} ueber CHF ${Number(row.betrag_chf).toFixed(2)} wurde ${label}.\n`
+              + `deine Auslage vom ${row.datum} über CHF ${Number(row.betrag_chf).toFixed(2)} wurde ${label}.\n`
               + (req.body.bemerkung_ausschuss ? `\nBemerkung Ausschuss: ${req.body.bemerkung_ausschuss}\n` : '')
               + `\nDetails: ${SITE_URL}/auslagen.html`,
           }, 'auslage-status');
-          // WhatsApp-Push an Eigentuemer
+          // WhatsApp-Push an Eigentümer
           const emoji = req.body.status === 'genehmigt' ? '✅' : req.body.status === 'ausbezahlt' ? '💰' : req.body.status === 'abgelehnt' ? '❌' : '🔄';
           pushWhatsappIfOptIn({
             email: row.user_email, sourceType: 'auslage-status', sourceId: row.id,
@@ -11190,7 +11190,7 @@ app.delete('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'r
     const isOwner = row.user_email.toLowerCase() === (req.user.email || '').toLowerCase();
     const canReview = canEditAuslageStatus(row, req.user);
     if (!canReview && !(isOwner && row.status === 'eingereicht')) {
-      return res.status(403).json({ error: 'Loeschen nur fuer eigene eingereichte Auslagen oder Ausschuss/Technik' });
+      return res.status(403).json({ error: 'Löschen nur für eigene eingereichte Auslagen oder Ausschuss/Technik' });
     }
     if (row.beleg_path) {
       try {
@@ -11218,7 +11218,7 @@ app.delete('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'r
     res.json({ success: true, cancelled_queue_mails: qDel.rowCount });
   } catch (err) {
     console.error('Auslagen delete error:', err);
-    res.status(500).json({ error: 'Fehler beim Loeschen' });
+    res.status(500).json({ error: 'Fehler beim Löschen' });
   }
 });
 
@@ -11287,7 +11287,7 @@ app.post('/api/auslagen/:id/belege', authMiddleware, requirePermission('auslagen
     const row = aus.rows[0];
     const isOwner = row.user_email.toLowerCase() === (req.user.email || '').toLowerCase();
     if (!(isOwner && row.status === 'eingereicht') && !canEditAuslageStatus(row, req.user)) {
-      return res.status(403).json({ error: 'Belege hinzufuegen nur bei eigener eingereichter Auslage oder Ausschuss' });
+      return res.status(403).json({ error: 'Belege hinzufügen nur bei eigener eingereichter Auslage oder Ausschuss' });
     }
     const { beleg_base64, beleg_filename, waehrung_original, wechselkurs_chf, kurs_quelle } = req.body || {};
     if (!beleg_base64) return res.status(400).json({ error: 'beleg_base64 fehlt' });
@@ -11327,7 +11327,7 @@ app.delete('/api/auslagen/:id/belege/:bid', authMiddleware, requirePermission('a
     const row = aus.rows[0];
     const isOwner = row.user_email.toLowerCase() === (req.user.email || '').toLowerCase();
     if (!(isOwner && row.status === 'eingereicht') && !canEditAuslageStatus(row, req.user)) {
-      return res.status(403).json({ error: 'Loeschen nur bei eigener eingereichter Auslage oder Ausschuss' });
+      return res.status(403).json({ error: 'Löschen nur bei eigener eingereichter Auslage oder Ausschuss' });
     }
     const beleg = await pool.query('SELECT beleg_path FROM auslagen_belege WHERE id = $1 AND auslage_id = $2', [bid, id]);
     if (beleg.rows.length === 0) return res.status(404).json({ error: 'Beleg nicht gefunden' });
@@ -11346,10 +11346,10 @@ app.delete('/api/auslagen/:id/belege/:bid', authMiddleware, requirePermission('a
 // ─── Auslagen: Positionen + KI-Belegleser + Stundensatz + Multi-Belege + FX ─────
 
 // FX-Helper: holt Wechselkurs am Datum von exchangerate.host (kostenlos, kein Key).
-// Cache: 24h pro (Datum + Waehrung) damit nicht jeder Scan ein Hit ist.
+// Cache: 24h pro (Datum + Währung) damit nicht jeder Scan ein Hit ist.
 const _fxCache = new Map();
-async function getWechselkursChf(waehrung, datum) {
-  const wkn = String(waehrung || 'CHF').toUpperCase();
+async function getWechselkursChf(währung, datum) {
+  const wkn = String(währung || 'CHF').toUpperCase();
   if (wkn === 'CHF' || !wkn) return { kurs: 1, quelle: null };
   const dat = (datum && /^\d{4}-\d{2}-\d{2}$/.test(datum)) ? datum : new Date().toISOString().slice(0, 10);
   const cacheKey = `${dat}:${wkn}`;
@@ -11372,7 +11372,7 @@ async function getWechselkursChf(waehrung, datum) {
 }
 
 // POST /api/auslagen/scan-beleg — Foto/PDF eines Belegs hochladen, KI extrahiert
-// Positionen, Datum, Total. Returns {datum, lieferant, positionen[], total_chf, waehrung, kurs}.
+// Positionen, Datum, Total. Returns {datum, lieferant, positionen[], total_chf, währung, kurs}.
 app.post('/api/auslagen/scan-beleg', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
   try {
     // Rate-Limit: max 30 Scans/h pro User (KI-Kosten)
@@ -11403,14 +11403,14 @@ Schema:
 {
   "datum": "YYYY-MM-DD" | null,
   "lieferant": string | null,        // Geschaeft, Firma
-  "waehrung": "CHF" | "EUR" | null,
+  "währung": "CHF" | "EUR" | null,
   "positionen": [
     {
       "beschreibung": string,       // Artikelname / Leistung
       "menge": number,              // Stueckzahl/Menge, default 1
       "einheit": string | null,     // "Stk", "kg", "l", "h", "m", ...
       "einzelpreis": number | null, // pro Einheit, optional
-      "gesamt": number              // total fuer diese Position
+      "gesamt": number              // total für diese Position
     }
   ],
   "subtotal": number | null,         // ohne MWST, falls erkennbar
@@ -11419,9 +11419,9 @@ Schema:
 }
 
 WICHTIG:
-- Alle Betraege als Zahlen in der Waehrung (z.B. 12.50 fuer 12.50 CHF)
+- Alle Betraege als Zahlen in der Währung (z.B. 12.50 für 12.50 CHF)
 - Wenn Datum nicht erkennbar: null
-- Mengen und Einheiten so genau wie moeglich extrahieren
+- Mengen und Einheiten so genau wie möglich extrahieren
 - Bei Restaurant-Beleg: jede Speise/Getraenk als eigene Position
 - Bei Baumarkt-Rechnung: jeden Artikel separat`;
 
@@ -11462,13 +11462,13 @@ WICHTIG:
       console.error('[auslagen-scan] JSON-Parse failed:', jsonText.slice(0, 300));
       return res.status(502).json({ error: 'OCR-Antwort kein gueltiges JSON', raw: content.slice(0, 500) });
     }
-    const waehrung = String(parsed.waehrung || 'CHF').toUpperCase();
-    const fx = await getWechselkursChf(waehrung, parsed.datum);
+    const währung = String(parsed.währung || 'CHF').toUpperCase();
+    const fx = await getWechselkursChf(währung, parsed.datum);
     const conv = (v) => Number.isFinite(v) ? Math.round(v * fx.kurs * 100) / 100 : v;
     res.json({
       datum: parsed.datum || null,
       lieferant: parsed.lieferant || null,
-      waehrung,
+      währung,
       wechselkurs_chf: fx.kurs,
       kurs_quelle: fx.quelle,
       positionen: Array.isArray(parsed.positionen) ? parsed.positionen.map(p => ({
@@ -11590,7 +11590,7 @@ app.delete('/api/auslagen-stundensatz/:id', authMiddleware, requirePermission('a
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Helper-API: liefert den gueltigen Stundensatz fuer einen STWEG (mit Fallback auf uebergreifend)
+// Helper-API: liefert den gueltigen Stundensatz für einen STWEG (mit Fallback auf uebergreifend)
 app.get('/api/auslagen-stundensatz/aktuell', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
   try {
     const stwegInt = parseInt(req.query.stweg, 10);
@@ -11606,14 +11606,14 @@ app.get('/api/auslagen-stundensatz/aktuell', authMiddleware, requirePermission('
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Seed: Auslagen-Stundensatz read fuer Ausschuss + Eigentuemer (zum Anzeigen)
+// Seed: Auslagen-Stundensatz read für Ausschuss + Eigentümer (zum Anzeigen)
 // → wird im initDB-Seed unten ergaenzt
 
-// ─── Mail-Empfaenger Stammdaten ──────────────────────────────────────
-// Generische Stammdaten fuer Mail-Adressaten (Anwalt, Bank, Versicherung,
+// ─── Mail-Empfänger Stammdaten ──────────────────────────────────────
+// Generische Stammdaten für Mail-Adressaten (Anwalt, Bank, Versicherung,
 // Handwerker, Behoerde, Energieversorger etc.). Wird genutzt von der
 // Ad-hoc-Compose-Funktion und kann von automatischen Workflows referenziert
-// werden ueber findEmpfaenger(kategorie, stweg).
+// werden über findEmpfaenger(kategorie, stweg).
 
 const EMPFAENGER_KATEGORIEN = [
   'verwaltung',     // virtuell — sucht in verwaltungen-Tabelle
@@ -11627,8 +11627,8 @@ const EMPFAENGER_KATEGORIEN = [
   'sonstige',
 ];
 
-// Liefert die zustaendigen Empfaenger fuer (kategorie, stweg).
-// Reihenfolge: STWEG-spezifisch → STWEG-uebergreifend. Mehrere Treffer moeglich (alle).
+// Liefert die zustaendigen Empfänger für (kategorie, stweg).
+// Reihenfolge: STWEG-spezifisch → STWEG-uebergreifend. Mehrere Treffer möglich (alle).
 async function findEmpfaenger(kategorie, stweg) {
   if (kategorie === 'verwaltung') {
     const verw = await findVerwaltungForStweg(stweg);
@@ -11664,7 +11664,7 @@ async function findEmpfaenger(kategorie, stweg) {
 }
 
 // CRUD-API
-app.get('/api/mail-empfaenger', authMiddleware, requirePermission('mail-empfaenger', 'read'), async (req, res) => {
+app.get('/api/mail-empfänger', authMiddleware, requirePermission('mail-empfänger', 'read'), async (req, res) => {
   try {
     const kategorie = String(req.query.kategorie || '').trim();
     const stwegFilter = parseInt(req.query.stweg, 10);
@@ -11676,11 +11676,11 @@ app.get('/api/mail-empfaenger', authMiddleware, requirePermission('mail-empfaeng
       `SELECT * FROM mail_empfaenger WHERE ${where} ORDER BY aktiv DESC, kategorie, stweg NULLS FIRST, name`,
       params,
     );
-    res.json({ empfaenger: r.rows, kategorien: EMPFAENGER_KATEGORIEN });
+    res.json({ empfänger: r.rows, kategorien: EMPFAENGER_KATEGORIEN });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/mail-empfaenger', authMiddleware, requirePermission('mail-empfaenger', 'write'), async (req, res) => {
+app.post('/api/mail-empfänger', authMiddleware, requirePermission('mail-empfänger', 'write'), async (req, res) => {
   try {
     const b = req.body || {};
     if (!b.kategorie || !EMPFAENGER_KATEGORIEN.includes(b.kategorie)) {
@@ -11705,7 +11705,7 @@ app.post('/api/mail-empfaenger', authMiddleware, requirePermission('mail-empfaen
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.put('/api/mail-empfaenger/:id', authMiddleware, requirePermission('mail-empfaenger', 'write'), async (req, res) => {
+app.put('/api/mail-empfänger/:id', authMiddleware, requirePermission('mail-empfänger', 'write'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
@@ -11735,7 +11735,7 @@ app.put('/api/mail-empfaenger/:id', authMiddleware, requirePermission('mail-empf
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.delete('/api/mail-empfaenger/:id', authMiddleware, requirePermission('mail-empfaenger', 'write'), async (req, res) => {
+app.delete('/api/mail-empfänger/:id', authMiddleware, requirePermission('mail-empfänger', 'write'), async (req, res) => {
   try {
     await pool.query('DELETE FROM mail_empfaenger WHERE id = $1', [parseInt(req.params.id, 10)]);
     res.json({ success: true });
@@ -11743,11 +11743,11 @@ app.delete('/api/mail-empfaenger/:id', authMiddleware, requirePermission('mail-e
 });
 
 // ─── Personen-API ────────────────────────────────────────────────────
-// Personen sind die Single Source of Truth fuer Kontaktdaten. Aenderungen
+// Personen sind die Single Source of Truth für Kontaktdaten. Änderungen
 // werden automatisch via DB-Trigger auf alle verknuepften wohnungen_kontakte
 // propagiert.
 
-// Lese-Zugriff: alle die wohnungsverwaltung lesen koennen
+// Lese-Zugriff: alle die wohnungsverwaltung lesen können
 function requireWohnungsverwaltungRead(req, res, next) {
   return requirePermission('wohnungsverwaltung', 'read')(req, res, next);
 }
@@ -11756,7 +11756,7 @@ function requireWohnungsverwaltungWrite(req, res, next) {
 }
 
 // H4: Pruefe ob User berechtigt ist, eine Person zu editieren.
-// Technik/Praesident: alle Personen. Ausschuss: nur Personen aus dem eigenen STWEG
+// Technik/Präsident: alle Personen. Ausschuss: nur Personen aus dem eigenen STWEG
 // (mind. eine wohnungen_kontakte-Zeile zu einer Wohnung im STWEG des Users).
 async function userCanEditPerson(user, personId) {
   const groups = user?.groups || [];
@@ -11835,7 +11835,7 @@ app.put('/api/personen/:id', authMiddleware, requireWohnungsverwaltungWrite, asy
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
     // H4: STWEG-Scope-Check: Ausschuss darf nur Personen aus eigenem STWEG editieren
     const allowed = await userCanEditPerson(req.user, id);
-    if (!allowed) return res.status(403).json({ error: 'Diese Person gehoert nicht zu einem STWEG fuer den du Ausschuss-Berechtigung hast' });
+    if (!allowed) return res.status(403).json({ error: 'Diese Person gehört nicht zu einem STWEG für den du Ausschuss-Berechtigung hast' });
     const b = req.body || {};
     const updates = [];
     const params = [];
@@ -11859,7 +11859,7 @@ app.put('/api/personen/:id', authMiddleware, requireWohnungsverwaltungWrite, asy
     if (b.geburtsdatum !== undefined) push('geburtsdatum', b.geburtsdatum || null);
     if (b.notiz !== undefined) push('notiz', b.notiz || null);
     if (b.review_needed !== undefined) push('review_needed', !!b.review_needed);
-    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
     params.push(id);
     const r = await pool.query(
       `UPDATE personen SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`,
@@ -11878,7 +11878,7 @@ app.put('/api/personen/:id', authMiddleware, requireWohnungsverwaltungWrite, asy
           [id],
         );
         for (const row of wRes.rows) {
-          const summary = `Kontaktdaten von ${r.rows[0].name} aktualisiert (gilt fuer alle ${wRes.rows.length} Wohnung(en) der Person)`;
+          const summary = `Kontaktdaten von ${r.rows[0].name} aktualisiert (gilt für alle ${wRes.rows.length} Wohnung(en) der Person)`;
           recordObjektChange(row.stweg, summary, req.user.email).catch(() => {});
         }
       } catch {}
@@ -11923,13 +11923,13 @@ app.get('/api/personen-dedup/kandidaten', authMiddleware, requireWohnungsverwalt
           FROM personen
       ),
       exakt AS (
-        SELECT 'exakt' AS art, name_norm AS schluessel, 1 AS sort,
+        SELECT 'exakt' AS art, name_norm AS schlüssel, 1 AS sort,
                array_agg(id ORDER BY id) AS ids, COUNT(*) AS n
           FROM normed GROUP BY name_norm HAVING COUNT(*) > 1
       ),
       token AS (
         -- Nur wenn Token-Set duplikat ist UND exakte Form nicht greift (sonst doppelte Anzeige)
-        SELECT 'token' AS art, token_key AS schluessel, 2 AS sort,
+        SELECT 'token' AS art, token_key AS schlüssel, 2 AS sort,
                array_agg(id ORDER BY id) AS ids, COUNT(*) AS n
           FROM normed
          WHERE token_key IS NOT NULL
@@ -11938,8 +11938,8 @@ app.get('/api/personen-dedup/kandidaten', authMiddleware, requireWohnungsverwalt
       ),
       gleich_email AS (
         -- Email-Duplikate (Familien) mit unterschiedlichem Namen — kein Merge-Hinweis,
-        -- nur als Info ob es echte Dubletten geben koennte (z.B. Tippfehler im Namen)
-        SELECT 'email' AS art, LOWER(TRIM(email)) AS schluessel, 3 AS sort,
+        -- nur als Info ob es echte Dubletten geben könnte (z.B. Tippfehler im Namen)
+        SELECT 'email' AS art, LOWER(TRIM(email)) AS schlüssel, 3 AS sort,
                array_agg(id ORDER BY id) AS ids, COUNT(*) AS n
           FROM normed
          WHERE email IS NOT NULL AND email <> ''
@@ -11949,7 +11949,7 @@ app.get('/api/personen-dedup/kandidaten', authMiddleware, requireWohnungsverwalt
       all_dups AS (
         SELECT * FROM exakt UNION ALL SELECT * FROM token UNION ALL SELECT * FROM gleich_email
       )
-      SELECT art, schluessel, ids, n,
+      SELECT art, schlüssel, ids, n,
              (SELECT json_agg(json_build_object(
                 'id', p.id, 'name', p.name, 'email', p.email, 'telefon', p.telefon, 'mobile', p.mobile,
                 'n_wohnungen', (SELECT COUNT(*) FROM wohnungen_kontakte k
@@ -11957,7 +11957,7 @@ app.get('/api/personen-dedup/kandidaten', authMiddleware, requireWohnungsverwalt
               ) ORDER BY p.id)
                 FROM personen p WHERE p.id = ANY(ids)) AS personen
         FROM all_dups
-       ORDER BY sort, n DESC, schluessel
+       ORDER BY sort, n DESC, schlüssel
        LIMIT 200
     `);
     res.json({ kandidaten: r.rows });
@@ -11977,12 +11977,12 @@ app.post('/api/personen/merge', authMiddleware, requireWohnungsverwaltungWrite, 
     if (!Number.isFinite(keepId) || !Number.isFinite(mergeId) || keepId === mergeId) {
       return res.status(400).json({ error: 'keep_id und merge_id (verschieden) erforderlich' });
     }
-    // H4: beide Personen muessen im Scope sein
+    // H4: beide Personen müssen im Scope sein
     const [canKeep, canMerge] = await Promise.all([
       userCanEditPerson(req.user, keepId), userCanEditPerson(req.user, mergeId),
     ]);
     if (!canKeep || !canMerge) {
-      return res.status(403).json({ error: 'Mindestens eine Person gehoert nicht zu deinem STWEG-Scope' });
+      return res.status(403).json({ error: 'Mindestens eine Person gehört nicht zu deinem STWEG-Scope' });
     }
     await client.query('BEGIN');
     const k = await client.query('SELECT * FROM personen WHERE id = $1', [keepId]);
@@ -12010,7 +12010,7 @@ app.post('/api/personen/merge', authMiddleware, requireWohnungsverwaltungWrite, 
       `UPDATE wohnungen_kontakte SET person_id = $1 WHERE person_id = $2`,
       [keepId, mergeId],
     );
-    // Merge-Person loeschen
+    // Merge-Person löschen
     await client.query('DELETE FROM personen WHERE id = $1', [mergeId]);
     await client.query('COMMIT');
     res.json({ success: true, reassigned_kontakte: reassigned.rowCount });
@@ -12024,7 +12024,7 @@ app.post('/api/personen/merge', authMiddleware, requireWohnungsverwaltungWrite, 
 });
 
 // ─── Ad-hoc Mail-Composer ─────────────────────────────────────────────
-// Erlaubt das Schreiben einer freien Mail an einen beliebigen Empfaenger
+// Erlaubt das Schreiben einer freien Mail an einen beliebigen Empfänger
 // (entweder direkt eingegeben oder aus mail_empfaenger-Stammdaten gewaehlt).
 // Geht durch den gleichen Genehmigungs-Workflow wie automatische Mails.
 // Attachments werden inline base64 in der Queue gespeichert.
@@ -12037,7 +12037,7 @@ app.post('/api/mail-compose', authMiddleware, requirePermission('mail-compose', 
     }
     const b = req.body || {};
 
-    // Empfaenger entweder direkt (mail_to) oder via Stammdaten (empfaenger_id)
+    // Empfänger entweder direkt (mail_to) oder via Stammdaten (empfaenger_id)
     let mailTo = b.mail_to;
     let mailCc = b.mail_cc;
     let mailReplyTo = b.mail_reply_to;
@@ -12049,7 +12049,7 @@ app.post('/api/mail-compose', authMiddleware, requirePermission('mail-compose', 
     if (b.empfaenger_id) {
       const empfId = parseInt(b.empfaenger_id, 10);
       const er = await pool.query('SELECT * FROM mail_empfaenger WHERE id = $1 AND aktiv = true', [empfId]);
-      if (er.rows.length === 0) return res.status(404).json({ error: 'Empfaenger nicht gefunden oder inaktiv' });
+      if (er.rows.length === 0) return res.status(404).json({ error: 'Empfänger nicht gefunden oder inaktiv' });
       const e = er.rows[0];
       firma = e.name;
       sourceType = `ad-hoc-${e.kategorie}`;
@@ -12065,7 +12065,7 @@ app.post('/api/mail-compose', authMiddleware, requirePermission('mail-compose', 
     }
 
     if (!mailTo || (Array.isArray(mailTo) ? mailTo.length === 0 : !String(mailTo).trim())) {
-      return res.status(400).json({ error: 'Empfaenger (mail_to oder empfaenger_id) erforderlich' });
+      return res.status(400).json({ error: 'Empfänger (mail_to oder empfaenger_id) erforderlich' });
     }
     if (!b.subject || !String(b.subject).trim()) return res.status(400).json({ error: 'Betreff erforderlich' });
     if (!b.body_text || !String(b.body_text).trim()) return res.status(400).json({ error: 'Text erforderlich' });
@@ -12096,7 +12096,7 @@ app.post('/api/mail-compose', authMiddleware, requirePermission('mail-compose', 
       });
       res.json({ ok: true, queued: true, queue_id: queueId, firma, requires_approval: true });
     } else {
-      // Direktversand ohne Freigabe (z.B. an interne Empfaenger)
+      // Direktversand ohne Freigabe (z.B. an interne Empfänger)
       const toStr = Array.isArray(mailTo) ? mailTo.join(', ') : String(mailTo);
       const ccStr = Array.isArray(mailCc) ? mailCc.join(', ') : (mailCc ? String(mailCc) : undefined);
       const liveAttachments = attachments.map(a => ({
@@ -12118,8 +12118,8 @@ app.post('/api/mail-compose', authMiddleware, requirePermission('mail-compose', 
 });
 
 // ─── Mail-Templates ────────────────────────────────────────────────
-// Erlaubt es, Subject/Body fuer ausgehende Mails pro source_type
-// (+ optional Empfaenger-Kategorie) zu konfigurieren statt hartcodiert.
+// Erlaubt es, Subject/Body für ausgehende Mails pro source_type
+// (+ optional Empfänger-Kategorie) zu konfigurieren statt hartcodiert.
 // Platzhalter-Syntax: {{path.to.field}}, z.B. {{auslage.betrag_chf}}.
 // Erweiterte Helpers: {{#if x}}…{{/if}}, {{date x}}, {{chf x}}.
 
@@ -12185,7 +12185,7 @@ async function findMailTemplate(sourceType, empfaengerKategorie) {
   return r.rows[0] || null;
 }
 
-// CRUD fuer Templates (Technik/Praesident)
+// CRUD für Templates (Technik/Präsident)
 app.get('/api/mail-templates', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM mail_templates ORDER BY source_type, empfaenger_kategorie NULLS LAST');
@@ -12249,10 +12249,10 @@ app.post('/api/mail-templates/preview', authMiddleware, requireTechnikOrPraeside
 
 // ─── Mail-Approval-Config + 4-Augen-Logik ──────────────────────────
 // Pro source_type-Pattern eine Regel. Bei Auslagen-Auszahlung auch
-// betrags-abhaengig (z.B. >5000 CHF nur Praesident).
+// betrags-abhaengig (z.B. >5000 CHF nur Präsident).
 
 async function getApprovalRuleForQueueItem(queueRow) {
-  // Betrag ermitteln (nur fuer auslage-auszahlung relevant)
+  // Betrag ermitteln (nur für auslage-auszahlung relevant)
   let betrag = 0;
   if (queueRow.source_type.startsWith('auslage-auszahlung') && queueRow.source_id) {
     const a = await pool.query('SELECT betrag_chf FROM auslagen WHERE id = $1', [queueRow.source_id]);
@@ -12284,7 +12284,7 @@ function userHasAnyGroup(user, groupsCsv) {
   return required.some(g => userGroups.includes(g));
 }
 
-// CRUD fuer Approval-Config (nur Technik/Praesident)
+// CRUD für Approval-Config (nur Technik/Präsident)
 app.get('/api/mail-approval-config', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM mail_approval_config ORDER BY sort_order, source_type_pattern');
@@ -12346,11 +12346,11 @@ app.delete('/api/mail-approval-config/:id', authMiddleware, requireTechnikOrPrae
 });
 
 // ─── Verwaltungs-Mail-Outbox API ────────────────────────────────────
-// Nur Technik + Praesident duerfen die Queue sehen/bearbeiten/freigeben.
+// Nur Technik + Präsident dürfen die Queue sehen/bearbeiten/freigeben.
 function requireTechnikOrPraesident(req, res, next) {
   const groups = req.user?.groups || [];
   if (isTechnik(groups) || isPraesident(groups)) return next();
-  return res.status(403).json({ error: 'Nur fuer Technik oder Praesident' });
+  return res.status(403).json({ error: 'Nur für Technik oder Präsident' });
 }
 
 // Liste aller Mails in der Queue (mit Filter)
@@ -12386,7 +12386,7 @@ app.get('/api/verwaltung-mail-queue', authMiddleware, requireTechnikOrPraesident
   }
 });
 
-// Anzahl pending (fuer Nav-Badge)
+// Anzahl pending (für Nav-Badge)
 app.get('/api/verwaltung-mail-queue/pending-count', authMiddleware, async (req, res) => {
   try {
     const groups = req.user?.groups || [];
@@ -12433,7 +12433,7 @@ app.get('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesi
 });
 
 // Edit (To/CC/Subject/Body) — nur solange pending.
-// C2-Fix: Bei jeder inhaltlichen Aenderung werden alle bisherigen Approvals
+// C2-Fix: Bei jeder inhaltlichen Änderung werden alle bisherigen Approvals
 // invalidiert, damit das 4-Augen-Prinzip nicht durch nachtraegliches Editieren
 // umgangen werden kann.
 app.put('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
@@ -12450,7 +12450,7 @@ app.put('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesi
     const row = cur.rows[0];
     if (row.status !== 'pending') {
       await client.query('ROLLBACK');
-      return res.status(409).json({ error: `Editieren nur bei Status 'pending' moeglich (aktuell: ${row.status})` });
+      return res.status(409).json({ error: `Editieren nur bei Status 'pending' möglich (aktuell: ${row.status})` });
     }
     // Beim ersten Edit Original-Snapshot speichern
     let snapshot = row.original_snapshot;
@@ -12464,7 +12464,7 @@ app.put('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesi
     const updates = [];
     const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
-    // Pruefen ob inhaltliche Aenderung vorliegt (fuer Approval-Reset)
+    // Prüfen ob inhaltliche Änderung vorliegt (für Approval-Reset)
     let contentChanged = false;
     const isDifferent = (a, b) => (a == null ? '' : String(a)) !== (b == null ? '' : String(b));
     if (b.mail_to !== undefined) {
@@ -12494,7 +12494,7 @@ app.put('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesi
     }
     if (updates.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Keine Aenderungen' });
+      return res.status(400).json({ error: 'Keine Änderungen' });
     }
     push('original_snapshot', JSON.stringify(snapshot));
     push('edited_by', req.user.email);
@@ -12520,7 +12520,7 @@ app.put('/api/verwaltung-mail-queue/:id', authMiddleware, requireTechnikOrPraesi
   }
 });
 
-// Freigeben (Multi-Approver-faehig). Bei 4-Augen-Prinzip braucht's
+// Freigeben (Multi-Approver-fähig). Bei 4-Augen-Prinzip braucht's
 // >= min_approvers verschiedene User aus required_groups. Erst dann Versand.
 // H3-Fix: Race-Safe durch SELECT ... FOR UPDATE auf queue-Row im selben
 // Transaktionsblock. Status-Wechsel auf 'freigegeben' atomar mit COUNT.
@@ -12551,7 +12551,7 @@ app.post('/api/verwaltung-mail-queue/:id/freigeben', authMiddleware, async (req,
     } catch (e) {
       await client.query('ROLLBACK');
       if (String(e.code) === '23505') {
-        return res.status(409).json({ error: 'Du hast bereits freigegeben — fuer ' + rule.min_approvers + '-Augen-Prinzip braucht es weitere Approver' });
+        return res.status(409).json({ error: 'Du hast bereits freigegeben — für ' + rule.min_approvers + '-Augen-Prinzip braucht es weitere Approver' });
       }
       throw e;
     }
@@ -12625,7 +12625,7 @@ app.post('/api/verwaltung-mail-queue/:id/ablehnen', authMiddleware, requireTechn
               + `Auslage: ${SITE_URL}/auslagen.html\n`
               + `Mail-Queue: ${SITE_URL}/verwaltung-mail-outbox.html`,
           }, 'verwaltung-mail-abgelehnt');
-          // WhatsApp an Eigentuemer + Freigeber
+          // WhatsApp an Eigentümer + Freigeber
           pushWhatsappBroadcast({
             emails: [a.user_email, a.bearbeitet_von].filter(v => v),
             sourceType: 'verwaltung-mail-abgelehnt', sourceId: row.source_id,
@@ -12684,7 +12684,7 @@ app.get('/api/verwaltung-mail-queue/:id/attachment/:idx', authMiddleware, requir
 // ─── PBX / Voicemail Integration ─────────────────────────────────────
 // Asterisk-AGI laedt aufgenommene Voicemails hier hoch. Wir transkribieren
 // via OpenRouter (Whisper-1), erstellen mit Claude eine kurze Zusammenfassung
-// und mailen Audio + Transkript + Summary an Technik+Praesident.
+// und mailen Audio + Transkript + Summary an Technik+Präsident.
 //
 // Authentifizierung: gleiches Pattern wie WhatsApp-Bot — Shared-Secret im
 // X-PBX-Secret-Header, der mit PBX_SHARED_SECRET env var matched.
@@ -12699,7 +12699,7 @@ function requirePbxSecret(req, res, next) {
 }
 
 async function transcribeWhisper(audioBuf, mimeType = 'audio/wav') {
-  // OpenRouter unterstuetzt Whisper-large-v3 ueber den /audio/transcriptions endpoint.
+  // OpenRouter unterstuetzt Whisper-large-v3 über den /audio/transcriptions endpoint.
   // Falls OPENROUTER_API_KEY fehlt → leerer Transkript als Fallback.
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return { text: '', error: 'OPENROUTER_API_KEY nicht gesetzt' };
@@ -12719,7 +12719,7 @@ async function transcribeWhisper(audioBuf, mimeType = 'audio/wav') {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${endpoint.key}`,
-        // OpenRouter verlangt HTTP-Referer/X-Title fuer Attribution
+        // OpenRouter verlangt HTTP-Referer/X-Title für Attribution
         ...(endpoint.url.includes('openrouter') ? { 'HTTP-Referer': 'https://www.rosenweg4303.ch', 'X-Title': 'Rosenweg PBX' } : {}),
       },
       body: form,
@@ -12730,7 +12730,7 @@ async function transcribeWhisper(audioBuf, mimeType = 'audio/wav') {
   } catch (e) { return { text: '', error: e.message }; }
 }
 
-// Formatiert eine Verteiler-Email fuer WhatsApp-Gruppen-Mirror:
+// Formatiert eine Verteiler-Email für WhatsApp-Gruppen-Mirror:
 // - kompakter Titel (Subject)
 // - 2-4 Bullet-Points mit Kernaussage
 // - Action-Items wenn erkennbar
@@ -12754,28 +12754,28 @@ async function reformatEmailForWhatsapp({ subject, senderName, body, attachmentC
         messages: [
           {
             role: 'system',
-            content: `Du formatierst Emails fuer einen WhatsApp-Gruppen-Mirror der Rosenweg-STWEG.
+            content: `Du formatierst Emails für einen WhatsApp-Gruppen-Mirror der Rosenweg-STWEG.
 Liefere eine WhatsApp-gerechte, AUSFUEHRLICHE Zusammenfassung in genau diesem Format:
 📧 *<Titel mit max 70 Zeichen, evtl. gekuerzt>*
 _von: <Absender>_
 
 📝 *Worum geht's:*
-<2-3 Saetze Kontext: was ist der Anlass, wer ist betroffen, worauf bezieht sich die Mail>
+<2-3 Sätze Kontext: was ist der Anlass, wer ist betroffen, worauf bezieht sich die Mail>
 
 🔑 *Die wichtigsten Punkte:*
 • <Bullet 1 — konkret, mit Zahlen/Daten/Namen wenn vorhanden, max 180 Zeichen>
 • <Bullet 2>
 • <Bullet 3>
-• <weitere Bullets nach Bedarf, insgesamt 4-8 Stueck>
+• <weitere Bullets nach Bedarf, insgesamt 4-8 Stück>
 
 <Wenn Termine/Fristen erwaehnt: 📅 *Termine:* <Auflistung Datum/Frist>>
 <Wenn Geldbetraege erwaehnt: 💰 *Betraege:* <Liste mit Posten + CHF>>
-<Wenn klare Aktion verlangt: 👉 *Was ist zu tun:* <konkret, 1-2 Saetze, wer/was/wann>>
+<Wenn klare Aktion verlangt: 👉 *Was ist zu tun:* <konkret, 1-2 Sätze, wer/was/wann>>
 
 Regeln:
 - WhatsApp-Markdown (*fett*, _kursiv_, kein Markdown-#)
-- Maximal 3500 Zeichen Total — lieber ausfuehrlich als zu knapp
-- Alle inhaltlich relevanten Details aus der Mail uebernehmen (Zahlen, Daten, Namen, Beschluesse, Begruendungen)
+- Maximal 3500 Zeichen Total — lieber ausführlich als zu knapp
+- Alle inhaltlich relevanten Details aus der Mail übernehmen (Zahlen, Daten, Namen, Beschlüsse, Begründungen)
 - Keine Floskeln, keine Gruessformeln, keine Signatur, keine Footer/Disclaimer, keine HTML-Reste
 - Bei laengeren Mails: lieber 6-8 Bullets als alles in 3 zu quetschen
 - Auf Deutsch (Schweizer Hochdeutsch, kein ß)`,
@@ -12792,7 +12792,7 @@ Regeln:
     const data = await r.json();
     const txt = data.choices?.[0]?.message?.content?.trim();
     if (!txt || txt.length < 20) return fallback();
-    // Anhang-Hint anhaengen falls nicht schon drin
+    // Anhang-Hint anhängen falls nicht schon drin
     if (attachmentCount > 0 && !/📎/.test(txt)) {
       return txt + `\n\n📎 ${attachmentCount} Anhang${attachmentCount > 1 ? 'e' : ''} per Email.`;
     }
@@ -12823,10 +12823,10 @@ async function analyzeVoicemail(transcript, callerId) {
 {
   "summary": string,              // 1-2 Sätze Kern-Anliegen, knapp, ohne Floskeln
   "urgency": "niedrig" | "mittel" | "hoch",
-  "action": string,               // 1 Satz vorgeschlagene naechste Handlung
+  "action": string,               // 1 Satz vorgeschlagene nächste Handlung
   "is_defekt": boolean,           // true wenn ein Schaden/Defekt/Reparaturbedarf gemeldet wird
   "defekt_stweg": number | null,  // STWEG-Nummer 1-8 (wenn ein Haus oder eine Hausnummer genannt wird), sonst null
-  "defekt_beschreibung": string   // saubere Defektbeschreibung (1-3 Saetze) falls is_defekt, sonst ""
+  "defekt_beschreibung": string   // saubere Defektbeschreibung (1-3 Sätze) falls is_defekt, sonst ""
 }
 STWEG-Mapping: Rosenweg 17/18 = STWEG 1, RW13/14/16 = STWEG 2, RW9/10/12 = STWEG 3, RW5/6/8 = STWEG 4, RW1/2/4 = STWEG 5, ...`,
           },
@@ -12851,7 +12851,7 @@ STWEG-Mapping: Rosenweg 17/18 = STWEG 1, RW13/14/16 = STWEG 2, RW9/10/12 = STWEG
   } catch { return empty; }
 }
 
-// Cache fuer WA-Group-ID "Rosenweg Technik" (5 Min TTL)
+// Cache für WA-Group-ID "Rosenweg Technik" (5 Min TTL)
 let _technikWaCache = { id: null, fetched_at: 0 };
 async function resolveTechnikWhatsappGroupId() {
   const TTL_MS = 5 * 60 * 1000;
@@ -12930,7 +12930,7 @@ app.post('/api/pbx/voicemail', requirePbxSecret, async (req, res) => {
       if (groupId) {
         const summaryLine = analysis.summary ? `*Zusammenfassung:* ${analysis.summary}` : null;
         const urgLine = analysis.urgency ? `*Dringlichkeit:* ${analysis.urgency}` : null;
-        const actLine = analysis.action ? `*Naechster Schritt:* ${analysis.action}` : null;
+        const actLine = analysis.action ? `*Nächster Schritt:* ${analysis.action}` : null;
         const rekLine = reklamationId
           ? `✅ *Auto-Reklamation #${reklamationId} erstellt* (STWEG ${analysis.defekt_stweg || '—'})\n${SITE_URL}/reklamationen.html#${reklamationId}`
           : null;
@@ -13025,7 +13025,7 @@ app.put('/api/pbx/ring-members/:id', authMiddleware, requireTechnikOrPraesident,
       updates.push(`${f} = $${params.length}`);
     }
   }
-  if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderung' });
+  if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderung' });
   params.push(id);
   try {
     const r = await pool.query(
@@ -13108,7 +13108,7 @@ app.get('/api/pbx/hours/check', requirePbxSecret, async (_req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Aktive Liste fuer AGI-Lookup: nur enabled + nicht abgelaufen, geordnet
+// Aktive Liste für AGI-Lookup: nur enabled + nicht abgelaufen, geordnet
 app.get('/api/pbx/ring-members/active', requirePbxSecret, async (_req, res) => {
   try {
     const r = await pool.query(
@@ -13269,7 +13269,7 @@ async function findPersonByPhone(phoneInput) {
 }
 
 // Universelle Notification: wenn die Person Opt-In hat und eine Nummer
-// hinterlegt ist, wird zusaetzlich zur (bereits versandten) Email eine
+// hinterlegt ist, wird zusätzlich zur (bereits versandten) Email eine
 // WhatsApp-Nachricht in die Outbox gestellt. Lookup via Email ODER Person-ID.
 // Nimmt nur kompakten body (kein subject — wird vom Aufrufer integriert).
 async function pushWhatsappIfOptIn({ email, personId, body, sourceType, sourceId }) {
@@ -13298,7 +13298,7 @@ async function pushWhatsappIfOptIn({ email, personId, body, sourceType, sourceId
     // Sammle alle Empfaengernummern:
     //   - primary (mobile bevorzugt, sonst telefon)
     //   - jede telefone[]-Entry mit explizitem whatsapp:true Flag
-    // Dedupliziert ueber Ziffer-Normalisierung (verhindert Doppel-Sends
+    // Dedupliziert über Ziffer-Normalisierung (verhindert Doppel-Sends
     // wenn jemand dieselbe Nummer doppelt eintraegt).
     const targets = [];
     const seen = new Set();
@@ -13330,7 +13330,7 @@ async function pushWhatsappIfOptIn({ email, personId, body, sourceType, sourceId
   }
 }
 
-// Variante: an mehrere Empfaenger (Emails-Array)
+// Variante: an mehrere Empfänger (Emails-Array)
 async function pushWhatsappBroadcast({ emails, body, sourceType, sourceId }) {
   if (!Array.isArray(emails) || emails.length === 0) return 0;
   let n = 0;
@@ -13343,7 +13343,7 @@ async function pushWhatsappBroadcast({ emails, body, sourceType, sourceId }) {
 // Queue eine ausgehende Nachricht. Bot-Service holt sie und versendet.
 async function queueWhatsappMessage({ phone, body, attachments, sourceType, sourceId, personId, chatId }) {
   // chatId hat Vorrang: bei LID-Privacy-Chats ist die echte Nummer
-  // nicht aufloesbar, dann muessen wir die @lid-JID direkt zurueck-routen.
+  // nicht aufloesbar, dann müssen wir die @lid-JID direkt zurück-routen.
   const norm = chatId || normalizePhone(phone);
   if (!norm) throw new Error('Ungueltige Telefonnummer');
   const r = await pool.query(
@@ -13373,7 +13373,7 @@ Antworte mit der *Zahl* oder dem *Befehl*:
 5️⃣  Webseite oeffnen
 6️⃣  Alle Befehle (Hilfe)
 
-Tipp: Du kannst auch einfach in eigenen Worten beschreiben, was du brauchst — oder einen Beleg als Foto senden. Schreib *menu* fuer dieses Menue jederzeit erneut.`;
+Tipp: Du kannst auch einfach in eigenen Worten beschreiben, was du brauchst — oder einen Beleg als Foto senden. Schreib *menu* für dieses Menue jederzeit erneut.`;
 }
 
 async function handleWhatsappCommand(person, body) {
@@ -13476,7 +13476,7 @@ ${SITE_URL}/verwaltung.html`;
       });
       return `🔧 *Handwerker — ${kategorieArg}* (${r.rows.length})\n\n${lines.join('\n\n')}\n\nVolle Liste mit Details: ${SITE_URL}/handwerker.html\n🔙 Menue: *menu*`;
     }
-    // Komplette Uebersicht, gruppiert
+    // Komplette Übersicht, gruppiert
     const r = await pool.query(
       `SELECT firma, telefon, mobile, kategorie, bewertung FROM handwerker
         WHERE archiviert = false
@@ -13498,7 +13498,7 @@ ${SITE_URL}/verwaltung.html`;
       const more = list.length > 2 ? `\n  _+${list.length - 2} weitere_` : '';
       parts.push(`*${kat}* (${list.length})\n${top}${more}`);
     }
-    return `🔧 *Handwerker-Uebersicht* (${r.rows.length} Eintraege)\n\n${parts.join('\n\n')}\n\nFilter nach Kategorie: \`/handwerker sanitaer\`\nVolle Liste mit Bewertungen: ${SITE_URL}/handwerker.html\n🔙 Menue: *menu*`;
+    return `🔧 *Handwerker-Übersicht* (${r.rows.length} Eintraege)\n\n${parts.join('\n\n')}\n\nFilter nach Kategorie: \`/handwerker sanitaer\`\nVolle Liste mit Bewertungen: ${SITE_URL}/handwerker.html\n🔙 Menue: *menu*`;
   }
   if (lower.startsWith('/reklamation') || lower.startsWith('/schaden')) {
     const beschreibung = text.replace(/^\/(reklamation|schaden)\s*/i, '').trim();
@@ -13544,7 +13544,7 @@ ${SITE_URL}/verwaltung.html`;
   return null; // Kein Befehl — leer = keine Antwort, oder Default-Help
 }
 
-// Webhook fuer eingehende Nachrichten (vom Bot-Service aufgerufen)
+// Webhook für eingehende Nachrichten (vom Bot-Service aufgerufen)
 app.post('/api/whatsapp/inbound', requireWhatsappSecret, async (req, res) => {
   try {
     const { phone, chat_id, body, whatsapp_msg_id, attachments } = req.body || {};
@@ -13563,7 +13563,7 @@ app.post('/api/whatsapp/inbound', requireWhatsappSecret, async (req, res) => {
     // Command-Handler
     let reply = await handleWhatsappCommand(person, body);
     if (!reply && body && String(body).startsWith('/')) {
-      reply = 'Unbekannter Befehl. Schreibe `/menu` fuer das Hauptmenue oder `/hilfe` fuer die Befehls-Liste.';
+      reply = 'Unbekannter Befehl. Schreibe `/menu` für das Hauptmenue oder `/hilfe` für die Befehls-Liste.';
     }
     if (reply) {
       const repliedId = await queueWhatsappMessage({
@@ -13627,7 +13627,7 @@ app.post('/api/whatsapp/heartbeat', requireWhatsappSecret, (req, res) => {
 });
 
 // Stale-Detector: wenn der letzte Heartbeat > 5min her ist, einmal Alarm
-// an Technik/Praesident senden (direkt-Email + WA falls Opt-In).
+// an Technik/Präsident senden (direkt-Email + WA falls Opt-In).
 async function checkBotHeartbeat() {
   const STALE_MS = 5 * 60 * 1000;
   const lastHb = waBotHeartbeat?.received_at;
@@ -13638,7 +13638,7 @@ async function checkBotHeartbeat() {
   const ageMin = Math.round(age / 60000);
   console.warn(`[WA-Watchdog] Bot stale seit ${ageMin}min — Alarm.`);
   try {
-    // Technik + Praesident-Emails sammeln
+    // Technik + Präsident-Emails sammeln
     const r = await pool.query(
       `SELECT DISTINCT email FROM users
         WHERE active = true AND email IS NOT NULL
@@ -13656,20 +13656,20 @@ async function checkBotHeartbeat() {
         + `Letzte Meldung: ${new Date(lastHb).toLocaleString('de-CH')}\n`
         + `Letzter Status: ${lastReady}\n`
         + `Telefon: ${phone}\n\n`
-        + `Pruefen: docker service ps rosenweg_whatsapp-bot\n`
+        + `Prüfen: docker service ps rosenweg_whatsapp-bot\n`
         + `Logs:    docker service logs rosenweg_whatsapp-bot --tail 50\n`
         + `Admin-UI: ${SITE_URL}/whatsapp-bot-admin.html`,
     }, 'whatsapp-bot-stale').catch(() => {});
     pushWhatsappBroadcast({
       emails: adminEmails,
       sourceType: 'bot-watchdog',
-      body: `⚠ *WhatsApp-Bot stale*\nKein Heartbeat seit ${ageMin}min.\nDocker-Logs pruefen.`,
+      body: `⚠ *WhatsApp-Bot stale*\nKein Heartbeat seit ${ageMin}min.\nDocker-Logs prüfen.`,
     }).catch(() => {});
   } catch (err) {
     console.warn('[WA-Watchdog] Alarm konnte nicht gesendet werden:', err.message);
   }
 }
-setInterval(checkBotHeartbeat, 60_000); // jede Minute pruefen
+setInterval(checkBotHeartbeat, 60_000); // jede Minute prüfen
 
 // QR-Code-Bridge: Bot pusht den aktuellen QR; Admin holt ihn als PNG.
 // In-Memory (volatile, kein DB-Stoerfaktor; QR rotiert eh alle 60s).
@@ -13750,7 +13750,7 @@ async function resolveBroadcastRecipients(target) {
   if (target.startsWith('stweg:')) {
     const stwegNr = parseInt(target.slice(6), 10);
     if (!Number.isFinite(stwegNr)) throw new Error('Ungueltiger STWEG-Filter');
-    // Personen ueber wohnungen_kontakte zu STWEG zugeordnet
+    // Personen über wohnungen_kontakte zu STWEG zugeordnet
     params.push(stwegNr);
     personSqlFilter += ` AND EXISTS (
       SELECT 1 FROM wohnungen_kontakte wk
@@ -13804,7 +13804,7 @@ async function resolveBroadcastRecipients(target) {
 
 // Admin-API: Liste der WhatsApp-Gruppen in denen der Bot Mitglied ist.
 // Proxy zum Bot-HTTP-Endpoint /groups (Bot laeuft auf 100.64.2.29 in CT 220 ... NEIN,
-// Bot laeuft im Docker-Swarm). Wir koennen den Bot via Docker-Service-Namen erreichen.
+// Bot laeuft im Docker-Swarm). Wir können den Bot via Docker-Service-Namen erreichen.
 app.get('/api/whatsapp/admin/groups', authMiddleware, requireTechnikOrPraesident, async (_req, res) => {
   try {
     const r = await fetch('http://rosenweg_whatsapp-bot:8080/groups', {
@@ -13819,7 +13819,7 @@ app.get('/api/whatsapp/admin/groups', authMiddleware, requireTechnikOrPraesident
   }
 });
 
-// Admin-API fuer UI: Status + letzte Nachrichten + Outbox
+// Admin-API für UI: Status + letzte Nachrichten + Outbox
 app.get('/api/whatsapp/admin/status', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
   try {
     const [pending, recent, byPerson, optIn] = await Promise.all([
@@ -13893,7 +13893,7 @@ app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamation
     if (b.handwerker_id !== undefined) push('handwerker_id', b.handwerker_id || null);
     if (b.zugewiesen_an !== undefined) push('zugewiesen_an', b.zugewiesen_an || null);
     if (b.notiz !== undefined) push('notiz', b.notiz || null);
-    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
     push('updated_at', new Date());
     params.push(id);
     const r = await pool.query(
@@ -13938,7 +13938,7 @@ function ispIsAdmin(req) {
   return isTechnik(g) || isPraesident(g) || req.user?.isAdmin;
 }
 
-// Hilfsfunktion: hat user die Wohnung X als Eigentuemer/Mieter/Bewohner?
+// Hilfsfunktion: hat user die Wohnung X als Eigentümer/Mieter/Bewohner?
 async function userOwnsWohnung(email, wohnungId) {
   if (!email || !wohnungId) return false;
   const r = await pool.query(
@@ -13952,13 +13952,13 @@ async function userOwnsWohnung(email, wohnungId) {
 }
 
 // === Hostname-Auto-Approval-Logik ===
-// Hostnames die wie Rosenweg-Eigene aussehen brauchen Admin-Pruefung,
+// Hostnames die wie Rosenweg-Eigene aussehen brauchen Admin-Prüfung,
 // damit niemand z.B. 'rosenweg4303.com' oder 'r12.rosenweg.ch' anlegt
 // und damit Bewohner faked.
 function hostNeedsAdminApproval(hostname) {
   const h = (hostname || '').toLowerCase();
   if (h.includes('rosenweg')) return 'enthaelt "rosenweg"';
-  // r-prefix: rNN. (wie r9., r17., ...) waere Verwechslung mit STWEG-Konvention
+  // r-prefix: rNN. (wie r9., r17., ...) wäre Verwechslung mit STWEG-Konvention
   if (/^r\d+\./.test(h)) return 'r<Nummer>. Pattern reserviert (Hausnummern)';
   if (h.endsWith('.rosenweg4303.ch') || h.endsWith('.rosenweg9.ch')) return 'unsere Domain';
   return null;
@@ -13972,7 +13972,7 @@ function ispResolveTarget() {
   };
 }
 
-// DNS-Check: prueft ob hostname's A/AAAA/CNAME auf uns zeigt
+// DNS-Check: prüft ob hostname's A/AAAA/CNAME auf uns zeigt
 async function ispCheckDns(hostname) {
   const target = ispResolveTarget();
   const dns = (await import('node:dns/promises')).default;
@@ -13990,7 +13990,7 @@ async function ispCheckDns(hostname) {
 async function ispDecideApproval(hostname) {
   const adminReason = hostNeedsAdminApproval(hostname);
   if (adminReason) return { approval_status: 'pending_admin', approval_reason: adminReason, active: false };
-  // Sofort DNS pruefen
+  // Sofort DNS prüfen
   const dnsCheck = await ispCheckDns(hostname).catch(() => null);
   if (dnsCheck && dnsCheck.matches) {
     return { approval_status: 'approved', approval_reason: 'Auto-Approval: DNS zeigt auf uns', active: true,
@@ -14002,9 +14002,9 @@ async function ispDecideApproval(hostname) {
 
 // Endpoint: DNS-Info (zeigt Customer was er konfigurieren muss)
 // ─── NOC Dashboard ─────────────────────────────────────────────────────
-// Aggregierte Echtzeit-Metriken fuer das ISP-Admin-NOC-Cockpit.
+// Aggregierte Echtzeit-Metriken für das ISP-Admin-NOC-Cockpit.
 // Admin-only — die Daten umfassen Quota-Stand, Top-Sender und Gesamt-
-// Volumen ueber alle Sender-Domains.
+// Volumen über alle Sender-Domains.
 app.get('/api/isp/noc/dashboard', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
   try {
     const ym = new Date().toISOString().slice(0, 7);
@@ -14027,11 +14027,11 @@ app.get('/api/isp/noc/dashboard', authMiddleware, requireTechnikOrPraesident, as
               COUNT(*) AS total FROM isp_mail_relays`);
     const relayStats = relays.rows[0];
 
-    // Pending Mailbox-Antraege
+    // Pending Mailbox-Anträge
     const pending = (await pool.query(
       `SELECT COUNT(*)::int AS n FROM mailbox_requests WHERE status='pending'`)).rows[0].n;
 
-    // Pending VLAN-Antraege
+    // Pending VLAN-Anträge
     let pendingVlan = 0;
     try {
       pendingVlan = (await pool.query(
@@ -14067,7 +14067,7 @@ app.get('/api/isp/noc/dashboard', authMiddleware, requireTechnikOrPraesident, as
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// UniFi-Metriken fuer NOC-Cockpit (Geraete, Clients, WAN, WLANs, Top-APs)
+// UniFi-Metriken für NOC-Cockpit (Geräte, Clients, WAN, WLANs, Top-APs)
 async function unifiGet(path, timeoutMs = 4000) {
   const r = await fetch(`${UNIFI_HOST}/proxy/network/api/s/default/${path}`, {
     headers: { 'X-API-Key': UNIFI_API_KEY },
@@ -14202,9 +14202,9 @@ async function buildTraefikDynamicConfig() {
   // mit "middlewares cannot be a standalone element" abbrechen. Wir fuellen
   // unten und cleanen am Ende.
   const cfg = { http: { routers: {}, services: {}, middlewares: {}, serversTransports: {} }, tcp: { routers: {}, services: {} } };
-  // ServersTransport fuer HTTPS-Backends mit Self-Signed / Mismatched Certs
-  // (typisch fuer interne Services wie Mailcow, NCP etc.). InsecureSkipVerify
-  // ist hier sicher weil der Hop Edge-Traefik → Backend ueber das interne
+  // ServersTransport für HTTPS-Backends mit Self-Signed / Mismatched Certs
+  // (typisch für interne Services wie Mailcow, NCP etc.). InsecureSkipVerify
+  // ist hier sicher weil der Hop Edge-Traefik → Backend über das interne
   // LAN laeuft, kein WAN dazwischen.
   cfg.http.serversTransports['insecure-internal'] = { insecureSkipVerify: true };
 
@@ -14268,10 +14268,10 @@ async function buildTraefikDynamicConfig() {
     cfg.http.routers[id] = {
       rule,
       entryPoints: ['websecure'],
-      service: 'noop@internal',  // wird durch middleware abgefangen, kein backend noetig
+      service: 'noop@internal',  // wird durch middleware abgefangen, kein backend nötig
       middlewares: [mw],
       tls: { certResolver: 'cf' },
-      priority: 100,  // hoeher als sonstige routes damit Redirect zuerst greift
+      priority: 100,  // höher als sonstige routes damit Redirect zuerst greift
     };
   }
 
@@ -14303,7 +14303,7 @@ async function buildTraefikDynamicConfig() {
     };
   }
 
-  // 2) TCP-SNI-Passthrough fuer Mail-Relays
+  // 2) TCP-SNI-Passthrough für Mail-Relays
   const mrs = await pool.query(
     `SELECT * FROM isp_mail_relays
       WHERE active = true
@@ -14339,7 +14339,7 @@ async function buildTraefikDynamicConfig() {
   }
 
   // Cleanup: strip leere sub-objekte damit Traefik-File-Provider nicht
-  // ueber "middlewares cannot be a standalone element" stolpert.
+  // über "middlewares cannot be a standalone element" stolpert.
   for (const proto of ['http', 'tcp']) {
     for (const key of Object.keys(cfg[proto])) {
       if (!cfg[proto][key] || Object.keys(cfg[proto][key]).length === 0) {
@@ -14352,7 +14352,7 @@ async function buildTraefikDynamicConfig() {
 }
 
 app.get('/api/traefik/dynamic', async (req, res) => {
-  // Nur internes Netz (100.64.x.x) erlauben — sonst koennten Externe das
+  // Nur internes Netz (100.64.x.x) erlauben — sonst könnten Externe das
   // Routing kartieren.
   const xff = (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
   const remote = xff || req.socket.remoteAddress || '';
@@ -14372,10 +14372,10 @@ app.get('/api/isp/dns-info', authMiddleware, (req, res) => {
 });
 
 // Endpoint: DNS-Check on-demand
-// DynDNS-Endpoint fuer UniFi / UDM-Pro:
+// DynDNS-Endpoint für UniFi / UDM-Pro:
 // Format: GET /api/cf-ddns?hostname=public&myip=37.17.232.133
 // Auth: HTTP Basic (user:pass via header) — pass = env CF_DDNS_TOKEN
-// Update Cloudflare-A-Record fuer die gegebene Subdomain auf myip
+// Update Cloudflare-A-Record für die gegebene Subdomain auf myip
 app.get('/api/cf-ddns', async (req, res) => {
   try {
     const expectedToken = process.env.CF_DDNS_TOKEN;
@@ -14401,7 +14401,7 @@ app.get('/api/cf-ddns', async (req, res) => {
     const cfZone = process.env.CLOUDFLARE_ZONE_ID || '0b113bed342ed868b4b42c09149ea2b5';
     if (!cfToken) return res.status(500).send('badconfig');
 
-    // Allowlist: erlaubte Hostnames die per DDNS aktualisiert werden duerfen
+    // Allowlist: erlaubte Hostnames die per DDNS aktualisiert werden dürfen
     const allowlist = (process.env.CF_DDNS_ALLOWLIST || 'public').toLowerCase().split(',').map(s => s.trim());
     const shortName = hostname.replace('.rosenweg4303.ch', '');
     if (!allowlist.includes(shortName) && !allowlist.includes(hostname)) {
@@ -14492,7 +14492,7 @@ app.post('/api/isp/reverse-proxy/:id/recheck-dns', authMiddleware, async (req, r
 // === Subscribers (Wohnungs-Anschluesse) ===
 app.get('/api/isp/subscribers', authMiddleware, async (req, res) => {
   try {
-    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Praesident' });
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Präsident' });
     const r = await pool.query(
       `SELECT s.*, w.bezeichnung AS wohnung_bezeichnung, w.stweg
          FROM isp_subscribers s
@@ -14524,7 +14524,7 @@ app.get('/api/isp/subscribers/me', authMiddleware, async (req, res) => {
 
 app.post('/api/isp/subscribers', authMiddleware, async (req, res) => {
   try {
-    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Praesident' });
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Präsident' });
     const b = req.body || {};
     if (!b.wohnung_id) return res.status(400).json({ error: 'wohnung_id Pflicht' });
     const r = await pool.query(
@@ -14542,7 +14542,7 @@ app.post('/api/isp/subscribers', authMiddleware, async (req, res) => {
 
 app.put('/api/isp/subscribers/:id', authMiddleware, async (req, res) => {
   try {
-    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Praesident' });
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Präsident' });
     const id = parseInt(req.params.id, 10);
     const b = req.body || {};
     const updates = []; const params = [];
@@ -14550,7 +14550,7 @@ app.put('/api/isp/subscribers/:id', authMiddleware, async (req, res) => {
     for (const col of ['status','anschluss_typ','switch_name','switch_port','vlan','bandbreite_down_mbps','bandbreite_up_mbps','mac_dot1x','eigenleistung_chf','eigenleistung_datum','notizen']) {
       if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
     }
-    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
     push('updated_at', new Date());
     params.push(id);
     const r = await pool.query(`UPDATE isp_subscribers SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
@@ -14561,7 +14561,7 @@ app.put('/api/isp/subscribers/:id', authMiddleware, async (req, res) => {
 
 app.delete('/api/isp/subscribers/:id', authMiddleware, async (req, res) => {
   try {
-    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Praesident' });
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Präsident' });
     await pool.query('DELETE FROM isp_subscribers WHERE id = $1', [parseInt(req.params.id, 10)]);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -14589,7 +14589,7 @@ app.get('/api/isp/fixed-ips', authMiddleware, async (req, res) => {
 
 app.post('/api/isp/fixed-ips', authMiddleware, async (req, res) => {
   try {
-    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Praesident' });
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Präsident' });
     const b = req.body || {};
     if (!b.ip_address || !b.ip_typ) return res.status(400).json({ error: 'ip_address + ip_typ Pflicht' });
     if (!b.wohnung_id && !b.service_name) return res.status(400).json({ error: 'wohnung_id ODER service_name Pflicht' });
@@ -14605,7 +14605,7 @@ app.post('/api/isp/fixed-ips', authMiddleware, async (req, res) => {
 
 app.put('/api/isp/fixed-ips/:id', authMiddleware, async (req, res) => {
   try {
-    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Praesident' });
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Präsident' });
     const id = parseInt(req.params.id, 10);
     const b = req.body || {};
     const updates = []; const params = [];
@@ -14613,7 +14613,7 @@ app.put('/api/isp/fixed-ips/:id', authMiddleware, async (req, res) => {
     for (const col of ['ip_address','ip_typ','wohnung_id','service_name','zweck','mac_address','hostname','notizen']) {
       if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
     }
-    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
     push('updated_at', new Date());
     params.push(id);
     const r = await pool.query(`UPDATE isp_fixed_ips SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
@@ -14623,7 +14623,7 @@ app.put('/api/isp/fixed-ips/:id', authMiddleware, async (req, res) => {
 
 app.delete('/api/isp/fixed-ips/:id', authMiddleware, async (req, res) => {
   try {
-    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Praesident' });
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Präsident' });
     await pool.query('DELETE FROM isp_fixed_ips WHERE id = $1', [parseInt(req.params.id, 10)]);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -14727,7 +14727,7 @@ app.get('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Liefert die moeglichen VLAN-Optionen fuer den User (sortiert nach Wohnung→Hobbyraum→Parkplatz)
+// Liefert die moeglichen VLAN-Optionen für den User (sortiert nach Wohnung→Hobbyraum→Parkplatz)
 app.get('/api/isp/vpn-accounts/options', authMiddleware, async (req, res) => {
   try {
     const target = (req.query.user_email || req.user.email || '').toLowerCase();
@@ -14753,7 +14753,7 @@ app.post('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
     const userOpts = await getUserVlanOptions(target);
     if (!vlan) vlan = userOpts[0]?.vlan || null;
     if (vlan && !ispIsAdmin(req) && !userOpts.some(o => o.vlan === vlan)) {
-      return res.status(403).json({ error: 'Dieses VLAN gehoert nicht zu deinen zugewiesenen Einheiten' });
+      return res.status(403).json({ error: 'Dieses VLAN gehört nicht zu deinen zugewiesenen Einheiten' });
     }
     if (!vlan) return res.status(400).json({ error: 'Keine Heim-Wohnung in der Objektverwaltung — VLAN nicht ermittelbar' });
 
@@ -14791,7 +14791,7 @@ app.put('/api/isp/vpn-accounts/:id', authMiddleware, async (req, res) => {
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
     const allowed = ['backend','username','public_key','assigned_ip','config_path','active','notizen'];
     for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
-    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
     push('updated_at', new Date());
     params.push(id);
     const r = await pool.query(`UPDATE isp_vpn_accounts SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
@@ -14900,13 +14900,13 @@ app.get('/api/isp/vlan-requests', authMiddleware, async (req, res) => {
 app.post('/api/isp/vlan-requests', authMiddleware, async (req, res) => {
   try {
     const b = req.body || {};
-    if (!b.zweck) return res.status(400).json({ error: 'zweck Pflicht (wofuer wird das VLAN gebraucht)' });
-    // User-Wahl validieren: wohnung_id muss zu eigenen Einheiten gehoeren (Admin darf alles)
+    if (!b.zweck) return res.status(400).json({ error: 'zweck Pflicht (wofür wird das VLAN gebraucht)' });
+    // User-Wahl validieren: wohnung_id muss zu eigenen Einheiten gehören (Admin darf alles)
     let wohnungId = b.wohnung_id || null;
     if (wohnungId && !ispIsAdmin(req)) {
       const ownOpts = await getUserVlanOptions(req.user.email);
       if (!ownOpts.some(o => o.wohnung_id === parseInt(wohnungId, 10))) {
-        return res.status(403).json({ error: 'Dieses Objekt gehoert nicht zu deinen zugewiesenen Einheiten' });
+        return res.status(403).json({ error: 'Dieses Objekt gehört nicht zu deinen zugewiesenen Einheiten' });
       }
     }
     const mitnutzer = normalizeMitnutzerEmails(b.mitnutzer_emails, req.user.email);
@@ -14935,7 +14935,7 @@ app.put('/api/isp/vlan-requests/:id', authMiddleware, async (req, res) => {
     const isOwner = (v.antragsteller_email || '').toLowerCase() === email;
     const isMitnutzer = (v.mitnutzer_emails || []).map(x => String(x).toLowerCase()).includes(email);
     if (!admin && !isOwner && !isMitnutzer) return res.status(403).json({ error: 'Nur Antragsteller, Mitnutzer oder Admin' });
-    // Mitnutzer-Felder duerfen nur Owner editieren; ansonsten User-Felder waehrend pending
+    // Mitnutzer-Felder dürfen nur Owner editieren; ansonsten User-Felder während pending
     const b = req.body || {};
     const updates = []; const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
@@ -14947,8 +14947,8 @@ app.put('/api/isp/vlan-requests/:id', authMiddleware, async (req, res) => {
     const allowed = admin ? [...userFields, ...ownerOnlyFields, ...adminFields]
                           : (isOwner ? [...userFields, ...ownerOnlyFields] : []);
     if (!admin && v.status !== 'pending') return res.status(400).json({ error: 'Nur in Status pending editierbar' });
-    if (!admin && !isOwner && allowed.length === 0) return res.status(403).json({ error: 'Mitnutzer koennen Antrag nur zurueckziehen, nicht editieren' });
-    // VLAN-ID-Uniqueness pruefen, bevor wir UPDATE bauen.
+    if (!admin && !isOwner && allowed.length === 0) return res.status(403).json({ error: 'Mitnutzer können Antrag nur zurückziehen, nicht editieren' });
+    // VLAN-ID-Uniqueness prüfen, bevor wir UPDATE bauen.
     if (b.vlan_id !== undefined && b.vlan_id !== null && b.vlan_id !== '' && b.vlan_id !== v.vlan_id) {
       const dup = await pool.query(
         "SELECT id FROM isp_vlan_requests WHERE vlan_id = $1 AND id <> $2 AND status IN ('approved','deployed')",
@@ -14971,7 +14971,7 @@ app.put('/api/isp/vlan-requests/:id', authMiddleware, async (req, res) => {
         push(col, b[col] === '' ? null : b[col]);
       }
     }
-    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
     push('updated_at', new Date());
     params.push(id);
     const r = await pool.query(`UPDATE isp_vlan_requests SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
@@ -14989,7 +14989,7 @@ app.put('/api/isp/vlan-requests/:id', authMiddleware, async (req, res) => {
       try {
         provisioning = await runProvisioning(id);
       } catch (e) { provisioning = { ok: false, errors: [{ step: 'auto_provision', error: e.message }] }; }
-      // Aktualisierte Row nochmal lesen (status koennte jetzt 'deployed' sein)
+      // Aktualisierte Row nochmal lesen (status könnte jetzt 'deployed' sein)
       const final = await pool.query('SELECT * FROM isp_vlan_requests WHERE id = $1', [id]);
       return res.json({ ...final.rows[0], provisioning });
     }
@@ -14997,7 +14997,7 @@ app.put('/api/isp/vlan-requests/:id', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Vorschlag fuer naechste freie VLAN-ID nach Schema <HausNr><NN>
+// Vorschlag für nächste freie VLAN-ID nach Schema <HausNr><NN>
 // Schema: docs/unifi.md — RW9 Bewohner -> 9XX (z.B. 911), RW18 -> 18XX (z.B. 1803)
 app.get('/api/isp/vlan-requests/:id/suggest', authMiddleware, async (req, res) => {
   try {
@@ -15035,7 +15035,7 @@ app.get('/api/isp/vlan-requests/:id/suggest', authMiddleware, async (req, res) =
       unifiUsed = (uw.data || []).map(n => Number(n.vlan)).filter(Number.isFinite);
       for (const v of unifiUsed) usedSet.add(v);
     } catch {}
-    // Iteriere <Haus>01 .. <Haus>99 (z.B. 901..999 fuer RW9, 1801..1899 fuer RW18)
+    // Iteriere <Haus>01 .. <Haus>99 (z.B. 901..999 für RW9, 1801..1899 für RW18)
     const hausStr = String(hausNr);
     for (let seq = 1; seq <= 99; seq++) {
       const candidate = parseInt(hausStr + String(seq).padStart(2, '0'), 10);
@@ -15044,7 +15044,7 @@ app.get('/api/isp/vlan-requests/:id/suggest', authMiddleware, async (req, res) =
           haus: hausNr,
           haus_bezeichnung: home.bezeichnung,
           suggested_vlan_id: candidate,
-          reasoning: `Schema <HausNr><NN>: naechste freie ID fuer RW${hausNr} = ${candidate}`,
+          reasoning: `Schema <HausNr><NN>: nächste freie ID für RW${hausNr} = ${candidate}`,
           unifi_used_count: unifiUsed.length,
         });
       }
@@ -15071,8 +15071,8 @@ app.delete('/api/isp/vlan-requests/:id', authMiddleware, async (req, res) => {
     if (!admin && !isOwner && !isMitnutzer) return res.status(403).json({ error: 'Nur Antragsteller, Mitnutzer oder Admin' });
 
     // Wenn der Antrag schon provisioniert war (approved/deployed mit
-    // unifi_network_id), erst aufraeumen: Router-LXC API + Trunks + PPSK +
-    // UniFi-Network. Sonst lassen wir Leaks zurueck.
+    // unifi_network_id), erst aufräumen: Router-LXC API + Trunks + PPSK +
+    // UniFi-Network. Sonst lassen wir Leaks zurück.
     let deprovisioning = null;
     const wasProvisioned = (v.status === 'approved' || v.status === 'deployed') && (v.unifi_network_id || v.vlan_id);
     if (wasProvisioned) {
@@ -15111,7 +15111,7 @@ function parseCidr(cidr) {
 }
 
 // Subnet-Groesse vom User-Wunsch parsen: "/28" oder "28" -> 28. Default 28.
-// Akzeptiert /24 - /30 (16-4 IPs); /30 ist Minimum fuer P2P, sinnvoll ab /29.
+// Akzeptiert /24 - /30 (16-4 IPs); /30 ist Minimum für P2P, sinnvoll ab /29.
 function parseRequestedMask(s) {
   if (s == null || String(s).trim() === '') return 28;
   const m = /^\/?(\d+)$/.exec(String(s).trim());
@@ -15121,7 +15121,7 @@ function parseRequestedMask(s) {
   return v;
 }
 
-// Allokiert den naechsten freien Subnet-Block der vom User gewuenschten Groesse
+// Allokiert den nächsten freien Subnet-Block der vom User gewuenschten Groesse
 // aus dem Pool, ohne Konflikte mit anderen User-Subnets desselben Router-LXC.
 async function allocateUserSubnet(routerId, requestedMask, excludeRequestId = null) {
   const rr = await pool.query('SELECT user_vlan_subnet_pool FROM isp_client_vlan_routers WHERE id = $1', [routerId]);
@@ -15218,7 +15218,7 @@ app.get('/api/isp/vlan-requests/:id/allocation-preview', authMiddleware, async (
     }
     out.assigned_router_id = routerId;
 
-    // Subnet allokieren (nur fuer kind=subnet)
+    // Subnet allokieren (nur für kind=subnet)
     if ((v.kind || 'vlan') === 'subnet' && routerId) {
       const mask = parseRequestedMask(v.gewuenschte_groesse);
       try {
@@ -15229,7 +15229,7 @@ app.get('/api/isp/vlan-requests/:id/allocation-preview', authMiddleware, async (
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Zufaelliges Passwort fuer PPSK (12 chars, alphanum)
+// Zufaelliges Passwort für PPSK (12 chars, alphanum)
 function generatePpskPassword() {
   const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
   const l = 'abcdefghjkmnpqrstuvwxyz';
@@ -15240,7 +15240,7 @@ function generatePpskPassword() {
   return out.split('').sort(() => Math.random() - 0.5).join('');
 }
 
-// UniFi Network-Conf fuer User-VLAN anlegen. purpose='vlan-only' = reine
+// UniFi Network-Conf für User-VLAN anlegen. purpose='vlan-only' = reine
 // VLAN-Tag-Propagation auf APs/Switches, KEIN UDM-Gateway, KEIN DHCP.
 // Routing+DHCP macht die Router-LXC auf VLAN <id> via eth0.<vlan>.
 async function unifiCreateUserNetwork(v) {
@@ -15256,7 +15256,7 @@ async function unifiCreateUserNetwork(v) {
   return created;
 }
 
-// PPSK zur Rosenweg-WLAN hinzufuegen, networkconf_id zeigt auf User-Netz.
+// PPSK zur Rosenweg-WLAN hinzufügen, networkconf_id zeigt auf User-Netz.
 async function unifiAddPpskToRosenwegWlan(networkconf_id, password) {
   const wl = await unifiGet('rest/wlanconf');
   const rosenweg = (wl.data || []).find(w => w.name === 'Rosenweg');
@@ -15297,7 +15297,7 @@ async function routerApiCall(lxcId, method, path, body) {
   return json;
 }
 
-// PPSK fuer eine bestimmte networkconf_id wieder aus der Rosenweg-WLAN raus.
+// PPSK für eine bestimmte networkconf_id wieder aus der Rosenweg-WLAN raus.
 async function unifiRemovePpskForNetwork(networkconf_id) {
   const wl = await unifiGet('rest/wlanconf');
   const rosenweg = (wl.data || []).find(w => w.name === 'Rosenweg');
@@ -15312,7 +15312,7 @@ async function unifiRemovePpskForNetwork(networkconf_id) {
   return { removed: before.length - after.length };
 }
 
-// UniFi-Network loeschen
+// UniFi-Network löschen
 async function unifiDeleteNetwork(networkconf_id) {
   return await unifiCall('DELETE', `rest/networkconf/${networkconf_id}`);
 }
@@ -15365,7 +15365,7 @@ async function runDeprovisioning(v, router) {
       result.errors.push({ step: 'ppsk', error: err.message });
     }
   }
-  // 4) UniFi-Network loeschen
+  // 4) UniFi-Network löschen
   if (v.unifi_network_id) {
     try {
       await unifiDeleteNetwork(v.unifi_network_id);
@@ -15381,7 +15381,7 @@ async function runDeprovisioning(v, router) {
 // Setzt voraus dass net0.trunks die User-VLAN-ID enthaelt — sonst kommt der
 // Tag nicht durch eth0. Trunks-Update via PVE-API (hot-apply via PUT /config).
 async function pveProvisionRouterLxc(v, router) {
-  // Welcher Node hostet den CT? Brauchen wir fuer die Trunk-Config.
+  // Welcher Node hostet den CT? Brauchen wir für die Trunk-Config.
   const resources = await pveAPI('GET', '/cluster/resources?type=vm');
   const ct = (resources || []).find(x => x.type === 'lxc' && x.vmid === router.lxc_id);
   if (!ct) throw new Error(`CT ${router.lxc_id} nicht im Cluster gefunden`);
@@ -15391,9 +15391,9 @@ async function pveProvisionRouterLxc(v, router) {
   const cidr = parseCidr(v.subnet_v4);
   if (!cidr) throw new Error('subnet_v4 ungueltig');
 
-  // 1) Trunks im net0 sicherstellen (PVE-API PUT /config). Aenderungen am bridge
+  // 1) Trunks im net0 sicherstellen (PVE-API PUT /config). Änderungen am bridge
   //    werden vom Kernel meist hot-applied; falls nicht, hat es spaetestens beim
-  //    naechsten CT-Reboot Wirkung. Idempotent: nur PUT wenn was zu aendern.
+  //    nächsten CT-Reboot Wirkung. Idempotent: nur PUT wenn was zu ändern.
   const cfg = await pveAPI('GET', `/nodes/${ct.node}/lxc/${router.lxc_id}/config`);
   const net0Parts = String(cfg.net0 || '').split(',');
   const trunksIdx = net0Parts.findIndex(p => p.startsWith('trunks='));
@@ -15416,7 +15416,7 @@ async function pveProvisionRouterLxc(v, router) {
   return { node: ct.node, lxc_id: router.lxc_id, user_vlan: userVlan, router_api: result };
 }
 
-// Bash-Skript fuer manuelles Provisioning auf dem Router-LXC.
+// Bash-Skript für manuelles Provisioning auf dem Router-LXC.
 // Wird vom Admin auf einem PVE-Host ausgefuehrt (er hat root + pct).
 function buildRouterLxcProvisionScript(v, router) {
   const cidr = parseCidr(v.subnet_v4);
@@ -15430,14 +15430,14 @@ function buildRouterLxcProvisionScript(v, router) {
   const clientIf = `eth0.${clientVlan}`;
   const userIf = `eth0.${userVlan}`;
   return `#!/usr/bin/env bash
-# Provisioning fuer Netzwerk-Antrag #${v.id} (${v.gewuenschter_name || ''})
+# Provisioning für Netzwerk-Antrag #${v.id} (${v.gewuenschter_name || ''})
 #   User-VLAN:    ${userVlan}
 #   Subnet:       ${v.subnet_v4}
 #   Gateway:      ${gw}/${mask}
 #   DHCP-Range:   ${dhcpFrom} - ${dhcpTo}
 #   Router-LXC:   ${lxcId}  (Client-VLAN ${clientVlan})
 #
-# Auf einem PVE-Host ausfuehren wo CT ${lxcId} laeuft:
+# Auf einem PVE-Host ausführen wo CT ${lxcId} laeuft:
 #   ssh root@pveN  bash <(curl -s ...)   oder copy/paste.
 
 set -euo pipefail
@@ -15459,7 +15459,7 @@ pct exec $LXC -- bash -c "
   ip addr replace \\\$USER_GW/$MASK dev $USER_IF
 " 2>&1 | sed 's/^/  /'
 
-# 2. dnsmasq-Config fuer dieses User-VLAN
+# 2. dnsmasq-Config für dieses User-VLAN
 pct exec $LXC -- bash -c "
   mkdir -p /etc/dnsmasq.d
   cat > /etc/dnsmasq.d/vlan-$USER_VLAN.conf <<EOF
@@ -15488,7 +15488,7 @@ pct exec $LXC -- bash -c "
 
 echo
 echo \"[OK] VLAN $USER_VLAN auf CT \$LXC eingerichtet.\"
-echo \"     Teste DHCP von einem Geraet im VLAN $USER_VLAN.\"
+echo \"     Teste DHCP von einem Gerät im VLAN $USER_VLAN.\"
 `;
 }
 
@@ -15589,7 +15589,7 @@ async function runProvisioning(id) {
       result.steps.push({ step: 'router_lxc', ok: true, node: rlxc.node, lxc_id: rlxc.lxc_id });
     } catch (err) {
       result.errors.push({ step: 'router_lxc', error: err.message });
-      // Fallback-Script fuer manuelle Ausfuehrung
+      // Fallback-Script für manuelle Ausführung
       script = buildRouterLxcProvisionScript(v, router);
     }
   } else if (v.kind === 'subnet' && router) {
@@ -15631,8 +15631,8 @@ app.post('/api/isp/vlan-requests/:id/provision', authMiddleware, async (req, res
 });
 
 // === Router-LXC pro Client-VLAN (Phase 2) ===
-// Admin-only Verwaltung der LXCs die als Default-Gateway + DHCP fuer
-// Netzwerk-Subnet-Antraege dienen. Auto-Provisioning ist Phase 3.
+// Admin-only Verwaltung der LXCs die als Default-Gateway + DHCP für
+// Netzwerk-Subnet-Anträge dienen. Auto-Provisioning ist Phase 3.
 app.get('/api/isp/client-vlan-routers', authMiddleware, async (req, res) => {
   try {
     if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Admin' });
@@ -15705,7 +15705,7 @@ app.put('/api/isp/client-vlan-routers/:id', authMiddleware, async (req, res) => 
     const updates = []; const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
     for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
-    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
     push('updated_at', new Date());
     params.push(id);
     const r = await pool.query(`UPDATE isp_client_vlan_routers SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
@@ -15727,7 +15727,7 @@ const PVE_LXC_DEFAULTS = {
   bridge: 'vmbr1',
 };
 
-// Liste der PVE-Nodes aus /nodes (fuer Round-Robin).
+// Liste der PVE-Nodes aus /nodes (für Round-Robin).
 async function pveNodes() {
   const data = await pveAPI('GET', '/nodes');
   return (data || []).filter(n => n.status === 'online').map(n => n.node);
@@ -15778,8 +15778,8 @@ async function bootstrapOneRouterLxc(router, targetNode) {
     features: 'nesting=1',
     onboot: 1,
     start: 1,
-    description: `Auto-erstellt vom isp-admin fuer Client-VLAN ${cvlan} (${router.bezeichnung || ''})`,
-    // password: zufaellig, wir koennen via pct enter rein wenn noetig
+    description: `Auto-erstellt vom isp-admin für Client-VLAN ${cvlan} (${router.bezeichnung || ''})`,
+    // password: zufaellig, wir können via pct enter rein wenn nötig
     password: Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2),
   };
   const upid = await pveAPI('POST', `/nodes/${targetNode}/lxc`, body);
@@ -15787,11 +15787,11 @@ async function bootstrapOneRouterLxc(router, targetNode) {
   return { vmid: router.lxc_id, node: targetNode, hostname, ip: `${ip}/24`, gw, upid };
 }
 
-// Bash-Skript fuer Inner-Install: apt + dnsmasq + nftables-Grundgeruest.
+// Bash-Skript für Inner-Install: apt + dnsmasq + nftables-Grundgeruest.
 // Wird einmal pro neuer LXC vom Admin via "pct exec" ausgefuehrt.
 function buildRouterLxcInitScript(router) {
   return `#!/usr/bin/env bash
-# Inner-Setup fuer Router-LXC ${router.lxc_id} (Client-VLAN ${router.client_vlan_id})
+# Inner-Setup für Router-LXC ${router.lxc_id} (Client-VLAN ${router.client_vlan_id})
 # Ausfuehren auf dem PVE-Host wo CT laeuft:  bash <(curl -s ...)  oder copy/paste.
 set -euo pipefail
 LXC=${router.lxc_id}
@@ -15802,11 +15802,11 @@ pct exec $LXC -- bash -c '
   apt-get update -q
   apt-get install -y -q dnsmasq nftables iproute2
   mkdir -p /etc/dnsmasq.d
-  # leere dnsmasq.d-Configs: dnsmasq nur fuer User-VLANs (je nach Antrag)
+  # leere dnsmasq.d-Configs: dnsmasq nur für User-VLANs (je nach Antrag)
   > /etc/dnsmasq.conf  # vorhandene globale Defaults raus
   echo "conf-dir=/etc/dnsmasq.d,*.conf" > /etc/dnsmasq.conf
   systemctl enable dnsmasq nftables
-  # nftables-Grundgeruest: Tabelle + leere Chains (Regeln pro User-VLAN spaeter)
+  # nftables-Grundgeruest: Tabelle + leere Chains (Regeln pro User-VLAN später)
   cat > /etc/nftables.conf <<EOF
 flush ruleset
 table inet rosenweg {
@@ -15863,10 +15863,10 @@ app.post('/api/isp/client-vlan-routers/bootstrap-all', authMiddleware, async (re
         results.push({ router_id: router.id, lxc_id: router.lxc_id, ok: false, error: err.message });
       }
     }
-    // Globales Init-Script fuer ALLE auf einmal
+    // Globales Init-Script für ALLE auf einmal
     const initScript = `#!/usr/bin/env bash
-# Inner-Setup fuer ALLE Router-LXCs in einem Rutsch.
-# Auf jedem PVE-Host ausfuehren wo CTs liegen — pct exec funktioniert nur lokal.
+# Inner-Setup für ALLE Router-LXCs in einem Rutsch.
+# Auf jedem PVE-Host ausführen wo CTs liegen — pct exec funktioniert nur lokal.
 set -euo pipefail
 for LXC in ${rr.rows.map(r => r.lxc_id).join(' ')}; do
   pct status $LXC >/dev/null 2>&1 || { echo "[skip] CT $LXC nicht hier"; continue; }
@@ -15938,8 +15938,8 @@ app.post('/api/isp/reverse-proxy', authMiddleware, async (req, res) => {
       return res.status(403).json({ error: 'Du kannst nur eigene Routen anlegen' });
     }
     // Auto-Approval: Admin-Erstellung aus dem Admin-Tab umgeht die
-    // Approval-Pruefung automatisch (Admin koennen nicht durch ihre eigene
-    // Logik blockiert sein). Sonst greift die normale DNS-Pruefung.
+    // Approval-Prüfung automatisch (Admin können nicht durch ihre eigene
+    // Logik blockiert sein). Sonst greift die normale DNS-Prüfung.
     const decision = ispIsAdmin(req)
       ? { approval_status: 'approved', approval_reason: 'Admin-erstellt', active: true,
           dns_verified_at: null, last_dns_check_at: null }
@@ -15986,7 +15986,7 @@ app.put('/api/isp/reverse-proxy/:id', authMiddleware, async (req, res) => {
                          'approval_status','approval_reason'];
     const allowed = admin ? [...userFields, ...adminFields] : userFields;
     for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
-    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
     push('updated_at', new Date());
     params.push(id);
     const r = await pool.query(`UPDATE isp_reverse_proxy_routes SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
@@ -16066,7 +16066,7 @@ app.put('/api/isp/redirects/:id', authMiddleware, async (req, res) => {
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
     const allowed = ['source_host','source_path','target_url','http_code','preserve_path','active','notizen','owner_email','wohnung_id'];
     for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
-    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
     push('updated_at', new Date());
     params.push(id);
     const r = await pool.query(`UPDATE isp_redirects SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
@@ -16089,8 +16089,8 @@ app.delete('/api/isp/redirects/:id', authMiddleware, async (req, res) => {
 });
 
 // === Traefik-Provider-Endpoint ===
-// Liefert die dynamic-config fuer Traefik (http-provider). Kein authMiddleware
-// noetig — der Endpoint laeuft nur ueber das interne Docker-Netz, Traefik
+// Liefert die dynamic-config für Traefik (http-provider). Kein authMiddleware
+// nötig — der Endpoint laeuft nur über das interne Docker-Netz, Traefik
 // pollt im 30s-Takt. Output: JSON (Traefik akzeptiert YAML+JSON).
 app.get('/api/isp/traefik-config', async (req, res) => {
   try {
@@ -16152,7 +16152,7 @@ app.get('/api/isp/traefik-config', async (req, res) => {
         middlewares: [id],
         tls: { certResolver: 'letsencrypt' },
       };
-      // Auch HTTP (port 80) Router fuer redirect (ohne TLS)
+      // Auch HTTP (port 80) Router für redirect (ohne TLS)
       config.http.routers[id + '_http'] = {
         rule: ruleParts.join(' && '),
         service: 'noop@internal',
@@ -16213,7 +16213,7 @@ app.get('/api/isp/traefik-config', async (req, res) => {
 
 // ─── SMTP2GO-API Client ────────────────────────────────────────────────
 // Sender-Domain-Verifikation (DKIM + Return-Path-CNAMEs) damit Outbound
-// ueber unseren Smarthost mit DMARC-Alignment rausgeht.
+// über unseren Smarthost mit DMARC-Alignment rausgeht.
 // API-Doku: https://developers.smtp2go.com/llms.txt
 async function smtp2goApi(path, body) {
   const key = process.env.SMTP2GO_API_KEY;
@@ -16231,7 +16231,7 @@ async function smtp2goApi(path, body) {
   return j.data;
 }
 
-// Holt aktuellen Verifikationsstatus + erwartete DNS-Records fuer eine Domain.
+// Holt aktuellen Verifikationsstatus + erwartete DNS-Records für eine Domain.
 // Nutzt /v3/domain/verify (forciert sofortigen Recheck) statt /v3/domain/view.
 async function smtp2goGetDomainStatus(domain) {
   const data = await smtp2goApi('/domain/verify', { domain });
@@ -16263,7 +16263,7 @@ async function smtp2goEnsureDomain(domain) {
 }
 
 // ─── Mailcow-API Client ────────────────────────────────────────────────
-// Ruft die Mailcow REST-API (https://mailcow.docs.apiary.io/) ueber den
+// Ruft die Mailcow REST-API (https://mailcow.docs.apiary.io/) über den
 // per /etc/default/asterisk-env oder docker-service-env gesetzten Key auf.
 async function mailcowApi(method, path, body) {
   const base = process.env.MAILCOW_API_BASE;
@@ -16282,7 +16282,7 @@ async function mailcowApi(method, path, body) {
 }
 
 // ─── Mailbox-Onboarding-Workflow ──────────────────────────────────────
-// User auf isp-mein-zugang sieht/beantragt Mailboxes fuer eigene Mail-Relays
+// User auf isp-mein-zugang sieht/beantragt Mailboxes für eigene Mail-Relays
 // mit mailcow_managed=true. Admin auf isp-admin approved + provisioniert.
 
 // Notification an die WA-Gruppe "Rosenweg Technik" bei allen Mailbox-Vorgaengen.
@@ -16322,16 +16322,16 @@ async function provisionMailcowMailbox({ local_part, domain, full_name, quota_mb
     password2: password,
     active: '1',
     // force_pw_update=1 blockt unter SOGo+manchen IMAP-Backends den ersten
-    // Login bis ein PW-Wechsel im UI passiert — fuer Auto-Approve nicht
+    // Login bis ein PW-Wechsel im UI passiert — für Auto-Approve nicht
     // praktikabel (User loggt sich direkt im Mail-Client an, nicht in SOGo).
-    // Stattdessen den User im UI auffordern, das Initial-PW zu aendern.
+    // Stattdessen den User im UI auffordern, das Initial-PW zu ändern.
     force_pw_update: '0',
     tls_enforce_in: '1',
     tls_enforce_out: '1',
   });
 }
 
-// GET: Liste der Domains fuer die der User Mailboxes beantragen darf
+// GET: Liste der Domains für die der User Mailboxes beantragen darf
 // (mailcow_managed + allowed_groups matchen User-Gruppen)
 app.get('/api/isp/mailbox-eligible-relays', authMiddleware, async (req, res) => {
   try {
@@ -16345,7 +16345,7 @@ app.get('/api/isp/mailbox-eligible-relays', authMiddleware, async (req, res) => 
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// GET: Liste der Antraege/Mailboxen.
+// GET: Liste der Anträge/Mailboxen.
 // initial_password wird NUR ausgeliefert wenn der Caller berechtigt ist:
 //   - Shared-Mailbox (keinem User zugeordnet) -> Admin sieht PW
 //   - persoenliche Mailbox -> NUR der zugeordnete User sieht PW (Admin nicht)
@@ -16373,7 +16373,7 @@ app.get('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
       const ownerEmail = (row.assigned_user_email || row.antragsteller_email || '').toLowerCase();
       const isOwner = email === ownerEmail;
       const shared = !row.assigned_user_email;
-      // PW sichtbar fuer: Owner immer; Admin nur bei Shared-Mailboxen.
+      // PW sichtbar für: Owner immer; Admin nur bei Shared-Mailboxen.
       const canSeePw = isOwner || (admin && shared);
       if (!canSeePw) return { ...row, initial_password: null, has_initial_password: !!row.initial_password };
       return { ...row, has_initial_password: !!row.initial_password };
@@ -16382,7 +16382,7 @@ app.get('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Prueft ob der User berechtigt ist Mailboxes fuer das Relay zu beantragen.
+// Prueft ob der User berechtigt ist Mailboxes für das Relay zu beantragen.
 // allowed_groups = NULL -> jeder. Sonst muss min. eine Gruppe matchen
 // (Authentik-Hierarchie: r9-eigentuemer impliziert eigentuemer etc.).
 function isAllowedForRelay(user, relay) {
@@ -16408,7 +16408,7 @@ app.post('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Diese Domain wird nicht von Rosenweg verwaltet — Mailbox-Provisionierung beim Domain-Owner' });
     }
     if (!ispIsAdmin(req) && !isAllowedForRelay(req.user, rel.rows[0])) {
-      return res.status(403).json({ error: `Mailboxen fuer ${rel.rows[0].domain} sind nur fuer berechtigte STWEG-Mitglieder verfuegbar` });
+      return res.status(403).json({ error: `Mailboxen für ${rel.rows[0].domain} sind nur für berechtigte STWEG-Mitglieder verfuegbar` });
     }
     const standard = isStandardMailboxRequest(b);
     const username = `${lp}@${rel.rows[0].domain}`;
@@ -16466,7 +16466,7 @@ app.post('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
   }
 });
 
-// GET: User-Autocomplete fuer Admin-UI (Mailbox-Zuweisung). Liefert
+// GET: User-Autocomplete für Admin-UI (Mailbox-Zuweisung). Liefert
 // max. 20 Treffer aus users (active=true), gesucht in name + email.
 app.get('/api/isp/user-search', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
   try {
@@ -16486,7 +16486,7 @@ app.get('/api/isp/user-search', authMiddleware, requireTechnikOrPraesident, asyn
 
 // POST: Admin legt direkt eine Mailbox an, optional einem User zugeordnet.
 // Ohne assigned_user_email -> Shared-Mailbox (Admin sieht PW).
-// Mit assigned_user_email -> persoenlich (PW nur fuer User sichtbar).
+// Mit assigned_user_email -> persoenlich (PW nur für User sichtbar).
 app.post('/api/isp/admin-create-mailbox', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
   try {
     const b = req.body || {};
@@ -16594,7 +16594,7 @@ app.post('/api/isp/mailbox-requests/:id/approve', authMiddleware, requireTechnik
       username,
       assigned: isAssigned,
       // Shared (keinem User zugeordnet) -> Admin sieht PW. Sonst nur Hinweis.
-      ...(isAssigned ? { msg: 'Initial-PW liegt fuer den User unter "Meine Mailboxen" bereit' } : { initial_password: password }),
+      ...(isAssigned ? { msg: 'Initial-PW liegt für den User unter "Meine Mailboxen" bereit' } : { initial_password: password }),
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -16618,7 +16618,7 @@ app.post('/api/isp/mailbox-requests/:id/reject', authMiddleware, requireTechnikO
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// POST: Passwort-Reset. User+Admin duerfen. Visibility wie bei Approve:
+// POST: Passwort-Reset. User+Admin dürfen. Visibility wie bei Approve:
 //   - Mailbox keinem User zugeordnet -> Caller sieht PW
 //   - Mailbox einem User zugeordnet  -> PW landet in initial_password,
 //                                       Admin bekommt KEIN PW im Response,
@@ -16647,19 +16647,19 @@ app.post('/api/isp/mailbox-requests/:id/reset-password', authMiddleware, async (
     await pool.query('UPDATE mailbox_requests SET initial_password=$1, updated_at=NOW() WHERE id=$2', [password, id]);
     notifyTechnikMailbox(
       `🔑 *Passwort zurueckgesetzt*\n${username}\ndurch ${req.user.email}` +
-      (admin && !isOwner ? ` (Admin-Reset fuer ${ownerEmail || '—'})` : ''),
+      (admin && !isOwner ? ` (Admin-Reset für ${ownerEmail || '—'})` : ''),
     );
     // Visibility-Regel: Shared-Mailbox ODER Owner selber -> PW im Response.
     // Admin-Reset einer persoenlichen Mailbox -> KEIN PW im Response.
     const showPw = !mr.assigned_user_email || isOwner;
     res.json({
       ok: true,
-      ...(showPw ? { new_password: password } : { msg: 'Neues PW liegt fuer den User unter "Meine Mailboxen" bereit' }),
+      ...(showPw ? { new_password: password } : { msg: 'Neues PW liegt für den User unter "Meine Mailboxen" bereit' }),
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// DELETE: Mailbox loeschen. Owner darf pending zuruecknehmen, Admin darf
+// DELETE: Mailbox löschen. Owner darf pending zuruecknehmen, Admin darf
 // alles. Approved -> Mailbox wird in Mailcow geloescht.
 app.delete('/api/isp/mailbox-requests/:id', authMiddleware, async (req, res) => {
   try {
@@ -16681,7 +16681,7 @@ app.delete('/api/isp/mailbox-requests/:id', authMiddleware, async (req, res) => 
     }
     // Hard-delete: Zeile entfernen, damit der Local-Part wieder
     // verfuegbar ist (UNIQUE-Constraint blockiert sonst Neu-Anlage).
-    // Audit-Trail laeuft ueber den WA-Notify-Eintrag.
+    // Audit-Trail laeuft über den WA-Notify-Eintrag.
     await pool.query(`DELETE FROM mailbox_requests WHERE id=$1`, [id]);
     notifyTechnikMailbox(
       `🗑 *Mailbox geloescht*\n${mr.local_part}@${mr.domain}\nvon ${ownerEmail || '—'}\ndurch ${req.user.email}`,
@@ -16726,7 +16726,7 @@ app.post('/api/isp/mail-relays', authMiddleware, async (req, res) => {
     const decision = ispIsAdmin(req) && b.skip_approval
       ? { approval_status: 'approved', approval_reason: 'Admin-Bypass', active: true }
       : await ispDecideApproval(b.domain);
-    // mailcow_managed + allowed_groups nur fuer Admin (sonst koennte sich jeder
+    // mailcow_managed + allowed_groups nur für Admin (sonst könnte sich jeder
     // selbst eine "Rosenweg-verwaltete" Domain anlegen).
     const mailcowManaged = ispIsAdmin(req) ? !!b.mailcow_managed : false;
     const allowedGroups = (ispIsAdmin(req) && Array.isArray(b.allowed_groups) && b.allowed_groups.length)
@@ -16776,7 +16776,7 @@ app.put('/api/isp/mail-relays/:id', authMiddleware, async (req, res) => {
                          'mailcow_managed','allowed_groups'];
     const allowed = admin ? [...userFields, ...adminFields] : userFields;
     for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
-    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
     push('updated_at', new Date());
     params.push(id);
     const r = await pool.query(`UPDATE isp_mail_relays SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
@@ -16809,14 +16809,14 @@ function requireTrackerSecret(req, res, next) {
   next();
 }
 
-// SMTP2GO Free-Tier: 1000/Monat. Schwellen fuer WA-Alert: 80%, 100%
+// SMTP2GO Free-Tier: 1000/Monat. Schwellen für WA-Alert: 80%, 100%
 // und danach in 500er-Schritten (1500, 2000, ...) damit wir bei
 // kostenpflichtiger Nutzung jeweils dokumentiert werden.
 const SMTP2GO_FREE_LIMIT = 1000;
 function quotaThresholdsCrossed(prevTotal, newTotal) {
   // Erstmal die "weichen" Schwellen 80% und 100% des Free-Tiers
   const fixed = [Math.floor(SMTP2GO_FREE_LIMIT * 0.8), SMTP2GO_FREE_LIMIT];
-  // Dann alle 500er ueber dem Free-Tier
+  // Dann alle 500er über dem Free-Tier
   const beyond = [];
   for (let t = SMTP2GO_FREE_LIMIT + 500; t <= 50000; t += 500) beyond.push(t);
   return [...fixed, ...beyond].filter(t => prevTotal < t && newTotal >= t);
@@ -16826,7 +16826,7 @@ app.post('/api/isp/outbound-usage/ingest', requireTrackerSecret, async (req, res
   try {
     const events = Array.isArray(req.body?.events) ? req.body.events : [];
     if (events.length === 0) return res.json({ ok: true, processed: 0 });
-    // Quota-Pruefung pro betroffenem Monat: zuerst Vorher-Total holen,
+    // Quota-Prüfung pro betroffenem Monat: zuerst Vorher-Total holen,
     // dann nach UPSERT Nachher-Total und Schwellen vergleichen.
     const monthsTouched = new Set();
     let processed = 0;
@@ -16847,14 +16847,14 @@ app.post('/api/isp/outbound-usage/ingest', requireTrackerSecret, async (req, res
       monthsTouched.add(ym);
     }
 
-    // Quota-Alerts pruefen + ggf. WA-Notify
+    // Quota-Alerts prüfen + ggf. WA-Notify
     for (const ym of monthsTouched) {
       try {
         const totalRow = await pool.query(
           `SELECT COALESCE(SUM(count),0)::int AS total FROM isp_outbound_usage WHERE year_month=$1`, [ym]);
         const newTotal = totalRow.rows[0].total;
         // Schwellen die VOR diesem Ingest noch nicht ueberschritten waren
-        // (wir kennen das exakte Delta nicht — schaetzen ueber sum(delta) ueber alle Events)
+        // (wir kennen das exakte Delta nicht — schaetzen über sum(delta) über alle Events)
         const deltaSum = events
           .filter(e => e.year_month === ym && parseInt(e.count_delta,10) > 0)
           .reduce((a, e) => a + parseInt(e.count_delta, 10), 0);
@@ -16867,7 +16867,7 @@ app.post('/api/isp/outbound-usage/ingest', requireTrackerSecret, async (req, res
              VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING id`,
             [ym, threshold]);
           if (ins.rows.length === 0) continue;
-          // Top 5 Sender-Domains anhaengen damit man sieht wer's verbraucht
+          // Top 5 Sender-Domains anhängen damit man sieht wer's verbraucht
           const top = (await pool.query(
             `SELECT sender_domain, count FROM isp_outbound_usage
               WHERE year_month=$1 ORDER BY count DESC LIMIT 5`, [ym])).rows;
@@ -16889,7 +16889,7 @@ app.post('/api/isp/outbound-usage/ingest', requireTrackerSecret, async (req, res
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// GET: Monatsverlauf fuer eine Sender-Domain (Owner + Admin).
+// GET: Monatsverlauf für eine Sender-Domain (Owner + Admin).
 app.get('/api/isp/outbound-usage/:domain', authMiddleware, async (req, res) => {
   try {
     const domain = String(req.params.domain || '').toLowerCase();
@@ -16945,7 +16945,7 @@ app.post('/api/isp/mail-relays/:id/smarthost', authMiddleware, requireTechnikOrP
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Recheck-Status via SMTP2GO. Owner + Admin duerfen.
+// Recheck-Status via SMTP2GO. Owner + Admin dürfen.
 app.post('/api/isp/mail-relays/:id/smarthost/recheck', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -16954,7 +16954,7 @@ app.post('/api/isp/mail-relays/:id/smarthost/recheck', authMiddleware, async (re
     const v = e.rows[0];
     const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
     if (!isOwner && !ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Owner oder Admin' });
-    if (!v.outbound_via_smarthost) return res.status(400).json({ error: 'Smarthost ist fuer diese Domain nicht aktiviert' });
+    if (!v.outbound_via_smarthost) return res.status(400).json({ error: 'Smarthost ist für diese Domain nicht aktiviert' });
     let status;
     try { status = await smtp2goGetDomainStatus(v.domain); }
     catch (err) { return res.status(502).json({ error: 'SMTP2GO: ' + err.message }); }
@@ -16976,7 +16976,7 @@ app.post('/api/isp/mail-relays/:id/recheck-dns', authMiddleware, async (req, res
     const v = e.rows[0];
     const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
     if (!isOwner && !ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Owner oder Admin' });
-    // Bei Mail-Relays pruefen wir MX statt A/AAAA
+    // Bei Mail-Relays prüfen wir MX statt A/AAAA
     const dns = (await import('node:dns/promises')).default;
     let mx = null;
     try { mx = await dns.resolveMx(v.domain).catch(() => null); } catch {}
@@ -17010,7 +17010,7 @@ app.get('/api/isp/mailboxes', authMiddleware, async (req, res) => {
 
 app.post('/api/isp/mailboxes', authMiddleware, async (req, res) => {
   try {
-    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Praesident' });
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Präsident' });
     const b = req.body || {};
     if (!b.local_part || !b.domain) return res.status(400).json({ error: 'local_part + domain Pflicht' });
     const r = await pool.query(
@@ -17025,7 +17025,7 @@ app.post('/api/isp/mailboxes', authMiddleware, async (req, res) => {
 
 app.put('/api/isp/mailboxes/:id', authMiddleware, async (req, res) => {
   try {
-    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Praesident' });
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Präsident' });
     const id = parseInt(req.params.id, 10);
     const b = req.body || {};
     const updates = []; const params = [];
@@ -17033,7 +17033,7 @@ app.put('/api/isp/mailboxes/:id', authMiddleware, async (req, res) => {
     for (const col of ['local_part','domain','owner_user_email','wohnung_id','aliases','quota_mb','active','notizen']) {
       if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
     }
-    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
     push('updated_at', new Date());
     params.push(id);
     const r = await pool.query(`UPDATE isp_mailboxes SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
@@ -17043,7 +17043,7 @@ app.put('/api/isp/mailboxes/:id', authMiddleware, async (req, res) => {
 
 app.delete('/api/isp/mailboxes/:id', authMiddleware, async (req, res) => {
   try {
-    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Praesident' });
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Präsident' });
     await pool.query('DELETE FROM isp_mailboxes WHERE id = $1', [parseInt(req.params.id, 10)]);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -17065,7 +17065,7 @@ app.get('/api/vollmachten/templates', authMiddleware, async (req, res) => {
 
 app.post('/api/vollmachten/templates', authMiddleware, async (req, res) => {
   try {
-    if (!canEditTemplates(req.user.groups || [])) return res.status(403).json({ error: 'Nur Technik/Praesident/Ausschuss' });
+    if (!canEditTemplates(req.user.groups || [])) return res.status(403).json({ error: 'Nur Technik/Präsident/Ausschuss' });
     const b = req.body || {};
     if (!b.titel || !b.art || !b.geltungsbereich) return res.status(400).json({ error: 'titel, art, geltungsbereich Pflicht' });
     if (!['generell','spezifisch','auskunft'].includes(b.art)) return res.status(400).json({ error: 'Ungueltige art' });
@@ -17080,7 +17080,7 @@ app.post('/api/vollmachten/templates', authMiddleware, async (req, res) => {
 
 app.put('/api/vollmachten/templates/:id', authMiddleware, async (req, res) => {
   try {
-    if (!canEditTemplates(req.user.groups || [])) return res.status(403).json({ error: 'Nur Technik/Praesident/Ausschuss' });
+    if (!canEditTemplates(req.user.groups || [])) return res.status(403).json({ error: 'Nur Technik/Präsident/Ausschuss' });
     const id = parseInt(req.params.id, 10);
     const b = req.body || {};
     const updates = []; const params = [];
@@ -17093,7 +17093,7 @@ app.put('/api/vollmachten/templates/:id', authMiddleware, async (req, res) => {
     }
     if (b.geltungsbereich !== undefined) push('geltungsbereich', b.geltungsbereich);
     if (b.gueltigkeit_default !== undefined) push('gueltigkeit_default', b.gueltigkeit_default || null);
-    if (updates.length === 0) return res.status(400).json({ error: 'Keine Aenderungen' });
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
     push('updated_at', new Date());
     params.push(id);
     const r = await pool.query(
@@ -17107,7 +17107,7 @@ app.put('/api/vollmachten/templates/:id', authMiddleware, async (req, res) => {
 
 app.delete('/api/vollmachten/templates/:id', authMiddleware, async (req, res) => {
   try {
-    if (!canEditTemplates(req.user.groups || [])) return res.status(403).json({ error: 'Nur Technik/Praesident/Ausschuss' });
+    if (!canEditTemplates(req.user.groups || [])) return res.status(403).json({ error: 'Nur Technik/Präsident/Ausschuss' });
     const id = parseInt(req.params.id, 10);
     await pool.query('DELETE FROM vollmachten_templates WHERE id = $1', [id]);
     res.json({ ok: true });
@@ -17115,8 +17115,8 @@ app.delete('/api/vollmachten/templates/:id', authMiddleware, async (req, res) =>
 });
 
 // ─── Vollmachten ────────────────────────────────────────────────────
-// Eigentuemer erteilt Vollmacht an Verwalter/Mieter/andere Person.
-// Berechtigung 'vollmachten-eigene' (jeder Eigentuemer) zum Erfassen
+// Eigentümer erteilt Vollmacht an Verwalter/Mieter/andere Person.
+// Berechtigung 'vollmachten-eigene' (jeder Eigentümer) zum Erfassen
 // eigener Vollmachten; 'vollmachten-admin' (technik/praesident/verwaltung)
 // um alle zu sehen/widerrufen. Auto-Status-Update: Vollmachten mit
 // gueltig_bis < heute werden bei jedem List-Call als 'abgelaufen' markiert.
@@ -17218,7 +17218,7 @@ function buildVollmachtHtml(v) {
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  /* A4 mit sicheren Druckraendern: 15mm rundum (Standard auch fuer
+  /* A4 mit sicheren Druckraendern: 15mm rundum (Standard auch für
      Tintenstrahler ohne randlos-Druck). Header-bar ist KEIN full-bleed
      mehr, sondern als Karte innerhalb des Satzspiegels. */
   @page { size: A4; margin: 15mm; }
@@ -17430,7 +17430,7 @@ async function generateVollmachtPdf(v) {
   return Buffer.from(await r.arrayBuffer());
 }
 
-// Lookup-Helper fuer das Vollmachten-Formular (jeder eingeloggte User darf
+// Lookup-Helper für das Vollmachten-Formular (jeder eingeloggte User darf
 // lesen — limitierte Felder, kein PII-Leak).
 app.get('/api/vollmachten/lookup/verwaltungen', authMiddleware, async (req, res) => {
   try {
@@ -17473,7 +17473,7 @@ app.get('/api/vollmachten/lookup/my-wohnungen', authMiddleware, async (req, res)
 });
 
 // Kontakte (Verwalter / Mieter / Miteigentuemer) aus den Wohnungen des aktuellen
-// Users — fuer Quick-Pick im Vollmachten-Modal. So muss der Eigentuemer nicht
+// Users — für Quick-Pick im Vollmachten-Modal. So muss der Eigentümer nicht
 // die Daten nochmal eintippen die schon in der Objektverwaltung stehen.
 app.get('/api/vollmachten/lookup/my-kontakte', authMiddleware, async (req, res) => {
   try {
@@ -17506,14 +17506,14 @@ app.get('/api/vollmachten/lookup/my-kontakte', authMiddleware, async (req, res) 
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Batch-Erfassung: fuer alle existierenden Verwalter-Kontakte in der
-// Objektverwaltung Entwurfs-Vollmachten anlegen. Nur fuer Admins.
+// Batch-Erfassung: für alle existierenden Verwalter-Kontakte in der
+// Objektverwaltung Entwurfs-Vollmachten anlegen. Nur für Admins.
 // Idempotent: legt nur an wo noch keine aktive/Entwurf-Vollmacht existiert.
 app.post('/api/vollmachten/bootstrap-verwalter', authMiddleware, async (req, res) => {
   try {
     const groups = req.user.groups || [];
     if (!(isTechnik(groups) || isPraesident(groups) || req.user.isAdmin)) {
-      return res.status(403).json({ error: 'Nur Technik/Praesident' });
+      return res.status(403).json({ error: 'Nur Technik/Präsident' });
     }
     // Alle Wohnungen finden die einen verwalter-Kontakt haben
     const wohnungenMitVerwalter = await pool.query(
@@ -17528,7 +17528,7 @@ app.post('/api/vollmachten/bootstrap-verwalter', authMiddleware, async (req, res
     const client = await pool.connect();
     try {
       for (const w of wohnungenMitVerwalter.rows) {
-        // Aktuelle Verwalter + Eigentuemer dieser Wohnung holen
+        // Aktuelle Verwalter + Eigentümer dieser Wohnung holen
         const k = await client.query(
           `SELECT rolle, name, email, telefon, adresse, person_id
              FROM wohnungen_kontakte
@@ -17569,7 +17569,7 @@ app.get('/api/vollmachten', authMiddleware, async (req, res) => {
     const isGlobalAdmin = isTechnik(groups) || isPraesident(groups) || groups.some(g => g.toLowerCase() === 'verwaltung');
     const ausschussStwegs = [...getAusschussStwegs(groups)];
     const isAusschuss = ausschussStwegs.length > 0;
-    // Im UI: 'Alle (Admin)' Tab fuer alle die mindestens stweg-scoped sehen
+    // Im UI: 'Alle (Admin)' Tab für alle die mindestens stweg-scoped sehen
     const isAdmin = isGlobalAdmin || isAusschuss;
     const email = req.user.email || '';
     // Status-Auto-Update: abgelaufene aktiv → abgelaufen
@@ -17627,7 +17627,7 @@ app.post('/api/vollmachten', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Ungueltige art' });
     }
     // Standard-Berechtigung: jeder eingeloggte User darf Vollmachten erfassen
-    // (in der Regel fuer sich selbst als Vollmachtgeber)
+    // (in der Regel für sich selbst als Vollmachtgeber)
     const sql = h => `INSERT INTO vollmachten (
          doc_hash,
          vollmachtgeber_person_id, vollmachtgeber_name, vollmachtgeber_email, vollmachtgeber_adresse,
@@ -17647,7 +17647,7 @@ app.post('/api/vollmachten', authMiddleware, async (req, res) => {
     ]);
     const vollmacht = r.rows[0];
     // Vollmachtgeber-Liste: aus body.vollmachtgeber wenn vorhanden, sonst
-    // implizit aus den vollmachtgeber_*-Feldern (Backward-Compat: Einzel-Eigentuemer)
+    // implizit aus den vollmachtgeber_*-Feldern (Backward-Compat: Einzel-Eigentümer)
     const vgList = Array.isArray(b.vollmachtgeber) && b.vollmachtgeber.length > 0
       ? b.vollmachtgeber
       : [{ person_id: b.vollmachtgeber_person_id || null, name: b.vollmachtgeber_name, email: b.vollmachtgeber_email || null, adresse: b.vollmachtgeber_adresse || null }];
@@ -17686,7 +17686,7 @@ app.put('/api/vollmachten/:id', authMiddleware, async (req, res) => {
     for (const k of allowed) {
       if (b[k] !== undefined) push(k, b[k] === '' ? null : b[k]);
     }
-    if (updates.length === 0 && !Array.isArray(b.vollmachtgeber)) return res.status(400).json({ error: 'Keine Aenderungen' });
+    if (updates.length === 0 && !Array.isArray(b.vollmachtgeber)) return res.status(400).json({ error: 'Keine Änderungen' });
     if (updates.length > 0) {
       push('updated_at', new Date());
       params.push(id);
@@ -17719,7 +17719,7 @@ app.post('/api/vollmachten/:id/sign-digital', authMiddleware, async (req, res) =
     const existing = await pool.query('SELECT * FROM vollmachten WHERE id = $1', [id]);
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = existing.rows[0];
-    if (v.status !== 'entwurf') return res.status(400).json({ error: 'Nur Entwuerfe koennen signiert werden (Status: ' + v.status + ')' });
+    if (v.status !== 'entwurf') return res.status(400).json({ error: 'Nur Entwuerfe können signiert werden (Status: ' + v.status + ')' });
     const userEmail = (req.user.email || '').toLowerCase();
     // Eigene Vollmachtgeber-Zeile finden
     const my = await pool.query(
@@ -17741,7 +17741,7 @@ app.post('/api/vollmachten/:id/sign-digital', authMiddleware, async (req, res) =
         WHERE id=$4`,
       [ip, ua, sub ? String(sub) : null, my.rows[0].id],
     );
-    // Pruefen ob ALLE signiert haben → Status aktiv
+    // Prüfen ob ALLE signiert haben → Status aktiv
     const counts = await pool.query(
       `SELECT COUNT(*) AS total, COUNT(signed_at) AS signed
          FROM vollmachten_vollmachtgeber WHERE vollmacht_id = $1`,
@@ -17765,7 +17765,7 @@ app.post('/api/vollmachten/:id/sign-digital', authMiddleware, async (req, res) =
   } catch (err) { console.error('[vollmachten] sign:', err); res.status(500).json({ error: err.message }); }
 });
 
-// Aktivieren mit Papier-Signatur (Status setzen; Upload des Scans separat ueber Documents)
+// Aktivieren mit Papier-Signatur (Status setzen; Upload des Scans separat über Documents)
 app.post('/api/vollmachten/:id/activate-paper', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -17778,7 +17778,7 @@ app.post('/api/vollmachten/:id/activate-paper', authMiddleware, async (req, res)
     if (!isAdmin && !(await vmIsUserVollmachtgeber(id, req.user.email, v.vollmachtgeber_email))) {
       return res.status(403).json({ error: 'Nur Vollmachtgeber oder Admin' });
     }
-    if (v.status !== 'entwurf') return res.status(400).json({ error: 'Nur Entwuerfe koennen aktiviert werden' });
+    if (v.status !== 'entwurf') return res.status(400).json({ error: 'Nur Entwuerfe können aktiviert werden' });
     const r = await pool.query(
       `UPDATE vollmachten SET status='aktiv', signatur_typ='papier',
          papier_pdf_path=$1, updated_at=NOW() WHERE id=$2 RETURNING *`,
@@ -17847,11 +17847,11 @@ app.post('/api/vollmachten/:id/verify-ai', authMiddleware, async (req, res) => {
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'OPENROUTER_API_KEY nicht konfiguriert' });
 
-    // PDF laden + an Gotenberg fuer PDF→PNG-Konversion senden (Vision-Check)
+    // PDF laden + an Gotenberg für PDF→PNG-Konversion senden (Vision-Check)
     const fullPath = pathModule.join(DOCS_PATH, v.papier_pdf_path);
     const pdfBuf = await fs.readFile(fullPath);
 
-    // Gotenberg: /forms/libreoffice/convert kann Office-Dateien zu PDF, fuer
+    // Gotenberg: /forms/libreoffice/convert kann Office-Dateien zu PDF, für
     // PDF→PNG nutzen wir /forms/pdfengines/convert mit Format-Header. Falls
     // nicht verfuegbar: fallback auf PDF-Text-Extraktion.
     // Erstmal direkter Versuch: PDF als data-URL an Claude (unterstuetzt direkt
@@ -17874,7 +17874,7 @@ Pruefe und liefere JSON mit folgenden Feldern:
   "unterschriften_indikatoren": number, // Anzahl Signaturfelder/Hinweise auf Unterschriften
   "auffaelligkeiten": [string],     // freie Hinweise: gestrichene Stellen, abweichender Text, etc.
   "gesamtbewertung": "ok" | "warnung" | "problem",
-  "kommentar": string               // 1-2 Saetze Zusammenfassung
+  "kommentar": string               // 1-2 Sätze Zusammenfassung
 }`;
 
     const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -17985,7 +17985,7 @@ app.get('/api/vollmachten/:id/pdf', authMiddleware, async (req, res) => {
   } catch (err) { console.error('[vollmachten] pdf:', err); res.status(500).json({ error: err.message }); }
 });
 
-// Loeschen (nur Entwurf)
+// Löschen (nur Entwurf)
 app.delete('/api/vollmachten/:id', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -17997,7 +17997,7 @@ app.delete('/api/vollmachten/:id', authMiddleware, async (req, res) => {
     const isOwner = await vmIsUserVollmachtgeber(id, req.user.email, v.vollmachtgeber_email)
                  || (v.created_by_user_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
     if (!isAdmin && !isOwner) return res.status(403).json({ error: 'Nur Vollmachtgeber oder Admin' });
-    if (v.status !== 'entwurf' && !isAdmin) return res.status(400).json({ error: 'Nur Entwuerfe koennen geloescht werden (Admin darf alle)' });
+    if (v.status !== 'entwurf' && !isAdmin) return res.status(400).json({ error: 'Nur Entwuerfe können geloescht werden (Admin darf alle)' });
     await pool.query('DELETE FROM vollmachten WHERE id = $1', [id]);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -18185,7 +18185,7 @@ async function initDB() {
       ALTER TABLE email_verteiler ADD COLUMN IF NOT EXISTS group_name VARCHAR(255);
       ALTER TABLE email_verteiler ADD COLUMN IF NOT EXISTS group_names JSONB DEFAULT '[]';
       -- WhatsApp-Gruppen-Mirror: wenn gesetzt, wird jede an die Verteiler-Adresse
-      -- gehende Mail zusaetzlich in die hinterlegte WhatsApp-Gruppe gepostet.
+      -- gehende Mail zusätzlich in die hinterlegte WhatsApp-Gruppe gepostet.
       ALTER TABLE email_verteiler ADD COLUMN IF NOT EXISTS whatsapp_group_id VARCHAR(120);
       ALTER TABLE email_verteiler ADD COLUMN IF NOT EXISTS whatsapp_group_name VARCHAR(255);
       -- Migrate single group_name to group_names array
@@ -18247,7 +18247,7 @@ async function initDB() {
       -- Ensure duration_minutes column exists on wasch_sessions
       ALTER TABLE wasch_sessions ADD COLUMN IF NOT EXISTS duration_minutes INTEGER;
 
-      -- Waschkueche: stweg column for per-STWEG rooms
+      -- Waschküche: stweg column for per-STWEG rooms
       ALTER TABLE wasch_rooms ADD COLUMN IF NOT EXISTS stweg INTEGER;
       -- Migrate existing rooms to STWEG 3 (original installation)
       UPDATE wasch_rooms SET stweg = 3 WHERE stweg IS NULL;
@@ -18710,10 +18710,10 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_auslagen_stweg_status ON auslagen(stweg, status);
       CREATE INDEX IF NOT EXISTS idx_auslagen_created ON auslagen(created_at DESC);
 
-      -- Generische Mail-Empfaenger-Stammdaten (Anwalt, Bank, Versicherung,
+      -- Generische Mail-Empfänger-Stammdaten (Anwalt, Bank, Versicherung,
       -- Handwerker, Behoerde, Energieversorger etc.). Die "Verwaltung" bleibt
       -- in eigener verwaltungen-Tabelle (Vertrag/Plattform-Felder), wird aber
-      -- von Empfaenger-Helper-Funktion als Kategorie 'verwaltung' mit-gequeried.
+      -- von Empfänger-Helper-Funktion als Kategorie 'verwaltung' mit-gequeried.
       CREATE TABLE IF NOT EXISTS mail_empfaenger (
         id SERIAL PRIMARY KEY,
         kategorie VARCHAR(60) NOT NULL,        -- 'anwalt','bank','versicherung','behoerde','energie','handwerker','sonstige', ...
@@ -18735,14 +18735,14 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_mail_empf_kategorie ON mail_empfaenger(kategorie, aktiv);
       CREATE INDEX IF NOT EXISTS idx_mail_empf_stweg ON mail_empfaenger(stweg, aktiv);
 
-      -- Personen-Entitaet (Single Source of Truth fuer Kontaktdaten).
-      -- Eine Person kann mehrere Wohnungen besitzen/bewohnen. Aenderungen an
+      -- Personen-Entitaet (Single Source of Truth für Kontaktdaten).
+      -- Eine Person kann mehrere Wohnungen besitzen/bewohnen. Änderungen an
       -- Email/Telefon/Adresse propagieren automatisch via Trigger auf alle
       -- verknuepften wohnungen_kontakte-Zeilen.
       CREATE TABLE IF NOT EXISTS personen (
         id SERIAL PRIMARY KEY,
         name VARCHAR(255) NOT NULL,           -- Anzeigename (z.B. "Stefan Mueller")
-        vorname VARCHAR(120),                  -- optional, fuer strukturierte Anzeige
+        vorname VARCHAR(120),                  -- optional, für strukturierte Anzeige
         nachname VARCHAR(120),                 -- optional
         email VARCHAR(255),
         telefon VARCHAR(60),
@@ -18751,7 +18751,7 @@ async function initDB() {
         geburtsdatum DATE,
         anrede VARCHAR(20),                    -- Herr / Frau / Familie / etc.
         notiz TEXT,
-        review_needed BOOLEAN DEFAULT false,   -- markiert moegliche Duplikate fuer Dedup
+        review_needed BOOLEAN DEFAULT false,   -- markiert moegliche Duplikate für Dedup
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
@@ -18774,7 +18774,7 @@ async function initDB() {
         id SERIAL PRIMARY KEY,
         name VARCHAR(120) NOT NULL,
         phone VARCHAR(60) NOT NULL,             -- internationales Format z.B. +41765199970
-        enabled BOOLEAN DEFAULT true,           -- Toggle (auch fuer permanente)
+        enabled BOOLEAN DEFAULT true,           -- Toggle (auch für permanente)
         is_temporary BOOLEAN DEFAULT false,     -- Vertretung
         valid_until TIMESTAMPTZ,                -- NULL = permanent, sonst Ablauf
         priority INTEGER DEFAULT 100,           -- niedrigere zuerst, gleiche parallel
@@ -18822,7 +18822,7 @@ async function initDB() {
       -- Format: ["alias1@example.com","alias2@example.com"]. Primary bleibt
       -- in der email-Spalte. Lookup matcht email OR irgendeinen Eintrag hier.
       ALTER TABLE personen ADD COLUMN IF NOT EXISTS emails JSONB DEFAULT '[]'::jsonb;
-      -- GIN-Index fuer schnellen JSONB-Array-Contains-Lookup
+      -- GIN-Index für schnellen JSONB-Array-Contains-Lookup
       CREATE INDEX IF NOT EXISTS idx_personen_emails_gin ON personen USING gin (emails);
 
       -- WhatsApp-Bot: ein-/ausgehende Nachrichten
@@ -18834,7 +18834,7 @@ async function initDB() {
         body TEXT,
         attachments JSONB DEFAULT '[]'::jsonb,      -- [{type, url, mimetype, caption?}]
         person_id INTEGER REFERENCES personen(id) ON DELETE SET NULL,
-        source_type VARCHAR(60),                    -- z.B. 'auslage-status' | 'reklamation-bestaetigung' | 'command-response'
+        source_type VARCHAR(60),                    -- z.B. 'auslage-status' | 'reklamation-bestätigung' | 'command-response'
         source_id INTEGER,
         status VARCHAR(20) DEFAULT 'received',      -- received | queued | sent | failed | bounced
         error_message TEXT,
@@ -18846,7 +18846,7 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_wa_msg_pending ON whatsapp_messages(status, created_at)
         WHERE direction = 'outbound' AND status = 'queued';
       CREATE INDEX IF NOT EXISTS idx_wa_msg_person ON whatsapp_messages(person_id, created_at DESC);
-      -- chat_id (WhatsApp JID: <id>@c.us, <id>@lid, <id>@g.us) — fuer Reply
+      -- chat_id (WhatsApp JID: <id>@c.us, <id>@lid, <id>@g.us) — für Reply
       -- an LID-Privacy-Chats, wo die echte Nummer nicht aufgeloest werden kann.
       ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS chat_id VARCHAR(120);
 
@@ -18872,20 +18872,20 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_rekl_person ON reklamationen(person_id);
       CREATE INDEX IF NOT EXISTS idx_wk_person ON wohnungen_kontakte(person_id);
 
-      -- Vollmachten: Eigentuemer bevollmaechtigt Verwalter/Mieter/andere
+      -- Vollmachten: Eigentümer bevollmaechtigt Verwalter/Mieter/andere
       -- Person zur Vertretung in laufender Verwaltung, Einzel-Geschaeft
       -- oder Datenschutz-Auskunft. Schweizer ZertES Art.2: digital signiert
       -- per Authentik-Login = einfache elektronische Signatur (mit
-      -- Audit-Log: timestamp, IP, user-agent). Papier-Pfad fuer
+      -- Audit-Log: timestamp, IP, user-agent). Papier-Pfad für
       -- gedruckt+unterschrieben+gescannt.
       CREATE TABLE IF NOT EXISTS vollmachten (
         id SERIAL PRIMARY KEY,
-        -- Vollmachtgeber (= Eigentuemer/Berechtigter, der die Vollmacht erteilt)
+        -- Vollmachtgeber (= Eigentümer/Berechtigter, der die Vollmacht erteilt)
         vollmachtgeber_person_id INTEGER REFERENCES personen(id) ON DELETE SET NULL,
         vollmachtgeber_name TEXT NOT NULL,
         vollmachtgeber_email TEXT,
         vollmachtgeber_adresse TEXT,
-        -- Bevollmaechtigter
+        -- Bevollmächtigter
         bevollmaechtigter_typ VARCHAR(20) NOT NULL,    -- 'eigentuemer' | 'verwaltung' | 'mieter' | 'extern'
         bevollmaechtigter_person_id INTEGER REFERENCES personen(id) ON DELETE SET NULL,
         bevollmaechtigter_verwaltung_id INTEGER REFERENCES verwaltungen(id) ON DELETE SET NULL,
@@ -18931,15 +18931,15 @@ async function initDB() {
       -- erlaubt und bei Drucken nicht verwechselbar ist.
       ALTER TABLE vollmachten ADD COLUMN IF NOT EXISTS doc_hash VARCHAR(16) UNIQUE;
       CREATE INDEX IF NOT EXISTS idx_vm_doc_hash ON vollmachten(doc_hash);
-      -- Hash fuer Bestands-Vollmachten nachgenerieren
+      -- Hash für Bestands-Vollmachten nachgenerieren
       UPDATE vollmachten SET doc_hash = SUBSTRING(MD5(id::TEXT || created_at::TEXT) FROM 1 FOR 8)
         WHERE doc_hash IS NULL;
 
-      -- CH-Recht: bei Miteigentum (Ehepaar, Erbengemeinschaft, etc.) muessen
-      -- ALLE Vollmachtgeber unterschreiben damit die Vollmacht gueltig ist.
+      -- CH-Recht: bei Miteigentum (Ehepaar, Erbengemeinschaft, etc.) müssen
+      -- ALLE Vollmachtgeber unterschreiben damit die Vollmacht gültig ist.
       -- Separate Tabelle pro Vollmachtgeber mit eigener Signatur. Die alte
       -- vollmachtgeber_*-Spalten im Haupt-Record bleiben als 'Primaer-Vollmachtgeber'
-      -- (Snapshot, fuer Anzeige in Listen + Backward-Compatibility).
+      -- (Snapshot, für Anzeige in Listen + Backward-Compatibility).
       CREATE TABLE IF NOT EXISTS vollmachten_vollmachtgeber (
         id SERIAL PRIMARY KEY,
         vollmacht_id INTEGER NOT NULL REFERENCES vollmachten(id) ON DELETE CASCADE,
@@ -18962,8 +18962,8 @@ async function initDB() {
 
       -- ───── ISP / Anschluss-Verwaltung ─────
       -- Pro Wohnung ein Anschluss-Datensatz (Status, Switch-Port, Bandbreite,
-      -- VLAN, Erschliessungs-Kosten). Sichtbar fuer Bewohner als
-      -- 'Mein Anschluss', voll editierbar fuer technik/praesident.
+      -- VLAN, Erschliessungs-Kosten). Sichtbar für Bewohner als
+      -- 'Mein Anschluss', voll editierbar für technik/praesident.
       CREATE TABLE IF NOT EXISTS isp_subscribers (
         id SERIAL PRIMARY KEY,
         wohnung_id INTEGER REFERENCES wohnungen(id) ON DELETE CASCADE,
@@ -19027,14 +19027,14 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_isp_vpn_user ON isp_vpn_accounts(LOWER(user_email));
       CREATE INDEX IF NOT EXISTS idx_isp_vpn_active ON isp_vpn_accounts(active);
 
-      -- VLAN-Requests: Bewohner kann eigenes VLAN beantragen (z.B. fuer
+      -- VLAN-Requests: Bewohner kann eigenes VLAN beantragen (z.B. für
       -- Smart-Home, Server, Gaming). Antrag → status pending → Technik
       -- genehmigt + traegt vlan_id ein → Erschliessung.
       CREATE TABLE IF NOT EXISTS isp_vlan_requests (
         id SERIAL PRIMARY KEY,
         antragsteller_email TEXT NOT NULL,
         wohnung_id INTEGER REFERENCES wohnungen(id) ON DELETE SET NULL,
-        zweck TEXT NOT NULL,                     -- Freitext: wofuer
+        zweck TEXT NOT NULL,                     -- Freitext: wofür
         gewuenschter_name VARCHAR(80),           -- Wunsch-Bezeichnung
         gewuenschte_groesse VARCHAR(20),         -- /29, /28, /24
         geraete_anzahl INTEGER,
@@ -19053,8 +19053,8 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_isp_vlanreq_status ON isp_vlan_requests(status);
       CREATE INDEX IF NOT EXISTS idx_isp_vlanreq_user ON isp_vlan_requests(LOWER(antragsteller_email));
 
-      -- Mitnutzer: zusaetzliche Bewohner-Emails (lowercase, deduped), die das
-      -- VLAN ebenfalls sehen + zurueckziehen koennen.
+      -- Mitnutzer: zusätzliche Bewohner-Emails (lowercase, deduped), die das
+      -- VLAN ebenfalls sehen + zurückziehen können.
       DO $$ BEGIN
         ALTER TABLE isp_vlan_requests
           ADD COLUMN IF NOT EXISTS mitnutzer_emails TEXT[] DEFAULT ARRAY[]::TEXT[];
@@ -19065,7 +19065,7 @@ async function initDB() {
       -- Netzwerk-Antrag erweitert um 'Kind' + WLAN-Option:
       --   vlan      → klassischer VLAN-Tag-Antrag (user macht eigenes Routing)
       --   subnet    → wir richten DHCP/Gateway via UDM ein, kabel-only
-      --   subnet+wlan → zusaetzlich PPSK im Rosenweg-WLAN auto-erstellt
+      --   subnet+wlan → zusätzlich PPSK im Rosenweg-WLAN auto-erstellt
       DO $$ BEGIN
         ALTER TABLE isp_vlan_requests
           ADD COLUMN IF NOT EXISTS kind VARCHAR(20) DEFAULT 'vlan',
@@ -19073,7 +19073,7 @@ async function initDB() {
           ADD COLUMN IF NOT EXISTS wlan_password TEXT,             -- nach UniFi-Provisionierung
           ADD COLUMN IF NOT EXISTS dhcp_range_from INET,
           ADD COLUMN IF NOT EXISTS dhcp_range_to INET,
-          ADD COLUMN IF NOT EXISTS dhcp_gateway INET,              -- DHCP-Default-Gateway den User-Geraete sehen
+          ADD COLUMN IF NOT EXISTS dhcp_gateway INET,              -- DHCP-Default-Gateway den User-Geräte sehen
           ADD COLUMN IF NOT EXISTS unifi_network_id VARCHAR(40);   -- UniFi-NetworkConf _id nach Provisionierung
         ALTER TABLE isp_vlan_requests
           ADD CONSTRAINT isp_vlanreq_kind_chk CHECK (kind IN ('vlan','subnet'));
@@ -19081,7 +19081,7 @@ async function initDB() {
 
       -- Phase 2: Router-LXC pro Client-VLAN.
       -- Architektur: pro offiziellem Client-VLAN (9, 99, 139, 179, ...) ein
-      -- dedizierter LXC der als Default-Gateway + DHCP fuer alle User-Subnets
+      -- dedizierter LXC der als Default-Gateway + DHCP für alle User-Subnets
       -- in diesem Client-VLAN dient. LXC-IDs vergibt der Admin manuell.
       -- Phase 2 verwaltet nur den Datensatz; Provisionierung kommt in Phase 3.
       CREATE TABLE IF NOT EXISTS isp_client_vlan_routers (
@@ -19090,7 +19090,7 @@ async function initDB() {
         bezeichnung VARCHAR(80),                   -- z.B. "RW9 Bewohner-Sammel"
         lxc_id INTEGER NOT NULL,                   -- Proxmox-CT-ID (Admin-defined)
         pve_host VARCHAR(20),                      -- pve1|pve2|pve3
-        mgmt_ip INET,                              -- Mgmt-IP fuer SSH/Provisioning
+        mgmt_ip INET,                              -- Mgmt-IP für SSH/Provisioning
         upstream_gateway INET,                     -- Default-Route in den Client-VLAN
         active BOOLEAN DEFAULT true,
         notizen TEXT,
@@ -19114,11 +19114,11 @@ async function initDB() {
             REFERENCES isp_client_vlan_routers(id) ON DELETE SET NULL;
       EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
-      -- Approval-Workflow fuer Reverse-Proxy + Redirects:
+      -- Approval-Workflow für Reverse-Proxy + Redirects:
       -- 1. Customer beantragt mit beliebigem Hostname (z.B. test.abc.ch)
       -- 2. System checkt ob 'rosenweg' o.ae. drin → pending_admin
       -- 3. Sonst: System checkt ob DNS bereits auf uns zeigt → approved+active
-      -- 4. Background-Job re-checkt DNS alle 5 Min fuer pending_dns
+      -- 4. Background-Job re-checkt DNS alle 5 Min für pending_dns
       DO $$ BEGIN
         ALTER TABLE isp_reverse_proxy_routes
           ADD COLUMN IF NOT EXISTS approval_status VARCHAR(20) DEFAULT 'pending_dns',
@@ -19132,7 +19132,7 @@ async function initDB() {
       CREATE TABLE IF NOT EXISTS isp_redirects (
         id SERIAL PRIMARY KEY,
         source_host VARCHAR(255) NOT NULL,
-        source_path VARCHAR(500) DEFAULT '/',    -- z.B. '/foo' oder '/' fuer alles
+        source_path VARCHAR(500) DEFAULT '/',    -- z.B. '/foo' oder '/' für alles
         target_url VARCHAR(1000) NOT NULL,
         http_code INTEGER DEFAULT 301,           -- 301 permanent | 302 temporaer
         preserve_path BOOLEAN DEFAULT false,     -- /foo/bar wird an target/foo/bar haengt
@@ -19228,14 +19228,14 @@ async function initDB() {
       ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS smtps_sni_hostname VARCHAR(255);
       ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS smtps_host VARCHAR(255);
       ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS smtps_port INTEGER DEFAULT 465;
-      -- mailcow_managed=true: Rosenweg betreibt die Mailcow-Instanz fuer diese Domain,
-      -- d.h. wir koennen via Mailcow-API Mailboxes anlegen/loeschen/Passwort setzen.
+      -- mailcow_managed=true: Rosenweg betreibt die Mailcow-Instanz für diese Domain,
+      -- d.h. wir können via Mailcow-API Mailboxes anlegen/löschen/Passwort setzen.
       ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS mailcow_managed BOOLEAN DEFAULT false;
-      -- allowed_groups: Authentik-Gruppen die Mailboxes fuer diese Domain beantragen
-      -- duerfen. NULL = jeder eingeloggte User. Beispiel rosenweg9.ch:
+      -- allowed_groups: Authentik-Gruppen die Mailboxes für diese Domain beantragen
+      -- dürfen. NULL = jeder eingeloggte User. Beispiel rosenweg9.ch:
       -- ['r9-eigentuemer','r9-bewohner','stweg3-eigentuemer','stweg3-bewohner','stweg3-ausschuss']
       ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS allowed_groups TEXT[];
-      -- Outbound-Smarthost via PMG (→ SMTP2GO) fuer Kunden mit eigenem
+      -- Outbound-Smarthost via PMG (→ SMTP2GO) für Kunden mit eigenem
       -- Mailserver in unserem Netz. Wenn aktiv:
       --   * Kunde konfiguriert seinen Postfix mit relayhost = [pmg.rosenweg4303.ch]:25
       --   * Wir verifizieren die Sender-Domain bei SMTP2GO (DKIM + Return-Path)
@@ -19270,8 +19270,8 @@ async function initDB() {
         UNIQUE (year_month, threshold)
       );
 
-      -- Mailbox-Onboarding: User-Antraege fuer rosenweg-managed Domains.
-      -- Status: pending (Admin pruefen) -> approved (provisioniert in Mailcow)
+      -- Mailbox-Onboarding: User-Anträge für rosenweg-managed Domains.
+      -- Status: pending (Admin prüfen) -> approved (provisioniert in Mailcow)
       --                                  -> rejected (Antrag abgelehnt)
       CREATE TABLE IF NOT EXISTS mailbox_requests (
         id SERIAL PRIMARY KEY,
@@ -19298,20 +19298,20 @@ async function initDB() {
       -- initial_password = Klartext, NUR bis User auf "notiert" klickt.
       ALTER TABLE mailbox_requests ADD COLUMN IF NOT EXISTS initial_password TEXT;
       ALTER TABLE mailbox_requests ADD COLUMN IF NOT EXISTS auto_approved BOOLEAN DEFAULT false;
-      -- Backfill: bestehende Antraege ohne assigned_user_email = persoenlich.
+      -- Backfill: bestehende Anträge ohne assigned_user_email = persoenlich.
       UPDATE mailbox_requests SET assigned_user_email = antragsteller_email
        WHERE assigned_user_email IS NULL AND antragsteller_email IS NOT NULL;
       -- Alt-Zeilen mit status='deleted' raeumen (waren Soft-Deletes, blockten
-      -- die UNIQUE-Constraint fuer neue Antraege).
+      -- die UNIQUE-Constraint für neue Anträge).
       DELETE FROM mailbox_requests WHERE status='deleted';
 
       -- isp_mailboxes ist veraltet (PMG hat keine eigenen Mailboxes).
-      -- Tabelle bleibt fuer Backward-Compat, wird nicht mehr benutzt.
+      -- Tabelle bleibt für Backward-Compat, wird nicht mehr benutzt.
       CREATE TABLE IF NOT EXISTS isp_mailboxes (
         id SERIAL PRIMARY KEY,
         local_part VARCHAR(120) NOT NULL,        -- vor @
         domain VARCHAR(120) NOT NULL,            -- nach @
-        owner_user_email TEXT,                   -- Wem gehoert das Postfach
+        owner_user_email TEXT,                   -- Wem gehört das Postfach
         wohnung_id INTEGER REFERENCES wohnungen(id) ON DELETE SET NULL,
         aliases TEXT[],                          -- weitere Adressen die dahin gehen
         quota_mb INTEGER,
@@ -19326,7 +19326,7 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_isp_mb_owner ON isp_mailboxes(LOWER(owner_user_email));
       CREATE INDEX IF NOT EXISTS idx_isp_mb_domain ON isp_mailboxes(domain);
 
-      -- Umlaut-invariante Such-Funktion (fuer KI-Suche etc.)
+      -- Umlaut-invariante Such-Funktion (für KI-Suche etc.)
       -- 'Müller' und 'Mueller' werden beide auf 'mueller' normalisiert.
       CREATE OR REPLACE FUNCTION de_norm(t text) RETURNS text
         LANGUAGE sql IMMUTABLE AS $$
@@ -19334,18 +19334,18 @@ async function initDB() {
             'ä','ae'),'ö','oe'),'ü','ue'),'Ä','ae'),'Ö','oe'),'Ü','ue'),'ß','ss'))
         $$;
 
-      -- Personal Access Tokens (PAT) fuer M2M / KI-Agent-Zugriff.
+      -- Personal Access Tokens (PAT) für M2M / KI-Agent-Zugriff.
       -- User erstellt im Profil Token, kopiert ihn einmal, traegt in
       -- Agent (Hermes, OpenClaw, MCP-Client) ein. Wirkt im API als
       -- 'login als dieser User' mit gleichen Permissions wie Browser-Login.
       -- Scopes optional: NULL = volle User-Rechte; ['vollmachten:read', ...]
-      -- restringiert. Audit-Log haelt token_id fuer Nachverfolgbarkeit.
+      -- restringiert. Audit-Log haelt token_id für Nachverfolgbarkeit.
       CREATE TABLE IF NOT EXISTS api_tokens (
         id SERIAL PRIMARY KEY,
         user_email TEXT NOT NULL,
         name TEXT NOT NULL,                 -- vom User vergeben (z.B. 'Hermes Mobile')
         token_hash TEXT NOT NULL UNIQUE,    -- sha256(plain_token)
-        token_prefix VARCHAR(16) NOT NULL,  -- erste 12 Zeichen fuer Anzeige
+        token_prefix VARCHAR(16) NOT NULL,  -- erste 12 Zeichen für Anzeige
         scopes JSONB,                       -- NULL = alle User-Rechte
         last_used_at TIMESTAMPTZ,
         last_used_ip TEXT,
@@ -19357,10 +19357,10 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(LOWER(user_email), revoked_at);
       CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash) WHERE revoked_at IS NULL;
 
-      -- Vorlagen-Tabelle: vorgefertigte Geltungsbereich-Texte fuer haeufige
-      -- Faelle (z.B. 'generelle Verwalter-Vollmacht', 'Vermietungs-Vollmacht'),
-      -- damit nicht jeder Eigentuemer den gleichen Text neu formulieren muss.
-      -- Anlage durch technik/praesident/ausschuss, Lese-Zugriff fuer alle.
+      -- Vorlagen-Tabelle: vorgefertigte Geltungsbereich-Texte für haeufige
+      -- Fälle (z.B. 'generelle Verwalter-Vollmacht', 'Vermietungs-Vollmacht'),
+      -- damit nicht jeder Eigentümer den gleichen Text neu formulieren muss.
+      -- Anlage durch technik/praesident/ausschuss, Lese-Zugriff für alle.
       CREATE TABLE IF NOT EXISTS vollmachten_templates (
         id SERIAL PRIMARY KEY,
         titel VARCHAR(200) NOT NULL,
@@ -19464,7 +19464,7 @@ async function initDB() {
 
       -- Verwaltungs-Mail-Genehmigungs-Queue
       -- Alle ausgehenden Mails an externe Verwaltung werden zuerst hier
-      -- abgelegt und brauchen Freigabe durch Technik oder Praesident
+      -- abgelegt und brauchen Freigabe durch Technik oder Präsident
       -- bevor sie versendet werden. Inhalt kann editiert werden.
       CREATE TABLE IF NOT EXISTS verwaltung_mail_queue (
         id SERIAL PRIMARY KEY,
@@ -19494,7 +19494,7 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_vmq_pending ON verwaltung_mail_queue(status, created_at) WHERE status = 'pending';
       CREATE INDEX IF NOT EXISTS idx_vmq_source ON verwaltung_mail_queue(source_type, source_id);
 
-      -- M7: Separate Tabelle fuer Mail-Attachments. Inline-base64 in JSONB skaliert
+      -- M7: Separate Tabelle für Mail-Attachments. Inline-base64 in JSONB skaliert
       -- nicht (20 MB Anhang × 100 Mails = 2 GB Tabelle). Hier nur Metadaten +
       -- Referenz auf Disk-Pfad (docs_path) ODER kleine inline content_base64.
       CREATE TABLE IF NOT EXISTS verwaltung_mail_attachments (
@@ -19502,8 +19502,8 @@ async function initDB() {
         queue_id INTEGER NOT NULL REFERENCES verwaltung_mail_queue(id) ON DELETE CASCADE,
         filename VARCHAR(255) NOT NULL,
         size_bytes INTEGER,
-        docs_path TEXT,                       -- live aus DOCS_PATH lesen (Standard fuer Belege)
-        content_base64 TEXT,                  -- inline (fuer Ad-hoc-Compose-Uploads)
+        docs_path TEXT,                       -- live aus DOCS_PATH lesen (Standard für Belege)
+        content_base64 TEXT,                  -- inline (für Ad-hoc-Compose-Uploads)
         sort_order INTEGER DEFAULT 0,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         CONSTRAINT vma_source_chk CHECK (docs_path IS NOT NULL OR content_base64 IS NOT NULL)
@@ -19514,10 +19514,10 @@ async function initDB() {
       -- source_type vor 'default'. Erste passende Regel gilt.
       CREATE TABLE IF NOT EXISTS mail_approval_config (
         id SERIAL PRIMARY KEY,
-        source_type_pattern VARCHAR(120) NOT NULL,        -- z.B. 'auslage-auszahlung', 'ad-hoc-anwalt', 'objekt-aenderung' oder 'default'
-        min_betrag_chf NUMERIC(10,2),                     -- optional, gilt nur fuer Auslagen ueber diesem Betrag
+        source_type_pattern VARCHAR(120) NOT NULL,        -- z.B. 'auslage-auszahlung', 'ad-hoc-anwalt', 'objekt-änderung' oder 'default'
+        min_betrag_chf NUMERIC(10,2),                     -- optional, gilt nur für Auslagen über diesem Betrag
         required_groups TEXT NOT NULL,                    -- Komma-Liste, z.B. 'technik,praesident'
-        min_approvers INTEGER NOT NULL DEFAULT 1,         -- Anzahl Freigaben fuer Versand (4-Augen-Prinzip ab 2)
+        min_approvers INTEGER NOT NULL DEFAULT 1,         -- Anzahl Freigaben für Versand (4-Augen-Prinzip ab 2)
         sort_order INTEGER DEFAULT 0,                     -- bei mehreren passenden zaehlt niedrigster sort_order zuerst
         notiz TEXT,
         aktiv BOOLEAN DEFAULT true,
@@ -19539,12 +19539,12 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_mal_queue ON mail_approval_log(queue_id);
 
-      -- Mail-Templates pro source_type + optional Empfaenger-Kategorie.
+      -- Mail-Templates pro source_type + optional Empfänger-Kategorie.
       -- Platzhalter im Format {{path.to.field}} (z.B. {{auslage.betrag_chf}}).
       -- Wenn kein Template gefunden wird, wird der hartcodierte Default verwendet.
       CREATE TABLE IF NOT EXISTS mail_templates (
         id SERIAL PRIMARY KEY,
-        source_type VARCHAR(120) NOT NULL,                -- z.B. 'auslage-auszahlung', 'objekt-aenderung'
+        source_type VARCHAR(120) NOT NULL,                -- z.B. 'auslage-auszahlung', 'objekt-änderung'
         empfaenger_kategorie VARCHAR(60),                  -- z.B. 'verwaltung', 'bank', NULL = alle
         subject_template TEXT NOT NULL,
         body_template TEXT NOT NULL,
@@ -19557,7 +19557,7 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_templates_source ON mail_templates(source_type, aktiv);
 
       -- Outbox-Tracking: wann ging die letzte Auszahlungs-Mail an wen?
-      -- Damit koennen wir genehmigte Auslagen, die waehrend einer Vakanz
+      -- Damit können wir genehmigte Auslagen, die während einer Vakanz
       -- nur an den Ausschuss gingen, automatisch an eine neue Verwaltung
       -- nachreichen, sobald diese wirksam wird.
       ALTER TABLE auslagen ADD COLUMN IF NOT EXISTS auszahlung_mail_at TIMESTAMPTZ;
@@ -19568,7 +19568,7 @@ async function initDB() {
       ALTER TABLE auslagen ADD COLUMN IF NOT EXISTS auszahlung_reminder_at TIMESTAMPTZ;
       CREATE INDEX IF NOT EXISTS idx_auslagen_offen_fallback ON auslagen(status, auszahlung_mail_fallback) WHERE status = 'genehmigt';
 
-      -- Projekt-Budget (Soll-Wert) fuer Budget-Tracking
+      -- Projekt-Budget (Soll-Wert) für Budget-Tracking
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS budget_chf NUMERIC(12,2);
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS budget_warnung_pct INTEGER DEFAULT 80;
 
@@ -19582,7 +19582,7 @@ async function initDB() {
       END $$;
       CREATE INDEX IF NOT EXISTS idx_auslagen_projekt ON auslagen(projekt_slug) WHERE projekt_slug IS NOT NULL;
 
-      -- L1+L6: CHECK-Constraints nachtraeglich hinzufuegen (CREATE TABLE IF NOT EXISTS
+      -- L1+L6: CHECK-Constraints nachtraeglich hinzufügen (CREATE TABLE IF NOT EXISTS
       -- fuegt neue Constraints nicht zu existierender Tabelle hinzu)
       DO $$ BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'auslagen_betrag_chk' AND conrelid = 'auslagen'::regclass) THEN
@@ -19600,7 +19600,7 @@ async function initDB() {
       END $$;
 
       -- Mehrere Belege pro Auslage. Migration: bestehendes auslagen.beleg_path
-      -- wird beim ersten Start in auslagen_belege als erster Eintrag uebernommen.
+      -- wird beim ersten Start in auslagen_belege als erster Eintrag übernommen.
       CREATE TABLE IF NOT EXISTS auslagen_belege (
         id SERIAL PRIMARY KEY,
         auslage_id INTEGER NOT NULL REFERENCES auslagen(id) ON DELETE CASCADE,
@@ -19615,7 +19615,7 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_auslagen_belege_auslage ON auslagen_belege(auslage_id, sort_order);
 
-      -- Migration: bestehende beleg_path-Werte in neue Tabelle uebernehmen
+      -- Migration: bestehende beleg_path-Werte in neue Tabelle übernehmen
       DO $$ BEGIN
         IF EXISTS (SELECT 1 FROM auslagen WHERE beleg_path IS NOT NULL
                     AND NOT EXISTS (SELECT 1 FROM auslagen_belege WHERE auslage_id = auslagen.id)) THEN
@@ -19627,13 +19627,13 @@ async function initDB() {
       END $$;
 
       -- Detaillierte Positionen pro Auslage (KI-Belegleser-Output oder manuell)
-      -- Positionen koennen einem konkreten Beleg zugeordnet sein (beleg_id)
+      -- Positionen können einem konkreten Beleg zugeordnet sein (beleg_id)
       CREATE TABLE IF NOT EXISTS auslagen_positionen (
         id SERIAL PRIMARY KEY,
         auslage_id INTEGER NOT NULL REFERENCES auslagen(id) ON DELETE CASCADE,
         position_typ VARCHAR(20) NOT NULL DEFAULT 'material',   -- 'material' | 'arbeitszeit'
         beschreibung TEXT NOT NULL,
-        menge NUMERIC(10,3) DEFAULT 1,                          -- Stueck / Stunden / Liter etc.
+        menge NUMERIC(10,3) DEFAULT 1,                          -- Stück / Stunden / Liter etc.
         einheit VARCHAR(20),                                    -- 'Stk', 'h', 'kg', 'l', 'm', ...
         einzelpreis_chf NUMERIC(10,2),                          -- pro Einheit
         gesamt_chf NUMERIC(10,2) NOT NULL,                      -- berechnet oder manuell
@@ -19648,7 +19648,7 @@ async function initDB() {
       ALTER TABLE auslagen_positionen ADD COLUMN IF NOT EXISTS gesamt_original NUMERIC(10,2);
 
       -- Stundensatz-Config: pro STWEG oder uebergreifend (stweg=NULL).
-      -- Wird beim KI-Belegleser bei "Arbeitszeit"-Positionen automatisch fuer
+      -- Wird beim KI-Belegleser bei "Arbeitszeit"-Positionen automatisch für
       -- die Berechnung genutzt.
       CREATE TABLE IF NOT EXISTS auslagen_stundensatz (
         id SERIAL PRIMARY KEY,
@@ -19703,7 +19703,7 @@ async function initDB() {
         ('Verwaltung', 'bewohner-verwaltung', 'write'),
         ('Verwaltung', 'energie-monitor', 'read'),
         ('Verwaltung', 'email-verteiler', 'read'),
-        ('Verwaltung', 'zaehler', 'read'),
+        ('Verwaltung', 'zähler', 'read'),
         ('Verwaltung', 'kontakte', 'read'),
         ('Verwaltung', 'verwaltung', 'read')
         ON CONFLICT DO NOTHING
@@ -19730,14 +19730,14 @@ async function initDB() {
         INSERT INTO permissions (group_name, page, access) VALUES ($1, 'email-archiv', 'read')
         ON CONFLICT (group_name, page) DO NOTHING
       `, [groupName]);
-      // Ausschuss kann Auslagen seines STWEGs pruefen/freigeben
+      // Ausschuss kann Auslagen seines STWEGs prüfen/freigeben
       await client.query(`
         INSERT INTO permissions (group_name, page, access) VALUES ($1, 'auslagen', 'write')
         ON CONFLICT (group_name, page) DO NOTHING
       `, [groupName]);
     }
 
-    // Seed auslagen read fuer alle Eigentuemer-Gruppen (eigene Auslagen einsehen/einreichen)
+    // Seed auslagen read für alle Eigentümer-Gruppen (eigene Auslagen einsehen/einreichen)
     const eigentuemerGroups = Object.values(STWEG_GROUPS).map(g => g.eigentuemer).filter(Boolean);
     for (const groupName of eigentuemerGroups) {
       await client.query(`
@@ -19751,7 +19751,7 @@ async function initDB() {
       ON CONFLICT (group_name, page) DO NOTHING
     `);
 
-    // Auslagen-Stundensatz: Ausschuss write fuer den eigenen STWEG (vereinfacht: alle Ausschuss write)
+    // Auslagen-Stundensatz: Ausschuss write für den eigenen STWEG (vereinfacht: alle Ausschuss write)
     for (const groupName of ausschussGroups) {
       await client.query(`
         INSERT INTO permissions (group_name, page, access) VALUES ($1, 'auslagen-stundensatz', 'write')
@@ -19764,7 +19764,7 @@ async function initDB() {
       `, [groupName]);
     }
 
-    // PBX-Admin (Asterisk-Konfiguration): nur Technik + Praesident
+    // PBX-Admin (Asterisk-Konfiguration): nur Technik + Präsident
     await client.query(`
       INSERT INTO permissions (group_name, page, access) VALUES
       ('technik', 'pbx-admin', 'write'),
@@ -19772,7 +19772,7 @@ async function initDB() {
       ON CONFLICT (group_name, page) DO NOTHING
     `);
 
-    // Loeschungen-Admin (Pending Authentik-Deletions): Technik + Praesident
+    // Loeschungen-Admin (Pending Authentik-Deletions): Technik + Präsident
     await client.query(`
       INSERT INTO permissions (group_name, page, access) VALUES
       ('technik', 'loeschungen', 'write'),
@@ -19783,15 +19783,15 @@ async function initDB() {
     // Default Approval-Regel: technik ODER praesident, 1 Freigabe genuegt.
     await client.query(`
       INSERT INTO mail_approval_config (source_type_pattern, required_groups, min_approvers, sort_order, notiz)
-      SELECT 'default', 'technik,praesident', 1, 100, 'Standard: 1 Freigabe von Technik oder Praesident'
+      SELECT 'default', 'technik,praesident', 1, 100, 'Standard: 1 Freigabe von Technik oder Präsident'
       WHERE NOT EXISTS (SELECT 1 FROM mail_approval_config WHERE source_type_pattern = 'default' AND min_betrag_chf IS NULL)
     `);
 
-    // Mail-Empfaenger Stammdaten: Ausschuss read, Technik/Praesident sowieso write via isTechnik/isPraesident
-    // Mail-Compose: Ausschuss write (kann Mails entwerfen, aber Freigabe macht Technik/Praesident)
+    // Mail-Empfänger Stammdaten: Ausschuss read, Technik/Präsident sowieso write via isTechnik/isPraesident
+    // Mail-Compose: Ausschuss write (kann Mails entwerfen, aber Freigabe macht Technik/Präsident)
     for (const groupName of ausschussGroups) {
       await client.query(`
-        INSERT INTO permissions (group_name, page, access) VALUES ($1, 'mail-empfaenger', 'read')
+        INSERT INTO permissions (group_name, page, access) VALUES ($1, 'mail-empfänger', 'read')
         ON CONFLICT (group_name, page) DO NOTHING
       `, [groupName]);
       await client.query(`
@@ -19803,8 +19803,8 @@ async function initDB() {
     // ─── Einmalige Personen-Migration ──────────────────────────────
     // Wenn die personen-Tabelle leer ist UND es aktive Kontakte gibt,
     // konsolidieren wir die Kontakte zu Personen via (Name + Email).
-    // Email-Sharing (Ehepaare) bleibt erhalten — die Person wird ueber
-    // person_id eindeutig referenziert, nicht ueber die Email.
+    // Email-Sharing (Ehepaare) bleibt erhalten — die Person wird über
+    // person_id eindeutig referenziert, nicht über die Email.
     try {
       const personCount = await client.query('SELECT COUNT(*) AS cnt FROM personen');
       const kontaktCount = await client.query('SELECT COUNT(*) AS cnt FROM wohnungen_kontakte WHERE archiviert_am IS NULL AND person_id IS NULL');
@@ -19815,7 +19815,7 @@ async function initDB() {
         //     shared Email werden korrekt als getrennte Personen behandelt
         //   - Wenn KEINE Email: jeder Kontakt bekommt eigene Person (per id partition),
         //     statt versehentlich verschiedene "Hans Mueller" zusammenzufuehren.
-        //     Admin kann spaeter per Merge-Tool zusammenfuehren wenn gewollt.
+        //     Admin kann später per Merge-Tool zusammenfuehren wenn gewollt.
         const inserted = await client.query(`
           WITH active AS (
             SELECT id, name, email, telefon, adresse,
@@ -19854,9 +19854,9 @@ async function initDB() {
              AND LOWER(TRIM(k.name))  = LOWER(TRIM(COALESCE(p.name,'')))
              AND LOWER(TRIM(k.email)) = LOWER(TRIM(COALESCE(p.email,'')))
         `);
-        // person_id fuer Email-lose Kontakte: jeder Kontakt wurde als eigene Person
-        // eingefuegt → einzeln matchen ueber name + name+telefon+adresse Heuristik nicht
-        // moeglich; daher: pro Kontakt INSERT (oder Subquery) wenn nicht gemappt.
+        // person_id für Email-lose Kontakte: jeder Kontakt wurde als eigene Person
+        // eingefuegt → einzeln matchen über name + name+telefon+adresse Heuristik nicht
+        // möglich; daher: pro Kontakt INSERT (oder Subquery) wenn nicht gemappt.
         // Da Migration nur einmal laeuft und alle ohne-email Personen 1:1 mit Kontakten
         // korrespondieren, einfache nachgelagerte Logik:
         const orphan = await client.query(
@@ -19978,7 +19978,7 @@ async function initDB() {
           }
         }
 
-        // wohnungen_kontakte: gleicher Split (fuer Eintraege ohne person_id; mit person_id
+        // wohnungen_kontakte: gleicher Split (für Eintraege ohne person_id; mit person_id
         // wird durch Trigger automatisch ueberschrieben sobald personen.telefon/mobile sich
         // aendert; aber falls noch nicht propagiert, sicherheitshalber direkt)
         const wkRows = await client.query(
