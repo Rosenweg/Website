@@ -14534,6 +14534,50 @@ app.get('/api/isp/wohnungen-options', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// UniFi: Port-Security (MAC-Bindung) auf einem Switch-Port setzen oder leeren.
+// switchName: UniFi-Device-Name (z.B. "PoE-Switch1 R9 Heizungsraum")
+// portIdx: 1-basierte Port-Nummer
+// mac: lowercase aa:bb:cc:dd:ee:ff, oder null/leer = Port-Security deaktivieren
+async function unifiSetPortMacBinding(switchName, portIdx, mac) {
+  if (!switchName || !portIdx) return { skipped: 'no_switch_or_port' };
+  const idx = parseInt(portIdx, 10);
+  if (!Number.isInteger(idx) || idx < 1) throw new Error('port_idx ungueltig');
+  const d = await unifiGet('stat/device');
+  const sw = (d.data || []).find(x => x.type === 'usw' && x.name === switchName);
+  if (!sw) throw new Error(`Switch "${switchName}" nicht in UniFi gefunden`);
+  const overrides = Array.isArray(sw.port_overrides) ? sw.port_overrides.map(o => ({ ...o })) : [];
+  let entry = overrides.find(o => o.port_idx === idx);
+  if (!entry) { entry = { port_idx: idx }; overrides.push(entry); }
+  if (mac && /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/i.test(mac)) {
+    entry.port_security_enabled = true;
+    entry.port_security_mac_address = [mac.toLowerCase()];
+  } else {
+    entry.port_security_enabled = false;
+    entry.port_security_mac_address = [];
+  }
+  await unifiCall('PUT', `rest/device/${sw._id}`, { port_overrides: overrides });
+  return { ok: true, switch: switchName, port: idx, mac: mac || null };
+}
+
+// Hilfs-Wrapper: vergleicht alten + neuen Sub-Eintrag und propagiert Aenderungen
+// an UniFi (Port-Security). Wenn switch/port geaendert hat, wird der alte Port
+// geleert und der neue gesetzt. Fehler werden geloggt aber nicht zur Anfrage
+// durchgereicht (kein 500 wenn UniFi mal unreachable).
+async function syncSubscriberToUnifi(oldRow, newRow) {
+  try {
+    const oldSw = oldRow?.switch_name; const oldPort = oldRow?.switch_port;
+    const newSw = newRow?.switch_name; const newPort = newRow?.switch_port;
+    const newMac = newRow?.mac_dot1x;
+    // Wenn der Switch/Port-Slot wechselt, alten leeren (falls Port-Security gesetzt war)
+    if (oldRow?.mac_dot1x && (oldSw !== newSw || String(oldPort) !== String(newPort)) && oldSw && oldPort) {
+      await unifiSetPortMacBinding(oldSw, oldPort, null).catch(e => console.warn('[UniFi-Sync] clear-old:', e.message));
+    }
+    if (newSw && newPort) {
+      await unifiSetPortMacBinding(newSw, newPort, newMac).catch(e => console.warn('[UniFi-Sync] set-new:', e.message));
+    }
+  } catch (e) { console.warn('[UniFi-Sync] fail:', e.message); }
+}
+
 // === Subscribers (Wohnungs-Anschluesse) ===
 app.get('/api/isp/subscribers', authMiddleware, async (req, res) => {
   try {
@@ -14581,7 +14625,10 @@ app.post('/api/isp/subscribers', authMiddleware, async (req, res) => {
        b.vlan || null, b.bandbreite_down_mbps || null, b.bandbreite_up_mbps || null, b.mac_dot1x || null,
        b.eigenleistung_chf || null, b.eigenleistung_datum || null, b.notizen || null],
     );
-    res.json(r.rows[0]);
+    const row = r.rows[0];
+    // UniFi-Sync (fire-and-forget, blockt aber den Response)
+    await syncSubscriberToUnifi(null, row);
+    res.json(row);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -14590,6 +14637,8 @@ app.put('/api/isp/subscribers/:id', authMiddleware, async (req, res) => {
     if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Präsident' });
     const id = parseInt(req.params.id, 10);
     const b = req.body || {};
+    const oldQ = await pool.query('SELECT * FROM isp_subscribers WHERE id = $1', [id]);
+    if (oldQ.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const updates = []; const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
     for (const col of ['status','anschluss_typ','switch_name','switch_port','vlan','bandbreite_down_mbps','bandbreite_up_mbps','mac_dot1x','eigenleistung_chf','eigenleistung_datum','notizen']) {
@@ -14599,7 +14648,7 @@ app.put('/api/isp/subscribers/:id', authMiddleware, async (req, res) => {
     push('updated_at', new Date());
     params.push(id);
     const r = await pool.query(`UPDATE isp_subscribers SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
-    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    await syncSubscriberToUnifi(oldQ.rows[0], r.rows[0]);
     res.json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -14607,7 +14656,10 @@ app.put('/api/isp/subscribers/:id', authMiddleware, async (req, res) => {
 app.delete('/api/isp/subscribers/:id', authMiddleware, async (req, res) => {
   try {
     if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Präsident' });
-    await pool.query('DELETE FROM isp_subscribers WHERE id = $1', [parseInt(req.params.id, 10)]);
+    const id = parseInt(req.params.id, 10);
+    const old = await pool.query('SELECT * FROM isp_subscribers WHERE id = $1', [id]);
+    await pool.query('DELETE FROM isp_subscribers WHERE id = $1', [id]);
+    if (old.rows[0]) await syncSubscriberToUnifi(old.rows[0], null);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
