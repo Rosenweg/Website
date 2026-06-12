@@ -370,10 +370,24 @@ async function loadWlan() {
         // koennten leer sein, aber WLAN gehoert in dieselbe Sektion).
         document.getElementById('sec-meinanschluss').classList.remove('hidden');
         const wrap = document.getElementById('wlan-cards');
-        wrap.innerHTML = wlans.map((w, idx) => `
+        // Haus-WLAN zuerst, dann private User-VLAN-WLANs
+        const sortedWlans = wlans.slice().sort((a, b) => {
+          if (!!a.isUserVlan !== !!b.isUserVlan) return a.isUserVlan ? 1 : -1;
+          return a.isUserVlan ? (a.vlan || 0) - (b.vlan || 0) : (a.hausNr || 0) - (b.hausNr || 0);
+        });
+        wrap.innerHTML = sortedWlans.map((w, idx) => {
+          const isPriv = !!w.isUserVlan;
+          const header = isPriv
+            ? `🔒 Mein WLAN — ${esc(w.network || ('VLAN ' + w.vlan))}`
+            : `🏠 Haus WLAN — Rosenweg ${esc(w.hausNr)}`;
+          const banner = isPriv
+            ? `<div class="text-[10px] bg-emerald-50 border border-emerald-200 text-emerald-800 rounded px-2 py-1">🔒 Privates Netz: nur du${w.rolle === 'mitnutzer' ? ' (Mitnutzer)' : ''} + deine Mitnutzer, isoliert von anderen Bewohnern.</div>`
+            : `<div class="text-[10px] bg-amber-50 border border-amber-200 text-amber-900 rounded px-2 py-1">⚠ Mit allen Bewohnern deines Hauses geteilt — Geräte sehen sich gegenseitig. Privat? <a href="/isp-mein-zugang.html" class="underline">eigenes Netzwerk beantragen</a>.</div>`;
+          return `
           <div class="bg-white border rounded-2xl shadow-sm p-5 grid grid-cols-[1fr_auto] gap-4 items-center">
             <div class="space-y-2">
-              <div class="text-xs text-slate-500 uppercase tracking-wide font-semibold">📶 Mein WLAN — Rosenweg ${esc(w.hausNr)}</div>
+              <div class="text-xs text-slate-500 uppercase tracking-wide font-semibold">${header}</div>
+              ${banner}
               <div>
                 <div class="text-[10px] text-slate-500 uppercase">SSID</div>
                 <div class="font-mono font-semibold">Rosenweg</div>
@@ -391,10 +405,11 @@ async function loadWlan() {
               <canvas id="qr-wlan-${idx}" class="bg-white rounded-lg"></canvas>
               <div class="text-[10px] text-slate-500 mt-1">scannen zum Verbinden</div>
             </div>
-          </div>`).join('');
+          </div>`;
+        }).join('');
         wrap.classList.remove('hidden');
-        // QR-Codes rendern
-        wlans.forEach((w, idx) => {
+        // QR-Codes rendern (gleiche Reihenfolge wie das HTML oben)
+        sortedWlans.forEach((w, idx) => {
             const canvas = document.getElementById('qr-wlan-' + idx);
             if (canvas && window.QRious) {
                 const wifiStr = `WIFI:T:WPA;S:${escWifi('Rosenweg')};P:${escWifi(w.password)};;`;
