@@ -14977,6 +14977,125 @@ function parseCidr(cidr) {
   return { mask, mask_octets: mo, network: toIp(netNum), broadcast: toIp(bcNum), first_host: toIp(netNum + 1), last_host: toIp(bcNum - 1) };
 }
 
+// Subnet-Groesse vom User-Wunsch parsen: "/28" oder "28" -> 28. Default 28.
+// Akzeptiert /24 - /30 (16-4 IPs); /30 ist Minimum fuer P2P, sinnvoll ab /29.
+function parseRequestedMask(s) {
+  if (s == null || String(s).trim() === '') return 28;
+  const m = /^\/?(\d+)$/.exec(String(s).trim());
+  if (!m) return 28;
+  const v = parseInt(m[1], 10);
+  if (!Number.isInteger(v) || v < 24 || v > 30) return 28;
+  return v;
+}
+
+// Allokiert den naechsten freien Subnet-Block der vom User gewuenschten Groesse
+// aus dem Pool, ohne Konflikte mit anderen User-Subnets desselben Router-LXC.
+async function allocateUserSubnet(routerId, requestedMask, excludeRequestId = null) {
+  const rr = await pool.query('SELECT user_vlan_subnet_pool FROM isp_client_vlan_routers WHERE id = $1', [routerId]);
+  if (rr.rows.length === 0) throw new Error('Router-LXC nicht gefunden');
+  const poolCidr = String(rr.rows[0].user_vlan_subnet_pool || '');
+  const poolP = parseCidr(poolCidr);
+  if (!poolP) throw new Error('user_vlan_subnet_pool ungueltig: ' + poolCidr);
+  if (poolP.mask >= requestedMask) throw new Error(`Pool /${poolP.mask} kann kein /${requestedMask} liefern`);
+
+  const used = await pool.query(`
+    SELECT v.id, v.subnet_v4
+      FROM isp_vlan_requests v
+     WHERE v.assigned_router_id = $1
+       AND v.subnet_v4 IS NOT NULL
+       AND v.status IN ('approved','deployed')
+       ${excludeRequestId ? 'AND v.id <> $2' : ''}
+  `, excludeRequestId ? [routerId, excludeRequestId] : [routerId]);
+
+  const ipToNum = ip => ip.split('.').reduce((n, o) => (n << 8) + (+o), 0) >>> 0;
+  const numToIp = n => [(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff].join('.');
+  const inUse = used.rows.map(r => {
+    const p = parseCidr(String(r.subnet_v4));
+    if (!p) return null;
+    return { start: ipToNum(p.network), end: ipToNum(p.broadcast) };
+  }).filter(Boolean);
+
+  const poolStart = ipToNum(poolP.network);
+  const poolEnd = ipToNum(poolP.broadcast);
+  const blockSize = 1 << (32 - requestedMask);
+
+  // First-fit ab Pool-Start, aligned auf blockSize (Pool ist groesser → automatisch aligned).
+  for (let candidate = poolStart; candidate + blockSize - 1 <= poolEnd; candidate += blockSize) {
+    const cEnd = candidate + blockSize - 1;
+    const collision = inUse.some(u => !(cEnd < u.start || candidate > u.end));
+    if (collision) continue;
+    const net = numToIp(candidate);
+    // Bei /30: nur 1 Host (.1=gw, .2=DHCP, .3=Broadcast). Bei /29: 6 Hosts. Bei /28: 14.
+    return {
+      cidr: `${net}/${requestedMask}`,
+      gateway: numToIp(candidate + 1),
+      dhcp_from: numToIp(candidate + 2),
+      dhcp_to: numToIp(candidate + blockSize - 2),
+      mask: requestedMask,
+      broadcast: numToIp(cEnd),
+      usable_hosts: Math.max(0, blockSize - 3), // minus net + bcast + gw
+    };
+  }
+  throw new Error(`Kein freier /${requestedMask}-Block im Pool ${poolCidr}`);
+}
+
+// Endpoint: Auto-Vorbefuellung fuers Approve-Modal.
+app.get('/api/isp/vlan-requests/:id/allocation-preview', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Admin' });
+    const id = parseInt(req.params.id, 10);
+    const ex = await pool.query('SELECT * FROM isp_vlan_requests WHERE id = $1', [id]);
+    if (ex.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = ex.rows[0];
+    const out = { request_id: id, kind: v.kind || 'vlan', with_wlan: !!v.with_wlan };
+
+    // VLAN-ID vorschlagen
+    try {
+      const sR = await fetch(`http://127.0.0.1:${PORT}/api/isp/vlan-requests/${id}/suggest`, {
+        headers: { 'Authorization': req.headers.authorization || '' },
+      }).catch(() => null);
+      if (sR && sR.ok) {
+        const s = await sR.json();
+        out.suggested_vlan_id = s.suggested_vlan_id;
+        out.haus = s.haus;
+      }
+    } catch {}
+
+    // Router auto-vorschlagen: per Haus -> Client-VLAN aus VPN_RW_TO_VLAN
+    let routerId = v.assigned_router_id;
+    if (!routerId) {
+      let homeBezeichnung = null;
+      if (v.wohnung_id) {
+        const wq = await pool.query('SELECT bezeichnung FROM wohnungen WHERE id = $1', [v.wohnung_id]);
+        homeBezeichnung = wq.rows[0]?.bezeichnung || null;
+      }
+      if (!homeBezeichnung) {
+        const opts = await getUserVlanOptions(v.antragsteller_email);
+        homeBezeichnung = opts[0]?.bezeichnung || null;
+      }
+      const haus = vpnRwFromBezeichnung(homeBezeichnung);
+      const cvlan = haus && VPN_RW_TO_VLAN[haus];
+      if (cvlan) {
+        const rr = await pool.query('SELECT id, client_vlan_id, lxc_id, bezeichnung FROM isp_client_vlan_routers WHERE client_vlan_id = $1 AND active = true', [cvlan]);
+        if (rr.rows.length > 0) { routerId = rr.rows[0].id; out.suggested_router = rr.rows[0]; }
+      }
+    } else {
+      const rr = await pool.query('SELECT id, client_vlan_id, lxc_id, bezeichnung FROM isp_client_vlan_routers WHERE id = $1', [routerId]);
+      if (rr.rows.length > 0) out.suggested_router = rr.rows[0];
+    }
+    out.assigned_router_id = routerId;
+
+    // Subnet allokieren (nur fuer kind=subnet)
+    if ((v.kind || 'vlan') === 'subnet' && routerId) {
+      const mask = parseRequestedMask(v.gewuenschte_groesse);
+      try {
+        out.allocation = await allocateUserSubnet(routerId, mask, id);
+      } catch (e) { out.allocation_error = e.message; }
+    }
+    res.json(out);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Zufaelliges Passwort fuer PPSK (12 chars, alphanum)
 function generatePpskPassword() {
   const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -15251,13 +15370,14 @@ app.post('/api/isp/client-vlan-routers', authMiddleware, async (req, res) => {
     const lxc = parseInt(b.lxc_id, 10);
     if (!Number.isInteger(cvi) || cvi < 1 || cvi > 4094) return res.status(400).json({ error: 'client_vlan_id muss 1-4094 sein' });
     if (!Number.isInteger(lxc) || lxc < 100 || lxc > 99999) return res.status(400).json({ error: 'lxc_id muss eine valide CT-ID sein' });
+    const pool_default = b.user_vlan_subnet_pool || `192.168.${cvi}.0/24`;
     const r = await pool.query(
       `INSERT INTO isp_client_vlan_routers
-         (client_vlan_id, bezeichnung, lxc_id, pve_host, mgmt_ip, upstream_gateway, active, notizen)
-       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,true),$8)
+         (client_vlan_id, bezeichnung, lxc_id, pve_host, mgmt_ip, upstream_gateway, active, notizen, user_vlan_subnet_pool)
+       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,true),$8,$9)
        RETURNING *`,
       [cvi, b.bezeichnung || null, lxc, b.pve_host || null,
-       b.mgmt_ip || null, b.upstream_gateway || null, b.active, b.notizen || null],
+       b.mgmt_ip || null, b.upstream_gateway || null, b.active, b.notizen || null, pool_default],
     );
     res.json(r.rows[0]);
   } catch (err) {
@@ -15273,7 +15393,7 @@ app.put('/api/isp/client-vlan-routers/:id', authMiddleware, async (req, res) => 
     const ex = await pool.query('SELECT * FROM isp_client_vlan_routers WHERE id = $1', [id]);
     if (ex.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const b = req.body || {};
-    const allowed = ['client_vlan_id','bezeichnung','lxc_id','pve_host','mgmt_ip','upstream_gateway','active','notizen'];
+    const allowed = ['client_vlan_id','bezeichnung','lxc_id','pve_host','mgmt_ip','upstream_gateway','active','notizen','user_vlan_subnet_pool'];
     const updates = []; const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
     for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
@@ -18489,6 +18609,14 @@ async function initDB() {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_isp_cvr_active ON isp_client_vlan_routers(active);
+      -- Subnet-Pool aus dem auto-allokiert wird (default: 192.168.<client_vlan>.0/24)
+      DO $$ BEGIN
+        ALTER TABLE isp_client_vlan_routers
+          ADD COLUMN IF NOT EXISTS user_vlan_subnet_pool CIDR;
+      EXCEPTION WHEN OTHERS THEN NULL; END $$;
+      UPDATE isp_client_vlan_routers
+         SET user_vlan_subnet_pool = ('192.168.' || client_vlan_id || '.0/24')::CIDR
+       WHERE user_vlan_subnet_pool IS NULL;
 
       -- Verknuepfung Netzwerk-Antrag -> Router-LXC (welcher LXC routet das?)
       DO $$ BEGIN

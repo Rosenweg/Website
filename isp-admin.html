@@ -579,28 +579,102 @@
     await loadVlans();
   }
   async function vlanApprove(id) {
-    // Vorschlag nach Schema <HausNr><NN> holen
-    let suggested = '', reasoning = '';
+    // Alle Vorbefüllungen vom Backend holen: VLAN-ID-Vorschlag, Router-Auto-Pick, Subnet-Allokation
+    let prefill = {};
     try {
-      const r = await AuthentikAuth.apiFetch('/api/isp/vlan-requests/' + id + '/suggest');
-      if (r.ok) {
-        const s = await r.json();
-        suggested = String(s.suggested_vlan_id || '');
-        reasoning = s.reasoning || '';
-      } else {
-        const err = await r.json().catch(() => ({}));
-        if (err.error) reasoning = '⚠ Auto-Vorschlag fehlgeschlagen: ' + err.error;
-      }
+      const r = await AuthentikAuth.apiFetch('/api/isp/vlan-requests/' + id + '/allocation-preview');
+      if (r.ok) prefill = await r.json();
     } catch {}
-    const promptLabel = reasoning ? reasoning + '\n\nVLAN-ID zuweisen:' : 'VLAN-ID zuweisen:';
-    const vlanId = prompt(promptLabel, suggested);
-    if (!vlanId) return;
-    const subnet = prompt('Subnet (CIDR, z.B. 10.0.50.0/28) — leer fuer VLAN-only:', '');
-    await AuthentikAuth.apiFetch('/api/isp/vlan-requests/' + id, {
+    const req = vlanRequests.find(x => x.id === id) || {};
+    const kind = prefill.kind || req.kind || 'vlan';
+    const routerOptions = clientVlanRouters.filter(r => r.active);
+    const routerOptsHtml = ['<option value="">— kein Router (nur VLAN-only) —</option>',
+      ...routerOptions.map(r => `<option value="${r.id}" ${prefill.assigned_router_id === r.id ? 'selected' : ''}>Client-VLAN ${r.client_vlan_id} / LXC ${r.lxc_id}${r.bezeichnung ? ' — '+esc(r.bezeichnung) : ''}</option>`)
+    ].join('');
+    const alloc = prefill.allocation || {};
+    const allocErr = prefill.allocation_error ? `<p class="text-xs text-red-700">⚠ Subnet-Allokation: ${esc(prefill.allocation_error)}</p>` : '';
+    const subnetHelp = kind === 'subnet'
+      ? `<p class="text-xs text-gray-500 mt-0.5">Pool und Größe (${esc(req.gewuenschte_groesse || 'auto /28')}) wurden vorbefüllt.</p>${allocErr}`
+      : '<p class="text-xs text-gray-500 mt-0.5">VLAN-only (kind=vlan): User macht Routing/DHCP selbst. Subnet optional.</p>';
+    const modal = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
+      <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5 max-h-[90vh] overflow-y-auto">
+        <h2 class="font-bold mb-3">Antrag #${id} genehmigen</h2>
+        <div class="space-y-2 text-sm">
+          <div>
+            <label class="block text-xs text-gray-600">VLAN-ID *</label>
+            <input id="ap-vlan" type="number" min="1" max="4094" value="${esc(prefill.suggested_vlan_id || req.vlan_id || '')}" class="w-full border rounded px-2 py-1 font-mono">
+            <p class="text-xs text-gray-500 mt-0.5">Schema &lt;HausNr&gt;&lt;NN&gt; — Vorschlag: ${esc(prefill.suggested_vlan_id || '?')}</p>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-600">Router-LXC ${kind === 'subnet' ? '*' : '(optional)'}</label>
+            <select id="ap-router" class="w-full border rounded px-2 py-1">${routerOptsHtml}</select>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-600">Subnet (CIDR) ${kind === 'subnet' ? '*' : '(optional)'}</label>
+            <input id="ap-subnet" type="text" value="${esc(alloc.cidr || req.subnet_v4 || '')}" placeholder="z.B. 192.168.99.16/28" class="w-full border rounded px-2 py-1 font-mono">
+            ${subnetHelp}
+          </div>
+          ${kind === 'subnet' ? `
+          <div class="grid grid-cols-3 gap-2">
+            <div>
+              <label class="block text-xs text-gray-600">DHCP-Gateway</label>
+              <input id="ap-gw" type="text" value="${esc(alloc.gateway || req.dhcp_gateway || '')}" class="w-full border rounded px-2 py-1 font-mono text-xs">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-600">DHCP von</label>
+              <input id="ap-from" type="text" value="${esc(alloc.dhcp_from || req.dhcp_range_from || '')}" class="w-full border rounded px-2 py-1 font-mono text-xs">
+            </div>
+            <div>
+              <label class="block text-xs text-gray-600">DHCP bis</label>
+              <input id="ap-to" type="text" value="${esc(alloc.dhcp_to || req.dhcp_range_to || '')}" class="w-full border rounded px-2 py-1 font-mono text-xs">
+            </div>
+          </div>` : ''}
+          <div>
+            <label class="block text-xs text-gray-600">Notizen Technik</label>
+            <textarea id="ap-notes" rows="2" class="w-full border rounded px-2 py-1 text-xs">${esc(req.notizen_technik || '')}</textarea>
+          </div>
+        </div>
+        <div class="flex justify-between items-center gap-2 mt-4">
+          <label class="flex items-center gap-1 text-xs text-gray-600">
+            <input id="ap-and-provision" type="checkbox" ${kind === 'subnet' ? 'checked' : ''}>
+            anschließend gleich provisionieren (UniFi + PPSK)
+          </label>
+          <div class="flex gap-2">
+            <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Abbrechen</button>
+            <button onclick="vlanApproveSubmit(${id})" class="px-3 py-1.5 bg-green-600 text-white rounded text-sm">Genehmigen</button>
+          </div>
+        </div>
+      </div></div>`;
+    document.body.insertAdjacentHTML('beforeend', modal);
+  }
+  async function vlanApproveSubmit(id) {
+    const vlanId = parseInt(document.getElementById('ap-vlan').value, 10);
+    if (!vlanId) { alert('VLAN-ID ist Pflicht'); return; }
+    const routerSel = document.getElementById('ap-router').value;
+    const subnet = document.getElementById('ap-subnet').value.trim();
+    const gw = document.getElementById('ap-gw')?.value.trim() || null;
+    const dhcpFrom = document.getElementById('ap-from')?.value.trim() || null;
+    const dhcpTo = document.getElementById('ap-to')?.value.trim() || null;
+    const notes = document.getElementById('ap-notes').value.trim() || null;
+    const andProvision = document.getElementById('ap-and-provision').checked;
+    const body = {
+      status: 'approved',
+      vlan_id: vlanId,
+      subnet_v4: subnet || null,
+      notizen_technik: notes,
+      assigned_router_id: routerSel ? parseInt(routerSel, 10) : null,
+      dhcp_gateway: gw,
+      dhcp_range_from: dhcpFrom,
+      dhcp_range_to: dhcpTo,
+    };
+    const r = await AuthentikAuth.apiFetch('/api/isp/vlan-requests/' + id, {
       method: 'PUT', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ status: 'approved', vlan_id: parseInt(vlanId, 10), subnet_v4: subnet || null }),
+      body: JSON.stringify(body),
     });
+    if (!r.ok) { alert('Fehler: ' + await r.text()); return; }
+    document.querySelector('.fixed')?.remove();
     await loadVlans();
+    if (andProvision) vlanProvision(id);
   }
   async function vlanReject(id) {
     const reason = prompt('Ablehnungsgrund:');
