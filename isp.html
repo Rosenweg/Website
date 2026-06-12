@@ -320,6 +320,12 @@
 
 <script>
 (async function init() {
+    // WICHTIG: AuthentikAuth.init() muss laufen damit der #auth=... Hash
+    // aus dem OAuth-Callback geparst und der Token in localStorage gespeichert
+    // wird. Vorher hat isp.html nur getUser() aufgerufen → Hash blieb unverarbeitet
+    // → User landete nach Login wieder auf "Anmelden".
+    // requireAuth:false damit Nicht-eingeloggte die Landing-Page sehen koennen.
+    await AuthentikAuth.init({ requireAuth: false });
     const user = AuthentikAuth.getUser();
     const greeting = document.getElementById('hero-greeting');
     if (user) {
