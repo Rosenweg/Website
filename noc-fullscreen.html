@@ -101,11 +101,7 @@
 
   <script>
     const params = new URLSearchParams(location.search);
-    const TOKEN = params.get('token');
-    if (!TOKEN) {
-      document.getElementById('noc-err').classList.remove('hidden');
-      document.getElementById('noc-err').textContent = 'Kein ?token=… in der URL. Wallboard-Zugang braucht den NOC_PUBLIC_TOKEN.';
-    }
+    const TOKEN = params.get('token') || '';
     const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     const fmtBytes = (b) => {
       if (!b || b < 1) return '0 B/s';
@@ -132,15 +128,15 @@
         `<polyline points="${pts(txHistory)}" fill="none" stroke="#6ee7b7" stroke-width="1.5"/>`;
     }
     async function load() {
-      if (!TOKEN) return;
       try {
+        const qs = TOKEN ? ('?token=' + encodeURIComponent(TOKEN)) : '';
         const [dr, ur] = await Promise.all([
-          fetch('/api/isp/noc/public/dashboard?token=' + encodeURIComponent(TOKEN)),
-          fetch('/api/isp/noc/public/unifi?token=' + encodeURIComponent(TOKEN)),
+          fetch('/api/isp/noc/public/dashboard' + qs),
+          fetch('/api/isp/noc/public/unifi' + qs),
         ]);
         if (!dr.ok || !ur.ok) {
           document.getElementById('noc-err').classList.remove('hidden');
-          document.getElementById('noc-err').textContent = `Auth-Fehler (Dashboard ${dr.status} / UniFi ${ur.status}). Token korrekt?`;
+          document.getElementById('noc-err').textContent = `Fehler (Dashboard ${dr.status} / UniFi ${ur.status}).`;
           return;
         }
         document.getElementById('noc-err').classList.add('hidden');
