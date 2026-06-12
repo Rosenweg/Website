@@ -1,0 +1,13 @@
+[Unit]
+Description=Rosenweg Router-LXC API
+After=network-online.target dnsmasq.service nftables.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node /opt/rosenweg-router-api/server.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
