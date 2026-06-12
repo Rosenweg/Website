@@ -263,6 +263,7 @@
           <button data-tab="routers" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">🛣 Router-LXCs</button>
           <button data-tab="vpn" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">🔒 VPN-Konten</button>
           <button data-tab="mail" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">✉ Mailserver/PMG</button>
+          <button data-tab="maint" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">🔔 Wartungen <span id="maint-active-badge" class="hidden text-xs bg-red-100 text-red-800 px-1.5 py-0.5 rounded">0</span></button>
         </nav>
       </div>
 
@@ -348,6 +349,19 @@
         </div>
         <div id="mbq-list" class="space-y-2"></div>
       </div>
+
+      <!-- Wartungen / Störungen -->
+      <div id="tab-maint" class="tab-view hidden">
+        <div class="bg-amber-50 border border-amber-200 rounded p-3 mb-3 text-sm text-amber-900">
+          <p class="font-semibold">🔔 Wartungs- &amp; Störungs-Kommunikation</p>
+          <p class="text-xs mt-1">Geplante Wartungen ankündigen, Spontan-Ausfälle melden. Email geht an alle Bewohner im Scope, WhatsApp-Broadcast nur an aktive Subscriber. UniFi-Geräte-Updates werden automatisch erkannt und gemeldet.</p>
+        </div>
+        <div class="flex justify-end gap-2 mb-3">
+          <button onclick="openMaintModal({})" class="bg-blue-600 text-white px-3 py-1.5 rounded text-sm">+ Wartung anlegen</button>
+          <button onclick="openMaintModal({severity:'critical', start_at: new Date().toISOString(), notify_lead_time_minutes: 0, title: 'Spontan-Störung'})" class="bg-red-600 text-white px-3 py-1.5 rounded text-sm">⚠ Spontan-Störung</button>
+        </div>
+        <div id="maint-list" class="space-y-2"></div>
+      </div>
     </div>
   </main>
 
@@ -371,7 +385,8 @@
     document.getElementById('auth-gate').classList.add('hidden');
     document.getElementById('content').classList.remove('hidden');
     document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
-    loadSubs(); loadVlans(); loadIps(); loadRp(); loadVpns(); loadRelays(); loadMailboxRequests(); loadRouters(); checkMailcow();
+    loadSubs(); loadVlans(); loadIps(); loadRp(); loadVpns(); loadRelays(); loadMailboxRequests(); loadRouters(); loadMaint(); checkMailcow();
+    setInterval(loadMaint, 60000); // Wartungen aktualisieren (auto-detected updates)
     loadNocDashboard(); runNocHealthChecks(); loadNocUnifi();
     setInterval(loadNocDashboard, 30000); setInterval(runNocHealthChecks, 60000); setInterval(loadNocUnifi, 30000);
     setInterval(() => { document.getElementById('noc-time').textContent = new Date().toLocaleTimeString('de-CH'); }, 1000);
@@ -1120,6 +1135,158 @@
       await loadVlans();
     } catch (e) { alert('Fehler: ' + e.message); }
   }
+  // === Wartungen ===
+  let maintList = [];
+  async function loadMaint() {
+    const r = await AuthentikAuth.apiFetch('/api/isp/maintenance');
+    if (!r.ok) return;
+    maintList = (await r.json()).maintenance || [];
+    const active = maintList.filter(m => m.status === 'active').length;
+    const badge = document.getElementById('maint-active-badge');
+    if (active > 0) { badge.classList.remove('hidden'); badge.textContent = active; }
+    else badge.classList.add('hidden');
+    renderMaint();
+  }
+  function maintScopeLabel(scope) {
+    if (!scope) return 'alle';
+    if (scope.all) return 'alle Häuser';
+    const parts = [];
+    if (Array.isArray(scope.houses) && scope.houses.length) parts.push('Häuser: ' + scope.houses.map(h => 'RW'+h).join(', '));
+    if (Array.isArray(scope.vlans) && scope.vlans.length) parts.push('VLANs: ' + scope.vlans.join(', '));
+    return parts.length ? parts.join(' · ') : 'alle';
+  }
+  function renderMaint() {
+    const wrap = document.getElementById('maint-list');
+    if (maintList.length === 0) { wrap.innerHTML = '<p class="p-6 text-gray-400 italic text-center">Keine Wartungen erfasst.</p>'; return; }
+    wrap.innerHTML = maintList.map(m => {
+      const sev = m.severity === 'critical' ? 'bg-red-100 text-red-800' : m.severity === 'warning' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800';
+      const stat = m.status === 'active' ? 'bg-red-200 text-red-900 animate-pulse' : m.status === 'planned' ? 'bg-amber-100 text-amber-800' : m.status === 'completed' ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-600';
+      const channels = [];
+      if (m.notify_email) channels.push('✉ Email');
+      if (m.notify_whatsapp) channels.push('💬 WhatsApp');
+      const auto = m.auto_source === 'unifi_device_update' ? '<span class="ml-2 text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">🤖 UniFi-Auto</span>' : '';
+      const sent = [];
+      if (m.notify_email_pre_at) sent.push('pre ✓');
+      if (m.notify_start_at) sent.push('start ✓');
+      if (m.notify_end_at) sent.push('end ✓');
+      return `
+      <div class="bg-white border rounded-lg p-4">
+        <div class="flex items-start justify-between flex-wrap gap-2">
+          <div class="flex-1">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-xs ${stat} px-2 py-0.5 rounded font-semibold">${esc(m.status)}</span>
+              <span class="text-xs ${sev} px-2 py-0.5 rounded">${esc(m.severity)}</span>
+              <span class="font-semibold">${esc(m.title)}</span>
+              ${auto}
+            </div>
+            <div class="text-xs text-gray-500 mt-1">${esc(maintScopeLabel(m.scope))}</div>
+            <div class="text-xs text-gray-600 mt-1">📅 ${fmtDt(m.start_at)} → ${fmtDt(m.end_at)}</div>
+            ${m.description ? `<p class="text-sm text-gray-700 mt-2 whitespace-pre-wrap">${esc(m.description)}</p>` : ''}
+            <div class="text-xs text-gray-500 mt-2">Kanäle: ${channels.join(' + ') || '—'} · gesendet: ${sent.join(', ') || 'noch nichts'}</div>
+          </div>
+          <div class="flex flex-col gap-1">
+            <button onclick='openMaintModal(${JSON.stringify(m).replace(/'/g, "&apos;")})' class="text-xs text-blue-600 hover:underline">Bearbeiten</button>
+            <button onclick='maintNotify(${m.id}, "pre")' class="text-xs text-amber-700 hover:underline">📢 Vorab senden</button>
+            <button onclick='maintNotify(${m.id}, "start")' class="text-xs text-red-700 hover:underline">📢 Start senden</button>
+            <button onclick='maintNotify(${m.id}, "end")' class="text-xs text-emerald-700 hover:underline">📢 Ende senden</button>
+            <button onclick='delMaint(${m.id})' class="text-xs text-red-600 hover:underline">Löschen</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+  function openMaintModal(m) {
+    document.querySelectorAll('[data-modal="maint"]').forEach(el => el.remove());
+    const scopeHouses = m.scope?.houses || [];
+    const houseChips = [1,2,4,5,6,8,9,10,12,13,14,16,17,18].map(h =>
+      `<label class="inline-flex items-center gap-1 text-xs bg-gray-50 px-2 py-1 rounded border"><input type="checkbox" class="mh" value="${h}" ${scopeHouses.includes(h) ? 'checked' : ''}> RW${h}</label>`
+    ).join('');
+    const fmtLocal = s => { if (!s) return ''; const d = new Date(s); const pad = n => String(n).padStart(2,'0'); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+    const modal = `<div data-modal="maint" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
+      <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-xl w-full p-5 max-h-[90vh] overflow-y-auto">
+        <h2 class="font-bold mb-3">${m.id ? 'Wartung bearbeiten' : 'Wartung anlegen'}</h2>
+        <div class="space-y-2 text-sm">
+          <div><label class="block text-xs text-gray-600">Titel *</label><input id="mt-title" type="text" value="${esc(m.title || '')}" class="w-full border rounded px-2 py-1"></div>
+          <div><label class="block text-xs text-gray-600">Beschreibung</label><textarea id="mt-desc" rows="3" class="w-full border rounded px-2 py-1">${esc(m.description || '')}</textarea></div>
+          <div class="grid grid-cols-3 gap-2">
+            <div><label class="block text-xs text-gray-600">Schweregrad</label>
+              <select id="mt-sev" class="w-full border rounded px-2 py-1">
+                <option value="info" ${m.severity === 'info' ? 'selected' : ''}>info</option>
+                <option value="warning" ${m.severity === 'warning' ? 'selected' : ''}>warning</option>
+                <option value="critical" ${m.severity === 'critical' ? 'selected' : ''}>critical</option>
+              </select>
+            </div>
+            <div><label class="block text-xs text-gray-600">Status</label>
+              <select id="mt-status" class="w-full border rounded px-2 py-1">
+                <option value="planned" ${m.status === 'planned' ? 'selected' : ''}>planned</option>
+                <option value="active" ${m.status === 'active' ? 'selected' : ''}>active</option>
+                <option value="completed" ${m.status === 'completed' ? 'selected' : ''}>completed</option>
+                <option value="cancelled" ${m.status === 'cancelled' ? 'selected' : ''}>cancelled</option>
+              </select>
+            </div>
+            <div><label class="block text-xs text-gray-600">Vorlauf (Min)</label><input id="mt-lead" type="number" value="${m.notify_lead_time_minutes ?? 60}" class="w-full border rounded px-2 py-1"></div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div><label class="block text-xs text-gray-600">Start</label><input id="mt-start" type="datetime-local" value="${fmtLocal(m.start_at)}" class="w-full border rounded px-2 py-1"></div>
+            <div><label class="block text-xs text-gray-600">Ende</label><input id="mt-end" type="datetime-local" value="${fmtLocal(m.end_at)}" class="w-full border rounded px-2 py-1"></div>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-600">Scope: betroffene Häuser</label>
+            <label class="inline-flex items-center gap-1 text-xs mb-1"><input id="mt-all" type="checkbox" ${m.scope?.all ? 'checked' : ''}> alle Häuser (überschreibt Einzelauswahl)</label>
+            <div class="flex flex-wrap gap-1 mt-1">${houseChips}</div>
+          </div>
+          <div class="flex gap-3 items-center pt-1">
+            <label class="inline-flex items-center gap-1 text-xs"><input id="mt-em" type="checkbox" ${m.notify_email !== false ? 'checked' : ''}> ✉ Email an alle Bewohner</label>
+            <label class="inline-flex items-center gap-1 text-xs"><input id="mt-wa" type="checkbox" ${m.notify_whatsapp ? 'checked' : ''}> 💬 WhatsApp an Subscriber</label>
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 mt-3">
+          <button onclick="document.querySelectorAll('[data-modal=&quot;maint&quot;]').forEach(el=>el.remove())" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Abbrechen</button>
+          <button onclick="saveMaint(${m.id || 'null'})" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm">Speichern</button>
+        </div>
+      </div></div>`;
+    document.body.insertAdjacentHTML('beforeend', modal);
+  }
+  async function saveMaint(id) {
+    const modals = document.querySelectorAll('[data-modal="maint"]');
+    const modal = modals[modals.length - 1] || document;
+    const get = i => modal.querySelector('#' + i);
+    const allHouses = get('mt-all').checked;
+    const houses = allHouses ? [] : Array.from(modal.querySelectorAll('.mh:checked')).map(c => parseInt(c.value, 10));
+    const scope = allHouses ? { all: true } : { houses };
+    const body = {
+      title: get('mt-title').value.trim(),
+      description: get('mt-desc').value.trim() || null,
+      severity: get('mt-sev').value,
+      status: get('mt-status').value,
+      start_at: get('mt-start').value ? new Date(get('mt-start').value).toISOString() : null,
+      end_at: get('mt-end').value ? new Date(get('mt-end').value).toISOString() : null,
+      notify_lead_time_minutes: parseInt(get('mt-lead').value, 10) || 0,
+      notify_email: get('mt-em').checked,
+      notify_whatsapp: get('mt-wa').checked,
+      scope,
+    };
+    if (!body.title) { alert('Titel ist Pflicht'); return; }
+    const url = id ? `/api/isp/maintenance/${id}` : '/api/isp/maintenance';
+    const method = id ? 'PUT' : 'POST';
+    const r = await AuthentikAuth.apiFetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    if (!r.ok) { alert('Fehler: ' + await r.text()); return; }
+    document.querySelectorAll('[data-modal="maint"]').forEach(el => el.remove());
+    await loadMaint();
+  }
+  async function maintNotify(id, kind) {
+    if (!confirm(`Benachrichtigung jetzt senden (${kind})?`)) return;
+    const r = await AuthentikAuth.apiFetch(`/api/isp/maintenance/${id}/notify?kind=${kind}`, { method: 'POST' });
+    const data = await r.json();
+    alert(r.ok ? `Gesendet:\nEmail: ${data.email?.sent || 0}\nWhatsApp: ${data.whatsapp?.sent || 0}` : 'Fehler: ' + JSON.stringify(data));
+    await loadMaint();
+  }
+  async function delMaint(id) {
+    if (!confirm('Wartung löschen?')) return;
+    await AuthentikAuth.apiFetch('/api/isp/maintenance/' + id, { method: 'DELETE' });
+    await loadMaint();
+  }
+
   async function delRouter(id) {
     if (!confirm('Router-LXC-Eintrag löschen? (Der LXC selbst wird NICHT angefasst.)')) return;
     const r = await AuthentikAuth.apiFetch('/api/isp/client-vlan-routers/' + id, { method: 'DELETE' });

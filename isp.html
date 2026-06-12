@@ -70,6 +70,8 @@
     </style>
 </header>
 
+<div id="maint-banner-host"></div>
+
 <main class="max-w-7xl mx-auto px-6 lg:px-8 py-12 space-y-16">
 
     <!-- ════════════════════════════════════════════════════ -->
@@ -342,10 +344,42 @@
     }
     loadMeinAnschluss(user);
     loadWlan();
+    loadMaintBanner();
+    setInterval(loadMaintBanner, 60000); // alle 60s aktualisieren
     runHealthChecks();
 })();
 
 function escWifi(s) { return String(s || '').replace(/[\\;,":\s]/g, c => '\\' + c); }
+
+async function loadMaintBanner() {
+  try {
+    const r = await fetch('/api/isp/maintenance/public');
+    if (!r.ok) return;
+    const data = await r.json();
+    const host = document.getElementById('maint-banner-host');
+    if (!host) return;
+    const active = (data.maintenance || []).filter(m => m.status === 'active' || m.status === 'planned');
+    if (active.length === 0) { host.innerHTML = ''; return; }
+    const fmt = d => d ? new Date(d).toLocaleString('de-CH', { timeZone: 'Europe/Zurich' }) : '';
+    host.innerHTML = active.map(m => {
+      const color = m.severity === 'critical' ? 'bg-red-600 text-white' : m.severity === 'warning' ? 'bg-amber-500 text-white' : 'bg-blue-600 text-white';
+      const icon = m.status === 'active' ? '🔴' : '🟡';
+      const label = m.status === 'active' ? 'STÖRUNG/WARTUNG LÄUFT' : 'WARTUNG GEPLANT';
+      const auto = m.auto_source === 'unifi_device_update' ? ' (UniFi-Update erkannt)' : '';
+      return `<div class="${color} px-4 py-3 text-sm">
+        <div class="max-w-7xl mx-auto flex items-start gap-3">
+          <span class="text-lg shrink-0">${icon}</span>
+          <div class="flex-1">
+            <div class="font-bold uppercase text-xs tracking-wide">${label}${auto}</div>
+            <div class="font-semibold">${esc(m.title)}</div>
+            ${m.description ? `<div class="text-xs opacity-90 mt-1 whitespace-pre-wrap">${esc(m.description)}</div>` : ''}
+            <div class="text-xs opacity-75 mt-1">${fmt(m.start_at)}${m.end_at ? ' → ' + fmt(m.end_at) : ''}</div>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) { console.warn('Maint-Banner:', e.message); }
+}
 
 async function loadWlan() {
     // wlan-Endpoint ist tokenbasiert — User-Objekt kann noch null sein
