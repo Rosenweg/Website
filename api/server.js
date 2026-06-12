@@ -14880,6 +14880,22 @@ app.put('/api/isp/vlan-requests/:id', authMiddleware, async (req, res) => {
                           : (isOwner ? [...userFields, ...ownerOnlyFields] : []);
     if (!admin && v.status !== 'pending') return res.status(400).json({ error: 'Nur in Status pending editierbar' });
     if (!admin && !isOwner && allowed.length === 0) return res.status(403).json({ error: 'Mitnutzer koennen Antrag nur zurueckziehen, nicht editieren' });
+    // VLAN-ID-Uniqueness pruefen, bevor wir UPDATE bauen.
+    if (b.vlan_id !== undefined && b.vlan_id !== null && b.vlan_id !== '' && b.vlan_id !== v.vlan_id) {
+      const dup = await pool.query(
+        "SELECT id FROM isp_vlan_requests WHERE vlan_id = $1 AND id <> $2 AND status IN ('approved','deployed')",
+        [b.vlan_id, id]);
+      if (dup.rows.length > 0) {
+        return res.status(409).json({ error: `VLAN-ID ${b.vlan_id} ist bereits an Antrag #${dup.rows[0].id} vergeben` });
+      }
+      // Optional: gegen UniFi-Live-Check (vermeidet Konflikt mit von Hand angelegten Netzen).
+      // Nicht-blockierend bei Fehler — UniFi-API kann mal down sein.
+      try {
+        const uw = await unifiGet('rest/networkconf', 3500);
+        const used = (uw.data || []).some(n => Number(n.vlan) === Number(b.vlan_id));
+        if (used) return res.status(409).json({ error: `VLAN-ID ${b.vlan_id} ist bereits in UniFi konfiguriert` });
+      } catch {}
+    }
     for (const col of allowed) if (b[col] !== undefined) {
       if (col === 'mitnutzer_emails') {
         push(col, normalizeMitnutzerEmails(b[col], v.antragsteller_email));
