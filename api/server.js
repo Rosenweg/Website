@@ -14184,6 +14184,24 @@ app.get('/api/isp/noc/unifi', authMiddleware, requireTechnikOrPraesident, async 
       out.wlans.enabled = wlans.filter(x => x.enabled).length;
     } catch {}
 
+    // Router-LXC-Health: parallel auf alle aktiven Router pingen
+    try {
+      const rr = await pool.query("SELECT lxc_id FROM isp_client_vlan_routers WHERE active = true");
+      const ips = rr.rows.map(r => `100.64.3.${r.lxc_id - 400}`);
+      const token = routerApiToken();
+      const results = await Promise.all(ips.map(async ip => {
+        try {
+          const resp = await fetch(`http://${ip}:8080/health`, {
+            headers: { 'Authorization': 'Bearer ' + token },
+            signal: AbortSignal.timeout(2500),
+          });
+          return resp.ok;
+        } catch { return false; }
+      }));
+      const ok = results.filter(Boolean).length;
+      out.routers = { total: ips.length, ok, status: ok === ips.length ? 'ok' : (ok === 0 ? 'critical' : 'warning') };
+    } catch (e) { out.routers = { total: 0, ok: 0, status: 'unknown', error: e.message }; }
+
     res.json(out);
   } catch (err) {
     out.error = err.message;
