@@ -14184,23 +14184,28 @@ app.get('/api/isp/noc/unifi', authMiddleware, requireTechnikOrPraesident, async 
       out.wlans.enabled = wlans.filter(x => x.enabled).length;
     } catch {}
 
-    // Router-LXC-Health: parallel auf alle aktiven Router pingen
+    // Router-LXC-Health: parallel auf alle aktiven Router pingen, pro Router
+    // einzelner Eintrag damit das UI granular anzeigen kann welcher down ist.
     try {
-      const rr = await pool.query("SELECT lxc_id FROM isp_client_vlan_routers WHERE active = true");
-      const ips = rr.rows.map(r => `100.64.3.${r.lxc_id - 400}`);
+      const rr = await pool.query(
+        "SELECT id, lxc_id, client_vlan_id, bezeichnung FROM isp_client_vlan_routers WHERE active = true ORDER BY client_vlan_id");
       const token = routerApiToken();
-      const results = await Promise.all(ips.map(async ip => {
+      out.routers = await Promise.all(rr.rows.map(async r => {
+        const ip = `100.64.3.${r.lxc_id - 400}`;
+        let ok = false;
         try {
           const resp = await fetch(`http://${ip}:8080/health`, {
             headers: { 'Authorization': 'Bearer ' + token },
             signal: AbortSignal.timeout(2500),
           });
-          return resp.ok;
-        } catch { return false; }
+          ok = resp.ok;
+        } catch {}
+        // Kurzes Label fuer Dot — "RW9", "RK", etc.
+        const labelMatch = (r.bezeichnung || '').match(/^(R[KW]\d*)/);
+        const label = labelMatch ? labelMatch[1] : `CT${r.lxc_id}`;
+        return { lxc_id: r.lxc_id, client_vlan: r.client_vlan_id, label, ok };
       }));
-      const ok = results.filter(Boolean).length;
-      out.routers = { total: ips.length, ok, status: ok === ips.length ? 'ok' : (ok === 0 ? 'critical' : 'warning') };
-    } catch (e) { out.routers = { total: 0, ok: 0, status: 'unknown', error: e.message }; }
+    } catch (e) { out.routers = []; out.routers_error = e.message; }
 
     res.json(out);
   } catch (err) {
@@ -16575,15 +16580,18 @@ async function maintPollUnifiAccess() {
     const json = await r.json();
     const devs = Array.isArray(json.data) ? json.data : [];
     for (const d of devs) {
+      // Access-Geraet "weiss" via update.device_version_ugprade_status (typo
+      // im UniFi-Feldnamen!) ob ein Update wartet, vorbereitet oder laeuft.
+      const us = (d.update && d.update.device_version_ugprade_status) ||
+                 (d.update_manual && d.update_manual.device_version_upgrade_status) ||
+                 {};
+      const updatePending = !!(us.is_waiting || us.is_preparing || us.is_upgrading);
       await maintHandleDeviceUpdate({
         key: 'access-' + (d.unique_id || d.id || d.name),
         name: d.alias || d.name,
         model: d.display_model || d.model || 'Access',
         isOnline: d.is_online === true,
-        // Access-API hat kein klares 'upgradable'-Flag in v2 — wir
-        // verlassen uns auf den is_online-Wechsel (Update startet
-        // typischerweise mit offline-Phase).
-        upgradable: false,
+        upgradable: updatePending,
         source: 'access',
       });
     }
