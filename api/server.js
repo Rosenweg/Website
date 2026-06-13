@@ -15173,7 +15173,17 @@ app.post('/api/isp/vlan-requests', authMiddleware, async (req, res) => {
        b.gewuenschte_groesse || null, b.geraete_anzahl || null, b.internet_zugriff, b.andere_vlans_zugriff,
        mitnutzer, b.kind || null, b.with_wlan],
     );
-    res.json(r.rows[0]);
+    const created = r.rows[0];
+    const kindLabel = created.kind === 'subnet' ? 'Subnet/eigenes IP-Netz' : 'VLAN';
+    notifyTechnik(
+      `🆕 *Neuer ${kindLabel}-Antrag* (pending)\n` +
+      `${created.gewuenschter_name || '(unbenannt)'} — von ${req.user.email}\n` +
+      `Zweck: ${created.zweck}` +
+      (created.with_wlan ? `\nmit WLAN-SSID gewuenscht` : '') +
+      `\n${SITE_URL}/isp-admin.html#vlan`,
+      'vlan-request',
+    );
+    res.json(created);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -17231,17 +17241,18 @@ async function mailcowApi(method, path, body) {
 
 // Notification an die WA-Gruppe "Rosenweg Technik" bei allen Mailbox-Vorgaengen.
 // Wirft nicht — Notify-Fehler darf den eigentlichen Vorgang nicht blockieren.
-async function notifyTechnikMailbox(text) {
+async function notifyTechnik(text, sourceType = 'technik-event') {
   try {
     const groupId = await resolveTechnikWhatsappGroupId();
-    if (!groupId) { console.warn('[mailbox-notify] keine Technik-Group gefunden'); return; }
+    if (!groupId) { console.warn(`[${sourceType}-notify] keine Technik-Group gefunden`); return; }
     await queueWhatsappMessage({
       chatId: groupId,
       body: text.slice(0, 3500),
-      sourceType: 'mailbox-event',
+      sourceType,
     });
-  } catch (e) { console.warn('[mailbox-notify]', e.message); }
+  } catch (e) { console.warn(`[${sourceType}-notify]`, e.message); }
 }
+const notifyTechnikMailbox = (text) => notifyTechnik(text, 'mailbox-event');
 
 // Generiert ein zufaelliges, sprechbares Initial-Passwort (16 Zeichen, alnum).
 function generateMailboxPassword() {
