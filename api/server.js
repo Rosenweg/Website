@@ -15546,10 +15546,13 @@ async function routerApiCall(lxcId, method, path, body) {
   const ip = routerLxcMgmtIp(lxcId);
   const token = routerApiToken();
   if (!token) throw new Error('ROUTER_API_TOKEN/Secret nicht konfiguriert');
+  // 30s: POST /vlans im Router-LXC startet dnsmasq + reloaded nftables —
+  // unter Last sind >15s realistisch. Lieber grosszuegig timeouten als
+  // ein bereits-applied-aber-zu-spaet-geantwortet als Fehler durchreichen.
   const opts = {
     method,
     headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(30000),
   };
   if (body !== undefined) opts.body = JSON.stringify(body);
   const r = await fetch(`http://${ip}:8080${path}`, opts);
@@ -16238,31 +16241,31 @@ async function deliverMaintNotify({ channel, recipients, body, subject, sendFn }
     const lowered = direct.map(r => r.toLowerCase());
     await pool.query(
       `INSERT INTO isp_maint_notify_throttle (recipient, channel, last_at, pending_lines, pending_subjects)
-       SELECT u, $1, NOW(), '[]'::jsonb, '[]'::jsonb FROM unnest($2::text[]) AS u
+       SELECT u, $1, NOW(), '{}'::text[], '{}'::text[] FROM unnest($2::text[]) AS u
        ON CONFLICT (recipient, channel) DO UPDATE SET last_at = NOW()`,
       [channel, lowered],
     );
   }
   if (throttled.length) {
     const lowered = throttled.map(r => r.toLowerCase());
-    // Append (body, subject) zu pending_lines / pending_subjects pro Empfaenger.
-    // Doppelte body-Lines unterdruecken (jsonb_array contains) – sonst wuerde
-    // ein zweites pre+start+end fuer dieselbe Maintenance dreimal angehaengt.
+    // Append (body, subject) zu pending_lines/pending_subjects pro Empfaenger.
+    // Doppelte unterdruecken — ein zweites pre+start+end fuer dieselbe Maintenance
+    // wuerde sonst dreimal angehaengt.
     await pool.query(
       `INSERT INTO isp_maint_notify_throttle (recipient, channel, last_at, pending_lines, pending_subjects)
        SELECT u, $1, NOW() - ($4 || ' minutes')::interval,
-              jsonb_build_array($2::text), jsonb_build_array($3::text)
+              ARRAY[$2::text], ARRAY[$3::text]
          FROM unnest($5::text[]) AS u
        ON CONFLICT (recipient, channel) DO UPDATE SET
          pending_lines = CASE
-           WHEN isp_maint_notify_throttle.pending_lines @> jsonb_build_array($2::text)
+           WHEN $2::text = ANY(isp_maint_notify_throttle.pending_lines)
              THEN isp_maint_notify_throttle.pending_lines
-           ELSE isp_maint_notify_throttle.pending_lines || jsonb_build_array($2::text)
+           ELSE array_append(isp_maint_notify_throttle.pending_lines, $2::text)
          END,
          pending_subjects = CASE
-           WHEN isp_maint_notify_throttle.pending_subjects @> jsonb_build_array($3::text)
+           WHEN $3::text = ANY(isp_maint_notify_throttle.pending_subjects)
              THEN isp_maint_notify_throttle.pending_subjects
-           ELSE isp_maint_notify_throttle.pending_subjects || jsonb_build_array($3::text)
+           ELSE array_append(isp_maint_notify_throttle.pending_subjects, $3::text)
          END`,
       [channel, body, subject || '', String(MAINT_NOTIFY_THROTTLE_MIN), lowered],
     );
@@ -16277,7 +16280,7 @@ async function maintFlushNotifyPending() {
     const r = await pool.query(
       `SELECT recipient, channel, pending_lines, pending_subjects
          FROM isp_maint_notify_throttle
-        WHERE jsonb_array_length(pending_lines) > 0
+        WHERE array_length(pending_lines, 1) > 0
           AND last_at < NOW() - ($1 || ' minutes')::interval`,
       [String(MAINT_NOTIFY_THROTTLE_MIN)],
     );
@@ -16309,7 +16312,7 @@ async function maintFlushNotifyPending() {
         // Throttle-Fenster. pending_lines leeren.
         await pool.query(
           `UPDATE isp_maint_notify_throttle
-              SET pending_lines = '[]'::jsonb, pending_subjects = '[]'::jsonb, last_at = NOW()
+              SET pending_lines = '{}'::text[], pending_subjects = '{}'::text[], last_at = NOW()
             WHERE recipient = $1 AND channel = $2`,
           [row.recipient, row.channel],
         );
@@ -19970,14 +19973,26 @@ async function initDB() {
         recipient TEXT NOT NULL,
         channel VARCHAR(20) NOT NULL,
         last_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        pending_lines JSONB DEFAULT '[]'::JSONB,
-        pending_subjects JSONB DEFAULT '[]'::JSONB,
+        pending_lines TEXT[] DEFAULT '{}'::TEXT[],
+        pending_subjects TEXT[] DEFAULT '{}'::TEXT[],
         PRIMARY KEY (recipient, channel)
       );
+      -- Migration falls Tabelle vorher mit JSONB-Spalten existierte
+      DO $migrate$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+           WHERE table_name='isp_maint_notify_throttle'
+             AND column_name='pending_lines' AND data_type='jsonb'
+        ) THEN
+          ALTER TABLE isp_maint_notify_throttle DROP COLUMN pending_lines;
+          ALTER TABLE isp_maint_notify_throttle DROP COLUMN pending_subjects;
+        END IF;
+      END $migrate$;
       ALTER TABLE isp_maint_notify_throttle
-        ADD COLUMN IF NOT EXISTS pending_lines JSONB DEFAULT '[]'::JSONB;
+        ADD COLUMN IF NOT EXISTS pending_lines TEXT[] DEFAULT '{}'::TEXT[];
       ALTER TABLE isp_maint_notify_throttle
-        ADD COLUMN IF NOT EXISTS pending_subjects JSONB DEFAULT '[]'::JSONB;
+        ADD COLUMN IF NOT EXISTS pending_subjects TEXT[] DEFAULT '{}'::TEXT[];
 
       CREATE TABLE IF NOT EXISTS isp_subscribers (
         id SERIAL PRIMARY KEY,
