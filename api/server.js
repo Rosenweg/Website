@@ -4612,6 +4612,63 @@ async function saveKontakte(client, wohnungId, kontakte, stweg) {
   );
 }
 
+// Liest aktive Kontakte einer Wohnung (nicht archiviert). Wird vor dem
+// PUT-UPDATE genutzt um eine Vorher-Momentaufnahme fuer den Verwaltungs-
+// Diff zu bekommen.
+async function loadKontakteForWohnung(client, wohnungId) {
+  const r = await client.query(
+    'SELECT rolle, name, email, telefon, adresse FROM wohnungen_kontakte WHERE wohnung_id = $1 AND archiviert_am IS NULL ORDER BY rolle, name',
+    [wohnungId],
+  );
+  return r.rows;
+}
+
+// Liefert eine Liste menschenlesbarer Diff-Strings ueber die fuer die
+// Verwaltung relevanten Felder. Interne Felder (bezeichnung, notizen,
+// besonderheiten) werden ignoriert — die hat die Verwaltung nicht zu
+// interessieren. Liefert leeres Array zurueck wenn nichts relevantes.
+function computeWohnungChanges(oldRow, newRow, oldKontakte, newKontakte) {
+  const changes = [];
+  const fmt = v => (v === null || v === undefined || v === '') ? '—' : String(v);
+  const compare = (label, oldV, newV, transform = fmt) => {
+    if (String(oldV ?? '') === String(newV ?? '')) return;
+    changes.push(`${label}: "${transform(oldV)}" → "${transform(newV)}"`);
+  };
+  compare('Typ', oldRow.typ, newRow.typ);
+  compare('Stockwerk', oldRow.stockwerk, newRow.stockwerk);
+  compare('Zimmer', oldRow.zimmer, newRow.zimmer);
+  compare('Fläche (m²)', oldRow.flaeche_m2, newRow.flaeche_m2);
+  compare('Bewohnt von', oldRow.bewohnt_von, newRow.bewohnt_von);
+  compare('Waschküche-Berechtigung',
+    !!oldRow.waschkueche_berechtigt, !!newRow.waschkueche_berechtigt,
+    v => v ? 'ja' : 'nein');
+  // Wertquote als kombiniertes Feld behandeln
+  const oldWQ = oldRow.wertquote_zaehler && oldRow.wertquote_nenner
+    ? `${oldRow.wertquote_zaehler}/${oldRow.wertquote_nenner}` : null;
+  const newWQ = newRow.wertquote_zaehler && newRow.wertquote_nenner
+    ? `${newRow.wertquote_zaehler}/${newRow.wertquote_nenner}` : null;
+  if (oldWQ !== newWQ) changes.push(`Wertquote: "${oldWQ || '—'}" → "${newWQ || '—'}"`);
+  // Kontakt-Diffs nur fuer Eigentuemer + Mieter (der Verwaltung relevant)
+  const RELEVANT_ROLLEN = new Set(['eigentuemer', 'mieter']);
+  const ROLLE_LABEL = { eigentuemer: 'Eigentümer', mieter: 'Mieter' };
+  const oldRel = (oldKontakte || []).filter(k => RELEVANT_ROLLEN.has(k.rolle));
+  const newRel = (newKontakte || []).filter(k => RELEVANT_ROLLEN.has(k.rolle));
+  const keyOf = k => `${k.rolle}|${(k.email || k.name || '').toLowerCase()}`;
+  const oldByKey = new Map(oldRel.map(k => [keyOf(k), k]));
+  const newByKey = new Map(newRel.map(k => [keyOf(k), k]));
+  for (const [k, v] of oldByKey) {
+    if (!newByKey.has(k)) {
+      changes.push(`${ROLLE_LABEL[v.rolle] || v.rolle} entfernt: ${v.name || v.email}`);
+    }
+  }
+  for (const [k, v] of newByKey) {
+    if (!oldByKey.has(k)) {
+      changes.push(`${ROLLE_LABEL[v.rolle] || v.rolle} neu: ${v.name || v.email}${v.email ? ` <${v.email}>` : ''}`);
+    }
+  }
+  return changes;
+}
+
 async function autoCreateVollmachtForVerwalter(client, wohnungId, stweg, kontakte) {
   const verwalter = kontakte.filter(k => k.rolle === 'verwalter' && k.email && k.name);
   if (verwalter.length === 0) return;
@@ -5704,9 +5761,9 @@ app.post('/api/verwaltungen/:id/kontakte', authMiddleware, requireAusschussOrTec
     const verwId = parseInt(req.params.id);
     const b = req.body || {};
     const r = await pool.query(
-      `INSERT INTO verwaltungs_kontakte (verwaltung_id, name, funktion, email, telefon, sort_order)
-       VALUES ($1, $2, $3, $4, $5, COALESCE($6, 0)) RETURNING *`,
-      [verwId, b.name, b.funktion || null, b.email || null, normalizePhone(b.telefon), b.sort_order || 0]
+      `INSERT INTO verwaltungs_kontakte (verwaltung_id, name, funktion, email, telefon, sort_order, cc_default)
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6, 0), COALESCE($7, false)) RETURNING *`,
+      [verwId, b.name, b.funktion || null, b.email || null, normalizePhone(b.telefon), b.sort_order || 0, !!b.cc_default]
     );
     res.json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -5717,9 +5774,9 @@ app.put('/api/verwaltungen/kontakte/:kid', authMiddleware, requireAusschussOrTec
   try {
     const b = req.body || {};
     const r = await pool.query(
-      `UPDATE verwaltungs_kontakte SET name=$1, funktion=$2, email=$3, telefon=$4, sort_order=$5
-       WHERE id = $6 RETURNING *`,
-      [b.name, b.funktion || null, b.email || null, normalizePhone(b.telefon), b.sort_order || 0, parseInt(req.params.kid)]
+      `UPDATE verwaltungs_kontakte SET name=$1, funktion=$2, email=$3, telefon=$4, sort_order=$5, cc_default=$6
+       WHERE id = $7 RETURNING *`,
+      [b.name, b.funktion || null, b.email || null, normalizePhone(b.telefon), b.sort_order || 0, !!b.cc_default, parseInt(req.params.kid)]
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     res.json(r.rows[0]);
@@ -6824,6 +6881,12 @@ app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
     const stweg = parseStweg(req.params.stweg);
     const b = req.body;
     await client.query('BEGIN');
+    // Vorher-State fuer Diff laden — wir wollen die Verwaltung nur ueber
+    // verwaltungs-relevante Aenderungen informieren, nicht ueber rein
+    // interne Felder wie bezeichnung/notizen/besonderheiten.
+    const oldR = await client.query('SELECT * FROM wohnungen WHERE id=$1 AND stweg=$2', [req.params.id, stweg]);
+    const oldRow = oldR.rows[0] || null;
+    const oldKontakte = oldRow ? await loadKontakteForWohnung(client, oldRow.id) : [];
     const result = await client.query(
       `UPDATE wohnungen SET bezeichnung=$1, stockwerk=$2, zimmer=$3, flaeche_m2=$4, typ=$5, besonderheiten=$6,
         bewohnt_von=$7, waschkueche_berechtigt=$8, notizen=$9,
@@ -6852,8 +6915,16 @@ app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
     res.json(wohnung);
     // Sync kontakte to Authentik in background
     syncKontakteToAuthentik(parseStweg(req.params.stweg), b.kontakte, b.bewohnt_von).catch(() => {});
-    // Verwaltung informieren
-    recordObjektChange(stweg, `Wohnung "${wohnung.bezeichnung}" aktualisiert (Bewohner/Daten)`, req.user.email).catch(() => {});
+    // Verwaltung informieren — aber NUR wenn verwaltungs-relevante Felder
+    // sich aenderten. Interne Felder (bezeichnung, notizen, besonderheiten)
+    // sind fuer die Verwaltung uninteressant.
+    if (oldRow) {
+      const changes = computeWohnungChanges(oldRow, result.rows[0], oldKontakte, wohnung.kontakte || []);
+      if (changes.length > 0) {
+        const line = `Wohnung "${wohnung.bezeichnung}":\n` + changes.map(c => `      - ${c}`).join('\n');
+        recordObjektChange(stweg, line, req.user.email).catch(() => {});
+      }
+    }
   } catch (err) {
     await client.query('ROLLBACK');
     if (err.code === '23505') return res.status(409).json({ error: 'Wohnung mit dieser Bezeichnung existiert bereits' });
@@ -10195,7 +10266,9 @@ async function findVerwaltungForStweg(stweg) {
            COALESCE((
              SELECT array_agg(k.email ORDER BY k.sort_order, k.id)
                FROM verwaltungs_kontakte k
-              WHERE k.verwaltung_id = c.id AND k.email IS NOT NULL AND k.email <> ''
+              WHERE k.verwaltung_id = c.id
+                AND k.email IS NOT NULL AND k.email <> ''
+                AND k.cc_default = true
            ), ARRAY[]::text[]) AS kontakt_emails
       FROM chosen c
   `, [stwegVal]);
@@ -10581,24 +10654,37 @@ async function recordObjektChange(stweg, line, changedBy) {
     const stamp = new Date().toLocaleString('de-CH');
     const newLine = `  • ${stamp} (${changedBy || 'unbekannt'}): ${line}`;
 
-    const existing = await pool.query(
-      `SELECT id, body_text FROM verwaltung_mail_queue
-        WHERE source_type = 'objekt-änderung'
-          AND source_id = $1
-          AND status = 'pending'
-        LIMIT 1`,
-      [stwegVal || 0],
-    );
-
-    if (existing.rows.length > 0) {
-      // Bestehenden pending Eintrag erweitern (keine erneute Notification)
-      await pool.query(
-        `UPDATE verwaltung_mail_queue
-            SET body_text = body_text || E'\\n' || $1
-          WHERE id = $2`,
-        [newLine, existing.rows[0].id],
+    // Race-safe: SELECT FOR UPDATE auf bestehenden pending Eintrag in einer
+    // Transaktion. Wenn parallel zwei Aenderungen reinkommen, sieht der
+    // zweite den Lock und wartet — danach findet er die schon angelegte
+    // Row und erweitert sie statt einen Duplikat-Eintrag zu schreiben.
+    // Partial-Unique-Index auf (source_type, source_id) WHERE pending
+    // ist die Defense-in-Depth-Sicherung.
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const existing = await client.query(
+        `SELECT id FROM verwaltung_mail_queue
+          WHERE source_type = 'objekt-änderung'
+            AND source_id = $1
+            AND status = 'pending'
+          FOR UPDATE
+          LIMIT 1`,
+        [stwegVal || 0],
       );
-      return;
+      if (existing.rows.length > 0) {
+        await client.query(
+          `UPDATE verwaltung_mail_queue
+              SET body_text = body_text || E'\\n' || $1
+            WHERE id = $2`,
+          [newLine, existing.rows[0].id],
+        );
+        await client.query('COMMIT');
+        return;
+      }
+      await client.query('COMMIT');
+    } finally {
+      client.release();
     }
 
     // Neuen Sammel-Eintrag in die Queue stellen — Template aus DB versuchen
@@ -10621,27 +10707,40 @@ async function recordObjektChange(stweg, line, changedBy) {
           `── Änderungen (${stwegLabel}) ──`,
           newLine,
           ``,
-          `Diese Mail wird automatisch um weitere Änderungen erweitert, solange sie`,
-          `noch nicht freigegeben ist. Sobald Technik oder Präsident die Mail`,
-          `freigibt, geht sie an Sie raus.`,
-          ``,
           `Bitte aktualisieren Sie Ihre Stamm- und Kontaktdaten entsprechend.`,
           ``,
           `Mit freundlichen Gruessen`,
           `STWEG-Kooperation Rosenweg`,
         ].join('\n');
 
-    await enqueueVerwaltungMail({
-      source_type: 'objekt-änderung',
-      source_id: stwegVal || 0,
-      mailTo: verw.mailTo,
-      mailCc: verw.mailCc,
-      mailReplyTo: null,
-      subject,
-      bodyText: body,
-      attachments: [],
-      createdBy: changedBy || 'system',
-    });
+    try {
+      await enqueueVerwaltungMail({
+        source_type: 'objekt-änderung',
+        source_id: stwegVal || 0,
+        mailTo: verw.mailTo,
+        mailCc: verw.mailCc,
+        mailReplyTo: null,
+        subject,
+        bodyText: body,
+        attachments: [],
+        createdBy: changedBy || 'system',
+      });
+    } catch (e) {
+      // 23505 = unique_violation: andere Transaktion war eine Mikrosekunde
+      // schneller und hat denselben pending Eintrag schon angelegt. Statt
+      // beide Mails parallel rauszuhauen, haengen wir unseren Body-Eintrag
+      // an die existierende Queue-Row an.
+      if (e.code === '23505') {
+        await pool.query(
+          `UPDATE verwaltung_mail_queue
+              SET body_text = body_text || E'\\n' || $1
+            WHERE source_type = 'objekt-änderung'
+              AND source_id = $2
+              AND status = 'pending'`,
+          [newLine, stwegVal || 0],
+        );
+      } else { throw e; }
+    }
   } catch (err) {
     console.warn('[objekt-änderung] recordObjektChange Fehler:', err.message);
   }
@@ -19713,6 +19812,17 @@ async function initDB() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_verwaltungs_kontakte_verw ON verwaltungs_kontakte(verwaltung_id);
+      -- cc_default: nur wenn aktiviert wird dieser Kontakt automatisch ins
+      -- CC bei System-Mails (Objekt-Aenderungen, Auslagen-Auszahlung etc.)
+      -- aufgenommen. Default false — Hauptansprechpartner gewinnt nicht
+      -- automatisch CC-Status nur weil er als Kontakt existiert.
+      ALTER TABLE verwaltungs_kontakte ADD COLUMN IF NOT EXISTS cc_default BOOLEAN DEFAULT false;
+
+      -- Race-Fix fuer recordObjektChange: verhindert dass zwei parallele
+      -- Aenderungen denselben pending Eintrag doppelt anlegen.
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_verw_mail_queue_pending_dedup
+        ON verwaltung_mail_queue(source_type, source_id)
+        WHERE status = 'pending';
 
       CREATE TABLE IF NOT EXISTS unterschriftenliste_rueckläufe (
         id SERIAL PRIMARY KEY,
