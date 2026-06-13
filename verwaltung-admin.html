@@ -296,13 +296,17 @@
         document.getElementById('m-kontakte').innerHTML = pendingKontakte.map((k, i) => `
             <div class="grid grid-cols-12 gap-2 items-start">
                 <input type="text" placeholder="Name" value="${escapeHtml(k.name||'')}" oninput="pendingKontakte[${i}].name=this.value" class="col-span-3 border border-gray-300 rounded px-2 py-1 text-sm">
-                <input type="text" placeholder="Funktion" value="${escapeHtml(k.funktion||'')}" oninput="pendingKontakte[${i}].funktion=this.value" class="col-span-3 border border-gray-300 rounded px-2 py-1 text-sm">
+                <input type="text" placeholder="Funktion" value="${escapeHtml(k.funktion||'')}" oninput="pendingKontakte[${i}].funktion=this.value" class="col-span-2 border border-gray-300 rounded px-2 py-1 text-sm">
                 <input type="email" placeholder="Email" value="${escapeHtml(k.email||'')}" oninput="pendingKontakte[${i}].email=this.value" class="col-span-3 border border-gray-300 rounded px-2 py-1 text-sm">
                 <input type="text" placeholder="Tel" value="${escapeHtml(k.telefon||'')}" oninput="pendingKontakte[${i}].telefon=this.value" class="col-span-2 border border-gray-300 rounded px-2 py-1 text-sm">
+                <label class="col-span-1 flex items-center gap-1 text-xs text-gray-600 justify-center" title="Bei System-Mails in CC nehmen">
+                    <input type="checkbox" ${k.cc_default ? 'checked' : ''} onchange="pendingKontakte[${i}].cc_default=this.checked">
+                    <span>CC</span>
+                </label>
                 <button onclick="removeKontakt(${i})" class="col-span-1 text-red-600 text-xs hover:underline">×</button>
             </div>`).join('') || '<p class="text-xs text-gray-400">Keine Kontaktpersonen.</p>';
     }
-    function addKontakt() { pendingKontakte.push({ name:'', funktion:'', email:'', telefon:'' }); renderKontakte(); }
+    function addKontakt() { pendingKontakte.push({ name:'', funktion:'', email:'', telefon:'', cc_default:false }); renderKontakte(); }
     function removeKontakt(i) { pendingKontakte.splice(i,1); renderKontakte(); }
 
     function closeModal() { document.getElementById('modal').classList.add('hidden'); }
@@ -345,7 +349,7 @@
             if (!k.name?.trim()) continue;
             await AuthentikAuth.apiFetch(`/api/verwaltungen/${verwId}/kontakte`, {
                 method: 'POST', headers:{'Content-Type':'application/json'},
-                body: JSON.stringify({ name: k.name, funktion: k.funktion, email: k.email, telefon: k.telefon, sort_order: i })
+                body: JSON.stringify({ name: k.name, funktion: k.funktion, email: k.email, telefon: k.telefon, sort_order: i, cc_default: !!k.cc_default })
             });
         }
         closeModal();
