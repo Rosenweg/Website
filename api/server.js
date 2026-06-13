@@ -16767,7 +16767,31 @@ async function maintHandleDeviceUpdate({ key, name, model, isOnline, upgradable,
     } catch (e) { console.warn('[Maint-Auto] pre-insert:', e.message); }
   }
 
-  if (prev === undefined) return; // erster Poll: keine Transitions
+  // Auto-Close: ist das Device online und es gibt eine aktive Auto-Wartung
+  // dafuer, sofort schliessen + All-Clear schicken. Laeuft bei JEDEM Poll
+  // (nicht nur bei prev===0→online), damit haengende Wartungen nach API-
+  // Restart aufgeraeumt werden — _maintLastDeviceState ist dann naemlich
+  // leer und prev===undefined wuerde sonst alles silent verschlucken.
+  if (isOnline) {
+    try {
+      const close = await pool.query(
+        `UPDATE isp_maintenance
+            SET status='completed', end_at=NOW(), notify_end_at=NOW(), updated_at=NOW()
+          WHERE auto_source='unifi_device_update' AND source_device_id=$1
+            AND status='active'
+          RETURNING *`,
+        [key],
+      );
+      if (close.rows[0]) {
+        const row = close.rows[0];
+        console.log(`[Maint-Auto] end: #${row.id} ${row.title}`);
+        if (row.notify_email)    sendMaintenanceMail(row, 'end').catch(e => console.warn('[Maint-Auto] end-mail:', e.message));
+        if (row.notify_whatsapp) sendMaintenanceWhatsApp(row, 'end').catch(e => console.warn('[Maint-Auto] end-wa:', e.message));
+      }
+    } catch (e) { console.warn('[Maint-Auto] close error:', e.message); }
+  }
+
+  if (prev === undefined) return; // erster Poll: keine Start-Transitions
 
   // 2) Online -> Offline/Update: bestehende planned -> active hochstufen,
   //    oder neue Wartung anlegen wenn keine vorbereitet war.
@@ -16813,26 +16837,8 @@ async function maintHandleDeviceUpdate({ key, name, model, isOnline, upgradable,
     } catch (e) { console.warn('[Maint-Auto] start error:', e.message); }
   }
 
-  // 3) Offline/Update -> wieder online: active -> completed + All-Clear.
-  if (prev === 0 && isOnline) {
-    try {
-      const close = await pool.query(
-        `UPDATE isp_maintenance
-            SET status='completed', end_at=NOW(), notify_end_at=NOW(), updated_at=NOW()
-          WHERE auto_source='unifi_device_update' AND source_device_id=$1
-            AND status='active'
-          RETURNING *`,
-        [key],
-      );
-      if (close.rows[0]) {
-        const row = close.rows[0];
-        console.log(`[Maint-Auto] end: #${row.id} ${row.title}`);
-        const mail = await sendMaintenanceMail(row, 'end');
-        const wa = await sendMaintenanceWhatsApp(row, 'end');
-        console.log(`[Maint-Auto] end-notify: email=${mail.sent} wa=${wa.sent}`);
-      }
-    } catch (e) { console.warn('[Maint-Auto] close error:', e.message); }
-  }
+  // (Auto-Close wurde oben vor dem prev-undefined-Return erledigt, damit
+  // haengende Wartungen auch nach API-Restart aufgeraeumt werden.)
 }
 
 async function maintPollUnifiDevices() {
