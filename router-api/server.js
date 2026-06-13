@@ -2,14 +2,23 @@
 // Rosenweg Router-LXC API
 // Lauscht auf eth1 (VLAN 3, RK-Technik) und verwaltet User-VLANs auf eth0.
 //   POST   /vlans          -> {vlan, gateway, mask, dhcp_from, dhcp_to}
+//                             Idempotent: bei bereits konfiguriertem VLAN
+//                             sofort 200 mit applied:false. Sonst 202 mit
+//                             {job_id} — Worker laeuft im Hintergrund.
+//   GET    /jobs/:id       -> Job-Status: pending|done|failed (mit result/error)
 //   DELETE /vlans/:vlan    -> Cleanup ip link + dnsmasq config + nftables rules
 //   GET    /vlans          -> Liste aktuelle eth0.X Interfaces
 //   GET    /health         -> hostname + Anzahl aktiver VLANs
 // Auth: Bearer-Token aus /etc/rosenweg-router-api/token (chmod 600 root).
+//
+// Async-Apply: dnsmasq+nft Reload kann unter Last >15s dauern. Statt den
+// HTTP-Request synchron warten zu lassen (Caller-Timeout = unklarer State
+// im Router), gibt POST sofort job_id zurueck. API-Caller pollt /jobs/:id.
 
 const http = require('http');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
 const { execSync } = require('child_process');
 
 const TOKEN_FILE = '/etc/rosenweg-router-api/token';
@@ -34,6 +43,18 @@ function listVlans() {
   const out = shTry("ip -o link show | awk -F': ' '{print $2}' | grep -oE 'eth0\\.[0-9]+' | sort -u");
   if (!out.ok) return [];
   return out.out.trim().split('\n').filter(Boolean).map(s => Number(s.replace('eth0.', '')));
+}
+
+// Idempotenz-Check: ist dieses VLAN bereits voll konfiguriert?
+// Wenn Interface, dnsmasq-Conf UND alle nft-Regeln existieren, kann der
+// Apply uebersprungen werden — der teure systemctl restart faellt weg.
+function vlanFullyConfigured(vlan) {
+  const iface = `eth0.${vlan}`;
+  if (!shTry(`ip link show ${iface}`).ok) return false;
+  if (!fs.existsSync(`/etc/dnsmasq.d/vlan-${vlan}.conf`)) return false;
+  const fwd = shTry('nft list chain inet rosenweg forward').out || '';
+  if (!fwd.includes(`"${iface}"`)) return false;
+  return true;
 }
 
 function addVlan({ vlan, gateway, mask, dhcp_from, dhcp_to }) {
@@ -100,6 +121,41 @@ function removeVlan(vlan) {
   return { ok: true, vlan, iface, steps };
 }
 
+// ----------------------------------- Job-Queue --------------------------
+// In-memory Map: job_id -> {status, result?, error?, started_at, finished_at?}
+// Pro VLAN gibt's nur einen aktiven Job zur gleichen Zeit (Coalescing).
+const jobs = new Map();
+const vlanJobs = new Map(); // vlan -> job_id (nur fuer aktive Jobs)
+
+function newJobId() { return crypto.randomBytes(8).toString('hex'); }
+
+function runJob(jobId, fn) {
+  jobs.set(jobId, { status: 'pending', started_at: Date.now() });
+  setImmediate(() => {
+    try {
+      const result = fn();
+      jobs.set(jobId, { status: 'done', result, started_at: Date.now(), finished_at: Date.now() });
+    } catch (e) {
+      jobs.set(jobId, { status: 'failed', error: e.message, started_at: Date.now(), finished_at: Date.now() });
+    }
+  });
+}
+
+// Cleanup: Jobs > 5 Min fertig oder > 10 Min pending (zombie) loeschen.
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, j] of jobs) {
+    const stale = (j.finished_at && now - j.finished_at > 5 * 60 * 1000)
+               || (!j.finished_at && now - j.started_at > 10 * 60 * 1000);
+    if (stale) {
+      jobs.delete(id);
+      for (const [v, jid] of vlanJobs) if (jid === id) vlanJobs.delete(v);
+    }
+  }
+}, 60 * 1000).unref?.();
+
+// ----------------------------------- HTTP -------------------------------
+
 const server = http.createServer((req, res) => {
   const auth = req.headers.authorization || '';
   if (auth !== `Bearer ${TOKEN}`) {
@@ -117,8 +173,45 @@ const server = http.createServer((req, res) => {
       if (req.method === 'GET' && path === '/health') {
         return res.end(JSON.stringify({ ok: true, hostname: os.hostname(), vlans: listVlans(), uptime_s: Math.floor(os.uptime()) }));
       }
-      if (req.method === 'GET' && path === '/vlans') return res.end(JSON.stringify({ vlans: listVlans() }));
-      if (req.method === 'POST' && path === '/vlans') return res.end(JSON.stringify(addVlan(json)));
+      if (req.method === 'GET' && path === '/vlans') {
+        return res.end(JSON.stringify({ vlans: listVlans() }));
+      }
+      if (req.method === 'POST' && path === '/vlans') {
+        const vlan = Number(json.vlan);
+        if (!Number.isInteger(vlan) || vlan < 1 || vlan > 4094) {
+          res.writeHead(400); return res.end(JSON.stringify({ error: 'vlan invalid' }));
+        }
+        // Schritt 1: Idempotenz — wenn VLAN bereits voll konfiguriert ist,
+        // sofort done. Spart 1-3s systemctl-restart.
+        if (vlanFullyConfigured(vlan)) {
+          return res.end(JSON.stringify({
+            ok: true, vlan, applied: false, skipped: 'already_configured',
+          }));
+        }
+        // Schritt 2: Job-Coalescing — wenn fuer dieses VLAN schon ein Job
+        // laeuft, dessen ID zurueckgeben. Verhindert doppelte konkurrente
+        // Apply-Versuche bei retry-happy Callern.
+        const existingJobId = vlanJobs.get(vlan);
+        if (existingJobId && jobs.has(existingJobId)) {
+          const j = jobs.get(existingJobId);
+          if (j.status === 'pending') {
+            res.writeHead(202);
+            return res.end(JSON.stringify({ job_id: existingJobId, status: 'pending', coalesced: true }));
+          }
+        }
+        // Schritt 3: neuer Job — sofort 202 + job_id zurueck, Apply async.
+        const jobId = newJobId();
+        vlanJobs.set(vlan, jobId);
+        runJob(jobId, () => addVlan(json));
+        res.writeHead(202);
+        return res.end(JSON.stringify({ job_id: jobId, status: 'pending' }));
+      }
+      const jm = /^\/jobs\/([0-9a-f]+)$/.exec(path);
+      if (req.method === 'GET' && jm) {
+        const j = jobs.get(jm[1]);
+        if (!j) { res.writeHead(404); return res.end(JSON.stringify({ error: 'job_not_found' })); }
+        return res.end(JSON.stringify({ job_id: jm[1], ...j }));
+      }
       const dm = /^\/vlans\/(\d+)$/.exec(path);
       if (req.method === 'DELETE' && dm) return res.end(JSON.stringify(removeVlan(Number(dm[1]))));
       res.writeHead(404); return res.end(JSON.stringify({ error: 'not_found' }));
