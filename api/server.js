@@ -16360,7 +16360,7 @@ async function maintSubscriberRecipientsForScope(scope) {
             AND s.status IN ('aktiv','geplant')
             AND (
               w.bezeichnung ~ ('^(' || $1::text || ')[\\.\\-]')
-              OR (w.bezeichnung ~* '^RW(' || $1::text || ')-')
+              OR w.bezeichnung ~* ('^RW(' || $1::text || ')-')
             )`;
     params = [unique.join('|')];
   }
