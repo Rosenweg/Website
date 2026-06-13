@@ -34,7 +34,7 @@ const SERVICES_GROUPS = [
     items: [
       { label: 'Mail Outbox', href: 'verwaltung-mail-outbox.html', activeKey: 'verwaltung-mail-outbox', permAny: 'technik,praesident', badgeIds: ['nav-vmq-badge', 'nav-vmq-badge-mobile'] },
       { label: 'Mail schreiben (Ad-hoc)', href: 'mail-compose.html', activeKey: 'mail-compose', perm: 'mail-compose' },
-      { label: 'Empfänger-Stammdaten', href: 'mail-empfänger-admin.html', activeKey: 'mail-empfänger', perm: 'mail-empfänger' },
+      { label: 'Empfänger-Stammdaten', href: 'mail-empfaenger-admin.html', activeKey: 'mail-empfänger', perm: 'mail-empfänger' },
       { label: 'Freigabe-Regeln', href: 'mail-approval-config.html', activeKey: 'mail-approval-config', permAny: 'technik,praesident' },
       { label: 'Templates', href: 'mail-templates.html', activeKey: 'mail-templates', permAny: 'technik,praesident' },
     ],
@@ -53,7 +53,7 @@ const SERVICES_GROUPS = [
     icon: '⚙',
     items: [
       { label: 'Energie-Monitor', href: 'energie-monitor.html', activeKey: 'energie', perm: 'energie-monitor' },
-      { label: 'Zähler & Verbrauch', href: 'zähler.html', activeKey: 'zähler', perm: 'zähler' },
+      { label: 'Zähler & Verbrauch', href: 'zaehler.html', activeKey: 'zähler', perm: 'zähler' },
       { label: 'Auslagen / Vorschüsse', href: 'auslagen.html', activeKey: 'auslagen', perm: 'auslagen' },
       { label: 'Stundensatz (Auslagen)', href: 'auslagen-stundensatz.html', activeKey: 'auslagen-stundensatz', perm: 'auslagen-stundensatz' },
       { label: 'Handwerker & Lieferanten', href: 'handwerker.html', activeKey: 'handwerker', perm: 'handwerker' },
