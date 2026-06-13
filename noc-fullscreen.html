@@ -98,18 +98,25 @@
   </div>
 
   <footer class="mt-4 text-xs text-slate-600 text-center">
-    Wallboard · refresh 30s · powered by isp.rosenweg4303.ch
+    Wallboard · refresh 5s · powered by isp.rosenweg4303.ch
   </footer>
 
   <script>
     const params = new URLSearchParams(location.search);
+    // Token via Header senden statt URL-Query — sonst landet er in nginx
+    // access logs, Browser-History, Referer-Headern und ist auf dem
+    // Wallboard-Screen sichtbar. URL-Query ist Fallback fuer manuelles
+    // Aufrufen, wird aber sofort aus der Adresszeile entfernt.
     const TOKEN = params.get('token') || '';
+    if (TOKEN) {
+      try { history.replaceState(null, '', location.pathname); } catch {}
+    }
     const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     const fmtBytes = (b) => {
       if (!b || b < 1) return '0 B/s';
-      const u = ['B','K','M','G','T']; let i = 0; let v = b * 8 / 1; // bits
-      // actually bytes-per-sec from API, convert to bps:
-      v = b * 8;
+      const u = ['B','K','M','G','T']; let i = 0;
+      // API liefert bytes-per-sec → in bps umrechnen
+      let v = b * 8;
       while (v >= 1000 && i < u.length - 1) { v /= 1000; i++; }
       return v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2) + ' ' + u[i] + 'bps';
     };
@@ -119,7 +126,8 @@
       return (d ? d+'d ' : '') + h.toString().padStart(2,'0')+':'+m.toString().padStart(2,'0');
     };
     const rxHistory = [], txHistory = [];
-    const MAX_HIST = 60;
+    // 360 Punkte × 5 s Refresh = 30 Min Graph-Window
+    const MAX_HIST = 360;
     function drawWanGraph() {
       const svg = document.getElementById('wan-graph');
       if (!rxHistory.length) { svg.innerHTML = ''; return; }
@@ -129,12 +137,20 @@
         `<polyline points="${pts(rxHistory)}" fill="none" stroke="#67e8f9" stroke-width="1.5"/>` +
         `<polyline points="${pts(txHistory)}" fill="none" stroke="#6ee7b7" stroke-width="1.5"/>`;
     }
+    let loadInFlight = false;
     async function load() {
+      // Overlap-Guard: wenn der vorige load() noch laeuft (langsame UniFi-
+      // Antwort, slow DB), neuen Tick skippen statt parallel zu hammern.
+      if (loadInFlight) return;
+      // Pause wenn Tab versteckt / Browser minimiert — verhindert Polling
+      // auf einem Kiosk dessen Screen ohnehin niemand sieht.
+      if (typeof document !== 'undefined' && document.hidden) return;
+      loadInFlight = true;
       try {
-        const qs = TOKEN ? ('?token=' + encodeURIComponent(TOKEN)) : '';
+        const headers = TOKEN ? { 'X-Noc-Token': TOKEN } : {};
         const [dr, ur] = await Promise.all([
-          fetch('/api/isp/noc/public/dashboard' + qs),
-          fetch('/api/isp/noc/public/unifi' + qs),
+          fetch('/api/isp/noc/public/dashboard', { headers }),
+          fetch('/api/isp/noc/public/unifi',     { headers }),
         ]);
         if (!dr.ok || !ur.ok) {
           document.getElementById('noc-err').classList.remove('hidden');
@@ -187,7 +203,7 @@
           dots.push(`<span class="pill"><span class="noc-led ${color}"></span><span class="text-xs uppercase">${esc(s.subsystem)}</span></span>`);
         }
         for (const r of (u.routers || [])) {
-          dots.push(`<span class="pill" title="CT ${r.lxc_id} · VLAN ${r.client_vlan}"><span class="noc-led ${r.ok ? 'led-green' : 'led-red'}"></span><span class="text-xs uppercase">${esc(r.label)}</span></span>`);
+          dots.push(`<span class="pill" title="CT ${esc(r.lxc_id)} · VLAN ${esc(r.client_vlan)}"><span class="noc-led ${r.ok ? 'led-green' : 'led-red'}"></span><span class="text-xs uppercase">${esc(r.label)}</span></span>`);
         }
         sw.innerHTML = dots.join('') || '<span class="text-xs text-slate-500">keine Daten</span>';
 
@@ -205,7 +221,16 @@
       } catch (e) {
         document.getElementById('noc-err').classList.remove('hidden');
         document.getElementById('noc-err').textContent = 'Fehler: ' + e.message;
+      } finally {
+        loadInFlight = false;
       }
+    }
+    // Sofort wieder pollen wenn der Tab nach Sleep zurueckkommt — vermeidet
+    // dass das Wallboard 5–60 s lang stale Daten zeigt.
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) load();
+      });
     }
     function tick() {
       const now = new Date();

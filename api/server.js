@@ -14009,12 +14009,17 @@ async function ispDecideApproval(hostname) {
 // ENV NOC_PUBLIC_TOKEN gesetzt. Nur lesend. Internal-Forward an die admin
 // Handler ueber app._router.handle nach dem Stack der erforderlichen Middlware.
 const NOC_PUBLIC_TOKEN = process.env.NOC_PUBLIC_TOKEN || '';
-// Token-Check, optional: wenn NOC_PUBLIC_OPEN=1 ist (oder NOC_PUBLIC_TOKEN
-// unset), darf jeder die NOC-Public-Endpoints abrufen. Read-only Aggregat-
-// Metriken — kein PII-Risiko, Subscriber-Liste/Adressen sind NICHT exponed.
+// Token-Check, default-deny: ohne NOC_PUBLIC_OPEN=1 muss ein gueltiger Token
+// kommen, sonst 403. Fail-safe nach docker-stack-deploy-Env-Wipe (siehe
+// CLAUDE.md: stack deploy expandet ungesetzte Vars zu leerstring, was vorher
+// die Endpoints weltweit oeffnete). Read-only Aggregat-Metriken — kein PII,
+// aber auch nicht freiwillig an die Oeffentlichkeit.
 function checkNocToken(req, res) {
   if (process.env.NOC_PUBLIC_OPEN === '1') return true;
-  if (!NOC_PUBLIC_TOKEN) return true; // Default offen falls Token nicht konfiguriert
+  if (!NOC_PUBLIC_TOKEN) {
+    res.status(503).json({ error: 'NOC-Public-Endpoint nicht konfiguriert (NOC_PUBLIC_TOKEN fehlt)' });
+    return false;
+  }
   const t = req.query.token || req.headers['x-noc-token'];
   if (t !== NOC_PUBLIC_TOKEN) { res.status(403).json({ error: 'Token ungueltig' }); return false; }
   return true;
@@ -14240,7 +14245,7 @@ async function nocUnifiHandler(req, res) {
         "SELECT id, lxc_id, client_vlan_id, bezeichnung FROM isp_client_vlan_routers WHERE active = true ORDER BY client_vlan_id");
       const token = routerApiToken();
       out.routers = await Promise.all(rr.rows.map(async r => {
-        const ip = `100.64.3.${r.lxc_id - 400}`;
+        const ip = routerLxcMgmtIp(r.lxc_id);
         let ok = false;
         try {
           const resp = await fetch(`http://${ip}:8080/health`, {
@@ -15175,14 +15180,18 @@ app.post('/api/isp/vlan-requests', authMiddleware, async (req, res) => {
     );
     const created = r.rows[0];
     const kindLabel = created.kind === 'subnet' ? 'Subnet/eigenes IP-Netz' : 'VLAN';
+    // User-controlled Felder vor dem WA-Push clampen + Markdown-Marker
+    // (`*`, `_`, ` ``` `) entschaerfen, sonst kann ein Antragsteller die
+    // Technik-Group-Nachricht beliebig formatieren / kapern.
+    const clamp = (s, n = 200) => String(s || '').replace(/[*_`~]/g, '').slice(0, n);
     notifyTechnik(
       `🆕 *Neuer ${kindLabel}-Antrag* (pending)\n` +
-      `${created.gewuenschter_name || '(unbenannt)'} — von ${req.user.email}\n` +
-      `Zweck: ${created.zweck}` +
+      `${clamp(created.gewuenschter_name, 80) || '(unbenannt)'} — von ${clamp(req.user.email, 120)}\n` +
+      `Zweck: ${clamp(created.zweck, 300)}` +
       (created.with_wlan ? `\nmit WLAN-SSID gewuenscht` : '') +
       `\n${SITE_URL}/isp-admin.html#vlan`,
       'vlan-request',
-    );
+    ).catch(e => console.warn('[vlan-request notify]', e.message));
     res.json(created);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -16202,7 +16211,8 @@ const MAINT_AUSSCHUSS_EMAIL = 'ausschuss@rosenweg4303.ch';
 // pro MAINT_NOTIFY_THROTTLE_MIN (default 30 Min). Was waehrend des Fensters
 // reinkommt wird gepuffert und am Ende als Sammelmeldung verschickt.
 // Gilt fuer alle Empfaenger inkl. Ausschuss-Verteiler.
-const MAINT_NOTIFY_THROTTLE_MIN = parseInt(process.env.MAINT_NOTIFY_THROTTLE_MIN || '30', 10);
+const _MAINT_THROTTLE_RAW = parseInt(process.env.MAINT_NOTIFY_THROTTLE_MIN || '30', 10);
+const MAINT_NOTIFY_THROTTLE_MIN = Number.isFinite(_MAINT_THROTTLE_RAW) ? _MAINT_THROTTLE_RAW : 30;
 
 // Kernroutine: liefert eine Maintenance-Notification an alle Empfaenger.
 //   - direkt-Sender bekommen sofort `body` (via `sendFn(directList, body)`)
@@ -16211,11 +16221,17 @@ const MAINT_NOTIFY_THROTTLE_MIN = parseInt(process.env.MAINT_NOTIFY_THROTTLE_MIN
 // Rueckgabe: { sent, throttled }.
 async function deliverMaintNotify({ channel, recipients, body, subject, sendFn }) {
   if (!Array.isArray(recipients) || recipients.length === 0) return { sent: 0, throttled: 0 };
-  const list = recipients.filter(Boolean);
+  const list = recipients.filter(Boolean).map(r => String(r));
   if (MAINT_NOTIFY_THROTTLE_MIN <= 0) {
-    const n = await sendFn(list, body);
-    return { sent: n, throttled: 0 };
+    try {
+      const n = await sendFn(list, body);
+      return { sent: typeof n === 'number' ? n : list.length, throttled: 0 };
+    } catch (e) {
+      console.warn('[maint-notify] sendFn error (no-throttle):', e.message);
+      return { sent: 0, throttled: 0, error: e.message };
+    }
   }
+  const loweredList = list.map(c => c.toLowerCase());
   let blocked = new Set();
   {
     const r = await pool.query(
@@ -16223,7 +16239,7 @@ async function deliverMaintNotify({ channel, recipients, body, subject, sendFn }
         WHERE channel = $1
           AND recipient = ANY($2::text[])
           AND last_at > NOW() - ($3 || ' minutes')::interval`,
-      [channel, list.map(c => c.toLowerCase()), String(MAINT_NOTIFY_THROTTLE_MIN)],
+      [channel, loweredList, String(MAINT_NOTIFY_THROTTLE_MIN)],
     );
     blocked = new Set(r.rows.map(x => x.recipient));
   }
@@ -16234,28 +16250,41 @@ async function deliverMaintNotify({ channel, recipients, body, subject, sendFn }
     else direct.push(c);
   }
   let sent = 0;
+  let sendFailed = false;
   if (direct.length) {
-    try { sent = await sendFn(direct, body) || direct.length; } catch (e) {
+    try {
+      const n = await sendFn(direct, body);
+      sent = typeof n === 'number' ? n : direct.length;
+    } catch (e) {
       console.warn('[maint-notify] sendFn error:', e.message);
+      sendFailed = true;
     }
-    const lowered = direct.map(r => r.toLowerCase());
-    await pool.query(
-      `INSERT INTO isp_maint_notify_throttle (recipient, channel, last_at, pending_lines, pending_subjects)
-       SELECT u, $1, NOW(), '{}'::text[], '{}'::text[] FROM unnest($2::text[]) AS u
-       ON CONFLICT (recipient, channel) DO UPDATE SET last_at = NOW()`,
-      [channel, lowered],
-    );
+    // Throttle-Fenster nur starten wenn der Send wirklich erfolgreich war —
+    // sonst wuerden wir Empfaenger 30 Min stilllegen die nichts bekommen haben.
+    if (!sendFailed && sent > 0) {
+      const lowered = direct.map(r => r.toLowerCase());
+      await pool.query(
+        `INSERT INTO isp_maint_notify_throttle (recipient, channel, last_at, pending_lines, pending_subjects)
+         SELECT u, $1, NOW(), '{}'::text[], '{}'::text[] FROM unnest($2::text[]) AS u
+         ON CONFLICT (recipient, channel) DO UPDATE SET last_at = NOW()`,
+        [channel, lowered],
+      );
+    }
   }
   if (throttled.length) {
     const lowered = throttled.map(r => r.toLowerCase());
     // Append (body, subject) zu pending_lines/pending_subjects pro Empfaenger.
-    // Doppelte unterdruecken — ein zweites pre+start+end fuer dieselbe Maintenance
-    // wuerde sonst dreimal angehaengt.
+    // WICHTIG: last_at NICHT auf NOW()-interval seeden — der Empfaenger MUSS
+    // bereits eine bestehende Throttle-Row haben (wurde ja als "blocked"
+    // erkannt). Eine neue Row mit alten last_at zu erzeugen wuerde das
+    // Combine-Fenster auf den naechsten Cron-Tick (60s) kollabieren statt
+    // bis Ende des 30-Min-Fensters zu warten. Falls (race-condition) doch
+    // keine Row da war, starten wir mit NOW() — der Combine-Window-Start.
+    // Duplikate (gleicher body/subject) werden ignoriert.
     await pool.query(
       `INSERT INTO isp_maint_notify_throttle (recipient, channel, last_at, pending_lines, pending_subjects)
-       SELECT u, $1, NOW() - ($4 || ' minutes')::interval,
-              ARRAY[$2::text], ARRAY[$3::text]
-         FROM unnest($5::text[]) AS u
+       SELECT u, $1, NOW(), ARRAY[$2::text], ARRAY[$3::text]
+         FROM unnest($4::text[]) AS u
        ON CONFLICT (recipient, channel) DO UPDATE SET
          pending_lines = CASE
            WHEN $2::text = ANY(isp_maint_notify_throttle.pending_lines)
@@ -16267,61 +16296,85 @@ async function deliverMaintNotify({ channel, recipients, body, subject, sendFn }
              THEN isp_maint_notify_throttle.pending_subjects
            ELSE array_append(isp_maint_notify_throttle.pending_subjects, $3::text)
          END`,
-      [channel, body, subject || '', String(MAINT_NOTIFY_THROTTLE_MIN), lowered],
+      [channel, body, subject || '', lowered],
     );
   }
-  return { sent, throttled: throttled.length };
+  return { sent, throttled: throttled.length, sendFailed };
 }
 
 // Cron: flusht gebufferte pending_lines fuer Empfaenger deren Throttle
 // abgelaufen ist. Kombiniert mehrere bodies zu einer Sammelmeldung.
+//
+// Race-safe via Postgres advisory lock — verhindert dass zwei ueberlappende
+// Cron-Ticks dieselben Zeilen doppelt senden (passiert wenn ein Flush
+// laenger als 60s dauert und der naechste Tick startet).
+const MAINT_FLUSH_LOCK_KEY = 0x4D41494E54464C53n; // 'MAINTFLS' in hex
 async function maintFlushNotifyPending() {
+  let gotLock = false;
   try {
+    const lockR = await pool.query('SELECT pg_try_advisory_lock($1) AS ok', [MAINT_FLUSH_LOCK_KEY.toString()]);
+    gotLock = !!lockR.rows[0]?.ok;
+    if (!gotLock) return; // anderer Tick laeuft noch
     const r = await pool.query(
       `SELECT recipient, channel, pending_lines, pending_subjects
          FROM isp_maint_notify_throttle
         WHERE array_length(pending_lines, 1) > 0
-          AND last_at < NOW() - ($1 || ' minutes')::interval`,
+          AND last_at < NOW() - ($1 || ' minutes')::interval
+        FOR UPDATE SKIP LOCKED`,
       [String(MAINT_NOTIFY_THROTTLE_MIN)],
     );
     for (const row of r.rows) {
-      const lines = Array.isArray(row.pending_lines) ? row.pending_lines : [];
-      const subjects = Array.isArray(row.pending_subjects) ? row.pending_subjects : [];
+      const lines = row.pending_lines || [];
+      const subjects = row.pending_subjects || [];
       if (!lines.length) continue;
+      let sendOk = false;
       try {
         if (row.channel === 'whatsapp') {
           const header = lines.length > 1
             ? `🔔 *Rosenweg ISP — Sammelmeldung* (${lines.length} Wartungen)\n\n`
             : '';
           const body = header + lines.join('\n\n— — —\n\n');
-          await pushWhatsappBroadcast({
+          const n = await pushWhatsappBroadcast({
             emails: [row.recipient], body,
-            sourceType: 'isp_maintenance', sourceId: 'flush',
+            // sourceId muss numerisch sein (whatsapp_messages.source_id ist
+            // INTEGER) — fuer Flush-Aggregate keine spezifische maint-id.
+            sourceType: 'isp_maintenance_flush', sourceId: null,
           });
+          sendOk = n > 0;
         } else if (row.channel === 'email') {
           const subj = subjects.length > 1
             ? `[Rosenweg ISP] Sammelmeldung: ${subjects.length} Wartungen`
             : (subjects[0] || '[Rosenweg ISP] Wartungs-Update');
-          const body = (lines.length > 1
+          const text = (lines.length > 1
             ? `Hallo,\n\nmehrere Wartungs-Ereignisse wurden im selben Zeitraum gemeldet — hier die Sammelmeldung:\n\n`
             : '')
             + lines.join('\n\n------------------------------\n\n');
-          await sendEmail({ to: row.recipient, subject: subj, text: body });
+          await loggedSendMail({
+            from: MAIL_FROM, to: row.recipient, subject: subj, text,
+          }, 'maint-notify-flush');
+          sendOk = true;
         }
-        // last_at NICHT updaten — die Flush-Nachricht startet ein neues
-        // Throttle-Fenster. pending_lines leeren.
+      } catch (e) {
+        console.warn(`[maint-notify-flush] ${row.channel} ${row.recipient}:`, e.message);
+      }
+      // pending_lines NUR leeren wenn Sendung wirklich raus ist — sonst
+      // wuerden gepufferte Sammelmeldungen lautlos verschwinden bei einem
+      // Transport-Fehler. Bei Erfolg: Throttle-Fenster reset auf NOW().
+      if (sendOk) {
         await pool.query(
           `UPDATE isp_maint_notify_throttle
               SET pending_lines = '{}'::text[], pending_subjects = '{}'::text[], last_at = NOW()
             WHERE recipient = $1 AND channel = $2`,
           [row.recipient, row.channel],
         );
-      } catch (e) {
-        console.warn(`[maint-notify-flush] ${row.channel} ${row.recipient}:`, e.message);
       }
     }
   } catch (e) {
     console.warn('[maint-notify-flush] error:', e.message);
+  } finally {
+    if (gotLock) {
+      try { await pool.query('SELECT pg_advisory_unlock($1)', [MAINT_FLUSH_LOCK_KEY.toString()]); } catch {}
+    }
   }
 }
 
@@ -16432,13 +16485,15 @@ async function sendMaintenanceMail(maint, kind /* 'pre'|'start'|'end' */) {
       subject,
       sendFn: async (list, b) => {
         if (!list.length) return 0;
-        await transporter.sendMail({
-          from: process.env.SMTP_FROM || 'isp@rosenweg4303.ch',
-          to: 'isp@rosenweg4303.ch',
+        // loggedSendMail: schreibt Versand in email_log fuer Audit.
+        // BCC fuer den Direct-Cohort — eine Mail an alle Empfaenger.
+        await loggedSendMail({
+          from: MAIL_FROM,
+          to: MAIL_FROM,
           bcc: list,
           subject,
           text: b,
-        });
+        }, 'maint-notify-direct');
         return list.length;
       },
     });
@@ -16447,18 +16502,6 @@ async function sendMaintenanceMail(maint, kind /* 'pre'|'start'|'end' */) {
     console.warn('[Maint-Mail] error:', e.message);
     return { sent: 0, error: e.message };
   }
-}
-
-// Helper fuer den Flush-Cron — einzelne Mail (nicht BCC, weil pro Empfaenger
-// separat geflusht wird). Ausschuss ist nie im Flush, der bekam die Mails
-// schon direkt im ersten Send.
-async function sendEmail({ to, subject, text }) {
-  if (!to) return false;
-  await transporter.sendMail({
-    from: process.env.SMTP_FROM || 'isp@rosenweg4303.ch',
-    to, subject, text,
-  });
-  return true;
 }
 
 // SCHEMA: jeder Endpoint joint die Counts der zu sendenden Notifs nicht — wir
