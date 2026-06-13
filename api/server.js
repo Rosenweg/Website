@@ -17402,6 +17402,36 @@ app.get('/api/isp/traefik-config', async (req, res) => {
       }
     });
 
+    // PVE-Cluster Reverse-Proxy mit sticky-cookie:
+    //   pve-cluster1.rosenweg4303.ch -> sticky pve1/2/3:8006
+    // Sticky garantiert dass nach Auth bzw. innerhalb einer noVNC-Konsolen-
+    // Session der Client immer an denselben Node gerouted wird (PVE-Auth-
+    // Token gilt zwar cluster-weit, aber Live-VM-Konsolen-Tunnel sind
+    // node-bound). Backends sind PVE pveproxy auf 8006 mit Self-Signed —
+    // pveSkipVerify Transport erlaubt re-encryption ohne Cert-Verify.
+    config.http.serversTransports = config.http.serversTransports || {};
+    config.http.serversTransports.pveSkipVerify = { insecureSkipVerify: true };
+    config.http.routers.pve_cluster = {
+      rule: 'Host(`pve-cluster1.rosenweg4303.ch`)',
+      service: 'pve_cluster',
+      entryPoints: ['websecure'],
+      tls: { certResolver: 'letsencrypt' },
+    };
+    config.http.services.pve_cluster = {
+      loadBalancer: {
+        sticky: {
+          cookie: { name: 'pve_sticky', secure: true, httpOnly: true, sameSite: 'lax' },
+        },
+        serversTransport: 'pveSkipVerify',
+        servers: [
+          { url: 'https://100.64.2.20:8006' },
+          { url: 'https://100.64.2.21:8006' },
+          { url: 'https://100.64.2.22:8006' },
+        ],
+        passHostHeader: true,
+      },
+    };
+
     // Leere Sub-Maps entfernen — Traefik weigert sich sonst beim Parsen
     // ("middlewares cannot be a standalone element").
     for (const top of ['http', 'tcp']) {
