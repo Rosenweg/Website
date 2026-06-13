@@ -17415,20 +17415,26 @@ app.get('/api/isp/traefik-config', async (req, res) => {
       rule: 'Host(`pve-cluster1.rosenweg4303.ch`)',
       service: 'pve_cluster',
       entryPoints: ['websecure'],
-      tls: { certResolver: 'letsencrypt' },
+      // Default-Cert (Self-Signed) statt LE — letsencrypt-Resolver ist rate-
+      // limited fuer www/noc/isp. Sobald User pve-cluster1 als public CNAME
+      // anlegt UND der Rate-Limit-Cooldown vorbei ist, kann auf
+      // {certResolver:'letsencrypt'} umgestellt werden.
+      tls: {},
     };
     config.http.services.pve_cluster = {
       loadBalancer: {
         sticky: {
-          cookie: { name: 'pve_sticky', secure: true, httpOnly: true, sameSite: 'lax' },
+          cookie: { name: 'pve_sticky', secure: false, httpOnly: true, sameSite: 'lax' },
         },
-        serversTransport: 'pveSkipVerify',
+        // @http suffix erzwingt: serversTransports vom HTTP-Provider (statt
+        // Docker/File/Swarm). Ohne suffix kann Traefik die Referenz nicht
+        // aufloesen und kippt den ganzen Service still.
+        serversTransport: 'pveSkipVerify@http',
         servers: [
           { url: 'https://100.64.2.20:8006' },
           { url: 'https://100.64.2.21:8006' },
           { url: 'https://100.64.2.22:8006' },
         ],
-        passHostHeader: true,
       },
     };
 
