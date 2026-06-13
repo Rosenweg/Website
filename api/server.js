@@ -10255,30 +10255,41 @@ function auslagenStwegFolder(stweg) {
 //   3) Fallback: Ausschuss des STWEGs (+ Technik) — mit Hinweis "keine Verwaltung hinterlegt"
 // Liefert { firma, mailTo, mailCc, fallback }
 // Prueft ob eine Email-Adresse zu einer aktuell aktiven Verwaltung gehoert
-// — entweder als Firma-Email (verwaltungen.email) oder als einer ihrer
-// Kontaktpersonen (verwaltungs_kontakte.email). Beruecksichtigt auch
-// vertrag_von / vertrag_bis: nur Verwaltungen deren Vertrag aktuell laeuft
-// werden als "aktiv" gewertet.
-//
-// Wird benutzt um die Verwaltung als Sender an geschuetzte Verteiler frei-
-// zuschalten — Drittfirmen-Emails koennen nicht ueber Authentik-Gruppen
-// authentifiziert werden, hier ist die DB-Liste die Quelle der Wahrheit.
+// — Match auf DOMAIN-Ebene (nicht exakte Adresse), damit alle Mitarbeiter
+// der Verwaltung (info@, kontakt@, markus.huber@ etc.) automatisch erlaubt
+// sind ohne jede einzelne Adresse pflegen zu muessen.
+// Berechtigte Domains werden aus verwaltungen.email + verwaltungs_kontakte.email
+// abgeleitet (alles was @<domain> hat zaehlt). Beruecksichtigt vertrag_von /
+// vertrag_bis: nur Verwaltungen mit aktuell laufendem Vertrag.
 async function isActiveVerwaltungEmail(email) {
   if (!email) return false;
   const e = String(email).toLowerCase();
+  const at = e.lastIndexOf('@');
+  if (at < 1 || at === e.length - 1) return false;
+  const senderDomain = e.slice(at + 1);
   try {
     const r = await pool.query(
-      `SELECT 1
-         FROM verwaltungen v
-         LEFT JOIN verwaltungs_kontakte k ON k.verwaltung_id = v.id
-        WHERE v.aktiv = true
-          AND (v.vertrag_von IS NULL OR v.vertrag_von <= CURRENT_DATE)
-          AND (v.vertrag_bis IS NULL OR v.vertrag_bis >= CURRENT_DATE)
-          AND (LOWER(v.email) = $1 OR LOWER(k.email) = $1)
-        LIMIT 1`,
-      [e],
+      `SELECT DISTINCT LOWER(SPLIT_PART(addr, '@', 2)) AS domain
+         FROM (
+           SELECT v.email AS addr
+             FROM verwaltungen v
+            WHERE v.aktiv = true
+              AND (v.vertrag_von IS NULL OR v.vertrag_von <= CURRENT_DATE)
+              AND (v.vertrag_bis IS NULL OR v.vertrag_bis >= CURRENT_DATE)
+              AND v.email IS NOT NULL AND v.email <> ''
+           UNION ALL
+           SELECT k.email AS addr
+             FROM verwaltungs_kontakte k
+             JOIN verwaltungen v ON v.id = k.verwaltung_id
+            WHERE v.aktiv = true
+              AND (v.vertrag_von IS NULL OR v.vertrag_von <= CURRENT_DATE)
+              AND (v.vertrag_bis IS NULL OR v.vertrag_bis >= CURRENT_DATE)
+              AND k.email IS NOT NULL AND k.email <> ''
+         ) s
+        WHERE addr LIKE '%@%'`,
     );
-    return r.rows.length > 0;
+    const domains = new Set(r.rows.map(x => x.domain).filter(Boolean));
+    return domains.has(senderDomain);
   } catch (err) {
     console.warn('[isActiveVerwaltungEmail]', err.message);
     return false;
