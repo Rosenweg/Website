@@ -15555,13 +15555,13 @@ async function routerApiCall(lxcId, method, path, body) {
   const ip = routerLxcMgmtIp(lxcId);
   const token = routerApiToken();
   if (!token) throw new Error('ROUTER_API_TOKEN/Secret nicht konfiguriert');
-  // 30s: POST /vlans im Router-LXC startet dnsmasq + reloaded nftables —
-  // unter Last sind >15s realistisch. Lieber grosszuegig timeouten als
-  // ein bereits-applied-aber-zu-spaet-geantwortet als Fehler durchreichen.
+  // Router-API antwortet jetzt async: POST /vlans gibt sofort {job_id}
+  // zurueck statt synchron auf dnsmasq+nft-Reload zu warten. 8s reichen
+  // dicke fuer den Sync-Teil (Idempotenz-Check + Job-Spawn).
   const opts = {
     method,
     headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(8000),
   };
   if (body !== undefined) opts.body = JSON.stringify(body);
   const r = await fetch(`http://${ip}:8080${path}`, opts);
@@ -15681,14 +15681,37 @@ async function pveProvisionRouterLxc(v, router) {
   }
 
   // 2) Router-LXC API anfunken: legt ip-link / dnsmasq.d / nft-Regeln idempotent an.
-  const result = await routerApiCall(router.lxc_id, 'POST', '/vlans', {
+  //    Router-API antwortet entweder mit applied:false (Idempotenz-Hit) oder
+  //    {job_id, status:'pending'}. In letzterem Fall pollen wir bis done/failed.
+  const initial = await routerApiCall(router.lxc_id, 'POST', '/vlans', {
     vlan: userVlan,
     gateway: v.dhcp_gateway,
     mask: cidr.mask,
     dhcp_from: v.dhcp_range_from,
     dhcp_to: v.dhcp_range_to,
   });
+  let result = initial;
+  if (initial.job_id) {
+    result = await pollRouterJob(router.lxc_id, initial.job_id);
+  }
   return { node: ct.node, lxc_id: router.lxc_id, user_vlan: userVlan, router_api: result };
+}
+
+// Poll Router-LXC job until done/failed. Default-Timeout 90s: jeder einzelne
+// HTTP-Aufruf bleibt schnell (8s), wir koennen also viele Polls in einem
+// 90-s-Fenster machen ohne dass ein einzelner Read den ganzen Provisioner
+// blockt.
+async function pollRouterJob(lxcId, jobId, { timeoutMs = 90_000, intervalMs = 1500 } = {}) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    await new Promise(r => setTimeout(r, intervalMs));
+    let r;
+    try { r = await routerApiCall(lxcId, 'GET', `/jobs/${jobId}`); }
+    catch (e) { continue; } // transient — bis Timeout weiterprobieren
+    if (r.status === 'done') return r.result;
+    if (r.status === 'failed') throw new Error(`router-job ${jobId} failed: ${r.error || 'unknown'}`);
+  }
+  throw new Error(`router-job ${jobId} timeout nach ${timeoutMs}ms`);
 }
 
 // Bash-Skript für manuelles Provisioning auf dem Router-LXC.
