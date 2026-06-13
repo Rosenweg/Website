@@ -3276,7 +3276,15 @@ async function processInboundEmail(rawEmail, overrideToAddress, messageId) {
   if (allowedGroups.length > 0 && senderEmail) {
     const senderEmailLower = senderEmail.toLowerCase();
     let allowed = false;
-    if (AUTHENTIK_API_TOKEN) {
+    // Exemption: die aktive(n) Verwaltung(en) und ihre Kontakt-Emails duerfen
+    // an JEDEN geschuetzten Verteiler schreiben, ohne explizit in einer
+    // Authentik-Gruppe zu sein. Diese Adressen sind extern (Drittfirma) und
+    // koennen nicht ueber Authentik-Membership beruecksichtigt werden.
+    if (await isActiveVerwaltungEmail(senderEmailLower)) {
+      allowed = true;
+      console.log(`[Verteiler] Sender ${senderEmail} als aktive Verwaltung erkannt — erlaubt`);
+    }
+    if (!allowed && AUTHENTIK_API_TOKEN) {
       try {
         const akData = await authentikAPI('GET', `/core/users/?email=${encodeURIComponent(senderEmailLower)}`);
         const user = akData.results?.find(u => u.email?.toLowerCase() === senderEmailLower);
@@ -10246,6 +10254,37 @@ function auslagenStwegFolder(stweg) {
 //   2) Aktive Verwaltung mit stweg IS NULL (Kooperations-weit)
 //   3) Fallback: Ausschuss des STWEGs (+ Technik) — mit Hinweis "keine Verwaltung hinterlegt"
 // Liefert { firma, mailTo, mailCc, fallback }
+// Prueft ob eine Email-Adresse zu einer aktuell aktiven Verwaltung gehoert
+// — entweder als Firma-Email (verwaltungen.email) oder als einer ihrer
+// Kontaktpersonen (verwaltungs_kontakte.email). Beruecksichtigt auch
+// vertrag_von / vertrag_bis: nur Verwaltungen deren Vertrag aktuell laeuft
+// werden als "aktiv" gewertet.
+//
+// Wird benutzt um die Verwaltung als Sender an geschuetzte Verteiler frei-
+// zuschalten — Drittfirmen-Emails koennen nicht ueber Authentik-Gruppen
+// authentifiziert werden, hier ist die DB-Liste die Quelle der Wahrheit.
+async function isActiveVerwaltungEmail(email) {
+  if (!email) return false;
+  const e = String(email).toLowerCase();
+  try {
+    const r = await pool.query(
+      `SELECT 1
+         FROM verwaltungen v
+         LEFT JOIN verwaltungs_kontakte k ON k.verwaltung_id = v.id
+        WHERE v.aktiv = true
+          AND (v.vertrag_von IS NULL OR v.vertrag_von <= CURRENT_DATE)
+          AND (v.vertrag_bis IS NULL OR v.vertrag_bis >= CURRENT_DATE)
+          AND (LOWER(v.email) = $1 OR LOWER(k.email) = $1)
+        LIMIT 1`,
+      [e],
+    );
+    return r.rows.length > 0;
+  } catch (err) {
+    console.warn('[isActiveVerwaltungEmail]', err.message);
+    return false;
+  }
+}
+
 async function findVerwaltungForStweg(stweg) {
   const stwegInt = parseInt(stweg, 10);
   const stwegVal = Number.isFinite(stwegInt) ? stwegInt : null;
