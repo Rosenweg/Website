@@ -16592,6 +16592,10 @@ app.put('/api/isp/maintenance/:id', authMiddleware, async (req, res) => {
     if (!ispMaintCanWrite(req)) return res.status(403).json({ error: 'Nur Technik oder Ausschuss' });
     const id = parseInt(req.params.id, 10);
     const b = req.body || {};
+    // Vorher-Status fuer Transition-Detection (start/end-Notifications)
+    const prev = await pool.query('SELECT status, notify_start_at, notify_end_at FROM isp_maintenance WHERE id = $1', [id]);
+    if (prev.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const prevStatus = prev.rows[0].status;
     const updates = []; const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
     for (const col of ['title','description','severity','status','start_at','end_at',
@@ -16600,11 +16604,33 @@ app.put('/api/isp/maintenance/:id', authMiddleware, async (req, res) => {
     }
     if (b.scope !== undefined) push('scope', JSON.stringify(b.scope || {}));
     if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
+    // Bei Status-Uebergang notify_*_at gleich mit setzen, damit der Cron
+    // die Notification nicht nochmal verschickt.
+    const newStatus = b.status;
+    const becameActive = newStatus === 'active' && prevStatus !== 'active' && prevStatus !== 'completed';
+    const becameDone = newStatus === 'completed' && prevStatus !== 'completed';
+    if (becameActive) push('notify_start_at', new Date());
+    if (becameDone) push('notify_end_at', new Date());
     push('updated_at', new Date());
     params.push(id);
     const r = await pool.query(`UPDATE isp_maintenance SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
-    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
-    res.json(r.rows[0]);
+    const updated = r.rows[0];
+    // Status-Uebergaenge ausloesen: planned -> active -> 'start', * -> completed -> 'end'.
+    // Notifications gehen durch deliverMaintNotify und damit automatisch durch
+    // den 30-Min-Throttle (sodass Empfaenger trotz Start+End hintereinander
+    // hoechstens eine Nachricht pro Halbstunde bekommen).
+    if (becameActive) {
+      Promise.allSettled([
+        updated.notify_email     ? sendMaintenanceMail(updated, 'start')      : null,
+        updated.notify_whatsapp  ? sendMaintenanceWhatsApp(updated, 'start')  : null,
+      ]).catch(e => console.warn('[maint-put] start-notify:', e.message));
+    } else if (becameDone) {
+      Promise.allSettled([
+        updated.notify_email     ? sendMaintenanceMail(updated, 'end')      : null,
+        updated.notify_whatsapp  ? sendMaintenanceWhatsApp(updated, 'end')  : null,
+      ]).catch(e => console.warn('[maint-put] end-notify:', e.message));
+    }
+    res.json(updated);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
