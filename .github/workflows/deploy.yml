@@ -14,6 +14,7 @@ env:
   WHATSAPP_BOT_IMAGE: ghcr.io/rosenweg/rosenweg-whatsapp-bot
   SHELLY_EMULATOR_IMAGE: ghcr.io/rosenweg/shelly-emulator
   ISP_IMAGE: ghcr.io/rosenweg/rosenweg-isp
+  STWEG_IMAGE: ghcr.io/rosenweg/rosenweg-stweg
 
 jobs:
   build-api:
@@ -89,6 +90,31 @@ jobs:
           tags: |
             ${{ env.ISP_IMAGE }}:latest
             ${{ env.ISP_IMAGE }}:${{ github.sha }}
+
+  build-stweg:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push STWEG frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.stweg
+          push: true
+          tags: |
+            ${{ env.STWEG_IMAGE }}:latest
+            ${{ env.STWEG_IMAGE }}:${{ github.sha }}
 
   build-energy-collector:
     runs-on: ubuntu-latest
