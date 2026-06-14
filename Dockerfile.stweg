@@ -5,8 +5,13 @@
 # komplett aus der Hauptseite in den stweg3-Container.
 FROM nginx:1.27-alpine
 
+# Config als Template — der nginx-Entrypoint substituiert ${WASCHKUECHE}
+# per envsubst beim Start (nginx-Runtime-Vars wie $site/$host/$uri bleiben,
+# da sie keine Env-Vars sind). Default WASCHKUECHE=0 (Modul aus), pro
+# Service per --env-add WASCHKUECHE=1 zuschaltbar.
 RUN rm /etc/nginx/conf.d/default.conf
-COPY nginx.stweg.conf /etc/nginx/conf.d/default.conf
+COPY nginx.stweg.conf /etc/nginx/templates/default.conf.template
+ENV WASCHKUECHE=0
 
 WORKDIR /usr/share/nginx/html
 
@@ -25,6 +30,11 @@ COPY js/ js/
 COPY css/ css/
 COPY site-config.json .
 COPY logo-rosenweg.png .
+
+# Waschkueche-Modul (zuschaltbar via WASCHKUECHE=1). Liegt als
+# _waschkueche.html im Image; nginx serviert es nur bei WASCHKUECHE=1
+# unter /waschkueche.html. Kontext (welche STWEG) aus dem Hostname.
+COPY waschkueche.html _waschkueche.html
 
 # nginx-Default-Index entfernen (wir routen alles per Host -> /stwegN)
 RUN rm -f index.html
