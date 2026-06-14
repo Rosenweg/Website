@@ -5965,7 +5965,7 @@ function rosenwegNrAusBezeichnung(bezeichnung) {
   // 1305 / 1604 (4-stellig) → erste 2 Stellen
   m = /^(\d{2})\d{2}$/.exec(bezeichnung);
   if (m) return parseInt(m[1]);
-  // P-Nummern (Tiefgarage, STWEG 8) → keine Hausnummer
+  // P-Nummern (Tiefgarage, MEG) → keine Hausnummer
   return null;
 }
 async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) {
@@ -5996,7 +5996,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
     });
   } else {
     // Live aus DB
-    // STWEG 8 ist die MEG-Tiefgarage mit ausschliesslich typ='Parkplatz'.
+    // Die MEG ist die Tiefeinstellhalle mit ausschliesslich typ='Parkplatz'.
     // Für alle anderen STWEGen sind nur Wohnungen + Hobbyraeume relevant
     // (Tiefgarage-Plaetze gehören nicht ins Stockwerkeigentum).
     const erlaubteTypen = stweg === 8 ? ['Parkplatz'] : ['Wohnung', 'Hobbyraum'];
@@ -6037,16 +6037,16 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
     }
   }
 
-  // STWEG 8 (MEG-Tiefgarage) hat über 100 Eigentümer in unterschiedlichsten
+  // Die MEG-Tiefeinstellhalle hat über 100 Einstellplatz-Eigentümer in unterschiedlichsten
   // Haeusern + viele Auswaertige — Sammelliste an einem Ort macht keinen Sinn.
-  // Daher generiere für STWEG 8 grundsätzlich nur Einzelbriefe (jeder
+  // Daher generiere für die MEG grundsätzlich nur Einzelbriefe (jeder
   // Eigentümer bekommt seinen eigenen Brief mit Unterschriftszeile).
   const einzelOnly = stweg === 8;
 
   // Einzelbrief-Empfänger sammeln (auswärtige Eigentümer; bei einzelOnly: alle)
   const einzelbriefe = [];
   let totalWQ = 0, totalUnits = 0;
-  // Nenner ist normalerweise 1000 (STWEG-Wohnungen) oder 110 (STWEG 8 Tiefgarage).
+  // Nenner ist normalerweise 1000 (STWEG-Wohnungen) oder 110 (MEG-Tiefeinstellhalle).
   // Wir leiten ihn aus den vorhandenen Wohnungen ab — nimm den haeufigsten Nenner.
   const nennerCounts = new Map();
   for (const w of wohnungen.rows) {
@@ -6079,7 +6079,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
       const hausnr = rosenwegNrAusBezeichnung(w.bezeichnung);
       adresseZelle = hausnr ? `Rosenweg ${hausnr}, 4303 Kaiseraugst` : '4303 Kaiseraugst';
     }
-    // Einzelbrief: bei einzelOnly (STWEG 8) ALLE Eigentümer; sonst NUR
+    // Einzelbrief: bei einzelOnly (MEG) ALLE Eigentümer; sonst NUR
     // Eigentümer mit auswaertiger Adresse — lokale Eigentümer derselben
     // Einheit bleiben auf der Sammelliste. So bekommt z.B. Salvatore Cali
     // (wohnt Rosenweg 10) keinen Einzelbrief, auch wenn Mit-Eigentümer
@@ -6138,7 +6138,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
 
   // ── Haushaltszusammenfassung über Wohnungs-Grenzen hinweg ──────
   // Per-Wohnung haben wir oben bereits Eigentümer mit gleicher Adresse
-  // gruppiert (Ehepaare auf demselben Platz = ein Brief). STWEG 8 hat
+  // gruppiert (Ehepaare auf demselben Platz = ein Brief). die MEG hat
   // aber häufig denselben Haushalt auf MEHREREN Parkplaetzen (Thomas
   // Nijs P50/P64/P70, Esther Fleig P41/P42, etc.). Wir mergen daher
   // nach dem Sammeln noch einmal über alle Briefe: gleiche normalisierte
@@ -6260,7 +6260,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
   const verifyUrl = `${SITE_URL}/echtheitspruefung.html?hash=${hash}`;
   const verifyPageBase = `${SITE_URL}/echtheitspruefung.html`;
 
-  // Bei einzelOnly (STWEG 8) zeigt schon die Hauptseite die Tabelle;
+  // Bei einzelOnly (MEG) zeigt schon die Hauptseite die Tabelle;
   // doppelte Auflistung vermeiden.
   const einzelbriefeUebersicht = (einzelbriefe.length === 0 || einzelOnly) ? '' : `
     <h2 class="section-title">Einzelbriefe (auswärts wohnende Eigentümer)</h2>
