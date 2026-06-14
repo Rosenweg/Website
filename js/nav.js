@@ -256,7 +256,7 @@ const RosenwegNav = {
     const desktopLinks = stwegen.map(s => {
       const label = `${this._esc(s.name)} – ${this._esc(s.adressen)}`;
       const sep = s.nr === 8 ? '<hr class="my-1">' : '';
-      return `${sep}<a href="${sub(s)}" class="${dropA('stweg' + s.nr)} block px-4 py-2 text-sm">${label}</a>`;
+      return `${sep}<a href="${sub(s)}" class="${dropA(s.slug || ('stweg' + parseInt(s.nr)))} block px-4 py-2 text-sm">${label}</a>`;
     }).join('\n              ');
 
     const mobileLinks = stwegen.map(s =>
