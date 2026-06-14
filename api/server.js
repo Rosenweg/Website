@@ -16825,7 +16825,8 @@ async function maintProcessScheduledNotifications() {
     const now = new Date();
     const all = await pool.query(`
       SELECT * FROM isp_maintenance
-       WHERE status IN ('planned','active') AND notify_email = true
+       WHERE status IN ('planned','active')
+         AND (notify_email = true OR notify_whatsapp = true)
     `);
     for (const m of all.rows) {
       const fire = async (kind) => {
