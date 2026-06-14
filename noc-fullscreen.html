@@ -205,6 +205,9 @@
         for (const r of (u.routers || [])) {
           dots.push(`<span class="pill" title="CT ${esc(r.lxc_id)} · VLAN ${esc(r.client_vlan)}"><span class="noc-led ${r.ok ? 'led-green' : 'led-red'}"></span><span class="text-xs uppercase">${esc(r.label)}</span></span>`);
         }
+        for (const f of (u.frontends || [])) {
+          dots.push(`<span class="pill" title="Frontend-Container ${esc(f.svc)}"><span class="noc-led ${f.ok ? 'led-green' : 'led-red'}"></span><span class="text-xs uppercase">${esc(f.label)}</span></span>`);
+        }
         sw.innerHTML = dots.join('') || '<span class="text-xs text-slate-500">keine Daten</span>';
 
         // Top APs
