@@ -14324,6 +14324,8 @@ async function nocUnifiHandler(req, res) {
     wan: { up: false, ip: null, uptime_s: null, gw_name: null },
     top_aps: [],
     health: [],
+    routers: [],
+    frontends: [],
     error: null,
   };
   try {
@@ -14429,6 +14431,29 @@ async function nocUnifiHandler(req, res) {
         return { lxc_id: r.lxc_id, client_vlan: r.client_vlan_id, label, ok };
       }));
     } catch (e) { out.routers = []; out.routers_error = e.message; }
+
+    // Frontend-Container-Health: parallel /health auf jeden Service-VIP im
+    // Docker-Overlay (interne DNS-Aufloesung ueber rosenweg-net). Granular,
+    // damit das NOC-Wallboard pro Container einen Dot zeigt. Internes Probe
+    // (Container up?), nicht der WAN-Pfad — das machen Edge/Swarm separat.
+    try {
+      const FRONTENDS = [
+        { svc: 'stweg1', label: 'ST1' }, { svc: 'stweg2', label: 'ST2' },
+        { svc: 'stweg3', label: 'ST3' }, { svc: 'stweg4', label: 'ST4' },
+        { svc: 'stweg5', label: 'ST5' }, { svc: 'stweg6', label: 'ST6' },
+        { svc: 'stweg7', label: 'ST7' }, { svc: 'meg', label: 'MEG' },
+        { svc: 'rosenweg_isp', label: 'ISP' },
+        { svc: 'rosenweg_website', label: 'WWW' },
+      ];
+      out.frontends = await Promise.all(FRONTENDS.map(async f => {
+        let ok = false;
+        try {
+          const resp = await fetch(`http://${f.svc}/health`, { signal: AbortSignal.timeout(2500) });
+          ok = resp.ok;
+        } catch {}
+        return { svc: f.svc, label: f.label, ok };
+      }));
+    } catch (e) { out.frontends = []; out.frontends_error = e.message; }
 
     res.json(out);
   } catch (err) {
