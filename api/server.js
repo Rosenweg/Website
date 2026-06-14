@@ -17303,8 +17303,18 @@ app.get('/api/isp/traefik-config', async (req, res) => {
     const mailRelays = (await pool.query(`SELECT * FROM isp_mail_relays WHERE active = true`)).rows;
     const config = { http: { routers: {}, services: {}, middlewares: {} }, tcp: { routers: {}, services: {} } };
 
+    // Dieser Endpoint wird vom Swarm-Traefik gepollt (HTTP-Provider).
+    // Edge-Traefik nutzt /api/traefik/dynamic. Routen deren Backend auf
+    // die Swarm-Traefik-VIP (100.64.2.27) zeigen sind "Edge -> Swarm"-
+    // Routes; fuer Swarm-Traefik selbst waeren das Self-Loops (TLS-
+    // Cert-Error 500, weil die VIP nicht im Cert-SAN ist). Diese Hosts
+    // (isp, noc, test) werden Swarm-intern via Docker-Service-Labels
+    // gerouted, daher hier rausfiltern.
+    const SWARM_VIP_RE = /^(?:https?:\/\/)?100\.64\.2\.27(?:[:\/]|$)/i;
+
     // Reverse-Proxy-Routen
     routes.forEach((r, i) => {
+      if (SWARM_VIP_RE.test(r.backend_url || '')) return;
       const id = 'rp_' + r.id;
       const middlewares = [];
       if (r.auth_required) {
