@@ -150,6 +150,12 @@ services:
         - traefik.http.routers.rosenweg-isp.entrypoints=websecure
         - traefik.http.routers.rosenweg-isp.tls.certresolver=cf
         - traefik.http.services.rosenweg-isp.loadbalancer.server.port=80
+        # noc.rosenweg4303.ch wird vom selben Container bedient (eigener
+        # nginx-vhost in nginx.isp.conf -> noc-fullscreen.html).
+        - "traefik.http.routers.noc.rule=Host(`noc.rosenweg4303.ch`)"
+        - traefik.http.routers.noc.entrypoints=websecure
+        - traefik.http.routers.noc.tls.certresolver=cf
+        - traefik.http.routers.noc.service=rosenweg-isp
         - shepherd.enable=true
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
@@ -487,6 +493,236 @@ services:
       placement:
         constraints:
           - node.role == manager
+
+  # ============================================
+  # STWEG/MEG-Frontend-Container — ein Image (rosenweg-stweg), nginx waehlt
+  # docroot per Host-Header (~^(stweg[1-7]|meg)\.). Pro Subdomain ein
+  # Service (Isolation). meg = Tiefeinstellhalle (ex-stweg8).
+  # ============================================
+
+  stweg1:
+    image: ghcr.io/rosenweg/rosenweg-stweg:latest
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - traefik.enable=true
+        - "traefik.http.routers.stweg1.rule=Host(`stweg1.rosenweg4303.ch`)"
+        - traefik.http.routers.stweg1.entrypoints=websecure
+        - traefik.http.routers.stweg1.tls.certresolver=cf
+        - traefik.http.services.stweg1.loadbalancer.server.port=80
+        - shepherd.enable=true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  stweg2:
+    image: ghcr.io/rosenweg/rosenweg-stweg:latest
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - traefik.enable=true
+        - "traefik.http.routers.stweg2.rule=Host(`stweg2.rosenweg4303.ch`)"
+        - traefik.http.routers.stweg2.entrypoints=websecure
+        - traefik.http.routers.stweg2.tls.certresolver=cf
+        - traefik.http.services.stweg2.loadbalancer.server.port=80
+        - shepherd.enable=true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  stweg3:
+    image: ghcr.io/rosenweg/rosenweg-stweg:latest
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - traefik.enable=true
+        - "traefik.http.routers.stweg3.rule=Host(`stweg3.rosenweg4303.ch`)"
+        - traefik.http.routers.stweg3.entrypoints=websecure
+        - traefik.http.routers.stweg3.tls.certresolver=cf
+        - traefik.http.services.stweg3.loadbalancer.server.port=80
+        - shepherd.enable=true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  stweg4:
+    image: ghcr.io/rosenweg/rosenweg-stweg:latest
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - traefik.enable=true
+        - "traefik.http.routers.stweg4.rule=Host(`stweg4.rosenweg4303.ch`)"
+        - traefik.http.routers.stweg4.entrypoints=websecure
+        - traefik.http.routers.stweg4.tls.certresolver=cf
+        - traefik.http.services.stweg4.loadbalancer.server.port=80
+        - shepherd.enable=true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  stweg5:
+    image: ghcr.io/rosenweg/rosenweg-stweg:latest
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - traefik.enable=true
+        - "traefik.http.routers.stweg5.rule=Host(`stweg5.rosenweg4303.ch`)"
+        - traefik.http.routers.stweg5.entrypoints=websecure
+        - traefik.http.routers.stweg5.tls.certresolver=cf
+        - traefik.http.services.stweg5.loadbalancer.server.port=80
+        - shepherd.enable=true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  stweg6:
+    image: ghcr.io/rosenweg/rosenweg-stweg:latest
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - traefik.enable=true
+        - "traefik.http.routers.stweg6.rule=Host(`stweg6.rosenweg4303.ch`)"
+        - traefik.http.routers.stweg6.entrypoints=websecure
+        - traefik.http.routers.stweg6.tls.certresolver=cf
+        - traefik.http.services.stweg6.loadbalancer.server.port=80
+        - shepherd.enable=true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  stweg7:
+    image: ghcr.io/rosenweg/rosenweg-stweg:latest
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - traefik.enable=true
+        - "traefik.http.routers.stweg7.rule=Host(`stweg7.rosenweg4303.ch`)"
+        - traefik.http.routers.stweg7.entrypoints=websecure
+        - traefik.http.routers.stweg7.tls.certresolver=cf
+        - traefik.http.services.stweg7.loadbalancer.server.port=80
+        - shepherd.enable=true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  meg:
+    image: ghcr.io/rosenweg/rosenweg-stweg:latest
+    networks:
+      - rosenweg-net
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      labels:
+        - traefik.enable=true
+        - "traefik.http.routers.meg.rule=Host(`meg.rosenweg4303.ch`)"
+        - traefik.http.routers.meg.entrypoints=websecure
+        - traefik.http.routers.meg.tls.certresolver=cf
+        - traefik.http.services.meg.loadbalancer.server.port=80
+        - shepherd.enable=true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
 
 networks:
   rosenweg-net:
