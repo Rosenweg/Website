@@ -560,6 +560,10 @@ services:
     image: ghcr.io/rosenweg/rosenweg-stweg:latest
     networks:
       - rosenweg-net
+    environment:
+      # Smart-Waschkueche-Modul fuer STWEG 3 zuschalten (nginx serviert
+      # /waschkueche.html nur bei WASCHKUECHE=1).
+      WASCHKUECHE: "1"
     deploy:
       replicas: 1
       update_config:

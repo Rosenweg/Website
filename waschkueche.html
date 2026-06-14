@@ -9,8 +9,12 @@
     <script src="/js/authentik-auth.js?v=2"></script>
     <script src="/js/site-config.js"></script>
     <script>
-        // STWEG from URL parameter
-        const WASCH_STWEG = parseInt(new URLSearchParams(window.location.search).get('stweg')) || 0;
+        // STWEG-Kontext: ?stweg=N hat Vorrang, sonst aus dem Hostname
+        // ableiten (stwegN.rosenweg4303.ch -> N). So funktioniert das
+        // Modul env-zugeschaltet pro STWEG-Subdomain ohne Query-Param.
+        const WASCH_STWEG = parseInt(new URLSearchParams(window.location.search).get('stweg'))
+          || parseInt((window.location.hostname.match(/^stweg(\d+)\./) || [])[1])
+          || 0;
         if (!WASCH_STWEG) document.title = 'Waschküche - Rosenweg';
     </script>
     <style>
