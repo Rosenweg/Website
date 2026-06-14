@@ -14,6 +14,11 @@ services:
       # alle 30s aus dem API. Befuellt via isp-admin.html + isp-mein-zugang.html.
       - "--providers.http.endpoint=http://tasks.rosenweg_api:3000/api/isp/traefik-config"
       - "--providers.http.pollInterval=30s"
+      # Shared-Secret: der Endpoint exponiert Backend-IPs und ist nicht mehr
+      # offen. WICHTIG: ${TRAEFIK_CONFIG_SECRET} wird beim stack-deploy aus dem
+      # Shell-Env expandiert — vorher `set -a; . /root/.env; set +a`, sonst
+      # Leerstring -> Provider bekommt 403 -> Routing-Updates stoppen.
+      - "--providers.http.headers.X-Traefik-Secret=${TRAEFIK_CONFIG_SECRET}"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
       # TCP-Entrypoint fuer Multi-Tenant IMAPS via HostSNI passthrough

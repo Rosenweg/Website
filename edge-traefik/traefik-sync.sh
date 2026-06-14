@@ -11,10 +11,16 @@ DEST="/etc/traefik/dynamic/routes.yml"
 TMP_JSON="$(mktemp -t routes.json.XXXXXX)"
 TMP_YML="$(mktemp -p /etc/traefik/dynamic .routes.yml.XXXXXX)"
 
+# Shared-Secret: der Endpoint ist nicht mehr IP-gated, sondern verlangt den
+# Header X-Traefik-Secret. Wert kommt aus /etc/default/traefik-sync
+# (EnvironmentFile der Service-Unit). Ohne Secret -> API 403 -> wir behalten
+# die vorherige Config.
+TRAEFIK_CONFIG_SECRET="${TRAEFIK_CONFIG_SECRET:-}"
+
 trap 'rm -f "$TMP_JSON" "$TMP_YML"' EXIT
 
 HTTP_CODE=$(curl -sk --max-time 10 -o "$TMP_JSON" -w '%{http_code}' \
-  -H "Host: $HOST" "$ENDPOINT" || true)
+  -H "Host: $HOST" -H "X-Traefik-Secret: $TRAEFIK_CONFIG_SECRET" "$ENDPOINT" || true)
 
 if [ "$HTTP_CODE" != "200" ]; then
   echo "[traefik-sync] HTTP $HTTP_CODE — keep previous config" >&2

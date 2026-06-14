@@ -5,5 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# Shared-Secret fuer /api/traefik/dynamic (X-Traefik-Secret-Header).
+# Datei: TRAEFIK_CONFIG_SECRET=...  (chmod 600). "-" = optional, damit der
+# Sync nicht hart failt falls die Datei (noch) fehlt — die API antwortet
+# dann 403 und wir behalten die letzte Config.
+EnvironmentFile=-/etc/default/traefik-sync
 ExecStart=/usr/local/sbin/traefik-sync.sh
 User=root
