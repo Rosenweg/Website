@@ -14696,12 +14696,16 @@ async function buildTraefikDynamicConfig() {
 }
 
 app.get('/api/traefik/dynamic', async (req, res) => {
-  // Nur internes Netz (100.64.x.x) erlauben — sonst könnten Externe das
-  // Routing kartieren.
-  const xff = (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-  const remote = xff || req.socket.remoteAddress || '';
-  const isInternal = /^(127\.|::1|::ffff:127\.|10\.|172\.1[6-9]\.|172\.2[0-9]\.|172\.3[01]\.|192\.168\.|100\.64\.|::ffff:100\.64\.|::ffff:10\.)/.test(remote);
-  if (!isInternal) return res.status(403).json({ error: 'Only internal' });
+  // Shared-Secret statt IP-Allowlist: der frühere "nur intern"-Check
+  // vertraute dem ersten X-Forwarded-For-Eintrag, der über die Edge intern
+  // ist — von außen umgehbar und leakte die komplette Routing-Topologie inkl.
+  // Backend-IPs. Konsument ist ausschließlich traefik-sync.sh (CT245), das
+  // den Header X-Traefik-Secret setzt. Fail-closed: ohne korrektes Secret 403
+  // (Sync behält dann seine letzte Config — Routing bleibt, Updates stoppen).
+  const expected = process.env.TRAEFIK_CONFIG_SECRET || '';
+  if (!expected || req.headers['x-traefik-secret'] !== expected) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
   try {
     const cfg = await buildTraefikDynamicConfig();
     res.json(cfg);
@@ -17415,6 +17419,14 @@ app.delete('/api/isp/redirects/:id', authMiddleware, async (req, res) => {
 // nötig — der Endpoint laeuft nur über das interne Docker-Netz, Traefik
 // pollt im 30s-Takt. Output: JSON (Traefik akzeptiert YAML+JSON).
 app.get('/api/isp/traefik-config', async (req, res) => {
+  // Gleiche Leak-Klasse wie /api/traefik/dynamic: exponiert Backend-URLs/IPs.
+  // Konsument ist der Swarm-Traefik HTTP-Provider (sendet X-Traefik-Secret via
+  // --providers.http.headers). Fail-closed: ohne korrektes Secret 403 — der
+  // HTTP-Provider behaelt bei Fehler seine letzte Config.
+  const expected = process.env.TRAEFIK_CONFIG_SECRET || '';
+  if (!expected || req.headers['x-traefik-secret'] !== expected) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
   try {
     const routes = (await pool.query(`SELECT * FROM isp_reverse_proxy_routes WHERE active = true`)).rows;
     const redirects = (await pool.query(`SELECT * FROM isp_redirects WHERE active = true`)).rows;
