@@ -18,7 +18,7 @@ COPY stweg4/ stweg4/
 COPY stweg5/ stweg5/
 COPY stweg6/ stweg6/
 COPY stweg7/ stweg7/
-COPY stweg8/ stweg8/
+COPY meg/ meg/
 
 # Shared Frontend-Module + Config + Logo (host-unabhaengig am Root)
 COPY js/ js/

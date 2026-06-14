@@ -43,6 +43,21 @@ RUN rm -f /usr/share/nginx/html/isp.html \
           /usr/share/nginx/html/nginx.isp.conf \
           /usr/share/nginx/html/js/nav-isp.js
 
+# STWEG/MEG-Frontends leben in eigenen Containern (stwegN/meg.rosenweg4303.ch).
+# Hauptseite serviert die STWEG/MEG-Verzeichnisse NICHT mehr — inkl. der
+# Waschkueche-Module (lagen unter stweg3/). nav.js verlinkt jetzt absolut
+# auf die Subdomains.
+RUN rm -rf /usr/share/nginx/html/stweg1 \
+           /usr/share/nginx/html/stweg2 \
+           /usr/share/nginx/html/stweg3 \
+           /usr/share/nginx/html/stweg4 \
+           /usr/share/nginx/html/stweg5 \
+           /usr/share/nginx/html/stweg6 \
+           /usr/share/nginx/html/stweg7 \
+           /usr/share/nginx/html/meg \
+           /usr/share/nginx/html/nginx.stweg.conf \
+           /usr/share/nginx/html/Dockerfile.stweg
+
 EXPOSE 80
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
