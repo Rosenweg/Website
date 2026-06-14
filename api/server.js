@@ -455,10 +455,15 @@ app.get('/api/auth/login', (req, res) => {
 
 // Logout - end Authentik session and redirect back
 app.get('/api/auth/logout', async (req, res) => {
-  // Invalidate local session if token is provided
+  // id_token VOR dem Delete laden — wird gleich als id_token_hint an
+  // Authentiks end-session geschickt, sonst verlangt Authentik vor dem
+  // Beenden eine Re-Authentifizierung (die schlimmste UX ueberhaupt).
   const token = req.headers.authorization?.replace('Bearer ', '') || req.query.token;
+  let idTokenHint = null;
   if (token) {
     try {
+      const r = await pool.query('SELECT id_token FROM sessions WHERE token = $1', [token]);
+      idTokenHint = r.rows[0]?.id_token || null;
       await pool.query('DELETE FROM sessions WHERE token = $1', [token]);
       tokenCache.delete(token);
     } catch (err) {
@@ -475,10 +480,12 @@ app.get('/api/auth/logout', async (req, res) => {
       if (url.origin === new URL(SITE_URL).origin) postLogoutRedirect = url.href;
     } catch {}
   }
+
   const params = new URLSearchParams({
     post_logout_redirect_uri: postLogoutRedirect,
     client_id: AUTHENTIK_CLIENT_ID,
   });
+  if (idTokenHint) params.set('id_token_hint', idTokenHint);
   res.redirect(`${AUTHENTIK_EXTERNAL_URL}/application/o/rosenweg-website/end-session/?${params}`);
 });
 
@@ -553,11 +560,12 @@ app.get('/api/auth/callback', async (req, res) => {
     );
     const user = userResult.rows[0];
 
-    // Create session token
+    // Create session token. id_token mitspeichern fuer spaeteren Logout
+    // (end-session braucht id_token_hint sonst Re-Auth-Prompt).
     const sessionToken = crypto.randomBytes(32).toString('hex');
     await pool.query(
-      'INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3)',
-      [sessionToken, user.id, new Date(Date.now() + 24 * 60 * 60 * 1000)]
+      'INSERT INTO sessions (token, user_id, expires_at, id_token) VALUES ($1, $2, $3, $4)',
+      [sessionToken, user.id, new Date(Date.now() + 24 * 60 * 60 * 1000), tokenData.id_token || null]
     );
 
     // Fetch permissions for this user
@@ -19295,6 +19303,10 @@ async function initDB() {
         created_at TIMESTAMP DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
+      -- OIDC id_token persistieren, damit Logout id_token_hint zum
+      -- end-session-Endpoint mitschicken kann. Ohne den Hint verlangt
+      -- Authentik vor dem Beenden eine erneute Authentifizierung.
+      ALTER TABLE sessions ADD COLUMN IF NOT EXISTS id_token TEXT;
 
       CREATE TABLE IF NOT EXISTS wasch_rooms (
         id SERIAL PRIMARY KEY,
