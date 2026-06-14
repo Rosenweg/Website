@@ -422,6 +422,18 @@ const OAUTH_ALLOWED_HOSTS = new Set([
   'www.rosenweg4303.ch',
   'rosenweg4303.ch',
   'isp.rosenweg4303.ch',
+  // STWEG-Frontend-Container (stweg1..8.rosenweg4303.ch) — eigener
+  // OAuth-Callback je Subdomain, damit die Session auf demselben Origin
+  // landet von dem der Login startet. Authentik-Provider hat dazu eine
+  // Regex-Redirect-URI fuer ^https://stweg[1-8]\.rosenweg4303\.ch/...
+  'stweg1.rosenweg4303.ch',
+  'stweg2.rosenweg4303.ch',
+  'stweg3.rosenweg4303.ch',
+  'stweg4.rosenweg4303.ch',
+  'stweg5.rosenweg4303.ch',
+  'stweg6.rosenweg4303.ch',
+  'stweg7.rosenweg4303.ch',
+  'stweg8.rosenweg4303.ch',
 ]);
 function oauthRedirectUri(req) {
   const host = req.headers['x-forwarded-host'] || req.headers.host || '';
