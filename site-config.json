@@ -106,7 +106,8 @@
       "typ": "Tiefgarage",
       "email": "meg@rosenweg4303.ch",
       "groups": {
-        "ausschuss": "meg-ausschuss"
+        "ausschuss": "meg-ausschuss",
+        "eigentuemer": "meg-eigentuemer"
       },
       "slug": "meg"
     }
