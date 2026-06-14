@@ -33,7 +33,7 @@ const RosenwegDocs = {
     'stweg5': 'STWEG 5 – Rosenweg 5/6/8',
     'stweg6': 'STWEG 6 – Rosenweg 1',
     'stweg7': 'STWEG 7 – Rosenweg 2/4',
-    'stweg8': 'MEG – Tiefeinstellhalle',
+    'meg': 'MEG – Tiefeinstellhalle',
   },
 
   FILE_ICONS: {
@@ -72,7 +72,7 @@ const RosenwegDocs = {
     const folders = ['allgemein'];
     for (const [nr, groupNames] of Object.entries(this.STWEG_GROUPS)) {
       if (this.groups.some(g => groupNames.includes(g.toLowerCase()) && g.toLowerCase().endsWith('-ausschuss'))) {
-        folders.push(`stweg${nr}`);
+        folders.push(String(nr) === '8' ? 'meg' : `stweg${nr}`);
       }
     }
     return folders;

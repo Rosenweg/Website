@@ -786,6 +786,19 @@ function getUserStwegs(groups) {
   return stwegs;
 }
 
+// Dokument-/Auslagen-Ordner <-> STWEG-Nummer. STWEG 8 = MEG-Tiefeinstellhalle,
+// deren Ordner heisst 'meg' (nicht 'stweg8'). 'stweg8' wird uebergangsweise
+// (Fileserver-Move) noch als Alias zu 8 akzeptiert.
+function stwegFolderName(nr) {
+  const n = parseInt(nr, 10);
+  return n === 8 ? 'meg' : `stweg${n}`;
+}
+function folderStwegNr(folder) {
+  if (folder === 'meg' || folder === 'stweg8') return 8;
+  const m = String(folder).match(/^stweg(\d+)$/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
 /** Check if user is Technik (full access to all folders) */
 // Sanftes Telefon-Normalisieren: 079 X → +41 79 X X X, 00CC… → +CC…, sonst belassen.
 // Mischformate (mit Buchstaben/Doppelpunkten) werden nicht angefasst.
@@ -821,8 +834,8 @@ function isDocPathAllowed(filePath, groups) {
   // Projekte folder: accessible to all eigentuemer
   if (folder === 'projekte' && groups.some(g => g.toLowerCase().includes('eigentuemer'))) return true;
   const stwegs = getUserStwegs(groups);
-  const match = folder.match(/^stweg(\d+)$/);
-  return match && stwegs.has(parseInt(match[1]));
+  const nr = folderStwegNr(folder);
+  return nr !== null && stwegs.has(nr);
 }
 
 /** Check if user can write to a document path */
@@ -834,8 +847,8 @@ function canWriteDocPath(filePath, groups) {
   // Ausschuss members can write to their own stweg + allgemein + projekte
   if (folder === 'allgemein' || folder === 'projekte') return true;
   const stwegs = getUserStwegs(groups);
-  const match = folder.match(/^stweg(\d+)$/);
-  return match && stwegs.has(parseInt(match[1]));
+  const nr = folderStwegNr(folder);
+  return nr !== null && stwegs.has(nr);
 }
 
 /** Get STWEG numbers where user is Ausschuss member */
@@ -6625,7 +6638,7 @@ app.get('/api/unterschriftenliste/snapshot/:hash.pdf', async (req, res) => {
     pool.query('UPDATE unterschriftenliste_snapshots SET download_count = COALESCE(download_count,0) + 1 WHERE hash = $1', [hash]).catch(() => {});
     res.setHeader('Content-Type', 'application/pdf');
     const inline = req.query.preview === '1';
-    res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="unterschriftenliste-stweg${s.stweg}-${String(s.datum).slice(0,10)}-${hash}.pdf"`);
+    res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="unterschriftenliste-${stwegFolderName(s.stweg)}-${String(s.datum).slice(0,10)}-${hash}.pdf"`);
     res.setHeader('Content-Length', stat.size);
     fsSync.createReadStream(fullPath).pipe(res);
   } catch (err) {
@@ -6769,7 +6782,7 @@ app.get('/api/unterschriftenliste/:stweg.pdf', authMiddleware, requirePermission
     }
     res.setHeader('Content-Type', 'application/pdf');
     const inline = req.query.preview === '1';
-    const fname = `unterschriftenliste-stweg${stweg}-${opts.datum}-${opts._hash || ''}.pdf`;
+    const fname = `unterschriftenliste-${stwegFolderName(stweg)}-${opts.datum}-${opts._hash || ''}.pdf`;
     res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${fname}"`);
     res.send(pdfBuf);
   } catch (err) {
@@ -7563,7 +7576,7 @@ app.get('/api/public/ausschuss', async (req, res) => {
       result.vertreter.push({
         stweg_nummer: nr,
         stweg_typ: nr === 8 ? 'Tiefgarage' : 'Wohngebäude',
-        email: `stweg${nr}@rosenweg4303.ch`,
+        email: nr === 8 ? 'meg@rosenweg4303.ch' : `stweg${nr}@rosenweg4303.ch`,
         vertreter: members,
       });
     }
@@ -10323,7 +10336,7 @@ const AUSLAGEN_STATUS = ['eingereicht', 'genehmigt', 'abgelehnt', 'ausbezahlt'];
 
 function auslagenStwegFolder(stweg) {
   const n = parseInt(stweg, 10);
-  if (Number.isFinite(n) && n >= 1 && n <= 8) return `stweg${n}`;
+  if (Number.isFinite(n) && n >= 1 && n <= 8) return stwegFolderName(n);
   return 'allgemein';
 }
 
