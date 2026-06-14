@@ -433,7 +433,7 @@ const OAUTH_ALLOWED_HOSTS = new Set([
   'stweg5.rosenweg4303.ch',
   'stweg6.rosenweg4303.ch',
   'stweg7.rosenweg4303.ch',
-  'stweg8.rosenweg4303.ch',
+  'meg.rosenweg4303.ch',
 ]);
 function oauthRedirectUri(req) {
   const host = req.headers['x-forwarded-host'] || req.headers.host || '';

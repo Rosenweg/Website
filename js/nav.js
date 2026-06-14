@@ -248,14 +248,19 @@ const RosenwegNav = {
     const dropA = (key) => active === key ? 'bg-blue-50 text-blue-600' : 'text-gray-700 hover:bg-gray-50';
     const stwegen = this._config?.stwegen || [];
 
+    // STWEG/MEG leben in eigenen Frontend-Containern auf Subdomains
+    // (stwegN.rosenweg4303.ch, meg.rosenweg4303.ch). Links daher absolut
+    // ueber den slug aus site-config — nicht mehr ueber den www-Pfad.
+    const sub = s => `https://${this._esc(s.slug || ('stweg' + parseInt(s.nr)))}.rosenweg4303.ch/`;
+
     const desktopLinks = stwegen.map(s => {
-      const label = s.typ === 'Tiefgarage' ? `${this._esc(s.name)} – TG ${this._esc(s.adressen)}` : `${this._esc(s.name)} – ${this._esc(s.adressen)}`;
+      const label = `${this._esc(s.name)} – ${this._esc(s.adressen)}`;
       const sep = s.nr === 8 ? '<hr class="my-1">' : '';
-      return `${sep}<a href="${base}stweg${parseInt(s.nr)}/" class="${dropA('stweg' + s.nr)} block px-4 py-2 text-sm">${label}</a>`;
+      return `${sep}<a href="${sub(s)}" class="${dropA('stweg' + s.nr)} block px-4 py-2 text-sm">${label}</a>`;
     }).join('\n              ');
 
     const mobileLinks = stwegen.map(s =>
-      `<a href="${base}stweg${s.nr}/" class="text-sm text-gray-700 hover:bg-gray-100 rounded px-2 py-1">STWEG ${s.nr}</a>`
+      `<a href="${sub(s)}" class="text-sm text-gray-700 hover:bg-gray-100 rounded px-2 py-1">${this._esc(s.name)}</a>`
     ).join('\n          ');
 
     return `
