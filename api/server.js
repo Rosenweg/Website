@@ -2134,6 +2134,65 @@ app.put('/api/wasch/rooms/:id', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// MEG (Tiefeinstellhalle) - Einstellplatz-Verwaltung
+// ═══════════════════════════════════════════════════════════════════
+
+// Public: nur die zu vermietenden Plaetze (fuer "Motorradplaetze noch frei").
+// Keine PII — nur platz_nr/typ/status. Wird vom meg-Frontend ungeschuetzt geladen.
+app.get('/api/meg/einstellplaetze/verfuegbar', async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT id, platz_nr, typ FROM meg_einstellplaetze
+        WHERE status = 'zu_vermieten' ORDER BY typ, platz_nr`);
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: 'Fehler beim Laden' }); }
+});
+
+// Volle Liste — nur eingeloggt (Ausschuss/Eigentuemer sehen Zuordnungen).
+app.get('/api/meg/einstellplaetze', authMiddleware, async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM meg_einstellplaetze ORDER BY typ, platz_nr');
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: 'Fehler beim Laden' }); }
+});
+
+app.post('/api/meg/einstellplaetze', authMiddleware, adminOnly, async (req, res) => {
+  const { platz_nr, typ, status, zugeordnet_name, zugeordnet_email, wohnung_id, notizen } = req.body;
+  if (!platz_nr) return res.status(400).json({ error: 'platz_nr erforderlich' });
+  try {
+    const r = await pool.query(
+      `INSERT INTO meg_einstellplaetze (platz_nr, typ, status, zugeordnet_name, zugeordnet_email, wohnung_id, notizen)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [platz_nr, typ || 'auto', status || 'frei', zugeordnet_name || null,
+       zugeordnet_email || null, wohnung_id || null, notizen || null]);
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' }); }
+});
+
+app.put('/api/meg/einstellplaetze/:id', authMiddleware, adminOnly, async (req, res) => {
+  const { platz_nr, typ, status, zugeordnet_name, zugeordnet_email, wohnung_id, notizen } = req.body;
+  try {
+    const r = await pool.query(
+      `UPDATE meg_einstellplaetze SET
+         platz_nr=COALESCE($2,platz_nr), typ=COALESCE($3,typ), status=COALESCE($4,status),
+         zugeordnet_name=$5, zugeordnet_email=$6, wohnung_id=$7, notizen=$8, updated_at=NOW()
+       WHERE id=$1 RETURNING *`,
+      [req.params.id, platz_nr, typ, status, zugeordnet_name || null,
+       zugeordnet_email || null, wohnung_id || null, notizen || null]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Platz nicht gefunden' });
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' }); }
+});
+
+app.delete('/api/meg/einstellplaetze/:id', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM meg_einstellplaetze WHERE id=$1 RETURNING id', [req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Platz nicht gefunden' });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: 'Interner Serverfehler' }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // WASCHKÜCHE - RESERVIERUNGEN (minutengenau)
 // ═══════════════════════════════════════════════════════════════════
 
@@ -19356,6 +19415,30 @@ async function initDB() {
         active BOOLEAN DEFAULT true,
         created_at TIMESTAMP DEFAULT NOW()
       );
+
+      -- MEG (Tiefeinstellhalle): Einstellplatz-Verwaltung. typ auto|motorrad,
+      -- status frei|zu_vermieten|vermietet|eigengenutzt. Motorradplaetze 1-5
+      -- mit status='zu_vermieten' werden oeffentlich als frei angezeigt.
+      CREATE TABLE IF NOT EXISTS meg_einstellplaetze (
+        id SERIAL PRIMARY KEY,
+        platz_nr VARCHAR(20) NOT NULL,
+        typ VARCHAR(20) NOT NULL DEFAULT 'auto',
+        status VARCHAR(20) NOT NULL DEFAULT 'frei',
+        zugeordnet_name VARCHAR(255),
+        zugeordnet_email VARCHAR(255),
+        wohnung_id INTEGER,
+        notizen TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_meg_ep_status ON meg_einstellplaetze(status);
+      CREATE INDEX IF NOT EXISTS idx_meg_ep_typ ON meg_einstellplaetze(typ);
+      -- Seed der 110 echten Einstellplaetze aus den Gruendungsakten
+      -- (GB 965.001-965.106, Parzelle 349 EH Rosenweg, Platznummer 1-110),
+      -- nur wenn leer. Typ/Status/Zuordnung pflegt danach der MEG-Ausschuss.
+      INSERT INTO meg_einstellplaetze (platz_nr, typ, status)
+      SELECT g::text, 'auto', 'frei' FROM generate_series(1,110) g
+      WHERE NOT EXISTS (SELECT 1 FROM meg_einstellplaetze);
 
       CREATE TABLE IF NOT EXISTS wasch_reservations (
         id SERIAL PRIMARY KEY,
