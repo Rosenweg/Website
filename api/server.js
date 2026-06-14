@@ -17329,7 +17329,7 @@ app.get('/api/isp/traefik-config', async (req, res) => {
         service: id,
         entryPoints: ['websecure'],
         middlewares,
-        ...(r.ssl ? { tls: r.ssl_method === 'letsencrypt' ? { certResolver: 'letsencrypt' } : {} } : {}),
+        ...(r.ssl ? { tls: r.ssl_method === 'letsencrypt' ? { certResolver: 'cf' } : (r.ssl_method === 'cloudflare-origin' ? {} : { certResolver: 'cf' }) } : {}),
       };
       config.http.services[id] = { loadBalancer: { servers: [{ url: r.backend_url }] } };
     });
@@ -17354,7 +17354,7 @@ app.get('/api/isp/traefik-config', async (req, res) => {
         service: 'noop@internal', // dummy, der wird wegen redirect nie aufgerufen
         entryPoints: ['websecure'],
         middlewares: [id],
-        tls: { certResolver: 'letsencrypt' },
+        tls: { certResolver: 'cf' },
       };
       // Auch HTTP (port 80) Router für redirect (ohne TLS)
       config.http.routers[id + '_http'] = {

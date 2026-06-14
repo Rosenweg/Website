@@ -26,6 +26,14 @@ services:
       - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
       - "--certificatesresolvers.letsencrypt.acme.email=stefan+rosenweg@juroct.ch"
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      # DNS-01 via Cloudflare — umgeht http-01-redirect-Probleme bei Hosts
+      # die zugleich Backend-Routes haben, und vermeidet das Rate-Limit-
+      # Risiko aus wiederholten failed authorizations.
+      - "--certificatesresolvers.cf.acme.dnschallenge=true"
+      - "--certificatesresolvers.cf.acme.dnschallenge.provider=cloudflare"
+      - "--certificatesresolvers.cf.acme.dnschallenge.delayBeforeCheck=10"
+      - "--certificatesresolvers.cf.acme.email=stefan+rosenweg@juroct.ch"
+      - "--certificatesresolvers.cf.acme.storage=/letsencrypt/acme-cf.json"
       - "--log.level=WARN"
       - "--accesslog=true"
       - "--accesslog.filepath=/var/log/traefik/access.log"
@@ -38,6 +46,10 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - traefik-certs:/letsencrypt
       - traefik-logs:/var/log/traefik
+    environment:
+      # Fuer den CF-Resolver — Token muss Zone:DNS:Edit + Zone:Read auf den
+      # benutzten Zonen haben (rosenweg4303.ch + rosenweg9.ch).
+      - CF_DNS_API_TOKEN=${CLOUDFLARE_API_TOKEN}
     networks:
       - rosenweg-net
     deploy:
@@ -78,7 +90,7 @@ services:
         - "traefik.enable=true"
         - "traefik.http.routers.rosenweg.rule=Host(`www.rosenweg4303.ch`) || Host(`rosenweg4303.ch`)"
         - "traefik.http.routers.rosenweg.entrypoints=websecure"
-        - "traefik.http.routers.rosenweg.tls.certresolver=letsencrypt"
+        - "traefik.http.routers.rosenweg.tls.certresolver=cf"
         - "traefik.http.services.rosenweg.loadbalancer.server.port=80"
         # Hinweis: Cloudflare→Origin laeuft als HTTP (Flexible SSL), darum https? im regex.
         - "traefik.http.middlewares.rosenweg-www.redirectregex.regex=^https?://rosenweg4303\\.ch/(.*)"
@@ -98,7 +110,7 @@ services:
         # rosenweg9.ch → /stweg3/
         - "traefik.http.routers.rosenweg9.rule=Host(`www.rosenweg9.ch`) || Host(`rosenweg9.ch`)"
         - "traefik.http.routers.rosenweg9.entrypoints=websecure"
-        - "traefik.http.routers.rosenweg9.tls.certresolver=letsencrypt"
+        - "traefik.http.routers.rosenweg9.tls.certresolver=cf"
         - "traefik.http.middlewares.rosenweg9-redirect.redirectregex.regex=^https://(www\\.)?rosenweg9\\.ch/?(.*)"
         - "traefik.http.middlewares.rosenweg9-redirect.redirectregex.replacement=https://www.rosenweg4303.ch/stweg3/$${2}"
         - "traefik.http.middlewares.rosenweg9-redirect.redirectregex.permanent=true"
