@@ -20,7 +20,7 @@ const RosenwegDocs = {
     5: ['stweg5-bewohner', 'stweg5-eigentuemer', 'stweg5-ausschuss'],
     6: ['r1-bewohner', 'r1-eigentuemer', 'stweg6-ausschuss'],
     7: ['stweg7-bewohner', 'stweg7-eigentuemer', 'stweg7-ausschuss'],
-    8: ['stweg8-ausschuss'],
+    8: ['meg-ausschuss'],
   },
 
   CATEGORY_LABELS: {
@@ -33,7 +33,7 @@ const RosenwegDocs = {
     'stweg5': 'STWEG 5 – Rosenweg 5/6/8',
     'stweg6': 'STWEG 6 – Rosenweg 1',
     'stweg7': 'STWEG 7 – Rosenweg 2/4',
-    'stweg8': 'STWEG 8 – Tiefgarage',
+    'stweg8': 'MEG – Tiefeinstellhalle',
   },
 
   FILE_ICONS: {
