@@ -104,9 +104,9 @@
       "name": "MEG",
       "adressen": "Tiefeinstellhalle",
       "typ": "Tiefgarage",
-      "email": "stweg8@rosenweg4303.ch",
+      "email": "meg@rosenweg4303.ch",
       "groups": {
-        "ausschuss": "stweg8-ausschuss"
+        "ausschuss": "meg-ausschuss"
       },
       "slug": "meg"
     }

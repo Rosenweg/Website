@@ -22,7 +22,7 @@ const STWEG_GROUPS = {
   5: { bewohner: 'stweg5-bewohner', eigentuemer: 'stweg5-eigentuemer', ausschuss: 'stweg5-ausschuss' },
   6: { bewohner: 'r1-bewohner', eigentuemer: 'r1-eigentuemer', ausschuss: 'stweg6-ausschuss' },
   7: { bewohner: 'stweg7-bewohner', eigentuemer: 'stweg7-eigentuemer', ausschuss: 'stweg7-ausschuss' },
-  8: { ausschuss: 'stweg8-ausschuss' },
+  8: { ausschuss: 'meg-ausschuss' },
 };
 
 const app = express();
