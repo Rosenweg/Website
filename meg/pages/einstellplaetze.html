@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Einstellplätze – MEG Tiefeinstellhalle</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/site-config.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js?v=2"></script>
+    <script>RosenwegNav.init({ active: 'stweg8' });</script>
+
+    <section class="bg-gradient-to-r from-slate-700 to-slate-900 text-white py-10">
+        <div class="max-w-6xl mx-auto px-4">
+            <h1 class="text-3xl font-bold">Einstellplätze</h1>
+            <p class="opacity-90">MEG Tiefeinstellhalle – 110 Plätze (Parzelle 349)</p>
+        </div>
+    </section>
+
+    <!-- Öffentlich: zu vermieten -->
+    <section class="py-10">
+        <div class="max-w-6xl mx-auto px-4">
+            <div class="bg-white rounded-xl shadow p-6 mb-8">
+                <h2 class="text-xl font-bold text-gray-800 mb-4">Noch zu vermieten</h2>
+                <div id="verfuegbar" class="text-gray-600">Lade …</div>
+            </div>
+
+            <!-- Admin-Grid (nur Ausschuss/Technik) -->
+            <div id="admin-wrap" class="hidden">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-xl font-bold text-gray-800">Platz-Verwaltung</h2>
+                    <span class="text-sm text-gray-500">Status &amp; Zuordnung pflegen</span>
+                </div>
+                <div class="bg-white rounded-xl shadow overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-100 text-gray-600 uppercase text-xs">
+                            <tr>
+                                <th class="text-left px-3 py-2">Platz</th>
+                                <th class="text-left px-3 py-2">Typ</th>
+                                <th class="text-left px-3 py-2">Status</th>
+                                <th class="text-left px-3 py-2">Zugeordnet</th>
+                                <th class="text-left px-3 py-2">Notiz</th>
+                                <th class="px-3 py-2"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="grid"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="login-hint" class="hidden text-center py-6">
+                <p class="text-gray-600 mb-3">Zur Platz-Verwaltung anmelden (MEG-Ausschuss / Technik).</p>
+                <button id="login-btn" class="bg-slate-700 text-white px-6 py-2 rounded-lg hover:bg-slate-800">Anmelden</button>
+            </div>
+        </div>
+    </section>
+
+    <script>
+    const TYPEN = ['auto', 'motorrad'];
+    const STATUS = ['frei', 'zu_vermieten', 'vermietet', 'eigengenutzt'];
+    const STATUS_LABEL = { frei: 'frei', zu_vermieten: 'zu vermieten', vermietet: 'vermietet', eigengenutzt: 'eigengenutzt' };
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+    async function loadVerfuegbar() {
+        try {
+            const r = await fetch('/api/meg/einstellplaetze/verfuegbar');
+            const list = await r.json();
+            const moto = list.filter(p => p.typ === 'motorrad').map(p => p.platz_nr);
+            const auto = list.filter(p => p.typ === 'auto').map(p => p.platz_nr);
+            const el = document.getElementById('verfuegbar');
+            if (!list.length) { el.innerHTML = '<span class="text-gray-500">Aktuell sind keine Plätze zu vermieten.</span>'; return; }
+            el.innerHTML = `
+                <div class="flex flex-wrap gap-6">
+                    <div><div class="text-3xl font-bold text-emerald-600">${moto.length}</div>
+                        <div class="text-sm text-gray-600">Motorradplätze frei${moto.length ? ': Nr. ' + moto.map(esc).join(', ') : ''}</div></div>
+                    <div><div class="text-3xl font-bold text-emerald-600">${auto.length}</div>
+                        <div class="text-sm text-gray-600">Autoplätze frei${auto.length ? ': Nr. ' + auto.map(esc).join(', ') : ''}</div></div>
+                </div>`;
+        } catch { document.getElementById('verfuegbar').textContent = 'Fehler beim Laden.'; }
+    }
+
+    function row(p) {
+        const opt = (arr, v, lbl) => arr.map(x => `<option value="${x}" ${x===v?'selected':''}>${esc(lbl?lbl[x]:x)}</option>`).join('');
+        return `<tr class="border-t" data-id="${p.id}">
+            <td class="px-3 py-2 font-medium">${esc(p.platz_nr)}</td>
+            <td class="px-3 py-2"><select class="border rounded px-1 py-0.5 f-typ">${opt(TYPEN, p.typ)}</select></td>
+            <td class="px-3 py-2"><select class="border rounded px-1 py-0.5 f-status">${opt(STATUS, p.status, STATUS_LABEL)}</select></td>
+            <td class="px-3 py-2"><input class="border rounded px-1 py-0.5 w-36 f-name" value="${esc(p.zugeordnet_name)}" placeholder="Name"></td>
+            <td class="px-3 py-2"><input class="border rounded px-1 py-0.5 w-40 f-notiz" value="${esc(p.notizen)}" placeholder="–"></td>
+            <td class="px-3 py-2"><button class="text-xs bg-slate-700 text-white px-2 py-1 rounded f-save">Speichern</button></td>
+        </tr>`;
+    }
+
+    async function loadGrid() {
+        const token = AuthentikAuth.getToken();
+        const r = await fetch('/api/meg/einstellplaetze', { headers: { Authorization: 'Bearer ' + token } });
+        if (!r.ok) return;
+        const list = await r.json();
+        document.getElementById('grid').innerHTML = list.map(row).join('');
+        document.querySelectorAll('#grid .f-save').forEach(btn => btn.addEventListener('click', save));
+    }
+
+    async function save(e) {
+        const tr = e.target.closest('tr');
+        const token = AuthentikAuth.getToken();
+        const body = {
+            typ: tr.querySelector('.f-typ').value,
+            status: tr.querySelector('.f-status').value,
+            zugeordnet_name: tr.querySelector('.f-name').value || null,
+            notizen: tr.querySelector('.f-notiz').value || null,
+        };
+        e.target.textContent = '…';
+        const r = await fetch('/api/meg/einstellplaetze/' + tr.dataset.id, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+            body: JSON.stringify(body),
+        });
+        e.target.textContent = r.ok ? '✓' : 'Fehler';
+        setTimeout(() => { e.target.textContent = 'Speichern'; }, 1500);
+        if (r.ok) loadVerfuegbar();
+    }
+
+    (async () => {
+        loadVerfuegbar();
+        try {
+            const user = await AuthentikAuth.init();
+            if (user && (user.isAdmin || (user.groups || []).some(g => /ausschuss|technik|präsident|praesident/i.test(g)))) {
+                document.getElementById('admin-wrap').classList.remove('hidden');
+                loadGrid();
+            } else {
+                document.getElementById('login-hint').classList.remove('hidden');
+            }
+        } catch {
+            document.getElementById('login-hint').classList.remove('hidden');
+        }
+        document.getElementById('login-btn')?.addEventListener('click', () => AuthentikAuth.login());
+    })();
+    </script>
+</body>
+</html>

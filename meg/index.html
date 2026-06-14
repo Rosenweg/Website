@@ -40,13 +40,40 @@
                 </div>
                 <div class="hidden md:block">
                     <div class="bg-white bg-opacity-20 rounded-lg p-4 text-center">
-                        <div class="text-5xl font-bold">8</div>
-                        <div class="text-sm uppercase tracking-wide">STWEG</div>
+                        <div class="text-3xl font-bold">110</div>
+                        <div class="text-sm uppercase tracking-wide">Einstellplätze</div>
                     </div>
                 </div>
             </div>
         </div>
     </section>
+
+    <!-- Einstellplätze CTA -->
+    <section class="py-8">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <a href="pages/einstellplaetze.html" class="block bg-white rounded-xl shadow-md hover:shadow-lg transition p-6 border-l-4 border-slate-700">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="text-xl font-bold text-gray-800">Einstellplätze</h3>
+                        <p class="text-gray-600 text-sm">110 Plätze – Verwaltung &amp; freie Plätze (Motorrad/Auto)</p>
+                    </div>
+                    <span class="text-slate-700 text-2xl">→</span>
+                </div>
+                <div id="ep-frei-hint" class="mt-3 text-sm text-emerald-700"></div>
+            </a>
+        </div>
+    </section>
+    <script>
+    fetch('/api/meg/einstellplaetze/verfuegbar').then(r => r.json()).then(l => {
+        if (l && l.length) {
+            const m = l.filter(p => p.typ === 'motorrad').length, a = l.filter(p => p.typ === 'auto').length;
+            const parts = [];
+            if (m) parts.push(m + ' Motorradplatz' + (m > 1 ? 'e' : '') + ' frei');
+            if (a) parts.push(a + ' Autoplatz' + (a > 1 ? '/-plätze' : '') + ' frei');
+            document.getElementById('ep-frei-hint').textContent = '● ' + parts.join(' · ') + ' – noch zu vermieten';
+        }
+    }).catch(() => {});
+    </script>
 
     <!-- Verwaltung & Kontakte -->
     <section class="py-12 bg-gray-50">
