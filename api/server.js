@@ -8,10 +8,8 @@ const fsSync = require('fs');
 const fs = require('fs').promises;
 const pathModule = require('path');
 
-/** Escape string for safe HTML insertion */
-function escapeHtml(str) {
-  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
+// ─── Ausgelagerte Module (inkrementeller Router-Split) ───────────────
+const { escapeHtml, createSemaphore, normalizePhone, safeId } = require('./lib/utils');
 
 // STWEG group mapping (Authentik group names per STWEG)
 const STWEG_GROUPS = {
@@ -174,22 +172,7 @@ function isAllowlistedSender(email) {
   return EMAIL_ALLOWLIST.includes(e) || EMAIL_ALLOWLIST.includes(e.replace(/\+[^@]*/, ''));
 }
 
-// Simple async semaphore to throttle Gotenberg/external converter calls.
-// Default max 3 concurrent — high enough for normal load, low enough that
-// 20+ parallel print emails don't slam the converter into timeouts.
-function createSemaphore(max) {
-  let active = 0;
-  const queue = [];
-  const next = () => {
-    if (active >= max || queue.length === 0) return;
-    active++;
-    queue.shift()();
-  };
-  return async function acquire() {
-    await new Promise(r => { queue.push(r); next(); });
-    return () => { active--; next(); };
-  };
-}
+// createSemaphore -> lib/utils.js. Gotenberg/Converter-Throttle (max 3 parallel).
 const gotenbergSemaphore = createSemaphore(parseInt(process.env.GOTENBERG_MAX_CONCURRENT || '3'));
 
 // ─── Health ─────────────────────────────────────────────────────────
@@ -803,25 +786,7 @@ function folderStwegNr(folder) {
   return m ? parseInt(m[1], 10) : null;
 }
 
-/** Check if user is Technik (full access to all folders) */
-// Sanftes Telefon-Normalisieren: 079 X → +41 79 X X X, 00CC… → +CC…, sonst belassen.
-// Mischformate (mit Buchstaben/Doppelpunkten) werden nicht angefasst.
-function normalizePhone(val) {
-  if (!val) return null;
-  let s = String(val).trim();
-  if (!s) return null;
-  if (/[a-zA-ZäöüÄÖÜ:]/.test(s)) return s;
-  s = s.replace(/[^\d+]/g, '');
-  if (!s) return null;
-  if (s.startsWith('00')) s = '+' + s.slice(2);
-  if (s.startsWith('0') && !s.startsWith('00')) s = '+41' + s.slice(1);
-  if (s.startsWith('41') && !s.startsWith('+')) s = '+' + s;
-  const ch = s.match(/^\+41(\d{2})(\d{3})(\d{2})(\d{2})$/);
-  if (ch) return `+41 ${ch[1]} ${ch[2]} ${ch[3]} ${ch[4]}`;
-  const intl = s.match(/^\+(\d{1,3})(\d+)$/);
-  if (intl) return `+${intl[1]} ${intl[2].replace(/(\d{3})(?=\d)/g, '$1 ')}`;
-  return s;
-}
+// normalizePhone -> lib/utils.js
 
 function isTechnik(groups) {
   return groups.some(g => g.toLowerCase() === 'technik');
@@ -14636,7 +14601,7 @@ app.get('/api/isp/noc/unifi', authMiddleware, requireTechnikOrPraesident, nocUni
 // Wird vom Traefik in LXC 245 alle 15s gepollt (HTTP-Provider). Liefert
 // die aktuelle Route-Liste als Traefik-JSON-Schema. KEIN authMiddleware —
 // nur erreichbar im internen LAN, und Traefik kennt keinen Auth-Header.
-function safeId(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, ''); }
+// safeId -> lib/utils.js
 
 async function buildTraefikDynamicConfig() {
   // WICHTIG: leere sections (z.B. middlewares: {}) lassen Traefik file-provider
