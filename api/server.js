@@ -3056,39 +3056,47 @@ app.put('/api/kontakte', authMiddleware, adminOnly, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════
 
 // Resolve all email addresses for a group (including all descendant groups)
+// Holt die beiden teuren Authentik-Volllisten (Gruppen + aktive User).
+// Teuer (~je 1-2s) — wer mehrere Gruppen aufloest, sollte EINMAL holen und
+// resolveGroupEmailsFromData wiederverwenden statt resolveGroupEmails pro Gruppe.
+async function fetchAuthentikGroupsUsers() {
+  const groupsData = await authentikAPI('GET', '/core/groups/?page_size=500');
+  const allGroups = groupsData.results || groupsData;
+  const usersData = await authentikAPI('GET', '/core/users/?page_size=500');
+  const allUsers = (usersData.results || usersData).filter(u => u.is_active && u.email);
+  return { allGroups, allUsers };
+}
+
+// Pure: loest Gruppe (inkl. Untergruppen-Hierarchie) gegen vorgeladene Listen auf.
+function resolveGroupEmailsFromData(groupName, allGroups, allUsers) {
+  const target = allGroups.find(g => g.name.toLowerCase() === groupName.toLowerCase());
+  if (!target) return [];
+  // Collect target + all descendant group PKs
+  const groupPks = new Set([target.pk]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const g of allGroups) {
+      if (g.parent && groupPks.has(g.parent) && !groupPks.has(g.pk)) {
+        groupPks.add(g.pk);
+        changed = true;
+      }
+    }
+  }
+  const emails = new Set();
+  for (const u of allUsers) {
+    const userGroupPks = u.groups_obj ? u.groups_obj.map(g => g.pk) : (u.groups || []);
+    if (userGroupPks.some(pk => groupPks.has(pk))) {
+      emails.add(u.email.toLowerCase());
+    }
+  }
+  return [...emails];
+}
+
 async function resolveGroupEmails(groupName) {
   try {
-    const groupsData = await authentikAPI('GET', '/core/groups/?page_size=500');
-    const allGroups = groupsData.results || groupsData;
-    const usersData = await authentikAPI('GET', '/core/users/?page_size=500');
-    const allUsers = (usersData.results || usersData).filter(u => u.is_active && u.email);
-
-    // Find the target group
-    const target = allGroups.find(g => g.name.toLowerCase() === groupName.toLowerCase());
-    if (!target) return [];
-
-    // Collect target + all descendant group PKs
-    const groupPks = new Set([target.pk]);
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const g of allGroups) {
-        if (g.parent && groupPks.has(g.parent) && !groupPks.has(g.pk)) {
-          groupPks.add(g.pk);
-          changed = true;
-        }
-      }
-    }
-
-    // Find all users in any of these groups
-    const emails = new Set();
-    for (const u of allUsers) {
-      const userGroupPks = u.groups_obj ? u.groups_obj.map(g => g.pk) : (u.groups || []);
-      if (userGroupPks.some(pk => groupPks.has(pk))) {
-        emails.add(u.email.toLowerCase());
-      }
-    }
-    return [...emails];
+    const { allGroups, allUsers } = await fetchAuthentikGroupsUsers();
+    return resolveGroupEmailsFromData(groupName, allGroups, allUsers);
   } catch (err) {
     console.error('resolveGroupEmails error:', err.message);
     return [];
@@ -7138,15 +7146,27 @@ app.get('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
        FROM email_verteiler ORDER BY stweg, name`
     );
     // For group-based verteiler, resolve actual member count.
-    // War sequentiell (N Verteiler x M Gruppen, je ein Authentik-Call) -> ~22s.
-    // Jede distinkte Gruppe nur EINMAL aufloesen (Memo) und alle parallel.
+    // War ~22s: jede Authentik-Gruppe loeste 2 Full-List-Calls (/core/groups,
+    // /core/users) aus -> N x 2 Authentik-Calls. Jetzt: die teuren Listen genau
+    // EINMAL pro Request holen, Authentik-Gruppen in-memory aufloesen; jede
+    // distinkte Gruppe nur einmal (Memo). verwaltung:-Gruppen sind lokale
+    // DB-Queries (schnell) und laufen parallel.
     const rows = result.rows;
+    const needsAuthentik = rows.some(v => {
+      const gns = v.group_names?.length ? v.group_names : (v.group_name ? [v.group_name] : []);
+      return gns.some(gn => !gn.startsWith('verwaltung:'));
+    });
+    let authData = null;
+    if (needsAuthentik) {
+      try { authData = await fetchAuthentikGroupsUsers(); }
+      catch { authData = { allGroups: [], allUsers: [] }; }
+    }
     const groupCache = new Map();
     const resolveOnce = (gn) => {
       if (!groupCache.has(gn)) {
-        groupCache.set(gn, (gn.startsWith('verwaltung:')
-          ? resolveVerwaltungsGroup(gn)
-          : resolveGroupEmails(gn)).catch(() => []));
+        groupCache.set(gn, gn.startsWith('verwaltung:')
+          ? resolveVerwaltungsGroup(gn).catch(() => [])
+          : Promise.resolve(authData ? resolveGroupEmailsFromData(gn, authData.allGroups, authData.allUsers) : []));
       }
       return groupCache.get(gn);
     };
