@@ -14492,20 +14492,24 @@ async function nocUnifiHandler(req, res) {
       }
     } catch (e) { /* health-fehler nicht fatal */ }
 
-    // Devices
-    const d = await unifiGet('stat/device-basic').catch(() => unifiGet('stat/device'));
-    const devs = d.data || [];
-    out.reachable = true;
-    out.devices.total = devs.length;
-    for (const dev of devs) {
-      const t = (dev.type || 'unknown').toLowerCase(); // uap, usw, ugw, udm, uxg
-      const online = (dev.state === 1) || (dev.state === '1');
-      if (online) out.devices.online++; else out.devices.offline++;
-      const tk = ({uap:'ap', usw:'switch', ugw:'gateway', udm:'gateway', uxg:'gateway'})[t] || t;
-      out.devices.by_type[tk] = out.devices.by_type[tk] || { total: 0, online: 0 };
-      out.devices.by_type[tk].total++;
-      if (online) out.devices.by_type[tk].online++;
-    }
+    // Devices. Gekapselt: ein UniFi-Fehler (z.B. 401 bei ungueltigem API-Key)
+    // darf NICHT den ganzen Handler abbrechen — sonst fehlt auch das davon
+    // unabhaengige Router- + Frontend-Monitoring. reachable bleibt dann false.
+    try {
+      const d = await unifiGet('stat/device-basic').catch(() => unifiGet('stat/device'));
+      const devs = d.data || [];
+      out.reachable = true;
+      out.devices.total = devs.length;
+      for (const dev of devs) {
+        const t = (dev.type || 'unknown').toLowerCase(); // uap, usw, ugw, udm, uxg
+        const online = (dev.state === 1) || (dev.state === '1');
+        if (online) out.devices.online++; else out.devices.offline++;
+        const tk = ({uap:'ap', usw:'switch', ugw:'gateway', udm:'gateway', uxg:'gateway'})[t] || t;
+        out.devices.by_type[tk] = out.devices.by_type[tk] || { total: 0, online: 0 };
+        out.devices.by_type[tk].total++;
+        if (online) out.devices.by_type[tk].online++;
+      }
+    } catch (e) { out.error = 'unifi stat/device -> ' + e.message; }
     // Top-APs nach Client-Count (nur wenn full device-Info verfuegbar)
     try {
       const full = await unifiGet('stat/device');
