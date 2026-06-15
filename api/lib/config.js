@@ -33,6 +33,8 @@ const OAUTH_ALLOWED_HOSTS = new Set([
   'stweg6.rosenweg4303.ch',
   'stweg7.rosenweg4303.ch',
   'meg.rosenweg4303.ch',
+  // Messaging-Gateway-Web-UI (eigener Bot-Container, Reverse-Proxy auf /api/*).
+  'whatsapp.rosenweg4303.ch',
   // STWEG 3 hat zusaetzlich die eigene Domain rosenweg9.ch (serviert denselben
   // Container). Login muss von dort denselben Origin-Callback bauen.
   'rosenweg9.ch',
