@@ -434,6 +434,10 @@ const OAUTH_ALLOWED_HOSTS = new Set([
   'stweg6.rosenweg4303.ch',
   'stweg7.rosenweg4303.ch',
   'meg.rosenweg4303.ch',
+  // STWEG 3 hat zusaetzlich die eigene Domain rosenweg9.ch (serviert denselben
+  // Container). Login muss von dort denselben Origin-Callback bauen.
+  'rosenweg9.ch',
+  'www.rosenweg9.ch',
 ]);
 function oauthRedirectUri(req) {
   const host = req.headers['x-forwarded-host'] || req.headers.host || '';
