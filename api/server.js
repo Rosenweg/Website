@@ -15526,6 +15526,10 @@ function hausFromDeviceName(name) {
 // Email-Verteiler-Adresse des Ausschusses (statisch). Bekommt jede Wartungs-
 // Mail mit, damit das Gremium informiert bleibt.
 const MAINT_AUSSCHUSS_EMAIL = 'ausschuss@rosenweg4303.ch';
+// Nur Technik darf die Wartungsmail als direkter (sichtbarer) To-Empfaenger
+// bekommen. Alle anderen — inkl. Ausschuss — laufen verdeckt per BCC und
+// damit ueber die Freigabe-Outbox.
+const MAINT_TECHNIK_EMAIL = 'technik@rosenweg4303.ch';
 
 // Per-Empfaenger-Throttle mit Combine-Puffer: max 1 Maintenance-Notification
 // pro MAINT_NOTIFY_THROTTLE_MIN (default 30 Min). Was waehrend des Fensters
@@ -15798,16 +15802,16 @@ async function sendMaintenanceMail(maint, kind /* 'pre'|'start'|'end' */) {
     `\nFuer Rueckfragen: technik@rosenweg4303.ch`,
     `\nRosenweg ISP`,
   ].filter(Boolean).join('\n');
-  // To = sichtbare Ausschuss-Adresse, BCC = Kundenliste (Empfaenger bleiben
-  // untereinander verborgen). Die Mail landet als 'pending' in der Outbox und
-  // wird erst nach Freigabe (Technik/Präsident) per sendVerwaltungMailFromQueue
-  // tatsaechlich versendet.
-  const bccList = recipients.filter(e => e.toLowerCase() !== MAINT_AUSSCHUSS_EMAIL.toLowerCase());
+  // To = technik@ (einzige Adresse die direkt gehen darf). ALLE anderen
+  // Empfaenger — Subscriber-Kunden UND der Ausschuss — laufen verdeckt per
+  // BCC. Die Mail landet als 'pending' in der Outbox und wird erst nach
+  // Freigabe (Technik/Präsident) per sendVerwaltungMailFromQueue versendet.
+  const bccList = recipients.filter(e => e.toLowerCase() !== MAINT_TECHNIK_EMAIL.toLowerCase());
   try {
     const queueId = await enqueueVerwaltungMail({
       source_type: 'isp_maintenance',
       source_id: maint.id || null,
-      mailTo: MAINT_AUSSCHUSS_EMAIL,
+      mailTo: MAINT_TECHNIK_EMAIL,
       mailBcc: bccList,
       subject,
       bodyText: body,
