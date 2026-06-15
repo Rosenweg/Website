@@ -6,10 +6,10 @@ COPY api/package.json ./
 RUN npm install --production
 
 COPY api/server.js ./
-# Aufgeteilte Module (inkrementeller Router-Split). routes/ wird ergaenzt
-# sobald die erste Domaene rausgezogen ist.
+# Aufgeteilte Module (inkrementeller Router-Split).
 COPY api/lib/ ./lib/
 COPY api/middleware/ ./middleware/
+COPY api/routes/ ./routes/
 COPY api/scripts/ ./scripts/
 # site-config.json wird vom Auto-Seed gelesen (legacy Verwaltung -> DB)
 COPY site-config.json ./
