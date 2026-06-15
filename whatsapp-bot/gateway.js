@@ -75,6 +75,14 @@ function startGateway(botCore) {
     );
     CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(id DESC);
     CREATE INDEX IF NOT EXISTS idx_messages_dir ON messages(direction, id DESC);
+    -- Erlaubte Quell-IPs fuer den SMTP-Server (E-Mail->WhatsApp). Leer = offen
+    -- (mit Warnung); sobald >=1 Eintrag -> nur diese IPs duerfen einliefern.
+    CREATE TABLE IF NOT EXISTS smtp_ips (
+      ip TEXT PRIMARY KEY,
+      note TEXT,
+      created_by TEXT,
+      created_at TEXT
+    );
   `);
 
   const q = {
@@ -98,7 +106,22 @@ function startGateway(botCore) {
     msgGet: db.prepare(`SELECT * FROM messages WHERE id=?`),
     msgDeleted: db.prepare(`UPDATE messages SET deleted_at=?, delete_error=NULL WHERE id=?`),
     msgDeleteErr: db.prepare(`UPDATE messages SET delete_error=? WHERE id=?`),
+    ipAll: db.prepare(`SELECT ip FROM smtp_ips`),
+    ipList: db.prepare(`SELECT ip,note,created_by,created_at FROM smtp_ips ORDER BY ip`),
+    ipAdd: db.prepare(`INSERT INTO smtp_ips (ip,note,created_by,created_at) VALUES (?,?,?,?)
+      ON CONFLICT(ip) DO UPDATE SET note=excluded.note`),
+    ipDel: db.prepare(`DELETE FROM smtp_ips WHERE ip=?`),
   };
+
+  // Quell-IP normalisieren (smtp-server liefert oft IPv4-mapped IPv6 wie
+  // ::ffff:100.64.2.x — wir wollen die nackte v4).
+  const normIp = (a) => String(a || '').replace(/^::ffff:/i, '');
+  // Pruefen ob eine Quell-IP einliefern darf. Leere Allowlist = offen (Warnung).
+  function smtpIpAllowed(addr) {
+    const allowed = q.ipAll.all().map(r => r.ip);
+    if (allowed.length === 0) return true; // nicht konfiguriert -> offen
+    return allowed.includes(normIp(addr));
+  }
 
   // ── Ziel-Aufloesung (gemeinsam fuer JSON-API + SMTP-in) ──────────────────
   // Reihenfolge: Alias > JID > Nummer > Gruppenname.
@@ -290,6 +313,22 @@ function startGateway(botCore) {
     res.json({ ok: true });
   });
 
+  // SMTP-Quell-IP-Allowlist (E-Mail->WhatsApp Absicherung)
+  app.get('/gateway/ui/smtp-ips', uiAuth, (req, res) => {
+    const ips = q.ipList.all();
+    res.json({ ips, enforced: ips.length > 0, smtp_port: SMTP_PORT });
+  });
+  app.post('/gateway/ui/smtp-ips', jsonBody, uiAuth, (req, res) => {
+    const ip = normIp(String(req.body?.ip || '').trim());
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return res.status(400).json({ error: 'Gueltige IPv4-Adresse erforderlich' });
+    q.ipAdd.run(ip, req.body?.note || null, req.uiUser.email, nowIso());
+    res.json({ ok: true });
+  });
+  app.delete('/gateway/ui/smtp-ips/:ip', uiAuth, (req, res) => {
+    q.ipDel.run(normIp(String(req.params.ip)));
+    res.json({ ok: true });
+  });
+
   // Public health (kein Auth)
   app.get('/gateway/health', (req, res) => res.json({ ok: true, wa_ready: botCore.isReady(), smtp_port: SMTP_PORT }));
 
@@ -305,6 +344,12 @@ function startGateway(botCore) {
     banner: 'Rosenweg Messaging-Gateway (E-Mail->WhatsApp)',
     authOptional: !SMTP_USER,
     disabledCommands: SMTP_USER ? [] : ['STARTTLS'],
+    // Quell-IP-Allowlist (im Web-UI verwaltbar). Leer = offen (Warnung im Log).
+    onConnect(session, cb) {
+      if (smtpIpAllowed(session.remoteAddress)) return cb();
+      console.warn(`[Gateway-SMTP] abgewiesen: ${session.remoteAddress} nicht in Allowlist`);
+      const e = new Error('Quell-IP nicht erlaubt'); e.responseCode = 554; cb(e);
+    },
     onAuth(auth, session, cb) {
       if (SMTP_USER && auth.username === SMTP_USER && auth.password === SMTP_PASS) return cb(null, { user: auth.username });
       return cb(new Error('Ungueltige SMTP-Zugangsdaten'));
