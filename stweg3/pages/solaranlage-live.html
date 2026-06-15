@@ -3,147 +3,143 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Solaranlage Live - Rosenweg 9</title>
-    <link rel="icon" href="../images/logo.png" type="image/png">
+    <title>Solaranlage Live – Rosenweg 9</title>
+    <link rel="icon" href="/logo-rosenweg.png" type="image/png">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #eab308 0%, #f97316 100%);
-            min-height: 100vh; display: flex; flex-direction: column; color: #1f2937;
-        }
-        .header {
-            background: rgba(255,255,255,0.95); padding: 1rem 2rem;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            display: flex; justify-content: space-between; align-items: center;
-            flex-wrap: wrap; gap: 1rem;
-        }
-        .header h1 { color: #333; font-size: 1.4rem; display: flex; align-items: center; gap: .5rem; }
-        .header .back-btn {
-            background: #eab308; color: #fff; padding: .5rem 1.25rem; border-radius: 8px;
-            text-decoration: none; font-weight: 600; transition: all .2s;
-        }
-        .header .back-btn:hover { background: #f97316; }
-        .live-badge {
-            display: inline-flex; align-items: center; gap: .4rem; padding: .2rem .7rem;
-            background: #fee2e2; color: #b91c1c; border-radius: 20px; font-size: .8rem; font-weight: 700;
-        }
+        :root { --y:#eab308; --g:#22c55e; --r:#ef4444; --b:#3b82f6; --a:#f59e0b; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f3f4f6; color: #1f2937; min-height: 100vh; }
+
+        /* Eigene Nav-Bar: stweg-spezifisches Logo, Fallback Rosenweg-Logo (onerror) */
+        .topnav { background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.08); position: sticky; top: 0; z-index: 50;
+                  display: flex; align-items: center; justify-content: space-between; padding: .6rem 1.25rem; gap: 1rem; flex-wrap: wrap; }
+        .brand { display: flex; align-items: center; gap: .75rem; text-decoration: none; color: inherit; }
+        .brand img { height: 44px; width: auto; display: block; }
+        .brand .t { font-weight: 700; font-size: 1.05rem; line-height: 1.1; }
+        .brand .s { font-size: .75rem; color: #6b7280; }
+        .nav-right { display: flex; align-items: center; gap: .85rem; }
+        .live-badge { display: inline-flex; align-items: center; gap: .4rem; padding: .25rem .7rem; background: #fee2e2; color: #b91c1c; border-radius: 20px; font-size: .78rem; font-weight: 700; }
         .live-dot { width: 8px; height: 8px; background: #ef4444; border-radius: 50%; animation: pulse 1.5s infinite; }
-        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+        .back { color: var(--y); font-weight: 600; text-decoration: none; font-size: .9rem; }
+        .back:hover { color: #f97316; }
 
-        .wrap { flex: 1; width: 100%; max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
+        .wrap { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
+        .err { background: #fef2f2; color: #b91c1c; border-radius: 12px; padding: .9rem; text-align: center; margin-bottom: 1rem; display: none; }
 
-        /* Fluss-Diagramm */
-        .flow {
-            display: grid; grid-template-columns: 1fr 1fr;
-            grid-template-areas: "prod prod" "cons grid";
-            gap: 1.5rem 2rem; align-items: center; justify-items: center;
-            background: rgba(255,255,255,0.96); border-radius: 20px; padding: 2.5rem 1.5rem;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.18); position: relative;
-        }
-        .node-prod { grid-area: prod; }
-        .node-cons { grid-area: cons; }
-        .node-grid { grid-area: grid; }
-        .circle {
-            width: clamp(140px, 26vw, 210px); aspect-ratio: 1; border-radius: 50%;
-            background: #fff; display: flex; flex-direction: column; align-items: center;
-            justify-content: center; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-            border: 6px solid #e5e7eb; transition: border-color .4s;
-            position: relative; z-index: 1;
-        }
-        /* Energiefluss-Linien (zwischen den Kreismitten, per JS gezeichnet) */
+        /* Fluss-Diagramm: Verbraucher links, Verbrauch Mitte, Produktion oben, Netz rechts */
+        .flow { position: relative; background: #fff; border-radius: 20px; padding: 2rem 1.25rem; box-shadow: 0 10px 40px rgba(0,0,0,.1);
+                display: grid; gap: 1rem 1.25rem; align-items: center; justify-items: center;
+                grid-template-columns: minmax(96px,.8fr) minmax(0,1.3fr) minmax(110px,.85fr);
+                grid-template-areas: ".  prod  ." "cons  verb  netz"; }
+        .a-prod{grid-area:prod} .a-cons{grid-area:cons} .a-verb{grid-area:verb} .a-netz{grid-area:netz}
+        .cons-stack { display: flex; flex-direction: column; gap: .9rem; align-items: center; }
+
         .flow-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: visible; }
         .flowline { stroke-width: 5; fill: none; stroke-linecap: round; stroke-dasharray: 1 13; animation: dash .7s linear infinite; }
-        .fl-green { stroke: #22c55e; } .fl-red { stroke: #ef4444; } .fl-blue { stroke: #3b82f6; }
+        .fl-green{stroke:var(--g)} .fl-red{stroke:var(--r)} .fl-blue{stroke:var(--b)} .fl-amber{stroke:var(--a)}
         @keyframes dash { to { stroke-dashoffset: -14; } }
-        .circle .ic { font-size: clamp(1.4rem, 4vw, 2rem); margin-bottom: .3rem; }
-        .circle .val { font-size: clamp(1.4rem, 5vw, 2.4rem); font-weight: 700; line-height: 1; color: #111827; }
+
+        .circle { background: #fff; border-radius: 50%; aspect-ratio: 1; display: flex; flex-direction: column; align-items: center;
+                  justify-content: center; text-align: center; box-shadow: 0 4px 18px rgba(0,0,0,.08); border: 6px solid #e5e7eb;
+                  transition: border-color .4s, opacity .4s; position: relative; z-index: 1; padding: .3rem; }
+        .c-big { width: clamp(150px,24vw,205px); }
+        .c-med { width: clamp(120px,20vw,172px); }
+        .c-sm  { width: clamp(88px,17vw,118px); border-width: 5px; }
+        .circle .ic { font-size: clamp(1rem,3.2vw,1.8rem); margin-bottom: .15rem; }
+        .circle .val { font-weight: 700; line-height: 1; color: #111827; }
+        .c-big .val { font-size: clamp(1.4rem,5vw,2.3rem); } .c-med .val { font-size: clamp(1.2rem,4vw,1.9rem); } .c-sm .val { font-size: clamp(.85rem,3vw,1.15rem); }
         .circle .val .u { font-size: .5em; font-weight: 500; color: #6b7280; }
-        .circle .lbl { font-size: clamp(.75rem, 2.2vw, .95rem); color: #6b7280; margin-top: .35rem; text-transform: uppercase; letter-spacing: .03em; }
-        .circle .sub { font-size: .8rem; color: #9ca3af; margin-top: .15rem; }
-        .ring-prod { border-color: #eab308; }
-        .ring-cons { border-color: #22c55e; }
-        .ring-feed { border-color: #ef4444; }
-        .ring-draw { border-color: #3b82f6; }
-        .ring-idle { border-color: #e5e7eb; }
+        .circle .lbl { color: #6b7280; text-transform: uppercase; letter-spacing: .03em; margin-top: .25rem; }
+        .c-big .lbl,.c-med .lbl { font-size: clamp(.72rem,2vw,.92rem); } .c-sm .lbl { font-size: clamp(.6rem,2vw,.7rem); }
+        .circle .sub { font-size: .72rem; color: #9ca3af; margin-top: .1rem; }
+        .ring-y{border-color:var(--y)} .ring-g{border-color:var(--g)} .ring-r{border-color:var(--r)} .ring-b{border-color:var(--b)} .ring-a{border-color:var(--a)} .ring-idle{border-color:#e5e7eb}
+        .circle.off { opacity: .5; }
 
-        .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-top: 1.5rem; }
-        .card {
-            background: rgba(255,255,255,0.96); border-radius: 14px; padding: 1.1rem 1.25rem;
-            box-shadow: 0 4px 18px rgba(0,0,0,0.12);
-        }
-        .card .ct { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: #9ca3af; display:flex; align-items:center; gap:.4rem; }
-        .card .cv { font-size: 1.6rem; font-weight: 700; color: #111827; margin-top: .3rem; }
-        .card .cv .u { font-size: .55em; font-weight: 500; color: #6b7280; }
-        .card .cs { font-size: .82rem; color: #6b7280; margin-top: .15rem; }
-        .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
-        .dot-on { background: #22c55e; } .dot-off { background: #9ca3af; }
+        .cards { display: grid; grid-template-columns: repeat(auto-fit,minmax(150px,1fr)); gap: 1rem; margin-top: 1.25rem; }
+        .card { background: #fff; border-radius: 14px; padding: 1rem 1.2rem; box-shadow: 0 4px 16px rgba(0,0,0,.08); }
+        .card .ct { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: #9ca3af; }
+        .card .cv { font-size: 1.5rem; font-weight: 700; margin-top: .25rem; } .card .cv .u { font-size: .55em; font-weight: 500; color: #6b7280; }
+        .meta { text-align: center; color: #6b7280; font-size: .82rem; margin-top: 1.1rem; line-height: 1.6; }
 
-        .meta { text-align: center; color: rgba(255,255,255,0.95); font-size: .82rem; margin-top: 1.25rem; line-height: 1.7; }
-        .meta .src { opacity: .85; }
-        .err { background: #fef2f2; color: #b91c1c; border-radius: 12px; padding: 1rem; text-align: center; margin-bottom: 1rem; display: none; }
-
-        @media (max-width: 560px) {
-            .flow { grid-template-columns: 1fr; grid-template-areas: "prod" "cons" "grid"; gap: 1.25rem; padding: 1.75rem 1rem; }
-            .header { padding: 1rem; } .header h1 { font-size: 1.15rem; } .wrap { padding: 1rem; }
+        @media (max-width: 640px) {
+            .flow { grid-template-columns: 1fr; grid-template-areas: "prod" "verb" "cons" "netz"; }
+            .cons-stack { flex-direction: row; flex-wrap: wrap; justify-content: center; }
+            .brand .t { font-size: .95rem; }
         }
     </style>
 </head>
 <body>
-    <header class="header">
-        <h1><span>☀️</span> Solaranlage Live – Rosenweg 9</h1>
-        <span class="live-badge"><span class="live-dot"></span> LIVE</span>
-        <a href="../index.html" class="back-btn">← Zurück</a>
-    </header>
+    <nav class="topnav">
+        <a href="../index.html" class="brand">
+            <img src="/logo-stweg3-rosenweg9.png" onerror="this.onerror=null;this.src='/logo-rosenweg.png'" alt="Rosenweg 9">
+            <span><span class="t">Solaranlage Live</span><br><span class="s">STWEG 3 · Rosenweg 9</span></span>
+        </a>
+        <div class="nav-right">
+            <span class="live-badge"><span class="live-dot"></span> LIVE</span>
+            <a href="../index.html" class="back">← Zurück</a>
+        </div>
+    </nav>
 
     <div class="wrap">
         <div id="err" class="err"></div>
 
         <div class="flow">
             <svg id="flow-svg" class="flow-svg" preserveAspectRatio="none"></svg>
-            <div class="node-prod">
-                <div id="c-prod" class="circle ring-idle">
+
+            <div class="a-prod">
+                <div id="c-prod" class="circle c-med ring-idle">
                     <div class="ic">🔆</div>
                     <div class="val"><span id="v-prod">–</span><span class="u"> kW</span></div>
                     <div class="lbl">Produktion</div>
                 </div>
             </div>
-            <div class="node-cons">
-                <div id="c-cons" class="circle ring-idle">
+
+            <div class="a-cons cons-stack">
+                <div id="c-boiler" class="circle c-sm ring-idle">
+                    <div class="ic">♨️</div>
+                    <div class="val"><span id="v-boiler">–</span><span class="u"> kW</span></div>
+                    <div class="lbl" id="l-boiler">Boiler</div>
+                </div>
+                <div id="c-allg" class="circle c-sm ring-idle">
+                    <div class="ic">💡</div>
+                    <div class="val"><span id="v-allg">–</span><span class="u"> kW</span></div>
+                    <div class="lbl">Allgemein</div>
+                </div>
+                <div id="c-wohn" class="circle c-sm ring-idle">
+                    <div class="ic">🚪</div>
+                    <div class="val"><span id="v-wohn">–</span><span class="u"> kW</span></div>
+                    <div class="lbl">Wohnungen</div>
+                    <div class="sub" id="s-wohn"></div>
+                </div>
+            </div>
+
+            <div class="a-verb">
+                <div id="c-verb" class="circle c-big ring-idle">
                     <div class="ic">🏠</div>
                     <div class="val"><span id="v-cons">–</span><span class="u"> kW</span></div>
                     <div class="lbl">Verbrauch</div>
-                    <div id="v-self" class="sub"></div>
+                    <div class="sub" id="v-self"></div>
                 </div>
             </div>
-            <div class="node-grid">
-                <div id="c-grid" class="circle ring-idle">
+
+            <div class="a-netz">
+                <div id="c-grid" class="circle c-med ring-idle">
                     <div class="ic">⚡</div>
                     <div class="val"><span id="v-grid">–</span><span class="u"> kW</span></div>
-                    <div id="l-grid" class="lbl">Netz</div>
+                    <div class="lbl" id="l-grid">Netz</div>
                 </div>
             </div>
         </div>
 
         <div class="cards">
-            <div class="card">
-                <div class="ct"><span id="boiler-dot" class="dot dot-off"></span> <span id="boiler-label">Boiler</span></div>
-                <div class="cv"><span id="v-boiler">–</span><span class="u"> kW</span></div>
-                <div id="v-boiler-pct" class="cs"></div>
-            </div>
-            <div class="card">
-                <div class="ct">☀️ Ertrag heute</div>
-                <div class="cv"><span id="v-today-prod">–</span><span class="u"> kWh</span></div>
-            </div>
-            <div class="card">
-                <div class="ct">⚡ Einspeisung heute</div>
-                <div class="cv"><span id="v-today-feed">–</span><span class="u"> kWh</span></div>
-            </div>
+            <div class="card"><div class="ct">☀️ Ertrag heute</div><div class="cv"><span id="v-today-prod">–</span><span class="u"> kWh</span></div></div>
+            <div class="card"><div class="ct">⚡ Einspeisung heute</div><div class="cv"><span id="v-today-feed">–</span><span class="u"> kWh</span></div></div>
         </div>
 
         <div class="meta">
             <div id="m-updated">Verbinde …</div>
-            <div id="m-src" class="src"></div>
+            <div id="m-src"></div>
         </div>
     </div>
 
@@ -153,30 +149,31 @@
         const $ = id => document.getElementById(id);
         const SRC_LBL = { geeicht: 'geeichter Zähler', smartfox: 'SmartFox', none: '–' };
 
-        // Energiefluss-Linien zwischen den Kreismitten zeichnen (responsive: misst
-        // die echten Positionen, funktioniert in 2-Spalten- wie 1-Spalten-Layout).
-        // Punkte wandern vom Start- zum Endpunkt -> zeigen die Flussrichtung.
         let lastData = null;
         function drawFlows(d) {
-            const flow = document.querySelector('.flow');
-            const svg = $('flow-svg');
+            const flow = document.querySelector('.flow'), svg = $('flow-svg');
             if (!flow || !svg) return;
             const fr = flow.getBoundingClientRect();
             svg.setAttribute('viewBox', `0 0 ${fr.width} ${fr.height}`);
-            const ctr = el => { const r = el.getBoundingClientRect(); return { x: r.left - fr.left + r.width/2, y: r.top - fr.top + r.height/2, rad: r.width/2 }; };
-            const P = ctr($('c-prod')), C = ctr($('c-cons')), G = ctr($('c-grid'));
-            // Endpunkte auf die Kreisraender kuerzen (Linie startet/endet am Rand)
-            const edge = (a, b) => { const dx=b.x-a.x, dy=b.y-a.y, len=Math.hypot(dx,dy)||1; return `${a.x+dx/len*a.rad} ${a.y+dy/len*a.rad} ${b.x-dx/len*b.rad} ${b.y-dy/len*b.rad}`; };
-            // Topologie: PV speist die Hausverteilung, das Netz haengt am Haus.
-            // Daher PV->Haus, und Haus<->Netz (Ueberschuss raus / Bezug rein).
+            const ctr = el => { const r = el.getBoundingClientRect(); return { x: r.left-fr.left+r.width/2, y: r.top-fr.top+r.height/2, rad: r.width/2 }; };
+            const P=ctr($('c-prod')), V=ctr($('c-verb')), G=ctr($('c-grid')), B=ctr($('c-boiler')), A=ctr($('c-allg')), W=ctr($('c-wohn'));
+            const edge = (a,b) => { const dx=b.x-a.x, dy=b.y-a.y, len=Math.hypot(dx,dy)||1; return [a.x+dx/len*a.rad, a.y+dy/len*a.rad, b.x-dx/len*b.rad, b.y-dy/len*b.rad]; };
             const seg = [];
-            if (d.production_w > 50 && d.consumption_w > 50) seg.push(['fl-green', edge(P, C)]);  // PV -> Haus
-            if (d.feed_in_w > 50) seg.push(['fl-red', edge(C, G)]);                                 // Haus -> Netz (Lieferung)
-            if (d.draw_w > 50) seg.push(['fl-blue', edge(G, C)]);                                   // Netz -> Haus (Bezug)
-            svg.innerHTML = seg.map(([cls, c]) => { const p = c.split(' ');
-                return `<line x1="${p[0]}" y1="${p[1]}" x2="${p[2]}" y2="${p[3]}" class="flowline ${cls}"/>`; }).join('');
+            if (d.production_w > 50) seg.push(['fl-green', edge(P, V)]);                 // PV -> Verbrauch
+            if (d.feed_in_w > 50) seg.push(['fl-red', edge(V, G)]);                       // Haus -> Netz (Lieferung)
+            if (d.draw_w > 50) seg.push(['fl-blue', edge(G, V)]);                         // Netz -> Haus (Bezug)
+            if (d.boiler.power_w > 50 && d.boiler.online) seg.push(['fl-amber', edge(V, B)]);
+            if (d.allgemein.power_w > 50 && d.allgemein.online) seg.push(['fl-amber', edge(V, A)]);
+            if (d.wohnungen.power_w > 50) seg.push(['fl-amber', edge(V, W)]);
+            svg.innerHTML = seg.map(([cls,p]) => `<line x1="${p[0]}" y1="${p[1]}" x2="${p[2]}" y2="${p[3]}" class="flowline ${cls}"/>`).join('');
         }
         window.addEventListener('resize', () => { if (lastData) drawFlows(lastData); });
+
+        function setConsumer(circleId, valId, data, ring) {
+            const on = data.online !== false;
+            $(valId).textContent = on ? kw(data.power_w) : '—';
+            $(circleId).className = 'circle c-sm ' + (!on ? 'ring-idle off' : (data.power_w > 50 ? ring : 'ring-idle'));
+        }
 
         async function load() {
             try {
@@ -185,45 +182,30 @@
                 const d = await r.json();
                 $('err').style.display = 'none';
 
-                // Produktion
                 $('v-prod').textContent = kw(d.production_w);
-                $('c-prod').className = 'circle ' + (d.production_w > 50 ? 'ring-prod' : 'ring-idle');
+                $('c-prod').className = 'circle c-med ' + (d.production_w > 50 ? 'ring-y' : 'ring-idle');
 
-                // Verbrauch
                 $('v-cons').textContent = kw(d.consumption_w);
-                $('c-cons').className = 'circle ' + (d.consumption_w > 50 ? 'ring-cons' : 'ring-idle');
+                $('c-verb').className = 'circle c-big ' + (d.consumption_w > 50 ? 'ring-g' : 'ring-idle');
                 $('v-self').textContent = d.production_w > 50 ? d.self_pct + '% Eigenverbrauch' : '';
 
-                // Netz: Lieferung (Einspeisung) oder Bezug
-                if (d.feed_in_w > 50) {
-                    $('v-grid').textContent = kw(d.feed_in_w);
-                    $('l-grid').textContent = 'Lieferung';
-                    $('c-grid').className = 'circle ring-feed';
-                } else if (d.draw_w > 50) {
-                    $('v-grid').textContent = kw(d.draw_w);
-                    $('l-grid').textContent = 'Netzbezug';
-                    $('c-grid').className = 'circle ring-draw';
-                } else {
-                    $('v-grid').textContent = '0.00';
-                    $('l-grid').textContent = 'Netz';
-                    $('c-grid').className = 'circle ring-idle';
-                }
+                if (d.feed_in_w > 50) { $('v-grid').textContent = kw(d.feed_in_w); $('l-grid').textContent = 'Lieferung'; $('c-grid').className = 'circle c-med ring-r'; }
+                else if (d.draw_w > 50) { $('v-grid').textContent = kw(d.draw_w); $('l-grid').textContent = 'Netzbezug'; $('c-grid').className = 'circle c-med ring-b'; }
+                else { $('v-grid').textContent = '0.00'; $('l-grid').textContent = 'Netz'; $('c-grid').className = 'circle c-med ring-idle'; }
 
-                // Boiler
-                $('boiler-label').textContent = d.boiler.label || 'Boiler';
-                $('v-boiler').textContent = kw(d.boiler.power_w);
-                $('v-boiler-pct').textContent = d.boiler.power_w > 10 ? Math.round(d.boiler.percent) + '%' : 'aus';
-                $('boiler-dot').className = 'dot ' + (d.boiler.power_w > 10 ? 'dot-on' : 'dot-off');
+                // Verbraucher
+                $('l-boiler').textContent = d.boiler.label || 'Boiler';
+                setConsumer('c-boiler', 'v-boiler', d.boiler, 'ring-a');
+                setConsumer('c-allg', 'v-allg', d.allgemein, 'ring-a');
+                $('v-wohn').textContent = kw(d.wohnungen.power_w);
+                $('c-wohn').className = 'circle c-sm ' + (d.wohnungen.power_w > 50 ? 'ring-a' : 'ring-idle');
+                $('s-wohn').textContent = d.wohnungen.online_count + '/' + d.wohnungen.total_count + ' online';
 
-                // Tageswerte
                 $('v-today-prod').textContent = kwh(d.today.production_wh);
                 $('v-today-feed').textContent = kwh(d.today.feed_in_wh);
 
-                // Meta
-                const t = new Date(d.ts);
-                $('m-updated').textContent = 'Aktualisiert: ' + t.toLocaleTimeString('de-CH');
-                $('m-src').textContent = 'Produktion: ' + (SRC_LBL[d.production_source] || d.production_source)
-                    + ' · Netz: ' + (SRC_LBL[d.grid_source] || d.grid_source);
+                $('m-updated').textContent = 'Aktualisiert: ' + new Date(d.ts).toLocaleTimeString('de-CH');
+                $('m-src').textContent = 'Produktion: ' + (SRC_LBL[d.production_source] || d.production_source) + ' · Netz: ' + (SRC_LBL[d.grid_source] || d.grid_source);
 
                 lastData = d;
                 drawFlows(d);
