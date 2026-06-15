@@ -20,6 +20,13 @@
       </div>
       <p class="text-sm text-gray-600 mb-5">WhatsApp senden (API-Key oder hier), eingehende Mails→WhatsApp, Audit-Log. <span id="me" class="text-gray-400"></span></p>
 
+      <!-- QR-Pairing: nur sichtbar wenn der Bot ungepairt ist -->
+      <div id="pair-box" class="hidden bg-white rounded-lg shadow p-4 mb-5 border-2 border-amber-300">
+        <h2 class="text-lg font-bold mb-2">📱 WhatsApp-Pairing erforderlich</h2>
+        <p class="text-sm text-gray-600 mb-3">Der Bot ist nicht verknüpft. Scanne den QR: am Handy <b>WhatsApp → Einstellungen → Verknüpfte Geräte → Gerät verknüpfen</b>. (QR rotiert ~alle 60s, Seite aktualisiert automatisch.)</p>
+        <img id="pair-qr" alt="QR-Code" class="border rounded bg-white w-full max-w-[300px] h-auto aspect-square">
+      </div>
+
       <div class="flex gap-1 border-b mb-5 text-sm">
         <button data-tab="send"    class="tab px-3 py-2 border-b-2 border-blue-600 font-medium">Senden</button>
         <button data-tab="inbox"   class="tab px-3 py-2 border-b-2 border-transparent text-gray-500">Posteingang</button>
@@ -179,7 +186,8 @@
   async function addSmtpIp(){ const ip=document.getElementById('ip-addr').value.trim(); const note=document.getElementById('ip-note').value.trim(); if(!ip)return; try{ await jsend('/gateway/ui/smtp-ips',{ip,note}); document.getElementById('ip-addr').value='';document.getElementById('ip-note').value=''; loadSmtpIps(); }catch(e){ alert(e.message); } }
   async function delSmtpIp(ip,btn){ if(!confirm('IP entfernen? '+ip))return; try{ await api('/gateway/ui/smtp-ips/'+encodeURIComponent(ip),{method:'DELETE'}); loadSmtpIps(); }catch(e){ alert(e.message); } }
 
-  async function loadStatus(){ try{ const d=await jget('/gateway/health'); const el=document.getElementById('wa-status'); el.textContent=d.wa_ready?'WhatsApp bereit':'WhatsApp offline'; el.className='text-xs px-2 py-1 rounded '+(d.wa_ready?'bg-emerald-100 text-emerald-700':'bg-red-100 text-red-700'); }catch{} }
+  async function loadStatus(){ try{ const d=await jget('/gateway/health'); const el=document.getElementById('wa-status'); el.textContent=d.wa_ready?'WhatsApp bereit':(d.needs_pairing?'Pairing nötig':'WhatsApp offline'); el.className='text-xs px-2 py-1 rounded '+(d.wa_ready?'bg-emerald-100 text-emerald-700':'bg-amber-100 text-amber-700'); const box=document.getElementById('pair-box'); if(d.needs_pairing){ box.classList.remove('hidden'); loadQr(); } else { box.classList.add('hidden'); } }catch{} }
+  async function loadQr(){ try{ const d=await jget('/gateway/qr'); if(d.qr_png_base64){ document.getElementById('pair-qr').src='data:image/png;base64,'+d.qr_png_base64; } }catch{} }
 
   document.addEventListener('DOMContentLoaded', async () => {
     const u = await AuthentikAuth.init({ requireAuth: true });

@@ -142,6 +142,9 @@ function startGateway(botCore) {
     return { chatId: await botCore.findGroupByName(raw), kind: 'group', label: raw };
   }
 
+  // QR-Pairing-Code (base64-PNG), vom WA-Client via setQr() gesetzt; null=gepairt.
+  let currentQr = null;
+
   // ── Senden + Loggen (gemeinsam) ──────────────────────────────────────────
   async function sendAndLog({ source, sender, to, title, body, attachments }) {
     const text = title ? `*${title}*\n\n${body || ''}`.trim() : (body || '');
@@ -329,8 +332,14 @@ function startGateway(botCore) {
     res.json({ ok: true });
   });
 
-  // Public health (kein Auth)
-  app.get('/gateway/health', (req, res) => res.json({ ok: true, wa_ready: botCore.isReady(), smtp_port: SMTP_PORT }));
+  // QR-Pairing (vom WA-Client via setQr() gesetzt). Auth: Technik/Präsident —
+  // wer den QR scannt, verknuepft den Bot mit seinem WhatsApp-Account.
+  app.get('/gateway/qr', uiAuth, (req, res) => res.json({ qr_png_base64: currentQr, paired: botCore.isReady() }));
+
+  // Public health (kein Auth) — Liveness; needs_pairing fuers Web-UI.
+  app.get('/gateway/health', (req, res) => res.json({
+    ok: true, wa_ready: botCore.isReady(), needs_pairing: !botCore.isReady() && !!currentQr, smtp_port: SMTP_PORT,
+  }));
 
   // 2) Statisches Web-UI (zuletzt).
   app.use(express.static(path.join(__dirname, 'public')));
@@ -401,7 +410,11 @@ function startGateway(botCore) {
     });
   }
 
-  return { logInbound, db, _internal: { resolveTarget, sendAndLog } };
+  return {
+    logInbound,
+    setQr: (b64) => { currentQr = b64; },
+    db, _internal: { resolveTarget, sendAndLog },
+  };
 }
 
 module.exports = { startGateway };

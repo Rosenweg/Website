@@ -90,21 +90,24 @@ client.on('qr', async (qr) => {
   try {
     await qrPng.toFile(QR_PNG_PATH, qr, { width: 512, margin: 2 });
   } catch (e) { console.warn('[WA] QR-PNG schreiben fehlgeschlagen:', e.message); }
-  // Auch an die API pushen, damit Admin den QR via Browser holen kann
   try {
     const png = await qrPng.toBuffer(qr, { width: 512, margin: 2 });
+    const b64 = png.toString('base64');
+    // a) Direkt ins Gateway-Webinterface (whatsapp.rosenweg4303.ch) — self-contained.
+    gatewayHooks?.setQr(b64);
+    // b) Auch an die Haupt-API pushen (Legacy whatsapp-bot-admin Seite).
     await fetch(`${API_BASE}/api/whatsapp/qr`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-WA-Secret': WA_SECRET },
-      body: JSON.stringify({ png_base64: png.toString('base64') }),
+      body: JSON.stringify({ png_base64: b64 }),
     });
-  } catch (e) { console.warn('[WA] QR an API pushen fehlgeschlagen:', e.message); }
+  } catch (e) { console.warn('[WA] QR-Verteilung fehlgeschlagen:', e.message); }
 });
 
 client.on('authenticated', async () => {
   console.log('[WA] Authentifiziert');
   try { fs.unlinkSync(QR_PNG_PATH); } catch {}
-  // QR aus API loeschen (paired)
+  gatewayHooks?.setQr(null); // QR im Gateway loeschen (gepairt)
   try {
     await fetch(`${API_BASE}/api/whatsapp/qr`, {
       method: 'DELETE',
@@ -145,6 +148,7 @@ let readyAt = null;
 client.on('ready', () => {
   isReady = true;
   readyAt = new Date();
+  gatewayHooks?.setQr(null);
   console.log('[WA] Bot ist bereit, Nummer:', client.info?.wid?.user);
 });
 
@@ -427,13 +431,17 @@ setInterval(sendHeartbeat, HEARTBEAT_MS);
 // HTTP-Healthcheck + Groups-Endpoint
 const healthServer = http.createServer(async (req, res) => {
   if (req.url === '/health') {
-    if (isReady) {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ready', phone: client.info?.wid?.user, uptime: process.uptime() }));
-    } else {
-      res.writeHead(503, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'not_ready' }));
-    }
+    // LIVENESS, nicht Readiness: solange der Prozess/Server antwortet, ist der
+    // Container "healthy" — auch UNGEPAIRT (waiting_for_pairing ist ein gueltiger
+    // Betriebszustand!). Sonst killt Swarm einen ungepairten Bot und man kann ihn
+    // nie pairen (Deadlock). Verbindungsabbrueche faengt der Auto-Reconnect ab.
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: isReady ? 'ready' : 'waiting_for_pairing',
+      ready: isReady,
+      phone: client.info?.wid?.user || null,
+      uptime: process.uptime(),
+    }));
     return;
   }
   if (req.url === '/groups') {
