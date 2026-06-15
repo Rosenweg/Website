@@ -217,6 +217,11 @@ services:
       # UniFi-Controller-API-Key (Dashboard-UniFi-Panel + Frontend-Monitoring).
       # Muss in /root/.env stehen, sonst greift der ungueltige Hardcoded-Fallback.
       UNIFI_API_KEY: "${UNIFI_API_KEY}"
+      # Router-LXC-API-Token (NOC-Router-Health + Router-Provisioning). War als
+      # Docker-Secret /run/secrets/router_api_token gemountet, aber nirgends im
+      # Stack referenziert -> nach stack deploy weg -> alle Router-Dots rot (401).
+      # Jetzt als Env (Code-Fallback process.env.ROUTER_API_TOKEN). In /root/.env.
+      ROUTER_API_TOKEN: "${ROUTER_API_TOKEN}"
     volumes:
       - rosenweg-documents:/documents
     networks:
