@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Messaging-Gateway — Rosenweg</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <link rel="icon" href="/js/../logo-rosenweg.png">
+  <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'); body{font-family:'Inter',sans-serif}</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <main class="max-w-5xl mx-auto px-4 py-6">
+    <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center"><p class="text-gray-600">Lade…</p></div>
+
+    <div id="content" class="hidden">
+      <div class="flex items-center justify-between mb-1">
+        <h1 class="text-2xl font-bold text-gray-900">📨 Messaging-Gateway</h1>
+        <span id="wa-status" class="text-xs px-2 py-1 rounded bg-gray-100 text-gray-600">…</span>
+      </div>
+      <p class="text-sm text-gray-600 mb-5">WhatsApp senden (API-Key oder hier), eingehende Mails→WhatsApp, Audit-Log. <span id="me" class="text-gray-400"></span></p>
+
+      <div class="flex gap-1 border-b mb-5 text-sm">
+        <button data-tab="send"    class="tab px-3 py-2 border-b-2 border-blue-600 font-medium">Senden</button>
+        <button data-tab="inbox"   class="tab px-3 py-2 border-b-2 border-transparent text-gray-500">Posteingang</button>
+        <button data-tab="log"     class="tab px-3 py-2 border-b-2 border-transparent text-gray-500">Log</button>
+        <button data-tab="keys"    class="tab px-3 py-2 border-b-2 border-transparent text-gray-500">API-Keys</button>
+        <button data-tab="aliases" class="tab px-3 py-2 border-b-2 border-transparent text-gray-500">Aliase</button>
+      </div>
+
+      <!-- SENDEN -->
+      <section data-panel="send" class="panel bg-white rounded-lg shadow p-4">
+        <h2 class="font-bold mb-3">WhatsApp senden</h2>
+        <label class="block text-xs text-gray-500">Ziel (Nummer, Gruppe oder Alias)</label>
+        <div class="flex gap-2 mt-1">
+          <input id="s-to" list="targets" placeholder="+41791234567 oder Gruppenname" class="flex-1 border rounded px-2 py-1.5 text-sm">
+          <datalist id="targets"></datalist>
+        </div>
+        <label class="block text-xs text-gray-500 mt-3">Titel (optional, wird fett vorangestellt)</label>
+        <input id="s-title" class="mt-1 w-full border rounded px-2 py-1.5 text-sm">
+        <label class="block text-xs text-gray-500 mt-3">Nachricht</label>
+        <textarea id="s-body" rows="5" class="mt-1 w-full border rounded px-2 py-1.5 text-sm"></textarea>
+        <label class="block text-xs text-gray-500 mt-3">Anhänge (optional)</label>
+        <input id="s-files" type="file" multiple class="mt-1 text-sm">
+        <div class="mt-3 flex items-center gap-3">
+          <button id="s-send" class="bg-blue-600 text-white rounded px-4 py-1.5 text-sm hover:bg-blue-700">Senden</button>
+          <span id="s-result" class="text-xs"></span>
+        </div>
+      </section>
+
+      <!-- POSTEINGANG -->
+      <section data-panel="inbox" class="panel hidden bg-white rounded-lg shadow p-4">
+        <div class="flex items-center justify-between mb-3"><h2 class="font-bold">Posteingang (empfangen)</h2><button onclick="loadInbox()" class="text-xs text-blue-600">aktualisieren</button></div>
+        <div id="inbox-list" class="text-sm divide-y"></div>
+      </section>
+
+      <!-- LOG -->
+      <section data-panel="log" class="panel hidden bg-white rounded-lg shadow p-4">
+        <div class="flex items-center justify-between mb-3"><h2 class="font-bold">Audit-Log (gesendet)</h2><button onclick="loadLog()" class="text-xs text-blue-600">aktualisieren</button></div>
+        <div id="log-list" class="text-sm divide-y"></div>
+      </section>
+
+      <!-- KEYS -->
+      <section data-panel="keys" class="panel hidden bg-white rounded-lg shadow p-4">
+        <h2 class="font-bold mb-3">API-Keys (für andere Systeme/Projekte)</h2>
+        <div class="flex gap-2 mb-3">
+          <input id="k-name" placeholder="Name (z.B. monitoring)" class="border rounded px-2 py-1.5 text-sm">
+          <input id="k-scopes" placeholder="scopes (* oder whatsapp)" value="*" class="border rounded px-2 py-1.5 text-sm w-40">
+          <button id="k-add" class="bg-emerald-600 text-white rounded px-3 py-1.5 text-sm hover:bg-emerald-700">Key erstellen</button>
+        </div>
+        <div id="k-new" class="hidden mb-3 p-3 bg-amber-50 border border-amber-200 rounded text-sm"></div>
+        <div id="keys-list" class="text-sm divide-y"></div>
+      </section>
+
+      <!-- ALIASES -->
+      <section data-panel="aliases" class="panel hidden bg-white rounded-lg shadow p-4">
+        <h2 class="font-bold mb-3">Aliase (Adresse → WhatsApp-Ziel)</h2>
+        <p class="text-xs text-gray-500 mb-3">Für E-Mail→WhatsApp: eine Mail an <code>&lt;adresse&gt;@whatsapp.rosenweg4303.ch</code> geht ans hinterlegte Ziel. Auch in der JSON-API/„Senden" nutzbar.</p>
+        <div class="flex flex-wrap gap-2 mb-3">
+          <input id="a-address" placeholder="adresse (z.B. technik)" class="border rounded px-2 py-1.5 text-sm">
+          <input id="a-target" placeholder="Ziel (Nummer/Gruppenname/JID)" class="border rounded px-2 py-1.5 text-sm flex-1 min-w-[180px]">
+          <select id="a-kind" class="border rounded px-2 py-1.5 text-sm">
+            <option value="number">Nummer</option><option value="group">Gruppe</option><option value="jid">JID</option>
+          </select>
+          <button id="a-add" class="bg-emerald-600 text-white rounded px-3 py-1.5 text-sm hover:bg-emerald-700">Speichern</button>
+        </div>
+        <div id="aliases-list" class="text-sm divide-y"></div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const fmtDt = s => s ? new Date(s).toLocaleString('de-CH') : '';
+  const api = (url, opts) => AuthentikAuth.apiFetch(url, opts);
+  async function jget(url){ const r=await api(url); if(!r.ok) throw new Error((await r.json().catch(()=>({}))).error||('HTTP '+r.status)); return r.json(); }
+  async function jsend(url, body, method='POST'){ const r=await api(url,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined}); const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d.error||('HTTP '+r.status)); return d; }
+
+  function showTab(name){
+    document.querySelectorAll('.tab').forEach(b=>{ const on=b.dataset.tab===name; b.classList.toggle('border-blue-600',on); b.classList.toggle('font-medium',on); b.classList.toggle('text-gray-500',!on); b.classList.toggle('border-transparent',!on); });
+    document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('hidden',p.dataset.panel!==name));
+    if(name==='inbox')loadInbox(); if(name==='log')loadLog(); if(name==='keys')loadKeys(); if(name==='aliases')loadAliases();
+  }
+
+  async function filesToAttachments(input){
+    const out=[];
+    for(const f of input.files){
+      const b64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=rej;r.readAsDataURL(f);});
+      out.push({filename:f.name, mimetype:f.type||'application/octet-stream', data_base64:b64});
+    }
+    return out;
+  }
+
+  async function doSend(){
+    const to=document.getElementById('s-to').value.trim();
+    const title=document.getElementById('s-title').value.trim();
+    const body=document.getElementById('s-body').value;
+    const res=document.getElementById('s-result');
+    if(!to){res.textContent='Ziel fehlt';res.className='text-xs text-red-600';return;}
+    res.textContent='Sende…';res.className='text-xs text-gray-500';
+    try{
+      const attachments=await filesToAttachments(document.getElementById('s-files'));
+      const d=await jsend('/gateway/ui/send',{to,title,body,attachments});
+      res.textContent=`✓ gesendet (#${d.id} → ${d.target})`; res.className='text-xs text-emerald-700';
+      document.getElementById('s-body').value=''; document.getElementById('s-title').value=''; document.getElementById('s-files').value='';
+    }catch(e){ res.textContent='✗ '+e.message; res.className='text-xs text-red-600'; }
+  }
+
+  async function loadTargets(){
+    try{
+      const [g,a]=await Promise.all([jget('/gateway/ui/groups').catch(()=>({groups:[]})), jget('/gateway/ui/aliases').catch(()=>({aliases:[]}))]);
+      const dl=document.getElementById('targets'); dl.innerHTML='';
+      (a.aliases||[]).forEach(x=>{const o=document.createElement('option');o.value=x.address;o.label=`Alias → ${x.target}`;dl.appendChild(o);});
+      (g.groups||[]).forEach(x=>{const o=document.createElement('option');o.value=x.name;o.label=`Gruppe (${x.participants})`;dl.appendChild(o);});
+    }catch{}
+  }
+
+  function msgRow(m, withDelete){
+    const del = withDelete && m.status==='sent' && m.whatsapp_msg_id && !m.deleted_at
+      ? `<button onclick="delMsg(${m.id},this)" class="text-xs text-red-600 hover:underline">🗑</button>` : (m.deleted_at?'<span class="text-xs text-gray-400">gelöscht</span>':'');
+    const st = m.status==='sent'?'text-emerald-700':m.status==='failed'?'text-red-700':'text-gray-500';
+    return `<div class="py-2 flex items-start justify-between gap-3">
+      <div class="min-w-0">
+        <div class="text-xs text-gray-400">${esc(fmtDt(m.created_at))} · <span class="${st}">${esc(m.status)}</span> · ${esc(m.source||'')}${m.sender?' · '+esc(m.sender):''}</div>
+        <div class="text-gray-900">→ ${esc(m.target||'')} ${m.subject?'· <b>'+esc(m.subject)+'</b>':''}</div>
+        <div class="text-gray-600 truncate">${esc((m.body||'').slice(0,140))}</div>
+        ${m.error?`<div class="text-xs text-red-500">${esc(m.error)}</div>`:''}${m.delete_error?`<div class="text-xs text-red-400">Löschen: ${esc(m.delete_error)}</div>`:''}
+      </div><div>${del}</div></div>`;
+  }
+  async function loadInbox(){ try{ const d=await jget('/gateway/ui/messages?direction=inbound&limit=100'); document.getElementById('inbox-list').innerHTML=(d.messages||[]).map(m=>`<div class="py-2"><div class="text-xs text-gray-400">${esc(fmtDt(m.created_at))} · von ${esc(m.sender||'')}</div><div class="text-gray-800">${esc(m.body||'')}</div></div>`).join('')||'<p class="text-gray-400 py-4">Nichts empfangen.</p>'; }catch(e){ document.getElementById('inbox-list').innerHTML='<p class="text-red-600 py-4">'+esc(e.message)+'</p>'; } }
+  async function loadLog(){ try{ const d=await jget('/gateway/ui/messages?direction=outbound&limit=200'); document.getElementById('log-list').innerHTML=(d.messages||[]).map(m=>msgRow(m,true)).join('')||'<p class="text-gray-400 py-4">Noch nichts gesendet.</p>'; }catch(e){ document.getElementById('log-list').innerHTML='<p class="text-red-600 py-4">'+esc(e.message)+'</p>'; } }
+  async function delMsg(id,btn){ if(!confirm('Diese WhatsApp-Nachricht für alle löschen?'))return; btn.disabled=true;btn.textContent='…'; try{ await jsend(`/gateway/ui/messages/${id}/delete`); loadLog(); }catch(e){ alert('Fehler: '+e.message); btn.disabled=false;btn.textContent='🗑'; } }
+
+  async function loadKeys(){ try{ const d=await jget('/gateway/ui/keys'); document.getElementById('keys-list').innerHTML=(d.keys||[]).map(k=>`<div class="py-2 flex items-center justify-between"><div><span class="font-medium">${esc(k.name)}</span> <code class="text-xs text-gray-400">${esc(k.key_prefix)}…</code> <span class="text-xs text-gray-400">scopes:${esc(k.scopes)} · ${k.last_used_at?'zuletzt '+esc(fmtDt(k.last_used_at)):'nie genutzt'}</span> ${k.revoked_at?'<span class="text-xs text-red-500">widerrufen</span>':''}</div>${k.revoked_at?'':`<button onclick="revokeKey(${k.id},this)" class="text-xs text-red-600">widerrufen</button>`}</div>`).join('')||'<p class="text-gray-400 py-4">Keine Keys.</p>'; }catch(e){ document.getElementById('keys-list').innerHTML='<p class="text-red-600 py-4">'+esc(e.message)+'</p>'; } }
+  async function addKey(){ const name=document.getElementById('k-name').value.trim(); const scopes=document.getElementById('k-scopes').value.trim()||'*'; if(!name)return; try{ const d=await jsend('/gateway/ui/keys',{name,scopes}); const box=document.getElementById('k-new'); box.classList.remove('hidden'); box.innerHTML=`Neuer Key (nur jetzt sichtbar): <code class="break-all font-bold">${esc(d.key)}</code>`; document.getElementById('k-name').value=''; loadKeys(); }catch(e){ alert('Fehler: '+e.message); } }
+  async function revokeKey(id,btn){ if(!confirm('Key widerrufen?'))return; try{ await api(`/gateway/ui/keys/${id}`,{method:'DELETE'}); loadKeys(); }catch(e){ alert(e.message); } }
+
+  async function loadAliases(){ try{ const d=await jget('/gateway/ui/aliases'); document.getElementById('aliases-list').innerHTML=(d.aliases||[]).map(a=>`<div class="py-2 flex items-center justify-between"><div><code class="font-medium">${esc(a.address)}</code> → ${esc(a.target)} <span class="text-xs text-gray-400">(${esc(a.target_kind)})</span></div><button onclick="delAlias('${esc(a.address)}',this)" class="text-xs text-red-600">löschen</button></div>`).join('')||'<p class="text-gray-400 py-4">Keine Aliase.</p>'; }catch(e){ document.getElementById('aliases-list').innerHTML='<p class="text-red-600 py-4">'+esc(e.message)+'</p>'; } }
+  async function addAlias(){ const address=document.getElementById('a-address').value.trim(); const target=document.getElementById('a-target').value.trim(); const target_kind=document.getElementById('a-kind').value; if(!address||!target)return; try{ await jsend('/gateway/ui/aliases',{address,target,target_kind}); document.getElementById('a-address').value='';document.getElementById('a-target').value=''; loadAliases(); loadTargets(); }catch(e){ alert(e.message); } }
+  async function delAlias(address,btn){ if(!confirm('Alias löschen?'))return; try{ await api('/gateway/ui/aliases/'+encodeURIComponent(address),{method:'DELETE'}); loadAliases(); loadTargets(); }catch(e){ alert(e.message); } }
+
+  async function loadStatus(){ try{ const d=await jget('/gateway/health'); const el=document.getElementById('wa-status'); el.textContent=d.wa_ready?'WhatsApp bereit':'WhatsApp offline'; el.className='text-xs px-2 py-1 rounded '+(d.wa_ready?'bg-emerald-100 text-emerald-700':'bg-red-100 text-red-700'); }catch{} }
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    const u = await AuthentikAuth.init({ requireAuth: true });
+    if (!u) return;
+    document.getElementById('auth-gate').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+    document.getElementById('me').textContent = u.email ? '· '+u.email : '';
+    document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>showTab(b.dataset.tab)));
+    document.getElementById('s-send').addEventListener('click', doSend);
+    document.getElementById('k-add').addEventListener('click', addKey);
+    document.getElementById('a-add').addEventListener('click', addAlias);
+    loadStatus(); loadTargets();
+    setInterval(loadStatus, 20000);
+  });
+  </script>
+</body>
+</html>

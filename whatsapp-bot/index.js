@@ -46,6 +46,13 @@ const HEARTBEAT_MS   = parseInt(process.env.WA_HEARTBEAT_MS, 10)   || 30_000;
 const HEALTH_PORT    = parseInt(process.env.WA_HEALTH_PORT, 10)    || 8080;
 const RECONNECT_MS   = parseInt(process.env.WA_RECONNECT_MS, 10)   || 30_000;
 const DATA_DIR       = process.env.WA_DATA_DIR || '/data';
+// Wohin eingehende Nachrichten weitergeleitet werden (Command-Bot der Haupt-API).
+// Rosenweg: gesetzt; anderes Projekt: leer -> nur SQLite-Log im Gateway.
+const FORWARD_INBOUND_URL = process.env.FORWARD_INBOUND_URL
+  || (process.env.WA_SECRET_FORWARD_OFF ? '' : `${API_BASE}/api/whatsapp/inbound`);
+
+// Hooks aus dem Gateway (gateway.js) — fuer Inbound-Logging in die SQLite.
+let gatewayHooks = null;
 
 if (!WA_SECRET) {
   console.error('FATAL: WHATSAPP_SHARED_SECRET env var fehlt');
@@ -212,12 +219,21 @@ client.on('message_create', async (msg) => {
         });
       } catch (e) { console.warn('[WA] Media-Download fehlgeschlagen:', e.message); }
     }
-    const res = await fetch(`${API_BASE}/api/whatsapp/inbound`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-WA-Secret': WA_SECRET },
-      body: JSON.stringify({ phone, chat_id: chatId, body, whatsapp_msg_id: msg.id?._serialized, attachments }),
-    });
-    if (!res.ok) console.warn('[WA] API inbound rejected:', res.status, await res.text().catch(() => ''));
+    // 1) Gateway-SQLite-Log (fuers Web-UI „was wurde empfangen") — best effort.
+    try {
+      gatewayHooks?.logInbound({
+        phone, chatId, body, whatsappMsgId: msg.id?._serialized || null, attachments,
+      });
+    } catch (e) { console.warn('[WA] Gateway-Inbound-Log Fehler:', e.message); }
+    // 2) Weiterleitung an die Command-Bot-API (optional, per FORWARD_INBOUND_URL).
+    if (FORWARD_INBOUND_URL) {
+      const res = await fetch(FORWARD_INBOUND_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-WA-Secret': WA_SECRET },
+        body: JSON.stringify({ phone, chat_id: chatId, body, whatsapp_msg_id: msg.id?._serialized, attachments }),
+      });
+      if (!res.ok) console.warn('[WA] API inbound rejected:', res.status, await res.text().catch(() => ''));
+    }
   } catch (err) {
     console.error('[WA] Inbound-Handler Fehler:', err);
   }
@@ -245,6 +261,76 @@ async function waitForAck(msg, minAck = 1, timeoutMs = 8000) {
   console.log(`[WA] ACK-Timeout fuer ${id}`);
 }
 
+// ─── Geteilte Sende-/Loesch-Kernfunktionen ──────────────────────────────
+// Wird von BEIDEN genutzt: pollOutbox (Postgres-App-Queue der Haupt-API) UND
+// dem Standalone-Gateway (gateway.js: keyed JSON-API, SMTP-in, Web-UI).
+// Gibt die _serialized WhatsApp-Message-ID zurueck (fuer Tracking/Loeschen).
+// attachments: [{ mimetype, data_base64|content_base64, filename, caption }]
+async function sendViaClient(chatId, body, attachments = []) {
+  // Bei Gruppen: chat erst laden — client.sendMessage schlaegt sonst gerne
+  // ohne Fehler "sent" zurueck ohne tatsaechliche Zustellung.
+  const isGroup = chatId.endsWith('@g.us');
+  const chat = isGroup ? await client.getChatById(chatId) : null;
+  let mediaSent = false;
+  let sentMsg = null;
+  for (const a of (attachments || [])) {
+    if (a.docs_path) continue; // Disk-Pfade: spezielle Behandlung — vorerst skippen
+    const b64 = a.data_base64 || a.content_base64;
+    if (b64) {
+      let mime = a.mimetype || 'application/octet-stream';
+      let dataB64 = b64;
+      let filename = a.filename || 'anhang';
+      // WAV -> OGG opus konvertieren (zuverlaessigere Zustellung als Voice)
+      if (mime === 'audio/wav' || mime === 'audio/wave' || mime === 'audio/x-wav') {
+        try {
+          dataB64 = await convertWavToOgg(b64);
+          mime = 'audio/ogg; codecs=opus';
+          filename = filename.replace(/\.wav$/i, '.ogg');
+        } catch (e) { console.warn(`[WA] ffmpeg-Konvertierung fehlgeschlagen, sende WAV: ${e.message}`); }
+      }
+      const media = new MessageMedia(mime, dataB64, filename);
+      const opts = { caption: body || a.caption || '', sendAudioAsVoice: mime.startsWith('audio/ogg') };
+      sentMsg = chat ? await chat.sendMessage(media, opts) : await client.sendMessage(chatId, media, opts);
+      mediaSent = true;
+    }
+  }
+  if (!mediaSent && body) {
+    sentMsg = chat ? await chat.sendMessage(body) : await client.sendMessage(chatId, body);
+  }
+  if (!sentMsg) throw new Error('sendMessage liefert null/undefined (kein Body, keine Anhaenge?)');
+  // Warten bis die Nachricht WIRKLICH beim WA-Server ist (ack>=1) — sonst
+  // ueberholt eine schnell hochgeladene Voice-Note die unbestaetigte Textnachricht.
+  await waitForAck(sentMsg, 1, 6000);
+  return { msgId: sentMsg.id?._serialized || null, ack: sentMsg.ack ?? null };
+}
+
+// "Fuer alle loeschen" per gespeicherter WhatsApp-Message-ID.
+async function revokeByMsgId(msgId) {
+  const msg = await client.getMessageById(msgId);
+  if (!msg) throw new Error('Nachricht nicht (mehr) auffindbar');
+  await msg.delete(true); // true = fuer alle
+}
+
+// Alle Gruppen des Bots (id/name/participants).
+async function getGroups() {
+  const chats = await client.getChats();
+  return chats.filter(c => c.isGroup).map(c => ({
+    id: c.id._serialized, name: c.name,
+    participants: (c.groupMetadata?.participants || []).length,
+  }));
+}
+
+// Gruppe per exaktem (case-insensitive) Titel -> chatId. 0/>1 Treffer -> Fehler.
+async function findGroupByName(name) {
+  const target = String(name || '').trim().toLowerCase();
+  if (!target) throw new Error('Leerer Gruppenname');
+  const chats = await client.getChats();
+  const matches = chats.filter(c => c.isGroup && (c.name || '').trim().toLowerCase() === target);
+  if (matches.length === 0) throw new Error(`Keine WhatsApp-Gruppe mit Titel "${name}"`);
+  if (matches.length > 1) throw new Error(`Mehrere Gruppen mit Titel "${name}" — bitte JID verwenden`);
+  return matches[0].id._serialized;
+}
+
 // Outbox-Polling
 async function pollOutbox() {
   if (!isReady) return;
@@ -265,56 +351,15 @@ async function pollOutbox() {
               ? m.phone
               : m.phone.replace(/\D/g, '') + '@c.us');
 
-        // Bei Gruppen: chat erst laden — client.sendMessage schlaegt sonst
-        // gerne ohne Fehler "sent" zurueck ohne tatsaechliche Zustellung.
-        const isGroup = chatId.endsWith('@g.us');
-        const chat = isGroup ? await client.getChatById(chatId) : null;
-        const sendVia = chat || client; // chat.sendMessage(content) bzw. client.sendMessage(chatId, content)
-
-        // Anhaenge (falls vorhanden) als MessageMedia
-        let mediaSent = false;
-        let sentMsg = null;
-        for (const a of (m.attachments || [])) {
-          if (a.docs_path) continue; // Disk-Pfade waeren spezielle Behandlung — vorerst skippen
-          if (a.data_base64) {
-            let mime = a.mimetype || 'image/jpeg';
-            let dataB64 = a.data_base64;
-            let filename = a.filename || 'beleg';
-            // WAV -> OGG opus konvertieren fuer Voicemails (zuverlaessigere Zustellung)
-            if (mime === 'audio/wav' || mime === 'audio/wave' || mime === 'audio/x-wav') {
-              try {
-                dataB64 = await convertWavToOgg(a.data_base64);
-                mime = 'audio/ogg; codecs=opus';
-                filename = filename.replace(/\.wav$/i, '.ogg');
-                console.log(`[WA] msg=${m.id} WAV -> OGG konvertiert (${a.data_base64.length} -> ${dataB64.length} bytes b64)`);
-              } catch (e) { console.warn(`[WA] msg=${m.id} ffmpeg-Konvertierung fehlgeschlagen, sende WAV: ${e.message}`); }
-            }
-            const media = new MessageMedia(mime, dataB64, filename);
-            const opts = { caption: m.body || a.caption || '', sendAudioAsVoice: mime.startsWith('audio/ogg') };
-            sentMsg = chat
-              ? await chat.sendMessage(media, opts)
-              : await client.sendMessage(chatId, media, opts);
-            mediaSent = true;
-          }
-        }
-        if (!mediaSent && m.body) {
-          sentMsg = chat ? await chat.sendMessage(m.body) : await client.sendMessage(chatId, m.body);
-        }
-        // Verifizieren dass die Nachricht tatsaechlich akzeptiert wurde
-        if (!sentMsg) throw new Error('sendMessage liefert null/undefined');
-        console.log(`[WA] msg=${m.id} -> ${chatId} (id=${sentMsg.id?._serialized || '?'}, ack=${sentMsg.ack ?? '?'})`);
+        const { msgId } = await sendViaClient(chatId, m.body, m.attachments);
+        console.log(`[WA] msg=${m.id} -> ${chatId} (id=${msgId || '?'})`);
         // whatsapp_msg_id IMMER mitschicken — damit die Nachricht spaeter
         // gezielt geloescht ("fuer alle loeschen") werden kann (Tracking).
         await fetch(`${API_BASE}/api/whatsapp/status`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-WA-Secret': WA_SECRET },
-          body: JSON.stringify({ message_id: m.id, status: 'sent', whatsapp_msg_id: sentMsg.id?._serialized || null }),
+          body: JSON.stringify({ message_id: m.id, status: 'sent', whatsapp_msg_id: msgId }),
         });
-        // Warten bis die Nachricht WIRKLICH beim WA-Server angekommen ist
-        // (ack >= 1 = server-ack) bevor die naechste rausgeht — sonst
-        // ueberholt eine schnell hochgeladene Voice-Note die noch nicht
-        // bestaetigte Text-Nachricht.
-        await waitForAck(sentMsg, 1, 6000);
       } catch (err) {
         // err.message kann bei whatsapp-web.js single-char sein; stack mitloggen
         const detailedErr = err.stack || `${err.name || ''}: ${err.message || ''}` || String(err);
@@ -348,9 +393,7 @@ async function pollDeletions() {
     for (const m of (messages || [])) {
       let ok = false, errMsg = null;
       try {
-        const msg = await client.getMessageById(m.whatsapp_msg_id);
-        if (!msg) throw new Error('Nachricht nicht (mehr) auffindbar');
-        await msg.delete(true); // true = "fuer alle loeschen"
+        await revokeByMsgId(m.whatsapp_msg_id);
         ok = true;
         console.log(`[WA] geloescht msg=${m.id} (${m.whatsapp_msg_id})`);
       } catch (err) {
@@ -423,6 +466,21 @@ const healthServer = http.createServer(async (req, res) => {
   res.writeHead(404); res.end();
 });
 healthServer.listen(HEALTH_PORT, () => console.log('[WA] Healthcheck-HTTP auf Port', HEALTH_PORT));
+
+// ─── Standalone Messaging-Gateway (eigener API-Server + SMTP-in + Web-UI) ──
+// Laeuft unabhaengig vom WA-Client-Lifecycle; nur das tatsaechliche WA-*Senden*
+// braucht isReady(). Wir reichen die geteilten Kernfunktionen als botCore rein.
+try {
+  gatewayHooks = require('./gateway').startGateway({
+    isReady: () => isReady,
+    sendViaClient,
+    revokeByMsgId,
+    findGroupByName,
+    getGroups,
+  });
+} catch (e) {
+  console.error('[Gateway] Start fehlgeschlagen (Bot laeuft weiter ohne Gateway):', e.stack || e.message);
+}
 
 client.initialize().catch(err => { console.error('Init-Fehler:', err); process.exit(1); });
 

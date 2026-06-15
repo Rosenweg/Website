@@ -16,9 +16,17 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     NODE_ENV=production
 
 WORKDIR /app
-COPY package.json ./
-RUN npm install --omit=dev
-COPY index.js ./
+# Build-Context ist das Repo-Root (siehe .github/workflows/deploy.yml) damit das
+# geteilte js/ + die Web-UI mitkopiert werden koennen.
+COPY whatsapp-bot/package.json ./
+# python3/make/g++ nur falls better-sqlite3 kein prebuilt-Binary hat.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+  && npm install --omit=dev \
+  && apt-get purge -y python3 make g++ && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+COPY whatsapp-bot/index.js whatsapp-bot/gateway.js ./
+# Web-UI fuer den Gateway (whatsapp.rosenweg4303.ch)
+COPY whatsapp-gateway.html ./public/index.html
+COPY js/ ./public/js/
 
 # Session-Verzeichnis (Volume-Mount empfohlen)
 RUN mkdir -p /data && chown -R node:node /data /app
