@@ -152,6 +152,16 @@ client.on('ready', () => {
   console.log('[WA] Bot ist bereit, Nummer:', client.info?.wid?.user);
 });
 
+// Zustell-/Lesebestaetigung: ACK-Aenderungen unserer gesendeten Nachrichten
+// ans Gateway melden (delivered/read + ggf. Status-Mail an E-Mail-Absender).
+// ack: 1=server, 2=zugestellt(Geraet), 3=gelesen(blau), 4=abgespielt.
+client.on('message_ack', (msg, ack) => {
+  try {
+    if (!msg.fromMe) return;
+    gatewayHooks?.updateAck(msg.id?._serialized, ack);
+  } catch (e) { /* best effort */ }
+});
+
 // Eingehende Nachrichten → an API
 // WhatsApp hat seit ~2026 das @lid-Format (Linked-ID) fuer Privacy: viele
 // 1:1-Chats kommen als from=<lid>@lid statt <phone>@c.us. Das alte 'message'-
