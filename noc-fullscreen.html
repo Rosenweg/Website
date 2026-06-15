@@ -36,7 +36,11 @@
 
   <div id="noc-err" class="hidden mb-3 bg-rose-900/40 border border-rose-700 rounded p-3 text-rose-200"></div>
 
-  <div class="grid-noc lg:grid-cols-3">
+  <!-- Festes 3-Spalten-Layout (KEIN lg:-Breakpoint): das Wallboard laeuft in
+       einem WebView/Slideshow mit fixer FHD-Aufloesung. Meldet das WebView
+       eine logische Breite < 1024px, wuerde lg:grid-cols-3 einspaltig kippen
+       und nur WAN+UniFi waeren im Bild — der Rest scrollt aus dem Screen. -->
+  <div class="grid-noc grid-cols-3">
     <!-- WAN -->
     <div class="bg-slate-900/50 border border-slate-700 rounded-xl p-5">
       <div class="text-xs uppercase tracking-wider text-slate-400 mb-2">WAN</div>
