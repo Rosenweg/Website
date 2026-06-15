@@ -49,7 +49,13 @@
             background: #fff; display: flex; flex-direction: column; align-items: center;
             justify-content: center; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,0.08);
             border: 6px solid #e5e7eb; transition: border-color .4s;
+            position: relative; z-index: 1;
         }
+        /* Energiefluss-Linien (zwischen den Kreismitten, per JS gezeichnet) */
+        .flow-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: visible; }
+        .flowline { stroke-width: 5; fill: none; stroke-linecap: round; stroke-dasharray: 1 13; animation: dash .7s linear infinite; }
+        .fl-green { stroke: #22c55e; } .fl-red { stroke: #ef4444; } .fl-blue { stroke: #3b82f6; }
+        @keyframes dash { to { stroke-dashoffset: -14; } }
         .circle .ic { font-size: clamp(1.4rem, 4vw, 2rem); margin-bottom: .3rem; }
         .circle .val { font-size: clamp(1.4rem, 5vw, 2.4rem); font-weight: 700; line-height: 1; color: #111827; }
         .circle .val .u { font-size: .5em; font-weight: 500; color: #6b7280; }
@@ -94,6 +100,7 @@
         <div id="err" class="err"></div>
 
         <div class="flow">
+            <svg id="flow-svg" class="flow-svg" preserveAspectRatio="none"></svg>
             <div class="node-prod">
                 <div id="c-prod" class="circle ring-idle">
                     <div class="ic">🔆</div>
@@ -146,6 +153,29 @@
         const $ = id => document.getElementById(id);
         const SRC_LBL = { geeicht: 'geeichter Zähler', smartfox: 'SmartFox', none: '–' };
 
+        // Energiefluss-Linien zwischen den Kreismitten zeichnen (responsive: misst
+        // die echten Positionen, funktioniert in 2-Spalten- wie 1-Spalten-Layout).
+        // Punkte wandern vom Start- zum Endpunkt -> zeigen die Flussrichtung.
+        let lastData = null;
+        function drawFlows(d) {
+            const flow = document.querySelector('.flow');
+            const svg = $('flow-svg');
+            if (!flow || !svg) return;
+            const fr = flow.getBoundingClientRect();
+            svg.setAttribute('viewBox', `0 0 ${fr.width} ${fr.height}`);
+            const ctr = el => { const r = el.getBoundingClientRect(); return { x: r.left - fr.left + r.width/2, y: r.top - fr.top + r.height/2, rad: r.width/2 }; };
+            const P = ctr($('c-prod')), C = ctr($('c-cons')), G = ctr($('c-grid'));
+            // Endpunkte auf die Kreisraender kuerzen (Linie startet/endet am Rand)
+            const edge = (a, b) => { const dx=b.x-a.x, dy=b.y-a.y, len=Math.hypot(dx,dy)||1; return `${a.x+dx/len*a.rad} ${a.y+dy/len*a.rad} ${b.x-dx/len*b.rad} ${b.y-dy/len*b.rad}`; };
+            const seg = [];
+            if (d.production_w > 50 && d.consumption_w > 50) seg.push(['fl-green', edge(P, C)]);  // PV -> Haus
+            if (d.feed_in_w > 50) seg.push(['fl-red', edge(P, G)]);                                 // PV -> Netz (Lieferung)
+            if (d.draw_w > 50) seg.push(['fl-blue', edge(G, C)]);                                   // Netz -> Haus (Bezug)
+            svg.innerHTML = seg.map(([cls, c]) => { const p = c.split(' ');
+                return `<line x1="${p[0]}" y1="${p[1]}" x2="${p[2]}" y2="${p[3]}" class="flowline ${cls}"/>`; }).join('');
+        }
+        window.addEventListener('resize', () => { if (lastData) drawFlows(lastData); });
+
         async function load() {
             try {
                 const r = await fetch('/api/energy/solar-live', { cache: 'no-store' });
@@ -192,6 +222,9 @@
                 $('m-updated').textContent = 'Aktualisiert: ' + t.toLocaleTimeString('de-CH');
                 $('m-src').textContent = 'Produktion: ' + (SRC_LBL[d.production_source] || d.production_source)
                     + ' · Netz: ' + (SRC_LBL[d.grid_source] || d.grid_source);
+
+                lastData = d;
+                drawFlows(d);
             } catch (e) {
                 $('err').style.display = 'block';
                 $('err').textContent = 'Live-Daten nicht erreichbar: ' + e.message;
