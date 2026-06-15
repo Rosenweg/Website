@@ -105,6 +105,7 @@
               <th class="px-3 py-2 text-left">Person</th>
               <th class="px-3 py-2 text-left">Text</th>
               <th class="px-3 py-2 text-left">Status</th>
+              <th class="px-3 py-2 text-left">Löschen</th>
             </tr>
           </thead>
           <tbody id="tbody" class="divide-y divide-gray-100"></tbody>
@@ -221,6 +222,31 @@
     } catch {}
   }
 
+  // Loesch-Zelle pro Nachricht. Nur ausgehende, gesendete Nachrichten mit
+  // gespeicherter WA-Message-ID lassen sich "fuer alle loeschen".
+  function deleteCell(m) {
+    if (m.deleted_at) return '<span class="text-gray-400">gelöscht</span>';
+    if (m.delete_requested_at) return '<span class="text-amber-600">⏳ wird gelöscht…</span>';
+    if (m.direction !== 'outbound' || m.status !== 'sent') return '<span class="text-gray-300">—</span>';
+    if (!m.whatsapp_msg_id) return '<span class="text-gray-300" title="keine WA-Message-ID gespeichert">—</span>';
+    return `<button onclick="requestDelete(${m.id}, this)" class="text-xs text-red-600 hover:underline">🗑 löschen</button>`
+      + (m.delete_error ? `<div class="text-xs text-red-400 mt-0.5" title="${esc(m.delete_error)}">Fehler</div>` : '');
+  }
+
+  async function requestDelete(id, btn) {
+    if (!confirm('Diese WhatsApp-Nachricht für ALLE löschen?\n\n(Funktioniert nur solange WhatsApps Lösch-Zeitfenster offen ist. Der Bot führt es beim nächsten Poll aus, max. 15s.)')) return;
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/whatsapp/admin/messages/${id}/delete`, { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+      setTimeout(load, 3000);
+    } catch (e) {
+      alert('Löschen fehlgeschlagen: ' + e.message);
+      if (btn) { btn.disabled = false; btn.textContent = '🗑 löschen'; }
+    }
+  }
+
   async function load() {
     try {
       const r = await AuthentikAuth.apiFetch('/api/whatsapp/admin/status');
@@ -242,7 +268,8 @@
         <td class="px-3 py-2 text-xs">${m.person_id ? '#' + m.person_id : '<span class="text-gray-400">—</span>'}</td>
         <td class="px-3 py-2 text-sm truncate max-w-md">${esc((m.body || '').slice(0, 100))}</td>
         <td class="px-3 py-2"><span class="text-xs px-2 py-0.5 rounded ${m.status === 'sent' ? 'bg-emerald-100 text-emerald-800' : m.status === 'queued' ? 'bg-amber-100 text-amber-800' : m.status === 'failed' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-700'}">${esc(m.status)}</span></td>
-      </tr>`).join('') || '<tr><td colspan="6" class="px-3 py-6 text-center text-gray-400">Keine Nachrichten.</td></tr>';
+        <td class="px-3 py-2 text-xs">${deleteCell(m)}</td>
+      </tr>`).join('') || '<tr><td colspan="7" class="px-3 py-6 text-center text-gray-400">Keine Nachrichten.</td></tr>';
     } catch (e) {
       document.getElementById('status').innerHTML = `<div class="col-span-4 text-red-600">Fehler: ${esc(e.message)}</div>`;
     }
