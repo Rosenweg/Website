@@ -6,6 +6,10 @@ COPY api/package.json ./
 RUN npm install --production
 
 COPY api/server.js ./
+# Aufgeteilte Module (inkrementeller Router-Split). Weitere Verzeichnisse
+# (middleware/, routes/) werden ergaenzt sobald sie Inhalt haben.
+COPY api/lib/ ./lib/
+COPY api/scripts/ ./scripts/
 # site-config.json wird vom Auto-Seed gelesen (legacy Verwaltung -> DB)
 COPY site-config.json ./
 
