@@ -112,14 +112,8 @@ services:
         - "traefik.http.middlewares.rosenweg-alias-defekt.redirectregex.replacement=https://www.rosenweg4303.ch/reklamationen.html"
         - "traefik.http.middlewares.rosenweg-alias-defekt.redirectregex.permanent=false"
         - "traefik.http.routers.rosenweg.middlewares=rosenweg-www,rosenweg-clean-urls,rosenweg-alias-defekt"
-        # rosenweg9.ch → /stweg3/
-        - "traefik.http.routers.rosenweg9.rule=Host(`www.rosenweg9.ch`) || Host(`rosenweg9.ch`)"
-        - "traefik.http.routers.rosenweg9.entrypoints=websecure"
-        - "traefik.http.routers.rosenweg9.tls.certresolver=cf"
-        - "traefik.http.middlewares.rosenweg9-redirect.redirectregex.regex=^https://(www\\.)?rosenweg9\\.ch/?(.*)"
-        - "traefik.http.middlewares.rosenweg9-redirect.redirectregex.replacement=https://www.rosenweg4303.ch/stweg3/$${2}"
-        - "traefik.http.middlewares.rosenweg9-redirect.redirectregex.permanent=true"
-        - "traefik.http.routers.rosenweg9.middlewares=rosenweg9-redirect"
+        # rosenweg9.ch wird NICHT mehr hierher umgeleitet — die Domain serviert
+        # jetzt direkt den stweg3-Container (Router am stweg3-Service unten).
         - "shepherd.enable=true"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
@@ -595,7 +589,7 @@ services:
         max_attempts: 3
       labels:
         - traefik.enable=true
-        - "traefik.http.routers.stweg3.rule=Host(`stweg3.rosenweg4303.ch`)"
+        - "traefik.http.routers.stweg3.rule=Host(`stweg3.rosenweg4303.ch`) || Host(`rosenweg9.ch`) || Host(`www.rosenweg9.ch`)"
         - traefik.http.routers.stweg3.entrypoints=websecure
         - traefik.http.routers.stweg3.tls.certresolver=cf
         - traefik.http.services.stweg3.loadbalancer.server.port=80
