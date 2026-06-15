@@ -3057,14 +3057,33 @@ app.put('/api/kontakte', authMiddleware, adminOnly, async (req, res) => {
 
 // Resolve all email addresses for a group (including all descendant groups)
 // Holt die beiden teuren Authentik-Volllisten (Gruppen + aktive User).
-// Teuer (~je 1-2s) — wer mehrere Gruppen aufloest, sollte EINMAL holen und
-// resolveGroupEmailsFromData wiederverwenden statt resolveGroupEmails pro Gruppe.
-async function fetchAuthentikGroupsUsers() {
-  const groupsData = await authentikAPI('GET', '/core/groups/?page_size=500');
-  const allGroups = groupsData.results || groupsData;
-  const usersData = await authentikAPI('GET', '/core/users/?page_size=500');
-  const allUsers = (usersData.results || usersData).filter(u => u.is_active && u.email);
-  return { allGroups, allUsers };
+// Teuer (~je mehrere Sekunden, kalt) — daher kurzer Cross-Request-Cache (TTL)
+// PLUS In-Flight-Coalescing (gleichzeitige Aufrufer teilen sich einen Fetch).
+// Glaettet u.a. den Cold-Start von GET /api/verteiler. Tradeoff: Gruppen-
+// Mitgliedschaften koennen bis zu AUTH_GU_TTL veraltet angezeigt werden — fuer
+// Member-Counts/Versand-Vorschau unkritisch (Authentik-Gruppen aendern selten).
+const AUTH_GU_TTL = 60 * 1000;
+let _authGUCache = null;      // { ts, data }
+let _authGUInflight = null;   // Promise waehrend ein Fetch laeuft
+async function fetchAuthentikGroupsUsers(force = false) {
+  if (!force && _authGUCache && (Date.now() - _authGUCache.ts) < AUTH_GU_TTL) {
+    return _authGUCache.data;
+  }
+  if (_authGUInflight) return _authGUInflight;
+  _authGUInflight = (async () => {
+    try {
+      const groupsData = await authentikAPI('GET', '/core/groups/?page_size=500');
+      const allGroups = groupsData.results || groupsData;
+      const usersData = await authentikAPI('GET', '/core/users/?page_size=500');
+      const allUsers = (usersData.results || usersData).filter(u => u.is_active && u.email);
+      const data = { allGroups, allUsers };
+      _authGUCache = { ts: Date.now(), data };
+      return data;
+    } finally {
+      _authGUInflight = null;
+    }
+  })();
+  return _authGUInflight;
 }
 
 // Pure: loest Gruppe (inkl. Untergruppen-Hierarchie) gegen vorgeladene Listen auf.
