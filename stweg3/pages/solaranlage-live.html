@@ -167,9 +167,11 @@
             const P = ctr($('c-prod')), C = ctr($('c-cons')), G = ctr($('c-grid'));
             // Endpunkte auf die Kreisraender kuerzen (Linie startet/endet am Rand)
             const edge = (a, b) => { const dx=b.x-a.x, dy=b.y-a.y, len=Math.hypot(dx,dy)||1; return `${a.x+dx/len*a.rad} ${a.y+dy/len*a.rad} ${b.x-dx/len*b.rad} ${b.y-dy/len*b.rad}`; };
+            // Topologie: PV speist die Hausverteilung, das Netz haengt am Haus.
+            // Daher PV->Haus, und Haus<->Netz (Ueberschuss raus / Bezug rein).
             const seg = [];
             if (d.production_w > 50 && d.consumption_w > 50) seg.push(['fl-green', edge(P, C)]);  // PV -> Haus
-            if (d.feed_in_w > 50) seg.push(['fl-red', edge(P, G)]);                                 // PV -> Netz (Lieferung)
+            if (d.feed_in_w > 50) seg.push(['fl-red', edge(C, G)]);                                 // Haus -> Netz (Lieferung)
             if (d.draw_w > 50) seg.push(['fl-blue', edge(G, C)]);                                   // Netz -> Haus (Bezug)
             svg.innerHTML = seg.map(([cls, c]) => { const p = c.split(' ');
                 return `<line x1="${p[0]}" y1="${p[1]}" x2="${p[2]}" y2="${p[3]}" class="flowline ${cls}"/>`; }).join('');
