@@ -9480,10 +9480,11 @@ async function findVerwaltungForStweg(stweg) {
 // freigegeben werden. Inhalt ist in der Queue editierbar.
 
 async function enqueueVerwaltungMail({
-  source_type, source_id, mailTo, mailCc, mailReplyTo, subject, bodyText, attachments, createdBy,
+  source_type, source_id, mailTo, mailCc, mailBcc, mailReplyTo, subject, bodyText, attachments, createdBy,
 }) {
   const toStr = Array.isArray(mailTo) ? mailTo.join(', ') : String(mailTo || '');
   const ccStr = Array.isArray(mailCc) ? mailCc.join(', ') : (mailCc ? String(mailCc) : null);
+  const bccStr = Array.isArray(mailBcc) ? mailBcc.join(', ') : (mailBcc ? String(mailBcc) : null);
   // M7: Attachments in separater Tabelle statt JSONB inline (Skalierbarkeit).
   // Legacy attachments-JSONB-Spalte wird mit minimalen Metadaten gefuellt für
   // Backward-Compat des GET-Endpoints.
@@ -9494,10 +9495,10 @@ async function enqueueVerwaltungMail({
   }));
   const r = await pool.query(
     `INSERT INTO verwaltung_mail_queue
-       (source_type, source_id, mail_to, mail_cc, mail_reply_to, subject, body_text, attachments, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)
+       (source_type, source_id, mail_to, mail_cc, mail_bcc, mail_reply_to, subject, body_text, attachments, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
      RETURNING id`,
-    [source_type, source_id || null, toStr, ccStr, mailReplyTo || null, subject, bodyText, JSON.stringify(attMeta), createdBy || null],
+    [source_type, source_id || null, toStr, ccStr, bccStr, mailReplyTo || null, subject, bodyText, JSON.stringify(attMeta), createdBy || null],
   );
   const queueId = r.rows[0].id;
   // Real Attachments in separate Tabelle
@@ -9589,6 +9590,7 @@ async function sendVerwaltungMailFromQueue(queueId, approverEmail) {
       from: MAIL_FROM,
       to: q.mail_to,
       cc: q.mail_cc || undefined,
+      bcc: q.mail_bcc || undefined,
       replyTo: q.mail_reply_to || undefined,
       subject: q.subject,
       text: q.body_text,
@@ -11633,6 +11635,8 @@ app.get('/api/verwaltung-mail-queue', authMiddleware, requireTechnikOrPraesident
     }
     const r = await pool.query(
       `SELECT id, source_type, source_id, mail_to, mail_cc, mail_reply_to,
+              CASE WHEN mail_bcc IS NULL OR mail_bcc = '' THEN 0
+                   ELSE array_length(string_to_array(mail_bcc, ','), 1) END AS bcc_count,
               subject, status, created_by, created_at, edited_by, edited_at,
               freigegeben_von, freigegeben_am, abgelehnt_von, abgelehnt_am, abgelehnt_grund,
               sent_at, send_error,
@@ -15768,10 +15772,14 @@ async function sendMaintenanceWhatsApp(maint, kind) {
   }
 }
 
-// Sendet eine Wartungs-Mail an scope-Empfaenger. Body als Markdown -> simple Plain.
+// Stellt eine Wartungs-Mail an scope-Empfaenger in die Genehmigungs-Outbox
+// (verwaltung_mail_queue) — KEIN Direktversand mehr. Technik/Präsident geben
+// frei, erst dann geht die Mail per BCC an die Kunden raus. Gilt fuer alle
+// Trigger (manuell + auto, z.B. UniFi-Geraete-Update). Der WhatsApp-Broadcast
+// (sendMaintenanceWhatsApp) laeuft weiterhin direkt — nur E-Mail wird gestoppt.
 async function sendMaintenanceMail(maint, kind /* 'pre'|'start'|'end' */) {
   const recipients = await maintRecipientsForScope(maint.scope || {});
-  if (recipients.length === 0) return { sent: 0, skipped: 'no_recipients' };
+  if (recipients.length === 0) return { sent: 0, queued: 0, skipped: 'no_recipients' };
   const sevPrefix = maint.severity === 'critical' ? '⚠ DRINGEND' : (maint.severity === 'warning' ? '⚠' : 'ℹ');
   const kindLabel = kind === 'pre' ? 'Erinnerung' : (kind === 'start' ? 'beginnt jetzt' : 'beendet');
   const subject = `${sevPrefix} [Rosenweg ISP] ${maint.title} — ${kindLabel}`;
@@ -15790,33 +15798,25 @@ async function sendMaintenanceMail(maint, kind /* 'pre'|'start'|'end' */) {
     `\nFuer Rueckfragen: technik@rosenweg4303.ch`,
     `\nRosenweg ISP`,
   ].filter(Boolean).join('\n');
-  // Mit Throttle+Combine pro Empfaenger. Direct-Sender bekommen sofort eine
-  // BCC-Mail; gethrottelte Empfaenger werden in pending_lines gesammelt und
-  // spaeter vom Flush-Cron als Einzel-Mail (Sammelmeldung) versendet.
+  // To = sichtbare Ausschuss-Adresse, BCC = Kundenliste (Empfaenger bleiben
+  // untereinander verborgen). Die Mail landet als 'pending' in der Outbox und
+  // wird erst nach Freigabe (Technik/Präsident) per sendVerwaltungMailFromQueue
+  // tatsaechlich versendet.
+  const bccList = recipients.filter(e => e.toLowerCase() !== MAINT_AUSSCHUSS_EMAIL.toLowerCase());
   try {
-    const r = await deliverMaintNotify({
-      channel: 'email',
-      recipients,
-      body,
+    const queueId = await enqueueVerwaltungMail({
+      source_type: 'isp_maintenance',
+      source_id: maint.id || null,
+      mailTo: MAINT_AUSSCHUSS_EMAIL,
+      mailBcc: bccList,
       subject,
-      sendFn: async (list, b) => {
-        if (!list.length) return 0;
-        // loggedSendMail: schreibt Versand in email_log fuer Audit.
-        // BCC fuer den Direct-Cohort — eine Mail an alle Empfaenger.
-        await loggedSendMail({
-          from: MAIL_FROM,
-          to: MAIL_FROM,
-          bcc: list,
-          subject,
-          text: b,
-        }, 'maint-notify-direct');
-        return list.length;
-      },
+      bodyText: body,
+      createdBy: maint.auto_source ? `isp-maintenance-auto (${maint.auto_source})` : 'isp-maintenance',
     });
-    return { sent: r.sent, throttled: r.throttled };
+    return { sent: 0, queued: recipients.length, queue_id: queueId };
   } catch (e) {
-    console.warn('[Maint-Mail] error:', e.message);
-    return { sent: 0, error: e.message };
+    console.warn('[Maint-Mail] enqueue error:', e.message);
+    return { sent: 0, queued: 0, error: e.message };
   }
 }
 
@@ -20015,6 +20015,10 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_vmq_pending ON verwaltung_mail_queue(status, created_at) WHERE status = 'pending';
       CREATE INDEX IF NOT EXISTS idx_vmq_source ON verwaltung_mail_queue(source_type, source_id);
+      -- BCC fuer Broadcast-Mails (z.B. ISP-Wartungsmeldungen an viele Kunden):
+      -- Empfaenger bleiben untereinander verborgen. mail_to traegt eine sichtbare
+      -- Adresse (z.B. ausschuss@), mail_bcc die eigentliche Kundenliste.
+      ALTER TABLE verwaltung_mail_queue ADD COLUMN IF NOT EXISTS mail_bcc TEXT;
 
       -- M7: Separate Tabelle für Mail-Attachments. Inline-base64 in JSONB skaliert
       -- nicht (20 MB Anhang × 100 Mails = 2 GB Tabelle). Hier nur Metadaten +

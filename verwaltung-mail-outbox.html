@@ -121,7 +121,7 @@
           <span class="text-xs text-gray-400">${esc(fmtDt(m.created_at))}</span>
         </div>
         <div class="mt-1 font-medium text-gray-900 text-sm truncate">${esc(m.subject)}</div>
-        <div class="text-xs text-gray-500 mt-0.5 truncate">→ ${esc(m.mail_to)}</div>
+        <div class="text-xs text-gray-500 mt-0.5 truncate">→ ${esc(m.mail_to)}${m.bcc_count > 0 ? ` · BCC ${esc(m.bcc_count)}` : ''}</div>
         <div class="text-xs text-gray-400 mt-0.5">
           ${esc(m.source_type)}${m.source_id ? ' #' + m.source_id : ''}
           ${m.attachment_count > 0 ? ` · 📎 ${m.attachment_count}` : ''}
@@ -220,6 +220,10 @@
           <span class="text-xs text-gray-500">CC</span>
           <input id="f-cc" type="text" value="${esc(m.mail_cc || '')}" ${editable} class="${editableCls} mt-1 w-full border rounded px-2 py-1.5 text-sm">
         </label>
+        ${m.mail_bcc ? `<label class="block">
+          <span class="text-xs text-gray-500">BCC (verdeckte Empfänger — ${esc(String(m.mail_bcc).split(',').filter(s => s.trim()).length)})</span>
+          <textarea readonly rows="2" class="mt-1 w-full border rounded px-2 py-1.5 text-sm bg-gray-50 text-gray-600">${esc(m.mail_bcc)}</textarea>
+        </label>` : ''}
         <label class="block">
           <span class="text-xs text-gray-500">Reply-To</span>
           <input id="f-reply" type="text" value="${esc(m.mail_reply_to || '')}" ${editable} class="${editableCls} mt-1 w-full border rounded px-2 py-1.5 text-sm">
