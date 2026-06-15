@@ -3,259 +3,204 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Solaranlage Live-Übersicht - STWEG 3 Rosenweg</title>
+    <title>Solaranlage Live - Rosenweg 9</title>
     <link rel="icon" href="../images/logo.png" type="image/png">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(135deg, #eab308 0%, #f97316 100%);
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
+            min-height: 100vh; display: flex; flex-direction: column; color: #1f2937;
         }
-
         .header {
-            background: rgba(255, 255, 255, 0.95);
-            padding: 1rem 2rem;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 1rem;
+            background: rgba(255,255,255,0.95); padding: 1rem 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            display: flex; justify-content: space-between; align-items: center;
+            flex-wrap: wrap; gap: 1rem;
         }
-
-        .header h1 {
-            color: #333;
-            font-size: 1.5rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .header .icon {
-            font-size: 2rem;
-        }
-
+        .header h1 { color: #333; font-size: 1.4rem; display: flex; align-items: center; gap: .5rem; }
         .header .back-btn {
-            background: #eab308;
-            color: white;
-            padding: 0.5rem 1.5rem;
-            border-radius: 8px;
-            text-decoration: none;
-            font-weight: 500;
-            transition: all 0.3s ease;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
+            background: #eab308; color: #fff; padding: .5rem 1.25rem; border-radius: 8px;
+            text-decoration: none; font-weight: 600; transition: all .2s;
         }
-
-        .header .back-btn:hover {
-            background: #f97316;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        .header .back-btn:hover { background: #f97316; }
+        .live-badge {
+            display: inline-flex; align-items: center; gap: .4rem; padding: .2rem .7rem;
+            background: #fee2e2; color: #b91c1c; border-radius: 20px; font-size: .8rem; font-weight: 700;
         }
+        .live-dot { width: 8px; height: 8px; background: #ef4444; border-radius: 50%; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
 
-        .container {
-            flex: 1;
-            display: flex;
-            padding: 2rem;
-            max-width: 1800px;
-            width: 100%;
-            margin: 0 auto;
+        .wrap { flex: 1; width: 100%; max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
+
+        /* Fluss-Diagramm */
+        .flow {
+            display: grid; grid-template-columns: 1fr 1fr;
+            grid-template-areas: "prod prod" "cons grid";
+            gap: 1.5rem 2rem; align-items: center; justify-items: center;
+            background: rgba(255,255,255,0.96); border-radius: 20px; padding: 2.5rem 1.5rem;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.18); position: relative;
         }
-
-        .iframe-wrapper {
-            flex: 1;
-            background: white;
-            border-radius: 16px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-            overflow: hidden;
-            position: relative;
+        .node-prod { grid-area: prod; }
+        .node-cons { grid-area: cons; }
+        .node-grid { grid-area: grid; }
+        .circle {
+            width: clamp(140px, 26vw, 210px); aspect-ratio: 1; border-radius: 50%;
+            background: #fff; display: flex; flex-direction: column; align-items: center;
+            justify-content: center; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            border: 6px solid #e5e7eb; transition: border-color .4s;
         }
+        .circle .ic { font-size: clamp(1.4rem, 4vw, 2rem); margin-bottom: .3rem; }
+        .circle .val { font-size: clamp(1.4rem, 5vw, 2.4rem); font-weight: 700; line-height: 1; color: #111827; }
+        .circle .val .u { font-size: .5em; font-weight: 500; color: #6b7280; }
+        .circle .lbl { font-size: clamp(.75rem, 2.2vw, .95rem); color: #6b7280; margin-top: .35rem; text-transform: uppercase; letter-spacing: .03em; }
+        .circle .sub { font-size: .8rem; color: #9ca3af; margin-top: .15rem; }
+        .ring-prod { border-color: #eab308; }
+        .ring-cons { border-color: #22c55e; }
+        .ring-feed { border-color: #ef4444; }
+        .ring-draw { border-color: #3b82f6; }
+        .ring-idle { border-color: #e5e7eb; }
 
-        .iframe-wrapper iframe {
-            width: 100%;
-            height: 100%;
-            border: none;
-            display: block;
+        .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-top: 1.5rem; }
+        .card {
+            background: rgba(255,255,255,0.96); border-radius: 14px; padding: 1.1rem 1.25rem;
+            box-shadow: 0 4px 18px rgba(0,0,0,0.12);
         }
+        .card .ct { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: #9ca3af; display:flex; align-items:center; gap:.4rem; }
+        .card .cv { font-size: 1.6rem; font-weight: 700; color: #111827; margin-top: .3rem; }
+        .card .cv .u { font-size: .55em; font-weight: 500; color: #6b7280; }
+        .card .cs { font-size: .82rem; color: #6b7280; margin-top: .15rem; }
+        .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+        .dot-on { background: #22c55e; } .dot-off { background: #9ca3af; }
 
-        .loading {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            text-align: center;
-            color: #eab308;
-        }
+        .meta { text-align: center; color: rgba(255,255,255,0.95); font-size: .82rem; margin-top: 1.25rem; line-height: 1.7; }
+        .meta .src { opacity: .85; }
+        .err { background: #fef2f2; color: #b91c1c; border-radius: 12px; padding: 1rem; text-align: center; margin-bottom: 1rem; display: none; }
 
-        .loading-spinner {
-            width: 50px;
-            height: 50px;
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #eab308;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 1rem;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .info-box {
-            background: rgba(255, 255, 255, 0.95);
-            padding: 1rem;
-            border-radius: 12px;
-            margin: 0 2rem 1rem;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-        }
-
-        .info-box p {
-            color: #555;
-            line-height: 1.6;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .status-indicator {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.25rem 0.75rem;
-            background: #fef3c7;
-            color: #78350f;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            font-weight: 500;
-        }
-
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            background: #eab308;
-            border-radius: 50%;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        @media (max-width: 768px) {
-            .header {
-                padding: 1rem;
-            }
-
-            .header h1 {
-                font-size: 1.2rem;
-            }
-
-            .container {
-                padding: 1rem;
-            }
-
-            .info-box {
-                margin: 0 1rem 1rem;
-            }
-        }
-
-        /* Responsive iframe height */
-        @media (min-width: 769px) {
-            .iframe-wrapper {
-                min-height: 700px;
-            }
-        }
-
-        @media (max-width: 768px) {
-            .iframe-wrapper {
-                min-height: 600px;
-            }
+        @media (max-width: 560px) {
+            .flow { grid-template-columns: 1fr; grid-template-areas: "prod" "cons" "grid"; gap: 1.25rem; padding: 1.75rem 1rem; }
+            .header { padding: 1rem; } .header h1 { font-size: 1.15rem; } .wrap { padding: 1rem; }
         }
     </style>
 </head>
 <body>
     <header class="header">
-        <h1>
-            <span class="icon">☀️</span>
-            Solaranlage Live-Übersicht
-        </h1>
-        <a href="index.html" class="back-btn">
-            ← Zurück zur Startseite
-        </a>
+        <h1><span>☀️</span> Solaranlage Live – Rosenweg 9</h1>
+        <span class="live-badge"><span class="live-dot"></span> LIVE</span>
+        <a href="../index.html" class="back-btn">← Zurück</a>
     </header>
 
-    <div class="info-box">
-        <p>
-            <span class="status-indicator">
-                <span class="status-dot"></span>
-                LIVE
-            </span>
-            Aktuelle Produktions- und Verbrauchsdaten der Solaranlage auf dem Rosenweg 9
-        </p>
-    </div>
+    <div class="wrap">
+        <div id="err" class="err"></div>
 
-    <div class="container">
-        <div class="iframe-wrapper" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 3rem;">
-            <div style="text-align: center; max-width: 600px;">
-                <div style="font-size: 5rem; margin-bottom: 2rem;">☀️</div>
-                <h2 style="color: #333; margin-bottom: 1.5rem; font-size: 2rem;">Solaranlage Live-Daten</h2>
-                <p style="color: #666; margin-bottom: 2.5rem; line-height: 1.8; font-size: 1.1rem;">
-                    Die Live-Übersicht zeigt Ihnen in Echtzeit die aktuelle Stromproduktion,
-                    den Verbrauch und die Netzeinspeisung der Solaranlage auf dem Rosenweg 9.
-                </p>
-
-                <a href="https://my.smartfox.at/users/liveview/autoLogin/R9p2vHCKsbpTApNV2PDBQEVAWKHSHPttsfGcPSlO7LU"
-                   target="_blank"
-                   rel="noopener noreferrer"
-                   class="live-button"
-                   style="display: inline-flex; align-items: center; gap: 0.75rem; background: linear-gradient(135deg, #eab308 0%, #f97316 100%); color: white; padding: 1.25rem 2.5rem; border-radius: 12px; text-decoration: none; font-weight: 600; font-size: 1.2rem; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(234, 179, 8, 0.4);">
-                    <span style="font-size: 1.5rem;">📊</span>
-                    Live-Daten öffnen
-                    <span style="font-size: 1.2rem;">→</span>
-                </a>
-
-                <p style="color: #999; margin-top: 2rem; font-size: 0.9rem;">
-                    Die Daten werden in einem neuen Fenster geöffnet
-                </p>
-
-                <div style="margin-top: 3rem; padding: 1.5rem; background: #f8f9fa; border-radius: 12px; text-align: left;">
-                    <h3 style="color: #333; margin-bottom: 1rem; font-size: 1.1rem;">📈 Was Sie sehen werden:</h3>
-                    <ul style="color: #666; line-height: 2; list-style: none; padding: 0;">
-                        <li style="margin-bottom: 0.5rem;">✓ Aktuelle Stromproduktion in kW</li>
-                        <li style="margin-bottom: 0.5rem;">✓ Hausverbrauch in Echtzeit</li>
-                        <li style="margin-bottom: 0.5rem;">✓ Netzbezug oder Einspeisung</li>
-                        <li style="margin-bottom: 0.5rem;">✓ Batterie-Status (falls vorhanden)</li>
-                        <li style="margin-bottom: 0.5rem;">✓ Boiler-Status</li>
-                    </ul>
+        <div class="flow">
+            <div class="node-prod">
+                <div id="c-prod" class="circle ring-idle">
+                    <div class="ic">🔆</div>
+                    <div class="val"><span id="v-prod">–</span><span class="u"> kW</span></div>
+                    <div class="lbl">Produktion</div>
                 </div>
             </div>
+            <div class="node-cons">
+                <div id="c-cons" class="circle ring-idle">
+                    <div class="ic">🏠</div>
+                    <div class="val"><span id="v-cons">–</span><span class="u"> kW</span></div>
+                    <div class="lbl">Verbrauch</div>
+                    <div id="v-self" class="sub"></div>
+                </div>
+            </div>
+            <div class="node-grid">
+                <div id="c-grid" class="circle ring-idle">
+                    <div class="ic">⚡</div>
+                    <div class="val"><span id="v-grid">–</span><span class="u"> kW</span></div>
+                    <div id="l-grid" class="lbl">Netz</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="cards">
+            <div class="card">
+                <div class="ct"><span id="boiler-dot" class="dot dot-off"></span> <span id="boiler-label">Boiler</span></div>
+                <div class="cv"><span id="v-boiler">–</span><span class="u"> kW</span></div>
+                <div id="v-boiler-pct" class="cs"></div>
+            </div>
+            <div class="card">
+                <div class="ct">☀️ Ertrag heute</div>
+                <div class="cv"><span id="v-today-prod">–</span><span class="u"> kWh</span></div>
+            </div>
+            <div class="card">
+                <div class="ct">⚡ Einspeisung heute</div>
+                <div class="cv"><span id="v-today-feed">–</span><span class="u"> kWh</span></div>
+            </div>
+        </div>
+
+        <div class="meta">
+            <div id="m-updated">Verbinde …</div>
+            <div id="m-src" class="src"></div>
         </div>
     </div>
 
     <script>
-        // Add hover effect to button
-        const button = document.querySelector('.live-button');
+        const kw = w => (Math.abs(w) / 1000).toFixed(2);
+        const kwh = wh => (wh / 1000).toFixed(1);
+        const $ = id => document.getElementById(id);
+        const SRC_LBL = { geeicht: 'geeichter Zähler', smartfox: 'SmartFox', none: '–' };
 
-        button.addEventListener('mouseenter', function() {
-            this.style.transform = 'translateY(-3px)';
-            this.style.boxShadow = '0 6px 20px rgba(234, 179, 8, 0.6)';
-        });
+        async function load() {
+            try {
+                const r = await fetch('/api/energy/solar-live', { cache: 'no-store' });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const d = await r.json();
+                $('err').style.display = 'none';
 
-        button.addEventListener('mouseleave', function() {
-            this.style.transform = 'translateY(0)';
-            this.style.boxShadow = '0 4px 15px rgba(234, 179, 8, 0.4)';
-        });
+                // Produktion
+                $('v-prod').textContent = kw(d.production_w);
+                $('c-prod').className = 'circle ' + (d.production_w > 50 ? 'ring-prod' : 'ring-idle');
+
+                // Verbrauch
+                $('v-cons').textContent = kw(d.consumption_w);
+                $('c-cons').className = 'circle ' + (d.consumption_w > 50 ? 'ring-cons' : 'ring-idle');
+                $('v-self').textContent = d.production_w > 50 ? d.self_pct + '% Eigenverbrauch' : '';
+
+                // Netz: Lieferung (Einspeisung) oder Bezug
+                if (d.feed_in_w > 50) {
+                    $('v-grid').textContent = kw(d.feed_in_w);
+                    $('l-grid').textContent = 'Lieferung';
+                    $('c-grid').className = 'circle ring-feed';
+                } else if (d.draw_w > 50) {
+                    $('v-grid').textContent = kw(d.draw_w);
+                    $('l-grid').textContent = 'Netzbezug';
+                    $('c-grid').className = 'circle ring-draw';
+                } else {
+                    $('v-grid').textContent = '0.00';
+                    $('l-grid').textContent = 'Netz';
+                    $('c-grid').className = 'circle ring-idle';
+                }
+
+                // Boiler
+                $('boiler-label').textContent = d.boiler.label || 'Boiler';
+                $('v-boiler').textContent = kw(d.boiler.power_w);
+                $('v-boiler-pct').textContent = d.boiler.power_w > 10 ? Math.round(d.boiler.percent) + '%' : 'aus';
+                $('boiler-dot').className = 'dot ' + (d.boiler.power_w > 10 ? 'dot-on' : 'dot-off');
+
+                // Tageswerte
+                $('v-today-prod').textContent = kwh(d.today.production_wh);
+                $('v-today-feed').textContent = kwh(d.today.feed_in_wh);
+
+                // Meta
+                const t = new Date(d.ts);
+                $('m-updated').textContent = 'Aktualisiert: ' + t.toLocaleTimeString('de-CH');
+                $('m-src').textContent = 'Produktion: ' + (SRC_LBL[d.production_source] || d.production_source)
+                    + ' · Netz: ' + (SRC_LBL[d.grid_source] || d.grid_source);
+            } catch (e) {
+                $('err').style.display = 'block';
+                $('err').textContent = 'Live-Daten nicht erreichbar: ' + e.message;
+                $('m-updated').textContent = '';
+            }
+        }
+        load();
+        setInterval(load, 4000);
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
     </script>
 </body>
 </html>

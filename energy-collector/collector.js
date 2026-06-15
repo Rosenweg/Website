@@ -332,6 +332,11 @@ async function readShelly(meter) {
 // ─── SmartFox Pro2 HTTP/XML Reader (Heizstab/Boiler) ────────────────
 const http = require('http');
 
+// Aggregierte SmartFox-Solarwerte fuer /api/energy/solar-live. Wird bei jedem
+// SmartFox-Poll aktualisiert. SEPARAT von der readings-Tabelle gehalten, damit
+// das Meter-Schema unveraendert bleibt. null bis zum ersten erfolgreichen Poll.
+let smartfoxSolar = null;
+
 function smartFoxFetch(url, timeout = 10000) {
   return new Promise((resolve, reject) => {
     const req = http.get(url, { timeout }, (res) => {
@@ -387,6 +392,27 @@ async function readSmartFox(meter) {
 
   // Daily energy counter (Wh -> kWh) - resets at midnight
   data.energy_import_kwh = parseVal('hidAoutEnergyDay') / 1000;
+
+  // ── Solar-Live-Aggregat (fuer /api/energy/solar-live) ──
+  // PV-Produktion = Summe der Wechselrichter wr1..wr5 (kW->W). Netz =
+  // detailsPowerValue (W; <0 = Einspeisung/Lieferung, >0 = Bezug). Boiler aus
+  // analogOut*. Tageswerte aus eDay*. Diese Felder gibt es nur am SmartFox.
+  const parseText = (id) => {
+    const m = xml.match(new RegExp(`<value id="${id}">([^<]*)</value>`));
+    return m ? m[1].replace(/&[^;]+;/g, '').replace(/<[^>]*>/g, '').trim() : '';
+  };
+  let prodKw = 0;
+  for (let i = 1; i <= 5; i++) prodKw += parseVal(`wr${i}PowerValue`);
+  smartfoxSolar = {
+    ts: Date.now(),
+    production_w: prodKw * 1000,
+    grid_w: parseVal('detailsPowerValue'),       // <0 = Einspeisung, >0 = Bezug
+    boiler_w: parseVal('analogOutPower') * 1000,
+    boiler_pct: parseVal('analogOutPercent'),
+    boiler_desc: parseText('analogOutDescription') || 'Boiler',
+    today_prod_wh: parseVal('eDayValue'),
+    today_feedin_wh: parseVal('eDayToGridValue'),
+  };
 
   return data;
 }
@@ -638,6 +664,50 @@ app.get('/api/energy/live/:meterId', (req, res) => {
   const data = getNetLiveData(req.params.meterId);
   if (!data) return res.status(404).json({ error: 'Meter not found' });
   res.json(data);
+});
+
+// Aggregierte Solar-Live-Ansicht Rosenweg 9 (Fluss-Diagramm-Daten).
+// GEEICHT-FIRST mit SmartFox-Fallback: Produktion bevorzugt vom geeichten
+// Zaehler r9-produktion; Netz aktuell vom SmartFox (geeichter r9-haupt liefert
+// keine Modbus-Daten — sobald er zurueck ist + Vorzeichen verifiziert, hier
+// ergaenzen). Konvention grid_w: >0 = Bezug, <0 = Einspeisung/Lieferung.
+app.get('/api/energy/solar-live', (req, res) => {
+  const FRESH_MS = 120000;
+  const now = Date.now();
+  const freshTs = (ts) => ts && (now - new Date(ts).getTime() < FRESH_MS);
+
+  // Produktion: geeicht (power_w < 0 = Produktion) -> sonst SmartFox-WR-Summe
+  const prod = latestReadings.get('r9-produktion');
+  let production_w, production_source;
+  if (prod && freshTs(prod.ts)) {
+    production_w = Math.max(0, -(prod.power_w || 0));
+    production_source = 'geeicht';
+  } else if (smartfoxSolar && freshTs(smartfoxSolar.ts)) {
+    production_w = Math.max(0, smartfoxSolar.production_w || 0);
+    production_source = 'smartfox';
+  } else { production_w = 0; production_source = 'none'; }
+
+  // Netz: SmartFox (r9-haupt Modbus offline). >0 Bezug, <0 Lieferung.
+  let grid_w, grid_source;
+  if (smartfoxSolar && freshTs(smartfoxSolar.ts)) {
+    grid_w = smartfoxSolar.grid_w || 0; grid_source = 'smartfox';
+  } else { grid_w = 0; grid_source = 'none'; }
+
+  const consumption_w = Math.max(0, production_w + grid_w);
+  const self_pct = production_w > 0 ? Math.round(consumption_w / production_w * 100) : 0;
+  const sf = smartfoxSolar || {};
+
+  res.json({
+    ts: new Date().toISOString(),
+    production_w, production_source,
+    grid_w, grid_source,
+    feed_in_w: grid_w < 0 ? -grid_w : 0,   // Lieferung
+    draw_w: grid_w > 0 ? grid_w : 0,       // Bezug
+    consumption_w, self_pct,
+    boiler: { power_w: sf.boiler_w || 0, percent: sf.boiler_pct || 0, label: sf.boiler_desc || 'Boiler' },
+    today: { production_wh: sf.today_prod_wh || 0, feed_in_wh: sf.today_feedin_wh || 0 },
+    smartfox_online: !!(smartfoxSolar && freshTs(smartfoxSolar.ts)),
+  });
 });
 
 // Helper: subtract child meter values from parent rows (in-memory, after query)
