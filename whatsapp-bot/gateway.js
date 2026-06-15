@@ -343,10 +343,12 @@ function startGateway(botCore) {
   smtp.listen(SMTP_PORT, () => console.log(`[Gateway] SMTP-in auf Port ${SMTP_PORT} (auth:${!!SMTP_USER})`));
 
   // ── Hooks zurueck an index.js (Inbound-Logging) ──────────────────────────
-  function logInbound({ phone, chatId, body, whatsappMsgId, attachments }) {
+  function logInbound({ phone, chatId, body, whatsappMsgId, attachments, isGroup, groupName }) {
     q.msgInsert.run({
       direction: 'inbound', source: 'inbound', sender: phone || chatId || null,
-      target: chatId || phone || null, target_kind: 'jid',
+      // Bei Gruppen: target = Gruppenname (fuers Display), sonst die 1:1-JID.
+      target: isGroup ? (groupName || chatId) : (chatId || phone || null),
+      target_kind: isGroup ? 'group' : 'jid',
       subject: null, body: body || null,
       attachments_json: JSON.stringify((attachments || []).map(a => ({ filename: a.filename, mimetype: a.mimetype }))),
       whatsapp_msg_id: whatsappMsgId || null, status: 'received', error: null,

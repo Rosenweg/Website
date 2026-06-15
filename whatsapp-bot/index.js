@@ -156,77 +156,70 @@ client.on('ready', () => {
 client.on('message_create', async (msg) => {
   try {
     if (msg.fromMe) return;
-    // Gruppen ignorieren (sonst antwortet Bot auf alles in jeder Gruppe).
-    if (msg.from.endsWith('@g.us')) return;
-    // Nur 1:1 (klassisch @c.us oder neu @lid)
-    if (!msg.from.endsWith('@c.us') && !msg.from.endsWith('@lid')) return;
-    // Phone aufloesen — bei @lid liefert getContact() typischerweise nur
-    // die LID. Die echte Nummer steckt im Store.Contact (in-page WhatsApp
-    // Web State) unter Feldern wie phoneNumber/lidOrigPhone. Wir greifen
-    // via puppeteer-evaluate darauf zu.
+    const isGroup = msg.from.endsWith('@g.us');
+    // 1:1 (klassisch @c.us oder neu @lid) ODER Gruppe (@g.us). Gruppen werden
+    // NUR ins Gateway-Log geschrieben (kein Command-Bot-Forward -> kein Auto-Reply).
+    if (!isGroup && !msg.from.endsWith('@c.us') && !msg.from.endsWith('@lid')) return;
+
+    // Absender-JID: bei Gruppen der Teilnehmer (author), sonst der Chat selbst.
+    const senderJid = isGroup ? (msg.author || msg.from) : msg.from;
+
+    // Phone aufloesen — bei @lid liefert getContact() typischerweise nur die LID.
     let phone = null;
     let contactDebug = {};
     try {
-      const contact = await msg.getContact();
+      const contact = await msg.getContact(); // bei Gruppen: der Author
       contactDebug = {
-        id: contact?.id?._serialized,
-        number: contact?.number,
-        pushname: contact?.pushname,
-        name: contact?.name,
-        shortName: contact?.shortName,
-        verifiedName: contact?.verifiedName,
+        id: contact?.id?._serialized, number: contact?.number, pushname: contact?.pushname,
+        name: contact?.name, shortName: contact?.shortName, verifiedName: contact?.verifiedName,
         isMyContact: contact?.isMyContact,
       };
-      if (contact?.number && /^\d{8,15}$/.test(contact.number) && !msg.from.startsWith(contact.number)) {
+      if (contact?.number && /^\d{8,15}$/.test(contact.number) && !senderJid.startsWith(contact.number)) {
         phone = '+' + contact.number;
       }
     } catch (e) { /* fallback unten */ }
-    // Bei @lid: offizielle whatsapp-web.js API client.getContactLidAndPhone()
-    // (ab v1.34) liefert [{lid, pn}] zurueck. pn ist die echte Telefonnummer
-    // als JID-User-Teil oder ganzer JID.
-    if (!phone && msg.from.endsWith('@lid')) {
+    if (!phone && senderJid.endsWith('@lid')) {
       try {
-        const arr = await client.getContactLidAndPhone([msg.from]);
+        const arr = await client.getContactLidAndPhone([senderJid]);
         const entry = Array.isArray(arr) ? arr[0] : arr;
-        console.log(`[WA-LID] getContactLidAndPhone(${msg.from}):`, JSON.stringify(entry));
         const pn = entry?.pn || '';
-        // pn kann '<digits>' oder '<digits>@s.whatsapp.net' oder '<digits>@c.us' sein
         const digits = String(pn).split('@')[0].replace(/^\+/, '');
         if (/^\d{8,15}$/.test(digits)) phone = '+' + digits;
       } catch (e) { console.warn('[WA-LID] getContactLidAndPhone Fehler:', e.message); }
     }
-    if (!phone && msg.from.endsWith('@c.us')) {
-      phone = '+' + msg.from.replace('@c.us', '');
-    }
-    // Letzter Fallback: LID-Nummer mit Hinweis (Person-Match wird scheitern)
+    if (!phone && senderJid.endsWith('@c.us')) phone = '+' + senderJid.replace('@c.us', '');
     if (!phone) {
-      phone = '+' + msg.from.replace(/@(lid|c\.us)$/, '');
-      console.warn(`[WA] Inbound ohne aufloesbare echte Nummer, fallback=${phone} debug=`, contactDebug);
+      phone = '+' + senderJid.replace(/@(lid|c\.us|g\.us)$/, '');
+      if (!isGroup) console.warn(`[WA] Inbound ohne aufloesbare echte Nummer, fallback=${phone} debug=`, contactDebug);
     }
-    console.log(`[WA] Inbound von ${phone} (${msg.from}): ${(msg.body||'').slice(0,80)}`);
-    const chatId = msg.from; // echte Chat-ID (@c.us oder @lid) fuer Reply
+
+    // Gruppenname (fuers Web-UI-Display).
+    let groupName = null;
+    if (isGroup) { try { groupName = (await msg.getChat())?.name || null; } catch {} }
+
+    console.log(`[WA] Inbound ${isGroup ? '(Gruppe '+(groupName||msg.from)+') ' : ''}von ${phone}: ${(msg.body||'').slice(0,80)}`);
+    const chatId = msg.from; // Gruppe: @g.us | 1:1: @c.us/@lid
     const body = msg.body || '';
     const attachments = [];
     if (msg.hasMedia) {
       try {
         const media = await msg.downloadMedia();
         attachments.push({
-          type: 'image',
-          mimetype: media.mimetype,
+          type: 'image', mimetype: media.mimetype,
           filename: media.filename || `media-${Date.now()}`,
-          data_base64: media.data,
-          caption: msg.body || null,
+          data_base64: media.data, caption: msg.body || null,
         });
       } catch (e) { console.warn('[WA] Media-Download fehlgeschlagen:', e.message); }
     }
-    // 1) Gateway-SQLite-Log (fuers Web-UI „was wurde empfangen") — best effort.
+    // 1) Gateway-SQLite-Log (1:1 UND Gruppe) — best effort.
     try {
       gatewayHooks?.logInbound({
         phone, chatId, body, whatsappMsgId: msg.id?._serialized || null, attachments,
+        isGroup, groupName,
       });
     } catch (e) { console.warn('[WA] Gateway-Inbound-Log Fehler:', e.message); }
-    // 2) Weiterleitung an die Command-Bot-API (optional, per FORWARD_INBOUND_URL).
-    if (FORWARD_INBOUND_URL) {
+    // 2) Command-Bot-Forward NUR fuer 1:1 (Gruppen: nur loggen, kein Auto-Reply).
+    if (!isGroup && FORWARD_INBOUND_URL) {
       const res = await fetch(FORWARD_INBOUND_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-WA-Secret': WA_SECRET },

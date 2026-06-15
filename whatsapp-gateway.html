@@ -96,7 +96,9 @@
   async function jget(url){ const r=await api(url); if(!r.ok) throw new Error((await r.json().catch(()=>({}))).error||('HTTP '+r.status)); return r.json(); }
   async function jsend(url, body, method='POST'){ const r=await api(url,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined}); const d=await r.json().catch(()=>({})); if(!r.ok) throw new Error(d.error||('HTTP '+r.status)); return d; }
 
+  let activeTab='send';
   function showTab(name){
+    activeTab=name;
     document.querySelectorAll('.tab').forEach(b=>{ const on=b.dataset.tab===name; b.classList.toggle('border-blue-600',on); b.classList.toggle('font-medium',on); b.classList.toggle('text-gray-500',!on); b.classList.toggle('border-transparent',!on); });
     document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('hidden',p.dataset.panel!==name));
     if(name==='inbox')loadInbox(); if(name==='log')loadLog(); if(name==='keys')loadKeys(); if(name==='aliases')loadAliases();
@@ -147,7 +149,7 @@
         ${m.error?`<div class="text-xs text-red-500">${esc(m.error)}</div>`:''}${m.delete_error?`<div class="text-xs text-red-400">Löschen: ${esc(m.delete_error)}</div>`:''}
       </div><div>${del}</div></div>`;
   }
-  async function loadInbox(){ try{ const d=await jget('/gateway/ui/messages?direction=inbound&limit=100'); document.getElementById('inbox-list').innerHTML=(d.messages||[]).map(m=>`<div class="py-2"><div class="text-xs text-gray-400">${esc(fmtDt(m.created_at))} · von ${esc(m.sender||'')}</div><div class="text-gray-800">${esc(m.body||'')}</div></div>`).join('')||'<p class="text-gray-400 py-4">Nichts empfangen.</p>'; }catch(e){ document.getElementById('inbox-list').innerHTML='<p class="text-red-600 py-4">'+esc(e.message)+'</p>'; } }
+  async function loadInbox(){ try{ const d=await jget('/gateway/ui/messages?direction=inbound&limit=100'); document.getElementById('inbox-list').innerHTML=(d.messages||[]).map(m=>`<div class="py-2"><div class="text-xs text-gray-400">${esc(fmtDt(m.created_at))} · von ${esc(m.sender||'')}${m.target_kind==='group'?' · <span class="text-indigo-500">in Gruppe '+esc(m.target||'')+'</span>':''}</div><div class="text-gray-800">${esc(m.body||'')}</div></div>`).join('')||'<p class="text-gray-400 py-4">Nichts empfangen.</p>'; }catch(e){ document.getElementById('inbox-list').innerHTML='<p class="text-red-600 py-4">'+esc(e.message)+'</p>'; } }
   async function loadLog(){ try{ const d=await jget('/gateway/ui/messages?direction=outbound&limit=200'); document.getElementById('log-list').innerHTML=(d.messages||[]).map(m=>msgRow(m,true)).join('')||'<p class="text-gray-400 py-4">Noch nichts gesendet.</p>'; }catch(e){ document.getElementById('log-list').innerHTML='<p class="text-red-600 py-4">'+esc(e.message)+'</p>'; } }
   async function delMsg(id,btn){ if(!confirm('Diese WhatsApp-Nachricht für alle löschen?'))return; btn.disabled=true;btn.textContent='…'; try{ await jsend(`/gateway/ui/messages/${id}/delete`); loadLog(); }catch(e){ alert('Fehler: '+e.message); btn.disabled=false;btn.textContent='🗑'; } }
 
@@ -173,6 +175,8 @@
     document.getElementById('a-add').addEventListener('click', addAlias);
     loadStatus(); loadTargets();
     setInterval(loadStatus, 20000);
+    // Auto-Refresh: aktiver Posteingang/Log alle 15s aktualisieren.
+    setInterval(()=>{ if(activeTab==='inbox')loadInbox(); else if(activeTab==='log')loadLog(); }, 15000);
   });
   </script>
 </body>
