@@ -40,77 +40,11 @@ app.use(cors({
 // fuer Audit gewrappt. initDB() bleibt unten im Bootstrap und nutzt diesen pool.
 const { pool, energyPool, auditCtx } = require('./lib/db');
 
-// ─── SMTP (SMTP2GO) ────────────────────────────────────────────────
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'mail.smtp2go.com',
-  port: parseInt(process.env.SMTP_PORT || '2525'),
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER || '',
-    pass: process.env.SMTP_PASS || '',
-  },
-});
-
-const MAIL_FROM = process.env.MAIL_FROM || 'noreply@rosenweg4303.ch';
-const SMTP2GO_API_KEY = process.env.SMTP2GO_API_KEY || '';
-const SMTP2GO_API_URL = 'https://eu-api.smtp2go.com/v3';
-
-// External sender allowlist for all rosenweg email functions (verteiler, drucker, etc.)
-// Format: comma-separated emails. Senders from VERTEILER_DOMAIN, users table, or Authentik
-// are always allowed; this covers external addresses that should be trusted.
-const EMAIL_ALLOWLIST = (process.env.EMAIL_ALLOWLIST || '')
-  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-
-// ─── Helpers ────────────────────────────────────────────────────────
-function generateOTP() {
-  return crypto.randomInt(100000, 999999).toString();
-}
-
-// Wrapper um transporter.sendMail() der jeden Versand in email_log protokolliert.
-// trigger ist ein kurzer Slug ('print-notification', 'otp-login', ...) zur Nachvollziehbarkeit.
-async function loggedSendMail(mailOpts, trigger, extra = {}) {
-  const toRaw = mailOpts.to || '';
-  const toAddresses = Array.isArray(toRaw) ? toRaw.join(', ') : String(toRaw);
-  const recipientsCount = (toAddresses ? toAddresses.split(',').filter(s => s.trim()).length : 0);
-  const fromRaw = String(mailOpts.from || MAIL_FROM);
-  // Versuch, Name <email> aus from zu extrahieren
-  let fromEmail = fromRaw, fromName = null;
-  const m = fromRaw.match(/^"?([^"<]+?)"?\s*<([^>]+)>$/);
-  if (m) { fromName = m[1].trim(); fromEmail = m[2].trim(); }
-  let result, error;
-  try {
-    result = await transporter.sendMail(mailOpts);
-  } catch (err) {
-    error = err;
-  }
-  try {
-    await pool.query(
-      `INSERT INTO email_log (trigger, from_email, from_name, subject, to_addresses, recipients_count, has_attachments, status, message_id, error_message, verteiler_id, recipients_list, parent_message_id, parent_source)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-      [
-        trigger, fromEmail, fromName, mailOpts.subject || null, toAddresses, recipientsCount,
-        Array.isArray(mailOpts.attachments) && mailOpts.attachments.length > 0,
-        error ? 'failed' : 'sent',
-        result?.messageId || null,
-        error ? String(error.message || error).slice(0, 1000) : null,
-        extra.verteiler_id || null,
-        extra.recipients_list || null,
-        extra.parent_message_id || null,
-        extra.parent_source || null,
-      ]
-    );
-  } catch (logErr) {
-    console.error('[email_log] insert error:', logErr.message);
-  }
-  if (error) throw error;
-  return result;
-}
-
-function isAllowlistedSender(email) {
-  if (!email) return false;
-  const e = email.toLowerCase();
-  return EMAIL_ALLOWLIST.includes(e) || EMAIL_ALLOWLIST.includes(e.replace(/\+[^@]*/, ''));
-}
+// Mail (transporter, loggedSendMail, isAllowlistedSender, generateOTP, EMAIL_ALLOWLIST,
+// MAIL_FROM, SMTP2GO_*) -> lib/mail.js
+const { transporter, MAIL_FROM, SMTP2GO_API_KEY, SMTP2GO_API_URL, EMAIL_ALLOWLIST, generateOTP, loggedSendMail, isAllowlistedSender } = require('./lib/mail');
+// WhatsApp-Queue + Technik-Gruppen-Resolver -> lib/whatsapp.js
+const { queueWhatsappMessage, resolveTechnikWhatsappGroupId } = require('./lib/whatsapp');
 
 // createSemaphore -> lib/utils.js. Gotenberg/Converter-Throttle (max 3 parallel).
 const gotenbergSemaphore = createSemaphore(parseInt(process.env.GOTENBERG_MAX_CONCURRENT || '3'));
@@ -12687,34 +12621,7 @@ STWEG-Mapping: Rosenweg 17/18 = STWEG 1, RW13/14/16 = STWEG 2, RW9/10/12 = STWEG
   } catch { return empty; }
 }
 
-// Cache für WA-Group-ID "Rosenweg Technik" (5 Min TTL)
-let _technikWaCache = { id: null, fetched_at: 0 };
-async function resolveTechnikWhatsappGroupId() {
-  const TTL_MS = 5 * 60 * 1000;
-  if (_technikWaCache.id && (Date.now() - _technikWaCache.fetched_at) < TTL_MS) {
-    return _technikWaCache.id;
-  }
-  try {
-    // tasks.* statt VIP weil Docker Swarm IPVS auf unserem Setup zickt
-    const r = await fetch('http://tasks.rosenweg_whatsapp-bot:8080/groups', {
-      headers: { 'X-WA-Secret': process.env.WHATSAPP_SHARED_SECRET || '' },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!r.ok) return null;
-    const { groups } = await r.json();
-    // Match: enthält "rosenweg" UND "technik" (case-insensitive)
-    const found = (groups || []).find(g => {
-      const n = (g.name || '').toLowerCase();
-      return n.includes('rosenweg') && n.includes('technik');
-    });
-    if (found) {
-      _technikWaCache = { id: found.id, fetched_at: Date.now() };
-      console.log(`[pbx-voicemail] Group "${found.name}" -> ${found.id}`);
-      return found.id;
-    }
-  } catch (e) { console.warn('[pbx-voicemail] /groups Fehler:', e.message); }
-  return null;
-}
+// resolveTechnikWhatsappGroupId -> lib/whatsapp.js
 
 app.post('/api/pbx/voicemail', requirePbxSecret, async (req, res) => {
   try {
@@ -13209,21 +13116,7 @@ async function pushWhatsappBroadcast({ emails, body, sourceType, sourceId }) {
   return n;
 }
 
-// Queue eine ausgehende Nachricht. Bot-Service holt sie und versendet.
-async function queueWhatsappMessage({ phone, body, attachments, sourceType, sourceId, personId, chatId }) {
-  // chatId hat Vorrang: bei LID-Privacy-Chats ist die echte Nummer
-  // nicht aufloesbar, dann müssen wir die @lid-JID direkt zurück-routen.
-  const norm = chatId || normalizePhone(phone);
-  if (!norm) throw new Error('Ungueltige Telefonnummer');
-  const r = await pool.query(
-    `INSERT INTO whatsapp_messages
-       (direction, phone, chat_id, body, attachments, person_id, source_type, source_id, status)
-     VALUES ('outbound', $1, $2, $3, $4::jsonb, $5, $6, $7, 'queued')
-     RETURNING id`,
-    [norm, chatId || null, body || '', JSON.stringify(attachments || []), personId || null, sourceType || null, sourceId || null],
-  );
-  return r.rows[0].id;
-}
+// queueWhatsappMessage -> lib/whatsapp.js
 
 // Command-Handler: parst Body und antwortet entsprechend.
 function buildWhatsappMenu(person) {
