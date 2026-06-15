@@ -216,6 +216,11 @@ services:
       # Stack referenziert -> nach stack deploy weg -> alle Router-Dots rot (401).
       # Jetzt als Env (Code-Fallback process.env.ROUTER_API_TOKEN). In /root/.env.
       ROUTER_API_TOKEN: "${ROUTER_API_TOKEN}"
+      # PBX-Shared-Secret (Asterisk-AGI -> /api/pbx/voicemail + /call-notify).
+      # War nur per --env-add -> bei stack deploy gewiped -> 503 -> keine
+      # Voicemail-/Anruf-Meldungen mehr. Muss in /root/.env stehen (= Wert in
+      # /etc/default/asterisk-env auf CT220).
+      PBX_SHARED_SECRET: "${PBX_SHARED_SECRET}"
     volumes:
       - rosenweg-documents:/documents
     networks:
