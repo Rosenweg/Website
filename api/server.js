@@ -13286,6 +13286,39 @@ app.post('/api/pbx/voicemail', requirePbxSecret, async (req, res) => {
   }
 });
 
+// ── Anruf-Meldung OHNE Voicemail ───────────────────────────────────────
+// Der Dialplan-Hangup-Handler (pbx_call_notify.py) meldet hierher, wenn ein
+// Anruf den Anrufbeantworter erreicht hat, aber KEINE Nachricht hinterlassen
+// wurde (Anrufer legte waehrend/nach der Ansage auf). Liefert eine kurze
+// Technik-WhatsApp, damit der Anruf trotzdem sichtbar ist.
+app.post('/api/pbx/call-notify', requirePbxSecret, async (req, res) => {
+  try {
+    const callerId = (req.body?.caller || 'Unbekannt').toString();
+    const uniqueid = (req.body?.uniqueid || '').toString();
+    const reason = (req.body?.reason || 'no-message').toString();
+    console.log(`[pbx-call-notify] caller=${callerId} uid=${uniqueid} reason=${reason}`);
+    const groupId = await resolveTechnikWhatsappGroupId();
+    if (!groupId) {
+      console.warn('[pbx-call-notify] WA-Group "Rosenweg Technik" nicht gefunden');
+      return res.json({ ok: false, reason: 'no-group' });
+    }
+    const reasonLine = reason === 'missed'
+      ? 'Nicht angenommen'
+      : 'Aufgelegt, ohne eine Nachricht zu hinterlassen';
+    const waBody = [
+      `📞 *Anruf* von ${callerId}`,
+      `🕒 ${new Date().toLocaleString('de-CH')}`,
+      `ℹ️ ${reasonLine}`,
+    ].join('\n');
+    await queueWhatsappMessage({ chatId: groupId, phone: groupId, body: waBody, sourceType: 'pbx-call' });
+    console.log(`[pbx-call-notify] WA an Gruppe ${groupId} gequeued`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[pbx-call-notify] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── PBX Ring-Members: Admin-Verwaltung der Empfaengerliste ─────────────
 // Asterisk-AGI holt die aktive Liste live via /active-Endpoint.
 
