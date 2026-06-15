@@ -12,6 +12,7 @@
     "better-sqlite3": "^11.8.1",
     "smtp-server": "^3.13.6",
     "mailparser": "^3.7.2",
-    "http-proxy-middleware": "^2.0.7"
+    "http-proxy-middleware": "^2.0.7",
+    "nodemailer": "^6.9.16"
   }
 }

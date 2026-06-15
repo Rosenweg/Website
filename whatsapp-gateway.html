@@ -162,9 +162,12 @@
     const del = withDelete && m.status==='sent' && m.whatsapp_msg_id && !m.deleted_at
       ? `<button onclick="delMsg(${m.id},this)" class="text-xs text-red-600 hover:underline">🗑</button>` : (m.deleted_at?'<span class="text-xs text-gray-400">gelöscht</span>':'');
     const st = m.status==='sent'?'text-emerald-700':m.status==='failed'?'text-red-700':'text-gray-500';
+    const ack = m.read_at ? `<span class="text-blue-600" title="${esc(fmtDt(m.read_at))}">✓✓ gelesen</span>`
+              : m.delivered_at ? `<span class="text-gray-500" title="${esc(fmtDt(m.delivered_at))}">✓✓ zugestellt</span>`
+              : (m.status==='sent' ? `<span class="text-gray-400">✓ gesendet</span>` : '');
     return `<div class="py-2 flex items-start justify-between gap-3">
       <div class="min-w-0">
-        <div class="text-xs text-gray-400">${esc(fmtDt(m.created_at))} · <span class="${st}">${esc(m.status)}</span> · ${esc(m.source||'')}${m.sender?' · '+esc(m.sender):''}</div>
+        <div class="text-xs text-gray-400">${esc(fmtDt(m.created_at))} · <span class="${st}">${esc(m.status)}</span>${ack?' · '+ack:''} · ${esc(m.source||'')}${m.sender?' · '+esc(m.sender):''}</div>
         <div class="text-gray-900">→ ${esc(m.target||'')} ${m.subject?'· <b>'+esc(m.subject)+'</b>':''}</div>
         <div class="text-gray-600 truncate">${esc((m.body||'').slice(0,140))}</div>
         ${m.error?`<div class="text-xs text-red-500">${esc(m.error)}</div>`:''}${m.delete_error?`<div class="text-xs text-red-400">Löschen: ${esc(m.delete_error)}</div>`:''}

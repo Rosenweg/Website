@@ -411,6 +411,11 @@ services:
       GW_SMTP_PORT: "2525"
       MAIN_API_BASE: http://rosenweg_api:3000
       GW_PUBLIC_HOST: whatsapp.rosenweg4303.ch
+      # Status-Rueckmeldung (Zustell-/Lesebestaetigung) an den E-Mail-Absender,
+      # relay ueber Mailcow (CT 240). Leer = aus.
+      GW_NOTIFY_RELAY_HOST: "100.64.2.33"
+      GW_NOTIFY_RELAY_PORT: "25"
+      GW_NOTIFY_FROM: whatsapp-gateway@rosenweg4303.ch
     volumes:
       - whatsapp-data:/data
     networks:

@@ -17,6 +17,7 @@ const Database = require('better-sqlite3');
 const { SMTPServer } = require('smtp-server');
 const { simpleParser } = require('mailparser');
 const { createProxyMiddleware } = require('http-proxy-middleware');
+const nodemailer = require('nodemailer');
 
 const DATA_DIR        = process.env.WA_DATA_DIR || '/data';
 const GATEWAY_PORT     = parseInt(process.env.WA_GATEWAY_PORT, 10) || 8090;
@@ -26,6 +27,11 @@ const SMTP_PASS        = process.env.GW_SMTP_PASS || '';
 const MAIN_API_BASE    = process.env.MAIN_API_BASE || process.env.API_BASE || '';
 const PUBLIC_HOST      = process.env.GW_PUBLIC_HOST || 'whatsapp.rosenweg4303.ch';
 const MAX_BODY         = process.env.GW_MAX_BODY || '25mb';
+// Status-Rueckmeldung an den E-Mail-Absender (Zustell-/Lesebestaetigung). Nur
+// aktiv wenn ein Relay gesetzt ist (z.B. Mailcow). KEIN allgemeiner Mailversand.
+const NOTIFY_RELAY_HOST = process.env.GW_NOTIFY_RELAY_HOST || '';
+const NOTIFY_RELAY_PORT = parseInt(process.env.GW_NOTIFY_RELAY_PORT, 10) || 25;
+const NOTIFY_FROM       = process.env.GW_NOTIFY_FROM || 'whatsapp-gateway@rosenweg4303.ch';
 
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const nowIso = () => new Date().toISOString();
@@ -84,6 +90,13 @@ function startGateway(botCore) {
       created_at TEXT
     );
   `);
+  // Migration: ACK-Status-Spalten (Zustell-/Lesebestaetigung aus WhatsApp).
+  {
+    const cols = db.prepare('PRAGMA table_info(messages)').all().map(c => c.name);
+    for (const c of ['delivered_at', 'read_at', 'notified_delivered', 'notified_read']) {
+      if (!cols.includes(c)) db.exec(`ALTER TABLE messages ADD COLUMN ${c} TEXT`);
+    }
+  }
 
   const q = {
     keyByHash: db.prepare(`SELECT * FROM api_keys WHERE key_hash=? AND revoked_at IS NULL`),
@@ -101,11 +114,15 @@ function startGateway(botCore) {
       (direction,source,sender,target,target_kind,subject,body,attachments_json,whatsapp_msg_id,status,error,created_at,sent_at)
       VALUES (@direction,@source,@sender,@target,@target_kind,@subject,@body,@attachments_json,@whatsapp_msg_id,@status,@error,@created_at,@sent_at)`),
     msgList: db.prepare(`SELECT id,direction,source,sender,target,target_kind,subject,body,
-      whatsapp_msg_id,status,error,created_at,sent_at,deleted_at,delete_error
+      whatsapp_msg_id,status,error,created_at,sent_at,deleted_at,delete_error,delivered_at,read_at
       FROM messages WHERE (@direction IS NULL OR direction=@direction) ORDER BY id DESC LIMIT @limit`),
     msgGet: db.prepare(`SELECT * FROM messages WHERE id=?`),
     msgDeleted: db.prepare(`UPDATE messages SET deleted_at=?, delete_error=NULL WHERE id=?`),
     msgDeleteErr: db.prepare(`UPDATE messages SET delete_error=? WHERE id=?`),
+    msgByWaId: db.prepare(`SELECT * FROM messages WHERE whatsapp_msg_id=?`),
+    ackDelivered: db.prepare(`UPDATE messages SET delivered_at=? WHERE whatsapp_msg_id=? AND delivered_at IS NULL`),
+    ackRead: db.prepare(`UPDATE messages SET read_at=?, delivered_at=COALESCE(delivered_at,?) WHERE whatsapp_msg_id=? AND read_at IS NULL`),
+    markNotified: db.prepare(`UPDATE messages SET notified_delivered=COALESCE(notified_delivered,@nd), notified_read=COALESCE(notified_read,@nr) WHERE id=@id`),
     ipAll: db.prepare(`SELECT ip FROM smtp_ips`),
     ipList: db.prepare(`SELECT ip,note,created_by,created_at FROM smtp_ips ORDER BY ip`),
     ipAdd: db.prepare(`INSERT INTO smtp_ips (ip,note,created_by,created_at) VALUES (?,?,?,?)
@@ -144,6 +161,35 @@ function startGateway(botCore) {
 
   // QR-Pairing-Code (base64-PNG), vom WA-Client via setQr() gesetzt; null=gepairt.
   let currentQr = null;
+
+  // Optionaler Mail-Sender NUR fuer Status-Rueckmeldungen an den E-Mail-Absender.
+  const notifyTx = NOTIFY_RELAY_HOST
+    ? nodemailer.createTransport({ host: NOTIFY_RELAY_HOST, port: NOTIFY_RELAY_PORT, secure: false, tls: { rejectUnauthorized: false } })
+    : null;
+
+  // WhatsApp-ACK -> Zustell-/Lesestatus. Bei E-Mail-Quelle: Status zurueck an
+  // den Absender mailen (einmalig pro Stufe). ack: 2=zugestellt, 3=gelesen.
+  function updateAck(msgId, ack) {
+    if (!msgId || ack == null) return;
+    if (ack >= 2) q.ackDelivered.run(nowIso(), msgId);
+    if (ack >= 3) q.ackRead.run(nowIso(), nowIso(), msgId);
+    const row = q.msgByWaId.get(msgId);
+    if (!row || row.source !== 'smtp-email' || !notifyTx) return;
+    const wantDelivered = ack >= 2 && row.delivered_at && !row.notified_delivered;
+    const wantRead      = ack >= 3 && row.read_at && !row.notified_read;
+    if (!wantDelivered && !wantRead) return;
+    const stage = wantRead ? 'gelesen' : 'zugestellt';
+    const tsIso = wantRead ? row.read_at : row.delivered_at;
+    const ts = (() => { try { return new Date(tsIso).toLocaleString('de-CH', { timeZone: 'Europe/Zurich' }); } catch { return tsIso; } })();
+    notifyTx.sendMail({
+      from: NOTIFY_FROM,
+      to: row.sender,
+      subject: `WhatsApp ${stage}: ${row.subject || row.target}`,
+      text: `Deine WhatsApp-Nachricht an ${row.target} wurde ${stage}.\n\nZeit: ${ts}\n${row.subject ? 'Betreff: ' + row.subject + '\n' : ''}\n— Rosenweg WhatsApp-Gateway`,
+    }).then(() => {
+      q.markNotified.run({ id: row.id, nd: wantDelivered ? nowIso() : null, nr: wantRead ? nowIso() : null });
+    }).catch(e => console.warn('[Gateway] Status-Mail fehlgeschlagen:', e.message));
+  }
 
   // ── Senden + Loggen (gemeinsam) ──────────────────────────────────────────
   async function sendAndLog({ source, sender, to, title, body, attachments }) {
@@ -413,6 +459,7 @@ function startGateway(botCore) {
   return {
     logInbound,
     setQr: (b64) => { currentQr = b64; },
+    updateAck,
     db, _internal: { resolveTarget, sendAndLog },
   };
 }
