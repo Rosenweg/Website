@@ -702,6 +702,22 @@ app.get('/api/energy/solar-live', (req, res) => {
   const self_pct = production_w > 0 ? Math.round(consumption_w / production_w * 100) : 0;
   const sf = smartfoxSolar || {};
 
+  // Verbrauchs-Aufschluesselung (geeichte Modbus-Zaehler; Verbrauchsmesser
+  // melden positiv). allgemein = Gemeinschaftsstrom; wohnungen = Summe aller
+  // Wohnungszaehler. Tote Zaehler (offline) zaehlen 0 + online=false.
+  const allg = latestReadings.get('r9-allgemein');
+  const allgemein = {
+    power_w: (allg && freshTs(allg.ts)) ? Math.max(0, allg.power_w || 0) : 0,
+    online: !!(allg && freshTs(allg.ts)),
+  };
+  const APARTMENT_METERS = ['r9-eg1','r9-eg2','r9-eg3','r9-1og1','r9-1og2','r9-1og3','r9-2og1','r9-2og2','r9-2og3','r9-keller-neziri'];
+  let aptW = 0, aptOn = 0;
+  for (const id of APARTMENT_METERS) {
+    const r = latestReadings.get(id);
+    if (r && freshTs(r.ts)) { aptW += Math.max(0, r.power_w || 0); aptOn++; }
+  }
+  const wohnungen = { power_w: aptW, online_count: aptOn, total_count: APARTMENT_METERS.length };
+
   res.json({
     ts: new Date().toISOString(),
     production_w, production_source,
@@ -709,7 +725,9 @@ app.get('/api/energy/solar-live', (req, res) => {
     feed_in_w: grid_w < 0 ? -grid_w : 0,   // Lieferung
     draw_w: grid_w > 0 ? grid_w : 0,       // Bezug
     consumption_w, self_pct,
-    boiler: { power_w: sf.boiler_w || 0, percent: sf.boiler_pct || 0, label: sf.boiler_desc || 'Boiler' },
+    boiler: { power_w: sf.boiler_w || 0, percent: sf.boiler_pct || 0, label: sf.boiler_desc || 'Boiler', online: !!(smartfoxSolar && freshTs(smartfoxSolar.ts)) },
+    allgemein,
+    wohnungen,
     today: { production_wh: sf.today_prod_wh || 0, feed_in_wh: sf.today_feedin_wh || 0 },
     smartfox_online: !!(smartfoxSolar && freshTs(smartfoxSolar.ts)),
   });
