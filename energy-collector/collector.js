@@ -425,7 +425,12 @@ async function getModbusClient(meter) {
   if (client && client.isOpen) return client;
 
   client = new ModbusRTU();
-  await client.connectTCP(meter.host, { port: meter.port });
+  // Connect-Timeout begrenzen: tote Zaehler (Modbus-Port dicht) wuerden sonst
+  // im OS-Default (~30-75s) haengen und die Poll-Schleife ausbremsen.
+  await Promise.race([
+    client.connectTCP(meter.host, { port: meter.port }),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('connect timeout')), 4000)),
+  ]);
   client.setTimeout(3000);
   // Handle connection errors to prevent unhandled rejections crashing the process
   client._port.on('error', (err) => {
@@ -500,9 +505,9 @@ async function pollAll() {
   isPolling = true;
   try {
     const meters = await getActiveMeters();
-    for (const meter of meters) {
-      await pollMeter(meter);
-    }
+    // Parallel statt sequentiell: ein toter Zaehler (Connect-Timeout) darf die
+    // lebenden nicht ausbremsen. pollMeter faengt eigene Fehler ab.
+    await Promise.allSettled(meters.map(m => pollMeter(m)));
   } catch (err) {
     console.error('[Poll] pollAll error:', err.message);
   } finally {
