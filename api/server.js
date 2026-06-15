@@ -22,7 +22,7 @@ const STWEG_GROUPS = {
   5: { bewohner: 'stweg5-bewohner', eigentuemer: 'stweg5-eigentuemer', ausschuss: 'stweg5-ausschuss' },
   6: { bewohner: 'r1-bewohner', eigentuemer: 'r1-eigentuemer', ausschuss: 'stweg6-ausschuss' },
   7: { bewohner: 'stweg7-bewohner', eigentuemer: 'stweg7-eigentuemer', ausschuss: 'stweg7-ausschuss' },
-  8: { ausschuss: 'meg-ausschuss' },
+  8: { ausschuss: 'meg-ausschuss', eigentuemer: 'meg-eigentuemer', bewohner: 'meg-bewohner' },
 };
 
 const app = express();
@@ -2169,7 +2169,16 @@ app.get('/api/meg/einstellplaetze', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Fehler beim Laden' }); }
 });
 
-app.post('/api/meg/einstellplaetze', authMiddleware, adminOnly, async (req, res) => {
+// MEG-Platzverwaltung: Technik/Praesident (isAdmin) ODER MEG-Ausschuss
+// (Ausschuss fuer STWEG 8). Frontend (einstellplaetze.html) zeigt dem Ausschuss
+// das Bearbeiten-Grid — adminOnly waere zu streng und gaebe 403 beim Speichern.
+function megManageGate(req, res, next) {
+  const groups = req.user?.groups || [];
+  if (req.user?.isAdmin || getAusschussStwegs(groups).has(8)) return next();
+  return res.status(403).json({ error: 'MEG-Ausschuss oder Technik erforderlich' });
+}
+
+app.post('/api/meg/einstellplaetze', authMiddleware, megManageGate, async (req, res) => {
   const { platz_nr, typ, status, zugeordnet_name, zugeordnet_email, wohnung_id, notizen } = req.body;
   if (!platz_nr) return res.status(400).json({ error: 'platz_nr erforderlich' });
   try {
@@ -2182,7 +2191,7 @@ app.post('/api/meg/einstellplaetze', authMiddleware, adminOnly, async (req, res)
   } catch (err) { res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' }); }
 });
 
-app.put('/api/meg/einstellplaetze/:id', authMiddleware, adminOnly, async (req, res) => {
+app.put('/api/meg/einstellplaetze/:id', authMiddleware, megManageGate, async (req, res) => {
   const { platz_nr, typ, status, zugeordnet_name, zugeordnet_email, wohnung_id, notizen } = req.body;
   try {
     const r = await pool.query(
@@ -2197,7 +2206,7 @@ app.put('/api/meg/einstellplaetze/:id', authMiddleware, adminOnly, async (req, r
   } catch (err) { res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' }); }
 });
 
-app.delete('/api/meg/einstellplaetze/:id', authMiddleware, adminOnly, async (req, res) => {
+app.delete('/api/meg/einstellplaetze/:id', authMiddleware, megManageGate, async (req, res) => {
   try {
     const r = await pool.query('DELETE FROM meg_einstellplaetze WHERE id=$1 RETURNING id', [req.params.id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Platz nicht gefunden' });
@@ -7128,23 +7137,31 @@ app.get('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
               jsonb_array_length(COALESCE(members, '[]'::jsonb)) as member_count
        FROM email_verteiler ORDER BY stweg, name`
     );
-    // For group-based verteiler, resolve actual member count
+    // For group-based verteiler, resolve actual member count.
+    // War sequentiell (N Verteiler x M Gruppen, je ein Authentik-Call) -> ~22s.
+    // Jede distinkte Gruppe nur EINMAL aufloesen (Memo) und alle parallel.
     const rows = result.rows;
-    for (const v of rows) {
-      const groupNames = v.group_names?.length ? v.group_names : (v.group_name ? [v.group_name] : []);
-      if (groupNames.length > 0) {
-        const allEmails = new Set();
-        for (const gn of groupNames) {
-          const emails = gn.startsWith('verwaltung:')
-            ? await resolveVerwaltungsGroup(gn)
-            : await resolveGroupEmails(gn);
-          // Filter out base drucker addresses without +tag (kein Empfänger zugeordnet)
-          emails.filter(e => !/^druckerr(9|13)@/.test(e)).forEach(e => allEmails.add(e));
-        }
-        v.member_count = allEmails.size;
-        v.resolved_emails = [...allEmails];
+    const groupCache = new Map();
+    const resolveOnce = (gn) => {
+      if (!groupCache.has(gn)) {
+        groupCache.set(gn, (gn.startsWith('verwaltung:')
+          ? resolveVerwaltungsGroup(gn)
+          : resolveGroupEmails(gn)).catch(() => []));
       }
-    }
+      return groupCache.get(gn);
+    };
+    await Promise.all(rows.map(async (v) => {
+      const groupNames = v.group_names?.length ? v.group_names : (v.group_name ? [v.group_name] : []);
+      if (groupNames.length === 0) return;
+      const lists = await Promise.all(groupNames.map(resolveOnce));
+      const allEmails = new Set();
+      for (const emails of lists) {
+        // Filter out base drucker addresses without +tag (kein Empfänger zugeordnet)
+        emails.filter(e => !/^druckerr(9|13)@/.test(e)).forEach(e => allEmails.add(e));
+      }
+      v.member_count = allEmails.size;
+      v.resolved_emails = [...allEmails];
+    }));
     res.json({ verteiler: rows });
   } catch (err) {
     res.status(500).json({ error: 'Fehler beim Laden der Verteiler' });
