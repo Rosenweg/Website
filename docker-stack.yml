@@ -208,6 +208,15 @@ services:
       DOCS_PATH: /documents
       WG_CONTROL_URL: "${WG_CONTROL_URL:-http://100.64.2.34:3001}"
       WG_CONTROL_TOKEN: "${WG_CONTROL_TOKEN}"
+      # NOC-Public-Dashboard: OPEN=1 hart verankert, damit ein gewipter
+      # NOC_PUBLIC_TOKEN das oeffentliche Dashboard NICHT mehr lahmlegt
+      # (Code: NOC_PUBLIC_OPEN==='1' -> erlaubt ohne Token). Token bleibt
+      # optional fuer den Fall, dass OPEN spaeter wieder auf 0 geht.
+      NOC_PUBLIC_OPEN: "1"
+      NOC_PUBLIC_TOKEN: "${NOC_PUBLIC_TOKEN}"
+      # UniFi-Controller-API-Key (Dashboard-UniFi-Panel + Frontend-Monitoring).
+      # Muss in /root/.env stehen, sonst greift der ungueltige Hardcoded-Fallback.
+      UNIFI_API_KEY: "${UNIFI_API_KEY}"
     volumes:
       - rosenweg-documents:/documents
     networks:
