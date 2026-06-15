@@ -12878,6 +12878,60 @@ app.post('/api/whatsapp/status', requireWhatsappSecret, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ─── WhatsApp-Nachricht nachtraeglich loeschen ("fuer alle loeschen") ──
+// Technik/Präsident markiert eine gesendete Nachricht; der Bot revoked sie
+// (Delete-Poll) und meldet deleted_at zurueck. Geht nur wenn whatsapp_msg_id
+// gespeichert ist (sonst kein Hebel) und WhatsApps Loesch-Zeitfenster offen ist.
+app.post('/api/whatsapp/admin/messages/:id/delete', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
+    const r = await pool.query('SELECT id, whatsapp_msg_id, deleted_at FROM whatsapp_messages WHERE id = $1', [id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nachricht nicht gefunden' });
+    const row = r.rows[0];
+    if (row.deleted_at) return res.status(409).json({ error: 'Bereits geloescht' });
+    if (!row.whatsapp_msg_id) {
+      return res.status(422).json({ error: 'Keine WhatsApp-Message-ID gespeichert — diese Nachricht kann nicht automatisch geloescht werden (vor dem Tracking-Update gesendet).' });
+    }
+    await pool.query(
+      `UPDATE whatsapp_messages
+          SET delete_requested_at = NOW(), delete_requested_by = $2, delete_error = NULL
+        WHERE id = $1`,
+      [id, req.user?.email || 'unknown'],
+    );
+    res.json({ ok: true, queued_for_deletion: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Bot holt offene Loeschauftraege.
+app.get('/api/whatsapp/delete-poll', requireWhatsappSecret, async (req, res) => {
+  try {
+    const limit = Math.min(50, parseInt(req.query.limit, 10) || 20);
+    const r = await pool.query(
+      `SELECT id, whatsapp_msg_id, chat_id, phone
+         FROM whatsapp_messages
+        WHERE delete_requested_at IS NOT NULL AND deleted_at IS NULL AND whatsapp_msg_id IS NOT NULL
+        ORDER BY delete_requested_at
+        LIMIT $1`,
+      [limit],
+    );
+    res.json({ messages: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Bot meldet Loesch-Ergebnis zurueck.
+app.post('/api/whatsapp/delete-status', requireWhatsappSecret, async (req, res) => {
+  try {
+    const { message_id, deleted, error_message } = req.body || {};
+    if (deleted) {
+      await pool.query('UPDATE whatsapp_messages SET deleted_at = NOW(), delete_error = NULL WHERE id = $1', [message_id]);
+    } else {
+      await pool.query('UPDATE whatsapp_messages SET delete_error = $2 WHERE id = $1', [message_id, String(error_message || 'unbekannt').slice(0, 500)]);
+    }
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Bot-Heartbeat: in-memory, alarmiert Admins wenn stale (>5min).
 let waBotHeartbeat = null; // { is_ready, ready_at, phone, pid, uptime_seconds, received_at }
 let waBotStaleAlertSent = false; // verhindert Alert-Spam
@@ -13088,7 +13142,9 @@ app.get('/api/whatsapp/admin/status', authMiddleware, requireTechnikOrPraesident
   try {
     const [pending, recent, byPerson, optIn] = await Promise.all([
       pool.query(`SELECT COUNT(*)::int AS n FROM whatsapp_messages WHERE direction = 'outbound' AND status = 'queued'`),
-      pool.query(`SELECT id, direction, phone, body, status, person_id, created_at FROM whatsapp_messages ORDER BY created_at DESC LIMIT 30`),
+      pool.query(`SELECT id, direction, phone, body, status, person_id, created_at,
+                          whatsapp_msg_id, delete_requested_at, deleted_at, delete_error
+                     FROM whatsapp_messages ORDER BY created_at DESC LIMIT 30`),
       pool.query(`SELECT COUNT(DISTINCT person_id)::int AS n FROM whatsapp_messages WHERE person_id IS NOT NULL`),
       pool.query(`SELECT COUNT(*)::int AS n FROM personen WHERE whatsapp_opt_in = true`),
     ]);
@@ -15745,13 +15801,10 @@ async function maintSubscriberRecipientsForScope(scope) {
   return r.rows.map(x => x.email).filter(Boolean);
 }
 
-// WhatsApp-Broadcast an Subscriber-Bewohner im scope. Mit Throttle+Combine:
-// mehrere Wartungs-Events fuer denselben Empfaenger werden gepuffert und
-// am Ende des 30-Min-Fensters als Sammelmeldung versendet (siehe
-// deliverMaintNotify / maintFlushNotifyPending).
+// Wartungs-WhatsApp geht NUR an die Technik-Gruppe (direkt, ohne Review) —
+// gemaess ISP-Benachrichtigungs-Regel. KEIN Broadcast mehr an Subscriber-Kunden;
+// die werden ausschliesslich ueber die freigegebene Outbox-Mail erreicht.
 async function sendMaintenanceWhatsApp(maint, kind) {
-  const recipients = await maintSubscriberRecipientsForScope(maint.scope || {});
-  if (recipients.length === 0) return { sent: 0, skipped: 'no_recipients' };
   const sev = maint.severity === 'critical' ? '⚠⚠' : (maint.severity === 'warning' ? '⚠' : 'ℹ');
   const fmt = d => d ? new Date(d).toLocaleString('de-CH', { timeZone: 'Europe/Zurich', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '?';
   const body = kind === 'pre'
@@ -15760,27 +15813,24 @@ async function sendMaintenanceWhatsApp(maint, kind) {
     ? `${sev} *Rosenweg ISP*\n*${maint.title}* beginnt JETZT.\n\nVoraussichtl. Ende: ${fmt(maint.end_at)}\n\n${maint.description || ''}`
     : `✓ *Rosenweg ISP*\n*${maint.title}* — Wartung abgeschlossen, Dienste wieder verfuegbar.`;
   try {
-    const r = await deliverMaintNotify({
-      channel: 'whatsapp',
-      recipients,
-      body,
-      subject: maint.title,
-      sendFn: async (list, b) => pushWhatsappBroadcast({
-        emails: list, body: b, sourceType: 'isp_maintenance', sourceId: String(maint.id),
-      }),
+    const groupId = await resolveTechnikWhatsappGroupId();
+    if (!groupId) return { sent: 0, skipped: 'no_technik_group' };
+    await queueWhatsappMessage({
+      chatId: groupId, body,
+      sourceType: 'isp_maintenance', sourceId: maint.id || null,
     });
-    return { sent: r.sent, throttled: r.throttled, recipients: recipients.length };
+    return { sent: 1, target: 'technik-group' };
   } catch (e) {
     console.warn('[Maint-WhatsApp] error:', e.message);
     return { sent: 0, error: e.message };
   }
 }
 
-// Stellt eine Wartungs-Mail an scope-Empfaenger in die Genehmigungs-Outbox
-// (verwaltung_mail_queue) — KEIN Direktversand mehr. Technik/Präsident geben
-// frei, erst dann geht die Mail per BCC an die Kunden raus. Gilt fuer alle
-// Trigger (manuell + auto, z.B. UniFi-Geraete-Update). Der WhatsApp-Broadcast
-// (sendMaintenanceWhatsApp) laeuft weiterhin direkt — nur E-Mail wird gestoppt.
+// ISP-Benachrichtigungs-Regel (vom User 2026-06-15):
+//  - NUR Technik darf die Wartungsmeldung DIREKT (ohne Review) bekommen.
+//  - ALLE anderen (Ausschuss + Subscriber-Kunden) werden ueber die Mail-Outbox
+//    abgefangen: ihre Mail landet als 'pending' in verwaltung_mail_queue und
+//    geht erst nach Freigabe durch Technik/Präsident per BCC raus.
 async function sendMaintenanceMail(maint, kind /* 'pre'|'start'|'end' */) {
   const recipients = await maintRecipientsForScope(maint.scope || {});
   if (recipients.length === 0) return { sent: 0, queued: 0, skipped: 'no_recipients' };
@@ -15802,26 +15852,37 @@ async function sendMaintenanceMail(maint, kind /* 'pre'|'start'|'end' */) {
     `\nFuer Rueckfragen: technik@rosenweg4303.ch`,
     `\nRosenweg ISP`,
   ].filter(Boolean).join('\n');
-  // To = technik@ (einzige Adresse die direkt gehen darf). ALLE anderen
-  // Empfaenger — Subscriber-Kunden UND der Ausschuss — laufen verdeckt per
-  // BCC. Die Mail landet als 'pending' in der Outbox und wird erst nach
-  // Freigabe (Technik/Präsident) per sendVerwaltungMailFromQueue versendet.
-  const bccList = recipients.filter(e => e.toLowerCase() !== MAINT_TECHNIK_EMAIL.toLowerCase());
+  // "Alle anderen" = alle Empfaenger ausser Technik (Ausschuss + Kunden).
+  const others = recipients.filter(e => e.toLowerCase() !== MAINT_TECHNIK_EMAIL.toLowerCase());
+  let directSent = 0, queueId = null, directErr = null, queueErr = null;
+  // 1) DIREKT an Technik — ohne Review.
   try {
-    const queueId = await enqueueVerwaltungMail({
-      source_type: 'isp_maintenance',
-      source_id: maint.id || null,
-      mailTo: MAINT_TECHNIK_EMAIL,
-      mailBcc: bccList,
-      subject,
-      bodyText: body,
-      createdBy: maint.auto_source ? `isp-maintenance-auto (${maint.auto_source})` : 'isp-maintenance',
-    });
-    return { sent: 0, queued: recipients.length, queue_id: queueId };
+    await loggedSendMail({ from: MAIL_FROM, to: MAINT_TECHNIK_EMAIL, subject, text: body }, 'maint-notify-technik');
+    directSent = 1;
   } catch (e) {
-    console.warn('[Maint-Mail] enqueue error:', e.message);
-    return { sent: 0, queued: 0, error: e.message };
+    directErr = e.message;
+    console.warn('[Maint-Mail] Technik-Direktversand fehlgeschlagen:', e.message);
   }
+  // 2) Alle anderen -> Mail-Outbox (pending, Freigabe noetig). To=noreply (self),
+  //    BCC=Kunden+Ausschuss (verdeckt). Technik ist hier NICHT dabei (hat oben
+  //    schon direkt bekommen).
+  if (others.length > 0) {
+    try {
+      queueId = await enqueueVerwaltungMail({
+        source_type: 'isp_maintenance',
+        source_id: maint.id || null,
+        mailTo: MAIL_FROM,
+        mailBcc: others,
+        subject,
+        bodyText: body,
+        createdBy: maint.auto_source ? `isp-maintenance-auto (${maint.auto_source})` : 'isp-maintenance',
+      });
+    } catch (e) {
+      queueErr = e.message;
+      console.warn('[Maint-Mail] enqueue error:', e.message);
+    }
+  }
+  return { sent: directSent, queued: others.length, queue_id: queueId, direct_error: directErr, queue_error: queueErr };
 }
 
 // SCHEMA: jeder Endpoint joint die Counts der zu sendenden Notifs nicht — wir
@@ -19296,6 +19357,17 @@ async function initDB() {
       -- chat_id (WhatsApp JID: <id>@c.us, <id>@lid, <id>@g.us) — für Reply
       -- an LID-Privacy-Chats, wo die echte Nummer nicht aufgeloest werden kann.
       ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS chat_id VARCHAR(120);
+      -- Nachtraegliches Loeschen ("fuer alle loeschen"): Technik markiert eine
+      -- gesendete Nachricht, der Bot revoked sie per whatsapp_msg_id und meldet
+      -- deleted_at zurueck. Voraussetzung: whatsapp_msg_id ist gespeichert
+      -- (Bot meldet sie seit dem Tracking-Update beim Versand zurueck).
+      ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS delete_requested_at TIMESTAMPTZ;
+      ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS delete_requested_by VARCHAR(255);
+      ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+      ALTER TABLE whatsapp_messages ADD COLUMN IF NOT EXISTS delete_error TEXT;
+      -- Index fuer den Delete-Poll des Bots (offene Loeschauftraege).
+      CREATE INDEX IF NOT EXISTS idx_wa_msg_delete_pending ON whatsapp_messages(delete_requested_at)
+        WHERE delete_requested_at IS NOT NULL AND deleted_at IS NULL;
 
       -- Reklamationen / Schadensmeldungen via WhatsApp
       CREATE TABLE IF NOT EXISTS reklamationen (

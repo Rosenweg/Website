@@ -303,10 +303,12 @@ async function pollOutbox() {
         // Verifizieren dass die Nachricht tatsaechlich akzeptiert wurde
         if (!sentMsg) throw new Error('sendMessage liefert null/undefined');
         console.log(`[WA] msg=${m.id} -> ${chatId} (id=${sentMsg.id?._serialized || '?'}, ack=${sentMsg.ack ?? '?'})`);
+        // whatsapp_msg_id IMMER mitschicken — damit die Nachricht spaeter
+        // gezielt geloescht ("fuer alle loeschen") werden kann (Tracking).
         await fetch(`${API_BASE}/api/whatsapp/status`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-WA-Secret': WA_SECRET },
-          body: JSON.stringify({ message_id: m.id, status: 'sent' }),
+          body: JSON.stringify({ message_id: m.id, status: 'sent', whatsapp_msg_id: sentMsg.id?._serialized || null }),
         });
         // Warten bis die Nachricht WIRKLICH beim WA-Server angekommen ist
         // (ack >= 1 = server-ack) bevor die naechste rausgeht — sonst
@@ -330,6 +332,42 @@ async function pollOutbox() {
 }
 
 setInterval(pollOutbox, POLL_MS);
+
+// Delete-Polling: holt offene Loeschauftraege und revoked die jeweilige
+// Nachricht "fuer alle". whatsapp-web.js: getMessageById(id).delete(true).
+// Klappt nur solange WhatsApps Loesch-Zeitfenster offen ist; sonst Fehler ->
+// wird als delete_error zurueckgemeldet.
+async function pollDeletions() {
+  if (!isReady) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/whatsapp/delete-poll?limit=10`, {
+      headers: { 'X-WA-Secret': WA_SECRET },
+    });
+    if (!res.ok) { console.warn('[WA] Delete-Poll fehlgeschlagen:', res.status); return; }
+    const { messages } = await res.json();
+    for (const m of (messages || [])) {
+      let ok = false, errMsg = null;
+      try {
+        const msg = await client.getMessageById(m.whatsapp_msg_id);
+        if (!msg) throw new Error('Nachricht nicht (mehr) auffindbar');
+        await msg.delete(true); // true = "fuer alle loeschen"
+        ok = true;
+        console.log(`[WA] geloescht msg=${m.id} (${m.whatsapp_msg_id})`);
+      } catch (err) {
+        errMsg = err.message || String(err);
+        console.warn(`[WA] Loeschen msg=${m.id} fehlgeschlagen:`, errMsg);
+      }
+      await fetch(`${API_BASE}/api/whatsapp/delete-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-WA-Secret': WA_SECRET },
+        body: JSON.stringify({ message_id: m.id, deleted: ok, error_message: errMsg }),
+      }).catch(() => {});
+    }
+  } catch (err) {
+    console.error('[WA] Delete-Poll-Fehler:', err.message);
+  }
+}
+setInterval(pollDeletions, POLL_MS);
 
 // Heartbeat an API: damit der Admin sieht ob der Bot lebt und gepairt ist.
 // Stale-Heartbeats (>5min) → API alarmiert Technik/Praesident.
