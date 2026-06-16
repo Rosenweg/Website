@@ -194,7 +194,7 @@ async function loadExts(){
 }
 async function addExt(){
   const body = { ext:$('e_ext').value.trim(), name:$('e_name').value.trim(), secret:$('e_secret').value.trim() };
-  if(!body.ext||!body.name){ showErr('Extension + Name erforderlich'); return; }
+  if(!body.name){ showErr('Name erforderlich'); return; }
   const r = await api('/api/pbx/sip-extensions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!r.ok){ showErr((await r.json()).error||'Fehler'); return; }
   $('e_ext').value=$('e_name').value=$('e_secret').value=''; loadExts();
