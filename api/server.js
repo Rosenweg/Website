@@ -11623,6 +11623,74 @@ function requireTechnikOrPraesident(req, res, next) {
   return res.status(403).json({ error: 'Nur für Technik oder Präsident' });
 }
 
+// ─── Zähler-Technik (Rosenweg 9) ────────────────────────────────────
+// Technische Zähleruebersicht: IP, Online-Status, Seriennummer, alle
+// Messwerte + Zaehlerstaende. Nur fuer Technik / Verwaltung /
+// Rosenweg-9-Eigentuemer (= stweg3-eigentuemer).
+const ENERGY_COLLECTOR_URL = process.env.ENERGY_COLLECTOR_URL || 'http://energy-collector:3001';
+
+function requireZaehlerTechnik(req, res, next) {
+  const groups = req.user?.groups || [];
+  const gl = groups.map(g => String(g).toLowerCase());
+  const ok = isTechnik(groups)
+    || gl.includes('verwaltung')
+    || gl.includes('stweg3-eigentuemer');
+  if (ok) return next();
+  return res.status(403).json({ error: 'Nur für Technik, Verwaltung oder Rosenweg-9-Eigentümer' });
+}
+
+app.get('/api/zaehler-technik', authMiddleware, requireZaehlerTechnik, async (req, res) => {
+  try {
+    const [metersResp, liveResp] = await Promise.all([
+      fetch(`${ENERGY_COLLECTOR_URL}/api/energy/meters`, { signal: AbortSignal.timeout(8000) }),
+      fetch(`${ENERGY_COLLECTOR_URL}/api/energy/live`, { signal: AbortSignal.timeout(8000) }),
+    ]);
+    if (!metersResp.ok || !liveResp.ok) {
+      return res.status(502).json({ error: 'Energy-Collector nicht erreichbar' });
+    }
+    const meters = await metersResp.json();
+    const live = await liveResp.json();
+    const now = Date.now();
+    const FRESH_MS = 30000; // Poll alle 5s; >30s ohne frischen Wert = offline
+
+    const rows = meters.map((m) => {
+      const l = live[m.id] || null;
+      const ts = l?.ts || null;
+      const online = ts ? (now - new Date(ts).getTime() < FRESH_MS) : false;
+      return {
+        id: m.id,
+        name: m.name,
+        type: m.type,
+        host: m.host,
+        port: m.port,
+        unit_id: m.unit_id,
+        shelly_type: m.shelly_type,
+        location: m.location,
+        category: m.category,
+        active: m.active,
+        serial: l?.serial ?? null,
+        device_time: l?.device_time ?? null,
+        online,
+        last_seen: ts,
+        live: l ? {
+          power_w: l.power_w,
+          power_l1_w: l.power_l1_w, power_l2_w: l.power_l2_w, power_l3_w: l.power_l3_w,
+          voltage_l1_v: l.voltage_l1_v, voltage_l2_v: l.voltage_l2_v, voltage_l3_v: l.voltage_l3_v,
+          current_l1_a: l.current_l1_a, current_l2_a: l.current_l2_a, current_l3_a: l.current_l3_a,
+          pf_l1: l.pf_l1, pf_l2: l.pf_l2, pf_l3: l.pf_l3, tariff: l.tariff,
+          energy_import_kwh: l.energy_import_kwh, energy_export_kwh: l.energy_export_kwh,
+          energy_import_t1_kwh: l.energy_import_t1_kwh, energy_import_t2_kwh: l.energy_import_t2_kwh,
+          energy_export_t1_kwh: l.energy_export_t1_kwh, energy_export_t2_kwh: l.energy_export_t2_kwh,
+        } : null,
+      };
+    });
+
+    res.json({ meters: rows, server_time: new Date().toISOString() });
+  } catch (err) {
+    res.status(502).json({ error: 'Energy-Collector nicht erreichbar: ' + err.message });
+  }
+});
+
 // Liste aller Mails in der Queue (mit Filter)
 app.get('/api/verwaltung-mail-queue', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
   try {
