@@ -84,7 +84,7 @@
   <!-- Ring-Group -->
   <div class="card">
     <h2>🔔 Ring-Group Mitglieder</h2>
-    <table><thead><tr><th>Name</th><th>Ziel</th><th>Typ</th><th>Prio</th><th>Zeitsperre</th><th>Aktiv</th><th></th></tr></thead>
+    <table><thead><tr><th>Name</th><th>Ziel</th><th>Typ</th><th>Intern</th><th>Prio</th><th>Zeitsperre</th><th>Aktiv</th><th></th></tr></thead>
       <tbody id="members"></tbody></table>
     <div class="row" style="margin-top:.8rem;border-top:1px solid #f1f5f9;padding-top:.8rem">
       <label class="f">Name<input id="m_name"></label>
@@ -103,7 +103,7 @@
     <table><thead><tr><th>Ext</th><th>Name</th><th>Passwort</th><th>Status</th><th></th></tr></thead>
       <tbody id="exts"></tbody></table>
     <div class="row" style="margin-top:.8rem;border-top:1px solid #f1f5f9;padding-top:.8rem">
-      <label class="f">Extension<input id="e_ext" placeholder="11" style="width:90px"></label>
+      <label class="f">Extension (leer = auto)<input id="e_ext" placeholder="2000+" style="width:90px"></label>
       <label class="f">Name<input id="e_name"></label>
       <label class="f">Passwort (leer = generiert)<input id="e_secret"></label>
       <button onclick="addExt()" style="align-self:flex-end">+ Telefon</button>
@@ -164,12 +164,13 @@ async function loadMembers(){
     <td>${esc(m.name)}</td>
     <td class="mono">${esc(m.phone)}</td>
     <td><span class="tag">${m.kind==='sip'?'SIP':'Mobil'}</span></td>
+    <td class="mono">${m.internal_ext||'—'}</td>
     <td>${m.priority}</td>
     <td><label style="display:inline-flex;align-items:center;gap:.4rem;cursor:pointer" title="angehakt = nur in Geschäftszeit (Zeitsperre); aus = klingelt immer">
       <input type="checkbox" ${m.bypass_hours?'':'checked'} onchange="toggleZeitsperre(${m.id},this.checked)">
       <span style="font-size:.78rem" class="${m.bypass_hours?'':'muted'}">${m.bypass_hours?'klingelt immer':'Zeitsperre'}</span></label></td>
     <td><input type="checkbox" ${m.enabled?'checked':''} onchange="toggleMember(${m.id},this.checked)"></td>
-    <td><button class="danger" onclick="delMember(${m.id})">Löschen</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">Keine Mitglieder.</td></tr>';
+    <td><button class="danger" onclick="delMember(${m.id})">Löschen</button></td></tr>`).join('') || '<tr><td colspan="8" class="muted">Keine Mitglieder.</td></tr>';
 }
 async function addMember(){
   const body = { name:$('m_name').value.trim(), kind:$('m_kind').value, phone:$('m_phone').value.trim(),

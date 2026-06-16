@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS ring_members (
     is_temporary INTEGER NOT NULL DEFAULT 0,
     valid_until  TEXT,                     -- ISO8601, NULL = permanent
     priority     INTEGER NOT NULL DEFAULT 100,     -- kleinere zuerst, gleiche parallel
+    internal_ext INTEGER,                  -- interne Direktwahl (ab 1000), eindeutig
     notiz        TEXT,
     added_by     TEXT,
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
@@ -89,10 +90,27 @@ def connect():
     return conn
 
 
+def next_ext(conn, table, col, start):
+    """Naechste freie ganzzahlige Durchwahl >= start in table.col."""
+    rows = [int(r[0]) for r in conn.execute(f"SELECT {col} FROM {table} WHERE {col} IS NOT NULL")]
+    n = start
+    used = set(rows)
+    while n in used:
+        n += 1
+    return n
+
+
 def init_db():
     conn = connect()
     try:
         conn.executescript(SCHEMA)
+        # Migration fuer bestehende DBs: internal_ext-Spalte + Backfill ab 1000.
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(ring_members)")]
+        if "internal_ext" not in cols:
+            conn.execute("ALTER TABLE ring_members ADD COLUMN internal_ext INTEGER")
+        for r in conn.execute("SELECT id FROM ring_members WHERE internal_ext IS NULL ORDER BY id").fetchall():
+            conn.execute("UPDATE ring_members SET internal_ext = ? WHERE id = ?",
+                         (next_ext(conn, "ring_members", "internal_ext", 1000), r[0]))
         for k, v in DEFAULT_CONFIG.items():
             conn.execute(
                 "INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING",

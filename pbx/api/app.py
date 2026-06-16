@@ -156,6 +156,25 @@ def conference_members():
         conn.close()
 
 
+@app.get("/api/pbx/ring-members/by-ext/<int:ext>")
+def ring_member_by_ext(ext):
+    """AGI: interne Direktwahl (ab 1000) -> Ziel des Ring-Mitglieds."""
+    err = require_agi()
+    if err:
+        return err
+    conn = db.connect()
+    try:
+        row = conn.execute(
+            "SELECT name, phone, kind FROM ring_members WHERE internal_ext = ? AND enabled = 1",
+            (ext,),
+        ).fetchone()
+        if not row:
+            return jsonify({"found": False}), 404
+        return jsonify({"found": True, **dict(row)})
+    finally:
+        conn.close()
+
+
 @app.post("/api/pbx/call-event")
 def call_event():
     err = require_agi()
@@ -270,7 +289,7 @@ def ring_members_list():
     try:
         rows = conn.execute(
             "SELECT id, name, phone, kind, bypass_hours, enabled, is_temporary, valid_until, "
-            "priority, notiz, added_by, created_at, updated_at FROM ring_members ORDER BY priority, name"
+            "priority, internal_ext, notiz, added_by, created_at, updated_at FROM ring_members ORDER BY priority, name"
         ).fetchall()
         return jsonify({"members": db.rows_to_dicts(rows)})
     finally:
@@ -296,11 +315,12 @@ def ring_members_create():
         phone = "+" + phone[1:].replace(" ", "")
     conn = db.connect()
     try:
+        iext = db.next_ext(conn, "ring_members", "internal_ext", 1000)
         cur = conn.execute(
-            "INSERT INTO ring_members (name, phone, kind, bypass_hours, is_temporary, valid_until, priority, notiz, added_by) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO ring_members (name, phone, kind, bypass_hours, is_temporary, valid_until, priority, internal_ext, notiz, added_by) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
             (name, phone, kind, 1 if b.get("bypass_hours") else 0, 1 if b.get("is_temporary") else 0,
-             b.get("valid_until"), int(b.get("priority") or 100), b.get("notiz"), actor(user)),
+             b.get("valid_until"), int(b.get("priority") or 100), iext, b.get("notiz"), actor(user)),
         )
         conn.commit()
         row = conn.execute("SELECT * FROM ring_members WHERE id = ?", (cur.lastrowid,)).fetchone()
@@ -483,14 +503,16 @@ def sip_ext_create():
         return deny
     b = request.get_json(silent=True) or {}
     ext, name = str(b.get("ext", "")).strip(), str(b.get("name", "")).strip()
-    if not ext.isdigit() or len(ext) < 2:
-        return jsonify({"error": "Extension muss numerisch sein (>=2 Stellen, z.B. 11)"}), 400
     if not name:
         return jsonify({"error": "name erforderlich"}), 400
+    if ext and not ext.isdigit():
+        return jsonify({"error": "Extension muss numerisch sein"}), 400
     secret = str(b.get("secret") or "").strip() or pysecrets.token_urlsafe(12)
     ctx = str(b.get("context") or "internal").strip()
     conn = db.connect()
     try:
+        if not ext:
+            ext = str(db.next_ext(conn, "sip_extensions", "ext", 2000))  # fortlaufend ab 2000
         conn.execute(
             "INSERT INTO sip_extensions (ext, name, secret, context) VALUES (?,?,?,?)",
             (ext, name, secret, ctx),
