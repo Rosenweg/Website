@@ -93,7 +93,10 @@ def analyze(transcript, caller_id):
         if not r.ok:
             return dict(EMPTY_ANALYSIS)
         content = r.json()["choices"][0]["message"]["content"]
-        data = json.loads(content)
+        # Modelle (Bedrock/Claude) verpacken JSON oft in ```json … ``` Fences trotz
+        # response_format. Robust: vom ersten { bis zum letzten } extrahieren.
+        i, j = content.find("{"), content.rfind("}")
+        data = json.loads(content[i:j + 1] if i != -1 and j != -1 else content)
         out = dict(EMPTY_ANALYSIS)
         out.update({k: data.get(k, out[k]) for k in out})
         return out
