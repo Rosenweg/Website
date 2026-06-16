@@ -446,27 +446,30 @@ def regenerate_phones_conf(conn):
     ]
     for r in rows:
         ext, name, secret, ctx = r["ext"], r["name"], r["secret"], r["context"]
+        # Kanonisches PJSIP-Muster: endpoint/auth/aor TEILEN den Namen (= Extension).
+        # PJSIP-Sorcery unterscheidet per type=; der Registrar findet die AOR ueber
+        # den To-User (= Extension). Getrennte -aor/-auth-Namen -> "AOR '' not found".
         lines += [
             f"[{ext}]",
             "type=endpoint",
             f"context={ctx}",
             "disallow=all",
             "allow=opus,g722,alaw,ulaw",
-            f"auth={ext}-auth",
-            f"aors={ext}-aor",
+            f"auth={ext}",
+            f"aors={ext}",
             f"callerid={name} <{ext}>",
             "direct_media=no",
             "rewrite_contact=yes",
             "force_rport=yes",
             "rtp_symmetric=yes",
             "",
-            f"[{ext}-auth]",
+            f"[{ext}]",
             "type=auth",
             "auth_type=userpass",
             f"username={ext}",
             f"password={secret}",
             "",
-            f"[{ext}-aor]",
+            f"[{ext}]",
             "type=aor",
             "max_contacts=2",
             "remove_existing=yes",
@@ -497,7 +500,7 @@ def sip_ext_list():
         except Exception:  # noqa: BLE001
             regs = set()
         for e in exts:
-            e["registered"] = f"{e['ext']}-aor" in regs
+            e["registered"] = str(e["ext"]) in regs
         return jsonify({"extensions": exts})
     finally:
         conn.close()
