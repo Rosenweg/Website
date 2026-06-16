@@ -1,0 +1,21 @@
+[Unit]
+Description=Rosenweg PBX-API (standalone, neben Asterisk in CT 220)
+After=network-online.target asterisk.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Config (Secrets/Pfade) via EnvironmentFile. PBX_SHARED_SECRET liegt schon
+# in /etc/default/asterisk-env (von den AGI-Scripts genutzt) -> wiederverwenden.
+EnvironmentFile=-/etc/default/asterisk-env
+EnvironmentFile=-/etc/default/pbx-api
+WorkingDirectory=/opt/pbx-api
+ExecStart=/opt/pbx-api/venv/bin/python /opt/pbx-api/app.py
+Restart=on-failure
+RestartSec=5
+# Muss pjsip_phones.conf schreiben + von asterisk lesbar machen.
+User=asterisk
+Group=asterisk
+
+[Install]
+WantedBy=multi-user.target

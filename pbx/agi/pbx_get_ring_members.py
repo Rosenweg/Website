@@ -34,7 +34,7 @@ def _load_env_file(path='/etc/default/asterisk-env'):
     except FileNotFoundError: pass
     return env
 _envfile = _load_env_file()
-API_BASE   = os.environ.get('API_BASE')   or _envfile.get('API_BASE',   'http://100.64.2.27:3000')
+API_BASE   = os.environ.get('PBX_API_BASE')      or _envfile.get('PBX_API_BASE', 'http://127.0.0.1:8095')
 PBX_SECRET = os.environ.get('PBX_SHARED_SECRET') or _envfile.get('PBX_SHARED_SECRET', '')
 
 # AGI-Protokoll: stdin liest Header bis Leerzeile, dann Commands auf stdout
@@ -56,26 +56,39 @@ def log(msg):
     sys.stdout.flush()
     sys.stdin.readline()
 
+def dial_target(m):
+    """kind=sip -> direkt registriertes Endpoint; sonst ueber peoplefone-Trunk."""
+    if m.get('kind') == 'sip':
+        return f"PJSIP/{m['phone']}"
+    return f"PJSIP/{m['phone']}@peoplefone"
+
+
 def main():
     consume_agi_env()
+    # Arg 1 = IS_OPEN (vom Dialplan). Ausserhalb der Geschaeftszeit liefert die
+    # API nur Mitglieder mit bypass_hours=1 ("klingelt immer").
+    is_open = '1'
+    if len(sys.argv) > 1 and sys.argv[1] in ('0', '1'):
+        is_open = sys.argv[1]
     try:
         r = requests.get(
             f'{API_BASE}/api/pbx/ring-members/active',
+            params={'open': is_open},
             headers={'X-PBX-Secret': PBX_SECRET},
             timeout=5,
         )
         if not r.ok:
             log(f'API HTTP {r.status_code}')
-            set_var('RING_DIAL', '')
+            set_var('RING_LEVELS', '0')
             return
         members = r.json().get('members', [])
     except Exception as e:
         log(f'API-Fehler: {e}')
-        set_var('RING_DIAL', '')
+        set_var('RING_LEVELS', '0')
         return
 
     if not members:
-        log('Keine aktiven Members')
+        log(f'Keine aktiven Members (open={is_open})')
         set_var('RING_LEVELS', '0')
         return
 
@@ -89,7 +102,7 @@ def main():
     set_var('RING_LEVELS', str(len(levels)))
     for idx, prio in enumerate(levels, start=1):
         ms = by_prio[prio]
-        dial_str = '&'.join(f"PJSIP/{m['phone']}@peoplefone" for m in ms)
+        dial_str = '&'.join(dial_target(m) for m in ms)
         set_var(f'RING_DIAL_{idx}', dial_str)
         log(f"Level {idx} (Prio {prio}): {', '.join(m['name'] for m in ms)}")
 
