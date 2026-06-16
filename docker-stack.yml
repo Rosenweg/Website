@@ -168,6 +168,14 @@ services:
   # ============================================
   api:
     image: ghcr.io/rosenweg/rosenweg-api:latest
+    # Port 3000 im LAN published, damit die Standalone-PBX-API (CT 220, NICHT im
+    # Swarm) den Authentik-Login DIREKT reverse-proxien kann — nur der direkte
+    # Ingress-Pfad (kein Traefik dazwischen) bewahrt X-Forwarded-Host=pbx, sonst
+    # baut oauthRedirectUri den Callback faelschlich auf www. Nur LAN (100.64.2.x).
+    ports:
+      - target: 3000
+        published: 3000
+        mode: ingress
     environment:
       DB_HOST: postgres
       DB_PORT: "5432"

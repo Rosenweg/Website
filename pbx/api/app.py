@@ -551,7 +551,11 @@ def proxy_main_api(subpath):
             request.method, url, headers=headers, params=request.args,
             data=request.get_data(), timeout=15, allow_redirects=False,
         )
-        excluded = {"content-encoding", "transfer-encoding", "connection", "content-length"}
+        # Hop-by-hop-Header (PEP 3333 / RFC 2616) MUESSEN raus — waitress wirft
+        # sonst AssertionError (z.B. bei "Keep-Alive" vom direkt erreichten Node-API).
+        excluded = {"content-encoding", "content-length", "transfer-encoding", "connection",
+                    "keep-alive", "proxy-authenticate", "proxy-authorization", "te",
+                    "trailer", "trailers", "upgrade"}
         out_headers = [(k, v) for k, v in resp.headers.items() if k.lower() not in excluded]
         return (resp.content, resp.status_code, out_headers)
     except requests.RequestException as e:

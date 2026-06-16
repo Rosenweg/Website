@@ -24,6 +24,9 @@
   button { padding:.5rem .9rem; border:none; border-radius:8px; background:#2563eb; color:#fff; font-weight:600; cursor:pointer; font-size:.88rem; }
   button.sec { background:#e5e7eb; color:#374151; }
   button.danger { background:#fee2e2; color:#b91c1c; }
+  .loginbtn { display:inline-flex; align-items:center; gap:.55rem; padding:.7rem 1.4rem; background:#2563eb; color:#fff; border:none; border-radius:10px; font-weight:600; font-size:.95rem; cursor:pointer; box-shadow:0 4px 14px rgba(37,99,235,.3); transition:background .15s; }
+  .loginbtn:hover { background:#1d4ed8; }
+  .gate .sub { color:#9ca3af; margin-top:.9rem; font-size:.8rem; }
   table { width:100%; border-collapse:collapse; font-size:.86rem; }
   th, td { text-align:left; padding:.45rem .5rem; border-bottom:1px solid #f1f5f9; }
   th { font-size:.7rem; text-transform:uppercase; color:#9ca3af; letter-spacing:.03em; }
@@ -48,7 +51,8 @@
 <div id="gate" class="gate" style="display:none">
   <h2>🔒 Anmeldung erforderlich</h2>
   <p style="color:#6b7280;margin:.6rem 0 1rem">Nur für Technik / Präsident.</p>
-  <div id="sso-login-container"></div>
+  <button class="loginbtn" onclick="AuthentikAuth.login()">🔐 Mit Rosenweg-Konto anmelden</button>
+  <div class="sub">Sichere Anmeldung über Authentik SSO</div>
 </div>
 
 <div class="wrap" id="content" style="display:none">
@@ -202,7 +206,7 @@ async function loadCalls(){
     <td>${c.duration_seconds!=null?c.duration_seconds+'s':'—'}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Noch keine Anrufe.</td></tr>';
 }
 
-function gate(){ $('content').style.display='none'; $('gate').style.display='block'; AuthentikAuth.createLoginButton('sso-login-container'); }
+function gate(){ $('content').style.display='none'; $('gate').style.display='block'; }
 async function start(){
   if(!AuthentikAuth.isLoggedIn()){ gate(); return; }
   const u = AuthentikAuth.getUser();
