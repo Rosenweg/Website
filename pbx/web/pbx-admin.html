@@ -165,7 +165,9 @@ async function loadMembers(){
     <td class="mono">${esc(m.phone)}</td>
     <td><span class="tag">${m.kind==='sip'?'SIP':'Mobil'}</span></td>
     <td>${m.priority}</td>
-    <td>${m.bypass_hours?'<span class="pill ok">immer</span>':'<span class="muted">Zeitsperre</span>'}</td>
+    <td><label style="display:inline-flex;align-items:center;gap:.4rem;cursor:pointer" title="angehakt = nur in Geschäftszeit (Zeitsperre); aus = klingelt immer">
+      <input type="checkbox" ${m.bypass_hours?'':'checked'} onchange="toggleZeitsperre(${m.id},this.checked)">
+      <span style="font-size:.78rem" class="${m.bypass_hours?'':'muted'}">${m.bypass_hours?'klingelt immer':'Zeitsperre'}</span></label></td>
     <td><input type="checkbox" ${m.enabled?'checked':''} onchange="toggleMember(${m.id},this.checked)"></td>
     <td><button class="danger" onclick="delMember(${m.id})">Löschen</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted">Keine Mitglieder.</td></tr>';
 }
@@ -178,6 +180,7 @@ async function addMember(){
   $('m_name').value=$('m_phone').value=''; loadMembers();
 }
 async function toggleMember(id,enabled){ await api('/api/pbx/ring-members/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})}); }
+async function toggleZeitsperre(id,zeitsperre){ await api('/api/pbx/ring-members/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({bypass_hours:!zeitsperre})}); loadMembers(); }
 async function delMember(id){ if(!confirm('Mitglied löschen?'))return; await api('/api/pbx/ring-members/'+id,{method:'DELETE'}); loadMembers(); }
 
 async function loadExts(){
