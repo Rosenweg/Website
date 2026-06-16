@@ -61,6 +61,22 @@ def main():
         payload['answered_by'] = args[1] if len(args) > 1 else ''
     elif event == 'end':
         payload['hangup_cause'] = args[1] if len(args) > 1 else 'UNKNOWN'
+    elif event == 'cdr':
+        # Hangup-Handler: komplettes CDR (ausgehend/intern). args[1] = ^-getrennt:
+        #   src ^ dst ^ disposition ^ billsec ^ start ^ uniqueid
+        parts = ((args[1] if len(args) > 1 else '').split('^') + [''] * 6)[:6]
+        src, dst, disp, billsec, start, cdr_uid = parts
+        dst_digits = ''.join(c for c in dst if c.isdigit())
+        outbound = dst.startswith('+') or dst.startswith('00') or (dst.startswith('0') and len(dst_digits) >= 10)
+        payload.update({
+            'uniqueid': cdr_uid or uniqueid,
+            'direction': 'outbound' if outbound else 'internal',
+            'caller_id': src,
+            'dialed': dst,
+            'hangup_cause': disp,
+            'duration_seconds': int(billsec) if billsec.isdigit() else None,
+            'started_at': start or None,
+        })
 
     try:
         r = requests.post(f'{API_BASE}/api/pbx/call-event',
