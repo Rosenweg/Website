@@ -34,6 +34,7 @@
         <button data-tab="keys"    class="tab px-3 py-2 border-b-2 border-transparent text-gray-500">API-Keys</button>
         <button data-tab="aliases" class="tab px-3 py-2 border-b-2 border-transparent text-gray-500">Aliase</button>
         <button data-tab="smtpips" class="tab px-3 py-2 border-b-2 border-transparent text-gray-500">SMTP-IPs</button>
+        <button data-tab="broadcast" class="tab px-3 py-2 border-b-2 border-transparent text-gray-500">📢 Broadcast</button>
       </div>
 
       <!-- SENDEN -->
@@ -53,6 +54,37 @@
         <div class="mt-3 flex items-center gap-3">
           <button id="s-send" class="bg-blue-600 text-white rounded px-4 py-1.5 text-sm hover:bg-blue-700">Senden</button>
           <span id="s-result" class="text-xs"></span>
+        </div>
+      </section>
+
+      <!-- BROADCAST -->
+      <section data-panel="broadcast" class="panel hidden bg-white rounded-lg shadow p-4">
+        <h2 class="font-bold mb-1">📢 Broadcast — Massennachricht an Bewohner</h2>
+        <p class="text-xs text-gray-500 mb-3">Nur an Personen mit WhatsApp-Opt-In. Erst „Empfänger zählen", dann senden.</p>
+        <label class="block text-xs text-gray-500">Ziel</label>
+        <select id="bc-target" class="mt-1 w-full border rounded px-2 py-1.5 text-sm">
+          <option value="all">Alle Opt-In Personen</option>
+          <option value="stweg:1">STWEG 1</option>
+          <option value="stweg:2">STWEG 2</option>
+          <option value="stweg:3">STWEG 3</option>
+          <option value="stweg:4">STWEG 4</option>
+          <option value="stweg:5">STWEG 5</option>
+          <option value="stweg:6">STWEG 6</option>
+          <option value="stweg:7">STWEG 7</option>
+          <option value="stweg:8">MEG (Tiefeinstellhalle)</option>
+          <option value="group:technik">Technik</option>
+          <option value="group:Präsident">Präsident</option>
+          <option value="group:ausschuss">Ausschuss (alle)</option>
+          <option value="group:eigentuemer">Eigentümer (alle)</option>
+          <option value="group:bewohner">Bewohner (alle)</option>
+          <option value="group:verwaltung">Verwaltung</option>
+        </select>
+        <label class="block text-xs text-gray-500 mt-3">Nachricht</label>
+        <textarea id="bc-body" rows="5" class="mt-1 w-full border rounded px-2 py-1.5 text-sm"></textarea>
+        <div class="mt-3 flex items-center gap-3">
+          <button id="bc-count" onclick="bcCount()" class="bg-gray-200 text-gray-700 rounded px-3 py-1.5 text-sm hover:bg-gray-300">Empfänger zählen</button>
+          <button id="bc-send" onclick="bcSend()" class="bg-blue-600 text-white rounded px-4 py-1.5 text-sm hover:bg-blue-700">Senden</button>
+          <span id="bc-result" class="text-xs"></span>
         </div>
       </section>
 
@@ -191,6 +223,29 @@
 
   async function loadStatus(){ try{ const d=await jget('/gateway/health'); const el=document.getElementById('wa-status'); el.textContent=d.wa_ready?'WhatsApp bereit':(d.needs_pairing?'Pairing nötig':'WhatsApp offline'); el.className='text-xs px-2 py-1 rounded '+(d.wa_ready?'bg-emerald-100 text-emerald-700':'bg-amber-100 text-amber-700'); const box=document.getElementById('pair-box'); if(d.needs_pairing){ box.classList.remove('hidden'); loadQr(); } else { box.classList.add('hidden'); } }catch{} }
   async function loadQr(){ try{ const d=await jget('/gateway/qr'); if(d.qr_png_base64){ document.getElementById('pair-qr').src='data:image/png;base64,'+d.qr_png_base64; } }catch{} }
+
+  // Broadcast (Empfaenger + Versand laufen ueber die Haupt-API, reverse-proxied)
+  let bcLastTarget=null, bcCountVal=0;
+  async function bcCount(){
+    const t=document.getElementById('bc-target').value, el=document.getElementById('bc-result');
+    el.textContent='zähle…'; el.className='text-xs text-gray-500';
+    try{ const d=await jget('/api/whatsapp/admin/recipients?target='+encodeURIComponent(t));
+      bcLastTarget=t; bcCountVal=d.count;
+      const sample=(d.recipients||[]).slice(0,3).map(x=>x.name).filter(Boolean).join(', ');
+      el.textContent=`${d.count} Empfänger`+(sample?` (z.B. ${sample})`:''); el.className='text-xs text-emerald-700';
+    }catch(e){ el.textContent=e.message; el.className='text-xs text-red-600'; }
+  }
+  async function bcSend(){
+    const t=document.getElementById('bc-target').value, body=document.getElementById('bc-body').value.trim(), el=document.getElementById('bc-result');
+    if(!body){ el.textContent='Nachricht fehlt'; el.className='text-xs text-red-600'; return; }
+    if(t!==bcLastTarget){ el.textContent='Bitte erst „Empfänger zählen"'; el.className='text-xs text-amber-600'; return; }
+    if(!confirm(`Broadcast an ${bcCountVal} Empfänger senden?`)) return;
+    el.textContent='sende…'; el.className='text-xs text-gray-500';
+    try{ const d=await jsend('/api/whatsapp/admin/broadcast',{target:t,body});
+      el.textContent=`Gesendet: ${d.queued??d.sent??bcCountVal} Nachrichten`; el.className='text-xs text-emerald-700';
+      document.getElementById('bc-body').value=''; bcLastTarget=null;
+    }catch(e){ el.textContent=e.message; el.className='text-xs text-red-600'; }
+  }
 
   document.addEventListener('DOMContentLoaded', async () => {
     const u = await AuthentikAuth.init({ requireAuth: true });
