@@ -13096,12 +13096,19 @@ app.post('/api/whatsapp/delete-status', requireWhatsappSecret, async (req, res) 
 let waBotHeartbeat = null; // { is_ready, ready_at, phone, pid, uptime_seconds, received_at }
 let waBotStaleAlertSent = false; // verhindert Alert-Spam
 app.post('/api/whatsapp/heartbeat', requireWhatsappSecret, (req, res) => {
+  const wasStale = waBotStaleAlertSent;            // war zuvor ein Stale-Alarm raus?
+  const prevHb = waBotHeartbeat?.received_at;       // letzter Heartbeat vor der Lücke
   waBotHeartbeat = {
     ...req.body,
     received_at: new Date(),
   };
   waBotStaleAlertSent = false; // Bot lebt → Alert-Sperre aufheben
   res.json({ ok: true });
+  // Flanke stale→erreichbar: Entwarnung an dieselben Admins schicken.
+  if (wasStale) {
+    const downMin = prevHb ? Math.round((Date.now() - new Date(prevHb).getTime()) / 60000) : null;
+    sendBotRecovery(downMin).catch(() => {});
+  }
 });
 
 // Stale-Detector: wenn der letzte Heartbeat > 5min her ist, einmal Alarm
@@ -13147,6 +13154,38 @@ async function checkBotHeartbeat() {
     console.warn('[WA-Watchdog] Alarm konnte nicht gesendet werden:', err.message);
   }
 }
+// Entwarnung: Bot sendet wieder Heartbeats nach einem Stale-Alarm.
+async function sendBotRecovery(downMin) {
+  console.log(`[WA-Watchdog] Bot wieder erreichbar${downMin != null ? ` (Ausfall ~${downMin}min)` : ''} — Entwarnung.`);
+  try {
+    const r = await pool.query(
+      `SELECT DISTINCT email FROM users
+        WHERE active = true AND email IS NOT NULL
+          AND (groups_json::jsonb ? 'technik' OR groups_json::jsonb ? 'Präsident')`,
+    );
+    const adminEmails = r.rows.map(x => x.email).filter(Boolean);
+    if (adminEmails.length === 0) return;
+    const phone = waBotHeartbeat?.phone || '(unbekannt)';
+    await loggedSendMail({
+      from: MAIL_FROM,
+      to: adminEmails.join(', '),
+      subject: '✅ WhatsApp-Bot wieder erreichbar',
+      text: `Entwarnung: Der WhatsApp-Bot sendet wieder Heartbeats.\n\n`
+        + (downMin != null ? `Ausfalldauer: ca. ${downMin} Minuten\n` : '')
+        + `Status: ${waBotHeartbeat?.is_ready ? 'ready' : 'nicht ready'}\n`
+        + `Telefon: ${phone}\n`
+        + `Zeit: ${new Date().toLocaleString('de-CH')}\n`,
+    }, 'whatsapp-bot-recovered').catch(() => {});
+    pushWhatsappBroadcast({
+      emails: adminEmails,
+      sourceType: 'bot-watchdog',
+      body: `✅ *WhatsApp-Bot wieder online*\nHeartbeat empfangen${downMin != null ? ` (Ausfall ~${downMin}min)` : ''}. Entwarnung.`,
+    }).catch(() => {});
+  } catch (err) {
+    console.warn('[WA-Watchdog] Entwarnung konnte nicht gesendet werden:', err.message);
+  }
+}
+
 setInterval(checkBotHeartbeat, 60_000); // jede Minute prüfen
 
 // QR-Code-Bridge: Bot pusht den aktuellen QR; Admin holt ihn als PNG.
