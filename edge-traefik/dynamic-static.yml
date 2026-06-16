@@ -37,3 +37,20 @@ http:
       middlewares: [admin-auth]
       tls:
         certResolver: cf
+
+    # PBX-Admin-Web-UI: eigenstaendige PBX-API in CT 220 (kein Swarm, kein
+    # CF-Tunnel). Auth laeuft in der App (Reverse-Proxy auf die Haupt-API /
+    # Authentik), daher hier KEIN basicAuth. Nur HTTP — SIP bleibt LAN/VPN.
+    pbx-admin:
+      rule: "Host(`pbx.rosenweg4303.ch`)"
+      entryPoints: [websecure]
+      service: pbx-api
+      middlewares: [sec-headers]
+      tls:
+        certResolver: cf
+
+  services:
+    pbx-api:
+      loadBalancer:
+        servers:
+          - url: "http://100.64.2.29:8095"
