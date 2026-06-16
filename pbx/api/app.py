@@ -491,7 +491,14 @@ def sip_ext_list():
         rows = conn.execute(
             "SELECT ext, name, secret, context, enabled, created_at, updated_at FROM sip_extensions ORDER BY ext"
         ).fetchall()
-        return jsonify({"extensions": db.rows_to_dicts(rows)})
+        exts = db.rows_to_dicts(rows)
+        try:
+            regs = ami.registered_aors()
+        except Exception:  # noqa: BLE001
+            regs = set()
+        for e in exts:
+            e["registered"] = f"{e['ext']}-aor" in regs
+        return jsonify({"extensions": exts})
     finally:
         conn.close()
 

@@ -110,6 +110,17 @@ def reload_pjsip():
     return command("pjsip reload")
 
 
+def registered_aors():
+    """Set der AOR-Namen mit aktivem Contact (= ein Telefon ist registriert)."""
+    out = command("pjsip show contacts")
+    aors = set()
+    for line in out.splitlines():
+        m = re.search(r"Contact:\s+([^/\s]+)/", line)
+        if m:
+            aors.add(m.group(1).strip())
+    return aors
+
+
 if __name__ == "__main__":
     import json
     print(json.dumps(trunk_status(), indent=2))

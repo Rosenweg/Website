@@ -100,7 +100,7 @@
   <div class="card">
     <h2>☎️ SIP-Telefone (LAN/VPN)</h2>
     <p class="muted" style="font-size:.82rem;margin-bottom:.7rem">Registrierung am Server <b class="mono">100.64.2.29</b> (Port 5060, nur im LAN/VPN). Benutzername = Extension, Passwort wie unten. Danach als Ring-Mitglied „SIP-Telefon" hinzufügbar.</p>
-    <table><thead><tr><th>Ext</th><th>Name</th><th>Passwort</th><th>Status</th><th></th></tr></thead>
+    <table><thead><tr><th>Ext</th><th>Name</th><th>Passwort</th><th>Registriert</th><th>Status</th><th></th></tr></thead>
       <tbody id="exts"></tbody></table>
     <div class="row" style="margin-top:.8rem;border-top:1px solid #f1f5f9;padding-top:.8rem">
       <label class="f">Extension (leer = auto)<input id="e_ext" placeholder="2000+" style="width:90px"></label>
@@ -194,9 +194,10 @@ async function loadExts(){
   $('exts').innerHTML = xs.map(x=>`<tr>
     <td class="mono">${esc(x.ext)}</td><td>${esc(x.name)}</td>
     <td class="mono">${esc(x.secret)}</td>
+    <td>${x.registered?'<span class="pill ok">● registriert</span>':'<span class="muted">nicht angemeldet</span>'}</td>
     <td>${x.enabled?'<span class="pill ok">aktiv</span>':'<span class="muted">aus</span>'}</td>
     <td>${inRing.has(String(x.ext))?'<span class="pill ok">in Ring-Group</span>':`<button class="sec" onclick="addSipToRing('${esc(x.ext)}')">+ Ring-Group</button>`}
-        <button class="danger" onclick="delExt('${esc(x.ext)}')">Löschen</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted">Keine SIP-Telefone.</td></tr>';
+        <button class="danger" onclick="delExt('${esc(x.ext)}')">Löschen</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Keine SIP-Telefone.</td></tr>';
 }
 async function addSipToRing(ext){
   const ph = sipPhones.find(x=>String(x.ext)===String(ext));
