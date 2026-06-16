@@ -53,6 +53,19 @@ async function readMeter(client, meter) {
   // smart-me: Modbus address = internal address - 1
   // All values are int32 (2 registers each), Big Endian
 
+  // Group 0: Serial Number (internal 0x2000) + Date/Time UTC (internal 0x2002)
+  //          → Modbus 0x1FFF, 4 registers (serial uint32, unix-time uint32).
+  //          Best-effort: statische Geraete-Identitaet, darf den Live-Read nicht killen.
+  try {
+    const idBuf = await client.readHoldingRegisters(0x1FFF, 4);
+    data.serial = parseRegisterValue(Buffer.from(idBuf.buffer), 'uint32');
+    const dt = parseRegisterValue(Buffer.from(idBuf.buffer.slice(4)), 'uint32');
+    data.device_time = dt ? new Date(dt * 1000).toISOString() : null;
+  } catch (e) {
+    data.serial = null;
+    data.device_time = null;
+  }
+
   // Group 1: Power registers (internal 0x2004-0x200B → Modbus 0x2003-0x200A, 8 registers)
   const powerBuf = await client.readHoldingRegisters(0x2003, 8);
   data.power_mw = parseRegisterValue(Buffer.from(powerBuf.buffer), 'int32');        // mW
@@ -76,10 +89,26 @@ async function readMeter(client, meter) {
   data.pf_l3_raw = parseRegisterValue(Buffer.from(pfBuf.buffer.subarray(4, 6)), 'uint16');
   data.tariff_raw = parseRegisterValue(Buffer.from(pfBuf.buffer.subarray(6, 8)), 'uint16');
 
-  // Group 4: Energy import/export in kWh (internal 0x204C/0x204E → Modbus 0x204B/0x204D)
-  const energyBuf = await client.readHoldingRegisters(0x204B, 4);
-  data.energy_import_raw = parseRegisterValue(Buffer.from(energyBuf.buffer), 'int32');      // kWh * 1000
-  data.energy_export_raw = parseRegisterValue(Buffer.from(energyBuf.buffer.slice(4)), 'int32');
+  // Group 4: Energy in Wh, uint32. Total + Tarif-Split in EINEM Read.
+  //   internal 0x204C Import-Total, 0x204E Export-Total,
+  //   0x2050 Import-T1, 0x2052 Import-T2, 0x2054 Export-T1, 0x2056 Export-T2
+  //   → Modbus 0x204B, 12 Register (6 x uint32). Fallback auf 4 Register
+  //   (nur Total), falls ein Zaehler den Tarif-Split-Block nicht exponiert —
+  //   damit ein fehlender Block nicht den ganzen Read (=> Zaehler offline) killt.
+  let eb;
+  try {
+    const energyBuf = await client.readHoldingRegisters(0x204B, 12);
+    eb = Buffer.from(energyBuf.buffer);
+  } catch (e) {
+    const energyBuf = await client.readHoldingRegisters(0x204B, 4);
+    eb = Buffer.from(energyBuf.buffer);
+  }
+  data.energy_import_raw    = parseRegisterValue(eb.slice(0), 'uint32');   // Wh
+  data.energy_export_raw    = parseRegisterValue(eb.slice(4), 'uint32');
+  data.energy_import_t1_raw = eb.length >= 12 ? parseRegisterValue(eb.slice(8),  'uint32') : 0;
+  data.energy_import_t2_raw = eb.length >= 16 ? parseRegisterValue(eb.slice(12), 'uint32') : 0;
+  data.energy_export_t1_raw = eb.length >= 20 ? parseRegisterValue(eb.slice(16), 'uint32') : 0;
+  data.energy_export_t2_raw = eb.length >= 24 ? parseRegisterValue(eb.slice(20), 'uint32') : 0;
 
   // Convert to human-readable units
   return {
@@ -99,10 +128,12 @@ async function readMeter(client, meter) {
     tariff: data.tariff_raw,
     energy_import_kwh: data.energy_import_raw / 1000,
     energy_export_kwh: data.energy_export_raw / 1000,
-    energy_import_t1_kwh: 0,
-    energy_import_t2_kwh: 0,
-    energy_export_t1_kwh: 0,
-    energy_export_t2_kwh: 0,
+    energy_import_t1_kwh: data.energy_import_t1_raw / 1000,
+    energy_import_t2_kwh: data.energy_import_t2_raw / 1000,
+    energy_export_t1_kwh: data.energy_export_t1_raw / 1000,
+    energy_export_t2_kwh: data.energy_export_t2_raw / 1000,
+    serial: data.serial,
+    device_time: data.device_time,
   };
 }
 

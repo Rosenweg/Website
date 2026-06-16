@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zähler-Technik – Rosenweg 9</title>
+    <link rel="icon" href="/logo-rosenweg.png" type="image/png">
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root { --y:#eab308; --g:#22c55e; --r:#ef4444; --b:#3b82f6; --grey:#9ca3af; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+               background: linear-gradient(135deg, #eab308 0%, #f97316 100%); background-attachment: fixed; color: #1f2937; min-height: 100vh; }
+
+        .topnav { background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.08); position: sticky; top: 0; z-index: 50;
+                  display: flex; align-items: center; justify-content: space-between; padding: .6rem 1.25rem; gap: 1rem; flex-wrap: wrap; }
+        .brand { display: flex; align-items: center; gap: .75rem; text-decoration: none; color: inherit; }
+        .brand img { height: 44px; width: auto; display: block; }
+        .brand .t { font-weight: 700; font-size: 1.05rem; line-height: 1.1; }
+        .brand .s { font-size: .75rem; color: #6b7280; }
+        .nav-right { display: flex; align-items: center; gap: .85rem; }
+        .live-badge { display: inline-flex; align-items: center; gap: .4rem; padding: .25rem .7rem; background: #fee2e2; color: #b91c1c; border-radius: 20px; font-size: .78rem; font-weight: 700; }
+        .live-dot { width: 8px; height: 8px; background: #ef4444; border-radius: 50%; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+        .back { color: var(--y); font-weight: 600; text-decoration: none; font-size: .9rem; }
+        .back:hover { color: #f97316; }
+
+        .wrap { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
+        .err, .gate { background: #fff; border-radius: 14px; padding: 1.5rem; text-align: center; margin-bottom: 1rem; box-shadow: 0 6px 24px rgba(0,0,0,.12); }
+        .err { color: #b91c1c; display: none; }
+        .gate { display: none; }
+        .gate h2 { margin-bottom: .5rem; }
+        .gate p { color: #6b7280; margin-bottom: 1rem; }
+
+        .summary { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+        .pill { background: #fff; border-radius: 12px; padding: .7rem 1.1rem; box-shadow: 0 4px 16px rgba(0,0,0,.1); font-size: .9rem; }
+        .pill b { font-size: 1.3rem; display: block; }
+
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 1rem; }
+        .meter { background: #fff; border-radius: 16px; box-shadow: 0 6px 24px rgba(0,0,0,.12); overflow: hidden; border-top: 5px solid var(--grey); }
+        .meter.on { border-top-color: var(--g); }
+        .meter.off { border-top-color: var(--r); opacity: .92; }
+        .mhead { display: flex; align-items: center; justify-content: space-between; padding: .85rem 1rem .6rem; gap: .5rem; }
+        .mname { font-weight: 700; font-size: 1.05rem; }
+        .mid { font-size: .7rem; color: var(--grey); font-family: ui-monospace, monospace; }
+        .status { display: inline-flex; align-items: center; gap: .35rem; font-size: .78rem; font-weight: 700; padding: .2rem .6rem; border-radius: 20px; white-space: nowrap; }
+        .status.on { background: #dcfce7; color: #15803d; }
+        .status.off { background: #fee2e2; color: #b91c1c; }
+        .sdot { width: 8px; height: 8px; border-radius: 50%; }
+        .status.on .sdot { background: #22c55e; }
+        .status.off .sdot { background: #ef4444; }
+
+        .ident { padding: 0 1rem .6rem; display: grid; grid-template-columns: auto 1fr; gap: .15rem .6rem; font-size: .82rem; }
+        .ident dt { color: var(--grey); }
+        .ident dd { font-family: ui-monospace, monospace; word-break: break-all; }
+
+        .sect { border-top: 1px solid #f1f5f9; padding: .6rem 1rem; }
+        .sect h4 { font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; color: var(--grey); margin-bottom: .45rem; }
+        .phases { display: grid; grid-template-columns: repeat(3, 1fr); gap: .4rem; text-align: center; }
+        .ph { background: #f8fafc; border-radius: 8px; padding: .35rem .2rem; }
+        .ph .pl { font-size: .6rem; color: var(--grey); }
+        .ph .pv { font-weight: 700; font-size: .92rem; }
+        .ph .pu { font-size: .6em; color: var(--grey); font-weight: 500; }
+        .kv { display: grid; grid-template-columns: 1fr auto; gap: .2rem .5rem; font-size: .85rem; }
+        .kv .k { color: #6b7280; }
+        .kv .v { font-weight: 600; text-align: right; }
+        .total { font-weight: 700; }
+
+        .updated { text-align: center; color: rgba(255,255,255,.95); font-size: .82rem; margin-top: 1.25rem; text-shadow: 0 1px 2px rgba(0,0,0,.15); }
+        .muted { color: var(--grey); }
+    </style>
+</head>
+<body>
+    <nav class="topnav">
+        <a href="/" class="brand">
+            <img src="/logo-stweg3-rosenweg9.png" onerror="this.onerror=null;this.src='/logo-rosenweg.png'" alt="Rosenweg 9">
+            <span><span class="t">Zähler-Technik</span><br><span class="s">STWEG 3 · Rosenweg 9</span></span>
+        </a>
+        <div class="nav-right">
+            <span class="live-badge"><span class="live-dot"></span> LIVE</span>
+            <a href="/" class="back">← Zurück</a>
+        </div>
+    </nav>
+
+    <div class="wrap">
+        <div id="err" class="err"></div>
+
+        <div id="gate" class="gate">
+            <h2>🔒 Anmeldung erforderlich</h2>
+            <p>Diese technische Übersicht ist nur für Technik, Verwaltung und Rosenweg-9-Eigentümer.</p>
+            <div id="sso-login-container"></div>
+        </div>
+
+        <div id="content" style="display:none">
+            <div class="summary">
+                <div class="pill"><span class="muted">Zähler</span> <b id="s-total">–</b></div>
+                <div class="pill"><span class="muted">Online</span> <b id="s-online" style="color:#16a34a">–</b></div>
+                <div class="pill"><span class="muted">Offline</span> <b id="s-offline" style="color:#dc2626">–</b></div>
+            </div>
+            <div id="grid" class="grid"></div>
+            <div class="updated" id="updated">Lade …</div>
+        </div>
+    </div>
+
+    <script>
+        const $ = id => document.getElementById(id);
+        const fmt = (v, d = 0) => (v == null || isNaN(v)) ? '–' : Number(v).toFixed(d);
+        const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+        function relTime(ts) {
+            if (!ts) return 'nie';
+            const s = Math.round((Date.now() - new Date(ts).getTime()) / 1000);
+            if (s < 60) return s + 's';
+            if (s < 3600) return Math.round(s / 60) + ' Min';
+            if (s < 86400) return Math.round(s / 3600) + ' Std';
+            return Math.round(s / 86400) + ' Tg';
+        }
+
+        function phaseRow(label, vals, unit, dec) {
+            const cells = vals.map((v, i) =>
+                `<div class="ph"><div class="pl">${['L1', 'L2', 'L3'][i]}</div><div class="pv">${fmt(v, dec)}<span class="pu"> ${unit}</span></div></div>`
+            ).join('');
+            return `<div class="sect"><h4>${label}</h4><div class="phases">${cells}</div></div>`;
+        }
+
+        function meterCard(m) {
+            const l = m.live || {};
+            const cls = m.online ? 'on' : 'off';
+            const tariff = l.tariff != null ? ('T' + l.tariff) : '–';
+
+            let body = `
+                <div class="mhead">
+                    <div><div class="mname">${esc(m.name || m.id)}</div><div class="mid">${esc(m.id)}</div></div>
+                    <span class="status ${cls}"><span class="sdot"></span>${m.online ? 'Online' : 'Offline'}</span>
+                </div>
+                <dl class="ident">
+                    <dt>IP</dt><dd>${esc(m.host || '–')}${m.port ? ':' + m.port : ''}${m.unit_id != null ? ' · Unit ' + m.unit_id : ''}</dd>
+                    <dt>Serie</dt><dd>${m.serial != null ? esc(m.serial) : '<span class="muted">–</span>'}</dd>
+                    <dt>Typ</dt><dd>${esc(m.type || '–')}${m.shelly_type ? ' / ' + esc(m.shelly_type) : ''}</dd>
+                    <dt>Gerätezeit</dt><dd>${m.device_time ? new Date(m.device_time).toLocaleString('de-CH') : '<span class="muted">–</span>'}</dd>
+                    <dt>Zuletzt</dt><dd>${esc(relTime(m.last_seen))}${m.last_seen ? ' her' : ''}</dd>
+                </dl>`;
+
+            if (m.live) {
+                body += `<div class="sect"><h4>Leistung gesamt</h4><div class="kv"><span class="k">P · Tarif ${tariff}</span><span class="v total">${fmt(l.power_w)} W</span></div></div>`;
+                body += phaseRow('Leistung je Phase', [l.power_l1_w, l.power_l2_w, l.power_l3_w], 'W', 0);
+                body += phaseRow('Spannung', [l.voltage_l1_v, l.voltage_l2_v, l.voltage_l3_v], 'V', 1);
+                body += phaseRow('Strom', [l.current_l1_a, l.current_l2_a, l.current_l3_a], 'A', 2);
+                body += phaseRow('Leistungsfaktor', [l.pf_l1, l.pf_l2, l.pf_l3], '', 2);
+                body += `
+                    <div class="sect"><h4>Zählerstand</h4><div class="kv">
+                        <span class="k">Bezug gesamt</span><span class="v total">${fmt(l.energy_import_kwh, 1)} kWh</span>
+                        <span class="k muted">· Hochtarif (T1)</span><span class="v">${fmt(l.energy_import_t1_kwh, 1)} kWh</span>
+                        <span class="k muted">· Niedertarif (T2)</span><span class="v">${fmt(l.energy_import_t2_kwh, 1)} kWh</span>
+                        <span class="k">Einspeisung gesamt</span><span class="v total">${fmt(l.energy_export_kwh, 1)} kWh</span>
+                        <span class="k muted">· Hochtarif (T1)</span><span class="v">${fmt(l.energy_export_t1_kwh, 1)} kWh</span>
+                        <span class="k muted">· Niedertarif (T2)</span><span class="v">${fmt(l.energy_export_t2_kwh, 1)} kWh</span>
+                    </div></div>`;
+            } else {
+                body += `<div class="sect"><span class="muted">Keine Live-Daten — Zähler nicht erreichbar.</span></div>`;
+            }
+
+            return `<div class="meter ${cls}">${body}</div>`;
+        }
+
+        async function load() {
+            try {
+                const resp = await AuthentikAuth.apiFetch('/api/zaehler-technik', { cache: 'no-store' });
+                if (resp.status === 401) { showGate(); return; }
+                if (resp.status === 403) {
+                    $('gate').style.display = 'block';
+                    $('gate').innerHTML = '<h2>⛔ Kein Zugriff</h2><p>Dein Konto ist nicht für die Zähler-Technik freigeschaltet (nur Technik, Verwaltung, Rosenweg-9-Eigentümer).</p>';
+                    $('content').style.display = 'none';
+                    return;
+                }
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+                render(data);
+            } catch (e) {
+                $('err').style.display = 'block';
+                $('err').textContent = 'Fehler beim Laden: ' + e.message;
+            }
+        }
+
+        function render(data) {
+            $('gate').style.display = 'none';
+            $('err').style.display = 'none';
+            $('content').style.display = 'block';
+            const meters = (data.meters || []).slice().sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+            const online = meters.filter(m => m.online).length;
+            $('s-total').textContent = meters.length;
+            $('s-online').textContent = online;
+            $('s-offline').textContent = meters.length - online;
+            $('grid').innerHTML = meters.map(meterCard).join('');
+            $('updated').textContent = 'Aktualisiert: ' + new Date(data.server_time || Date.now()).toLocaleTimeString('de-CH');
+        }
+
+        function showGate() {
+            $('content').style.display = 'none';
+            $('err').style.display = 'none';
+            $('gate').style.display = 'block';
+            $('gate').innerHTML = '<h2>🔒 Anmeldung erforderlich</h2><p>Diese technische Übersicht ist nur für Technik, Verwaltung und Rosenweg-9-Eigentümer.</p><div id="sso-login-container"></div>';
+            AuthentikAuth.createLoginButton('sso-login-container');
+        }
+
+        let timer = null;
+        function start() {
+            if (!AuthentikAuth.isLoggedIn()) { showGate(); return; }
+            load();
+            if (timer) clearInterval(timer);
+            timer = setInterval(() => { if (!document.hidden) load(); }, 10000);
+        }
+
+        start();
+    </script>
+</body>
+</html>
