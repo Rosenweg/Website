@@ -33,7 +33,7 @@
         <button data-tab="log"     class="tab px-3 py-2 border-b-2 border-transparent text-gray-500">Log</button>
         <button data-tab="keys"    class="tab px-3 py-2 border-b-2 border-transparent text-gray-500">API-Keys</button>
         <button data-tab="aliases" class="tab px-3 py-2 border-b-2 border-transparent text-gray-500">Aliase</button>
-        <button data-tab="smtpips" class="tab px-3 py-2 border-b-2 border-transparent text-gray-500">SMTP-IPs</button>
+        <button data-tab="smtpips" class="tab px-3 py-2 border-b-2 border-transparent text-gray-500">SMTP-Zugang</button>
         <button data-tab="broadcast" class="tab px-3 py-2 border-b-2 border-transparent text-gray-500">📢 Broadcast</button>
       </div>
 
@@ -127,17 +127,29 @@
         <div id="aliases-list" class="text-sm divide-y"></div>
       </section>
 
-      <!-- SMTP-IPs -->
+      <!-- SMTP-Zugang: Quell-IPs + Absender-Allowlist -->
       <section data-panel="smtpips" class="panel hidden bg-white rounded-lg shadow p-4">
-        <h2 class="font-bold mb-1">SMTP-Quell-IPs (E-Mail→WhatsApp)</h2>
-        <p class="text-xs text-gray-500 mb-3">Nur diese IPs dürfen Mails an den Gateway-SMTP (Port <span id="ip-port">2525</span>) einliefern. <b>Leere Liste = offen für alle</b> (Warnung). Mailcow's IP hier eintragen, um es zu sperren.</p>
-        <div id="ip-status" class="text-xs mb-3"></div>
-        <div class="flex flex-wrap gap-2 mb-3">
+        <h2 class="font-bold mb-1">SMTP-Zugang (E-Mail→WhatsApp)</h2>
+        <p class="text-xs text-gray-500 mb-3">Mail wird angenommen, wenn die <b>Quell-IP ODER der Absender</b> erlaubt ist. Sind <b>beide Listen leer</b> = offen für alle (Warnung). Port <span id="ip-port">2525</span>.</p>
+
+        <h3 class="font-semibold text-sm mb-1">Quell-IPs</h3>
+        <div id="ip-status" class="text-xs mb-2"></div>
+        <div class="flex flex-wrap gap-2 mb-2">
           <input id="ip-addr" placeholder="z.B. 100.64.2.x" class="border rounded px-2 py-1.5 text-sm">
           <input id="ip-note" placeholder="Notiz (z.B. Mailcow)" class="border rounded px-2 py-1.5 text-sm flex-1 min-w-[160px]">
           <button id="ip-add" class="bg-emerald-600 text-white rounded px-3 py-1.5 text-sm hover:bg-emerald-700">Erlauben</button>
         </div>
-        <div id="ips-list" class="text-sm divide-y"></div>
+        <div id="ips-list" class="text-sm divide-y mb-5"></div>
+
+        <h3 class="font-semibold text-sm mb-1">Absenderadressen</h3>
+        <p class="text-xs text-gray-500 mb-2">Erlaubt von wechselnden IPs. Format: <code>foo@bar.ch</code> (genaue Adresse), <code>@bar.ch</code> oder <code>bar.ch</code> (ganze Domain).</p>
+        <div id="snd-status" class="text-xs mb-2"></div>
+        <div class="flex flex-wrap gap-2 mb-2">
+          <input id="snd-addr" placeholder="z.B. alerts@rosenweg4303.ch oder @rosenweg4303.ch" class="border rounded px-2 py-1.5 text-sm flex-1 min-w-[220px]">
+          <input id="snd-note" placeholder="Notiz" class="border rounded px-2 py-1.5 text-sm flex-1 min-w-[140px]">
+          <button id="snd-add" class="bg-emerald-600 text-white rounded px-3 py-1.5 text-sm hover:bg-emerald-700">Erlauben</button>
+        </div>
+        <div id="snd-list" class="text-sm divide-y"></div>
       </section>
     </div>
   </main>
@@ -154,7 +166,7 @@
     activeTab=name;
     document.querySelectorAll('.tab').forEach(b=>{ const on=b.dataset.tab===name; b.classList.toggle('border-blue-600',on); b.classList.toggle('font-medium',on); b.classList.toggle('text-gray-500',!on); b.classList.toggle('border-transparent',!on); });
     document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('hidden',p.dataset.panel!==name));
-    if(name==='inbox')loadInbox(); if(name==='log')loadLog(); if(name==='keys')loadKeys(); if(name==='aliases')loadAliases(); if(name==='smtpips')loadSmtpIps();
+    if(name==='inbox')loadInbox(); if(name==='log')loadLog(); if(name==='keys')loadKeys(); if(name==='aliases')loadAliases(); if(name==='smtpips'){loadSmtpIps();loadSmtpSenders();}
   }
 
   async function filesToAttachments(input){
@@ -220,6 +232,9 @@
   async function loadSmtpIps(){ try{ const d=await jget('/gateway/ui/smtp-ips'); document.getElementById('ip-port').textContent=d.smtp_port; const st=document.getElementById('ip-status'); st.innerHTML=d.enforced?`<span class="text-emerald-700">🔒 ${d.ips.length} IP(s) erlaubt — nur diese dürfen einliefern.</span>`:`<span class="text-amber-600">⚠ Allowlist leer — aktuell <b>alle</b> Quellen erlaubt. IP eintragen zum Sperren.</span>`; document.getElementById('ips-list').innerHTML=(d.ips||[]).map(x=>`<div class="py-2 flex items-center justify-between"><div><code class="font-medium">${esc(x.ip)}</code>${x.note?' <span class="text-xs text-gray-400">'+esc(x.note)+'</span>':''}</div><button onclick="delSmtpIp('${esc(x.ip)}',this)" class="text-xs text-red-600">entfernen</button></div>`).join('')||'<p class="text-gray-400 py-3">Keine IPs — offen.</p>'; }catch(e){ document.getElementById('ips-list').innerHTML='<p class="text-red-600 py-3">'+esc(e.message)+'</p>'; } }
   async function addSmtpIp(){ const ip=document.getElementById('ip-addr').value.trim(); const note=document.getElementById('ip-note').value.trim(); if(!ip)return; try{ await jsend('/gateway/ui/smtp-ips',{ip,note}); document.getElementById('ip-addr').value='';document.getElementById('ip-note').value=''; loadSmtpIps(); }catch(e){ alert(e.message); } }
   async function delSmtpIp(ip,btn){ if(!confirm('IP entfernen? '+ip))return; try{ await api('/gateway/ui/smtp-ips/'+encodeURIComponent(ip),{method:'DELETE'}); loadSmtpIps(); }catch(e){ alert(e.message); } }
+  async function loadSmtpSenders(){ try{ const d=await jget('/gateway/ui/smtp-senders'); const st=document.getElementById('snd-status'); st.innerHTML=(d.senders&&d.senders.length)?`<span class="text-emerald-700">🔒 ${d.senders.length} Absender erlaubt (zusätzlich zu den IPs).</span>`:`<span class="text-gray-400">Keine Absender-Einträge — Annahme nur über die Quell-IPs.</span>`; document.getElementById('snd-list').innerHTML=(d.senders||[]).map(x=>`<div class="py-2 flex items-center justify-between"><div><code class="font-medium">${esc(x.addr)}</code>${x.note?' <span class="text-xs text-gray-400">'+esc(x.note)+'</span>':''}</div><button onclick="delSmtpSender('${esc(x.addr)}',this)" class="text-xs text-red-600">entfernen</button></div>`).join('')||'<p class="text-gray-400 py-3">Keine Absender.</p>'; }catch(e){ document.getElementById('snd-list').innerHTML='<p class="text-red-600 py-3">'+esc(e.message)+'</p>'; } }
+  async function addSmtpSender(){ const addr=document.getElementById('snd-addr').value.trim(); const note=document.getElementById('snd-note').value.trim(); if(!addr)return; try{ await jsend('/gateway/ui/smtp-senders',{addr,note}); document.getElementById('snd-addr').value='';document.getElementById('snd-note').value=''; loadSmtpSenders(); }catch(e){ alert(e.message); } }
+  async function delSmtpSender(addr,btn){ if(!confirm('Absender entfernen? '+addr))return; try{ await api('/gateway/ui/smtp-senders/'+encodeURIComponent(addr),{method:'DELETE'}); loadSmtpSenders(); }catch(e){ alert(e.message); } }
 
   async function loadStatus(){ try{ const d=await jget('/gateway/health'); const el=document.getElementById('wa-status'); el.textContent=d.wa_ready?'WhatsApp bereit':(d.needs_pairing?'Pairing nötig':'WhatsApp offline'); el.className='text-xs px-2 py-1 rounded '+(d.wa_ready?'bg-emerald-100 text-emerald-700':'bg-amber-100 text-amber-700'); const box=document.getElementById('pair-box'); if(d.needs_pairing){ box.classList.remove('hidden'); loadQr(); } else { box.classList.add('hidden'); } }catch{} }
   async function loadQr(){ try{ const d=await jget('/gateway/qr'); if(d.qr_png_base64){ document.getElementById('pair-qr').src='data:image/png;base64,'+d.qr_png_base64; } }catch{} }
@@ -258,6 +273,7 @@
     document.getElementById('k-add').addEventListener('click', addKey);
     document.getElementById('a-add').addEventListener('click', addAlias);
     document.getElementById('ip-add').addEventListener('click', addSmtpIp);
+    document.getElementById('snd-add').addEventListener('click', addSmtpSender);
     loadStatus(); loadTargets();
     setInterval(loadStatus, 20000);
     // Auto-Refresh: aktiver Posteingang/Log alle 15s aktualisieren.

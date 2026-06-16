@@ -31,7 +31,16 @@ const MAX_BODY         = process.env.GW_MAX_BODY || '25mb';
 // aktiv wenn ein Relay gesetzt ist (z.B. Mailcow). KEIN allgemeiner Mailversand.
 const NOTIFY_RELAY_HOST = process.env.GW_NOTIFY_RELAY_HOST || '';
 const NOTIFY_RELAY_PORT = parseInt(process.env.GW_NOTIFY_RELAY_PORT, 10) || 25;
+const NOTIFY_RELAY_USER = process.env.GW_NOTIFY_RELAY_USER || '';   // SMTP-Auth (Mailcow-Mailbox) -> Relay ohne mynetworks
+const NOTIFY_RELAY_PASS = process.env.GW_NOTIFY_RELAY_PASS || '';
 const NOTIFY_FROM       = process.env.GW_NOTIFY_FROM || 'whatsapp-gateway@rosenweg4303.ch';
+// Reply-To-Domain fuer WA->Mail: eine eingehende WhatsApp-Antwort wird als Mail
+// mit Reply-To <nummer>@<domain> zugestellt. Antwortet der Mensch darauf und
+// routet die Domain auf den SMTP-in (separater Infra-Schritt), schliesst sich der
+// Kreis (local-part = Nummer -> resolveTarget -> WhatsApp). Default: NOTIFY_FROM-Domain.
+const REPLY_DOMAIN      = process.env.GW_REPLY_DOMAIN || (NOTIFY_FROM.split('@')[1] || 'rosenweg4303.ch');
+// WA->Mail-Weiterleitung global an/aus (Default an, sobald ein Relay gesetzt ist).
+const WA_TO_MAIL        = process.env.GW_WA_TO_MAIL !== '0';
 
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const nowIso = () => new Date().toISOString();
@@ -89,6 +98,15 @@ function startGateway(botCore) {
       created_by TEXT,
       created_at TEXT
     );
+    -- Erlaubte Absender (From) fuer den SMTP-Server. Ergaenzt smtp_ips:
+    -- Mail wird angenommen, wenn Quell-IP ODER Absender gewhitelistet ist.
+    -- Eintrag = exakte Adresse 'foo@bar.ch' ODER ganze Domain '@bar.ch' / 'bar.ch'.
+    CREATE TABLE IF NOT EXISTS smtp_senders (
+      addr TEXT PRIMARY KEY,             -- lowercased: 'foo@bar.ch' | '@bar.ch'
+      note TEXT,
+      created_by TEXT,
+      created_at TEXT
+    );
   `);
   // Migration: ACK-Status-Spalten (Zustell-/Lesebestaetigung aus WhatsApp).
   {
@@ -128,16 +146,42 @@ function startGateway(botCore) {
     ipAdd: db.prepare(`INSERT INTO smtp_ips (ip,note,created_by,created_at) VALUES (?,?,?,?)
       ON CONFLICT(ip) DO UPDATE SET note=excluded.note`),
     ipDel: db.prepare(`DELETE FROM smtp_ips WHERE ip=?`),
+    senderAll: db.prepare(`SELECT addr FROM smtp_senders`),
+    senderList: db.prepare(`SELECT addr,note,created_by,created_at FROM smtp_senders ORDER BY addr`),
+    senderAdd: db.prepare(`INSERT INTO smtp_senders (addr,note,created_by,created_at) VALUES (?,?,?,?)
+      ON CONFLICT(addr) DO UPDATE SET note=excluded.note`),
+    senderDel: db.prepare(`DELETE FROM smtp_senders WHERE addr=?`),
+    // WA->Mail-Bridge: juengste E-Mail->WA-Konversation zu einem 1:1-Chat finden,
+    // um eine eingehende WhatsApp-Antwort an den urspruenglichen Absender zu mailen.
+    bridgeLookup: db.prepare(`SELECT sender, subject FROM messages
+      WHERE source='smtp-email' AND direction='outbound' AND target=?
+      ORDER BY id DESC LIMIT 1`),
   };
 
   // Quell-IP normalisieren (smtp-server liefert oft IPv4-mapped IPv6 wie
   // ::ffff:100.64.2.x — wir wollen die nackte v4).
   const normIp = (a) => String(a || '').replace(/^::ffff:/i, '');
-  // Pruefen ob eine Quell-IP einliefern darf. Leere Allowlist = offen (Warnung).
-  function smtpIpAllowed(addr) {
-    const allowed = q.ipAll.all().map(r => r.ip);
-    if (allowed.length === 0) return true; // nicht konfiguriert -> offen
-    return allowed.includes(normIp(addr));
+  function ipInList(addr) { return q.ipAll.all().map(r => r.ip).includes(normIp(addr)); }
+  // Absender (From) gegen smtp_senders pruefen: exakte Adresse ODER ganze Domain
+  // (Eintrag '@bar.ch' oder 'bar.ch' matcht jede Adresse dieser Domain).
+  function senderInList(from) {
+    const addr = String(from || '').trim().toLowerCase();
+    if (!addr) return false;
+    const dom = addr.includes('@') ? addr.split('@').pop() : '';
+    return q.senderAll.all().some(r => {
+      const e = String(r.addr || '').trim().toLowerCase();
+      if (!e) return false;
+      if (e.startsWith('@')) return dom === e.slice(1);
+      if (!e.includes('@')) return dom === e;          // bare domain
+      return addr === e;                                // exact address
+    });
+  }
+  // Kombinierte Annahme-Entscheidung. Beide Listen leer -> offen (Warnung).
+  // Sonst: annehmen wenn Quell-IP ODER Absender gewhitelistet ist.
+  function smtpAccept(remoteAddr, from) {
+    const ips = q.ipAll.all(), senders = q.senderAll.all();
+    if (ips.length === 0 && senders.length === 0) return true; // nicht konfiguriert
+    return ipInList(remoteAddr) || senderInList(from);
   }
 
   // ── Ziel-Aufloesung (gemeinsam fuer JSON-API + SMTP-in) ──────────────────
@@ -163,8 +207,18 @@ function startGateway(botCore) {
   let currentQr = null;
 
   // Optionaler Mail-Sender NUR fuer Status-Rueckmeldungen an den E-Mail-Absender.
+  // Relay ueber Mailcow: mit Auth (587/STARTTLS) -> kein "Relay access denied",
+  // keine mynetworks-Aenderung noetig. Ohne USER faellt's auf Port-25-ohne-Auth
+  // zurueck (nur wenn der Gateway-Host in Mailcows mynetworks waere).
   const notifyTx = NOTIFY_RELAY_HOST
-    ? nodemailer.createTransport({ host: NOTIFY_RELAY_HOST, port: NOTIFY_RELAY_PORT, secure: false, tls: { rejectUnauthorized: false } })
+    ? nodemailer.createTransport({
+        host: NOTIFY_RELAY_HOST,
+        port: NOTIFY_RELAY_PORT,
+        secure: NOTIFY_RELAY_PORT === 465,
+        requireTLS: NOTIFY_RELAY_PORT === 587,
+        auth: NOTIFY_RELAY_USER ? { user: NOTIFY_RELAY_USER, pass: NOTIFY_RELAY_PASS } : undefined,
+        tls: { rejectUnauthorized: false },
+      })
     : null;
 
   // WhatsApp-ACK -> Zustell-/Lesestatus. Bei E-Mail-Quelle: Status zurueck an
@@ -378,6 +432,25 @@ function startGateway(botCore) {
     res.json({ ok: true });
   });
 
+  // SMTP-Absender-Allowlist (From) — ergaenzt die IP-Allowlist (IP ODER Absender)
+  app.get('/gateway/ui/smtp-senders', uiAuth, (req, res) => {
+    const senders = q.senderList.all();
+    const ipsN = q.ipAll.all().length;
+    res.json({ senders, enforced: senders.length > 0 || ipsN > 0 });
+  });
+  app.post('/gateway/ui/smtp-senders', jsonBody, uiAuth, (req, res) => {
+    let addr = String(req.body?.addr || '').trim().toLowerCase();
+    // erlaubt: 'foo@bar.ch' | '@bar.ch' | 'bar.ch'
+    const ok = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr) || /^@?[^@\s]+\.[^@\s]+$/.test(addr);
+    if (!ok) return res.status(400).json({ error: 'Adresse (foo@bar.ch), @domain oder domain erforderlich' });
+    q.senderAdd.run(addr, req.body?.note || null, req.uiUser.email, nowIso());
+    res.json({ ok: true });
+  });
+  app.delete('/gateway/ui/smtp-senders/:addr', uiAuth, (req, res) => {
+    q.senderDel.run(String(req.params.addr).trim().toLowerCase());
+    res.json({ ok: true });
+  });
+
   // QR-Pairing (vom WA-Client via setQr() gesetzt). Auth: Technik/Präsident —
   // wer den QR scannt, verknuepft den Bot mit seinem WhatsApp-Account.
   app.get('/gateway/qr', uiAuth, (req, res) => res.json({ qr_png_base64: currentQr, paired: botCore.isReady() }));
@@ -399,11 +472,22 @@ function startGateway(botCore) {
     banner: 'Rosenweg Messaging-Gateway (E-Mail->WhatsApp)',
     authOptional: !SMTP_USER,
     disabledCommands: SMTP_USER ? [] : ['STARTTLS'],
-    // Quell-IP-Allowlist (im Web-UI verwaltbar). Leer = offen (Warnung im Log).
+    // Annahme: Quell-IP ODER Absender gewhitelistet (im Web-UI verwaltbar).
+    // Beide Listen leer = offen (Warnung im Log).
     onConnect(session, cb) {
-      if (smtpIpAllowed(session.remoteAddress)) return cb();
-      console.warn(`[Gateway-SMTP] abgewiesen: ${session.remoteAddress} nicht in Allowlist`);
-      const e = new Error('Quell-IP nicht erlaubt'); e.responseCode = 554; cb(e);
+      const ips = q.ipAll.all(), senders = q.senderAll.all();
+      // Reiner IP-Modus (keine Sender-Whitelist): frueh an der IP abweisen.
+      if (senders.length === 0 && ips.length > 0 && !ipInList(session.remoteAddress)) {
+        console.warn(`[Gateway-SMTP] abgewiesen (IP): ${session.remoteAddress}`);
+        const e = new Error('Quell-IP nicht erlaubt'); e.responseCode = 554; return cb(e);
+      }
+      cb(); // sonst annehmen — finale Entscheidung in onMailFrom
+    },
+    // Finale Entscheidung sobald der Absender bekannt ist (IP ODER Absender).
+    onMailFrom(address, session, cb) {
+      if (smtpAccept(session.remoteAddress, address.address)) return cb();
+      console.warn(`[Gateway-SMTP] abgewiesen (IP+Absender): ${session.remoteAddress} / ${address.address}`);
+      const e = new Error('Quell-IP oder Absender nicht erlaubt'); e.responseCode = 554; return cb(e);
     },
     onAuth(auth, session, cb) {
       if (SMTP_USER && auth.username === SMTP_USER && auth.password === SMTP_PASS) return cb(null, { user: auth.username });
@@ -442,6 +526,28 @@ function startGateway(botCore) {
   smtp.on('error', (e) => console.warn('[Gateway-SMTP] Fehler:', e.message));
   smtp.listen(SMTP_PORT, () => console.log(`[Gateway] SMTP-in auf Port ${SMTP_PORT} (auth:${!!SMTP_USER})`));
 
+  // ── WA -> Mail (voll-bidirektional) ──────────────────────────────────────
+  // Eine eingehende 1:1-WhatsApp-Nachricht, die zu einer vorherigen
+  // E-Mail->WhatsApp-Konversation gehoert (gleiche chatId), als echte E-Mail an
+  // den urspruenglichen Absender zurueckschicken. Reply-To traegt die Nummer,
+  // damit der Pfad bei entsprechendem Mail-Routing round-trip-faehig ist.
+  function forwardWaToMail({ chatId, phone, body, attachments }) {
+    if (!WA_TO_MAIL || !notifyTx || !chatId) return;
+    const bridge = q.bridgeLookup.get(chatId) || (phone ? q.bridgeLookup.get(phone.replace(/\D/g, '') + '@c.us') : null);
+    if (!bridge || !bridge.sender) return;                 // keine Mail-Konversation -> nicht forwarden
+    // Echte Nummer fuer Reply-To bevorzugen (bei @lid ist die chatId-Zahl nur die LID).
+    const num = (phone ? phone.replace(/\D/g, '') : '') || String(chatId).split('@')[0].replace(/\D/g, '');
+    const attNote = (attachments && attachments.length)
+      ? `\n\n[${attachments.length} Anhang/Anhaenge in WhatsApp — im Gateway-Posteingang sichtbar]` : '';
+    notifyTx.sendMail({
+      from: NOTIFY_FROM,
+      to: bridge.sender,
+      replyTo: num ? `${num}@${REPLY_DOMAIN}` : NOTIFY_FROM,
+      subject: bridge.subject ? `Re: ${bridge.subject}` : `WhatsApp-Antwort von ${num || chatId}`,
+      text: `${body || '(kein Text)'}${attNote}\n\n— WhatsApp-Antwort, weitergeleitet vom Rosenweg-Gateway`,
+    }).catch(e => console.warn('[Gateway] WA->Mail fehlgeschlagen:', e.message));
+  }
+
   // ── Hooks zurueck an index.js (Inbound-Logging) ──────────────────────────
   function logInbound({ phone, chatId, body, whatsappMsgId, attachments, isGroup, groupName }) {
     q.msgInsert.run({
@@ -454,6 +560,8 @@ function startGateway(botCore) {
       whatsapp_msg_id: whatsappMsgId || null, status: 'received', error: null,
       created_at: nowIso(), sent_at: null,
     });
+    // Nur 1:1 (keine Gruppen) zurueck an eine vorhandene Mail-Konversation spiegeln.
+    if (!isGroup) forwardWaToMail({ chatId, phone, body, attachments });
   }
 
   return {
