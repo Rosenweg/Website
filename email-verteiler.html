@@ -311,10 +311,10 @@
                 el.innerHTML = items.map(it => {
                     const v = typeof it === 'string' ? it : it.value;
                     const l = typeof it === 'string' ? it : (it.label || it.value);
-                    return `&lt;label class="flex items-start gap-2 py-1 px-2 hover:bg-white/50 rounded cursor-pointer text-sm"&gt;`
-                         + `&lt;input type="checkbox" value="${escapeHtml(v)}" ${sel.has(v) ? 'checked' : ''} class="mt-0.5 flex-shrink-0"&gt;`
-                         + `&lt;span&gt;${escapeHtml(l)}&lt;/span&gt;`
-                         + `&lt;/label&gt;`;
+                    return `<label class="flex items-start gap-2 py-1 px-2 hover:bg-white/50 rounded cursor-pointer text-sm">`
+                         + `<input type="checkbox" value="${escapeHtml(v)}" ${sel.has(v) ? 'checked' : ''} class="mt-0.5 flex-shrink-0">`
+                         + `<span>${escapeHtml(l)}</span>`
+                         + `</label>`;
                 }).join('');
             },
             getValues(id) {
