@@ -33,12 +33,46 @@ async function resolveTechnikWhatsappGroupId() {
   return null;
 }
 
-// Queue eine ausgehende Nachricht. Bot-Service holt sie und versendet.
+// Ausgehende Nachricht. PRIMAER ueber das dedizierte Gateway (/gateway/send,
+// keyed). Faellt das aus (WA nicht bereit / Gateway unerreichbar): Fallback in
+// die Postgres-Queue -> Bot pollt + retried (Durability). Der Postgres-Record
+// bleibt fuer "letzte 30 Nachrichten" + "fuer alle loeschen"-Tracking — bei
+// Gateway-Erfolg als 'sent' (NICHT 'queued', sonst sendet pollOutbox doppelt).
+const GATEWAY_SEND_URL = process.env.GATEWAY_SEND_URL || 'http://tasks.rosenweg_whatsapp-bot:8090/gateway/send';
+const GATEWAY_API_KEY  = process.env.GATEWAY_API_KEY || '';
+
 async function queueWhatsappMessage({ phone, body, attachments, sourceType, sourceId, personId, chatId }) {
   // chatId hat Vorrang: bei LID-Privacy-Chats ist die echte Nummer
   // nicht aufloesbar, dann müssen wir die @lid-JID direkt zurück-routen.
   const norm = chatId || normalizePhone(phone);
   if (!norm) throw new Error('Ungueltige Telefonnummer');
+
+  if (GATEWAY_API_KEY) {
+    try {
+      const gw = await fetch(GATEWAY_SEND_URL, {
+        method: 'POST',
+        headers: { 'X-Messaging-Key': GATEWAY_API_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: 'whatsapp', to: norm, body: body || '', attachments: attachments || [] }),
+        signal: AbortSignal.timeout(20000),
+      });
+      if (gw.ok) {
+        const d = await gw.json().catch(() => ({}));
+        const ins = await pool.query(
+          `INSERT INTO whatsapp_messages
+             (direction, phone, chat_id, body, attachments, person_id, source_type, source_id, status, whatsapp_msg_id, sent_at)
+           VALUES ('outbound', $1, $2, $3, $4::jsonb, $5, $6, $7, 'sent', $8, NOW())
+           RETURNING id`,
+          [norm, chatId || null, body || '', JSON.stringify(attachments || []), personId || null, sourceType || null, sourceId || null, d.whatsapp_msg_id || null],
+        );
+        return ins.rows[0].id;
+      }
+      console.warn(`[wa] Gateway-Send HTTP ${gw.status} -> Fallback Queue`);
+    } catch (e) {
+      console.warn('[wa] Gateway-Send fehlgeschlagen, Fallback Queue:', e.message);
+    }
+  }
+
+  // Fallback: Postgres-Queue (Bot pollt + retried).
   const r = await pool.query(
     `INSERT INTO whatsapp_messages
        (direction, phone, chat_id, body, attachments, person_id, source_type, source_id, status)
