@@ -45,6 +45,7 @@ const { pool, energyPool, auditCtx } = require('./lib/db');
 const { transporter, MAIL_FROM, SMTP2GO_API_KEY, SMTP2GO_API_URL, EMAIL_ALLOWLIST, generateOTP, loggedSendMail, isAllowlistedSender } = require('./lib/mail');
 // WhatsApp-Queue + Technik-Gruppen-Resolver -> lib/whatsapp.js
 const { queueWhatsappMessage, resolveTechnikWhatsappGroupId } = require('./lib/whatsapp');
+const { mountAlarmpanel } = require('./lib/alarmpanel');
 
 // createSemaphore -> lib/utils.js. Gotenberg/Converter-Throttle (max 3 parallel).
 const gotenbergSemaphore = createSemaphore(parseInt(process.env.GOTENBERG_MAX_CONCURRENT || '3'));
@@ -20955,6 +20956,11 @@ app.get('/api/connections/stats', authMiddleware, adminOnly, async (req, res) =>
 // Track intervals and server for graceful shutdown
 let server;
 const activeIntervals = [];
+
+// Alarmpanel (STWEG3 Gas/Rauch): Tabellen + /api/alarmpanel/* + Shelly-Polling +
+// Alarm-Eskalation. Verwalten = Technik/Präsident; Bewohner-Broadcast (Rauch)
+// über den getesteten resolveBroadcastRecipients('stweg:3').
+mountAlarmpanel({ app, authMiddleware, requireManage: requireTechnikOrPraesident, resolveBroadcastRecipients });
 
 initDB()
   .then(() => {
