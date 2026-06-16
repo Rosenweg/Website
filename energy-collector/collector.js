@@ -673,9 +673,10 @@ app.get('/api/energy/live/:meterId', (req, res) => {
 
 // Aggregierte Solar-Live-Ansicht Rosenweg 9 (Fluss-Diagramm-Daten).
 // GEEICHT-FIRST mit SmartFox-Fallback: Produktion bevorzugt vom geeichten
-// Zaehler r9-produktion; Netz aktuell vom SmartFox (geeichter r9-haupt liefert
-// keine Modbus-Daten — sobald er zurueck ist + Vorzeichen verifiziert, hier
-// ergaenzen). Konvention grid_w: >0 = Bezug, <0 = Einspeisung/Lieferung.
+// Zaehler r9-produktion; Netz bevorzugt vom geeichten Hauptzaehler r9-haupt
+// (gleiche Vorzeichen-Konvention wie SmartFox: -370W r9-haupt ~ -368W SmartFox
+// am 2026-06-16 verifiziert), Fallback SmartFox wenn r9-haupt stale.
+// Konvention grid_w: >0 = Bezug, <0 = Einspeisung/Lieferung.
 app.get('/api/energy/solar-live', (req, res) => {
   const FRESH_MS = 120000;
   const now = Date.now();
@@ -692,9 +693,13 @@ app.get('/api/energy/solar-live', (req, res) => {
     production_source = 'smartfox';
   } else { production_w = 0; production_source = 'none'; }
 
-  // Netz: SmartFox (r9-haupt Modbus offline). >0 Bezug, <0 Lieferung.
+  // Netz: geeichter Hauptzaehler r9-haupt bevorzugt (>0 Bezug, <0 Lieferung;
+  // direkt, kein Negieren) -> sonst SmartFox-Fallback -> sonst none.
+  const haupt = latestReadings.get('r9-haupt');
   let grid_w, grid_source;
-  if (smartfoxSolar && freshTs(smartfoxSolar.ts)) {
+  if (haupt && freshTs(haupt.ts)) {
+    grid_w = haupt.power_w || 0; grid_source = 'geeicht';
+  } else if (smartfoxSolar && freshTs(smartfoxSolar.ts)) {
     grid_w = smartfoxSolar.grid_w || 0; grid_source = 'smartfox';
   } else { grid_w = 0; grid_source = 'none'; }
 
