@@ -12370,6 +12370,58 @@ app.post('/api/pbx/voicemail-reklamation', requirePbxSecret, async (req, res) =>
   }
 });
 
+// ── Caller-Name-Lookup (CNAM) fuer eingehende Anrufe ───────────────────
+// Die PBX (AGI pbx_cnam.py) fragt hier mit der Anrufer-Nummer an und bekommt
+// einen Anzeigenamen: zuerst aus dem Rosenweg-Telefonbuch (personen/handwerker/
+// verwaltungen), sonst via search.ch (Schweizer Verzeichnis, SEARCH_CH_API_KEY).
+async function searchChReverse(number) {
+  const key = process.env.SEARCH_CH_API_KEY;
+  if (!key || !number) return null;
+  try {
+    const r = await fetch(`https://tel.search.ch/api/?key=${encodeURIComponent(key)}&was=${encodeURIComponent(number)}&maxnum=1`,
+      { signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return null;
+    const xml = await r.text();
+    const m = xml.match(/<entry>[\s\S]*?<title[^>]*>([^<]+)<\/title>/i);
+    return m ? m[1].replace(/\s+/g, ' ').trim() : null;
+  } catch { return null; }
+}
+
+app.get('/api/pbx/cnam/:number', requirePbxSecret, async (req, res) => {
+  try {
+    const raw = String(req.params.number || '').trim();
+    const norm = normalizePhone(raw);
+    const last9 = (norm || raw).replace(/\D/g, '').slice(-9);
+    if (last9.length < 6) return res.json({ name: null });
+
+    // 1) Personen (Bewohner/Eigentuemer)
+    const person = await findPersonByPhone(raw);
+    if (person) {
+      const name = [person.vorname, person.nachname].filter(Boolean).join(' ').trim();
+      if (name) return res.json({ name, source: 'telefonbuch' });
+    }
+    // 2) Handwerker + Verwaltungen (Match auf die letzten 9 Ziffern -> robust gg. +41/0)
+    const hv = await pool.query(
+      `SELECT firma AS name FROM handwerker
+         WHERE RIGHT(regexp_replace(COALESCE(telefon,''),'\\D','','g'),9) = $1
+            OR RIGHT(regexp_replace(COALESCE(mobile,''),'\\D','','g'),9) = $1
+       UNION ALL
+       SELECT firma_name AS name FROM verwaltungen
+         WHERE RIGHT(regexp_replace(COALESCE(telefon,''),'\\D','','g'),9) = $1
+       LIMIT 1`, [last9]);
+    if (hv.rows[0]?.name) return res.json({ name: hv.rows[0].name, source: 'telefonbuch' });
+
+    // 3) search.ch
+    const sc = await searchChReverse(norm || raw);
+    if (sc) return res.json({ name: sc, source: 'search.ch' });
+
+    res.json({ name: null });
+  } catch (err) {
+    console.error('[pbx-cnam]', err.message);
+    res.json({ name: null });
+  }
+});
+
 // ── PBX Ring-Members: Admin-Verwaltung der Empfaengerliste ─────────────
 // Asterisk-AGI holt die aktive Liste live via /active-Endpoint.
 
