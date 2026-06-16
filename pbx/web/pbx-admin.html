@@ -119,7 +119,7 @@
   <!-- Anruf-Log -->
   <div class="card">
     <h2>📋 Anruf-Log <span class="act" onclick="loadCalls()">Neu laden</span></h2>
-    <table><thead><tr><th>Zeit</th><th>Richtung</th><th>Von</th><th>Status</th><th>Dauer</th></tr></thead>
+    <table><thead><tr><th>Zeit</th><th>Richtung</th><th>Von</th><th>An</th><th>Status</th><th>Dauer</th></tr></thead>
       <tbody id="calls"></tbody></table>
   </div>
 </div>
@@ -218,9 +218,10 @@ async function loadCalls(){
   const cs = (await (await api('/api/pbx/calls?limit=50')).json()).calls || [];
   $('calls').innerHTML = cs.map(c=>`<tr>
     <td class="mono">${esc((c.started_at||'').replace('T',' ').slice(0,16))}</td>
-    <td>${esc(c.direction)}</td><td class="mono">${esc(c.caller_id||'')}</td>
+    <td>${({inbound:'⬇ eingehend',outbound:'⬆ ausgehend',internal:'↔ intern'})[c.direction]||esc(c.direction||'')}</td>
+    <td class="mono">${esc(c.caller_id||'')}</td><td class="mono">${esc(c.dialed||'')}</td>
     <td>${esc(c.hangup_cause||(c.answered_at?'angenommen':'—'))}</td>
-    <td>${c.duration_seconds!=null?c.duration_seconds+'s':'—'}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Noch keine Anrufe.</td></tr>';
+    <td>${c.duration_seconds!=null?c.duration_seconds+'s':'—'}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Noch keine Anrufe.</td></tr>';
 }
 
 function gate(){ $('content').style.display='none'; $('gate').style.display='block'; }

@@ -206,6 +206,17 @@ def call_event():
                 "WHERE uniqueid = ?",
                 (b.get("ended_at"), b.get("hangup_cause"), b.get("ended_at"), uid),
             )
+        elif event == "cdr":
+            # Komplett-Record aus dem Hangup-Handler (ausgehende + interne Anrufe).
+            conn.execute(
+                "INSERT INTO calls (direction, caller_id, dialed, uniqueid, started_at, ended_at, "
+                "duration_seconds, hangup_cause) VALUES (?,?,?,?, COALESCE(?, datetime('now')), datetime('now'), ?, ?) "
+                "ON CONFLICT(uniqueid) DO UPDATE SET direction=excluded.direction, caller_id=excluded.caller_id, "
+                "dialed=excluded.dialed, duration_seconds=excluded.duration_seconds, "
+                "hangup_cause=excluded.hangup_cause, ended_at=excluded.ended_at",
+                (b.get("direction", "internal"), b.get("caller_id"), b.get("dialed"), uid,
+                 b.get("started_at"), b.get("duration_seconds"), b.get("hangup_cause")),
+            )
         conn.commit()
         return jsonify({"ok": True})
     finally:
