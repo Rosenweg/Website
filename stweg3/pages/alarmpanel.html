@@ -174,18 +174,15 @@
                 <dl class="kv">${kv}</dl>${actions}</div>`;
         }
 
-        async function loadMe() {
-            try { const r = await AuthentikAuth.apiFetch('/api/me'); if (!r.ok) return; const me = await r.json();
-                const g = (me.groups || []).map(x => String(x).toLowerCase());
-                canManage = !!me.is_admin || g.includes('technik') || g.includes('präsident') || g.includes('praesident') || g.some(x => x.endsWith('-ausschuss'));
-                $('manage').style.display = canManage ? 'block' : 'none';
-            } catch {}
+        function isManager(user) {
+            const g = (user.groups || []).map(x => String(x).toLowerCase());
+            return !!user.isAdmin || g.includes('technik') || g.includes('präsident') || g.includes('praesident') || g.some(x => x.endsWith('-ausschuss'));
         }
 
         async function load() {
             try {
                 const resp = await AuthentikAuth.apiFetch('/api/alarmpanel/sensors', { cache: 'no-store' });
-                if (resp.status === 401) { showGate(); return; }
+                if (resp.status === 401) { AuthentikAuth.login(); return; }
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
                 const data = await resp.json();
                 $('gate').style.display = 'none'; $('err').style.display = 'none'; $('content').style.display = 'block';
@@ -244,18 +241,20 @@
             try { const r = await AuthentikAuth.apiFetch('/api/alarmpanel/sensors/'+id+'/test', { method:'POST' }); const d = await r.json().catch(()=>({}));
                 if (!r.ok) throw new Error(d.error||('HTTP '+r.status)); alert('Test ausgelöst → ' + (d.notified||'Technik')); load(); } catch(e){ alert('Fehler: '+e.message); } }
 
-        function showGate() { $('content').style.display='none'; $('err').style.display='none'; $('gate').style.display='block';
-            $('gate').innerHTML='<h2>🔒 Anmeldung erforderlich</h2><p>Das Alarmpanel ist für die Bewohner und Technik der STWEG 3.</p><div id="sso-login-container"></div>';
-            AuthentikAuth.createLoginButton('sso-login-container'); }
-
         let timer = null;
         async function start() {
-            if (!AuthentikAuth.isLoggedIn()) { showGate(); return; }
+            // init() behandelt den OAuth-Callback UND leitet bei fehlender Anmeldung
+            // automatisch zum Authentik-SSO um (kein In-Page-Login-Button nötig).
+            const user = await AuthentikAuth.init({ requireAuth: true });
+            if (!user) return; // wird gerade zur Anmeldung umgeleitet
+            $('gate').style.display = 'none';
+            canManage = isManager(user);
+            $('manage').style.display = canManage ? 'block' : 'none';
             $('f-type').addEventListener('change', toggleThr);
             $('f-conn').addEventListener('change', toggleConn);
             $('f-save').addEventListener('click', saveSensor);
             $('f-cancel').addEventListener('click', resetForm);
-            await loadMe(); load();
+            load();
             if (timer) clearInterval(timer);
             timer = setInterval(() => { if (!document.hidden) load(); }, 10000);
         }
