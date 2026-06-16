@@ -107,6 +107,17 @@ function startGateway(botCore) {
       created_by TEXT,
       created_at TEXT
     );
+    -- Konfigurierbare WA->Mail-Weiterleitung: Nachrichten aus einem bestimmten
+    -- 1:1-Chat (Nummer/JID) ODER einer Gruppe (Name/JID) an frei gewaehlte
+    -- E-Mail-Empfaenger spiegeln. Mehrere Zeilen pro Quelle = mehrere Empfaenger.
+    CREATE TABLE IF NOT EXISTS wa_forwards (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      match_key TEXT NOT NULL,           -- lowercased: Gruppenname | Nummer (digits) | JID
+      kind TEXT NOT NULL,                -- 'group' | 'number' | 'jid'
+      email TEXT NOT NULL,
+      note TEXT, created_by TEXT, created_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_fwd_match ON wa_forwards(kind, match_key);
   `);
   // Migration: ACK-Status-Spalten (Zustell-/Lesebestaetigung aus WhatsApp).
   {
@@ -156,6 +167,10 @@ function startGateway(botCore) {
     bridgeLookup: db.prepare(`SELECT sender, subject FROM messages
       WHERE source='smtp-email' AND direction='outbound' AND target=?
       ORDER BY id DESC LIMIT 1`),
+    fwdMatch: db.prepare(`SELECT email FROM wa_forwards WHERE kind=? AND match_key=?`),
+    fwdList: db.prepare(`SELECT id,match_key,kind,email,note,created_by,created_at FROM wa_forwards ORDER BY kind,match_key,email`),
+    fwdAdd: db.prepare(`INSERT INTO wa_forwards (match_key,kind,email,note,created_by,created_at) VALUES (?,?,?,?,?,?)`),
+    fwdDel: db.prepare(`DELETE FROM wa_forwards WHERE id=?`),
   };
 
   // Quell-IP normalisieren (smtp-server liefert oft IPv4-mapped IPv6 wie
@@ -451,6 +466,24 @@ function startGateway(botCore) {
     res.json({ ok: true });
   });
 
+  // WA->Mail-Weiterleitungs-Regeln (pro 1:1-Chat / Gruppe konfigurierbare Empfaenger)
+  app.get('/gateway/ui/forwards', uiAuth, (req, res) => res.json({ forwards: q.fwdList.all() }));
+  app.post('/gateway/ui/forwards', jsonBody, uiAuth, (req, res) => {
+    const kind = String(req.body?.kind || '').trim();
+    let match_key = String(req.body?.match_key || '').trim();
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!['group', 'number', 'jid'].includes(kind)) return res.status(400).json({ error: 'kind: group|number|jid' });
+    if (!match_key) return res.status(400).json({ error: 'Quelle (Gruppenname/Nummer/JID) erforderlich' });
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Gueltige E-Mail-Adresse erforderlich' });
+    match_key = kind === 'number' ? match_key.replace(/\D/g, '') : match_key.toLowerCase();
+    q.fwdAdd.run(match_key, kind, email, req.body?.note || null, req.uiUser.email, nowIso());
+    res.json({ ok: true });
+  });
+  app.delete('/gateway/ui/forwards/:id', uiAuth, (req, res) => {
+    q.fwdDel.run(parseInt(req.params.id, 10));
+    res.json({ ok: true });
+  });
+
   // QR-Pairing (vom WA-Client via setQr() gesetzt). Auth: Technik/Präsident —
   // wer den QR scannt, verknuepft den Bot mit seinem WhatsApp-Account.
   app.get('/gateway/qr', uiAuth, (req, res) => res.json({ qr_png_base64: currentQr, paired: botCore.isReady() }));
@@ -526,26 +559,64 @@ function startGateway(botCore) {
   smtp.on('error', (e) => console.warn('[Gateway-SMTP] Fehler:', e.message));
   smtp.listen(SMTP_PORT, () => console.log(`[Gateway] SMTP-in auf Port ${SMTP_PORT} (auth:${!!SMTP_USER})`));
 
-  // ── WA -> Mail (voll-bidirektional) ──────────────────────────────────────
-  // Eine eingehende 1:1-WhatsApp-Nachricht, die zu einer vorherigen
-  // E-Mail->WhatsApp-Konversation gehoert (gleiche chatId), als echte E-Mail an
-  // den urspruenglichen Absender zurueckschicken. Reply-To traegt die Nummer,
-  // damit der Pfad bei entsprechendem Mail-Routing round-trip-faehig ist.
+  // ── WA -> Mail Weiterleitung ─────────────────────────────────────────────
+  // Zwei Mechanismen, beide ueber den Relay (PMG/SMTP2GO):
+  //  a) Bridge-Auto-Reply: eingehende 1:1-Antwort zu einer vorherigen
+  //     E-Mail->WA-Konversation -> zurueck an den urspruenglichen Absender.
+  //  b) Konfigurierbare Regeln (wa_forwards): Nachrichten aus einem bestimmten
+  //     1:1-Chat ODER einer Gruppe an frei gewaehlte E-Mail-Empfaenger.
+  const attNoteOf = (atts) => (atts && atts.length)
+    ? `\n\n[${atts.length} Anhang/Anhaenge in WhatsApp — im Gateway-Posteingang sichtbar]` : '';
+
+  function sendForwardMail({ to, replyToNum, subject, body, atts }) {
+    if (!notifyTx || !to) return;
+    notifyTx.sendMail({
+      from: NOTIFY_FROM, to,
+      replyTo: replyToNum ? `${replyToNum}@${REPLY_DOMAIN}` : NOTIFY_FROM,
+      subject,
+      text: `${body || '(kein Text)'}${attNoteOf(atts)}\n\n— weitergeleitet vom Rosenweg WhatsApp-Gateway`,
+    }).catch(e => console.warn('[Gateway] WA->Mail fehlgeschlagen:', e.message));
+  }
+
+  // Bridge (nur 1:1). Gibt die Empfaenger-Adresse zurueck (oder null), damit die
+  // Regel-Weiterleitung denselben Empfaenger nicht doppelt anschreibt.
   function forwardWaToMail({ chatId, phone, body, attachments }) {
-    if (!WA_TO_MAIL || !notifyTx || !chatId) return;
+    if (!WA_TO_MAIL || !notifyTx || !chatId) return null;
     const bridge = q.bridgeLookup.get(chatId) || (phone ? q.bridgeLookup.get(phone.replace(/\D/g, '') + '@c.us') : null);
-    if (!bridge || !bridge.sender) return;                 // keine Mail-Konversation -> nicht forwarden
+    if (!bridge || !bridge.sender) return null;            // keine Mail-Konversation -> nicht forwarden
     // Echte Nummer fuer Reply-To bevorzugen (bei @lid ist die chatId-Zahl nur die LID).
     const num = (phone ? phone.replace(/\D/g, '') : '') || String(chatId).split('@')[0].replace(/\D/g, '');
-    const attNote = (attachments && attachments.length)
-      ? `\n\n[${attachments.length} Anhang/Anhaenge in WhatsApp — im Gateway-Posteingang sichtbar]` : '';
-    notifyTx.sendMail({
-      from: NOTIFY_FROM,
-      to: bridge.sender,
-      replyTo: num ? `${num}@${REPLY_DOMAIN}` : NOTIFY_FROM,
+    sendForwardMail({ to: bridge.sender, replyToNum: num,
       subject: bridge.subject ? `Re: ${bridge.subject}` : `WhatsApp-Antwort von ${num || chatId}`,
-      text: `${body || '(kein Text)'}${attNote}\n\n— WhatsApp-Antwort, weitergeleitet vom Rosenweg-Gateway`,
-    }).catch(e => console.warn('[Gateway] WA->Mail fehlgeschlagen:', e.message));
+      body, atts: attachments });
+    return String(bridge.sender).toLowerCase();
+  }
+
+  // Regelbasierte Weiterleitung (1:1 per Nummer/JID, Gruppe per Name/JID).
+  function forwardByRules({ chatId, phone, isGroup, groupName, body, attachments, exclude }) {
+    if (!notifyTx) return;
+    const keys = [];
+    if (isGroup) {
+      if (groupName) keys.push(['group', groupName.toLowerCase()]);
+      if (chatId) keys.push(['jid', String(chatId).toLowerCase()]);
+    } else {
+      if (phone) keys.push(['number', phone.replace(/\D/g, '')]);
+      if (chatId) keys.push(['jid', String(chatId).toLowerCase()]);
+    }
+    const seen = new Set(exclude ? [exclude] : []);
+    const emails = [];
+    for (const [kind, mk] of keys) {
+      for (const r of q.fwdMatch.all(kind, mk)) {
+        const e = String(r.email || '').trim().toLowerCase();
+        if (e && !seen.has(e)) { seen.add(e); emails.push(e); }
+      }
+    }
+    if (!emails.length) return;
+    const num = isGroup ? null : ((phone ? phone.replace(/\D/g, '') : '') || String(chatId || '').split('@')[0].replace(/\D/g, ''));
+    const subject = isGroup
+      ? `WhatsApp [${groupName || 'Gruppe'}] von ${phone || chatId}`
+      : `WhatsApp von ${num || chatId}`;
+    for (const to of emails) sendForwardMail({ to, replyToNum: num, subject, body, atts: attachments });
   }
 
   // ── Hooks zurueck an index.js (Inbound-Logging) ──────────────────────────
@@ -560,8 +631,10 @@ function startGateway(botCore) {
       whatsapp_msg_id: whatsappMsgId || null, status: 'received', error: null,
       created_at: nowIso(), sent_at: null,
     });
-    // Nur 1:1 (keine Gruppen) zurueck an eine vorhandene Mail-Konversation spiegeln.
-    if (!isGroup) forwardWaToMail({ chatId, phone, body, attachments });
+    // a) Bridge-Auto-Reply (nur 1:1) — Empfaenger merken fuer Dedup.
+    const bridgeEmail = isGroup ? null : forwardWaToMail({ chatId, phone, body, attachments });
+    // b) konfigurierte Regeln (1:1 UND Gruppe).
+    forwardByRules({ chatId, phone, isGroup, groupName, body, attachments, exclude: bridgeEmail });
   }
 
   return {
