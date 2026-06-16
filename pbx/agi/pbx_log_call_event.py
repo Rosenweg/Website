@@ -25,7 +25,7 @@ def _load_env_file(path='/etc/default/asterisk-env'):
                 if '=' in line:
                     k, v = line.split('=', 1)
                     env[k.strip()] = v.strip().strip('"').strip("'")
-    except FileNotFoundError: pass
+    except (FileNotFoundError, PermissionError, OSError): pass
     return env
 _envfile = _load_env_file()
 API_BASE   = os.environ.get('PBX_API_BASE')      or _envfile.get('PBX_API_BASE', 'http://127.0.0.1:8095')
