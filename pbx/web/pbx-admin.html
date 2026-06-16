@@ -208,6 +208,8 @@ async function loadCalls(){
 
 function gate(){ $('content').style.display='none'; $('gate').style.display='block'; }
 async function start(){
+  // Token aus dem #auth=-Fragment nach dem Authentik-Redirect in localStorage schreiben.
+  AuthentikAuth.handleCallback();
   if(!AuthentikAuth.isLoggedIn()){ gate(); return; }
   const u = AuthentikAuth.getUser();
   $('who').textContent = u?.name || u?.email || '';
