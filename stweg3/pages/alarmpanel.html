@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alarmpanel – Rosenweg 9</title>
+    <link rel="icon" href="/logo-rosenweg.png" type="image/png">
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root { --g:#22c55e; --r:#ef4444; --y:#eab308; --grey:#9ca3af; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+               background: linear-gradient(135deg, #b91c1c 0%, #f97316 100%); background-attachment: fixed; color: #1f2937; min-height: 100vh; }
+        .topnav { background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.08); position: sticky; top: 0; z-index: 50;
+                  display: flex; align-items: center; justify-content: space-between; padding: .6rem 1.25rem; gap: 1rem; flex-wrap: wrap; }
+        .brand { display: flex; align-items: center; gap: .75rem; text-decoration: none; color: inherit; }
+        .brand img { height: 44px; width: auto; display: block; }
+        .brand .t { font-weight: 700; font-size: 1.05rem; line-height: 1.1; }
+        .brand .s { font-size: .75rem; color: #6b7280; }
+        .nav-right { display: flex; align-items: center; gap: .85rem; }
+        .live-badge { display: inline-flex; align-items: center; gap: .4rem; padding: .25rem .7rem; background: #fee2e2; color: #b91c1c; border-radius: 20px; font-size: .78rem; font-weight: 700; }
+        .live-dot { width: 8px; height: 8px; background: #ef4444; border-radius: 50%; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+        .back { color: #f97316; font-weight: 600; text-decoration: none; font-size: .9rem; }
+
+        .wrap { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
+        .err, .gate { background: #fff; border-radius: 14px; padding: 1.5rem; text-align: center; margin-bottom: 1rem; box-shadow: 0 6px 24px rgba(0,0,0,.12); }
+        .err { color: #b91c1c; display: none; }
+        .gate { display: none; }
+        .gate p { color: #6b7280; margin-bottom: 1rem; }
+
+        .alarmbar { display:none; background:#dc2626; color:#fff; border-radius:14px; padding:1rem 1.25rem; margin-bottom:1.25rem; font-weight:700; font-size:1.15rem; box-shadow:0 6px 24px rgba(220,38,38,.5); animation: pulse 1.2s infinite; }
+        .okbar { background:#16a34a; color:#fff; border-radius:14px; padding:.85rem 1.25rem; margin-bottom:1.25rem; font-weight:700; box-shadow:0 4px 16px rgba(0,0,0,.15); }
+
+        .summary { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+        .pill { background: #fff; border-radius: 12px; padding: .7rem 1.1rem; box-shadow: 0 4px 16px rgba(0,0,0,.1); font-size: .9rem; }
+        .pill b { font-size: 1.3rem; display: block; }
+        .muted { color: var(--grey); }
+
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; }
+        .card { background: #fff; border-radius: 16px; box-shadow: 0 6px 24px rgba(0,0,0,.12); overflow: hidden; border-top: 5px solid var(--grey); }
+        .card.ok { border-top-color: var(--g); }
+        .card.alarm { border-top-color: var(--r); box-shadow:0 0 0 3px #ef4444, 0 6px 24px rgba(0,0,0,.2); }
+        .card.offline { border-top-color: var(--grey); opacity:.9; }
+        .chead { display: flex; align-items: center; justify-content: space-between; padding: .85rem 1rem .6rem; gap: .5rem; }
+        .cname { font-weight: 700; font-size: 1.05rem; display:flex; align-items:center; gap:.4rem; }
+        .cloc { font-size: .8rem; color: var(--grey); }
+        .status { display: inline-flex; align-items: center; gap: .35rem; font-size: .78rem; font-weight: 700; padding: .2rem .6rem; border-radius: 20px; white-space: nowrap; }
+        .status.ok { background:#dcfce7; color:#15803d; } .status.ok .sdot{ background:#22c55e; }
+        .status.alarm { background:#fee2e2; color:#b91c1c; } .status.alarm .sdot{ background:#ef4444; animation:pulse 1s infinite; }
+        .status.offline { background:#f1f5f9; color:#64748b; } .status.offline .sdot{ background:#9ca3af; }
+        .sdot { width: 8px; height: 8px; border-radius: 50%; }
+        .kv { padding:0 1rem .6rem; display:grid; grid-template-columns:auto 1fr; gap:.2rem .6rem; font-size:.85rem; }
+        .kv dt { color: var(--grey); } .kv dd { font-weight:600; text-align:right; }
+        .cactions { border-top:1px solid #f1f5f9; padding:.55rem 1rem; display:flex; gap:.5rem; flex-wrap:wrap; }
+        .btn { border:none; border-radius:8px; padding:.35rem .7rem; font-size:.78rem; font-weight:600; cursor:pointer; }
+        .btn.test { background:#fef3c7; color:#92400e; } .btn.del { background:#fee2e2; color:#b91c1c; } .btn.edit{ background:#e0e7ff; color:#3730a3; }
+        .btn.primary { background:#16a34a; color:#fff; padding:.5rem 1rem; }
+
+        .panel { background:#fff; border-radius:16px; box-shadow:0 6px 24px rgba(0,0,0,.12); padding:1.1rem 1.25rem; margin-bottom:1.25rem; }
+        .panel h3 { font-size:1rem; margin-bottom:.75rem; }
+        .frm { display:flex; flex-wrap:wrap; gap:.6rem; align-items:end; }
+        .frm label { font-size:.72rem; color:#6b7280; display:block; }
+        .frm input, .frm select { border:1px solid #d1d5db; border-radius:8px; padding:.45rem .6rem; font-size:.88rem; }
+        table.log { width:100%; border-collapse:collapse; font-size:.82rem; }
+        table.log th, table.log td { text-align:left; padding:.4rem .5rem; border-bottom:1px solid #f1f5f9; }
+        table.log th { color:var(--grey); font-weight:600; text-transform:uppercase; font-size:.66rem; }
+        .ev-alarm { color:#b91c1c; font-weight:700; } .ev-clear,.ev-online{ color:#15803d; } .ev-offline{ color:#92400e; } .ev-test{ color:#3730a3; }
+        .updated { text-align: center; color: rgba(255,255,255,.95); font-size: .82rem; margin-top: 1.25rem; text-shadow: 0 1px 2px rgba(0,0,0,.15); }
+    </style>
+</head>
+<body>
+    <nav class="topnav">
+        <a href="/" class="brand">
+            <img src="/logo-stweg3-rosenweg9.png" onerror="this.onerror=null;this.src='/logo-rosenweg.png'" alt="Rosenweg 9">
+            <span><span class="t">🚨 Alarmpanel</span><br><span class="s">STWEG 3 · Rosenweg 9</span></span>
+        </a>
+        <div class="nav-right">
+            <span class="live-badge"><span class="live-dot"></span> LIVE</span>
+            <a href="/" class="back">← Zurück</a>
+        </div>
+    </nav>
+
+    <div class="wrap">
+        <div id="err" class="err"></div>
+        <div id="gate" class="gate">
+            <h2>🔒 Anmeldung erforderlich</h2>
+            <p>Das Alarmpanel ist für die Bewohner und Technik der STWEG 3.</p>
+            <div id="sso-login-container"></div>
+        </div>
+
+        <div id="content" style="display:none">
+            <div id="alarmbar" class="alarmbar"></div>
+            <div id="okbar" class="okbar" style="display:none"></div>
+
+            <div class="summary">
+                <div class="pill"><span class="muted">Geräte</span> <b id="s-total">–</b></div>
+                <div class="pill"><span class="muted">OK</span> <b id="s-ok" style="color:#16a34a">–</b></div>
+                <div class="pill"><span class="muted">Alarm</span> <b id="s-alarm" style="color:#dc2626">–</b></div>
+                <div class="pill"><span class="muted">Offline</span> <b id="s-offline" style="color:#92400e">–</b></div>
+            </div>
+
+            <div id="grid" class="grid"></div>
+
+            <!-- Verwaltung (nur Technik/Ausschuss) -->
+            <div id="manage" class="panel" style="display:none; margin-top:1.25rem">
+                <h3>➕ Gerät aufschalten</h3>
+                <div class="frm">
+                    <div><label>Name</label><input id="f-name" placeholder="z.B. Rauchmelder Keller"></div>
+                    <div><label>Ort</label><input id="f-loc" placeholder="z.B. Keller / 2.OG"></div>
+                    <div><label>Typ</label><select id="f-type"><option value="smoke">Rauchmelder</option><option value="gas">Gaswarner</option></select></div>
+                    <div><label>Shelly IP/Host</label><input id="f-host" placeholder="z.B. 100.64.x.x"></div>
+                    <div id="f-thr-wrap" style="display:none"><label>Gas-Schwelle (ppm)</label><input id="f-thr" type="number" placeholder="z.B. 100"></div>
+                    <button id="f-save" class="btn primary">Aufschalten</button>
+                    <button id="f-cancel" class="btn" style="display:none">Abbrechen</button>
+                </div>
+                <p class="muted" style="font-size:.75rem; margin-top:.5rem">Rauchmelder = Shelly Plus Smoke (Gen2). Gaswarner = Shelly Gas (Gen1). Lesen lokal per HTTP. Alarm → Technik (WhatsApp+Mail); Rauchmelder zusätzlich an alle STWEG3-Bewohner.</p>
+            </div>
+
+            <!-- Alarm-Historie -->
+            <div class="panel" style="margin-top:1.25rem">
+                <h3>📜 Verlauf</h3>
+                <table class="log"><thead><tr><th>Zeit</th><th>Gerät</th><th>Ereignis</th><th>Detail</th><th>Benachrichtigt</th></tr></thead>
+                <tbody id="log"><tr><td colspan="5" class="muted">Lade …</td></tr></tbody></table>
+            </div>
+
+            <div class="updated" id="updated">Lade …</div>
+        </div>
+    </div>
+
+    <script>
+        const $ = id => document.getElementById(id);
+        const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        let canManage = false, editId = null;
+
+        function relTime(ts) {
+            if (!ts) return 'nie';
+            const s = Math.round((Date.now() - new Date(ts).getTime()) / 1000);
+            if (s < 60) return s + 's'; if (s < 3600) return Math.round(s/60) + ' Min';
+            if (s < 86400) return Math.round(s/3600) + ' Std'; return Math.round(s/86400) + ' Tg';
+        }
+        const typeIcon = t => t === 'smoke' ? '🔥' : '⛽';
+        const statusLabel = s => ({ ok:'OK', alarm:'ALARM', offline:'Offline' }[s] || '–');
+
+        function sensorCard(s) {
+            const cls = s.in_alarm ? 'alarm' : (s.status === 'offline' ? 'offline' : 'ok');
+            let kv = `<dt>Typ</dt><dd>${s.device_type === 'smoke' ? 'Rauchmelder' : 'Gaswarner'}</dd>
+                      <dt>Host</dt><dd style="font-family:ui-monospace,monospace">${esc(s.host)}</dd>
+                      <dt>Messwert</dt><dd>${esc(s.last_value || '–')}</dd>`;
+            if (s.battery_percent != null) kv += `<dt>Batterie</dt><dd style="color:${s.battery_low?'#b91c1c':'inherit'}">${Math.round(s.battery_percent)}%${s.battery_low?' ⚠️':''}</dd>`;
+            if (s.gas_threshold_ppm != null) kv += `<dt>Schwelle</dt><dd>${s.gas_threshold_ppm} ppm</dd>`;
+            kv += `<dt>Letzter Alarm</dt><dd>${s.last_alarm_at ? relTime(s.last_alarm_at)+' her' : '<span class="muted">–</span>'}</dd>
+                   <dt>Geprüft</dt><dd>${s.last_ok_at ? relTime(s.last_ok_at)+' her' : '<span class="muted">nie</span>'}</dd>`;
+            let actions = '';
+            if (canManage) actions = `<div class="cactions">
+                <button class="btn test" onclick="testSensor(${s.id},'${esc(s.name)}')">🧪 Test</button>
+                <button class="btn edit" onclick='editSensor(${JSON.stringify(s).replace(/'/g,"&#39;")})'>Bearbeiten</button>
+                <button class="btn del" onclick="delSensor(${s.id},'${esc(s.name)}')">Entfernen</button></div>`;
+            return `<div class="card ${cls}">
+                <div class="chead"><div><div class="cname">${typeIcon(s.device_type)} ${esc(s.name)}</div>${s.location?`<div class="cloc">${esc(s.location)}</div>`:''}</div>
+                <span class="status ${cls}"><span class="sdot"></span>${statusLabel(s.in_alarm?'alarm':s.status)}</span></div>
+                <dl class="kv">${kv}</dl>${actions}</div>`;
+        }
+
+        async function loadMe() {
+            try { const r = await AuthentikAuth.apiFetch('/api/me'); if (!r.ok) return; const me = await r.json();
+                const g = (me.groups || []).map(x => String(x).toLowerCase());
+                canManage = !!me.is_admin || g.includes('technik') || g.includes('präsident') || g.includes('praesident') || g.some(x => x.endsWith('-ausschuss'));
+                $('manage').style.display = canManage ? 'block' : 'none';
+            } catch {}
+        }
+
+        async function load() {
+            try {
+                const resp = await AuthentikAuth.apiFetch('/api/alarmpanel/sensors', { cache: 'no-store' });
+                if (resp.status === 401) { showGate(); return; }
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+                $('gate').style.display = 'none'; $('err').style.display = 'none'; $('content').style.display = 'block';
+                const sensors = data.sensors || [], sm = data.summary || {};
+                $('s-total').textContent = sensors.length; $('s-ok').textContent = sm.ok || 0;
+                $('s-alarm').textContent = sm.alarm || 0; $('s-offline').textContent = sm.offline || 0;
+                const alarms = sensors.filter(s => s.in_alarm);
+                if (alarms.length) { $('alarmbar').style.display = 'block'; $('okbar').style.display = 'none';
+                    $('alarmbar').innerHTML = '🚨 ALARM: ' + alarms.map(s => esc(s.name) + (s.location?' ('+esc(s.location)+')':'')).join(', '); }
+                else { $('alarmbar').style.display = 'none'; $('okbar').style.display = 'block';
+                    $('okbar').textContent = sensors.length ? `✅ Alle ${sensors.length} Geräte unauffällig` : 'Noch keine Geräte aufgeschaltet.'; }
+                $('grid').innerHTML = sensors.map(sensorCard).join('');
+                $('updated').textContent = 'Aktualisiert: ' + new Date().toLocaleTimeString('de-CH') + ' · Polling ' + Math.round((data.poll_ms||30000)/1000) + 's';
+                loadLog();
+            } catch (e) { $('err').style.display = 'block'; $('err').textContent = 'Fehler beim Laden: ' + e.message; }
+        }
+
+        async function loadLog() {
+            try { const r = await AuthentikAuth.apiFetch('/api/alarmpanel/events'); if (!r.ok) return; const d = await r.json();
+                $('log').innerHTML = (d.events || []).map(e => `<tr>
+                    <td>${new Date(e.created_at).toLocaleString('de-CH')}</td><td>${esc(e.sensor_name)||'–'}</td>
+                    <td class="ev-${esc(e.event)}">${esc(e.event)}</td><td>${esc(e.detail)||''}</td><td class="muted">${esc(e.notified)||''}</td></tr>`).join('')
+                    || '<tr><td colspan="5" class="muted">Noch keine Ereignisse.</td></tr>';
+            } catch {}
+        }
+
+        // ── Verwaltung ──
+        function resetForm() { editId = null; $('f-name').value=$('f-loc').value=$('f-host').value=$('f-thr').value=''; $('f-type').value='smoke'; toggleThr(); $('f-save').textContent='Aufschalten'; $('f-cancel').style.display='none'; }
+        function toggleThr() { $('f-thr-wrap').style.display = $('f-type').value === 'gas' ? 'block' : 'none'; }
+        function editSensor(s) { editId = s.id; $('f-name').value=s.name||''; $('f-loc').value=s.location||''; $('f-type').value=s.device_type; $('f-host').value=s.host||''; $('f-thr').value=s.gas_threshold_ppm||''; toggleThr(); $('f-save').textContent='Speichern'; $('f-cancel').style.display='inline-block'; $('manage').scrollIntoView({behavior:'smooth'}); }
+        async function saveSensor() {
+            const body = { name:$('f-name').value.trim(), location:$('f-loc').value.trim(), device_type:$('f-type').value, host:$('f-host').value.trim(), gas_threshold_ppm:$('f-thr').value?parseInt($('f-thr').value,10):null };
+            if (!body.name || !body.host) { alert('Name und Host erforderlich'); return; }
+            try { const url = editId ? '/api/alarmpanel/sensors/'+editId : '/api/alarmpanel/sensors';
+                const r = await AuthentikAuth.apiFetch(url, { method: editId?'PUT':'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+                if (r.status === 403) { alert('Nur Technik/Ausschuss dürfen Geräte verwalten.'); return; }
+                if (!r.ok) throw new Error((await r.json().catch(()=>({}))).error || ('HTTP '+r.status));
+                resetForm(); load();
+            } catch (e) { alert('Fehler: ' + e.message); }
+        }
+        async function delSensor(id, name) { if (!confirm('Gerät entfernen? ' + name)) return;
+            try { const r = await AuthentikAuth.apiFetch('/api/alarmpanel/sensors/'+id, { method:'DELETE' }); if (!r.ok) throw new Error('HTTP '+r.status); load(); } catch(e){ alert('Fehler: '+e.message); } }
+        async function testSensor(id, name) { if (!confirm('Test-Alarm für "'+name+'" auslösen? (geht NUR an Technik, nicht an Bewohner)')) return;
+            try { const r = await AuthentikAuth.apiFetch('/api/alarmpanel/sensors/'+id+'/test', { method:'POST' }); const d = await r.json().catch(()=>({}));
+                if (!r.ok) throw new Error(d.error||('HTTP '+r.status)); alert('Test ausgelöst → ' + (d.notified||'Technik')); load(); } catch(e){ alert('Fehler: '+e.message); } }
+
+        function showGate() { $('content').style.display='none'; $('err').style.display='none'; $('gate').style.display='block';
+            $('gate').innerHTML='<h2>🔒 Anmeldung erforderlich</h2><p>Das Alarmpanel ist für die Bewohner und Technik der STWEG 3.</p><div id="sso-login-container"></div>';
+            AuthentikAuth.createLoginButton('sso-login-container'); }
+
+        let timer = null;
+        async function start() {
+            if (!AuthentikAuth.isLoggedIn()) { showGate(); return; }
+            $('f-type').addEventListener('change', toggleThr);
+            $('f-save').addEventListener('click', saveSensor);
+            $('f-cancel').addEventListener('click', resetForm);
+            await loadMe(); load();
+            if (timer) clearInterval(timer);
+            timer = setInterval(() => { if (!document.hidden) load(); }, 10000);
+        }
+        start();
+    </script>
+</body>
+</html>
