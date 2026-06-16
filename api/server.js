@@ -12331,6 +12331,45 @@ app.post('/api/pbx/call-notify', requirePbxSecret, async (req, res) => {
   }
 });
 
+// ── Voicemail-Auto-Reklamation (Webhook von der autarken PBX-API) ──────
+// Die PBX-API (CT 220) transkribiert + analysiert die Voicemail selbst und
+// ruft hier nur noch fuer die Rosenweg-spezifische Reklamation an (personen-
+// Lookup + reklamationen leben in der Haupt-DB). Body: { caller_id, uniqueid,
+// transcript, analysis:{ is_defekt, defekt_stweg, defekt_beschreibung, ... } }.
+// Liefert { reklamation_id } zurueck, damit die PBX den Link in die WhatsApp setzt.
+app.post('/api/pbx/voicemail-reklamation', requirePbxSecret, async (req, res) => {
+  try {
+    const callerId = String(req.body?.caller_id || 'unbekannt').slice(0, 50);
+    const analysis = req.body?.analysis || {};
+    if (!analysis.is_defekt || !analysis.defekt_beschreibung) {
+      return res.json({ ok: true, reklamation_id: null, reason: 'kein Defekt erkannt' });
+    }
+    const normCaller = normalizePhone(callerId);
+    let personId = null;
+    if (normCaller) {
+      const pr = await pool.query(
+        `SELECT id FROM personen
+          WHERE telefon = $1
+             OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(telefone,'[]'::jsonb)) t WHERE t = $1)
+          LIMIT 1`,
+        [normCaller],
+      );
+      if (pr.rows[0]) personId = pr.rows[0].id;
+    }
+    const ins = await pool.query(
+      `INSERT INTO reklamationen (person_id, stweg, beschreibung, eingang_kanal)
+       VALUES ($1, $2, $3, 'pbx-voicemail') RETURNING id`,
+      [personId, analysis.defekt_stweg || null, String(analysis.defekt_beschreibung).slice(0, 2000)],
+    );
+    const reklamationId = ins.rows[0].id;
+    console.log(`[pbx-voicemail-reklamation] #${reklamationId} erstellt (stweg=${analysis.defekt_stweg}, person=${personId})`);
+    res.json({ ok: true, reklamation_id: reklamationId, person_id: personId });
+  } catch (err) {
+    console.error('[pbx-voicemail-reklamation] error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── PBX Ring-Members: Admin-Verwaltung der Empfaengerliste ─────────────
 // Asterisk-AGI holt die aktive Liste live via /active-Endpoint.
 
