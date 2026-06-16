@@ -33,7 +33,7 @@ def _load_env_file(path='/etc/default/asterisk-env'):
                 if '=' in line:
                     k, v = line.split('=', 1)
                     env[k.strip()] = v.strip().strip('"').strip("'")
-    except FileNotFoundError:
+    except (FileNotFoundError, PermissionError, OSError):
         pass
     return env
 

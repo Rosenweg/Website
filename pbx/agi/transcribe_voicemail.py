@@ -39,7 +39,7 @@ def _load_env_file(path='/etc/default/asterisk-env'):
                 if '=' in line:
                     k, v = line.split('=', 1)
                     env[k.strip()] = v.strip().strip('"').strip("'")
-    except FileNotFoundError: pass
+    except (FileNotFoundError, PermissionError, OSError): pass
     return env
 _envfile = _load_env_file()
 # Lokale PBX-API (KI-Pipeline laeuft autark in CT 220, nicht mehr Haupt-API).
