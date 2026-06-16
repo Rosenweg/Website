@@ -7,9 +7,13 @@
 // (/rpc/Shelly.GetStatus, Komponente smoke:0), Gas = Shelly Gas Gen1 (/status,
 // gas_sensor + concentration.ppm). Kein Cloud, kein MQTT.
 // ─────────────────────────────────────────────────────────────────────────
+const crypto = require('crypto');
 const { pool } = require('./db');
 const { queueWhatsappMessage, resolveTechnikWhatsappGroupId } = require('./whatsapp');
 const { loggedSendMail } = require('./mail');
+
+const WEBHOOK_BASE = process.env.ALARM_WEBHOOK_BASE || 'https://www.rosenweg4303.ch';
+const webhookUrl = (t, ev) => `${WEBHOOK_BASE}/api/alarmpanel/webhook?token=${t}&event=${ev || 'alarm'}`;
 
 const POLL_MS       = parseInt(process.env.ALARM_POLL_MS, 10) || 30000; // 30s
 const OFFLINE_AFTER = 3;    // aufeinanderfolgende Fehlversuche -> offline
@@ -25,7 +29,11 @@ async function initSchema() {
       name TEXT NOT NULL,
       location TEXT,
       device_type TEXT NOT NULL,            -- 'smoke' | 'gas'
-      host TEXT NOT NULL,                   -- Shelly IP/Hostname (lokal)
+      conn TEXT NOT NULL DEFAULT 'poll',    -- 'poll' (netzbetrieben, HTTP-Polling) | 'webhook' (Batterie, Shelly-Action pusht)
+      host TEXT,                            -- Shelly IP/Hostname (nur poll)
+      auth_user TEXT,                       -- Shelly Basic-Auth (nur poll, wenn Geraet auth aktiv hat)
+      auth_pass TEXT,
+      webhook_token TEXT,                   -- nur webhook: identifiziert+authentifiziert den Push
       gas_threshold_ppm INTEGER,            -- nur gas; Alarm ab >= ppm (zusaetzl. zum Geraete-Alarm)
       active BOOLEAN NOT NULL DEFAULT true,
       status TEXT DEFAULT 'unknown',        -- 'ok' | 'alarm' | 'offline' | 'unknown'
@@ -50,6 +58,11 @@ async function initSchema() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_alarm_events ON alarm_events(id DESC);
+    ALTER TABLE alarm_sensors ADD COLUMN IF NOT EXISTS conn TEXT NOT NULL DEFAULT 'poll';
+    ALTER TABLE alarm_sensors ADD COLUMN IF NOT EXISTS auth_user TEXT;
+    ALTER TABLE alarm_sensors ADD COLUMN IF NOT EXISTS auth_pass TEXT;
+    ALTER TABLE alarm_sensors ADD COLUMN IF NOT EXISTS webhook_token TEXT;
+    ALTER TABLE alarm_sensors ALTER COLUMN host DROP NOT NULL;
   `);
 }
 
@@ -62,9 +75,14 @@ async function logEvent(s, event, detail, notified) {
 }
 
 // ── Shelly lokal lesen ────────────────────────────────────────────────────
+function authHeaders(s) {
+  if (!s.auth_user) return {};
+  return { Authorization: 'Basic ' + Buffer.from(`${s.auth_user}:${s.auth_pass || ''}`).toString('base64') };
+}
 async function readSensor(s) {
+  const opt = { signal: AbortSignal.timeout(3000), headers: authHeaders(s) };
   if (s.device_type === 'smoke') {
-    const r = await fetch(`http://${s.host}/rpc/Shelly.GetStatus`, { signal: AbortSignal.timeout(3000) });
+    const r = await fetch(`http://${s.host}/rpc/Shelly.GetStatus`, opt);
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const st = await r.json();
     const sm = st['smoke:0'] || {};
@@ -73,7 +91,7 @@ async function readSensor(s) {
     return { alarm: sm.alarm === true, battery: bat, value: sm.alarm ? 'Rauch erkannt' : 'klar' };
   }
   // gas: Shelly Gas (Gen1)
-  const r = await fetch(`http://${s.host}/status`, { signal: AbortSignal.timeout(3000) });
+  const r = await fetch(`http://${s.host}/status`, opt);
   if (!r.ok) throw new Error('HTTP ' + r.status);
   const st = await r.json();
   const gs = st.gas_sensor || {};
@@ -119,7 +137,7 @@ function escalator(resolveBroadcastRecipients) {
 function startPolling(escalate) {
   async function pollOnce() {
     let rows = [];
-    try { ({ rows } = await pool.query(`SELECT * FROM alarm_sensors WHERE active = true`)); }
+    try { ({ rows } = await pool.query(`SELECT * FROM alarm_sensors WHERE active = true AND conn = 'poll'`)); }
     catch (e) { console.warn('[alarm] poll select:', e.message); return; }
     for (const s of rows) {
       try {
@@ -158,7 +176,8 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
     .then(() => { startPolling(escalate); console.log('[alarm] Alarmpanel aktiv (poll', POLL_MS + 'ms)'); })
     .catch(e => console.error('[alarm] initSchema:', e.message));
 
-  const VIEW = ['id', 'stweg', 'name', 'location', 'device_type', 'host', 'gas_threshold_ppm', 'active',
+  const VIEW = ['id', 'stweg', 'name', 'location', 'device_type', 'conn', 'host', 'gas_threshold_ppm', 'active',
+    '(auth_user IS NOT NULL) AS has_auth', '(webhook_token IS NOT NULL) AS has_webhook',
     'status', 'in_alarm', 'battery_low', 'battery_percent', 'last_value', 'last_ok_at', 'last_alarm_at'].join(',');
 
   // Liste + Live-Status
@@ -170,21 +189,59 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  // Aufschalten
+  // Aufschalten — conn='poll' (netzbetrieben, host nötig, optional auth) oder
+  // 'webhook' (Batterie; generiert Token+URL, die in die Shelly-Action gehört).
   app.post('/api/alarmpanel/sensors', authMiddleware, requireManage, async (req, res) => {
     const b = req.body || {};
     const name = String(b.name || '').trim();
     const device_type = String(b.device_type || '').trim();
+    const conn = b.conn === 'webhook' ? 'webhook' : 'poll';
     const host = String(b.host || '').trim();
-    if (!name || !['smoke', 'gas'].includes(device_type) || !host) {
-      return res.status(400).json({ error: 'name, device_type (smoke|gas) und host erforderlich' });
-    }
+    if (!name || !['smoke', 'gas'].includes(device_type)) return res.status(400).json({ error: 'name + device_type (smoke|gas) erforderlich' });
+    if (conn === 'poll' && !host) return res.status(400).json({ error: 'host erforderlich (Polling)' });
+    const token = conn === 'webhook' ? 'wh_' + crypto.randomBytes(18).toString('hex') : null;
     try {
       const { rows } = await pool.query(
-        `INSERT INTO alarm_sensors (name, location, device_type, host, gas_threshold_ppm, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-        [name, b.location || null, device_type, host, device_type === 'gas' ? (parseInt(b.gas_threshold_ppm, 10) || null) : null, req.user?.email || null]);
-      res.json({ ok: true, id: rows[0].id });
+        `INSERT INTO alarm_sensors (name, location, device_type, conn, host, auth_user, auth_pass, webhook_token, gas_threshold_ppm, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+        [name, b.location || null, device_type, conn,
+         conn === 'poll' ? host : null,
+         conn === 'poll' && b.auth_user ? String(b.auth_user) : null,
+         conn === 'poll' && b.auth_pass ? String(b.auth_pass) : null,
+         token, device_type === 'gas' ? (parseInt(b.gas_threshold_ppm, 10) || null) : null, req.user?.email || null]);
+      res.json({ ok: true, id: rows[0].id, webhook_url: token ? webhookUrl(token) : null, webhook_clear_url: token ? webhookUrl(token, 'clear') : null });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Manager: Webhook-URLs eines Geräts (zum Eintragen in die Shelly-Action)
+  app.get('/api/alarmpanel/sensors/:id/webhook', authMiddleware, requireManage, async (req, res) => {
+    try {
+      const { rows } = await pool.query(`SELECT webhook_token FROM alarm_sensors WHERE id=$1`, [parseInt(req.params.id, 10)]);
+      const t = rows[0]?.webhook_token;
+      if (!t) return res.status(404).json({ error: 'kein Webhook-Gerät' });
+      res.json({ alarm_url: webhookUrl(t, 'alarm'), clear_url: webhookUrl(t, 'clear') });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Webhook fuer Batterie-Geräte (Shelly Action). Auth = Token, KEIN Authentik.
+  app.all('/api/alarmpanel/webhook', async (req, res) => {
+    const token = String((req.query && req.query.token) || (req.body && req.body.token) || '');
+    const event = String((req.query && req.query.event) || (req.body && req.body.event) || 'alarm').toLowerCase();
+    if (!token) return res.status(400).json({ error: 'token fehlt' });
+    try {
+      const { rows } = await pool.query(`SELECT * FROM alarm_sensors WHERE webhook_token=$1 AND active=true`, [token]);
+      const s = rows[0];
+      if (!s) return res.status(404).json({ error: 'unbekannt' });
+      if (['clear', 'ok', 'normal', 'off'].includes(event)) {
+        const was = s.in_alarm;
+        await pool.query(`UPDATE alarm_sensors SET status='ok', in_alarm=false, last_value='klar', last_ok_at=NOW() WHERE id=$1`, [s.id]);
+        if (was) { await logEvent(s, 'clear', 'via Webhook'); await notifyTechnik(`✅ Entwarnung: ${s.name}${s.location ? ' — ' + s.location : ''}`); }
+      } else {
+        const was = s.in_alarm;
+        await pool.query(`UPDATE alarm_sensors SET status='alarm', in_alarm=true, last_value='Alarm', last_alarm_at=NOW(), last_ok_at=NOW() WHERE id=$1`, [s.id]);
+        if (!was) await escalate(s, { value: 'Alarm (Push)' }, false);
+      }
+      res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
@@ -193,10 +250,12 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
     try {
       await pool.query(
         `UPDATE alarm_sensors SET name=COALESCE($1,name), location=$2, host=COALESCE($3,host),
-           gas_threshold_ppm=$4, active=COALESCE($5,active) WHERE id=$6`,
+           gas_threshold_ppm=$4, active=COALESCE($5,active),
+           auth_user=COALESCE($7,auth_user), auth_pass=COALESCE($8,auth_pass) WHERE id=$6`,
         [b.name ?? null, b.location ?? null, b.host ?? null,
          b.gas_threshold_ppm != null ? parseInt(b.gas_threshold_ppm, 10) : null,
-         typeof b.active === 'boolean' ? b.active : null, parseInt(req.params.id, 10)]);
+         typeof b.active === 'boolean' ? b.active : null, parseInt(req.params.id, 10),
+         b.auth_user ?? null, (b.auth_pass !== undefined && b.auth_pass !== '') ? b.auth_pass : null]);
       res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });

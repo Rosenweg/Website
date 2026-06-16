@@ -109,12 +109,22 @@
                     <div><label>Name</label><input id="f-name" placeholder="z.B. Rauchmelder Keller"></div>
                     <div><label>Ort</label><input id="f-loc" placeholder="z.B. Keller / 2.OG"></div>
                     <div><label>Typ</label><select id="f-type"><option value="smoke">Rauchmelder</option><option value="gas">Gaswarner</option></select></div>
-                    <div><label>Shelly IP/Host</label><input id="f-host" placeholder="z.B. 100.64.x.x"></div>
+                    <div><label>Verbindung</label><select id="f-conn"><option value="poll">Polling (netzbetrieben)</option><option value="webhook">Webhook (Batterie)</option></select></div>
+                    <div id="f-poll" class="frm" style="gap:.6rem">
+                        <div><label>Shelly IP/Host</label><input id="f-host" placeholder="z.B. 100.64.90.x"></div>
+                        <div><label>Auth-User <span class="muted">(falls Gerät Auth hat)</span></label><input id="f-user" placeholder="admin"></div>
+                        <div><label>Auth-Passwort</label><input id="f-pass" type="password" placeholder="leer = kein Auth"></div>
+                    </div>
                     <div id="f-thr-wrap" style="display:none"><label>Gas-Schwelle (ppm)</label><input id="f-thr" type="number" placeholder="z.B. 100"></div>
                     <button id="f-save" class="btn primary">Aufschalten</button>
                     <button id="f-cancel" class="btn" style="display:none">Abbrechen</button>
                 </div>
-                <p class="muted" style="font-size:.75rem; margin-top:.5rem">Rauchmelder = Shelly Plus Smoke (Gen2). Gaswarner = Shelly Gas (Gen1). Lesen lokal per HTTP. Alarm → Technik (WhatsApp+Mail); Rauchmelder zusätzlich an alle STWEG3-Bewohner.</p>
+                <div id="webhook-result" style="display:none; background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:.75rem 1rem; margin-top:.75rem; font-size:.82rem">
+                    <b>Webhook-URL</b> — in der Shelly-App des Melders unter <i>Actions / Webhooks</i> bei Alarm eintragen:
+                    <div style="margin-top:.4rem"><code id="wh-alarm" style="word-break:break-all; background:#fff; padding:.2rem .4rem; border-radius:6px; display:block"></code></div>
+                    <div style="margin-top:.3rem">Entwarnung (optional): <code id="wh-clear" style="word-break:break-all; font-size:.78rem"></code></div>
+                </div>
+                <p class="muted" style="font-size:.75rem; margin-top:.5rem">Gaswarner (Shelly Gas, netzbetrieben) = <b>Polling</b>. Rauchmelder (Shelly Plus Smoke, Batterie) schläft → <b>Webhook</b>: die generierte URL in die Shelly-Action eintragen. Alarm → Technik (WhatsApp+Mail); Rauchmelder zusätzlich an alle STWEG3-Bewohner.</p>
             </div>
 
             <!-- Alarm-Historie -->
@@ -145,8 +155,9 @@
         function sensorCard(s) {
             const cls = s.in_alarm ? 'alarm' : (s.status === 'offline' ? 'offline' : 'ok');
             let kv = `<dt>Typ</dt><dd>${s.device_type === 'smoke' ? 'Rauchmelder' : 'Gaswarner'}</dd>
-                      <dt>Host</dt><dd style="font-family:ui-monospace,monospace">${esc(s.host)}</dd>
-                      <dt>Messwert</dt><dd>${esc(s.last_value || '–')}</dd>`;
+                      <dt>Verbindung</dt><dd>${s.conn === 'webhook' ? 'Webhook (Batterie)' : 'Polling' + (s.has_auth ? ' 🔒' : '')}</dd>`;
+            if (s.conn !== 'webhook') kv += `<dt>Host</dt><dd style="font-family:ui-monospace,monospace">${esc(s.host || '–')}</dd>`;
+            kv += `<dt>Messwert</dt><dd>${esc(s.last_value || '–')}</dd>`;
             if (s.battery_percent != null) kv += `<dt>Batterie</dt><dd style="color:${s.battery_low?'#b91c1c':'inherit'}">${Math.round(s.battery_percent)}%${s.battery_low?' ⚠️':''}</dd>`;
             if (s.gas_threshold_ppm != null) kv += `<dt>Schwelle</dt><dd>${s.gas_threshold_ppm} ppm</dd>`;
             kv += `<dt>Letzter Alarm</dt><dd>${s.last_alarm_at ? relTime(s.last_alarm_at)+' her' : '<span class="muted">–</span>'}</dd>
@@ -154,6 +165,7 @@
             let actions = '';
             if (canManage) actions = `<div class="cactions">
                 <button class="btn test" onclick="testSensor(${s.id},'${esc(s.name)}')">🧪 Test</button>
+                ${s.has_webhook ? `<button class="btn edit" onclick="showWebhook(${s.id})">🔗 Webhook</button>` : ''}
                 <button class="btn edit" onclick='editSensor(${JSON.stringify(s).replace(/'/g,"&#39;")})'>Bearbeiten</button>
                 <button class="btn del" onclick="delSensor(${s.id},'${esc(s.name)}')">Entfernen</button></div>`;
             return `<div class="card ${cls}">
@@ -201,18 +213,30 @@
         }
 
         // ── Verwaltung ──
-        function resetForm() { editId = null; $('f-name').value=$('f-loc').value=$('f-host').value=$('f-thr').value=''; $('f-type').value='smoke'; toggleThr(); $('f-save').textContent='Aufschalten'; $('f-cancel').style.display='none'; }
+        function resetForm() { editId = null; ['f-name','f-loc','f-host','f-thr','f-user','f-pass'].forEach(i=>$(i).value=''); $('f-type').value='smoke'; $('f-conn').value='poll'; toggleThr(); toggleConn(); $('webhook-result').style.display='none'; $('f-save').textContent='Aufschalten'; $('f-cancel').style.display='none'; }
         function toggleThr() { $('f-thr-wrap').style.display = $('f-type').value === 'gas' ? 'block' : 'none'; }
-        function editSensor(s) { editId = s.id; $('f-name').value=s.name||''; $('f-loc').value=s.location||''; $('f-type').value=s.device_type; $('f-host').value=s.host||''; $('f-thr').value=s.gas_threshold_ppm||''; toggleThr(); $('f-save').textContent='Speichern'; $('f-cancel').style.display='inline-block'; $('manage').scrollIntoView({behavior:'smooth'}); }
+        function toggleConn() { $('f-poll').style.display = $('f-conn').value === 'poll' ? 'flex' : 'none'; }
+        function editSensor(s) { editId = s.id; $('f-name').value=s.name||''; $('f-loc').value=s.location||''; $('f-type').value=s.device_type; $('f-conn').value=s.conn||'poll'; $('f-host').value=s.host||''; $('f-user').value=''; $('f-pass').value=''; $('f-thr').value=s.gas_threshold_ppm||''; toggleThr(); toggleConn(); $('webhook-result').style.display='none'; $('f-save').textContent='Speichern'; $('f-cancel').style.display='inline-block'; $('manage').scrollIntoView({behavior:'smooth'}); }
         async function saveSensor() {
-            const body = { name:$('f-name').value.trim(), location:$('f-loc').value.trim(), device_type:$('f-type').value, host:$('f-host').value.trim(), gas_threshold_ppm:$('f-thr').value?parseInt($('f-thr').value,10):null };
-            if (!body.name || !body.host) { alert('Name und Host erforderlich'); return; }
+            const conn = $('f-conn').value;
+            const body = { name:$('f-name').value.trim(), location:$('f-loc').value.trim(), device_type:$('f-type').value, conn,
+                host:$('f-host').value.trim(), auth_user:$('f-user').value.trim()||null, auth_pass:$('f-pass').value||undefined,
+                gas_threshold_ppm:$('f-thr').value?parseInt($('f-thr').value,10):null };
+            if (!body.name) { alert('Name erforderlich'); return; }
+            if (conn==='poll' && !body.host) { alert('Host erforderlich (Polling)'); return; }
             try { const url = editId ? '/api/alarmpanel/sensors/'+editId : '/api/alarmpanel/sensors';
                 const r = await AuthentikAuth.apiFetch(url, { method: editId?'PUT':'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
                 if (r.status === 403) { alert('Nur Technik/Ausschuss dürfen Geräte verwalten.'); return; }
-                if (!r.ok) throw new Error((await r.json().catch(()=>({}))).error || ('HTTP '+r.status));
-                resetForm(); load();
+                const d = await r.json().catch(()=>({}));
+                if (!r.ok) throw new Error(d.error || ('HTTP '+r.status));
+                if (d.webhook_url) { $('wh-alarm').textContent=d.webhook_url; $('wh-clear').textContent=d.webhook_clear_url||''; $('webhook-result').style.display='block'; }
+                editId=null; ['f-name','f-loc','f-host','f-thr','f-user','f-pass'].forEach(i=>$(i).value=''); $('f-save').textContent='Aufschalten'; $('f-cancel').style.display='none';
+                load();
             } catch (e) { alert('Fehler: ' + e.message); }
+        }
+        async function showWebhook(id) {
+            try { const r = await AuthentikAuth.apiFetch('/api/alarmpanel/sensors/'+id+'/webhook'); const d = await r.json();
+                if (!r.ok) throw new Error(d.error||'Fehler'); prompt('Webhook-URL (Alarm) — in die Shelly-Action eintragen:', d.alarm_url); } catch(e){ alert(e.message); }
         }
         async function delSensor(id, name) { if (!confirm('Gerät entfernen? ' + name)) return;
             try { const r = await AuthentikAuth.apiFetch('/api/alarmpanel/sensors/'+id, { method:'DELETE' }); if (!r.ok) throw new Error('HTTP '+r.status); load(); } catch(e){ alert('Fehler: '+e.message); } }
@@ -228,6 +252,7 @@
         async function start() {
             if (!AuthentikAuth.isLoggedIn()) { showGate(); return; }
             $('f-type').addEventListener('change', toggleThr);
+            $('f-conn').addEventListener('change', toggleConn);
             $('f-save').addEventListener('click', saveSensor);
             $('f-cancel').addEventListener('click', resetForm);
             await loadMe(); load();
