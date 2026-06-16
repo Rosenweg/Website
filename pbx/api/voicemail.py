@@ -27,6 +27,7 @@ WA_TARGET = os.environ.get("VOICEMAIL_WA_TARGET", "Rosenweg Technik")
 
 FORWARD_URL = os.environ.get("FORWARD_VOICEMAIL_URL", "")          # optional: Haupt-API fuer Auto-Reklamation
 FORWARD_SECRET = os.environ.get("FORWARD_VOICEMAIL_SECRET", os.environ.get("PBX_SHARED_SECRET", ""))
+SITE_URL = os.environ.get("SITE_URL", "https://www.rosenweg4303.ch").rstrip("/")
 
 ANALYZE_SYSTEM = (
     "Du analysierst Anrufbeantworter-Nachrichten der Rosenweg-STWEG (Schweizer "
@@ -116,7 +117,7 @@ def _gateway_send(title, body, attachments=None):
         return False, str(e)
 
 
-def deliver_whatsapp(caller_id, uniqueid, transcript, analysis, audio_b64):
+def deliver_whatsapp(caller_id, uniqueid, transcript, analysis, audio_b64, reklamation_id=None):
     now = datetime.now(ZoneInfo("Europe/Zurich")).strftime("%d.%m.%Y %H:%M")
     parts = [f"🕒 {now}"]
     if analysis.get("summary"):
@@ -125,6 +126,9 @@ def deliver_whatsapp(caller_id, uniqueid, transcript, analysis, audio_b64):
         parts.append(f"*Dringlichkeit:* {analysis['urgency']}")
     if analysis.get("action"):
         parts.append(f"*Naechster Schritt:* {analysis['action']}")
+    if reklamation_id:
+        parts.append(f"✅ *Auto-Reklamation #{reklamation_id} erstellt* (STWEG "
+                     f"{analysis.get('defekt_stweg') or '—'})\n{SITE_URL}/reklamationen.html#{reklamation_id}")
     if transcript:
         parts.append(f"*Transkript:*\n{transcript}")
     body = "\n\n".join(parts)[:3500]
@@ -139,7 +143,9 @@ def deliver_whatsapp(caller_id, uniqueid, transcript, analysis, audio_b64):
 
 
 def forward_for_reklamation(caller_id, uniqueid, transcript, analysis):
-    """Optionaler Webhook an die Haupt-API fuer die Rosenweg-Auto-Reklamation."""
+    """Optionaler Webhook an die Haupt-API: legt die Rosenweg-Auto-Reklamation an
+    (personen-Lookup + reklamationen leben dort). Gibt die reklamation_id zurueck
+    (oder None)."""
     if not FORWARD_URL:
         return None
     try:
@@ -149,9 +155,9 @@ def forward_for_reklamation(caller_id, uniqueid, transcript, analysis):
             json={"caller_id": caller_id, "uniqueid": uniqueid, "transcript": transcript, "analysis": analysis},
             timeout=15,
         )
-        return r.ok
-    except requests.RequestException:
-        return False
+        return r.json().get("reklamation_id") if r.ok else None
+    except (requests.RequestException, ValueError):
+        return None
 
 
 def process(audio_bytes, caller_id, uniqueid):
@@ -159,14 +165,15 @@ def process(audio_bytes, caller_id, uniqueid):
     import base64
     transcript, wh_err = transcribe(audio_bytes)
     analysis = analyze(transcript, caller_id)
+    # ERST die Reklamation (Haupt-API) -> ID -> DANN WhatsApp MIT Reklamations-Link.
+    reklamation_id = forward_for_reklamation(caller_id, uniqueid, transcript, analysis)
     audio_b64 = base64.b64encode(audio_bytes).decode()
-    wa_ok, wa_err = deliver_whatsapp(caller_id, uniqueid, transcript, analysis, audio_b64)
-    forwarded = forward_for_reklamation(caller_id, uniqueid, transcript, analysis)
+    wa_ok, wa_err = deliver_whatsapp(caller_id, uniqueid, transcript, analysis, audio_b64, reklamation_id)
     return {
         "transcript": transcript,
         "analysis": analysis,
         "whisper_error": wh_err,
         "whatsapp_ok": wa_ok,
         "whatsapp_error": wa_err,
-        "forwarded": forwarded,
+        "reklamation_id": reklamation_id,
     }

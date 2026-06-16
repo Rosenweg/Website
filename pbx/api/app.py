@@ -229,6 +229,7 @@ def voicemail_ingest():
         "summary_present": bool(result["analysis"].get("summary")),
         "whatsapp_ok": result["whatsapp_ok"],
         "defekt": result["analysis"].get("is_defekt"),
+        "reklamation_id": result.get("reklamation_id"),
     })
 
 
