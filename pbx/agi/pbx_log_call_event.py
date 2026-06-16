@@ -28,7 +28,7 @@ def _load_env_file(path='/etc/default/asterisk-env'):
     except FileNotFoundError: pass
     return env
 _envfile = _load_env_file()
-API_BASE   = os.environ.get('API_BASE')          or _envfile.get('API_BASE',   'http://100.64.2.27:3000')
+API_BASE   = os.environ.get('PBX_API_BASE')      or _envfile.get('PBX_API_BASE', 'http://127.0.0.1:8095')
 PBX_SECRET = os.environ.get('PBX_SHARED_SECRET') or _envfile.get('PBX_SHARED_SECRET', '')
 
 # AGI-Env-Header aus stdin lesen (Asterisk sendet das vor unseren Commands)

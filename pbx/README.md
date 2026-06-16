@@ -1,6 +1,21 @@
 # Rosenweg PBX (Asterisk)
 
-Telefonanlage fuer die +41 61 551 01 52 (peoplefone-SIP-Trunk). Laeuft NICHT in Docker, sondern in einem dedizierten LXC (CT 220 auf pve2). Begruendung: SIP/RTP-NAT in Docker = Aerger, LXC hat klassische Netzwerk-Semantik + native apt-Verwaltung.
+Telefonanlage fuer die +41 61 551 01 52 (peoplefone-SIP-Trunk). Laeuft NICHT in Docker, sondern in einem dedizierten LXC (CT 220). Begruendung: SIP/RTP-NAT in Docker = Aerger, LXC hat klassische Netzwerk-Semantik + native apt-Verwaltung.
+
+> **Stand 2026-06-16 — eigenstaendige PBX-API.** Die komplette PBX-Steuerung lebt
+> jetzt als **Standalone-Python-Service in CT 220** (`pbx/api/`, eigene SQLite) —
+> nicht mehr in der Haupt-API:
+> - Ring-Group + **Zeitsperre pro Mitglied** (`bypass_hours`, „klingelt immer")
+> - **SIP-Telefone (LAN/VPN)** — Verwaltung im UI, generiert `pjsip_phones.conf`
+> - **Technik-Konferenz**: `100` am SIP-Telefon, **`*100`** als Mid-Call-Eskalation
+> - **Voicemail-KI autark**: Whisper (Groq) → Claude-Analyse → **WhatsApp direkt
+>   via Gateway** (`/gateway/send`) → Call-Log. Auto-Reklamation optional per Webhook.
+> - Trunk-Status (lokales AMI), Test-Call, Call-Log
+>
+> Admin-UI vom selben Container serviert: **`pbx.rosenweg4303.ch`**. Die Haupt-API
+> ist nur noch optionaler Webhook-Empfaenger (Auto-Reklamation). **Deploy +
+> Migration: [DEPLOY-PBX-API.md](DEPLOY-PBX-API.md).** CT 220 laeuft aktuell auf
+> **pve1 (100.64.2.20)**, CT-IP **100.64.2.29**.
 
 **Phase 1 (heutiger Stand):**
 - Mo-So 06-20h → Ring-Group an Technik-Mobiles (Stefan + Andreas), parallel klingelnd
