@@ -1,5 +1,17 @@
 version: "3.8"
 
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  DEPLOY NUR VIA  /root/deploy-stack.sh  (sourcet /root/.env)              ║
+# ║  ----------------------------------------------------------------------  ║
+# ║  'docker stack deploy' expandiert ${VAR} aus der Aufrufer-Shell. Ist eine ║
+# ║  Var dort ungesetzt -> LEERSTRING -> Secret wird still gewiped.           ║
+# ║  Der Wrapper macht 'set -a; . /root/.env; set +a' davor -> alle ${VAR}    ║
+# ║  (auch Traefik-Command-Arg + CIFS-Volume) interpolieren korrekt.          ║
+# ║  Zusaetzlich liest 'api' Secrets per env_file: /root/.env (deckt auch die ║
+# ║  frueher nur per --env-add gesetzten ab). EINZIGE Quelle: /root/.env.     ║
+# ║  NIEMALS 'docker stack deploy' nackt aufrufen.                            ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+
 services:
   # ============================================
   # Traefik - Reverse Proxy mit Let's Encrypt
@@ -176,59 +188,37 @@ services:
       - target: 3000
         published: 3000
         mode: ingress
+    # ── Secrets via env_file (/root/.env) statt ${VAR} ──────────────────────
+    # WICHTIG: KEINE Secret-${VAR} mehr in environment! Bei 'docker stack deploy'
+    # expandiert ${VAR} aus der Aufrufer-Shell -> wenn ungesetzt = LEERSTRING und
+    # ueberschreibt das Secret. env_file liest /root/.env direkt (shell-unabhaengig)
+    # und bringt AUCH die frueher nur per --env-add gesetzten Secrets mit
+    # (SMTP2GO_API_KEY, TRACKER_SHARED_SECRET, MAILCOW_API_*, GATEWAY_API_KEY ...).
+    # NUR Nicht-Secret-Config + selbst-schuetzende ${VAR:-default} bleiben hier.
+    env_file:
+      - /root/.env
     environment:
       DB_HOST: postgres
       DB_PORT: "5432"
       DB_NAME: rosenweg
       DB_USER: rosenweg
-      DB_PASSWORD: "${DB_PASSWORD}"
       SMTP_HOST: mail-eu.smtp2go.com
       SMTP_PORT: "2525"
-      SMTP_USER: "${SMTP_USER}"
-      SMTP_PASS: "${SMTP_PASS}"
-      SMTP2GO_API_KEY: "${SMTP2GO_API_KEY}"
       MAIL_FROM: "noreply@rosenweg4303.ch"
-      WHATSAPP_SHARED_SECRET: "${WHATSAPP_SHARED_SECRET}"
       PORT: "3000"
       AUTHENTIK_URL: "https://server:9443"
       AUTHENTIK_EXTERNAL_URL: "https://authentik.rosenweg4303.ch"
-      AUTHENTIK_CLIENT_ID: "${AUTHENTIK_CLIENT_ID}"
-      AUTHENTIK_CLIENT_SECRET: "${AUTHENTIK_CLIENT_SECRET}"
-      AUTHENTIK_API_TOKEN: "${AUTHENTIK_API_TOKEN}"
       SITE_URL: "https://www.rosenweg4303.ch"
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
-      PEOPLEFON_API_URL: "${PEOPLEFON_API_URL}"
-      PEOPLEFON_API_KEY: "${PEOPLEFON_API_KEY}"
-      PEOPLEFON_NUMBER: "${PEOPLEFON_NUMBER}"
       ENERGY_DB_HOST: energy-db
       ENERGY_DB_PORT: "5432"
       ENERGY_DB_NAME: energy
       ENERGY_DB_USER: energy
-      ENERGY_DB_PASSWORD: "${ENERGY_DB_PASSWORD:-energy2026}"
       PVE_API_URL: https://100.64.2.20:8006
-      PVE_API_TOKEN: "${PVE_API_TOKEN}"
       DOCS_PATH: /documents
       WG_CONTROL_URL: "${WG_CONTROL_URL:-http://100.64.2.34:3001}"
-      WG_CONTROL_TOKEN: "${WG_CONTROL_TOKEN}"
-      # NOC-Public-Dashboard: OPEN=1 hart verankert, damit ein gewipter
-      # NOC_PUBLIC_TOKEN das oeffentliche Dashboard NICHT mehr lahmlegt
-      # (Code: NOC_PUBLIC_OPEN==='1' -> erlaubt ohne Token). Token bleibt
-      # optional fuer den Fall, dass OPEN spaeter wieder auf 0 geht.
+      # NOC-Public-Dashboard hart offen (OPEN=1), unabhaengig vom Token.
       NOC_PUBLIC_OPEN: "1"
-      NOC_PUBLIC_TOKEN: "${NOC_PUBLIC_TOKEN}"
-      # UniFi-Controller-API-Key (Dashboard-UniFi-Panel + Frontend-Monitoring).
-      # Muss in /root/.env stehen, sonst greift der ungueltige Hardcoded-Fallback.
-      UNIFI_API_KEY: "${UNIFI_API_KEY}"
-      # Router-LXC-API-Token (NOC-Router-Health + Router-Provisioning). War als
-      # Docker-Secret /run/secrets/router_api_token gemountet, aber nirgends im
-      # Stack referenziert -> nach stack deploy weg -> alle Router-Dots rot (401).
-      # Jetzt als Env (Code-Fallback process.env.ROUTER_API_TOKEN). In /root/.env.
-      ROUTER_API_TOKEN: "${ROUTER_API_TOKEN}"
-      # PBX-Shared-Secret (Asterisk-AGI -> /api/pbx/voicemail + /call-notify).
-      # War nur per --env-add -> bei stack deploy gewiped -> 503 -> keine
-      # Voicemail-/Anruf-Meldungen mehr. Muss in /root/.env stehen (= Wert in
-      # /etc/default/asterisk-env auf CT220).
-      PBX_SHARED_SECRET: "${PBX_SHARED_SECRET}"
     volumes:
       - rosenweg-documents:/documents
     networks:
@@ -419,11 +409,19 @@ services:
       GW_SMTP_PORT: "2525"
       MAIN_API_BASE: http://rosenweg_api:3000
       GW_PUBLIC_HOST: whatsapp.rosenweg4303.ch
-      # Status-Rueckmeldung (Zustell-/Lesebestaetigung) an den E-Mail-Absender,
-      # relay ueber Mailcow (CT 240). Leer = aus.
-      GW_NOTIFY_RELAY_HOST: "100.64.2.33"
+      # WA->Mail-Versand (Status, Bridge-Auto-Reply, Weiterleitungsregeln) ueber
+      # PMG (CT 230, 100.64.2.31:25) -> SMTP2GO. Kein Auth (mynetworks-Trust).
+      GW_NOTIFY_RELAY_HOST: "100.64.2.31"
       GW_NOTIFY_RELAY_PORT: "25"
-      GW_NOTIFY_FROM: whatsapp-gateway@rosenweg4303.ch
+      GW_NOTIFY_FROM: whatsapp-gateway@whatsapp.rosenweg4303.ch
+    # SMTP-in (Mail->WhatsApp) host-published auf der gepinnten Node (.24), damit
+    # PMG (nicht im Overlay) inbound Mail fuer whatsapp.rosenweg4303.ch hierher
+    # transportieren kann. Absicherung: smtp_senders-Whitelist + iptables (nur PMG).
+    ports:
+      - target: 2525
+        published: 2525
+        protocol: tcp
+        mode: host
     volumes:
       - whatsapp-data:/data
     networks:
