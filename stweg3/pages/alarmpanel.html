@@ -49,6 +49,8 @@
         .status.ok { background:#dcfce7; color:#15803d; } .status.ok .sdot{ background:#22c55e; }
         .status.alarm { background:#fee2e2; color:#b91c1c; } .status.alarm .sdot{ background:#ef4444; animation:pulse 1s infinite; }
         .status.offline { background:#f1f5f9; color:#64748b; } .status.offline .sdot{ background:#9ca3af; }
+        .status.unknown { background:#f1f5f9; color:#64748b; } .status.unknown .sdot{ background:#94a3b8; }
+        .card.unknown { border-top-color:#cbd5e1; }
         .sdot { width: 8px; height: 8px; border-radius: 50%; }
         .kv { padding:0 1rem .6rem; display:grid; grid-template-columns:auto 1fr; gap:.2rem .6rem; font-size:.85rem; }
         .kv dt { color: var(--grey); } .kv dd { font-weight:600; text-align:right; }
@@ -97,6 +99,7 @@
                 <div class="pill"><span class="muted">Geräte</span> <b id="s-total">–</b></div>
                 <div class="pill"><span class="muted">OK</span> <b id="s-ok" style="color:#16a34a">–</b></div>
                 <div class="pill"><span class="muted">Alarm</span> <b id="s-alarm" style="color:#dc2626">–</b></div>
+                <div class="pill"><span class="muted">Wartet</span> <b id="s-unknown" style="color:#64748b">–</b></div>
                 <div class="pill"><span class="muted">Offline</span> <b id="s-offline" style="color:#92400e">–</b></div>
             </div>
 
@@ -150,10 +153,11 @@
             if (s < 86400) return Math.round(s/3600) + ' Std'; return Math.round(s/86400) + ' Tg';
         }
         const typeIcon = t => t === 'smoke' ? '🔥' : '⛽';
-        const statusLabel = s => ({ ok:'OK', alarm:'ALARM', offline:'Offline' }[s] || '–');
+        const statusLabel = s => ({ ok:'OK', alarm:'ALARM', offline:'Offline', unknown:'Wartet…' }[s] || 'Wartet…');
 
         function sensorCard(s) {
-            const cls = s.in_alarm ? 'alarm' : (s.status === 'offline' ? 'offline' : 'ok');
+            const eff = s.in_alarm ? 'alarm' : (['ok','offline'].includes(s.status) ? s.status : 'unknown');
+            const cls = eff;
             let kv = `<dt>Typ</dt><dd>${s.device_type === 'smoke' ? 'Rauchmelder' : 'Gaswarner'}</dd>
                       <dt>Verbindung</dt><dd>${s.conn === 'webhook' ? 'Webhook (Batterie)' : 'Polling' + (s.has_auth ? ' 🔒' : '')}</dd>`;
             if (s.conn !== 'webhook') kv += `<dt>Host</dt><dd style="font-family:ui-monospace,monospace">${esc(s.host || '–')}</dd>`;
@@ -170,7 +174,7 @@
                 <button class="btn del" onclick="delSensor(${s.id},'${esc(s.name)}')">Entfernen</button></div>`;
             return `<div class="card ${cls}">
                 <div class="chead"><div><div class="cname">${typeIcon(s.device_type)} ${esc(s.name)}</div>${s.location?`<div class="cloc">${esc(s.location)}</div>`:''}</div>
-                <span class="status ${cls}"><span class="sdot"></span>${statusLabel(s.in_alarm?'alarm':s.status)}</span></div>
+                <span class="status ${cls}"><span class="sdot"></span>${statusLabel(eff)}</span></div>
                 <dl class="kv">${kv}</dl>${actions}</div>`;
         }
 
@@ -189,11 +193,13 @@
                 const sensors = data.sensors || [], sm = data.summary || {};
                 $('s-total').textContent = sensors.length; $('s-ok').textContent = sm.ok || 0;
                 $('s-alarm').textContent = sm.alarm || 0; $('s-offline').textContent = sm.offline || 0;
+                $('s-unknown').textContent = sm.unknown || 0;
                 const alarms = sensors.filter(s => s.in_alarm);
                 if (alarms.length) { $('alarmbar').style.display = 'block'; $('okbar').style.display = 'none';
                     $('alarmbar').innerHTML = '🚨 ALARM: ' + alarms.map(s => esc(s.name) + (s.location?' ('+esc(s.location)+')':'')).join(', '); }
                 else { $('alarmbar').style.display = 'none'; $('okbar').style.display = 'block';
-                    $('okbar').textContent = sensors.length ? `✅ Alle ${sensors.length} Geräte unauffällig` : 'Noch keine Geräte aufgeschaltet.'; }
+                    const u = sm.unknown || 0;
+                    $('okbar').textContent = sensors.length ? ('✅ Keine Alarme' + (u ? ` · ${u} wartet auf erste Meldung` : '')) : 'Noch keine Geräte aufgeschaltet.'; }
                 $('grid').innerHTML = sensors.map(sensorCard).join('');
                 $('updated').textContent = 'Aktualisiert: ' + new Date().toLocaleTimeString('de-CH') + ' · Polling ' + Math.round((data.poll_ms||30000)/1000) + 's';
                 loadLog();

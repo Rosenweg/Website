@@ -184,7 +184,14 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
   app.get('/api/alarmpanel/sensors', authMiddleware, async (req, res) => {
     try {
       const { rows } = await pool.query(`SELECT ${VIEW} FROM alarm_sensors ORDER BY device_type, name`);
-      const agg = rows.reduce((a, s) => { if (s.in_alarm) a.alarm++; else if (s.status === 'offline') a.offline++; else if (s.active) a.ok++; return a; }, { ok: 0, alarm: 0, offline: 0 });
+      const agg = rows.reduce((a, s) => {
+        if (!s.active) return a;
+        if (s.in_alarm) a.alarm++;
+        else if (s.status === 'offline') a.offline++;
+        else if (s.status === 'ok') a.ok++;
+        else a.unknown++;            // 'unknown' = Webhook-Gerät hat sich noch nicht gemeldet (NICHT als ok zählen)
+        return a;
+      }, { ok: 0, alarm: 0, offline: 0, unknown: 0 });
       res.json({ sensors: rows, summary: agg, poll_ms: POLL_MS });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
