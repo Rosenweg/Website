@@ -2623,6 +2623,12 @@ async function resolveVerteilerRecipients(verteiler) {
         : await resolveGroupEmails(gn);
       emails.forEach(e => { if (!isInvalidDrucker(e)) allEmails.add(e); });
     }
+    // Statische Zusatz-Mitglieder additiv zur Gruppe (z.B. WhatsApp-Bridge-Adressen
+    // wie technik@whatsapp.rosenweg4303.ch). Frueher wurden members bei group_names ignoriert.
+    for (const m of (verteiler.members || [])) {
+      const e = typeof m === 'string' ? m : m.email;
+      if (e && !e.endsWith('.invalid') && !isInvalidDrucker(e)) allEmails.add(e);
+    }
     return [...allEmails];
   }
   // Fallback: static members list (legacy — for verteilers not yet migrated)
