@@ -69,6 +69,10 @@ certificatesResolvers:
     acme:
       email: stefan.mueller.1694@gmail.com
       storage: /var/lib/traefik/acme.json
+      # Chrome misstraut der "ISRG Root YR"-Kette (CERT_AUTHORITY_INVALID).
+      # Bevorzuge die Kette die bei ISRG Root X1 ankert (Chrome-vertraut),
+      # falls Let's Encrypt eine solche Alternative anbietet.
+      preferredChain: "ISRG Root X1"
       dnsChallenge:
         provider: cloudflare
         resolvers:
