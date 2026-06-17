@@ -6834,15 +6834,15 @@ if (process.env.MAILCOW_API_BASE && process.env.MAILCOW_API_KEY && VERTEILER_NAT
 }
 
 app.post('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
-  const { stweg, name, email_address, members, reply_to, subject_prefix, group_name, group_names, allowed_sender_groups } = req.body;
+  const { stweg, name, email_address, members, reply_to, subject_prefix, group_name, group_names, allowed_sender_groups, external_allowed } = req.body;
   if (!name || !email_address) return res.status(400).json({ error: 'Name und Email-Adresse erforderlich' });
   try {
     const groups = group_names?.length ? group_names : (group_name ? [group_name] : []);
     const allowedSenders = Array.isArray(allowed_sender_groups) ? allowed_sender_groups : [];
     const result = await pool.query(
-      `INSERT INTO email_verteiler (stweg, name, email_address, members, reply_to, subject_prefix, group_name, group_names, allowed_sender_groups)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [stweg || 0, name, email_address, JSON.stringify(members || []), reply_to || 'sender', subject_prefix || null, groups[0] || null, JSON.stringify(groups), JSON.stringify(allowedSenders)]
+      `INSERT INTO email_verteiler (stweg, name, email_address, members, reply_to, subject_prefix, group_name, group_names, allowed_sender_groups, external_allowed)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+      [stweg || 0, name, email_address, JSON.stringify(members || []), reply_to || 'sender', subject_prefix || null, groups[0] || null, JSON.stringify(groups), JSON.stringify(allowedSenders), external_allowed === true]
     );
     syncVerteilerAlias(result.rows[0]).catch(() => {});
     res.json(result.rows[0]);
@@ -6855,17 +6855,17 @@ app.post('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
 // Update Verteiler
 app.put('/api/verteiler/:id', authMiddleware, adminOnly, async (req, res) => {
   const { stweg, name, email_address, members, active, reply_to, subject_prefix, group_name, group_names, allowed_sender_groups,
-          whatsapp_group_id, whatsapp_group_name } = req.body;
+          whatsapp_group_id, whatsapp_group_name, external_allowed } = req.body;
   try {
     const groups = group_names?.length ? group_names : (group_name ? [group_name] : []);
     const allowedSenders = Array.isArray(allowed_sender_groups) ? allowed_sender_groups : [];
     const result = await pool.query(
       `UPDATE email_verteiler SET stweg=$1, name=$2, email_address=$3, members=$4, active=$5,
               reply_to=$6, subject_prefix=$7, group_name=$8, group_names=$9, allowed_sender_groups=$10,
-              whatsapp_group_id=$11, whatsapp_group_name=$12
-       WHERE id=$13 RETURNING *`,
+              whatsapp_group_id=$11, whatsapp_group_name=$12, external_allowed=$13
+       WHERE id=$14 RETURNING *`,
       [stweg, name, email_address, JSON.stringify(members || []), active !== false, reply_to || 'sender', subject_prefix || null, groups[0] || null, JSON.stringify(groups), JSON.stringify(allowedSenders),
-       whatsapp_group_id || null, whatsapp_group_name || null,
+       whatsapp_group_id || null, whatsapp_group_name || null, external_allowed === true,
        req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
@@ -6873,6 +6873,55 @@ app.put('/api/verteiler/:id', authMiddleware, adminOnly, async (req, res) => {
     res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: 'Fehler beim Aktualisieren' });
+  }
+});
+
+// GET /api/verteiler/mailcow-gate — Config fuer das rspamd-Pull-Script auf CT 240.
+// Liefert die "gated" Verteiler-Aliase (external_allowed=false) + erlaubte Absender-Domains
+// (alle Mailcow-Domains + aktive Verwaltungs-Domains). Das Script auf Mailcow baut daraus
+// eine rspamd-Regel: an gated Aliase nur von erlaubten Domains, sonst Reject. Secret-geschuetzt.
+app.get('/api/verteiler/mailcow-gate', requireTrackerSecret, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT email_address FROM email_verteiler WHERE active = true AND external_allowed = false`
+    );
+    const gated_aliases = rows
+      .map(r => String(r.email_address || '').toLowerCase())
+      .filter(a => a.endsWith(`@${VERTEILER_DOMAIN}`));
+    // Alle Mailcow-gehosteten Domains
+    let mailcowDomains = [];
+    try {
+      const d = await mailcowApi('GET', '/get/domain/all');
+      mailcowDomains = (Array.isArray(d) ? d : [])
+        .map(x => String(x.domain_name || x.domain || '').toLowerCase()).filter(Boolean);
+    } catch (e) { console.warn('[mailcow-gate] domain/all:', e.message); }
+    // + aktive Verwaltungs-Domains (Vertrag laufend)
+    const vq = await pool.query(
+      `SELECT DISTINCT LOWER(SPLIT_PART(addr, '@', 2)) AS domain FROM (
+         SELECT v.email AS addr FROM verwaltungen v
+          WHERE v.aktiv = true AND (v.vertrag_von IS NULL OR v.vertrag_von <= CURRENT_DATE)
+            AND (v.vertrag_bis IS NULL OR v.vertrag_bis >= CURRENT_DATE) AND v.email IS NOT NULL AND v.email <> ''
+         UNION ALL
+         SELECT k.email AS addr FROM verwaltungs_kontakte k JOIN verwaltungen v ON v.id = k.verwaltung_id
+          WHERE v.aktiv = true AND (v.vertrag_von IS NULL OR v.vertrag_von <= CURRENT_DATE)
+            AND (v.vertrag_bis IS NULL OR v.vertrag_bis >= CURRENT_DATE) AND k.email IS NOT NULL AND k.email <> ''
+       ) s WHERE addr LIKE '%@%'`
+    );
+    const verwaltungDomains = vq.rows.map(r => r.domain).filter(Boolean);
+    const allowed_domains = [...new Set([...mailcowDomains, ...verwaltungDomains])].sort();
+    // Einzel-Adressen aus der Objektverwaltung (personen + wohnungen_kontakte) duerfen auch senden
+    const eq = await pool.query(
+      `SELECT DISTINCT LOWER(email) AS email FROM (
+         SELECT email FROM personen WHERE email IS NOT NULL AND email <> ''
+         UNION ALL
+         SELECT email FROM wohnungen_kontakte WHERE email IS NOT NULL AND email <> ''
+       ) s WHERE email LIKE '%@%'`
+    );
+    const allowed_emails = eq.rows.map(r => r.email).filter(Boolean).sort();
+    res.json({ gated_aliases: gated_aliases.sort(), allowed_domains, allowed_emails, generated_at: new Date().toISOString() });
+  } catch (err) {
+    console.error('[mailcow-gate]', err.message);
+    res.status(500).json({ error: 'Fehler' });
   }
 });
 
