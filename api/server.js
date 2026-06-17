@@ -6691,6 +6691,7 @@ app.get('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
     const result = await pool.query(
       `SELECT id, stweg, name, email_address, members, active,
               reply_to, subject_prefix, group_name, group_names, created_at,
+              whatsapp_group_id, whatsapp_group_name, external_allowed,
               jsonb_array_length(COALESCE(members, '[]'::jsonb)) as member_count
        FROM email_verteiler ORDER BY stweg, name`
     );
