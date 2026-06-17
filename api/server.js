@@ -3111,6 +3111,7 @@ const IMAP_POLL_INTERVAL = parseInt(process.env.IMAP_POLL_INTERVAL || '60') * 10
 // die manche Mails (z.B. von externen Mailservern mit komischen DKIM) in den
 // Spam-Folder forwardet. Sender-Auth-Check unten verhindert echte Spam-Forwards.
 const IMAP_MAILBOXES = (process.env.IMAP_MAILBOXES || 'INBOX,Junk').split(',').map(s => s.trim()).filter(Boolean);
+const VERTEILER_DOMAIN = process.env.VERTEILER_DOMAIN || 'rosenweg4303.ch';
 
 // Dediziertes archiv@-Postfach (eigener IMAP-Login). Der archiv@-Poller speist
 // daraus die email_archive-DB (Suche/Anhaenge/Vier-Augen-Loeschen bleiben).
@@ -3123,7 +3124,6 @@ const DMARC_IMAP_PASS = process.env.DMARC_IMAP_PASS || '';
 // Mailcow verteilt selbst; der inbox@-Poller versendet NICHT mehr nach (Doppelversand-Schutz).
 const VERTEILER_NATIVE_FANOUT = process.env.VERTEILER_NATIVE_FANOUT !== '0';
 const VERTEILER_ARCHIVE_ADDR = (process.env.VERTEILER_ARCHIVE_ADDR || `archiv@${VERTEILER_DOMAIN}`).toLowerCase();
-const VERTEILER_DOMAIN = process.env.VERTEILER_DOMAIN || 'rosenweg4303.ch';
 
 async function pollGmailForVerteiler() {
   if (!IMAP_USER || !IMAP_PASS) return;
