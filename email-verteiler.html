@@ -251,6 +251,11 @@
                             <div id="vf-group-preview" class="mt-2"></div>
                         </div>
                         <div class="mb-3">
+                            <label class="text-xs text-gray-500">Feste Adressen (zusätzlich zu den Gruppen, eine pro Zeile)</label>
+                            <textarea id="vf-members" rows="2" placeholder="z.B. technik@whatsapp.rosenweg4303.ch&#10;extern@example.com" class="w-full text-sm px-3 py-2 border rounded-lg font-mono"></textarea>
+                            <p class="text-xs text-gray-400 mt-1">Werden zusätzlich zu den Gruppen-Mitgliedern angeschrieben — z.B. WhatsApp-Bridge-Adressen oder externe Empfänger.</p>
+                        </div>
+                        <div class="mb-3">
                             <label class="text-xs text-gray-500">Erlaubte Sender-Gruppen (optional, leer = jeder @rosenweg4303.ch-Sender)</label>
                             <div id="vf-allowed-senders" class="w-full text-sm border rounded-lg bg-amber-50 max-h-48 overflow-y-auto p-1"></div>
                             <p class="text-xs text-gray-400 mt-1">Nur Mitglieder dieser Authentik-Gruppen dürfen an diesen Verteiler senden — alle anderen Sender erhalten automatisch eine Rückläufer-Mail.</p>
@@ -652,6 +657,7 @@
             document.getElementById('vf-reply-to').value = 'sender';
             document.getElementById('vf-prefix').value = '';
             document.getElementById('vf-external-allowed').checked = false;
+            document.getElementById('vf-members').value = '';
             document.getElementById('vf-group-preview').innerHTML = '';
             document.getElementById('vf-verwaltung-preview').innerHTML = '';
             populateVerwaltungDropdown([]);
@@ -678,6 +684,7 @@
             document.getElementById('vf-reply-to').value = v.reply_to || 'sender';
             document.getElementById('vf-prefix').value = v.subject_prefix || '';
             document.getElementById('vf-external-allowed').checked = v.external_allowed === true;
+            document.getElementById('vf-members').value = (v.members || []).map(m => typeof m === 'string' ? m : m.email).filter(Boolean).join('\n');
             const groups = v.group_names?.length ? v.group_names : (v.group_name ? [v.group_name] : []);
             const verwaltungGroups = groups.filter(g => g.startsWith('verwaltung:'));
             const authentikGroups = groups.filter(g => !g.startsWith('verwaltung:'));
@@ -703,12 +710,14 @@
             const authentik = multiCb.getValues('vf-group');
             const group_names = [...verwaltung, ...authentik];
             const allowed_sender_groups = multiCb.getValues('vf-allowed-senders');
+            const members = document.getElementById('vf-members').value
+                .split('\n').map(s => s.trim()).filter(Boolean);
             if (!name || !email_address) return alert('Name und E-Mail-Adresse erforderlich');
-            if (group_names.length === 0) return alert('Bitte mindestens eine Verwaltungs- oder Authentik-Gruppe wählen');
+            if (group_names.length === 0 && members.length === 0) return alert('Bitte mindestens eine Gruppe wählen oder eine feste Adresse angeben');
 
             const body = {
                 stweg: parseInt(document.getElementById('vf-stweg').value) || 0,
-                name, email_address, group_names, allowed_sender_groups,
+                name, email_address, group_names, allowed_sender_groups, members,
                 reply_to: document.getElementById('vf-reply-to').value,
                 subject_prefix: document.getElementById('vf-prefix').value || null,
                 external_allowed: document.getElementById('vf-external-allowed').checked,
