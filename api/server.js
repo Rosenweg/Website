@@ -13210,7 +13210,7 @@ async function alertMeter(m, unreachable) {
   const body = unreachable
     ? `⚠️ *${label} nicht erreichbar*\n${m.name}${where}\nModbus ${m.host}:${m.port || 502} antwortet nicht.\n\n🔧 *Neustart:*\n${METER_RESTART_HINT}\n\n— Rosenweg Energie-Watchdog`
     : `✅ *${label} wieder erreichbar*\n${m.name}${where} liefert wieder Daten. Entwarnung.`;
-  try { const gid = await resolveTechnikWhatsappGroupId(); if (gid) await queueWhatsappMessage({ chatId: gid, body, sourceType: 'meter-watchdog', sourceId: m.id }); }
+  try { const gid = await resolveTechnikWhatsappGroupId(); if (gid) await queueWhatsappMessage({ chatId: gid, body, sourceType: 'meter-watchdog' }); }
   catch (e) { console.warn('[Meter-Watchdog] WA:', e.message); }
   try {
     const emails = await meterTechnikEmails();
