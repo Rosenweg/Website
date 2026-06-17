@@ -742,8 +742,15 @@ app.get('/api/energy/solar-live', (req, res) => {
   // melden positiv). allgemein = Gemeinschaftsstrom; wohnungen = Summe aller
   // Wohnungszaehler. Tote Zaehler (offline) zaehlen 0 + online=false.
   const allg = latestReadings.get('r9-allgemein');
+  // Der Boiler (SmartFox) haengt physisch am Allgemeinstrom-Kreis (r9-allgemein).
+  // Er wird separat ausgewiesen -> hier vom Allgemein abziehen, sonst doppelt
+  // gezaehlt (einmal im allgemein, einmal als boiler).
+  const sfFresh = !!(smartfoxSolar && freshTs(smartfoxSolar.ts));
+  const boilerW = sfFresh ? Math.max(0, sf.boiler_w || 0) : 0;
+  const allgRawW = (allg && freshTs(allg.ts)) ? Math.max(0, allg.power_w || 0) : 0;
   const allgemein = {
-    power_w: (allg && freshTs(allg.ts)) ? Math.max(0, allg.power_w || 0) : 0,
+    power_w: Math.max(0, allgRawW - boilerW),
+    power_raw_w: allgRawW,            // ungekuerzt (inkl. Boiler) — fuer Debug/Anzeige
     online: !!(allg && freshTs(allg.ts)),
   };
   const APARTMENT_METERS = ['r9-eg1','r9-eg2','r9-eg3','r9-1og1','r9-1og2','r9-1og3','r9-2og1','r9-2og2','r9-2og3','r9-keller-neziri'];
