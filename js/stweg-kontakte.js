@@ -214,7 +214,11 @@ const STWEGKontakte = (function() {
         function checkAuth() {
             if (typeof AuthentikAuth === 'undefined') return;
             var user = AuthentikAuth.getUser();
-            if (user && AuthentikAuth.isLoggedIn()) {
+            var loggedIn = !!(user && AuthentikAuth.isLoggedIn());
+            // Funktionskacheln + Online-Services nur fuer eingeloggte Mitglieder zeigen
+            var svc = document.getElementById('online-services');
+            if (svc) svc.classList.toggle('hidden', !loggedIn);
+            if (loggedIn) {
                 loadKontakte(stwegNr, user);
             } else {
                 showLoginState(stwegNr);

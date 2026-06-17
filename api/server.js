@@ -6428,34 +6428,6 @@ app.get('/api/stweg/:stweg/overview', async (req, res) => {
   }
 });
 
-// GET /api/stweg-verzeichnis/:stweg — Mitglieder-Verzeichnis der eigenen STWEG.
-// Schweizer StWEG-Recht: Miteigentuemer duerfen das Verzeichnis ihrer Gemeinschaft sehen.
-// Nur authMiddleware + requireStwegAccess (Mitglied DIESER STWEG) — KEINE
-// wohnungsverwaltung-Admin-Berechtigung noetig (im Gegensatz zu /api/wohnungen/:stweg).
-app.get('/api/stweg-verzeichnis/:stweg', authMiddleware, requireStwegAccess, async (req, res) => {
-  try {
-    const stweg = parseStweg(req.params.stweg);
-    const wResult = await pool.query('SELECT * FROM wohnungen WHERE stweg = $1', [stweg]);
-    const kResult = await pool.query(
-      `SELECT k.* FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id WHERE w.stweg = $1 ORDER BY k.rolle, k.sort_order, k.id`,
-      [stweg]
-    );
-    const kontakteMap = {};
-    for (const k of kResult.rows) { (kontakteMap[k.wohnung_id] ||= []).push(k); }
-    const wohnungen = wResult.rows.map(w => {
-      const kontakte = kontakteMap[w.id] || [];
-      if (kontakte.length === 0 && w.eigentuemer_name) kontakte.push({ rolle: 'eigentuemer', name: w.eigentuemer_name, email: w.eigentuemer_email || null, telefon: w.eigentuemer_telefon || null });
-      if (kontakte.length === 0 && w.mieter_name) kontakte.push({ rolle: 'mieter', name: w.mieter_name, email: w.mieter_email || null, telefon: w.mieter_telefon || null });
-      return { ...w, kontakte };
-    });
-    wohnungen.sort((a, b) => wohnungSort(a.bezeichnung, b.bezeichnung));
-    res.json({ stweg, wohnungen });
-  } catch (err) {
-    console.error('stweg-verzeichnis error:', err.message);
-    res.status(500).json({ error: 'Fehler beim Laden des Verzeichnisses' });
-  }
-});
-
 // GET /api/wohnungen/:stweg/stats - Occupancy statistics
 app.get('/api/wohnungen/:stweg/stats', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
   try {
