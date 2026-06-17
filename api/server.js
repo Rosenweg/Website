@@ -13188,6 +13188,61 @@ async function sendBotRecovery(downMin) {
 
 setInterval(checkBotHeartbeat, 60_000); // jede Minute prüfen
 
+// ── Modbus-Zähler-Watchdog ─────────────────────────────────────────────────
+// Meldet unerreichbare Modbus-Zähler an Technik (WhatsApp + Mail) inkl.
+// Neustart-Hinweis. Edge-getriggert (kein Spam) + Entwarnung sobald wieder da.
+// Erreichbarkeit = Frische der readings (Energy-DB): kein Reading seit STALE_MS.
+const meterAlertState = new Map(); // meterId -> true = aktuell als unreachable gemeldet
+const METER_STALE_MS = 12 * 60 * 1000;
+const METER_RESTART_HINT = process.env.ENERGY_RESTART_HINT
+  || 'Zähler bzw. Modbus-Gateway am Standort kurz stromlos machen (Sicherung/Netzstecker ~10s aus, wieder ein). Nach ~2 Min liefert er wieder Daten. (Gerät pingt oft, aber der Modbus-TCP-Dienst auf Port 502 hängt.)';
+
+async function meterTechnikEmails() {
+  const r = await pool.query(
+    `SELECT DISTINCT email FROM users WHERE active = true AND email IS NOT NULL
+       AND (groups_json::jsonb ? 'technik' OR groups_json::jsonb ? 'Präsident')`);
+  return r.rows.map(x => x.email).filter(Boolean);
+}
+
+async function alertMeter(m, unreachable) {
+  const label = m.category === 'grid' ? 'Netzzähler' : 'Zähler';
+  const where = m.location ? ` (${m.location})` : '';
+  const body = unreachable
+    ? `⚠️ *${label} nicht erreichbar*\n${m.name}${where}\nModbus ${m.host}:${m.port || 502} antwortet nicht.\n\n🔧 *Neustart:*\n${METER_RESTART_HINT}\n\n— Rosenweg Energie-Watchdog`
+    : `✅ *${label} wieder erreichbar*\n${m.name}${where} liefert wieder Daten. Entwarnung.`;
+  try { const gid = await resolveTechnikWhatsappGroupId(); if (gid) await queueWhatsappMessage({ chatId: gid, body, sourceType: 'meter-watchdog', sourceId: m.id }); }
+  catch (e) { console.warn('[Meter-Watchdog] WA:', e.message); }
+  try {
+    const emails = await meterTechnikEmails();
+    if (emails.length) await loggedSendMail({
+      from: MAIL_FROM, to: emails.join(', '),
+      subject: `${unreachable ? '⚠️' : '✅'} ${label} ${m.name} ${unreachable ? 'nicht erreichbar' : 'wieder OK'}`,
+      text: body,
+    }, unreachable ? 'meter-unreachable' : 'meter-recovered').catch(() => {});
+  } catch (e) { console.warn('[Meter-Watchdog] Mail:', e.message); }
+  console.log(`[Meter-Watchdog] ${m.id} ${unreachable ? 'UNREACHABLE' : 'recovered'}`);
+}
+
+async function checkMeterReachability() {
+  let rows;
+  try {
+    ({ rows } = await energyPool.query(
+      `SELECT m.id, m.name, m.host, m.port, m.location, m.category,
+              (SELECT MAX(ts) FROM readings r WHERE r.meter_id = m.id) AS last_ts
+         FROM meters m
+        WHERE m.active = true AND m.type = 'modbus'`));
+  } catch (e) { console.warn('[Meter-Watchdog] Query:', e.message); return; }
+  const now = Date.now();
+  for (const m of rows) {
+    const stale = !m.last_ts || (now - new Date(m.last_ts).getTime() > METER_STALE_MS);
+    const wasAlerted = meterAlertState.get(m.id) === true;
+    if (stale && !wasAlerted) { meterAlertState.set(m.id, true); await alertMeter(m, true); }
+    else if (!stale && wasAlerted) { meterAlertState.set(m.id, false); await alertMeter(m, false); }
+  }
+}
+setInterval(checkMeterReachability, 5 * 60_000); // alle 5 Min
+setTimeout(checkMeterReachability, 90_000);       // erster Check nach 90s
+
 // QR-Code-Bridge: Bot pusht den aktuellen QR; Admin holt ihn als PNG.
 // In-Memory (volatile, kein DB-Stoerfaktor; QR rotiert eh alle 60s).
 let waCurrentQrPng = null;
