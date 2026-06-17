@@ -135,9 +135,8 @@ const STWEGKontakte = (function() {
 
                 for (var k = 0; k < w.bewohner.length; k++) {
                     var person = w.bewohner[k];
-                    var rolleLabel = person.rolle === 'eigentuemer' ? 'Eigentümer' : 'Mieter';
-                    var isSelfOwner = person.rolle === 'eigentuemer' && w.bewohner.length === 1;
-                    var displayRolle = isSelfOwner ? 'Eigentümer (Selbstbewohner)' : rolleLabel;
+                    // Rolle 1:1 aus der Objektverwaltung uebernehmen (nicht umbiegen)
+                    var displayRolle = person.rolle ? (person.rolle.charAt(0).toUpperCase() + person.rolle.slice(1)) : 'Kontakt';
                     html += '<div>';
                     html += '<p class="font-semibold text-gray-800">' + esc(person.name) + '</p>';
                     if (person.email) html += '<p class="text-sm text-gray-600">&#x1F4E7; <a href="mailto:' + esc(person.email) + '" class="text-blue-600 hover:underline">' + esc(person.email) + '</a></p>';
