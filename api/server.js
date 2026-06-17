@@ -13419,9 +13419,17 @@ setInterval(checkBotHeartbeat, 60_000); // jede Minute prüfen
 // Meldet unerreichbare Modbus-Zähler an Technik (WhatsApp + Mail) inkl.
 // Neustart-Hinweis. Edge-getriggert (kein Spam) + Entwarnung sobald wieder da.
 // Erreichbarkeit = Frische der readings (Energy-DB): kein Reading seit STALE_MS.
-const meterAlertState = new Map(); // meterId -> lastAlertAt(ms), solange als unerreichbar gemeldet
+// Alert-State in der DB (Tabelle meter_alert_state) statt in-memory — sonst feuert
+// jeder api-Restart/Deploy einen frischen "UNREACHABLE"-Alarm fuer dauerhaft tote Zaehler.
 const METER_STALE_MS = 12 * 60 * 1000;
 const METER_REMIND_MS = 2 * 60 * 60 * 1000; // waehrend offline alle 2h erneut melden
+let meterAlertTableReady = false;
+async function ensureMeterAlertTable() {
+  if (meterAlertTableReady) return;
+  await energyPool.query(`CREATE TABLE IF NOT EXISTS meter_alert_state (
+    meter_id TEXT PRIMARY KEY, last_alert_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+  meterAlertTableReady = true;
+}
 const METER_RESTART_HINT = process.env.ENERGY_RESTART_HINT
   || 'Am smart-me Zähler die Tasten T1 + T2 gleichzeitig ~10 Sekunden gedrückt halten — das erzwingt einen Neustart (smart-me Anleitung). Nach ~2 Min liefert der Zähler wieder Daten. Das Gerät pingt meist, aber der Modbus-TCP-Dienst (Port 502) hängt sich auf.';
 
@@ -13454,21 +13462,31 @@ async function alertMeter(m, unreachable, isReminder) {
 async function checkMeterReachability() {
   let rows;
   try {
+    await ensureMeterAlertTable();
     ({ rows } = await energyPool.query(
       `SELECT m.id, m.name, m.host, m.port, m.location, m.category,
-              (SELECT MAX(ts) FROM readings r WHERE r.meter_id = m.id) AS last_ts
+              (SELECT MAX(ts) FROM readings r WHERE r.meter_id = m.id) AS last_ts,
+              (SELECT s.last_alert_at FROM meter_alert_state s WHERE s.meter_id = m.id) AS last_alert_at
          FROM meters m
         WHERE m.active = true AND m.type = 'modbus'`));
   } catch (e) { console.warn('[Meter-Watchdog] Query:', e.message); return; }
   const now = Date.now();
   for (const m of rows) {
     const stale = !m.last_ts || (now - new Date(m.last_ts).getTime() > METER_STALE_MS);
-    const lastAlert = meterAlertState.get(m.id);
+    // lastAlert aus DB → uebersteht api-Restarts/Deploys (kein Spam mehr).
+    const lastAlert = m.last_alert_at ? new Date(m.last_alert_at).getTime() : undefined;
     if (stale) {
-      if (lastAlert === undefined) { meterAlertState.set(m.id, now); await alertMeter(m, true, false); }            // erste Meldung
-      else if (now - lastAlert >= METER_REMIND_MS) { meterAlertState.set(m.id, now); await alertMeter(m, true, true); } // 2h-Erinnerung
+      if (lastAlert === undefined) {
+        await energyPool.query(`INSERT INTO meter_alert_state(meter_id,last_alert_at) VALUES($1,NOW())
+                                ON CONFLICT(meter_id) DO UPDATE SET last_alert_at=NOW()`, [m.id]);
+        await alertMeter(m, true, false);            // erste Meldung (echter neuer Ausfall)
+      } else if (now - lastAlert >= METER_REMIND_MS) {
+        await energyPool.query(`UPDATE meter_alert_state SET last_alert_at=NOW() WHERE meter_id=$1`, [m.id]);
+        await alertMeter(m, true, true);             // 2h-Erinnerung
+      }
     } else if (lastAlert !== undefined) {
-      meterAlertState.delete(m.id); await alertMeter(m, false, false);                                              // Entwarnung
+      await energyPool.query(`DELETE FROM meter_alert_state WHERE meter_id=$1`, [m.id]);
+      await alertMeter(m, false, false);             // Entwarnung
     }
   }
 }
