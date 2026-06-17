@@ -6738,6 +6738,52 @@ app.get('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // Get single Verteiler
+// GET /api/verteiler/mailcow-gate — Config fuer das rspamd-Pull-Script auf CT 240.
+// MUSS vor '/api/verteiler/:id' stehen, sonst matcht :id="mailcow-gate" (→ 401).
+// Liefert gated Aliase (external_allowed=false) + erlaubte Absender (alle Mailcow-Domains
+// + aktive Verwaltungs-Domains als Domains, Objektverwaltung als Einzel-Adressen).
+app.get('/api/verteiler/mailcow-gate', requireTrackerSecret, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT email_address FROM email_verteiler WHERE active = true AND external_allowed = false`
+    );
+    const gated_aliases = rows
+      .map(r => String(r.email_address || '').toLowerCase())
+      .filter(a => a.endsWith(`@${VERTEILER_DOMAIN}`));
+    let mailcowDomains = [];
+    try {
+      const d = await mailcowApi('GET', '/get/domain/all');
+      mailcowDomains = (Array.isArray(d) ? d : [])
+        .map(x => String(x.domain_name || x.domain || '').toLowerCase()).filter(Boolean);
+    } catch (e) { console.warn('[mailcow-gate] domain/all:', e.message); }
+    const vq = await pool.query(
+      `SELECT DISTINCT LOWER(SPLIT_PART(addr, '@', 2)) AS domain FROM (
+         SELECT v.email AS addr FROM verwaltungen v
+          WHERE v.aktiv = true AND (v.vertrag_von IS NULL OR v.vertrag_von <= CURRENT_DATE)
+            AND (v.vertrag_bis IS NULL OR v.vertrag_bis >= CURRENT_DATE) AND v.email IS NOT NULL AND v.email <> ''
+         UNION ALL
+         SELECT k.email AS addr FROM verwaltungs_kontakte k JOIN verwaltungen v ON v.id = k.verwaltung_id
+          WHERE v.aktiv = true AND (v.vertrag_von IS NULL OR v.vertrag_von <= CURRENT_DATE)
+            AND (v.vertrag_bis IS NULL OR v.vertrag_bis >= CURRENT_DATE) AND k.email IS NOT NULL AND k.email <> ''
+       ) s WHERE addr LIKE '%@%'`
+    );
+    const verwaltungDomains = vq.rows.map(r => r.domain).filter(Boolean);
+    const allowed_domains = [...new Set([...mailcowDomains, ...verwaltungDomains])].sort();
+    const eq = await pool.query(
+      `SELECT DISTINCT LOWER(email) AS email FROM (
+         SELECT email FROM personen WHERE email IS NOT NULL AND email <> ''
+         UNION ALL
+         SELECT email FROM wohnungen_kontakte WHERE email IS NOT NULL AND email <> ''
+       ) s WHERE email LIKE '%@%'`
+    );
+    const allowed_emails = eq.rows.map(r => r.email).filter(Boolean).sort();
+    res.json({ gated_aliases: gated_aliases.sort(), allowed_domains, allowed_emails, generated_at: new Date().toISOString() });
+  } catch (err) {
+    console.error('[mailcow-gate]', err.message);
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
 app.get('/api/verteiler/:id', authMiddleware, adminOnly, async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM email_verteiler WHERE id = $1', [req.params.id]);
@@ -6873,55 +6919,6 @@ app.put('/api/verteiler/:id', authMiddleware, adminOnly, async (req, res) => {
     res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: 'Fehler beim Aktualisieren' });
-  }
-});
-
-// GET /api/verteiler/mailcow-gate — Config fuer das rspamd-Pull-Script auf CT 240.
-// Liefert die "gated" Verteiler-Aliase (external_allowed=false) + erlaubte Absender-Domains
-// (alle Mailcow-Domains + aktive Verwaltungs-Domains). Das Script auf Mailcow baut daraus
-// eine rspamd-Regel: an gated Aliase nur von erlaubten Domains, sonst Reject. Secret-geschuetzt.
-app.get('/api/verteiler/mailcow-gate', requireTrackerSecret, async (req, res) => {
-  try {
-    const { rows } = await pool.query(
-      `SELECT email_address FROM email_verteiler WHERE active = true AND external_allowed = false`
-    );
-    const gated_aliases = rows
-      .map(r => String(r.email_address || '').toLowerCase())
-      .filter(a => a.endsWith(`@${VERTEILER_DOMAIN}`));
-    // Alle Mailcow-gehosteten Domains
-    let mailcowDomains = [];
-    try {
-      const d = await mailcowApi('GET', '/get/domain/all');
-      mailcowDomains = (Array.isArray(d) ? d : [])
-        .map(x => String(x.domain_name || x.domain || '').toLowerCase()).filter(Boolean);
-    } catch (e) { console.warn('[mailcow-gate] domain/all:', e.message); }
-    // + aktive Verwaltungs-Domains (Vertrag laufend)
-    const vq = await pool.query(
-      `SELECT DISTINCT LOWER(SPLIT_PART(addr, '@', 2)) AS domain FROM (
-         SELECT v.email AS addr FROM verwaltungen v
-          WHERE v.aktiv = true AND (v.vertrag_von IS NULL OR v.vertrag_von <= CURRENT_DATE)
-            AND (v.vertrag_bis IS NULL OR v.vertrag_bis >= CURRENT_DATE) AND v.email IS NOT NULL AND v.email <> ''
-         UNION ALL
-         SELECT k.email AS addr FROM verwaltungs_kontakte k JOIN verwaltungen v ON v.id = k.verwaltung_id
-          WHERE v.aktiv = true AND (v.vertrag_von IS NULL OR v.vertrag_von <= CURRENT_DATE)
-            AND (v.vertrag_bis IS NULL OR v.vertrag_bis >= CURRENT_DATE) AND k.email IS NOT NULL AND k.email <> ''
-       ) s WHERE addr LIKE '%@%'`
-    );
-    const verwaltungDomains = vq.rows.map(r => r.domain).filter(Boolean);
-    const allowed_domains = [...new Set([...mailcowDomains, ...verwaltungDomains])].sort();
-    // Einzel-Adressen aus der Objektverwaltung (personen + wohnungen_kontakte) duerfen auch senden
-    const eq = await pool.query(
-      `SELECT DISTINCT LOWER(email) AS email FROM (
-         SELECT email FROM personen WHERE email IS NOT NULL AND email <> ''
-         UNION ALL
-         SELECT email FROM wohnungen_kontakte WHERE email IS NOT NULL AND email <> ''
-       ) s WHERE email LIKE '%@%'`
-    );
-    const allowed_emails = eq.rows.map(r => r.email).filter(Boolean).sort();
-    res.json({ gated_aliases: gated_aliases.sort(), allowed_domains, allowed_emails, generated_at: new Date().toISOString() });
-  } catch (err) {
-    console.error('[mailcow-gate]', err.message);
-    res.status(500).json({ error: 'Fehler' });
   }
 });
 
