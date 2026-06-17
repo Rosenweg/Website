@@ -62,13 +62,13 @@ ROSENWEG_FROM_OK_DOMAIN {
   type = "from";
   filter = "email:domain";
   map = "/etc/rspamd/custom/rosenweg_allowed_domains.map";
-  symbol = "ROSENWEG_FROM_OK";
+  symbol = "ROSENWEG_FROM_OK_DOMAIN";
   score = 0.0;
 }
 ROSENWEG_FROM_OK_EMAIL {
   type = "from";
   map = "/etc/rspamd/custom/rosenweg_allowed_emails.map";
-  symbol = "ROSENWEG_FROM_OK";
+  symbol = "ROSENWEG_FROM_OK_EMAIL";
   score = 0.0;
 }
 %s
@@ -76,7 +76,7 @@ ROSENWEG_FROM_OK_EMAIL {
 
 COMPOSITE_BLOCK = """%s
 ROSENWEG_VERTEILER_GATE_REJECT {
-  expression = "ROSENWEG_GATED_RCPT & !ROSENWEG_FROM_OK";
+  expression = "ROSENWEG_GATED_RCPT & !ROSENWEG_FROM_OK_DOMAIN & !ROSENWEG_FROM_OK_EMAIL";
   score = 9999.0;
   policy = "leave";
 }
@@ -127,8 +127,12 @@ def configtest():
 
 
 def reload_rspamd():
-    subprocess.run(["docker", "exec", RSPAMD_CONTAINER, "rspamadm", "control", "reload"],
-                   cwd=MAILCOW_DIR, capture_output=True, text=True)
+    # Neue multimap-Regeln/Composites werden von `rspamadm control reload` NICHT
+    # registriert (nur Map-Inhalte). Beim Aendern der Config-Bloecke daher ein
+    # echter Container-Restart. Map-Inhalts-Aenderungen brauchen das nicht
+    # (rspamd ueberwacht die Map-Dateien selbst).
+    subprocess.run(["docker", "restart", RSPAMD_CONTAINER],
+                   cwd=MAILCOW_DIR, capture_output=True, text=True, timeout=120)
 
 
 def main():
