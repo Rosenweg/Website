@@ -3104,7 +3104,7 @@ const IMAP_POLL_INTERVAL = parseInt(process.env.IMAP_POLL_INTERVAL || '60') * 10
 // Welche Mailboxen werden gepolled — INBOX + Spam wegen Cloudflare Spam-Heuristik
 // die manche Mails (z.B. von externen Mailservern mit komischen DKIM) in den
 // Spam-Folder forwardet. Sender-Auth-Check unten verhindert echte Spam-Forwards.
-const IMAP_MAILBOXES = (process.env.IMAP_MAILBOXES || 'INBOX,[Gmail]/Spam').split(',').map(s => s.trim()).filter(Boolean);
+const IMAP_MAILBOXES = (process.env.IMAP_MAILBOXES || 'INBOX,Junk').split(',').map(s => s.trim()).filter(Boolean);
 const VERTEILER_DOMAIN = process.env.VERTEILER_DOMAIN || 'rosenweg4303.ch';
 
 async function pollGmailForVerteiler() {
@@ -3209,20 +3209,24 @@ async function pollGmailForVerteiler() {
           let verteilerAddress = null;
           let alsoArchive = false;
 
-          // Collect ALL @rosenweg4303.ch addresses from To/Cc/Bcc (primary source — what the sender really wrote)
           const allAddrs = [];
+          // PRIMAER (Mailcow/Postfix): X-Original-To/Delivered-To = der tatsaechliche
+          // Envelope-Empfaenger nach Alias-Expansion. Deckt BCC-only-Mail ab und
+          // bewahrt den +tag fuer Drucker. Die Ingestion-Mailbox inbox@ ist nie ein
+          // Verteiler-/Drucker-Ziel und wird ausgeschlossen.
+          // (Ersetzt die alte Gmail/Cloudflare-Delivered-To-+tag-Logik.)
+          const recvRegex = /^(?:X-Original-To|Delivered-To):\s*([^\r\n]+)/gim;
+          let rm;
+          while ((rm = recvRegex.exec(headers)) !== null) {
+            const a = (rm[1].match(/[a-z0-9._+-]+@rosenweg4303\.ch/i) || [])[0];
+            if (a && a.toLowerCase() !== `inbox@${VERTEILER_DOMAIN}`) allAddrs.push(a.toLowerCase());
+          }
+          // Ergaenzend: was der Sender sichtbar geschrieben hat (To/Cc/Bcc).
           const addrRegex = /^(?:To|Cc|Bcc):\s*([^\r\n](?:[^\r\n]|\r?\n[ \t])*)/gim;
           let am;
           while ((am = addrRegex.exec(headers)) !== null) {
             const lineAddrs = am[1].match(/[a-z0-9._+-]+@rosenweg4303\.ch/gi) || [];
-            for (const a of lineAddrs) allAddrs.push(a.toLowerCase());
-          }
-
-          // Fallback: Delivered-To plus-tag (used by Cloudflare/Gmail routing)
-          const plusMatch = headers.match(/^Delivered-To:\s*[^+\r\n]+\+([^@\r\n]+)@/im);
-          if (allAddrs.length === 0 && plusMatch) {
-            const base = plusMatch[1].toLowerCase().split('+')[0];
-            allAddrs.push(`${base}@${VERTEILER_DOMAIN}`);
+            for (const a of lineAddrs) if (a.toLowerCase() !== `inbox@${VERTEILER_DOMAIN}`) allAddrs.push(a.toLowerCase());
           }
 
           // Detect archiv@ as side-effect (separate from main delivery)
@@ -6669,6 +6673,27 @@ app.get('/api/verteiler/:id', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // Create Verteiler
+// Mailcow-Alias fuer eine Verteiler-Adresse pflegen (-> inbox@). Seit dem Umzug
+// von Gmail/CF-Routing auf Mailcow brauchen Verteiler-Adressen einen expliziten
+// Alias (kein Catch-all). Best-effort: Fehler duerfen das CRUD nie blocken.
+async function syncMailcowAlias(action, address) {
+  const base = process.env.MAILCOW_API_BASE, key = process.env.MAILCOW_API_KEY;
+  if (!base || !key) return;
+  const addr = String(address || '').trim().toLowerCase();
+  if (!addr.endsWith(`@${VERTEILER_DOMAIN}`)) return;
+  const H = { 'X-API-Key': key, 'Content-Type': 'application/json' };
+  try {
+    if (action === 'add') {
+      await fetch(`${base}/api/v1/add/alias`, { method: 'POST', headers: H,
+        body: JSON.stringify({ address: addr, goto: `inbox@${VERTEILER_DOMAIN}`, active: '1' }) });
+    } else if (action === 'delete') {
+      const all = await (await fetch(`${base}/api/v1/get/alias/all`, { headers: H })).json();
+      const a = (Array.isArray(all) ? all : []).find(x => String(x.address || '').toLowerCase() === addr);
+      if (a) await fetch(`${base}/api/v1/delete/alias`, { method: 'POST', headers: H, body: JSON.stringify([a.id]) });
+    }
+  } catch (e) { console.warn('[Mailcow-Alias]', action, addr, e.message); }
+}
+
 app.post('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
   const { stweg, name, email_address, members, reply_to, subject_prefix, group_name, group_names, allowed_sender_groups } = req.body;
   if (!name || !email_address) return res.status(400).json({ error: 'Name und Email-Adresse erforderlich' });
@@ -6680,6 +6705,7 @@ app.post('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
       [stweg || 0, name, email_address, JSON.stringify(members || []), reply_to || 'sender', subject_prefix || null, groups[0] || null, JSON.stringify(groups), JSON.stringify(allowedSenders)]
     );
+    await syncMailcowAlias('add', email_address);
     res.json(result.rows[0]);
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Email-Adresse existiert bereits' });
@@ -6704,6 +6730,7 @@ app.put('/api/verteiler/:id', authMiddleware, adminOnly, async (req, res) => {
        req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    await syncMailcowAlias('add', email_address);
     res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: 'Fehler beim Aktualisieren' });
@@ -6758,7 +6785,9 @@ app.post('/api/verteiler/:id/test-send', authMiddleware, adminOnly, async (req, 
 // Delete Verteiler
 app.delete('/api/verteiler/:id', authMiddleware, adminOnly, async (req, res) => {
   try {
+    const { rows: [v] } = await pool.query('SELECT email_address FROM email_verteiler WHERE id = $1', [req.params.id]);
     await pool.query('DELETE FROM email_verteiler WHERE id = $1', [req.params.id]);
+    if (v?.email_address) await syncMailcowAlias('delete', v.email_address);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Fehler' });
