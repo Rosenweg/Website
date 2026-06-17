@@ -3111,6 +3111,18 @@ const IMAP_POLL_INTERVAL = parseInt(process.env.IMAP_POLL_INTERVAL || '60') * 10
 // die manche Mails (z.B. von externen Mailservern mit komischen DKIM) in den
 // Spam-Folder forwardet. Sender-Auth-Check unten verhindert echte Spam-Forwards.
 const IMAP_MAILBOXES = (process.env.IMAP_MAILBOXES || 'INBOX,Junk').split(',').map(s => s.trim()).filter(Boolean);
+
+// Dediziertes archiv@-Postfach (eigener IMAP-Login). Der archiv@-Poller speist
+// daraus die email_archive-DB (Suche/Anhaenge/Vier-Augen-Loeschen bleiben).
+const ARCHIV_IMAP_USER = process.env.ARCHIV_IMAP_USER || `archiv@${VERTEILER_DOMAIN}`;
+const ARCHIV_IMAP_PASS = process.env.ARCHIV_IMAP_PASS || '';
+// Dediziertes dmarc@-Postfach (eigener IMAP-Login). /api/dmarc/reports liest daraus.
+const DMARC_IMAP_USER = process.env.DMARC_IMAP_USER || `dmarc@${VERTEILER_DOMAIN}`;
+const DMARC_IMAP_PASS = process.env.DMARC_IMAP_PASS || '';
+// Native Mailcow-Fanout: Verteiler-Aliase haben goto = aufgeloeste Mitglieder + archiv@.
+// Mailcow verteilt selbst; der inbox@-Poller versendet NICHT mehr nach (Doppelversand-Schutz).
+const VERTEILER_NATIVE_FANOUT = process.env.VERTEILER_NATIVE_FANOUT !== '0';
+const VERTEILER_ARCHIVE_ADDR = (process.env.VERTEILER_ARCHIVE_ADDR || `archiv@${VERTEILER_DOMAIN}`).toLowerCase();
 const VERTEILER_DOMAIN = process.env.VERTEILER_DOMAIN || 'rosenweg4303.ch';
 
 async function pollGmailForVerteiler() {
@@ -3750,13 +3762,22 @@ async function pollGmailForVerteiler() {
 
           console.log(`[IMAP] Processing: ${verteilerAddress} (UID ${uid})`);
           let processed = false;
-          try {
-            const result = await processInboundEmail(source, verteilerAddress, messageId);
-            console.log(`[IMAP] Result: ${result.action} (${result.recipients || 0} recipients)`);
+          if (VERTEILER_NATIVE_FANOUT) {
+            // Mailcow faechert Verteiler nativ auf (Alias-goto = Mitglieder + archiv@).
+            // Verteiler-Mail landet normalerweise gar nicht mehr in inbox@. Defensive:
+            // falls doch (z.B. inbox@ explizit mit-adressiert), NICHT erneut versenden —
+            // sonst Doppelversand. Nur ins Verteiler-Folder ablegen.
+            console.log(`[IMAP] Native-Fanout aktiv — kein Re-Send für ${verteilerAddress} (UID ${uid})`);
             processed = true;
-          } catch (procErr) {
-            console.error(`[IMAP] Processing failed for UID ${uid} (${verteilerAddress}):`, procErr.message);
-            // Don't move, don't mark as read — will retry next poll
+          } else {
+            try {
+              const result = await processInboundEmail(source, verteilerAddress, messageId);
+              console.log(`[IMAP] Result: ${result.action} (${result.recipients || 0} recipients)`);
+              processed = true;
+            } catch (procErr) {
+              console.error(`[IMAP] Processing failed for UID ${uid} (${verteilerAddress}):`, procErr.message);
+              // Don't move, don't mark as read — will retry next poll
+            }
           }
 
           // Only move AFTER successful processing
@@ -3885,6 +3906,68 @@ function startImapPoll() {
   activeIntervals.push(setInterval(() => guardedPollGmail(), IMAP_POLL_INTERVAL));
   // First poll after 10s (wait for DNS/network to be ready)
   setTimeout(() => guardedPollGmail(), 10000);
+}
+
+// ─── archiv@-Postfach-Poller → email_archive-DB ───────────────────────
+// archiv@ ist ein echtes Mailcow-Postfach und steht in jedem Verteiler-goto.
+// Jede Listen-Mail landet hier; dieser Poller speist daraus die bestehende
+// email_archive-DB-Ansicht (Suche/Anhaenge/Vier-Augen-Loeschen bleiben erhalten).
+let archivPolling = false;
+async function pollArchivMailbox() {
+  if (!ARCHIV_IMAP_PASS || archivPolling) return;
+  archivPolling = true;
+  const { ImapFlow } = require('imapflow');
+  const client = new ImapFlow({
+    host: IMAP_HOST, port: IMAP_PORT, secure: true,
+    auth: { user: ARCHIV_IMAP_USER, pass: ARCHIV_IMAP_PASS }, logger: false,
+    socketTimeout: 30000, greetingTimeout: 15000, connectionTimeout: 30000,
+    tls: { rejectUnauthorized: false },
+  });
+  try {
+    await client.connect();
+    const lock = await client.getMailboxLock('INBOX');
+    try {
+      const mb = client.mailbox;
+      const st = await pool.query("SELECT last_uid::text AS last_uid, uid_validity::text AS uid_validity FROM imap_state WHERE mailbox = 'ARCHIV'");
+      let lastUid;
+      if (st.rows.length === 0) {
+        // Erster Lauf: Watermark auf aktuellen Stand setzen (kein Nacharbeiten Altbestand).
+        lastUid = Math.max(0, (mb.uidNext || 1) - 1);
+        await pool.query("INSERT INTO imap_state (mailbox, uid_validity, last_uid) VALUES ('ARCHIV', $1, $2)", [String(mb.uidValidity), String(lastUid)]);
+        console.log(`[ARCHIV] Watermark initialisiert bei UID ${lastUid}`);
+        return;
+      }
+      if (st.rows[0].uid_validity !== String(mb.uidValidity)) {
+        lastUid = 0;
+        await pool.query("UPDATE imap_state SET uid_validity = $1, last_uid = '0' WHERE mailbox = 'ARCHIV'", [String(mb.uidValidity)]);
+        console.warn(`[ARCHIV] UIDVALIDITY geaendert → Watermark reset`);
+      } else {
+        lastUid = parseInt(st.rows[0].last_uid, 10) || 0;
+      }
+      let maxUid = lastUid, archived = 0;
+      for await (const msg of client.fetch(`${lastUid + 1}:*`, { uid: true, source: true, envelope: true }, { uid: true })) {
+        if (msg.uid <= lastUid) continue;
+        const messageId = msg.envelope?.messageId || (`archiv-${mb.uidValidity}-${msg.uid}`);
+        try {
+          const dup = await pool.query('SELECT id FROM email_archive WHERE message_id = $1', [messageId]);
+          if (dup.rows.length === 0 && msg.source) {
+            await archiveEmail(msg.source, messageId);
+            archived++;
+          }
+        } catch (e) { console.error(`[ARCHIV] Archivieren UID ${msg.uid} fehlgeschlagen:`, e.message); }
+        if (msg.uid > maxUid) maxUid = msg.uid;
+      }
+      if (maxUid > lastUid) {
+        await pool.query("UPDATE imap_state SET last_uid = $1, updated_at = NOW() WHERE mailbox = 'ARCHIV'", [String(maxUid)]);
+        if (archived) console.log(`[ARCHIV] ${archived} Mail(s) archiviert (Watermark → UID ${maxUid})`);
+      }
+    } finally { lock.release(); }
+  } catch (e) { console.error('[ARCHIV] Poll-Fehler:', e.message); }
+  finally { try { await client.logout(); } catch {} archivPolling = false; }
+}
+if (ARCHIV_IMAP_PASS) {
+  setTimeout(() => pollArchivMailbox(), 25000);
+  setInterval(() => pollArchivMailbox(), 60000);
 }
 
 // ─── STWEG Kontakte ─────────────────────────────────────────────────
@@ -6700,6 +6783,56 @@ async function syncMailcowAlias(action, address) {
   } catch (e) { console.warn('[Mailcow-Alias]', action, addr, e.message); }
 }
 
+// Schreibt den Mailcow-Alias eines Verteilers neu: goto = aufgeloeste Mitglieder + archiv@.
+// Damit faechert Mailcow nativ an die Empfaenger auf (kein IMAP-Poll-Nachversand), und
+// jede Listen-Mail bekommt automatisch eine Archiv-Kopie. Mitgliedschaft kommt live aus
+// Authentik/Verwaltungs-DB → deshalb periodisch + bei jeder Verteiler-Aenderung neu setzen.
+async function syncVerteilerAlias(list) {
+  const base = process.env.MAILCOW_API_BASE, key = process.env.MAILCOW_API_KEY;
+  if (!base || !key) return { ok: false, reason: 'mailcow not configured' };
+  if (!list || !list.email_address) return { ok: false, reason: 'no address' };
+  const addr = String(list.email_address).trim().toLowerCase();
+  if (!addr.endsWith(`@${VERTEILER_DOMAIN}`)) return { ok: false, reason: 'foreign domain' };
+  if (addr === VERTEILER_ARCHIVE_ADDR) return { ok: false, reason: 'archive addr itself' };
+  try {
+    const recipients = list.active === false ? [] : await resolveVerteilerRecipients(list);
+    const gotoSet = new Set(recipients.map(r => String(r).toLowerCase()).filter(Boolean));
+    gotoSet.add(VERTEILER_ARCHIVE_ADDR); // Archiv-Kopie immer mit drin
+    const goto = [...gotoSet].join(',');
+    const all = await mailcowApi('GET', '/get/alias/all');
+    const existing = (Array.isArray(all) ? all : []).find(a => String(a.address || '').toLowerCase() === addr);
+    const activeStr = list.active === false ? '0' : '1';
+    if (existing) {
+      await mailcowApi('POST', '/edit/alias', { items: [String(existing.id)], attr: { goto, active: activeStr } });
+    } else {
+      await mailcowApi('POST', '/add/alias', { address: addr, goto, active: activeStr });
+    }
+    return { ok: true, count: recipients.length, goto_targets: gotoSet.size };
+  } catch (e) {
+    console.warn('[Verteiler-Sync]', addr, e.message);
+    return { ok: false, reason: e.message };
+  }
+}
+
+async function syncAllVerteilerAliases() {
+  if (!process.env.MAILCOW_API_BASE || !process.env.MAILCOW_API_KEY || !VERTEILER_NATIVE_FANOUT) return;
+  try {
+    const { rows } = await pool.query('SELECT * FROM email_verteiler WHERE active = true');
+    let ok = 0, fail = 0, members = 0;
+    for (const list of rows) {
+      const r = await syncVerteilerAlias(list);
+      if (r.ok) { ok++; members += r.count || 0; } else if (r.reason !== 'archive addr itself') { fail++; }
+    }
+    console.log(`[Verteiler-Sync] ${ok} Aliase gesetzt (goto=Mitglieder+archiv@, Σ${members} Empf.)${fail ? `, ${fail} Fehler` : ''}`);
+  } catch (e) { console.warn('[Verteiler-Sync] Gesamtlauf:', e.message); }
+}
+
+// Periodischer Sync (Authentik-Mitgliedschaft aendert sich extern) + initialer Lauf nach Start.
+if (process.env.MAILCOW_API_BASE && process.env.MAILCOW_API_KEY && VERTEILER_NATIVE_FANOUT) {
+  setTimeout(() => syncAllVerteilerAliases(), 20000);
+  setInterval(() => syncAllVerteilerAliases(), 10 * 60 * 1000);
+}
+
 app.post('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
   const { stweg, name, email_address, members, reply_to, subject_prefix, group_name, group_names, allowed_sender_groups } = req.body;
   if (!name || !email_address) return res.status(400).json({ error: 'Name und Email-Adresse erforderlich' });
@@ -6711,7 +6844,7 @@ app.post('/api/verteiler', authMiddleware, adminOnly, async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
       [stweg || 0, name, email_address, JSON.stringify(members || []), reply_to || 'sender', subject_prefix || null, groups[0] || null, JSON.stringify(groups), JSON.stringify(allowedSenders)]
     );
-    await syncMailcowAlias('add', email_address);
+    syncVerteilerAlias(result.rows[0]).catch(() => {});
     res.json(result.rows[0]);
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Email-Adresse existiert bereits' });
@@ -6736,7 +6869,7 @@ app.put('/api/verteiler/:id', authMiddleware, adminOnly, async (req, res) => {
        req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
-    await syncMailcowAlias('add', email_address);
+    syncVerteilerAlias(result.rows[0]).catch(() => {});
     res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: 'Fehler beim Aktualisieren' });
@@ -6813,6 +6946,7 @@ app.post('/api/verteiler/:id/members', authMiddleware, adminOnly, async (req, re
       [JSON.stringify(member), req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    syncVerteilerAlias(result.rows[0]).catch(() => {});
     res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: 'Fehler' });
@@ -6829,6 +6963,7 @@ app.delete('/api/verteiler/:id/members/:email', authMiddleware, adminOnly, async
       'UPDATE email_verteiler SET members = $1 WHERE id = $2 RETURNING *',
       [JSON.stringify(filtered), req.params.id]
     );
+    syncVerteilerAlias(result.rows[0]).catch(() => {});
     res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: 'Fehler' });
@@ -6909,21 +7044,31 @@ app.get('/api/email/log/:id/status', authMiddleware, adminOnly, async (req, res)
 
 // DMARC Reports - parse from Gmail inbox
 app.get('/api/dmarc/reports', authMiddleware, adminOnly, async (req, res) => {
-  if (!IMAP_USER || !IMAP_PASS) return res.status(400).json({ error: 'IMAP nicht konfiguriert' });
+  // Dediziertes dmarc@-Postfach bevorzugt; sonst Fallback auf inbox@/DMARC-Folder (Alt).
+  const useDedicated = !!DMARC_IMAP_PASS;
+  const dmarcUser = useDedicated ? DMARC_IMAP_USER : IMAP_USER;
+  const dmarcPass = useDedicated ? DMARC_IMAP_PASS : IMAP_PASS;
+  if (!dmarcUser || !dmarcPass) return res.status(400).json({ error: 'IMAP nicht konfiguriert' });
   try {
     const { ImapFlow } = require('imapflow');
     const zlib = require('zlib');
     const client = new ImapFlow({
       host: IMAP_HOST, port: IMAP_PORT, secure: true,
-      auth: { user: IMAP_USER, pass: IMAP_PASS }, logger: false,
+      auth: { user: dmarcUser, pass: dmarcPass }, logger: false,
       socketTimeout: 30000, greetingTimeout: 15000, connectionTimeout: 30000,
+      tls: { rejectUnauthorized: false },
     });
     await client.connect();
 
-    // Try DMARC folder first (IMAP poller moves dmarc@ mails here), fallback to INBOX
+    // Dediziertes dmarc@-Postfach: alle Mails in INBOX sind DMARC-Reports.
+    // Fallback (Alt): DMARC-Folder im inbox@-Account, sonst INBOX.
     let folderOpened = false;
-    try { await client.mailboxOpen('DMARC'); folderOpened = true; } catch {}
-    if (!folderOpened) await client.mailboxOpen('INBOX');
+    if (useDedicated) {
+      await client.mailboxOpen('INBOX'); folderOpened = true;
+    } else {
+      try { await client.mailboxOpen('DMARC'); folderOpened = true; } catch {}
+      if (!folderOpened) await client.mailboxOpen('INBOX');
+    }
 
     // Find DMARC report emails
     const uids = [];
