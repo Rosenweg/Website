@@ -13221,8 +13221,9 @@ setInterval(checkBotHeartbeat, 60_000); // jede Minute prüfen
 // Meldet unerreichbare Modbus-Zähler an Technik (WhatsApp + Mail) inkl.
 // Neustart-Hinweis. Edge-getriggert (kein Spam) + Entwarnung sobald wieder da.
 // Erreichbarkeit = Frische der readings (Energy-DB): kein Reading seit STALE_MS.
-const meterAlertState = new Map(); // meterId -> true = aktuell als unreachable gemeldet
+const meterAlertState = new Map(); // meterId -> lastAlertAt(ms), solange als unerreichbar gemeldet
 const METER_STALE_MS = 12 * 60 * 1000;
+const METER_REMIND_MS = 2 * 60 * 60 * 1000; // waehrend offline alle 2h erneut melden
 const METER_RESTART_HINT = process.env.ENERGY_RESTART_HINT
   || 'Am smart-me Zähler die Tasten T1 + T2 gleichzeitig ~10 Sekunden gedrückt halten — das erzwingt einen Neustart (smart-me Anleitung). Nach ~2 Min liefert der Zähler wieder Daten. Das Gerät pingt meist, aber der Modbus-TCP-Dienst (Port 502) hängt sich auf.';
 
@@ -13233,11 +13234,11 @@ async function meterTechnikEmails() {
   return r.rows.map(x => x.email).filter(Boolean);
 }
 
-async function alertMeter(m, unreachable) {
+async function alertMeter(m, unreachable, isReminder) {
   const label = m.category === 'grid' ? 'Netzzähler' : 'Zähler';
   const where = m.location ? ` (${m.location})` : '';
   const body = unreachable
-    ? `⚠️ *${label} nicht erreichbar*\n${m.id}${where}\nModbus ${m.host}:${m.port || 502} antwortet nicht.\n\n🔧 *Neustart:*\n${METER_RESTART_HINT}\n\n— Rosenweg Energie-Watchdog`
+    ? `⚠️ *${label} ${isReminder ? 'weiterhin ' : ''}nicht erreichbar*\n${m.id}${where}\nModbus ${m.host}:${m.port || 502} antwortet nicht.\n\n🔧 *Neustart:*\n${METER_RESTART_HINT}\n\n— Rosenweg Energie-Watchdog`
     : `✅ *${label} wieder erreichbar*\n${m.id}${where} liefert wieder Daten. Entwarnung.`;
   try { const gid = await resolveTechnikWhatsappGroupId(); if (gid) await queueWhatsappMessage({ chatId: gid, body, sourceType: 'meter-watchdog' }); }
   catch (e) { console.warn('[Meter-Watchdog] WA:', e.message); }
@@ -13249,7 +13250,7 @@ async function alertMeter(m, unreachable) {
       text: body,
     }, unreachable ? 'meter-unreachable' : 'meter-recovered').catch(() => {});
   } catch (e) { console.warn('[Meter-Watchdog] Mail:', e.message); }
-  console.log(`[Meter-Watchdog] ${m.id} ${unreachable ? 'UNREACHABLE' : 'recovered'}`);
+  console.log(`[Meter-Watchdog] ${m.id} ${unreachable ? (isReminder ? 'still UNREACHABLE (2h reminder)' : 'UNREACHABLE') : 'recovered'}`);
 }
 
 async function checkMeterReachability() {
@@ -13264,9 +13265,13 @@ async function checkMeterReachability() {
   const now = Date.now();
   for (const m of rows) {
     const stale = !m.last_ts || (now - new Date(m.last_ts).getTime() > METER_STALE_MS);
-    const wasAlerted = meterAlertState.get(m.id) === true;
-    if (stale && !wasAlerted) { meterAlertState.set(m.id, true); await alertMeter(m, true); }
-    else if (!stale && wasAlerted) { meterAlertState.set(m.id, false); await alertMeter(m, false); }
+    const lastAlert = meterAlertState.get(m.id);
+    if (stale) {
+      if (lastAlert === undefined) { meterAlertState.set(m.id, now); await alertMeter(m, true, false); }            // erste Meldung
+      else if (now - lastAlert >= METER_REMIND_MS) { meterAlertState.set(m.id, now); await alertMeter(m, true, true); } // 2h-Erinnerung
+    } else if (lastAlert !== undefined) {
+      meterAlertState.delete(m.id); await alertMeter(m, false, false);                                              // Entwarnung
+    }
   }
 }
 setInterval(checkMeterReachability, 5 * 60_000); // alle 5 Min
