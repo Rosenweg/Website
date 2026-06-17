@@ -1,0 +1,10 @@
+[Unit]
+Description=Rosenweg Verteiler-Sender-Gate alle 5 Min + nach Boot
+
+[Timer]
+OnBootSec=120s
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,9 @@
+[Unit]
+Description=Rosenweg Verteiler-Sender-Gate -> Mailcow rspamd
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/mailcow-verteiler-gate.py
+Nice=10
