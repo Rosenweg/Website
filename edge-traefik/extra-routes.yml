@@ -1,0 +1,62 @@
+# Direct-WAN Routes — HTTPS backend zum Swarm-Traefik (vermeidet redirect-loop)
+http:
+  routers:
+    rw4303-apex-www:
+      entryPoints: [websecure]
+      rule: Host(`www.rosenweg4303.ch`) || Host(`rosenweg4303.ch`)
+      service: swarm-https-svc
+      tls: { certResolver: cf }
+    rw9-apex-www:
+      entryPoints: [websecure]
+      rule: Host(`www.rosenweg9.ch`) || Host(`rosenweg9.ch`)
+      service: swarm-https-svc
+      tls: { certResolver: cf }
+    nextcloud-rw4303:
+      entryPoints: [websecure]
+      rule: Host(`nextcloud.rosenweg4303.ch`)
+      service: swarm-https-svc
+      tls: { certResolver: cf }
+    auth-rw4303:
+      entryPoints: [websecure]
+      rule: Host(`auth.rosenweg4303.ch`)
+      service: authentik-hosts-svc
+      tls: { certResolver: cf }
+    # authentik direkt zu authentik_server:9000 (kein TLS am Backend).
+    # authentik_server publisht 9000 in PublishMode=host auf allen 3 Docker-Hosts.
+    # Healthchecks markieren tote Hosts (z.B. ohne lokale Replica) automatisch unhealthy.
+    authentik-rw4303:
+      entryPoints: [websecure]
+      rule: Host(`authentik.rosenweg4303.ch`)
+      service: authentik-hosts-svc
+      tls: { certResolver: cf }
+    # files.rosenweg4303.ch -> kein Router. War vorher CF-Tunnel ohne Swarm-Router.
+  services:
+    swarm-https-svc:
+      loadBalancer:
+        passHostHeader: true
+        serversTransport: insecure-internal
+        servers:
+          - url: https://100.64.2.27
+    authentik-hosts-svc:
+      loadBalancer:
+        passHostHeader: true
+        healthCheck:
+          path: /-/health/live/
+          interval: 10s
+          timeout: 3s
+        servers:
+          - url: http://100.64.2.37:9000
+tcp:
+  routers:
+    # personen.rosenweg4303.ch: TCP-HostSNI-Passthrough zu Mailcow Nginx auf 100.64.2.33:443.
+    # Mailcow hat eigenen LE-Cert mit personen.rosenweg4303.ch im SAN.
+    personen-rw4303-passthrough:
+      entryPoints: [websecure]
+      rule: HostSNI(`personen.rosenweg4303.ch`)
+      service: personen-rw4303-svc
+      tls: { passthrough: true }
+  services:
+    personen-rw4303-svc:
+      loadBalancer:
+        servers:
+          - address: 100.64.2.33:443
