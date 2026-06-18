@@ -16329,6 +16329,15 @@ async function sendMaintenanceWhatsApp(maint, kind) {
 //    abgefangen: ihre Mail landet als 'pending' in verwaltung_mail_queue und
 //    geht erst nach Freigabe durch Technik/Präsident per BCC raus.
 async function sendMaintenanceMail(maint, kind /* 'pre'|'start'|'end' */) {
+  // Auto-erkannte UniFi-Geraete-/Controller-Updates NICHT per Mail versenden —
+  // das spammt technik@ zu (pre/start/end x viele Geraete x taeglich 3-Uhr-Fenster).
+  // Die Technik-Gruppe wird stattdessen per WhatsApp informiert
+  // (sendMaintenanceWhatsApp laeuft weiter). Manuelle Wartungen
+  // (auto_source='manual'/null) gehen weiterhin per Mail raus. (User-Wunsch,
+  // analog Zaehler-Watchdog: Routine-Auto-Alerts nur via WhatsApp.)
+  if (maint.auto_source === 'unifi_device_update') {
+    return { sent: 0, queued: 0, skipped: 'auto_unifi_email_suppressed' };
+  }
   const recipients = await maintRecipientsForScope(maint.scope || {});
   if (recipients.length === 0) return { sent: 0, queued: 0, skipped: 'no_recipients' };
   const sevPrefix = maint.severity === 'critical' ? '⚠ DRINGEND' : (maint.severity === 'warning' ? '⚠' : 'ℹ');
