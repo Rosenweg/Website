@@ -625,6 +625,41 @@
     <!-- Dokumente Schnellzugriff -->
     <section class="py-12 bg-white">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <!-- Aktuelles Sitzungsprotokoll (prominent, neuestes aus 06-protokolle) -->
+            <div id="latest-protokoll" class="max-w-2xl mx-auto mb-8"></div>
+            <script>
+            (function(){
+                const token = AuthentikAuth.getToken();
+                const box = document.getElementById('latest-protokoll');
+                if (!box) return;
+                if (!token) { box.innerHTML = ''; return; }
+                const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+                const dateOf = f => { const m = f.path.match(/(\d{4})[.\-](\d{2})[.\-](\d{2})/); if (!m) return null; const t = new Date(m[1]+'-'+m[2]+'-'+m[3]).getTime(); return isNaN(t) ? null : t; };
+                fetch('/api/documents', { headers: { Authorization: 'Bearer ' + token } })
+                    .then(r => r.json())
+                    .then(files => {
+                        const prot = (files || []).filter(f => {
+                            const p = (f.path || '').toLowerCase();
+                            return p.startsWith('stweg3/06-protokolle/') && p.endsWith('.pdf') && p.includes('protokoll');
+                        });
+                        if (!prot.length) { box.innerHTML = ''; return; }
+                        const dated = prot.filter(f => dateOf(f)).sort((a, b) => dateOf(b) - dateOf(a));
+                        const f = dated[0] || prot.sort((a, b) => (b.modified || 0) - (a.modified || 0))[0];
+                        const d = dateOf(f);
+                        const dateStr = d ? new Date(d).toLocaleDateString('de-CH', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+                        const title = dateStr ? 'Sitzung vom ' + esc(dateStr) : esc(f.path.split('/').pop());
+                        box.innerHTML = '<a href="/api/documents/' + esc(f.path) + '" target="_blank" class="flex items-center gap-4 bg-gradient-to-r from-blue-600 to-blue-800 text-white rounded-xl p-5 shadow-lg hover:from-blue-700 hover:to-blue-900 transition">' +
+                            '<span class="text-3xl flex-shrink-0">&#128203;</span>' +
+                            '<div class="flex-1 min-w-0">' +
+                                '<p class="text-xs uppercase tracking-wide text-blue-200">Aktuelles Sitzungsprotokoll</p>' +
+                                '<p class="text-lg font-bold truncate">' + title + '</p>' +
+                            '</div>' +
+                            '<span class="flex-shrink-0 bg-white/20 hover:bg-white/30 rounded-lg px-4 py-2 text-sm font-semibold whitespace-nowrap">&#214;ffnen &rarr;</span>' +
+                        '</a>';
+                    })
+                    .catch(() => { box.innerHTML = ''; });
+            })();
+            </script>
             <h2 class="text-2xl font-bold text-gray-800 mb-2 text-center flex items-center justify-center gap-2">
                 <svg class="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
                 Aktuelle Dokumente
