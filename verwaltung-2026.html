@@ -63,6 +63,7 @@
         'offerte erhalten': 'bg-blue-100 text-blue-700',
         'in bewertung': 'bg-amber-100 text-amber-800',
         'favorit': 'bg-emerald-100 text-emerald-800',
+        'gewählt': 'bg-emerald-600 text-white',
         'abgelehnt': 'bg-red-100 text-red-700',
     };
 
@@ -148,13 +149,13 @@
                 <div class="space-y-4">`;
 
             // Sort: favorit first, then in bewertung, then offerte erhalten, angefragt, abgelehnt
-            const order = { 'favorit': 0, 'in bewertung': 1, 'offerte erhalten': 2, 'angefragt': 3, 'abgelehnt': 9 };
+            const order = { 'gewählt': -1, 'favorit': 0, 'in bewertung': 1, 'offerte erhalten': 2, 'angefragt': 3, 'abgelehnt': 9 };
             const sorted = [...p.candidates].sort((a, b) => (order[a.status] ?? 5) - (order[b.status] ?? 5));
 
             for (const c of sorted) {
                 const atts = attsByCand[c.id] || [];
                 const statusCls = CAND_COLORS[c.status] || 'bg-gray-100 text-gray-700';
-                const isFavorit = c.status === 'favorit';
+                const isFavorit = c.status === 'favorit' || c.status === 'gewählt';
                 const cardCls = isFavorit ? 'border-2 border-emerald-400 ring-1 ring-emerald-200' : 'border';
 
                 html += `<div class="bg-white rounded-lg shadow-sm p-5 ${cardCls}">
