@@ -13448,14 +13448,7 @@ async function alertMeter(m, unreachable, isReminder) {
     : `✅ *${label} wieder erreichbar*\n${m.id}${where} liefert wieder Daten. Entwarnung.`;
   try { const gid = await resolveTechnikWhatsappGroupId(); if (gid) await queueWhatsappMessage({ chatId: gid, body, sourceType: 'meter-watchdog' }); }
   catch (e) { console.warn('[Meter-Watchdog] WA:', e.message); }
-  try {
-    const emails = await meterTechnikEmails();
-    if (emails.length) await loggedSendMail({
-      from: MAIL_FROM, to: emails.join(', '),
-      subject: `${unreachable ? '⚠️' : '✅'} ${label} ${m.id} ${unreachable ? 'nicht erreichbar' : 'wieder OK'}`,
-      text: body,
-    }, unreachable ? 'meter-unreachable' : 'meter-recovered').catch(() => {});
-  } catch (e) { console.warn('[Meter-Watchdog] Mail:', e.message); }
+  // Zähler-Alerts nur noch via WhatsApp — E-Mail-Benachrichtigung entfernt (User-Wunsch)
   console.log(`[Meter-Watchdog] ${m.id} ${unreachable ? (isReminder ? 'still UNREACHABLE (2h reminder)' : 'UNREACHABLE') : 'recovered'}`);
 }
 
