@@ -1,0 +1,8 @@
+[Unit]
+Description=Rosenweg Kontakte-Sync (Postgres -> Nextcloud + SOGo + Z-Push)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/bin/contacts-sync.py
