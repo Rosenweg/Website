@@ -16329,15 +16329,6 @@ async function sendMaintenanceWhatsApp(maint, kind) {
 //    abgefangen: ihre Mail landet als 'pending' in verwaltung_mail_queue und
 //    geht erst nach Freigabe durch Technik/Präsident per BCC raus.
 async function sendMaintenanceMail(maint, kind /* 'pre'|'start'|'end' */) {
-  // Auto-erkannte UniFi-Geraete-/Controller-Updates NICHT per Mail versenden —
-  // das spammt technik@ zu (pre/start/end x viele Geraete x taeglich 3-Uhr-Fenster).
-  // Die Technik-Gruppe wird stattdessen per WhatsApp informiert
-  // (sendMaintenanceWhatsApp laeuft weiter). Manuelle Wartungen
-  // (auto_source='manual'/null) gehen weiterhin per Mail raus. (User-Wunsch,
-  // analog Zaehler-Watchdog: Routine-Auto-Alerts nur via WhatsApp.)
-  if (maint.auto_source === 'unifi_device_update') {
-    return { sent: 0, queued: 0, skipped: 'auto_unifi_email_suppressed' };
-  }
   const recipients = await maintRecipientsForScope(maint.scope || {});
   if (recipients.length === 0) return { sent: 0, queued: 0, skipped: 'no_recipients' };
   const sevPrefix = maint.severity === 'critical' ? '⚠ DRINGEND' : (maint.severity === 'warning' ? '⚠' : 'ℹ');
@@ -16567,7 +16558,10 @@ async function maintProcessScheduledNotifications() {
 // 2. Real-time: state 1->!=1 (Network) bzw. CONNECTED->!CONNECTED (Protect):
 //    bestehende planned->active oder neue active + Start-Notif.
 // 3. Recovery: state zurueck auf online: active->completed + All-Clear.
-const _maintLastDeviceState = new Map(); // device-id -> state
+const _maintLastDeviceState = new Map(); // device-id -> state (1/0)
+const _maintOfflineSince = new Map();     // device-id -> ts (erste Offline-Beobachtung)
+const _maintWasUpgradable = new Map();    // device-id -> bool (Controller hat Update angestossen)
+const MAINT_OFFLINE_NOTIFY_MS = 30 * 60 * 1000; // erst nach 30min Offline melden
 
 // Naechstes UniFi-Device-Update-Fenster (3 AM Europe/Zurich, robust gegen DST).
 function nextDeviceUpdateSlot(hour = 3) {
@@ -16593,6 +16587,7 @@ function nextDeviceUpdateSlot(hour = 3) {
 async function maintHandleDeviceUpdate({ key, name, model, isOnline, upgradable, upgradeTo, source }) {
   const prev = _maintLastDeviceState.get(key);
   _maintLastDeviceState.set(key, isOnline ? 1 : 0);
+  if (upgradable) _maintWasUpgradable.set(key, true);
   const haus = hausFromDeviceName(name);
   const scope = haus ? { houses: [haus] } : { all: true };
   const productLabel = source === 'protect'    ? 'UniFi-Protect-Geraet'
@@ -16600,44 +16595,40 @@ async function maintHandleDeviceUpdate({ key, name, model, isOnline, upgradable,
                      : source === 'controller' ? 'UniFi-Controller'
                      : 'UniFi-Network-Geraet';
 
-  // 1) Pre-Detection: upgradable + noch online + noch keine Wartung → "planned"
-  //    start_at = naechstes 3 AM Zurich (UniFi-Device-Auto-Upgrade-Slot), Pre-
-  //    Mail 30min vorher. Bei Access (in-Progress-Signal) gehen wir sofort an.
-  if (upgradable && isOnline) {
-    const slot = nextDeviceUpdateSlot(3);
-    const title = `Firmware-Update geplant: ${name || model || key}`;
-    const desc = `${productLabel} "${name || ''}" (${model || ''}) ` +
-                 `bekommt ein Firmware-Update${upgradeTo ? ' auf ' + upgradeTo : ''}. ` +
-                 `UniFi installiert das automatisch im naechsten Device-Update-Fenster ` +
-                 `(taeglich 3 Uhr nachts). Der Anschluss kann waehrend dieser Zeit kurz ` +
-                 `unterbrochen sein.`;
-    try {
-      const ins = await pool.query(
-        `INSERT INTO isp_maintenance
-           (title, description, severity, scope, status, start_at,
-            notify_email, notify_whatsapp, notify_lead_time_minutes,
-            auto_source, source_device_id, source_device_name)
-         VALUES ($1,$2,'info',$3::JSONB,'planned',$4,
-                 true, true, 30,
-                 'unifi_device_update', $5, $6)
-         ON CONFLICT (source_device_id)
-           WHERE auto_source = 'unifi_device_update' AND status IN ('planned','active')
-         DO NOTHING
-         RETURNING *`,
-        [title, desc, JSON.stringify(scope), slot, key, name || null],
-      );
-      if (ins.rows[0]) {
-        console.log(`[Maint-Auto] pre: ${title} (slot=${slot.toISOString()})`);
-      }
-    } catch (e) { console.warn('[Maint-Auto] pre-insert:', e.message); }
-  }
+  // Auto-Wartungen benachrichtigen NUR per WhatsApp (Technik-Gruppe), KEINE
+  // E-Mail mehr (User-Wunsch — sonst spammt es technik@ zu). notify_email=false
+  // -> auch der Scheduler (maintProcessScheduledNotifications) mailt nicht.
+  // notify_start_at/notify_email_pre_at=NOW() -> Scheduler feuert nicht doppelt.
+  const openAndNotify = async (severity, title, desc) => {
+    const ins = await pool.query(
+      `INSERT INTO isp_maintenance
+         (title, description, severity, scope, status, start_at,
+          notify_email, notify_whatsapp, notify_lead_time_minutes,
+          notify_start_at, notify_email_pre_at,
+          auto_source, source_device_id, source_device_name)
+       VALUES ($1,$2,$3,$4::JSONB,'active',NOW(),
+               false, true, 0, NOW(), NOW(),
+               'unifi_device_update', $5, $6)
+       ON CONFLICT (source_device_id)
+         WHERE auto_source = 'unifi_device_update' AND status IN ('planned','active')
+       DO NOTHING
+       RETURNING *`,
+      [title, desc, severity, JSON.stringify(scope), key, name || null],
+    );
+    const row = ins.rows[0];
+    if (!row) return null; // schon eine aktive Wartung -> kein Doppel-Alarm
+    console.log(`[Maint-Auto] open: #${row.id} ${row.title}`);
+    const wa = await sendMaintenanceWhatsApp(row, 'start');
+    console.log(`[Maint-Auto] notify #${row.id}: wa=${wa.sent} (email aus)`);
+    return row;
+  };
 
-  // Auto-Close: ist das Device online und es gibt eine aktive Auto-Wartung
-  // dafuer, sofort schliessen + All-Clear schicken. Laeuft bei JEDEM Poll
-  // (nicht nur bei prev===0→online), damit haengende Wartungen nach API-
-  // Restart aufgeraeumt werden — _maintLastDeviceState ist dann naemlich
-  // leer und prev===undefined wuerde sonst alles silent verschlucken.
+  // A) Geraet (wieder) ONLINE -> offene Auto-Wartung schliessen + All-Clear (nur
+  //    WhatsApp). Laeuft bei JEDEM Online-Poll, damit haengende Wartungen nach
+  //    API-Restart aufgeraeumt werden (_maintLastDeviceState ist dann leer).
   if (isOnline) {
+    _maintOfflineSince.delete(key);
+    _maintWasUpgradable.delete(key);
     try {
       const close = await pool.query(
         `UPDATE isp_maintenance
@@ -16650,60 +16641,39 @@ async function maintHandleDeviceUpdate({ key, name, model, isOnline, upgradable,
       if (close.rows[0]) {
         const row = close.rows[0];
         console.log(`[Maint-Auto] end: #${row.id} ${row.title}`);
-        if (row.notify_email)    sendMaintenanceMail(row, 'end').catch(e => console.warn('[Maint-Auto] end-mail:', e.message));
-        if (row.notify_whatsapp) sendMaintenanceWhatsApp(row, 'end').catch(e => console.warn('[Maint-Auto] end-wa:', e.message));
+        sendMaintenanceWhatsApp(row, 'end').catch(e => console.warn('[Maint-Auto] end-wa:', e.message));
       }
     } catch (e) { console.warn('[Maint-Auto] close error:', e.message); }
+    return;
   }
 
-  if (prev === undefined) return; // erster Poll: keine Start-Transitions
+  // --- ab hier ist das Geraet OFFLINE ---
+  // Offline-Startzeit merken (auch beim ersten Poll nach (Re)Start).
+  if (!_maintOfflineSince.has(key)) _maintOfflineSince.set(key, Date.now());
 
-  // 2) Online -> Offline/Update: bestehende planned -> active hochstufen,
-  //    oder neue Wartung anlegen wenn keine vorbereitet war.
-  if (prev === 1 && !isOnline) {
-    try {
-      const planned = await pool.query(
-        `UPDATE isp_maintenance
-            SET status='active', start_at=NOW(), notify_start_at=NOW(),
-                severity='warning', updated_at=NOW()
-          WHERE auto_source='unifi_device_update' AND source_device_id=$1
-            AND status='planned'
-          RETURNING *`,
-        [key],
-      );
-      let row = planned.rows[0];
-      if (!row) {
-        const title = `Geraete-Update: ${name || model || key}`;
-        const desc = `${productLabel} "${name || ''}" (${model || ''}) fuehrt gerade ein Update durch oder ist offline. ` +
-                     `Der Anschluss kann waehrend dieser Zeit kurz unterbrochen sein.`;
-        const ins = await pool.query(
-          `INSERT INTO isp_maintenance
-             (title, description, severity, scope, status, start_at,
-              notify_email, notify_whatsapp, notify_lead_time_minutes,
-              notify_start_at,
-              auto_source, source_device_id, source_device_name)
-           VALUES ($1,$2,'warning',$3::JSONB,'active',NOW(),
-                   true,true,0, NOW(),
-                   'unifi_device_update', $4, $5)
-           ON CONFLICT (source_device_id)
-             WHERE auto_source = 'unifi_device_update' AND status IN ('planned','active')
-           DO NOTHING
-           RETURNING *`,
-          [title, desc, JSON.stringify(scope), key, name || null],
-        );
-        row = ins.rows[0];
-      }
-      if (row) {
-        console.log(`[Maint-Auto] start: #${row.id} ${row.title}`);
-        const mail = await sendMaintenanceMail(row, 'start');
-        const wa = await sendMaintenanceWhatsApp(row, 'start');
-        console.log(`[Maint-Auto] start-notify: email=${mail.sent} wa=${wa.sent}`);
-      }
-    } catch (e) { console.warn('[Maint-Auto] start error:', e.message); }
+  // FALL 1: Update vom Controller angestossen. Geraet war upgradable und geht
+  // jetzt offline (Firmware-Reboot). Genau EINE Meldung beim Uebergang
+  // online->offline (per WhatsApp).
+  if (prev === 1 && _maintWasUpgradable.get(key)) {
+    const title = `Firmware-Update: ${name || model || key}`;
+    const desc = `${productLabel} "${name || ''}" (${model || ''}) installiert gerade ein ` +
+                 `Firmware-Update${upgradeTo ? ' auf ' + upgradeTo : ''} und ist dabei kurz offline. ` +
+                 `Der Anschluss kann waehrend dieser Zeit unterbrochen sein.`;
+    try { await openAndNotify('warning', title, desc); }
+    catch (e) { console.warn('[Maint-Auto] update-open:', e.message); }
+    return;
   }
 
-  // (Auto-Close wurde oben vor dem prev-undefined-Return erledigt, damit
-  // haengende Wartungen auch nach API-Restart aufgeraeumt werden.)
+  // FALL 2: Geraet >30min ununterbrochen nicht erreichbar (echter Ausfall, kein
+  // angekuendigtes Update). Kurze Blips (<30min) bleiben absichtlich still.
+  const since = _maintOfflineSince.get(key) || Date.now();
+  if (Date.now() - since >= MAINT_OFFLINE_NOTIFY_MS) {
+    const title = `Geraet nicht erreichbar: ${name || model || key}`;
+    const desc = `${productLabel} "${name || ''}" (${model || ''}) ist seit ueber 30 Minuten ` +
+                 `nicht erreichbar. Moeglicher Ausfall — bitte pruefen.`;
+    try { await openAndNotify('warning', title, desc); }  // ON CONFLICT -> nur einmal
+    catch (e) { console.warn('[Maint-Auto] offline-open:', e.message); }
+  }
 }
 
 async function maintPollUnifiDevices() {
