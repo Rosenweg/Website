@@ -206,7 +206,7 @@ services:
       SMTP_PORT: "2525"
       MAIL_FROM: "noreply@rosenweg4303.ch"
       PORT: "3000"
-      AUTHENTIK_URL: "https://server:9443"
+      AUTHENTIK_URL: "http://100.64.2.37:9000"
       AUTHENTIK_EXTERNAL_URL: "https://authentik.rosenweg4303.ch"
       SITE_URL: "https://www.rosenweg4303.ch"
       NODE_TLS_REJECT_UNAUTHORIZED: "0"

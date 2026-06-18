@@ -1,0 +1,86 @@
+services:
+  postgresql:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authentik"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: authentik
+      POSTGRES_DB: authentik
+      POSTGRES_PASSWORD: ${PG_PASS}
+  redis:
+    image: redis:7-alpine
+    command: --save 60 1 --loglevel warning
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - ./redis:/data
+  server:
+    image: ghcr.io/goauthentik/server:2026.5.3
+    restart: unless-stopped
+    command: server
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+      AUTHENTIK_REDIS__HOST: redis
+      AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS: "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10"
+      AUTHENTIK_POSTGRESQL__HOST: postgresql
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_PASS}
+      AUTHENTIK_EXTERNAL_URL: https://authentik.rosenweg4303.ch
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      AUTHENTIK_DISABLE_UPDATE_CHECK: "true"
+    volumes:
+      - ./media:/media
+      - ./templates:/templates
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+  worker:
+    image: ghcr.io/goauthentik/server:2026.5.3
+    restart: unless-stopped
+    command: worker
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+      AUTHENTIK_REDIS__HOST: redis
+      AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS: "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10"
+      AUTHENTIK_POSTGRESQL__HOST: postgresql
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_PASS}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+    volumes:
+      - ./media:/media
+      - ./templates:/templates
+      - ./certs:/certs
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+  ldap:
+    image: ghcr.io/goauthentik/ldap:2026.5.3
+    restart: unless-stopped
+    environment:
+      AUTHENTIK_HOST: http://server:9000
+      AUTHENTIK_INSECURE: "true"
+      AUTHENTIK_TOKEN: ${LDAP_TOKEN}
+    ports:
+      - "389:3389"
+      - "636:6636"
+    depends_on:
+      - server
