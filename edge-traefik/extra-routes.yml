@@ -48,6 +48,13 @@ http:
           - url: http://100.64.2.37:9000
 tcp:
   routers:
+    # contacts.rosenweg4303.ch: TCP-HostSNI-Passthrough zu Z-Push nginx auf 100.64.2.38:443.
+    # CT 115 hat eigenes LE-Cert (certbot dns-cloudflare) -> kein edge-ACME noetig.
+    contacts-rw4303-passthrough:
+      entryPoints: [websecure]
+      rule: HostSNI(`contacts.rosenweg4303.ch`)
+      service: contacts-rw4303-svc
+      tls: { passthrough: true }
     # personen.rosenweg4303.ch: TCP-HostSNI-Passthrough zu Mailcow Nginx auf 100.64.2.33:443.
     # Mailcow hat eigenen LE-Cert mit personen.rosenweg4303.ch im SAN.
     personen-rw4303-passthrough:
@@ -56,6 +63,10 @@ tcp:
       service: personen-rw4303-svc
       tls: { passthrough: true }
   services:
+    contacts-rw4303-svc:
+      loadBalancer:
+        servers:
+          - address: 100.64.2.38:443
     personen-rw4303-svc:
       loadBalancer:
         servers:

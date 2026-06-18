@@ -63,6 +63,7 @@
                 <a href="#whatsapp" class="guide-card bg-blue-50 hover:bg-blue-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128241;</div><span class="text-xs font-medium text-gray-700">WhatsApp-Bot</span></a>
                 <a href="#telefonbuch" class="guide-card bg-blue-50 hover:bg-blue-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128222;</div><span class="text-xs font-medium text-gray-700">Telefonbuch</span></a>
                 <a href="#wlan" class="guide-card bg-blue-50 hover:bg-blue-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128246;</div><span class="text-xs font-medium text-gray-700">WLAN</span></a>
+                <a href="#kontakte-sync" class="guide-card bg-indigo-50 hover:bg-indigo-100 rounded-lg p-3 text-center"><div class="text-2xl mb-1">&#128241;</div><span class="text-xs font-medium text-gray-700">Kontakte aufs Handy</span></a>
             </div>
         </div>
 
@@ -546,6 +547,66 @@
                 <div class="info-box rounded-lg p-4">
                     <p class="text-sm text-blue-800"><strong>E-Mail-Verteiler:</strong> Wenn Sie eine E-Mail an <em>ausschuss@rosenweg4303.ch</em> senden, wird sie automatisch an alle Ausschuss-Mitglieder weitergeleitet. Sie müssen nicht jeden einzeln anschreiben.</p>
                 </div>
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- KONTAKTE AUFS HANDY (ActiveSync) -->
+        <!-- ═══════════════════════════════════════════ -->
+        <section id="kontakte-sync" class="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div class="bg-indigo-600 text-white px-8 py-5">
+                <h2 class="text-2xl font-bold flex items-center gap-3">
+                    <span class="text-3xl">&#128241;</span> Rosenweg-Verzeichnis aufs Handy
+                </h2>
+                <p class="mt-1 opacity-90">Alle Rosenweg-Kontakte (Bewohner, Verwaltung, Technik) direkt im Telefonbuch — nativ, ohne Zusatz-App, mit Ihrem Rosenweg-Login.</p>
+            </div>
+            <div class="p-8 space-y-8">
+
+                <div class="info-box rounded-lg p-4">
+                    <p class="text-sm text-blue-800"><strong>Was ist das?</strong> Ein Konto, das das gemeinsame Rosenweg-Verzeichnis automatisch ins Telefonbuch synchronisiert — und aktuell hält. Es ist <strong>kein</strong> E-Mail-Postfach, nur Kontakte. Angemeldet wird mit Ihrem ganz normalen Rosenweg-Login (derselbe wie auf der Website).</p>
+                </div>
+
+                <div class="flex gap-5 items-start">
+                    <div class="step-number bg-indigo-600">1</div>
+                    <div class="flex-1">
+                        <h3 class="font-semibold text-lg mb-2">Neues Konto hinzufügen (Typ „Exchange")</h3>
+                        <p class="text-gray-600 mb-2"><strong>Android:</strong> Einstellungen → <em>Konten</em> → <em>Konto hinzufügen</em> → <strong>Exchange</strong> (je nach Handy auch „Exchange/ActiveSync" oder „Firmen-/Arbeitskonto").</p>
+                        <p class="text-gray-600"><strong>iPhone:</strong> Einstellungen → <em>Kontakte</em> → <em>Account hinzufügen</em> → <strong>Microsoft Exchange</strong> → „Manuell konfigurieren".</p>
+                    </div>
+                </div>
+
+                <div class="flex gap-5 items-start">
+                    <div class="step-number bg-indigo-600">2</div>
+                    <div class="flex-1">
+                        <h3 class="font-semibold text-lg mb-2">Diese Einstellungen eingeben</h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <tbody class="divide-y divide-gray-100">
+                                    <tr><td class="py-2 pr-4 font-medium text-gray-700 align-top">Server</td><td class="py-2 font-mono text-indigo-700 select-all">contacts.rosenweg4303.ch</td></tr>
+                                    <tr><td class="py-2 pr-4 font-medium text-gray-700 align-top">Benutzername<br><span class="text-xs text-gray-400">(„Domain\\Nutzername")</span></td><td class="py-2 text-gray-700">Ihr Rosenweg-Login, z.B. <span class="font-mono text-indigo-700">vorname.nachname</span> &nbsp;<span class="text-xs text-amber-700">(ohne @…!)</span></td></tr>
+                                    <tr><td class="py-2 pr-4 font-medium text-gray-700 align-top">Passwort</td><td class="py-2 text-gray-700">Ihr Rosenweg-Passwort</td></tr>
+                                    <tr><td class="py-2 pr-4 font-medium text-gray-700 align-top">Domäne</td><td class="py-2 text-gray-700">leer lassen</td></tr>
+                                    <tr><td class="py-2 pr-4 font-medium text-gray-700 align-top">Port</td><td class="py-2 font-mono text-indigo-700">443</td></tr>
+                                    <tr><td class="py-2 pr-4 font-medium text-gray-700 align-top">Sicherheit</td><td class="py-2 font-mono text-indigo-700">SSL/TLS</td></tr>
+                                    <tr><td class="py-2 pr-4 font-medium text-gray-700 align-top">E-Mail<br><span class="text-xs text-gray-400">(falls verlangt)</span></td><td class="py-2 text-gray-700">irgendeine Adresse, z.B. <span class="font-mono">vorname.nachname@rosenweg4303.ch</span> — zählen tut nur der Benutzername</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex gap-5 items-start">
+                    <div class="step-number bg-indigo-600">3</div>
+                    <div class="flex-1">
+                        <h3 class="font-semibold text-lg mb-2">Nur Kontakte synchronisieren</h3>
+                        <p class="text-gray-600">Beim Einrichten <strong>nur „Kontakte" aktivieren</strong> und E-Mail + Kalender ausschalten (es ist ja kein Postfach). Fertig — das Rosenweg-Verzeichnis erscheint im Telefonbuch und bleibt automatisch aktuell.</p>
+                    </div>
+                </div>
+
+                <div class="info-box rounded-lg p-4" style="background:#fffbeb;border-color:#fcd34d;">
+                    <p class="text-sm text-amber-900"><strong>Login klappt nicht?</strong> Den Benutzernamen <em>ohne</em> @… eingeben (also <span class="font-mono">vorname.nachname</span>, nicht die E-Mail-Adresse). Hilft das nicht weiter, wenden Sie sich an die Technik (siehe Abschnitt „Kontakt").</p>
+                </div>
+
             </div>
         </section>
 
