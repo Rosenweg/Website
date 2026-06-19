@@ -31,11 +31,23 @@
     (async function() {
         const $ = id => document.getElementById(id);
         const escapeHtml = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+        try { await AuthentikAuth.init({ requireAuth: false }); } catch (e) {}
         try {
             const r = await fetch('/api/verwaltungen/public');
             if (!r.ok) throw new Error('HTTP ' + r.status);
             const data = await r.json();
             const v = data.verwaltungen || [];
+            // Kontaktpersonen sind geschuetzt -> nur eingeloggt, ueber den stufen-/
+            // STWEG-gefilterten Endpoint nachladen + nach id in verw.kontakte mergen.
+            if (AuthentikAuth.isLoggedIn && AuthentikAuth.isLoggedIn()) {
+                try {
+                    const kr = await AuthentikAuth.apiFetch('/api/verwaltungen/kontakte');
+                    if (kr.ok) {
+                        const byId = (await kr.json()).kontakte || {};
+                        for (const verw of v) verw.kontakte = byId[verw.id] || [];
+                    }
+                } catch (e) { /* keine Kontakte sichtbar */ }
+            }
             $('loading').classList.add('hidden');
             if (v.length === 0) { $('empty').classList.remove('hidden'); return; }
             $('list').innerHTML = v.map(verw => {

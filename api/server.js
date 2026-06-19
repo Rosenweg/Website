@@ -12,7 +12,7 @@ const pathModule = require('path');
 const { escapeHtml, createSemaphore, normalizePhone, safeId } = require('./lib/utils');
 
 // STWEG-Gruppen-Mapping + pure Klassifizierer -> lib/groups.js
-const { STWEG_GROUPS, parseStweg, getUserStwegs, stwegFolderName, folderStwegNr, isTechnik, isPraesident, getAusschussStwegs, isAusschussForAny } = require('./lib/groups');
+const { STWEG_GROUPS, parseStweg, getUserStwegs, stwegFolderName, folderStwegNr, isTechnik, isPraesident, getAusschussStwegs, isAusschussForAny, canSeeVerwaltungKontakte } = require('./lib/groups');
 
 const app = express();
 
@@ -5387,23 +5387,42 @@ app.get('/api/verwaltungen/public', async (req, res) => {
     //                  UND (kein Enddatum ODER Enddatum noch nicht vorbei)
     const { rows: verw } = await pool.query(`
       SELECT id, stweg, firma_name, adresse, telefon, email, website, oeffnungszeiten,
-             plattform_name, plattform_url, vertrag_von, vertrag_bis
+             plattform_name, plattform_url, vertrag_von, vertrag_bis, kontakt_sichtbarkeit
       FROM verwaltungen
       WHERE aktiv = true
         AND (vertrag_von IS NULL OR vertrag_von <= CURRENT_DATE)
         AND (vertrag_bis IS NULL OR vertrag_bis >= CURRENT_DATE)
       ORDER BY stweg NULLS FIRST, firma_name
     `);
-    const ids = verw.map(v => v.id);
-    const { rows: kontakte } = ids.length === 0 ? { rows: [] } : await pool.query(`
+    // KONTAKTPERSONEN bewusst NICHT hier — sie sind stufen-/STWEG-geschuetzt und
+    // kommen separat ueber GET /api/verwaltungen/kontakte (authed, gefiltert).
+    res.json({ verwaltungen: verw.map(v => ({ ...v, kontakte: [] })) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Kontaktpersonen — nur fuer Berechtigte (Sichtbarkeits-Level + STWEG), eingeloggt.
+// Liefert { kontakte: { <verwaltung_id>: [ {name,funktion,email,telefon} ] } }.
+app.get('/api/verwaltungen/kontakte', authMiddleware, async (req, res) => {
+  try {
+    const groups = req.user.groups || [];
+    const { rows: verw } = await pool.query(`
+      SELECT id, stweg, kontakt_sichtbarkeit FROM verwaltungen
+      WHERE aktiv = true
+        AND (vertrag_von IS NULL OR vertrag_von <= CURRENT_DATE)
+        AND (vertrag_bis IS NULL OR vertrag_bis >= CURRENT_DATE)
+    `);
+    const allowedIds = verw
+      .filter(v => canSeeVerwaltungKontakte(groups, v.stweg, v.kontakt_sichtbarkeit))
+      .map(v => v.id);
+    if (allowedIds.length === 0) return res.json({ kontakte: {} });
+    const { rows: kontakte } = await pool.query(`
       SELECT verwaltung_id, name, funktion, email, telefon
       FROM verwaltungs_kontakte WHERE verwaltung_id = ANY($1::int[])
       ORDER BY verwaltung_id, sort_order, id
-    `, [ids]);
-    const byVerw = new Map();
-    for (const v of verw) byVerw.set(v.id, { ...v, kontakte: [] });
-    for (const k of kontakte) byVerw.get(k.verwaltung_id)?.kontakte.push(k);
-    res.json({ verwaltungen: [...byVerw.values()] });
+    `, [allowedIds]);
+    const byVerw = {};
+    for (const k of kontakte) (byVerw[k.verwaltung_id] = byVerw[k.verwaltung_id] || []).push(k);
+    res.json({ kontakte: byVerw });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -5427,18 +5446,19 @@ app.get('/api/verwaltungen', authMiddleware, requireAusschussOrTechnik, async (r
 app.post('/api/verwaltungen', authMiddleware, requireAusschussOrTechnik, async (req, res) => {
   try {
     const b = req.body || {};
+    const sichtbar = ['technik_praesident','ausschuss','eigentuemer','bewohner'].includes(b.kontakt_sichtbarkeit) ? b.kontakt_sichtbarkeit : 'ausschuss';
     const r = await pool.query(`
       INSERT INTO verwaltungen
         (stweg, firma_name, adresse, telefon, email, website, oeffnungszeiten,
          plattform_name, plattform_url, plattform_user, plattform_pass,
-         vertrag_von, vertrag_bis, kuendigungsfrist_monate, kuendigung_eingereicht_am, dokument_pfad, notizen, aktiv)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, COALESCE($18, true))
+         vertrag_von, vertrag_bis, kuendigungsfrist_monate, kuendigung_eingereicht_am, dokument_pfad, notizen, aktiv, kontakt_sichtbarkeit)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, COALESCE($18, true), $19)
       RETURNING *
     `, [b.stweg || null, b.firma_name, b.adresse || null, normalizePhone(b.telefon), b.email || null,
         b.website || null, b.oeffnungszeiten || null,
         b.plattform_name || null, b.plattform_url || null, b.plattform_user || null, b.plattform_pass || null,
         b.vertrag_von || null, b.vertrag_bis || null, b.kuendigungsfrist_monate || null, b.kuendigung_eingereicht_am || null,
-        b.dokument_pfad || null, b.notizen || null, b.aktiv]);
+        b.dokument_pfad || null, b.notizen || null, b.aktiv, sichtbar]);
     const created = r.rows[0];
     // Wenn die neue Verwaltung sofort wirksam ist, offene Auslagen nachreichen
     const resent = await maybeResendForVerwaltung(created);
@@ -5460,19 +5480,20 @@ app.put('/api/verwaltungen/:id', authMiddleware, requireAusschussOrTechnik, asyn
   try {
     const id = parseInt(req.params.id);
     const b = req.body || {};
+    const sichtbar = ['technik_praesident','ausschuss','eigentuemer','bewohner'].includes(b.kontakt_sichtbarkeit) ? b.kontakt_sichtbarkeit : 'ausschuss';
     const r = await pool.query(`
       UPDATE verwaltungen SET
         stweg = $1, firma_name = $2, adresse = $3, telefon = $4, email = $5,
         website = $6, oeffnungszeiten = $7,
         plattform_name = $8, plattform_url = $9, plattform_user = $10, plattform_pass = $11,
         vertrag_von = $12, vertrag_bis = $13, kuendigungsfrist_monate = $14, kuendigung_eingereicht_am = $15,
-        dokument_pfad = $16, notizen = $17, aktiv = $18, updated_at = NOW()
-      WHERE id = $19 RETURNING *
+        dokument_pfad = $16, notizen = $17, aktiv = $18, kontakt_sichtbarkeit = $19, updated_at = NOW()
+      WHERE id = $20 RETURNING *
     `, [b.stweg || null, b.firma_name, b.adresse || null, normalizePhone(b.telefon), b.email || null,
         b.website || null, b.oeffnungszeiten || null,
         b.plattform_name || null, b.plattform_url || null, b.plattform_user || null, b.plattform_pass || null,
         b.vertrag_von || null, b.vertrag_bis || null, b.kuendigungsfrist_monate || null, b.kuendigung_eingereicht_am || null,
-        b.dokument_pfad || null, b.notizen || null, b.aktiv === false ? false : true, id]);
+        b.dokument_pfad || null, b.notizen || null, b.aktiv === false ? false : true, sichtbar, id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const updated = r.rows[0];
     // Wenn die Verwaltung jetzt wirksam ist, offene Auslagen nachreichen
@@ -19686,6 +19707,9 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_verwaltungen_stweg ON verwaltungen(stweg, aktiv);
       ALTER TABLE verwaltungen ADD COLUMN IF NOT EXISTS website VARCHAR(255);
       ALTER TABLE verwaltungen ADD COLUMN IF NOT EXISTS oeffnungszeiten TEXT;
+      -- Sichtbarkeit der KONTAKTPERSONEN: technik_praesident|ausschuss|eigentuemer|bewohner.
+      -- Firma-Infos bleiben oeffentlich; nur die Kontakte sind stufen-/STWEG-gebunden.
+      ALTER TABLE verwaltungen ADD COLUMN IF NOT EXISTS kontakt_sichtbarkeit VARCHAR(20) NOT NULL DEFAULT 'ausschuss';
 
       CREATE TABLE IF NOT EXISTS verwaltungs_kontakte (
         id SERIAL PRIMARY KEY,

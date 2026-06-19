@@ -69,7 +69,31 @@ function isAusschussForAny(groups) {
   return getAusschussStwegs(groups).size > 0;
 }
 
+// Sichtbarkeits-Level fuer Verwaltungs-Kontakte. Restriktiv -> offen:
+// technik_praesident > ausschuss > eigentuemer > bewohner ("diese Rolle + alle
+// hoeheren"). technik+praesident sehen alles; ausschuss/eigentuemer/bewohner
+// zusaetzlich STWEG-gebunden (Verwaltung mit stweg=null gilt fuer alle STWEGs
+// des Users). Erwartet die aufgeloesten (Ancestor-)Gruppen des Users.
+function canSeeVerwaltungKontakte(groups, verwaltungStweg, level) {
+  groups = groups || [];
+  if (isTechnik(groups) || isPraesident(groups)) return true;
+  const lvl = level || 'ausschuss';
+  if (lvl === 'technik_praesident') return false;
+  const vS = (verwaltungStweg == null || verwaltungStweg === '') ? null : Number(verwaltungStweg);
+  const userStwegs = getUserStwegs(groups);
+  const stwegsToCheck = vS == null ? [...userStwegs] : (userStwegs.has(vS) ? [vS] : []);
+  for (const s of stwegsToCheck) {
+    const m = STWEG_GROUPS[s]; if (!m) continue;
+    const inRole = (role) => m[role] && groups.some(g => g.toLowerCase() === m[role].toLowerCase());
+    if (lvl === 'ausschuss'   && inRole('ausschuss')) return true;
+    if (lvl === 'eigentuemer' && (inRole('ausschuss') || inRole('eigentuemer'))) return true;
+    if (lvl === 'bewohner'    && (inRole('ausschuss') || inRole('eigentuemer') || inRole('bewohner'))) return true;
+  }
+  return false;
+}
+
 module.exports = {
   STWEG_GROUPS, parseStweg, getUserStwegs, stwegFolderName, folderStwegNr,
   isTechnik, isPraesident, getAusschussStwegs, isAusschussForAny,
+  canSeeVerwaltungKontakte,
 };
