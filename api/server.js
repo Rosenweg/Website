@@ -2738,6 +2738,11 @@ app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
     // EINE Mail, alle Empfänger im BCC — so sehen sie sich gegenseitig NICHT (DSGVO).
     // To = MAIL_FROM (neutral); der Verteiler-Alias darf NICHT ins To (sonst Re-Fanout).
     try {
+      // Body kommt als Plain-Text aus der Textarea — Zeilenumbrueche erhalten:
+      // text-Teil 1:1, html-Teil escaped + \n -> <br>. Sonst schluckt HTML die Umbrueche.
+      const htmlBody = String(body)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/\r?\n/g, '<br>');
       await transporter.sendMail({
         from: MAIL_FROM,
         to: MAIL_FROM,
@@ -2745,7 +2750,8 @@ app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
         // Antworten gehen an den sendenden User, nicht an die generische From-Adresse.
         replyTo: req.user?.email || undefined,
         subject,
-        html: body,
+        text: body,
+        html: htmlBody,
       });
       sent = validRecipients.length;
     } catch (sendErr) {
