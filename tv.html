@@ -35,6 +35,21 @@
             <div class="text-sm text-gray-400" id="status">Lade Kanäle...</div>
         </div>
 
+        <!-- Multicast-Playlist für Smart-TV / VLC / Tellio (242 HEVC-Sender, direkt aus dem
+             lokalen Init7-Multicast — schlank, kein Server-Transcoding). Browser können HEVC
+             meist nicht, darum als Direkt-Download für native Player. -->
+        <div class="mb-4 bg-gray-800 border border-gray-700 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div class="text-sm text-gray-300">
+                <span class="font-medium text-white">📺 Smart-TV / VLC / Tellio:</span>
+                Multicast-Playlist mit <span class="text-white font-medium">242 HD-Sendern</span> — schlank &amp; direkt.
+                <span class="block text-xs text-gray-500 mt-0.5">Für HEVC-fähige Player (VLC, Smart-TV, Tellio) im Hausnetz — funktioniert in allen VLANs (via udpxy). Im Browser den Player unten nutzen.</span>
+            </div>
+            <a href="/tv-playlist.m3u" download="rosenweg-tv-multicast.m3u"
+               class="shrink-0 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg text-center">
+                Playlist (.m3u) ↓
+            </a>
+        </div>
+
         <div class="grid lg:grid-cols-3 gap-4">
             <!-- Player -->
             <div class="lg:col-span-2">
@@ -175,41 +190,60 @@
                 return;
             }
 
-            if (typeof mpegts !== 'undefined' && mpegts.isSupported()) {
-                player = mpegts.createPlayer({
-                    type: 'mpegts',
-                    url: streamUrl,
-                    isLive: true,
-                    hasAudio: true,
-                    hasVideo: true,
-                }, {
-                    // Live-TV: einfach abspielen. Kein Latency-Chasing —
-                    // das hatte bei 20s-Sessions den Browser disconnecten
-                    // lassen. Lieber ein bisschen Lag als Aussetzer.
-                    enableStashBuffer: true,
-                    stashInitialSize: 384,
-                    liveBufferLatencyChasing: false,
-                    lazyLoad: false,
-                    autoCleanupSourceBuffer: true,
-                    autoCleanupMaxBackwardDuration: 30,
-                    autoCleanupMinBackwardDuration: 10,
-                });
-                player.attachMediaElement(video);
-                player.on(mpegts.Events.ERROR, (type, detail, info) => {
-                    console.error('mpegts error:', type, detail, info);
-                    // Reconnect-Versuch bei NetworkError
-                    if (type === mpegts.ErrorTypes.NETWORK_ERROR && player) {
-                        try { player.unload(); player.load(); player.play(); } catch (e) {}
-                    }
-                });
-                player.on(mpegts.Events.LOADING_COMPLETE, () => console.log('mpegts: loading complete'));
-                player.load();
-                player.play().catch(e => console.warn('autoplay blocked:', e.message));
-            } else {
-                console.error('mpegts.js nicht unterstuetzt — Browser kann den Stream nicht abspielen');
-            }
+            // HEVC versuchen (schlank, Multicast-Quelle via Streamer), bei Fehler
+            // einmalig auf H.264 (HTTP-HLS) zurueckfallen.
+            startPlayer(streamUrl, !!(ch.hevc && browserHevcOk()));
 
             renderChannels(document.querySelector('.group-btn.active')?.dataset.group === 'all' ? null : document.querySelector('.group-btn.active')?.dataset.group);
+        }
+
+        // Kann der Browser HEVC/H.265 in MSE dekodieren? (Safari + Chrome mit HW-HEVC; Firefox nie)
+        function browserHevcOk() {
+            try {
+                return !!(window.MediaSource && MediaSource.isTypeSupported &&
+                    (MediaSource.isTypeSupported('video/mp4; codecs="hvc1.1.6.L93.B0"') ||
+                     MediaSource.isTypeSupported('video/mp4; codecs="hev1.1.6.L93.B0"')));
+            } catch (e) { return false; }
+        }
+
+        // mpegts-Player starten. hevc=true haengt ?codec=hevc an (schlanker Multicast-
+        // Stream); schlaegt das fehl, einmaliger Fallback auf H.264.
+        function startPlayer(baseUrl, hevc) {
+            const video = document.getElementById('player');
+            if (player) { try { player.destroy(); } catch (e) {} player = null; }
+            if (typeof mpegts === 'undefined' || !mpegts.isSupported()) {
+                console.error('mpegts.js nicht unterstuetzt — Browser kann den Stream nicht abspielen');
+                return;
+            }
+            const url = baseUrl + (hevc ? (baseUrl.includes('?') ? '&' : '?') + 'codec=hevc' : '');
+            console.log('startPlayer', hevc ? 'HEVC' : 'H.264', url);
+            player = mpegts.createPlayer({
+                type: 'mpegts', url, isLive: true, hasAudio: true, hasVideo: true,
+            }, {
+                enableStashBuffer: true,
+                stashInitialSize: 384,
+                liveBufferLatencyChasing: false,
+                lazyLoad: false,
+                autoCleanupSourceBuffer: true,
+                autoCleanupMaxBackwardDuration: 30,
+                autoCleanupMinBackwardDuration: 10,
+            });
+            player.attachMediaElement(video);
+            let fellBack = false;
+            player.on(mpegts.Events.ERROR, (type, detail, info) => {
+                console.error('mpegts error:', type, detail, info, 'hevc=' + hevc);
+                if (hevc && !fellBack) {
+                    fellBack = true;
+                    console.warn('HEVC fehlgeschlagen — Fallback auf H.264');
+                    startPlayer(baseUrl, false);
+                    return;
+                }
+                if (type === mpegts.ErrorTypes.NETWORK_ERROR && player) {
+                    try { player.unload(); player.load(); player.play(); } catch (e) {}
+                }
+            });
+            player.load();
+            player.play().catch(e => console.warn('autoplay blocked:', e.message));
         }
 
         document.getElementById('search').addEventListener('input', () => {
