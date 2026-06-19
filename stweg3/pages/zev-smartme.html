@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZEV / smart-me — Strom-Abrechnung — Rosenweg 9</title>
+    <link rel="icon" href="/logo-rosenweg.png" type="image/png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-amber-50 to-orange-100 min-h-screen text-gray-800">
+    <nav class="bg-white shadow-sm sticky top-0 z-50 flex items-center justify-between px-5 py-3 flex-wrap gap-3">
+        <a href="/" class="flex items-center gap-3 no-underline text-inherit">
+            <img src="/logo-rosenweg.png" class="h-10 w-auto" alt="">
+            <span><span class="block font-bold leading-tight">ZEV / smart-me</span><span class="text-xs text-gray-500">Strom-Abrechnung · Rosenweg 9</span></span>
+        </a>
+        <a href="/" class="text-amber-600 font-semibold text-sm hover:text-orange-600">← Übersicht</a>
+    </nav>
+
+    <main class="max-w-5xl mx-auto px-4 py-6">
+        <div id="loading" class="text-center text-gray-500 py-12">Lade …</div>
+
+        <div id="gate" class="hidden bg-white rounded-xl shadow p-8 text-center">
+            <h2 class="text-xl font-bold mb-2">🔒 Zugriff</h2>
+            <p id="gate-msg" class="text-gray-500 mb-4">Diese Seite ist nur für Verwaltung / Ausschuss / Technik.</p>
+            <div id="sso-login-container"></div>
+        </div>
+
+        <div id="content" class="hidden space-y-6">
+            <section class="bg-white/70 border border-amber-200 rounded-xl p-4 text-sm text-gray-700">
+                <p class="font-semibold text-gray-900 mb-1">Wie es funktioniert</p>
+                <p>Pro Eigentümer gibt es einen Mail-Alias <code class="bg-amber-100 px-1 rounded">zev.&lt;name&gt;@&lt;domain&gt;</code>.
+                smart-me schickt die ZEV-Rechnung an diesen Alias — Mailcow leitet sie automatisch weiter an:
+                <strong>aktueller Mieter/Bewohner</strong> + <strong>Archiv-Postfach</strong> + <strong>Rechnungsadresse (Immosense)</strong>.
+                Bei einem Bewohner-/Mieterwechsel (ab Wechseldatum in der Objektverwaltung) wird der Alias automatisch umgehängt
+                und die <strong>Axova AG</strong> per Freigabe-Mail informiert (sie passt smart-me an).</p>
+            </section>
+
+            <!-- Konfiguration -->
+            <section class="bg-white rounded-xl shadow-sm border p-5">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-bold text-gray-900">Konfiguration</h2>
+                    <label class="flex items-center gap-2 text-sm font-medium">
+                        <input type="checkbox" id="c-aktiv" class="w-4 h-4">
+                        <span>Modul aktiv</span>
+                    </label>
+                </div>
+                <div class="grid md:grid-cols-2 gap-4 text-sm">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Alias-Domain</label>
+                        <input type="text" id="c-domain" placeholder="rosenweg9.ch" class="w-full border border-gray-300 rounded px-3 py-1.5">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Alias-Prefix</label>
+                        <input type="text" id="c-prefix" placeholder="zev" class="w-full border border-gray-300 rounded px-3 py-1.5">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Archiv-Postfach (smart-me Kopie)</label>
+                        <input type="email" id="c-archiv" placeholder="smartme@rosenweg9.ch" class="w-full border border-gray-300 rounded px-3 py-1.5">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Rechnungsadresse Verwaltung (Immosense)</label>
+                        <input type="email" id="c-invoice" placeholder="invoice@immosense.ch" class="w-full border border-gray-300 rounded px-3 py-1.5">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Axova-Mailadresse (Wechsel-Benachrichtigung)</label>
+                        <input type="email" id="c-axova" placeholder="info@axova.ch" class="w-full border border-gray-300 rounded px-3 py-1.5">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Notizen</label>
+                        <input type="text" id="c-notizen" class="w-full border border-gray-300 rounded px-3 py-1.5">
+                    </div>
+                </div>
+                <div class="flex items-center gap-3 mt-4">
+                    <button id="btn-save" class="bg-amber-600 text-white px-5 py-2 rounded-lg font-semibold hover:bg-amber-700 transition">Speichern</button>
+                    <span id="save-msg" class="text-sm text-gray-500"></span>
+                </div>
+            </section>
+
+            <!-- Wohnungen / Aliase -->
+            <section class="bg-white rounded-xl shadow-sm border p-5">
+                <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+                    <h2 class="text-lg font-bold text-gray-900">Wohnungen &amp; Aliase</h2>
+                    <button id="btn-sync" class="bg-emerald-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-emerald-700 transition text-sm">⟳ Aliase nach Mailcow syncen</button>
+                </div>
+                <p id="sync-msg" class="text-sm text-gray-500 mb-3"></p>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-xs uppercase tracking-wider text-gray-500 border-b">
+                                <th class="py-2 pr-3">Wohnung</th>
+                                <th class="py-2 pr-3">Eigentümer</th>
+                                <th class="py-2 pr-3">Alias</th>
+                                <th class="py-2 pr-3">Aktueller Bewohner</th>
+                                <th class="py-2 pr-3">Weiterleitung an</th>
+                                <th class="py-2">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="wohnungen-body"></tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <script>
+    const STWEG = 3;
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+
+    function showGate(msg) {
+        $('loading').classList.add('hidden');
+        $('content').classList.add('hidden');
+        if (msg) $('gate-msg').textContent = msg;
+        $('gate').classList.remove('hidden');
+        if (!msg) AuthentikAuth.createLoginButton('sso-login-container');
+    }
+
+    function fillConfig(c) {
+        $('c-aktiv').checked = c.aktiv === true;
+        $('c-domain').value = c.alias_domain || 'rosenweg9.ch';
+        $('c-prefix').value = c.alias_prefix || 'zev';
+        $('c-archiv').value = c.archiv_mailbox || '';
+        $('c-invoice').value = c.invoice_email || '';
+        $('c-axova').value = c.axova_email || '';
+        $('c-notizen').value = c.notizen || '';
+    }
+
+    function rolleLabel(r) {
+        return ({ mieter: 'Mieter', bewohner: 'Bewohner', eigentuemer: 'Eigentümer' }[r]) || (r || '—');
+    }
+
+    function renderWohnungen(rows, syncResults) {
+        const byId = {};
+        for (const r of (syncResults || [])) byId[r.wohnung_id] = r;
+        $('wohnungen-body').innerHTML = (rows || []).map(w => {
+            const sr = byId[w.wohnung_id];
+            let status;
+            if (sr && sr.synced) status = '<span class="text-emerald-700">✓ gesynct</span>';
+            else if (sr && sr.reason) status = `<span class="text-red-600">${esc(sr.reason)}</span>`;
+            else if (w.sync_ready) status = '<span class="text-gray-400">bereit</span>';
+            else status = `<span class="text-amber-600">${w.alias_address ? 'kein Empfänger' : 'kein Eigentümer-Name'}</span>`;
+            const goto = (w.goto || []).map(g => `<span class="inline-block bg-gray-100 rounded px-1.5 py-0.5 text-xs font-mono mr-1 mb-1">${esc(g)}</span>`).join('');
+            return `<tr class="border-b last:border-0 align-top">
+                <td class="py-2 pr-3 font-medium">${esc(w.bezeichnung || '—')}</td>
+                <td class="py-2 pr-3">${esc(w.eigentuemer_name || '—')}</td>
+                <td class="py-2 pr-3 font-mono text-xs ${w.alias_address ? '' : 'text-gray-400'}">${esc(w.alias_address || '—')}</td>
+                <td class="py-2 pr-3">${esc(w.bewohner_name || '—')}<br><span class="text-xs text-gray-500">${esc(w.bewohner_email || 'keine Mail')} · ${esc(rolleLabel(w.bewohner_rolle))}</span></td>
+                <td class="py-2 pr-3">${goto || '<span class="text-gray-400 text-xs">—</span>'}</td>
+                <td class="py-2 text-xs">${status}</td>
+            </tr>`;
+        }).join('') || '<tr><td colspan="6" class="py-4 text-center text-gray-400">Keine Wohnungen.</td></tr>';
+    }
+
+    async function load() {
+        try {
+            const r = await AuthentikAuth.apiFetch(`/api/zev/wohnungen/${STWEG}`, { cache: 'no-store' });
+            if (r.status === 401) { showGate(); return; }
+            if (r.status === 403) { showGate('Dein Konto ist nicht für die Wohnungsverwaltung freigeschaltet.'); return; }
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const data = await r.json();
+            fillConfig(data.config || {});
+            renderWohnungen(data.wohnungen);
+            $('loading').classList.add('hidden');
+            $('content').classList.remove('hidden');
+        } catch (e) {
+            $('loading').textContent = 'Fehler: ' + e.message;
+        }
+    }
+
+    async function saveConfig() {
+        $('save-msg').textContent = 'Speichere …';
+        const body = {
+            aktiv: $('c-aktiv').checked,
+            alias_domain: $('c-domain').value.trim() || 'rosenweg9.ch',
+            alias_prefix: $('c-prefix').value.trim() || 'zev',
+            archiv_mailbox: $('c-archiv').value.trim() || null,
+            invoice_email: $('c-invoice').value.trim() || null,
+            axova_email: $('c-axova').value.trim() || null,
+            notizen: $('c-notizen').value.trim() || null,
+        };
+        try {
+            const r = await AuthentikAuth.apiFetch(`/api/zev/config/${STWEG}`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+            });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            $('save-msg').textContent = '✓ Gespeichert';
+            setTimeout(() => $('save-msg').textContent = '', 2500);
+            load();
+        } catch (e) { $('save-msg').textContent = 'Fehler: ' + e.message; }
+    }
+
+    async function syncAliases() {
+        if (!confirm('Alle Aliase dieser STWEG nach Mailcow schreiben/aktualisieren?')) return;
+        $('sync-msg').textContent = 'Synce …';
+        try {
+            const r = await AuthentikAuth.apiFetch(`/api/zev/sync/${STWEG}`, { method: 'POST' });
+            const data = await r.json();
+            if (!r.ok || data.ok === false) { $('sync-msg').textContent = 'Fehler: ' + (data.reason || data.error || r.status); return; }
+            $('sync-msg').textContent = `✓ ${data.synced}/${data.total} Aliase gesynct`;
+            const w = await AuthentikAuth.apiFetch(`/api/zev/wohnungen/${STWEG}`, { cache: 'no-store' });
+            const wd = await w.json();
+            renderWohnungen(wd.wohnungen, data.results);
+        } catch (e) { $('sync-msg').textContent = 'Fehler: ' + e.message; }
+    }
+
+    AuthentikAuth.handleCallback();
+    if (!AuthentikAuth.isLoggedIn()) { showGate(); }
+    else {
+        $('btn-save').addEventListener('click', saveConfig);
+        $('btn-sync').addEventListener('click', syncAliases);
+        load();
+    }
+    </script>
+</body>
+</html>

@@ -13,6 +13,7 @@ const { escapeHtml, createSemaphore, normalizePhone, safeId } = require('./lib/u
 
 // STWEG-Gruppen-Mapping + pure Klassifizierer -> lib/groups.js
 const { STWEG_GROUPS, parseStweg, getUserStwegs, stwegFolderName, folderStwegNr, isTechnik, isPraesident, getAusschussStwegs, isAusschussForAny, canSeeVerwaltungKontakte } = require('./lib/groups');
+const { zevAliasAddress, zevGotoTargets } = require('./lib/zev');
 
 const app = express();
 
@@ -5110,6 +5111,8 @@ async function autoArchiveSupersededKontakte() {
     if (r.rowCount > 0) {
       console.log(`[KontakteCron] ${r.rowCount} Vorgaenger archiviert (durch vorgemerkte Eintraege superseded)`);
     }
+    // ZEV: nach dem Auto-Archive (sauberer Bewohner-Stand) Aliase syncen + Wechsel melden.
+    await processZevDaily();
   } catch (err) {
     console.error('[KontakteCron] Auto-Archive Fehler:', err.message);
   }
@@ -5544,6 +5547,190 @@ app.delete('/api/verwaltungen/kontakte/:kid', authMiddleware, requireAusschussOr
     await pool.query('DELETE FROM verwaltungs_kontakte WHERE id = $1', [parseInt(req.params.kid)]);
     res.json({ deleted: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── ZEV / smart-me Strom-Abrechnung (optionales Modul, generisch je STWEG) ───
+// Pro Eigentuemer ein Mailcow-Alias `zev.<name>@<domain>`. smart-me schickt die
+// ZEV-Rechnung an den Alias; Mailcow faechert nativ auf: aktueller Bewohner +
+// Archiv-Postfach (smartme@) + Immosense-Rechnungsadresse. Bei Bewohner-/Eigent-
+// uemerwechsel (wohnungen_kontakte.gueltig_ab) -> Alias-Resync + Axova-Outbox-Mail.
+
+async function loadZevConfig(stweg) {
+  const r = await pool.query('SELECT * FROM zev_config WHERE stweg = $1', [stweg]);
+  if (r.rows.length) return r.rows[0];
+  return { stweg, aktiv: false, alias_domain: 'rosenweg9.ch', alias_prefix: 'zev',
+           archiv_mailbox: null, invoice_email: null, axova_email: null, notizen: null };
+}
+
+// Loest je Wohnung einer STWEG den Eigentuemer (Alias-Name) + aktuellen Bewohner
+// (goto-Empfaenger) auf. Aktueller Bewohner = Mieter > Bewohner > Eigentuemer aus
+// den aktiven (nicht archivierten, gueltig_ab <= heute) Kontakten; Flat-Fallback.
+async function resolveZevForStweg(stweg, cfg) {
+  const wRes = await pool.query('SELECT * FROM wohnungen WHERE stweg = $1', [stweg]);
+  const kRes = await pool.query(
+    `SELECT k.* FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id
+      WHERE w.stweg = $1 AND k.archiviert_am IS NULL
+        AND (k.gueltig_ab IS NULL OR k.gueltig_ab <= CURRENT_DATE)
+      ORDER BY k.rolle, k.sort_order, k.id`, [stweg]);
+  const byW = {};
+  for (const k of kRes.rows) (byW[k.wohnung_id] = byW[k.wohnung_id] || []).push(k);
+  const rows = wRes.rows.map(w => {
+    const ks = byW[w.id] || [];
+    const eig = ks.find(k => k.rolle === 'eigentuemer');
+    const eigName = (eig && eig.name) || w.eigentuemer_name || null;
+    const occ = ks.find(k => k.rolle === 'mieter') || ks.find(k => k.rolle === 'bewohner') || eig;
+    let bewEmail = (occ && occ.email) || null;
+    let bewName = (occ && occ.name) || null;
+    let bewRolle = (occ && occ.rolle) || null;
+    if (!ks.length) { // Flat-Fallback nur wenn gar keine Kontakte vorhanden
+      if (w.mieter_name) { bewEmail = w.mieter_email; bewName = w.mieter_name; bewRolle = 'mieter'; }
+      else if (w.eigentuemer_name) { bewEmail = w.eigentuemer_email; bewName = w.eigentuemer_name; bewRolle = 'eigentuemer'; }
+    }
+    const alias = zevAliasAddress(eigName, cfg.alias_prefix, cfg.alias_domain);
+    const goto = zevGotoTargets({ bewohnerEmail: bewEmail, archivMailbox: cfg.archiv_mailbox, invoiceEmail: cfg.invoice_email });
+    return {
+      wohnung_id: w.id, bezeichnung: w.bezeichnung, typ: w.typ,
+      eigentuemer_name: eigName, alias_address: alias,
+      bewohner_name: bewName, bewohner_email: bewEmail, bewohner_rolle: bewRolle,
+      goto, sync_ready: !!(alias && goto.length),
+    };
+  });
+  rows.sort((a, b) => String(a.bezeichnung || '').localeCompare(String(b.bezeichnung || ''), 'de'));
+  return rows;
+}
+
+// Synct alle ZEV-Aliase einer STWEG nach Mailcow (idempotent: add/edit je Alias).
+async function syncZevAliasesForStweg(stweg) {
+  const cfg = await loadZevConfig(stweg);
+  if (!cfg.aktiv) return { ok: false, reason: 'ZEV fuer diese STWEG nicht aktiv' };
+  const rows = await resolveZevForStweg(stweg, cfg);
+  const all = await mailcowApi('GET', '/get/alias/all');
+  const existingByAddr = {};
+  for (const a of (Array.isArray(all) ? all : [])) existingByAddr[String(a.address || '').toLowerCase()] = a;
+  const results = [];
+  for (const r of rows) {
+    if (!r.sync_ready) {
+      results.push({ ...r, synced: false, reason: !r.alias_address ? 'kein Eigentuemer-Name' : 'kein gueltiger Empfaenger' });
+      continue;
+    }
+    const addr = r.alias_address.toLowerCase();
+    const goto = r.goto.join(',');
+    try {
+      const ex = existingByAddr[addr];
+      if (ex) await mailcowApi('POST', '/edit/alias', { items: [String(ex.id)], attr: { goto, active: '1' } });
+      else await mailcowApi('POST', '/add/alias', { address: addr, goto, active: '1' });
+      results.push({ ...r, synced: true });
+    } catch (e) { results.push({ ...r, synced: false, reason: e.message }); }
+  }
+  return { ok: true, synced: results.filter(x => x.synced).length, total: rows.length, results };
+}
+
+// Bei Aktivierung: alle aktuell aktiven Bewohner/Eigentuemer-Kontakte als bereits
+// "verarbeitet" markieren (Baseline) -> bei Aktivierung keine Wechsel-Mail-Flut.
+// Echte Wechsel haben spaeter ein gueltig_ab in der Zukunft -> nicht in der Baseline.
+async function seedZevBaseline(stweg) {
+  await pool.query(
+    `INSERT INTO zev_wechsel_processed (kontakt_id, wohnung_id, stweg, processed_at)
+       SELECT k.id, k.wohnung_id, $1, NOW()
+         FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id
+        WHERE w.stweg = $1 AND k.archiviert_am IS NULL
+          AND (k.gueltig_ab IS NULL OR k.gueltig_ab <= CURRENT_DATE)
+          AND k.rolle IN ('mieter','bewohner','eigentuemer')
+     ON CONFLICT (kontakt_id) DO NOTHING`, [stweg]);
+}
+
+// Eine Wechsel-Benachrichtigung an Axova (+ Immosense als CC) in die Genehmigungs-
+// Outbox legen. Markiert den ausloesenden Kontakt nur dann als verarbeitet, wenn
+// tatsaechlich eine Mail erzeugt wurde (axova_email gesetzt) -> sonst Retry am Folgetag.
+async function notifyZevWechsel(cfg, k) {
+  const alias = zevAliasAddress(k.eigentuemer_name, cfg.alias_prefix, cfg.alias_domain);
+  if (!cfg.axova_email) return; // ohne Axova-Adresse: spaeter erneut versuchen
+  const ab = k.gueltig_ab ? String(k.gueltig_ab).slice(0, 10) : 'sofort';
+  const subject = `ZEV-Wechsel ${k.bezeichnung || ''} (STWEG ${cfg.stweg}) — smart-me Empfänger aktualisieren`;
+  const body =
+    `Hallo Axova-Team\n\n`
+    + `In der Wohnung "${k.bezeichnung || '—'}" (STWEG ${cfg.stweg}) ist ab ${ab} ein neuer `
+    + `${k.rolle === 'mieter' ? 'Mieter' : 'Bewohner'} hinterlegt:\n\n`
+    + `  Name: ${k.name || '—'}\n`
+    + (k.email ? `  Mail: ${k.email}\n` : '')
+    + (k.telefon ? `  Tel:  ${k.telefon}\n` : '')
+    + `\nDie ZEV-Abrechnung dieser Wohnung läuft weiterhin über den Alias:\n  ${alias || '(kein Alias — Eigentümer-Name fehlt)'}\n\n`
+    + `Bitte smart-me für diese Wohnung entsprechend aktualisieren. Die Weiterleitung an den `
+    + `Bewohner, das Archiv (${cfg.archiv_mailbox || '—'}) und die Rechnungsadresse `
+    + `(${cfg.invoice_email || '—'}) ist über den Alias bereits angepasst.\n\n`
+    + `Freundliche Grüsse\nVerwaltung Rosenweg (automatische Meldung)`;
+  const queueId = await enqueueVerwaltungMail({
+    source_type: 'zev-wechsel', source_id: k.wohnung_id,
+    mailTo: [cfg.axova_email],
+    mailCc: cfg.invoice_email ? [cfg.invoice_email] : null,
+    subject, bodyText: body, createdBy: 'system (ZEV)',
+  });
+  await pool.query(
+    `INSERT INTO zev_wechsel_processed (kontakt_id, wohnung_id, stweg, alias_address, outbox_queue_id, processed_at)
+     VALUES ($1,$2,$3,$4,$5,NOW()) ON CONFLICT (kontakt_id) DO NOTHING`,
+    [k.id, k.wohnung_id, cfg.stweg, alias, queueId]);
+}
+
+// Taeglich (nach Auto-Archive): je aktiver STWEG Aliase neu syncen + neue Bewohner-/
+// Mieter-Kontakte (ab gueltig_ab, noch nicht gemeldet) an Axova/Immosense melden.
+async function processZevDaily() {
+  let cfgs;
+  try { cfgs = await pool.query('SELECT * FROM zev_config WHERE aktiv = true'); }
+  catch { return; } // Tabelle evtl. noch nicht migriert / DB nicht bereit
+  for (const cfg of cfgs.rows) {
+    try {
+      await syncZevAliasesForStweg(cfg.stweg);
+      const neu = await pool.query(
+        `SELECT k.*, w.bezeichnung, w.eigentuemer_name
+           FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id
+          WHERE w.stweg = $1 AND k.archiviert_am IS NULL
+            AND k.rolle IN ('mieter','bewohner')
+            AND (k.gueltig_ab IS NULL OR k.gueltig_ab <= CURRENT_DATE)
+            AND NOT EXISTS (SELECT 1 FROM zev_wechsel_processed p WHERE p.kontakt_id = k.id)`,
+        [cfg.stweg]);
+      for (const k of neu.rows) await notifyZevWechsel(cfg, k);
+      if (neu.rows.length) console.log(`[zev-daily] STWEG ${cfg.stweg}: ${neu.rows.length} Wechsel an Axova gemeldet`);
+    } catch (e) { console.warn('[zev-daily]', cfg.stweg, e.message); }
+  }
+}
+
+app.get('/api/zev/config/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
+  try { res.json({ config: await loadZevConfig(parseInt(req.params.stweg)) }); }
+  catch (e) { console.error('[zev-config-get]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+app.put('/api/zev/config/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, async (req, res) => {
+  try {
+    const stweg = parseInt(req.params.stweg); const b = req.body || {};
+    const trim = v => (typeof v === 'string' && v.trim()) ? v.trim() : null;
+    const prev = await loadZevConfig(stweg);
+    await pool.query(
+      `INSERT INTO zev_config (stweg, aktiv, alias_domain, alias_prefix, archiv_mailbox, invoice_email, axova_email, notizen, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())
+       ON CONFLICT (stweg) DO UPDATE SET
+         aktiv=$2, alias_domain=$3, alias_prefix=$4, archiv_mailbox=$5, invoice_email=$6, axova_email=$7, notizen=$8, updated_at=NOW()`,
+      [stweg, b.aktiv === true, trim(b.alias_domain) || 'rosenweg9.ch', (trim(b.alias_prefix) || 'zev').toLowerCase(),
+       trim(b.archiv_mailbox), trim(b.invoice_email), trim(b.axova_email), trim(b.notizen)]);
+    // Erstaktivierung: Baseline setzen (kein Wechsel-Mail-Schwall) + Aliase initial syncen.
+    if (b.aktiv === true && !prev.aktiv) {
+      await seedZevBaseline(stweg).catch(e => console.warn('[zev-baseline]', e.message));
+      syncZevAliasesForStweg(stweg).catch(e => console.warn('[zev-initial-sync]', e.message));
+    }
+    res.json({ ok: true, config: await loadZevConfig(stweg) });
+  } catch (e) { console.error('[zev-config-put]', e); res.status(500).json({ error: 'Fehler beim Speichern' }); }
+});
+
+app.get('/api/zev/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
+  try {
+    const stweg = parseInt(req.params.stweg);
+    const cfg = await loadZevConfig(stweg);
+    res.json({ config: cfg, wohnungen: await resolveZevForStweg(stweg, cfg) });
+  } catch (e) { console.error('[zev-wohnungen]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+app.post('/api/zev/sync/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, async (req, res) => {
+  try { res.json(await syncZevAliasesForStweg(parseInt(req.params.stweg))); }
+  catch (e) { console.error('[zev-sync]', e); res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/wohnungen/eigentuemer-übersicht', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
@@ -19682,6 +19869,33 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_print_jobs_token ON print_jobs(token);
       ALTER TABLE print_jobs ADD COLUMN IF NOT EXISTS last_reminder_at TIMESTAMPTZ;
       CREATE INDEX IF NOT EXISTS idx_print_jobs_open ON print_jobs (created_at DESC) WHERE picked_up_at IS NULL AND status = 'printed';
+
+      -- ZEV / smart-me Strom-Abrechnung pro STWEG (optionales Modul).
+      -- Generisch je STWEG; aktuell nur STWEG 3 aktiv. Pro Eigentuemer ein
+      -- Mailcow-Alias zev.<name>@<alias_domain>, goto = aktueller Bewohner +
+      -- archiv_mailbox + invoice_email. Adressen im Modul-UI konfigurierbar.
+      CREATE TABLE IF NOT EXISTS zev_config (
+        stweg INTEGER PRIMARY KEY,
+        aktiv BOOLEAN NOT NULL DEFAULT false,
+        alias_domain VARCHAR(120) NOT NULL DEFAULT 'rosenweg9.ch',
+        alias_prefix VARCHAR(40) NOT NULL DEFAULT 'zev',
+        archiv_mailbox VARCHAR(255),
+        invoice_email VARCHAR(255),
+        axova_email VARCHAR(255),
+        notizen TEXT,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      -- Tracking: welcher Bewohner-/Eigentuemerwechsel (= wohnungen_kontakte-Eintrag
+      -- mit gueltig_ab) wurde schon verarbeitet (Alias-Resync + Axova-Outbox-Mail),
+      -- damit der taegliche Job nicht mehrfach benachrichtigt.
+      CREATE TABLE IF NOT EXISTS zev_wechsel_processed (
+        kontakt_id INTEGER PRIMARY KEY,
+        wohnung_id INTEGER,
+        stweg INTEGER,
+        alias_address VARCHAR(255),
+        outbox_queue_id INTEGER,
+        processed_at TIMESTAMPTZ DEFAULT NOW()
+      );
 
       CREATE TABLE IF NOT EXISTS verwaltungen (
         id SERIAL PRIMARY KEY,
