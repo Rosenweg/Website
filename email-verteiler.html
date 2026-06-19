@@ -774,8 +774,16 @@
 
                     const statusColor = entry.status === 'sent' ? 'green' : entry.status === 'partial' ? 'yellow' : 'red';
                     const statusLabel = entry.status === 'sent' ? 'Zugestellt' : entry.status === 'partial' ? 'Teilweise' : 'Fehlgeschlagen';
-                    const failedList = entry.failed_recipients ? JSON.parse(entry.failed_recipients) : [];
-                    const recipientsList = entry.recipients_list ? JSON.parse(entry.recipients_list) : [];
+                    // Alte Einträge speichern recipients_list als Komma-String, neue als JSON
+                    // — robust parsen, sonst crasht JSON.parse und das ganze Protokoll bricht ab.
+                    const parseList = (v) => {
+                        if (!v) return [];
+                        if (Array.isArray(v)) return v;
+                        try { const p = JSON.parse(v); return Array.isArray(p) ? p : [String(p)]; }
+                        catch { return String(v).split(',').map(s => s.trim()).filter(Boolean); }
+                    };
+                    const failedList = parseList(entry.failed_recipients);
+                    const recipientsList = parseList(entry.recipients_list);
 
                     const card = document.createElement('div');
                     card.className = 'border rounded-lg p-4 hover:bg-gray-50 transition cursor-pointer';
