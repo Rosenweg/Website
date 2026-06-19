@@ -4484,7 +4484,18 @@ function computeWohnungChanges(oldRow, newRow, oldKontakte, newKontakte) {
   for (const [k, v] of newByKey) {
     if (!oldByKey.has(k)) {
       changes.push(`${ROLLE_LABEL[v.rolle] || v.rolle} neu: ${v.name || v.email}${v.email ? ` <${v.email}>` : ''}`);
+      continue;
     }
+    // Gleicher Kontakt (Rolle + Email/Name unveraendert) -> geaenderte Einzelfelder
+    // melden (Name, Email, Telefon, Adresse). Vorher wurden diese verschluckt.
+    const o = oldByKey.get(k);
+    const lbl = ROLLE_LABEL[v.rolle] || v.rolle;
+    const feld = [];
+    if ((o.name || '') !== (v.name || '')) feld.push(`Name "${o.name || '—'}" → "${v.name || '—'}"`);
+    if ((o.email || '').toLowerCase() !== (v.email || '').toLowerCase()) feld.push(`E-Mail "${o.email || '—'}" → "${v.email || '—'}"`);
+    if (normalizePhone(o.telefon || '') !== normalizePhone(v.telefon || '')) feld.push(`Telefon "${o.telefon || '—'}" → "${v.telefon || '—'}"`);
+    if ((o.adresse || '').trim() !== (v.adresse || '').trim()) feld.push(`Adresse "${o.adresse || '—'}" → "${v.adresse || '—'}"`);
+    if (feld.length) changes.push(`${lbl} ${v.name || v.email} geändert: ${feld.join('; ')}`);
   }
   return changes;
 }
@@ -5671,7 +5682,9 @@ async function resolveZevForStweg(stweg, cfg) {
       if (w.mieter_name) { bewEmail = w.mieter_email; bewName = w.mieter_name; bewRolle = 'mieter'; }
       else if (w.eigentuemer_name) { bewEmail = w.eigentuemer_email; bewName = w.eigentuemer_name; bewRolle = 'eigentuemer'; }
     }
-    const alias = zevAliasAddress(eigName, cfg.alias_prefix, cfg.alias_domain);
+    // Alias traegt den Namen des AKTUELLEN Bewohners/Mieters (nicht des Eigentuemers):
+    // bei Bewohnerwechsel aendert sich die Adresse -> Axova stellt smart-me darauf um.
+    const alias = zevAliasAddress(bewName, cfg.alias_prefix, cfg.alias_domain);
     const goto = zevGotoTargets({ bewohnerEmail: bewEmail, archivMailbox: cfg.archiv_mailbox, invoiceEmail: cfg.invoice_email });
     return {
       wohnung_id: w.id, bezeichnung: w.bezeichnung, typ: w.typ,
