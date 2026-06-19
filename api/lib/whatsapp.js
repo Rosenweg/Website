@@ -4,6 +4,10 @@
 const { pool } = require('./db');
 const { normalizePhone } = require('./utils');
 
+// Gateway-Endpoints. Default = Overlay-Name (Swarm); nach LXC-Migration via
+// Env GATEWAY_GROUPS_URL / GATEWAY_SEND_URL auf die CT-IP gesetzt.
+const GATEWAY_GROUPS_URL = process.env.GATEWAY_GROUPS_URL || 'http://tasks.rosenweg_whatsapp-bot:8080/groups';
+
 // Cache für WA-Group-ID "Rosenweg Technik" (5 Min TTL)
 let _technikWaCache = { id: null, fetched_at: 0 };
 async function resolveTechnikWhatsappGroupId() {
@@ -12,8 +16,7 @@ async function resolveTechnikWhatsappGroupId() {
     return _technikWaCache.id;
   }
   try {
-    // tasks.* statt VIP weil Docker Swarm IPVS auf unserem Setup zickt
-    const r = await fetch('http://tasks.rosenweg_whatsapp-bot:8080/groups', {
+    const r = await fetch(GATEWAY_GROUPS_URL, {
       headers: { 'X-WA-Secret': process.env.WHATSAPP_SHARED_SECRET || '' },
       signal: AbortSignal.timeout(8000),
     });
