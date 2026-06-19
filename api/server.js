@@ -13370,7 +13370,7 @@ async function checkBotHeartbeat() {
         + `Telefon: ${phone}\n\n`
         + `Prüfen: docker service ps rosenweg_whatsapp-bot\n`
         + `Logs:    docker service logs rosenweg_whatsapp-bot --tail 50\n`
-        + `Admin-UI: ${SITE_URL}/whatsapp-bot-admin.html`,
+        + `Admin-UI: https://whatsapp.rosenweg4303.ch`,
     }, 'whatsapp-bot-stale').catch(() => {});
     pushWhatsappBroadcast({
       emails: adminEmails,

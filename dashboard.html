@@ -157,7 +157,7 @@
       const w = widgets.whatsapp_outbox;
       const hasIssue = (w.pending || 0) > 5 || (w.failed || 0) > 0;
       const ringCls = hasIssue ? 'ring-2 ring-red-300' : '';
-      cards.push(card(`💬 WhatsApp-Bot${(w.failed||0) > 0 ? ' ⚠' : ''}`, '/whatsapp-bot-admin.html',
+      cards.push(card(`💬 WhatsApp-Bot${(w.failed||0) > 0 ? ' ⚠' : ''}`, 'https://whatsapp.rosenweg4303.ch',
         `<div class="grid grid-cols-2 gap-2 text-sm ${ringCls} rounded p-1">
           <div class="bg-amber-50 rounded p-2 text-center">
             <div class="text-xs text-amber-700 uppercase">Pending</div>
