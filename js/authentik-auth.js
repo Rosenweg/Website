@@ -174,17 +174,20 @@ const AuthentikAuth = {
   createLoginButton(container) {
     if (typeof container === 'string') container = document.getElementById(container);
     if (!container) return;
+    // Inline-Styles (KEIN Tailwind) — der Button muss auch auf Seiten ohne
+    // Tailwind-CDN sauber aussehen (sonst der "super hässliche" ungestylte Button).
     container.innerHTML = `
-      <div class="text-center">
+      <div style="text-align:center">
         <button onclick="AuthentikAuth.login()"
-          class="inline-flex items-center gap-3 bg-blue-600 text-white px-8 py-4 rounded-lg hover:bg-blue-700 transition font-semibold text-lg shadow-lg">
-          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          style="display:inline-flex;align-items:center;gap:.6rem;background:#2563eb;color:#fff;border:none;padding:.85rem 1.75rem;border-radius:.6rem;font-weight:600;font-size:1.05rem;cursor:pointer;box-shadow:0 8px 20px rgba(37,99,235,.35);transition:background .15s"
+          onmouseover="this.style.background='#1d4ed8'" onmouseout="this.style.background='#2563eb'">
+          <svg width="22" height="22" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
               d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path>
           </svg>
           Mit Rosenweg-Konto anmelden
         </button>
-        <p class="text-gray-500 mt-4 text-sm">Sichere Anmeldung über Authentik SSO</p>
+        <p style="color:#6b7280;margin-top:1rem;font-size:.85rem">Sichere Anmeldung über Authentik SSO</p>
       </div>
     `;
   },
