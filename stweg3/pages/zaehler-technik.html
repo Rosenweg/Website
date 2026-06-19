@@ -211,6 +211,8 @@
             timer = setInterval(() => { if (!document.hidden) load(); }, 10000);
         }
 
+        // OAuth-Callback aus #auth=... verarbeiten (Token speichern), SONST Login-Loop.
+        AuthentikAuth.handleCallback();
         start();
     </script>
 </body>
