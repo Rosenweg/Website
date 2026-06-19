@@ -2723,6 +2723,8 @@ app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
       try {
         await transporter.sendMail({
           from: MAIL_FROM,
+          // Antworten gehen an den sendenden User, nicht an die generische From-Adresse.
+          replyTo: req.user?.email || undefined,
           to,
           subject,
           html: body,

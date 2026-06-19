@@ -756,11 +756,9 @@
             list.innerHTML = '';
 
             try {
-                const headers = {};
-                const token = AuthentikAuth.getToken();
-                if (token) headers['Authorization'] = `Bearer ${token}`;
-
-                const res = await fetch('/api/email/log?limit=50', { headers });
+                // apiFetch (wie beim Senden) — robuste Authentik-Auth statt rohem Bearer.
+                const res = await AuthentikAuth.apiFetch('/api/email/log?limit=50');
+                if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
 
                 loading.classList.add('hidden');
