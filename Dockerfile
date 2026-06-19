@@ -58,6 +58,11 @@ RUN rm -rf /usr/share/nginx/html/stweg1 \
            /usr/share/nginx/html/nginx.stweg.conf \
            /usr/share/nginx/html/Dockerfile.stweg
 
+# PBX-Frontend lebt im eigenen Container (pbx.rosenweg4303.ch / CT 220, pbx-api).
+# Hauptseite verlinkt nur dorthin (js/nav.js), serviert KEINE Kopie.
+RUN rm -rf /usr/share/nginx/html/pbx \
+           /usr/share/nginx/html/pbx-admin.html
+
 EXPOSE 80
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
