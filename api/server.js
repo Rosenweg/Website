@@ -3186,6 +3186,10 @@ const VERTEILER_DOMAIN = process.env.VERTEILER_DOMAIN || 'rosenweg4303.ch';
 // daraus die email_archive-DB (Suche/Anhaenge/Vier-Augen-Loeschen bleiben).
 const ARCHIV_IMAP_USER = process.env.ARCHIV_IMAP_USER || `archiv@${VERTEILER_DOMAIN}`;
 const ARCHIV_IMAP_PASS = process.env.ARCHIV_IMAP_PASS || '';
+// ZEV smart-me Archiv-Postfach (eigener IMAP-Login). Poller speist zev_rechnungen
+// fuer die Bewohner-Online-Ansicht. Host = IMAP_HOST (gleiche Mailcow, rosenweg9.ch).
+const SMARTME_IMAP_USER = process.env.SMARTME_IMAP_USER || 'smartme@rosenweg9.ch';
+const SMARTME_IMAP_PASS = process.env.SMARTME_IMAP_PASS || '';
 // Dediziertes dmarc@-Postfach (eigener IMAP-Login). /api/dmarc/reports liest daraus.
 const DMARC_IMAP_USER = process.env.DMARC_IMAP_USER || `dmarc@${VERTEILER_DOMAIN}`;
 const DMARC_IMAP_PASS = process.env.DMARC_IMAP_PASS || '';
@@ -4037,6 +4041,87 @@ async function pollArchivMailbox() {
 if (ARCHIV_IMAP_PASS) {
   setTimeout(() => pollArchivMailbox(), 25000);
   setInterval(() => pollArchivMailbox(), 60000);
+}
+
+// ─── ZEV smart-me Archiv-Poller (Rechnungen -> zev_rechnungen) ────────
+// Map Empfaenger-Alias (zev.<name>@...) -> Wohnung, aus den aktiven ZEV-STWEGs.
+async function buildZevAliasMap() {
+  const map = {};
+  let cfgs;
+  try { cfgs = await pool.query('SELECT * FROM zev_config WHERE aktiv = true'); } catch { return map; }
+  for (const cfg of cfgs.rows) {
+    try {
+      const rows = await resolveZevForStweg(cfg.stweg, cfg);
+      for (const r of rows) if (r.alias_address) map[r.alias_address.toLowerCase()] = { wohnung_id: r.wohnung_id, stweg: cfg.stweg, alias_address: r.alias_address };
+    } catch {}
+  }
+  return map;
+}
+
+let zevPolling = false;
+async function pollZevArchive() {
+  if (!SMARTME_IMAP_PASS || zevPolling) return;
+  zevPolling = true;
+  const { ImapFlow } = require('imapflow');
+  const client = new ImapFlow({
+    host: IMAP_HOST, port: IMAP_PORT, secure: true,
+    auth: { user: SMARTME_IMAP_USER, pass: SMARTME_IMAP_PASS }, logger: false,
+    socketTimeout: 30000, greetingTimeout: 15000, connectionTimeout: 30000,
+    tls: { rejectUnauthorized: false },
+  });
+  try {
+    await client.connect();
+    const aliasMap = await buildZevAliasMap();
+    const lock = await client.getMailboxLock('INBOX');
+    try {
+      const mb = client.mailbox;
+      const st = await pool.query("SELECT last_uid::text AS last_uid, uid_validity::text AS uid_validity FROM imap_state WHERE mailbox = 'ZEV'");
+      let lastUid;
+      if (st.rows.length === 0) {
+        // Erster Lauf: Altbestand ab UID 0 mitnehmen (neues Postfach, kein Fremdmail).
+        lastUid = 0;
+        await pool.query("INSERT INTO imap_state (mailbox, uid_validity, last_uid) VALUES ('ZEV', $1, '0')", [String(mb.uidValidity)]);
+      } else if (st.rows[0].uid_validity !== String(mb.uidValidity)) {
+        lastUid = 0;
+        await pool.query("UPDATE imap_state SET uid_validity = $1, last_uid = '0' WHERE mailbox = 'ZEV'", [String(mb.uidValidity)]);
+      } else {
+        lastUid = parseInt(st.rows[0].last_uid, 10) || 0;
+      }
+      let maxUid = lastUid, stored = 0;
+      for await (const msg of client.fetch(`${lastUid + 1}:*`, { uid: true, source: true, envelope: true }, { uid: true })) {
+        if (msg.uid <= lastUid) continue;
+        if (msg.uid > maxUid) maxUid = msg.uid;
+        const messageId = msg.envelope?.messageId || (`zev-${mb.uidValidity}-${msg.uid}`);
+        try {
+          const dup = await pool.query('SELECT id FROM zev_rechnungen WHERE message_id = $1', [messageId]);
+          if (dup.rows.length || !msg.source) continue;
+          const parsed = await simpleParser(msg.source);
+          const recips = [].concat(parsed.to?.value || [], parsed.cc?.value || []).map(a => String(a.address || '').toLowerCase());
+          const hdrTo = String(parsed.headers?.get('delivered-to') || parsed.headers?.get('x-original-to') || '').toLowerCase();
+          if (hdrTo) recips.push(...hdrTo.split(/[<>,\s]+/).filter(Boolean));
+          let match = null;
+          for (const r of recips) { if (aliasMap[r]) { match = aliasMap[r]; break; } }
+          const pdf = (parsed.attachments || []).find(a => a.contentType === 'application/pdf' || /\.pdf$/i.test(a.filename || ''));
+          await pool.query(
+            `INSERT INTO zev_rechnungen (stweg, wohnung_id, alias_address, message_id, betreff, absender, empfangen_am, pdf_filename, pdf_size, pdf_data)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (message_id) DO NOTHING`,
+            [match?.stweg || null, match?.wohnung_id || null, match?.alias_address || (recips.find(r => aliasMap[r]) || null), messageId,
+             parsed.subject || null, parsed.from?.value?.[0]?.address || null, parsed.date || null,
+             pdf?.filename || null, pdf ? pdf.content.length : null, pdf ? pdf.content : null]);
+          stored++;
+        } catch (e) { console.error(`[ZEV-Archiv] UID ${msg.uid}:`, e.message); }
+      }
+      if (maxUid > lastUid) {
+        await pool.query("UPDATE imap_state SET last_uid = $1, updated_at = NOW() WHERE mailbox = 'ZEV'", [String(maxUid)]);
+        if (stored) console.log(`[ZEV-Archiv] ${stored} Rechnung(en) erfasst (Watermark → UID ${maxUid})`);
+      }
+    } finally { lock.release(); }
+  } catch (e) { console.error('[ZEV-Archiv] Poll-Fehler:', e.message); }
+  finally { try { await client.logout(); } catch {} zevPolling = false; }
+}
+if (SMARTME_IMAP_PASS) {
+  setTimeout(() => pollZevArchive(), 90000);
+  setInterval(() => pollZevArchive(), 5 * 60 * 1000);
 }
 
 // ─── STWEG Kontakte ─────────────────────────────────────────────────
@@ -5705,12 +5790,12 @@ app.put('/api/zev/config/:stweg', authMiddleware, requirePermission('wohnungsver
     const trim = v => (typeof v === 'string' && v.trim()) ? v.trim() : null;
     const prev = await loadZevConfig(stweg);
     await pool.query(
-      `INSERT INTO zev_config (stweg, aktiv, alias_domain, alias_prefix, archiv_mailbox, invoice_email, axova_email, notizen, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())
+      `INSERT INTO zev_config (stweg, aktiv, alias_domain, alias_prefix, archiv_mailbox, invoice_email, axova_email, notizen, eigentuemer_sieht_mieter, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
        ON CONFLICT (stweg) DO UPDATE SET
-         aktiv=$2, alias_domain=$3, alias_prefix=$4, archiv_mailbox=$5, invoice_email=$6, axova_email=$7, notizen=$8, updated_at=NOW()`,
+         aktiv=$2, alias_domain=$3, alias_prefix=$4, archiv_mailbox=$5, invoice_email=$6, axova_email=$7, notizen=$8, eigentuemer_sieht_mieter=$9, updated_at=NOW()`,
       [stweg, b.aktiv === true, trim(b.alias_domain) || 'rosenweg9.ch', (trim(b.alias_prefix) || 'zev').toLowerCase(),
-       trim(b.archiv_mailbox), trim(b.invoice_email), trim(b.axova_email), trim(b.notizen)]);
+       trim(b.archiv_mailbox), trim(b.invoice_email), trim(b.axova_email), trim(b.notizen), b.eigentuemer_sieht_mieter === true]);
     // Erstaktivierung: Baseline setzen (kein Wechsel-Mail-Schwall) + Aliase initial syncen.
     if (b.aktiv === true && !prev.aktiv) {
       await seedZevBaseline(stweg).catch(e => console.warn('[zev-baseline]', e.message));
@@ -5731,6 +5816,55 @@ app.get('/api/zev/wohnungen/:stweg', authMiddleware, requirePermission('wohnungs
 app.post('/api/zev/sync/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, async (req, res) => {
   try { res.json(await syncZevAliasesForStweg(parseInt(req.params.stweg))); }
   catch (e) { console.error('[zev-sync]', e); res.status(500).json({ error: e.message }); }
+});
+
+// Welche Wohnungen darf dieser User (per Email) ZEV-Rechnungen sehen?
+// Aktueller Bewohner/Mieter: immer. Eigentuemer: nur selbstbewohnt ODER wenn der
+// STWEG-Schalter eigentuemer_sieht_mieter an ist. Nur in ZEV-aktiven STWEGs.
+async function getZevWohnungenForUser(user) {
+  const email = String(user?.email || '').toLowerCase();
+  if (!email) return [];
+  const r = await pool.query(
+    `SELECT k.wohnung_id, k.rolle, w.bewohnt_von, c.eigentuemer_sieht_mieter
+       FROM wohnungen_kontakte k
+       JOIN wohnungen w ON k.wohnung_id = w.id
+       JOIN zev_config c ON c.stweg = w.stweg AND c.aktiv = true
+      WHERE k.archiviert_am IS NULL
+        AND (k.gueltig_ab IS NULL OR k.gueltig_ab <= CURRENT_DATE)
+        AND LOWER(k.email) = $1`, [email]);
+  const allowed = new Set();
+  for (const row of r.rows) {
+    if (row.rolle === 'mieter' || row.rolle === 'bewohner') allowed.add(row.wohnung_id);
+    else if (row.rolle === 'eigentuemer' && (row.bewohnt_von === 'eigentuemer' || row.eigentuemer_sieht_mieter)) allowed.add(row.wohnung_id);
+  }
+  return [...allowed];
+}
+
+app.get('/api/zev/meine-rechnungen', authMiddleware, async (req, res) => {
+  try {
+    const wohnungen = await getZevWohnungenForUser(req.user);
+    if (!wohnungen.length) return res.json({ rechnungen: [] });
+    const r = await pool.query(
+      `SELECT id, wohnung_id, betreff, absender, empfangen_am, pdf_filename, pdf_size,
+              (pdf_data IS NOT NULL) AS has_pdf
+         FROM zev_rechnungen WHERE wohnung_id = ANY($1::int[])
+        ORDER BY empfangen_am DESC NULLS LAST, id DESC`, [wohnungen]);
+    res.json({ rechnungen: r.rows });
+  } catch (e) { console.error('[zev-meine-rechnungen]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+app.get('/api/zev/rechnung/:id/pdf', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const wohnungen = await getZevWohnungenForUser(req.user);
+    if (!wohnungen.length) return res.status(403).json({ error: 'Kein Zugriff' });
+    const r = await pool.query('SELECT wohnung_id, pdf_filename, pdf_data FROM zev_rechnungen WHERE id = $1', [id]);
+    if (!r.rows.length || !r.rows[0].pdf_data) return res.status(404).json({ error: 'Nicht gefunden' });
+    if (!wohnungen.includes(r.rows[0].wohnung_id)) return res.status(403).json({ error: 'Kein Zugriff' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${String(r.rows[0].pdf_filename || 'rechnung.pdf').replace(/[^\w.\-]/g, '_')}"`);
+    res.send(r.rows[0].pdf_data);
+  } catch (e) { console.error('[zev-rechnung-pdf]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 
 app.get('/api/wohnungen/eigentuemer-übersicht', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
@@ -19896,6 +20030,26 @@ async function initDB() {
         outbox_queue_id INTEGER,
         processed_at TIMESTAMPTZ DEFAULT NOW()
       );
+      -- Toggle: sieht der Eigentuemer auch die Rechnungen seiner vermieteten
+      -- Wohnungen (Mieter-Rechnungen)? Default aus = datensparsam (jeder seins).
+      ALTER TABLE zev_config ADD COLUMN IF NOT EXISTS eigentuemer_sieht_mieter BOOLEAN NOT NULL DEFAULT false;
+      -- Aus smartme@ gepollte ZEV-Rechnungen (PDF), je Wohnung attribuiert ueber
+      -- die Alias-Empfaengeradresse (zev.<name>@...). Online-Ansicht fuer Bewohner.
+      CREATE TABLE IF NOT EXISTS zev_rechnungen (
+        id SERIAL PRIMARY KEY,
+        stweg INTEGER,
+        wohnung_id INTEGER,
+        alias_address VARCHAR(255),
+        message_id VARCHAR(512) UNIQUE,
+        betreff TEXT,
+        absender VARCHAR(320),
+        empfangen_am TIMESTAMPTZ,
+        pdf_filename VARCHAR(300),
+        pdf_size INTEGER,
+        pdf_data BYTEA,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_zev_rechnungen_wohnung ON zev_rechnungen(wohnung_id, empfangen_am DESC);
 
       CREATE TABLE IF NOT EXISTS verwaltungen (
         id SERIAL PRIMARY KEY,
