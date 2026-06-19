@@ -24,9 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 make g+
   && npm install --omit=dev \
   && apt-get purge -y python3 make g++ && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 COPY whatsapp-bot/index.js whatsapp-bot/gateway.js ./
-# Web-UI fuer den Gateway (whatsapp.rosenweg4303.ch)
-COPY whatsapp-gateway.html ./public/index.html
-COPY js/ ./public/js/
+# (Gateway-Web-UI entfernt — laeuft jetzt in einem eigenen Container.)
 
 # Session-Verzeichnis (Volume-Mount empfohlen)
 RUN mkdir -p /data && chown -R node:node /data /app

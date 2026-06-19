@@ -1428,6 +1428,29 @@ app.get('/api/tv/channels', authMiddleware, async (req, res) => {
 // Browser holt sich hier nur den Token + die public Stream-URL — keine
 // MPEG-TS-Bytes mehr durch die API. Player verbindet sich direkt mit dem
 // LXC via CF Tunnel.
+// Multicast-Playlist (alle Sender als udpxy-HTTP-URLs, cross-VLAN) fuer native
+// Player. Wird hier (statt im Streamer) ausgeliefert, weil die ISP-nginx den
+// Streamer im RK-Clients-VLAN nicht erreicht, die API ueber das Overlay aber schon.
+// Kein Auth — sind nur udpxy-URLs, abspielbar nur im Hausnetz.
+app.get('/api/tv/playlist.m3u', async (req, res) => {
+  try {
+    const udpxy = process.env.UDPXY_BASE || 'http://100.64.9.200:4022';
+    const r = await fetch('https://api.init7.net/tvchannels.m3u', {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) throw new Error('init7 HTTP ' + r.status);
+    let body = await r.text();
+    // udp://@<gruppe>:<port> -> http://<udpxy>/udp/<gruppe>:<port>
+    body = body.replace(/^udp:\/\/@?([\d.]+):(\d+).*$/gm, (_m, g, p) => `${udpxy}/udp/${g}:${p}`);
+    res.set('Content-Type', 'audio/x-mpegurl; charset=utf-8');
+    res.set('Content-Disposition', 'attachment; filename="rosenweg-tv-multicast.m3u"');
+    res.set('Cache-Control', 'public, max-age=1800');
+    res.send(body);
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
 app.get('/api/tv/stream-url/:channelId', authMiddleware, (req, res) => {
   const id = req.params.channelId;
   if (!/^[a-f0-9-]+$/i.test(id)) return res.status(400).json({ error: 'Invalid channel id' });
