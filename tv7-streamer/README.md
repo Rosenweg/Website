@@ -1,23 +1,30 @@
-# tv7-streamer (LXC 250)
+# TV7-Streamer (LXC 250 / CT 250, `100.64.9.250`, RK-Clients-VLAN)
 
-Standalone Streamer für Init7-Tellio-HLS. Eigener LXC weil das ffmpeg
-Audio-Transcode (AC-3 → AAC) sonst den `rosenweg_api`-Container blockt.
+Stand-alone Node-Proxy fuer Init7-TV. Liefert alle 242 Sender an Browser
+(mpegts.js) und native Player.
 
-## Komponenten
+## Quellen pro Kanal
+- **Multicast** `udp://@233.50.230.x:5000` (alle 242, lokal auf RK-Clients;
+  Codecs HEVC/H.264/mpeg2).
+- **HTTP-HLS** `api.tv.init7.net` (nur ~101 mit channel-id, immer H.264).
 
-- **server.js** — Node.js HTTP-Server auf Port 3000
-  - `GET /channels` → cached Init7-Playlist als JSON
-  - `GET /stream/<channel-id>?token=…` → MPEG-TS-Stream, transcoded
-  - `GET /health` → `{ok, sessions}`
-- **tv7-streamer.service** — systemd-Unit
-- **/etc/default/tv7-streamer** — Env (HMAC_SECRET, PORT)
+## Browser-Auslieferung
+- `?codec=hevc` (HEVC-faehiger Browser): Multicast-Quelle, Video COPY, mpeg2->H.264.
+- sonst: H.264-Quelle (HTTP wo vorhanden, sonst Multicast); HEVC/mpeg2 -> H.264
+  (max 720p). Audio AC-3/MP2 -> AAC.
 
-## Fanout
+## Endpoints
+- `/channels` — JSON (242, mit `mcast`/`httpId`/`hevc`/`h264`).
+- `/playlist.m3u` — alle 242 als udpxy-URLs (cross-VLAN). **Hinweis:** Browser
+  laden die M3U ueber `/api/tv/playlist.m3u` (API), weil die ISP-nginx den
+  Streamer nicht erreicht.
+- `/stream/<id>?token=...[&codec=hevc]` — MPEG-TS (HMAC-Token vom rosenweg_api).
 
-Pro Channel **EIN** ffmpeg-Prozess, alle Zuschauer teilen sich das Output.
-Wenn der letzte Client geht: 10 s Karenzzeit, dann `SIGTERM` an ffmpeg.
-
-## Deploy / Update
-
-`./deploy.sh` lädt server.js + service-Unit per `pct push` in CT 250 und
-restartet den Service.
+## Deploy (NICHT via GHA — laeuft direkt im CT)
+```
+pct push 250 server.js /opt/tv7-streamer/server.js
+pct exec 250 -- node --check /opt/tv7-streamer/server.js
+pct exec 250 -- systemctl restart tv7-streamer
+```
+Secret: `TV7_HMAC_SECRET` in `/etc/default/tv7-streamer` (gleich wie rosenweg_api).
+udpxy laeuft auf CT 109 (`tv-proxy`, `100.64.9.200:4022`).
