@@ -1376,39 +1376,59 @@ const TV7_TOKEN_TTL = 3600; // 1 hour
 let tv7ChannelsCache = null;
 let tv7CacheTime = 0;
 
+// Multicast-only-Sender (kein HTTP-channel-id) bekommen eine stabile hex+bindestrich-
+// ID aus der Gruppe (233.50.230.57 -> e9-32-e6-39) — passt durch die id-Regex und
+// IDENTISCH zur Logik im tv7-streamer (mcastId), damit /stream/<id> dort aufgeht.
+function mcastIdFromGroup(group) {
+  return group.split('.').map(o => parseInt(o, 10).toString(16).padStart(2, '0')).join('-');
+}
+
+function parseTV7Playlist(text) {
+  const out = [];
+  const lines = (text || '').split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].startsWith('#EXTINF')) continue;
+    const url = (lines[i + 1] || '').trim();
+    if (!url || url.startsWith('#')) continue;
+    out.push({
+      logo: (lines[i].match(/tvg-logo="([^"]*)"/) || [])[1] || '',
+      tvg: (lines[i].match(/tvg-name="([^"]*)"/) || [])[1] || '',
+      group: (lines[i].match(/group-title="([^"]*)"/) || [])[1] || '',
+      name: ((lines[i].match(/,\s*(.+)$/) || [])[1] || '').trim(),
+      url,
+    });
+  }
+  return out;
+}
+
+// Alle 242 Sender aus der Multicast-Liste, gemerged mit HTTP-channel-ids (fuer den
+// H.264-Pfad). Spiegelt getChannels() im tv7-streamer (gleiche IDs).
 async function fetchTV7Channels() {
   if (tv7ChannelsCache && Date.now() - tv7CacheTime < 3600000) return tv7ChannelsCache;
-  const resp = await fetch(TV7_PLAYLIST_URL, { signal: AbortSignal.timeout(10000) });
-  const text = await resp.text();
+  const [httpResp, mcResp] = await Promise.all([
+    fetch('https://api.init7.net/tvchannels.m3u?rp=true', { signal: AbortSignal.timeout(10000) }),
+    fetch('https://api.init7.net/tvchannels.m3u', { signal: AbortSignal.timeout(10000) }),
+  ]);
+  const httpEntries = parseTV7Playlist(await httpResp.text());
+  const mcEntries = parseTV7Playlist(await mcResp.text());
+  const httpMap = {};
+  for (const e of httpEntries) {
+    const id = (e.url.match(/channel=([a-f0-9-]+)/i) || [])[1];
+    if (id) httpMap[e.tvg] = id;
+  }
   const channels = [];
-  const lines = text.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].startsWith('#EXTINF:')) {
-      const logoMatch = lines[i].match(/tvg-logo="([^"]+)"/);
-      const groupMatch = lines[i].match(/group-title="([^"]+)"/);
-      const nameMatch = lines[i].match(/,\s*(.+)$/);
-      const url = (lines[i + 1] || '').trim();
-      if (url.startsWith('http')) {
-        const idMatch = url.match(/channel=([a-f0-9-]+)/i);
-        channels.push({
-          id: idMatch ? idMatch[1] : null,
-          name: nameMatch ? nameMatch[1].trim() : 'Unknown',
-          logo: logoMatch ? logoMatch[1] : '',
-          group: groupMatch ? groupMatch[1] : '',
-          streamUrl: url,
-        });
-      } else if (url.startsWith('udp://')) {
-        const mcMatch = url.match(/udp:\/\/@?([\d.]+):(\d+)/);
-        if (mcMatch) {
-          channels.push({
-            name: nameMatch ? nameMatch[1].trim() : 'Unknown',
-            logo: logoMatch ? logoMatch[1] : '',
-            group: groupMatch ? groupMatch[1] : '',
-            multicast: `${mcMatch[1]}:${mcMatch[2]}`,
-          });
-        }
-      }
-    }
+  for (const e of mcEntries) {
+    const u = e.url.match(/udp:\/\/@?([\d.]+):(\d+)/i);
+    if (!u) continue;
+    const httpId = httpMap[e.tvg] || null;
+    channels.push({
+      id: httpId || mcastIdFromGroup(u[1]),
+      name: e.name || e.tvg || 'Unknown',
+      logo: e.logo,
+      group: e.group,
+      hevc: true,
+      h264: !!httpId,
+    });
   }
   tv7ChannelsCache = channels;
   tv7CacheTime = Date.now();
