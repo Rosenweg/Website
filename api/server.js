@@ -13622,7 +13622,7 @@ async function resolveBroadcastRecipients(target) {
 // Bot laeuft im Docker-Swarm). Wir können den Bot via Docker-Service-Namen erreichen.
 app.get('/api/whatsapp/admin/groups', authMiddleware, requireTechnikOrPraesident, async (_req, res) => {
   try {
-    const r = await fetch('http://rosenweg_whatsapp-bot:8080/groups', {
+    const r = await fetch(process.env.GATEWAY_GROUPS_URL || 'http://rosenweg_whatsapp-bot:8080/groups', {
       headers: { 'X-WA-Secret': WHATSAPP_SHARED_SECRET },
       signal: AbortSignal.timeout(8000),
     });
