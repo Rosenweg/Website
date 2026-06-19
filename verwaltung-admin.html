@@ -86,6 +86,16 @@
                     <input type="text" id="m-firma" required class="w-full border border-gray-300 rounded px-3 py-1.5">
                 </div>
                 <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Kontaktpersonen sichtbar für</label>
+                    <select id="m-sichtbarkeit" class="w-full border border-gray-300 rounded px-3 py-1.5">
+                        <option value="technik_praesident">Nur Technik + Präsident</option>
+                        <option value="ausschuss">Ausschuss (+ Technik/Präsident) der STWEG</option>
+                        <option value="eigentuemer">Eigentümer + Ausschuss der STWEG</option>
+                        <option value="bewohner">Alle Mitglieder der STWEG (Bewohner+)</option>
+                    </select>
+                    <p class="text-xs text-gray-400 mt-1">Firma-Infos (Adresse, Tel, Mail, Website) bleiben öffentlich — nur die <strong>Kontaktpersonen</strong> sind geschützt. „Stufe + alle höheren"; STWEG-übergreifend = für alle relevanten STWEGs.</p>
+                </div>
+                <div>
                     <label class="block text-xs font-medium text-gray-600 mb-1">Adresse</label>
                     <textarea id="m-adresse" rows="2" class="w-full border border-gray-300 rounded px-3 py-1.5"></textarea>
                 </div>
@@ -274,6 +284,7 @@
         document.getElementById('m-stweg').value = v.stweg || '';
         document.getElementById('m-aktiv').value = v.aktiv === false ? 'false' : 'true';
         document.getElementById('m-firma').value = v.firma_name || '';
+        document.getElementById('m-sichtbarkeit').value = v.kontakt_sichtbarkeit || 'ausschuss';
         document.getElementById('m-adresse').value = v.adresse || '';
         document.getElementById('m-telefon').value = v.telefon || '';
         document.getElementById('m-email').value = v.email || '';
@@ -315,6 +326,7 @@
         const body = {
             stweg: document.getElementById('m-stweg').value || null,
             firma_name: document.getElementById('m-firma').value.trim(),
+            kontakt_sichtbarkeit: document.getElementById('m-sichtbarkeit').value,
             adresse: document.getElementById('m-adresse').value.trim() || null,
             telefon: document.getElementById('m-telefon').value.trim() || null,
             email: document.getElementById('m-email').value.trim() || null,
