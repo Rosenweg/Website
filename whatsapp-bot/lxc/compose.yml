@@ -1,0 +1,30 @@
+# WhatsApp-Bridge — läuft in CT 116 (100.64.2.39, HA-float auf Ceph), NICHT mehr im Swarm.
+# Deploy:  cd /opt/whatsapp-bot && docker compose pull && docker compose up -d
+# Secret:  /opt/whatsapp-bot/.env  ->  WHATSAPP_SHARED_SECRET=...   (NICHT im Repo)
+services:
+  whatsapp-bot:
+    image: ghcr.io/rosenweg/rosenweg-whatsapp-bot:latest
+    container_name: whatsapp-bot
+    restart: unless-stopped
+    environment:
+      API_BASE: http://100.64.2.27:3000        # Swarm-VIP (api host-published :3000)
+      MAIN_API_BASE: http://100.64.2.27:3000
+      WHATSAPP_SHARED_SECRET: "${WHATSAPP_SHARED_SECRET}"
+      WA_POLL_MS: "15000"
+      WA_HEARTBEAT_MS: "30000"
+      WA_HEALTH_PORT: "8080"
+      WA_RECONNECT_MS: "30000"
+      WA_GATEWAY_PORT: "8090"
+      GW_SMTP_PORT: "2525"
+      GW_PUBLIC_HOST: whatsapp.rosenweg4303.ch
+      GW_NOTIFY_RELAY_HOST: "100.64.2.31"        # PMG -> SMTP2GO
+      GW_NOTIFY_RELAY_PORT: "25"
+      GW_NOTIFY_FROM: whatsapp-gateway@whatsapp.rosenweg4303.ch
+    ports:
+      - "8080:8080"   # health + /groups (api -> hier via GATEWAY_GROUPS_URL)
+      - "8090:8090"   # Gateway-HTTP/UI + /gateway/send (Traefik-Route id=25 + pbx)
+      - "2525:2525"   # SMTP-in (NUR PMG .31 — siehe wa-2525-fw.service)
+    volumes:
+      - whatsapp-data:/data   # gepairte WA-Session + gateway.sqlite (kalt vom Swarm migriert)
+volumes:
+  whatsapp-data:

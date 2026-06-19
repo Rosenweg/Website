@@ -1,0 +1,17 @@
+# /etc/systemd/system/wa-2525-fw.service  (in CT 116)
+# Beschränkt den SMTP-in-Port 2525 auf PMG (.31). Sonst könnten LAN-Hosts PMG
+# umgehen und mit gefälschtem MAIL FROM Mail->WhatsApp einschleusen (smtp_senders
+# ist envelope-basiert + ohne PMG kein SPF-Reject). Idempotent, läuft nach Docker
+# (DOCKER-USER-Chain existiert dann) — auch nach Reboot/HA-Failover.
+[Unit]
+Description=Restrict WhatsApp SMTP-in (2525) to PMG only
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'iptables -C DOCKER-USER -p tcp --dport 2525 ! -s 100.64.2.31 -j DROP 2>/dev/null || iptables -I DOCKER-USER -p tcp --dport 2525 ! -s 100.64.2.31 -j DROP'
+
+[Install]
+WantedBy=multi-user.target
