@@ -51,8 +51,8 @@
 <div id="gate" class="gate" style="display:none">
   <h2>🔒 Anmeldung erforderlich</h2>
   <p style="color:#6b7280;margin:.6rem 0 1rem">Nur für Technik / Präsident.</p>
-  <button class="loginbtn" onclick="AuthentikAuth.login()">🔐 Mit Rosenweg-Konto anmelden</button>
-  <div class="sub">Sichere Anmeldung über Authentik SSO</div>
+  <div id="sso-login-container"></div>
+  <script>AuthentikAuth.createLoginButton('sso-login-container');</script>
 </div>
 
 <div class="wrap" id="content" style="display:none">
