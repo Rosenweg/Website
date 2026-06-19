@@ -2704,36 +2704,53 @@ app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
   log.push(now);
   verteilerSendLog.set(uid, log);
 
-  const { verteiler_id, subject, body, recipients } = req.body;
-  if (!subject || !body || !recipients?.length) {
-    return res.status(400).json({ error: 'Betreff, Text und Empfänger erforderlich' });
+  const { verteiler_id, subject, body } = req.body;
+  let recipients = Array.isArray(req.body.recipients) ? req.body.recipients : [];
+  if (!subject || !body) {
+    return res.status(400).json({ error: 'Betreff und Text erforderlich' });
+  }
+  // Das Frontend schickt nur verteiler_id (keine expliziten Empfänger) — also hier
+  // aus dem Verteiler auflösen. resolveVerteilerRecipients liefert die Mitglieder-Mails.
+  if (recipients.length === 0 && verteiler_id) {
+    try {
+      const { rows: [vt] } = await pool.query('SELECT * FROM email_verteiler WHERE id = $1', [parseInt(verteiler_id)]);
+      if (!vt) return res.status(404).json({ error: 'Verteiler nicht gefunden' });
+      recipients = await resolveVerteilerRecipients(vt);
+    } catch (e) {
+      console.error('resolveVerteilerRecipients failed:', e.message);
+      return res.status(500).json({ error: 'Empfänger konnten nicht aufgelöst werden' });
+    }
+  }
+  if (!recipients.length) {
+    return res.status(400).json({ error: 'Verteiler hat keine Empfänger' });
   }
 
   // Validate all recipients are valid email addresses
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const validRecipients = recipients.filter(r => typeof r === 'string' && emailRegex.test(r));
   if (validRecipients.length === 0) {
-    return res.status(400).json({ error: 'Keine gültigen E-Mail-Adressen' });
+    return res.status(400).json({ error: 'Keine gültigen E-Mail-Adressen im Verteiler' });
   }
 
   try {
     let sent = 0;
-    const failed = [];
-    for (const to of validRecipients) {
-      try {
-        await transporter.sendMail({
-          from: MAIL_FROM,
-          // Antworten gehen an den sendenden User, nicht an die generische From-Adresse.
-          replyTo: req.user?.email || undefined,
-          to,
-          subject,
-          html: body,
-        });
-        sent++;
-      } catch (sendErr) {
-        console.error(`Failed to send to recipient:`, sendErr.message);
-        failed.push(to);
-      }
+    let failed = [];
+    // EINE Mail, alle Empfänger im BCC — so sehen sie sich gegenseitig NICHT (DSGVO).
+    // To = MAIL_FROM (neutral); der Verteiler-Alias darf NICHT ins To (sonst Re-Fanout).
+    try {
+      await transporter.sendMail({
+        from: MAIL_FROM,
+        to: MAIL_FROM,
+        bcc: validRecipients,
+        // Antworten gehen an den sendenden User, nicht an die generische From-Adresse.
+        replyTo: req.user?.email || undefined,
+        subject,
+        html: body,
+      });
+      sent = validRecipients.length;
+    } catch (sendErr) {
+      console.error('BCC-Versand fehlgeschlagen:', sendErr.message);
+      failed = validRecipients.slice();
     }
 
     // Log to email_log
