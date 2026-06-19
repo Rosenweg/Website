@@ -33,11 +33,12 @@
         <div id="content" class="hidden space-y-6">
             <section class="bg-white/70 border border-amber-200 rounded-xl p-4 text-sm text-gray-700">
                 <p class="font-semibold text-gray-900 mb-1">Wie es funktioniert</p>
-                <p>Pro Eigentümer gibt es einen Mail-Alias <code class="bg-amber-100 px-1 rounded">zev.&lt;name&gt;@&lt;domain&gt;</code>.
-                smart-me schickt die ZEV-Rechnung an diesen Alias — Mailcow leitet sie automatisch weiter an:
-                <strong>aktueller Mieter/Bewohner</strong> + <strong>Archiv-Postfach</strong> + <strong>Rechnungsadresse (Immosense)</strong>.
-                Bei einem Bewohner-/Mieterwechsel (ab Wechseldatum in der Objektverwaltung) wird der Alias automatisch umgehängt
-                und die <strong>Axova AG</strong> per Freigabe-Mail informiert (sie passt smart-me an).</p>
+                <p>Pro Wohnung gibt es einen Mail-Alias <code class="bg-amber-100 px-1 rounded">zev.&lt;bewohner&gt;@&lt;domain&gt;</code>
+                (benannt nach dem <strong>aktuellen Bewohner</strong>) — plus <code class="bg-amber-100 px-1 rounded">zev.allgemein@…</code> für den Allgemeinzähler.
+                smart-me schickt die ZEV-Rechnung an den Alias — Mailcow leitet sie automatisch weiter an:
+                <strong>aktueller Mieter/Bewohner</strong> + <strong>Archiv</strong> + <strong>Verwaltung (Immosense)</strong>.
+                Bei einem Wechsel (ab Wechseldatum in der Objektverwaltung) wird ein <strong>neuer</strong> Alias aktiv, der alte bleibt
+                <strong>6 Monate</strong> aktiv (Schlussabrechnung), und die <strong>Axova AG</strong> wird per Freigabe-Mail informiert (sie stellt smart-me um).</p>
             </section>
 
             <!-- Konfiguration -->
@@ -65,6 +66,10 @@
                     <div>
                         <label class="block text-xs font-medium text-gray-600 mb-1">Rechnungsadresse Verwaltung (Immosense)</label>
                         <input type="email" id="c-invoice" placeholder="invoice@immosense.ch" class="w-full border border-gray-300 rounded px-3 py-1.5">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Allgemeinzähler-Empfänger (z.B. STWEG-Ausschuss)</label>
+                        <input type="email" id="c-allgemein" placeholder="ausschuss@…" class="w-full border border-gray-300 rounded px-3 py-1.5">
                     </div>
                     <div>
                         <label class="block text-xs font-medium text-gray-600 mb-1">Axova-Mailadresse (Wechsel-Benachrichtigung)</label>
@@ -132,6 +137,7 @@
         $('c-prefix').value = c.alias_prefix || 'zev';
         $('c-archiv').value = c.archiv_mailbox || '';
         $('c-invoice').value = c.invoice_email || '';
+        $('c-allgemein').value = c.allgemein_email || '';
         $('c-axova').value = c.axova_email || '';
         $('c-notizen').value = c.notizen || '';
         $('c-eig-sieht-mieter').checked = c.eigentuemer_sieht_mieter === true;
@@ -187,6 +193,7 @@
             alias_prefix: $('c-prefix').value.trim() || 'zev',
             archiv_mailbox: $('c-archiv').value.trim() || null,
             invoice_email: $('c-invoice').value.trim() || null,
+            allgemein_email: $('c-allgemein').value.trim() || null,
             axova_email: $('c-axova').value.trim() || null,
             notizen: $('c-notizen').value.trim() || null,
             eigentuemer_sieht_mieter: $('c-eig-sieht-mieter').checked,
