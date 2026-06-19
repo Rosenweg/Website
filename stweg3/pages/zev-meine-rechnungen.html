@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meine ZEV-Rechnungen — Rosenweg 9</title>
+    <link rel="icon" href="/logo-rosenweg.png" type="image/png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-amber-50 to-orange-100 min-h-screen text-gray-800">
+    <nav class="bg-white shadow-sm sticky top-0 z-50 flex items-center justify-between px-5 py-3 flex-wrap gap-3">
+        <a href="/" class="flex items-center gap-3 no-underline text-inherit">
+            <img src="/logo-rosenweg.png" class="h-10 w-auto" alt="">
+            <span><span class="block font-bold leading-tight">Meine ZEV-Rechnungen</span><span class="text-xs text-gray-500">Strom-Abrechnung · Rosenweg 9</span></span>
+        </a>
+        <a href="/" class="text-amber-600 font-semibold text-sm hover:text-orange-600">← Übersicht</a>
+    </nav>
+
+    <main class="max-w-3xl mx-auto px-4 py-6">
+        <div id="loading" class="text-center text-gray-500 py-12">Lade …</div>
+
+        <div id="gate" class="hidden bg-white rounded-xl shadow p-8 text-center">
+            <h2 class="text-xl font-bold mb-2">🔒 Anmeldung erforderlich</h2>
+            <p class="text-gray-500 mb-4">Deine ZEV-Stromabrechnungen siehst du nach dem Login.</p>
+            <div id="sso-login-container"></div>
+        </div>
+
+        <div id="content" class="hidden">
+            <p class="text-sm text-gray-600 mb-4">Deine Strom-Abrechnungen (ZEV / smart-me) — automatisch aus dem Archiv, nur deine eigenen.</p>
+            <div id="empty" class="hidden bg-white rounded-xl border p-8 text-center text-gray-500">
+                Noch keine Rechnungen vorhanden. Sobald smart-me eine Abrechnung verschickt, erscheint sie hier.
+            </div>
+            <div id="list" class="space-y-3"></div>
+        </div>
+    </main>
+
+    <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    const fmtDate = d => { if (!d) return '—'; try { return new Date(d).toLocaleDateString('de-CH', { day:'2-digit', month:'2-digit', year:'numeric' }); } catch { return String(d).slice(0,10); } };
+    const fmtSize = b => b ? (b > 1024*1024 ? (b/1024/1024).toFixed(1)+' MB' : Math.round(b/1024)+' KB') : '';
+
+    function showGate() {
+        $('loading').classList.add('hidden');
+        $('content').classList.add('hidden');
+        $('gate').classList.remove('hidden');
+        AuthentikAuth.createLoginButton('sso-login-container');
+    }
+
+    function render(list) {
+        if (!list.length) { $('empty').classList.remove('hidden'); return; }
+        $('list').innerHTML = list.map(r => `
+            <div class="bg-white rounded-xl shadow-sm border p-4 flex items-center justify-between gap-4 flex-wrap">
+                <div class="min-w-0">
+                    <div class="font-semibold text-gray-900 truncate">${esc(r.betreff || 'ZEV-Abrechnung')}</div>
+                    <div class="text-xs text-gray-500 mt-0.5">${esc(fmtDate(r.empfangen_am))}${r.absender ? ' · '+esc(r.absender) : ''}${r.pdf_size ? ' · '+esc(fmtSize(r.pdf_size)) : ''}</div>
+                </div>
+                ${r.has_pdf
+                    ? `<button data-id="${r.id}" data-name="${esc(r.pdf_filename || 'rechnung.pdf')}" class="dl bg-amber-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-amber-700 transition text-sm whitespace-nowrap">⤓ PDF</button>`
+                    : `<span class="text-xs text-gray-400">kein PDF</span>`}
+            </div>`).join('');
+        document.querySelectorAll('.dl').forEach(b => b.addEventListener('click', () => downloadPdf(b.dataset.id, b.dataset.name, b)));
+    }
+
+    async function downloadPdf(id, name, btn) {
+        const old = btn.textContent; btn.textContent = '…'; btn.disabled = true;
+        try {
+            const r = await AuthentikAuth.apiFetch(`/api/zev/rechnung/${id}/pdf`);
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const blob = await r.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = name || 'rechnung.pdf';
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 4000);
+        } catch (e) { alert('Download fehlgeschlagen: ' + e.message); }
+        finally { btn.textContent = old; btn.disabled = false; }
+    }
+
+    async function load() {
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/zev/meine-rechnungen', { cache: 'no-store' });
+            if (r.status === 401) { showGate(); return; }
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const data = await r.json();
+            $('loading').classList.add('hidden');
+            $('content').classList.remove('hidden');
+            render(data.rechnungen || []);
+        } catch (e) { $('loading').textContent = 'Fehler: ' + e.message; }
+    }
+
+    AuthentikAuth.handleCallback();
+    if (!AuthentikAuth.isLoggedIn()) showGate();
+    else load();
+    </script>
+</body>
+</html>

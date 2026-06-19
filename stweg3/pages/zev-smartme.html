@@ -75,6 +75,12 @@
                         <input type="text" id="c-notizen" class="w-full border border-gray-300 rounded px-3 py-1.5">
                     </div>
                 </div>
+                <label class="flex items-start gap-2 text-sm mt-4">
+                    <input type="checkbox" id="c-eig-sieht-mieter" class="w-4 h-4 mt-0.5">
+                    <span>Eigentümer sieht auch die Online-Rechnungen <strong>vermieteter</strong> Wohnungen
+                        <br><span class="text-xs text-gray-500">Aus = datensparsam: nur der aktuelle Bewohner/Mieter sieht seine Rechnung. Vor dem Aktivieren Datenschutz/Verwaltung prüfen.</span></span>
+                </label>
+                <p class="text-xs text-gray-500 mt-3">Bewohner-Ansicht: <a href="zev-meine-rechnungen.html" class="text-amber-700 underline">Meine ZEV-Rechnungen</a> (jeder sieht nur seine eigenen).</p>
                 <div class="flex items-center gap-3 mt-4">
                     <button id="btn-save" class="bg-amber-600 text-white px-5 py-2 rounded-lg font-semibold hover:bg-amber-700 transition">Speichern</button>
                     <span id="save-msg" class="text-sm text-gray-500"></span>
@@ -128,6 +134,7 @@
         $('c-invoice').value = c.invoice_email || '';
         $('c-axova').value = c.axova_email || '';
         $('c-notizen').value = c.notizen || '';
+        $('c-eig-sieht-mieter').checked = c.eigentuemer_sieht_mieter === true;
     }
 
     function rolleLabel(r) {
@@ -182,6 +189,7 @@
             invoice_email: $('c-invoice').value.trim() || null,
             axova_email: $('c-axova').value.trim() || null,
             notizen: $('c-notizen').value.trim() || null,
+            eigentuemer_sieht_mieter: $('c-eig-sieht-mieter').checked,
         };
         try {
             const r = await AuthentikAuth.apiFetch(`/api/zev/config/${STWEG}`, {
