@@ -18,8 +18,9 @@ BACKUP_SUBDIR=archiv/whatsapp-bot-session
 BACKUP_FILE="$MOUNT/$BACKUP_SUBDIR/$BACKUP_NAME"
 
 mkdir -p "$MOUNT"
+# Credentials in /etc/rosenweg/cifs.cred (chmod 600), NICHT im Repo.
 mountpoint -q "$MOUNT" || mount -t cifs //100.64.2.28/api "$MOUNT" \
-  -o username=api-svc,password=RwApiCifs2026,vers=3.0,uid=0,gid=0
+  -o credentials=/etc/rosenweg/cifs.cred,vers=3.0,uid=0,gid=0
 
 if [ ! -f "$BACKUP_FILE" ]; then
   echo "FEHLER: Backup-Datei nicht gefunden: $BACKUP_FILE"

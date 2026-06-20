@@ -30,9 +30,11 @@ fi
 
 mkdir -p "$MOUNT"
 if ! mountpoint -q "$MOUNT"; then
+  # Credentials in /etc/rosenweg/cifs.cred (chmod 600), NICHT im Repo:
+  #   printf 'username=api-svc\npassword=<PW>\n' > /etc/rosenweg/cifs.cred && chmod 600 /etc/rosenweg/cifs.cred
   mount -t cifs //100.64.2.28/api "$MOUNT" \
-    -o username=api-svc,password=RwApiCifs2026,vers=3.0,uid=0,gid=0,file_mode=0664,dir_mode=0775 \
-    || { log "FEHLER: CIFS-Mount fehlgeschlagen"; exit 1; }
+    -o credentials=/etc/rosenweg/cifs.cred,vers=3.0,uid=0,gid=0,file_mode=0664,dir_mode=0775 \
+    || { log "FEHLER: CIFS-Mount fehlgeschlagen (Credentials /etc/rosenweg/cifs.cred vorhanden?)"; exit 1; }
   MOUNTED_HERE=1
 else
   MOUNTED_HERE=0
