@@ -1,0 +1,12 @@
+# Frontend-LXC-Belegung (De-Swarm). Quelle der Wahrheit für provision.sh (dort als case).
+# site    ct    ip            type      edge_hosts                                          cutover
+www       118   100.64.2.41   website   www.rosenweg4303.ch,rosenweg4303.ch                 extra-routes.yml (swarm-https-svc)
+isp       119   100.64.2.42   isp       isp.rosenweg4303.ch,noc.rosenweg4303.ch             DB: isp + noc
+stweg1    120   100.64.2.43   stweg     stweg1.rosenweg4303.ch                              DB
+stweg2    121   100.64.2.44   stweg     stweg2.rosenweg4303.ch                              DB
+stweg3    122   100.64.2.45   stweg     stweg3.rosenweg4303.ch,rosenweg9.ch,www.rosenweg9.ch  DB(stweg3) + extra-routes.yml(rw9 apex); energy-collector vorher host-publishen
+stweg4    123   100.64.2.46   stweg     stweg4.rosenweg4303.ch                              DB
+stweg5    124   100.64.2.47   stweg     stweg5.rosenweg4303.ch                              DB
+stweg6    125   100.64.2.48   stweg     stweg6.rosenweg4303.ch                              DB
+stweg7    126   100.64.2.49   stweg     stweg7.rosenweg4303.ch                              DB
+meg       127   100.64.2.50   stweg     meg.rosenweg4303.ch                                 DB  (CANARY)
