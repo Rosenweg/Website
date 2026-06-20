@@ -288,6 +288,13 @@ services:
   # ============================================
   energy-collector:
     image: ghcr.io/rosenweg/energy-collector:latest
+    # Port 3001 im LAN published, damit die nativen Frontend-LXCs (De-Swarm) die
+    # /api/energy/-Upstream (rw_energy = 100.64.2.27:3001) ausserhalb des Overlays
+    # erreichen. Interim bis energy-collector selbst in ein LXC zieht (Schritt 4).
+    ports:
+      - target: 3001
+        published: 3001
+        mode: ingress
     environment:
       METERS: "${ENERGY_METERS:-100.64.90.70:502:1:r9-haupt,100.64.90.71:502:1:r9-produktion,100.64.90.72:502:1:r9-allgemein,100.64.90.73:502:1:r9-eg1,100.64.90.74:502:1:r9-eg2,100.64.90.75:502:1:r9-eg3,100.64.90.76:502:1:r9-1og1,100.64.90.77:502:1:r9-1og2,100.64.90.78:502:1:r9-1og3,100.64.90.79:502:1:r9-2og1,100.64.90.80:502:1:r9-2og2,100.64.90.81:502:1:r9-2og3,100.64.90.82:502:1:r9-keller-neziri}"
       POLL_INTERVAL: "5"

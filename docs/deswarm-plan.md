@@ -64,3 +64,25 @@ stabilem Soak des LXC-Pendants entfernen.
 `rosenweg_isp` ist auf `node.hostname==docker-pve1` gepinnt (zur api) → isp→api lokal, Login
 stabil. **Wenn die api den Node wechselt, neu pinnen** — oder die Frontends als ersten
 Migrationsschritt ziehen, dann ist's erledigt.
+
+## Status 2026-06-21: Schritt 1 (Frontends) ABGESCHLOSSEN
+Alle 13 Frontends laufen als **native-nginx-LXCs** (kein Docker), Artefakte unter
+`frontends-lxc/`, CT118-127 / `100.64.2.41-.50` + edge CT245 `.40`. Doppelt-Stack:
+statische **IPv6** `2a02:16a:1400:9::40-::50` (persistent), pve-Hosts `::20-::22`.
+
+- **Routing:** edge-traefik (CT245, `.40`/`::40`) terminiert TLS, routet Host→LXC.
+  DB-Routen (`isp_reverse_proxy_routes`) für isp/noc/stweg1-7, `extra-routes.yml`
+  für www/apex→CT118 + rosenweg9→CT122.
+- **Public-DNS (rosenweg4303.ch):** alle Frontends `CNAME → kooperation` (DynDNS .133).
+  **proxied=true (CF-WAF)** für www/apex/noc/stweg1-7/meg — **erfordert SSL-Mode `Full`**
+  (Flexible → Redirect-Loop!). **isp = grey** (proxied=false) wegen IPTV-`/tv-stream/`.
+- **Internes Split-Horizon (UDM, UniFi-API `static-dns`):** alle Frontend-Hosts →
+  A `100.64.2.40` + AAAA `2a02:16a:1400:9::40` (edge). Kein WAN-Hairpin, kein CF-AAAA-Leak.
+- **KEIN CF-Tunnel** im Frontend-Pfad (frühere Annahme war falsch).
+- energy-collector `:3001` host-published (`.27:3001`) für `/api/energy/`.
+
+**OFFEN:** Swarm-Frontend-Services (`website`, `isp`, `stweg1-7`, `meg`) laufen noch als
+**Hot-Rollback** — nach Soak (1-2 Tage) `scale=0`, dann entfernen. api/postgres/energy/
+doc-converter/syslog/traefik/shepherd bleiben Swarm (= De-Swarm Schritt 2-5).
+Follow-ups: hardcoded `UNIFI_API_KEY`/CF-Token in `api/server.js` → rotieren + Env;
+isp `/tv-stream/` erreicht VLAN9 (100.64.9.250) nicht aus dem LXC.
