@@ -14601,6 +14601,25 @@ async function nocUnifiHandler(req, res) {
       }));
     } catch (e) { out.frontends = []; out.frontends_error = e.message; }
 
+    // Infrastruktur-LXC-Health aus Proxmox (cluster/resources): kritische CTs als
+    // Dot — gestoppte/fehlende sofort sichtbar (haette dc1 gezeigt). Router-CTs (5xx)
+    // sind oben schon als out.routers; hier die Infrastruktur-CTs.
+    try {
+      const INFRA = {
+        100: 'PDM', 102: 'NTP', 104: 'NC', 105: 'MQTT', 106: 'FILE', 108: 'DC1',
+        109: 'TVPRX', 111: 'CUPS', 113: 'VPN', 114: 'AUTH', 115: 'ZPUSH', 116: 'WA',
+        201: 'DOCK1', 202: 'DOCK2', 203: 'DOCK3', 206: 'FILE2', 220: 'PBX', 230: 'PMG',
+        240: 'MAIL', 245: 'EDGE', 250: 'TV7', 260: 'NFS',
+      };
+      const pve = await pveAPI('GET', '/cluster/resources?type=vm');
+      const byId = {};
+      for (const x of (pve?.data || [])) if (x.type === 'lxc') byId[x.vmid] = x;
+      out.lxcs = Object.entries(INFRA).map(([id, label]) => {
+        const x = byId[Number(id)];
+        return { vmid: Number(id), label, status: x ? x.status : 'missing', ok: !!x && x.status === 'running' };
+      }).sort((a, b) => a.label.localeCompare(b.label));
+    } catch (e) { out.lxcs = []; out.lxcs_error = e.message; }
+
     res.json(out);
   } catch (err) {
     out.error = err.message;
