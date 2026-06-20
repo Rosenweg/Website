@@ -14611,9 +14611,9 @@ async function nocUnifiHandler(req, res) {
         201: 'DOCK1', 202: 'DOCK2', 203: 'DOCK3', 206: 'FILE2', 220: 'PBX', 230: 'PMG',
         240: 'MAIL', 245: 'EDGE', 250: 'TV7', 260: 'NFS',
       };
-      const pve = await pveAPI('GET', '/cluster/resources?type=vm');
+      const pve = await pveAPI('GET', '/cluster/resources?type=vm'); // gibt .data-Array direkt
       const byId = {};
-      for (const x of (pve?.data || [])) if (x.type === 'lxc') byId[x.vmid] = x;
+      for (const x of (Array.isArray(pve) ? pve : [])) if (x.type === 'lxc') byId[x.vmid] = x;
       out.lxcs = Object.entries(INFRA).map(([id, label]) => {
         const x = byId[Number(id)];
         return { vmid: Number(id), label, status: x ? x.status : 'missing', ok: !!x && x.status === 'running' };
