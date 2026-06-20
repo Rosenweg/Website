@@ -1188,7 +1188,7 @@ app.put('/api/me/whatsapp-optin', authMiddleware, async (req, res) => {
 });
 
 // WiFi info for authenticated users (PPSK from UniFi)
-const UNIFI_API_KEY = process.env.UNIFI_API_KEY || 'eQq7HtvQwjnAJzHwBLMrlueFDjSfmc6H';
+const UNIFI_API_KEY = process.env.UNIFI_API_KEY || ''; // aus /root/.env (env_file); KEIN hardcoded Fallback
 const UNIFI_HOST = process.env.UNIFI_HOST || 'https://100.64.2.1';
 
 app.get('/api/wifi', authMiddleware, async (req, res) => {
