@@ -212,6 +212,9 @@
         for (const f of (u.frontends || [])) {
           dots.push(`<span class="pill" title="Frontend-Container ${esc(f.svc)}"><span class="noc-led ${f.ok ? 'led-green' : 'led-red'}"></span><span class="text-xs uppercase">${esc(f.label)}</span></span>`);
         }
+        for (const l of (u.lxcs || [])) {
+          dots.push(`<span class="pill" title="LXC ${esc(l.vmid)} · ${esc(l.status)}"><span class="noc-led ${l.ok ? 'led-green' : 'led-red'}"></span><span class="text-xs uppercase">${esc(l.label)}</span></span>`);
+        }
         sw.innerHTML = dots.join('') || '<span class="text-xs text-slate-500">keine Daten</span>';
 
         // Top APs
