@@ -1,0 +1,73 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: rosenweg
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: rosenweg
+    volumes: [pgdata:/var/lib/postgresql/data]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rosenweg"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+  api:
+    image: ghcr.io/rosenweg/rosenweg-api:latest
+    env_file: .env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: rosenweg
+      DB_USER: rosenweg
+      SMTP_HOST: mail-eu.smtp2go.com
+      SMTP_PORT: "2525"
+      MAIL_FROM: "noreply@rosenweg4303.ch"
+      PORT: "3000"
+      AUTHENTIK_URL: "http://100.64.2.37:9000"
+      AUTHENTIK_EXTERNAL_URL: "https://authentik.rosenweg4303.ch"
+      SITE_URL: "https://www.rosenweg4303.ch"
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+      ENERGY_DB_HOST: "100.64.2.53"
+      ENERGY_DB_PORT: "5432"
+      ENERGY_DB_NAME: energy
+      ENERGY_DB_USER: energy
+      ENERGY_COLLECTOR_URL: "http://100.64.2.53:3001"
+      PVE_API_URL: "https://100.64.2.20:8006"
+      DOCS_PATH: /documents
+      WG_CONTROL_URL: "http://100.64.2.34:3001"
+      NOC_PUBLIC_OPEN: "1"
+    ports: ["3000:3000"]
+    volumes: ["/mnt/documents:/documents"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: unless-stopped
+  doc-converter:
+    image: gotenberg/gotenberg:8
+    command: ["gotenberg", "--api-timeout=120s"]
+    restart: unless-stopped
+  shelly-emulator:
+    image: ghcr.io/rosenweg/shelly-emulator:latest
+    environment:
+      BACKEND_URL: "https://www.rosenweg4303.ch/api/energy/shelly"
+      POLL_MS: "10000"
+      ENERGY_GROUP: "r9"
+      SHELLY_HOSTNAME: "shellypvrosenweg9"
+      PORT: "8089"
+    ports: ["8089:8089"]
+    restart: unless-stopped
+  syslog-collector:
+    image: ghcr.io/rosenweg/syslog-collector:latest
+    environment:
+      SYSLOG_PORT: "5514"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: rosenweg
+      DB_USER: rosenweg
+      DB_PASSWORD: ${DB_PASSWORD}
+    ports: ["5514:5514/udp", "5514:5514/tcp"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: unless-stopped
+volumes:
+  pgdata:

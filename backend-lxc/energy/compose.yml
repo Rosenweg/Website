@@ -1,0 +1,36 @@
+services:
+  energy-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: energy
+      POSTGRES_PASSWORD: ${ENERGY_DB_PASSWORD:-energy2026}
+      POSTGRES_DB: energy
+    ports: ["5432:5432"]
+    volumes: [energydata:/var/lib/postgresql/data]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U energy"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+  energy-collector:
+    image: ghcr.io/rosenweg/energy-collector:latest
+    environment:
+      METERS: "100.64.90.70:502:1:r9-haupt,100.64.90.71:502:1:r9-produktion,100.64.90.72:502:1:r9-allgemein,100.64.90.73:502:1:r9-eg1,100.64.90.74:502:1:r9-eg2,100.64.90.75:502:1:r9-eg3,100.64.90.76:502:1:r9-1og1,100.64.90.77:502:1:r9-1og2,100.64.90.78:502:1:r9-1og3,100.64.90.79:502:1:r9-2og1,100.64.90.80:502:1:r9-2og2,100.64.90.81:502:1:r9-2og3,100.64.90.82:502:1:r9-keller-neziri"
+      POLL_INTERVAL: "5"
+      API_PORT: "3001"
+      DB_HOST: energy-db
+      DB_PORT: "5432"
+      DB_NAME: energy
+      DB_USER: energy
+      DB_PASSWORD: ${ENERGY_DB_PASSWORD:-energy2026}
+      MQTT_URL: "mqtt://100.64.2.51:1883"
+      MQTT_USER: collector
+      MQTT_PASS: ${MQTT_ENERGY_PASS}
+      MQTT_PREFIX: energy
+    ports: ["3001:3001"]
+    depends_on:
+      energy-db: {condition: service_healthy}
+    restart: unless-stopped
+volumes:
+  energydata:
