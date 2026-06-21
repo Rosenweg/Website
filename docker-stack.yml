@@ -304,6 +304,13 @@ services:
       DB_NAME: energy
       DB_USER: energy
       DB_PASSWORD: "${ENERGY_DB_PASSWORD:-energy2026}"
+      # MQTT-Publish der Zaehlerdaten (Broker = CT105 Mosquitto, VLAN2 .51).
+      # MQTT_ENERGY_PASS kommt aus /root/.env (deploy-stack.sh sourct das).
+      # Leer => Publish aus, Collector laeuft normal weiter.
+      MQTT_URL: "${MQTT_URL:-mqtt://100.64.2.51:1883}"
+      MQTT_USER: "${MQTT_USER:-collector}"
+      MQTT_PASS: "${MQTT_ENERGY_PASS:-}"
+      MQTT_PREFIX: "${MQTT_PREFIX:-energy}"
     networks:
       - rosenweg-net
     deploy:
