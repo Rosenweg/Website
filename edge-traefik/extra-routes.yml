@@ -34,6 +34,20 @@ http:
       rule: Host(`mqtt.rosenweg4303.ch`)
       service: mqtt-ws-svc
       tls: { certResolver: cf }
+    # Kurze IPTV-URL: tv.rosenweg4303.ch -> api /api/tv/playlist.m3u (242 Kanaele).
+    tv-rw4303:
+      entryPoints: [websecure]
+      rule: Host(`tv.rosenweg4303.ch`)
+      service: tv-playlist-svc
+      middlewares: [tv-playlist-path]
+      tls:
+        certResolver: cf
+        domains:
+          - main: tv.rosenweg4303.ch
+  middlewares:
+    tv-playlist-path:
+      replacePath:
+        path: /api/tv/playlist.m3u
   services:
     www-lxc-svc:
       loadBalancer:
@@ -64,6 +78,11 @@ http:
         passHostHeader: true
         servers:
           - url: http://100.64.2.51:9001
+    tv-playlist-svc:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: http://100.64.2.52:3000
 tcp:
   routers:
     contacts-rw4303-passthrough:
