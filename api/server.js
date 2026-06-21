@@ -1464,10 +1464,12 @@ app.get('/api/tv/playlist.m3u', async (req, res) => {
     // EPG-Referenz (Apps laden xmltv automatisch) + tvg-id (=tvg-name) fuers Mapping
     body = body.replace(/^#EXTM3U.*/m, '#EXTM3U url-tvg="https://tv.rosenweg4303.ch/epg.xml" x-tvg-url="https://tv.rosenweg4303.ch/epg.xml"');
     body = body.replace(/(#EXTINF:[^\n]*?)tvg-name="([^"]+)"/g, (m, pre, name) => m.includes('tvg-id=') ? m : `${pre}tvg-id="${name}" tvg-name="${name}"`);
+    // Live-Kanaele: Dauer 0 -> -1 (sonst behandeln viele Player den Kanal als
+    // 0-Sekunden-Clip und spielen ihn nicht, z.B. TiviMate).
+    body = body.replace(/^#EXTINF:0([ ,])/gm, '#EXTINF:-1$1');
     // udp://@<gruppe>:<port> -> http://<udpxy>/udp/<gruppe>:<port>
     body = body.replace(/^udp:\/\/@?([\d.]+):(\d+).*$/gm, (_m, g, p) => `${udpxy}/udp/${g}:${p}`);
     res.set('Content-Type', 'audio/x-mpegurl; charset=utf-8');
-    res.set('Content-Disposition', 'attachment; filename="rosenweg-tv-multicast.m3u"');
     res.set('Cache-Control', 'public, max-age=1800');
     res.send(body);
   } catch (e) {
