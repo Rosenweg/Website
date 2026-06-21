@@ -27,6 +27,13 @@ http:
       rule: Host(`authentik.rosenweg4303.ch`)
       service: authentik-hosts-svc
       tls: { certResolver: cf }
+    # MQTT-over-WebSocket: wss://mqtt.rosenweg4303.ch -> Mosquitto :9001 (plain ws).
+    # edge terminiert TLS, Traefik handhabt den WS-Upgrade transparent.
+    mqtt-rw4303:
+      entryPoints: [websecure]
+      rule: Host(`mqtt.rosenweg4303.ch`)
+      service: mqtt-ws-svc
+      tls: { certResolver: cf }
   services:
     www-lxc-svc:
       loadBalancer:
@@ -53,6 +60,11 @@ http:
           timeout: 3s
         servers:
           - url: http://100.64.2.37:9000
+    mqtt-ws-svc:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: http://100.64.2.51:9001
 tcp:
   routers:
     contacts-rw4303-passthrough:
