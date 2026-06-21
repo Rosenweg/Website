@@ -44,10 +44,23 @@ http:
         certResolver: cf
         domains:
           - main: tv.rosenweg4303.ch
+    # XMLTV-EPG: tv.rosenweg4303.ch/epg.xml -> api /api/tv/epg.xml (spezifischer Pfad).
+    tv-epg-rw4303:
+      entryPoints: [websecure]
+      rule: Host(`tv.rosenweg4303.ch`) && Path(`/epg.xml`)
+      service: tv-playlist-svc
+      middlewares: [tv-epg-path]
+      tls:
+        certResolver: cf
+        domains:
+          - main: tv.rosenweg4303.ch
   middlewares:
     tv-playlist-path:
       replacePath:
         path: /api/tv/playlist.m3u
+    tv-epg-path:
+      replacePath:
+        path: /api/tv/epg.xml
   services:
     www-lxc-svc:
       loadBalancer:
