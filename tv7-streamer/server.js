@@ -31,7 +31,7 @@ const MCAST_PLAYLIST = 'https://api.init7.net/tvchannels.m3u';        // ohne rp
 const INIT7_LIVE = 'https://api.tv.init7.net/api/live/?channel=';
 // udpxy (CT 109 "tv-proxy", RK-Clients) joint den Multicast lokal und gibt ihn als
 // HTTP-Unicast wieder raus — das routet die UDM ueber ALLE VLANs.
-const UDPXY_BASE = process.env.UDPXY_BASE || 'http://100.64.9.200:4022';
+const UDPXY_BASE = process.env.UDPXY_BASE || 'http://100.64.9.24:4022';
 
 let channelsCache = { ts: 0, data: [] };
 let m3uCache = { ts: 0, body: '' };

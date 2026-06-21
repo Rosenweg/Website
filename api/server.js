@@ -1364,7 +1364,7 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
 // udpxy für Multicast laeuft in LXC 109 (100.64.9.200:4022) — aktuell
 // blockiert die UDM-Firewall den Init7-Multicast-Inflow, deshalb HLS-Pfad.
 const TV7_PLAYLIST_URL = 'https://api.init7.net/tvchannels.m3u?rp=true';
-const UDPXY_HOST = process.env.UDPXY_HOST || 'http://100.64.9.200:4022';
+const UDPXY_HOST = process.env.UDPXY_HOST || 'http://100.64.9.24:4022';
 const TV7_STREAMER_URL = process.env.TV7_STREAMER_URL || 'http://100.64.9.23:3000';
 // Public-Pfad den der Browser für den Stream anspricht. Default ist ein
 // relativer Pfad — die nginx der ISP-Seite proxyt /tv-stream/* direkt zum
@@ -1455,7 +1455,7 @@ app.get('/api/tv/channels', authMiddleware, async (req, res) => {
 // Kein Auth — sind nur udpxy-URLs, abspielbar nur im Hausnetz.
 app.get('/api/tv/playlist.m3u', async (req, res) => {
   try {
-    const udpxy = process.env.UDPXY_BASE || 'http://100.64.9.200:4022';
+    const udpxy = process.env.UDPXY_BASE || 'http://100.64.9.24:4022';
     const r = await fetch('https://api.init7.net/tvchannels.m3u', {
       signal: AbortSignal.timeout(8000),
     });
