@@ -15,7 +15,7 @@ http:
     nextcloud-rw4303:
       entryPoints: [websecure]
       rule: Host(`nextcloud.rosenweg4303.ch`)
-      service: swarm-https-svc
+      service: nextcloud-lxc-svc
       tls: { certResolver: cf }
     auth-rw4303:
       entryPoints: [websecure]
@@ -45,12 +45,11 @@ http:
         passHostHeader: true
         servers:
           - url: http://100.64.2.45
-    swarm-https-svc:
+    nextcloud-lxc-svc:
       loadBalancer:
         passHostHeader: true
-        serversTransport: insecure-internal
         servers:
-          - url: https://100.64.2.27
+          - url: http://100.64.2.36
     authentik-hosts-svc:
       loadBalancer:
         passHostHeader: true
