@@ -1354,7 +1354,7 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
 //   Browser → /api/tv/channels       (API, Authentik-Session)
 //   Browser → /api/tv/stream/<id>    (API, Authentik-Session)
 //             ↓ pipe MPEG-TS
-//          tv7-streamer (LXC 250, 100.64.9.250:3000)
+//          tv7-streamer (LXC 250, 100.64.9.23:3000)
 //             ↓ spawn ffmpeg
 //          api.tv.init7.net (HLS, AC-3 audio)
 //
@@ -1365,7 +1365,7 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
 // blockiert die UDM-Firewall den Init7-Multicast-Inflow, deshalb HLS-Pfad.
 const TV7_PLAYLIST_URL = 'https://api.init7.net/tvchannels.m3u?rp=true';
 const UDPXY_HOST = process.env.UDPXY_HOST || 'http://100.64.9.200:4022';
-const TV7_STREAMER_URL = process.env.TV7_STREAMER_URL || 'http://100.64.9.250:3000';
+const TV7_STREAMER_URL = process.env.TV7_STREAMER_URL || 'http://100.64.9.23:3000';
 // Public-Pfad den der Browser für den Stream anspricht. Default ist ein
 // relativer Pfad — die nginx der ISP-Seite proxyt /tv-stream/* direkt zum
 // LXC 250, kein API-Hop. Wenn ein voller URL gesetzt ist (z.B. via CF
