@@ -2,6 +2,7 @@ const ModbusRTU = require('modbus-serial');
 const { Pool } = require('pg');
 const express = require('express');
 const cors = require('cors');
+const mqtt = require('mqtt');
 
 // ─── Configuration ──────────────────────────────────────────────────
 // METERS env var is only used for initial DB seeding (first start)
@@ -27,6 +28,68 @@ const pool = new Pool({
   statement_timeout: 30000,
 });
 pool.on('error', (err) => console.error('[DB] Idle client error:', err.message));
+
+// ─── MQTT-Publish (Zaehlerdaten fuer andere Regelsysteme) ───────────
+// Jeder Poll wird zusaetzlich zur DB nach MQTT publiziert (retained), damit
+// Regelsysteme/Dashboards den letzten Wert sofort beim Connect bekommen.
+// MQTT_URL leer => Feature aus (Collector laeuft unveraendert weiter).
+const MQTT_URL = process.env.MQTT_URL || '';
+const MQTT_USER = process.env.MQTT_USER || 'collector';
+const MQTT_PASS = process.env.MQTT_PASS || '';
+const MQTT_PREFIX = process.env.MQTT_PREFIX || 'energy';
+let mqttClient = null;
+if (MQTT_URL) {
+  mqttClient = mqtt.connect(MQTT_URL, {
+    username: MQTT_USER,
+    password: MQTT_PASS,
+    clientId: 'energy-collector',
+    reconnectPeriod: 5000,
+    connectTimeout: 10000,
+    will: { topic: `${MQTT_PREFIX}/collector/status`, payload: 'offline', retain: true, qos: 0 },
+  });
+  mqttClient.on('connect', () => {
+    console.log(`[MQTT] connected ${MQTT_URL} (prefix ${MQTT_PREFIX})`);
+    mqttClient.publish(`${MQTT_PREFIX}/collector/status`, 'online', { retain: true });
+  });
+  mqttClient.on('error', (e) => console.error('[MQTT] error:', e.message));
+  mqttClient.on('reconnect', () => console.log('[MQTT] reconnecting...'));
+  mqttClient.on('close', () => console.log('[MQTT] disconnected'));
+} else {
+  console.log('[MQTT] disabled (kein MQTT_URL gesetzt)');
+}
+
+// Ein Reading publishen: Voll-JSON unter energy/<id> + flache numerische
+// Schluesseltopics energy/<id>/<feld> (retained) fuer simple Subscriber.
+function mqttPublishReading(meter, data, ts) {
+  if (!mqttClient || !mqttClient.connected) return;
+  // meter.id "r9-2og3" -> Topic energy/r9/2og3 (Hierarchie energy/<haus>/<bereich>).
+  // Dieses Schema traegt die ACL: energy=alle, energy/r9=nur Rosenweg-9-Gruppen,
+  // energy/r9/2og3=nur die Wohnungs-Gruppe. Bereich = Rest nach dem ersten "-".
+  const idParts = String(meter.id).split('-');
+  const haus = idParts.shift();
+  const bereich = idParts.length ? idParts.join('-') : haus;
+  const base = `${MQTT_PREFIX}/${haus}/${bereich}`;
+  try {
+    mqttClient.publish(base, JSON.stringify({
+      name: meter.name,
+      location: meter.location || null,
+      category: meter.category || null,
+      ts: ts.toISOString(),
+      power_w: data.power_w,
+      power_l1_w: data.power_l1_w,
+      power_l2_w: data.power_l2_w,
+      power_l3_w: data.power_l3_w,
+      energy_import_kwh: data.energy_import_kwh,
+      energy_export_kwh: data.energy_export_kwh,
+      tariff: data.tariff,
+    }), { retain: true });
+    for (const k of ['power_w', 'energy_import_kwh', 'energy_export_kwh']) {
+      if (data[k] != null) mqttClient.publish(`${base}/${k}`, String(data[k]), { retain: true });
+    }
+  } catch (e) {
+    console.error('[MQTT] publish error:', e.message);
+  }
+}
 
 // ─── smart-me Telstar 80A Register Map ──────────────────────────────
 // All registers use FC03 (Read Holding Registers), Big Endian
@@ -524,6 +587,8 @@ async function pollMeter(meter) {
         data.energy_export_t1_kwh, data.energy_export_t2_kwh,
       ]
     );
+
+    mqttPublishReading(meter, data, ts);
   } catch (err) {
     mtrEvt(meter, 'POLL_FAIL', `code=${err.code || '-'} msg=${err.message}`);
     console.error(`Poll error [${meter.name}]:`, err.message);
@@ -1749,6 +1814,11 @@ async function gracefulShutdown(signal) {
   for (const [id, client] of modbusClients) {
     try { client.close(); } catch (_) {}
     modbusClients.delete(id);
+  }
+
+  // Close MQTT (will-Message faengt harte Abbrueche ab)
+  if (mqttClient) {
+    try { mqttClient.publish(`${MQTT_PREFIX}/collector/status`, 'offline', { retain: true }); mqttClient.end(true); } catch (_) {}
   }
 
   // Close DB pool
