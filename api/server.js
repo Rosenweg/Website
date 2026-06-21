@@ -1461,6 +1461,9 @@ app.get('/api/tv/playlist.m3u', async (req, res) => {
     });
     if (!r.ok) throw new Error('init7 HTTP ' + r.status);
     let body = await r.text();
+    // EPG-Referenz (Apps laden xmltv automatisch) + tvg-id (=tvg-name) fuers Mapping
+    body = body.replace(/^#EXTM3U.*/m, '#EXTM3U url-tvg="https://tv.rosenweg4303.ch/epg.xml" x-tvg-url="https://tv.rosenweg4303.ch/epg.xml"');
+    body = body.replace(/(#EXTINF:[^\n]*?)tvg-name="([^"]+)"/g, (m, pre, name) => m.includes('tvg-id=') ? m : `${pre}tvg-id="${name}" tvg-name="${name}"`);
     // udp://@<gruppe>:<port> -> http://<udpxy>/udp/<gruppe>:<port>
     body = body.replace(/^udp:\/\/@?([\d.]+):(\d+).*$/gm, (_m, g, p) => `${udpxy}/udp/${g}:${p}`);
     res.set('Content-Type', 'audio/x-mpegurl; charset=utf-8');
@@ -1468,6 +1471,70 @@ app.get('/api/tv/playlist.m3u', async (req, res) => {
     res.set('Cache-Control', 'public, max-age=1800');
     res.send(body);
   } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// ─── TV7 EPG (XMLTV) ─────────────────────────────────────────────────
+// Init7-EPG-API (api.tv.init7.net/api/epg/) ist zeitsortiert + paginiert.
+// Wir holen nur den Zukunfts-Tail (now-3h .. Ende) und bauen XMLTV.
+// channel id = canonical_name (= tvg-name in der Playlist). Cache 6h.
+let _tv7EpgCache = null;
+const TV7_EPG_TTL = 6 * 3600 * 1000;
+function tv7XmlEsc(s) {
+  return String(s == null ? '' : s).replace(/[<>&'"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
+}
+function tv7XmltvTime(iso) {
+  const d = new Date(iso); const p = n => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())} +0000`;
+}
+async function buildTV7Epg() {
+  const BASE = 'https://api.tv.init7.net/api/epg/';
+  const head = await (await fetch(`${BASE}?limit=1`, { signal: AbortSignal.timeout(15000) })).json();
+  const total = head.count || 0;
+  const minTs = Date.now() - 3 * 3600 * 1000; // ab 3h vor jetzt
+  const LIMIT = 20000;
+  let offset = Math.max(0, total - 90000); // Zukunfts-Tail (~letzte ~7 Tage)
+  const channels = new Map();
+  const programmes = [];
+  while (offset < total) {
+    const page = await (await fetch(`${BASE}?limit=${LIMIT}&offset=${offset}`, { signal: AbortSignal.timeout(30000) })).json();
+    for (const r of (page.results || [])) {
+      if (new Date(r.timeslot.lower).getTime() < minTs) continue;
+      const ch = r.channel || {}; const id = ch.canonical_name;
+      if (!id) continue;
+      if (!channels.has(id)) channels.set(id, { name: ch.name || id, logo: ch.logo || '' });
+      programmes.push({ id, start: r.timeslot.lower, stop: r.timeslot.upper, title: r.title, sub: r.sub_title, desc: r.desc });
+    }
+    offset += LIMIT;
+  }
+  let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<tv generator-info-name="rosenweg-tv">\n';
+  for (const [id, c] of channels) {
+    xml += `  <channel id="${tv7XmlEsc(id)}"><display-name>${tv7XmlEsc(c.name)}</display-name>${c.logo ? `<icon src="${tv7XmlEsc(c.logo)}"/>` : ''}</channel>\n`;
+  }
+  for (const p of programmes) {
+    xml += `  <programme start="${tv7XmltvTime(p.start)}" stop="${tv7XmltvTime(p.stop)}" channel="${tv7XmlEsc(p.id)}">`;
+    xml += `<title>${tv7XmlEsc(p.title)}</title>`;
+    if (p.sub) xml += `<sub-title>${tv7XmlEsc(p.sub)}</sub-title>`;
+    if (p.desc) xml += `<desc>${tv7XmlEsc(p.desc)}</desc>`;
+    xml += `</programme>\n`;
+  }
+  xml += '</tv>\n';
+  return { xml, channels: channels.size, programmes: programmes.length };
+}
+app.get('/api/tv/epg.xml', async (req, res) => {
+  try {
+    if (!_tv7EpgCache || (Date.now() - _tv7EpgCache.ts) > TV7_EPG_TTL) {
+      const built = await buildTV7Epg();
+      _tv7EpgCache = { xml: built.xml, ts: Date.now() };
+      console.log(`[TV7-EPG] gebaut: ${built.channels} Kanaele, ${built.programmes} Sendungen`);
+    }
+    res.set('Content-Type', 'application/xml; charset=utf-8');
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.send(_tv7EpgCache.xml);
+  } catch (e) {
+    if (_tv7EpgCache) { res.set('Content-Type', 'application/xml; charset=utf-8'); return res.send(_tv7EpgCache.xml); }
+    console.error('[TV7-EPG] error:', e.message);
     res.status(502).json({ error: e.message });
   }
 });
