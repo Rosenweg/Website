@@ -451,10 +451,20 @@ async function readSmartFox(meter) {
 // ─── Polling Loop ───────────────────────────────────────────────────
 const modbusClients = new Map();
 
+// ── Soft-Sniffer: strukturierte TCP-Events pro Zaehler (Kollisions-Timing) ──
+// Greppbar via `docker logs <energy-collector> | grep MTR-EVT`. Schluessel-Signal:
+// PORT_ERROR code=ECONNRESET auf haupt/allgemein = der ESP32-Single-Slot wurde
+// von einem ZWEITEN Modbus-Client gekapert (Reset by peer). connect_timeout
+// hingegen = Geraet/:502 haengt (Firmware). So unterscheiden wir Kollision vs Haenger.
+function mtrEvt(meter, event, detail = '') {
+  console.log(`[MTR-EVT] ${new Date().toISOString()} ${meter.name} ${event}${detail ? ' ' + detail : ''}`);
+}
+
 async function getModbusClient(meter) {
   let client = modbusClients.get(meter.id);
   if (client && client.isOpen) return client;
 
+  mtrEvt(meter, 'CONNECT_TRY', `${meter.host}:${meter.port}`);
   client = new ModbusRTU();
   // Connect-Timeout begrenzen: tote Zaehler (Modbus-Port dicht) wuerden sonst
   // im OS-Default (~30-75s) haengen und die Poll-Schleife ausbremsen.
@@ -465,10 +475,12 @@ async function getModbusClient(meter) {
   client.setTimeout(3000);
   // Handle connection errors to prevent unhandled rejections crashing the process
   client._port.on('error', (err) => {
+    mtrEvt(meter, 'PORT_ERROR', `code=${err.code || '-'} ${err.message}`);
     console.error(`Modbus connection error [${meter.name}]:`, err.message);
     modbusClients.delete(meter.id);
   });
   modbusClients.set(meter.id, client);
+  mtrEvt(meter, 'CONNECT_OK');
   console.log(`Modbus connected: ${meter.name} (${meter.host}:${meter.port})`);
   return client;
 }
@@ -513,6 +525,7 @@ async function pollMeter(meter) {
       ]
     );
   } catch (err) {
+    mtrEvt(meter, 'POLL_FAIL', `code=${err.code || '-'} msg=${err.message}`);
     console.error(`Poll error [${meter.name}]:`, err.message);
     if (meter.type === 'modbus') {
       const client = modbusClients.get(meter.id);
