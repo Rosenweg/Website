@@ -81,8 +81,26 @@ statische **IPv6** `2a02:16a:1400:9::40-::50` (persistent), pve-Hosts `::20-::22
 - **KEIN CF-Tunnel** im Frontend-Pfad (frühere Annahme war falsch).
 - energy-collector `:3001` host-published (`.27:3001`) für `/api/energy/`.
 
-**OFFEN:** Swarm-Frontend-Services (`website`, `isp`, `stweg1-7`, `meg`) laufen noch als
-**Hot-Rollback** — nach Soak (1-2 Tage) `scale=0`, dann entfernen. api/postgres/energy/
-doc-converter/syslog/traefik/shepherd bleiben Swarm (= De-Swarm Schritt 2-5).
-Follow-ups: hardcoded `UNIFI_API_KEY`/CF-Token in `api/server.js` → rotieren + Env;
-isp `/tv-stream/` erreicht VLAN9 (100.64.9.250) nicht aus dem LXC.
+Follow-ups: isp `/tv-stream/` GELÖST (Streamer-IP-Konflikt, jetzt .9.23).
+
+## Status 2026-06-21 (später): Frontends scale=0 + Backend-Kern build-alongside
+- **Frontend-Swarm-Services auf `scale=0`** (website/isp/stweg1-7/meg) — alle Hostnamen
+  liefern weiter 200 via LXC. **Schritt 1 endgültig durch.**
+- **CT128 `core-backend` (.52)** angelegt: Debian 13, Docker CE 29.6.0 + compose, im LXC.
+  **Fallen gelöst:** (a) trixie braucht extra `iptables`-Paket (sonst dockerd-Start-Fail
+  „NAT chain DOCKER: iptables not found"); (b) Docker-LXC-Config = `nesting,keyctl` +
+  `apparmor:unconfined` (KEINE extra cgroup/cap-Zeilen).
+- **api+postgres-Stack** (`/opt/rosenweg-core/compose.yml`, env_file `.env`): rosenweg-DB
+  via `pg_dump|psql` migriert + verifiziert (85 Tab., Row-Counts identisch). api läuft,
+  `/api/health`=200, `/api/me`=401 (DB-connected). Env-Override: `DB_HOST=postgres`,
+  `ENERGY_COLLECTOR_URL=http://100.64.2.27:3001` (Overlay-Name nicht auflösbar).
+- **OFFEN für api-Cutover:** (1) **CIFS `/documents`** — Docker-CIFS-Volume scheitert im
+  unprivileged LXC („operation not permitted"): `mount=cifs`-Feature wird von
+  `apparmor:unconfined` überschrieben. Lösung: CIFS am **pve-Host** mounten (fstab auf
+  allen 3 Hosts wg. HA-float) + per `mp0` durchreichen → compose-bind. (2) Cutover:
+  `/api/`-Upstreams (Frontend-nginx `rw_api`, Broker-MQTT-Endpoints, edge) von `.27:3000`
+  auf `.52:3000`, dann Swarm-api `scale=0`.
+
+**OFFEN (Rest):** energy-db (3.4 GB) + collector → CT129; authentik postgres/redis →
+Authentik-LXC; doc-converter/shelly/syslog → Support-LXC; **Mail-SNI 465/993** (alter
+Swarm-Traefik ist dafür load-bearing) → edge-traefik + Router-DNAT; dann Swarm-Abbau.
