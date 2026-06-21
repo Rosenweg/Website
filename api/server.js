@@ -12351,6 +12351,103 @@ function requireTechnikOrPraesident(req, res, next) {
 // Rosenweg-9-Eigentuemer (= stweg3-eigentuemer).
 const ENERGY_COLLECTOR_URL = process.env.ENERGY_COLLECTOR_URL || 'http://energy-collector:3001';
 
+// ─── MQTT-Auth (mosquitto-go-auth HTTP-Backend) ─────────────────────
+// Zweistufig: technische Write-User (collector) laufen ueber den files-Backend
+// des Brokers (existieren nur in Mosquitto). Menschen bekommen hier ein
+// kurzlebiges Token und werden per Authentik-Gruppen + meter_groups autorisiert
+// (Reuse der Collector-Zugriffslogik /api/energy/user/:email/meters). technik =
+// superuser (sieht alles). Schreiben duerfen Menschen nie (acc=2 -> deny).
+const MQTT_AUTH_SECRET = process.env.MQTT_AUTH_SECRET || '';
+pool.query(`CREATE TABLE IF NOT EXISTS mqtt_tokens (
+  token_hash  TEXT PRIMARY KEY,
+  email       TEXT NOT NULL,
+  groups_json TEXT NOT NULL DEFAULT '[]',
+  is_technik  BOOLEAN NOT NULL DEFAULT false,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)`).then(() => pool.query(`CREATE INDEX IF NOT EXISTS idx_mqtt_tokens_email ON mqtt_tokens(email)`))
+  .catch(e => console.error('[mqtt] table init:', e.message));
+
+// go-auth kann keine Custom-Header senden -> Shared-Secret als URI-Query ?k=
+function mqttBrokerGuard(req, res, next) {
+  if (!MQTT_AUTH_SECRET || req.query.k !== MQTT_AUTH_SECRET) return res.status(403).end();
+  next();
+}
+async function mqttUserByEmail(email) {
+  const r = await pool.query(
+    `SELECT groups_json, is_technik FROM mqtt_tokens
+       WHERE email = $1 AND expires_at > NOW()
+       ORDER BY expires_at DESC LIMIT 1`,
+    [String(email || '').toLowerCase()]
+  );
+  return r.rows[0] || null;
+}
+
+// Web-Interface holt sich ein kurzlebiges MQTT-Token (12h). username = email.
+app.post('/api/mqtt/token', authMiddleware, async (req, res) => {
+  try {
+    const groups = req.user.groups || [];
+    const isTech = !!req.user.isAdmin || isTechnik(groups);
+    const token = 'rwmqtt_' + crypto.randomBytes(24).toString('hex');
+    const hash = crypto.createHash('sha256').update(token).digest('hex');
+    await pool.query(
+      `INSERT INTO mqtt_tokens (token_hash, email, groups_json, is_technik, expires_at)
+         VALUES ($1, $2, $3, $4, NOW() + interval '12 hours')`,
+      [hash, String(req.user.email).toLowerCase(), JSON.stringify(groups), isTech]
+    );
+    pool.query(`DELETE FROM mqtt_tokens WHERE expires_at < NOW()`).catch(() => {});
+    res.json({ username: String(req.user.email).toLowerCase(), password: token, is_technik: isTech, prefix: 'energy' });
+  } catch (err) {
+    console.error('[mqtt] token error:', err.message);
+    res.status(500).json({ error: 'Token-Fehler' });
+  }
+});
+
+// mosquitto-go-auth getuser: Token gegen mqtt_tokens pruefen (200=ok / 403=nein).
+app.post('/api/mqtt/getuser', mqttBrokerGuard, async (req, res) => {
+  try {
+    const { username, password } = req.body || {};
+    if (!password) return res.status(403).end();
+    const hash = crypto.createHash('sha256').update(password).digest('hex');
+    const r = await pool.query(
+      `SELECT 1 FROM mqtt_tokens WHERE token_hash = $1 AND email = $2 AND expires_at > NOW()`,
+      [hash, String(username || '').toLowerCase()]
+    );
+    return res.status(r.rows.length ? 200 : 403).end();
+  } catch (err) { console.error('[mqtt] getuser:', err.message); return res.status(500).end(); }
+});
+
+// superuser: technik darf alles.
+app.post('/api/mqtt/superuser', mqttBrokerGuard, async (req, res) => {
+  try {
+    const u = await mqttUserByEmail((req.body || {}).username);
+    return res.status(u && u.is_technik ? 200 : 403).end();
+  } catch (err) { console.error('[mqtt] superuser:', err.message); return res.status(500).end(); }
+});
+
+// aclcheck: Menschen nur lesen; Topic energy/<haus>/<bereich> -> Zaehler
+// <haus>-<bereich>, gegen die Collector-Zugriffsliste pruefen.
+app.post('/api/mqtt/aclcheck', mqttBrokerGuard, async (req, res) => {
+  try {
+    const { username, topic, acc } = req.body || {};
+    if (Number(acc) === 2) return res.status(403).end();        // write = nur tech users (files-backend)
+    const u = await mqttUserByEmail(username);
+    if (!u) return res.status(403).end();
+    if (u.is_technik) return res.status(200).end();             // technik sieht alles
+    if (topic === 'energy/collector/status') return res.status(200).end();
+    const m = /^energy\/([^/]+)\/([^/]+)/.exec(String(topic || ''));
+    if (!m) return res.status(403).end();
+    const meterId = `${m[1]}-${m[2]}`;
+    const groups = (() => { try { return JSON.parse(u.groups_json || '[]'); } catch { return []; } })();
+    const url = `${ENERGY_COLLECTOR_URL}/api/energy/user/${encodeURIComponent(String(username).toLowerCase())}/meters?groups=${encodeURIComponent(groups.join(','))}`;
+    const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    if (!resp.ok) return res.status(403).end();
+    const meters = await resp.json();
+    const allowed = Array.isArray(meters) && meters.some(x => x.id === meterId);
+    return res.status(allowed ? 200 : 403).end();
+  } catch (err) { console.error('[mqtt] aclcheck:', err.message); return res.status(500).end(); }
+});
+
 function requireZaehlerTechnik(req, res, next) {
   const groups = req.user?.groups || [];
   const gl = groups.map(g => String(g).toLowerCase());
