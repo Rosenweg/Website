@@ -101,6 +101,26 @@ Follow-ups: isp `/tv-stream/` GELÖST (Streamer-IP-Konflikt, jetzt .9.23).
   `/api/`-Upstreams (Frontend-nginx `rw_api`, Broker-MQTT-Endpoints, edge) von `.27:3000`
   auf `.52:3000`, dann Swarm-api `scale=0`.
 
-**OFFEN (Rest):** energy-db (3.4 GB) + collector → CT129; authentik postgres/redis →
-Authentik-LXC; doc-converter/shelly/syslog → Support-LXC; **Mail-SNI 465/993** (alter
-Swarm-Traefik ist dafür load-bearing) → edge-traefik + Router-DNAT; dann Swarm-Abbau.
+## Status 2026-06-21 (Nacht): BACKEND-MIGRATION KOMPLETT ✅
+Alles aus dem Swarm in LXCs gezogen, alle Cutover verifiziert. Swarm nur noch als Rollback.
+- **api-Cutover:** CT128 (privilegiert wg. CIFS) — api+postgres+doc-converter+shelly+syslog.
+  rosenweg-DB migriert (Final-Freeze + Delta). `rw_api`/Broker-go-auth/WA-Bridge → `.52:3000`.
+  CIFS `/documents`: am LXC mounten (fstab, **privilegiert**) + compose-**bind** (NICHT
+  Docker-CIFS-Volume → Retry-Sturm killte smbd per OOM!). gotenberg-command braucht das
+  Binary: `["gotenberg","--api-timeout=120s"]`.
+- **energy-Cutover:** CT129 (.53) — energy-db (3.4 GB, 12.48M readings; Bulk-Dump ohne
+  Downtime + Delta; **`readings_id_seq` nachziehen** sonst duplicate-key!) + collector.
+  `rw_energy`/`ENERGY_COLLECTOR_URL` → `.53:3001`. Nur EIN Collector pollen lassen!
+- **Authentik:** CT114 war schon self-contained (eigene pg/redis) → Swarm-DBs nur `scale=0`.
+- **Mail-SNI 465/993:** lief schon über edge (Router-DNAT → `.40`); Swarm-Traefik `scale=0`.
+  edge-`traefik-sync` ENDPOINT `.27` → `http://100.64.2.52:3000`.
+- **Docker-in-LXC:** Docker CE (offizielles Repo) + **`iptables`-Paket** (trixie). Privileg.
+  LXC für CIFS, sonst unprivileged ok.
+
+**Endstand Swarm:** nur `rosenweg_postgres` + `rosenweg_energy-db` = **1/1 als laufender
+Rollback** (Swarm-Volumes sind node-lokal → scale=0/1 würde leeres Volume riskieren, drum
+laufen lassen). Alles andere `0/0`. **Vollständiger Abbau (DBs scale=0 + Stack/Volumes
+entfernen) NACH stabilem Soak** (1-2 Tage).
+
+**Mini-Follow-ups:** UniFi-rsyslog-Ziel auf `.52` (in der UI); shelly-`:8089`-Consumer
+prüfen; CT128/CT129 `compose.yml` ins Repo (analog `frontends-lxc/`).
