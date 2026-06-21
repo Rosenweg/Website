@@ -12360,43 +12360,54 @@ const ENERGY_COLLECTOR_URL = process.env.ENERGY_COLLECTOR_URL || 'http://energy-
 const MQTT_AUTH_SECRET = process.env.MQTT_AUTH_SECRET || '';
 pool.query(`CREATE TABLE IF NOT EXISTS mqtt_tokens (
   token_hash  TEXT PRIMARY KEY,
+  username    TEXT NOT NULL,
   email       TEXT NOT NULL,
   groups_json TEXT NOT NULL DEFAULT '[]',
   is_technik  BOOLEAN NOT NULL DEFAULT false,
   expires_at  TIMESTAMPTZ NOT NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-)`).then(() => pool.query(`CREATE INDEX IF NOT EXISTS idx_mqtt_tokens_email ON mqtt_tokens(email)`))
+)`).then(() => pool.query(`ALTER TABLE mqtt_tokens ADD COLUMN IF NOT EXISTS username TEXT`))
+  .then(() => pool.query(`CREATE INDEX IF NOT EXISTS idx_mqtt_tokens_username ON mqtt_tokens(username)`))
   .catch(e => console.error('[mqtt] table init:', e.message));
+
+// mosquitto lehnt Usernames mit +/# ("dangerous username", MQTT-Wildcards) ab und
+// macht dann KEINEN ACL-Check. E-Mails koennen +-Adressierung haben -> sicheren
+// MQTT-Username ableiten. Die echte E-Mail bleibt im Token (fuer den Zaehler-Check).
+function mqttSafeUsername(email) {
+  return String(email || '').toLowerCase().replace(/[+#]/g, '_');
+}
 
 // go-auth kann keine Custom-Header senden -> Shared-Secret als URI-Query ?k=
 function mqttBrokerGuard(req, res, next) {
   if (!MQTT_AUTH_SECRET || req.query.k !== MQTT_AUTH_SECRET) return res.status(403).end();
   next();
 }
-async function mqttUserByEmail(email) {
+async function mqttUserByUsername(username) {
   const r = await pool.query(
-    `SELECT groups_json, is_technik FROM mqtt_tokens
-       WHERE email = $1 AND expires_at > NOW()
+    `SELECT email, groups_json, is_technik FROM mqtt_tokens
+       WHERE username = $1 AND expires_at > NOW()
        ORDER BY expires_at DESC LIMIT 1`,
-    [String(email || '').toLowerCase()]
+    [String(username || '')]
   );
   return r.rows[0] || null;
 }
 
-// Web-Interface holt sich ein kurzlebiges MQTT-Token (12h). username = email.
+// Web-Interface holt sich ein kurzlebiges MQTT-Token (12h). username = sicher.
 app.post('/api/mqtt/token', authMiddleware, async (req, res) => {
   try {
     const groups = req.user.groups || [];
     const isTech = !!req.user.isAdmin || isTechnik(groups);
+    const email = String(req.user.email).toLowerCase();
+    const username = mqttSafeUsername(email);
     const token = 'rwmqtt_' + crypto.randomBytes(24).toString('hex');
     const hash = crypto.createHash('sha256').update(token).digest('hex');
     await pool.query(
-      `INSERT INTO mqtt_tokens (token_hash, email, groups_json, is_technik, expires_at)
-         VALUES ($1, $2, $3, $4, NOW() + interval '12 hours')`,
-      [hash, String(req.user.email).toLowerCase(), JSON.stringify(groups), isTech]
+      `INSERT INTO mqtt_tokens (token_hash, username, email, groups_json, is_technik, expires_at)
+         VALUES ($1, $2, $3, $4, $5, NOW() + interval '12 hours')`,
+      [hash, username, email, JSON.stringify(groups), isTech]
     );
     pool.query(`DELETE FROM mqtt_tokens WHERE expires_at < NOW()`).catch(() => {});
-    res.json({ username: String(req.user.email).toLowerCase(), password: token, is_technik: isTech, prefix: 'energy' });
+    res.json({ username, password: token, is_technik: isTech, prefix: 'energy' });
   } catch (err) {
     console.error('[mqtt] token error:', err.message);
     res.status(500).json({ error: 'Token-Fehler' });
@@ -12410,8 +12421,8 @@ app.post('/api/mqtt/getuser', mqttBrokerGuard, async (req, res) => {
     if (!password) return res.status(403).end();
     const hash = crypto.createHash('sha256').update(password).digest('hex');
     const r = await pool.query(
-      `SELECT 1 FROM mqtt_tokens WHERE token_hash = $1 AND email = $2 AND expires_at > NOW()`,
-      [hash, String(username || '').toLowerCase()]
+      `SELECT 1 FROM mqtt_tokens WHERE token_hash = $1 AND username = $2 AND expires_at > NOW()`,
+      [hash, String(username || '')]
     );
     return res.status(r.rows.length ? 200 : 403).end();
   } catch (err) { console.error('[mqtt] getuser:', err.message); return res.status(500).end(); }
@@ -12420,18 +12431,18 @@ app.post('/api/mqtt/getuser', mqttBrokerGuard, async (req, res) => {
 // superuser: technik darf alles.
 app.post('/api/mqtt/superuser', mqttBrokerGuard, async (req, res) => {
   try {
-    const u = await mqttUserByEmail((req.body || {}).username);
+    const u = await mqttUserByUsername((req.body || {}).username);
     return res.status(u && u.is_technik ? 200 : 403).end();
   } catch (err) { console.error('[mqtt] superuser:', err.message); return res.status(500).end(); }
 });
 
 // aclcheck: Menschen nur lesen; Topic energy/<haus>/<bereich> -> Zaehler
-// <haus>-<bereich>, gegen die Collector-Zugriffsliste pruefen.
+// <haus>-<bereich>, gegen die Collector-Zugriffsliste (echte E-Mail) pruefen.
 app.post('/api/mqtt/aclcheck', mqttBrokerGuard, async (req, res) => {
   try {
     const { username, topic, acc } = req.body || {};
     if (Number(acc) === 2) return res.status(403).end();        // write = nur tech users (files-backend)
-    const u = await mqttUserByEmail(username);
+    const u = await mqttUserByUsername(username);
     if (!u) return res.status(403).end();
     if (u.is_technik) return res.status(200).end();             // technik sieht alles
     if (topic === 'energy/collector/status') return res.status(200).end();
@@ -12439,7 +12450,7 @@ app.post('/api/mqtt/aclcheck', mqttBrokerGuard, async (req, res) => {
     if (!m) return res.status(403).end();
     const meterId = `${m[1]}-${m[2]}`;
     const groups = (() => { try { return JSON.parse(u.groups_json || '[]'); } catch { return []; } })();
-    const url = `${ENERGY_COLLECTOR_URL}/api/energy/user/${encodeURIComponent(String(username).toLowerCase())}/meters?groups=${encodeURIComponent(groups.join(','))}`;
+    const url = `${ENERGY_COLLECTOR_URL}/api/energy/user/${encodeURIComponent(u.email)}/meters?groups=${encodeURIComponent(groups.join(','))}`;
     const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
     if (!resp.ok) return res.status(403).end();
     const meters = await resp.json();
