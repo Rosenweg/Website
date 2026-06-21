@@ -33,7 +33,10 @@ http:
       entryPoints: [websecure]
       rule: Host(`mqtt.rosenweg4303.ch`)
       service: mqtt-ws-svc
-      tls: { certResolver: cf }
+      tls:
+        certResolver: cf
+        domains:
+          - main: mqtt.rosenweg4303.ch
     # Kurze IPTV-URL: tv.rosenweg4303.ch -> api /api/tv/playlist.m3u (242 Kanaele).
     tv-rw4303:
       entryPoints: [websecure]
