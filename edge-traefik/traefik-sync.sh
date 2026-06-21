@@ -5,7 +5,7 @@
 # Triggered by traefik-sync.timer every 15 s.
 set -uo pipefail
 
-ENDPOINT="https://100.64.2.27/api/traefik/dynamic"
+ENDPOINT="http://100.64.2.52:3000/api/traefik/dynamic"
 HOST="isp.rosenweg4303.ch"
 DEST="/etc/traefik/dynamic/routes.yml"
 TMP_JSON="$(mktemp -t routes.json.XXXXXX)"
