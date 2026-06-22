@@ -123,10 +123,14 @@ const RosenwegNav = {
 
     const active = opts.active || '';
     const basePath = opts.basePath || this._detectBasePath();
+    // Satelliten-Subdomains (z.B. mqtt.rosenweg4303.ch) setzen window.__NAV_BASE__,
+    // damit Logo + Home + Menü auf die Hauptseite (www) zeigen statt relativ auf den
+    // eigenen Host. Der site-config-/Auth-Pfad bleibt relativ (same-origin, kein CORS).
+    const linkBase = (typeof window !== 'undefined' && window.__NAV_BASE__) || basePath;
 
-    this._injectMobileAssets(basePath);
+    this._injectMobileAssets(linkBase);
     await this._loadConfig(basePath);
-    nav.innerHTML = this._render(active, basePath);
+    nav.innerHTML = this._render(active, linkBase);
     this._setupMobile();
     this._setupDropdowns();
     this._setupAuth(basePath);
