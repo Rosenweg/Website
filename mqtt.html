@@ -23,31 +23,35 @@
 <body class="bg-gray-50 min-h-screen">
     <!-- Navigation: identisch zur Hauptseite; Links/Logo zeigen auf www (Satelliten-Host). -->
     <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
-    <script>window.__NAV_BASE__ = 'https://www.rosenweg4303.ch/';</script>
+    <script>
+      // Hauptseite = www; kompakte Satelliten-Nav (Logo->Hauptseite + Titel + passende Links)
+      window.__NAV_BASE__ = 'https://www.rosenweg4303.ch/';
+      window.__NAV_SATELLITE__ = {
+        title: 'MQTT Topic-Browser',
+        links: [
+          { label: 'Dashboard', href: 'dashboard.html' },
+          { label: 'Energie-Monitor', href: 'energie-monitor.html' },
+          { label: 'Zähler', href: 'zaehler.html' },
+        ],
+      };
+    </script>
     <script src="/js/nav.js?v=2"></script>
     <script>RosenwegNav.init({ active: '' });</script>
 
     <!-- App-Bereich: erst nach erfolgreichem Login sichtbar -->
     <main id="app" style="display:none">
-        <!-- Gradient-Banner-Header (Standard: weich/mit Banner) -->
-        <section class="bg-gradient-to-r from-blue-600 to-blue-800 text-white py-10">
-            <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                    <h1 class="text-3xl font-bold mb-1">MQTT Topic-Browser</h1>
-                    <p class="text-lg opacity-90">Live-Telemetrie der Zähler über <span class="mono">mqtt.rosenweg4303.ch</span></p>
-                </div>
-                <div class="flex items-center gap-3 text-sm">
-                    <span id="roleBadge" class="px-2.5 py-1 rounded-full font-medium"></span>
-                    <span class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/15">
-                        <span id="connDot" class="dot bg-gray-300"></span>
-                        <span id="connText" class="text-white/90">verbinde…</span>
-                    </span>
-                </div>
-            </div>
-        </section>
-
-        <!-- Inhalt -->
         <div class="max-w-6xl mx-auto px-4 py-6">
+        <!-- Schlanke Kopfzeile: Untertitel + Rolle + Verbindungsstatus (Titel steht in der Nav) -->
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <p class="text-sm text-gray-500">Live-Telemetrie der Zähler über <span class="mono">mqtt.rosenweg4303.ch</span></p>
+            <div class="flex items-center gap-3 text-sm">
+                <span id="roleBadge" class="px-2.5 py-1 rounded-full font-medium"></span>
+                <span class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white border">
+                    <span id="connDot" class="dot bg-gray-400"></span>
+                    <span id="connText" class="text-gray-600">verbinde…</span>
+                </span>
+            </div>
+        </div>
         <!-- Tab-Leiste -->
         <div class="flex space-x-1 bg-gray-100 rounded-lg p-1 mb-4 w-fit">
             <button onclick="switchTab('live')" id="tab-live"
