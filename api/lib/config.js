@@ -23,6 +23,9 @@ const OAUTH_ALLOWED_HOSTS = new Set([
   'isp.rosenweg4303.ch',
   // MQTT-Topic-Browser (eigener Host, Seite via www-Frontend, WS-Upgrade -> Broker).
   'mqtt.rosenweg4303.ch',
+  // Audience-Subdomains (fokussierte Nav, Seiten via www-Frontend).
+  'admin.rosenweg4303.ch',
+  'ausschuss.rosenweg4303.ch',
   // STWEG-Frontend-Container (stweg1..8.rosenweg4303.ch) — eigener
   // OAuth-Callback je Subdomain, damit die Session auf demselben Origin
   // landet von dem der Login startet. Authentik-Provider hat dazu eine

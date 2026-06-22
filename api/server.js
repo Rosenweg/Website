@@ -12750,6 +12750,27 @@ app.delete('/api/mqtt/topic-rules/:id', authMiddleware, requireMqttTechnik, asyn
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Audience-Map fuer die Subdomain-Navs (admin./ausschuss.): leitet pro Rechte-Seite
+// die Audience(s) aus der permissions-Tabelle ab. Regel: eine *-ausschuss-Gruppe ->
+// 'ausschuss'; nur technik (oder zusaetzlich nur Praesident) -> 'admin'. Seiten ganz
+// ohne Rechte-Eintrag fehlen hier -> die Nav behandelt sie als admin (nur technik).
+app.get('/api/nav/audience-map', authMiddleware, async (req, res) => {
+  try {
+    const rows = (await pool.query('SELECT group_name, page FROM permissions')).rows;
+    const byPage = {};
+    rows.forEach(r => { const g = String(r.group_name).toLowerCase(); (byPage[r.page] = byPage[r.page] || new Set()).add(g); });
+    const map = {};
+    for (const [page, set] of Object.entries(byPage)) {
+      const nonTech = [...set].filter(g => g !== 'technik');
+      const aud = [];
+      if (nonTech.some(g => g.includes('ausschuss'))) aud.push('ausschuss');
+      if (nonTech.length === 0 || nonTech.every(g => g === 'präsident' || g === 'praesident')) aud.push('admin');
+      if (aud.length) map[page] = aud;
+    }
+    res.json(map);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 function requireZaehlerTechnik(req, res, next) {
   const groups = req.user?.groups || [];
   const gl = groups.map(g => String(g).toLowerCase());
