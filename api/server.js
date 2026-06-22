@@ -4227,6 +4227,12 @@ async function pollZevArchive() {
           // PDF-Textlayer auslesen -> Rechnungsfelder (Betrag, Zeitraum, Objekt, Tarif-Positionen).
           let inv = { rechnungsnummer: null, rechnungsdatum: null, zeitraum_von: null, zeitraum_bis: null, objekt: null, betrag_chf: null, positionen: [] };
           if (pdf) { try { inv = zevParseInvoice(await zevPdfToText(pdf.content)); } catch (e) { console.error('[ZEV-Archiv] PDF-Parse:', e.message); } }
+          // Dedup auch per Rechnungsnummer: dieselbe Rechnung mehrfach geforwardet = neue Message-ID,
+          // aber gleiche Nummer -> nicht doppelt erfassen.
+          if (inv.rechnungsnummer) {
+            const dupNr = await pool.query('SELECT 1 FROM zev_rechnungen WHERE rechnungsnummer = $1 LIMIT 1', [inv.rechnungsnummer]);
+            if (dupNr.rows.length) continue;
+          }
           await pool.query(
             `INSERT INTO zev_rechnungen (stweg, wohnung_id, alias_address, bewohner_email, bewohner_name, message_id, betreff, absender, empfangen_am, pdf_filename, pdf_size, pdf_data, rechnungsnummer, rechnungsdatum, zeitraum_von, zeitraum_bis, objekt, betrag_chf, positionen)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) ON CONFLICT (message_id) DO NOTHING`,
