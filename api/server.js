@@ -12439,6 +12439,18 @@ pool.query(`CREATE TABLE IF NOT EXISTS mqtt_tokens (
   .then(() => pool.query(`CREATE INDEX IF NOT EXISTS idx_mqtt_tokens_username ON mqtt_tokens(username)`))
   .catch(e => console.error('[mqtt] table init:', e.message));
 
+// MQTT-only Service-User (existieren NUR im Broker, nicht in Authentik) — fuer
+// technische Anwendungen/Regelsysteme zum Lesen UND Schreiben. Persistentes
+// Passwort (sha256), ACL = topic_filter (MQTT-Wildcards) + can_write.
+pool.query(`CREATE TABLE IF NOT EXISTS mqtt_service_users (
+  username      TEXT PRIMARY KEY,
+  password_hash TEXT NOT NULL,
+  can_write     BOOLEAN NOT NULL DEFAULT false,
+  topic_filter  TEXT NOT NULL DEFAULT 'energy/#',
+  description   TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)`).catch(e => console.error('[mqtt] service-users table init:', e.message));
+
 // mosquitto lehnt Usernames mit +/# ("dangerous username", MQTT-Wildcards) ab und
 // macht dann KEINEN ACL-Check. E-Mails koennen +-Adressierung haben -> sicheren
 // MQTT-Username ableiten. Die echte E-Mail bleibt im Token (fuer den Zaehler-Check).
@@ -12484,6 +12496,24 @@ app.post('/api/mqtt/token', authMiddleware, async (req, res) => {
 });
 
 // mosquitto-go-auth getuser: Token gegen mqtt_tokens pruefen (200=ok / 403=nein).
+// Service-User-Lookup + MQTT-Topic-Match (filter mit +/# vs topic).
+async function mqttServiceUserByUsername(username) {
+  const r = await pool.query(
+    `SELECT username, password_hash, can_write, topic_filter FROM mqtt_service_users WHERE username = $1`,
+    [String(username || '')]);
+  return r.rows[0] || null;
+}
+function mqttTopicMatch(filter, topic) {
+  const f = String(filter || '').split('/'), t = String(topic || '').split('/');
+  for (let i = 0; i < f.length; i++) {
+    if (f[i] === '#') return true;        // matcht Rest inkl. Parent-Level
+    if (i >= t.length) return false;
+    if (f[i] === '+') continue;           // matcht genau ein Level
+    if (f[i] !== t[i]) return false;
+  }
+  return f.length === t.length;
+}
+
 app.post('/api/mqtt/getuser', mqttBrokerGuard, async (req, res) => {
   try {
     const { username, password } = req.body || {};
@@ -12493,7 +12523,11 @@ app.post('/api/mqtt/getuser', mqttBrokerGuard, async (req, res) => {
       `SELECT 1 FROM mqtt_tokens WHERE token_hash = $1 AND username = $2 AND expires_at > NOW()`,
       [hash, String(username || '')]
     );
-    return res.status(r.rows.length ? 200 : 403).end();
+    if (r.rows.length) return res.status(200).end();
+    // Service-User (persistentes Passwort, nur im Broker)
+    const s = await mqttServiceUserByUsername(username);
+    if (s && s.password_hash === hash) return res.status(200).end();
+    return res.status(403).end();
   } catch (err) { console.error('[mqtt] getuser:', err.message); return res.status(500).end(); }
 });
 
@@ -12510,7 +12544,13 @@ app.post('/api/mqtt/superuser', mqttBrokerGuard, async (req, res) => {
 app.post('/api/mqtt/aclcheck', mqttBrokerGuard, async (req, res) => {
   try {
     const { username, topic, acc } = req.body || {};
-    if (Number(acc) === 2) return res.status(403).end();        // write = nur tech users (files-backend)
+    // Service-User (nur Broker, technische Anwendungen): ACL = topic_filter + can_write
+    const svc = await mqttServiceUserByUsername(username);
+    if (svc) {
+      if (Number(acc) === 2 && !svc.can_write) return res.status(403).end();
+      return res.status(mqttTopicMatch(svc.topic_filter, topic) ? 200 : 403).end();
+    }
+    if (Number(acc) === 2) return res.status(403).end();        // Menschen schreiben nie
     const u = await mqttUserByUsername(username);
     if (!u) return res.status(403).end();
     if (u.is_technik) return res.status(200).end();             // technik sieht alles
@@ -12621,6 +12661,39 @@ app.post('/api/mqtt/publish', authMiddleware, requireMqttTechnik, async (req, re
       if (err) return res.status(502).json({ error: err.message });
       res.json({ ok: true });
     });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// MQTT-Service-User verwalten (Technik) — technische Anwendungen/Regelsysteme,
+// existieren NUR im Broker (nicht in Authentik). Lesen + optional Schreiben im topic_filter.
+app.get('/api/mqtt/service-users', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    const r = await pool.query('SELECT username, can_write, topic_filter, description, created_at FROM mqtt_service_users ORDER BY username');
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/mqtt/service-users', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    const username = String(req.body?.username || '').trim();
+    if (!/^[a-zA-Z0-9_.-]{3,64}$/.test(username)) return res.status(400).json({ error: 'Username: 3-64 Zeichen aus a-z A-Z 0-9 _ . -' });
+    const topic_filter = String(req.body?.topic_filter || 'energy/#').trim() || 'energy/#';
+    const can_write = !!req.body?.can_write;
+    const description = String(req.body?.description || '').slice(0, 200);
+    const password = 'svc_' + crypto.randomBytes(18).toString('base64url');
+    const hash = crypto.createHash('sha256').update(password).digest('hex');
+    await pool.query(
+      'INSERT INTO mqtt_service_users (username, password_hash, can_write, topic_filter, description) VALUES ($1,$2,$3,$4,$5)',
+      [username, hash, can_write, topic_filter, description]);
+    res.json({ username, password, can_write, topic_filter, hint: 'Passwort wird nur EINMAL angezeigt — jetzt notieren.' });
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: 'Username existiert bereits' });
+    res.status(500).json({ error: e.message });
+  }
+});
+app.delete('/api/mqtt/service-users/:username', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM mqtt_service_users WHERE username = $1', [req.params.username]);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
