@@ -12451,6 +12451,20 @@ pool.query(`CREATE TABLE IF NOT EXISTS mqtt_service_users (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )`).catch(e => console.error('[mqtt] service-users table init:', e.message));
 
+// Generische Topic-Schutz-Regeln: beliebiges Topic-Muster (MQTT-Wildcards) ->
+// Authentik-Gruppe darf lesen und/oder schreiben. Greift in aclcheck zusaetzlich
+// zur energy/-Zaehler-Logik (energy = nur Lesen ueber meter_groups/meter_users).
+pool.query(`CREATE TABLE IF NOT EXISTS mqtt_topic_rules (
+  id           SERIAL PRIMARY KEY,
+  topic_filter TEXT NOT NULL,
+  group_name   TEXT NOT NULL,
+  can_read     BOOLEAN NOT NULL DEFAULT true,
+  can_write    BOOLEAN NOT NULL DEFAULT false,
+  description  TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(topic_filter, group_name)
+)`).catch(e => console.error('[mqtt] topic-rules table init:', e.message));
+
 // mosquitto lehnt Usernames mit +/# ("dangerous username", MQTT-Wildcards) ab und
 // macht dann KEINEN ACL-Check. E-Mails koennen +-Adressierung haben -> sicheren
 // MQTT-Username ableiten. Die echte E-Mail bleibt im Token (fuer den Zaehler-Check).
@@ -12550,15 +12564,25 @@ app.post('/api/mqtt/aclcheck', mqttBrokerGuard, async (req, res) => {
       if (Number(acc) === 2 && !svc.can_write) return res.status(403).end();
       return res.status(mqttTopicMatch(svc.topic_filter, topic) ? 200 : 403).end();
     }
-    if (Number(acc) === 2) return res.status(403).end();        // Menschen schreiben nie
     const u = await mqttUserByUsername(username);
     if (!u) return res.status(403).end();
-    if (u.is_technik) return res.status(200).end();             // technik sieht alles
+    if (u.is_technik) return res.status(200).end();             // technik sieht/schreibt alles
+    const write = Number(acc) === 2;
+    const groups = (() => { try { return JSON.parse(u.groups_json || '[]'); } catch { return []; } })();
+    const groupsLc = groups.map(g => String(g).toLowerCase());
+    // 1. Generische Topic-Regeln (beliebige Topics, Gruppen-basiert, Read/Write).
+    const rules = (await pool.query('SELECT topic_filter, group_name, can_read, can_write FROM mqtt_topic_rules')).rows;
+    for (const rule of rules) {
+      if (!groupsLc.includes(String(rule.group_name).toLowerCase())) continue;
+      if (!mqttTopicMatch(rule.topic_filter, topic)) continue;
+      if (write ? rule.can_write : rule.can_read) return res.status(200).end();
+    }
+    // 2. energy/-Zaehler: Menschen nur LESEN (ueber meter_groups/meter_users).
+    if (write) return res.status(403).end();                    // Schreiben nur per Topic-Regel oder Service-User
     if (topic === 'energy/collector/status') return res.status(200).end();
     const m = /^energy\/([^/]+)\/([^/]+)/.exec(String(topic || ''));
     if (!m) return res.status(403).end();
     const meterId = `${m[1]}-${m[2]}`;
-    const groups = (() => { try { return JSON.parse(u.groups_json || '[]'); } catch { return []; } })();
     const url = `${ENERGY_COLLECTOR_URL}/api/energy/user/${encodeURIComponent(u.email)}/meters?groups=${encodeURIComponent(groups.join(','))}`;
     const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
     if (!resp.ok) return res.status(403).end();
@@ -12693,6 +12717,35 @@ app.post('/api/mqtt/service-users', authMiddleware, requireMqttTechnik, async (r
 app.delete('/api/mqtt/service-users/:username', authMiddleware, requireMqttTechnik, async (req, res) => {
   try {
     await pool.query('DELETE FROM mqtt_service_users WHERE username = $1', [req.params.username]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Generische Topic-Schutz-Regeln verwalten (Technik): Topic-Muster -> Gruppe darf read/write.
+app.get('/api/mqtt/topic-rules', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    const r = await pool.query('SELECT id, topic_filter, group_name, can_read, can_write, description, created_at FROM mqtt_topic_rules ORDER BY topic_filter, group_name');
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/mqtt/topic-rules', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    const topic_filter = String(req.body?.topic_filter || '').trim();
+    const group_name = String(req.body?.group_name || '').trim();
+    if (!topic_filter || !group_name) return res.status(400).json({ error: 'topic_filter und group_name noetig' });
+    const can_read = req.body?.can_read !== false;   // Default: lesen erlaubt
+    const can_write = !!req.body?.can_write;
+    const description = String(req.body?.description || '').slice(0, 200);
+    await pool.query(
+      `INSERT INTO mqtt_topic_rules (topic_filter, group_name, can_read, can_write, description) VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (topic_filter, group_name) DO UPDATE SET can_read=EXCLUDED.can_read, can_write=EXCLUDED.can_write, description=EXCLUDED.description`,
+      [topic_filter, group_name, can_read, can_write, description]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/mqtt/topic-rules/:id', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM mqtt_topic_rules WHERE id = $1', [parseInt(req.params.id, 10) || 0]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

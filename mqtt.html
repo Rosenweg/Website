@@ -141,6 +141,37 @@
                 <div id="svcList" class="space-y-2"><p class="text-gray-400 text-sm">Lade…</p></div>
             </div>
 
+            <!-- Generische Topic-Schutz-Regeln -->
+            <div class="bg-white rounded-xl border p-5">
+                <div class="flex items-center justify-between mb-1">
+                    <h2 class="text-sm font-semibold text-gray-700">Topic-Schutz-Regeln (beliebige Topics → Gruppe)</h2>
+                    <button onclick="loadTopicRules()" class="text-xs text-blue-600 hover:text-blue-800">Neu laden</button>
+                </div>
+                <p class="text-xs text-gray-500 mb-3">Beliebiges Topic-Muster (mit <span class="mono">+ / #</span>) für eine Authentik-Gruppe freigeben — Lesen und/oder Schreiben. Gilt zusätzlich zur <span class="mono">energy/</span>-Zähler-Logik. Technik darf immer alles.</p>
+                <div class="flex flex-wrap gap-2 items-end mb-3 pb-3 border-b">
+                    <div class="flex-1 min-w-[150px]">
+                        <label class="block text-xs text-gray-500 mb-1">Topic-Muster</label>
+                        <input id="trTopic" placeholder="z.B. control/r9/#"
+                               class="mono px-2.5 py-1.5 border rounded-lg text-sm w-full focus:ring-2 focus:ring-blue-400 focus:outline-none">
+                    </div>
+                    <div class="min-w-[150px]">
+                        <label class="block text-xs text-gray-500 mb-1">Gruppe</label>
+                        <input id="trGroup" list="knownGroups" placeholder="Authentik-Gruppe"
+                               class="px-2.5 py-1.5 border rounded-lg text-sm w-full focus:ring-2 focus:ring-blue-400 focus:outline-none">
+                    </div>
+                    <label class="flex items-center gap-1.5 text-sm text-gray-600 select-none mb-1.5">
+                        <input id="trRead" type="checkbox" class="rounded" checked> Lesen
+                    </label>
+                    <label class="flex items-center gap-1.5 text-sm text-gray-600 select-none mb-1.5">
+                        <input id="trWrite" type="checkbox" class="rounded"> Schreiben
+                    </label>
+                    <button onclick="createTopicRule()"
+                            class="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium mb-0.5">Regel anlegen</button>
+                </div>
+                <p id="trMsg" class="text-sm mb-2 hidden"></p>
+                <div id="trList" class="space-y-2"><p class="text-gray-400 text-sm">Lade…</p></div>
+            </div>
+
             <!-- bekannte Authentik-Gruppen für Autocomplete -->
             <datalist id="knownGroups"></datalist>
         </div>
@@ -465,7 +496,7 @@
         const off = 'px-4 py-1.5 text-sm font-medium rounded-md text-gray-500 hover:text-gray-700';
         tl.className = isLive ? on : off;
         ta.className = (isLive ? off : on) + (userIsTechnik ? '' : ' hidden');
-        if (!isLive && userIsTechnik) { loadAdmin(); loadServiceUsers(); }
+        if (!isLive && userIsTechnik) { loadAdmin(); loadServiceUsers(); loadTopicRules(); }
     }
 
     // ═══════════════════ PUBLISH / TEST (nur Technik) ═══════════════════
@@ -727,6 +758,55 @@
         try {
             await AuthentikAuth.apiFetch('/api/mqtt/service-users/' + encodeURIComponent(username), { method: 'DELETE' });
             loadServiceUsers();
+        } catch (e) { /* ignorieren */ }
+    }
+
+    // ═══════════════════ TOPIC-SCHUTZ-REGELN (nur Technik) ═══════════════════
+    async function loadTopicRules() {
+        const el = document.getElementById('trList');
+        el.innerHTML = '<p class="text-gray-400 text-sm">Lade…</p>';
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/mqtt/topic-rules');
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const rules = await r.json();
+            if (!Array.isArray(rules) || rules.length === 0) {
+                el.innerHTML = '<p class="text-gray-400 text-sm">Noch keine Topic-Regeln.</p>'; return;
+            }
+            el.innerHTML = rules.map(t => `
+                <div class="flex flex-wrap items-center gap-3 text-sm border rounded-lg px-3 py-2">
+                    <span class="mono text-gray-800">${esc(t.topic_filter)}</span>
+                    <span class="text-xs text-gray-400">→</span>
+                    <span class="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">${esc(t.group_name)}</span>
+                    <span class="text-xs text-gray-500">${t.can_read ? 'Lesen' : ''}${t.can_read && t.can_write ? ' + ' : ''}${t.can_write ? 'Schreiben' : ''}</span>
+                    ${t.description ? `<span class="text-xs text-gray-400 truncate max-w-[160px]">${esc(t.description)}</span>` : ''}
+                    <button onclick="deleteTopicRule(${t.id})" class="ml-auto text-xs text-red-500 hover:text-red-700">löschen</button>
+                </div>`).join('');
+        } catch (e) { el.innerHTML = `<p class="text-sm text-red-600">${esc(e.message)}</p>`; }
+    }
+    async function createTopicRule() {
+        const topic_filter = document.getElementById('trTopic').value.trim();
+        const group_name = document.getElementById('trGroup').value.trim();
+        const can_read = document.getElementById('trRead').checked;
+        const can_write = document.getElementById('trWrite').checked;
+        const msg = document.getElementById('trMsg');
+        if (!topic_filter || !group_name) {
+            msg.className = 'text-sm mb-2 text-red-600'; msg.textContent = 'Topic-Muster und Gruppe nötig.'; msg.classList.remove('hidden'); return;
+        }
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/mqtt/topic-rules',
+                { method: 'POST', body: { topic_filter, group_name, can_read, can_write } });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) { msg.className = 'text-sm mb-2 text-red-600'; msg.textContent = d.error || ('Fehler ' + r.status); msg.classList.remove('hidden'); return; }
+            msg.className = 'text-sm mb-2 text-green-600'; msg.textContent = 'Regel gespeichert.'; msg.classList.remove('hidden');
+            document.getElementById('trTopic').value = '';
+            document.getElementById('trGroup').value = '';
+            loadTopicRules();
+        } catch (e) { msg.className = 'text-sm mb-2 text-red-600'; msg.textContent = e.message; msg.classList.remove('hidden'); }
+    }
+    async function deleteTopicRule(id) {
+        try {
+            await AuthentikAuth.apiFetch('/api/mqtt/topic-rules/' + id, { method: 'DELETE' });
+            loadTopicRules();
         } catch (e) { /* ignorieren */ }
     }
 
