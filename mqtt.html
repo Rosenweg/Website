@@ -114,7 +114,7 @@
                     <h2 class="text-sm font-semibold text-gray-700">MQTT-Service-User (technische Anwendungen)</h2>
                     <button onclick="loadServiceUsers()" class="text-xs text-blue-600 hover:text-blue-800">Neu laden</button>
                 </div>
-                <p class="text-xs text-gray-500 mb-3">Existieren nur im Broker (nicht in Authentik) — für Regelsysteme/externe Apps zum Lesen und optional Schreiben. Festes Passwort.</p>
+                <p class="text-xs text-gray-500 mb-3">Existieren nur im Broker (nicht in Authentik) — für Regelsysteme/externe Apps zum Lesen und optional Schreiben. Festes Passwort. Der <span class="mono">Topic-Filter</span> nutzt die Platzhalter <span class="mono">+</span>/<span class="mono">#</span> (Erklärung in der Karte „Topic-Schutz-Regeln" unten).</p>
                 <div class="flex flex-wrap gap-2 items-end mb-3 pb-3 border-b">
                     <div>
                         <label class="block text-xs text-gray-500 mb-1">Username</label>
@@ -147,7 +147,20 @@
                     <h2 class="text-sm font-semibold text-gray-700">Topic-Schutz-Regeln (beliebige Topics → Gruppe)</h2>
                     <button onclick="loadTopicRules()" class="text-xs text-blue-600 hover:text-blue-800">Neu laden</button>
                 </div>
-                <p class="text-xs text-gray-500 mb-3">Beliebiges Topic-Muster (mit <span class="mono">+ / #</span>) für eine Authentik-Gruppe freigeben — Lesen und/oder Schreiben. Gilt zusätzlich zur <span class="mono">energy/</span>-Zähler-Logik. Technik darf immer alles.</p>
+                <p class="text-xs text-gray-500 mb-2">Gib einer Authentik-Gruppe Lesen und/oder Schreiben auf beliebige Topics. Gilt zusätzlich zur <span class="mono">energy/</span>-Zähler-Logik. Technik darf immer alles.</p>
+                <details class="mb-3 text-xs">
+                    <summary class="cursor-pointer text-blue-600 hover:text-blue-800 select-none">❓ Wie funktionieren Topics und die Platzhalter <span class="mono">+</span> und <span class="mono">#</span>?</summary>
+                    <div class="mt-2 p-3 bg-blue-50 rounded-lg text-gray-700 space-y-2 leading-relaxed">
+                        <p>Ein Topic ist wie ein <b>Ordner-Pfad</b>, mit <span class="mono">/</span> getrennt — z.B. <span class="mono bg-white px-1 rounded border">energy/r9/2og3/power_w</span> = Haus <b>r9</b> → Wohnung <b>2og3</b> → <b>Leistung</b>.</p>
+                        <p><span class="mono bg-white px-1.5 rounded border font-semibold text-base">#</span> = <b>alles ab hier</b> (diese Ebene und alle darunter). Steht immer am Ende.<br>
+                            <span class="mono">control/r9/#</span> → <span class="mono">control/r9</span> und alles darunter (<span class="mono">control/r9/heizung</span>, <span class="mono">control/r9/licht/flur</span> …).<br>
+                            <span class="mono">energy/#</span> → wirklich alle Energie-Topics.</p>
+                        <p><span class="mono bg-white px-1.5 rounded border font-semibold text-base">+</span> = <b>genau eine Ebene</b> (ein Platzhalter mittendrin).<br>
+                            <span class="mono">energy/+/haupt</span> → der <span class="mono">haupt</span>-Zähler <i>jedes</i> Hauses (r1, r9, …), aber nichts tiefer.</p>
+                        <p><b>Ohne Platzhalter</b> = genau dieses <b>eine</b> Topic, z.B. <span class="mono">control/r9/heizung</span>.</p>
+                        <p class="text-gray-500 pt-1 border-t">Faustregel: „eine Gruppe darf einen ganzen Bereich" → <span class="mono">bereich/#</span>. Im Zweifel <span class="mono">#</span> am Ende nehmen.</p>
+                    </div>
+                </details>
                 <div class="flex flex-wrap gap-2 items-end mb-3 pb-3 border-b">
                     <div class="flex-1 min-w-[150px]">
                         <label class="block text-xs text-gray-500 mb-1">Topic-Muster</label>
