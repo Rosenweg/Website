@@ -12764,6 +12764,7 @@ app.get('/api/nav/audience-map', async (req, res) => {  // public: nur Seite->Ka
       const nonTech = [...set].filter(g => g !== 'technik');
       const aud = [];
       if (nonTech.some(g => g.includes('ausschuss'))) aud.push('ausschuss');
+      if (nonTech.some(g => ['eigentuemer', 'bewohner', 'verwaltung'].includes(g) || g.endsWith('-eigentuemer') || g.endsWith('-bewohner'))) aud.push('www');
       if (nonTech.length === 0 || nonTech.every(g => g === 'präsident' || g === 'praesident')) aud.push('admin');
       if (aud.length) map[page] = aud;
     }
