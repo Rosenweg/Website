@@ -4197,6 +4197,26 @@ async function pollZevArchive() {
              match?.bewohner_email || null, match?.bewohner_name || null, messageId,
              parsed.subject || null, parsed.from?.value?.[0]?.address || null, parsed.date || null,
              pdf?.filename || null, pdf ? pdf.content.length : null, pdf ? pdf.content : null]);
+          // Bewohner bekommt die Rechnung als saubere Re-Mail von zev@rosenweg9.ch (via SMTP2GO,
+          // verifizierter Absender + gute Reputation) — statt unzuverlaessigem Roh-Forward der
+          // Fremdmail (scheitert an SMTP2GO-Verified-Sender bzw. frischer Relay-IP-Reputation).
+          if (match?.bewohner_email && pdf) {
+            const stwegHost = match.stweg === 8 ? 'meg' : ('stweg' + match.stweg);
+            try {
+              await loggedSendMail({
+                from: 'STWEG-Kooperation Rosenweg <zev@rosenweg9.ch>',
+                to: match.bewohner_email,
+                subject: 'Neue Stromabrechnung (ZEV)',
+                text: `Guten Tag${match.bewohner_name ? ' ' + match.bewohner_name : ''}\n\n`
+                  + `im Anhang finden Sie Ihre aktuelle Stromabrechnung (ZEV).\n\n`
+                  + `Alle Ihre Abrechnungen koennen Sie jederzeit auch online einsehen:\n`
+                  + `https://${stwegHost}.rosenweg4303.ch/pages/zev-meine-rechnungen.html\n\n`
+                  + `Bei Fragen zur Abrechnung finden Sie die Kontaktdaten auf der Rechnung.\n\n`
+                  + `Freundliche Gruesse\nSTWEG-Kooperation Rosenweg`,
+                attachments: [{ filename: pdf.filename || 'Stromabrechnung.pdf', content: pdf.content }],
+              }, 'zev-rechnung-bewohner');
+            } catch (e) { console.error('[ZEV-Archiv] Re-Mail an Bewohner fehlgeschlagen:', e.message); }
+          }
           stored++;
         } catch (e) { console.error(`[ZEV-Archiv] UID ${msg.uid}:`, e.message); }
       }
@@ -5774,7 +5794,9 @@ async function resolveZevForStweg(stweg, cfg) {
     // Alias traegt den Namen des AKTUELLEN Bewohners/Mieters (nicht des Eigentuemers):
     // bei Bewohnerwechsel aendert sich die Adresse -> Axova stellt smart-me darauf um.
     const alias = zevAliasAddress(bewName, cfg.alias_prefix, cfg.alias_domain);
-    const goto = zevGotoTargets({ bewohnerEmail: bewEmail, archivMailbox: cfg.archiv_mailbox, invoiceEmail: cfg.invoice_email });
+    // Bewohner NICHT mehr im Alias-goto: er bekommt die Rechnung per Re-Mail (zev@, SMTP2GO).
+    // Der Alias archiviert nur noch (smartme@) + Verwaltung (invoice_email).
+    const goto = zevGotoTargets({ archivMailbox: cfg.archiv_mailbox, invoiceEmail: cfg.invoice_email });
     return {
       wohnung_id: w.id, bezeichnung: w.bezeichnung, typ: w.typ,
       eigentuemer_name: eigName, alias_address: alias,
