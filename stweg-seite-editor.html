@@ -7,8 +7,9 @@
     <link rel="icon" href="/logo-rosenweg.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="js/authentik-auth.js?v=2"></script>
-    <!-- CKEditor 5 Superbuild (enthält Tabellen- + Bild-Plugins). Exponiert window.CKEDITOR.ClassicEditor. -->
-    <script src="https://cdn.ckeditor.com/ckeditor5/41.4.2/super-build/ckeditor.js"></script>
+    <!-- CKEditor 5 Classic-Build: Rich-Text + Tabellen + Bilder, OHNE Premium/Collaboration.
+         Exponiert global window.ClassicEditor. -->
+    <script src="https://cdn.ckeditor.com/ckeditor5/41.4.2/classic/ckeditor.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; }
@@ -302,27 +303,13 @@
                 editor = await ClassicEditorRef.create(editorEl, {
                     toolbar: [
                         'heading', '|',
-                        'bold', 'italic', 'underline', 'link',
+                        'bold', 'italic', 'link',
                         'bulletedList', 'numberedList', 'blockQuote', '|',
                         'insertTable', 'uploadImage', '|',
                         'undo', 'redo'
                     ],
                     table: { contentToolbar: ['tableColumn', 'tableRow', 'mergeTableCells'] },
-                    extraPlugins: [Base64UploadAdapterPlugin],
-                    // Der Superbuild bündelt Premium-/Collaboration-Plugins, die ohne Lizenz +
-                    // channelId werfen (Fehler collaboration-missing-channelid). Alle entfernen.
-                    // Unbekannte Namen werden ignoriert -> Liste darf großzügig sein.
-                    removePlugins: [
-                        'CKBox', 'CKFinder', 'EasyImage', 'CloudServices', 'CloudServicesCommentsAdapter',
-                        'RealTimeCollaborativeEditing', 'RealTimeCollaborativeComments',
-                        'RealTimeCollaborativeRevisionHistory', 'RealTimeCollaborativeTrackChanges',
-                        'PresenceList', 'Comments', 'CommentsArchive', 'CommentsRepository',
-                        'TrackChanges', 'TrackChangesData', 'TrackChangesEditing',
-                        'RevisionHistory', 'Pagination', 'WProofreader', 'MathType',
-                        'AIAssistant', 'OpenAITextAdapter', 'AzureOpenAITextAdapter',
-                        'SlashCommand', 'Template', 'DocumentOutline', 'DocumentOutlineUI', 'TableOfContents',
-                        'FormatPainter', 'PasteFromOfficeEnhanced', 'CaseChange', 'MultiLevelList', 'Markdown'
-                    ]
+                    extraPlugins: [Base64UploadAdapterPlugin]
                 });
             } catch (e) {
                 console.error('CKEditor init fehlgeschlagen:', e);
