@@ -12811,6 +12811,42 @@ app.post('/api/stweg-modules', authMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── STWEG-Seiten-Inhalt (Modul "seiten-editor") ────────────────────
+pool.query(`CREATE TABLE IF NOT EXISTS stweg_content (
+  stweg      INTEGER PRIMARY KEY,
+  content    TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by TEXT
+)`).catch(e => console.error('[stweg-content] table init:', e.message));
+
+// GET: Inhalt einer STWEG-Seite (public, fuers Rendern). Plain-Text (kein HTML).
+app.get('/api/stweg-content/:stweg', async (req, res) => {
+  try {
+    const stweg = parseInt(req.params.stweg, 10);
+    const r = await pool.query('SELECT content, updated_at FROM stweg_content WHERE stweg = $1', [stweg]);
+    res.json(r.rows[0] || { content: '', updated_at: null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST: Inhalt speichern. Admin jede STWEG, Ausschuss eigene — UND Modul aktiv.
+app.post('/api/stweg-content/:stweg', authMiddleware, async (req, res) => {
+  try {
+    const stweg = parseInt(req.params.stweg, 10);
+    if (!Number.isFinite(stweg)) return res.status(400).json({ error: 'stweg ungueltig' });
+    const groups = req.user?.groups || [];
+    const admin = isTechnik(groups) || isPraesident(groups);
+    if (!admin && !getAusschussStwegs(groups).has(stweg)) return res.status(403).json({ error: 'Nur die eigene STWEG' });
+    const m = await pool.query("SELECT 1 FROM stweg_modules WHERE stweg=$1 AND module='seiten-editor' AND active=true", [stweg]);
+    if (!m.rows.length) return res.status(403).json({ error: 'Modul Seiten-Editor nicht aktiv' });
+    const content = String(req.body?.content ?? '').slice(0, 20000);
+    await pool.query(
+      `INSERT INTO stweg_content (stweg, content, updated_at, updated_by) VALUES ($1,$2,NOW(),$3)
+         ON CONFLICT (stweg) DO UPDATE SET content=EXCLUDED.content, updated_at=NOW(), updated_by=EXCLUDED.updated_by`,
+      [stweg, content, req.user?.email || null]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 function requireZaehlerTechnik(req, res, next) {
   const groups = req.user?.groups || [];
   const gl = groups.map(g => String(g).toLowerCase());
