@@ -1,5 +1,8 @@
 FROM node:22-alpine
 
+# poppler-utils -> pdftotext, fuer ZEV-Rechnungs-Parsing (Textlayer auslesen)
+RUN apk add --no-cache poppler-utils
+
 WORKDIR /app
 
 COPY api/package.json ./

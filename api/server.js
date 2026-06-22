@@ -4113,6 +4113,40 @@ if (ARCHIV_IMAP_PASS) {
   setInterval(() => pollArchivMailbox(), 60000);
 }
 
+// ─── ZEV-Rechnungs-PDF parsen (Textlayer via pdftotext -layout) ──────
+const { execFile: _zevExecFile } = require('child_process');
+function zevPdfToText(buffer) {
+  return new Promise((resolve) => {
+    const tmp = `/tmp/zev-${crypto.randomBytes(6).toString('hex')}.pdf`;
+    try { fsSync.writeFileSync(tmp, buffer); } catch { return resolve(''); }
+    _zevExecFile('pdftotext', ['-layout', tmp, '-'], { maxBuffer: 16 * 1024 * 1024, timeout: 15000 }, (err, stdout) => {
+      try { fsSync.unlinkSync(tmp); } catch {}
+      resolve(err ? '' : String(stdout || ''));
+    });
+  });
+}
+function zevParseSwissNum(s) {
+  if (!s) return null;
+  const n = parseFloat(String(s).replace(/['’.\s]/g, '').replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+}
+// Parst die smart-me-Rechnung (Felder + Tarif-Positionen). Tolerant: fehlende Felder = null.
+function zevParseInvoice(text) {
+  const out = { rechnungsnummer: null, rechnungsdatum: null, zeitraum_von: null, zeitraum_bis: null, objekt: null, betrag_chf: null, positionen: [] };
+  if (!text) return out;
+  let m;
+  if ((m = text.match(/Rechnungsnummer\s+([0-9]+)/))) out.rechnungsnummer = m[1];
+  if ((m = text.match(/Rechnungsdatum\s+(\d{2}\.\d{2}\.\d{4})/))) out.rechnungsdatum = m[1];
+  if ((m = text.match(/Abrechnungszeitraum\s+(\d{2}\.\d{2}\.\d{4})\s*[-–]\s*(\d{2}\.\d{2}\.\d{4})/))) { out.zeitraum_von = m[1]; out.zeitraum_bis = m[2]; }
+  if ((m = text.match(/Objekt\s{2,}(.+)/))) out.objekt = m[1].trim();
+  const tot = [...text.matchAll(/^\s*Total\s+([\d'’.,]+)\s*CHF/gm)];
+  if (tot.length) out.betrag_chf = zevParseSwissNum(tot[tot.length - 1][1]);
+  for (const p of text.matchAll(/^\s*(.+?)\s+([\d'’.,]+)\s*kWh\s+([\d'’.,]+)\s*CHF\s+([\d'’.,]+)\s*CHF/gm)) {
+    out.positionen.push({ name: p[1].trim(), kwh: zevParseSwissNum(p[2]), preis: zevParseSwissNum(p[3]), total: zevParseSwissNum(p[4]) });
+  }
+  return out;
+}
+
 // ─── ZEV smart-me Archiv-Poller (Rechnungen -> zev_rechnungen) ────────
 // Map Empfaenger-Alias (zev.<name>@...) -> Wohnung, aus den aktiven ZEV-STWEGs.
 async function buildZevAliasMap() {
@@ -4190,13 +4224,17 @@ async function pollZevArchive() {
           let match = null;
           for (const r of recips) { if (aliasMap[r]) { match = aliasMap[r]; break; } }
           const pdf = (parsed.attachments || []).find(a => a.contentType === 'application/pdf' || /\.pdf$/i.test(a.filename || ''));
+          // PDF-Textlayer auslesen -> Rechnungsfelder (Betrag, Zeitraum, Objekt, Tarif-Positionen).
+          let inv = { rechnungsnummer: null, rechnungsdatum: null, zeitraum_von: null, zeitraum_bis: null, objekt: null, betrag_chf: null, positionen: [] };
+          if (pdf) { try { inv = zevParseInvoice(await zevPdfToText(pdf.content)); } catch (e) { console.error('[ZEV-Archiv] PDF-Parse:', e.message); } }
           await pool.query(
-            `INSERT INTO zev_rechnungen (stweg, wohnung_id, alias_address, bewohner_email, bewohner_name, message_id, betreff, absender, empfangen_am, pdf_filename, pdf_size, pdf_data)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (message_id) DO NOTHING`,
+            `INSERT INTO zev_rechnungen (stweg, wohnung_id, alias_address, bewohner_email, bewohner_name, message_id, betreff, absender, empfangen_am, pdf_filename, pdf_size, pdf_data, rechnungsnummer, rechnungsdatum, zeitraum_von, zeitraum_bis, objekt, betrag_chf, positionen)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) ON CONFLICT (message_id) DO NOTHING`,
             [match?.stweg || null, match?.wohnung_id || null, match?.alias_address || (recips.find(r => aliasMap[r]) || null),
              match?.bewohner_email || null, match?.bewohner_name || null, messageId,
              parsed.subject || null, parsed.from?.value?.[0]?.address || null, parsed.date || null,
-             pdf?.filename || null, pdf ? pdf.content.length : null, pdf ? pdf.content : null]);
+             pdf?.filename || null, pdf ? pdf.content.length : null, pdf ? pdf.content : null,
+             inv.rechnungsnummer, inv.rechnungsdatum, inv.zeitraum_von, inv.zeitraum_bis, inv.objekt, inv.betrag_chf, JSON.stringify(inv.positionen)]);
           // Bewohner bekommt die Rechnung als saubere Re-Mail von zev@rosenweg9.ch (via SMTP2GO,
           // verifizierter Absender + gute Reputation) — statt unzuverlaessigem Roh-Forward der
           // Fremdmail (scheitert an SMTP2GO-Verified-Sender bzw. frischer Relay-IP-Reputation).
@@ -4206,9 +4244,12 @@ async function pollZevArchive() {
               await loggedSendMail({
                 from: 'STWEG-Kooperation Rosenweg <zev@rosenweg9.ch>',
                 to: match.bewohner_email,
-                subject: 'Neue Stromabrechnung (ZEV)',
+                subject: 'Neue Stromabrechnung (ZEV)' + (inv.zeitraum_von ? ` ${inv.zeitraum_von} – ${inv.zeitraum_bis}` : ''),
                 text: `Guten Tag${match.bewohner_name ? ' ' + match.bewohner_name : ''}\n\n`
-                  + `im Anhang finden Sie Ihre aktuelle Stromabrechnung (ZEV).\n\n`
+                  + `im Anhang finden Sie Ihre aktuelle Stromabrechnung (ZEV).\n`
+                  + (inv.zeitraum_von ? `Abrechnungszeitraum: ${inv.zeitraum_von} – ${inv.zeitraum_bis}\n` : '')
+                  + (inv.betrag_chf != null ? `Rechnungsbetrag: ${inv.betrag_chf.toFixed(2)} CHF\n` : '')
+                  + `\n`
                   + `Alle Ihre Abrechnungen koennen Sie jederzeit auch online einsehen:\n`
                   + `https://${stwegHost}.rosenweg4303.ch/pages/zev-meine-rechnungen.html\n\n`
                   + `Bei Fragen zur Abrechnung finden Sie die Kontaktdaten auf der Rechnung.\n\n`
@@ -4232,6 +4273,25 @@ if (SMARTME_IMAP_PASS) {
   setTimeout(() => pollZevArchive(), 90000);
   setInterval(() => pollZevArchive(), 5 * 60 * 1000);
 }
+
+// Einmaliger Backfill: bestehende Rechnungen ohne geparste Felder nachziehen (PDF-Textlayer).
+async function backfillZevParsing() {
+  try {
+    const r = await pool.query("SELECT id, pdf_data FROM zev_rechnungen WHERE pdf_data IS NOT NULL AND betrag_chf IS NULL LIMIT 500");
+    let n = 0;
+    for (const row of r.rows) {
+      try {
+        const inv = zevParseInvoice(await zevPdfToText(row.pdf_data));
+        await pool.query(
+          `UPDATE zev_rechnungen SET rechnungsnummer=$2, rechnungsdatum=$3, zeitraum_von=$4, zeitraum_bis=$5, objekt=$6, betrag_chf=$7, positionen=$8 WHERE id=$1`,
+          [row.id, inv.rechnungsnummer, inv.rechnungsdatum, inv.zeitraum_von, inv.zeitraum_bis, inv.objekt, inv.betrag_chf, JSON.stringify(inv.positionen)]);
+        n++;
+      } catch (e) { console.error('[ZEV-backfill] id', row.id, e.message); }
+    }
+    if (n) console.log(`[ZEV-backfill] ${n} Rechnung(en) nachgeparst`);
+  } catch (e) { console.error('[ZEV-backfill]', e.message); }
+}
+setTimeout(() => backfillZevParsing(), 30000);
 
 // ─── STWEG Kontakte ─────────────────────────────────────────────────
 
@@ -6017,6 +6077,7 @@ app.get('/api/zev/meine-rechnungen', authMiddleware, async (req, res) => {
     if (!email && !memberWohnungen.length) return res.json({ rechnungen: [] });
     const r = await pool.query(
       `SELECT id, wohnung_id, betreff, absender, empfangen_am, pdf_filename, pdf_size,
+              rechnungsnummer, rechnungsdatum, zeitraum_von, zeitraum_bis, objekt, betrag_chf, positionen,
               (pdf_data IS NOT NULL) AS has_pdf
          FROM zev_rechnungen zr
         WHERE (LOWER(bewohner_email) = $1 AND $1 <> '')
@@ -20756,6 +20817,14 @@ async function initDB() {
       ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS bewohner_email VARCHAR(320);
       ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS bewohner_name VARCHAR(255);
       CREATE INDEX IF NOT EXISTS idx_zev_rechnungen_bewohner ON zev_rechnungen(LOWER(bewohner_email));
+      -- Aus dem PDF-Textlayer geparste Rechnungsfelder (smart-me).
+      ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS rechnungsnummer TEXT;
+      ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS rechnungsdatum  TEXT;
+      ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS zeitraum_von    TEXT;
+      ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS zeitraum_bis    TEXT;
+      ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS objekt          TEXT;
+      ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS betrag_chf      NUMERIC(12,2);
+      ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS positionen      JSONB;
       -- Allgemeinzaehler-Empfaenger (zusaetzlich zu Verwaltung+Archiv), z.B. STWEG-Ausschuss.
       ALTER TABLE zev_config ADD COLUMN IF NOT EXISTS allgemein_email VARCHAR(255);
       -- Optionaler Absender-Override fuer Outbox-Mails (ZEV nutzt smartme@rosenweg9.ch).
