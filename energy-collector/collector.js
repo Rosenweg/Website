@@ -69,22 +69,43 @@ function mqttPublishReading(meter, data, ts) {
   const haus = idParts.shift();
   const bereich = idParts.length ? idParts.join('-') : haus;
   const base = `${MQTT_PREFIX}/${haus}/${bereich}`;
+  // Voll-JSON unter dem Basistopic + JEDES vorhandene Mess-Feld als eigenes
+  // retained Subtopic (energy/<haus>/<bereich>/<feld>). Nicht alle Zaehler liefern
+  // alle Felder (Shelly EM hat keine Spannung/Strom) -> nur vorhandene publiziert.
+  const fields = {
+    power_w: data.power_w,
+    power_l1_w: data.power_l1_w,
+    power_l2_w: data.power_l2_w,
+    power_l3_w: data.power_l3_w,
+    voltage_l1_v: data.voltage_l1_v,
+    voltage_l2_v: data.voltage_l2_v,
+    voltage_l3_v: data.voltage_l3_v,
+    current_l1_a: data.current_l1_a,
+    current_l2_a: data.current_l2_a,
+    current_l3_a: data.current_l3_a,
+    pf_l1: data.pf_l1,
+    pf_l2: data.pf_l2,
+    pf_l3: data.pf_l3,
+    tariff: data.tariff,
+    energy_import_kwh: data.energy_import_kwh,
+    energy_export_kwh: data.energy_export_kwh,
+    energy_import_t1_kwh: data.energy_import_t1_kwh,
+    energy_import_t2_kwh: data.energy_import_t2_kwh,
+    energy_export_t1_kwh: data.energy_export_t1_kwh,
+    energy_export_t2_kwh: data.energy_export_t2_kwh,
+  };
   try {
     mqttClient.publish(base, JSON.stringify({
       name: meter.name,
       location: meter.location || null,
       category: meter.category || null,
       ts: ts.toISOString(),
-      power_w: data.power_w,
-      power_l1_w: data.power_l1_w,
-      power_l2_w: data.power_l2_w,
-      power_l3_w: data.power_l3_w,
-      energy_import_kwh: data.energy_import_kwh,
-      energy_export_kwh: data.energy_export_kwh,
-      tariff: data.tariff,
+      ...fields,
     }), { retain: true });
-    for (const k of ['power_w', 'energy_import_kwh', 'energy_export_kwh']) {
-      if (data[k] != null) mqttClient.publish(`${base}/${k}`, String(data[k]), { retain: true });
+    for (const [k, v] of Object.entries(fields)) {
+      if (typeof v === 'number' && Number.isFinite(v)) {
+        mqttClient.publish(`${base}/${k}`, String(v), { retain: true });
+      }
     }
   } catch (e) {
     console.error('[MQTT] publish error:', e.message);
