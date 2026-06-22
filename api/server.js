@@ -12528,6 +12528,102 @@ app.post('/api/mqtt/aclcheck', mqttBrokerGuard, async (req, res) => {
   } catch (err) { console.error('[mqtt] aclcheck:', err.message); return res.status(500).end(); }
 });
 
+// ─── MQTT-Verwaltung + Publish (Technik) fuer die Web-UI ────────────
+function requireMqttTechnik(req, res, next) {
+  const groups = req.user?.groups || [];
+  if (req.user?.isAdmin || groups.some(g => String(g).toLowerCase() === 'technik')) return next();
+  return res.status(403).json({ error: 'Nur fuer Technik' });
+}
+
+// Lazy MQTT-Write-Client (Broker-User 'collector', darf energy/# schreiben).
+let _apiMqttClient = null;
+function apiMqttPublishClient() {
+  if (_apiMqttClient) return _apiMqttClient;
+  const url = process.env.MQTT_URL;
+  if (!url) return null;
+  const mqttLib = require('mqtt');
+  _apiMqttClient = mqttLib.connect(url, {
+    username: process.env.MQTT_USER || 'collector',
+    password: process.env.MQTT_PASS || '',
+    reconnectPeriod: 5000,
+    clientId: 'rwapi_pub_' + crypto.randomBytes(4).toString('hex'),
+  });
+  _apiMqttClient.on('error', (e) => console.error('[mqtt-pub]', e.message));
+  return _apiMqttClient;
+}
+
+// Alle aktiven Zaehler (fuer die Zugriffsverwaltung)
+app.get('/api/mqtt/meters', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    const r = await energyPool.query('SELECT id, name, location, category FROM meters WHERE active = true ORDER BY id');
+    res.json(r.rows);
+  } catch (e) { console.error('[mqtt] meters:', e.message); res.status(500).json({ error: e.message }); }
+});
+
+// Gruppen-Zugriff je Zaehler
+app.get('/api/mqtt/meters/:id/groups', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    const r = await energyPool.query('SELECT group_name FROM meter_groups WHERE meter_id = $1 ORDER BY group_name', [req.params.id]);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/mqtt/meters/:id/groups', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    const gn = String(req.body?.group_name || '').trim();
+    if (!gn) return res.status(400).json({ error: 'group_name fehlt' });
+    await energyPool.query(
+      'INSERT INTO meter_groups (meter_id, group_name) VALUES ($1,$2) ON CONFLICT (meter_id, group_name) DO NOTHING',
+      [req.params.id, gn]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/mqtt/meters/:id/groups/:group_name', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    await energyPool.query('DELETE FROM meter_groups WHERE meter_id = $1 AND group_name = $2', [req.params.id, req.params.group_name]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Einzel-User-Zugriff je Zaehler
+app.get('/api/mqtt/meters/:id/users', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    const r = await energyPool.query('SELECT user_email, user_name, role FROM meter_users WHERE meter_id = $1 ORDER BY user_email', [req.params.id]);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/mqtt/meters/:id/users', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    const email = String(req.body?.user_email || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: 'user_email fehlt' });
+    await energyPool.query(
+      `INSERT INTO meter_users (meter_id, user_email, user_name, role) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (meter_id, user_email) DO UPDATE SET user_name = EXCLUDED.user_name, role = EXCLUDED.role`,
+      [req.params.id, email, String(req.body?.user_name || email), String(req.body?.role || 'viewer')]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/mqtt/meters/:id/users/:user_email', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    await energyPool.query('DELETE FROM meter_users WHERE meter_id = $1 AND user_email = $2', [req.params.id, String(req.params.user_email).toLowerCase()]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Publish (nur Technik, nur energy/-Topics ohne Wildcards) ueber den Broker-Write-User
+app.post('/api/mqtt/publish', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    const topic = String(req.body?.topic || '').trim();
+    const payload = String(req.body?.payload ?? '');
+    if (!/^energy\/[^#+]*$/.test(topic)) return res.status(400).json({ error: 'Nur energy/-Topics (ohne Wildcards) erlaubt' });
+    const c = apiMqttPublishClient();
+    if (!c) return res.status(503).json({ error: 'MQTT nicht konfiguriert' });
+    c.publish(topic, payload, { qos: 0 }, (err) => {
+      if (err) return res.status(502).json({ error: err.message });
+      res.json({ ok: true });
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 function requireZaehlerTechnik(req, res, next) {
   const groups = req.user?.groups || [];
   const gl = groups.map(g => String(g).toLowerCase());
