@@ -270,12 +270,9 @@ const RosenwegNav = {
   // Seite ohne Rechte-Eintrag = nur technik = admin.
   _pages() {
     return [
-      { href: 'https://isp.rosenweg4303.ch/netzwerk.html', label: 'Netzwerk', group: 'Infrastruktur', perm: 'netzwerk' },
-      { href: 'https://isp.rosenweg4303.ch/verbindungen.html', label: 'Verbindungen', group: 'Infrastruktur', perm: 'verbindungen' },
+      { href: 'https://isp.rosenweg4303.ch/', label: 'ISP / Netzwerk', group: 'Infrastruktur', perm: 'isp' },
       { href: 'proxmox-verwaltung.html', label: 'Proxmox', group: 'Infrastruktur', perm: 'proxmox-verwaltung' },
-      { href: 'https://isp.rosenweg4303.ch/dmarc.html', label: 'DMARC', group: 'Infrastruktur', perm: 'dmarc' },
       { href: 'energie-config.html', label: 'Zählerverwaltung', group: 'Infrastruktur', perm: 'energie-config' },
-      { href: 'https://isp.rosenweg4303.ch/isp-admin.html', label: 'ISP-Admin', group: 'Infrastruktur', perm: 'isp-admin' },
       { href: 'https://mqtt.rosenweg4303.ch/', label: 'MQTT-Browser', group: 'Infrastruktur', perm: 'mqtt' },
       { href: 'mail-approval-config.html', label: 'Freigabe-Konfig', group: 'Mail-Betrieb', perm: 'mail-approval-config' },
       { href: 'mail-templates.html', label: 'Vorlagen', group: 'Mail-Betrieb', perm: 'mail-templates' },
