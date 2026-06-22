@@ -292,10 +292,9 @@ const RosenwegNav = {
       { href: 'loeschungen.html', label: 'Löschungen', group: 'Vorgänge', perm: 'loeschungen' },
       { href: 'echtheitspruefung.html', label: 'Echtheitsprüfung', group: 'Vorgänge', perm: 'echtheitspruefung' },
       { href: 'brief-tracking.html', label: 'Brief-Tracking', group: 'Vorgänge', perm: 'brief-tracking' },
-      { href: 'wohnungsverwaltung.html', label: 'Wohnungen', group: 'Verwaltung', perm: 'wohnungsverwaltung' },
       { href: 'objektverwaltung.html', label: 'Objektverwaltung', group: 'Verwaltung', perm: 'objektverwaltung', aud: ['admin', 'ausschuss'] },
       { href: 'grundbuch.html', label: 'Grundbuch', group: 'Verwaltung', perm: 'grundbuch' },
-      { href: 'mail-compose.html', label: 'Mail schreiben', group: 'Verwaltung', perm: 'mail-compose' },
+      { href: 'mail-compose.html', label: 'Mail schreiben', group: 'Mail-Betrieb', perm: 'mail-compose' },
     ];
   },
 
