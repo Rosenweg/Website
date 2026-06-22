@@ -247,7 +247,39 @@ const RosenwegNav = {
     return '/';
   },
 
+  _renderSatellite(cfg, base) {
+    const links = (cfg.links || []).map(l => {
+      const href = /^https?:/.test(l.href) ? l.href : base + l.href;
+      return `<a href="${this._esc(href)}" class="px-3 py-2 text-sm text-gray-600 hover:text-blue-600 transition">${this._esc(l.label)}</a>`;
+    }).join('');
+    return `
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex justify-between items-center h-16">
+        <div class="flex items-center gap-3 min-w-0">
+          <a href="${base}" class="flex items-center shrink-0" title="Zur Hauptseite">
+            <img src="${base}logo-rosenweg.png" alt="Rosenweg" class="h-10 w-auto">
+          </a>
+          ${cfg.title ? `<span class="text-gray-300 hidden sm:inline">/</span><span class="font-semibold text-gray-800 truncate">${this._esc(cfg.title)}</span>` : ''}
+        </div>
+        <div class="flex items-center gap-1">
+          <div class="hidden sm:flex items-center gap-1">${links}</div>
+          <a href="${base}" class="px-3 py-2 text-sm text-gray-500 hover:text-blue-600 transition">← Hauptseite</a>
+          <div id="nav-auth" class="hidden sm:flex items-center gap-2 ml-2 pl-2 border-l">
+            <a href="${base}profil.html" id="nav-user-link" class="text-sm text-gray-600 hover:text-blue-600 hidden"></a>
+            <button id="nav-login-btn" class="text-sm bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition hidden">Anmelden</button>
+            <button id="nav-logout-btn" class="text-sm text-gray-500 hover:text-red-600 transition hidden">Abmelden</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  },
+
   _render(active, base) {
+    // Satelliten-/Kompakt-Nav (z.B. mqtt.rosenweg4303.ch): nur Logo -> Hauptseite,
+    // Seitentitel + wenige passende Links. Verhindert die ueberladene Hauptnav.
+    if (typeof window !== 'undefined' && window.__NAV_SATELLITE__) {
+      return this._renderSatellite(window.__NAV_SATELLITE__, base);
+    }
     const a = (key) => active === key ? 'text-blue-600 font-semibold' : 'text-gray-700 hover:text-blue-600';
     const dropA = (key) => active === key ? 'bg-blue-50 text-blue-600' : 'text-gray-700 hover:bg-gray-50';
     const stwegen = this._config?.stwegen || [];
