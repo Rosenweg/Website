@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STWEG-Module — Rosenweg</title>
+    <link rel="icon" href="/logo-rosenweg.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="js/authentik-auth.js?v=2"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Gemeinsame Navigation -->
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js?v=2"></script>
+    <script>RosenwegNav.init({ active: '' });</script>
+
+    <!-- Gradient-Banner-Header -->
+    <section class="bg-gradient-to-r from-blue-600 to-blue-800 text-white py-10">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h1 class="text-3xl font-bold mb-1">STWEG-Module</h1>
+            <p class="text-lg opacity-90">Optionale Module pro STWEG aktivieren</p>
+        </div>
+    </section>
+
+    <!-- Login-Gate: wird vor erfolgreichem Login angezeigt -->
+    <div id="gate" class="max-w-4xl mx-auto px-4 py-12 text-center text-gray-600"></div>
+
+    <!-- App-Inhalt: erst nach Login sichtbar -->
+    <main class="max-w-4xl mx-auto px-4 py-6" id="app" style="display:none">
+        <div id="content"></div>
+    </main>
+
+    <script>
+    // ---------------------------------------------------------------
+    // Fest definierte, optionale Module
+    // ---------------------------------------------------------------
+    const MODULES = [
+        { key: 'waschkueche',  label: 'Waschküche',    desc: 'Waschküchen-Reservierung & Verwaltung' },
+        { key: 'seiten-editor', label: 'Seiten-Editor', desc: 'Eigene STWEG-Seite (Inhalts-/News-Bereich) bearbeiten' },
+    ];
+
+    // Anzeige-Name einer STWEG (8 = MEG / Tiefeinstellhalle)
+    function stwegLabel(n) { return n === 8 ? 'MEG' : `STWEG ${n}`; }
+
+    // Lokaler Zustand: { "<stweg>": ["<module>", ...] }  (nur aktive Module)
+    let moduleMap = {};
+    // Welche STWEGs darf der aktuelle User sehen/schalten?
+    let sichtbareStwegs = [];
+    let istAdmin = false;
+
+    // ---------------------------------------------------------------
+    // Bootstrap: Auth + Daten laden
+    // ---------------------------------------------------------------
+    (async function() {
+        const currentUser = await AuthentikAuth.init({
+            requireAuth: true,
+            onLogout: () => AuthentikAuth.createLoginButton('gate'),
+        });
+        if (!currentUser) return; // nicht eingeloggt -> Gate zeigt Login-Button
+
+        // Gate ausblenden, App zeigen
+        document.getElementById('gate').style.display = 'none';
+        document.getElementById('app').style.display = 'block';
+
+        const groups = (currentUser.groups || []).map(g => String(g).toLowerCase());
+
+        // Admin = isAdmin-Flag ODER Mitglied von technik / präsident
+        istAdmin = currentUser.isAdmin === true
+            || groups.some(g => g === 'technik' || g === 'präsident' || g === 'praesident');
+
+        // Eigene STWEGs aus den Gruppen ableiten
+        const eigeneStwegs = new Set();
+        for (const g of groups) {
+            const m = g.match(/^stweg(\d+)-/);     // z.B. stweg3-ausschuss / stweg3-eigentuemer
+            if (m) eigeneStwegs.add(parseInt(m[1], 10));
+            if (/^meg-/.test(g)) eigeneStwegs.add(8); // meg-ausschuss = STWEG 8
+        }
+
+        // Sichtbare STWEGs bestimmen
+        if (istAdmin) {
+            sichtbareStwegs = [1, 2, 3, 4, 5, 6, 7, 8];
+        } else {
+            sichtbareStwegs = [...eigeneStwegs].sort((a, b) => a - b);
+        }
+
+        // Aktiven Zustand laden (public endpoint, kein Auth nötig)
+        await ladeModule();
+        render();
+    })();
+
+    // ---------------------------------------------------------------
+    // Aktive Module je STWEG vom Server holen
+    // ---------------------------------------------------------------
+    async function ladeModule() {
+        try {
+            const r = await fetch('/api/stweg-modules');
+            if (r.ok) {
+                moduleMap = await r.json() || {};
+            } else {
+                moduleMap = {};
+            }
+        } catch (e) {
+            moduleMap = {};
+        }
+    }
+
+    // Prüft, ob ein Modul für eine STWEG aktiv ist
+    function istAktiv(stweg, key) {
+        const arr = moduleMap[String(stweg)] || moduleMap[stweg];
+        return Array.isArray(arr) && arr.includes(key);
+    }
+
+    // ---------------------------------------------------------------
+    // UI rendern
+    // ---------------------------------------------------------------
+    function render() {
+        const content = document.getElementById('content');
+        content.innerHTML = '';
+
+        // Nicht-Admin ohne STWEG-Zugehörigkeit
+        if (sichtbareStwegs.length === 0) {
+            content.innerHTML = `
+                <div class="bg-white rounded-lg shadow p-5 text-center text-gray-600">
+                    Keine STWEG-Zugehörigkeit
+                </div>`;
+            return;
+        }
+
+        // Eine Karte pro sichtbarer STWEG
+        for (const stweg of sichtbareStwegs) {
+            const card = document.createElement('div');
+            card.className = 'bg-white rounded-lg shadow p-5 mb-4';
+
+            // Karten-Kopf
+            const head = document.createElement('h2');
+            head.className = 'text-xl font-semibold text-gray-900 mb-4';
+            head.textContent = stwegLabel(stweg); // textContent -> kein XSS
+            card.appendChild(head);
+
+            // Eine Zeile pro Modul
+            for (const mod of MODULES) {
+                card.appendChild(moduleRow(stweg, mod));
+            }
+
+            content.appendChild(card);
+        }
+    }
+
+    // Baut eine Modul-Zeile (Label + Beschreibung + Toggle + Feedback)
+    function moduleRow(stweg, mod) {
+        const aktiv = istAktiv(stweg, mod.key);
+
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between gap-4 py-3 border-t border-gray-100 first:border-t-0';
+
+        // Text-Block (feste Labels -> textContent)
+        const text = document.createElement('div');
+        const label = document.createElement('div');
+        label.className = 'font-medium text-gray-900';
+        label.textContent = mod.label;
+        const desc = document.createElement('div');
+        desc.className = 'text-sm text-gray-500';
+        desc.textContent = mod.desc;
+        text.appendChild(label);
+        text.appendChild(desc);
+
+        // Rechte Seite: Feedback + Toggle
+        const right = document.createElement('div');
+        right.className = 'flex items-center gap-3 shrink-0';
+
+        const feedback = document.createElement('span');
+        feedback.className = 'text-sm h-5'; // Platz reservieren, Farbe je nach Zustand
+        right.appendChild(feedback);
+
+        const toggle = buildToggle(aktiv);
+        toggle.addEventListener('click', () => onToggle(stweg, mod.key, toggle, feedback));
+        right.appendChild(toggle);
+
+        row.appendChild(text);
+        row.appendChild(right);
+        return row;
+    }
+
+    // ---------------------------------------------------------------
+    // Toggle-Switch (Tailwind, kein Default-Checkbox-Look)
+    // ---------------------------------------------------------------
+    function buildToggle(on) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.setAttribute('role', 'switch');
+        applyToggleState(btn, on);
+
+        // Runder Knopf im Inneren
+        const knob = document.createElement('span');
+        knob.className = 'knob inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform';
+        btn.appendChild(knob);
+
+        applyKnob(btn, on);
+        return btn;
+    }
+
+    // Setzt Farbe/ARIA des Toggle-Buttons
+    function applyToggleState(btn, on) {
+        btn.dataset.on = on ? '1' : '0';
+        btn.setAttribute('aria-checked', on ? 'true' : 'false');
+        btn.className = 'relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none '
+            + (on ? 'bg-blue-700' : 'bg-gray-300');
+    }
+
+    // Verschiebt den Knopf passend zum Zustand
+    function applyKnob(btn, on) {
+        const knob = btn.querySelector('.knob');
+        if (!knob) return;
+        knob.className = 'knob inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform '
+            + (on ? 'translate-x-5' : 'translate-x-1');
+    }
+
+    // Komplettes Toggle-Update
+    function setToggle(btn, on) {
+        applyToggleState(btn, on);
+        applyKnob(btn, on);
+    }
+
+    function isToggleOn(btn) { return btn.dataset.on === '1'; }
+
+    // ---------------------------------------------------------------
+    // Toggle-Klick -> sofort speichern
+    // ---------------------------------------------------------------
+    async function onToggle(stweg, key, btn, feedback) {
+        if (btn.disabled) return;
+        const neu = !isToggleOn(btn);
+
+        // Optimistisch umschalten + sperren während des Requests
+        setToggle(btn, neu);
+        btn.disabled = true;
+        btn.classList.add('opacity-60');
+        feedback.textContent = '';
+
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/stweg-modules', {
+                method: 'POST',
+                body: { stweg: parseInt(stweg, 10), module: key, active: neu },
+            });
+
+            if (r.ok) {
+                // Lokalen Zustand aktualisieren
+                updateLocal(stweg, key, neu);
+                feedback.className = 'text-sm h-5 text-green-600';
+                feedback.textContent = 'gespeichert';
+                setTimeout(() => { feedback.textContent = ''; }, 2000);
+            } else {
+                // Fehler: Toggle zurücksetzen
+                setToggle(btn, !neu);
+                feedback.className = 'text-sm h-5 text-red-600';
+                feedback.textContent = r.status === 403 ? 'Nur eigene STWEG' : ('Fehler ' + r.status);
+            }
+        } catch (e) {
+            setToggle(btn, !neu);
+            feedback.className = 'text-sm h-5 text-red-600';
+            feedback.textContent = 'Fehler';
+        } finally {
+            btn.disabled = false;
+            btn.classList.remove('opacity-60');
+        }
+    }
+
+    // Hält moduleMap konsistent mit dem geschalteten Zustand
+    function updateLocal(stweg, key, on) {
+        const sk = String(stweg);
+        const arr = moduleMap[sk] || moduleMap[stweg] || [];
+        const set = new Set(arr);
+        if (on) set.add(key); else set.delete(key);
+        moduleMap[sk] = [...set];
+        if (sk !== String(stweg)) delete moduleMap[stweg];
+    }
+    </script>
+</body>
+</html>
