@@ -59,6 +59,25 @@ http:
         certResolver: cf
         domains:
           - main: mqtt.rosenweg4303.ch
+    # Audience-Subdomain admin.rosenweg4303.ch -> www-Frontend (fokussierte Admin-Nav via Host).
+    # Intern-only (nur UDM-DNS -> .40), kein oeffentlicher CF-Record.
+    admin-rw4303:
+      entryPoints: [websecure]
+      rule: Host(`admin.rosenweg4303.ch`)
+      service: www-lxc-svc
+      tls:
+        certResolver: cf
+        domains:
+          - main: admin.rosenweg4303.ch
+    # Audience-Subdomain ausschuss.rosenweg4303.ch -> www-Frontend (fokussierte Ausschuss-Nav).
+    ausschuss-rw4303:
+      entryPoints: [websecure]
+      rule: Host(`ausschuss.rosenweg4303.ch`)
+      service: www-lxc-svc
+      tls:
+        certResolver: cf
+        domains:
+          - main: ausschuss.rosenweg4303.ch
     # Kurze IPTV-URL: tv.rosenweg4303.ch -> api /api/tv/playlist.m3u (242 Kanaele).
     tv-rw4303:
       entryPoints: [websecure]
