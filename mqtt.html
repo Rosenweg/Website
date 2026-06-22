@@ -25,22 +25,26 @@
     <script src="/js/nav.js?v=2"></script>
 
     <!-- App-Bereich: erst nach erfolgreichem Login sichtbar -->
-    <main class="max-w-6xl mx-auto px-4 py-6" id="app" style="display:none">
-        <!-- Kopf -->
-        <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
-            <div>
-                <h1 class="text-2xl font-bold text-gray-800">MQTT Topic-Browser</h1>
-                <p class="text-sm text-gray-500">Live-Telemetrie der Zähler über <span class="mono">mqtt.rosenweg4303.ch</span></p>
+    <main id="app" style="display:none">
+        <!-- Gradient-Banner-Header (Standard: weich/mit Banner) -->
+        <section class="bg-gradient-to-r from-blue-600 to-blue-800 text-white py-10">
+            <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h1 class="text-3xl font-bold mb-1">MQTT Topic-Browser</h1>
+                    <p class="text-lg opacity-90">Live-Telemetrie der Zähler über <span class="mono">mqtt.rosenweg4303.ch</span></p>
+                </div>
+                <div class="flex items-center gap-3 text-sm">
+                    <span id="roleBadge" class="px-2.5 py-1 rounded-full font-medium"></span>
+                    <span class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/15">
+                        <span id="connDot" class="dot bg-gray-300"></span>
+                        <span id="connText" class="text-white/90">verbinde…</span>
+                    </span>
+                </div>
             </div>
-            <div class="flex items-center gap-3 text-sm">
-                <span id="roleBadge" class="px-2.5 py-1 rounded-full font-medium"></span>
-                <span class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white border">
-                    <span id="connDot" class="dot bg-gray-400"></span>
-                    <span id="connText" class="text-gray-600">verbinde…</span>
-                </span>
-            </div>
-        </div>
+        </section>
 
+        <!-- Inhalt -->
+        <div class="max-w-6xl mx-auto px-4 py-6">
         <!-- Tab-Leiste -->
         <div class="flex space-x-1 bg-gray-100 rounded-lg p-1 mb-4 w-fit">
             <button onclick="switchTab('live')" id="tab-live"
@@ -63,8 +67,8 @@
             </div>
 
             <!-- Baum-Ansicht -->
-            <div id="tree" class="bg-white rounded-xl border divide-y divide-gray-100 overflow-hidden"></div>
-            <div id="empty" class="bg-white rounded-xl border px-4 py-10 text-center text-gray-400 text-sm">
+            <div id="tree" class="bg-white rounded-lg shadow divide-y divide-gray-100 overflow-hidden"></div>
+            <div id="empty" class="bg-white rounded-lg shadow px-4 py-10 text-center text-gray-400 text-sm">
                 Warte auf Telemetrie… (Zähler publizieren retained — sollte sofort erscheinen)
             </div>
 
@@ -77,7 +81,7 @@
         <!-- ══════════════════ ZUGRIFFSVERWALTUNG (nur Technik) ══════════════════ -->
         <div id="view-admin" class="hidden space-y-6">
             <!-- Publish / Test -->
-            <div class="bg-white rounded-xl border p-5">
+            <div class="bg-white rounded-lg shadow p-5">
                 <h2 class="text-sm font-semibold text-gray-700 mb-3">Publish / Test</h2>
                 <div class="flex flex-wrap gap-3 items-end">
                     <div class="flex-1 min-w-[200px]">
@@ -91,13 +95,13 @@
                                class="w-full mono px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none">
                     </div>
                     <button onclick="doPublish()"
-                            class="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium">Senden</button>
+                            class="px-4 py-2 text-sm rounded-lg bg-blue-700 text-white hover:bg-blue-800 font-medium">Senden</button>
                 </div>
                 <p id="pubMsg" class="text-sm mt-2"></p>
             </div>
 
             <!-- Zähler-Zugriff -->
-            <div class="bg-white rounded-xl border p-5">
+            <div class="bg-white rounded-lg shadow p-5">
                 <div class="flex items-center justify-between mb-3">
                     <h2 class="text-sm font-semibold text-gray-700">Zähler-Zugriff (Gruppen &amp; Einzel-User)</h2>
                     <button onclick="loadAdmin()" class="text-xs text-blue-600 hover:text-blue-800">Neu laden</button>
@@ -109,7 +113,7 @@
             </div>
 
             <!-- MQTT-Service-User (nur Broker, für technische Anwendungen) -->
-            <div class="bg-white rounded-xl border p-5">
+            <div class="bg-white rounded-lg shadow p-5">
                 <div class="flex items-center justify-between mb-1">
                     <h2 class="text-sm font-semibold text-gray-700">MQTT-Service-User (technische Anwendungen)</h2>
                     <button onclick="loadServiceUsers()" class="text-xs text-blue-600 hover:text-blue-800">Neu laden</button>
@@ -135,14 +139,14 @@
                                class="px-2.5 py-1.5 border rounded-lg text-sm w-full focus:ring-2 focus:ring-blue-400 focus:outline-none">
                     </div>
                     <button onclick="createServiceUser()"
-                            class="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium mb-0.5">Anlegen</button>
+                            class="px-3 py-1.5 text-sm rounded-lg bg-blue-700 text-white hover:bg-blue-800 font-medium mb-0.5">Anlegen</button>
                 </div>
                 <div id="svcNew" class="hidden mb-3"></div>
                 <div id="svcList" class="space-y-2"><p class="text-gray-400 text-sm">Lade…</p></div>
             </div>
 
             <!-- Generische Topic-Schutz-Regeln -->
-            <div class="bg-white rounded-xl border p-5">
+            <div class="bg-white rounded-lg shadow p-5">
                 <div class="flex items-center justify-between mb-1">
                     <h2 class="text-sm font-semibold text-gray-700">Topic-Schutz-Regeln (beliebige Topics → Gruppe)</h2>
                     <button onclick="loadTopicRules()" class="text-xs text-blue-600 hover:text-blue-800">Neu laden</button>
@@ -179,7 +183,7 @@
                         <input id="trWrite" type="checkbox" class="rounded"> Schreiben
                     </label>
                     <button onclick="createTopicRule()"
-                            class="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium mb-0.5">Regel anlegen</button>
+                            class="px-3 py-1.5 text-sm rounded-lg bg-blue-700 text-white hover:bg-blue-800 font-medium mb-0.5">Regel anlegen</button>
                 </div>
                 <p id="trMsg" class="text-sm mb-2 hidden"></p>
                 <div id="trList" class="space-y-2"><p class="text-gray-400 text-sm">Lade…</p></div>
@@ -188,6 +192,7 @@
             <!-- bekannte Authentik-Gruppen für Autocomplete -->
             <datalist id="knownGroups"></datalist>
         </div>
+        </div><!-- /Inhalt -->
     </main>
 
     <!-- Login-Gate (vor Login sichtbar) -->
@@ -624,7 +629,7 @@
                     <input list="knownGroups" placeholder="Gruppe…" data-addgroup="${esc(id)}"
                            class="flex-1 px-2.5 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none">
                     <button onclick="addGroup('${esc(id)}')"
-                            class="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700">+</button>
+                            class="px-3 py-1.5 text-sm rounded-lg bg-blue-700 text-white hover:bg-blue-800">+</button>
                 </div>
             </div>
             <div>
