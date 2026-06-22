@@ -29,10 +29,32 @@ http:
       tls: { certResolver: cf }
     # MQTT-over-WebSocket: wss://mqtt.rosenweg4303.ch -> Mosquitto :9001 (plain ws).
     # edge terminiert TLS, Traefik handhabt den WS-Upgrade transparent.
-    mqtt-rw4303:
+    # mqtt.rosenweg4303.ch: WS-Upgrade -> Broker (:9001), sonst -> Seite (www-Frontend);
+    # exakt "/" wird auf /mqtt.html umgeschrieben.
+    mqtt-ws-rw4303:
+      entryPoints: [websecure]
+      rule: Host(`mqtt.rosenweg4303.ch`) && HeaderRegexp(`Upgrade`, `(?i)websocket`)
+      priority: 100
+      service: mqtt-ws-svc
+      tls:
+        certResolver: cf
+        domains:
+          - main: mqtt.rosenweg4303.ch
+    mqtt-root-rw4303:
+      entryPoints: [websecure]
+      rule: Host(`mqtt.rosenweg4303.ch`) && Path(`/`)
+      priority: 50
+      service: www-lxc-svc
+      middlewares: [mqtt-root-rewrite]
+      tls:
+        certResolver: cf
+        domains:
+          - main: mqtt.rosenweg4303.ch
+    mqtt-page-rw4303:
       entryPoints: [websecure]
       rule: Host(`mqtt.rosenweg4303.ch`)
-      service: mqtt-ws-svc
+      priority: 10
+      service: www-lxc-svc
       tls:
         certResolver: cf
         domains:
@@ -64,6 +86,9 @@ http:
     tv-epg-path:
       replacePath:
         path: /api/tv/epg.xml
+    mqtt-root-rewrite:
+      replacePath:
+        path: /mqtt.html
   services:
     www-lxc-svc:
       loadBalancer:
