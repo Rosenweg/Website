@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const fsSync = require('fs');
 const fs = require('fs').promises;
 const pathModule = require('path');
+const sanitizeHtml = require('sanitize-html');
 
 // ─── Ausgelagerte Module (inkrementeller Router-Split) ───────────────
 const { escapeHtml, createSemaphore, normalizePhone, safeId } = require('./lib/utils');
@@ -12844,6 +12845,75 @@ app.post('/api/stweg-content/:stweg', authMiddleware, async (req, res) => {
          ON CONFLICT (stweg) DO UPDATE SET content=EXCLUDED.content, updated_at=NOW(), updated_by=EXCLUDED.updated_by`,
       [stweg, content, req.user?.email || null]);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── STWEG-Seiten-Abschnitte (Modul "seiten-editor", WYSIWYG) ───────
+const STWEG_SECTIONS = ['willkommen', 'aktuelles', 'infos', 'termine'];
+const SANITIZE_OPTS = {
+  allowedTags: ['p', 'br', 'span', 'div', 'strong', 'b', 'em', 'i', 'u', 's', 'blockquote',
+    'ul', 'ol', 'li', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'pre', 'code', 'hr',
+    'img', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'colgroup', 'col', 'caption'],
+  allowedAttributes: {
+    a: ['href', 'target', 'rel'],
+    img: ['src', 'alt', 'width', 'height'],
+    td: ['colspan', 'rowspan'],
+    th: ['colspan', 'rowspan'],
+    '*': ['style', 'class'],
+  },
+  allowedStyles: {
+    '*': {
+      'text-align': [/^left$/, /^right$/, /^center$/, /^justify$/],
+      'color': [/^#(0x)?[0-9a-fA-F]{3,8}$/, /^rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)$/],
+      'background-color': [/^#(0x)?[0-9a-fA-F]{3,8}$/, /^rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)$/],
+      'width': [/^\d+(?:px|%)$/],
+      'height': [/^\d+(?:px|%)$/],
+    },
+  },
+  allowedSchemes: ['http', 'https', 'mailto', 'tel'],
+  allowedSchemesByTag: { img: ['http', 'https', 'data'] },
+  allowProtocolRelative: false,
+  transformTags: { a: sanitizeHtml.simpleTransform('a', { rel: 'noopener noreferrer' }) },
+};
+
+pool.query(`CREATE TABLE IF NOT EXISTS stweg_sections (
+  stweg      INTEGER NOT NULL,
+  section    TEXT NOT NULL,
+  html       TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by TEXT,
+  PRIMARY KEY (stweg, section)
+)`).catch(e => console.error('[stweg-sections] table init:', e.message));
+
+// GET: alle Abschnitte einer STWEG (public, fuers Rendern + Editor-Laden).
+app.get('/api/stweg-sections/:stweg', async (req, res) => {
+  try {
+    const stweg = parseInt(req.params.stweg, 10);
+    const r = await pool.query('SELECT section, html, updated_at FROM stweg_sections WHERE stweg=$1', [stweg]);
+    const out = {};
+    r.rows.forEach(x => { out[x.section] = { html: x.html, updated_at: x.updated_at }; });
+    res.json(out);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST: einen Abschnitt speichern. Admin jede STWEG, Ausschuss eigene — Modul aktiv — HTML sanitisiert.
+app.post('/api/stweg-sections/:stweg/:section', authMiddleware, async (req, res) => {
+  try {
+    const stweg = parseInt(req.params.stweg, 10);
+    const section = String(req.params.section || '');
+    if (!Number.isFinite(stweg)) return res.status(400).json({ error: 'stweg ungueltig' });
+    if (!STWEG_SECTIONS.includes(section)) return res.status(400).json({ error: 'unbekannter Abschnitt' });
+    const groups = req.user?.groups || [];
+    const admin = isTechnik(groups) || isPraesident(groups);
+    if (!admin && !getAusschussStwegs(groups).has(stweg)) return res.status(403).json({ error: 'Nur die eigene STWEG' });
+    const m = await pool.query("SELECT 1 FROM stweg_modules WHERE stweg=$1 AND module='seiten-editor' AND active=true", [stweg]);
+    if (!m.rows.length) return res.status(403).json({ error: 'Modul Seiten-Editor nicht aktiv' });
+    const clean = sanitizeHtml(String(req.body?.html ?? ''), SANITIZE_OPTS);
+    await pool.query(
+      `INSERT INTO stweg_sections (stweg, section, html, updated_at, updated_by) VALUES ($1,$2,$3,NOW(),$4)
+         ON CONFLICT (stweg, section) DO UPDATE SET html=EXCLUDED.html, updated_at=NOW(), updated_by=EXCLUDED.updated_by`,
+      [stweg, section, clean, req.user?.email || null]);
+    res.json({ ok: true, html: clean });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
