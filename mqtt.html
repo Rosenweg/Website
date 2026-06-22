@@ -21,8 +21,11 @@
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
-    <!-- Navigation (nav.js rendert die Leiste selbst) -->
+    <!-- Navigation: identisch zur Hauptseite; Links/Logo zeigen auf www (Satelliten-Host). -->
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script>window.__NAV_BASE__ = 'https://www.rosenweg4303.ch/';</script>
     <script src="/js/nav.js?v=2"></script>
+    <script>RosenwegNav.init({ active: '' });</script>
 
     <!-- App-Bereich: erst nach erfolgreichem Login sichtbar -->
     <main id="app" style="display:none">
