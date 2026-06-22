@@ -65,6 +65,9 @@
                 };
                 const token = AuthentikAuth.getToken();
                 if (!token) return;
+                // Aktive Module dieser STWEG laden (Gating, z.B. Waschküche).
+                fetch('/api/stweg-modules').then(r => r.ok ? r.json() : {}).catch(() => ({})).then(modMap => {
+                const modules = modMap[STWEG_NR] || [];
                 fetch('/api/stweg/' + STWEG_NR + '/overview', { headers: { Authorization: 'Bearer ' + token } })
                     .then(r => r.json())
                     .then(data => {
@@ -83,8 +86,8 @@
                                 '</div>'
                             );
                         }
-                        // Waschkuechen-Karte
-                        if (data.waschkuechen > 0) {
+                        // Waschkuechen-Karte — nur wenn Modul "waschkueche" für die STWEG aktiv
+                        if (data.waschkuechen > 0 && modules.includes('waschkueche')) {
                             cards.push(
                                 '<div class="bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-lg border-2 border-green-200">' +
                                     '<div class="flex items-center mb-3">' +
@@ -102,10 +105,31 @@
                         for (const [typ, anzahl] of Object.entries(data.typen || {})) {
                             parts.push(anzahl + ' ' + typ + (anzahl !== 1 && typ === 'Wohnung' ? 'en' : ''));
                         }
-                        if (data.waschkuechen > 0) parts.push(data.waschkuechen + ' Waschkuechen');
+                        if (data.waschkuechen > 0 && modules.includes('waschkueche')) parts.push(data.waschkuechen + ' Waschkuechen');
                         const sub = document.getElementById('stweg-subtitle');
                         if (sub) sub.textContent = parts.join(' \u2022 ');
                     }).catch(() => {});
+                });
+            })();
+            </script>
+
+            <!-- STWEG-Inhalt (Modul "seiten-editor") — nur wenn aktiv + Inhalt vorhanden -->
+            <div id="stweg-content-box" class="hidden bg-white rounded-lg shadow p-6 mb-8">
+                <div id="stweg-content-body" class="text-gray-700 leading-relaxed"></div>
+            </div>
+            <script>
+            (function() {
+                const N = 3;
+                function esc(s){ return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+                fetch('/api/stweg-modules').then(r => r.ok ? r.json() : {}).catch(() => ({})).then(m => {
+                    if (!((m[N] || []).includes('seiten-editor'))) return;
+                    fetch('/api/stweg-content/' + N).then(r => r.ok ? r.json() : {}).catch(() => ({})).then(d => {
+                        const c = ((d && d.content) || '').trim();
+                        if (!c) return;
+                        document.getElementById('stweg-content-body').innerHTML = esc(c).replace(/\n/g, '<br>');
+                        document.getElementById('stweg-content-box').classList.remove('hidden');
+                    });
+                });
             })();
             </script>
 

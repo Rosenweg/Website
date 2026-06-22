@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STWEG-Seite bearbeiten — Rosenweg</title>
+    <link rel="icon" href="/logo-rosenweg.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="js/authentik-auth.js?v=2"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Gemeinsame Navigation -->
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js?v=2"></script>
+    <script>RosenwegNav.init({ active: '' });</script>
+
+    <!-- Gradient-Banner-Header -->
+    <section class="bg-gradient-to-r from-blue-600 to-blue-800 text-white py-10">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h1 class="text-3xl font-bold mb-1">STWEG-Seite bearbeiten</h1>
+            <p class="text-lg opacity-90">Inhalts-/News-Bereich der eigenen STWEG-Seite</p>
+        </div>
+    </section>
+
+    <!-- Login-Gate: wird vor erfolgreichem Login angezeigt -->
+    <div id="gate" class="max-w-4xl mx-auto px-4 py-12 text-center text-gray-600"></div>
+
+    <!-- App-Inhalt: erst nach Login sichtbar -->
+    <main class="max-w-4xl mx-auto px-4 py-6" id="app" style="display:none">
+
+        <!-- STWEG-Auswahl (nur sichtbar, wenn mehrere STWEGs wählbar sind) -->
+        <div id="stweg-picker" class="bg-white rounded-lg shadow p-5 mb-4" style="display:none">
+            <label for="stweg-select" class="block font-medium text-gray-900 mb-2">STWEG auswählen</label>
+            <select id="stweg-select"
+                    class="w-full sm:w-64 border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </select>
+        </div>
+
+        <!-- Hinweis-Bereich (Modul nicht aktiv / keine STWEG-Zugehörigkeit) -->
+        <div id="notice"></div>
+
+        <!-- Editor-Bereich (nur sichtbar, wenn Modul aktiv ist) -->
+        <div id="editor" style="display:none">
+            <!-- Editor-Karte -->
+            <div class="bg-white rounded-lg shadow p-5 mb-4">
+                <h2 class="text-xl font-semibold text-gray-900 mb-3">Inhalt bearbeiten</h2>
+                <textarea id="content-input" rows="14"
+                          class="w-full border border-gray-300 rounded-md px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Text für den Inhalts-/News-Bereich der STWEG-Seite…"></textarea>
+                <div class="flex flex-wrap items-center gap-3 mt-3">
+                    <button id="save-btn" type="button"
+                            class="bg-blue-700 hover:bg-blue-800 text-white font-medium px-5 py-2 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60">
+                        Speichern
+                    </button>
+                    <!-- Speicher-Feedback (grün=ok, rot=Fehler) -->
+                    <span id="save-feedback" class="text-sm"></span>
+                    <!-- Zeitstempel der letzten Änderung -->
+                    <span id="updated-at" class="text-sm text-gray-500 ml-auto"></span>
+                </div>
+                <p class="text-xs text-gray-400 mt-2">
+                    Plain-Text. Zeilenumbrüche werden übernommen; HTML wird NICHT gerendert.
+                </p>
+            </div>
+
+            <!-- Vorschau-Karte -->
+            <div class="bg-white rounded-lg shadow p-5 mb-4">
+                <h2 class="text-xl font-semibold text-gray-900 mb-3">Vorschau</h2>
+                <!-- Inhalt wird ausschliesslich escaped eingefügt (siehe renderVorschau) -->
+                <div id="preview" class="text-gray-800 leading-relaxed break-words"></div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+    // ---------------------------------------------------------------
+    // Modul-Key, der das Bearbeitungsrecht für die Seite freischaltet
+    // ---------------------------------------------------------------
+    const EDITOR_MODULE = 'seiten-editor';
+
+    // Anzeige-Name einer STWEG (8 = MEG / Tiefeinstellhalle)
+    function stwegLabel(n) { return n === 8 ? 'MEG' : ('STWEG ' + n); }
+
+    // Lokaler Zustand
+    let sichtbareStwegs = [];   // welche STWEGs darf der User sehen?
+    let istAdmin = false;
+    let aktuelleStweg = null;   // aktuell ausgewählte STWEG
+
+    // ---------------------------------------------------------------
+    // HTML-Escaping: verhindert XSS, da Inhalt als Plain-Text gilt
+    // ---------------------------------------------------------------
+    function esc(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    // ---------------------------------------------------------------
+    // Bootstrap: Auth + Daten laden
+    // ---------------------------------------------------------------
+    (async function() {
+        const currentUser = await AuthentikAuth.init({
+            requireAuth: true,
+            onLogout: () => AuthentikAuth.createLoginButton('gate'),
+        });
+        if (!currentUser) return; // nicht eingeloggt -> Gate zeigt Login-Button
+
+        // Gate ausblenden, App zeigen
+        document.getElementById('gate').style.display = 'none';
+        document.getElementById('app').style.display = 'block';
+
+        const groups = (currentUser.groups || []).map(g => String(g).toLowerCase());
+
+        // Admin = isAdmin-Flag ODER Mitglied von technik / präsident
+        istAdmin = currentUser.isAdmin === true
+            || groups.some(g => g === 'technik' || g === 'präsident' || g === 'praesident');
+
+        // Eigene STWEGs aus den Gruppen ableiten
+        const eigeneStwegs = new Set();
+        for (const g of groups) {
+            const m = g.match(/^stweg(\d+)-/);     // z.B. stweg3-ausschuss / stweg3-eigentuemer
+            if (m) eigeneStwegs.add(parseInt(m[1], 10));
+            if (/^meg-/.test(g)) eigeneStwegs.add(8); // meg-* = STWEG 8
+        }
+
+        // Sichtbare STWEGs bestimmen
+        if (istAdmin) {
+            sichtbareStwegs = [1, 2, 3, 4, 5, 6, 7, 8];
+        } else {
+            sichtbareStwegs = [...eigeneStwegs].sort((a, b) => a - b);
+        }
+
+        // Nicht-Admin ohne STWEG-Zugehörigkeit -> Hinweis und Schluss
+        if (sichtbareStwegs.length === 0) {
+            zeigeNotice('gray', 'Keine STWEG-Zugehörigkeit',
+                'Ihrem Konto ist keine STWEG zugeordnet. Wenden Sie sich an den Ausschuss.');
+            return;
+        }
+
+        // STWEG-Auswahl aufbauen
+        bauePicker();
+
+        // Erste STWEG laden
+        aktuelleStweg = sichtbareStwegs[0];
+        await ladeStweg(aktuelleStweg);
+
+        // Speichern-Button verdrahten
+        document.getElementById('save-btn').addEventListener('click', speichern);
+
+        // Live-Vorschau: bei jeder Eingabe neu rendern
+        document.getElementById('content-input').addEventListener('input', renderVorschau);
+    })();
+
+    // ---------------------------------------------------------------
+    // STWEG-Auswahl (Dropdown) aufbauen
+    // ---------------------------------------------------------------
+    function bauePicker() {
+        const picker = document.getElementById('stweg-picker');
+        const select = document.getElementById('stweg-select');
+
+        // Bei genau einer STWEG: kein Dropdown nötig
+        if (sichtbareStwegs.length <= 1) {
+            picker.style.display = 'none';
+            return;
+        }
+
+        // Optionen erzeugen (textContent -> kein XSS)
+        select.innerHTML = '';
+        for (const s of sichtbareStwegs) {
+            const opt = document.createElement('option');
+            opt.value = String(s);
+            opt.textContent = stwegLabel(s);
+            select.appendChild(opt);
+        }
+        picker.style.display = 'block';
+
+        // Wechsel -> Modul-Check + Laden neu (auch für Ausschuss mit mehreren STWEGs)
+        select.addEventListener('change', async () => {
+            aktuelleStweg = parseInt(select.value, 10);
+            await ladeStweg(aktuelleStweg);
+        });
+    }
+
+    // ---------------------------------------------------------------
+    // Eine STWEG laden: Modul-Check, danach ggf. Inhalt holen
+    // ---------------------------------------------------------------
+    async function ladeStweg(stweg) {
+        // UI zurücksetzen
+        document.getElementById('editor').style.display = 'none';
+        clearNotice();
+        clearFeedback();
+
+        // 1) Modul-Status prüfen
+        const aktiv = await istModulAktiv(stweg);
+        if (!aktiv) {
+            zeigeNotice('yellow',
+                'Modul „Seiten-Editor“ nicht aktiviert',
+                'Das Modul „Seiten-Editor“ ist für ' + stwegLabel(stweg) + ' nicht aktiviert. '
+                + 'Erst unter „STWEG-Module“ aktivieren.');
+            return; // Editor bleibt ausgeblendet
+        }
+
+        // 2) Inhalt laden
+        await ladeInhalt(stweg);
+    }
+
+    // ---------------------------------------------------------------
+    // Prüfen, ob das Editor-Modul für die STWEG aktiv ist
+    // GET /api/stweg-modules -> { "<stweg>": ["<modulkey>"] }
+    // ---------------------------------------------------------------
+    async function istModulAktiv(stweg) {
+        try {
+            const r = await fetch('/api/stweg-modules');
+            if (!r.ok) return false;
+            const map = await r.json() || {};
+            const arr = map[String(stweg)] || map[stweg];
+            return Array.isArray(arr) && arr.includes(EDITOR_MODULE);
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Inhalt der STWEG-Seite laden
+    // GET /api/stweg-content/<stweg> -> { content, updated_at }
+    // ---------------------------------------------------------------
+    async function ladeInhalt(stweg) {
+        const input = document.getElementById('content-input');
+        const updatedEl = document.getElementById('updated-at');
+
+        let content = '';
+        let updatedAt = null;
+        try {
+            const r = await fetch('/api/stweg-content/' + encodeURIComponent(stweg));
+            if (r.ok) {
+                const data = await r.json() || {};
+                content = typeof data.content === 'string' ? data.content : '';
+                updatedAt = data.updated_at || null;
+            }
+        } catch (e) {
+            // Bei Fehler bleibt der Editor leer; Speichern legt den Inhalt an
+        }
+
+        input.value = content;
+        updatedEl.textContent = updatedAt ? ('zuletzt geändert: ' + formatZeit(updatedAt)) : '';
+
+        // Editor anzeigen + Vorschau initial rendern
+        document.getElementById('editor').style.display = 'block';
+        renderVorschau();
+    }
+
+    // ---------------------------------------------------------------
+    // Speichern
+    // POST /api/stweg-content/<stweg>  body: { content }
+    // ---------------------------------------------------------------
+    async function speichern() {
+        if (aktuelleStweg == null) return;
+        const btn = document.getElementById('save-btn');
+        const input = document.getElementById('content-input');
+        const fb = document.getElementById('save-feedback');
+
+        btn.disabled = true;
+        clearFeedback();
+
+        try {
+            const r = await AuthentikAuth.apiFetch(
+                '/api/stweg-content/' + encodeURIComponent(aktuelleStweg),
+                { method: 'POST', body: { content: input.value } }
+            );
+
+            if (r.ok) {
+                fb.className = 'text-sm text-green-600';
+                fb.textContent = 'gespeichert';
+                // Zeitstempel aktualisieren (Server-Wert falls vorhanden, sonst jetzt)
+                let updatedAt = null;
+                try { const d = await r.json(); updatedAt = d && d.updated_at; } catch (e) {}
+                document.getElementById('updated-at').textContent =
+                    'zuletzt geändert: ' + formatZeit(updatedAt || new Date().toISOString());
+                setTimeout(() => { fb.textContent = ''; }, 2500);
+            } else {
+                // Fehlertext aus { error } herauslesen
+                let msg = 'Fehler ' + r.status;
+                try { const d = await r.json(); if (d && d.error) msg = d.error; } catch (e) {}
+                fb.className = 'text-sm text-red-600';
+                fb.textContent = msg;
+            }
+        } catch (e) {
+            fb.className = 'text-sm text-red-600';
+            fb.textContent = 'Speichern fehlgeschlagen';
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Live-Vorschau rendern: NUR escaped + \n -> <br>, kein rohes HTML
+    // ---------------------------------------------------------------
+    function renderVorschau() {
+        const text = document.getElementById('content-input').value;
+        const preview = document.getElementById('preview');
+        if (!text.trim()) {
+            preview.innerHTML = '<span class="text-gray-400 italic">Keine Inhalte</span>';
+            return;
+        }
+        // esc() macht den Text sicher, danach Zeilenumbrüche zu <br>
+        preview.innerHTML = esc(text).replace(/\n/g, '<br>');
+    }
+
+    // ---------------------------------------------------------------
+    // Hilfsfunktionen: Hinweis-Box & Feedback
+    // ---------------------------------------------------------------
+    function zeigeNotice(farbe, titel, text) {
+        // Tailwind-Klassen statisch halten (kein dynamisches Class-Name-Bauen,
+        // damit der CDN-JIT die Farben kennt)
+        const stile = {
+            yellow: 'bg-yellow-50 border-yellow-300 text-yellow-800',
+            gray:   'bg-white border-gray-200 text-gray-700',
+        };
+        const cls = stile[farbe] || stile.gray;
+        const notice = document.getElementById('notice');
+        notice.innerHTML =
+            '<div class="rounded-lg shadow p-5 mb-4 border ' + cls + '">'
+            + '<div class="font-semibold mb-1">' + esc(titel) + '</div>'
+            + '<div class="text-sm">' + esc(text) + '</div>'
+            + '</div>';
+    }
+    function clearNotice() { document.getElementById('notice').innerHTML = ''; }
+
+    function clearFeedback() {
+        const fb = document.getElementById('save-feedback');
+        fb.textContent = '';
+        fb.className = 'text-sm';
+    }
+
+    // ISO-Zeit hübsch (lokal, deutsch) formatieren; bei Fehler Rohwert zurückgeben
+    function formatZeit(iso) {
+        try {
+            const d = new Date(iso);
+            if (isNaN(d.getTime())) return String(iso);
+            return d.toLocaleString('de-CH', {
+                day: '2-digit', month: '2-digit', year: 'numeric',
+                hour: '2-digit', minute: '2-digit',
+            });
+        } catch (e) {
+            return String(iso);
+        }
+    }
+    </script>
+</body>
+</html>
