@@ -12772,6 +12772,45 @@ app.get('/api/nav/audience-map', async (req, res) => {  // public: nur Seite->Ka
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Optionale Module pro STWEG ─────────────────────────────────────
+pool.query(`CREATE TABLE IF NOT EXISTS stweg_modules (
+  stweg   INTEGER NOT NULL,
+  module  TEXT NOT NULL,
+  active  BOOLEAN NOT NULL DEFAULT false,
+  PRIMARY KEY (stweg, module)
+)`).catch(e => console.error('[stweg-modules] table init:', e.message));
+
+// GET: aktive Module je STWEG (public, fuer die Nav). -> { "3": ["waschkueche"], ... }
+app.get('/api/stweg-modules', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT stweg, module FROM stweg_modules WHERE active = true');
+    const map = {};
+    r.rows.forEach(x => { (map[x.stweg] = map[x.stweg] || []).push(x.module); });
+    res.json(map);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST: Modul fuer eine STWEG an/aus. Admin (technik/Praesident) jede STWEG,
+// Ausschuss nur die eigene(n).
+app.post('/api/stweg-modules', authMiddleware, async (req, res) => {
+  try {
+    const stweg = parseInt(req.body?.stweg, 10);
+    const module = String(req.body?.module || '').trim();
+    const active = !!req.body?.active;
+    if (!Number.isFinite(stweg) || !module) return res.status(400).json({ error: 'stweg + module noetig' });
+    const groups = req.user?.groups || [];
+    const admin = isTechnik(groups) || isPraesident(groups);
+    if (!admin && !getAusschussStwegs(groups).has(stweg)) {
+      return res.status(403).json({ error: 'Nur die eigene STWEG' });
+    }
+    await pool.query(
+      `INSERT INTO stweg_modules (stweg, module, active) VALUES ($1,$2,$3)
+         ON CONFLICT (stweg, module) DO UPDATE SET active = EXCLUDED.active`,
+      [stweg, module, active]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 function requireZaehlerTechnik(req, res, next) {
   const groups = req.user?.groups || [];
   const gl = groups.map(g => String(g).toLowerCase());
