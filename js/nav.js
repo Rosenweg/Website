@@ -292,7 +292,7 @@ const RosenwegNav = {
       { href: 'echtheitspruefung.html', label: 'Echtheitsprüfung', group: 'Vorgänge', perm: 'echtheitspruefung' },
       { href: 'brief-tracking.html', label: 'Brief-Tracking', group: 'Vorgänge', perm: 'brief-tracking' },
       { href: 'wohnungsverwaltung.html', label: 'Wohnungen', group: 'Verwaltung', perm: 'wohnungsverwaltung' },
-      { href: 'objektverwaltung.html', label: 'Objekte', group: 'Verwaltung', perm: 'objektverwaltung' },
+      { href: 'objektverwaltung.html', label: 'Objektverwaltung', group: 'Verwaltung', perm: 'objektverwaltung', aud: ['admin', 'ausschuss'] },
       { href: 'grundbuch.html', label: 'Grundbuch', group: 'Verwaltung', perm: 'grundbuch' },
       { href: 'mail-compose.html', label: 'Mail schreiben', group: 'Verwaltung', perm: 'mail-compose' },
     ];
@@ -303,7 +303,7 @@ const RosenwegNav = {
   _renderAudience(audience, map, active) {
     const home = 'https://www.rosenweg4303.ch/';
     const curr = ((typeof window !== 'undefined' && window.location.pathname.split('/').pop()) || '').toLowerCase();
-    const pages = this._pages().filter(p => ((map && map[p.perm]) || ['admin']).includes(audience));
+    const pages = this._pages().filter(p => (p.aud || (map && map[p.perm]) || ['admin']).includes(audience));
     const groups = {};
     pages.forEach(p => { (groups[p.group] = groups[p.group] || []).push(p); });
     const link = (p) => {
