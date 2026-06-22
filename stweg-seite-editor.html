@@ -7,9 +7,13 @@
     <link rel="icon" href="/logo-rosenweg.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="js/authentik-auth.js?v=2"></script>
+    <!-- CKEditor 5 Superbuild (enthält Tabellen- + Bild-Plugins). Exponiert global ClassicEditor. -->
+    <script src="https://cdn.ckeditor.com/ckeditor5/41.4.2/super-build/ckeditor.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; }
+        /* CKEditor-Inhaltsbereich auf eine angenehme Mindesthöhe bringen */
+        .ck-editor__editable_inline { min-height: 180px; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -22,7 +26,7 @@
     <section class="bg-gradient-to-r from-blue-600 to-blue-800 text-white py-10">
         <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
             <h1 class="text-3xl font-bold mb-1">STWEG-Seite bearbeiten</h1>
-            <p class="text-lg opacity-90">Inhalts-/News-Bereich der eigenen STWEG-Seite</p>
+            <p class="text-lg opacity-90">Inhaltsabschnitte der eigenen STWEG-Seite (WYSIWYG)</p>
         </div>
     </section>
 
@@ -33,7 +37,7 @@
     <main class="max-w-4xl mx-auto px-4 py-6" id="app" style="display:none">
 
         <!-- STWEG-Auswahl (nur sichtbar, wenn mehrere STWEGs wählbar sind) -->
-        <div id="stweg-picker" class="bg-white rounded-lg shadow p-5 mb-4" style="display:none">
+        <div id="stweg-picker" class="bg-white rounded-lg shadow p-5 mb-6" style="display:none">
             <label for="stweg-select" class="block font-medium text-gray-900 mb-2">STWEG auswählen</label>
             <select id="stweg-select"
                     class="w-full sm:w-64 border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -43,55 +47,41 @@
         <!-- Hinweis-Bereich (Modul nicht aktiv / keine STWEG-Zugehörigkeit) -->
         <div id="notice"></div>
 
-        <!-- Editor-Bereich (nur sichtbar, wenn Modul aktiv ist) -->
-        <div id="editor" style="display:none">
-            <!-- Editor-Karte -->
-            <div class="bg-white rounded-lg shadow p-5 mb-4">
-                <h2 class="text-xl font-semibold text-gray-900 mb-3">Inhalt bearbeiten</h2>
-                <textarea id="content-input" rows="14"
-                          class="w-full border border-gray-300 rounded-md px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Text für den Inhalts-/News-Bereich der STWEG-Seite…"></textarea>
-                <div class="flex flex-wrap items-center gap-3 mt-3">
-                    <button id="save-btn" type="button"
-                            class="bg-blue-700 hover:bg-blue-800 text-white font-medium px-5 py-2 rounded-md transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60">
-                        Speichern
-                    </button>
-                    <!-- Speicher-Feedback (grün=ok, rot=Fehler) -->
-                    <span id="save-feedback" class="text-sm"></span>
-                    <!-- Zeitstempel der letzten Änderung -->
-                    <span id="updated-at" class="text-sm text-gray-500 ml-auto"></span>
-                </div>
-                <p class="text-xs text-gray-400 mt-2">
-                    Plain-Text. Zeilenumbrüche werden übernommen; HTML wird NICHT gerendert.
-                </p>
-            </div>
-
-            <!-- Vorschau-Karte -->
-            <div class="bg-white rounded-lg shadow p-5 mb-4">
-                <h2 class="text-xl font-semibold text-gray-900 mb-3">Vorschau</h2>
-                <!-- Inhalt wird ausschliesslich escaped eingefügt (siehe renderVorschau) -->
-                <div id="preview" class="text-gray-800 leading-relaxed break-words"></div>
-            </div>
-        </div>
+        <!-- Editor-Bereich: hier werden die Abschnitts-Karten dynamisch eingehängt -->
+        <div id="sections"></div>
     </main>
 
     <script>
-    // ---------------------------------------------------------------
-    // Modul-Key, der das Bearbeitungsrecht für die Seite freischaltet
-    // ---------------------------------------------------------------
+    // ===============================================================
+    // Konfiguration
+    // ===============================================================
+
+    // Modul-Key, der das Bearbeitungsrecht für die Seiten freischaltet
     const EDITOR_MODULE = 'seiten-editor';
+
+    // Feste Abschnitte (genau diese 4, in dieser Reihenfolge)
+    const SECTIONS = [
+        { key: 'willkommen', title: 'Willkommen / Begrüßung' },
+        { key: 'aktuelles',  title: 'Aktuelles / News' },
+        { key: 'termine',    title: 'Termine' },
+        { key: 'infos',      title: 'Wichtige Infos / Hinweise' },
+    ];
 
     // Anzeige-Name einer STWEG (8 = MEG / Tiefeinstellhalle)
     function stwegLabel(n) { return n === 8 ? 'MEG' : ('STWEG ' + n); }
 
+    // ===============================================================
     // Lokaler Zustand
+    // ===============================================================
     let sichtbareStwegs = [];   // welche STWEGs darf der User sehen?
     let istAdmin = false;
     let aktuelleStweg = null;   // aktuell ausgewählte STWEG
+    // Map<key, CKEditor-Instanz> der aktuell aktiven Abschnitts-Editoren
+    let editoren = {};
 
-    // ---------------------------------------------------------------
-    // HTML-Escaping: verhindert XSS, da Inhalt als Plain-Text gilt
-    // ---------------------------------------------------------------
+    // ===============================================================
+    // HTML-Escaping für Hinweis-/Statustexte (kein roher User-Input)
+    // ===============================================================
     function esc(s) {
         return String(s == null ? '' : s)
             .replace(/&/g, '&amp;')
@@ -101,10 +91,29 @@
             .replace(/'/g, '&#39;');
     }
 
-    // ---------------------------------------------------------------
+    // ===============================================================
+    // Base64-Bild-Upload-Adapter: Bilder werden inline als data:-URL
+    // eingebettet (KEIN Upload-Server). Wird CKEditor als extraPlugin
+    // übergeben und greift via FileRepository in den Upload-Pfad ein.
+    // ===============================================================
+    function Base64UploadAdapterPlugin(editor) {
+        editor.plugins.get('FileRepository').createUploadAdapter = function (loader) {
+            return {
+                upload: () => loader.file.then(file => new Promise((resolve, reject) => {
+                    const r = new FileReader();
+                    r.onload = () => resolve({ default: r.result });
+                    r.onerror = reject;
+                    r.readAsDataURL(file);
+                })),
+                abort() {}
+            };
+        };
+    }
+
+    // ===============================================================
     // Bootstrap: Auth + Daten laden
-    // ---------------------------------------------------------------
-    (async function() {
+    // ===============================================================
+    (async function () {
         const currentUser = await AuthentikAuth.init({
             requireAuth: true,
             onLogout: () => AuthentikAuth.createLoginButton('gate'),
@@ -124,14 +133,14 @@
         // Eigene STWEGs aus den Gruppen ableiten
         const eigeneStwegs = new Set();
         for (const g of groups) {
-            const m = g.match(/^stweg(\d+)-/);     // z.B. stweg3-ausschuss / stweg3-eigentuemer
+            const m = g.match(/^stweg(\d+)-/);      // z.B. stweg3-ausschuss / stweg3-eigentuemer
             if (m) eigeneStwegs.add(parseInt(m[1], 10));
-            if (/^meg-/.test(g)) eigeneStwegs.add(8); // meg-* = STWEG 8
+            if (/^meg-/.test(g)) eigeneStwegs.add(8); // meg-* = STWEG 8 (MEG)
         }
 
         // Sichtbare STWEGs bestimmen
         if (istAdmin) {
-            sichtbareStwegs = [1, 2, 3, 4, 5, 6, 7, 8];
+            sichtbareStwegs = [1, 2, 3, 4, 5, 6, 7, 8]; // 8 = MEG
         } else {
             sichtbareStwegs = [...eigeneStwegs].sort((a, b) => a - b);
         }
@@ -149,17 +158,11 @@
         // Erste STWEG laden
         aktuelleStweg = sichtbareStwegs[0];
         await ladeStweg(aktuelleStweg);
-
-        // Speichern-Button verdrahten
-        document.getElementById('save-btn').addEventListener('click', speichern);
-
-        // Live-Vorschau: bei jeder Eingabe neu rendern
-        document.getElementById('content-input').addEventListener('input', renderVorschau);
     })();
 
-    // ---------------------------------------------------------------
+    // ===============================================================
     // STWEG-Auswahl (Dropdown) aufbauen
-    // ---------------------------------------------------------------
+    // ===============================================================
     function bauePicker() {
         const picker = document.getElementById('stweg-picker');
         const select = document.getElementById('stweg-select');
@@ -180,40 +183,41 @@
         }
         picker.style.display = 'block';
 
-        // Wechsel -> Modul-Check + Laden neu (auch für Ausschuss mit mehreren STWEGs)
+        // Wechsel -> alte Editoren zerstören, Modul-Check + neu aufbauen
         select.addEventListener('change', async () => {
             aktuelleStweg = parseInt(select.value, 10);
             await ladeStweg(aktuelleStweg);
         });
     }
 
-    // ---------------------------------------------------------------
-    // Eine STWEG laden: Modul-Check, danach ggf. Inhalt holen
-    // ---------------------------------------------------------------
+    // ===============================================================
+    // Eine STWEG laden: Editoren aufräumen, Modul-Check, danach Aufbau
+    // ===============================================================
     async function ladeStweg(stweg) {
-        // UI zurücksetzen
-        document.getElementById('editor').style.display = 'none';
+        // Sauberes Cleanup: bestehende Editoren zerstören (sonst doppelte Instanzen)
+        await zerstoereEditoren();
+        document.getElementById('sections').innerHTML = '';
         clearNotice();
-        clearFeedback();
 
         // 1) Modul-Status prüfen
         const aktiv = await istModulAktiv(stweg);
         if (!aktiv) {
             zeigeNotice('yellow',
                 'Modul „Seiten-Editor“ nicht aktiviert',
-                'Das Modul „Seiten-Editor“ ist für ' + stwegLabel(stweg) + ' nicht aktiviert. '
-                + 'Erst unter „STWEG-Module“ aktivieren.');
-            return; // Editor bleibt ausgeblendet
+                'Das Modul „Seiten-Editor“ ist für ' + stwegLabel(stweg) + ' nicht aktiviert '
+                + '(unter „STWEG-Module“ einschalten).');
+            return; // Editoren werden NICHT initialisiert
         }
 
-        // 2) Inhalt laden
-        await ladeInhalt(stweg);
+        // 2) Vorhandene Inhalte laden + Editoren aufbauen
+        const data = await ladeSections(stweg);
+        await baueEditoren(stweg, data);
     }
 
-    // ---------------------------------------------------------------
+    // ===============================================================
     // Prüfen, ob das Editor-Modul für die STWEG aktiv ist
-    // GET /api/stweg-modules -> { "<stweg>": ["<modulkey>"] }
-    // ---------------------------------------------------------------
+    // GET /api/stweg-modules -> { "<stweg>": ["<modulkey>", ...] }
+    // ===============================================================
     async function istModulAktiv(stweg) {
         try {
             const r = await fetch('/api/stweg-modules');
@@ -226,95 +230,158 @@
         }
     }
 
-    // ---------------------------------------------------------------
-    // Inhalt der STWEG-Seite laden
-    // GET /api/stweg-content/<stweg> -> { content, updated_at }
-    // ---------------------------------------------------------------
-    async function ladeInhalt(stweg) {
-        const input = document.getElementById('content-input');
-        const updatedEl = document.getElementById('updated-at');
-
-        let content = '';
-        let updatedAt = null;
+    // ===============================================================
+    // Abschnitts-Inhalte laden
+    // GET /api/stweg-sections/<stweg>
+    //   -> { "<key>": { html, updated_at }, ... } (nur befüllte vorhanden)
+    // ===============================================================
+    async function ladeSections(stweg) {
         try {
-            const r = await fetch('/api/stweg-content/' + encodeURIComponent(stweg));
+            const r = await fetch('/api/stweg-sections/' + encodeURIComponent(stweg));
             if (r.ok) {
-                const data = await r.json() || {};
-                content = typeof data.content === 'string' ? data.content : '';
-                updatedAt = data.updated_at || null;
+                return (await r.json()) || {};
             }
         } catch (e) {
-            // Bei Fehler bleibt der Editor leer; Speichern legt den Inhalt an
+            // Bei Fehler werden leere Editoren aufgebaut
         }
-
-        input.value = content;
-        updatedEl.textContent = updatedAt ? ('zuletzt geändert: ' + formatZeit(updatedAt)) : '';
-
-        // Editor anzeigen + Vorschau initial rendern
-        document.getElementById('editor').style.display = 'block';
-        renderVorschau();
+        return {};
     }
 
-    // ---------------------------------------------------------------
-    // Speichern
-    // POST /api/stweg-content/<stweg>  body: { content }
-    // ---------------------------------------------------------------
-    async function speichern() {
-        if (aktuelleStweg == null) return;
-        const btn = document.getElementById('save-btn');
-        const input = document.getElementById('content-input');
-        const fb = document.getElementById('save-feedback');
+    // ===============================================================
+    // Editoren aufbauen: pro Abschnitt eine Karte + CKEditor-Instanz
+    // ===============================================================
+    async function baueEditoren(stweg, data) {
+        const container = document.getElementById('sections');
 
+        for (const section of SECTIONS) {
+            const eintrag = data[section.key] || null;
+
+            // --- Karte aufbauen (DOM-API -> kein XSS über Titel) ---
+            const card = document.createElement('div');
+            card.className = 'bg-white rounded-lg shadow p-5 mb-6';
+
+            const h2 = document.createElement('h2');
+            h2.className = 'text-xl font-semibold text-gray-900 mb-3';
+            h2.textContent = section.title;
+            card.appendChild(h2);
+
+            // Editor-Ziel
+            const editorEl = document.createElement('div');
+            card.appendChild(editorEl);
+
+            // Aktionsleiste: Speichern-Button + Status + zuletzt-geändert
+            const bar = document.createElement('div');
+            bar.className = 'flex flex-wrap items-center gap-3 mt-3';
+
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'bg-blue-700 hover:bg-blue-800 text-white font-medium px-5 py-2 rounded-md '
+                + 'transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60';
+            btn.textContent = 'Speichern';
+            bar.appendChild(btn);
+
+            const status = document.createElement('span');
+            status.className = 'text-sm';
+            bar.appendChild(status);
+
+            const updatedEl = document.createElement('span');
+            updatedEl.className = 'text-sm text-gray-500 ml-auto';
+            updatedEl.textContent = (eintrag && eintrag.updated_at)
+                ? ('zuletzt geändert: ' + formatZeit(eintrag.updated_at))
+                : '';
+            bar.appendChild(updatedEl);
+
+            card.appendChild(bar);
+            container.appendChild(card);
+
+            // --- CKEditor 5 (ClassicEditor aus dem Superbuild, global) initialisieren ---
+            let editor;
+            try {
+                editor = await ClassicEditor.create(editorEl, {
+                    toolbar: [
+                        'heading', '|',
+                        'bold', 'italic', 'underline', 'link',
+                        'bulletedList', 'numberedList', 'blockQuote', '|',
+                        'insertTable', 'imageUpload', '|',
+                        'undo', 'redo'
+                    ],
+                    table: { contentToolbar: ['tableColumn', 'tableRow', 'mergeTableCells'] },
+                    extraPlugins: [Base64UploadAdapterPlugin]
+                });
+            } catch (e) {
+                status.className = 'text-sm text-red-600';
+                status.textContent = 'Editor konnte nicht geladen werden';
+                continue;
+            }
+
+            // Anfangsinhalt setzen (fehlende Abschnitte = leer)
+            editor.setData((eintrag && eintrag.html) || '');
+
+            // Instanz merken (für Cleanup beim STWEG-Wechsel)
+            editoren[section.key] = editor;
+
+            // Speichern verdrahten (eigene Closure pro Abschnitt)
+            btn.addEventListener('click', () =>
+                speichern(stweg, section.key, editor, btn, status, updatedEl));
+        }
+    }
+
+    // ===============================================================
+    // Einen Abschnitt speichern
+    // POST /api/stweg-sections/<stweg>/<key>  body: { html }
+    //   -> 200 { ok:true, html:"<sanitisiertes html>" } | 4xx { error }
+    // ===============================================================
+    async function speichern(stweg, key, editor, btn, status, updatedEl) {
         btn.disabled = true;
-        clearFeedback();
+        status.className = 'text-sm';
+        status.textContent = '';
 
         try {
             const r = await AuthentikAuth.apiFetch(
-                '/api/stweg-content/' + encodeURIComponent(aktuelleStweg),
-                { method: 'POST', body: { content: input.value } }
+                '/api/stweg-sections/' + encodeURIComponent(stweg) + '/' + encodeURIComponent(key),
+                { method: 'POST', body: { html: editor.getData() } }
             );
 
             if (r.ok) {
-                fb.className = 'text-sm text-green-600';
-                fb.textContent = 'gespeichert';
-                // Zeitstempel aktualisieren (Server-Wert falls vorhanden, sonst jetzt)
-                let updatedAt = null;
-                try { const d = await r.json(); updatedAt = d && d.updated_at; } catch (e) {}
-                document.getElementById('updated-at').textContent =
-                    'zuletzt geändert: ' + formatZeit(updatedAt || new Date().toISOString());
-                setTimeout(() => { fb.textContent = ''; }, 2500);
+                // Server liefert sanitisiertes HTML zurück -> zurück in den Editor
+                let resp = {};
+                try { resp = (await r.json()) || {}; } catch (e) {}
+                if (typeof resp.html === 'string') editor.setData(resp.html);
+
+                status.className = 'text-sm text-green-600';
+                status.textContent = 'gespeichert';
+                updatedEl.textContent = 'zuletzt geändert: '
+                    + formatZeit(resp.updated_at || new Date().toISOString());
+                setTimeout(() => { if (status.textContent === 'gespeichert') status.textContent = ''; }, 2500);
             } else {
-                // Fehlertext aus { error } herauslesen
+                // Fehlertext aus { error } herauslesen (z.B. 403)
                 let msg = 'Fehler ' + r.status;
                 try { const d = await r.json(); if (d && d.error) msg = d.error; } catch (e) {}
-                fb.className = 'text-sm text-red-600';
-                fb.textContent = msg;
+                status.className = 'text-sm text-red-600';
+                status.textContent = msg;
             }
         } catch (e) {
-            fb.className = 'text-sm text-red-600';
-            fb.textContent = 'Speichern fehlgeschlagen';
+            status.className = 'text-sm text-red-600';
+            status.textContent = 'Speichern fehlgeschlagen';
         } finally {
             btn.disabled = false;
         }
     }
 
-    // ---------------------------------------------------------------
-    // Live-Vorschau rendern: NUR escaped + \n -> <br>, kein rohes HTML
-    // ---------------------------------------------------------------
-    function renderVorschau() {
-        const text = document.getElementById('content-input').value;
-        const preview = document.getElementById('preview');
-        if (!text.trim()) {
-            preview.innerHTML = '<span class="text-gray-400 italic">Keine Inhalte</span>';
-            return;
+    // ===============================================================
+    // Cleanup: alle aktiven CKEditor-Instanzen zerstören
+    // ===============================================================
+    async function zerstoereEditoren() {
+        const instanzen = Object.values(editoren);
+        editoren = {};
+        for (const ed of instanzen) {
+            try { await ed.destroy(); } catch (e) { /* ignorieren */ }
         }
-        // esc() macht den Text sicher, danach Zeilenumbrüche zu <br>
-        preview.innerHTML = esc(text).replace(/\n/g, '<br>');
     }
 
-    // ---------------------------------------------------------------
-    // Hilfsfunktionen: Hinweis-Box & Feedback
-    // ---------------------------------------------------------------
+    // ===============================================================
+    // Hilfsfunktionen: Hinweis-Box
+    // ===============================================================
     function zeigeNotice(farbe, titel, text) {
         // Tailwind-Klassen statisch halten (kein dynamisches Class-Name-Bauen,
         // damit der CDN-JIT die Farben kennt)
@@ -325,18 +392,12 @@
         const cls = stile[farbe] || stile.gray;
         const notice = document.getElementById('notice');
         notice.innerHTML =
-            '<div class="rounded-lg shadow p-5 mb-4 border ' + cls + '">'
+            '<div class="rounded-lg shadow p-5 mb-6 border ' + cls + '">'
             + '<div class="font-semibold mb-1">' + esc(titel) + '</div>'
             + '<div class="text-sm">' + esc(text) + '</div>'
             + '</div>';
     }
     function clearNotice() { document.getElementById('notice').innerHTML = ''; }
-
-    function clearFeedback() {
-        const fb = document.getElementById('save-feedback');
-        fb.textContent = '';
-        fb.className = 'text-sm';
-    }
 
     // ISO-Zeit hübsch (lokal, deutsch) formatieren; bei Fehler Rohwert zurückgeben
     function formatZeit(iso) {
