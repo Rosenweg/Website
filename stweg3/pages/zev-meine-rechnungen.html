@@ -35,7 +35,7 @@
             <div id="empty" class="hidden bg-white rounded-xl border p-8 text-center text-gray-500">
                 Noch keine Rechnungen vorhanden. Sobald smart-me eine Abrechnung verschickt, erscheint sie hier.
             </div>
-            <div id="list" class="space-y-3"></div>
+            <div id="list" class="space-y-4"></div>
         </div>
     </main>
 
@@ -45,6 +45,37 @@
     const fmtDate = d => { if (!d) return '—'; try { return new Date(d).toLocaleDateString('de-CH', { day:'2-digit', month:'2-digit', year:'numeric' }); } catch { return String(d).slice(0,10); } };
     const fmtSize = b => b ? (b > 1024*1024 ? (b/1024/1024).toFixed(1)+' MB' : Math.round(b/1024)+' KB') : '';
 
+    // Schweizer Format: Tausender mit ', Dezimal mit . , 2 Nachkommastellen → "CHF 1'234.50"
+    const fmtCHF = n => {
+        if (n == null || isNaN(n)) return '—';
+        const fixed = Number(n).toFixed(2);
+        const [intPart, dec] = fixed.split('.');
+        const sign = intPart.startsWith('-') ? '-' : '';
+        const digits = intPart.replace('-', '');
+        const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/g, "'");
+        return 'CHF ' + sign + grouped + '.' + dec;
+    };
+
+    // z.B. "2'435.17 kWh" — Nachkommastellen nur wenn vorhanden (max 2)
+    const fmtNum = (n, unit) => {
+        if (n == null || isNaN(n)) return '—';
+        const num = Number(n);
+        const hasDec = !Number.isInteger(num);
+        const fixed = hasDec ? num.toFixed(2) : String(num);
+        const [intPart, dec] = fixed.split('.');
+        const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, "'");
+        const out = dec ? grouped + '.' + dec : grouped;
+        return unit ? out + ' ' + unit : out;
+    };
+
+    // Zeitraum "01.01.2025 – 31.03.2025" — Werte kommen als "dd.mm.yyyy" (string), nur escapen
+    const zeitraumStr = r => {
+        if (r.zeitraum_von && r.zeitraum_bis) return esc(r.zeitraum_von) + ' – ' + esc(r.zeitraum_bis);
+        if (r.zeitraum_von) return 'ab ' + esc(r.zeitraum_von);
+        if (r.zeitraum_bis) return 'bis ' + esc(r.zeitraum_bis);
+        return esc(fmtDate(r.empfangen_am));
+    };
+
     function showGate() {
         $('loading').classList.add('hidden');
         $('content').classList.add('hidden');
@@ -52,19 +83,102 @@
         AuthentikAuth.createLoginButton('sso-login-container');
     }
 
+    function positionenHtml(positionen) {
+        if (!Array.isArray(positionen) || !positionen.length) return '';
+        const rows = positionen.map(p => {
+            const verbrauch = (p.kwh != null) ? fmtNum(p.kwh, 'kWh') : '';
+            const preis = (p.preis != null) ? fmtNum(p.preis) + ' CHF/kWh' : '';
+            const total = (p.total != null) ? fmtCHF(p.total) : '';
+            return `
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-0.5 py-2 border-b border-gray-100 last:border-0 text-sm">
+                    <div class="font-medium text-gray-800 col-span-2 sm:col-span-1">${esc(p.name || '—')}</div>
+                    <div class="text-gray-500 tabular-nums">${esc(verbrauch)}</div>
+                    <div class="text-gray-500 tabular-nums">${esc(preis)}</div>
+                    <div class="text-gray-900 font-semibold text-right tabular-nums">${esc(total)}</div>
+                </div>`;
+        }).join('');
+        return `
+            <div class="mt-3 pt-3 border-t border-gray-100">
+                <div class="hidden sm:grid sm:grid-cols-4 gap-x-3 text-[11px] uppercase tracking-wide text-gray-400 font-semibold pb-1">
+                    <div>Position</div><div>Verbrauch</div><div>Preis</div><div class="text-right">Total</div>
+                </div>
+                ${rows}
+            </div>`;
+    }
+
     function render(list) {
         if (!list.length) { $('empty').classList.remove('hidden'); return; }
-        $('list').innerHTML = list.map(r => `
-            <div class="bg-white rounded-xl shadow-sm border p-4 flex items-center justify-between gap-4 flex-wrap">
-                <div class="min-w-0">
-                    <div class="font-semibold text-gray-900 truncate">${esc(r.betreff || 'ZEV-Abrechnung')}</div>
-                    <div class="text-xs text-gray-500 mt-0.5">${esc(fmtDate(r.empfangen_am))}${r.absender ? ' · '+esc(r.absender) : ''}${r.pdf_size ? ' · '+esc(fmtSize(r.pdf_size)) : ''}</div>
+        $('list').innerHTML = list.map(r => {
+            const titel = esc(r.objekt || r.betreff || 'ZEV-Abrechnung');
+            const metaBits = [];
+            if (r.rechnungsnummer) metaBits.push('Nr. ' + esc(r.rechnungsnummer));
+            if (r.rechnungsdatum) metaBits.push('Rechnungsdatum ' + esc(r.rechnungsdatum));
+            if (r.absender) metaBits.push(esc(r.absender));
+            if (r.pdf_size) metaBits.push(esc(fmtSize(r.pdf_size)));
+            const meta = metaBits.join(' · ');
+            const betragHtml = (r.betrag_chf != null)
+                ? `<div class="text-2xl font-bold text-amber-700 whitespace-nowrap tabular-nums">${esc(fmtCHF(r.betrag_chf))}</div>`
+                : '';
+
+            const aktionen = r.has_pdf ? `
+                <div class="flex gap-2 mt-3 pt-3 border-t border-gray-100">
+                    <button data-id="${r.id}" data-card="${r.id}" class="preview bg-amber-50 text-amber-700 px-4 py-2 rounded-lg font-semibold hover:bg-amber-100 transition text-sm border border-amber-200">👁 Vorschau</button>
+                    <button data-id="${r.id}" data-name="${esc(r.pdf_filename || 'rechnung.pdf')}" class="dl bg-amber-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-amber-700 transition text-sm whitespace-nowrap">⤓ PDF</button>
                 </div>
-                ${r.has_pdf
-                    ? `<button data-id="${r.id}" data-name="${esc(r.pdf_filename || 'rechnung.pdf')}" class="dl bg-amber-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-amber-700 transition text-sm whitespace-nowrap">⤓ PDF</button>`
-                    : `<span class="text-xs text-gray-400">kein PDF</span>`}
-            </div>`).join('');
+                <div id="prev-${r.id}" class="hidden mt-3"></div>` : '';
+
+            return `
+            <div class="bg-white rounded-xl shadow-sm border p-4">
+                <div class="flex items-start justify-between gap-4 flex-wrap">
+                    <div class="min-w-0 flex-1">
+                        <div class="font-semibold text-gray-900 truncate">${titel}</div>
+                        <div class="text-sm text-gray-600 mt-0.5">${zeitraumStr(r)}</div>
+                        ${meta ? `<div class="text-xs text-gray-400 mt-0.5 truncate">${meta}</div>` : ''}
+                    </div>
+                    ${betragHtml}
+                </div>
+                ${positionenHtml(r.positionen)}
+                ${aktionen}
+            </div>`;
+        }).join('');
+
         document.querySelectorAll('.dl').forEach(b => b.addEventListener('click', () => downloadPdf(b.dataset.id, b.dataset.name, b)));
+        document.querySelectorAll('.preview').forEach(b => b.addEventListener('click', () => togglePreview(b.dataset.id, b)));
+    }
+
+    async function togglePreview(id, btn) {
+        const box = $('prev-' + id);
+        if (!box) return;
+        // bereits sichtbar → ausblenden
+        if (!box.classList.contains('hidden') && box.dataset.loaded === '1') {
+            box.classList.add('hidden');
+            btn.textContent = '👁 Vorschau';
+            return;
+        }
+        // schon geladen, nur wieder einblenden
+        if (box.dataset.loaded === '1') {
+            box.classList.remove('hidden');
+            btn.textContent = '✕ Vorschau ausblenden';
+            return;
+        }
+        // lazy laden
+        const old = btn.textContent; btn.textContent = 'Lade …'; btn.disabled = true;
+        box.classList.remove('hidden');
+        box.innerHTML = '<div class="text-sm text-gray-400 py-4 text-center">Lade Vorschau …</div>';
+        try {
+            const r = await AuthentikAuth.apiFetch(`/api/zev/rechnung/${id}/pdf`);
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const blob = await r.blob();
+            const url = URL.createObjectURL(blob);
+            box.innerHTML = `<iframe src="${url}" class="w-full rounded-lg border border-gray-200" style="height:75vh;min-height:480px;" title="PDF-Vorschau"></iframe>`;
+            box.dataset.loaded = '1';
+            btn.textContent = '✕ Vorschau ausblenden';
+        } catch (e) {
+            box.innerHTML = `<div class="text-sm text-red-500 py-4 text-center">Vorschau fehlgeschlagen: ${esc(e.message)}</div>`;
+            btn.textContent = old;
+        } finally {
+            btn.disabled = false;
+        }
     }
 
     async function downloadPdf(id, name, btn) {
