@@ -6020,7 +6020,7 @@ app.get('/api/zev/rechnung/:id/pdf', authMiddleware, async (req, res) => {
   } catch (e) { console.error('[zev-rechnung-pdf]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 
-app.get('/api/wohnungen/eigentuemer-übersicht', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
+app.get('/api/wohnungen/eigentuemer-uebersicht', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
   try {
     // Technik/Präsident sehen alle, Ausschuss-Mitglieder nur ihre STWEGs
     const groups = req.user?.groups || [];

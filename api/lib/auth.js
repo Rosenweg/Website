@@ -8,7 +8,9 @@ const { isAusschussForAny } = require('./groups');
 
 // ─── Authentik API (oeffentliche URL, damit generierte Links klickbar sind) ──
 async function authentikAPI(method, path, body = null) {
-  const url = `${AUTHENTIK_EXTERNAL_URL}/api/v3${path}`;
+  // INTERNE URL (.37:9000) — die api laeuft intern (CT128) und erreicht die
+  // public authentik.rosenweg4303.ch NICHT (De-Swarm: vorher Swarm-intern ok).
+  const url = `${AUTHENTIK_URL}/api/v3${path}`;
   const opts = {
     method,
     headers: {

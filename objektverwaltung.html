@@ -1266,7 +1266,7 @@
             document.getElementById('eig-loading').classList.remove('hidden');
             try {
                 // Fetch all wohnungen + kontakte across STWEGs the user can access
-                const res = await AuthentikAuth.apiFetch('/api/wohnungen/eigentuemer-übersicht');
+                const res = await AuthentikAuth.apiFetch('/api/wohnungen/eigentuemer-uebersicht');
                 if (!res.ok) throw new Error('API error ' + res.status);
                 const data = await res.json();
                 eigentuemerData = data.eigentuemer || [];
