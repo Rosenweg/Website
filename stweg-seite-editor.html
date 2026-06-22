@@ -308,7 +308,21 @@
                         'undo', 'redo'
                     ],
                     table: { contentToolbar: ['tableColumn', 'tableRow', 'mergeTableCells'] },
-                    extraPlugins: [Base64UploadAdapterPlugin]
+                    extraPlugins: [Base64UploadAdapterPlugin],
+                    // Der Superbuild bündelt Premium-/Collaboration-Plugins, die ohne Lizenz +
+                    // channelId werfen (Fehler collaboration-missing-channelid). Alle entfernen.
+                    // Unbekannte Namen werden ignoriert -> Liste darf großzügig sein.
+                    removePlugins: [
+                        'CKBox', 'CKFinder', 'EasyImage', 'CloudServices', 'CloudServicesCommentsAdapter',
+                        'RealTimeCollaborativeEditing', 'RealTimeCollaborativeComments',
+                        'RealTimeCollaborativeRevisionHistory', 'RealTimeCollaborativeTrackChanges',
+                        'PresenceList', 'Comments', 'CommentsArchive', 'CommentsRepository',
+                        'TrackChanges', 'TrackChangesData', 'TrackChangesEditing',
+                        'RevisionHistory', 'Pagination', 'WProofreader', 'MathType',
+                        'AIAssistant', 'OpenAITextAdapter', 'AzureOpenAITextAdapter',
+                        'SlashCommand', 'Template', 'DocumentOutline', 'DocumentOutlineUI', 'TableOfContents',
+                        'FormatPainter', 'PasteFromOfficeEnhanced', 'CaseChange', 'MultiLevelList', 'Markdown'
+                    ]
                 });
             } catch (e) {
                 console.error('CKEditor init fehlgeschlagen:', e);
