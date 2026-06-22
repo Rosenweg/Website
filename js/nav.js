@@ -123,6 +123,22 @@ const RosenwegNav = {
 
     const active = opts.active || '';
     const basePath = opts.basePath || this._detectBasePath();
+
+    // Audience-Subdomains (admin./ausschuss.rosenweg4303.ch): fokussierte Nav,
+    // Seiten-Zuordnung live aus den Zugriffsrechten (/api/nav/audience-map).
+    const host = (typeof window !== 'undefined' && window.location.hostname) || '';
+    const audience = host === 'admin.rosenweg4303.ch' ? 'admin'
+      : host === 'ausschuss.rosenweg4303.ch' ? 'ausschuss' : null;
+    if (audience) {
+      let map = {};
+      try { const r = await fetch('/api/nav/audience-map'); if (r.ok) map = await r.json(); } catch {}
+      nav.innerHTML = this._renderAudience(audience, map, active);
+      this._setupDropdowns();
+      this._setupAuth(basePath);
+      this._publishNavHeight(nav);
+      return;
+    }
+
     // Satelliten-Subdomains (z.B. mqtt.rosenweg4303.ch) setzen window.__NAV_BASE__,
     // damit Logo + Home + Menü auf die Hauptseite (www) zeigen statt relativ auf den
     // eigenen Host. Der site-config-/Auth-Pfad bleibt relativ (same-origin, kein CORS).
@@ -245,6 +261,86 @@ const RosenwegNav = {
       if (path.includes('/stweg')) return '../';
     }
     return '/';
+  },
+
+  // Seiten-Registry = nur METADATEN (Datei/Label/Gruppe/perm-Schlüssel).
+  // Die AUDIENCE pro Seite wird NICHT hier festgelegt, sondern live aus den
+  // Zugriffsrechten abgeleitet (api /api/nav/audience-map, Schlüssel = perm):
+  //   *-ausschuss-Gruppe -> ausschuss · nur technik/Präsident -> admin.
+  // Seite ohne Rechte-Eintrag = nur technik = admin.
+  _pages() {
+    return [
+      { href: 'netzwerk.html', label: 'Netzwerk', group: 'Infrastruktur', perm: 'netzwerk' },
+      { href: 'verbindungen.html', label: 'Verbindungen', group: 'Infrastruktur', perm: 'verbindungen' },
+      { href: 'proxmox-verwaltung.html', label: 'Proxmox', group: 'Infrastruktur', perm: 'proxmox-verwaltung' },
+      { href: 'dmarc.html', label: 'DMARC', group: 'Infrastruktur', perm: 'dmarc' },
+      { href: 'energie-config.html', label: 'Energie-Konfig', group: 'Infrastruktur', perm: 'energie-config' },
+      { href: 'isp-admin.html', label: 'ISP-Admin', group: 'Infrastruktur', perm: 'isp-admin' },
+      { href: 'https://mqtt.rosenweg4303.ch/', label: 'MQTT-Browser', group: 'Infrastruktur', perm: 'mqtt' },
+      { href: 'mail-approval-config.html', label: 'Freigabe-Konfig', group: 'Mail-Betrieb', perm: 'mail-approval-config' },
+      { href: 'mail-templates.html', label: 'Vorlagen', group: 'Mail-Betrieb', perm: 'mail-templates' },
+      { href: 'email-log.html', label: 'Mail-Log', group: 'Mail-Betrieb', perm: 'email-log' },
+      { href: 'email-archiv.html', label: 'Mail-Archiv', group: 'Mail-Betrieb', perm: 'email-archiv' },
+      { href: 'mail-empfaenger-admin.html', label: 'Empfänger', group: 'Mail-Betrieb', perm: 'mail-empfaenger' },
+      { href: 'verwaltung-mail-outbox.html', label: 'Mail-Outbox', group: 'Mail-Betrieb', perm: 'verwaltung-mail-outbox' },
+      { href: 'rechteverwaltung.html', label: 'Rechte', group: 'System', perm: 'rechteverwaltung' },
+      { href: 'verwaltung-admin.html', label: 'Verwaltung-Admin', group: 'System', perm: 'verwaltung-admin' },
+      { href: 'auslagen.html', label: 'Auslagen', group: 'Vorgänge', perm: 'auslagen' },
+      { href: 'auslagen-stundensatz.html', label: 'Stundensätze', group: 'Vorgänge', perm: 'auslagen-stundensatz' },
+      { href: 'handwerker.html', label: 'Handwerker', group: 'Vorgänge', perm: 'handwerker' },
+      { href: 'vollmachten.html', label: 'Vollmachten', group: 'Vorgänge', perm: 'vollmachten' },
+      { href: 'projekte.html', label: 'Projekte', group: 'Vorgänge', perm: 'projekte' },
+      { href: 'reklamationen.html', label: 'Reklamationen', group: 'Vorgänge', perm: 'reklamationen' },
+      { href: 'loeschungen.html', label: 'Löschungen', group: 'Vorgänge', perm: 'loeschungen' },
+      { href: 'echtheitspruefung.html', label: 'Echtheitsprüfung', group: 'Vorgänge', perm: 'echtheitspruefung' },
+      { href: 'brief-tracking.html', label: 'Brief-Tracking', group: 'Vorgänge', perm: 'brief-tracking' },
+      { href: 'wohnungsverwaltung.html', label: 'Wohnungen', group: 'Verwaltung', perm: 'wohnungsverwaltung' },
+      { href: 'objektverwaltung.html', label: 'Objekte', group: 'Verwaltung', perm: 'objektverwaltung' },
+      { href: 'grundbuch.html', label: 'Grundbuch', group: 'Verwaltung', perm: 'grundbuch' },
+      { href: 'mail-compose.html', label: 'Mail schreiben', group: 'Verwaltung', perm: 'mail-compose' },
+    ];
+  },
+
+  // Fokussierte Audience-Nav (admin./ausschuss.) — Logo->Hauptseite, gruppierte
+  // Dropdowns; welche Seite in welche Audience faellt, kommt aus `map` (Rechte).
+  _renderAudience(audience, map, active) {
+    const home = 'https://www.rosenweg4303.ch/';
+    const curr = ((typeof window !== 'undefined' && window.location.pathname.split('/').pop()) || '').toLowerCase();
+    const pages = this._pages().filter(p => ((map && map[p.perm]) || ['admin']).includes(audience));
+    const groups = {};
+    pages.forEach(p => { (groups[p.group] = groups[p.group] || []).push(p); });
+    const link = (p) => {
+      const ext = /^https?:/.test(p.href);
+      const href = ext ? p.href : '/' + p.href;
+      const act = (!ext && p.href.toLowerCase() === curr) ? 'bg-blue-50 text-blue-600 font-medium' : 'text-gray-700 hover:bg-gray-50';
+      return `<a href="${this._esc(href)}" class="${act} block px-4 py-2 text-sm rounded">${this._esc(p.label)}${ext ? ' ↗' : ''}</a>`;
+    };
+    const dropdowns = Object.entries(groups).map(([g, ps]) => `
+      <div class="relative nav-dropdown">
+        <button class="text-gray-700 hover:text-blue-600 px-3 py-2 text-sm transition flex items-center gap-1">${this._esc(g)}
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg></button>
+        <div class="nav-dropdown-menu hidden absolute left-0 mt-1 w-56 bg-white rounded-lg shadow-lg border py-1 z-50">${ps.map(link).join('')}</div>
+      </div>`).join('');
+    const labelMap = { admin: 'Admin · Technik / Präsident', ausschuss: 'Ausschuss' };
+    return `
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex justify-between items-center h-16">
+        <div class="flex items-center gap-3 min-w-0">
+          <a href="${home}" class="flex items-center shrink-0" title="Zur Hauptseite"><img src="${home}logo-rosenweg.png" alt="Rosenweg" class="h-10 w-auto"></a>
+          <span class="text-gray-300 hidden sm:inline">/</span>
+          <span class="font-semibold text-gray-800 truncate">${this._esc(labelMap[audience] || audience)}</span>
+        </div>
+        <div class="hidden md:flex items-center gap-1">${dropdowns}</div>
+        <div class="flex items-center gap-2">
+          <a href="${home}" class="px-3 py-2 text-sm text-gray-500 hover:text-blue-600 transition hidden sm:inline">← Hauptseite</a>
+          <div id="nav-auth" class="hidden sm:flex items-center gap-2 pl-2 border-l">
+            <a href="${home}profil.html" id="nav-user-link" class="text-sm text-gray-600 hover:text-blue-600 hidden"></a>
+            <button id="nav-login-btn" class="text-sm bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 transition hidden">Anmelden</button>
+            <button id="nav-logout-btn" class="text-sm text-gray-500 hover:text-red-600 transition hidden">Abmelden</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
   },
 
   _renderSatellite(cfg, base) {
