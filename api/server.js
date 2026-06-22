@@ -12754,7 +12754,7 @@ app.delete('/api/mqtt/topic-rules/:id', authMiddleware, requireMqttTechnik, asyn
 // die Audience(s) aus der permissions-Tabelle ab. Regel: eine *-ausschuss-Gruppe ->
 // 'ausschuss'; nur technik (oder zusaetzlich nur Praesident) -> 'admin'. Seiten ganz
 // ohne Rechte-Eintrag fehlen hier -> die Nav behandelt sie als admin (nur technik).
-app.get('/api/nav/audience-map', authMiddleware, async (req, res) => {
+app.get('/api/nav/audience-map', async (req, res) => {  // public: nur Seite->Kategorie, nicht sensibel
   try {
     const rows = (await pool.query('SELECT group_name, page FROM permissions')).rows;
     const byPage = {};
