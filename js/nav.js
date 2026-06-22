@@ -280,6 +280,7 @@ const RosenwegNav = {
       { href: 'email-archiv.html', label: 'Mail-Archiv', group: 'Mail-Betrieb', perm: 'email-archiv' },
       { href: 'mail-empfaenger-admin.html', label: 'Empfänger', group: 'Mail-Betrieb', perm: 'mail-empfaenger' },
       { href: 'verwaltung-mail-outbox.html', label: 'Mail-Outbox', group: 'Mail-Betrieb', perm: 'verwaltung-mail-outbox' },
+      { href: 'email-verteiler.html', label: 'Mail-Verteiler', group: 'Mail-Betrieb', perm: 'email-verteiler', aud: ['admin'] },
       { href: 'rechteverwaltung.html', label: 'Rechte', group: 'System', perm: 'rechteverwaltung' },
       { href: 'verwaltung-admin.html', label: 'Hausverwaltung-Admin', group: 'System', perm: 'verwaltung-admin' },
       { href: 'auslagen.html', label: 'Auslagen', group: 'Vorgänge', perm: 'auslagen' },
