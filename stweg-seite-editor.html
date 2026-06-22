@@ -7,7 +7,7 @@
     <link rel="icon" href="/logo-rosenweg.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="js/authentik-auth.js?v=2"></script>
-    <!-- CKEditor 5 Superbuild (enthält Tabellen- + Bild-Plugins). Exponiert global ClassicEditor. -->
+    <!-- CKEditor 5 Superbuild (enthält Tabellen- + Bild-Plugins). Exponiert window.CKEDITOR.ClassicEditor. -->
     <script src="https://cdn.ckeditor.com/ckeditor5/41.4.2/super-build/ckeditor.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -294,23 +294,26 @@
             card.appendChild(bar);
             container.appendChild(card);
 
-            // --- CKEditor 5 (ClassicEditor aus dem Superbuild, global) initialisieren ---
+            // --- CKEditor 5 initialisieren — Superbuild exponiert CKEDITOR.ClassicEditor (kein globales ClassicEditor) ---
+            const ClassicEditorRef = (window.CKEDITOR && window.CKEDITOR.ClassicEditor) || window.ClassicEditor;
             let editor;
             try {
-                editor = await ClassicEditor.create(editorEl, {
+                if (!ClassicEditorRef) throw new Error('CKEDITOR/ClassicEditor nicht verfügbar (CDN nicht geladen?)');
+                editor = await ClassicEditorRef.create(editorEl, {
                     toolbar: [
                         'heading', '|',
                         'bold', 'italic', 'underline', 'link',
                         'bulletedList', 'numberedList', 'blockQuote', '|',
-                        'insertTable', 'imageUpload', '|',
+                        'insertTable', 'uploadImage', '|',
                         'undo', 'redo'
                     ],
                     table: { contentToolbar: ['tableColumn', 'tableRow', 'mergeTableCells'] },
                     extraPlugins: [Base64UploadAdapterPlugin]
                 });
             } catch (e) {
+                console.error('CKEditor init fehlgeschlagen:', e);
                 status.className = 'text-sm text-red-600';
-                status.textContent = 'Editor konnte nicht geladen werden';
+                status.textContent = 'Editor konnte nicht geladen werden: ' + (e && e.message ? e.message : e);
                 continue;
             }
 
