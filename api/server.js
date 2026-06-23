@@ -227,7 +227,7 @@ app.post('/api/otp/verify', async (req, res) => {
     const token = crypto.randomBytes(32).toString('hex');
     await pool.query(
       'INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3)',
-      [token, row.user_id, new Date(Date.now() + 24 * 60 * 60 * 1000)]
+      [token, row.user_id, new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)] // 30 Tage, Sliding-Expiry in authMiddleware
     );
 
     res.json({
@@ -404,7 +404,7 @@ app.get('/api/auth/callback', async (req, res) => {
     const sessionToken = crypto.randomBytes(32).toString('hex');
     await pool.query(
       'INSERT INTO sessions (token, user_id, expires_at, id_token) VALUES ($1, $2, $3, $4)',
-      [sessionToken, user.id, new Date(Date.now() + 24 * 60 * 60 * 1000), tokenData.id_token || null]
+      [sessionToken, user.id, new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), tokenData.id_token || null] // 30 Tage, Sliding-Expiry in authMiddleware
     );
 
     // Fetch permissions for this user
@@ -15384,6 +15384,85 @@ app.get('/api/reklamationen/meine', authMiddleware, async (req, res) => {
         ORDER BY created_at DESC LIMIT 100`, [email]);
     res.json({ reklamationen: r.rows });
   } catch (e) { console.error('[reklamationen-meine]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+// ─── Reparatur-Melder OHNE Login: per E-Mail-Code (OTP) fuer bekannte Bewohner ───
+// Schritt 1: Code anfordern (autorisiert gegen personen/users, Anti-Spam).
+const reklaCodeRate = new Map(); // email -> {first,count}
+app.post('/api/reklamationen/code', async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').toLowerCase().trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Gültige E-Mail erforderlich' });
+    const now = Date.now(); const e = reklaCodeRate.get(email);
+    if (e && now - e.first < 600000 && e.count >= 3) return res.status(429).json({ error: 'Zu viele Anfragen. Bitte später erneut.' });
+    if (e && now - e.first < 600000) e.count++; else reklaCodeRate.set(email, { first: now, count: 1 });
+    // Autorisierung: E-Mail muss im Bewohner-Verzeichnis (personen) oder als aktiver user bekannt sein.
+    const pr = await pool.query('SELECT name FROM personen WHERE LOWER(email) = $1 LIMIT 1', [email]);
+    let name = pr.rows[0]?.name;
+    if (!name) { const ur = await pool.query('SELECT name FROM users WHERE email = $1 AND active = true LIMIT 1', [email]); name = ur.rows[0]?.name; }
+    if (!name) return res.status(403).json({ error: 'E-Mail nicht im Verzeichnis. Bitte mit Konto anmelden oder die Verwaltung kontaktieren.' });
+    const code = generateOTP();
+    await pool.query('UPDATE otp_codes SET used = true WHERE email = $1 AND used = false', [email]);
+    await pool.query('INSERT INTO otp_codes (email, code, expires_at) VALUES ($1, $2, $3)', [email, code, new Date(Date.now() + 10 * 60 * 1000)]);
+    await loggedSendMail({
+      from: MAIL_FROM, to: email,
+      subject: 'Ihr Code zur Reparatur-Meldung – Rosenweg',
+      html: `<div style="font-family:sans-serif;max-width:400px;margin:0 auto;padding:20px;">
+        <h2 style="color:#1e40af;">Reparatur melden</h2>
+        <p>Hallo ${escapeHtml(name)},</p>
+        <p>Ihr Bestätigungscode:</p>
+        <div style="background:#f0f9ff;border:2px solid #3b82f6;border-radius:8px;padding:20px;text-align:center;margin:20px 0;">
+          <span style="font-size:32px;font-weight:bold;letter-spacing:8px;color:#1e40af;">${code}</span>
+        </div>
+        <p style="color:#6b7280;font-size:14px;">10 Minuten gültig. Code in der Reparatur-App eingeben.</p>
+      </div>`,
+    }, 'reklamation-code');
+    res.json({ ok: true });
+  } catch (e) { console.error('[reklamation-code]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+// Schritt 2: oeffentlich melden (Code verifizieren -> Reklamation, ohne Session).
+app.post('/api/reklamationen/oeffentlich', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const email = String(b.email || '').toLowerCase().trim();
+    const code = String(b.code || '').trim();
+    if (!email || !code) return res.status(400).json({ error: 'E-Mail und Code erforderlich' });
+    const vr = await pool.query('SELECT id, code, expires_at FROM otp_codes WHERE email = $1 AND used = false ORDER BY created_at DESC LIMIT 1', [email]);
+    const row = vr.rows[0];
+    if (!row) return res.status(400).json({ error: 'Kein Code gefunden. Bitte neuen anfordern.' });
+    if (new Date() > new Date(row.expires_at)) { await pool.query('UPDATE otp_codes SET used = true WHERE id = $1', [row.id]); return res.status(400).json({ error: 'Code abgelaufen.' }); }
+    const cA = Buffer.from(row.code), cB = Buffer.from(code);
+    if (cA.length !== cB.length || !crypto.timingSafeEqual(cA, cB)) return res.status(400).json({ error: 'Ungültiger Code' });
+    await pool.query('UPDATE otp_codes SET used = true WHERE id = $1', [row.id]);
+    const beschreibung = String(b.beschreibung || '').trim().slice(0, 4000);
+    if (!beschreibung) return res.status(400).json({ error: 'Beschreibung erforderlich' });
+    const kategorie = ['aufzug', 'heizung', 'wasser', 'tuer', 'reinigung', 'sonstige'].includes(b.kategorie) ? b.kategorie : 'sonstige';
+    const stweg = Number.isFinite(parseInt(b.stweg, 10)) ? parseInt(b.stweg, 10) : null;
+    const pr = await pool.query('SELECT id FROM personen WHERE LOWER(email) = $1 LIMIT 1', [email]);
+    const personId = pr.rows[0]?.id || null;
+    let bildPfad = null;
+    if (b.foto_base64) {
+      try {
+        const m = String(b.foto_base64).match(/^data:image\/(\w+);base64,(.+)$/s);
+        const ext = (m ? m[1] : 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 4) || 'jpg';
+        const buf = Buffer.from(m ? m[2] : b.foto_base64, 'base64');
+        if (buf.length > 0 && buf.length <= 8 * 1024 * 1024) {
+          const folder = stweg ? ('stweg' + stweg) : 'allgemein';
+          const dir = pathModule.join(DOCS_PATH, folder, 'reklamationen');
+          await fs.mkdir(dir, { recursive: true });
+          const fname = `rekl-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+          await fs.writeFile(pathModule.join(dir, fname), buf);
+          bildPfad = pathModule.join(folder, 'reklamationen', fname);
+        }
+      } catch (e) { console.error('[reklamation-foto]', e.message); }
+    }
+    const r = await pool.query(
+      `INSERT INTO reklamationen (person_id, stweg, kategorie, beschreibung, bild_pfad, eingang_kanal, status)
+       VALUES ($1,$2,$3,$4,$5,'web','offen') RETURNING id, kategorie, beschreibung, status, created_at`,
+      [personId, stweg, kategorie, beschreibung, bildPfad]);
+    res.json({ ok: true, reklamation: r.rows[0] });
+  } catch (e) { console.error('[reklamation-oeffentlich]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 
 // ─── ISP / Anschluss / VPN / Fix-IPs / Mailboxes ─────────────────────
