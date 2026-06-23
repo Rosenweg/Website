@@ -10,7 +10,7 @@
  *  - Web-Push: push + notificationclick (Status-/Alert-Benachrichtigungen).
  */
 
-const CACHE = 'rosenweg-technik-v1';
+const CACHE = 'rosenweg-technik-v2';
 
 // App-Shell — alles was fuer den Offline-Start noetig ist.
 const SHELL = [
@@ -95,8 +95,8 @@ self.addEventListener('push', (e) => {
   const d = (() => { try { return e.data ? e.data.json() : {}; } catch { return {}; } })();
   e.waitUntil(self.registration.showNotification(d.title || 'Rosenweg', {
     body: d.body || '',
-    icon: d.icon || '/icons/icon-192.png',
-    badge: '/icons/icon-192.png',
+    icon: '/icons/icon-notif.png',
+    badge: '/icons/icon-badge.png',
     tag: d.tag,
     data: { url: d.url || '/' },
   }));
