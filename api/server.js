@@ -15405,6 +15405,14 @@ async function getTechnikEmails() {
     return r.rows.map((x) => x.email).filter(Boolean);
   } catch { return []; }
 }
+// Technik-Mitglieder (fuer Aufgaben-Zuweisung in der Triage neben externen Handwerkern).
+app.get('/api/technik/mitglieder', authMiddleware, requirePermission('reklamationen', 'read'), async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT name, email FROM users WHERE active = true AND email IS NOT NULL AND LOWER(groups_json::text) LIKE '%"technik"%' ORDER BY name`);
+    res.json({ mitglieder: r.rows });
+  } catch (e) { console.error('[technik-mitglieder]', e); res.status(500).json({ error: 'Fehler' }); }
+});
 const reklaWebRate = new Map(); // key -> [timestamps]
 app.post('/api/reklamationen', authMiddleware, async (req, res) => {
   try {
@@ -15447,6 +15455,8 @@ app.post('/api/reklamationen', authMiddleware, async (req, res) => {
       title: 'Neue Reparatur-Meldung', body: `${kategorie}: ${beschreibung.slice(0, 80)}`,
       url: 'https://pwa.rosenweg4303.ch/technik/', tag: `rekl-${r.rows[0].id}`,
     })).catch(() => {});
+    // WhatsApp an die Technik-Gruppe (neue Meldung) — die API meldet selbst.
+    notifyTechnik(`🔧 *Neue Reparatur-Meldung* #${r.rows[0].id}\nKategorie: ${kategorie}${stweg ? ` · STWEG ${stweg}` : ''}\n${beschreibung.slice(0, 200)}\n\n→ pwa.rosenweg4303.ch/technik/`, 'reklamation-neu').catch(() => {});
     res.json({ ok: true, reklamation: r.rows[0] });
   } catch (e) { console.error('[reklamation-web-post]', e); res.status(500).json({ error: 'Fehler' }); }
 });
@@ -15559,6 +15569,8 @@ app.post('/api/reklamationen/oeffentlich', async (req, res) => {
       title: 'Neue Reparatur-Meldung', body: `${kategorie}: ${beschreibung.slice(0, 80)}`,
       url: 'https://pwa.rosenweg4303.ch/technik/', tag: `rekl-${r.rows[0].id}`,
     })).catch(() => {});
+    // WhatsApp an die Technik-Gruppe (neue Meldung) — die API meldet selbst.
+    notifyTechnik(`🔧 *Neue Reparatur-Meldung* #${r.rows[0].id}\nKategorie: ${kategorie}${stweg ? ` · STWEG ${stweg}` : ''}\n${beschreibung.slice(0, 200)}\n\n→ pwa.rosenweg4303.ch/technik/`, 'reklamation-neu').catch(() => {});
     res.json({ ok: true, reklamation: r.rows[0] });
   } catch (e) { console.error('[reklamation-oeffentlich]', e); res.status(500).json({ error: 'Fehler' }); }
 });
