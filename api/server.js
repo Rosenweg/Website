@@ -15315,9 +15315,12 @@ app.get('/api/reklamationen', authMiddleware, requirePermission('reklamationen',
     const ausschussStwegs = [...getAusschussStwegs(groups)];
     const params = [];
     let where = isAdmin ? 'TRUE' : (ausschussStwegs.length > 0 ? `r.stweg = ANY($${params.push(ausschussStwegs)}::int[]) OR r.stweg IS NULL` : `r.person_id = (SELECT id FROM personen WHERE LOWER(email) = LOWER($${params.push(req.user.email)}) LIMIT 1)`);
-    const status = String(req.query.status || '').trim();
-    if (status && ['offen','weitergeleitet','erledigt','abgewiesen'].includes(status)) {
-      params.push(status); where += ` AND r.status = $${params.length}`;
+    // status kann einzeln ('offen') oder komma-separiert ('offen,weitergeleitet')
+    // sein -> erlaubt Aktiv- (offen,weitergeleitet) und Archiv- (erledigt,abgewiesen) Sichten.
+    const statusRaw = String(req.query.status || '').trim();
+    if (statusRaw) {
+      const wanted = statusRaw.split(',').map(s => s.trim()).filter(s => ['offen','weitergeleitet','erledigt','abgewiesen'].includes(s));
+      if (wanted.length) { params.push(wanted); where += ` AND r.status = ANY($${params.length})`; }
     }
     const r = await pool.query(
       `SELECT r.*, p.name AS person_name, p.email AS person_email, h.firma AS handwerker_firma
@@ -15335,6 +15338,7 @@ app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamation
   try {
     const id = parseInt(req.params.id, 10);
     const b = req.body || {};
+    const before = (await pool.query('SELECT status, handwerker_id, zugewiesen_an, notiz FROM reklamationen WHERE id = $1', [id])).rows[0] || {};
     const updates = []; const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
     if (b.status !== undefined) {
@@ -15355,6 +15359,17 @@ app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamation
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const updated = r.rows[0];
+    // History-Schritte protokollieren (wer hat wann was geaendert)
+    const who = req.user.name || req.user.email || 'unbekannt';
+    if (b.status !== undefined && b.status !== before.status) logReklEvent(id, who, `Status: ${before.status || '—'} → ${b.status}`).catch(() => {});
+    if (b.handwerker_id !== undefined && (b.handwerker_id || null) !== (before.handwerker_id || null)) {
+      if (b.handwerker_id) { try { const hw = await pool.query('SELECT firma FROM handwerker WHERE id = $1', [b.handwerker_id]); logReklEvent(id, who, `Handwerker zugewiesen: ${hw.rows[0]?.firma || ('#' + b.handwerker_id)}`).catch(() => {}); } catch {} }
+      else logReklEvent(id, who, 'Handwerker-Zuweisung entfernt').catch(() => {});
+    }
+    if (b.zugewiesen_an !== undefined && (b.zugewiesen_an || null) !== (before.zugewiesen_an || null)) {
+      logReklEvent(id, who, b.zugewiesen_an ? `Zugewiesen an: ${b.zugewiesen_an}` : 'Zuweisung entfernt').catch(() => {});
+    }
+    if (b.notiz !== undefined && (b.notiz || '') !== (before.notiz || '')) logReklEvent(id, who, `Notiz geändert: "${String(b.notiz || '').slice(0, 80)}"`).catch(() => {});
     // Notification an Melder bei Status-Wechsel
     if (b.status && updated.person_id) {
       try {
@@ -15413,6 +15428,18 @@ app.get('/api/technik/mitglieder', authMiddleware, requirePermission('reklamatio
     res.json({ mitglieder: r.rows });
   } catch (e) { console.error('[technik-mitglieder]', e); res.status(500).json({ error: 'Fehler' }); }
 });
+// History/Verlauf einer Reklamation (wer hat wann was gemacht) — best-effort.
+async function logReklEvent(reklId, who, text) {
+  try { await pool.query('INSERT INTO reklamation_events (reklamation_id, who, event) VALUES ($1,$2,$3)', [reklId, String(who || '').slice(0, 200), String(text || '').slice(0, 500)]); } catch (e) { /* best-effort */ }
+}
+app.get('/api/reklamationen/:id/history', authMiddleware, requirePermission('reklamationen', 'read'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
+    const r = await pool.query('SELECT created_at, who, event FROM reklamation_events WHERE reklamation_id = $1 ORDER BY created_at ASC, id ASC', [id]);
+    res.json({ events: r.rows });
+  } catch (e) { console.error('[reklamation-history]', e); res.status(500).json({ error: 'Fehler' }); }
+});
 const reklaWebRate = new Map(); // key -> [timestamps]
 app.post('/api/reklamationen', authMiddleware, async (req, res) => {
   try {
@@ -15450,6 +15477,7 @@ app.post('/api/reklamationen', authMiddleware, async (req, res) => {
       `INSERT INTO reklamationen (person_id, stweg, kategorie, beschreibung, bild_pfad, eingang_kanal, status)
        VALUES ($1,$2,$3,$4,$5,'web','offen') RETURNING id, kategorie, beschreibung, status, created_at`,
       [personId, stweg, kategorie, beschreibung, bildPfad]);
+    logReklEvent(r.rows[0].id, email, 'Erstellt (Web-Formular)').catch(() => {});
     // Web-Push an die Technik (neue Meldung -> Cockpit)
     getTechnikEmails().then((emails) => webpushLib.sendToEmails(emails, {
       title: 'Neue Reparatur-Meldung', body: `${kategorie}: ${beschreibung.slice(0, 80)}`,
@@ -15564,6 +15592,7 @@ app.post('/api/reklamationen/oeffentlich', async (req, res) => {
       `INSERT INTO reklamationen (person_id, stweg, kategorie, beschreibung, bild_pfad, eingang_kanal, status)
        VALUES ($1,$2,$3,$4,$5,'web','offen') RETURNING id, kategorie, beschreibung, status, created_at`,
       [personId, stweg, kategorie, beschreibung, bildPfad]);
+    logReklEvent(r.rows[0].id, email, 'Erstellt (Web-Formular)').catch(() => {});
     // Web-Push an die Technik (neue Meldung -> Cockpit)
     getTechnikEmails().then((emails) => webpushLib.sendToEmails(emails, {
       title: 'Neue Reparatur-Meldung', body: `${kategorie}: ${beschreibung.slice(0, 80)}`,
@@ -21817,6 +21846,14 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_rekl_status ON reklamationen(status, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_rekl_person ON reklamationen(person_id);
+      CREATE TABLE IF NOT EXISTS reklamation_events (
+        id SERIAL PRIMARY KEY,
+        reklamation_id INTEGER REFERENCES reklamationen(id) ON DELETE CASCADE,
+        who VARCHAR(200),
+        event VARCHAR(500),
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_rekl_events ON reklamation_events(reklamation_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_wk_person ON wohnungen_kontakte(person_id);
 
       -- Vollmachten: Eigentümer bevollmaechtigt Verwalter/Mieter/andere
