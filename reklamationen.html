@@ -48,7 +48,7 @@
             <th class="px-3 py-2 text-left">Person</th>
             <th class="px-3 py-2 text-left">STWEG</th>
             <th class="px-3 py-2 text-left">Beschreibung</th>
-            <th class="px-3 py-2 text-left">Handwerker</th>
+            <th class="px-3 py-2 text-left">Zuweisung</th>
             <th class="px-3 py-2 text-left">Status</th>
             <th class="px-3 py-2 text-left">Aktionen</th>
           </tr></thead>
@@ -58,9 +58,54 @@
     </div>
   </main>
 
+  <!-- Edit-Modal -->
+  <div id="editModal" class="hidden fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4" onclick="if(event.target===this)closeEdit()">
+    <div class="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+      <div class="px-5 py-3 border-b flex items-center justify-between sticky top-0 bg-white">
+        <h3 class="font-bold text-gray-900">Reklamation <span id="em-id"></span> bearbeiten</h3>
+        <button onclick="closeEdit()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
+      </div>
+      <div class="p-5 space-y-4">
+        <div id="em-meta" class="text-sm text-gray-600"></div>
+        <div id="em-desc" class="text-sm text-gray-800 bg-gray-50 rounded-lg px-3 py-2 whitespace-pre-wrap"></div>
+        <div id="em-foto-wrap" class="hidden">
+          <img id="em-foto" alt="Foto" class="max-h-60 rounded-lg border cursor-zoom-in" onclick="if(this.src)window.open(this.src)">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1">Status</label>
+          <select id="em-status" class="w-full border rounded-lg px-3 py-2 text-sm">
+            <option value="offen">offen</option>
+            <option value="weitergeleitet">weitergeleitet</option>
+            <option value="erledigt">erledigt</option>
+            <option value="abgewiesen">abgewiesen</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1">Zuweisung</label>
+          <select id="em-assign" class="w-full border rounded-lg px-3 py-2 text-sm"></select>
+          <p class="text-[11px] text-gray-400 mt-1">Technik-Team (intern) oder externer Handwerker.</p>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1">Notiz (intern)</label>
+          <textarea id="em-notiz" rows="3" maxlength="2000" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="interne Notiz …"></textarea>
+        </div>
+        <div id="em-msg" class="hidden text-sm rounded-lg px-3 py-2"></div>
+      </div>
+      <div class="px-5 py-3 border-t flex justify-end gap-2 sticky bottom-0 bg-white">
+        <button onclick="closeEdit()" class="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Abbrechen</button>
+        <button id="em-save" onclick="saveEdit()" class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Speichern</button>
+      </div>
+    </div>
+  </div>
+
   <script>
   const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const fmtDt = s => s ? new Date(s).toLocaleString('de-CH') : '';
+
+  let reklList = [];
+  let handwerkerList = [];
+  let technikList = [];
+  let editFotoUrl = null;
 
   document.addEventListener('DOMContentLoaded', async () => {
     const u = await AuthentikAuth.init({ requireAuth: true });
@@ -68,42 +113,124 @@
     document.getElementById('auth-gate').classList.add('hidden');
     document.getElementById('content').classList.remove('hidden');
     document.getElementById('filter-status').addEventListener('change', load);
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeEdit(); });
+    await Promise.all([loadHandwerker(), loadTechnik()]);
     await load();
   });
+
+  async function loadHandwerker() {
+    try { const r = await AuthentikAuth.apiFetch('/api/handwerker'); if (r.ok) { const d = await r.json(); handwerkerList = d.handwerker || d || []; } } catch {}
+  }
+  async function loadTechnik() {
+    try { const r = await AuthentikAuth.apiFetch('/api/technik/mitglieder'); if (r.ok) { const d = await r.json(); technikList = d.mitglieder || []; } } catch {}
+  }
 
   async function load() {
     const status = document.getElementById('filter-status').value;
     const r = await AuthentikAuth.apiFetch('/api/reklamationen' + (status ? '?status=' + status : ''));
     if (!r.ok) { document.getElementById('tbody').innerHTML = `<tr><td colspan="7" class="text-red-600 p-4">${r.status}</td></tr>`; return; }
     const d = await r.json();
-    const list = d.reklamationen || [];
-    if (list.length === 0) {
+    reklList = d.reklamationen || [];
+    if (reklList.length === 0) {
       document.getElementById('tbody').innerHTML = '<tr><td colspan="7" class="text-gray-400 text-center p-6">Keine Reklamationen.</td></tr>';
       return;
     }
-    document.getElementById('tbody').innerHTML = list.map(r => `<tr class="hover:bg-gray-50">
+    document.getElementById('tbody').innerHTML = reklList.map(r => {
+      const zuw = r.handwerker_firma ? esc(r.handwerker_firma) : (r.zugewiesen_an ? '👤 ' + esc(r.zugewiesen_an) : '—');
+      const foto = r.bild_pfad ? ' 📷' : '';
+      return `<tr class="hover:bg-gray-50">
       <td class="px-3 py-2 text-xs text-gray-500">${esc(fmtDt(r.created_at))}</td>
       <td class="px-3 py-2 text-sm">${esc(r.person_name || '—')}</td>
       <td class="px-3 py-2 text-sm">${r.stweg ? 'STWEG ' + r.stweg : '—'}</td>
-      <td class="px-3 py-2 text-sm"><div class="max-w-[260px] sm:max-w-md line-clamp-2" title="${esc(r.beschreibung || '')}">${esc(r.beschreibung || '')}</div></td>
-      <td class="px-3 py-2 text-xs">${esc(r.handwerker_firma || '—')}</td>
+      <td class="px-3 py-2 text-sm"><div class="max-w-[260px] sm:max-w-md line-clamp-2" title="${esc(r.beschreibung || '')}">${esc(r.beschreibung || '')}${foto}</div></td>
+      <td class="px-3 py-2 text-xs">${zuw}</td>
       <td class="px-3 py-2"><span class="s-${esc(r.status)} text-xs px-2 py-0.5 rounded">${esc(r.status)}</span></td>
-      <td class="px-3 py-2 whitespace-nowrap text-xs space-x-2">
-        <button onclick="setStatus(${r.id}, 'weitergeleitet')" class="text-blue-600 hover:underline">→ weiter</button>
-        <button onclick="setStatus(${r.id}, 'erledigt')" class="text-emerald-700 hover:underline">✓ erledigt</button>
-        <button onclick="setStatus(${r.id}, 'abgewiesen')" class="text-red-600 hover:underline">✗ ablehnen</button>
+      <td class="px-3 py-2 whitespace-nowrap text-xs">
+        <button onclick="openEdit(${r.id})" class="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">✏️ Bearbeiten</button>
       </td>
-    </tr>`).join('');
+    </tr>`;
+    }).join('');
   }
 
-  async function setStatus(id, status) {
-    if (!confirm(`Status auf "${status}" setzen?`)) return;
-    const r = await AuthentikAuth.apiFetch('/api/reklamationen/' + id, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
-    });
-    if (!r.ok) { alert('Fehler: ' + r.status); return; }
-    await load();
+  // Kombiniertes Zuweisungs-Dropdown: Technik-Team (zugewiesen_an) + Handwerker (handwerker_id)
+  function assignOptions(r) {
+    let html = '<option value="">— nicht zugewiesen —</option>';
+    if (technikList.length) {
+      html += '<optgroup label="Technik-Team">';
+      html += technikList.map(m => {
+        const name = m.name || m.email;
+        const sel = (!r.handwerker_id && r.zugewiesen_an && r.zugewiesen_an === name) ? ' selected' : '';
+        return `<option value="tech:${esc(name)}"${sel}>${esc(name)}</option>`;
+      }).join('');
+      html += '</optgroup>';
+    }
+    if (handwerkerList.length) {
+      html += '<optgroup label="Handwerker">';
+      html += handwerkerList.map(h => {
+        const sel = (r.handwerker_id && String(r.handwerker_id) === String(h.id)) ? ' selected' : '';
+        return `<option value="hw:${esc(h.id)}"${sel}>${esc(h.firma || h.name || ('#' + h.id))}</option>`;
+      }).join('');
+      html += '</optgroup>';
+    }
+    return html;
+  }
+
+  let editId = null;
+  function openEdit(id) {
+    const r = reklList.find(x => String(x.id) === String(id));
+    if (!r) return;
+    editId = id;
+    document.getElementById('em-id').textContent = '#' + r.id;
+    const von = [r.person_name, r.stweg ? ('STWEG ' + r.stweg) : null, r.kategorie].filter(Boolean).map(esc).join(' · ');
+    document.getElementById('em-meta').textContent = von + ' · ' + fmtDt(r.created_at);
+    document.getElementById('em-desc').textContent = r.beschreibung || '';
+    document.getElementById('em-status').value = r.status || 'offen';
+    document.getElementById('em-assign').innerHTML = assignOptions(r);
+    document.getElementById('em-notiz').value = r.notiz || '';
+    const msg = document.getElementById('em-msg'); msg.classList.add('hidden');
+    // Foto laden (authentifiziert -> Blob)
+    const fw = document.getElementById('em-foto-wrap'); const fi = document.getElementById('em-foto');
+    if (editFotoUrl) { try { URL.revokeObjectURL(editFotoUrl); } catch {} editFotoUrl = null; }
+    fi.removeAttribute('src');
+    if (r.bild_pfad) {
+      fw.classList.remove('hidden');
+      AuthentikAuth.apiFetch('/api/reklamationen/' + encodeURIComponent(id) + '/foto', { cache: 'no-store' })
+        .then(resp => resp.ok ? resp.blob() : null)
+        .then(b => { if (b) { editFotoUrl = URL.createObjectURL(b); fi.src = editFotoUrl; } else { fi.alt = 'Foto nicht ladbar'; } })
+        .catch(() => { fi.alt = 'Foto-Fehler'; });
+    } else { fw.classList.add('hidden'); }
+    document.getElementById('editModal').classList.remove('hidden');
+  }
+
+  function closeEdit() {
+    document.getElementById('editModal').classList.add('hidden');
+    if (editFotoUrl) { try { URL.revokeObjectURL(editFotoUrl); } catch {} editFotoUrl = null; }
+    editId = null;
+  }
+
+  async function saveEdit() {
+    if (editId == null) return;
+    const body = {
+      status: document.getElementById('em-status').value,
+      notiz: document.getElementById('em-notiz').value,
+    };
+    const a = document.getElementById('em-assign').value;
+    if (a === '') { body.handwerker_id = null; body.zugewiesen_an = null; }
+    else if (a.startsWith('tech:')) { body.zugewiesen_an = a.slice(5); body.handwerker_id = null; }
+    else if (a.startsWith('hw:')) { body.handwerker_id = parseInt(a.slice(3), 10); body.zugewiesen_an = null; }
+    const btn = document.getElementById('em-save'); btn.disabled = true;
+    const msg = document.getElementById('em-msg');
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/reklamationen/' + editId, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      if (!r.ok) { let m = 'HTTP ' + r.status; try { const j = await r.json(); if (j.error) m = j.error; } catch {} throw new Error(m); }
+      msg.textContent = '✓ Gespeichert'; msg.className = 'text-sm rounded-lg px-3 py-2 bg-green-100 text-green-800';
+      await load();
+      setTimeout(closeEdit, 600);
+    } catch (e) {
+      msg.textContent = 'Fehler: ' + e.message; msg.className = 'text-sm rounded-lg px-3 py-2 bg-red-100 text-red-700';
+    } finally { btn.disabled = false; }
   }
   </script>
 </body>
