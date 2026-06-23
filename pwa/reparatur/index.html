@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0369a1">
+  <title>Reparatur melden — Rosenweg</title>
+  <link rel="manifest" href="/pwa/reparatur/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/pwa/icons/icon-192.png">
+  <link rel="icon" href="/logo-rosenweg.png" type="image/png">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    /* sichere Bereiche fuer Notch / Home-Indicator */
+    .safe-top { padding-top: env(safe-area-inset-top); }
+    .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+    /* aktiver Kategorie-Button */
+    .cat-btn.sel { background:#e0f2fe; border-color:#0369a1; color:#075985; }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800 antialiased">
+
+  <!-- Schlanker Titel-Balken -->
+  <header class="bg-sky-700 text-white sticky top-0 z-40 shadow safe-top">
+    <div class="px-4 py-3 flex items-center gap-2">
+      <span class="text-lg font-semibold">🔧 Reparatur melden</span>
+      <span id="netBadge" class="ml-auto text-[11px] font-medium px-2 py-0.5 rounded-full bg-sky-600/60 hidden"></span>
+    </div>
+  </header>
+
+  <!-- Lade-Zustand -->
+  <div id="loading" class="text-center text-slate-500 py-16">Lade …</div>
+
+  <!-- Login-Gate -->
+  <div id="gate" class="hidden max-w-md mx-auto px-5 py-16 text-center">
+    <h2 class="text-xl font-bold mb-2">🔒 Anmeldung erforderlich</h2>
+    <p class="text-slate-500 mb-6">Zum Melden einer Reparatur bitte mit dem Rosenweg-Konto anmelden.</p>
+    <div id="gate-login"></div>
+  </div>
+
+  <!-- App -->
+  <main id="app" class="hidden max-w-md mx-auto px-4 pb-28">
+
+    <!-- ===== Ansicht: Melden ===== -->
+    <section id="view-melden" class="py-4">
+      <form id="form" class="space-y-5">
+        <!-- Kategorie -->
+        <div>
+          <label class="block text-sm font-semibold mb-2">Kategorie</label>
+          <div id="catGrid" class="grid grid-cols-3 gap-2"></div>
+          <input type="hidden" id="kategorie" required>
+        </div>
+
+        <!-- Beschreibung -->
+        <div>
+          <label for="beschreibung" class="block text-sm font-semibold mb-2">Beschreibung <span class="text-red-500">*</span></label>
+          <textarea id="beschreibung" rows="4" required
+            class="w-full rounded-xl border border-slate-300 px-3 py-2 text-base focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none"
+            placeholder="Was ist kaputt? Wo genau?"></textarea>
+        </div>
+
+        <!-- Ort / STWEG -->
+        <div>
+          <label for="stweg" class="block text-sm font-semibold mb-2">Ort</label>
+          <select id="stweg"
+            class="w-full rounded-xl border border-slate-300 px-3 py-2 text-base bg-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none"></select>
+        </div>
+
+        <!-- Foto (optional) -->
+        <div>
+          <label class="block text-sm font-semibold mb-2">Foto <span class="text-slate-400 font-normal">(optional)</span></label>
+          <input id="foto" type="file" accept="image/*" capture="environment" class="hidden">
+          <button type="button" id="fotoBtn"
+            class="w-full rounded-xl border border-dashed border-slate-300 px-3 py-4 text-slate-500 text-sm bg-white active:bg-slate-100">
+            📷 Foto aufnehmen / auswählen
+          </button>
+          <div id="fotoPreview" class="hidden mt-2 relative">
+            <img id="fotoImg" class="w-full rounded-xl border border-slate-200" alt="Vorschau">
+            <button type="button" id="fotoRemove"
+              class="absolute top-2 right-2 bg-black/60 text-white rounded-full w-8 h-8 text-lg leading-none">✕</button>
+            <div id="fotoInfo" class="text-[11px] text-slate-400 mt-1"></div>
+          </div>
+        </div>
+
+        <!-- Senden -->
+        <button type="submit" id="submitBtn"
+          class="w-full bg-sky-700 text-white font-semibold text-lg rounded-xl py-3.5 shadow active:bg-sky-800 disabled:opacity-50">
+          Senden
+        </button>
+        <div id="formMsg" class="hidden text-sm rounded-xl px-3 py-2"></div>
+      </form>
+    </section>
+
+    <!-- ===== Ansicht: Meine Meldungen ===== -->
+    <section id="view-meine" class="hidden py-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold">Meine Meldungen</h2>
+        <button id="refreshBtn" class="text-sky-700 text-sm font-medium active:text-sky-900">↻ Aktualisieren</button>
+      </div>
+      <div id="meineMsg" class="text-center text-slate-400 py-8 text-sm">Lade …</div>
+      <div id="meineList" class="space-y-3"></div>
+    </section>
+  </main>
+
+  <!-- Untere Tab-Leiste -->
+  <nav id="tabbar" class="hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 safe-bottom z-40">
+    <div class="max-w-md mx-auto grid grid-cols-2">
+      <button data-tab="melden" class="tab py-2.5 text-sm font-medium text-sky-700 flex flex-col items-center gap-0.5">
+        <span class="text-xl leading-none">➕</span> Melden
+      </button>
+      <button data-tab="meine" class="tab py-2.5 text-sm font-medium text-slate-400 flex flex-col items-center gap-0.5">
+        <span class="text-xl leading-none">📋</span> Meine Meldungen
+      </button>
+    </div>
+  </nav>
+
+  <script>
+  'use strict';
+
+  // ---------- Helfer ----------
+  const $ = id => document.getElementById(id);
+  // XSS-Schutz fuer alle dynamischen Strings
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const fmtDate = d => { if (!d) return '—'; try { return new Date(d).toLocaleString('de-CH', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }); } catch { return String(d).slice(0,16); } };
+
+  // Kategorien (Wert → Label + Icon)
+  const KATEGORIEN = [
+    { v:'aufzug',    l:'Aufzug',     i:'🛗' },
+    { v:'heizung',   l:'Heizung',    i:'🔥' },
+    { v:'wasser',    l:'Wasser',     i:'💧' },
+    { v:'tuer',      l:'Tür/Schloss',i:'🚪' },
+    { v:'reinigung', l:'Reinigung',  i:'🧹' },
+    { v:'sonstige',  l:'Sonstiges',  i:'❓' },
+  ];
+  const KAT_LABEL = Object.fromEntries(KATEGORIEN.map(k => [k.v, k.i + ' ' + k.l]));
+
+  // Status → Badge-Styling + Label
+  const STATUS = {
+    offen:          { l:'offen',          c:'bg-slate-100 text-slate-600' },
+    weitergeleitet: { l:'weitergeleitet', c:'bg-blue-100 text-blue-700' },
+    erledigt:       { l:'erledigt',       c:'bg-green-100 text-green-700' },
+    abgewiesen:     { l:'abgewiesen',     c:'bg-red-100 text-red-700' },
+    ausstehend:     { l:'⏳ ausstehend',  c:'bg-yellow-100 text-yellow-800' },
+  };
+
+  // STWEG-Auswahl: 1–7 plus MEG(=8)
+  const STWEG_OPTIONS = [
+    { v:1, l:'STWEG 1' }, { v:2, l:'STWEG 2' }, { v:3, l:'STWEG 3' }, { v:4, l:'STWEG 4' },
+    { v:5, l:'STWEG 5' }, { v:6, l:'STWEG 6' }, { v:7, l:'STWEG 7' }, { v:8, l:'MEG' },
+  ];
+
+  let currentUser = null;
+  let fotoDataUrl = null; // komprimiertes JPEG als Data-URL
+
+  // =====================================================================
+  //  IndexedDB — Offline-Queue
+  // =====================================================================
+  const DB_NAME = 'rosenweg-reparatur';
+  const STORE = 'queue';
+  let _dbPromise = null;
+
+  function db() {
+    if (_dbPromise) return _dbPromise;
+    _dbPromise = new Promise((resolve, reject) => {
+      const r = indexedDB.open(DB_NAME, 1);
+      r.onupgradeneeded = () => {
+        const d = r.result;
+        if (!d.objectStoreNames.contains(STORE)) {
+          d.createObjectStore(STORE, { keyPath: 'localId' });
+        }
+      };
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+    return _dbPromise;
+  }
+
+  async function queueAdd(entry) {
+    const d = await db();
+    return new Promise((resolve, reject) => {
+      const tx = d.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).put(entry);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  async function queueAll() {
+    const d = await db();
+    return new Promise((resolve, reject) => {
+      const tx = d.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function queueDelete(localId) {
+    const d = await db();
+    return new Promise((resolve, reject) => {
+      const tx = d.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).delete(localId);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  // =====================================================================
+  //  Foto-Kompression (Canvas) — laengste Kante max 1600px, JPEG ~0.7
+  // =====================================================================
+  function compressImage(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const MAX = 1600;
+          let { width, height } = img;
+          if (width > height && width > MAX) { height = Math.round(height * MAX / width); width = MAX; }
+          else if (height >= width && height > MAX) { width = Math.round(width * MAX / height); height = MAX; }
+          const canvas = document.createElement('canvas');
+          canvas.width = width; canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          // immer als JPEG ~0.7 ausgeben → Data-URL data:image/jpeg;base64,…
+          resolve(canvas.toDataURL('image/jpeg', 0.7));
+        };
+        img.onerror = () => reject(new Error('Bild konnte nicht geladen werden.'));
+        img.src = reader.result;
+      };
+      reader.onerror = () => reject(new Error('Datei konnte nicht gelesen werden.'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function dataUrlBytes(dataUrl) {
+    // grobe Groessenabschaetzung der Base64-Nutzdaten
+    const i = dataUrl.indexOf(',');
+    const b64 = i >= 0 ? dataUrl.slice(i + 1) : dataUrl;
+    return Math.round(b64.length * 3 / 4);
+  }
+
+  // =====================================================================
+  //  UI-Aufbau
+  // =====================================================================
+  function buildCategories() {
+    $('catGrid').innerHTML = KATEGORIEN.map(k => `
+      <button type="button" data-v="${esc(k.v)}"
+        class="cat-btn rounded-xl border border-slate-300 bg-white py-3 flex flex-col items-center gap-1 text-xs font-medium active:bg-slate-100">
+        <span class="text-2xl leading-none">${k.i}</span>
+        <span>${esc(k.l)}</span>
+      </button>`).join('');
+    $('catGrid').querySelectorAll('.cat-btn').forEach(b => {
+      b.addEventListener('click', () => {
+        $('catGrid').querySelectorAll('.cat-btn').forEach(x => x.classList.remove('sel'));
+        b.classList.add('sel');
+        $('kategorie').value = b.dataset.v;
+      });
+    });
+  }
+
+  // Eigene STWEGs aus den Authentik-Gruppen ableiten.
+  function myStwegs(user) {
+    const set = new Set();
+    for (const g of (user?.groups || [])) {
+      const gl = String(g).toLowerCase();
+      let m = gl.match(/^stweg(\d+)-/);
+      if (m) { set.add(parseInt(m[1], 10)); continue; }
+      if (/^meg-/.test(gl)) set.add(8);
+    }
+    return [...set].sort((a, b) => a - b);
+  }
+
+  function buildStwegSelect() {
+    const mine = myStwegs(currentUser);
+    const opts = [];
+    // eigene STWEGs zuerst (als Default vorausgewaehlt)
+    for (const v of mine) {
+      const o = STWEG_OPTIONS.find(x => x.v === v);
+      if (o) opts.push(`<option value="${o.v}">${esc(o.l)} (meiner)</option>`);
+    }
+    // dann alle anderen
+    for (const o of STWEG_OPTIONS) {
+      if (mine.includes(o.v)) continue;
+      opts.push(`<option value="${o.v}">${esc(o.l)}</option>`);
+    }
+    // Allgemein/unbekannt → null
+    opts.push(`<option value="">Allgemein / unbekannt</option>`);
+    $('stweg').innerHTML = opts.join('');
+    // Default: erster eigener STWEG, sonst "Allgemein"
+    $('stweg').value = mine.length ? String(mine[0]) : '';
+  }
+
+  // ---------- Tabs ----------
+  function switchTab(tab) {
+    $('view-melden').classList.toggle('hidden', tab !== 'melden');
+    $('view-meine').classList.toggle('hidden', tab !== 'meine');
+    document.querySelectorAll('.tab').forEach(b => {
+      const active = b.dataset.tab === tab;
+      b.classList.toggle('text-sky-700', active);
+      b.classList.toggle('text-slate-400', !active);
+    });
+    if (tab === 'meine') loadMeine();
+  }
+
+  // ---------- Netz-Badge ----------
+  function updateNetBadge() {
+    const b = $('netBadge');
+    if (!navigator.onLine) {
+      b.textContent = 'offline';
+      b.classList.remove('hidden');
+    } else {
+      b.classList.add('hidden');
+    }
+  }
+
+  function showFormMsg(text, kind) {
+    const el = $('formMsg');
+    el.textContent = text;
+    el.className = 'text-sm rounded-xl px-3 py-2 ' + (
+      kind === 'ok' ? 'bg-green-100 text-green-800' :
+      kind === 'queued' ? 'bg-yellow-100 text-yellow-800' :
+      'bg-red-100 text-red-700'
+    );
+    el.classList.remove('hidden');
+  }
+
+  // =====================================================================
+  //  Senden + Offline-Queue
+  // =====================================================================
+  function resetForm() {
+    $('form').reset();
+    $('kategorie').value = '';
+    $('catGrid').querySelectorAll('.cat-btn').forEach(x => x.classList.remove('sel'));
+    fotoDataUrl = null;
+    $('fotoPreview').classList.add('hidden');
+    $('fotoImg').src = '';
+    buildStwegSelect();
+  }
+
+  // POST einer Reklamation. Wirft bei Netzfehler (→ queue), gibt bei
+  // 4xx/429 ein {clientError} zurueck (kein requeue).
+  async function postReklamation(payload) {
+    let resp;
+    try {
+      resp = await AuthentikAuth.apiFetch('/api/reklamationen', { method: 'POST', body: payload });
+    } catch (netErr) {
+      // echter Netzwerkfehler → werfen, damit Aufrufer in die Queue legt
+      const e = new Error('network'); e.isNetwork = true; throw e;
+    }
+    if (resp.ok) {
+      return { ok: true, data: await resp.json().catch(() => ({})) };
+    }
+    // 429 / andere 4xx → Server hat geantwortet, NICHT requeuen
+    let msg = 'HTTP ' + resp.status;
+    try { const j = await resp.json(); if (j && j.error) msg = j.error; } catch {}
+    return { ok: false, clientError: true, status: resp.status, error: msg };
+  }
+
+  async function onSubmit(ev) {
+    ev.preventDefault();
+    $('formMsg').classList.add('hidden');
+
+    const kategorie = $('kategorie').value;
+    const beschreibung = $('beschreibung').value.trim();
+    const stwegRaw = $('stweg').value;
+    const stweg = stwegRaw === '' ? null : parseInt(stwegRaw, 10);
+
+    if (!kategorie) { showFormMsg('Bitte eine Kategorie wählen.', 'err'); return; }
+    if (!beschreibung) { showFormMsg('Bitte eine Beschreibung eingeben.', 'err'); return; }
+
+    const payload = { kategorie, beschreibung, stweg };
+    if (fotoDataUrl) payload.foto_base64 = fotoDataUrl;
+
+    const btn = $('submitBtn');
+    btn.disabled = true; const old = btn.textContent; btn.textContent = 'Senden …';
+
+    // Offline → direkt puffern, gar nicht erst versuchen
+    if (!navigator.onLine) {
+      await enqueueAndNotify(payload);
+      btn.disabled = false; btn.textContent = old;
+      return;
+    }
+
+    try {
+      const res = await postReklamation(payload);
+      if (res.ok) {
+        showFormMsg('✓ Meldung gesendet. Danke!', 'ok');
+        resetForm();
+        switchTab('meine');
+      } else {
+        // 429 / 4xx → Fehler zeigen, NICHT requeuen
+        showFormMsg('Konnte nicht gesendet werden: ' + res.error, 'err');
+      }
+    } catch (e) {
+      // Netzfehler → in die Offline-Queue
+      await enqueueAndNotify(payload);
+    } finally {
+      btn.disabled = false; btn.textContent = old;
+    }
+  }
+
+  async function enqueueAndNotify(payload) {
+    const entry = {
+      localId: 'q_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+      payload,
+      created_at: new Date().toISOString(),
+    };
+    try {
+      await queueAdd(entry);
+      showFormMsg('📡 Gespeichert — wird gesendet, sobald wieder online.', 'queued');
+      resetForm();
+      switchTab('meine');
+    } catch (e) {
+      showFormMsg('Speichern fehlgeschlagen: ' + e.message, 'err');
+    }
+  }
+
+  // Queue abarbeiten — nacheinander POSTen, bei Erfolg aus Queue loeschen.
+  let _flushing = false;
+  async function flushQueue() {
+    if (_flushing || !navigator.onLine) return;
+    _flushing = true;
+    try {
+      const items = await queueAll();
+      for (const item of items) {
+        try {
+          const res = await postReklamation(item.payload);
+          if (res.ok) {
+            await queueDelete(item.localId);
+          } else if (res.clientError) {
+            // dauerhafter Fehler (4xx/429) → nicht endlos behalten, entfernen
+            await queueDelete(item.localId);
+          }
+          // sonst (sollte nicht passieren): drin lassen, naechster Versuch
+        } catch (e) {
+          // Netzfehler → abbrechen, Rest bleibt fuer naechsten online-Trigger
+          break;
+        }
+      }
+    } finally {
+      _flushing = false;
+    }
+  }
+
+  // =====================================================================
+  //  Meine Meldungen
+  // =====================================================================
+  function statusBadge(status) {
+    const s = STATUS[status] || STATUS.offen;
+    return `<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full ${s.c}">${esc(s.l)}</span>`;
+  }
+
+  function serverCardHtml(r) {
+    const kat = KAT_LABEL[r.kategorie] || esc(r.kategorie || 'Sonstiges');
+    const foto = r.has_bild ? ' <span title="Foto angehängt">📷</span>' : '';
+    const notiz = r.notiz ? `<div class="mt-2 text-xs text-slate-600 bg-slate-50 rounded-lg px-2 py-1.5"><span class="font-semibold">Notiz:</span> ${esc(r.notiz)}</div>` : '';
+    const erledigt = r.erledigt_am ? `<div class="text-[11px] text-green-700 mt-1">erledigt am ${esc(fmtDate(r.erledigt_am))}</div>` : '';
+    return `
+      <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+        <div class="flex items-start justify-between gap-2">
+          <div class="text-sm font-semibold">${kat}${foto}</div>
+          ${statusBadge(r.status)}
+        </div>
+        <div class="text-sm text-slate-700 mt-1 whitespace-pre-wrap break-words">${esc(r.beschreibung)}</div>
+        <div class="text-[11px] text-slate-400 mt-1">${esc(fmtDate(r.created_at))}</div>
+        ${erledigt}
+        ${notiz}
+      </div>`;
+  }
+
+  function pendingCardHtml(item) {
+    const p = item.payload || {};
+    const kat = KAT_LABEL[p.kategorie] || esc(p.kategorie || 'Sonstiges');
+    const foto = p.foto_base64 ? ' 📷' : '';
+    return `
+      <div class="bg-white rounded-xl shadow-sm border border-yellow-300 p-3">
+        <div class="flex items-start justify-between gap-2">
+          <div class="text-sm font-semibold">${kat}${foto}</div>
+          ${statusBadge('ausstehend')}
+        </div>
+        <div class="text-sm text-slate-700 mt-1 whitespace-pre-wrap break-words">${esc(p.beschreibung)}</div>
+        <div class="text-[11px] text-slate-400 mt-1">${esc(fmtDate(item.created_at))} · noch nicht gesendet</div>
+      </div>`;
+  }
+
+  async function loadMeine() {
+    const msg = $('meineMsg'); const list = $('meineList');
+    msg.classList.remove('hidden'); msg.textContent = 'Lade …';
+    list.innerHTML = '';
+
+    // erst Queue leeren (falls inzwischen wieder online)
+    await flushQueue();
+
+    let server = [];
+    let serverError = null;
+    if (navigator.onLine) {
+      try {
+        const r = await AuthentikAuth.apiFetch('/api/reklamationen/meine', { cache: 'no-store' });
+        if (r.status === 401) { showGate(); return; }
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const data = await r.json();
+        server = Array.isArray(data.reklamationen) ? data.reklamationen : [];
+      } catch (e) {
+        serverError = e.message;
+      }
+    } else {
+      serverError = 'offline';
+    }
+
+    const pending = await queueAll().catch(() => []);
+
+    // kombinieren: { ts, html } und nach Datum (neueste zuerst) sortieren
+    const rows = [];
+    for (const it of pending) rows.push({ ts: new Date(it.created_at).getTime() || 0, html: pendingCardHtml(it) });
+    for (const r of server) rows.push({ ts: new Date(r.created_at).getTime() || 0, html: serverCardHtml(r) });
+    rows.sort((a, b) => b.ts - a.ts);
+
+    if (!rows.length) {
+      msg.classList.remove('hidden');
+      msg.textContent = serverError && serverError !== 'offline'
+        ? 'Fehler beim Laden: ' + serverError
+        : (serverError === 'offline' ? 'Offline — keine ausstehenden Meldungen.' : 'Noch keine Meldungen.');
+      return;
+    }
+    msg.classList.add('hidden');
+    let head = '';
+    if (serverError === 'offline') head = '<div class="text-[11px] text-yellow-700 bg-yellow-50 rounded-lg px-2 py-1.5 mb-1">Offline — zeige nur ausstehende Meldungen.</div>';
+    else if (serverError) head = `<div class="text-[11px] text-red-600 bg-red-50 rounded-lg px-2 py-1.5 mb-1">Server-Meldungen nicht erreichbar (${esc(serverError)}).</div>`;
+    list.innerHTML = head + rows.map(r => r.html).join('');
+  }
+
+  // =====================================================================
+  //  Gate / Init
+  // =====================================================================
+  function showGate() {
+    $('loading').classList.add('hidden');
+    $('app').classList.add('hidden');
+    $('tabbar').classList.add('hidden');
+    $('gate').classList.remove('hidden');
+    AuthentikAuth.createLoginButton('gate-login');
+  }
+
+  function showApp() {
+    $('loading').classList.add('hidden');
+    $('gate').classList.add('hidden');
+    $('app').classList.remove('hidden');
+    $('tabbar').classList.remove('hidden');
+  }
+
+  // ---------- Event-Wiring (statisch, einmalig) ----------
+  function wireEvents() {
+    $('form').addEventListener('submit', onSubmit);
+
+    // Foto auswaehlen
+    $('fotoBtn').addEventListener('click', () => $('foto').click());
+    $('foto').addEventListener('change', async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      $('fotoBtn').textContent = 'Bild wird verarbeitet …';
+      try {
+        fotoDataUrl = await compressImage(file);
+        $('fotoImg').src = fotoDataUrl;
+        $('fotoInfo').textContent = '≈ ' + Math.round(dataUrlBytes(fotoDataUrl) / 1024) + ' KB';
+        $('fotoPreview').classList.remove('hidden');
+      } catch (err) {
+        fotoDataUrl = null;
+        alert('Foto-Fehler: ' + err.message);
+      } finally {
+        $('fotoBtn').textContent = '📷 Foto aufnehmen / auswählen';
+        $('foto').value = ''; // erlaubt erneutes Waehlen derselben Datei
+      }
+    });
+    $('fotoRemove').addEventListener('click', () => {
+      fotoDataUrl = null;
+      $('fotoPreview').classList.add('hidden');
+      $('fotoImg').src = '';
+    });
+
+    // Tabs
+    document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+    $('refreshBtn').addEventListener('click', loadMeine);
+
+    // Online/Offline
+    window.addEventListener('online', async () => { updateNetBadge(); await flushQueue(); if (!$('view-meine').classList.contains('hidden')) loadMeine(); });
+    window.addEventListener('offline', updateNetBadge);
+  }
+
+  async function main() {
+    buildCategories();
+    wireEvents();
+    updateNetBadge();
+
+    // Service Worker registrieren
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/pwa/reparatur/sw.js', { scope: '/pwa/reparatur/' }).catch(() => {});
+    }
+
+    // Login-Gate
+    currentUser = await AuthentikAuth.init({
+      requireAuth: true,
+      onLogout: () => showGate(),
+    });
+    if (!currentUser) { showGate(); return; }
+
+    buildStwegSelect();
+    showApp();
+    switchTab('melden');
+
+    // beim App-Start: ausstehende Meldungen senden
+    await flushQueue();
+  }
+
+  main();
+  </script>
+</body>
+</html>
