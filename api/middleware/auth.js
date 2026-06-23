@@ -50,7 +50,7 @@ async function authMiddleware(req, res, next) {
 
     // 1. Try local session token first
     const result = await pool.query(
-      `SELECT s.user_id, u.name, u.email, u.role, u.wohnung, u.stweg, u.groups_json
+      `SELECT s.user_id, s.expires_at, u.name, u.email, u.role, u.wohnung, u.stweg, u.groups_json
        FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.token = $1 AND s.expires_at > NOW()`,
       [token]
@@ -60,6 +60,15 @@ async function authMiddleware(req, res, next) {
       req.user.id = req.user.user_id; // Ensure both .id and .user_id are set consistently
       req.user.isAdmin = req.user.role === 'admin';
       req.user.groups = (() => { try { return JSON.parse(req.user.groups_json || '[]'); } catch { return []; } })();
+      // Sliding-Expiry: aktive Sessions automatisch verlaengern (kein staendiges
+      // Neu-Anmelden). Nur schreiben wenn die Session naeher als 1 Tag an ihre
+      // 30-Tage-Marke gerueckt ist -> max. 1 DB-Write pro Tag/Session, non-blocking.
+      const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+      const exp = new Date(req.user.expires_at).getTime();
+      if (exp < Date.now() + SESSION_TTL_MS - 24 * 60 * 60 * 1000) {
+        pool.query('UPDATE sessions SET expires_at = $1 WHERE token = $2',
+          [new Date(Date.now() + SESSION_TTL_MS), token]).catch(() => {});
+      }
       return auditCtx.run({ userEmail: req.user.email || req.user.name || 'unknown' }, next);
     }
 
