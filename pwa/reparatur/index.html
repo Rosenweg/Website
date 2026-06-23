@@ -71,11 +71,122 @@
   <!-- Lade-Zustand -->
   <div id="loading" class="text-center text-slate-500 py-16">Lade …</div>
 
-  <!-- Login-Gate -->
-  <div id="gate" class="hidden max-w-md mx-auto px-5 py-16 text-center">
-    <h2 class="text-xl font-bold mb-2">🔒 Anmeldung erforderlich</h2>
-    <p class="text-slate-500 mb-6">Zum Melden einer Reparatur bitte mit dem Rosenweg-Konto anmelden.</p>
-    <div id="gate-login"></div>
+  <!-- =================================================================
+       Einstiegs-Gate (NICHT eingeloggt): zwei Wege
+       ================================================================= -->
+  <div id="gate" class="hidden max-w-md mx-auto px-5 py-12">
+
+    <!-- Auswahl: Konto-Login ODER E-Mail-Code -->
+    <section id="gate-choice" class="text-center">
+      <h2 class="text-xl font-bold mb-1">🔧 Reparatur melden</h2>
+      <p class="text-slate-500 mb-8">Wie möchtest du eine Reparatur melden?</p>
+
+      <button type="button" id="gateLoginBtn"
+        class="w-full bg-sky-700 text-white font-semibold text-lg rounded-2xl py-4 shadow active:bg-sky-800 mb-3">
+        🔐 Mit Konto anmelden
+      </button>
+      <p class="text-[12px] text-slate-400 mb-7">Volle Funktion inkl. „Meine Meldungen".</p>
+
+      <button type="button" id="gateCodeBtn"
+        class="w-full bg-white border-2 border-sky-300 text-sky-800 font-semibold text-lg rounded-2xl py-4 shadow-sm active:bg-sky-50">
+        ✉️ Ohne Konto melden<br><span class="text-sm font-normal">per E-Mail-Code</span>
+      </button>
+      <p class="text-[12px] text-slate-400 mt-2">Schnell, ohne Anmeldung. Code kommt per E-Mail.</p>
+
+      <!-- versteckter Mount für Authentik-Login-Button -->
+      <div id="gate-login" class="hidden"></div>
+    </section>
+
+    <!-- ===== E-Mail-Code Schritt 1: Code anfordern ===== -->
+    <section id="gate-code1" class="hidden">
+      <button type="button" class="gate-back text-sky-700 text-sm font-medium mb-4 active:text-sky-900">← Zurück</button>
+      <h2 class="text-xl font-bold mb-1">✉️ Ohne Konto melden</h2>
+      <p class="text-slate-500 mb-6 text-sm">Gib deine E-Mail-Adresse ein. Wir senden dir einen 6-stelligen Code.</p>
+      <form id="codeReqForm" class="space-y-4">
+        <div>
+          <label for="codeEmail" class="block text-sm font-semibold mb-2">E-Mail-Adresse <span class="text-red-500">*</span></label>
+          <input id="codeEmail" type="email" required autocomplete="email" inputmode="email"
+            class="w-full rounded-xl border border-slate-300 px-3 py-3 text-base focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none"
+            placeholder="name@beispiel.ch">
+        </div>
+        <button type="submit" id="codeReqBtn"
+          class="w-full bg-sky-700 text-white font-semibold text-lg rounded-xl py-3.5 shadow active:bg-sky-800 disabled:opacity-50">
+          Code anfordern
+        </button>
+        <div id="codeReqMsg" class="hidden text-sm rounded-xl px-3 py-2"></div>
+      </form>
+    </section>
+
+    <!-- ===== E-Mail-Code Schritt 2: Melden ===== -->
+    <section id="gate-code2" class="hidden">
+      <button type="button" class="gate-back text-sky-700 text-sm font-medium mb-4 active:text-sky-900">← Zurück</button>
+      <div class="bg-sky-50 border border-sky-200 rounded-xl px-3 py-2.5 text-sm mb-5">
+        📧 Code gesendet an <span id="codeEmailLabel" class="font-semibold"></span> (gültig 10 Min).
+        <button type="button" id="codeOtherEmail" class="text-sky-700 underline ml-1 active:text-sky-900">andere E-Mail</button>
+      </div>
+      <form id="pubForm" class="space-y-5">
+        <!-- Kategorie -->
+        <div>
+          <label class="block text-sm font-semibold mb-2">Kategorie</label>
+          <div id="pubCatGrid" class="grid grid-cols-3 gap-2"></div>
+          <input type="hidden" id="pubKategorie" required>
+        </div>
+        <!-- Beschreibung -->
+        <div>
+          <label for="pubBeschreibung" class="block text-sm font-semibold mb-2">Beschreibung <span class="text-red-500">*</span></label>
+          <textarea id="pubBeschreibung" rows="4" required
+            class="w-full rounded-xl border border-slate-300 px-3 py-2 text-base focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none"
+            placeholder="Was ist kaputt? Wo genau?"></textarea>
+        </div>
+        <!-- Ort / STWEG -->
+        <div>
+          <label for="pubStweg" class="block text-sm font-semibold mb-2">Ort</label>
+          <select id="pubStweg"
+            class="w-full rounded-xl border border-slate-300 px-3 py-2 text-base bg-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none"></select>
+        </div>
+        <!-- Foto (optional) -->
+        <div>
+          <label class="block text-sm font-semibold mb-2">Foto <span class="text-slate-400 font-normal">(optional)</span></label>
+          <input id="pubFoto" type="file" accept="image/*" capture="environment" class="hidden">
+          <button type="button" id="pubFotoBtn"
+            class="w-full rounded-xl border border-dashed border-slate-300 px-3 py-4 text-slate-500 text-sm bg-white active:bg-slate-100">
+            📷 Foto aufnehmen / auswählen
+          </button>
+          <div id="pubFotoPreview" class="hidden mt-2 relative">
+            <img id="pubFotoImg" class="w-full rounded-xl border border-slate-200" alt="Vorschau">
+            <button type="button" id="pubFotoRemove"
+              class="absolute top-2 right-2 bg-black/60 text-white rounded-full w-8 h-8 text-lg leading-none">✕</button>
+            <div id="pubFotoInfo" class="text-[11px] text-slate-400 mt-1"></div>
+          </div>
+        </div>
+        <!-- Code -->
+        <div>
+          <label for="pubCode" class="block text-sm font-semibold mb-2">Code aus der E-Mail <span class="text-red-500">*</span></label>
+          <input id="pubCode" type="text" required inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code"
+            class="w-full rounded-xl border border-slate-300 px-3 py-3 text-center text-2xl tracking-[0.5em] font-semibold focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none"
+            placeholder="000000">
+        </div>
+        <!-- Senden -->
+        <button type="submit" id="pubSubmitBtn"
+          class="w-full bg-sky-700 text-white font-semibold text-lg rounded-xl py-3.5 shadow active:bg-sky-800 disabled:opacity-50">
+          Reparatur melden
+        </button>
+        <div id="pubFormMsg" class="hidden text-sm rounded-xl px-3 py-2"></div>
+      </form>
+    </section>
+
+    <!-- ===== E-Mail-Code: Erfolg ===== -->
+    <section id="gate-success" class="hidden text-center py-8">
+      <div class="text-5xl mb-3">✅</div>
+      <h2 class="text-xl font-bold mb-2">Danke!</h2>
+      <p id="successText" class="text-slate-600 mb-8"></p>
+      <button type="button" id="successAgainBtn"
+        class="w-full bg-sky-700 text-white font-semibold text-lg rounded-xl py-3.5 shadow active:bg-sky-800">
+        Weitere Meldung
+      </button>
+      <button type="button" class="gate-back w-full text-sky-700 text-sm font-medium mt-3 py-2 active:text-sky-900">Zur Startseite</button>
+    </section>
+
   </div>
 
   <!-- App -->
@@ -636,12 +747,21 @@
   // =====================================================================
   //  Gate / Init
   // =====================================================================
-  function showGate() {
+  // Gate sichtbar machen + auf einen der vier Schritte schalten.
+  // step: 'choice' | 'code1' | 'code2' | 'success'
+  function showGate(step) {
     $('loading').classList.add('hidden');
     $('app').classList.add('hidden');
     $('tabbar').classList.add('hidden');
     $('gate').classList.remove('hidden');
-    AuthentikAuth.createLoginButton('gate-login');
+    gateStep(step || 'choice');
+  }
+
+  function gateStep(step) {
+    $('gate-choice').classList.toggle('hidden', step !== 'choice');
+    $('gate-code1').classList.toggle('hidden', step !== 'code1');
+    $('gate-code2').classList.toggle('hidden', step !== 'code2');
+    $('gate-success').classList.toggle('hidden', step !== 'success');
   }
 
   function showApp() {
@@ -649,6 +769,197 @@
     $('gate').classList.add('hidden');
     $('app').classList.remove('hidden');
     $('tabbar').classList.remove('hidden');
+  }
+
+  // =====================================================================
+  //  E-Mail-Code-Flow (OHNE Login, OHNE Session)
+  //  Eigene State/DOM-IDs (pub*) — teilt sich NICHTS mit dem
+  //  eingeloggten Flow ausser den Konstanten + compressImage().
+  // =====================================================================
+  let pubEmail = null;          // gemerkte E-Mail aus Schritt 1
+  let pubFotoDataUrl = null;    // komprimiertes JPEG als Data-URL
+
+  function showGateMsg(elId, text, kind) {
+    const el = $(elId);
+    el.textContent = text;
+    el.className = 'text-sm rounded-xl px-3 py-2 ' + (
+      kind === 'ok' ? 'bg-green-100 text-green-800' :
+      kind === 'warn' ? 'bg-yellow-100 text-yellow-800' :
+      'bg-red-100 text-red-700'
+    );
+    el.classList.remove('hidden');
+  }
+
+  // Kategorie-Buttons für den oeffentlichen Pfad (eigenes Grid + Hidden-Input).
+  function buildPubCategories() {
+    $('pubCatGrid').innerHTML = KATEGORIEN.map(k => `
+      <button type="button" data-v="${esc(k.v)}"
+        class="cat-btn rounded-xl border border-slate-300 bg-white py-3 flex flex-col items-center gap-1 text-xs font-medium active:bg-slate-100">
+        <span class="text-2xl leading-none">${k.i}</span>
+        <span>${esc(k.l)}</span>
+      </button>`).join('');
+    $('pubCatGrid').querySelectorAll('.cat-btn').forEach(b => {
+      b.addEventListener('click', () => {
+        $('pubCatGrid').querySelectorAll('.cat-btn').forEach(x => x.classList.remove('sel'));
+        b.classList.add('sel');
+        $('pubKategorie').value = b.dataset.v;
+      });
+    });
+  }
+
+  // STWEG-Dropdown ohne User-Kontext: 1–7, MEG, plus "Allgemein/weiss nicht".
+  function buildPubStwegSelect() {
+    const opts = STWEG_OPTIONS.map(o => `<option value="${o.v}">${esc(o.l)}</option>`);
+    opts.push(`<option value="" selected>Allgemein / weiß nicht</option>`);
+    $('pubStweg').innerHTML = opts.join('');
+    $('pubStweg').value = '';
+  }
+
+  function resetPubForm() {
+    $('pubForm').reset();
+    $('pubKategorie').value = '';
+    $('pubCatGrid').querySelectorAll('.cat-btn').forEach(x => x.classList.remove('sel'));
+    pubFotoDataUrl = null;
+    $('pubFotoPreview').classList.add('hidden');
+    $('pubFotoImg').src = '';
+    buildPubStwegSelect();
+    $('pubFormMsg').classList.add('hidden');
+  }
+
+  // Schritt 1 — Code anfordern (PLAIN fetch, keine Session).
+  async function onCodeRequest(ev) {
+    ev.preventDefault();
+    $('codeReqMsg').classList.add('hidden');
+    const email = $('codeEmail').value.trim().toLowerCase();
+    if (!email) { showGateMsg('codeReqMsg', 'Bitte E-Mail-Adresse eingeben.', 'err'); return; }
+
+    const btn = $('codeReqBtn'); btn.disabled = true; const old = btn.textContent; btn.textContent = 'Sende …';
+    try {
+      const r = await fetch('/api/reklamationen/code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      if (r.ok) {
+        pubEmail = email;
+        $('codeEmailLabel').textContent = email;
+        resetPubForm();
+        gateStep('code2');
+        showGateMsg('codeReqMsg', 'Code per E-Mail gesendet (gültig 10 Min).', 'ok');
+      } else if (r.status === 403) {
+        showGateMsg('codeReqMsg', 'Diese E-Mail ist nicht im Verzeichnis. Bitte mit Konto anmelden oder die Verwaltung kontaktieren.', 'err');
+      } else if (r.status === 429) {
+        showGateMsg('codeReqMsg', 'Zu viele Anfragen, bitte später erneut versuchen.', 'warn');
+      } else {
+        let msg = 'Fehler (HTTP ' + r.status + ').';
+        try { const j = await r.json(); if (j && j.error) msg = j.error; } catch {}
+        showGateMsg('codeReqMsg', msg, 'err');
+      }
+    } catch (e) {
+      showGateMsg('codeReqMsg', 'Netzwerkfehler — bitte erneut versuchen.', 'err');
+    } finally {
+      btn.disabled = false; btn.textContent = old;
+    }
+  }
+
+  // Schritt 2 — oeffentlich melden (PLAIN fetch, keine Offline-Queue).
+  async function onPubSubmit(ev) {
+    ev.preventDefault();
+    $('pubFormMsg').classList.add('hidden');
+
+    const kategorie = $('pubKategorie').value;
+    const beschreibung = $('pubBeschreibung').value.trim();
+    const stwegRaw = $('pubStweg').value;
+    const stweg = stwegRaw === '' ? null : parseInt(stwegRaw, 10);
+    const code = $('pubCode').value.trim();
+
+    if (!kategorie) { showGateMsg('pubFormMsg', 'Bitte eine Kategorie wählen.', 'err'); return; }
+    if (!beschreibung) { showGateMsg('pubFormMsg', 'Bitte eine Beschreibung eingeben.', 'err'); return; }
+    if (!code) { showGateMsg('pubFormMsg', 'Bitte den Code aus der E-Mail eingeben.', 'err'); return; }
+
+    const payload = { email: pubEmail, code, kategorie, beschreibung, stweg };
+    if (pubFotoDataUrl) payload.foto_base64 = pubFotoDataUrl;
+
+    const btn = $('pubSubmitBtn'); btn.disabled = true; const old = btn.textContent; btn.textContent = 'Sende …';
+    try {
+      const r = await fetch('/api/reklamationen/oeffentlich', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (r.ok) {
+        const j = await r.json().catch(() => ({}));
+        const id = j.reklamation && j.reklamation.id;
+        $('successText').textContent = id
+          ? `Deine Meldung #${id} ist eingegangen, die Technik kümmert sich darum.`
+          : 'Deine Meldung ist eingegangen, die Technik kümmert sich darum.';
+        gateStep('success');
+      } else if (r.status === 429) {
+        showGateMsg('pubFormMsg', 'Zu viele Anfragen, bitte später erneut versuchen.', 'warn');
+      } else {
+        // 400: Fehlertext aus error. Bei Code-Problemen Weg zurück zu Schritt 1 anbieten.
+        let msg = 'Fehler (HTTP ' + r.status + ').';
+        try { const j = await r.json(); if (j && j.error) msg = j.error; } catch {}
+        const codeProblem = /code/i.test(msg);
+        if (codeProblem) {
+          showGateMsg('pubFormMsg', msg + ' Bitte neuen Code anfordern.', 'err');
+        } else {
+          showGateMsg('pubFormMsg', msg, 'err');
+        }
+      }
+    } catch (e) {
+      showGateMsg('pubFormMsg', 'Netzwerkfehler — bitte erneut versuchen.', 'err');
+    } finally {
+      btn.disabled = false; btn.textContent = old;
+    }
+  }
+
+  // Statisches Wiring fuer den oeffentlichen Pfad (einmalig).
+  function wireGate() {
+    // Auswahl-Gate
+    $('gateLoginBtn').addEventListener('click', () => AuthentikAuth.login());
+    $('gateCodeBtn').addEventListener('click', () => { $('codeReqMsg').classList.add('hidden'); gateStep('code1'); });
+
+    // "Zurueck" → immer zur Auswahl
+    document.querySelectorAll('.gate-back').forEach(b => b.addEventListener('click', () => gateStep('choice')));
+
+    // Schritt 1
+    $('codeReqForm').addEventListener('submit', onCodeRequest);
+
+    // Schritt 2
+    $('pubForm').addEventListener('submit', onPubSubmit);
+    $('codeOtherEmail').addEventListener('click', () => { $('codeReqMsg').classList.add('hidden'); gateStep('code1'); });
+
+    // Foto (eigene Aufnahme, gleiche compressImage()-Pipeline)
+    $('pubFotoBtn').addEventListener('click', () => $('pubFoto').click());
+    $('pubFoto').addEventListener('change', async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      $('pubFotoBtn').textContent = 'Bild wird verarbeitet …';
+      try {
+        pubFotoDataUrl = await compressImage(file);
+        $('pubFotoImg').src = pubFotoDataUrl;
+        $('pubFotoInfo').textContent = '≈ ' + Math.round(dataUrlBytes(pubFotoDataUrl) / 1024) + ' KB';
+        $('pubFotoPreview').classList.remove('hidden');
+      } catch (err) {
+        pubFotoDataUrl = null;
+        alert('Foto-Fehler: ' + err.message);
+      } finally {
+        $('pubFotoBtn').textContent = '📷 Foto aufnehmen / auswählen';
+        $('pubFoto').value = '';
+      }
+    });
+    $('pubFotoRemove').addEventListener('click', () => {
+      pubFotoDataUrl = null;
+      $('pubFotoPreview').classList.add('hidden');
+      $('pubFotoImg').src = '';
+    });
+
+    // Erfolg → weitere Meldung (zurueck zu Schritt 1, neuer Code noetig)
+    $('successAgainBtn').addEventListener('click', () => { $('codeReqMsg').classList.add('hidden'); gateStep('code1'); });
+
+    buildPubCategories();
+    buildPubStwegSelect();
   }
 
   // ---------- Event-Wiring (statisch, einmalig) ----------
@@ -692,6 +1003,7 @@
   async function main() {
     buildCategories();
     wireEvents();
+    wireGate();
     wireInstallBanner();
     updateNetBadge();
 
@@ -700,13 +1012,15 @@
       navigator.serviceWorker.register('/reparatur/sw.js', { scope: '/reparatur/' }).catch(() => {});
     }
 
-    // Login-Gate
+    // Gate selbst steuern: KEIN Zwangslogin. Eingeloggt → voller App-Flow,
+    // sonst → Auswahl-Gate (Konto-Login ODER E-Mail-Code).
     currentUser = await AuthentikAuth.init({
-      requireAuth: true,
-      onLogout: () => showGate(),
+      requireAuth: false,
+      onLogout: () => showGate('choice'),
     });
-    if (!currentUser) { showGate(); return; }
+    if (!currentUser) { showGate('choice'); return; }
 
+    // ── Eingeloggter Flow (unverändert) ──
     buildStwegSelect();
     showApp();
     switchTab('melden');
