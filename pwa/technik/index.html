@@ -176,6 +176,8 @@
   let currentUser = null;
   let handwerker = [];        // [{id, firma, kategorie, ...}]
   let handwerkerLoaded = false;
+  let technikMitglieder = []; // [{name, email}]
+  let technikMitgliederLoaded = false;
 
   // ---------- Zugangsprüfung: Technik-Gruppe ODER isAdmin ----------
   function hasTechnikAccess(user) {
@@ -217,12 +219,33 @@
     return `<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full ${s.c}">${esc(s.l)}</span>`;
   }
 
-  function handwerkerOptions(selectedId) {
-    const opts = ['<option value="">— Handwerker zuweisen —</option>'];
-    for (const h of handwerker) {
-      const label = [h.firma, h.kategorie].filter(Boolean).join(' · ');
-      const sel = String(h.id) === String(selectedId) ? ' selected' : '';
-      opts.push(`<option value="${esc(h.id)}"${sel}>${esc(label || ('#' + h.id))}</option>`);
+  // Kombiniertes Zuweisungs-Dropdown: Technik-Team (zugewiesen_an=Name)
+  // ODER externer Handwerker (handwerker_id). Vorauswahl: zugewiesen_an > handwerker_id.
+  function assignOptions(r) {
+    const assignedName = r.zugewiesen_an ? String(r.zugewiesen_an) : null;
+    const hwId = r.handwerker_id;
+    const hasTech = assignedName != null && assignedName !== '';
+    const opts = [`<option value=""${hasTech || hwId ? '' : ' selected'}>— nicht zugewiesen —</option>`];
+
+    if (technikMitglieder.length) {
+      opts.push('<optgroup label="Technik-Team">');
+      for (const m of technikMitglieder) {
+        const name = String(m.name || '').trim();
+        if (!name) continue;
+        const sel = hasTech && name === assignedName ? ' selected' : '';
+        opts.push(`<option value="tech:${esc(name)}"${sel}>${esc(name)}</option>`);
+      }
+      opts.push('</optgroup>');
+    }
+
+    if (handwerker.length) {
+      opts.push('<optgroup label="Handwerker">');
+      for (const h of handwerker) {
+        const label = [h.firma, h.kategorie].filter(Boolean).join(' · ');
+        const sel = !hasTech && String(h.id) === String(hwId) ? ' selected' : '';
+        opts.push(`<option value="hw:${esc(h.id)}"${sel}>${esc(label || ('#' + h.id))}</option>`);
+      }
+      opts.push('</optgroup>');
     }
     return opts.join('');
   }
@@ -254,7 +277,7 @@
         <div class="mt-3">
           <select data-act="assign" data-id="${esc(r.id)}"
             class="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm bg-white focus:ring-2 focus:ring-sky-500 outline-none">
-            ${handwerkerOptions(r.handwerker_id)}
+            ${assignOptions(r)}
           </select>
         </div>
 
@@ -291,10 +314,23 @@
     } catch { /* Zuweisung dann ohne Liste */ }
   }
 
+  async function loadTechnikMitglieder() {
+    if (technikMitgliederLoaded) return;
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/technik/mitglieder', { cache: 'no-store' });
+      if (r.ok) {
+        const data = await r.json();
+        technikMitglieder = Array.isArray(data.mitglieder) ? data.mitglieder : [];
+        technikMitgliederLoaded = true;
+      }
+      // 403/Fehler: einfach ohne Technik-Optgroup weiter (kein Throw)
+    } catch { /* Zuweisung dann ohne Technik-Team */ }
+  }
+
   async function loadTriage() {
     const msg = $('triageMsg'); const list = $('triageList');
     msg.classList.remove('hidden'); msg.textContent = 'Lade …'; list.innerHTML = '';
-    await loadHandwerker();
+    await Promise.all([loadHandwerker(), loadTechnikMitglieder()]);
     try {
       const r = await AuthentikAuth.apiFetch('/api/reklamationen?status=offen', { cache: 'no-store' });
       if (r.status === 403) { msg.textContent = 'Keine Berechtigung (fehlende „reklamationen"-Permission).'; return; }
@@ -386,11 +422,28 @@
       const sel = ev.target.closest('[data-act="assign"]');
       if (!sel) return;
       const id = sel.dataset.id;
-      const val = sel.value === '' ? null : parseInt(sel.value, 10);
+      const val = sel.value || '';
+      let body, okMsg;
+      if (val === '') {
+        // nicht zugewiesen → beide Felder leeren
+        body = { handwerker_id: null, zugewiesen_an: null };
+        okMsg = '✓ Zuweisung entfernt';
+      } else if (val.startsWith('tech:')) {
+        // Technik-Mitglied → Name in zugewiesen_an, Handwerker raus
+        const name = val.slice(5);
+        body = { zugewiesen_an: name, handwerker_id: null };
+        okMsg = '✓ Zugewiesen an ' + name;
+      } else if (val.startsWith('hw:')) {
+        // externer Handwerker → handwerker_id, freie Zuweisung raus
+        const hwId = parseInt(val.slice(3), 10);
+        body = { handwerker_id: Number.isFinite(hwId) ? hwId : null, zugewiesen_an: null };
+        okMsg = '✓ Handwerker zugewiesen';
+      } else {
+        return;
+      }
       try {
-        // Zuweisung: handwerker_id setzen; bei Zuweisung optional auf weitergeleitet
-        await putRekl(id, { handwerker_id: val });
-        rowMsg(id, val ? '✓ Handwerker zugewiesen' : '✓ Zuweisung entfernt', true);
+        await putRekl(id, body);
+        rowMsg(id, okMsg, true);
       } catch (e) { rowMsg(id, 'Fehler: ' + e.message, false); }
     });
   }
