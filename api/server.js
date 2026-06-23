@@ -4247,7 +4247,12 @@ async function pollZevArchive() {
           if (match?.bewohner_email && pdf) {
             const stwegHost = match.stweg === 8 ? 'meg' : ('stweg' + match.stweg);
             try {
-              await loggedSendMail({
+              await sendTemplated('zev-rechnung-bewohner', {
+                bewohner_name: match.bewohner_name || '',
+                zeitraum_von: inv.zeitraum_von || '', zeitraum_bis: inv.zeitraum_bis || '',
+                betrag_text: inv.betrag_chf != null ? `${inv.betrag_chf.toFixed(2)} CHF` : '',
+                stweg_host: stwegHost,
+              }, {
                 from: 'STWEG-Kooperation Rosenweg <zev@rosenweg9.ch>',
                 to: match.bewohner_email,
                 subject: 'Neue Stromabrechnung (ZEV)' + (inv.zeitraum_von ? ` ${inv.zeitraum_von} – ${inv.zeitraum_bis}` : ''),
@@ -4261,7 +4266,7 @@ async function pollZevArchive() {
                   + `Bei Fragen zur Abrechnung finden Sie die Kontaktdaten auf der Rechnung.\n\n`
                   + `Freundliche Gruesse\nSTWEG-Kooperation Rosenweg`,
                 attachments: [{ filename: pdf.filename || 'Stromabrechnung.pdf', content: pdf.content }],
-              }, 'zev-rechnung-bewohner');
+              });
             } catch (e) { console.error('[ZEV-Archiv] Re-Mail an Bewohner fehlgeschlagen:', e.message); }
           }
           stored++;
@@ -5091,7 +5096,12 @@ async function runAuszahlungReminderDaily() {
         const betrag = Number(a.betrag_chf).toFixed(2);
         const to = (verw && verw.mailTo.length > 0) ? verw.mailTo.join(', ') : a.bearbeitet_von || a.user_email;
         const ausschussCc = [a.user_email, a.bearbeitet_von].filter((v, i, ar) => v && ar.indexOf(v) === i);
-        await loggedSendMail({
+        await sendTemplated('auslage-auszahlung-reminder', {
+          tage, stweg_label: stwegLabel, betrag_chf: Number(a.betrag_chf), auslage_id: a.id,
+          user_name: a.user_name, user_email: a.user_email, beschreibung: a.beschreibung,
+          iban: a.iban || '— nicht angegeben —',
+          genehmigt_am: new Date(a.bearbeitet_am).toLocaleDateString('de-CH'), site_url: SITE_URL,
+        }, {
           from: MAIL_FROM,
           to,
           cc: ausschussCc.join(', '),
@@ -5107,7 +5117,7 @@ async function runAuszahlungReminderDaily() {
             + `Genehmigt am:    ${new Date(a.bearbeitet_am).toLocaleDateString('de-CH')} (vor ${tage} Tagen)\n\n`
             + `Bitte Auszahlung prüfen / durchfuehren und im System als "ausbezahlt" markieren:\n${SITE_URL}/auslagen.html\n\n`
             + `(Diese Erinnerung wird alle 14 Tage automatisch wiederholt, bis die Auslage als ausbezahlt markiert ist.)`,
-        }, 'auslage-auszahlung-reminder');
+        });
         // WhatsApp-Push an Eigentümer + bearbeitet_von (Approver) bei Opt-In
         pushWhatsappBroadcast({
           emails: ausschussCc, sourceType: 'auslage-auszahlung-reminder', sourceId: a.id,
@@ -10448,7 +10458,12 @@ async function enqueueVerwaltungMail({
     if (recipients.length > 0) {
       const pendingCount = await pool.query(`SELECT COUNT(*) AS cnt FROM verwaltung_mail_queue WHERE status = 'pending'`);
       const cnt = pendingCount.rows[0].cnt;
-      await loggedSendMail({
+      await sendTemplated('verwaltung-mail-pending', {
+        betreff: subject, betreff_kurz: subject.slice(0, 80),
+        quelle: `${source_type}${source_id ? ' #' + source_id : ''}`,
+        an: toStr, cc: ccStr || '', eingestellt_von: createdBy || 'system',
+        pending_count: cnt, mehrere: cnt !== '1', site_url: SITE_URL,
+      }, {
         from: MAIL_FROM,
         to: recipients.join(', '),
         subject: `Verwaltungs-Mail wartet auf Freigabe: ${subject.slice(0, 80)}`,
@@ -10461,7 +10476,7 @@ async function enqueueVerwaltungMail({
           + `Eingestellt von: ${createdBy || 'system'}\n\n`
           + `Aktuell ${cnt} Mail${cnt === '1' ? '' : 's'} pending.\n\n`
           + `Zur Freigabe / Bearbeitung / Ablehnung:\n${SITE_URL}/verwaltung-mail-outbox.html`,
-      }, 'verwaltung-mail-pending');
+      });
       // WhatsApp-Push an Approver (kuerzer)
       pushWhatsappBroadcast({
         emails: recipients, sourceType: 'verwaltung-mail-pending', sourceId: queueId,
@@ -10686,7 +10701,15 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
       // C1-Fix: nur tracken wenn Mail wirklich raus ist — sonst weiss der
       // Eigentümer nicht, dass der Versand fehlgeschlagen ist.
       try {
-        await loggedSendMail({
+        await sendTemplated('auslage-auszahlung-ausschuss-fallback', {
+          subject_prefix: subjectPrefix,
+          stweg_label: stwegLabel,
+          fallback_ausschuss: verw.fallback === 'ausschuss',
+          auslage: { ...auslage, betrag_chf: Number(auslage.betrag_chf) },
+          projekt: auslage.projekt_slug ? { slug: auslage.projekt_slug, title: auslage.projekt_title || auslage.projekt_slug } : null,
+          datum, freigeber: freigebender, freigabe_am: freigabeAm,
+          has_attachment: hasAttachment, ausschuss_email: ausschussEmail, site_url: SITE_URL,
+        }, {
           from: MAIL_FROM,
           to: verw.mailTo.join(', '),
           cc: [auslage.user_email].filter(v => v).join(', '),
@@ -10694,7 +10717,7 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
           subject,
           text,
           attachments: liveAtt,
-        }, 'auslage-auszahlung-ausschuss-fallback');
+        });
       } catch (e) {
         console.error('[auslagen] Ausschuss-Direktversand Fehler:', e.message);
         return { ok: false, reason: 'Mail-Versand an Ausschuss-Fallback fehlgeschlagen: ' + e.message, fallback: 'ausschuss', queued: false };
@@ -11210,14 +11233,17 @@ app.post('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'),
         for (const r of ausschussRes.rows) if (r.email) adminEmails.push(r.email);
       }
       if (adminEmails.length > 0) {
-        await loggedSendMail({
+        await sendTemplated('auslage-neu', {
+          user_name: userName, user_email: userEmail, stweg_label: stwegLabel,
+          betrag_chf: betrag, datum, kategorie: kat || '-', beschreibung, site_url: SITE_URL,
+        }, {
           from: MAIL_FROM,
           to: adminEmails.join(', '),
           subject: `Neue Auslage von ${userName} (${stwegLabel}, CHF ${betrag.toFixed(2)})`,
           text: `${userName} (${userEmail}) hat eine Auslage zur Prüfung eingereicht.\n\n`
             + `STWEG: ${stwegLabel}\nDatum: ${datum}\nKategorie: ${kat || '-'}\nBetrag: CHF ${betrag.toFixed(2)}\n`
             + `Beschreibung: ${beschreibung}\n\nZum Prüfen: ${SITE_URL}/auslagen.html`,
-        }, 'auslage-neu');
+        });
         // WhatsApp-Push an Approver mit Opt-In
         pushWhatsappBroadcast({
           emails: adminEmails, sourceType: 'auslage-neu', sourceId: result.rows[0].id,
@@ -11333,7 +11359,11 @@ app.put('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'read
         // Eigentümer-Bestätigung "erhalten" → keine Mail an sich selbst
         const skipOwnerMail = (req.body.status === 'ausbezahlt' && isOwner && !canReview);
         if (!skipOwnerMail) {
-          await loggedSendMail({
+          await sendTemplated('auslage-status', {
+            user_name: row.user_name, datum: row.datum, betrag_chf: Number(row.betrag_chf),
+            label, beschreibung_kurz: row.beschreibung.slice(0, 60),
+            bemerkung_ausschuss: req.body.bemerkung_ausschuss || '', site_url: SITE_URL,
+          }, {
             from: MAIL_FROM,
             to: row.user_email,
             subject: `Auslage ${label}: CHF ${Number(row.betrag_chf).toFixed(2)} (${row.beschreibung.slice(0, 60)})`,
@@ -11341,7 +11371,7 @@ app.put('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'read
               + `deine Auslage vom ${row.datum} über CHF ${Number(row.betrag_chf).toFixed(2)} wurde ${label}.\n`
               + (req.body.bemerkung_ausschuss ? `\nBemerkung Ausschuss: ${req.body.bemerkung_ausschuss}\n` : '')
               + `\nDetails: ${SITE_URL}/auslagen.html`,
-          }, 'auslage-status');
+          });
           // WhatsApp-Push an Eigentümer
           const emoji = req.body.status === 'genehmigt' ? '✅' : req.body.status === 'ausbezahlt' ? '💰' : req.body.status === 'abgelehnt' ? '❌' : '🔄';
           pushWhatsappIfOptIn({
@@ -12375,6 +12405,233 @@ async function findMailTemplate(sourceType, empfaengerKategorie) {
   return r.rows[0] || null;
 }
 
+// Versendet eine Mail ueber das Template-System: existiert ein aktives Template fuer den
+// Trigger (= source_type) [+ optional context.empfaenger_kategorie], wird Subject/Body daraus
+// gerendert; sonst der mitgegebene Inline-Fallback (mailOpts.subject/text). Loggt wie gehabt.
+async function sendTemplated(trigger, context, mailOpts, extra = {}) {
+  let subject = mailOpts.subject, text = mailOpts.text;
+  try {
+    const tpl = await findMailTemplate(trigger, (context && context.empfaenger_kategorie) || null);
+    if (tpl) {
+      if (tpl.subject_template) subject = renderTemplate(tpl.subject_template, context || {});
+      if (tpl.body_template) text = renderTemplate(tpl.body_template, context || {});
+    }
+  } catch (e) { console.error('[sendTemplated]', trigger, e.message); }
+  return loggedSendMail({ ...mailOpts, subject, text }, trigger, extra);
+}
+
+// Default-Templates -> beim Start in mail_templates geseedet (nur falls noch nicht vorhanden),
+// damit sie im Editor erscheinen + bearbeitbar sind. Variablen: {{var}}, {{helper var}}
+// (helper: chf/date/datetime/upper/lower), {{#if var}}…{{/if}}. Wird von der Migration befuellt.
+const MAIL_TEMPLATE_DEFAULTS = [
+  {
+    source_type: 'auslage-neu', empfaenger_kategorie: null,
+    subject_template: 'Neue Auslage von {{user_name}} ({{stweg_label}}, {{chf betrag_chf}})',
+    body_template:
+      '{{user_name}} ({{user_email}}) hat eine Auslage zur Prüfung eingereicht.\n\n'
+      + 'STWEG: {{stweg_label}}\nDatum: {{datum}}\nKategorie: {{kategorie}}\nBetrag: {{chf betrag_chf}}\n'
+      + 'Beschreibung: {{beschreibung}}\n\nZum Prüfen: {{site_url}}/auslagen.html',
+    notiz: 'An Ausschuss bei neuer Auslage. Variablen: user_name, user_email, stweg_label, betrag_chf, datum, kategorie, beschreibung, site_url',
+  },
+  {
+    source_type: 'auslage-status', empfaenger_kategorie: null,
+    subject_template: 'Auslage {{label}}: {{chf betrag_chf}} ({{beschreibung_kurz}})',
+    body_template:
+      'Hallo {{user_name}},\n\n'
+      + 'deine Auslage vom {{datum}} über {{chf betrag_chf}} wurde {{label}}.\n'
+      + '{{#if bemerkung_ausschuss}}\nBemerkung Ausschuss: {{bemerkung_ausschuss}}\n{{/if}}'
+      + '\nDetails: {{site_url}}/auslagen.html',
+    notiz: 'An Eigentümer bei Status-Wechsel. Variablen: user_name, datum, betrag_chf, label, beschreibung_kurz, bemerkung_ausschuss, site_url',
+  },
+  {
+    source_type: 'auslage-auszahlung-reminder', empfaenger_kategorie: null,
+    subject_template: '⏰ Erinnerung: Auszahlung offen seit {{tage}} Tagen — {{stweg_label}}, {{chf betrag_chf}} (Auslage {{auslage_id}})',
+    body_template:
+      'Diese Auslage wurde vor {{tage}} Tagen genehmigt, aber noch nicht als ausbezahlt markiert.\n\n'
+      + '── Auslage {{auslage_id}} ──\n'
+      + 'STWEG:           {{stweg_label}}\n'
+      + 'Eingereicht von: {{user_name}} <{{user_email}}>\n'
+      + 'Beschreibung:    {{beschreibung}}\n'
+      + 'Betrag:          {{chf betrag_chf}}\n'
+      + 'IBAN:            {{iban}}\n'
+      + 'Genehmigt am:    {{genehmigt_am}} (vor {{tage}} Tagen)\n\n'
+      + 'Bitte Auszahlung prüfen / durchfuehren und im System als "ausbezahlt" markieren:\n{{site_url}}/auslagen.html\n\n'
+      + '(Diese Erinnerung wird alle 14 Tage automatisch wiederholt, bis die Auslage als ausbezahlt markiert ist.)',
+    notiz: 'Reminder an Verwaltung für offene Auszahlung. Variablen: tage, stweg_label, betrag_chf, auslage_id, user_name, user_email, beschreibung, iban, genehmigt_am, site_url',
+  },
+  {
+    source_type: 'auslage-auszahlung-ausschuss-fallback', empfaenger_kategorie: null,
+    subject_template: '{{subject_prefix}}Auszahlungsauftrag {{stweg_label}}: {{auslage.user_name}} – {{chf auslage.betrag_chf}} (Auslage {{auslage.id}})',
+    body_template:
+      '{{#if fallback_ausschuss}}ACHTUNG: Für {{stweg_label}} ist KEINE aktive Verwaltung mit E-Mail-Adresse hinterlegt.\n'
+      + 'Diese Auszahlungs-Aufforderung geht deshalb ersatzweise an den Ausschuss.\n'
+      + 'Bitte unter {{site_url}}/verwaltung-admin.html die Verwaltung pflegen, danach geht die Mail kuenftig automatisch dorthin.\n'
+      + '\n────────────────────────────────────────\n{{/if}}'
+      + 'Sehr geehrte Damen und Herren\n\n'
+      + 'der Ausschuss hat folgende Auslage geprueft und zur Auszahlung freigegeben.\n'
+      + 'Bitte ueberweisen Sie den Betrag an die unten angegebene IBAN.\n\n'
+      + '── Auftrag ──\n'
+      + 'STWEG:           {{stweg_label}}\n'
+      + 'Auslage-Nr:      {{auslage.id}}\n'
+      + '{{#if projekt}}Projekt:         {{projekt.title}}\n{{/if}}'
+      + 'Eingereicht von: {{auslage.user_name}} <{{auslage.user_email}}>\n'
+      + 'Beleg-Datum:     {{datum}}\n'
+      + 'Kategorie:       {{auslage.kategorie}}\n'
+      + 'Betrag:          {{chf auslage.betrag_chf}}\n'
+      + 'IBAN:            {{auslage.iban}}\n\n'
+      + '── Beschreibung ──\n{{auslage.beschreibung}}\n\n'
+      + '{{#if auslage.bemerkung_eigentuemer}}── Bemerkung Eigentümer ──\n{{auslage.bemerkung_eigentuemer}}\n\n{{/if}}'
+      + '{{#if auslage.bemerkung_ausschuss}}── Bemerkung Ausschuss ──\n{{auslage.bemerkung_ausschuss}}\n\n{{/if}}'
+      + '── Freigabe ──\n'
+      + 'Geprueft und freigegeben durch: {{freigeber}} am {{freigabe_am}}\n\n'
+      + '{{#if has_attachment}}Der Beleg ist als Anhang beigefuegt.{{/if}}\n\n'
+      + 'Nach erfolgter Überweisung bitte als Bestätigung kurze Rueckmeldung an {{ausschuss_email}}, der Eigentümer markiert die Auslage selbst als "erhalten" auf:\n'
+      + '{{site_url}}/auslagen.html\n\n'
+      + 'Freundliche Gruesse\nSTWEG-Kooperation Rosenweg',
+    notiz: 'Direktversand an Ausschuss wenn keine Verwaltung hinterlegt. Variablen: subject_prefix, stweg_label, fallback_ausschuss, auslage.{id,user_name,user_email,kategorie,betrag_chf,iban,beschreibung,bemerkung_eigentuemer,bemerkung_ausschuss}, projekt.title, datum, freigeber, freigabe_am, has_attachment, ausschuss_email, site_url',
+  },
+  {
+    source_type: 'reklamation-status', empfaenger_kategorie: null,
+    subject_template: 'Deine Reklamation #{{reklamation_id}} wurde {{label}}',
+    body_template:
+      'Hallo {{person_name}},\n\ndeine Reklamation "{{beschreibung_kurz}}" wurde {{label}}.\n'
+      + '{{#if notiz}}\nBemerkung: {{notiz}}\n{{/if}}'
+      + '\nDetails: {{site_url}}/reklamationen.html',
+    notiz: 'An Melder bei Reklamations-Status-Wechsel. Variablen: person_name, reklamation_id, label, beschreibung_kurz, notiz, site_url',
+  },
+  {
+    source_type: 'zev-rechnung-bewohner', empfaenger_kategorie: null,
+    subject_template: 'Neue Stromabrechnung (ZEV){{#if zeitraum_von}} {{zeitraum_von}} – {{zeitraum_bis}}{{/if}}',
+    body_template:
+      'Guten Tag{{#if bewohner_name}} {{bewohner_name}}{{/if}}\n\n'
+      + 'im Anhang finden Sie Ihre aktuelle Stromabrechnung (ZEV).\n'
+      + '{{#if zeitraum_von}}Abrechnungszeitraum: {{zeitraum_von}} – {{zeitraum_bis}}\n{{/if}}'
+      + '{{#if betrag_text}}Rechnungsbetrag: {{betrag_text}}\n{{/if}}'
+      + '\nAlle Ihre Abrechnungen koennen Sie jederzeit auch online einsehen:\n'
+      + 'https://{{stweg_host}}.rosenweg4303.ch/pages/zev-meine-rechnungen.html\n\n'
+      + 'Bei Fragen zur Abrechnung finden Sie die Kontaktdaten auf der Rechnung.\n\n'
+      + 'Freundliche Gruesse\nSTWEG-Kooperation Rosenweg',
+    notiz: 'Re-Mail der ZEV-Stromabrechnung an Bewohner. Variablen: bewohner_name, zeitraum_von, zeitraum_bis, betrag_text, stweg_host',
+  },
+  {
+    source_type: 'verwaltung-mail-pending', empfaenger_kategorie: null,
+    subject_template: 'Verwaltungs-Mail wartet auf Freigabe: {{betreff_kurz}}',
+    body_template:
+      'Eine ausgehende Mail an die Verwaltung wartet auf deine Freigabe.\n\n'
+      + 'Quelle:   {{quelle}}\n'
+      + 'An:       {{an}}\n'
+      + '{{#if cc}}CC:       {{cc}}\n{{/if}}'
+      + 'Betreff:  {{betreff}}\n'
+      + 'Eingestellt von: {{eingestellt_von}}\n\n'
+      + 'Aktuell {{pending_count}} Mail{{#if mehrere}}s{{/if}} pending.\n\n'
+      + 'Zur Freigabe / Bearbeitung / Ablehnung:\n{{site_url}}/verwaltung-mail-outbox.html',
+    notiz: 'An Technik/Präsident wenn Verwaltungs-Mail freigabe-pending. Variablen: betreff_kurz, betreff, quelle, an, cc, eingestellt_von, pending_count, mehrere, site_url',
+  },
+  {
+    source_type: 'verwaltung-mail-abgelehnt', empfaenger_kategorie: null,
+    subject_template: 'Auszahlungs-Mail abgelehnt: {{betreff_kurz}}',
+    body_template:
+      'Die Auszahlungs-Mail an die Verwaltung wurde von {{abgelehnt_von}} abgelehnt.\n\n'
+      + 'Grund: {{grund}}\n\n'
+      + 'Auslage: {{site_url}}/auslagen.html\n'
+      + 'Mail-Queue: {{site_url}}/verwaltung-mail-outbox.html',
+    notiz: 'An Eigentümer/Freigeber wenn Auszahlungs-Mail abgelehnt. Variablen: abgelehnt_von, grund, betreff_kurz, site_url',
+  },
+  {
+    source_type: 'maint-notify-flush', empfaenger_kategorie: null,
+    subject_template: '{{#if mehrere}}[Rosenweg ISP] Sammelmeldung: {{anzahl}} Wartungen{{/if}}{{#if einzel}}{{einzel_subject}}{{/if}}',
+    body_template:
+      '{{#if mehrere}}Hallo,\n\nmehrere Wartungs-Ereignisse wurden im selben Zeitraum gemeldet — hier die Sammelmeldung:\n\n{{/if}}'
+      + '{{lines_joined}}',
+    notiz: 'ISP-Wartungs-Sammelmeldung per Mail. Variablen: mehrere, einzel, anzahl, einzel_subject, lines_joined',
+  },
+  // Seed-only (Versand laeuft bereits ueber findMailTemplate im Code, hier nur Default fuer Editor):
+  {
+    source_type: 'auslage-auszahlung', empfaenger_kategorie: 'verwaltung',
+    subject_template: 'Auszahlungsauftrag {{stweg_label}}: {{auslage.user_name}} – {{chf auslage.betrag_chf}} (Auslage {{auslage.id}})',
+    body_template:
+      'Sehr geehrte Damen und Herren\n\n'
+      + 'der Ausschuss hat folgende Auslage geprueft und zur Auszahlung freigegeben.\n'
+      + 'Bitte ueberweisen Sie den Betrag an die unten angegebene IBAN.\n\n'
+      + '── Auftrag ──\n'
+      + 'STWEG:           {{stweg_label}}\n'
+      + 'Auslage-Nr:      {{auslage.id}}\n'
+      + '{{#if projekt}}Projekt:         {{projekt.title}}\n{{/if}}'
+      + 'Eingereicht von: {{auslage.user_name}} <{{auslage.user_email}}>\n'
+      + 'Beleg-Datum:     {{datum}}\n'
+      + 'Kategorie:       {{auslage.kategorie}}\n'
+      + 'Betrag:          {{chf auslage.betrag_chf}}\n'
+      + 'IBAN:            {{auslage.iban}}\n\n'
+      + '── Beschreibung ──\n{{auslage.beschreibung}}\n\n'
+      + '{{#if auslage.bemerkung_eigentuemer}}── Bemerkung Eigentümer ──\n{{auslage.bemerkung_eigentuemer}}\n\n{{/if}}'
+      + '{{#if auslage.bemerkung_ausschuss}}── Bemerkung Ausschuss ──\n{{auslage.bemerkung_ausschuss}}\n\n{{/if}}'
+      + '── Freigabe ──\n'
+      + 'Geprueft und freigegeben durch: {{freigeber}} am {{freigabe_am}}\n\n'
+      + '{{#if has_attachment}}Der Beleg ist als Anhang beigefuegt.{{/if}}\n\n'
+      + 'Nach erfolgter Überweisung bitte als Bestätigung kurze Rueckmeldung an {{ausschuss_email}}, der Eigentümer markiert die Auslage selbst als "erhalten" auf:\n'
+      + '{{site_url}}/auslagen.html\n\n'
+      + 'Freundliche Gruesse\nSTWEG-Kooperation Rosenweg',
+    notiz: 'Auszahlungsauftrag an externe Verwaltung (Queue). Variablen: stweg_label, auslage.{id,user_name,user_email,kategorie,betrag_chf,iban,beschreibung,bemerkung_eigentuemer,bemerkung_ausschuss}, projekt.title, datum, freigeber, freigabe_am, has_attachment, ausschuss_email, site_url',
+  },
+  {
+    source_type: 'auslage-auszahlung-nachgereicht', empfaenger_kategorie: 'verwaltung',
+    subject_template: 'Auszahlungsauftrag {{stweg_label}}: {{auslage.user_name}} – {{chf auslage.betrag_chf}} (Auslage {{auslage.id}})',
+    body_template:
+      'HINWEIS: Diese Auslage wurde bereits am {{freigabe_am}} vom Ausschuss zur Auszahlung freigegeben,\n'
+      + 'als noch keine externe Verwaltung beauftragt war (Vakanz). Da Sie nun als zustaendige\n'
+      + 'Verwaltung wirksam sind, wird der Auftrag automatisch an Sie nachgereicht.\n'
+      + '\n────────────────────────────────────────\n'
+      + 'Sehr geehrte Damen und Herren\n\n'
+      + 'der Ausschuss hat folgende Auslage während der Vakanz-Phase geprueft und freigegeben.\n'
+      + 'Bitte ueberweisen Sie den Betrag an die unten angegebene IBAN.\n\n'
+      + '── Auftrag ──\n'
+      + 'STWEG:           {{stweg_label}}\n'
+      + 'Auslage-Nr:      {{auslage.id}}\n'
+      + '{{#if projekt}}Projekt:         {{projekt.title}}\n{{/if}}'
+      + 'Eingereicht von: {{auslage.user_name}} <{{auslage.user_email}}>\n'
+      + 'Beleg-Datum:     {{datum}}\n'
+      + 'Kategorie:       {{auslage.kategorie}}\n'
+      + 'Betrag:          {{chf auslage.betrag_chf}}\n'
+      + 'IBAN:            {{auslage.iban}}\n\n'
+      + '── Beschreibung ──\n{{auslage.beschreibung}}\n\n'
+      + '{{#if auslage.bemerkung_eigentuemer}}── Bemerkung Eigentümer ──\n{{auslage.bemerkung_eigentuemer}}\n\n{{/if}}'
+      + '{{#if auslage.bemerkung_ausschuss}}── Bemerkung Ausschuss ──\n{{auslage.bemerkung_ausschuss}}\n\n{{/if}}'
+      + '── Freigabe ──\n'
+      + 'Geprueft und freigegeben durch: {{freigeber}} am {{freigabe_am}}\n\n'
+      + '{{#if has_attachment}}Der Beleg ist als Anhang beigefuegt.{{/if}}\n\n'
+      + 'Nach erfolgter Überweisung bitte als Bestätigung kurze Rueckmeldung an {{ausschuss_email}}, der Eigentümer markiert die Auslage selbst als "erhalten" auf:\n'
+      + '{{site_url}}/auslagen.html\n\n'
+      + 'Freundliche Gruesse\nSTWEG-Kooperation Rosenweg',
+    notiz: 'Nachgereichter Auszahlungsauftrag nach Vakanz. Variablen wie auslage-auszahlung plus Nachreich-Hinweis.',
+  },
+  {
+    source_type: 'objekt-änderung', empfaenger_kategorie: 'verwaltung',
+    subject_template: 'Objektverwaltungs-Änderungen {{stweg_label}} ({{today_de}})',
+    body_template:
+      'Sehr geehrte Damen und Herren\n\n'
+      + 'folgende Änderungen wurden in der Objektverwaltung der STWEG-Kooperation\n'
+      + 'erfasst und sind für Ihre Unterlagen relevant:\n\n'
+      + '── Änderungen ({{stweg_label}}) ──\n'
+      + '{{erste_aenderung}}\n\n'
+      + 'Bitte aktualisieren Sie Ihre Stamm- und Kontaktdaten entsprechend.\n\n'
+      + 'Mit freundlichen Gruessen\nSTWEG-Kooperation Rosenweg',
+    notiz: 'Sammel-Mail Objektverwaltungs-Änderungen an Verwaltung. Variablen: stweg_label, today_de, erste_aenderung, site_url. Weitere Änderungen werden im Queue-Body angehängt.',
+  },
+];
+
+async function seedMailTemplates() {
+  for (const d of MAIL_TEMPLATE_DEFAULTS) {
+    try {
+      await pool.query(
+        `INSERT INTO mail_templates (source_type, empfaenger_kategorie, subject_template, body_template, notiz, aktiv)
+         SELECT $1,$2,$3,$4,$5,true
+          WHERE NOT EXISTS (SELECT 1 FROM mail_templates WHERE source_type = $1 AND empfaenger_kategorie IS NOT DISTINCT FROM $2)`,
+        [d.source_type, d.empfaenger_kategorie || null, d.subject_template, d.body_template, d.notiz || null]);
+    } catch (e) { console.error('[seedMailTemplates]', d.source_type, e.message); }
+  }
+}
+setTimeout(() => seedMailTemplates(), 20000);
+
 // CRUD für Templates (Technik/Präsident)
 app.get('/api/mail-templates', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
   try {
@@ -13370,7 +13627,10 @@ app.post('/api/verwaltung-mail-queue/:id/ablehnen', authMiddleware, requireTechn
         if (aR.rows.length > 0) {
           const a = aR.rows[0];
           const cc = [a.user_email, a.bearbeitet_von].filter(v => v).join(', ');
-          await loggedSendMail({
+          await sendTemplated('verwaltung-mail-abgelehnt', {
+            abgelehnt_von: req.user.email, grund,
+            betreff_kurz: row.subject.slice(0, 80), site_url: SITE_URL,
+          }, {
             from: MAIL_FROM,
             to: a.bearbeitet_von || a.user_email,
             cc,
@@ -13380,7 +13640,7 @@ app.post('/api/verwaltung-mail-queue/:id/ablehnen', authMiddleware, requireTechn
               + `Grund: ${grund}\n\n`
               + `Auslage: ${SITE_URL}/auslagen.html\n`
               + `Mail-Queue: ${SITE_URL}/verwaltung-mail-outbox.html`,
-          }, 'verwaltung-mail-abgelehnt');
+          });
           // WhatsApp an Eigentümer + Freigeber
           pushWhatsappBroadcast({
             emails: [a.user_email, a.bearbeitet_von].filter(v => v),
@@ -14915,13 +15175,17 @@ app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamation
           const labelMap = { weitergeleitet: 'an Handwerker weitergeleitet', erledigt: 'als erledigt markiert', abgewiesen: 'abgewiesen', offen: 'wieder geoeffnet' };
           const label = labelMap[b.status] || b.status;
           if (p.rows[0].email) {
-            await loggedSendMail({
+            await sendTemplated('reklamation-status', {
+              person_name: p.rows[0].name, reklamation_id: updated.id, label,
+              beschreibung_kurz: (updated.beschreibung || '').slice(0, 100),
+              notiz: b.notiz || '', site_url: SITE_URL,
+            }, {
               from: MAIL_FROM, to: p.rows[0].email,
               subject: `Deine Reklamation #${updated.id} wurde ${label}`,
               text: `Hallo ${p.rows[0].name},\n\ndeine Reklamation "${(updated.beschreibung || '').slice(0, 100)}" wurde ${label}.\n`
                 + (b.notiz ? `\nBemerkung: ${b.notiz}\n` : '')
                 + `\nDetails: ${SITE_URL}/reklamationen.html`,
-            }, 'reklamation-status');
+            });
           }
           const emoji = b.status === 'erledigt' ? '✅' : b.status === 'abgewiesen' ? '❌' : b.status === 'weitergeleitet' ? '➡️' : '🔄';
           pushWhatsappIfOptIn({
@@ -17433,9 +17697,13 @@ async function maintFlushNotifyPending() {
             ? `Hallo,\n\nmehrere Wartungs-Ereignisse wurden im selben Zeitraum gemeldet — hier die Sammelmeldung:\n\n`
             : '')
             + lines.join('\n\n------------------------------\n\n');
-          await loggedSendMail({
+          await sendTemplated('maint-notify-flush', {
+            mehrere: lines.length > 1, einzel: lines.length <= 1, anzahl: subjects.length,
+            einzel_subject: subjects[0] || '[Rosenweg ISP] Wartungs-Update',
+            lines_joined: lines.join('\n\n------------------------------\n\n'),
+          }, {
             from: MAIL_FROM, to: row.recipient, subject: subj, text,
-          }, 'maint-notify-flush');
+          });
           sendOk = true;
         }
       } catch (e) {
