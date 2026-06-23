@@ -15331,6 +15331,61 @@ app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamation
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ─── PWA Reparatur-Melder: Bewohner meldet einen Schaden -> reklamationen (Kanal 'web') ──
+const reklaWebRate = new Map(); // key -> [timestamps]
+app.post('/api/reklamationen', authMiddleware, async (req, res) => {
+  try {
+    const email = String(req.user?.email || '').toLowerCase();
+    const b = req.body || {};
+    const beschreibung = String(b.beschreibung || '').trim().slice(0, 4000);
+    if (!beschreibung) return res.status(400).json({ error: 'Beschreibung erforderlich' });
+    const kategorie = ['aufzug', 'heizung', 'wasser', 'tuer', 'reinigung', 'sonstige'].includes(b.kategorie) ? b.kategorie : 'sonstige';
+    const stweg = Number.isFinite(parseInt(b.stweg, 10)) ? parseInt(b.stweg, 10) : null;
+    const pr = await pool.query('SELECT id FROM personen WHERE LOWER(email) = $1 LIMIT 1', [email]);
+    const personId = pr.rows[0]?.id || null;
+    // Rate-Limit: max 5 Meldungen / 10 Min pro Person
+    const key = personId || email; const now = Date.now();
+    const arr = (reklaWebRate.get(key) || []).filter(t => now - t < 600000);
+    if (arr.length >= 5) return res.status(429).json({ error: 'Zu viele Meldungen — bitte später erneut.' });
+    arr.push(now); reklaWebRate.set(key, arr);
+    // Optionales Foto -> DOCS-Volume
+    let bildPfad = null;
+    if (b.foto_base64) {
+      try {
+        const m = String(b.foto_base64).match(/^data:image\/(\w+);base64,(.+)$/s);
+        const ext = (m ? m[1] : 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 4) || 'jpg';
+        const buf = Buffer.from(m ? m[2] : b.foto_base64, 'base64');
+        if (buf.length > 0 && buf.length <= 8 * 1024 * 1024) {
+          const folder = stweg ? ('stweg' + stweg) : 'allgemein';
+          const dir = pathModule.join(DOCS_PATH, folder, 'reklamationen');
+          await fs.mkdir(dir, { recursive: true });
+          const fname = `rekl-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+          await fs.writeFile(pathModule.join(dir, fname), buf);
+          bildPfad = pathModule.join(folder, 'reklamationen', fname);
+        }
+      } catch (e) { console.error('[reklamation-foto]', e.message); }
+    }
+    const r = await pool.query(
+      `INSERT INTO reklamationen (person_id, stweg, kategorie, beschreibung, bild_pfad, eingang_kanal, status)
+       VALUES ($1,$2,$3,$4,$5,'web','offen') RETURNING id, kategorie, beschreibung, status, created_at`,
+      [personId, stweg, kategorie, beschreibung, bildPfad]);
+    res.json({ ok: true, reklamation: r.rows[0] });
+  } catch (e) { console.error('[reklamation-web-post]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+// Eigene Meldungen für die PWA ("Meine Meldungen") — ohne reklamationen-Permission.
+app.get('/api/reklamationen/meine', authMiddleware, async (req, res) => {
+  try {
+    const email = String(req.user?.email || '').toLowerCase();
+    const r = await pool.query(
+      `SELECT id, kategorie, beschreibung, status, (bild_pfad IS NOT NULL) AS has_bild, created_at, erledigt_am, notiz
+         FROM reklamationen
+        WHERE person_id = (SELECT id FROM personen WHERE LOWER(email) = $1 LIMIT 1)
+        ORDER BY created_at DESC LIMIT 100`, [email]);
+    res.json({ reklamationen: r.rows });
+  } catch (e) { console.error('[reklamationen-meine]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
 // ─── ISP / Anschluss / VPN / Fix-IPs / Mailboxes ─────────────────────
 // Berechtigungs-Helper: nur technik/praesident sind voll-admin auf ISP.
 function ispIsAdmin(req) {
