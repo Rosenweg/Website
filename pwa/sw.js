@@ -16,7 +16,7 @@
  *  - Sonstige GETs: stale-while-revalidate.
  */
 
-const CACHE = 'rosenweg-launcher-v1';
+const CACHE = 'rosenweg-launcher-v2';
 
 // Launcher-App-Shell — nur das, was fuer den Offline-Start des Hubs noetig ist.
 const SHELL = [
