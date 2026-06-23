@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reklamationen — Rosenweg</title>
+    <link rel="icon" href="/logo-rosenweg.png" type="image/png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .s-offen { background:#fef3c7; color:#92400e; }
+        .s-weitergeleitet { background:#dbeafe; color:#1e40af; }
+        .s-erledigt { background:#d1fae5; color:#065f46; }
+        .s-abgewiesen { background:#fee2e2; color:#991b1b; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Navigation -->
+    <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+    <script src="/js/nav.js?v=2"></script>
+    <script>RosenwegNav.init({ active: 'reklamationen' });</script>
+
+    <!-- Header -->
+    <section class="bg-gradient-to-r from-rose-500 to-pink-600 text-white py-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-4xl font-bold mb-2">📝 Reklamationen</h1>
+                    <p class="text-xl opacity-90">Schadens- und Mängelmeldungen mit Status</p>
+                </div>
+                <div class="hidden md:block">
+                    <div class="bg-white bg-opacity-20 rounded-lg p-4 text-center">
+                        <svg class="h-16 w-16 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <main class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- Lade-/Auth-Gate -->
+        <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center">
+            <p class="text-gray-500">Lade …</p>
+        </div>
+
+        <!-- Fehler -->
+        <div id="error-box" class="hidden bg-red-50 border-l-4 border-red-500 p-6 rounded-lg">
+            <p class="font-semibold text-red-800 mb-1">⚠️ Konnte Reklamationen nicht laden</p>
+            <p id="error-msg" class="text-sm text-red-700"></p>
+        </div>
+
+        <!-- Inhalt -->
+        <div id="content" class="hidden space-y-8">
+            <p class="text-sm text-gray-600">
+                Hier sehen Sie die aktuellen Reklamationen Ihrer STWEG sowie übergreifende Meldungen — jeweils mit Bearbeitungsstatus. Aus Datenschutzgründen ohne Namen der meldenden Person.
+            </p>
+
+            <!-- Leerzustand -->
+            <div id="empty" class="hidden bg-white rounded-lg border p-8 text-center text-gray-500">
+                Aktuell keine Reklamationen.
+            </div>
+
+            <!-- Gruppen werden hier eingefügt -->
+            <div id="groups" class="space-y-8"></div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-gray-800 text-white py-8 mt-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <p>&copy; 2024 STWEG-Kooperation Rosenweg, Kaiseraugst</p>
+            <p class="text-sm text-gray-400 mt-2">Reklamationen-Übersicht</p>
+        </div>
+    </footer>
+
+    <script>
+    const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const fmtDt = s => s ? new Date(s).toLocaleString('de-CH') : '';
+
+    const STATUS_LABEL = {
+        offen: 'offen',
+        weitergeleitet: 'weitergeleitet',
+        erledigt: 'erledigt',
+        abgewiesen: 'abgewiesen',
+    };
+    const ACTIVE = new Set(['offen', 'weitergeleitet']);
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        const user = await AuthentikAuth.init({ requireAuth: true });
+        if (!user) return; // requireAuth leitet ggf. weiter
+        document.getElementById('auth-gate').classList.add('hidden');
+        await load();
+    });
+
+    async function load() {
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/reklamationen/uebersicht');
+            if (!r.ok) {
+                let m = 'HTTP ' + r.status;
+                if (r.status === 403) m = 'Keine Berechtigung (403).';
+                else { try { const j = await r.json(); if (j && j.error) m = j.error; } catch {} }
+                showError(m);
+                return;
+            }
+            const data = await r.json();
+            render(data.reklamationen || []);
+        } catch (e) {
+            showError(e.message || 'Netzwerkfehler');
+        }
+    }
+
+    function showError(msg) {
+        document.getElementById('auth-gate').classList.add('hidden');
+        document.getElementById('content').classList.add('hidden');
+        document.getElementById('error-msg').textContent = msg;
+        document.getElementById('error-box').classList.remove('hidden');
+    }
+
+    function statusBadge(status) {
+        const s = STATUS_LABEL[status] ? status : 'offen';
+        return `<span class="s-${esc(s)} text-xs font-medium px-2 py-0.5 rounded">${esc(STATUS_LABEL[s] || s)}</span>`;
+    }
+
+    function entryCard(r) {
+        const active = ACTIVE.has(r.status);
+        const inBearb = r.in_bearbeitung
+            ? '<span class="text-xs text-gray-500 inline-flex items-center gap-1">🔧 in Bearbeitung</span>'
+            : '';
+        const opacity = active ? '' : 'opacity-70';
+        return `
+        <div class="bg-white rounded-lg border p-4 ${opacity}">
+            <div class="flex items-start justify-between gap-3 mb-1">
+                <div class="min-w-0">
+                    ${r.kategorie ? `<span class="text-xs font-semibold uppercase tracking-wide text-gray-500">${esc(r.kategorie)}</span>` : ''}
+                </div>
+                <div class="flex items-center gap-2 shrink-0">${inBearb}${statusBadge(r.status)}</div>
+            </div>
+            <p class="text-sm text-gray-800 whitespace-pre-wrap break-words">${esc(r.beschreibung || '')}</p>
+            <p class="text-xs text-gray-400 mt-2">${esc(fmtDt(r.created_at))}${r.erledigt_am ? ' · erledigt: ' + esc(fmtDt(r.erledigt_am)) : ''}</p>
+        </div>`;
+    }
+
+    // Sortierung: aktive (offen/weitergeleitet) zuerst, dann nach Datum absteigend
+    function sortEntries(list) {
+        return list.slice().sort((a, b) => {
+            const aa = ACTIVE.has(a.status) ? 0 : 1;
+            const bb = ACTIVE.has(b.status) ? 0 : 1;
+            if (aa !== bb) return aa - bb;
+            return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+        });
+    }
+
+    function renderGroup(title, list) {
+        const sorted = sortEntries(list);
+        const active = sorted.filter(r => ACTIVE.has(r.status));
+        const archived = sorted.filter(r => !ACTIVE.has(r.status));
+
+        let html = `<section><h2 class="text-lg font-bold text-gray-900 mb-3">${esc(title)}</h2>`;
+        if (active.length === 0 && archived.length === 0) {
+            html += '<p class="text-sm text-gray-400">Keine Einträge.</p>';
+        } else {
+            html += `<div class="space-y-3">${active.map(entryCard).join('')}</div>`;
+            if (active.length === 0) {
+                html += '<p class="text-sm text-gray-400 mb-3">Keine aktiven Einträge.</p>';
+            }
+            if (archived.length > 0) {
+                html += `
+                <details class="mt-4">
+                    <summary class="cursor-pointer text-sm text-gray-500 hover:text-gray-700 select-none">📦 Archiv (${archived.length} erledigt/abgewiesen)</summary>
+                    <div class="space-y-3 mt-3">${archived.map(entryCard).join('')}</div>
+                </details>`;
+            }
+        }
+        html += '</section>';
+        return html;
+    }
+
+    function render(reklamationen) {
+        const content = document.getElementById('content');
+        const groupsEl = document.getElementById('groups');
+        const emptyEl = document.getElementById('empty');
+        content.classList.remove('hidden');
+
+        if (!reklamationen.length) {
+            emptyEl.classList.remove('hidden');
+            groupsEl.innerHTML = '';
+            return;
+        }
+        emptyEl.classList.add('hidden');
+
+        const uebergreifend = [];
+        const byStweg = new Map();
+        for (const r of reklamationen) {
+            if (r.stweg === null || r.stweg === undefined || r.stweg === '') {
+                uebergreifend.push(r);
+            } else {
+                const key = r.stweg;
+                if (!byStweg.has(key)) byStweg.set(key, []);
+                byStweg.get(key).push(r);
+            }
+        }
+
+        let html = '';
+        if (uebergreifend.length) {
+            html += renderGroup('Übergreifend', uebergreifend);
+        }
+        const stwegKeys = Array.from(byStweg.keys()).sort((a, b) => Number(a) - Number(b));
+        for (const k of stwegKeys) {
+            html += renderGroup('STWEG ' + k, byStweg.get(k));
+        }
+        groupsEl.innerHTML = html;
+    }
+    </script>
+</body>
+</html>
