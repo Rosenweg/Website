@@ -16,15 +16,15 @@
  *  - Sonstige GETs: stale-while-revalidate.
  */
 
-const CACHE = 'rosenweg-launcher-v2';
+const CACHE = 'rosenweg-launcher-v3';
 
 // Launcher-App-Shell — nur das, was fuer den Offline-Start des Hubs noetig ist.
 const SHELL = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
+  '/icons/icon-192-2.png',
+  '/icons/icon-512-2.png',
 ];
 
 // --- install: Shell precachen, sofort aktiv werden -------------------------
