@@ -1764,10 +1764,25 @@ app.get('/api/tv/extern.m3u', async (req, res) => {
     body = body.replace(/(#EXTINF:[^\n]*?)tvg-name="([^"]+)"/g, (m, pre, name) => m.includes('tvg-id=') ? m : `${pre}tvg-id="${name}" tvg-name="${name}"`);
     body = body.replace(/^#EXTINF:0([ ,])/gm, '#EXTINF:-1$1');
     // udp://@<grp>:<port> -> <BASE>/tv-udp/<grp>:<port>?token=<token>
-    body = body.replace(/udp:\/\/@?([\d.]+):(\d+)/gi, (m, grp, port) => `${TV_EXTERN_BASE}/tv-udp/${grp}:${port}?token=${encodeURIComponent(token)}`);
+    body = body.replace(/udp:\/\/@?([\d.]+):(\d+)/gi, (m, grp, port) => `${TV_EXTERN_BASE}/api/tv/extern/stream?token=${encodeURIComponent(token)}&ch=${grp}:${port}`);
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
     res.send(body);
   } catch (e) { console.error('[tv-extern-m3u]', e); res.status(500).type('text/plain').send('# Fehler'); }
+});
+
+// Stream-Einstieg: Token validieren -> via X-Accel-Redirect an nginx delegieren,
+// das den udpxy-Multicast intern relayt (kein MPEG-TS durch die API). Zuverlaessiger
+// als nginx auth_request (Query-Subrequest-Tuecken).
+app.get('/api/tv/extern/stream', async (req, res) => {
+  try {
+    const token = String(req.query.token || '');
+    const ch = String(req.query.ch || '');
+    if (!/^[\d.]+:\d+$/.test(ch)) return res.status(400).end();
+    if (!(await tvExternValidate(token))) return res.status(403).end();
+    res.setHeader('X-Accel-Redirect', `/tv-udp-internal/${ch}`);
+    res.setHeader('Content-Type', 'video/MP2T');
+    res.end();
+  } catch (e) { console.error('[tv-extern-stream]', e); if (!res.headersSent) res.status(500).end(); }
 });
 
 // ─── Print Job Pickup Confirmation ───────────────────────────────────
