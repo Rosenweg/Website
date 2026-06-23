@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0369a1">
+  <title>Arbeitserfassung — Rosenweg</title>
+  <link rel="manifest" href="/arbeit/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="icon" href="/logo-rosenweg.png" type="image/png">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    /* sichere Bereiche fuer Notch / Home-Indicator */
+    .safe-top { padding-top: env(safe-area-inset-top); }
+    .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+    /* aktiver Modus-Umschalter */
+    .mode-btn.sel { background:#0369a1; color:#fff; }
+    /* Timer-Ziffern */
+    .tabular { font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800 antialiased">
+
+  <!-- Schlanker Titel-Balken -->
+  <header class="bg-sky-700 text-white sticky top-0 z-40 shadow safe-top">
+    <div class="px-4 py-3 flex items-center gap-2 max-w-md mx-auto">
+      <span class="text-lg font-semibold">⏱️ Arbeitserfassung</span>
+      <span id="satzBadge" class="ml-auto text-[11px] font-medium px-2 py-0.5 rounded-full bg-sky-600/60 hidden"></span>
+    </div>
+  </header>
+
+  <!-- =================================================================
+       Geführtes Install-Banner (dezent, schließbar) — nur wenn NICHT
+       bereits als App installiert.
+       ================================================================= -->
+  <div id="installBanner" class="hidden max-w-md mx-auto px-4 pt-3">
+    <div class="bg-sky-50 border border-sky-200 rounded-xl px-3 py-3 text-sm relative">
+      <button id="installDismiss" type="button"
+        class="absolute top-2 right-2 text-slate-400 active:text-slate-600 text-lg leading-none w-7 h-7" aria-label="Ausblenden">✕</button>
+
+      <!-- Android/Chrome: Direkt-Button -->
+      <div id="installAndroid" class="hidden pr-6">
+        <p class="font-semibold text-sky-800 mb-1">📲 Als App installieren</p>
+        <p class="text-slate-600 mb-2">Schneller Zugriff, Timer läuft auch im Hintergrund weiter.</p>
+        <button id="installBtn" type="button"
+          class="bg-sky-700 text-white font-semibold rounded-lg px-4 py-2 active:bg-sky-800">📲 Installieren</button>
+        <p id="installAndroidHint" class="hidden text-slate-500 mt-2">
+          Falls kein Dialog erscheint: Browser-Menü <span class="font-semibold">⋮</span> →
+          <span class="font-semibold">„App installieren"</span>.
+        </p>
+      </div>
+
+      <!-- iOS/Safari: Schritt-Anleitung -->
+      <div id="installIos" class="hidden pr-6">
+        <p class="font-semibold text-sky-800 mb-1">📲 Zum Home-Bildschirm hinzufügen</p>
+        <p class="text-slate-700">
+          <span class="font-semibold">Teilen-Symbol</span>
+          <svg class="inline-block align-text-bottom w-4 h-4 text-sky-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v12"></path><path d="M8 7l4-4 4 4"></path>
+            <path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"></path>
+          </svg>
+          unten antippen → <span class="font-semibold">„Zum Home-Bildschirm"</span>.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lade-Zustand -->
+  <div id="loading" class="text-center text-slate-500 py-16">Lade …</div>
+
+  <!-- Keine-Berechtigung-Hinweis -->
+  <div id="noPerm" class="hidden max-w-md mx-auto px-5 py-16 text-center">
+    <div class="text-5xl mb-3">🔒</div>
+    <h2 class="text-xl font-bold mb-2">Keine Berechtigung</h2>
+    <p class="text-slate-600">Du hast keine Berechtigung für die Arbeitserfassung. Bitte beim Ausschuss melden.</p>
+  </div>
+
+  <!-- App -->
+  <main id="app" class="hidden max-w-md mx-auto px-4 pb-28">
+
+    <!-- ===== Ansicht: Erfassen ===== -->
+    <section id="view-erfassen" class="py-4">
+
+      <!-- Modus-Umschalter Timer / Manuell -->
+      <div class="grid grid-cols-2 gap-2 mb-5 bg-slate-100 rounded-xl p-1">
+        <button type="button" id="modeTimer"
+          class="mode-btn sel rounded-lg py-2 text-sm font-semibold active:opacity-90">⏱️ Stoppuhr</button>
+        <button type="button" id="modeManuell"
+          class="mode-btn rounded-lg py-2 text-sm font-semibold active:opacity-90">✏️ Manuell</button>
+      </div>
+
+      <!-- Timer-Panel -->
+      <div id="timerPanel" class="mb-5">
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 text-center">
+          <div id="timerStatus" class="text-[11px] font-medium text-slate-400 mb-1">bereit</div>
+          <div id="timerDisplay" class="text-5xl font-bold tabular tracking-tight text-sky-800">0:00:00</div>
+          <div class="grid grid-cols-3 gap-2 mt-5">
+            <button type="button" id="btnStart"
+              class="col-span-3 bg-sky-700 text-white font-semibold rounded-xl py-3 active:bg-sky-800">▶ Start</button>
+            <button type="button" id="btnPause"
+              class="hidden bg-amber-500 text-white font-semibold rounded-xl py-3 active:bg-amber-600">⏸ Pause</button>
+            <button type="button" id="btnResume"
+              class="hidden bg-sky-700 text-white font-semibold rounded-xl py-3 active:bg-sky-800">▶ Weiter</button>
+            <button type="button" id="btnStop"
+              class="hidden bg-slate-700 text-white font-semibold rounded-xl py-3 active:bg-slate-800">⏹ Stopp</button>
+          </div>
+        </div>
+        <p class="text-[11px] text-slate-400 text-center mt-2">Läuft auch bei gesperrtem Bildschirm oder App-Neustart weiter.</p>
+      </div>
+
+      <!-- Formular -->
+      <form id="form" class="space-y-5">
+        <!-- Datum -->
+        <div>
+          <label for="datum" class="block text-sm font-semibold mb-2">Datum</label>
+          <input id="datum" type="date"
+            class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base bg-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none">
+        </div>
+
+        <!-- STWEG -->
+        <div>
+          <label for="stweg" class="block text-sm font-semibold mb-2">STWEG / Bereich</label>
+          <select id="stweg"
+            class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base bg-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none"></select>
+          <p id="satzInfo" class="text-[12px] text-slate-500 mt-1.5"></p>
+        </div>
+
+        <!-- Tätigkeit -->
+        <div>
+          <label for="beschreibung" class="block text-sm font-semibold mb-2">Tätigkeit <span class="text-red-500">*</span></label>
+          <textarea id="beschreibung" rows="3" required
+            class="w-full rounded-xl border border-slate-300 px-3 py-2 text-base focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none"
+            placeholder="Was wurde gemacht? Wo?"></textarea>
+        </div>
+
+        <!-- Stunden -->
+        <div>
+          <label for="stunden" class="block text-sm font-semibold mb-2">Stunden <span class="text-red-500">*</span></label>
+          <input id="stunden" type="number" step="0.25" min="0" inputmode="decimal"
+            class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none"
+            placeholder="z.B. 1.5">
+          <p id="stundenHint" class="hidden text-[12px] text-sky-700 mt-1.5"></p>
+        </div>
+
+        <!-- IBAN (optional, gemerkt) -->
+        <div>
+          <label for="iban" class="block text-sm font-semibold mb-2">IBAN <span class="text-slate-400 font-normal">(optional, für Auszahlung)</span></label>
+          <input id="iban" type="text" autocomplete="off" spellcheck="false"
+            class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base uppercase focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none"
+            placeholder="CH00 0000 0000 0000 0000 0">
+          <p class="text-[11px] text-slate-400 mt-1">Wird auf diesem Gerät gemerkt — nur einmal eingeben.</p>
+        </div>
+
+        <!-- Betrag-Vorschau -->
+        <div id="betragBox" class="bg-sky-50 border border-sky-200 rounded-xl px-4 py-3 text-center">
+          <div class="text-[11px] font-medium text-sky-700">Auslage-Betrag</div>
+          <div id="betragVorschau" class="text-2xl font-bold text-sky-800 tabular">CHF 0.00</div>
+          <div id="betragRechnung" class="text-[11px] text-slate-500 mt-0.5"></div>
+        </div>
+
+        <!-- Senden -->
+        <button type="submit" id="submitBtn"
+          class="w-full bg-sky-700 text-white font-semibold text-lg rounded-xl py-3.5 shadow active:bg-sky-800 disabled:opacity-50">
+          Erfassen &amp; einreichen
+        </button>
+        <div id="formMsg" class="hidden text-sm rounded-xl px-3 py-2"></div>
+      </form>
+    </section>
+
+    <!-- ===== Ansicht: Erfolg ===== -->
+    <section id="view-success" class="hidden py-10 text-center">
+      <div class="text-5xl mb-3">✅</div>
+      <h2 class="text-xl font-bold mb-2">Erfasst</h2>
+      <p id="successText" class="text-slate-600 mb-8"></p>
+      <button type="button" id="successAgainBtn"
+        class="w-full bg-sky-700 text-white font-semibold text-lg rounded-xl py-3.5 shadow active:bg-sky-800">
+        Weitere Erfassung
+      </button>
+    </section>
+
+    <!-- ===== Ansicht: Meine Erfassungen ===== -->
+    <section id="view-meine" class="hidden py-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold">Meine Erfassungen</h2>
+        <button id="refreshBtn" class="text-sky-700 text-sm font-medium active:text-sky-900">↻ Aktualisieren</button>
+      </div>
+      <div id="meineMsg" class="text-center text-slate-400 py-8 text-sm">Lade …</div>
+      <div id="meineList" class="space-y-3"></div>
+    </section>
+  </main>
+
+  <!-- Untere Tab-Leiste -->
+  <nav id="tabbar" class="hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 safe-bottom z-40">
+    <div class="max-w-md mx-auto grid grid-cols-2">
+      <button data-tab="erfassen" class="tab py-2.5 text-sm font-medium text-sky-700 flex flex-col items-center gap-0.5">
+        <span class="text-xl leading-none">⏱️</span> Erfassen
+      </button>
+      <button data-tab="meine" class="tab py-2.5 text-sm font-medium text-slate-400 flex flex-col items-center gap-0.5">
+        <span class="text-xl leading-none">📋</span> Meine Erfassungen
+      </button>
+    </div>
+  </nav>
+
+  <script>
+  'use strict';
+
+  // ---------- Helfer ----------
+  const $ = id => document.getElementById(id);
+  // XSS-Schutz fuer alle dynamischen Strings
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  // CHF im Schweizer Format (Apostroph-Tausender)
+  const fmtChf = n => 'CHF ' + (Number(n) || 0).toLocaleString('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtDate = d => { if (!d) return '—'; try { return new Date(d).toLocaleDateString('de-CH', { day:'2-digit', month:'2-digit', year:'numeric' }); } catch { return String(d).slice(0,10); } };
+  const todayIso = () => { const d = new Date(); const p = n => String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; };
+
+  // STWEG-Auswahl: 1–7, MEG(=8), plus "übergreifend" (leer)
+  const STWEG_OPTIONS = [
+    { v:1, l:'STWEG 1' }, { v:2, l:'STWEG 2' }, { v:3, l:'STWEG 3' }, { v:4, l:'STWEG 4' },
+    { v:5, l:'STWEG 5' }, { v:6, l:'STWEG 6' }, { v:7, l:'STWEG 7' }, { v:8, l:'MEG' },
+  ];
+
+  // Status → Badge-Styling + Label (Server-Status der Auslage)
+  const STATUS = {
+    eingereicht: { l:'⏳ eingereicht', c:'bg-yellow-100 text-yellow-800' },
+    genehmigt:   { l:'✓ genehmigt',    c:'bg-green-100 text-green-700' },
+    ausbezahlt:  { l:'💰 ausbezahlt',  c:'bg-sky-100 text-sky-700' },
+    abgelehnt:   { l:'✕ abgelehnt',    c:'bg-red-100 text-red-700' },
+  };
+
+  const IBAN_KEY = 'rosenweg-arbeit-iban';
+
+  let currentUser = null;
+  let saetze = [];          // [{stweg, satz_chf, ...}] vom Server
+  let aktuellerSatz = null; // gewaehlter Satz (Zahl) oder null
+  let mode = 'timer';       // 'timer' | 'manuell'
+
+  // =====================================================================
+  //  Timer-State — Neustart-fest via localStorage (Zeitstempel, nicht Zaehler)
+  //  { running:bool, startedAt:epoch_ms (Beginn aktuelles Segment), accumulatedMs }
+  // =====================================================================
+  const TIMER_KEY = 'rosenweg-arbeit-timer';
+
+  function loadTimer() {
+    try {
+      const raw = localStorage.getItem(TIMER_KEY);
+      if (!raw) return { running: false, startedAt: 0, accumulatedMs: 0 };
+      const t = JSON.parse(raw);
+      return {
+        running: !!t.running,
+        startedAt: Number(t.startedAt) || 0,
+        accumulatedMs: Number(t.accumulatedMs) || 0,
+      };
+    } catch { return { running: false, startedAt: 0, accumulatedMs: 0 }; }
+  }
+  function saveTimer(t) {
+    try { localStorage.setItem(TIMER_KEY, JSON.stringify(t)); } catch {}
+  }
+  function clearTimer() {
+    try { localStorage.removeItem(TIMER_KEY); } catch {}
+  }
+
+  let timer = loadTimer();
+  let _rafId = null;
+
+  // Verstrichene Millisekunden = akkumuliert + (laeuft ? jetzt - Segmentstart : 0)
+  function elapsedMs(t = timer) {
+    return t.accumulatedMs + (t.running ? (Date.now() - t.startedAt) : 0);
+  }
+  function fmtHms(ms) {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    const p = n => String(n).padStart(2, '0');
+    return `${h}:${p(m)}:${p(s)}`;
+  }
+  // ganze Stunden aus den Millisekunden, auf 2 Dezimalstellen
+  function msToHours(ms) {
+    return Math.round((ms / 3600000) * 100) / 100;
+  }
+
+  function renderTimer() {
+    $('timerDisplay').textContent = fmtHms(elapsedMs());
+    const st = $('timerStatus');
+    if (timer.running) {
+      st.textContent = 'läuft …';
+      st.className = 'text-[11px] font-medium text-green-600 mb-1';
+    } else if (timer.accumulatedMs > 0) {
+      st.textContent = 'pausiert';
+      st.className = 'text-[11px] font-medium text-amber-600 mb-1';
+    } else {
+      st.textContent = 'bereit';
+      st.className = 'text-[11px] font-medium text-slate-400 mb-1';
+    }
+    // Buttons je nach Zustand
+    const running = timer.running;
+    const hasTime = timer.accumulatedMs > 0 || running;
+    $('btnStart').classList.toggle('hidden', hasTime);
+    $('btnPause').classList.toggle('hidden', !running);
+    $('btnResume').classList.toggle('hidden', running || !hasTime);
+    $('btnStop').classList.toggle('hidden', !hasTime);
+  }
+
+  // 1s-Tick NUR fuers Rendering (per rAF gedrosselt) — Zeit kommt aus Zeitstempeln.
+  let _lastTick = 0;
+  function tickLoop(ts) {
+    if (timer.running) {
+      if (!_lastTick || ts - _lastTick >= 250) { renderTimer(); _lastTick = ts; }
+      _rafId = requestAnimationFrame(tickLoop);
+    } else {
+      _rafId = null;
+    }
+  }
+  function startTickLoop() {
+    if (_rafId == null && timer.running) { _lastTick = 0; _rafId = requestAnimationFrame(tickLoop); }
+  }
+
+  function timerStart() {
+    timer = { running: true, startedAt: Date.now(), accumulatedMs: timer.accumulatedMs || 0 };
+    saveTimer(timer); renderTimer(); startTickLoop();
+  }
+  function timerPause() {
+    if (!timer.running) return;
+    timer = { running: false, startedAt: 0, accumulatedMs: elapsedMs() };
+    saveTimer(timer); renderTimer();
+  }
+  function timerStop() {
+    const ms = elapsedMs();
+    const hours = msToHours(ms);
+    // in Formular uebernehmen
+    $('stunden').value = hours > 0 ? String(hours) : '';
+    // Timer pausieren (sichtbar), Reset erst nach erfolgreichem Submit
+    timer = { running: false, startedAt: 0, accumulatedMs: ms };
+    saveTimer(timer); renderTimer();
+    $('stundenHint').textContent = `Aus Stoppuhr übernommen: ${fmtHms(ms)} = ${hours} h`;
+    $('stundenHint').classList.remove('hidden');
+    updateBetrag();
+    $('beschreibung').focus();
+  }
+  function timerReset() {
+    timer = { running: false, startedAt: 0, accumulatedMs: 0 };
+    clearTimer(); renderTimer();
+    $('stundenHint').classList.add('hidden');
+  }
+
+  // =====================================================================
+  //  Stundensatz
+  // =====================================================================
+  function selectedStweg() {
+    const v = $('stweg').value;
+    return v === '' ? null : parseInt(v, 10);
+  }
+
+  // Satz fuer gewaehlte STWEG; sonst null-stweg-Satz (uebergreifend).
+  function resolveSatz(stweg) {
+    let row = saetze.find(s => Number(s.stweg) === Number(stweg) && stweg != null);
+    if (!row) row = saetze.find(s => s.stweg == null);
+    return row ? Number(row.satz_chf) : null;
+  }
+
+  function applySatz() {
+    aktuellerSatz = resolveSatz(selectedStweg());
+    const badge = $('satzBadge');
+    const info = $('satzInfo');
+    if (aktuellerSatz != null && Number.isFinite(aktuellerSatz)) {
+      badge.textContent = fmtChf(aktuellerSatz) + '/h';
+      badge.classList.remove('hidden');
+      info.textContent = `Stundensatz: ${fmtChf(aktuellerSatz)} / h`;
+      info.className = 'text-[12px] text-slate-500 mt-1.5';
+    } else {
+      badge.classList.add('hidden');
+      info.textContent = 'Kein Stundensatz hinterlegt — bitte Ausschuss.';
+      info.className = 'text-[12px] text-amber-700 mt-1.5';
+    }
+    updateBetrag();
+  }
+
+  // =====================================================================
+  //  Betrag-Vorschau
+  // =====================================================================
+  function currentStunden() {
+    const h = parseFloat(String($('stunden').value).replace(',', '.'));
+    return Number.isFinite(h) && h > 0 ? h : 0;
+  }
+  function updateBetrag() {
+    const h = currentStunden();
+    const satz = (aktuellerSatz != null && Number.isFinite(aktuellerSatz)) ? aktuellerSatz : 0;
+    const betrag = Math.round(h * satz * 100) / 100;
+    $('betragVorschau').textContent = fmtChf(betrag);
+    $('betragRechnung').textContent = (h > 0 && satz > 0)
+      ? `${h} h × ${fmtChf(satz)}`
+      : '';
+  }
+
+  // =====================================================================
+  //  UI-Aufbau
+  // =====================================================================
+  // Eigene STWEGs aus den Authentik-Gruppen ableiten.
+  function myStwegs(user) {
+    const set = new Set();
+    for (const g of (user?.groups || [])) {
+      const gl = String(g).toLowerCase();
+      let m = gl.match(/^stweg(\d+)-/);
+      if (m) { set.add(parseInt(m[1], 10)); continue; }
+      if (/^meg-/.test(gl)) set.add(8);
+    }
+    return [...set].sort((a, b) => a - b);
+  }
+
+  function buildStwegSelect() {
+    const mine = myStwegs(currentUser);
+    const opts = [];
+    for (const v of mine) {
+      const o = STWEG_OPTIONS.find(x => x.v === v);
+      if (o) opts.push(`<option value="${o.v}">${esc(o.l)} (meiner)</option>`);
+    }
+    for (const o of STWEG_OPTIONS) {
+      if (mine.includes(o.v)) continue;
+      opts.push(`<option value="${o.v}">${esc(o.l)}</option>`);
+    }
+    opts.push(`<option value="">übergreifend</option>`);
+    $('stweg').innerHTML = opts.join('');
+    // Default: erste eigene STWEG, sonst "übergreifend"
+    $('stweg').value = mine.length ? String(mine[0]) : '';
+  }
+
+  // ---------- Modus-Umschalter ----------
+  function setMode(m) {
+    mode = m;
+    $('modeTimer').classList.toggle('sel', m === 'timer');
+    $('modeManuell').classList.toggle('sel', m === 'manuell');
+    $('timerPanel').classList.toggle('hidden', m !== 'timer');
+    // Manuell: Stunden direkt editierbar; Timer: ueber Stoppuhr (aber editierbar bleibt erlaubt)
+    if (m === 'manuell') {
+      $('stundenHint').classList.add('hidden');
+      $('stunden').focus();
+    }
+  }
+
+  // ---------- Tabs ----------
+  function switchTab(tab) {
+    $('view-erfassen').classList.toggle('hidden', tab !== 'erfassen');
+    $('view-meine').classList.toggle('hidden', tab !== 'meine');
+    // Erfolgs-Screen immer ausblenden beim Tab-Wechsel
+    if (tab === 'erfassen') $('view-success').classList.add('hidden');
+    document.querySelectorAll('.tab').forEach(b => {
+      const active = b.dataset.tab === tab;
+      b.classList.toggle('text-sky-700', active);
+      b.classList.toggle('text-slate-400', !active);
+    });
+    if (tab === 'meine') loadMeine();
+  }
+
+  function showFormMsg(text, kind) {
+    const el = $('formMsg');
+    el.textContent = text;
+    el.className = 'text-sm rounded-xl px-3 py-2 ' + (
+      kind === 'ok' ? 'bg-green-100 text-green-800' :
+      kind === 'warn' ? 'bg-yellow-100 text-yellow-800' :
+      'bg-red-100 text-red-700'
+    );
+    el.classList.remove('hidden');
+  }
+
+  // =====================================================================
+  //  Erfassung absenden — ZWEI Schritte
+  // =====================================================================
+  function resetForm() {
+    $('beschreibung').value = '';
+    $('stunden').value = '';
+    $('datum').value = todayIso();
+    $('formMsg').classList.add('hidden');
+    $('stundenHint').classList.add('hidden');
+    updateBetrag();
+  }
+
+  async function onSubmit(ev) {
+    ev.preventDefault();
+    $('formMsg').classList.add('hidden');
+
+    const datum = $('datum').value || todayIso();
+    const beschreibung = $('beschreibung').value.trim();
+    const stunden = currentStunden();
+    const stweg = selectedStweg();
+    const ibanRaw = $('iban').value.trim().replace(/\s+/g, '').toUpperCase();
+
+    if (!beschreibung) { showFormMsg('Bitte eine Tätigkeit beschreiben.', 'err'); return; }
+    if (!(stunden > 0)) { showFormMsg('Bitte Stunden erfassen (Stoppuhr stoppen oder manuell eingeben).', 'err'); return; }
+    if (aktuellerSatz == null || !Number.isFinite(aktuellerSatz) || aktuellerSatz <= 0) {
+      showFormMsg('Kein Stundensatz hinterlegt — bitte Ausschuss.', 'err'); return;
+    }
+
+    const satz = aktuellerSatz;
+    const betrag = Math.round(stunden * satz * 100) / 100;
+
+    // IBAN auf diesem Gerät merken
+    if (ibanRaw) { try { localStorage.setItem(IBAN_KEY, ibanRaw); } catch {} }
+
+    const btn = $('submitBtn');
+    btn.disabled = true; const old = btn.textContent; btn.textContent = 'Wird eingereicht …';
+
+    // --- Schritt 1: Auslage anlegen ---
+    const payload = {
+      datum,
+      beschreibung,
+      betrag_chf: betrag,
+      kategorie: 'Arbeitszeit',
+    };
+    if (stweg != null) payload.stweg = stweg;
+    if (ibanRaw) payload.iban = ibanRaw;
+
+    let auslageId = null;
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/auslagen', { method: 'POST', body: payload });
+      if (r.status === 403) { showFormMsg('Du hast keine Berechtigung für die Arbeitserfassung. Bitte beim Ausschuss melden.', 'err'); btn.disabled = false; btn.textContent = old; return; }
+      if (!r.ok) {
+        let msg = 'HTTP ' + r.status;
+        try { const j = await r.json(); if (j && j.error) msg = j.error; } catch {}
+        showFormMsg('Konnte nicht eingereicht werden: ' + msg, 'err');
+        btn.disabled = false; btn.textContent = old; return;
+      }
+      const j = await r.json().catch(() => ({}));
+      auslageId = j.auslage && j.auslage.id;
+    } catch (e) {
+      showFormMsg('Netzwerkfehler — bitte erneut versuchen.', 'err');
+      btn.disabled = false; btn.textContent = old; return;
+    }
+
+    // --- Schritt 2: Position "arbeitszeit" setzen (Best-Effort) ---
+    if (auslageId != null) {
+      try {
+        const r2 = await AuthentikAuth.apiFetch(`/api/auslagen/${auslageId}/positionen`, {
+          method: 'PUT',
+          body: {
+            positionen: [{
+              position_typ: 'arbeitszeit',
+              beschreibung,
+              menge: stunden,
+              einheit: 'h',
+              einzelpreis: satz,
+              gesamt_chf: betrag,
+            }],
+          },
+        });
+        if (!r2.ok) console.warn('[arbeit] Positionen-Update fehlgeschlagen (Auslage existiert):', r2.status);
+      } catch (e) {
+        console.warn('[arbeit] Positionen-Update Netzfehler (Auslage existiert):', e.message);
+      }
+    }
+
+    // --- Erfolg: Timer zuruecksetzen, Erfolgs-Screen ---
+    timerReset();
+    $('successText').textContent =
+      `${stunden} h × ${fmtChf(satz)} = ${fmtChf(betrag)}, zur Genehmigung eingereicht.`;
+    resetForm();
+    $('view-erfassen').classList.add('hidden');
+    $('view-meine').classList.add('hidden');
+    $('view-success').classList.remove('hidden');
+
+    btn.disabled = false; btn.textContent = old;
+  }
+
+  // =====================================================================
+  //  Meine Erfassungen
+  // =====================================================================
+  function statusBadge(status) {
+    const s = STATUS[status] || STATUS.eingereicht;
+    return `<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full ${s.c}">${esc(s.l)}</span>`;
+  }
+
+  function isArbeitszeit(r) {
+    return r.kategorie === 'Arbeitszeit'
+      || (Number(r.positionen_count) > 0 && r.kategorie === 'Arbeitszeit');
+  }
+
+  function cardHtml(r) {
+    return `
+      <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+        <div class="flex items-start justify-between gap-2">
+          <div class="text-sm font-semibold">${esc(fmtDate(r.datum))}</div>
+          ${statusBadge(r.status)}
+        </div>
+        <div class="text-sm text-slate-700 mt-1 whitespace-pre-wrap break-words">${esc(r.beschreibung || '')}</div>
+        <div class="text-[12px] text-slate-500 mt-1.5 font-medium">${fmtChf(r.betrag_chf)}</div>
+      </div>`;
+  }
+
+  async function loadMeine() {
+    const msg = $('meineMsg'); const list = $('meineList');
+    msg.classList.remove('hidden'); msg.textContent = 'Lade …';
+    list.innerHTML = '';
+
+    const myEmail = (currentUser?.email || '').toLowerCase();
+
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/auslagen', { cache: 'no-store' });
+      if (r.status === 403) { $('view-meine').classList.add('hidden'); return; }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      const all = Array.isArray(data.auslagen) ? data.auslagen : [];
+      // nur eigene + Arbeitszeit
+      const rows = all.filter(a =>
+        (a.user_email || '').toLowerCase() === myEmail && a.kategorie === 'Arbeitszeit'
+      );
+      if (!rows.length) {
+        msg.classList.remove('hidden');
+        msg.textContent = 'Noch keine Erfassungen.';
+        return;
+      }
+      msg.classList.add('hidden');
+      list.innerHTML = rows.map(cardHtml).join('');
+    } catch (e) {
+      msg.classList.remove('hidden');
+      msg.textContent = 'Fehler beim Laden: ' + e.message;
+    }
+  }
+
+  // =====================================================================
+  //  Geführtes Install-Banner (Android-Button / iOS-Anleitung)
+  // =====================================================================
+  let deferredPrompt = null;
+  let installDismissed = false;
+
+  function isStandalone() {
+    return window.matchMedia('(display-mode: standalone)').matches
+      || window.navigator.standalone === true;
+  }
+  function isIos() {
+    const ua = navigator.userAgent || '';
+    return /iphone|ipad|ipod/i.test(ua)
+      || (/Macintosh/.test(ua) && 'ontouchend' in document);
+  }
+
+  function renderInstallBanner() {
+    if (isStandalone() || installDismissed) {
+      $('installBanner').classList.add('hidden');
+      return;
+    }
+    const android = $('installAndroid');
+    const ios = $('installIos');
+    android.classList.add('hidden');
+    ios.classList.add('hidden');
+
+    if (isIos()) {
+      ios.classList.remove('hidden');
+    } else if (deferredPrompt || /android/i.test(navigator.userAgent)) {
+      android.classList.remove('hidden');
+      $('installAndroidHint').classList.toggle('hidden', !!deferredPrompt);
+    } else {
+      $('installBanner').classList.add('hidden');
+      return;
+    }
+    $('installBanner').classList.remove('hidden');
+  }
+
+  function wireInstallBanner() {
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      renderInstallBanner();
+    });
+    window.addEventListener('appinstalled', () => {
+      deferredPrompt = null;
+      $('installBanner').classList.add('hidden');
+    });
+    $('installBtn').addEventListener('click', async () => {
+      if (!deferredPrompt) return;
+      deferredPrompt.prompt();
+      try { await deferredPrompt.userChoice; } catch (_) {}
+      deferredPrompt = null;
+      renderInstallBanner();
+    });
+    $('installDismiss').addEventListener('click', () => {
+      installDismissed = true;
+      $('installBanner').classList.add('hidden');
+    });
+    renderInstallBanner();
+  }
+
+  // =====================================================================
+  //  Init
+  // =====================================================================
+  function showApp() {
+    $('loading').classList.add('hidden');
+    $('noPerm').classList.add('hidden');
+    $('app').classList.remove('hidden');
+    $('tabbar').classList.remove('hidden');
+  }
+  function showNoPerm() {
+    $('loading').classList.add('hidden');
+    $('app').classList.add('hidden');
+    $('tabbar').classList.add('hidden');
+    $('noPerm').classList.remove('hidden');
+  }
+
+  // ---------- Event-Wiring ----------
+  function wireEvents() {
+    // Modus
+    $('modeTimer').addEventListener('click', () => setMode('timer'));
+    $('modeManuell').addEventListener('click', () => setMode('manuell'));
+
+    // Timer-Buttons
+    $('btnStart').addEventListener('click', timerStart);
+    $('btnPause').addEventListener('click', timerPause);
+    $('btnResume').addEventListener('click', timerStart);
+    $('btnStop').addEventListener('click', timerStop);
+
+    // Formular
+    $('form').addEventListener('submit', onSubmit);
+    $('stunden').addEventListener('input', updateBetrag);
+    $('stweg').addEventListener('change', applySatz);
+
+    // Erfolg → weitere Erfassung
+    $('successAgainBtn').addEventListener('click', () => switchTab('erfassen'));
+
+    // Tabs
+    document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+    $('refreshBtn').addEventListener('click', loadMeine);
+
+    // Bei Wiederkehr in den Vordergrund (Bildschirm entsperrt etc.) Anzeige & Loop auffrischen
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) { renderTimer(); startTickLoop(); }
+    });
+  }
+
+  async function loadSaetze() {
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/auslagen-stundensatz', { cache: 'no-store' });
+      if (r.status === 403) { showNoPerm(); return false; }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      saetze = Array.isArray(data.saetze) ? data.saetze : [];
+      return true;
+    } catch (e) {
+      // Satz nicht ladbar → trotzdem App zeigen, Hinweis erscheint via applySatz
+      saetze = [];
+      return true;
+    }
+  }
+
+  async function main() {
+    wireEvents();
+    wireInstallBanner();
+
+    // Service Worker registrieren
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/arbeit/sw.js', { scope: '/arbeit/' }).catch(() => {});
+    }
+
+    // Login zwingend
+    currentUser = await AuthentikAuth.init({
+      requireAuth: true,
+      onLogout: () => { /* init() leitet automatisch zum Login um */ },
+    });
+    if (!currentUser) return; // Redirect zum Login laeuft
+
+    // Berechtigung pruefen (403 → freundlicher Hinweis)
+    const ok = await loadSaetze();
+    if (!ok) return; // showNoPerm() bereits gesetzt
+
+    // App aufbauen
+    buildStwegSelect();
+    $('datum').value = todayIso();
+    try { const iban = localStorage.getItem(IBAN_KEY); if (iban) $('iban').value = iban; } catch {}
+    applySatz();
+    setMode('timer');
+    showApp();
+    switchTab('erfassen');
+
+    // Timer-State nach Neustart wiederherstellen: laeuft er, zaehlt er sichtbar weiter.
+    renderTimer();
+    startTickLoop();
+  }
+
+  main();
+  </script>
+</body>
+</html>
