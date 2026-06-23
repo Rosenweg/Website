@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0369a1">
+  <title>Meine Daten — Rosenweg</title>
+  <link rel="manifest" href="/daten/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/icon-192-2.png">
+  <link rel="icon" href="/logo-rosenweg.png" type="image/png">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    /* sichere Bereiche fuer Notch / Home-Indicator */
+    .safe-top { padding-top: env(safe-area-inset-top); }
+    .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800 antialiased">
+
+  <!-- Kopf mit Logo + Titel -->
+  <header class="bg-sky-700 text-white sticky top-0 z-40 shadow safe-top">
+    <div class="px-4 py-3 flex items-center gap-3 max-w-md mx-auto">
+      <img src="/logo-rosenweg.png" alt="Rosenweg" class="h-9 w-9 rounded-full bg-white object-contain ring-1 ring-white/40">
+      <span class="text-lg font-semibold">📝 Meine Daten</span>
+    </div>
+  </header>
+
+  <!-- =================================================================
+       Geführtes Install-Banner (dezent, schließbar) — nur wenn NICHT
+       bereits als App installiert.
+       ================================================================= -->
+  <div id="installBanner" class="hidden max-w-md mx-auto px-4 pt-3">
+    <div class="bg-sky-50 border border-sky-200 rounded-xl px-3 py-3 text-sm relative">
+      <button id="installDismiss" type="button"
+        class="absolute top-2 right-2 text-slate-400 active:text-slate-600 text-lg leading-none w-7 h-7" aria-label="Ausblenden">✕</button>
+
+      <!-- Android/Chrome: Direkt-Button -->
+      <div id="installAndroid" class="hidden pr-6">
+        <p class="font-semibold text-sky-800 mb-1">📲 Als App installieren</p>
+        <p class="text-slate-600 mb-2">Schneller Zugriff auf deine Stammdaten.</p>
+        <button id="installBtn" type="button"
+          class="bg-sky-700 text-white font-semibold rounded-lg px-4 py-2 active:bg-sky-800">📲 Installieren</button>
+        <p id="installAndroidHint" class="hidden text-slate-500 mt-2">
+          Falls kein Dialog erscheint: Browser-Menü <span class="font-semibold">⋮</span> →
+          <span class="font-semibold">„App installieren"</span>.
+        </p>
+      </div>
+
+      <!-- iOS/Safari: Schritt-Anleitung -->
+      <div id="installIos" class="hidden pr-6">
+        <p class="font-semibold text-sky-800 mb-1">📲 Zum Home-Bildschirm hinzufügen</p>
+        <p class="text-slate-700">
+          <span class="font-semibold">Teilen-Symbol</span>
+          <svg class="inline-block align-text-bottom w-4 h-4 text-sky-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v12"></path><path d="M8 7l4-4 4 4"></path>
+            <path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"></path>
+          </svg>
+          unten antippen → <span class="font-semibold">„Zum Home-Bildschirm"</span>.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lade-Zustand -->
+  <div id="loading" class="text-center text-slate-500 py-16">Lade …</div>
+
+  <!-- Fehler beim Laden -->
+  <div id="loadError" class="hidden max-w-md mx-auto px-5 py-16 text-center">
+    <div class="text-5xl mb-3">⚠️</div>
+    <h2 class="text-xl font-bold mb-2">Konnte nicht laden</h2>
+    <p id="loadErrorText" class="text-slate-600">Bitte später erneut versuchen.</p>
+  </div>
+
+  <!-- App -->
+  <main id="app" class="hidden max-w-md mx-auto px-4 pb-12">
+
+    <!-- Erklärender Kopftext -->
+    <p class="text-sm text-slate-500 mt-4 leading-relaxed">
+      Hier kannst du deine Kontaktdaten selbst aktualisieren (Mutation).
+      Änderungen werden gespeichert und der Verwaltung gemeldet.
+    </p>
+
+    <form id="form" class="space-y-5 mt-5">
+
+      <!-- ===== Editierbar ===== -->
+      <div>
+        <label for="f-name" class="block text-sm font-semibold mb-2">Name</label>
+        <input id="f-name" type="text" autocomplete="name"
+          class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base bg-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none">
+      </div>
+
+      <div>
+        <label for="f-phone" class="block text-sm font-semibold mb-2">Telefon</label>
+        <input id="f-phone" type="tel" autocomplete="tel" inputmode="tel"
+          class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base bg-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none"
+          placeholder="z.B. +41 79 123 45 67">
+      </div>
+
+      <div>
+        <label for="f-strasse" class="block text-sm font-semibold mb-2">Strasse</label>
+        <input id="f-strasse" type="text" autocomplete="street-address"
+          class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base bg-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none">
+      </div>
+
+      <div class="grid grid-cols-3 gap-3">
+        <div class="col-span-1">
+          <label for="f-plz" class="block text-sm font-semibold mb-2">PLZ</label>
+          <input id="f-plz" type="text" autocomplete="postal-code" inputmode="numeric"
+            class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base bg-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none">
+        </div>
+        <div class="col-span-2">
+          <label for="f-ort" class="block text-sm font-semibold mb-2">Ort</label>
+          <input id="f-ort" type="text" autocomplete="address-level2"
+            class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base bg-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none">
+        </div>
+      </div>
+
+      <!-- ===== Nur-Anzeige (read-only) ===== -->
+      <div class="bg-slate-100 rounded-xl p-4 space-y-3">
+        <div>
+          <label for="f-email" class="block text-[12px] font-semibold text-slate-500 mb-1">E-Mail</label>
+          <input id="f-email" type="email" disabled
+            class="w-full rounded-lg border border-slate-200 px-3 py-2 text-base bg-slate-50 text-slate-500 cursor-not-allowed outline-none">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label for="f-wohnung" class="block text-[12px] font-semibold text-slate-500 mb-1">Wohnung</label>
+            <input id="f-wohnung" type="text" disabled
+              class="w-full rounded-lg border border-slate-200 px-3 py-2 text-base bg-slate-50 text-slate-500 cursor-not-allowed outline-none">
+          </div>
+          <div>
+            <label for="f-stweg" class="block text-[12px] font-semibold text-slate-500 mb-1">Stockwerk / STWEG</label>
+            <input id="f-stweg" type="text" disabled
+              class="w-full rounded-lg border border-slate-200 px-3 py-2 text-base bg-slate-50 text-slate-500 cursor-not-allowed outline-none">
+          </div>
+        </div>
+        <p class="text-[12px] text-slate-500 leading-relaxed">
+          Änderungen an Wohnung, Stockwerk oder E-Mail bitte direkt bei der Verwaltung.
+        </p>
+      </div>
+
+      <!-- ===== Zusatz-Telefonnummern (read-only Liste) ===== -->
+      <div id="telefoneBox" class="hidden">
+        <h3 class="text-sm font-semibold mb-2">Zusatz-Telefonnummern</h3>
+        <ul id="telefoneList" class="space-y-2"></ul>
+        <p class="text-[12px] text-slate-500 mt-2">Zusatznummern im Web-Profil verwalten.</p>
+      </div>
+
+      <!-- Senden -->
+      <button type="submit" id="submitBtn"
+        class="w-full bg-sky-700 text-white font-semibold text-lg rounded-xl py-3.5 shadow active:bg-sky-800 disabled:opacity-50">
+        Speichern &amp; der Verwaltung melden
+      </button>
+
+      <!-- Ergebnis-Meldung -->
+      <div id="formMsg" class="hidden text-sm rounded-xl px-3 py-3"></div>
+    </form>
+
+    <p class="text-center text-[11px] text-slate-400 mt-8">Rosenweg · pwa.rosenweg4303.ch</p>
+  </main>
+
+  <script>
+  'use strict';
+
+  // ---------- Helfer ----------
+  const $ = id => document.getElementById(id);
+  // XSS-Schutz fuer alle dynamischen Strings
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+
+  let currentUser = null;
+  let original = {}; // zuletzt geladener Stand (zum Vorbefuellen)
+
+  // =====================================================================
+  //  Daten laden + Formular vorbefuellen
+  // =====================================================================
+  function fill(data) {
+    original = data || {};
+    $('f-name').value    = data.name    ?? '';
+    $('f-phone').value   = data.phone   ?? '';
+    $('f-strasse').value = data.strasse ?? '';
+    $('f-plz').value     = data.plz     ?? '';
+    $('f-ort').value     = data.ort     ?? '';
+    // Read-only
+    $('f-email').value   = data.email   ?? '';
+    $('f-wohnung').value = data.wohnung ?? '';
+    $('f-stweg').value   = data.stweg   ?? '';
+
+    // Zusatz-Telefonnummern (read-only Liste)
+    const tels = Array.isArray(data.telefone) ? data.telefone : [];
+    if (tels.length) {
+      $('telefoneList').innerHTML = tels.map(t => {
+        const label = (t && typeof t === 'object')
+          ? [t.nummer ?? t.number ?? t.phone ?? '', t.typ ?? t.type ?? t.label ?? ''].filter(Boolean).join(' · ')
+          : String(t);
+        return `<li class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">${esc(label)}</li>`;
+      }).join('');
+      $('telefoneBox').classList.remove('hidden');
+    } else {
+      $('telefoneBox').classList.add('hidden');
+    }
+  }
+
+  function showMsg(text, kind, items) {
+    const el = $('formMsg');
+    let html = esc(text);
+    if (Array.isArray(items) && items.length) {
+      html += '<ul class="list-disc pl-5 mt-2 space-y-0.5">'
+        + items.map(s => `<li>${esc(s)}</li>`).join('')
+        + '</ul>';
+    }
+    el.innerHTML = html;
+    el.className = 'text-sm rounded-xl px-3 py-3 ' + (
+      kind === 'ok'   ? 'bg-green-100 text-green-800' :
+      kind === 'warn' ? 'bg-slate-100 text-slate-600' :
+                        'bg-red-100 text-red-700'
+    );
+    el.classList.remove('hidden');
+  }
+
+  // =====================================================================
+  //  Speichern
+  // =====================================================================
+  async function onSubmit(ev) {
+    ev.preventDefault();
+    $('formMsg').classList.add('hidden');
+
+    const payload = {
+      name:    $('f-name').value.trim(),
+      phone:   $('f-phone').value.trim(),
+      strasse: $('f-strasse').value.trim(),
+      plz:     $('f-plz').value.trim(),
+      ort:     $('f-ort').value.trim(),
+    };
+
+    const btn = $('submitBtn');
+    btn.disabled = true; const old = btn.textContent; btn.textContent = 'Wird gespeichert …';
+
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/me/mutation', { method: 'POST', body: payload });
+      if (!r.ok) {
+        let msg = 'HTTP ' + r.status;
+        try { const j = await r.json(); if (j && j.error) msg = j.error; } catch {}
+        showMsg(msg, 'err');
+        btn.disabled = false; btn.textContent = old; return;
+      }
+      const j = await r.json().catch(() => ({}));
+      const changed = Array.isArray(j.changed) ? j.changed : [];
+
+      if (changed.length > 0) {
+        showMsg('✓ Gespeichert. Die Verwaltung wurde über die Änderung informiert.', 'ok', changed);
+        // lokalen Stand aktualisieren
+        Object.assign(original, payload);
+      } else {
+        showMsg('Keine Änderungen.', 'warn');
+      }
+    } catch (e) {
+      showMsg('Netzwerkfehler — bitte erneut versuchen.', 'err');
+    } finally {
+      btn.disabled = false; btn.textContent = old;
+    }
+  }
+
+  // =====================================================================
+  //  Geführtes Install-Banner (Android-Button / iOS-Anleitung)
+  // =====================================================================
+  let deferredPrompt = null;
+  let installDismissed = false;
+
+  function isStandalone() {
+    return window.matchMedia('(display-mode: standalone)').matches
+      || window.navigator.standalone === true;
+  }
+  function isIos() {
+    const ua = navigator.userAgent || '';
+    return /iphone|ipad|ipod/i.test(ua)
+      || (/Macintosh/.test(ua) && 'ontouchend' in document);
+  }
+
+  function renderInstallBanner() {
+    if (isStandalone() || installDismissed) {
+      $('installBanner').classList.add('hidden');
+      return;
+    }
+    const android = $('installAndroid');
+    const ios = $('installIos');
+    android.classList.add('hidden');
+    ios.classList.add('hidden');
+
+    if (isIos()) {
+      ios.classList.remove('hidden');
+    } else if (deferredPrompt || /android/i.test(navigator.userAgent)) {
+      android.classList.remove('hidden');
+      $('installAndroidHint').classList.toggle('hidden', !!deferredPrompt);
+    } else {
+      $('installBanner').classList.add('hidden');
+      return;
+    }
+    $('installBanner').classList.remove('hidden');
+  }
+
+  function wireInstallBanner() {
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      renderInstallBanner();
+    });
+    window.addEventListener('appinstalled', () => {
+      deferredPrompt = null;
+      $('installBanner').classList.add('hidden');
+    });
+    $('installBtn').addEventListener('click', async () => {
+      if (!deferredPrompt) return;
+      deferredPrompt.prompt();
+      try { await deferredPrompt.userChoice; } catch (_) {}
+      deferredPrompt = null;
+      renderInstallBanner();
+    });
+    $('installDismiss').addEventListener('click', () => {
+      installDismissed = true;
+      $('installBanner').classList.add('hidden');
+    });
+    renderInstallBanner();
+  }
+
+  // =====================================================================
+  //  Init
+  // =====================================================================
+  function showApp() {
+    $('loading').classList.add('hidden');
+    $('loadError').classList.add('hidden');
+    $('app').classList.remove('hidden');
+  }
+  function showLoadError(text) {
+    $('loading').classList.add('hidden');
+    $('app').classList.add('hidden');
+    if (text) $('loadErrorText').textContent = text;
+    $('loadError').classList.remove('hidden');
+  }
+
+  async function loadData() {
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/me/mutation', { cache: 'no-store' });
+      if (!r.ok) { showLoadError('Fehler beim Laden (HTTP ' + r.status + ').'); return false; }
+      const data = await r.json();
+      fill(data || {});
+      return true;
+    } catch (e) {
+      showLoadError('Netzwerkfehler beim Laden.');
+      return false;
+    }
+  }
+
+  async function main() {
+    wireInstallBanner();
+    $('form').addEventListener('submit', onSubmit);
+
+    // Service Worker registrieren
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/daten/sw.js', { scope: '/daten/' }).catch(() => {});
+    }
+
+    // Login zwingend
+    currentUser = await AuthentikAuth.init({
+      requireAuth: true,
+      onLogout: () => { /* init() leitet automatisch zum Login um */ },
+    });
+    if (!currentUser) return; // Redirect zum Login laeuft
+
+    // Stammdaten laden + Formular vorbefuellen
+    const ok = await loadData();
+    if (!ok) return;
+
+    showApp();
+  }
+
+  main();
+  </script>
+</body>
+</html>
