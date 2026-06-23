@@ -1148,6 +1148,57 @@ app.put('/api/me/emails', authMiddleware, async (req, res) => {
   }
 });
 
+// ─── Selbstmutation: eigene Stammdaten (Name/Adresse/Telefon) selbst aendern ──
+// GET liefert den aktuellen Stand; POST speichert + meldet die Aenderung an die
+// Verwaltung (recordObjektChange -> verwaltung_mail_queue, Technik-Freigabe).
+// wohnung/stweg sind NICHT selbst-mutierbar (Eigentums-/Mietverhaeltnis -> Verwaltung).
+app.get('/api/me/mutation', authMiddleware, async (req, res) => {
+  try {
+    const id = req.user.user_id || req.user.id;
+    const r = await pool.query(
+      'SELECT name, email, wohnung, stweg, phone, strasse, plz, ort FROM users WHERE id = $1', [id]);
+    const u = r.rows[0] || {};
+    const email = (req.user.email || '').toLowerCase();
+    let telefone = [];
+    if (email) {
+      const pr = await pool.query('SELECT telefone FROM personen WHERE LOWER(email) = $1 LIMIT 1', [email]);
+      telefone = Array.isArray(pr.rows[0]?.telefone) ? pr.rows[0].telefone : [];
+    }
+    res.json({ ...u, telefone });
+  } catch (e) { console.error('[me/mutation GET]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+app.post('/api/me/mutation', authMiddleware, async (req, res) => {
+  try {
+    const id = req.user.user_id || req.user.id;
+    const b = req.body || {};
+    const cur = (await pool.query('SELECT name, wohnung, stweg, phone, strasse, plz, ort FROM users WHERE id = $1', [id])).rows[0] || {};
+    const f = {
+      name: b.name != null ? String(b.name).trim().slice(0, 200) : (cur.name || ''),
+      phone: b.phone != null ? (String(b.phone).trim().slice(0, 60) || null) : cur.phone,
+      strasse: b.strasse != null ? (String(b.strasse).trim().slice(0, 200) || null) : cur.strasse,
+      plz: b.plz != null ? (String(b.plz).trim().slice(0, 20) || null) : cur.plz,
+      ort: b.ort != null ? (String(b.ort).trim().slice(0, 120) || null) : cur.ort,
+    };
+    if (!f.name) return res.status(400).json({ error: 'Name erforderlich' });
+    const labels = { name: 'Name', phone: 'Telefon', strasse: 'Strasse', plz: 'PLZ', ort: 'Ort' };
+    const changes = [];
+    for (const k of Object.keys(labels)) {
+      const oldV = String(cur[k] || ''), newV = String(f[k] || '');
+      if (oldV !== newV) changes.push(`${labels[k]}: "${oldV || '–'}" → "${newV || '–'}"`);
+    }
+    await pool.query(
+      'UPDATE users SET name=$1, phone=$2, strasse=$3, plz=$4, ort=$5, updated_at=NOW() WHERE id=$6',
+      [f.name, f.phone, f.strasse, f.plz, f.ort, id]);
+    if (changes.length) {
+      const wohnLabel = cur.wohnung ? ` (Whg ${cur.wohnung})` : '';
+      const line = `${f.name}${wohnLabel}: ${changes.join('; ')}`;
+      recordObjektChange(cur.stweg, line, req.user.email).catch(() => {});
+    }
+    res.json({ ok: true, changed: changes });
+  } catch (e) { console.error('[me/mutation POST]', e); res.status(500).json({ error: 'Fehler beim Speichern' }); }
+});
+
 // PUT /api/me/whatsapp-optin — Toggle WhatsApp-Opt-In am Personen-Datensatz
 // Body: { enabled: bool }
 // Liefert Status zurück: { ok, enabled, phone, reason? }
