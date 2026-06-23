@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0369a1">
+    <title>Solaranlage Rosenweg 9</title>
+    <link rel="manifest" href="/solar/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/icons/icon-192-2.png">
+    <link rel="icon" href="/logo-rosenweg.png" type="image/png">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root { --y:#eab308; --g:#22c55e; --r:#ef4444; --b:#3b82f6; --a:#f59e0b; --sky:#0369a1; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+               background: linear-gradient(135deg, #eab308 0%, #f97316 100%); background-attachment: fixed; color: #1f2937; min-height: 100vh; }
+
+        /* sichere Bereiche fuer Notch / Home-Indicator */
+        .safe-top { padding-top: env(safe-area-inset-top); }
+
+        /* Kopf wie der Launcher: runder Logo-Kreis + Titel */
+        .topnav { background: var(--sky); color: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.15); position: sticky; top: 0; z-index: 50; }
+        .topnav-inner { display: flex; align-items: center; gap: .75rem; padding: .7rem 1rem; max-width: 1100px; margin: 0 auto; }
+        .topnav img { height: 2.25rem; width: 2.25rem; border-radius: 9999px; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px rgba(255,255,255,.4); flex: none; padding: 2px; }
+        .topnav .t { font-weight: 700; font-size: 1.1rem; line-height: 1.1; }
+        .live-badge { margin-left: auto; display: inline-flex; align-items: center; gap: .4rem; padding: .25rem .7rem; background: rgba(255,255,255,.18); color: #fff; border-radius: 20px; font-size: .72rem; font-weight: 700; }
+        .live-dot { width: 8px; height: 8px; background: #fff; border-radius: 50%; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+        .wrap { max-width: 1100px; margin: 0 auto; padding: 1.25rem 1rem 2rem; }
+
+        /* Install-Banner (dezent, schliessbar) */
+        .ibanner { background: #fff; border: 1px solid #bae6fd; border-radius: 14px; padding: .85rem 1rem; margin-bottom: 1rem; position: relative; box-shadow: 0 4px 16px rgba(0,0,0,.1); }
+        .ibanner .x { position: absolute; top: .4rem; right: .5rem; border: none; background: none; color: #94a3b8; font-size: 1.2rem; line-height: 1; width: 1.8rem; height: 1.8rem; cursor: pointer; }
+        .ibanner .h { font-weight: 700; color: #075985; margin-bottom: .25rem; }
+        .ibanner p { color: #475569; font-size: .85rem; line-height: 1.45; }
+        .ibtn { margin-top: .6rem; background: var(--sky); color: #fff; font-weight: 600; border: none; border-radius: 10px; padding: .55rem 1.1rem; font-size: .9rem; cursor: pointer; }
+        .ibtn:active { background: #075985; }
+        .ihint { color: #64748b; font-size: .82rem; margin-top: .5rem; }
+        .share-glyph { display: inline-block; vertical-align: text-bottom; width: 1rem; height: 1rem; color: var(--sky); }
+
+        .err { background: #fff; color: #b91c1c; border-radius: 12px; padding: .9rem; text-align: center; margin-bottom: 1rem; display: none; box-shadow: 0 4px 16px rgba(0,0,0,.1); font-size: .9rem; }
+
+        /* ─── DESKTOP: Fluss-Diagramm ─────────────────────────────── */
+        .flow-desktop { position: relative; background: #fff; border-radius: 20px; padding: 2rem 1.25rem; box-shadow: 0 10px 40px rgba(0,0,0,.18);
+                display: grid; gap: 1rem 1.25rem; align-items: center; justify-items: center;
+                grid-template-columns: minmax(96px,.8fr) minmax(0,1.3fr) minmax(110px,.85fr);
+                grid-template-areas: ".  prod  ." "cons  verb  netz"; }
+        .a-prod{grid-area:prod} .a-cons{grid-area:cons} .a-verb{grid-area:verb} .a-netz{grid-area:netz}
+        .cons-stack { display: flex; flex-direction: column; gap: .9rem; align-items: center; }
+        .flow-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: visible; }
+        .flowline { stroke-width: 5; fill: none; stroke-linecap: round; stroke-dasharray: 1 13; animation: dash .7s linear infinite; }
+        .fl-green{stroke:var(--g)} .fl-red{stroke:var(--r)} .fl-blue{stroke:var(--b)} .fl-amber{stroke:var(--a)}
+        @keyframes dash { to { stroke-dashoffset: -14; } }
+        .circle { background: #fff; border-radius: 50%; aspect-ratio: 1; display: flex; flex-direction: column; align-items: center;
+                  justify-content: center; text-align: center; box-shadow: 0 4px 18px rgba(0,0,0,.08); border: 6px solid #e5e7eb;
+                  transition: border-color .4s, opacity .4s; position: relative; z-index: 1; padding: .3rem; }
+        .c-big { width: clamp(150px,24vw,205px); } .c-med { width: clamp(120px,20vw,172px); } .c-sm { width: clamp(88px,17vw,118px); border-width: 5px; }
+        .circle .ic { font-size: clamp(1rem,3.2vw,1.8rem); margin-bottom: .15rem; }
+        .circle .val { font-weight: 700; line-height: 1; color: #111827; }
+        .c-big .val { font-size: clamp(1.4rem,5vw,2.3rem); } .c-med .val { font-size: clamp(1.2rem,4vw,1.9rem); } .c-sm .val { font-size: clamp(.85rem,3vw,1.15rem); }
+        .circle .val .u { font-size: .5em; font-weight: 500; color: #6b7280; }
+        .circle .lbl { color: #6b7280; text-transform: uppercase; letter-spacing: .03em; margin-top: .25rem; }
+        .c-big .lbl,.c-med .lbl { font-size: clamp(.72rem,2vw,.92rem); } .c-sm .lbl { font-size: clamp(.6rem,2vw,.7rem); }
+        .circle .sub { font-size: .72rem; color: #9ca3af; margin-top: .1rem; }
+        .ring-y{border-color:var(--y)} .ring-g{border-color:var(--g)} .ring-r{border-color:var(--r)} .ring-b{border-color:var(--b)} .ring-a{border-color:var(--a)} .ring-idle{border-color:#e5e7eb}
+        .circle.off { opacity: .5; }
+
+        /* ─── MOBILE: eigene Karten-Ansicht (keine Linien) ────────── */
+        .flow-mobile { display: none; }
+        .mcard { background: #fff; border-radius: 16px; box-shadow: 0 4px 18px rgba(0,0,0,.12); padding: 1.1rem 1.15rem;
+                 display: flex; align-items: center; gap: 1rem; border-left: 7px solid #e5e7eb; }
+        .mcard .mic { font-size: 2rem; line-height: 1; width: 2.4rem; text-align: center; }
+        .mcard .mbody { flex: 1; }
+        .mcard .mlbl { font-size: .74rem; text-transform: uppercase; letter-spacing: .04em; color: #9ca3af; }
+        .mcard .mval { font-size: 2.2rem; font-weight: 700; color: #111827; line-height: 1.05; }
+        .mcard .mval .u { font-size: .45em; font-weight: 500; color: #6b7280; }
+        .mcard .msub { font-size: .8rem; color: #9ca3af; }
+        .mc-prod { border-left-color: var(--y); }
+        .mc-verb { border-left-color: var(--g); }
+        .mcard[data-grid="feed"] { border-left-color: var(--r); }
+        .mcard[data-grid="draw"] { border-left-color: var(--b); }
+        .marrow { text-align: center; color: rgba(255,255,255,.9); font-size: 1.4rem; line-height: 1; margin: .25rem 0; }
+        .mhead { color: #fff; font-weight: 700; font-size: .95rem; margin: 1.25rem 0 .6rem; text-shadow: 0 1px 2px rgba(0,0,0,.15); }
+        .mtiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: .7rem; }
+        .mtile { background: #fff; border-radius: 14px; box-shadow: 0 4px 16px rgba(0,0,0,.1); padding: .8rem .5rem; text-align: center; border-top: 4px solid var(--a); }
+        .mtile.off { opacity: .55; border-top-color: #e5e7eb; }
+        .mtile .ti { font-size: 1.4rem; } .mtile .tv { font-weight: 700; font-size: 1.1rem; margin-top: .15rem; } .mtile .tv .u { font-size: .55em; color: #6b7280; font-weight: 500; }
+        .mtile .tl { font-size: .65rem; text-transform: uppercase; color: #9ca3af; margin-top: .1rem; } .mtile .ts { font-size: .6rem; color: #9ca3af; }
+
+        .cards { display: grid; grid-template-columns: repeat(auto-fit,minmax(150px,1fr)); gap: 1rem; margin-top: 1.25rem; }
+        .card { background: #fff; border-radius: 14px; padding: 1rem 1.2rem; box-shadow: 0 4px 16px rgba(0,0,0,.1); }
+        .card .ct { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: #9ca3af; }
+        .card .cv { font-size: 1.6rem; font-weight: 700; margin-top: .25rem; } .card .cv .u { font-size: .55em; font-weight: 500; color: #6b7280; }
+        .meta { text-align: center; color: rgba(255,255,255,.95); font-size: .85rem; margin-top: 1.1rem; line-height: 1.6; text-shadow: 0 1px 2px rgba(0,0,0,.15); }
+        .meta.stale { color: #fff; }
+        .meta .warn { display: inline-block; background: rgba(180,30,30,.85); color: #fff; border-radius: 10px; padding: .15rem .7rem; margin-top: .35rem; font-weight: 600; font-size: .78rem; }
+
+        @media (max-width: 760px) {
+            .flow-desktop { display: none; }
+            .flow-mobile { display: block; }
+        }
+    </style>
+</head>
+<body class="safe-top">
+    <nav class="topnav safe-top">
+        <div class="topnav-inner">
+            <img src="/logo-rosenweg.png" alt="Rosenweg">
+            <span class="t">Solaranlage Rosenweg 9</span>
+            <span class="live-badge"><span class="live-dot"></span> LIVE</span>
+        </div>
+    </nav>
+
+    <div class="wrap">
+
+        <!-- ───────── Install-Banner (aus im Standalone-Modus) ───────── -->
+        <div id="installBanner" class="ibanner" style="display:none">
+            <button id="installDismiss" class="x" type="button" aria-label="Ausblenden">✕</button>
+            <!-- Android/Chrome: Direkt-Button -->
+            <div id="installAndroid" style="display:none">
+                <div class="h">📲 Als App installieren</div>
+                <p>Schneller Zugriff auf die Live-Solardaten direkt vom Home-Bildschirm.</p>
+                <button id="installBtn" class="ibtn" type="button">📲 Installieren</button>
+                <p id="installAndroidHint" class="ihint" style="display:none">
+                    Falls kein Dialog erscheint: Browser-Menü <strong>⋮</strong> → <strong>„App installieren"</strong>.
+                </p>
+            </div>
+            <!-- iOS/Safari: Schritt-Anleitung -->
+            <div id="installIos" style="display:none">
+                <div class="h">📲 Zum Home-Bildschirm hinzufügen</div>
+                <p>
+                    <strong>Teilen-Symbol</strong>
+                    <svg class="share-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M12 3v12"></path><path d="M8 7l4-4 4 4"></path>
+                        <path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"></path>
+                    </svg>
+                    unten antippen → <strong>„Zum Home-Bildschirm"</strong>.
+                </p>
+            </div>
+        </div>
+
+        <div id="err" class="err"></div>
+
+        <!-- ───────── DESKTOP ───────── -->
+        <div class="flow-desktop">
+            <svg id="flow-svg" class="flow-svg" preserveAspectRatio="none"></svg>
+            <div class="a-prod">
+                <div id="c-prod" class="circle c-med ring-idle"><div class="ic">🔆</div><div class="val"><span class="v-prod">–</span><span class="u"> kW</span></div><div class="lbl">Produktion</div></div>
+            </div>
+            <div class="a-cons cons-stack">
+                <div id="c-boiler" class="circle c-sm ring-idle"><div class="ic">♨️</div><div class="val"><span class="v-boiler">–</span><span class="u"> kW</span></div><div class="lbl l-boiler">Boiler</div></div>
+                <div id="c-allg" class="circle c-sm ring-idle"><div class="ic">💡</div><div class="val"><span class="v-allg">–</span><span class="u"> kW</span></div><div class="lbl">Allgemein</div></div>
+                <div id="c-wohn" class="circle c-sm ring-idle"><div class="ic">🚪</div><div class="val"><span class="v-wohn">–</span><span class="u"> kW</span></div><div class="lbl">Wohnungen</div><div class="sub s-wohn"></div></div>
+            </div>
+            <div class="a-verb">
+                <div id="c-verb" class="circle c-big ring-idle"><div class="ic">🏠</div><div class="val"><span class="v-cons">–</span><span class="u"> kW</span></div><div class="lbl">Verbrauch</div><div class="sub v-self"></div></div>
+            </div>
+            <div class="a-netz">
+                <div id="c-grid" class="circle c-med ring-idle" data-grid="idle"><div class="ic">⚡</div><div class="val"><span class="v-grid">–</span><span class="u"> kW</span></div><div class="lbl l-grid">Netz</div></div>
+            </div>
+        </div>
+
+        <!-- ───────── MOBILE ───────── -->
+        <div class="flow-mobile">
+            <div class="mcard mc-prod"><span class="mic">🔆</span><div class="mbody"><div class="mlbl">Produktion</div><div class="mval"><span class="v-prod">–</span><span class="u"> kW</span></div></div></div>
+            <div class="marrow">↓</div>
+            <div class="mcard mc-verb"><span class="mic">🏠</span><div class="mbody"><div class="mlbl">Verbrauch</div><div class="mval"><span class="v-cons">–</span><span class="u"> kW</span></div><div class="msub v-self"></div></div></div>
+            <div class="marrow" id="m-arrow">↓</div>
+            <div class="mcard mc-grid" data-grid="idle"><span class="mic" id="m-grid-ic">⚡</span><div class="mbody"><div class="mlbl l-grid">Netz</div><div class="mval"><span class="v-grid">–</span><span class="u"> kW</span></div></div></div>
+
+            <div class="mhead">Verbrauch-Aufschlüsselung</div>
+            <div class="mtiles">
+                <div class="mtile" id="t-boiler"><div class="ti">♨️</div><div class="tv"><span class="v-boiler">–</span><span class="u"> kW</span></div><div class="tl l-boiler">Boiler</div></div>
+                <div class="mtile" id="t-allg"><div class="ti">💡</div><div class="tv"><span class="v-allg">–</span><span class="u"> kW</span></div><div class="tl">Allgemein</div></div>
+                <div class="mtile" id="t-wohn"><div class="ti">🚪</div><div class="tv"><span class="v-wohn">–</span><span class="u"> kW</span></div><div class="tl">Wohnungen</div><div class="ts s-wohn"></div></div>
+            </div>
+        </div>
+
+        <div class="cards">
+            <div class="card"><div class="ct">☀️ Ertrag heute</div><div class="cv"><span id="v-today-prod">–</span><span class="u"> kWh</span></div></div>
+            <div class="card"><div class="ct">⚡ Einspeisung heute</div><div class="cv"><span id="v-today-feed">–</span><span class="u"> kWh</span></div></div>
+        </div>
+
+        <div class="meta"><div id="m-updated">Verbinde …</div><div id="m-src"></div></div>
+    </div>
+
+    <script>
+        'use strict';
+
+        const kw = w => (Math.abs(Number(w) || 0) / 1000).toFixed(2);
+        const kwh = wh => ((Number(wh) || 0) / 1000).toFixed(1);
+        const $ = id => document.getElementById(id);
+        const setAll = (sel, txt) => document.querySelectorAll(sel).forEach(e => e.textContent = txt);
+        const SRC_LBL = { geeicht: 'geeichter Zähler', smartfox: 'SmartFox', none: '–' };
+
+        // Desktop-Flusslinien (nur wenn Desktop-View sichtbar)
+        let lastData = null;
+        function drawFlows(d) {
+            const flow = document.querySelector('.flow-desktop'), svg = $('flow-svg');
+            if (!flow || !svg) return;
+            if (flow.offsetParent === null) { svg.innerHTML = ''; return; }  // mobil ausgeblendet
+            const fr = flow.getBoundingClientRect();
+            svg.setAttribute('viewBox', `0 0 ${fr.width} ${fr.height}`);
+            const ctr = el => { const r = el.getBoundingClientRect(); return { x: r.left-fr.left+r.width/2, y: r.top-fr.top+r.height/2, rad: r.width/2 }; };
+            const P=ctr($('c-prod')), V=ctr($('c-verb')), G=ctr($('c-grid')), B=ctr($('c-boiler')), A=ctr($('c-allg')), W=ctr($('c-wohn'));
+            const edge = (a,b) => { const dx=b.x-a.x, dy=b.y-a.y, len=Math.hypot(dx,dy)||1; return [a.x+dx/len*a.rad, a.y+dy/len*a.rad, b.x-dx/len*b.rad, b.y-dy/len*b.rad]; };
+            const boiler = d.boiler || {}, allgemein = d.allgemein || {}, wohnungen = d.wohnungen || {};
+            const seg = [];
+            if (d.production_w > 50) seg.push(['fl-green', edge(P, V)]);
+            if (d.feed_in_w > 50) seg.push(['fl-red', edge(V, G)]);
+            if (d.draw_w > 50) seg.push(['fl-blue', edge(G, V)]);
+            if (boiler.power_w > 50 && boiler.online) seg.push(['fl-amber', edge(V, B)]);
+            if (allgemein.power_w > 50 && allgemein.online) seg.push(['fl-amber', edge(V, A)]);
+            if (wohnungen.power_w > 50) seg.push(['fl-amber', edge(V, W)]);
+            svg.innerHTML = seg.map(([cls,p]) => `<line x1="${p[0]}" y1="${p[1]}" x2="${p[2]}" y2="${p[3]}" class="flowline ${cls}"/>`).join('');
+        }
+        window.addEventListener('resize', () => { if (lastData) drawFlows(lastData); });
+
+        // veraltete-Daten-Erkennung: ts aelter als 90s → Hinweis.
+        const STALE_MS = 90 * 1000;
+
+        async function load() {
+            try {
+                const r = await fetch('/api/energy/solar-live', { cache: 'no-store' });
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const d = await r.json();
+
+                // fehlende verschachtelte Felder robust behandeln
+                const boiler = d.boiler || {}, allgemein = d.allgemein || {}, wohnungen = d.wohnungen || {}, today = d.today || {};
+
+                $('err').style.display = 'none';
+
+                // gemeinsame Werte (Desktop + Mobil ueber Klassen)
+                setAll('.v-prod', kw(d.production_w));
+                setAll('.v-cons', kw(d.consumption_w));
+                setAll('.v-self', (d.production_w > 50 && d.self_pct != null) ? d.self_pct + '% Eigenverbrauch' : '');
+                setAll('.v-boiler', boiler.online ? kw(boiler.power_w) : '—');
+                setAll('.v-allg', allgemein.online ? kw(allgemein.power_w) : '—');
+                setAll('.v-wohn', kw(wohnungen.power_w));
+                setAll('.s-wohn', (wohnungen.online_count != null && wohnungen.total_count != null)
+                    ? wohnungen.online_count + '/' + wohnungen.total_count + ' online' : '');
+                setAll('.l-boiler', boiler.label || 'Boiler');
+                $('v-today-prod').textContent = kwh(today.production_wh);
+                $('v-today-feed').textContent = kwh(today.feed_in_wh);
+
+                // Netz: Lieferung / Bezug / idle
+                let gv, gl, gstate, gic;
+                if (d.feed_in_w > 50) { gv = kw(d.feed_in_w); gl = 'Lieferung'; gstate = 'feed'; gic = '⚡'; }
+                else if (d.draw_w > 50) { gv = kw(d.draw_w); gl = 'Netzbezug'; gstate = 'draw'; gic = '🔌'; }
+                else { gv = '0.00'; gl = 'Netz'; gstate = 'idle'; gic = '⚡'; }
+                setAll('.v-grid', gv); setAll('.l-grid', gl);
+                $('m-grid-ic').textContent = gic;
+                $('c-grid').dataset.grid = gstate; $('c-grid').className = 'circle c-med ' + (gstate==='feed'?'ring-r':gstate==='draw'?'ring-b':'ring-idle');
+                document.querySelector('.mc-grid').dataset.grid = gstate;
+                $('m-arrow').textContent = gstate === 'draw' ? '↑' : '↓';
+
+                // Desktop-Kreis-Ringe + Verbraucher-Status
+                $('c-prod').className = 'circle c-med ' + (d.production_w > 50 ? 'ring-y' : 'ring-idle');
+                $('c-verb').className = 'circle c-big ' + (d.consumption_w > 50 ? 'ring-g' : 'ring-idle');
+                const cstate = (id, on, p) => $(id).className = 'circle c-sm ' + (!on ? 'ring-idle off' : (p > 50 ? 'ring-a' : 'ring-idle'));
+                cstate('c-boiler', boiler.online, boiler.power_w);
+                cstate('c-allg', allgemein.online, allgemein.power_w);
+                cstate('c-wohn', true, wohnungen.power_w);
+                // Mobile-Tile-Status
+                $('t-boiler').className = 'mtile' + (boiler.online ? '' : ' off');
+                $('t-allg').className = 'mtile' + (allgemein.online ? '' : ' off');
+
+                // Stand / veraltete-Daten-Hinweis
+                const meta = document.querySelector('.meta');
+                const ageMs = d.ts ? (Date.now() - new Date(d.ts).getTime()) : 0;
+                const stale = d.ts && ageMs > STALE_MS;
+                const stamp = d.ts ? new Date(d.ts).toLocaleTimeString('de-CH') : '–';
+                $('m-updated').innerHTML = 'Stand: ' + stamp
+                    + (stale ? '<br><span class="warn">⚠ Daten möglicherweise veraltet</span>' : '');
+                meta.classList.toggle('stale', !!stale);
+                $('m-src').textContent = 'Produktion: ' + (SRC_LBL[d.production_source] || d.production_source || '–')
+                    + ' · Netz: ' + (SRC_LBL[d.grid_source] || d.grid_source || '–');
+
+                lastData = d;
+                drawFlows(d);
+            } catch (e) {
+                $('err').style.display = 'block';
+                $('err').textContent = 'Live-Daten nicht erreichbar: ' + e.message;
+                $('m-updated').textContent = '';
+            }
+        }
+        load();
+        setInterval(load, 4000);
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
+
+        // =================================================================
+        //  Geführtes Install-Banner (Android-Button / iOS-Anleitung)
+        // =================================================================
+        let deferredPrompt = null, installDismissed = false;
+
+        function isStandalone() {
+            return window.matchMedia('(display-mode: standalone)').matches
+                || window.navigator.standalone === true;
+        }
+        function isIos() {
+            const ua = navigator.userAgent || '';
+            return /iphone|ipad|ipod/i.test(ua) || (/Macintosh/.test(ua) && 'ontouchend' in document);
+        }
+        function renderInstallBanner() {
+            const banner = $('installBanner');
+            if (isStandalone() || installDismissed) { banner.style.display = 'none'; return; }
+            const android = $('installAndroid'), ios = $('installIos');
+            android.style.display = 'none'; ios.style.display = 'none';
+            if (isIos()) {
+                ios.style.display = 'block';
+            } else if (deferredPrompt || /android/i.test(navigator.userAgent)) {
+                android.style.display = 'block';
+                $('installAndroidHint').style.display = deferredPrompt ? 'none' : 'block';
+            } else {
+                banner.style.display = 'none'; return;
+            }
+            banner.style.display = 'block';
+        }
+        window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; renderInstallBanner(); });
+        window.addEventListener('appinstalled', () => { deferredPrompt = null; $('installBanner').style.display = 'none'; });
+        $('installBtn').addEventListener('click', async () => {
+            if (!deferredPrompt) return;
+            deferredPrompt.prompt();
+            try { await deferredPrompt.userChoice; } catch (_) {}
+            deferredPrompt = null; renderInstallBanner();
+        });
+        $('installDismiss').addEventListener('click', () => { installDismissed = true; $('installBanner').style.display = 'none'; });
+        renderInstallBanner();
+
+        // Service Worker registrieren
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/solar/sw.js', { scope: '/solar/' }).catch(() => {});
+        }
+    </script>
+</body>
+</html>
