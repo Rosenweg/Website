@@ -151,14 +151,56 @@
             </div>`;
     }
 
+    // Verbrauch + Solaranteil je Jahr aus den Tarif-Positionen (kWh) aller Rechnungen.
+    function computeStats(list) {
+        const by = {};
+        for (const r of list) {
+            const yr = String(r.zeitraum_von || r.rechnungsdatum || '').slice(-4);
+            if (!/^\d{4}$/.test(yr)) continue;
+            for (const p of (r.positionen || [])) {
+                if (p.kwh == null || isNaN(p.kwh)) continue;
+                if (!by[yr]) by[yr] = { total: 0, solar: 0 };
+                by[yr].total += Number(p.kwh);
+                if (/solar/i.test(p.name || '')) by[yr].solar += Number(p.kwh);
+            }
+        }
+        return by;
+    }
+
+    function statsHtml() {
+        const by = computeStats(RECHNUNGEN);
+        const years = Object.keys(by).sort().reverse();
+        if (!years.length) return '';
+        const rows = years.map(yr => {
+            const { total, solar } = by[yr];
+            const pct = total > 0 ? Math.round(solar / total * 100) : 0;
+            return `
+                <div class="py-1.5">
+                    <div class="flex justify-between items-baseline text-sm mb-1">
+                        <span class="font-semibold text-gray-800">${esc(yr)}</span>
+                        <span class="text-gray-600 tabular-nums">${esc(fmtNum(Math.round(total), 'kWh'))} · <span class="text-green-700 font-semibold">${pct}% Solar</span></span>
+                    </div>
+                    <div class="h-2 rounded-full bg-gray-200 overflow-hidden" title="${pct}% Solarstrom">
+                        <div class="h-full bg-green-500" style="width:${pct}%"></div>
+                    </div>
+                </div>`;
+        }).join('');
+        return `
+            <div class="bg-white rounded-xl shadow-sm border p-4 mb-4">
+                <div class="font-semibold text-gray-900 mb-2 flex items-center gap-2">📊 Mein Stromverbrauch</div>
+                ${rows}
+                <div class="text-[11px] text-gray-400 mt-2">Verbrauch &amp; Solaranteil aus deinen Abrechnungen (inkl. bereits bezahlte).</div>
+            </div>`;
+    }
+
     function render() {
         if (!RECHNUNGEN.length) { $('empty').classList.remove('hidden'); $('list').innerHTML = ''; return; }
         $('empty').classList.add('hidden');
         const offen = RECHNUNGEN.filter(r => !r.bezahlt);
         const paid = RECHNUNGEN.filter(r => r.bezahlt);
-        let html = offen.length
+        let html = statsHtml() + (offen.length
             ? offen.map(cardHtml).join('')
-            : '<div class="bg-white rounded-xl border p-6 text-center text-gray-400">Keine offenen Rechnungen 🎉</div>';
+            : '<div class="bg-white rounded-xl border p-6 text-center text-gray-400">Keine offenen Rechnungen 🎉</div>');
         if (paid.length) {
             html += `<button id="togglePaid" class="block mx-auto mt-5 text-sm text-gray-500 hover:text-gray-700 font-medium">${showPaid ? '▲ Bezahlte ausblenden' : '▼ Bezahlte anzeigen (' + paid.length + ')'}</button>`;
             if (showPaid) html += `<div class="space-y-4 mt-3">${paid.map(cardHtml).join('')}</div>`;
