@@ -30,6 +30,7 @@ case "$SITE" in
   stweg6) CT=125; IP=100.64.2.48; TYPE=stweg ;;
   stweg7) CT=126; IP=100.64.2.49; TYPE=stweg ;;
   meg)    CT=127; IP=100.64.2.50; TYPE=stweg ;;
+  pwa)    CT=130; IP=100.64.2.54; TYPE=pwa ;;
   *) echo "FEHLER: unbekannte site '$SITE'"; exit 1 ;;
 esac
 
@@ -74,6 +75,7 @@ case "$SITE" in
   www)    HOSTHDR=www.rosenweg4303.ch ;;
   isp)    HOSTHDR=isp.rosenweg4303.ch ;;
   meg)    HOSTHDR=meg.rosenweg4303.ch ;;
+  pwa)    HOSTHDR=pwa.rosenweg4303.ch ;;
   stweg*) HOSTHDR="$SITE.rosenweg4303.ch" ;;
 esac
 pct exec "$CT" -- bash -c "curl -s -o /dev/null -w 'health=%{http_code}\n' http://localhost/health; curl -s -o /dev/null -w 'index(%s)=%%{http_code}\n' -H 'Host: $HOSTHDR' http://localhost/ | sed 's/%s/$HOSTHDR/'"

@@ -1,8 +1,8 @@
 {
-  "name": "Rosenweg Reparatur melden",
-  "short_name": "Reparatur",
-  "start_url": "/reparatur/",
-  "scope": "/reparatur/",
+  "name": "Rosenweg Apps",
+  "short_name": "Rosenweg",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#f8fafc",

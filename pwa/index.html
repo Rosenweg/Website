@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0369a1">
+  <title>Rosenweg Apps</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="icon" href="/logo-rosenweg.png" type="image/png">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    /* sichere Bereiche fuer Notch / Home-Indicator */
+    .safe-top { padding-top: env(safe-area-inset-top); }
+    .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800 antialiased">
+
+  <!-- Kopf mit Logo + Titel -->
+  <header class="bg-sky-700 text-white sticky top-0 z-40 shadow safe-top">
+    <div class="px-4 py-3 flex items-center gap-3 max-w-md mx-auto">
+      <img src="/logo-rosenweg.png" alt="Rosenweg" class="h-8 w-8 rounded bg-white/90 p-0.5 object-contain">
+      <span class="text-lg font-semibold">Rosenweg Apps</span>
+      <!-- klein: bereits installiert -->
+      <span id="installedBadge" class="ml-auto text-[11px] font-medium px-2 py-0.5 rounded-full bg-sky-600/60 hidden">✓ Als App installiert</span>
+    </div>
+  </header>
+
+  <main class="max-w-md mx-auto px-4 pb-12">
+
+    <!-- =================================================================
+         Geführtes Install-Banner (nur wenn NICHT bereits installiert)
+         ================================================================= -->
+    <section id="installBanner" class="hidden mt-4">
+      <div class="bg-white rounded-2xl shadow-sm border border-sky-200 overflow-hidden">
+        <div class="bg-sky-50 px-4 py-3 border-b border-sky-100">
+          <h2 class="font-semibold text-sky-800 flex items-center gap-2">
+            <span class="text-xl leading-none">📲</span> Als App installieren
+          </h2>
+          <p class="text-sm text-slate-600 mt-1">
+            Als App installiert: schneller Zugriff, funktioniert offline,
+            Benachrichtigungen möglich.
+          </p>
+        </div>
+
+        <div class="px-4 py-4">
+          <!-- Android/Chrome: Direkt-Button (beforeinstallprompt) -->
+          <div id="installAndroid" class="hidden">
+            <button id="installBtn"
+              class="w-full bg-sky-700 text-white font-semibold rounded-xl py-3 shadow active:bg-sky-800 flex items-center justify-center gap-2">
+              <span class="text-lg leading-none">📲</span> Als App installieren
+            </button>
+            <!-- Fallback-Hinweis falls beforeinstallprompt (noch) nicht kam -->
+            <p id="installAndroidHint" class="hidden text-sm text-slate-500 mt-3 leading-relaxed">
+              Falls kein Button erscheint: im Browser-Menü
+              <span class="font-semibold">⋮</span> oben rechts
+              <span class="font-semibold">„App installieren"</span> (oder
+              <span class="font-semibold">„Zum Startbildschirm hinzufügen"</span>)
+              antippen.
+            </p>
+          </div>
+
+          <!-- iOS/Safari: Schritt-Anleitung (kein beforeinstallprompt) -->
+          <div id="installIos" class="hidden">
+            <p class="text-sm text-slate-700 mb-3">So fügst du die App hinzu:</p>
+            <ol class="space-y-3 text-sm text-slate-700">
+              <li class="flex items-start gap-3">
+                <span class="flex-none w-6 h-6 rounded-full bg-sky-100 text-sky-700 font-bold text-xs flex items-center justify-center">1</span>
+                <span>
+                  Tippe unten in der Leiste auf das
+                  <span class="font-semibold">Teilen-Symbol</span>
+                  <!-- iOS Share-Glyph als Inline-SVG -->
+                  <svg class="inline-block align-text-bottom w-5 h-5 text-sky-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M12 3v12"></path>
+                    <path d="M8 7l4-4 4 4"></path>
+                    <path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"></path>
+                  </svg>
+                </span>
+              </li>
+              <li class="flex items-start gap-3">
+                <span class="flex-none w-6 h-6 rounded-full bg-sky-100 text-sky-700 font-bold text-xs flex items-center justify-center">2</span>
+                <span>
+                  Wähle
+                  <span class="font-semibold">„Zum Home-Bildschirm"</span>
+                  <span class="text-slate-400">(ggf. etwas nach unten scrollen)</span>.
+                </span>
+              </li>
+              <li class="flex items-start gap-3">
+                <span class="flex-none w-6 h-6 rounded-full bg-sky-100 text-sky-700 font-bold text-xs flex items-center justify-center">3</span>
+                <span>Oben rechts auf <span class="font-semibold">„Hinzufügen"</span> tippen — fertig.</span>
+              </li>
+            </ol>
+            <p class="text-[12px] text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mt-3">
+              Hinweis: Push-Benachrichtigungen funktionieren auf dem iPhone/iPad
+              <span class="font-semibold">nur</span>, wenn die App so zum
+              Home-Bildschirm hinzugefügt wurde.
+            </p>
+          </div>
+
+          <!-- Generischer Fallback (Desktop / unbekannter Browser) -->
+          <div id="installGeneric" class="hidden">
+            <p class="text-sm text-slate-600 leading-relaxed">
+              Diese Seite lässt sich als App installieren. Suche im Menü deines
+              Browsers nach <span class="font-semibold">„Installieren"</span>
+              oder <span class="font-semibold">„Zum Startbildschirm hinzufügen"</span>.
+            </p>
+          </div>
+
+          <!-- Schliessen -->
+          <button id="installDismiss" class="mt-4 text-sm text-slate-400 active:text-slate-600 w-full text-center">
+            Später / ausblenden
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================================
+         App-Liste (große Touch-Karten)
+         ================================================================= -->
+    <section class="mt-5 space-y-3">
+      <h2 class="text-xs font-semibold uppercase tracking-wide text-slate-400 px-1">Apps</h2>
+
+      <!-- Reparatur melden (aktiv) -->
+      <a href="/reparatur/"
+        class="flex items-center gap-4 bg-white rounded-2xl shadow-sm border border-slate-200 p-4 active:bg-slate-50 transition">
+        <span class="flex-none w-12 h-12 rounded-xl bg-sky-50 flex items-center justify-center text-2xl leading-none">🔧</span>
+        <span class="min-w-0">
+          <span class="block font-semibold">Reparatur melden</span>
+          <span class="block text-sm text-slate-500">Schaden/Defekt melden, mit Foto</span>
+        </span>
+        <span class="ml-auto text-slate-300 text-xl leading-none">›</span>
+      </a>
+
+      <!-- Arbeits-/Zeiterfassung (bald, deaktiviert) -->
+      <div class="flex items-center gap-4 bg-white rounded-2xl border border-slate-200 p-4 opacity-60 cursor-not-allowed select-none">
+        <span class="flex-none w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center text-2xl leading-none">⏱️</span>
+        <span class="min-w-0">
+          <span class="block font-semibold">Arbeits-/Zeiterfassung</span>
+          <span class="block text-sm text-slate-500">Arbeit für die Gemeinschaft + Zeit erfassen</span>
+        </span>
+        <span class="ml-auto text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">bald</span>
+      </div>
+
+      <!-- Technik-Cockpit (bald, deaktiviert) -->
+      <div class="flex items-center gap-4 bg-white rounded-2xl border border-slate-200 p-4 opacity-60 cursor-not-allowed select-none">
+        <span class="flex-none w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center text-2xl leading-none">🛠️</span>
+        <span class="min-w-0">
+          <span class="block font-semibold">Technik-Cockpit</span>
+          <span class="block text-sm text-slate-500">Für die Technik: Meldungen, Alerts, Status</span>
+        </span>
+        <span class="ml-auto text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">bald</span>
+      </div>
+    </section>
+
+    <p class="text-center text-[11px] text-slate-400 mt-8">Rosenweg · pwa.rosenweg4303.ch</p>
+  </main>
+
+  <script>
+  'use strict';
+
+  const $ = id => document.getElementById(id);
+
+  // ---------- Plattform-/Installations-Erkennung ----------
+  // Läuft die Seite bereits als installierte App (Standalone)?
+  function isStandalone() {
+    return window.matchMedia('(display-mode: standalone)').matches
+      || window.navigator.standalone === true; // iOS-Safari-Eigenheit
+  }
+  // iOS (iPhone/iPad/iPod)?  iPadOS meldet sich teils als "Macintosh" mit Touch.
+  function isIos() {
+    const ua = navigator.userAgent || '';
+    const iOsClassic = /iphone|ipad|ipod/i.test(ua);
+    const iPadOs = /Macintosh/.test(ua) && 'ontouchend' in document;
+    return iOsClassic || iPadOs;
+  }
+
+  // gespeichertes beforeinstallprompt-Event (Android/Chrome)
+  let deferredPrompt = null;
+  // ob der User das Banner bewusst ausgeblendet hat (nur diese Session)
+  let dismissed = false;
+
+  // ---------- Banner-Steuerung ----------
+  function showInstalledBadge() {
+    $('installedBadge').classList.remove('hidden');
+    $('installBanner').classList.add('hidden');
+  }
+
+  // Entscheidet, WELCHE Anleitung sichtbar ist und ob das Banner überhaupt erscheint.
+  function renderInstallBanner() {
+    // Bereits installiert → Banner aus, kleines "installiert"-Badge an.
+    if (isStandalone()) { showInstalledBadge(); return; }
+    // Manuell ausgeblendet → nichts zeigen.
+    if (dismissed) { $('installBanner').classList.add('hidden'); return; }
+
+    // Variante wählen
+    const android = $('installAndroid');
+    const ios = $('installIos');
+    const generic = $('installGeneric');
+    android.classList.add('hidden');
+    ios.classList.add('hidden');
+    generic.classList.add('hidden');
+
+    if (isIos()) {
+      // iOS/Safari: kein beforeinstallprompt → Schritt-Anleitung.
+      ios.classList.remove('hidden');
+    } else if (deferredPrompt) {
+      // Android/Chrome mit verfügbarem Prompt → Direkt-Button.
+      android.classList.remove('hidden');
+      $('installAndroidHint').classList.add('hidden');
+    } else if (/android/i.test(navigator.userAgent)) {
+      // Android, aber Event (noch) nicht da → Menü-Hinweis zeigen.
+      android.classList.remove('hidden');
+      $('installAndroidHint').classList.remove('hidden');
+    } else {
+      // Desktop / unbekannt → generischer Hinweis.
+      generic.classList.remove('hidden');
+    }
+
+    $('installBanner').classList.remove('hidden');
+  }
+
+  // ---------- Events ----------
+  // Android/Chrome: Browser bietet Installation an → abfangen & merken.
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    renderInstallBanner();
+  });
+
+  // Wurde die App gerade installiert → Banner weg, Badge an.
+  window.addEventListener('appinstalled', () => {
+    deferredPrompt = null;
+    showInstalledBadge();
+  });
+
+  // Direkt-Button: nativen Install-Dialog auslösen.
+  $('installBtn').addEventListener('click', async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    try { await deferredPrompt.userChoice; } catch (_) {}
+    // Prompt ist nach einmaliger Nutzung verbraucht.
+    deferredPrompt = null;
+    renderInstallBanner();
+  });
+
+  // Banner ausblenden (nur diese Session).
+  $('installDismiss').addEventListener('click', () => {
+    dismissed = true;
+    $('installBanner').classList.add('hidden');
+  });
+
+  // Wechselt der Anzeige-Modus (z.B. nach Installation) → neu bewerten.
+  try {
+    window.matchMedia('(display-mode: standalone)')
+      .addEventListener('change', renderInstallBanner);
+  } catch (_) { /* aeltere Browser ohne addEventListener am MQL */ }
+
+  // ---------- Service Worker (scope /) ----------
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+  }
+
+  // ---------- Init ----------
+  renderInstallBanner();
+  </script>
+</body>
+</html>

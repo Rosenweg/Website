@@ -1,32 +1,37 @@
 /*
- * Service Worker — Rosenweg Reparatur-Melder PWA
- * Scope: /reparatur/
+ * Service Worker — Rosenweg Apps Launcher (Hub)
+ * Scope: /  (Wurzel)
+ *
+ * WICHTIG: Dieser SW hat scope '/', der Reparatur-SW scope '/reparatur/'.
+ * Damit sich die beiden nicht ins Gehege kommen, cacht DIESER SW NUR die
+ * eigene Launcher-Shell ('/', '/index.html', Manifest, Icons) und greift
+ * NICHT aktiv in das fremde Scope der Reparatur-App ein. Navigationen ins
+ * Reparatur-Scope laufen ueber den Reparatur-SW (das engste registrierte
+ * Scope gewinnt).
  *
  * Strategie:
- *  - App-Shell wird beim install precached (Offline-Start moeglich).
- *  - Navigationen (mode 'navigate'): network-first, Fallback auf gecachte index.html.
- *  - /api/-Requests: NIE cachen — immer Netzwerk. Bei Fehler den Browser-Default
- *    durchreichen, damit die App-eigene Offline-Queue (IndexedDB) greift.
- *  - Sonstige GETs (Assets, CDN): stale-while-revalidate.
+ *  - install: Launcher-Shell precachen (Offline-Start des Launchers moeglich).
+ *  - Navigationen (mode 'navigate'): network-first, Fallback auf /index.html.
+ *  - /api/-Requests: NIE cachen — immer Netzwerk.
+ *  - Sonstige GETs: stale-while-revalidate.
  */
 
-const CACHE = 'rosenweg-reparatur-v1';
+const CACHE = 'rosenweg-launcher-v1';
 
-// App-Shell — alles was fuer den Offline-Start noetig ist.
+// Launcher-App-Shell — nur das, was fuer den Offline-Start des Hubs noetig ist.
 const SHELL = [
-  '/reparatur/',
-  '/reparatur/index.html',
-  '/reparatur/manifest.webmanifest',
+  '/',
+  '/index.html',
+  '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
-  '/js/authentik-auth.js',
 ];
 
 // --- install: Shell precachen, sofort aktiv werden -------------------------
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE).then((cache) =>
-      // einzeln adden, damit ein fehlendes Asset (z.B. Icon) den install nicht killt
+      // einzeln adden, damit ein fehlendes Asset den install nicht killt
       Promise.allSettled(SHELL.map((url) => cache.add(url)))
     ).then(() => self.skipWaiting())
   );
@@ -46,8 +51,7 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // 1) API niemals abfangen/cachen — immer ans Netz; Fehler nicht kaschieren,
-  //    damit die App-Queue den Netzfehler erkennt.
+  // 1) API niemals abfangen/cachen — immer ans Netz.
   if (url.pathname.startsWith('/api/')) {
     return; // Default-Browserverhalten
   }
@@ -55,20 +59,21 @@ self.addEventListener('fetch', (event) => {
   // Nur GET wird gecacht; alles andere durchreichen.
   if (req.method !== 'GET') return;
 
-  // 2) Navigationen → network-first mit Cache-Fallback auf index.html.
+  // 2) Navigationen → network-first mit Cache-Fallback auf den Launcher.
+  //    Hinweis: Navigationen ins /reparatur/-Scope werden i.d.R. vom
+  //    Reparatur-SW behandelt (engstes Scope gewinnt); landet hier nur,
+  //    was zum Launcher-Scope gehoert.
   if (req.mode === 'navigate') {
     event.respondWith(
       fetch(req)
         .then((resp) => {
-          // frische Navigationsantwort fuer spaeter ablegen
+          // frische Launcher-Antwort fuer spaeter ablegen
           const copy = resp.clone();
-          caches.open(CACHE).then((c) => c.put('/reparatur/index.html', copy)).catch(() => {});
+          caches.open(CACHE).then((c) => c.put('/index.html', copy)).catch(() => {});
           return resp;
         })
         .catch(() =>
-          caches.match('/reparatur/index.html').then(
-            (cached) => cached || caches.match('/reparatur/')
-          )
+          caches.match('/index.html').then((cached) => cached || caches.match('/'))
         )
     );
     return;
