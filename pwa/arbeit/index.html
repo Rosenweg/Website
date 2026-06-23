@@ -106,6 +106,8 @@
               class="hidden bg-sky-700 text-white font-semibold rounded-xl py-3 active:bg-sky-800">▶ Weiter</button>
             <button type="button" id="btnStop"
               class="hidden bg-slate-700 text-white font-semibold rounded-xl py-3 active:bg-slate-800">⏹ Stopp</button>
+            <button type="button" id="btnReset"
+              class="hidden bg-white border border-slate-300 text-slate-600 font-semibold rounded-xl py-3 active:bg-slate-100">↺ Zurücksetzen</button>
           </div>
         </div>
         <p class="text-[11px] text-slate-400 text-center mt-2">Läuft auch bei gesperrtem Bildschirm oder App-Neustart weiter.</p>
@@ -302,6 +304,7 @@
     $('btnPause').classList.toggle('hidden', !running);
     $('btnResume').classList.toggle('hidden', running || !hasTime);
     $('btnStop').classList.toggle('hidden', !hasTime);
+    $('btnReset').classList.toggle('hidden', !hasTime);
   }
 
   // 1s-Tick NUR fuers Rendering (per rAF gedrosselt) — Zeit kommt aus Zeitstempeln.
@@ -707,6 +710,10 @@
     $('btnPause').addEventListener('click', timerPause);
     $('btnResume').addEventListener('click', timerStart);
     $('btnStop').addEventListener('click', timerStop);
+    $('btnReset').addEventListener('click', () => {
+      if (elapsedMs() > 60000 && !confirm('Stoppuhr zurücksetzen? Die erfasste Zeit geht verloren.')) return;
+      timerReset();
+    });
 
     // Formular
     $('form').addEventListener('submit', onSubmit);
