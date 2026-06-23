@@ -1673,6 +1673,103 @@ app.get('/api/tv/stream/:channelId', (req, res, next) => {
   try { res.end(); } catch {}
 });
 
+// ─── TV7 Extern (udpxy-Playlist fuer Ferien/Reisen, token-geschuetzt) ─────────
+// udpxy relayt den Multicast als HTTP (alle 242 Sender, kein Transcode). Die nginx
+// auf isp.rosenweg4303.ch proxyt /tv-udp/<grp>:<port> via auth_request an
+// /api/tv/extern/validate und dann an udpxy. Token = DB-Eintrag (verlaengerbar/
+// widerrufbar im Interface), KEIN stateless HMAC.
+const TV_EXTERN_BASE = process.env.TV_EXTERN_BASE || 'https://isp.rosenweg4303.ch';
+const TV_EXTERN_TTL_DAYS = 30;
+async function ensureTvExternTable() {
+  await pool.query(`CREATE TABLE IF NOT EXISTS tv_extern_tokens (
+    id SERIAL PRIMARY KEY,
+    token TEXT UNIQUE NOT NULL,
+    user_email TEXT NOT NULL,
+    label TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    last_used_at TIMESTAMPTZ,
+    revoked BOOLEAN DEFAULT FALSE)`);
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_tv_extern_token ON tv_extern_tokens(token)');
+}
+setTimeout(() => ensureTvExternTable().catch(e => console.warn('[tv-extern] init:', e.message)), 12000);
+
+async function tvExternValidate(token) {
+  if (!token) return false;
+  const r = await pool.query('SELECT id FROM tv_extern_tokens WHERE token = $1 AND revoked = FALSE AND expires_at > NOW() LIMIT 1', [String(token)]);
+  if (!r.rows[0]) return false;
+  pool.query('UPDATE tv_extern_tokens SET last_used_at = NOW() WHERE id = $1', [r.rows[0].id]).catch(() => {});
+  return true;
+}
+
+// nginx auth_request-Ziel: schnell 200/403 (kein Auth — der Token IST die Auth).
+app.get('/api/tv/extern/validate', async (req, res) => {
+  try { res.status((await tvExternValidate(req.query.token)) ? 200 : 403).end(); }
+  catch { res.status(403).end(); }
+});
+
+// Token erstellen
+app.post('/api/tv/extern/token', authMiddleware, async (req, res) => {
+  try {
+    const email = (req.user.email || '').toLowerCase();
+    const label = String(req.body?.label || 'Ferien').slice(0, 80);
+    const token = crypto.randomBytes(18).toString('base64url');
+    const exp = new Date(Date.now() + TV_EXTERN_TTL_DAYS * 86400000);
+    await pool.query('INSERT INTO tv_extern_tokens (token, user_email, label, expires_at) VALUES ($1,$2,$3,$4)', [token, email, label, exp]);
+    res.json({ ok: true, token, m3u_url: `${TV_EXTERN_BASE}/api/tv/extern.m3u?token=${token}`, expires_at: exp });
+  } catch (e) { console.error('[tv-extern-create]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+// Eigene Tokens auflisten
+app.get('/api/tv/extern/tokens', authMiddleware, async (req, res) => {
+  try {
+    const email = (req.user.email || '').toLowerCase();
+    const r = await pool.query(
+      `SELECT id, token, label, created_at, expires_at, last_used_at, revoked, (expires_at < NOW()) AS expired
+         FROM tv_extern_tokens WHERE LOWER(user_email) = $1 ORDER BY created_at DESC`, [email]);
+    res.json({ tokens: r.rows, base: TV_EXTERN_BASE });
+  } catch (e) { res.status(500).json({ error: 'Fehler' }); }
+});
+
+// Verlaengern (+30 Tage ab jetzt, hebt revoke auf)
+app.post('/api/tv/extern/token/:id/extend', authMiddleware, async (req, res) => {
+  try {
+    const email = (req.user.email || '').toLowerCase();
+    const exp = new Date(Date.now() + TV_EXTERN_TTL_DAYS * 86400000);
+    const r = await pool.query('UPDATE tv_extern_tokens SET expires_at = $1, revoked = FALSE WHERE id = $2 AND LOWER(user_email) = $3 RETURNING expires_at',
+      [exp, parseInt(req.params.id, 10), email]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'Nicht gefunden' });
+    res.json({ ok: true, expires_at: r.rows[0].expires_at });
+  } catch (e) { res.status(500).json({ error: 'Fehler' }); }
+});
+
+// Widerrufen/Loeschen
+app.delete('/api/tv/extern/token/:id', authMiddleware, async (req, res) => {
+  try {
+    const email = (req.user.email || '').toLowerCase();
+    await pool.query('DELETE FROM tv_extern_tokens WHERE id = $1 AND LOWER(user_email) = $2', [parseInt(req.params.id, 10), email]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: 'Fehler' }); }
+});
+
+// Tokenisierte Playlist: alle Sender als udpxy-Proxy-URLs auf isp (extern erreichbar).
+app.get('/api/tv/extern.m3u', async (req, res) => {
+  try {
+    const token = String(req.query.token || '');
+    if (!(await tvExternValidate(token))) return res.status(403).type('text/plain').send('# ungueltiger oder abgelaufener Token');
+    const r = await fetch('https://api.init7.net/tvchannels.m3u', { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) throw new Error('init7 HTTP ' + r.status);
+    let body = await r.text();
+    body = body.replace(/^#EXTM3U.*/m, '#EXTM3U url-tvg="https://tv.rosenweg4303.ch/epg.xml" x-tvg-url="https://tv.rosenweg4303.ch/epg.xml"');
+    body = body.replace(/(#EXTINF:[^\n]*?)tvg-name="([^"]+)"/g, (m, pre, name) => m.includes('tvg-id=') ? m : `${pre}tvg-id="${name}" tvg-name="${name}"`);
+    body = body.replace(/^#EXTINF:0([ ,])/gm, '#EXTINF:-1$1');
+    // udp://@<grp>:<port> -> <BASE>/tv-udp/<grp>:<port>?token=<token>
+    body = body.replace(/udp:\/\/@?([\d.]+):(\d+)/gi, (m, grp, port) => `${TV_EXTERN_BASE}/tv-udp/${grp}:${port}?token=${encodeURIComponent(token)}`);
+    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
+    res.send(body);
+  } catch (e) { console.error('[tv-extern-m3u]', e); res.status(500).type('text/plain').send('# Fehler'); }
+});
+
 // ─── Print Job Pickup Confirmation ───────────────────────────────────
 app.get('/api/pickup/:token', async (req, res) => {
   try {
