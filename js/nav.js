@@ -46,6 +46,7 @@ const SERVICES_GROUPS = [
       { label: 'WhatsApp', href: 'https://whatsapp.rosenweg4303.ch/', activeKey: 'whatsapp-bot', perm: 'whatsapp-bot' },
       { label: 'PBX (Telefonanlage)', href: 'https://pbx.rosenweg4303.ch', activeKey: 'pbx-admin', perm: 'pbx-admin' },
       { label: 'Reklamationen', href: 'reklamationen.html', activeKey: 'reklamationen', perm: 'reklamationen' },
+      { label: 'Reklamationen (meine STWEG)', href: 'pages/reklamationen.html', activeKey: 'reklamationen', permAny: 'bewohner,eigentuemer,ausschuss,technik,praesident,verwaltung', stwegOnly: true },
     ],
   },
   {
@@ -71,6 +72,9 @@ const RosenwegNav = {
   },
 
   _renderServiceItem(item, base, active, isMobile) {
+    // STWEG-only-Eintraege (relative pages/-Links) nur auf STWEG-Sites zeigen,
+    // sonst broken Link auf www/isp.
+    if (item.stwegOnly && !this._isStwegSite()) return '';
     const permAttr = item.perm
       ? `data-perm="${this._esc(item.perm)}"`
       : item.permAny ? `data-perm-any="${this._esc(item.permAny)}"` : '';
@@ -261,6 +265,17 @@ const RosenwegNav = {
       if (path.includes('/stweg')) return '../';
     }
     return '/';
+  },
+
+  // Sind wir auf einer STWEG-Webseite? (stweg1-7/meg-Subdomain, rosenweg9/rosenweg1-Domain,
+  // oder Direktzugriff /stwegN/...). Steuert STWEG-only-Nav-Eintraege (relative pages/-Links).
+  _isStwegSite() {
+    const h = (typeof window !== 'undefined' && window.location.hostname) || '';
+    const p = (typeof window !== 'undefined' && window.location.pathname) || '';
+    return /^(stweg[1-7]|meg)\.rosenweg4303\.ch$/.test(h)
+      || /(^|\.)rosenweg9\.ch$/.test(h)
+      || /(^|\.)rosenweg1\.ch$/.test(h)
+      || p.includes('/stweg');
   },
 
   // Seiten-Registry = nur METADATEN (Datei/Label/Gruppe/perm-Schlüssel).
