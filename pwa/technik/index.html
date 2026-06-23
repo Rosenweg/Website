@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0369a1">
+  <title>Technik-Cockpit — Rosenweg</title>
+  <link rel="manifest" href="/technik/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="icon" href="/logo-rosenweg.png" type="image/png">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    .safe-top { padding-top: env(safe-area-inset-top); }
+    .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800 antialiased">
+
+  <!-- Titel-Balken -->
+  <header class="bg-sky-700 text-white sticky top-0 z-40 shadow safe-top">
+    <div class="px-4 py-3 flex items-center gap-2 max-w-md mx-auto">
+      <span class="text-lg font-semibold">🛠️ Technik-Cockpit</span>
+      <span id="netBadge" class="ml-auto text-[11px] font-medium px-2 py-0.5 rounded-full bg-sky-600/60 hidden"></span>
+    </div>
+  </header>
+
+  <!-- Install-Banner -->
+  <div id="installBanner" class="hidden max-w-md mx-auto px-4 pt-3">
+    <div class="bg-sky-50 border border-sky-200 rounded-xl px-3 py-3 text-sm relative">
+      <button id="installDismiss" type="button"
+        class="absolute top-2 right-2 text-slate-400 active:text-slate-600 text-lg leading-none w-7 h-7" aria-label="Ausblenden">✕</button>
+      <div id="installAndroid" class="hidden pr-6">
+        <p class="font-semibold text-sky-800 mb-1">📲 Als App installieren</p>
+        <p class="text-slate-600 mb-2">Schneller Zugriff, offline nutzbar, Benachrichtigungen möglich.</p>
+        <button id="installBtn" type="button"
+          class="bg-sky-700 text-white font-semibold rounded-lg px-4 py-2 active:bg-sky-800">📲 Installieren</button>
+        <p id="installAndroidHint" class="hidden text-slate-500 mt-2">
+          Falls kein Dialog erscheint: Browser-Menü <span class="font-semibold">⋮</span> →
+          <span class="font-semibold">„App installieren"</span>.
+        </p>
+      </div>
+      <div id="installIos" class="hidden pr-6">
+        <p class="font-semibold text-sky-800 mb-1">📲 Zum Home-Bildschirm hinzufügen</p>
+        <p class="text-slate-700">
+          <span class="font-semibold">Teilen-Symbol</span>
+          <svg class="inline-block align-text-bottom w-4 h-4 text-sky-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v12"></path><path d="M8 7l4-4 4 4"></path>
+            <path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"></path>
+          </svg>
+          unten antippen → <span class="font-semibold">„Zum Home-Bildschirm"</span>.
+        </p>
+        <p class="text-[12px] text-amber-700 mt-1">Push-Benachrichtigungen gehen am iPhone nur nach dieser Installation.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lade-Zustand -->
+  <div id="loading" class="text-center text-slate-500 py-16">Lade …</div>
+
+  <!-- Kein-Zugang-Screen -->
+  <div id="denied" class="hidden max-w-md mx-auto px-5 py-16 text-center">
+    <div class="text-5xl mb-4">🔒</div>
+    <h2 class="text-xl font-bold mb-2">Nur für die Technik</h2>
+    <p class="text-slate-500 mb-8">Dieses Cockpit ist der Technik-Gruppe vorbehalten. Falls du Zugriff brauchst, melde dich bei der Verwaltung.</p>
+    <a href="/" class="inline-block bg-sky-700 text-white font-semibold rounded-xl px-6 py-3 active:bg-sky-800">Zur App-Übersicht</a>
+  </div>
+
+  <!-- App -->
+  <main id="app" class="hidden max-w-md mx-auto px-4 pb-28">
+
+    <!-- ===== Tab: Triage ===== -->
+    <section id="view-triage" class="py-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold">🔧 Reklamations-Triage</h2>
+        <button id="triageRefresh" class="text-sky-700 text-sm font-medium active:text-sky-900">↻ Aktualisieren</button>
+      </div>
+      <div id="triageMsg" class="text-center text-slate-400 py-8 text-sm">Lade …</div>
+      <div id="triageList" class="space-y-3"></div>
+    </section>
+
+    <!-- ===== Tab: Alerts ===== -->
+    <section id="view-alerts" class="hidden py-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold">📡 Alerts / Wartung</h2>
+        <button id="alertsRefresh" class="text-sky-700 text-sm font-medium active:text-sky-900">↻ Aktualisieren</button>
+      </div>
+      <div id="alertsMsg" class="text-center text-slate-400 py-8 text-sm">Lade …</div>
+      <div id="alertsList" class="space-y-3"></div>
+    </section>
+
+    <!-- ===== Tab: Energie ===== -->
+    <section id="view-energie" class="hidden py-4">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold">⚡ Energie / Solar</h2>
+        <button id="energieRefresh" class="text-sky-700 text-sm font-medium active:text-sky-900">↻ Aktualisieren</button>
+      </div>
+      <div id="energieMsg" class="text-center text-slate-400 py-8 text-sm">Lade …</div>
+      <div id="energieGrid" class="grid grid-cols-2 gap-3"></div>
+    </section>
+
+    <!-- ===== Tab: Mehr (Schnellzugriff + Benachrichtigungen) ===== -->
+    <section id="view-mehr" class="hidden py-4 space-y-6">
+      <div>
+        <h2 class="font-semibold mb-3">🔗 Schnellzugriff</h2>
+        <div id="quickLinks" class="space-y-2"></div>
+      </div>
+
+      <div>
+        <h2 class="font-semibold mb-3">🔔 Benachrichtigungen</h2>
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+          <p id="pushState" class="text-sm text-slate-600 mb-3">Status wird geprüft …</p>
+          <button id="pushBtn" type="button"
+            class="hidden w-full bg-sky-700 text-white font-semibold rounded-xl py-3 active:bg-sky-800 disabled:opacity-50">
+            🔔 Benachrichtigungen aktivieren
+          </button>
+          <button id="pushTestBtn" type="button"
+            class="hidden w-full mt-2 bg-white border border-sky-300 text-sky-800 font-semibold rounded-xl py-2.5 active:bg-sky-50">
+            Test-Benachrichtigung senden
+          </button>
+          <p id="pushHint" class="hidden text-[12px] text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mt-3"></p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Untere Tab-Leiste -->
+  <nav id="tabbar" class="hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 safe-bottom z-40">
+    <div class="max-w-md mx-auto grid grid-cols-4">
+      <button data-tab="triage" class="tab py-2.5 text-[11px] font-medium text-sky-700 flex flex-col items-center gap-0.5">
+        <span class="text-xl leading-none">🔧</span> Triage
+      </button>
+      <button data-tab="alerts" class="tab py-2.5 text-[11px] font-medium text-slate-400 flex flex-col items-center gap-0.5">
+        <span class="text-xl leading-none">📡</span> Alerts
+      </button>
+      <button data-tab="energie" class="tab py-2.5 text-[11px] font-medium text-slate-400 flex flex-col items-center gap-0.5">
+        <span class="text-xl leading-none">⚡</span> Energie
+      </button>
+      <button data-tab="mehr" class="tab py-2.5 text-[11px] font-medium text-slate-400 flex flex-col items-center gap-0.5">
+        <span class="text-xl leading-none">⋯</span> Mehr
+      </button>
+    </div>
+  </nav>
+
+  <script>
+  'use strict';
+
+  // ---------- Helfer ----------
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const fmtDate = d => { if (!d) return '—'; try { return new Date(d).toLocaleString('de-CH', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' }); } catch { return String(d).slice(0,16); } };
+  const fmtW = w => { const n = Number(w); if (!Number.isFinite(n)) return '—'; return Math.abs(n) >= 1000 ? (n/1000).toFixed(2).replace(/\.?0+$/,'') + ' kW' : Math.round(n) + ' W'; };
+
+  // Kategorie-Labels (gleiche Werte wie Reparatur-Melder)
+  const KAT_LABEL = {
+    aufzug: '🛗 Aufzug', heizung: '🔥 Heizung', wasser: '💧 Wasser',
+    tuer: '🚪 Tür/Schloss', reinigung: '🧹 Reinigung', sonstige: '❓ Sonstiges',
+  };
+
+  // Reklamations-Status → erlaubte Werte (server: offen|weitergeleitet|erledigt|abgewiesen)
+  const STATUS = {
+    offen:          { l:'offen',          c:'bg-slate-100 text-slate-600' },
+    weitergeleitet: { l:'weitergeleitet', c:'bg-blue-100 text-blue-700' },
+    erledigt:       { l:'erledigt',       c:'bg-green-100 text-green-700' },
+    abgewiesen:     { l:'abgewiesen',     c:'bg-red-100 text-red-700' },
+  };
+  // Status-Buttons je Eintrag (Ziel-Status)
+  const STATUS_ACTIONS = [
+    { v:'weitergeleitet', l:'➡️ weitergeleitet', c:'bg-blue-600' },
+    { v:'erledigt',       l:'✅ erledigt',        c:'bg-green-600' },
+    { v:'abgewiesen',     l:'❌ abgewiesen',      c:'bg-red-600' },
+  ];
+
+  let currentUser = null;
+  let handwerker = [];        // [{id, firma, kategorie, ...}]
+  let handwerkerLoaded = false;
+
+  // ---------- Zugangsprüfung: Technik-Gruppe ODER isAdmin ----------
+  function hasTechnikAccess(user) {
+    if (!user) return false;
+    if (user.isAdmin === true) return true;
+    const groups = user.groups || [];
+    return groups.some(g => String(g).toLowerCase() === 'technik');
+  }
+
+  // ---------- Netz-Badge ----------
+  function updateNetBadge() {
+    const b = $('netBadge');
+    if (!navigator.onLine) { b.textContent = 'offline'; b.classList.remove('hidden'); }
+    else b.classList.add('hidden');
+  }
+
+  // ---------- Tabs ----------
+  function switchTab(tab) {
+    $('view-triage').classList.toggle('hidden', tab !== 'triage');
+    $('view-alerts').classList.toggle('hidden', tab !== 'alerts');
+    $('view-energie').classList.toggle('hidden', tab !== 'energie');
+    $('view-mehr').classList.toggle('hidden', tab !== 'mehr');
+    document.querySelectorAll('.tab').forEach(b => {
+      const active = b.dataset.tab === tab;
+      b.classList.toggle('text-sky-700', active);
+      b.classList.toggle('text-slate-400', !active);
+    });
+    if (tab === 'triage') loadTriage();
+    else if (tab === 'alerts') loadAlerts();
+    else if (tab === 'energie') loadEnergie();
+    else if (tab === 'mehr') { buildQuickLinks(); refreshPushUi(); }
+  }
+
+  // =====================================================================
+  //  1) Reklamations-Triage
+  // =====================================================================
+  function statusBadge(status) {
+    const s = STATUS[status] || STATUS.offen;
+    return `<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full ${s.c}">${esc(s.l)}</span>`;
+  }
+
+  function handwerkerOptions(selectedId) {
+    const opts = ['<option value="">— Handwerker zuweisen —</option>'];
+    for (const h of handwerker) {
+      const label = [h.firma, h.kategorie].filter(Boolean).join(' · ');
+      const sel = String(h.id) === String(selectedId) ? ' selected' : '';
+      opts.push(`<option value="${esc(h.id)}"${sel}>${esc(label || ('#' + h.id))}</option>`);
+    }
+    return opts.join('');
+  }
+
+  function triageCardHtml(r) {
+    const kat = KAT_LABEL[r.kategorie] || esc(r.kategorie || 'Sonstiges');
+    const foto = r.bild_pfad ? ' <span title="Foto angehängt">📷</span>' : '';
+    const von = [r.person_name, r.stweg ? ('STWEG ' + r.stweg) : null].filter(Boolean).map(esc).join(' · ');
+    const notiz = r.notiz ? esc(r.notiz) : '';
+    const statusBtns = STATUS_ACTIONS.map(a =>
+      `<button type="button" data-act="status" data-id="${esc(r.id)}" data-val="${a.v}"
+         class="${a.c} text-white text-xs font-semibold rounded-lg px-2.5 py-1.5 active:opacity-80 ${r.status === a.v ? 'ring-2 ring-offset-1 ring-slate-400' : ''}">${a.l}</button>`
+    ).join('');
+    return `
+      <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-3" data-rekl="${esc(r.id)}">
+        <div class="flex items-start justify-between gap-2">
+          <div class="text-sm font-semibold">#${esc(r.id)} · ${kat}${foto}</div>
+          ${statusBadge(r.status)}
+        </div>
+        ${von ? `<div class="text-[11px] text-slate-400 mt-0.5">${von}</div>` : ''}
+        <div class="text-sm text-slate-700 mt-1 whitespace-pre-wrap break-words">${esc(r.beschreibung)}</div>
+        <div class="text-[11px] text-slate-400 mt-1">${esc(fmtDate(r.created_at))}</div>
+
+        <div class="flex flex-wrap gap-2 mt-3">${statusBtns}</div>
+
+        <div class="mt-3">
+          <select data-act="assign" data-id="${esc(r.id)}"
+            class="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm bg-white focus:ring-2 focus:ring-sky-500 outline-none">
+            ${handwerkerOptions(r.handwerker_id)}
+          </select>
+        </div>
+
+        <div class="mt-2 flex gap-2">
+          <input type="text" data-act="notiz-input" data-id="${esc(r.id)}" value="${notiz}" maxlength="2000"
+            placeholder="Notiz …"
+            class="flex-1 rounded-lg border border-slate-300 px-2 py-2 text-sm focus:ring-2 focus:ring-sky-500 outline-none">
+          <button type="button" data-act="notiz-save" data-id="${esc(r.id)}"
+            class="bg-sky-700 text-white text-sm font-semibold rounded-lg px-3 active:bg-sky-800">Speichern</button>
+        </div>
+
+        <div data-act="row-msg" data-id="${esc(r.id)}" class="hidden text-[11px] mt-2 rounded-lg px-2 py-1.5"></div>
+      </div>`;
+  }
+
+  function rowMsg(id, text, ok) {
+    const el = document.querySelector(`[data-act="row-msg"][data-id="${CSS.escape(String(id))}"]`);
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'text-[11px] mt-2 rounded-lg px-2 py-1.5 ' + (ok ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-700');
+    el.classList.remove('hidden');
+    if (ok) setTimeout(() => el.classList.add('hidden'), 2500);
+  }
+
+  async function loadHandwerker() {
+    if (handwerkerLoaded) return;
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/handwerker', { cache: 'no-store' });
+      if (r.ok) {
+        const data = await r.json();
+        handwerker = Array.isArray(data.handwerker) ? data.handwerker : [];
+        handwerkerLoaded = true;
+      }
+    } catch { /* Zuweisung dann ohne Liste */ }
+  }
+
+  async function loadTriage() {
+    const msg = $('triageMsg'); const list = $('triageList');
+    msg.classList.remove('hidden'); msg.textContent = 'Lade …'; list.innerHTML = '';
+    await loadHandwerker();
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/reklamationen?status=offen', { cache: 'no-store' });
+      if (r.status === 403) { msg.textContent = 'Keine Berechtigung (fehlende „reklamationen"-Permission).'; return; }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      let rows = Array.isArray(data.reklamationen) ? data.reklamationen : [];
+      // offene zuerst, dann nach Datum (server filtert bereits status=offen, defensiv trotzdem)
+      rows.sort((a, b) => {
+        if ((a.status === 'offen') !== (b.status === 'offen')) return a.status === 'offen' ? -1 : 1;
+        return new Date(b.created_at) - new Date(a.created_at);
+      });
+      if (!rows.length) { msg.textContent = 'Keine offenen Reklamationen. 🎉'; return; }
+      msg.classList.add('hidden');
+      list.innerHTML = rows.map(triageCardHtml).join('');
+    } catch (e) {
+      msg.textContent = 'Fehler beim Laden: ' + e.message;
+    }
+  }
+
+  // PUT-Helfer
+  async function putRekl(id, body) {
+    const r = await AuthentikAuth.apiFetch('/api/reklamationen/' + encodeURIComponent(id), { method: 'PUT', body });
+    if (!r.ok) {
+      let m = 'HTTP ' + r.status;
+      try { const j = await r.json(); if (j && j.error) m = j.error; } catch {}
+      throw new Error(m);
+    }
+    return r.json().catch(() => ({}));
+  }
+
+  // Delegiertes Click-/Change-Handling im Triage-Bereich
+  function wireTriage() {
+    $('triageRefresh').addEventListener('click', loadTriage);
+    $('triageList').addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('[data-act]');
+      if (!btn) return;
+      const act = btn.dataset.act; const id = btn.dataset.id;
+      if (act === 'status') {
+        try { await putRekl(id, { status: btn.dataset.val }); rowMsg(id, '✓ Status: ' + btn.dataset.val, true); loadTriage(); }
+        catch (e) { rowMsg(id, 'Fehler: ' + e.message, false); }
+      } else if (act === 'notiz-save') {
+        const input = document.querySelector(`[data-act="notiz-input"][data-id="${CSS.escape(String(id))}"]`);
+        try { await putRekl(id, { notiz: input ? input.value : '' }); rowMsg(id, '✓ Notiz gespeichert', true); }
+        catch (e) { rowMsg(id, 'Fehler: ' + e.message, false); }
+      }
+    });
+    $('triageList').addEventListener('change', async (ev) => {
+      const sel = ev.target.closest('[data-act="assign"]');
+      if (!sel) return;
+      const id = sel.dataset.id;
+      const val = sel.value === '' ? null : parseInt(sel.value, 10);
+      try {
+        // Zuweisung: handwerker_id setzen; bei Zuweisung optional auf weitergeleitet
+        await putRekl(id, { handwerker_id: val });
+        rowMsg(id, val ? '✓ Handwerker zugewiesen' : '✓ Zuweisung entfernt', true);
+      } catch (e) { rowMsg(id, 'Fehler: ' + e.message, false); }
+    });
+  }
+
+  // =====================================================================
+  //  2) Alerts / Wartung
+  // =====================================================================
+  const SEVERITY = {
+    critical: 'bg-red-100 text-red-700', high: 'bg-orange-100 text-orange-700',
+    medium: 'bg-amber-100 text-amber-800', low: 'bg-slate-100 text-slate-600', info: 'bg-sky-100 text-sky-700',
+  };
+  const M_STATUS = { active: '🔴 aktiv', planned: '🗓️ geplant', completed: '✅ abgeschlossen' };
+
+  function alertCardHtml(m) {
+    const sevC = SEVERITY[String(m.severity || '').toLowerCase()] || 'bg-slate-100 text-slate-600';
+    const st = M_STATUS[m.status] || esc(m.status || '');
+    const when = m.start_at ? esc(fmtDate(m.start_at)) + (m.end_at ? ' – ' + esc(fmtDate(m.end_at)) : '') : '';
+    const src = m.auto_source ? `<span class="text-[10px] text-slate-400 ml-1">(${esc(m.auto_source)})</span>` : '';
+    return `
+      <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+        <div class="flex items-start justify-between gap-2">
+          <div class="text-sm font-semibold break-words">${esc(m.title)}${src}</div>
+          ${m.severity ? `<span class="text-[11px] font-semibold px-2 py-0.5 rounded-full ${sevC}">${esc(m.severity)}</span>` : ''}
+        </div>
+        <div class="text-[11px] text-slate-500 mt-0.5">${st}${m.scope ? ' · ' + esc(m.scope) : ''}</div>
+        ${m.description ? `<div class="text-sm text-slate-700 mt-1 whitespace-pre-wrap break-words">${esc(m.description)}</div>` : ''}
+        ${when ? `<div class="text-[11px] text-slate-400 mt-1">${when}</div>` : ''}
+      </div>`;
+  }
+
+  async function loadAlerts() {
+    const msg = $('alertsMsg'); const list = $('alertsList');
+    msg.classList.remove('hidden'); msg.textContent = 'Lade …'; list.innerHTML = '';
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/maintenance', { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      const rows = Array.isArray(data.maintenance) ? data.maintenance : [];
+      if (!rows.length) { msg.textContent = 'Keine Wartungen / Alerts.'; return; }
+      msg.classList.add('hidden');
+      list.innerHTML = rows.map(alertCardHtml).join('');
+    } catch (e) {
+      msg.textContent = 'Fehler beim Laden: ' + e.message;
+    }
+  }
+
+  // =====================================================================
+  //  3) Energie / Solar  (via /api/energy/ auf dieser Subdomain proxied)
+  // =====================================================================
+  function tile(label, value, sub, accent) {
+    return `
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-3">
+        <div class="text-[11px] text-slate-400">${esc(label)}</div>
+        <div class="text-xl font-bold ${accent || 'text-slate-800'} mt-0.5">${esc(value)}</div>
+        ${sub ? `<div class="text-[11px] text-slate-400 mt-0.5">${esc(sub)}</div>` : ''}
+      </div>`;
+  }
+
+  async function loadEnergie() {
+    const msg = $('energieMsg'); const grid = $('energieGrid');
+    msg.classList.remove('hidden'); msg.textContent = 'Lade …'; grid.innerHTML = '';
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/energy/solar-live', { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json() || {};
+      const tiles = [];
+      if (d.production_w !== undefined) tiles.push(tile('☀️ PV-Produktion', fmtW(d.production_w), d.production_source ? 'Quelle: ' + d.production_source : '', 'text-amber-600'));
+      if (d.consumption_w !== undefined) tiles.push(tile('🏠 Verbrauch', fmtW(d.consumption_w), d.self_pct ? d.self_pct + '% Eigenverbrauch' : '', 'text-sky-700'));
+      if (d.grid_w !== undefined) {
+        const draw = Number(d.draw_w) || 0, feed = Number(d.feed_in_w) || 0;
+        tiles.push(feed > draw
+          ? tile('🔌 Netz', '↑ ' + fmtW(feed), 'Einspeisung', 'text-green-600')
+          : tile('🔌 Netz', '↓ ' + fmtW(draw), 'Bezug', 'text-red-600'));
+      }
+      if (d.boiler && d.boiler.power_w !== undefined) tiles.push(tile('🔥 ' + (d.boiler.label || 'Boiler'), fmtW(d.boiler.power_w), (d.boiler.percent || 0) + '%' + (d.boiler.online ? '' : ' · offline'), 'text-orange-600'));
+      if (d.allgemein && d.allgemein.power_w !== undefined) tiles.push(tile('💡 Allgemein', fmtW(d.allgemein.power_w), d.allgemein.online ? '' : 'offline', 'text-slate-700'));
+      if (d.wohnungen && d.wohnungen.power_w !== undefined) tiles.push(tile('🏘️ Wohnungen', fmtW(d.wohnungen.power_w), (d.wohnungen.online_count || 0) + '/' + (d.wohnungen.total_count || 0) + ' online', 'text-slate-700'));
+      if (d.today && d.today.production_wh !== undefined) tiles.push(tile('📅 Heute PV', ((Number(d.today.production_wh) || 0) / 1000).toFixed(1) + ' kWh', 'Einspeisung ' + ((Number(d.today.feed_in_wh) || 0) / 1000).toFixed(1) + ' kWh', 'text-amber-600'));
+
+      // Fallback: /api/energy/live (Roh-Meter-Map) falls solar-live nichts lieferte
+      if (!tiles.length) {
+        try {
+          const lr = await AuthentikAuth.apiFetch('/api/energy/live', { cache: 'no-store' });
+          if (lr.ok) {
+            const live = await lr.json() || {};
+            const ids = Object.keys(live);
+            if (ids.length) {
+              for (const id of ids.slice(0, 6)) {
+                const m = live[id] || {};
+                tiles.push(tile(id, fmtW(m.power_w), '', 'text-slate-700'));
+              }
+            }
+          }
+        } catch { /* ignore */ }
+      }
+
+      if (!tiles.length) { msg.textContent = 'Keine Energiedaten verfügbar.'; return; }
+      msg.classList.add('hidden');
+      grid.innerHTML = tiles.join('');
+    } catch (e) {
+      msg.textContent = 'Energie nicht erreichbar: ' + e.message;
+    }
+  }
+
+  // =====================================================================
+  //  4) Schnellzugriff
+  // =====================================================================
+  const QUICK = [
+    { icon:'🖥️', title:'Proxmox', sub:'Virtualisierung', url:'https://100.64.2.20:8006' },
+    { icon:'📨', title:'MQTT', sub:'Zählerdaten', url:'https://mqtt.rosenweg4303.ch' },
+    { icon:'⚡', title:'Energie-Monitor', sub:'Verbrauch & Solar', url:'https://www.rosenweg4303.ch/energie-monitor.html' },
+    { icon:'🔢', title:'Zählerverwaltung', sub:'Zähler & Zuordnung', url:'https://www.rosenweg4303.ch/zaehler.html' },
+  ];
+  function buildQuickLinks() {
+    $('quickLinks').innerHTML = QUICK.map(q => `
+      <a href="${esc(q.url)}" target="_blank" rel="noopener"
+        class="flex items-center gap-3 bg-white rounded-xl shadow-sm border border-slate-200 p-3 active:bg-slate-50">
+        <span class="flex-none w-10 h-10 rounded-lg bg-sky-50 flex items-center justify-center text-xl leading-none">${q.icon}</span>
+        <span class="min-w-0">
+          <span class="block font-semibold text-sm">${esc(q.title)}</span>
+          <span class="block text-[11px] text-slate-500">${esc(q.sub)}</span>
+        </span>
+        <span class="ml-auto text-slate-300 text-lg leading-none">↗</span>
+      </a>`).join('');
+  }
+
+  // =====================================================================
+  //  5) Web-Push Opt-in
+  // =====================================================================
+  function isStandalone() {
+    return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  }
+  function isIos() {
+    const ua = navigator.userAgent || '';
+    return /iphone|ipad|ipod/i.test(ua) || (/Macintosh/.test(ua) && 'ontouchend' in document);
+  }
+  function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(base64);
+    const out = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+
+  function setPushState(text) { $('pushState').textContent = text; }
+  function showPushHint(text) {
+    const el = $('pushHint');
+    if (!text) { el.classList.add('hidden'); return; }
+    el.textContent = text; el.classList.remove('hidden');
+  }
+
+  async function refreshPushUi() {
+    const btn = $('pushBtn'); const testBtn = $('pushTestBtn');
+    btn.classList.add('hidden'); testBtn.classList.add('hidden'); showPushHint('');
+
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+      setPushState('Push wird auf diesem Gerät nicht unterstützt.');
+      return;
+    }
+    // iOS: Push nur in installierter (Home-Screen) PWA
+    if (isIos() && !isStandalone()) {
+      setPushState('Auf dem iPhone/iPad funktionieren Push-Benachrichtigungen nur in der installierten App.');
+      showPushHint('Tipp: Über das Teilen-Symbol → „Zum Home-Bildschirm" installieren, dann hier erneut öffnen.');
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      setPushState('🔕 Benachrichtigungen sind im Browser blockiert. Bitte in den Einstellungen erlauben.');
+      return;
+    }
+    let sub = null;
+    try { const reg = await navigator.serviceWorker.ready; sub = await reg.pushManager.getSubscription(); } catch { /* */ }
+    if (sub) {
+      setPushState('🔔 Benachrichtigungen sind aktiviert.');
+      btn.textContent = '🔕 Abbestellen';
+      btn.dataset.mode = 'off';
+      btn.classList.remove('hidden');
+      testBtn.classList.remove('hidden');
+    } else {
+      setPushState('Benachrichtigungen sind nicht aktiviert.');
+      btn.textContent = '🔔 Benachrichtigungen aktivieren';
+      btn.dataset.mode = 'on';
+      btn.classList.remove('hidden');
+    }
+  }
+
+  async function enablePush() {
+    const btn = $('pushBtn'); btn.disabled = true;
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') { setPushState('Berechtigung nicht erteilt.'); return; }
+      const kr = await AuthentikAuth.apiFetch('/api/push/vapid-public-key', { cache: 'no-store' });
+      if (!kr.ok) throw new Error('VAPID-Key nicht verfügbar (HTTP ' + kr.status + ')');
+      const { key } = await kr.json();
+      if (!key) throw new Error('Kein VAPID-Key');
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(key),
+      });
+      const sr = await AuthentikAuth.apiFetch('/api/push/subscribe', { method: 'POST', body: { subscription: sub } });
+      if (!sr.ok) throw new Error('Abo speichern fehlgeschlagen (HTTP ' + sr.status + ')');
+      setPushState('🔔 Benachrichtigungen sind aktiviert.');
+    } catch (e) {
+      setPushState('Fehler: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      refreshPushUi();
+    }
+  }
+
+  async function disablePush() {
+    const btn = $('pushBtn'); btn.disabled = true;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        const endpoint = sub.endpoint;
+        await sub.unsubscribe().catch(() => {});
+        await AuthentikAuth.apiFetch('/api/push/unsubscribe', { method: 'POST', body: { endpoint } }).catch(() => {});
+      }
+      setPushState('Benachrichtigungen sind nicht aktiviert.');
+    } catch (e) {
+      setPushState('Fehler: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      refreshPushUi();
+    }
+  }
+
+  function wirePush() {
+    $('pushBtn').addEventListener('click', () => {
+      if ($('pushBtn').dataset.mode === 'off') disablePush(); else enablePush();
+    });
+    $('pushTestBtn').addEventListener('click', async () => {
+      const b = $('pushTestBtn'); b.disabled = true;
+      try {
+        const r = await AuthentikAuth.apiFetch('/api/push/test', { method: 'POST', body: {} });
+        setPushState(r.ok ? '✅ Test gesendet — Benachrichtigung sollte gleich erscheinen.' : 'Test fehlgeschlagen (HTTP ' + r.status + ').');
+      } catch (e) { setPushState('Test-Fehler: ' + e.message); }
+      finally { b.disabled = false; }
+    });
+  }
+
+  // =====================================================================
+  //  Install-Banner
+  // =====================================================================
+  let deferredPrompt = null;
+  let installDismissed = false;
+
+  function renderInstallBanner() {
+    if (isStandalone() || installDismissed) { $('installBanner').classList.add('hidden'); return; }
+    const android = $('installAndroid'); const ios = $('installIos');
+    android.classList.add('hidden'); ios.classList.add('hidden');
+    if (isIos()) {
+      ios.classList.remove('hidden');
+    } else if (deferredPrompt || /android/i.test(navigator.userAgent)) {
+      android.classList.remove('hidden');
+      $('installAndroidHint').classList.toggle('hidden', !!deferredPrompt);
+    } else { $('installBanner').classList.add('hidden'); return; }
+    $('installBanner').classList.remove('hidden');
+  }
+  function wireInstallBanner() {
+    window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; renderInstallBanner(); });
+    window.addEventListener('appinstalled', () => { deferredPrompt = null; $('installBanner').classList.add('hidden'); });
+    $('installBtn').addEventListener('click', async () => {
+      if (!deferredPrompt) return;
+      deferredPrompt.prompt();
+      try { await deferredPrompt.userChoice; } catch (_) {}
+      deferredPrompt = null; renderInstallBanner();
+    });
+    $('installDismiss').addEventListener('click', () => { installDismissed = true; $('installBanner').classList.add('hidden'); });
+    renderInstallBanner();
+  }
+
+  // =====================================================================
+  //  Init
+  // =====================================================================
+  function showDenied() {
+    $('loading').classList.add('hidden');
+    $('app').classList.add('hidden');
+    $('tabbar').classList.add('hidden');
+    $('denied').classList.remove('hidden');
+  }
+  function showApp() {
+    $('loading').classList.add('hidden');
+    $('denied').classList.add('hidden');
+    $('app').classList.remove('hidden');
+    $('tabbar').classList.remove('hidden');
+  }
+
+  async function main() {
+    updateNetBadge();
+    wireInstallBanner();
+    wireTriage();
+    wirePush();
+    document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+    $('alertsRefresh').addEventListener('click', loadAlerts);
+    $('energieRefresh').addEventListener('click', loadEnergie);
+    window.addEventListener('online', updateNetBadge);
+    window.addEventListener('offline', updateNetBadge);
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/technik/sw.js', { scope: '/technik/' }).catch(() => {});
+    }
+
+    currentUser = await AuthentikAuth.init({ requireAuth: true });
+    if (!currentUser) return; // init leitet zum Login um
+
+    if (!hasTechnikAccess(currentUser)) { showDenied(); return; }
+
+    showApp();
+    switchTab('triage');
+  }
+
+  main();
+  </script>
+</body>
+</html>

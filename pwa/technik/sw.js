@@ -1,22 +1,22 @@
 /*
- * Service Worker — Rosenweg Reparatur-Melder PWA
- * Scope: /reparatur/
+ * Service Worker — Rosenweg Technik-Cockpit PWA
+ * Scope: /technik/
  *
  * Strategie:
  *  - App-Shell wird beim install precached (Offline-Start moeglich).
  *  - Navigationen (mode 'navigate'): network-first, Fallback auf gecachte index.html.
- *  - /api/-Requests: NIE cachen — immer Netzwerk. Bei Fehler den Browser-Default
- *    durchreichen, damit die App-eigene Offline-Queue (IndexedDB) greift.
+ *  - /api/-Requests: NIE cachen — immer Netzwerk (Live-/Session-Daten).
  *  - Sonstige GETs (Assets, CDN): stale-while-revalidate.
+ *  - Web-Push: push + notificationclick (Status-/Alert-Benachrichtigungen).
  */
 
-const CACHE = 'rosenweg-reparatur-v2';
+const CACHE = 'rosenweg-technik-v1';
 
 // App-Shell — alles was fuer den Offline-Start noetig ist.
 const SHELL = [
-  '/reparatur/',
-  '/reparatur/index.html',
-  '/reparatur/manifest.webmanifest',
+  '/technik/',
+  '/technik/index.html',
+  '/technik/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/js/authentik-auth.js',
@@ -46,8 +46,7 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // 1) API niemals abfangen/cachen — immer ans Netz; Fehler nicht kaschieren,
-  //    damit die App-Queue den Netzfehler erkennt.
+  // 1) API niemals abfangen/cachen — immer ans Netz.
   if (url.pathname.startsWith('/api/')) {
     return; // Default-Browserverhalten
   }
@@ -60,14 +59,13 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(req)
         .then((resp) => {
-          // frische Navigationsantwort fuer spaeter ablegen
           const copy = resp.clone();
-          caches.open(CACHE).then((c) => c.put('/reparatur/index.html', copy)).catch(() => {});
+          caches.open(CACHE).then((c) => c.put('/technik/index.html', copy)).catch(() => {});
           return resp;
         })
         .catch(() =>
-          caches.match('/reparatur/index.html').then(
-            (cached) => cached || caches.match('/reparatur/')
+          caches.match('/technik/index.html').then(
+            (cached) => cached || caches.match('/technik/')
           )
         )
     );
@@ -80,13 +78,12 @@ self.addEventListener('fetch', (event) => {
       cache.match(req).then((cached) => {
         const network = fetch(req)
           .then((resp) => {
-            // nur erfolgreiche, vollstaendige Antworten cachen
             if (resp && resp.status === 200 && (resp.type === 'basic' || resp.type === 'cors')) {
               cache.put(req, resp.clone()).catch(() => {});
             }
             return resp;
           })
-          .catch(() => cached); // offline → ggf. zwischengespeicherte Version
+          .catch(() => cached);
         return cached || network;
       })
     )

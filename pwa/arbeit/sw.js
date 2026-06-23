@@ -10,7 +10,7 @@
  *  - Sonstige GETs (Assets, CDN): stale-while-revalidate.
  */
 
-const CACHE = 'rosenweg-arbeit-v1';
+const CACHE = 'rosenweg-arbeit-v2';
 
 // App-Shell — alles was fuer den Offline-Start noetig ist.
 const SHELL = [
@@ -90,4 +90,26 @@ self.addEventListener('fetch', (event) => {
       })
     )
   );
+});
+
+// --- Web-Push --------------------------------------------------------------
+self.addEventListener('push', (e) => {
+  const d = (() => { try { return e.data ? e.data.json() : {}; } catch { return {}; } })();
+  e.waitUntil(self.registration.showNotification(d.title || 'Rosenweg', {
+    body: d.body || '',
+    icon: d.icon || '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    tag: d.tag,
+    data: { url: d.url || '/' },
+  }));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  e.waitUntil(clients.matchAll({ type: 'window' }).then((cs) => {
+    for (const c of cs) {
+      if (c.url.includes(new URL(e.notification.data.url, self.location.origin).pathname) && 'focus' in c) return c.focus();
+    }
+    return clients.openWindow(e.notification.data.url);
+  }));
 });
