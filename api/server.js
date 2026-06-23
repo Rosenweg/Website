@@ -255,6 +255,8 @@ const { AUTHENTIK_URL, AUTHENTIK_EXTERNAL_URL, AUTHENTIK_CLIENT_ID, AUTHENTIK_CL
 const { authentikAPI, tokenCache, validateAuthentikToken, MANAGED_PAGES, ACCESS_LEVELS, resolveAncestorGroups, getUserPermissions } = require('./lib/auth');
 // Auth-Middleware -> middleware/auth.js (authMiddleware/adminOnly/requirePermission/requireUserLogin)
 const { authMiddleware, adminOnly, requirePermission, requireUserLogin } = require('./middleware/auth');
+// Web-Push (VAPID) -> lib/webpush.js (Opt-in-Benachrichtigungen fuer PWAs)
+const webpushLib = require('./lib/webpush');
 
 // ═══════════════════════════════════════════════════════════════════
 // AUTHENTIK OAuth2 LOGIN
@@ -10329,7 +10331,7 @@ app.delete('/api/handwerker/:id', authMiddleware, requirePermission('handwerker'
 // und markiert als ausbezahlt. Belege werden als Dateien im DOCS-Volume
 // unter <stweg-folder>/auslagen/ abgelegt.
 
-const AUSLAGEN_KATEGORIEN = ['Material', 'Reparatur', 'Porto/Versand', 'Verpflegung', 'Reinigung', 'Reisekosten', 'Sonstiges'];
+const AUSLAGEN_KATEGORIEN = ['Material', 'Reparatur', 'Porto/Versand', 'Verpflegung', 'Reinigung', 'Reisekosten', 'Arbeitszeit', 'Sonstiges'];
 const AUSLAGEN_STATUS = ['eingereicht', 'genehmigt', 'abgelehnt', 'ausbezahlt'];
 
 function auslagenStwegFolder(stweg) {
@@ -12760,6 +12762,10 @@ async function seedMailTemplates() {
   }
 }
 setTimeout(() => seedMailTemplates(), 20000);
+// Web-Push initialisieren (Tabellen + VAPID-Keys aus DB laden/generieren).
+setTimeout(() => webpushLib.initWebPush()
+  .then(() => console.log('[webpush] VAPID bereit'))
+  .catch((e) => console.warn('[webpush] init fehlgeschlagen:', e.message)), 15000);
 
 // CRUD für Templates (Technik/Präsident)
 app.get('/api/mail-templates', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
@@ -15324,6 +15330,14 @@ app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamation
             body: `${emoji} *Reklamation #${updated.id} ${label}*\n${(updated.beschreibung || '').slice(0, 80)}`
               + (b.notiz ? `\n\n_Bemerkung:_ ${b.notiz}` : ''),
           }).catch(() => {});
+          // Web-Push an den Melder (falls in einer PWA abonniert)
+          if (p.rows[0].email) {
+            webpushLib.sendToEmails([p.rows[0].email], {
+              title: `Reklamation #${updated.id} ${label}`,
+              body: (updated.beschreibung || '').slice(0, 80),
+              url: 'https://pwa.rosenweg4303.ch/reparatur/', tag: `rekl-${updated.id}`,
+            }).catch(() => {});
+          }
         }
       } catch (e) { console.warn('[reklamation] Status-Mail:', e.message); }
     }
@@ -15463,6 +15477,37 @@ app.post('/api/reklamationen/oeffentlich', async (req, res) => {
       [personId, stweg, kategorie, beschreibung, bildPfad]);
     res.json({ ok: true, reklamation: r.rows[0] });
   } catch (e) { console.error('[reklamation-oeffentlich]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+// ─── Web-Push (VAPID): Opt-in-Benachrichtigungen fuer die PWAs ───
+app.get('/api/push/vapid-public-key', (req, res) => {
+  const key = webpushLib.getPublicKey();
+  if (!key) return res.status(503).json({ error: 'Push noch nicht bereit' });
+  res.json({ key });
+});
+app.post('/api/push/subscribe', authMiddleware, async (req, res) => {
+  try {
+    const sub = req.body?.subscription || req.body;
+    const pr = await pool.query('SELECT id FROM personen WHERE LOWER(email) = $1 LIMIT 1', [String(req.user.email || '').toLowerCase()]);
+    await webpushLib.saveSubscription(sub, {
+      userEmail: req.user.email, personId: pr.rows[0]?.id || null,
+      userAgent: (req.headers['user-agent'] || '').slice(0, 200),
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/push/unsubscribe', authMiddleware, async (req, res) => {
+  try {
+    const ep = (req.body?.subscription || req.body)?.endpoint || req.body?.endpoint;
+    await webpushLib.removeSubscription(ep);
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/push/test', authMiddleware, async (req, res) => {
+  const r = await webpushLib.sendToEmails([req.user.email], {
+    title: 'Rosenweg', body: 'Test-Benachrichtigung ✅', url: 'https://pwa.rosenweg4303.ch/', tag: 'test',
+  });
+  res.json(r);
 });
 
 // ─── ISP / Anschluss / VPN / Fix-IPs / Mailboxes ─────────────────────
