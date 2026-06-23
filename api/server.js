@@ -2217,28 +2217,43 @@ async function runMonthlyBilling() {
       );
 
       if (user.email) {
-        // Build session detail rows for email
-        const sessionRows = sessions.rows.map(s => {
+        // Build session detail rows for email (als Array von Objekten für Template-{{#each rows}})
+        const rows = sessions.rows.map(s => {
           const start = new Date(s.started_at);
           const dateStr = `${start.getDate()}.${start.getMonth()+1}.${start.getFullYear()}`;
           const startStr = `${String(start.getHours()).padStart(2,'0')}:${String(start.getMinutes()).padStart(2,'0')}`;
           const end = new Date(s.ended_at);
           const endStr = `${String(end.getHours()).padStart(2,'0')}:${String(end.getMinutes()).padStart(2,'0')}`;
-          return `<tr>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb;">${dateStr}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb;">${escapeHtml(s.room_name)}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb;">${startStr}-${endStr} (${s.duration_minutes} Min.)</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb;">${parseFloat(s.energy_consumed).toFixed(3)} kWh</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right;">CHF ${parseFloat(s.cost).toFixed(2)}</td>
-          </tr>`;
-        }).join('');
+          return {
+            datum: dateStr,
+            raum: escapeHtml(s.room_name),
+            zeit: `${startStr}-${endStr} (${s.duration_minutes} Min.)`,
+            verbrauch: `${parseFloat(s.energy_consumed).toFixed(3)} kWh`,
+            kosten: `CHF ${parseFloat(s.cost).toFixed(2)}`,
+          };
+        });
+        const sessionRows = rows.map(r => `<tr>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb;">${r.datum}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb;">${r.raum}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb;">${r.zeit}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb;">${r.verbrauch}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right;">${r.kosten}</td>
+          </tr>`).join('');
 
-        try {
-          await loggedSendMail({
-            from: MAIL_FROM,
-            to: user.email,
-            subject: `Waschküche Abrechnung ${monthName} ${year} - STWEG 3`,
-            html: `
+        const waschCtx = {
+          rows,
+          user_name: escapeHtml(user.name),
+          monat: monthName,
+          jahr: year,
+          wohnung: user.wohnung || '-',
+          total_sessions: user.total_sessions,
+          gesamtdauer: `${Math.floor(user.total_minutes / 60)}h ${user.total_minutes % 60}min`,
+          gesamtverbrauch: `${parseFloat(user.total_kwh).toFixed(2)} kWh`,
+          tarif: `CHF ${costPerKwh.toFixed(2)} / kWh`,
+          gesamtbetrag: `CHF ${parseFloat(user.total_cost).toFixed(2)}`,
+        };
+        const waschSubject = `Waschküche Abrechnung ${monthName} ${year} - STWEG 3`;
+        const waschHtmlFallback = `
               <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto;">
                 <h2 style="color: #1a56db;">Waschküche Abrechnung</h2>
                 <p>Hallo ${escapeHtml(user.name)},</p>
@@ -2295,8 +2310,15 @@ async function runMonthlyBilling() {
                   Diese Email wurde automatisch generiert.
                 </p>
               </div>
-            `,
-          }, 'wasch-billing');
+            `;
+
+        try {
+          await sendTemplated('wasch-billing', waschCtx, {
+            from: MAIL_FROM,
+            to: user.email,
+            subject: waschSubject,
+            html: waschHtmlFallback,
+          });
 
           await pool.query(
             'UPDATE wasch_billing SET email_sent = true, email_sent_at = NOW() WHERE user_id = $1 AND month = $2',
@@ -5313,19 +5335,38 @@ async function sendPickupReminder() {
     }
 
     const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // Tabellenzeilen als Array von Objekten (für Template-{{#each rows}}); Felder sind
+    // fertige HTML-Fragmente, exakt wie das bisherige Inline-HTML.
     const rows = jobs.map(j => {
       const ageDays = Math.floor((Date.now() - new Date(j.created_at).getTime()) / 86400000);
       const pickupUrl = `${SITE_URL}/abholung.html?token=${j.token}`;
-      return `<tr>
-        <td style="padding:6px 8px">${esc(j.recipient_name || '—')}${j.recipient_wohnung ? `<br><span style="font-size:11px;color:#666">${esc(j.recipient_wohnung)}</span>` : ''}</td>
-        <td style="padding:6px 8px">${esc(j.printer)}</td>
-        <td style="padding:6px 8px;text-align:right;color:${ageDays > 7 ? '#c41e1e' : '#666'};font-weight:${ageDays > 7 ? '600' : 'normal'}">${ageDays} Tage</td>
-        <td style="padding:6px 8px;font-size:11px;color:#444">${esc((j.subject || '').slice(0, 50))}</td>
-        <td style="padding:6px 8px"><a href="${pickupUrl}" style="font-size:11px;color:#c41e1e">Abholung bestätigen</a></td>
-      </tr>`;
-    }).join('');
+      return {
+        empfaenger: `${esc(j.recipient_name || '—')}${j.recipient_wohnung ? `<br><span style="font-size:11px;color:#666">${esc(j.recipient_wohnung)}</span>` : ''}`,
+        drucker: esc(j.printer),
+        alter_style: `text-align:right;color:${ageDays > 7 ? '#c41e1e' : '#666'};font-weight:${ageDays > 7 ? '600' : 'normal'}`,
+        alter: `${ageDays} Tage`,
+        betreff: esc((j.subject || '').slice(0, 50)),
+        aktion_url: pickupUrl,
+      };
+    });
+    const rowsHtml = rows.map(r => `<tr>
+        <td style="padding:6px 8px">${r.empfaenger}</td>
+        <td style="padding:6px 8px">${r.drucker}</td>
+        <td style="padding:6px 8px;${r.alter_style}">${r.alter}</td>
+        <td style="padding:6px 8px;font-size:11px;color:#444">${r.betreff}</td>
+        <td style="padding:6px 8px"><a href="${r.aktion_url}" style="font-size:11px;color:#c41e1e">Abholung bestätigen</a></td>
+      </tr>`).join('');
 
-    const html = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;max-width:800px;margin:0 auto">
+    const reminderSubject = `${jobs.length} Druckauftr${jobs.length === 1 ? 'ag wartet' : 'äge warten'} auf Abholung`;
+    const reminderCtx = {
+      rows,
+      anzahl: jobs.length,
+      auftrag_wort: `Druckauftrag${jobs.length === 1 ? '' : 'e'}`,
+      wartet_wort: `wartet${jobs.length === 1 ? '' : 'en'}`,
+      // subject_wort = "X Druckauftrag wartet" / "X Druckaufträge warten" (vor " auf Abholung")
+      subject_wort: `${jobs.length} Druckauftr${jobs.length === 1 ? 'ag wartet' : 'äge warten'}`,
+    };
+    const reminderHtmlFallback = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;max-width:800px;margin:0 auto">
       <h2 style="color:#c41e1e">${jobs.length} Druckauftrag${jobs.length === 1 ? '' : 'e'} wartet${jobs.length === 1 ? '' : 'en'} auf Abholung</h2>
       <p>Folgende Drucksachen liegen seit mehr als 24 Stunden bereit und sind noch nicht als abgeholt markiert:</p>
       <table style="width:100%;border-collapse:collapse;border:1px solid #ddd">
@@ -5336,18 +5377,18 @@ async function sendPickupReminder() {
           <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">Betreff</th>
           <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">Aktion</th>
         </tr></thead>
-        <tbody>${rows}</tbody>
+        <tbody>${rowsHtml}</tbody>
       </table>
       <p style="font-size:11px;color:#888;margin-top:16px">Bitte Drucksachen verteilen und über den Link "Abholung bestätigen" oder direkt am ausgedruckten Deckblatt-QR quittieren.<br>
       Diese Erinnerung wird pro Auftrag alle 3 Tage wiederholt, bis er abgeholt ist.</p>
     </body></html>`;
 
-    await loggedSendMail({
+    await sendTemplated('pickup-reminder', reminderCtx, {
       from: `"Rosenweg Druckserver" <noreply@${VERTEILER_DOMAIN}>`,
       to: [...notifyEmails].join(', '),
-      subject: `${jobs.length} Druckauftr${jobs.length === 1 ? 'ag wartet' : 'äge warten'} auf Abholung`,
-      html,
-    }, 'pickup-reminder');
+      subject: reminderSubject,
+      html: reminderHtmlFallback,
+    });
 
     await pool.query(
       `UPDATE print_jobs SET last_reminder_at = NOW() WHERE id = ANY($1::int[])`,
@@ -12374,8 +12415,21 @@ function tplFormat(value, helper) {
 
 function renderTemplate(template, context) {
   if (!template) return '';
+  let out = String(template);
+  // {{#each path}}…{{/each}} — Array iterieren. Item-Kontext: Objektfelder gemerged
+  // ({{feld}}), zusätzlich {{this}} (Primitive), {{@nr}} (1-basiert), {{@index}}.
+  out = out.replace(/\{\{#each\s+([^}]+?)\s*\}\}([\s\S]*?)\{\{\/each\}\}/g, (m, path, body) => {
+    const arr = tplGet(context, path.trim());
+    if (!Array.isArray(arr)) return '';
+    return arr.map((item, i) => {
+      const itemCtx = (item && typeof item === 'object')
+        ? { ...context, ...item, this: item, '@index': i, '@nr': i + 1 }
+        : { ...context, this: item, '@index': i, '@nr': i + 1 };
+      return renderTemplate(body, itemCtx);
+    }).join('');
+  });
   // {{#if path}}…{{/if}} — einfacher Bedingungsblock (nur top-level, kein nested)
-  let out = template.replace(/\{\{#if\s+([^}]+?)\s*\}\}([\s\S]*?)\{\{\/if\}\}/g, (m, path, body) => {
+  out = out.replace(/\{\{#if\s+([^}]+?)\s*\}\}([\s\S]*?)\{\{\/if\}\}/g, (m, path, body) => {
     return tplGet(context, path.trim()) ? body : '';
   });
   // {{helper path}} oder {{path}}
@@ -12409,15 +12463,18 @@ async function findMailTemplate(sourceType, empfaengerKategorie) {
 // Trigger (= source_type) [+ optional context.empfaenger_kategorie], wird Subject/Body daraus
 // gerendert; sonst der mitgegebene Inline-Fallback (mailOpts.subject/text). Loggt wie gehabt.
 async function sendTemplated(trigger, context, mailOpts, extra = {}) {
-  let subject = mailOpts.subject, text = mailOpts.text;
+  let subject = mailOpts.subject, text = mailOpts.text, html = mailOpts.html;
   try {
     const tpl = await findMailTemplate(trigger, (context && context.empfaenger_kategorie) || null);
     if (tpl) {
       if (tpl.subject_template) subject = renderTemplate(tpl.subject_template, context || {});
       if (tpl.body_template) text = renderTemplate(tpl.body_template, context || {});
+      if (tpl.body_html_template) html = renderTemplate(tpl.body_html_template, context || {});
     }
   } catch (e) { console.error('[sendTemplated]', trigger, e.message); }
-  return loggedSendMail({ ...mailOpts, subject, text }, trigger, extra);
+  const opts = { ...mailOpts, subject, text };
+  if (html) opts.html = html; else delete opts.html;
+  return loggedSendMail(opts, trigger, extra);
 }
 
 // Default-Templates -> beim Start in mail_templates geseedet (nur falls noch nicht vorhanden),
@@ -12617,16 +12674,88 @@ const MAIL_TEMPLATE_DEFAULTS = [
       + 'Mit freundlichen Gruessen\nSTWEG-Kooperation Rosenweg',
     notiz: 'Sammel-Mail Objektverwaltungs-Änderungen an Verwaltung. Variablen: stweg_label, today_de, erste_aenderung, site_url. Weitere Änderungen werden im Queue-Body angehängt.',
   },
+  {
+    source_type: 'wasch-billing', empfaenger_kategorie: null,
+    subject_template: 'Waschküche Abrechnung {{monat}} {{jahr}} - STWEG 3',
+    body_html_template:
+      '<div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto;">\n'
+      + '  <h2 style="color: #1a56db;">Waschküche Abrechnung</h2>\n'
+      + '  <p>Hallo {{user_name}},</p>\n'
+      + '  <p>hier ist Ihre minutengenaue Waschküche-Abrechnung für <strong>{{monat}} {{jahr}}</strong>:</p>\n'
+      + '\n'
+      + '  <h3 style="color:#374151;margin-top:24px;">Einzelnachweise</h3>\n'
+      + '  <table style="width:100%;border-collapse:collapse;margin:10px 0;font-size:0.9em;">\n'
+      + '    <thead>\n'
+      + '      <tr style="background:#f3f4f6;">\n'
+      + '        <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left;">Datum</th>\n'
+      + '        <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left;">Raum</th>\n'
+      + '        <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left;">Zeit (Dauer)</th>\n'
+      + '        <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left;">Verbrauch</th>\n'
+      + '        <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right;">Kosten</th>\n'
+      + '      </tr>\n'
+      + '    </thead>\n'
+      + '    <tbody>{{#each rows}}<tr>\n'
+      + '        <td style="padding:6px 10px;border:1px solid #e5e7eb;">{{datum}}</td>\n'
+      + '        <td style="padding:6px 10px;border:1px solid #e5e7eb;">{{raum}}</td>\n'
+      + '        <td style="padding:6px 10px;border:1px solid #e5e7eb;">{{zeit}}</td>\n'
+      + '        <td style="padding:6px 10px;border:1px solid #e5e7eb;">{{verbrauch}}</td>\n'
+      + '        <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right;">{{kosten}}</td>\n'
+      + '      </tr>{{/each}}</tbody>\n'
+      + '  </table>\n'
+      + '\n'
+      + '  <h3 style="color:#374151;margin-top:24px;">Zusammenfassung</h3>\n'
+      + '  <table style="width: 100%; border-collapse: collapse; margin: 10px 0;">\n'
+      + '    <tr style="background: #f3f4f6;"><td style="padding: 10px; border: 1px solid #e5e7eb;">Wohnung</td><td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: bold;">{{wohnung}}</td></tr>\n'
+      + '    <tr><td style="padding: 10px; border: 1px solid #e5e7eb;">Anzahl Waschgänge</td><td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: bold;">{{total_sessions}}</td></tr>\n'
+      + '    <tr style="background: #f3f4f6;"><td style="padding: 10px; border: 1px solid #e5e7eb;">Gesamtdauer</td><td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: bold;">{{gesamtdauer}}</td></tr>\n'
+      + '    <tr><td style="padding: 10px; border: 1px solid #e5e7eb;">Gesamtverbrauch</td><td style="padding: 10px; border: 1px solid #e5e7eb; font-weight: bold;">{{gesamtverbrauch}}</td></tr>\n'
+      + '    <tr style="background: #f3f4f6;"><td style="padding: 10px; border: 1px solid #e5e7eb;">Tarif</td><td style="padding: 10px; border: 1px solid #e5e7eb;">{{tarif}}</td></tr>\n'
+      + '    <tr style="background: #1a56db; color: white;"><td style="padding: 12px; border: 1px solid #1a56db; font-weight: bold;">Gesamtbetrag</td><td style="padding: 12px; border: 1px solid #1a56db; font-weight: bold; font-size: 1.2em;">{{gesamtbetrag}}</td></tr>\n'
+      + '  </table>\n'
+      + '  <p style="color: #6b7280; font-size: 0.9em;">Der Betrag wird mit der nächsten Nebenkostenabrechnung verrechnet.</p>\n'
+      + '  <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">\n'
+      + '  <p style="color: #9ca3af; font-size: 0.8em;">STWEG 3 - Rosenweg 9, 4303 Kaiseraugst<br>Minutengenaue Abrechnung basierend auf tatsächlichem Stromverbrauch.<br>Diese Email wurde automatisch generiert.</p>\n'
+      + '</div>',
+    notiz: 'Waschküche-Monatsabrechnung an Bewohner (HTML-Tabelle). Variablen: rows[].{datum,raum,zeit,verbrauch,kosten}, user_name, monat, jahr, wohnung, total_sessions, gesamtdauer, gesamtverbrauch, tarif, gesamtbetrag. raum/Felder sind bereits HTML-escaped.',
+  },
+  {
+    source_type: 'pickup-reminder', empfaenger_kategorie: null,
+    subject_template: '{{subject_wort}} auf Abholung',
+    body_html_template:
+      '<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;max-width:800px;margin:0 auto">\n'
+      + '  <h2 style="color:#c41e1e">{{anzahl}} {{auftrag_wort}} {{wartet_wort}} auf Abholung</h2>\n'
+      + '  <p>Folgende Drucksachen liegen seit mehr als 24 Stunden bereit und sind noch nicht als abgeholt markiert:</p>\n'
+      + '  <table style="width:100%;border-collapse:collapse;border:1px solid #ddd">\n'
+      + '    <thead><tr style="background:#fafafa">\n'
+      + '      <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">Empfänger</th>\n'
+      + '      <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">Drucker</th>\n'
+      + '      <th style="padding:6px 8px;text-align:right;border-bottom:1px solid #ddd">Alter</th>\n'
+      + '      <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">Betreff</th>\n'
+      + '      <th style="padding:6px 8px;text-align:left;border-bottom:1px solid #ddd">Aktion</th>\n'
+      + '    </tr></thead>\n'
+      + '    <tbody>{{#each rows}}<tr>\n'
+      + '        <td style="padding:6px 8px">{{empfaenger}}</td>\n'
+      + '        <td style="padding:6px 8px">{{drucker}}</td>\n'
+      + '        <td style="padding:6px 8px;{{alter_style}}">{{alter}}</td>\n'
+      + '        <td style="padding:6px 8px;font-size:11px;color:#444">{{betreff}}</td>\n'
+      + '        <td style="padding:6px 8px"><a href="{{aktion_url}}" style="font-size:11px;color:#c41e1e">Abholung bestätigen</a></td>\n'
+      + '      </tr>{{/each}}</tbody>\n'
+      + '  </table>\n'
+      + '  <p style="font-size:11px;color:#888;margin-top:16px">Bitte Drucksachen verteilen und über den Link "Abholung bestätigen" oder direkt am ausgedruckten Deckblatt-QR quittieren.<br>\n'
+      + '  Diese Erinnerung wird pro Auftrag alle 3 Tage wiederholt, bis er abgeholt ist.</p>\n'
+      + '</body></html>',
+    notiz: 'Pickup-Reminder ungeholte Druckaufträge an Technik/Präsident (HTML-Tabelle). Variablen: rows[].{empfaenger,drucker,alter_style,alter,betreff,aktion_url}, anzahl, auftrag_wort, wartet_wort, subject_wort. Felder sind bereits HTML-escaped.',
+  },
 ];
 
 async function seedMailTemplates() {
   for (const d of MAIL_TEMPLATE_DEFAULTS) {
     try {
       await pool.query(
-        `INSERT INTO mail_templates (source_type, empfaenger_kategorie, subject_template, body_template, notiz, aktiv)
-         SELECT $1,$2,$3,$4,$5,true
-          WHERE NOT EXISTS (SELECT 1 FROM mail_templates WHERE source_type = $1 AND empfaenger_kategorie IS NOT DISTINCT FROM $2)`,
-        [d.source_type, d.empfaenger_kategorie || null, d.subject_template, d.body_template, d.notiz || null]);
+        `INSERT INTO mail_templates (source_type, empfaenger_kategorie, subject_template, body_template, body_html_template, notiz, aktiv)
+         SELECT $1::varchar, $2::varchar, $3::text, $4::text, $5::text, $6::text, true
+          WHERE NOT EXISTS (SELECT 1 FROM mail_templates WHERE source_type = $1::varchar AND empfaenger_kategorie IS NOT DISTINCT FROM $2::varchar)`,
+        [d.source_type, d.empfaenger_kategorie || null, d.subject_template, d.body_template, d.body_html_template || null, d.notiz || null]);
     } catch (e) { console.error('[seedMailTemplates]', d.source_type, e.message); }
   }
 }
@@ -12647,10 +12776,10 @@ app.post('/api/mail-templates', authMiddleware, requireTechnikOrPraesident, asyn
       return res.status(400).json({ error: 'source_type, subject_template und body_template erforderlich' });
     }
     const r = await pool.query(
-      `INSERT INTO mail_templates (source_type, empfaenger_kategorie, subject_template, body_template, notiz, aktiv)
-       VALUES ($1, $2, $3, $4, $5, COALESCE($6, true)) RETURNING *`,
+      `INSERT INTO mail_templates (source_type, empfaenger_kategorie, subject_template, body_template, body_html_template, notiz, aktiv)
+       VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, true)) RETURNING *`,
       [String(b.source_type).trim().slice(0, 120), b.empfaenger_kategorie || null,
-       b.subject_template, b.body_template, b.notiz || null, b.aktiv],
+       b.subject_template, b.body_template, b.body_html_template || null, b.notiz || null, b.aktiv],
     );
     res.json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -12666,11 +12795,12 @@ app.put('/api/mail-templates/:id', authMiddleware, requireTechnikOrPraesident, a
          empfaenger_kategorie = $2,
          subject_template = COALESCE($3, subject_template),
          body_template = COALESCE($4, body_template),
-         notiz = $5, aktiv = COALESCE($6, aktiv), updated_at = NOW()
-       WHERE id = $7 RETURNING *`,
+         body_html_template = $5,
+         notiz = $6, aktiv = COALESCE($7, aktiv), updated_at = NOW()
+       WHERE id = $8 RETURNING *`,
       [b.source_type || null, b.empfaenger_kategorie || null,
        b.subject_template || null, b.body_template || null,
-       b.notiz || null, b.aktiv, id],
+       b.body_html_template || null, b.notiz || null, b.aktiv, id],
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     res.json(r.rows[0]);
@@ -12690,7 +12820,8 @@ app.post('/api/mail-templates/preview', authMiddleware, requireTechnikOrPraeside
     const b = req.body || {};
     const subj = renderTemplate(b.subject_template || '', b.context || {});
     const body = renderTemplate(b.body_template || '', b.context || {});
-    res.json({ subject: subj, body });
+    const html = b.body_html_template ? renderTemplate(b.body_html_template, b.context || {}) : '';
+    res.json({ subject: subj, body, html });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -22177,6 +22308,8 @@ async function initDB() {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+      -- Optionaler HTML-Body (mit {{#each}}-Loops für Tabellen-Mails); leer = reine Text-Mail.
+      ALTER TABLE mail_templates ADD COLUMN IF NOT EXISTS body_html_template TEXT;
       CREATE UNIQUE INDEX IF NOT EXISTS uq_templates ON mail_templates (source_type, COALESCE(empfaenger_kategorie, '_all'));
       CREATE INDEX IF NOT EXISTS idx_templates_source ON mail_templates(source_type, aktiv);
 
