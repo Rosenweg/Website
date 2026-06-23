@@ -332,7 +332,7 @@
     msg.classList.remove('hidden'); msg.textContent = 'Lade …'; list.innerHTML = '';
     await Promise.all([loadHandwerker(), loadTechnikMitglieder()]);
     try {
-      const r = await AuthentikAuth.apiFetch('/api/reklamationen?status=offen', { cache: 'no-store' });
+      const r = await AuthentikAuth.apiFetch('/api/reklamationen?status=offen,weitergeleitet', { cache: 'no-store' });
       if (r.status === 403) { msg.textContent = 'Keine Berechtigung (fehlende „reklamationen"-Permission).'; return; }
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const data = await r.json();
