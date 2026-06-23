@@ -30,11 +30,13 @@
       <div class="bg-white rounded-lg shadow p-3 mb-4 flex gap-3 items-center">
         <label class="text-sm"><span class="text-gray-600 mr-1">Status:</span>
           <select id="filter-status" class="border rounded px-2 py-1 text-sm">
-            <option value="">alle</option>
-            <option value="offen" selected>offen</option>
+            <option value="offen,weitergeleitet" selected>Aktiv (offen + weitergeleitet)</option>
+            <option value="offen">offen</option>
             <option value="weitergeleitet">weitergeleitet</option>
+            <option value="erledigt,abgewiesen">📦 Archiv (erledigt + abgewiesen)</option>
             <option value="erledigt">erledigt</option>
             <option value="abgewiesen">abgewiesen</option>
+            <option value="">alle</option>
           </select>
         </label>
         <button onclick="load()" class="ml-auto text-sm text-blue-600 hover:underline">Neu laden</button>
@@ -88,6 +90,10 @@
         <div>
           <label class="block text-xs font-semibold text-gray-500 mb-1">Notiz (intern)</label>
           <textarea id="em-notiz" rows="3" maxlength="2000" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="interne Notiz …"></textarea>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1">📜 Verlauf</label>
+          <div id="em-history" class="text-xs text-gray-600 space-y-1 max-h-44 overflow-y-auto bg-gray-50 rounded-lg px-3 py-2">—</div>
         </div>
         <div id="em-msg" class="hidden text-sm rounded-lg px-3 py-2"></div>
       </div>
@@ -199,6 +205,18 @@
         .then(b => { if (b) { editFotoUrl = URL.createObjectURL(b); fi.src = editFotoUrl; } else { fi.alt = 'Foto nicht ladbar'; } })
         .catch(() => { fi.alt = 'Foto-Fehler'; });
     } else { fw.classList.add('hidden'); }
+    // Verlauf/History laden
+    const hist = document.getElementById('em-history');
+    hist.innerHTML = '<span class="text-gray-400">lädt …</span>';
+    AuthentikAuth.apiFetch('/api/reklamationen/' + encodeURIComponent(id) + '/history')
+      .then(rp => rp.ok ? rp.json() : { events: [] })
+      .then(d => {
+        const ev = d.events || [];
+        hist.innerHTML = ev.length
+          ? ev.map(e => `<div>• <span class="text-gray-400">${esc(fmtDt(e.created_at))}</span> · <span class="font-medium">${esc(e.who || '—')}</span>: ${esc(e.event || '')}</div>`).join('')
+          : '<span class="text-gray-400">Noch kein Verlauf.</span>';
+      })
+      .catch(() => { hist.innerHTML = '<span class="text-gray-400">Verlauf nicht ladbar.</span>'; });
     document.getElementById('editModal').classList.remove('hidden');
   }
 
