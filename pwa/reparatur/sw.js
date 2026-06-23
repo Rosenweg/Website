@@ -1,6 +1,6 @@
 /*
  * Service Worker — Rosenweg Reparatur-Melder PWA
- * Scope: /pwa/reparatur/
+ * Scope: /reparatur/
  *
  * Strategie:
  *  - App-Shell wird beim install precached (Offline-Start moeglich).
@@ -14,11 +14,11 @@ const CACHE = 'rosenweg-reparatur-v1';
 
 // App-Shell — alles was fuer den Offline-Start noetig ist.
 const SHELL = [
-  '/pwa/reparatur/',
-  '/pwa/reparatur/index.html',
-  '/pwa/reparatur/manifest.webmanifest',
-  '/pwa/icons/icon-192.png',
-  '/pwa/icons/icon-512.png',
+  '/reparatur/',
+  '/reparatur/index.html',
+  '/reparatur/manifest.webmanifest',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
   '/js/authentik-auth.js',
 ];
 
@@ -62,12 +62,12 @@ self.addEventListener('fetch', (event) => {
         .then((resp) => {
           // frische Navigationsantwort fuer spaeter ablegen
           const copy = resp.clone();
-          caches.open(CACHE).then((c) => c.put('/pwa/reparatur/index.html', copy)).catch(() => {});
+          caches.open(CACHE).then((c) => c.put('/reparatur/index.html', copy)).catch(() => {});
           return resp;
         })
         .catch(() =>
-          caches.match('/pwa/reparatur/index.html').then(
-            (cached) => cached || caches.match('/pwa/reparatur/')
+          caches.match('/reparatur/index.html').then(
+            (cached) => cached || caches.match('/reparatur/')
           )
         )
     );

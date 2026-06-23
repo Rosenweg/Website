@@ -10,3 +10,4 @@ stweg5    124   100.64.2.47   stweg     stweg5.rosenweg4303.ch                  
 stweg6    125   100.64.2.48   stweg     stweg6.rosenweg4303.ch                              DB
 stweg7    126   100.64.2.49   stweg     stweg7.rosenweg4303.ch                              DB
 meg       127   100.64.2.50   stweg     meg.rosenweg4303.ch                                 DB  (CANARY)
+pwa       130   100.64.2.54   pwa       pwa.rosenweg4303.ch                                 extra-routes.yml (pwa-lxc-svc) + CF A public

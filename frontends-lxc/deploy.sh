@@ -45,6 +45,7 @@ assemble_website() {
     --exclude='shelly-emulator' --exclude='whatsapp-bot' --exclude='wiki' \
     --exclude='scripts' --exclude='edge-traefik' --exclude='authentik-ct' \
     --exclude='frontends-lxc' --exclude='pbx' --exclude='door-signs/README.md' \
+    --exclude='pwa' \
     --exclude='stweg1' --exclude='stweg2' --exclude='stweg3' --exclude='stweg4' \
     --exclude='stweg5' --exclude='stweg6' --exclude='stweg7' --exclude='meg' \
     --exclude='Dockerfile*' --exclude='docker-stack.yml' --exclude='deploy-stack.sh' \
@@ -77,10 +78,20 @@ assemble_stweg() {
   cp waschkueche.html "$build/_waschkueche.html"
 }
 
+assemble_pwa() {
+  # PWA-Subdomain: pwa/-Inhalt = Docroot (Übersicht /index.html + /reparatur/ + /icons/),
+  # plus shared js/ (Apps brauchen authentik-auth.js) + Logo/site-config.
+  rsync -a pwa/ "$build/"
+  mkdir -p "$build/js"
+  rsync -a js/ "$build/js/"
+  cp logo-rosenweg.png site-config.json "$build/" 2>/dev/null || true
+}
+
 case "$TYPE" in
   website) assemble_website ;;
   isp)     assemble_isp ;;
   stweg)   assemble_stweg ;;
+  pwa)     assemble_pwa ;;
   *) echo "FEHLER: unbekannter TYPE=$TYPE"; exit 1 ;;
 esac
 

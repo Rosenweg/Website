@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0369a1">
   <title>Reparatur melden — Rosenweg</title>
-  <link rel="manifest" href="/pwa/reparatur/manifest.webmanifest">
-  <link rel="apple-touch-icon" href="/pwa/icons/icon-192.png">
+  <link rel="manifest" href="/reparatur/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <link rel="icon" href="/logo-rosenweg.png" type="image/png">
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="/js/authentik-auth.js?v=2"></script>
@@ -29,6 +29,44 @@
       <span id="netBadge" class="ml-auto text-[11px] font-medium px-2 py-0.5 rounded-full bg-sky-600/60 hidden"></span>
     </div>
   </header>
+
+  <!-- =================================================================
+       Geführtes Install-Banner (dezent, schließbar) — nur wenn NICHT
+       bereits als App installiert. Führt den User beim ersten Öffnen
+       durch die Installation (auf iOS nötig für Push).
+       ================================================================= -->
+  <div id="installBanner" class="hidden max-w-md mx-auto px-4 pt-3">
+    <div class="bg-sky-50 border border-sky-200 rounded-xl px-3 py-3 text-sm relative">
+      <button id="installDismiss" type="button"
+        class="absolute top-2 right-2 text-slate-400 active:text-slate-600 text-lg leading-none w-7 h-7" aria-label="Ausblenden">✕</button>
+
+      <!-- Android/Chrome: Direkt-Button -->
+      <div id="installAndroid" class="hidden pr-6">
+        <p class="font-semibold text-sky-800 mb-1">📲 Als App installieren</p>
+        <p class="text-slate-600 mb-2">Schneller Zugriff, offline nutzbar, Benachrichtigungen möglich.</p>
+        <button id="installBtn" type="button"
+          class="bg-sky-700 text-white font-semibold rounded-lg px-4 py-2 active:bg-sky-800">📲 Installieren</button>
+        <p id="installAndroidHint" class="hidden text-slate-500 mt-2">
+          Falls kein Dialog erscheint: Browser-Menü <span class="font-semibold">⋮</span> →
+          <span class="font-semibold">„App installieren"</span>.
+        </p>
+      </div>
+
+      <!-- iOS/Safari: Schritt-Anleitung -->
+      <div id="installIos" class="hidden pr-6">
+        <p class="font-semibold text-sky-800 mb-1">📲 Zum Home-Bildschirm hinzufügen</p>
+        <p class="text-slate-700">
+          <span class="font-semibold">Teilen-Symbol</span>
+          <svg class="inline-block align-text-bottom w-4 h-4 text-sky-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v12"></path><path d="M8 7l4-4 4 4"></path>
+            <path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"></path>
+          </svg>
+          unten antippen → <span class="font-semibold">„Zum Home-Bildschirm"</span>.
+        </p>
+        <p class="text-[12px] text-amber-700 mt-1">Push-Benachrichtigungen gehen am iPhone nur nach dieser Installation.</p>
+      </div>
+    </div>
+  </div>
 
   <!-- Lade-Zustand -->
   <div id="loading" class="text-center text-slate-500 py-16">Lade …</div>
@@ -531,6 +569,71 @@
   }
 
   // =====================================================================
+  //  Geführtes Install-Banner (Android-Button / iOS-Anleitung)
+  // =====================================================================
+  let deferredPrompt = null;       // gespeichertes beforeinstallprompt-Event
+  let installDismissed = false;    // vom User ausgeblendet (nur diese Session)
+
+  function isStandalone() {
+    return window.matchMedia('(display-mode: standalone)').matches
+      || window.navigator.standalone === true; // iOS-Safari
+  }
+  function isIos() {
+    const ua = navigator.userAgent || '';
+    return /iphone|ipad|ipod/i.test(ua)
+      || (/Macintosh/.test(ua) && 'ontouchend' in document); // iPadOS
+  }
+
+  function renderInstallBanner() {
+    // Bereits installiert oder ausgeblendet → Banner aus.
+    if (isStandalone() || installDismissed) {
+      $('installBanner').classList.add('hidden');
+      return;
+    }
+    const android = $('installAndroid');
+    const ios = $('installIos');
+    android.classList.add('hidden');
+    ios.classList.add('hidden');
+
+    if (isIos()) {
+      ios.classList.remove('hidden');
+    } else if (deferredPrompt || /android/i.test(navigator.userAgent)) {
+      android.classList.remove('hidden');
+      // Direkt-Prompt verfügbar? → Button reicht; sonst Menü-Hinweis.
+      $('installAndroidHint').classList.toggle('hidden', !!deferredPrompt);
+    } else {
+      // Desktop/unbekannt → kein Banner.
+      $('installBanner').classList.add('hidden');
+      return;
+    }
+    $('installBanner').classList.remove('hidden');
+  }
+
+  function wireInstallBanner() {
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      renderInstallBanner();
+    });
+    window.addEventListener('appinstalled', () => {
+      deferredPrompt = null;
+      $('installBanner').classList.add('hidden');
+    });
+    $('installBtn').addEventListener('click', async () => {
+      if (!deferredPrompt) return;
+      deferredPrompt.prompt();
+      try { await deferredPrompt.userChoice; } catch (_) {}
+      deferredPrompt = null;
+      renderInstallBanner();
+    });
+    $('installDismiss').addEventListener('click', () => {
+      installDismissed = true;
+      $('installBanner').classList.add('hidden');
+    });
+    renderInstallBanner();
+  }
+
+  // =====================================================================
   //  Gate / Init
   // =====================================================================
   function showGate() {
@@ -589,11 +692,12 @@
   async function main() {
     buildCategories();
     wireEvents();
+    wireInstallBanner();
     updateNetBadge();
 
     // Service Worker registrieren
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/pwa/reparatur/sw.js', { scope: '/pwa/reparatur/' }).catch(() => {});
+      navigator.serviceWorker.register('/reparatur/sw.js', { scope: '/reparatur/' }).catch(() => {});
     }
 
     // Login-Gate

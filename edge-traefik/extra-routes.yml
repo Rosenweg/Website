@@ -78,6 +78,16 @@ http:
         certResolver: cf
         domains:
           - main: ausschuss.rosenweg4303.ch
+    # PWA-Subdomain pwa.rosenweg4303.ch -> dedizierter PWA-Frontend-LXC (CT130/.54).
+    # Oeffentlich (CF-CNAME pwa -> kooperation, proxied) wie www.
+    pwa-rw4303:
+      entryPoints: [websecure]
+      rule: Host(`pwa.rosenweg4303.ch`)
+      service: pwa-lxc-svc
+      tls:
+        certResolver: cf
+        domains:
+          - main: pwa.rosenweg4303.ch
     # Kurze IPTV-URL: tv.rosenweg4303.ch -> api /api/tv/playlist.m3u (242 Kanaele).
     tv-rw4303:
       entryPoints: [websecure]
@@ -114,6 +124,11 @@ http:
         passHostHeader: true
         servers:
           - url: http://100.64.2.41
+    pwa-lxc-svc:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: http://100.64.2.54
     rw9-lxc-svc:
       loadBalancer:
         passHostHeader: true
