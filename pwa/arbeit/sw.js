@@ -17,8 +17,8 @@ const SHELL = [
   '/arbeit/',
   '/arbeit/index.html',
   '/arbeit/manifest.webmanifest',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
+  '/icons/icon-192-2.png',
+  '/icons/icon-512-2.png',
   '/js/authentik-auth.js',
 ];
 
