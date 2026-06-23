@@ -15370,6 +15370,22 @@ app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamation
       logReklEvent(id, who, b.zugewiesen_an ? `Zugewiesen an: ${b.zugewiesen_an}` : 'Zuweisung entfernt').catch(() => {});
     }
     if (b.notiz !== undefined && (b.notiz || '') !== (before.notiz || '')) logReklEvent(id, who, `Notiz geändert: "${String(b.notiz || '').slice(0, 80)}"`).catch(() => {});
+    // Persönliche Benachrichtigung an das NEU zugewiesene Technik-Mitglied (WhatsApp + Push).
+    // zugewiesen_an speichert den Namen -> Technik-User per Name aufloesen.
+    if (b.zugewiesen_an !== undefined && b.zugewiesen_an && b.zugewiesen_an !== before.zugewiesen_an) {
+      (async () => {
+        try {
+          const um = await pool.query(`SELECT email FROM users WHERE name = $1 AND LOWER(groups_json::text) LIKE '%"technik"%' LIMIT 1`, [b.zugewiesen_an]);
+          const memberEmail = um.rows[0]?.email;
+          if (memberEmail) {
+            const body = `🔧 *Dir zugewiesen: Reklamation #${updated.id}*\nKategorie: ${updated.kategorie || '-'}${updated.stweg ? ` · STWEG ${updated.stweg}` : ''}\n${(updated.beschreibung || '').slice(0, 150)}\n\n→ pwa.rosenweg4303.ch/technik/`;
+            pushWhatsappIfOptIn({ email: memberEmail, body, sourceType: 'reklamation-zuweisung', sourceId: updated.id }).catch(() => {});
+            webpushLib.sendToEmails([memberEmail], { title: `Dir zugewiesen: Reklamation #${updated.id}`, body: (updated.beschreibung || '').slice(0, 80), url: 'https://pwa.rosenweg4303.ch/technik/', tag: `rekl-${updated.id}` }).catch(() => {});
+            logReklEvent(updated.id, 'System', `${b.zugewiesen_an} benachrichtigt`).catch(() => {});
+          }
+        } catch (e) { console.warn('[reklamation-zuweisung-notify]', e.message); }
+      })();
+    }
     // Notification an Melder bei Status-Wechsel
     if (b.status && updated.person_id) {
       try {
@@ -15439,6 +15455,26 @@ app.get('/api/reklamationen/:id/history', authMiddleware, requirePermission('rek
     const r = await pool.query('SELECT created_at, who, event FROM reklamation_events WHERE reklamation_id = $1 ORDER BY created_at ASC, id ASC', [id]);
     res.json({ events: r.rows });
   } catch (e) { console.error('[reklamation-history]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+// Bewohner-Uebersicht: Reklamationen der eigenen STWEG(s) + uebergreifende (stweg NULL),
+// sanitisiert (KEIN Melder-Name/-Email — Transparenz-Board, kein Datenleck).
+app.get('/api/reklamationen/uebersicht', authMiddleware, async (req, res) => {
+  try {
+    const stwegs = [...getUserStwegs(req.user.groups || [])];
+    const params = [];
+    let cond = 'r.stweg IS NULL';
+    if (stwegs.length) { params.push(stwegs); cond = `(r.stweg = ANY($${params.length}::int[]) OR r.stweg IS NULL)`; }
+    const r = await pool.query(
+      `SELECT r.id, r.kategorie, r.beschreibung, r.status, r.stweg, r.created_at, r.erledigt_am,
+              (r.handwerker_id IS NOT NULL OR r.zugewiesen_an IS NOT NULL) AS in_bearbeitung
+         FROM reklamationen r
+        WHERE ${cond}
+        ORDER BY (r.status IN ('erledigt','abgewiesen')) ASC, r.created_at DESC
+        LIMIT 200`,
+      params);
+    res.json({ reklamationen: r.rows, stwegs });
+  } catch (e) { console.error('[reklamationen-uebersicht]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 const reklaWebRate = new Map(); // key -> [timestamps]
 app.post('/api/reklamationen', authMiddleware, async (req, res) => {
