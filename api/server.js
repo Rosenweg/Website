@@ -15346,6 +15346,14 @@ app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamation
 });
 
 // ─── PWA Reparatur-Melder: Bewohner meldet einen Schaden -> reklamationen (Kanal 'web') ──
+// Technik-Gruppe (fuer Web-Push bei neuer Meldung). Matcht den JSON-Array-Eintrag "technik".
+async function getTechnikEmails() {
+  try {
+    const r = await pool.query(
+      `SELECT email FROM users WHERE active = true AND email IS NOT NULL AND LOWER(groups_json::text) LIKE '%"technik"%'`);
+    return r.rows.map((x) => x.email).filter(Boolean);
+  } catch { return []; }
+}
 const reklaWebRate = new Map(); // key -> [timestamps]
 app.post('/api/reklamationen', authMiddleware, async (req, res) => {
   try {
@@ -15383,6 +15391,11 @@ app.post('/api/reklamationen', authMiddleware, async (req, res) => {
       `INSERT INTO reklamationen (person_id, stweg, kategorie, beschreibung, bild_pfad, eingang_kanal, status)
        VALUES ($1,$2,$3,$4,$5,'web','offen') RETURNING id, kategorie, beschreibung, status, created_at`,
       [personId, stweg, kategorie, beschreibung, bildPfad]);
+    // Web-Push an die Technik (neue Meldung -> Cockpit)
+    getTechnikEmails().then((emails) => webpushLib.sendToEmails(emails, {
+      title: 'Neue Reparatur-Meldung', body: `${kategorie}: ${beschreibung.slice(0, 80)}`,
+      url: 'https://pwa.rosenweg4303.ch/technik/', tag: `rekl-${r.rows[0].id}`,
+    })).catch(() => {});
     res.json({ ok: true, reklamation: r.rows[0] });
   } catch (e) { console.error('[reklamation-web-post]', e); res.status(500).json({ error: 'Fehler' }); }
 });
@@ -15475,6 +15488,11 @@ app.post('/api/reklamationen/oeffentlich', async (req, res) => {
       `INSERT INTO reklamationen (person_id, stweg, kategorie, beschreibung, bild_pfad, eingang_kanal, status)
        VALUES ($1,$2,$3,$4,$5,'web','offen') RETURNING id, kategorie, beschreibung, status, created_at`,
       [personId, stweg, kategorie, beschreibung, bildPfad]);
+    // Web-Push an die Technik (neue Meldung -> Cockpit)
+    getTechnikEmails().then((emails) => webpushLib.sendToEmails(emails, {
+      title: 'Neue Reparatur-Meldung', body: `${kategorie}: ${beschreibung.slice(0, 80)}`,
+      url: 'https://pwa.rosenweg4303.ch/technik/', tag: `rekl-${r.rows[0].id}`,
+    })).catch(() => {});
     res.json({ ok: true, reklamation: r.rows[0] });
   } catch (e) { console.error('[reklamation-oeffentlich]', e); res.status(500).json({ error: 'Fehler' }); }
 });
