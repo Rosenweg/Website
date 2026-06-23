@@ -6084,6 +6084,7 @@ app.get('/api/zev/meine-rechnungen', authMiddleware, async (req, res) => {
     const r = await pool.query(
       `SELECT id, wohnung_id, betreff, absender, empfangen_am, pdf_filename, pdf_size,
               rechnungsnummer, rechnungsdatum, zeitraum_von, zeitraum_bis, objekt, betrag_chf, positionen,
+              bezahlt, bezahlt_am,
               (pdf_data IS NOT NULL) AS has_pdf
          FROM zev_rechnungen zr
         WHERE (LOWER(bewohner_email) = $1 AND $1 <> '')
@@ -6118,6 +6119,34 @@ app.get('/api/zev/rechnung/:id/pdf', authMiddleware, async (req, res) => {
     res.setHeader('Content-Disposition', `inline; filename="${String(row.pdf_filename || 'rechnung.pdf').replace(/[^\w.\-]/g, '_')}"`);
     res.send(row.pdf_data);
   } catch (e) { console.error('[zev-rechnung-pdf]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+// Bewohner markiert seine Rechnung als bezahlt (oder zurueck) -> in der Ansicht ausblendbar.
+app.post('/api/zev/rechnung/:id/bezahlt', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const bezahlt = !!req.body?.bezahlt;
+    const email = String(req.user?.email || '').toLowerCase();
+    const memberWohnungen = await getZevMemberWohnungen(req.user);
+    const r = await pool.query('SELECT wohnung_id, bewohner_email FROM zev_rechnungen WHERE id = $1', [id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Nicht gefunden' });
+    const row = r.rows[0];
+    let allowed = (email && String(row.bewohner_email || '').toLowerCase() === email);
+    if (!allowed && memberWohnungen.includes(row.wohnung_id)) {
+      const cur = await pool.query(
+        `SELECT 1 FROM wohnungen_kontakte WHERE wohnung_id = $1 AND archiviert_am IS NULL AND LOWER(email) = LOWER($2) LIMIT 1`,
+        [row.wohnung_id, row.bewohner_email]);
+      allowed = cur.rows.length > 0;
+    }
+    if (!allowed) return res.status(403).json({ error: 'Kein Zugriff' });
+    await pool.query(
+      `UPDATE zev_rechnungen SET bezahlt = $2,
+              bezahlt_am = CASE WHEN $2 THEN NOW() ELSE NULL END,
+              bezahlt_von = CASE WHEN $2 THEN $3 ELSE NULL END
+        WHERE id = $1`,
+      [id, bezahlt, req.user?.email || null]);
+    res.json({ ok: true, bezahlt });
+  } catch (e) { console.error('[zev-rechnung-bezahlt]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 
 app.get('/api/wohnungen/eigentuemer-uebersicht', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
@@ -20831,6 +20860,10 @@ async function initDB() {
       ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS objekt          TEXT;
       ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS betrag_chf      NUMERIC(12,2);
       ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS positionen      JSONB;
+      -- Bewohner markiert seine Rechnung als bezahlt -> in der Ansicht ausblendbar.
+      ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS bezahlt    BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS bezahlt_am TIMESTAMPTZ;
+      ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS bezahlt_von TEXT;
       -- Allgemeinzaehler-Empfaenger (zusaetzlich zu Verwaltung+Archiv), z.B. STWEG-Ausschuss.
       ALTER TABLE zev_config ADD COLUMN IF NOT EXISTS allgemein_email VARCHAR(255);
       -- Optionaler Absender-Override fuer Outbox-Mails (ZEV nutzt smartme@rosenweg9.ch).

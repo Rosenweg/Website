@@ -106,44 +106,79 @@
             </div>`;
     }
 
-    function render(list) {
-        if (!list.length) { $('empty').classList.remove('hidden'); return; }
-        $('list').innerHTML = list.map(r => {
-            const titel = esc(r.objekt || r.betreff || 'ZEV-Abrechnung');
-            const metaBits = [];
-            if (r.rechnungsnummer) metaBits.push('Nr. ' + esc(r.rechnungsnummer));
-            if (r.rechnungsdatum) metaBits.push('Rechnungsdatum ' + esc(r.rechnungsdatum));
-            if (r.absender) metaBits.push(esc(r.absender));
-            if (r.pdf_size) metaBits.push(esc(fmtSize(r.pdf_size)));
-            const meta = metaBits.join(' · ');
-            const betragHtml = (r.betrag_chf != null)
-                ? `<div class="text-2xl font-bold text-amber-700 whitespace-nowrap tabular-nums">${esc(fmtCHF(r.betrag_chf))}</div>`
-                : '';
+    let RECHNUNGEN = [];
+    let showPaid = false;
 
-            const aktionen = r.has_pdf ? `
-                <div class="flex gap-2 mt-3 pt-3 border-t border-gray-100">
+    function actionsHtml(r) {
+        const pdfBtns = r.has_pdf ? `
                     <button data-id="${r.id}" data-card="${r.id}" class="preview bg-amber-50 text-amber-700 px-4 py-2 rounded-lg font-semibold hover:bg-amber-100 transition text-sm border border-amber-200">👁 Vorschau</button>
-                    <button data-id="${r.id}" data-name="${esc(r.pdf_filename || 'rechnung.pdf')}" class="dl bg-amber-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-amber-700 transition text-sm whitespace-nowrap">⤓ PDF</button>
-                </div>
-                <div id="prev-${r.id}" class="hidden mt-3"></div>` : '';
+                    <button data-id="${r.id}" data-name="${esc(r.pdf_filename || 'rechnung.pdf')}" class="dl bg-amber-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-amber-700 transition text-sm whitespace-nowrap">⤓ PDF</button>` : '';
+        const bez = r.bezahlt
+            ? `<button data-id="${r.id}" data-val="0" class="paytoggle bg-gray-100 text-gray-600 px-4 py-2 rounded-lg font-semibold hover:bg-gray-200 transition text-sm border border-gray-200">↩ Wieder offen</button>`
+            : `<button data-id="${r.id}" data-val="1" class="paytoggle bg-green-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-green-700 transition text-sm">✓ Bezahlt</button>`;
+        return `
+                <div class="flex gap-2 flex-wrap mt-3 pt-3 border-t border-gray-100">${pdfBtns}${bez}</div>
+                ${r.has_pdf ? `<div id="prev-${r.id}" class="hidden mt-3"></div>` : ''}`;
+    }
 
-            return `
-            <div class="bg-white rounded-xl shadow-sm border p-4">
+    function cardHtml(r) {
+        const titel = esc(r.objekt || r.betreff || 'ZEV-Abrechnung');
+        const metaBits = [];
+        if (r.rechnungsnummer) metaBits.push('Nr. ' + esc(r.rechnungsnummer));
+        if (r.rechnungsdatum) metaBits.push('Rechnungsdatum ' + esc(r.rechnungsdatum));
+        if (r.absender) metaBits.push(esc(r.absender));
+        if (r.pdf_size) metaBits.push(esc(fmtSize(r.pdf_size)));
+        const meta = metaBits.join(' · ');
+        const betragHtml = (r.betrag_chf != null)
+            ? `<div class="text-2xl font-bold ${r.bezahlt ? 'text-gray-400 line-through' : 'text-amber-700'} whitespace-nowrap tabular-nums">${esc(fmtCHF(r.betrag_chf))}</div>`
+            : '';
+        const badge = r.bezahlt
+            ? `<div><span class="inline-block bg-green-100 text-green-700 text-xs font-semibold px-2 py-0.5 rounded-full mt-1">✓ bezahlt${r.bezahlt_am ? ' am ' + esc(fmtDate(r.bezahlt_am)) : ''}</span></div>`
+            : '';
+        return `
+            <div class="bg-white rounded-xl shadow-sm border p-4 ${r.bezahlt ? 'opacity-70' : ''}">
                 <div class="flex items-start justify-between gap-4 flex-wrap">
                     <div class="min-w-0 flex-1">
                         <div class="font-semibold text-gray-900 truncate">${titel}</div>
                         <div class="text-sm text-gray-600 mt-0.5">${zeitraumStr(r)}</div>
                         ${meta ? `<div class="text-xs text-gray-400 mt-0.5 truncate">${meta}</div>` : ''}
+                        ${badge}
                     </div>
                     ${betragHtml}
                 </div>
                 ${positionenHtml(r.positionen)}
-                ${aktionen}
+                ${actionsHtml(r)}
             </div>`;
-        }).join('');
+    }
 
+    function render() {
+        if (!RECHNUNGEN.length) { $('empty').classList.remove('hidden'); $('list').innerHTML = ''; return; }
+        $('empty').classList.add('hidden');
+        const offen = RECHNUNGEN.filter(r => !r.bezahlt);
+        const paid = RECHNUNGEN.filter(r => r.bezahlt);
+        let html = offen.length
+            ? offen.map(cardHtml).join('')
+            : '<div class="bg-white rounded-xl border p-6 text-center text-gray-400">Keine offenen Rechnungen 🎉</div>';
+        if (paid.length) {
+            html += `<button id="togglePaid" class="block mx-auto mt-5 text-sm text-gray-500 hover:text-gray-700 font-medium">${showPaid ? '▲ Bezahlte ausblenden' : '▼ Bezahlte anzeigen (' + paid.length + ')'}</button>`;
+            if (showPaid) html += `<div class="space-y-4 mt-3">${paid.map(cardHtml).join('')}</div>`;
+        }
+        $('list').innerHTML = html;
         document.querySelectorAll('.dl').forEach(b => b.addEventListener('click', () => downloadPdf(b.dataset.id, b.dataset.name, b)));
         document.querySelectorAll('.preview').forEach(b => b.addEventListener('click', () => togglePreview(b.dataset.id, b)));
+        document.querySelectorAll('.paytoggle').forEach(b => b.addEventListener('click', () => markBezahlt(b.dataset.id, b.dataset.val === '1', b)));
+        const tp = $('togglePaid'); if (tp) tp.addEventListener('click', () => { showPaid = !showPaid; render(); });
+    }
+
+    async function markBezahlt(id, val, btn) {
+        const old = btn.textContent; btn.disabled = true; btn.textContent = '…';
+        try {
+            const r = await AuthentikAuth.apiFetch(`/api/zev/rechnung/${id}/bezahlt`, { method: 'POST', body: { bezahlt: val } });
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const rec = RECHNUNGEN.find(x => String(x.id) === String(id));
+            if (rec) { rec.bezahlt = val; rec.bezahlt_am = val ? new Date().toISOString() : null; }
+            render();
+        } catch (e) { alert('Fehler: ' + e.message); btn.textContent = old; btn.disabled = false; }
     }
 
     async function togglePreview(id, btn) {
@@ -203,7 +238,8 @@
             const data = await r.json();
             $('loading').classList.add('hidden');
             $('content').classList.remove('hidden');
-            render(data.rechnungen || []);
+            RECHNUNGEN = data.rechnungen || [];
+            render();
         } catch (e) { $('loading').textContent = 'Fehler: ' + e.message; }
     }
 
