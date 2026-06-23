@@ -12772,8 +12772,8 @@ app.get('/api/mail-templates', authMiddleware, requireTechnikOrPraesident, async
 app.post('/api/mail-templates', authMiddleware, requireTechnikOrPraesident, async (req, res) => {
   try {
     const b = req.body || {};
-    if (!b.source_type || !b.subject_template || !b.body_template) {
-      return res.status(400).json({ error: 'source_type, subject_template und body_template erforderlich' });
+    if (!b.source_type || !b.subject_template || (!b.body_template && !b.body_html_template)) {
+      return res.status(400).json({ error: 'source_type, subject_template und body_template oder body_html_template erforderlich' });
     }
     const r = await pool.query(
       `INSERT INTO mail_templates (source_type, empfaenger_kategorie, subject_template, body_template, body_html_template, notiz, aktiv)
@@ -22310,6 +22310,8 @@ async function initDB() {
       );
       -- Optionaler HTML-Body (mit {{#each}}-Loops für Tabellen-Mails); leer = reine Text-Mail.
       ALTER TABLE mail_templates ADD COLUMN IF NOT EXISTS body_html_template TEXT;
+      -- HTML-only-Templates (nur body_html_template) erlauben -> body_template darf NULL sein.
+      ALTER TABLE mail_templates ALTER COLUMN body_template DROP NOT NULL;
       CREATE UNIQUE INDEX IF NOT EXISTS uq_templates ON mail_templates (source_type, COALESCE(empfaenger_kategorie, '_all'));
       CREATE INDEX IF NOT EXISTS idx_templates_source ON mail_templates(source_type, aktiv);
 
