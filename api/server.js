@@ -15464,6 +15464,21 @@ app.get('/api/reklamationen/meine', authMiddleware, async (req, res) => {
   } catch (e) { console.error('[reklamationen-meine]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 
+// Reklamations-Foto ausliefern (Triage im Technik-Cockpit) — wie Auslagen-Beleg,
+// mit Path-Traversal-Schutz. Permission wie die Triage-Liste (reklamationen read).
+app.get('/api/reklamationen/:id/foto', authMiddleware, requirePermission('reklamationen', 'read'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).end();
+    const r = await pool.query('SELECT bild_pfad FROM reklamationen WHERE id = $1', [id]);
+    const p = r.rows[0]?.bild_pfad;
+    if (!p) return res.status(404).json({ error: 'Kein Foto vorhanden' });
+    const full = pathModule.join(DOCS_PATH, p);
+    if (!full.startsWith(pathModule.resolve(DOCS_PATH) + '/')) return res.status(400).end();
+    res.sendFile(full, (err) => { if (err && !res.headersSent) res.status(404).end(); });
+  } catch (e) { console.error('[reklamation-foto]', e); if (!res.headersSent) res.status(500).end(); }
+});
+
 // ─── Reparatur-Melder OHNE Login: per E-Mail-Code (OTP) fuer bekannte Bewohner ───
 // Schritt 1: Code anfordern (autorisiert gegen personen/users, Anti-Spam).
 const reklaCodeRate = new Map(); // email -> {first,count}
