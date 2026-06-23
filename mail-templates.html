@@ -28,7 +28,7 @@
       </div>
 
       <div class="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-900 mb-4">
-        <strong>Platzhalter-Syntax:</strong> <code class="mono">{{path.to.field}}</code>, mit Helpers <code class="mono">{{chf auslage.betrag_chf}}</code>, <code class="mono">{{date auslage.datum}}</code>, <code class="mono">{{upper x}}</code>. Bedingung: <code class="mono">{{#if auslage.iban}}…{{/if}}</code>.
+        <strong>Platzhalter-Syntax:</strong> <code class="mono">{{path.to.field}}</code>, mit Helpers <code class="mono">{{chf auslage.betrag_chf}}</code>, <code class="mono">{{date auslage.datum}}</code>, <code class="mono">{{upper x}}</code>. Bedingung: <code class="mono">{{#if auslage.iban}}…{{/if}}</code>. Schleife: <code class="mono">{{#each rows}}…{{feld}}…{{/each}}</code> (im Block: <code class="mono">{{@nr}}</code> 1-basiert, <code class="mono">{{this}}</code> für Primitive).
         <br><strong>Verfügbare Source-Types:</strong> <code class="mono">auslage-auszahlung</code>, <code class="mono">auslage-auszahlung-nachgereicht</code>, <code class="mono">objekt-änderung</code>.
         <br><strong>Context-Beispiel auslage-auszahlung:</strong> <code class="mono">auslage.id</code>, <code class="mono">auslage.user_name</code>, <code class="mono">auslage.user_email</code>, <code class="mono">auslage.betrag_chf</code>, <code class="mono">auslage.iban</code>, <code class="mono">auslage.beschreibung</code>, <code class="mono">auslage.kategorie</code>, <code class="mono">stweg_label</code>, <code class="mono">betrag</code>, <code class="mono">datum</code>, <code class="mono">freigeber</code>, <code class="mono">verwaltung.firma</code>, <code class="mono">site_url</code>, <code class="mono">ausschuss_email</code>.
       </div>
@@ -73,6 +73,12 @@
                     placeholder="Sehr geehrte Damen und Herren,&#10;&#10;Der Ausschuss hat die Auslage Nr. {{auslage.id}} freigegeben.&#10;&#10;Betrag: {{chf auslage.betrag_chf}}&#10;IBAN: {{auslage.iban}}&#10;..."></textarea>
         </label>
         <label class="block">
+          <span class="text-xs text-gray-600">HTML-Body (optional)</span>
+          <textarea id="m-body-html" rows="10" class="mono mt-1 block w-full border rounded px-2 py-1.5"
+                    placeholder="&lt;table&gt;{{#each rows}}&lt;tr&gt;&lt;td&gt;{{feld}}&lt;/td&gt;&lt;/tr&gt;{{/each}}&lt;/table&gt;"></textarea>
+          <span class="text-xs text-gray-500 mt-0.5 block">Leer lassen = reine Text-Mail (Body-Template). Für Tabellen HTML mit <code class="mono">{{#each rows}}&lt;tr&gt;&lt;td&gt;{{feld}}&lt;/td&gt;&lt;/tr&gt;{{/each}}</code> nutzen.</span>
+        </label>
+        <label class="block">
           <span class="text-xs text-gray-600">Notiz</span>
           <input type="text" id="m-notiz" class="mt-1 block w-full border rounded px-2 py-1.5">
         </label>
@@ -83,8 +89,14 @@
           <div id="preview" class="hidden mt-2 bg-gray-50 border rounded p-3 text-sm">
             <div class="text-xs text-gray-500">Betreff:</div>
             <div id="prev-subj" class="font-semibold mb-2"></div>
-            <div class="text-xs text-gray-500">Body:</div>
-            <pre id="prev-body" class="mono text-xs whitespace-pre-wrap"></pre>
+            <div id="prev-body-wrap">
+              <div class="text-xs text-gray-500">Body:</div>
+              <pre id="prev-body" class="mono text-xs whitespace-pre-wrap"></pre>
+            </div>
+            <div id="prev-html-wrap" class="hidden">
+              <div class="text-xs text-gray-500">HTML-Vorschau:</div>
+              <iframe id="prev-html" sandbox="" class="w-full h-72 bg-white border rounded mt-1"></iframe>
+            </div>
           </div>
         </div>
 
@@ -112,6 +124,10 @@
     site_url: 'https://www.rosenweg4303.ch', ausschuss_email: 'ausschuss@rosenweg4303.ch',
     erste_aenderung: '  • 17.05.2026 (admin@…): Wohnung "EG.1" aktualisiert',
     today_de: '17.05.2026',
+    rows: [
+      { feld1: 'Beispiel A', feld2: '12.34', nr: 1 },
+      { feld1: 'Beispiel B', feld2: '56.78', nr: 2 },
+    ],
   };
 
   document.addEventListener('DOMContentLoaded', async () => {
@@ -180,6 +196,7 @@
     document.getElementById('m-kat').value = t.empfaenger_kategorie || '';
     document.getElementById('m-subject').value = t.subject_template;
     document.getElementById('m-body').value = t.body_template;
+    document.getElementById('m-body-html').value = t.body_html_template || '';
     document.getElementById('m-notiz').value = t.notiz || '';
     document.getElementById('m-aktiv').checked = t.aktiv !== false;
     document.getElementById('m-del').classList.remove('hidden');
@@ -194,6 +211,7 @@
     const payload = {
       subject_template: document.getElementById('m-subject').value,
       body_template: document.getElementById('m-body').value,
+      body_html_template: document.getElementById('m-body-html').value || null,
       context: SAMPLE_CTX,
     };
     try {
@@ -202,7 +220,17 @@
       });
       const d = await r.json();
       document.getElementById('prev-subj').textContent = d.subject;
-      document.getElementById('prev-body').textContent = d.body;
+      const htmlWrap = document.getElementById('prev-html-wrap');
+      const bodyWrap = document.getElementById('prev-body-wrap');
+      if (d.html) {
+        document.getElementById('prev-html').srcdoc = d.html;
+        htmlWrap.classList.remove('hidden');
+        bodyWrap.classList.add('hidden');
+      } else {
+        document.getElementById('prev-body').textContent = d.body;
+        bodyWrap.classList.remove('hidden');
+        htmlWrap.classList.add('hidden');
+      }
       document.getElementById('preview').classList.remove('hidden');
     } catch (e) { alert('Preview-Fehler: ' + e.message); }
   }
@@ -215,6 +243,7 @@
       empfaenger_kategorie: document.getElementById('m-kat').value || null,
       subject_template: document.getElementById('m-subject').value,
       body_template: document.getElementById('m-body').value,
+      body_html_template: document.getElementById('m-body-html').value || null,
       notiz: document.getElementById('m-notiz').value.trim() || null,
       aktiv: document.getElementById('m-aktiv').checked,
     };
