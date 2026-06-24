@@ -515,44 +515,36 @@ async function loadMeinAnschluss(user) {
 }
 
 async function runHealthChecks() {
-    // Mailcow live (no-cors HEAD)
-    let mailcowOk = false;
+    // Status aus der server-seitigen NOC-Zusammenfassung (/api/isp/status-summary) —
+    // zuverlaessig, KEINE fragilen Browser-Fetches/Cert-Abhaengigkeiten mehr.
+    // Fallback (Endpoint nicht erreichbar): optimistisch gruen.
+    let s = { internet: true, mail: true, web: true };
     try {
-        const ctrl = new AbortController(); setTimeout(() => ctrl.abort(), 4000);
-        await fetch('https://mailcow.rosenweg9.ch/', { signal: ctrl.signal, mode: 'no-cors' });
-        mailcowOk = true;
+        const r = await fetch('/api/isp/status-summary', { cache: 'no-store' });
+        if (r.ok) s = await r.json();
     } catch {}
-    // PMG quarantine (auch no-cors)
-    let pmgOk = false;
-    try {
-        const ctrl = new AbortController(); setTimeout(() => ctrl.abort(), 4000);
-        await fetch('https://quarantine.rosenweg9.ch/', { signal: ctrl.signal, mode: 'no-cors' });
-        pmgOk = true;
-    } catch {}
-    // Hier-Webserver erreichbar (== Webdienste live)
-    const webOk = true;
 
     const setPill = (name, ok) => {
         const el = document.querySelector(`#status-strip [data-svc="${name}"] .blob`);
         if (el) el.className = `blob w-2 h-2 rounded-full inline-block ${ok ? 'bg-emerald-300' : 'bg-rose-400'}`;
     };
-    setPill('mail', mailcowOk && pmgOk);
-    setPill('web', webOk);
-    setPill('internet', true);  // wir sind ja online wenn dieser Code laeuft
+    setPill('internet', s.internet);
+    setPill('mail', s.mail);
+    setPill('web', s.web);
 
-    // Mail-Health-Block in Sektion 2
+    // Mail-Health-Block in Sektion 2 (PMG + Mailcow = s.mail)
     const updateMail = (idx, ok) => {
         const li = document.querySelectorAll('#mail-health li')[idx];
         if (!li) return;
         const dot = li.querySelector('span.blob');
         if (dot) dot.className = `blob w-2 h-2 rounded-full inline-block ${ok ? 'bg-emerald-300' : 'bg-rose-400'}`;
     };
-    updateMail(0, pmgOk);
-    updateMail(1, mailcowOk);
+    updateMail(0, s.mail);
+    updateMail(1, s.mail);
     updateMail(2, true);  // SMTP2GO ist Drittanbieter, gehen wir von up aus
 
     // Footer-Status
-    const allOk = mailcowOk && pmgOk && webOk;
+    const allOk = s.internet && s.mail && s.web;
     document.getElementById('footer-status-dot').className =
       `w-2 h-2 rounded-full blob inline-block ${allOk ? 'bg-emerald-500' : 'bg-amber-500'}`;
     document.getElementById('footer-status-text').textContent =
