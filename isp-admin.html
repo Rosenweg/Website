@@ -1624,6 +1624,7 @@
     wrap.innerHTML = `<table class="min-w-full text-sm">
       <thead class="bg-gray-50 text-xs uppercase text-gray-500"><tr>
         <th class="px-3 py-2 text-left">User</th>
+        <th class="px-3 py-2 text-left">Bezeichnung</th>
         <th class="px-3 py-2 text-left">Heim-VLAN</th>
         <th class="px-3 py-2 text-left">IP</th>
         <th class="px-3 py-2 text-left">Status</th>
@@ -1632,6 +1633,7 @@
       </tr></thead>
       <tbody class="divide-y">${vpnAccounts.map(v => `
         <tr><td class="px-3 py-2 text-xs">${esc(v.user_email)}</td>
+          <td class="px-3 py-2 text-xs">${v.bezeichnung ? esc(v.bezeichnung) : '<span class="text-gray-400 italic">—</span>'} <button onclick="renameVpn(${v.id})" class="text-indigo-600 hover:underline" title="Bezeichnung ändern">✎</button></td>
           <td class="px-3 py-2 text-xs"><span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-mono">${vpnVlanFromNotizen(v.notizen)}</span></td>
           <td class="px-3 py-2 font-mono text-xs">${esc(v.assigned_ip || '—')}</td>
           <td class="px-3 py-2"><span class="text-xs ${v.active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'} px-2 py-0.5 rounded">${v.active ? 'aktiv' : 'inaktiv'}</span></td>
@@ -1648,6 +1650,14 @@
     await AuthentikAuth.apiFetch('/api/isp/vpn-accounts/' + id, { method: 'DELETE' });
     await loadVpns();
   }
+  async function renameVpn(id) {
+    const v = vpnAccounts.find(x => x.id === id) || {};
+    const neu = prompt('Bezeichnung für dieses VPN-Konto (wofür ist sie?):', v.bezeichnung || '');
+    if (neu === null) return;
+    const r = await AuthentikAuth.apiFetch('/api/isp/vpn-accounts/' + id, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ bezeichnung: neu.trim() }) });
+    if (!r.ok) { alert('Fehler: ' + await r.text()); return; }
+    await loadVpns();
+  }
   function openVpnModal() {
     const isAdmin = vpnAccounts.is_admin || true; // Best-effort; backend lehnt sonst ab
     const modal = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
@@ -1657,6 +1667,10 @@
           <div>
             <label class="block text-xs text-gray-600">Geräte-Name *</label>
             <input id="vpn-name" type="text" placeholder="z.B. iPhone Stefan" class="w-full border rounded px-2 py-1">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-600">Bezeichnung (wofür ist die VPN?)</label>
+            <input id="vpn-bez" type="text" placeholder="z.B. Homeoffice, Ferienhaus" class="w-full border rounded px-2 py-1">
           </div>
           <div>
             <label class="block text-xs text-gray-600">User-E-Mail (leer = du selbst; Admin darf für andere)</label>
@@ -1674,11 +1688,12 @@
   async function createVpn() {
     const name = document.getElementById('vpn-name').value.trim();
     const email = document.getElementById('vpn-email').value.trim();
+    const bez = document.getElementById('vpn-bez').value.trim();
     if (!name) { alert('Geräte-Name fehlt'); return; }
     const r = await AuthentikAuth.apiFetch('/api/isp/vpn-accounts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, ...(email ? { user_email: email } : {}) }),
+      body: JSON.stringify({ name, ...(email ? { user_email: email } : {}), ...(bez ? { bezeichnung: bez } : {}) }),
     });
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));

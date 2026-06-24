@@ -104,11 +104,23 @@
     vpnAccounts = (await r.json()).vpn_accounts || [];
     renderVpn();
   }
+  async function renameVpn(id) {
+    const v = vpnAccounts.find(x => x.id === id) || {};
+    const neu = prompt('Bezeichnung für dieses VPN-Konto (wofür ist sie?):', v.bezeichnung || '');
+    if (neu === null) return;
+    const r = await AuthentikAuth.apiFetch('/api/isp/vpn-accounts/' + id, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ bezeichnung: neu.trim() }) });
+    if (!r.ok) { alert('Fehler: ' + await r.text()); return; }
+    await loadVpn();
+  }
   function renderVpn() {
     const wrap = document.getElementById('vpn-list');
     if (vpnAccounts.length === 0) { wrap.innerHTML = '<p class="text-gray-400 italic text-sm">Noch kein VPN-Konto.</p>'; return; }
     wrap.innerHTML = vpnAccounts.map(v => `
       <div class="border rounded p-3 bg-gray-50">
+        <div class="flex items-center gap-2 mb-1">
+          <span class="font-semibold text-sm">${v.bezeichnung ? esc(v.bezeichnung) : '<span class="text-gray-400 italic font-normal">Ohne Bezeichnung</span>'}</span>
+          <button onclick="renameVpn(${v.id})" class="text-xs text-indigo-600 hover:underline" title="Bezeichnung ändern">✎ umbenennen</button>
+        </div>
         <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
           <div><span class="text-xs bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded">${esc(v.backend)}</span>
             ${v.username ? `<span class="ml-2 font-mono text-sm">${esc(v.username)}</span>` : ''}
@@ -206,7 +218,7 @@
         <div class="space-y-2 text-sm">
           ${optHtml}
           <div><label class="block text-xs text-gray-600">Public-Key <span class="text-gray-400">(optional)</span></label><textarea id="v-pub" rows="2" class="w-full border rounded px-2 py-1 font-mono text-xs" placeholder="z.B. xTI...= (sonst leer)"></textarea></div>
-          <div><label class="block text-xs text-gray-600">Notizen</label><input id="v-notiz" class="w-full border rounded px-2 py-1" placeholder="z.B. Laptop privat"></div>
+          <div><label class="block text-xs text-gray-600">Bezeichnung <span class="text-gray-400">(wofür ist die VPN?)</span></label><input id="v-bez" class="w-full border rounded px-2 py-1" placeholder="z.B. Laptop privat, Homeoffice, Ferienhaus"></div>
         </div>
         <div class="flex justify-end gap-2 mt-3">
           <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Abbrechen</button>
@@ -221,7 +233,7 @@
       backend: 'wireguard',
       vlan: vlanEl ? parseInt(vlanEl.value, 10) : undefined,
       public_key: document.getElementById('v-pub').value.trim() || null,
-      notizen: document.getElementById('v-notiz').value || null,
+      bezeichnung: document.getElementById('v-bez').value || null,
     };
     try {
       const r = await AuthentikAuth.apiFetch('/api/isp/vpn-accounts', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
