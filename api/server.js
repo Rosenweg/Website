@@ -16914,7 +16914,29 @@ app.get('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
     const r = admin
       ? await pool.query('SELECT * FROM isp_vpn_accounts ORDER BY active DESC, user_email, backend')
       : await pool.query('SELECT * FROM isp_vpn_accounts WHERE LOWER(user_email) = $1 ORDER BY active DESC, backend', [email]);
-    res.json({ vpn_accounts: r.rows, is_admin: admin });
+    let rows = r.rows;
+    // last_connect_at wird in der DB nie gefüllt — Live-Handshake aus wg-control überlagern
+    if (WG_CONTROL_TOKEN && rows.length) {
+      try {
+        const wr = await wgControl('GET', '/peers');
+        const body = await wr.json();
+        const peers = Array.isArray(body) ? body : (body.peers || []);
+        const hsMap = new Map();
+        for (const p of peers) {
+          const hs = p.latest_handshake || null;
+          if (p.public_key) hsMap.set('pk:' + p.public_key, hs);
+          if (p.id != null) hsMap.set('id:' + String(p.id), hs);
+          if (p.name) hsMap.set('nm:' + p.name, hs);
+        }
+        rows = rows.map(v => {
+          const hs = (v.public_key && hsMap.get('pk:' + v.public_key))
+            || (v.username && hsMap.get('id:' + String(v.username)))
+            || (v.username && hsMap.get('nm:' + v.username)) || null;
+          return hs ? { ...v, last_connect_at: hs } : v;
+        });
+      } catch {}
+    }
+    res.json({ vpn_accounts: rows, is_admin: admin });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
