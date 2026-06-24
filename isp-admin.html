@@ -1717,8 +1717,20 @@
       if (img) img.outerHTML = `<p class="text-xs text-red-600">QR-Code konnte nicht geladen werden (${esc(e.message)})</p>`;
     }
   }
+  function downloadText(content, filename) {
+    const blob = new Blob([content], { type: 'application/octet-stream' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+  function vpnConfName(v) {
+    return 'rosenweg-vpn-' + String(v.bezeichnung || v.assigned_ip || v.id || 'konto')
+      .replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase() + '.conf';
+  }
   function showCreatedConfig(v) {
     const cfg = v.config || '';
+    const fname = vpnConfName(v);
     const qrImgId = 'qr-img-' + v.id + '-' + Math.random().toString(36).slice(2, 8);
     const modal = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-2xl w-full p-5 max-h-[90vh] overflow-y-auto">
@@ -1730,7 +1742,16 @@
           <div>
             <label class="block text-xs text-gray-600 mb-1">Config-Text</label>
             <textarea readonly class="w-full border rounded px-2 py-1 font-mono text-xs h-72" onclick="this.select()">${esc(cfg)}</textarea>
-            <button onclick="navigator.clipboard.writeText(\`${cfg.replace(/`/g, '\\`')}\`); this.textContent='Kopiert!'" class="mt-1 text-xs text-blue-600 hover:underline">In Zwischenablage</button>
+            <div class="flex flex-wrap gap-3 mt-1 items-center">
+              <button onclick="downloadText(this.closest('div').previousElementSibling.value, '${fname}')" class="text-xs text-white bg-green-600 hover:bg-green-700 px-2 py-1 rounded font-semibold">⬇ .conf herunterladen</button>
+              <button onclick="navigator.clipboard.writeText(this.closest('div').previousElementSibling.value); this.textContent='Kopiert!'" class="text-xs text-blue-600 hover:underline">In Zwischenablage</button>
+            </div>
+            <details class="mt-2 text-xs text-gray-600">
+              <summary class="cursor-pointer text-blue-700">🐧 In Linux Mint importieren</summary>
+              <p class="mt-1">Datei herunterladen, dann im Terminal (im Download-Ordner):</p>
+              <pre class="bg-gray-100 border rounded p-2 mt-1 overflow-auto select-all">nmcli connection import type wireguard file ${fname}</pre>
+              <p class="mt-1">…oder grafisch: <strong>Einstellungen → Netzwerk → VPN → „+" → „Aus Datei importieren…"</strong> → die heruntergeladene <code>.conf</code> wählen, dann oben im Netzwerk-Menü einschalten.</p>
+            </details>
           </div>
           <div class="text-center">
             <label class="block text-xs text-gray-600 mb-1">QR-Code für Mobile-App</label>
