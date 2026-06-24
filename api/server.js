@@ -15587,6 +15587,91 @@ app.post('/api/reklamationen/:id/history', authMiddleware, requirePermission('re
   } catch (e) { console.error('[reklamation-history-post]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 
+// ─── Melde-Orte (QR-Code-Sticker) ────────────────────────────────────
+// Verwaltung der festen Orte; QR-Codes verlinken auf das Meldeformular mit
+// vorausgefuelltem Ort. Lese-/Schreibrechte wie die Reklamations-Triage.
+function genOrtCode() {
+  // 8 Zeichen, URL-sicher, ohne leicht verwechselbare Zeichen (0/O, 1/l).
+  const alphabet = 'abcdefghijkmnpqrstuvwxyz23456789';
+  const buf = crypto.randomBytes(8);
+  let s = '';
+  for (let i = 0; i < 8; i++) s += alphabet[buf[i] % alphabet.length];
+  return s;
+}
+const VALID_KAT = ['aufzug', 'heizung', 'wasser', 'tuer', 'reinigung', 'sonstige'];
+
+app.get('/api/reklamation-orte', authMiddleware, requirePermission('reklamationen', 'read'), async (req, res) => {
+  try {
+    const r = await pool.query('SELECT id, code, name, stweg, kategorie, aktiv, created_at FROM reklamation_orte ORDER BY aktiv DESC, name ASC');
+    res.json({ orte: r.rows });
+  } catch (e) { console.error('[rekl-orte-list]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+app.post('/api/reklamation-orte', authMiddleware, requirePermission('reklamationen', 'write'), async (req, res) => {
+  try {
+    const b = req.body || {};
+    const name = String(b.name || '').trim().slice(0, 200);
+    if (!name) return res.status(400).json({ error: 'Name erforderlich' });
+    const stweg = Number.isFinite(parseInt(b.stweg, 10)) ? parseInt(b.stweg, 10) : null;
+    const kategorie = VALID_KAT.includes(b.kategorie) ? b.kategorie : null;
+    // Eindeutigen Code erzeugen (sehr unwahrscheinliche Kollision -> wenige Retries).
+    let code = null;
+    for (let i = 0; i < 5 && !code; i++) {
+      const c = genOrtCode();
+      const ex = await pool.query('SELECT 1 FROM reklamation_orte WHERE code = $1', [c]);
+      if (ex.rows.length === 0) code = c;
+    }
+    if (!code) return res.status(500).json({ error: 'Code-Generierung fehlgeschlagen' });
+    const r = await pool.query(
+      'INSERT INTO reklamation_orte (code, name, stweg, kategorie) VALUES ($1,$2,$3,$4) RETURNING id, code, name, stweg, kategorie, aktiv, created_at',
+      [code, name, stweg, kategorie]);
+    res.json({ ok: true, ort: r.rows[0] });
+  } catch (e) { console.error('[rekl-orte-create]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+app.put('/api/reklamation-orte/:id', authMiddleware, requirePermission('reklamationen', 'write'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
+    const b = req.body || {};
+    const updates = []; const params = [];
+    const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
+    if (b.name !== undefined) { const n = String(b.name || '').trim().slice(0, 200); if (!n) return res.status(400).json({ error: 'Name erforderlich' }); push('name', n); }
+    if (b.stweg !== undefined) push('stweg', Number.isFinite(parseInt(b.stweg, 10)) ? parseInt(b.stweg, 10) : null);
+    if (b.kategorie !== undefined) push('kategorie', VALID_KAT.includes(b.kategorie) ? b.kategorie : null);
+    if (b.aktiv !== undefined) push('aktiv', !!b.aktiv);
+    if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
+    params.push(id);
+    const r = await pool.query(
+      `UPDATE reklamation_orte SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING id, code, name, stweg, kategorie, aktiv, created_at`,
+      params);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    res.json({ ok: true, ort: r.rows[0] });
+  } catch (e) { console.error('[rekl-orte-update]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+app.delete('/api/reklamation-orte/:id', authMiddleware, requirePermission('reklamationen', 'write'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
+    const r = await pool.query('DELETE FROM reklamation_orte WHERE id = $1 RETURNING id', [id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    res.json({ ok: true });
+  } catch (e) { console.error('[rekl-orte-delete]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+// OEFFENTLICH: Ort per QR-Code aufloesen (Vorausfuellen im Meldeformular,
+// noch vor dem Login/Code-Gate). Liefert nur aktive Orte, keine sensiblen Daten.
+app.get('/api/melde-ort/:code', async (req, res) => {
+  try {
+    const code = String(req.params.code || '').trim().slice(0, 40);
+    if (!code) return res.status(400).json({ error: 'Kein Code' });
+    const r = await pool.query('SELECT name, stweg, kategorie FROM reklamation_orte WHERE code = $1 AND aktiv = true', [code]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Ort nicht gefunden' });
+    res.json({ ort: r.rows[0] });
+  } catch (e) { console.error('[melde-ort]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
 // Bewohner-Uebersicht: Reklamationen der eigenen STWEG(s) + uebergreifende (stweg NULL),
 // sanitisiert (KEIN Melder-Name/-Email — Transparenz-Board, kein Datenleck).
 app.get('/api/reklamationen/uebersicht', authMiddleware, async (req, res) => {
@@ -15639,18 +15724,19 @@ app.post('/api/reklamationen', authMiddleware, async (req, res) => {
         }
       } catch (e) { console.error('[reklamation-foto]', e.message); }
     }
+    const standort = b.standort ? String(b.standort).trim().slice(0, 200) : null;
     const r = await pool.query(
-      `INSERT INTO reklamationen (person_id, stweg, kategorie, beschreibung, bild_pfad, eingang_kanal, status)
-       VALUES ($1,$2,$3,$4,$5,'web','offen') RETURNING id, kategorie, beschreibung, status, created_at`,
-      [personId, stweg, kategorie, beschreibung, bildPfad]);
-    logReklEvent(r.rows[0].id, email, 'Erstellt (Web-Formular)').catch(() => {});
+      `INSERT INTO reklamationen (person_id, stweg, kategorie, beschreibung, bild_pfad, standort, eingang_kanal, status)
+       VALUES ($1,$2,$3,$4,$5,$6,'web','offen') RETURNING id, kategorie, beschreibung, status, created_at`,
+      [personId, stweg, kategorie, beschreibung, bildPfad, standort]);
+    logReklEvent(r.rows[0].id, email, 'Erstellt (Web-Formular)' + (standort ? ` · 📍 ${standort}` : '')).catch(() => {});
     // Web-Push an die Technik (neue Meldung -> Cockpit)
     getTechnikEmails().then((emails) => webpushLib.sendToEmails(emails, {
       title: 'Neue Reparatur-Meldung', body: `${kategorie}: ${beschreibung.slice(0, 80)}`,
       url: 'https://pwa.rosenweg4303.ch/technik/', tag: `rekl-${r.rows[0].id}`,
     })).catch(() => {});
     // WhatsApp an die Technik-Gruppe (neue Meldung) — die API meldet selbst.
-    notifyTechnik(`🔧 *Neue Reparatur-Meldung* #${r.rows[0].id}\nKategorie: ${kategorie}${stweg ? ` · STWEG ${stweg}` : ''}\n${beschreibung.slice(0, 200)}\n\n→ pwa.rosenweg4303.ch/technik/`, 'reklamation-neu').catch(() => {});
+    notifyTechnik(`🔧 *Neue Reparatur-Meldung* #${r.rows[0].id}\nKategorie: ${kategorie}${stweg ? ` · STWEG ${stweg}` : ''}${standort ? `\n📍 ${standort}` : ''}\n${beschreibung.slice(0, 200)}\n\n→ pwa.rosenweg4303.ch/technik/`, 'reklamation-neu').catch(() => {});
     res.json({ ok: true, reklamation: r.rows[0] });
   } catch (e) { console.error('[reklamation-web-post]', e); res.status(500).json({ error: 'Fehler' }); }
 });
@@ -15660,7 +15746,7 @@ app.get('/api/reklamationen/meine', authMiddleware, async (req, res) => {
   try {
     const email = String(req.user?.email || '').toLowerCase();
     const r = await pool.query(
-      `SELECT id, kategorie, beschreibung, status, (bild_pfad IS NOT NULL) AS has_bild, created_at, erledigt_am, notiz
+      `SELECT id, kategorie, beschreibung, status, standort, (bild_pfad IS NOT NULL) AS has_bild, created_at, erledigt_am, notiz
          FROM reklamationen
         WHERE person_id = (SELECT id FROM personen WHERE LOWER(email) = $1 LIMIT 1)
         ORDER BY created_at DESC LIMIT 100`, [email]);
@@ -15754,18 +15840,19 @@ app.post('/api/reklamationen/oeffentlich', async (req, res) => {
         }
       } catch (e) { console.error('[reklamation-foto]', e.message); }
     }
+    const standort = b.standort ? String(b.standort).trim().slice(0, 200) : null;
     const r = await pool.query(
-      `INSERT INTO reklamationen (person_id, stweg, kategorie, beschreibung, bild_pfad, eingang_kanal, status)
-       VALUES ($1,$2,$3,$4,$5,'web','offen') RETURNING id, kategorie, beschreibung, status, created_at`,
-      [personId, stweg, kategorie, beschreibung, bildPfad]);
-    logReklEvent(r.rows[0].id, email, 'Erstellt (Web-Formular)').catch(() => {});
+      `INSERT INTO reklamationen (person_id, stweg, kategorie, beschreibung, bild_pfad, standort, eingang_kanal, status)
+       VALUES ($1,$2,$3,$4,$5,$6,'web','offen') RETURNING id, kategorie, beschreibung, status, created_at`,
+      [personId, stweg, kategorie, beschreibung, bildPfad, standort]);
+    logReklEvent(r.rows[0].id, email, 'Erstellt (Web-Formular)' + (standort ? ` · 📍 ${standort}` : '')).catch(() => {});
     // Web-Push an die Technik (neue Meldung -> Cockpit)
     getTechnikEmails().then((emails) => webpushLib.sendToEmails(emails, {
       title: 'Neue Reparatur-Meldung', body: `${kategorie}: ${beschreibung.slice(0, 80)}`,
       url: 'https://pwa.rosenweg4303.ch/technik/', tag: `rekl-${r.rows[0].id}`,
     })).catch(() => {});
     // WhatsApp an die Technik-Gruppe (neue Meldung) — die API meldet selbst.
-    notifyTechnik(`🔧 *Neue Reparatur-Meldung* #${r.rows[0].id}\nKategorie: ${kategorie}${stweg ? ` · STWEG ${stweg}` : ''}\n${beschreibung.slice(0, 200)}\n\n→ pwa.rosenweg4303.ch/technik/`, 'reklamation-neu').catch(() => {});
+    notifyTechnik(`🔧 *Neue Reparatur-Meldung* #${r.rows[0].id}\nKategorie: ${kategorie}${stweg ? ` · STWEG ${stweg}` : ''}${standort ? `\n📍 ${standort}` : ''}\n${beschreibung.slice(0, 200)}\n\n→ pwa.rosenweg4303.ch/technik/`, 'reklamation-neu').catch(() => {});
     res.json({ ok: true, reklamation: r.rows[0] });
   } catch (e) { console.error('[reklamation-oeffentlich]', e); res.status(500).json({ error: 'Fehler' }); }
 });
@@ -22071,6 +22158,20 @@ async function initDB() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_rekl_events ON reklamation_events(reklamation_id, created_at);
+      -- Melde-Orte fuer QR-Code-Sticker: ein fester Ort (z.B. "Aufzug Haus 9")
+      -- mit kurzem code im QR-Link -> Meldeformular mit vorausgefuelltem Ort.
+      CREATE TABLE IF NOT EXISTS reklamation_orte (
+        id SERIAL PRIMARY KEY,
+        code VARCHAR(40) UNIQUE NOT NULL,           -- kurzer URL-Token im QR-Link
+        name VARCHAR(200) NOT NULL,                 -- Anzeige, z.B. "Aufzug Haus 9"
+        stweg INTEGER,                              -- optional vorausgewaehlt
+        kategorie VARCHAR(60),                      -- optional vorausgewaehlt
+        aktiv BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_rekl_orte_aktiv ON reklamation_orte(aktiv);
+      -- Standort-Freitext an der Meldung (aus QR-Ort oder manuell uebernommen).
+      ALTER TABLE reklamationen ADD COLUMN IF NOT EXISTS standort VARCHAR(200);
       CREATE INDEX IF NOT EXISTS idx_wk_person ON wohnungen_kontakte(person_id);
 
       -- Vollmachten: Eigentümer bevollmaechtigt Verwalter/Mieter/andere

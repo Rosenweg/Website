@@ -6,7 +6,7 @@
   <title>Reklamationen — Rosenweg</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="/js/authentik-auth.js?v=2"></script>
-  <script src="/js/nav.js?v=2"></script>
+  <script src="/js/nav.js?v=3"></script>
   <link rel="icon" href="/logo-rosenweg.png">
   <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'); body { font-family: 'Inter', sans-serif; }
     .s-offen { background:#fef3c7; color:#92400e; }
@@ -153,7 +153,7 @@
       <td class="px-3 py-2 text-xs text-gray-500">${esc(fmtDt(r.created_at))}</td>
       <td class="px-3 py-2 text-sm">${esc(r.person_name || '—')}</td>
       <td class="px-3 py-2 text-sm">${r.stweg ? 'STWEG ' + r.stweg : '—'}</td>
-      <td class="px-3 py-2 text-sm"><div class="max-w-[260px] sm:max-w-md line-clamp-2" title="${esc(r.beschreibung || '')}">${esc(r.beschreibung || '')}${foto}</div></td>
+      <td class="px-3 py-2 text-sm"><div class="max-w-[260px] sm:max-w-md line-clamp-2" title="${esc(r.beschreibung || '')}">${r.standort ? '<span class="text-amber-700">📍 ' + esc(r.standort) + '</span> · ' : ''}${esc(r.beschreibung || '')}${foto}</div></td>
       <td class="px-3 py-2 text-xs">${zuw}</td>
       <td class="px-3 py-2"><span class="s-${esc(r.status)} text-xs px-2 py-0.5 rounded">${esc(r.status)}</span></td>
       <td class="px-3 py-2 whitespace-nowrap text-xs">
@@ -192,7 +192,7 @@
     if (!r) return;
     editId = id;
     document.getElementById('em-id').textContent = '#' + r.id;
-    const von = [r.person_name, r.stweg ? ('STWEG ' + r.stweg) : null, r.kategorie].filter(Boolean).map(esc).join(' · ');
+    const von = [r.person_name, r.stweg ? ('STWEG ' + r.stweg) : null, r.standort ? ('📍 ' + r.standort) : null, r.kategorie].filter(Boolean).map(esc).join(' · ');
     document.getElementById('em-meta').textContent = von + ' · ' + fmtDt(r.created_at);
     document.getElementById('em-desc').textContent = r.beschreibung || '';
     document.getElementById('em-status').value = r.status || 'offen';
