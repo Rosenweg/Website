@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  syntax-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Node syntax check (eigene .js, ohne node_modules und *.min.js)
+        run: |
+          set -e
+          found=0
+          while IFS= read -r -d '' f; do
+            found=1
+            node --check "$f"
+          done < <(find . -type f -name '*.js' -not -path '*/node_modules/*' -not -name '*.min.js' -print0)
+          if [ "$found" -eq 0 ]; then
+            echo "Keine JS-Dateien gefunden"; exit 1
+          fi
+          echo "✓ Syntax aller JS-Dateien OK"
+
+      - name: JSON validieren (alle .json ausserhalb node_modules)
+        run: |
+          set -e
+          while IFS= read -r -d '' f; do
+            node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "$f" \
+              || { echo "Ungueltiges JSON: $f"; exit 1; }
+          done < <(find . -type f -name '*.json' -not -path '*/node_modules/*' -print0)
+          echo "✓ Alle JSON-Dateien gueltig"
