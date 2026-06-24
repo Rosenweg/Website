@@ -15569,6 +15569,24 @@ app.get('/api/reklamationen/:id/history', authMiddleware, requirePermission('rek
   } catch (e) { console.error('[reklamation-history]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 
+// Technik dokumentiert einen Arbeitsschritt im Verlauf (was wurde wann gemacht).
+// Reiner Protokoll-Eintrag in reklamation_events — anders als 'notiz' (einzelnes,
+// ueberschreibbares Feld) bleiben Schritte als chronologische Timeline erhalten.
+app.post('/api/reklamationen/:id/history', authMiddleware, requirePermission('reklamationen', 'write'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
+    const text = String((req.body || {}).text || '').trim();
+    if (!text) return res.status(400).json({ error: 'Schritt darf nicht leer sein' });
+    const exists = await pool.query('SELECT id FROM reklamationen WHERE id = $1', [id]);
+    if (exists.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const who = req.user.name || req.user.email || 'unbekannt';
+    await logReklEvent(id, who, `🔧 ${text.slice(0, 480)}`);
+    const r = await pool.query('SELECT created_at, who, event FROM reklamation_events WHERE reklamation_id = $1 ORDER BY created_at ASC, id ASC', [id]);
+    res.json({ ok: true, events: r.rows });
+  } catch (e) { console.error('[reklamation-history-post]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
 // Bewohner-Uebersicht: Reklamationen der eigenen STWEG(s) + uebergreifende (stweg NULL),
 // sanitisiert (KEIN Melder-Name/-Email — Transparenz-Board, kein Datenleck).
 app.get('/api/reklamationen/uebersicht', authMiddleware, async (req, res) => {
