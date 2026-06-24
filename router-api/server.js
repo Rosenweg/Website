@@ -78,9 +78,12 @@ function addVlan({ vlan, gateway, mask, dhcp_from, dhcp_to }) {
     `bind-interfaces`,
     `dhcp-range=${dhcp_from},${dhcp_to},12h`,
     `dhcp-option=tag:${iface},3,${gateway}`,
-    `dhcp-option=tag:${iface},6,1.1.1.1,1.0.0.1`,
+    `dhcp-option=tag:${iface},6,${gateway}`,
   ].join('\n') + '\n';
   fs.writeFileSync(`/etc/dnsmasq.d/vlan-${vlan}.conf`, conf);
+  // Clients bekommen ihr Gateway als DNS (Option 6 oben); der Router ist Forwarder.
+  // AD-Namen zuverlässig an den DC; alles andere via resolv.conf-Upstream (.2.1 + 1.1.1.1).
+  fs.writeFileSync('/etc/dnsmasq.d/00-forward.conf', 'server=/ad.rosenweg4303.ch/100.64.2.30\n');
   const ds = shTry('systemctl restart dnsmasq');
   steps.push({ step: 'dnsmasq', ok: ds.ok, error: ds.error });
   // 3. nftables
