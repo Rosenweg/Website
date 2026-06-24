@@ -94,6 +94,11 @@
         <div>
           <label class="block text-xs font-semibold text-gray-500 mb-1">📜 Verlauf</label>
           <div id="em-history" class="text-xs text-gray-600 space-y-1 max-h-44 overflow-y-auto bg-gray-50 rounded-lg px-3 py-2">—</div>
+          <div class="flex gap-2 mt-2">
+            <input id="em-step" type="text" maxlength="480" class="flex-1 border rounded-lg px-3 py-2 text-sm" placeholder="Schritt dokumentieren (z.B. „Handwerker angerufen, Termin Di 14h") …" onkeydown="if(event.key==='Enter'){event.preventDefault();addStep();}">
+            <button id="em-step-btn" type="button" onclick="addStep()" class="px-3 py-2 text-sm bg-gray-700 text-white rounded-lg hover:bg-gray-800 whitespace-nowrap">+ Schritt</button>
+          </div>
+          <p class="text-[11px] text-gray-400 mt-1">Wird sofort als Verlaufseintrag gespeichert (mit Name &amp; Zeit).</p>
         </div>
         <div id="em-msg" class="hidden text-sm rounded-lg px-3 py-2"></div>
       </div>
@@ -206,18 +211,47 @@
         .catch(() => { fi.alt = 'Foto-Fehler'; });
     } else { fw.classList.add('hidden'); }
     // Verlauf/History laden
+    document.getElementById('em-step').value = '';
+    loadHistory(id);
+    document.getElementById('editModal').classList.remove('hidden');
+  }
+
+  function renderHistory(events) {
+    const hist = document.getElementById('em-history');
+    const ev = events || [];
+    hist.innerHTML = ev.length
+      ? ev.map(e => `<div>• <span class="text-gray-400">${esc(fmtDt(e.created_at))}</span> · <span class="font-medium">${esc(e.who || '—')}</span>: ${esc(e.event || '')}</div>`).join('')
+      : '<span class="text-gray-400">Noch kein Verlauf.</span>';
+  }
+
+  function loadHistory(id) {
     const hist = document.getElementById('em-history');
     hist.innerHTML = '<span class="text-gray-400">lädt …</span>';
-    AuthentikAuth.apiFetch('/api/reklamationen/' + encodeURIComponent(id) + '/history')
+    return AuthentikAuth.apiFetch('/api/reklamationen/' + encodeURIComponent(id) + '/history')
       .then(rp => rp.ok ? rp.json() : { events: [] })
-      .then(d => {
-        const ev = d.events || [];
-        hist.innerHTML = ev.length
-          ? ev.map(e => `<div>• <span class="text-gray-400">${esc(fmtDt(e.created_at))}</span> · <span class="font-medium">${esc(e.who || '—')}</span>: ${esc(e.event || '')}</div>`).join('')
-          : '<span class="text-gray-400">Noch kein Verlauf.</span>';
-      })
+      .then(d => renderHistory(d.events))
       .catch(() => { hist.innerHTML = '<span class="text-gray-400">Verlauf nicht ladbar.</span>'; });
-    document.getElementById('editModal').classList.remove('hidden');
+  }
+
+  async function addStep() {
+    if (editId == null) return;
+    const input = document.getElementById('em-step');
+    const text = input.value.trim();
+    if (!text) return;
+    const btn = document.getElementById('em-step-btn');
+    btn.disabled = true; input.disabled = true;
+    const msg = document.getElementById('em-msg'); msg.classList.add('hidden');
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/reklamationen/' + encodeURIComponent(editId) + '/history', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
+      });
+      if (!r.ok) { let m = 'HTTP ' + r.status; try { const j = await r.json(); if (j.error) m = j.error; } catch {} throw new Error(m); }
+      const d = await r.json();
+      renderHistory(d.events);
+      input.value = '';
+    } catch (e) {
+      msg.textContent = 'Fehler: ' + e.message; msg.className = 'text-sm rounded-lg px-3 py-2 bg-red-100 text-red-700'; msg.classList.remove('hidden');
+    } finally { btn.disabled = false; input.disabled = false; input.focus(); }
   }
 
   function closeEdit() {

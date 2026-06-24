@@ -289,8 +289,34 @@
             class="bg-sky-700 text-white text-sm font-semibold rounded-lg px-3 active:bg-sky-800">Speichern</button>
         </div>
 
+        <div class="mt-2 flex gap-2">
+          <input type="text" data-act="step-input" data-id="${esc(r.id)}" maxlength="480"
+            placeholder="Schritt dokumentieren (was gemacht?) …"
+            class="flex-1 rounded-lg border border-slate-300 px-2 py-2 text-sm focus:ring-2 focus:ring-sky-500 outline-none">
+          <button type="button" data-act="step-save" data-id="${esc(r.id)}"
+            class="bg-slate-700 text-white text-sm font-semibold rounded-lg px-3 active:bg-slate-800 whitespace-nowrap">+ Schritt</button>
+        </div>
+
+        <button type="button" data-act="verlauf-toggle" data-id="${esc(r.id)}"
+          class="mt-2 text-[11px] text-sky-700 active:underline">📜 Verlauf anzeigen</button>
+        <div data-act="verlauf" data-id="${esc(r.id)}" class="hidden text-[11px] text-slate-600 space-y-1 mt-1 bg-slate-50 rounded-lg px-2 py-1.5"></div>
+
         <div data-act="row-msg" data-id="${esc(r.id)}" class="hidden text-[11px] mt-2 rounded-lg px-2 py-1.5"></div>
       </div>`;
+  }
+
+  function renderVerlauf(id, events, ensureVisible) {
+    const box = document.querySelector(`[data-act="verlauf"][data-id="${CSS.escape(String(id))}"]`);
+    if (!box) return;
+    const ev = events || [];
+    box.innerHTML = ev.length
+      ? ev.map(e => `<div>• <span class="text-slate-400">${esc(fmtDate(e.created_at))}</span> · <span class="font-medium">${esc(e.who || '—')}</span>: ${esc(e.event || '')}</div>`).join('')
+      : '<span class="text-slate-400">Noch kein Verlauf.</span>';
+    if (ensureVisible && box.classList.contains('hidden')) {
+      box.classList.remove('hidden');
+      const tgl = document.querySelector(`[data-act="verlauf-toggle"][data-id="${CSS.escape(String(id))}"]`);
+      if (tgl) tgl.textContent = '📜 Verlauf ausblenden';
+    }
   }
 
   function rowMsg(id, text, ok) {
@@ -414,6 +440,32 @@
         const input = document.querySelector(`[data-act="notiz-input"][data-id="${CSS.escape(String(id))}"]`);
         try { await putRekl(id, { notiz: input ? input.value : '' }); rowMsg(id, '✓ Notiz gespeichert', true); }
         catch (e) { rowMsg(id, 'Fehler: ' + e.message, false); }
+      } else if (act === 'step-save') {
+        const input = document.querySelector(`[data-act="step-input"][data-id="${CSS.escape(String(id))}"]`);
+        const text = input ? input.value.trim() : '';
+        if (!text) { rowMsg(id, 'Schritt darf nicht leer sein', false); return; }
+        try {
+          const r = await AuthentikAuth.apiFetch('/api/reklamationen/' + encodeURIComponent(id) + '/history', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
+          });
+          if (!r.ok) { let m = 'HTTP ' + r.status; try { const j = await r.json(); if (j && j.error) m = j.error; } catch {} throw new Error(m); }
+          const d = await r.json();
+          if (input) input.value = '';
+          rowMsg(id, '✓ Schritt gespeichert', true);
+          renderVerlauf(id, d.events, true);
+        } catch (e) { rowMsg(id, 'Fehler: ' + e.message, false); }
+      } else if (act === 'verlauf-toggle') {
+        const box = document.querySelector(`[data-act="verlauf"][data-id="${CSS.escape(String(id))}"]`);
+        if (!box) return;
+        if (!box.classList.contains('hidden')) { box.classList.add('hidden'); btn.textContent = '📜 Verlauf anzeigen'; return; }
+        btn.textContent = '📜 Verlauf ausblenden';
+        box.classList.remove('hidden');
+        box.innerHTML = '<span class="text-slate-400">lädt …</span>';
+        try {
+          const r = await AuthentikAuth.apiFetch('/api/reklamationen/' + encodeURIComponent(id) + '/history', { cache: 'no-store' });
+          const d = r.ok ? await r.json() : { events: [] };
+          renderVerlauf(id, d.events, false);
+        } catch { box.innerHTML = '<span class="text-slate-400">Verlauf nicht ladbar.</span>'; }
       } else if (act === 'foto') {
         openFoto(id);
       }
