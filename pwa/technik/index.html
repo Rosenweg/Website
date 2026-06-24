@@ -266,6 +266,7 @@
           ${statusBadge(r.status)}
         </div>
         ${von ? `<div class="text-[11px] text-slate-400 mt-0.5">${von}</div>` : ''}
+        ${r.standort ? `<div class="text-[11px] text-amber-700 mt-0.5">📍 ${esc(r.standort)}</div>` : ''}
         <div class="text-sm text-slate-700 mt-1 whitespace-pre-wrap break-words">${esc(r.beschreibung)}</div>
         <div class="text-[11px] text-slate-400 mt-1">${esc(fmtDate(r.created_at))}</div>
         ${r.bild_pfad ? `<button type="button" data-act="foto" data-id="${esc(r.id)}" class="mt-2 block" title="Foto vergrössern">
