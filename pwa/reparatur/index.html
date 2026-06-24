@@ -68,6 +68,14 @@
     </div>
   </div>
 
+  <!-- QR-Ort-Banner (sichtbar wenn via Sticker geöffnet: ?ort=<code>) -->
+  <div id="ortBanner" class="hidden max-w-md mx-auto px-4 pt-3">
+    <div class="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 text-sm flex items-center gap-2">
+      <span class="text-lg">📍</span>
+      <div><span class="text-amber-700">Meldung für Ort:</span> <span id="ortBannerName" class="font-semibold text-amber-900"></span></div>
+    </div>
+  </div>
+
   <!-- Lade-Zustand -->
   <div id="loading" class="text-center text-slate-500 py-16">Lade …</div>
 
@@ -313,6 +321,48 @@
   let fotoDataUrl = null; // komprimiertes JPEG als Data-URL
 
   // =====================================================================
+  //  QR-Ort-Vorausfüllung: Sticker-Link ?ort=<code> -> Ort vom Server holen
+  //  und Kategorie/STWEG/Standort in beiden Formularen vorbelegen.
+  // =====================================================================
+  let ortPrefill = null; // { name, stweg, kategorie }
+
+  async function loadOrtPrefill() {
+    let code = null;
+    try { code = new URLSearchParams(location.search).get('ort'); } catch {}
+    if (!code) return;
+    try {
+      const r = await fetch('/api/melde-ort/' + encodeURIComponent(code));
+      if (!r.ok) return;
+      const d = await r.json();
+      if (d && d.ort && d.ort.name) {
+        ortPrefill = d.ort;
+        $('ortBannerName').textContent = d.ort.name;
+        $('ortBanner').classList.remove('hidden');
+      }
+    } catch {}
+  }
+
+  // Kategorie-Button programmatisch auswählen (für Vorbelegung).
+  function selectCatButton(gridId, hiddenId, val) {
+    const grid = $(gridId); if (!grid || !val) return;
+    const btn = grid.querySelector('.cat-btn[data-v="' + (window.CSS && CSS.escape ? CSS.escape(val) : val) + '"]');
+    if (!btn) return;
+    grid.querySelectorAll('.cat-btn').forEach(x => x.classList.remove('sel'));
+    btn.classList.add('sel');
+    $(hiddenId).value = val;
+  }
+
+  // STWEG/Kategorie in einem Formular nach Ort-Vorgabe setzen.
+  function applyOrtToForm(stwegId, catGridId, catHiddenId) {
+    if (!ortPrefill) return;
+    if (ortPrefill.stweg != null && $(stwegId)) {
+      const sel = $(stwegId);
+      if ([...sel.options].some(o => o.value === String(ortPrefill.stweg))) sel.value = String(ortPrefill.stweg);
+    }
+    if (ortPrefill.kategorie) selectCatButton(catGridId, catHiddenId, ortPrefill.kategorie);
+  }
+
+  // =====================================================================
   //  IndexedDB — Offline-Queue
   // =====================================================================
   const DB_NAME = 'rosenweg-reparatur';
@@ -415,6 +465,7 @@
         $('kategorie').value = b.dataset.v;
       });
     });
+    if (ortPrefill && ortPrefill.kategorie) selectCatButton('catGrid', 'kategorie', ortPrefill.kategorie);
   }
 
   // Eigene STWEGs aus den Authentik-Gruppen ableiten.
@@ -447,6 +498,10 @@
     $('stweg').innerHTML = opts.join('');
     // Default: erster eigener STWEG, sonst "Allgemein"
     $('stweg').value = mine.length ? String(mine[0]) : '';
+    // QR-Ort hat Vorrang, falls als Option vorhanden.
+    if (ortPrefill && ortPrefill.stweg != null && [...$('stweg').options].some(o => o.value === String(ortPrefill.stweg))) {
+      $('stweg').value = String(ortPrefill.stweg);
+    }
   }
 
   // ---------- Tabs ----------
@@ -528,6 +583,7 @@
     if (!beschreibung) { showFormMsg('Bitte eine Beschreibung eingeben.', 'err'); return; }
 
     const payload = { kategorie, beschreibung, stweg };
+    if (ortPrefill && ortPrefill.name) payload.standort = ortPrefill.name;
     if (fotoDataUrl) payload.foto_base64 = fotoDataUrl;
 
     const btn = $('submitBtn');
@@ -620,6 +676,7 @@
           <div class="text-sm font-semibold">${kat}${foto}</div>
           ${statusBadge(r.status)}
         </div>
+        ${r.standort ? `<div class="text-[11px] text-amber-700 mt-0.5">📍 ${esc(r.standort)}</div>` : ''}
         <div class="text-sm text-slate-700 mt-1 whitespace-pre-wrap break-words">${esc(r.beschreibung)}</div>
         <div class="text-[11px] text-slate-400 mt-1">${esc(fmtDate(r.created_at))}</div>
         ${erledigt}
@@ -892,6 +949,7 @@
         $('pubKategorie').value = b.dataset.v;
       });
     });
+    if (ortPrefill && ortPrefill.kategorie) selectCatButton('pubCatGrid', 'pubKategorie', ortPrefill.kategorie);
   }
 
   // STWEG-Dropdown ohne User-Kontext: 1–7, MEG, plus "Allgemein/weiss nicht".
@@ -900,6 +958,9 @@
     opts.push(`<option value="" selected>Allgemein / weiß nicht</option>`);
     $('pubStweg').innerHTML = opts.join('');
     $('pubStweg').value = '';
+    if (ortPrefill && ortPrefill.stweg != null && [...$('pubStweg').options].some(o => o.value === String(ortPrefill.stweg))) {
+      $('pubStweg').value = String(ortPrefill.stweg);
+    }
   }
 
   function resetPubForm() {
@@ -965,6 +1026,7 @@
     if (!code) { showGateMsg('pubFormMsg', 'Bitte den Code aus der E-Mail eingeben.', 'err'); return; }
 
     const payload = { email: pubEmail, code, kategorie, beschreibung, stweg };
+    if (ortPrefill && ortPrefill.name) payload.standort = ortPrefill.name;
     if (pubFotoDataUrl) payload.foto_base64 = pubFotoDataUrl;
 
     const btn = $('pubSubmitBtn'); btn.disabled = true; const old = btn.textContent; btn.textContent = 'Sende …';
@@ -1088,6 +1150,7 @@
   }
 
   async function main() {
+    await loadOrtPrefill();
     buildCategories();
     wireEvents();
     wireGate();

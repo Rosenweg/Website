@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Melde-Orte (QR-Codes) — Rosenweg</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/nav.js?v=3"></script>
+  <script src="/js/qrious.min.js"></script>
+  <link rel="icon" href="/logo-rosenweg.png">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    /* ===== Druck: nur die Sticker-Bögen, sonst alles ausblenden ===== */
+    @media print {
+      body * { visibility: hidden; }
+      #printArea, #printArea * { visibility: visible; }
+      #printArea { position: absolute; inset: 0; padding: 8mm; }
+      .no-print { display: none !important; }
+    }
+    /* Sticker-Kachel (Bildschirm + Druck) */
+    .sticker {
+      width: 62mm; border: 1.5px dashed #94a3b8; border-radius: 10px;
+      padding: 6mm 4mm; text-align: center; break-inside: avoid; background: #fff;
+      display: inline-flex; flex-direction: column; align-items: center; gap: 2mm;
+    }
+    #printArea { display: flex; flex-wrap: wrap; gap: 6mm; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50 no-print"></nav>
+  <script>RosenwegNav.init({ active: 'melde-orte' });</script>
+
+  <main class="max-w-5xl mx-auto px-4 py-6">
+    <div id="auth-gate" class="bg-white rounded-lg shadow p-8 text-center"><p class="text-gray-600">Lade…</p></div>
+
+    <div id="content" class="hidden">
+      <h1 class="text-2xl font-bold text-gray-900 mb-1">📍 Melde-Orte (QR-Codes)</h1>
+      <p class="text-sm text-gray-600 mb-5">
+        Feste Orte (z.&nbsp;B. „Aufzug Haus&nbsp;9", „Waschküche STWEG&nbsp;3"). Jeder Ort erhält einen QR-Code-Sticker —
+        wer ihn scannt, landet direkt im Meldeformular mit <strong>vorausgefülltem Ort</strong> und muss nur noch den Schaden beschreiben.
+      </p>
+
+      <!-- Neuer Ort -->
+      <div class="bg-white rounded-lg shadow p-4 mb-5">
+        <h2 class="font-semibold text-gray-800 mb-3">Neuen Ort anlegen</h2>
+        <form id="newForm" class="grid sm:grid-cols-4 gap-3 items-end">
+          <div class="sm:col-span-2">
+            <label class="block text-xs font-semibold text-gray-500 mb-1">Bezeichnung *</label>
+            <input id="nf-name" type="text" maxlength="200" required placeholder="z.B. Aufzug Haus 9"
+              class="w-full border rounded-lg px-3 py-2 text-sm">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 mb-1">Ort / STWEG</label>
+            <select id="nf-stweg" class="w-full border rounded-lg px-3 py-2 text-sm bg-white"></select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 mb-1">Kategorie (vorausgewählt)</label>
+            <select id="nf-kat" class="w-full border rounded-lg px-3 py-2 text-sm bg-white"></select>
+          </div>
+          <div class="sm:col-span-4">
+            <button type="submit" class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">+ Ort anlegen</button>
+            <span id="nf-msg" class="hidden text-sm ml-3"></span>
+          </div>
+        </form>
+      </div>
+
+      <div class="flex items-center gap-3 mb-3">
+        <h2 class="font-semibold text-gray-800">Orte</h2>
+        <button onclick="load()" class="text-sm text-blue-600 hover:underline">Neu laden</button>
+        <button id="printAllBtn" onclick="printAll()" class="ml-auto text-sm inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-700">🖨 Alle aktiven Sticker drucken</button>
+      </div>
+
+      <div class="bg-white rounded-lg shadow overflow-hidden">
+        <table class="min-w-full text-sm">
+          <thead class="bg-gray-50 text-xs uppercase text-gray-500"><tr>
+            <th class="px-3 py-2 text-left">Bezeichnung</th>
+            <th class="px-3 py-2 text-left">Ort</th>
+            <th class="px-3 py-2 text-left">Kategorie</th>
+            <th class="px-3 py-2 text-left">Status</th>
+            <th class="px-3 py-2 text-left">Aktionen</th>
+          </tr></thead>
+          <tbody id="tbody" class="divide-y divide-gray-100"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <!-- QR-Modal -->
+  <div id="qrModal" class="hidden fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4 no-print" onclick="if(event.target===this)closeQr()">
+    <div class="bg-white rounded-xl shadow-xl max-w-sm w-full">
+      <div class="px-5 py-3 border-b flex items-center justify-between">
+        <h3 class="font-bold text-gray-900">QR-Code</h3>
+        <button onclick="closeQr()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
+      </div>
+      <div class="p-5 text-center">
+        <div id="qm-name" class="font-semibold text-gray-800 mb-3"></div>
+        <canvas id="qm-canvas" class="mx-auto"></canvas>
+        <div class="text-[11px] text-gray-400 break-all mt-3" id="qm-url"></div>
+        <div class="flex gap-2 mt-4">
+          <button onclick="downloadQr()" class="flex-1 px-3 py-2 text-sm bg-gray-700 text-white rounded-lg hover:bg-gray-800">⬇ PNG</button>
+          <button onclick="printOne()" class="flex-1 px-3 py-2 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">🖨 Sticker drucken</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit-Modal -->
+  <div id="editModal" class="hidden fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4 no-print" onclick="if(event.target===this)closeEdit()">
+    <div class="bg-white rounded-xl shadow-xl max-w-md w-full">
+      <div class="px-5 py-3 border-b flex items-center justify-between">
+        <h3 class="font-bold text-gray-900">Ort bearbeiten</h3>
+        <button onclick="closeEdit()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
+      </div>
+      <div class="p-5 space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1">Bezeichnung *</label>
+          <input id="em-name" type="text" maxlength="200" class="w-full border rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 mb-1">Ort / STWEG</label>
+            <select id="em-stweg" class="w-full border rounded-lg px-3 py-2 text-sm bg-white"></select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 mb-1">Kategorie</label>
+            <select id="em-kat" class="w-full border rounded-lg px-3 py-2 text-sm bg-white"></select>
+          </div>
+        </div>
+        <label class="flex items-center gap-2 text-sm text-gray-700">
+          <input id="em-aktiv" type="checkbox" class="rounded"> aktiv
+        </label>
+        <div id="em-msg" class="hidden text-sm rounded-lg px-3 py-2"></div>
+      </div>
+      <div class="px-5 py-3 border-t flex justify-end gap-2">
+        <button onclick="closeEdit()" class="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Abbrechen</button>
+        <button id="em-save" onclick="saveEdit()" class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Druckbereich (nur beim Drucken sichtbar) -->
+  <div id="printArea"></div>
+
+  <script>
+  const REPARATUR_URL = 'https://pwa.rosenweg4303.ch/reparatur/';
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+  const STWEG_OPTIONS = [
+    { v:1, l:'STWEG 1' }, { v:2, l:'STWEG 2' }, { v:3, l:'STWEG 3' }, { v:4, l:'STWEG 4' },
+    { v:5, l:'STWEG 5' }, { v:6, l:'STWEG 6' }, { v:7, l:'STWEG 7' }, { v:8, l:'MEG' },
+  ];
+  const KATEGORIEN = [
+    { v:'aufzug', l:'🛗 Aufzug' }, { v:'heizung', l:'🔥 Heizung' }, { v:'wasser', l:'💧 Wasser' },
+    { v:'tuer', l:'🚪 Tür/Schloss' }, { v:'reinigung', l:'🧹 Reinigung' }, { v:'sonstige', l:'❓ Sonstiges' },
+  ];
+  const KAT_LABEL = Object.fromEntries(KATEGORIEN.map(k => [k.v, k.l]));
+
+  let orte = [];
+  let qrCurrent = null; // im QR-Modal angezeigter Ort
+
+  function ortUrl(code) { return REPARATUR_URL + '?ort=' + encodeURIComponent(code); }
+  function stwegLabel(v) { const o = STWEG_OPTIONS.find(x => x.v === v); return o ? o.l : '—'; }
+
+  function fillSelect(sel, withEmpty, emptyLabel) {
+    const opts = [];
+    if (withEmpty) opts.push(`<option value="">${esc(emptyLabel || '—')}</option>`);
+    for (const o of STWEG_OPTIONS) opts.push(`<option value="${o.v}">${esc(o.l)}</option>`);
+    sel.innerHTML = opts.join('');
+  }
+  function fillKatSelect(sel) {
+    const opts = ['<option value="">— keine —</option>'];
+    for (const k of KATEGORIEN) opts.push(`<option value="${k.v}">${esc(k.l)}</option>`);
+    sel.innerHTML = opts.join('');
+  }
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    const u = await AuthentikAuth.init({ requireAuth: true });
+    if (!u) return;
+    document.getElementById('auth-gate').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+    fillSelect(document.getElementById('nf-stweg'), true, 'Allgemein / keiner');
+    fillKatSelect(document.getElementById('nf-kat'));
+    fillSelect(document.getElementById('em-stweg'), true, 'Allgemein / keiner');
+    fillKatSelect(document.getElementById('em-kat'));
+    document.getElementById('newForm').addEventListener('submit', onCreate);
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeQr(); closeEdit(); } });
+    await load();
+  });
+
+  async function load() {
+    const r = await AuthentikAuth.apiFetch('/api/reklamation-orte');
+    if (!r.ok) { document.getElementById('tbody').innerHTML = `<tr><td colspan="5" class="text-red-600 p-4">Fehler ${r.status}</td></tr>`; return; }
+    const d = await r.json();
+    orte = d.orte || [];
+    render();
+  }
+
+  function render() {
+    const tb = document.getElementById('tbody');
+    if (!orte.length) {
+      tb.innerHTML = '<tr><td colspan="5" class="text-gray-400 text-center p-6">Noch keine Orte. Lege oben den ersten an.</td></tr>';
+      return;
+    }
+    tb.innerHTML = orte.map(o => `
+      <tr class="hover:bg-gray-50 ${o.aktiv ? '' : 'opacity-50'}">
+        <td class="px-3 py-2 font-medium text-gray-800">${esc(o.name)}</td>
+        <td class="px-3 py-2 text-gray-600">${o.stweg ? esc(stwegLabel(o.stweg)) : '—'}</td>
+        <td class="px-3 py-2 text-gray-600">${o.kategorie ? esc(KAT_LABEL[o.kategorie] || o.kategorie) : '—'}</td>
+        <td class="px-3 py-2">${o.aktiv ? '<span class="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700">aktiv</span>' : '<span class="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-500">inaktiv</span>'}</td>
+        <td class="px-3 py-2 whitespace-nowrap text-xs space-x-1">
+          <button onclick="showQr(${o.id})" class="px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700">📱 QR</button>
+          <button onclick="openEdit(${o.id})" class="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">✏️</button>
+          <button onclick="delOrt(${o.id})" class="px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200">🗑</button>
+        </td>
+      </tr>`).join('');
+  }
+
+  async function onCreate(ev) {
+    ev.preventDefault();
+    const name = document.getElementById('nf-name').value.trim();
+    const msg = document.getElementById('nf-msg');
+    if (!name) return;
+    const body = {
+      name,
+      stweg: document.getElementById('nf-stweg').value || null,
+      kategorie: document.getElementById('nf-kat').value || null,
+    };
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/reklamation-orte', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      if (!r.ok) { let m = 'HTTP ' + r.status; try { const j = await r.json(); if (j.error) m = j.error; } catch {} throw new Error(m); }
+      document.getElementById('newForm').reset();
+      msg.textContent = '✓ angelegt'; msg.className = 'text-sm ml-3 text-green-700';
+      msg.classList.remove('hidden'); setTimeout(() => msg.classList.add('hidden'), 1500);
+      await load();
+    } catch (e) {
+      msg.textContent = 'Fehler: ' + e.message; msg.className = 'text-sm ml-3 text-red-600'; msg.classList.remove('hidden');
+    }
+  }
+
+  // ---- QR-Modal (einzeln) ----
+  function showQr(id) {
+    const o = orte.find(x => x.id === id); if (!o) return;
+    qrCurrent = o;
+    const url = ortUrl(o.code);
+    document.getElementById('qm-name').textContent = '📍 ' + o.name;
+    document.getElementById('qm-url').textContent = url;
+    new QRious({ element: document.getElementById('qm-canvas'), value: url, size: 240, level: 'M', foreground: '#111827' });
+    document.getElementById('qrModal').classList.remove('hidden');
+  }
+  function closeQr() { document.getElementById('qrModal').classList.add('hidden'); qrCurrent = null; }
+  function downloadQr() {
+    if (!qrCurrent) return;
+    const a = document.createElement('a');
+    a.href = document.getElementById('qm-canvas').toDataURL('image/png');
+    a.download = 'qr-' + qrCurrent.code + '.png';
+    a.click();
+  }
+  function printOne() { if (qrCurrent) { buildStickers([qrCurrent]); closeQr(); window.print(); } }
+
+  // ---- Sticker-Bögen bauen + drucken ----
+  function buildStickers(list) {
+    const area = document.getElementById('printArea');
+    area.innerHTML = list.map(o => `
+      <div class="sticker">
+        <div style="font-weight:700;font-size:13pt;color:#0369a1;">🔧 Schaden melden</div>
+        <canvas data-qr="${esc(o.code)}"></canvas>
+        <div style="font-weight:700;font-size:12pt;color:#111827;">📍 ${esc(o.name)}</div>
+        <div style="font-size:9pt;color:#475569;">QR scannen → Reparatur / Schaden melden</div>
+        <div style="font-size:7.5pt;color:#94a3b8;">Rosenweg${o.stweg ? ' · ' + esc(stwegLabel(o.stweg)) : ''}</div>
+      </div>`).join('');
+    area.querySelectorAll('canvas[data-qr]').forEach(c => {
+      new QRious({ element: c, value: ortUrl(c.dataset.qr), size: 180, level: 'M', foreground: '#111827' });
+    });
+  }
+  function printAll() {
+    const active = orte.filter(o => o.aktiv);
+    if (!active.length) { alert('Keine aktiven Orte zum Drucken.'); return; }
+    buildStickers(active);
+    window.print();
+  }
+
+  // ---- Bearbeiten ----
+  let editId = null;
+  function openEdit(id) {
+    const o = orte.find(x => x.id === id); if (!o) return;
+    editId = id;
+    document.getElementById('em-name').value = o.name;
+    document.getElementById('em-stweg').value = o.stweg ? String(o.stweg) : '';
+    document.getElementById('em-kat').value = o.kategorie || '';
+    document.getElementById('em-aktiv').checked = !!o.aktiv;
+    document.getElementById('em-msg').classList.add('hidden');
+    document.getElementById('editModal').classList.remove('hidden');
+  }
+  function closeEdit() { document.getElementById('editModal').classList.add('hidden'); editId = null; }
+  async function saveEdit() {
+    if (editId == null) return;
+    const body = {
+      name: document.getElementById('em-name').value.trim(),
+      stweg: document.getElementById('em-stweg').value || null,
+      kategorie: document.getElementById('em-kat').value || null,
+      aktiv: document.getElementById('em-aktiv').checked,
+    };
+    const btn = document.getElementById('em-save'); btn.disabled = true;
+    const msg = document.getElementById('em-msg');
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/reklamation-orte/' + editId, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      if (!r.ok) { let m = 'HTTP ' + r.status; try { const j = await r.json(); if (j.error) m = j.error; } catch {} throw new Error(m); }
+      await load();
+      closeEdit();
+    } catch (e) {
+      msg.textContent = 'Fehler: ' + e.message; msg.className = 'text-sm rounded-lg px-3 py-2 bg-red-100 text-red-700'; msg.classList.remove('hidden');
+    } finally { btn.disabled = false; }
+  }
+
+  async function delOrt(id) {
+    const o = orte.find(x => x.id === id); if (!o) return;
+    if (!confirm(`Ort „${o.name}" löschen? Vorhandene Sticker funktionieren dann nicht mehr.`)) return;
+    const r = await AuthentikAuth.apiFetch('/api/reklamation-orte/' + id, { method: 'DELETE' });
+    if (r.ok) await load(); else alert('Löschen fehlgeschlagen (HTTP ' + r.status + ')');
+  }
+  </script>
+</body>
+</html>
