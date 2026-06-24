@@ -15882,6 +15882,32 @@ app.get('/api/isp/noc/public/dashboard', async (req, res) => {
   if (!checkNocToken(req, res)) return;
   return nocDashboardHandler(req, res);
 });
+
+// Oeffentliche Status-Zusammenfassung fuer die ISP-Startseite: 3 Rollup-Booleans aus
+// den server-seitigen NOC-Checks (pve-LXC-Status + Frontend-/health) — KEINE fragilen
+// Browser-Fetches/Cert-Abhaengigkeiten, KEINE Topologie geleakt. 15s-Cache.
+let _ispSummary = null, _ispSummaryT = 0;
+app.get('/api/isp/status-summary', async (req, res) => {
+  try {
+    if (_ispSummary && Date.now() - _ispSummaryT < 15000) return res.json(_ispSummary);
+    const byId = {};
+    try {
+      const pve = await pveAPI('GET', '/cluster/resources?type=vm');
+      for (const x of (Array.isArray(pve) ? pve : [])) if (x.type === 'lxc') byId[x.vmid] = x;
+    } catch {}
+    const up = (id) => byId[id]?.status === 'running';
+    const health = async (ip) => { try { const r = await fetch(`http://${ip}/health`, { signal: AbortSignal.timeout(2500) }); return r.ok; } catch { return false; } };
+    const [www, isp] = await Promise.all([health('100.64.2.41'), health('100.64.2.42')]);
+    const out = {
+      mail: up(240) && up(230),         // mailcow (CT240) + PMG (CT230)
+      web: up(114) && up(104) && www,   // Authentik + Nextcloud + www-LXC
+      internet: up(245) && isp,         // Edge (CT245) + isp-LXC
+      ts: Date.now(),
+    };
+    _ispSummary = out; _ispSummaryT = Date.now();
+    res.json(out);
+  } catch (e) { res.json({ mail: true, web: true, internet: true, error: e.message }); }
+});
 app.get('/api/isp/noc/public/unifi', async (req, res) => {
   if (!checkNocToken(req, res)) return;
   return nocUnifiHandler(req, res);
@@ -16124,21 +16150,24 @@ async function nocUnifiHandler(req, res) {
     // damit das NOC-Wallboard pro Container einen Dot zeigt. Internes Probe
     // (Container up?), nicht der WAN-Pfad — das machen Edge/Swarm separat.
     try {
+      // De-Swarm: Frontends laufen als native nginx-LXCs (nicht mehr als Swarm-Overlay-
+      // Services). /health DIREKT am LXC-IP pruefen statt am toten Swarm-Service-Namen
+      // (`http://stweg4/health` war scale=0 -> Dauer-rot trotz laufender Seite).
       const FRONTENDS = [
-        { svc: 'stweg1', label: 'ST1' }, { svc: 'stweg2', label: 'ST2' },
-        { svc: 'stweg3', label: 'ST3' }, { svc: 'stweg4', label: 'ST4' },
-        { svc: 'stweg5', label: 'ST5' }, { svc: 'stweg6', label: 'ST6' },
-        { svc: 'stweg7', label: 'ST7' }, { svc: 'meg', label: 'MEG' },
-        { svc: 'rosenweg_isp', label: 'ISP' },
-        { svc: 'rosenweg_website', label: 'WWW' },
+        { host: '100.64.2.43', label: 'ST1' }, { host: '100.64.2.44', label: 'ST2' },
+        { host: '100.64.2.45', label: 'ST3' }, { host: '100.64.2.46', label: 'ST4' },
+        { host: '100.64.2.47', label: 'ST5' }, { host: '100.64.2.48', label: 'ST6' },
+        { host: '100.64.2.49', label: 'ST7' }, { host: '100.64.2.50', label: 'MEG' },
+        { host: '100.64.2.42', label: 'ISP' },
+        { host: '100.64.2.41', label: 'WWW' },
       ];
       out.frontends = await Promise.all(FRONTENDS.map(async f => {
         let ok = false;
         try {
-          const resp = await fetch(`http://${f.svc}/health`, { signal: AbortSignal.timeout(2500) });
+          const resp = await fetch(`http://${f.host}/health`, { signal: AbortSignal.timeout(2500) });
           ok = resp.ok;
         } catch {}
-        return { svc: f.svc, label: f.label, ok };
+        return { label: f.label, ok };
       }));
     } catch (e) { out.frontends = []; out.frontends_error = e.message; }
 
