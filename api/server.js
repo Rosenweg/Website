@@ -16956,10 +16956,10 @@ app.post('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
     const peer = await wgResp.json();
 
     const r = await pool.query(
-      `INSERT INTO isp_vpn_accounts (user_email, backend, username, public_key, assigned_ip, config_path, active, notizen)
-       VALUES ($1, 'wireguard', $2, $3, $4, $5, true, $6) RETURNING *`,
+      `INSERT INTO isp_vpn_accounts (user_email, backend, username, public_key, assigned_ip, config_path, active, notizen, bezeichnung)
+       VALUES ($1, 'wireguard', $2, $3, $4, $5, true, $6, $7) RETURNING *`,
       [target, peer.id, peer.public_key, peer.assigned_ip, `wg-control/${peer.id}`,
-       `vlan=${vlan} name=${peer.name}`],
+       `vlan=${vlan} name=${peer.name}`, (b.bezeichnung || '').trim() || null],
     );
     res.json({ ...r.rows[0], config: peer.config, vlan });
   } catch (err) {
@@ -16980,7 +16980,7 @@ app.put('/api/isp/vpn-accounts/:id', authMiddleware, async (req, res) => {
     const b = req.body || {};
     const updates = []; const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
-    const allowed = ['backend','username','public_key','assigned_ip','config_path','active','notizen'];
+    const allowed = ['backend','username','public_key','assigned_ip','config_path','active','notizen','bezeichnung'];
     for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
     if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
     push('updated_at', new Date());
@@ -22261,11 +22261,13 @@ async function initDB() {
         active BOOLEAN DEFAULT true,
         last_connect_at TIMESTAMPTZ,
         notizen TEXT,
+        bezeichnung TEXT,                        -- kundenseitiges Alias/Label (wofür ist die VPN)
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_isp_vpn_user ON isp_vpn_accounts(LOWER(user_email));
       CREATE INDEX IF NOT EXISTS idx_isp_vpn_active ON isp_vpn_accounts(active);
+      ALTER TABLE isp_vpn_accounts ADD COLUMN IF NOT EXISTS bezeichnung TEXT;
 
       -- VLAN-Requests: Bewohner kann eigenes VLAN beantragen (z.B. für
       -- Smart-Home, Server, Gaming). Antrag → status pending → Technik
