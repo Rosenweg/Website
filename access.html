@@ -552,17 +552,17 @@
 
     async function showPlates() {
         let data; try { data = await api('/plates'); } catch (e) { return showStatus(e.message, 'err'); }
-        const rows = (data.plates || []).map(p => `<tr class="border-b last:border-0"><td class="py-1.5 pr-3 font-mono font-medium">${esc(p.plate)}</td><td class="py-1.5 text-gray-500 text-xs">${esc(p.email)}</td><td class="py-1.5 text-right text-xs ${p.synced_at ? 'text-green-600' : 'text-gray-300'}">${p.synced_at ? '✓ UniFi' : '—'}</td></tr>`).join('');
-        openModal('Kennzeichen-Vorregistrierungen', `<div class="text-xs text-gray-500 mb-2">${(data.plates || []).length} vorregistriert. Sync schreibt sie in die UniFi-Benutzer (per E-Mail gematcht).</div>
-            <div class="max-h-64 overflow-y-auto border rounded-lg mb-3"><table class="w-full text-sm"><tbody>${rows || '<tr><td class="text-gray-400 py-3 px-3">Noch keine Vorregistrierungen.</td></tr>'}</tbody></table></div>
-            <button onclick="syncPlatesNow(this)" type="button" class="w-full text-sm bg-gray-800 hover:bg-gray-900 text-white rounded-lg py-2">🔄 Jetzt zu UniFi synchronisieren</button>
+        const rows = (data.plates || []).map(p => `<tr class="border-b last:border-0"><td class="py-1.5 pr-3 font-mono font-medium">${esc(p.plate)}</td><td class="py-1.5 text-gray-500 text-xs">${esc(p.email)}</td><td class="py-1.5 text-right text-xs ${p.source === 'UniFi' ? 'text-green-600' : 'text-amber-600'}">${esc(p.source)}</td></tr>`).join('');
+        openModal('Kennzeichen', `<div class="text-xs text-gray-500 mb-2">${(data.plates || []).length} gesamt — <span class="text-green-600">UniFi</span> = im System, <span class="text-amber-600">Vor-Reg</span> = wartet auf UniFi-Benutzer (per E-Mail).</div>
+            <div class="max-h-64 overflow-y-auto border rounded-lg mb-3"><table class="w-full text-sm"><tbody>${rows || '<tr><td class="text-gray-400 py-3 px-3">Keine Kennzeichen.</td></tr>'}</tbody></table></div>
+            <button onclick="syncPlatesNow(this)" type="button" class="w-full text-sm bg-gray-800 hover:bg-gray-900 text-white rounded-lg py-2">🔄 Vor-Registrierungen nach UniFi übernehmen</button>
             <div id="plate-sync-result" class="text-xs mt-2"></div>`, () => true);
     }
     async function syncPlatesNow(btn) {
-        btn.disabled = true; const orig = btn.textContent; btn.textContent = 'Synchronisiere…';
+        btn.disabled = true; const orig = btn.textContent; btn.textContent = 'Übernehme…';
         try {
             const r = await api('/plates/sync', { method: 'POST' });
-            document.getElementById('plate-sync-result').innerHTML = `<span class="text-green-700">✓ ${r.syncedPlates} Kennzeichen → ${r.syncedUsers} Benutzer${r.unmatchedEmails ? `; ${r.unmatchedEmails} E-Mail(s) ohne UniFi-Benutzer` : ''}.</span>`;
+            document.getElementById('plate-sync-result').innerHTML = `<span class="text-green-700">✓ ${r.migratedPlates || 0} Kennzeichen von ${r.migratedUsers || 0} Benutzer(n) übernommen${r.unmatchedEmails ? `; ${r.unmatchedEmails} noch ohne UniFi-Benutzer` : ''}.</span>`;
         } catch (e) { document.getElementById('plate-sync-result').innerHTML = `<span class="text-red-600">${esc(e.message)}</span>`; }
         finally { btn.disabled = false; btn.textContent = orig; }
     }

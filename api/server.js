@@ -3182,53 +3182,67 @@ app.delete('/api/access/me/nfc/:token', authMiddleware, async (req, res) => {
 const ACCESS_PLATE_RE = /^[A-Z0-9ÄÖÜ][A-Z0-9ÄÖÜ \-]{0,15}$/;
 const normPlate = (p) => String(p || '').toUpperCase().replace(/\s+/g, ' ').trim();
 app.get('/api/access/me/plates', authMiddleware, async (req, res) => {
+  const u = await unifiUserByEmail(req.user?.email);
+  if (u) return res.json({ source: 'unifi', plates: (u.license_plates || []).map(p => ({ id: p.id, plate: p.credential })) });
   const e = (req.user?.email || '').toLowerCase();
-  const r = await pool.query('SELECT id, plate, created_at FROM access_plates WHERE lower(email)=$1 ORDER BY created_at', [e]);
-  res.json({ plates: r.rows });
+  const r = await pool.query('SELECT id, plate FROM access_plates WHERE lower(email)=$1 ORDER BY created_at', [e]);
+  res.json({ source: 'db', plates: r.rows });
 });
 app.post('/api/access/me/plates', authMiddleware, async (req, res) => {
-  if (!req.user?.email) return res.status(400).json({ error: 'Keine E-Mail im Profil' });
   const plate = normPlate(req.body?.plate);
   if (!ACCESS_PLATE_RE.test(plate)) return res.status(400).json({ error: 'Ungültiges Kennzeichen' });
-  try {
-    const r = await pool.query('INSERT INTO access_plates(email, plate) VALUES($1,$2) ON CONFLICT (email, plate) DO NOTHING RETURNING id', [req.user.email, plate]);
-    syncUserPlates(req.user.email).catch(() => {}); // sofort zu UniFi
-    res.json({ success: true, id: r.rows[0]?.id || null });
-  } catch (err) { res.status(500).json({ error: 'Fehler beim Speichern' }); }
+  const u = await unifiUserByEmail(req.user?.email);
+  if (u) { // direkt in UniFi (UniFi = Source)
+    const list = (u.license_plates || []).map(p => p.credential);
+    if (!list.includes(plate)) list.push(plate);
+    const r = await unifiAccessRaw('PUT', `/users/${u.id}/license_plates`, list);
+    if (!accessOk(r)) return res.status(r.status === 0 ? 502 : r.status).json({ error: r.body?.msg || 'Speichern in UniFi fehlgeschlagen' });
+    return res.json({ success: true });
+  }
+  if (!req.user?.email) return res.status(400).json({ error: 'Keine E-Mail im Profil' });
+  await pool.query('INSERT INTO access_plates(email, plate) VALUES($1,$2) ON CONFLICT (email, plate) DO NOTHING', [req.user.email, plate]);
+  res.json({ success: true });
 });
 app.delete('/api/access/me/plates/:id', authMiddleware, async (req, res) => {
+  const u = await unifiUserByEmail(req.user?.email);
+  if (u) { // id = UniFi license_plate-UUID
+    const r = await unifiAccessRaw('DELETE', `/users/${u.id}/license_plates/${encodeURIComponent(req.params.id)}`);
+    if (!accessOk(r)) return res.status(r.status === 0 ? 502 : r.status).json({ error: 'Entfernen fehlgeschlagen' });
+    return res.json({ success: true });
+  }
   const e = (req.user?.email || '').toLowerCase();
   await pool.query('DELETE FROM access_plates WHERE id=$1 AND lower(email)=$2', [parseInt(req.params.id, 10), e]);
-  syncUserPlates(req.user?.email).catch(() => {}); // sofort zu UniFi
   res.json({ success: true });
 });
 app.get('/api/access/plates', authMiddleware, adminOnly, async (req, res) => {
-  const r = await pool.query('SELECT id, email, plate, created_at, synced_at FROM access_plates ORDER BY email, plate');
-  res.json({ plates: r.rows });
+  const db = (await pool.query('SELECT email, plate FROM access_plates')).rows.map(r => ({ email: r.email, plate: r.plate, source: 'Vor-Reg' }));
+  const uniUsers = (await unifiAccessRaw('GET', '/users')).body?.data || [];
+  const unifi = [];
+  uniUsers.forEach(u => (u.license_plates || []).forEach(p => unifi.push({ email: u.email || u.user_email || '', plate: p.credential, source: 'UniFi' })));
+  res.json({ plates: [...unifi, ...db].sort((a, b) => (a.email || '').localeCompare(b.email || '')) });
 });
-// Sofort-Sync der Kennzeichen EINES Users (per E-Mail) -> UniFi. Bei Self-Service-Add/Remove sofort aufgerufen.
-async function syncUserPlates(email) {
-  const e = (email || '').toLowerCase().trim(); if (!e) return;
-  const u = await unifiUserByEmail(e); if (!u) return;
-  const plates = (await pool.query('SELECT plate FROM access_plates WHERE lower(email)=$1', [e])).rows.map(r => r.plate);
-  const r = await unifiAccessRaw('PUT', `/users/${u.id}/license_plates`, plates);
-  if (accessOk(r)) await pool.query('UPDATE access_plates SET synced_at=NOW() WHERE lower(email)=$1', [e]);
-}
-// Sync: vorregistrierte Kennzeichen (eigene DB) -> UniFi-User (PUT bare-array, ersetzt deren Plates).
+// Migration der Vor-Registrierungen: sobald ein (vorher nicht gematchter) User einen UniFi-Account hat,
+// die DB-Kennzeichen in UniFi MERGEN (nicht ersetzen!) + DB-Zeilen löschen → ab dann ist UniFi die Quelle.
 async function syncAccessPlates() {
   const rows = (await pool.query('SELECT email, plate FROM access_plates')).rows;
   const byEmail = {};
   rows.forEach(r => (byEmail[(r.email || '').toLowerCase().trim()] ||= []).push(r.plate));
   const uniUsers = (await unifiAccessRaw('GET', '/users')).body?.data || [];
   const map = {}; uniUsers.forEach(u => { const e = (u.email || u.user_email || '').toLowerCase().trim(); if (e) map[e] = u; });
-  let syncedUsers = 0, syncedPlates = 0, unmatched = 0;
-  for (const [email, plates] of Object.entries(byEmail)) {
+  let migratedUsers = 0, migratedPlates = 0, unmatched = 0;
+  for (const [email, dbPlates] of Object.entries(byEmail)) {
     const u = map[email];
     if (!u) { unmatched++; continue; }
-    const r = await unifiAccessRaw('PUT', `/users/${u.id}/license_plates`, plates); // Body = ["AG123",...]
-    if (accessOk(r)) { syncedUsers++; syncedPlates += plates.length; await pool.query('UPDATE access_plates SET synced_at=NOW() WHERE lower(email)=$1', [email]); }
+    const current = new Set((u.license_plates || []).map(p => p.credential));
+    const toAdd = dbPlates.filter(p => !current.has(p));
+    if (toAdd.length) {
+      const r = await unifiAccessRaw('PUT', `/users/${u.id}/license_plates`, [...current, ...toAdd]);
+      if (!accessOk(r)) continue;
+    }
+    await pool.query('DELETE FROM access_plates WHERE lower(email)=$1', [email]); // migriert → UniFi ist Source
+    migratedUsers++; migratedPlates += dbPlates.length;
   }
-  return { syncedUsers, syncedPlates, unmatchedEmails: unmatched };
+  return { migratedUsers, migratedPlates, unmatchedEmails: unmatched };
 }
 app.post('/api/access/plates/sync', authMiddleware, adminOnly, async (req, res) => {
   try { res.json(await syncAccessPlates()); } catch (e) { res.status(500).json({ error: e.message }); }
