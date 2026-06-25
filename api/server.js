@@ -2872,6 +2872,68 @@ app.delete('/api/access/visitors/:id', authMiddleware, adminOnly, async (req, re
   res.status(accessOk(r) ? 200 : r.status).json(r.body || {});
 });
 
+// ── NFC-Enrollment (Karte anlernen) ──
+// Enrollment-Gerät automatisch ermitteln; /devices liefert verschachtelt ([[{...}]]).
+async function accessEnrollDevice() {
+  const r = await unifiAccessRaw('GET', '/devices');
+  const flat = [];
+  (r.body?.data || []).forEach(x => Array.isArray(x) ? flat.push(...x) : flat.push(x));
+  const dev = flat.find(d => (d.capabilities || []).includes('support_register_card')) || flat[0];
+  return dev?.id || dev?.unique_id || null;
+}
+app.get('/api/access/nfc/device', authMiddleware, adminOnly, async (req, res) => {
+  res.json({ device_id: await accessEnrollDevice() });
+});
+app.post('/api/access/nfc/session', authMiddleware, adminOnly, async (req, res) => {
+  const device_id = req.body?.device_id || await accessEnrollDevice();
+  if (!device_id) return res.status(400).json({ error: 'Kein NFC-Lesegerät gefunden' });
+  const r = await unifiAccessRaw('POST', '/credentials/nfc_cards/sessions', { device_id });
+  if (!accessGuard(res, r)) return;
+  if (!accessOk(r)) return res.status(r.status).json({ error: r.body?.msg || 'Enrollment-Session fehlgeschlagen' });
+  res.json({ session_id: r.body?.data?.session_id || r.body?.data?.id });
+});
+app.get('/api/access/nfc/session/:id', authMiddleware, adminOnly, async (req, res) => {
+  const r = await unifiAccessRaw('GET', `/credentials/nfc_cards/sessions/${encodeURIComponent(req.params.id)}`);
+  if (!accessGuard(res, r)) return;
+  res.json({ data: r.body?.data ?? null, code: r.body?.code, raw_status: r.status });
+});
+app.delete('/api/access/nfc/session/:id', authMiddleware, adminOnly, async (req, res) => {
+  const r = await unifiAccessRaw('DELETE', `/credentials/nfc_cards/sessions/${encodeURIComponent(req.params.id)}`);
+  if (!accessGuard(res, r)) return;
+  res.json({ success: accessOk(r) });
+});
+// Karte einem Benutzer zuweisen / entfernen
+app.post('/api/access/users/:id/nfc', authMiddleware, adminOnly, async (req, res) => {
+  const { token, card_id } = req.body || {};
+  if (!token && !card_id) return res.status(400).json({ error: 'Karten-Token fehlt' });
+  const r = await unifiAccessRaw('PUT', `/users/${encodeURIComponent(req.params.id)}/nfc_cards`, { token: token || card_id });
+  if (!accessGuard(res, r)) return;
+  res.status(accessOk(r) ? 200 : r.status).json(r.body || {});
+});
+app.delete('/api/access/users/:id/nfc/:token', authMiddleware, adminOnly, async (req, res) => {
+  const r = await unifiAccessRaw('DELETE', `/users/${encodeURIComponent(req.params.id)}/nfc_cards/${encodeURIComponent(req.params.token)}`);
+  if (!accessGuard(res, r)) return;
+  res.status(accessOk(r) ? 200 : r.status).json(r.body || {});
+});
+
+// ── Access Policies (Zugangsregeln: Türen + Zeitplan) — Zuweisung pro Benutzer ──
+app.get('/api/access/policies', authMiddleware, adminOnly, async (req, res) => {
+  const r = await unifiAccessRaw('GET', '/access_policies');
+  if (!accessGuard(res, r)) return;
+  res.json({ policies: r.body?.data ?? [], raw_status: r.status });
+});
+app.get('/api/access/users/:id/policies', authMiddleware, adminOnly, async (req, res) => {
+  const r = await unifiAccessRaw('GET', `/users/${encodeURIComponent(req.params.id)}/access_policies`);
+  if (!accessGuard(res, r)) return;
+  res.json({ policies: r.body?.data ?? [], raw_status: r.status });
+});
+app.put('/api/access/users/:id/policies', authMiddleware, adminOnly, async (req, res) => {
+  const ids = req.body?.access_policy_ids || req.body?.policy_ids || [];
+  const r = await unifiAccessRaw('PUT', `/users/${encodeURIComponent(req.params.id)}/access_policies`, { access_policy_ids: ids });
+  if (!accessGuard(res, r)) return;
+  res.status(accessOk(r) ? 200 : r.status).json(r.body || {});
+});
+
 // ── Access-Konfiguration (Host/Token/enabled). Token wird NIE im Klartext ausgeliefert. ──
 app.get('/api/access/settings', authMiddleware, adminOnly, async (req, res) => {
   const host = await getAccessSetting('host', '');
@@ -4734,7 +4796,7 @@ app.get('/api/stweg/:nr/kontakte', authMiddleware, async (req, res) => {
     // Load apartments + contacts from Verwaltungs-DB
     const wRes = await pool.query('SELECT * FROM wohnungen WHERE stweg = $1', [nr]);
     const kRes = await pool.query(
-      `SELECT k.* FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id WHERE w.stweg = $1 ORDER BY k.rolle, k.sort_order, k.id`,
+      `SELECT k.* FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id WHERE w.stweg = $1 AND k.archiviert_am IS NULL ORDER BY k.rolle, k.sort_order, k.id`,
       [nr]
     );
 
@@ -7423,7 +7485,7 @@ app.get('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverw
     const stweg = parseStweg(req.params.stweg);
     const wResult = await pool.query('SELECT * FROM wohnungen WHERE stweg = $1', [stweg]);
     const kResult = await pool.query(
-      `SELECT k.* FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id WHERE w.stweg = $1 ORDER BY k.rolle, k.sort_order, k.id`,
+      `SELECT k.* FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id WHERE w.stweg = $1 AND k.archiviert_am IS NULL ORDER BY k.rolle, k.sort_order, k.id`,
       [stweg]
     );
     // Group kontakte by wohnung_id
