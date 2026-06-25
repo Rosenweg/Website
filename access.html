@@ -68,10 +68,11 @@
     const CH_CANTONS = ['AG','AI','AR','BE','BL','BS','FR','GE','GL','GR','JU','LU','NE','NW','OW','SG','SH','SO','SZ','TG','TI','UR','VD','VS','ZG','ZH'];
     function plateHtml(s) {
         const str = String(s || '').toUpperCase().trim();
-        const m = str.match(/^([A-Z]{2})[\s-]?(.+)$/);
-        if (!(m && CH_CANTONS.includes(m[1]))) return `<span class="plate"><span class="ptxt">${esc(str)}</span></span>`;
-        const canton = m[1], num = m[2].replace(/\s+/g, ' ').trim();
-        return `<span class="plate"><img class="arms" src="/img/kantone/CH.svg" alt="CH" loading="lazy"><span class="ptxt">${esc(canton)} ${esc(num)}</span><img class="arms" src="/img/kantone/${encodeURIComponent(canton)}.svg" alt="${esc(canton)}" loading="lazy"></span>`;
+        const m = str.match(/^([A-Z]{2})[\s]*([\d\s]+)$/);
+        const digits = m ? m[2].replace(/\s/g, '') : '';
+        if (!(m && CH_CANTONS.includes(m[1]) && /^\d{1,7}$/.test(digits))) return `<span class="plate"><span class="ptxt">${esc(str)}</span></span>`;
+        const canton = m[1];
+        return `<span class="plate"><img class="arms" src="/img/kantone/CH.svg" alt="CH" loading="lazy"><span class="ptxt">${esc(canton)} ${esc(digits)}</span><img class="arms" src="/img/kantone/${encodeURIComponent(canton)}.svg" alt="${esc(canton)}" loading="lazy"></span>`;
     }
     const loaded = {};
 
