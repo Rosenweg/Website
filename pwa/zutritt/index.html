@@ -16,10 +16,13 @@
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
     body { font-family: 'Inter', sans-serif; }
     /* Realistisches (CH-)Kennzeichen */
-    .plate { display:inline-flex; align-items:center; gap:6px; background:#fff; border:2px solid #1a1a1a; border-radius:5px; padding:4px 10px; font-weight:800; color:#111; font-size:16px; letter-spacing:1.5px; line-height:1; box-shadow:0 1px 2px rgba(0,0,0,.2); font-family:'Arial Narrow',Arial,sans-serif; }
-    .plate .cross { flex:none; width:16px; height:16px; background:#d52b1e; border-radius:2px; position:relative; }
-    .plate .cross::before { content:''; position:absolute; top:3.5px; left:6.5px; width:3px; height:9px; background:#fff; }
-    .plate .cross::after { content:''; position:absolute; left:3.5px; top:6.5px; width:9px; height:3px; background:#fff; }
+    .plate { display:inline-flex; align-items:center; gap:7px; background:#fff; border:2px solid #1a1a1a; border-radius:5px; padding:3px 8px; font-weight:800; color:#111; font-size:16px; letter-spacing:1.5px; line-height:1; box-shadow:0 1px 2px rgba(0,0,0,.2); font-family:'Arial Narrow',Arial,sans-serif; }
+    .plate .ptxt { padding:2px 0; }
+    .plate .arms { flex:none; width:18px; height:22px; position:relative; clip-path:polygon(0 0,100% 0,100% 60%,50% 100%,0 60%); }
+    .plate .arms.ch { background:#d52b1e; }
+    .plate .arms.ch::before { content:''; position:absolute; top:3.5px; left:7.5px; width:3px; height:9px; background:#fff; }
+    .plate .arms.ch::after { content:''; position:absolute; top:6px; left:4.5px; width:9px; height:3px; background:#fff; }
+    .plate .arms.kt { background:#e2e6ea; color:#111; font-size:8.5px; font-weight:800; text-align:center; padding-top:2px; letter-spacing:0; }
   </style>
 </head>
 <body class="bg-slate-50 min-h-screen text-slate-800">
@@ -58,9 +61,9 @@
     function plateHtml(s) {
       const str = String(s || '').toUpperCase().trim();
       const m = str.match(/^([A-Z]{2})[\s-]?(.+)$/);
-      const ch = m && CH_CANTONS.includes(m[1]);
-      const text = ch ? `${m[1]} ${m[2].replace(/\s+/g, ' ').trim()}` : str;
-      return `<span class="plate">${ch ? '<span class="cross"></span>' : ''}${esc(text)}</span>`;
+      if (!(m && CH_CANTONS.includes(m[1]))) return `<span class="plate"><span class="ptxt">${esc(str)}</span></span>`;
+      const canton = m[1], num = m[2].replace(/\s+/g, ' ').trim();
+      return `<span class="plate"><span class="arms ch" title="Schweiz"></span><span class="ptxt">${esc(canton)} ${esc(num)}</span><span class="arms kt" title="Kanton ${esc(canton)}">${esc(canton)}</span></span>`;
     }
     async function api(path, opts = {}) {
       const r = await AuthentikAuth.apiFetch('/api/access' + path, opts);
