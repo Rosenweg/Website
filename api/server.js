@@ -2276,6 +2276,22 @@ async function getWaschSetting(key, defaultValue) {
   } catch { return defaultValue; }
 }
 
+// Access-Subsystem-Config (primär; die Waschküche konsumiert dies via unifiAccess*-Helfer).
+// Eigene Tabelle access_settings: keys 'host', 'token', 'enabled'.
+async function getAccessSetting(key, defaultValue) {
+  try {
+    const result = await pool.query('SELECT value FROM access_settings WHERE key = $1', [key]);
+    return result.rows.length > 0 ? result.rows[0].value : defaultValue;
+  } catch { return defaultValue; }
+}
+async function setAccessSetting(key, value) {
+  await pool.query(
+    `INSERT INTO access_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+     ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()`,
+    [key, String(value)]
+  );
+}
+
 // Process a completed reservation: read exact energy consumption from energy DB
 async function processReservationEnd(reservation) {
   const room = await pool.query('SELECT * FROM wasch_rooms WHERE id = $1', [reservation.room_id]);
@@ -2590,8 +2606,8 @@ app.post('/api/wasch/admin/billing/run', authMiddleware, adminOnly, async (req, 
 
 // UniFi Access API helper
 async function unifiAccessRequest(method, path, body = null) {
-  const host = await getWaschSetting('unifi_access_host', '');
-  const token = await getWaschSetting('unifi_access_token', '');
+  const host = await getAccessSetting('host', '');
+  const token = await getAccessSetting('token', '');
   if (!host || !token) return null;
 
   const url = `https://${host}/api/v1/developer${path}`;
@@ -2637,10 +2653,10 @@ app.get('/api/wasch/admin/doors/list', authMiddleware, adminOnly, async (req, re
 
 // Unlock a door temporarily (for reservation start)
 async function unlockDoor(doorId, durationSeconds = 10) {
-  const enabled = await getWaschSetting('unifi_access_enabled', 'false');
+  const enabled = await getAccessSetting('enabled', 'false');
   if (enabled !== 'true' || !doorId) return false;
 
-  const result = await unifiAccessRequest('PUT', `/door/${doorId}/unlock`, {
+  const result = await unifiAccessRequest('PUT', `/doors/${doorId}/unlock`, {
     duration: durationSeconds,
   });
   if (result) {
@@ -2652,10 +2668,10 @@ async function unlockDoor(doorId, durationSeconds = 10) {
 
 // Lock a door (for reservation end)
 async function lockDoor(doorId) {
-  const enabled = await getWaschSetting('unifi_access_enabled', 'false');
+  const enabled = await getAccessSetting('enabled', 'false');
   if (enabled !== 'true' || !doorId) return false;
 
-  const result = await unifiAccessRequest('PUT', `/door/${doorId}/lock`);
+  const result = await unifiAccessRequest('PUT', `/doors/${doorId}/lock`);
   if (result) {
     console.log(`[UniFi Access] Door ${doorId} locked`);
     return true;
@@ -2666,12 +2682,12 @@ async function lockDoor(doorId) {
 // Check door status
 async function getDoorStatus(doorId) {
   if (!doorId) return null;
-  return await unifiAccessRequest('GET', `/door/${doorId}`);
+  return await unifiAccessRequest('GET', `/doors/${doorId}`);
 }
 
 // Cron: manage door access based on active reservations (runs with billing cron)
 async function manageDoorAccess() {
-  const enabled = await getWaschSetting('unifi_access_enabled', 'false');
+  const enabled = await getAccessSetting('enabled', 'false');
   if (enabled !== 'true') return;
 
   const now = new Date();
@@ -2736,6 +2752,142 @@ app.post('/api/wasch/admin/doors/:roomId/unlock', authMiddleware, adminOnly, asy
     res.json({ success: ok, message: ok ? `Tür für ${duration}s entsperrt` : 'UniFi Access nicht erreichbar' });
   } catch (err) {
     res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Interner Serverfehler' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// UNIFI ACCESS — Verwaltungs-UI (access.rosenweg4303.ch, nur Admin/Technik/Präsident)
+// Eigene Management-Oberfläche über die UniFi-Access-Developer-API. Nutzt denselben
+// Host/Token wie die Waschküche-Türsteuerung (wasch_settings). Pfade = UniFi Access
+// Developer API v1; bei Nichterreichbarkeit -> 502/503 (nie Crash). `raw_status` im
+// Body hilft beim Live-Abgleich, falls ein Pfad (users/logs/visitors) nachzuziehen ist.
+// ═══════════════════════════════════════════════════════════════════
+
+// Roher Helper: liefert {status, body} OHNE Fehler zu verschlucken (anders als unifiAccessRequest).
+async function unifiAccessRaw(method, path, body = null) {
+  const host = await getAccessSetting('host', '');
+  const token = await getAccessSetting('token', '');
+  if (!host || !token) return { status: 0, body: null, error: 'not_configured' };
+  try {
+    const opts = {
+      method,
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(8000),
+    };
+    if (body != null) opts.body = JSON.stringify(body);
+    const r = await fetch(`https://${host}/api/v1/developer${path}`, opts);
+    let json = null; try { json = await r.json(); } catch {}
+    return { status: r.status, body: json };
+  } catch (err) {
+    return { status: 0, body: null, error: err.message };
+  }
+}
+// Mappt Helper-Resultat auf HTTP-Fehler; gibt false zurück wenn schon geantwortet wurde.
+function accessGuard(res, r) {
+  if (r.error === 'not_configured') { res.status(503).json({ error: 'UniFi Access nicht konfiguriert (Host/Token fehlen)' }); return false; }
+  if (r.status === 0) { res.status(502).json({ error: 'UniFi Access nicht erreichbar' }); return false; }
+  return true;
+}
+const accessOk = (r) => r.status >= 200 && r.status < 300;
+
+// ── Türen + Live-Status ──
+app.get('/api/access/doors', authMiddleware, adminOnly, async (req, res) => {
+  const r = await unifiAccessRaw('GET', '/doors');
+  if (!accessGuard(res, r)) return;
+  const doors = (r.body?.data || []).map(d => ({
+    id: d.unique_id || d.id || d._id,
+    name: d.name || d.full_name,
+    full_name: d.full_name || d.name,
+    type: d.door_guard || d.type || null,
+    lock_state: d.door_lock_relay_status ?? d.lock_rule ?? null,
+    position: d.door_position_status ?? null,
+    online: d.is_bind_hub ?? null,
+  }));
+  res.json({ doors, raw_status: r.status });
+});
+
+// ── Remote-Öffnen (temporär) ──
+app.post('/api/access/doors/:id/unlock', authMiddleware, adminOnly, async (req, res) => {
+  const r = await unifiAccessRaw('PUT', `/doors/${encodeURIComponent(req.params.id)}/unlock`, {});
+  if (!accessGuard(res, r)) return;
+  if (accessOk(r)) return res.json({ success: true, message: 'Tür entsperrt' });
+  res.status(r.status).json({ error: r.body?.msg || 'Entsperren fehlgeschlagen', raw_status: r.status });
+});
+
+// ── Zutritts-Logs (Ereignisse) ──
+app.get('/api/access/logs', authMiddleware, adminOnly, async (req, res) => {
+  const page = parseInt(req.query.page) || 1;
+  const until = req.query.until ? parseInt(req.query.until) : Math.floor(Date.now() / 1000);
+  const since = req.query.since ? parseInt(req.query.since) : until - 7 * 24 * 3600;
+  const r = await unifiAccessRaw('POST', '/system/logs', {
+    topic: req.query.topic || 'door_openings', since, until, page_num: page, page_size: 50,
+  });
+  if (!accessGuard(res, r)) return;
+  res.json({ logs: r.body?.data?.hits ?? r.body?.data ?? [], pagination: r.body?.pagination ?? null, raw_status: r.status });
+});
+
+// ── Benutzer + Ausweise (PIN) ──
+app.get('/api/access/users', authMiddleware, adminOnly, async (req, res) => {
+  const r = await unifiAccessRaw('GET', '/users');
+  if (!accessGuard(res, r)) return;
+  res.json({ users: r.body?.data ?? [], raw_status: r.status });
+});
+app.post('/api/access/users', authMiddleware, adminOnly, async (req, res) => {
+  const { first_name, last_name, email, employee_number, onboard_time, pin_code } = req.body || {};
+  if (!first_name) return res.status(400).json({ error: 'Vorname erforderlich' });
+  const r = await unifiAccessRaw('POST', '/users', { first_name, last_name, email, employee_number, onboard_time, pin_code });
+  if (!accessGuard(res, r)) return;
+  res.status(accessOk(r) ? 200 : r.status).json(r.body || {});
+});
+app.put('/api/access/users/:id', authMiddleware, adminOnly, async (req, res) => {
+  const r = await unifiAccessRaw('PUT', `/users/${encodeURIComponent(req.params.id)}`, req.body || {});
+  if (!accessGuard(res, r)) return;
+  res.status(accessOk(r) ? 200 : r.status).json(r.body || {});
+});
+app.delete('/api/access/users/:id', authMiddleware, adminOnly, async (req, res) => {
+  const r = await unifiAccessRaw('DELETE', `/users/${encodeURIComponent(req.params.id)}`);
+  if (!accessGuard(res, r)) return;
+  res.status(accessOk(r) ? 200 : r.status).json(r.body || {});
+});
+
+// (NFC-Karten haben KEINEN eigenen Endpoint — sie sind pro Benutzer eingebettet
+//  als `nfc_cards` im /users-Objekt. Daher hier keine separate Route.)
+
+// ── Besucher-Pässe (temporärer Zutritt) ──
+app.get('/api/access/visitors', authMiddleware, adminOnly, async (req, res) => {
+  const r = await unifiAccessRaw('GET', '/visitors');
+  if (!accessGuard(res, r)) return;
+  res.json({ visitors: r.body?.data ?? [], raw_status: r.status });
+});
+app.post('/api/access/visitors', authMiddleware, adminOnly, async (req, res) => {
+  const { first_name, last_name, start_time, end_time, remarks, resources } = req.body || {};
+  if (!first_name || !start_time || !end_time) return res.status(400).json({ error: 'Name + Zeitraum (start_time/end_time) erforderlich' });
+  const r = await unifiAccessRaw('POST', '/visitors', { first_name, last_name, start_time, end_time, remarks, resources });
+  if (!accessGuard(res, r)) return;
+  res.status(accessOk(r) ? 200 : r.status).json(r.body || {});
+});
+app.delete('/api/access/visitors/:id', authMiddleware, adminOnly, async (req, res) => {
+  const r = await unifiAccessRaw('DELETE', `/visitors/${encodeURIComponent(req.params.id)}`);
+  if (!accessGuard(res, r)) return;
+  res.status(accessOk(r) ? 200 : r.status).json(r.body || {});
+});
+
+// ── Access-Konfiguration (Host/Token/enabled). Token wird NIE im Klartext ausgeliefert. ──
+app.get('/api/access/settings', authMiddleware, adminOnly, async (req, res) => {
+  const host = await getAccessSetting('host', '');
+  const token = await getAccessSetting('token', '');
+  const enabled = await getAccessSetting('enabled', 'false');
+  res.json({ host, token_set: !!token, enabled: enabled === 'true' });
+});
+app.put('/api/access/settings', authMiddleware, adminOnly, async (req, res) => {
+  const { host, token, enabled } = req.body || {};
+  try {
+    if (host !== undefined) await setAccessSetting('host', String(host).trim());
+    if (token !== undefined && token !== '') await setAccessSetting('token', String(token).trim()); // leer = unverändert (Token nicht überschreiben)
+    if (enabled !== undefined) await setAccessSetting('enabled', enabled ? 'true' : 'false');
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: req.user?.isAdmin ? err.message : 'Fehler' });
   }
 });
 
@@ -21342,6 +21494,13 @@ async function initDB() {
         updated_at TIMESTAMP DEFAULT NOW()
       );
 
+      -- Access-Subsystem (UniFi Access) — primär; Waschküche konsumiert dies.
+      CREATE TABLE IF NOT EXISTS access_settings (
+        key VARCHAR(100) PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+
       CREATE TABLE IF NOT EXISTS kontakte (
         id SERIAL PRIMARY KEY,
         stweg INTEGER NOT NULL,
@@ -23149,6 +23308,18 @@ async function initDB() {
         ('unifi_access_token', '')
       `);
       console.log('Seeded default Waschküche settings');
+    }
+
+    // Access-Subsystem (UniFi Access): Defaults + Migration alter unifi_access_*-Werte aus wasch_settings.
+    const accessExist = await client.query('SELECT COUNT(*) FROM access_settings');
+    if (parseInt(accessExist.rows[0].count) === 0) {
+      await client.query(`INSERT INTO access_settings (key, value) VALUES ('host',''),('token',''),('enabled','false')`);
+      await client.query(`
+        UPDATE access_settings a SET value = w.value, updated_at = NOW()
+        FROM wasch_settings w
+        WHERE w.key = 'unifi_access_' || a.key AND COALESCE(w.value,'') <> ''
+      `);
+      console.log('Seeded access_settings (UniFi Access subsystem)');
     }
 
     // Seed default permissions if none exist
