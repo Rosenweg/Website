@@ -19,6 +19,10 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; }
+        .plate { display:inline-flex; align-items:center; gap:6px; background:#fff; border:2px solid #1a1a1a; border-radius:5px; padding:3px 9px; font-weight:800; color:#111; font-size:15px; letter-spacing:1.5px; line-height:1; box-shadow:0 1px 2px rgba(0,0,0,.2); font-family:'Arial Narrow',Arial,sans-serif; }
+        .plate .cross { flex:none; width:15px; height:15px; background:#d52b1e; border-radius:2px; position:relative; }
+        .plate .cross::before { content:''; position:absolute; top:3px; left:6px; width:3px; height:9px; background:#fff; }
+        .plate .cross::after { content:''; position:absolute; left:3px; top:6px; width:9px; height:3px; background:#fff; }
         .tab-btn { padding: .55rem .9rem; font-size: .875rem; font-weight: 600; color: #6b7280; border-bottom: 2px solid transparent; white-space: nowrap; }
         .tab-btn.active { color: #b91c1c; border-color: #b91c1c; }
     </style>
@@ -62,6 +66,14 @@
     // ─────────────────────────── Helpers ───────────────────────────
     const $ = (s, r=document) => r.querySelector(s);
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const CH_CANTONS = ['AG','AI','AR','BE','BL','BS','FR','GE','GL','GR','JU','LU','NE','NW','OW','SG','SH','SO','SZ','TG','TI','UR','VD','VS','ZG','ZH'];
+    function plateHtml(s) {
+        const str = String(s || '').toUpperCase().trim();
+        const m = str.match(/^([A-Z]{2})[\s-]?(.+)$/);
+        const ch = m && CH_CANTONS.includes(m[1]);
+        const text = ch ? `${m[1]} ${m[2].replace(/\s+/g, ' ').trim()}` : str;
+        return `<span class="plate">${ch ? '<span class="cross"></span>' : ''}${esc(text)}</span>`;
+    }
     const loaded = {};
 
     async function api(path, opts = {}) {
@@ -552,7 +564,7 @@
 
     async function showPlates() {
         let data; try { data = await api('/plates'); } catch (e) { return showStatus(e.message, 'err'); }
-        const rows = (data.plates || []).map(p => `<tr class="border-b last:border-0"><td class="py-1.5 pr-3 font-mono font-medium">${esc(p.plate)}</td><td class="py-1.5 text-gray-500 text-xs">${esc(p.email)}</td><td class="py-1.5 text-right text-xs ${p.source === 'UniFi' ? 'text-green-600' : 'text-amber-600'}">${esc(p.source)}</td></tr>`).join('');
+        const rows = (data.plates || []).map(p => `<tr class="border-b last:border-0"><td class="py-2 pr-3">${plateHtml(p.plate)}</td><td class="py-1.5 text-gray-500 text-xs">${esc(p.email)}</td><td class="py-1.5 text-right text-xs ${p.source === 'UniFi' ? 'text-green-600' : 'text-amber-600'}">${esc(p.source)}</td></tr>`).join('');
         openModal('Kennzeichen', `<div class="text-xs text-gray-500 mb-2">${(data.plates || []).length} gesamt — <span class="text-green-600">UniFi</span> = im System, <span class="text-amber-600">Vor-Reg</span> = wartet auf UniFi-Benutzer (per E-Mail).</div>
             <div class="max-h-64 overflow-y-auto border rounded-lg mb-3"><table class="w-full text-sm"><tbody>${rows || '<tr><td class="text-gray-400 py-3 px-3">Keine Kennzeichen.</td></tr>'}</tbody></table></div>
             <button onclick="syncPlatesNow(this)" type="button" class="w-full text-sm bg-gray-800 hover:bg-gray-900 text-white rounded-lg py-2">🔄 Vor-Registrierungen nach UniFi übernehmen</button>
