@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#b91c1c">
+  <title>Zutritt — Rosenweg</title>
+  <link rel="manifest" href="/zutritt/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/icon-192-2.png">
+  <link rel="icon" href="/logo-rosenweg.png" type="image/png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Zutritt">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800">
+  <header class="bg-white border-b sticky top-0 z-30">
+    <div class="max-w-md mx-auto px-4 h-14 flex items-center gap-3">
+      <a href="/" class="text-slate-400 text-2xl leading-none">‹</a>
+      <span class="font-bold">Zutritt</span>
+      <span id="uname" class="ml-auto text-xs text-slate-400 truncate max-w-[55%]"></span>
+    </div>
+  </header>
+
+  <div id="gate" class="max-w-md mx-auto px-4 py-16 text-center text-slate-400">Lade…</div>
+
+  <main id="app" class="max-w-md mx-auto px-4 py-5 hidden space-y-6">
+    <div id="status" class="hidden rounded-xl px-4 py-2.5 text-sm"></div>
+    <section>
+      <h2 class="text-sm font-semibold text-slate-500 mb-2">Türen öffnen</h2>
+      <div id="doors" class="space-y-2"></div>
+    </section>
+    <section>
+      <h2 class="text-sm font-semibold text-slate-500 mb-2">Meine NFC-Karten</h2>
+      <div id="cards"></div>
+    </section>
+    <p class="text-center text-[11px] text-slate-400 pt-2">Rosenweg · Zutritt</p>
+  </main>
+
+  <script>
+    const $ = (s, r = document) => r.querySelector(s);
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    async function api(path, opts = {}) {
+      const r = await AuthentikAuth.apiFetch('/api/access' + path, opts);
+      if (!r.ok) { let m = 'Fehler ' + r.status; try { const j = await r.json(); m = j.error || m; } catch {} throw new Error(m); }
+      return r.json();
+    }
+    function toast(msg, ok) {
+      const e = $('#status');
+      e.className = 'rounded-xl px-4 py-2.5 text-sm ' + (ok ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800');
+      e.textContent = msg; e.classList.remove('hidden');
+      if (ok) setTimeout(() => e.classList.add('hidden'), 3000);
+    }
+
+    async function loadDoors() {
+      const el = $('#doors'); el.innerHTML = '<div class="text-slate-400 text-sm">Lade…</div>';
+      try {
+        const { doors } = await api('/me/doors');
+        if (!doors.length) { el.innerHTML = '<div class="text-slate-400 text-sm bg-white rounded-2xl border p-4">Aktuell keine Türen für dich freigegeben.</div>'; return; }
+        el.innerHTML = doors.map(d => `<button onclick="openDoor('${esc(d.id)}',this)" class="w-full flex items-center gap-3 bg-white rounded-2xl border p-4 active:bg-slate-50">
+          <span class="flex-none w-11 h-11 rounded-xl bg-red-50 flex items-center justify-center text-2xl">🔓</span>
+          <span class="text-left min-w-0"><span class="block font-semibold truncate">${esc(d.name)}</span>
+          <span class="block text-xs text-slate-400">${d.online ? 'online' : 'offline'} · ${d.lock_state === 'lock' ? 'verriegelt' : 'entriegelt'}</span></span>
+          <span class="ml-auto text-slate-300 text-xl">›</span></button>`).join('');
+      } catch (e) { el.innerHTML = `<div class="text-red-600 text-sm">${esc(e.message)}</div>`; }
+    }
+    async function openDoor(id, btn) {
+      btn.disabled = true; btn.style.opacity = .5;
+      try { const r = await api('/me/doors/' + encodeURIComponent(id) + '/unlock', { method: 'POST' }); toast(r.message || 'Tür geöffnet ✓', true); }
+      catch (e) { toast(e.message, false); }
+      finally { setTimeout(loadDoors, 1500); }
+    }
+
+    async function loadCards() {
+      const el = $('#cards');
+      try {
+        const me = await api('/me');
+        if (!me.found) { el.innerHTML = '<div class="text-slate-400 text-sm bg-white rounded-2xl border p-4">Für deinen Account ist noch kein Zutritts-Benutzer angelegt. Die Technik richtet das ein.</div>'; return; }
+        const cards = (me.cards || []).map(c => `<div class="flex items-center justify-between bg-white rounded-2xl border px-4 py-3 mb-2">
+          <span>🪪 ${esc(c.label)}</span><button onclick="rmCard('${esc(c.token)}')" class="text-red-600 text-xs">entfernen</button></div>`).join('');
+        el.innerHTML = (cards || '<div class="text-slate-400 text-sm mb-2">Noch keine Karte hinterlegt.</div>') +
+          '<button onclick="enroll()" class="w-full bg-red-700 active:bg-red-800 text-white font-medium rounded-2xl py-3">🪪 Karte anlernen</button>';
+      } catch (e) { el.innerHTML = `<div class="text-red-600 text-sm">${esc(e.message)}</div>`; }
+    }
+    async function rmCard(token) {
+      if (!confirm('Karte entfernen?')) return;
+      try { await api('/me/nfc/' + encodeURIComponent(token), { method: 'DELETE' }); toast('Karte entfernt', true); loadCards(); }
+      catch (e) { toast(e.message, false); }
+    }
+    function pickReader(devices) {
+      return new Promise(res => {
+        const m = document.createElement('div');
+        m.className = 'fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4';
+        m.innerHTML = `<div class="bg-white rounded-2xl p-5 w-full max-w-sm"><h3 class="font-semibold mb-3">Leser wählen</h3>
+          <div class="space-y-2">${devices.map(d => `<button data-id="${esc(d.id)}" class="w-full text-left border rounded-xl px-3 py-3 ${d.online ? '' : 'opacity-50'}">${esc(d.name)}<span class="block text-xs text-slate-400">${esc(d.model)}${d.online ? '' : ' · offline'}</span></button>`).join('')}</div>
+          <button id="pc" type="button" class="text-sm text-slate-500 mt-3">Abbrechen</button></div>`;
+        document.body.appendChild(m);
+        m.querySelectorAll('button[data-id]').forEach(b => b.onclick = () => { m.remove(); res(b.dataset.id); });
+        m.querySelector('#pc').onclick = () => { m.remove(); res(null); };
+        m.onclick = e => { if (e.target === m) { m.remove(); res(null); } };
+      });
+    }
+    async function enroll() {
+      let devices = []; try { devices = (await api('/me/devices')).devices || []; } catch {}
+      let dev; if (devices.length === 1) dev = devices[0].id; else if (devices.length > 1) { dev = await pickReader(devices); if (!dev) return; }
+      let session;
+      try { const r = await api('/me/nfc/session', { method: 'POST', body: dev ? { device_id: dev } : {} }); session = r.session_id; }
+      catch (e) { return toast(e.message, false); }
+      if (!session) return toast('Keine Session erhalten', false);
+      const ov = document.createElement('div');
+      ov.className = 'fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4';
+      ov.innerHTML = '<div class="bg-white rounded-2xl p-6 text-center max-w-xs"><div class="text-5xl mb-3 animate-pulse">🪪</div><div class="font-medium">Karte an den Leser halten…</div><button id="nc" type="button" class="text-sm text-slate-500 mt-4">Abbrechen</button></div>';
+      document.body.appendChild(ov);
+      let done = false;
+      const stop = async () => { if (done) return; done = true; ov.remove(); try { await api('/me/nfc/session/' + session, { method: 'DELETE' }); } catch {} };
+      ov.querySelector('#nc').onclick = stop;
+      for (let i = 0; i < 30 && !done; i++) {
+        await new Promise(r => setTimeout(r, 2000)); if (done) break;
+        let s; try { s = await api('/me/nfc/session/' + session); } catch { continue; }
+        const d = s.data || {};
+        const token = d.token || d.card_id || d.card?.token || d.nfc_card?.token || (Array.isArray(d.cards) && d.cards[0]?.token);
+        if (token) {
+          done = true; ov.remove();
+          try { await api('/me/nfc/assign', { method: 'POST', body: { token } }); toast('Karte hinzugefügt ✓', true); }
+          catch (e) { toast(e.message, false); }
+          loadCards(); return;
+        }
+      }
+      if (!done) { done = true; ov.remove(); try { await api('/me/nfc/session/' + session, { method: 'DELETE' }); } catch {} toast('Keine Karte erkannt (Timeout)', false); }
+    }
+
+    AuthentikAuth.init({
+      requireAuth: true,
+      onLogin(u) { $('#gate').classList.add('hidden'); $('#app').classList.remove('hidden'); $('#uname').textContent = u.name || u.email || ''; loadDoors(); loadCards(); },
+      onLogout() { /* init() leitet automatisch zum Login um */ },
+    });
+  </script>
+</body>
+</html>
