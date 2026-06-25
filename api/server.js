@@ -3100,6 +3100,81 @@ app.post('/api/access/sync', authMiddleware, adminOnly, async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Self-Service (Bewohner via PWA): eigene NFC-Karten + erlaubte Türen öffnen ──
+// STRENG auf den eingeloggten User begrenzt (UniFi-User via E-Mail-Match; nie fremde).
+async function unifiUserByEmail(email) {
+  const e = (email || '').toLowerCase().trim(); if (!e) return null;
+  const users = (await unifiAccessRaw('GET', '/users')).body?.data || [];
+  return users.find(u => (u.email || u.user_email || '').toLowerCase().trim() === e) || null;
+}
+// Türen, die der eingeloggte User öffnen darf (nach unserem Grant-Modell + seinen Authentik-Gruppen).
+async function meAllowedDoorIds(email) {
+  const e = (email || '').toLowerCase().trim();
+  const doorGrants = await buildDoorGrants();
+  const allowed = new Set();
+  for (const [doorId, grps] of Object.entries(doorGrants)) {
+    const emails = await authentikGroupEmails([...grps]);
+    if (emails.has(e)) allowed.add(doorId);
+  }
+  return allowed;
+}
+app.get('/api/access/me', authMiddleware, async (req, res) => {
+  const u = await unifiUserByEmail(req.user?.email);
+  if (!u) return res.json({ found: false });
+  res.json({ found: true, name: u.full_name || `${u.first_name || ''} ${u.last_name || ''}`.trim(),
+    cards: (u.nfc_cards || []).map(c => ({ token: c.token || c.id, label: c.display_id || c.id || c.token })) });
+});
+app.get('/api/access/me/devices', authMiddleware, async (req, res) => {
+  res.json({ devices: await accessReaders() });
+});
+app.get('/api/access/me/doors', authMiddleware, async (req, res) => {
+  const allowed = await meAllowedDoorIds(req.user?.email);
+  const all = (await unifiAccessRaw('GET', '/doors')).body?.data || [];
+  res.json({ doors: all.filter(d => allowed.has(d.unique_id || d.id)).map(d => ({
+    id: d.unique_id || d.id, name: d.name || d.full_name, lock_state: d.door_lock_relay_status, online: d.is_bind_hub })) });
+});
+app.post('/api/access/me/doors/:id/unlock', authMiddleware, async (req, res) => {
+  const allowed = await meAllowedDoorIds(req.user?.email);
+  if (!allowed.has(req.params.id)) return res.status(403).json({ error: 'Keine Berechtigung für diese Tür' });
+  const r = await unifiAccessRaw('PUT', `/doors/${encodeURIComponent(req.params.id)}/unlock`, {});
+  if (r.status === 0) return res.status(502).json({ error: 'Access nicht erreichbar' });
+  if (accessOk(r)) return res.json({ success: true, message: 'Tür geöffnet' });
+  res.status(r.status).json({ error: r.body?.msg || 'Öffnen fehlgeschlagen' });
+});
+app.post('/api/access/me/nfc/session', authMiddleware, async (req, res) => {
+  const u = await unifiUserByEmail(req.user?.email);
+  if (!u) return res.status(404).json({ error: 'Kein UniFi-Benutzer zu deiner E-Mail — bitte Technik kontaktieren' });
+  const device_id = req.body?.device_id || await accessEnrollDevice();
+  if (!device_id) return res.status(400).json({ error: 'Kein Lesegerät gefunden' });
+  const r = await unifiAccessRaw('POST', '/credentials/nfc_cards/sessions', { device_id });
+  if (r.status === 0) return res.status(502).json({ error: 'Access nicht erreichbar' });
+  if (!accessOk(r)) return res.status(r.status).json({ error: r.body?.msg || 'Session fehlgeschlagen' });
+  res.json({ session_id: r.body?.data?.session_id || r.body?.data?.id });
+});
+app.get('/api/access/me/nfc/session/:id', authMiddleware, async (req, res) => {
+  const r = await unifiAccessRaw('GET', `/credentials/nfc_cards/sessions/${encodeURIComponent(req.params.id)}`);
+  res.json({ data: r.body?.data ?? null, code: r.body?.code });
+});
+app.delete('/api/access/me/nfc/session/:id', authMiddleware, async (req, res) => {
+  await unifiAccessRaw('DELETE', `/credentials/nfc_cards/sessions/${encodeURIComponent(req.params.id)}`);
+  res.json({ success: true });
+});
+app.post('/api/access/me/nfc/assign', authMiddleware, async (req, res) => {
+  const u = await unifiUserByEmail(req.user?.email);
+  if (!u) return res.status(404).json({ error: 'Kein UniFi-Benutzer gefunden' });
+  const token = req.body?.token; if (!token) return res.status(400).json({ error: 'Token fehlt' });
+  const r = await unifiAccessRaw('PUT', `/users/${encodeURIComponent(u.id)}/nfc_cards`, { token });
+  if (accessOk(r)) return res.json({ success: true });
+  res.status(r.status === 0 ? 502 : r.status).json({ error: r.body?.msg || 'Zuweisen fehlgeschlagen' });
+});
+app.delete('/api/access/me/nfc/:token', authMiddleware, async (req, res) => {
+  const u = await unifiUserByEmail(req.user?.email);
+  if (!u) return res.status(404).json({ error: 'Kein UniFi-Benutzer gefunden' });
+  const r = await unifiAccessRaw('DELETE', `/users/${encodeURIComponent(u.id)}/nfc_cards/${encodeURIComponent(req.params.token)}`);
+  if (accessOk(r)) return res.json({ success: true });
+  res.status(r.status === 0 ? 502 : r.status).json({ error: 'Entfernen fehlgeschlagen' });
+});
+
 // ── Access-Konfiguration (Host/Token/enabled). Token wird NIE im Klartext ausgeliefert. ──
 app.get('/api/access/settings', authMiddleware, adminOnly, async (req, res) => {
   const host = await getAccessSetting('host', '');
