@@ -39,6 +39,10 @@
       <h2 class="text-sm font-semibold text-slate-500 mb-2">Meine NFC-Karten</h2>
       <div id="cards"></div>
     </section>
+    <section>
+      <h2 class="text-sm font-semibold text-slate-500 mb-2">Meine Kennzeichen</h2>
+      <div id="plates"></div>
+    </section>
     <p class="text-center text-[11px] text-slate-400 pt-2">Rosenweg · Zutritt</p>
   </main>
 
@@ -153,9 +157,32 @@
       if (!done) { done = true; ov.remove(); try { await api('/me/nfc/session/' + session, { method: 'DELETE' }); } catch {} toast('Keine Karte erkannt (Timeout)', false); }
     }
 
+    async function loadPlates() {
+      const el = $('#plates');
+      try {
+        const { plates } = await api('/me/plates');
+        const items = (plates || []).map(p => `<div class="flex items-center justify-between bg-white rounded-2xl border px-4 py-3 mb-2">
+          <span>🚗 ${esc(p.plate)}</span><button onclick="rmPlate(${p.id})" class="text-red-600 text-xs">entfernen</button></div>`).join('');
+        el.innerHTML = (items || '<div class="text-slate-400 text-sm mb-2">Noch kein Kennzeichen hinterlegt.</div>') +
+          `<div class="flex gap-2"><input id="plate-in" placeholder="z.B. AG 12345" maxlength="12" class="flex-1 border rounded-xl px-3 py-2.5 text-sm uppercase">
+          <button onclick="addPlate()" class="bg-red-700 active:bg-red-800 text-white font-medium rounded-xl px-5 text-lg">+</button></div>
+          <p class="text-[11px] text-slate-400 mt-2">Vorregistrierung — wird aktiv, sobald das Tiefgaragentor mit Kennzeichenerkennung eingerichtet ist.</p>`;
+      } catch (e) { el.innerHTML = `<div class="text-red-600 text-sm">${esc(e.message)}</div>`; }
+    }
+    async function addPlate() {
+      const v = ($('#plate-in').value || '').trim(); if (!v) return;
+      try { await api('/me/plates', { method: 'POST', body: { plate: v } }); toast('Kennzeichen gespeichert ✓', true); loadPlates(); }
+      catch (e) { toast(e.message, false); }
+    }
+    async function rmPlate(id) {
+      if (!confirm('Kennzeichen entfernen?')) return;
+      try { await api('/me/plates/' + id, { method: 'DELETE' }); toast('Entfernt', true); loadPlates(); }
+      catch (e) { toast(e.message, false); }
+    }
+
     AuthentikAuth.init({
       requireAuth: true,
-      onLogin(u) { $('#gate').classList.add('hidden'); $('#app').classList.remove('hidden'); $('#uname').textContent = u.name || u.email || ''; loadDoors(); loadCards(); setInterval(() => loadDoors(true), 15000); },
+      onLogin(u) { $('#gate').classList.add('hidden'); $('#app').classList.remove('hidden'); $('#uname').textContent = u.name || u.email || ''; loadDoors(); loadCards(); loadPlates(); setInterval(() => loadDoors(true), 15000); },
       onLogout() { /* init() leitet automatisch zum Login um */ },
     });
   </script>

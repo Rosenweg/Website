@@ -305,7 +305,8 @@
             p.innerHTML = `<div class="flex items-center gap-2 mb-3">
                 <input id="user-search" oninput="renderUsers()" placeholder="Suchen…" class="border rounded-lg px-3 py-1.5 text-sm flex-1 max-w-xs">
                 <span class="text-xs text-gray-400">${allUsers.length} Benutzer</span>
-                <button onclick="editUser()" class="ml-auto text-sm bg-red-700 hover:bg-red-800 text-white rounded-lg px-3 py-1.5">+ Neu</button>
+                <button onclick="showPlates()" class="ml-auto text-sm bg-gray-100 hover:bg-gray-200 rounded-lg px-3 py-1.5">🚗 Kennzeichen</button>
+                <button onclick="editUser()" class="text-sm bg-red-700 hover:bg-red-800 text-white rounded-lg px-3 py-1.5">+ Neu</button>
             </div><div id="user-body"></div>`;
             renderUsers();
         } catch (e) { p.innerHTML = `<div class="text-red-600">${esc(e.message)}</div>`; }
@@ -546,6 +547,13 @@
         const tok = $('#s-token').value.trim(); if (tok) body.token = tok;
         try { await api('/settings', { method: 'PUT', body }); showStatus('Gespeichert', 'ok'); loadSettings(); }
         catch (e) { showStatus(e.message, 'err'); }
+    }
+
+    async function showPlates() {
+        let data; try { data = await api('/plates'); } catch (e) { return showStatus(e.message, 'err'); }
+        const rows = (data.plates || []).map(p => `<tr class="border-b last:border-0"><td class="py-1.5 pr-3 font-mono font-medium">${esc(p.plate)}</td><td class="py-1.5 text-gray-500 text-xs">${esc(p.email)}</td></tr>`).join('');
+        openModal('Kennzeichen-Vorregistrierungen', `<div class="text-xs text-gray-500 mb-2">${(data.plates || []).length} vorregistriert — werden ins UniFi-LPR übernommen, sobald das Tor eingerichtet ist.</div>
+            <div class="max-h-80 overflow-y-auto border rounded-lg"><table class="w-full text-sm"><tbody>${rows || '<tr><td class="text-gray-400 py-3 px-3">Noch keine Vorregistrierungen.</td></tr>'}</tbody></table></div>`, () => true);
     }
 
     // ─────────────────────────── Modal ───────────────────────────
