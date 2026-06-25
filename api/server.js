@@ -3177,7 +3177,8 @@ app.delete('/api/access/me/nfc/:token', authMiddleware, async (req, res) => {
 });
 
 // ── Kennzeichen-Vorregistrierung (eigene DB; Sync zu UniFi-LPR sobald das Tor steht) ──
-const ACCESS_PLATE_RE = /^[A-Z0-9ÄÖÜ][A-Z0-9ÄÖÜ \-]{1,11}$/;
+// International (CH/DE/EU/…): Buchstaben (inkl. Umlaute), Ziffern, Leer-/Bindestrich; 1–16 Zeichen.
+const ACCESS_PLATE_RE = /^[A-Z0-9ÄÖÜ][A-Z0-9ÄÖÜ \-]{0,15}$/;
 const normPlate = (p) => String(p || '').toUpperCase().replace(/\s+/g, ' ').trim();
 app.get('/api/access/me/plates', authMiddleware, async (req, res) => {
   const e = (req.user?.email || '').toLowerCase();
@@ -3187,7 +3188,7 @@ app.get('/api/access/me/plates', authMiddleware, async (req, res) => {
 app.post('/api/access/me/plates', authMiddleware, async (req, res) => {
   if (!req.user?.email) return res.status(400).json({ error: 'Keine E-Mail im Profil' });
   const plate = normPlate(req.body?.plate);
-  if (!ACCESS_PLATE_RE.test(plate)) return res.status(400).json({ error: 'Ungültiges Kennzeichen (z.B. AG 12345)' });
+  if (!ACCESS_PLATE_RE.test(plate)) return res.status(400).json({ error: 'Ungültiges Kennzeichen' });
   try {
     const r = await pool.query('INSERT INTO access_plates(email, plate) VALUES($1,$2) ON CONFLICT (email, plate) DO NOTHING RETURNING id', [req.user.email, plate]);
     res.json({ success: true, id: r.rows[0]?.id || null });
