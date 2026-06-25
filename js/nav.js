@@ -821,3 +821,31 @@ const RosenwegSearch = {
   },
 };
 window.RosenwegSearch = RosenwegSearch;
+
+// ── Cookie-Hinweis: technisch notwendiges Login-Cookie (DSGVO-consent-frei, kein
+// Tracking). Einmaliger Info-Banner; Bestätigung subdomain-übergreifend gespeichert. ──
+(function () {
+  function showCookieNotice() {
+    if (document.cookie.indexOf('rw_cookie_ack=1') !== -1) return;
+    if (document.getElementById('rw-cookie-notice')) return;
+    var dom = /rosenweg4303\.ch$/.test(location.hostname) ? '; domain=.rosenweg4303.ch' : '';
+    var bar = document.createElement('div');
+    bar.id = 'rw-cookie-notice';
+    bar.setAttribute('role', 'note');
+    bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:9998;background:#1f2937;color:#fff;padding:12px 16px;font:14px/1.5 system-ui,-apple-system,sans-serif;display:flex;gap:14px;align-items:center;flex-wrap:wrap;box-shadow:0 -2px 12px rgba(0,0,0,.25)';
+    bar.innerHTML = '<span style="flex:1 1 280px">🍪 Diese Seite verwendet nur ein <strong>technisch notwendiges Cookie</strong>, um dich über alle Bereiche hinweg eingeloggt zu halten — kein Tracking, keine Werbung, keine Drittanbieter-Cookies.</span>';
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = 'Verstanden';
+    btn.style.cssText = 'flex:0 0 auto;background:#3b82f6;color:#fff;border:0;border-radius:6px;padding:8px 18px;font-weight:600;cursor:pointer';
+    btn.addEventListener('click', function () {
+      var sec = location.protocol === 'https:' ? '; secure' : '';
+      document.cookie = 'rw_cookie_ack=1; path=/; max-age=' + (365 * 24 * 3600) + '; samesite=lax' + dom + sec;
+      bar.remove();
+    });
+    bar.appendChild(btn);
+    (document.body || document.documentElement).appendChild(bar);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', showCookieNotice);
+  else showCookieNotice();
+})();
