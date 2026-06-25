@@ -1,0 +1,15 @@
+{
+  "name": "Rosenweg Access",
+  "short_name": "Access",
+  "description": "Türen öffnen und Zutritt verwalten — Rosenweg",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#b91c1c",
+  "icons": [
+    { "src": "/logo-rosenweg-technik.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/logo-rosenweg-technik.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
