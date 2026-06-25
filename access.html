@@ -19,10 +19,13 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; }
-        .plate { display:inline-flex; align-items:center; gap:6px; background:#fff; border:2px solid #1a1a1a; border-radius:5px; padding:3px 9px; font-weight:800; color:#111; font-size:15px; letter-spacing:1.5px; line-height:1; box-shadow:0 1px 2px rgba(0,0,0,.2); font-family:'Arial Narrow',Arial,sans-serif; }
-        .plate .cross { flex:none; width:15px; height:15px; background:#d52b1e; border-radius:2px; position:relative; }
-        .plate .cross::before { content:''; position:absolute; top:3px; left:6px; width:3px; height:9px; background:#fff; }
-        .plate .cross::after { content:''; position:absolute; left:3px; top:6px; width:9px; height:3px; background:#fff; }
+        .plate { display:inline-flex; align-items:center; gap:7px; background:#fff; border:2px solid #1a1a1a; border-radius:5px; padding:3px 8px; font-weight:800; color:#111; font-size:15px; letter-spacing:1.5px; line-height:1; box-shadow:0 1px 2px rgba(0,0,0,.2); font-family:'Arial Narrow',Arial,sans-serif; }
+        .plate .ptxt { padding:2px 0; }
+        .plate .arms { flex:none; width:17px; height:21px; position:relative; clip-path:polygon(0 0,100% 0,100% 60%,50% 100%,0 60%); }
+        .plate .arms.ch { background:#d52b1e; }
+        .plate .arms.ch::before { content:''; position:absolute; top:3px; left:7px; width:3px; height:9px; background:#fff; }
+        .plate .arms.ch::after { content:''; position:absolute; top:5.5px; left:4px; width:9px; height:3px; background:#fff; }
+        .plate .arms.kt { background:#e2e6ea; color:#111; font-size:8px; font-weight:800; text-align:center; padding-top:2px; letter-spacing:0; }
         .tab-btn { padding: .55rem .9rem; font-size: .875rem; font-weight: 600; color: #6b7280; border-bottom: 2px solid transparent; white-space: nowrap; }
         .tab-btn.active { color: #b91c1c; border-color: #b91c1c; }
     </style>
@@ -70,9 +73,9 @@
     function plateHtml(s) {
         const str = String(s || '').toUpperCase().trim();
         const m = str.match(/^([A-Z]{2})[\s-]?(.+)$/);
-        const ch = m && CH_CANTONS.includes(m[1]);
-        const text = ch ? `${m[1]} ${m[2].replace(/\s+/g, ' ').trim()}` : str;
-        return `<span class="plate">${ch ? '<span class="cross"></span>' : ''}${esc(text)}</span>`;
+        if (!(m && CH_CANTONS.includes(m[1]))) return `<span class="plate"><span class="ptxt">${esc(str)}</span></span>`;
+        const canton = m[1], num = m[2].replace(/\s+/g, ' ').trim();
+        return `<span class="plate"><span class="arms ch" title="Schweiz"></span><span class="ptxt">${esc(canton)} ${esc(num)}</span><span class="arms kt" title="Kanton ${esc(canton)}">${esc(canton)}</span></span>`;
     }
     const loaded = {};
 
