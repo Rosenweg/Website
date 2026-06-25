@@ -21,11 +21,7 @@
         body { font-family: 'Inter', sans-serif; }
         .plate { display:inline-flex; align-items:center; gap:7px; background:#fff; border:2px solid #1a1a1a; border-radius:5px; padding:3px 8px; font-weight:800; color:#111; font-size:15px; letter-spacing:1.5px; line-height:1; box-shadow:0 1px 2px rgba(0,0,0,.2); font-family:'Arial Narrow',Arial,sans-serif; }
         .plate .ptxt { padding:2px 0; }
-        .plate .arms { flex:none; width:17px; height:21px; position:relative; clip-path:polygon(0 0,100% 0,100% 60%,50% 100%,0 60%); }
-        .plate .arms.ch { background:#d52b1e; }
-        .plate .arms.ch::before { content:''; position:absolute; top:3px; left:7px; width:3px; height:9px; background:#fff; }
-        .plate .arms.ch::after { content:''; position:absolute; top:5.5px; left:4px; width:9px; height:3px; background:#fff; }
-        .plate .arms.kt { background:#e2e6ea; color:#111; font-size:8px; font-weight:800; text-align:center; padding-top:2px; letter-spacing:0; }
+        .plate .arms { flex:none; height:21px; width:auto; max-width:21px; object-fit:contain; display:block; }
         .tab-btn { padding: .55rem .9rem; font-size: .875rem; font-weight: 600; color: #6b7280; border-bottom: 2px solid transparent; white-space: nowrap; }
         .tab-btn.active { color: #b91c1c; border-color: #b91c1c; }
     </style>
@@ -75,7 +71,7 @@
         const m = str.match(/^([A-Z]{2})[\s-]?(.+)$/);
         if (!(m && CH_CANTONS.includes(m[1]))) return `<span class="plate"><span class="ptxt">${esc(str)}</span></span>`;
         const canton = m[1], num = m[2].replace(/\s+/g, ' ').trim();
-        return `<span class="plate"><span class="arms ch" title="Schweiz"></span><span class="ptxt">${esc(canton)} ${esc(num)}</span><span class="arms kt" title="Kanton ${esc(canton)}">${esc(canton)}</span></span>`;
+        return `<span class="plate"><img class="arms" src="/img/kantone/CH.svg" alt="CH" loading="lazy"><span class="ptxt">${esc(canton)} ${esc(num)}</span><img class="arms" src="/img/kantone/${encodeURIComponent(canton)}.svg" alt="${esc(canton)}" loading="lazy"></span>`;
     }
     const loaded = {};
 
