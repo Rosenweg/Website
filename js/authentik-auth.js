@@ -22,6 +22,7 @@ const AuthentikAuth = {
       if (data.token && data.user) {
         localStorage.setItem(this.SESSION_KEY, data.token);
         localStorage.setItem(this.USER_KEY, JSON.stringify(data.user));
+        this._setSharedToken(data.token);
         // Clean URL hash
         history.replaceState(null, '', window.location.pathname + window.location.search);
         return true;
@@ -34,7 +35,7 @@ const AuthentikAuth = {
 
   /** Check if user is logged in (has valid session) */
   isLoggedIn() {
-    return !!localStorage.getItem(this.SESSION_KEY);
+    return !!(localStorage.getItem(this.SESSION_KEY) || this._readSharedToken());
   },
 
   /** Get stored user data */
@@ -46,9 +47,29 @@ const AuthentikAuth = {
     }
   },
 
-  /** Get session token for API calls */
+  /** Get session token for API calls (localStorage ODER geteiltes Subdomain-Cookie) */
   getToken() {
-    return localStorage.getItem(this.SESSION_KEY);
+    return localStorage.getItem(this.SESSION_KEY) || this._readSharedToken();
+  },
+
+  // ── Cross-Subdomain-SSO: Token zusätzlich in einem Cookie auf .rosenweg4303.ch,
+  // damit der Login über ALLE Subdomains gilt (www/admin/ausschuss/isp/stweg…). ──
+  _cookieDomain() {
+    return /rosenweg4303\.ch$/.test(location.hostname) ? '.rosenweg4303.ch' : null; // andere Domains bleiben lokal
+  },
+  _setSharedToken(token) {
+    const dom = this._cookieDomain();
+    if (!dom || !token) return;
+    const secure = location.protocol === 'https:' ? '; secure' : '';
+    document.cookie = `${this.SESSION_KEY}=${encodeURIComponent(token)}; domain=${dom}; path=/; max-age=${30 * 24 * 3600}; samesite=lax${secure}`;
+  },
+  _readSharedToken() {
+    const m = document.cookie.match(new RegExp('(?:^|; )' + this.SESSION_KEY + '=([^;]+)'));
+    return m ? decodeURIComponent(m[1]) : null;
+  },
+  _clearSharedToken() {
+    const dom = this._cookieDomain();
+    if (dom) document.cookie = `${this.SESSION_KEY}=; domain=${dom}; path=/; max-age=0`;
   },
 
   /** Check if current user is admin */
@@ -78,9 +99,10 @@ const AuthentikAuth = {
 
   /** Logout - clear session and end Authentik session */
   logout(redirectTo) {
-    const token = localStorage.getItem(this.SESSION_KEY);
+    const token = this.getToken();
     localStorage.removeItem(this.SESSION_KEY);
     localStorage.removeItem(this.USER_KEY);
+    this._clearSharedToken();
     if (redirectTo !== false) {
       // Redirect through Authentik's end-session endpoint to fully log out
       const postLogoutRedirect = redirectTo || window.location.origin + window.location.pathname;
@@ -101,6 +123,8 @@ const AuthentikAuth = {
       if (resp.ok) {
         const data = await resp.json();
         localStorage.setItem(this.USER_KEY, JSON.stringify(data.user));
+        if (!localStorage.getItem(this.SESSION_KEY)) localStorage.setItem(this.SESSION_KEY, token);
+        this._setSharedToken(token); // Cookie-Ablauf mitschieben (Sliding-Session)
         return true;
       }
       this.logout(false);
