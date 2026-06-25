@@ -3176,6 +3176,33 @@ app.delete('/api/access/me/nfc/:token', authMiddleware, async (req, res) => {
   res.status(r.status === 0 ? 502 : r.status).json({ error: 'Entfernen fehlgeschlagen' });
 });
 
+// ── Kennzeichen-Vorregistrierung (eigene DB; Sync zu UniFi-LPR sobald das Tor steht) ──
+const ACCESS_PLATE_RE = /^[A-Z0-9ÄÖÜ][A-Z0-9ÄÖÜ \-]{1,11}$/;
+const normPlate = (p) => String(p || '').toUpperCase().replace(/\s+/g, ' ').trim();
+app.get('/api/access/me/plates', authMiddleware, async (req, res) => {
+  const e = (req.user?.email || '').toLowerCase();
+  const r = await pool.query('SELECT id, plate, created_at FROM access_plates WHERE lower(email)=$1 ORDER BY created_at', [e]);
+  res.json({ plates: r.rows });
+});
+app.post('/api/access/me/plates', authMiddleware, async (req, res) => {
+  if (!req.user?.email) return res.status(400).json({ error: 'Keine E-Mail im Profil' });
+  const plate = normPlate(req.body?.plate);
+  if (!ACCESS_PLATE_RE.test(plate)) return res.status(400).json({ error: 'Ungültiges Kennzeichen (z.B. AG 12345)' });
+  try {
+    const r = await pool.query('INSERT INTO access_plates(email, plate) VALUES($1,$2) ON CONFLICT (email, plate) DO NOTHING RETURNING id', [req.user.email, plate]);
+    res.json({ success: true, id: r.rows[0]?.id || null });
+  } catch (err) { res.status(500).json({ error: 'Fehler beim Speichern' }); }
+});
+app.delete('/api/access/me/plates/:id', authMiddleware, async (req, res) => {
+  const e = (req.user?.email || '').toLowerCase();
+  await pool.query('DELETE FROM access_plates WHERE id=$1 AND lower(email)=$2', [parseInt(req.params.id, 10), e]);
+  res.json({ success: true });
+});
+app.get('/api/access/plates', authMiddleware, adminOnly, async (req, res) => {
+  const r = await pool.query('SELECT id, email, plate, created_at, synced_at FROM access_plates ORDER BY email, plate');
+  res.json({ plates: r.rows });
+});
+
 // ── Access-Konfiguration (Host/Token/enabled). Token wird NIE im Klartext ausgeliefert. ──
 app.get('/api/access/settings', authMiddleware, adminOnly, async (req, res) => {
   const host = await getAccessSetting('host', '');
@@ -21824,6 +21851,11 @@ async function initDB() {
       -- Mapping Tür -> automatisch verwaltete UniFi-Policy (Name "RW-Auto: …").
       CREATE TABLE IF NOT EXISTS access_door_policy_map (
         unifi_door_id TEXT PRIMARY KEY, unifi_policy_id TEXT, updated_at TIMESTAMP DEFAULT NOW()
+      );
+      -- Kennzeichen-Vorregistrierung (eigene DB; Sync zu UniFi-LPR sobald das Tor eingerichtet ist).
+      CREATE TABLE IF NOT EXISTS access_plates (
+        id SERIAL PRIMARY KEY, email TEXT NOT NULL, plate TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(), synced_at TIMESTAMP, UNIQUE (email, plate)
       );
 
       CREATE TABLE IF NOT EXISTS kontakte (
