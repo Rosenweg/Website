@@ -105,8 +105,24 @@
                     </div>
                     <button onclick="unlockDoor('${esc(d.id)}', this)" class="mt-3 w-full bg-red-700 hover:bg-red-800 text-white text-sm font-medium rounded-lg py-2">🔓 Öffnen</button>
                 </div>`;
-            }).join('') + '</div>';
+            }).join('') + '</div><div id="door-policies" class="mt-6"></div>';
+            renderDoorPolicies();
         } catch (e) { p.innerHTML = `<div class="text-red-600">${esc(e.message)}</div>`; }
+    }
+    async function renderDoorPolicies() {
+        const el = $('#door-policies'); if (!el) return;
+        try {
+            const r = await api('/policies'); allPolicies = r.policies || [];
+            if (!allPolicies.length) { el.innerHTML = ''; return; }
+            const items = allPolicies.map(p => {
+                const res = (p.resources || []).map(x => x.type === 'door_group' ? 'Tür-Gruppe' : 'Tür').join(', ') || '—';
+                return `<div class="flex items-center justify-between border-b last:border-0 px-3 py-2 text-sm">
+                    <span class="font-medium">${esc(p.name)}</span><span class="text-xs text-gray-500">${esc(res)}</span></div>`;
+            }).join('');
+            el.innerHTML = `<h2 class="text-sm font-semibold text-gray-600 mb-2">Zugangsregeln (Policies)</h2>
+                <div class="bg-white rounded-xl border">${items}</div>
+                <p class="text-xs text-gray-400 mt-2">Wer welche Regel hat, legst du pro Person im Tab <strong>Benutzer</strong> fest (Abschnitt „Zugang").</p>`;
+        } catch (e) { el.innerHTML = `<div class="text-red-500 text-sm">${esc(e.message)}</div>`; }
     }
     async function unlockDoor(id, btn) {
         if (!confirm('Tür wirklich entriegeln?')) return;
@@ -156,6 +172,7 @@
 
     // ─────────────────────────── Benutzer ───────────────────────────
     let allUsers = [];
+    let allPolicies = [];
     async function loadUsers() {
         const p = $('#panel-users');
         p.innerHTML = '<div class="text-gray-400 text-sm">Lade Benutzer…</div>';
@@ -165,7 +182,7 @@
             p.innerHTML = `<div class="flex items-center gap-2 mb-3">
                 <input id="user-search" oninput="renderUsers()" placeholder="Suchen…" class="border rounded-lg px-3 py-1.5 text-sm flex-1 max-w-xs">
                 <span class="text-xs text-gray-400">${allUsers.length} Benutzer</span>
-                <button onclick="userForm()" class="ml-auto text-sm bg-red-700 hover:bg-red-800 text-white rounded-lg px-3 py-1.5">+ Neu</button>
+                <button onclick="editUser()" class="ml-auto text-sm bg-red-700 hover:bg-red-800 text-white rounded-lg px-3 py-1.5">+ Neu</button>
             </div><div id="user-body"></div>`;
             renderUsers();
         } catch (e) { p.innerHTML = `<div class="text-red-600">${esc(e.message)}</div>`; }
@@ -185,7 +202,7 @@
                 <td class="px-3 py-2">${pin}</td>
                 <td class="px-3 py-2 text-gray-500">${nfc ? nfc + ' 🪪' : '—'}</td>
                 <td class="px-3 py-2 text-right whitespace-nowrap">
-                    <button onclick='userForm(${JSON.stringify(u).replace(/'/g, "&#39;")})' class="text-blue-600 hover:underline text-xs">PIN</button>
+                    <button onclick='editUser(${JSON.stringify(u).replace(/'/g, "&#39;")})' class="text-blue-600 hover:underline text-xs">Bearbeiten</button>
                     <button onclick="delUser('${esc(u.id)}','${name.replace(/'/g,"")}')" class="text-red-600 hover:underline text-xs ml-2">Löschen</button>
                 </td></tr>`;
         }).join('');
@@ -193,27 +210,125 @@
             <thead><tr class="text-left text-xs text-gray-400 border-b"><th class="px-3 py-2">Name</th><th class="px-3 py-2">E-Mail</th><th class="px-3 py-2">Status</th><th class="px-3 py-2">PIN</th><th class="px-3 py-2">NFC</th><th></th></tr></thead>
             <tbody>${rows || '<tr><td colspan="6" class="px-3 py-4 text-gray-400">Keine Treffer.</td></tr>'}</tbody></table></div>`;
     }
-    function userForm(u) {
+    // Voller Benutzer-Editor: Stammdaten + PIN + NFC-Karten + Zugang (Policies)
+    function editUser(u) {
         const edit = !!u;
         const v = u || {};
-        openModal(edit ? 'PIN ändern' : 'Neuer Benutzer', `
-            ${edit ? `<div class="text-sm text-gray-600 mb-2">${esc(v.full_name || v.first_name || '')}</div>` : `
-            <input id="f-first" placeholder="Vorname *" class="w-full border rounded-lg px-3 py-2 mb-2 text-sm">
-            <input id="f-last" placeholder="Nachname" class="w-full border rounded-lg px-3 py-2 mb-2 text-sm">
-            <input id="f-email" placeholder="E-Mail" class="w-full border rounded-lg px-3 py-2 mb-2 text-sm">`}
-            <input id="f-pin" placeholder="PIN-Code (Ziffern)" inputmode="numeric" class="w-full border rounded-lg px-3 py-2 text-sm">
-        `, async () => {
+        const m = document.createElement('div');
+        m.className = 'fixed inset-0 bg-black/40 flex items-start justify-center z-50 p-4 overflow-y-auto';
+        m.innerHTML = `<div class="bg-white rounded-xl p-5 w-full max-w-md shadow-xl my-8">
+            <h3 class="font-semibold mb-3">${edit ? 'Benutzer bearbeiten' : 'Neuer Benutzer'}</h3>
+            <div class="space-y-2">
+                <div class="flex gap-2">
+                    <input id="eu-first" placeholder="Vorname *" value="${esc(v.first_name || '')}" class="w-1/2 border rounded-lg px-3 py-2 text-sm">
+                    <input id="eu-last" placeholder="Nachname" value="${esc(v.last_name || '')}" class="w-1/2 border rounded-lg px-3 py-2 text-sm">
+                </div>
+                <input id="eu-email" placeholder="E-Mail" value="${esc(v.email || v.user_email || '')}" class="w-full border rounded-lg px-3 py-2 text-sm">
+                <input id="eu-emp" placeholder="Personal-Nr. (optional)" value="${esc(v.employee_number || '')}" class="w-full border rounded-lg px-3 py-2 text-sm">
+                <input id="eu-pin" placeholder="PIN-Code (Ziffern${edit ? ', leer = unverändert' : ''})" inputmode="numeric" class="w-full border rounded-lg px-3 py-2 text-sm">
+            </div>
+            ${edit ? `
+            <div class="mt-4 border-t pt-3">
+                <div class="text-sm font-medium mb-1.5">NFC-Karten</div>
+                <div id="eu-nfc" class="text-sm text-gray-400">…</div>
+                <button id="eu-enroll" type="button" class="mt-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg px-3 py-1.5">🪪 Karte anlernen</button>
+            </div>
+            <div class="mt-4 border-t pt-3">
+                <div class="text-sm font-medium mb-1.5">Zugang (Policies)</div>
+                <div id="eu-policies" class="space-y-1 text-sm text-gray-400">…</div>
+            </div>` : ''}
+            <div class="flex justify-end gap-2 mt-5">
+                <button id="eu-close" type="button" class="text-sm text-gray-500 px-3 py-2">${edit ? 'Schließen' : 'Abbrechen'}</button>
+                <button id="eu-save" type="button" class="text-sm bg-red-700 hover:bg-red-800 text-white rounded-lg px-4 py-2">Speichern</button>
+            </div></div>`;
+        document.body.appendChild(m);
+        const close = () => m.remove();
+        m.querySelector('#eu-close').onclick = close;
+        m.onclick = (e) => { if (e.target === m) close(); };
+        m.querySelector('#eu-save').onclick = async () => {
+            const first = m.querySelector('#eu-first').value.trim();
+            if (!first) { showStatus('Vorname erforderlich', 'err'); return; }
+            const body = { first_name: first, last_name: m.querySelector('#eu-last').value.trim(), email: m.querySelector('#eu-email').value.trim(), employee_number: m.querySelector('#eu-emp').value.trim() };
+            const pin = m.querySelector('#eu-pin').value.trim(); if (pin) body.pin_code = pin;
             try {
-                if (edit) {
-                    await api('/users/' + encodeURIComponent(v.id), { method: 'PUT', body: { pin_code: $('#f-pin').value.trim() } });
-                } else {
-                    const first = $('#f-first').value.trim();
-                    if (!first) { showStatus('Vorname erforderlich', 'err'); return false; }
-                    await api('/users', { method: 'POST', body: { first_name: first, last_name: $('#f-last').value.trim(), email: $('#f-email').value.trim(), pin_code: $('#f-pin').value.trim() } });
-                }
-                showStatus('Gespeichert', 'ok'); loadUsers();
-            } catch (e) { showStatus(e.message, 'err'); return false; }
-        });
+                if (edit) await api('/users/' + encodeURIComponent(v.id), { method: 'PUT', body });
+                else await api('/users', { method: 'POST', body });
+                showStatus('Gespeichert', 'ok'); close(); loadUsers();
+            } catch (e) { showStatus(e.message, 'err'); }
+        };
+        if (edit) {
+            renderNfcCards(m, v);
+            renderUserPolicies(m, v);
+            m.querySelector('#eu-enroll').onclick = () => nfcEnroll(v, m);
+        }
+    }
+    function renderNfcCards(m, u) {
+        const el = m.querySelector('#eu-nfc');
+        const cards = Array.isArray(u.nfc_cards) ? u.nfc_cards : [];
+        if (!cards.length) { el.innerHTML = '<span class="text-gray-400">Keine Karten</span>'; return; }
+        el.innerHTML = cards.map(c => {
+            const tok = c.token || c.id || c.card_id || '';
+            return `<div class="flex items-center justify-between py-0.5"><span>🪪 ${esc(c.display_id || c.id || tok)}</span>
+                <button onclick="nfcRemove('${esc(u.id)}','${esc(tok)}', this)" class="text-red-600 hover:underline text-xs">entfernen</button></div>`;
+        }).join('');
+    }
+    async function nfcRemove(userId, token, btn) {
+        if (!confirm('NFC-Karte entfernen?')) return;
+        btn.disabled = true;
+        try { await api('/users/' + encodeURIComponent(userId) + '/nfc/' + encodeURIComponent(token), { method: 'DELETE' }); showStatus('Karte entfernt', 'ok'); loadUsers(); }
+        catch (e) { showStatus(e.message, 'err'); btn.disabled = false; }
+    }
+    async function nfcEnroll(u, m) {
+        let session;
+        try { const r = await api('/nfc/session', { method: 'POST', body: {} }); session = r.session_id; }
+        catch (e) { return showStatus('Enrollment-Start fehlgeschlagen: ' + e.message, 'err'); }
+        if (!session) return showStatus('Keine Enrollment-Session erhalten', 'err');
+        const ov = document.createElement('div');
+        ov.className = 'fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4';
+        ov.innerHTML = `<div class="bg-white rounded-xl p-6 text-center max-w-xs">
+            <div class="text-4xl mb-3 animate-pulse">🪪</div>
+            <div class="font-medium mb-1">Karte an den Leser halten…</div>
+            <div class="text-xs text-gray-500 mb-4">UA Ultra · Schlüsselkasten R9 UG</div>
+            <button id="nfc-cancel" type="button" class="text-sm text-gray-500">Abbrechen</button></div>`;
+        document.body.appendChild(ov);
+        let done = false;
+        const stop = async () => { if (done) return; done = true; ov.remove(); try { await api('/nfc/session/' + session, { method: 'DELETE' }); } catch {} };
+        ov.querySelector('#nfc-cancel').onclick = stop;
+        for (let i = 0; i < 30 && !done; i++) {
+            await new Promise(r => setTimeout(r, 2000));
+            if (done) break;
+            let s; try { s = await api('/nfc/session/' + session); } catch { continue; }
+            const d = s.data || {};
+            const token = d.token || d.card_id || d.card?.token || d.nfc_card?.token || (Array.isArray(d.cards) && d.cards[0]?.token);
+            if (token) {
+                done = true; ov.remove();
+                try { await api('/users/' + encodeURIComponent(u.id) + '/nfc', { method: 'POST', body: { token } }); showStatus('Karte zugewiesen ✓', 'ok'); }
+                catch (e) { showStatus('Zuweisen fehlgeschlagen: ' + e.message, 'err'); }
+                m.remove(); loadUsers();
+                return;
+            }
+        }
+        if (!done) { done = true; ov.remove(); try { await api('/nfc/session/' + session, { method: 'DELETE' }); } catch {} showStatus('Keine Karte erkannt (Timeout)', 'err'); }
+    }
+    async function renderUserPolicies(m, u) {
+        const el = m.querySelector('#eu-policies');
+        try {
+            if (!allPolicies.length) { const r = await api('/policies'); allPolicies = r.policies || []; }
+            const cur = await api('/users/' + encodeURIComponent(u.id) + '/policies');
+            const curIds = new Set((cur.policies || []).map(p => p.id));
+            if (!allPolicies.length) { el.innerHTML = '<span class="text-gray-400">Keine Policies definiert</span>'; return; }
+            el.innerHTML = allPolicies.map(p => `<label class="flex items-center gap-2">
+                <input type="checkbox" data-pid="${esc(p.id)}" ${curIds.has(p.id) ? 'checked' : ''} onchange="saveUserPolicies('${esc(u.id)}', this)">
+                <span>${esc(p.name)}</span></label>`).join('');
+        } catch (e) { el.innerHTML = `<span class="text-red-600">${esc(e.message)}</span>`; }
+    }
+    async function saveUserPolicies(userId, cb) {
+        const box = cb.closest('#eu-policies');
+        const ids = [...box.querySelectorAll('input[type=checkbox]:checked')].map(c => c.dataset.pid);
+        cb.disabled = true;
+        try { await api('/users/' + encodeURIComponent(userId) + '/policies', { method: 'PUT', body: { access_policy_ids: ids } }); showStatus('Zugang aktualisiert', 'ok'); }
+        catch (e) { showStatus(e.message, 'err'); cb.checked = !cb.checked; }
+        finally { cb.disabled = false; }
     }
     async function delUser(id, name) {
         if (!confirm(`Benutzer „${name}" wirklich löschen?`)) return;
