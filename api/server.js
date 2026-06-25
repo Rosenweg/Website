@@ -17168,6 +17168,58 @@ app.get('/api/isp/vpn-accounts/:id/qr', authMiddleware, async (req, res) => {
   } catch (err) { res.status(err.status || 500).json({ error: err.message }); }
 });
 
+// === PVE-Host-Meldungen (Cron/System-Mails der Proxmox-Hosts statt E-Mail-Versand) ===
+const PVE_MSG_SECRET = process.env.PVE_MSG_SECRET || 'RwPveMsg2026!';
+function pveSeverity(subject, body) {
+  const t = ((subject || '') + ' ' + (body || '')).toLowerCase();
+  if (/error|fail|critical|fatal|degraded|cannot|unable|\bdown\b|offline|panic|i\/o error/.test(t)) return 'error';
+  if (/warn|deferred|retry|threshold|nearly|temperatur|smart/.test(t)) return 'warning';
+  return 'info';
+}
+// Ingest vom PVE-Host-Pipe-Skript — Auth via Shared Secret (kein User-Login).
+app.post('/api/pve-messages', async (req, res) => {
+  try {
+    if ((req.get('X-Pve-Secret') || '') !== PVE_MSG_SECRET) return res.status(403).json({ error: 'forbidden' });
+    const b = req.body || {};
+    const host = String(b.host || 'unbekannt').slice(0, 80);
+    const sender = String(b.sender || '').slice(0, 200);
+    const subject = String(b.subject || '(kein Betreff)').slice(0, 300);
+    const body = String(b.body || '').slice(0, 20000);
+    const sev = ['info', 'warning', 'error'].includes(b.severity) ? b.severity : pveSeverity(subject, body);
+    await pool.query('INSERT INTO pve_messages (host, sender, subject, body, severity) VALUES ($1,$2,$3,$4,$5)',
+      [host, sender, subject, body, sev]);
+    await pool.query("DELETE FROM pve_messages WHERE read_at IS NOT NULL AND received_at < NOW() - INTERVAL '90 days'").catch(() => {});
+    res.json({ ok: true });
+  } catch (err) { console.error('[pve-messages]', err.message); res.status(500).json({ error: err.message }); }
+});
+app.get('/api/pve-messages', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Admin' });
+    const onlyUnread = req.query.unread === '1';
+    const limit = Math.min(parseInt(req.query.limit, 10) || 300, 1000);
+    const r = await pool.query(
+      `SELECT * FROM pve_messages ${onlyUnread ? 'WHERE read_at IS NULL' : ''} ORDER BY received_at DESC LIMIT $1`, [limit]);
+    const unread = (await pool.query('SELECT COUNT(*)::int AS n FROM pve_messages WHERE read_at IS NULL')).rows[0].n;
+    res.json({ messages: r.rows, unread });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.post('/api/pve-messages/read', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Admin' });
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(n => parseInt(n, 10)).filter(Boolean) : null;
+    if (ids && ids.length) await pool.query('UPDATE pve_messages SET read_at = NOW() WHERE id = ANY($1) AND read_at IS NULL', [ids]);
+    else await pool.query('UPDATE pve_messages SET read_at = NOW() WHERE read_at IS NULL');
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.delete('/api/pve-messages/:id', authMiddleware, async (req, res) => {
+  try {
+    if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Admin' });
+    await pool.query('DELETE FROM pve_messages WHERE id = $1', [parseInt(req.params.id, 10)]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // === VLAN-Requests ===
 // Mitnutzer-Emails normalisieren: lowercase, getrimmt, dedupe, ohne Antragsteller, basic Format-Check.
 function normalizeMitnutzerEmails(input, antragstellerEmail) {
@@ -22409,6 +22461,19 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_isp_vpn_user ON isp_vpn_accounts(LOWER(user_email));
       CREATE INDEX IF NOT EXISTS idx_isp_vpn_active ON isp_vpn_accounts(active);
       ALTER TABLE isp_vpn_accounts ADD COLUMN IF NOT EXISTS bezeichnung TEXT;
+
+      -- PVE-Host-Meldungen (Cron/System-Mails der Proxmox-Hosts, gesammelt statt per Mail).
+      CREATE TABLE IF NOT EXISTS pve_messages (
+        id SERIAL PRIMARY KEY,
+        host TEXT,
+        sender TEXT,
+        subject TEXT,
+        body TEXT,
+        severity VARCHAR(10) DEFAULT 'info',     -- info | warning | error
+        received_at TIMESTAMPTZ DEFAULT NOW(),
+        read_at TIMESTAMPTZ
+      );
+      CREATE INDEX IF NOT EXISTS idx_pve_messages_recv ON pve_messages(received_at DESC);
 
       -- VLAN-Requests: Bewohner kann eigenes VLAN beantragen (z.B. für
       -- Smart-Home, Server, Gaming). Antrag → status pending → Technik
