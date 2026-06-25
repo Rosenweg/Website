@@ -2587,6 +2587,13 @@ function startWaschCron() {
     }
   }, 5 * 60 * 1000));
 
+  // Access: Authentik-Gruppen -> UniFi-Türzugang alle 30 Min synchronisieren
+  activeIntervals.push(setInterval(() => {
+    syncAccessDoors().then(r => { if (r.assigned || r.revoked) console.log(`[access-sync] +${r.assigned}/-${r.revoked} (${r.matched} User)`); })
+      .catch(e => console.warn('[access-sync]', e.message));
+  }, 30 * 60 * 1000));
+  setTimeout(() => syncAccessDoors().catch(e => console.warn('[access-sync] initial', e.message)), 90 * 1000);
+
   console.log('[Waschküche] Cron jobs started (reservations 5min, doors 1min, billing 1st@08:00)');
 }
 
@@ -2932,6 +2939,157 @@ app.put('/api/access/users/:id/policies', authMiddleware, adminOnly, async (req,
   const r = await unifiAccessRaw('PUT', `/users/${encodeURIComponent(req.params.id)}/access_policies`, { access_policy_ids: ids });
   if (!accessGuard(res, r)) return;
   res.status(accessOk(r) ? 200 : r.status).json(r.body || {});
+});
+
+// ══ Türzugang nach Authentik-Gruppen (tür-zentriert + Tür-Gruppen, Auto-Sync) ══
+
+// Authentik-Gruppennamen -> Set(E-Mails) der Mitglieder (inkl. Untergruppen-Hierarchie).
+async function authentikGroupEmails(groupNames) {
+  const out = new Set();
+  if (!groupNames || !groupNames.length) return out;
+  const { groups, users } = await getKontakteData();
+  const pks = new Set();
+  for (const gn of groupNames) for (const pk of resolveDescendantPks(gn, groups)) pks.add(pk);
+  for (const u of getUsersInGroups(pks, users)) {
+    const e = (u.email || '').toLowerCase().trim(); if (e) out.add(e);
+  }
+  return out;
+}
+// Effektive Berechtigungen je Tür: {doorId: Set(authentik-group-names)} (direkt + via Tür-Gruppe).
+async function buildDoorGrants() {
+  const res = {};
+  const add = (door, grp) => { (res[door] ||= new Set()).add(grp); };
+  (await pool.query('SELECT unifi_door_id, authentik_group FROM access_door_grants')).rows.forEach(r => add(r.unifi_door_id, r.authentik_group));
+  (await pool.query(`SELECT d.unifi_door_id, g.authentik_group FROM access_group_grants g
+      JOIN access_door_group_doors d ON d.group_id = g.group_id`)).rows.forEach(r => add(r.unifi_door_id, r.authentik_group));
+  return res;
+}
+// "Immer"-Zeitplan: häufigster schedule_id der bestehenden Policies.
+async function accessDefaultSchedule() {
+  const r = await unifiAccessRaw('GET', '/access_policies');
+  const counts = {};
+  (r.body?.data || []).forEach(p => { if (p.schedule_id) counts[p.schedule_id] = (counts[p.schedule_id] || 0) + 1; });
+  return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+}
+// Stellt sicher, dass für eine Tür eine von UNS verwaltete UniFi-Policy existiert (Name "RW-Auto: …").
+async function ensureDoorPolicy(doorId, doorName, doCreate = true) {
+  const ex = await pool.query('SELECT unifi_policy_id FROM access_door_policy_map WHERE unifi_door_id=$1', [doorId]);
+  if (ex.rows[0]?.unifi_policy_id) return ex.rows[0].unifi_policy_id;
+  if (!doCreate) return null;
+  const schedule = await accessDefaultSchedule();
+  const r = await unifiAccessRaw('POST', '/access_policies', {
+    name: `RW-Auto: ${doorName || doorId}`, resources: [{ type: 'door', id: doorId }], schedule_id: schedule,
+  });
+  const pid = r.body?.data?.id || r.body?.data?.policy_id || null;
+  if (pid) await pool.query(
+    'INSERT INTO access_door_policy_map(unifi_door_id,unifi_policy_id) VALUES($1,$2) ON CONFLICT(unifi_door_id) DO UPDATE SET unifi_policy_id=$2, updated_at=NOW()',
+    [doorId, pid]
+  );
+  return pid;
+}
+// Kern: Authentik-Gruppen -> UniFi-Policy-Zuweisung pro User. dryRun = nur Vorschau (legt nichts an, ändert nichts).
+async function syncAccessDoors({ dryRun = false } = {}) {
+  const doorGrants = await buildDoorGrants();
+  const doorIds = Object.keys(doorGrants);
+  const doorNames = {};
+  (((await unifiAccessRaw('GET', '/doors')).body?.data) || []).forEach(d => { doorNames[d.unique_id || d.id] = d.name || d.full_name; });
+  const allG = new Set(); doorIds.forEach(d => doorGrants[d].forEach(g => allG.add(g)));
+  const groupEmails = {}; for (const gn of allG) groupEmails[gn] = await authentikGroupEmails([gn]);
+  const emailDoors = {};
+  for (const d of doorIds) for (const gn of doorGrants[d]) for (const e of (groupEmails[gn] || [])) (emailDoors[e] ||= new Set()).add(d);
+  const uniUsers = (await unifiAccessRaw('GET', '/users')).body?.data || [];
+  const emailToUser = {}; uniUsers.forEach(u => { const e = (u.email || u.user_email || '').toLowerCase().trim(); if (e) emailToUser[e] = u; });
+  const perDoor = doorIds.map(d => {
+    const emails = new Set(); doorGrants[d].forEach(gn => (groupEmails[gn] || []).forEach(e => emails.add(e)));
+    return { door: doorNames[d] || d, door_id: d, groups: [...doorGrants[d]], berechtigt: emails.size, in_unifi: [...emails].filter(e => emailToUser[e]).length };
+  });
+  if (dryRun) {
+    const wanted = new Set(); Object.values(groupEmails).forEach(s => s.forEach(e => wanted.add(e)));
+    return { dryRun: true, doors: doorIds.length, perDoor, unmatchedEmails: [...wanted].filter(e => !emailToUser[e]).length };
+  }
+  const doorPolicy = {}; for (const d of doorIds) doorPolicy[d] = await ensureDoorPolicy(d, doorNames[d], true);
+  const managed = new Set(Object.values(doorPolicy).filter(Boolean));
+  let assigned = 0, revoked = 0, matched = 0;
+  for (const u of uniUsers) {
+    const email = (u.email || u.user_email || '').toLowerCase().trim(); if (!email) continue;
+    const wantDoors = emailDoors[email] || new Set(); if (wantDoors.size) matched++;
+    const wantPolicies = new Set([...wantDoors].map(d => doorPolicy[d]).filter(Boolean));
+    const cur = (await unifiAccessRaw('GET', `/users/${u.id}/access_policies`)).body?.data || [];
+    const curIds = new Set(cur.map(p => p.id));
+    const desired = new Set([...curIds].filter(id => !managed.has(id))); // fremde Policies unangetastet
+    wantPolicies.forEach(id => desired.add(id));
+    const toAdd = [...desired].filter(id => managed.has(id) && !curIds.has(id));
+    const toRemove = [...curIds].filter(id => managed.has(id) && !desired.has(id));
+    if (toAdd.length || toRemove.length) {
+      assigned += toAdd.length; revoked += toRemove.length;
+      await unifiAccessRaw('PUT', `/users/${u.id}/access_policies`, { access_policy_ids: [...desired] });
+    }
+  }
+  return { dryRun: false, doors: doorIds.length, assigned, revoked, matched, perDoor };
+}
+
+app.get('/api/access/authentik-groups', authMiddleware, adminOnly, async (req, res) => {
+  try { const { groups } = await getKontakteData(); res.json({ groups: groups.map(g => g.name).sort() }); }
+  catch (e) { res.status(500).json({ error: 'Authentik nicht erreichbar' }); }
+});
+app.get('/api/access/door-groups', authMiddleware, adminOnly, async (req, res) => {
+  const gr = await pool.query('SELECT * FROM access_door_groups ORDER BY sort_order, name');
+  const doors = await pool.query('SELECT * FROM access_door_group_doors');
+  const grants = await pool.query('SELECT * FROM access_group_grants');
+  res.json({ groups: gr.rows.map(g => ({
+    ...g,
+    door_ids: doors.rows.filter(d => d.group_id === g.id).map(d => d.unifi_door_id),
+    authentik_groups: grants.rows.filter(x => x.group_id === g.id).map(x => x.authentik_group),
+  })) });
+});
+app.post('/api/access/door-groups', authMiddleware, adminOnly, async (req, res) => {
+  const name = (req.body?.name || '').trim(); if (!name) return res.status(400).json({ error: 'Name erforderlich' });
+  const r = await pool.query('INSERT INTO access_door_groups(name) VALUES($1) RETURNING *', [name]);
+  res.json(r.rows[0]);
+});
+app.put('/api/access/door-groups/:id', authMiddleware, adminOnly, async (req, res) => {
+  const id = parseInt(req.params.id, 10); const { name, door_ids, authentik_groups } = req.body || {};
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    if (name !== undefined) await client.query('UPDATE access_door_groups SET name=$1 WHERE id=$2', [String(name).trim(), id]);
+    if (Array.isArray(door_ids)) {
+      await client.query('DELETE FROM access_door_group_doors WHERE group_id=$1', [id]);
+      for (const d of door_ids) await client.query('INSERT INTO access_door_group_doors(group_id,unifi_door_id) VALUES($1,$2) ON CONFLICT DO NOTHING', [id, d]);
+    }
+    if (Array.isArray(authentik_groups)) {
+      await client.query('DELETE FROM access_group_grants WHERE group_id=$1', [id]);
+      for (const g of authentik_groups) await client.query('INSERT INTO access_group_grants(group_id,authentik_group) VALUES($1,$2) ON CONFLICT DO NOTHING', [id, g]);
+    }
+    await client.query('COMMIT'); res.json({ success: true });
+  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
+app.delete('/api/access/door-groups/:id', authMiddleware, adminOnly, async (req, res) => {
+  await pool.query('DELETE FROM access_door_groups WHERE id=$1', [parseInt(req.params.id, 10)]);
+  res.json({ success: true });
+});
+app.get('/api/access/doors/:id/grants', authMiddleware, adminOnly, async (req, res) => {
+  const direct = await pool.query('SELECT authentik_group FROM access_door_grants WHERE unifi_door_id=$1', [req.params.id]);
+  const via = await pool.query(`SELECT DISTINCT g.authentik_group, dg.name AS via FROM access_group_grants g
+      JOIN access_door_group_doors d ON d.group_id=g.group_id JOIN access_door_groups dg ON dg.id=g.group_id
+      WHERE d.unifi_door_id=$1`, [req.params.id]);
+  res.json({ direct: direct.rows.map(r => r.authentik_group), inherited: via.rows });
+});
+app.put('/api/access/doors/:id/grants', authMiddleware, adminOnly, async (req, res) => {
+  const groups = Array.isArray(req.body?.authentik_groups) ? req.body.authentik_groups : [];
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM access_door_grants WHERE unifi_door_id=$1', [req.params.id]);
+    for (const g of groups) await client.query('INSERT INTO access_door_grants(unifi_door_id,authentik_group) VALUES($1,$2) ON CONFLICT DO NOTHING', [req.params.id, g]);
+    await client.query('COMMIT'); res.json({ success: true });
+  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
+app.post('/api/access/sync', authMiddleware, adminOnly, async (req, res) => {
+  try { res.json(await syncAccessDoors({ dryRun: req.query.dry === '1' || req.body?.dry === true })); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── Access-Konfiguration (Host/Token/enabled). Token wird NIE im Klartext ausgeliefert. ──
@@ -21561,6 +21719,27 @@ async function initDB() {
         key VARCHAR(100) PRIMARY KEY,
         value TEXT NOT NULL,
         updated_at TIMESTAMP DEFAULT NOW()
+      );
+
+      -- Türzugang nach Authentik-Gruppen (tür-zentriert + Tür-Gruppen nach Gebäude).
+      CREATE TABLE IF NOT EXISTS access_door_groups (
+        id SERIAL PRIMARY KEY, name TEXT NOT NULL, sort_order INT DEFAULT 0, created_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS access_door_group_doors (
+        group_id INT REFERENCES access_door_groups(id) ON DELETE CASCADE,
+        unifi_door_id TEXT NOT NULL, PRIMARY KEY (group_id, unifi_door_id)
+      );
+      -- Berechtigte Authentik-Gruppen: direkt pro Tür ODER pro Tür-Gruppe.
+      CREATE TABLE IF NOT EXISTS access_door_grants (
+        unifi_door_id TEXT NOT NULL, authentik_group TEXT NOT NULL, PRIMARY KEY (unifi_door_id, authentik_group)
+      );
+      CREATE TABLE IF NOT EXISTS access_group_grants (
+        group_id INT REFERENCES access_door_groups(id) ON DELETE CASCADE,
+        authentik_group TEXT NOT NULL, PRIMARY KEY (group_id, authentik_group)
+      );
+      -- Mapping Tür -> automatisch verwaltete UniFi-Policy (Name "RW-Auto: …").
+      CREATE TABLE IF NOT EXISTS access_door_policy_map (
+        unifi_door_id TEXT PRIMARY KEY, unifi_policy_id TEXT, updated_at TIMESTAMP DEFAULT NOW()
       );
 
       CREATE TABLE IF NOT EXISTS kontakte (
