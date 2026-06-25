@@ -437,31 +437,32 @@ const RosenwegNav = {
             </div>
           </div>
 
-          <!-- Services Mega-Menu -->
-          <div class="relative nav-dropdown nav-perm-group" data-perm-group="services">
-            <button class="${a('services')} px-3 py-2 text-sm transition flex items-center gap-1">
-              Services
-              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-            </button>
-            ${this._renderServicesMegaMenu(active, base)}
-          </div>
-
-          <!-- Infos Dropdown -->
+          <!-- Bewohner-Dropdown (Info + Service für alle / Bewohner / Eigentümer) -->
           <div class="relative nav-dropdown">
-            <button class="${a('infos')} px-3 py-2 text-sm transition flex items-center gap-1">
-              Infos
+            <button class="${a('bewohner')} px-3 py-2 text-sm transition flex items-center gap-1">
+              Bewohner
               <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
             </button>
-            <div class="nav-dropdown-menu hidden absolute left-0 mt-1 w-48 bg-white rounded-lg shadow-lg border py-1 z-50">
-              <a href="${base}telefonbuch.html" class="${dropA('telefonbuch')} block px-4 py-2 text-sm">Telefonbuch</a>
-              <a href="${base}projekte.html" data-perm-any="eigentuemer" class="${dropA('projekte')} block px-4 py-2 text-sm">Projekte</a>
-              <a href="${base}verwaltung.html" class="${dropA('hausverwaltung')} block px-4 py-2 text-sm">Hausverwaltung</a>
-              <a href="${base}anfahrt.html" class="${dropA('anfahrt')} block px-4 py-2 text-sm">Anfahrt &amp; Parken</a>
-              <a href="${base}entsorgung.html" class="${dropA('entsorgung')} block px-4 py-2 text-sm">Entsorgung</a>
-              <a href="https://isp.rosenweg4303.ch/" class="block px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">ISP / WLAN ↗</a>
-              <a href="${base}#dokumente" class="${dropA('dokumente')} block px-4 py-2 text-sm">Dokumente</a>
+            <div class="nav-dropdown-menu hidden absolute left-0 mt-1 w-56 bg-white rounded-lg shadow-lg border py-1 z-50">
+              <a href="${base}telefonbuch.html" class="${dropA('telefonbuch')} block px-4 py-2 text-sm">📇 Telefonbuch</a>
+              <a href="${base}waschkueche.html" class="${dropA('waschkueche')} block px-4 py-2 text-sm">🧺 Waschküche</a>
+              <a href="${base}wlan.html" class="${dropA('wlan')} block px-4 py-2 text-sm">📶 WLAN-Zugang</a>
+              <a href="${base}tv.html" class="${dropA('tv')} block px-4 py-2 text-sm">📺 TV / Fernsehen</a>
+              <a href="https://pwa.rosenweg4303.ch/reparatur/" class="block px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">🔧 Schaden melden ↗</a>
+              <a href="${base}vollmachten.html" data-perm-any="eigentuemer,ausschuss,technik,praesident,verwaltung,bewohner" class="${dropA('vollmachten')} block px-4 py-2 text-sm">📝 Vollmachten</a>
+              <a href="${base}projekte.html" data-perm-any="eigentuemer" class="${dropA('projekte')} block px-4 py-2 text-sm">🏗 Projekte</a>
+              <div class="border-t my-1"></div>
+              <a href="${base}anfahrt.html" class="${dropA('anfahrt')} block px-4 py-2 text-sm">🚗 Anfahrt &amp; Parken</a>
+              <a href="${base}entsorgung.html" class="${dropA('entsorgung')} block px-4 py-2 text-sm">♻️ Entsorgung</a>
+              <a href="${base}verwaltung.html" class="${dropA('hausverwaltung')} block px-4 py-2 text-sm">🏢 Hausverwaltung</a>
+              <a href="https://isp.rosenweg4303.ch/" class="block px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">🌐 Internet / ISP ↗</a>
+              <a href="${base}#dokumente" class="${dropA('dokumente')} block px-4 py-2 text-sm">📁 Dokumente</a>
             </div>
           </div>
+
+          <!-- Rollen-Bereiche statt Services-Halde: Admin/Ausschuss-Tools leben auf ihren Audience-Subdomains -->
+          <a href="https://ausschuss.rosenweg4303.ch/" data-perm-any="ausschuss" class="px-3 py-2 text-sm text-gray-600 hover:text-blue-600 transition">Ausschuss ↗</a>
+          <a href="https://admin.rosenweg4303.ch/" data-perm-any="technik,praesident" class="px-3 py-2 text-sm text-gray-600 hover:text-blue-600 transition">Admin ↗</a>
 
           <a href="${base}rechteverwaltung.html" data-perm="rechteverwaltung" class="${a('rechte')} px-3 py-2 text-sm transition">Rechte</a>
           <a href="${base}profil.html" id="nav-profil-link" class="${a('profil')} px-3 py-2 text-sm transition hidden items-center gap-1">
@@ -502,18 +503,23 @@ const RosenwegNav = {
           ${mobileLinks}
         </div>
 
-        <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase nav-perm-section" data-perm-section="services">Services</div>
-        <div class="space-y-1 px-1">
-          ${this._renderServicesMobile(active, base)}
-        </div>
+        <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Bewohner</div>
+        <a href="${base}telefonbuch.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📇 Telefonbuch</a>
+        <a href="${base}waschkueche.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🧺 Waschküche</a>
+        <a href="${base}wlan.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📶 WLAN-Zugang</a>
+        <a href="${base}tv.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📺 TV / Fernsehen</a>
+        <a href="https://pwa.rosenweg4303.ch/reparatur/" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🔧 Schaden melden ↗</a>
+        <a href="${base}vollmachten.html" data-perm-any="eigentuemer,ausschuss,technik,praesident,verwaltung,bewohner" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📝 Vollmachten</a>
+        <a href="${base}projekte.html" data-perm-any="eigentuemer" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🏗 Projekte</a>
+        <a href="${base}anfahrt.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🚗 Anfahrt &amp; Parken</a>
+        <a href="${base}entsorgung.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">♻️ Entsorgung</a>
+        <a href="${base}verwaltung.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🏢 Hausverwaltung</a>
+        <a href="https://isp.rosenweg4303.ch/" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🌐 Internet / ISP ↗</a>
+        <a href="${base}#dokumente" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📁 Dokumente</a>
 
-        <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Infos</div>
-        <a href="${base}telefonbuch.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Telefonbuch</a>
-        <a href="${base}verwaltung.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Hausverwaltung</a>
-        <a href="${base}anfahrt.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Anfahrt &amp; Parken</a>
-        <a href="${base}entsorgung.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Entsorgung</a>
-        <a href="https://isp.rosenweg4303.ch/" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">ISP / WLAN ↗</a>
-        <a href="${base}#dokumente" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Dokumente</a>
+        <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Bereiche</div>
+        <a href="https://ausschuss.rosenweg4303.ch/" data-perm-any="ausschuss" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">👔 Ausschuss-Bereich ↗</a>
+        <a href="https://admin.rosenweg4303.ch/" data-perm-any="technik,praesident" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🔧 Admin-Bereich ↗</a>
 
         <hr class="my-2">
         <a href="${base}rechteverwaltung.html" data-perm="rechteverwaltung" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">Rechte</a>
