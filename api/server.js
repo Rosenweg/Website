@@ -3131,7 +3131,8 @@ app.get('/api/access/me/doors', authMiddleware, async (req, res) => {
   const allowed = await meAllowedDoorIds(req.user?.email);
   const all = (await unifiAccessRaw('GET', '/doors')).body?.data || [];
   res.json({ doors: all.filter(d => allowed.has(d.unique_id || d.id)).map(d => ({
-    id: d.unique_id || d.id, name: d.name || d.full_name, lock_state: d.door_lock_relay_status, online: d.is_bind_hub })) });
+    id: d.unique_id || d.id, name: d.name || d.full_name,
+    lock_state: d.door_lock_relay_status, position: d.door_position_status, online: d.is_bind_hub })) });
 });
 app.post('/api/access/me/doors/:id/unlock', authMiddleware, async (req, res) => {
   const allowed = await meAllowedDoorIds(req.user?.email);
