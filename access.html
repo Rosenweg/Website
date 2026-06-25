@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rosenweg Access — Zutrittsverwaltung</title>
+    <link rel="icon" href="/logo-rosenweg-technik.png">
+    <meta name="robots" content="noindex,nofollow">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .tab-btn { padding: .55rem .9rem; font-size: .875rem; font-weight: 600; color: #6b7280; border-bottom: 2px solid transparent; white-space: nowrap; }
+        .tab-btn.active { color: #b91c1c; border-color: #b91c1c; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen text-gray-800">
+    <header class="bg-white shadow-sm sticky top-0 z-40 border-b">
+        <div class="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <img src="/logo-rosenweg-technik.png" class="h-8 w-8" alt="">
+                <span class="font-bold">Rosenweg <span class="text-red-700">Access</span></span>
+            </div>
+            <div class="flex items-center gap-4 text-sm">
+                <span id="user-name" class="text-gray-500 hidden sm:inline"></span>
+                <a href="https://admin.rosenweg4303.ch/" class="text-red-700 hover:underline">← Admin</a>
+                <button onclick="AuthentikAuth.logout()" class="text-gray-500 hover:text-gray-800">Abmelden</button>
+            </div>
+        </div>
+    </header>
+
+    <div id="gate" class="max-w-md mx-auto mt-24 text-center text-gray-500">Lade…</div>
+
+    <main id="app" class="max-w-6xl mx-auto px-4 py-6 hidden">
+        <nav class="flex gap-1 border-b mb-5 overflow-x-auto">
+            <button class="tab-btn active" data-tab="doors">🚪 Türen</button>
+            <button class="tab-btn" data-tab="logs">📋 Zutritts-Log</button>
+            <button class="tab-btn" data-tab="users">👥 Benutzer</button>
+            <button class="tab-btn" data-tab="visitors">🎫 Besucher</button>
+            <button class="tab-btn ml-auto" data-tab="settings">⚙️</button>
+        </nav>
+
+        <div id="status" class="hidden mb-4 px-4 py-2.5 rounded-lg text-sm"></div>
+
+        <section id="panel-doors" class="tab-panel"></section>
+        <section id="panel-logs" class="tab-panel hidden"></section>
+        <section id="panel-users" class="tab-panel hidden"></section>
+        <section id="panel-visitors" class="tab-panel hidden"></section>
+        <section id="panel-settings" class="tab-panel hidden"></section>
+    </main>
+
+    <script>
+    // ─────────────────────────── Helpers ───────────────────────────
+    const $ = (s, r=document) => r.querySelector(s);
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const loaded = {};
+
+    async function api(path, opts = {}) {
+        const res = await AuthentikAuth.apiFetch('/api/access' + path, opts);
+        if (!res.ok) {
+            let msg = 'Fehler ' + res.status;
+            try { const j = await res.json(); msg = j.error || msg; } catch {}
+            const e = new Error(msg); e.status = res.status; throw e;
+        }
+        return res.json();
+    }
+    function showStatus(msg, type = 'info') {
+        const el = $('#status');
+        const styles = { info: 'bg-blue-50 text-blue-800', ok: 'bg-green-50 text-green-800', err: 'bg-red-50 text-red-800' };
+        el.className = 'mb-4 px-4 py-2.5 rounded-lg text-sm ' + (styles[type] || styles.info);
+        el.textContent = msg; el.classList.remove('hidden');
+        if (type === 'ok') setTimeout(() => el.classList.add('hidden'), 3500);
+    }
+    const fmtTime = (v) => { if (!v) return '—'; const d = new Date(typeof v === 'number' && v < 1e12 ? v * 1000 : v); return isNaN(d) ? esc(v) : d.toLocaleString('de-CH'); };
+
+    // ─────────────────────────── Tabs ───────────────────────────
+    function switchTab(name) {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('hidden', p.id !== 'panel-' + name));
+        $('#status').classList.add('hidden');
+        ({ doors: loadDoors, logs: loadLogs, users: loadUsers, visitors: loadVisitors, settings: loadSettings }[name])();
+    }
+
+    // ─────────────────────────── Türen ───────────────────────────
+    async function loadDoors() {
+        const p = $('#panel-doors');
+        p.innerHTML = '<div class="text-gray-400 text-sm">Lade Türen…</div>';
+        try {
+            const { doors } = await api('/doors');
+            if (!doors.length) { p.innerHTML = '<div class="text-gray-500">Keine Türen gefunden.</div>'; return; }
+            p.innerHTML = '<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">' + doors.map(d => {
+                const locked = d.lock_state === 'lock';
+                const online = d.online === true || d.online === 'true';
+                const pos = d.position === 'open' ? '<span class="text-amber-600">⚠️ offen</span>' : (d.position === 'close' ? 'geschlossen' : '');
+                return `<div class="bg-white rounded-xl border p-4 shadow-sm">
+                    <div class="flex items-start justify-between gap-2">
+                        <div><div class="font-semibold">${esc(d.name || d.full_name)}</div>
+                        <div class="text-xs text-gray-400 mt-0.5">${esc(d.full_name || '')}</div></div>
+                        <span class="text-xs px-2 py-0.5 rounded-full ${online ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}">${online ? '🟢 online' : '⚪ offline'}</span>
+                    </div>
+                    <div class="flex items-center gap-3 mt-3 text-sm">
+                        <span class="px-2 py-0.5 rounded ${locked ? 'bg-gray-100 text-gray-700' : 'bg-amber-100 text-amber-700'}">${locked ? '🔒 verriegelt' : '🔓 entriegelt'}</span>
+                        <span class="text-gray-500 text-xs">${pos}</span>
+                    </div>
+                    <button onclick="unlockDoor('${esc(d.id)}', this)" class="mt-3 w-full bg-red-700 hover:bg-red-800 text-white text-sm font-medium rounded-lg py-2">🔓 Öffnen</button>
+                </div>`;
+            }).join('') + '</div>';
+        } catch (e) { p.innerHTML = `<div class="text-red-600">${esc(e.message)}</div>`; }
+    }
+    async function unlockDoor(id, btn) {
+        if (!confirm('Tür wirklich entriegeln?')) return;
+        btn.disabled = true; btn.textContent = '…';
+        try { const r = await api('/doors/' + encodeURIComponent(id) + '/unlock', { method: 'POST' }); showStatus(r.message || 'Tür entsperrt', 'ok'); }
+        catch (e) { showStatus(e.message, 'err'); }
+        finally { setTimeout(loadDoors, 1200); }
+    }
+
+    // ─────────────────────────── Zutritts-Log ───────────────────────────
+    const LOG_TOPICS = [['door_openings','Türöffnungen'],['critical','Kritisch'],['admin_activity','Admin-Aktivität'],['visitor','Besucher'],['updates','Updates']];
+    async function loadLogs() {
+        const p = $('#panel-logs');
+        if (!p.dataset.init) {
+            p.dataset.init = '1';
+            p.innerHTML = `<div class="flex items-center gap-2 mb-3">
+                <label class="text-sm text-gray-500">Kategorie:</label>
+                <select id="log-topic" class="border rounded-lg px-2 py-1.5 text-sm">${LOG_TOPICS.map(t => `<option value="${t[0]}">${t[1]}</option>`).join('')}</select>
+                <button onclick="renderLogs()" class="text-sm bg-gray-100 hover:bg-gray-200 rounded-lg px-3 py-1.5">Aktualisieren</button>
+            </div><div id="log-body"></div>`;
+        }
+        renderLogs();
+    }
+    async function renderLogs() {
+        const body = $('#log-body'); const topic = $('#log-topic').value;
+        body.innerHTML = '<div class="text-gray-400 text-sm">Lade Ereignisse…</div>';
+        try {
+            const { logs } = await api('/logs?topic=' + encodeURIComponent(topic));
+            if (!logs.length) { body.innerHTML = '<div class="text-gray-500 text-sm">Keine Ereignisse in dieser Kategorie.</div>'; return; }
+            const rows = logs.map(h => {
+                const s = h._source || h;
+                const ts = h['@timestamp'] || s['@timestamp'] || s.timestamp || (s.event && s.event.published) || s.published;
+                const actor = (s.actor && (s.actor.display_name || s.actor.name)) || s.actor_name || '';
+                const msg = (s.event && (s.event.display_message || s.event.type)) || s.display_message || s.message || '';
+                const tgt = Array.isArray(s.target) ? s.target.map(t => t.display_name || t.name).filter(Boolean).join(', ') : '';
+                return `<tr class="border-b hover:bg-gray-50">
+                    <td class="px-3 py-2 text-gray-500 whitespace-nowrap">${fmtTime(ts)}</td>
+                    <td class="px-3 py-2">${esc(actor)}</td>
+                    <td class="px-3 py-2">${esc(msg)}</td>
+                    <td class="px-3 py-2 text-gray-500">${esc(tgt)}</td></tr>`;
+            }).join('');
+            body.innerHTML = `<div class="bg-white rounded-xl border overflow-x-auto"><table class="w-full text-sm">
+                <thead><tr class="text-left text-xs text-gray-400 border-b"><th class="px-3 py-2">Zeit</th><th class="px-3 py-2">Person</th><th class="px-3 py-2">Ereignis</th><th class="px-3 py-2">Tür</th></tr></thead>
+                <tbody>${rows}</tbody></table></div>`;
+        } catch (e) { body.innerHTML = `<div class="text-red-600">${esc(e.message)}</div>`; }
+    }
+
+    // ─────────────────────────── Benutzer ───────────────────────────
+    let allUsers = [];
+    async function loadUsers() {
+        const p = $('#panel-users');
+        p.innerHTML = '<div class="text-gray-400 text-sm">Lade Benutzer…</div>';
+        try {
+            const { users } = await api('/users');
+            allUsers = users || [];
+            p.innerHTML = `<div class="flex items-center gap-2 mb-3">
+                <input id="user-search" oninput="renderUsers()" placeholder="Suchen…" class="border rounded-lg px-3 py-1.5 text-sm flex-1 max-w-xs">
+                <span class="text-xs text-gray-400">${allUsers.length} Benutzer</span>
+                <button onclick="userForm()" class="ml-auto text-sm bg-red-700 hover:bg-red-800 text-white rounded-lg px-3 py-1.5">+ Neu</button>
+            </div><div id="user-body"></div>`;
+            renderUsers();
+        } catch (e) { p.innerHTML = `<div class="text-red-600">${esc(e.message)}</div>`; }
+    }
+    function renderUsers() {
+        const q = ($('#user-search')?.value || '').toLowerCase();
+        const list = allUsers.filter(u => !q || (`${u.first_name || ''} ${u.last_name || ''} ${u.email || u.user_email || ''} ${u.employee_number || ''}`.toLowerCase().includes(q)));
+        const rows = list.map(u => {
+            const name = esc(u.full_name || `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.username || u.id);
+            const nfc = Array.isArray(u.nfc_cards) ? u.nfc_cards.length : 0;
+            const pin = u.pin_code ? '•••• <span class="text-xs text-gray-400">gesetzt</span>' : '<span class="text-gray-300">—</span>';
+            const active = (u.status || '').toUpperCase() === 'ACTIVE';
+            return `<tr class="border-b hover:bg-gray-50">
+                <td class="px-3 py-2 font-medium">${name}</td>
+                <td class="px-3 py-2 text-gray-500">${esc(u.email || u.user_email || '')}</td>
+                <td class="px-3 py-2"><span class="text-xs px-2 py-0.5 rounded-full ${active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}">${esc(u.status || '—')}</span></td>
+                <td class="px-3 py-2">${pin}</td>
+                <td class="px-3 py-2 text-gray-500">${nfc ? nfc + ' 🪪' : '—'}</td>
+                <td class="px-3 py-2 text-right whitespace-nowrap">
+                    <button onclick='userForm(${JSON.stringify(u).replace(/'/g, "&#39;")})' class="text-blue-600 hover:underline text-xs">PIN</button>
+                    <button onclick="delUser('${esc(u.id)}','${name.replace(/'/g,"")}')" class="text-red-600 hover:underline text-xs ml-2">Löschen</button>
+                </td></tr>`;
+        }).join('');
+        $('#user-body').innerHTML = `<div class="bg-white rounded-xl border overflow-x-auto"><table class="w-full text-sm">
+            <thead><tr class="text-left text-xs text-gray-400 border-b"><th class="px-3 py-2">Name</th><th class="px-3 py-2">E-Mail</th><th class="px-3 py-2">Status</th><th class="px-3 py-2">PIN</th><th class="px-3 py-2">NFC</th><th></th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="6" class="px-3 py-4 text-gray-400">Keine Treffer.</td></tr>'}</tbody></table></div>`;
+    }
+    function userForm(u) {
+        const edit = !!u;
+        const v = u || {};
+        openModal(edit ? 'PIN ändern' : 'Neuer Benutzer', `
+            ${edit ? `<div class="text-sm text-gray-600 mb-2">${esc(v.full_name || v.first_name || '')}</div>` : `
+            <input id="f-first" placeholder="Vorname *" class="w-full border rounded-lg px-3 py-2 mb-2 text-sm">
+            <input id="f-last" placeholder="Nachname" class="w-full border rounded-lg px-3 py-2 mb-2 text-sm">
+            <input id="f-email" placeholder="E-Mail" class="w-full border rounded-lg px-3 py-2 mb-2 text-sm">`}
+            <input id="f-pin" placeholder="PIN-Code (Ziffern)" inputmode="numeric" class="w-full border rounded-lg px-3 py-2 text-sm">
+        `, async () => {
+            try {
+                if (edit) {
+                    await api('/users/' + encodeURIComponent(v.id), { method: 'PUT', body: { pin_code: $('#f-pin').value.trim() } });
+                } else {
+                    const first = $('#f-first').value.trim();
+                    if (!first) { showStatus('Vorname erforderlich', 'err'); return false; }
+                    await api('/users', { method: 'POST', body: { first_name: first, last_name: $('#f-last').value.trim(), email: $('#f-email').value.trim(), pin_code: $('#f-pin').value.trim() } });
+                }
+                showStatus('Gespeichert', 'ok'); loadUsers();
+            } catch (e) { showStatus(e.message, 'err'); return false; }
+        });
+    }
+    async function delUser(id, name) {
+        if (!confirm(`Benutzer „${name}" wirklich löschen?`)) return;
+        try { await api('/users/' + encodeURIComponent(id), { method: 'DELETE' }); showStatus('Gelöscht', 'ok'); loadUsers(); }
+        catch (e) { showStatus(e.message, 'err'); }
+    }
+
+    // ─────────────────────────── Besucher ───────────────────────────
+    async function loadVisitors() {
+        const p = $('#panel-visitors');
+        p.innerHTML = '<div class="text-gray-400 text-sm">Lade Besucher…</div>';
+        try {
+            const { visitors } = await api('/visitors');
+            const rows = (visitors || []).map(v => `<tr class="border-b hover:bg-gray-50">
+                <td class="px-3 py-2 font-medium">${esc(v.full_name || `${v.first_name || ''} ${v.last_name || ''}`.trim())}</td>
+                <td class="px-3 py-2 text-gray-500">${fmtTime(v.start_time)} – ${fmtTime(v.end_time)}</td>
+                <td class="px-3 py-2">${esc(v.status || '')}</td>
+                <td class="px-3 py-2 text-right"><button onclick="delVisitor('${esc(v.id)}')" class="text-red-600 hover:underline text-xs">Löschen</button></td></tr>`).join('');
+            p.innerHTML = `<div class="flex items-center mb-3"><span class="text-xs text-gray-400">${(visitors || []).length} Besucher-Pässe</span>
+                <button onclick="visitorForm()" class="ml-auto text-sm bg-red-700 hover:bg-red-800 text-white rounded-lg px-3 py-1.5">+ Neu</button></div>
+                <div class="bg-white rounded-xl border overflow-x-auto"><table class="w-full text-sm">
+                <thead><tr class="text-left text-xs text-gray-400 border-b"><th class="px-3 py-2">Name</th><th class="px-3 py-2">Zeitraum</th><th class="px-3 py-2">Status</th><th></th></tr></thead>
+                <tbody>${rows || '<tr><td colspan="4" class="px-3 py-4 text-gray-400">Keine Besucher-Pässe.</td></tr>'}</tbody></table></div>`;
+        } catch (e) { p.innerHTML = `<div class="text-red-600">${esc(e.message)}</div>`; }
+    }
+    function visitorForm() {
+        const now = new Date(); const later = new Date(Date.now() + 4 * 3600e3);
+        const iso = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+        openModal('Neuer Besucher-Pass', `
+            <input id="v-first" placeholder="Vorname *" class="w-full border rounded-lg px-3 py-2 mb-2 text-sm">
+            <input id="v-last" placeholder="Nachname" class="w-full border rounded-lg px-3 py-2 mb-2 text-sm">
+            <label class="text-xs text-gray-500">Von</label><input id="v-start" type="datetime-local" value="${iso(now)}" class="w-full border rounded-lg px-3 py-2 mb-2 text-sm">
+            <label class="text-xs text-gray-500">Bis</label><input id="v-end" type="datetime-local" value="${iso(later)}" class="w-full border rounded-lg px-3 py-2 text-sm">
+        `, async () => {
+            const first = $('#v-first').value.trim();
+            if (!first) { showStatus('Vorname erforderlich', 'err'); return false; }
+            try {
+                await api('/visitors', { method: 'POST', body: {
+                    first_name: first, last_name: $('#v-last').value.trim(),
+                    start_time: Math.floor(new Date($('#v-start').value).getTime() / 1000),
+                    end_time: Math.floor(new Date($('#v-end').value).getTime() / 1000),
+                } });
+                showStatus('Besucher-Pass erstellt', 'ok'); loadVisitors();
+            } catch (e) { showStatus(e.message, 'err'); return false; }
+        });
+    }
+    async function delVisitor(id) {
+        if (!confirm('Besucher-Pass löschen?')) return;
+        try { await api('/visitors/' + encodeURIComponent(id), { method: 'DELETE' }); showStatus('Gelöscht', 'ok'); loadVisitors(); }
+        catch (e) { showStatus(e.message, 'err'); }
+    }
+
+    // ─────────────────────────── Einstellungen ───────────────────────────
+    async function loadSettings() {
+        const p = $('#panel-settings');
+        p.innerHTML = '<div class="text-gray-400 text-sm">Lade…</div>';
+        try {
+            const s = await api('/settings');
+            p.innerHTML = `<div class="bg-white rounded-xl border p-5 max-w-lg">
+                <h2 class="font-semibold mb-3">UniFi-Access-Verbindung</h2>
+                <label class="text-xs text-gray-500">Controller-Host (IP:Port)</label>
+                <input id="s-host" value="${esc(s.host || '')}" class="w-full border rounded-lg px-3 py-2 mb-3 text-sm">
+                <label class="text-xs text-gray-500">API-Token ${s.token_set ? '<span class="text-green-600">(gesetzt — leer lassen = unverändert)</span>' : '<span class="text-red-600">(nicht gesetzt)</span>'}</label>
+                <input id="s-token" type="password" placeholder="${s.token_set ? '••••••••' : 'Token einfügen'}" class="w-full border rounded-lg px-3 py-2 mb-3 text-sm">
+                <label class="flex items-center gap-2 text-sm mb-4"><input id="s-enabled" type="checkbox" ${s.enabled ? 'checked' : ''}> Aktiviert (Türsteuerung)</label>
+                <button onclick="saveSettings()" class="bg-red-700 hover:bg-red-800 text-white text-sm font-medium rounded-lg px-4 py-2">Speichern</button>
+                <p class="text-xs text-gray-400 mt-3">Tipp: Token in UniFi Access erstellen (Einstellungen → API). Zum Rotieren neuen Token hier eintragen.</p>
+            </div>`;
+        } catch (e) { p.innerHTML = `<div class="text-red-600">${esc(e.message)}</div>`; }
+    }
+    async function saveSettings() {
+        const body = { host: $('#s-host').value.trim(), enabled: $('#s-enabled').checked };
+        const tok = $('#s-token').value.trim(); if (tok) body.token = tok;
+        try { await api('/settings', { method: 'PUT', body }); showStatus('Gespeichert', 'ok'); loadSettings(); }
+        catch (e) { showStatus(e.message, 'err'); }
+    }
+
+    // ─────────────────────────── Modal ───────────────────────────
+    function openModal(title, inner, onSave) {
+        const m = document.createElement('div');
+        m.className = 'fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4';
+        m.innerHTML = `<div class="bg-white rounded-xl p-5 w-full max-w-sm shadow-xl">
+            <h3 class="font-semibold mb-3">${esc(title)}</h3><div id="modal-body">${inner}</div>
+            <div class="flex justify-end gap-2 mt-4">
+                <button id="m-cancel" class="text-sm text-gray-500 px-3 py-2">Abbrechen</button>
+                <button id="m-save" class="text-sm bg-red-700 hover:bg-red-800 text-white rounded-lg px-4 py-2">Speichern</button>
+            </div></div>`;
+        document.body.appendChild(m);
+        const close = () => m.remove();
+        m.querySelector('#m-cancel').onclick = close;
+        m.onclick = (e) => { if (e.target === m) close(); };
+        m.querySelector('#m-save').onclick = async () => { const r = await onSave(); if (r !== false) close(); };
+    }
+
+    // ─────────────────────────── Init ───────────────────────────
+    AuthentikAuth.init({
+        requireAuth: true, requireAdmin: true,
+        onLogin(user) {
+            $('#gate').classList.add('hidden');
+            $('#app').classList.remove('hidden');
+            $('#user-name').textContent = user.name || user.email || '';
+            document.querySelectorAll('.tab-btn').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+            switchTab('doors');
+        },
+        onLogout(reason) {
+            if (reason === 'no-admin') {
+                $('#gate').innerHTML = '<div class="bg-white rounded-xl border p-6"><div class="text-lg font-semibold mb-1">Kein Zugriff</div><div class="text-gray-500 text-sm">Die Zutrittsverwaltung ist nur für Technik/Präsident.</div></div>';
+            }
+        }
+    });
+    </script>
+</body>
+</html>
