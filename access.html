@@ -108,11 +108,75 @@
                         <button onclick="doorGrants('${esc(d.id)}','${esc((d.name || d.full_name || '').replace(/'/g, ''))}')" class="px-3 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm" title="Berechtigte Gruppen">👥</button>
                     </div>
                 </div>`;
-            }).join('') + '</div><div id="door-policies" class="mt-6"></div>';
+            }).join('') + '</div><div id="door-groups-mgmt" class="mt-6"></div><div id="door-policies" class="mt-6"></div>';
+            renderDoorGroups();
             renderDoorPolicies();
         } catch (e) { p.innerHTML = `<div class="text-red-600">${esc(e.message)}</div>`; }
     }
     let authentikGroups = [];
+    let allDoorsCache = [];
+    // ── Tür-Gruppen (Gebäude) verwalten ──
+    async function renderDoorGroups() {
+        const el = $('#door-groups-mgmt'); if (!el) return;
+        try {
+            const { groups } = await api('/door-groups');
+            const items = groups.map(g => `<div class="flex items-center justify-between border-b last:border-0 px-3 py-2">
+                <div><div class="font-medium text-sm">${esc(g.name)}</div>
+                <div class="text-xs text-gray-500">${(g.door_ids || []).length} Tür(en) · Gruppen: ${(g.authentik_groups || []).map(esc).join(', ') || '—'}</div></div>
+                <div class="whitespace-nowrap"><button onclick='editDoorGroup(${JSON.stringify(g).replace(/'/g, "&#39;")})' class="text-blue-600 hover:underline text-xs">Bearbeiten</button>
+                <button onclick="delDoorGroup(${g.id})" class="text-red-600 hover:underline text-xs ml-2">Löschen</button></div></div>`).join('');
+            el.innerHTML = `<div class="flex items-center justify-between mb-2"><h2 class="text-sm font-semibold text-gray-600">Tür-Gruppen (Gebäude)</h2>
+                <button onclick="editDoorGroup()" class="text-sm bg-gray-100 hover:bg-gray-200 rounded-lg px-3 py-1.5">+ Neu</button></div>
+                <div class="bg-white rounded-xl border">${items || '<div class="text-gray-400 text-sm px-3 py-3">Noch keine Tür-Gruppen. Bündle Türen z.B. nach Gebäude (R9, …) und gib der Gruppe Authentik-Gruppen — gilt dann für alle Türen der Gruppe.</div>'}</div>`;
+        } catch (e) { el.innerHTML = `<div class="text-red-500 text-sm">${esc(e.message)}</div>`; }
+    }
+    async function editDoorGroup(g) {
+        const edit = !!g;
+        if (!authentikGroups.length) { try { authentikGroups = (await api('/authentik-groups')).groups || []; } catch {} }
+        if (!allDoorsCache.length) { try { allDoorsCache = (await api('/doors')).doors || []; } catch {} }
+        const selDoors = new Set(edit ? (g.door_ids || []) : []);
+        const selGroups = new Set(edit ? (g.authentik_groups || []) : []);
+        const m = document.createElement('div');
+        m.className = 'fixed inset-0 bg-black/40 flex items-start justify-center z-50 p-4 overflow-y-auto';
+        m.innerHTML = `<div class="bg-white rounded-xl p-5 w-full max-w-md shadow-xl my-8">
+            <h3 class="font-semibold mb-3">${edit ? 'Tür-Gruppe bearbeiten' : 'Neue Tür-Gruppe'}</h3>
+            <input id="dgr-name" placeholder="Name (z.B. Gebäude R9)" value="${esc(edit ? g.name : '')}" class="w-full border rounded-lg px-3 py-2 text-sm mb-3">
+            <div class="text-sm font-medium mb-1">Türen in dieser Gruppe</div>
+            <div class="border rounded-lg p-2 mb-3 max-h-40 overflow-y-auto space-y-1 text-sm">${allDoorsCache.map(d => `<label class="flex items-center gap-2"><input type="checkbox" class="dgr-door" value="${esc(d.id)}" ${selDoors.has(d.id) ? 'checked' : ''}><span>${esc(d.name || d.full_name)}</span></label>`).join('') || '<span class="text-gray-400">Keine Türen</span>'}</div>
+            <div class="text-sm font-medium mb-1">Berechtigte Authentik-Gruppen</div>
+            <input id="dgr-gsearch" placeholder="Gruppe suchen…" class="w-full border rounded-lg px-3 py-1.5 text-sm mb-1">
+            <div id="dgr-glist" class="border rounded-lg p-2 max-h-40 overflow-y-auto space-y-1 text-sm"></div>
+            <div class="flex justify-end gap-2 mt-4">
+                <button id="dgr-cancel" type="button" class="text-sm text-gray-500 px-3 py-2">Abbrechen</button>
+                <button id="dgr-save" type="button" class="text-sm bg-red-700 hover:bg-red-800 text-white rounded-lg px-4 py-2">Speichern</button>
+            </div></div>`;
+        document.body.appendChild(m);
+        const glist = m.querySelector('#dgr-glist');
+        const drawG = () => {
+            const q = (m.querySelector('#dgr-gsearch').value || '').toLowerCase();
+            glist.innerHTML = authentikGroups.filter(x => !q || x.toLowerCase().includes(q)).map(x => `<label class="flex items-center gap-2"><input type="checkbox" value="${esc(x)}" ${selGroups.has(x) ? 'checked' : ''}><span>${esc(x)}</span></label>`).join('');
+            glist.querySelectorAll('input').forEach(cb => cb.onchange = () => { cb.checked ? selGroups.add(cb.value) : selGroups.delete(cb.value); });
+        };
+        drawG();
+        m.querySelector('#dgr-gsearch').oninput = drawG;
+        m.querySelector('#dgr-cancel').onclick = () => m.remove();
+        m.onclick = e => { if (e.target === m) m.remove(); };
+        m.querySelector('#dgr-save').onclick = async () => {
+            const name = m.querySelector('#dgr-name').value.trim();
+            if (!name) { showStatus('Name erforderlich', 'err'); return; }
+            const doorIds = [...m.querySelectorAll('.dgr-door:checked')].map(c => c.value);
+            try {
+                const id = edit ? g.id : (await api('/door-groups', { method: 'POST', body: { name } })).id;
+                await api('/door-groups/' + id, { method: 'PUT', body: { name, door_ids: doorIds, authentik_groups: [...selGroups] } });
+                showStatus('Gespeichert', 'ok'); m.remove(); renderDoorGroups();
+            } catch (e) { showStatus(e.message, 'err'); }
+        };
+    }
+    async function delDoorGroup(id) {
+        if (!confirm('Tür-Gruppe löschen?')) return;
+        try { await api('/door-groups/' + id, { method: 'DELETE' }); showStatus('Gelöscht', 'ok'); renderDoorGroups(); }
+        catch (e) { showStatus(e.message, 'err'); }
+    }
     async function renderDoorPolicies() { // Sync-Panel unter den Türen
         const el = $('#door-policies'); if (!el) return;
         el.innerHTML = `<div class="bg-white rounded-xl border p-4">
@@ -329,9 +393,28 @@
         try { await api('/users/' + encodeURIComponent(userId) + '/nfc/' + encodeURIComponent(token), { method: 'DELETE' }); showStatus('Karte entfernt', 'ok'); loadUsers(); }
         catch (e) { showStatus(e.message, 'err'); btn.disabled = false; }
     }
+    function pickReader(devices) {
+        return new Promise(resolve => {
+            const m = document.createElement('div');
+            m.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4';
+            m.innerHTML = `<div class="bg-white rounded-xl p-5 w-full max-w-xs">
+                <h3 class="font-semibold mb-3">Leser wählen</h3>
+                <div class="space-y-2">${devices.map(d => `<button data-id="${esc(d.id)}" class="w-full text-left border rounded-lg px-3 py-2 text-sm hover:bg-gray-50 ${d.online ? '' : 'opacity-50'}">${esc(d.name)} <span class="text-xs text-gray-400">${esc(d.model)}${d.online ? '' : ' · offline'}</span></button>`).join('')}</div>
+                <button id="pr-cancel" type="button" class="text-sm text-gray-500 mt-3">Abbrechen</button></div>`;
+            document.body.appendChild(m);
+            m.querySelectorAll('button[data-id]').forEach(b => b.onclick = () => { m.remove(); resolve(b.dataset.id); });
+            m.querySelector('#pr-cancel').onclick = () => { m.remove(); resolve(null); };
+            m.onclick = e => { if (e.target === m) { m.remove(); resolve(null); } };
+        });
+    }
     async function nfcEnroll(u, m) {
+        let devices = [];
+        try { devices = (await api('/nfc/devices')).devices || []; } catch {}
+        let deviceId;
+        if (devices.length === 1) deviceId = devices[0].id;
+        else if (devices.length > 1) { deviceId = await pickReader(devices); if (!deviceId) return; }
         let session;
-        try { const r = await api('/nfc/session', { method: 'POST', body: {} }); session = r.session_id; }
+        try { const r = await api('/nfc/session', { method: 'POST', body: deviceId ? { device_id: deviceId } : {} }); session = r.session_id; }
         catch (e) { return showStatus('Enrollment-Start fehlgeschlagen: ' + e.message, 'err'); }
         if (!session) return showStatus('Keine Enrollment-Session erhalten', 'err');
         const ov = document.createElement('div');

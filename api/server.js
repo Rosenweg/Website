@@ -2888,8 +2888,16 @@ async function accessEnrollDevice() {
   const dev = flat.find(d => (d.capabilities || []).includes('support_register_card')) || flat[0];
   return dev?.id || dev?.unique_id || null;
 }
-app.get('/api/access/nfc/device', authMiddleware, adminOnly, async (req, res) => {
-  res.json({ device_id: await accessEnrollDevice() });
+// Liste aller Karten-Leser (für Leser-Auswahl beim Anlernen; skaliert auf mehrere Reader).
+async function accessReaders() {
+  const r = await unifiAccessRaw('GET', '/devices');
+  const flat = [];
+  (r.body?.data || []).forEach(x => Array.isArray(x) ? flat.push(...x) : flat.push(x));
+  return flat.filter(d => (d.capabilities || []).includes('support_register_card'))
+    .map(d => ({ id: d.id || d.unique_id, name: d.alias || d.name || (d.id || d.unique_id), model: d.type || '', online: d.is_online !== false }));
+}
+app.get('/api/access/nfc/devices', authMiddleware, adminOnly, async (req, res) => {
+  res.json({ devices: await accessReaders() });
 });
 app.post('/api/access/nfc/session', authMiddleware, adminOnly, async (req, res) => {
   const device_id = req.body?.device_id || await accessEnrollDevice();
