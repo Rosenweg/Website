@@ -3122,7 +3122,7 @@ app.get('/api/access/me', authMiddleware, async (req, res) => {
   const u = await unifiUserByEmail(req.user?.email);
   if (!u) return res.json({ found: false });
   res.json({ found: true, name: u.full_name || `${u.first_name || ''} ${u.last_name || ''}`.trim(),
-    cards: (u.nfc_cards || []).map(c => ({ token: c.token || c.id, label: c.display_id || c.id || c.token })) });
+    cards: (u.nfc_cards || []).map(c => ({ token: c.token || c.id, label: 'NFC-Karte ····' + String(c.id || c.token || '').slice(-4) })) });
 });
 app.get('/api/access/me/devices', authMiddleware, async (req, res) => {
   res.json({ devices: await accessReaders() });
