@@ -103,26 +103,77 @@
                         <span class="px-2 py-0.5 rounded ${locked ? 'bg-gray-100 text-gray-700' : 'bg-amber-100 text-amber-700'}">${locked ? '🔒 verriegelt' : '🔓 entriegelt'}</span>
                         <span class="text-gray-500 text-xs">${pos}</span>
                     </div>
-                    <button onclick="unlockDoor('${esc(d.id)}', this)" class="mt-3 w-full bg-red-700 hover:bg-red-800 text-white text-sm font-medium rounded-lg py-2">🔓 Öffnen</button>
+                    <div class="flex gap-2 mt-3">
+                        <button onclick="unlockDoor('${esc(d.id)}', this)" class="flex-1 bg-red-700 hover:bg-red-800 text-white text-sm font-medium rounded-lg py-2">🔓 Öffnen</button>
+                        <button onclick="doorGrants('${esc(d.id)}','${esc((d.name || d.full_name || '').replace(/'/g, ''))}')" class="px-3 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm" title="Berechtigte Gruppen">👥</button>
+                    </div>
                 </div>`;
             }).join('') + '</div><div id="door-policies" class="mt-6"></div>';
             renderDoorPolicies();
         } catch (e) { p.innerHTML = `<div class="text-red-600">${esc(e.message)}</div>`; }
     }
-    async function renderDoorPolicies() {
+    let authentikGroups = [];
+    async function renderDoorPolicies() { // Sync-Panel unter den Türen
         const el = $('#door-policies'); if (!el) return;
+        el.innerHTML = `<div class="bg-white rounded-xl border p-4">
+            <div class="flex items-center justify-between gap-3 flex-wrap">
+                <div><div class="font-semibold text-sm">Zugang synchronisieren</div>
+                <div class="text-xs text-gray-500">Überträgt die Gruppen-Berechtigungen der Türen auf UniFi (Authentik → Türzugang). Läuft auch automatisch alle 30 Min.</div></div>
+                <button onclick="runSync(true)" class="text-sm bg-gray-800 hover:bg-gray-900 text-white rounded-lg px-3 py-1.5">Vorschau</button>
+            </div>
+            <div id="sync-result" class="mt-3 text-sm"></div></div>`;
+    }
+    async function runSync(dry) {
+        const out = $('#sync-result'); out.innerHTML = '<span class="text-gray-400">Berechne…</span>';
         try {
-            const r = await api('/policies'); allPolicies = r.policies || [];
-            if (!allPolicies.length) { el.innerHTML = ''; return; }
-            const items = allPolicies.map(p => {
-                const res = (p.resources || []).map(x => x.type === 'door_group' ? 'Tür-Gruppe' : 'Tür').join(', ') || '—';
-                return `<div class="flex items-center justify-between border-b last:border-0 px-3 py-2 text-sm">
-                    <span class="font-medium">${esc(p.name)}</span><span class="text-xs text-gray-500">${esc(res)}</span></div>`;
-            }).join('');
-            el.innerHTML = `<h2 class="text-sm font-semibold text-gray-600 mb-2">Zugangsregeln (Policies)</h2>
-                <div class="bg-white rounded-xl border">${items}</div>
-                <p class="text-xs text-gray-400 mt-2">Wer welche Regel hat, legst du pro Person im Tab <strong>Benutzer</strong> fest (Abschnitt „Zugang").</p>`;
-        } catch (e) { el.innerHTML = `<div class="text-red-500 text-sm">${esc(e.message)}</div>`; }
+            const r = await api('/sync' + (dry ? '?dry=1' : ''), { method: 'POST' });
+            if (r.dryRun) {
+                const rows = (r.perDoor || []).map(d => `<tr class="border-b last:border-0"><td class="py-1.5 pr-3 font-medium">${esc(d.door)}</td>
+                    <td class="py-1.5 pr-3 text-gray-500">${esc(d.groups.join(', ') || '—')}</td>
+                    <td class="py-1.5 text-right whitespace-nowrap">${d.in_unifi}/${d.berechtigt}</td></tr>`).join('');
+                out.innerHTML = `<div class="text-gray-600 mb-2">Vorschau — es wird noch nichts geändert:</div>
+                    <div class="overflow-x-auto"><table class="w-full text-xs"><thead><tr class="text-gray-400 text-left border-b"><th class="py-1 pr-3">Tür</th><th class="py-1 pr-3">Berechtigte Gruppen</th><th class="py-1 text-right">in UniFi / berechtigt</th></tr></thead>
+                    <tbody>${rows || '<tr><td colspan="3" class="text-gray-400 py-2">Noch keine Tür hat Gruppen-Berechtigungen — über 👥 bei einer Tür setzen.</td></tr>'}</tbody></table></div>
+                    ${r.unmatchedEmails ? `<div class="text-amber-600 text-xs mt-2">⚠️ ${r.unmatchedEmails} berechtigte Person(en) haben (noch) keinen UniFi-Benutzer → nicht zuweisbar.</div>` : ''}
+                    ${(r.perDoor || []).some(d => d.berechtigt) ? `<button onclick="runSync(false)" class="mt-3 text-sm bg-red-700 hover:bg-red-800 text-white rounded-lg px-4 py-2">Jetzt anwenden</button>` : ''}`;
+            } else {
+                out.innerHTML = `<div class="text-green-700">✓ Synchronisiert: ${r.assigned} Zugänge vergeben, ${r.revoked} entzogen (${r.matched} Benutzer betroffen).</div>`;
+            }
+        } catch (e) { out.innerHTML = `<span class="text-red-600">${esc(e.message)}</span>`; }
+    }
+    async function doorGrants(doorId, doorName) {
+        if (!authentikGroups.length) { try { authentikGroups = (await api('/authentik-groups')).groups || []; } catch {} }
+        let cur = { direct: [], inherited: [] };
+        try { cur = await api('/doors/' + encodeURIComponent(doorId) + '/grants'); } catch {}
+        const sel = new Set(cur.direct || []);
+        const m = document.createElement('div');
+        m.className = 'fixed inset-0 bg-black/40 flex items-start justify-center z-50 p-4 overflow-y-auto';
+        const inh = (cur.inherited || []).length ? `<div class="text-xs text-gray-500 mb-2">Zusätzlich vererbt über Tür-Gruppen: ${cur.inherited.map(i => esc(i.authentik_group) + ' (' + esc(i.via) + ')').join(', ')}</div>` : '';
+        m.innerHTML = `<div class="bg-white rounded-xl p-5 w-full max-w-md shadow-xl my-8">
+            <h3 class="font-semibold mb-0.5">Berechtigte Gruppen</h3>
+            <div class="text-sm text-gray-500 mb-3">${esc(doorName)}</div>${inh}
+            <input id="dg-search" placeholder="Authentik-Gruppe suchen…" class="w-full border rounded-lg px-3 py-2 text-sm mb-2">
+            <div id="dg-list" class="max-h-72 overflow-y-auto border rounded-lg p-2 space-y-1 text-sm"></div>
+            <div class="flex justify-end gap-2 mt-4">
+                <button id="dg-cancel" type="button" class="text-sm text-gray-500 px-3 py-2">Abbrechen</button>
+                <button id="dg-save" type="button" class="text-sm bg-red-700 hover:bg-red-800 text-white rounded-lg px-4 py-2">Speichern</button>
+            </div></div>`;
+        document.body.appendChild(m);
+        const list = m.querySelector('#dg-list');
+        const draw = () => {
+            const q = (m.querySelector('#dg-search').value || '').toLowerCase();
+            list.innerHTML = authentikGroups.filter(g => !q || g.toLowerCase().includes(q)).map(g =>
+                `<label class="flex items-center gap-2"><input type="checkbox" value="${esc(g)}" ${sel.has(g) ? 'checked' : ''}><span>${esc(g)}</span></label>`).join('') || '<div class="text-gray-400 px-1">Keine Gruppen gefunden.</div>';
+            list.querySelectorAll('input').forEach(cb => cb.onchange = () => { cb.checked ? sel.add(cb.value) : sel.delete(cb.value); });
+        };
+        draw();
+        m.querySelector('#dg-search').oninput = draw;
+        m.querySelector('#dg-cancel').onclick = () => m.remove();
+        m.onclick = (e) => { if (e.target === m) m.remove(); };
+        m.querySelector('#dg-save').onclick = async () => {
+            try { await api('/doors/' + encodeURIComponent(doorId) + '/grants', { method: 'PUT', body: { authentik_groups: [...sel] } }); showStatus('Gruppen gespeichert — jetzt synchronisieren', 'ok'); m.remove(); }
+            catch (e) { showStatus(e.message, 'err'); }
+        };
     }
     async function unlockDoor(id, btn) {
         if (!confirm('Tür wirklich entriegeln?')) return;
