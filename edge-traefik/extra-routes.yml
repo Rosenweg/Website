@@ -88,6 +88,26 @@ http:
         certResolver: cf
         domains:
           - main: pwa.rosenweg4303.ch
+    # access.rosenweg4303.ch -> www-Frontend (Zutrittsverwaltung + PWA). "/" -> /access.html.
+    access-root-rw4303:
+      entryPoints: [websecure]
+      rule: Host(`access.rosenweg4303.ch`) && Path(`/`)
+      priority: 50
+      service: www-lxc-svc
+      middlewares: [access-root-rewrite]
+      tls:
+        certResolver: cf
+        domains:
+          - main: access.rosenweg4303.ch
+    access-page-rw4303:
+      entryPoints: [websecure]
+      rule: Host(`access.rosenweg4303.ch`)
+      priority: 10
+      service: www-lxc-svc
+      tls:
+        certResolver: cf
+        domains:
+          - main: access.rosenweg4303.ch
     # Kurze IPTV-URL: tv.rosenweg4303.ch -> api /api/tv/playlist.m3u (242 Kanaele).
     tv-rw4303:
       entryPoints: [websecure]
@@ -118,6 +138,9 @@ http:
     mqtt-root-rewrite:
       replacePath:
         path: /mqtt.html
+    access-root-rewrite:
+      replacePath:
+        path: /access.html
   services:
     www-lxc-svc:
       loadBalancer:
