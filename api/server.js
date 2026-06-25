@@ -2591,8 +2591,9 @@ function startWaschCron() {
   activeIntervals.push(setInterval(() => {
     syncAccessDoors().then(r => { if (r.assigned || r.revoked) console.log(`[access-sync] +${r.assigned}/-${r.revoked} (${r.matched} User)`); })
       .catch(e => console.warn('[access-sync]', e.message));
+    syncAccessPlates().catch(e => console.warn('[access-plate-sync]', e.message));
   }, 30 * 60 * 1000));
-  setTimeout(() => syncAccessDoors().catch(e => console.warn('[access-sync] initial', e.message)), 90 * 1000);
+  setTimeout(() => { syncAccessDoors().catch(e => console.warn('[access-sync] initial', e.message)); syncAccessPlates().catch(() => {}); }, 90 * 1000);
 
   console.log('[Waschküche] Cron jobs started (reservations 5min, doors 1min, billing 1st@08:00)');
 }
@@ -3202,6 +3203,25 @@ app.delete('/api/access/me/plates/:id', authMiddleware, async (req, res) => {
 app.get('/api/access/plates', authMiddleware, adminOnly, async (req, res) => {
   const r = await pool.query('SELECT id, email, plate, created_at, synced_at FROM access_plates ORDER BY email, plate');
   res.json({ plates: r.rows });
+});
+// Sync: vorregistrierte Kennzeichen (eigene DB) -> UniFi-User (PUT bare-array, ersetzt deren Plates).
+async function syncAccessPlates() {
+  const rows = (await pool.query('SELECT email, plate FROM access_plates')).rows;
+  const byEmail = {};
+  rows.forEach(r => (byEmail[(r.email || '').toLowerCase().trim()] ||= []).push(r.plate));
+  const uniUsers = (await unifiAccessRaw('GET', '/users')).body?.data || [];
+  const map = {}; uniUsers.forEach(u => { const e = (u.email || u.user_email || '').toLowerCase().trim(); if (e) map[e] = u; });
+  let syncedUsers = 0, syncedPlates = 0, unmatched = 0;
+  for (const [email, plates] of Object.entries(byEmail)) {
+    const u = map[email];
+    if (!u) { unmatched++; continue; }
+    const r = await unifiAccessRaw('PUT', `/users/${u.id}/license_plates`, plates); // Body = ["AG123",...]
+    if (accessOk(r)) { syncedUsers++; syncedPlates += plates.length; await pool.query('UPDATE access_plates SET synced_at=NOW() WHERE lower(email)=$1', [email]); }
+  }
+  return { syncedUsers, syncedPlates, unmatchedEmails: unmatched };
+}
+app.post('/api/access/plates/sync', authMiddleware, adminOnly, async (req, res) => {
+  try { res.json(await syncAccessPlates()); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── Access-Konfiguration (Host/Token/enabled). Token wird NIE im Klartext ausgeliefert. ──
