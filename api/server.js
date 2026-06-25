@@ -3192,18 +3192,28 @@ app.post('/api/access/me/plates', authMiddleware, async (req, res) => {
   if (!ACCESS_PLATE_RE.test(plate)) return res.status(400).json({ error: 'Ungültiges Kennzeichen' });
   try {
     const r = await pool.query('INSERT INTO access_plates(email, plate) VALUES($1,$2) ON CONFLICT (email, plate) DO NOTHING RETURNING id', [req.user.email, plate]);
+    syncUserPlates(req.user.email).catch(() => {}); // sofort zu UniFi
     res.json({ success: true, id: r.rows[0]?.id || null });
   } catch (err) { res.status(500).json({ error: 'Fehler beim Speichern' }); }
 });
 app.delete('/api/access/me/plates/:id', authMiddleware, async (req, res) => {
   const e = (req.user?.email || '').toLowerCase();
   await pool.query('DELETE FROM access_plates WHERE id=$1 AND lower(email)=$2', [parseInt(req.params.id, 10), e]);
+  syncUserPlates(req.user?.email).catch(() => {}); // sofort zu UniFi
   res.json({ success: true });
 });
 app.get('/api/access/plates', authMiddleware, adminOnly, async (req, res) => {
   const r = await pool.query('SELECT id, email, plate, created_at, synced_at FROM access_plates ORDER BY email, plate');
   res.json({ plates: r.rows });
 });
+// Sofort-Sync der Kennzeichen EINES Users (per E-Mail) -> UniFi. Bei Self-Service-Add/Remove sofort aufgerufen.
+async function syncUserPlates(email) {
+  const e = (email || '').toLowerCase().trim(); if (!e) return;
+  const u = await unifiUserByEmail(e); if (!u) return;
+  const plates = (await pool.query('SELECT plate FROM access_plates WHERE lower(email)=$1', [e])).rows.map(r => r.plate);
+  const r = await unifiAccessRaw('PUT', `/users/${u.id}/license_plates`, plates);
+  if (accessOk(r)) await pool.query('UPDATE access_plates SET synced_at=NOW() WHERE lower(email)=$1', [e]);
+}
 // Sync: vorregistrierte Kennzeichen (eigene DB) -> UniFi-User (PUT bare-array, ersetzt deren Plates).
 async function syncAccessPlates() {
   const rows = (await pool.query('SELECT email, plate FROM access_plates')).rows;
