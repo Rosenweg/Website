@@ -3192,12 +3192,12 @@ app.post('/api/access/me/plates', authMiddleware, async (req, res) => {
   const plate = normPlate(req.body?.plate);
   if (!ACCESS_PLATE_RE.test(plate)) return res.status(400).json({ error: 'Ungültiges Kennzeichen' });
   const u = await unifiUserByEmail(req.user?.email);
-  if (u) { // direkt in UniFi (UniFi = Source)
-    const list = (u.license_plates || []).map(p => p.credential);
-    if (!list.includes(plate)) list.push(plate);
-    const r = await unifiAccessRaw('PUT', `/users/${u.id}/license_plates`, list);
-    if (!accessOk(r)) return res.status(r.status === 0 ? 502 : r.status).json({ error: r.body?.msg || 'Speichern in UniFi fehlgeschlagen' });
-    return res.json({ success: true });
+  if (u) { // direkt in UniFi (UniFi = Source). PUT addiert (assign) -> NUR das neue schicken, sonst CODE_..._ALREADY_EXIST.
+    if ((u.license_plates || []).some(p => p.credential === plate)) return res.json({ success: true }); // schon da = idempotent ok
+    const r = await unifiAccessRaw('PUT', `/users/${u.id}/license_plates`, [plate]);
+    if (r.body?.code === 'SUCCESS') return res.json({ success: true });
+    if (r.body?.code === 'CODE_CREDS_LICENSE_PLATE_ALREADY_EXIST') return res.status(409).json({ error: 'Dieses Kennzeichen ist bereits registriert (evtl. bei einer anderen Person)' });
+    return res.status(r.status === 0 ? 502 : 400).json({ error: r.body?.msg || 'Speichern in UniFi fehlgeschlagen' });
   }
   if (!req.user?.email) return res.status(400).json({ error: 'Keine E-Mail im Profil' });
   await pool.query('INSERT INTO access_plates(email, plate) VALUES($1,$2) ON CONFLICT (email, plate) DO NOTHING', [req.user.email, plate]);
@@ -3236,8 +3236,8 @@ async function syncAccessPlates() {
     const current = new Set((u.license_plates || []).map(p => p.credential));
     const toAdd = dbPlates.filter(p => !current.has(p));
     if (toAdd.length) {
-      const r = await unifiAccessRaw('PUT', `/users/${u.id}/license_plates`, [...current, ...toAdd]);
-      if (!accessOk(r)) continue;
+      const r = await unifiAccessRaw('PUT', `/users/${u.id}/license_plates`, toAdd); // PUT addiert -> nur die neuen
+      if (r.body?.code !== 'SUCCESS') continue;
     }
     await pool.query('DELETE FROM access_plates WHERE lower(email)=$1', [email]); // migriert → UniFi ist Source
     migratedUsers++; migratedPlates += dbPlates.length;
