@@ -444,7 +444,6 @@ const RosenwegNav = {
             </button>
             <div class="nav-dropdown-menu hidden absolute left-0 mt-1 w-56 bg-white rounded-lg shadow-lg border py-1 z-50">
               <a href="${base}telefonbuch.html" class="${dropA('telefonbuch')} block px-4 py-2 text-sm">📇 Telefonbuch</a>
-              <a href="${base}waschkueche.html" class="${dropA('waschkueche')} block px-4 py-2 text-sm">🧺 Waschküche</a>
               <a href="${base}wlan.html" class="${dropA('wlan')} block px-4 py-2 text-sm">📶 WLAN-Zugang</a>
               <a href="${base}tv.html" class="${dropA('tv')} block px-4 py-2 text-sm">📺 TV / Fernsehen</a>
               <a href="https://pwa.rosenweg4303.ch/reparatur/" class="block px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">🔧 Schaden melden ↗</a>
@@ -503,7 +502,6 @@ const RosenwegNav = {
 
         <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Bewohner</div>
         <a href="${base}telefonbuch.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📇 Telefonbuch</a>
-        <a href="${base}waschkueche.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🧺 Waschküche</a>
         <a href="${base}wlan.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📶 WLAN-Zugang</a>
         <a href="${base}tv.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📺 TV / Fernsehen</a>
         <a href="https://pwa.rosenweg4303.ch/reparatur/" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🔧 Schaden melden ↗</a>
