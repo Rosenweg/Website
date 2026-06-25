@@ -392,7 +392,8 @@
         if (!cards.length) { el.innerHTML = '<span class="text-gray-400">Keine Karten</span>'; return; }
         el.innerHTML = cards.map(c => {
             const tok = c.token || c.id || c.card_id || '';
-            return `<div class="flex items-center justify-between py-0.5"><span>🪪 ${esc(c.display_id || c.id || tok)}</span>
+            const lbl = 'NFC-Karte ····' + String(c.id || tok).slice(-4);
+            return `<div class="flex items-center justify-between py-0.5"><span>🪪 ${esc(lbl)}</span>
                 <button onclick="nfcRemove('${esc(u.id)}','${esc(tok)}', this)" class="text-red-600 hover:underline text-xs">entfernen</button></div>`;
         }).join('');
     }
