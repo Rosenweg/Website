@@ -16100,16 +16100,42 @@ app.get('/api/reklamationen/:id/history', authMiddleware, requirePermission('rek
 // Technik dokumentiert einen Arbeitsschritt im Verlauf (was wurde wann gemacht).
 // Reiner Protokoll-Eintrag in reklamation_events — anders als 'notiz' (einzelnes,
 // ueberschreibbares Feld) bleiben Schritte als chronologische Timeline erhalten.
+// Der Melder wird ueber jeden Schritt informiert (E-Mail + WhatsApp + Web-Push).
+async function notifyMelderSchritt(rk, text) {
+  const p = (await pool.query('SELECT name, email FROM personen WHERE id = $1', [rk.person_id])).rows[0];
+  if (!p) return;
+  const besch = (rk.beschreibung || '').slice(0, 100);
+  if (p.email) {
+    await sendTemplated('reklamation-schritt', {
+      person_name: p.name, reklamation_id: rk.id, schritt: text, beschreibung_kurz: besch, site_url: SITE_URL,
+    }, {
+      from: MAIL_FROM, to: p.email,
+      subject: `Update zu deiner Reklamation #${rk.id}`,
+      text: `Hallo ${p.name},\n\nzu deiner Reklamation "${besch}" gibt es ein Update von der Technik:\n\n${text}\n\nDetails: ${SITE_URL}/reklamationen.html`,
+    });
+  }
+  pushWhatsappIfOptIn({
+    personId: rk.person_id, sourceType: 'reklamation-schritt', sourceId: rk.id,
+    body: `🔧 *Update zu Reklamation #${rk.id}*\n${besch}\n\n${text.slice(0, 200)}`,
+  }).catch(() => {});
+  if (p.email) {
+    webpushLib.sendToEmails([p.email], {
+      title: `Update: Reklamation #${rk.id}`, body: text.slice(0, 80),
+      url: 'https://pwa.rosenweg4303.ch/reparatur/', tag: `rekl-${rk.id}`,
+    }).catch(() => {});
+  }
+}
 app.post('/api/reklamationen/:id/history', authMiddleware, requirePermission('reklamationen', 'write'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
     const text = String((req.body || {}).text || '').trim();
     if (!text) return res.status(400).json({ error: 'Schritt darf nicht leer sein' });
-    const exists = await pool.query('SELECT id FROM reklamationen WHERE id = $1', [id]);
-    if (exists.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const rk = (await pool.query('SELECT id, person_id, beschreibung FROM reklamationen WHERE id = $1', [id])).rows[0];
+    if (!rk) return res.status(404).json({ error: 'Nicht gefunden' });
     const who = req.user.name || req.user.email || 'unbekannt';
     await logReklEvent(id, who, `🔧 ${text.slice(0, 480)}`);
+    if (rk.person_id) notifyMelderSchritt(rk, text).catch((e) => console.warn('[reklamation-schritt-notify]', e.message));
     const r = await pool.query('SELECT created_at, who, event FROM reklamation_events WHERE reklamation_id = $1 ORDER BY created_at ASC, id ASC', [id]);
     res.json({ ok: true, events: r.rows });
   } catch (e) { console.error('[reklamation-history-post]', e); res.status(500).json({ error: 'Fehler' }); }
