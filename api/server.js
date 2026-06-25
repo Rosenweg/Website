@@ -16033,7 +16033,7 @@ app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamation
         if (p.rows[0]) {
           const labelMap = { weitergeleitet: 'an Handwerker weitergeleitet', erledigt: 'als erledigt markiert', abgewiesen: 'abgewiesen', offen: 'wieder geoeffnet' };
           const label = labelMap[b.status] || b.status;
-          if (p.rows[0].email) {
+          if (['erledigt', 'abgewiesen'].includes(b.status) && p.rows[0].email) {
             await sendTemplated('reklamation-status', {
               person_name: p.rows[0].name, reklamation_id: updated.id, label,
               beschreibung_kurz: (updated.beschreibung || '').slice(0, 100),
@@ -16100,20 +16100,24 @@ app.get('/api/reklamationen/:id/history', authMiddleware, requirePermission('rek
 // Technik dokumentiert einen Arbeitsschritt im Verlauf (was wurde wann gemacht).
 // Reiner Protokoll-Eintrag in reklamation_events — anders als 'notiz' (einzelnes,
 // ueberschreibbares Feld) bleiben Schritte als chronologische Timeline erhalten.
-// Der Melder wird ueber jeden Schritt informiert (E-Mail + WhatsApp + Web-Push).
+// Melder-Bestätigung bei Eröffnung (E-Mail). E-Mail an den Melder gibt's NUR bei Eröffnung + Abschluss.
+async function notifyMelderEroeffnet(reklId, email, beschreibung) {
+  if (!email) return;
+  const besch = (beschreibung || '').slice(0, 100);
+  await sendTemplated('reklamation-eroeffnet', {
+    reklamation_id: reklId, beschreibung_kurz: besch, site_url: SITE_URL,
+  }, {
+    from: MAIL_FROM, to: email,
+    subject: `Deine Reklamation #${reklId} ist eingegangen`,
+    text: `Hallo,\n\ndeine Reklamation "${besch}" ist bei uns eingegangen (#${reklId}) und wird bearbeitet.\nDu wirst informiert, sobald sie abgeschlossen ist.\n\nDetails: ${SITE_URL}/reklamationen.html`,
+  });
+}
+// Arbeitsschritt -> Melder nur per WhatsApp + Web-Push (KEINE E-Mail; die gibt's nur bei Eröffnung/Abschluss).
 async function notifyMelderSchritt(rk, text) {
   const p = (await pool.query('SELECT name, email FROM personen WHERE id = $1', [rk.person_id])).rows[0];
   if (!p) return;
   const besch = (rk.beschreibung || '').slice(0, 100);
-  if (p.email) {
-    await sendTemplated('reklamation-schritt', {
-      person_name: p.name, reklamation_id: rk.id, schritt: text, beschreibung_kurz: besch, site_url: SITE_URL,
-    }, {
-      from: MAIL_FROM, to: p.email,
-      subject: `Update zu deiner Reklamation #${rk.id}`,
-      text: `Hallo ${p.name},\n\nzu deiner Reklamation "${besch}" gibt es ein Update von der Technik:\n\n${text}\n\nDetails: ${SITE_URL}/reklamationen.html`,
-    });
-  }
+  // KEINE E-Mail bei Arbeitsschritten — E-Mail nur bei Eröffnung + Abschluss. Hier nur WhatsApp + Web-Push.
   pushWhatsappIfOptIn({
     personId: rk.person_id, sourceType: 'reklamation-schritt', sourceId: rk.id,
     body: `🔧 *Update zu Reklamation #${rk.id}*\n${besch}\n\n${text.slice(0, 200)}`,
@@ -16284,6 +16288,7 @@ app.post('/api/reklamationen', authMiddleware, async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,'web','offen') RETURNING id, kategorie, beschreibung, status, created_at`,
       [personId, stweg, kategorie, beschreibung, bildPfad, standort]);
     logReklEvent(r.rows[0].id, email, 'Erstellt (Web-Formular)' + (standort ? ` · 📍 ${standort}` : '')).catch(() => {});
+    notifyMelderEroeffnet(r.rows[0].id, email, beschreibung).catch((e) => console.warn('[reklamation-eroeffnet-notify]', e.message));
     // Web-Push an die Technik (neue Meldung -> Cockpit)
     getTechnikEmails().then((emails) => webpushLib.sendToEmails(emails, {
       title: 'Neue Reparatur-Meldung', body: `${kategorie}: ${beschreibung.slice(0, 80)}`,
@@ -16400,6 +16405,7 @@ app.post('/api/reklamationen/oeffentlich', async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,'web','offen') RETURNING id, kategorie, beschreibung, status, created_at`,
       [personId, stweg, kategorie, beschreibung, bildPfad, standort]);
     logReklEvent(r.rows[0].id, email, 'Erstellt (Web-Formular)' + (standort ? ` · 📍 ${standort}` : '')).catch(() => {});
+    notifyMelderEroeffnet(r.rows[0].id, email, beschreibung).catch((e) => console.warn('[reklamation-eroeffnet-notify]', e.message));
     // Web-Push an die Technik (neue Meldung -> Cockpit)
     getTechnikEmails().then((emails) => webpushLib.sendToEmails(emails, {
       title: 'Neue Reparatur-Meldung', body: `${kategorie}: ${beschreibung.slice(0, 80)}`,
