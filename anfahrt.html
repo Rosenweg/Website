@@ -6,6 +6,7 @@
     <title>Anfahrt &amp; Besucherparkplätze — Rosenweg</title>
     <link rel="icon" href="/logo-rosenweg.png">
     <meta name="description" content="Anfahrtsbeschreibung und Standort der Besucherparkplätze der Überbauung Rosenweg, 4303 Kaiseraugst.">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/js/authentik-auth.js?v=2"></script>
     <script src="/js/nav.js?v=3"></script>
@@ -38,13 +39,7 @@
 
         <section class="bg-white rounded-xl shadow-sm border p-5 mb-6">
             <h2 class="text-lg font-semibold text-gray-800 mb-3">Standort auf der Karte</h2>
-            <div class="aspect-[16/10] w-full overflow-hidden rounded-lg border">
-                <iframe
-                    width="100%" height="100%" frameborder="0" scrolling="no" marginheight="0" marginwidth="0"
-                    src="https://www.openstreetmap.org/export/embed.html?bbox=7.7400%2C47.5370%2C7.7560%2C47.5440&amp;layer=mapnik&amp;marker=47.54042%2C7.74795"
-                    style="border: 0;"
-                    title="OpenStreetMap-Karte Rosenweg Kaiseraugst"></iframe>
-            </div>
+            <div id="standort-map" class="w-full rounded-lg border" style="height: 460px;"></div>
             <div class="flex flex-wrap gap-3 mt-3 text-sm">
                 <a href="https://www.openstreetmap.org/?mlat=47.54042&amp;mlon=7.74795#map=17/47.54042/7.74795"
                    target="_blank" rel="noopener"
@@ -138,5 +133,17 @@
             <p class="font-mono">Junkholzweg, 4303 Kaiseraugst</p>
         </section>
     </main>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+      (function () {
+        var el = document.getElementById('standort-map');
+        if (!el || typeof L === 'undefined') return;
+        var map = L.map(el, { scrollWheelZoom: false }).setView([47.54042, 7.74795], 16);
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19, attribution: '© OpenStreetMap-Mitwirkende'
+        }).addTo(map);
+        L.marker([47.54042, 7.74795]).addTo(map).bindPopup('Rosenweg · Junkholzweg, 4303 Kaiseraugst');
+      })();
+    </script>
 </body>
 </html>
