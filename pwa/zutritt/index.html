@@ -162,7 +162,7 @@
       try {
         const { plates } = await api('/me/plates');
         const items = (plates || []).map(p => `<div class="flex items-center justify-between bg-white rounded-2xl border px-4 py-3 mb-2">
-          <span>🚗 ${esc(p.plate)}</span><button onclick="rmPlate(${p.id})" class="text-red-600 text-xs">entfernen</button></div>`).join('');
+          <span>🚗 ${esc(p.plate)}</span><button onclick="rmPlate('${esc(String(p.id))}')" class="text-red-600 text-xs">entfernen</button></div>`).join('');
         el.innerHTML = (items || '<div class="text-slate-400 text-sm mb-2">Noch kein Kennzeichen hinterlegt.</div>') +
           `<div class="flex gap-2"><input id="plate-in" placeholder="z.B. AG 12345 oder B-MW 1234" maxlength="16" class="flex-1 border rounded-xl px-3 py-2.5 text-sm uppercase">
           <button onclick="addPlate()" class="bg-red-700 active:bg-red-800 text-white font-medium rounded-xl px-5 text-lg">+</button></div>
@@ -176,7 +176,7 @@
     }
     async function rmPlate(id) {
       if (!confirm('Kennzeichen entfernen?')) return;
-      try { await api('/me/plates/' + id, { method: 'DELETE' }); toast('Entfernt', true); loadPlates(); }
+      try { await api('/me/plates/' + encodeURIComponent(id), { method: 'DELETE' }); toast('Entfernt', true); loadPlates(); }
       catch (e) { toast(e.message, false); }
     }
 
