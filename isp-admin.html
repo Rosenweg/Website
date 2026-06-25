@@ -266,6 +266,7 @@
           <button data-tab="vpn" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">🔒 VPN-Konten</button>
           <button data-tab="mail" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">✉ Mailserver/PMG</button>
           <button data-tab="maint" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">🔔 Wartungen <span id="maint-active-badge" class="hidden text-xs bg-red-100 text-red-800 px-1.5 py-0.5 rounded">0</span></button>
+          <button data-tab="pvemsg" class="tab-btn py-2 px-1 text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-700">🖥 Host-Meldungen <span id="pvemsg-badge" class="hidden text-xs bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">0</span></button>
         </nav>
       </div>
 
@@ -364,6 +365,17 @@
         </div>
         <div id="maint-list" class="space-y-2"></div>
       </div>
+
+      <div id="tab-pvemsg" class="tab-view hidden">
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <p class="text-sm text-gray-600">System-/Cron-Meldungen der Proxmox-Hosts (statt E-Mail). <span id="pvemsg-count" class="text-gray-400"></span></p>
+          <div class="flex gap-2">
+            <button onclick="loadPveMessages()" class="text-sm bg-gray-100 px-3 py-1.5 rounded">↻ Aktualisieren</button>
+            <button onclick="pveMarkAllRead()" class="text-sm bg-blue-600 text-white px-3 py-1.5 rounded">Alle gelesen</button>
+          </div>
+        </div>
+        <div id="pvemsg-list" class="space-y-2"></div>
+      </div>
     </div>
   </main>
 
@@ -388,6 +400,7 @@
     document.getElementById('content').classList.remove('hidden');
     document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
     loadSubs(); loadVlans(); loadIps(); loadRp(); loadVpns(); loadRelays(); loadMailboxRequests(); loadRouters(); loadMaint(); checkMailcow();
+    loadPveMessages(); setInterval(loadPveMessages, 60000);
     setInterval(loadMaint, 60000); // Wartungen aktualisieren (auto-detected updates)
     loadNocDashboard(); runNocHealthChecks(); loadNocUnifi();
     setInterval(loadNocDashboard, 30000); setInterval(runNocHealthChecks, 60000); setInterval(loadNocUnifi, 30000);
@@ -416,6 +429,56 @@
     });
     document.querySelectorAll('.tab-view').forEach(v => v.classList.add('hidden'));
     document.getElementById('tab-' + t).classList.remove('hidden');
+  }
+
+  // === PVE-Host-Meldungen ===
+  let pveMessages = [];
+  async function loadPveMessages() {
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/pve-messages');
+      if (!r.ok) return;
+      const d = await r.json();
+      pveMessages = d.messages || [];
+      const badge = document.getElementById('pvemsg-badge');
+      if (d.unread > 0) { badge.textContent = d.unread; badge.classList.remove('hidden'); } else badge.classList.add('hidden');
+      document.getElementById('pvemsg-count').textContent = `· ${pveMessages.length} gesamt, ${d.unread} ungelesen`;
+      renderPveMessages();
+    } catch {}
+  }
+  function renderPveMessages() {
+    const wrap = document.getElementById('pvemsg-list');
+    if (!pveMessages.length) { wrap.innerHTML = '<p class="text-gray-400 italic text-sm p-4 text-center">Keine Meldungen.</p>'; return; }
+    const sevDot = { error: 'bg-red-500', warning: 'bg-amber-500', info: 'bg-gray-300' };
+    const sevBadge = { error: 'bg-red-100 text-red-800', warning: 'bg-amber-100 text-amber-800', info: 'bg-gray-100 text-gray-600' };
+    wrap.innerHTML = pveMessages.map(m => `
+      <div class="border rounded p-3 ${m.read_at ? 'bg-white' : 'bg-sky-50 border-sky-200'}">
+        <div class="flex items-start justify-between gap-2">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="inline-block w-2.5 h-2.5 rounded-full ${sevDot[m.severity] || sevDot.info}"></span>
+            <span class="text-xs font-mono bg-slate-100 px-2 py-0.5 rounded">${esc(m.host)}</span>
+            <span class="text-xs ${sevBadge[m.severity] || sevBadge.info} px-2 py-0.5 rounded">${esc(m.severity)}</span>
+            <span class="font-medium text-sm">${esc(m.subject)}</span>
+          </div>
+          <div class="flex items-center gap-2 flex-none text-xs">
+            <span class="text-gray-400">${fmtDt(m.received_at)}</span>
+            ${m.read_at ? '' : `<button onclick="pveMarkRead(${m.id})" class="text-blue-600 hover:underline">gelesen</button>`}
+            <button onclick="pveDelete(${m.id})" class="text-red-600 hover:underline" title="löschen">✕</button>
+          </div>
+        </div>
+        ${m.body ? `<details class="mt-1"><summary class="text-xs text-gray-500 cursor-pointer">Details</summary><pre class="bg-gray-50 border rounded p-2 mt-1 text-xs overflow-auto whitespace-pre-wrap">${esc(m.body)}</pre></details>` : ''}
+      </div>`).join('');
+  }
+  async function pveMarkRead(id) {
+    await AuthentikAuth.apiFetch('/api/pve-messages/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [id] }) });
+    await loadPveMessages();
+  }
+  async function pveMarkAllRead() {
+    await AuthentikAuth.apiFetch('/api/pve-messages/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+    await loadPveMessages();
+  }
+  async function pveDelete(id) {
+    await AuthentikAuth.apiFetch('/api/pve-messages/' + id, { method: 'DELETE' });
+    await loadPveMessages();
   }
 
   // === Subscribers / Erschliessung ===
