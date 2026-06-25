@@ -241,6 +241,30 @@
     }
   }
 
+  // ---- QR mit Rosenweg-Logo in der Mitte ----
+  // Fehlerkorrektur 'H' (~30%) verträgt die mittige Logo-Abdeckung problemlos.
+  const QR_LOGO_SRC = '/logo-rosenweg-technik.png';
+  const qrLogoImg = new Image();
+  qrLogoImg.src = QR_LOGO_SRC;
+  function whenLogoReady(cb) {
+    if (qrLogoImg.complete && qrLogoImg.naturalWidth) cb();
+    else qrLogoImg.addEventListener('load', cb, { once: true });
+  }
+  function drawQrWithLogo(canvas, url, size) {
+    new QRious({ element: canvas, value: url, size: size, level: 'H', foreground: '#111827' });
+    whenLogoReady(function () {
+      const ctx = canvas.getContext('2d');
+      const L = Math.round(size * 0.22);   // Logo-Durchmesser ~22%
+      const pad = Math.round(L * 0.16);    // weißer Ring drumherum
+      const cx = size / 2, cy = size / 2;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(cx, cy, (L + pad * 2) / 2, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.drawImage(qrLogoImg, cx - L / 2, cy - L / 2, L, L);
+    });
+  }
+
   // ---- QR-Modal (einzeln) ----
   function showQr(id) {
     const o = orte.find(x => x.id === id); if (!o) return;
@@ -248,7 +272,7 @@
     const url = ortUrl(o.code);
     document.getElementById('qm-name').textContent = '📍 ' + o.name;
     document.getElementById('qm-url').textContent = url;
-    new QRious({ element: document.getElementById('qm-canvas'), value: url, size: 240, level: 'M', foreground: '#111827' });
+    drawQrWithLogo(document.getElementById('qm-canvas'), url, 240);
     document.getElementById('qrModal').classList.remove('hidden');
   }
   function closeQr() { document.getElementById('qrModal').classList.add('hidden'); qrCurrent = null; }
@@ -259,7 +283,7 @@
     a.download = 'qr-' + qrCurrent.code + '.png';
     a.click();
   }
-  function printOne() { if (qrCurrent) { buildStickers([qrCurrent]); closeQr(); window.print(); } }
+  function printOne() { if (qrCurrent) { buildStickers([qrCurrent]); closeQr(); whenLogoReady(() => window.print()); } }
 
   // ---- Sticker-Bögen bauen + drucken ----
   function buildStickers(list) {
@@ -273,14 +297,14 @@
         <div style="font-size:7.5pt;color:#94a3b8;">Rosenweg${o.stweg ? ' · ' + esc(stwegLabel(o.stweg)) : ''}</div>
       </div>`).join('');
     area.querySelectorAll('canvas[data-qr]').forEach(c => {
-      new QRious({ element: c, value: ortUrl(c.dataset.qr), size: 180, level: 'M', foreground: '#111827' });
+      drawQrWithLogo(c, ortUrl(c.dataset.qr), 180);
     });
   }
   function printAll() {
     const active = orte.filter(o => o.aktiv);
     if (!active.length) { alert('Keine aktiven Orte zum Drucken.'); return; }
     buildStickers(active);
-    window.print();
+    whenLogoReady(() => window.print());
   }
 
   // ---- Bearbeiten ----
