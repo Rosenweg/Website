@@ -6,7 +6,7 @@
  *  - /api/-Requests: NIE cachen — immer Netzwerk.
  *  - Sonstige GETs: stale-while-revalidate.
  */
-const CACHE = 'rosenweg-doodle-v1';
+const CACHE = 'rosenweg-doodle-v2';
 const SHELL = [
   '/doodle/',
   '/doodle/index.html',
