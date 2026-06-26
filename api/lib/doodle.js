@@ -74,6 +74,9 @@ async function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_doodle_votes_poll   ON doodle_votes(poll_id);
     CREATE INDEX IF NOT EXISTS idx_doodle_invites_poll ON doodle_invites(poll_id);
     CREATE INDEX IF NOT EXISTS idx_doodle_invites_mail ON doodle_invites(LOWER(email));
+    ALTER TABLE doodle_polls ADD COLUMN IF NOT EXISTS stweg INTEGER;
+    ALTER TABLE doodle_polls ADD COLUMN IF NOT EXISTS project_slug VARCHAR(120);
+    ALTER TABLE doodle_polls ADD COLUMN IF NOT EXISTS gremium VARCHAR(120);
   `);
 }
 
@@ -192,18 +195,43 @@ function mountDoodle({ app }) {
     res.json({ email: req.actor.email, name: req.actor.name, isMember: req.actor.isMember, isAdmin: req.actor.isAdmin });
   });
 
+  // ── Nächster Termin: abgeleitet aus abgeschlossenen Umfragen mit fixem,
+  //    zukünftigem Termin (kein separater Termin-Datensatz nötig). ──────────
+  app.get('/api/doodle/next', doodleAuth, async (req, res) => {
+    try {
+      const conds = ["p.status = 'geschlossen'", 'p.final_option_id IS NOT NULL', 'o.starts_at IS NOT NULL', 'o.starts_at >= NOW()'];
+      const params = [];
+      if (req.query.project) { params.push(String(req.query.project)); conds.push(`p.project_slug = $${params.length}`); }
+      if (req.query.stweg) { params.push(parseInt(req.query.stweg, 10)); conds.push(`p.stweg = $${params.length}`); }
+      if (req.query.gremium) { params.push(String(req.query.gremium)); conds.push(`p.gremium = $${params.length}`); }
+      const r = await pool.query(
+        `SELECT p.id, p.titel, p.ort, o.label, o.starts_at
+           FROM doodle_polls p JOIN doodle_options o ON o.id = p.final_option_id
+          WHERE ${conds.join(' AND ')}
+          ORDER BY o.starts_at ASC LIMIT 1`, params);
+      res.json({ next: r.rows[0] || null });
+    } catch (e) { console.error('[doodle] next', e); res.status(500).json({ error: 'Fehler' }); }
+  });
+
   // ── Umfragen-Liste ───────────────────────────────────────────────────────
   app.get('/api/doodle/polls', doodleAuth, async (req, res) => {
     try {
       const a = req.actor;
-      const params = [];
-      let where = '';
-      if (!a.isMember) { params.push(a.email); where = `WHERE p.id IN (SELECT poll_id FROM doodle_invites WHERE LOWER(email) = $1)`; }
+      const conds = [], params = [];
+      if (!a.isMember) { params.push(a.email); conds.push(`p.id IN (SELECT poll_id FROM doodle_invites WHERE LOWER(email) = $${params.length})`); }
+      if (req.query.stweg) { params.push(parseInt(req.query.stweg, 10)); conds.push(`p.stweg = $${params.length}`); }
+      if (req.query.project) { params.push(String(req.query.project)); conds.push(`p.project_slug = $${params.length}`); }
+      if (req.query.gremium) { params.push(String(req.query.gremium)); conds.push(`p.gremium = $${params.length}`); }
+      params.push(a.email); const meIdx = params.length;
+      const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
       const r = await pool.query(
         `SELECT p.id, p.titel, p.ort, p.status, p.deadline, p.created_at, p.creator_name, p.final_option_id,
+                p.stweg, p.project_slug, p.gremium,
+                (SELECT label FROM doodle_options fo WHERE fo.id = p.final_option_id) AS final_label,
+                (SELECT starts_at FROM doodle_options fo WHERE fo.id = p.final_option_id) AS final_starts_at,
                 (SELECT COUNT(*) FROM doodle_options o WHERE o.poll_id = p.id) AS options_count,
                 (SELECT COUNT(DISTINCT voter_email) FROM doodle_votes v WHERE v.poll_id = p.id) AS voters_count,
-                EXISTS(SELECT 1 FROM doodle_votes v WHERE v.poll_id = p.id AND LOWER(v.voter_email) = $${params.push(a.email)}) AS i_voted
+                EXISTS(SELECT 1 FROM doodle_votes v WHERE v.poll_id = p.id AND LOWER(v.voter_email) = $${meIdx}) AS i_voted
            FROM doodle_polls p ${where}
           ORDER BY (p.status = 'offen') DESC, p.created_at DESC LIMIT 300`, params);
       res.json({ polls: r.rows, me: { email: a.email, name: a.name, isMember: a.isMember, isAdmin: a.isAdmin } });
@@ -228,12 +256,15 @@ function mountDoodle({ app }) {
       const ort = b.ort ? String(b.ort).trim().slice(0, 255) : null;
       const deadline = b.deadline ? new Date(b.deadline) : null;
       const allowAdd = !!b.allow_add_options;
+      const stweg = Number.isFinite(parseInt(b.stweg, 10)) ? parseInt(b.stweg, 10) : null;
+      const projectSlug = b.project_slug ? String(b.project_slug).trim().slice(0, 120) : null;
+      const gremium = b.gremium ? String(b.gremium).trim().slice(0, 120) : null;
 
       await client.query('BEGIN');
       const pr = await client.query(
-        `INSERT INTO doodle_polls (creator_email, creator_name, titel, beschreibung, ort, allow_add_options, deadline)
-         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-        [req.actor.email, req.actor.name, titel, beschreibung, ort, allowAdd, deadline && !isNaN(deadline) ? deadline : null]);
+        `INSERT INTO doodle_polls (creator_email, creator_name, titel, beschreibung, ort, allow_add_options, deadline, stweg, project_slug, gremium)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+        [req.actor.email, req.actor.name, titel, beschreibung, ort, allowAdd, deadline && !isNaN(deadline) ? deadline : null, stweg, projectSlug, gremium]);
       const pollId = pr.rows[0].id;
       for (let i = 0; i < options.length; i++) {
         const o = options[i];
@@ -287,6 +318,7 @@ function mountDoodle({ app }) {
           id: poll.id, titel: poll.titel, beschreibung: poll.beschreibung, ort: poll.ort,
           allow_add_options: poll.allow_add_options, status: poll.status, final_option_id: poll.final_option_id,
           deadline: poll.deadline, creator_name: poll.creator_name, created_at: poll.created_at,
+          stweg: poll.stweg, project_slug: poll.project_slug, gremium: poll.gremium,
         },
         options: opts.rows,
         votes: votes.rows,

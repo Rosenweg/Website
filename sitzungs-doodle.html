@@ -70,7 +70,22 @@
       return r;
     }
     let ME = null;
+    let ZD = { stwegen: [], projekte: [], gremien: ['Ausschuss', 'Präsidium', 'Technik'] };
+    const FILTER = { stweg: null, project: null, gremium: null };
     const $ = id => document.getElementById(id);
+    async function loadZuordnung() {
+      try { const r = await fetch('/site-config.json'); const c = await r.json(); ZD.stwegen = (c.stwegen || []).map(s => ({ n: parseInt(String(s.slug || '').replace(/\D/g, ''), 10), name: s.name || s.label || s.slug })); } catch (e) {}
+      if (isMember()) { try { const r = await dFetch('/api/projects-mini'); const d = await r.json(); ZD.projekte = d.projekte || []; } catch (e) {} }
+    }
+    const stwegName = n => { const s = ZD.stwegen.find(x => x.n === Number(n)); return s ? (s.name || ('STWEG ' + n)) : ('STWEG ' + n); };
+    const projName = slug => { const p = ZD.projekte.find(x => x.slug === slug); return p ? (p.title || slug) : slug; };
+    function zBadges(p) {
+      let h = '';
+      if (p.stweg) h += `<span class="text-xs bg-sky-100 text-sky-700 rounded-full px-2 py-0.5">🏠 ${escapeHtml(stwegName(p.stweg))}</span> `;
+      if (p.project_slug) h += `<span class="text-xs bg-violet-100 text-violet-700 rounded-full px-2 py-0.5">🏗 ${escapeHtml(projName(p.project_slug))}</span> `;
+      if (p.gremium) h += `<span class="text-xs bg-amber-100 text-amber-700 rounded-full px-2 py-0.5">👥 ${escapeHtml(p.gremium)}</span> `;
+      return h;
+    }
     const fmtDate = s => { if (!s) return ''; try { return new Date(s).toLocaleString('de-CH', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return s; } };
     const fmtDay = s => { if (!s) return ''; try { return new Date(s).toLocaleDateString('de-CH', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }); } catch { return s; } };
     const escapeHtml = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -116,33 +131,50 @@
       if (isMember()) { const u = AuthentikAuth.getUser(); who = `Angemeldet als <b>${escapeHtml(u?.name || u?.email || '')}</b>`; }
       else { const v = JSON.parse(localStorage.getItem('doodleVoter') || '{}'); who = `Angemeldet als <b>${escapeHtml(v.name || v.email || '')}</b> (Gast) · <a href="#" onclick="logoutDoodle();return false" class="text-teal-700 underline">abmelden</a>`; }
       $('authbar').innerHTML = who;
+      await loadZuordnung();
+      const q = new URLSearchParams(location.search);
+      FILTER.stweg = q.get('stweg'); FILTER.project = q.get('project'); FILTER.gremium = q.get('gremium');
+      if (q.get('new') === '1' && isMember()) { await loadList(); showCreate(); return; }
       await loadList();
-      // Direkt-Link ?poll=ID
-      const pid = new URLSearchParams(location.search).get('poll');
+      const pid = q.get('poll');
       if (pid) openPoll(parseInt(pid, 10));
     }
 
     async function loadList() {
-      const r = await dFetch('/api/doodle/polls');
+      const qs = [];
+      if (FILTER.stweg) qs.push('stweg=' + encodeURIComponent(FILTER.stweg));
+      if (FILTER.project) qs.push('project=' + encodeURIComponent(FILTER.project));
+      if (FILTER.gremium) qs.push('gremium=' + encodeURIComponent(FILTER.gremium));
+      const r = await dFetch('/api/doodle/polls' + (qs.length ? '?' + qs.join('&') : ''));
       if (!r.ok) { $('list').innerHTML = '<p class="text-red-600">Konnte Umfragen nicht laden.</p>'; return; }
       const d = await r.json(); ME = d.me || null;
       $('toolbar').classList.toggle('hidden', !(ME && ME.isMember));
       const polls = d.polls || [];
-      if (!polls.length) { $('list').innerHTML = '<p class="text-slate-500">Noch keine Terminumfragen.</p>'; return; }
-      $('list').innerHTML = polls.map(p => {
+      let head = '';
+      if (FILTER.stweg || FILTER.project || FILTER.gremium) {
+        const lbl = FILTER.project ? ('Projekt: ' + projName(FILTER.project)) : FILTER.stweg ? stwegName(FILTER.stweg) : ('Gremium: ' + FILTER.gremium);
+        head = `<div class="flex items-center justify-between mb-2"><span class="text-sm text-slate-600">Gefiltert auf <b>${escapeHtml(lbl)}</b></span><a href="${location.pathname}" class="text-sm text-teal-700 underline">alle anzeigen</a></div>`;
+      }
+      if (!polls.length) { $('list').innerHTML = head + '<p class="text-slate-500">Keine Terminumfragen.</p>'; return; }
+      $('list').innerHTML = head + polls.map(p => {
         const closed = p.status !== 'offen';
         const badge = closed ? '<span class="text-xs bg-slate-200 text-slate-600 rounded-full px-2 py-0.5">geschlossen</span>'
           : '<span class="text-xs bg-green-100 text-green-700 rounded-full px-2 py-0.5">offen</span>';
         const voted = p.i_voted ? '<span class="text-xs text-teal-700">✓ abgestimmt</span>' : '';
+        const termin = (closed && p.final_starts_at) ? '<span class="text-emerald-700 font-medium">📅 ' + fmtDate(p.final_starts_at) + '</span>'
+          : (closed && p.final_label) ? '<span class="text-emerald-700 font-medium">📅 ' + escapeHtml(p.final_label) + '</span>' : '';
+        const zb = zBadges(p);
         return `<div class="bg-white rounded-xl shadow p-4 cursor-pointer hover:shadow-md" onclick="openPoll(${p.id})">
           <div class="flex items-center justify-between gap-2">
             <h3 class="font-semibold text-lg">${escapeHtml(p.titel)}</h3>${badge}
           </div>
+          ${zb ? '<div class="mt-1 flex flex-wrap gap-1">' + zb + '</div>' : ''}
           <div class="text-sm text-slate-500 mt-1 flex flex-wrap gap-x-4 gap-y-1">
             ${p.ort ? '<span>📍 ' + escapeHtml(p.ort) + '</span>' : ''}
             <span>📋 ${p.options_count} Termine</span>
             <span>👥 ${p.voters_count} Stimmen</span>
-            ${p.deadline ? '<span>⏰ bis ' + fmtDay(p.deadline) + '</span>' : ''}
+            ${p.deadline && !closed ? '<span>⏰ bis ' + fmtDay(p.deadline) + '</span>' : ''}
+            ${termin}
             ${voted}
           </div>
           <div class="text-xs text-slate-400 mt-1">von ${escapeHtml(p.creator_name || '—')}</div>
@@ -194,9 +226,10 @@
             <span class="text-xs ${closed ? 'bg-slate-200 text-slate-600' : 'bg-green-100 text-green-700'} rounded-full px-2 py-0.5">${closed ? 'geschlossen' : 'offen'}</span>
           </div>
           ${p.ort ? '<p class="text-slate-500 mt-1">📍 ' + escapeHtml(p.ort) + '</p>' : ''}
+          ${zBadges(p) ? '<div class="mt-2 flex flex-wrap gap-1">' + zBadges(p) + '</div>' : ''}
           ${p.beschreibung ? '<p class="mt-2 whitespace-pre-line">' + escapeHtml(p.beschreibung) + '</p>' : ''}
-          ${p.deadline ? '<p class="text-sm text-slate-400 mt-1">⏰ Frist: ' + fmtDate(p.deadline) + '</p>' : ''}
-          ${closed && finalId ? '<div class="mt-3 bg-green-50 border border-green-200 rounded-lg p-3">✅ <b>Termin steht fest:</b> ' + escapeHtml((opts.find(o => o.id === finalId) || {}).label || '') + '</div>' : ''}
+          ${p.deadline && !closed ? '<p class="text-sm text-slate-400 mt-1">⏰ Frist: ' + fmtDate(p.deadline) + '</p>' : ''}
+          ${closed && finalId ? (() => { const fo = opts.find(o => o.id === finalId) || {}; return '<div class="mt-3 bg-green-50 border border-green-200 rounded-lg p-3">✅ <b>Termin steht fest:</b> ' + escapeHtml(fo.label || '') + (fo.starts_at ? ' — <b>' + fmtDate(fo.starts_at) + '</b>' : '') + '</div>'; })() : ''}
 
           <h3 class="font-semibold mt-5 mb-2">${closed ? 'Ergebnis' : 'Deine Stimme'}</h3>
           ${needName ? '<input id="voter-name" placeholder="Dein Name" class="border rounded-lg px-3 py-2 mb-3 w-full max-w-xs">' : ''}
@@ -283,7 +316,7 @@
       $('list').classList.add('hidden'); $('toolbar').classList.add('hidden'); $('detail').classList.add('hidden');
       $('create').classList.remove('hidden');
       $('create').innerHTML = `
-        <button onclick="render()" class="text-teal-700 mb-3">← zurück</button>
+        <button onclick="history.replaceState(null,'',location.pathname);FILTER.stweg=FILTER.project=FILTER.gremium=null;render()" class="text-teal-700 mb-3">← zurück</button>
         <div class="bg-white rounded-xl shadow p-5 space-y-3">
           <h2 class="text-xl font-bold">Neue Terminumfrage</h2>
           <div><label class="text-sm font-medium">Titel *</label><input id="c-titel" class="w-full border rounded-lg px-3 py-2 mt-1" placeholder="z.B. Eigentümerversammlung Herbst"></div>
@@ -298,6 +331,14 @@
             <button onclick="addOptRow()" class="text-sm text-teal-700 underline mt-1">+ Vorschlag</button>
           </div>
           <label class="flex items-center gap-2 text-sm"><input id="c-allowadd" type="checkbox"> Teilnehmer dürfen eigene Vorschläge ergänzen</label>
+          <div>
+            <label class="text-sm font-medium">Zuordnung <span class="text-slate-400 font-normal">(optional — für Direktanzeige am richtigen Ort)</span></label>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-1">
+              <select id="c-stweg" class="border rounded-lg px-3 py-2"><option value="">STWEG —</option></select>
+              <select id="c-project" class="border rounded-lg px-3 py-2"><option value="">Projekt —</option></select>
+              <select id="c-gremium" class="border rounded-lg px-3 py-2"><option value="">Gremium —</option></select>
+            </div>
+          </div>
           <div><label class="text-sm font-medium">Externe einladen (E-Mails, z.B. Verwaltung)</label>
             <textarea id="c-invites" class="w-full border rounded-lg px-3 py-2 mt-1" rows="2" placeholder="verwaltung@example.ch, ..."></textarea>
             <p class="text-xs text-slate-400">Komma- oder zeilengetrennt. Sie erhalten eine Einladung und stimmen per E-Mail-Code ab.</p>
@@ -306,6 +347,12 @@
           <span id="c-msg" class="ml-3 text-sm"></span>
         </div>`;
       addOptRow(); addOptRow();
+      const ss = $('c-stweg'); ZD.stwegen.filter(s => s.n).sort((a, b) => a.n - b.n).forEach(s => { const o = document.createElement('option'); o.value = s.n; o.textContent = s.name || ('STWEG ' + s.n); ss.appendChild(o); });
+      const ps = $('c-project'); ZD.projekte.forEach(p => { const o = document.createElement('option'); o.value = p.slug; o.textContent = p.title || p.slug; ps.appendChild(o); });
+      const gs = $('c-gremium'); ZD.gremien.forEach(g => { const o = document.createElement('option'); o.value = g; o.textContent = g; gs.appendChild(o); });
+      if (FILTER.stweg) ss.value = FILTER.stweg;
+      if (FILTER.project) ps.value = FILTER.project;
+      if (FILTER.gremium) gs.value = FILTER.gremium;
     }
     function addOptRow() {
       const div = document.createElement('div');
@@ -328,11 +375,12 @@
       const body = {
         titel, beschreibung: $('c-besch').value.trim() || null, ort: $('c-ort').value.trim() || null,
         deadline: $('c-deadline').value || null, allow_add_options: $('c-allowadd').checked, options, invites,
+        stweg: $('c-stweg').value || null, project_slug: $('c-project').value || null, gremium: $('c-gremium').value || null,
       };
       const r = await dFetch('/api/doodle/polls', { method: 'POST', body });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { $('c-msg').className = 'ml-3 text-sm text-red-600'; $('c-msg').textContent = d.error || 'Fehler'; return; }
-      render();
+      history.replaceState(null, '', location.pathname); FILTER.stweg = FILTER.project = FILTER.gremium = null; render();
     }
 
     // ── Init ────────────────────────────────────────────────────────────────

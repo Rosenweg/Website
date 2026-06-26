@@ -241,6 +241,9 @@
                     <div id="auslagen-list" class="mt-3 text-sm">${renderAuslagenList(p.slug)}</div>
                 </div>
 
+                <!-- Sitzungs-Doodle / Terminumfragen -->
+                <div id="doodle-section"></div>
+
                 <!-- Comments -->
                 <div class="bg-white rounded-xl shadow p-6">
                     <h2 class="text-lg font-bold text-gray-800 mb-4">Kommentare & Feedback</h2>
@@ -254,6 +257,36 @@
 
         // Auslagen-Liste asynchron nachladen
         loadProjektAuslagen(p.slug);
+        loadProjektDoodles(p.slug);
+    }
+
+    // Sitzungs-Doodle: Terminumfragen + automatisch abgeleiteter nächster Termin
+    async function loadProjektDoodles(slug) {
+        const sec = document.getElementById('doodle-section');
+        if (!sec) return;
+        const fmt = s => { try { return new Date(s).toLocaleString('de-CH', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return s; } };
+        const e2 = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        try {
+            const [nx, ls] = await Promise.all([
+                AuthentikAuth.apiFetch('/api/doodle/next?project=' + encodeURIComponent(slug)).then(r => r.json()).catch(() => ({})),
+                AuthentikAuth.apiFetch('/api/doodle/polls?project=' + encodeURIComponent(slug)).then(r => r.json()).catch(() => ({})),
+            ]);
+            const polls = ls.polls || [], next = nx.next;
+            let html = `<div class="bg-white rounded-xl shadow p-6">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="text-lg font-bold text-gray-800">🗓️ Terminumfragen</h2>
+                    <a href="/sitzungs-doodle.html?project=${encodeURIComponent(slug)}&new=1" class="text-sm bg-emerald-600 text-white px-3 py-1.5 rounded-lg hover:bg-emerald-700">+ Neue Umfrage</a>
+                </div>`;
+            if (next) html += `<div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3 mb-3">📅 <b>Nächster Termin:</b> ${e2(fmt(next.starts_at))} — ${e2(next.titel)}${next.ort ? ' · 📍 ' + e2(next.ort) : ''}</div>`;
+            if (!polls.length) html += '<p class="text-sm text-gray-500">Noch keine Terminumfragen für dieses Projekt.</p>';
+            else html += polls.map(p => {
+                const closed = p.status !== 'offen';
+                const t = closed && p.final_starts_at ? '📅 ' + fmt(p.final_starts_at) : closed && p.final_label ? '📅 ' + e2(p.final_label) : (closed ? 'geschlossen' : 'offen');
+                return `<a href="/sitzungs-doodle.html?poll=${p.id}" class="block border rounded-lg p-2 mb-1.5 hover:bg-gray-50 text-sm"><b>${e2(p.titel)}</b> <span class="text-gray-400">· ${e2(t)} · 👥 ${p.voters_count} Stimmen</span></a>`;
+            }).join('');
+            html += '</div>';
+            sec.innerHTML = html;
+        } catch (e) { sec.innerHTML = ''; }
     }
 
     function renderBudgetBar(p) {
