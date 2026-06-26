@@ -1,56 +1,34 @@
 /*
- * Service Worker — Rosenweg Terminumfragen (Doodle) PWA
- * Scope: /doodle/
- *  - App-Shell precachen (Offline-Start).
- *  - Navigationen: network-first, Fallback auf gecachte index.html.
- *  - /api/-Requests: NIE cachen — immer Netzwerk.
- *  - Sonstige GETs: stale-while-revalidate.
+ * Service Worker — Rosenweg Terminumfragen (Doodle)
+ * Bewusst OHNE Caching: nur installierbar machen, aber NIE eine alte Version
+ * ausliefern (Stale-Cache war die Loop-Ursache). Alle Requests gehen ans Netz,
+ * der OAuth-Callback (#auth=) wird normal verarbeitet.
  */
-const CACHE = 'rosenweg-doodle-v2';
-const SHELL = [
-  '/doodle/',
-  '/doodle/index.html',
-  '/doodle/manifest.webmanifest',
-  '/icons/icon-192-2.png',
-  '/icons/icon-512-2.png',
-  '/js/authentik-auth.js',
-];
+const CACHE = 'rosenweg-doodle-v3-nocache';
 
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE).then((cache) => Promise.allSettled(SHELL.map((url) => cache.add(url))))
-      .then(() => self.skipWaiting())
-  );
-});
+self.addEventListener('install', () => self.skipWaiting());
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+    caches.keys()
+      .then((keys) => Promise.all(keys.map((k) => caches.delete(k)))) // ALLE alten Caches weg
       .then(() => self.clients.claim())
   );
 });
 
-self.addEventListener('fetch', (event) => {
-  const req = event.request;
-  const url = new URL(req.url);
-  if (url.pathname.startsWith('/api/')) return;        // API nie cachen
-  if (req.method !== 'GET') return;
-  if (req.mode === 'navigate') {
-    event.respondWith(
-      fetch(req)
-        .then((resp) => { const copy = resp.clone(); caches.open(CACHE).then((c) => c.put('/doodle/index.html', copy)).catch(() => {}); return resp; })
-        .catch(() => caches.match('/doodle/index.html').then((cached) => cached || caches.match('/doodle/')))
-    );
-    return;
-  }
-  event.respondWith(
-    caches.open(CACHE).then((cache) =>
-      cache.match(req).then((cached) => {
-        const network = fetch(req)
-          .then((resp) => { if (resp && resp.status === 200 && (resp.type === 'basic' || resp.type === 'cors')) cache.put(req, resp.clone()).catch(() => {}); return resp; })
-          .catch(() => cached);
-        return cached || network;
-      })
-    )
-  );
+// Kein fetch-Handler mit respondWith → Browser-Standard (immer Netzwerk).
+// (Web-Push bleibt erhalten.)
+self.addEventListener('push', (e) => {
+  const d = (() => { try { return e.data ? e.data.json() : {}; } catch { return {}; } })();
+  e.waitUntil(self.registration.showNotification(d.title || 'Rosenweg', {
+    body: d.body || '', icon: '/icons/icon-notif.png', badge: '/icons/icon-badge.png',
+    tag: d.tag, data: { url: d.url || '/doodle/' },
+  }));
+});
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  e.waitUntil(clients.matchAll({ type: 'window' }).then((cs) => {
+    for (const c of cs) { if ('focus' in c) return c.focus(); }
+    return clients.openWindow(e.notification.data.url);
+  }));
 });
