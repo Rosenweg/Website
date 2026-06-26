@@ -453,6 +453,28 @@ const http = require('http');
 // das Meter-Schema unveraendert bleibt. null bis zum ersten erfolgreichen Poll.
 let smartfoxSolar = null;
 
+// Tages-Solarwerte aus den GEEICHTEN Zaehlern (zuverlaessiger als SmartFox-eDay,
+// das Produktion/Einspeisung falsch meldete). Produktion = r9-produktion Export-
+// Delta seit Mitternacht; Einspeisung = r9-haupt Export-Delta. Periodisch gecacht.
+let solarTodayMeters = null; // { production_wh, feed_in_wh, ts }
+async function updateSolarTodayMeters() {
+  try {
+    const q = await pool.query(`
+      WITH ds AS (SELECT (date_trunc('day', now() AT TIME ZONE 'Europe/Zurich') AT TIME ZONE 'Europe/Zurich') AS d)
+      SELECT m.meter_id,
+        (SELECT energy_export_kwh FROM readings r WHERE r.meter_id = m.meter_id AND r.ts >= (SELECT d FROM ds) ORDER BY r.ts DESC LIMIT 1) AS now_v,
+        (SELECT energy_export_kwh FROM readings r WHERE r.meter_id = m.meter_id AND r.ts >= (SELECT d FROM ds) ORDER BY r.ts ASC  LIMIT 1) AS start_v
+      FROM (VALUES ('r9-produktion'), ('r9-haupt')) AS m(meter_id)`);
+    const d = {};
+    for (const row of q.rows) d[row.meter_id] = (row.now_v != null && row.start_v != null) ? Math.max(0, (Number(row.now_v) - Number(row.start_v)) * 1000) : null;
+    if (d['r9-produktion'] != null && d['r9-haupt'] != null) {
+      solarTodayMeters = { production_wh: d['r9-produktion'], feed_in_wh: d['r9-haupt'], ts: Date.now() };
+    }
+  } catch (e) { console.error('[solar-today-meters]', e.message); }
+}
+setInterval(updateSolarTodayMeters, 60000);
+updateSolarTodayMeters();
+
 function smartFoxFetch(url, timeout = 10000) {
   return new Promise((resolve, reject) => {
     const req = http.get(url, { timeout }, (res) => {
@@ -877,7 +899,9 @@ app.get('/api/energy/solar-live', (req, res) => {
     boiler: { power_w: sf.boiler_w || 0, percent: sf.boiler_pct || 0, label: sf.boiler_desc || 'Boiler', online: !!(smartfoxSolar && freshTs(smartfoxSolar.ts)) },
     allgemein,
     wohnungen,
-    today: { production_wh: sf.today_prod_wh || 0, feed_in_wh: sf.today_feedin_wh || 0 },
+    today: (solarTodayMeters && (now - solarTodayMeters.ts < 600000))
+      ? { production_wh: solarTodayMeters.production_wh, feed_in_wh: solarTodayMeters.feed_in_wh, source: 'geeicht' }
+      : { production_wh: sf.today_prod_wh || 0, feed_in_wh: sf.today_feedin_wh || 0, source: 'smartfox' },
     smartfox_online: !!(smartfoxSolar && freshTs(smartfoxSolar.ts)),
   });
 });
