@@ -142,6 +142,9 @@
         <div class="cards">
             <div class="card"><div class="ct">☀️ Ertrag heute</div><div class="cv"><span id="v-today-prod">–</span><span class="u"> kWh</span></div></div>
             <div class="card"><div class="ct">⚡ Einspeisung heute</div><div class="cv"><span id="v-today-feed">–</span><span class="u"> kWh</span></div></div>
+            <div class="card"><div class="ct">💰 Eigenverbrauch (20 Rp.)</div><div class="cv">CHF <span id="v-ev-chf">–</span></div></div>
+            <div class="card"><div class="ct">💵 Einspeisung (8.2 Rp.)</div><div class="cv">CHF <span id="v-feed-chf">–</span></div></div>
+            <div class="card"><div class="ct">📈 Geld-Ertrag heute</div><div class="cv">CHF <span id="v-total-chf">–</span></div></div>
         </div>
 
         <div class="meta"><div id="m-updated">Verbinde …</div><div id="m-src"></div></div>
@@ -194,6 +197,17 @@
                 setAll('.l-boiler', d.boiler.label || 'Boiler');
                 $('v-today-prod').textContent = kwh(d.today.production_wh);
                 $('v-today-feed').textContent = kwh(d.today.feed_in_wh);
+
+                // Geld-Wert der Solar-Erträge (heute): Eigenverbrauch (selbst genutzt) à
+                // internem ZEV-Tarif 20 Rp./kWh, Einspeisung à AEW-Rückliefertarif 8.2 Rp./kWh.
+                const RP_INTERN = 0.20, RP_RUECKLIEFER = 0.082;
+                const prodKwh = (d.today.production_wh || 0) / 1000;
+                const feedKwh = (d.today.feed_in_wh || 0) / 1000;
+                const evKwh = Math.max(0, prodKwh - feedKwh);
+                const evChf = evKwh * RP_INTERN, feedChf = feedKwh * RP_RUECKLIEFER;
+                $('v-ev-chf').textContent = evChf.toFixed(2);
+                $('v-feed-chf').textContent = feedChf.toFixed(2);
+                $('v-total-chf').textContent = (evChf + feedChf).toFixed(2);
 
                 // Netz: Lieferung / Bezug / idle
                 let gv, gl, gstate, gic;
