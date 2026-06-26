@@ -140,7 +140,7 @@
         </div>
 
         <div class="cards">
-            <div class="card"><div class="ct">☀️ Ertrag heute</div><div class="cv"><span id="v-today-prod">–</span><span class="u"> kWh&nbsp;·&nbsp;CHF </span><span id="v-prod-chf">–</span></div></div>
+            <div class="card"><div class="ct">🔋 Eigenverbrauch heute</div><div class="cv"><span id="v-today-prod">–</span><span class="u"> kWh&nbsp;·&nbsp;CHF </span><span id="v-prod-chf">–</span></div></div>
             <div class="card"><div class="ct">⚡ Einspeisung heute</div><div class="cv"><span id="v-today-feed">–</span><span class="u"> kWh&nbsp;·&nbsp;CHF </span><span id="v-feed-chf">–</span></div></div>
         </div>
 
@@ -192,19 +192,17 @@
                 setAll('.v-wohn', kw(d.wohnungen.power_w));
                 setAll('.s-wohn', d.wohnungen.online_count + '/' + d.wohnungen.total_count + ' online');
                 setAll('.l-boiler', d.boiler.label || 'Boiler');
-                $('v-today-prod').textContent = kwh(d.today.production_wh);
-                $('v-today-feed').textContent = kwh(d.today.feed_in_wh);
-
-                // Geld-Wert inline pro Kachel: Ertrag = Eigenverbrauch (selbst genutzt) à
-                // 20 Rp. (intern) + Einspeisung à 8.2 Rp. (AEW); Einspeisung-Kachel = nur ×8.2 Rp.
+                // Tageswerte aus geeichten Zählern (r9-produktion/r9-haupt; SmartFox-Fallback):
+                // Eigenverbrauch (selbst genutzt = Produktion − Einspeisung) à 20 Rp. intern,
+                // Einspeisung à 8.2 Rp. (AEW-Rücklieferung).
                 const RP_INTERN = 0.20, RP_RUECKLIEFER = 0.082;
                 const prodKwh = (d.today.production_wh || 0) / 1000;
                 const feedKwh = (d.today.feed_in_wh || 0) / 1000;
                 const evKwh = Math.max(0, prodKwh - feedKwh);
-                const feedChf = feedKwh * RP_RUECKLIEFER;
-                const prodChf = evKwh * RP_INTERN + feedChf;
-                $('v-prod-chf').textContent = prodChf.toFixed(2);
-                $('v-feed-chf').textContent = feedChf.toFixed(2);
+                $('v-today-prod').textContent = evKwh.toFixed(1);
+                $('v-prod-chf').textContent = (evKwh * RP_INTERN).toFixed(2);
+                $('v-today-feed').textContent = feedKwh.toFixed(1);
+                $('v-feed-chf').textContent = (feedKwh * RP_RUECKLIEFER).toFixed(2);
 
                 // Netz: Lieferung / Bezug / idle
                 let gv, gl, gstate, gic;
