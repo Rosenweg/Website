@@ -197,12 +197,43 @@
     }
 
     // ── Detail / Abstimmen ──────────────────────────────────────────────────
-    let CUR = null, MYVOTES = {};
+    let CUR = null, MYVOTES = {}, MANVOTE = {};
+    function pollShareUrl() { return location.origin + location.pathname + '?poll=' + (CUR && CUR.poll.id); }
+    async function addInvite() {
+      const email = $('inv-email').value.trim(); const name = $('inv-name').value.trim();
+      if (!email) return;
+      const r = await dFetch('/api/doodle/polls/' + CUR.poll.id + '/invites', { method: 'POST', body: { email, name: name || null } });
+      if (!r.ok) { alert((await r.json().catch(() => ({}))).error || 'Fehler'); return; }
+      openPoll(CUR.poll.id);
+    }
+    async function removeInvite(email) {
+      if (!confirm('Einladung von ' + email + ' entfernen?')) return;
+      await dFetch('/api/doodle/polls/' + CUR.poll.id + '/invites', { method: 'DELETE', body: { email } });
+      openPoll(CUR.poll.id);
+    }
+    async function removeVoter(voterEmail) {
+      if (!confirm('Stimmen dieser Person wirklich entfernen?')) return;
+      await dFetch('/api/doodle/polls/' + CUR.poll.id + '/voter', { method: 'DELETE', body: { voter_email: voterEmail } });
+      openPoll(CUR.poll.id);
+    }
+    function manVote(optId, wert, btn) {
+      MANVOTE[optId] = (MANVOTE[optId] === wert) ? undefined : wert;
+      if (MANVOTE[optId] === undefined) delete MANVOTE[optId];
+      btn.parentNode.querySelectorAll('.man-v').forEach(b => b.classList.remove('sel-ja', 'sel-vielleicht', 'sel-nein'));
+      if (MANVOTE[optId]) btn.classList.add('sel-' + MANVOTE[optId]);
+    }
+    async function saveManualVote() {
+      const name = $('man-name').value.trim();
+      if (!name) { $('man-msg').className = 'ml-2 text-sm text-red-600'; $('man-msg').textContent = 'Name fehlt'; return; }
+      const r = await dFetch('/api/doodle/polls/' + CUR.poll.id + '/manual-vote', { method: 'POST', body: { name, votes: MANVOTE } });
+      if (!r.ok) { $('man-msg').className = 'ml-2 text-sm text-red-600'; $('man-msg').textContent = (await r.json().catch(() => ({}))).error || 'Fehler'; return; }
+      MANVOTE = {}; openPoll(CUR.poll.id);
+    }
     async function openPoll(id) {
       const r = await dFetch('/api/doodle/polls/' + id);
       if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || 'Fehler'); return; }
       CUR = await r.json();
-      MYVOTES = {};
+      MYVOTES = {}; MANVOTE = {};
       const myEmail = (CUR.me.email || '').toLowerCase();
       CUR.votes.filter(v => (v.voter_email || '').toLowerCase() === myEmail).forEach(v => { MYVOTES[v.option_id] = v.wert; });
       renderDetail();
@@ -279,13 +310,39 @@
           ${voters.length ? `<h3 class="font-semibold mt-6 mb-2">Übersicht (${voters.length})</h3>
             <div class="overflow-x-auto"><table class="text-sm border-collapse">
               <tr><th class="text-left p-1"></th>${opts.map(o => '<th class="p-1 text-center">' + escapeHtml((o.label || '').slice(0, 16)) + '</th>').join('')}</tr>
-              ${voters.map(ve => '<tr class="border-t"><td class="p-1 pr-3">' + escapeHtml(voterName[ve]) + '</td>' + opts.map(o => '<td class="p-1 text-center">' + (sym[voteOf[ve + '|' + o.id]] || '·') + '</td>').join('') + '</tr>').join('')}
+              ${voters.map(ve => `<tr class="border-t"><td class="p-1 pr-3 whitespace-nowrap">${escapeHtml(voterName[ve])}${CUR.me.canManage ? ` <button onclick="removeVoter('${ve}')" class="text-red-300" title="Teilnehmer entfernen">✕</button>` : ''}</td>${opts.map(o => `<td class="p-1 text-center">${sym[voteOf[ve + '|' + o.id]] || '·'}</td>`).join('')}</tr>`).join('')}
             </table></div>` : ''}
 
-          ${CUR.me.canManage ? `<div class="mt-6 pt-4 border-t flex flex-wrap gap-2">
-            ${!closed ? `<button onclick="closePoll()" class="bg-slate-700 text-white rounded-lg px-4 py-2 text-sm">Umfrage schliessen</button>` : `<button onclick="reopenPoll()" class="bg-slate-200 rounded-lg px-4 py-2 text-sm">wieder öffnen</button>`}
-            <button onclick="deletePoll()" class="text-red-600 text-sm px-2">löschen</button>
-            ${CUR.invites && CUR.invites.length ? '<span class="text-xs text-slate-400 self-center">Eingeladen: ' + CUR.invites.map(i => escapeHtml(i.email)).join(', ') + '</span>' : ''}
+          ${CUR.me.canManage ? `<div class="mt-6 pt-4 border-t space-y-5">
+            <div>
+              <h3 class="font-semibold mb-2">📧 Externe einladen</h3>
+              <div class="space-y-1 mb-2">
+                ${(CUR.invites || []).map(i => `<div class="flex items-center gap-2 text-sm"><span>${escapeHtml(i.email)}${i.name ? ' (' + escapeHtml(i.name) + ')' : ''}</span><button onclick="removeInvite('${i.email}')" class="text-red-400" title="Einladung entfernen">✕</button></div>`).join('') || '<p class="text-sm text-slate-400">Noch niemand eingeladen.</p>'}
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <input id="inv-email" type="email" placeholder="name@example.ch" class="flex-1 min-w-[150px] border rounded-lg px-3 py-2 text-sm">
+                <input id="inv-name" placeholder="Name (optional)" class="border rounded-lg px-3 py-2 text-sm w-28">
+                <button onclick="addInvite()" class="bg-teal-700 text-white rounded-lg px-3 py-2 text-sm">Einladen</button>
+              </div>
+              <p class="text-[11px] text-slate-400 mt-1 break-all">Bekommt den Link per Mail und stimmt mit E-Mail-Code ab. Direktlink: ${pollShareUrl()}</p>
+            </div>
+            <div>
+              <h3 class="font-semibold mb-2">📞 Telefonische Rückmeldung erfassen</h3>
+              <input id="man-name" placeholder="Name der Person" class="border rounded-lg px-3 py-2 text-sm w-full mb-2">
+              <div class="space-y-1">
+                ${opts.map(o => `<div class="flex items-center justify-between gap-2 text-sm"><span>${escapeHtml(o.label)}</span><div class="flex gap-1">
+                  <button class="vbtn man-v" data-opt="${o.id}" onclick="manVote(${o.id},'ja',this)">Ja</button>
+                  <button class="vbtn man-v" data-opt="${o.id}" onclick="manVote(${o.id},'vielleicht',this)">?</button>
+                  <button class="vbtn man-v" data-opt="${o.id}" onclick="manVote(${o.id},'nein',this)">Nein</button>
+                </div></div>`).join('')}
+              </div>
+              <button onclick="saveManualVote()" class="mt-2 bg-teal-700 text-white rounded-lg px-4 py-2 text-sm">Rückmeldung speichern</button>
+              <span id="man-msg" class="ml-2 text-sm"></span>
+            </div>
+            <div class="flex flex-wrap gap-2 pt-3 border-t">
+              ${!closed ? `<button onclick="closePoll()" class="bg-slate-700 text-white rounded-lg px-4 py-2 text-sm">Umfrage schliessen</button>` : `<button onclick="reopenPoll()" class="bg-slate-200 rounded-lg px-4 py-2 text-sm">wieder öffnen</button>`}
+              <button onclick="deletePoll()" class="text-red-600 text-sm px-2">Umfrage löschen</button>
+            </div>
           </div>` : ''}
         </div>`;
       window.scrollTo(0, y);

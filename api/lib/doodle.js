@@ -465,6 +465,85 @@ function mountDoodle({ app }) {
       res.json({ ok: true });
     } catch (e) { console.error('[doodle] delete', e); res.status(500).json({ error: 'Fehler' }); }
   });
+
+  // ── Verwaltung (nur Ersteller:in/Admin) ──────────────────────────────────
+  async function ownerCheck(req, id) {
+    const r = await pool.query('SELECT creator_email, titel, ort FROM doodle_polls WHERE id = $1', [id]);
+    const poll = r.rows[0];
+    if (!poll) return { err: 404 };
+    if (!req.actor.isAdmin && normEmail(poll.creator_email) !== req.actor.email) return { err: 403 };
+    return { poll };
+  }
+
+  // Externe einladen (E-Mail) + Einladungsmail
+  app.post('/api/doodle/polls/:id/invites', doodleAuth, memberOnly, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { poll, err } = await ownerCheck(req, id);
+      if (err) return res.status(err).json({ error: err === 404 ? 'Nicht gefunden' : 'Nur Ersteller:in/Admin' });
+      const email = normEmail(req.body?.email);
+      if (!validEmail(email)) return res.status(400).json({ error: 'Ungültige E-Mail' });
+      const name = req.body?.name ? String(req.body.name).trim().slice(0, 255) : null;
+      await pool.query('INSERT INTO doodle_invites (poll_id, email, name) VALUES ($1,$2,$3) ON CONFLICT (poll_id, email) DO UPDATE SET name = COALESCE(EXCLUDED.name, doodle_invites.name)', [id, email, name]);
+      loggedSendMail({
+        from: MAIL_FROM, to: email,
+        subject: `Terminumfrage: ${poll.titel} – bitte abstimmen`,
+        html: `<div style="font-family:sans-serif;max-width:560px"><p>Hallo${name ? ' ' + esc(name) : ''},</p>
+          <p>Du bist zu einer Terminumfrage eingeladen:</p><p style="font-size:18px;font-weight:bold">${esc(poll.titel)}</p>
+          ${poll.ort ? `<p>📍 ${esc(poll.ort)}</p>` : ''}
+          <p><a href="${pollUrl(id)}" style="display:inline-block;background:#0f766e;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none">Jetzt abstimmen</a></p>
+          <p style="color:#666;font-size:13px">Melde dich mit dieser E-Mail-Adresse an — du bekommst einen kurzen Code per Mail.</p></div>`,
+      }, 'doodle-invite').catch(e => console.warn('[doodle] invite-mail', e.message));
+      res.json({ ok: true });
+    } catch (e) { console.error('[doodle] add-invite', e); res.status(500).json({ error: 'Fehler' }); }
+  });
+
+  // Einladung entfernen
+  app.delete('/api/doodle/polls/:id/invites', doodleAuth, memberOnly, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { err } = await ownerCheck(req, id);
+      if (err) return res.status(err).json({ error: 'Kein Zugriff' });
+      await pool.query('DELETE FROM doodle_invites WHERE poll_id = $1 AND LOWER(email) = $2', [id, normEmail(req.body?.email)]);
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: 'Fehler' }); }
+  });
+
+  // Telefonische Rückmeldung von Hand erfassen (Name + Stimmen)
+  app.post('/api/doodle/polls/:id/manual-vote', doodleAuth, memberOnly, async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { err } = await ownerCheck(req, id);
+      if (err) { client.release(); return res.status(err).json({ error: 'Kein Zugriff' }); }
+      const name = String(req.body?.name || '').trim().slice(0, 255);
+      if (!name) { client.release(); return res.status(400).json({ error: 'Name erforderlich' }); }
+      const votes = req.body?.votes && typeof req.body.votes === 'object' ? req.body.votes : {};
+      const key = 'hand:' + name.toLowerCase().replace(/\s+/g, '_');
+      const valid = new Set((await pool.query('SELECT id FROM doodle_options WHERE poll_id = $1', [id])).rows.map(r => r.id));
+      await client.query('BEGIN');
+      await client.query('DELETE FROM doodle_votes WHERE poll_id = $1 AND voter_email = $2', [id, key]);
+      for (const [oid, wert] of Object.entries(votes)) {
+        const o = parseInt(oid, 10);
+        if (!valid.has(o) || !VOTE_VALUES.includes(wert)) continue;
+        await client.query('INSERT INTO doodle_votes (poll_id, option_id, voter_email, voter_name, wert) VALUES ($1,$2,$3,$4,$5)', [id, o, key, name, wert]);
+      }
+      await client.query('COMMIT');
+      res.json({ ok: true });
+    } catch (e) { try { await client.query('ROLLBACK'); } catch { /* */ } console.error('[doodle] manual-vote', e); res.status(500).json({ error: 'Fehler' }); }
+    finally { client.release(); }
+  });
+
+  // Teilnehmer (alle seine Stimmen) entfernen
+  app.delete('/api/doodle/polls/:id/voter', doodleAuth, memberOnly, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { err } = await ownerCheck(req, id);
+      if (err) return res.status(err).json({ error: 'Kein Zugriff' });
+      await pool.query('DELETE FROM doodle_votes WHERE poll_id = $1 AND LOWER(voter_email) = $2', [id, normEmail(req.body?.voter_email)]);
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: 'Fehler' }); }
+  });
 }
 
 module.exports = { mountDoodle };
