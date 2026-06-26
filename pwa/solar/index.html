@@ -176,8 +176,8 @@
         </div>
 
         <div class="cards">
-            <div class="card"><div class="ct">☀️ Ertrag heute</div><div class="cv"><span id="v-today-prod">–</span><span class="u"> kWh</span></div></div>
-            <div class="card"><div class="ct">⚡ Einspeisung heute</div><div class="cv"><span id="v-today-feed">–</span><span class="u"> kWh</span></div></div>
+            <div class="card"><div class="ct">🔋 Eigenverbrauch heute</div><div class="cv"><span id="v-today-prod">–</span><span class="u"> kWh&nbsp;·&nbsp;CHF </span><span id="v-prod-chf">–</span></div></div>
+            <div class="card"><div class="ct">⚡ Einspeisung heute</div><div class="cv"><span id="v-today-feed">–</span><span class="u"> kWh&nbsp;·&nbsp;CHF </span><span id="v-feed-chf">–</span></div></div>
         </div>
 
         <div class="meta"><div id="m-updated">Verbinde …</div><div id="m-src"></div></div>
@@ -239,8 +239,16 @@
                 setAll('.s-wohn', (wohnungen.online_count != null && wohnungen.total_count != null)
                     ? wohnungen.online_count + '/' + wohnungen.total_count + ' online' : '');
                 setAll('.l-boiler', boiler.label || 'Boiler');
-                $('v-today-prod').textContent = kwh(today.production_wh);
-                $('v-today-feed').textContent = kwh(today.feed_in_wh);
+                // Tageswerte (geeichte Zähler): Eigenverbrauch (selbst genutzt = Produktion −
+                // Einspeisung) à 20 Rp. intern, Einspeisung à 8.2 Rp. (AEW-Rücklieferung).
+                const RP_INTERN = 0.20, RP_RUECKLIEFER = 0.082;
+                const _prodKwh = (today.production_wh || 0) / 1000;
+                const _feedKwh = (today.feed_in_wh || 0) / 1000;
+                const _evKwh = Math.max(0, _prodKwh - _feedKwh);
+                $('v-today-prod').textContent = _evKwh.toFixed(1);
+                $('v-prod-chf').textContent = (_evKwh * RP_INTERN).toFixed(2);
+                $('v-today-feed').textContent = _feedKwh.toFixed(1);
+                $('v-feed-chf').textContent = (_feedKwh * RP_RUECKLIEFER).toFixed(2);
 
                 // Netz: Lieferung / Bezug / idle
                 let gv, gl, gstate, gic;
