@@ -132,8 +132,7 @@
       $('list').classList.remove('hidden');
       if (!authed) {
         $('authbar').innerHTML = '';
-        const _d = 'diag · currentUser=' + !!currentUser + ' · loggedIn=' + !!(window.AuthentikAuth && AuthentikAuth.isLoggedIn()) + ' · ssoTok=' + String((window.AuthentikAuth && AuthentikAuth.getToken()) || '-').slice(0, 6) + ' · hash=' + String(location.hash || '-').slice(0, 14);
-        $('list').innerHTML = '<pre class="text-[10px] text-amber-700 bg-amber-50 rounded p-2 mt-1 whitespace-pre-wrap break-all">' + _d + '</pre>';
+        $('list').innerHTML = '';
         return;
       }
       // Auth-Bar
