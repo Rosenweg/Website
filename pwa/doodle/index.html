@@ -30,25 +30,25 @@
       <div id="authbar" class="text-sm text-slate-600"></div>
     </div>
 
-    <!-- Login-Gate: E-Mail-Code primär (zuverlässig in der App), SSO als Nebenoption -->
+    <!-- Login-Gate: Rosenweg-Konto (geteilte PWA-Anmeldung) ODER E-Mail-Code (Externe) -->
     <div id="login-box" class="hidden bg-white rounded-xl shadow p-5 mb-6 max-w-md">
       <p class="font-semibold mb-1">Anmelden</p>
-      <p class="text-sm text-slate-500 mb-3">Gib deine E-Mail ein — du bekommst einen Code per Mail. So melden sich Mitglieder <em>und</em> eingeladene Externe (z.&nbsp;B. Verwaltung) an. In der installierten App ist das der zuverlässige Weg.</p>
-      <div id="step-email">
-        <label class="text-sm font-medium">E-Mail-Adresse</label>
-        <input id="in-email" type="email" class="w-full border rounded-lg px-3 py-2 mt-1" placeholder="name@example.ch">
-        <button onclick="requestCode()" class="w-full mt-2 bg-teal-700 hover:bg-teal-800 text-white rounded-lg py-2 font-semibold">Code anfordern</button>
-      </div>
-      <div id="step-code" class="hidden">
-        <label class="text-sm font-medium">Code aus der E-Mail</label>
-        <input id="in-code" inputmode="numeric" class="w-full border rounded-lg px-3 py-2 mt-1 tracking-widest text-center text-lg" placeholder="123456">
-        <button onclick="verifyCode()" class="w-full mt-2 bg-teal-700 hover:bg-teal-800 text-white rounded-lg py-2 font-semibold">Anmelden</button>
-        <button onclick="resetLogin()" class="w-full mt-1 text-sm text-slate-500">andere E-Mail</button>
-      </div>
-      <p id="login-msg" class="text-sm mt-2"></p>
-      <div class="border-t pt-3 mt-3">
-        <button onclick="AuthentikAuth.login()" class="text-sm text-slate-500 underline">Stattdessen mit Rosenweg-Konto (SSO)</button>
-        <p class="text-[11px] text-slate-400 mt-1">Hinweis: In der <em>installierten</em> App kommt die Konto-Anmeldung nicht zurück (Android trennt App/Browser) — dann bitte den E-Mail-Code nutzen.</p>
+      <p class="text-sm text-slate-500 mb-3">Mitglieder melden sich mit dem Rosenweg-Konto an (gleiche Anmeldung wie die übrige PWA). Eingeladene Externe (z.&nbsp;B. Verwaltung) nutzen den E-Mail-Code.</p>
+      <button onclick="AuthentikAuth.login()" class="w-full mb-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-2 font-semibold">Mit Rosenweg-Konto anmelden</button>
+      <div class="border-t pt-3">
+        <p class="text-xs text-slate-400 mb-2">… oder Externe mit E-Mail-Code:</p>
+        <div id="step-email">
+          <label class="text-sm font-medium">E-Mail-Adresse</label>
+          <input id="in-email" type="email" class="w-full border rounded-lg px-3 py-2 mt-1" placeholder="name@example.ch">
+          <button onclick="requestCode()" class="w-full mt-2 bg-teal-700 hover:bg-teal-800 text-white rounded-lg py-2 font-semibold">Code anfordern</button>
+        </div>
+        <div id="step-code" class="hidden">
+          <label class="text-sm font-medium">Code aus der E-Mail</label>
+          <input id="in-code" inputmode="numeric" class="w-full border rounded-lg px-3 py-2 mt-1 tracking-widest text-center text-lg" placeholder="123456">
+          <button onclick="verifyCode()" class="w-full mt-2 bg-teal-700 hover:bg-teal-800 text-white rounded-lg py-2 font-semibold">Anmelden</button>
+          <button onclick="resetLogin()" class="w-full mt-1 text-sm text-slate-500">andere E-Mail</button>
+        </div>
+        <p id="login-msg" class="text-sm mt-2"></p>
       </div>
     </div>
 
@@ -63,8 +63,9 @@
 
   <script>
     // ── Auth-Helfer: Mitglied (Authentik) ODER externer Code-Token ──────────
-    function isMember() { return !!(window.AuthentikAuth && AuthentikAuth.isLoggedIn()); }
-    function authToken() { return isMember() ? AuthentikAuth.getToken() : localStorage.getItem('doodleToken'); }
+    let currentUser = null; // wie Technik/Reparatur: Rückgabe von AuthentikAuth.init()
+    function isMember() { return !!currentUser; }
+    function authToken() { return currentUser ? AuthentikAuth.getToken() : localStorage.getItem('doodleToken'); }
     function isAuthed() { return !!authToken(); }
     async function dFetch(path, opts = {}) {
       const t = authToken();
@@ -131,7 +132,8 @@
       $('list').classList.remove('hidden');
       if (!authed) {
         $('authbar').innerHTML = '';
-        $('list').innerHTML = '';
+        const _d = 'diag · currentUser=' + !!currentUser + ' · loggedIn=' + !!(window.AuthentikAuth && AuthentikAuth.isLoggedIn()) + ' · ssoTok=' + String((window.AuthentikAuth && AuthentikAuth.getToken()) || '-').slice(0, 6) + ' · hash=' + String(location.hash || '-').slice(0, 14);
+        $('list').innerHTML = '<pre class="text-[10px] text-amber-700 bg-amber-50 rounded p-2 mt-1 whitespace-pre-wrap break-all">' + _d + '</pre>';
         return;
       }
       // Auth-Bar
@@ -398,7 +400,7 @@
 
     // ── Init ────────────────────────────────────────────────────────────────
     document.addEventListener('DOMContentLoaded', async () => {
-      try { await AuthentikAuth.init({ requireAuth: false }); } catch (e) {}
+      try { currentUser = await AuthentikAuth.init({ requireAuth: false, onLogout: () => { currentUser = null; } }); } catch (e) {}
       render();
     });
   </script>
