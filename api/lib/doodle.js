@@ -96,7 +96,18 @@ async function resolveActor(req) {
     };
   }
   const d = await pool.query('SELECT email, name FROM doodle_sessions WHERE token = $1 AND expires_at > NOW()', [token]);
-  if (d.rows[0]) return { email: normEmail(d.rows[0].email), name: d.rows[0].name, token, isMember: false, isAdmin: false };
+  if (d.rows[0]) {
+    const email = normEmail(d.rows[0].email);
+    // Bekanntes aktives Mitglied? -> volle Mitgliederrechte auch via E-Mail-Code
+    // (z.B. auf der PWA, wo SSO umstaendlich ist). Code wurde an die Mail zugestellt,
+    // also ist der Besitz nachgewiesen. Reine Eingeladene (nur doodle_invites) bleiben Gast.
+    const u = await pool.query('SELECT name, role, groups_json FROM users WHERE LOWER(email) = $1 AND active = true LIMIT 1', [email]);
+    if (u.rows[0]) {
+      let groups = []; try { groups = JSON.parse(u.rows[0].groups_json || '[]'); } catch { /* */ }
+      return { email, name: d.rows[0].name || u.rows[0].name, token, isMember: true, isAdmin: u.rows[0].role === 'admin' || isAdminGroups(groups) };
+    }
+    return { email, name: d.rows[0].name, token, isMember: false, isAdmin: false };
+  }
   return null;
 }
 function doodleAuth(req, res, next) {
@@ -211,6 +222,14 @@ function mountDoodle({ app }) {
           ORDER BY o.starts_at ASC LIMIT 1`, params);
       res.json({ next: r.rows[0] || null });
     } catch (e) { console.error('[doodle] next', e); res.status(500).json({ error: 'Fehler' }); }
+  });
+
+  // ── Projekte fürs Zuordnungs-Dropdown (auch für Code-Mitglieder) ─────────
+  app.get('/api/doodle/projects', doodleAuth, memberOnly, async (req, res) => {
+    try {
+      const r = await pool.query("SELECT slug, title FROM projects WHERE COALESCE(status,'aktiv') != 'archiviert' ORDER BY title");
+      res.json({ projekte: r.rows });
+    } catch (e) { res.status(500).json({ error: 'Fehler' }); }
   });
 
   // ── Umfragen-Liste ───────────────────────────────────────────────────────
