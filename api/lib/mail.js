@@ -18,6 +18,25 @@ const MAIL_FROM = process.env.MAIL_FROM || 'noreply@rosenweg4303.ch';
 const SMTP2GO_API_KEY = process.env.SMTP2GO_API_KEY || '';
 const SMTP2GO_API_URL = 'https://eu-api.smtp2go.com/v3';
 
+// ─── Mailcow-Submission (für rosenweg9.ch-Absender) ────────────────
+// SMTP2GO verifiziert rosenweg9.ch NICHT (550 not verified). Mails mit Absender @rosenweg9.ch
+// gehen daher über Mailcow (Auth als zev@) -> PMG -> Relay (smtp-relay), der die Domain sauber
+// zustellt (per-Domain-DKIM/SRS). Antworten landen im echten Postfach zev@rosenweg9.ch.
+const ZEV_SMTP_USER = process.env.ZEV_SMTP_USER || 'zev@rosenweg9.ch';
+const ZEV_SMTP_PASS = process.env.ZEV_SMTP_PASS || '';
+const MAILCOW_SMTP_HOST = process.env.IMAP_HOST || process.env.MAILCOW_SMTP_HOST || '';
+const MAILCOW_SMTP_SERVERNAME = process.env.ZEV_IMAP_SERVERNAME || process.env.IMAP_SERVERNAME || '';
+const mailcowTransporter = (ZEV_SMTP_PASS && MAILCOW_SMTP_HOST) ? nodemailer.createTransport({
+  host: MAILCOW_SMTP_HOST, port: 587, secure: false, requireTLS: true,
+  auth: { user: ZEV_SMTP_USER, pass: ZEV_SMTP_PASS },
+  tls: MAILCOW_SMTP_SERVERNAME ? { servername: MAILCOW_SMTP_SERVERNAME } : { rejectUnauthorized: false },
+}) : null;
+// Transport-Auswahl nach Absender-Domain: rosenweg9.ch -> Mailcow/Relay, sonst SMTP2GO.
+function pickTransporter(fromEmail) {
+  if (mailcowTransporter && /@rosenweg9\.ch$/i.test(String(fromEmail || '').trim())) return mailcowTransporter;
+  return transporter;
+}
+
 // External sender allowlist for all rosenweg email functions (verteiler, drucker, etc.)
 // Format: comma-separated emails. Senders from VERTEILER_DOMAIN, users table, or Authentik
 // are always allowed; this covers external addresses that should be trusted.
@@ -41,7 +60,7 @@ async function loggedSendMail(mailOpts, trigger, extra = {}) {
   if (m) { fromName = m[1].trim(); fromEmail = m[2].trim(); }
   let result, error;
   try {
-    result = await transporter.sendMail(mailOpts);
+    result = await pickTransporter(fromEmail).sendMail(mailOpts);
   } catch (err) {
     error = err;
   }

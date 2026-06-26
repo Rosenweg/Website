@@ -6791,7 +6791,7 @@ async function notifyZevWechsel(cfg, k) {
     if (prev.rows[0]?.name) alterAlias = zevAliasAddress(prev.rows[0].name, cfg.alias_prefix, cfg.alias_domain);
   } catch {}
   const ab = k.gueltig_ab ? String(k.gueltig_ab).slice(0, 10) : 'sofort';
-  const absender = cfg.archiv_mailbox || `smartme@${cfg.alias_domain || 'rosenweg9.ch'}`;
+  const absender = `zev@${cfg.alias_domain || 'rosenweg9.ch'}`; // eigener ZEV-Absender via Mailcow->Relay; Antworten ins zev@-Postfach
   const subject = `ZEV-Wechsel ${k.bezeichnung || ''} (STWEG ${cfg.stweg}) — smart-me Empfänger aktualisieren`;
   const body =
     `Hallo Axova-Team\n\n`
