@@ -60,7 +60,7 @@ http:
         domains:
           - main: mqtt.rosenweg4303.ch
     # Audience-Subdomain admin.rosenweg4303.ch -> www-Frontend (fokussierte Admin-Nav via Host).
-    # Intern-only (nur UDM-DNS -> .40), kein oeffentlicher CF-Record.
+    # Oeffentlich (CF-CNAME admin -> kooperation, proxied) wie www/pwa; intern UDM-DNS -> .40.
     admin-rw4303:
       entryPoints: [websecure]
       rule: Host(`admin.rosenweg4303.ch`)
@@ -70,6 +70,7 @@ http:
         domains:
           - main: admin.rosenweg4303.ch
     # Audience-Subdomain ausschuss.rosenweg4303.ch -> www-Frontend (fokussierte Ausschuss-Nav).
+    # Oeffentlich (CF-CNAME ausschuss -> kooperation, proxied) wie www/pwa; intern UDM-DNS -> .40.
     ausschuss-rw4303:
       entryPoints: [websecure]
       rule: Host(`ausschuss.rosenweg4303.ch`)
