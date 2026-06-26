@@ -326,6 +326,7 @@ async function initDB() {
       ALTER TABLE meters ADD COLUMN IF NOT EXISTS group_id VARCHAR(100);
 
       ALTER TABLE meters ADD COLUMN IF NOT EXISTS parent_id VARCHAR(100) REFERENCES meters(id);
+      ALTER TABLE meters ADD COLUMN IF NOT EXISTS serial BIGINT;
 
       -- Auto-classify known meter types and groups
       UPDATE meters SET category = 'grid' WHERE category = 'consumer' AND (id LIKE '%-haupt' OR name ILIKE '%haupt%' OR name ILIKE '%netzübergabe%');
@@ -586,6 +587,12 @@ async function pollMeter(meter) {
     const ts = new Date();
 
     latestReadings.set(meter.id, { ...data, ts, meter_id: meter.id });
+
+    // Geräte-Seriennummer (smart-me, via Modbus 0x1FFF) persistieren — nur schreiben, wenn neu/geändert.
+    if (data.serial != null) {
+      pool.query('UPDATE meters SET serial = $2 WHERE id = $1 AND serial IS DISTINCT FROM $2', [meter.id, data.serial])
+        .catch((e) => console.error('[serial-persist]', meter.id, e.message));
+    }
 
     await pool.query(
       `INSERT INTO readings (
