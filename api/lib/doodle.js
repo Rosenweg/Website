@@ -77,6 +77,7 @@ async function initSchema() {
     ALTER TABLE doodle_polls ADD COLUMN IF NOT EXISTS stweg INTEGER;
     ALTER TABLE doodle_polls ADD COLUMN IF NOT EXISTS project_slug VARCHAR(120);
     ALTER TABLE doodle_polls ADD COLUMN IF NOT EXISTS gremium VARCHAR(120);
+    ALTER TABLE doodle_polls ADD COLUMN IF NOT EXISTS public_token VARCHAR(40);
   `);
 }
 
@@ -346,6 +347,7 @@ function mountDoodle({ app }) {
       if (canManage) {
         const inv = await pool.query('SELECT email, name FROM doodle_invites WHERE poll_id = $1 ORDER BY id', [id]);
         out.invites = inv.rows;
+        out.poll.public_token = poll.public_token;
       }
       res.json(out);
     } catch (e) { console.error('[doodle] detail', e); res.status(500).json({ error: 'Fehler' }); }
@@ -421,7 +423,11 @@ function mountDoodle({ app }) {
         params.push(fid); sets.push(`final_option_id = $${params.length}`);
       }
       if (typeof b.titel === 'string' && b.titel.trim()) { params.push(b.titel.trim().slice(0, 255)); sets.push(`titel = $${params.length}`); }
-      if (!sets.length) return res.status(400).json({ error: 'Nichts zu ändern' });
+      if ('public' in b) {
+        if (b.public) { if (!poll.public_token) { params.push(crypto.randomBytes(16).toString('hex')); sets.push(`public_token = $${params.length}`); } }
+        else { sets.push('public_token = NULL'); }
+      }
+      if (!sets.length) return res.json({ ok: true });
       params.push(id);
       await pool.query(`UPDATE doodle_polls SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${params.length}`, params);
 
@@ -543,6 +549,61 @@ function mountDoodle({ app }) {
       await pool.query('DELETE FROM doodle_votes WHERE poll_id = $1 AND LOWER(voter_email) = $2', [id, normEmail(req.body?.voter_email)]);
       res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: 'Fehler' }); }
+  });
+
+  // ── Öffentlicher Link (ohne Login, nur Name) — per public_token ──────────
+  app.get('/api/doodle/public/:id', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const t = String(req.query.t || '');
+      const pr = await pool.query('SELECT * FROM doodle_polls WHERE id = $1', [id]);
+      const poll = pr.rows[0];
+      if (!poll || !poll.public_token || poll.public_token !== t) return res.status(404).json({ error: 'Link ungültig oder deaktiviert' });
+      const opts = await pool.query('SELECT id, label, starts_at, sort_order FROM doodle_options WHERE poll_id = $1 ORDER BY sort_order, id', [id]);
+      const votes = await pool.query('SELECT option_id, voter_name, wert FROM doodle_votes WHERE poll_id = $1', [id]);
+      res.json({
+        poll: { id: poll.id, titel: poll.titel, beschreibung: poll.beschreibung, ort: poll.ort, status: poll.status, final_option_id: poll.final_option_id, deadline: poll.deadline, allow_add_options: poll.allow_add_options },
+        options: opts.rows, votes: votes.rows,
+      });
+    } catch (e) { console.error('[doodle] public-get', e); res.status(500).json({ error: 'Fehler' }); }
+  });
+
+  const pubRate = new Map();
+  app.post('/api/doodle/public/:id/vote', async (req, res) => {
+    const client = await pool.connect();
+    try {
+      const id = parseInt(req.params.id, 10);
+      const t = String(req.query.t || '');
+      const pr = await pool.query('SELECT status, public_token, allow_add_options FROM doodle_polls WHERE id = $1', [id]);
+      const poll = pr.rows[0];
+      if (!poll || !poll.public_token || poll.public_token !== t) { client.release(); return res.status(404).json({ error: 'Link ungültig' }); }
+      if (poll.status !== 'offen') { client.release(); return res.status(409).json({ error: 'Diese Umfrage ist geschlossen' }); }
+      const name = String(req.body?.name || '').trim().slice(0, 120);
+      if (!name) { client.release(); return res.status(400).json({ error: 'Bitte Namen angeben' }); }
+      const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '');
+      const now = Date.now(); const arr = (pubRate.get(ip) || []).filter(x => now - x < 60000);
+      if (arr.length >= 30) { client.release(); return res.status(429).json({ error: 'Zu viele Anfragen — kurz warten.' }); }
+      arr.push(now); pubRate.set(ip, arr);
+      const votes = req.body?.votes && typeof req.body.votes === 'object' ? req.body.votes : {};
+      const newOptions = (poll.allow_add_options && Array.isArray(req.body?.new_options)) ? req.body.new_options.map(l => String(l || '').trim().slice(0, 255)).filter(Boolean).slice(0, 10) : [];
+      const key = 'public:' + name.toLowerCase().replace(/\s+/g, '_');
+      await client.query('BEGIN');
+      if (newOptions.length) {
+        const mx = await client.query('SELECT COALESCE(MAX(sort_order), -1) AS m FROM doodle_options WHERE poll_id = $1', [id]);
+        let so = (mx.rows[0].m | 0) + 1;
+        for (const label of newOptions) await client.query('INSERT INTO doodle_options (poll_id, label, sort_order, added_by) VALUES ($1,$2,$3,$4)', [id, label, so++, key]);
+      }
+      const valid = new Set((await client.query('SELECT id FROM doodle_options WHERE poll_id = $1', [id])).rows.map(r => r.id));
+      await client.query('DELETE FROM doodle_votes WHERE poll_id = $1 AND voter_email = $2', [id, key]);
+      for (const [oid, wert] of Object.entries(votes)) {
+        const o = parseInt(oid, 10);
+        if (!valid.has(o) || !VOTE_VALUES.includes(wert)) continue;
+        await client.query('INSERT INTO doodle_votes (poll_id, option_id, voter_email, voter_name, wert) VALUES ($1,$2,$3,$4,$5)', [id, o, key, name, wert]);
+      }
+      await client.query('COMMIT');
+      res.json({ ok: true });
+    } catch (e) { try { await client.query('ROLLBACK'); } catch { /* */ } console.error('[doodle] public-vote', e); res.status(500).json({ error: 'Fehler' }); }
+    finally { client.release(); }
   });
 }
 

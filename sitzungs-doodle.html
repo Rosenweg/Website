@@ -221,6 +221,82 @@
       if (!r.ok) { $('man-msg').className = 'ml-2 text-sm text-red-600'; $('man-msg').textContent = (await r.json().catch(() => ({}))).error || 'Fehler'; return; }
       MANVOTE = {}; openPoll(CUR.poll.id);
     }
+
+    // ── Öffentlicher Link (Ersteller-Verwaltung) ────────────────────────────
+    function publicLinkUrl() { return location.origin + location.pathname + '?poll=' + CUR.poll.id + '&t=' + CUR.poll.public_token; }
+    async function togglePublic(on) {
+      await dFetch('/api/doodle/polls/' + CUR.poll.id, { method: 'PUT', body: { public: on } });
+      openPoll(CUR.poll.id);
+    }
+    function copyPublicLink() {
+      const url = publicLinkUrl();
+      if (navigator.clipboard) navigator.clipboard.writeText(url).then(() => alert('Link kopiert')).catch(() => prompt('Link kopieren:', url));
+      else prompt('Link kopieren:', url);
+    }
+
+    // ── Öffentliche Abstimm-Ansicht (ohne Login, nur Name) ──────────────────
+    let PUB = null, PUBVOTE = {};
+    async function renderPublic(id, t) {
+      ['login-box', 'toolbar', 'list', 'create'].forEach(x => $(x).classList.add('hidden'));
+      $('detail').classList.remove('hidden'); $('authbar').innerHTML = '';
+      const r = await fetch('/api/doodle/public/' + encodeURIComponent(id) + '?t=' + encodeURIComponent(t));
+      if (!r.ok) { $('detail').innerHTML = '<div class="bg-white rounded-xl shadow p-6 text-center text-red-600">Link ungültig oder deaktiviert.</div>'; return; }
+      const d = await r.json();
+      PUB = { id, t, poll: d.poll, options: d.options, votes: d.votes, name: localStorage.getItem('doodlePublicName') || '' };
+      PUBVOTE = {};
+      renderPublicView();
+    }
+    function pubVote(optId, wert, btn) {
+      PUBVOTE[optId] = (PUBVOTE[optId] === wert) ? undefined : wert;
+      if (PUBVOTE[optId] === undefined) delete PUBVOTE[optId];
+      btn.parentNode.querySelectorAll('.pub-v').forEach(b => b.classList.remove('sel-ja', 'sel-vielleicht', 'sel-nein'));
+      if (PUBVOTE[optId]) btn.classList.add('sel-' + PUBVOTE[optId]);
+    }
+    function renderPublicView() {
+      const p = PUB.poll, opts = PUB.options, votes = PUB.votes, closed = p.status !== 'offen';
+      const cnt = {}; opts.forEach(o => cnt[o.id] = { ja: 0, vielleicht: 0, nein: 0 });
+      votes.forEach(v => { if (cnt[v.option_id]) cnt[v.option_id][v.wert]++; });
+      const maxJa = Math.max(0, ...opts.map(o => cnt[o.id].ja));
+      const voters = [...new Set(votes.map(v => v.voter_name))];
+      const voteOf = {}; votes.forEach(v => { voteOf[v.voter_name + '|' + v.option_id] = v.wert; });
+      const sym = { ja: '<span class="text-green-600">✓</span>', vielleicht: '<span class="text-amber-500">?</span>', nein: '<span class="text-red-500">✗</span>' };
+      $('detail').innerHTML = `<div class="bg-white rounded-xl shadow p-5">
+        <h2 class="text-xl font-bold">${escapeHtml(p.titel)}</h2>
+        ${p.ort ? '<p class="text-slate-500 mt-1">📍 ' + escapeHtml(p.ort) + '</p>' : ''}
+        ${p.beschreibung ? '<p class="mt-2 whitespace-pre-line">' + escapeHtml(p.beschreibung) + '</p>' : ''}
+        ${closed ? '<div class="mt-3 bg-slate-100 rounded-lg p-3 text-sm">Diese Umfrage ist geschlossen.</div>' : `
+          <h3 class="font-semibold mt-4 mb-1">Dein Name</h3>
+          <input id="pub-name" value="${escapeHtml(PUB.name || '')}" placeholder="Vor- und Nachname" class="border rounded-lg px-3 py-2 w-full mb-3">
+          <h3 class="font-semibold mb-2">Deine Verfügbarkeit</h3>
+          <div class="space-y-2">
+            ${opts.map(o => { const c = cnt[o.id]; const best = c.ja === maxJa && maxJa > 0; const mine = PUBVOTE[o.id]; return `<div class="border rounded-lg p-3 ${best ? 'bg-green-50 border-green-200' : ''}">
+              <div class="flex items-center justify-between gap-3 flex-wrap">
+                <div><div class="font-medium">${escapeHtml(o.label)}</div><div class="text-xs text-slate-500 mt-0.5">✓ ${c.ja} · ? ${c.vielleicht} · ✗ ${c.nein}</div></div>
+                <div class="flex gap-1">
+                  <button class="vbtn pub-v ${mine === 'ja' ? 'sel-ja' : ''}" onclick="pubVote(${o.id},'ja',this)">Ja</button>
+                  <button class="vbtn pub-v ${mine === 'vielleicht' ? 'sel-vielleicht' : ''}" onclick="pubVote(${o.id},'vielleicht',this)">Vielleicht</button>
+                  <button class="vbtn pub-v ${mine === 'nein' ? 'sel-nein' : ''}" onclick="pubVote(${o.id},'nein',this)">Nein</button>
+                </div>
+              </div></div>`; }).join('')}
+          </div>
+          <button onclick="savePublicVote()" class="mt-4 bg-teal-700 hover:bg-teal-800 text-white rounded-lg px-5 py-2 font-semibold">Abstimmen</button>
+          <span id="pub-msg" class="ml-3 text-sm"></span>`}
+        ${voters.length ? `<h3 class="font-semibold mt-6 mb-2">Übersicht (${voters.length})</h3>
+          <div class="overflow-x-auto"><table class="text-sm border-collapse">
+            <tr><th class="text-left p-1"></th>${opts.map(o => '<th class="p-1 text-center">' + escapeHtml((o.label || '').slice(0, 16)) + '</th>').join('')}</tr>
+            ${voters.map(vn => `<tr class="border-t"><td class="p-1 pr-3 whitespace-nowrap">${escapeHtml(vn)}</td>${opts.map(o => `<td class="p-1 text-center">${sym[voteOf[vn + '|' + o.id]] || '·'}</td>`).join('')}</tr>`).join('')}
+          </table></div>` : ''}
+      </div>`;
+    }
+    async function savePublicVote() {
+      const name = $('pub-name').value.trim();
+      if (!name) { $('pub-msg').className = 'ml-3 text-sm text-red-600'; $('pub-msg').textContent = 'Bitte Namen angeben'; return; }
+      localStorage.setItem('doodlePublicName', name);
+      const r = await fetch('/api/doodle/public/' + encodeURIComponent(PUB.id) + '/vote?t=' + encodeURIComponent(PUB.t), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, votes: PUBVOTE }) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { $('pub-msg').className = 'ml-3 text-sm text-red-600'; $('pub-msg').textContent = d.error || 'Fehler'; return; }
+      renderPublic(PUB.id, PUB.t);
+    }
     async function openPoll(id) {
       const r = await dFetch('/api/doodle/polls/' + id);
       if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || 'Fehler'); return; }
@@ -330,6 +406,13 @@
               </div>
               <button onclick="saveManualVote()" class="mt-2 bg-teal-700 text-white rounded-lg px-4 py-2 text-sm">Rückmeldung speichern</button>
               <span id="man-msg" class="ml-2 text-sm"></span>
+            </div>
+            <div>
+              <h3 class="font-semibold mb-2">🔗 Öffentlicher Link (ohne Login)</h3>
+              ${CUR.poll.public_token ? `<p class="text-sm break-all bg-slate-50 rounded p-2">${publicLinkUrl()}</p>
+                <div class="flex gap-2 mt-1"><button onclick="copyPublicLink()" class="bg-teal-700 text-white rounded-lg px-3 py-1.5 text-sm">Link kopieren</button><button onclick="togglePublic(false)" class="text-red-600 text-sm px-2">deaktivieren</button></div>`
+                : `<button onclick="togglePublic(true)" class="bg-teal-700 text-white rounded-lg px-3 py-2 text-sm">Öffentlichen Link erstellen</button>`}
+              <p class="text-[11px] text-slate-400 mt-1">Jede:r mit dem Link kann mit Namen abstimmen — ganz ohne Konto/Code.</p>
             </div>
             <div class="flex flex-wrap gap-2 pt-3 border-t">
               ${!closed ? `<button onclick="closePoll()" class="bg-slate-700 text-white rounded-lg px-4 py-2 text-sm">Umfrage schliessen</button>` : `<button onclick="reopenPoll()" class="bg-slate-200 rounded-lg px-4 py-2 text-sm">wieder öffnen</button>`}
@@ -450,6 +533,8 @@
 
     // ── Init ────────────────────────────────────────────────────────────────
     document.addEventListener('DOMContentLoaded', async () => {
+      const q = new URLSearchParams(location.search);
+      if (q.get('t') && q.get('poll')) { renderPublic(q.get('poll'), q.get('t')); return; }
       try { currentUser = await AuthentikAuth.init({ requireAuth: false, onLogout: () => { currentUser = null; } }); } catch (e) {}
       render();
     });
