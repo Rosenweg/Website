@@ -131,7 +131,8 @@
       $('list').classList.remove('hidden');
       if (!authed) {
         $('authbar').innerHTML = '';
-        $('list').innerHTML = '<p class="text-slate-500">Bitte zuerst anmelden.</p>';
+        const _d = 'diag · loggedIn=' + !!(window.AuthentikAuth && AuthentikAuth.isLoggedIn()) + ' · tok=' + String(authToken() || '-').slice(0, 6) + ' · cookie=' + document.cookie.includes('rosenweg_session') + ' · hash=' + String(location.hash || '-').slice(0, 16);
+        $('list').innerHTML = '<p class="text-slate-500">Bitte zuerst anmelden.</p><pre class="text-[10px] text-amber-700 bg-amber-50 rounded p-2 mt-2 whitespace-pre-wrap break-all">' + _d + '</pre>';
         return;
       }
       // Auth-Bar
