@@ -56,8 +56,9 @@
 
   <script>
     // ── Auth-Helfer: Mitglied (Authentik) ODER externer Code-Token ──────────
-    function isMember() { return !!(window.AuthentikAuth && AuthentikAuth.isLoggedIn()); }
-    function authToken() { return isMember() ? AuthentikAuth.getToken() : localStorage.getItem('doodleToken'); }
+    let currentUser = null; // wie Technik/Reparatur: Rückgabe von AuthentikAuth.init()
+    function isMember() { return !!currentUser; }
+    function authToken() { return currentUser ? AuthentikAuth.getToken() : localStorage.getItem('doodleToken'); }
     function isAuthed() { return !!authToken(); }
     async function dFetch(path, opts = {}) {
       const t = authToken();
@@ -390,7 +391,7 @@
 
     // ── Init ────────────────────────────────────────────────────────────────
     document.addEventListener('DOMContentLoaded', async () => {
-      try { await AuthentikAuth.init({ requireAuth: false }); } catch (e) {}
+      try { currentUser = await AuthentikAuth.init({ requireAuth: false, onLogout: () => { currentUser = null; } }); } catch (e) {}
       render();
     });
   </script>
