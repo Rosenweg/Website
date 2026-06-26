@@ -82,7 +82,7 @@
     async function loadZuordnung() {
       try { const r = await fetch('/site-config.json'); const c = await r.json(); ZD.stwegen = (c.stwegen || []).map(s => ({ n: parseInt(String(s.slug || '').replace(/\D/g, ''), 10), name: s.name || s.label || s.slug })); } catch (e) {}
       if (!ZD.stwegen.length) ZD.stwegen = Array.from({ length: 8 }, (_, i) => ({ n: i + 1, name: 'STWEG ' + (i + 1) }));
-      if (isMember()) { try { const r = await dFetch('/api/projects-mini'); const d = await r.json(); ZD.projekte = d.projekte || []; } catch (e) {} }
+      try { const r = await dFetch('/api/doodle/projects'); const d = await r.json(); ZD.projekte = d.projekte || []; } catch (e) {}
     }
     const stwegName = n => { const s = ZD.stwegen.find(x => x.n === Number(n)); return s ? (s.name || ('STWEG ' + n)) : ('STWEG ' + n); };
     const projName = slug => { const p = ZD.projekte.find(x => x.slug === slug); return p ? (p.title || slug) : slug; };
@@ -156,13 +156,18 @@
       if (!r.ok) { $('list').innerHTML = '<p class="text-red-600">Konnte Umfragen nicht laden.</p>'; return; }
       const d = await r.json(); ME = d.me || null;
       $('toolbar').classList.toggle('hidden', !(ME && ME.isMember));
+      if (ME) { const nm = escapeHtml(ME.name || ME.email || ''); const sso = isMember(); $('authbar').innerHTML = `Angemeldet als <b>${nm}</b>${ME.isMember ? '' : ' (Gast)'}${sso ? '' : ' · <a href="#" onclick="logoutDoodle();return false" class="text-teal-700 underline">abmelden</a>'}`; }
       const polls = d.polls || [];
       let head = '';
       if (FILTER.stweg || FILTER.project || FILTER.gremium) {
         const lbl = FILTER.project ? ('Projekt: ' + projName(FILTER.project)) : FILTER.stweg ? stwegName(FILTER.stweg) : ('Gremium: ' + FILTER.gremium);
         head = `<div class="flex items-center justify-between mb-2"><span class="text-sm text-slate-600">Gefiltert auf <b>${escapeHtml(lbl)}</b></span><a href="${location.pathname}" class="text-sm text-teal-700 underline">alle anzeigen</a></div>`;
       }
-      if (!polls.length) { $('list').innerHTML = head + '<p class="text-slate-500">Keine Terminumfragen.</p>'; return; }
+      if (!polls.length) {
+        const msg = (ME && ME.isMember) ? 'Noch keine Terminumfragen — leg mit „+ Neue Terminumfrage" die erste an.' : 'Aktuell sind keine Terminumfragen für Sie verfügbar.';
+        $('list').innerHTML = head + `<div class="bg-white rounded-xl shadow p-6 text-center text-slate-500">🗓️ ${msg}</div>`;
+        return;
+      }
       $('list').innerHTML = head + polls.map(p => {
         const closed = p.status !== 'offen';
         const badge = closed ? '<span class="text-xs bg-slate-200 text-slate-600 rounded-full px-2 py-0.5">geschlossen</span>'

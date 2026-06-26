@@ -613,7 +613,7 @@
   ];
   function buildQuickLinks() {
     $('quickLinks').innerHTML = QUICK.map(q => `
-      <a href="${esc(q.url)}" target="_blank" rel="noopener"
+      <a href="${esc(q.url)}" ${/^https?:/.test(q.url) ? 'target="_blank" rel="noopener"' : ''}
         class="flex items-center gap-3 bg-white rounded-xl shadow-sm border border-slate-200 p-3 active:bg-slate-50">
         <span class="flex-none w-10 h-10 rounded-lg bg-sky-50 flex items-center justify-center text-xl leading-none">${q.icon}</span>
         <span class="min-w-0">
