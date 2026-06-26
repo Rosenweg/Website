@@ -30,12 +30,13 @@
       <div id="authbar" class="text-sm text-slate-600"></div>
     </div>
 
-    <!-- Login-Gate für Nicht-Mitglieder -->
+    <!-- Login-Gate: Konto-SSO (wie Reparatur) ODER E-Mail-Code (Externe) -->
     <div id="login-box" class="hidden bg-white rounded-xl shadow p-5 mb-6 max-w-md">
-      <p class="font-semibold mb-1">Anmelden zum Abstimmen</p>
-      <p class="text-sm text-slate-500 mb-3">Mitglieder melden sich mit dem Rosenweg-Konto an. Eingeladene (z.&nbsp;B. Verwaltung) bekommen einen Code per E-Mail.</p>
+      <p class="font-semibold mb-1">Anmelden</p>
+      <p class="text-sm text-slate-500 mb-3">Mitglieder melden sich mit dem Rosenweg-Konto an (du bleibst angemeldet). Eingeladene Externe (z.&nbsp;B. Verwaltung) nutzen den E-Mail-Code.</p>
       <button onclick="AuthentikAuth.login()" class="w-full mb-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-2 font-semibold">Mit Rosenweg-Konto anmelden</button>
       <div class="border-t pt-3">
+        <p class="text-xs text-slate-400 mb-2">… oder mit E-Mail-Code:</p>
         <div id="step-email">
           <label class="text-sm font-medium">E-Mail-Adresse</label>
           <input id="in-email" type="email" class="w-full border rounded-lg px-3 py-2 mt-1" placeholder="name@example.ch">
