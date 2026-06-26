@@ -4831,34 +4831,63 @@ if (ARCHIV_IMAP_PASS) {
 // ─── ZEV-Rechnungs-PDF parsen (Textlayer via pdftotext -layout) ──────
 const { execFile: _zevExecFile } = require('child_process');
 function zevPdfToText(buffer) {
+  // N2: PDF direkt per stdin an pdftotext -> keine weltlesbare Temp-Datei mit Rechnungsdaten in /tmp.
   return new Promise((resolve) => {
-    const tmp = `/tmp/zev-${crypto.randomBytes(6).toString('hex')}.pdf`;
-    try { fsSync.writeFileSync(tmp, buffer); } catch { return resolve(''); }
-    _zevExecFile('pdftotext', ['-layout', tmp, '-'], { maxBuffer: 16 * 1024 * 1024, timeout: 15000 }, (err, stdout) => {
-      try { fsSync.unlinkSync(tmp); } catch {}
-      resolve(err ? '' : String(stdout || ''));
-    });
+    let out = ''; let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    let p;
+    try { p = require('child_process').spawn('pdftotext', ['-layout', '-', '-'], { timeout: 15000 }); }
+    catch { return finish(''); }
+    p.stdout.on('data', (d) => { out += d; });
+    p.on('error', () => finish(''));
+    p.on('close', (code) => finish(code === 0 ? out : ''));
+    p.stdin.on('error', () => finish(''));
+    try { p.stdin.end(buffer); } catch { finish(''); }
   });
 }
+// Schweizer Zahl robust parsen. Tausendertrenner sind Apostroph/Leerzeichen (CH-Norm),
+// das Dezimaltrennzeichen ist das LETZTE '.' oder ',' mit 1-2 Nachkommastellen. Damit wird
+// sowohl "1'234.50", "1234,50", "1234.50" als auch "12'345" korrekt erkannt — KEIN 100x-Bug
+// mehr (frueher wurde der Dezimalpunkt faelschlich als Tausendertrenner entfernt).
 function zevParseSwissNum(s) {
-  if (!s) return null;
-  const n = parseFloat(String(s).replace(/['’.\s]/g, '').replace(',', '.'));
+  if (s == null) return null;
+  let str = String(s).trim().replace(/[’'’ \s]/g, ''); // Apostroph/NBSP/Space = Tausender
+  if (!str) return null;
+  const lastComma = str.lastIndexOf(',');
+  const lastDot = str.lastIndexOf('.');
+  const dec = Math.max(lastComma, lastDot);
+  if (dec > -1) {
+    const frac = str.slice(dec + 1);
+    if (/^\d{1,2}$/.test(frac)) {
+      str = str.slice(0, dec).replace(/[.,]/g, '') + '.' + frac; // dec = echtes Dezimaltrennzeichen
+    } else {
+      str = str.replace(/[.,]/g, ''); // beide nur Tausender (z.B. "1.234.567")
+    }
+  }
+  const n = parseFloat(str);
   return Number.isFinite(n) ? n : null;
 }
 // Parst die smart-me-Rechnung (Felder + Tarif-Positionen). Tolerant: fehlende Felder = null.
+// betrag_chf: 'Total ... CHF' (letztes Vorkommen); Fallback = Summe der Positionen, wenn kein
+// Total gefunden. parse_ok = true, wenn ein plausibler Betrag (> 0) ermittelt wurde.
 function zevParseInvoice(text) {
-  const out = { rechnungsnummer: null, rechnungsdatum: null, zeitraum_von: null, zeitraum_bis: null, objekt: null, betrag_chf: null, positionen: [] };
+  const out = { rechnungsnummer: null, rechnungsdatum: null, zeitraum_von: null, zeitraum_bis: null, objekt: null, betrag_chf: null, positionen: [], parse_ok: false };
   if (!text) return out;
   let m;
-  if ((m = text.match(/Rechnungsnummer\s+([0-9]+)/))) out.rechnungsnummer = m[1];
+  if ((m = text.match(/Rechnungsnummer\s+([A-Za-z0-9][A-Za-z0-9._\/\-]*)/))) out.rechnungsnummer = m[1];
   if ((m = text.match(/Rechnungsdatum\s+(\d{2}\.\d{2}\.\d{4})/))) out.rechnungsdatum = m[1];
   if ((m = text.match(/Abrechnungszeitraum\s+(\d{2}\.\d{2}\.\d{4})\s*[-–]\s*(\d{2}\.\d{2}\.\d{4})/))) { out.zeitraum_von = m[1]; out.zeitraum_bis = m[2]; }
   if ((m = text.match(/Objekt\s{2,}(.+)/))) out.objekt = m[1].trim();
-  const tot = [...text.matchAll(/^\s*Total\s+([\d'’.,]+)\s*CHF/gm)];
-  if (tot.length) out.betrag_chf = zevParseSwissNum(tot[tot.length - 1][1]);
   for (const p of text.matchAll(/^\s*(.+?)\s+([\d'’.,]+)\s*kWh\s+([\d'’.,]+)\s*CHF\s+([\d'’.,]+)\s*CHF/gm)) {
     out.positionen.push({ name: p[1].trim(), kwh: zevParseSwissNum(p[2]), preis: zevParseSwissNum(p[3]), total: zevParseSwissNum(p[4]) });
   }
+  const tot = [...text.matchAll(/^\s*Total\s+([\d'’.,]+)\s*CHF/gm)];
+  if (tot.length) out.betrag_chf = zevParseSwissNum(tot[tot.length - 1][1]);
+  if (out.betrag_chf == null && out.positionen.length) {
+    const sum = out.positionen.reduce((a, p) => a + (p.total || 0), 0);
+    if (sum > 0) out.betrag_chf = Math.round(sum * 100) / 100; // Fallback aus Positionen
+  }
+  out.parse_ok = out.betrag_chf != null && out.betrag_chf > 0;
   return out;
 }
 
@@ -4866,14 +4895,15 @@ function zevParseInvoice(text) {
 // Map Empfaenger-Alias (zev.<name>@...) -> Wohnung, aus den aktiven ZEV-STWEGs.
 async function buildZevAliasMap() {
   const map = {};
+  let complete = true; // W3: false, sobald eine aktive STWEG nicht sauber aufgeloest werden konnte
   let cfgs;
-  try { cfgs = await pool.query('SELECT * FROM zev_config WHERE aktiv = true'); } catch { return map; }
+  try { cfgs = await pool.query('SELECT * FROM zev_config WHERE aktiv = true'); } catch { return { map, complete: false }; }
   for (const cfg of cfgs.rows) {
     try {
       // Aktuelle Bewohner (eine Zeile je Wohnung) + Allgemein-Alias
       const rows = await resolveZevForStweg(cfg.stweg, cfg);
       for (const r of rows) if (r.alias_address) {
-        map[r.alias_address.toLowerCase()] = { wohnung_id: r.wohnung_id, stweg: cfg.stweg, alias_address: r.alias_address, bewohner_email: r.bewohner_email, bewohner_name: r.bewohner_name };
+        map[r.alias_address.toLowerCase()] = { wohnung_id: r.wohnung_id, stweg: cfg.stweg, alias_address: r.alias_address, bewohner_email: r.bewohner_email, bewohner_name: r.bewohner_name, typ: r.typ === 'allgemein' ? 'allgemein' : 'wohnung' };
       }
       // Kuerzlich ausgezogene Bewohner (archiviert < 6 Monate): Alias 6 Monate aktiv
       // halten (Schlussabrechnung) + Rechnungen weiter dem ALTEN Bewohner zuordnen.
@@ -4887,28 +4917,70 @@ async function buildZevAliasMap() {
       for (const k of recent.rows) {
         const a = zevAliasAddress(k.name, cfg.alias_prefix, cfg.alias_domain);
         if (a && !map[a.toLowerCase()]) {
-          map[a.toLowerCase()] = { wohnung_id: k.wohnung_id, stweg: cfg.stweg, alias_address: a, bewohner_email: k.email, bewohner_name: k.name, departed: true };
+          map[a.toLowerCase()] = { wohnung_id: k.wohnung_id, stweg: cfg.stweg, alias_address: a, bewohner_email: k.email, bewohner_name: k.name, departed: true, typ: 'wohnung' };
         }
       }
-    } catch {}
+    } catch (e) { complete = false; console.warn('[ZEV-aliasmap] STWEG', cfg.stweg, e.message); }
   }
-  return map;
+  return { map, complete };
+}
+
+// Re-Mail an den Bewohner (saubere Mail von zev@, via SMTP2GO). Auch OHNE PDF (W4): dann
+// nur Hinweis + Online-Link. Gibt {ok, error} zurueck — Aufrufer trackt remail_status.
+async function sendZevRemail(rec) {
+  if (!rec.bewohner_email) return { ok: false, error: 'keine Bewohner-Mail' };
+  const stwegHost = rec.stweg === 8 ? 'meg' : ('stweg' + rec.stweg);
+  const hasPdf = !!(rec.pdf_data && rec.pdf_data.length);
+  try {
+    await sendTemplated('zev-rechnung-bewohner', {
+      bewohner_name: rec.bewohner_name || '',
+      zeitraum_von: rec.zeitraum_von || '', zeitraum_bis: rec.zeitraum_bis || '',
+      betrag_text: rec.betrag_chf != null ? `${Number(rec.betrag_chf).toFixed(2)} CHF` : '',
+      stweg_host: stwegHost,
+    }, {
+      from: 'STWEG-Kooperation Rosenweg <zev@rosenweg9.ch>',
+      to: rec.bewohner_email,
+      subject: 'Neue Stromabrechnung (ZEV)' + (rec.zeitraum_von ? ` ${rec.zeitraum_von} – ${rec.zeitraum_bis}` : ''),
+      text: `Guten Tag${rec.bewohner_name ? ' ' + rec.bewohner_name : ''}\n\n`
+        + (hasPdf ? `im Anhang finden Sie Ihre aktuelle Stromabrechnung (ZEV).\n`
+                  : `für Sie liegt eine neue Stromabrechnung (ZEV) bereit. Sie können sie online einsehen.\n`)
+        + (rec.zeitraum_von ? `Abrechnungszeitraum: ${rec.zeitraum_von} – ${rec.zeitraum_bis}\n` : '')
+        + (rec.betrag_chf != null ? `Rechnungsbetrag: ${Number(rec.betrag_chf).toFixed(2)} CHF\n` : '')
+        + `\n`
+        + `Alle Ihre Abrechnungen können Sie jederzeit auch online einsehen:\n`
+        + `https://${stwegHost}.rosenweg4303.ch/pages/zev-meine-rechnungen.html\n\n`
+        + `Bei Fragen zur Abrechnung finden Sie die Kontaktdaten auf der Rechnung.\n\n`
+        + `Freundliche Gruesse\nSTWEG-Kooperation Rosenweg`,
+      attachments: hasPdf ? [{ filename: rec.pdf_filename || 'Stromabrechnung.pdf', content: rec.pdf_data }] : [],
+    });
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+async function recordZevRemail(id, res) {
+  await pool.query(
+    `UPDATE zev_rechnungen SET remail_status=$2, remail_attempts=remail_attempts+1, remail_last_at=NOW(), remail_error=$3 WHERE id=$1`,
+    [id, res.ok ? 'sent' : 'failed', res.ok ? null : String(res.error || '').slice(0, 500)],
+  ).catch((e) => console.warn('[ZEV] recordZevRemail', e.message));
 }
 
 let zevPolling = false;
 async function pollZevArchive() {
   if (!SMARTME_IMAP_PASS || zevPolling) return;
   zevPolling = true;
+  // W6: TLS-Validierung standardmaessig AN, mit SNI-Servername (Cert ist auf den Mailcow-FQDN
+  // ausgestellt, wir verbinden per IP). Bewusst abschaltbar via ZEV_IMAP_TLS_INSECURE=1.
+  const tlsInsecure = process.env.ZEV_IMAP_TLS_INSECURE === '1' || process.env.ZEV_IMAP_TLS_INSECURE === 'true';
+  const tlsServername = process.env.ZEV_IMAP_SERVERNAME || process.env.IMAP_SERVERNAME || null;
   const { ImapFlow } = require('imapflow');
   const client = new ImapFlow({
     host: IMAP_HOST, port: IMAP_PORT, secure: true,
     auth: { user: SMARTME_IMAP_USER, pass: SMARTME_IMAP_PASS }, logger: false,
     socketTimeout: 30000, greetingTimeout: 15000, connectionTimeout: 30000,
-    tls: { rejectUnauthorized: false },
+    tls: { rejectUnauthorized: !tlsInsecure, ...(tlsServername ? { servername: tlsServername } : {}) },
   });
   try {
     await client.connect();
-    const aliasMap = await buildZevAliasMap();
+    const { map: aliasMap } = await buildZevAliasMap();
     const lock = await client.getMailboxLock('INBOX');
     try {
       const mb = client.mailbox;
@@ -4924,6 +4996,7 @@ async function pollZevArchive() {
       } else {
         lastUid = parseInt(st.rows[0].last_uid, 10) || 0;
       }
+      await pool.query("UPDATE imap_state SET last_attempt_at = NOW() WHERE mailbox = 'ZEV'");
       let maxUid = lastUid, stored = 0;
       for await (const msg of client.fetch(`${lastUid + 1}:*`, { uid: true, source: true, envelope: true }, { uid: true })) {
         if (msg.uid <= lastUid) continue;
@@ -4938,61 +5011,65 @@ async function pollZevArchive() {
           if (hdrTo) recips.push(...hdrTo.split(/[<>,\s]+/).filter(Boolean));
           let match = null;
           for (const r of recips) { if (aliasMap[r]) { match = aliasMap[r]; break; } }
+          // B3: Zuordnung. allgemein = Allgemeinzaehler (kein Bewohner), unzugeordnet = kein Alias-Match.
+          const zuordnung = match ? (match.typ === 'allgemein' ? 'allgemein' : 'wohnung') : 'unzugeordnet';
+          const zevRecip = recips.find(r => /^zev[._]/.test(r)) || null;
           const pdf = (parsed.attachments || []).find(a => a.contentType === 'application/pdf' || /\.pdf$/i.test(a.filename || ''));
           // PDF-Textlayer auslesen -> Rechnungsfelder (Betrag, Zeitraum, Objekt, Tarif-Positionen).
-          let inv = { rechnungsnummer: null, rechnungsdatum: null, zeitraum_von: null, zeitraum_bis: null, objekt: null, betrag_chf: null, positionen: [] };
+          let inv = { rechnungsnummer: null, rechnungsdatum: null, zeitraum_von: null, zeitraum_bis: null, objekt: null, betrag_chf: null, positionen: [], parse_ok: false };
           if (pdf) { try { inv = zevParseInvoice(await zevPdfToText(pdf.content)); } catch (e) { console.error('[ZEV-Archiv] PDF-Parse:', e.message); } }
-          // Dedup auch per Rechnungsnummer: dieselbe Rechnung mehrfach geforwardet = neue Message-ID,
-          // aber gleiche Nummer -> nicht doppelt erfassen.
-          if (inv.rechnungsnummer) {
-            const dupNr = await pool.query('SELECT 1 FROM zev_rechnungen WHERE rechnungsnummer = $1 LIMIT 1', [inv.rechnungsnummer]);
+          // B1: Dedup per Rechnungsnummer nur PRO WOHNUNG (nicht global) -> dieselbe Sammelnummer
+          // auf verschiedenen Wohnungen kollidiert nicht; dieselbe Rechnung 2x = uebersprungen.
+          if (inv.rechnungsnummer && match?.wohnung_id) {
+            const dupNr = await pool.query('SELECT 1 FROM zev_rechnungen WHERE wohnung_id = $1 AND rechnungsnummer = $2 LIMIT 1', [match.wohnung_id, inv.rechnungsnummer]);
             if (dupNr.rows.length) continue;
           }
-          await pool.query(
-            `INSERT INTO zev_rechnungen (stweg, wohnung_id, alias_address, bewohner_email, bewohner_name, message_id, betreff, absender, empfangen_am, pdf_filename, pdf_size, pdf_data, rechnungsnummer, rechnungsdatum, zeitraum_von, zeitraum_bis, objekt, betrag_chf, positionen)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) ON CONFLICT (message_id) DO NOTHING`,
-            [match?.stweg || null, match?.wohnung_id || null, match?.alias_address || (recips.find(r => aliasMap[r]) || null),
-             match?.bewohner_email || null, match?.bewohner_name || null, messageId,
-             parsed.subject || null, parsed.from?.value?.[0]?.address || null, parsed.date || null,
-             pdf?.filename || null, pdf ? pdf.content.length : null, pdf ? pdf.content : null,
-             inv.rechnungsnummer, inv.rechnungsdatum, inv.zeitraum_von, inv.zeitraum_bis, inv.objekt, inv.betrag_chf, JSON.stringify(inv.positionen)]);
-          // Bewohner bekommt die Rechnung als saubere Re-Mail von zev@rosenweg9.ch (via SMTP2GO,
-          // verifizierter Absender + gute Reputation) — statt unzuverlaessigem Roh-Forward der
-          // Fremdmail (scheitert an SMTP2GO-Verified-Sender bzw. frischer Relay-IP-Reputation).
-          if (match?.bewohner_email && pdf) {
-            const stwegHost = match.stweg === 8 ? 'meg' : ('stweg' + match.stweg);
-            try {
-              await sendTemplated('zev-rechnung-bewohner', {
-                bewohner_name: match.bewohner_name || '',
-                zeitraum_von: inv.zeitraum_von || '', zeitraum_bis: inv.zeitraum_bis || '',
-                betrag_text: inv.betrag_chf != null ? `${inv.betrag_chf.toFixed(2)} CHF` : '',
-                stweg_host: stwegHost,
-              }, {
-                from: 'STWEG-Kooperation Rosenweg <zev@rosenweg9.ch>',
-                to: match.bewohner_email,
-                subject: 'Neue Stromabrechnung (ZEV)' + (inv.zeitraum_von ? ` ${inv.zeitraum_von} – ${inv.zeitraum_bis}` : ''),
-                text: `Guten Tag${match.bewohner_name ? ' ' + match.bewohner_name : ''}\n\n`
-                  + `im Anhang finden Sie Ihre aktuelle Stromabrechnung (ZEV).\n`
-                  + (inv.zeitraum_von ? `Abrechnungszeitraum: ${inv.zeitraum_von} – ${inv.zeitraum_bis}\n` : '')
-                  + (inv.betrag_chf != null ? `Rechnungsbetrag: ${inv.betrag_chf.toFixed(2)} CHF\n` : '')
-                  + `\n`
-                  + `Alle Ihre Abrechnungen koennen Sie jederzeit auch online einsehen:\n`
-                  + `https://${stwegHost}.rosenweg4303.ch/pages/zev-meine-rechnungen.html\n\n`
-                  + `Bei Fragen zur Abrechnung finden Sie die Kontaktdaten auf der Rechnung.\n\n`
-                  + `Freundliche Gruesse\nSTWEG-Kooperation Rosenweg`,
-                attachments: [{ filename: pdf.filename || 'Stromabrechnung.pdf', content: pdf.content }],
-              });
-            } catch (e) { console.error('[ZEV-Archiv] Re-Mail an Bewohner fehlgeschlagen:', e.message); }
+          let rechnungId;
+          try {
+            const ins = await pool.query(
+              `INSERT INTO zev_rechnungen (stweg, wohnung_id, alias_address, bewohner_email, bewohner_name, message_id, betreff, absender, empfangen_am, pdf_filename, pdf_size, pdf_data, rechnungsnummer, rechnungsdatum, zeitraum_von, zeitraum_bis, objekt, betrag_chf, positionen, zuordnung, parse_ok, parse_attempts)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) ON CONFLICT (message_id) DO NOTHING RETURNING id`,
+              [match?.stweg || null, match?.wohnung_id || null, match?.alias_address || zevRecip,
+               match?.bewohner_email || null, match?.bewohner_name || null, messageId,
+               parsed.subject || null, parsed.from?.value?.[0]?.address || null, parsed.date || null,
+               pdf?.filename || null, pdf ? pdf.content.length : null, pdf ? pdf.content : null,
+               inv.rechnungsnummer, inv.rechnungsdatum, inv.zeitraum_von, inv.zeitraum_bis, inv.objekt, inv.betrag_chf, JSON.stringify(inv.positionen),
+               zuordnung, pdf ? inv.parse_ok : null, pdf ? 1 : 0]);
+            if (!ins.rows.length) continue; // message_id schon vorhanden
+            rechnungId = ins.rows[0].id;
+          } catch (e) {
+            if (e.code === '23505') continue; // (wohnung_id, rechnungsnummer)-Dup -> ueberspringen
+            throw e;
           }
           stored++;
+          // B3: unzugeordnete Rechnung -> Technik alarmieren (sie taucht in keiner Bewohner-Ansicht auf).
+          if (zuordnung === 'unzugeordnet') {
+            notifyTechnik(`⚠️ ZEV: Rechnung ohne Zuordnung (#${rechnungId}). Empfänger-Alias unbekannt: ${zevRecip || parsed.subject || '?'}. Bitte im Admin (zev-smartme) zuordnen.`, 'zev-unzugeordnet').catch(() => {});
+          } else if (pdf && !inv.parse_ok) {
+            // W4: PDF da, aber kein plausibler Betrag geparst -> melden (Format-Aenderung?).
+            notifyTechnik(`⚠️ ZEV: Rechnung #${rechnungId} konnte nicht sauber geparst werden (kein Betrag). smart-me-Format prüfen.`, 'zev-parsefail').catch(() => {});
+          } else if (!pdf && zuordnung === 'wohnung') {
+            notifyTechnik(`⚠️ ZEV: Rechnung #${rechnungId} ohne PDF-Anhang empfangen (${match?.bewohner_email || '?'}). Bitte prüfen.`, 'zev-nopdf').catch(() => {});
+          }
+          // B2: Bewohner-Re-Mail (auch ohne PDF: Link). Status persistieren; bei Fehler Alarm + Retry am Folgetag.
+          if (match?.bewohner_email) {
+            const res = await sendZevRemail({ bewohner_email: match.bewohner_email, bewohner_name: match.bewohner_name, stweg: match.stweg, zeitraum_von: inv.zeitraum_von, zeitraum_bis: inv.zeitraum_bis, betrag_chf: inv.betrag_chf, pdf_filename: pdf?.filename, pdf_data: pdf?.content });
+            await recordZevRemail(rechnungId, res);
+            if (!res.ok) notifyTechnik(`⚠️ ZEV: Re-Mail an Bewohner fehlgeschlagen (Rechnung #${rechnungId}, ${match.bewohner_email}): ${res.error}. Wird täglich erneut versucht.`, 'zev-remail-fail').catch(() => {});
+          }
         } catch (e) { console.error(`[ZEV-Archiv] UID ${msg.uid}:`, e.message); }
       }
       if (maxUid > lastUid) {
         await pool.query("UPDATE imap_state SET last_uid = $1, updated_at = NOW() WHERE mailbox = 'ZEV'", [String(maxUid)]);
         if (stored) console.log(`[ZEV-Archiv] ${stored} Rechnung(en) erfasst (Watermark → UID ${maxUid})`);
       }
+      // W2: erfolgreicher Poll (auch bei 0 neuen Mails) -> Heartbeat fuer den Watchdog.
+      await pool.query("UPDATE imap_state SET last_ok_at = NOW(), last_error = NULL WHERE mailbox = 'ZEV'");
     } finally { lock.release(); }
-  } catch (e) { console.error('[ZEV-Archiv] Poll-Fehler:', e.message); }
+  } catch (e) {
+    console.error('[ZEV-Archiv] Poll-Fehler:', e.message);
+    await pool.query("UPDATE imap_state SET last_error = $1 WHERE mailbox = 'ZEV'", [String(e.message).slice(0, 500)]).catch(() => {});
+  }
   finally { try { await client.logout(); } catch {} zevPolling = false; }
 }
 if (SMARTME_IMAP_PASS) {
@@ -5003,16 +5080,20 @@ if (SMARTME_IMAP_PASS) {
 // Einmaliger Backfill: bestehende Rechnungen ohne geparste Felder nachziehen (PDF-Textlayer).
 async function backfillZevParsing() {
   try {
-    const r = await pool.query("SELECT id, pdf_data FROM zev_rechnungen WHERE pdf_data IS NOT NULL AND betrag_chf IS NULL LIMIT 500");
+    // N5: nur Rechnungen mit < 5 Parse-Versuchen -> dauerhaft unparsbare PDFs werden nicht bei jedem Boot reprozessiert.
+    const r = await pool.query("SELECT id, pdf_data FROM zev_rechnungen WHERE pdf_data IS NOT NULL AND betrag_chf IS NULL AND parse_attempts < 5 LIMIT 500");
     let n = 0;
     for (const row of r.rows) {
       try {
         const inv = zevParseInvoice(await zevPdfToText(row.pdf_data));
         await pool.query(
-          `UPDATE zev_rechnungen SET rechnungsnummer=$2, rechnungsdatum=$3, zeitraum_von=$4, zeitraum_bis=$5, objekt=$6, betrag_chf=$7, positionen=$8 WHERE id=$1`,
-          [row.id, inv.rechnungsnummer, inv.rechnungsdatum, inv.zeitraum_von, inv.zeitraum_bis, inv.objekt, inv.betrag_chf, JSON.stringify(inv.positionen)]);
-        n++;
-      } catch (e) { console.error('[ZEV-backfill] id', row.id, e.message); }
+          `UPDATE zev_rechnungen SET rechnungsnummer=$2, rechnungsdatum=$3, zeitraum_von=$4, zeitraum_bis=$5, objekt=$6, betrag_chf=$7, positionen=$8, parse_ok=$9, parse_attempts=parse_attempts+1 WHERE id=$1`,
+          [row.id, inv.rechnungsnummer, inv.rechnungsdatum, inv.zeitraum_von, inv.zeitraum_bis, inv.objekt, inv.betrag_chf, JSON.stringify(inv.positionen), inv.parse_ok]);
+        if (inv.betrag_chf != null) n++;
+      } catch (e) {
+        await pool.query("UPDATE zev_rechnungen SET parse_attempts = parse_attempts + 1 WHERE id = $1", [row.id]).catch(() => {});
+        console.error('[ZEV-backfill] id', row.id, e.message);
+      }
     }
     if (n) console.log(`[ZEV-backfill] ${n} Rechnung(en) nachgeparst`);
   } catch (e) { console.error('[ZEV-backfill]', e.message); }
@@ -6661,8 +6742,10 @@ async function syncZevAliasesForStweg(stweg) {
 // Nur deaktivieren (reversibel), nie loeschen; Stopp wenn die Soll-Liste leer ist
 // (Schutz vor Massendeaktivierung bei DB-/Resolver-Fehler).
 async function cleanupOrphanZevAliases() {
-  const valid = await buildZevAliasMap();
-  if (!Object.keys(valid).length) return;
+  const { map: valid, complete } = await buildZevAliasMap();
+  // W3: nur deaktivieren, wenn ALLE aktiven STWEGs sauber aufgeloest wurden — sonst koennten
+  // Aliase einer transient ausgefallenen STWEG faelschlich als Orphan deaktiviert werden (Rechnungen bouncen).
+  if (!complete || !Object.keys(valid).length) return;
   let cfgs;
   try { cfgs = await pool.query("SELECT DISTINCT alias_prefix, alias_domain FROM zev_config WHERE aktiv = true"); } catch { return; }
   const manages = (addr) => cfgs.rows.some(c =>
@@ -6740,6 +6823,33 @@ async function notifyZevWechsel(cfg, k) {
     [k.id, k.wohnung_id, cfg.stweg, neuerAlias, queueId]);
 }
 
+// B2: fehlgeschlagene Bewohner-Re-Mails erneut versuchen (taeglich, max 5 Versuche je Rechnung).
+async function retryZevRemails() {
+  const r = await pool.query(
+    `SELECT id, stweg, bewohner_email, bewohner_name, zeitraum_von, zeitraum_bis, betrag_chf, pdf_filename, pdf_data
+       FROM zev_rechnungen
+      WHERE remail_status = 'failed' AND remail_attempts < 5 AND bewohner_email IS NOT NULL
+      ORDER BY id LIMIT 100`);
+  let ok = 0;
+  for (const row of r.rows) {
+    const res = await sendZevRemail(row);
+    await recordZevRemail(row.id, res);
+    if (res.ok) ok++;
+  }
+  if (r.rows.length) console.log(`[ZEV] Re-Mail-Retry: ${ok}/${r.rows.length} zugestellt`);
+}
+
+// W2: Watchdog — alarmiert, wenn der smartme@-Poller seit > 6 h keinen erfolgreichen Abruf hatte.
+async function checkZevPollerHealth() {
+  if (!SMARTME_IMAP_PASS) return;
+  const r = await pool.query("SELECT last_ok_at, last_error FROM imap_state WHERE mailbox = 'ZEV'");
+  const row = r.rows[0];
+  const ageH = row?.last_ok_at ? (Date.now() - new Date(row.last_ok_at).getTime()) / 3.6e6 : Infinity;
+  if (ageH > 6) {
+    notifyTechnik(`🔴 ZEV-Poller: seit ${row?.last_ok_at ? Math.round(ageH) + ' h' : 'Start'} kein erfolgreicher Abruf des smartme@-Postfachs${row?.last_error ? ` (Fehler: ${row.last_error})` : ''}. Rechnungen werden evtl. nicht erfasst/zugestellt.`, 'zev-poller-down').catch(() => {});
+  }
+}
+
 // Taeglich (nach Auto-Archive): je aktiver STWEG Aliase neu syncen + neue Bewohner-/
 // Mieter-Kontakte (ab gueltig_ab, noch nicht gemeldet) an Axova/Immosense melden.
 async function processZevDaily() {
@@ -6761,6 +6871,8 @@ async function processZevDaily() {
       if (neu.rows.length) console.log(`[zev-daily] STWEG ${cfg.stweg}: ${neu.rows.length} Wechsel an Axova gemeldet`);
     } catch (e) { console.warn('[zev-daily]', cfg.stweg, e.message); }
   }
+  try { await retryZevRemails(); } catch (e) { console.warn('[zev-remail-retry]', e.message); }
+  try { await checkZevPollerHealth(); } catch (e) { console.warn('[zev-health]', e.message); }
 }
 
 app.get('/api/zev/config/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
@@ -6821,11 +6933,30 @@ async function getZevMemberWohnungen(user) {
   return r.rows.map(x => x.wohnung_id);
 }
 
+// W1: Wohnungen, deren Eigentuemer der User ist UND deren STWEG den Schalter
+// `eigentuemer_sieht_mieter` = true hat. Fuer diese darf er ALLE Rechnungen sehen
+// (auch die des aktuellen Mieters). Default ist der Schalter aus -> leere Liste.
+async function getZevOwnerWohnungen(user) {
+  const email = String(user?.email || '').toLowerCase();
+  if (!email) return [];
+  const r = await pool.query(
+    `SELECT DISTINCT k.wohnung_id
+       FROM wohnungen_kontakte k
+       JOIN wohnungen w ON k.wohnung_id = w.id
+       JOIN zev_config c ON c.stweg = w.stweg AND c.aktiv = true AND c.eigentuemer_sieht_mieter = true
+      WHERE k.archiviert_am IS NULL
+        AND (k.gueltig_ab IS NULL OR k.gueltig_ab <= CURRENT_DATE)
+        AND k.rolle = 'eigentuemer'
+        AND LOWER(k.email) = $1`, [email]);
+  return r.rows.map(x => x.wohnung_id);
+}
+
 app.get('/api/zev/meine-rechnungen', authMiddleware, async (req, res) => {
   try {
     const email = String(req.user?.email || '').toLowerCase();
     const memberWohnungen = await getZevMemberWohnungen(req.user);
-    if (!email && !memberWohnungen.length) return res.json({ rechnungen: [] });
+    const ownerWohnungen = await getZevOwnerWohnungen(req.user); // W1: nur bei aktivem Toggle
+    if (!email && !memberWohnungen.length && !ownerWohnungen.length) return res.json({ rechnungen: [] });
     const r = await pool.query(
       `SELECT id, wohnung_id, betreff, absender, empfangen_am, pdf_filename, pdf_size,
               rechnungsnummer, rechnungsdatum, zeitraum_von, zeitraum_bis, objekt, betrag_chf, positionen,
@@ -6838,7 +6969,8 @@ app.get('/api/zev/meine-rechnungen', authMiddleware, async (req, res) => {
                             WHERE kk.wohnung_id = zr.wohnung_id
                               AND kk.archiviert_am IS NULL
                               AND LOWER(kk.email) = LOWER(zr.bewohner_email)))
-        ORDER BY empfangen_am DESC NULLS LAST, id DESC`, [email, memberWohnungen]);
+           OR (wohnung_id = ANY($3::int[]))
+        ORDER BY empfangen_am DESC NULLS LAST, id DESC`, [email, memberWohnungen, ownerWohnungen]);
     res.json({ rechnungen: r.rows });
   } catch (e) { console.error('[zev-meine-rechnungen]', e); res.status(500).json({ error: 'Fehler' }); }
 });
@@ -6848,6 +6980,7 @@ app.get('/api/zev/rechnung/:id/pdf', authMiddleware, async (req, res) => {
     const id = parseInt(req.params.id);
     const email = String(req.user?.email || '').toLowerCase();
     const memberWohnungen = await getZevMemberWohnungen(req.user);
+    const ownerWohnungen = await getZevOwnerWohnungen(req.user);
     const r = await pool.query('SELECT wohnung_id, bewohner_email, pdf_filename, pdf_data FROM zev_rechnungen WHERE id = $1', [id]);
     if (!r.rows.length || !r.rows[0].pdf_data) return res.status(404).json({ error: 'Nicht gefunden' });
     const row = r.rows[0];
@@ -6859,6 +6992,7 @@ app.get('/api/zev/rechnung/:id/pdf', authMiddleware, async (req, res) => {
         [row.wohnung_id, row.bewohner_email]);
       allowed = cur.rows.length > 0;
     }
+    if (!allowed && ownerWohnungen.includes(row.wohnung_id)) allowed = true; // W1: Eigentümer mit aktivem Toggle
     if (!allowed) return res.status(403).json({ error: 'Kein Zugriff' });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${String(row.pdf_filename || 'rechnung.pdf').replace(/[^\w.\-]/g, '_')}"`);
@@ -6873,6 +7007,7 @@ app.post('/api/zev/rechnung/:id/bezahlt', authMiddleware, async (req, res) => {
     const bezahlt = !!req.body?.bezahlt;
     const email = String(req.user?.email || '').toLowerCase();
     const memberWohnungen = await getZevMemberWohnungen(req.user);
+    const ownerWohnungen = await getZevOwnerWohnungen(req.user);
     const r = await pool.query('SELECT wohnung_id, bewohner_email FROM zev_rechnungen WHERE id = $1', [id]);
     if (!r.rows.length) return res.status(404).json({ error: 'Nicht gefunden' });
     const row = r.rows[0];
@@ -6883,6 +7018,7 @@ app.post('/api/zev/rechnung/:id/bezahlt', authMiddleware, async (req, res) => {
         [row.wohnung_id, row.bewohner_email]);
       allowed = cur.rows.length > 0;
     }
+    if (!allowed && ownerWohnungen.includes(row.wohnung_id)) allowed = true; // W1: Eigentümer mit aktivem Toggle
     if (!allowed) return res.status(403).json({ error: 'Kein Zugriff' });
     await pool.query(
       `UPDATE zev_rechnungen SET bezahlt = $2,
@@ -6892,6 +7028,57 @@ app.post('/api/zev/rechnung/:id/bezahlt', authMiddleware, async (req, res) => {
       [id, bezahlt, req.user?.email || null]);
     res.json({ ok: true, bezahlt });
   } catch (e) { console.error('[zev-rechnung-bezahlt]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+// B3: nicht zugeordnete ZEV-Rechnungen (unbekannter Alias / Allgemein auf persoenlichem Alias etc.) —
+// landen sonst in keiner Bewohner-Ansicht. Admin sieht + ordnet sie manuell zu.
+app.get('/api/zev/unzugeordnet', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT id, stweg, wohnung_id, alias_address, betreff, absender, empfangen_am,
+              rechnungsnummer, rechnungsdatum, zeitraum_von, zeitraum_bis, objekt, betrag_chf,
+              zuordnung, parse_ok, (pdf_data IS NOT NULL) AS has_pdf
+         FROM zev_rechnungen
+        WHERE COALESCE(zuordnung, 'unzugeordnet') = 'unzugeordnet'
+        ORDER BY empfangen_am DESC NULLS LAST, id DESC LIMIT 200`);
+    res.json({ rechnungen: r.rows });
+  } catch (e) { console.error('[zev-unzugeordnet]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+// B3: eine Rechnung manuell einer Wohnung (+ Bewohner) zuordnen; optional Re-Mail ausloesen.
+app.post('/api/zev/rechnung/:id/zuordnen', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const b = req.body || {};
+    const wohnungId = parseInt(b.wohnung_id);
+    if (!Number.isFinite(wohnungId)) return res.status(400).json({ error: 'wohnung_id erforderlich' });
+    const w = await pool.query('SELECT id, stweg FROM wohnungen WHERE id = $1', [wohnungId]);
+    if (!w.rows.length) return res.status(404).json({ error: 'Wohnung nicht gefunden' });
+    const stweg = w.rows[0].stweg;
+    let bewEmail = (typeof b.bewohner_email === 'string' && b.bewohner_email.trim()) ? b.bewohner_email.trim() : null;
+    let bewName = (typeof b.bewohner_name === 'string' && b.bewohner_name.trim()) ? b.bewohner_name.trim() : null;
+    if (!bewEmail) { // Default: aktueller Bewohner der Wohnung (Mieter > Bewohner > Eigentuemer)
+      const occ = await pool.query(
+        `SELECT name, email FROM wohnungen_kontakte WHERE wohnung_id = $1 AND archiviert_am IS NULL
+            AND rolle IN ('mieter','bewohner','eigentuemer')
+          ORDER BY CASE rolle WHEN 'mieter' THEN 1 WHEN 'bewohner' THEN 2 ELSE 3 END, sort_order, id LIMIT 1`, [wohnungId]);
+      if (occ.rows[0]) { bewEmail = occ.rows[0].email; bewName = bewName || occ.rows[0].name; }
+    }
+    const upd = await pool.query(
+      `UPDATE zev_rechnungen SET wohnung_id=$2, stweg=$3, bewohner_email=$4, bewohner_name=$5, zuordnung='wohnung' WHERE id=$1
+       RETURNING id, stweg, bewohner_email, bewohner_name, zeitraum_von, zeitraum_bis, betrag_chf, pdf_filename, pdf_data`,
+      [id, wohnungId, stweg, bewEmail, bewName]);
+    if (!upd.rows.length) return res.status(404).json({ error: 'Rechnung nicht gefunden' });
+    if (b.remail === true && upd.rows[0].bewohner_email) {
+      const r2 = await sendZevRemail(upd.rows[0]);
+      await recordZevRemail(id, r2);
+      return res.json({ ok: true, remail: r2.ok, remail_error: r2.error || null });
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: 'Diese Rechnungsnummer existiert für die Wohnung bereits' });
+    console.error('[zev-zuordnen]', e); res.status(500).json({ error: 'Fehler' });
+  }
 });
 
 app.get('/api/wohnungen/eigentuemer-uebersicht', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
@@ -22568,6 +22755,25 @@ async function initDB() {
       ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS bezahlt    BOOLEAN NOT NULL DEFAULT false;
       ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS bezahlt_am TIMESTAMPTZ;
       ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS bezahlt_von TEXT;
+      -- Zuordnung (B3): 'wohnung' | 'allgemein' | 'unzugeordnet'. Unzugeordnete brauchen Admin-Aktion.
+      ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS zuordnung TEXT;
+      -- Re-Mail-Zustellung an Bewohner (B2): Status + Retry-Tracking (Erfassen != Zustellen).
+      ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS remail_status   TEXT;        -- 'sent' | 'failed' | 'skipped' | NULL(=n/a)
+      ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS remail_attempts INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS remail_last_at  TIMESTAMPTZ;
+      ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS remail_error    TEXT;
+      -- Parsing-Tracking (W4/N5): Erfolg + Versuchszaehler (deckelt Backfill bei unparsbaren PDFs).
+      ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS parse_ok        BOOLEAN;
+      ALTER TABLE zev_rechnungen ADD COLUMN IF NOT EXISTS parse_attempts  INTEGER NOT NULL DEFAULT 0;
+      -- B1: dieselbe Rechnungsnummer pro Wohnung nur EINMAL (DB-Garantie gegen Doppelerfassung,
+      -- aber NICHT global -> verschiedene Wohnungen duerfen dieselbe Sammelnummer tragen).
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_zev_rechnungen_wohnung_rnr
+        ON zev_rechnungen(wohnung_id, rechnungsnummer)
+        WHERE rechnungsnummer IS NOT NULL AND wohnung_id IS NOT NULL;
+      -- W2: Poller-Heartbeat (auch bei 0 neuen Mails) -> Watchdog/Alarm bei totem Poller.
+      ALTER TABLE imap_state ADD COLUMN IF NOT EXISTS last_attempt_at TIMESTAMPTZ;
+      ALTER TABLE imap_state ADD COLUMN IF NOT EXISTS last_ok_at      TIMESTAMPTZ;
+      ALTER TABLE imap_state ADD COLUMN IF NOT EXISTS last_error      TEXT;
       -- Allgemeinzaehler-Empfaenger (zusaetzlich zu Verwaltung+Archiv), z.B. STWEG-Ausschuss.
       ALTER TABLE zev_config ADD COLUMN IF NOT EXISTS allgemein_email VARCHAR(255);
       -- Optionaler Absender-Override fuer Outbox-Mails (ZEV nutzt smartme@rosenweg9.ch).
