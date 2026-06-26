@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Energie Rosenweg — ZEV &amp; E-Ladeinfrastruktur (Info)</title>
+<style>
+  :root { --c:#0f766e; --c2:#115e59; --bg:#f8fafc; --ink:#1e293b; --mut:#64748b; --warn:#b45309; --warnbg:#fffbeb; --ok:#15803d; --line:#e2e8f0; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; color:var(--ink); line-height:1.6; margin:0; background:var(--bg); }
+  .wrap { max-width:880px; margin:0 auto; padding:32px 22px 80px; }
+  header { border-bottom:4px solid var(--c); padding-bottom:18px; margin-bottom:8px; }
+  h1 { font-size:1.85rem; margin:0 0 4px; color:var(--c2); }
+  .sub { color:var(--mut); font-size:1.02rem; }
+  .meta { color:var(--mut); font-size:.85rem; margin-top:8px; }
+  h2 { color:var(--c2); font-size:1.28rem; margin:36px 0 10px; padding-top:10px; border-top:1px solid var(--line); }
+  h3 { font-size:1.04rem; margin:18px 0 6px; }
+  ul { margin:8px 0; padding-left:22px; } li { margin:4px 0; }
+  table { border-collapse:collapse; width:100%; margin:14px 0; font-size:.92rem; }
+  th,td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; }
+  th { background:#ecfdf5; color:var(--c2); }
+  .box { border-radius:10px; padding:14px 16px; margin:14px 0; }
+  .challenge { background:var(--warnbg); border:1px solid #fcd34d; }
+  .challenge h3 { color:var(--warn); margin-top:0; }
+  .ok { background:#f0fdf4; border:1px solid #bbf7d0; } .ok strong { color:var(--ok); }
+  .tag { display:inline-block; background:var(--c); color:#fff; font-size:.72rem; padding:2px 9px; border-radius:99px; margin-right:6px; }
+  .ascii { background:#0f172a; color:#e2e8f0; padding:14px 16px; border-radius:8px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.8rem; line-height:1.45; overflow-x:auto; white-space:pre; }
+  .small { font-size:.82rem; color:var(--mut); }
+  a { color:var(--c2); }
+  footer { margin-top:46px; padding-top:16px; border-top:1px solid var(--line); color:var(--mut); font-size:.82rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Energie Rosenweg</h1>
+  <div class="sub">Gemeinsamer ZEV/vZEV über die Siedlung &amp; E-Ladeinfrastruktur in der Tiefgarage — Info &amp; Zwischenstand</div>
+  <div class="meta">STWEG-Kooperation Rosenweg, Kaiseraugst (AG) · Stand 26.06.2026 · Netzbetreiber: AEW Energie AG · öffentliche Info-Version</div>
+</header>
+
+<h2>Worum es geht</h2>
+<p>Zwei zusammenhängende Vorhaben, die wir <strong>bewusst kombiniert</strong> angehen, weil sich an mehreren Punkten grosse <strong>Synergien</strong> ergeben (gemeinsame Infrastruktur, Solarstrom-Nutzung, Mess- und Abrechnungstechnik):</p>
+<table>
+  <tr><th>Projekt</th><th>Ziel</th></tr>
+  <tr><td><span class="tag">ZEV</span><strong>ZEV Rosenweg</strong></td><td>Den Eigenverbrauch von Solarstrom auf die <strong>ganze Siedlung</strong> ausweiten — als ZEV bzw. virtueller ZEV (vZEV) hinter unserem gemeinsamen AEW-Anschluss. Der bestehende ZEV Rosenweg 9 wird als Produktionsgruppe integriert.</td></tr>
+  <tr><td><span class="tag">Lade</span><strong>E-Ladestationen</strong></td><td>Ladeinfrastruktur in der Tiefgarage mit nutzerbezogener Abrechnung, dynamischem Lastmanagement und Nutzung von Solarstrom. An den Versammlungen wurde Interesse daran geäussert.</td></tr>
+</table>
+
+<h2>Unsere Strom-Infrastruktur</h2>
+<p>Die Ausgangslage ist günstig, weil bereits ein <strong>gemeinsamer Anschluss</strong> existiert:</p>
+<div class="ascii">AEW-Zuleitung 400 A (Hauptschalter)
+        ▼
+  HAUPTVERTEILUNG R9   (Platz für einen weiteren Schrank vorhanden)
+        ├── 63/80 A ─▶ Haus 1   (eigene Unterverteilung, eigene Zähler)
+        ├── 63/80 A ─▶ Haus 4   (…)
+        ├── 63/80 A ─▶ Haus 6   (…)
+        ├── 63/80 A ─▶ Haus 9   (…)
+        └── 80 A    ─▶ Allgemein / Tiefgarage
+                         (eigener AEW-Zähler, geteilt mit Haus RW9)</div>
+<ul>
+  <li>Eine gemeinsame <strong>400-A-Zuleitung</strong> speist die Hauptverteilung; von dort gehen Abgänge zu jedem Haus.</li>
+  <li>Jedes Haus hat eigene Wohnungs- und Allgemein-Zähler; die Verteil-Infrastruktur hinter dem Anschluss <strong>gehört uns</strong>.</li>
+  <li>Pro Wohnung ist bereits ein <strong>eigener Stromzähler</strong> vorhanden, der live ausgelesen wird — die Mess-Basis für eine faire, nutzerbezogene Abrechnung ist also da.</li>
+  <li>Am Hauptverteiler ist <strong>Platz für einen weiteren Schrank</strong> — der natürliche Ort für die Lade-Einspeisung mit eigenem Zähler.</li>
+</ul>
+<div class="box ok"><strong>Folgerung:</strong> Weil alle Häuser hinter <strong>einem</strong> gemeinsamen Anschluss hängen, ist ein gemeinsamer ZEV technisch naheliegend — selbst genutzter Solarstrom bleibt günstig im Haus.</div>
+
+<h2>Modellwahl: ZEV / vZEV / LEG</h2>
+<p>Das neue Stromgesetz (2025/26) bringt zusätzliche Modelle, um Strom über mehrere Liegenschaften zu teilen:</p>
+<table>
+  <tr><th>Modell</th><th>Kurz</th></tr>
+  <tr><td><strong>ZEV</strong></td><td>Mehrere Verbraucher hinter einem Anschluss; selbst genutzter Solarstrom zahlt keine Netznutzung.</td></tr>
+  <tr><td><strong>vZEV</strong> (seit 2025)</td><td>Virtueller Zusammenschluss am selben Netzverknüpfungspunkt.</td></tr>
+  <tr><td><strong>LEG</strong> (seit 2026)</td><td>Lokale Elektrizitätsgemeinschaft — Teilung über das öffentliche Netz innerhalb der Gemeinde, mit reduziertem Netztarif.</td></tr>
+</table>
+<p>Da wir bereits einen gemeinsamen Anschluss haben, ist für uns voraussichtlich ein <strong>physischer ZEV</strong> der beste Weg. Das ist mit der AEW zu bestätigen.</p>
+
+<h2>Faire Abrechnung &amp; Messung</h2>
+<ul>
+  <li>Wir dürfen nur <strong>hinter den eigenen Zählern</strong> messen — das genügt: unsere vorhandenen Wohnungszähler erlauben eine verbrauchsgenaue, faire Aufteilung.</li>
+  <li>Bei vZEV/LEG verlangt die AEW eigene Smart Meter an den Abrechnungspunkten und übernimmt die übergeordnete Verrechnung; die interne Aufteilung bleibt bei uns.</li>
+</ul>
+
+<h2>E-Laden mit Solarstrom &amp; Lastmanagement</h2>
+<ul>
+  <li>Geplant: <strong>Laden aus Solarüberschuss</strong> und ein <strong>dynamisches Lastmanagement</strong>, das die Ladeleistung automatisch an die verfügbare Anschlusskapazität anpasst (mit Open-Source-Software, herstelleroffen).</li>
+  <li>Die Lade-Einspeisung kommt aus der 400-A-Hauptverteilung (neuer Schrank) mit eigenem Zähler — nicht über den kleinen 80-A-Allgemeinanschluss.</li>
+  <li>Die vorhandene Zähler-Auslesung lässt sich direkt einbinden — kein Doppelaufbau.</li>
+</ul>
+
+<h2>AEW — Rahmen &amp; Prozess</h2>
+<ul>
+  <li>Die <strong>AEW Energie AG</strong> ist unser Netzbetreiber. Anschluss-/Installationsanzeigen reicht ein <strong>konzessionierter Elektroinstallateur</strong> ein; die AEW bestimmt den Anschlusspunkt und stellt die Zähler.</li>
+  <li>Ladeinfrastruktur ist anzumelden; bei mehreren Ladepunkten ist ein Lastmanagement faktisch Pflicht.</li>
+  <li>Kontakt: info@aew.ch · E-Mobilität: emobility@aew.ch.</li>
+</ul>
+
+<h2>Herausforderungen &amp; offene Punkte</h2>
+<div class="box challenge"><h3>Ehrlich gesagt</h3>
+<ul>
+  <li>Die <strong>aktive Beteiligung ist — gemessen an unseren 110 Parkplätzen — noch klein</strong>, und die <strong>Kosten sind gross</strong>. Damit daraus etwas wird, braucht es Eigentümer, die mitanpacken.</li>
+  <li>Es braucht eine <strong>Grundinstallation</strong>, von der zunächst nicht alle direkt profitieren — das gemeinsam fair zu lösen ist Teil der Aufgabe.</li>
+  <li>Das genaue <strong>Messkonzept</strong> und die <strong>Modellwahl</strong> (ZEV/vZEV/LEG) sind mit der AEW zu klären.</li>
+  <li>Wir brauchen den <strong>richtigen Elektriker</strong>, der das Vorhaben mitträgt.</li>
+</ul></div>
+
+<h2>Nächste Schritte</h2>
+<ol>
+  <li><strong>Mithilfe sammeln</strong> — ein kleines Energie-Team mit Sachverstand und Tatkraft.</li>
+  <li>Erstgespräche mit passenden <strong>Elektro- und ZEV-Fachfirmen</strong> (wir prüfen mehrere regionale Anbieter; Vorschläge willkommen).</li>
+  <li><strong>AEW-Gespräch</strong>: Modellwahl, Messkonzept, Anschluss.</li>
+  <li><strong>Bedarf &amp; Perimeter</strong> festlegen (Ladepunkte, Teilnehmer) und die Finanzierung über die STWEGs klären.</li>
+</ol>
+
+<div class="box ok"><strong>Mitmachen?</strong> Wer im Energie-Team mithelfen möchte oder einen passenden Elektriker kennt: bitte in der WhatsApp-„Energiegruppe" oder direkt bei Stefan melden. Jede Hand zählt.</div>
+
+<footer>Energie Rosenweg · Stand 26.06.2026 · Lebendes Dokument — wird laufend ergänzt. Regulatorische Details sind mit der AEW zu bestätigen.</footer>
+</div>
+</body>
+</html>
