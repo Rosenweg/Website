@@ -48,6 +48,7 @@ const { transporter, MAIL_FROM, SMTP2GO_API_KEY, SMTP2GO_API_URL, EMAIL_ALLOWLIS
 // WhatsApp-Queue + Technik-Gruppen-Resolver -> lib/whatsapp.js
 const { queueWhatsappMessage, resolveTechnikWhatsappGroupId } = require('./lib/whatsapp');
 const { mountAlarmpanel } = require('./lib/alarmpanel');
+const { mountDoodle } = require('./lib/doodle');
 
 // createSemaphore -> lib/utils.js. Gotenberg/Converter-Throttle (max 3 parallel).
 const gotenbergSemaphore = createSemaphore(parseInt(process.env.GOTENBERG_MAX_CONCURRENT || '3'));
@@ -24517,6 +24518,7 @@ const activeIntervals = [];
 // Alarm-Eskalation. Verwalten = Technik/Präsident; Bewohner-Broadcast (Rauch)
 // über den getesteten resolveBroadcastRecipients('stweg:3').
 mountAlarmpanel({ app, authMiddleware, requireManage: requireTechnikOrPraesident, resolveBroadcastRecipients });
+mountDoodle({ app });
 
 initDB()
   .then(() => {
