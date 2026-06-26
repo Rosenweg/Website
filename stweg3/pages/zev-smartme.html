@@ -115,12 +115,33 @@
                     </table>
                 </div>
             </section>
+
+            <!-- B3: Nicht zugeordnete Rechnungen -->
+            <section id="unz-section" class="bg-white rounded-xl shadow-sm border p-5 hidden">
+                <h2 class="text-lg font-bold text-gray-900 mb-1">⚠️ Nicht zugeordnete Rechnungen</h2>
+                <p class="text-sm text-gray-500 mb-4">Rechnungen, deren Empfänger-Alias keiner Wohnung zugeordnet werden konnte (unbekannter Alias o. Ä.). Bitte manuell einer Wohnung zuweisen — sonst erscheinen sie in keiner Bewohner-Ansicht.</p>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-xs uppercase tracking-wider text-gray-500 border-b">
+                                <th class="py-2 pr-3">Empfangen</th>
+                                <th class="py-2 pr-3">Alias / Betreff</th>
+                                <th class="py-2 pr-3">Betrag</th>
+                                <th class="py-2 pr-3">Zuordnen zu</th>
+                                <th class="py-2"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="unz-body"></tbody>
+                    </table>
+                </div>
+            </section>
         </div>
     </main>
 
     <script>
-    const STWEG = 3;
+    const STWEG = parseInt(new URLSearchParams(location.search).get('stweg'), 10) || 3; // N3: pro STWEG wiederverwendbar
     const $ = id => document.getElementById(id);
+    let WOHNUNGEN = [];
     const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 
     function showGate(msg) {
@@ -177,7 +198,9 @@
             if (!r.ok) throw new Error('HTTP ' + r.status);
             const data = await r.json();
             fillConfig(data.config || {});
+            WOHNUNGEN = data.wohnungen || [];
             renderWohnungen(data.wohnungen);
+            loadUnzugeordnet();
             $('loading').classList.add('hidden');
             $('content').classList.remove('hidden');
         } catch (e) {
@@ -221,6 +244,51 @@
             const wd = await w.json();
             renderWohnungen(wd.wohnungen, data.results);
         } catch (e) { $('sync-msg').textContent = 'Fehler: ' + e.message; }
+    }
+
+    // ── B3: nicht zugeordnete Rechnungen ──
+    function wohnungOptions() {
+        return '<option value="">— Wohnung wählen —</option>' + WOHNUNGEN.filter(w => w.wohnung_id)
+            .map(w => `<option value="${w.wohnung_id}">${esc(w.bezeichnung || '')} — ${esc(w.bewohner_name || w.eigentuemer_name || '')}</option>`).join('');
+    }
+    function renderUnzugeordnet(rows) {
+        const sec = $('unz-section');
+        if (!rows || !rows.length) { sec.classList.add('hidden'); return; }
+        sec.classList.remove('hidden');
+        $('unz-body').innerHTML = rows.map(z => `<tr class="border-b last:border-0 align-top" data-id="${z.id}">
+            <td class="py-2 pr-3 text-xs whitespace-nowrap">${esc((z.empfangen_am || '').slice(0, 10))}</td>
+            <td class="py-2 pr-3"><span class="font-mono text-xs">${esc(z.alias_address || '—')}</span><br><span class="text-xs text-gray-500">${esc((z.betreff || '').slice(0, 60))}</span></td>
+            <td class="py-2 pr-3 whitespace-nowrap">${z.betrag_chf != null ? ('CHF ' + Number(z.betrag_chf).toFixed(2)) : '<span class="text-amber-600 text-xs">kein Betrag</span>'}</td>
+            <td class="py-2 pr-3"><select class="unz-sel border rounded px-2 py-1 text-xs">${wohnungOptions()}</select><label class="block text-xs text-gray-500 mt-1"><input type="checkbox" class="unz-remail"> Re-Mail an Bewohner senden</label></td>
+            <td class="py-2"><button class="unz-assign bg-amber-600 text-white px-3 py-1 rounded text-xs font-semibold hover:bg-amber-700">Zuordnen</button></td>
+        </tr>`).join('');
+        $('unz-body').querySelectorAll('.unz-assign').forEach(btn => btn.addEventListener('click', onAssign));
+    }
+    async function onAssign(e) {
+        const tr = e.target.closest('tr');
+        const id = tr.dataset.id;
+        const wid = tr.querySelector('.unz-sel').value;
+        const remail = tr.querySelector('.unz-remail').checked;
+        if (!wid) { alert('Bitte eine Wohnung wählen.'); return; }
+        e.target.disabled = true; e.target.textContent = '…';
+        try {
+            const r = await AuthentikAuth.apiFetch(`/api/zev/rechnung/${id}/zuordnen`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ wohnung_id: Number(wid), remail }),
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) { alert('Fehler: ' + (d.error || r.status)); e.target.disabled = false; e.target.textContent = 'Zuordnen'; return; }
+            tr.remove();
+            if (!$('unz-body').children.length) $('unz-section').classList.add('hidden');
+        } catch (err) { alert('Fehler: ' + err.message); e.target.disabled = false; e.target.textContent = 'Zuordnen'; }
+    }
+    async function loadUnzugeordnet() {
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/zev/unzugeordnet', { cache: 'no-store' });
+            if (!r.ok) return;
+            const d = await r.json();
+            renderUnzugeordnet(d.rechnungen || []);
+        } catch {}
     }
 
     AuthentikAuth.handleCallback();
