@@ -9137,8 +9137,31 @@ app.get('/api/stweg/:stweg/events', authMiddleware, async (req, res) => {
     } catch (wErr) {
       console.error('Wartungs-Events Merge error:', wErr.message);
     }
+    // Sitzungs-Doodle: finalisierte Terminumfragen dieser STWEG als virtuelle
+    // Termine einmischen (analog Wartungen) -> erscheinen automatisch in
+    // "Naechste Termine", ohne separaten Termin-Datensatz.
+    let doodleEvents = [];
+    try {
+      const dq = await pool.query(
+        `SELECT p.id, p.titel, p.ort, o.starts_at
+           FROM doodle_polls p JOIN doodle_options o ON o.id = p.final_option_id
+          WHERE p.status = 'geschlossen' AND p.stweg = $1 AND o.starts_at IS NOT NULL
+            AND o.starts_at BETWEEN CURRENT_DATE - INTERVAL '7 days' AND CURRENT_DATE + INTERVAL '365 days'
+          ORDER BY o.starts_at`,
+        [stweg]
+      );
+      doodleEvents = dq.rows.map(d => ({
+        id: `doodle-${d.id}`,
+        title: `🗓️ ${d.titel}`,
+        description: 'Sitzungstermin (aus Terminumfrage)',
+        start: d.starts_at, end: null, location: d.ort || null,
+        category: 'sitzung', all_day: false, source: 'doodle', poll_id: d.id,
+      }));
+    } catch (dErr) {
+      console.error('Doodle-Events Merge error:', dErr.message);
+    }
     // Merge and sort by date
-    const all = [...stwegEvents, ...globalEvents, ...wartungEvents].sort((a, b) => new Date(a.start) - new Date(b.start));
+    const all = [...stwegEvents, ...globalEvents, ...wartungEvents, ...doodleEvents].sort((a, b) => new Date(a.start) - new Date(b.start));
     res.json(all);
   } catch (err) {
     res.status(500).json({ error: 'Fehler' });
