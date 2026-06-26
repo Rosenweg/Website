@@ -51,19 +51,19 @@
 <div class="ascii">AEW-Zuleitung 400 A (Hauptschalter)
         ▼
   HAUPTVERTEILUNG R9   (Platz für einen weiteren Schrank vorhanden)
-        ├── 63/80 A ─▶ Haus 1   (eigene Unterverteilung, eigene Zähler)
-        ├── 63/80 A ─▶ Haus 4   (…)
-        ├── 63/80 A ─▶ Haus 6   (…)
-        ├── 63/80 A ─▶ Haus 9   (…)
+        ├── 63/80 A ─▶ Haus 1   (eigene Unterverteilung · AEW-Zähler)
+        ├── 63/80 A ─▶ Haus 4   (… AEW-Zähler)
+        ├── 63/80 A ─▶ Haus 6   (… AEW-Zähler)
+        ├── 63/80 A ─▶ Haus 9   (zusätzlich eigene, von uns lesbare Messung)
         └── 80 A    ─▶ Allgemein / Tiefgarage
                          (eigener AEW-Zähler, geteilt mit Haus RW9)</div>
 <ul>
   <li>Eine gemeinsame <strong>400-A-Zuleitung</strong> speist die Hauptverteilung; von dort gehen Abgänge zu jedem Haus.</li>
-  <li>Jedes Haus hat eigene Wohnungs- und Allgemein-Zähler; die Verteil-Infrastruktur hinter dem Anschluss <strong>gehört uns</strong>.</li>
-  <li>Pro Wohnung ist bereits ein <strong>eigener Stromzähler</strong> vorhanden, der live ausgelesen wird — die Mess-Basis für eine faire, nutzerbezogene Abrechnung ist also da.</li>
+  <li>Die Verteil-Infrastruktur hinter dem Anschluss <strong>gehört uns</strong>. Die einzelnen Häuser werden aber von der <strong>AEW</strong> gemessen — auf diese Zähler haben wir keinen Zugriff.</li>
+  <li>Nur in <strong>Rosenweg 9</strong> gibt es zusätzlich eine <strong>eigene, von uns ausgelesene Messung</strong> (Basis für die nutzerbezogene Abrechnung dort). Für die übrigen Häuser bräuchte ein siedlungsweiter Zusammenschluss entweder eigene Zähler oder die Messdaten der AEW.</li>
   <li>Am Hauptverteiler ist <strong>Platz für einen weiteren Schrank</strong> — der natürliche Ort für die Lade-Einspeisung mit eigenem Zähler.</li>
 </ul>
-<div class="box ok"><strong>Folgerung:</strong> Weil alle Häuser hinter <strong>einem</strong> gemeinsamen Anschluss hängen, ist ein gemeinsamer ZEV technisch naheliegend — selbst genutzter Solarstrom bleibt günstig im Haus.</div>
+<div class="box ok"><strong>Folgerung:</strong> Physisch hängen alle Häuser hinter <strong>einem</strong> gemeinsamen Anschluss — eine gute Basis. Da aber bisher nur Rosenweg 9 von uns selbst gemessen wird, ist mit der AEW zu klären, <strong>wie die übrigen Häuser eingebunden werden</strong> (eigene Zähler ergänzen oder Saldierung über die AEW-Messung, z. B. via vZEV/LEG).</div>
 
 <h2>Modellwahl: ZEV / vZEV / LEG</h2>
 <p>Das neue Stromgesetz (2025/26) bringt zusätzliche Modelle, um Strom über mehrere Liegenschaften zu teilen:</p>
@@ -77,7 +77,7 @@
 
 <h2>Faire Abrechnung &amp; Messung</h2>
 <ul>
-  <li>Wir dürfen nur <strong>hinter den eigenen Zählern</strong> messen — das genügt: unsere vorhandenen Wohnungszähler erlauben eine verbrauchsgenaue, faire Aufteilung.</li>
+  <li>Wir dürfen nur <strong>hinter den eigenen Zählern</strong> messen. In Rosenweg 9 sind solche eigenen Zähler vorhanden; für die übrigen Häuser müssten dafür eigene Zähler ergänzt oder die AEW-Messdaten genutzt werden.</li>
   <li>Bei vZEV/LEG verlangt die AEW eigene Smart Meter an den Abrechnungspunkten und übernimmt die übergeordnete Verrechnung; die interne Aufteilung bleibt bei uns.</li>
 </ul>
 
@@ -85,7 +85,7 @@
 <ul>
   <li>Geplant: <strong>Laden aus Solarüberschuss</strong> und ein <strong>dynamisches Lastmanagement</strong>, das die Ladeleistung automatisch an die verfügbare Anschlusskapazität anpasst (mit Open-Source-Software, herstelleroffen).</li>
   <li>Die Lade-Einspeisung kommt aus der 400-A-Hauptverteilung (neuer Schrank) mit eigenem Zähler — nicht über den kleinen 80-A-Allgemeinanschluss.</li>
-  <li>Die vorhandene Zähler-Auslesung lässt sich direkt einbinden — kein Doppelaufbau.</li>
+  <li>In Rosenweg 9 ist die Zähler-Auslesung bereits vorhanden; fürs Lastmanagement am Gesamtanschluss braucht es zusätzlich einen <strong>eigenen Zähler am Hauptanschluss</strong> (die AEW-Zähler der anderen Häuser können wir nicht lesen).</li>
 </ul>
 
 <h2>AEW — Rahmen &amp; Prozess</h2>
