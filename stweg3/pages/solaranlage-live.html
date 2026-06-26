@@ -79,6 +79,7 @@
         .card { background: #fff; border-radius: 14px; padding: 1rem 1.2rem; box-shadow: 0 4px 16px rgba(0,0,0,.1); }
         .card .ct { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: #9ca3af; }
         .card .cv { font-size: 1.5rem; font-weight: 700; margin-top: .25rem; } .card .cv .u { font-size: .55em; font-weight: 500; color: #6b7280; }
+        .card .cm { font-size: 1.05rem; font-weight: 600; color: #16a34a; margin-top: .15rem; }
         .meta { text-align: center; color: rgba(255,255,255,.95); font-size: .82rem; margin-top: 1.1rem; line-height: 1.6; text-shadow: 0 1px 2px rgba(0,0,0,.15); }
 
         @media (max-width: 760px) {
@@ -140,8 +141,8 @@
         </div>
 
         <div class="cards">
-            <div class="card"><div class="ct">🔋 Eigenverbrauch heute</div><div class="cv"><span id="v-today-prod">–</span><span class="u"> kWh&nbsp;·&nbsp;CHF </span><span id="v-prod-chf">–</span></div></div>
-            <div class="card"><div class="ct">⚡ Einspeisung heute</div><div class="cv"><span id="v-today-feed">–</span><span class="u"> kWh&nbsp;·&nbsp;CHF </span><span id="v-feed-chf">–</span></div></div>
+            <div class="card"><div class="ct">🔋 Eigenverbrauch heute</div><div class="cv"><span id="v-today-prod">–</span><span class="u"> kWh</span></div><div class="cm">CHF <span id="v-prod-chf">–</span></div></div>
+            <div class="card"><div class="ct">⚡ Einspeisung heute</div><div class="cv"><span id="v-today-feed">–</span><span class="u"> kWh</span></div><div class="cm">CHF <span id="v-feed-chf">–</span></div></div>
         </div>
 
         <div class="meta"><div id="m-updated">Verbinde …</div><div id="m-src"></div></div>
