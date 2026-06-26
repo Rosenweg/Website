@@ -5342,57 +5342,58 @@ async function loadKontakteForWohnung(client, wohnungId) {
 // Verwaltung relevanten Felder. Interne Felder (bezeichnung, notizen,
 // besonderheiten) werden ignoriert — die hat die Verwaltung nicht zu
 // interessieren. Liefert leeres Array zurueck wenn nichts relevantes.
+// Liefert STRUKTURIERTE Änderungen (für ein konsolidiertes Vorher/Nachher in der
+// Verwaltungs-Mail): { felder:[{label,vorher,nachher}], eigentuemer:{vorher,nachher}|null, mieter:... }.
+// Eigentümer/Mieter werden als Roster (Name <E-Mail>) verglichen — nur wenn sich der
+// Bestand wirklich ändert. Reine Adress-/Telefon-Tweaks an derselben Person erzeugen
+// KEINE Meldung (sonst Rauschen wie Komma-Korrekturen). Namens-/E-Mail-Änderungen sind
+// Teil des Rosters und erscheinen daher als Vorher→Nachher.
 function computeWohnungChanges(oldRow, newRow, oldKontakte, newKontakte) {
-  const changes = [];
   const fmt = v => (v === null || v === undefined || v === '') ? '—' : String(v);
-  const compare = (label, oldV, newV, transform = fmt) => {
+  const felder = [];
+  const cmp = (label, oldV, newV, transform = fmt) => {
     if (String(oldV ?? '') === String(newV ?? '')) return;
-    changes.push(`${label}: "${transform(oldV)}" → "${transform(newV)}"`);
+    felder.push({ label, vorher: transform(oldV), nachher: transform(newV) });
   };
-  compare('Typ', oldRow.typ, newRow.typ);
-  compare('Stockwerk', oldRow.stockwerk, newRow.stockwerk);
-  compare('Zimmer', oldRow.zimmer, newRow.zimmer);
-  compare('Fläche (m²)', oldRow.flaeche_m2, newRow.flaeche_m2);
-  compare('Bewohnt von', oldRow.bewohnt_von, newRow.bewohnt_von);
-  compare('Waschküche-Berechtigung',
-    !!oldRow.waschkueche_berechtigt, !!newRow.waschkueche_berechtigt,
-    v => v ? 'ja' : 'nein');
-  // Wertquote als kombiniertes Feld behandeln
-  const oldWQ = oldRow.wertquote_zaehler && oldRow.wertquote_nenner
-    ? `${oldRow.wertquote_zaehler}/${oldRow.wertquote_nenner}` : null;
-  const newWQ = newRow.wertquote_zaehler && newRow.wertquote_nenner
-    ? `${newRow.wertquote_zaehler}/${newRow.wertquote_nenner}` : null;
-  if (oldWQ !== newWQ) changes.push(`Wertquote: "${oldWQ || '—'}" → "${newWQ || '—'}"`);
-  // Kontakt-Diffs nur fuer Eigentuemer + Mieter (der Verwaltung relevant)
-  const RELEVANT_ROLLEN = new Set(['eigentuemer', 'mieter']);
-  const ROLLE_LABEL = { eigentuemer: 'Eigentümer', mieter: 'Mieter' };
-  const oldRel = (oldKontakte || []).filter(k => RELEVANT_ROLLEN.has(k.rolle));
-  const newRel = (newKontakte || []).filter(k => RELEVANT_ROLLEN.has(k.rolle));
-  const keyOf = k => `${k.rolle}|${(k.email || k.name || '').toLowerCase()}`;
-  const oldByKey = new Map(oldRel.map(k => [keyOf(k), k]));
-  const newByKey = new Map(newRel.map(k => [keyOf(k), k]));
-  for (const [k, v] of oldByKey) {
-    if (!newByKey.has(k)) {
-      changes.push(`${ROLLE_LABEL[v.rolle] || v.rolle} entfernt: ${v.name || v.email}`);
+  cmp('Typ', oldRow.typ, newRow.typ);
+  cmp('Stockwerk', oldRow.stockwerk, newRow.stockwerk);
+  cmp('Zimmer', oldRow.zimmer, newRow.zimmer);
+  cmp('Fläche (m²)', oldRow.flaeche_m2, newRow.flaeche_m2);
+  cmp('Bewohnt von', oldRow.bewohnt_von, newRow.bewohnt_von);
+  cmp('Waschküche-Berechtigung', !!oldRow.waschkueche_berechtigt, !!newRow.waschkueche_berechtigt, v => v ? 'ja' : 'nein');
+  const oldWQ = oldRow.wertquote_zaehler && oldRow.wertquote_nenner ? `${oldRow.wertquote_zaehler}/${oldRow.wertquote_nenner}` : null;
+  const newWQ = newRow.wertquote_zaehler && newRow.wertquote_nenner ? `${newRow.wertquote_zaehler}/${newRow.wertquote_nenner}` : null;
+  if (oldWQ !== newWQ) felder.push({ label: 'Wertquote', vorher: oldWQ || '—', nachher: newWQ || '—' });
+
+  // Roster (Name <E-Mail>, Tel, Adresse) je Rolle. Verglichen wird ueber einen normalisierten
+  // Schluessel inkl. Telefon/Adresse — so werden AUCH Adress-/Telefon-Aenderungen gemeldet;
+  // reine Telefon-Format-/Whitespace-Unterschiede glaettet normalizePhone bzw. \s-Normalisierung.
+  const fmtOwner = k => {
+    let s = `${k.name || k.email || '—'}`;
+    if (k.email) s += ` <${k.email}>`;
+    const extra = [];
+    if (k.telefon) extra.push(`Tel ${k.telefon}`);
+    if (k.adresse) extra.push(k.adresse);
+    if (extra.length) s += `, ${extra.join(', ')}`;
+    return s;
+  };
+  const ownerKey = k => [
+    (k.name || '').trim().toLowerCase(),
+    (k.email || '').trim().toLowerCase(),
+    normalizePhone(k.telefon || ''),
+    (k.adresse || '').replace(/\s+/g, ' ').trim().toLowerCase(),
+  ].join('|');
+  const out = { felder, eigentuemer: null, mieter: null };
+  for (const rolle of ['eigentuemer', 'mieter']) {
+    const list = (kontakte) => (kontakte || []).filter(k => k.rolle === rolle)
+      .map(k => ({ key: ownerKey(k), display: fmtOwner(k) }))
+      .sort((a, b) => a.display.localeCompare(b.display));
+    const o = list(oldKontakte), n = list(newKontakte);
+    if (o.map(x => x.key).join('||') !== n.map(x => x.key).join('||')) {
+      out[rolle] = { vorher: o.map(x => x.display), nachher: n.map(x => x.display) };
     }
   }
-  for (const [k, v] of newByKey) {
-    if (!oldByKey.has(k)) {
-      changes.push(`${ROLLE_LABEL[v.rolle] || v.rolle} neu: ${v.name || v.email}${v.email ? ` <${v.email}>` : ''}`);
-      continue;
-    }
-    // Gleicher Kontakt (Rolle + Email/Name unveraendert) -> geaenderte Einzelfelder
-    // melden (Name, Email, Telefon, Adresse). Vorher wurden diese verschluckt.
-    const o = oldByKey.get(k);
-    const lbl = ROLLE_LABEL[v.rolle] || v.rolle;
-    const feld = [];
-    if ((o.name || '') !== (v.name || '')) feld.push(`Name "${o.name || '—'}" → "${v.name || '—'}"`);
-    if ((o.email || '').toLowerCase() !== (v.email || '').toLowerCase()) feld.push(`E-Mail "${o.email || '—'}" → "${v.email || '—'}"`);
-    if (normalizePhone(o.telefon || '') !== normalizePhone(v.telefon || '')) feld.push(`Telefon "${o.telefon || '—'}" → "${v.telefon || '—'}"`);
-    if ((o.adresse || '').trim() !== (v.adresse || '').trim()) feld.push(`Adresse "${o.adresse || '—'}" → "${v.adresse || '—'}"`);
-    if (feld.length) changes.push(`${lbl} ${v.name || v.email} geändert: ${feld.join('; ')}`);
-  }
-  return changes;
+  return out;
 }
 
 async function autoCreateVollmachtForVerwalter(client, wohnungId, stweg, kontakte) {
@@ -8021,10 +8022,9 @@ app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
     // sich aenderten. Interne Felder (bezeichnung, notizen, besonderheiten)
     // sind fuer die Verwaltung uninteressant.
     if (oldRow) {
-      const changes = computeWohnungChanges(oldRow, result.rows[0], oldKontakte, wohnung.kontakte || []);
-      if (changes.length > 0) {
-        const line = `Wohnung "${wohnung.bezeichnung}":\n` + changes.map(c => `      - ${c}`).join('\n');
-        recordObjektChange(stweg, line, req.user.email).catch(() => {});
+      const ch = computeWohnungChanges(oldRow, result.rows[0], oldKontakte, wohnung.kontakte || []);
+      if (ch.felder.length || ch.eigentuemer || ch.mieter) {
+        recordObjektChange(stweg, { kind: 'wohnung', bez: wohnung.bezeichnung, ...ch }, req.user.email).catch(() => {});
       }
     }
   } catch (err) {
@@ -11491,7 +11491,60 @@ async function sendAuszahlungsMail(auslage, ausschussEmail, ausschussName, opts 
 // Coalescing: solange ein pending Queue-Eintrag für den STWEG existiert,
 // wird er um die neue Änderung erweitert (eine Sammel-Mail pro STWEG).
 // Bei Ausschuss-Fallback wird gar nichts gemacht (Ausschuss kennt die Änderungen).
-async function recordObjektChange(stweg, line, changedBy) {
+// Merge eine Einzeländerung in den strukturierten Sammel-Zustand. `change` ist entweder
+// Freitext (String/{text} -> notes) oder { kind:'wohnung', bez, felder:[{label,vorher,nachher}],
+// eigentuemer:{vorher,nachher}|null, mieter:... }. Vorher wird je Wohnung/Feld nur EINMAL
+// festgehalten, Nachher immer aktualisiert → Zwischenstände (Umbenennungen, Komma-Korrekturen)
+// kollabieren automatisch zum Netto-Vorher/Nachher.
+function mergeObjektChangeState(state, change) {
+  state = state || {};
+  state.wohnungen = state.wohnungen || {};
+  state.notes = state.notes || [];
+  if (change && change.kind === 'wohnung') {
+    const w = state.wohnungen[change.bez] = state.wohnungen[change.bez] || { felder: {}, eigentuemer: null, mieter: null };
+    for (const f of (change.felder || [])) {
+      if (!w.felder[f.label]) w.felder[f.label] = { vorher: f.vorher };
+      w.felder[f.label].nachher = f.nachher;
+    }
+    for (const rolle of ['eigentuemer', 'mieter']) {
+      if (!change[rolle]) continue;
+      if (!w[rolle]) w[rolle] = { vorher: change[rolle].vorher, nachher: change[rolle].nachher };
+      else w[rolle].nachher = change[rolle].nachher;
+    }
+  } else {
+    const text = (change && typeof change === 'object' && change.text != null) ? String(change.text) : String(change || '');
+    if (text.trim()) state.notes.push(text.trim());
+  }
+  return state;
+}
+
+// Strukturierten Sammel-Zustand als konsolidierten Vorher/Nachher-Block rendern.
+function renderObjektChangeBlock(state) {
+  const out = [];
+  for (const bez of Object.keys(state.wohnungen || {}).sort()) {
+    const w = state.wohnungen[bez];
+    const parts = [];
+    for (const [label, fv] of Object.entries(w.felder || {})) {
+      if (String(fv.vorher) === String(fv.nachher)) continue;
+      parts.push(`      ${label}: "${fv.vorher}" → "${fv.nachher}"`);
+    }
+    for (const rolle of ['eigentuemer', 'mieter']) {
+      const r = w[rolle];
+      if (!r) continue;
+      const vArr = r.vorher || [], nArr = r.nachher || [];
+      if (vArr.join('||') === nArr.join('||')) continue;
+      const lbl = rolle === 'eigentuemer' ? 'Eigentümer' : 'Mieter';
+      const fmtList = arr => (arr.length ? arr : ['—']).map(x => `         - ${x}`).join('\n');
+      parts.push(`      ${lbl} vorher:\n${fmtList(vArr)}`);
+      parts.push(`      ${lbl} nachher:\n${fmtList(nArr)}`);
+    }
+    if (parts.length) out.push(`  • Wohnung "${bez}":\n${parts.join('\n')}`);
+  }
+  for (const note of (state.notes || [])) out.push(`  • ${note}`);
+  return out.join('\n');
+}
+
+async function recordObjektChange(stweg, change, changedBy) {
   try {
     const stwegInt = parseInt(stweg, 10);
     const stwegVal = Number.isFinite(stwegInt) && stwegInt >= 1 && stwegInt <= 8 ? stwegInt : null;
@@ -11499,20 +11552,28 @@ async function recordObjektChange(stweg, line, changedBy) {
     if (!verw || verw.fallback) return; // keine wirksame Verwaltung → ueberspringen
 
     const stwegLabel = stwegVal ? `STWEG ${stwegVal}` : 'STWEG-uebergreifend';
-    const stamp = new Date().toLocaleString('de-CH');
-    const newLine = `  • ${stamp} (${changedBy || 'unbekannt'}): ${line}`;
+    const tpl = await findMailTemplate('objekt-änderung', 'verwaltung');
+    const renderBody = (state) => {
+      const block = renderObjektChangeBlock(state);
+      const ctx = { stweg_label: stwegLabel, stweg: stwegVal, today_de: new Date().toLocaleDateString('de-CH'), erste_aenderung: block, site_url: SITE_URL };
+      return tpl ? renderTemplate(tpl.body_template, ctx) : [
+        `Sehr geehrte Damen und Herren`, ``,
+        `folgende Änderungen wurden in der Objektverwaltung der STWEG-Kooperation`,
+        `erfasst und sind für Ihre Unterlagen relevant:`, ``,
+        `── Änderungen (${stwegLabel}) ──`, block, ``,
+        `Bitte aktualisieren Sie Ihre Stamm- und Kontaktdaten entsprechend.`, ``,
+        `Mit freundlichen Gruessen`, `STWEG-Kooperation Rosenweg`,
+      ].join('\n');
+    };
 
-    // Race-safe: SELECT FOR UPDATE auf bestehenden pending Eintrag in einer
-    // Transaktion. Wenn parallel zwei Aenderungen reinkommen, sieht der
-    // zweite den Lock und wartet — danach findet er die schon angelegte
-    // Row und erweitert sie statt einen Duplikat-Eintrag zu schreiben.
-    // Partial-Unique-Index auf (source_type, source_id) WHERE pending
-    // ist die Defense-in-Depth-Sicherung.
+    // Race-safe: SELECT FOR UPDATE auf bestehenden pending Eintrag. Strukturierter change_state
+    // wird gemerged und der Body komplett NEU gerendert (Netto-Vorher/Nachher) statt Zeilen
+    // anzuhaengen. Partial-Unique-Index (source_type, source_id) WHERE pending sichert Race ab.
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
       const existing = await client.query(
-        `SELECT id FROM verwaltung_mail_queue
+        `SELECT id, change_state FROM verwaltung_mail_queue
           WHERE source_type = 'objekt-änderung'
             AND source_id = $1
             AND status = 'pending'
@@ -11521,11 +11582,10 @@ async function recordObjektChange(stweg, line, changedBy) {
         [stwegVal || 0],
       );
       if (existing.rows.length > 0) {
+        const state = mergeObjektChangeState(existing.rows[0].change_state || {}, change);
         await client.query(
-          `UPDATE verwaltung_mail_queue
-              SET body_text = body_text || E'\\n' || $1
-            WHERE id = $2`,
-          [newLine, existing.rows[0].id],
+          `UPDATE verwaltung_mail_queue SET change_state = $1, body_text = $2 WHERE id = $3`,
+          [JSON.stringify(state), renderBody(state), existing.rows[0].id],
         );
         await client.query('COMMIT');
         return;
@@ -11535,32 +11595,11 @@ async function recordObjektChange(stweg, line, changedBy) {
       client.release();
     }
 
-    // Neuen Sammel-Eintrag in die Queue stellen — Template aus DB versuchen
-    const tpl = await findMailTemplate('objekt-änderung', 'verwaltung');
-    const tplContext = {
-      stweg_label: stwegLabel, stweg: stwegVal, today_de: new Date().toLocaleDateString('de-CH'),
-      erste_aenderung: newLine, site_url: SITE_URL,
-    };
+    // Neuen Sammel-Eintrag in die Queue stellen.
+    const state = mergeObjektChangeState({}, change);
     const subject = tpl
-      ? renderTemplate(tpl.subject_template, tplContext)
+      ? renderTemplate(tpl.subject_template, { stweg_label: stwegLabel, stweg: stwegVal, today_de: new Date().toLocaleDateString('de-CH'), site_url: SITE_URL })
       : `Objektverwaltungs-Änderungen ${stwegLabel} (${new Date().toLocaleDateString('de-CH')})`;
-    const body = tpl
-      ? renderTemplate(tpl.body_template, tplContext)
-      : [
-          `Sehr geehrte Damen und Herren`,
-          ``,
-          `folgende Änderungen wurden in der Objektverwaltung der STWEG-Kooperation`,
-          `erfasst und sind für Ihre Unterlagen relevant:`,
-          ``,
-          `── Änderungen (${stwegLabel}) ──`,
-          newLine,
-          ``,
-          `Bitte aktualisieren Sie Ihre Stamm- und Kontaktdaten entsprechend.`,
-          ``,
-          `Mit freundlichen Gruessen`,
-          `STWEG-Kooperation Rosenweg`,
-        ].join('\n');
-
     try {
       await enqueueVerwaltungMail({
         source_type: 'objekt-änderung',
@@ -11569,24 +11608,37 @@ async function recordObjektChange(stweg, line, changedBy) {
         mailCc: verw.mailCc,
         mailReplyTo: null,
         subject,
-        bodyText: body,
+        bodyText: renderBody(state),
         attachments: [],
         createdBy: changedBy || 'system',
       });
+      await pool.query(
+        `UPDATE verwaltung_mail_queue SET change_state = $1
+          WHERE source_type = 'objekt-änderung' AND source_id = $2 AND status = 'pending'`,
+        [JSON.stringify(state), stwegVal || 0],
+      );
     } catch (e) {
-      // 23505 = unique_violation: andere Transaktion war eine Mikrosekunde
-      // schneller und hat denselben pending Eintrag schon angelegt. Statt
-      // beide Mails parallel rauszuhauen, haengen wir unseren Body-Eintrag
-      // an die existierende Queue-Row an.
+      // 23505 = unique_violation: parallele Transaktion war schneller und hat den pending
+      // Eintrag schon angelegt -> in deren change_state mergen + Body neu rendern (statt 2. Mail).
       if (e.code === '23505') {
-        await pool.query(
-          `UPDATE verwaltung_mail_queue
-              SET body_text = body_text || E'\\n' || $1
-            WHERE source_type = 'objekt-änderung'
-              AND source_id = $2
-              AND status = 'pending'`,
-          [newLine, stwegVal || 0],
-        );
+        const c2 = await pool.connect();
+        try {
+          await c2.query('BEGIN');
+          const ex = await c2.query(
+            `SELECT id, change_state FROM verwaltung_mail_queue
+              WHERE source_type = 'objekt-änderung' AND source_id = $1 AND status = 'pending'
+              FOR UPDATE LIMIT 1`,
+            [stwegVal || 0],
+          );
+          if (ex.rows.length > 0) {
+            const st = mergeObjektChangeState(ex.rows[0].change_state || {}, change);
+            await c2.query(
+              `UPDATE verwaltung_mail_queue SET change_state = $1, body_text = $2 WHERE id = $3`,
+              [JSON.stringify(st), renderBody(st), ex.rows[0].id],
+            );
+          }
+          await c2.query('COMMIT');
+        } finally { c2.release(); }
       } else { throw e; }
     }
   } catch (err) {
@@ -13365,7 +13417,7 @@ const MAIL_TEMPLATE_DEFAULTS = [
       + '{{erste_aenderung}}\n\n'
       + 'Bitte aktualisieren Sie Ihre Stamm- und Kontaktdaten entsprechend.\n\n'
       + 'Mit freundlichen Gruessen\nSTWEG-Kooperation Rosenweg',
-    notiz: 'Sammel-Mail Objektverwaltungs-Änderungen an Verwaltung. Variablen: stweg_label, today_de, erste_aenderung, site_url. Weitere Änderungen werden im Queue-Body angehängt.',
+    notiz: 'Sammel-Mail Objektverwaltungs-Änderungen an Verwaltung. Variablen: stweg_label, today_de, erste_aenderung (= konsolidierter Vorher/Nachher-Block), site_url. Body wird bei jeder weiteren Änderung aus change_state neu gerendert → Netto-Vorher/Nachher, Zwischenstände (Umbenennungen, Komma-Korrekturen) kollabieren.',
   },
   {
     source_type: 'wasch-billing', empfaenger_kategorie: null,
@@ -22520,6 +22572,7 @@ async function initDB() {
       ALTER TABLE zev_config ADD COLUMN IF NOT EXISTS allgemein_email VARCHAR(255);
       -- Optionaler Absender-Override fuer Outbox-Mails (ZEV nutzt smartme@rosenweg9.ch).
       ALTER TABLE verwaltung_mail_queue ADD COLUMN IF NOT EXISTS mail_from VARCHAR(320);
+      ALTER TABLE verwaltung_mail_queue ADD COLUMN IF NOT EXISTS change_state JSONB;
 
       CREATE TABLE IF NOT EXISTS verwaltungen (
         id SERIAL PRIMARY KEY,
