@@ -5051,12 +5051,9 @@ async function pollZevArchive() {
           } else if (!pdf && zuordnung === 'wohnung') {
             notifyTechnik(`⚠️ ZEV: Rechnung #${rechnungId} ohne PDF-Anhang empfangen (${match?.bewohner_email || '?'}). Bitte prüfen.`, 'zev-nopdf').catch(() => {});
           }
-          // B2: Bewohner-Re-Mail (auch ohne PDF: Link). Status persistieren; bei Fehler Alarm + Retry am Folgetag.
-          if (match?.bewohner_email) {
-            const res = await sendZevRemail({ bewohner_email: match.bewohner_email, bewohner_name: match.bewohner_name, stweg: match.stweg, zeitraum_von: inv.zeitraum_von, zeitraum_bis: inv.zeitraum_bis, betrag_chf: inv.betrag_chf, pdf_filename: pdf?.filename, pdf_data: pdf?.content });
-            await recordZevRemail(rechnungId, res);
-            if (!res.ok) notifyTechnik(`⚠️ ZEV: Re-Mail an Bewohner fehlgeschlagen (Rechnung #${rechnungId}, ${match.bewohner_email}): ${res.error}. Wird täglich erneut versucht.`, 'zev-remail-fail').catch(() => {});
-          }
+          // Zustellung an den Bewohner erfolgt direkt per Alias-Forward (Bewohner ist im goto, via
+          // Mailcow->PMG->Relay) — KEINE separate Re-Mail mehr. Der Poller dient hier nur noch dem
+          // Archiv + der Online-Ansicht. (sendZevRemail/Retry bleiben für evtl. manuelle Nutzung erhalten.)
         } catch (e) { console.error(`[ZEV-Archiv] UID ${msg.uid}:`, e.message); }
       }
       if (maxUid > lastUid) {
@@ -6686,9 +6683,10 @@ async function resolveZevForStweg(stweg, cfg) {
     // Alias traegt den Namen des AKTUELLEN Bewohners/Mieters (nicht des Eigentuemers):
     // bei Bewohnerwechsel aendert sich die Adresse -> Axova stellt smart-me darauf um.
     const alias = zevAliasAddress(bewName, cfg.alias_prefix, cfg.alias_domain);
-    // Bewohner NICHT mehr im Alias-goto: er bekommt die Rechnung per Re-Mail (zev@, SMTP2GO).
-    // Der Alias archiviert nur noch (smartme@) + Verwaltung (invoice_email).
-    const goto = zevGotoTargets({ archivMailbox: cfg.archiv_mailbox, invoiceEmail: cfg.invoice_email });
+    // Bewohner bekommt die Original-smart-me-Rechnung per Alias-Forward DIREKT (via Mailcow->PMG->
+    // neuer Relay, der rosenweg9.ch sauber zustellt; SMTP2GO verifiziert rosenweg9.ch nicht). Alias
+    // archiviert zusaetzlich an smartme@ (Online-Ansicht) + optional Verwaltung (invoice_email).
+    const goto = zevGotoTargets({ bewohnerEmail: bewEmail, archivMailbox: cfg.archiv_mailbox, invoiceEmail: cfg.invoice_email });
     return {
       wohnung_id: w.id, bezeichnung: w.bezeichnung, typ: w.typ,
       eigentuemer_name: eigName, alias_address: alias,
