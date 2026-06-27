@@ -16517,7 +16517,7 @@ app.post('/api/reklamationen', authMiddleware, async (req, res) => {
     const b = req.body || {};
     const beschreibung = String(b.beschreibung || '').trim().slice(0, 4000);
     if (!beschreibung) return res.status(400).json({ error: 'Beschreibung erforderlich' });
-    const kategorie = ['aufzug', 'heizung', 'wasser', 'tuer', 'reinigung', 'sonstige'].includes(b.kategorie) ? b.kategorie : 'sonstige';
+    const kategorie = ['aufzug', 'heizung', 'wasser', 'tuer', 'reinigung', 'licht', 'strom', 'netzwerk', 'sonstige'].includes(b.kategorie) ? b.kategorie : 'sonstige';
     const stweg = Number.isFinite(parseInt(b.stweg, 10)) ? parseInt(b.stweg, 10) : null;
     const pr = await pool.query('SELECT id FROM personen WHERE LOWER(email) = $1 LIMIT 1', [email]);
     const personId = pr.rows[0]?.id || null;
@@ -16640,7 +16640,7 @@ app.post('/api/reklamationen/oeffentlich', async (req, res) => {
     await pool.query('UPDATE otp_codes SET used = true WHERE id = $1', [row.id]);
     const beschreibung = String(b.beschreibung || '').trim().slice(0, 4000);
     if (!beschreibung) return res.status(400).json({ error: 'Beschreibung erforderlich' });
-    const kategorie = ['aufzug', 'heizung', 'wasser', 'tuer', 'reinigung', 'sonstige'].includes(b.kategorie) ? b.kategorie : 'sonstige';
+    const kategorie = ['aufzug', 'heizung', 'wasser', 'tuer', 'reinigung', 'licht', 'strom', 'netzwerk', 'sonstige'].includes(b.kategorie) ? b.kategorie : 'sonstige';
     const stweg = Number.isFinite(parseInt(b.stweg, 10)) ? parseInt(b.stweg, 10) : null;
     const pr = await pool.query('SELECT id FROM personen WHERE LOWER(email) = $1 LIMIT 1', [email]);
     const personId = pr.rows[0]?.id || null;
