@@ -16223,6 +16223,9 @@ app.get('/api/reklamationen', authMiddleware, requirePermission('reklamationen',
       const wanted = statusRaw.split(',').map(s => s.trim()).filter(s => ['offen','weitergeleitet','erledigt','abgewiesen'].includes(s));
       if (wanted.length) { params.push(wanted); where += ` AND r.status = ANY($${params.length})`; }
     }
+    // Archiviert: standardmaessig ausblenden; ?archiviert=1 zeigt NUR archivierte.
+    if (req.query.archiviert === '1') where += ' AND r.archiviert = TRUE';
+    else where += ' AND COALESCE(r.archiviert, FALSE) = FALSE';
     const r = await pool.query(
       `SELECT r.*, p.name AS person_name, p.email AS person_email, h.firma AS handwerker_firma
          FROM reklamationen r
@@ -16270,7 +16273,7 @@ app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamation
   try {
     const id = parseInt(req.params.id, 10);
     const b = req.body || {};
-    const before = (await pool.query('SELECT status, handwerker_id, zugewiesen_an, notiz FROM reklamationen WHERE id = $1', [id])).rows[0] || {};
+    const before = (await pool.query('SELECT status, handwerker_id, zugewiesen_an, notiz, archiviert FROM reklamationen WHERE id = $1', [id])).rows[0] || {};
     const updates = []; const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
     if (b.status !== undefined) {
@@ -16282,6 +16285,7 @@ app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamation
     if (b.handwerker_id !== undefined) push('handwerker_id', b.handwerker_id || null);
     if (b.zugewiesen_an !== undefined) push('zugewiesen_an', b.zugewiesen_an || null);
     if (b.notiz !== undefined) push('notiz', b.notiz || null);
+    if (b.archiviert !== undefined) push('archiviert', !!b.archiviert);
     if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
     push('updated_at', new Date());
     params.push(id);
@@ -16302,6 +16306,7 @@ app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamation
       logReklEvent(id, who, b.zugewiesen_an ? `Zugewiesen an: ${b.zugewiesen_an}` : 'Zuweisung entfernt').catch(() => {});
     }
     if (b.notiz !== undefined && (b.notiz || '') !== (before.notiz || '')) logReklEvent(id, who, `Notiz geändert: "${String(b.notiz || '').slice(0, 80)}"`).catch(() => {});
+    if (b.archiviert !== undefined && (!!b.archiviert) !== (!!before.archiviert)) logReklEvent(id, who, b.archiviert ? '📦 Archiviert' : '↩ Aus Archiv zurückgeholt').catch(() => {});
     // Persönliche Benachrichtigung an das NEU zugewiesene Technik-Mitglied (WhatsApp + Push).
     // zugewiesen_an speichert den Namen -> Technik-User per Name aufloesen.
     if (b.zugewiesen_an !== undefined && b.zugewiesen_an && b.zugewiesen_an !== before.zugewiesen_an) {
@@ -23160,6 +23165,7 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_rekl_orte_aktiv ON reklamation_orte(aktiv);
       -- Standort-Freitext an der Meldung (aus QR-Ort oder manuell uebernommen).
       ALTER TABLE reklamationen ADD COLUMN IF NOT EXISTS standort VARCHAR(200);
+      ALTER TABLE reklamationen ADD COLUMN IF NOT EXISTS archiviert BOOLEAN DEFAULT FALSE;
       -- Auto-Zuweisung: pro Kategorie ein Standard-Verantwortlicher (Technik-Mitglied
       -- per Name ODER externer Handwerker). Neue Meldungen werden automatisch zugewiesen.
       CREATE TABLE IF NOT EXISTS reklamation_auto_assign (

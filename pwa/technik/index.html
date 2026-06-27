@@ -457,7 +457,7 @@
   }
 
   // ── Automatische Zuweisung (pro Kategorie, optional je STWEG; Default = keiner) ──
-  const AC_STWEGS = [{ v: 0, l: 'Alle STWEG (Standard)' }].concat(Array.from({ length: 7 }, (_, i) => ({ v: i + 1, l: 'STWEG ' + (i + 1) })));
+  const AC_STWEGS = [{ v: 0, l: 'Alle STWEG (Standard)' }].concat(Array.from({ length: 7 }, (_, i) => ({ v: i + 1, l: 'STWEG ' + (i + 1) }))).concat([{ v: 8, l: 'MEG / Tiefgarage' }]);
   let acRulesAll = {}; let acStweg = 0;
   function closeAutoCockpit() { const m = $('autoCockpitModal'); if (m) m.classList.add('hidden'); }
   function acValToRule(v) {
