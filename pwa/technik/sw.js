@@ -10,7 +10,7 @@
  *  - Web-Push: push + notificationclick (Status-/Alert-Benachrichtigungen).
  */
 
-const CACHE = 'rosenweg-technik-v6';
+const CACHE = 'rosenweg-technik-v7';
 
 // App-Shell — alles was fuer den Offline-Start noetig ist.
 const SHELL = [
