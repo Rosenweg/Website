@@ -15736,10 +15736,11 @@ ${SITE_URL}/verwaltung.html`;
 // Webhook für eingehende Nachrichten (vom Bot-Service aufgerufen)
 app.post('/api/whatsapp/inbound', requireWhatsappSecret, async (req, res) => {
   try {
-    const { phone, chat_id, body, whatsapp_msg_id, attachments } = req.body || {};
+    const { phone, chat_id, body, whatsapp_msg_id, attachments, is_group } = req.body || {};
     if (!phone) return res.status(400).json({ error: 'phone fehlt' });
+    const isGroup = !!is_group || String(chat_id || '').endsWith('@g.us');
     const person = await findPersonByPhone(phone);
-    // Speichern
+    // Speichern — ALLE Chats (1:1 UND Gruppen, in denen der Bot Mitglied ist).
     const ins = await pool.query(
       `INSERT INTO whatsapp_messages (direction, phone, chat_id, whatsapp_msg_id, body, attachments, person_id, status)
        VALUES ('inbound', $1, $2, $3, $4, $5::jsonb, $6, 'received') RETURNING id`,
@@ -15749,18 +15750,21 @@ app.post('/api/whatsapp/inbound', requireWhatsappSecret, async (req, res) => {
     if (person) {
       await pool.query('UPDATE personen SET whatsapp_letzte_aktivitaet = NOW() WHERE id = $1', [person.id]);
     }
-    // Command-Handler
-    let reply = await handleWhatsappCommand(person, body);
-    if (!reply && body && String(body).startsWith('/')) {
-      reply = 'Unbekannter Befehl. Schreibe `/menu` für das Hauptmenue oder `/hilfe` für die Befehls-Liste.';
+    // Command-Bot-Auto-Reply NUR in 1:1. In Gruppen: nur erfassen (kein Spam) —
+    // intelligente Gruppen-Antworten kommen separat via Technik-Bot.
+    if (!isGroup) {
+      let reply = await handleWhatsappCommand(person, body);
+      if (!reply && body && String(body).startsWith('/')) {
+        reply = 'Unbekannter Befehl. Schreibe `/menu` für das Hauptmenue oder `/hilfe` für die Befehls-Liste.';
+      }
+      if (reply) {
+        const repliedId = await queueWhatsappMessage({
+          phone, chatId: chat_id, body: reply, sourceType: 'command-response', sourceId: ins.rows[0].id, personId: person?.id,
+        });
+        return res.json({ ok: true, message_id: ins.rows[0].id, reply_queued: repliedId });
+      }
     }
-    if (reply) {
-      const repliedId = await queueWhatsappMessage({
-        phone, chatId: chat_id, body: reply, sourceType: 'command-response', sourceId: ins.rows[0].id, personId: person?.id,
-      });
-      return res.json({ ok: true, message_id: ins.rows[0].id, reply_queued: repliedId });
-    }
-    res.json({ ok: true, message_id: ins.rows[0].id });
+    res.json({ ok: true, message_id: ins.rows[0].id, captured: true, is_group: isGroup });
   } catch (err) {
     console.error('WhatsApp inbound error:', err);
     res.status(500).json({ error: err.message });

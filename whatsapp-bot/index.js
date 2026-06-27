@@ -232,12 +232,15 @@ client.on('message_create', async (msg) => {
         isGroup, groupName,
       });
     } catch (e) { console.warn('[WA] Gateway-Inbound-Log Fehler:', e.message); }
-    // 2) Command-Bot-Forward NUR fuer 1:1 (Gruppen: nur loggen, kein Auto-Reply).
-    if (!isGroup && FORWARD_INBOUND_URL) {
+    // 2) An die API weiterleiten — fuer ALLE Chats, in denen der Bot Mitglied ist
+    //    (1:1 UND Gruppen), damit das System die volle Konversation erfasst.
+    //    `is_group` steuert API-seitig: 1:1 -> Command-Bot antwortet; Gruppe -> nur erfassen,
+    //    KEIN Auto-Reply (intelligente Gruppen-Antworten kommen separat via Technik-Bot).
+    if (FORWARD_INBOUND_URL) {
       const res = await fetch(FORWARD_INBOUND_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-WA-Secret': WA_SECRET },
-        body: JSON.stringify({ phone, chat_id: chatId, body, whatsapp_msg_id: msg.id?._serialized, attachments }),
+        body: JSON.stringify({ phone, chat_id: chatId, body, whatsapp_msg_id: msg.id?._serialized, attachments, is_group: isGroup, group_name: groupName }),
       });
       if (!res.ok) console.warn('[WA] API inbound rejected:', res.status, await res.text().catch(() => ''));
     }
