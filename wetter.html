@@ -33,6 +33,13 @@
     .card .cv { font-size: 1.55rem; font-weight: 600; margin-top: .2rem; }
     .card .cv .u { font-size: .55em; font-weight: 500; opacity: .75; }
     .card .cx { font-size: .76rem; opacity: .8; margin-top: .1rem; min-height: 1em; }
+    .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .8rem; }
+    .chart-card { background: rgba(255,255,255,.12); backdrop-filter: blur(6px); border-radius: 16px; padding: .9rem 1rem .6rem; }
+    .chart-card .ch { display: flex; justify-content: space-between; align-items: baseline; font-size: .76rem; }
+    .chart-card .ch .ct { text-transform: uppercase; letter-spacing: .04em; opacity: .8; }
+    .chart-card .ch .cnow { font-weight: 700; font-size: 1.05rem; }
+    .chart-card svg { width: 100%; height: 70px; margin-top: .3rem; display: block; }
+    .chart-card .cr { display: flex; justify-content: space-between; font-size: .68rem; opacity: .65; margin-top: .1rem; }
     .foot { text-align: center; opacity: .8; font-size: .8rem; margin-top: 1.6rem; line-height: 1.6; }
   </style>
 </head>
@@ -77,7 +84,16 @@
       <div class="card"><div class="ct">🌕 Beleuchtung</div><div class="cv"><span id="m-illum">–</span><span class="u"> %</span></div><div class="cx" id="m-alt-x"></div></div>
     </div>
 
-    <div class="foot">Live via MQTT <span id="last"></span><br>Rosenweg 9 · öffentlich · berechnete Werte ohne Gewähr</div>
+    <h2 class="sec">Verlauf (24 h)</h2>
+    <div class="charts" id="charts">
+      <div class="chart-card"><div class="ch"><span class="ct">🌡️ Temperatur °C</span><span class="cnow" id="n-outdoortemp">–</span></div><svg id="chart-outdoortemp" viewBox="0 0 300 70" preserveAspectRatio="none"></svg><div class="cr"><span id="lo-outdoortemp"></span><span id="hi-outdoortemp"></span></div></div>
+      <div class="chart-card"><div class="ch"><span class="ct">💧 Luftfeuchte %</span><span class="cnow" id="n-outdoorhumidity">–</span></div><svg id="chart-outdoorhumidity" viewBox="0 0 300 70" preserveAspectRatio="none"></svg><div class="cr"><span id="lo-outdoorhumidity"></span><span id="hi-outdoorhumidity"></span></div></div>
+      <div class="chart-card"><div class="ch"><span class="ct">💨 Wind km/h</span><span class="cnow" id="n-windspeed">–</span></div><svg id="chart-windspeed" viewBox="0 0 300 70" preserveAspectRatio="none"></svg><div class="cr"><span id="lo-windspeed"></span><span id="hi-windspeed"></span></div></div>
+      <div class="chart-card"><div class="ch"><span class="ct">🔵 Luftdruck hPa</span><span class="cnow" id="n-pressureabs">–</span></div><svg id="chart-pressureabs" viewBox="0 0 300 70" preserveAspectRatio="none"></svg><div class="cr"><span id="lo-pressureabs"></span><span id="hi-pressureabs"></span></div></div>
+      <div class="chart-card"><div class="ch"><span class="ct">☀️ Solar W/m²</span><span class="cnow" id="n-solarradiation">–</span></div><svg id="chart-solarradiation" viewBox="0 0 300 70" preserveAspectRatio="none"></svg><div class="cr"><span id="lo-solarradiation"></span><span id="hi-solarradiation"></span></div></div>
+    </div>
+
+    <div class="foot">Live via MQTT <span id="last"></span> · Verlauf alle 5 Min<br>Rosenweg 9 · öffentlich · berechnete Werte ohne Gewähr</div>
   </div>
 
   <script>
@@ -222,6 +238,44 @@
     recompute();
   }
 
+  /* ===== 24h-Verlaeufe (public History-Endpoint -> Inline-SVG-Sparklines) ===== */
+  const CHARTS = [
+    { f: 'outdoortemp', dec: 1, color: '#fb923c' },
+    { f: 'outdoorhumidity', dec: 0, color: '#38bdf8' },
+    { f: 'windspeed', dec: 1, color: '#a3e635' },
+    { f: 'pressureabs', dec: 1, color: '#c084fc' },
+    { f: 'solarradiation', dec: 0, color: '#fde047' },
+  ];
+  function drawChart(field, points, dec, color) {
+    const svg = $('chart-' + field); if (!svg) return;
+    const W = 300, H = 70, pad = 5;
+    const data = points.map(p => ({ t: new Date(p.ts).getTime(), v: Number(p[field]) }))
+      .filter(p => Number.isFinite(p.t) && Number.isFinite(p.v));
+    const lo = $('lo-' + field), hi = $('hi-' + field), nw = $('n-' + field);
+    if (data.length < 2) { svg.innerHTML = '<text x="150" y="38" fill="rgba(255,255,255,.55)" font-size="13" text-anchor="middle">sammelt Daten…</text>'; return; }
+    const ts = data.map(d => d.t), vs = data.map(d => d.v);
+    const tmin = Math.min(...ts), tmax = Math.max(...ts);
+    let vmin = Math.min(...vs), vmax = Math.max(...vs);
+    if (vmin === vmax) { vmin -= 1; vmax += 1; }
+    const X = (t) => pad + (W - 2 * pad) * (t - tmin) / (tmax - tmin || 1);
+    const Y = (v) => pad + (H - 2 * pad) * (1 - (v - vmin) / (vmax - vmin));
+    const line = data.map(d => `${X(d.t).toFixed(1)},${Y(d.v).toFixed(1)}`).join(' ');
+    const area = `${pad},${H - pad} ${line} ${(W - pad)},${H - pad}`;
+    svg.innerHTML = `<polygon points="${area}" fill="${color}" opacity="0.16"/>` +
+      `<polyline points="${line}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    if (lo) lo.textContent = '↓ ' + Math.min(...vs).toFixed(dec);
+    if (hi) hi.textContent = '↑ ' + Math.max(...vs).toFixed(dec);
+    if (nw) nw.textContent = data[data.length - 1].v.toFixed(dec);
+  }
+  async function loadHistory() {
+    try {
+      const r = await fetch('/api/wetter/r9/history?h=24', { cache: 'no-store' });
+      if (!r.ok) return;
+      const pts = (await r.json()).points || [];
+      CHARTS.forEach(c => drawChart(c.f, pts, c.dec, c.color));
+    } catch (e) { console.error('history', e); }
+  }
+
   // Oeffentlich: read-only MQTT-User (nur wetter/r9/# lesen), eingebettet — keine Anmeldung.
   function connect() {
     setConn('wait', 'verbinde…');
@@ -240,6 +294,8 @@
   document.addEventListener('DOMContentLoaded', () => {
     updateAstro();
     setInterval(updateAstro, 60000); // Sonne/Mond jede Minute
+    loadHistory();
+    setInterval(loadHistory, 300000); // Verlauf alle 5 Min nachladen
     connect();
   });
   </script>
