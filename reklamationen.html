@@ -40,6 +40,7 @@
           </select>
         </label>
         <button onclick="load()" class="ml-auto text-sm text-blue-600 hover:underline">Neu laden</button>
+        <button onclick="openAutoAssign()" class="text-sm inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700">⚙️ Auto-Zuweisung</button>
         <button data-excel-export data-excel-source="#reklamationen-table" data-excel-name="reklamationen-{date}.xlsx" data-excel-sheet="Reklamationen" class="text-sm inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 text-white rounded hover:bg-emerald-700">⬇ Excel</button>
       </div>
 
@@ -83,6 +84,10 @@
           </select>
         </div>
         <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1">Kategorie</label>
+          <select id="em-kategorie" class="w-full border rounded-lg px-3 py-2 text-sm"></select>
+        </div>
+        <div>
           <label class="block text-xs font-semibold text-gray-500 mb-1">Zuweisung</label>
           <select id="em-assign" class="w-full border rounded-lg px-3 py-2 text-sm"></select>
           <p class="text-[11px] text-gray-400 mt-1">Technik-Team (intern) oder externer Handwerker.</p>
@@ -109,8 +114,34 @@
     </div>
   </div>
 
+  <!-- Auto-Zuweisungs-Modal -->
+  <div id="autoModal" class="hidden fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4" onclick="if(event.target===this)closeAuto()">
+    <div class="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+      <div class="px-5 py-3 border-b flex items-center justify-between sticky top-0 bg-white">
+        <h3 class="font-bold text-gray-900">⚙️ Automatische Zuweisung</h3>
+        <button onclick="closeAuto()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
+      </div>
+      <div class="p-5 space-y-3">
+        <p class="text-xs text-gray-500">Pro Kategorie ein Standard-Verantwortlicher. <b>Neue</b> Meldungen dieser Kategorie werden automatisch zugewiesen — Technik-Mitglieder zusätzlich per WhatsApp/Push benachrichtigt.</p>
+        <div id="auto-rows" class="space-y-2"></div>
+        <div id="auto-msg" class="hidden text-sm rounded-lg px-3 py-2"></div>
+      </div>
+      <div class="px-5 py-3 border-t flex justify-end gap-2 sticky bottom-0 bg-white">
+        <button onclick="closeAuto()" class="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Abbrechen</button>
+        <button id="auto-save" onclick="saveAuto()" class="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Speichern</button>
+      </div>
+    </div>
+  </div>
+
   <script>
   const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  // Kategorien (Wert -> Label mit Icon) — analog zur PWA "Reparatur melden".
+  const KATEGORIEN = [
+    { v:'aufzug', l:'🛗 Aufzug' }, { v:'heizung', l:'🔥 Heizung' }, { v:'wasser', l:'💧 Wasser' },
+    { v:'tuer', l:'🚪 Tür/Schloss' }, { v:'reinigung', l:'🧹 Reinigung' }, { v:'licht', l:'💡 Licht' },
+    { v:'strom', l:'⚡ Strom' }, { v:'netzwerk', l:'🌐 Netzwerk' }, { v:'salz', l:'🧂 Salz' },
+    { v:'sonstige', l:'❓ Sonstiges' },
+  ];
   const fmtDt = s => s ? new Date(s).toLocaleString('de-CH') : '';
 
   let reklList = [];
@@ -124,7 +155,7 @@
     document.getElementById('auth-gate').classList.add('hidden');
     document.getElementById('content').classList.remove('hidden');
     document.getElementById('filter-status').addEventListener('change', load);
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeEdit(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeEdit(); closeAuto(); } });
     await Promise.all([loadHandwerker(), loadTechnik()]);
     await load();
   });
@@ -196,6 +227,13 @@
     document.getElementById('em-meta').textContent = von + ' · ' + fmtDt(r.created_at);
     document.getElementById('em-desc').textContent = r.beschreibung || '';
     document.getElementById('em-status').value = r.status || 'offen';
+    {
+      const katSel = document.getElementById('em-kategorie');
+      let opts = KATEGORIEN.slice();
+      if (r.kategorie && !opts.find(k => k.v === r.kategorie)) opts = [{ v: r.kategorie, l: r.kategorie }, ...opts];
+      katSel.innerHTML = opts.map(k => `<option value="${esc(k.v)}">${esc(k.l)}</option>`).join('');
+      katSel.value = r.kategorie || 'sonstige';
+    }
     document.getElementById('em-assign').innerHTML = assignOptions(r);
     document.getElementById('em-notiz').value = r.notiz || '';
     const msg = document.getElementById('em-msg'); msg.classList.add('hidden');
@@ -264,6 +302,7 @@
     if (editId == null) return;
     const body = {
       status: document.getElementById('em-status').value,
+      kategorie: document.getElementById('em-kategorie').value,
       notiz: document.getElementById('em-notiz').value,
     };
     const a = document.getElementById('em-assign').value;
@@ -282,6 +321,46 @@
       setTimeout(closeEdit, 600);
     } catch (e) {
       msg.textContent = 'Fehler: ' + e.message; msg.className = 'text-sm rounded-lg px-3 py-2 bg-red-100 text-red-700';
+    } finally { btn.disabled = false; }
+  }
+
+  // ── Automatische Zuweisung (pro Kategorie ein Standard-Verantwortlicher) ──
+  function closeAuto() { document.getElementById('autoModal').classList.add('hidden'); }
+  async function openAutoAssign() {
+    const rules = {};
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/reklamationen/auto-assign');
+      if (r.ok) { const d = await r.json(); (d.rules || []).forEach(ru => { rules[ru.kategorie] = ru; }); }
+    } catch {}
+    document.getElementById('auto-rows').innerHTML = KATEGORIEN.map(k => {
+      const ru = rules[k.v] || {};
+      return `<div class="flex items-center gap-2">
+        <span class="text-sm w-32 shrink-0">${k.l}</span>
+        <select data-kat="${esc(k.v)}" class="auto-sel flex-1 border rounded-lg px-2 py-1.5 text-sm">${assignOptions(ru)}</select>
+      </div>`;
+    }).join('');
+    document.getElementById('auto-msg').classList.add('hidden');
+    document.getElementById('autoModal').classList.remove('hidden');
+  }
+  async function saveAuto() {
+    const rules = Array.from(document.querySelectorAll('.auto-sel')).map(sel => {
+      const ru = { kategorie: sel.getAttribute('data-kat'), zugewiesen_an: null, handwerker_id: null };
+      const v = sel.value;
+      if (v.startsWith('tech:')) ru.zugewiesen_an = v.slice(5);
+      else if (v.startsWith('hw:')) ru.handwerker_id = parseInt(v.slice(3), 10);
+      return ru;
+    });
+    const btn = document.getElementById('auto-save'); btn.disabled = true;
+    const msg = document.getElementById('auto-msg');
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/reklamationen/auto-assign', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rules }),
+      });
+      if (!r.ok) { let m = 'HTTP ' + r.status; try { const j = await r.json(); if (j.error) m = j.error; } catch {} throw new Error(m); }
+      msg.textContent = '✓ Gespeichert'; msg.className = 'text-sm rounded-lg px-3 py-2 bg-green-100 text-green-800'; msg.classList.remove('hidden');
+      setTimeout(closeAuto, 600);
+    } catch (e) {
+      msg.textContent = 'Fehler: ' + e.message; msg.className = 'text-sm rounded-lg px-3 py-2 bg-red-100 text-red-700'; msg.classList.remove('hidden');
     } finally { btn.disabled = false; }
   }
   </script>

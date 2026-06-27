@@ -16235,6 +16235,36 @@ app.get('/api/reklamationen', authMiddleware, requirePermission('reklamationen',
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Auto-Zuweisungs-Regeln (pro Kategorie ein Standard-Verantwortlicher) — lesen.
+// VOR der :id-Route registriert, sonst matcht ":id" = "auto-assign".
+app.get('/api/reklamationen/auto-assign', authMiddleware, requirePermission('reklamationen', 'read'), async (req, res) => {
+  try {
+    const r = await pool.query('SELECT kategorie, zugewiesen_an, handwerker_id FROM reklamation_auto_assign');
+    res.json({ rules: r.rows });
+  } catch (e) { console.error('[rekl-auto-assign-get]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+// Regeln komplett setzen (Upsert pro Kategorie; leeres Ziel = Regel loeschen).
+app.put('/api/reklamationen/auto-assign', authMiddleware, requirePermission('reklamationen', 'write'), async (req, res) => {
+  const rules = Array.isArray(req.body?.rules) ? req.body.rules : [];
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const ru of rules) {
+      const kat = String(ru.kategorie || '').slice(0, 60); if (!kat) continue;
+      const za = ru.zugewiesen_an ? String(ru.zugewiesen_an).slice(0, 200) : null;
+      const hw = Number.isFinite(parseInt(ru.handwerker_id, 10)) ? parseInt(ru.handwerker_id, 10) : null;
+      if (!za && !hw) { await client.query('DELETE FROM reklamation_auto_assign WHERE kategorie = $1', [kat]); continue; }
+      await client.query(
+        `INSERT INTO reklamation_auto_assign (kategorie, zugewiesen_an, handwerker_id, updated_at)
+         VALUES ($1,$2,$3,NOW())
+         ON CONFLICT (kategorie) DO UPDATE SET zugewiesen_an = EXCLUDED.zugewiesen_an, handwerker_id = EXCLUDED.handwerker_id, updated_at = NOW()`,
+        [kat, za, hw]);
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (e) { await client.query('ROLLBACK'); console.error('[rekl-auto-assign-put]', e); res.status(500).json({ error: 'Fehler' }); }
+  finally { client.release(); }
+});
 app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamationen', 'write'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -16274,18 +16304,7 @@ app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamation
     // Persönliche Benachrichtigung an das NEU zugewiesene Technik-Mitglied (WhatsApp + Push).
     // zugewiesen_an speichert den Namen -> Technik-User per Name aufloesen.
     if (b.zugewiesen_an !== undefined && b.zugewiesen_an && b.zugewiesen_an !== before.zugewiesen_an) {
-      (async () => {
-        try {
-          const um = await pool.query(`SELECT email FROM users WHERE name = $1 AND LOWER(groups_json::text) LIKE '%"technik"%' LIMIT 1`, [b.zugewiesen_an]);
-          const memberEmail = um.rows[0]?.email;
-          if (memberEmail) {
-            const body = `🔧 *Dir zugewiesen: Reklamation #${updated.id}*\nKategorie: ${updated.kategorie || '-'}${updated.stweg ? ` · STWEG ${updated.stweg}` : ''}\n${(updated.beschreibung || '').slice(0, 150)}\n\n→ pwa.rosenweg4303.ch/technik/`;
-            pushWhatsappIfOptIn({ email: memberEmail, body, sourceType: 'reklamation-zuweisung', sourceId: updated.id }).catch(() => {});
-            webpushLib.sendToEmails([memberEmail], { title: `Dir zugewiesen: Reklamation #${updated.id}`, body: (updated.beschreibung || '').slice(0, 80), url: 'https://pwa.rosenweg4303.ch/technik/', tag: `rekl-${updated.id}` }).catch(() => {});
-            logReklEvent(updated.id, 'System', `${b.zugewiesen_an} benachrichtigt`).catch(() => {});
-          }
-        } catch (e) { console.warn('[reklamation-zuweisung-notify]', e.message); }
-      })();
+      notifyReklAssignee(updated, b.zugewiesen_an).catch(() => {});
     }
     // Notification an Melder bei Status-Wechsel
     if (b.status && updated.person_id) {
@@ -16348,6 +16367,42 @@ app.get('/api/technik/mitglieder', authMiddleware, requirePermission('reklamatio
 // History/Verlauf einer Reklamation (wer hat wann was gemacht) — best-effort.
 async function logReklEvent(reklId, who, text) {
   try { await pool.query('INSERT INTO reklamation_events (reklamation_id, who, event) VALUES ($1,$2,$3)', [reklId, String(who || '').slice(0, 200), String(text || '').slice(0, 500)]); } catch (e) { /* best-effort */ }
+}
+// Persoenliche Benachrichtigung an ein zugewiesenes Technik-Mitglied (per Name aufgeloest):
+// WhatsApp (falls Opt-In) + Web-Push. Gibt true zurueck, wenn ein Technik-User gefunden wurde.
+async function notifyReklAssignee(rekl, name) {
+  try {
+    const um = await pool.query(`SELECT email FROM users WHERE name = $1 AND LOWER(groups_json::text) LIKE '%"technik"%' LIMIT 1`, [name]);
+    const memberEmail = um.rows[0]?.email;
+    if (!memberEmail) return false;
+    const body = `🔧 *Dir zugewiesen: Reklamation #${rekl.id}*\nKategorie: ${rekl.kategorie || '-'}${rekl.stweg ? ` · STWEG ${rekl.stweg}` : ''}\n${(rekl.beschreibung || '').slice(0, 150)}\n\n→ pwa.rosenweg4303.ch/technik/`;
+    pushWhatsappIfOptIn({ email: memberEmail, body, sourceType: 'reklamation-zuweisung', sourceId: rekl.id }).catch(() => {});
+    webpushLib.sendToEmails([memberEmail], { title: `Dir zugewiesen: Reklamation #${rekl.id}`, body: (rekl.beschreibung || '').slice(0, 80), url: 'https://pwa.rosenweg4303.ch/technik/', tag: `rekl-${rekl.id}` }).catch(() => {});
+    logReklEvent(rekl.id, 'System', `${name} benachrichtigt`).catch(() => {});
+    return true;
+  } catch (e) { console.warn('[reklamation-zuweisung-notify]', e.message); return false; }
+}
+// Auto-Zuweisung beim Anlegen: hinterlegte Regel pro Kategorie anwenden (Technik-Mitglied
+// ODER Handwerker). Nur wenn die Meldung noch unzugewiesen ist. Best-effort.
+async function autoAssignReklamation(reklId) {
+  try {
+    const rk = await pool.query('SELECT * FROM reklamationen WHERE id = $1', [reklId]);
+    const rekl = rk.rows[0];
+    if (!rekl || rekl.zugewiesen_an || rekl.handwerker_id) return;
+    const rule = (await pool.query('SELECT zugewiesen_an, handwerker_id FROM reklamation_auto_assign WHERE kategorie = $1', [rekl.kategorie])).rows[0];
+    if (!rule || (!rule.zugewiesen_an && !rule.handwerker_id)) return;
+    if (rule.handwerker_id) {
+      await pool.query('UPDATE reklamationen SET handwerker_id = $2, zugewiesen_an = NULL, updated_at = NOW() WHERE id = $1', [reklId, rule.handwerker_id]);
+      let firma = '#' + rule.handwerker_id;
+      try { const h = await pool.query('SELECT firma FROM handwerker WHERE id = $1', [rule.handwerker_id]); if (h.rows[0]?.firma) firma = h.rows[0].firma; } catch {}
+      logReklEvent(reklId, 'System', `Auto-zugewiesen an Handwerker: ${firma}`).catch(() => {});
+    } else {
+      await pool.query('UPDATE reklamationen SET zugewiesen_an = $2, handwerker_id = NULL, updated_at = NOW() WHERE id = $1', [reklId, rule.zugewiesen_an]);
+      logReklEvent(reklId, 'System', `Auto-zugewiesen an: ${rule.zugewiesen_an}`).catch(() => {});
+      const updated = (await pool.query('SELECT * FROM reklamationen WHERE id = $1', [reklId])).rows[0];
+      await notifyReklAssignee(updated, rule.zugewiesen_an);
+    }
+  } catch (e) { console.warn('[reklamation-auto-assign]', e.message); }
 }
 app.get('/api/reklamationen/:id/history', authMiddleware, requirePermission('reklamationen', 'read'), async (req, res) => {
   try {
@@ -16517,7 +16572,7 @@ app.post('/api/reklamationen', authMiddleware, async (req, res) => {
     const b = req.body || {};
     const beschreibung = String(b.beschreibung || '').trim().slice(0, 4000);
     if (!beschreibung) return res.status(400).json({ error: 'Beschreibung erforderlich' });
-    const kategorie = ['aufzug', 'heizung', 'wasser', 'tuer', 'reinigung', 'licht', 'strom', 'netzwerk', 'sonstige'].includes(b.kategorie) ? b.kategorie : 'sonstige';
+    const kategorie = ['aufzug', 'heizung', 'wasser', 'tuer', 'reinigung', 'licht', 'strom', 'netzwerk', 'salz', 'sonstige'].includes(b.kategorie) ? b.kategorie : 'sonstige';
     const stweg = Number.isFinite(parseInt(b.stweg, 10)) ? parseInt(b.stweg, 10) : null;
     const pr = await pool.query('SELECT id FROM personen WHERE LOWER(email) = $1 LIMIT 1', [email]);
     const personId = pr.rows[0]?.id || null;
@@ -16549,6 +16604,7 @@ app.post('/api/reklamationen', authMiddleware, async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,'web','offen') RETURNING id, kategorie, beschreibung, status, created_at`,
       [personId, stweg, kategorie, beschreibung, bildPfad, standort]);
     logReklEvent(r.rows[0].id, email, 'Erstellt (Web-Formular)' + (standort ? ` · 📍 ${standort}` : '')).catch(() => {});
+    autoAssignReklamation(r.rows[0].id).catch((e) => console.warn('[reklamation-auto-assign]', e.message));
     notifyMelderEroeffnet(r.rows[0].id, email, beschreibung).catch((e) => console.warn('[reklamation-eroeffnet-notify]', e.message));
     // Web-Push an die Technik (neue Meldung -> Cockpit)
     getTechnikEmails().then((emails) => webpushLib.sendToEmails(emails, {
@@ -16640,7 +16696,7 @@ app.post('/api/reklamationen/oeffentlich', async (req, res) => {
     await pool.query('UPDATE otp_codes SET used = true WHERE id = $1', [row.id]);
     const beschreibung = String(b.beschreibung || '').trim().slice(0, 4000);
     if (!beschreibung) return res.status(400).json({ error: 'Beschreibung erforderlich' });
-    const kategorie = ['aufzug', 'heizung', 'wasser', 'tuer', 'reinigung', 'licht', 'strom', 'netzwerk', 'sonstige'].includes(b.kategorie) ? b.kategorie : 'sonstige';
+    const kategorie = ['aufzug', 'heizung', 'wasser', 'tuer', 'reinigung', 'licht', 'strom', 'netzwerk', 'salz', 'sonstige'].includes(b.kategorie) ? b.kategorie : 'sonstige';
     const stweg = Number.isFinite(parseInt(b.stweg, 10)) ? parseInt(b.stweg, 10) : null;
     const pr = await pool.query('SELECT id FROM personen WHERE LOWER(email) = $1 LIMIT 1', [email]);
     const personId = pr.rows[0]?.id || null;
@@ -16666,6 +16722,7 @@ app.post('/api/reklamationen/oeffentlich', async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,'web','offen') RETURNING id, kategorie, beschreibung, status, created_at`,
       [personId, stweg, kategorie, beschreibung, bildPfad, standort]);
     logReklEvent(r.rows[0].id, email, 'Erstellt (Web-Formular)' + (standort ? ` · 📍 ${standort}` : '')).catch(() => {});
+    autoAssignReklamation(r.rows[0].id).catch((e) => console.warn('[reklamation-auto-assign]', e.message));
     notifyMelderEroeffnet(r.rows[0].id, email, beschreibung).catch((e) => console.warn('[reklamation-eroeffnet-notify]', e.message));
     // Web-Push an die Technik (neue Meldung -> Cockpit)
     getTechnikEmails().then((emails) => webpushLib.sendToEmails(emails, {
@@ -23098,6 +23155,14 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_rekl_orte_aktiv ON reklamation_orte(aktiv);
       -- Standort-Freitext an der Meldung (aus QR-Ort oder manuell uebernommen).
       ALTER TABLE reklamationen ADD COLUMN IF NOT EXISTS standort VARCHAR(200);
+      -- Auto-Zuweisung: pro Kategorie ein Standard-Verantwortlicher (Technik-Mitglied
+      -- per Name ODER externer Handwerker). Neue Meldungen werden automatisch zugewiesen.
+      CREATE TABLE IF NOT EXISTS reklamation_auto_assign (
+        kategorie VARCHAR(60) PRIMARY KEY,
+        zugewiesen_an VARCHAR(200),
+        handwerker_id INTEGER REFERENCES handwerker(id) ON DELETE SET NULL,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
       CREATE INDEX IF NOT EXISTS idx_wk_person ON wohnungen_kontakte(person_id);
 
       -- Vollmachten: Eigentümer bevollmaechtigt Verwalter/Mieter/andere
