@@ -16298,54 +16298,61 @@ app.put('/api/reklamationen/auto-assign', authMiddleware, requirePermission('rek
   } catch (e) { await client.query('ROLLBACK'); console.error('[rekl-auto-assign-put]', e); res.status(500).json({ error: 'Fehler' }); }
   finally { client.release(); }
 });
+// Zentrale Reklamations-Mutation — EINE Quelle der Wahrheit, genutzt von PUT (Mensch)
+// UND Technik-Bot (gleicher Pfad: Update + Verlauf + Auto-Assign-Notify + Melder-Notify).
+// fields: Teilmenge von {status, kategorie, handwerker_id, zugewiesen_an, notiz, archiviert}.
+// actor: Name fuer den Verlauf. Rueckgabe { reklamation } ODER { error, status }.
+async function updateReklamation(id, fields, actor) {
+  const b = fields || {};
+  if (!Number.isFinite(id)) return { error: 'Ungueltige ID', status: 400 };
+  const beforeQ = await pool.query('SELECT status, handwerker_id, zugewiesen_an, notiz, archiviert FROM reklamationen WHERE id = $1', [id]);
+  if (beforeQ.rows.length === 0) return { error: 'Nicht gefunden', status: 404 };
+  const before = beforeQ.rows[0];
+  const updates = []; const params = [];
+  const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
+  if (b.status !== undefined) {
+    if (!['offen', 'weitergeleitet', 'erledigt', 'abgewiesen'].includes(b.status)) return { error: 'Ungueltiger Status', status: 400 };
+    push('status', b.status);
+    if (b.status === 'erledigt') push('erledigt_am', new Date());
+  }
+  if (b.kategorie !== undefined) push('kategorie', b.kategorie ? String(b.kategorie).slice(0, 60) : null);
+  if (b.handwerker_id !== undefined) push('handwerker_id', b.handwerker_id || null);
+  if (b.zugewiesen_an !== undefined) push('zugewiesen_an', b.zugewiesen_an || null);
+  if (b.notiz !== undefined) push('notiz', b.notiz || null);
+  if (b.archiviert !== undefined) push('archiviert', !!b.archiviert);
+  if (updates.length === 0) return { error: 'Keine Änderungen', status: 400 };
+  push('updated_at', new Date());
+  params.push(id);
+  const r = await pool.query(`UPDATE reklamationen SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
+  if (r.rows.length === 0) return { error: 'Nicht gefunden', status: 404 };
+  const updated = r.rows[0];
+  const who = actor || 'System';
+  if (b.status !== undefined && b.status !== before.status) logReklEvent(id, who, `Status: ${before.status || '—'} → ${b.status}`).catch(() => {});
+  if (b.handwerker_id !== undefined && (b.handwerker_id || null) !== (before.handwerker_id || null)) {
+    if (b.handwerker_id) { try { const hw = await pool.query('SELECT firma FROM handwerker WHERE id = $1', [b.handwerker_id]); logReklEvent(id, who, `Handwerker zugewiesen: ${hw.rows[0]?.firma || ('#' + b.handwerker_id)}`).catch(() => {}); } catch {} }
+    else logReklEvent(id, who, 'Handwerker-Zuweisung entfernt').catch(() => {});
+  }
+  if (b.zugewiesen_an !== undefined && (b.zugewiesen_an || null) !== (before.zugewiesen_an || null)) {
+    logReklEvent(id, who, b.zugewiesen_an ? `Zugewiesen an: ${b.zugewiesen_an}` : 'Zuweisung entfernt').catch(() => {});
+  }
+  if (b.notiz !== undefined && (b.notiz || '') !== (before.notiz || '')) logReklEvent(id, who, `Notiz geändert: "${String(b.notiz || '').slice(0, 80)}"`).catch(() => {});
+  if (b.archiviert !== undefined && (!!b.archiviert) !== (!!before.archiviert)) logReklEvent(id, who, b.archiviert ? '📦 Archiviert' : '↩ Aus Archiv zurückgeholt').catch(() => {});
+  // Persoenliche Benachrichtigung an neu zugewiesenes Technik-Mitglied.
+  if (b.zugewiesen_an !== undefined && b.zugewiesen_an && b.zugewiesen_an !== before.zugewiesen_an) {
+    notifyReklAssignee(updated, b.zugewiesen_an).catch(() => {});
+  }
+  // Melder-Benachrichtigung bei Status-WECHSEL (E-Mail/WhatsApp/Push).
+  if (b.status !== undefined && b.status !== before.status && updated.person_id) {
+    notifyMelderStatus(updated, b.status, b.notiz || '').catch((e) => console.warn('[reklamation] Status-Mail:', e.message));
+  }
+  return { reklamation: updated };
+}
 app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamationen', 'write'), async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
-    const b = req.body || {};
-    const before = (await pool.query('SELECT status, handwerker_id, zugewiesen_an, notiz, archiviert FROM reklamationen WHERE id = $1', [id])).rows[0] || {};
-    const updates = []; const params = [];
-    const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
-    if (b.status !== undefined) {
-      if (!['offen','weitergeleitet','erledigt','abgewiesen'].includes(b.status)) return res.status(400).json({ error: 'Ungueltiger Status' });
-      push('status', b.status);
-      if (b.status === 'erledigt') push('erledigt_am', new Date());
-    }
-    if (b.kategorie !== undefined) push('kategorie', b.kategorie ? String(b.kategorie).slice(0, 60) : null);
-    if (b.handwerker_id !== undefined) push('handwerker_id', b.handwerker_id || null);
-    if (b.zugewiesen_an !== undefined) push('zugewiesen_an', b.zugewiesen_an || null);
-    if (b.notiz !== undefined) push('notiz', b.notiz || null);
-    if (b.archiviert !== undefined) push('archiviert', !!b.archiviert);
-    if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
-    push('updated_at', new Date());
-    params.push(id);
-    const r = await pool.query(
-      `UPDATE reklamationen SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`,
-      params,
-    );
-    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
-    const updated = r.rows[0];
-    // History-Schritte protokollieren (wer hat wann was geaendert)
     const who = req.user.name || req.user.email || 'unbekannt';
-    if (b.status !== undefined && b.status !== before.status) logReklEvent(id, who, `Status: ${before.status || '—'} → ${b.status}`).catch(() => {});
-    if (b.handwerker_id !== undefined && (b.handwerker_id || null) !== (before.handwerker_id || null)) {
-      if (b.handwerker_id) { try { const hw = await pool.query('SELECT firma FROM handwerker WHERE id = $1', [b.handwerker_id]); logReklEvent(id, who, `Handwerker zugewiesen: ${hw.rows[0]?.firma || ('#' + b.handwerker_id)}`).catch(() => {}); } catch {} }
-      else logReklEvent(id, who, 'Handwerker-Zuweisung entfernt').catch(() => {});
-    }
-    if (b.zugewiesen_an !== undefined && (b.zugewiesen_an || null) !== (before.zugewiesen_an || null)) {
-      logReklEvent(id, who, b.zugewiesen_an ? `Zugewiesen an: ${b.zugewiesen_an}` : 'Zuweisung entfernt').catch(() => {});
-    }
-    if (b.notiz !== undefined && (b.notiz || '') !== (before.notiz || '')) logReklEvent(id, who, `Notiz geändert: "${String(b.notiz || '').slice(0, 80)}"`).catch(() => {});
-    if (b.archiviert !== undefined && (!!b.archiviert) !== (!!before.archiviert)) logReklEvent(id, who, b.archiviert ? '📦 Archiviert' : '↩ Aus Archiv zurückgeholt').catch(() => {});
-    // Persönliche Benachrichtigung an das NEU zugewiesene Technik-Mitglied (WhatsApp + Push).
-    // zugewiesen_an speichert den Namen -> Technik-User per Name aufloesen.
-    if (b.zugewiesen_an !== undefined && b.zugewiesen_an && b.zugewiesen_an !== before.zugewiesen_an) {
-      notifyReklAssignee(updated, b.zugewiesen_an).catch(() => {});
-    }
-    // Notification an Melder bei Status-Wechsel (E-Mail/WhatsApp/Push) — gemeinsamer Helper.
-    if (b.status && updated.person_id) {
-      notifyMelderStatus(updated, b.status, b.notiz || '').catch((e) => console.warn('[reklamation] Status-Mail:', e.message));
-    }
-    res.json(updated);
+    const out = await updateReklamation(parseInt(req.params.id, 10), req.body || {}, who);
+    if (out.error) return res.status(out.status || 500).json({ error: out.error });
+    res.json(out.reklamation);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -16766,11 +16773,11 @@ async function technikBotResolve(reklId, apply) {
         'INSERT INTO reklamation_events (reklamation_id, who, event, created_at) VALUES ($1,$2,$3,COALESCE($4::timestamptz, NOW()))',
         [reklId, String(v.ausgefuehrt_von || 'Technik-Bot').slice(0, 200), ('🔧 ' + String(v.arbeitsschritt)).slice(0, 500), v.zeitpunkt_iso || null]);
     }
-    await pool.query("UPDATE reklamationen SET status = 'erledigt', erledigt_am = NOW(), updated_at = NOW() WHERE id = $1", [reklId]);
+    // Audit-Notiz (woraus erkannt)
     await pool.query("INSERT INTO reklamation_events (reklamation_id, who, event) VALUES ($1,'Technik-Bot',$2)",
-      [reklId, `Automatisch als erledigt erkannt aus Technik-Chat (conf ${v.confidence})`]);
-    // "Voll wie ein Mensch": Melder benachrichtigen (E-Mail/WhatsApp/Push) wie beim manuellen Erledigen.
-    notifyMelderStatus({ id: reklId, person_id: r.person_id, beschreibung: r.beschreibung }, 'erledigt', v.arbeitsschritt || '').catch(() => {});
+      [reklId, `🤖 Aus Technik-Chat erkannt (conf ${v.confidence}): "${(v.evidence || '').slice(0, 120)}"`]);
+    // Status erledigt ueber DENSELBEN Pfad wie ein Mensch -> Verlauf + Melder-Notify automatisch.
+    await updateReklamation(reklId, { status: 'erledigt', notiz: v.arbeitsschritt || null }, 'Technik-Bot');
     out.applied = true;
   }
   return out;
