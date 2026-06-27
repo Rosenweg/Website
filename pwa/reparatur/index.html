@@ -685,9 +685,11 @@
         </div>
         ${r.standort ? `<div class="text-[11px] text-amber-700 mt-0.5">📍 ${esc(r.standort)}</div>` : ''}
         <div class="text-sm text-slate-700 mt-1 whitespace-pre-wrap break-words">${esc(r.beschreibung)}</div>
+        ${r.has_bild ? `<img data-foto="${r.id}" alt="Foto wird geladen …" class="mt-2 max-h-52 w-auto rounded-lg border border-slate-200 bg-slate-100 cursor-zoom-in" />` : ''}
         <div class="text-[11px] text-slate-400 mt-1">${esc(fmtDate(r.created_at))}</div>
         ${erledigt}
         ${notiz}
+        <div data-verlauf="${r.id}" class="mt-2"></div>
         <div class="mt-2 flex justify-end">
           ${r.melder_archiviert
             ? `<button type="button" onclick="archiveMine(${r.id}, false)" class="text-[11px] text-amber-700 active:underline">↩ Wiederherstellen</button>`
@@ -720,6 +722,35 @@
       if (!r.ok) { let m = 'HTTP ' + r.status; try { const j = await r.json(); if (j.error) m = j.error; } catch {} throw new Error(m); }
       await loadMeine();
     } catch (e) { alert('Fehler: ' + e.message); }
+  }
+
+  // Foto + Verlauf/Arbeitsschritte der eigenen Meldungen nachladen (Owner-Endpoints).
+  async function loadMeineDetails(rows) {
+    for (const r of rows) {
+      if (r.has_bild) {
+        const img = document.querySelector(`[data-foto="${r.id}"]`);
+        if (img) {
+          try {
+            const resp = await AuthentikAuth.apiFetch('/api/reklamationen/meine/' + r.id + '/foto', { cache: 'no-store' });
+            if (resp.ok) { const url = URL.createObjectURL(await resp.blob()); img.src = url; img.addEventListener('click', () => window.open(url)); }
+            else img.alt = 'Foto nicht ladbar';
+          } catch { img.alt = 'Foto-Fehler'; }
+        }
+      }
+      const vEl = document.querySelector(`[data-verlauf="${r.id}"]`);
+      if (vEl) {
+        try {
+          const resp = await AuthentikAuth.apiFetch('/api/reklamationen/meine/' + r.id + '/verlauf', { cache: 'no-store' });
+          if (resp.ok) {
+            const ev = (await resp.json()).events || [];
+            if (ev.length) {
+              vEl.innerHTML = '<div class="text-[11px] font-semibold text-slate-500 mb-0.5">📜 Verlauf</div>'
+                + ev.map(e => `<div class="text-[11px] text-slate-600">• <span class="text-slate-400">${esc(fmtDate(e.created_at))}</span> ${esc(e.event)}</div>`).join('');
+            }
+          }
+        } catch {}
+      }
+    }
   }
 
   async function loadMeine() {
@@ -767,6 +798,7 @@
     if (serverError === 'offline') head = '<div class="text-[11px] text-yellow-700 bg-yellow-50 rounded-lg px-2 py-1.5 mb-1">Offline — zeige nur ausstehende Meldungen.</div>';
     else if (serverError) head = `<div class="text-[11px] text-red-600 bg-red-50 rounded-lg px-2 py-1.5 mb-1">Server-Meldungen nicht erreichbar (${esc(serverError)}).</div>`;
     list.innerHTML = head + rows.map(r => r.html).join('');
+    loadMeineDetails(server);
   }
 
   // =====================================================================

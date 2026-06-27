@@ -16688,6 +16688,42 @@ app.post('/api/reklamationen/:id/meine-archivieren', authMiddleware, async (req,
 
 // Reklamations-Foto ausliefern (Triage im Technik-Cockpit) — wie Auslagen-Beleg,
 // mit Path-Traversal-Schutz. Permission wie die Triage-Liste (reklamationen read).
+// Owner-Zugriff: Foto der EIGENEN Meldung (ohne reklamationen-Permission, via person_id).
+app.get('/api/reklamationen/meine/:id/foto', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).end();
+    const email = String(req.user?.email || '').toLowerCase();
+    const r = await pool.query(
+      'SELECT bild_pfad FROM reklamationen WHERE id = $1 AND person_id = (SELECT id FROM personen WHERE LOWER(email) = $2 LIMIT 1)',
+      [id, email]);
+    const p = r.rows[0]?.bild_pfad;
+    if (!p) return res.status(404).json({ error: 'Kein Foto / nicht deine Meldung' });
+    const full = pathModule.join(DOCS_PATH, p);
+    if (!full.startsWith(pathModule.resolve(DOCS_PATH) + '/')) return res.status(400).end();
+    res.sendFile(full, (err) => { if (err && !res.headersSent) res.status(404).end(); });
+  } catch (e) { console.error('[reklamation-meine-foto]', e); if (!res.headersSent) res.status(500).end(); }
+});
+// Owner-Zugriff: Verlauf/Arbeitsschritte der EIGENEN Meldung (interne Notizen/Benachrichtigungen gefiltert).
+app.get('/api/reklamationen/meine/:id/verlauf', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
+    const email = String(req.user?.email || '').toLowerCase();
+    const own = await pool.query(
+      'SELECT 1 FROM reklamationen WHERE id = $1 AND person_id = (SELECT id FROM personen WHERE LOWER(email) = $2 LIMIT 1)',
+      [id, email]);
+    if (own.rows.length === 0) return res.status(404).json({ error: 'Nicht deine Meldung' });
+    const r = await pool.query(
+      `SELECT created_at, who, event FROM reklamation_events
+        WHERE reklamation_id = $1
+          AND event NOT ILIKE 'Notiz geändert%'
+          AND event NOT ILIKE '%benachrichtigt%'
+          AND event NOT ILIKE 'Kategorie korrigiert%'
+        ORDER BY created_at ASC, id ASC`, [id]);
+    res.json({ events: r.rows });
+  } catch (e) { console.error('[reklamation-meine-verlauf]', e); res.status(500).json({ error: 'Fehler' }); }
+});
 app.get('/api/reklamationen/:id/foto', authMiddleware, requirePermission('reklamationen', 'read'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
