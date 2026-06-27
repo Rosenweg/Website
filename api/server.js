@@ -13959,7 +13959,7 @@ app.post('/api/wetter/:station/ingest', mqttBrokerGuard, async (req, res) => {
   try {
     const st = String(req.params.station || 'r9').slice(0, 16);
     const b = req.body || {};
-    const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+    const num = (v) => { if (v === '' || v == null) return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
     await pool.query(
       `INSERT INTO wetter_history (station, outdoortemp, outdoorhumidity, windspeed, winddir, pressureabs, solarradiation)
        VALUES ($1,$2,$3,$4,$5,$6,$7)`,
