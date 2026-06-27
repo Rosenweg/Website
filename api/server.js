@@ -16632,12 +16632,29 @@ app.get('/api/reklamationen/meine', authMiddleware, async (req, res) => {
   try {
     const email = String(req.user?.email || '').toLowerCase();
     const r = await pool.query(
-      `SELECT id, kategorie, beschreibung, status, standort, (bild_pfad IS NOT NULL) AS has_bild, created_at, erledigt_am, notiz
+      `SELECT id, kategorie, beschreibung, status, standort, (bild_pfad IS NOT NULL) AS has_bild, created_at, erledigt_am, notiz, COALESCE(melder_archiviert, FALSE) AS melder_archiviert
          FROM reklamationen
         WHERE person_id = (SELECT id FROM personen WHERE LOWER(email) = $1 LIMIT 1)
         ORDER BY created_at DESC LIMIT 100`, [email]);
     res.json({ reklamationen: r.rows });
   } catch (e) { console.error('[reklamationen-meine]', e); res.status(500).json({ error: 'Fehler' }); }
+});
+
+// Melder blendet EIGENE Meldung in "Meine Meldungen" aus/ein (nur seine Sicht —
+// Technik-Triage bleibt unberuehrt). Ownership ueber person_id; keine Permission noetig.
+app.post('/api/reklamationen/:id/meine-archivieren', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
+    const email = String(req.user?.email || '').toLowerCase();
+    const val = !!(req.body && req.body.archiviert);
+    const r = await pool.query(
+      `UPDATE reklamationen SET melder_archiviert = $2
+        WHERE id = $1 AND person_id = (SELECT id FROM personen WHERE LOWER(email) = $3 LIMIT 1)
+        RETURNING id`, [id, val, email]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden oder nicht deine Meldung' });
+    res.json({ ok: true, archiviert: val });
+  } catch (e) { console.error('[reklamation-meine-archivieren]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 
 // Reklamations-Foto ausliefern (Triage im Technik-Cockpit) — wie Auslagen-Beleg,
@@ -23166,6 +23183,7 @@ async function initDB() {
       -- Standort-Freitext an der Meldung (aus QR-Ort oder manuell uebernommen).
       ALTER TABLE reklamationen ADD COLUMN IF NOT EXISTS standort VARCHAR(200);
       ALTER TABLE reklamationen ADD COLUMN IF NOT EXISTS archiviert BOOLEAN DEFAULT FALSE;
+      ALTER TABLE reklamationen ADD COLUMN IF NOT EXISTS melder_archiviert BOOLEAN DEFAULT FALSE;
       -- Auto-Zuweisung: pro Kategorie ein Standard-Verantwortlicher (Technik-Mitglied
       -- per Name ODER externer Handwerker). Neue Meldungen werden automatisch zugewiesen.
       CREATE TABLE IF NOT EXISTS reklamation_auto_assign (

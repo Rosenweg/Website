@@ -263,7 +263,10 @@
       </div>
       <div class="flex items-center justify-between mb-3">
         <h2 class="font-semibold">Meine Meldungen</h2>
-        <button id="refreshBtn" class="text-sky-700 text-sm font-medium active:text-sky-900">↻ Aktualisieren</button>
+        <div class="flex items-center gap-3">
+          <button id="archToggle" class="text-slate-500 text-sm font-medium active:text-slate-700">📦 Archiv</button>
+          <button id="refreshBtn" class="text-sky-700 text-sm font-medium active:text-sky-900">↻ Aktualisieren</button>
+        </div>
       </div>
       <div id="meineMsg" class="text-center text-slate-400 py-8 text-sm">Lade …</div>
       <div id="meineList" class="space-y-3"></div>
@@ -685,6 +688,11 @@
         <div class="text-[11px] text-slate-400 mt-1">${esc(fmtDate(r.created_at))}</div>
         ${erledigt}
         ${notiz}
+        <div class="mt-2 flex justify-end">
+          ${r.melder_archiviert
+            ? `<button type="button" onclick="archiveMine(${r.id}, false)" class="text-[11px] text-amber-700 active:underline">↩ Wiederherstellen</button>`
+            : `<button type="button" onclick="archiveMine(${r.id}, true)" class="text-[11px] text-slate-400 active:text-slate-600">📦 Archivieren</button>`}
+        </div>
       </div>`;
   }
 
@@ -701,6 +709,17 @@
         <div class="text-sm text-slate-700 mt-1 whitespace-pre-wrap break-words">${esc(p.beschreibung)}</div>
         <div class="text-[11px] text-slate-400 mt-1">${esc(fmtDate(item.created_at))} · noch nicht gesendet</div>
       </div>`;
+  }
+
+  let showArchivedMine = false;
+  async function archiveMine(id, val) {
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/reklamationen/' + id + '/meine-archivieren', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ archiviert: val }),
+      });
+      if (!r.ok) { let m = 'HTTP ' + r.status; try { const j = await r.json(); if (j.error) m = j.error; } catch {} throw new Error(m); }
+      await loadMeine();
+    } catch (e) { alert('Fehler: ' + e.message); }
   }
 
   async function loadMeine() {
@@ -720,6 +739,7 @@
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const data = await r.json();
         server = Array.isArray(data.reklamationen) ? data.reklamationen : [];
+        server = server.filter(x => showArchivedMine ? x.melder_archiviert : !x.melder_archiviert);
       } catch (e) {
         serverError = e.message;
       }
@@ -731,7 +751,7 @@
 
     // kombinieren: { ts, html } und nach Datum (neueste zuerst) sortieren
     const rows = [];
-    for (const it of pending) rows.push({ ts: new Date(it.created_at).getTime() || 0, html: pendingCardHtml(it) });
+    if (!showArchivedMine) for (const it of pending) rows.push({ ts: new Date(it.created_at).getTime() || 0, html: pendingCardHtml(it) });
     for (const r of server) rows.push({ ts: new Date(r.created_at).getTime() || 0, html: serverCardHtml(r) });
     rows.sort((a, b) => b.ts - a.ts);
 
@@ -739,7 +759,7 @@
       msg.classList.remove('hidden');
       msg.textContent = serverError && serverError !== 'offline'
         ? 'Fehler beim Laden: ' + serverError
-        : (serverError === 'offline' ? 'Offline — keine ausstehenden Meldungen.' : 'Noch keine Meldungen.');
+        : (serverError === 'offline' ? 'Offline — keine ausstehenden Meldungen.' : (showArchivedMine ? 'Keine archivierten Meldungen.' : 'Noch keine Meldungen.'));
       return;
     }
     msg.classList.add('hidden');
@@ -1147,6 +1167,12 @@
     // Tabs
     document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
     $('refreshBtn').addEventListener('click', loadMeine);
+    $('archToggle').addEventListener('click', () => {
+      showArchivedMine = !showArchivedMine;
+      $('archToggle').textContent = showArchivedMine ? '← Aktive' : '📦 Archiv';
+      $('archToggle').classList.toggle('text-sky-700', showArchivedMine);
+      loadMeine();
+    });
 
     // Online/Offline
     window.addEventListener('online', async () => { updateNetBadge(); await flushQueue(); if (!$('view-meine').classList.contains('hidden')) loadMeine(); });
