@@ -15771,6 +15771,30 @@ app.post('/api/whatsapp/inbound', requireWhatsappSecret, async (req, res) => {
   }
 });
 
+// Einmal-Backfill: alte Inbound-Nachrichten aus der Gateway-SQLite ins System holen
+// (nur speichern, KEIN Command-Processing -> keine Doppel-Reklamationen). Dedup via whatsapp_msg_id.
+app.post('/api/whatsapp/backfill', requireWhatsappSecret, async (req, res) => {
+  try {
+    const msgs = Array.isArray(req.body?.messages) ? req.body.messages : [];
+    let inserted = 0, skipped = 0;
+    for (const m of msgs) {
+      if (!m.phone && !m.chat_id) { skipped++; continue; }
+      if (m.whatsapp_msg_id) {
+        const ex = await pool.query('SELECT 1 FROM whatsapp_messages WHERE whatsapp_msg_id = $1 LIMIT 1', [m.whatsapp_msg_id]);
+        if (ex.rowCount) { skipped++; continue; }
+      }
+      const person = m.phone ? await findPersonByPhone(m.phone) : null;
+      await pool.query(
+        `INSERT INTO whatsapp_messages (direction, phone, chat_id, whatsapp_msg_id, body, attachments, person_id, status, created_at)
+         VALUES ('inbound', $1, $2, $3, $4, '[]'::jsonb, $5, 'received', COALESCE($6::timestamptz, NOW()))`,
+        [normalizePhone(m.phone) || m.phone || null, m.chat_id || null, m.whatsapp_msg_id || null, m.body || '', person?.id || null, m.created_at || null],
+      );
+      inserted++;
+    }
+    res.json({ ok: true, inserted, skipped });
+  } catch (e) { console.error('[wa-backfill]', e); res.status(500).json({ error: e.message }); }
+});
+
 // Outbox-Poll: Bot-Service holt anstehende Nachrichten
 app.get('/api/whatsapp/outbox-poll', requireWhatsappSecret, async (req, res) => {
   try {
