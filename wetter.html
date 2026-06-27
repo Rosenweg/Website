@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wetter Rosenweg 9</title>
+  <link rel="icon" href="/logo-rosenweg.png">
+  <script src="/js/mqtt.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: 'Inter', sans-serif; min-height: 100vh;
+      background: linear-gradient(160deg, #1e3a8a 0%, #2563eb 45%, #38bdf8 100%); color: #fff; }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 1.2rem 1rem 3rem; }
+    .top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.2rem; }
+    .brand { display: flex; align-items: center; gap: .6rem; }
+    .brand img { height: 34px; }
+    .brand .t { font-weight: 700; font-size: 1.05rem; line-height: 1.1; }
+    .brand .s { font-size: .8rem; opacity: .85; }
+    .conn { font-size: .8rem; padding: .25rem .6rem; border-radius: 999px; background: rgba(255,255,255,.15); white-space: nowrap; }
+    .conn .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: .35rem; background: #fbbf24; }
+    .conn.ok .dot { background: #34d399; } .conn.err .dot { background: #f87171; } .conn.off .dot { background: #94a3b8; }
+    .hero { text-align: center; margin: .5rem 0 1.4rem; }
+    .hero .temp { font-size: 4.2rem; font-weight: 300; line-height: 1; }
+    .hero .temp .u { font-size: 1.6rem; font-weight: 500; vertical-align: super; opacity: .8; }
+    .hero .sub { font-size: .95rem; opacity: .9; margin-top: .3rem; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .9rem; }
+    .card { background: rgba(255,255,255,.12); backdrop-filter: blur(6px); border-radius: 16px; padding: 1rem 1.1rem; }
+    .card .ct { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; opacity: .8; }
+    .card .cv { font-size: 1.7rem; font-weight: 600; margin-top: .25rem; }
+    .card .cv .u { font-size: .55em; font-weight: 500; opacity: .75; }
+    .card .cx { font-size: .8rem; opacity: .8; margin-top: .1rem; min-height: 1em; }
+    .foot { text-align: center; opacity: .8; font-size: .8rem; margin-top: 1.4rem; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="brand">
+        <img src="/logo-stweg3-rosenweg9.png" onerror="this.onerror=null;this.src='/logo-rosenweg.png'" alt="R9">
+        <div><div class="t">Wetterstation</div><div class="s">Rosenweg 9</div></div>
+      </div>
+      <div id="conn" class="conn"><span class="dot"></span><span id="conn-t">…</span></div>
+    </div>
+
+    <div class="hero">
+      <div class="temp"><span id="v-outdoortemp">–</span><span class="u">°C</span></div>
+      <div class="sub" id="hero-sub">Aussentemperatur</div>
+    </div>
+    <div class="cards">
+      <div class="card"><div class="ct">💧 Luftfeuchte</div><div class="cv"><span id="v-outdoorhumidity">–</span><span class="u"> %</span></div><div class="cx"></div></div>
+      <div class="card"><div class="ct">💨 Wind</div><div class="cv"><span id="v-windspeed">–</span><span class="u"> km/h</span></div><div class="cx" id="x-wind"></div></div>
+      <div class="card"><div class="ct">🧭 Windrichtung</div><div class="cv"><span id="v-winddir">–</span><span class="u"> °</span></div><div class="cx" id="x-winddir"></div></div>
+      <div class="card"><div class="ct">🔵 Luftdruck</div><div class="cv"><span id="v-pressureabs">–</span><span class="u"> hPa</span></div><div class="cx"></div></div>
+      <div class="card"><div class="ct">☀️ Solarstrahlung</div><div class="cv"><span id="v-solarradiation">–</span><span class="u"> W/m²</span></div><div class="cx" id="x-solar"></div></div>
+    </div>
+    <div class="foot">Live via MQTT <span id="last"></span><br>Rosenweg 9 · öffentlich</div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const COMPASS = ['N','NNO','NO','ONO','O','OSO','SO','SSO','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+    const compass = (deg) => { const d = Number(deg); return Number.isFinite(d) ? COMPASS[Math.round(((d % 360) / 22.5)) % 16] : ''; };
+    const setConn = (s, t) => { const c = $('conn'); c.className = 'conn ' + s; $('conn-t').textContent = t; };
+    const fmt = (v, dec) => { const n = Number(v); return Number.isFinite(n) ? n.toFixed(dec) : v; };
+
+    const FIELDS = {
+      outdoortemp: { el: 'v-outdoortemp', dec: 1 },
+      outdoorhumidity: { el: 'v-outdoorhumidity', dec: 0 },
+      windspeed: { el: 'v-windspeed', dec: 1 },
+      winddir: { el: 'v-winddir', dec: 0 },
+      pressureabs: { el: 'v-pressureabs', dec: 1 },
+      solarradiation: { el: 'v-solarradiation', dec: 0 },
+    };
+
+    function onMessage(topic, payload) {
+      const field = String(topic).split('/').pop();
+      const f = FIELDS[field];
+      if (!f) return;
+      const raw = payload.toString().trim();
+      $(f.el).textContent = fmt(raw, f.dec);
+      if (field === 'winddir') $('x-winddir').textContent = compass(raw);
+      if (field === 'windspeed') $('x-wind').textContent = Number(raw) < 1 ? 'windstill' : '';
+      if (field === 'solarradiation') $('x-solar').textContent = Number(raw) <= 0 ? 'Nacht / kein Sonnenlicht' : '';
+      if (field === 'outdoortemp') {
+        const t = Number(raw);
+        $('hero-sub').textContent = 'Aussentemperatur' + (Number.isFinite(t) ? (t >= 25 ? ' · warm 🥵' : t <= 3 ? ' · kalt 🥶' : '') : '');
+      }
+      $('last').textContent = '· Stand ' + new Date().toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    // Oeffentlich: read-only Service-User (nur wetter/r9/# lesen) direkt eingebettet — keine Anmeldung.
+    function connect() {
+      setConn('wait', 'verbinde…');
+      const client = mqtt.connect('wss://mqtt.rosenweg4303.ch', {
+        username: 'wetter-public', password: 'wetter-public-a5aafd438e6f4dfb',
+        protocolVersion: 4, clean: true, reconnectPeriod: 6000, connectTimeout: 12000,
+        clientId: 'rwwetter_' + Math.random().toString(16).slice(2, 10),
+      });
+      client.on('connect', () => {
+        setConn('ok', 'live');
+        client.subscribe('wetter/r9/#', { qos: 0 }, (err) => { if (err) setConn('err', 'kein Zugriff'); });
+      });
+      client.on('message', onMessage);
+      client.on('reconnect', () => setConn('wait', 'reconnect…'));
+      client.on('close', () => setConn('off', 'getrennt'));
+      client.on('error', (e) => { console.error('mqtt', e); setConn('err', 'Fehler'); });
+    }
+    document.addEventListener('DOMContentLoaded', connect);
+  </script>
+</body>
+</html>

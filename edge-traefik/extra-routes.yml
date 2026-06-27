@@ -109,6 +109,28 @@ http:
         certResolver: cf
         domains:
           - main: access.rosenweg4303.ch
+    # wetter.rosenweg4303.ch -> www-Frontend (Wetterstation R9). "/" -> /wetter.html.
+    # CF-CNAME wetter -> kooperation (proxied). OEFFENTLICH (kein Login) — Seite nutzt
+    # read-only MQTT-User wetter-public (nur wetter/r9/# lesen), eingebettet.
+    wetter-root-rw4303:
+      entryPoints: [websecure]
+      rule: Host(`wetter.rosenweg4303.ch`) && Path(`/`)
+      priority: 50
+      service: www-lxc-svc
+      middlewares: [wetter-root-rewrite]
+      tls:
+        certResolver: cf
+        domains:
+          - main: wetter.rosenweg4303.ch
+    wetter-page-rw4303:
+      entryPoints: [websecure]
+      rule: Host(`wetter.rosenweg4303.ch`)
+      priority: 10
+      service: www-lxc-svc
+      tls:
+        certResolver: cf
+        domains:
+          - main: wetter.rosenweg4303.ch
     # Kurze IPTV-URL: tv.rosenweg4303.ch -> api /api/tv/playlist.m3u (242 Kanaele).
     tv-rw4303:
       entryPoints: [websecure]
