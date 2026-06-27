@@ -16724,6 +16724,59 @@ app.get('/api/reklamationen/meine/:id/verlauf', authMiddleware, async (req, res)
     res.json({ events: r.rows });
   } catch (e) { console.error('[reklamation-meine-verlauf]', e); res.status(500).json({ error: 'Fehler' }); }
 });
+// ── Technik-Bot: Reklamation aus dem Technik-Gruppenchat als erledigt erkennen ──
+// LLM (OpenRouter claude-haiku-4.5) extrahiert strukturiert {erledigt, arbeitsschritt, ...}.
+// Bei apply: schreibt ZWEI Verlaufseintraege (Arbeitsschritt attribuiert+Chat-Zeit, Erledigt-Vermerk)
+// + Status erledigt. Melder-Nachricht NUR als Entwurf. Siehe docs/technik-bot-konzept.md.
+async function technikBotResolve(reklId, apply) {
+  const KEY = process.env.OPENROUTER_API_KEY;
+  if (!KEY) return { error: 'OPENROUTER_API_KEY nicht konfiguriert' };
+  if (!Number.isFinite(reklId)) return { error: 'Ungueltige ID' };
+  const r = (await pool.query('SELECT * FROM reklamationen WHERE id = $1', [reklId])).rows[0];
+  if (!r) return { error: 'Reklamation nicht gefunden' };
+  if (['erledigt', 'abgewiesen'].includes(r.status)) return { reklamation_id: reklId, skip: 'bereits abgeschlossen', status: r.status };
+  const msgs = (await pool.query(
+    `SELECT created_at, COALESCE((SELECT name FROM personen p WHERE p.id = w.person_id), w.phone) AS wer, body
+       FROM whatsapp_messages w
+      WHERE w.direction = 'inbound'
+        AND (w.chat_id = 'Rosenweg Technik' OR w.chat_id LIKE '120363407257445046%')
+        AND w.created_at >= $1::timestamptz - interval '21 days'
+      ORDER BY w.created_at`, [r.created_at])).rows;
+  if (!msgs.length) return { reklamation_id: reklId, resolved: false, reason: 'kein Chat-Kontext' };
+  const chat = msgs.map(m => `[${new Date(m.created_at).toISOString().slice(0, 16)}] ${m.wer}: ${(m.body || '').replace(/\s+/g, ' ')}`).join('\n');
+  const sys = 'Du bist der Technik-Assistent einer Schweizer Wohnbaugenossenschaft. Pruefe, ob eine Reklamation laut dem Technik-Gruppenchat erledigt ist, und extrahiere den ausgefuehrten Arbeitsschritt. Antworte NUR mit gueltigem JSON.';
+  const user = `REKLAMATION #${r.id}\nKategorie: ${r.kategorie} | STWEG ${r.stweg || '-'} | Status: ${r.status} | zugewiesen: ${r.zugewiesen_an || '-'}\nBeschreibung: ${r.beschreibung}\n\nTECHNIK-GRUPPENCHAT (chronologisch):\n${chat.slice(0, 6000)}\n\nLiefere JSON:\n{"erledigt":true|false,"confidence":0.0-1.0,"arbeitsschritt":"was wurde konkret gemacht (kurz) oder null","ausgefuehrt_von":"Name der Person oder null","zeitpunkt_iso":"ISO-Zeit der Erledigungs-Chatnachricht oder null","evidence":"woertliches Chat-Zitat","melder_nachricht":"kurze freundliche Nachricht an die meldende Person, dass es behoben ist"}`;
+  const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'anthropic/claude-haiku-4.5', temperature: 0.1, messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) return { error: 'LLM-Fehler ' + resp.status, detail: JSON.stringify(data).slice(0, 200) };
+  let v;
+  try { const c = data.choices[0].message.content; v = JSON.parse((c.match(/\{[\s\S]*\}/) || [c])[0]); }
+  catch (e) { return { error: 'LLM-Antwort nicht parsebar' }; }
+  const out = { reklamation_id: reklId, ...v, applied: false };
+  if (apply && v.erledigt && Number(v.confidence) >= 0.8) {
+    if (v.arbeitsschritt) {
+      await pool.query(
+        'INSERT INTO reklamation_events (reklamation_id, who, event, created_at) VALUES ($1,$2,$3,COALESCE($4::timestamptz, NOW()))',
+        [reklId, String(v.ausgefuehrt_von || 'Technik-Bot').slice(0, 200), ('🔧 ' + String(v.arbeitsschritt)).slice(0, 500), v.zeitpunkt_iso || null]);
+    }
+    await pool.query("UPDATE reklamationen SET status = 'erledigt', erledigt_am = NOW(), updated_at = NOW() WHERE id = $1", [reklId]);
+    await pool.query("INSERT INTO reklamation_events (reklamation_id, who, event) VALUES ($1,'Technik-Bot',$2)",
+      [reklId, `Automatisch als erledigt erkannt aus Technik-Chat (conf ${v.confidence})`]);
+    out.applied = true;
+  }
+  return out;
+}
+app.post('/api/technik-bot/resolve/:id', requireWhatsappSecret, async (req, res) => {
+  try {
+    const apply = req.query.apply === '1' || req.body?.apply === true;
+    const out = await technikBotResolve(parseInt(req.params.id, 10), apply);
+    res.status(out.error ? 502 : 200).json(out);
+  } catch (e) { console.error('[technik-bot-resolve]', e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/reklamationen/:id/foto', authMiddleware, requirePermission('reklamationen', 'read'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
