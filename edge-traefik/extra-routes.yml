@@ -164,6 +164,9 @@ http:
     access-root-rewrite:
       replacePath:
         path: /access.html
+    wetter-root-rewrite:
+      replacePath:
+        path: /wetter.html
   services:
     www-lxc-svc:
       loadBalancer:
