@@ -13940,6 +13940,52 @@ pool.query(`CREATE TABLE IF NOT EXISTS mqtt_topic_rules (
   UNIQUE(topic_filter, group_name)
 )`).catch(e => console.error('[mqtt] topic-rules table init:', e.message));
 
+// Wetterstation-Historie (24h-Verlaeufe auf der oeffentlichen wetter-Seite). Snapshot
+// alle paar Minuten via Ingest-Timer (CT105 liest retained MQTT -> POST). History = public.
+pool.query(`CREATE TABLE IF NOT EXISTS wetter_history (
+  ts              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  station         TEXT NOT NULL DEFAULT 'r9',
+  outdoortemp     REAL,
+  outdoorhumidity REAL,
+  windspeed       REAL,
+  winddir         REAL,
+  pressureabs     REAL,
+  solarradiation  REAL
+)`).then(() => pool.query(`CREATE INDEX IF NOT EXISTS idx_wetter_history_station_ts ON wetter_history(station, ts DESC)`))
+  .catch(e => console.error('[wetter] history table init:', e.message));
+
+// Ingest (Broker-Secret ?k=): ein Snapshot der aktuellen Werte. Aufruf vom Ingest-Timer (CT105).
+app.post('/api/wetter/:station/ingest', mqttBrokerGuard, async (req, res) => {
+  try {
+    const st = String(req.params.station || 'r9').slice(0, 16);
+    const b = req.body || {};
+    const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+    await pool.query(
+      `INSERT INTO wetter_history (station, outdoortemp, outdoorhumidity, windspeed, winddir, pressureabs, solarradiation)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [st, num(b.outdoortemp), num(b.outdoorhumidity), num(b.windspeed), num(b.winddir), num(b.pressureabs), num(b.solarradiation)]
+    );
+    res.json({ ok: true });
+  } catch (e) { console.error('[wetter] ingest:', e.message); res.status(500).json({ error: 'ingest' }); }
+});
+
+// History (PUBLIC, kein Login): Zeitreihe der letzten h Stunden (default 24, max 168).
+app.get('/api/wetter/:station/history', async (req, res) => {
+  try {
+    const st = String(req.params.station || 'r9').slice(0, 16);
+    const hours = Math.min(168, Math.max(1, parseInt(req.query.h, 10) || 24));
+    const r = await pool.query(
+      `SELECT ts, outdoortemp, outdoorhumidity, windspeed, winddir, pressureabs, solarradiation
+         FROM wetter_history
+        WHERE station = $1 AND ts > NOW() - ($2 * INTERVAL '1 hour')
+        ORDER BY ts ASC`,
+      [st, hours]
+    );
+    res.set('Cache-Control', 'public, max-age=120');
+    res.json({ station: st, hours, points: r.rows });
+  } catch (e) { console.error('[wetter] history:', e.message); res.status(500).json({ error: 'history' }); }
+});
+
 // mosquitto lehnt Usernames mit +/# ("dangerous username", MQTT-Wildcards) ab und
 // macht dann KEINEN ACL-Check. E-Mails koennen +-Adressierung haben -> sicheren
 // MQTT-Username ableiten. Die echte E-Mail bleibt im Token (fuer den Zaehler-Check).
