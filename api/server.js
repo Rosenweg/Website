@@ -16341,42 +16341,9 @@ app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamation
     if (b.zugewiesen_an !== undefined && b.zugewiesen_an && b.zugewiesen_an !== before.zugewiesen_an) {
       notifyReklAssignee(updated, b.zugewiesen_an).catch(() => {});
     }
-    // Notification an Melder bei Status-Wechsel
+    // Notification an Melder bei Status-Wechsel (E-Mail/WhatsApp/Push) — gemeinsamer Helper.
     if (b.status && updated.person_id) {
-      try {
-        const p = await pool.query('SELECT name, email FROM personen WHERE id = $1', [updated.person_id]);
-        if (p.rows[0]) {
-          const labelMap = { weitergeleitet: 'an Handwerker weitergeleitet', erledigt: 'als erledigt markiert', abgewiesen: 'abgewiesen', offen: 'wieder geoeffnet' };
-          const label = labelMap[b.status] || b.status;
-          if (['erledigt', 'abgewiesen'].includes(b.status) && p.rows[0].email) {
-            await sendTemplated('reklamation-status', {
-              person_name: p.rows[0].name, reklamation_id: updated.id, label,
-              beschreibung_kurz: (updated.beschreibung || '').slice(0, 100),
-              notiz: b.notiz || '', site_url: SITE_URL,
-            }, {
-              from: MAIL_FROM, to: p.rows[0].email,
-              subject: `Deine Reklamation #${updated.id} wurde ${label}`,
-              text: `Hallo ${p.rows[0].name},\n\ndeine Reklamation "${(updated.beschreibung || '').slice(0, 100)}" wurde ${label}.\n`
-                + (b.notiz ? `\nBemerkung: ${b.notiz}\n` : '')
-                + `\nDetails: ${SITE_URL}/reklamationen.html`,
-            });
-          }
-          const emoji = b.status === 'erledigt' ? '✅' : b.status === 'abgewiesen' ? '❌' : b.status === 'weitergeleitet' ? '➡️' : '🔄';
-          pushWhatsappIfOptIn({
-            personId: updated.person_id, sourceType: 'reklamation-status', sourceId: updated.id,
-            body: `${emoji} *Reklamation #${updated.id} ${label}*\n${(updated.beschreibung || '').slice(0, 80)}`
-              + (b.notiz ? `\n\n_Bemerkung:_ ${b.notiz}` : ''),
-          }).catch(() => {});
-          // Web-Push an den Melder (falls in einer PWA abonniert)
-          if (p.rows[0].email) {
-            webpushLib.sendToEmails([p.rows[0].email], {
-              title: `Reklamation #${updated.id} ${label}`,
-              body: (updated.beschreibung || '').slice(0, 80),
-              url: 'https://pwa.rosenweg4303.ch/reparatur/', tag: `rekl-${updated.id}`,
-            }).catch(() => {});
-          }
-        }
-      } catch (e) { console.warn('[reklamation] Status-Mail:', e.message); }
+      notifyMelderStatus(updated, b.status, b.notiz || '').catch((e) => console.warn('[reklamation] Status-Mail:', e.message));
     }
     res.json(updated);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -16724,6 +16691,42 @@ app.get('/api/reklamationen/meine/:id/verlauf', authMiddleware, async (req, res)
     res.json({ events: r.rows });
   } catch (e) { console.error('[reklamation-meine-verlauf]', e); res.status(500).json({ error: 'Fehler' }); }
 });
+// Melder-Benachrichtigung bei Status-Wechsel (E-Mail + WhatsApp + Web-Push) — gemeinsam
+// fuer manuelle (PUT) und automatische (Technik-Bot) Erledigung. rekl: {id, person_id, beschreibung}.
+async function notifyMelderStatus(rekl, status, notiz) {
+  try {
+    if (!rekl || !rekl.person_id) return;
+    const p = await pool.query('SELECT name, email FROM personen WHERE id = $1', [rekl.person_id]);
+    if (!p.rows[0]) return;
+    const labelMap = { weitergeleitet: 'an Handwerker weitergeleitet', erledigt: 'als erledigt markiert', abgewiesen: 'abgewiesen', offen: 'wieder geoeffnet' };
+    const label = labelMap[status] || status;
+    if (['erledigt', 'abgewiesen'].includes(status) && p.rows[0].email) {
+      await sendTemplated('reklamation-status', {
+        person_name: p.rows[0].name, reklamation_id: rekl.id, label,
+        beschreibung_kurz: (rekl.beschreibung || '').slice(0, 100),
+        notiz: notiz || '', site_url: SITE_URL,
+      }, {
+        from: MAIL_FROM, to: p.rows[0].email,
+        subject: `Deine Reklamation #${rekl.id} wurde ${label}`,
+        text: `Hallo ${p.rows[0].name},\n\ndeine Reklamation "${(rekl.beschreibung || '').slice(0, 100)}" wurde ${label}.\n`
+          + (notiz ? `\nBemerkung: ${notiz}\n` : '')
+          + `\nDetails: ${SITE_URL}/reklamationen.html`,
+      });
+    }
+    const emoji = status === 'erledigt' ? '✅' : status === 'abgewiesen' ? '❌' : status === 'weitergeleitet' ? '➡️' : '🔄';
+    pushWhatsappIfOptIn({
+      personId: rekl.person_id, sourceType: 'reklamation-status', sourceId: rekl.id,
+      body: `${emoji} *Reklamation #${rekl.id} ${label}*\n${(rekl.beschreibung || '').slice(0, 80)}` + (notiz ? `\n\n_Bemerkung:_ ${notiz}` : ''),
+    }).catch(() => {});
+    if (p.rows[0].email) {
+      webpushLib.sendToEmails([p.rows[0].email], {
+        title: `Reklamation #${rekl.id} ${label}`, body: (rekl.beschreibung || '').slice(0, 80),
+        url: 'https://pwa.rosenweg4303.ch/reparatur/', tag: `rekl-${rekl.id}`,
+      }).catch(() => {});
+    }
+  } catch (e) { console.warn('[reklamation] Status-Notify:', e.message); }
+}
+
 // ── Technik-Bot: Reklamation aus dem Technik-Gruppenchat als erledigt erkennen ──
 // LLM (OpenRouter claude-haiku-4.5) extrahiert strukturiert {erledigt, arbeitsschritt, ...}.
 // Bei apply: schreibt ZWEI Verlaufseintraege (Arbeitsschritt attribuiert+Chat-Zeit, Erledigt-Vermerk)
@@ -16766,6 +16769,8 @@ async function technikBotResolve(reklId, apply) {
     await pool.query("UPDATE reklamationen SET status = 'erledigt', erledigt_am = NOW(), updated_at = NOW() WHERE id = $1", [reklId]);
     await pool.query("INSERT INTO reklamation_events (reklamation_id, who, event) VALUES ($1,'Technik-Bot',$2)",
       [reklId, `Automatisch als erledigt erkannt aus Technik-Chat (conf ${v.confidence})`]);
+    // "Voll wie ein Mensch": Melder benachrichtigen (E-Mail/WhatsApp/Push) wie beim manuellen Erledigen.
+    notifyMelderStatus({ id: reklId, person_id: r.person_id, beschreibung: r.beschreibung }, 'erledigt', v.arbeitsschritt || '').catch(() => {});
     out.applied = true;
   }
   return out;
@@ -16777,6 +16782,30 @@ app.post('/api/technik-bot/resolve/:id', requireWhatsappSecret, async (req, res)
     res.status(out.error ? 502 : 200).json(out);
   } catch (e) { console.error('[technik-bot-resolve]', e); res.status(500).json({ error: e.message }); }
 });
+// Tages-Cron (Europe/Zurich, ab 06:30): scannt offene Reklamationen + erledigt klar aus dem
+// Technik-Chat geloeste — voll wie ein Mensch (inkl. Melder-Benachrichtigung). Idempotent:
+// bereits erledigte werden uebersprungen -> keine Doppel-Benachrichtigungen.
+let lastTechnikBotScanDay = null;
+async function runTechnikBotScanDaily() {
+  try {
+    if (!process.env.OPENROUTER_API_KEY) return;
+    const now = new Date();
+    const [zhHour, zhMin] = now.toLocaleString('en-GB', { timeZone: 'Europe/Zurich', hour: '2-digit', minute: '2-digit', hour12: false }).split(':').map((n) => parseInt(n, 10));
+    const zhDay = now.toLocaleString('en-CA', { timeZone: 'Europe/Zurich' }).slice(0, 10);
+    if (zhHour < 6 || (zhHour === 6 && zhMin < 30)) return;   // erst ab 06:30 lokal
+    if (lastTechnikBotScanDay === zhDay) return;
+    lastTechnikBotScanDay = zhDay;
+    const open = (await pool.query(
+      "SELECT id FROM reklamationen WHERE status IN ('offen','weitergeleitet') AND COALESCE(archiviert, false) = false ORDER BY id")).rows;
+    let resolved = 0;
+    for (const row of open) {
+      try { const out = await technikBotResolve(row.id, true); if (out && out.applied) resolved++; }
+      catch (e) { console.warn('[technik-bot-scan]', row.id, e.message); }
+    }
+    console.log(`[technik-bot-scan] ${open.length} offene geprueft, ${resolved} automatisch erledigt`);
+  } catch (e) { console.error('[technik-bot-scan] Lauf fehlgeschlagen:', e.message); }
+}
+setInterval(runTechnikBotScanDaily, 15 * 60 * 1000);
 app.get('/api/reklamationen/:id/foto', authMiddleware, requirePermission('reklamationen', 'read'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
