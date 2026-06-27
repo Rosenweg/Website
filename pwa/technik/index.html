@@ -75,7 +75,10 @@
     <section id="view-triage" class="py-4">
       <div class="flex items-center justify-between mb-3">
         <h2 class="font-semibold">🔧 Reklamations-Triage</h2>
-        <button id="triageRefresh" class="text-sky-700 text-sm font-medium active:text-sky-900">↻ Aktualisieren</button>
+        <div class="flex items-center gap-3">
+          <button type="button" onclick="openAutoCockpit()" class="text-indigo-700 text-sm font-medium active:text-indigo-900">⚙️ Auto</button>
+          <button id="triageRefresh" class="text-sky-700 text-sm font-medium active:text-sky-900">↻ Aktualisieren</button>
+        </div>
       </div>
       <div id="triageMsg" class="text-center text-slate-400 py-8 text-sm">Lade …</div>
       <div id="triageList" class="space-y-3"></div>
@@ -144,6 +147,29 @@
     </div>
   </nav>
 
+  <!-- Auto-Zuweisungs-Modal -->
+  <div id="autoCockpitModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4" onclick="if(event.target===this)closeAutoCockpit()">
+    <div class="bg-white w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[88vh] overflow-y-auto">
+      <div class="px-4 py-3 border-b flex items-center justify-between sticky top-0 bg-white">
+        <h3 class="font-semibold">⚙️ Automatische Zuweisung</h3>
+        <button type="button" onclick="closeAutoCockpit()" class="text-slate-400 text-2xl leading-none w-9 h-9">×</button>
+      </div>
+      <div class="p-4 space-y-3">
+        <p class="text-[12px] text-slate-500">Pro Kategorie ein Standard-Verantwortlicher — optional je STWEG anders. Neue Meldungen werden automatisch zugewiesen; Technik-Mitglieder zusätzlich benachrichtigt. „— nicht zugewiesen —" = keiner.</p>
+        <div class="flex items-center gap-2">
+          <label class="text-sm font-medium text-slate-600">STWEG:</label>
+          <select id="ac-stweg" class="border border-slate-300 rounded-lg px-2 py-1.5 text-sm flex-1 bg-white"></select>
+        </div>
+        <div id="ac-rows" class="space-y-2"></div>
+        <div id="ac-msg" class="hidden text-sm rounded-lg px-3 py-2"></div>
+      </div>
+      <div class="px-4 py-3 border-t flex justify-end gap-2 sticky bottom-0 bg-white">
+        <button type="button" onclick="closeAutoCockpit()" class="px-4 py-2 text-sm text-slate-600 active:bg-slate-100 rounded-lg">Abbrechen</button>
+        <button type="button" id="ac-save" onclick="saveAutoCockpit()" class="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg active:bg-indigo-700 font-semibold">Speichern</button>
+      </div>
+    </div>
+  </div>
+
   <script>
   'use strict';
 
@@ -156,8 +182,11 @@
   // Kategorie-Labels (gleiche Werte wie Reparatur-Melder)
   const KAT_LABEL = {
     aufzug: '🛗 Aufzug', heizung: '🔥 Heizung', wasser: '💧 Wasser',
-    tuer: '🚪 Tür/Schloss', reinigung: '🧹 Reinigung', sonstige: '❓ Sonstiges',
+    tuer: '🚪 Tür/Schloss', reinigung: '🧹 Reinigung', licht: '💡 Licht',
+    strom: '⚡ Strom', netzwerk: '🌐 Netzwerk', salz: '🧂 Salz', sonstige: '❓ Sonstiges',
   };
+  // Reihenfolge fuer die Auto-Zuweisungs-Liste
+  const KAT_ORDER = ['aufzug','heizung','wasser','tuer','reinigung','licht','strom','netzwerk','salz','sonstige'];
 
   // Reklamations-Status → erlaubte Werte (server: offen|weitergeleitet|erledigt|abgewiesen)
   const STATUS = {
@@ -425,6 +454,70 @@
       throw new Error(m);
     }
     return r.json().catch(() => ({}));
+  }
+
+  // ── Automatische Zuweisung (pro Kategorie, optional je STWEG; Default = keiner) ──
+  const AC_STWEGS = [{ v: 0, l: 'Alle STWEG (Standard)' }].concat(Array.from({ length: 7 }, (_, i) => ({ v: i + 1, l: 'STWEG ' + (i + 1) })));
+  let acRulesAll = {}; let acStweg = 0;
+  function closeAutoCockpit() { const m = $('autoCockpitModal'); if (m) m.classList.add('hidden'); }
+  function acValToRule(v) {
+    const ru = { zugewiesen_an: null, handwerker_id: null };
+    if (v && v.startsWith('tech:')) ru.zugewiesen_an = v.slice(5);
+    else if (v && v.startsWith('hw:')) ru.handwerker_id = parseInt(v.slice(3), 10);
+    return ru;
+  }
+  function acRenderRows() {
+    $('ac-rows').innerHTML = KAT_ORDER.map(kat => {
+      const v = acRulesAll[kat + '|' + acStweg] || '';
+      return `<div class="flex items-center gap-2">
+        <span class="text-sm w-28 shrink-0">${KAT_LABEL[kat] || esc(kat)}</span>
+        <select data-kat="${esc(kat)}" class="ac-sel flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm bg-white">${assignOptions(acValToRule(v))}</select>
+      </div>`;
+    }).join('');
+  }
+  function acCapture() {
+    document.querySelectorAll('.ac-sel').forEach(sel => { acRulesAll[sel.getAttribute('data-kat') + '|' + acStweg] = sel.value || ''; });
+  }
+  async function openAutoCockpit() {
+    await Promise.all([loadHandwerker(), loadTechnikMitglieder()]);
+    acRulesAll = {}; acStweg = 0;
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/reklamationen/auto-assign', { cache: 'no-store' });
+      if (r.status === 403) { alert('Keine Berechtigung für die Auto-Zuweisung.'); return; }
+      if (r.ok) {
+        const d = await r.json();
+        (d.rules || []).forEach(ru => {
+          const v = ru.zugewiesen_an ? ('tech:' + ru.zugewiesen_an) : (ru.handwerker_id ? ('hw:' + ru.handwerker_id) : '');
+          acRulesAll[ru.kategorie + '|' + (ru.stweg || 0)] = v;
+        });
+      }
+    } catch {}
+    const sw = $('ac-stweg');
+    sw.innerHTML = AC_STWEGS.map(s => `<option value="${s.v}">${esc(s.l)}</option>`).join('');
+    sw.value = '0';
+    sw.onchange = () => { acCapture(); acStweg = parseInt(sw.value, 10) || 0; acRenderRows(); };
+    acRenderRows();
+    $('ac-msg').classList.add('hidden');
+    $('autoCockpitModal').classList.remove('hidden');
+  }
+  async function saveAutoCockpit() {
+    acCapture();
+    const rules = Object.entries(acRulesAll).map(([key, v]) => {
+      const parts = key.split('|');
+      return Object.assign({ kategorie: parts[0], stweg: parseInt(parts[1], 10) || 0 }, acValToRule(v));
+    });
+    const btn = $('ac-save'); btn.disabled = true;
+    const msg = $('ac-msg');
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/reklamationen/auto-assign', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rules }),
+      });
+      if (!r.ok) { let m = 'HTTP ' + r.status; try { const j = await r.json(); if (j.error) m = j.error; } catch {} throw new Error(m); }
+      msg.textContent = '✓ Gespeichert'; msg.className = 'text-sm rounded-lg px-3 py-2 bg-green-100 text-green-700'; msg.classList.remove('hidden');
+      setTimeout(closeAutoCockpit, 700);
+    } catch (e) {
+      msg.textContent = 'Fehler: ' + e.message; msg.className = 'text-sm rounded-lg px-3 py-2 bg-red-100 text-red-700'; msg.classList.remove('hidden');
+    } finally { btn.disabled = false; }
   }
 
   // Delegiertes Click-/Change-Handling im Triage-Bereich

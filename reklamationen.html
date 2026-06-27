@@ -122,7 +122,11 @@
         <button onclick="closeAuto()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
       </div>
       <div class="p-5 space-y-3">
-        <p class="text-xs text-gray-500">Pro Kategorie ein Standard-Verantwortlicher. <b>Neue</b> Meldungen dieser Kategorie werden automatisch zugewiesen — Technik-Mitglieder zusätzlich per WhatsApp/Push benachrichtigt.</p>
+        <p class="text-xs text-gray-500">Pro Kategorie ein Standard-Verantwortlicher — optional je STWEG anders. <b>Neue</b> Meldungen werden automatisch zugewiesen; Technik-Mitglieder zusätzlich per WhatsApp/Push benachrichtigt. „— nicht zugewiesen —" = keiner.</p>
+        <div class="flex items-center gap-2">
+          <label class="text-sm text-gray-600 font-medium">STWEG:</label>
+          <select id="auto-stweg" class="border rounded-lg px-2 py-1.5 text-sm"></select>
+        </div>
         <div id="auto-rows" class="space-y-2"></div>
         <div id="auto-msg" class="hidden text-sm rounded-lg px-3 py-2"></div>
       </div>
@@ -324,31 +328,56 @@
     } finally { btn.disabled = false; }
   }
 
-  // ── Automatische Zuweisung (pro Kategorie ein Standard-Verantwortlicher) ──
-  function closeAuto() { document.getElementById('autoModal').classList.add('hidden'); }
-  async function openAutoAssign() {
-    const rules = {};
-    try {
-      const r = await AuthentikAuth.apiFetch('/api/reklamationen/auto-assign');
-      if (r.ok) { const d = await r.json(); (d.rules || []).forEach(ru => { rules[ru.kategorie] = ru; }); }
-    } catch {}
+  // ── Automatische Zuweisung (pro Kategorie, optional je STWEG; Default = keiner) ──
+  const AUTO_STWEGS = [{ v: 0, l: 'Alle STWEG (Standard)' }].concat(Array.from({ length: 7 }, (_, i) => ({ v: i + 1, l: 'STWEG ' + (i + 1) })));
+  let autoRulesAll = {};   // "kat|stweg" -> select-value ("tech:Name"/"hw:id"/"")
+  let autoStweg = 0;
+  function closeAuto() { const m = document.getElementById('autoModal'); if (m) m.classList.add('hidden'); }
+  function autoValToRule(v) {
+    const ru = { zugewiesen_an: null, handwerker_id: null };
+    if (v && v.startsWith('tech:')) ru.zugewiesen_an = v.slice(5);
+    else if (v && v.startsWith('hw:')) ru.handwerker_id = parseInt(v.slice(3), 10);
+    return ru;
+  }
+  function renderAutoRows() {
     document.getElementById('auto-rows').innerHTML = KATEGORIEN.map(k => {
-      const ru = rules[k.v] || {};
+      const v = autoRulesAll[k.v + '|' + autoStweg] || '';
       return `<div class="flex items-center gap-2">
         <span class="text-sm w-32 shrink-0">${k.l}</span>
-        <select data-kat="${esc(k.v)}" class="auto-sel flex-1 border rounded-lg px-2 py-1.5 text-sm">${assignOptions(ru)}</select>
+        <select data-kat="${esc(k.v)}" class="auto-sel flex-1 border rounded-lg px-2 py-1.5 text-sm">${assignOptions(autoValToRule(v))}</select>
       </div>`;
     }).join('');
+  }
+  function captureAutoRows() {
+    document.querySelectorAll('.auto-sel').forEach(sel => {
+      autoRulesAll[sel.getAttribute('data-kat') + '|' + autoStweg] = sel.value || '';
+    });
+  }
+  async function openAutoAssign() {
+    autoRulesAll = {}; autoStweg = 0;
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/reklamationen/auto-assign');
+      if (r.ok) {
+        const d = await r.json();
+        (d.rules || []).forEach(ru => {
+          const v = ru.zugewiesen_an ? ('tech:' + ru.zugewiesen_an) : (ru.handwerker_id ? ('hw:' + ru.handwerker_id) : '');
+          autoRulesAll[ru.kategorie + '|' + (ru.stweg || 0)] = v;
+        });
+      }
+    } catch {}
+    const sw = document.getElementById('auto-stweg');
+    sw.innerHTML = AUTO_STWEGS.map(s => `<option value="${s.v}">${s.l}</option>`).join('');
+    sw.value = String(autoStweg);
+    sw.onchange = () => { captureAutoRows(); autoStweg = parseInt(sw.value, 10) || 0; renderAutoRows(); };
+    renderAutoRows();
     document.getElementById('auto-msg').classList.add('hidden');
     document.getElementById('autoModal').classList.remove('hidden');
   }
   async function saveAuto() {
-    const rules = Array.from(document.querySelectorAll('.auto-sel')).map(sel => {
-      const ru = { kategorie: sel.getAttribute('data-kat'), zugewiesen_an: null, handwerker_id: null };
-      const v = sel.value;
-      if (v.startsWith('tech:')) ru.zugewiesen_an = v.slice(5);
-      else if (v.startsWith('hw:')) ru.handwerker_id = parseInt(v.slice(3), 10);
-      return ru;
+    captureAutoRows();
+    const rules = Object.entries(autoRulesAll).map(([key, v]) => {
+      const parts = key.split('|');
+      return Object.assign({ kategorie: parts[0], stweg: parseInt(parts[1], 10) || 0 }, autoValToRule(v));
     });
     const btn = document.getElementById('auto-save'); btn.disabled = true;
     const msg = document.getElementById('auto-msg');
@@ -358,7 +387,7 @@
       });
       if (!r.ok) { let m = 'HTTP ' + r.status; try { const j = await r.json(); if (j.error) m = j.error; } catch {} throw new Error(m); }
       msg.textContent = '✓ Gespeichert'; msg.className = 'text-sm rounded-lg px-3 py-2 bg-green-100 text-green-800'; msg.classList.remove('hidden');
-      setTimeout(closeAuto, 600);
+      setTimeout(closeAuto, 700);
     } catch (e) {
       msg.textContent = 'Fehler: ' + e.message; msg.className = 'text-sm rounded-lg px-3 py-2 bg-red-100 text-red-700'; msg.classList.remove('hidden');
     } finally { btn.disabled = false; }
