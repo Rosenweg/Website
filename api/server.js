@@ -16239,7 +16239,7 @@ app.get('/api/reklamationen', authMiddleware, requirePermission('reklamationen',
 // VOR der :id-Route registriert, sonst matcht ":id" = "auto-assign".
 app.get('/api/reklamationen/auto-assign', authMiddleware, requirePermission('reklamationen', 'read'), async (req, res) => {
   try {
-    const r = await pool.query('SELECT kategorie, zugewiesen_an, handwerker_id FROM reklamation_auto_assign');
+    const r = await pool.query('SELECT kategorie, stweg, zugewiesen_an, handwerker_id FROM reklamation_auto_assign ORDER BY kategorie, stweg');
     res.json({ rules: r.rows });
   } catch (e) { console.error('[rekl-auto-assign-get]', e); res.status(500).json({ error: 'Fehler' }); }
 });
@@ -16251,14 +16251,15 @@ app.put('/api/reklamationen/auto-assign', authMiddleware, requirePermission('rek
     await client.query('BEGIN');
     for (const ru of rules) {
       const kat = String(ru.kategorie || '').slice(0, 60); if (!kat) continue;
+      const st = Number.isFinite(parseInt(ru.stweg, 10)) ? parseInt(ru.stweg, 10) : 0;
       const za = ru.zugewiesen_an ? String(ru.zugewiesen_an).slice(0, 200) : null;
       const hw = Number.isFinite(parseInt(ru.handwerker_id, 10)) ? parseInt(ru.handwerker_id, 10) : null;
-      if (!za && !hw) { await client.query('DELETE FROM reklamation_auto_assign WHERE kategorie = $1', [kat]); continue; }
+      if (!za && !hw) { await client.query('DELETE FROM reklamation_auto_assign WHERE kategorie = $1 AND stweg = $2', [kat, st]); continue; }
       await client.query(
-        `INSERT INTO reklamation_auto_assign (kategorie, zugewiesen_an, handwerker_id, updated_at)
-         VALUES ($1,$2,$3,NOW())
-         ON CONFLICT (kategorie) DO UPDATE SET zugewiesen_an = EXCLUDED.zugewiesen_an, handwerker_id = EXCLUDED.handwerker_id, updated_at = NOW()`,
-        [kat, za, hw]);
+        `INSERT INTO reklamation_auto_assign (kategorie, stweg, zugewiesen_an, handwerker_id, updated_at)
+         VALUES ($1,$2,$3,$4,NOW())
+         ON CONFLICT (kategorie, stweg) DO UPDATE SET zugewiesen_an = EXCLUDED.zugewiesen_an, handwerker_id = EXCLUDED.handwerker_id, updated_at = NOW()`,
+        [kat, st, za, hw]);
     }
     await client.query('COMMIT');
     res.json({ ok: true });
@@ -16389,7 +16390,11 @@ async function autoAssignReklamation(reklId) {
     const rk = await pool.query('SELECT * FROM reklamationen WHERE id = $1', [reklId]);
     const rekl = rk.rows[0];
     if (!rekl || rekl.zugewiesen_an || rekl.handwerker_id) return;
-    const rule = (await pool.query('SELECT zugewiesen_an, handwerker_id FROM reklamation_auto_assign WHERE kategorie = $1', [rekl.kategorie])).rows[0];
+    // STWEG-spezifische Regel bevorzugen, sonst Default (stweg=0 = Alle STWEG).
+    const st = Number.isFinite(parseInt(rekl.stweg, 10)) ? parseInt(rekl.stweg, 10) : 0;
+    const rule = (await pool.query(
+      'SELECT zugewiesen_an, handwerker_id FROM reklamation_auto_assign WHERE kategorie = $1 AND stweg IN ($2, 0) ORDER BY (stweg = $2) DESC LIMIT 1',
+      [rekl.kategorie, st])).rows[0];
     if (!rule || (!rule.zugewiesen_an && !rule.handwerker_id)) return;
     if (rule.handwerker_id) {
       await pool.query('UPDATE reklamationen SET handwerker_id = $2, zugewiesen_an = NULL, updated_at = NOW() WHERE id = $1', [reklId, rule.handwerker_id]);
@@ -23158,11 +23163,25 @@ async function initDB() {
       -- Auto-Zuweisung: pro Kategorie ein Standard-Verantwortlicher (Technik-Mitglied
       -- per Name ODER externer Handwerker). Neue Meldungen werden automatisch zugewiesen.
       CREATE TABLE IF NOT EXISTS reklamation_auto_assign (
-        kategorie VARCHAR(60) PRIMARY KEY,
+        kategorie VARCHAR(60) NOT NULL,
+        stweg INTEGER NOT NULL DEFAULT 0,      -- 0 = Alle STWEG (Default/Fallback)
         zugewiesen_an VARCHAR(200),
         handwerker_id INTEGER REFERENCES handwerker(id) ON DELETE SET NULL,
-        updated_at TIMESTAMPTZ DEFAULT NOW()
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (kategorie, stweg)
       );
+      ALTER TABLE reklamation_auto_assign ADD COLUMN IF NOT EXISTS stweg INTEGER NOT NULL DEFAULT 0;
+      -- Migration: alter PK (nur kategorie) -> (kategorie, stweg)
+      DO $migrate_raa$
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid
+          WHERE t.relname = 'reklamation_auto_assign' AND c.contype = 'p' AND array_length(c.conkey, 1) = 1
+        ) THEN
+          ALTER TABLE reklamation_auto_assign DROP CONSTRAINT reklamation_auto_assign_pkey;
+          ALTER TABLE reklamation_auto_assign ADD PRIMARY KEY (kategorie, stweg);
+        END IF;
+      END $migrate_raa$;
       CREATE INDEX IF NOT EXISTS idx_wk_person ON wohnungen_kontakte(person_id);
 
       -- Vollmachten: Eigentümer bevollmaechtigt Verwalter/Mieter/andere
