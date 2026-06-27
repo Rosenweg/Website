@@ -15374,8 +15374,9 @@ app.get('/api/pbx/calls', authMiddleware, requireTechnikOrPraesident, async (req
 });
 
 // ── PBX Test-Outbound (Sandbox) + Trunk-Status ─────────────────────────────
-// Asterisk-Manager-Interface auf 100.64.2.29:5038 (siehe manager.conf in pbx/)
-const PBX_HOST = process.env.PBX_HOST || '100.64.2.29';
+// Asterisk-Manager-Interface auf 100.64.2.55:5038 (siehe manager.conf in pbx/).
+// CT220 von .29 (Konflikt mit Fileserver-VIP) auf .55 umgezogen 2026-06-27.
+const PBX_HOST = process.env.PBX_HOST || '100.64.2.55';
 const PBX_AMI_USER = process.env.PBX_AMI_USER || 'rosenweg';
 const PBX_AMI_SECRET = process.env.PBX_AMI_SECRET || '';
 
