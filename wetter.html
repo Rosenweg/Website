@@ -21,6 +21,9 @@
     .conn { font-size: .8rem; padding: .25rem .6rem; border-radius: 999px; background: rgba(255,255,255,.15); white-space: nowrap; }
     .conn .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: .35rem; background: #fbbf24; }
     .conn.ok .dot { background: #34d399; } .conn.err .dot { background: #f87171; } .conn.off .dot { background: #94a3b8; }
+    .clock { text-align: center; margin: .2rem 0 -.2rem; opacity: .92; }
+    .clock .ct { font-size: 2rem; font-weight: 300; letter-spacing: .02em; font-variant-numeric: tabular-nums; }
+    .clock .cd { font-size: .82rem; opacity: .8; text-transform: capitalize; }
     .hero { text-align: center; margin: 1rem 0 1.4rem; }
     .hero .ico { font-size: 4rem; line-height: 1; filter: drop-shadow(0 4px 12px rgba(0,0,0,.25)); }
     .hero .temp { font-size: 4rem; font-weight: 300; line-height: 1; margin-top: .2rem; }
@@ -51,6 +54,11 @@
         <div><div class="t">Wetterstation</div><div class="s">Rosenweg 9 · Kaiseraugst</div></div>
       </div>
       <div id="conn" class="conn"><span class="dot"></span><span id="conn-t">…</span></div>
+    </div>
+
+    <div class="clock">
+      <div class="ct" id="clock-t">–</div>
+      <div class="cd" id="clock-d"></div>
     </div>
 
     <div class="hero">
@@ -291,7 +299,15 @@
     client.on('error', (e) => { console.error('mqtt', e); setConn('err', 'Fehler'); });
   }
 
+  function updateClock() {
+    const n = new Date();
+    $('clock-t').textContent = n.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    $('clock-d').textContent = n.toLocaleDateString('de-CH', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
+    updateClock();
+    setInterval(updateClock, 1000); // Uhr jede Sekunde
     updateAstro();
     setInterval(updateAstro, 60000); // Sonne/Mond jede Minute
     loadHistory();
