@@ -53,4 +53,4 @@ http:
     pbx-api:
       loadBalancer:
         servers:
-          - url: "http://100.64.2.29:8095"
+          - url: "http://100.64.2.55:8095"
