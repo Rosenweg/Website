@@ -9,10 +9,11 @@
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: 'Inter', sans-serif; min-height: 100vh;
-      background: linear-gradient(160deg, #1e3a8a 0%, #2563eb 45%, #38bdf8 100%); color: #fff; }
-    .wrap { max-width: 760px; margin: 0 auto; padding: 1.2rem 1rem 3rem; }
-    .top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1.2rem; }
+    body { margin: 0; font-family: 'Inter', sans-serif; min-height: 100vh; color: #fff;
+      background: linear-gradient(160deg, #1e3a8a 0%, #2563eb 45%, #38bdf8 100%);
+      transition: background 1.5s ease; }
+    .wrap { max-width: 780px; margin: 0 auto; padding: 1.2rem 1rem 3rem; }
+    .top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .8rem; }
     .brand { display: flex; align-items: center; gap: .6rem; }
     .brand img { height: 34px; }
     .brand .t { font-weight: 700; font-size: 1.05rem; line-height: 1.1; }
@@ -20,17 +21,19 @@
     .conn { font-size: .8rem; padding: .25rem .6rem; border-radius: 999px; background: rgba(255,255,255,.15); white-space: nowrap; }
     .conn .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: .35rem; background: #fbbf24; }
     .conn.ok .dot { background: #34d399; } .conn.err .dot { background: #f87171; } .conn.off .dot { background: #94a3b8; }
-    .hero { text-align: center; margin: .5rem 0 1.4rem; }
-    .hero .temp { font-size: 4.2rem; font-weight: 300; line-height: 1; }
-    .hero .temp .u { font-size: 1.6rem; font-weight: 500; vertical-align: super; opacity: .8; }
+    .hero { text-align: center; margin: 1rem 0 1.4rem; }
+    .hero .ico { font-size: 4rem; line-height: 1; filter: drop-shadow(0 4px 12px rgba(0,0,0,.25)); }
+    .hero .temp { font-size: 4rem; font-weight: 300; line-height: 1; margin-top: .2rem; }
+    .hero .temp .u { font-size: 1.5rem; font-weight: 500; vertical-align: super; opacity: .8; }
     .hero .sub { font-size: .95rem; opacity: .9; margin-top: .3rem; }
-    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .9rem; }
-    .card { background: rgba(255,255,255,.12); backdrop-filter: blur(6px); border-radius: 16px; padding: 1rem 1.1rem; }
-    .card .ct { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; opacity: .8; }
-    .card .cv { font-size: 1.7rem; font-weight: 600; margin-top: .25rem; }
+    h2.sec { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; opacity: .75; margin: 1.6rem 0 .6rem; font-weight: 600; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .8rem; }
+    .card { background: rgba(255,255,255,.12); backdrop-filter: blur(6px); border-radius: 16px; padding: .9rem 1rem; }
+    .card .ct { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; opacity: .8; }
+    .card .cv { font-size: 1.55rem; font-weight: 600; margin-top: .2rem; }
     .card .cv .u { font-size: .55em; font-weight: 500; opacity: .75; }
-    .card .cx { font-size: .8rem; opacity: .8; margin-top: .1rem; min-height: 1em; }
-    .foot { text-align: center; opacity: .8; font-size: .8rem; margin-top: 1.4rem; line-height: 1.6; }
+    .card .cx { font-size: .76rem; opacity: .8; margin-top: .1rem; min-height: 1em; }
+    .foot { text-align: center; opacity: .8; font-size: .8rem; margin-top: 1.6rem; line-height: 1.6; }
   </style>
 </head>
 <body>
@@ -38,75 +41,207 @@
     <div class="top">
       <div class="brand">
         <img src="/logo-stweg3-rosenweg9.png" onerror="this.onerror=null;this.src='/logo-rosenweg.png'" alt="R9">
-        <div><div class="t">Wetterstation</div><div class="s">Rosenweg 9</div></div>
+        <div><div class="t">Wetterstation</div><div class="s">Rosenweg 9 · Kaiseraugst</div></div>
       </div>
       <div id="conn" class="conn"><span class="dot"></span><span id="conn-t">…</span></div>
     </div>
 
     <div class="hero">
+      <div class="ico" id="hero-ico">🌡️</div>
       <div class="temp"><span id="v-outdoortemp">–</span><span class="u">°C</span></div>
       <div class="sub" id="hero-sub">Aussentemperatur</div>
     </div>
+
+    <h2 class="sec">Messwerte</h2>
     <div class="cards">
       <div class="card"><div class="ct">💧 Luftfeuchte</div><div class="cv"><span id="v-outdoorhumidity">–</span><span class="u"> %</span></div><div class="cx"></div></div>
       <div class="card"><div class="ct">💨 Wind</div><div class="cv"><span id="v-windspeed">–</span><span class="u"> km/h</span></div><div class="cx" id="x-wind"></div></div>
       <div class="card"><div class="ct">🧭 Windrichtung</div><div class="cv"><span id="v-winddir">–</span><span class="u"> °</span></div><div class="cx" id="x-winddir"></div></div>
-      <div class="card"><div class="ct">🔵 Luftdruck</div><div class="cv"><span id="v-pressureabs">–</span><span class="u"> hPa</span></div><div class="cx"></div></div>
+      <div class="card"><div class="ct">🔵 Luftdruck</div><div class="cv"><span id="v-pressureabs">–</span><span class="u"> hPa</span></div><div class="cx" id="x-press"></div></div>
       <div class="card"><div class="ct">☀️ Solarstrahlung</div><div class="cv"><span id="v-solarradiation">–</span><span class="u"> W/m²</span></div><div class="cx" id="x-solar"></div></div>
     </div>
-    <div class="foot">Live via MQTT <span id="last"></span><br>Rosenweg 9 · öffentlich</div>
+
+    <h2 class="sec">Berechnet</h2>
+    <div class="cards">
+      <div class="card"><div class="ct">🌫️ Taupunkt</div><div class="cv"><span id="d-dew">–</span><span class="u"> °C</span></div><div class="cx" id="x-dew"></div></div>
+      <div class="card"><div class="ct">🧥 Gefühlt</div><div class="cv"><span id="d-feel">–</span><span class="u"> °C</span></div><div class="cx" id="x-feel"></div></div>
+      <div class="card"><div class="ct">💦 Absolute Feuchte</div><div class="cv"><span id="d-abs">–</span><span class="u"> g/m³</span></div><div class="cx"></div></div>
+    </div>
+
+    <h2 class="sec">Sonne &amp; Mond</h2>
+    <div class="cards">
+      <div class="card"><div class="ct">🌅 Sonnenaufgang</div><div class="cv" id="s-rise">–</div><div class="cx" id="s-rise-x"></div></div>
+      <div class="card"><div class="ct">🌇 Sonnenuntergang</div><div class="cv" id="s-set">–</div><div class="cx" id="s-set-x"></div></div>
+      <div class="card"><div class="ct">☀️ Sonnenstand</div><div class="cv"><span id="s-alt">–</span><span class="u"> °</span></div><div class="cx" id="s-alt-x"></div></div>
+      <div class="card"><div class="ct">🌙 Mondphase</div><div class="cv" id="m-emoji">–</div><div class="cx" id="m-name"></div></div>
+      <div class="card"><div class="ct">🌕 Beleuchtung</div><div class="cv"><span id="m-illum">–</span><span class="u"> %</span></div><div class="cx" id="m-alt-x"></div></div>
+    </div>
+
+    <div class="foot">Live via MQTT <span id="last"></span><br>Rosenweg 9 · öffentlich · berechnete Werte ohne Gewähr</div>
   </div>
 
   <script>
-    const $ = (id) => document.getElementById(id);
-    const COMPASS = ['N','NNO','NO','ONO','O','OSO','SO','SSO','S','SSW','SW','WSW','W','WNW','NW','NNW'];
-    const compass = (deg) => { const d = Number(deg); return Number.isFinite(d) ? COMPASS[Math.round(((d % 360) / 22.5)) % 16] : ''; };
-    const setConn = (s, t) => { const c = $('conn'); c.className = 'conn ' + s; $('conn-t').textContent = t; };
-    const fmt = (v, dec) => { const n = Number(v); return Number.isFinite(n) ? n.toFixed(dec) : v; };
-
-    const FIELDS = {
-      outdoortemp: { el: 'v-outdoortemp', dec: 1 },
-      outdoorhumidity: { el: 'v-outdoorhumidity', dec: 0 },
-      windspeed: { el: 'v-windspeed', dec: 1 },
-      winddir: { el: 'v-winddir', dec: 0 },
-      pressureabs: { el: 'v-pressureabs', dec: 1 },
-      solarradiation: { el: 'v-solarradiation', dec: 0 },
+  /* ===== kompaktes SunCalc (Vladimir Agafonkin, MIT) ===== */
+  const SunCalc = (function () {
+    const PI = Math.PI, rad = PI / 180, dayMs = 864e5, J1970 = 2440588, J2000 = 2451545, e = rad * 23.4397;
+    const toJulian = (d) => d.valueOf() / dayMs - 0.5 + J1970;
+    const fromJulian = (j) => new Date((j + 0.5 - J1970) * dayMs);
+    const toDays = (d) => toJulian(d) - J2000;
+    const ra = (l, b) => Math.atan2(Math.sin(l) * Math.cos(e) - Math.tan(b) * Math.sin(e), Math.cos(l));
+    const dec = (l, b) => Math.asin(Math.sin(b) * Math.cos(e) + Math.cos(b) * Math.sin(e) * Math.sin(l));
+    const az = (H, phi, d) => Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(phi) - Math.tan(d) * Math.cos(phi));
+    const alt = (H, phi, d) => Math.asin(Math.sin(phi) * Math.sin(d) + Math.cos(phi) * Math.cos(d) * Math.cos(H));
+    const sidereal = (d, lw) => rad * (280.16 + 360.9856235 * d) - lw;
+    const sma = (d) => rad * (357.5291 + 0.98560028 * d);
+    const ecl = (M) => M + rad * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M)) + rad * 102.9372 + PI;
+    const sunCoords = (d) => { const M = sma(d), L = ecl(M); return { dec: dec(L, 0), ra: ra(L, 0) }; };
+    const SC = {};
+    SC.getPosition = (date, lat, lng) => { const lw = rad * -lng, phi = rad * lat, d = toDays(date), c = sunCoords(d), H = sidereal(d, lw) - c.ra; return { azimuth: az(H, phi, c.dec), altitude: alt(H, phi, c.dec) }; };
+    const J0 = 0.0009;
+    const cyc = (d, lw) => Math.round(d - J0 - lw / (2 * PI));
+    const approx = (Ht, lw, n) => J0 + (Ht + lw) / (2 * PI) + n;
+    const transitJ = (ds, M, L) => J2000 + ds + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L);
+    const ha = (h, phi, d) => Math.acos((Math.sin(h) - Math.sin(phi) * Math.sin(d)) / (Math.cos(phi) * Math.cos(d)));
+    SC.getTimes = (date, lat, lng) => {
+      const lw = rad * -lng, phi = rad * lat, d = toDays(date), n = cyc(d, lw), ds = approx(0, lw, n),
+        M = sma(ds), L = ecl(M), dc = dec(L, 0), Jnoon = transitJ(ds, M, L),
+        w = ha(-0.833 * rad, phi, dc), Jset = transitJ(approx(w, lw, n), M, L);
+      return { sunrise: fromJulian(Jnoon - (Jset - Jnoon)), sunset: fromJulian(Jset), solarNoon: fromJulian(Jnoon) };
     };
+    const moonCoords = (d) => {
+      const L = rad * (218.316 + 13.176396 * d), M = rad * (134.963 + 13.064993 * d), F = rad * (93.272 + 13.229350 * d),
+        l = L + rad * 6.289 * Math.sin(M), b = rad * 5.128 * Math.sin(F), dt = 385001 - 20905 * Math.cos(M);
+      return { ra: ra(l, b), dec: dec(l, b), dist: dt };
+    };
+    SC.getMoonPosition = (date, lat, lng) => {
+      const lw = rad * -lng, phi = rad * lat, d = toDays(date), c = moonCoords(d), H = sidereal(d, lw) - c.ra;
+      let h = alt(H, phi, c.dec); h += (0.017 * rad) / Math.tan(h + (10.26 * rad) / (h + 5.114 * rad));
+      return { azimuth: az(H, phi, c.dec), altitude: h };
+    };
+    SC.getMoonIllumination = (date) => {
+      const d = toDays(date || new Date()), s = sunCoords(d), m = moonCoords(d), sdist = 149598000,
+        phi = Math.acos(Math.sin(s.dec) * Math.sin(m.dec) + Math.cos(s.dec) * Math.cos(m.dec) * Math.cos(s.ra - m.ra)),
+        inc = Math.atan2(sdist * Math.sin(phi), m.dist - sdist * Math.cos(phi)),
+        angle = Math.atan2(Math.cos(s.dec) * Math.sin(s.ra - m.ra), Math.sin(s.dec) * Math.cos(m.dec) - Math.cos(s.dec) * Math.sin(m.dec) * Math.cos(s.ra - m.ra));
+      return { fraction: (1 + Math.cos(inc)) / 2, phase: 0.5 + 0.5 * inc * (angle < 0 ? -1 : 1) / PI };
+    };
+    return SC;
+  })();
 
-    function onMessage(topic, payload) {
-      const field = String(topic).split('/').pop();
-      const f = FIELDS[field];
-      if (!f) return;
-      const raw = payload.toString().trim();
-      $(f.el).textContent = fmt(raw, f.dec);
-      if (field === 'winddir') $('x-winddir').textContent = compass(raw);
-      if (field === 'windspeed') $('x-wind').textContent = Number(raw) < 1 ? 'windstill' : '';
-      if (field === 'solarradiation') $('x-solar').textContent = Number(raw) <= 0 ? 'Nacht / kein Sonnenlicht' : '';
-      if (field === 'outdoortemp') {
-        const t = Number(raw);
-        $('hero-sub').textContent = 'Aussentemperatur' + (Number.isFinite(t) ? (t >= 25 ? ' · warm 🥵' : t <= 3 ? ' · kalt 🥶' : '') : '');
-      }
-      $('last').textContent = '· Stand ' + new Date().toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
-    }
+  const $ = (id) => document.getElementById(id);
+  const LAT = 47.535, LON = 7.726; // Rosenweg 9, Kaiseraugst
+  const COMPASS = ['N','NNO','NO','ONO','O','OSO','SO','SSO','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+  const compass = (d) => { const n = Number(d); return Number.isFinite(n) ? COMPASS[Math.round(((n % 360) / 22.5)) % 16] : ''; };
+  const setConn = (s, t) => { const c = $('conn'); c.className = 'conn ' + s; $('conn-t').textContent = t; };
+  const fmt = (v, dec) => { const n = Number(v); return Number.isFinite(n) ? n.toFixed(dec) : '–'; };
+  const hhmm = (d) => d instanceof Date && !isNaN(d) ? d.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' }) : '–';
 
-    // Oeffentlich: read-only Service-User (nur wetter/r9/# lesen) direkt eingebettet — keine Anmeldung.
-    function connect() {
-      setConn('wait', 'verbinde…');
-      const client = mqtt.connect('wss://mqtt.rosenweg4303.ch', {
-        username: 'wetter-public', password: 'wetter-public-a5aafd438e6f4dfb',
-        protocolVersion: 4, clean: true, reconnectPeriod: 6000, connectTimeout: 12000,
-        clientId: 'rwwetter_' + Math.random().toString(16).slice(2, 10),
-      });
-      client.on('connect', () => {
-        setConn('ok', 'live');
-        client.subscribe('wetter/r9/#', { qos: 0 }, (err) => { if (err) setConn('err', 'kein Zugriff'); });
-      });
-      client.on('message', onMessage);
-      client.on('reconnect', () => setConn('wait', 'reconnect…'));
-      client.on('close', () => setConn('off', 'getrennt'));
-      client.on('error', (e) => { console.error('mqtt', e); setConn('err', 'Fehler'); });
+  const cur = {}; // aktuelle Messwerte
+  const FIELDS = { outdoortemp: 1, outdoorhumidity: 0, windspeed: 1, winddir: 0, pressureabs: 1, solarradiation: 0 };
+
+  function recompute() {
+    const T = cur.outdoortemp, RH = cur.outdoorhumidity, v = cur.windspeed;
+    // Taupunkt (Magnus)
+    if (Number.isFinite(T) && Number.isFinite(RH) && RH > 0) {
+      const a = 17.27, b = 237.7, g = (a * T) / (b + T) + Math.log(RH / 100);
+      const td = (b * g) / (a - g);
+      $('d-dew').textContent = td.toFixed(1);
+      $('x-dew').textContent = (T - td) < 2.5 ? 'Nebel/Tau möglich' : '';
+      // absolute Feuchte g/m³
+      const ah = 6.112 * Math.exp((17.67 * T) / (T + 243.5)) * RH * 2.1674 / (273.15 + T);
+      $('d-abs').textContent = ah.toFixed(1);
     }
-    document.addEventListener('DOMContentLoaded', connect);
+    // Gefühlte Temperatur
+    if (Number.isFinite(T)) {
+      let feel = T, note = '';
+      if (T <= 10 && Number.isFinite(v) && v > 4.8) {
+        feel = 13.12 + 0.6215 * T - 11.37 * Math.pow(v, 0.16) + 0.3965 * T * Math.pow(v, 0.16);
+        note = 'Windchill';
+      } else if (T >= 27 && Number.isFinite(RH)) {
+        const c = [-8.784695, 1.61139411, 2.338549, -0.14611605, -0.012308094, -0.016424828, 0.002211732, 0.00072546, -0.000003582];
+        feel = c[0] + c[1]*T + c[2]*RH + c[3]*T*RH + c[4]*T*T + c[5]*RH*RH + c[6]*T*T*RH + c[7]*T*RH*RH + c[8]*T*T*RH*RH;
+        note = 'Hitzeindex';
+      } else { note = 'wie gemessen'; }
+      $('d-feel').textContent = feel.toFixed(1);
+      $('x-feel').textContent = note;
+    }
+    updateHero();
+  }
+
+  function updateHero() {
+    const now = new Date();
+    const sun = SunCalc.getPosition(now, LAT, LON);
+    const day = sun.altitude > 0;
+    const sol = cur.solarradiation;
+    let ico = '🌙';
+    if (day) ico = Number.isFinite(sol) ? (sol > 400 ? '☀️' : sol > 80 ? '🌤️' : '☁️') : '☀️';
+    $('hero-ico').textContent = ico;
+    // Tag/Nacht-Verlauf
+    const altd = sun.altitude * 180 / Math.PI;
+    let bg;
+    if (altd > 8) bg = 'linear-gradient(160deg,#1e3a8a 0%,#2563eb 45%,#38bdf8 100%)';
+    else if (altd > -6) bg = 'linear-gradient(160deg,#4c1d95 0%,#9333ea 40%,#f59e0b 100%)'; // Dämmerung
+    else bg = 'linear-gradient(160deg,#0b1026 0%,#1e293b 55%,#334155 100%)'; // Nacht
+    document.body.style.background = bg;
+  }
+
+  function updateAstro() {
+    const now = new Date();
+    const t = SunCalc.getTimes(now, LAT, LON);
+    $('s-rise').textContent = hhmm(t.sunrise);
+    $('s-set').textContent = hhmm(t.sunset);
+    const sp = SunCalc.getPosition(now, LAT, LON), altd = sp.altitude * 180 / Math.PI;
+    $('s-alt').textContent = altd.toFixed(0);
+    $('s-alt-x').textContent = altd > 0 ? 'über Horizont' : 'unter Horizont';
+    const mi = SunCalc.getMoonIllumination(now);
+    const phase = mi.phase; // 0=Neumond .5=Vollmond
+    const EM = ['🌑','🌒','🌓','🌔','🌕','🌖','🌗','🌘'];
+    const NM = ['Neumond','zunehmende Sichel','erstes Viertel','zunehmender Mond','Vollmond','abnehmender Mond','letztes Viertel','abnehmende Sichel'];
+    const idx = Math.round(phase * 8) % 8;
+    $('m-emoji').textContent = EM[idx];
+    $('m-name').textContent = NM[idx];
+    $('m-illum').textContent = Math.round(mi.fraction * 100);
+    const mp = SunCalc.getMoonPosition(now, LAT, LON), maltd = mp.altitude * 180 / Math.PI;
+    $('m-alt-x').textContent = maltd > 0 ? 'Mond sichtbar' : 'unter Horizont';
+    updateHero();
+  }
+
+  function onMessage(topic, payload) {
+    const field = String(topic).split('/').pop();
+    if (!(field in FIELDS)) return;
+    const raw = payload.toString().trim();
+    const num = Number(raw);
+    cur[field] = Number.isFinite(num) ? num : raw;
+    $('v-' + field).textContent = fmt(raw, FIELDS[field]);
+    if (field === 'winddir') $('x-winddir').textContent = compass(raw);
+    if (field === 'windspeed') $('x-wind').textContent = num < 1 ? 'windstill' : (num >= 39 ? 'stürmisch' : '');
+    if (field === 'solarradiation') $('x-solar').textContent = num <= 0 ? 'Nacht / kein Sonnenlicht' : (num > 600 ? 'starke Sonne' : '');
+    if (field === 'pressureabs') $('x-press').textContent = num < 1000 ? 'eher Tiefdruck' : num > 1020 ? 'eher Hochdruck' : 'normal';
+    if (field === 'outdoortemp') $('hero-sub').textContent = 'Aussentemperatur' + (num >= 25 ? ' · warm 🥵' : num <= 3 ? ' · kalt 🥶' : '');
+    $('last').textContent = '· Stand ' + new Date().toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
+    recompute();
+  }
+
+  // Oeffentlich: read-only MQTT-User (nur wetter/r9/# lesen), eingebettet — keine Anmeldung.
+  function connect() {
+    setConn('wait', 'verbinde…');
+    const client = mqtt.connect('wss://mqtt.rosenweg4303.ch', {
+      username: 'wetter-public', password: 'wetter-public-a5aafd438e6f4dfb',
+      protocolVersion: 4, clean: true, reconnectPeriod: 6000, connectTimeout: 12000,
+      clientId: 'rwwetter_' + Math.random().toString(16).slice(2, 10),
+    });
+    client.on('connect', () => { setConn('ok', 'live'); client.subscribe('wetter/r9/#', { qos: 0 }, (e) => { if (e) setConn('err', 'kein Zugriff'); }); });
+    client.on('message', onMessage);
+    client.on('reconnect', () => setConn('wait', 'reconnect…'));
+    client.on('close', () => setConn('off', 'getrennt'));
+    client.on('error', (e) => { console.error('mqtt', e); setConn('err', 'Fehler'); });
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    updateAstro();
+    setInterval(updateAstro, 60000); // Sonne/Mond jede Minute
+    connect();
+  });
   </script>
 </body>
 </html>
