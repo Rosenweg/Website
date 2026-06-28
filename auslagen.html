@@ -185,7 +185,8 @@
         <div id="form-error" class="text-sm text-red-600 hidden"></div>
         <div class="flex justify-end gap-2 pt-2">
           <button type="button" onclick="closeModal()" class="px-3 py-1.5 text-gray-600 hover:bg-gray-100 rounded">Abbrechen</button>
-          <button type="submit" id="btn-save" class="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700">Speichern</button>
+          <button type="button" id="btn-draft" class="px-4 py-1.5 bg-white border border-slate-300 text-slate-700 rounded hover:bg-slate-50">Als Entwurf</button>
+          <button type="submit" id="btn-save" class="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700">Einreichen</button>
         </div>
       </form>
     </div>
@@ -243,6 +244,7 @@
     populateStwegSelect();
     document.getElementById('btn-new').addEventListener('click', () => openNew());
     document.getElementById('form-auslage').addEventListener('submit', onSubmit);
+    document.getElementById('btn-draft').addEventListener('click', () => onSubmit(null, true));
     document.getElementById('filter-status').addEventListener('change', loadAuslagen);
     document.getElementById('filter-scope').addEventListener('change', render);
     document.getElementById('filter-projekt').addEventListener('change', loadAuslagen);
@@ -539,7 +541,8 @@
     document.getElementById('form-auslage').reset();
     document.getElementById('f-id').value = '';
     document.getElementById('f-status').value = '';
-    document.getElementById('btn-save').textContent = 'Speichern';
+    document.getElementById('btn-save').textContent = 'Einreichen';
+    document.getElementById('btn-draft').classList.remove('hidden');
     SCAN_WARN = ''; renderPlausi();
     document.getElementById('f-datum').value = new Date().toISOString().slice(0, 10);
     document.getElementById('f-projekt').value = document.getElementById('filter-projekt')?.value || '';
@@ -557,6 +560,8 @@
     const isDraft = a.status === 'entwurf';
     document.getElementById('modal-title').textContent = isDraft ? 'Entschädigung ergänzen & einreichen' : 'Auslage bearbeiten';
     document.getElementById('btn-save').textContent = isDraft ? 'Einreichen' : 'Speichern';
+    document.getElementById('btn-draft').textContent = 'Als Entwurf speichern';
+    document.getElementById('btn-draft').classList.toggle('hidden', !isDraft);
     document.getElementById('f-id').value = a.id;
     document.getElementById('f-status').value = a.status || '';
     document.getElementById('f-datum').value = (a.datum || '').slice(0, 10);
@@ -692,14 +697,19 @@
     document.getElementById('modal').classList.add('hidden');
   }
 
-  async function onSubmit(ev) {
-    ev.preventDefault();
-    renderPlausi();
-    if (!document.getElementById('plausi').classList.contains('hidden')) {
-      if (!confirm('Achtung — Plausibilitäts-Warnung (Betrag/Positionen/Beleg-Total stimmen nicht überein). Trotzdem fortfahren?')) return;
+  async function onSubmit(ev, asDraft) {
+    if (ev) ev.preventDefault();
+    if (!asDraft) {
+      renderPlausi();
+      if (!document.getElementById('plausi').classList.contains('hidden')) {
+        if (!confirm('Achtung — Plausibilitäts-Warnung (Betrag/Positionen/Beleg-Total stimmen nicht überein). Trotzdem fortfahren?')) return;
+      }
     }
-    const btn = document.getElementById('btn-save');
-    btn.disabled = true; btn.textContent = 'Speichere…';
+    const btn = document.getElementById(asDraft ? 'btn-draft' : 'btn-save');
+    const btnLabel = btn.textContent;
+    document.getElementById('btn-save').disabled = true;
+    document.getElementById('btn-draft').disabled = true;
+    btn.textContent = 'Speichere…';
     const errEl = document.getElementById('form-error');
     errEl.classList.add('hidden');
     try {
@@ -710,13 +720,13 @@
         throw new Error('IBAN-Format ungültig (z.B. CH00 0000 0000 0000 0000 0)');
       }
       const betrag = parseFloat(document.getElementById('f-betrag').value);
-      if (!Number.isFinite(betrag) || betrag <= 0) throw new Error('Betrag muss > 0 sein');
-      if (betrag > 100000) throw new Error('Betrag > 100\'000 CHF ist nicht plausibel');
+      if (!asDraft && (!Number.isFinite(betrag) || betrag <= 0)) throw new Error('Betrag muss > 0 sein');
+      if (Number.isFinite(betrag) && betrag > 100000) throw new Error('Betrag > 100\'000 CHF ist nicht plausibel');
       // Erster pending Beleg (legacy) als beleg_base64/filename, restliche via /belege POST
       const firstPending = BELEGE.find(b => b._pending);
       const payload = {
         datum: document.getElementById('f-datum').value,
-        betrag_chf: betrag,
+        betrag_chf: Number.isFinite(betrag) ? betrag : 0,
         stweg: document.getElementById('f-stweg').value || null,
         kategorie: document.getElementById('f-kategorie').value || null,
         beschreibung: document.getElementById('f-beschreibung').value.trim(),
@@ -724,8 +734,13 @@
         bemerkung_eigentuemer: document.getElementById('f-bemerkung').value.trim() || null,
         projekt_slug: document.getElementById('f-projekt').value || null,
       };
-      // Entwurf (aus Reklamation) wird mit dem Speichern eingereicht.
-      if (document.getElementById('f-status').value === 'entwurf') payload.status = 'eingereicht';
+      // Status: neu → eingereicht (oder Entwurf bei "Als Entwurf"); bestehender Entwurf → einreichen.
+      const curStatus = document.getElementById('f-status').value;
+      if (!id) {
+        if (asDraft) payload.status = 'entwurf';
+      } else if (curStatus === 'entwurf' && !asDraft) {
+        payload.status = 'eingereicht';
+      }
       if (firstPending) {
         payload.beleg_base64 = firstPending.beleg_base64;
         payload.beleg_filename = firstPending.beleg_filename;
@@ -762,7 +777,9 @@
       errEl.textContent = e.message;
       errEl.classList.remove('hidden');
     } finally {
-      btn.disabled = false; btn.textContent = 'Speichern';
+      document.getElementById('btn-save').disabled = false;
+      document.getElementById('btn-draft').disabled = false;
+      btn.textContent = btnLabel;
     }
   }
 
