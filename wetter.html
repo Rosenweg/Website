@@ -55,7 +55,12 @@
     .modal-head .mt { font-weight: 600; font-size: 1.1rem; }
     .modal-head .mx { display: block; font-size: .78rem; opacity: .75; margin-top: .15rem; }
     .modal-close { cursor: pointer; background: rgba(255,255,255,.12); border: none; color: #fff; border-radius: 999px; min-width: 32px; height: 32px; font-size: 1rem; line-height: 1; }
-    .modal svg { width: 100%; height: auto; display: block; margin-top: .5rem; }
+    .modal svg { width: 100%; height: auto; display: block; margin-top: .5rem; touch-action: none; cursor: crosshair; }
+    .modal-ctrl { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: .5rem; margin-top: .7rem; }
+    .ranges { display: flex; gap: .3rem; flex-wrap: wrap; }
+    .ranges button, .rst { cursor: pointer; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.14); color: #fff; border-radius: 8px; padding: .3rem .65rem; font-size: .78rem; font-family: inherit; }
+    .ranges button.on { background: rgba(255,255,255,.34); font-weight: 600; }
+    .zhint { font-size: .7rem; opacity: .55; text-align: center; margin-top: .35rem; }
     .modal .grid { stroke: rgba(255,255,255,.09); stroke-width: 1; }
     .modal .ax { stroke: rgba(255,255,255,.3); stroke-width: 1; }
     .modal .tl { fill: rgba(255,255,255,.7); font-size: 11px; }
@@ -127,7 +132,14 @@
         <div><span class="mt" id="modal-title">–</span><span class="mx" id="modal-sub"></span></div>
         <button class="modal-close" id="modal-close" aria-label="Schliessen">✕</button>
       </div>
+      <div class="modal-ctrl">
+        <div class="ranges" id="modal-ranges">
+          <button data-h="1">1 h</button><button data-h="6">6 h</button><button data-h="24">24 h</button><button data-h="72">3 d</button><button data-h="168">7 d</button>
+        </div>
+        <button class="rst" id="modal-reset">⟲ Zoom zurück</button>
+      </div>
       <svg id="modal-svg" viewBox="0 0 640 340" role="img"></svg>
+      <div class="zhint">Bereich ziehen = reinzoomen · Mausrad = zoomen · Doppeltipp / ⟲ = ganze Spanne</div>
     </div>
   </div>
 
@@ -313,60 +325,84 @@
       pts.forEach(p => { if (p.solarradiation != null) p.solarradiation /= SOLAR_LUX_PER_WM2; }); // Lux -> W/m²
       lastPoints = pts;
       CHARTS.forEach(c => drawChart(c.f, pts, c.dec, c.color));
-      const mf = $('modal').dataset.field;
-      if (mf && $('modal').classList.contains('open')) openChart(mf); // offene Vollansicht mitziehen
     } catch (e) { console.error('history', e); }
   }
 
-  /* ===== Vollansicht (Modal) mit Achsen / Skalen ===== */
+  /* ===== Vollansicht (Modal): flexible Zeitskala + Zoom ===== */
   function niceStep(span, count) {
     const raw = (span || 1) / Math.max(1, count);
     const mag = Math.pow(10, Math.floor(Math.log10(raw)));
     const n = raw / mag;
     return (n < 1.5 ? 1 : n < 3 ? 2 : n < 7 ? 5 : 10) * mag;
   }
+  const MX0 = 54, MX1 = 624; // Plot-x-Bereich in viewBox-Einheiten
+  const mState = { field: null, hours: 24, points: [], t0: 0, t1: 0 };
+  async function fetchHist(hours) {
+    try {
+      const r = await fetch('/api/wetter/r9/history?h=' + hours, { cache: 'no-store' });
+      if (!r.ok) return [];
+      const pts = (await r.json()).points || [];
+      pts.forEach(p => { if (p.solarradiation != null) p.solarradiation /= SOLAR_LUX_PER_WM2; });
+      return pts;
+    } catch (e) { console.error('hist', e); return []; }
+  }
+  async function modalLoad(hours) {
+    mState.hours = hours;
+    [...$('modal-ranges').children].forEach(b => b.classList.toggle('on', +b.dataset.h === hours));
+    const pts = await fetchHist(hours);
+    mState.points = pts.map(p => ({ t: new Date(p.ts).getTime(), v: Number(p[mState.field]) }))
+      .filter(p => Number.isFinite(p.t) && Number.isFinite(p.v));
+    if (mState.points.length) { mState.t0 = mState.points[0].t; mState.t1 = mState.points[mState.points.length - 1].t; }
+    renderModal();
+  }
   function openChart(field) {
     const cfg = CHARTS.find(c => c.f === field); if (!cfg) return;
-    const svg = $('modal-svg');
-    const W = 640, H = 340, mL = 54, mR = 16, mT = 16, mB = 34, x0 = mL, x1 = W - mR, y0 = mT, y1 = H - mB;
+    mState.field = field;
     $('modal-title').textContent = cfg.label + ' · ' + cfg.unit;
     $('modal').dataset.field = field;
-    const data = (lastPoints || []).map(p => ({ t: new Date(p.ts).getTime(), v: Number(p[field]) }))
-      .filter(p => Number.isFinite(p.t) && Number.isFinite(p.v));
-    if (data.length < 2) {
-      svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" fill="rgba(255,255,255,.6)" font-size="15" text-anchor="middle">noch zu wenig Daten</text>`;
-      $('modal-sub').textContent = ''; $('modal').classList.add('open'); return;
-    }
-    const ts = data.map(d => d.t), vs = data.map(d => d.v);
-    const tmin = Math.min(...ts), tmax = Math.max(...ts);
-    let vmin = Math.min(...vs), vmax = Math.max(...vs);
-    if (vmin === vmax) { vmin -= 1; vmax += 1; }
+    $('modal').classList.add('open');
+    modalLoad(mState.hours || 24);
+  }
+  function closeModal() { $('modal').classList.remove('open'); $('modal').dataset.field = ''; }
+  function resetZoom() { if (mState.points.length) { mState.t0 = mState.points[0].t; mState.t1 = mState.points[mState.points.length - 1].t; renderModal(); } }
+  function fmtTick(t, span) {
+    const d = new Date(t);
+    return span <= 36 * 3600e3
+      ? d.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit' });
+  }
+  function pxToTime(px) { return mState.t0 + (mState.t1 - mState.t0) * (Math.max(MX0, Math.min(MX1, px)) - MX0) / (MX1 - MX0); }
+  function clientToSvgX(clientX) { const r = $('modal-svg').getBoundingClientRect(); return Math.max(MX0, Math.min(MX1, (clientX - r.left) / r.width * 640)); }
+  function renderModal(sel) {
+    const cfg = CHARTS.find(c => c.f === mState.field); if (!cfg) return;
+    const svg = $('modal-svg');
+    const W = 640, H = 340, mT = 16, mB = 36, x0 = MX0, x1 = MX1, y0 = mT, y1 = H - mB;
+    const all = mState.points;
+    if (all.length < 2) { svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" fill="rgba(255,255,255,.6)" font-size="15" text-anchor="middle">noch zu wenig Daten</text>`; $('modal-sub').textContent = ''; return; }
+    let t0 = mState.t0, t1 = mState.t1; if (t1 - t0 < 60e3) t1 = t0 + 60e3;
+    const vis = all.filter(d => d.t >= t0 && d.t <= t1);
+    const data = vis.length >= 2 ? vis : all;
+    const vs = data.map(d => d.v);
+    let vmin = Math.min(...vs), vmax = Math.max(...vs); if (vmin === vmax) { vmin -= 1; vmax += 1; }
     const vstep = niceStep(vmax - vmin, 4);
     const vlo = Math.floor(vmin / vstep) * vstep, vhi = Math.ceil(vmax / vstep) * vstep;
-    const X = (t) => x0 + (x1 - x0) * (t - tmin) / (tmax - tmin || 1);
+    const span = t1 - t0;
+    const X = (t) => x0 + (x1 - x0) * (t - t0) / (span || 1);
     const Y = (v) => y1 - (y1 - y0) * (v - vlo) / (vhi - vlo || 1);
     let g = '';
-    for (let v = vlo; v <= vhi + 1e-9; v += vstep) {
-      const y = Y(v);
-      g += `<line class="grid" x1="${x0}" y1="${y.toFixed(1)}" x2="${x1}" y2="${y.toFixed(1)}"/>`;
-      g += `<text class="tl" x="${x0 - 7}" y="${(y + 3.5).toFixed(1)}" text-anchor="end">${+v.toFixed(cfg.dec)}</text>`;
-    }
+    for (let v = vlo; v <= vhi + 1e-9; v += vstep) { const y = Y(v); g += `<line class="grid" x1="${x0}" y1="${y.toFixed(1)}" x2="${x1}" y2="${y.toFixed(1)}"/><text class="tl" x="${x0 - 7}" y="${(y + 3.5).toFixed(1)}" text-anchor="end">${+v.toFixed(cfg.dec)}</text>`; }
     const N = 5;
-    for (let i = 0; i <= N; i++) {
-      const t = tmin + (tmax - tmin) * i / N, x = X(t);
-      g += `<line class="grid" x1="${x.toFixed(1)}" y1="${y0}" x2="${x.toFixed(1)}" y2="${y1}"/>`;
-      g += `<text class="tl" x="${x.toFixed(1)}" y="${y1 + 16}" text-anchor="middle">${new Date(t).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' })}</text>`;
-    }
+    for (let i = 0; i <= N; i++) { const t = t0 + span * i / N, x = X(t); g += `<line class="grid" x1="${x.toFixed(1)}" y1="${y0}" x2="${x.toFixed(1)}" y2="${y1}"/><text class="tl" x="${x.toFixed(1)}" y="${y1 + 16}" text-anchor="middle">${fmtTick(t, span)}</text>`; }
     g += `<line class="ax" x1="${x0}" y1="${y0}" x2="${x0}" y2="${y1}"/><line class="ax" x1="${x0}" y1="${y1}" x2="${x1}" y2="${y1}"/>`;
     const line = data.map(d => `${X(d.t).toFixed(1)},${Y(d.v).toFixed(1)}`).join(' ');
     g += `<polygon points="${X(data[0].t).toFixed(1)},${y1} ${line} ${X(data[data.length - 1].t).toFixed(1)},${y1}" fill="${cfg.color}" opacity="0.15"/>`;
     g += `<polyline points="${line}" fill="none" stroke="${cfg.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+    if (sel) g += `<rect x="${Math.min(sel.a, sel.b).toFixed(1)}" y="${y0}" width="${Math.abs(sel.b - sel.a).toFixed(1)}" height="${y1 - y0}" fill="rgba(255,255,255,.2)" stroke="rgba(255,255,255,.5)"/>`;
     svg.innerHTML = g;
-    const lo = Math.min(...vs), hi = Math.max(...vs), now = vs[vs.length - 1];
-    $('modal-sub').textContent = `jetzt ${now.toFixed(cfg.dec)} · min ${lo.toFixed(cfg.dec)} · max ${hi.toFixed(cfg.dec)} ${cfg.unit} · ${data.length} Punkte`;
-    $('modal').classList.add('open');
+    const lo = Math.min(...vs), hi = Math.max(...vs), now = all[all.length - 1].v;
+    const hrs = Math.round((t1 - t0) / 3600e3 * 10) / 10;
+    $('modal-sub').textContent = `jetzt ${now.toFixed(cfg.dec)} · Fenster ${hrs} h · min ${lo.toFixed(cfg.dec)} / max ${hi.toFixed(cfg.dec)} ${cfg.unit}`;
   }
-  function closeModal() { $('modal').classList.remove('open'); $('modal').dataset.field = ''; }
 
   // Oeffentlich: read-only MQTT-User (nur wetter/r9/# lesen), eingebettet — keine Anmeldung.
   function connect() {
@@ -405,6 +441,26 @@
     $('modal-close').addEventListener('click', closeModal);
     $('modal').addEventListener('click', (e) => { if (e.target === $('modal')) closeModal(); });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+    $('modal-ranges').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) modalLoad(+b.dataset.h); });
+    $('modal-reset').addEventListener('click', resetZoom);
+    const msvg = $('modal-svg'); let drag = null;
+    msvg.addEventListener('pointerdown', (e) => { drag = { a: clientToSvgX(e.clientX) }; try { msvg.setPointerCapture(e.pointerId); } catch (_) {} });
+    msvg.addEventListener('pointermove', (e) => { if (!drag) return; drag.b = clientToSvgX(e.clientX); renderModal({ a: drag.a, b: drag.b }); });
+    msvg.addEventListener('pointerup', (e) => {
+      if (!drag) return; const b = clientToSvgX(e.clientX);
+      if (Math.abs(b - drag.a) > 8) { const tA = pxToTime(drag.a), tB = pxToTime(b); mState.t0 = Math.min(tA, tB); mState.t1 = Math.max(tA, tB); }
+      drag = null; renderModal();
+    });
+    msvg.addEventListener('pointercancel', () => { drag = null; renderModal(); });
+    msvg.addEventListener('dblclick', resetZoom);
+    msvg.addEventListener('wheel', (e) => {
+      if (!mState.points.length) return; e.preventDefault();
+      const tc = pxToTime(clientToSvgX(e.clientX)), f = e.deltaY < 0 ? 0.7 : 1.4;
+      let n0 = tc - (tc - mState.t0) * f, n1 = tc + (mState.t1 - tc) * f;
+      const dMin = mState.points[0].t, dMax = mState.points[mState.points.length - 1].t;
+      n0 = Math.max(dMin, n0); n1 = Math.min(dMax, n1);
+      if (n1 - n0 > 60e3) { mState.t0 = n0; mState.t1 = n1; renderModal(); }
+    }, { passive: false });
   });
   </script>
 </body>
