@@ -12108,7 +12108,7 @@ app.get('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'), 
       where = `LOWER(user_email) = $1`;
     }
     const statusFilter = String(req.query.status || '').trim();
-    if (statusFilter && AUSLAGEN_STATUS.includes(statusFilter)) {
+    if (statusFilter && [...AUSLAGEN_STATUS, 'entwurf'].includes(statusFilter)) {
       params.push(statusFilter);
       where += ` AND status = $${params.length}`;
     }
@@ -12415,8 +12415,8 @@ app.delete('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'r
     const row = cur.rows[0];
     const isOwner = row.user_email.toLowerCase() === (req.user.email || '').toLowerCase();
     const canReview = canEditAuslageStatus(row, req.user);
-    if (!canReview && !(isOwner && row.status === 'eingereicht')) {
-      return res.status(403).json({ error: 'Löschen nur für eigene eingereichte Auslagen oder Ausschuss/Technik' });
+    if (!canReview && !(isOwner && (row.status === 'eingereicht' || row.status === 'entwurf'))) {
+      return res.status(403).json({ error: 'Löschen nur für eigene eingereichte Auslagen/Entwürfe oder Ausschuss/Technik' });
     }
     if (row.beleg_path) {
       try {
