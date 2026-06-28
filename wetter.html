@@ -30,19 +30,11 @@
     .hero .temp .u { font-size: 1.5rem; font-weight: 500; vertical-align: super; opacity: .8; }
     .hero .sub { font-size: .95rem; opacity: .9; margin-top: .3rem; }
     h2.sec { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; opacity: .75; margin: 1.6rem 0 .6rem; font-weight: 600; }
-    .astro { display: grid; grid-template-columns: 1.7fr 1fr; gap: .8rem; }
     .astro-card { background: rgba(255,255,255,.12); backdrop-filter: blur(6px); border-radius: 16px; padding: .8rem 1rem 1rem; }
     .astro-card > svg { width: 100%; height: auto; display: block; }
     .astro-foot { display: flex; justify-content: space-between; align-items: center; font-size: .82rem; margin-top: .3rem; }
     .astro-foot b { font-weight: 700; }
-    .astro-foot #s-state { font-size: .72rem; opacity: .82; text-align: center; }
-    .astro-card.moon { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .5rem; }
-    .astro-card.moon svg { max-width: 116px; }
-    .moon-info { text-align: center; }
-    .moon-info .mname { font-weight: 600; font-size: .96rem; }
-    .moon-info .msub { font-size: .82rem; opacity: .9; }
-    .moon-info .msub2 { font-size: .74rem; opacity: .7; margin-top: .1rem; }
-    @media (max-width: 520px) { .astro { grid-template-columns: 1fr; } }
+    .astro-sub { text-align: center; font-size: .85rem; opacity: .92; margin-top: .35rem; }
     .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .8rem; }
     .card { background: rgba(255,255,255,.12); backdrop-filter: blur(6px); border-radius: 16px; padding: .9rem 1rem; }
     .card .ct { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; opacity: .8; }
@@ -118,23 +110,13 @@
     </div>
 
     <h2 class="sec">Sonne &amp; Mond</h2>
-    <div class="astro">
-      <div class="astro-card">
-        <svg id="sun-arc" viewBox="0 0 300 158" role="img" aria-label="Sonnenstand"></svg>
-        <div class="astro-foot">
-          <span>🌅 <b id="s-rise">–</b></span>
-          <span id="s-state">–</span>
-          <span><b id="s-set">–</b> 🌇</span>
-        </div>
+    <div class="astro-card">
+      <svg id="sky-arc" viewBox="0 0 300 150" role="img" aria-label="Sonne und Mond"></svg>
+      <div class="astro-foot">
+        <span>☀️ <b id="s-rise">–</b>–<b id="s-set">–</b></span>
+        <span>🌙 <b id="m-rise">–</b>–<b id="m-set">–</b></span>
       </div>
-      <div class="astro-card moon">
-        <svg id="moon-disk" viewBox="0 0 120 120" role="img" aria-label="Mondphase"></svg>
-        <div class="moon-info">
-          <div class="mname" id="m-name">–</div>
-          <div class="msub"><b id="m-illum">–</b> % beleuchtet</div>
-          <div class="msub2" id="m-alt-x"></div>
-        </div>
-      </div>
+      <div class="astro-sub" id="astro-sub">–</div>
     </div>
 
     <h2 class="sec">Verlauf (24 h)</h2>
@@ -211,6 +193,29 @@
         inc = Math.atan2(sdist * Math.sin(phi), m.dist - sdist * Math.cos(phi)),
         angle = Math.atan2(Math.cos(s.dec) * Math.sin(s.ra - m.ra), Math.sin(s.dec) * Math.cos(m.dec) - Math.cos(s.dec) * Math.sin(m.dec) * Math.cos(s.ra - m.ra));
       return { fraction: (1 + Math.cos(inc)) / 2, phase: 0.5 + 0.5 * inc * (angle < 0 ? -1 : 1) / PI };
+    };
+    const hoursLater = (date, h) => new Date(date.valueOf() + h * 3600000);
+    SC.getMoonTimes = (date, lat, lng) => {
+      const t = new Date(date); t.setHours(0, 0, 0, 0);
+      const hc = 0.133 * rad;
+      let h0 = SC.getMoonPosition(t, lat, lng).altitude - hc, h1, h2, rise, set, a, b, xe, ye, dd, roots, x1, x2, dx;
+      for (let i = 1; i <= 24; i += 2) {
+        h1 = SC.getMoonPosition(hoursLater(t, i), lat, lng).altitude - hc;
+        h2 = SC.getMoonPosition(hoursLater(t, i + 1), lat, lng).altitude - hc;
+        a = (h0 + h2) / 2 - h1; b = (h2 - h0) / 2;
+        xe = -b / (2 * a); ye = (a * xe + b) * xe + h1;
+        dd = b * b - 4 * a * h1; roots = 0;
+        if (dd >= 0) { dx = Math.sqrt(dd) / (Math.abs(a) * 2); x1 = xe - dx; x2 = xe + dx; if (Math.abs(x1) <= 1) roots++; if (Math.abs(x2) <= 1) roots++; if (x1 < -1) x1 = x2; }
+        if (roots === 1) { if (h0 < 0) rise = i + x1; else set = i + x1; }
+        else if (roots === 2) { rise = i + (ye < 0 ? x2 : x1); set = i + (ye < 0 ? x1 : x2); }
+        if (rise && set) break;
+        h0 = h2;
+      }
+      const res = {};
+      if (rise) res.rise = hoursLater(t, rise);
+      if (set) res.set = hoursLater(t, set);
+      if (!rise && !set) res[ye > 0 ? 'alwaysUp' : 'alwaysDown'] = true;
+      return res;
     };
     return SC;
   })();
@@ -289,57 +294,63 @@
     document.body.style.background = `linear-gradient(160deg, ${cols[0]} 0%, ${cols[1]} 45%, ${cols[2]} 100%)`;
   }
 
-  function drawSunArc() {
-    const svg = $('sun-arc'); if (!svg) return;
-    const W = 300, cx = 150, cy = 132, r = 122, now = new Date();
-    const t = SunCalc.getTimes(now, LAT, LON);
-    const sr = t.sunrise.getTime(), ss = t.sunset.getTime(), tn = now.getTime();
-    const altd = SunCalc.getPosition(now, LAT, LON).altitude * 180 / Math.PI;
-    const isDay = tn >= sr && tn <= ss;
-    let frac = (tn - sr) / (ss - sr); frac = Math.max(0, Math.min(1, frac));
-    const P = (f) => { const a = Math.PI * (1 - f); return [cx + r * Math.cos(a), cy - r * Math.sin(a)]; };
-    const [ax, ay] = P(0), [bx, by] = P(1), [sx, sy] = P(frac);
-    const n = (v) => v.toFixed(1);
-    let g = `<defs>
-      <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${isDay ? '#fcd34d' : '#334155'}" stop-opacity="${isDay ? '.35' : '.22'}"/><stop offset="1" stop-color="#0f172a" stop-opacity="0"/></linearGradient>
-      <radialGradient id="sunGlow"><stop offset="0" stop-color="#fff7d6"/><stop offset=".55" stop-color="#fbbf24"/><stop offset="1" stop-color="#f59e0b"/></radialGradient>
-    </defs>`;
-    g += `<path d="M ${n(ax)} ${n(ay)} A ${r} ${r} 0 0 1 ${n(bx)} ${n(by)} L ${n(bx)} ${cy} L ${n(ax)} ${cy} Z" fill="url(#sky)"/>`;
-    g += `<path d="M ${n(ax)} ${n(ay)} A ${r} ${r} 0 0 1 ${n(bx)} ${n(by)}" fill="none" stroke="rgba(255,255,255,.3)" stroke-width="1.5" stroke-dasharray="3 4"/>`;
-    if (isDay) g += `<path d="M ${n(ax)} ${n(ay)} A ${r} ${r} 0 0 1 ${n(sx)} ${n(sy)}" fill="none" stroke="#fde68a" stroke-width="2.5"/>`;
-    g += `<line x1="6" y1="${cy}" x2="${W - 6}" y2="${cy}" stroke="rgba(255,255,255,.35)" stroke-width="1.5"/>`;
-    g += `<circle cx="${n(ax)}" cy="${n(ay)}" r="3" fill="#fbbf24"/><circle cx="${n(bx)}" cy="${n(by)}" r="3" fill="#f59e0b"/>`;
-    if (isDay) g += `<circle cx="${n(sx)}" cy="${n(sy)}" r="18" fill="#fde68a" opacity=".18"/><circle cx="${n(sx)}" cy="${n(sy)}" r="11" fill="url(#sunGlow)"/>`;
-    else g += `<text x="${cx}" y="${cy - 34}" text-anchor="middle" fill="rgba(255,255,255,.72)" font-size="14">🌙 Nacht</text>`;
-    svg.innerHTML = g;
-    $('s-rise').textContent = hhmm(t.sunrise);
-    $('s-set').textContent = hhmm(t.sunset);
-    const dayLen = (ss - sr) / 3600e3;
-    $('s-state').textContent = isDay ? `☀️ ${altd.toFixed(0)}° · Tag ${dayLen.toFixed(1)} h` : `${altd.toFixed(0)}° · unter Horizont`;
-  }
-  function drawMoon() {
-    const svg = $('moon-disk'); if (!svg) return;
-    const cx = 60, cy = 60, r = 50, now = new Date();
-    const mi = SunCalc.getMoonIllumination(now), f = mi.fraction, waxing = mi.phase < 0.5;
+  function moonDiskSvg(cx, cy, r, mi) {
+    const f = mi.fraction, waxing = mi.phase < 0.5;
     let lit = '';
-    if (f > 0.985) lit = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#moonlit)"/>`;
+    if (f > 0.985) lit = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="#fefce8"/>`;
     else if (f >= 0.015) {
       const rx = (r * Math.abs(1 - 2 * f)).toFixed(2), gib = f > 0.5;
       const side = waxing ? 1 : 0, term = waxing ? (gib ? 1 : 0) : (gib ? 0 : 1);
-      lit = `<path d="M ${cx} ${cy - r} A ${r} ${r} 0 0 ${side} ${cx} ${cy + r} A ${rx} ${r} 0 0 ${term} ${cx} ${cy - r} Z" fill="url(#moonlit)"/>`;
+      lit = `<path d="M ${cx} ${cy - r} A ${r} ${r} 0 0 ${side} ${cx} ${cy + r} A ${rx} ${r} 0 0 ${term} ${cx} ${cy - r} Z" fill="#fefce8"/>`;
     }
-    svg.innerHTML = `<defs><radialGradient id="moonlit" cx=".4" cy=".4"><stop offset="0" stop-color="#fefce8"/><stop offset="1" stop-color="#d4d0bf"/></radialGradient></defs>
-      <circle cx="${cx}" cy="${cy}" r="${r}" fill="#222b3d"/>${lit}
-      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(255,255,255,.18)" stroke-width="1"/>`;
+    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="#1e293b"/>${lit}<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(255,255,255,.3)" stroke-width="1"/>`;
+  }
+  function drawSky() {
+    const svg = $('sky-arc'); if (!svg) return;
+    const PI = Math.PI, W = 300, cx = 150, cy = 134, r = 120, now = new Date();
+    const n = (v) => v.toFixed(1), clamp = (v) => Math.max(0, Math.min(1, v));
+    const P = (f) => { const a = PI * (1 - f); return [cx + r * Math.cos(a), cy - r * Math.sin(a)]; };
+    // Sonne
+    const st = SunCalc.getTimes(now, LAT, LON);
+    const sr = st.sunrise.getTime(), ss = st.sunset.getTime(), tn = now.getTime();
+    const sunAlt = SunCalc.getPosition(now, LAT, LON).altitude * 180 / PI;
+    const sunUp = tn >= sr && tn <= ss;
+    const sf = clamp((tn - sr) / (ss - sr));
+    // Mond
+    const mt = SunCalc.getMoonTimes(now, LAT, LON);
+    const mpos = SunCalc.getMoonPosition(now, LAT, LON), moonAlt = mpos.altitude * 180 / PI;
+    const moonUp = moonAlt > 0;
+    let mf;
+    if (mt.rise && mt.set && mt.rise < mt.set && now >= mt.rise && now <= mt.set) mf = (now - mt.rise) / (mt.set - mt.rise);
+    else mf = (mpos.azimuth + PI / 2) / PI;
+    mf = clamp(mf);
+    const mi = SunCalc.getMoonIllumination(now);
+    const [ax, ay] = P(0), [bx, by] = P(1), [sx, sy] = P(sf), [mx, my] = P(mf);
+    const skyTop = sunAlt > 6 ? '#fcd34d' : sunAlt > -6 ? '#9333ea' : '#334155';
+    const skyOp = sunAlt > 6 ? '.35' : sunAlt > -6 ? '.28' : '.22';
+    let g = `<defs>
+      <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${skyTop}" stop-opacity="${skyOp}"/><stop offset="1" stop-color="#0f172a" stop-opacity="0"/></linearGradient>
+      <radialGradient id="sunGlow"><stop offset="0" stop-color="#fff7d6"/><stop offset=".55" stop-color="#fbbf24"/><stop offset="1" stop-color="#f59e0b"/></radialGradient>
+    </defs>`;
+    g += `<path d="M ${n(ax)} ${n(ay)} A ${r} ${r} 0 0 1 ${n(bx)} ${n(by)} L ${n(bx)} ${cy} L ${n(ax)} ${cy} Z" fill="url(#sky)"/>`;
+    g += `<path d="M ${n(ax)} ${n(ay)} A ${r} ${r} 0 0 1 ${n(bx)} ${n(by)}" fill="none" stroke="rgba(255,255,255,.28)" stroke-width="1.5" stroke-dasharray="3 4"/>`;
+    g += `<line x1="6" y1="${cy}" x2="${W - 6}" y2="${cy}" stroke="rgba(255,255,255,.35)" stroke-width="1.5"/>`;
+    g += `<circle cx="${n(ax)}" cy="${n(ay)}" r="3" fill="#fbbf24"/><circle cx="${n(bx)}" cy="${n(by)}" r="3" fill="#f59e0b"/>`;
+    if (moonUp) g += moonDiskSvg(n(mx), n(my), 10, mi);
+    if (sunUp) g += `<circle cx="${n(sx)}" cy="${n(sy)}" r="17" fill="#fde68a" opacity=".18"/><circle cx="${n(sx)}" cy="${n(sy)}" r="11" fill="url(#sunGlow)"/>`;
+    if (!sunUp && !moonUp) g += `<text x="${cx}" y="${cy - 30}" text-anchor="middle" fill="rgba(255,255,255,.6)" font-size="13">Sonne &amp; Mond unter Horizont</text>`;
+    svg.innerHTML = g;
+    $('s-rise').textContent = hhmm(st.sunrise);
+    $('s-set').textContent = hhmm(st.sunset);
+    $('m-rise').textContent = mt.rise ? hhmm(mt.rise) : '—';
+    $('m-set').textContent = mt.set ? hhmm(mt.set) : '—';
     const NM = ['Neumond', 'zunehmende Sichel', 'erstes Viertel', 'zunehmender Mond', 'Vollmond', 'abnehmender Mond', 'letztes Viertel', 'abnehmende Sichel'];
-    $('m-name').textContent = NM[Math.round(mi.phase * 8) % 8];
-    $('m-illum').textContent = Math.round(f * 100);
-    const maltd = SunCalc.getMoonPosition(now, LAT, LON).altitude * 180 / Math.PI;
-    $('m-alt-x').textContent = maltd > 0 ? '🌙 über Horizont' : 'unter Horizont';
+    const EM = ['🌑', '🌒', '🌓', '🌔', '🌕', '🌖', '🌗', '🌘'];
+    const pi = Math.round(mi.phase * 8) % 8;
+    $('astro-sub').textContent = `${EM[pi]} ${NM[pi]} · ${Math.round(mi.fraction * 100)}% beleuchtet`;
   }
   function updateAstro() {
-    drawSunArc();
-    drawMoon();
+    drawSky();
     updateHero();
   }
 
