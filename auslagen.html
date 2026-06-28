@@ -17,6 +17,7 @@
     .status-genehmigt   { background:#dbeafe; color:#1e40af; }
     .status-abgelehnt   { background:#fee2e2; color:#991b1b; }
     .status-ausbezahlt  { background:#d1fae5; color:#065f46; }
+    .status-entwurf     { background:#e5e7eb; color:#374151; }
   </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -46,6 +47,7 @@
           <span class="text-gray-600 mr-1">Status:</span>
           <select id="filter-status" class="border rounded px-2 py-1 text-sm">
             <option value="">alle</option>
+            <option value="entwurf">Entwurf</option>
             <option value="eingereicht">eingereicht</option>
             <option value="genehmigt">genehmigt</option>
             <option value="abgelehnt">abgelehnt</option>
@@ -107,6 +109,7 @@
       </div>
       <form id="form-auslage" class="space-y-3">
         <input type="hidden" id="f-id">
+        <input type="hidden" id="f-status">
         <div class="grid grid-cols-2 gap-3">
           <label class="block text-sm">
             <span class="text-gray-700">Datum *</span>
@@ -325,7 +328,7 @@
     }
     tbody.innerHTML = list.map(a => {
       const isMine = (a.user_email || '').toLowerCase() === myEmail;
-      const canEditOwn = isMine && a.status === 'eingereicht';
+      const canEditOwn = isMine && (a.status === 'eingereicht' || a.status === 'entwurf');
       const canReviewThis = STATE.can_review && !isMine;
       const canOwnerConfirm = isMine && a.status === 'genehmigt';
       const stwegLabel = a.stweg ? `STWEG ${a.stweg}` : '—';
@@ -335,7 +338,11 @@
         : '<span class="text-gray-400">–</span>';
       const aktionen = [];
       if (canEditOwn) {
-        aktionen.push(`<button onclick="openEdit(${a.id})" class="text-blue-600 hover:underline">bearbeiten</button>`);
+        if (a.status === 'entwurf') {
+          aktionen.push(`<button onclick="openEdit(${a.id})" class="text-emerald-700 hover:underline font-semibold">ergänzen &amp; einreichen</button>`);
+        } else {
+          aktionen.push(`<button onclick="openEdit(${a.id})" class="text-blue-600 hover:underline">bearbeiten</button>`);
+        }
         aktionen.push(`<button onclick="deleteAuslage(${a.id})" class="text-red-600 hover:underline">löschen</button>`);
       }
       if (canOwnerConfirm) {
@@ -533,6 +540,8 @@
     document.getElementById('modal-title').textContent = 'Neue Auslage';
     document.getElementById('form-auslage').reset();
     document.getElementById('f-id').value = '';
+    document.getElementById('f-status').value = '';
+    document.getElementById('btn-save').textContent = 'Speichern';
     document.getElementById('f-datum').value = new Date().toISOString().slice(0, 10);
     document.getElementById('f-projekt').value = document.getElementById('filter-projekt')?.value || '';
     document.getElementById('form-error').classList.add('hidden');
@@ -547,10 +556,13 @@
   async function openEdit(id) {
     const a = STATE.auslagen.find(x => x.id === id);
     if (!a) return;
-    document.getElementById('modal-title').textContent = 'Auslage bearbeiten';
+    const isDraft = a.status === 'entwurf';
+    document.getElementById('modal-title').textContent = isDraft ? 'Entschädigung ergänzen & einreichen' : 'Auslage bearbeiten';
+    document.getElementById('btn-save').textContent = isDraft ? 'Einreichen' : 'Speichern';
     document.getElementById('f-id').value = a.id;
+    document.getElementById('f-status').value = a.status || '';
     document.getElementById('f-datum').value = (a.datum || '').slice(0, 10);
-    document.getElementById('f-betrag').value = a.betrag_chf;
+    document.getElementById('f-betrag').value = (isDraft && Number(a.betrag_chf) === 0) ? '' : a.betrag_chf;
     document.getElementById('f-stweg').value = a.stweg || '';
     document.getElementById('f-kategorie').value = a.kategorie || '';
     document.getElementById('f-beschreibung').value = a.beschreibung || '';
@@ -691,6 +703,8 @@
         bemerkung_eigentuemer: document.getElementById('f-bemerkung').value.trim() || null,
         projekt_slug: document.getElementById('f-projekt').value || null,
       };
+      // Entwurf (aus Reklamation) wird mit dem Speichern eingereicht.
+      if (document.getElementById('f-status').value === 'entwurf') payload.status = 'eingereicht';
       if (firstPending) {
         payload.beleg_base64 = firstPending.beleg_base64;
         payload.beleg_filename = firstPending.beleg_filename;
