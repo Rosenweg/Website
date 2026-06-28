@@ -10,7 +10,7 @@
  *  - Sonstige GETs (Assets, CDN): stale-while-revalidate.
  */
 
-const CACHE = 'rosenweg-arbeit-v12';
+const CACHE = 'rosenweg-arbeit-v13';
 
 // App-Shell — alles was fuer den Offline-Start noetig ist.
 const SHELL = [
