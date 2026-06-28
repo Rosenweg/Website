@@ -154,6 +154,7 @@
 
   const $ = (id) => document.getElementById(id);
   const LAT = 47.535, LON = 7.726; // Rosenweg 9, Kaiseraugst
+  const SOLAR_LUX_PER_WM2 = 126.7; // Station liefert Solar in Lux -> W/m² (Ecowitt-Standard ~lux/126.7)
   const COMPASS = ['N','NNO','NO','ONO','O','OSO','SO','SSO','S','SSW','SW','WSW','W','WNW','NW','NNW'];
   const compass = (d) => { const n = Number(d); return Number.isFinite(n) ? COMPASS[Math.round(((n % 360) / 22.5)) % 16] : ''; };
   const setConn = (s, t) => { const c = $('conn'); c.className = 'conn ' + s; $('conn-t').textContent = t; };
@@ -234,9 +235,10 @@
     const field = String(topic).split('/').pop();
     if (!(field in FIELDS)) return;
     const raw = payload.toString().trim();
-    const num = Number(raw);
+    let num = Number(raw);
+    if (field === 'solarradiation' && Number.isFinite(num)) num = num / SOLAR_LUX_PER_WM2; // Lux -> W/m²
     cur[field] = Number.isFinite(num) ? num : raw;
-    $('v-' + field).textContent = fmt(raw, FIELDS[field]);
+    $('v-' + field).textContent = Number.isFinite(num) ? num.toFixed(FIELDS[field]) : raw;
     if (field === 'winddir') $('x-winddir').textContent = compass(raw);
     if (field === 'windspeed') $('x-wind').textContent = num < 1 ? 'windstill' : (num >= 39 ? 'stürmisch' : '');
     if (field === 'solarradiation') $('x-solar').textContent = num <= 0 ? 'Nacht / kein Sonnenlicht' : (num > 600 ? 'starke Sonne' : '');
@@ -280,6 +282,7 @@
       const r = await fetch('/api/wetter/r9/history?h=24', { cache: 'no-store' });
       if (!r.ok) return;
       const pts = (await r.json()).points || [];
+      pts.forEach(p => { if (p.solarradiation != null) p.solarradiation /= SOLAR_LUX_PER_WM2; }); // Lux -> W/m²
       CHARTS.forEach(c => drawChart(c.f, pts, c.dec, c.color));
     } catch (e) { console.error('history', e); }
   }
