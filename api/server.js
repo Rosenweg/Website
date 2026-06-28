@@ -11913,7 +11913,7 @@ async function resendOffeneAuszahlungenFuerWirksameVerwaltung(stwegOrNull) {
 function canSeeAuslage(row, user) {
   const groups = user?.groups || [];
   const isOwner = row.user_email && row.user_email.toLowerCase() === (user.email || '').toLowerCase();
-  if (row.status === 'entwurf') return isOwner; // Entwuerfe (Reklamations-Entschaedigung) nur fuer den Ersteller
+  if (row.status === 'entwurf') return isOwner || isTechnik(groups) || isPraesident(groups); // Entwuerfe: Ersteller + ganze Technik
   if (isTechnik(groups) || isPraesident(groups)) return true;
   if (isOwner) return true;
   // Ausschuss seines STWEGs sieht Auslagen seines STWEGs
@@ -12122,9 +12122,11 @@ app.get('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'), 
       params.push(projektFilter);
       where += ` AND projekt_slug = $${params.length}`;
     }
-    // Entwuerfe (Reklamations-Entschaedigung) nur fuer den Ersteller sichtbar.
-    params.push(email);
-    where = `(${where}) AND (status <> 'entwurf' OR LOWER(user_email) = $${params.length})`;
+    // Entwuerfe: Technik/Praesident sehen alle; Ausschuss/Eigentuemer nur eigene.
+    if (!isAdmin) {
+      params.push(email);
+      where = `(${where}) AND (status <> 'entwurf' OR LOWER(user_email) = $${params.length})`;
+    }
     const result = await pool.query(
       `SELECT a.id, a.user_email, a.user_name, a.stweg, a.datum, a.kategorie, a.beschreibung, a.betrag_chf,
               a.iban, a.beleg_path, a.beleg_filename, a.status, a.bemerkung_eigentuemer, a.bemerkung_ausschuss,
@@ -12326,6 +12328,10 @@ app.put('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'read
       if (isOwnerSubmitDraft) {
         const effBetrag = req.body.betrag_chf !== undefined ? Number(req.body.betrag_chf) : Number(row.betrag_chf);
         if (!Number.isFinite(effBetrag) || effBetrag <= 0) return res.status(400).json({ error: 'Betrag erforderlich zum Einreichen' });
+      }
+      // Entwurf darf nur der Ersteller (durch Einreichen) statusseitig veraendern — kein Review vorab.
+      if (row.status === 'entwurf' && !isOwnerSubmitDraft) {
+        return res.status(403).json({ error: 'Entwurf muss zuerst vom Ersteller eingereicht werden' });
       }
       if (canReview) {
         if (newStatus === 'ausbezahlt' && !canMarkPaid(req.user, row)) {
