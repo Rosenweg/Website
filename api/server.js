@@ -11231,7 +11231,7 @@ app.delete('/api/handwerker/:id', authMiddleware, requirePermission('handwerker'
 // und markiert als ausbezahlt. Belege werden als Dateien im DOCS-Volume
 // unter <stweg-folder>/auslagen/ abgelegt.
 
-const AUSLAGEN_KATEGORIEN = ['Material', 'Reparatur', 'Porto/Versand', 'Verpflegung', 'Reinigung', 'Reisekosten', 'Arbeitszeit', 'Sonstiges'];
+const AUSLAGEN_KATEGORIEN = ['Material', 'Reparatur', 'Porto/Versand', 'Reinigung', 'Arbeitszeit', 'Sonstiges'];
 const AUSLAGEN_STATUS = ['eingereicht', 'genehmigt', 'abgelehnt', 'ausbezahlt'];
 
 function auslagenStwegFolder(stweg) {
