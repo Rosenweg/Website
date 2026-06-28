@@ -243,6 +243,7 @@
         <button type="button" id="d-close" class="text-slate-400 text-2xl leading-none w-9 h-9 active:text-slate-600">✕</button>
       </div>
       <div id="d-status-row" class="mb-3"></div>
+      <div id="d-belege" class="space-y-1 text-xs mb-3"></div>
       <form id="d-form" class="space-y-4">
         <input type="hidden" id="d-id">
         <input type="hidden" id="d-status">
@@ -274,6 +275,11 @@
         </div>
       </form>
     </div>
+  </div>
+
+  <!-- Bild-/PDF-Viewer -->
+  <div id="viewer" class="hidden fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-2">
+    <div id="viewer-body" class="max-w-full max-h-full flex items-center justify-center"></div>
   </div>
 
   <script>
@@ -737,6 +743,8 @@
     $('d-readonly-hint').classList.toggle('hidden', editable);
     if (!editable) $('d-readonly-hint').textContent = 'Bereits in Bearbeitung beim Ausschuss — nicht mehr änderbar.';
     dMsg('');
+    $('d-belege').innerHTML = '';
+    if (Number(r.belege_count) > 0) loadDetailBelege(r.id);
     $('sheet').classList.remove('hidden');
   }
 
@@ -825,11 +833,17 @@
   }
 
   function renderQBelege() {
-    $('q-belege').innerHTML = Q_BELEGE.map((b, i) =>
-      `<div class="flex items-center justify-between bg-slate-50 rounded px-2 py-1">
-         <span class="truncate">📎 ${esc(b.filename)}</span>
-         <button type="button" onclick="qRemove(${i})" class="text-red-500 ml-2">entfernen</button>
-       </div>`).join('');
+    $('q-belege').innerHTML = Q_BELEGE.map((b, i) => {
+      const thumb = b.mime === 'application/pdf'
+        ? `<span class="w-10 h-10 flex items-center justify-center bg-slate-200 rounded text-lg shrink-0">📄</span>`
+        : `<img src="data:${b.mime};base64,${b.base64}" class="w-10 h-10 object-cover rounded shrink-0">`;
+      return `<div class="flex items-center gap-2 bg-slate-50 rounded px-2 py-1">
+        ${thumb}
+        <span class="truncate flex-1" onclick="qView(${i})">${esc(b.filename)}</span>
+        <button type="button" onclick="qView(${i})" class="text-sky-600 text-xs px-1">ansehen</button>
+        <button type="button" onclick="qRemove(${i})" class="text-red-500 text-xs px-1">entfernen</button>
+      </div>`;
+    }).join('');
   }
   function qRemove(i) { Q_BELEGE.splice(i, 1); renderQBelege(); }
 
@@ -862,6 +876,12 @@
       $('q-status').classList.add('hidden');
     }
     sd.waehrung = scan?.währung || null; sd.kurs = scan?.wechselkurs_chf || null; sd.quelle = scan?.kurs_quelle || null;
+    // Sinnvoll benennen: Quittung_<Lieferant>_<Datum>.<ext>
+    if (scan && (scan.lieferant || scan.datum)) {
+      const lief = String(scan.lieferant || 'Beleg').replace(/[^\wäöüÄÖÜàéèêç.&-]+/g, ' ').trim().replace(/\s+/g, '_').slice(0, 40) || 'Beleg';
+      const ext = sd.mime === 'application/pdf' ? 'pdf' : 'jpg';
+      sd.filename = `Quittung_${lief}_${scan.datum || todayIso()}.${ext}`;
+    }
     Q_BELEGE.push(sd);
     renderQBelege();
     if (scan) {
@@ -926,6 +946,47 @@
     $('beschreibung').value = '';
     $('view-erfassen').classList.add('hidden'); $('view-meine').classList.add('hidden');
     $('view-success').classList.remove('hidden');
+  }
+
+  // ---------- Beleg-Viewer ----------
+  let VIEWER_URL = null;
+  function showViewer(html) { $('viewer-body').innerHTML = html; $('viewer').classList.remove('hidden'); }
+  function closeViewer() {
+    $('viewer').classList.add('hidden'); $('viewer-body').innerHTML = '';
+    if (VIEWER_URL) { try { URL.revokeObjectURL(VIEWER_URL); } catch {} VIEWER_URL = null; }
+  }
+  function viewerHtml(src, isPdf) {
+    return isPdf
+      ? `<iframe src="${src}" class="bg-white rounded" style="width:92vw;height:85vh"></iframe>`
+      : `<img src="${src}" class="rounded" style="max-width:100%;max-height:88vh;object-fit:contain">`;
+  }
+  function qView(i) {
+    const b = Q_BELEGE[i]; if (!b) return;
+    showViewer(viewerHtml(`data:${b.mime};base64,${b.base64}`, b.mime === 'application/pdf'));
+  }
+  async function viewBeleg(id, bid, filename) {
+    showViewer('<div class="text-white text-sm">Lädt…</div>');
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/auslagen/${id}/belege/${bid}`);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const blob = await r.blob();
+      if (VIEWER_URL) { try { URL.revokeObjectURL(VIEWER_URL); } catch {} }
+      VIEWER_URL = URL.createObjectURL(blob);
+      const isPdf = /\.pdf$/i.test(filename || '') || blob.type === 'application/pdf';
+      showViewer(viewerHtml(VIEWER_URL, isPdf));
+    } catch (e) { showViewer('<div class="text-white text-sm">Fehler: ' + esc(e.message) + '</div>'); }
+  }
+  async function loadDetailBelege(id) {
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/auslagen/${id}/belege`);
+      if (!r.ok) return;
+      const belege = (await r.json()).belege || [];
+      if (!belege.length) return;
+      $('d-belege').innerHTML = '<div class="font-semibold mb-1">Belege</div>' + belege.map(b =>
+        `<button type="button" data-bid="${b.id}" data-fn="${esc(b.beleg_filename || '')}" class="flex items-center gap-2 w-full bg-slate-50 rounded px-2 py-1.5 text-left active:bg-slate-100">
+           <span>📎</span><span class="truncate flex-1">${esc(b.beleg_filename || 'Beleg')}</span><span class="text-sky-600">ansehen</span>
+         </button>`).join('');
+    } catch { /* ignore */ }
   }
 
   // =====================================================================
@@ -1041,6 +1102,8 @@
     $('d-form').addEventListener('submit', saveDetail);
     $('d-delete').addEventListener('click', deleteDetail);
     $('sheet').addEventListener('click', e => { if (e.target === $('sheet')) closeSheet(); });
+    $('d-belege').addEventListener('click', e => { const b = e.target.closest('[data-bid]'); if (b) viewBeleg($('d-id').value, b.dataset.bid, b.dataset.fn); });
+    $('viewer').addEventListener('click', closeViewer);
 
     // Bei Wiederkehr in den Vordergrund (Bildschirm entsperrt etc.) Anzeige & Loop auffrischen
     document.addEventListener('visibilitychange', () => {
