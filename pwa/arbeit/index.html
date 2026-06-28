@@ -132,6 +132,13 @@
           <p id="satzInfo" class="text-[12px] text-slate-500 mt-1.5"></p>
         </div>
 
+        <!-- Projekt (optional) -->
+        <div>
+          <label for="projekt" class="block text-sm font-semibold mb-2">Projekt <span class="text-slate-400 font-normal">(optional)</span></label>
+          <select id="projekt"
+            class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base bg-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none"></select>
+        </div>
+
         <!-- Tätigkeit -->
         <div>
           <label for="beschreibung" class="block text-sm font-semibold mb-2">Tätigkeit <span class="text-red-500">*</span></label>
@@ -263,12 +270,20 @@
           <select id="d-kategorie" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base bg-white disabled:bg-slate-100 disabled:text-slate-500"></select>
         </div>
         <div>
+          <label class="block text-sm font-semibold mb-1">Projekt <span class="text-slate-400 font-normal">(optional)</span></label>
+          <select id="d-projekt" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base bg-white disabled:bg-slate-100 disabled:text-slate-500"></select>
+        </div>
+        <div>
           <label class="block text-sm font-semibold mb-1">Beschreibung</label>
           <textarea id="d-beschreibung" rows="3" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-base disabled:bg-slate-100 disabled:text-slate-500"></textarea>
         </div>
         <div>
           <label class="block text-sm font-semibold mb-1">Betrag CHF</label>
           <input id="d-betrag" type="number" step="0.05" min="0" inputmode="decimal" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base disabled:bg-slate-100 disabled:text-slate-500">
+        </div>
+        <div id="d-positionen-wrap" class="hidden">
+          <label class="block text-sm font-semibold mb-1">Positionen</label>
+          <div id="d-positionen" class="space-y-1 text-sm"></div>
         </div>
         <div>
           <label class="block text-sm font-semibold mb-1">IBAN <span class="text-slate-400 font-normal">(optional)</span></label>
@@ -560,11 +575,59 @@
   function resetForm() {
     $('beschreibung').value = '';
     $('stunden').value = '';
+    $('projekt').value = '';
     $('datum').value = todayIso();
     $('formMsg').classList.add('hidden');
     $('stundenHint').classList.add('hidden');
     resetQuittung();
     updateBetrag();
+  }
+
+  // ---------- Projekte ----------
+  let PROJEKTE = [];
+  async function loadProjekte() {
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/projects-mini', { cache: 'no-store' });
+      if (r.ok) PROJEKTE = (await r.json()).projekte || [];
+    } catch { /* offline / keine Berechtigung → kein Projekt-Dropdown */ }
+    const opts = '<option value="">— kein Projekt —</option>' + PROJEKTE.map(p => `<option value="${esc(p.slug)}">${esc(p.title)}</option>`).join('');
+    ['projekt', 'd-projekt'].forEach(id => { const el = $(id); if (el) el.innerHTML = opts; });
+  }
+
+  // ---------- Positionen im Detail-Sheet (ansehen + entfernen) ----------
+  let D_POSITIONEN = [];
+  function renderDetailPositionen(editable) {
+    const wrap = $('d-positionen-wrap'), list = $('d-positionen');
+    if (!D_POSITIONEN.length) { wrap.classList.add('hidden'); return; }
+    wrap.classList.remove('hidden');
+    list.innerHTML = D_POSITIONEN.map((p, i) =>
+      `<div class="flex items-center gap-2 bg-slate-50 rounded px-2 py-1.5">
+         <span class="flex-1 truncate">${esc(p.beschreibung || p.position_typ)} · ${fmtChf(p.gesamt_chf)}</span>
+         ${editable ? `<button type="button" data-pos="${i}" class="text-red-500 text-xl leading-none px-1">×</button>` : ''}
+       </div>`).join('');
+  }
+  async function loadDetailPositionen(id, editable) {
+    D_POSITIONEN = [];
+    $('d-positionen-wrap').classList.add('hidden');
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/auslagen/${id}/positionen`);
+      if (!r.ok) return;
+      D_POSITIONEN = (await r.json()).positionen || [];
+      renderDetailPositionen(editable);
+    } catch { /* ignore */ }
+  }
+  async function removeDetailPosition(i) {
+    const id = $('d-id').value;
+    D_POSITIONEN.splice(i, 1);
+    const positionen = D_POSITIONEN.map(p => ({ position_typ: p.position_typ, beschreibung: p.beschreibung, menge: Number(p.menge), einheit: p.einheit, einzelpreis: p.einzelpreis_chf != null ? Number(p.einzelpreis_chf) : null, gesamt_chf: Number(p.gesamt_chf) }));
+    const neu = Math.round(positionen.reduce((s, p) => s + (Number(p.gesamt_chf) || 0), 0) * 100) / 100;
+    try {
+      await AuthentikAuth.apiFetch(`/api/auslagen/${id}/positionen`, { method: 'PUT', body: { positionen } });
+      if (neu > 0) { await AuthentikAuth.apiFetch(`/api/auslagen/${id}`, { method: 'PUT', body: { betrag_chf: neu } }); $('d-betrag').value = neu.toFixed(2); }
+      renderDetailPositionen(true);
+      dMsg('Position entfernt.' + (neu > 0 ? ` Neuer Betrag ${fmtChf(neu)}.` : ''), true);
+      loadMeine();
+    } catch (e) { dMsg('Entfernen fehlgeschlagen: ' + e.message); }
   }
 
   // ---------- Offline-Puffer (IndexedDB-Queue für neue Erfassungen) ----------
@@ -655,6 +718,7 @@
     if (asDraft) payload.status = 'entwurf';
     if (stweg != null) payload.stweg = stweg;
     if (ibanRaw) payload.iban = ibanRaw;
+    if ($('projekt').value) payload.projekt_slug = $('projekt').value;
     const positionen = [];
     if (hasHours) positionen.push({ position_typ: 'arbeitszeit', beschreibung, menge: stunden, einheit: 'h', einzelpreis: satz, gesamt_chf: zeitBetrag });
     Q_POSITIONEN.forEach(p => positionen.push(p));
@@ -775,7 +839,8 @@
     $('d-beschreibung').value = r.beschreibung || '';
     $('d-betrag').value = (r.status === 'entwurf' && Number(r.betrag_chf) === 0) ? '' : r.betrag_chf;
     $('d-iban').value = r.iban || '';
-    ['d-datum', 'd-kategorie', 'd-beschreibung', 'd-betrag', 'd-iban'].forEach(f => { $(f).disabled = !editable; });
+    $('d-projekt').value = r.projekt_slug || '';
+    ['d-datum', 'd-kategorie', 'd-projekt', 'd-beschreibung', 'd-betrag', 'd-iban'].forEach(f => { $(f).disabled = !editable; });
     $('d-save').classList.toggle('hidden', !editable);
     $('d-delete').classList.toggle('hidden', !editable);
     $('d-save').textContent = r.status === 'entwurf' ? 'Ergänzen & einreichen' : 'Speichern';
@@ -784,6 +849,7 @@
     dMsg('');
     $('d-belege').innerHTML = '';
     if (Number(r.belege_count) > 0) loadDetailBelege(r.id);
+    loadDetailPositionen(r.id, editable);
     $('d-addbeleg').classList.toggle('hidden', !editable);
     $('d-file').value = '';
     $('d-addstatus').classList.add('hidden');
@@ -803,6 +869,7 @@
       kategorie: $('d-kategorie').value,
       beschreibung: $('d-beschreibung').value.trim(),
       iban: ibanRaw || null,
+      projekt_slug: $('d-projekt').value || null,
     };
     if (Number.isFinite(betrag) && betrag > 0) payload.betrag_chf = betrag;
     if (status === 'entwurf') {
@@ -1153,6 +1220,7 @@
     $('d-delete').addEventListener('click', deleteDetail);
     $('sheet').addEventListener('click', e => { if (e.target === $('sheet')) closeSheet(); });
     $('d-belege').addEventListener('click', e => { const b = e.target.closest('[data-bid]'); if (b) viewBeleg($('d-id').value, b.dataset.bid, b.dataset.fn); });
+    $('d-positionen').addEventListener('click', e => { const b = e.target.closest('[data-pos]'); if (b) removeDetailPosition(Number(b.dataset.pos)); });
     $('viewer').addEventListener('click', closeViewer);
     $('d-file').addEventListener('change', e => { if (e.target.files[0]) attachToAuslage($('d-id').value, e.target.files[0], $('d-ki').checked); });
 
@@ -1206,6 +1274,7 @@
     showApp();
     switchTab('erfassen');
 
+    loadProjekte();
     // Offline-Puffer: bei Verbindung automatisch senden + Badge aktualisieren.
     window.addEventListener('online', flushQueue);
     updateBetrag();
