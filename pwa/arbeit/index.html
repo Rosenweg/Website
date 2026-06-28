@@ -81,6 +81,8 @@
   <!-- App -->
   <main id="app" class="hidden max-w-md mx-auto px-4 pb-28">
 
+    <div id="queueBadge" class="hidden bg-amber-50 border border-amber-200 text-amber-800 rounded-xl px-3 py-2 text-sm mt-3 text-center"></div>
+
     <!-- ===== Ansicht: Erfassen ===== -->
     <section id="view-erfassen" class="py-4">
 
@@ -565,6 +567,62 @@
     updateBetrag();
   }
 
+  // ---------- Offline-Puffer (IndexedDB-Queue für neue Erfassungen) ----------
+  function idbOpen() {
+    return new Promise((res, rej) => {
+      const req = indexedDB.open('rosenweg-aufwand', 1);
+      req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains('queue')) req.result.createObjectStore('queue', { keyPath: 'id', autoIncrement: true }); };
+      req.onsuccess = () => res(req.result);
+      req.onerror = () => rej(req.error);
+    });
+  }
+  async function idbAdd(rec) { const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction('queue', 'readwrite'); tx.objectStore('queue').add(rec); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
+  async function idbAll() { const db = await idbOpen(); return new Promise((res, rej) => { const r = db.transaction('queue').objectStore('queue').getAll(); r.onsuccess = () => res(r.result || []); r.onerror = () => rej(r.error); }); }
+  async function idbDel(id) { const db = await idbOpen(); return new Promise((res, rej) => { const tx = db.transaction('queue', 'readwrite'); tx.objectStore('queue').delete(id); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
+
+  async function enqueue(op) { await idbAdd({ ...op, ts: Date.now() }); updateQueueBadge(); }
+
+  async function updateQueueBadge() {
+    const el = $('queueBadge'); if (!el) return;
+    try {
+      const n = (await idbAll()).length;
+      if (n > 0) { el.textContent = `📥 ${n} Erfassung${n > 1 ? 'en' : ''} offline — wird gesendet, sobald online`; el.classList.remove('hidden'); }
+      else el.classList.add('hidden');
+    } catch { el.classList.add('hidden'); }
+  }
+
+  async function sendCreateOp(op) {
+    const r = await AuthentikAuth.apiFetch('/api/auslagen', { method: 'POST', body: op.payload });
+    if (!r.ok) { let m = 'HTTP ' + r.status; try { const j = await r.json(); if (j && j.error) m = j.error; } catch {} const e = new Error(m); e.httpStatus = r.status; throw e; }
+    const id = (await r.json().catch(() => ({}))).auslage?.id;
+    for (const b of (op.belege || [])) {
+      try { await AuthentikAuth.apiFetch(`/api/auslagen/${id}/belege`, { method: 'POST', body: { beleg_base64: b.base64, beleg_filename: b.filename, waehrung_original: b.waehrung, wechselkurs_chf: b.kurs, kurs_quelle: b.quelle } }); }
+      catch (e) { console.warn('[queue] Beleg:', e.message); }
+    }
+    if (op.positionen && op.positionen.length) {
+      try { await AuthentikAuth.apiFetch(`/api/auslagen/${id}/positionen`, { method: 'PUT', body: { positionen: op.positionen } }); }
+      catch (e) { console.warn('[queue] Positionen:', e.message); }
+    }
+    return id;
+  }
+
+  let FLUSHING = false;
+  async function flushQueue() {
+    if (FLUSHING || !navigator.onLine) return;
+    FLUSHING = true;
+    try {
+      const all = await idbAll();
+      for (const rec of all) {
+        try { await sendCreateOp(rec); await idbDel(rec.id); }
+        catch (e) {
+          if (e.httpStatus && e.httpStatus >= 400 && e.httpStatus < 500) { console.warn('[queue] verwerfe unsendbaren Eintrag', rec.id, e.message); await idbDel(rec.id); }
+          else break; // Netzwerk/Server → später erneut
+        }
+      }
+    } catch (e) { console.warn('[queue] flush:', e.message); }
+    finally { FLUSHING = false; updateQueueBadge(); }
+  }
+
   async function onSubmit(ev, asDraft) {
     if (ev) ev.preventDefault();
     $('formMsg').classList.add('hidden');
@@ -592,51 +650,26 @@
     const btn = asDraft ? $('draftBtn') : $('submitBtn');
     btn.disabled = true; const old = btn.textContent; btn.textContent = asDraft ? 'Speichert …' : 'Wird eingereicht …';
 
-    // --- Schritt 1: EINE Auslage (Zeit + Material zusammen = ein Vorgang) ---
+    // Vorgang zusammenstellen (Zeit + Material = EINE Auslage)
     const payload = { datum, beschreibung, betrag_chf: total, kategorie: hasHours ? 'Arbeitszeit' : 'Material' };
     if (asDraft) payload.status = 'entwurf';
     if (stweg != null) payload.stweg = stweg;
     if (ibanRaw) payload.iban = ibanRaw;
+    const positionen = [];
+    if (hasHours) positionen.push({ position_typ: 'arbeitszeit', beschreibung, menge: stunden, einheit: 'h', einzelpreis: satz, gesamt_chf: zeitBetrag });
+    Q_POSITIONEN.forEach(p => positionen.push(p));
+    const op = { op: 'create', payload, positionen, belege: Q_BELEGE.map(b => ({ base64: b.base64, filename: b.filename, waehrung: b.waehrung, kurs: b.kurs, quelle: b.quelle })) };
 
-    let auslageId = null;
+    let queued = false;
     try {
-      const r = await AuthentikAuth.apiFetch('/api/auslagen', { method: 'POST', body: payload });
-      if (r.status === 403) { showFormMsg('Du hast keine Berechtigung für die Erfassung. Bitte beim Ausschuss melden.', 'err'); btn.disabled = false; btn.textContent = old; return; }
-      if (!r.ok) {
-        let msg = 'HTTP ' + r.status;
-        try { const j = await r.json(); if (j && j.error) msg = j.error; } catch {}
-        showFormMsg('Konnte nicht gespeichert werden: ' + msg, 'err');
-        btn.disabled = false; btn.textContent = old; return;
-      }
-      const j = await r.json().catch(() => ({}));
-      auslageId = j.auslage && j.auslage.id;
+      if (!navigator.onLine) throw Object.assign(new Error('offline'), { offline: true });
+      await sendCreateOp(op);
     } catch (e) {
-      showFormMsg('Netzwerkfehler — bitte erneut versuchen.', 'err');
-      btn.disabled = false; btn.textContent = old; return;
-    }
-
-    // --- Schritt 2: Belege hochladen (Quittungen) ---
-    if (auslageId != null) {
-      for (const b of Q_BELEGE) {
-        try {
-          await AuthentikAuth.apiFetch(`/api/auslagen/${auslageId}/belege`, {
-            method: 'POST', body: { beleg_base64: b.base64, beleg_filename: b.filename, waehrung_original: b.waehrung, wechselkurs_chf: b.kurs, kurs_quelle: b.quelle },
-          });
-        } catch (e) { console.warn('[arbeit] Beleg-Upload:', e.message); }
-      }
-    }
-
-    // --- Schritt 3: Positionen (Arbeitszeit + Material) ---
-    if (auslageId != null) {
-      const positionen = [];
-      if (hasHours) positionen.push({ position_typ: 'arbeitszeit', beschreibung, menge: stunden, einheit: 'h', einzelpreis: satz, gesamt_chf: zeitBetrag });
-      Q_POSITIONEN.forEach(p => positionen.push(p));
-      if (positionen.length) {
-        try {
-          const r2 = await AuthentikAuth.apiFetch(`/api/auslagen/${auslageId}/positionen`, { method: 'PUT', body: { positionen } });
-          if (!r2.ok) console.warn('[arbeit] Positionen:', r2.status);
-        } catch (e) { console.warn('[arbeit] Positionen:', e.message); }
-      }
+      if (e.httpStatus === 403) { showFormMsg('Du hast keine Berechtigung für die Erfassung. Bitte beim Ausschuss melden.', 'err'); btn.disabled = false; btn.textContent = old; return; }
+      if (e.httpStatus && e.httpStatus >= 400 && e.httpStatus < 500) { showFormMsg('Konnte nicht gespeichert werden: ' + e.message, 'err'); btn.disabled = false; btn.textContent = old; return; }
+      // offline / Netzwerk / Serverfehler → lokal puffern, automatisch senden sobald online
+      try { await enqueue(op); queued = true; }
+      catch (e2) { showFormMsg('Speichern fehlgeschlagen: ' + e2.message, 'err'); btn.disabled = false; btn.textContent = old; return; }
     }
 
     // --- Erfolg ---
@@ -644,9 +677,11 @@
     const teile = [];
     if (hasHours) teile.push(`${stunden} h × ${fmtChf(satz)}`);
     if (materialBetrag > 0) teile.push(`Material ${fmtChf(materialBetrag)}`);
-    $('successText').textContent = asDraft
-      ? `Als Entwurf gespeichert (${fmtChf(total)}${teile.length ? ': ' + teile.join(' + ') : ''}). Unter „Meine Erfassungen" ergänzen & einreichen.`
-      : `${teile.join(' + ')}${teile.length ? ' = ' : ''}${fmtChf(total)} eingereicht${Q_BELEGE.length ? ` (${Q_BELEGE.length} Beleg${Q_BELEGE.length > 1 ? 'e' : ''})` : ''}.`;
+    $('successText').textContent = queued
+      ? `📥 Offline gespeichert (${fmtChf(total)}) — wird automatisch gesendet, sobald Verbindung da ist.`
+      : (asDraft
+        ? `Als Entwurf gespeichert (${fmtChf(total)}${teile.length ? ': ' + teile.join(' + ') : ''}). Unter „Meine Erfassungen" ergänzen & einreichen.`
+        : `${teile.join(' + ')}${teile.length ? ' = ' : ''}${fmtChf(total)} eingereicht${Q_BELEGE.length ? ` (${Q_BELEGE.length} Beleg${Q_BELEGE.length > 1 ? 'e' : ''})` : ''}.`);
     resetForm();
     resetQuittung();
     $('view-erfassen').classList.add('hidden');
@@ -654,6 +689,7 @@
     $('view-success').classList.remove('hidden');
 
     btn.disabled = false; btn.textContent = old;
+    if (queued) flushQueue();
   }
 
   // =====================================================================
@@ -1169,6 +1205,12 @@
     setMode('timer');
     showApp();
     switchTab('erfassen');
+
+    // Offline-Puffer: bei Verbindung automatisch senden + Badge aktualisieren.
+    window.addEventListener('online', flushQueue);
+    updateBetrag();
+    updateQueueBadge();
+    flushQueue();
 
     // Timer-State nach Neustart wiederherstellen: laeuft er, zaehlt er sichtbar weiter.
     renderTimer();
