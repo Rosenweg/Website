@@ -43,6 +43,22 @@
     .chart-card .ch .cnow { font-weight: 700; font-size: 1.05rem; }
     .chart-card svg { width: 100%; height: 70px; margin-top: .3rem; display: block; }
     .chart-card .cr { display: flex; justify-content: space-between; font-size: .68rem; opacity: .65; margin-top: .1rem; }
+    .chart-card { cursor: pointer; position: relative; transition: transform .12s ease, background .2s; }
+    .chart-card:hover { background: rgba(255,255,255,.17); transform: translateY(-1px); }
+    .chart-card::after { content: '⤢'; position: absolute; top: .55rem; right: .8rem; font-size: .9rem; opacity: .4; }
+    .chart-card:hover::after { opacity: .85; }
+    .hint { text-align: center; font-size: .74rem; opacity: .6; margin: -.2rem 0 .7rem; }
+    .modal { position: fixed; inset: 0; background: rgba(8,12,30,.8); backdrop-filter: blur(4px); display: none; align-items: center; justify-content: center; padding: 1rem; z-index: 50; }
+    .modal.open { display: flex; }
+    .modal-box { background: linear-gradient(160deg,#1e293b,#0f172a); border: 1px solid rgba(255,255,255,.12); border-radius: 18px; padding: 1.1rem 1.1rem .9rem; width: 100%; max-width: 760px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+    .modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+    .modal-head .mt { font-weight: 600; font-size: 1.1rem; }
+    .modal-head .mx { display: block; font-size: .78rem; opacity: .75; margin-top: .15rem; }
+    .modal-close { cursor: pointer; background: rgba(255,255,255,.12); border: none; color: #fff; border-radius: 999px; min-width: 32px; height: 32px; font-size: 1rem; line-height: 1; }
+    .modal svg { width: 100%; height: auto; display: block; margin-top: .5rem; }
+    .modal .grid { stroke: rgba(255,255,255,.09); stroke-width: 1; }
+    .modal .ax { stroke: rgba(255,255,255,.3); stroke-width: 1; }
+    .modal .tl { fill: rgba(255,255,255,.7); font-size: 11px; }
     .foot { text-align: center; opacity: .8; font-size: .8rem; margin-top: 1.6rem; line-height: 1.6; }
   </style>
 </head>
@@ -93,6 +109,7 @@
     </div>
 
     <h2 class="sec">Verlauf (24 h)</h2>
+    <div class="hint">↦ Diagramm antippen für Vollansicht mit Skalen</div>
     <div class="charts" id="charts">
       <div class="chart-card"><div class="ch"><span class="ct">🌡️ Temperatur °C</span><span class="cnow" id="n-outdoortemp">–</span></div><svg id="chart-outdoortemp" viewBox="0 0 300 70" preserveAspectRatio="none"></svg><div class="cr"><span id="lo-outdoortemp"></span><span id="hi-outdoortemp"></span></div></div>
       <div class="chart-card"><div class="ch"><span class="ct">💧 Luftfeuchte %</span><span class="cnow" id="n-outdoorhumidity">–</span></div><svg id="chart-outdoorhumidity" viewBox="0 0 300 70" preserveAspectRatio="none"></svg><div class="cr"><span id="lo-outdoorhumidity"></span><span id="hi-outdoorhumidity"></span></div></div>
@@ -102,6 +119,16 @@
     </div>
 
     <div class="foot">Live via MQTT <span id="last"></span> · Verlauf alle 5 Min<br>Rosenweg 9 · öffentlich · berechnete Werte ohne Gewähr</div>
+  </div>
+
+  <div class="modal" id="modal">
+    <div class="modal-box">
+      <div class="modal-head">
+        <div><span class="mt" id="modal-title">–</span><span class="mx" id="modal-sub"></span></div>
+        <button class="modal-close" id="modal-close" aria-label="Schliessen">✕</button>
+      </div>
+      <svg id="modal-svg" viewBox="0 0 640 340" role="img"></svg>
+    </div>
   </div>
 
   <script>
@@ -250,12 +277,13 @@
 
   /* ===== 24h-Verlaeufe (public History-Endpoint -> Inline-SVG-Sparklines) ===== */
   const CHARTS = [
-    { f: 'outdoortemp', dec: 1, color: '#fb923c' },
-    { f: 'outdoorhumidity', dec: 0, color: '#38bdf8' },
-    { f: 'windspeed', dec: 1, color: '#a3e635' },
-    { f: 'pressureabs', dec: 1, color: '#c084fc' },
-    { f: 'solarradiation', dec: 0, color: '#fde047' },
+    { f: 'outdoortemp', dec: 1, color: '#fb923c', label: '🌡️ Temperatur', unit: '°C' },
+    { f: 'outdoorhumidity', dec: 0, color: '#38bdf8', label: '💧 Luftfeuchte', unit: '%' },
+    { f: 'windspeed', dec: 1, color: '#a3e635', label: '💨 Wind', unit: 'km/h' },
+    { f: 'pressureabs', dec: 1, color: '#c084fc', label: '🔵 Luftdruck', unit: 'hPa' },
+    { f: 'solarradiation', dec: 0, color: '#fde047', label: '☀️ Solarstrahlung', unit: 'W/m²' },
   ];
+  let lastPoints = [];
   function drawChart(field, points, dec, color) {
     const svg = $('chart-' + field); if (!svg) return;
     const W = 300, H = 70, pad = 5;
@@ -283,9 +311,62 @@
       if (!r.ok) return;
       const pts = (await r.json()).points || [];
       pts.forEach(p => { if (p.solarradiation != null) p.solarradiation /= SOLAR_LUX_PER_WM2; }); // Lux -> W/m²
+      lastPoints = pts;
       CHARTS.forEach(c => drawChart(c.f, pts, c.dec, c.color));
+      const mf = $('modal').dataset.field;
+      if (mf && $('modal').classList.contains('open')) openChart(mf); // offene Vollansicht mitziehen
     } catch (e) { console.error('history', e); }
   }
+
+  /* ===== Vollansicht (Modal) mit Achsen / Skalen ===== */
+  function niceStep(span, count) {
+    const raw = (span || 1) / Math.max(1, count);
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const n = raw / mag;
+    return (n < 1.5 ? 1 : n < 3 ? 2 : n < 7 ? 5 : 10) * mag;
+  }
+  function openChart(field) {
+    const cfg = CHARTS.find(c => c.f === field); if (!cfg) return;
+    const svg = $('modal-svg');
+    const W = 640, H = 340, mL = 54, mR = 16, mT = 16, mB = 34, x0 = mL, x1 = W - mR, y0 = mT, y1 = H - mB;
+    $('modal-title').textContent = cfg.label + ' · ' + cfg.unit;
+    $('modal').dataset.field = field;
+    const data = (lastPoints || []).map(p => ({ t: new Date(p.ts).getTime(), v: Number(p[field]) }))
+      .filter(p => Number.isFinite(p.t) && Number.isFinite(p.v));
+    if (data.length < 2) {
+      svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" fill="rgba(255,255,255,.6)" font-size="15" text-anchor="middle">noch zu wenig Daten</text>`;
+      $('modal-sub').textContent = ''; $('modal').classList.add('open'); return;
+    }
+    const ts = data.map(d => d.t), vs = data.map(d => d.v);
+    const tmin = Math.min(...ts), tmax = Math.max(...ts);
+    let vmin = Math.min(...vs), vmax = Math.max(...vs);
+    if (vmin === vmax) { vmin -= 1; vmax += 1; }
+    const vstep = niceStep(vmax - vmin, 4);
+    const vlo = Math.floor(vmin / vstep) * vstep, vhi = Math.ceil(vmax / vstep) * vstep;
+    const X = (t) => x0 + (x1 - x0) * (t - tmin) / (tmax - tmin || 1);
+    const Y = (v) => y1 - (y1 - y0) * (v - vlo) / (vhi - vlo || 1);
+    let g = '';
+    for (let v = vlo; v <= vhi + 1e-9; v += vstep) {
+      const y = Y(v);
+      g += `<line class="grid" x1="${x0}" y1="${y.toFixed(1)}" x2="${x1}" y2="${y.toFixed(1)}"/>`;
+      g += `<text class="tl" x="${x0 - 7}" y="${(y + 3.5).toFixed(1)}" text-anchor="end">${+v.toFixed(cfg.dec)}</text>`;
+    }
+    const N = 5;
+    for (let i = 0; i <= N; i++) {
+      const t = tmin + (tmax - tmin) * i / N, x = X(t);
+      g += `<line class="grid" x1="${x.toFixed(1)}" y1="${y0}" x2="${x.toFixed(1)}" y2="${y1}"/>`;
+      g += `<text class="tl" x="${x.toFixed(1)}" y="${y1 + 16}" text-anchor="middle">${new Date(t).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' })}</text>`;
+    }
+    g += `<line class="ax" x1="${x0}" y1="${y0}" x2="${x0}" y2="${y1}"/><line class="ax" x1="${x0}" y1="${y1}" x2="${x1}" y2="${y1}"/>`;
+    const line = data.map(d => `${X(d.t).toFixed(1)},${Y(d.v).toFixed(1)}`).join(' ');
+    g += `<polygon points="${X(data[0].t).toFixed(1)},${y1} ${line} ${X(data[data.length - 1].t).toFixed(1)},${y1}" fill="${cfg.color}" opacity="0.15"/>`;
+    g += `<polyline points="${line}" fill="none" stroke="${cfg.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+    svg.innerHTML = g;
+    const lo = Math.min(...vs), hi = Math.max(...vs), now = vs[vs.length - 1];
+    $('modal-sub').textContent = `jetzt ${now.toFixed(cfg.dec)} · min ${lo.toFixed(cfg.dec)} · max ${hi.toFixed(cfg.dec)} ${cfg.unit} · ${data.length} Punkte`;
+    $('modal').classList.add('open');
+  }
+  function closeModal() { $('modal').classList.remove('open'); $('modal').dataset.field = ''; }
 
   // Oeffentlich: read-only MQTT-User (nur wetter/r9/# lesen), eingebettet — keine Anmeldung.
   function connect() {
@@ -316,6 +397,14 @@
     loadHistory();
     setInterval(loadHistory, 300000); // Verlauf alle 5 Min nachladen
     connect();
+    $('charts').addEventListener('click', (e) => {
+      const card = e.target.closest('.chart-card'); if (!card) return;
+      const svg = card.querySelector('svg'); if (!svg) return;
+      openChart(svg.id.replace('chart-', ''));
+    });
+    $('modal-close').addEventListener('click', closeModal);
+    $('modal').addEventListener('click', (e) => { if (e.target === $('modal')) closeModal(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
   });
   </script>
 </body>
