@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#2563eb">
+  <title>Wetter Rosenweg 9</title>
+  <link rel="manifest" href="/wetter/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/icon-192-2.png">
+  <link rel="icon" href="/logo-rosenweg.png">
+  <script src="/js/mqtt.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: 'Inter', sans-serif; min-height: 100vh; color: #fff;
+      background: linear-gradient(160deg, #1e3a8a 0%, #2563eb 45%, #38bdf8 100%);
+      transition: background 1.5s ease; }
+    .wrap { max-width: 780px; margin: 0 auto; padding: 1.2rem 1rem 3rem; }
+    .top { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .8rem; }
+    .brand { display: flex; align-items: center; gap: .6rem; }
+    .brand img { height: 34px; }
+    .brand .t { font-weight: 700; font-size: 1.05rem; line-height: 1.1; }
+    .brand .s { font-size: .8rem; opacity: .85; }
+    .conn { font-size: .8rem; padding: .25rem .6rem; border-radius: 999px; background: rgba(255,255,255,.15); white-space: nowrap; }
+    .conn .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: .35rem; background: #fbbf24; }
+    .conn.ok .dot { background: #34d399; } .conn.err .dot { background: #f87171; } .conn.off .dot { background: #94a3b8; }
+    .clock { text-align: center; margin: .2rem 0 -.2rem; opacity: .92; }
+    .clock .ct { font-size: 2rem; font-weight: 300; letter-spacing: .02em; font-variant-numeric: tabular-nums; }
+    .clock .cd { font-size: .82rem; opacity: .8; text-transform: capitalize; }
+    .hero { text-align: center; margin: 1rem 0 1.4rem; }
+    .hero .ico { font-size: 4rem; line-height: 1; filter: drop-shadow(0 4px 12px rgba(0,0,0,.25)); }
+    .hero .temp { font-size: 4rem; font-weight: 300; line-height: 1; margin-top: .2rem; }
+    .hero .temp .u { font-size: 1.5rem; font-weight: 500; vertical-align: super; opacity: .8; }
+    .hero .sub { font-size: .95rem; opacity: .9; margin-top: .3rem; }
+    h2.sec { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; opacity: .75; margin: 1.6rem 0 .6rem; font-weight: 600; }
+    .astro { display: grid; grid-template-columns: 1.7fr 1fr; gap: .8rem; }
+    .astro-card { background: rgba(255,255,255,.12); backdrop-filter: blur(6px); border-radius: 16px; padding: .8rem 1rem 1rem; }
+    .astro-card > svg { width: 100%; height: auto; display: block; }
+    .astro-foot { display: flex; justify-content: space-between; align-items: center; font-size: .82rem; margin-top: .3rem; }
+    .astro-foot b { font-weight: 700; }
+    .astro-foot #s-state { font-size: .72rem; opacity: .82; text-align: center; }
+    .astro-card.moon { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .5rem; }
+    .astro-card.moon svg { max-width: 116px; }
+    .moon-info { text-align: center; }
+    .moon-info .mname { font-weight: 600; font-size: .96rem; }
+    .moon-info .msub { font-size: .82rem; opacity: .9; }
+    .moon-info .msub2 { font-size: .74rem; opacity: .7; margin-top: .1rem; }
+    @media (max-width: 520px) { .astro { grid-template-columns: 1fr; } }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .8rem; }
+    .card { background: rgba(255,255,255,.12); backdrop-filter: blur(6px); border-radius: 16px; padding: .9rem 1rem; }
+    .card .ct { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; opacity: .8; }
+    .card .cv { font-size: 1.55rem; font-weight: 600; margin-top: .2rem; }
+    .card .cv .u { font-size: .55em; font-weight: 500; opacity: .75; }
+    .card .cx { font-size: .76rem; opacity: .8; margin-top: .1rem; min-height: 1em; }
+    .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .8rem; }
+    .chart-card { background: rgba(255,255,255,.12); backdrop-filter: blur(6px); border-radius: 16px; padding: .9rem 1rem .6rem; }
+    .chart-card .ch { display: flex; justify-content: space-between; align-items: baseline; font-size: .76rem; }
+    .chart-card .ch .ct { text-transform: uppercase; letter-spacing: .04em; opacity: .8; }
+    .chart-card .ch .cnow { font-weight: 700; font-size: 1.05rem; }
+    .chart-card svg { width: 100%; height: 70px; margin-top: .3rem; display: block; }
+    .chart-card .cr { display: flex; justify-content: space-between; font-size: .68rem; opacity: .65; margin-top: .1rem; }
+    .chart-card { cursor: pointer; position: relative; transition: transform .12s ease, background .2s; }
+    .chart-card:hover { background: rgba(255,255,255,.17); transform: translateY(-1px); }
+    .chart-card::after { content: '⤢'; position: absolute; top: .55rem; right: .8rem; font-size: .9rem; opacity: .4; }
+    .chart-card:hover::after { opacity: .85; }
+    .hint { text-align: center; font-size: .74rem; opacity: .6; margin: -.2rem 0 .7rem; }
+    .modal { position: fixed; inset: 0; background: rgba(8,12,30,.8); backdrop-filter: blur(4px); display: none; align-items: center; justify-content: center; padding: 1rem; z-index: 50; }
+    .modal.open { display: flex; }
+    .modal-box { background: linear-gradient(160deg,#1e293b,#0f172a); border: 1px solid rgba(255,255,255,.12); border-radius: 18px; padding: 1.1rem 1.1rem .9rem; width: 100%; max-width: 760px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+    .modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+    .modal-head .mt { font-weight: 600; font-size: 1.1rem; }
+    .modal-head .mx { display: block; font-size: .78rem; opacity: .75; margin-top: .15rem; }
+    .modal-close { cursor: pointer; background: rgba(255,255,255,.12); border: none; color: #fff; border-radius: 999px; min-width: 32px; height: 32px; font-size: 1rem; line-height: 1; }
+    .modal svg { width: 100%; height: auto; display: block; margin-top: .5rem; touch-action: none; cursor: crosshair; }
+    .modal-ctrl { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: .5rem; margin-top: .7rem; }
+    .ranges { display: flex; gap: .3rem; flex-wrap: wrap; }
+    .ranges button, .rst { cursor: pointer; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.14); color: #fff; border-radius: 8px; padding: .3rem .65rem; font-size: .78rem; font-family: inherit; }
+    .ranges button.on { background: rgba(255,255,255,.34); font-weight: 600; }
+    .zhint { font-size: .7rem; opacity: .55; text-align: center; margin-top: .35rem; }
+    .modal .grid { stroke: rgba(255,255,255,.09); stroke-width: 1; }
+    .modal .ax { stroke: rgba(255,255,255,.3); stroke-width: 1; }
+    .modal .tl { fill: rgba(255,255,255,.7); font-size: 11px; }
+    .foot { text-align: center; opacity: .8; font-size: .8rem; margin-top: 1.6rem; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a href="/" style="display:inline-flex;align-items:center;gap:.3rem;color:#fff;opacity:.85;text-decoration:none;font-size:.82rem;margin-bottom:.5rem">‹ Übersicht</a>
+    <div class="top">
+      <div class="brand">
+        <img src="/logo-stweg3-rosenweg9.png" onerror="this.onerror=null;this.src='/logo-rosenweg.png'" alt="R9">
+        <div><div class="t">Wetterstation</div><div class="s">Rosenweg 9 · Kaiseraugst</div></div>
+      </div>
+      <div id="conn" class="conn"><span class="dot"></span><span id="conn-t">…</span></div>
+    </div>
+
+    <div class="clock">
+      <div class="ct" id="clock-t">–</div>
+      <div class="cd" id="clock-d"></div>
+    </div>
+
+    <div class="hero">
+      <div class="ico" id="hero-ico">🌡️</div>
+      <div class="temp"><span id="v-outdoortemp">–</span><span class="u">°C</span></div>
+      <div class="sub" id="hero-sub">Aussentemperatur</div>
+    </div>
+
+    <h2 class="sec">Messwerte</h2>
+    <div class="cards">
+      <div class="card"><div class="ct">💧 Luftfeuchte</div><div class="cv"><span id="v-outdoorhumidity">–</span><span class="u"> %</span></div><div class="cx"></div></div>
+      <div class="card"><div class="ct">💨 Wind</div><div class="cv"><span id="v-windspeed">–</span><span class="u"> km/h</span></div><div class="cx" id="x-wind"></div></div>
+      <div class="card"><div class="ct">🧭 Windrichtung</div><div class="cv"><span id="v-winddir">–</span><span class="u"> °</span></div><div class="cx" id="x-winddir"></div></div>
+      <div class="card"><div class="ct">🔵 Luftdruck</div><div class="cv"><span id="v-pressureabs">–</span><span class="u"> hPa</span></div><div class="cx" id="x-press"></div></div>
+      <div class="card"><div class="ct">☀️ Solarstrahlung</div><div class="cv"><span id="v-solarradiation">–</span><span class="u"> W/m²</span></div><div class="cx" id="x-solar"></div></div>
+    </div>
+
+    <h2 class="sec">Berechnet</h2>
+    <div class="cards">
+      <div class="card"><div class="ct">🌫️ Taupunkt</div><div class="cv"><span id="d-dew">–</span><span class="u"> °C</span></div><div class="cx" id="x-dew"></div></div>
+      <div class="card"><div class="ct">🧥 Gefühlt</div><div class="cv"><span id="d-feel">–</span><span class="u"> °C</span></div><div class="cx" id="x-feel"></div></div>
+      <div class="card"><div class="ct">💦 Absolute Feuchte</div><div class="cv"><span id="d-abs">–</span><span class="u"> g/m³</span></div><div class="cx"></div></div>
+    </div>
+
+    <h2 class="sec">Sonne &amp; Mond</h2>
+    <div class="astro">
+      <div class="astro-card">
+        <svg id="sun-arc" viewBox="0 0 300 158" role="img" aria-label="Sonnenstand"></svg>
+        <div class="astro-foot">
+          <span>🌅 <b id="s-rise">–</b></span>
+          <span id="s-state">–</span>
+          <span><b id="s-set">–</b> 🌇</span>
+        </div>
+      </div>
+      <div class="astro-card moon">
+        <svg id="moon-disk" viewBox="0 0 120 120" role="img" aria-label="Mondphase"></svg>
+        <div class="moon-info">
+          <div class="mname" id="m-name">–</div>
+          <div class="msub"><b id="m-illum">–</b> % beleuchtet</div>
+          <div class="msub2" id="m-alt-x"></div>
+        </div>
+      </div>
+    </div>
+
+    <h2 class="sec">Verlauf (24 h)</h2>
+    <div class="hint">↦ Diagramm antippen für Vollansicht mit Skalen</div>
+    <div class="charts" id="charts">
+      <div class="chart-card"><div class="ch"><span class="ct">🌡️ Temperatur °C</span><span class="cnow" id="n-outdoortemp">–</span></div><svg id="chart-outdoortemp" viewBox="0 0 300 70" preserveAspectRatio="none"></svg><div class="cr"><span id="lo-outdoortemp"></span><span id="hi-outdoortemp"></span></div></div>
+      <div class="chart-card"><div class="ch"><span class="ct">💧 Luftfeuchte %</span><span class="cnow" id="n-outdoorhumidity">–</span></div><svg id="chart-outdoorhumidity" viewBox="0 0 300 70" preserveAspectRatio="none"></svg><div class="cr"><span id="lo-outdoorhumidity"></span><span id="hi-outdoorhumidity"></span></div></div>
+      <div class="chart-card"><div class="ch"><span class="ct">💨 Wind km/h</span><span class="cnow" id="n-windspeed">–</span></div><svg id="chart-windspeed" viewBox="0 0 300 70" preserveAspectRatio="none"></svg><div class="cr"><span id="lo-windspeed"></span><span id="hi-windspeed"></span></div></div>
+      <div class="chart-card"><div class="ch"><span class="ct">🔵 Luftdruck hPa</span><span class="cnow" id="n-pressureabs">–</span></div><svg id="chart-pressureabs" viewBox="0 0 300 70" preserveAspectRatio="none"></svg><div class="cr"><span id="lo-pressureabs"></span><span id="hi-pressureabs"></span></div></div>
+      <div class="chart-card"><div class="ch"><span class="ct">☀️ Solar W/m²</span><span class="cnow" id="n-solarradiation">–</span></div><svg id="chart-solarradiation" viewBox="0 0 300 70" preserveAspectRatio="none"></svg><div class="cr"><span id="lo-solarradiation"></span><span id="hi-solarradiation"></span></div></div>
+    </div>
+
+    <div class="foot">Live via MQTT <span id="last"></span> · Verlauf alle 5 Min<br>Rosenweg 9 · öffentlich · berechnete Werte ohne Gewähr</div>
+  </div>
+
+  <div class="modal" id="modal">
+    <div class="modal-box">
+      <div class="modal-head">
+        <div><span class="mt" id="modal-title">–</span><span class="mx" id="modal-sub"></span></div>
+        <button class="modal-close" id="modal-close" aria-label="Schliessen">✕</button>
+      </div>
+      <div class="modal-ctrl">
+        <div class="ranges" id="modal-ranges">
+          <button data-h="1">1 h</button><button data-h="6">6 h</button><button data-h="24">24 h</button><button data-h="72">3 d</button><button data-h="168">7 d</button>
+        </div>
+        <button class="rst" id="modal-reset">⟲ Zoom zurück</button>
+      </div>
+      <svg id="modal-svg" viewBox="0 0 640 340" role="img"></svg>
+      <div class="zhint">Bereich ziehen = reinzoomen · Mausrad = zoomen · Doppeltipp / ⟲ = ganze Spanne</div>
+    </div>
+  </div>
+
+  <script>
+  /* ===== kompaktes SunCalc (Vladimir Agafonkin, MIT) ===== */
+  const SunCalc = (function () {
+    const PI = Math.PI, rad = PI / 180, dayMs = 864e5, J1970 = 2440588, J2000 = 2451545, e = rad * 23.4397;
+    const toJulian = (d) => d.valueOf() / dayMs - 0.5 + J1970;
+    const fromJulian = (j) => new Date((j + 0.5 - J1970) * dayMs);
+    const toDays = (d) => toJulian(d) - J2000;
+    const ra = (l, b) => Math.atan2(Math.sin(l) * Math.cos(e) - Math.tan(b) * Math.sin(e), Math.cos(l));
+    const dec = (l, b) => Math.asin(Math.sin(b) * Math.cos(e) + Math.cos(b) * Math.sin(e) * Math.sin(l));
+    const az = (H, phi, d) => Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(phi) - Math.tan(d) * Math.cos(phi));
+    const alt = (H, phi, d) => Math.asin(Math.sin(phi) * Math.sin(d) + Math.cos(phi) * Math.cos(d) * Math.cos(H));
+    const sidereal = (d, lw) => rad * (280.16 + 360.9856235 * d) - lw;
+    const sma = (d) => rad * (357.5291 + 0.98560028 * d);
+    const ecl = (M) => M + rad * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M)) + rad * 102.9372 + PI;
+    const sunCoords = (d) => { const M = sma(d), L = ecl(M); return { dec: dec(L, 0), ra: ra(L, 0) }; };
+    const SC = {};
+    SC.getPosition = (date, lat, lng) => { const lw = rad * -lng, phi = rad * lat, d = toDays(date), c = sunCoords(d), H = sidereal(d, lw) - c.ra; return { azimuth: az(H, phi, c.dec), altitude: alt(H, phi, c.dec) }; };
+    const J0 = 0.0009;
+    const cyc = (d, lw) => Math.round(d - J0 - lw / (2 * PI));
+    const approx = (Ht, lw, n) => J0 + (Ht + lw) / (2 * PI) + n;
+    const transitJ = (ds, M, L) => J2000 + ds + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L);
+    const ha = (h, phi, d) => Math.acos((Math.sin(h) - Math.sin(phi) * Math.sin(d)) / (Math.cos(phi) * Math.cos(d)));
+    SC.getTimes = (date, lat, lng) => {
+      const lw = rad * -lng, phi = rad * lat, d = toDays(date), n = cyc(d, lw), ds = approx(0, lw, n),
+        M = sma(ds), L = ecl(M), dc = dec(L, 0), Jnoon = transitJ(ds, M, L),
+        w = ha(-0.833 * rad, phi, dc), Jset = transitJ(approx(w, lw, n), M, L);
+      return { sunrise: fromJulian(Jnoon - (Jset - Jnoon)), sunset: fromJulian(Jset), solarNoon: fromJulian(Jnoon) };
+    };
+    const moonCoords = (d) => {
+      const L = rad * (218.316 + 13.176396 * d), M = rad * (134.963 + 13.064993 * d), F = rad * (93.272 + 13.229350 * d),
+        l = L + rad * 6.289 * Math.sin(M), b = rad * 5.128 * Math.sin(F), dt = 385001 - 20905 * Math.cos(M);
+      return { ra: ra(l, b), dec: dec(l, b), dist: dt };
+    };
+    SC.getMoonPosition = (date, lat, lng) => {
+      const lw = rad * -lng, phi = rad * lat, d = toDays(date), c = moonCoords(d), H = sidereal(d, lw) - c.ra;
+      let h = alt(H, phi, c.dec); h += (0.017 * rad) / Math.tan(h + (10.26 * rad) / (h + 5.114 * rad));
+      return { azimuth: az(H, phi, c.dec), altitude: h };
+    };
+    SC.getMoonIllumination = (date) => {
+      const d = toDays(date || new Date()), s = sunCoords(d), m = moonCoords(d), sdist = 149598000,
+        phi = Math.acos(Math.sin(s.dec) * Math.sin(m.dec) + Math.cos(s.dec) * Math.cos(m.dec) * Math.cos(s.ra - m.ra)),
+        inc = Math.atan2(sdist * Math.sin(phi), m.dist - sdist * Math.cos(phi)),
+        angle = Math.atan2(Math.cos(s.dec) * Math.sin(s.ra - m.ra), Math.sin(s.dec) * Math.cos(m.dec) - Math.cos(s.dec) * Math.sin(m.dec) * Math.cos(s.ra - m.ra));
+      return { fraction: (1 + Math.cos(inc)) / 2, phase: 0.5 + 0.5 * inc * (angle < 0 ? -1 : 1) / PI };
+    };
+    return SC;
+  })();
+
+  const $ = (id) => document.getElementById(id);
+  const LAT = 47.535, LON = 7.726; // Rosenweg 9, Kaiseraugst
+  const SOLAR_LUX_PER_WM2 = 126.7; // Station liefert Solar in Lux -> W/m² (Ecowitt-Standard ~lux/126.7)
+  const COMPASS = ['N','NNO','NO','ONO','O','OSO','SO','SSO','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+  const compass = (d) => { const n = Number(d); return Number.isFinite(n) ? COMPASS[Math.round(((n % 360) / 22.5)) % 16] : ''; };
+  const setConn = (s, t) => { const c = $('conn'); c.className = 'conn ' + s; $('conn-t').textContent = t; };
+  const fmt = (v, dec) => { const n = Number(v); return Number.isFinite(n) ? n.toFixed(dec) : '–'; };
+  const hhmm = (d) => d instanceof Date && !isNaN(d) ? d.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' }) : '–';
+
+  const cur = {}; // aktuelle Messwerte
+  const FIELDS = { outdoortemp: 1, outdoorhumidity: 0, windspeed: 1, winddir: 0, pressureabs: 1, solarradiation: 0 };
+
+  function recompute() {
+    const T = cur.outdoortemp, RH = cur.outdoorhumidity, v = cur.windspeed;
+    // Taupunkt (Magnus)
+    if (Number.isFinite(T) && Number.isFinite(RH) && RH > 0) {
+      const a = 17.27, b = 237.7, g = (a * T) / (b + T) + Math.log(RH / 100);
+      const td = (b * g) / (a - g);
+      $('d-dew').textContent = td.toFixed(1);
+      $('x-dew').textContent = (T - td) < 2.5 ? 'Nebel/Tau möglich' : '';
+      // absolute Feuchte g/m³
+      const ah = 6.112 * Math.exp((17.67 * T) / (T + 243.5)) * RH * 2.1674 / (273.15 + T);
+      $('d-abs').textContent = ah.toFixed(1);
+    }
+    // Gefühlte Temperatur
+    if (Number.isFinite(T)) {
+      let feel = T, note = '';
+      if (T <= 10 && Number.isFinite(v) && v > 4.8) {
+        feel = 13.12 + 0.6215 * T - 11.37 * Math.pow(v, 0.16) + 0.3965 * T * Math.pow(v, 0.16);
+        note = 'Windchill';
+      } else if (T >= 27 && Number.isFinite(RH)) {
+        const c = [-8.784695, 1.61139411, 2.338549, -0.14611605, -0.012308094, -0.016424828, 0.002211732, 0.00072546, -0.000003582];
+        feel = c[0] + c[1]*T + c[2]*RH + c[3]*T*RH + c[4]*T*T + c[5]*RH*RH + c[6]*T*T*RH + c[7]*T*RH*RH + c[8]*T*T*RH*RH;
+        note = 'Hitzeindex';
+      } else { note = 'wie gemessen'; }
+      $('d-feel').textContent = feel.toFixed(1);
+      $('x-feel').textContent = note;
+    }
+    updateHero();
+  }
+
+  function mix(hex, hex2, t) { // hex Richtung hex2 mischen (t: 0..1)
+    const a = parseInt(hex.slice(1), 16), b = parseInt(hex2.slice(1), 16);
+    const r = (a >> 16) + (((b >> 16) - (a >> 16)) * t);
+    const g = ((a >> 8) & 255) + ((((b >> 8) & 255) - ((a >> 8) & 255)) * t);
+    const c = (a & 255) + (((b & 255) - (a & 255)) * t);
+    return '#' + ((1 << 24) | (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(c)).toString(16).slice(1);
+  }
+  function updateHero() {
+    const now = new Date();
+    const sun = SunCalc.getPosition(now, LAT, LON);
+    const day = sun.altitude > 0;
+    const sol = cur.solarradiation;
+    let ico = '🌙';
+    if (day) ico = Number.isFinite(sol) ? (sol > 400 ? '☀️' : sol > 80 ? '🌤️' : '☁️') : '☀️';
+    $('hero-ico').textContent = ico;
+    // Hintergrund nach Temperatur (kalt=blau -> mild=türkis -> warm=orange -> heiss=rot), nachts abgedunkelt
+    const altd = sun.altitude * 180 / Math.PI;
+    const TEMP_BANDS = [
+      { max: 0,  cols: ['#0c4a6e', '#0ea5e9', '#bae6fd'] }, // Frost / eisig
+      { max: 8,  cols: ['#1e3a8a', '#2563eb', '#60a5fa'] }, // kalt
+      { max: 15, cols: ['#155e75', '#0891b2', '#67e8f9'] }, // frisch
+      { max: 21, cols: ['#0f766e', '#14b8a6', '#99f6e4'] }, // mild
+      { max: 26, cols: ['#b45309', '#f59e0b', '#fde68a'] }, // warm
+      { max: 30, cols: ['#9a3412', '#ea580c', '#fdba74'] }, // heiss
+      { max: 99, cols: ['#7f1d1d', '#dc2626', '#fb923c'] }, // sehr heiss
+    ];
+    const T = cur.outdoortemp;
+    const band = Number.isFinite(T) ? (TEMP_BANDS.find(b => T <= b.max) || TEMP_BANDS[TEMP_BANDS.length - 1]) : TEMP_BANDS[1];
+    const dark = altd > 6 ? 0 : altd > -6 ? (1 - (altd + 6) / 12) * 0.5 : 0.55; // Dämmerung -> Nacht
+    const cols = band.cols.map(c => dark > 0 ? mix(c, '#0b1026', dark) : c);
+    document.body.style.background = `linear-gradient(160deg, ${cols[0]} 0%, ${cols[1]} 45%, ${cols[2]} 100%)`;
+  }
+
+  function drawSunArc() {
+    const svg = $('sun-arc'); if (!svg) return;
+    const W = 300, cx = 150, cy = 132, r = 122, now = new Date();
+    const t = SunCalc.getTimes(now, LAT, LON);
+    const sr = t.sunrise.getTime(), ss = t.sunset.getTime(), tn = now.getTime();
+    const altd = SunCalc.getPosition(now, LAT, LON).altitude * 180 / Math.PI;
+    const isDay = tn >= sr && tn <= ss;
+    let frac = (tn - sr) / (ss - sr); frac = Math.max(0, Math.min(1, frac));
+    const P = (f) => { const a = Math.PI * (1 - f); return [cx + r * Math.cos(a), cy - r * Math.sin(a)]; };
+    const [ax, ay] = P(0), [bx, by] = P(1), [sx, sy] = P(frac);
+    const n = (v) => v.toFixed(1);
+    let g = `<defs>
+      <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${isDay ? '#fcd34d' : '#334155'}" stop-opacity="${isDay ? '.35' : '.22'}"/><stop offset="1" stop-color="#0f172a" stop-opacity="0"/></linearGradient>
+      <radialGradient id="sunGlow"><stop offset="0" stop-color="#fff7d6"/><stop offset=".55" stop-color="#fbbf24"/><stop offset="1" stop-color="#f59e0b"/></radialGradient>
+    </defs>`;
+    g += `<path d="M ${n(ax)} ${n(ay)} A ${r} ${r} 0 0 1 ${n(bx)} ${n(by)} L ${n(bx)} ${cy} L ${n(ax)} ${cy} Z" fill="url(#sky)"/>`;
+    g += `<path d="M ${n(ax)} ${n(ay)} A ${r} ${r} 0 0 1 ${n(bx)} ${n(by)}" fill="none" stroke="rgba(255,255,255,.3)" stroke-width="1.5" stroke-dasharray="3 4"/>`;
+    if (isDay) g += `<path d="M ${n(ax)} ${n(ay)} A ${r} ${r} 0 0 1 ${n(sx)} ${n(sy)}" fill="none" stroke="#fde68a" stroke-width="2.5"/>`;
+    g += `<line x1="6" y1="${cy}" x2="${W - 6}" y2="${cy}" stroke="rgba(255,255,255,.35)" stroke-width="1.5"/>`;
+    g += `<circle cx="${n(ax)}" cy="${n(ay)}" r="3" fill="#fbbf24"/><circle cx="${n(bx)}" cy="${n(by)}" r="3" fill="#f59e0b"/>`;
+    if (isDay) g += `<circle cx="${n(sx)}" cy="${n(sy)}" r="18" fill="#fde68a" opacity=".18"/><circle cx="${n(sx)}" cy="${n(sy)}" r="11" fill="url(#sunGlow)"/>`;
+    else g += `<text x="${cx}" y="${cy - 34}" text-anchor="middle" fill="rgba(255,255,255,.72)" font-size="14">🌙 Nacht</text>`;
+    svg.innerHTML = g;
+    $('s-rise').textContent = hhmm(t.sunrise);
+    $('s-set').textContent = hhmm(t.sunset);
+    const dayLen = (ss - sr) / 3600e3;
+    $('s-state').textContent = isDay ? `☀️ ${altd.toFixed(0)}° · Tag ${dayLen.toFixed(1)} h` : `${altd.toFixed(0)}° · unter Horizont`;
+  }
+  function drawMoon() {
+    const svg = $('moon-disk'); if (!svg) return;
+    const cx = 60, cy = 60, r = 50, now = new Date();
+    const mi = SunCalc.getMoonIllumination(now), f = mi.fraction, waxing = mi.phase < 0.5;
+    let lit = '';
+    if (f > 0.985) lit = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#moonlit)"/>`;
+    else if (f >= 0.015) {
+      const rx = (r * Math.abs(1 - 2 * f)).toFixed(2), gib = f > 0.5;
+      const side = waxing ? 1 : 0, term = waxing ? (gib ? 1 : 0) : (gib ? 0 : 1);
+      lit = `<path d="M ${cx} ${cy - r} A ${r} ${r} 0 0 ${side} ${cx} ${cy + r} A ${rx} ${r} 0 0 ${term} ${cx} ${cy - r} Z" fill="url(#moonlit)"/>`;
+    }
+    svg.innerHTML = `<defs><radialGradient id="moonlit" cx=".4" cy=".4"><stop offset="0" stop-color="#fefce8"/><stop offset="1" stop-color="#d4d0bf"/></radialGradient></defs>
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="#222b3d"/>${lit}
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(255,255,255,.18)" stroke-width="1"/>`;
+    const NM = ['Neumond', 'zunehmende Sichel', 'erstes Viertel', 'zunehmender Mond', 'Vollmond', 'abnehmender Mond', 'letztes Viertel', 'abnehmende Sichel'];
+    $('m-name').textContent = NM[Math.round(mi.phase * 8) % 8];
+    $('m-illum').textContent = Math.round(f * 100);
+    const maltd = SunCalc.getMoonPosition(now, LAT, LON).altitude * 180 / Math.PI;
+    $('m-alt-x').textContent = maltd > 0 ? '🌙 über Horizont' : 'unter Horizont';
+  }
+  function updateAstro() {
+    drawSunArc();
+    drawMoon();
+    updateHero();
+  }
+
+  function onMessage(topic, payload) {
+    const field = String(topic).split('/').pop();
+    if (!(field in FIELDS)) return;
+    const raw = payload.toString().trim();
+    let num = Number(raw);
+    if (field === 'solarradiation' && Number.isFinite(num)) num = num / SOLAR_LUX_PER_WM2; // Lux -> W/m²
+    cur[field] = Number.isFinite(num) ? num : raw;
+    $('v-' + field).textContent = Number.isFinite(num) ? num.toFixed(FIELDS[field]) : raw;
+    if (field === 'winddir') $('x-winddir').textContent = compass(raw);
+    if (field === 'windspeed') $('x-wind').textContent = num < 1 ? 'windstill' : (num >= 39 ? 'stürmisch' : '');
+    if (field === 'solarradiation') $('x-solar').textContent = num <= 0 ? 'Nacht / kein Sonnenlicht' : (num > 600 ? 'starke Sonne' : '');
+    if (field === 'pressureabs') $('x-press').textContent = num < 1000 ? 'eher Tiefdruck' : num > 1020 ? 'eher Hochdruck' : 'normal';
+    if (field === 'outdoortemp') $('hero-sub').textContent = 'Aussentemperatur' + (num >= 25 ? ' · warm 🥵' : num <= 3 ? ' · kalt 🥶' : '');
+    $('last').textContent = '· Stand ' + new Date().toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
+    recompute();
+  }
+
+  /* ===== 24h-Verlaeufe (public History-Endpoint -> Inline-SVG-Sparklines) ===== */
+  const CHARTS = [
+    { f: 'outdoortemp', dec: 1, color: '#fb923c', label: '🌡️ Temperatur', unit: '°C' },
+    { f: 'outdoorhumidity', dec: 0, color: '#38bdf8', label: '💧 Luftfeuchte', unit: '%' },
+    { f: 'windspeed', dec: 1, color: '#a3e635', label: '💨 Wind', unit: 'km/h' },
+    { f: 'pressureabs', dec: 1, color: '#c084fc', label: '🔵 Luftdruck', unit: 'hPa' },
+    { f: 'solarradiation', dec: 0, color: '#fde047', label: '☀️ Solarstrahlung', unit: 'W/m²' },
+  ];
+  let lastPoints = [];
+  function drawChart(field, points, dec, color) {
+    const svg = $('chart-' + field); if (!svg) return;
+    const W = 300, H = 70, pad = 5;
+    const data = points.map(p => ({ t: new Date(p.ts).getTime(), v: Number(p[field]) }))
+      .filter(p => Number.isFinite(p.t) && Number.isFinite(p.v));
+    const lo = $('lo-' + field), hi = $('hi-' + field), nw = $('n-' + field);
+    if (data.length < 2) { svg.innerHTML = '<text x="150" y="38" fill="rgba(255,255,255,.55)" font-size="13" text-anchor="middle">sammelt Daten…</text>'; return; }
+    const ts = data.map(d => d.t), vs = data.map(d => d.v);
+    const tmin = Math.min(...ts), tmax = Math.max(...ts);
+    let vmin = Math.min(...vs), vmax = Math.max(...vs);
+    if (vmin === vmax) { vmin -= 1; vmax += 1; }
+    const X = (t) => pad + (W - 2 * pad) * (t - tmin) / (tmax - tmin || 1);
+    const Y = (v) => pad + (H - 2 * pad) * (1 - (v - vmin) / (vmax - vmin));
+    const line = data.map(d => `${X(d.t).toFixed(1)},${Y(d.v).toFixed(1)}`).join(' ');
+    const area = `${pad},${H - pad} ${line} ${(W - pad)},${H - pad}`;
+    svg.innerHTML = `<polygon points="${area}" fill="${color}" opacity="0.16"/>` +
+      `<polyline points="${line}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    if (lo) lo.textContent = '↓ ' + Math.min(...vs).toFixed(dec);
+    if (hi) hi.textContent = '↑ ' + Math.max(...vs).toFixed(dec);
+    if (nw) nw.textContent = data[data.length - 1].v.toFixed(dec);
+  }
+  async function loadHistory() {
+    try {
+      const r = await fetch('/api/wetter/r9/history?h=24', { cache: 'no-store' });
+      if (!r.ok) return;
+      const pts = (await r.json()).points || [];
+      pts.forEach(p => { if (p.solarradiation != null) p.solarradiation /= SOLAR_LUX_PER_WM2; }); // Lux -> W/m²
+      lastPoints = pts;
+      CHARTS.forEach(c => drawChart(c.f, pts, c.dec, c.color));
+    } catch (e) { console.error('history', e); }
+  }
+
+  /* ===== Vollansicht (Modal): flexible Zeitskala + Zoom ===== */
+  function niceStep(span, count) {
+    const raw = (span || 1) / Math.max(1, count);
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const n = raw / mag;
+    return (n < 1.5 ? 1 : n < 3 ? 2 : n < 7 ? 5 : 10) * mag;
+  }
+  const MX0 = 54, MX1 = 624; // Plot-x-Bereich in viewBox-Einheiten
+  const mState = { field: null, hours: 24, points: [], t0: 0, t1: 0 };
+  async function fetchHist(hours) {
+    try {
+      const r = await fetch('/api/wetter/r9/history?h=' + hours, { cache: 'no-store' });
+      if (!r.ok) return [];
+      const pts = (await r.json()).points || [];
+      pts.forEach(p => { if (p.solarradiation != null) p.solarradiation /= SOLAR_LUX_PER_WM2; });
+      return pts;
+    } catch (e) { console.error('hist', e); return []; }
+  }
+  async function modalLoad(hours) {
+    mState.hours = hours;
+    [...$('modal-ranges').children].forEach(b => b.classList.toggle('on', +b.dataset.h === hours));
+    const pts = await fetchHist(hours);
+    mState.points = pts.map(p => ({ t: new Date(p.ts).getTime(), v: Number(p[mState.field]) }))
+      .filter(p => Number.isFinite(p.t) && Number.isFinite(p.v));
+    if (mState.points.length) { mState.t0 = mState.points[0].t; mState.t1 = mState.points[mState.points.length - 1].t; }
+    renderModal();
+  }
+  function openChart(field) {
+    const cfg = CHARTS.find(c => c.f === field); if (!cfg) return;
+    mState.field = field;
+    $('modal-title').textContent = cfg.label + ' · ' + cfg.unit;
+    $('modal').dataset.field = field;
+    $('modal').classList.add('open');
+    modalLoad(mState.hours || 24);
+  }
+  function closeModal() { $('modal').classList.remove('open'); $('modal').dataset.field = ''; }
+  function resetZoom() { if (mState.points.length) { mState.t0 = mState.points[0].t; mState.t1 = mState.points[mState.points.length - 1].t; renderModal(); } }
+  function fmtTick(t, span) {
+    const d = new Date(t);
+    return span <= 36 * 3600e3
+      ? d.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit' });
+  }
+  function pxToTime(px) { return mState.t0 + (mState.t1 - mState.t0) * (Math.max(MX0, Math.min(MX1, px)) - MX0) / (MX1 - MX0); }
+  function clientToSvgX(clientX) { const r = $('modal-svg').getBoundingClientRect(); return Math.max(MX0, Math.min(MX1, (clientX - r.left) / r.width * 640)); }
+  function renderModal(sel) {
+    const cfg = CHARTS.find(c => c.f === mState.field); if (!cfg) return;
+    const svg = $('modal-svg');
+    const W = 640, H = 340, mT = 16, mB = 36, x0 = MX0, x1 = MX1, y0 = mT, y1 = H - mB;
+    const all = mState.points;
+    if (all.length < 2) { svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" fill="rgba(255,255,255,.6)" font-size="15" text-anchor="middle">noch zu wenig Daten</text>`; $('modal-sub').textContent = ''; return; }
+    let t0 = mState.t0, t1 = mState.t1; if (t1 - t0 < 60e3) t1 = t0 + 60e3;
+    const vis = all.filter(d => d.t >= t0 && d.t <= t1);
+    const data = vis.length >= 2 ? vis : all;
+    const vs = data.map(d => d.v);
+    let vmin = Math.min(...vs), vmax = Math.max(...vs); if (vmin === vmax) { vmin -= 1; vmax += 1; }
+    const vstep = niceStep(vmax - vmin, 4);
+    const vlo = Math.floor(vmin / vstep) * vstep, vhi = Math.ceil(vmax / vstep) * vstep;
+    const span = t1 - t0;
+    const X = (t) => x0 + (x1 - x0) * (t - t0) / (span || 1);
+    const Y = (v) => y1 - (y1 - y0) * (v - vlo) / (vhi - vlo || 1);
+    let g = '';
+    for (let v = vlo; v <= vhi + 1e-9; v += vstep) { const y = Y(v); g += `<line class="grid" x1="${x0}" y1="${y.toFixed(1)}" x2="${x1}" y2="${y.toFixed(1)}"/><text class="tl" x="${x0 - 7}" y="${(y + 3.5).toFixed(1)}" text-anchor="end">${+v.toFixed(cfg.dec)}</text>`; }
+    const N = 5;
+    for (let i = 0; i <= N; i++) { const t = t0 + span * i / N, x = X(t); g += `<line class="grid" x1="${x.toFixed(1)}" y1="${y0}" x2="${x.toFixed(1)}" y2="${y1}"/><text class="tl" x="${x.toFixed(1)}" y="${y1 + 16}" text-anchor="middle">${fmtTick(t, span)}</text>`; }
+    g += `<line class="ax" x1="${x0}" y1="${y0}" x2="${x0}" y2="${y1}"/><line class="ax" x1="${x0}" y1="${y1}" x2="${x1}" y2="${y1}"/>`;
+    const line = data.map(d => `${X(d.t).toFixed(1)},${Y(d.v).toFixed(1)}`).join(' ');
+    g += `<polygon points="${X(data[0].t).toFixed(1)},${y1} ${line} ${X(data[data.length - 1].t).toFixed(1)},${y1}" fill="${cfg.color}" opacity="0.15"/>`;
+    g += `<polyline points="${line}" fill="none" stroke="${cfg.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+    if (sel) g += `<rect x="${Math.min(sel.a, sel.b).toFixed(1)}" y="${y0}" width="${Math.abs(sel.b - sel.a).toFixed(1)}" height="${y1 - y0}" fill="rgba(255,255,255,.2)" stroke="rgba(255,255,255,.5)"/>`;
+    svg.innerHTML = g;
+    const lo = Math.min(...vs), hi = Math.max(...vs), now = all[all.length - 1].v;
+    const hrs = Math.round((t1 - t0) / 3600e3 * 10) / 10;
+    $('modal-sub').textContent = `jetzt ${now.toFixed(cfg.dec)} · Fenster ${hrs} h · min ${lo.toFixed(cfg.dec)} / max ${hi.toFixed(cfg.dec)} ${cfg.unit}`;
+  }
+
+  // Oeffentlich: read-only MQTT-User (nur wetter/r9/# lesen), eingebettet — keine Anmeldung.
+  function connect() {
+    setConn('wait', 'verbinde…');
+    const client = mqtt.connect('wss://mqtt.rosenweg4303.ch', {
+      username: 'wetter-public', password: 'wetter-public-a5aafd438e6f4dfb',
+      protocolVersion: 4, clean: true, reconnectPeriod: 6000, connectTimeout: 12000,
+      clientId: 'rwwetter_' + Math.random().toString(16).slice(2, 10),
+    });
+    client.on('connect', () => { setConn('ok', 'live'); client.subscribe('wetter/r9/#', { qos: 0 }, (e) => { if (e) setConn('err', 'kein Zugriff'); }); });
+    client.on('message', onMessage);
+    client.on('reconnect', () => setConn('wait', 'reconnect…'));
+    client.on('close', () => setConn('off', 'getrennt'));
+    client.on('error', (e) => { console.error('mqtt', e); setConn('err', 'Fehler'); });
+  }
+
+  function updateClock() {
+    const n = new Date();
+    $('clock-t').textContent = n.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    $('clock-d').textContent = n.toLocaleDateString('de-CH', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    updateClock();
+    setInterval(updateClock, 1000); // Uhr jede Sekunde
+    updateAstro();
+    setInterval(updateAstro, 60000); // Sonne/Mond jede Minute
+    loadHistory();
+    setInterval(loadHistory, 300000); // Verlauf alle 5 Min nachladen
+    connect();
+    $('charts').addEventListener('click', (e) => {
+      const card = e.target.closest('.chart-card'); if (!card) return;
+      const svg = card.querySelector('svg'); if (!svg) return;
+      openChart(svg.id.replace('chart-', ''));
+    });
+    $('modal-close').addEventListener('click', closeModal);
+    $('modal').addEventListener('click', (e) => { if (e.target === $('modal')) closeModal(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+    $('modal-ranges').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) modalLoad(+b.dataset.h); });
+    $('modal-reset').addEventListener('click', resetZoom);
+    const msvg = $('modal-svg'); let drag = null;
+    msvg.addEventListener('pointerdown', (e) => { drag = { a: clientToSvgX(e.clientX) }; try { msvg.setPointerCapture(e.pointerId); } catch (_) {} });
+    msvg.addEventListener('pointermove', (e) => { if (!drag) return; drag.b = clientToSvgX(e.clientX); renderModal({ a: drag.a, b: drag.b }); });
+    msvg.addEventListener('pointerup', (e) => {
+      if (!drag) return; const b = clientToSvgX(e.clientX);
+      if (Math.abs(b - drag.a) > 8) { const tA = pxToTime(drag.a), tB = pxToTime(b); mState.t0 = Math.min(tA, tB); mState.t1 = Math.max(tA, tB); }
+      drag = null; renderModal();
+    });
+    msvg.addEventListener('pointercancel', () => { drag = null; renderModal(); });
+    msvg.addEventListener('dblclick', resetZoom);
+    msvg.addEventListener('wheel', (e) => {
+      if (!mState.points.length) return; e.preventDefault();
+      const tc = pxToTime(clientToSvgX(e.clientX)), f = e.deltaY < 0 ? 0.7 : 1.4;
+      let n0 = tc - (tc - mState.t0) * f, n1 = tc + (mState.t1 - tc) * f;
+      const dMin = mState.points[0].t, dMax = mState.points[mState.points.length - 1].t;
+      n0 = Math.max(dMin, n0); n1 = Math.min(dMax, n1);
+      if (n1 - n0 > 60e3) { mState.t0 = n0; mState.t1 = n1; renderModal(); }
+    }, { passive: false });
+  });
+  </script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/wetter/sw.js', { scope: '/wetter/' }).catch(() => {});
+    }
+  </script>
+  <script src="/js/pwa-install-hint.js"></script>
+</body>
+</html>
