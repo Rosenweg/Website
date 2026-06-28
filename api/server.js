@@ -11912,8 +11912,10 @@ async function resendOffeneAuszahlungenFuerWirksameVerwaltung(stwegOrNull) {
 
 function canSeeAuslage(row, user) {
   const groups = user?.groups || [];
+  const isOwner = row.user_email && row.user_email.toLowerCase() === (user.email || '').toLowerCase();
+  if (row.status === 'entwurf') return isOwner; // Entwuerfe (Reklamations-Entschaedigung) nur fuer den Ersteller
   if (isTechnik(groups) || isPraesident(groups)) return true;
-  if (row.user_email && row.user_email.toLowerCase() === (user.email || '').toLowerCase()) return true;
+  if (isOwner) return true;
   // Ausschuss seines STWEGs sieht Auslagen seines STWEGs
   if (row.stweg && getAusschussStwegs(groups).has(parseInt(row.stweg, 10))) return true;
   // M6: STWEG-uebergreifende Auslagen (stweg=NULL) sind für alle Ausschuss-Mitglieder sichtbar
@@ -12120,6 +12122,9 @@ app.get('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'), 
       params.push(projektFilter);
       where += ` AND projekt_slug = $${params.length}`;
     }
+    // Entwuerfe (Reklamations-Entschaedigung) nur fuer den Ersteller sichtbar.
+    params.push(email);
+    where = `(${where}) AND (status <> 'entwurf' OR LOWER(user_email) = $${params.length})`;
     const result = await pool.query(
       `SELECT a.id, a.user_email, a.user_name, a.stweg, a.datum, a.kategorie, a.beschreibung, a.betrag_chf,
               a.iban, a.beleg_path, a.beleg_filename, a.status, a.bemerkung_eigentuemer, a.bemerkung_ausschuss,
@@ -12274,7 +12279,7 @@ app.put('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'read
     const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
 
-    if (isOwner && row.status === 'eingereicht') {
+    if (isOwner && (row.status === 'eingereicht' || row.status === 'entwurf')) {
       if (req.body.datum !== undefined) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(String(req.body.datum))) return res.status(400).json({ error: 'Datum YYYY-MM-DD' });
         push('datum', req.body.datum);
@@ -12316,11 +12321,17 @@ app.put('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'read
       const newStatus = req.body.status;
       if (!AUSLAGEN_STATUS.includes(newStatus)) return res.status(400).json({ error: 'Ungueltiger Status' });
       const isOwnerConfirmPaid = isOwner && newStatus === 'ausbezahlt' && row.status === 'genehmigt';
+      // Eigentümer reicht eigenen Entwurf ein (entwurf -> eingereicht); Betrag muss dann > 0 sein.
+      const isOwnerSubmitDraft = isOwner && row.status === 'entwurf' && newStatus === 'eingereicht';
+      if (isOwnerSubmitDraft) {
+        const effBetrag = req.body.betrag_chf !== undefined ? Number(req.body.betrag_chf) : Number(row.betrag_chf);
+        if (!Number.isFinite(effBetrag) || effBetrag <= 0) return res.status(400).json({ error: 'Betrag erforderlich zum Einreichen' });
+      }
       if (canReview) {
         if (newStatus === 'ausbezahlt' && !canMarkPaid(req.user, row)) {
           return res.status(403).json({ error: '"Ausbezahlt" dürfen nur Verwaltung, Technik, Präsident oder der einreichende Eigentümer (nach Genehmigung) setzen' });
         }
-      } else if (!isOwnerConfirmPaid) {
+      } else if (!isOwnerConfirmPaid && !isOwnerSubmitDraft) {
         return res.status(403).json({ error: 'Keine Berechtigung für diese Status-Änderung' });
       }
       push('status', newStatus);
@@ -16348,6 +16359,49 @@ app.put('/api/reklamationen/auto-assign', authMiddleware, requirePermission('rek
 // UND Technik-Bot (gleicher Pfad: Update + Verlauf + Auto-Assign-Notify + Melder-Notify).
 // fields: Teilmenge von {status, kategorie, handwerker_id, zugewiesen_an, notiz, archiviert}.
 // actor: Name fuer den Verlauf. Rueckgabe { reklamation } ODER { error, status }.
+// Aufwandentschaedigung-Entwurf: Empfaenger (zugewiesene Technik / actor) zu {email,name} aufloesen.
+async function resolveAuslageRecipient(s) {
+  const v = String(s || '').trim();
+  if (!v || v.toLowerCase() === 'technik-bot' || v.toLowerCase() === 'system') return null;
+  if (v.includes('@')) {
+    const p = await pool.query('SELECT name FROM personen WHERE LOWER(email) = LOWER($1) LIMIT 1', [v]);
+    return { email: v.toLowerCase(), name: p.rows[0]?.name || v };
+  }
+  const p = await pool.query(
+    "SELECT name, email FROM personen WHERE LOWER(name) = LOWER($1) AND email IS NOT NULL AND email <> '' ORDER BY id LIMIT 1",
+    [v]
+  );
+  if (p.rows[0]?.email) return { email: String(p.rows[0].email).toLowerCase(), name: p.rows[0].name };
+  return null;
+}
+
+// Beim Erledigen einer Reklamation einen vorbefuellten Entwurf in der Aufwandentschaedigung
+// (auslagen, status='entwurf') fuer die zugewiesene Technik anlegen. Idempotent pro Reklamation.
+async function createAuslageEntwurfFromReklamation(rekl, actor) {
+  try {
+    const exists = await pool.query('SELECT 1 FROM auslagen WHERE reklamation_id = $1 LIMIT 1', [rekl.id]);
+    if (exists.rows.length) return;
+    const recip = (await resolveAuslageRecipient(rekl.zugewiesen_an)) || (await resolveAuslageRecipient(actor));
+    if (!recip) return; // niemand zuordenbar -> kein Entwurf
+    const lastIban = await pool.query(
+      'SELECT iban FROM auslagen WHERE LOWER(user_email) = $1 AND iban IS NOT NULL ORDER BY created_at DESC LIMIT 1',
+      [recip.email]
+    );
+    const steps = await pool.query(
+      "SELECT event FROM reklamation_events WHERE reklamation_id = $1 AND event LIKE '🔧%' ORDER BY created_at",
+      [rekl.id]
+    ).catch(() => ({ rows: [] }));
+    const stepTxt = steps.rows.map(r => String(r.event).replace(/^🔧\s*/, '')).join('; ');
+    const besch = (`Reklamation #${rekl.id}: ${String(rekl.beschreibung || '').slice(0, 300)}` + (stepTxt ? ` — ${stepTxt}` : '')).slice(0, 2000);
+    await pool.query(
+      `INSERT INTO auslagen (user_email, user_name, stweg, datum, kategorie, beschreibung, betrag_chf, iban, status, reklamation_id)
+       VALUES ($1, $2, $3, CURRENT_DATE, 'Arbeitszeit', $4, 0, $5, 'entwurf', $6)`,
+      [recip.email, recip.name, rekl.stweg || null, besch, lastIban.rows[0]?.iban || null, rekl.id]
+    );
+    logReklEvent(rekl.id, 'System', `💰 Entschädigungs-Entwurf für ${recip.name} angelegt`).catch(() => {});
+  } catch (e) { console.error('[auslage-entwurf]', e.message); }
+}
+
 async function updateReklamation(id, fields, actor) {
   const b = fields || {};
   if (!Number.isFinite(id)) return { error: 'Ungueltige ID', status: 400 };
@@ -16390,6 +16444,10 @@ async function updateReklamation(id, fields, actor) {
   // Melder-Benachrichtigung bei Status-WECHSEL (E-Mail/WhatsApp/Push).
   if (b.status !== undefined && b.status !== before.status && updated.person_id) {
     notifyMelderStatus(updated, b.status, b.notiz || '').catch((e) => console.warn('[reklamation] Status-Mail:', e.message));
+  }
+  // Aufwandentschaedigung: beim Wechsel auf 'erledigt' Entwurf fuer die zugewiesene Technik anlegen.
+  if (b.status === 'erledigt' && before.status !== 'erledigt') {
+    createAuslageEntwurfFromReklamation(updated, who).catch(() => {});
   }
   return { reklamation: updated };
 }
@@ -23188,6 +23246,14 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_auslagen_user ON auslagen(user_email);
       CREATE INDEX IF NOT EXISTS idx_auslagen_stweg_status ON auslagen(stweg, status);
       CREATE INDEX IF NOT EXISTS idx_auslagen_created ON auslagen(created_at DESC);
+
+      -- Reklamations-Aufwandentschaedigung: Entwurf-Status + Reklamationsbezug.
+      ALTER TABLE auslagen DROP CONSTRAINT IF EXISTS auslagen_status_chk;
+      ALTER TABLE auslagen ADD CONSTRAINT auslagen_status_chk CHECK (status IN ('entwurf','eingereicht','genehmigt','abgelehnt','ausbezahlt'));
+      ALTER TABLE auslagen DROP CONSTRAINT IF EXISTS auslagen_betrag_chk;
+      ALTER TABLE auslagen ADD CONSTRAINT auslagen_betrag_chk CHECK (betrag_chf >= 0 AND betrag_chf <= 100000);
+      ALTER TABLE auslagen ADD COLUMN IF NOT EXISTS reklamation_id INTEGER;
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_auslagen_reklamation ON auslagen(reklamation_id) WHERE reklamation_id IS NOT NULL;
 
       -- Generische Mail-Empfänger-Stammdaten (Anwalt, Bank, Versicherung,
       -- Handwerker, Behoerde, Energieversorger etc.). Die "Verwaltung" bleibt
