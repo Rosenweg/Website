@@ -85,13 +85,11 @@
     <section id="view-erfassen" class="py-4">
 
       <!-- Modus-Umschalter Timer / Manuell -->
-      <div class="grid grid-cols-3 gap-2 mb-5 bg-slate-100 rounded-xl p-1">
+      <div class="grid grid-cols-2 gap-2 mb-5 bg-slate-100 rounded-xl p-1">
         <button type="button" id="modeTimer"
-          class="mode-btn sel rounded-lg py-2 text-sm font-semibold active:opacity-90">⏱️ Zeit</button>
+          class="mode-btn sel rounded-lg py-2 text-sm font-semibold active:opacity-90">⏱️ Stoppuhr</button>
         <button type="button" id="modeManuell"
           class="mode-btn rounded-lg py-2 text-sm font-semibold active:opacity-90">✏️ Manuell</button>
-        <button type="button" id="modeQuittung"
-          class="mode-btn rounded-lg py-2 text-sm font-semibold active:opacity-90">📷 Quittung</button>
       </div>
 
       <!-- Timer-Panel -->
@@ -158,31 +156,25 @@
           <p class="text-[11px] text-slate-400 mt-1">Wird auf diesem Gerät gemerkt — nur einmal eingeben.</p>
         </div>
 
-        <!-- Quittung (KI-Scan) -->
-        <div id="quittungPanel" class="hidden space-y-4">
-          <div>
-            <label class="block text-sm font-semibold mb-2">📷 Quittung / Beleg</label>
-            <input id="q-file" type="file" accept="image/*,application/pdf" capture="environment"
-              class="w-full text-sm text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-sky-50 file:text-sky-700">
-            <div class="flex items-center justify-between mt-2">
-              <label class="flex items-center gap-2 text-xs text-slate-600">
-                <input type="checkbox" id="q-ki" checked> 🤖 automatisch auslesen
-              </label>
-              <span id="q-status" class="hidden text-sm font-medium text-purple-700">🤖 liest…</span>
-            </div>
-            <p class="text-[11px] text-slate-400 mt-1">Foto wird auf dem Gerät verkleinert; mehrere Belege möglich. Fremdwährung wird in CHF umgerechnet.</p>
+        <!-- Quittungen / Material (optional) — gehört zum selben Vorgang wie die Arbeitszeit -->
+        <div id="quittungPanel" class="space-y-3 border-t border-slate-200 pt-4">
+          <div class="text-sm font-semibold">📷 Quittungen / Material <span class="text-slate-400 font-normal">(optional)</span></div>
+          <input id="q-file" type="file" accept="image/*,application/pdf" capture="environment"
+            class="w-full text-sm text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-sky-50 file:text-sky-700">
+          <div class="flex items-center justify-between">
+            <label class="flex items-center gap-2 text-xs text-slate-600">
+              <input type="checkbox" id="q-ki" checked> 🤖 automatisch auslesen
+            </label>
+            <span id="q-status" class="hidden text-sm font-medium text-purple-700">🤖 liest…</span>
           </div>
           <div id="q-belege" class="space-y-1 text-xs"></div>
           <div>
-            <label class="block text-sm font-semibold mb-2">Kategorie</label>
-            <select id="q-kategorie" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base bg-white"></select>
-          </div>
-          <div>
-            <label class="block text-sm font-semibold mb-2">Betrag CHF <span class="text-red-500">*</span></label>
+            <label class="block text-sm font-semibold mb-1">Material-Betrag CHF <span class="text-slate-400 font-normal">(aus Quittung, anpassbar)</span></label>
             <input id="q-betrag" type="number" step="0.05" min="0" inputmode="decimal"
               class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base">
           </div>
           <div id="q-plausi" class="hidden text-sm rounded-lg px-3 py-2"></div>
+          <p class="text-[11px] text-slate-400">Foto wird auf dem Gerät verkleinert; mehrere möglich. Fremdwährung → CHF.</p>
         </div>
 
         <!-- Betrag-Vorschau -->
@@ -472,11 +464,14 @@
   function updateBetrag() {
     const h = currentStunden();
     const satz = (aktuellerSatz != null && Number.isFinite(aktuellerSatz)) ? aktuellerSatz : 0;
-    const betrag = Math.round(h * satz * 100) / 100;
-    $('betragVorschau').textContent = fmtChf(betrag);
-    $('betragRechnung').textContent = (h > 0 && satz > 0)
-      ? `${h} h × ${fmtChf(satz)}`
-      : '';
+    const zeit = Math.round(h * satz * 100) / 100;
+    const material = Math.round((parseFloat($('q-betrag').value) || 0) * 100) / 100;
+    const total = Math.round((zeit + material) * 100) / 100;
+    $('betragVorschau').textContent = fmtChf(total);
+    const parts = [];
+    if (h > 0 && satz > 0) parts.push(`${h} h × ${fmtChf(satz)}`);
+    if (material > 0) parts.push(`Material ${fmtChf(material)}`);
+    $('betragRechnung').textContent = parts.join('  +  ');
   }
 
   // =====================================================================
@@ -514,19 +509,9 @@
   // ---------- Modus-Umschalter ----------
   function setMode(m) {
     mode = m;
-    const q = m === 'quittung';
     $('modeTimer').classList.toggle('sel', m === 'timer');
     $('modeManuell').classList.toggle('sel', m === 'manuell');
-    $('modeQuittung').classList.toggle('sel', q);
     $('timerPanel').classList.toggle('hidden', m !== 'timer');
-    // Arbeitszeit-Felder (Stunden + Stundensatz-Vorschau) nur in den Zeit-Modi
-    $('grpStunden').classList.toggle('hidden', q);
-    $('betragBox').classList.toggle('hidden', q);
-    $('quittungPanel').classList.toggle('hidden', !q);
-    $('submitBtn').textContent = q ? 'Quittung einreichen' : 'Einreichen';
-    if (q && !$('q-kategorie').options.length) {
-      $('q-kategorie').innerHTML = KATEGORIEN.filter(k => k !== 'Arbeitszeit').map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
-    }
     if (m === 'manuell') {
       $('stundenHint').classList.add('hidden');
       $('stunden').focus();
@@ -567,13 +552,13 @@
     $('datum').value = todayIso();
     $('formMsg').classList.add('hidden');
     $('stundenHint').classList.add('hidden');
+    resetQuittung();
     updateBetrag();
   }
 
   async function onSubmit(ev, asDraft) {
     if (ev) ev.preventDefault();
     $('formMsg').classList.add('hidden');
-    if (mode === 'quittung') return submitQuittung(asDraft);
 
     const datum = $('datum').value || todayIso();
     const beschreibung = $('beschreibung').value.trim();
@@ -581,29 +566,25 @@
     const stweg = selectedStweg();
     const ibanRaw = $('iban').value.trim().replace(/\s+/g, '').toUpperCase();
     const hasHours = stunden > 0;
+    const satz = aktuellerSatz;
+    const zeitBetrag = hasHours ? Math.round(stunden * satz * 100) / 100 : 0;
+    const materialBetrag = Math.round((parseFloat($('q-betrag').value) || 0) * 100) / 100;
+    const total = Math.round((zeitBetrag + materialBetrag) * 100) / 100;
 
-    if (!beschreibung) { showFormMsg('Bitte eine Tätigkeit beschreiben.', 'err'); return; }
-    if (!asDraft && !hasHours) { showFormMsg('Bitte Stunden erfassen (Stoppuhr stoppen oder manuell eingeben).', 'err'); return; }
+    if (!beschreibung) { showFormMsg('Bitte eine Tätigkeit / Beschreibung angeben.', 'err'); return; }
     if (hasHours && (aktuellerSatz == null || !Number.isFinite(aktuellerSatz) || aktuellerSatz <= 0)) {
       showFormMsg('Kein Stundensatz hinterlegt — bitte Ausschuss.', 'err'); return;
     }
+    if (!asDraft && total <= 0) { showFormMsg('Bitte Stunden erfassen oder eine Quittung / einen Material-Betrag hinzufügen.', 'err'); return; }
+    if (!asDraft && SCAN_WARN && !confirm('Plausi-Warnung: ' + SCAN_WARN + '\n\nTrotzdem einreichen?')) return;
 
-    const satz = aktuellerSatz;
-    const betrag = hasHours ? Math.round(stunden * satz * 100) / 100 : 0;
-
-    // IBAN auf diesem Gerät merken
     if (ibanRaw) { try { localStorage.setItem(IBAN_KEY, ibanRaw); } catch {} }
 
     const btn = asDraft ? $('draftBtn') : $('submitBtn');
     btn.disabled = true; const old = btn.textContent; btn.textContent = asDraft ? 'Speichert …' : 'Wird eingereicht …';
 
-    // --- Schritt 1: Auslage anlegen ---
-    const payload = {
-      datum,
-      beschreibung,
-      betrag_chf: betrag,
-      kategorie: 'Arbeitszeit',
-    };
+    // --- Schritt 1: EINE Auslage (Zeit + Material zusammen = ein Vorgang) ---
+    const payload = { datum, beschreibung, betrag_chf: total, kategorie: hasHours ? 'Arbeitszeit' : 'Material' };
     if (asDraft) payload.status = 'entwurf';
     if (stweg != null) payload.stweg = stweg;
     if (ibanRaw) payload.iban = ibanRaw;
@@ -611,11 +592,11 @@
     let auslageId = null;
     try {
       const r = await AuthentikAuth.apiFetch('/api/auslagen', { method: 'POST', body: payload });
-      if (r.status === 403) { showFormMsg('Du hast keine Berechtigung für die Arbeitserfassung. Bitte beim Ausschuss melden.', 'err'); btn.disabled = false; btn.textContent = old; return; }
+      if (r.status === 403) { showFormMsg('Du hast keine Berechtigung für die Erfassung. Bitte beim Ausschuss melden.', 'err'); btn.disabled = false; btn.textContent = old; return; }
       if (!r.ok) {
         let msg = 'HTTP ' + r.status;
         try { const j = await r.json(); if (j && j.error) msg = j.error; } catch {}
-        showFormMsg('Konnte nicht eingereicht werden: ' + msg, 'err');
+        showFormMsg('Konnte nicht gespeichert werden: ' + msg, 'err');
         btn.disabled = false; btn.textContent = old; return;
       }
       const j = await r.json().catch(() => ({}));
@@ -625,34 +606,40 @@
       btn.disabled = false; btn.textContent = old; return;
     }
 
-    // --- Schritt 2: Position "arbeitszeit" setzen (Best-Effort; nur wenn Stunden erfasst) ---
-    if (auslageId != null && hasHours) {
-      try {
-        const r2 = await AuthentikAuth.apiFetch(`/api/auslagen/${auslageId}/positionen`, {
-          method: 'PUT',
-          body: {
-            positionen: [{
-              position_typ: 'arbeitszeit',
-              beschreibung,
-              menge: stunden,
-              einheit: 'h',
-              einzelpreis: satz,
-              gesamt_chf: betrag,
-            }],
-          },
-        });
-        if (!r2.ok) console.warn('[arbeit] Positionen-Update fehlgeschlagen (Auslage existiert):', r2.status);
-      } catch (e) {
-        console.warn('[arbeit] Positionen-Update Netzfehler (Auslage existiert):', e.message);
+    // --- Schritt 2: Belege hochladen (Quittungen) ---
+    if (auslageId != null) {
+      for (const b of Q_BELEGE) {
+        try {
+          await AuthentikAuth.apiFetch(`/api/auslagen/${auslageId}/belege`, {
+            method: 'POST', body: { beleg_base64: b.base64, beleg_filename: b.filename, waehrung_original: b.waehrung, wechselkurs_chf: b.kurs, kurs_quelle: b.quelle },
+          });
+        } catch (e) { console.warn('[arbeit] Beleg-Upload:', e.message); }
       }
     }
 
-    // --- Erfolg: Timer zuruecksetzen, Erfolgs-Screen ---
+    // --- Schritt 3: Positionen (Arbeitszeit + Material) ---
+    if (auslageId != null) {
+      const positionen = [];
+      if (hasHours) positionen.push({ position_typ: 'arbeitszeit', beschreibung, menge: stunden, einheit: 'h', einzelpreis: satz, gesamt_chf: zeitBetrag });
+      Q_POSITIONEN.forEach(p => positionen.push(p));
+      if (positionen.length) {
+        try {
+          const r2 = await AuthentikAuth.apiFetch(`/api/auslagen/${auslageId}/positionen`, { method: 'PUT', body: { positionen } });
+          if (!r2.ok) console.warn('[arbeit] Positionen:', r2.status);
+        } catch (e) { console.warn('[arbeit] Positionen:', e.message); }
+      }
+    }
+
+    // --- Erfolg ---
     timerReset();
+    const teile = [];
+    if (hasHours) teile.push(`${stunden} h × ${fmtChf(satz)}`);
+    if (materialBetrag > 0) teile.push(`Material ${fmtChf(materialBetrag)}`);
     $('successText').textContent = asDraft
-      ? `Als Entwurf gespeichert${hasHours ? ` (${stunden} h × ${fmtChf(satz)} = ${fmtChf(betrag)})` : ''}. Unter „Meine Erfassungen" ergänzen & einreichen.`
-      : `${stunden} h × ${fmtChf(satz)} = ${fmtChf(betrag)}, zur Genehmigung eingereicht.`;
+      ? `Als Entwurf gespeichert (${fmtChf(total)}${teile.length ? ': ' + teile.join(' + ') : ''}). Unter „Meine Erfassungen" ergänzen & einreichen.`
+      : `${teile.join(' + ')}${teile.length ? ' = ' : ''}${fmtChf(total)} eingereicht${Q_BELEGE.length ? ` (${Q_BELEGE.length} Beleg${Q_BELEGE.length > 1 ? 'e' : ''})` : ''}.`;
     resetForm();
+    resetQuittung();
     $('view-erfassen').classList.add('hidden');
     $('view-meine').classList.add('hidden');
     $('view-success').classList.remove('hidden');
@@ -808,7 +795,7 @@
   function resetQuittung() {
     Q_BELEGE = []; Q_POSITIONEN = []; Q_SCANTOTAL = 0;
     $('q-file').value = ''; $('q-betrag').value = '';
-    renderQBelege(); renderQPlausi();
+    renderQBelege(); renderQPlausi(); updateBetrag();
   }
 
   // Bild im Browser verkleinern -> JPEG-base64 (wandelt auch HEIC zu JPEG); PDF roh.
@@ -902,6 +889,7 @@
       Q_SCANTOTAL += Number(scan.total) || 0;
       if (Q_SCANTOTAL > 0) $('q-betrag').value = Q_SCANTOTAL.toFixed(2);
       renderQPlausi();
+      updateBetrag();
       if (scan.währung && scan.währung !== 'CHF') {
         showFormMsg(`Beleg in ${scan.währung} → CHF ${(scan.total || 0).toFixed(2)} (${scan.kurs_quelle}).`, 'ok');
       }
@@ -909,56 +897,7 @@
     $('q-file').value = '';
   }
 
-  async function submitQuittung(asDraft) {
-    const datum = $('datum').value || todayIso();
-    const beschreibung = $('beschreibung').value.trim();
-    const stweg = selectedStweg();
-    const ibanRaw = $('iban').value.trim().replace(/\s+/g, '').toUpperCase();
-    const betrag = parseFloat($('q-betrag').value) || 0;
-    if (!beschreibung) { showFormMsg('Bitte Beschreibung / Lieferant angeben.', 'err'); return; }
-    if (!asDraft && !(betrag > 0)) { showFormMsg('Bitte Betrag erfassen.', 'err'); return; }
-    if (ibanRaw && !/^[A-Z]{2}\d{2}[A-Z0-9]{4,30}$/.test(ibanRaw)) { showFormMsg('IBAN ungültig.', 'err'); return; }
-    if (!asDraft) {
-      renderQPlausi();
-      if (!$('q-plausi').classList.contains('hidden') && !confirm('Plausi-Warnung (Betrag ≠ Beleg-Total). Trotzdem einreichen?')) return;
-    }
-    if (ibanRaw) { try { localStorage.setItem(IBAN_KEY, ibanRaw); } catch {} }
-
-    const btn = asDraft ? $('draftBtn') : $('submitBtn'); btn.disabled = true; const old = btn.textContent; btn.textContent = asDraft ? 'Speichert …' : 'Wird eingereicht …';
-    const payload = { datum, beschreibung, betrag_chf: betrag, kategorie: $('q-kategorie').value || 'Material' };
-    if (asDraft) payload.status = 'entwurf';
-    if (stweg != null) payload.stweg = stweg;
-    if (ibanRaw) payload.iban = ibanRaw;
-    let id = null;
-    try {
-      const r = await AuthentikAuth.apiFetch('/api/auslagen', { method: 'POST', body: payload });
-      const j = await r.json().catch(() => ({}));
-      if (r.status === 403) { showFormMsg('Keine Berechtigung für die Erfassung.', 'err'); btn.disabled = false; btn.textContent = old; return; }
-      if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
-      id = j.auslage && j.auslage.id;
-    } catch (e) { showFormMsg('Einreichen fehlgeschlagen: ' + e.message, 'err'); btn.disabled = false; btn.textContent = old; return; }
-
-    for (const b of Q_BELEGE) {
-      try {
-        await AuthentikAuth.apiFetch(`/api/auslagen/${id}/belege`, {
-          method: 'POST', body: { beleg_base64: b.base64, beleg_filename: b.filename, waehrung_original: b.waehrung, wechselkurs_chf: b.kurs, kurs_quelle: b.quelle },
-        });
-      } catch (e) { console.warn('[quittung] Beleg-Upload:', e.message); }
-    }
-    if (Q_POSITIONEN.length) {
-      try { await AuthentikAuth.apiFetch(`/api/auslagen/${id}/positionen`, { method: 'PUT', body: { positionen: Q_POSITIONEN } }); }
-      catch (e) { console.warn('[quittung] Positionen:', e.message); }
-    }
-
-    btn.disabled = false; btn.textContent = old;
-    $('successText').textContent = asDraft
-      ? `Quittung als Entwurf gespeichert${Q_BELEGE.length ? ` (${Q_BELEGE.length} Beleg${Q_BELEGE.length > 1 ? 'e' : ''})` : ''}. Unter „Meine Erfassungen" einreichen.`
-      : `Quittung über ${fmtChf(betrag)} eingereicht${Q_BELEGE.length > 1 ? ' (' + Q_BELEGE.length + ' Belege)' : ''}.`;
-    resetQuittung();
-    $('beschreibung').value = '';
-    $('view-erfassen').classList.add('hidden'); $('view-meine').classList.add('hidden');
-    $('view-success').classList.remove('hidden');
-  }
+  // Quittung-Einreichen ist in onSubmit aufgegangen: Zeit + Material = EIN Vorgang.
 
   // ---------- Beleg-Viewer ----------
   let VIEWER_URL = null;
@@ -1084,9 +1023,8 @@
     // Modus
     $('modeTimer').addEventListener('click', () => setMode('timer'));
     $('modeManuell').addEventListener('click', () => setMode('manuell'));
-    $('modeQuittung').addEventListener('click', () => setMode('quittung'));
     $('q-file').addEventListener('change', e => { if (e.target.files[0]) addQuittung(e.target.files[0], $('q-ki').checked); });
-    $('q-betrag').addEventListener('input', renderQPlausi);
+    $('q-betrag').addEventListener('input', () => { renderQPlausi(); updateBetrag(); });
 
     // Timer-Buttons
     $('btnStart').addEventListener('click', timerStart);
