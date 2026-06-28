@@ -197,6 +197,10 @@
           class="w-full bg-sky-700 text-white font-semibold text-lg rounded-xl py-3.5 shadow active:bg-sky-800 disabled:opacity-50">
           Erfassen &amp; einreichen
         </button>
+        <button type="button" id="draftBtn"
+          class="w-full mt-2 bg-white border border-slate-300 text-slate-700 font-semibold rounded-xl py-3 active:bg-slate-50 disabled:opacity-50">
+          Als Entwurf speichern
+        </button>
         <div id="formMsg" class="hidden text-sm rounded-xl px-3 py-2"></div>
       </form>
     </section>
@@ -566,31 +570,32 @@
     updateBetrag();
   }
 
-  async function onSubmit(ev) {
-    ev.preventDefault();
+  async function onSubmit(ev, asDraft) {
+    if (ev) ev.preventDefault();
     $('formMsg').classList.add('hidden');
-    if (mode === 'quittung') return submitQuittung();
+    if (mode === 'quittung') return submitQuittung(asDraft);
 
     const datum = $('datum').value || todayIso();
     const beschreibung = $('beschreibung').value.trim();
     const stunden = currentStunden();
     const stweg = selectedStweg();
     const ibanRaw = $('iban').value.trim().replace(/\s+/g, '').toUpperCase();
+    const hasHours = stunden > 0;
 
     if (!beschreibung) { showFormMsg('Bitte eine Tätigkeit beschreiben.', 'err'); return; }
-    if (!(stunden > 0)) { showFormMsg('Bitte Stunden erfassen (Stoppuhr stoppen oder manuell eingeben).', 'err'); return; }
-    if (aktuellerSatz == null || !Number.isFinite(aktuellerSatz) || aktuellerSatz <= 0) {
+    if (!asDraft && !hasHours) { showFormMsg('Bitte Stunden erfassen (Stoppuhr stoppen oder manuell eingeben).', 'err'); return; }
+    if (hasHours && (aktuellerSatz == null || !Number.isFinite(aktuellerSatz) || aktuellerSatz <= 0)) {
       showFormMsg('Kein Stundensatz hinterlegt — bitte Ausschuss.', 'err'); return;
     }
 
     const satz = aktuellerSatz;
-    const betrag = Math.round(stunden * satz * 100) / 100;
+    const betrag = hasHours ? Math.round(stunden * satz * 100) / 100 : 0;
 
     // IBAN auf diesem Gerät merken
     if (ibanRaw) { try { localStorage.setItem(IBAN_KEY, ibanRaw); } catch {} }
 
-    const btn = $('submitBtn');
-    btn.disabled = true; const old = btn.textContent; btn.textContent = 'Wird eingereicht …';
+    const btn = asDraft ? $('draftBtn') : $('submitBtn');
+    btn.disabled = true; const old = btn.textContent; btn.textContent = asDraft ? 'Speichert …' : 'Wird eingereicht …';
 
     // --- Schritt 1: Auslage anlegen ---
     const payload = {
@@ -599,6 +604,7 @@
       betrag_chf: betrag,
       kategorie: 'Arbeitszeit',
     };
+    if (asDraft) payload.status = 'entwurf';
     if (stweg != null) payload.stweg = stweg;
     if (ibanRaw) payload.iban = ibanRaw;
 
@@ -619,8 +625,8 @@
       btn.disabled = false; btn.textContent = old; return;
     }
 
-    // --- Schritt 2: Position "arbeitszeit" setzen (Best-Effort) ---
-    if (auslageId != null) {
+    // --- Schritt 2: Position "arbeitszeit" setzen (Best-Effort; nur wenn Stunden erfasst) ---
+    if (auslageId != null && hasHours) {
       try {
         const r2 = await AuthentikAuth.apiFetch(`/api/auslagen/${auslageId}/positionen`, {
           method: 'PUT',
@@ -643,8 +649,9 @@
 
     // --- Erfolg: Timer zuruecksetzen, Erfolgs-Screen ---
     timerReset();
-    $('successText').textContent =
-      `${stunden} h × ${fmtChf(satz)} = ${fmtChf(betrag)}, zur Genehmigung eingereicht.`;
+    $('successText').textContent = asDraft
+      ? `Als Entwurf gespeichert${hasHours ? ` (${stunden} h × ${fmtChf(satz)} = ${fmtChf(betrag)})` : ''}. Unter „Meine Erfassungen" ergänzen & einreichen.`
+      : `${stunden} h × ${fmtChf(satz)} = ${fmtChf(betrag)}, zur Genehmigung eingereicht.`;
     resetForm();
     $('view-erfassen').classList.add('hidden');
     $('view-meine').classList.add('hidden');
@@ -902,21 +909,24 @@
     $('q-file').value = '';
   }
 
-  async function submitQuittung() {
+  async function submitQuittung(asDraft) {
     const datum = $('datum').value || todayIso();
     const beschreibung = $('beschreibung').value.trim();
     const stweg = selectedStweg();
     const ibanRaw = $('iban').value.trim().replace(/\s+/g, '').toUpperCase();
-    const betrag = parseFloat($('q-betrag').value);
+    const betrag = parseFloat($('q-betrag').value) || 0;
     if (!beschreibung) { showFormMsg('Bitte Beschreibung / Lieferant angeben.', 'err'); return; }
-    if (!(betrag > 0)) { showFormMsg('Bitte Betrag erfassen.', 'err'); return; }
+    if (!asDraft && !(betrag > 0)) { showFormMsg('Bitte Betrag erfassen.', 'err'); return; }
     if (ibanRaw && !/^[A-Z]{2}\d{2}[A-Z0-9]{4,30}$/.test(ibanRaw)) { showFormMsg('IBAN ungültig.', 'err'); return; }
-    renderQPlausi();
-    if (!$('q-plausi').classList.contains('hidden') && !confirm('Plausi-Warnung (Betrag ≠ Beleg-Total). Trotzdem einreichen?')) return;
+    if (!asDraft) {
+      renderQPlausi();
+      if (!$('q-plausi').classList.contains('hidden') && !confirm('Plausi-Warnung (Betrag ≠ Beleg-Total). Trotzdem einreichen?')) return;
+    }
     if (ibanRaw) { try { localStorage.setItem(IBAN_KEY, ibanRaw); } catch {} }
 
-    const btn = $('submitBtn'); btn.disabled = true; const old = btn.textContent; btn.textContent = 'Wird eingereicht …';
+    const btn = asDraft ? $('draftBtn') : $('submitBtn'); btn.disabled = true; const old = btn.textContent; btn.textContent = asDraft ? 'Speichert …' : 'Wird eingereicht …';
     const payload = { datum, beschreibung, betrag_chf: betrag, kategorie: $('q-kategorie').value || 'Material' };
+    if (asDraft) payload.status = 'entwurf';
     if (stweg != null) payload.stweg = stweg;
     if (ibanRaw) payload.iban = ibanRaw;
     let id = null;
@@ -941,7 +951,9 @@
     }
 
     btn.disabled = false; btn.textContent = old;
-    $('successText').textContent = `Quittung über ${fmtChf(betrag)} eingereicht${Q_BELEGE.length > 1 ? ' (' + Q_BELEGE.length + ' Belege)' : ''}.`;
+    $('successText').textContent = asDraft
+      ? `Quittung als Entwurf gespeichert${Q_BELEGE.length ? ` (${Q_BELEGE.length} Beleg${Q_BELEGE.length > 1 ? 'e' : ''})` : ''}. Unter „Meine Erfassungen" einreichen.`
+      : `Quittung über ${fmtChf(betrag)} eingereicht${Q_BELEGE.length > 1 ? ' (' + Q_BELEGE.length + ' Belege)' : ''}.`;
     resetQuittung();
     $('beschreibung').value = '';
     $('view-erfassen').classList.add('hidden'); $('view-meine').classList.add('hidden');
@@ -1088,6 +1100,7 @@
 
     // Formular
     $('form').addEventListener('submit', onSubmit);
+    $('draftBtn').addEventListener('click', () => onSubmit(null, true));
     $('stunden').addEventListener('input', updateBetrag);
     $('stweg').addEventListener('change', applySatz);
 

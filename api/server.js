@@ -12165,12 +12165,17 @@ app.get('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'), 
 // POST /api/auslagen — neue Auslage einreichen (Eigentümer)
 app.post('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'), async (req, res) => {
   try {
-    const { datum, kategorie, beschreibung, betrag_chf, iban, stweg, bemerkung_eigentuemer, beleg_base64, beleg_filename, projekt_slug } = req.body || {};
-    if (!datum || !beschreibung || betrag_chf == null) {
-      return res.status(400).json({ error: 'datum, beschreibung und betrag_chf sind Pflichtfelder' });
+    const { datum, kategorie, beschreibung, betrag_chf, iban, stweg, bemerkung_eigentuemer, beleg_base64, beleg_filename, projekt_slug, status } = req.body || {};
+    const finalStatus = status === 'entwurf' ? 'entwurf' : 'eingereicht';
+    if (!datum || !beschreibung) {
+      return res.status(400).json({ error: 'datum und beschreibung sind Pflichtfelder' });
     }
-    const betrag = Number(betrag_chf);
-    if (!Number.isFinite(betrag) || betrag <= 0) return res.status(400).json({ error: 'Ungueltiger Betrag' });
+    if (finalStatus !== 'entwurf' && betrag_chf == null) {
+      return res.status(400).json({ error: 'betrag_chf ist Pflichtfeld' });
+    }
+    const betrag = Number(betrag_chf == null ? 0 : betrag_chf);
+    if (!Number.isFinite(betrag) || betrag < 0) return res.status(400).json({ error: 'Ungueltiger Betrag' });
+    if (finalStatus !== 'entwurf' && betrag <= 0) return res.status(400).json({ error: 'Ungueltiger Betrag' });
     if (betrag > 100000) return res.status(400).json({ error: 'Betrag > 100000 CHF nicht plausibel' });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(datum))) return res.status(400).json({ error: 'Datum muss YYYY-MM-DD sein' });
     const kat = kategorie && AUSLAGEN_KATEGORIEN.includes(kategorie) ? kategorie : null;
@@ -12215,15 +12220,15 @@ app.post('/api/auslagen', authMiddleware, requirePermission('auslagen', 'read'),
       `INSERT INTO auslagen
          (user_email, user_name, stweg, datum, kategorie, beschreibung, betrag_chf, iban,
           beleg_path, beleg_filename, bemerkung_eigentuemer, projekt_slug, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'eingereicht')
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        RETURNING *`,
       [userEmail, userName, stwegVal, datum, kat, String(beschreibung).slice(0, 2000), betrag,
        ibanClean, belegPath, belegFilename,
-       bemerkung_eigentuemer ? String(bemerkung_eigentuemer).slice(0, 1000) : null, projektSlug],
+       bemerkung_eigentuemer ? String(bemerkung_eigentuemer).slice(0, 1000) : null, projektSlug, finalStatus],
     );
 
-    // Ausschuss informieren (Best-Effort, kein Fehler wenn Mail scheitert)
-    try {
+    // Ausschuss informieren (Best-Effort) — NICHT bei Entwuerfen (noch nicht eingereicht).
+    if (finalStatus !== 'entwurf') try {
       const stwegLabel = stwegVal ? `STWEG ${stwegVal}` : 'STWEG-uebergreifend';
       const adminEmails = [];
       if (stwegVal && STWEG_GROUPS[stwegVal]?.ausschuss) {
@@ -12447,6 +12452,42 @@ app.delete('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'r
       [id],
     );
     await pool.query('DELETE FROM auslagen WHERE id = $1', [id]);
+
+    // Benachrichtigung bei Loeschung einer bereits eingereichten Auslage (nicht bei reinen Entwuerfen):
+    // E-Mail an Verwaltung/Ausschuss des STWEG (+ CC Einreicher) und WhatsApp an Technik.
+    if (row.status && row.status !== 'entwurf') {
+      const stwegLabel = row.stweg ? `STWEG ${row.stweg}` : 'Kooperation';
+      const betrag = Number(row.betrag_chf || 0).toFixed(2);
+      const wer = req.user.name || req.user.email || 'unbekannt';
+      (async () => {
+        try {
+          const verw = await findVerwaltungForStweg(row.stweg);
+          const to = (verw && verw.mailTo && verw.mailTo.length) ? verw.mailTo.join(', ') : (row.bearbeitet_von || row.user_email);
+          await sendTemplated('auslage-geloescht', {
+            auslage_id: row.id, stweg_label: stwegLabel, betrag_chf: Number(row.betrag_chf || 0), status: row.status,
+            user_name: row.user_name, user_email: row.user_email, beschreibung: row.beschreibung,
+            geloescht_von: wer, site_url: SITE_URL,
+          }, {
+            from: MAIL_FROM, to, cc: row.user_email,
+            subject: `🗑️ Auslage ${row.id} gelöscht — ${stwegLabel}, CHF ${betrag} (war "${row.status}")`,
+            text:
+              `Eine bereits eingereichte Auslage wurde gelöscht.\n\n`
+              + `── Auslage ${row.id} ──\n`
+              + `STWEG:           ${stwegLabel}\n`
+              + `Status war:      ${row.status}\n`
+              + `Eingereicht von: ${row.user_name} <${row.user_email}>\n`
+              + `Beschreibung:    ${row.beschreibung}\n`
+              + `Betrag:          CHF ${betrag}\n`
+              + `Gelöscht von:    ${wer}\n`,
+          });
+        } catch (e) { console.warn('[auslage-delete] Mail:', e.message); }
+      })();
+      notifyTechnik(
+        `🗑️ Auslage ${row.id} gelöscht von ${wer} — ${stwegLabel}, CHF ${betrag}, war "${row.status}" (${row.user_name}): ${String(row.beschreibung || '').slice(0, 100)}`,
+        `auslage-del-${row.id}`
+      ).catch(() => {});
+    }
+
     res.json({ success: true, cancelled_queue_mails: qDel.rowCount });
   } catch (err) {
     console.error('Auslagen delete error:', err);
