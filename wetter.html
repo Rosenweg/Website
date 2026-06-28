@@ -147,7 +147,7 @@
       <div class="chart-card"><div class="ch"><span class="ct">☀️ Solar W/m²</span><span class="cnow" id="n-solarradiation">–</span></div><svg id="chart-solarradiation" viewBox="0 0 300 70" preserveAspectRatio="none"></svg><div class="cr"><span id="lo-solarradiation"></span><span id="hi-solarradiation"></span></div></div>
     </div>
 
-    <div class="foot">Live via MQTT <span id="last"></span> · Verlauf alle 5 Min<br>Rosenweg 9 · öffentlich · berechnete Werte ohne Gewähr</div>
+    <div class="foot">Live via MQTT <span id="last"></span> · Verlauf jede Minute<br>Rosenweg 9 · öffentlich · berechnete Werte ohne Gewähr</div>
   </div>
 
   <div class="modal" id="modal">
@@ -504,7 +504,7 @@
     updateAstro();
     setInterval(updateAstro, 60000); // Sonne/Mond jede Minute
     loadHistory();
-    setInterval(loadHistory, 300000); // Verlauf alle 5 Min nachladen
+    setInterval(loadHistory, 60000); // Verlauf jede Minute nachladen
     connect();
     $('charts').addEventListener('click', (e) => {
       const card = e.target.closest('.chart-card'); if (!card) return;
