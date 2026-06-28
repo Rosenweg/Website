@@ -329,7 +329,7 @@
     tbody.innerHTML = list.map(a => {
       const isMine = (a.user_email || '').toLowerCase() === myEmail;
       const canEditOwn = isMine && (a.status === 'eingereicht' || a.status === 'entwurf');
-      const canReviewThis = STATE.can_review && !isMine;
+      const canReviewThis = STATE.can_review && !isMine && a.status !== 'entwurf';
       const canOwnerConfirm = isMine && a.status === 'genehmigt';
       const stwegLabel = a.stweg ? `STWEG ${a.stweg}` : '—';
       const belegCount = Number(a.belege_count || 0);
