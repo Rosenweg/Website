@@ -206,6 +206,47 @@
     </div>
   </nav>
 
+  <!-- Detail / Bearbeiten — Bottom-Sheet -->
+  <div id="sheet" class="hidden fixed inset-0 z-50 bg-black/40 flex items-end">
+    <div class="bg-white w-full max-w-md mx-auto rounded-t-2xl p-5 max-h-[92vh] overflow-y-auto safe-bottom">
+      <div class="flex items-center justify-between mb-3">
+        <h3 id="d-title" class="font-semibold text-lg">Auslage</h3>
+        <button type="button" id="d-close" class="text-slate-400 text-2xl leading-none w-9 h-9 active:text-slate-600">✕</button>
+      </div>
+      <div id="d-status-row" class="mb-3"></div>
+      <form id="d-form" class="space-y-4">
+        <input type="hidden" id="d-id">
+        <input type="hidden" id="d-status">
+        <div>
+          <label class="block text-sm font-semibold mb-1">Datum</label>
+          <input id="d-datum" type="date" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base disabled:bg-slate-100 disabled:text-slate-500">
+        </div>
+        <div>
+          <label class="block text-sm font-semibold mb-1">Kategorie</label>
+          <select id="d-kategorie" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base bg-white disabled:bg-slate-100 disabled:text-slate-500"></select>
+        </div>
+        <div>
+          <label class="block text-sm font-semibold mb-1">Beschreibung</label>
+          <textarea id="d-beschreibung" rows="3" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-base disabled:bg-slate-100 disabled:text-slate-500"></textarea>
+        </div>
+        <div>
+          <label class="block text-sm font-semibold mb-1">Betrag CHF</label>
+          <input id="d-betrag" type="number" step="0.05" min="0" inputmode="decimal" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base disabled:bg-slate-100 disabled:text-slate-500">
+        </div>
+        <div>
+          <label class="block text-sm font-semibold mb-1">IBAN <span class="text-slate-400 font-normal">(optional)</span></label>
+          <input id="d-iban" type="text" autocomplete="off" spellcheck="false" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base uppercase disabled:bg-slate-100 disabled:text-slate-500">
+        </div>
+        <p id="d-readonly-hint" class="hidden text-[12px] text-slate-500"></p>
+        <div id="d-msg" class="hidden text-sm rounded-lg px-3 py-2"></div>
+        <div class="flex flex-wrap gap-2 pt-1">
+          <button type="submit" id="d-save" class="flex-1 bg-sky-700 text-white font-semibold rounded-xl py-3 active:bg-sky-800">Speichern</button>
+          <button type="button" id="d-delete" class="px-4 bg-white border border-red-300 text-red-600 font-semibold rounded-xl py-3 active:bg-red-50">Löschen</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <script>
   'use strict';
 
@@ -226,6 +267,7 @@
 
   // Status → Badge-Styling + Label (Server-Status der Auslage)
   const STATUS = {
+    entwurf:     { l:'📝 Entwurf',     c:'bg-slate-200 text-slate-700' },
     eingereicht: { l:'⏳ eingereicht', c:'bg-yellow-100 text-yellow-800' },
     genehmigt:   { l:'✓ genehmigt',    c:'bg-green-100 text-green-700' },
     ausbezahlt:  { l:'💰 ausbezahlt',  c:'bg-sky-100 text-sky-700' },
@@ -580,15 +622,19 @@
   }
 
   function cardHtml(r) {
+    const kat = r.kategorie ? `<span class="text-[11px] text-slate-500">${esc(r.kategorie)}</span>` : '';
     return `
-      <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-3">
+      <button type="button" data-id="${r.id}" class="w-full text-left bg-white rounded-xl shadow-sm border border-slate-200 p-3 active:bg-slate-50">
         <div class="flex items-start justify-between gap-2">
           <div class="text-sm font-semibold">${esc(fmtDate(r.datum))}</div>
           ${statusBadge(r.status)}
         </div>
         <div class="text-sm text-slate-700 mt-1 whitespace-pre-wrap break-words">${esc(r.beschreibung || '')}</div>
-        <div class="text-[12px] text-slate-500 mt-1.5 font-medium">${fmtChf(r.betrag_chf)}</div>
-      </div>`;
+        <div class="flex items-center justify-between mt-1.5">
+          <div class="text-[12px] text-slate-500 font-medium">${fmtChf(r.betrag_chf)}</div>
+          ${kat}
+        </div>
+      </button>`;
   }
 
   async function loadMeine() {
@@ -604,10 +650,9 @@
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const data = await r.json();
       const all = Array.isArray(data.auslagen) ? data.auslagen : [];
-      // nur eigene + Arbeitszeit
-      const rows = all.filter(a =>
-        (a.user_email || '').toLowerCase() === myEmail && a.kategorie === 'Arbeitszeit'
-      );
+      // alle eigenen Auslagen (Arbeitszeit + Material/Spesen + Reklamations-Entwürfe)
+      const rows = all.filter(a => (a.user_email || '').toLowerCase() === myEmail);
+      MEINE_ROWS = rows;
       if (!rows.length) {
         msg.classList.remove('hidden');
         msg.textContent = 'Noch keine Erfassungen.';
@@ -618,6 +663,86 @@
     } catch (e) {
       msg.classList.remove('hidden');
       msg.textContent = 'Fehler beim Laden: ' + e.message;
+    }
+  }
+
+  // ---------- Detail / Bearbeiten ----------
+  let MEINE_ROWS = [];
+  const KATEGORIEN = ['Material', 'Reparatur', 'Porto/Versand', 'Verpflegung', 'Reisekosten', 'Reinigung', 'Arbeitszeit', 'Sonstiges'];
+
+  function dMsg(t, ok) {
+    const e = $('d-msg');
+    if (!t) { e.classList.add('hidden'); e.textContent = ''; return; }
+    e.textContent = t;
+    e.className = 'text-sm rounded-lg px-3 py-2 ' + (ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700');
+  }
+
+  function openDetail(id) {
+    const r = MEINE_ROWS.find(x => x.id === id);
+    if (!r) return;
+    const editable = r.status === 'entwurf' || r.status === 'eingereicht';
+    $('d-id').value = r.id;
+    $('d-status').value = r.status;
+    $('d-title').textContent = r.status === 'entwurf' ? 'Entschädigung ergänzen' : (editable ? 'Auslage bearbeiten' : 'Auslage');
+    $('d-status-row').innerHTML = statusBadge(r.status) + (r.reklamation_id ? ` <span class="text-[11px] text-slate-500 ml-1">aus Reklamation #${r.reklamation_id}</span>` : '');
+    $('d-datum').value = (r.datum || '').slice(0, 10);
+    const kats = KATEGORIEN.includes(r.kategorie) || !r.kategorie ? KATEGORIEN : [r.kategorie, ...KATEGORIEN];
+    $('d-kategorie').innerHTML = kats.map(k => `<option value="${esc(k)}"${k === r.kategorie ? ' selected' : ''}>${esc(k)}</option>`).join('');
+    $('d-beschreibung').value = r.beschreibung || '';
+    $('d-betrag').value = (r.status === 'entwurf' && Number(r.betrag_chf) === 0) ? '' : r.betrag_chf;
+    $('d-iban').value = r.iban || '';
+    ['d-datum', 'd-kategorie', 'd-beschreibung', 'd-betrag', 'd-iban'].forEach(f => { $(f).disabled = !editable; });
+    $('d-save').classList.toggle('hidden', !editable);
+    $('d-delete').classList.toggle('hidden', !editable);
+    $('d-save').textContent = r.status === 'entwurf' ? 'Ergänzen & einreichen' : 'Speichern';
+    $('d-readonly-hint').classList.toggle('hidden', editable);
+    if (!editable) $('d-readonly-hint').textContent = 'Bereits in Bearbeitung beim Ausschuss — nicht mehr änderbar.';
+    dMsg('');
+    $('sheet').classList.remove('hidden');
+  }
+
+  function closeSheet() { $('sheet').classList.add('hidden'); }
+
+  async function saveDetail(ev) {
+    ev.preventDefault();
+    const id = $('d-id').value, status = $('d-status').value;
+    const betrag = parseFloat($('d-betrag').value);
+    const ibanRaw = $('d-iban').value.replace(/\s+/g, '').toUpperCase();
+    if (ibanRaw && !/^[A-Z]{2}\d{2}[A-Z0-9]{4,30}$/.test(ibanRaw)) { dMsg('IBAN-Format ungültig'); return; }
+    const payload = {
+      datum: $('d-datum').value,
+      kategorie: $('d-kategorie').value,
+      beschreibung: $('d-beschreibung').value.trim(),
+      iban: ibanRaw || null,
+    };
+    if (Number.isFinite(betrag) && betrag > 0) payload.betrag_chf = betrag;
+    if (status === 'entwurf') {
+      if (!Number.isFinite(betrag) || betrag <= 0) { dMsg('Bitte Betrag eintragen, dann einreichen.'); return; }
+      payload.status = 'eingereicht';
+    }
+    const btn = $('d-save'); btn.disabled = true; const old = btn.textContent; btn.textContent = 'Speichert …';
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/auslagen/${id}`, { method: 'PUT', body: payload });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+      closeSheet();
+      loadMeine();
+    } catch (e) {
+      dMsg('Fehler: ' + e.message);
+    }
+    btn.disabled = false; btn.textContent = old;
+  }
+
+  async function deleteDetail() {
+    const id = $('d-id').value;
+    if (!confirm('Diese Auslage wirklich löschen?')) return;
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/auslagen/${id}`, { method: 'DELETE' });
+      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || 'HTTP ' + r.status); }
+      closeSheet();
+      loadMeine();
+    } catch (e) {
+      dMsg('Löschen fehlgeschlagen: ' + e.message);
     }
   }
 
@@ -726,6 +851,11 @@
     // Tabs
     document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
     $('refreshBtn').addEventListener('click', loadMeine);
+    $('meineList').addEventListener('click', e => { const c = e.target.closest('[data-id]'); if (c) openDetail(Number(c.dataset.id)); });
+    $('d-close').addEventListener('click', closeSheet);
+    $('d-form').addEventListener('submit', saveDetail);
+    $('d-delete').addEventListener('click', deleteDetail);
+    $('sheet').addEventListener('click', e => { if (e.target === $('sheet')) closeSheet(); });
 
     // Bei Wiederkehr in den Vordergrund (Bildschirm entsperrt etc.) Anzeige & Loop auffrischen
     document.addEventListener('visibilitychange', () => {
