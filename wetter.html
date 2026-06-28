@@ -30,6 +30,19 @@
     .hero .temp .u { font-size: 1.5rem; font-weight: 500; vertical-align: super; opacity: .8; }
     .hero .sub { font-size: .95rem; opacity: .9; margin-top: .3rem; }
     h2.sec { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; opacity: .75; margin: 1.6rem 0 .6rem; font-weight: 600; }
+    .astro { display: grid; grid-template-columns: 1.7fr 1fr; gap: .8rem; }
+    .astro-card { background: rgba(255,255,255,.12); backdrop-filter: blur(6px); border-radius: 16px; padding: .8rem 1rem 1rem; }
+    .astro-card > svg { width: 100%; height: auto; display: block; }
+    .astro-foot { display: flex; justify-content: space-between; align-items: center; font-size: .82rem; margin-top: .3rem; }
+    .astro-foot b { font-weight: 700; }
+    .astro-foot #s-state { font-size: .72rem; opacity: .82; text-align: center; }
+    .astro-card.moon { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .5rem; }
+    .astro-card.moon svg { max-width: 116px; }
+    .moon-info { text-align: center; }
+    .moon-info .mname { font-weight: 600; font-size: .96rem; }
+    .moon-info .msub { font-size: .82rem; opacity: .9; }
+    .moon-info .msub2 { font-size: .74rem; opacity: .7; margin-top: .1rem; }
+    @media (max-width: 520px) { .astro { grid-template-columns: 1fr; } }
     .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: .8rem; }
     .card { background: rgba(255,255,255,.12); backdrop-filter: blur(6px); border-radius: 16px; padding: .9rem 1rem; }
     .card .ct { font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; opacity: .8; }
@@ -105,12 +118,23 @@
     </div>
 
     <h2 class="sec">Sonne &amp; Mond</h2>
-    <div class="cards">
-      <div class="card"><div class="ct">🌅 Sonnenaufgang</div><div class="cv" id="s-rise">–</div><div class="cx" id="s-rise-x"></div></div>
-      <div class="card"><div class="ct">🌇 Sonnenuntergang</div><div class="cv" id="s-set">–</div><div class="cx" id="s-set-x"></div></div>
-      <div class="card"><div class="ct">☀️ Sonnenstand</div><div class="cv"><span id="s-alt">–</span><span class="u"> °</span></div><div class="cx" id="s-alt-x"></div></div>
-      <div class="card"><div class="ct">🌙 Mondphase</div><div class="cv" id="m-emoji">–</div><div class="cx" id="m-name"></div></div>
-      <div class="card"><div class="ct">🌕 Beleuchtung</div><div class="cv"><span id="m-illum">–</span><span class="u"> %</span></div><div class="cx" id="m-alt-x"></div></div>
+    <div class="astro">
+      <div class="astro-card">
+        <svg id="sun-arc" viewBox="0 0 300 158" role="img" aria-label="Sonnenstand"></svg>
+        <div class="astro-foot">
+          <span>🌅 <b id="s-rise">–</b></span>
+          <span id="s-state">–</span>
+          <span><b id="s-set">–</b> 🌇</span>
+        </div>
+      </div>
+      <div class="astro-card moon">
+        <svg id="moon-disk" viewBox="0 0 120 120" role="img" aria-label="Mondphase"></svg>
+        <div class="moon-info">
+          <div class="mname" id="m-name">–</div>
+          <div class="msub"><b id="m-illum">–</b> % beleuchtet</div>
+          <div class="msub2" id="m-alt-x"></div>
+        </div>
+      </div>
     </div>
 
     <h2 class="sec">Verlauf (24 h)</h2>
@@ -249,24 +273,57 @@
     document.body.style.background = bg;
   }
 
-  function updateAstro() {
-    const now = new Date();
+  function drawSunArc() {
+    const svg = $('sun-arc'); if (!svg) return;
+    const W = 300, cx = 150, cy = 132, r = 122, now = new Date();
     const t = SunCalc.getTimes(now, LAT, LON);
+    const sr = t.sunrise.getTime(), ss = t.sunset.getTime(), tn = now.getTime();
+    const altd = SunCalc.getPosition(now, LAT, LON).altitude * 180 / Math.PI;
+    const isDay = tn >= sr && tn <= ss;
+    let frac = (tn - sr) / (ss - sr); frac = Math.max(0, Math.min(1, frac));
+    const P = (f) => { const a = Math.PI * (1 - f); return [cx + r * Math.cos(a), cy - r * Math.sin(a)]; };
+    const [ax, ay] = P(0), [bx, by] = P(1), [sx, sy] = P(frac);
+    const n = (v) => v.toFixed(1);
+    let g = `<defs>
+      <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${isDay ? '#fcd34d' : '#334155'}" stop-opacity="${isDay ? '.35' : '.22'}"/><stop offset="1" stop-color="#0f172a" stop-opacity="0"/></linearGradient>
+      <radialGradient id="sunGlow"><stop offset="0" stop-color="#fff7d6"/><stop offset=".55" stop-color="#fbbf24"/><stop offset="1" stop-color="#f59e0b"/></radialGradient>
+    </defs>`;
+    g += `<path d="M ${n(ax)} ${n(ay)} A ${r} ${r} 0 0 1 ${n(bx)} ${n(by)} L ${n(bx)} ${cy} L ${n(ax)} ${cy} Z" fill="url(#sky)"/>`;
+    g += `<path d="M ${n(ax)} ${n(ay)} A ${r} ${r} 0 0 1 ${n(bx)} ${n(by)}" fill="none" stroke="rgba(255,255,255,.3)" stroke-width="1.5" stroke-dasharray="3 4"/>`;
+    if (isDay) g += `<path d="M ${n(ax)} ${n(ay)} A ${r} ${r} 0 0 1 ${n(sx)} ${n(sy)}" fill="none" stroke="#fde68a" stroke-width="2.5"/>`;
+    g += `<line x1="6" y1="${cy}" x2="${W - 6}" y2="${cy}" stroke="rgba(255,255,255,.35)" stroke-width="1.5"/>`;
+    g += `<circle cx="${n(ax)}" cy="${n(ay)}" r="3" fill="#fbbf24"/><circle cx="${n(bx)}" cy="${n(by)}" r="3" fill="#f59e0b"/>`;
+    if (isDay) g += `<circle cx="${n(sx)}" cy="${n(sy)}" r="18" fill="#fde68a" opacity=".18"/><circle cx="${n(sx)}" cy="${n(sy)}" r="11" fill="url(#sunGlow)"/>`;
+    else g += `<text x="${cx}" y="${cy - 34}" text-anchor="middle" fill="rgba(255,255,255,.72)" font-size="14">🌙 Nacht</text>`;
+    svg.innerHTML = g;
     $('s-rise').textContent = hhmm(t.sunrise);
     $('s-set').textContent = hhmm(t.sunset);
-    const sp = SunCalc.getPosition(now, LAT, LON), altd = sp.altitude * 180 / Math.PI;
-    $('s-alt').textContent = altd.toFixed(0);
-    $('s-alt-x').textContent = altd > 0 ? 'über Horizont' : 'unter Horizont';
-    const mi = SunCalc.getMoonIllumination(now);
-    const phase = mi.phase; // 0=Neumond .5=Vollmond
-    const EM = ['🌑','🌒','🌓','🌔','🌕','🌖','🌗','🌘'];
-    const NM = ['Neumond','zunehmende Sichel','erstes Viertel','zunehmender Mond','Vollmond','abnehmender Mond','letztes Viertel','abnehmende Sichel'];
-    const idx = Math.round(phase * 8) % 8;
-    $('m-emoji').textContent = EM[idx];
-    $('m-name').textContent = NM[idx];
-    $('m-illum').textContent = Math.round(mi.fraction * 100);
-    const mp = SunCalc.getMoonPosition(now, LAT, LON), maltd = mp.altitude * 180 / Math.PI;
-    $('m-alt-x').textContent = maltd > 0 ? 'Mond sichtbar' : 'unter Horizont';
+    const dayLen = (ss - sr) / 3600e3;
+    $('s-state').textContent = isDay ? `☀️ ${altd.toFixed(0)}° · Tag ${dayLen.toFixed(1)} h` : `${altd.toFixed(0)}° · unter Horizont`;
+  }
+  function drawMoon() {
+    const svg = $('moon-disk'); if (!svg) return;
+    const cx = 60, cy = 60, r = 50, now = new Date();
+    const mi = SunCalc.getMoonIllumination(now), f = mi.fraction, waxing = mi.phase < 0.5;
+    let lit = '';
+    if (f > 0.985) lit = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#moonlit)"/>`;
+    else if (f >= 0.015) {
+      const rx = (r * Math.abs(1 - 2 * f)).toFixed(2), gib = f > 0.5;
+      const side = waxing ? 1 : 0, term = waxing ? (gib ? 1 : 0) : (gib ? 0 : 1);
+      lit = `<path d="M ${cx} ${cy - r} A ${r} ${r} 0 0 ${side} ${cx} ${cy + r} A ${rx} ${r} 0 0 ${term} ${cx} ${cy - r} Z" fill="url(#moonlit)"/>`;
+    }
+    svg.innerHTML = `<defs><radialGradient id="moonlit" cx=".4" cy=".4"><stop offset="0" stop-color="#fefce8"/><stop offset="1" stop-color="#d4d0bf"/></radialGradient></defs>
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="#222b3d"/>${lit}
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(255,255,255,.18)" stroke-width="1"/>`;
+    const NM = ['Neumond', 'zunehmende Sichel', 'erstes Viertel', 'zunehmender Mond', 'Vollmond', 'abnehmender Mond', 'letztes Viertel', 'abnehmende Sichel'];
+    $('m-name').textContent = NM[Math.round(mi.phase * 8) % 8];
+    $('m-illum').textContent = Math.round(f * 100);
+    const maltd = SunCalc.getMoonPosition(now, LAT, LON).altitude * 180 / Math.PI;
+    $('m-alt-x').textContent = maltd > 0 ? '🌙 über Horizont' : 'unter Horizont';
+  }
+  function updateAstro() {
+    drawSunArc();
+    drawMoon();
     updateHero();
   }
 
