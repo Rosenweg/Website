@@ -16,8 +16,8 @@
   .conn .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:.35rem; background:#f59e0b; vertical-align:middle; }
   .conn.ok .dot { background:#22c55e; } .conn.off .dot { background:#ef4444; }
   .clk { font-size:1rem; opacity:.85; }
-  .wrap { padding:.6rem; }
-  svg { width:100%; height:auto; display:block; max-height:calc(100vh - 60px); }
+  .wrap { padding:.5rem; }
+  svg { width:100%; height:auto; display:block; max-height:calc(100vh - 58px); }
   .lbl { fill:#8aa0bd; font-size:13px; }
   .unit { fill:#6b809e; font-size:12px; }
   .val { fill:#eaf2ff; font-weight:700; font-variant-numeric:tabular-nums; }
@@ -25,6 +25,10 @@
   .cardttl { fill:#9fb4d2; font-size:13px; font-weight:600; }
   .pipe { stroke:#3b5a86; stroke-width:6; fill:none; stroke-linecap:round; }
   .lead { stroke:#3b5a86; stroke-width:1.5; stroke-dasharray:3 3; }
+  .btn { cursor:pointer; }
+  .btn rect { stroke-width:1.5; }
+  .btn text { font-size:13px; font-weight:600; pointer-events:none; }
+  .ceil { stroke:#3a4a66; stroke-width:5; }
 </style>
 </head>
 <body>
@@ -36,73 +40,76 @@
     </div>
   </div>
   <div class="wrap">
-  <svg id="hmi" viewBox="0 0 1000 620" role="img" aria-label="Anlagenschema Heizungsraum">
+  <svg id="hmi" viewBox="0 0 1000 600" role="img" aria-label="Anlagenschema Heizungsraum">
     <defs>
       <linearGradient id="tankgrad" x1="0" y1="0" x2="0" y2="1">
         <stop id="g-top" offset="0" stop-color="#b45309"/>
         <stop id="g-bot" offset="1" stop-color="#1d4ed8"/>
       </linearGradient>
       <radialGradient id="heatglow"><stop offset="0" stop-color="#fb923c" stop-opacity="1"/><stop offset="1" stop-color="#fb923c" stop-opacity="0"/></radialGradient>
-      <filter id="soft"><feGaussianBlur stdDeviation="2"/></filter>
     </defs>
 
+    <!-- ===== Decke mit Gasmelder (mittig über Speicher) ===== -->
+    <line class="ceil" x1="300" y1="72" x2="770" y2="72"/>
+    <text x="304" y="64" class="lbl">Decke</text>
+    <line x1="530" y1="72" x2="530" y2="84" stroke="#3a4a66" stroke-width="3"/>
+    <rect x="508" y="84" width="44" height="28" rx="6" fill="#101c33" stroke="#21385c" stroke-width="1.5"/>
+    <circle id="gas-ind" cx="530" cy="98" r="6" fill="#475569"/>
+
+    <!-- ===== Gas-Faceplate (links, eigene Zone) ===== -->
+    <rect x="40" y="84" width="210" height="96" rx="8" class="card"/>
+    <text x="54" y="108" class="cardttl">🛑 Gaswarner (Decke)</text>
+    <text x="54" y="144" id="gas-state" class="val" font-size="24">–</text>
+    <text x="54" y="168" class="lbl" font-size="13"><tspan id="gas-ppm">–</tspan><tspan class="unit" dx="3">ppm Methan</tspan></text>
+
+    <!-- ===== rechte obere Ecke: Raumklima (zuerst) + Lüfter ===== -->
+    <rect x="792" y="20" width="193" height="86" rx="8" class="card"/>
+    <text x="806" y="42" class="cardttl">🌡️ Raumklima</text>
+    <text x="806" y="74" class="val" font-size="22"><tspan id="kl-t">–</tspan><tspan class="unit" dx="3">°C</tspan></text>
+    <text x="806" y="96" class="lbl" font-size="14"><tspan id="kl-h">–</tspan><tspan class="unit" dx="3">% rH</tspan></text>
+
+    <rect x="792" y="118" width="193" height="86" rx="8" class="card"/>
+    <text x="806" y="140" class="cardttl">🌀 Lüfter Heizraum</text>
+    <circle id="luf-ind" cx="968" cy="134" r="6" fill="#475569"/>
+    <text x="806" y="170" id="luf-state" class="val" font-size="22">–</text>
+    <text x="806" y="192" class="lbl" font-size="13"><tspan id="luf-pow">–</tspan><tspan class="unit" dx="3">W</tspan></text>
+
     <!-- ===== Kombispeicher ===== -->
-    <text x="430" y="92" class="lbl" font-size="15" font-weight="600">Kombispeicher</text>
-    <!-- Rohre -->
-    <path class="pipe" d="M 430 130 V 70 H 250"/>
-    <text x="244" y="64" class="lbl" text-anchor="end">Heizung / WW (Vorlauf)</text>
-    <path class="pipe" d="M 540 130 V 96 H 250"/>
-    <text x="244" y="100" class="lbl" text-anchor="end">Rücklauf</text>
-    <!-- Tankkörper -->
-    <rect x="400" y="130" width="170" height="420" rx="26" fill="url(#tankgrad)"/>
-    <rect x="400" y="130" width="170" height="420" rx="26" fill="none" stroke="#33507e" stroke-width="2.5"/>
-    <!-- Heizstab-Glow + Spirale -->
-    <circle id="heiz-glow" cx="485" cy="500" r="70" fill="url(#heatglow)" opacity="0"/>
-    <path id="heiz-coil" d="M 430 486 h 110 M 430 500 h 110 M 430 514 h 110" stroke="#7a8aa3" stroke-width="4" fill="none" stroke-linecap="round"/>
-    <!-- Sensoren oben/unten -->
-    <circle cx="570" cy="190" r="6" fill="#eaf2ff" stroke="#0b1220" stroke-width="1.5"/>
-    <line class="lead" x1="576" y1="190" x2="648" y2="190"/>
-    <circle cx="570" cy="470" r="6" fill="#eaf2ff" stroke="#0b1220" stroke-width="1.5"/>
-    <line class="lead" x1="576" y1="470" x2="648" y2="470"/>
+    <path class="pipe" d="M 470 210 V 186"/>
+    <path class="pipe" d="M 590 210 V 186"/>
+    <text x="530" y="178" class="lbl" font-size="12" text-anchor="middle">↑ Heizung / Warmwasser</text>
+    <text x="440" y="204" class="lbl" font-size="15" font-weight="600">Kombispeicher</text>
+    <rect x="440" y="210" width="180" height="362" rx="26" fill="url(#tankgrad)"/>
+    <rect x="440" y="210" width="180" height="362" rx="26" fill="none" stroke="#33507e" stroke-width="2.5"/>
+    <circle id="heiz-glow" cx="530" cy="528" r="64" fill="url(#heatglow)" opacity="0"/>
+    <path id="heiz-coil" d="M 462 518 h 136 M 462 532 h 136 M 462 546 h 136" stroke="#7a8aa3" stroke-width="4" fill="none" stroke-linecap="round"/>
+    <circle cx="620" cy="256" r="6" fill="#eaf2ff" stroke="#0b1220" stroke-width="1.5"/>
+    <line class="lead" x1="626" y1="256" x2="660" y2="256"/>
+    <circle cx="620" cy="520" r="6" fill="#eaf2ff" stroke="#0b1220" stroke-width="1.5"/>
+    <line class="lead" x1="626" y1="520" x2="660" y2="520"/>
 
-    <!-- Temp-Faceplate oben -->
-    <rect x="648" y="158" width="150" height="64" rx="8" class="card"/>
-    <text x="662" y="180" class="cardttl">🌡️ Speicher oben</text>
-    <text x="662" y="210" class="val" font-size="26"><tspan id="t-oben">–</tspan><tspan class="unit" dx="4">°C</tspan></text>
-    <!-- Temp-Faceplate unten -->
-    <rect x="648" y="438" width="150" height="64" rx="8" class="card"/>
-    <text x="662" y="460" class="cardttl">🌡️ Speicher unten</text>
-    <text x="662" y="490" class="val" font-size="26"><tspan id="t-unten">–</tspan><tspan class="unit" dx="4">°C</tspan></text>
+    <!-- Temp oben / unten -->
+    <rect x="660" y="224" width="150" height="64" rx="8" class="card"/>
+    <text x="674" y="246" class="cardttl">🌡️ Speicher oben</text>
+    <text x="674" y="276" class="val" font-size="26"><tspan id="t-oben">–</tspan><tspan class="unit" dx="4">°C</tspan></text>
+    <rect x="660" y="496" width="150" height="64" rx="8" class="card"/>
+    <text x="674" y="518" class="cardttl">🌡️ Speicher unten</text>
+    <text x="674" y="548" class="val" font-size="26"><tspan id="t-unten">–</tspan><tspan class="unit" dx="4">°C</tspan></text>
 
-    <!-- Heizstab-Faceplate -->
-    <rect x="648" y="300" width="150" height="78" rx="8" class="card"/>
-    <text x="662" y="322" class="cardttl">⚡ Heizstab (PV)</text>
-    <circle id="heiz-ind" cx="772" cy="316" r="6" fill="#475569"/>
-    <text x="662" y="350" class="val" font-size="24"><tspan id="heiz-pow">–</tspan><tspan class="unit" dx="4">kW</tspan></text>
-    <text x="662" y="370" id="heiz-state" class="lbl" font-size="13">–</text>
+    <!-- Heizstab-Faceplate mit Manuell/Automatik -->
+    <rect x="660" y="300" width="325" height="128" rx="8" class="card"/>
+    <text x="674" y="322" class="cardttl">⚡ Heizstab (PV-Überschuss)</text>
+    <circle id="heiz-ind" cx="968" cy="316" r="6" fill="#475569"/>
+    <text x="674" y="362" class="val" font-size="26"><tspan id="heiz-pow">–</tspan><tspan class="unit" dx="4">kW</tspan></text>
+    <text x="674" y="390" id="heiz-state" class="lbl" font-size="13">–</text>
+    <text x="800" y="344" class="lbl" font-size="12">Modus</text>
+    <g class="btn" id="btn-auto" onclick="setMode('auto')"><rect x="800" y="350" width="86" height="28" rx="6"/><text x="843" y="369" text-anchor="middle">AUTO</text></g>
+    <g class="btn" id="btn-man" onclick="setMode('manuell')"><rect x="892" y="350" width="86" height="28" rx="6"/><text x="935" y="369" text-anchor="middle">MANUELL</text></g>
+    <text x="800" y="392" class="lbl" font-size="12">Hand</text>
+    <g class="btn" id="btn-on" onclick="setHand(true)"><rect x="800" y="396" width="86" height="26" rx="6"/><text x="843" y="414" text-anchor="middle">EIN</text></g>
+    <g class="btn" id="btn-off" onclick="setHand(false)"><rect x="892" y="396" width="86" height="26" rx="6"/><text x="935" y="414" text-anchor="middle">AUS</text></g>
 
-    <!-- ===== rechte Spalte: Faceplates ===== -->
-    <!-- Lüfter -->
-    <rect x="832" y="158" width="150" height="90" rx="8" class="card"/>
-    <text x="846" y="180" class="cardttl">🌀 Lüfter Heizraum</text>
-    <circle id="luf-ind" cx="956" cy="174" r="6" fill="#475569"/>
-    <text x="846" y="210" id="luf-state" class="val" font-size="22">–</text>
-    <text x="846" y="234" class="lbl" font-size="13"><tspan id="luf-pow">–</tspan><tspan class="unit" dx="3">W</tspan></text>
-
-    <!-- Gaswarner -->
-    <rect x="832" y="262" width="150" height="90" rx="8" class="card"/>
-    <text x="846" y="284" class="cardttl">🟢 Gaswarner</text>
-    <circle id="gas-ind" cx="956" cy="278" r="6" fill="#475569"/>
-    <text x="846" y="314" id="gas-state" class="val" font-size="20">–</text>
-    <text x="846" y="338" class="lbl" font-size="13"><tspan id="gas-ppm">–</tspan><tspan class="unit" dx="3">ppm</tspan></text>
-
-    <!-- Raumklima -->
-    <rect x="832" y="366" width="150" height="90" rx="8" class="card"/>
-    <text x="846" y="388" class="cardttl">🌡️ Raumklima</text>
-    <text x="846" y="420" class="val" font-size="22"><tspan id="kl-t">–</tspan><tspan class="unit" dx="3">°C</tspan></text>
-    <text x="846" y="444" class="lbl" font-size="14"><tspan id="kl-h">–</tspan><tspan class="unit" dx="3">% rH</tspan></text>
-
-    <text x="20" y="600" class="unit" id="foot">Live via ioBroker socket.io</text>
+    <text x="20" y="586" class="unit" id="foot">Live via ioBroker socket.io · Modus → 0_userdata.0.heizstab (Stellbefehl an SmartFox separat)</text>
   </svg>
   </div>
 
@@ -117,13 +124,15 @@
     gas:    'shelly.0.SHGS-1#3C6105F68C94#1.Gas.AlarmState',
     gasppm: 'shelly.0.SHGS-1#3C6105F68C94#1.Gas.Concentration',
     klT:    'shelly.0.shellyplusht#08b61fccf7a0#1.Temperature0.Celsius',
-    klH:    'shelly.0.shellyplusht#08b61fccf7a0#1.Humidity0.Relative'
+    klH:    'shelly.0.shellyplusht#08b61fccf7a0#1.Humidity0.Relative',
+    mode:   '0_userdata.0.heizstab.mode',
+    manon:  '0_userdata.0.heizstab.manual_on'
   };
   var REV = {}; Object.keys(IDS).forEach(function(k){ REV[IDS[k]] = k; });
   var V = {};
+  var socket = null;
 
   function num(x){ var n = Number(x); return isFinite(n) ? n : null; }
-  // Temperatur -> Farbe (20°C blau .. 45 türkis .. 60 orange .. 75 rot)
   function tcol(t){
     if (t == null) return '#475569';
     var stops = [[20,'#2563eb'],[40,'#06b6d4'],[55,'#f59e0b'],[75,'#dc2626']];
@@ -131,8 +140,7 @@
     if (t >= stops[stops.length-1][0]) return stops[stops.length-1][1];
     for (var i=0;i<stops.length-1;i++){
       if (t >= stops[i][0] && t <= stops[i+1][0]){
-        var f=(t-stops[i][0])/(stops[i+1][0]-stops[i][0]);
-        return mix(stops[i][1], stops[i+1][1], f);
+        return mix(stops[i][1], stops[i+1][1], (t-stops[i][0])/(stops[i+1][0]-stops[i][0]));
       }
     }
     return '#475569';
@@ -142,6 +150,12 @@
     var r=(x>>16)+(((y>>16)-(x>>16))*f), g=((x>>8)&255)+((((y>>8)&255)-((x>>8)&255))*f), c=(x&255)+(((y&255)-(x&255))*f);
     return '#'+((1<<24)|(Math.round(r)<<16)|(Math.round(g)<<8)|Math.round(c)).toString(16).slice(1);
   }
+  function btnSet(id, on, onColor){
+    var g=$(id); if(!g) return; var r=g.querySelector('rect'), t=g.querySelector('text');
+    r.setAttribute('fill', on ? onColor : '#16243d');
+    r.setAttribute('stroke', on ? onColor : '#2b4566');
+    t.setAttribute('fill', on ? '#0b1220' : '#9fb4d2');
+  }
 
   function render(){
     var to=num(V.toben), tu=num(V.tunten);
@@ -150,13 +164,17 @@
     $('g-top').setAttribute('stop-color', tcol(to));
     $('g-bot').setAttribute('stop-color', tcol(tu));
 
-    var hp=num(V.heiz); // W
-    var active = hp!=null && hp > 50;
+    var hp=num(V.heiz), active = hp!=null && hp > 50;
+    var manuell = (V.mode==='manuell'), manon = (V.manon===true||V.manon==='true'||V.manon===1);
     $('heiz-pow').textContent = hp!=null ? (hp/1000).toFixed(2) : '–';
     $('heiz-glow').setAttribute('opacity', active ? '0.9' : '0');
     $('heiz-coil').setAttribute('stroke', active ? '#fb923c' : '#7a8aa3');
     $('heiz-ind').setAttribute('fill', active ? '#fb923c' : '#475569');
-    $('heiz-state').textContent = hp==null ? '–' : (active ? 'AKTIV · PV-Überschuss' : 'aus');
+    $('heiz-state').textContent = (manuell ? 'Manuell · '+(manon?'EIN':'AUS') : 'Auto · '+(active?'PV aktiv':'wartet'));
+    btnSet('btn-auto', !manuell, '#38bdf8');
+    btnSet('btn-man', manuell, '#f59e0b');
+    btnSet('btn-on', manuell && manon, '#22c55e');
+    btnSet('btn-off', manuell && !manon, '#94a3b8');
 
     var lon = (V.lufOn===true||V.lufOn==='true'||V.lufOn===1);
     $('luf-state').textContent = (V.lufOn==null) ? '–' : (lon ? 'EIN' : 'AUS');
@@ -164,7 +182,7 @@
     $('luf-ind').setAttribute('fill', lon ? '#22c55e' : '#475569');
     var lp=num(V.lufP); $('luf-pow').textContent = lp!=null ? lp.toFixed(1) : '–';
 
-    var ga = V.gas; var alarm = (ga!=null && String(ga).toLowerCase()!=='none' && ga!=='' );
+    var ga=V.gas, alarm = (ga!=null && String(ga).toLowerCase()!=='none' && ga!=='');
     $('gas-state').textContent = ga==null ? '–' : (alarm ? 'ALARM' : 'NORMAL');
     $('gas-state').setAttribute('fill', ga==null ? '#8aa0bd' : (alarm ? '#ef4444' : '#22c55e'));
     $('gas-ind').setAttribute('fill', ga==null ? '#475569' : (alarm ? '#ef4444' : '#22c55e'));
@@ -175,12 +193,14 @@
     $('kl-h').textContent = kh!=null ? kh.toFixed(0) : '–';
   }
 
+  function setMode(m){ if(socket) socket.emit('setState', IDS.mode, {val:m, ack:false}); V.mode=m; render(); }
+  function setHand(on){ if(socket) socket.emit('setState', IDS.manon, {val:on, ack:false}); V.manon=on; render(); }
+
   function setConn(state, txt){ var c=$('conn'); c.className='conn '+state; $('conn-t').textContent=txt; }
   function clock(){ $('clk').textContent = new Date().toLocaleTimeString('de-CH',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
   setInterval(clock, 1000); clock();
 
-  // ===== ioBroker socket.io (web.0, anonym) =====
-  var socket = io(location.origin, { path:'/socket.io', transports:['websocket','polling'], reconnection:true });
+  socket = io(location.origin, { path:'/socket.io', transports:['websocket','polling'], reconnection:true });
   socket.on('connect', function(){
     setConn('ok','live');
     Object.keys(IDS).forEach(function(k){
@@ -189,12 +209,10 @@
       socket.emit('subscribe', id);
     });
   });
-  socket.on('stateChange', function(id, st){
-    var k = REV[id]; if (!k || !st) return;
-    V[k] = st.val; render();
-  });
+  socket.on('stateChange', function(id, st){ var k=REV[id]; if(!k||!st) return; V[k]=st.val; render(); });
   socket.on('disconnect', function(){ setConn('off','getrennt'); });
   socket.on('connect_error', function(){ setConn('off','Fehler'); });
+  render();
 </script>
 </body>
 </html>
