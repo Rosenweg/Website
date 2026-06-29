@@ -93,14 +93,7 @@
       <div class="sub" id="hero-sub">Aussentemperatur</div>
     </div>
 
-    <h2 class="sec">Messwerte</h2>
-    <div class="cards">
-      <div class="card"><div class="ct">💧 Luftfeuchte</div><div class="cv"><span id="v-outdoorhumidity">–</span><span class="u"> %</span></div><div class="cx"></div></div>
-      <div class="card"><div class="ct">💨 Wind</div><div class="cv"><span id="v-windspeed">–</span><span class="u"> km/h</span></div><div class="cx" id="x-wind"></div></div>
-      <div class="card"><div class="ct">🧭 Windrichtung</div><div class="cv"><span id="v-winddir">–</span><span class="u"> °</span></div><div class="cx" id="x-winddir"></div></div>
-      <div class="card"><div class="ct">🔵 Luftdruck</div><div class="cv"><span id="v-pressureabs">–</span><span class="u"> hPa</span></div><div class="cx" id="x-press"></div></div>
-      <div class="card"><div class="ct">☀️ Solarstrahlung</div><div class="cv"><span id="v-solarradiation">–</span><span class="u"> W/m²</span></div><div class="cx" id="x-solar"></div></div>
-    </div>
+    <div id="dyn-cards"></div>
 
     <h2 class="sec">Berechnet</h2>
     <div class="cards">
@@ -230,7 +223,59 @@
   const hhmm = (d) => d instanceof Date && !isNaN(d) ? d.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' }) : '–';
 
   const cur = {}; // aktuelle Messwerte
-  const FIELDS = { outdoortemp: 1, outdoorhumidity: 0, windspeed: 1, winddir: 0, pressureabs: 1, solarradiation: 0 };
+  // Alle von der Station gelieferten Werte, gruppiert: [feld, Label, Einheit, Nachkommastellen]
+  const METRICS = [
+    { sec: 'Messwerte', items: [
+      ['outdoorhumidity', '💧 Luftfeuchte', '%', 0],
+      ['windspeed', '💨 Wind', 'km/h', 1],
+      ['windgustspeed', '🌬️ Böen', 'km/h', 1],
+      ['maxdailygust', '🌬️ Max. Böe heute', 'km/h', 1],
+      ['winddir', '🧭 Windrichtung', '°', 0],
+      ['pressureabs', '🔵 Luftdruck', 'hPa', 1],
+      ['pressurerel', '🔵 Luftdruck (rel.)', 'hPa', 1],
+      ['solarradiation', '☀️ Solarstrahlung', 'W/m²', 0],
+      ['uvi', '🕶️ UV-Index', '', 0],
+    ]},
+    { sec: 'Regen', items: [
+      ['rain', '🌧️ Regenrate', 'mm/h', 1],
+      ['dailyrain', '☔ Heute', 'mm', 1],
+      ['weeklyrain', '☔ Woche', 'mm', 1],
+      ['monthlyrain', '☔ Monat', 'mm', 1],
+      ['yearlyrain', '☔ Jahr', 'mm', 1],
+      ['rain_piezo', '🌧️ Rate (Piezo)', 'mm/h', 1],
+      ['dailyrain_piezo', '☔ Heute (Piezo)', 'mm', 1],
+      ['yearlyrain_piezo', '☔ Jahr (Piezo)', 'mm', 1],
+    ]},
+    { sec: 'Umwelt & Luftqualität', items: [
+      ['lightning', '⚡ Blitze (Anzahl)', '', 0],
+      ['lightning_time', '⚡ Letzter Blitz', '', null],
+      ['co2', '🫁 CO₂', 'ppm', 0],
+      ['pm25_co2', '🌫️ Feinstaub PM2.5', 'µg/m³', 0],
+      ['pm10_co2', '🌫️ Feinstaub PM10', 'µg/m³', 0],
+      ['humi_co2', '💧 Feuchte (CO₂-Modul)', '%', 0],
+      ['tf_co2', '🌡️ Temp (CO₂-Modul)', '°C', 1],
+      ['tf_ch', '🌡️ Temp Zusatzkanal', '°C', 1],
+      ['soilmoisture', '🌱 Bodenfeuchte', '%', 0],
+    ]},
+    { sec: 'Innen (Station)', items: [
+      ['indoortemp', '🌡️ Innen-Temperatur', '°C', 1],
+      ['indoorhumidity', '💧 Innen-Feuchte', '%', 0],
+    ]},
+  ];
+  const DEC = { outdoortemp: 1 };
+  METRICS.forEach(g => g.items.forEach(([f, , , d]) => { DEC[f] = (d == null ? 1 : d); }));
+  function buildCards() {
+    const host = $('dyn-cards'); if (!host) return;
+    host.innerHTML = METRICS.map(g => {
+      const cards = g.items.map(([f, label, unit]) =>
+        `<div class="card"><div class="ct">${label}</div><div class="cv"><span id="v-${f}">–</span>${unit ? `<span class="u"> ${unit}</span>` : ''}</div><div class="cx" id="x-${f}"></div></div>`
+      ).join('');
+      return `<h2 class="sec">${g.sec}</h2><div class="cards">${cards}</div>`;
+    }).join('');
+  }
+  const setNote = (id, t) => { const e = $(id); if (e) e.textContent = t || ''; };
+  const uvNote = (u) => !Number.isFinite(u) ? '' : u < 3 ? 'niedrig' : u < 6 ? 'mässig' : u < 8 ? 'hoch' : u < 11 ? 'sehr hoch' : 'extrem';
+  function fmtLightning(raw) { const n = Number(raw); if (!Number.isFinite(n) || n <= 0) return 'keine'; const d = new Date(n * 1000); return isNaN(d) ? String(raw) : d.toLocaleString('de-CH', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
 
   function recompute() {
     const T = cur.outdoortemp, RH = cur.outdoorhumidity, v = cur.windspeed;
@@ -356,16 +401,24 @@
 
   function onMessage(topic, payload) {
     const field = String(topic).split('/').pop();
-    if (!(field in FIELDS)) return;
     const raw = payload.toString().trim();
     let num = Number(raw);
     if (field === 'solarradiation' && Number.isFinite(num)) num = num / SOLAR_LUX_PER_WM2; // Lux -> W/m²
     cur[field] = Number.isFinite(num) ? num : raw;
-    $('v-' + field).textContent = Number.isFinite(num) ? num.toFixed(FIELDS[field]) : raw;
-    if (field === 'winddir') $('x-winddir').textContent = compass(raw);
-    if (field === 'windspeed') $('x-wind').textContent = num < 1 ? 'windstill' : (num >= 39 ? 'stürmisch' : '');
-    if (field === 'solarradiation') $('x-solar').textContent = num <= 0 ? 'Nacht / kein Sonnenlicht' : (num > 600 ? 'starke Sonne' : '');
-    if (field === 'pressureabs') $('x-press').textContent = num < 1000 ? 'eher Tiefdruck' : num > 1020 ? 'eher Hochdruck' : 'normal';
+    const el = $('v-' + field);
+    if (el) {
+      if (field === 'lightning_time') el.textContent = fmtLightning(raw);
+      else el.textContent = Number.isFinite(num) ? num.toFixed(DEC[field] ?? 1) : raw;
+    }
+    // Hinweistexte unter den Kacheln
+    if (field === 'winddir') setNote('x-winddir', cur.windheading || compass(raw));
+    if (field === 'windheading') setNote('x-winddir', String(raw));
+    if (field === 'windspeed') setNote('x-windspeed', num < 1 ? 'windstill' : (num >= 39 ? 'stürmisch' : ''));
+    if (field === 'windgustspeed') setNote('x-windgustspeed', num >= 39 ? 'Sturmböen' : '');
+    if (field === 'solarradiation') setNote('x-solarradiation', num <= 0 ? 'Nacht / kein Sonnenlicht' : (num > 600 ? 'starke Sonne' : ''));
+    if (field === 'pressureabs') setNote('x-pressureabs', num < 1000 ? 'eher Tiefdruck' : num > 1020 ? 'eher Hochdruck' : 'normal');
+    if (field === 'uvi') setNote('x-uvi', uvNote(num));
+    if (field === 'rain') setNote('x-rain', num > 0 ? 'es regnet 🌧️' : 'trocken');
     if (field === 'outdoortemp') $('hero-sub').textContent = 'Aussentemperatur' + (num >= 25 ? ' · warm 🥵' : num <= 3 ? ' · kalt 🥶' : '');
     $('last').textContent = '· Stand ' + new Date().toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
     recompute();
@@ -510,6 +563,7 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
+    buildCards();
     updateClock();
     setInterval(updateClock, 1000); // Uhr jede Sekunde
     updateAstro();

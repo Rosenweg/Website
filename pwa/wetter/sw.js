@@ -10,7 +10,7 @@
  *  (Live-Werte kommen ueber MQTT-WebSocket, nicht ueber den SW.)
  */
 
-const CACHE = 'rosenweg-wetter-v2';
+const CACHE = 'rosenweg-wetter-v3';
 
 const SHELL = [
   '/wetter/',
