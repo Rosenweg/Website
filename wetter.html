@@ -114,13 +114,7 @@
 
     <h2 class="sec">Verlauf (24 h)</h2>
     <div class="hint">↦ Diagramm antippen für Vollansicht mit Skalen</div>
-    <div class="charts" id="charts">
-      <div class="chart-card"><div class="ch"><span class="ct">🌡️ Temperatur °C</span><span class="cnow" id="n-outdoortemp">–</span></div><svg id="chart-outdoortemp" viewBox="0 0 300 70" preserveAspectRatio="none"></svg><div class="cr"><span id="lo-outdoortemp"></span><span id="hi-outdoortemp"></span></div></div>
-      <div class="chart-card"><div class="ch"><span class="ct">💧 Luftfeuchte %</span><span class="cnow" id="n-outdoorhumidity">–</span></div><svg id="chart-outdoorhumidity" viewBox="0 0 300 70" preserveAspectRatio="none"></svg><div class="cr"><span id="lo-outdoorhumidity"></span><span id="hi-outdoorhumidity"></span></div></div>
-      <div class="chart-card"><div class="ch"><span class="ct">💨 Wind km/h</span><span class="cnow" id="n-windspeed">–</span></div><svg id="chart-windspeed" viewBox="0 0 300 70" preserveAspectRatio="none"></svg><div class="cr"><span id="lo-windspeed"></span><span id="hi-windspeed"></span></div></div>
-      <div class="chart-card"><div class="ch"><span class="ct">🔵 Luftdruck hPa</span><span class="cnow" id="n-pressureabs">–</span></div><svg id="chart-pressureabs" viewBox="0 0 300 70" preserveAspectRatio="none"></svg><div class="cr"><span id="lo-pressureabs"></span><span id="hi-pressureabs"></span></div></div>
-      <div class="chart-card"><div class="ch"><span class="ct">☀️ Solar W/m²</span><span class="cnow" id="n-solarradiation">–</span></div><svg id="chart-solarradiation" viewBox="0 0 300 70" preserveAspectRatio="none"></svg><div class="cr"><span id="lo-solarradiation"></span><span id="hi-solarradiation"></span></div></div>
-    </div>
+    <div class="charts" id="charts"></div>
 
     <div class="foot">Live via MQTT <span id="last"></span> · Verlauf jede Minute<br>Rosenweg 9 · öffentlich · berechnete Werte ohne Gewähr</div>
   </div>
@@ -256,10 +250,6 @@
       ['tf_co2', '🌡️ Temp (CO₂-Modul)', '°C', 1],
       ['tf_ch', '🌡️ Temp Zusatzkanal', '°C', 1],
       ['soilmoisture', '🌱 Bodenfeuchte', '%', 0],
-    ]},
-    { sec: 'Innen (Station)', items: [
-      ['indoortemp', '🌡️ Innen-Temperatur', '°C', 1],
-      ['indoorhumidity', '💧 Innen-Feuchte', '%', 0],
     ]},
   ];
   const DEC = { outdoortemp: 1 };
@@ -429,9 +419,18 @@
     { f: 'outdoortemp', dec: 1, color: '#fb923c', label: '🌡️ Temperatur', unit: '°C' },
     { f: 'outdoorhumidity', dec: 0, color: '#38bdf8', label: '💧 Luftfeuchte', unit: '%' },
     { f: 'windspeed', dec: 1, color: '#a3e635', label: '💨 Wind', unit: 'km/h' },
+    { f: 'windgustspeed', dec: 1, color: '#84cc16', label: '🌬️ Böen', unit: 'km/h' },
     { f: 'pressureabs', dec: 1, color: '#c084fc', label: '🔵 Luftdruck', unit: 'hPa' },
     { f: 'solarradiation', dec: 0, color: '#fde047', label: '☀️ Solarstrahlung', unit: 'W/m²' },
+    { f: 'uvi', dec: 0, color: '#f472b6', label: '🕶️ UV-Index', unit: '' },
+    { f: 'rain', dec: 1, color: '#60a5fa', label: '🌧️ Regenrate', unit: 'mm/h' },
   ];
+  function buildCharts() {
+    const host = $('charts'); if (!host) return;
+    host.innerHTML = CHARTS.map(c =>
+      `<div class="chart-card"><div class="ch"><span class="ct">${c.label} ${c.unit}</span><span class="cnow" id="n-${c.f}">–</span></div><svg id="chart-${c.f}" viewBox="0 0 300 70" preserveAspectRatio="none"></svg><div class="cr"><span id="lo-${c.f}"></span><span id="hi-${c.f}"></span></div></div>`
+    ).join('');
+  }
   let lastPoints = [];
   function drawChart(field, points, dec, color) {
     const svg = $('chart-' + field); if (!svg) return;
@@ -564,6 +563,7 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     buildCards();
+    buildCharts();
     updateClock();
     setInterval(updateClock, 1000); // Uhr jede Sekunde
     updateAstro();
