@@ -1,0 +1,9 @@
+[Unit]
+Description=Heizstab Manuell/Auto Bridge (ioBroker simple-api -> SmartFox Modbus)
+After=network.target
+[Service]
+ExecStart=/usr/bin/python3 /opt/heizstab-bridge.py
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target
