@@ -14008,8 +14008,12 @@ pool.query(`CREATE TABLE IF NOT EXISTS wetter_history (
   windspeed       REAL,
   winddir         REAL,
   pressureabs     REAL,
-  solarradiation  REAL
+  solarradiation  REAL,
+  rain            REAL,
+  uvi             REAL,
+  windgustspeed   REAL
 )`).then(() => pool.query(`CREATE INDEX IF NOT EXISTS idx_wetter_history_station_ts ON wetter_history(station, ts DESC)`))
+  .then(() => pool.query(`ALTER TABLE wetter_history ADD COLUMN IF NOT EXISTS rain REAL, ADD COLUMN IF NOT EXISTS uvi REAL, ADD COLUMN IF NOT EXISTS windgustspeed REAL`))
   .catch(e => console.error('[wetter] history table init:', e.message));
 
 // Ingest (Broker-Secret ?k=): ein Snapshot der aktuellen Werte. Aufruf vom Ingest-Timer (CT105).
@@ -14019,9 +14023,9 @@ app.post('/api/wetter/:station/ingest', mqttBrokerGuard, async (req, res) => {
     const b = req.body || {};
     const num = (v) => { if (v === '' || v == null) return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
     await pool.query(
-      `INSERT INTO wetter_history (station, outdoortemp, outdoorhumidity, windspeed, winddir, pressureabs, solarradiation)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [st, num(b.outdoortemp), num(b.outdoorhumidity), num(b.windspeed), num(b.winddir), num(b.pressureabs), num(b.solarradiation)]
+      `INSERT INTO wetter_history (station, outdoortemp, outdoorhumidity, windspeed, winddir, pressureabs, solarradiation, rain, uvi, windgustspeed)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [st, num(b.outdoortemp), num(b.outdoorhumidity), num(b.windspeed), num(b.winddir), num(b.pressureabs), num(b.solarradiation), num(b.rain), num(b.uvi), num(b.windgustspeed)]
     );
     res.json({ ok: true });
   } catch (e) { console.error('[wetter] ingest:', e.message); res.status(500).json({ error: 'ingest' }); }
@@ -14033,7 +14037,7 @@ app.get('/api/wetter/:station/history', async (req, res) => {
     const st = String(req.params.station || 'r9').slice(0, 16);
     const hours = Math.min(168, Math.max(1, parseInt(req.query.h, 10) || 24));
     const r = await pool.query(
-      `SELECT ts, outdoortemp, outdoorhumidity, windspeed, winddir, pressureabs, solarradiation
+      `SELECT ts, outdoortemp, outdoorhumidity, windspeed, winddir, pressureabs, solarradiation, rain, uvi, windgustspeed
          FROM wetter_history
         WHERE station = $1 AND ts > NOW() - ($2 * INTERVAL '1 hour')
         ORDER BY ts ASC`,
@@ -14107,6 +14111,19 @@ function mqttTopicMatch(filter, topic) {
   return f.length === t.length;
 }
 
+// ACL mit mehreren Patterns (Komma-getrennt) + Deny-Patterns ("!pattern", z.B. Datenschutz:
+// Indoor-Topics vom oeffentlichen Read-User ausschliessen). Rueckwaerts-kompatibel:
+// ein einzelnes Pattern verhaelt sich exakt wie mqttTopicMatch.
+function mqttAclAllows(filter, topic) {
+  const parts = String(filter || '').split(',').map(s => s.trim()).filter(Boolean);
+  let allowed = false;
+  for (const p of parts) {
+    if (p[0] === '!') { if (mqttTopicMatch(p.slice(1), topic)) return false; } // Deny gewinnt
+    else if (mqttTopicMatch(p, topic)) allowed = true;
+  }
+  return allowed;
+}
+
 app.post('/api/mqtt/getuser', mqttBrokerGuard, async (req, res) => {
   try {
     const { username, password } = req.body || {};
@@ -14141,7 +14158,7 @@ app.post('/api/mqtt/aclcheck', mqttBrokerGuard, async (req, res) => {
     const svc = await mqttServiceUserByUsername(username);
     if (svc) {
       if (Number(acc) === 2 && !svc.can_write) return res.status(403).end();
-      return res.status(mqttTopicMatch(svc.topic_filter, topic) ? 200 : 403).end();
+      return res.status(mqttAclAllows(svc.topic_filter, topic) ? 200 : 403).end();
     }
     const u = await mqttUserByUsername(username);
     if (!u) return res.status(403).end();
