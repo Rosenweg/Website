@@ -76,6 +76,7 @@ assemble_stweg() {
   rsync -a stweg1 stweg2 stweg3 stweg4 stweg5 stweg6 stweg7 meg js css "$build/"
   cp site-config.json logo-rosenweg.png logo-stweg3-rosenweg9.png logo-stweg6-rosenweg1.png "$build/"
   cp waschkueche.html "$build/_waschkueche.html"
+  cp steuerung.html "$build/steuerung.html"
 }
 
 assemble_pwa() {
