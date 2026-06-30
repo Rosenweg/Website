@@ -7,7 +7,8 @@
 <script src="/lib/js/socket.io.js"></script>
 <style>
   * { box-sizing: border-box; }
-  body { margin:0; font-family: 'Segoe UI', system-ui, sans-serif; background:#0b1220; color:#dbe4f0; }
+  html, body { height:100%; }
+  body { margin:0; font-family: 'Segoe UI', system-ui, sans-serif; background:#0b1220; color:#dbe4f0; display:flex; flex-direction:column; }
   .bar { display:flex; align-items:center; justify-content:space-between; padding:.5rem 1rem; background:linear-gradient(90deg,#13203a,#0e1830); border-bottom:1px solid #1e3a5f; }
   .bar .ttl { font-weight:600; font-size:1.05rem; letter-spacing:.02em; }
   .bar .ttl small { display:block; font-weight:400; font-size:.72rem; opacity:.6; }
@@ -16,8 +17,8 @@
   .conn .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:.35rem; background:#f59e0b; vertical-align:middle; }
   .conn.ok .dot { background:#22c55e; } .conn.off .dot { background:#ef4444; }
   .clk { font-size:1rem; opacity:.85; }
-  .wrap { padding:.5rem; }
-  svg { width:100%; height:auto; display:block; max-height:calc(100vh - 58px); }
+  .wrap { padding:.5rem; flex:1 1 auto; min-height:0; }
+  svg { width:100%; height:100%; display:block; }
   .lbl { fill:#8aa0bd; font-size:13px; }
   .unit { fill:#6b809e; font-size:12px; }
   .val { fill:#eaf2ff; font-weight:700; font-variant-numeric:tabular-nums; }
