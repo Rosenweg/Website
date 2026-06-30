@@ -162,14 +162,29 @@ http:
       priority: 100
       service: authentik-hosts-svc
       tls: { certResolver: cf }
-    heizung-rw9:
+    # Nur die Heizung-View + ihre Assets durchlassen (socket.io-Client unter
+    # /lib, WS /socket.io) — NICHT den vollen ioBroker-Web (vis-2-Editor etc.).
+    heizung-view-rw9:
+      entryPoints: [websecure]
+      rule: Host(`heizung.rosenweg9.ch`) && (PathPrefix(`/web.0/heizung`) || PathPrefix(`/socket.io`) || PathPrefix(`/lib`))
+      priority: 50
+      service: iobroker-svc
+      middlewares: [authentik-fwd]
+      tls: { certResolver: cf }
+    # Alles andere (/, /vis-2/, …) -> auf die View umleiten (kein Editor-Zugriff).
+    heizung-redirect-rw9:
       entryPoints: [websecure]
       rule: Host(`heizung.rosenweg9.ch`)
       priority: 10
       service: iobroker-svc
-      middlewares: [authentik-fwd]
+      middlewares: [heizung-to-view]
       tls: { certResolver: cf }
   middlewares:
+    # Catch-all auf heizung.rosenweg9.ch -> direkt in die View (statt Editor).
+    heizung-to-view:
+      redirectRegex:
+        regex: ^https?://heizung\.rosenweg9\.ch/.*
+        replacement: https://heizung.rosenweg9.ch/web.0/heizung/index.html
     tv-playlist-path:
       replacePath:
         path: /api/tv/playlist.m3u
