@@ -9,7 +9,7 @@ Heizstab-Leistung (mqtt.0.energy.r9.heizstab.power_w / SmartFox), Lüfter, Gaswa
 `iobroker file write <lokal>/heizung-operator.html /web.0/heizung/index.html`
 **URL:** http://100.64.90.50:8082/web.0/heizung/index.html
 
-## heizstab-bridge (Heizstab Manuell/Auto -> SmartFox Modbus)
+## heizstab-bridge.js — Heizstab Manuell/Auto -> SmartFox Modbus (ioBroker-JS)
 systemd-Dienst auf CT901 (`/opt/heizstab-bridge.py`, Unit `heizstab-bridge.service`).
 Liest Modus aus ioBroker via **simple-api** (REST :8087, `0_userdata.0.heizstab.mode` / `.manual_on`),
 stellt **SmartFox 100.64.90.62** per Modbus TCP (FC 0x10!) self-healing (alle 3 s, nur bei Abweichung):
@@ -23,3 +23,5 @@ Gen2-Shelly als BLE-Gateway für BLU-Geräte (H&T/Motion). **Version MUSS zum Ad
 
 ## heizraum-temp.js — Heizraum-Temp-Wächter (eigenständig im ioBroker, OHNE Kern-API)
 ioBroker-JavaScript `script.js.Heizung.heizraum_temp` (CT901). Liest beide H&T (BLU `0c:ef:f6…` + WiFi `08b61fccf7a0`) nativ, postet bei Übertemperatur **direkt** an den WhatsApp-Gateway `http://100.64.2.39:8090/gateway/send` (Header `X-Messaging-Key`, Body `{channel,to,body}`), Ziel = Technik-Gruppe `120363407257445046@g.us`. Warn 40 °C / Alarm 45 °C, Anti-Spam (Flanke + 6h-Reminder nur im Alarm + Entwarnung, State in `0_userdata.0.heizraum.*`), Redundanz/blind-Erkennung. Bewusst NICHT in der Kern-API (kein Single Point of Failure). Deploy: `iobroker object set <id> '{minimal}'` dann `iobroker object set <id> "common.source=$(cat ...)"` (CLI splittet am ERSTEN `=`), dann `common.enabled=true`.
+
+**Update:** Der Heizstab läuft jetzt als ioBroker-JavaScript `script.js.Heizung.heizstab` (Repo `iobroker/heizstab-bridge.js`, Modbus via `require('net')`, `on()`-Trigger + 3s-Self-Heal) — der frühere Python-systemd-Dienst (heizstab-bridge.service) ist **gestoppt + disabled** (durch den 2-Schritt-Script-Trick nicht mehr nötig). Einheitlich „alles im ioBroker".
