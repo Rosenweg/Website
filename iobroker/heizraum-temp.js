@@ -10,7 +10,7 @@ const SENSORS = [
 const WARN_C = 40, ALARM_C = 45, HYST = 2;
 const STALE_MS = 30 * 60 * 1000, REMIND_MS = 6 * 60 * 60 * 1000;
 const GW_URL = 'http://100.64.2.39:8090/gateway/send';
-const GW_KEY = 'mg_d07ae66b847ebb8f7d47d44fd35213393fe865fe9ef88306254ffa1c644f9443';
+const GW_KEY = '<REDACTED — entspricht API GATEWAY_API_KEY, nur im deployten ioBroker-Script>';
 const TECHNIK = '120363407257445046@g.us';
 const ST_LEVEL = '0_userdata.0.heizraum.alert_level';
 const ST_TS    = '0_userdata.0.heizraum.alert_ts';
