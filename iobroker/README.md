@@ -17,3 +17,6 @@ stellt **SmartFox 100.64.90.62** per Modbus TCP (FC 0x10!) self-healing (alle 3 
 - MANUELL -> **40400=1**, **40401**=Stellwert (0.1%-Schritte: 1000=100%/EIN, 0=AUS)
 - Ist-Leistung lesbar in 41047 (Aout %). Adressen literal (kein Modicon-Offset). SmartFox quittiert Writes verzögert -> Read-Back zählt. NIE zwei Modbus-Clients gleichzeitig (Race).
 Deploy: Datei nach /opt/heizstab-bridge.py + Unit nach /etc/systemd/system/, `systemctl enable --now heizstab-bridge`.
+
+## shelly-ble-gateway-v1.2.js — Shelly BLU lesen (BLE-Gateway-Script)
+Gen2-Shelly als BLE-Gateway für BLU-Geräte (H&T/Motion). **Version MUSS zum Adapter passen**: shelly 10.6.1 → **v1.2** (v1.3 erst ≥11). Quelle: iobroker.shelly-Doku am Tag v10.3.0. Deploy auf die netzbetriebenen Plus1PM via RPC `Script.Stop`→`PutCode`(chunked)→`SetConfig enable`→`Start`. Werte: `shelly.0.ble.<mac>.{temperature,humidity,battery,…}`.
