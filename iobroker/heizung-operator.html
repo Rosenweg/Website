@@ -25,7 +25,7 @@
   .cardttl { fill:#9fb4d2; font-size:13px; font-weight:600; }
   .pipe { stroke:#3b5a86; stroke-width:6; fill:none; stroke-linecap:round; }
   .lead { stroke:#3b5a86; stroke-width:1.5; stroke-dasharray:3 3; }
-  .btn { cursor:pointer; }
+  .btn { cursor:default; pointer-events:none; }
   .btn rect { stroke-width:1.5; }
   .btn text { font-size:13px; font-weight:600; pointer-events:none; }
   .ceil { stroke:#3a4a66; stroke-width:5; }
@@ -102,14 +102,14 @@
     <circle id="heiz-ind" cx="968" cy="316" r="6" fill="#475569"/>
     <text x="674" y="362" class="val" font-size="26"><tspan id="heiz-pow">–</tspan><tspan class="unit" dx="4">kW</tspan></text>
     <text x="674" y="390" id="heiz-state" class="lbl" font-size="13">–</text>
-    <text x="800" y="344" class="lbl" font-size="12">Modus</text>
-    <g class="btn" id="btn-auto" onclick="setMode('auto')"><rect x="800" y="350" width="86" height="28" rx="6"/><text x="843" y="369" text-anchor="middle">AUTO</text></g>
-    <g class="btn" id="btn-man" onclick="setMode('manuell')"><rect x="892" y="350" width="86" height="28" rx="6"/><text x="935" y="369" text-anchor="middle">MANUELL</text></g>
+    <text x="800" y="344" class="lbl" font-size="12">Modus · 🔒 nur Anzeige</text>
+    <g class="btn" id="btn-auto"><rect x="800" y="350" width="86" height="28" rx="6"/><text x="843" y="369" text-anchor="middle">AUTO</text></g>
+    <g class="btn" id="btn-man"><rect x="892" y="350" width="86" height="28" rx="6"/><text x="935" y="369" text-anchor="middle">MANUELL</text></g>
     <text x="800" y="392" class="lbl" font-size="12">Hand</text>
-    <g class="btn" id="btn-on" onclick="setHand(true)"><rect x="800" y="396" width="86" height="26" rx="6"/><text x="843" y="414" text-anchor="middle">EIN</text></g>
-    <g class="btn" id="btn-off" onclick="setHand(false)"><rect x="892" y="396" width="86" height="26" rx="6"/><text x="935" y="414" text-anchor="middle">AUS</text></g>
+    <g class="btn" id="btn-on"><rect x="800" y="396" width="86" height="26" rx="6"/><text x="843" y="414" text-anchor="middle">EIN</text></g>
+    <g class="btn" id="btn-off"><rect x="892" y="396" width="86" height="26" rx="6"/><text x="935" y="414" text-anchor="middle">AUS</text></g>
 
-    <text x="20" y="586" class="unit" id="foot">Live via ioBroker socket.io · AUTO/MANUELL stellt den SmartFox-Heizstab via Modbus-Brücke (Hand EIN = 100 % aus dem Netz)</text>
+    <text x="20" y="586" class="unit" id="foot">Live via ioBroker · Heizstab-Steuerung nur Anzeige — SmartFox regelt per PV (manuelle Stellung nur am SmartFox-Gerät)</text>
   </svg>
   </div>
 
