@@ -16173,6 +16173,97 @@ async function checkMeterReachability() {
 setInterval(checkMeterReachability, 5 * 60_000); // alle 5 Min
 setTimeout(checkMeterReachability, 90_000);       // erster Check nach 90s
 
+// ── Heizraum-Temperatur-Watchdog (Server/Netzwerk-Schrank) ─────────────────
+// Liest die beiden H&T (BLU + WiFi) aus dem ioBroker (simple-api) und meldet
+// Übertemperatur an Technik (WhatsApp). Bewusst Anti-Spam: edge-getriggert +
+// DB-State, Reminder NUR im Alarm alle 6h, Entwarnung 1x. Bewertung über die
+// FRISCHEN Sensoren (Redundanz BLU+WiFi); "blind"-Meldung nur wenn beide stale.
+const HEIZRAUM_IOB_API = process.env.IOB_SIMPLE_API || 'http://100.64.90.50:8087';
+const HEIZRAUM_SENSORS = [
+  { key: 'blu',  label: 'BLU H&T',       id: 'shelly.0.ble.0c:ef:f6:02:eb:ba.temperature' },
+  { key: 'wifi', label: 'WiFi Plus H&T', id: 'shelly.0.shellyplusht#08b61fccf7a0#1.Temperature0.Celsius' },
+];
+const HEIZRAUM_WARN_C  = Number(process.env.HEIZRAUM_WARN_C  || 40);
+const HEIZRAUM_ALARM_C = Number(process.env.HEIZRAUM_ALARM_C || 45);
+const HEIZRAUM_HYST_C  = 2;                     // Hysterese fürs Zurückstufen
+const HEIZRAUM_STALE_MS = 30 * 60 * 1000;       // Sensor gilt als ausgefallen
+const HEIZRAUM_REMIND_MS = 6 * 60 * 60 * 1000;  // im Alarm alle 6h erinnern
+let heizraumAlertReady = false;
+let heizraumLoggedOnce = false;
+async function ensureHeizraumAlertTable() {
+  if (heizraumAlertReady) return;
+  await pool.query(`CREATE TABLE IF NOT EXISTS heizraum_alert_state (
+    id TEXT PRIMARY KEY, level TEXT NOT NULL DEFAULT 'ok', last_alert_at TIMESTAMPTZ)`);
+  heizraumAlertReady = true;
+}
+async function heizraumGet(id) {
+  try {
+    const r = await fetch(`${HEIZRAUM_IOB_API}/get/${id.replace(/#/g, '%23')}`, { signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const val = Number(j.val);
+    return Number.isFinite(val) ? { val, ts: Number(j.ts || j.lc || 0) } : null;
+  } catch { return null; }
+}
+async function heizraumGetState(id) {
+  const r = await pool.query('SELECT level, last_alert_at FROM heizraum_alert_state WHERE id=$1', [id]);
+  return r.rows[0] || { level: 'ok', last_alert_at: null };
+}
+async function heizraumSetState(id, level) {
+  await pool.query(`INSERT INTO heizraum_alert_state (id, level, last_alert_at) VALUES ($1,$2,NOW())
+    ON CONFLICT (id) DO UPDATE SET level=$2, last_alert_at=NOW()`, [id, level]);
+}
+async function checkHeizraumTemp() {
+  try {
+    await ensureHeizraumAlertTable();
+    const now = Date.now();
+    const reads = [];
+    for (const s of HEIZRAUM_SENSORS) {
+      const g = await heizraumGet(s.id);
+      reads.push({ ...s, val: g ? g.val : null, fresh: !!g && (now - g.ts <= HEIZRAUM_STALE_MS) });
+    }
+    const fresh = reads.filter(r => r.fresh && r.val != null);
+    const detail = reads.map(r => `${r.label}: ${r.val != null ? r.val.toFixed(1) + '°C' : '—'}${r.fresh ? '' : ' (stale)'}`).join(' · ');
+    if (!heizraumLoggedOnce) { console.log(`[Heizraum-Watchdog] aktiv (Warn ${HEIZRAUM_WARN_C}°C / Alarm ${HEIZRAUM_ALARM_C}°C) — ${detail}`); heizraumLoggedOnce = true; }
+
+    // 1) Blind-Erkennung: kein einziger frischer Sensor
+    const blind = await heizraumGetState('blind');
+    if (fresh.length === 0) {
+      if (blind.level !== 'blind') {
+        await notifyTechnik(`🌡️❓ *Heizraum-Temp nicht lesbar*\nKein Sensor liefert frische Werte (${detail}). Überwachung des Server/Netzwerk-Schranks aktuell blind.\n— Heizraum-Watchdog`, 'heizraum-watchdog');
+        await heizraumSetState('blind', 'blind');
+      }
+      return;
+    } else if (blind.level === 'blind') {
+      await notifyTechnik(`✅ *Heizraum-Temp wieder lesbar*\n${detail}. Entwarnung.\n— Heizraum-Watchdog`, 'heizraum-watchdog');
+      await heizraumSetState('blind', 'ok');
+    }
+
+    // 2) Übertemperatur über die frischen Sensoren (Maximum)
+    const maxT = Math.max(...fresh.map(r => r.val));
+    const prev = await heizraumGetState('temp');
+    let level = maxT >= HEIZRAUM_ALARM_C ? 'alarm' : (maxT >= HEIZRAUM_WARN_C ? 'warn' : 'ok');
+    if (prev.level === 'alarm' && maxT >= HEIZRAUM_ALARM_C - HEIZRAUM_HYST_C) level = 'alarm';
+    else if ((prev.level === 'alarm' || prev.level === 'warn') && level === 'ok' && maxT >= HEIZRAUM_WARN_C - HEIZRAUM_HYST_C) level = 'warn';
+    const rank = { ok: 0, warn: 1, alarm: 2 };
+    if (rank[level] > rank[prev.level]) {
+      const msg = level === 'alarm'
+        ? `🔥 *HEIZRAUM-ALARM — ${maxT.toFixed(1)} °C* (≥ ${HEIZRAUM_ALARM_C}°C)\nÜberhitzungsgefahr Server/Netzwerk-Schrank! Lüftung/Kühlung prüfen.\n${detail}\n— Heizraum-Watchdog`
+        : `⚠️ *Heizraum warm — ${maxT.toFixed(1)} °C* (≥ ${HEIZRAUM_WARN_C}°C)\n${detail}\n— Heizraum-Watchdog`;
+      await notifyTechnik(msg, 'heizraum-watchdog');
+      await heizraumSetState('temp', level);
+    } else if (rank[level] < rank[prev.level]) {
+      if (level === 'ok') await notifyTechnik(`✅ *Heizraum wieder ok — ${maxT.toFixed(1)} °C*\n${detail}. Entwarnung.\n— Heizraum-Watchdog`, 'heizraum-watchdog');
+      await heizraumSetState('temp', level);
+    } else if (level === 'alarm' && prev.last_alert_at && (now - new Date(prev.last_alert_at).getTime() >= HEIZRAUM_REMIND_MS)) {
+      await notifyTechnik(`🔥 *Heizraum weiterhin heiß — ${maxT.toFixed(1)} °C*\n${detail}\n— Heizraum-Watchdog`, 'heizraum-watchdog');
+      await heizraumSetState('temp', level);
+    }
+  } catch (e) { console.warn('[Heizraum-Watchdog]', e.message); }
+}
+setInterval(checkHeizraumTemp, 3 * 60_000);  // alle 3 Min
+setTimeout(checkHeizraumTemp, 100_000);      // erster Check nach ~100s
+
 // QR-Code-Bridge: Bot pusht den aktuellen QR; Admin holt ihn als PNG.
 // In-Memory (volatile, kein DB-Stoerfaktor; QR rotiert eh alle 60s).
 let waCurrentQrPng = null;
