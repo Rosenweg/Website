@@ -20,3 +20,6 @@ Deploy: Datei nach /opt/heizstab-bridge.py + Unit nach /etc/systemd/system/, `sy
 
 ## shelly-ble-gateway-v1.2.js — Shelly BLU lesen (BLE-Gateway-Script)
 Gen2-Shelly als BLE-Gateway für BLU-Geräte (H&T/Motion). **Version MUSS zum Adapter passen**: shelly 10.6.1 → **v1.2** (v1.3 erst ≥11). Quelle: iobroker.shelly-Doku am Tag v10.3.0. Deploy auf die netzbetriebenen Plus1PM via RPC `Script.Stop`→`PutCode`(chunked)→`SetConfig enable`→`Start`. Werte: `shelly.0.ble.<mac>.{temperature,humidity,battery,…}`.
+
+## heizraum-temp.js — Heizraum-Temp-Wächter (eigenständig im ioBroker, OHNE Kern-API)
+ioBroker-JavaScript `script.js.Heizung.heizraum_temp` (CT901). Liest beide H&T (BLU `0c:ef:f6…` + WiFi `08b61fccf7a0`) nativ, postet bei Übertemperatur **direkt** an den WhatsApp-Gateway `http://100.64.2.39:8090/gateway/send` (Header `X-Messaging-Key`, Body `{channel,to,body}`), Ziel = Technik-Gruppe `120363407257445046@g.us`. Warn 40 °C / Alarm 45 °C, Anti-Spam (Flanke + 6h-Reminder nur im Alarm + Entwarnung, State in `0_userdata.0.heizraum.*`), Redundanz/blind-Erkennung. Bewusst NICHT in der Kern-API (kein Single Point of Failure). Deploy: `iobroker object set <id> '{minimal}'` dann `iobroker object set <id> "common.source=$(cat ...)"` (CLI splittet am ERSTEN `=`), dann `common.enabled=true`.
