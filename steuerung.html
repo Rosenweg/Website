@@ -30,9 +30,13 @@
   <!-- Inhalt -->
   <main id="app" class="flex-1 flex flex-col" style="display:none">
     <section class="bg-gradient-to-r from-blue-700 to-blue-900 text-white">
-      <div class="max-w-7xl mx-auto px-4 py-5">
-        <h1 class="text-2xl md:text-3xl font-bold">Steuerung &amp; Anlagen</h1>
-        <p class="text-blue-100 text-sm">Live-Ansichten der Haustechnik · Rosenweg 9</p>
+      <div class="max-w-7xl mx-auto px-4 py-5 flex items-center justify-between gap-4">
+        <div>
+          <h1 class="text-2xl md:text-3xl font-bold">Steuerung &amp; Anlagen</h1>
+          <p class="text-blue-100 text-sm">Live-Ansichten der Haustechnik · Rosenweg 9</p>
+        </div>
+        <a id="open-tab" href="#" target="_blank" rel="noopener"
+           class="shrink-0 text-sm bg-white/15 hover:bg-white/25 text-white px-3 py-2 rounded-lg">↗ In neuem Tab</a>
       </div>
     </section>
 
@@ -46,30 +50,68 @@
 
     <!-- View-Container (iframe) -->
     <div class="flex-1 bg-gray-100 p-3">
-      <div class="max-w-7xl mx-auto h-full bg-[#0b1220] rounded-xl shadow overflow-hidden" style="min-height:78vh">
-        <div id="frame-loading" class="h-full flex items-center justify-center text-gray-400 text-sm">Lade Ansicht …</div>
+      <div class="max-w-7xl mx-auto h-full bg-[#0b1220] rounded-xl shadow overflow-hidden relative" style="min-height:78vh">
         <iframe id="view-frame" title="Anlagen-Ansicht" allow="fullscreen"></iframe>
+        <!-- Overlay: Laden / Freischalten -->
+        <div id="frame-overlay" class="absolute inset-0 flex items-center justify-center bg-[#0b1220] text-gray-300">
+          <div id="ov-loading" class="text-sm">Lade Ansicht …</div>
+          <div id="ov-unlock" class="hidden text-center max-w-md px-6">
+            <p class="text-gray-200 font-medium mb-1">Ansicht muss einmal angemeldet werden</p>
+            <p class="text-gray-400 text-sm mb-4">Aus Sicherheitsgründen liegt die Heizungs-Ansicht hinter einer separaten Anmeldung. Einmal freischalten — danach lädt sie hier automatisch.</p>
+            <button id="unlock-btn" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-medium">Anmelden &amp; anzeigen</button>
+            <p class="text-gray-500 text-xs mt-3">Öffnet kurz einen neuen Tab. Nach der Anmeldung hierher zurück — die Ansicht erscheint automatisch.</p>
+          </div>
+        </div>
       </div>
     </div>
   </main>
 
   <script>
-    // Views -> geschützte ioBroker-URL (hinter Authentik-Forward-Auth exponiert)
+    // Views -> geschützte ioBroker-URL (hinter Authentik-Forward-Auth)
     const VIEWS = {
       heizung: 'https://heizung.rosenweg9.ch/web.0/heizung/index.html',
     };
-    const frame = document.getElementById('view-frame');
-    const loading = document.getElementById('frame-loading');
+    const frame   = document.getElementById('view-frame');
+    const overlay = document.getElementById('frame-overlay');
+    const ovLoad  = document.getElementById('ov-loading');
+    const ovUnlock= document.getElementById('ov-unlock');
+    const openTab = document.getElementById('open-tab');
+    let current = 'heizung';
+    let loadTimer = null;
+
+    function setOverlay(state) { // 'loading' | 'unlock' | 'hidden'
+      overlay.style.display = state === 'hidden' ? 'none' : 'flex';
+      ovLoad.classList.toggle('hidden',   state !== 'loading');
+      ovUnlock.classList.toggle('hidden', state !== 'unlock');
+    }
 
     function showView(key) {
       const url = VIEWS[key]; if (!url) return;
-      loading.style.display = 'flex'; frame.style.display = 'none';
-      frame.onload = () => { loading.style.display = 'none'; frame.style.display = 'block'; };
-      frame.src = url;
+      current = key;
+      openTab.href = url;
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.view === key));
+      setOverlay('loading');
+      clearTimeout(loadTimer);
+      // onload feuert nur, wenn der iframe wirklich die View lädt (nicht bei
+      // X-Frame-blockiertem Authentik-Login). Bleibt onload aus -> Freischalten.
+      frame.onload = () => { clearTimeout(loadTimer); setOverlay('hidden'); };
+      frame.src = 'about:blank';
+      frame.src = url;
+      loadTimer = setTimeout(() => setOverlay('unlock'), 6000);
     }
+
     document.getElementById('tabbar').addEventListener('click', (e) => {
       const b = e.target.closest('.tab-btn'); if (b) showView(b.dataset.view);
+    });
+
+    document.getElementById('unlock-btn').addEventListener('click', () => {
+      // Top-Level-Anmeldung in neuem Tab: dort greift das Authentik-SSO (kein
+      // iframe-Block), setzt das Proxy-Cookie auf heizung.rosenweg9.ch.
+      window.open(VIEWS[current], 'heizung_auth');
+      setOverlay('loading');
+      // Wenn der Nutzer zurückkommt: iframe neu laden (jetzt mit Cookie).
+      const onFocus = () => { window.removeEventListener('focus', onFocus); setTimeout(() => showView(current), 600); };
+      window.addEventListener('focus', onFocus);
     });
 
     (async function () {
