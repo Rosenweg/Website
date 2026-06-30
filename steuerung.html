@@ -66,9 +66,10 @@
       </div>
     </div>
 
-    <!-- View-Container -->
-    <div class="flex-1 bg-gray-100 p-3">
-      <div class="max-w-7xl mx-auto h-full bg-[#0b1220] rounded-xl shadow overflow-hidden" style="min-height:74vh">
+    <!-- View-Container — feste Höhe, sonst kollabiert iframe height:100% auf SVG-Default -->
+    <div class="bg-gray-100 p-3">
+      <div class="max-w-7xl mx-auto bg-[#0b1220] rounded-xl shadow overflow-hidden"
+           style="height:calc(100vh - 230px); min-height:420px">
         <iframe id="view-frame" title="Anlagen-Ansicht" allow="fullscreen"></iframe>
       </div>
     </div>
