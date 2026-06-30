@@ -16,6 +16,7 @@ const ST_LEVEL = '0_userdata.0.heizraum.alert_level';
 const ST_TS    = '0_userdata.0.heizraum.alert_ts';
 const ST_BLIND = '0_userdata.0.heizraum.blind';
 const RANK = { ok: 0, warn: 1, alarm: 2 };
+const ORT = 'Rosenweg 9';
 
 function send(text) {
   httpPost(GW_URL, JSON.stringify({ channel: 'whatsapp', to: TECHNIK, body: String(text).slice(0, 3500) }),
@@ -38,10 +39,10 @@ function check() {
 
   const blind = getState(ST_BLIND).val === true;
   if (fresh.length === 0) {
-    if (!blind) { send(`🌡️❓ *Heizraum-Temp nicht lesbar*\n${detail}. Überwachung Server/Netzwerk-Schrank aktuell blind.\n— Heizraum-Wächter`); setState(ST_BLIND, true, true); }
+    if (!blind) { send(`🌡️❓ *Heizraum ${ORT}: Temp nicht lesbar*\n${detail}. Überwachung Server/Netzwerk-Schrank aktuell blind.\n— Heizraum-Wächter`); setState(ST_BLIND, true, true); }
     return;
   } else if (blind) {
-    send(`✅ *Heizraum-Temp wieder lesbar*\n${detail}. Entwarnung.\n— Heizraum-Wächter`); setState(ST_BLIND, false, true);
+    send(`✅ *Heizraum ${ORT}: Temp wieder lesbar*\n${detail}. Entwarnung.\n— Heizraum-Wächter`); setState(ST_BLIND, false, true);
   }
 
   const maxT = Math.max.apply(null, fresh.map(r => r.val));
@@ -53,14 +54,14 @@ function check() {
   const now = Date.now();
   if (RANK[level] > RANK[prev]) {
     send(level === 'alarm'
-      ? `🔥 *HEIZRAUM-ALARM — ${maxT.toFixed(1)} °C* (≥ ${ALARM_C}°C)\nÜberhitzungsgefahr Server/Netzwerk-Schrank! Lüftung/Kühlung prüfen.\n${detail}\n— Heizraum-Wächter`
-      : `⚠️ *Heizraum warm — ${maxT.toFixed(1)} °C* (≥ ${WARN_C}°C)\n${detail}\n— Heizraum-Wächter`);
+      ? `🔥 *HEIZRAUM-ALARM ${ORT} — ${maxT.toFixed(1)} °C* (≥ ${ALARM_C}°C)\nÜberhitzungsgefahr Server/Netzwerk-Schrank! Lüftung/Kühlung prüfen.\n${detail}\n— Heizraum-Wächter`
+      : `⚠️ *Heizraum ${ORT} warm — ${maxT.toFixed(1)} °C* (≥ ${WARN_C}°C)\n${detail}\n— Heizraum-Wächter`);
     setState(ST_LEVEL, level, true); setState(ST_TS, now, true);
   } else if (RANK[level] < RANK[prev]) {
-    if (level === 'ok') send(`✅ *Heizraum wieder ok — ${maxT.toFixed(1)} °C*\n${detail}. Entwarnung.\n— Heizraum-Wächter`);
+    if (level === 'ok') send(`✅ *Heizraum ${ORT} wieder ok — ${maxT.toFixed(1)} °C*\n${detail}. Entwarnung.\n— Heizraum-Wächter`);
     setState(ST_LEVEL, level, true); setState(ST_TS, now, true);
   } else if (level === 'alarm' && (now - Number(getState(ST_TS).val || 0) >= REMIND_MS)) {
-    send(`🔥 *Heizraum weiterhin heiß — ${maxT.toFixed(1)} °C*\n${detail}\n— Heizraum-Wächter`);
+    send(`🔥 *Heizraum ${ORT} weiterhin heiß — ${maxT.toFixed(1)} °C*\n${detail}\n— Heizraum-Wächter`);
     setState(ST_TS, now, true);
   }
 }
@@ -69,4 +70,4 @@ createState(ST_LEVEL, 'ok', { name: 'Heizraum Alarm-Level', type: 'string', read
 createState(ST_TS, 0, { name: 'Heizraum Alarm-Zeitstempel', type: 'number', read: true, write: true });
 createState(ST_BLIND, false, { name: 'Heizraum Temp blind', type: 'boolean', read: true, write: true });
 setTimeout(() => { check(); setInterval(check, 3 * 60 * 1000); }, 8000);
-log('[Heizraum-Wächter] gestartet (Warn ' + WARN_C + '°C / Alarm ' + ALARM_C + '°C, Gateway direkt)');
+log('[Heizraum-Wächter Rosenweg 9] gestartet (Warn ' + WARN_C + '°C / Alarm ' + ALARM_C + '°C, Gateway direkt)');
