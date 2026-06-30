@@ -10,6 +10,9 @@
   <script src="/js/site-config.js"></script>
   <style>
     .tab-btn.active { background:#1d4ed8; color:#fff; }
+    /* Höhe aus dem Seitenverhältnis der View (5:3), nur durch die Viewporthöhe gedeckelt. */
+    .view-box { width:100%; aspect-ratio:5 / 3; max-height:calc(100dvh - 170px); }
+    @supports not (aspect-ratio:1) { .view-box { height:70vh; } } /* alte Browser */
     #view-frame { width:100%; height:100%; border:0; display:block; background:#0b1220; }
   </style>
 </head>
@@ -66,10 +69,11 @@
       </div>
     </div>
 
-    <!-- View-Container — feste Höhe, sonst kollabiert iframe height:100% auf SVG-Default -->
+    <!-- View-Container — Höhe aus dem Seitenverhältnis der View (1000×600 = 5:3),
+         nicht aus dem Viewport: robust über Desktop/Tablet/Smartphone. 100dvh
+         (mobil-stabil, kein Adressleisten-Springen) nur als oberer Deckel. -->
     <div class="bg-gray-100 p-3">
-      <div class="max-w-7xl mx-auto bg-[#0b1220] rounded-xl shadow overflow-hidden"
-           style="height:calc(100vh - 230px); min-height:420px">
+      <div class="view-box max-w-7xl mx-auto bg-[#0b1220] rounded-xl shadow overflow-hidden">
         <iframe id="view-frame" title="Anlagen-Ansicht" allow="fullscreen"></iframe>
       </div>
     </div>
