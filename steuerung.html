@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Steuerung · Rosenweg 9</title>
+  <link rel="icon" href="/logo-rosenweg.png">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/js/authentik-auth.js?v=2"></script>
+  <script src="/js/site-config.js"></script>
+  <style>
+    .tab-btn.active { background:#1d4ed8; color:#fff; }
+    #view-frame { width:100%; height:100%; border:0; display:block; background:#0b1220; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen flex flex-col">
+  <nav id="main-nav" class="bg-white shadow-lg sticky top-0 z-50"></nav>
+  <script src="/js/nav.js?v=3"></script>
+  <script>RosenwegNav.init({ active: 'steuerung', basePath: '/' });</script>
+
+  <!-- Login-Gate -->
+  <div id="loginGate" class="flex-1 flex items-center justify-center">
+    <div class="text-center bg-white rounded-xl shadow p-8">
+      <h2 class="text-2xl font-bold mb-2">⚙️ Steuerung · Rosenweg 9</h2>
+      <p class="text-gray-500 mb-6">Bitte anmelden, um die Anlagen-Ansichten zu sehen.</p>
+      <div id="login-container"></div>
+    </div>
+  </div>
+
+  <!-- Inhalt -->
+  <main id="app" class="flex-1 flex flex-col" style="display:none">
+    <section class="bg-gradient-to-r from-blue-700 to-blue-900 text-white">
+      <div class="max-w-7xl mx-auto px-4 py-5">
+        <h1 class="text-2xl md:text-3xl font-bold">Steuerung &amp; Anlagen</h1>
+        <p class="text-blue-100 text-sm">Live-Ansichten der Haustechnik · Rosenweg 9</p>
+      </div>
+    </section>
+
+    <!-- Tabs (erweiterbar) -->
+    <div class="bg-white border-b">
+      <div class="max-w-7xl mx-auto px-4 flex gap-2 overflow-x-auto" id="tabbar">
+        <button class="tab-btn active px-4 py-2 rounded-t-lg font-medium text-sm" data-view="heizung">🔥 Heizung</button>
+        <!-- weitere Views später: z.B. Energie, Wetter … -->
+      </div>
+    </div>
+
+    <!-- View-Container (iframe) -->
+    <div class="flex-1 bg-gray-100 p-3">
+      <div class="max-w-7xl mx-auto h-full bg-[#0b1220] rounded-xl shadow overflow-hidden" style="min-height:78vh">
+        <div id="frame-loading" class="h-full flex items-center justify-center text-gray-400 text-sm">Lade Ansicht …</div>
+        <iframe id="view-frame" title="Anlagen-Ansicht" allow="fullscreen"></iframe>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // Views -> geschützte ioBroker-URL (hinter Authentik-Forward-Auth exponiert)
+    const VIEWS = {
+      heizung: 'https://heizung.rosenweg4303.ch/web.0/heizung/index.html',
+    };
+    const frame = document.getElementById('view-frame');
+    const loading = document.getElementById('frame-loading');
+
+    function showView(key) {
+      const url = VIEWS[key]; if (!url) return;
+      loading.style.display = 'flex'; frame.style.display = 'none';
+      frame.onload = () => { loading.style.display = 'none'; frame.style.display = 'block'; };
+      frame.src = url;
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.view === key));
+    }
+    document.getElementById('tabbar').addEventListener('click', (e) => {
+      const b = e.target.closest('.tab-btn'); if (b) showView(b.dataset.view);
+    });
+
+    (async function () {
+      const enter = () => {
+        document.getElementById('loginGate').classList.add('hidden');
+        document.getElementById('app').style.display = 'flex';
+        showView('heizung');
+      };
+      const user = await AuthentikAuth.init({ requireAuth: false, onLogin: () => enter() });
+      if (!user) { AuthentikAuth.createLoginButton('login-container'); return; }
+      enter();
+    })();
+  </script>
+</body>
+</html>
