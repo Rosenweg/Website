@@ -151,6 +151,24 @@ http:
         certResolver: cf
         domains:
           - main: tv.rosenweg4303.ch
+
+    # Heizung-Operator-View (ioBroker auf 100.64.90.50:8082) hinter Authentik-
+    # Forward-Auth. ioBroker selbst hat KEINE Auth (setState moeglich) -> die
+    # Subdomain ist NUR mit gueltiger Authentik-Session erreichbar.
+    # /outpost.goauthentik.io/* muss OHNE Auth zur Authentik (Login-Flow + Callback).
+    heizung-outpost-rw9:
+      entryPoints: [websecure]
+      rule: Host(`heizung.rosenweg9.ch`) && PathPrefix(`/outpost.goauthentik.io/`)
+      priority: 100
+      service: authentik-hosts-svc
+      tls: { certResolver: cf }
+    heizung-rw9:
+      entryPoints: [websecure]
+      rule: Host(`heizung.rosenweg9.ch`)
+      priority: 10
+      service: iobroker-svc
+      middlewares: [authentik-fwd]
+      tls: { certResolver: cf }
   middlewares:
     tv-playlist-path:
       replacePath:
@@ -167,6 +185,18 @@ http:
     wetter-root-rewrite:
       replacePath:
         path: /wetter.html
+    # Authentik Forward-Auth (Embedded Outpost). Provider "heizung-forward"
+    # (forward_single, external_host=https://heizung.rosenweg9.ch).
+    authentik-fwd:
+      forwardAuth:
+        address: http://100.64.2.37:9000/outpost.goauthentik.io/auth/traefik
+        trustForwardHeader: true
+        authResponseHeaders:
+          - X-authentik-username
+          - X-authentik-groups
+          - X-authentik-email
+          - X-authentik-name
+          - X-authentik-uid
   services:
     www-lxc-svc:
       loadBalancer:
@@ -207,6 +237,11 @@ http:
         passHostHeader: true
         servers:
           - url: http://100.64.2.52:3000
+    iobroker-svc:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: http://100.64.90.50:8082
 tcp:
   routers:
     contacts-rw4303-passthrough:
