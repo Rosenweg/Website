@@ -52,11 +52,9 @@
       </div>
     </section>
 
-    <!-- Tabs -->
-    <div class="bg-white border-b">
-      <div class="max-w-7xl mx-auto px-4 flex gap-2 overflow-x-auto" id="tabbar">
-        <button class="tab-btn active px-4 py-2 rounded-t-lg font-medium text-sm" data-view="heizung">🔥 Heizung</button>
-      </div>
+    <!-- Tabs (dynamisch nach Berechtigung befüllt) -->
+    <div id="tabs-row" class="bg-white border-b">
+      <div class="max-w-7xl mx-auto px-4 flex gap-2 overflow-x-auto" id="tabbar"></div>
     </div>
 
     <!-- Helfer-Leiste (Freischalten / Neuer Tab) -->
@@ -72,29 +70,58 @@
     <!-- View-Container — Höhe aus dem Seitenverhältnis der View (1000×600 = 5:3),
          nicht aus dem Viewport: robust über Desktop/Tablet/Smartphone. 100dvh
          (mobil-stabil, kein Adressleisten-Springen) nur als oberer Deckel. -->
-    <div class="bg-gray-100 p-3">
+    <div id="view-area" class="bg-gray-100 p-3">
       <div class="view-box max-w-7xl mx-auto bg-[#0b1220] rounded-xl shadow overflow-hidden">
         <iframe id="view-frame" title="Anlagen-Ansicht" allow="fullscreen"></iframe>
+      </div>
+    </div>
+
+    <!-- kein Zugriff (keine erlaubte View für die Gruppe) -->
+    <div id="noaccess" class="hidden flex-1 flex items-center justify-center p-8">
+      <div class="text-center bg-white rounded-xl shadow p-8 max-w-md">
+        <div class="text-4xl mb-3">🔒</div>
+        <h2 class="text-xl font-semibold text-gray-800 mb-2">Kein Zugriff</h2>
+        <p class="text-gray-500">Für deine Gruppe ist hier keine Anlagen-Ansicht freigegeben. Die Heizungs-Ansicht ist für die Technik und Bewohner/Eigentümer von Rosenweg 9 (STWEG 3).</p>
       </div>
     </div>
   </main>
 
   <script>
+    // View-Katalog mit Berechtigung (Authentik-Gruppen, lowercase-Vergleich).
+    // groups:null = für alle Eingeloggten. Künftige Steuer-Views z.B. groups:['technik'].
     const VIEWS = {
-      heizung: 'https://heizung.rosenweg9.ch/web.0/heizung/index.html?v=2',
+      heizung: {
+        label: '🔥 Heizung',
+        url: 'https://heizung.rosenweg9.ch/web.0/heizung/index.html?v=2',
+        groups: ['technik','präsident','praesident','r9-bewohner','r9-eigentuemer','stweg3-eigentuemer','stweg3-ausschuss'],
+      },
     };
     const frame   = document.getElementById('view-frame');
     const openTab = document.getElementById('open-tab');
     const helpTab = document.getElementById('help-tab');
-    let current = 'heizung';
+    let current = null;
+
+    const groupsLower = () => (AuthentikAuth.getUser()?.groups || []).map(g => String(g).toLowerCase());
+    const mayView = (v, gl) => !v.groups || v.groups.some(g => gl.includes(g.toLowerCase()));
 
     function showView(key) {
-      const url = VIEWS[key]; if (!url) return;
+      const v = VIEWS[key]; if (!v) return;
       current = key;
-      openTab.href = url; helpTab.href = url;
+      openTab.href = v.url; helpTab.href = v.url;
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.view === key));
       frame.src = 'about:blank';
-      frame.src = url;
+      frame.src = v.url;
+    }
+
+    function buildTabs(keys) {
+      document.getElementById('tabbar').innerHTML = keys.map(k =>
+        `<button class="tab-btn px-4 py-2 rounded-t-lg font-medium text-sm" data-view="${k}">${VIEWS[k].label}</button>`
+      ).join('');
+    }
+
+    function showNoAccess() {
+      ['tabs-row','helpbar','view-area'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+      document.getElementById('noaccess').classList.remove('hidden');
     }
 
     document.getElementById('tabbar').addEventListener('click', (e) => {
@@ -104,9 +131,10 @@
       document.getElementById('helpbar').style.display = 'none';
     });
     document.getElementById('unlock-btn').addEventListener('click', () => {
+      if (!current) return;
       // Top-Level-Anmeldung in neuem Tab: setzt das Proxy-Cookie auf
       // heizung.rosenweg9.ch (kein iframe-Block). Danach iframe neu laden.
-      window.open(VIEWS[current], 'heizung_auth');
+      window.open(VIEWS[current].url, 'heizung_auth');
       const onFocus = () => { window.removeEventListener('focus', onFocus); setTimeout(() => showView(current), 600); };
       window.addEventListener('focus', onFocus);
     });
@@ -115,7 +143,10 @@
       const enter = () => {
         document.getElementById('loginGate').classList.add('hidden');
         document.getElementById('app').style.display = 'flex';
-        showView('heizung');
+        const allowed = Object.keys(VIEWS).filter(k => mayView(VIEWS[k], groupsLower()));
+        if (!allowed.length) { showNoAccess(); return; }
+        buildTabs(allowed);
+        showView(allowed[0]);
       };
       const user = await AuthentikAuth.init({ requireAuth: false, onLogin: () => enter() });
       if (!user) { AuthentikAuth.createLoginButton('login-container'); return; }

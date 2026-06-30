@@ -55,7 +55,7 @@ const SERVICES_GROUPS = [
     title: 'Betrieb & Admin',
     icon: '⚙',
     items: [
-      { label: 'Steuerung / Anlagen', href: 'steuerung.html', activeKey: 'steuerung', permAny: 'eigentuemer,ausschuss,technik,praesident,verwaltung,bewohner' },
+      { label: 'Steuerung / Anlagen', href: 'steuerung.html', activeKey: 'steuerung', permAny: 'r9,stweg3,technik,praesident' },
       { label: 'Energie-Monitor', href: 'energie-monitor.html', activeKey: 'energie', perm: 'energie-monitor' },
       { label: 'Zähler & Verbrauch', href: 'zaehler.html', activeKey: 'zähler', perm: 'zähler' },
       { label: 'Auslagen / Vorschüsse', href: 'auslagen.html', activeKey: 'auslagen', perm: 'auslagen' },
