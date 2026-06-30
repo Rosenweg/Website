@@ -179,12 +179,38 @@ http:
       service: iobroker-svc
       middlewares: [heizung-to-view]
       tls: { certResolver: cf }
+    # Zweiter Host heizung.rosenweg4303.ch (same-site fürs Einbetten auf dem
+    # rosenweg4303-Portal). Gleiche View/Outpost/Policy, eigener Proxy-Provider.
+    heizung4303-outpost:
+      entryPoints: [websecure]
+      rule: Host(`heizung.rosenweg4303.ch`) && PathPrefix(`/outpost.goauthentik.io/`)
+      priority: 100
+      service: authentik-hosts-svc
+      tls: { certResolver: cf }
+    heizung4303-view:
+      entryPoints: [websecure]
+      rule: Host(`heizung.rosenweg4303.ch`) && (PathPrefix(`/web.0/heizung`) || PathPrefix(`/socket.io`) || PathPrefix(`/lib`))
+      priority: 50
+      service: iobroker-svc
+      middlewares: [authentik-fwd]
+      tls: { certResolver: cf }
+    heizung4303-redirect:
+      entryPoints: [websecure]
+      rule: Host(`heizung.rosenweg4303.ch`)
+      priority: 10
+      service: iobroker-svc
+      middlewares: [heizung4303-to-view]
+      tls: { certResolver: cf }
   middlewares:
     # Catch-all auf heizung.rosenweg9.ch -> direkt in die View (statt Editor).
     heizung-to-view:
       redirectRegex:
         regex: ^https?://heizung\.rosenweg9\.ch/.*
         replacement: https://heizung.rosenweg9.ch/web.0/heizung/index.html
+    heizung4303-to-view:
+      redirectRegex:
+        regex: ^https?://heizung\.rosenweg4303\.ch/.*
+        replacement: https://heizung.rosenweg4303.ch/web.0/heizung/index.html
     tv-playlist-path:
       replacePath:
         path: /api/tv/playlist.m3u

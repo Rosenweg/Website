@@ -55,7 +55,6 @@ const SERVICES_GROUPS = [
     title: 'Betrieb & Admin',
     icon: '⚙',
     items: [
-      { label: 'Steuerung / Anlagen', href: 'steuerung.html', activeKey: 'steuerung', permAny: 'r9,stweg3,technik,praesident' },
       { label: 'Energie-Monitor', href: 'energie-monitor.html', activeKey: 'energie', perm: 'energie-monitor' },
       { label: 'Zähler & Verbrauch', href: 'zaehler.html', activeKey: 'zähler', perm: 'zähler' },
       { label: 'Auslagen / Vorschüsse', href: 'auslagen.html', activeKey: 'auslagen', perm: 'auslagen' },
@@ -451,6 +450,7 @@ const RosenwegNav = {
               <a href="https://pwa.rosenweg4303.ch/reparatur/" class="block px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">🔧 Schaden melden ↗</a>
               <a href="${base}vollmachten.html" data-perm-any="eigentuemer,ausschuss,technik,praesident,verwaltung,bewohner" class="${dropA('vollmachten')} block px-4 py-2 text-sm">📝 Vollmachten</a>
               <a href="${base}projekte.html" data-perm-any="eigentuemer" class="${dropA('projekte')} block px-4 py-2 text-sm">🏗 Projekte</a>
+              <a href="${base}steuerung.html" data-perm-any="r9,stweg3,technik,praesident" class="${dropA('steuerung')} block px-4 py-2 text-sm">⚙️ Steuerung / Anlagen</a>
               <div class="border-t my-1"></div>
               <a href="${base}anfahrt.html" class="${dropA('anfahrt')} block px-4 py-2 text-sm">🚗 Anfahrt &amp; Parken</a>
               <a href="${base}entsorgung.html" class="${dropA('entsorgung')} block px-4 py-2 text-sm">♻️ Entsorgung</a>
@@ -509,6 +509,7 @@ const RosenwegNav = {
         <a href="https://pwa.rosenweg4303.ch/reparatur/" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🔧 Schaden melden ↗</a>
         <a href="${base}vollmachten.html" data-perm-any="eigentuemer,ausschuss,technik,praesident,verwaltung,bewohner" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📝 Vollmachten</a>
         <a href="${base}projekte.html" data-perm-any="eigentuemer" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🏗 Projekte</a>
+        <a href="${base}steuerung.html" data-perm-any="r9,stweg3,technik,praesident" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">⚙️ Steuerung / Anlagen</a>
         <a href="${base}anfahrt.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🚗 Anfahrt &amp; Parken</a>
         <a href="${base}entsorgung.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">♻️ Entsorgung</a>
         <a href="${base}verwaltung.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🏢 Hausverwaltung</a>
