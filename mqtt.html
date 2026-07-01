@@ -255,7 +255,7 @@
     // ─── Zustand ──────────────────────────────────────────────────────
     const topics = new Map();          // basistopic-feld -> { value, ts }
     const history = new Map();         // topic -> [zahl, zahl, …] (max ~60) für Sparkline
-    const collapsed = new Set();       // zugeklappte Zähler-Knoten (Default: alle zu)
+    const expanded = new Set();        // aufgeklappte Zähler-Knoten (Default leer = alle ZU)
     let client = null, currentUser = null, paused = false, dirty = false;
     let userIsTechnik = false;
 
@@ -401,7 +401,7 @@
                 }
 
                 const displayName = node.name || meter;
-                const open = filtering || !collapsed.has(meter);
+                const open = filtering || expanded.has(meter);
                 const fieldKeys = [...fieldMap.keys()].sort();
 
                 html += `<div>`;
@@ -446,8 +446,8 @@
         const meter = btn.getAttribute('data-meter');
         const chev = btn.querySelector('.chev');
         const fields = document.querySelector(`[data-fields="${CSS.escape(meter)}"]`);
-        if (collapsed.has(meter)) { collapsed.delete(meter); chev.classList.add('open'); fields && fields.classList.remove('hidden'); }
-        else { collapsed.add(meter); chev.classList.remove('open'); fields && fields.classList.add('hidden'); }
+        if (expanded.has(meter)) { expanded.delete(meter); chev.classList.remove('open'); fields && fields.classList.add('hidden'); }
+        else { expanded.add(meter); chev.classList.add('open'); fields && fields.classList.remove('hidden'); }
     }
 
     // ─── Sanfter Re-Render-Loop (max 2x/s) ────────────────────────────
