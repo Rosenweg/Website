@@ -69,7 +69,7 @@
         .mcard[data-grid="draw"] { border-left-color: var(--b); }
         .marrow { text-align: center; color: rgba(255,255,255,.9); font-size: 1.3rem; line-height: 1; margin: .15rem 0; }
         .mhead { color: #fff; font-weight: 700; font-size: .95rem; margin: 1.25rem 0 .6rem; text-shadow: 0 1px 2px rgba(0,0,0,.15); }
-        .mtiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: .7rem; }
+        .mtiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: .7rem; }
         .mtile { background: #fff; border-radius: 14px; box-shadow: 0 4px 16px rgba(0,0,0,.1); padding: .8rem .5rem; text-align: center; border-top: 4px solid var(--a); }
         .mtile.off { opacity: .55; border-top-color: #e5e7eb; }
         .mtile .ti { font-size: 1.3rem; } .mtile .tv { font-weight: 700; font-size: 1.05rem; margin-top: .15rem; } .mtile .tv .u { font-size: .55em; color: #6b7280; font-weight: 500; }
@@ -115,6 +115,7 @@
                 <div id="c-boiler" class="circle c-sm ring-idle"><div class="ic">♨️</div><div class="val"><span class="v-boiler">–</span><span class="u"> kW</span></div><div class="lbl l-boiler">Boiler</div></div>
                 <div id="c-allg" class="circle c-sm ring-idle"><div class="ic">💡</div><div class="val"><span class="v-allg">–</span><span class="u"> kW</span></div><div class="lbl">Allgemein</div></div>
                 <div id="c-wohn" class="circle c-sm ring-idle"><div class="ic">🚪</div><div class="val"><span class="v-wohn">–</span><span class="u"> kW</span></div><div class="lbl">Wohnungen</div><div class="sub s-wohn"></div></div>
+                <div id="c-ueber" class="circle c-sm ring-idle"><div class="ic">☀️</div><div class="val"><span class="v-ueber">–</span><span class="u"> kW</span></div><div class="lbl">PV-Überschuss</div></div>
             </div>
             <div class="a-verb">
                 <div id="c-verb" class="circle c-big ring-idle"><div class="ic">🏠</div><div class="val"><span class="v-cons">–</span><span class="u"> kW</span></div><div class="lbl">Verbrauch</div><div class="sub v-self"></div></div>
@@ -137,6 +138,7 @@
                 <div class="mtile" id="t-boiler"><div class="ti">♨️</div><div class="tv"><span class="v-boiler">–</span><span class="u"> kW</span></div><div class="tl l-boiler">Boiler</div></div>
                 <div class="mtile" id="t-allg"><div class="ti">💡</div><div class="tv"><span class="v-allg">–</span><span class="u"> kW</span></div><div class="tl">Allgemein</div></div>
                 <div class="mtile" id="t-wohn"><div class="ti">🚪</div><div class="tv"><span class="v-wohn">–</span><span class="u"> kW</span></div><div class="tl">Wohnungen</div><div class="ts s-wohn"></div></div>
+                <div class="mtile" id="t-ueber"><div class="ti">☀️</div><div class="tv"><span class="v-ueber">–</span><span class="u"> kW</span></div><div class="tl">PV-Überschuss</div></div>
             </div>
         </div>
 
@@ -164,7 +166,7 @@
             const fr = flow.getBoundingClientRect();
             svg.setAttribute('viewBox', `0 0 ${fr.width} ${fr.height}`);
             const ctr = el => { const r = el.getBoundingClientRect(); return { x: r.left-fr.left+r.width/2, y: r.top-fr.top+r.height/2, rad: r.width/2 }; };
-            const P=ctr($('c-prod')), V=ctr($('c-verb')), G=ctr($('c-grid')), B=ctr($('c-boiler')), A=ctr($('c-allg')), W=ctr($('c-wohn'));
+            const P=ctr($('c-prod')), V=ctr($('c-verb')), G=ctr($('c-grid')), B=ctr($('c-boiler')), A=ctr($('c-allg')), W=ctr($('c-wohn')), U=ctr($('c-ueber'));
             const edge = (a,b) => { const dx=b.x-a.x, dy=b.y-a.y, len=Math.hypot(dx,dy)||1; return [a.x+dx/len*a.rad, a.y+dy/len*a.rad, b.x-dx/len*b.rad, b.y-dy/len*b.rad]; };
             const seg = [];
             if (d.production_w > 50) seg.push(['fl-green', edge(P, V)]);
@@ -173,6 +175,7 @@
             if (d.boiler.power_w > 50 && d.boiler.online) seg.push(['fl-amber', edge(V, B)]);
             if (d.allgemein.power_w > 50 && d.allgemein.online) seg.push(['fl-amber', edge(V, A)]);
             if (d.wohnungen.power_w > 50) seg.push(['fl-amber', edge(V, W)]);
+            if (d.ueberschuss && d.ueberschuss.power_w > 50 && d.ueberschuss.online) seg.push(['fl-amber', edge(V, U)]);
             svg.innerHTML = seg.map(([cls,p]) => `<line x1="${p[0]}" y1="${p[1]}" x2="${p[2]}" y2="${p[3]}" class="flowline ${cls}"/>`).join('');
         }
         window.addEventListener('resize', () => { if (lastData) drawFlows(lastData); });
@@ -191,6 +194,7 @@
                 setAll('.v-boiler', d.boiler.online ? kw(d.boiler.power_w) : '—');
                 setAll('.v-allg', d.allgemein.online ? kw(d.allgemein.power_w) : '—');
                 setAll('.v-wohn', kw(d.wohnungen.power_w));
+                setAll('.v-ueber', (d.ueberschuss && d.ueberschuss.online) ? kw(d.ueberschuss.power_w) : '—');
                 setAll('.s-wohn', d.wohnungen.online_count + '/' + d.wohnungen.total_count + ' online');
                 setAll('.l-boiler', d.boiler.label || 'Boiler');
                 // Tageswerte aus geeichten Zählern (r9-produktion/r9-haupt; SmartFox-Fallback):
@@ -223,9 +227,11 @@
                 cstate('c-boiler', d.boiler.online, d.boiler.power_w);
                 cstate('c-allg', d.allgemein.online, d.allgemein.power_w);
                 cstate('c-wohn', true, d.wohnungen.power_w);
+                cstate('c-ueber', d.ueberschuss && d.ueberschuss.online, d.ueberschuss ? d.ueberschuss.power_w : 0);
                 // Mobile-Tile-Status
                 $('t-boiler').className = 'mtile' + (d.boiler.online ? '' : ' off');
                 $('t-allg').className = 'mtile' + (d.allgemein.online ? '' : ' off');
+                $('t-ueber').className = 'mtile' + (d.ueberschuss && d.ueberschuss.online ? '' : ' off');
 
                 $('m-updated').textContent = 'Aktualisiert: ' + new Date(d.ts).toLocaleTimeString('de-CH');
                 $('m-src').textContent = 'Produktion: ' + (SRC_LBL[d.production_source] || d.production_source) + ' · Netz: ' + (SRC_LBL[d.grid_source] || d.grid_source);

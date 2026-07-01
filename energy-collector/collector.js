@@ -37,6 +37,8 @@ const MQTT_URL = process.env.MQTT_URL || '';
 const MQTT_USER = process.env.MQTT_USER || 'collector';
 const MQTT_PASS = process.env.MQTT_PASS || '';
 const MQTT_PREFIX = process.env.MQTT_PREFIX || 'energy';
+// PV-Ueberschuss-Anteil pro Wohnung (via MQTT abonniert): wohnung -> { w, ts }
+const ueberschussReadings = new Map();
 let mqttClient = null;
 if (MQTT_URL) {
   mqttClient = mqtt.connect(MQTT_URL, {
@@ -50,6 +52,21 @@ if (MQTT_URL) {
   mqttClient.on('connect', () => {
     console.log(`[MQTT] connected ${MQTT_URL} (prefix ${MQTT_PREFIX})`);
     mqttClient.publish(`${MQTT_PREFIX}/collector/status`, 'online', { retain: true });
+    // PV-Ueberschuss-Anteil pro Wohnung (von einem anderen Producer publiziert)
+    // abonnieren -> als 4. "Verbraucher" in solar-live + von den Wohnungen abziehen
+    // (steckt in den Wohnungszaehlern mit drin, sonst doppelt gezaehlt).
+    mqttClient.subscribe(`${MQTT_PREFIX}/r9/ueberschuss/+/total_w`, { qos: 0 }, (err) => {
+      if (err) console.error('[MQTT] ueberschuss subscribe:', err.message);
+      else console.log('[MQTT] subscribed ueberschuss/+/total_w');
+    });
+  });
+  mqttClient.on('message', (topic, payload) => {
+    // energy/r9/ueberschuss/<wohnung>/total_w  (p[2]=ueberschuss, p[3]=wohnung, p[4]=total_w)
+    const p = String(topic).split('/');
+    if (p[2] === 'ueberschuss' && p[4] === 'total_w') {
+      const w = Number(payload.toString());
+      if (Number.isFinite(w)) ueberschussReadings.set(p[3], { w, ts: Date.now() });
+    }
   });
   mqttClient.on('error', (e) => console.error('[MQTT] error:', e.message));
   mqttClient.on('reconnect', () => console.log('[MQTT] reconnecting...'));
@@ -887,7 +904,13 @@ app.get('/api/energy/solar-live', (req, res) => {
     const r = latestReadings.get(id);
     if (r && freshTs(r.ts)) { aptW += Math.max(0, r.power_w || 0); aptOn++; }
   }
-  const wohnungen = { power_w: aptW, online_count: aptOn, total_count: APARTMENT_METERS.length };
+  // PV-Ueberschuss-Anteil pro Wohnung (energy/r9/ueberschuss/<apt>/total_w, via MQTT
+  // abonniert): als eigener "Verbraucher" ausgewiesen UND von den Wohnungen abgezogen
+  // (steckt in den Wohnungszaehlern mit drin -> sonst doppelt gezaehlt).
+  let ueberW = 0, ueberOn = 0;
+  for (const [, r] of ueberschussReadings) { if (freshTs(r.ts)) { ueberW += Math.max(0, r.w); ueberOn++; } }
+  const ueberschuss = { power_w: ueberW, online: ueberOn > 0, count: ueberOn, total_count: APARTMENT_METERS.length };
+  const wohnungen = { power_w: Math.max(0, aptW - ueberW), power_raw_w: aptW, online_count: aptOn, total_count: APARTMENT_METERS.length };
 
   res.json({
     ts: new Date().toISOString(),
@@ -899,6 +922,7 @@ app.get('/api/energy/solar-live', (req, res) => {
     boiler: { power_w: sf.boiler_w || 0, percent: sf.boiler_pct || 0, label: sf.boiler_desc || 'Boiler', online: !!(smartfoxSolar && freshTs(smartfoxSolar.ts)) },
     allgemein,
     wohnungen,
+    ueberschuss,
     today: (solarTodayMeters && (now - solarTodayMeters.ts < 600000))
       ? { production_wh: solarTodayMeters.production_wh, feed_in_wh: solarTodayMeters.feed_in_wh, source: 'geeicht' }
       : { production_wh: sf.today_prod_wh || 0, feed_in_wh: sf.today_feedin_wh || 0, source: 'smartfox' },
