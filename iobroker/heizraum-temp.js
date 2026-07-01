@@ -29,7 +29,9 @@ function send(text) {
 function readSensor(s) {
   const o = getState(s.id);
   const val = (o && o.val != null && isFinite(Number(o.val))) ? Number(o.val) : null;
-  const ts = o ? (o.lc || o.ts || 0) : 0;
+  // ts = letzte AKTUALISIERUNG (jede Meldung), NICHT lc (nur bei Wertänderung).
+  // Sonst gilt ein Sensor mit stabilem Wert fälschlich als "stale".
+  const ts = o ? Math.max(Number(o.ts) || 0, Number(o.lc) || 0) : 0;
   return { label: s.label, val, fresh: val != null && (Date.now() - ts <= STALE_MS) };
 }
 function check() {
