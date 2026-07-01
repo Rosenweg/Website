@@ -297,6 +297,11 @@
             const feld = parts.slice(3).join('/'); // '' = Basistopic
             return { haus, meter: `energy/${haus}/${bereich}`, bereich, feld };
         }
+        // wetter/<station>/<feld...> -> alle Felder unter einem Knoten, feld gesetzt
+        // (sonst gälten die Skalarwerte als leeres Basistopic -> würden verworfen).
+        if (parts[0] === 'wetter' && parts.length >= 3) {
+            return { haus: `Wetter ${parts[1]}`, meter: `wetter/${parts[1]}`, bereich: parts[1], feld: parts.slice(2).join('/') };
+        }
         // Fallback: alles unter Pseudo-Haus "(sonstige)"
         return { haus: '(sonstige)', meter: topic, bereich: parts.slice(1).join('/') || topic, feld: '' };
     }
@@ -338,15 +343,15 @@
             if (feld === '') {
                 // Basistopic = JSON: Name extrahieren, plus alle Felder direkt einspeisen
                 node.baseTs = Math.max(node.baseTs, d.ts);
-                try {
-                    const obj = JSON.parse(d.value);
-                    if (obj && typeof obj === 'object') {
-                        if (obj.name) node.name = String(obj.name);
-                        node._json = obj;
-                        node._jsonTs = d.ts;
-                    }
-                } catch { /* kein JSON -> als Rohwert-Feld zeigen */
-                    node.fields.push({ topic, feld: '(payload)', value: d.value, ts: d.ts, raw: true });
+                let obj; try { obj = JSON.parse(d.value); } catch { obj = undefined; }
+                if (obj && typeof obj === 'object') {
+                    if (obj.name) node.name = String(obj.name);
+                    node._json = obj;
+                    node._jsonTs = d.ts;
+                } else {
+                    // Skalar (Zahl/String/Bool) oder Nicht-JSON -> als Rohwert-Feld zeigen,
+                    // statt es (wie bisher bei Zahlen) stumm zu verwerfen.
+                    node.fields.push({ topic, feld: '(Wert)', value: d.value, ts: d.ts, raw: true });
                 }
             } else {
                 node.fields.push({ topic, feld, value: d.value, ts: d.ts });
