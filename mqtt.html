@@ -488,9 +488,10 @@
             tok = await r.json();
         } catch (e) { setConn('err', 'Token-Fehler'); return; }
 
-        // Abos bestimmen
+        // Abos bestimmen — Technik sieht ALLE Topics (nicht nur energy/),
+        // also z.B. auch wetter/#. ACL erlaubt Technik ohnehin alles.
         const subs = tok.is_technik
-            ? ['energy/#']
+            ? ['#']
             : [...await meterTopicsFor(currentUser), 'energy/collector/status'];
 
         setConn('wait', 'verbinde…');
