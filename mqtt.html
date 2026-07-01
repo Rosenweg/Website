@@ -326,6 +326,19 @@
         </svg>`;
     }
 
+    // ─── Unix-Timestamp -> menschenlesbar (nur plausible Epochen) ─────
+    // Ganzzahl in s- (~2001–2096) oder ms-Epoch-Bereich -> Datum/Zeit.
+    // Floats (z.B. Energie-Zähler) + kleine Zahlen werden ignoriert.
+    function humanTime(n) {
+        if (!Number.isFinite(n) || !Number.isInteger(n)) return '';
+        let ms = null;
+        if (n >= 1e12 && n < 4e12) ms = n;             // ms-Epoch
+        else if (n >= 1e9 && n < 4e9) ms = n * 1000;   // s-Epoch
+        if (ms === null) return '';
+        return new Date(ms).toLocaleString('de-CH',
+            { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
     // ─── Render der Baum-Ansicht ──────────────────────────────────────
     function render() {
         const q = document.getElementById('filter').value.trim().toLowerCase();
@@ -411,11 +424,13 @@
                     const num = parseFloat(f.value);
                     const isNum = isFinite(num) && !f.raw;
                     const valStr = isNum ? fmtNum(f.value, unit) : esc(String(f.value).slice(0, 120));
+                    const ht = humanTime(Number(f.value));   // Wert = Unix-Zeit? -> zusätzlich Datum
                     const fresh = (Date.now() - f.ts) < 30000;
                     const spark = isNum ? sparkline(history.get(f.topic)) : '';
                     html += `<div class="flex items-center gap-3 py-1 text-sm border-b border-gray-50 last:border-0">
                         <span class="mono text-gray-600 w-44 flex-shrink-0 truncate" title="${esc(fk)}">${esc(fk)}</span>
                         <span class="mono text-gray-900 font-medium">${valStr}${unit ? ' <span class="text-gray-400 font-normal">' + esc(unit) + '</span>' : ''}</span>
+                        ${ht ? `<span class="text-xs text-gray-400 flex-shrink-0" title="Unix-Zeit umgerechnet">🕒 ${esc(ht)}</span>` : ''}
                         <span class="flex-shrink-0">${spark}</span>
                         <span class="ml-auto text-xs ${fresh ? 'text-green-600' : 'text-gray-400'} flex-shrink-0">${age(f.ts)}</span>
                     </div>`;
