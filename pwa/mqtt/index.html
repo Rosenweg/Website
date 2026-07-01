@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0369a1">
+    <title>MQTT-Browser — Rosenweg</title>
+    <link rel="manifest" href="/mqtt/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/icons/icon-192-2.png">
+    <link rel="icon" href="/logo-rosenweg.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <script src="/js/mqtt.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .mono { font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; }
+        .dot { width:.6rem; height:.6rem; border-radius:9999px; display:inline-block; }
+        .pulse { animation: pulse 1.6s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.35;} }
+        /* dezenter Übergang fürs Aufklappen */
+        .chev { transition: transform .15s; }
+        .chev.open { transform: rotate(90deg); }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- PWA-Kopf: zurück zur App-Übersicht -->
+    <header class="bg-sky-700 text-white sticky top-0 z-50 shadow" style="padding-top:env(safe-area-inset-top)">
+      <div class="px-4 py-3 flex items-center gap-3 max-w-6xl mx-auto">
+        <a href="/" class="text-white/90 active:text-white text-2xl leading-none -ml-1" aria-label="Zurück zur App-Übersicht">‹</a>
+        <span class="text-lg font-semibold">📡 MQTT-Browser</span>
+      </div>
+    </header>
+
+    <!-- App-Bereich: erst nach erfolgreichem Login sichtbar -->
+    <main id="app" style="display:none">
+        <div class="max-w-6xl mx-auto px-4 py-6">
+        <!-- Schlanke Kopfzeile: Untertitel + Rolle + Verbindungsstatus (Titel steht in der Nav) -->
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <p class="text-sm text-gray-500">Live-Telemetrie der Zähler über <span class="mono">mqtt.rosenweg4303.ch</span></p>
+            <div class="flex items-center gap-3 text-sm">
+                <span id="roleBadge" class="px-2.5 py-1 rounded-full font-medium"></span>
+                <span class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white border">
+                    <span id="connDot" class="dot bg-gray-400"></span>
+                    <span id="connText" class="text-gray-600">verbinde…</span>
+                </span>
+            </div>
+        </div>
+        <!-- Tab-Leiste -->
+        <div class="flex space-x-1 bg-gray-100 rounded-lg p-1 mb-4 w-fit">
+            <button onclick="switchTab('live')" id="tab-live"
+                    class="px-4 py-1.5 text-sm font-medium rounded-md bg-white text-gray-900 shadow-sm">Live-Daten</button>
+            <button onclick="switchTab('admin')" id="tab-admin"
+                    class="px-4 py-1.5 text-sm font-medium rounded-md text-gray-500 hover:text-gray-700 hidden">Zugriffsverwaltung</button>
+        </div>
+
+        <!-- ══════════════════ LIVE-DATEN ══════════════════ -->
+        <div id="view-live">
+            <!-- Filter / Steuerung -->
+            <div class="flex flex-wrap items-center gap-3 mb-3">
+                <input id="filter" type="text" placeholder="Filter (z.B. r9, power, 2og3)…"
+                       class="flex-1 min-w-[200px] px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none">
+                <label class="flex items-center gap-1.5 text-sm text-gray-600 select-none">
+                    <input id="pause" type="checkbox" class="rounded"> Pause
+                </label>
+                <button id="clearBtn" class="px-3 py-2 text-sm bg-white border rounded-lg hover:bg-gray-50">Leeren</button>
+                <span class="text-sm text-gray-500"><span id="count" class="font-semibold text-gray-700">0</span> Topics</span>
+            </div>
+
+            <!-- Baum-Ansicht -->
+            <div id="tree" class="bg-white rounded-lg shadow divide-y divide-gray-100 overflow-hidden"></div>
+            <div id="empty" class="bg-white rounded-lg shadow px-4 py-10 text-center text-gray-400 text-sm">
+                Warte auf Telemetrie… (Zähler publizieren retained — sollte sofort erscheinen)
+            </div>
+
+            <p class="text-xs text-gray-400 mt-3">
+                Technik sieht alle Topics; andere nur die Zähler ihrer Zugehörigkeit. Verbindung läuft über dein
+                Rosenweg-Konto (Token 12 h gültig). Sparklines zeigen die letzten ~60 Werte.
+            </p>
+        </div>
+
+        <!-- ══════════════════ ZUGRIFFSVERWALTUNG (nur Technik) ══════════════════ -->
+        <div id="view-admin" class="hidden space-y-6">
+            <!-- Publish / Test -->
+            <div class="bg-white rounded-lg shadow p-5">
+                <h2 class="text-sm font-semibold text-gray-700 mb-3">Publish / Test</h2>
+                <div class="flex flex-wrap gap-3 items-end">
+                    <div class="flex-1 min-w-[200px]">
+                        <label class="block text-xs text-gray-500 mb-1">Topic</label>
+                        <input id="pubTopic" type="text" value="energy/test"
+                               class="w-full mono px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none">
+                    </div>
+                    <div class="flex-1 min-w-[200px]">
+                        <label class="block text-xs text-gray-500 mb-1">Payload</label>
+                        <input id="pubPayload" type="text" placeholder="z.B. hallo oder {&quot;x&quot;:1}"
+                               class="w-full mono px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none">
+                    </div>
+                    <button onclick="doPublish()"
+                            class="px-4 py-2 text-sm rounded-lg bg-blue-700 text-white hover:bg-blue-800 font-medium">Senden</button>
+                </div>
+                <p id="pubMsg" class="text-sm mt-2"></p>
+            </div>
+
+            <!-- Zähler-Zugriff -->
+            <div class="bg-white rounded-lg shadow p-5">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="text-sm font-semibold text-gray-700">Zähler-Zugriff (Gruppen &amp; Einzel-User)</h2>
+                    <button onclick="loadAdmin()" class="text-xs text-blue-600 hover:text-blue-800">Neu laden</button>
+                </div>
+                <p id="adminError" class="text-sm text-red-600 mb-3 hidden"></p>
+                <div id="adminList" class="space-y-3">
+                    <p class="text-gray-400 text-sm">Lade Zähler…</p>
+                </div>
+            </div>
+
+            <!-- MQTT-Service-User (nur Broker, für technische Anwendungen) -->
+            <div class="bg-white rounded-lg shadow p-5">
+                <div class="flex items-center justify-between mb-1">
+                    <h2 class="text-sm font-semibold text-gray-700">MQTT-Service-User (technische Anwendungen)</h2>
+                    <button onclick="loadServiceUsers()" class="text-xs text-blue-600 hover:text-blue-800">Neu laden</button>
+                </div>
+                <p class="text-xs text-gray-500 mb-3">Existieren nur im Broker (nicht in Authentik) — für Regelsysteme/externe Apps zum Lesen und optional Schreiben. Festes Passwort. Der <span class="mono">Topic-Filter</span> nutzt die Platzhalter <span class="mono">+</span>/<span class="mono">#</span> (Erklärung in der Karte „Topic-Schutz-Regeln" unten).</p>
+                <div class="flex flex-wrap gap-2 items-end mb-3 pb-3 border-b">
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">Username</label>
+                        <input id="svcUser" placeholder="z.B. heizung-r9"
+                               class="mono px-2.5 py-1.5 border rounded-lg text-sm w-40 focus:ring-2 focus:ring-blue-400 focus:outline-none">
+                    </div>
+                    <div class="flex-1 min-w-[150px]">
+                        <label class="block text-xs text-gray-500 mb-1">Topic-Filter (+ / # erlaubt)</label>
+                        <input id="svcTopic" value="energy/#"
+                               class="mono px-2.5 py-1.5 border rounded-lg text-sm w-full focus:ring-2 focus:ring-blue-400 focus:outline-none">
+                    </div>
+                    <label class="flex items-center gap-1.5 text-sm text-gray-600 select-none mb-1.5">
+                        <input id="svcWrite" type="checkbox" class="rounded"> Schreiben
+                    </label>
+                    <div class="flex-1 min-w-[130px]">
+                        <label class="block text-xs text-gray-500 mb-1">Beschreibung</label>
+                        <input id="svcDesc" placeholder="optional"
+                               class="px-2.5 py-1.5 border rounded-lg text-sm w-full focus:ring-2 focus:ring-blue-400 focus:outline-none">
+                    </div>
+                    <button onclick="createServiceUser()"
+                            class="px-3 py-1.5 text-sm rounded-lg bg-blue-700 text-white hover:bg-blue-800 font-medium mb-0.5">Anlegen</button>
+                </div>
+                <div id="svcNew" class="hidden mb-3"></div>
+                <div id="svcList" class="space-y-2"><p class="text-gray-400 text-sm">Lade…</p></div>
+            </div>
+
+            <!-- Generische Topic-Schutz-Regeln -->
+            <div class="bg-white rounded-lg shadow p-5">
+                <div class="flex items-center justify-between mb-1">
+                    <h2 class="text-sm font-semibold text-gray-700">Topic-Schutz-Regeln (beliebige Topics → Gruppe)</h2>
+                    <button onclick="loadTopicRules()" class="text-xs text-blue-600 hover:text-blue-800">Neu laden</button>
+                </div>
+                <p class="text-xs text-gray-500 mb-2">Gib einer Authentik-Gruppe Lesen und/oder Schreiben auf beliebige Topics. Gilt zusätzlich zur <span class="mono">energy/</span>-Zähler-Logik. Technik darf immer alles.</p>
+                <details class="mb-3 text-xs">
+                    <summary class="cursor-pointer text-blue-600 hover:text-blue-800 select-none">❓ Wie funktionieren Topics und die Platzhalter <span class="mono">+</span> und <span class="mono">#</span>?</summary>
+                    <div class="mt-2 p-3 bg-blue-50 rounded-lg text-gray-700 space-y-2 leading-relaxed">
+                        <p>Ein Topic ist wie ein <b>Ordner-Pfad</b>, mit <span class="mono">/</span> getrennt — z.B. <span class="mono bg-white px-1 rounded border">energy/r9/2og3/power_w</span> = Haus <b>r9</b> → Wohnung <b>2og3</b> → <b>Leistung</b>.</p>
+                        <p><span class="mono bg-white px-1.5 rounded border font-semibold text-base">#</span> = <b>alles ab hier</b> (diese Ebene und alle darunter). Steht immer am Ende.<br>
+                            <span class="mono">control/r9/#</span> → <span class="mono">control/r9</span> und alles darunter (<span class="mono">control/r9/heizung</span>, <span class="mono">control/r9/licht/flur</span> …).<br>
+                            <span class="mono">energy/#</span> → wirklich alle Energie-Topics.</p>
+                        <p><span class="mono bg-white px-1.5 rounded border font-semibold text-base">+</span> = <b>genau eine Ebene</b> (ein Platzhalter mittendrin).<br>
+                            <span class="mono">energy/+/haupt</span> → der <span class="mono">haupt</span>-Zähler <i>jedes</i> Hauses (r1, r9, …), aber nichts tiefer.</p>
+                        <p><b>Ohne Platzhalter</b> = genau dieses <b>eine</b> Topic, z.B. <span class="mono">control/r9/heizung</span>.</p>
+                        <p class="text-gray-500 pt-1 border-t">Faustregel: „eine Gruppe darf einen ganzen Bereich" → <span class="mono">bereich/#</span>. Im Zweifel <span class="mono">#</span> am Ende nehmen.</p>
+                    </div>
+                </details>
+                <div class="flex flex-wrap gap-2 items-end mb-3 pb-3 border-b">
+                    <div class="flex-1 min-w-[150px]">
+                        <label class="block text-xs text-gray-500 mb-1">Topic-Muster</label>
+                        <input id="trTopic" placeholder="z.B. control/r9/#"
+                               class="mono px-2.5 py-1.5 border rounded-lg text-sm w-full focus:ring-2 focus:ring-blue-400 focus:outline-none">
+                    </div>
+                    <div class="min-w-[150px]">
+                        <label class="block text-xs text-gray-500 mb-1">Gruppe</label>
+                        <input id="trGroup" list="knownGroups" placeholder="Authentik-Gruppe"
+                               class="px-2.5 py-1.5 border rounded-lg text-sm w-full focus:ring-2 focus:ring-blue-400 focus:outline-none">
+                    </div>
+                    <label class="flex items-center gap-1.5 text-sm text-gray-600 select-none mb-1.5">
+                        <input id="trRead" type="checkbox" class="rounded" checked> Lesen
+                    </label>
+                    <label class="flex items-center gap-1.5 text-sm text-gray-600 select-none mb-1.5">
+                        <input id="trWrite" type="checkbox" class="rounded"> Schreiben
+                    </label>
+                    <button onclick="createTopicRule()"
+                            class="px-3 py-1.5 text-sm rounded-lg bg-blue-700 text-white hover:bg-blue-800 font-medium mb-0.5">Regel anlegen</button>
+                </div>
+                <p id="trMsg" class="text-sm mb-2 hidden"></p>
+                <div id="trList" class="space-y-2"><p class="text-gray-400 text-sm">Lade…</p></div>
+            </div>
+
+            <!-- bekannte Authentik-Gruppen für Autocomplete -->
+            <datalist id="knownGroups"></datalist>
+        </div>
+        </div><!-- /Inhalt -->
+    </main>
+
+    <!-- Login-Gate (vor Login sichtbar) -->
+    <div id="gate" class="max-w-md mx-auto mt-24 px-4"></div>
+
+    <script>
+    // ─── HTML-Escaping gegen XSS ───────────────────────────────────────
+    function esc(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    // ─── Bekannte Authentik-Gruppen (für <datalist>) ──────────────────
+    const KNOWN_GROUPS = (() => {
+        const base = ['technik', 'Präsident', 'ausschuss', 'eigentuemer', 'bewohner', 'verwaltung', 'meg-ausschuss'];
+        const stweg = [];
+        for (let i = 1; i <= 8; i++) { stweg.push(`stweg${i}-eigentuemer`, `stweg${i}-bewohner`); }
+        const haus = [];
+        [1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, 16, 18].forEach(n => { haus.push(`r${n}-eigentuemer`, `r${n}-bewohner`); });
+        return [...base, ...stweg, ...haus];
+    })();
+
+    // ─── Einheiten-Mapping fürs Feld-Suffix ───────────────────────────
+    const UNITS = {
+        power_w: 'W', power_l1_w: 'W', power_l2_w: 'W', power_l3_w: 'W',
+        voltage_l1_v: 'V', voltage_l2_v: 'V', voltage_l3_v: 'V',
+        current_l1_a: 'A', current_l2_a: 'A', current_l3_a: 'A',
+        pf_l1: '', pf_l2: '', pf_l3: '',
+        tariff: '',
+        energy_import_kwh: 'kWh', energy_export_kwh: 'kWh',
+        energy_import_t1_kwh: 'kWh', energy_import_t2_kwh: 'kWh',
+        energy_export_t1_kwh: 'kWh', energy_export_t2_kwh: 'kWh',
+    };
+    function unitFor(field) { return UNITS[field] || ''; }
+
+    // ─── Zahl je nach Einheit hübsch runden ───────────────────────────
+    function fmtNum(val, unit) {
+        const n = parseFloat(val);
+        if (!isFinite(n)) return esc(val);
+        if (unit === 'W') return Math.round(n).toLocaleString('de-CH');
+        if (unit === 'V') return n.toFixed(1);
+        if (unit === 'A') return n.toFixed(2);
+        if (unit === 'kWh') return n.toFixed(3);
+        if (unit === '') {
+            // pf / tariff / unbekannt-aber-numerisch: kompakt
+            if (Number.isInteger(n)) return String(n);
+            return n.toFixed(3);
+        }
+        return String(n);
+    }
+
+    // ─── Zustand ──────────────────────────────────────────────────────
+    const topics = new Map();          // basistopic-feld -> { value, ts }
+    const history = new Map();         // topic -> [zahl, zahl, …] (max ~60) für Sparkline
+    const collapsed = new Set();       // zugeklappte Zähler-Knoten (Default: alle zu)
+    let client = null, currentUser = null, paused = false, dirty = false;
+    let userIsTechnik = false;
+
+    // ─── Technik-Erkennung ────────────────────────────────────────────
+    function isTechnik(u) {
+        if (!u) return false;
+        if (u.isAdmin === true) return true;
+        return (u.groups || []).some(g => {
+            const gl = String(g).toLowerCase();
+            return gl === 'technik' || gl === 'präsident' || gl === 'praesident';
+        });
+    }
+
+    // ─── Verbindungsstatus mit farbigem Punkt ─────────────────────────
+    function setConn(state, text) {
+        const dot = document.getElementById('connDot'), t = document.getElementById('connText');
+        const map = { ok: 'bg-green-500', wait: 'bg-amber-400 pulse', err: 'bg-red-500', off: 'bg-gray-400' };
+        dot.className = 'dot ' + (map[state] || map.off);
+        t.textContent = text;
+    }
+
+    // ─── Aktualität (z.B. "3s") ───────────────────────────────────────
+    function age(ts) {
+        const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+        if (s < 60) return s + 's';
+        if (s < 3600) return Math.round(s / 60) + 'm';
+        return Math.round(s / 3600) + 'h';
+    }
+
+    // ─── Topic-Parsing ────────────────────────────────────────────────
+    // energy/<haus>/<bereich>            -> Basistopic (JSON)
+    // energy/<haus>/<bereich>/<feld>     -> einzelner Wert
+    // Sonstiges (z.B. energy/collector/status, energy/test) -> als eigener Knoten
+    function parseTopic(topic) {
+        const parts = topic.split('/');
+        if (parts[0] === 'energy' && parts.length >= 3) {
+            const haus = parts[1];
+            const bereich = parts[2];
+            const feld = parts.slice(3).join('/'); // '' = Basistopic
+            return { haus, meter: `energy/${haus}/${bereich}`, bereich, feld };
+        }
+        // wetter/<station>/<feld...> -> alle Felder unter einem Knoten, feld gesetzt
+        // (sonst gälten die Skalarwerte als leeres Basistopic -> würden verworfen).
+        if (parts[0] === 'wetter' && parts.length >= 3) {
+            return { haus: `Wetter ${parts[1]}`, meter: `wetter/${parts[1]}`, bereich: parts[1], feld: parts.slice(2).join('/') };
+        }
+        // Fallback: alles unter Pseudo-Haus "(sonstige)"
+        return { haus: '(sonstige)', meter: topic, bereich: parts.slice(1).join('/') || topic, feld: '' };
+    }
+
+    // ─── Sparkline (inline-SVG, ~80x20) ───────────────────────────────
+    function sparkline(arr) {
+        if (!arr || arr.length < 2) return '';
+        const W = 80, H = 20, pad = 2;
+        let min = Math.min(...arr), max = Math.max(...arr);
+        if (!isFinite(min) || !isFinite(max)) return '';
+        if (min === max) { min -= 1; max += 1; } // flache Linie mittig
+        const n = arr.length;
+        const dx = (W - 2 * pad) / (n - 1);
+        const pts = arr.map((v, i) => {
+            const x = pad + i * dx;
+            const y = H - pad - ((v - min) / (max - min)) * (H - 2 * pad);
+            return `${x.toFixed(1)},${y.toFixed(1)}`;
+        }).join(' ');
+        return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="inline-block align-middle">
+            <polyline points="${pts}" fill="none" stroke="#3b82f6" stroke-width="1.2"
+                      stroke-linejoin="round" stroke-linecap="round"/>
+        </svg>`;
+    }
+
+    // ─── Unix-Timestamp -> menschenlesbar (nur plausible Epochen) ─────
+    // Ganzzahl in s- (~2001–2096) oder ms-Epoch-Bereich -> Datum/Zeit.
+    // Floats (z.B. Energie-Zähler) + kleine Zahlen werden ignoriert.
+    function humanTime(n) {
+        if (!Number.isFinite(n) || !Number.isInteger(n)) return '';
+        let ms = null;
+        if (n >= 1e12 && n < 4e12) ms = n;             // ms-Epoch
+        else if (n >= 1e9 && n < 4e9) ms = n * 1000;   // s-Epoch
+        if (ms === null) return '';
+        return new Date(ms).toLocaleString('de-CH',
+            { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    // ─── Render der Baum-Ansicht ──────────────────────────────────────
+    function render() {
+        const q = document.getElementById('filter').value.trim().toLowerCase();
+        document.getElementById('count').textContent = topics.size;
+
+        // Topics in Haus -> Zähler -> Felder gruppieren
+        const houses = new Map(); // haus -> Map(meter -> { name, fields:[{topic,feld,value,ts}], baseTs })
+        for (const [topic, d] of topics.entries()) {
+            if (q && !topic.toLowerCase().includes(q)) continue;
+            const { haus, meter, feld } = parseTopic(topic);
+            if (!houses.has(haus)) houses.set(haus, new Map());
+            const meters = houses.get(haus);
+            if (!meters.has(meter)) meters.set(meter, { name: null, fields: [], baseTs: 0 });
+            const node = meters.get(meter);
+            if (feld === '') {
+                // Basistopic = JSON: Name extrahieren, plus alle Felder direkt einspeisen
+                node.baseTs = Math.max(node.baseTs, d.ts);
+                let obj; try { obj = JSON.parse(d.value); } catch { obj = undefined; }
+                if (obj && typeof obj === 'object') {
+                    if (obj.name) node.name = String(obj.name);
+                    node._json = obj;
+                    node._jsonTs = d.ts;
+                } else {
+                    // Skalar (Zahl/String/Bool) oder Nicht-JSON -> als Rohwert-Feld zeigen,
+                    // statt es (wie bisher bei Zahlen) stumm zu verwerfen.
+                    node.fields.push({ topic, feld: '(Wert)', value: d.value, ts: d.ts, raw: true });
+                }
+            } else {
+                node.fields.push({ topic, feld, value: d.value, ts: d.ts });
+            }
+        }
+
+        const treeEl = document.getElementById('tree');
+        const emptyEl = document.getElementById('empty');
+        if (houses.size === 0) { treeEl.innerHTML = ''; emptyEl.style.display = 'block'; return; }
+        emptyEl.style.display = 'none';
+
+        const filtering = q.length > 0;
+        const houseKeys = [...houses.keys()].sort();
+        let html = '';
+
+        for (const haus of houseKeys) {
+            const meters = houses.get(haus);
+            html += `<div class="px-4 py-2 bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wide">${esc(haus)}</div>`;
+            const meterKeys = [...meters.keys()].sort();
+            for (const meter of meterKeys) {
+                const node = meters.get(meter);
+                // Felder aus Basis-JSON ableiten (falls Subtopics fehlen, kommen Werte direkt aus JSON)
+                const fieldMap = new Map(); // feld -> {value, ts, topic}
+                if (node._json) {
+                    for (const [k, v] of Object.entries(node._json)) {
+                        if (['name', 'location', 'category', 'ts'].includes(k)) continue;
+                        if (typeof v === 'object') continue;
+                        fieldMap.set(k, { value: v, ts: node._jsonTs, topic: meter + '/' + k });
+                    }
+                }
+                // Subtopic-Felder überschreiben JSON (frischer + exakter)
+                for (const f of node.fields) {
+                    fieldMap.set(f.feld, { value: f.value, ts: f.ts, topic: f.topic, raw: f.raw });
+                }
+
+                const displayName = node.name || meter;
+                const open = filtering || !collapsed.has(meter);
+                const fieldKeys = [...fieldMap.keys()].sort();
+
+                html += `<div>`;
+                html += `<button type="button" onclick="toggleMeter(this)" data-meter="${esc(meter)}"
+                            class="w-full flex items-center gap-2 px-4 py-2 text-left hover:bg-gray-50">
+                            <svg class="chev ${open ? 'open' : ''} w-3.5 h-3.5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                            <span class="font-medium text-gray-800">${esc(displayName)}</span>
+                            <span class="mono text-xs text-gray-400">${esc(meter)}</span>
+                            <span class="ml-auto text-xs text-gray-400">${fieldKeys.length} Felder</span>
+                         </button>`;
+
+                html += `<div class="${open ? '' : 'hidden'} pl-9 pr-4 pb-2" data-fields="${esc(meter)}">`;
+                if (fieldKeys.length === 0) {
+                    html += `<p class="text-xs text-gray-400 py-1">keine Felder</p>`;
+                }
+                for (const fk of fieldKeys) {
+                    const f = fieldMap.get(fk);
+                    const unit = f.raw ? '' : unitFor(fk);
+                    const num = parseFloat(f.value);
+                    const isNum = isFinite(num) && !f.raw;
+                    const valStr = isNum ? fmtNum(f.value, unit) : esc(String(f.value).slice(0, 120));
+                    const ht = humanTime(Number(f.value));   // Wert = Unix-Zeit? -> zusätzlich Datum
+                    const fresh = (Date.now() - f.ts) < 30000;
+                    const spark = isNum ? sparkline(history.get(f.topic)) : '';
+                    html += `<div class="flex items-center gap-3 py-1 text-sm border-b border-gray-50 last:border-0">
+                        <span class="mono text-gray-600 w-44 flex-shrink-0 truncate" title="${esc(fk)}">${esc(fk)}</span>
+                        <span class="mono text-gray-900 font-medium">${valStr}${unit ? ' <span class="text-gray-400 font-normal">' + esc(unit) + '</span>' : ''}</span>
+                        ${ht ? `<span class="text-xs text-gray-400 flex-shrink-0" title="Unix-Zeit umgerechnet">🕒 ${esc(ht)}</span>` : ''}
+                        <span class="flex-shrink-0">${spark}</span>
+                        <span class="ml-auto text-xs ${fresh ? 'text-green-600' : 'text-gray-400'} flex-shrink-0">${age(f.ts)}</span>
+                    </div>`;
+                }
+                html += `</div></div>`;
+            }
+        }
+        treeEl.innerHTML = html;
+    }
+
+    // Zähler-Knoten auf-/zuklappen (Zustand merken)
+    function toggleMeter(btn) {
+        const meter = btn.getAttribute('data-meter');
+        const chev = btn.querySelector('.chev');
+        const fields = document.querySelector(`[data-fields="${CSS.escape(meter)}"]`);
+        if (collapsed.has(meter)) { collapsed.delete(meter); chev.classList.add('open'); fields && fields.classList.remove('hidden'); }
+        else { collapsed.add(meter); chev.classList.remove('open'); fields && fields.classList.add('hidden'); }
+    }
+
+    // ─── Sanfter Re-Render-Loop (max 2x/s) ────────────────────────────
+    setInterval(() => { if (dirty && !paused) { dirty = false; render(); } }, 500);
+    setInterval(() => { if (!paused) render(); }, 5000); // Alters-Anzeige aktualisieren
+
+    // ─── Eingehende Nachricht ─────────────────────────────────────────
+    function onMessage(topic, payload) {
+        if (paused) return;
+        const val = payload.toString();
+        topics.set(topic, { value: val, ts: Date.now() });
+
+        // Verlaufspuffer für numerische Topics (max ~60 Werte)
+        const n = parseFloat(val);
+        if (isFinite(n) && !val.trim().startsWith('{')) {
+            let buf = history.get(topic);
+            if (!buf) { buf = []; history.set(topic, buf); }
+            buf.push(n);
+            if (buf.length > 60) buf.shift();
+        }
+        // Bei Basis-JSON: auch die numerischen Felder in die Sparkline-Puffer schreiben
+        if (val.trim().startsWith('{')) {
+            try {
+                const obj = JSON.parse(val);
+                for (const [k, v] of Object.entries(obj)) {
+                    if (typeof v !== 'number') continue;
+                    const ft = topic + '/' + k;
+                    let buf = history.get(ft);
+                    if (!buf) { buf = []; history.set(ft, buf); }
+                    buf.push(v);
+                    if (buf.length > 60) buf.shift();
+                }
+            } catch { /* ignorieren */ }
+        }
+        dirty = true;
+    }
+
+    // ─── Erlaubte Zähler-Topics (Nicht-Technik) ───────────────────────
+    async function meterTopicsFor(user) {
+        try {
+            const groups = (user.groups || []).join(',');
+            const resp = await AuthentikAuth.apiFetch(
+                `/api/energy/user/${encodeURIComponent(user.email)}/meters?groups=${encodeURIComponent(groups)}`);
+            const meters = await resp.json();
+            if (!Array.isArray(meters)) return [];
+            // nur erstes '-' -> '/'  (energy/<haus>/<bereich>/#)
+            return meters.map(m => `energy/${String(m.id).replace('-', '/')}/#`);
+        } catch { return []; }
+    }
+
+    // ─── MQTT-Verbindung ──────────────────────────────────────────────
+    async function connect() {
+        setConn('wait', 'hole Token…');
+        let tok;
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/mqtt/token', { method: 'POST' });
+            if (!r.ok) throw new Error('Token ' + r.status);
+            tok = await r.json();
+        } catch (e) { setConn('err', 'Token-Fehler'); return; }
+
+        // Abos bestimmen — Technik sieht ALLE Topics (nicht nur energy/),
+        // also z.B. auch wetter/#. ACL erlaubt Technik ohnehin alles.
+        const subs = tok.is_technik
+            ? ['#']
+            : [...await meterTopicsFor(currentUser), 'energy/collector/status'];
+
+        setConn('wait', 'verbinde…');
+        client = mqtt.connect('wss://mqtt.rosenweg4303.ch', {
+            username: tok.username, password: tok.password,
+            protocolVersion: 4, clean: true, reconnectPeriod: 6000, connectTimeout: 12000,
+            clientId: 'rwweb_' + Math.random().toString(16).slice(2, 10),
+        });
+        client.on('connect', () => {
+            setConn('ok', 'verbunden');
+            subs.forEach(s => client.subscribe(s, { qos: 0 }, (err) => {
+                if (err) console.warn('subscribe denied:', s, err.message);
+            }));
+        });
+        client.on('message', onMessage);
+        client.on('reconnect', () => setConn('wait', 'reconnect…'));
+        client.on('close', () => setConn('off', 'getrennt'));
+        client.on('error', (e) => { console.error('mqtt', e); setConn('err', 'Fehler: ' + (e.message || e)); });
+    }
+
+    // ═══════════════════ TABS ═══════════════════
+    function switchTab(tab) {
+        const isLive = tab === 'live';
+        document.getElementById('view-live').classList.toggle('hidden', !isLive);
+        document.getElementById('view-admin').classList.toggle('hidden', isLive);
+        const tl = document.getElementById('tab-live'), ta = document.getElementById('tab-admin');
+        const on = 'px-4 py-1.5 text-sm font-medium rounded-md bg-white text-gray-900 shadow-sm';
+        const off = 'px-4 py-1.5 text-sm font-medium rounded-md text-gray-500 hover:text-gray-700';
+        tl.className = isLive ? on : off;
+        ta.className = (isLive ? off : on) + (userIsTechnik ? '' : ' hidden');
+        if (!isLive && userIsTechnik) { loadAdmin(); loadServiceUsers(); loadTopicRules(); }
+    }
+
+    // ═══════════════════ PUBLISH / TEST (nur Technik) ═══════════════════
+    async function doPublish() {
+        const topic = document.getElementById('pubTopic').value.trim();
+        const payload = document.getElementById('pubPayload').value;
+        const msg = document.getElementById('pubMsg');
+        if (!topic) { msg.className = 'text-sm mt-2 text-red-600'; msg.textContent = 'Topic fehlt.'; return; }
+        msg.className = 'text-sm mt-2 text-gray-500'; msg.textContent = 'sende…';
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/mqtt/publish', { method: 'POST', body: { topic, payload } });
+            if (r.status === 403) { msg.className = 'text-sm mt-2 text-red-600'; msg.textContent = 'Nur Technik darf publizieren.'; return; }
+            if (!r.ok) {
+                let detail = '';
+                try { detail = (await r.json()).error || ''; } catch {}
+                msg.className = 'text-sm mt-2 text-red-600';
+                msg.textContent = `Fehler (${r.status})${detail ? ': ' + detail : ''}`;
+                return;
+            }
+            msg.className = 'text-sm mt-2 text-green-600';
+            msg.textContent = `Gesendet an ${topic}.`;
+        } catch (e) {
+            msg.className = 'text-sm mt-2 text-red-600';
+            msg.textContent = 'Netzwerkfehler: ' + (e.message || e);
+        }
+    }
+
+    // ═══════════════════ ZUGRIFFSVERWALTUNG (nur Technik) ═══════════════════
+    function meterDisplay(m) {
+        return m.group_id ? `${m.group_id}-${m.name}` : (m.name || m.id);
+    }
+
+    async function loadAdmin() {
+        const listEl = document.getElementById('adminList');
+        const errEl = document.getElementById('adminError');
+        errEl.classList.add('hidden');
+        listEl.innerHTML = '<p class="text-gray-400 text-sm">Lade Zähler…</p>';
+        let meters;
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/mqtt/meters');
+            if (r.status === 403) throw new Error('403');
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            meters = await r.json();
+        } catch (e) {
+            listEl.innerHTML = '';
+            errEl.classList.remove('hidden');
+            errEl.textContent = e.message === '403'
+                ? 'Kein Zugriff — nur Technik.'
+                : 'Zähler konnten nicht geladen werden: ' + e.message;
+            return;
+        }
+        if (!Array.isArray(meters) || meters.length === 0) {
+            listEl.innerHTML = '<p class="text-gray-400 text-sm">Keine Zähler vorhanden.</p>';
+            return;
+        }
+        // Karten-Gerüst rendern; Gruppen/User je Zähler asynchron nachladen
+        listEl.innerHTML = meters.map(m => `
+            <details class="border rounded-lg" data-meter-id="${esc(m.id)}">
+                <summary class="cursor-pointer px-4 py-2.5 select-none flex items-center gap-2">
+                    <span class="font-medium text-gray-800">${esc(meterDisplay(m))}</span>
+                    <span class="mono text-xs text-gray-400">${esc(m.id)}</span>
+                </summary>
+                <div class="px-4 pb-4 pt-1 space-y-4" data-body="${esc(m.id)}">
+                    <p class="text-xs text-gray-400">lade…</p>
+                </div>
+            </details>
+        `).join('');
+
+        // Body erst beim ersten Aufklappen laden
+        listEl.querySelectorAll('details').forEach(det => {
+            det.addEventListener('toggle', () => {
+                if (det.open && !det._loaded) { det._loaded = true; loadMeterAccess(det.getAttribute('data-meter-id')); }
+            });
+        });
+    }
+
+    async function loadMeterAccess(id) {
+        const body = document.querySelector(`[data-body="${CSS.escape(id)}"]`);
+        if (!body) return;
+        let groups = [], users = [];
+        try {
+            const [gr, ur] = await Promise.all([
+                AuthentikAuth.apiFetch(`/api/mqtt/meters/${encodeURIComponent(id)}/groups`),
+                AuthentikAuth.apiFetch(`/api/mqtt/meters/${encodeURIComponent(id)}/users`),
+            ]);
+            if (gr.ok) groups = await gr.json();
+            if (ur.ok) users = await ur.json();
+        } catch (e) {
+            body.innerHTML = `<p class="text-sm text-red-600">Fehler: ${esc(e.message)}</p>`;
+            return;
+        }
+
+        const groupChips = (Array.isArray(groups) ? groups : []).map(g => `
+            <span class="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-xs px-2 py-1 rounded-full">
+                ${esc(g.group_name)}
+                <button onclick="removeGroup('${esc(id)}', this.dataset.g)" data-g="${esc(g.group_name)}"
+                        class="text-blue-400 hover:text-blue-700" title="entfernen">&times;</button>
+            </span>`).join('') || '<span class="text-xs text-gray-400">keine</span>';
+
+        const userChips = (Array.isArray(users) ? users : []).map(u => `
+            <span class="inline-flex items-center gap-1 bg-gray-100 text-gray-700 text-xs px-2 py-1 rounded-full">
+                ${esc(u.user_email)}${u.role ? ` <span class="text-gray-400">(${esc(u.role)})</span>` : ''}
+                <button onclick="removeUser('${esc(id)}', this.dataset.u)" data-u="${esc(u.user_email)}"
+                        class="text-gray-400 hover:text-gray-700" title="entfernen">&times;</button>
+            </span>`).join('') || '<span class="text-xs text-gray-400">keine</span>';
+
+        body.innerHTML = `
+            <div>
+                <p class="text-xs font-semibold text-gray-500 mb-1.5">Gruppen</p>
+                <div class="flex flex-wrap gap-1.5 mb-2">${groupChips}</div>
+                <div class="flex gap-2">
+                    <input list="knownGroups" placeholder="Gruppe…" data-addgroup="${esc(id)}"
+                           class="flex-1 px-2.5 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none">
+                    <button onclick="addGroup('${esc(id)}')"
+                            class="px-3 py-1.5 text-sm rounded-lg bg-blue-700 text-white hover:bg-blue-800">+</button>
+                </div>
+            </div>
+            <div>
+                <p class="text-xs font-semibold text-gray-500 mb-1.5">Einzel-User</p>
+                <div class="flex flex-wrap gap-1.5 mb-2">${userChips}</div>
+                <div class="flex flex-wrap gap-2">
+                    <input type="email" placeholder="E-Mail" data-adduser-email="${esc(id)}"
+                           class="flex-1 min-w-[160px] px-2.5 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none">
+                    <input type="text" placeholder="Name (optional)" data-adduser-name="${esc(id)}"
+                           class="flex-1 min-w-[120px] px-2.5 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none">
+                    <input type="text" placeholder="Rolle (optional)" data-adduser-role="${esc(id)}"
+                           class="w-28 px-2.5 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none">
+                    <button onclick="addUser('${esc(id)}')"
+                            class="px-3 py-1.5 text-sm rounded-lg bg-gray-700 text-white hover:bg-gray-800">+</button>
+                </div>
+            </div>
+            <p class="text-sm hidden" data-msg="${esc(id)}"></p>
+        `;
+    }
+
+    function adminMsg(id, ok, text) {
+        const el = document.querySelector(`[data-msg="${CSS.escape(id)}"]`);
+        if (!el) return;
+        el.className = 'text-sm ' + (ok ? 'text-green-600' : 'text-red-600');
+        el.textContent = text;
+        el.classList.remove('hidden');
+    }
+
+    // Body neu laden + Details offen halten
+    function reloadMeterBody(id) {
+        const det = document.querySelector(`details[data-meter-id="${CSS.escape(id)}"]`);
+        if (det) det._loaded = true;
+        loadMeterAccess(id);
+    }
+
+    async function addGroup(id) {
+        const inp = document.querySelector(`[data-addgroup="${CSS.escape(id)}"]`);
+        const group_name = inp.value.trim();
+        if (!group_name) return;
+        try {
+            const r = await AuthentikAuth.apiFetch(`/api/mqtt/meters/${encodeURIComponent(id)}/groups`,
+                { method: 'POST', body: { group_name } });
+            if (r.status === 403) return adminMsg(id, false, 'Nur Technik.');
+            if (!r.ok) return adminMsg(id, false, 'Fehler ' + r.status);
+            reloadMeterBody(id);
+        } catch (e) { adminMsg(id, false, e.message); }
+    }
+
+    async function removeGroup(id, group_name) {
+        try {
+            const r = await AuthentikAuth.apiFetch(
+                `/api/mqtt/meters/${encodeURIComponent(id)}/groups/${encodeURIComponent(group_name)}`,
+                { method: 'DELETE' });
+            if (r.status === 403) return adminMsg(id, false, 'Nur Technik.');
+            if (!r.ok) return adminMsg(id, false, 'Fehler ' + r.status);
+            reloadMeterBody(id);
+        } catch (e) { adminMsg(id, false, e.message); }
+    }
+
+    async function addUser(id) {
+        const user_email = document.querySelector(`[data-adduser-email="${CSS.escape(id)}"]`).value.trim();
+        const user_name = document.querySelector(`[data-adduser-name="${CSS.escape(id)}"]`).value.trim();
+        const role = document.querySelector(`[data-adduser-role="${CSS.escape(id)}"]`).value.trim();
+        if (!user_email) return adminMsg(id, false, 'E-Mail fehlt.');
+        try {
+            const r = await AuthentikAuth.apiFetch(`/api/mqtt/meters/${encodeURIComponent(id)}/users`,
+                { method: 'POST', body: { user_email, user_name: user_name || undefined, role: role || undefined } });
+            if (r.status === 403) return adminMsg(id, false, 'Nur Technik.');
+            if (!r.ok) return adminMsg(id, false, 'Fehler ' + r.status);
+            reloadMeterBody(id);
+        } catch (e) { adminMsg(id, false, e.message); }
+    }
+
+    async function removeUser(id, user_email) {
+        try {
+            const r = await AuthentikAuth.apiFetch(
+                `/api/mqtt/meters/${encodeURIComponent(id)}/users/${encodeURIComponent(user_email)}`,
+                { method: 'DELETE' });
+            if (r.status === 403) return adminMsg(id, false, 'Nur Technik.');
+            if (!r.ok) return adminMsg(id, false, 'Fehler ' + r.status);
+            reloadMeterBody(id);
+        } catch (e) { adminMsg(id, false, e.message); }
+    }
+
+    // ═══════════════════ MQTT-SERVICE-USER (nur Technik) ═══════════════════
+    async function loadServiceUsers() {
+        const el = document.getElementById('svcList');
+        el.innerHTML = '<p class="text-gray-400 text-sm">Lade…</p>';
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/mqtt/service-users');
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const users = await r.json();
+            if (!Array.isArray(users) || users.length === 0) {
+                el.innerHTML = '<p class="text-gray-400 text-sm">Noch keine Service-User.</p>'; return;
+            }
+            el.innerHTML = users.map(u => `
+                <div class="flex flex-wrap items-center gap-3 text-sm border rounded-lg px-3 py-2">
+                    <span class="mono font-medium text-gray-800">${esc(u.username)}</span>
+                    <span class="text-xs px-2 py-0.5 rounded-full ${u.can_write ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}">${u.can_write ? 'Lesen + Schreiben' : 'nur Lesen'}</span>
+                    <span class="mono text-xs text-gray-500">${esc(u.topic_filter)}</span>
+                    ${u.description ? `<span class="text-xs text-gray-400 truncate max-w-[180px]">${esc(u.description)}</span>` : ''}
+                    <button onclick="deleteServiceUser('${esc(u.username)}')" class="ml-auto text-xs text-red-500 hover:text-red-700">löschen</button>
+                </div>`).join('');
+        } catch (e) { el.innerHTML = `<p class="text-sm text-red-600">${esc(e.message)}</p>`; }
+    }
+
+    async function createServiceUser() {
+        const username = document.getElementById('svcUser').value.trim();
+        const topic_filter = document.getElementById('svcTopic').value.trim() || 'energy/#';
+        const can_write = document.getElementById('svcWrite').checked;
+        const description = document.getElementById('svcDesc').value.trim();
+        const box = document.getElementById('svcNew');
+        if (!username) return;
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/mqtt/service-users',
+                { method: 'POST', body: { username, topic_filter, can_write, description } });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                box.className = 'mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700';
+                box.textContent = d.error || ('Fehler ' + r.status);
+                box.classList.remove('hidden'); return;
+            }
+            box.className = 'mb-3 p-3 bg-green-50 border border-green-200 rounded-lg text-sm';
+            box.innerHTML = `
+                <p class="font-semibold text-green-800 mb-1">Service-User <span class="mono">${esc(d.username)}</span> angelegt</p>
+                <p class="text-gray-700 mb-1">Passwort (nur jetzt sichtbar):
+                    <span class="mono bg-white px-2 py-0.5 rounded border select-all">${esc(d.password)}</span></p>
+                <p class="text-xs text-gray-500">Broker <span class="mono">mqtt://100.64.2.51:1883</span> (intern) oder
+                    <span class="mono">wss://mqtt.rosenweg4303.ch</span> · Topic <span class="mono">${esc(d.topic_filter)}</span>
+                    · ${d.can_write ? 'Lesen + Schreiben' : 'nur Lesen'}</p>`;
+            box.classList.remove('hidden');
+            document.getElementById('svcUser').value = '';
+            document.getElementById('svcDesc').value = '';
+            loadServiceUsers();
+        } catch (e) {
+            box.className = 'mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700';
+            box.textContent = 'Netzwerkfehler: ' + (e.message || e);
+            box.classList.remove('hidden');
+        }
+    }
+
+    async function deleteServiceUser(username) {
+        if (!confirm('Service-User "' + username + '" löschen? Verbundene Anwendungen können sich dann nicht mehr anmelden.')) return;
+        try {
+            await AuthentikAuth.apiFetch('/api/mqtt/service-users/' + encodeURIComponent(username), { method: 'DELETE' });
+            loadServiceUsers();
+        } catch (e) { /* ignorieren */ }
+    }
+
+    // ═══════════════════ TOPIC-SCHUTZ-REGELN (nur Technik) ═══════════════════
+    async function loadTopicRules() {
+        const el = document.getElementById('trList');
+        el.innerHTML = '<p class="text-gray-400 text-sm">Lade…</p>';
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/mqtt/topic-rules');
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const rules = await r.json();
+            if (!Array.isArray(rules) || rules.length === 0) {
+                el.innerHTML = '<p class="text-gray-400 text-sm">Noch keine Topic-Regeln.</p>'; return;
+            }
+            el.innerHTML = rules.map(t => `
+                <div class="flex flex-wrap items-center gap-3 text-sm border rounded-lg px-3 py-2">
+                    <span class="mono text-gray-800">${esc(t.topic_filter)}</span>
+                    <span class="text-xs text-gray-400">→</span>
+                    <span class="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">${esc(t.group_name)}</span>
+                    <span class="text-xs text-gray-500">${t.can_read ? 'Lesen' : ''}${t.can_read && t.can_write ? ' + ' : ''}${t.can_write ? 'Schreiben' : ''}</span>
+                    ${t.description ? `<span class="text-xs text-gray-400 truncate max-w-[160px]">${esc(t.description)}</span>` : ''}
+                    <button onclick="deleteTopicRule(${t.id})" class="ml-auto text-xs text-red-500 hover:text-red-700">löschen</button>
+                </div>`).join('');
+        } catch (e) { el.innerHTML = `<p class="text-sm text-red-600">${esc(e.message)}</p>`; }
+    }
+    async function createTopicRule() {
+        const topic_filter = document.getElementById('trTopic').value.trim();
+        const group_name = document.getElementById('trGroup').value.trim();
+        const can_read = document.getElementById('trRead').checked;
+        const can_write = document.getElementById('trWrite').checked;
+        const msg = document.getElementById('trMsg');
+        if (!topic_filter || !group_name) {
+            msg.className = 'text-sm mb-2 text-red-600'; msg.textContent = 'Topic-Muster und Gruppe nötig.'; msg.classList.remove('hidden'); return;
+        }
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/mqtt/topic-rules',
+                { method: 'POST', body: { topic_filter, group_name, can_read, can_write } });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) { msg.className = 'text-sm mb-2 text-red-600'; msg.textContent = d.error || ('Fehler ' + r.status); msg.classList.remove('hidden'); return; }
+            msg.className = 'text-sm mb-2 text-green-600'; msg.textContent = 'Regel gespeichert.'; msg.classList.remove('hidden');
+            document.getElementById('trTopic').value = '';
+            document.getElementById('trGroup').value = '';
+            loadTopicRules();
+        } catch (e) { msg.className = 'text-sm mb-2 text-red-600'; msg.textContent = e.message; msg.classList.remove('hidden'); }
+    }
+    async function deleteTopicRule(id) {
+        try {
+            await AuthentikAuth.apiFetch('/api/mqtt/topic-rules/' + id, { method: 'DELETE' });
+            loadTopicRules();
+        } catch (e) { /* ignorieren */ }
+    }
+
+    // ═══════════════════ INIT ═══════════════════
+    async function init() {
+        currentUser = await AuthentikAuth.init({
+            requireAuth: true,
+            onLogout: () => { AuthentikAuth.createLoginButton('gate'); },
+        });
+        if (!currentUser) return; // init() redirectet selbst zum Login
+
+        document.getElementById('app').style.display = 'block';
+        userIsTechnik = isTechnik(currentUser);
+
+        // Rollen-Badge
+        const badge = document.getElementById('roleBadge');
+        if (userIsTechnik) { badge.textContent = 'Technik · alle Topics'; badge.className += ' bg-blue-100 text-blue-700'; }
+        else { badge.textContent = 'eigene Zähler'; badge.className += ' bg-gray-200 text-gray-700'; }
+
+        // Admin-Tab + Datalist nur für Technik
+        if (userIsTechnik) {
+            document.getElementById('tab-admin').classList.remove('hidden');
+            document.getElementById('knownGroups').innerHTML =
+                KNOWN_GROUPS.map(g => `<option value="${esc(g)}">`).join('');
+        }
+
+        // Live-Steuerung
+        document.getElementById('filter').addEventListener('input', render);
+        document.getElementById('pause').addEventListener('change', e => { paused = e.target.checked; if (!paused) render(); });
+        document.getElementById('clearBtn').addEventListener('click', () => { topics.clear(); history.clear(); render(); });
+
+        connect();
+    }
+    document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
