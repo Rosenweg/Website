@@ -393,6 +393,9 @@
     const field = String(topic).split('/').pop();
     const raw = payload.toString().trim();
     let num = Number(raw);
+    // Sensor-Fehler-Sentinels / unrealistische Extremwerte (-9999, -5000, …) ignorieren:
+    // Nachricht verwerfen (letzter gueltiger Wert bleibt stehen). Vor der Solar-Umrechnung.
+    if (Number.isFinite(num) && (num <= -1000 || num >= 100000)) return;
     if (field === 'solarradiation' && Number.isFinite(num)) num = num / SOLAR_LUX_PER_WM2; // Lux -> W/m²
     cur[field] = Number.isFinite(num) ? num : raw;
     const el = $('v-' + field);
@@ -436,7 +439,7 @@
     const svg = $('chart-' + field); if (!svg) return;
     const W = 300, H = 70, pad = 5;
     const data = points.map(p => ({ t: new Date(p.ts).getTime(), v: Number(p[field]) }))
-      .filter(p => Number.isFinite(p.t) && Number.isFinite(p.v));
+      .filter(p => Number.isFinite(p.t) && Number.isFinite(p.v) && p.v > -1000 && p.v < 100000);
     const lo = $('lo-' + field), hi = $('hi-' + field), nw = $('n-' + field);
     if (data.length < 2) { svg.innerHTML = '<text x="150" y="38" fill="rgba(255,255,255,.55)" font-size="13" text-anchor="middle">sammelt Daten…</text>'; return; }
     const ts = data.map(d => d.t), vs = data.map(d => d.v);
@@ -487,7 +490,7 @@
     [...$('modal-ranges').children].forEach(b => b.classList.toggle('on', +b.dataset.h === hours));
     const pts = await fetchHist(hours);
     mState.points = pts.map(p => ({ t: new Date(p.ts).getTime(), v: Number(p[mState.field]) }))
-      .filter(p => Number.isFinite(p.t) && Number.isFinite(p.v));
+      .filter(p => Number.isFinite(p.t) && Number.isFinite(p.v) && p.v > -1000 && p.v < 100000);
     if (mState.points.length) { mState.t0 = mState.points[0].t; mState.t1 = mState.points[mState.points.length - 1].t; }
     renderModal();
   }
