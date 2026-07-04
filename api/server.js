@@ -14021,7 +14021,15 @@ app.post('/api/wetter/:station/ingest', mqttBrokerGuard, async (req, res) => {
   try {
     const st = String(req.params.station || 'r9').slice(0, 16);
     const b = req.body || {};
-    const num = (v) => { if (v === '' || v == null) return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
+    // Sensor-Fehler-Sentinels / unrealistische Extremwerte (-9999, -5000, …) verwerfen
+    // -> als null speichern (nicht aufzeichnen). Kein reales Wetterfeld liegt <= -1000
+    // (kaeltestes ~-90 °C) oder >= 100000; negative Werte gibt es nur bei Temp/Taupunkt.
+    const num = (v) => {
+      if (v === '' || v == null) return null;
+      const n = Number(v);
+      if (!Number.isFinite(n) || n <= -1000 || n >= 100000) return null;
+      return n;
+    };
     await pool.query(
       `INSERT INTO wetter_history (station, outdoortemp, outdoorhumidity, windspeed, winddir, pressureabs, solarradiation, rain, uvi, windgustspeed)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
