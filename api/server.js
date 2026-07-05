@@ -18014,7 +18014,8 @@ async function syncSubscriberToUnifi(oldRow, newRow) {
 // echten UniFi-Daten (stat/device Port + stat/sta Clients).
 function ispSubscriberLive(sub, devices, clients) {
   if (!sub.switch_name || !sub.switch_port) return { checked: false, state: 'unconfigured' };
-  const sw = (devices || []).find(d => d.name === sub.switch_name && Array.isArray(d.port_table));
+  const wantSw = String(sub.switch_name || '').trim();
+  const sw = (devices || []).find(d => String(d.name || '').trim() === wantSw && Array.isArray(d.port_table));
   if (!sw) return { checked: true, state: 'switch_not_found' };
   const port = sw.port_table.find(p => String(p.port_idx) === String(sub.switch_port));
   if (!port) return { checked: true, state: 'port_not_found' };
