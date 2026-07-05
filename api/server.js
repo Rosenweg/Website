@@ -17918,6 +17918,13 @@ async function unifiSetPortConfig(switchName, portIdx, { mac, vlan, portProfileI
     entry.port_security_mac_address = [];
   }
 
+  // 802.1X auf ISP-Ports NIE erzwingen: es gibt keinen RADIUS-Server, ein geerbtes
+  // dot1x_ctrl=auto blockiert den Port komplett (unauthorized) — trotz gesetzter
+  // MAC-Port-Security. force_authorized = normal weiterleiten; die MAC-Allowlist
+  // (oben) ist die eigentliche Absicherung. Gilt auch beim Entfernen (mac leer),
+  // damit der Port sauber wieder freigegeben wird.
+  entry.dot1x_ctrl = 'force_authorized';
+
   // VLAN / Port-Profile sind alternativ: Profile gewinnt wenn beides gesetzt.
   if (portProfileId) {
     entry.portconf_id = portProfileId;
