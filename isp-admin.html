@@ -488,6 +488,30 @@
     subscribers = (await r.json()).subscribers || [];
     renderSubs();
   }
+  // Live-Zustand eines Anschlusses (aus UniFi): kein Gerät / falsche MAC / keine IP /
+  // IP abweichend / 802.1X blockiert / aktiv. Tooltip zeigt Details (Port, MAC, IP).
+  function liveBadge(live) {
+    if (!live || !live.checked) return '';
+    const M = {
+      ok:               ['bg-green-100 text-green-800',  '● aktiv'],
+      no_device:        ['bg-gray-100 text-gray-500',    '○ kein Gerät'],
+      wrong_mac:        ['bg-red-100 text-red-800',      '✖ falsche MAC'],
+      no_ip:            ['bg-amber-100 text-amber-800',  '▲ Gerät, keine IP'],
+      ip_mismatch:      ['bg-amber-100 text-amber-800',  '▲ IP abweichend'],
+      blocked_dot1x:    ['bg-red-100 text-red-800',      '⛔ 802.1X blockiert'],
+      switch_not_found: ['bg-gray-100 text-gray-500',    '? Switch fehlt'],
+      port_not_found:   ['bg-gray-100 text-gray-500',    '? Port fehlt'],
+    };
+    const [cls, lbl] = M[live.state] || ['bg-gray-100 text-gray-500', live.state];
+    const tip = [
+      live.port_up != null ? 'Port ' + (live.port_up ? 'up' : 'down') : '',
+      live.connected_mac ? 'MAC ' + live.connected_mac + (live.mac_ok === false ? ' (≠Soll)' : live.mac_ok ? ' ✓' : '') : '',
+      live.ip_actual ? 'IP ' + live.ip_actual + (live.ip_ok === false ? ' (≠Soll)' : live.ip_ok ? ' ✓' : '') : '',
+      live.mac_filter ? 'MAC-Filter aktiv' : '',
+      live.dot1x_ctrl && live.dot1x_ctrl !== 'force_authorized' ? '802.1X=' + live.dot1x_ctrl : '',
+    ].filter(Boolean).join(' · ');
+    return `<span title="${esc(tip)}" class="block mt-1 text-[11px] ${cls} px-2 py-0.5 rounded">${lbl}</span>`;
+  }
   function renderSubs() {
     const wrap = document.getElementById('sub-list');
     if (subscribers.length === 0) {
@@ -502,7 +526,7 @@
         ${subscribers.map(s => `
           <tr>
             <td class="px-3 py-2">${esc(s.wohnung_bezeichnung || '?')} <span class="text-xs text-gray-400">STWEG ${s.stweg}</span></td>
-            <td class="px-3 py-2"><span class="text-xs ${s.status === 'aktiv' ? 'bg-green-100 text-green-800' : s.status === 'geplant' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-700'} px-2 py-0.5 rounded">${esc(s.status)}</span></td>
+            <td class="px-3 py-2"><span class="text-xs ${s.status === 'aktiv' ? 'bg-green-100 text-green-800' : s.status === 'geplant' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-700'} px-2 py-0.5 rounded" title="Soll-Status (manuell)">${esc(s.status)}</span>${liveBadge(s.live)}</td>
             <td class="px-3 py-2">${esc(s.anschluss_typ || '—')}</td>
             <td class="px-3 py-2 text-xs font-mono">${esc(s.switch_name || '—')}${s.switch_port ? ' :' + esc(s.switch_port) : ''}</td>
             <td class="px-3 py-2">${s.vlan ?? '—'}</td>

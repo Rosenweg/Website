@@ -18009,6 +18009,40 @@ async function syncSubscriberToUnifi(oldRow, newRow) {
 }
 
 // === Subscribers (Wohnungs-Anschluesse) ===
+// Live-Status eines Anschlusses aus UniFi: Gerät dran? richtige MAC am Port? richtige IP?
+// 802.1X-blockiert? Spiegelt die Soll-Konfig (switch/port/mac_dot1x/fixed_ip) gegen die
+// echten UniFi-Daten (stat/device Port + stat/sta Clients).
+function ispSubscriberLive(sub, devices, clients) {
+  if (!sub.switch_name || !sub.switch_port) return { checked: false, state: 'unconfigured' };
+  const sw = (devices || []).find(d => d.name === sub.switch_name && Array.isArray(d.port_table));
+  if (!sw) return { checked: true, state: 'switch_not_found' };
+  const port = sw.port_table.find(p => String(p.port_idx) === String(sub.switch_port));
+  if (!port) return { checked: true, state: 'port_not_found' };
+  const expMac = String(sub.mac_dot1x || '').toLowerCase();
+  const expIp = sub.fixed_ip || null;
+  const swMac = String(sw.mac || '').toLowerCase();
+  const onPort = (clients || []).filter(c => String(c.sw_mac || '').toLowerCase() === swMac && String(c.sw_port) === String(sub.switch_port));
+  const learned = (port.mac_table || []).map(m => String(m.mac || '').toLowerCase()).filter(Boolean);
+  const expClient = expMac ? (clients || []).find(c => String(c.mac || '').toLowerCase() === expMac) : null;
+  const portUp = !!port.up;
+  const connectedMac = (onPort[0] && String(onPort[0].mac).toLowerCase()) || learned[0] || null;
+  const devicePresent = portUp && (onPort.length > 0 || learned.length > 0);
+  const macOk = expMac ? (onPort.some(c => String(c.mac || '').toLowerCase() === expMac) || learned.includes(expMac)) : null;
+  const ipActual = (expClient && expClient.ip) || (onPort[0] && onPort[0].ip) || null;
+  const ipOk = expIp ? (ipActual === expIp) : null;
+  const macFilter = !!port.port_security_enabled && (port.port_security_mac_address || []).map(x => String(x).toLowerCase()).includes(expMac);
+  let state;
+  if (String(port.dot1x_ctrl) === 'auto') state = 'blocked_dot1x';   // 802.1X ohne RADIUS -> Port tot
+  else if (!devicePresent) state = 'no_device';
+  else if (expMac && macOk === false) state = 'wrong_mac';
+  else if (expMac && macOk && expIp && ipOk === false) state = 'ip_mismatch';
+  else if (macOk !== false && !ipActual) state = 'no_ip';
+  else state = 'ok';
+  return { checked: true, state, port_up: portUp, device_present: devicePresent,
+           connected_mac: connectedMac, mac_ok: macOk, ip_actual: ipActual, ip_ok: ipOk,
+           mac_filter: macFilter, dot1x_ctrl: port.dot1x_ctrl || null };
+}
+
 app.get('/api/isp/subscribers', authMiddleware, async (req, res) => {
   try {
     if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Präsident' });
@@ -18018,7 +18052,16 @@ app.get('/api/isp/subscribers', authMiddleware, async (req, res) => {
          LEFT JOIN wohnungen w ON w.id = s.wohnung_id
         ORDER BY w.stweg, w.bezeichnung`,
     );
-    res.json({ subscribers: r.rows });
+    const subs = r.rows;
+    // Live-Status best-effort aus UniFi (Port/MAC/IP gegen Soll). Faellt UniFi aus -> ohne live.
+    if (subs.some(s => s.switch_name && s.switch_port)) {
+      try {
+        const [dev, sta] = await Promise.all([unifiGet('stat/device', 5000), unifiGet('stat/sta', 5000)]);
+        const devices = dev.data || [], clients = sta.data || [];
+        for (const s of subs) s.live = ispSubscriberLive(s, devices, clients);
+      } catch (e) { console.warn('[isp] live-status:', e.message); }
+    }
+    res.json({ subscribers: subs });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
