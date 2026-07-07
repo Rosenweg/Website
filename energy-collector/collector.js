@@ -847,6 +847,54 @@ app.get('/api/energy/live/:meterId', (req, res) => {
   res.json(data);
 });
 
+// ─── EINE Quelle der Wahrheit: Netz/Produktion Rosenweg 9 ───────────
+// Loest Netz (grid_w) und Produktion (production_w) GEEICHT-FIRST mit
+// SmartFox-Fallback auf. Frueher war diese Logik in solar-live UND in
+// getGroupLiveData dupliziert -> die Kopien drifteten (getGroupLiveData
+// hatte keinen Fallback -> Ueberschuss=0 bei totem r9-haupt). Jetzt genau
+// hier. solar-live, getGroupLiveData und der MQTT-Publisher (energy/r9/solar/*)
+// lesen alle DIESES Ergebnis.
+// Konvention grid_w: >0 = Bezug, <0 = Einspeisung/Lieferung.
+function resolveR9GridProduction() {
+  const now = Date.now();
+  const fresh = (ts) => ts && (now - new Date(ts).getTime() < 120000);
+
+  // Produktion: geeichter r9-produktion (power_w < 0 = Produktion) -> SmartFox-WR-Summe
+  const prod = latestReadings.get('r9-produktion');
+  let production_w, production_source;
+  if (prod && fresh(prod.ts)) { production_w = Math.max(0, -(prod.power_w || 0)); production_source = 'geeicht'; }
+  else if (smartfoxSolar && fresh(smartfoxSolar.ts)) { production_w = Math.max(0, smartfoxSolar.production_w || 0); production_source = 'smartfox'; }
+  else { production_w = 0; production_source = 'none'; }
+
+  // Netz: geeichter Hauptzaehler r9-haupt (>0 Bezug, <0 Lieferung, direkt) -> SmartFox -> none
+  const haupt = latestReadings.get('r9-haupt');
+  let grid_w, grid_source, grid_ts;
+  if (haupt && fresh(haupt.ts)) { grid_w = haupt.power_w || 0; grid_source = 'geeicht'; grid_ts = haupt.ts; }
+  else if (smartfoxSolar && fresh(smartfoxSolar.ts)) { grid_w = smartfoxSolar.grid_w || 0; grid_source = 'smartfox'; grid_ts = smartfoxSolar.ts; }
+  else { grid_w = 0; grid_source = 'none'; grid_ts = null; }
+
+  return { grid_w, grid_source, grid_ts, production_w, production_source };
+}
+
+// Publiziert die aufgeloesten Solar-Werte RETAINED nach MQTT (energy/r9/solar/*),
+// damit externe Verbraucher (ioBroker, Shelly-Scripts, Dashboards) EINE gemeinsame,
+// bereits fallback-aufgeloeste Quelle abonnieren koennen — statt die Fallback-Logik
+// selbst zu duplizieren. source/ts im Payload -> Leser sieht Herkunft + Frische.
+function publishSolarDerived() {
+  try {
+    if (!mqttClient || !mqttClient.connected) return;
+    const { grid_w, grid_source, production_w } = resolveR9GridProduction();
+    const surplus_w = Math.max(0, -grid_w);
+    const base = `${MQTT_PREFIX}/r9/solar`;
+    const opt = { retain: true };
+    mqttClient.publish(`${base}/grid_w`, String(Math.round(grid_w)), opt);       // >0 Bezug, <0 Einspeisung
+    mqttClient.publish(`${base}/production_w`, String(Math.round(production_w)), opt);
+    mqttClient.publish(`${base}/surplus_w`, String(Math.round(surplus_w)), opt); // = max(0, -grid_w)
+    mqttClient.publish(`${base}/source`, grid_source, opt);                       // geeicht|smartfox|none
+    mqttClient.publish(`${base}/ts`, String(Date.now()), opt);
+  } catch (e) { console.error('publishSolarDerived:', e.message); }
+}
+
 // Aggregierte Solar-Live-Ansicht Rosenweg 9 (Fluss-Diagramm-Daten).
 // GEEICHT-FIRST mit SmartFox-Fallback: Produktion bevorzugt vom geeichten
 // Zaehler r9-produktion; Netz bevorzugt vom geeichten Hauptzaehler r9-haupt
@@ -858,26 +906,8 @@ app.get('/api/energy/solar-live', (req, res) => {
   const now = Date.now();
   const freshTs = (ts) => ts && (now - new Date(ts).getTime() < FRESH_MS);
 
-  // Produktion: geeicht (power_w < 0 = Produktion) -> sonst SmartFox-WR-Summe
-  const prod = latestReadings.get('r9-produktion');
-  let production_w, production_source;
-  if (prod && freshTs(prod.ts)) {
-    production_w = Math.max(0, -(prod.power_w || 0));
-    production_source = 'geeicht';
-  } else if (smartfoxSolar && freshTs(smartfoxSolar.ts)) {
-    production_w = Math.max(0, smartfoxSolar.production_w || 0);
-    production_source = 'smartfox';
-  } else { production_w = 0; production_source = 'none'; }
-
-  // Netz: geeichter Hauptzaehler r9-haupt bevorzugt (>0 Bezug, <0 Lieferung;
-  // direkt, kein Negieren) -> sonst SmartFox-Fallback -> sonst none.
-  const haupt = latestReadings.get('r9-haupt');
-  let grid_w, grid_source;
-  if (haupt && freshTs(haupt.ts)) {
-    grid_w = haupt.power_w || 0; grid_source = 'geeicht';
-  } else if (smartfoxSolar && freshTs(smartfoxSolar.ts)) {
-    grid_w = smartfoxSolar.grid_w || 0; grid_source = 'smartfox';
-  } else { grid_w = 0; grid_source = 'none'; }
+  // Netz + Produktion aus dem zentralen Resolver (geeicht-first, SmartFox-Fallback).
+  const { grid_w, grid_source, production_w, production_source } = resolveR9GridProduction();
 
   const consumption_w = Math.max(0, production_w + grid_w);
   const self_pct = production_w > 0 ? Math.round(consumption_w / production_w * 100) : 0;
@@ -1481,28 +1511,23 @@ async function getGroupLiveData(group) {
 
   let grid_w = null, production_w = null, heizstab_w = null, grid_ts = null;
   const consumers = [];
-  const now = Date.now();
-  const freshTs = (ts) => ts && (now - new Date(ts).getTime() < 120000);
+
+  // Grid + Produktion aus dem zentralen Resolver (geeicht-first, SmartFox-Fallback).
+  // Nur fuer r9 verfuegbar; andere Gruppen fallen unten auf die Meter-Kategorien zurueck.
+  if (group === 'r9') {
+    const r = resolveR9GridProduction();
+    if (r.grid_source !== 'none') { grid_w = Math.round(r.grid_w); grid_ts = r.grid_ts; }
+    if (r.production_source !== 'none') production_w = Math.round(r.production_w);
+  }
 
   for (const m of meters.rows) {
     const live = latestReadings.get(m.id);
     const power = live ? Math.round(live.power_w || 0) : 0;
-    const fresh = !!(live && freshTs(live.ts));
-    // Grid/Produktion NUR mit frischen geeichten Werten uebernehmen; sonst greift unten
-    // der SmartFox-Fallback. Sonst regelt die Ueberschuss-Steuerung auf einen VERALTETEN
-    // r9-haupt-Wert (z.B. bei totem Hauptzaehler -> falscher/0-Ueberschuss trotz PV).
-    if (m.category === 'grid') { if (fresh) { grid_w = power; grid_ts = live.ts; } }
-    else if (m.category === 'production') { if (fresh) production_w = Math.abs(power); }
-    else if (m.id.includes('heizstab')) { heizstab_w = power; }
+    if (m.id.includes('heizstab')) { heizstab_w = power; }
     else if (m.category === 'consumer') { consumers.push({ id: m.id, name: m.name, power_w: power }); }
-  }
-
-  // Fallback SmartFox, wenn kein FRISCHER geeichter Grid-/Produktionswert vorliegt
-  // (z.B. r9-haupt/produktion tot). Gleiche Vorzeichen-Konvention wie geeicht
-  // (grid_w: <0 Einspeisung, >0 Bezug; 2026-06-16 verifiziert). Nur Gruppe r9.
-  if (group === 'r9' && smartfoxSolar && freshTs(smartfoxSolar.ts)) {
-    if (grid_w === null) { grid_w = Math.round(smartfoxSolar.grid_w || 0); grid_ts = smartfoxSolar.ts; }
-    if (production_w === null) production_w = Math.round(smartfoxSolar.production_w || 0);
+    // Andere Gruppen (kein r9-Resolver): grid/production direkt aus den Kategorien
+    else if (group !== 'r9' && m.category === 'grid') { grid_w = power; grid_ts = live?.ts || null; }
+    else if (group !== 'r9' && m.category === 'production') { production_w = Math.abs(power); }
   }
 
   return { grid_w, production_w, heizstab_w, consumers, timestamp: grid_ts };
@@ -1886,6 +1911,10 @@ async function start() {
 
   // Cleanup old data daily at 3am
   setInterval(cleanupOldData, 24 * 60 * 60 * 1000);
+
+  // Aufgeloeste Solar-Werte alle 5s retained nach MQTT (energy/r9/solar/*)
+  setInterval(publishSolarDerived, 5000);
+  setTimeout(publishSolarDerived, 3000); // erster Publish kurz nach Start
 
   // Start API
   app.listen(API_PORT, () => {
