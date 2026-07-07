@@ -1485,10 +1485,22 @@ async function getGroupLiveData(group) {
   for (const m of meters.rows) {
     const live = latestReadings.get(m.id);
     const power = live ? Math.round(live.power_w || 0) : 0;
-    if (m.category === 'grid') { grid_w = power; grid_ts = live?.ts; }
-    else if (m.category === 'production') { production_w = Math.abs(power); }
+    const fresh = !!(live && freshTs(live.ts));
+    // Grid/Produktion NUR mit frischen geeichten Werten uebernehmen; sonst greift unten
+    // der SmartFox-Fallback. Sonst regelt die Ueberschuss-Steuerung auf einen VERALTETEN
+    // r9-haupt-Wert (z.B. bei totem Hauptzaehler -> falscher/0-Ueberschuss trotz PV).
+    if (m.category === 'grid') { if (fresh) { grid_w = power; grid_ts = live.ts; } }
+    else if (m.category === 'production') { if (fresh) production_w = Math.abs(power); }
     else if (m.id.includes('heizstab')) { heizstab_w = power; }
     else if (m.category === 'consumer') { consumers.push({ id: m.id, name: m.name, power_w: power }); }
+  }
+
+  // Fallback SmartFox, wenn kein FRISCHER geeichter Grid-/Produktionswert vorliegt
+  // (z.B. r9-haupt/produktion tot). Gleiche Vorzeichen-Konvention wie geeicht
+  // (grid_w: <0 Einspeisung, >0 Bezug; 2026-06-16 verifiziert). Nur Gruppe r9.
+  if (group === 'r9' && smartfoxSolar && freshTs(smartfoxSolar.ts)) {
+    if (grid_w === null) { grid_w = Math.round(smartfoxSolar.grid_w || 0); grid_ts = smartfoxSolar.ts; }
+    if (production_w === null) production_w = Math.round(smartfoxSolar.production_w || 0);
   }
 
   return { grid_w, production_w, heizstab_w, consumers, timestamp: grid_ts };
