@@ -1481,6 +1481,8 @@ async function getGroupLiveData(group) {
 
   let grid_w = null, production_w = null, heizstab_w = null, grid_ts = null;
   const consumers = [];
+  const now = Date.now();
+  const freshTs = (ts) => ts && (now - new Date(ts).getTime() < 120000);
 
   for (const m of meters.rows) {
     const live = latestReadings.get(m.id);
