@@ -1544,11 +1544,11 @@ app.get('/api/energy/surplus', openCors, async (req, res) => {
   try {
     const group = req.query.group || 'r9';
     const data = await getGroupLiveData(group);
-    if (data.grid_w === null) return res.status(503).json({ error: 'No live data' });
-
-    const surplus_w = Math.max(0, -data.grid_w);
+    // Immer gleich bedienen (HTTP 200); keine frische Netz-Quelle -> grid_w=0 -> surplus=0.
+    const grid_w = data.grid_w === null ? 0 : data.grid_w;
+    const surplus_w = Math.max(0, -grid_w);
     const result = {
-      surplus_w, grid_power_w: data.grid_w, production_w: data.production_w,
+      surplus_w, grid_power_w: grid_w, production_w: data.production_w,
       heizstab_w: data.heizstab_w, consumers: data.consumers,
       timestamp: data.timestamp, group,
     };
@@ -1571,12 +1571,12 @@ app.get('/api/energy/surplus-available', openCors, async (req, res) => {
   try {
     const group = req.query.group || 'r9';
     const data = await getGroupLiveData(group);
-    if (data.grid_w === null) return res.status(503).json({ error: 'No live data' });
-
+    // Immer gleich bedienen (HTTP 200); keine frische Netz-Quelle -> grid_w=0 -> surplus=0.
+    const grid_w = data.grid_w === null ? 0 : data.grid_w;
     const heizstab = data.heizstab_w || 0;
-    const surplus_w = Math.max(0, -data.grid_w) + heizstab;
+    const surplus_w = Math.max(0, -grid_w) + heizstab;
     const result = {
-      surplus_w, grid_power_w: data.grid_w, heizstab_w: heizstab,
+      surplus_w, grid_power_w: grid_w, heizstab_w: heizstab,
       production_w: data.production_w, consumers: data.consumers,
       timestamp: data.timestamp, group,
     };
@@ -1597,9 +1597,9 @@ app.get('/api/energy/lametric', openCors, async (req, res) => {
   try {
     const group = req.query.group || 'r9';
     const data = await getGroupLiveData(group);
-    if (data.grid_w === null) return res.status(503).json({ error: 'No live data' });
-
-    const surplus_w = Math.max(0, -data.grid_w);
+    // Immer gleich bedienen (HTTP 200); keine frische Netz-Quelle -> grid_w=0 -> surplus=0.
+    const grid_w = data.grid_w === null ? 0 : data.grid_w;
+    const surplus_w = Math.max(0, -grid_w);
     const heizstab = data.heizstab_w || 0;
     const surplus_available = surplus_w + heizstab;
 
@@ -1607,7 +1607,7 @@ app.get('/api/energy/lametric', openCors, async (req, res) => {
       surplus_w: { val: surplus_w, icon: 'i67405', label: 'Ueberschuss' },
       surplus_available_w: { val: surplus_available, icon: 'i67405', label: 'Verfuegbar' },
       production_w: { val: data.production_w || 0, icon: 'i37515', label: 'Solar' },
-      grid_power_w: { val: data.grid_w, icon: data.grid_w < 0 ? 'i64129' : 'i59257', label: 'Netz' },
+      grid_power_w: { val: grid_w, icon: grid_w < 0 ? 'i64129' : 'i59257', label: 'Netz' },
       heizstab_w: { val: heizstab, icon: 'i52509', label: 'Heizstab' },
     };
 
@@ -1642,8 +1642,12 @@ app.get('/api/energy/shelly', openCors, async (req, res) => {
     const group = req.query.group || 'r9';
     const variant = (req.query.variant || 'surplus').toLowerCase();
     const data = await getGroupLiveData(group);
-    if (data.grid_w === null) return res.status(503).json({ error: 'No live data' });
-    const surplus_w = Math.max(0, -data.grid_w);
+    // Endpoint MUSS immer gleich bedienen (HTTP 200 + volles JSON, wie der Shelly es
+    // erwartet). Ist KEINE frische Netz-Quelle da (r9-haupt UND SmartFox tot) ->
+    // grid_w=0 -> surplus=0 (sichere Richtung: ohne bestaetigten Ueberschuss wird
+    // kein Verbraucher eingeschaltet). Kein 503 mehr.
+    const grid_w = data.grid_w === null ? 0 : data.grid_w;
+    const surplus_w = Math.max(0, -grid_w);
     const heizstab_w = data.heizstab_w || 0;
     const surplus_available_w = surplus_w + heizstab_w;
     const production_w = data.production_w || 0;
@@ -1662,12 +1666,12 @@ app.get('/api/energy/shelly', openCors, async (req, res) => {
       production: {
         a: { label: 'Solar-Produktion', w: production_w },
         b: { label: 'Verbrauch',        w: consumption_w },
-        c: { label: 'Netz-Bezug',       w: Math.max(0, data.grid_w) },
+        c: { label: 'Netz-Bezug',       w: Math.max(0, grid_w) },
       },
       grid: {
-        a: { label: 'Einspeisung',  w: Math.max(0, -data.grid_w) },
-        b: { label: 'Netz-Bezug',   w: Math.max(0, data.grid_w) },
-        c: { label: 'Netto-Bilanz', w: data.grid_w },
+        a: { label: 'Einspeisung',  w: Math.max(0, -grid_w) },
+        b: { label: 'Netz-Bezug',   w: Math.max(0, grid_w) },
+        c: { label: 'Netto-Bilanz', w: grid_w },
       },
       // Single-Wert Varianten fuer Shelly Plus 1PM Emulation
       // (jeweils nur Phase A populiert, B+C = 0)
@@ -1703,7 +1707,7 @@ app.get('/api/energy/shelly', openCors, async (req, res) => {
       // Rohwerte fuer eigene Mappings
       production_w,
       consumption_w,
-      grid_w: data.grid_w,
+      grid_w,
       heizstab_w,
       battery_soc: data.battery_soc != null ? data.battery_soc : null,
     });
