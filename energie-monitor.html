@@ -868,13 +868,17 @@
         try {
             const daysMap = { week: 7, month: 30, quarter: 90, year: 365 };
             const days = daysMap[consumptionPeriod] || 30;
-            const toParam = isLive ? '' : `&to=${selectedDate.toISOString().slice(0, 10)}`;
+            // Aus dem Langzeit-Rollup (readings_hourly, haelt Monate/Jahre + schnell) statt
+            // Rohdaten (nur letzte 30 Tage). Felder day/consumption_kwh/export_kwh identisch.
+            const toDate = isLive ? new Date() : new Date(selectedDate.toISOString().slice(0, 10) + 'T23:59:59');
+            const fromDate = new Date(toDate.getTime() - days * 86400000);
+            const rurl = (id) => `${API}/rollup/${id}?from=${fromDate.toISOString()}&to=${toDate.toISOString()}&bucket=day`;
 
-            // Load meter daily + reference meters daily in parallel for solar split
+            // Load meter + reference meters (rollup, daily) in parallel for solar split
             const [meterRes, hauptRes, prodRes] = await Promise.all([
-                fetch(`${API}/daily/${currentMeter}?days=${days}${toParam}`),
-                gridMeterId ? fetch(`${API}/daily/${gridMeterId}?days=${days}${toParam}`) : null,
-                prodMeterId ? fetch(`${API}/daily/${prodMeterId}?days=${days}${toParam}`) : null,
+                fetch(rurl(currentMeter)),
+                gridMeterId ? fetch(rurl(gridMeterId)) : null,
+                prodMeterId ? fetch(rurl(prodMeterId)) : null,
             ]);
             const data = await meterRes.json();
             const hauptData = hauptRes ? await hauptRes.json() : [];
