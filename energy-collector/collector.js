@@ -1784,11 +1784,12 @@ app.get('/api/energy/compare', async (req, res) => {
     if (meterIds.length === 0) return res.status(400).json({ error: 'meters parameter required' });
     if (meterIds.length > 10) return res.status(400).json({ error: 'max 10 meters' });
 
+    // Aus dem schnellen Stunden-Rollup (nicht Rohdaten) -> Langzeit-Vergleich + schnell.
     const result = await pool.query(
-      `SELECT meter_id, date_trunc('day', ts)::date AS day,
-        MAX(energy_import_kwh) - MIN(energy_import_kwh) AS consumption_kwh
-       FROM readings
-       WHERE meter_id = ANY($1) AND ts >= NOW() - ($2 || ' days')::interval
+      `SELECT meter_id, date_trunc('day', hour)::date AS day,
+        SUM(consumption_kwh) AS consumption_kwh
+       FROM readings_hourly
+       WHERE meter_id = ANY($1) AND hour >= NOW() - ($2 || ' days')::interval
        GROUP BY meter_id, day
        ORDER BY day, meter_id`,
       [meterIds, String(days)]
