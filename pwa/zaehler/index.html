@@ -382,15 +382,14 @@
         setHint('Lädt …');
         try {
             let rows;
-            if (days <= 7.5) {
-                // Kurze Zeiträume: Leistungskurve (W) aus /history (server-seitig gebucketet)
+            if (days <= 2) {
+                // Kurz (≤2 Tage): feine Leistungskurve (W) aus /history (Rohdaten, gebucketet)
                 const r = await fetchT(`${API}/history/${id}?from=${fromISO}&to=${toISO}&limit=1500`);
                 rows = r.ok ? await r.json() : [];
                 renderPowerChart(rows, days);
             } else {
-                // Lange Zeiträume: Tagesverbrauch (kWh) aus /daily
-                const nd = Math.ceil(days);
-                const r = await fetchT(`${API}/daily/${id}?days=${nd}`);
+                // Länger: Tagesverbrauch (kWh) aus dem schnellen Stunden-Rollup (hält Monate)
+                const r = await fetchT(`${API}/rollup/${id}?from=${fromISO}&to=${toISO}&bucket=day`);
                 rows = r.ok ? await r.json() : [];
                 renderDailyChart(rows, days);
             }

@@ -314,28 +314,29 @@ async function initDB() {
       CREATE INDEX IF NOT EXISTS idx_readings_meter_ts ON readings(meter_id, ts DESC);
       CREATE INDEX IF NOT EXISTS idx_readings_ts ON readings(ts DESC);
 
-      -- Hourly aggregation view
-      CREATE MATERIALIZED VIEW IF NOT EXISTS readings_hourly AS
-        SELECT
-          meter_id,
-          date_trunc('hour', ts) AS hour,
-          AVG(power_w) AS avg_power_w,
-          MAX(power_w) AS max_power_w,
-          MIN(power_w) AS min_power_w,
-          AVG(voltage_l1_v) AS avg_voltage_l1,
-          AVG(voltage_l2_v) AS avg_voltage_l2,
-          AVG(voltage_l3_v) AS avg_voltage_l3,
-          MAX(energy_import_kwh) - MIN(energy_import_kwh) AS consumption_kwh,
-          MAX(energy_export_kwh) - MIN(energy_export_kwh) AS export_kwh,
-          MAX(energy_import_t1_kwh) - MIN(energy_import_t1_kwh) AS consumption_t1_kwh,
-          MAX(energy_import_t2_kwh) - MIN(energy_import_t2_kwh) AS consumption_t2_kwh,
-          COUNT(*) AS sample_count
-        FROM readings
-        GROUP BY meter_id, date_trunc('hour', ts)
-      WITH NO DATA;
+      -- Stundengenaues Rollup. FRUEHER eine Materialized View (Full-Refresh aus readings) —
+      -- das skalierte nicht (bei Mio Zeilen brach der Refresh im Timeout ab -> View eingefroren).
+      -- JETZT eine regulaere Tabelle, die rollupHourly() inkrementell per UPSERT pflegt:
+      -- bleibt aktuell UND haelt Langzeit-Historie unabhaengig von der Roh-Retention (30 Tage).
+      CREATE TABLE IF NOT EXISTS readings_hourly (
+        meter_id VARCHAR(100) NOT NULL,
+        hour TIMESTAMP NOT NULL,
+        avg_power_w DOUBLE PRECISION,
+        max_power_w DOUBLE PRECISION,
+        min_power_w DOUBLE PRECISION,
+        avg_voltage_l1 DOUBLE PRECISION,
+        avg_voltage_l2 DOUBLE PRECISION,
+        avg_voltage_l3 DOUBLE PRECISION,
+        consumption_kwh DOUBLE PRECISION,
+        export_kwh DOUBLE PRECISION,
+        consumption_t1_kwh DOUBLE PRECISION,
+        consumption_t2_kwh DOUBLE PRECISION,
+        sample_count BIGINT
+      );
 
       CREATE UNIQUE INDEX IF NOT EXISTS idx_readings_hourly_pk
         ON readings_hourly(meter_id, hour);
+      CREATE INDEX IF NOT EXISTS idx_readings_hourly_hour ON readings_hourly(hour);
 
       -- Migration: add location column if missing
       ALTER TABLE meters ADD COLUMN IF NOT EXISTS location VARCHAR(255);
@@ -692,28 +693,56 @@ async function pollAll() {
 }
 
 // Refresh materialized view every 5 minutes
-async function refreshHourlyView() {
+// Inkrementelles Stunden-Rollup: UPSERT der letzten ~3 Stunden aus den Rohdaten in
+// readings_hourly. Billig (nur wenige Stunden Rohdaten) und IMMER aktuell — ersetzt den
+// frueheren teuren Full-Refresh der Materialized View (der bei Mio Zeilen im Timeout
+// abbrach und die View einfrieren liess).
+async function rollupHourly(sinceHours = 3) {
   try {
-    await pool.query('REFRESH MATERIALIZED VIEW CONCURRENTLY readings_hourly');
-  } catch (err) {
-    // First refresh must be non-concurrent
-    try {
-      await pool.query('REFRESH MATERIALIZED VIEW readings_hourly');
-    } catch (e) {
-      console.error('Hourly view refresh error:', e.message);
-    }
+    await pool.query(`
+      INSERT INTO readings_hourly (meter_id, hour, avg_power_w, max_power_w, min_power_w,
+        avg_voltage_l1, avg_voltage_l2, avg_voltage_l3,
+        consumption_kwh, export_kwh, consumption_t1_kwh, consumption_t2_kwh, sample_count)
+      SELECT meter_id, date_trunc('hour', ts) AS hour,
+        AVG(power_w), MAX(power_w), MIN(power_w),
+        AVG(voltage_l1_v), AVG(voltage_l2_v), AVG(voltage_l3_v),
+        MAX(energy_import_kwh) - MIN(energy_import_kwh),
+        MAX(energy_export_kwh) - MIN(energy_export_kwh),
+        MAX(energy_import_t1_kwh) - MIN(energy_import_t1_kwh),
+        MAX(energy_import_t2_kwh) - MIN(energy_import_t2_kwh),
+        COUNT(*)
+      FROM readings
+      WHERE ts >= date_trunc('hour', NOW()) - ($1 || ' hours')::interval
+      GROUP BY meter_id, date_trunc('hour', ts)
+      ON CONFLICT (meter_id, hour) DO UPDATE SET
+        avg_power_w = EXCLUDED.avg_power_w, max_power_w = EXCLUDED.max_power_w, min_power_w = EXCLUDED.min_power_w,
+        avg_voltage_l1 = EXCLUDED.avg_voltage_l1, avg_voltage_l2 = EXCLUDED.avg_voltage_l2, avg_voltage_l3 = EXCLUDED.avg_voltage_l3,
+        consumption_kwh = EXCLUDED.consumption_kwh, export_kwh = EXCLUDED.export_kwh,
+        consumption_t1_kwh = EXCLUDED.consumption_t1_kwh, consumption_t2_kwh = EXCLUDED.consumption_t2_kwh,
+        sample_count = EXCLUDED.sample_count
+    `, [String(sinceHours)]);
+  } catch (e) {
+    console.error('rollupHourly error:', e.message);
   }
 }
 
 // Cleanup old raw data (keep 7 days, hourly aggregates stay)
+const RAW_RETENTION_DAYS = parseInt(process.env.RAW_RETENTION_DAYS, 10) || 30;
+// Rohdaten-Retention: alles aelter als RAW_RETENTION_DAYS loeschen. BATCHWEISE (LIMIT via
+// ctid-Subselect), damit auf langsamem Storage kein Riesen-Lock/WAL-Berg entsteht. Die
+// Langzeit-Historie lebt im Stunden-Rollup (readings_hourly), NICHT in den Rohdaten.
 async function cleanupOldData() {
   try {
-    const result = await pool.query(
-      "DELETE FROM readings WHERE ts < NOW() - INTERVAL '7 days'"
-    );
-    if (result.rowCount > 0) {
-      console.log(`Cleaned up ${result.rowCount} old readings`);
-    }
+    let total = 0, n = 0, guard = 0;
+    do {
+      const r = await pool.query(
+        `DELETE FROM readings WHERE ctid IN (
+           SELECT ctid FROM readings WHERE ts < NOW() - ($1 || ' days')::interval LIMIT 20000
+         )`, [String(RAW_RETENTION_DAYS)]);
+      n = r.rowCount || 0; total += n;
+      if (n) await new Promise(r => setTimeout(r, 250)); // dem Storage Luft lassen
+    } while (n === 20000 && ++guard < 5000);
+    if (total > 0) console.log(`Cleaned up ${total} old readings (> ${RAW_RETENTION_DAYS}d)`);
   } catch (err) {
     console.error('Cleanup error:', err.message);
   }
@@ -1181,6 +1210,37 @@ app.get('/api/energy/today/:meterId', async (req, res) => {
   const rows = result.rows[0] ? [result.rows[0]] : [];
   await subtractChildrenAgg(meterId, rows, todayQuery, dayStart.toISOString(), dayEnd.toISOString(), null);
   res.json(rows[0] || {});
+});
+
+// Langzeit-Verlauf aus dem Stunden-Rollup (readings_hourly) — SCHNELL und haelt Monate an
+// Historie (unabhaengig von der 30-Tage-Rohdaten-Retention). bucket=day (Default) | hour.
+// day: SUM(consumption_kwh) je Tag (fuer Balken); hour: Stundenwerte inkl. avg_power_w.
+app.get('/api/energy/rollup/:meterId', async (req, res) => {
+  const { meterId } = req.params;
+  const { from, to } = req.query;
+  const bucket = (req.query.bucket === 'hour') ? 'hour' : 'day';
+  const fromDate = from || new Date(Date.now() - 30 * 86400000).toISOString();
+  const toDate = to || new Date().toISOString();
+  try {
+    let result;
+    if (bucket === 'hour') {
+      result = await pool.query(
+        `SELECT hour AS ts, avg_power_w AS power_w, max_power_w, consumption_kwh, export_kwh
+         FROM readings_hourly WHERE meter_id = $1 AND hour >= $2 AND hour <= $3 ORDER BY hour`,
+        [meterId, fromDate, toDate]);
+    } else {
+      result = await pool.query(
+        `SELECT date_trunc('day', hour)::date AS day,
+           SUM(consumption_kwh) AS consumption_kwh, SUM(export_kwh) AS export_kwh,
+           AVG(avg_power_w) AS avg_power_w, MAX(max_power_w) AS max_power_w
+         FROM readings_hourly WHERE meter_id = $1 AND hour >= $2 AND hour <= $3
+         GROUP BY day ORDER BY day`,
+        [meterId, fromDate, toDate]);
+    }
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1743,12 +1803,12 @@ app.get('/api/energy/compare', async (req, res) => {
 app.get('/api/energy/projection/:meterId', async (req, res) => {
   try {
     const { meterId } = req.params;
-    // Get last 30 days daily consumption
+    // Letzte 30 Tage Tagesverbrauch — aus dem schnellen Stunden-Rollup (nicht Rohdaten).
     const result = await pool.query(
-      `SELECT date_trunc('day', ts)::date AS day,
-        MAX(energy_import_kwh) - MIN(energy_import_kwh) AS consumption_kwh
-       FROM readings
-       WHERE meter_id = $1 AND ts >= NOW() - interval '30 days'
+      `SELECT date_trunc('day', hour)::date AS day,
+        SUM(consumption_kwh) AS consumption_kwh
+       FROM readings_hourly
+       WHERE meter_id = $1 AND hour >= NOW() - interval '30 days'
        GROUP BY day ORDER BY day`,
       [meterId]
     );
@@ -1774,13 +1834,13 @@ app.get('/api/energy/projection/:meterId', async (req, res) => {
       const prod = await pool.query("SELECT id FROM meters WHERE group_id = $1 AND category = 'production'", [gid]);
       if (grid.rows.length > 0 && prod.rows.length > 0) {
         const gridDaily = await pool.query(
-          `SELECT MAX(energy_import_kwh) - MIN(energy_import_kwh) AS import, MAX(energy_export_kwh) - MIN(energy_export_kwh) AS export
-           FROM readings WHERE meter_id = $1 AND ts >= NOW() - interval '30 days'`,
+          `SELECT SUM(consumption_kwh) AS import, SUM(export_kwh) AS export
+           FROM readings_hourly WHERE meter_id = $1 AND hour >= NOW() - interval '30 days'`,
           [grid.rows[0].id]
         );
         const prodDaily = await pool.query(
-          `SELECT MAX(energy_export_kwh) - MIN(energy_export_kwh) AS production
-           FROM readings WHERE meter_id = $1 AND ts >= NOW() - interval '30 days'`,
+          `SELECT SUM(export_kwh) AS production
+           FROM readings_hourly WHERE meter_id = $1 AND hour >= NOW() - interval '30 days'`,
           [prod.rows[0].id]
         );
         const gridImport = parseFloat(gridDaily.rows[0]?.import || 0);
@@ -1909,12 +1969,14 @@ async function start() {
   pollAll(); // immediate first poll
   setInterval(pollAll, POLL_INTERVAL);
 
-  // Refresh hourly view every 5 minutes
-  setInterval(refreshHourlyView, 5 * 60 * 1000);
-  setTimeout(refreshHourlyView, 30 * 1000); // first refresh after 30s
+  // Stunden-Rollup inkrementell alle 5 min (UPSERT letzte Stunden) + kurz nach Start
+  setInterval(rollupHourly, 5 * 60 * 1000);
+  setTimeout(rollupHourly, 30 * 1000);
 
-  // Cleanup old data daily at 3am
+  // Cleanup: taeglich + einmal ~2 min nach Start (der 24h-Timer allein lief bei haeufigen
+  // Restarts nie -> Rohtabelle wuchs unbegrenzt; Startlauf stellt Retention zuverlaessig her)
   setInterval(cleanupOldData, 24 * 60 * 60 * 1000);
+  setTimeout(cleanupOldData, 120 * 1000);
 
   // Aufgeloeste Solar-Werte alle 5s retained nach MQTT (energy/r9/solar/*)
   setInterval(publishSolarDerived, 5000);
