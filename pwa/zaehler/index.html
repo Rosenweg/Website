@@ -65,6 +65,30 @@
         .chartbox { position: relative; height: 300px; }
         .hint { color: #64748b; text-align: center; font-size: .85rem; padding: 1.5rem 0; }
         .backlink { display: inline-flex; align-items: center; gap: .3rem; color: #fff; font-weight: 600; font-size: .85rem; text-decoration: none; margin-bottom: .6rem; opacity: .95; }
+
+        /* Untere Kennzahlen im Kopf (Verbrauch heute / Zählerstand) */
+        .subrow { display: flex; gap: 1.6rem; margin-top: .8rem; border-top: 1px solid #f1f5f9; padding-top: .7rem; }
+        .subrow .sv { font-weight: 800; color: #0f172a; font-size: 1.05rem; line-height: 1; }
+        .subrow .sl { font-size: .72rem; color: #64748b; margin-top: .25rem; }
+
+        .ctitle { font-weight: 700; color: #0f172a; font-size: .95rem; margin-bottom: .7rem; }
+
+        /* Phasenverteilung */
+        .phasebox { position: relative; height: 150px; max-width: 200px; margin: 0 auto .5rem; }
+        .phaserow { display: flex; align-items: center; gap: .6rem; padding: .45rem 0; border-top: 1px solid #f1f5f9; font-size: .88rem; }
+        .phaserow:first-child { border-top: none; }
+        .phaserow .pn { font-weight: 800; width: 1.7rem; }
+        .phaserow .pd { color: #64748b; font-size: .78rem; }
+        .phaserow .pw { font-weight: 700; color: #0f172a; margin-left: auto; }
+
+        /* Kosten-Prognose */
+        .projcard { background: linear-gradient(135deg, #fff7ed 0%, #fffbeb 100%); border: 1px solid #fed7aa; }
+        .projgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: .8rem; }
+        .projgrid .pv { font-weight: 800; color: #9a3412; font-size: 1.1rem; line-height: 1.1; }
+        .projgrid .pc { font-weight: 700; color: #c2410c; font-size: .85rem; margin-top: .1rem; }
+        .projgrid .pl { font-size: .72rem; color: #9a3412; opacity: .8; margin-top: .2rem; }
+        .solbar { height: 6px; background: #fde68a; border-radius: 99px; overflow: hidden; margin-top: .35rem; }
+        .solbar > div { height: 100%; background: #16a34a; transition: width .4s; }
     </style>
 </head>
 <body>
@@ -103,9 +127,20 @@
                     </div>
                     <div class="live">
                         <div class="big" id="dPower">– W</div>
-                        <div class="sub" id="dReading">Zählerstand: –</div>
+                        <div class="sub" style="font-size:.72rem;color:#94a3b8">aktuelle Leistung</div>
                     </div>
                 </div>
+                <div class="subrow">
+                    <div class="s"><div class="sv" id="dToday">–</div><div class="sl">Verbrauch heute</div></div>
+                    <div class="s"><div class="sv" id="dReading">–</div><div class="sl">Zählerstand</div></div>
+                </div>
+            </div>
+
+            <!-- Phasenverteilung (nur wenn der Zähler Phasenwerte liefert) -->
+            <div class="card" id="phaseCard" style="display:none">
+                <div class="ctitle">Phasenverteilung</div>
+                <div class="phasebox"><canvas id="phaseChart"></canvas></div>
+                <div id="phaseList"></div>
             </div>
 
             <div class="ranges" id="ranges">
@@ -125,13 +160,24 @@
                 <div class="chartbox"><canvas id="chart"></canvas></div>
                 <div class="hint" id="chartHint" style="display:none">Keine Daten im gewählten Zeitraum.</div>
             </div>
+
+            <!-- Kosten-Prognose (Basis: 30 Tage) -->
+            <div class="card projcard" id="projCard" style="display:none">
+                <div class="ctitle">Kosten-Prognose <span id="projDays" style="font-weight:400;color:#9a3412;font-size:.72rem"></span></div>
+                <div class="projgrid">
+                    <div><div class="pv" id="pjDaily">–</div><div class="pl">Ø Tagesverbrauch</div></div>
+                    <div><div class="pv" id="pjMonth">–</div><div class="pc" id="pjMonthC"></div><div class="pl">Monats-Prognose</div></div>
+                    <div><div class="pv" id="pjYear">–</div><div class="pc" id="pjYearC"></div><div class="pl">Jahres-Prognose</div></div>
+                    <div><div class="pv" id="pjSolar" style="color:#16a34a">–</div><div class="pl">Solaranteil</div><div class="solbar"><div id="pjSolarBar" style="width:0%"></div></div></div>
+                </div>
+            </div>
         </div>
     </div>
 
     <script src="/js/authentik-auth.js?v=2"></script>
     <script>
     const API = '/api/energy';
-    let USER = null, METERS = [], CURRENT = null, CHART = null, LIVE_TIMER = null, CUR_RANGE = '24h';
+    let USER = null, METERS = [], CURRENT = null, CHART = null, PHASE_CHART = null, LIVE_TIMER = null, CUR_RANGE = '24h', TODAY_TICK = 0;
 
     const $ = (id) => document.getElementById(id);
     const showErr = (m) => { const e = $('err'); e.textContent = m; e.style.display = 'block'; };
@@ -212,9 +258,14 @@
         $('liveBadge').style.display = 'inline-flex';
         $('dName').textContent = CURRENT.name || CURRENT.id;
         $('dCat').textContent = catLabel(CURRENT.category);
+        $('phaseCard').style.display = 'none';
+        $('projCard').style.display = 'none';
+        $('dToday').textContent = '–'; $('dReading').textContent = '–'; $('dPower').textContent = '…';
         window.scrollTo(0, 0);
         setRange('24h');
         startLive();
+        loadToday();
+        loadProjection();
     }
 
     function backToList() {
@@ -233,14 +284,69 @@
             if (!r.ok) { $('dPower').textContent = 'offline'; return; }
             const d = await r.json();
             $('dPower').textContent = Number.isFinite(d.power_w) ? fmtW(d.power_w) : 'offline';
-            const reading = d.energy_import_kwh;
-            $('dReading').textContent = Number.isFinite(reading)
-                ? 'Zählerstand: ' + reading.toFixed(1).replace('.', ',') + ' kWh'
-                : 'Zählerstand: –';
+            $('dReading').textContent = Number.isFinite(d.energy_import_kwh)
+                ? d.energy_import_kwh.toFixed(d.energy_import_kwh >= 100 ? 0 : 1).replace('.', ',') + ' kWh' : '–';
+            updatePhases(d);
+            if (TODAY_TICK++ % 3 === 0) loadToday(); // ~alle 30 s auffrischen
         } catch { $('dPower').textContent = 'offline'; }
     }
     function startLive() { stopLive(); pollLive(); LIVE_TIMER = setInterval(pollLive, 10000); }
     function stopLive() { if (LIVE_TIMER) clearInterval(LIVE_TIMER); LIVE_TIMER = null; }
+
+    // Phasenverteilung aus dem Live-Reading (nur wenn L1/L2/L3 vorhanden)
+    const PH_COLORS = ['#0ea5e9', '#8b5cf6', '#f59e0b'];
+    function updatePhases(d) {
+        const l1 = d.power_l1_w, l2 = d.power_l2_w, l3 = d.power_l3_w;
+        if (![l1, l2, l3].some(Number.isFinite)) { $('phaseCard').style.display = 'none'; return; }
+        $('phaseCard').style.display = 'block';
+        const a = [Math.abs(l1 || 0), Math.abs(l2 || 0), Math.abs(l3 || 0)];
+        if (!PHASE_CHART) {
+            PHASE_CHART = new Chart($('phaseChart'), {
+                type: 'doughnut',
+                data: { labels: ['L1', 'L2', 'L3'], datasets: [{ data: a, backgroundColor: PH_COLORS, borderWidth: 0 }] },
+                options: { responsive: true, maintainAspectRatio: false, cutout: '55%',
+                    plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+                        tooltip: { callbacks: { label: (c) => `${c.label}: ${Math.round(c.parsed)} W` } } } }
+            });
+        } else { PHASE_CHART.data.datasets[0].data = a; PHASE_CHART.update('none'); }
+        const rows = [['L1', l1, d.current_l1_a, d.pf_l1], ['L2', l2, d.current_l2_a, d.pf_l2], ['L3', l3, d.current_l3_a, d.pf_l3]];
+        $('phaseList').innerHTML = rows.map(([n, w, amp, pf], i) => {
+            const det = [Number.isFinite(amp) ? amp.toFixed(1) + ' A' : null, Number.isFinite(pf) ? 'pf ' + pf.toFixed(2) : null].filter(Boolean).join(' · ');
+            return `<div class="phaserow"><span class="pn" style="color:${PH_COLORS[i]}">${n}</span><span class="pd">${det}</span><span class="pw">${fmtW(w)}</span></div>`;
+        }).join('');
+    }
+
+    // Verbrauch heute
+    async function loadToday() {
+        if (!CURRENT) return;
+        try {
+            const r = await fetch(`${API}/today/${encodeURIComponent(CURRENT.id)}`);
+            if (!r.ok) return;
+            const t = await r.json();
+            $('dToday').textContent = Number.isFinite(t.consumption_kwh) ? fmtKwh(t.consumption_kwh) : '–';
+        } catch {}
+    }
+
+    // Kosten-Prognose (Basis 30 Tage) — Karte nur bei vorhandener Datenbasis
+    async function loadProjection() {
+        $('projCard').style.display = 'none';
+        if (!CURRENT) return;
+        try {
+            const r = await fetch(`${API}/projection/${encodeURIComponent(CURRENT.id)}`);
+            if (!r.ok) return;
+            const p = await r.json();
+            if (!p.avg_daily_kwh) return;
+            $('projDays').textContent = `· Basis ${p.days_analyzed} Tage`;
+            $('pjDaily').textContent = p.avg_daily_kwh + ' kWh';
+            $('pjMonth').textContent = p.projected_monthly_kwh + ' kWh';
+            $('pjMonthC').textContent = p.projected_monthly_cost > 0 ? 'CHF ' + p.projected_monthly_cost.toFixed(2) : '';
+            $('pjYear').textContent = p.projected_yearly_kwh + ' kWh';
+            $('pjYearC').textContent = p.projected_yearly_cost > 0 ? 'CHF ' + p.projected_yearly_cost.toFixed(2) : '';
+            $('pjSolar').textContent = p.solar_share_percent + ' %';
+            $('pjSolarBar').style.width = Math.min(100, p.solar_share_percent) + '%';
+            $('projCard').style.display = 'block';
+        } catch {}
+    }
 
     // ── Zeitraum + Chart ───────────────────────────────────────────
     function setRange(r) {

@@ -9,7 +9,7 @@
  *  - Sonstige GETs (Assets, CDN): stale-while-revalidate.
  */
 
-const CACHE = 'rosenweg-zaehler-v1';
+const CACHE = 'rosenweg-zaehler-v2';
 
 // App-Shell — alles was fuer den Offline-Start noetig ist.
 const SHELL = [
