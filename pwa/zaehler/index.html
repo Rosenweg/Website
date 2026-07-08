@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0f766e">
+    <title>Mein Zähler Rosenweg</title>
+    <link rel="manifest" href="/zaehler/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/icons/icon-192-2.png">
+    <link rel="icon" href="/logo-rosenweg.png" type="image/png">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+               background: linear-gradient(135deg, #14b8a6 0%, #0891b2 100%); background-attachment: fixed;
+               color: #1f2937; min-height: 100vh; }
+
+        .topnav { background: #0f766e; color: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.15); position: sticky; top: 0; z-index: 50; padding-top: env(safe-area-inset-top); }
+        .topnav-inner { display: flex; align-items: center; gap: .75rem; padding: .7rem 1rem; max-width: 1100px; margin: 0 auto; }
+        .topnav img { height: 2.25rem; width: 2.25rem; border-radius: 9999px; background: #fff; object-fit: contain; box-shadow: 0 0 0 1px rgba(255,255,255,.4); flex: none; padding: 2px; }
+        .topnav .t { font-weight: 700; font-size: 1.1rem; line-height: 1.1; }
+        .live-badge { margin-left: auto; display: none; align-items: center; gap: .4rem; padding: .25rem .7rem; background: rgba(255,255,255,.18); color: #fff; border-radius: 20px; font-size: .72rem; font-weight: 700; }
+        .live-dot { width: 8px; height: 8px; background: #fff; border-radius: 50%; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+        .wrap { max-width: 1100px; margin: 0 auto; padding: 1.1rem 1rem 2rem; }
+
+        .err { background: #fff; color: #b91c1c; border-radius: 12px; padding: .9rem; text-align: center; margin-bottom: 1rem; display: none; box-shadow: 0 4px 16px rgba(0,0,0,.1); font-size: .9rem; }
+        .loading { color: #fff; text-align: center; padding: 2.5rem 1rem; font-weight: 600; }
+
+        .card { background: #fff; border-radius: 18px; padding: 1.1rem 1.1rem 1.25rem; box-shadow: 0 8px 30px rgba(0,0,0,.14); margin-bottom: 1rem; }
+
+        /* Zähler-Auswahl */
+        .grp { margin-bottom: 1rem; }
+        .grp h2 { color: #fff; font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; opacity: .95; margin: 0 .15rem .5rem; text-shadow: 0 1px 2px rgba(0,0,0,.25); }
+        .chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .6rem; }
+        .chip { background: #fff; border: 2px solid transparent; border-radius: 14px; padding: .7rem .8rem; cursor: pointer; text-align: left; box-shadow: 0 4px 14px rgba(0,0,0,.1); transition: border-color .2s, transform .1s; display: flex; flex-direction: column; gap: .2rem; }
+        .chip:active { transform: scale(.98); }
+        .chip.sel { border-color: #0f766e; }
+        .chip .cn { font-weight: 700; font-size: .95rem; color: #0f172a; line-height: 1.15; }
+        .chip .cp { font-size: .82rem; color: #0f766e; font-weight: 600; }
+        .chip .cb { font-size: .68rem; color: #64748b; text-transform: uppercase; letter-spacing: .03em; }
+
+        /* Detail-Kopf */
+        .dhead { display: flex; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
+        .dhead .mname { font-weight: 800; font-size: 1.15rem; color: #0f172a; }
+        .dhead .mcat { font-size: .72rem; color: #64748b; text-transform: uppercase; letter-spacing: .03em; }
+        .dhead .live { margin-left: auto; text-align: right; }
+        .dhead .big { font-weight: 800; font-size: 1.9rem; color: #0f766e; line-height: 1; }
+        .dhead .sub { font-size: .8rem; color: #475569; margin-top: .3rem; }
+
+        /* Zeitraum-Auswahl */
+        .ranges { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; align-items: center; }
+        .rbtn { border: none; background: rgba(255,255,255,.85); color: #0f766e; font-weight: 700; border-radius: 10px; padding: .5rem .9rem; font-size: .85rem; cursor: pointer; box-shadow: 0 3px 10px rgba(0,0,0,.1); }
+        .rbtn.sel { background: #0f766e; color: #fff; }
+        .custom { display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; background: rgba(255,255,255,.85); border-radius: 10px; padding: .35rem .55rem; box-shadow: 0 3px 10px rgba(0,0,0,.1); font-size: .8rem; color: #334155; }
+        .custom input { border: 1px solid #cbd5e1; border-radius: 7px; padding: .3rem .4rem; font-size: .82rem; font-family: inherit; }
+        .custom button { border: none; background: #0f766e; color: #fff; border-radius: 7px; padding: .35rem .7rem; font-weight: 700; font-size: .8rem; cursor: pointer; }
+
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px,1fr)); gap: .6rem; margin-bottom: 1rem; }
+        .stat { background: #f0fdfa; border-radius: 12px; padding: .6rem .5rem; text-align: center; }
+        .stat .sv { font-weight: 800; font-size: 1.05rem; color: #0f766e; line-height: 1.1; }
+        .stat .sl { font-size: .7rem; color: #475569; margin-top: .2rem; }
+
+        .chartbox { position: relative; height: 300px; }
+        .hint { color: #64748b; text-align: center; font-size: .85rem; padding: 1.5rem 0; }
+        .backlink { display: inline-flex; align-items: center; gap: .3rem; color: #fff; font-weight: 600; font-size: .85rem; text-decoration: none; margin-bottom: .6rem; opacity: .95; }
+    </style>
+</head>
+<body>
+    <nav class="topnav">
+        <div class="topnav-inner">
+            <img src="/logo-rosenweg.png" alt="Rosenweg">
+            <div class="t">Mein Zähler</div>
+            <span id="liveBadge" class="live-badge"><span class="live-dot"></span>LIVE</span>
+        </div>
+    </nav>
+
+    <div class="wrap">
+        <div id="err" class="err"></div>
+        <div id="loading" class="loading">Lade Zähler…</div>
+
+        <!-- Zähler-Auswahl -->
+        <div id="meterPick" style="display:none">
+            <div class="grp" id="grpOwn" style="display:none">
+                <h2>Meine Zähler</h2>
+                <div class="chips" id="chipsOwn"></div>
+            </div>
+            <div class="grp" id="grpCommon" style="display:none">
+                <h2>Gemeinschaft</h2>
+                <div class="chips" id="chipsCommon"></div>
+            </div>
+        </div>
+
+        <!-- Detail -->
+        <div id="detail" style="display:none">
+            <a href="#" id="backLink" class="backlink">‹ Alle Zähler</a>
+            <div class="card">
+                <div class="dhead">
+                    <div>
+                        <div class="mname" id="dName">–</div>
+                        <div class="mcat" id="dCat"></div>
+                    </div>
+                    <div class="live">
+                        <div class="big" id="dPower">– W</div>
+                        <div class="sub" id="dReading">Zählerstand: –</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="ranges" id="ranges">
+                <button class="rbtn" data-r="24h">24 Std</button>
+                <button class="rbtn" data-r="7d">7 Tage</button>
+                <button class="rbtn" data-r="30d">30 Tage</button>
+                <button class="rbtn" data-r="12m">12 Monate</button>
+                <div class="custom">
+                    <span>von</span><input type="date" id="cFrom">
+                    <span>bis</span><input type="date" id="cTo">
+                    <button id="cGo" type="button">Anzeigen</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="stats" id="dStats"></div>
+                <div class="chartbox"><canvas id="chart"></canvas></div>
+                <div class="hint" id="chartHint" style="display:none">Keine Daten im gewählten Zeitraum.</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/authentik-auth.js?v=2"></script>
+    <script>
+    const API = '/api/energy';
+    let USER = null, METERS = [], CURRENT = null, CHART = null, LIVE_TIMER = null, CUR_RANGE = '24h';
+
+    const $ = (id) => document.getElementById(id);
+    const showErr = (m) => { const e = $('err'); e.textContent = m; e.style.display = 'block'; };
+
+    // ── Zahlformatierung ────────────────────────────────────────────
+    function fmtW(w) {
+        if (w == null || !Number.isFinite(w)) return '–';
+        const a = Math.abs(w);
+        if (a >= 1000) return (w / 1000).toFixed(2).replace('.', ',') + ' kW';
+        return Math.round(w) + ' W';
+    }
+    function fmtKwh(v) {
+        if (v == null || !Number.isFinite(v)) return '–';
+        return v.toFixed(v >= 100 ? 0 : 1).replace('.', ',') + ' kWh';
+    }
+    function catLabel(c) {
+        return ({ grid: 'Netz / Hauptzähler', production: 'Solar-Produktion', consumer: 'Verbrauch' })[c] || (c || '');
+    }
+
+    // ── Zähler laden (eigene vs Gemeinschaft via zwei Abfragen) ─────
+    async function loadMeters() {
+        const email = encodeURIComponent(USER.email);
+        const groups = (USER.groups || []).join(',');
+        const [ownR, allR] = await Promise.all([
+            fetch(`${API}/user/${email}/meters`),                                   // nur persönlich (meter_users)
+            fetch(`${API}/user/${email}/meters?groups=${encodeURIComponent(groups)}`) // + Gemeinschaft (meter_groups)
+        ]);
+        if (!ownR.ok || !allR.ok) throw new Error('Zähler konnten nicht geladen werden');
+        const own = await ownR.json();
+        const all = await allR.json();
+        const ownIds = new Set(own.map(m => m.id));
+        const common = all.filter(m => !ownIds.has(m.id));
+        return { own, common, all };
+    }
+
+    function chip(m) {
+        const el = document.createElement('button');
+        el.className = 'chip'; el.dataset.id = m.id;
+        el.innerHTML = `<span class="cn"></span><span class="cp" id="lp-${cssId(m.id)}">–</span><span class="cb"></span>`;
+        el.querySelector('.cn').textContent = m.name || m.id;
+        el.querySelector('.cb').textContent = catLabel(m.category);
+        el.addEventListener('click', () => selectMeter(m.id));
+        return el;
+    }
+    const cssId = (s) => String(s).replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    function renderPick(data) {
+        METERS = data.all;
+        const own = data.own, common = data.common;
+        if (own.length) { $('grpOwn').style.display = 'block'; own.forEach(m => $('chipsOwn').appendChild(chip(m))); }
+        if (common.length) { $('grpCommon').style.display = 'block'; common.forEach(m => $('chipsCommon').appendChild(chip(m))); }
+        if (!own.length && !common.length) { showErr('Dir sind noch keine Zähler zugeordnet.'); return; }
+        $('meterPick').style.display = 'block';
+        refreshChipLive();
+    }
+
+    // Live-Werte in den Auswahl-Chips (leichtgewichtig, alle Zähler auf einmal)
+    async function refreshChipLive() {
+        try {
+            const r = await fetch(`${API}/live`);
+            if (!r.ok) return;
+            const all = await r.json(); // erwartet Map/Array je Zähler
+            const map = Array.isArray(all) ? Object.fromEntries(all.map(x => [x.meter_id || x.id, x])) : all;
+            METERS.forEach(m => {
+                const el = $('lp-' + cssId(m.id));
+                const d = map[m.id];
+                if (el) el.textContent = d && Number.isFinite(d.power_w) ? fmtW(d.power_w) : '—';
+            });
+        } catch {}
+    }
+
+    // ── Detail-Ansicht ─────────────────────────────────────────────
+    function selectMeter(id) {
+        CURRENT = METERS.find(m => m.id === id);
+        if (!CURRENT) return;
+        $('meterPick').style.display = 'none';
+        $('detail').style.display = 'block';
+        $('liveBadge').style.display = 'inline-flex';
+        $('dName').textContent = CURRENT.name || CURRENT.id;
+        $('dCat').textContent = catLabel(CURRENT.category);
+        window.scrollTo(0, 0);
+        setRange('24h');
+        startLive();
+    }
+
+    function backToList() {
+        stopLive();
+        $('detail').style.display = 'none';
+        $('meterPick').style.display = 'block';
+        $('liveBadge').style.display = 'none';
+        CURRENT = null;
+        refreshChipLive();
+    }
+
+    async function pollLive() {
+        if (!CURRENT) return;
+        try {
+            const r = await fetch(`${API}/live/${encodeURIComponent(CURRENT.id)}`);
+            if (!r.ok) { $('dPower').textContent = 'offline'; return; }
+            const d = await r.json();
+            $('dPower').textContent = Number.isFinite(d.power_w) ? fmtW(d.power_w) : 'offline';
+            const reading = d.energy_import_kwh;
+            $('dReading').textContent = Number.isFinite(reading)
+                ? 'Zählerstand: ' + reading.toFixed(1).replace('.', ',') + ' kWh'
+                : 'Zählerstand: –';
+        } catch { $('dPower').textContent = 'offline'; }
+    }
+    function startLive() { stopLive(); pollLive(); LIVE_TIMER = setInterval(pollLive, 10000); }
+    function stopLive() { if (LIVE_TIMER) clearInterval(LIVE_TIMER); LIVE_TIMER = null; }
+
+    // ── Zeitraum + Chart ───────────────────────────────────────────
+    function setRange(r) {
+        CUR_RANGE = r;
+        document.querySelectorAll('#ranges .rbtn').forEach(b => b.classList.toggle('sel', b.dataset.r === r));
+        let from, to = new Date();
+        if (r === '24h') from = new Date(Date.now() - 24 * 3600e3);
+        else if (r === '7d') from = new Date(Date.now() - 7 * 86400e3);
+        else if (r === '30d') from = new Date(Date.now() - 30 * 86400e3);
+        else if (r === '12m') from = new Date(Date.now() - 365 * 86400e3);
+        loadChart(from, to);
+    }
+
+    function spanDays(from, to) { return (to - from) / 86400e3; }
+
+    async function loadChart(from, to) {
+        if (!CURRENT) return;
+        const days = spanDays(from, to);
+        const id = encodeURIComponent(CURRENT.id);
+        const fromISO = from.toISOString(), toISO = to.toISOString();
+        $('chartHint').style.display = 'none';
+        try {
+            if (days <= 7.5) {
+                // Kurze Zeiträume: Leistungskurve (W) aus /history (server-seitig gebucketet)
+                const r = await fetch(`${API}/history/${id}?from=${fromISO}&to=${toISO}&limit=1500`);
+                const rows = r.ok ? await r.json() : [];
+                renderPowerChart(rows, days);
+            } else {
+                // Lange Zeiträume: Tagesverbrauch (kWh) aus /daily
+                const nd = Math.ceil(days);
+                const r = await fetch(`${API}/daily/${id}?days=${nd}`);
+                const rows = r.ok ? await r.json() : [];
+                renderDailyChart(rows, days);
+            }
+        } catch (e) { showErr('Verlauf konnte nicht geladen werden: ' + e.message); }
+    }
+
+    function destroyChart() { if (CHART) { CHART.destroy(); CHART = null; } }
+
+    function labelTime(d, days) {
+        const p = (n) => String(n).padStart(2, '0');
+        if (days <= 1.2) return p(d.getHours()) + ':' + p(d.getMinutes());
+        if (days <= 7.5) return p(d.getDate()) + '.' + p(d.getMonth() + 1) + '. ' + p(d.getHours()) + 'h';
+        return p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.';
+    }
+
+    function renderPowerChart(rows, days) {
+        destroyChart();
+        if (!rows.length) { $('chartHint').style.display = 'block'; setStats([]); return; }
+        const labels = rows.map(r => labelTime(new Date(r.ts), days));
+        const data = rows.map(r => Math.round(r.power_w || 0));
+        // Statistik
+        const powers = data.filter(Number.isFinite);
+        const avg = powers.reduce((a, b) => a + b, 0) / (powers.length || 1);
+        const max = powers.length ? Math.max(...powers) : 0;
+        const first = rows.find(r => Number.isFinite(r.energy_import_kwh));
+        const last = [...rows].reverse().find(r => Number.isFinite(r.energy_import_kwh));
+        const kwh = (first && last) ? Math.max(0, last.energy_import_kwh - first.energy_import_kwh) : null;
+        setStats([
+            kwh != null ? { v: fmtKwh(kwh), l: 'Verbrauch' } : null,
+            { v: fmtW(avg), l: 'Ø Leistung' },
+            { v: fmtW(max), l: 'Max Leistung' },
+        ].filter(Boolean));
+        CHART = new Chart($('chart'), {
+            type: 'line',
+            data: { labels, datasets: [{
+                label: 'Leistung', data, borderColor: '#0f766e', backgroundColor: 'rgba(15,118,110,.12)',
+                borderWidth: 2, pointRadius: 0, fill: true, tension: .25,
+            }]},
+            options: baseOpts('W')
+        });
+    }
+
+    function renderDailyChart(rows, days) {
+        destroyChart();
+        if (!rows.length) { $('chartHint').style.display = 'block'; setStats([]); return; }
+        const labels = rows.map(r => {
+            const d = new Date(r.day);
+            const p = (n) => String(n).padStart(2, '0');
+            return days > 200 ? p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.' : p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.';
+        });
+        const data = rows.map(r => +(r.consumption_kwh || 0));
+        const total = data.reduce((a, b) => a + b, 0);
+        const avgDay = total / (data.length || 1);
+        const maxDay = data.length ? Math.max(...data) : 0;
+        setStats([
+            { v: fmtKwh(total), l: 'Verbrauch gesamt' },
+            { v: fmtKwh(avgDay), l: 'Ø pro Tag' },
+            { v: fmtKwh(maxDay), l: 'Max Tag' },
+        ]);
+        CHART = new Chart($('chart'), {
+            type: 'bar',
+            data: { labels, datasets: [{
+                label: 'kWh/Tag', data, backgroundColor: '#0f766e', borderRadius: 4,
+            }]},
+            options: baseOpts('kWh')
+        });
+    }
+
+    function baseOpts(unit) {
+        return {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: { label: (c) => `${c.parsed.y} ${unit}` } }
+            },
+            scales: {
+                x: { ticks: { maxTicksLimit: 8, autoSkip: true, font: { size: 10 } }, grid: { display: false } },
+                y: { ticks: { font: { size: 10 }, callback: (v) => v + ' ' + unit }, grid: { color: '#eef2f6' } }
+            }
+        };
+    }
+
+    function setStats(items) {
+        const box = $('dStats');
+        box.innerHTML = '';
+        items.forEach(it => {
+            const d = document.createElement('div'); d.className = 'stat';
+            d.innerHTML = `<div class="sv"></div><div class="sl"></div>`;
+            d.querySelector('.sv').textContent = it.v;
+            d.querySelector('.sl').textContent = it.l;
+            box.appendChild(d);
+        });
+    }
+
+    // ── Events ─────────────────────────────────────────────────────
+    document.querySelectorAll('#ranges .rbtn').forEach(b => b.addEventListener('click', () => setRange(b.dataset.r)));
+    $('cGo').addEventListener('click', () => {
+        const f = $('cFrom').value, t = $('cTo').value;
+        if (!f || !t) { showErr('Bitte Von- und Bis-Datum wählen.'); return; }
+        const from = new Date(f + 'T00:00:00'), to = new Date(t + 'T23:59:59');
+        if (from >= to) { showErr('Von muss vor Bis liegen.'); return; }
+        document.querySelectorAll('#ranges .rbtn').forEach(b => b.classList.remove('sel'));
+        CUR_RANGE = 'custom';
+        loadChart(from, to);
+    });
+    $('backLink').addEventListener('click', (e) => { e.preventDefault(); backToList(); });
+
+    // Chip-Live alle 15s auffrischen wenn in der Liste
+    setInterval(() => { if (!CURRENT && METERS.length) refreshChipLive(); }, 15000);
+
+    // ── Start ──────────────────────────────────────────────────────
+    (async function main() {
+        try {
+            USER = await AuthentikAuth.init({ requireAuth: true });
+            if (!USER) return; // init leitet ggf. zum Login um
+            // Default-Datumsfelder: letzte 7 Tage
+            const iso = (d) => d.toISOString().slice(0, 10);
+            $('cTo').value = iso(new Date());
+            $('cFrom').value = iso(new Date(Date.now() - 7 * 86400e3));
+            const data = await loadMeters();
+            $('loading').style.display = 'none';
+            renderPick(data);
+        } catch (e) {
+            $('loading').style.display = 'none';
+            showErr('Fehler beim Laden: ' + e.message);
+        }
+    })();
+
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/zaehler/sw.js', { scope: '/zaehler/' }).catch(() => {});
+    }
+    </script>
+</body>
+</html>
