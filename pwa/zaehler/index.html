@@ -181,6 +181,12 @@
 
     const $ = (id) => document.getElementById(id);
     const showErr = (m) => { const e = $('err'); e.textContent = m; e.style.display = 'block'; };
+    // Fetch mit hartem Timeout, damit langsame Backend-Queries die UI nie einfrieren.
+    function fetchT(url, ms = 22000) {
+        const ac = new AbortController();
+        const t = setTimeout(() => ac.abort(), ms);
+        return fetch(url, { signal: ac.signal }).finally(() => clearTimeout(t));
+    }
 
     // ── Zahlformatierung ────────────────────────────────────────────
     function fmtW(w) {
@@ -320,7 +326,7 @@
     async function loadToday() {
         if (!CURRENT) return;
         try {
-            const r = await fetch(`${API}/today/${encodeURIComponent(CURRENT.id)}`);
+            const r = await fetchT(`${API}/today/${encodeURIComponent(CURRENT.id)}`);
             if (!r.ok) return;
             const t = await r.json();
             $('dToday').textContent = Number.isFinite(t.consumption_kwh) ? fmtKwh(t.consumption_kwh) : '–';
@@ -332,7 +338,7 @@
         $('projCard').style.display = 'none';
         if (!CURRENT) return;
         try {
-            const r = await fetch(`${API}/projection/${encodeURIComponent(CURRENT.id)}`);
+            const r = await fetchT(`${API}/projection/${encodeURIComponent(CURRENT.id)}`);
             if (!r.ok) return;
             const p = await r.json();
             if (!p.avg_daily_kwh) return;
@@ -362,26 +368,39 @@
 
     function spanDays(from, to) { return (to - from) / 86400e3; }
 
+    function setHint(msg) {
+        const h = $('chartHint');
+        if (!msg) { h.style.display = 'none'; return; }
+        h.textContent = msg; h.style.display = 'block';
+    }
+
     async function loadChart(from, to) {
         if (!CURRENT) return;
         const days = spanDays(from, to);
         const id = encodeURIComponent(CURRENT.id);
         const fromISO = from.toISOString(), toISO = to.toISOString();
-        $('chartHint').style.display = 'none';
+        setHint('Lädt …');
         try {
+            let rows;
             if (days <= 7.5) {
                 // Kurze Zeiträume: Leistungskurve (W) aus /history (server-seitig gebucketet)
-                const r = await fetch(`${API}/history/${id}?from=${fromISO}&to=${toISO}&limit=1500`);
-                const rows = r.ok ? await r.json() : [];
+                const r = await fetchT(`${API}/history/${id}?from=${fromISO}&to=${toISO}&limit=1500`);
+                rows = r.ok ? await r.json() : [];
                 renderPowerChart(rows, days);
             } else {
                 // Lange Zeiträume: Tagesverbrauch (kWh) aus /daily
                 const nd = Math.ceil(days);
-                const r = await fetch(`${API}/daily/${id}?days=${nd}`);
-                const rows = r.ok ? await r.json() : [];
+                const r = await fetchT(`${API}/daily/${id}?days=${nd}`);
+                rows = r.ok ? await r.json() : [];
                 renderDailyChart(rows, days);
             }
-        } catch (e) { showErr('Verlauf konnte nicht geladen werden: ' + e.message); }
+            if (rows && rows.length) setHint(null);
+        } catch (e) {
+            destroyChart(); setStats([]);
+            setHint(e.name === 'AbortError'
+                ? 'Der Verlauf dauert für diesen Zeitraum zu lange – bitte einen kürzeren wählen.'
+                : 'Verlauf konnte nicht geladen werden.');
+        }
     }
 
     function destroyChart() { if (CHART) { CHART.destroy(); CHART = null; } }
@@ -395,7 +414,7 @@
 
     function renderPowerChart(rows, days) {
         destroyChart();
-        if (!rows.length) { $('chartHint').style.display = 'block'; setStats([]); return; }
+        if (!rows.length) { setHint('Keine Daten im gewählten Zeitraum.'); setStats([]); return; }
         const labels = rows.map(r => labelTime(new Date(r.ts), days));
         const data = rows.map(r => Math.round(r.power_w || 0));
         // Statistik
@@ -422,7 +441,7 @@
 
     function renderDailyChart(rows, days) {
         destroyChart();
-        if (!rows.length) { $('chartHint').style.display = 'block'; setStats([]); return; }
+        if (!rows.length) { setHint('Keine Daten im gewählten Zeitraum.'); setStats([]); return; }
         const labels = rows.map(r => {
             const d = new Date(r.day);
             const p = (n) => String(n).padStart(2, '0');
