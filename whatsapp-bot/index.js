@@ -50,6 +50,9 @@ const DATA_DIR       = process.env.WA_DATA_DIR || '/data';
 // Rosenweg: gesetzt; anderes Projekt: leer -> nur SQLite-Log im Gateway.
 const FORWARD_INBOUND_URL = process.env.FORWARD_INBOUND_URL
   || (process.env.WA_SECRET_FORWARD_OFF ? '' : `${API_BASE}/api/whatsapp/inbound`);
+// Eingehende Nachrichten als gelesen markieren (blaue Haken), NACHDEM die API sie
+// bestaetigt gespeichert hat. Default an; via WA_MARK_SEEN=0 abschaltbar.
+const MARK_SEEN = process.env.WA_MARK_SEEN !== '0';
 
 // Hooks aus dem Gateway (gateway.js) — fuer Inbound-Logging in die SQLite.
 let gatewayHooks = null;
@@ -236,13 +239,23 @@ client.on('message_create', async (msg) => {
     //    (1:1 UND Gruppen), damit das System die volle Konversation erfasst.
     //    `is_group` steuert API-seitig: 1:1 -> Command-Bot antwortet; Gruppe -> nur erfassen,
     //    KEIN Auto-Reply (intelligente Gruppen-Antworten kommen separat via Technik-Bot).
+    let storedOk = false;
     if (FORWARD_INBOUND_URL) {
       const res = await fetch(FORWARD_INBOUND_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-WA-Secret': WA_SECRET },
         body: JSON.stringify({ phone, chat_id: chatId, body, whatsapp_msg_id: msg.id?._serialized, attachments, is_group: isGroup, group_name: groupName }),
       });
+      storedOk = res.ok;
       if (!res.ok) console.warn('[WA] API inbound rejected:', res.status, await res.text().catch(() => ''));
+    }
+    // 3) Erst NACH bestaetigter Persistenz (API res.ok) den Chat als gelesen markieren
+    //    (blaue Haken fuer den Absender). Schlaegt das Speichern fehl -> bleibt ungelesen
+    //    = sichtbares "unverarbeitet"-Signal. wwebjs kann nur pro Chat (sendSeen),
+    //    nicht pro Einzelnachricht. Gilt fuer 1:1 UND Gruppen. Abschaltbar via WA_MARK_SEEN=0.
+    if (storedOk && MARK_SEEN) {
+      try { const chat = await msg.getChat(); await chat.sendSeen(); }
+      catch (e) { console.warn('[WA] sendSeen fehlgeschlagen:', e.message); }
     }
   } catch (err) {
     console.error('[WA] Inbound-Handler Fehler:', err);
