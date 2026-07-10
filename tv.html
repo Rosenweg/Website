@@ -10,12 +10,18 @@
     <script src="/js/site-config.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-        body { font-family: 'Inter', sans-serif; }
+        body { font-family: 'Inter', sans-serif; overflow-x: clip; }
         .channel-card { transition: all 0.15s; }
         .channel-card:hover { transform: scale(1.02); }
         .channel-card.active { ring: 2px; box-shadow: 0 0 0 3px rgba(59,130,246,0.5); }
         #player-container { aspect-ratio: 16/9; }
+        #player { object-fit: contain; background: #000; }
         .group-btn.active { background-color: #2563eb; color: white; }
+        /* Breitbild-Modus: Player ueber die GESAMTE Fensterbreite (Full-Bleed aus dem
+           max-w-Container), Kanalliste darunter. Zwischenstufe zwischen normal + Vollbild. */
+        #tv-grid.wide { display: block; }
+        #tv-grid.wide #player-col { width: 100vw; margin-left: calc(50% - 50vw); margin-bottom: 1rem; }
+        #tv-grid.wide #player-container { border-radius: 0; max-height: calc(100vh - 64px); }
     </style>
 </head>
 <body class="bg-gray-900 text-white min-h-screen">
@@ -108,9 +114,9 @@
             </div>
         </div>
 
-        <div class="grid lg:grid-cols-3 gap-4">
+        <div id="tv-grid" class="grid lg:grid-cols-3 gap-4">
             <!-- Player -->
-            <div class="lg:col-span-2">
+            <div id="player-col" class="lg:col-span-2">
                 <div id="player-container" class="bg-black rounded-xl overflow-hidden relative">
                     <video id="player" class="w-full h-full" controls autoplay>
                         <p class="text-gray-500 text-center p-8">Wähle einen Kanal aus der Liste</p>
@@ -119,8 +125,15 @@
                         <p class="text-gray-300 text-lg">Kanal auswählen &rarr;</p>
                     </div>
                 </div>
-                <div id="now-playing" class="mt-2 text-sm text-gray-400 hidden">
-                    <span>Aktuell: </span><span id="now-playing-name" class="text-white font-medium"></span>
+                <div class="mt-2 flex items-center gap-2">
+                    <div id="now-playing" class="text-sm text-gray-400 hidden min-w-0 truncate">
+                        <span>Aktuell: </span><span id="now-playing-name" class="text-white font-medium"></span>
+                    </div>
+                    <button id="wide-toggle" type="button" onclick="toggleWide()"
+                        class="ml-auto shrink-0 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-xs font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5"
+                        title="Player auf die gesamte Fensterbreite">
+                        <span id="wide-icon">🖥</span><span id="wide-label">Breitbild</span>
+                    </button>
                 </div>
             </div>
 
@@ -316,6 +329,21 @@
             if (e.key === 'ArrowUp' && idx > 0) { playChannel(idx - 1); e.preventDefault(); }
             if (e.key === 'ArrowDown' && idx < channels.length - 1) { playChannel(idx + 1); e.preventDefault(); }
         });
+
+        // ============ Breitbild-Modus (Player ueber gesamte Fensterbreite) ============
+        function applyWide(on) {
+            document.getElementById('tv-grid').classList.toggle('wide', on);
+            document.getElementById('wide-label').textContent = on ? 'Normale Ansicht' : 'Breitbild';
+            document.getElementById('wide-icon').textContent = on ? '🗔' : '🖥';
+        }
+        function toggleWide() {
+            const on = !document.getElementById('tv-grid').classList.contains('wide');
+            applyWide(on);
+            try { localStorage.setItem('tv-wide', on ? '1' : '0'); } catch {}
+            if (on) window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        // gemerkte Auswahl wiederherstellen
+        try { if (localStorage.getItem('tv-wide') === '1') applyWide(true); } catch {}
 
         // ============ Externer Zugriff / Ferien-Playlist ============
         const escH = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
