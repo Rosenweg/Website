@@ -334,13 +334,28 @@ async function revokeByMsgId(msgId) {
   await msg.delete(true); // true = fuer alle
 }
 
-// Alle Gruppen des Bots (id/name/participants).
+// Gruppen-Info inkl. Community-Metadaten: parentGroupId = Community-Zuordnung (welche
+// Community-Elterngruppe), announce = Ankuendigungsgruppe, isParentGroup = Elterngruppe.
+// HINWEIS: WhatsApp/whatsapp-web.js koennen NICHT beigetretene Community-Subgruppen NICHT
+// auflisten -> hier erscheinen nur Gruppen, in denen der Bot Mitglied ist.
+function groupInfo(c) {
+  const gm = c.groupMetadata || {};
+  const pg = gm.parentGroupId;
+  return {
+    id: c.id._serialized,
+    name: c.name,
+    participants: (gm.participants || []).length,
+    parentGroupId: pg ? (pg._serialized || (pg.user && pg.server ? pg.user + '@' + pg.server : String(pg))) : null,
+    isParentGroup: !!gm.isParentGroup,
+    isAnnounce: !!gm.announce,
+    desc: gm.desc || null,
+  };
+}
+
+// Alle Gruppen des Bots (inkl. Community-Metadaten).
 async function getGroups() {
   const chats = await client.getChats();
-  return chats.filter(c => c.isGroup).map(c => ({
-    id: c.id._serialized, name: c.name,
-    participants: (c.groupMetadata?.participants || []).length,
-  }));
+  return chats.filter(c => c.isGroup).map(groupInfo);
 }
 
 // Gruppe per exaktem (case-insensitive) Titel -> chatId. 0/>1 Treffer -> Fehler.
@@ -477,11 +492,7 @@ const healthServer = http.createServer(async (req, res) => {
     if (!isReady) { res.writeHead(503); res.end('not_ready'); return; }
     try {
       const chats = await client.getChats();
-      const groups = chats.filter(c => c.isGroup).map(c => ({
-        id: c.id._serialized,
-        name: c.name,
-        participants: (c.groupMetadata?.participants || []).length,
-      }));
+      const groups = chats.filter(c => c.isGroup).map(groupInfo);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ groups }));
     } catch (err) {
