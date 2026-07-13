@@ -510,12 +510,15 @@ const healthServer = http.createServer(async (req, res) => {
     if (!isReady) { res.writeHead(503); res.end('not_ready'); return; }
     try {
       let raw = ''; for await (const c of req) raw += c;
-      const { chatId, sinceMs = 0, limit = 25, containing = null, dryRun = true } = JSON.parse(raw || '{}');
+      const { chatId, sinceMs = 0, untilMs = null, ids = null, limit = 25, containing = null, dryRun = true } = JSON.parse(raw || '{}');
       if (!chatId) { res.writeHead(400); res.end(JSON.stringify({ error: 'chatId fehlt' })); return; }
+      const idSet = Array.isArray(ids) && ids.length ? new Set(ids) : null;
       const chat = await client.getChatById(chatId);
       const msgs = await chat.fetchMessages({ limit });
       const cand = msgs.filter(m => m.fromMe
+        && (idSet ? idSet.has(m.id?._serialized) : true)   // wenn ids gesetzt: NUR diese
         && (m.timestamp * 1000) >= Number(sinceMs)
+        && (untilMs == null || (m.timestamp * 1000) <= Number(untilMs))
         && (!containing || String(m.body || '').includes(containing)));
       const out = [];
       for (const m of cand) {
