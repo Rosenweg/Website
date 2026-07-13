@@ -294,37 +294,38 @@ async function sendViaClient(chatId, body, attachments = []) {
   // ohne Fehler "sent" zurueck ohne tatsaechliche Zustellung.
   const isGroup = chatId.endsWith('@g.us');
   const chat = isGroup ? await client.getChatById(chatId) : null;
-  let mediaSent = false;
-  let sentMsg = null;
-  for (const a of (attachments || [])) {
-    if (a.docs_path) continue; // Disk-Pfade: spezielle Behandlung — vorerst skippen
-    const b64 = a.data_base64 || a.content_base64;
-    if (b64) {
-      let mime = a.mimetype || 'application/octet-stream';
-      let dataB64 = b64;
-      let filename = a.filename || 'anhang';
-      // WAV -> OGG opus konvertieren (zuverlaessigere Zustellung als Voice)
-      if (mime === 'audio/wav' || mime === 'audio/wave' || mime === 'audio/x-wav') {
-        try {
-          dataB64 = await convertWavToOgg(b64);
-          mime = 'audio/ogg; codecs=opus';
-          filename = filename.replace(/\.wav$/i, '.ogg');
-        } catch (e) { console.warn(`[WA] ffmpeg-Konvertierung fehlgeschlagen, sende WAV: ${e.message}`); }
-      }
-      const media = new MessageMedia(mime, dataB64, filename);
-      const opts = { caption: body || a.caption || '', sendAudioAsVoice: mime.startsWith('audio/ogg') };
-      sentMsg = chat ? await chat.sendMessage(media, opts) : await client.sendMessage(chatId, media, opts);
-      mediaSent = true;
+  const send = (content, opts) => chat ? chat.sendMessage(content, opts) : client.sendMessage(chatId, content, opts);
+  const sentMsgs = [];
+  const atts = (attachments || []).filter(a => !a.docs_path && (a.data_base64 || a.content_base64));
+
+  // 1) Text ZUERST als eigene Nachricht (nur EINMAL). Frueher wurde der volle Body als
+  //    Caption an JEDEN Anhang gehaengt -> bei Mehr-Dokument-Mails N-mal derselbe Text
+  //    in der Gruppe (Ausschuss-Vorfall 2026-07-13). Jetzt: eine Textnachricht, dann Doks.
+  if (body) sentMsgs.push(await send(body));
+
+  // 2) Dann jeder Anhang OHNE Caption (Text steht schon oben).
+  for (const a of atts) {
+    let mime = a.mimetype || 'application/octet-stream';
+    let dataB64 = a.data_base64 || a.content_base64;
+    let filename = a.filename || 'anhang';
+    // WAV -> OGG opus konvertieren (zuverlaessigere Zustellung als Voice)
+    if (mime === 'audio/wav' || mime === 'audio/wave' || mime === 'audio/x-wav') {
+      try {
+        dataB64 = await convertWavToOgg(dataB64);
+        mime = 'audio/ogg; codecs=opus';
+        filename = filename.replace(/\.wav$/i, '.ogg');
+      } catch (e) { console.warn(`[WA] ffmpeg-Konvertierung fehlgeschlagen, sende WAV: ${e.message}`); }
     }
+    const media = new MessageMedia(mime, dataB64, filename);
+    sentMsgs.push(await send(media, { caption: a.caption || '', sendAudioAsVoice: mime.startsWith('audio/ogg') }));
   }
-  if (!mediaSent && body) {
-    sentMsg = chat ? await chat.sendMessage(body) : await client.sendMessage(chatId, body);
-  }
-  if (!sentMsg) throw new Error('sendMessage liefert null/undefined (kein Body, keine Anhaenge?)');
-  // Warten bis die Nachricht WIRKLICH beim WA-Server ist (ack>=1) — sonst
-  // ueberholt eine schnell hochgeladene Voice-Note die unbestaetigte Textnachricht.
-  await waitForAck(sentMsg, 1, 6000);
-  return { msgId: sentMsg.id?._serialized || null, ack: sentMsg.ack ?? null };
+
+  const sent = sentMsgs.filter(Boolean);
+  if (sent.length === 0) throw new Error('sendMessage liefert null/undefined (kein Body, keine Anhaenge?)');
+  // Warten bis die letzte Nachricht WIRKLICH beim WA-Server ist (ack>=1).
+  const last = sent[sent.length - 1];
+  await waitForAck(last, 1, 6000);
+  return { msgId: last.id?._serialized || null, ack: last.ack ?? null, msgIds: sent.map(m => m.id?._serialized).filter(Boolean) };
 }
 
 // "Fuer alle loeschen" per gespeicherter WhatsApp-Message-ID.
@@ -495,6 +496,39 @@ const healthServer = http.createServer(async (req, res) => {
       const groups = chats.filter(c => c.isGroup).map(groupInfo);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ groups }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+  // Gezieltes "fuer alle" loeschen der letzten EIGENEN Bot-Nachrichten einer Gruppe/Chat.
+  // Body {chatId, sinceMs?, limit?, containing?, dryRun?}. dryRun=true (Default) zeigt nur,
+  // was geloescht WUERDE. Nur fromMe-Nachrichten ab sinceMs (+ optional Body-Teilstring).
+  if (req.url === '/delete-recent' && req.method === 'POST') {
+    if (req.headers['x-wa-secret'] !== WA_SECRET) { res.writeHead(401); res.end('Unauthorized'); return; }
+    if (!isReady) { res.writeHead(503); res.end('not_ready'); return; }
+    try {
+      let raw = ''; for await (const c of req) raw += c;
+      const { chatId, sinceMs = 0, limit = 25, containing = null, dryRun = true } = JSON.parse(raw || '{}');
+      if (!chatId) { res.writeHead(400); res.end(JSON.stringify({ error: 'chatId fehlt' })); return; }
+      const chat = await client.getChatById(chatId);
+      const msgs = await chat.fetchMessages({ limit });
+      const cand = msgs.filter(m => m.fromMe
+        && (m.timestamp * 1000) >= Number(sinceMs)
+        && (!containing || String(m.body || '').includes(containing)));
+      const out = [];
+      for (const m of cand) {
+        const info = {
+          id: m.id?._serialized, ts: new Date(m.timestamp * 1000).toISOString(),
+          type: m.type, hasMedia: !!m.hasMedia,
+          body: String(m.body || '').replace(/\s+/g, ' ').slice(0, 60),
+        };
+        if (!dryRun) { try { await m.delete(true); info.deleted = true; } catch (e) { info.deleted = false; info.error = e.message; } }
+        out.push(info);
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ dryRun, count: out.length, messages: out }));
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
