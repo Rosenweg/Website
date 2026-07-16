@@ -130,14 +130,20 @@ heute über UniFi Access authentifiziert und protokolliert.
   UniFi-Access-NFC → Depot-Zugriff landet im Zutritts-Log. Schlüssel liegen physisch am
   Objekt, Zugriff ist protokolliert. *Offen: Ausweitung/Widmung des Kastens von R9 auf die
   Kooperation (Berechtigungen, ggf. zweiter Kasten je nach Menge/Wege).*
-- **Professionell (später):** elektronisches Schlüsselschrank-System mit Einzelfach-
-  Verriegelung (z.B. Deister keyBox, Traka) — jeder Schlüssel einzeln freigegeben und
-  geloggt, direkte Kopplung an das Register aus Ebene 1.
+- **Kooperations-Schrank mit Einzelschlüssel-Nachweis (geplant, Eigenbau):** modularer
+  intelligenter Schlüsselschrank, der **jede einzelne Entnahme/Rückgabe pro Person**
+  protokolliert — nicht nur „wer den Schrank geöffnet hat". Details siehe **Anhang A**.
 - **Notfall getrennt:** separater **Feuerwehr-Schlüsseldepot (FSD)** / Notfallkasten,
   physisch getrennt vom Alltagsdepot, nur für Blaulicht/Notdienst.
 
 **Grundregel:** Schlüssel werden nicht mehr „mitgenommen", sondern gegen Register-Eintrag
 aus dem Depot entnommen und dorthin zurückgegeben.
+
+**Warum ein eigener Kooperations-Schrank (Klasse B), nicht nur der Access-Ultra-Kasten:**
+Der vorhandene R9-Kasten (Klasse A) sichert *wer den Schrank öffnet* — sobald er offen
+ist, kann aber jeder jeden Schlüssel nehmen, ohne Spur *welcher* fehlt. Genau diese Lücke
+hat den Verwaltungswechsel chaotisch gemacht. Ein Klasse-B-Schrank verfolgt **jeden
+einzelnen Schlüssel** (RFID-/iButton-Anhänger je Bund) und schließt die Lücke.
 
 ---
 
@@ -235,5 +241,95 @@ Dieser Ablauf wird durch das Register erzwungen — er lässt sich nicht mehr �
   ausweiten.
 - Umfang: alle Anlagen erfassen oder nur Gemeinschaft (Wohnungsschlüssel bleiben bei
   Eigentümern)?
-- Budget/Bereitschaft für elektronischen Schlüsselschrank mit Einzelfach (Phase 3) vs.
-  weiter mit dem vorhandenen Access-Ultra-Kasten.
+- ~~Fertigsystem vs. Eigenbau~~ → **entschieden: integrierter Eigenbau** (siehe Anhang A).
+- Menge der Schlüssel(bünde) → **erst nach Bestandsaufnahme (Phase 0)**; Schrank deshalb
+  **modular** planen (in Blöcken erweiterbar).
+- Verriegelungs-Variante des Eigenbaus: **nur-Erkennung** (einfach, empfohlen) vs.
+  **Einzelfach-Verriegelung** (max. Sicherheit, mehr Elektromechanik) — siehe Anhang A.
+
+---
+
+## Anhang A — Eigenbau intelligenter Schlüsselschrank (integriert)
+
+> **Entschieden:** integrierter Eigenbau statt Fertigsystem. Ziel: **jeder einzelne
+> Schlüssel** wird protokolliert, Daten fließen in **euer eigenes System** (DB `rosenweg`,
+> MQTT, API) statt in fremde Hersteller-Software. Menge noch offen → **modular** bauen.
+
+### A.1 Grundprinzip
+
+- Jeder Schlüssel(bund) hängt an einem **eindeutigen elektronischen Anhänger** — empfohlen
+  **1-Wire iButton (DS1990A)**: ~1–2 CHF/Stück, robust, jede ID weltweit eindeutig,
+  trivial auszulesen. (Alternative: RFID-Tag + Reader je Position — teurer.)
+- Die **Schranktür** bleibt über den vorhandenen **UniFi Access Ultra** verriegelt →
+  authentifiziert die **Person** und liefert das Öffnungs-Event.
+- Ein **ESP32 je Modul** liest die iButton-Positionen und meldet Änderungen an euer
+  System. Ihr habt MQTT bereits (`mqtt.html`) → ESP32 publiziert auf MQTT, API abonniert.
+
+### A.2 Zwei Bau-Varianten
+
+**Variante 1 — „nur Erkennung" (empfohlen, einfach):**
+- Jede Hakenposition ist ein **iButton-Lesekontakt** (kein Riegel pro Fach).
+- Der Schrank erkennt permanent, **welche iButtons hängen / fehlen**.
+- Öffnet jemand die Tür (UniFi Access → Person bekannt), wird die **Differenz** der
+  gehängten iButtons dieser Person zugeordnet → Entnahme/Rückgabe automatisch geloggt.
+- **Verhindert** eine unberechtigte Entnahme nicht physisch, **protokolliert** sie aber
+  lückenlos. Für eine STWEG i.d.R. völlig ausreichend — Ziel ist Nachvollziehbarkeit.
+- Wenig Hardware: Reader-Kontakte + I/O-Expander (MCP23017) + ESP32. Kein Netzteil für
+  Riegel, keine bewegten Teile.
+
+**Variante 2 — „Einzelfach-Verriegelung" (max. Sicherheit):**
+- Zusätzlich **Solenoid/Servo-Riegel je Position**; der Schrank gibt **nur die
+  berechtigten Schlüssel** frei (wie Traka/Creone).
+- Braucht Treiber (MOSFET/ULN2803) + kräftigeres Netzteil, deutlich mehr Verdrahtung
+  und Mechanik pro Fach.
+- Nur nötig, wenn einzelne Schlüssel *physisch* gesperrt werden müssen (z.B. TG-General,
+  Technikräume) — lässt sich auch **nur für einige Fächer** nachrüsten (Hybrid).
+
+### A.3 Ablauf (Variante 1)
+
+```
+1. Person hält NFC an UniFi Access Ultra  → Tür entriegelt
+2. UniFi-Access-Event (Person + Zeit)     → Webhook → api/routes/schluessel.js
+3. Person entnimmt/hängt Schlüssel         → iButton verschwindet/erscheint an Position P
+4. ESP32 meldet Änderung (Position P, iButton-ID, ab/anwesend) → MQTT → api
+5. api verknüpft iButton-ID ↔ schluessel_exemplar und Person aus Schritt 2
+   → schreibt schluessel_ausgabe (Audit-Trail automatisch)
+6. Tür zu → Abgleich; Überfälligkeit/Unstimmigkeit → WhatsApp/Mail an Ausschuss
+```
+
+### A.4 Stückliste (grob, pro Modul)
+
+| Teil | Zweck |
+|------|-------|
+| ESP32 (WLAN, in eurem Netz / Netbird) | Steuerung + MQTT-Anbindung |
+| 1-Wire-Bus + DS1990A iButtons | eindeutiger Anhänger je Schlüsselbund |
+| iButton-Sockel je Position | Lesekontakt am Haken |
+| MCP23017 I/O-Expander | viele Positionen an wenige Pins |
+| *(Var. 2)* Solenoid/Servo + MOSFET/ULN2803 + Netzteil | Einzelfach-Riegel |
+| abschließbarer Metallschrank, Tür mit UniFi Access Ultra | Gehäuse (Ultra vorhanden) |
+| optional OLED/Touch | Rückmeldung „Schlüssel #7 entnommen" |
+
+### A.5 Modularität (weil Menge offen)
+
+- In **Blöcken à z.B. 16 Positionen** bauen, jeder Block = 1 ESP32 + 1 I/O-Expander.
+- Start mit 1–2 Blöcken nach der Bestandsaufnahme, später **einfach Blöcke ergänzen**
+  ohne die bestehenden zu ändern (jeder Block meldet eigenständig auf MQTT).
+
+### A.6 Integration in euren Stack
+
+| Baustein | Anbindung |
+|----------|-----------|
+| ESP32 → System | **MQTT** (vorhanden) oder HTTP an `api/routes/schluessel.js` |
+| Person ↔ Entnahme | **UniFi Access Event/Webhook** → api (Person aus Türöffnung) |
+| Zuordnung iButton ↔ Schlüssel | Feld `qr_token`/`ibutton_id` an `schluessel_exemplar` |
+| Protokoll | `schluessel_ausgabe` + DB-Audit (`app.user_email`) |
+| Alarme | WhatsApp-Bot + Mail (Überfällig, Ist>Soll, Verlust) |
+
+### A.7 Reihenfolge (fügt sich in Roadmap Phase 3)
+
+1. **Bestandsaufnahme** (Phase 0) → Menge → Blockzahl festlegen.
+2. **Register-MVP** (Phase 1) muss stehen — der Schrank meldet dorthin.
+3. Ein **Block als Prototyp** (Variante 1) am R9-Standort, iButtons an bestehende
+   Schlüssel, Tür über den vorhandenen Access Ultra.
+4. Test, dann **Blöcke bis zum Bedarf** ergänzen; einzelne Fächer bei Bedarf auf
+   Variante 2 (Riegel) aufrüsten.
