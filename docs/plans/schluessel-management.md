@@ -333,3 +333,35 @@ Dieser Ablauf wird durch das Register erzwungen — er lässt sich nicht mehr �
    Schlüssel, Tür über den vorhandenen Access Ultra.
 4. Test, dann **Blöcke bis zum Bedarf** ergänzen; einzelne Fächer bei Bedarf auf
    Variante 2 (Riegel) aufrüsten.
+
+### A.8 Konkrete Stückliste (Hybrid) — Vorschlag
+
+> **Entscheidung Hybrid:** Erkennung an **allen** Haken (1-Wire), Riegel nur an **wenigen
+> kritischen** Fächern. Preise ca., **vor Kauf prüfen**. Mengen hängen an Phase 0.
+
+**Kern-Trick Erkennung:** alle Haken an **einen gemeinsamen 1-Wire-Bus**. Der ESP32 liest
+per „Search-ROM" alle anwesenden iButton-IDs → kein Reader/Controller pro Fach nötig, nur
+ein Kontakt pro Haken. Riegel-Elektromechanik nur an den kritischen Fächern.
+
+| # | Artikel | Zweck | Menge | ca. Preis | Bezug (CH/EU) |
+|---|---------|-------|-------|-----------|----------------|
+| 1 | **Metall-Schlüsselschrank abschliessbar**, z.B. Rieffel (50/100 Haken) | Gehäuse | 1 | CHF 170–450 | officeworld.ch, rottner-tresor.ch, gonser.ch |
+| 2 | **iButton DS1990A** (TM-Anhänger) | eind. ID je Schlüsselbund | 1× je Bund | ~0.5–2.–/Stk (Bulk) | ibuttonshop.com, AliExpress, eBay |
+| 3 | **DS9092 Probe / TM-Sockel** (mit LED) | Kontakt je Haken | 1× je Haken | ~1–3.–/Stk (10er) | AliExpress, eBay, ibuttonshop.com |
+| 4 | **ESP32 DevKit** (WLAN) | Steuerung + MQTT | 1 je Block | CHF 8–15 | bastelgarten.ch, play-zone.ch, pi-shop.ch, distrelec.ch, BerryBase |
+| 5 | 4.7 kΩ Widerstand (1-Wire Pull-up); optional **DS2482-100** (I²C→1-Wire-Master) | Bus | 1 je Bus | <1.– / ~5.– | distrelec.ch, bastelgarten.ch |
+| 6 | **12 V Solenoid-Schrankschloss** (Mini, „normally closed") | Riegel je krit. Fach | nur krit. Fächer | CHF 8–15/Stk | amazon.de, AliExpress |
+| 7 | **ULN2803A** Darlington-Array **oder** MOSFET-Treiber-Modul | schaltet Solenoide | 1 pro 8 Riegel | CHF 1–8 | distrelec.ch, bastelgarten.ch |
+| 8 | **MCP23017** I²C-Portexpander | viele Riegel an wenig Pins | nach Riegel-Zahl | CHF 2–4 | distrelec.ch, bastelgarten.ch |
+| 9 | **Netzteil 12 V / 5 A** | Versorgung Solenoide | 1 | CHF 15–25 | distrelec.ch, bastelgarten.ch |
+| 10 | optional **OLED 0.96"** + Piezo-Buzzer | Rückmeldung „#7 entnommen" | 1 je Block | CHF 5–10 | bastelgarten.ch, play-zone.ch |
+| 11 | **Schranktür-Verriegelung: UniFi Access Ultra** | Person-Auth + Event | — | **vorhanden** | — |
+
+**Hinweise:**
+- Positionen 6–9 (Riegel-Strang) entfallen für die reinen Erkennungs-Fächer — nur für die
+  kritischen (z.B. TG-General, Technikräume) beschaffen. Hybrid = klein anfangen.
+- iButton statt RFID gewählt: billiger, robuster, Multidrop-Bus trivial. RFID nur falls
+  „ohne Einstecken" gewünscht (teurer, Reader je Position).
+- ESP32 meldet via **MQTT** (vorhandene Infra) an `api/routes/schluessel.js`; Türöffnung
+  kommt als **UniFi-Access-Event** dazu → Person ↔ bewegte iButtons verknüpft.
+- Neues DB-Feld `ibutton_id` an `schluessel_exemplar` (Mapping iButton ↔ Schlüssel).
