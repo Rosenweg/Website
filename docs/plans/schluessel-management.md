@@ -6,8 +6,15 @@
 > die jeweilige Verwaltung.
 >
 > **Status:** Konzept (noch kein Code). Baut auf bestehender Infrastruktur auf
-> (`access.html`, UniFi Access / UA Ultra, Schlüsselkasten R9 UG, DB `rosenweg` mit
-> Audit-Trigger, Authentik-Gruppen, WhatsApp-Bot, Mail).
+> (DB `rosenweg` mit Audit-Trigger, Authentik-Gruppen, WhatsApp-Bot, Mail).
+>
+> **Entschieden:** Es wird ein **eigenes, kooperationsweites Modul** gebaut — *nicht*
+> ein Ausbau von `access.html`. Grund: `access.html` ist ein **Eigenbau von/für
+> Rosenweg 9 (STWEG 3)** und bleibt dessen Zutrittsverwaltung. Das Schlüsselregister
+> muss dagegen **alle 7 STWEG + Tiefgarage** abdecken und der ganzen Kooperation gehören.
+> Der physische Schlüsselkasten am R9 wurde bereits mit einem **UniFi Access Ultra zum
+> elektronischen Schloss umgebaut** — dieser existierende Kasten ist der Startpunkt für
+> Ebene 2, wird aber künftig für die Kooperation genutzt.
 
 ---
 
@@ -112,14 +119,17 @@ Schließanlagen-Tausch.
 
 ## 3. Ebene 2 — Physisches Schlüsseldepot am Objekt
 
-Damit auch die Metallstücke bleiben, nicht nur die Daten. Standort ist bereits vorhanden:
-**Schlüsselkasten R9 UG**.
+Damit auch die Metallstücke bleiben, nicht nur die Daten. Standort ist bereits vorhanden
+und bereits elektronisch: der **Schlüsselkasten R9 UG**, den du mit einem **UniFi Access
+Ultra zum elektronischen Schloss umgebaut** hast. Jeder Kasten-Zugriff wird also schon
+heute über UniFi Access authentifiziert und protokolliert.
 
 **Ausbaustufen:**
 
-- **Pragmatisch (heute):** elektronischer Schlüsselkasten/-tresor mit PIN oder — besser —
-  Öffnung über die **bestehende UniFi-Access-NFC**, damit jeder Depot-Zugriff im
-  Zutritts-Log landet. Schlüssel liegen physisch am Objekt, Zugriff ist protokolliert.
+- **Vorhanden (heute):** elektronisch verriegelter Schlüsselkasten R9 UG, Öffnung über
+  UniFi-Access-NFC → Depot-Zugriff landet im Zutritts-Log. Schlüssel liegen physisch am
+  Objekt, Zugriff ist protokolliert. *Offen: Ausweitung/Widmung des Kastens von R9 auf die
+  Kooperation (Berechtigungen, ggf. zweiter Kasten je nach Menge/Wege).*
 - **Professionell (später):** elektronisches Schlüsselschrank-System mit Einzelfach-
   Verriegelung (z.B. Deister keyBox, Traka) — jeder Schlüssel einzeln freigegeben und
   geloggt, direkte Kopplung an das Register aus Ebene 1.
@@ -190,7 +200,7 @@ Dieser Ablauf wird durch das Register erzwungen — er lässt sich nicht mehr �
 | Datenbank | DB `rosenweg`, Audit-Trigger `app.user_email` (schon da) |
 | Auth | Authentik-Gruppen, Muster wie `*-ausschuss` |
 | API | neue Route `api/routes/schluessel.js` (analog `meg.js`, `grundbuch.js`) |
-| Frontend | PWA `pwa/schluessel/` **oder** neuer Tab in `access.html` |
+| Frontend | **eigenes** PWA-Modul `pwa/schluessel/` (kooperationsweit; *nicht* `access.html`, das ist R9-Eigenbau) |
 | Personen | Verknüpfung `halter_person_id` → `personen.html` |
 | Objekte | `schliessanlage.stweg_nr` → `site-config.json` / `objektverwaltung.html` |
 | Benachrichtigung | WhatsApp-Bot + Mail (Ausgabe, Überfälligkeit, Verlust) |
@@ -218,9 +228,12 @@ Dieser Ablauf wird durch das Register erzwungen — er lässt sich nicht mehr �
 
 ## 8. Offene Entscheidungen
 
-- Standort Depot bestätigen (R9 UG ausreichend zentral für alle 7 STWEG + TG?).
-- Eigenes PWA-Modul vs. Tab in `access.html` — sauberer Schnitt vs. „alles Zutritt an
-  einem Ort".
-- Umfang Sicherheitsstufen: Sollen alle Anlagen erfasst werden oder nur Gemeinschaft
-  (Wohnungsschlüssel bleiben bei Eigentümern)?
-- Budget/Bereitschaft für elektronischen Schlüsselschrank (Phase 3) vs. einfacher Tresor.
+- ~~Eigenes Modul vs. Tab in `access.html`~~ → **entschieden: eigenes, kooperationsweites
+  Modul** (`access.html` bleibt R9-Zutritt).
+- Depot: reicht der vorhandene Access-Ultra-Kasten R9 UG für alle 7 STWEG + TG, oder
+  braucht es einen zweiten Standort (Wege/Menge)? Berechtigungen von R9 auf Kooperation
+  ausweiten.
+- Umfang: alle Anlagen erfassen oder nur Gemeinschaft (Wohnungsschlüssel bleiben bei
+  Eigentümern)?
+- Budget/Bereitschaft für elektronischen Schlüsselschrank mit Einzelfach (Phase 3) vs.
+  weiter mit dem vorhandenen Access-Ultra-Kasten.
