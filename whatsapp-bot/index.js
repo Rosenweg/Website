@@ -317,7 +317,11 @@ async function sendViaClient(chatId, body, attachments = []) {
       } catch (e) { console.warn(`[WA] ffmpeg-Konvertierung fehlgeschlagen, sende WAV: ${e.message}`); }
     }
     const media = new MessageMedia(mime, dataB64, filename);
-    sentMsgs.push(await send(media, { caption: a.caption || '', sendAudioAsVoice: mime.startsWith('audio/ogg') }));
+    // Dokumente (alles ausser Bild/Video/Audio) MUESSEN als Dokument gesendet werden
+    // (sendMediaAsDocument/forceDocument) — sonst versucht WA ein Preview zu rendern und
+    // liefert eine LEERE Datei (Ausschuss-„leere Dokumente"-Vorfall 2026-07-13).
+    const isDoc = !/^(image|video|audio)\//i.test(mime);
+    sentMsgs.push(await send(media, { caption: a.caption || '', sendAudioAsVoice: mime.startsWith('audio/ogg'), sendMediaAsDocument: isDoc }));
   }
 
   const sent = sentMsgs.filter(Boolean);
@@ -532,6 +536,34 @@ const healthServer = http.createServer(async (req, res) => {
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ dryRun, count: out.length, messages: out }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+  // Diagnose: laedt die Medien der letzten EIGENEN Nachrichten runter + meldet echte
+  // Dekodier-Groesse + Magic-Bytes — um zu verifizieren dass gesendete Dokumente NICHT leer sind.
+  if (req.url === '/media-check' && req.method === 'POST') {
+    if (req.headers['x-wa-secret'] !== WA_SECRET) { res.writeHead(401); res.end('Unauthorized'); return; }
+    if (!isReady) { res.writeHead(503); res.end('not_ready'); return; }
+    try {
+      let raw = ''; for await (const c of req) raw += c;
+      const { chatId, limit = 15 } = JSON.parse(raw || '{}');
+      const chat = await client.getChatById(chatId);
+      const msgs = await chat.fetchMessages({ limit });
+      const out = [];
+      for (const m of msgs.filter(x => x.fromMe && x.hasMedia)) {
+        let size = 0, magic = '', err = null;
+        try {
+          const md = await m.downloadMedia();
+          if (md && md.data) { const buf = Buffer.from(md.data, 'base64'); size = buf.length; magic = buf.slice(0, 8).toString('latin1').replace(/[^\x20-\x7e]/g, '.'); }
+          else err = 'no-data';
+        } catch (e) { err = e.message; }
+        out.push({ id: m.id?._serialized, ts: new Date(m.timestamp * 1000).toISOString(), type: m.type, size, magic, err });
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ count: out.length, media: out }));
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
