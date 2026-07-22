@@ -32,6 +32,13 @@
 - [ ] **Datenschutz (User: „Alibi-Übung", ignorieren):** in offenen Gruppen sieht/screenshottet eh jeder alles → für den eigenen Kreis unkritisch, solange Archiv-Zugriff begrenzt + Teilnehmer informiert.
 - **NICHT vergessen:** `whatsapp.rosenweg4303.ch` ist Google-Safe-Browsing-geflaggt („Schädlich") — User will es **ignorieren** (dokumentiert, kein To-do).
 
+### Technik-WhatsApp-Alerts fielen 2 Wochen lautlos aus (2026-07-22)
+- [x] **Root Cause:** `resolveTechnikWhatsappGroupId()` (api/lib/whatsapp.js) suchte die Technik-Gruppe über den **flaky `/groups`-Endpoint** des Bots (whatsapp-web.js `getChats` liefert zeitweise leer) → lieferte **seit 2026-07-08 `null`** → `alertMeter`/PBX-Voicemail reihten NICHTS ein (queueWhatsappMessage nur `if(gid)`). Watchdog erkannte die Ausfälle (Logs), aber KEIN WhatsApp. Beweis: letzte `whatsapp_messages` mit source_type='meter-watchdog' = 2026-07-08, obwohl Meter weiter UNREACHABLE.
+- [x] **Fix 1 (Resolver):** `TECHNIK_WA_GROUP_ID=120363407257445046@g.us` (Env, CT128 `/opt/rosenweg-core/compose.yml`) — Resolver bevorzugt feste JID, `/groups` nur Fallback. Commit fbaf446. Verifiziert: Resolver liefert JID. Betraf ALLE Technik-Alerts (Zähler + PBX-Voicemail).
+- [x] **Fix 2 (Send crashte):** Nachdem Fix 1 wieder Alerts einreihte → Versand `failed`: `client.getChatById()` wirft WA-Web-„r"-Fehler (msg=429). `sendViaClient` (whatsapp-bot/index.js) lud bei Gruppen erst den Chat → crashte. Fix: getChatById best-effort try/catch → bei Fehler direkt `client.sendMessage(chatId,…)`. Commit d0084c8.
+- [x] **Fix 3 (Deploy blockiert):** **CT116 disk-full** (`no space left on device`) → neues Bot-Image ließ sich nicht pullen, Bot lief auf altem Code. `docker image/builder prune -af` → 7 GB frei → Image + Fix live. **Wiederkehrend** (viele Image-Pulls) → Auto-Prune-Timer auf CT116 wäre sinnvoll (offen).
+- [ ] **Offene Hardware-Aktion:** r9-eg3 (~3 Tage offline, 100.64.90.75) + r9-haupt (~9,5h, 100.64.90.70) sind physisch tot (smart-me Modbus :502 hängt) → am Gerät T1+T2 ~10s drücken (Neustart). Watchdog alarmiert jetzt wieder.
+
 ### Findings / Risiken
 - **Brute-Force-Fläche PMG-Login:** Edge macht TLS-Passthrough → nginx auf CT230 sieht keine echte Client-IP (alle = Edge `.40`) → nginx-Rate-Limit / fail2ban wirkungslos. `/api2/*/access/ticket` ist extern nötig (Quarantäne-App) → Admin-Passwort-Login extern möglich; Schutz nur via PMG-Login-Delay + starkes Passwort. Admin-**Config** (`/nodes`,`/config`,`/cluster`) bleibt aber 403.
 - **immosense.ch (Hausverwaltung):** hat **kein DMARC** (nur SPF via M365/Mailchimp). Nicht unser Problem, aber notiert (ihre Domain ist für Dritte spoofbar).
