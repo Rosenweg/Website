@@ -291,6 +291,7 @@ const RosenwegNav = {
       { href: 'proxmox-verwaltung.html', label: 'Proxmox', group: 'Infrastruktur', perm: 'proxmox-verwaltung' },
       { href: 'energie-config.html', label: 'Zählerverwaltung', group: 'Infrastruktur', perm: 'energie-config' },
       { href: 'https://mqtt.rosenweg4303.ch/', label: 'MQTT-Browser', group: 'Infrastruktur', perm: 'mqtt' },
+      { href: 'https://whatsapp.rosenweg4303.ch/', label: 'WhatsApp-Gateway', group: 'Infrastruktur', perm: 'whatsapp-bot', aud: ['admin'] },
       { href: 'mail-approval-config.html', label: 'Mail-Freigabe-Regeln', group: 'Mail-Betrieb', perm: 'mail-approval-config' },
       { href: 'mail-templates.html', label: 'Vorlagen', group: 'Mail-Betrieb', perm: 'mail-templates' },
       { href: 'email-log.html', label: 'Mail-Log', group: 'Mail-Betrieb', perm: 'email-log' },
