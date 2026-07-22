@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rosenweg WhatsApp-Gateway</title>
+<style>
+  :root{
+    --bg:#f4f6f9; --card:#ffffff; --border:#e3e8ef; --text:#1f2933; --muted:#667085;
+    --accent:#2563eb; --accent-d:#1d4ed8; --green:#16a34a; --green-bg:#dcfce7;
+    --yellow:#ca8a04; --yellow-bg:#fef9c3; --red:#dc2626; --red-bg:#fee2e2;
+    --shadow:0 1px 3px rgba(16,24,40,.08),0 1px 2px rgba(16,24,40,.04);
+    --radius:12px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f141a; --card:#1a212b; --border:#2a333f; --text:#e5eaf0; --muted:#93a1b3;
+      --accent:#3b82f6; --accent-d:#2563eb; --green:#22c55e; --green-bg:#052e16;
+      --yellow:#eab308; --yellow-bg:#3a2f05; --red:#ef4444; --red-bg:#3a1010;
+      --shadow:0 1px 3px rgba(0,0,0,.4);
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--text); min-height:100vh;
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-text-size-adjust:100%;
+  }
+  a{color:var(--accent)}
+  h1,h2,h3{margin:0}
+  button{font:inherit;cursor:pointer}
+  input,select,textarea{font:inherit}
+
+  /* Header */
+  header{
+    background:var(--card); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:20;
+    padding:.7rem 1rem; display:flex; align-items:center; gap:.75rem; flex-wrap:wrap;
+    padding-top:calc(.7rem + env(safe-area-inset-top));
+  }
+  .brand{display:flex;align-items:center;gap:.55rem;font-weight:700;font-size:1.05rem}
+  .brand .logo{
+    width:30px;height:30px;border-radius:8px;background:var(--green);color:#fff;
+    display:grid;place-items:center;flex:0 0 auto;
+  }
+  .brand .logo svg{width:18px;height:18px;fill:#fff}
+  .spacer{flex:1 1 auto}
+  .status{
+    display:inline-flex;align-items:center;gap:.4rem;padding:.32rem .7rem;border-radius:999px;
+    font-size:.82rem;font-weight:600;white-space:nowrap;
+  }
+  .status .dot{width:9px;height:9px;border-radius:50%;background:currentColor}
+  .status.ok{color:var(--green);background:var(--green-bg)}
+  .status.warn{color:var(--yellow);background:var(--yellow-bg)}
+  .status.bad{color:var(--red);background:var(--red-bg)}
+  .who{font-size:.82rem;color:var(--muted);white-space:nowrap;max-width:40vw;overflow:hidden;text-overflow:ellipsis}
+
+  /* Tabs */
+  nav.tabs{
+    background:var(--card);border-bottom:1px solid var(--border);position:sticky;top:52px;z-index:15;
+    display:flex;gap:.15rem;overflow-x:auto;padding:0 .5rem;-webkit-overflow-scrolling:touch;
+  }
+  nav.tabs button{
+    background:none;border:none;color:var(--muted);padding:.75rem .8rem;font-weight:600;font-size:.9rem;
+    border-bottom:2.5px solid transparent;white-space:nowrap;
+  }
+  nav.tabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+  nav.tabs button .badge{
+    display:inline-block;min-width:18px;padding:0 .3rem;margin-left:.35rem;border-radius:999px;
+    background:var(--accent);color:#fff;font-size:.72rem;line-height:18px;text-align:center;font-weight:700;
+  }
+
+  main{max-width:960px;margin:0 auto;padding:1rem;padding-bottom:4rem}
+  .panel{display:none}
+  .panel.active{display:block}
+
+  .card{
+    background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:1.1rem;margin-bottom:1.1rem;
+  }
+  .card h2{font-size:1.05rem;margin-bottom:.2rem}
+  .card .sub{color:var(--muted);font-size:.86rem;margin:.15rem 0 1rem}
+  .card h3{font-size:.95rem;margin:.2rem 0 .7rem}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:1.1rem}
+  @media (max-width:720px){.grid2{grid-template-columns:1fr}}
+
+  label{display:block;font-size:.82rem;font-weight:600;color:var(--muted);margin:.6rem 0 .25rem}
+  input[type=text],input[type=email],select,textarea{
+    width:100%;padding:.6rem .7rem;border:1px solid var(--border);border-radius:9px;
+    background:var(--bg);color:var(--text);outline:none;
+  }
+  input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.15)}
+  textarea{resize:vertical;min-height:90px}
+  .row{display:flex;gap:.6rem;flex-wrap:wrap}
+  .row > *{flex:1 1 160px}
+  .row.tight > *{flex:0 0 auto}
+
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:.4rem;
+    background:var(--accent);color:#fff;border:none;padding:.6rem 1.1rem;border-radius:9px;font-weight:600;
+  }
+  .btn:hover{background:var(--accent-d)}
+  .btn.sm{padding:.4rem .7rem;font-size:.85rem}
+  .btn.ghost{background:transparent;color:var(--accent);border:1px solid var(--border)}
+  .btn.ghost:hover{background:var(--bg)}
+  .btn.danger{background:transparent;color:var(--red);border:1px solid var(--border)}
+  .btn.danger:hover{background:var(--red-bg)}
+  .btn:disabled{opacity:.55;cursor:not-allowed}
+  .actions{margin-top:1rem;display:flex;gap:.6rem;flex-wrap:wrap}
+
+  /* Lists / tables */
+  .list{display:flex;flex-direction:column;gap:.55rem}
+  .item{
+    display:flex;align-items:center;gap:.75rem;padding:.7rem .85rem;border:1px solid var(--border);
+    border-radius:10px;background:var(--bg);
+  }
+  .item .main{flex:1 1 auto;min-width:0}
+  .item .t{font-weight:600;word-break:break-word}
+  .item .m{color:var(--muted);font-size:.82rem;word-break:break-word}
+  .empty{color:var(--muted);font-size:.88rem;padding:.8rem;text-align:center}
+
+  .chip{display:inline-block;padding:.12rem .5rem;border-radius:6px;font-size:.72rem;font-weight:700;
+    background:var(--border);color:var(--text);text-transform:uppercase;letter-spacing:.02em}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.85em;word-break:break-all}
+
+  .tblwrap{overflow-x:auto;border:1px solid var(--border);border-radius:10px}
+  table{border-collapse:collapse;width:100%;font-size:.86rem}
+  th,td{text-align:left;padding:.55rem .65rem;border-bottom:1px solid var(--border);vertical-align:top}
+  th{color:var(--muted);font-weight:600;white-space:nowrap;background:var(--bg)}
+  tr:last-child td{border-bottom:none}
+  .st{display:inline-block;padding:.1rem .45rem;border-radius:6px;font-size:.72rem;font-weight:700}
+  .st.sent{background:var(--green-bg);color:var(--green)}
+  .st.err{background:var(--red-bg);color:var(--red)}
+  .st.pend{background:var(--yellow-bg);color:var(--yellow)}
+  .st.del{background:var(--border);color:var(--muted)}
+
+  .seg{display:inline-flex;border:1px solid var(--border);border-radius:9px;overflow:hidden}
+  .seg button{background:var(--card);border:none;color:var(--muted);padding:.45rem .9rem;font-weight:600;font-size:.85rem}
+  .seg button.active{background:var(--accent);color:#fff}
+
+  /* QR */
+  .qr-wrap{text-align:center;padding:1rem}
+  .qr-wrap img{width:270px;max-width:80vw;height:auto;border:1px solid var(--border);border-radius:12px;background:#fff;padding:8px}
+  .paired-ok{text-align:center;padding:1.5rem;color:var(--green);font-weight:600;font-size:1.05rem}
+
+  /* Toasts */
+  #toasts{position:fixed;left:50%;transform:translateX(-50%);bottom:1rem;z-index:60;display:flex;
+    flex-direction:column;gap:.5rem;width:min(440px,92vw)}
+  .toast{padding:.7rem .95rem;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);font-size:.9rem;
+    color:#fff;animation:slidein .18s ease}
+  .toast.err{background:#dc2626}
+  .toast.ok{background:#16a34a}
+  .toast.info{background:#334155}
+  @keyframes slidein{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+  /* Key reveal */
+  .keybox{background:var(--yellow-bg);border:1px solid var(--yellow);border-radius:10px;padding:.9rem;margin-bottom:1rem}
+  .keybox .k{font-family:ui-monospace,monospace;font-size:1rem;word-break:break-all;background:var(--card);
+    border:1px solid var(--border);border-radius:8px;padding:.6rem;margin:.5rem 0;user-select:all}
+
+  .loading{color:var(--muted);padding:1rem;text-align:center}
+  .fatal{max-width:520px;margin:4rem auto;text-align:center;padding:2rem}
+  .fatal h2{color:var(--red);margin-bottom:.6rem}
+  .hidden{display:none!important}
+  .hint{font-size:.82rem;color:var(--muted);margin-top:.5rem}
+</style>
+</head>
+<body>
+
+<div id="boot" class="loading" style="padding-top:4rem">Lade…</div>
+
+<div id="app" class="hidden">
+  <header>
+    <div class="brand">
+      <span class="logo"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 2a8 8 0 1 1-4.2 14.8l-.3-.2-3 .8.8-2.9-.2-.3A8 8 0 0 1 12 4zm-3 4c-.3 0-.6.1-.8.4-.3.3-1 1-1 2.4s1 2.8 1.2 3c.1.2 2 3.1 5 4.3 2.4 1 3 .8 3.5.7.6-.1 1.8-.7 2-1.4.3-.7.3-1.3.2-1.4-.1-.1-.3-.2-.6-.4l-2-1c-.3-.1-.5-.2-.7.1l-.7.9c-.1.2-.3.2-.5.1-.3-.1-1.2-.4-2.2-1.3-.8-.7-1.4-1.6-1.5-1.9-.1-.2 0-.4.1-.5l.4-.5c.1-.2.2-.3.3-.5.1-.2 0-.3 0-.5l-.9-2.1c-.2-.5-.4-.5-.6-.5z"/></svg></span>
+      <span>WhatsApp-Gateway</span>
+    </div>
+    <div class="spacer"></div>
+    <span id="statusBadge" class="status warn"><span class="dot"></span><span id="statusText">…</span></span>
+    <span id="whoami" class="who"></span>
+  </header>
+
+  <nav class="tabs" id="tabnav"></nav>
+
+  <main>
+    <!-- Pairing -->
+    <section class="panel" data-tab="pairing">
+      <div class="card">
+        <h2>Verbindung / Pairing</h2>
+        <p class="sub">Scanne den QR-Code mit WhatsApp (Verknüpfte Geräte), um den Bot mit dem WhatsApp-Konto zu verbinden.</p>
+        <div id="pairBody"><div class="loading">Lade QR…</div></div>
+      </div>
+    </section>
+
+    <!-- Weiterleitungen -->
+    <section class="panel" data-tab="forwards">
+      <div class="card">
+        <h2>Weiterleitungen</h2>
+        <p class="sub">Eingehende WhatsApp-Nachrichten dieser Quelle werden zusätzlich an die E-Mail weitergeleitet (z. B. <b>archiv@rosenweg4303.ch</b> zum Archivieren).</p>
+        <div id="fwdList" class="list"><div class="loading">Lade…</div></div>
+      </div>
+      <div class="card">
+        <h3>Neue Weiterleitung</h3>
+        <div class="row">
+          <div style="flex:0 0 150px">
+            <label>Quell-Typ</label>
+            <select id="fwdKind">
+              <option value="group">Gruppe (Name)</option>
+              <option value="jid">Gruppe (JID)</option>
+              <option value="number">Nummer</option>
+            </select>
+          </div>
+          <div id="fwdGroupWrap" style="flex:2 1 220px">
+            <label>Gruppe wählen</label>
+            <select id="fwdGroupSel"><option value="">– Gruppen laden… –</option></select>
+          </div>
+          <div id="fwdKeyWrap" class="hidden" style="flex:2 1 220px">
+            <label id="fwdKeyLabel">Quelle</label>
+            <input type="text" id="fwdKey" placeholder="z. B. 41791234567">
+          </div>
+          <div style="flex:2 1 220px">
+            <label>Ziel-E-Mail</label>
+            <input type="email" id="fwdEmail" placeholder="archiv@rosenweg4303.ch">
+          </div>
+        </div>
+        <label>Notiz (optional)</label>
+        <input type="text" id="fwdNote" placeholder="z. B. Hauswartung">
+        <div class="actions"><button class="btn" id="fwdAdd">Weiterleitung hinzufügen</button></div>
+      </div>
+    </section>
+
+    <!-- Senden -->
+    <section class="panel" data-tab="send">
+      <div class="card">
+        <h2>Nachricht senden</h2>
+        <p class="sub">Sende eine WhatsApp-Nachricht an eine Gruppe, Nummer, JID oder einen Alias.</p>
+        <label>An (Gruppenname / Nummer / JID / Alias)</label>
+        <input type="text" id="sendTo" placeholder="z. B. Hauswartung oder 41791234567">
+        <label>Titel (optional)</label>
+        <input type="text" id="sendTitle" placeholder="Betreff / fett vorangestellt">
+        <label>Text</label>
+        <textarea id="sendBody" placeholder="Nachrichtentext…"></textarea>
+        <div class="actions"><button class="btn" id="sendBtn">Senden</button></div>
+      </div>
+    </section>
+
+    <!-- Nachrichten -->
+    <section class="panel" data-tab="messages">
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;margin-bottom:.9rem">
+          <h2 style="margin:0">Nachrichten</h2>
+          <div class="spacer"></div>
+          <div class="seg" id="msgFilter">
+            <button data-dir="inbound" class="active">Eingehend</button>
+            <button data-dir="outbound">Ausgehend</button>
+          </div>
+          <button class="btn ghost sm" id="msgReload">Aktualisieren</button>
+        </div>
+        <div id="msgBody"><div class="loading">Lade…</div></div>
+      </div>
+    </section>
+
+    <!-- Gruppen -->
+    <section class="panel" data-tab="groups">
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:.8rem;margin-bottom:.6rem">
+          <h2 style="margin:0">Gruppen</h2>
+          <div class="spacer"></div>
+          <button class="btn ghost sm" id="grpReload">Aktualisieren</button>
+        </div>
+        <p class="sub">Alle WhatsApp-Gruppen des Bots. Komfort: direkt eine Weiterleitung an archiv@ anlegen.</p>
+        <div id="grpBody"><div class="loading">Lade…</div></div>
+      </div>
+    </section>
+
+    <!-- SMTP Absicherung -->
+    <section class="panel" data-tab="smtp">
+      <div class="card">
+        <h2>E-Mail → WhatsApp Absicherung</h2>
+        <p class="sub" id="smtpHint">Eine E-Mail an <code>&lt;lokalteil&gt;@&lt;gateway&gt;</code> wird als WhatsApp gesendet, wenn der Absender ODER die Quell-IP erlaubt ist.</p>
+        <div class="grid2">
+          <div>
+            <h3>Absender-Allowlist <span id="sndEnf" class="chip"></span></h3>
+            <div id="sndList" class="list"><div class="loading">Lade…</div></div>
+            <label>Adresse / @domain / domain</label>
+            <div class="row tight">
+              <input type="text" id="sndAddr" placeholder="foo@bar.ch, @bar.ch oder bar.ch" style="flex:1 1 auto">
+              <button class="btn sm" id="sndAdd">＋</button>
+            </div>
+          </div>
+          <div>
+            <h3>IP-Allowlist <span id="ipEnf" class="chip"></span></h3>
+            <div id="ipList" class="list"><div class="loading">Lade…</div></div>
+            <label>IPv4-Adresse</label>
+            <div class="row tight">
+              <input type="text" id="ipAddr" placeholder="z. B. 100.64.2.31" style="flex:1 1 auto">
+              <button class="btn sm" id="ipAdd">＋</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Aliase -->
+    <section class="panel" data-tab="aliases">
+      <div class="card">
+        <h2>Aliase</h2>
+        <p class="sub">Bilde eine E-Mail-Adresse auf ein festes WhatsApp-Ziel ab (Nummer, Gruppe oder JID).</p>
+        <div id="aliasList" class="list"><div class="loading">Lade…</div></div>
+      </div>
+      <div class="card">
+        <h3>Neuer Alias</h3>
+        <div class="row">
+          <div style="flex:2 1 220px"><label>E-Mail-Adresse</label><input type="text" id="alAddr" placeholder="hauswart@gateway"></div>
+          <div style="flex:0 0 150px">
+            <label>Ziel-Typ</label>
+            <select id="alKind"><option value="number">Nummer</option><option value="group">Gruppe</option><option value="jid">JID</option></select>
+          </div>
+          <div style="flex:2 1 220px"><label>Ziel</label><input type="text" id="alTarget" placeholder="41791234567 / Gruppenname / JID"></div>
+        </div>
+        <label>Notiz (optional)</label>
+        <input type="text" id="alNote">
+        <div class="actions"><button class="btn" id="alAdd">Alias hinzufügen</button></div>
+      </div>
+    </section>
+
+    <!-- API Keys -->
+    <section class="panel" data-tab="keys">
+      <div class="card">
+        <h2>API-Keys</h2>
+        <p class="sub">Maschinen-Keys für den <code>/gateway/send</code>-Endpoint. Ein neuer Key ist nur einmal sichtbar.</p>
+        <div id="keyReveal"></div>
+        <div id="keyList" class="list"><div class="loading">Lade…</div></div>
+      </div>
+      <div class="card">
+        <h3>Neuen Key erstellen</h3>
+        <div class="row">
+          <div style="flex:2 1 200px"><label>Name</label><input type="text" id="keyName" placeholder="z. B. iobroker"></div>
+          <div style="flex:1 1 160px"><label>Scopes</label><input type="text" id="keyScopes" placeholder="* oder whatsapp"></div>
+        </div>
+        <div class="actions"><button class="btn" id="keyAdd">Key erstellen</button></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="fatal" class="hidden"></div>
+<div id="toasts"></div>
+
+<script src="authentik-auth.js"></script>
+<script>
+"use strict";
+(function(){
+  var health = null;
+
+  // ── Toast ──────────────────────────────────────────────────────────────
+  function toast(msg, type){
+    var box = document.getElementById('toasts');
+    var el = document.createElement('div');
+    el.className = 'toast ' + (type || 'info');
+    el.textContent = msg;
+    box.appendChild(el);
+    setTimeout(function(){ el.style.transition='opacity .3s'; el.style.opacity='0'; setTimeout(function(){el.remove();}, 300); }, type==='err'?6000:3200);
+  }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+
+  // ── API helper ─────────────────────────────────────────────────────────
+  function api(method, path, body){
+    var token = AuthentikAuth.getToken();
+    var opts = { method: method, headers: { 'Authorization': 'Bearer ' + (token||'') } };
+    if (body !== undefined){ opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+    return fetch(path, opts).then(function(resp){
+      if (resp.status === 401){ AuthentikAuth.login(); throw new Error('Nicht angemeldet'); }
+      return resp.text().then(function(txt){
+        var data = {};
+        try { data = txt ? JSON.parse(txt) : {}; } catch(e){ data = {}; }
+        if (!resp.ok){
+          var msg = data && data.error ? data.error : ('Fehler ' + resp.status);
+          if (resp.status === 403) msg = 'Nur Technik/Präsident: ' + (data.error || 'Zugriff verweigert');
+          var err = new Error(msg); err.status = resp.status; err.data = data; throw err;
+        }
+        return data;
+      });
+    });
+  }
+  function apiErr(e){ if (e && e.message && e.message !== 'Nicht angemeldet') toast(e.message, 'err'); }
+
+  // ── Tabs ───────────────────────────────────────────────────────────────
+  var TABS = [
+    { id:'pairing',  label:'Pairing' },
+    { id:'forwards', label:'Weiterleitungen' },
+    { id:'send',     label:'Senden' },
+    { id:'messages', label:'Nachrichten' },
+    { id:'groups',   label:'Gruppen' },
+    { id:'smtp',     label:'E-Mail→WA' },
+    { id:'aliases',  label:'Aliase' },
+    { id:'keys',     label:'API-Keys' }
+  ];
+  var current = null;
+  function buildTabs(){
+    var nav = document.getElementById('tabnav');
+    nav.innerHTML = '';
+    TABS.forEach(function(t){
+      var b = document.createElement('button');
+      b.textContent = t.label; b.dataset.tab = t.id;
+      b.onclick = function(){ showTab(t.id); };
+      nav.appendChild(b);
+    });
+  }
+  function showTab(id){
+    current = id;
+    Array.prototype.forEach.call(document.querySelectorAll('nav.tabs button'), function(b){ b.classList.toggle('active', b.dataset.tab===id); });
+    Array.prototype.forEach.call(document.querySelectorAll('.panel'), function(p){ p.classList.toggle('active', p.dataset.tab===id); });
+    if (history.replaceState) history.replaceState(null,'','#'+id);
+    loadTab(id);
+  }
+  function loadTab(id){
+    if (id==='pairing') loadPairing();
+    else if (id==='forwards') loadForwards();
+    else if (id==='messages') loadMessages();
+    else if (id==='groups') loadGroups();
+    else if (id==='smtp') loadSmtp();
+    else if (id==='aliases') loadAliases();
+    else if (id==='keys') loadKeys();
+  }
+
+  // ── Header status ──────────────────────────────────────────────────────
+  function refreshHealth(){
+    return fetch('/gateway/health').then(function(r){return r.json();}).then(function(h){
+      health = h;
+      var badge = document.getElementById('statusBadge'), txt = document.getElementById('statusText');
+      badge.className = 'status ' + (h.wa_ready ? 'ok' : (h.needs_pairing ? 'warn' : 'bad'));
+      txt.textContent = h.wa_ready ? 'verbunden' : (h.needs_pairing ? 'Pairing nötig' : 'getrennt');
+      // Show/hide pairing tab
+      var pairBtn = document.querySelector('nav.tabs button[data-tab="pairing"]');
+      if (pairBtn) pairBtn.classList.toggle('hidden', !!h.wa_ready);
+      return h;
+    }).catch(function(){
+      var badge = document.getElementById('statusBadge'), txt = document.getElementById('statusText');
+      badge.className = 'status bad'; txt.textContent = 'offline';
+    });
+  }
+
+  // ── Pairing ────────────────────────────────────────────────────────────
+  var pairTimer = null;
+  function loadPairing(){
+    if (pairTimer){ clearInterval(pairTimer); pairTimer = null; }
+    fetchQr();
+    pairTimer = setInterval(function(){ if (current!=='pairing'){ clearInterval(pairTimer); pairTimer=null; return; } fetchQr(); }, 5000);
+  }
+  function fetchQr(){
+    api('GET','/gateway/qr').then(function(d){
+      var body = document.getElementById('pairBody');
+      if (d.paired){
+        body.innerHTML = '<div class="paired-ok">✓ Verbunden'+(health && health.smtp_port?'':'')+'</div>';
+        if (pairTimer){ clearInterval(pairTimer); pairTimer=null; }
+        refreshHealth();
+      } else if (d.qr_png_base64){
+        body.innerHTML = '<div class="qr-wrap"><img alt="QR-Code" src="data:image/png;base64,'+esc(d.qr_png_base64)+'"><p class="hint">Aktualisiert automatisch alle 5 Sekunden.</p></div>';
+      } else {
+        body.innerHTML = '<div class="loading">Warte auf QR-Code vom WhatsApp-Client…</div>';
+      }
+    }).catch(apiErr);
+  }
+
+  // ── Forwards ───────────────────────────────────────────────────────────
+  var groupsCache = null;
+  function loadForwards(){
+    api('GET','/gateway/ui/forwards').then(function(d){
+      var el = document.getElementById('fwdList');
+      var f = d.forwards || [];
+      if (!f.length){ el.innerHTML = '<div class="empty">Noch keine Weiterleitungen.</div>'; return; }
+      el.innerHTML = '';
+      f.forEach(function(r){
+        var it = document.createElement('div'); it.className='item';
+        it.innerHTML = '<div class="main"><div class="t">'+esc(r.email)+'</div>'+
+          '<div class="m"><span class="chip">'+esc(r.kind)+'</span> <span class="mono">'+esc(r.match_key)+'</span>'+
+          (r.note?' · '+esc(r.note):'')+'</div></div>';
+        var del = document.createElement('button'); del.className='btn danger sm'; del.textContent='Löschen';
+        del.onclick = function(){ if(!confirm('Weiterleitung löschen?'))return;
+          api('DELETE','/gateway/ui/forwards/'+r.id).then(function(){ toast('Gelöscht','ok'); loadForwards(); }).catch(apiErr); };
+        it.appendChild(del); el.appendChild(it);
+      });
+    }).catch(apiErr);
+    ensureGroups();
+  }
+  function ensureGroups(force){
+    var sel = document.getElementById('fwdGroupSel');
+    if (groupsCache && !force){ fillGroupSel(sel); return; }
+    api('GET','/gateway/ui/groups').then(function(d){ groupsCache = d.groups||[]; fillGroupSel(sel); })
+      .catch(function(e){ sel.innerHTML = '<option value="">'+(e.status===503?'WhatsApp nicht bereit':'Gruppen nicht ladbar')+'</option>'; });
+  }
+  function fillGroupSel(sel){
+    if (!groupsCache) return;
+    sel.innerHTML = '<option value="">– Gruppe wählen –</option>';
+    groupsCache.forEach(function(g){
+      var o = document.createElement('option'); o.value = g.id||g.chatId||''; o.dataset.name = g.name||''; o.textContent = g.name||'(ohne Name)';
+      sel.appendChild(o);
+    });
+  }
+  function syncFwdInputs(){
+    var kind = document.getElementById('fwdKind').value;
+    var gWrap = document.getElementById('fwdGroupWrap'), kWrap = document.getElementById('fwdKeyWrap');
+    if (kind==='number'){
+      gWrap.classList.add('hidden'); kWrap.classList.remove('hidden');
+      document.getElementById('fwdKeyLabel').textContent = 'Telefonnummer';
+      document.getElementById('fwdKey').placeholder = 'z. B. 41791234567';
+    } else {
+      gWrap.classList.remove('hidden'); kWrap.classList.add('hidden');
+    }
+  }
+  function addForward(){
+    var kind = document.getElementById('fwdKind').value;
+    var email = document.getElementById('fwdEmail').value.trim();
+    var note = document.getElementById('fwdNote').value.trim();
+    var match_key = '';
+    if (kind==='number'){ match_key = document.getElementById('fwdKey').value.trim(); }
+    else {
+      var sel = document.getElementById('fwdGroupSel');
+      var opt = sel.options[sel.selectedIndex];
+      if (!opt || !opt.value){ toast('Bitte eine Gruppe wählen','err'); return; }
+      match_key = (kind==='group') ? (opt.dataset.name||'') : opt.value; // Name bei group, JID bei jid
+    }
+    if (!match_key){ toast('Quelle fehlt','err'); return; }
+    if (!email){ toast('Ziel-E-Mail fehlt','err'); return; }
+    api('POST','/gateway/ui/forwards',{ kind:kind, match_key:match_key, email:email, note:note||undefined })
+      .then(function(){ toast('Weiterleitung angelegt','ok');
+        document.getElementById('fwdEmail').value=''; document.getElementById('fwdNote').value=''; document.getElementById('fwdKey').value='';
+        loadForwards(); }).catch(apiErr);
+  }
+
+  // ── Send ───────────────────────────────────────────────────────────────
+  function doSend(){
+    var to = document.getElementById('sendTo').value.trim();
+    var title = document.getElementById('sendTitle').value.trim();
+    var body = document.getElementById('sendBody').value;
+    if (!to){ toast('Empfänger fehlt','err'); return; }
+    if (!body.trim()){ toast('Text fehlt','err'); return; }
+    var btn = document.getElementById('sendBtn'); btn.disabled=true;
+    api('POST','/gateway/ui/send',{ to:to, title:title||undefined, body:body })
+      .then(function(){ toast('Gesendet','ok'); document.getElementById('sendBody').value=''; document.getElementById('sendTitle').value=''; })
+      .catch(apiErr).then(function(){ btn.disabled=false; });
+  }
+
+  // ── Messages ───────────────────────────────────────────────────────────
+  var msgDir = 'inbound';
+  function statusClass(m){
+    if (m.deleted_at) return 'del';
+    if (m.status==='sent' || m.sent_at) return 'sent';
+    if (m.status==='error' || m.error) return 'err';
+    return 'pend';
+  }
+  function statusLabel(m){
+    if (m.deleted_at) return 'gelöscht';
+    if (m.error) return 'Fehler';
+    return m.status || (m.sent_at?'sent':'—');
+  }
+  function fmtTime(s){ if(!s) return '—'; var d=new Date(s); if(isNaN(d)) return esc(s);
+    return d.toLocaleString('de-CH',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); }
+  function loadMessages(){
+    api('GET','/gateway/ui/messages?direction='+msgDir+'&limit=100').then(function(d){
+      var box = document.getElementById('msgBody'); var msgs = d.messages||[];
+      if (!msgs.length){ box.innerHTML = '<div class="empty">Keine Nachrichten.</div>'; return; }
+      var rows = msgs.map(function(m){
+        var who = msgDir==='inbound' ? (m.sender||'—') : (m.target||'—');
+        var short = (m.body||'').replace(/\s+/g,' ').trim(); if (short.length>70) short = short.slice(0,70)+'…';
+        var delBtn = (msgDir==='outbound' && m.whatsapp_msg_id && !m.deleted_at)
+          ? '<button class="btn danger sm" data-del="'+m.id+'">Löschen</button>' : '';
+        return '<tr><td>'+fmtTime(m.created_at)+'</td>'+
+          '<td class="mono">'+esc(who)+(m.target_kind?' <span class="chip">'+esc(m.target_kind)+'</span>':'')+'</td>'+
+          '<td>'+(m.subject?'<b>'+esc(m.subject)+'</b><br>':'')+esc(short)+'</td>'+
+          '<td><span class="st '+statusClass(m)+'">'+esc(statusLabel(m))+'</span>'+
+            (m.error?'<div class="m" style="color:var(--red);font-size:.72rem">'+esc(m.error)+'</div>':'')+'</td>'+
+          '<td>'+delBtn+'</td></tr>';
+      }).join('');
+      box.innerHTML = '<div class="tblwrap"><table><thead><tr><th>Zeit</th><th>'+
+        (msgDir==='inbound'?'Absender':'Ziel')+'</th><th>Text</th><th>Status</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+      Array.prototype.forEach.call(box.querySelectorAll('[data-del]'), function(b){
+        b.onclick = function(){ if(!confirm('WhatsApp-Nachricht für alle löschen?'))return;
+          api('POST','/gateway/ui/messages/'+b.dataset.del+'/delete').then(function(){ toast('Gelöscht','ok'); loadMessages(); }).catch(apiErr); };
+      });
+    }).catch(function(e){ document.getElementById('msgBody').innerHTML='<div class="empty">'+esc(e.message)+'</div>'; apiErr(e); });
+  }
+
+  // ── Groups ─────────────────────────────────────────────────────────────
+  function loadGroups(){
+    var box = document.getElementById('grpBody');
+    box.innerHTML = '<div class="loading">Lade…</div>';
+    api('GET','/gateway/ui/groups').then(function(d){
+      groupsCache = d.groups||[];
+      if (!groupsCache.length){ box.innerHTML = '<div class="empty">Keine Gruppen.</div>'; return; }
+      box.innerHTML = '';
+      var list = document.createElement('div'); list.className='list';
+      groupsCache.forEach(function(g){
+        var jid = g.id||g.chatId||'';
+        var it = document.createElement('div'); it.className='item';
+        it.innerHTML = '<div class="main"><div class="t">'+esc(g.name||'(ohne Name)')+
+          (g.isParentGroup?' <span class="chip">Community</span>':'')+'</div>'+
+          '<div class="m mono">'+esc(jid)+(g.participants?(' · '+g.participants+' Teiln.'):'')+'</div></div>';
+        var b = document.createElement('button'); b.className='btn ghost sm'; b.textContent='→ archiv@';
+        b.title = 'Weiterleitung an archiv@rosenweg4303.ch anlegen';
+        b.onclick = function(){ if(!confirm('Weiterleitung dieser Gruppe an archiv@rosenweg4303.ch anlegen?'))return;
+          api('POST','/gateway/ui/forwards',{ kind:'jid', match_key:jid, email:'archiv@rosenweg4303.ch', note:g.name||undefined })
+            .then(function(){ toast('Weiterleitung angelegt','ok'); }).catch(apiErr); };
+        it.appendChild(b); list.appendChild(it);
+      });
+      box.appendChild(list);
+    }).catch(function(e){ box.innerHTML='<div class="empty">'+(e.status===503?'WhatsApp nicht bereit — bitte zuerst pairen.':esc(e.message))+'</div>'; });
+  }
+
+  // ── SMTP allowlists ────────────────────────────────────────────────────
+  function loadSmtp(){
+    // senders
+    api('GET','/gateway/ui/smtp-senders').then(function(d){
+      var el = document.getElementById('sndList'); var s = d.senders||[];
+      document.getElementById('sndEnf').textContent = d.enforced ? 'aktiv' : 'inaktiv';
+      if (!s.length){ el.innerHTML='<div class="empty">Keine Einträge.</div>'; return; }
+      el.innerHTML=''; s.forEach(function(r){ el.appendChild(allowItem(r.addr, r.note, function(){
+        api('DELETE','/gateway/ui/smtp-senders/'+encodeURIComponent(r.addr)).then(function(){ toast('Entfernt','ok'); loadSmtp(); }).catch(apiErr); })); });
+    }).catch(apiErr);
+    // ips
+    api('GET','/gateway/ui/smtp-ips').then(function(d){
+      var el = document.getElementById('ipList'); var s = d.ips||[];
+      document.getElementById('ipEnf').textContent = d.enforced ? 'aktiv' : 'inaktiv';
+      if (d.smtp_port) document.getElementById('smtpHint').innerHTML =
+        'Eine E-Mail an <code>&lt;lokalteil&gt;@&lt;gateway&gt;</code> (SMTP-Port '+esc(d.smtp_port)+') wird als WhatsApp gesendet, wenn der Absender ODER die Quell-IP erlaubt ist.';
+      if (!s.length){ el.innerHTML='<div class="empty">Keine Einträge.</div>'; return; }
+      el.innerHTML=''; s.forEach(function(r){ el.appendChild(allowItem(r.ip, r.note, function(){
+        api('DELETE','/gateway/ui/smtp-ips/'+encodeURIComponent(r.ip)).then(function(){ toast('Entfernt','ok'); loadSmtp(); }).catch(apiErr); })); });
+    }).catch(apiErr);
+  }
+  function allowItem(val, note, onDel){
+    var it = document.createElement('div'); it.className='item';
+    it.innerHTML = '<div class="main"><div class="t mono">'+esc(val)+'</div>'+(note?'<div class="m">'+esc(note)+'</div>':'')+'</div>';
+    var b = document.createElement('button'); b.className='btn danger sm'; b.textContent='✕'; b.onclick=onDel; it.appendChild(b);
+    return it;
+  }
+
+  // ── Aliases ────────────────────────────────────────────────────────────
+  function loadAliases(){
+    api('GET','/gateway/ui/aliases').then(function(d){
+      var el = document.getElementById('aliasList'); var a = d.aliases||[];
+      if (!a.length){ el.innerHTML='<div class="empty">Keine Aliase.</div>'; return; }
+      el.innerHTML=''; a.forEach(function(r){
+        var it = document.createElement('div'); it.className='item';
+        it.innerHTML = '<div class="main"><div class="t">'+esc(r.address)+' → <span class="mono">'+esc(r.target)+'</span></div>'+
+          '<div class="m"><span class="chip">'+esc(r.target_kind)+'</span>'+(r.note?' · '+esc(r.note):'')+'</div></div>';
+        var b = document.createElement('button'); b.className='btn danger sm'; b.textContent='Löschen';
+        b.onclick = function(){ if(!confirm('Alias löschen?'))return;
+          api('DELETE','/gateway/ui/aliases/'+encodeURIComponent(r.address)).then(function(){ toast('Gelöscht','ok'); loadAliases(); }).catch(apiErr); };
+        it.appendChild(b); el.appendChild(it);
+      });
+    }).catch(apiErr);
+  }
+  function addAlias(){
+    var address = document.getElementById('alAddr').value.trim();
+    var target = document.getElementById('alTarget').value.trim();
+    var kind = document.getElementById('alKind').value;
+    var note = document.getElementById('alNote').value.trim();
+    if (!address || !target){ toast('Adresse und Ziel erforderlich','err'); return; }
+    api('POST','/gateway/ui/aliases',{ address:address, target:target, target_kind:kind, note:note||undefined })
+      .then(function(){ toast('Alias angelegt','ok');
+        document.getElementById('alAddr').value=''; document.getElementById('alTarget').value=''; document.getElementById('alNote').value='';
+        loadAliases(); }).catch(apiErr);
+  }
+
+  // ── Keys ───────────────────────────────────────────────────────────────
+  function loadKeys(){
+    api('GET','/gateway/ui/keys').then(function(d){
+      var el = document.getElementById('keyList'); var k = d.keys||[];
+      var active = k.filter(function(r){ return !r.revoked_at; });
+      if (!active.length){ el.innerHTML='<div class="empty">Keine aktiven Keys.</div>'; return; }
+      el.innerHTML=''; active.forEach(function(r){
+        var pfx = r.prefix || r.key_prefix || '';
+        var it = document.createElement('div'); it.className='item';
+        it.innerHTML = '<div class="main"><div class="t">'+esc(r.name)+' <span class="mono">'+esc(pfx)+'…</span></div>'+
+          '<div class="m">Scopes: '+esc(r.scopes||'*')+' · zuletzt: '+fmtTime(r.last_used_at)+'</div></div>';
+        var b = document.createElement('button'); b.className='btn danger sm'; b.textContent='Widerrufen';
+        b.onclick = function(){ if(!confirm('Key "'+r.name+'" widerrufen?'))return;
+          api('DELETE','/gateway/ui/keys/'+r.id).then(function(){ toast('Widerrufen','ok'); loadKeys(); }).catch(apiErr); };
+        it.appendChild(b); el.appendChild(it);
+      });
+    }).catch(apiErr);
+  }
+  function addKey(){
+    var name = document.getElementById('keyName').value.trim();
+    var scopes = document.getElementById('keyScopes').value.trim();
+    if (!name){ toast('Name erforderlich','err'); return; }
+    api('POST','/gateway/ui/keys',{ name:name, scopes:scopes||undefined }).then(function(d){
+      document.getElementById('keyName').value=''; document.getElementById('keyScopes').value='';
+      var rv = document.getElementById('keyReveal');
+      rv.innerHTML = '<div class="keybox"><b>Neuer API-Key — nur jetzt sichtbar!</b><div class="k" id="revealK">'+esc(d.key)+'</div>'+
+        '<button class="btn sm" id="copyK">Kopieren</button> <button class="btn ghost sm" id="hideK">Ausblenden</button></div>';
+      document.getElementById('copyK').onclick = function(){
+        var t = d.key;
+        if (navigator.clipboard) navigator.clipboard.writeText(t).then(function(){ toast('Kopiert','ok'); }, function(){ toast('Kopieren fehlgeschlagen','err'); });
+        else toast('Zwischenablage nicht verfügbar','err');
+      };
+      document.getElementById('hideK').onclick = function(){ rv.innerHTML=''; };
+      loadKeys();
+    }).catch(apiErr);
+  }
+
+  // ── Wire up events ─────────────────────────────────────────────────────
+  function wire(){
+    document.getElementById('fwdKind').onchange = syncFwdInputs;
+    document.getElementById('fwdAdd').onclick = addForward;
+    document.getElementById('sendBtn').onclick = doSend;
+    document.getElementById('msgReload').onclick = loadMessages;
+    Array.prototype.forEach.call(document.querySelectorAll('#msgFilter button'), function(b){
+      b.onclick = function(){ msgDir=b.dataset.dir;
+        Array.prototype.forEach.call(document.querySelectorAll('#msgFilter button'), function(x){ x.classList.toggle('active', x===b); });
+        loadMessages(); };
+    });
+    document.getElementById('grpReload').onclick = function(){ groupsCache=null; loadGroups(); };
+    document.getElementById('sndAdd').onclick = function(){
+      var v = document.getElementById('sndAddr').value.trim(); if(!v){ toast('Adresse fehlt','err'); return; }
+      api('POST','/gateway/ui/smtp-senders',{ addr:v }).then(function(){ toast('Hinzugefügt','ok'); document.getElementById('sndAddr').value=''; loadSmtp(); }).catch(apiErr); };
+    document.getElementById('ipAdd').onclick = function(){
+      var v = document.getElementById('ipAddr').value.trim(); if(!v){ toast('IP fehlt','err'); return; }
+      api('POST','/gateway/ui/smtp-ips',{ ip:v }).then(function(){ toast('Hinzugefügt','ok'); document.getElementById('ipAddr').value=''; loadSmtp(); }).catch(apiErr); };
+    document.getElementById('alAdd').onclick = addAlias;
+    document.getElementById('keyAdd').onclick = addKey;
+    syncFwdInputs();
+  }
+
+  // ── Boot ───────────────────────────────────────────────────────────────
+  function fatal(title, msg){
+    document.getElementById('boot').classList.add('hidden');
+    document.getElementById('app').classList.add('hidden');
+    var f = document.getElementById('fatal'); f.classList.remove('hidden');
+    f.innerHTML = '<div class="fatal"><h2>'+esc(title)+'</h2><p>'+esc(msg)+'</p></div>';
+  }
+
+  AuthentikAuth.init({ requireAuth: true }).then(function(user){
+    if (!user) return; // init() redirects to Authentik login
+    document.getElementById('boot').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    buildTabs(); wire();
+    // whoami via gateway (authoritative Technik/Präsident-Check)
+    api('GET','/gateway/ui/whoami').then(function(w){
+      document.getElementById('whoami').textContent = w.name || w.email || '';
+      document.getElementById('whoami').title = w.email || '';
+    }).catch(function(e){
+      if (e.status === 403){ fatal('Kein Zugriff', 'Diese Verwaltung ist nur für Technik/Präsident zugänglich.'); throw e; }
+      apiErr(e);
+    });
+    refreshHealth().then(function(){
+      var initial = (location.hash||'').replace('#','');
+      var valid = TABS.some(function(t){ return t.id===initial; });
+      if (initial==='pairing' && health && health.wa_ready) valid=false;
+      showTab(valid ? initial : 'forwards');
+    });
+    setInterval(refreshHealth, 15000);
+  }).catch(function(e){
+    console.error(e);
+    if (!document.getElementById('fatal').classList.contains('hidden')) return;
+    fatal('Anmeldung fehlgeschlagen', (e && e.message) || 'Unbekannter Fehler');
+  });
+})();
+</script>
+</body>
+</html>

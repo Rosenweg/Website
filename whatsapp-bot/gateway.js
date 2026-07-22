@@ -41,6 +41,10 @@ const NOTIFY_FROM       = process.env.GW_NOTIFY_FROM || 'whatsapp-gateway@rosenw
 const REPLY_DOMAIN      = process.env.GW_REPLY_DOMAIN || (NOTIFY_FROM.split('@')[1] || 'rosenweg4303.ch');
 // WA->Mail-Weiterleitung global an/aus (Default an, sobald ein Relay gesetzt ist).
 const WA_TO_MAIL        = process.env.GW_WA_TO_MAIL !== '0';
+// Catch-all-Archiv: ALLE eingehenden GRUPPEN-Nachrichten werden (zusaetzlich zu den
+// wa_forwards-Regeln) an diese Adresse weitergeleitet — deckt alle + kuenftige Gruppen
+// ohne Pflege ab. Leer = aus. Z.B. archiv@rosenweg4303.ch.
+const ARCHIVE_ALL_GROUPS = (process.env.WA_ARCHIVE_ALL_GROUPS || '').trim().toLowerCase();
 
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const nowIso = () => new Date().toISOString();
@@ -610,6 +614,10 @@ function startGateway(botCore) {
         const e = String(r.email || '').trim().toLowerCase();
         if (e && !seen.has(e)) { seen.add(e); emails.push(e); }
       }
+    }
+    // Catch-all: alle Gruppen-Nachrichten zusaetzlich ins Archiv (deckt auch neue Gruppen).
+    if (isGroup && ARCHIVE_ALL_GROUPS && !seen.has(ARCHIVE_ALL_GROUPS)) {
+      seen.add(ARCHIVE_ALL_GROUPS); emails.push(ARCHIVE_ALL_GROUPS);
     }
     if (!emails.length) return;
     const num = isGroup ? null : ((phone ? phone.replace(/\D/g, '') : '') || String(chatId || '').split('@')[0].replace(/\D/g, ''));

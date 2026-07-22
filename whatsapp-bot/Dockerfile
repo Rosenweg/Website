@@ -41,7 +41,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 make g+
   && npm install --omit=dev \
   && apt-get purge -y python3 make g++ && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 COPY whatsapp-bot/index.js whatsapp-bot/gateway.js ./
-# (Gateway-Web-UI entfernt — laeuft jetzt in einem eigenen Container.)
+# Gateway-Web-UI (statisch, wird von gateway.js via express.static('public') serviert).
+COPY whatsapp-bot/public ./public
 
 # Session-Verzeichnis (Volume-Mount empfohlen)
 RUN mkdir -p /data && chown -R node:node /data /app
