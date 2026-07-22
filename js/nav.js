@@ -44,7 +44,7 @@ const SERVICES_GROUPS = [
     title: 'WhatsApp & Meldungen',
     icon: '💬',
     items: [
-      { label: 'WhatsApp', href: 'https://whatsapp.rosenweg4303.ch/', activeKey: 'whatsapp-bot', perm: 'whatsapp-bot' },
+      { label: 'WhatsApp-Gateway', href: 'https://whatsapp.rosenweg4303.ch/', activeKey: 'whatsapp-bot', permAny: 'technik,praesident' },
       { label: 'PBX (Telefonanlage)', href: 'https://pbx.rosenweg4303.ch', activeKey: 'pbx-admin', perm: 'pbx-admin' },
       { label: 'Reklamationen', href: 'reklamationen.html', activeKey: 'reklamationen', perm: 'reklamationen' },
       { label: 'Melde-Orte (QR-Codes)', href: 'melde-orte.html', activeKey: 'melde-orte', perm: 'reklamationen' },

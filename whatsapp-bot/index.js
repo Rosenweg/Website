@@ -301,7 +301,13 @@ async function sendViaClient(chatId, body, attachments = []) {
   // 1) Text ZUERST als eigene Nachricht (nur EINMAL). Frueher wurde der volle Body als
   //    Caption an JEDEN Anhang gehaengt -> bei Mehr-Dokument-Mails N-mal derselbe Text
   //    in der Gruppe (Ausschuss-Vorfall 2026-07-13). Jetzt: eine Textnachricht, dann Doks.
-  if (body) sentMsgs.push(await send(body));
+  // whatsapp-web.js liefert bei sendMessage gelegentlich null/undefined ohne Fehler
+  // (transient, v.a. direkt nach Reconnect) -> 1x nachfassen, bevor wir aufgeben.
+  if (body) {
+    let m = await send(body);
+    if (!m) { await new Promise((r) => setTimeout(r, 900)); m = await send(body); }
+    if (m) sentMsgs.push(m);
+  }
 
   // 2) Dann jeder Anhang OHNE Caption (Text steht schon oben).
   for (const a of atts) {
@@ -325,7 +331,10 @@ async function sendViaClient(chatId, body, attachments = []) {
   }
 
   const sent = sentMsgs.filter(Boolean);
-  if (sent.length === 0) throw new Error('sendMessage liefert null/undefined (kein Body, keine Anhaenge?)');
+  if (sent.length === 0) {
+    if (!body && !atts.length) throw new Error('Nichts zu senden — weder Text noch Anhang.');
+    throw new Error('WhatsApp-Versand fehlgeschlagen (Ziel evtl. nicht bei WhatsApp erreichbar). Bitte Empfänger prüfen und erneut versuchen.');
+  }
   // Warten bis die letzte Nachricht WIRKLICH beim WA-Server ist (ack>=1).
   const last = sent[sent.length - 1];
   await waitForAck(last, 1, 6000);

@@ -245,6 +245,38 @@
       </div>
     </section>
 
+    <!-- Broadcast -->
+    <section class="panel" data-tab="broadcast">
+      <div class="card">
+        <h2>📢 Broadcast an Bewohner</h2>
+        <p class="sub">Massennachricht per WhatsApp — nur an Personen mit WhatsApp-Opt-In. Erst „Empfänger zählen", dann senden.</p>
+        <label>Zielgruppe</label>
+        <select id="bcTarget">
+          <option value="all">Alle Opt-In-Personen</option>
+          <option value="stweg:1">STWEG 1</option>
+          <option value="stweg:2">STWEG 2</option>
+          <option value="stweg:3">STWEG 3</option>
+          <option value="stweg:4">STWEG 4</option>
+          <option value="stweg:5">STWEG 5</option>
+          <option value="stweg:6">STWEG 6</option>
+          <option value="stweg:7">STWEG 7</option>
+          <option value="stweg:8">MEG (Tiefgarage)</option>
+          <option value="group:technik">Technik</option>
+          <option value="group:ausschuss">Ausschuss (alle)</option>
+          <option value="group:eigentuemer">Eigentümer (alle)</option>
+          <option value="group:bewohner">Bewohner (alle)</option>
+          <option value="group:verwaltung">Verwaltung</option>
+        </select>
+        <label>Nachricht</label>
+        <textarea id="bcBody" placeholder="Nachrichtentext…"></textarea>
+        <div class="actions">
+          <button class="btn" id="bcCountBtn">Empfänger zählen</button>
+          <button class="btn" id="bcSendBtn">Senden</button>
+          <span id="bcResult" class="sub"></span>
+        </div>
+      </div>
+    </section>
+
     <!-- Nachrichten -->
     <section class="panel" data-tab="messages">
       <div class="card">
@@ -391,6 +423,7 @@
     { id:'pairing',  label:'Pairing' },
     { id:'forwards', label:'Weiterleitungen' },
     { id:'send',     label:'Senden' },
+    { id:'broadcast',label:'📢 Broadcast' },
     { id:'messages', label:'Nachrichten' },
     { id:'groups',   label:'Gruppen' },
     { id:'smtp',     label:'E-Mail→WA' },
@@ -541,6 +574,30 @@
     api('POST','/gateway/ui/send',{ to:to, title:title||undefined, body:body })
       .then(function(){ toast('Gesendet','ok'); document.getElementById('sendBody').value=''; document.getElementById('sendTitle').value=''; })
       .catch(apiErr).then(function(){ btn.disabled=false; });
+  }
+
+  // ── Broadcast (Massennachricht an Bewohner, via Haupt-API /api-Proxy) ────
+  function bcTargetVal(){ return document.getElementById('bcTarget').value; }
+  function bcCount(){
+    var el = document.getElementById('bcResult'); el.textContent = '…zähle…';
+    api('GET','/api/whatsapp/admin/recipients?target=' + encodeURIComponent(bcTargetVal()))
+      .then(function(d){
+        var n = (d.count != null) ? d.count : ((d.total != null) ? d.total : (d.recipients ? d.recipients.length : 0));
+        var sample = (d.recipients || []).slice(0,3).map(function(x){ return x.name; }).filter(Boolean).join(', ');
+        el.textContent = n + ' Empfänger' + (sample ? ' (z. B. ' + sample + '…)' : '');
+      }).catch(function(e){ el.textContent = ''; apiErr(e); });
+  }
+  function bcSend(){
+    var body = document.getElementById('bcBody').value.trim();
+    if (!body){ toast('Text fehlt','err'); return; }
+    if (!confirm('Broadcast an „' + bcTargetVal() + '" wirklich senden?')) return;
+    var btn = document.getElementById('bcSendBtn'); btn.disabled = true;
+    api('POST','/api/whatsapp/admin/broadcast',{ target: bcTargetVal(), body: body })
+      .then(function(d){
+        toast((d.queued || 0) + ' Nachrichten eingereiht','ok');
+        document.getElementById('bcResult').textContent = (d.queued || 0) + '/' + (d.total || 0) + ' gesendet';
+        document.getElementById('bcBody').value = '';
+      }).catch(apiErr).then(function(){ btn.disabled = false; });
   }
 
   // ── Messages ───────────────────────────────────────────────────────────
@@ -707,6 +764,8 @@
     document.getElementById('fwdKind').onchange = syncFwdInputs;
     document.getElementById('fwdAdd').onclick = addForward;
     document.getElementById('sendBtn').onclick = doSend;
+    document.getElementById('bcCountBtn').onclick = bcCount;
+    document.getElementById('bcSendBtn').onclick = bcSend;
     document.getElementById('msgReload').onclick = loadMessages;
     Array.prototype.forEach.call(document.querySelectorAll('#msgFilter button'), function(b){
       b.onclick = function(){ msgDir=b.dataset.dir;
