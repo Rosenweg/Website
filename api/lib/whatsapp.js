@@ -11,6 +11,11 @@ const GATEWAY_GROUPS_URL = process.env.GATEWAY_GROUPS_URL || 'http://tasks.rosen
 // Cache für WA-Group-ID "Rosenweg Technik" (5 Min TTL)
 let _technikWaCache = { id: null, fetched_at: 0 };
 async function resolveTechnikWhatsappGroupId() {
+  // Feste Gruppen-JID per Env bevorzugen — unabhaengig vom flaky /groups-Endpoint.
+  // whatsapp-web.js getChats liefert zeitweise leer -> resolveTechnik... gab null zurueck
+  // -> Technik-Alerts (Zaehler-Watchdog, PBX-Voicemail...) fielen seit 2026-07-08 lautlos aus.
+  const envId = (process.env.TECHNIK_WA_GROUP_ID || '').trim();
+  if (envId) return envId;
   const TTL_MS = 5 * 60 * 1000;
   if (_technikWaCache.id && (Date.now() - _technikWaCache.fetched_at) < TTL_MS) {
     return _technikWaCache.id;
