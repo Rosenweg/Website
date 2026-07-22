@@ -1,0 +1,218 @@
+/**
+ * Authentik SSO Authentication Module
+ * Shared across all Rosenweg pages
+ */
+const AuthentikAuth = {
+  SESSION_KEY: 'rosenweg_session',
+  USER_KEY: 'rosenweg_user',
+
+  /** Start login - redirect to Authentik via API */
+  login(redirectPath) {
+    const redirect = redirectPath || window.location.pathname;
+    window.location.href = `/api/auth/login?redirect=${encodeURIComponent(redirect)}`;
+  },
+
+  /** Process auth callback from URL hash (after Authentik redirect) */
+  handleCallback() {
+    const hash = window.location.hash;
+    if (!hash.startsWith('#auth=')) return false;
+
+    try {
+      const data = JSON.parse(decodeURIComponent(hash.substring(6)));
+      if (data.token && data.user) {
+        localStorage.setItem(this.SESSION_KEY, data.token);
+        localStorage.setItem(this.USER_KEY, JSON.stringify(data.user));
+        this._setSharedToken(data.token);
+        // Clean URL hash
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+        return true;
+      }
+    } catch (e) {
+      console.error('Auth callback parse error:', e);
+    }
+    return false;
+  },
+
+  /** Check if user is logged in (has valid session) */
+  isLoggedIn() {
+    return !!(localStorage.getItem(this.SESSION_KEY) || this._readSharedToken());
+  },
+
+  /** Get stored user data */
+  getUser() {
+    try {
+      return JSON.parse(localStorage.getItem(this.USER_KEY));
+    } catch {
+      return null;
+    }
+  },
+
+  /** Get session token for API calls (localStorage ODER geteiltes Subdomain-Cookie) */
+  getToken() {
+    return localStorage.getItem(this.SESSION_KEY) || this._readSharedToken();
+  },
+
+  // ── Cross-Subdomain-SSO: Token zusätzlich in einem Cookie auf .rosenweg4303.ch,
+  // damit der Login über ALLE Subdomains gilt (www/admin/ausschuss/isp/stweg…). ──
+  _cookieDomain() {
+    return /rosenweg4303\.ch$/.test(location.hostname) ? '.rosenweg4303.ch' : null; // andere Domains bleiben lokal
+  },
+  _setSharedToken(token) {
+    const dom = this._cookieDomain();
+    if (!dom || !token) return;
+    const secure = location.protocol === 'https:' ? '; secure' : '';
+    document.cookie = `${this.SESSION_KEY}=${encodeURIComponent(token)}; domain=${dom}; path=/; max-age=${30 * 24 * 3600}; samesite=lax${secure}`;
+  },
+  _readSharedToken() {
+    const m = document.cookie.match(new RegExp('(?:^|; )' + this.SESSION_KEY + '=([^;]+)'));
+    return m ? decodeURIComponent(m[1]) : null;
+  },
+  _clearSharedToken() {
+    const dom = this._cookieDomain();
+    if (dom) document.cookie = `${this.SESSION_KEY}=; domain=${dom}; path=/; max-age=0`;
+  },
+
+  /** Check if current user is admin */
+  isAdmin() {
+    const user = this.getUser();
+    return user?.isAdmin === true;
+  },
+
+  /** Check if current user has permission for a page (read/write) */
+  hasPermission(page, level = 'read') {
+    const user = this.getUser();
+    if (!user) return false;
+    // Technik and Präsident always have full access
+    if (user.groups?.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; })) return true;
+    const perms = user.permissions || {};
+    const levels = { none: 0, read: 1, write: 2 };
+    return (levels[perms[page]] || 0) >= (levels[level] || 0);
+  },
+
+  /** Get user's access level for a page (none/read/write) */
+  getPermission(page) {
+    const user = this.getUser();
+    if (!user) return 'none';
+    if (user.groups?.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; })) return 'write';
+    return user.permissions?.[page] || 'none';
+  },
+
+  /** Logout - clear session and end Authentik session */
+  logout(redirectTo) {
+    const token = this.getToken();
+    localStorage.removeItem(this.SESSION_KEY);
+    localStorage.removeItem(this.USER_KEY);
+    this._clearSharedToken();
+    if (redirectTo !== false) {
+      // Redirect through Authentik's end-session endpoint to fully log out
+      const postLogoutRedirect = redirectTo || window.location.origin + window.location.pathname;
+      const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+      window.location.href = `/api/auth/logout?redirect=${encodeURIComponent(postLogoutRedirect)}${tokenParam}`;
+    }
+  },
+
+  /** Validate session against server */
+  async validateSession() {
+    const token = this.getToken();
+    if (!token) return false;
+
+    try {
+      const resp = await fetch('/api/auth/me', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        localStorage.setItem(this.USER_KEY, JSON.stringify(data.user));
+        if (!localStorage.getItem(this.SESSION_KEY)) localStorage.setItem(this.SESSION_KEY, token);
+        this._setSharedToken(token); // Cookie-Ablauf mitschieben (Sliding-Session)
+        return true;
+      }
+      this.logout(false);
+      return false;
+    } catch {
+      return false;
+    }
+  },
+
+  /** Make authenticated API call */
+  async apiFetch(url, options = {}) {
+    const token = this.getToken();
+    const headers = { ...options.headers };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    if (options.body && typeof options.body === 'object' && !(options.body instanceof FormData) && !(options.body instanceof ArrayBuffer) && !(options.body instanceof Uint8Array)) {
+      headers['Content-Type'] = 'application/json';
+      options.body = JSON.stringify(options.body);
+    }
+    const resp = await fetch(url, { ...options, headers });
+    // Session abgelaufen kann sich auf zwei Arten zeigen:
+    //   a) API antwortet direkt mit 401 (sauberer Fall)
+    //   b) fetch() folgt einem 302 zur Authentik-Login-Seite → resp.url
+    //      zeigt dann auf Authentik. resp.redirected ist true.
+    // NUR diese beiden Fälle triggern logout, NICHT pauschal HTML.
+    const isAuthRedirect = resp.redirected && /authentik|\/application\/o\//i.test(resp.url || '');
+    if (resp.status === 401 || isAuthRedirect) {
+      this.logout();
+      return resp;
+    }
+    return resp;
+  },
+
+  /**
+   * Initialize auth on page load.
+   * Returns user object if logged in, null otherwise.
+   * If requireAuth is true, redirects to login automatically.
+   * If requireAdmin is true, shows error for non-admins.
+   */
+  async init({ requireAuth = true, requireAdmin = false, onLogin, onLogout } = {}) {
+    // Handle OAuth callback
+    if (this.handleCallback()) {
+      if (onLogin) onLogin(this.getUser());
+      return this.getUser();
+    }
+
+    // Check existing session
+    if (this.isLoggedIn()) {
+      const valid = await this.validateSession();
+      if (valid) {
+        const user = this.getUser();
+        if (requireAdmin && !user.isAdmin) {
+          if (onLogout) onLogout('no-admin');
+          return null;
+        }
+        if (onLogin) onLogin(user);
+        return user;
+      }
+    }
+
+    // Not logged in
+    if (requireAuth) {
+      if (onLogout) onLogout('not-logged-in');
+      // Auto-redirect to Authentik login
+      this.login();
+      return null;
+    }
+    return null;
+  },
+
+  /** Create a standard login button element */
+  createLoginButton(container) {
+    if (typeof container === 'string') container = document.getElementById(container);
+    if (!container) return;
+    // Inline-Styles (KEIN Tailwind) — der Button muss auch auf Seiten ohne
+    // Tailwind-CDN sauber aussehen (sonst der "super hässliche" ungestylte Button).
+    container.innerHTML = `
+      <div style="text-align:center">
+        <button onclick="AuthentikAuth.login()"
+          style="display:inline-flex;align-items:center;gap:.6rem;background:#2563eb;color:#fff;border:none;padding:.85rem 1.75rem;border-radius:.6rem;font-weight:600;font-size:1.05rem;cursor:pointer;box-shadow:0 8px 20px rgba(37,99,235,.35);transition:background .15s"
+          onmouseover="this.style.background='#1d4ed8'" onmouseout="this.style.background='#2563eb'">
+          <svg width="22" height="22" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path>
+          </svg>
+          Mit Rosenweg-Konto anmelden
+        </button>
+        <p style="color:#6b7280;margin-top:1rem;font-size:.85rem">Sichere Anmeldung über Authentik SSO</p>
+      </div>
+    `;
+  },
+};
