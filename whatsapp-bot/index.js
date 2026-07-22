@@ -293,7 +293,14 @@ async function sendViaClient(chatId, body, attachments = []) {
   // Bei Gruppen: chat erst laden — client.sendMessage schlaegt sonst gerne
   // ohne Fehler "sent" zurueck ohne tatsaechliche Zustellung.
   const isGroup = chatId.endsWith('@g.us');
-  const chat = isGroup ? await client.getChatById(chatId) : null;
+  // getChatById wirft bei WA-Web-Breakage zeitweise den "r"-Fehler (msg=429) -> dann
+  // NICHT hart scheitern, sondern direkt per client.sendMessage(chatId, …) senden.
+  // (Chat-Load ist nur ein Zuverlaessigkeits-Bonus fuer Gruppen, kein Muss.)
+  let chat = null;
+  if (isGroup) {
+    try { chat = await client.getChatById(chatId); }
+    catch (e) { console.warn(`[WA] getChatById(${chatId}) fehlgeschlagen (${e.message}) -> direkter sendMessage-Fallback`); }
+  }
   const send = (content, opts) => chat ? chat.sendMessage(content, opts) : client.sendMessage(chatId, content, opts);
   const sentMsgs = [];
   const atts = (attachments || []).filter(a => !a.docs_path && (a.data_base64 || a.content_base64));
