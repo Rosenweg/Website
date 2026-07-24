@@ -1873,7 +1873,7 @@ app.get('/api/users', authMiddleware, adminOnly, async (req, res) => {
 app.get('/api/messenger/directory', authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, name, stweg FROM users
+      `SELECT id, name, stweg, avatar_url FROM users
         WHERE active IS NOT FALSE AND COALESCE(TRIM(name), '') <> ''
         ORDER BY name`
     );
