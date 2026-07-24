@@ -1862,6 +1862,26 @@ app.get('/api/users', authMiddleware, adminOnly, async (req, res) => {
   }
 });
 
+// GET /api/messenger/directory — schlanke Personenliste für den Personen-Picker
+// der Messenger-PWA (chat.rosenweg4303.ch). Jeder EINGELOGGTE User darf die
+// Siedlungs-Mitglieder als Verzeichnis sehen (wie WhatsApp-Kontakte innerhalb der
+// Genossenschaft); nur unkritische Felder (id/name/stweg, KEINE Rolle/Balance).
+// Die id ist users.id — derselbe Namespace wie /api/auth/me → passt zu
+// conversation_members.user_id im message-store.
+app.get('/api/messenger/directory', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, name, stweg FROM users
+        WHERE active IS NOT FALSE AND COALESCE(TRIM(name), '') <> ''
+        ORDER BY name`
+    );
+    res.json({ users: result.rows });
+  } catch (err) {
+    console.error('messenger/directory error:', err);
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
 app.get('/api/users/:id', authMiddleware, async (req, res) => {
   try {
     const requestedId = parseInt(req.params.id);
