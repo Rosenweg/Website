@@ -314,12 +314,14 @@ app.get('/api/auth/logout', async (req, res) => {
   }
 
   const { redirect } = req.query;
-  // Only allow redirects to our own site to prevent open redirect
+  // Only allow redirects to our own sites (SITE_URL or a whitelisted OAuth host,
+  // z. B. chat.rosenweg4303.ch) — so ein Subdomain-Logout auch dorthin
+  // zurückkehrt und Authentik eine registrierte post_logout_redirect_uri sieht.
   let postLogoutRedirect = SITE_URL;
   if (redirect) {
     try {
       const url = new URL(redirect, SITE_URL);
-      if (url.origin === new URL(SITE_URL).origin) postLogoutRedirect = url.href;
+      if (url.origin === new URL(SITE_URL).origin || OAUTH_ALLOWED_HOSTS.has(url.host)) postLogoutRedirect = url.href;
     } catch {}
   }
 
