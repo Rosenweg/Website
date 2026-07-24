@@ -30,6 +30,8 @@ const OAUTH_ALLOWED_HOSTS = new Set([
   'ausschuss.rosenweg4303.ch',
   // PWA-Subdomain (dedizierter Frontend-LXC CT130, eigener OAuth-Callback-Origin).
   'pwa.rosenweg4303.ch',
+  // Messenger-PWA (dedizierter Stack CT131, eigener OAuth-Callback-Origin).
+  'chat.rosenweg4303.ch',
   // STWEG-Frontend-Container (stweg1..8.rosenweg4303.ch) — eigener
   // OAuth-Callback je Subdomain, damit die Session auf demselben Origin
   // landet von dem der Login startet. Authentik-Provider hat dazu eine
