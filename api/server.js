@@ -1882,6 +1882,43 @@ app.get('/api/messenger/directory', authMiddleware, async (req, res) => {
   }
 });
 
+// GET /api/messenger/house-membership — die Hausnummer(n) des EINGELOGGTEN Users
+// für die Per-Haus-Auto-Mitgliedschaft im Messenger (haus-r<N>). Ableitung:
+// users.email → wohnungen_kontakte.email → wohnungen.bezeichnung, deren Präfix
+// das Haus kodiert (18.2OG.1→18, RW17-01→17, 1305→13). Best-effort: was nicht
+// eindeutig zu einer bekannten Hausnummer der STWEG passt, wird verworfen (kein
+// Fehl-Join). STWEG→Häuser aus site-config.json (Wohngebäude 1–7).
+app.get('/api/messenger/house-membership', authMiddleware, async (req, res) => {
+  const STWEG_HOUSES = { 1: ['17', '18'], 2: ['13', '14', '16'], 3: ['9'], 4: ['10', '12'], 5: ['5', '6', '8'], 6: ['1'], 7: ['2', '4'] };
+  const parseHouse = (bez, stweg) => {
+    if (!bez) return null;
+    const m = String(bez).replace(/^RW/i, '').match(/^(\d+)/);
+    if (!m) return null;
+    const digits = m[1];
+    const houses = (STWEG_HOUSES[stweg] || []).slice().sort((a, b) => b.length - a.length);
+    for (const h of houses) if (digits === h || digits.startsWith(h)) return h;
+    return null;
+  };
+  try {
+    const uid = req.user.user_id || req.user.id;
+    const ur = await pool.query('SELECT email FROM users WHERE id = $1', [uid]);
+    const email = (ur.rows[0]?.email || '').toLowerCase();
+    if (!email) return res.json({ houses: [] });
+    const { rows } = await pool.query(
+      `SELECT w.stweg, w.bezeichnung
+         FROM wohnungen_kontakte wk
+         JOIN wohnungen w ON w.id = wk.wohnung_id
+        WHERE lower(wk.email) = $1 AND wk.deleted_at IS NULL AND wk.archiviert_am IS NULL`,
+      [email]
+    );
+    const houses = [...new Set(rows.map((r) => parseHouse(r.bezeichnung, r.stweg)).filter(Boolean))];
+    res.json({ houses });
+  } catch (err) {
+    console.error('house-membership error:', err);
+    res.status(500).json({ error: 'Fehler' });
+  }
+});
+
 app.get('/api/users/:id', authMiddleware, async (req, res) => {
   try {
     const requestedId = parseInt(req.params.id);
