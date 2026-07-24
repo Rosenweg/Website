@@ -14191,9 +14191,37 @@ function mqttAclAllows(filter, topic) {
   return allowed;
 }
 
+// ── Messenger (chat.rosenweg4303.ch) MQTT-Auth — ADDITIV zur Energie-Auth ──
+// Der Messenger stellt per-User HS256-JWTs aus (message-store signiert mit
+// MQTT_JWT_SECRET). Leitet der zentrale CT105-Broker einen Connect/ACL hierher,
+// erkennen wir diese JWTs (username/password = das JWT) und autorisieren anhand
+// der sub_topics/pub_topics-Claims. Die Energie-Auth darunter bleibt unverändert
+// — Messenger-JWTs greifen nur vorher kurz.
+const MSG_MQTT_JWT_SECRET = process.env.MQTT_JWT_SECRET || '';
+function messengerJwtClaims(token) {
+  try {
+    if (!MSG_MQTT_JWT_SECRET || typeof token !== 'string') return null;
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const expected = crypto.createHmac('sha256', MSG_MQTT_JWT_SECRET).update(parts[0] + '.' + parts[1]).digest('base64url');
+    const sig = Buffer.from(parts[2]); const exp = Buffer.from(expected);
+    if (sig.length !== exp.length || !crypto.timingSafeEqual(sig, exp)) return null;
+    const claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    if (claims.exp && Date.now() / 1000 > claims.exp) return null;
+    return claims;
+  } catch { return null; }
+}
+function msgTopicAllowed(prefixes, topic) {
+  if (!Array.isArray(prefixes)) return false;
+  const t = String(topic || '');
+  return prefixes.some((p) => p === '#' || t === p || t === p + '/msg' || t.startsWith(p + '/'));
+}
+
 app.post('/api/mqtt/getuser', mqttBrokerGuard, async (req, res) => {
   try {
     const { username, password } = req.body || {};
+    // Messenger-JWT (chat.) → gültige Signatur genügt.
+    if (messengerJwtClaims(username) || messengerJwtClaims(password)) return res.status(200).end();
     if (!password) return res.status(403).end();
     const hash = crypto.createHash('sha256').update(password).digest('hex');
     const r = await pool.query(
@@ -14211,7 +14239,11 @@ app.post('/api/mqtt/getuser', mqttBrokerGuard, async (req, res) => {
 // superuser: technik darf alles.
 app.post('/api/mqtt/superuser', mqttBrokerGuard, async (req, res) => {
   try {
-    const u = await mqttUserByUsername((req.body || {}).username);
+    const { username, password } = req.body || {};
+    // Messenger: nur das Backend-Token (backend:true) ist Superuser; per-User nein.
+    const mj = messengerJwtClaims(username) || messengerJwtClaims(password);
+    if (mj) return res.status(mj.backend === true ? 200 : 403).end();
+    const u = await mqttUserByUsername(username);
     return res.status(u && u.is_technik ? 200 : 403).end();
   } catch (err) { console.error('[mqtt] superuser:', err.message); return res.status(500).end(); }
 });
@@ -14220,7 +14252,19 @@ app.post('/api/mqtt/superuser', mqttBrokerGuard, async (req, res) => {
 // <haus>-<bereich>, gegen die Collector-Zugriffsliste (echte E-Mail) pruefen.
 app.post('/api/mqtt/aclcheck', mqttBrokerGuard, async (req, res) => {
   try {
-    const { username, topic, acc } = req.body || {};
+    const { username, password, topic, acc } = req.body || {};
+    // Messenger-JWT → Topic gegen sub_topics/pub_topics-Claims (acc 1/4=read/sub,
+    // 2=write, 3=readwrite). Backend-Token darf alles.
+    const mj = messengerJwtClaims(username) || messengerJwtClaims(password);
+    if (mj) {
+      if (mj.backend === true) return res.status(200).end();
+      const a = Number(acc);
+      let ok;
+      if (a === 2) ok = msgTopicAllowed(mj.pub_topics, topic);
+      else if (a === 3) ok = msgTopicAllowed(mj.pub_topics, topic) && msgTopicAllowed(mj.sub_topics, topic);
+      else ok = msgTopicAllowed(mj.sub_topics, topic);
+      return res.status(ok ? 200 : 403).end();
+    }
     // Service-User (nur Broker, technische Anwendungen): ACL = topic_filter + can_write
     const svc = await mqttServiceUserByUsername(username);
     if (svc) {
