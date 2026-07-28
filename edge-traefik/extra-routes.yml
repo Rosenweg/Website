@@ -295,6 +295,18 @@ tcp:
       rule: HostSNI(`personen.rosenweg4303.ch`)
       service: personen-rw4303-svc
       tls: { passthrough: true }
+    # mqtts://mqtt.rosenweg4303.ch:8883 -> Mosquitto CT105:1883.
+    # KEIN passthrough: Edge TERMINIERT TLS (cf-Cert) und reicht Klartext-MQTT an
+    # den Broker weiter (Hop im vertrauenswürdigen VLAN). Bewohner-Login = Authentik
+    # App-Passwort (siehe /api/mqtt/*). Client MUSS SNI senden (Standard-TLS tut das).
+    mqtts-broker-rw4303:
+      entryPoints: [mqtts]
+      rule: HostSNI(`mqtt.rosenweg4303.ch`)
+      service: mqtts-broker-svc
+      tls:
+        certResolver: cf
+        domains:
+          - main: mqtt.rosenweg4303.ch
   services:
     contacts-rw4303-svc:
       loadBalancer:
@@ -304,3 +316,7 @@ tcp:
       loadBalancer:
         servers:
           - address: 100.64.2.33:443
+    mqtts-broker-svc:
+      loadBalancer:
+        servers:
+          - address: 100.64.2.51:1883
