@@ -2,9 +2,10 @@
 // (authMiddleware, adminOnly, requirePermission, requireUserLogin) bleibt
 // vorerst in server.js und nutzt die hier exportierten Helfer (kleinerer
 // Risikoschritt; Middleware-Move folgt separat).
-const { AUTHENTIK_URL, AUTHENTIK_EXTERNAL_URL, AUTHENTIK_CLIENT_ID, AUTHENTIK_CLIENT_SECRET, AUTHENTIK_API_TOKEN } = require('./config');
+const crypto = require('crypto');
+const { AUTHENTIK_URL, AUTHENTIK_EXTERNAL_URL, AUTHENTIK_CLIENT_ID, AUTHENTIK_CLIENT_SECRET, AUTHENTIK_API_TOKEN, MQTT_ROPC_CLIENT_ID, MQTT_ROPC_CLIENT_SECRET } = require('./config');
 const { pool } = require('./db');
-const { isAusschussForAny } = require('./groups');
+const { isAusschussForAny, isTechnik, isPraesident } = require('./groups');
 
 // ─── Authentik API (oeffentliche URL, damit generierte Links klickbar sind) ──
 async function authentikAPI(method, path, body = null) {
@@ -84,6 +85,73 @@ async function validateAuthentikToken(token) {
   } catch (err) {
     console.error('Authentik token validation error:', err.message);
     return null;
+  }
+}
+
+// ─── Nicht-interaktiver Login fuer MQTT-Clients ─────────────────────
+// Erlaubt Authentik-Usern, sich bei MQTT ohne Browser-Token-Flow anzumelden.
+// Authentik kennt kein ROPC mit echtem Login-Passwort: der Client sendet
+// username = Authentik-User/E-Mail und password = ein am Konto erzeugtes
+// App-Passwort-Token. Der Grant (grant_type=password, von Authentik wie
+// client_credentials behandelt) wird gegen den token-Endpoint validiert;
+// Identitaet + Gruppen kommen aus userinfo (providerunabhaengig, kein
+// Introspect-Client-Mismatch). Ergebnis (auch Fehlschlag) wird kurz gecacht,
+// damit wiederholte Reconnects Authentik nicht ueberrollen.
+// Rueckgabe: { email, groups, is_technik } | null.
+const pwLoginCache = new Map(); // sha256(user\0pass) -> { user, time, ttl }
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of pwLoginCache) { if (now - v.time > v.ttl) pwLoginCache.delete(k); }
+}, 5 * 60 * 1000);
+
+async function authentikPasswordLogin(username, password) {
+  if (!username || !password) return null;
+  const cacheKey = crypto.createHash('sha256').update(`${username}\0${password}`).digest('hex');
+  const cached = pwLoginCache.get(cacheKey);
+  if (cached && Date.now() - cached.time < cached.ttl) return cached.user;
+
+  const clientId = MQTT_ROPC_CLIENT_ID;
+  if (!clientId) return null;
+  const remember = (user) => {
+    // Speicher begrenzen: viele fehlgeschlagene Versuche (je unterschiedliches
+    // Passwort = eigener Key) sollen den Cache nicht aufblaehen.
+    if (pwLoginCache.size > 10000) pwLoginCache.clear();
+    // Erfolg 60s cachen, Fehlschlag nur 15s (schnellere Wiederholung nach PW-Aenderung).
+    pwLoginCache.set(cacheKey, { user, time: Date.now(), ttl: user ? 60 * 1000 : 15 * 1000 });
+    return user;
+  };
+  try {
+    const params = new URLSearchParams({
+      grant_type: 'password',
+      client_id: clientId,
+      username: String(username),
+      password: String(password),
+      scope: 'openid email profile',
+    });
+    if (MQTT_ROPC_CLIENT_SECRET) params.set('client_secret', MQTT_ROPC_CLIENT_SECRET);
+    const tok = await fetch(`${AUTHENTIK_URL}/application/o/token/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!tok.ok) return remember(null);            // 400/401 = falsche Credentials
+    const data = await tok.json();
+    if (!data.access_token) return remember(null);
+    const ui = await fetch(`${AUTHENTIK_URL}/application/o/userinfo/`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${data.access_token}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!ui.ok) return remember(null);
+    const info = await ui.json();
+    const email = String(info.email || info.preferred_username || '').toLowerCase();
+    if (!email) return remember(null);
+    const groups = Array.isArray(info.groups) ? info.groups : [];
+    return remember({ email, groups, is_technik: isTechnik(groups) || isPraesident(groups) });
+  } catch (err) {
+    console.error('[mqtt] password login error:', err.message);
+    return null;                                   // Netzwerkfehler nicht cachen
   }
 }
 
@@ -191,6 +259,6 @@ async function getUserPermissions(groups) {
 }
 
 module.exports = {
-  authentikAPI, tokenCache, validateAuthentikToken,
+  authentikAPI, tokenCache, validateAuthentikToken, authentikPasswordLogin,
   MANAGED_PAGES, ACCESS_LEVELS, resolveAncestorGroups, getUserPermissions,
 };
