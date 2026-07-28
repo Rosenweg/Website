@@ -454,11 +454,36 @@ Zwei Wege, je nach gewünschtem Methodenumfang an der **Schranktür**:
 - `seq` streng monoton je Gerät (persistent über Reboot).
 - `ts` = Unix-Epoch aus **NTP**; ohne NTP Fallback auf `uptime` + Server-Empfangszeit.
 
-### B.5 ACL (in eure `mqtt_service_users`)
+### B.5 Auth-Modell — Maschinen vs. Menschen
 
-- Gerät: User `schrank-<id>`, `topic_filter = schluessel/<schrank>/#`, `can_write = true`,
-  aber cmd nur lesen (optional zweite Regel: `.../cmd/#` read-only).
-- API: eigener User, darf `.../cmd/#` schreiben, Rest lesen.
+> **Grundsatz:** Interaktiver Login (Authentik/OIDC → 12-h-Token, `server.js:14082`) ist
+> **nur für Menschen** im MQTT-Browser gedacht. **MQTT-Clients (ESP32, API, Integrationen)
+> bekommen keine Authentik-Identität** — kein Browser-Flow, das 12-h-Token ist headless
+> nicht erneuerbar, und Token-User sind per Default read-only (`server.js:14185`), der
+> ESP32 muss aber schreiben. Maschinen laufen deshalb über **Service-User**
+> (`mqtt_service_users`, persistentes Secret, nur im Broker).
+
+| | Menschen | Maschinen (Clients) |
+|---|---|---|
+| Identität | Authentik (OIDC) | **Service-User je Gerät** |
+| Credential | kurzlebiges Token (12 h) | **persistentes Secret**, einmal provisioniert |
+| Erneuerung | interaktiv beim Login | keine; **einzeln widerrufbar** |
+| Rechte | read-only, außer Topic-Regel | least-privilege `topic_filter` + gezielt `can_write` |
+
+**Konkret fürs Modul:**
+- **Gerät:** eigener Service-User **je Schrank**, nicht geteilt — z.B. `schrank-<id>`,
+  `topic_filter = schluessel/<schrank>/#`, `can_write = true`; `cmd/#` nur lesen
+  (optionale zweite Regel). Secret liegt im NVS (Anhang C.6). Vorteil: einzeln
+  widerrufbar + im Broker-Log identifizierbar.
+- **API:** publiziert `cmd/#` über ihren Publish-User (`collector`, `server.js:14214`).
+- **Menschen (Ausschuss):** lesen über Authentik + **`mqtt_topic_rules`**-Regel
+  (`topic_filter = 'schluessel/#'`, `group_name = 'schluessel-admin'` bzw. `technik`,
+  `can_read = true`). Ohne solche Regel → `aclcheck` verweigert (`server.js:14188`);
+  nur `technik` ist Superuser.
+
+**Upgrade-Pfad:** mosquitto **mTLS / Client-Zertifikate** je Gerät (kein Secret im
+Klartext, Widerruf per CRL) — sauberste Maschinen-Auth, mehr Infra. Für den Start genügt
+Service-User + Secret über TLS-Transport.
 
 ### B.6 Server-Korrelation Person ↔ Schlüssel (der Kern)
 
