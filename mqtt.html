@@ -69,6 +69,9 @@
                 <label class="flex items-center gap-1.5 text-sm text-gray-600 select-none">
                     <input id="pause" type="checkbox" class="rounded"> Pause
                 </label>
+                <label class="flex items-center gap-1.5 text-sm text-gray-600 select-none">
+                    <input id="rawToggle" type="checkbox" class="rounded" checked> Roh&nbsp;(#)
+                </label>
                 <button id="clearBtn" class="px-3 py-2 text-sm bg-white border rounded-lg hover:bg-gray-50">Leeren</button>
                 <span class="text-sm text-gray-500"><span id="count" class="font-semibold text-gray-700">0</span> Topics</span>
             </div>
@@ -300,7 +303,7 @@
     const topics = new Map();          // basistopic-feld -> { value, ts }
     const history = new Map();         // topic -> [zahl, zahl, …] (max ~60) für Sparkline
     const expanded = new Set();        // aufgeklappte Zähler-Knoten (Default leer = alle ZU)
-    let client = null, currentUser = null, paused = false, dirty = false;
+    let client = null, currentUser = null, paused = false, dirty = false, rawView = true;
     let userIsTechnik = false;
     let SVC_USERS = [];        // zuletzt geladene Service-User (für Inline-Editor)
 
@@ -392,11 +395,34 @@
             { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     }
 
+    // ─── Roh-Ansicht: ALLE Topics flach (wie mosquitto_sub -t '#' -v) ────────
+    function renderRaw(q) {
+        const treeEl = document.getElementById('tree');
+        const emptyEl = document.getElementById('empty');
+        const now = Date.now();
+        const rows = [...topics.entries()]
+            .filter(([t]) => !q || t.toLowerCase().includes(q))
+            .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+        if (rows.length === 0) { treeEl.innerHTML = ''; emptyEl.style.display = 'block'; return; }
+        emptyEl.style.display = 'none';
+        treeEl.innerHTML = rows.map(([t, d]) => {
+            const age = Math.round((now - d.ts) / 1000);
+            const fresh = age < 30;
+            let v = String(d.value); if (v.length > 300) v = v.slice(0, 300) + '…';
+            return `<div class="flex items-start gap-3 px-4 py-1.5 hover:bg-gray-50 text-sm">
+                <span class="mono text-gray-800 flex-shrink-0 ${fresh ? '' : 'opacity-50'}">${esc(t)}</span>
+                <span class="mono text-gray-500 break-all flex-1 min-w-0">${esc(v)}</span>
+                <span class="text-xs text-gray-400 flex-shrink-0 w-14 text-right" title="${new Date(d.ts).toLocaleString()}">${age < 1 ? 'jetzt' : age + 's'}</span>
+            </div>`;
+        }).join('');
+    }
+
     // ─── Render der Baum-Ansicht ──────────────────────────────────────
     function render() {
         const q = document.getElementById('filter').value.trim().toLowerCase();
         document.getElementById('count').textContent = topics.size;
         refreshKnownTopics();   // <datalist> der Zugriffsverwaltung mitziehen
+        if (rawView) { renderRaw(q); return; }
 
         // Topics in Haus -> Zähler -> Felder gruppieren
         const houses = new Map(); // haus -> Map(meter -> { name, fields:[{topic,feld,value,ts}], baseTs })
@@ -1130,6 +1156,7 @@
         // Live-Steuerung
         document.getElementById('filter').addEventListener('input', render);
         document.getElementById('pause').addEventListener('change', e => { paused = e.target.checked; if (!paused) render(); });
+        document.getElementById('rawToggle').addEventListener('change', e => { rawView = e.target.checked; render(); });
         document.getElementById('clearBtn').addEventListener('click', () => { topics.clear(); history.clear(); render(); });
 
         // Bewohner-MQTT-Zugang: Enter im Suchfeld löst Suche aus (Daten werden on-demand geladen)
