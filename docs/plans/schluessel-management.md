@@ -387,3 +387,144 @@ Zwei Wege, je nach gewünschtem Methodenumfang an der **Schranktür**:
   Mobile**, **kein PIN/QR/Face**. Sinnvoll, wenn Karte + Handy genügen.
 
 **Entschieden:** G3-Pro-Weg (alle Methoden), Hub wird mitbestellt (Starter Kit Pro).
+
+---
+
+## Anhang B — MQTT-Schema
+
+> Konvention wie bestehend: Broker Mosquitto **CT105 `mqtt://100.64.2.51:1883`**,
+> Auth über `mosquitto-go-auth` + Tabelle `mqtt_service_users` (topic_filter + can_write).
+> Domain = `schluessel`, Ort = Schrank-ID (`<schrank>`, z.B. `r9ug`), passend zu
+> `energy/r9/…` / `control/r9/…`.
+
+### B.1 Topics — Gerät → Broker (ESP32 publiziert)
+
+| Topic | Retain | QoS | Zweck |
+|-------|:------:|:---:|-------|
+| `schluessel/<schrank>/status` | ✓ | 1 | Heartbeat/online, fw, uptime, rssi, Blockzahl. **LWT** setzt hier `{"online":false}` |
+| `schluessel/<schrank>/block/<b>/status` | ✓ | 1 | Bus-Gesundheit je Block (erkannt, CRC-Fehler) |
+| `schluessel/<schrank>/inventory` | ✓ | 1 | **Momentaufnahme** aller anwesenden iButton-IDs (Abgleich/Recovery) |
+| `schluessel/<schrank>/event` | ✗ | 1 | Einzelnes Entnahme-/Rückgabe-Ereignis |
+| `schluessel/<schrank>/lock/<fach>/state` | ✓ | 1 | Riegel-Zustand je Fach (`locked`/`unlocked`/`unknown`) |
+| `schluessel/<schrank>/ack` | ✗ | 1 | Quittung auf ein Kommando (`cmd_id`) |
+
+### B.2 Topics — Broker → Gerät (API publiziert, ESP32 abonniert)
+
+| Topic | QoS | Zweck |
+|-------|:---:|-------|
+| `schluessel/<schrank>/cmd/unlock` | 1 | Riegel-Fach/Fächer freigeben |
+| `schluessel/<schrank>/cmd/relock` | 1 | Wieder verriegeln |
+| `schluessel/<schrank>/cmd/scan` | 1 | Sofort vollständigen Inventory-Scan + publish |
+| `schluessel/<schrank>/cmd/ui` | 1 | OLED-Text / Buzzer / LED (Feedback) |
+
+### B.3 Payloads (JSON)
+
+```jsonc
+// status (retained)
+{ "online": true, "fw": "1.0.3", "uptime_s": 84213, "rssi": -61,
+  "blocks": 2, "ts": 1753699200, "seq": 10432 }
+// LWT-Payload:  { "online": false }
+
+// event (nicht retained, QoS1)
+{ "ts": 1753699231, "seq": 10433, "block": 1, "position": 7,
+  "ibutton": "01:A3:9F:22:00:00:00:5C",
+  "action": "taken",            // taken | returned
+  "door_open": true }           // war die Tür in dem Moment offen? (Plausibilität)
+
+// inventory (retained Snapshot)
+{ "ts": 1753699200, "seq": 10432, "count": 42,
+  "present": [ {"block":1,"position":3,"ibutton":"01:.."}, ... ] }
+
+// lock/<fach>/state (retained)
+{ "fach": 5, "state": "locked", "sense": true, "ts": 1753699200 }
+
+// cmd/unlock  (API → Gerät)
+{ "cmd_id": "u-9f3a", "fach": [5,12], "timeout_s": 30, "reason": "grant:handwerker" }
+// ack (Gerät → API)
+{ "cmd_id": "u-9f3a", "ok": true, "ts": 1753699233 }
+```
+
+### B.4 Semantik & Zuverlässigkeit
+
+- **Retained** für `status`, `inventory`, `lock/*/state` → jeder Subscriber kennt nach
+  Reconnect sofort den Ist-Zustand.
+- `event` **nicht retained**, QoS 1: ESP32 puffert bei Offline in NVS/Flash und sendet mit
+  steigender `seq` nach → **kein Ereignis geht verloren**; die API **dedupliziert per
+  `(schrank, seq)`** und erkennt Lücken.
+- `seq` streng monoton je Gerät (persistent über Reboot).
+- `ts` = Unix-Epoch aus **NTP**; ohne NTP Fallback auf `uptime` + Server-Empfangszeit.
+
+### B.5 ACL (in eure `mqtt_service_users`)
+
+- Gerät: User `schrank-<id>`, `topic_filter = schluessel/<schrank>/#`, `can_write = true`,
+  aber cmd nur lesen (optional zweite Regel: `.../cmd/#` read-only).
+- API: eigener User, darf `.../cmd/#` schreiben, Rest lesen.
+
+### B.6 Server-Korrelation Person ↔ Schlüssel (der Kern)
+
+1. **UniFi-Access-Webhook**: Tür `<schrank>` um `t0` von Person **P** geöffnet.
+2. API öffnet **Korrelationsfenster** `[t0, t_close]` (Tür-Zu-Event; Fallback 90 s).
+3. Alle `event` mit `ts` im Fenster werden **P** zugeordnet.
+4. `taken` → offener `schluessel_ausgabe`-Datensatz; `returned` → schließt den offenen.
+5. Mehrere Personen im Fenster (Tür aufgehalten) → **Konflikt-Flag** → Ausschuss-Review.
+
+---
+
+## Anhang C — ESP32-Firmware-Struktur
+
+> Ziel: robust, offline-fest, OTA-fähig (Wandschrank ohne USB-Zugriff). Sprache
+> Arduino-C++ oder ESP-IDF; unten framework-neutral als Module/Tasks.
+
+### C.1 Module
+
+| Modul | Aufgabe |
+|-------|---------|
+| `config` | Schrank-ID, Block-Layout (OneWire-GPIO je Block, Fach-Mapping), Broker, Timeouts — aus **NVS** überschreibbar (Provisionierung ohne Reflash) |
+| `net` | WLAN (Reconnect + Backoff), **NTP/SNTP**-Zeitsync |
+| `mqttc` | MQTT-Client, **LWT** auf `status`, Reconnect, `cmd/#` abonnieren, Publish-Wrapper mit `seq` |
+| `owbus` | je Block ein OneWire-Bus; `scan()` = Search-ROM → Menge von IDs **inkl. CRC8-Prüfung** |
+| `diff` | neue Menge ⇄ letzte Menge → `taken`/`returned`-Events; **Entprellung** |
+| `store` | Ring-Puffer der Events in NVS/LittleFS; persistenter `seq`; Flush bei MQTT-Connect |
+| `locks` | MCP23017 (I²C) → Treiber; `unlock(fach,timeout)`, Auto-Relock, optional Sense; state publish |
+| `ui` | OLED/Buzzer/LED (optional) |
+| `ota` | ArduinoOTA / HTTP-OTA |
+
+### C.2 Tasks (FreeRTOS)
+
+- **Task Scan** (~alle 250 ms): `owbus.scan()` je Block → `diff` → Event in `store` +
+  publish (falls online). Läuft **immer**, auch offline.
+- **Task Net/MQTT**: Verbindung halten, LWT, `cmd`-Handler, `store` flushen, Heartbeat
+  `status` alle 30 s.
+- **Task Locks**: `cmd/unlock` ausführen, Auto-Relock-Timer, `lock/*/state` publizieren.
+- Hardware-**Watchdog**.
+
+### C.3 Geräte-State-Machine
+
+```
+BOOT → WIFI_CONNECTING → NTP_SYNC → MQTT_CONNECTING → ONLINE  ⇄  OFFLINE_BUFFERING
+```
+Scannen ist **von ONLINE entkoppelt** — Events werden offline gepuffert und nachgesendet.
+
+### C.4 Entprell-Logik (gegen Wackelkontakt)
+
+- iButton gilt erst als **entfernt** nach `absent_confirm` (z.B. 3) aufeinanderfolgenden
+  Scans ohne die ID; erst als **neu** nach ebenso vielen mit ID.
+- Reads mit **CRC-Fehler verwerfen**, nicht als „entfernt" werten (sonst Fehl-Events).
+- Nach ESP32-Neustart: `inventory` (retained) vs. DB-Sollzustand → Server korrigiert Drift.
+
+### C.5 Kommando-Ablauf (Riegel)
+
+```
+cmd/unlock  → locks.unlock(fach, timeout) → ack
+            → Entnahme erkannt (diff) ODER Timeout → relock → lock/<fach>/state
+```
+
+### C.6 Beispiel-Konfiguration (NVS/JSON)
+
+```json
+{ "schrank": "r9ug",
+  "blocks": [ { "id": 1, "ow_gpio": 16 }, { "id": 2, "ow_gpio": 17 } ],
+  "locks":  { "mcp_addr": "0x20", "fach_map": { "5": 0, "12": 1 } },
+  "broker": "mqtt://100.64.2.51:1883",
+  "heartbeat_s": 30, "scan_ms": 250, "absent_confirm": 3 }
+```
