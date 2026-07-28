@@ -14276,12 +14276,15 @@ app.post('/api/mqtt/superuser', mqttBrokerGuard, async (req, res) => {
 app.post('/api/mqtt/aclcheck', mqttBrokerGuard, async (req, res) => {
   try {
     const { username, password, topic, acc } = req.body || {};
-    // Globaler Health-Topic "heartbeat": JEDER authentifizierte Client darf ihn
-    // LESEN/abonnieren (broker-lokaler Publisher schreibt ihn, siehe CT105
-    // mqtt-heartbeat.service — unabhaengig von collector/api). Schreiben bleibt
-    // der Service-User-ACL vorbehalten (nur broker-heartbeat).
-    if ((Number(acc) === 1 || Number(acc) === 4) && (topic === 'heartbeat' || String(topic || '').startsWith('heartbeat/'))) {
-      return res.status(200).end();
+    // Global LESBARE Topics fuer JEDEN authentifizierten Client (acc read/subscribe):
+    //  - "heartbeat": broker-lokaler Health-Ping (CT105 mqtt-heartbeat.service)
+    //  - "display/#": Ankuendigungen/Notfall fuer Kiosk- & Hardware-Displays (retained)
+    // Schreiben bleibt jeweils der Service-/Technik-ACL vorbehalten.
+    if (Number(acc) === 1 || Number(acc) === 4) {
+      const t = String(topic || '');
+      if (t === 'heartbeat' || t.startsWith('heartbeat/') || t === 'display' || t.startsWith('display/')) {
+        return res.status(200).end();
+      }
     }
     // Messenger-JWT → Topic gegen sub_topics/pub_topics-Claims (acc 1/4=read/sub,
     // 2=write, 3=readwrite). Backend-Token darf alles.
@@ -14621,6 +14624,33 @@ app.patch('/api/mqtt/service-users/:username', authMiddleware, requireMqttTechni
     const r = await pool.query(`UPDATE mqtt_service_users SET ${fields.join(', ')} WHERE username=$${i} RETURNING username, can_write, topic_filter, description`, vals);
     if (!r.rows.length) return res.status(404).json({ error: 'Service-User nicht gefunden' });
     res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══ Display-Ankündigungen / Notfall (retained display/*) ════════════════════
+// Kiosk-Seiten (display.rosenweg4303.ch) + Hardware-Displays (ESP32/LED/e-ink)
+// abonnieren display/announcement + display/emergency. RETAINED -> ein Display
+// zeigt nach Neustart sofort den aktuellen Stand. active:false löscht die Anzeige.
+// Payload JSON: { text, active, scroll, ts, by }. Publish via API-MQTT-Client
+// (Service-User collector braucht display/# im topic_filter).
+const DISPLAY_CHANNELS = { announcement: 'display/announcement', emergency: 'display/emergency' };
+app.post('/api/display/announce', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    const topic = DISPLAY_CHANNELS[String(req.body?.channel || 'announcement')];
+    if (!topic) return res.status(400).json({ error: 'channel: announcement | emergency' });
+    const active = req.body?.active !== false;
+    const text = String(req.body?.text || '').slice(0, 2000);
+    if (active && !text.trim()) return res.status(400).json({ error: 'Text fehlt' });
+    const payload = JSON.stringify({
+      text, active, scroll: !!req.body?.scroll,
+      ts: Date.now(), by: req.user?.name || req.user?.email || 'admin',
+    });
+    const c = apiMqttPublishClient();
+    if (!c) return res.status(503).json({ error: 'MQTT nicht konfiguriert' });
+    c.publish(topic, payload, { qos: 1, retain: true }, (err) => {
+      if (err) return res.status(502).json({ error: err.message });
+      res.json({ ok: true, topic, active });
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
