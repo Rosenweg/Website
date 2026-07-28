@@ -61,10 +61,11 @@ Frische-Indikator: `{source,ts,epoch}`, ~alle 10 s).
   „Display / Ankündigungen & Notfall" (Text, Kanal, Laufschrift, senden/löschen).
 - **API:** `POST /api/display/announce` `{ channel: "announcement"|"emergency",
   text, scroll, active }` (Bearer-Token, Technik).
-- **Automatisch:** Nachrichten in der Messenger-Gruppe **„Notfall/Krise"**
+- **Automatisch (Chat):** Nachrichten in der Messenger-Gruppe **„Notfall/Krise"**
   (`bcast/notfall`) werden vom message-store automatisch auf `display/emergency`
-  gespiegelt → erscheinen sofort auf allen Displays. Löschen der Anzeige manuell
-  über die Admin-Karte.
+  gespiegelt → erscheinen sofort auf allen Displays. **Beenden direkt im Chat:**
+  eine Nachricht **„Stop"** (oder „Entwarnung"/„Ende"/„Vorbei"/„Aufgehoben"/„Alles ok")
+  hebt den Notfall auf (`active:false`). Alternativ „Anzeige löschen" in der Admin-Karte.
 
 ## Minimalbeispiel (mosquitto / Shell)
 
