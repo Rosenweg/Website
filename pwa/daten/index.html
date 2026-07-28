@@ -159,6 +159,110 @@
       <div id="formMsg" class="hidden text-sm rounded-xl px-3 py-3"></div>
     </form>
 
+    <!-- =================================================================
+         MQTT-Zugang (Self-Service) — additive Karte
+         ================================================================= -->
+    <section id="mqCard" class="hidden mt-8 bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+      <h2 class="text-base font-bold flex items-center gap-2 mb-2">🔌 MQTT-Zugang</h2>
+      <p class="text-sm text-slate-500 leading-relaxed">
+        Du kannst deine Energie-/Zählerdaten mit einem normalen MQTT-Client
+        (z.B. ioBroker, Home Assistant) live abrufen — mit deinem persönlichen Login.
+      </p>
+
+      <!-- Lade-/Fehlerzustand der Karte -->
+      <div id="mqLoading" class="text-sm text-slate-400 py-4">Lade MQTT-Zugang …</div>
+      <div id="mqError" class="hidden text-sm rounded-xl px-3 py-3 bg-red-100 text-red-700 mt-3"></div>
+
+      <!-- Deaktiviert-Hinweis -->
+      <div id="mqDisabled" class="hidden text-sm rounded-xl px-3 py-3 bg-slate-100 text-slate-500 mt-3">
+        MQTT-Login ist derzeit deaktiviert.
+      </div>
+
+      <!-- Inhalt (nur wenn aktiviert) -->
+      <div id="mqBody" class="hidden mt-4 space-y-5">
+
+        <!-- Verbindungsdaten -->
+        <div>
+          <h3 class="text-sm font-semibold mb-2">Verbindungsdaten</h3>
+          <dl class="bg-slate-50 rounded-xl border border-slate-200 divide-y divide-slate-200 text-sm">
+            <div class="px-3 py-2">
+              <dt class="text-[12px] font-semibold text-slate-500">Broker intern (im GBT-/Rosenweg-WLAN)</dt>
+              <dd id="mqBrokerInt" class="font-mono text-slate-800 break-all mt-0.5"></dd>
+              <dd class="text-[11px] text-slate-400">kein TLS</dd>
+            </div>
+            <div class="px-3 py-2">
+              <dt class="text-[12px] font-semibold text-slate-500">
+                Broker extern
+                <span class="ml-1 inline-block align-middle text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-700 rounded px-1.5 py-0.5">geplant / bald</span>
+              </dt>
+              <dd id="mqBrokerExt" class="font-mono text-slate-800 break-all mt-0.5"></dd>
+              <dd class="text-[11px] text-slate-400">TLS</dd>
+            </div>
+            <div class="px-3 py-2">
+              <dt class="text-[12px] font-semibold text-slate-500">Username</dt>
+              <dd id="mqUsername" class="font-mono text-slate-800 break-all mt-0.5"></dd>
+            </div>
+            <div class="px-3 py-2">
+              <dt class="text-[12px] font-semibold text-slate-500">Passwort</dt>
+              <dd class="text-slate-600 mt-0.5">
+                ein App-Passwort (unten erzeugen) —
+                <span class="font-semibold">NICHT</span> dein normales Login-Passwort
+              </dd>
+            </div>
+          </dl>
+        </div>
+
+        <!-- Erlaubte Topics -->
+        <div>
+          <h3 class="text-sm font-semibold mb-2">Erlaubte Topics</h3>
+          <div id="mqSuperuser" class="hidden text-sm rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 px-3 py-2">
+            Voller Zugriff (Technik/Vorstand)
+          </div>
+          <ul id="mqTopics" class="space-y-1.5"></ul>
+        </div>
+
+        <!-- App-Passwörter -->
+        <div>
+          <h3 class="text-sm font-semibold mb-2">App-Passwörter</h3>
+
+          <!-- Neu erzeugter Key (einmalig) -->
+          <div id="mqResult" class="hidden rounded-xl border border-green-300 bg-green-50 p-3 mb-3">
+            <p class="text-[12px] font-semibold text-green-800 mb-1">
+              ✓ App-Passwort erstellt — nur jetzt sichtbar. Jetzt kopieren und im MQTT-Client eintragen.
+            </p>
+            <div class="flex items-stretch gap-2 mt-2">
+              <code id="mqResultKey" class="flex-1 font-mono text-sm bg-white border border-green-300 rounded-lg px-2.5 py-2 break-all text-slate-800"></code>
+              <button id="mqCopyBtn" type="button"
+                class="shrink-0 bg-green-700 text-white text-sm font-semibold rounded-lg px-3 active:bg-green-800">Kopieren</button>
+            </div>
+            <dl class="mt-3 text-[12px] text-green-900/80 space-y-0.5">
+              <div><span class="font-semibold">Username:</span> <span id="mqResultUser" class="font-mono break-all"></span></div>
+              <div><span class="font-semibold">Broker intern:</span> <span id="mqResultBroker" class="font-mono break-all"></span></div>
+            </dl>
+          </div>
+
+          <!-- Liste vorhandener App-Passwörter -->
+          <ul id="mqPwList" class="space-y-2"></ul>
+          <p id="mqPwEmpty" class="hidden text-[12px] text-slate-400">Noch keine App-Passwörter.</p>
+
+          <!-- Neues App-Passwort -->
+          <div class="mt-3 flex items-stretch gap-2">
+            <input id="mqLabel" type="text" maxlength="60" autocomplete="off"
+              placeholder="Bezeichnung (z.B. ioBroker)"
+              class="flex-1 rounded-xl border border-slate-300 px-3 py-2.5 text-base bg-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none">
+            <button id="mqCreateBtn" type="button"
+              class="shrink-0 bg-sky-700 text-white text-sm font-semibold rounded-xl px-3 active:bg-sky-800 disabled:opacity-50">
+              Neu
+            </button>
+          </div>
+          <p class="text-[11px] text-slate-400 mt-1.5">Maximal 10 App-Passwörter.</p>
+
+          <!-- Meldung im App-Passwort-Bereich -->
+          <div id="mqPwMsg" class="hidden text-sm rounded-xl px-3 py-3 mt-3"></div>
+        </div>
+      </div>
+    </section>
+
     <p class="text-center text-[11px] text-slate-400 mt-8">Rosenweg · pwa.rosenweg4303.ch</p>
   </main>
 
@@ -326,6 +430,187 @@
   }
 
   // =====================================================================
+  //  MQTT-Zugang (Self-Service)  — rein additiv
+  // =====================================================================
+  let mqBroker = null; // { host, internalHost, port, tlsPort }
+
+  function mqShowPwMsg(text, kind) {
+    const el = $('mqPwMsg');
+    el.textContent = text;
+    el.className = 'text-sm rounded-xl px-3 py-3 mt-3 ' + (
+      kind === 'ok'   ? 'bg-green-100 text-green-800' :
+      kind === 'warn' ? 'bg-slate-100 text-slate-600' :
+                        'bg-red-100 text-red-700'
+    );
+    el.classList.remove('hidden');
+  }
+
+  function mqRenderPwList(list) {
+    const arr = Array.isArray(list) ? list : [];
+    if (!arr.length) {
+      $('mqPwList').innerHTML = '';
+      $('mqPwEmpty').classList.remove('hidden');
+      return;
+    }
+    $('mqPwEmpty').classList.add('hidden');
+    $('mqPwList').innerHTML = arr.map(p => {
+      const label = esc(p.label || '(ohne Bezeichnung)');
+      const exp = p.expires ? `<span class="text-[11px] text-slate-400">läuft ab: ${esc(String(p.expires))}</span>` : '';
+      return `<li class="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2">
+        <span class="min-w-0">
+          <span class="block text-sm text-slate-700 truncate">${label}</span>
+          ${exp}
+        </span>
+        <button type="button" data-mq-revoke="${esc(String(p.id))}"
+          class="shrink-0 text-sm font-semibold text-red-600 active:text-red-800">widerrufen</button>
+      </li>`;
+    }).join('');
+
+    $('mqPwList').querySelectorAll('[data-mq-revoke]').forEach(btn => {
+      btn.addEventListener('click', () => mqRevoke(btn.getAttribute('data-mq-revoke'), btn));
+    });
+  }
+
+  function mqRenderAccess(d) {
+    $('mqLoading').classList.add('hidden');
+    $('mqError').classList.add('hidden');
+
+    // Deaktiviert?
+    if (d && d.enabled === false) {
+      $('mqDisabled').classList.remove('hidden');
+      $('mqBody').classList.add('hidden');
+      return;
+    }
+    $('mqDisabled').classList.add('hidden');
+
+    const broker = (d && d.broker) || {};
+    mqBroker = broker;
+    const port    = broker.port    ?? 1883;
+    const tlsPort = broker.tlsPort ?? 8883;
+    const intHost = broker.internalHost || broker.host || '';
+    const extHost = broker.host || '';
+
+    $('mqBrokerInt').textContent = `mqtt://${intHost}:${port}`;
+    $('mqBrokerExt').textContent = `mqtts://${extHost}:${tlsPort}`;
+    $('mqUsername').textContent  = d && d.username ? d.username : '';
+
+    // Topics / Superuser
+    if (d && d.superuser) {
+      $('mqSuperuser').classList.remove('hidden');
+      $('mqTopics').innerHTML = '';
+    } else {
+      $('mqSuperuser').classList.add('hidden');
+      const topics = Array.isArray(d && d.topics) ? d.topics : [];
+      $('mqTopics').innerHTML = topics.length
+        ? topics.map(t => `<li class="font-mono text-[13px] rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-slate-700 break-all">${esc(String(t))}</li>`).join('')
+        : '<li class="text-[12px] text-slate-400">Keine Topics freigegeben.</li>';
+    }
+
+    mqRenderPwList(d && d.appPasswords);
+    $('mqBody').classList.remove('hidden');
+  }
+
+  async function mqLoad() {
+    $('mqCard').classList.remove('hidden');
+    $('mqLoading').classList.remove('hidden');
+    $('mqError').classList.add('hidden');
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/mqtt/my-access', { cache: 'no-store' });
+      if (!r.ok) {
+        $('mqLoading').classList.add('hidden');
+        $('mqBody').classList.add('hidden');
+        $('mqError').textContent = 'MQTT-Zugang konnte nicht geladen werden (HTTP ' + r.status + ').';
+        $('mqError').classList.remove('hidden');
+        return;
+      }
+      const d = await r.json().catch(() => ({}));
+      mqRenderAccess(d || {});
+    } catch (e) {
+      $('mqLoading').classList.add('hidden');
+      $('mqBody').classList.add('hidden');
+      $('mqError').textContent = 'Netzwerkfehler beim Laden des MQTT-Zugangs.';
+      $('mqError').classList.remove('hidden');
+    }
+  }
+
+  async function mqRevoke(id, btn) {
+    if (!id) return;
+    if (btn) btn.disabled = true;
+    $('mqPwMsg').classList.add('hidden');
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/mqtt/my-app-passwords/' + encodeURIComponent(id), { method: 'DELETE' });
+      if (!r.ok) {
+        mqShowPwMsg('Widerrufen fehlgeschlagen (HTTP ' + r.status + ').', 'err');
+        if (btn) btn.disabled = false;
+        return;
+      }
+      // Abschnitt neu laden
+      await mqLoad();
+    } catch (e) {
+      mqShowPwMsg('Netzwerkfehler beim Widerrufen.', 'err');
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function mqCreate() {
+    const label = $('mqLabel').value.trim();
+    if (!label) { mqShowPwMsg('Bitte eine Bezeichnung eingeben.', 'warn'); return; }
+
+    const btn = $('mqCreateBtn');
+    btn.disabled = true; const old = btn.textContent; btn.textContent = '…';
+    $('mqPwMsg').classList.add('hidden');
+    $('mqResult').classList.add('hidden');
+
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/mqtt/my-app-passwords', { method: 'POST', body: { label } });
+      if (r.status === 429) {
+        mqShowPwMsg('Maximal 10 — bitte alte löschen.', 'warn');
+        return;
+      }
+      if (!r.ok) {
+        let msg = 'Erstellen fehlgeschlagen (HTTP ' + r.status + ').';
+        try { const j = await r.json(); if (j && j.error) msg = j.error; } catch {}
+        mqShowPwMsg(msg, 'err');
+        return;
+      }
+      const j = await r.json().catch(() => ({}));
+      const key = j && j.key ? j.key : '';
+      const user = (j && j.username) || $('mqUsername').textContent || '';
+      const port = (mqBroker && mqBroker.port) ?? 1883;
+      const intHost = (mqBroker && (mqBroker.internalHost || mqBroker.host)) || '';
+
+      $('mqResultKey').textContent    = key;
+      $('mqResultUser').textContent   = user;
+      $('mqResultBroker').textContent = `mqtt://${intHost}:${port}`;
+      $('mqResult').classList.remove('hidden');
+      $('mqLabel').value = '';
+
+      // Liste aktualisieren (Key bleibt sichtbar)
+      await mqLoad();
+    } catch (e) {
+      mqShowPwMsg('Netzwerkfehler beim Erstellen.', 'err');
+    } finally {
+      btn.disabled = false; btn.textContent = old;
+    }
+  }
+
+  function mqWire() {
+    $('mqCreateBtn').addEventListener('click', mqCreate);
+    $('mqLabel').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); mqCreate(); } });
+    $('mqCopyBtn').addEventListener('click', async () => {
+      const key = $('mqResultKey').textContent || '';
+      if (!key) return;
+      try {
+        await navigator.clipboard.writeText(key);
+        const b = $('mqCopyBtn'); const old = b.textContent; b.textContent = '✓ Kopiert';
+        setTimeout(() => { b.textContent = old; }, 1500);
+      } catch (_) {
+        mqShowPwMsg('Kopieren nicht möglich — bitte manuell markieren.', 'warn');
+      }
+    });
+  }
+
+  // =====================================================================
   //  Init
   // =====================================================================
   function showApp() {
@@ -374,6 +659,10 @@
     if (!ok) return;
 
     showApp();
+
+    // MQTT-Zugang (additiv, eigener Fehlerpfad — blockiert die Seite nicht)
+    mqWire();
+    mqLoad();
   }
 
   main();

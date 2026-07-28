@@ -147,9 +147,28 @@
                     </div>
                     <button onclick="createServiceUser()"
                             class="px-3 py-1.5 text-sm rounded-lg bg-blue-700 text-white hover:bg-blue-800 font-medium mb-0.5">Anlegen</button>
+                    <p class="w-full text-xs text-gray-400 mt-1">Mehrere Topics kommagetrennt, z.B. <span class="mono">energy/r9/#, energy/r13/haupt/#</span> — <span class="mono">!prefix</span> = Ausnahme.</p>
                 </div>
                 <div id="svcNew" class="hidden mb-3"></div>
                 <div id="svcList" class="space-y-2"><p class="text-gray-400 text-sm">Lade…</p></div>
+            </div>
+
+            <!-- Bewohner-MQTT-Zugang (persönliche App-Passwörter) -->
+            <div class="bg-white rounded-lg shadow p-5">
+                <h2 class="text-sm font-semibold text-gray-700 mb-1">Bewohner-MQTT-Zugang (App-Passwörter)</h2>
+                <p class="text-xs text-gray-500 mb-3">Vergib einem Bewohner ein persönliches App-Passwort für den direkten MQTT-Login (z.B. Home-Assistant, eigene Apps). Der Zugriff folgt automatisch den Zähler-/Topic-Rechten des Kontos. App-Passwörter sind jederzeit widerrufbar, ohne das Rosenweg-Login zu berühren.</p>
+                <div class="flex flex-wrap gap-2 items-end mb-3 pb-3 border-b">
+                    <div class="flex-1 min-w-[200px]">
+                        <label class="block text-xs text-gray-500 mb-1">Bewohner suchen (Name / E-Mail, min. 2 Zeichen)</label>
+                        <input id="uapSearch" placeholder="z.B. Müller oder max@…"
+                               class="px-2.5 py-1.5 border rounded-lg text-sm w-full focus:ring-2 focus:ring-blue-400 focus:outline-none">
+                    </div>
+                    <button onclick="uapDoSearch()"
+                            class="px-3 py-1.5 text-sm rounded-lg bg-blue-700 text-white hover:bg-blue-800 font-medium mb-0.5">Suchen</button>
+                </div>
+                <p id="uapError" class="text-sm text-red-600 mb-2 hidden"></p>
+                <div id="uapResults" class="space-y-1.5 mb-3"></div>
+                <div id="uapDetail"></div>
             </div>
 
             <!-- Generische Topic-Schutz-Regeln -->
@@ -258,6 +277,7 @@
     const expanded = new Set();        // aufgeklappte Zähler-Knoten (Default leer = alle ZU)
     let client = null, currentUser = null, paused = false, dirty = false;
     let userIsTechnik = false;
+    let SVC_USERS = [];        // zuletzt geladene Service-User (für Inline-Editor)
 
     // ─── Technik-Erkennung ────────────────────────────────────────────
     function isTechnik(u) {
@@ -753,15 +773,65 @@
             if (!Array.isArray(users) || users.length === 0) {
                 el.innerHTML = '<p class="text-gray-400 text-sm">Noch keine Service-User.</p>'; return;
             }
-            el.innerHTML = users.map(u => `
-                <div class="flex flex-wrap items-center gap-3 text-sm border rounded-lg px-3 py-2">
+            SVC_USERS = users;
+            el.innerHTML = users.map((u, i) => `
+                <div class="flex flex-wrap items-center gap-3 text-sm border rounded-lg px-3 py-2" data-svc-row="${i}">
                     <span class="mono font-medium text-gray-800">${esc(u.username)}</span>
                     <span class="text-xs px-2 py-0.5 rounded-full ${u.can_write ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}">${u.can_write ? 'Lesen + Schreiben' : 'nur Lesen'}</span>
                     <span class="mono text-xs text-gray-500">${esc(u.topic_filter)}</span>
                     ${u.description ? `<span class="text-xs text-gray-400 truncate max-w-[180px]">${esc(u.description)}</span>` : ''}
-                    <button onclick="deleteServiceUser('${esc(u.username)}')" class="ml-auto text-xs text-red-500 hover:text-red-700">löschen</button>
+                    <span class="ml-auto flex items-center gap-3">
+                        <button onclick="editServiceUser(${i})" class="text-xs text-blue-600 hover:text-blue-800">bearbeiten</button>
+                        <button onclick="deleteServiceUser('${esc(u.username)}')" class="text-xs text-red-500 hover:text-red-700">löschen</button>
+                    </span>
                 </div>`).join('');
         } catch (e) { el.innerHTML = `<p class="text-sm text-red-600">${esc(e.message)}</p>`; }
+    }
+
+    // Zeile in Inline-Editor verwandeln (mehrere Topics kommagetrennt)
+    function editServiceUser(i) {
+        const u = SVC_USERS[i];
+        if (!u) return;
+        const row = document.querySelector(`[data-svc-row="${i}"]`);
+        if (!row) return;
+        row.innerHTML = `
+            <span class="mono font-medium text-gray-800 w-full sm:w-auto">${esc(u.username)}</span>
+            <div class="flex-1 min-w-[180px]">
+                <label class="block text-xs text-gray-500 mb-1">Topic-Filter (kommagetrennt, <span class="mono">!prefix</span> = Ausnahme)</label>
+                <input id="svcEditTopic-${i}" value="${esc(u.topic_filter)}"
+                       class="mono px-2.5 py-1.5 border rounded-lg text-sm w-full focus:ring-2 focus:ring-blue-400 focus:outline-none">
+            </div>
+            <label class="flex items-center gap-1.5 text-sm text-gray-600 select-none mb-0.5">
+                <input id="svcEditWrite-${i}" type="checkbox" class="rounded" ${u.can_write ? 'checked' : ''}> Schreiben
+            </label>
+            <div class="flex-1 min-w-[130px]">
+                <label class="block text-xs text-gray-500 mb-1">Beschreibung</label>
+                <input id="svcEditDesc-${i}" value="${esc(u.description || '')}" placeholder="optional"
+                       class="px-2.5 py-1.5 border rounded-lg text-sm w-full focus:ring-2 focus:ring-blue-400 focus:outline-none">
+            </div>
+            <span class="ml-auto flex items-center gap-2">
+                <button onclick="saveServiceUser(${i})" class="px-3 py-1.5 text-xs rounded-lg bg-blue-700 text-white hover:bg-blue-800 font-medium">Speichern</button>
+                <button onclick="loadServiceUsers()" class="px-3 py-1.5 text-xs rounded-lg bg-white border hover:bg-gray-50">Abbrechen</button>
+            </span>
+            <p id="svcEditMsg-${i}" class="w-full text-xs text-red-600 hidden"></p>`;
+    }
+
+    async function saveServiceUser(i) {
+        const u = SVC_USERS[i];
+        if (!u) return;
+        const topic_filter = document.getElementById('svcEditTopic-' + i).value.trim();
+        const can_write = document.getElementById('svcEditWrite-' + i).checked;
+        const description = document.getElementById('svcEditDesc-' + i).value.trim();
+        const msg = document.getElementById('svcEditMsg-' + i);
+        if (!topic_filter) { msg.textContent = 'Topic-Filter darf nicht leer sein.'; msg.classList.remove('hidden'); return; }
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/mqtt/service-users/' + encodeURIComponent(u.username),
+                { method: 'PATCH', body: { topic_filter, can_write, description } });
+            if (r.status === 403) { msg.textContent = 'Nur für Technik.'; msg.classList.remove('hidden'); return; }
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) { msg.textContent = d.error || ('Fehler ' + r.status); msg.classList.remove('hidden'); return; }
+            loadServiceUsers();
+        } catch (e) { msg.textContent = 'Netzwerkfehler: ' + (e.message || e); msg.classList.remove('hidden'); }
     }
 
     async function createServiceUser() {
@@ -805,6 +875,150 @@
             await AuthentikAuth.apiFetch('/api/mqtt/service-users/' + encodeURIComponent(username), { method: 'DELETE' });
             loadServiceUsers();
         } catch (e) { /* ignorieren */ }
+    }
+
+    // ═══════════════════ BEWOHNER-MQTT-ZUGANG / APP-PASSWÖRTER (nur Technik) ═══════════════════
+    let UAP_SELECTED = null;   // aktuell gewählter Bewohner (E-Mail)
+
+    function uapErr(text) {
+        const el = document.getElementById('uapError');
+        el.textContent = text; el.classList.remove('hidden');
+    }
+    function uapClearErr() { document.getElementById('uapError').classList.add('hidden'); }
+
+    async function uapDoSearch() {
+        uapClearErr();
+        const q = document.getElementById('uapSearch').value.trim();
+        const res = document.getElementById('uapResults');
+        document.getElementById('uapDetail').innerHTML = '';
+        if (q.length < 2) { uapErr('Bitte mindestens 2 Zeichen eingeben.'); return; }
+        res.innerHTML = '<p class="text-gray-400 text-sm">Suche…</p>';
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/mqtt/user-search?q=' + encodeURIComponent(q));
+            if (r.status === 403) { res.innerHTML = ''; uapErr('Nur für Technik.'); return; }
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const users = await r.json();
+            if (!Array.isArray(users) || users.length === 0) {
+                res.innerHTML = '<p class="text-gray-400 text-sm">Keine Treffer.</p>'; return;
+            }
+            res.innerHTML = users.map(u => `
+                <button type="button" onclick="uapSelect('${esc(u.email)}')"
+                        class="w-full text-left border rounded-lg px-3 py-2 text-sm hover:bg-gray-50 flex flex-wrap items-center gap-2">
+                    <span class="font-medium text-gray-800">${esc(u.name || u.username)}</span>
+                    <span class="text-xs text-gray-500">${esc(u.email)}</span>
+                    <span class="mono text-xs text-gray-400 ml-auto">${esc(u.username)}</span>
+                </button>`).join('');
+        } catch (e) { res.innerHTML = ''; uapErr('Fehler: ' + (e.message || e)); }
+    }
+
+    async function uapSelect(email) {
+        uapClearErr();
+        UAP_SELECTED = email;
+        const det = document.getElementById('uapDetail');
+        det.innerHTML = '<p class="text-gray-400 text-sm">Lade Zugang…</p>';
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/mqtt/user-app-passwords?email=' + encodeURIComponent(email));
+            if (r.status === 403) { det.innerHTML = ''; uapErr('Nur für Technik.'); return; }
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            const d = await r.json();
+            uapRenderDetail(d);
+        } catch (e) { det.innerHTML = ''; uapErr('Fehler: ' + (e.message || e)); }
+    }
+
+    function uapRenderDetail(d) {
+        const det = document.getElementById('uapDetail');
+        const topicsHtml = d.superuser
+            ? '<span class="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">Voller Zugriff (Technik)</span>'
+            : ((Array.isArray(d.topics) && d.topics.length)
+                ? d.topics.map(t => `<span class="mono text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded">${esc(t)}</span>`).join(' ')
+                : '<span class="text-xs text-gray-400">keine (folgt Zähler-Zuordnung)</span>');
+
+        const pwHtml = (Array.isArray(d.appPasswords) && d.appPasswords.length)
+            ? d.appPasswords.map(p => `
+                <div class="flex flex-wrap items-center gap-3 text-sm border rounded-lg px-3 py-2">
+                    <span class="text-gray-800">${esc(p.label || '(ohne Bezeichnung)')}</span>
+                    ${p.expires ? `<span class="text-xs text-gray-400">gültig bis ${esc(p.expires)}</span>` : ''}
+                    <button onclick="uapRevoke('${esc(String(p.id))}')" class="ml-auto text-xs text-red-500 hover:text-red-700">widerrufen</button>
+                </div>`).join('')
+            : '<p class="text-gray-400 text-sm">Noch keine App-Passwörter.</p>';
+
+        det.innerHTML = `
+            <div class="border rounded-lg p-4 space-y-4">
+                <div class="flex flex-wrap items-center gap-3">
+                    <span class="font-medium text-gray-800">${esc(d.name || '')}</span>
+                    <span class="text-xs text-gray-500">${esc(d.email)}</span>
+                    <span class="mono text-xs text-gray-400">MQTT-Username: ${esc(d.username)}</span>
+                </div>
+                <div>
+                    <p class="text-xs font-semibold text-gray-500 mb-1.5">Erlaubte Topics</p>
+                    <div class="flex flex-wrap gap-1.5">${topicsHtml}</div>
+                </div>
+                <div class="text-xs text-gray-500 leading-relaxed">
+                    <p class="font-semibold text-gray-600 mb-0.5">Broker</p>
+                    <p>intern: <span class="mono">mqtt://100.64.2.51:1883</span> (kein TLS)</p>
+                    <p>extern (geplant): <span class="mono">mqtts://mqtt.rosenweg4303.ch:8883</span></p>
+                </div>
+                <div>
+                    <p class="text-xs font-semibold text-gray-500 mb-1.5">App-Passwörter</p>
+                    <div class="space-y-2 mb-3" id="uapPwList">${pwHtml}</div>
+                    <div class="flex flex-wrap gap-2 items-end pt-2 border-t">
+                        <div class="flex-1 min-w-[160px]">
+                            <label class="block text-xs text-gray-500 mb-1">Bezeichnung (z.B. „Home Assistant")</label>
+                            <input id="uapLabel" placeholder="optional"
+                                   class="px-2.5 py-1.5 border rounded-lg text-sm w-full focus:ring-2 focus:ring-blue-400 focus:outline-none">
+                        </div>
+                        <button onclick="uapCreate()"
+                                class="px-3 py-1.5 text-sm rounded-lg bg-blue-700 text-white hover:bg-blue-800 font-medium mb-0.5">App-Passwort erzeugen</button>
+                    </div>
+                    <div id="uapNew" class="hidden mt-3"></div>
+                </div>
+            </div>`;
+    }
+
+    async function uapCreate() {
+        if (!UAP_SELECTED) return;
+        const label = document.getElementById('uapLabel').value.trim();
+        const box = document.getElementById('uapNew');
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/mqtt/user-app-passwords',
+                { method: 'POST', body: { email: UAP_SELECTED, label } });
+            if (r.status === 403) {
+                box.className = 'mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700';
+                box.textContent = 'Nur für Technik.'; box.classList.remove('hidden'); return;
+            }
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                box.className = 'mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700';
+                box.textContent = d.error || ('Fehler ' + r.status); box.classList.remove('hidden'); return;
+            }
+            box.className = 'mt-3 p-3 bg-green-50 border border-green-200 rounded-lg text-sm';
+            box.innerHTML = `
+                <p class="font-semibold text-green-800 mb-1">App-Passwort${d.label ? ' „' + esc(d.label) + '"' : ''} erzeugt</p>
+                <p class="text-xs text-red-700 mb-2 font-medium">Nur jetzt sichtbar — dem Bewohner sicher übergeben.</p>
+                <div class="space-y-1 text-gray-700">
+                    <p>Username: <span class="mono bg-white px-2 py-0.5 rounded border select-all">${esc(d.username)}</span></p>
+                    <p>App-Passwort: <span class="mono bg-white px-2 py-0.5 rounded border select-all">${esc(d.key)}</span></p>
+                    <p class="text-xs text-gray-500">Broker intern <span class="mono">mqtt://100.64.2.51:1883</span> · extern (geplant) <span class="mono">mqtts://mqtt.rosenweg4303.ch:8883</span></p>
+                </div>`;
+            box.classList.remove('hidden');
+            // Detail (inkl. Passwortliste) frisch laden — Klartext-Box bleibt bis zur nächsten Aktion sichtbar
+            const prev = box.outerHTML;
+            await uapSelect(UAP_SELECTED);
+            const freshBox = document.getElementById('uapNew');
+            if (freshBox) freshBox.outerHTML = prev;
+        } catch (e) {
+            box.className = 'mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700';
+            box.textContent = 'Netzwerkfehler: ' + (e.message || e); box.classList.remove('hidden');
+        }
+    }
+
+    async function uapRevoke(id) {
+        if (!confirm('App-Passwort widerrufen? Geräte mit diesem Passwort können sich dann nicht mehr anmelden.')) return;
+        try {
+            const r = await AuthentikAuth.apiFetch('/api/mqtt/user-app-passwords/' + encodeURIComponent(id), { method: 'DELETE' });
+            if (r.status === 403) { uapErr('Nur für Technik.'); return; }
+            if (UAP_SELECTED) uapSelect(UAP_SELECTED);
+        } catch (e) { uapErr('Fehler: ' + (e.message || e)); }
     }
 
     // ═══════════════════ TOPIC-SCHUTZ-REGELN (nur Technik) ═══════════════════
@@ -883,6 +1097,12 @@
         document.getElementById('filter').addEventListener('input', render);
         document.getElementById('pause').addEventListener('change', e => { paused = e.target.checked; if (!paused) render(); });
         document.getElementById('clearBtn').addEventListener('click', () => { topics.clear(); history.clear(); render(); });
+
+        // Bewohner-MQTT-Zugang: Enter im Suchfeld löst Suche aus (Daten werden on-demand geladen)
+        if (userIsTechnik) {
+            const uapS = document.getElementById('uapSearch');
+            if (uapS) uapS.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); uapDoSearch(); } });
+        }
 
         connect();
     }
