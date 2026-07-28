@@ -251,9 +251,9 @@ app.post('/api/otp/verify', async (req, res) => {
 });
 
 // Authentik/OAuth/PVE-Config + OAUTH_ALLOWED_HOSTS + oauthRedirectUri -> lib/config.js
-const { AUTHENTIK_URL, AUTHENTIK_EXTERNAL_URL, AUTHENTIK_CLIENT_ID, AUTHENTIK_CLIENT_SECRET, AUTHENTIK_API_TOKEN, SITE_URL, PVE_API_URL, PVE_API_TOKEN, OAUTH_ALLOWED_HOSTS, oauthRedirectUri } = require('./lib/config');
+const { AUTHENTIK_URL, AUTHENTIK_EXTERNAL_URL, AUTHENTIK_CLIENT_ID, AUTHENTIK_CLIENT_SECRET, AUTHENTIK_API_TOKEN, SITE_URL, PVE_API_URL, PVE_API_TOKEN, OAUTH_ALLOWED_HOSTS, oauthRedirectUri, MQTT_PASSWORD_LOGIN } = require('./lib/config');
 // Auth-Helfer -> lib/auth.js
-const { authentikAPI, tokenCache, validateAuthentikToken, MANAGED_PAGES, ACCESS_LEVELS, resolveAncestorGroups, getUserPermissions } = require('./lib/auth');
+const { authentikAPI, tokenCache, validateAuthentikToken, authentikPasswordLogin, MANAGED_PAGES, ACCESS_LEVELS, resolveAncestorGroups, getUserPermissions } = require('./lib/auth');
 // Auth-Middleware -> middleware/auth.js (authMiddleware/adminOnly/requirePermission/requireUserLogin)
 const { authMiddleware, adminOnly, requirePermission, requireUserLogin } = require('./middleware/auth');
 // Web-Push (VAPID) -> lib/webpush.js (Opt-in-Benachrichtigungen fuer PWAs)
@@ -14232,6 +14232,29 @@ app.post('/api/mqtt/getuser', mqttBrokerGuard, async (req, res) => {
     // Service-User (persistentes Passwort, nur im Broker)
     const s = await mqttServiceUserByUsername(username);
     if (s && s.password_hash === hash) return res.status(200).end();
+    // Authentik-User: nicht-interaktiver Login mit Benutzer/E-Mail + Passwort
+    // (OAuth2 Password-Grant). Fuer MQTT-Clients ohne Browser-Token-Flow.
+    // Opt-in per Env (MQTT_PASSWORD_LOGIN) — Passwort geht im CONNECT ueber die
+    // Leitung, daher nur mit TLS aktivieren.
+    if (MQTT_PASSWORD_LOGIN) {
+      const ident = await authentikPasswordLogin(username, password);
+      if (ident) {
+        // Identitaet + Gruppen kurz als mqtt_tokens-Zeile cachen (Username als
+        // Schluessel), damit aclcheck dieselbe Gruppen-/Zaehler-Logik wie beim
+        // Browser-Token nutzt. Ein Eintrag pro Username, bei Re-Login aktualisiert.
+        const idHash = crypto.createHash('sha256').update('pwlogin:' + String(username || '')).digest('hex');
+        await pool.query(
+          `INSERT INTO mqtt_tokens (token_hash, username, email, groups_json, is_technik, expires_at)
+             VALUES ($1, $2, $3, $4, $5, NOW() + interval '1 hour')
+           ON CONFLICT (token_hash) DO UPDATE SET
+             username = EXCLUDED.username, email = EXCLUDED.email,
+             groups_json = EXCLUDED.groups_json, is_technik = EXCLUDED.is_technik,
+             expires_at = EXCLUDED.expires_at`,
+          [idHash, String(username || ''), ident.email, JSON.stringify(ident.groups || []), !!ident.is_technik]
+        );
+        return res.status(200).end();
+      }
+    }
     return res.status(403).end();
   } catch (err) { console.error('[mqtt] getuser:', err.message); return res.status(500).end(); }
 });
