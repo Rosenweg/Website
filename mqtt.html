@@ -93,7 +93,7 @@
                 <div class="flex flex-wrap gap-3 items-end">
                     <div class="flex-1 min-w-[200px]">
                         <label class="block text-xs text-gray-500 mb-1">Topic</label>
-                        <input id="pubTopic" type="text" value="energy/test"
+                        <input id="pubTopic" type="text" value="energy/test" list="knownTopics"
                                class="w-full mono px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none">
                     </div>
                     <div class="flex-1 min-w-[200px]">
@@ -134,7 +134,7 @@
                     </div>
                     <div class="flex-1 min-w-[150px]">
                         <label class="block text-xs text-gray-500 mb-1">Topic-Filter (+ / # erlaubt)</label>
-                        <input id="svcTopic" value="energy/#"
+                        <input id="svcTopic" value="energy/#" list="knownTopics"
                                class="mono px-2.5 py-1.5 border rounded-lg text-sm w-full focus:ring-2 focus:ring-blue-400 focus:outline-none">
                     </div>
                     <label class="flex items-center gap-1.5 text-sm text-gray-600 select-none mb-1.5">
@@ -194,7 +194,7 @@
                 <div class="flex flex-wrap gap-2 items-end mb-3 pb-3 border-b">
                     <div class="flex-1 min-w-[150px]">
                         <label class="block text-xs text-gray-500 mb-1">Topic-Muster</label>
-                        <input id="trTopic" placeholder="z.B. control/r9/#"
+                        <input id="trTopic" placeholder="z.B. control/r9/#" list="knownTopics"
                                class="mono px-2.5 py-1.5 border rounded-lg text-sm w-full focus:ring-2 focus:ring-blue-400 focus:outline-none">
                     </div>
                     <div class="min-w-[150px]">
@@ -217,6 +217,8 @@
 
             <!-- bekannte Authentik-Gruppen für Autocomplete -->
             <datalist id="knownGroups"></datalist>
+            <!-- alle live gesehenen Topics + Wildcard-Präfixe (dynamisch) -->
+            <datalist id="knownTopics"></datalist>
         </div>
         </div><!-- /Inhalt -->
     </main>
@@ -241,6 +243,29 @@
         [1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, 16, 18].forEach(n => { haus.push(`r${n}-eigentuemer`, `r${n}-bewohner`); });
         return [...base, ...stweg, ...haus];
     })();
+
+    // ─── Bekannte Topics (dynamisch, für <datalist> in der Zugriffsverwaltung) ──
+    // Speist sich aus der Live-#-Subscription: jedes real gesehene Topic + alle
+    // abgeleiteten Wildcard-Präfixe (energy/# , energy/r9/# , energy/r9/eg3/#),
+    // damit ACL-Regeln/Service-User/Publish direkt aus echten Topics gewählt werden.
+    let _ktTs = 0, _ktN = -1;
+    function refreshKnownTopics() {
+        const now = Date.now();
+        if (now - _ktTs < 3000 && topics.size === _ktN) return;   // throttle
+        _ktTs = now; _ktN = topics.size;
+        const set = new Set();
+        for (const topic of topics.keys()) {
+            set.add(topic);
+            const seg = topic.split('/');
+            let acc = '';
+            for (let i = 0; i < seg.length - 1; i++) {   // Präfix-Wildcards
+                acc += (i ? '/' : '') + seg[i];
+                set.add(acc + '/#');
+            }
+        }
+        const dl = document.getElementById('knownTopics');
+        if (dl) dl.innerHTML = [...set].sort().map(t => `<option value="${esc(t)}"></option>`).join('');
+    }
 
     // ─── Einheiten-Mapping fürs Feld-Suffix ───────────────────────────
     const UNITS = {
@@ -363,6 +388,7 @@
     function render() {
         const q = document.getElementById('filter').value.trim().toLowerCase();
         document.getElementById('count').textContent = topics.size;
+        refreshKnownTopics();   // <datalist> der Zugriffsverwaltung mitziehen
 
         // Topics in Haus -> Zähler -> Felder gruppieren
         const houses = new Map(); // haus -> Map(meter -> { name, fields:[{topic,feld,value,ts}], baseTs })
@@ -798,7 +824,7 @@
             <span class="mono font-medium text-gray-800 w-full sm:w-auto">${esc(u.username)}</span>
             <div class="flex-1 min-w-[180px]">
                 <label class="block text-xs text-gray-500 mb-1">Topic-Filter (kommagetrennt, <span class="mono">!prefix</span> = Ausnahme)</label>
-                <input id="svcEditTopic-${i}" value="${esc(u.topic_filter)}"
+                <input id="svcEditTopic-${i}" value="${esc(u.topic_filter)}" list="knownTopics"
                        class="mono px-2.5 py-1.5 border rounded-lg text-sm w-full focus:ring-2 focus:ring-blue-400 focus:outline-none">
             </div>
             <label class="flex items-center gap-1.5 text-sm text-gray-600 select-none mb-0.5">
