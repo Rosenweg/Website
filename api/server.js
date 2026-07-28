@@ -14480,6 +14480,143 @@ app.delete('/api/mqtt/topic-rules/:id', authMiddleware, requireMqttTechnik, asyn
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ═══ MQTT App-Passwörter (Authentik-Token intent=app_password) ═══════════════
+// Nicht-interaktiver MQTT-Login (siehe authentikPasswordLogin/lib/auth.js). Wir
+// verwalten AUSSCHLIESSLICH Tokens mit Präfix "mqtt-<pk>-", damit wir nie andere
+// App-Passwörter des Users anfassen. Der MQTT-Username = Authentik-Username.
+const MQTT_BROKER_HINT = {
+  host: process.env.MQTT_PUBLIC_HOST || 'mqtt.rosenweg4303.ch',
+  internalHost: process.env.MQTT_INTERNAL_HOST || '100.64.2.51',
+  port: 1883, tlsPort: 8883,
+};
+async function authentikUserByEmail(email) {
+  if (!email) return null;
+  const data = await authentikAPI('GET', `/core/users/?search=${encodeURIComponent(email)}`);
+  const list = Array.isArray(data.results) ? data.results : [];
+  const u = list.find(x => String(x.email || '').toLowerCase() === String(email).toLowerCase())
+         || list.find(x => String(x.username || '').toLowerCase() === String(email).toLowerCase());
+  return u ? { pk: u.pk, username: u.username, email: u.email, name: u.name, groups: (u.groups_obj || []).map(g => g.name) } : null;
+}
+async function mqttTopicsForUser(email, groups) {
+  const gl = (groups || []).map(g => String(g).toLowerCase());
+  if (gl.includes('technik') || gl.includes('praesident') || gl.includes('präsident')) return ['energy/#'];
+  try {
+    const url = `${ENERGY_COLLECTOR_URL}/api/energy/user/${encodeURIComponent(email)}/meters?groups=${encodeURIComponent((groups || []).join(','))}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return [];
+    const meters = await r.json();
+    if (!Array.isArray(meters)) return [];
+    return meters.map(m => {
+      const id = String(m.id || ''); const i = id.indexOf('-');
+      return i > 0 ? `energy/${id.slice(0, i)}/${id.slice(i + 1)}/#` : `energy/${id}/#`;
+    });
+  } catch { return []; }
+}
+async function listMqttAppPasswords(pk) {
+  const data = await authentikAPI('GET', `/core/tokens/?user=${pk}&page_size=100`);
+  const list = Array.isArray(data.results) ? data.results : [];
+  return list.filter(t => String(t.identifier || '').startsWith(`mqtt-${pk}-`))
+    .map(t => ({ id: t.identifier, label: t.description || '', expires: t.expires || null }));
+}
+async function createMqttAppPassword(pk, label) {
+  const id = `mqtt-${pk}-${crypto.randomBytes(4).toString('hex')}`;
+  await authentikAPI('POST', '/core/tokens/', {
+    identifier: id, intent: 'app_password', user: pk,
+    description: String(label || 'MQTT-Zugang').slice(0, 150), expiring: false,
+  });
+  const key = await authentikAPI('GET', `/core/tokens/${id}/view_key/`);
+  return { id, label: String(label || 'MQTT-Zugang').slice(0, 150), key: key.key };
+}
+function mqttIsSuperuser(groups) {
+  const gl = (groups || []).map(g => String(g).toLowerCase());
+  return gl.includes('technik') || gl.includes('praesident') || gl.includes('präsident');
+}
+
+// ── Self-Service (jeder eingeloggte Bewohner) ──
+app.get('/api/mqtt/my-access', authMiddleware, requireUserLogin, async (req, res) => {
+  try {
+    const au = await authentikUserByEmail(req.user.email);
+    if (!au) return res.status(404).json({ error: 'Authentik-User nicht gefunden' });
+    const [topics, pws] = await Promise.all([
+      mqttTopicsForUser(req.user.email, req.user.groups),
+      listMqttAppPasswords(au.pk),
+    ]);
+    res.json({
+      username: au.username, broker: MQTT_BROKER_HINT, topics,
+      superuser: mqttIsSuperuser(req.user.groups), enabled: !!MQTT_PASSWORD_LOGIN, appPasswords: pws,
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/mqtt/my-app-passwords', authMiddleware, requireUserLogin, async (req, res) => {
+  try {
+    const au = await authentikUserByEmail(req.user.email);
+    if (!au) return res.status(404).json({ error: 'Authentik-User nicht gefunden' });
+    if ((await listMqttAppPasswords(au.pk)).length >= 10) return res.status(429).json({ error: 'Maximal 10 App-Passwörter — bitte alte löschen' });
+    const created = await createMqttAppPassword(au.pk, req.body?.label);
+    res.json({ ...created, username: au.username });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/mqtt/my-app-passwords/:id', authMiddleware, requireUserLogin, async (req, res) => {
+  try {
+    const au = await authentikUserByEmail(req.user.email);
+    if (!au) return res.status(404).json({ error: 'Authentik-User nicht gefunden' });
+    const id = String(req.params.id || '');
+    if (!id.startsWith(`mqtt-${au.pk}-`)) return res.status(403).json({ error: 'Nicht dein App-Passwort' });
+    await authentikAPI('DELETE', `/core/tokens/${encodeURIComponent(id)}/`);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Admin-Vergabe (Technik/Präsident) ──
+app.get('/api/mqtt/user-search', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (q.length < 2) return res.json([]);
+    const data = await authentikAPI('GET', `/core/users/?search=${encodeURIComponent(q)}&page_size=20`);
+    res.json((data.results || []).map(u => ({ username: u.username, email: u.email, name: u.name, groups: (u.groups_obj || []).map(g => g.name) })));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/mqtt/user-app-passwords', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    const au = await authentikUserByEmail(String(req.query.email || ''));
+    if (!au) return res.status(404).json({ error: 'User nicht gefunden' });
+    const [topics, pws] = await Promise.all([mqttTopicsForUser(au.email, au.groups), listMqttAppPasswords(au.pk)]);
+    res.json({ username: au.username, email: au.email, name: au.name, groups: au.groups, superuser: mqttIsSuperuser(au.groups), topics, appPasswords: pws });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/mqtt/user-app-passwords', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    const au = await authentikUserByEmail(String(req.body?.email || ''));
+    if (!au) return res.status(404).json({ error: 'User nicht gefunden' });
+    const created = await createMqttAppPassword(au.pk, req.body?.label || `Vergeben von ${req.user.name || req.user.email}`);
+    res.json({ ...created, username: au.username, email: au.email });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/mqtt/user-app-passwords/:id', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    const id = String(req.params.id || '');
+    if (!/^mqtt-\d+-/.test(id)) return res.status(400).json({ error: 'Kein MQTT-App-Passwort' });
+    await authentikAPI('DELETE', `/core/tokens/${encodeURIComponent(id)}/`);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Service-User: Topics/can_write editieren (mehrere Topics = Komma-Liste;
+//    mqttAclAllows unterstützt das bereits inkl. "!"-Deny) ──
+app.patch('/api/mqtt/service-users/:username', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    const fields = []; const vals = []; let i = 1;
+    if (req.body?.topic_filter !== undefined) { fields.push(`topic_filter=$${i++}`); vals.push(String(req.body.topic_filter || 'energy/#').trim() || 'energy/#'); }
+    if (req.body?.can_write !== undefined) { fields.push(`can_write=$${i++}`); vals.push(!!req.body.can_write); }
+    if (req.body?.description !== undefined) { fields.push(`description=$${i++}`); vals.push(String(req.body.description || '').slice(0, 200)); }
+    if (!fields.length) return res.status(400).json({ error: 'Nichts zu ändern' });
+    vals.push(req.params.username);
+    const r = await pool.query(`UPDATE mqtt_service_users SET ${fields.join(', ')} WHERE username=$${i} RETURNING username, can_write, topic_filter, description`, vals);
+    if (!r.rows.length) return res.status(404).json({ error: 'Service-User nicht gefunden' });
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Audience-Map fuer die Subdomain-Navs (admin./ausschuss.): leitet pro Rechte-Seite
 // die Audience(s) aus der permissions-Tabelle ab. Regel: eine *-ausschuss-Gruppe ->
 // 'ausschuss'; nur technik (oder zusaetzlich nur Praesident) -> 'admin'. Seiten ganz
