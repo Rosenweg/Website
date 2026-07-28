@@ -14232,10 +14232,10 @@ app.post('/api/mqtt/getuser', mqttBrokerGuard, async (req, res) => {
     // Service-User (persistentes Passwort, nur im Broker)
     const s = await mqttServiceUserByUsername(username);
     if (s && s.password_hash === hash) return res.status(200).end();
-    // Authentik-User: nicht-interaktiver Login mit Benutzer/E-Mail + Passwort
-    // (OAuth2 Password-Grant). Fuer MQTT-Clients ohne Browser-Token-Flow.
-    // Opt-in per Env (MQTT_PASSWORD_LOGIN) — Passwort geht im CONNECT ueber die
-    // Leitung, daher nur mit TLS aktivieren.
+    // Authentik-User: nicht-interaktiver Login mit Benutzer/E-Mail + App-Passwort
+    // (grant_type=password gegen Authentik). Fuer MQTT-Clients ohne Browser-
+    // Token-Flow. Opt-in per Env (MQTT_PASSWORD_LOGIN) — Credential geht im
+    // CONNECT ueber die Leitung, daher nur mit TLS aktivieren.
     if (MQTT_PASSWORD_LOGIN) {
       const ident = await authentikPasswordLogin(username, password);
       if (ident) {

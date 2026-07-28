@@ -88,13 +88,15 @@ async function validateAuthentikToken(token) {
   }
 }
 
-// ─── Nicht-interaktiver Login (ROPC) fuer MQTT-Clients ──────────────
-// Erlaubt Authentik-Usern, sich bei MQTT direkt mit Benutzer/E-Mail +
-// Passwort anzumelden, ohne den Browser-Token-Flow. Validiert die
-// Credentials per OAuth2 Password-Grant gegen Authentik und liest
-// Identitaet + Gruppen aus dem userinfo-Endpoint (providerunabhaengig,
-// kein Introspect-Client-Mismatch). Ergebnis (auch Fehlschlag) wird kurz
-// gecacht, damit wiederholte Reconnects Authentik nicht ueberrollen.
+// ─── Nicht-interaktiver Login fuer MQTT-Clients ─────────────────────
+// Erlaubt Authentik-Usern, sich bei MQTT ohne Browser-Token-Flow anzumelden.
+// Authentik kennt kein ROPC mit echtem Login-Passwort: der Client sendet
+// username = Authentik-User/E-Mail und password = ein am Konto erzeugtes
+// App-Passwort-Token. Der Grant (grant_type=password, von Authentik wie
+// client_credentials behandelt) wird gegen den token-Endpoint validiert;
+// Identitaet + Gruppen kommen aus userinfo (providerunabhaengig, kein
+// Introspect-Client-Mismatch). Ergebnis (auch Fehlschlag) wird kurz gecacht,
+// damit wiederholte Reconnects Authentik nicht ueberrollen.
 // Rueckgabe: { email, groups, is_technik } | null.
 const pwLoginCache = new Map(); // sha256(user\0pass) -> { user, time, ttl }
 setInterval(() => {
