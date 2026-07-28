@@ -347,8 +347,16 @@
         if (parts[0] === 'wetter' && parts.length >= 3) {
             return { haus: `Wetter ${parts[1]}`, meter: `wetter/${parts[1]}`, bereich: parts[1], feld: parts.slice(2).join('/') };
         }
-        // Fallback: alles unter Pseudo-Haus "(sonstige)"
-        return { haus: '(sonstige)', meter: topic, bereich: parts.slice(1).join('/') || topic, feld: '' };
+        // Fallback: generisch nach Namespace (1. Segment) gruppieren — so erscheinen
+        // ALLE Broker-Topics sauber, inkl. Chat (group/dm/presence/bcast/receipt),
+        // heartbeat und beliebige neue Namespaces. 2. Segment = Knoten, Rest = Feld.
+        const ns = parts[0] || '(root)';
+        return {
+            haus: ns,
+            meter: parts.length > 1 ? `${parts[0]}/${parts[1]}` : parts[0],
+            bereich: parts.slice(1).join('/') || parts[0],
+            feld: parts.slice(2).join('/'),
+        };
     }
 
     // ─── Sparkline (inline-SVG, ~80x20) ───────────────────────────────
