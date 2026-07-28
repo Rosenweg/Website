@@ -50,6 +50,11 @@ entryPoints:
     address: ":587"
   smtp:
     address: ":25"
+  # MQTT-over-TLS (mqtts): TCP-Entrypoint, TLS wird am Edge terminiert
+  # (cf-Cert mqtt.rosenweg4303.ch) und Klartext-MQTT an CT105:1883 weitergereicht.
+  # Route: extra-routes.yml tcp.routers.mqtts-broker-rw4303. WAN-Forward :8883 -> Edge.
+  mqtts:
+    address: ":8883"
   # Metrics (intern, nicht WAN-exposed)
   metrics:
     address: "127.0.0.1:8082"
