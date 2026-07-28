@@ -131,6 +131,27 @@ http:
         certResolver: cf
         domains:
           - main: wetter.rosenweg4303.ch
+    # display.rosenweg4303.ch -> www-Frontend (Kiosk-Anzeige Ankündigungen/Notfall).
+    # "/" -> /display.html. Öffentlich (read-only MQTT-User display-public, nur display/#).
+    display-root-rw4303:
+      entryPoints: [websecure]
+      rule: Host(`display.rosenweg4303.ch`) && Path(`/`)
+      priority: 50
+      service: www-lxc-svc
+      middlewares: [display-root-rewrite]
+      tls:
+        certResolver: cf
+        domains:
+          - main: display.rosenweg4303.ch
+    display-page-rw4303:
+      entryPoints: [websecure]
+      rule: Host(`display.rosenweg4303.ch`)
+      priority: 10
+      service: www-lxc-svc
+      tls:
+        certResolver: cf
+        domains:
+          - main: display.rosenweg4303.ch
     # Kurze IPTV-URL: tv.rosenweg4303.ch -> api /api/tv/playlist.m3u (242 Kanaele).
     tv-rw4303:
       entryPoints: [websecure]
@@ -220,6 +241,9 @@ http:
     mqtt-root-rewrite:
       replacePath:
         path: /mqtt.html
+    display-root-rewrite:
+      replacePath:
+        path: /display.html
     access-root-rewrite:
       replacePath:
         path: /access.html
