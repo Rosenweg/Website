@@ -133,6 +133,16 @@ http:
           - main: wetter.rosenweg4303.ch
     # display.rosenweg4303.ch -> www-Frontend (Kiosk-Anzeige Ankündigungen/Notfall).
     # "/" -> /display.html. Öffentlich (read-only MQTT-User display-public, nur display/#).
+    # /api/* auf display.rosenweg4303.ch -> Haupt-API (RSS-Ticker-Feed /api/display/rss).
+    display-api-rw4303:
+      entryPoints: [websecure]
+      rule: Host(`display.rosenweg4303.ch`) && PathPrefix(`/api/`)
+      priority: 100
+      service: core-api-svc
+      tls:
+        certResolver: cf
+        domains:
+          - main: display.rosenweg4303.ch
     display-root-rw4303:
       entryPoints: [websecure]
       rule: Host(`display.rosenweg4303.ch`) && Path(`/`)
@@ -298,6 +308,11 @@ http:
         servers:
           - url: http://100.64.2.51:9001
     tv-playlist-svc:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: http://100.64.2.52:3000
+    core-api-svc:
       loadBalancer:
         passHostHeader: true
         servers:
