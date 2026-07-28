@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rosenweg Anzeige</title>
+  <link rel="icon" href="/logo-rosenweg.png">
+  <script src="/js/mqtt.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: 'Inter', sans-serif; color: #f8fafc; overflow: hidden;
+      background: radial-gradient(120% 120% at 50% 0%, #1e293b 0%, #0f172a 55%, #060a14 100%);
+      -webkit-user-select: none; user-select: none; cursor: none;
+    }
+    #screen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+
+    /* ===== Ruhezustand ===== */
+    .idle { text-align: center; padding: 2vmin; width: 100%; }
+    .idle .brand { display: flex; align-items: center; justify-content: center; gap: 1.4vw; margin-bottom: 4vh; opacity: .92; }
+    .idle .brand img { height: clamp(38px, 6vh, 82px); filter: drop-shadow(0 3px 10px rgba(0,0,0,.4)); }
+    .idle .brand .tt { font-weight: 700; font-size: clamp(1.4rem, 3.4vw, 3rem); line-height: 1; letter-spacing: .01em; }
+    .idle .brand .ss { font-size: clamp(.8rem, 1.4vw, 1.3rem); opacity: .7; margin-top: .4vh; }
+    .clock-t { font-size: clamp(4rem, 20vw, 20rem); font-weight: 300; line-height: .95; letter-spacing: .01em; font-variant-numeric: tabular-nums; text-shadow: 0 4px 24px rgba(0,0,0,.45); }
+    .clock-t .sec { font-size: .42em; font-weight: 300; opacity: .55; vertical-align: baseline; margin-left: .12em; }
+    .clock-d { font-size: clamp(1.1rem, 3.2vw, 3rem); font-weight: 300; opacity: .78; margin-top: 2.5vh; text-transform: capitalize; }
+
+    /* ===== Ankündigung ===== */
+    .announce { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 6vmin 5vmin; }
+    .announce .kick { font-size: clamp(1rem, 2.6vw, 2rem); font-weight: 600; letter-spacing: .18em; text-transform: uppercase; color: #38bdf8; margin-bottom: 4vh; }
+    .announce .body { font-weight: 600; line-height: 1.14; max-width: 92vw; text-shadow: 0 3px 18px rgba(0,0,0,.4); word-break: break-word; overflow-wrap: anywhere; }
+
+    /* ===== Notfall (Vollbild rot) ===== */
+    body.emergency { background: #000; }
+    .emergency-scr { position: fixed; inset: 0; background: linear-gradient(160deg, #b91c1c 0%, #dc2626 55%, #991b1b 100%); color: #fff;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 5vmin;
+      border: .9vmin solid #fff; box-shadow: inset 0 0 0 .35vmin #7f1d1d; animation: pulse 2.4s ease-in-out infinite; }
+    @keyframes pulse { 0%, 100% { box-shadow: inset 0 0 0 .35vmin #7f1d1d, inset 0 0 8vmin rgba(0,0,0,.25); } 50% { box-shadow: inset 0 0 0 .35vmin #fecaca, inset 0 0 14vmin rgba(0,0,0,.1); } }
+    .emergency-scr .sym { font-size: clamp(4rem, 13vw, 13rem); line-height: 1; margin-bottom: 3vh; filter: drop-shadow(0 4px 12px rgba(0,0,0,.35)); }
+    .emergency-scr .kick { font-size: clamp(1.2rem, 3.4vw, 3rem); font-weight: 800; letter-spacing: .16em; text-transform: uppercase; margin-bottom: 4vh; text-shadow: 0 2px 10px rgba(0,0,0,.4); }
+    .emergency-scr .body { font-weight: 800; line-height: 1.12; max-width: 92vw; text-shadow: 0 3px 16px rgba(0,0,0,.5); word-break: break-word; overflow-wrap: anywhere; }
+
+    /* Text-Skalierung nach Länge (JS setzt Klasse) */
+    .txt-xl  { font-size: clamp(3rem, 12vw, 13rem); }
+    .txt-lg  { font-size: clamp(2.4rem, 8.5vw, 9rem); }
+    .txt-md  { font-size: clamp(2rem, 6vw, 6rem); }
+    .txt-sm  { font-size: clamp(1.6rem, 4vw, 4.2rem); }
+
+    /* ===== Laufschrift ===== */
+    .marquee { width: 100%; overflow: hidden; white-space: nowrap; }
+    .marquee .run { display: inline-block; padding-left: 100%; font-weight: 700; line-height: 1.1; will-change: transform; animation: scroll var(--dur, 22s) linear infinite; }
+    @keyframes scroll { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+    .mq-xl { font-size: clamp(3rem, 13vw, 15rem); }
+    .mq-lg { font-size: clamp(2.6rem, 10vw, 11rem); }
+
+    /* ===== Verbindungs-/Frische-Indikator (dezent, Ecke) ===== */
+    #stat { position: fixed; bottom: 1.6vmin; right: 1.8vmin; display: flex; align-items: center; gap: .6vmin;
+      font-size: clamp(.62rem, 1vw, .9rem); color: rgba(255,255,255,.5); z-index: 20; letter-spacing: .02em; }
+    #stat .dot { width: 1.15vmin; height: 1.15vmin; min-width: 8px; min-height: 8px; border-radius: 50%; background: #fbbf24; box-shadow: 0 0 6px currentColor; color: #fbbf24; transition: color .3s; }
+    #stat.ok  .dot { background: #34d399; color: #34d399; }
+    #stat.err .dot { background: #f87171; color: #f87171; }
+    #stat.off .dot { background: #94a3b8; color: #94a3b8; }
+    #stat .lbl { opacity: .8; }
+    body.emergency #stat { color: rgba(255,255,255,.7); }
+
+    /* Aktualisiert-vor Zeitstempel */
+    #age { position: fixed; bottom: 1.6vmin; left: 1.8vmin; font-size: clamp(.62rem, 1vw, .9rem); color: rgba(255,255,255,.4); z-index: 20; letter-spacing: .02em; }
+    body.emergency #age { color: rgba(255,255,255,.6); }
+  </style>
+</head>
+<body>
+  <div id="screen"></div>
+  <div id="age"></div>
+  <div id="stat" class="off"><span class="dot"></span><span class="lbl" id="stat-t">…</span></div>
+
+  <script>
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+  // ===== Zustand =====
+  const state = {
+    announcement: null, // { text, active, scroll, ts, by }
+    emergency: null,
+    lastHeartbeat: 0,   // ms epoch der letzten Heartbeat-Nachricht
+    connOk: false,      // MQTT verbunden?
+    connLabel: 'verbinde…',
+    connClass: 'off',
+    lastTs: 0,          // ts der aktuell gezeigten Meldung (für "aktualisiert vor")
+  };
+
+  // Sichtbarer Kanal: emergency hat Vorrang vor announcement.
+  function activeChannel() {
+    if (state.emergency && state.emergency.active && (state.emergency.text || '').trim()) return { kind: 'emergency', d: state.emergency };
+    if (state.announcement && state.announcement.active && (state.announcement.text || '').trim()) return { kind: 'announce', d: state.announcement };
+    return null;
+  }
+
+  // Textlängen-abhängige Größenklasse
+  function sizeClass(text, scroll, kind) {
+    if (scroll) return kind === 'emergency' ? 'mq-lg' : 'mq-xl';
+    const n = (text || '').length;
+    if (n <= 24)  return 'txt-xl';
+    if (n <= 60)  return 'txt-lg';
+    if (n <= 140) return 'txt-md';
+    return 'txt-sm';
+  }
+
+  // Marquee-Dauer proportional zur Textlänge (gleichmäßiges, lesbares Tempo)
+  function marqueeDur(text) {
+    const n = (text || '').length;
+    return Math.max(14, Math.min(70, Math.round(n * 0.42 + 12))) + 's';
+  }
+
+  function renderChannel(kind, d) {
+    const text = (d.text || '').trim();
+    const scroll = !!d.scroll;
+    const cls = sizeClass(text, scroll, kind);
+    const inner = scroll
+      ? `<div class="marquee"><span class="run ${cls}" style="--dur:${marqueeDur(text)}">${esc(text)}</span></div>`
+      : `<div class="body ${cls}">${esc(text)}</div>`;
+
+    if (kind === 'emergency') {
+      document.body.classList.add('emergency');
+      $('screen').innerHTML =
+        `<div class="emergency-scr">
+           <div class="sym">🚨</div>
+           <div class="kick">Notfall · Achtung</div>
+           ${inner}
+         </div>`;
+    } else {
+      document.body.classList.remove('emergency');
+      $('screen').innerHTML =
+        `<div class="announce">
+           <div class="kick">Ankündigung</div>
+           ${inner}
+         </div>`;
+    }
+  }
+
+  const WD = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
+  const MO = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+  function renderIdle() {
+    document.body.classList.remove('emergency');
+    const n = new Date();
+    const hh = String(n.getHours()).padStart(2, '0');
+    const mm = String(n.getMinutes()).padStart(2, '0');
+    const ss = String(n.getSeconds()).padStart(2, '0');
+    const dateStr = `${WD[n.getDay()]}, ${n.getDate()}. ${MO[n.getMonth()]} ${n.getFullYear()}`;
+    $('screen').innerHTML =
+      `<div class="idle">
+         <div class="brand">
+           <img src="/logo-rosenweg.png" alt="Rosenweg" onerror="this.style.display='none'">
+           <div><div class="tt">Rosenweg</div><div class="ss">Kaiseraugst</div></div>
+         </div>
+         <div class="clock-t">${hh}:${mm}<span class="sec">${ss}</span></div>
+         <div class="clock-d">${dateStr}</div>
+       </div>`;
+  }
+
+  // Aktueller Bildschirmzustand, um unnötiges Neu-Rendern (v.a. Marquee-Neustart) zu vermeiden.
+  let shown = { kind: null, sig: null };
+  function render() {
+    const ch = activeChannel();
+    if (!ch) {
+      state.lastTs = 0;
+      if (shown.kind !== 'idle') { shown = { kind: 'idle', sig: null }; renderIdle(); }
+      else if (shown.kind === 'idle') renderIdle(); // Uhr tickt
+      updateAge();
+      return;
+    }
+    const d = ch.d;
+    const sig = JSON.stringify([ch.kind, d.text, !!d.scroll]);
+    if (shown.kind !== ch.kind || shown.sig !== sig) {
+      shown = { kind: ch.kind, sig };
+      renderChannel(ch.kind, d);
+    }
+    state.lastTs = Number(d.ts) || 0;
+    updateAge();
+  }
+
+  function updateAge() {
+    const el = $('age');
+    if (!state.lastTs) { el.textContent = ''; return; }
+    const secs = Math.max(0, Math.round((Date.now() - state.lastTs * 1000) / 1000));
+    let t;
+    if (secs < 60) t = 'gerade eben';
+    else if (secs < 3600) t = 'vor ' + Math.round(secs / 60) + ' Min';
+    else if (secs < 86400) t = 'vor ' + Math.round(secs / 3600) + ' Std';
+    else t = 'vor ' + Math.round(secs / 86400) + ' Tg';
+    el.textContent = 'aktualisiert ' + t;
+  }
+
+  // ===== Verbindungs-/Frische-Indikator =====
+  function setStat(cls, label) { state.connClass = cls; state.connLabel = label; }
+  function refreshStat() {
+    let cls, label;
+    if (!state.connOk) {
+      cls = state.connClass === 'err' ? 'err' : 'off';
+      label = state.connLabel || 'getrennt';
+    } else {
+      const age = Date.now() - state.lastHeartbeat;
+      if (!state.lastHeartbeat || age > 30000) { cls = 'err'; label = 'keine Daten'; }
+      else { cls = 'ok'; label = 'live'; }
+    }
+    const s = $('stat');
+    s.className = cls;
+    $('stat-t').textContent = label;
+  }
+
+  // ===== MQTT-Nachrichten =====
+  function onMessage(topic, payload) {
+    const t = String(topic);
+    const raw = payload.toString();
+
+    if (t === 'heartbeat') {
+      state.lastHeartbeat = Date.now();
+      refreshStat();
+      return;
+    }
+    if (t === 'display/announcement' || t === 'display/emergency') {
+      let d = null;
+      try { d = JSON.parse(raw); } catch (_) { d = null; }
+      if (raw.trim() === '') d = null; // geleerter retained Payload
+      const key = t === 'display/emergency' ? 'emergency' : 'announcement';
+      state[key] = d;
+      render();
+      return;
+    }
+    // andere display/* Topics werden ignoriert
+  }
+
+  // Öffentlich: read-only MQTT-User (nur display/# + heartbeat lesen), eingebettet — keine Anmeldung.
+  function connect() {
+    setStat('off', 'verbinde…'); refreshStat();
+    const client = mqtt.connect('wss://mqtt.rosenweg4303.ch', {
+      username: 'display-public', password: 'display-public-5b1e60a4b34f71e5',
+      protocolVersion: 4, clean: true, reconnectPeriod: 6000, connectTimeout: 12000,
+      clientId: 'rwdisplay_' + Math.random().toString(16).slice(2, 10),
+    });
+    client.on('connect', () => {
+      state.connOk = true;
+      client.subscribe('display/#', { qos: 0 }, (e) => { if (e) { setStat('err', 'kein Zugriff'); state.connOk = false; refreshStat(); } });
+      client.subscribe('heartbeat', { qos: 0 }, () => {});
+      refreshStat();
+    });
+    client.on('message', onMessage);
+    client.on('reconnect', () => { state.connOk = false; setStat('off', 'reconnect…'); refreshStat(); });
+    client.on('close', () => { state.connOk = false; setStat('off', 'getrennt'); refreshStat(); });
+    client.on('offline', () => { state.connOk = false; setStat('off', 'offline'); refreshStat(); });
+    client.on('error', (e) => { console.error('mqtt', e); state.connOk = false; setStat('err', 'Fehler'); refreshStat(); });
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    render();
+    connect();
+    // Uhr-Tick + Alter aktualisieren
+    setInterval(() => { if (shown.kind === 'idle') renderIdle(); updateAge(); }, 1000);
+    // Frische-Indikator regelmäßig prüfen (auch ohne neue Nachrichten -> stale erkennen)
+    setInterval(refreshStat, 5000);
+  });
+  </script>
+</body>
+</html>
