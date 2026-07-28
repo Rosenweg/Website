@@ -14689,6 +14689,34 @@ ${items.map((it, i) => `<item><title>${xesc(it.title)}</title><description>${xes
   res.send(body);
 });
 
+// ═══ Alarm-Trigger (Sensoren via ioBroker: Gas-/Rauchmelder …) ═══════════════
+// Löst einen Notfall aus, indem in die Messenger-Gruppe "Notfall/Krise"
+// (bcast/notfall) gepostet wird -> Chat + Web-Push aufs Handy + Display-Spiegelung
+// (message-store). active:false = Entwarnung (clear:true -> hebt display/emergency
+// auf, ohne den Notfall neu zu setzen). Auth = Shared Secret (X-Alarm-Secret), da
+// der Aufrufer (ioBroker) kein User-Login hat.
+const ALARM_SECRET = process.env.ALARM_SECRET || '';
+app.post('/api/alarm', async (req, res) => {
+  try {
+    if (!ALARM_SECRET || req.get('X-Alarm-Secret') !== ALARM_SECRET) return res.status(403).json({ error: 'forbidden' });
+    const active = req.body?.active !== false;
+    const source = String(req.body?.source || 'Alarm').slice(0, 80);
+    const text = String(req.body?.text || '').slice(0, 500);
+    const body = active ? (text || `⚠️ ALARM: ${source}`) : (text || `✅ Entwarnung: ${source} wieder normal`);
+    const c = apiMqttPublishClient();
+    if (!c) return res.status(503).json({ error: 'MQTT nicht konfiguriert' });
+    const msg = JSON.stringify({
+      senderId: 'system-alarm', sender: source, body,
+      clientMsgId: 'alarm-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex'),
+      ...(active ? {} : { clear: true }),
+    });
+    c.publish('bcast/notfall/msg', msg, { qos: 1 }, (err) => {
+      if (err) return res.status(502).json({ error: err.message });
+      res.json({ ok: true, active, source });
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Audience-Map fuer die Subdomain-Navs (admin./ausschuss.): leitet pro Rechte-Seite
 // die Audience(s) aus der permissions-Tabelle ab. Regel: eine *-ausschuss-Gruppe ->
 // 'ausschuss'; nur technik (oder zusaetzlich nur Praesident) -> 'admin'. Seiten ganz
