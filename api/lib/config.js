@@ -10,6 +10,26 @@ const AUTHENTIK_CLIENT_SECRET = process.env.AUTHENTIK_CLIENT_SECRET || '';
 const AUTHENTIK_API_TOKEN = process.env.AUTHENTIK_API_TOKEN || '';
 const SITE_URL = process.env.SITE_URL || 'https://www.rosenweg4303.ch';
 
+// ─── MQTT: nicht-interaktiver Login fuer Clients ─────────────────────
+// Erlaubt Authentik-Usern, sich bei MQTT direkt mit Benutzer/E-Mail +
+// App-Passwort-Token anzumelden (statt Browser-Token). Opt-in, da das
+// Credential im MQTT-CONNECT uebertragen wird -> nur ueber TLS aktivieren.
+//
+// Hinweis: Authentik unterstuetzt KEIN klassisches ROPC mit dem echten
+// Login-Passwort. grant_type=password wird wie client_credentials behandelt:
+// Username = Authentik-User/E-Mail, "Passwort" = ein am Konto erzeugtes
+// App-Passwort-Token (pro Nutzer, einzeln widerrufbar). Der genutzte
+// OAuth2-Provider muss den Grant "Password" (bzw. Client credentials) erlauben.
+//
+// Dedizierter Provider (empfohlen): MQTT_ROPC_CLIENT_ID setzen; das Secret
+// bleibt dann leer (Public Client) oder wird explizit gesetzt. Nur ohne
+// eigenen Client faellt es auf die Web-App-Credentials zurueck.
+const MQTT_PASSWORD_LOGIN = process.env.MQTT_PASSWORD_LOGIN === '1' || process.env.MQTT_PASSWORD_LOGIN === 'true';
+const MQTT_ROPC_CLIENT_ID = process.env.MQTT_ROPC_CLIENT_ID || AUTHENTIK_CLIENT_ID;
+const MQTT_ROPC_CLIENT_SECRET = process.env.MQTT_ROPC_CLIENT_ID
+  ? (process.env.MQTT_ROPC_CLIENT_SECRET || '')   // dedizierter Provider: nur explizites Secret
+  : AUTHENTIK_CLIENT_SECRET;                       // Fallback: Web-App-Credentials (Paar)
+
 // ─── Proxmox VE Config ──────────────────────────────────────────────
 const PVE_API_URL = process.env.PVE_API_URL || 'https://100.64.2.20:8006';
 const PVE_API_TOKEN = process.env.PVE_API_TOKEN || '';
@@ -67,4 +87,5 @@ module.exports = {
   AUTHENTIK_URL, AUTHENTIK_EXTERNAL_URL, AUTHENTIK_CLIENT_ID, AUTHENTIK_CLIENT_SECRET,
   AUTHENTIK_API_TOKEN, SITE_URL, PVE_API_URL, PVE_API_TOKEN,
   OAUTH_ALLOWED_HOSTS, oauthRedirectUri,
+  MQTT_PASSWORD_LOGIN, MQTT_ROPC_CLIENT_ID, MQTT_ROPC_CLIENT_SECRET,
 };
