@@ -14276,6 +14276,13 @@ app.post('/api/mqtt/superuser', mqttBrokerGuard, async (req, res) => {
 app.post('/api/mqtt/aclcheck', mqttBrokerGuard, async (req, res) => {
   try {
     const { username, password, topic, acc } = req.body || {};
+    // Globaler Health-Topic "heartbeat": JEDER authentifizierte Client darf ihn
+    // LESEN/abonnieren (broker-lokaler Publisher schreibt ihn, siehe CT105
+    // mqtt-heartbeat.service — unabhaengig von collector/api). Schreiben bleibt
+    // der Service-User-ACL vorbehalten (nur broker-heartbeat).
+    if ((Number(acc) === 1 || Number(acc) === 4) && (topic === 'heartbeat' || String(topic || '').startsWith('heartbeat/'))) {
+      return res.status(200).end();
+    }
     // Messenger-JWT → Topic gegen sub_topics/pub_topics-Claims (acc 1/4=read/sub,
     // 2=write, 3=readwrite). Backend-Token darf alles.
     const mj = messengerJwtClaims(username) || messengerJwtClaims(password);
