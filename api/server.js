@@ -14339,8 +14339,12 @@ function requireMqttTechnik(req, res, next) {
   return res.status(403).json({ error: 'Nur fuer Technik' });
 }
 
-// Lazy MQTT-Write-Client (Broker-User 'collector', darf energy/# schreiben).
+// Lazy MQTT-Write-Client (Broker-User 'collector', darf energy/#,display/# schreiben).
+// Liest zusätzlich display/# mit (retained) und cached den Stand -> RSS-Ticker-Feed
+// (/api/display/rss). Deckt auch die per Chat gesetzten Notfälle ab (message-store
+// published display/emergency direkt, nicht über /api/display/announce).
 let _apiMqttClient = null;
+const displayCache = { announcement: null, emergency: null };
 function apiMqttPublishClient() {
   if (_apiMqttClient) return _apiMqttClient;
   const url = process.env.MQTT_URL;
@@ -14353,8 +14357,16 @@ function apiMqttPublishClient() {
     clientId: 'rwapi_pub_' + crypto.randomBytes(4).toString('hex'),
   });
   _apiMqttClient.on('error', (e) => console.error('[mqtt-pub]', e.message));
+  _apiMqttClient.on('connect', () => _apiMqttClient.subscribe('display/#', { qos: 0 }));
+  _apiMqttClient.on('message', (topic, payload) => {
+    const ch = topic === 'display/announcement' ? 'announcement' : topic === 'display/emergency' ? 'emergency' : null;
+    if (!ch) return;
+    try { displayCache[ch] = JSON.parse(payload.toString('utf8')); } catch { displayCache[ch] = null; }
+  });
   return _apiMqttClient;
 }
+// Client früh verbinden, damit der RSS-Feed die retained display/*-Stände sofort kennt.
+setTimeout(() => { try { apiMqttPublishClient(); } catch (_) {} }, 3000);
 
 // Alle aktiven Zaehler (fuer die Zugriffsverwaltung)
 app.get('/api/mqtt/meters', authMiddleware, requireMqttTechnik, async (req, res) => {
@@ -14652,6 +14664,29 @@ app.post('/api/display/announce', authMiddleware, requireMqttTechnik, async (req
       res.json({ ok: true, topic, active });
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// RSS-Ticker-Feed für Digital-Signage (SlideShow-App Ticker-Zone). PUBLIC (kein
+// Login — Ankündigungen sind nicht geheim). Zeigt aktive Notfall + Ankündigung
+// als Items; leer wenn nichts aktiv. Stand kommt aus displayCache (display/# Sub).
+app.get('/api/display/rss', (req, res) => {
+  const xesc = (s) => String(s == null ? '' : s).replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
+  const items = [];
+  const em = displayCache.emergency, an = displayCache.announcement;
+  if (em && em.active && em.text) items.push({ title: 'NOTFALL: ' + em.text, ts: em.ts });
+  if (an && an.active && an.text) items.push({ title: an.text, ts: an.ts });
+  const rfc = (ms) => new Date(Number(ms) || Date.now()).toUTCString();
+  const body = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+<title>Rosenweg Anzeige</title>
+<link>https://display.rosenweg4303.ch</link>
+<description>Aktuelle Ankündigungen und Notfälle</description>
+<ttl>1</ttl>
+${items.map((it, i) => `<item><title>${xesc(it.title)}</title><description>${xesc(it.title)}</description><guid isPermaLink="false">rw-disp-${i}-${it.ts}</guid><pubDate>${rfc(it.ts)}</pubDate></item>`).join('\n')}
+</channel></rss>`;
+  res.set('Content-Type', 'application/rss+xml; charset=utf-8');
+  res.set('Cache-Control', 'no-cache');
+  res.send(body);
 });
 
 // Audience-Map fuer die Subdomain-Navs (admin./ausschuss.): leitet pro Rechte-Seite
