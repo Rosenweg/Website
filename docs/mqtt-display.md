@@ -67,6 +67,24 @@ Frische-Indikator: `{source,ts,epoch}`, ~alle 10 s).
   eine Nachricht **„Stop"** (oder „Entwarnung"/„Ende"/„Vorbei"/„Aufgehoben"/„Alles ok")
   hebt den Notfall auf (`active:false`). Alternativ „Anzeige löschen" in der Admin-Karte.
 
+## Digital-Signage-Ticker (SlideShow-App)
+
+Für Laufschriften in der Android-TV-App **SlideShow** (`sk.mimac.slideshow`) gibt es
+einen RSS-Feed mit den aktiven Meldungen (Notfall zuerst, dann Ankündigung):
+
+```
+https://display.rosenweg4303.ch/api/display/rss      (extern/TLS, via Edge)
+http://100.64.2.52:3000/api/display/rss              (intern direkt, ohne Edge)
+```
+
+In der App eine **Ticker-Zone** (RSS) auf diese URL richten → scrollt die aktuelle
+Ankündigung. Ist nichts aktiv, ist der Feed leer (Ticker zeigt nichts). Feed ist
+public (kein Login). `ttl=1` → App fragt häufig neu.
+
+Für den **Notfall-Vollbild-Override** in der SlideShow-App (Layout-Wechsel per
+MQTT-Command `layout/set`) siehe die geplante Bridge — braucht Geräte-MAC + ein
+„Notfall"-Layout in der App.
+
 ## Minimalbeispiel (mosquitto / Shell)
 
 ```bash
