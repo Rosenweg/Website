@@ -355,7 +355,7 @@ ein Kontakt pro Haken. Riegel-Elektromechanik nur an den kritischen Fächern.
 | 8 | **MCP23017** I²C-Portexpander | viele Riegel an wenig Pins | nach Riegel-Zahl | CHF 2–4 | distrelec.ch, bastelgarten.ch |
 | 9 | **Netzteil 12 V / 5 A** | Versorgung Solenoide | 1 | CHF 15–25 | distrelec.ch, bastelgarten.ch |
 | 10 | optional **OLED 0.96"** + Piezo-Buzzer | Rückmeldung „#7 entnommen" | 1 je Block | CHF 5–10 | bastelgarten.ch, play-zone.ch |
-| 11 | **Schranktür-Verriegelung: UniFi Access Ultra** | Person-Auth + Event | — | **vorhanden** | — |
+| 11 | **Schranktür-Reader** — siehe A.9 (neuer G3-Pro **oder** vorhandener Ultra) | Person-Auth + Event | 1 | siehe A.9 | store.ui.com, Brack, Digitec |
 
 **Hinweise:**
 - Positionen 6–9 (Riegel-Strang) entfallen für die reinen Erkennungs-Fächer — nur für die
@@ -365,3 +365,25 @@ ein Kontakt pro Haken. Riegel-Elektromechanik nur an den kritischen Fächern.
 - ESP32 meldet via **MQTT** (vorhandene Infra) an `api/routes/schluessel.js`; Türöffnung
   kommt als **UniFi-Access-Event** dazu → Person ↔ bewegte iButtons verknüpft.
 - Neues DB-Feld `ibutton_id` an `schluessel_exemplar` (Mapping iButton ↔ Schlüssel).
+
+### A.9 Türreader für den neuen Schrank — UniFi Access
+
+Zwei Wege, je nach gewünschtem Methodenumfang an der **Schranktür**:
+
+**Variante „alle Methoden" (gewählt) — UniFi Access G3 Reader Pro:**
+- Unterstützt **NFC-Karte/Keyfob · Apple/Google Wallet (Touch Pass) · Mobile/BLE · PIN
+  (Touchscreen, gemischte Ziffern) · QR-Code · Gesichtserkennung · Wave-to-Exit** +
+  Kamera/Intercom/Klingel. Pro Tür einzeln aktivierbar, welche Methoden gelten.
+- **Braucht zwingend einen UniFi Access „Door Hub"** (Adoption via PoE-Port, Türrelais,
+  **12 V/1 A-Lock-Ausgang** → kann das Solenoid-Schloss direkt versorgen).
+- **Empfehlung: Starter Kit `UA-G3-SK-PRO`** — enthält Door Hub + G3 Reader Pro + einfachen
+  G3 Reader + Keyfobs in einem Kauf. ~CHF 450–550. Alternativ einzeln `UA-G3-Pro`
+  (~CHF 200–260) + Door Hub (~CHF 190–230).
+- Praktischer Mehrwert für den Schrank v.a. **PIN + QR**: Handwerker/Verwaltung erhalten
+  einen **zeitlich begrenzten PIN/QR** statt einer Karte.
+
+**Sparvariante — zweiter UniFi Access Ultra:**
+- Standalone (kein Hub nötig), integriertes Relais, ~CHF 130–160. Aber **nur NFC/Wallet/
+  Mobile**, **kein PIN/QR/Face**. Sinnvoll, wenn Karte + Handy genügen.
+
+**Entschieden:** G3-Pro-Weg (alle Methoden), Hub wird mitbestellt (Starter Kit Pro).
