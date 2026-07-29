@@ -37,9 +37,10 @@ WORKDIR /app
 # geteilte js/ + die Web-UI mitkopiert werden koennen.
 COPY whatsapp-bot/package.json ./
 # python3/make/g++ nur falls better-sqlite3 kein prebuilt-Binary hat.
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+# git: für die whatsapp-web.js-GitHub-Dependency (Fix-Branch PR #201850, bis upstream released).
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ git \
   && npm install --omit=dev \
-  && apt-get purge -y python3 make g++ && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+  && apt-get purge -y python3 make g++ git && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 COPY whatsapp-bot/index.js whatsapp-bot/gateway.js ./
 # Gateway-Web-UI (statisch, wird von gateway.js via express.static('public') serviert).
 COPY whatsapp-bot/public ./public
