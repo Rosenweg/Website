@@ -573,6 +573,65 @@ app.delete('/api/me/tokens/:id', authMiddleware, requireUserLogin, async (req, r
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ── Passkeys (WebAuthn) — Self-Service (Meine Daten) ───────────────────────
+// Nutzer legen optional Passkeys an; sie dienen dem Aufsperren des Konto-Chat-
+// Schlüssels via WebAuthn-PRF (rpId=rosenweg4303.ch → gilt auch auf chat.).
+// Registrierung ist client-getrieben: der Sicherheitswert liegt im PRF-Secret,
+// das der Server NIE sieht, nicht in einer Attestations-Signatur. Gespeichert
+// wird nur, was zum Wiederfinden + PRF-Aufruf nötig ist (credential_id, ob PRF
+// unterstützt). Der eigentliche (verschlüsselte) Konto-Schlüssel kommt später.
+async function ensureWebauthnTable() {
+  await pool.query(`CREATE TABLE IF NOT EXISTS webauthn_passkeys (
+    id SERIAL PRIMARY KEY,
+    user_email TEXT NOT NULL,
+    credential_id TEXT UNIQUE NOT NULL,
+    label TEXT,
+    transports JSONB,
+    prf_supported BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    last_used_at TIMESTAMPTZ)`);
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_webauthn_user ON webauthn_passkeys(LOWER(user_email))');
+}
+setTimeout(() => ensureWebauthnTable().catch(e => console.warn('[webauthn] init:', e.message)), 12000);
+
+app.get('/api/me/passkeys', authMiddleware, requireUserLogin, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT id, label, prf_supported, created_at, last_used_at
+         FROM webauthn_passkeys WHERE LOWER(user_email) = LOWER($1)
+        ORDER BY created_at DESC`, [req.user.email]);
+    res.json({ passkeys: r.rows });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/me/passkeys', authMiddleware, requireUserLogin, async (req, res) => {
+  try {
+    const { credentialId, label, transports, prfSupported } = req.body || {};
+    if (!credentialId || typeof credentialId !== 'string') {
+      return res.status(400).json({ error: 'credentialId erforderlich' });
+    }
+    const r = await pool.query(
+      `INSERT INTO webauthn_passkeys (user_email, credential_id, label, transports, prf_supported)
+       VALUES ($1,$2,$3,$4::jsonb,$5)
+       ON CONFLICT (credential_id) DO UPDATE SET label = EXCLUDED.label, prf_supported = EXCLUDED.prf_supported
+       RETURNING id, label, prf_supported, created_at`,
+      [req.user.email, credentialId.slice(0, 512), (label || 'Passkey').slice(0, 100),
+       Array.isArray(transports) ? JSON.stringify(transports) : null, !!prfSupported]);
+    res.json(r.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/me/passkeys/:id', authMiddleware, requireUserLogin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const r = await pool.query(
+      `DELETE FROM webauthn_passkeys WHERE id = $1 AND LOWER(user_email) = LOWER($2) RETURNING id`,
+      [id, req.user.email]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Endpoint für Agent: 'wer bin ich, was kann ich' — für Discovery/Onboarding.
 app.get('/api/me', authMiddleware, async (req, res) => {
   res.json({

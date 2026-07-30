@@ -263,6 +263,39 @@
       </div>
     </section>
 
+    <!-- =================================================================
+         Passkey (Chat-Verschlüsselung) — Self-Service, optional
+         ================================================================= -->
+    <section id="pkCard" class="hidden mt-8 bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+      <h2 class="text-base font-bold flex items-center gap-2 mb-2">🔐 Passkey (Chat)</h2>
+      <p class="text-sm text-slate-500 leading-relaxed">
+        Optional: Mit einem Passkey (Fingerabdruck/Gesicht) sperrst du künftig deinen
+        verschlüsselten Chat auf jedem Gerät auf — ohne Passwort, und ohne dass jemand
+        am Server mitlesen kann. Ganz ohne Passkey geht es später per Wiederherstellungs-Code.
+      </p>
+
+      <div id="pkUnsupported" class="hidden text-sm rounded-xl px-3 py-3 bg-slate-100 text-slate-500 mt-3">
+        Dieses Gerät / dieser Browser unterstützt keine Passkeys.
+      </div>
+
+      <div id="pkBody" class="hidden mt-4 space-y-4">
+        <ul id="pkList" class="space-y-2"></ul>
+        <p id="pkEmpty" class="hidden text-[12px] text-slate-400">Noch kein Passkey angelegt.</p>
+
+        <div class="flex items-stretch gap-2">
+          <input id="pkLabel" type="text" maxlength="40" autocomplete="off"
+            placeholder="Bezeichnung (z.B. Mein iPhone)"
+            class="flex-1 rounded-xl border border-slate-300 px-3 py-2.5 text-base bg-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none">
+          <button id="pkCreateBtn" type="button"
+            class="shrink-0 bg-sky-700 text-white text-sm font-semibold rounded-xl px-3 active:bg-sky-800 disabled:opacity-50">
+            Passkey einrichten
+          </button>
+        </div>
+
+        <div id="pkMsg" class="hidden text-sm rounded-xl px-3 py-3"></div>
+      </div>
+    </section>
+
     <p class="text-center text-[11px] text-slate-400 mt-8">Rosenweg · pwa.rosenweg4303.ch</p>
   </main>
 
@@ -638,6 +671,118 @@
     }
   }
 
+  // =====================================================================
+  //  Passkeys (WebAuthn) — optionaler Chat-Entsperr-Schlüssel
+  //  rpId = rosenweg4303.ch → gilt auch auf chat.rosenweg4303.ch. Registrierung
+  //  ist client-getrieben (kein Attestations-Check nötig — der Wert liegt im
+  //  PRF-Secret, das der Server nie sieht). Hier wird PRF-Support ECHT getestet.
+  // =====================================================================
+  const PK_RP_ID = 'rosenweg4303.ch';
+  const pkSupported = () => !!(window.PublicKeyCredential && navigator.credentials && navigator.credentials.create);
+  const pkB64url = (buf) =>
+    btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  function pkMsg(text, kind) {
+    const el = $('pkMsg'); el.textContent = text;
+    el.className = 'text-sm rounded-xl px-3 py-3 ' + (
+      kind === 'ok' ? 'bg-green-100 text-green-800' :
+      kind === 'warn' ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-700');
+    el.classList.remove('hidden');
+  }
+
+  function pkRender(list) {
+    const ul = $('pkList');
+    if (!Array.isArray(list) || !list.length) { ul.innerHTML = ''; $('pkEmpty').classList.remove('hidden'); return; }
+    $('pkEmpty').classList.add('hidden');
+    ul.innerHTML = list.map(p => {
+      const d = p.created_at ? new Date(p.created_at).toLocaleDateString('de-CH') : '';
+      const prf = p.prf_supported
+        ? '<span class="text-[11px] text-green-700">✓ entsperrt Chat</span>'
+        : '<span class="text-[11px] text-amber-700">kein PRF auf diesem Gerät</span>';
+      return `<li class="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+        <div><div class="text-sm text-slate-800">${esc(p.label || 'Passkey')}</div>
+        <div class="text-[11px] text-slate-400">${esc(d)} · ${prf}</div></div>
+        <button type="button" data-pk-del="${p.id}" class="shrink-0 text-[12px] text-red-600 active:text-red-800">Entfernen</button>
+      </li>`;
+    }).join('');
+    ul.querySelectorAll('[data-pk-del]').forEach(b =>
+      b.addEventListener('click', () => pkDelete(b.getAttribute('data-pk-del'), b)));
+  }
+
+  async function pkLoad() {
+    $('pkCard').classList.remove('hidden');
+    if (!pkSupported()) { $('pkUnsupported').classList.remove('hidden'); return; }
+    $('pkBody').classList.remove('hidden');
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/me/passkeys', { cache: 'no-store' });
+      if (r.ok) { const d = await r.json().catch(() => ({})); pkRender(d.passkeys || []); }
+    } catch { /* Anlegen bleibt möglich */ }
+  }
+
+  async function pkDelete(id, btn) {
+    if (!confirm('Passkey wirklich entfernen?')) return;
+    if (btn) btn.disabled = true;
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/me/passkeys/' + encodeURIComponent(id), { method: 'DELETE' });
+      if (r.ok) pkLoad(); else pkMsg('Löschen fehlgeschlagen.', 'err');
+    } catch { pkMsg('Netzwerkfehler.', 'err'); }
+  }
+
+  async function pkRegister() {
+    if (!pkSupported()) return;
+    const btn = $('pkCreateBtn'); btn.disabled = true; const old = btn.textContent; btn.textContent = 'Warte auf Passkey …';
+    $('pkMsg').classList.add('hidden');
+    try {
+      const label = ($('pkLabel').value || '').trim() || 'Passkey';
+      const email = (currentUser && (currentUser.email || currentUser.preferred_username)) || 'user';
+      const userId = new TextEncoder().encode(email).slice(0, 64);
+      const cred = await navigator.credentials.create({ publicKey: {
+        rp: { id: PK_RP_ID, name: 'Rosenweg' },
+        user: { id: userId, name: email, displayName: (currentUser && currentUser.name) || email },
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+        authenticatorSelection: { residentKey: 'preferred', userVerification: 'preferred' },
+        timeout: 60000, attestation: 'none',
+        extensions: { prf: {} },
+      }});
+      const transports = (cred.response.getTransports && cred.response.getTransports()) || [];
+      // PRF-Support ECHT ermitteln: erst aus create(), sonst per get()-Probe.
+      let prfSupported = false;
+      const ext = cred.getClientExtensionResults ? cred.getClientExtensionResults() : {};
+      if (ext && ext.prf && ext.prf.enabled === true) {
+        prfSupported = true;
+      } else {
+        try {
+          const salt = crypto.getRandomValues(new Uint8Array(32));
+          const asrt = await navigator.credentials.get({ publicKey: {
+            challenge: crypto.getRandomValues(new Uint8Array(32)),
+            rpId: PK_RP_ID,
+            allowCredentials: [{ type: 'public-key', id: cred.rawId, transports }],
+            userVerification: 'preferred',
+            extensions: { prf: { eval: { first: salt } } },
+          }});
+          const pr = asrt.getClientExtensionResults().prf;
+          prfSupported = !!(pr && pr.results && pr.results.first);
+        } catch { prfSupported = false; }
+      }
+      const r = await AuthentikAuth.apiFetch('/api/me/passkeys', { method: 'POST', body: {
+        credentialId: pkB64url(cred.rawId), label, transports, prfSupported,
+      }});
+      if (!r.ok) { let m = 'HTTP ' + r.status; try { const j = await r.json(); if (j.error) m = j.error; } catch {} pkMsg('Speichern fehlgeschlagen: ' + m, 'err'); return; }
+      $('pkLabel').value = '';
+      pkMsg(prfSupported
+        ? '✓ Passkey angelegt — dieses Gerät kann den verschlüsselten Chat später aufsperren.'
+        : '✓ Passkey angelegt. Achtung: Dieses Gerät unterstützt kein PRF — der Chat lässt sich hier später nur per Wiederherstellungs-Code entsperren.',
+        prfSupported ? 'ok' : 'warn');
+      pkLoad();
+    } catch (e) {
+      if (e && e.name === 'NotAllowedError') pkMsg('Abgebrochen oder abgelehnt.', 'warn');
+      else pkMsg('Passkey konnte nicht angelegt werden: ' + ((e && e.message) || e), 'err');
+    } finally { btn.disabled = false; btn.textContent = old; }
+  }
+
+  function pkWire() { $('pkCreateBtn').addEventListener('click', pkRegister); }
+
   async function main() {
     wireInstallBanner();
     $('form').addEventListener('submit', onSubmit);
@@ -663,6 +808,10 @@
     // MQTT-Zugang (additiv, eigener Fehlerpfad — blockiert die Seite nicht)
     mqWire();
     mqLoad();
+
+    // Passkeys (additiv, optional)
+    pkWire();
+    pkLoad();
   }
 
   main();
