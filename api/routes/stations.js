@@ -39,6 +39,13 @@ const { STATION_TYPES, buildConfig, missingSecrets } = require('../lib/stationco
 
 const router = express.Router();
 
+// Express 4 fängt Fehler aus async-Handlern NICHT ab: eine abgelehnte Promise
+// endet als unhandledRejection, die Anfrage bekommt nie eine Antwort, und der
+// Aufrufer läuft in seinen Timeout. Genau das passierte beim Registrieren
+// einer zuvor abgemeldeten Station. Deshalb jeder Handler durch diesen
+// Wrapper — und am Ende ein Fehlerbehandler, der wenigstens sauber 500 sagt.
+const a = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
 const SETUP_TTL_MINUTES = 30;
 const SETUP_PREFIX = 'rw_setup_';
 const STATION_PREFIX = 'rw_station_';
@@ -169,7 +176,7 @@ function nurTechnik(req, res, next) {
 // Bewusst ohne Gruppenprüfung: eine Station aufsetzen darf jeder mit einem
 // gültigen Rosenweg-Konto. Wer es war, steht in registered_by, und jede neue
 // Station taucht sofort in der Verwaltung auf.
-router.post('/login', async (req, res) => {
+router.post('/login', a(async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'Benutzer und Passwort nötig' });
 
@@ -200,7 +207,7 @@ router.post('/login', async (req, res) => {
     expires_in: SETUP_TTL_MINUTES * 60,
     user: { name: user.displayName, username: user.username },
   });
-});
+}));
 
 // GET /api/stations/types
 router.get('/types', setupSession, (req, res) => res.json({ types: STATION_TYPES }));
@@ -209,7 +216,7 @@ router.get('/types', setupSession, (req, res) => res.json({ types: STATION_TYPES
 // MUSS vor den /:id-Routen stehen, sonst frisst ':id' das 'admin'.
 
 // GET /api/stations/admin/list
-router.get('/admin/list', authMiddleware, nurTechnik, async (req, res) => {
+router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
   await ensureSchema();
   const r = await pool.query(`
     SELECT id, role, hostname, standort, notiz, status, sperr_grund, gesperrt_von,
@@ -218,20 +225,20 @@ router.get('/admin/list', authMiddleware, nurTechnik, async (req, res) => {
       FROM stations
      ORDER BY (revoked_at IS NOT NULL), registered_at DESC`);
   res.json({ stations: r.rows, types: STATION_TYPES });
-});
+}));
 
 // GET /api/stations/admin/:id/events
-router.get('/admin/:id/events', authMiddleware, nurTechnik, async (req, res) => {
+router.get('/admin/:id/events', authMiddleware, nurTechnik, a(async (req, res) => {
   await ensureSchema();
   const r = await pool.query(
     'SELECT art, wer, text, erstellt FROM station_events WHERE station_id = $1 ORDER BY erstellt DESC LIMIT 100',
     [req.params.id],
   );
   res.json({ events: r.rows });
-});
+}));
 
 // POST /api/stations/admin/:id/block  { grund }
-router.post('/admin/:id/block', authMiddleware, nurTechnik, async (req, res) => {
+router.post('/admin/:id/block', authMiddleware, nurTechnik, a(async (req, res) => {
   await ensureSchema();
   const grund = (req.body?.grund || '').trim() || null;
   const wer = req.user?.email || req.user?.name || 'unbekannt';
@@ -244,10 +251,10 @@ router.post('/admin/:id/block', authMiddleware, nurTechnik, async (req, res) => 
   await ereignis(req.params.id, 'gesperrt', wer, grund);
   console.log(`[stations] '${req.params.id}' gesperrt von ${wer}${grund ? ` (${grund})` : ''}`);
   res.json({ ok: true });
-});
+}));
 
 // POST /api/stations/admin/:id/unblock
-router.post('/admin/:id/unblock', authMiddleware, nurTechnik, async (req, res) => {
+router.post('/admin/:id/unblock', authMiddleware, nurTechnik, a(async (req, res) => {
   await ensureSchema();
   const wer = req.user?.email || req.user?.name || 'unbekannt';
   const r = await pool.query(
@@ -258,11 +265,11 @@ router.post('/admin/:id/unblock', authMiddleware, nurTechnik, async (req, res) =
   if (!r.rows.length) return res.status(404).json({ error: 'Station nicht gefunden' });
   await ereignis(req.params.id, 'entsperrt', wer, null);
   res.json({ ok: true });
-});
+}));
 
 // DELETE /api/stations/admin/:id — endgültig entfernen. Das Token der Station
 // ist danach wertlos; das Gerät fällt beim nächsten Lauf auf.
-router.delete('/admin/:id', authMiddleware, nurTechnik, async (req, res) => {
+router.delete('/admin/:id', authMiddleware, nurTechnik, a(async (req, res) => {
   await ensureSchema();
   const wer = req.user?.email || req.user?.name || 'unbekannt';
   const r = await pool.query(
@@ -273,7 +280,7 @@ router.delete('/admin/:id', authMiddleware, nurTechnik, async (req, res) => {
   await ereignis(req.params.id, 'entfernt', wer, null);
   console.log(`[stations] '${req.params.id}' entfernt von ${wer}`);
   res.json({ ok: true });
-});
+}));
 
 // ─── Registrierung ──────────────────────────────────────────────────
 
@@ -287,7 +294,7 @@ function slug(s) {
 }
 
 // POST /api/stations/register  { type, standort, id?, hostname?, notiz?, hardware? }
-router.post('/register', setupSession, async (req, res) => {
+router.post('/register', setupSession, a(async (req, res) => {
   const { type, standort, notiz, hardware } = req.body || {};
   if (!STATION_TYPES.some((t) => t.id === type)) {
     return res.status(400).json({ error: `Unbekannter Typ '${type}'` });
@@ -318,33 +325,51 @@ router.post('/register', setupSession, async (req, res) => {
     overrides: {},
   };
 
-  await pool.query(
+  // Eine abgemeldete Station hinterlässt ihre Zeile (Verlauf und Ereignisse
+  // sollen bleiben), und id ist der Primärschlüssel. Ohne ON CONFLICT würde
+  // dieselbe Kennung nach einem 'stationctl unregister' nie wieder vergeben
+  // werden können. Das WHERE ist der Riegel davor, eine *aktive* Station zu
+  // überschreiben — die hat die Dublettenprüfung oben schon abgefangen.
+  const eingefuegt = await pool.query(
     `INSERT INTO stations (id, role, hostname, standort, notiz, token_hash, hardware,
                            registered_by, last_seen_ip)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+     ON CONFLICT (id) DO UPDATE SET
+       role = EXCLUDED.role, hostname = EXCLUDED.hostname,
+       standort = EXCLUDED.standort, notiz = EXCLUDED.notiz,
+       token_hash = EXCLUDED.token_hash, hardware = EXCLUDED.hardware,
+       registered_by = EXCLUDED.registered_by, last_seen_ip = EXCLUDED.last_seen_ip,
+       registered_at = NOW(), revoked_at = NULL, status = 'aktiv',
+       sperr_grund = NULL, gesperrt_von = NULL, gesperrt_am = NULL,
+       last_seen_at = NULL, last_state = NULL
+     WHERE stations.revoked_at IS NOT NULL
+     RETURNING id`,
     [row.id, row.role, row.hostname, row.standort, row.notiz, sha256(token),
       JSON.stringify(hardware || {}), req.setupUser.username, clientIp(req)],
   );
+  if (!eingefuegt.rows.length) {
+    return res.status(409).json({ error: `Station '${id}' gibt es schon` });
+  }
   await ereignis(id, 'registriert', req.setupUser.username, `${type} · ${row.standort}`);
 
   console.log(`[stations] '${id}' (${type}) registriert von ${req.setupUser.username}`);
   res.status(201).json({ station_id: id, station_token: token, config: buildConfig(row) });
-});
+}));
 
 // ─── Betrieb (Station selbst) ───────────────────────────────────────
 
 // GET /api/stations/:id/config
-router.get('/:id/config', stationAuth, async (req, res) => {
+router.get('/:id/config', stationAuth, a(async (req, res) => {
   await pool.query('UPDATE stations SET last_seen_at = NOW(), last_seen_ip = $2 WHERE id = $1',
     [req.station.id, clientIp(req)]);
   res.json(buildConfig(req.station));
-});
+}));
 
 // POST /api/stations/:id/seen  { state }
 //
 // Das ist die Rückmeldung, von der die Verwaltung lebt: was für ein Gerät,
 // welche Rolle, welche Version, hat die Einrichtung geklappt.
-router.post('/:id/seen', stationAuth, async (req, res) => {
+router.post('/:id/seen', stationAuth, a(async (req, res) => {
   const state = req.body?.state || {};
   await pool.query(
     'UPDATE stations SET last_seen_at = NOW(), last_seen_ip = $3, last_state = $2 WHERE id = $1',
@@ -355,15 +380,24 @@ router.post('/:id/seen', stationAuth, async (req, res) => {
       state.text ? String(state.text).slice(0, 500) : null);
   }
   res.json({ ok: true, gesperrt: req.station.status === 'gesperrt' });
-});
+}));
 
 // DELETE /api/stations/:id — die Station meldet sich selbst ab.
-router.delete('/:id', stationAuth, async (req, res) => {
+router.delete('/:id', stationAuth, a(async (req, res) => {
   await pool.query('UPDATE stations SET revoked_at = NOW(), status = $2 WHERE id = $1',
     [req.station.id, 'abgemeldet']);
   await ereignis(req.station.id, 'abgemeldet', null, 'von der Station selbst');
   console.log(`[stations] '${req.station.id}' hat sich abgemeldet`);
   res.json({ ok: true });
+}));
+
+// Letzte Instanz: was hier ankommt, wäre sonst eine Anfrage ohne Antwort —
+// der Installer stünde bis in seinen Timeout und wüsste nichts.
+// eslint-disable-next-line no-unused-vars
+router.use((err, req, res, next) => {
+  console.error('[stations] unbehandelt:', err?.message || err);
+  if (res.headersSent) return;
+  res.status(500).json({ error: 'Unerwarteter Fehler in der Stationsverwaltung' });
 });
 
 module.exports = router;
