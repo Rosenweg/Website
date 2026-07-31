@@ -1,0 +1,18 @@
+# Deploy-Keys und gebaute Images gehören nie ins Repo
+build/keys/
+build/out/
+build/cache/
+*.iso
+deploy-key*
+id_ed25519*
+*.pem
+
+# Lokale Test-Configs (die echte Config liegt im privaten Config-Repo)
+station.json
+station.local.json
+*.local.json
+
+# Editor / OS
+.DS_Store
+*.swp
+*~
