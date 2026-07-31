@@ -29,6 +29,9 @@ const DEFAULTS = {
     realm: 'AD.ROSENWEG4303.CH',
     workgroup: 'ROSENWEG',
     controller: '100.64.2.30',
+    // Rechnerkonten landen in einer eigenen OU. Das Beitrittskonto hat auch
+    // nur dort Rechte — es ist ausdrücklich kein Domänenadministrator.
+    computer_ou: 'OU=Stationen,DC=ad,DC=rosenweg4303,DC=ch',
     allow_groups: ['rosenweg'],
     admin_groups: ['technik'],
   },
