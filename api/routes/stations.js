@@ -36,6 +36,7 @@ const { authenticateAD } = require('../lib/adauth');
 const { authMiddleware } = require('../middleware/auth');
 const { isTechnik, isPraesident } = require('../lib/groups');
 const { STATION_TYPES, buildConfig, missingSecrets } = require('../lib/stationconfig');
+const { stationApps } = require('../lib/stationapps');
 
 const router = express.Router();
 
@@ -357,6 +358,14 @@ router.post('/register', setupSession, a(async (req, res) => {
 }));
 
 // ─── Betrieb (Station selbst) ───────────────────────────────────────
+
+// GET /api/stations/:id/apps
+//
+// Die Rosenweg-Seiten als Programmliste. Abgeleitet aus js/nav.js, damit die
+// Stationen nicht hinterherhinken, wenn die Website eine Seite dazubekommt.
+router.get('/:id/apps', stationAuth, a(async (req, res) => {
+  res.json({ apps: stationApps() });
+}));
 
 // GET /api/stations/:id/config
 router.get('/:id/config', stationAuth, a(async (req, res) => {
