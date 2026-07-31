@@ -64,7 +64,8 @@ const ROLE_DEFAULTS = {
     look: {
       gtk_theme: 'Mint-Y-Blue',
       icon_theme: 'Mint-Y',
-      font: 'Ubuntu 10',
+      // Keine feste Schrift: fonts-ubuntu gibt es in Trixie nicht mehr. Ohne
+      // Angabe wählt die Station selbst, was tatsächlich installiert ist.
       mint_themes_version: '2.4.0',
       mint_icons_version: '1.9.2',
     },
