@@ -7,19 +7,55 @@
 // synchronisiert Benutzer und Gruppen ohnehin alle zwei Minuten ins AD, und
 // die Stationen melden sich später über genau dieses AD an.
 //
+// Immer über LDAPS: das AD lehnt einfache Binds auf Port 389 von sich aus ab
+// ("Transport encryption required"), und hier geht ein Klartextpasswort über
+// die Leitung. Das Zertifikat des DC ist selbst ausgestellt und trägt keine
+// SAN, nur CN=DC1.ad.rosenweg4303.ch — deshalb wird die CA gepinnt und der
+// Name von Hand geprüft, statt die Prüfung abzuschalten.
+//
 // Nur für den Stations-Installer gedacht. Alles Browserbasierte läuft
 // unverändert über Authentik.
 const { Client } = require('ldapts');
 
-const AD_URL = process.env.AD_URL || 'ldap://100.64.2.30:389';
+const AD_URL = process.env.AD_URL || 'ldaps://100.64.2.30:636';
 const AD_DOMAIN = process.env.AD_DOMAIN || 'ad.rosenweg4303.ch';
 const AD_BASE_DN = process.env.AD_BASE_DN
   || 'DC=' + AD_DOMAIN.split('.').join(',DC=');
+// Auf welchen Namen das Zertifikat des DC lautet.
+const AD_TLS_SERVERNAME = process.env.AD_TLS_SERVERNAME || 'DC1.ad.rosenweg4303.ch';
+// PEM der Samba-CA, einzeilig mit \n statt Zeilenumbrüchen (.env kann keine).
+const AD_TLS_CA = (process.env.AD_TLS_CA_PEM || '').replace(/\\n/g, '\n').trim();
+const AD_TLS_INSECURE = process.env.AD_TLS_INSECURE === '1';
 
 // CN aus einem DN ziehen: 'CN=technik,CN=Users,DC=…' -> 'technik'
 function cnOf(dn) {
   const m = /^CN=([^,]+)/i.exec(dn || '');
   return m ? m[1] : null;
+}
+
+function tlsOptions() {
+  if (!AD_URL.startsWith('ldaps:')) return undefined;
+
+  if (!AD_TLS_CA) {
+    if (!AD_TLS_INSECURE) {
+      throw new Error(
+        'AD_TLS_CA_PEM ist nicht gesetzt. Ohne gepinnte CA werden keine '
+        + 'Zugangsdaten an den DC geschickt (AD_TLS_INSECURE=1 hebt das auf).',
+      );
+    }
+    return { rejectUnauthorized: false };
+  }
+
+  return {
+    ca: [AD_TLS_CA],
+    // Wir verbinden über die IP; der DC weist sich unter seinem Namen aus.
+    servername: AD_TLS_SERVERNAME,
+    checkServerIdentity: (host, cert) => {
+      const cn = cert?.subject?.CN;
+      if (cn && cn.toLowerCase() === AD_TLS_SERVERNAME.toLowerCase()) return undefined;
+      return new Error(`DC weist sich als '${cn}' aus, erwartet war '${AD_TLS_SERVERNAME}'.`);
+    },
+  };
 }
 
 /**
@@ -39,7 +75,12 @@ async function authenticateAD(username, password) {
 
   const user = String(username).trim();
   const upn = user.includes('@') ? user : `${user}@${AD_DOMAIN}`;
-  const client = new Client({ url: AD_URL, timeout: 8000, connectTimeout: 8000 });
+  const client = new Client({
+    url: AD_URL,
+    timeout: 8000,
+    connectTimeout: 8000,
+    tlsOptions: tlsOptions(),
+  });
 
   try {
     try {
