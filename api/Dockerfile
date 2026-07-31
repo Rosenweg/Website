@@ -16,6 +16,9 @@ COPY api/routes/ ./routes/
 COPY api/scripts/ ./scripts/
 # site-config.json wird vom Auto-Seed gelesen (legacy Verwaltung -> DB)
 COPY site-config.json ./
+# nav.js ist die einzige Quelle der Seitenliste; die Stationen leiten
+# daraus ihre Programme ab (lib/stationapps.js).
+COPY js/nav.js ./nav.js
 
 EXPOSE 3000
 
