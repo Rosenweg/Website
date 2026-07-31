@@ -9583,6 +9583,12 @@ app.use('/api/email-archive', require('./routes/email-archive'));
 // GRUNDBUCH-CROWDSOURCING -> routes/grundbuch.js (Router-Split, PoC-Domäne)
 app.use('/api/grundbuch', require('./routes/grundbuch'));
 
+// STATIONEN (Rosenweg/os-stationen) -> routes/stations.js
+// Bewusst ohne authMiddleware: der Installer läuft auf einem Gerät ohne
+// Browser und ohne Identität und meldet sich mit Benutzer + Passwort gegen
+// das AD an. Siehe os-stationen/docs/installer.md.
+app.use('/api/stations', require('./routes/stations'));
+
 // ═══════════════════════════════════════════════════════════════════
 // DOCUMENTS (local fileserver, NFS-mounted or local path)
 // ═══════════════════════════════════════════════════════════════════

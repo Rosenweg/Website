@@ -61,6 +61,7 @@ const SERVICES_GROUPS = [
       { label: 'Stundensatz (Auslagen)', href: 'auslagen-stundensatz.html', activeKey: 'auslagen-stundensatz', perm: 'auslagen-stundensatz' },
       { label: 'Handwerker & Lieferanten', href: 'handwerker.html', activeKey: 'handwerker', perm: 'handwerker' },
       { label: 'Proxmox', href: 'proxmox-verwaltung.html', activeKey: 'proxmox', perm: 'proxmox-verwaltung' },
+      { label: 'Stationen', href: 'stationen.html', activeKey: 'stationen', permAny: 'technik,praesident' },
       { label: 'Konto-Loeschungen', href: 'loeschungen.html', activeKey: 'loeschungen', perm: 'loeschungen' },
     ],
   },
@@ -289,6 +290,7 @@ const RosenwegNav = {
     return [
       { href: 'https://isp.rosenweg4303.ch/', label: 'ISP / Netzwerk', group: 'Infrastruktur', perm: 'isp' },
       { href: 'proxmox-verwaltung.html', label: 'Proxmox', group: 'Infrastruktur', perm: 'proxmox-verwaltung' },
+      { href: 'stationen.html', label: 'Stationen', group: 'Infrastruktur', perm: 'stationen', aud: ['admin'] },
       { href: 'energie-config.html', label: 'Zählerverwaltung', group: 'Infrastruktur', perm: 'energie-config' },
       { href: 'https://mqtt.rosenweg4303.ch/', label: 'MQTT-Browser', group: 'Infrastruktur', perm: 'mqtt' },
       { href: 'https://whatsapp.rosenweg4303.ch/', label: 'WhatsApp-Gateway', group: 'Infrastruktur', perm: 'whatsapp-bot', aud: ['admin'] },
