@@ -1,0 +1,6 @@
+# Skripte werden per `source` zusammengesetzt; Variablen aus lib/ sind für
+# shellcheck nicht immer sichtbar.
+external-sources=true
+
+# SC1091: Quelldateien werden erst auf der Station aufgelöst.
+disable=SC1091
