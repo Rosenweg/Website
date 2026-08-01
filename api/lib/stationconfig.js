@@ -73,7 +73,10 @@ const ROLE_DEFAULTS = {
     shares: ['dokumente', 'scans'],
     printing: { enabled: true },
     scanning: { enabled: true, target_dir: '~/scans' },
-    flatpaks: ['org.linphone.Linphone'],
+    // OnlyOffice als Flatpak: rund 800 MB pro Station, dafür auf jeder
+    // Station dieselbe Version — und die Dokumente auf den Shares lassen
+    // sich ohne Umweg über den Browser öffnen.
+    flatpaks: ['org.onlyoffice.desktopeditors'],
   },
   display: {
     url: 'https://display.rosenweg4303.ch',
