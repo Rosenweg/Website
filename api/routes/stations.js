@@ -178,6 +178,16 @@ async function stationAuth(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// Wie nurTechnik, aber fuer die App-Sitzung: dort stehen die Gruppen aus dem
+// AD, nicht die eines Web-Logins. publish-os.sh meldet sich so an — es waere
+// unsinnig, dafuer einen zweiten Anmeldeweg zu verlangen.
+function nurTechnikApp(req, res, next) {
+  let groups = [];
+  try { groups = JSON.parse(req.appUser?.groups_json || '[]'); } catch { groups = []; }
+  if (isTechnik(groups) || isPraesident(groups)) return next();
+  return res.status(403).json({ error: 'Nur die Gruppe technik darf Versionen veröffentlichen' });
+}
+
 function nurTechnik(req, res, next) {
   const groups = req.user?.groups || [];
   if (req.user?.isAdmin || isTechnik(groups) || isPraesident(groups)) return next();
@@ -233,7 +243,7 @@ router.get('/types', setupSession, (req, res) => res.json({ types: STATION_TYPES
 // POST /api/stations/os — neue Version veroeffentlichen (Technik).
 // Der Tarball kommt roh im Koerper; Version und Kanal als Kopfzeilen.
 router.post('/os', express.raw({ type: '*/*', limit: '64mb' }),
-  authMiddleware, nurTechnik, a(async (req, res) => {
+  appSession, nurTechnikApp, a(async (req, res) => {
     const version = String(req.headers['x-version'] || '').trim();
     const kanal = String(req.headers['x-kanal'] || 'main').trim();
     const notiz = req.headers['x-notiz'] ? String(req.headers['x-notiz']) : null;
@@ -245,14 +255,14 @@ router.post('/os', express.raw({ type: '*/*', limit: '64mb' }),
       return res.status(400).json({ error: 'Kein Tarball im Körper' });
     }
 
-    const wer = req.user?.email || req.user?.name || 'unbekannt';
+    const wer = req.appUser?.display_name || req.appUser?.username || 'unbekannt';
     const ergebnis = await stationos.veroeffentlichen({ version, kanal, daten: req.body, notiz, wer });
     console.log(`[stations] OS ${ergebnis.kanal}/${version} veröffentlicht von ${wer} (${ergebnis.groesse} B)`);
     res.status(201).json(ergebnis);
   }));
 
 // GET /api/stations/os — Übersicht (Technik).
-router.get('/os', authMiddleware, nurTechnik, a(async (req, res) => {
+router.get('/os', appSession, nurTechnikApp, a(async (req, res) => {
   res.json({ versionen: await stationos.liste() });
 }));
 
