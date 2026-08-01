@@ -37,6 +37,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { isTechnik, isPraesident } = require('../lib/groups');
 const { STATION_TYPES, buildConfig, missingSecrets } = require('../lib/stationconfig');
 const { stationApps } = require('../lib/stationapps');
+const { telefonbuch } = require('../lib/telefonbuch');
 
 const router = express.Router();
 
@@ -50,6 +51,8 @@ const a = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(
 const SETUP_TTL_MINUTES = 30;
 const SETUP_PREFIX = 'rw_setup_';
 const STATION_PREFIX = 'rw_station_';
+const APP_PREFIX = 'rw_app_';
+const APP_TTL_TAGE = 30;
 
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const newToken = (prefix) => prefix + crypto.randomBytes(32).toString('hex');
@@ -88,6 +91,16 @@ async function ensureSchema() {
       username     TEXT NOT NULL,
       display_name TEXT,
       created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at   TIMESTAMPTZ NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS station_app_sessions (
+      token_hash   TEXT PRIMARY KEY,
+      username     TEXT NOT NULL,
+      display_name TEXT,
+      groups_json  TEXT NOT NULL DEFAULT '[]',
+      station_id   TEXT,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_used_at TIMESTAMPTZ,
       expires_at   TIMESTAMPTZ NOT NULL
     );
     CREATE TABLE IF NOT EXISTS station_events (
@@ -281,6 +294,67 @@ router.delete('/admin/:id', authMiddleware, nurTechnik, a(async (req, res) => {
   await ereignis(req.params.id, 'entfernt', wer, null);
   console.log(`[stations] '${req.params.id}' entfernt von ${wer}`);
   res.json({ ok: true });
+}));
+
+// ─── Anmeldung der Anwendungen auf der Station ──────────────────────
+// Der Stationstoken gehoert dem Geraet und kennt keine Person. Fuer alles,
+// was von der angemeldeten Person abhaengt — das Telefonbuch etwa —, braucht
+// es eine eigene Sitzung.
+
+async function appSession(req, res, next) {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '') || '';
+    if (!token.startsWith(APP_PREFIX)) return res.status(401).json({ error: 'Nicht angemeldet' });
+    await ensureSchema();
+    const r = await pool.query(
+      'SELECT * FROM station_app_sessions WHERE token_hash = $1 AND expires_at > NOW()',
+      [sha256(token)],
+    );
+    if (r.rows.length === 0) return res.status(401).json({ error: 'Anmeldung abgelaufen' });
+    req.appUser = r.rows[0];
+    pool.query('UPDATE station_app_sessions SET last_used_at = NOW() WHERE token_hash = $1',
+      [sha256(token)]).catch(() => {});
+    next();
+  } catch (e) { next(e); }
+}
+
+// POST /api/stations/app-login  { username, password, station_id? }
+router.post('/app-login', a(async (req, res) => {
+  const { username, password, station_id } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: 'Benutzer und Passwort nötig' });
+
+  let user;
+  try {
+    user = await authenticateAD(username, password);
+  } catch (e) {
+    console.error('[stations] AD nicht erreichbar:', e.message);
+    return res.status(503).json({ error: 'Verzeichnisdienst nicht erreichbar' });
+  }
+  if (!user) return res.status(401).json({ error: 'Benutzer oder Passwort stimmt nicht' });
+
+  await ensureSchema();
+  const token = newToken(APP_PREFIX);
+  await pool.query(
+    `INSERT INTO station_app_sessions (token_hash, username, display_name, groups_json, station_id, expires_at)
+     VALUES ($1,$2,$3,$4,$5, NOW() + ($6 || ' days')::interval)`,
+    [sha256(token), user.username, user.displayName, JSON.stringify(user.groups || []),
+      station_id || null, String(APP_TTL_TAGE)],
+  );
+  res.json({
+    token,
+    expires_in: APP_TTL_TAGE * 24 * 3600,
+    user: { name: user.displayName, username: user.username, groups: user.groups },
+  });
+}));
+
+// GET /api/stations/telefonbuch — Umfang richtet sich nach den Gruppen.
+router.get('/telefonbuch', appSession, a(async (req, res) => {
+  let groups = [];
+  try { groups = JSON.parse(req.appUser.groups_json || '[]'); } catch { groups = []; }
+  res.json({
+    fuer: req.appUser.display_name || req.appUser.username,
+    eintraege: await telefonbuch(groups),
+  });
 }));
 
 // ─── Registrierung ──────────────────────────────────────────────────
