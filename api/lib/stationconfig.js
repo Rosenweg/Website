@@ -83,6 +83,15 @@ const ROLE_DEFAULTS = {
   },
 };
 
+// Was je Rolle von den Vorgaben abweicht.
+const ROLE_OVERRIDES = {
+  // Eine Anzeige hat keinen Anmeldebildschirm — sie braucht die Domäne
+  // nicht. Der Beitritt wäre ein Rechnerkonto und ein Fehlerpunkt ohne
+  // Gegenwert, und er würde die Einrichtung abbrechen, wenn der DC gerade
+  // nicht erreichbar ist.
+  display: { domain: { enabled: false } },
+};
+
 // Tiefes Zusammenführen: spätere Objekte gewinnen, Arrays werden ersetzt.
 function merge(base, patch) {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return patch === undefined ? base : patch;
@@ -133,7 +142,7 @@ function missingSecrets() {
  */
 function buildConfig(station) {
   const role = station.role;
-  const cfg = merge(merge(DEFAULTS, secrets()), {
+  const cfg = merge(merge(merge(DEFAULTS, ROLE_OVERRIDES[role] || {}), secrets()), {
     station: {
       id: station.id,
       hostname: station.hostname || station.id,
