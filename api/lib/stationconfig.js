@@ -140,6 +140,10 @@ function buildConfig(station) {
       role,
       standort: station.standort || '',
       notiz: station.notiz || '',
+      // Wer die Station aufgesetzt hat. Die Station braucht das selbst: nur
+      // diese Person und die Technik dürfen dort auf den vollen Desktop
+      // umschalten (station-desktop-modus).
+      eingerichtet_von: station.registered_by || '',
     },
     roles: { [role]: ROLE_DEFAULTS[role] || {} },
   });
