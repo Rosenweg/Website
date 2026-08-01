@@ -38,6 +38,7 @@ const { isTechnik, isPraesident } = require('../lib/groups');
 const { STATION_TYPES, buildConfig, missingSecrets } = require('../lib/stationconfig');
 const { stationApps } = require('../lib/stationapps');
 const { telefonbuch } = require('../lib/telefonbuch');
+const stationos = require('../lib/stationos');
 
 const router = express.Router();
 
@@ -225,6 +226,35 @@ router.post('/login', a(async (req, res) => {
 
 // GET /api/stations/types
 router.get('/types', setupSession, (req, res) => res.json({ types: STATION_TYPES }));
+
+// ─── Versionen des Stations-Betriebssystems ─────────────────────────
+// MUSS vor den /:id-Routen stehen.
+
+// POST /api/stations/os — neue Version veroeffentlichen (Technik).
+// Der Tarball kommt roh im Koerper; Version und Kanal als Kopfzeilen.
+router.post('/os', express.raw({ type: '*/*', limit: '64mb' }),
+  authMiddleware, nurTechnik, a(async (req, res) => {
+    const version = String(req.headers['x-version'] || '').trim();
+    const kanal = String(req.headers['x-kanal'] || 'main').trim();
+    const notiz = req.headers['x-notiz'] ? String(req.headers['x-notiz']) : null;
+
+    if (!/^[A-Za-z0-9._-]{4,64}$/.test(version)) {
+      return res.status(400).json({ error: 'X-Version fehlt oder ist ungültig' });
+    }
+    if (!Buffer.isBuffer(req.body) || req.body.length < 1024) {
+      return res.status(400).json({ error: 'Kein Tarball im Körper' });
+    }
+
+    const wer = req.user?.email || req.user?.name || 'unbekannt';
+    const ergebnis = await stationos.veroeffentlichen({ version, kanal, daten: req.body, notiz, wer });
+    console.log(`[stations] OS ${ergebnis.kanal}/${version} veröffentlicht von ${wer} (${ergebnis.groesse} B)`);
+    res.status(201).json(ergebnis);
+  }));
+
+// GET /api/stations/os — Übersicht (Technik).
+router.get('/os', authMiddleware, nurTechnik, a(async (req, res) => {
+  res.json({ versionen: await stationos.liste() });
+}));
 
 // ─── Verwaltung ─────────────────────────────────────────────────────
 // MUSS vor den /:id-Routen stehen, sonst frisst ':id' das 'admin'.
@@ -439,6 +469,30 @@ router.post('/register', setupSession, a(async (req, res) => {
 // Stationen nicht hinterherhinken, wenn die Website eine Seite dazubekommt.
 router.get('/:id/apps', stationAuth, a(async (req, res) => {
   res.json({ apps: stationApps() });
+}));
+
+// GET /api/stations/:id/os?kanal=main — was ist das Neueste?
+router.get('/:id/os', stationAuth, a(async (req, res) => {
+  const n = await stationos.neueste(req.query.kanal || 'main');
+  if (!n) return res.status(404).json({ error: 'Für diesen Kanal ist noch nichts veröffentlicht' });
+  res.json(n);
+}));
+
+// GET /api/stations/:id/os/tarball?version=…&kanal=main
+// Auch alte Versionen — der Rollback braucht genau das.
+router.get('/:id/os/tarball', stationAuth, a(async (req, res) => {
+  const kanal = req.query.kanal || 'main';
+  const version = String(req.query.version || '').trim()
+    || (await stationos.neueste(kanal))?.version;
+  if (!version) return res.status(404).json({ error: 'Keine Version angegeben und keine vorhanden' });
+
+  const v = await stationos.holen(kanal, version);
+  if (!v) return res.status(404).json({ error: `Version '${version}' gibt es im Kanal '${kanal}' nicht` });
+
+  res.set('Content-Type', 'application/gzip');
+  res.set('X-Version', v.version);
+  res.set('X-SHA256', v.sha256);
+  res.send(v.daten);
 }));
 
 // GET /api/stations/:id/config
