@@ -91,7 +91,10 @@ const ROLE_DEFAULTS = {
     home: {
       server: 'fileserver.ad.rosenweg4303.ch',
       server_ip: '100.64.2.28',
-      share: 'homes',
+      // 'home', nicht 'homes': so heisst die Freigabe auf dem Fileserver
+      // (/mnt/cephfs-userdata/home, darunter je ein Ordner pro Benutzer). Mit
+      // 'homes' zeigte die Einhaengung ins Leere und das Home blieb lokal.
+      share: 'home',
       roaming_profile: true,
       roaming_interval_minutes: 10,
     },
