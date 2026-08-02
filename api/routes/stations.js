@@ -246,7 +246,23 @@ router.post('/os', express.raw({ type: '*/*', limit: '64mb' }),
   appSession, nurTechnikApp, a(async (req, res) => {
     const version = String(req.headers['x-version'] || '').trim();
     const kanal = String(req.headers['x-kanal'] || 'main').trim();
-    const notiz = req.headers['x-notiz'] ? String(req.headers['x-notiz']) : null;
+    // Node liest Kopfzeilen als latin-1 — ein "ü" in der Notiz kam deshalb als
+    // "Ã¼" in der Verwaltung an. publish-os.sh schickt sie jetzt prozentkodiert;
+    // Aufrufer ohne Kodierung werden hier nachträglich geradegezogen.
+    const notiz = req.headers['x-notiz']
+      ? (() => {
+        const roh = String(req.headers['x-notiz']);
+        // Nur wo wirklich Prozentzeichen stehen, wird dekodiert. Sonst liefe ein
+        // unkodierter Aufruf durch decodeURIComponent unverändert durch, ohne je
+        // beim latin-1-Fallback anzukommen — die Umlaute blieben kaputt.
+        if (/%[0-9A-Fa-f]{2}/.test(roh)) {
+          try {
+            return decodeURIComponent(roh);
+          } catch { /* kaputt kodiert — unten als latin-1 versuchen */ }
+        }
+        return Buffer.from(roh, 'latin1').toString('utf8');
+      })()
+      : null;
 
     if (!/^[A-Za-z0-9._-]{4,64}$/.test(version)) {
       return res.status(400).json({ error: 'X-Version fehlt oder ist ungültig' });
