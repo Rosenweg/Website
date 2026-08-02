@@ -60,6 +60,11 @@ const ROLE_DEFAULTS = {
     web_url: 'https://www.rosenweg4303.ch',
     screen_lock_seconds: 300,
     inactivity_timeout_seconds: 900,
+    // Spaetestens nach einem Tag ohne jede Eingabe wird abgemeldet — auch am
+    // Sperrbildschirm. Sonst bleibt eine Sitzung uebers Wochenende stehen:
+    // Shares eingehaengt, Roaming-Profil in der Schwebe, und ein naechtlicher
+    // Update-Neustart traefe sie offen an. 0 schaltet es ab.
+    session_idle_logout_seconds: 86400,
     // Leerlaufanzeige: dieselbe Seite wie auf den Anzeigestationen als
     // Bildschirmschoner. Standardmässig aus — im Sitzungszimmer oder im
     // Eingang sinnvoll, im Büro der Verwaltung eher störend. Sie ersetzt die
