@@ -41,9 +41,8 @@ const DEFAULTS = {
   agent: {
     status_enabled: true,
     status_interval_seconds: 300,
-    log_push_enabled: false,
-    log_push_interval_minutes: 60,
-    log_keep_days: 30,
+    // log_push_* ist entfallen: die Logs gingen per git ins private
+    // Config-Repo, das es nicht mehr gibt. Ein Ersatz über die API steht aus.
   },
   updates: {
     auto_update: true,
