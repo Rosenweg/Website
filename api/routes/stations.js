@@ -19,10 +19,13 @@
 //   Station selbst (Stationstoken)
 //     GET    /api/stations/:id/config     Konfiguration abholen
 //     POST   /api/stations/:id/seen       Lebenszeichen und Zustand melden
+//     POST   /api/stations/:id/logs       Journal und Zustand einsenden
 //     DELETE /api/stations/:id            sich selbst abmelden
 //
 //   Verwaltung (Anmeldung im Web, Gruppe technik)
 //     GET    /api/stations/admin/list     alle Stationen mit Zustand
+//     GET    /api/stations/admin/:id/logs      eingesandte Logs, ohne Inhalt
+//     GET    /api/stations/admin/:id/logs/:logId   ein Log im Klartext
 //     POST   /api/stations/admin/:id/block    sperren
 //     POST   /api/stations/admin/:id/unblock  entsperren
 //     DELETE /api/stations/admin/:id          endgültig entfernen
@@ -113,6 +116,15 @@ async function ensureSchema() {
       erstellt   TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS station_events_id_idx ON station_events (station_id, erstellt DESC);
+    CREATE TABLE IF NOT EXISTS station_logs (
+      id         BIGSERIAL PRIMARY KEY,
+      station_id TEXT NOT NULL,
+      teil       TEXT NOT NULL,
+      inhalt     TEXT NOT NULL,
+      bytes      INTEGER NOT NULL DEFAULT 0,
+      erstellt   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS station_logs_id_idx ON station_logs (station_id, erstellt DESC);
   `).catch((e) => { schemaReady = null; throw e; });
   return schemaReady;
 }
@@ -305,6 +317,32 @@ router.get('/admin/:id/events', authMiddleware, nurTechnik, a(async (req, res) =
     [req.params.id],
   );
   res.json({ events: r.rows });
+}));
+
+// GET /api/stations/admin/:id/logs — was die Station eingesandt hat, ohne
+// Inhalt. Der kommt einzeln; sonst zöge die Liste ein paar Megabyte nach sich.
+router.get('/admin/:id/logs', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const r = await pool.query(
+    `SELECT id, teil, bytes, erstellt FROM station_logs
+      WHERE station_id = $1 ORDER BY erstellt DESC, teil LIMIT 200`,
+    [req.params.id],
+  );
+  res.json({ logs: r.rows });
+}));
+
+// GET /api/stations/admin/:id/logs/:logId — ein Log im Klartext.
+router.get('/admin/:id/logs/:logId', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  // Ohne diese Prüfung endet ein 'logs/kaputt' als Datenbankfehler und damit
+  // als 500 — die Verwaltung sähe "Unerwarteter Fehler" statt "gibt es nicht".
+  if (!/^\d+$/.test(req.params.logId)) return res.status(404).json({ error: 'Log nicht gefunden' });
+  const r = await pool.query(
+    'SELECT teil, inhalt, erstellt FROM station_logs WHERE id = $1 AND station_id = $2',
+    [req.params.logId, req.params.id],
+  );
+  if (!r.rows.length) return res.status(404).json({ error: 'Log nicht gefunden' });
+  res.json(r.rows[0]);
 }));
 
 // POST /api/stations/admin/:id/block  { grund }
@@ -543,6 +581,76 @@ router.post('/:id/seen', stationAuth, a(async (req, res) => {
       state.text ? String(state.text).slice(0, 500) : null);
   }
   res.json({ ok: true, gesperrt: req.station.status === 'gesperrt' });
+}));
+
+// POST /api/stations/:id/logs  { teile: { journal: "…", failed_units: "…", … } }
+//
+// Stationen sind von aussen nicht erreichbar — keine Firewall-Öffnung, SSH
+// maskiert. Ohne diesen Weg kommt niemand an das Journal eines Geräts heran,
+// ohne davorzusitzen. Genau das war der Grund, warum die Fehler vom 2. August
+// so lange unbemerkt blieben.
+//
+// Die Station schickt mit ihrem eigenen Token; auf dem Gerät liegt dafür kein
+// zusätzlicher Schlüssel. Der frühere Weg — git ins private Config-Repo mit
+// einem Deploy-Key je Station — ist mit dem Repo entfallen.
+//
+// Bewusst kein Streaming und keine Datei: ein paar tausend Journal-Zeilen
+// passen in eine Textspalte, und was älter ist als log_keep_days, fliegt beim
+// nächsten Einsenden raus.
+const LOG_TEILE = ['journal', 'failed_units', 'status', 'state', 'gesundheit'];
+const LOG_MAX_ZEICHEN = 200_000;   // je Teil, rund 2000 Journal-Zeilen
+const LOG_MAX_EINSENDUNGEN = 24;   // je Station — bei stündlich rund ein Tag
+
+// Kein eigener Body-Parser: server.js hat express.json({ limit: '10mb' })
+// bereits global davor. Ein zweiter hier täte nichts — der Body ist längst
+// gelesen — und täuschte ein Limit vor, das nicht gilt.
+router.post('/:id/logs', stationAuth, a(async (req, res) => {
+  const teile = req.body?.teile;
+  if (!teile || typeof teile !== 'object' || Array.isArray(teile)) {
+    return res.status(400).json({ error: 'Feld "teile" fehlt oder ist kein Objekt' });
+  }
+
+  const angenommen = [];
+  for (const name of LOG_TEILE) {
+    const roh = teile[name];
+    if (roh === undefined || roh === null) continue;
+    let text = typeof roh === 'string' ? roh : JSON.stringify(roh, null, 2);
+    if (!text.trim()) continue;
+
+    // Vorne kürzen, nicht hinten: das Neueste steht am Ende eines Journals,
+    // und das ist das, weswegen jemand nachsieht.
+    let gekuerzt = false;
+    if (text.length > LOG_MAX_ZEICHEN) {
+      text = text.slice(text.length - LOG_MAX_ZEICHEN);
+      gekuerzt = true;
+    }
+    if (gekuerzt) text = `[… Anfang abgeschnitten, Grenze ${LOG_MAX_ZEICHEN} Zeichen …]\n${text}`;
+
+    await pool.query(
+      'INSERT INTO station_logs (station_id, teil, inhalt, bytes) VALUES ($1,$2,$3,$4)',
+      [req.station.id, name, text, Buffer.byteLength(text, 'utf8')],
+    );
+    angenommen.push(name);
+  }
+
+  if (!angenommen.length) return res.status(400).json({ error: 'Keine verwertbaren Teile' });
+
+  // Aufräumen beim Schreiben, nicht per Cron: so gibt es keinen zweiten Ort,
+  // an dem etwas vergessen werden kann.
+  const tage = Number(buildConfig(req.station)?.agent?.log_keep_days) || 14;
+  await pool.query(
+    `DELETE FROM station_logs
+      WHERE station_id = $1
+        AND (erstellt < NOW() - ($2 || ' days')::interval
+             OR id NOT IN (SELECT id FROM station_logs WHERE station_id = $1
+                            ORDER BY erstellt DESC LIMIT $3))`,
+    [req.station.id, String(tage), LOG_MAX_EINSENDUNGEN * LOG_TEILE.length],
+  ).catch((e) => console.error('[stations] Logs nicht aufgeräumt:', e.message));
+
+  await pool.query('UPDATE stations SET last_seen_at = NOW(), last_seen_ip = $2 WHERE id = $1',
+    [req.station.id, clientIp(req)]);
+
+  res.json({ ok: true, angenommen });
 }));
 
 // DELETE /api/stations/:id — die Station meldet sich selbst ab.
