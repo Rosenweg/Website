@@ -98,8 +98,15 @@ const ROLE_DEFAULTS = {
       roaming_profile: true,
       roaming_interval_minutes: 10,
     },
-    shares: ['dokumente', 'scans'],
+    // 'scans' steht hier bewusst NICHT: die Freigabe auf CT 106 hat
+    // 'valid users = ROSENWEG\scanner' und gehoert damit einem einzigen Konto.
+    // Als Vorgabe scheiterte bei JEDER Anmeldung eine Einhaengung und
+    // hinterliess einen Fehler im Protokoll, ohne dass jemand etwas davon hatte.
+    shares: ['dokumente'],
     printing: { enabled: true },
+    // Zielordner im Home, nicht auf der Scans-Freigabe. Das Home liegt ohnehin
+    // auf dem Fileserver — die Scans landen also dort, wo die Person sie an
+    // jeder Station wiederfindet.
     scanning: { enabled: true, target_dir: '~/scans' },
     // OnlyOffice als Flatpak: rund 800 MB pro Station, dafür auf jeder
     // Station dieselbe Version — und die Dokumente auf den Shares lassen
