@@ -1,6 +1,9 @@
 # Rosenweg Kooperation - Systemuebersicht
 
-> Stand: 2026-04-10 | ~120 API-Endpunkte, 8 STWEGs, 50+ Seiten, 3 Datenbanken, 15+ Docker-Services
+> Stand: 2026-08-02 | ~120 API-Endpunkte, 8 STWEGs, 50+ Seiten, 3 Datenbanken
+>
+> Die Fachkapitel stammen vom 10. April 2026 und sind seither nicht nachgemessen.
+> Nachgemessen ist der Abschnitt [Infrastruktur](#infrastruktur).
 
 ## Website & Bewohner-Portal
 
@@ -125,58 +128,83 @@
 
 ## Infrastruktur
 
-### Docker Services (Live-Stand 2026-04-10)
+> **Der Docker Swarm ist Geschichte.** Bis April 2026 lief alles als Stack auf
+> drei Manager-Nodes (`docker-pve1/2/3`, CT 201-203, `100.64.2.24-26`). Diese
+> Container gibt es nicht mehr, die Adressen antworten nicht. Heute hat jeder
+> Dienst seinen eigenen LXC. Was unten steht, ist am **2. August 2026**
+> nachgemessen — `pct list` auf pve1/2/3 und je ein Verbindungstest.
 
-| Service | Replicas | Image |
-|---------|----------|-------|
-| rosenweg_website | 3/3 | ghcr.io/rosenweg/rosenweg-website:latest |
-| rosenweg_api | 1/1 | ghcr.io/rosenweg/rosenweg-api:latest |
-| rosenweg_postgres | 1/1 | postgres:17-alpine |
-| rosenweg_energy-collector | 1/1 | ghcr.io/rosenweg/energy-collector:latest |
-| rosenweg_energy-db | 1/1 | postgres:17-alpine |
-| rosenweg_syslog-collector | 1/1 | ghcr.io/rosenweg/syslog-collector:latest |
-| rosenweg_tv-proxy | 1/1 | ghcr.io/rosenweg/tv-proxy:latest |
-| rosenweg_doc-converter | 1/1 | gotenberg/gotenberg:8 |
-| rosenweg_traefik | 1/1 | traefik:latest |
-| rosenweg_shepherd | 1/1 | mazzolino/shepherd:latest |
-| authentik_server | 1/1 | ghcr.io/goauthentik/server:2024.12 |
-| authentik_worker | 1/1 | ghcr.io/goauthentik/server:2024.12 |
-| authentik_ldap | 1/1 | ghcr.io/goauthentik/ldap:2024.12 |
-| authentik_postgresql | 1/1 | postgres:17-alpine |
-| authentik_redis | 1/1 | redis:7-alpine |
-| cloudflared_cloudflared | 2/2 | cloudflare/cloudflared:latest |
-| netbox_netbox | 1/1 | netboxcommunity/netbox:latest |
-| netbox_netbox-worker | 1/1 | netboxcommunity/netbox:latest |
-| netbox_postgres | 1/1 | postgres:17-alpine |
-| netbox_redis | 1/1 | redis:7-alpine |
-| netbox_collector | 1/1 | netbox-collector:latest |
+### Proxmox-Hosts
+
+| Host | IP | Rolle |
+|------|-----|-------|
+| pve1 | 100.64.2.20 | Backend, Frontends, Mail, Router-CTs |
+| pve2 | 100.64.2.21 | Fileserver, Domänencontroller, Authentik |
+| pve3 | 100.64.2.22 | Traefik am Rand, PBX, Druck, Gateways |
+
+### LXC Container (gemessen 2026-08-02)
+
+**pve1**
+
+| CT | Name | IP | Funktion |
+|----|------|-----|----------|
+| 128 | core-backend | 100.64.2.52 | **Rosenweg-API** (Port 3000, `/api/health` antwortet) |
+| 129 | energy-stack | 100.64.2.53 | Energie-Erfassung (Port 3001) |
+| 118 | fe-www | 100.64.2.41 | Startseite |
+| 119-127, 130 | fe-stweg1-7, fe-meg, fe-isp, fe-pwa | 100.64.2.42-50, .54 | je ein Frontend pro STWEG bzw. Bereich |
+| 105 | rk-mqtt-server | 100.64.2.51 | MQTT-Broker (Anzeigen, Stationen) |
+| 104 | nextcloud | 100.64.2.36 | Nextcloud |
+| 240 | mailcow | 100.64.2.33 | Mailserver |
+| 109 | tv-proxy | 100.64.9.24 | TV-Proxy |
+| 113 | vpn-wg | 100.64.2.34 | WireGuard-Gateway in alle Benutzernetze |
+| 500-518 | rw*-usernetze-router | 100.64.x.250 | je ein Router pro Haus |
+
+**pve2**
+
+| CT | Name | IP | Funktion |
+|----|------|-----|----------|
+| 106 | fileserver | 100.64.2.28 | Samba/CIFS — Homes und `dokumente` |
+| 206 | fileserver2 | 100.64.2.27 | Replikat |
+| 108 | dc1 | 100.64.2.30 | Active Directory (`AD.ROSENWEG4303.CH`) |
+| 114 | authentik | 100.64.2.37 | SSO (Port 9443) |
+| 131 | core-messenger | 100.64.2.56 | Messenger-Backend |
+| 260 | nfs-shared | 100.64.2.35 | NFS |
+
+**pve3**
+
+| CT | Name | IP | Funktion |
+|----|------|-----|----------|
+| 245 | edge-traefik | 100.64.2.40 | Reverse Proxy, Port 80/443 |
+| 220 | asterisk-pbx | 100.64.2.55 | Telefonanlage |
+| 111 | cups-server | 100.64.2.32 | Druckserver |
+| 230 | pmg | 100.64.2.31 | Proxmox Mail Gateway |
+| 116 | whatsapp-bridge | 100.64.2.39 | WhatsApp-Anbindung |
+| 115 | zpush | 100.64.2.38 | ActiveSync |
+
+**Noch nicht nachgesehen:** was in CT 101 (`docker`, pve1) läuft, und wo NetBox,
+Gotenberg und der Cloudflare-Tunnel heute liegen. Sie standen im Swarm; dass
+sie noch laufen, ist damit nicht belegt.
 
 ### Plattform
 
 | Faehigkeit | Status | Ort |
 |-----------|--------|-----|
-| Docker Swarm (3 Manager-Nodes) | Implementiert | docker-pve1/2/3 (CT 201-203) |
-| Traefik Reverse Proxy + Let's Encrypt | Implementiert | Port 80/443 |
-| Cloudflare Tunnel (2 Replicas) | Implementiert | Externer Zugang |
-| Gotenberg (Dokument-Konvertierung) | Implementiert | LibreOffice + Chromium |
-| Service Watchdog (auto-restart) | Implementiert | Cron alle 2min |
-| IPVS-Fix (Overlay-Netzwerk) | Implementiert | Cron alle 5min |
-| Shepherd (Auto-Image-Updates) | Implementiert | Prueft regelmaessig auf neue Images |
-| Healthchecks (pro Service) | Implementiert | Docker Healthcheck |
-| Resource Limits (Memory) | Implementiert | docker-stack.yml |
-| NetBox (Netzwerk-Dokumentation) | Implementiert | Port 8000 (3 Services) |
+| Ein LXC je Dienst | Implementiert | siehe Tabellen oben |
+| Traefik Reverse Proxy + Let's Encrypt | Implementiert | CT 245 `edge-traefik`, Port 80/443 |
+| Gotenberg (Dokument-Konvertierung) | Unklar | lief im Swarm; heutiger Ort nicht geprüft |
+| Cloudflare Tunnel | Unklar | lief im Swarm; heutiger Ort nicht geprüft |
+| NetBox (Netzwerk-Dokumentation) | Unklar | lief im Swarm; heutiger Ort nicht geprüft |
 
-### LXC Container (Proxmox)
+Die frühere Swarm-Mechanik — Shepherd für Auto-Image-Updates, der
+Service-Watchdog, der IPVS-Fix fürs Overlay-Netz, Replica-Zahlen — ist mit dem
+Swarm entfallen. `docker-stack.yml`, [`infrastruktur.md`](infrastruktur.md) und
+[`cloudflare.md`](cloudflare.md) im selben Repo beschreiben sie noch; sie sind
+nicht nachgeführt.
 
-| CT | Name | IP | Funktion |
-|----|------|-----|----------|
-| 201 | docker-pve1 | 100.64.2.24 | Docker Swarm Manager (VIP) |
-| 202 | docker-pve2 | 100.64.2.25 | Docker Swarm Manager |
-| 203 | docker-pve3 | 100.64.2.26 | Docker Swarm Manager |
-| 105 | authentik | 100.64.2.25 | SSO (im Swarm) |
-| 106 | fileserver | 100.64.2.28 | Samba/CIFS Fileserver |
-| 108 | samba-ad-dc | 100.64.2.30/31 | Active Directory DC |
-| 113 | claw-document-manager | 100.64.2.33 | OpenClaw AI Agent |
+## OpenClaw Dokumenten-Manager
+
+> CT 113 heisst heute `vpn-wg` (100.64.2.34). Der Dokumenten-Manager läuft dort
+> nicht mehr — wo er hingekommen ist, wurde nicht ermittelt.
 
 ## OpenClaw Dokumenten-Manager
 
@@ -196,6 +224,6 @@
 - **~120 API-Endpunkte** in server.js + energy-collector
 - **8 STWEGs**, ~60 Wohnungen, 16 Haeuser
 - **3 Datenbanken**: Rosenweg (PostgreSQL), Energy (PostgreSQL), SQLite (Sessions)
-- **15+ Docker-Services** auf 3 Swarm-Nodes
+- **Ein LXC je Dienst** auf pve1/2/3 — der Docker Swarm ist abgeloest
 - **Compliance**: FPUEV (6 Monate Verbindungslog), DMARC, Email-Archiv
 - **Backup**: Stuendlich nach GitHub mit Alert bei Fehler
