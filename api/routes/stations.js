@@ -20,6 +20,7 @@
 //     GET    /api/stations/:id/config     Konfiguration abholen
 //     POST   /api/stations/:id/seen       Lebenszeichen und Zustand melden
 //     POST   /api/stations/:id/logs       Journal und Zustand einsenden
+//     GET    /api/stations/:id/benutzerbild  Anmeldebild einer Person
 //     DELETE /api/stations/:id            sich selbst abmelden
 //
 //   Verwaltung (Anmeldung im Web, Gruppe technik)
@@ -42,6 +43,7 @@ const { STATION_TYPES, buildConfig, missingSecrets } = require('../lib/stationco
 const { stationApps } = require('../lib/stationapps');
 const { telefonbuch } = require('../lib/telefonbuch');
 const stationos = require('../lib/stationos');
+const { benutzerbild } = require('../lib/benutzerbild');
 
 const router = express.Router();
 
@@ -581,6 +583,39 @@ router.post('/:id/seen', stationAuth, a(async (req, res) => {
       state.text ? String(state.text).slice(0, 500) : null);
   }
   res.json({ ok: true, gesperrt: req.station.status === 'gesperrt' });
+}));
+
+// GET /api/stations/:id/benutzerbild?benutzer=<name>&groesse=256
+//
+// Das Bild, das die Station im Anmelde-, Sperr- und Menübildschirm zeigt.
+// Es kommt aus Authentik: dort steht je Konto entweder ein hochgeladenes Foto
+// oder ein erzeugtes Initialenbild. Im AD steht zwar ein `thumbnailPhoto`, aber
+// bei allen Konten dasselbe — das Rosenweg-Wappen. Als persönliches Bild taugt
+// das nicht.
+//
+// Warum über die API und nicht direkt: der Authentik-Token darf nicht auf die
+// Geräte. Die Station hat ihr eigenes Token, und das genügt hier.
+router.get('/:id/benutzerbild', stationAuth, a(async (req, res) => {
+  const benutzer = String(req.query.benutzer || '').trim();
+  if (!benutzer) return res.status(400).json({ error: 'Parameter "benutzer" fehlt' });
+
+  const groesse = Math.min(Math.max(parseInt(req.query.groesse, 10) || 256, 32), 512);
+
+  let bild;
+  try {
+    bild = await benutzerbild(benutzer, groesse);
+  } catch (e) {
+    console.error('[stations] Benutzerbild aus Authentik:', e.message);
+    return res.status(502).json({ error: 'Authentik nicht erreichbar' });
+  }
+  if (!bild) return res.status(404).json({ error: 'Kein Bild für diese Person' });
+
+  // Ein Initialenbild ändert sich nur, wenn jemand ein Foto hochlädt. Eine
+  // Stunde Zwischenspeicher spart bei jeder Anmeldung eine Authentik-Anfrage,
+  // ohne dass ein neues Foto lange auf sich warten liesse.
+  res.set('Cache-Control', 'private, max-age=3600');
+  res.set('X-Herkunft', bild.herkunft);
+  res.type(bild.typ).send(bild.daten);
 }));
 
 // POST /api/stations/:id/logs  { teile: { journal: "…", failed_units: "…", … } }
