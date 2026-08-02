@@ -83,7 +83,18 @@ const ROLE_DEFAULTS = {
       mint_themes_version: '2.4.0',
       mint_icons_version: '1.9.2',
     },
-    home: { server: '100.64.2.28', share: 'homes', roaming_profile: true, roaming_interval_minutes: 10 },
+    // Ein NAME, keine IP: die Freigaben werden mit sec=krb5 eingehaengt, und
+    // Kerberos kennt Dienste nur unter ihrem Namen. Mit '100.64.2.28' quittierte
+    // der KDC jede Anfrage mit KRB5KDC_ERR_S_PRINCIPAL_UNKNOWN — pam_mount
+    // scheiterte beim Anmelden, und dokumente/scans blieben leere Ordner.
+    // server_ip ist nur die Rueckfallebene, solange der DNS-Eintrag fehlt.
+    home: {
+      server: 'fileserver.ad.rosenweg4303.ch',
+      server_ip: '100.64.2.28',
+      share: 'homes',
+      roaming_profile: true,
+      roaming_interval_minutes: 10,
+    },
     shares: ['dokumente', 'scans'],
     printing: { enabled: true },
     scanning: { enabled: true, target_dir: '~/scans' },
