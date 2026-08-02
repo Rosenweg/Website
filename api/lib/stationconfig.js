@@ -41,8 +41,14 @@ const DEFAULTS = {
   agent: {
     status_enabled: true,
     status_interval_seconds: 300,
-    // log_push_* ist entfallen: die Logs gingen per git ins private
-    // Config-Repo, das es nicht mehr gibt. Ein Ersatz über die API steht aus.
+    // Logs schiebt die Station an POST /api/stations/:id/logs — mit ihrem
+    // eigenen Token, ohne Deploy-Key. Der frühere Weg über git ins private
+    // Config-Repo ist mit dem Repo entfallen.
+    log_push_enabled: true,
+    log_push_interval_minutes: 60,
+    // Wie lange die API die Einsendungen aufhebt. Es geht ums Nachsehen, wenn
+    // etwas schiefging, nicht um ein Archiv.
+    log_keep_days: 14,
   },
   updates: {
     auto_update: true,
