@@ -181,9 +181,15 @@
 | 116 | whatsapp-bridge | 100.64.2.39 | WhatsApp-Anbindung |
 | 115 | zpush | 100.64.2.38 | ActiveSync |
 
-**Noch nicht nachgesehen:** was in CT 101 (`docker`, pve1) läuft, und wo NetBox,
-Gotenberg und der Cloudflare-Tunnel heute liegen. Sie standen im Swarm; dass
-sie noch laufen, ist damit nicht belegt.
+Auf CT 128 laufen die Dienste als Docker-Compose-Stack unter
+`/opt/rosenweg-core` — gemessen am 2. August: `api`, `postgres` (die
+Rosenweg-Datenbank), `doc-converter` (Gotenberg), `syslog-collector` und
+`shelly-emulator`. Die Datenbank ist von aussen nicht erreichbar; sie hört nur
+im Docker-Netz.
+
+**Noch nicht nachgesehen:** wo NetBox und der Cloudflare-Tunnel heute liegen.
+Sie standen im Swarm; dass sie noch laufen, ist damit nicht belegt. CT 101
+(`docker`, 100.64.2.231) enthält nur noch einen `portainer/agent`.
 
 ### Plattform
 
@@ -191,7 +197,7 @@ sie noch laufen, ist damit nicht belegt.
 |-----------|--------|-----|
 | Ein LXC je Dienst | Implementiert | siehe Tabellen oben |
 | Traefik Reverse Proxy + Let's Encrypt | Implementiert | CT 245 `edge-traefik`, Port 80/443 |
-| Gotenberg (Dokument-Konvertierung) | Unklar | lief im Swarm; heutiger Ort nicht geprüft |
+| Gotenberg (Dokument-Konvertierung) | Implementiert | CT 128, Container `rosenweg-core-doc-converter-1` |
 | Cloudflare Tunnel | Unklar | lief im Swarm; heutiger Ort nicht geprüft |
 | NetBox (Netzwerk-Dokumentation) | Unklar | lief im Swarm; heutiger Ort nicht geprüft |
 
@@ -203,8 +209,11 @@ nicht nachgeführt.
 
 ## OpenClaw Dokumenten-Manager
 
-> CT 113 heisst heute `vpn-wg` (100.64.2.34). Der Dokumenten-Manager läuft dort
-> nicht mehr — wo er hingekommen ist, wurde nicht ermittelt.
+> **Existiert auf dem Cluster nicht mehr.** Nachgesehen am 2. August: weder
+> unter den LXC-Containern noch unter den VMs auf pve1/2/3 findet sich der
+> Agent. CT 113 heisst heute `vpn-wg` (100.64.2.34), und 100.64.2.33 gehört
+> inzwischen `mailcow` (CT 240). Das Folgende beschreibt den Stand vom April
+> und ist nur noch als Beschreibung dessen zu lesen, was einmal lief.
 
 ## OpenClaw Dokumenten-Manager
 
