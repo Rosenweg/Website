@@ -26,6 +26,7 @@
 //     GET    /api/stations/admin/list     alle Stationen mit Zustand
 //     GET    /api/stations/admin/:id/logs      eingesandte Logs, ohne Inhalt
 //     GET    /api/stations/admin/:id/logs/:logId   ein Log im Klartext
+//     POST   /api/stations/admin/:id/update   Update anfordern
 //     POST   /api/stations/admin/:id/block    sperren
 //     POST   /api/stations/admin/:id/unblock  entsperren
 //     DELETE /api/stations/admin/:id          endgültig entfernen
@@ -90,6 +91,11 @@ async function ensureSchema() {
     ALTER TABLE stations ADD COLUMN IF NOT EXISTS gesperrt_von TEXT;
     ALTER TABLE stations ADD COLUMN IF NOT EXISTS gesperrt_am  TIMESTAMPTZ;
     ALTER TABLE stations ADD COLUMN IF NOT EXISTS last_seen_ip TEXT;
+    -- Aufforderung aus der Verwaltung: "aktualisiere dich beim naechsten
+    -- Lebenszeichen". Eine Station ist von aussen nicht erreichbar, also kann
+    -- man ihr nichts schicken — sie fragt alle paar Minuten selbst nach.
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS update_angefordert TIMESTAMPTZ;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS update_angefordert_von TEXT;
     CREATE TABLE IF NOT EXISTS station_setup_sessions (
       token_hash   TEXT PRIMARY KEY,
       username     TEXT NOT NULL,
@@ -303,7 +309,8 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
   const r = await pool.query(`
     SELECT id, role, hostname, standort, notiz, status, sperr_grund, gesperrt_von,
            gesperrt_am, hardware, registered_by, registered_at,
-           last_seen_at, last_seen_ip, last_state, revoked_at
+           last_seen_at, last_seen_ip, last_state, revoked_at,
+           update_angefordert, update_angefordert_von
       FROM stations
      ORDER BY (revoked_at IS NOT NULL), registered_at DESC`);
   res.json({ stations: r.rows, types: STATION_TYPES });
@@ -343,6 +350,28 @@ router.get('/admin/:id/logs/:logId', authMiddleware, nurTechnik, a(async (req, r
   );
   if (!r.rows.length) return res.status(404).json({ error: 'Log nicht gefunden' });
   res.json(r.rows[0]);
+}));
+
+// POST /api/stations/admin/:id/update
+//
+// „Aktualisiere dich." Geschickt werden kann der Station nichts — sie hängt
+// hinter der Firewall und hat keinen offenen Port. Also wird die Aufforderung
+// hier vermerkt und beim nächsten Lebenszeichen ausgeliefert
+// (agent.status_interval_seconds, Vorgabe 300).
+router.post('/admin/:id/update', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const wer = req.user?.email || req.user?.name || 'unbekannt';
+  const r = await pool.query(
+    `UPDATE stations SET update_angefordert = NOW(), update_angefordert_von = $2
+      WHERE id = $1 AND revoked_at IS NULL AND status <> 'gesperrt'
+      RETURNING id`,
+    [req.params.id, wer],
+  );
+  if (!r.rows.length) {
+    return res.status(404).json({ error: 'Station nicht gefunden, entfernt oder gesperrt' });
+  }
+  await ereignis(req.params.id, 'update-angefordert', wer, null);
+  res.json({ ok: true });
 }));
 
 // POST /api/stations/admin/:id/block  { grund }
@@ -580,7 +609,27 @@ router.post('/:id/seen', stationAuth, a(async (req, res) => {
     await ereignis(req.station.id, String(state.ereignis).slice(0, 40), null,
       state.text ? String(state.text).slice(0, 500) : null);
   }
-  res.json({ ok: true, gesperrt: req.station.status === 'gesperrt' });
+
+  // Hat jemand in der Verwaltung ein Update angefordert? Dann hier ausliefern
+  // und im selben Zug quittieren — sonst liefe die Station bei jedem
+  // Lebenszeichen erneut los.
+  //
+  // Eine gesperrte Station bekommt nichts: sie soll gerade NICHT weiterlaufen.
+  let update = false;
+  if (req.station.status !== 'gesperrt' && req.station.update_angefordert) {
+    const r = await pool.query(
+      `UPDATE stations SET update_angefordert = NULL, update_angefordert_von = NULL
+        WHERE id = $1 AND update_angefordert IS NOT NULL RETURNING update_angefordert_von`,
+      [req.station.id],
+    );
+    if (r.rows.length) {
+      update = true;
+      await ereignis(req.station.id, 'update-abgeholt', r.rows[0].update_angefordert_von,
+        'Station hat die Aufforderung entgegengenommen');
+    }
+  }
+
+  res.json({ ok: true, gesperrt: req.station.status === 'gesperrt', update });
 }));
 
 // POST /api/stations/:id/logs  { teile: { journal: "…", failed_units: "…", … } }
