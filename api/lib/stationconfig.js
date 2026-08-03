@@ -299,4 +299,16 @@ function buildConfig(station) {
   return merge(cfg, station.overrides || {});
 }
 
-module.exports = { STATION_TYPES, buildConfig, missingSecrets, merge };
+/**
+ * Was die Hausvorgabe beim WLAN sagt — für die Verwaltung, damit dort niemand
+ * ein Netz einträgt, das ohnehin schon für alle gilt. Der Schlüssel selbst
+ * bleibt hier, es geht nur um „ist einer gesetzt".
+ */
+function hausWlan() {
+  return {
+    ssid: process.env.STATION_WIFI_SSID || '',
+    passwort_gesetzt: !!process.env.STATION_WIFI_PASSWORD,
+  };
+}
+
+module.exports = { STATION_TYPES, buildConfig, missingSecrets, merge, hausWlan };

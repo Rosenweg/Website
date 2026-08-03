@@ -39,7 +39,7 @@ const { pool } = require('../lib/db');
 const { authenticateAD } = require('../lib/adauth');
 const { authMiddleware } = require('../middleware/auth');
 const { isTechnik, isPraesident } = require('../lib/groups');
-const { STATION_TYPES, buildConfig, missingSecrets } = require('../lib/stationconfig');
+const { STATION_TYPES, buildConfig, missingSecrets, hausWlan } = require('../lib/stationconfig');
 const { stationApps } = require('../lib/stationapps');
 const { telefonbuch } = require('../lib/telefonbuch');
 const stationos = require('../lib/stationos');
@@ -342,6 +342,10 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
       return { ...z, overrides: sichtbar, overrides_geheim: geheim };
     }),
     types: STATION_TYPES,
+    // Die Hausvorgabe zum WLAN. Ohne sie sähe die Verwaltung nur die
+    // stationseigene Ebene — also ein leeres Feld — und jemand trüge das Netz
+    // ein zweites Mal ein, obwohl es längst für alle gilt.
+    haus_wlan: hausWlan(),
   });
 }));
 
