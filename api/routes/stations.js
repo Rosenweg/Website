@@ -646,7 +646,11 @@ router.post('/:id/seen', stationAuth, a(async (req, res) => {
 // Bewusst kein Streaming und keine Datei: ein paar tausend Journal-Zeilen
 // passen in eine Textspalte, und was älter ist als log_keep_days, fliegt beim
 // nächsten Einsenden raus.
-const LOG_TEILE = ['journal', 'failed_units', 'status', 'state', 'gesundheit'];
+// 'update' ist der Update-Lauf allein — dieselben Zeilen stehen zwar auch im
+// Journal, aber dort zwischen zweitausend anderen und über drei Neustarts
+// verteilt. Wer wissen will, ob das Update durchging, soll einen Eintrag
+// anklicken und nicht suchen.
+const LOG_TEILE = ['journal', 'update', 'failed_units', 'status', 'state', 'gesundheit'];
 const LOG_MAX_ZEICHEN = 200_000;   // je Teil, rund 2000 Journal-Zeilen
 const LOG_MAX_EINSENDUNGEN = 24;   // je Station — bei stündlich rund ein Tag
 
