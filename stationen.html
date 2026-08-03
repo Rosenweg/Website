@@ -158,13 +158,16 @@
 
                 <div class="border-t pt-4">
                     <h4 class="font-medium text-gray-800">WLAN</h4>
-                    <p class="text-sm text-gray-500 mb-3">Nur ausfüllen, wenn diese Station ein <em>anderes</em> Netz braucht als das Haus-WLAN — etwa ein Gerät in einem Nachbargebäude.</p>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <p class="text-sm text-gray-500 mb-3">Im Haus gibt es ein Funknetz mit eigenen Schlüsseln je Bereich — der Schlüssel bestimmt, in welchem Netz die Station landet. Er kommt aus UniFi und muss hier nicht eingetippt werden.</p>
+                    <label class="block"><span class="text-sm font-medium text-gray-700">Netz</span>
+                        <select id="cfg-wlan-netz" class="mt-1 w-full border rounded-lg px-3 py-2" onchange="cfgWlanUmschalten()"></select>
+                        <span class="text-xs text-gray-500" id="cfg-wlan-hinweis"></span></label>
+
+                    <div id="cfg-wlan-eigen" class="hidden grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
                         <label class="block"><span class="text-sm font-medium text-gray-700">Netzname (SSID)</span>
                             <input id="cfg-wlan-ssid" type="text" class="mt-1 w-full border rounded-lg px-3 py-2"></label>
                         <label class="block"><span class="text-sm font-medium text-gray-700">Passwort</span>
-                            <input id="cfg-wlan-psk" type="password" autocomplete="new-password" class="mt-1 w-full border rounded-lg px-3 py-2" placeholder="unverändert lassen: leer">
-                            <span class="text-xs text-gray-500" id="cfg-wlan-hinweis"></span></label>
+                            <input id="cfg-wlan-psk" type="password" autocomplete="new-password" class="mt-1 w-full border rounded-lg px-3 py-2" placeholder="unverändert lassen: leer"></label>
                     </div>
                 </div>
 
@@ -207,6 +210,7 @@
     <script>
         let stationen = [];
         let hausWlan = null;
+        let wlanNetze = [];
         let typen = [];
 
         window.addEventListener('DOMContentLoaded', async () => {
@@ -245,6 +249,7 @@
                 const daten = await api('/api/stations/admin/list');
                 stationen = daten.stations || [];
                 hausWlan = daten.haus_wlan || null;
+                wlanNetze = daten.wlan_netze || [];
                 typen = daten.types || [];
                 zeichne();
             } catch (err) {
@@ -374,8 +379,6 @@
             document.getElementById('cfg-standort').value = s.standort || '';
             document.getElementById('cfg-notiz').value = s.notiz || '';
             document.getElementById('cfg-kanal').value = ov.updates?.channel || '';
-            document.getElementById('cfg-wlan-ssid').value = ov.network?.wifi?.ssid || '';
-            document.getElementById('cfg-wlan-psk').value = '';
             document.getElementById('cfg-json').value = JSON.stringify(ov, null, 2);
             document.getElementById('cfg-meldung').textContent = '';
 
@@ -383,25 +386,41 @@
             // glaubt, es sei keines gesetzt, steht es wenigstens da.
             cfgHatteWlanPasswort = (s.overrides_geheim || []).includes('network.wifi.password');
 
-            // Ohne eigenen Eintrag gilt das Haus-WLAN. Das gehört sichtbar
-            // hierher — sonst steht dort ein leeres Feld, und jemand trägt ein
-            // Netz ein, das ohnehin schon für alle gilt.
-            const feldSsid = document.getElementById('cfg-wlan-ssid');
-            if (hausWlan?.ssid) {
-                feldSsid.placeholder = `Haus-WLAN: ${hausWlan.ssid}`;
-                document.getElementById('cfg-wlan-hinweis').textContent = cfgHatteWlanPasswort
-                    ? 'Eigenes Passwort für diese Station gesetzt.'
-                    : (hausWlan.passwort_gesetzt
-                        ? `Leer lassen — dann gilt „${hausWlan.ssid}" aus der Hausvorgabe.`
-                        : `Hausvorgabe „${hausWlan.ssid}", aber ohne Passwort.`);
-            } else {
-                feldSsid.placeholder = '';
-                document.getElementById('cfg-wlan-hinweis').textContent = cfgHatteWlanPasswort
-                    ? 'Ein Passwort ist gesetzt.'
-                    : 'Kein WLAN hinterlegt — auch nicht in der Hausvorgabe.';
-            }
+            // Die Auswahl: Hausvorgabe, eines der Netze aus UniFi, oder ein
+            // fremdes Netz von Hand. Der Schlüssel steht nirgends davon — er
+            // wird erst beim Abholen der Config eingesetzt.
+            const auswahl = document.getElementById('cfg-wlan-netz');
+            const vorgabe = hausWlan?.netz || 'RK-Clients';
+            auswahl.innerHTML =
+                `<option value="">Hausvorgabe (${escape(vorgabe)})</option>` +
+                wlanNetze.map(n => `<option value="${escape(n.name)}">${escape(n.name)}${n.vlan ? ` — VLAN ${n.vlan}` : ''}</option>`).join('') +
+                '<option value="__eigen">Eigenes Netz (Station steht nicht im Haus)</option>';
+
+            const eigenesNetz = !!ov.network?.wifi?.ssid;
+            auswahl.value = eigenesNetz ? '__eigen' : (ov.network?.wifi?.netz || '');
+            document.getElementById('cfg-wlan-ssid').value = ov.network?.wifi?.ssid || '';
+            document.getElementById('cfg-wlan-psk').value = '';
+            cfgWlanUmschalten();
 
             document.getElementById('cfg-dialog').classList.remove('hidden');
+        }
+
+        function cfgWlanUmschalten() {
+            const wahl = document.getElementById('cfg-wlan-netz').value;
+            const eigen = document.getElementById('cfg-wlan-eigen');
+            eigen.classList.toggle('hidden', wahl !== '__eigen');
+            eigen.classList.toggle('grid', wahl === '__eigen');
+
+            const hinweis = document.getElementById('cfg-wlan-hinweis');
+            if (wahl === '__eigen') {
+                hinweis.textContent = cfgHatteWlanPasswort
+                    ? 'Ein eigenes Passwort ist gesetzt — leer lassen heisst unverändert.'
+                    : 'Netzname und Passwort von Hand eintragen.';
+            } else if (wahl === '') {
+                hinweis.textContent = `Es gilt „${hausWlan?.netz || 'RK-Clients'}" wie für alle Stationen.`;
+            } else {
+                hinweis.textContent = 'Der Schlüssel kommt aus UniFi — hier ist nichts einzutippen.';
+            }
         }
 
         function cfgSchliessen() {
@@ -427,20 +446,25 @@
             }
 
             const kanal = document.getElementById('cfg-kanal').value;
-            const ssid = document.getElementById('cfg-wlan-ssid').value.trim();
-            const psk = document.getElementById('cfg-wlan-psk').value;
+            const netzWahl = document.getElementById('cfg-wlan-netz').value;
 
             overrides.updates = { ...(overrides.updates || {}) };
             if (kanal) overrides.updates.channel = kanal; else delete overrides.updates.channel;
             if (!Object.keys(overrides.updates).length) delete overrides.updates;
 
-            if (ssid) {
-                overrides.network = { ...(overrides.network || {}) };
-                overrides.network.wifi = { ...(overrides.network.wifi || {}), ssid };
+            // Drei Fälle, und jeder räumt die Reste des anderen weg — sonst
+            // bliebe eine alte SSID stehen und schlüge den Netznamen.
+            if (netzWahl === '__eigen') {
+                const ssid = document.getElementById('cfg-wlan-ssid').value.trim();
+                const psk = document.getElementById('cfg-wlan-psk').value;
+                if (!ssid) return melden('Für ein eigenes Netz fehlt der Netzname.', false);
+                if (!psk && !cfgHatteWlanPasswort) return melden('Für ein eigenes Netz fehlt das Passwort.', false);
+                overrides.network = { wifi: { ssid, netz: null } };
                 if (psk) overrides.network.wifi.password = psk;
-                if (!overrides.network.wifi.password && !cfgHatteWlanPasswort) {
-                    return melden('Für das WLAN fehlt noch das Passwort.', false);
-                }
+            } else if (netzWahl) {
+                overrides.network = { wifi: { netz: netzWahl, ssid: null, password: null } };
+            } else {
+                overrides.network = null;
             }
 
             try {
