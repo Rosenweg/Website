@@ -158,7 +158,7 @@
 
                 <div class="border-t pt-4">
                     <h4 class="font-medium text-gray-800">WLAN</h4>
-                    <p class="text-sm text-gray-500 mb-3">Nur nötig, wenn die Station kein Netzwerkkabel hat.</p>
+                    <p class="text-sm text-gray-500 mb-3">Nur ausfüllen, wenn diese Station ein <em>anderes</em> Netz braucht als das Haus-WLAN — etwa ein Gerät in einem Nachbargebäude.</p>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <label class="block"><span class="text-sm font-medium text-gray-700">Netzname (SSID)</span>
                             <input id="cfg-wlan-ssid" type="text" class="mt-1 w-full border rounded-lg px-3 py-2"></label>
@@ -206,6 +206,7 @@
 
     <script>
         let stationen = [];
+        let hausWlan = null;
         let typen = [];
 
         window.addEventListener('DOMContentLoaded', async () => {
@@ -243,6 +244,7 @@
             try {
                 const daten = await api('/api/stations/admin/list');
                 stationen = daten.stations || [];
+                hausWlan = daten.haus_wlan || null;
                 typen = daten.types || [];
                 zeichne();
             } catch (err) {
@@ -380,8 +382,24 @@
             // Das Passwort kommt nie zurück an den Browser. Damit niemand
             // glaubt, es sei keines gesetzt, steht es wenigstens da.
             cfgHatteWlanPasswort = (s.overrides_geheim || []).includes('network.wifi.password');
-            document.getElementById('cfg-wlan-hinweis').textContent =
-                cfgHatteWlanPasswort ? 'Ein Passwort ist gesetzt.' : 'Noch kein Passwort gesetzt.';
+
+            // Ohne eigenen Eintrag gilt das Haus-WLAN. Das gehört sichtbar
+            // hierher — sonst steht dort ein leeres Feld, und jemand trägt ein
+            // Netz ein, das ohnehin schon für alle gilt.
+            const feldSsid = document.getElementById('cfg-wlan-ssid');
+            if (hausWlan?.ssid) {
+                feldSsid.placeholder = `Haus-WLAN: ${hausWlan.ssid}`;
+                document.getElementById('cfg-wlan-hinweis').textContent = cfgHatteWlanPasswort
+                    ? 'Eigenes Passwort für diese Station gesetzt.'
+                    : (hausWlan.passwort_gesetzt
+                        ? `Leer lassen — dann gilt „${hausWlan.ssid}" aus der Hausvorgabe.`
+                        : `Hausvorgabe „${hausWlan.ssid}", aber ohne Passwort.`);
+            } else {
+                feldSsid.placeholder = '';
+                document.getElementById('cfg-wlan-hinweis').textContent = cfgHatteWlanPasswort
+                    ? 'Ein Passwort ist gesetzt.'
+                    : 'Kein WLAN hinterlegt — auch nicht in der Hausvorgabe.';
+            }
 
             document.getElementById('cfg-dialog').classList.remove('hidden');
         }
