@@ -60,3 +60,7 @@ whatsapp-qr.png
 /*.pdf
 /*.xlsx
 authentik-ct/.env
+
+# Python-Zwischencode — entsteht beim Ausprobieren der Skripte unter scripts/
+__pycache__/
+*.pyc
