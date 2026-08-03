@@ -115,7 +115,17 @@ const ROLE_DEFAULTS = {
     // Als Vorgabe scheiterte bei JEDER Anmeldung eine Einhaengung und
     // hinterliess einen Fehler im Protokoll, ohne dass jemand etwas davon hatte.
     shares: ['dokumente'],
-    printing: { enabled: true },
+    // Drucken: alles vom zentralen Druckserver (CT 111), nichts einzeln
+    // eingetragen. Kommt dort ein Drucker dazu, hat ihn jede Station sofort.
+    //
+    // Der Weg dorthin hat am 3. August zwei Sperren gehabt, beide auf dem
+    // Server, beide behoben — wer den Namen hier ändert, sollte sie kennen:
+    // CUPS hörte nur auf IPv4 ('Listen 0.0.0.0:631'), der Name löst aber
+    // zuerst auf IPv6 auf; und CUPS lehnte danach jede Anfrage mit 400 ab,
+    // weil der Host-Kopf nicht zum eigenen Namen passte (der Rechner heisst
+    // sich cups-server.rosenweg4303.ch, gefragt wird nach .ad.). Jetzt stehen
+    // dort 'Listen [::]:631' und eine ServerAlias-Zeile.
+    printing: { enabled: true, server: 'cups-server.ad.rosenweg4303.ch' },
     // Zielordner im Home, nicht auf der Scans-Freigabe. Das Home liegt ohnehin
     // auf dem Fileserver — die Scans landen also dort, wo die Person sie an
     // jeder Station wiederfindet.
