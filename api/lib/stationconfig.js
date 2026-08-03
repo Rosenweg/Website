@@ -157,6 +157,35 @@ const ROLE_DEFAULTS = {
       brother_driver_url: 'https://download.brother.com/welcome/dlf105200/brscan4-0.4.11-1.amd64.deb',
       brother_driver_sha256: '027b73648722ac8c8eb1a9c419d284a6562cc763feac9740a2b75a683b092972',
     },
+    // Die Bildschirme der virtuellen Maschinen. Ein Menüeintrag, angemeldet
+    // wird über Authentik — denselben Weg wie überall im Haus. Der Cluster
+    // hat dafür längst einen Realm, und die Rechte hängen dort an den Konten;
+    // die Liste kommt aus /cluster/resources und wird von Proxmox selbst
+    // gefiltert.
+    //
+    // Der Name und nicht die IP: das Zertifikat ist ein öffentliches (Let's
+    // Encrypt, gültig für pve-cluster1 und pve1), damit genügt der
+    // Systemvorrat und es braucht kein eigenes CA auf der Station. Über die IP
+    // ginge das nicht — sie steht nicht im Zertifikat.
+    //
+    // Achtung, pve-cluster1.rosenweg4303.ch zeigt auf den Traefik (100.64.2.27)
+    // und antwortet dort nicht auf 8006. pve1.rosenweg4303.ch zeigt aus dem
+    // Stationsnetz auf 100.64.9.20 und antwortet. Am 3. August gemessen.
+    //
+    // Alle drei Knoten, der Reihe nach: fällt einer aus, nimmt das Programm
+    // den nächsten. Fragen muss man nur einen — /cluster/resources antwortet
+    // für den ganzen Cluster. Jeder Knoten hat seinen eigenen Namen im
+    // Zertifikat, am 3. August einzeln nachgesehen.
+    remote_console: {
+      enabled: true,
+      servers: [
+        'https://pve1.rosenweg4303.ch:8006',
+        'https://pve2.rosenweg4303.ch:8006',
+        'https://pve3.rosenweg4303.ch:8006',
+      ],
+      realm: 'authentik',
+      ca_pem: '',
+    },
     // OnlyOffice als Flatpak: rund 800 MB pro Station, dafür auf jeder
     // Station dieselbe Version — und die Dokumente auf den Shares lassen
     // sich ohne Umweg über den Browser öffnen.
