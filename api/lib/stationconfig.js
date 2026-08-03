@@ -28,7 +28,13 @@ const DEFAULTS = {
     enabled: true,
     realm: 'AD.ROSENWEG4303.CH',
     workgroup: 'ROSENWEG',
-    controller: '100.64.2.30',
+    // Ein NAME, keine IP — dieselbe Falle wie bei home.server. Kerberos kennt
+    // Dienste nur unter ihrem Namen: zu '100.64.2.30' gibt es kein 'ldap/…',
+    // und der KDC antwortet mit "Server not found in Kerberos database". Mit
+    // der IP scheiterte am 3. August das Auslesen des Benutzerbilds aus dem AD.
+    // Der Wert speist krb5.conf (kdc, admin_server), dort ist ein Name ebenso
+    // richtig.
+    controller: 'dc1.ad.rosenweg4303.ch',
     // Rechnerkonten landen in einer eigenen OU. Das Beitrittskonto hat auch
     // nur dort Rechte — es ist ausdrücklich kein Domänenadministrator.
     computer_ou: 'OU=Stationen,DC=ad,DC=rosenweg4303,DC=ch',
