@@ -129,7 +129,26 @@ const ROLE_DEFAULTS = {
     // Zielordner im Home, nicht auf der Scans-Freigabe. Das Home liegt ohnehin
     // auf dem Fileserver — die Scans landen also dort, wo die Person sie an
     // jeder Station wiederfindet.
-    scanning: { enabled: true, target_dir: '~/scans' },
+    scanning: {
+      enabled: true,
+      target_dir: '~/scans',
+      // Die Multifunktionsgeräte sind zugleich die Drucker. Eingetragen mit
+      // Adresse und nicht gesucht: die automatische Suche läuft über mDNS und
+      // endet an der Segmentgrenze — die Geräte stehen in den Hausnetzen, die
+      // Stationen in ihrem eigenen.
+      //
+      // WSD und nicht eSCL: auf /eSCL/ScannerCapabilities antworten beide mit
+      // 404, auf /WebServices/Device mit 405. Am 3. August so gemessen.
+      //
+      // Rosenweg 9 scannt darüber. Rosenweg 13 wird gefunden, verweigert aber
+      // das Öffnen ("Error during device I/O") — das Gerät ist von 2011, und
+      // sein WSD-Scan tut es nicht. Es bleibt eingetragen, damit es auffällt
+      // statt vergessen zu werden; siehe docs/offene-punkte.md.
+      scanners: [
+        { name: 'Rosenweg 9 (Brother DCP-1612W)', url: 'http://100.64.99.4/WebServices/Device', protocol: 'WSD' },
+        { name: 'Rosenweg 13 (Brother MFC-J6510DW)', url: 'http://100.64.139.4/WebServices/Device', protocol: 'WSD' },
+      ],
+    },
     // OnlyOffice als Flatpak: rund 800 MB pro Station, dafür auf jeder
     // Station dieselbe Version — und die Dokumente auf den Shares lassen
     // sich ohne Umweg über den Browser öffnen.
