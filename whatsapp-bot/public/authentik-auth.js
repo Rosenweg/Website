@@ -30,6 +30,18 @@ const AuthentikAuth = {
   // 401 zurück, ignoriert die Aufforderung mangels Ticket und fragt NICHT
   // nach — dort kostet das eine Anfrage und sonst nichts.
   SSO_PROBE_URL: 'https://authentik.rosenweg4303.ch/source/kerberos/ad-kerberos/',
+  // Der zweite Schritt, ohne den der erste nichts bewirkt.
+  //
+  // Nach dem Kerberos-Handschlag liegt in Authentik ein fertiger Anmeldeplan,
+  // aber die Sitzung steht noch nicht — die entsteht erst, wenn der Flow
+  // wirklich durchläuft. Im Browser tut das die Flow-Seite mit ihrem
+  // JavaScript; eine Hintergrundanfrage holt nur deren Hülle. Genau daran ist
+  // der erste Wurf am 3. August gescheitert: Handschlag angenommen (302 statt
+  // 401), und angemeldet war trotzdem niemand.
+  //
+  // Diese Adresse führt den Flow serverseitig einen Schritt weiter, und dieser
+  // eine Schritt ist die Anmeldung.
+  SSO_FLOW_URL: 'https://authentik.rosenweg4303.ch/api/v3/flows/executor/default-source-authentication/?query=',
   SSO_PROBE_MS: 2500,
   SSO_PAUSE_KEY: 'rosenweg_sso_pause',
   SSO_PAUSE_MS: 6 * 60 * 60 * 1000,
@@ -44,13 +56,15 @@ const AuthentikAuth = {
 
       const abbruch = new AbortController();
       uhr = setTimeout(() => abbruch.abort(), this.SSO_PROBE_MS);
-      await fetch(this.SSO_PROBE_URL, {
+      const holen = (url) => fetch(url, {
         mode: 'no-cors',
         credentials: 'include',
         cache: 'no-store',
         redirect: 'follow',
         signal: abbruch.signal,
       });
+      await holen(this.SSO_PROBE_URL);
+      await holen(this.SSO_FLOW_URL);
     } catch (e) {
       try {
         localStorage.setItem(this.SSO_PAUSE_KEY, String(Date.now() + this.SSO_PAUSE_MS));
