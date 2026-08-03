@@ -40,6 +40,7 @@ const { authenticateAD } = require('../lib/adauth');
 const { authMiddleware } = require('../middleware/auth');
 const { isTechnik, isPraesident } = require('../lib/groups');
 const { STATION_TYPES, buildConfig, missingSecrets, hausWlan } = require('../lib/stationconfig');
+const { wlanAufloesen, netznamen } = require('../lib/stationwlan');
 const { stationApps } = require('../lib/stationapps');
 const { telefonbuch } = require('../lib/telefonbuch');
 const stationos = require('../lib/stationos');
@@ -346,6 +347,10 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
     // stationseigene Ebene — also ein leeres Feld — und jemand trüge das Netz
     // ein zweites Mal ein, obwohl es längst für alle gilt.
     haus_wlan: hausWlan(),
+    // Die Netze aus UniFi, nur die Namen — damit die Verwaltung eine Auswahl
+    // anbieten kann statt eines Textfelds, in das jemand einen Schlüssel
+    // tippt, den es längst gibt.
+    wlan_netze: await netznamen(),
   });
 }));
 
@@ -718,7 +723,13 @@ router.get('/:id/os/tarball', stationAuth, a(async (req, res) => {
 router.get('/:id/config', stationAuth, a(async (req, res) => {
   await pool.query('UPDATE stations SET last_seen_at = NOW(), last_seen_ip = $2 WHERE id = $1',
     [req.station.id, clientIp(req)]);
-  res.json(buildConfig(req.station));
+
+  // Der WLAN-Schlüssel wird erst hier eingesetzt, frisch aus UniFi. In der
+  // Config steht nur der Netzname — so gibt es keinen zweiten Ort, an dem ein
+  // Schlüssel gepflegt werden müsste und veralten kann.
+  const cfg = buildConfig(req.station);
+  cfg.network = { ...(cfg.network || {}), wifi: await wlanAufloesen(cfg.network?.wifi) };
+  res.json(cfg);
 }));
 
 // POST /api/stations/:id/seen  { state }

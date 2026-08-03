@@ -246,21 +246,29 @@ function secrets() {
       username: process.env.STATION_MQTT_USER || '',
       password: process.env.STATION_MQTT_PASSWORD || '',
     },
-    // Das Haus-WLAN, für Stationen ohne Netzwerkkabel. Fest hinterlegt und
-    // nicht pro Station eingetippt: es ist überall dasselbe Netz, und ein
-    // Schlüssel, den man an zehn Stellen pflegt, ist an neun davon veraltet.
+    // Das Haus-WLAN, für Stationen ohne Netzwerkkabel.
     //
-    // Wie alle Geheimnisse aus der Umgebung der API (/opt/rosenweg-core/.env
-    // auf CT 128), nicht aus diesem Repo. Eine Station mit Kabel merkt davon
-    // nichts — base/20-network.sh legt das Profil nur an, wenn eine SSID da
-    // ist, und ein zusätzliches WLAN-Profil stört ein Kabel nicht.
+    // Hier steht ein NETZNAME, kein Passwort. Im Haus gibt es genau ein
+    // Funknetz ('Rosenweg') mit privaten Schlüsseln; welchen ein Gerät
+    // benutzt, entscheidet über sein VLAN. 'RK-Clients' ist der allgemeine
+    // Client-Bereich; eine Station, die zu einem Haus gehören soll, bekommt
+    // dessen Netz ('RW9-Clients' und so weiter) in ihre overrides.
     //
-    // Eine einzelne Station kann es über ihre overrides überschreiben, etwa
-    // ein Gerät in einem Nachbargebäude mit eigenem Netz.
+    // Den Schlüssel holt lib/stationwlan.js frisch aus UniFi. Wird er dort
+    // gewechselt, ziehen die Stationen von selbst nach, und in der Verwaltung
+    // tippt ihn niemand ab.
+    //
+    // Eine Station bei jemandem zu Hause trägt stattdessen ssid und password
+    // von Hand ein; das gewinnt gegen den Netznamen.
+    //
+    // Hier steht NUR der Netzname. Stünde hier auch eine SSID, gewänne sie
+    // gegen die Auflösung aus UniFi — das ist genau der Fall „von Hand
+    // eingetragen", und der gehört den overrides einer einzelnen Station.
+    // STATION_WIFI_SSID/PASSWORD gelten deshalb nur noch als Rückfallebene,
+    // falls UniFi nicht antwortet (siehe lib/stationwlan.js).
     network: {
       wifi: {
-        ssid: process.env.STATION_WIFI_SSID || '',
-        password: process.env.STATION_WIFI_PASSWORD || '',
+        netz: process.env.STATION_WIFI_NETZ || 'RK-Clients',
       },
     },
   };
@@ -306,6 +314,7 @@ function buildConfig(station) {
  */
 function hausWlan() {
   return {
+    netz: process.env.STATION_WIFI_NETZ || 'RK-Clients',
     ssid: process.env.STATION_WIFI_SSID || '',
     passwort_gesetzt: !!process.env.STATION_WIFI_PASSWORD,
   };
