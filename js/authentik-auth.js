@@ -6,9 +6,64 @@ const AuthentikAuth = {
   SESSION_KEY: 'rosenweg_session',
   USER_KEY: 'rosenweg_user',
 
+  // --- Stiller SSO-Versuch ---------------------------------------------
+  //
+  // Wer an einer Station angemeldet ist, hat ein Kerberos-Ticket. Der Browser
+  // dort gibt es an authentik.rosenweg4303.ch weiter (Richtlinie
+  // AuthServerAllowlist, gesetzt von os-stationen). Dann muss sich niemand ein
+  // zweites Mal anmelden — die Anmeldeseite kommt gar nicht erst.
+  //
+  // Warum dieser Umweg und nicht einfach eine Weiterleitung auf die
+  // SSO-Adresse: ein misslungener Kerberos-Versuch fällt NICHT auf die
+  // Anmeldemaske zurück. Er endet bei HTTP 401 mit 'WWW-Authenticate:
+  // Negotiate', und dabei bleibt es. Am 3. August nachgemessen. Wer von
+  // auswärts käme, sässe in einer Sackgasse. Als Hintergrundanfrage dagegen
+  // ist ein Fehlschlag folgenlos: es passiert einfach nichts Sichtbares, und
+  // gleich darauf kommt die gewohnte Anmeldung.
+  //
+  // Ein unsichtbares Fenster (iframe) ginge auch nicht — Authentik schickt
+  // 'X-Frame-Options: DENY'.
+  //
+  // 'no-cors': die Antwort dürfen wir ohnehin nicht lesen, und wir brauchen
+  // sie auch nicht. Es geht allein darum, dass der Browser die Sitzung setzt.
+  // Ein Browser ohne Kerberos (jedes Gerät ausserhalb des Hauses) bekommt die
+  // 401 zurück, ignoriert die Aufforderung mangels Ticket und fragt NICHT
+  // nach — dort kostet das eine Anfrage und sonst nichts.
+  SSO_PROBE_URL: 'https://authentik.rosenweg4303.ch/source/kerberos/ad-kerberos/',
+  SSO_PROBE_MS: 2500,
+  SSO_PAUSE_KEY: 'rosenweg_sso_pause',
+  SSO_PAUSE_MS: 6 * 60 * 60 * 1000,
+
+  async _ssoVersuch() {
+    let uhr = null;
+    try {
+      // Antwortet Authentik gar nicht, soll nicht jede Anmeldung darauf
+      // warten. Nach einem Abbruch ein paar Stunden Ruhe.
+      const pause = Number(localStorage.getItem(this.SSO_PAUSE_KEY) || 0);
+      if (Date.now() < pause) return;
+
+      const abbruch = new AbortController();
+      uhr = setTimeout(() => abbruch.abort(), this.SSO_PROBE_MS);
+      await fetch(this.SSO_PROBE_URL, {
+        mode: 'no-cors',
+        credentials: 'include',
+        cache: 'no-store',
+        redirect: 'follow',
+        signal: abbruch.signal,
+      });
+    } catch (e) {
+      try {
+        localStorage.setItem(this.SSO_PAUSE_KEY, String(Date.now() + this.SSO_PAUSE_MS));
+      } catch (_) { /* privater Modus: dann eben jedes Mal */ }
+    } finally {
+      if (uhr) clearTimeout(uhr);
+    }
+  },
+
   /** Start login - redirect to Authentik via API */
-  login(redirectPath) {
+  async login(redirectPath) {
     const redirect = redirectPath || window.location.pathname;
+    await this._ssoVersuch();
     window.location.href = `/api/auth/login?redirect=${encodeURIComponent(redirect)}`;
   },
 
