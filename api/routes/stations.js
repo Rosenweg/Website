@@ -206,6 +206,23 @@ function nurTechnikApp(req, res, next) {
   return res.status(403).json({ error: 'Nur die Gruppe technik darf Versionen veröffentlichen' });
 }
 
+// Wie nurTechnikApp, aber zusätzlich für eine Gruppe, die NUR das darf.
+//
+// 'technik' ist im Haus der Generalschlüssel: über technik-authentik hängt
+// daran unter anderem Administrator auf dem ganzen Proxmox-Cluster. Für einen
+// Vorgang, der einen Tarball hochlädt, ist das zu viel — erst recht, wenn das
+// Passwort dafür auf einem Rechner liegen muss, damit etwas automatisch
+// veröffentlichen kann.
+//
+// Deshalb: wer in 'os-veroeffentlichen' ist, darf genau diesen einen
+// Endpunkt und sonst nichts. Die Gruppe steht in keiner anderen Prüfung.
+function darfOsVeroeffentlichen(req, res, next) {
+  let groups = [];
+  try { groups = JSON.parse(req.appUser?.groups_json || '[]'); } catch { groups = []; }
+  if (groups.includes('os-veroeffentlichen')) return next();
+  return nurTechnikApp(req, res, next);
+}
+
 function nurTechnik(req, res, next) {
   const groups = req.user?.groups || [];
   if (req.user?.isAdmin || isTechnik(groups) || isPraesident(groups)) return next();
@@ -261,7 +278,7 @@ router.get('/types', setupSession, (req, res) => res.json({ types: STATION_TYPES
 // POST /api/stations/os — neue Version veroeffentlichen (Technik).
 // Der Tarball kommt roh im Koerper; Version und Kanal als Kopfzeilen.
 router.post('/os', express.raw({ type: '*/*', limit: '64mb' }),
-  appSession, nurTechnikApp, a(async (req, res) => {
+  appSession, darfOsVeroeffentlichen, a(async (req, res) => {
     const version = String(req.headers['x-version'] || '').trim();
     const kanal = String(req.headers['x-kanal'] || 'main').trim();
     // Node liest Kopfzeilen als latin-1 — ein "ü" in der Notiz kam deshalb als
@@ -296,7 +313,7 @@ router.post('/os', express.raw({ type: '*/*', limit: '64mb' }),
   }));
 
 // GET /api/stations/os — Übersicht (Technik).
-router.get('/os', appSession, nurTechnikApp, a(async (req, res) => {
+router.get('/os', appSession, darfOsVeroeffentlichen, a(async (req, res) => {
   res.json({ versionen: await stationos.liste() });
 }));
 
