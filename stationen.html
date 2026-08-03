@@ -135,6 +135,54 @@
         </div>
     </div>
 
+    <!-- Einstellungen je Station -->
+    <div id="cfg-dialog" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[85vh] flex flex-col">
+            <div class="p-6 border-b">
+                <h3 class="text-lg font-semibold text-gray-800" id="cfg-titel">Einstellungen</h3>
+                <p class="text-sm text-gray-500">Gilt nur für diese Station. Was hier leer bleibt, kommt aus der Hausvorgabe.</p>
+            </div>
+            <div class="flex-1 overflow-y-auto p-6 space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <label class="block"><span class="text-sm font-medium text-gray-700">Standort</span>
+                        <input id="cfg-standort" type="text" class="mt-1 w-full border rounded-lg px-3 py-2" placeholder="z. B. Eingang Rosenweg 9"></label>
+                    <label class="block"><span class="text-sm font-medium text-gray-700">Kanal</span>
+                        <select id="cfg-kanal" class="mt-1 w-full border rounded-lg px-3 py-2">
+                            <option value="">Hausvorgabe (main)</option>
+                            <option value="main">main</option>
+                            <option value="test">test</option>
+                        </select></label>
+                </div>
+                <label class="block"><span class="text-sm font-medium text-gray-700">Notiz</span>
+                    <input id="cfg-notiz" type="text" class="mt-1 w-full border rounded-lg px-3 py-2"></label>
+
+                <div class="border-t pt-4">
+                    <h4 class="font-medium text-gray-800">WLAN</h4>
+                    <p class="text-sm text-gray-500 mb-3">Nur nötig, wenn die Station kein Netzwerkkabel hat.</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <label class="block"><span class="text-sm font-medium text-gray-700">Netzname (SSID)</span>
+                            <input id="cfg-wlan-ssid" type="text" class="mt-1 w-full border rounded-lg px-3 py-2"></label>
+                        <label class="block"><span class="text-sm font-medium text-gray-700">Passwort</span>
+                            <input id="cfg-wlan-psk" type="password" autocomplete="new-password" class="mt-1 w-full border rounded-lg px-3 py-2" placeholder="unverändert lassen: leer">
+                            <span class="text-xs text-gray-500" id="cfg-wlan-hinweis"></span></label>
+                    </div>
+                </div>
+
+                <details class="border-t pt-4">
+                    <summary class="cursor-pointer text-sm font-medium text-gray-700">Weitere Einstellungen (JSON)</summary>
+                    <p class="text-sm text-gray-500 my-2">Der vollständige Stand dieser Station. Wer hier etwas ändert, überschreibt die Felder oben.</p>
+                    <textarea id="cfg-json" rows="8" class="w-full border rounded-lg px-3 py-2 font-mono text-xs"></textarea>
+                </details>
+
+                <p id="cfg-meldung" class="text-sm"></p>
+            </div>
+            <div class="p-6 border-t flex justify-end gap-3">
+                <button onclick="cfgSchliessen()" class="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50">Abbrechen</button>
+                <button onclick="cfgSpeichern()" class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Speichern</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Sperr-Dialog -->
     <div id="dialog" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-lg shadow-xl max-w-lg w-full p-6">
@@ -275,6 +323,8 @@
                 const aktionen = s.revoked_at ? '<span class="text-gray-400 text-xs">—</span>' : (
                     `<button onclick="jetztAktualisieren('${escape(s.id)}')" class="text-blue-600 hover:text-blue-800 font-medium">Aktualisieren</button>
                      <span class="text-gray-300 mx-1">|</span>
+                     <button onclick="cfgOeffnen('${escape(s.id)}')" class="text-blue-600 hover:text-blue-800 font-medium">Einstellen</button>
+                     <span class="text-gray-300 mx-1">|</span>
                      <button onclick="logsOeffnen('${escape(s.id)}')" class="text-blue-600 hover:text-blue-800 font-medium">Logs</button>
                      <span class="text-gray-300 mx-1">|</span>` + (
                         s.status === 'gesperrt'
@@ -295,6 +345,101 @@
                     <td class="py-3 px-6 whitespace-nowrap">${aktionen}</td>
                 </tr>`;
             }).join('');
+        }
+
+        // ─── Einstellungen je Station ──────────────────────────────────
+        // Bis zum 3. August ging das nur an der Datenbank vorbei: `overrides`
+        // wurde einmal beim Registrieren geschrieben und danach nie wieder.
+        //
+        // Gespeichert wird ZUSAMMENGEFÜHRT (die API führt den Zweig zusammen),
+        // damit dieses Formular nichts löscht, was es nicht kennt. Deshalb
+        // steht unten auch der vollständige JSON-Stand: was hier nicht als
+        // Feld existiert, bleibt sichtbar und änderbar.
+        //
+        // Passwörter kommen von der API geschwärzt zurück und stehen deshalb
+        // NICHT im JSON-Kasten. Verloren gehen sie trotzdem nicht: PATCH führt
+        // die Zweige zusammen, ein weggelassenes Passwort bleibt also stehen.
+
+        let cfgStation = null;
+        let cfgHatteWlanPasswort = false;
+
+        function cfgOeffnen(id) {
+            cfgStation = id;
+            const s = (stationen || []).find(x => x.id === id) || {};
+            const ov = s.overrides || {};
+
+            document.getElementById('cfg-titel').textContent = `Einstellungen für „${id}"`;
+            document.getElementById('cfg-standort').value = s.standort || '';
+            document.getElementById('cfg-notiz').value = s.notiz || '';
+            document.getElementById('cfg-kanal').value = ov.updates?.channel || '';
+            document.getElementById('cfg-wlan-ssid').value = ov.network?.wifi?.ssid || '';
+            document.getElementById('cfg-wlan-psk').value = '';
+            document.getElementById('cfg-json').value = JSON.stringify(ov, null, 2);
+            document.getElementById('cfg-meldung').textContent = '';
+
+            // Das Passwort kommt nie zurück an den Browser. Damit niemand
+            // glaubt, es sei keines gesetzt, steht es wenigstens da.
+            cfgHatteWlanPasswort = (s.overrides_geheim || []).includes('network.wifi.password');
+            document.getElementById('cfg-wlan-hinweis').textContent =
+                cfgHatteWlanPasswort ? 'Ein Passwort ist gesetzt.' : 'Noch kein Passwort gesetzt.';
+
+            document.getElementById('cfg-dialog').classList.remove('hidden');
+        }
+
+        function cfgSchliessen() {
+            document.getElementById('cfg-dialog').classList.add('hidden');
+            cfgStation = null;
+        }
+
+        async function cfgSpeichern() {
+            const melden = (text, gut) => {
+                const el = document.getElementById('cfg-meldung');
+                el.textContent = text;
+                el.className = 'text-sm ' + (gut ? 'text-green-700' : 'text-red-600');
+            };
+
+            // Der JSON-Kasten ist die Grundlage, die Felder darüber
+            // überschreiben ihn. Andersherum verlöre man beim Speichern still
+            // alles, was jemand unten von Hand ergänzt hat.
+            let overrides;
+            try {
+                overrides = JSON.parse(document.getElementById('cfg-json').value || '{}');
+            } catch (e) {
+                return melden('Das JSON unten ist nicht lesbar: ' + e.message, false);
+            }
+
+            const kanal = document.getElementById('cfg-kanal').value;
+            const ssid = document.getElementById('cfg-wlan-ssid').value.trim();
+            const psk = document.getElementById('cfg-wlan-psk').value;
+
+            overrides.updates = { ...(overrides.updates || {}) };
+            if (kanal) overrides.updates.channel = kanal; else delete overrides.updates.channel;
+            if (!Object.keys(overrides.updates).length) delete overrides.updates;
+
+            if (ssid) {
+                overrides.network = { ...(overrides.network || {}) };
+                overrides.network.wifi = { ...(overrides.network.wifi || {}), ssid };
+                if (psk) overrides.network.wifi.password = psk;
+                if (!overrides.network.wifi.password && !cfgHatteWlanPasswort) {
+                    return melden('Für das WLAN fehlt noch das Passwort.', false);
+                }
+            }
+
+            try {
+                await api(`/api/stations/admin/${encodeURIComponent(cfgStation)}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({
+                        standort: document.getElementById('cfg-standort').value,
+                        notiz: document.getElementById('cfg-notiz').value,
+                        overrides,
+                    }),
+                });
+                melden('Gespeichert. Die Station übernimmt es beim nächsten Update.', true);
+                await ladeDaten();
+                setTimeout(cfgSchliessen, 1200);
+            } catch (err) {
+                melden(err.message, false);
+            }
         }
 
         // ─── Logs ──────────────────────────────────────────────────────

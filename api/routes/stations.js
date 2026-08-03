@@ -327,10 +327,22 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
     SELECT id, role, hostname, standort, notiz, status, sperr_grund, gesperrt_von,
            gesperrt_am, hardware, registered_by, registered_at,
            last_seen_at, last_seen_ip, last_state, revoked_at,
-           update_angefordert, update_angefordert_von
+           update_angefordert, update_angefordert_von, overrides
       FROM stations
      ORDER BY (revoked_at IS NOT NULL), registered_at DESC`);
-  res.json({ stations: r.rows, types: STATION_TYPES });
+
+  // In den overrides kann ein WLAN-Schlüssel stehen. Der Browser braucht ihn
+  // nie: die Verwaltung zeigt nur, DASS einer gesetzt ist, und beim Speichern
+  // führt PATCH die Zweige zusammen — ein weggelassenes Passwort bleibt also
+  // stehen. Ein Klartextschlüssel in einer Seite, die jemand offen liegen
+  // lässt, wäre der unnötigste Weg, ihn zu verlieren.
+  res.json({
+    stations: r.rows.map((z) => {
+      const { sichtbar, geheim } = ohneGeheimnisse(z.overrides);
+      return { ...z, overrides: sichtbar, overrides_geheim: geheim };
+    }),
+    types: STATION_TYPES,
+  });
 }));
 
 // GET /api/stations/admin/:id/events
@@ -389,6 +401,99 @@ router.post('/admin/:id/update', authMiddleware, nurTechnik, a(async (req, res) 
   }
   await ereignis(req.params.id, 'update-angefordert', wer, null);
   res.json({ ok: true });
+}));
+
+// PATCH /api/stations/admin/:id  { standort?, notiz?, overrides? }
+//
+// Bis zum 3. August gab es das nicht, und damit gab es die ganze Ebene nicht:
+// `overrides` wurde genau einmal geschrieben, beim Registrieren, mit `{}`.
+// Jede Einstellung, die die Doku als „pro Station" beschrieb — Kanal, WLAN,
+// Bildschirmzeiten, Drucker —, war faktisch global. Wer eine Station umstellen
+// wollte, musste an die Datenbank.
+//
+// `overrides` wird ZUSAMMENGEFÜHRT, nicht ersetzt: ein Formular, das nur das
+// WLAN kennt, darf nicht den Kanal löschen, den jemand anders gesetzt hat.
+// Wer einen Zweig wirklich entfernen will, schickt dort `null`.
+// Schlüssel, deren Wert nicht an den Browser gehört. Absichtlich nach Muster
+// und nicht nach fester Liste: wer morgen `api_token` ergänzt, soll ihn nicht
+// versehentlich ausliefern.
+const GEHEIM_MUSTER = /passwor[dt]|secret|token|psk|schluessel/i;
+
+function ohneGeheimnisse(wert, pfad = '') {
+  if (!wert || typeof wert !== 'object' || Array.isArray(wert)) {
+    return { sichtbar: wert, geheim: [] };
+  }
+  const sichtbar = {};
+  const geheim = [];
+  for (const [schluessel, inhalt] of Object.entries(wert)) {
+    const voll = pfad ? `${pfad}.${schluessel}` : schluessel;
+    if (GEHEIM_MUSTER.test(schluessel)) { geheim.push(voll); continue; }
+    const tiefer = ohneGeheimnisse(inhalt, voll);
+    sichtbar[schluessel] = tiefer.sichtbar;
+    geheim.push(...tiefer.geheim);
+  }
+  return { sichtbar, geheim };
+}
+
+function tiefZusammenfuehren(alt, neu) {
+  const ergebnis = { ...(alt || {}) };
+  for (const [schluessel, wert] of Object.entries(neu || {})) {
+    if (wert === null) { delete ergebnis[schluessel]; continue; }
+    if (wert && typeof wert === 'object' && !Array.isArray(wert)) {
+      ergebnis[schluessel] = tiefZusammenfuehren(ergebnis[schluessel], wert);
+    } else {
+      ergebnis[schluessel] = wert;
+    }
+  }
+  return ergebnis;
+}
+
+router.patch('/admin/:id', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const wer = req.user?.email || req.user?.name || 'unbekannt';
+
+  const vorher = await pool.query(
+    'SELECT overrides FROM stations WHERE id = $1 AND revoked_at IS NULL',
+    [req.params.id],
+  );
+  if (!vorher.rows.length) return res.status(404).json({ error: 'Station nicht gefunden' });
+
+  const felder = [];
+  const werte = [req.params.id];
+  const geaendert = [];
+
+  for (const feld of ['standort', 'notiz']) {
+    if (req.body?.[feld] === undefined) continue;
+    const wert = String(req.body[feld] || '').trim().slice(0, 500) || null;
+    werte.push(wert);
+    felder.push(`${feld} = $${werte.length}`);
+    geaendert.push(feld);
+  }
+
+  if (req.body?.overrides !== undefined) {
+    const eingang = req.body.overrides;
+    if (!eingang || typeof eingang !== 'object' || Array.isArray(eingang)) {
+      return res.status(400).json({ error: 'overrides muss ein Objekt sein' });
+    }
+    const zusammen = tiefZusammenfuehren(vorher.rows[0].overrides || {}, eingang);
+    werte.push(JSON.stringify(zusammen));
+    felder.push(`overrides = $${werte.length}::jsonb`);
+    geaendert.push('overrides');
+  }
+
+  if (!felder.length) return res.status(400).json({ error: 'Nichts zu ändern' });
+
+  const r = await pool.query(
+    `UPDATE stations SET ${felder.join(', ')} WHERE id = $1
+      RETURNING id, standort, notiz, overrides`,
+    werte,
+  );
+
+  // Was geändert wurde, steht im Ereignis — aber ohne die Werte. In den
+  // overrides kann ein WLAN-Schlüssel stehen, und der gehört nicht in ein
+  // Protokoll, das die halbe Verwaltung lesen darf.
+  await ereignis(req.params.id, 'config-geaendert', wer, geaendert.join(', '));
+  res.json(r.rows[0]);
 }));
 
 // POST /api/stations/admin/:id/block  { grund }
