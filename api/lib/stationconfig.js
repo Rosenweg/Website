@@ -35,6 +35,13 @@ const DEFAULTS = {
     // Der Wert speist krb5.conf (kdc, admin_server), dort ist ein Name ebenso
     // richtig.
     controller: 'dc1.ad.rosenweg4303.ch',
+    // Rechner, die zum Haus gehören, aber nicht unter der AD-Domäne stehen.
+    // Zwei Dinge lesen diese Liste: die krb5.conf (sonst sucht Kerberos für
+    // authentik.rosenweg4303.ch einen Realm ROSENWEG4303.CH, den es nicht
+    // gibt) und die Chromium-Richtlinie (sonst reicht der Browser das Ticket
+    // gar nicht erst weiter). Eine Liste statt zwei, damit ein Rechner nicht
+    // in der einen steht und in der anderen fehlt.
+    sso_hosts: ['authentik.rosenweg4303.ch'],
     // Rechnerkonten landen in einer eigenen OU. Das Beitrittskonto hat auch
     // nur dort Rechte — es ist ausdrücklich kein Domänenadministrator.
     computer_ou: 'OU=Stationen,DC=ad,DC=rosenweg4303,DC=ch',
