@@ -273,7 +273,9 @@
                 const st = s.last_state || {};
                 const version = st.os_version ? `<div class="text-xs text-gray-400">OS ${escape(st.os_version)}</div>` : '';
                 const aktionen = s.revoked_at ? '<span class="text-gray-400 text-xs">—</span>' : (
-                    `<button onclick="logsOeffnen('${escape(s.id)}')" class="text-blue-600 hover:text-blue-800 font-medium">Logs</button>
+                    `<button onclick="jetztAktualisieren('${escape(s.id)}')" class="text-blue-600 hover:text-blue-800 font-medium">Aktualisieren</button>
+                     <span class="text-gray-300 mx-1">|</span>
+                     <button onclick="logsOeffnen('${escape(s.id)}')" class="text-blue-600 hover:text-blue-800 font-medium">Logs</button>
                      <span class="text-gray-300 mx-1">|</span>` + (
                         s.status === 'gesperrt'
                             ? `<button onclick="entsperren('${escape(s.id)}')" class="text-green-700 hover:text-green-900 font-medium">Entsperren</button>`
@@ -390,6 +392,19 @@
             dialogSchliessen();
             if (aktion) await aktion(grund);
         });
+
+        // Der Station lässt sich nichts schicken — sie hängt hinter der Firewall
+        // und hat keinen offenen Port. Die Aufforderung wird deshalb vermerkt
+        // und beim nächsten Lebenszeichen abgeholt; das ist alle fünf Minuten.
+        function jetztAktualisieren(id) {
+            dialogOeffnen(
+                `Station „${id}" aktualisieren`,
+                'Die Station holt sich die neueste Version und wendet sie an. Sie fragt alle fünf Minuten nach, so lange kann es dauern. Bei flüchtigem Root startet sie dabei zweimal neu und ist ein paar Minuten nicht bedienbar.',
+                'Aktualisieren', 'bg-blue-600 hover:bg-blue-700',
+                async () => tuUnd(`/api/stations/admin/${encodeURIComponent(id)}/update`,
+                    { method: 'POST' }, `„${id}" wird beim nächsten Lebenszeichen aktualisiert.`),
+                false);
+        }
 
         function sperren(id) {
             dialogOeffnen(
