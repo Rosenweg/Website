@@ -295,6 +295,20 @@ app.get('/api/auth/login', (req, res) => {
   res.redirect(`${AUTHENTIK_EXTERNAL_URL}/application/o/authorize/?${params}`);
 });
 
+// Stammt dieses id_token von der Adresse, an die wir es zurueckgeben? Nur der
+// 'iss'-Eintrag wird gelesen, nichts geprueft — die Pruefung macht Authentik.
+function passtZumAussteller(idToken) {
+  try {
+    const teil = String(idToken).split('.')[1];
+    if (!teil) return false;
+    const roh = Buffer.from(teil.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+    const iss = JSON.parse(roh).iss || '';
+    return iss.startsWith(AUTHENTIK_EXTERNAL_URL);
+  } catch {
+    return false;
+  }
+}
+
 // Logout - end Authentik session and redirect back
 app.get('/api/auth/logout', async (req, res) => {
   // id_token VOR dem Delete laden — wird gleich als id_token_hint an
@@ -329,7 +343,12 @@ app.get('/api/auth/logout', async (req, res) => {
     post_logout_redirect_uri: postLogoutRedirect,
     client_id: AUTHENTIK_CLIENT_ID,
   });
-  if (idTokenHint) params.set('id_token_hint', idTokenHint);
+  // Den Hint nur mitschicken, wenn er von derselben Adresse stammt, an die wir
+  // ihn schicken. Sitzungen aus der Zeit vor dem Wechsel auf die aeussere
+  // Adresse tragen den alten Aussteller; Authentik antwortet darauf mit
+  // 'Bad Request' und die Person kommt nicht heraus. Ohne Hint fragt es
+  // stattdessen einmal nach — unschoen, aber es funktioniert.
+  if (idTokenHint && passtZumAussteller(idTokenHint)) params.set('id_token_hint', idTokenHint);
   res.redirect(`${AUTHENTIK_EXTERNAL_URL}/application/o/rosenweg-website/end-session/?${params}`);
 });
 
@@ -350,7 +369,19 @@ app.get('/api/auth/callback', async (req, res) => {
   try {
     // Exchange code for token. redirect_uri MUSS exakt zum Login-Start
     // passen (Authentik prüft das), deshalb aus dem State holen.
-    const tokenUrl = `${AUTHENTIK_URL}/application/o/token/`;
+    //
+    // Ueber die AEUSSERE Adresse, nicht die interne. Authentik baut den
+    // 'iss'-Eintrag des id_token aus dem Host, unter dem es gefragt wird.
+    // Ueber http://100.64.2.37:9000 kam deshalb ein Token mit genau diesem
+    // Aussteller heraus — und beim Abmelden lehnte Authentik es als
+    // 'Bad Request: The request is otherwise malformed' ab, weil end-session
+    // unter https://authentik.rosenweg4303.ch laeuft und einen anderen
+    // Aussteller erwartet. Am 3. August auf dem Bildschirm gesehen.
+    //
+    // Die aeussere Adresse ist von der API aus erreichbar und sogar schneller
+    // (0,76 s gegen 1,06 s, nachgemessen). Faellt sie doch einmal aus, geht es
+    // ueber die interne weiter: eine Anmeldung, die nicht klappt, waere
+    // schlimmer als eine Abmeldung, die nachfragt.
     const tokenBody = new URLSearchParams({
       grant_type: 'authorization_code',
       code,
@@ -358,12 +389,19 @@ app.get('/api/auth/callback', async (req, res) => {
       client_id: AUTHENTIK_CLIENT_ID,
       client_secret: AUTHENTIK_CLIENT_SECRET,
     }).toString();
-    const tokenResp = await fetch(tokenUrl, {
+    const tokenAbrufen = (basis) => fetch(`${basis}/application/o/token/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: tokenBody,
       signal: AbortSignal.timeout(10000),
     });
+    let tokenResp;
+    try {
+      tokenResp = await tokenAbrufen(AUTHENTIK_EXTERNAL_URL);
+    } catch (err) {
+      console.error('Token-Tausch ueber die aeussere Adresse fehlgeschlagen, versuche die interne:', err.message);
+      tokenResp = await tokenAbrufen(AUTHENTIK_URL);
+    }
     const tokenText = await tokenResp.text();
     if (!tokenResp.ok) {
       console.error('Token exchange failed, status:', tokenResp.status, 'body:', tokenText.substring(0, 500));
