@@ -139,15 +139,23 @@ const ROLE_DEFAULTS = {
       //
       // WSD und nicht eSCL: auf /eSCL/ScannerCapabilities antworten beide mit
       // 404, auf /WebServices/Device mit 405. Am 3. August so gemessen.
-      //
-      // Rosenweg 9 scannt darüber. Rosenweg 13 wird gefunden, verweigert aber
-      // das Öffnen ("Error during device I/O") — das Gerät ist von 2011, und
-      // sein WSD-Scan tut es nicht. Es bleibt eingetragen, damit es auffällt
-      // statt vergessen zu werden; siehe docs/offene-punkte.md.
       scanners: [
         { name: 'Rosenweg 9 (Brother DCP-1612W)', url: 'http://100.64.99.4/WebServices/Device', protocol: 'WSD' },
-        { name: 'Rosenweg 13 (Brother MFC-J6510DW)', url: 'http://100.64.139.4/WebServices/Device', protocol: 'WSD' },
       ],
+      // Der MFC-J6510DW von 2011 fehlt oben mit Absicht: über WSD wird er zwar
+      // gefunden, lässt sich aber nicht öffnen. Sein Scan-Dienst existiert
+      // nicht — /WebServices/ScannerService gibt es beim DCP-1612W (Antwort
+      // 411), bei ihm nicht (404). Mit Brothers eigenem Treiber geht er
+      // sofort, und besser: Vorlageneinzug und bis 4800 dpi.
+      brother_scanners: [
+        { name: 'RosenwegR13', model: 'MFC-J6510DW', ip: '100.64.139.4' },
+      ],
+      // Unfrei und von Brother, deshalb geholt statt mitgeliefert. Die
+      // Prüfsumme ist die des Pakets, das am 3. August auf der Teststation
+      // gemessen wurde — installiert wird genau dieses und nicht, was unter
+      // der Adresse gerade liegt.
+      brother_driver_url: 'https://download.brother.com/welcome/dlf105200/brscan4-0.4.11-1.amd64.deb',
+      brother_driver_sha256: '027b73648722ac8c8eb1a9c419d284a6562cc763feac9740a2b75a683b092972',
     },
     // OnlyOffice als Flatpak: rund 800 MB pro Station, dafür auf jeder
     // Station dieselbe Version — und die Dokumente auf den Shares lassen
