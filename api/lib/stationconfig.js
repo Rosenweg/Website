@@ -246,6 +246,23 @@ function secrets() {
       username: process.env.STATION_MQTT_USER || '',
       password: process.env.STATION_MQTT_PASSWORD || '',
     },
+    // Das Haus-WLAN, für Stationen ohne Netzwerkkabel. Fest hinterlegt und
+    // nicht pro Station eingetippt: es ist überall dasselbe Netz, und ein
+    // Schlüssel, den man an zehn Stellen pflegt, ist an neun davon veraltet.
+    //
+    // Wie alle Geheimnisse aus der Umgebung der API (/opt/rosenweg-core/.env
+    // auf CT 128), nicht aus diesem Repo. Eine Station mit Kabel merkt davon
+    // nichts — base/20-network.sh legt das Profil nur an, wenn eine SSID da
+    // ist, und ein zusätzliches WLAN-Profil stört ein Kabel nicht.
+    //
+    // Eine einzelne Station kann es über ihre overrides überschreiben, etwa
+    // ein Gerät in einem Nachbargebäude mit eigenem Netz.
+    network: {
+      wifi: {
+        ssid: process.env.STATION_WIFI_SSID || '',
+        password: process.env.STATION_WIFI_PASSWORD || '',
+      },
+    },
   };
 }
 
