@@ -147,7 +147,7 @@ const ROLE_DEFAULTS = {
       // WSD und nicht eSCL: auf /eSCL/ScannerCapabilities antworten beide mit
       // 404, auf /WebServices/Device mit 405. Am 3. August so gemessen.
       scanners: [
-        { name: 'Rosenweg 9 (Brother DCP-1612W)', url: 'http://100.64.99.4/WebServices/Device', protocol: 'WSD' },
+        { name: 'HP Rosenweg 9', url: 'http://100.64.99.4/WebServices/Device', protocol: 'WSD' },
       ],
       // Der MFC-J6510DW von 2011 fehlt oben mit Absicht: über WSD wird er zwar
       // gefunden, lässt sich aber nicht öffnen. Sein Scan-Dienst existiert
@@ -155,7 +155,10 @@ const ROLE_DEFAULTS = {
       // 411), bei ihm nicht (404). Mit Brothers eigenem Treiber geht er
       // sofort, und besser: Vorlageneinzug und bis 4800 dpi.
       brother_scanners: [
-        { name: 'RosenwegR13', model: 'MFC-J6510DW', ip: '100.64.139.4' },
+        // Kein Leerzeichen: brsaneconfig4 schneidet dort ab. Aus 'Rosenweg 13'
+        // wurde stillschweigend 'Rosenweg', und der Eintrag stand danach
+        // doppelt da. Am 4. August gemessen.
+        { name: 'Rosenweg-13', model: 'MFC-J6510DW', ip: '100.64.139.4' },
       ],
       // Unfrei und von Brother, deshalb geholt statt mitgeliefert. Die
       // Prüfsumme ist die des Pakets, das am 3. August auf der Teststation
