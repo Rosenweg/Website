@@ -66,19 +66,25 @@ bit_loeschen() {
 geaendert=0
 geprueft=0
 
-# Tiefe 2: die Heimatordner selbst und ihre unmittelbaren Unterordner. Tiefer
-# zu gehen hiesse, über fremde Dokumentenbäume zu laufen — dort richtet das
-# Bit keinen Schaden an, und ein Lauf über zehntausende Ordner wäre teuer.
-while IFS= read -r -d '' ordner; do
+# Ein einziger rekursiver Aufruf statt eines Prozesses je Ordner.
+#
+# Der Baum hat rund 15000 Ordner (am 4. August gezählt), davon 15351 tiefer als
+# zwei Ebenen — eine Tiefenbegrenzung überspränge also praktisch alles. Mit
+# `getfattr -R` liest ein Prozess den ganzen Baum; `setfattr` läuft nur für die
+# wenigen, bei denen das Bit wirklich gesetzt ist.
+#
+# NUR Ordner. Bei einer DATEI ist READONLY ein echter Schreibschutz, den jemand
+# absichtlich gesetzt hat — den anzufassen wäre etwas ganz anderes, als einen
+# Windows-Merker von einem Ordner zu nehmen.
+while IFS=$'\t' read -r ordner roh; do
+    [ -n "$ordner" ] || continue
+    [ -d "$ordner" ] || continue
     geprueft=$((geprueft + 1))
-    roh="$(getfattr -n user.DOSATTRIB -e hex --absolute-names "$ordner" 2>/dev/null \
-           | sed -n 's/^user.DOSATTRIB=//p')"
-    [ -n "$roh" ] || continue
     readonly_gesetzt "$roh" || continue
 
     neu="$(bit_loeschen "$roh")"
     if [ "$PROBE" -eq 1 ]; then
-        sag "würde lösen: $ordner ($roh -> $neu)"
+        sag "würde lösen: $ordner"
         geaendert=$((geaendert + 1))
         continue
     fi
@@ -89,7 +95,9 @@ while IFS= read -r -d '' ordner; do
     else
         sag "FEHLER beim Setzen: $ordner"
     fi
-done < <(find "$BASIS" -mindepth 1 -maxdepth 2 -type d -print0 2>/dev/null)
+done < <(getfattr -R -h -n user.DOSATTRIB -e hex --absolute-names "$BASIS" 2>/dev/null \
+         | awk '/^# file: /   { pfad = substr($0, 9); next }
+                /^user\.DOSATTRIB=/ { if (pfad != "") printf "%s\t%s\n", pfad, substr($0, 16); pfad = "" }')
 
 sag "$geprueft Ordner geprüft, $geaendert geändert$([ "$PROBE" -eq 1 ] && echo ' (nur Probe)')."
 exit 0
