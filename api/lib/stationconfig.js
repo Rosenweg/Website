@@ -155,10 +155,13 @@ const ROLE_DEFAULTS = {
       // 411), bei ihm nicht (404). Mit Brothers eigenem Treiber geht er
       // sofort, und besser: Vorlageneinzug und bis 4800 dpi.
       brother_scanners: [
-        // Kein Leerzeichen: brsaneconfig4 schneidet dort ab. Aus 'Rosenweg 13'
-        // wurde stillschweigend 'Rosenweg', und der Eintrag stand danach
-        // doppelt da. Am 4. August gemessen.
-        { name: 'Rosenweg-13', model: 'MFC-J6510DW', ip: '100.64.139.4' },
+        // `name` ist der ANZEIGENAME und darf Leerzeichen haben; die Station
+        // verteilt ihn auf die zwei Felder, die der Treiber ausgibt (erstes
+        // Wort in den Gerätenamen, Rest ins Modellfeld). Angezeigt wird damit
+        // "Brother Rosenweg 13" — ohne Modellbezeichnung, weil sie den Platz
+        // einnimmt. `model` bleibt das echte Modell: daraus holt sich der
+        // Treiber die Geräte-ID, und die macht die Arbeit.
+        { name: 'Rosenweg 13', model: 'MFC-J6510DW', ip: '100.64.139.4' },
       ],
       // Unfrei und von Brother, deshalb geholt statt mitgeliefert. Die
       // Prüfsumme ist die des Pakets, das am 3. August auf der Teststation
