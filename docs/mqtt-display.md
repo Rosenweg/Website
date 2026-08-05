@@ -81,9 +81,62 @@ In der App eine **Ticker-Zone** (RSS) auf diese URL richten → scrollt die aktu
 Ankündigung. Ist nichts aktiv, ist der Feed leer (Ticker zeigt nichts). Feed ist
 public (kein Login). `ttl=1` → App fragt häufig neu.
 
-Für den **Notfall-Vollbild-Override** in der SlideShow-App (Layout-Wechsel per
-MQTT-Command `layout/set`) siehe die geplante Bridge — braucht Geräte-MAC + ein
-„Notfall"-Layout in der App.
+### SlideShow-Geräte über MQTT steuern
+
+Am 5. August am Tablet im Eingang durchgemessen. Vier Themen je Gerät;
+`<name>` ist das Feld „Name des MQTT-Themas", ohne Eintrag die MAC ohne
+Doppelpunkte in Grossbuchstaben:
+
+```text
+SLIDESHOW/REQ/<name>/API      Befehle hinein
+SLIDESHOW/RESP/<name>/API     Antworten heraus
+SLIDESHOW/REQ/<name>/SHELL    Shell-Befehle, RESP entsprechend
+```
+
+**Die Parameter gehören in ein `parameters`-Objekt.** Beim Hersteller stehen
+sie flach aufgeführt — flach geschickt antwortet die App mit „Missing one
+of …" oder einer `NumberFormatException: s == null`, und man sucht den Fehler
+bei den Feldnamen statt bei der Verschachtelung:
+
+```json
+{ "operation": "playlist/set",
+  "parameters": { "zoneName": "Hauptpanel", "playlistName": "Alarm" } }
+```
+
+Erprobt und bestätigt: `zones` (liefert die Zonennamen), `deviceInfo` (Modell,
+Android-Version, laufendes Layout, Temperatur, Lautstärke), `playlist/set`,
+`showSentHtml`.
+
+`showSentHtml` zeigt eine beliebige Seite auf Zeit und braucht dafür **keine**
+Datei auf dem Gerät — für einen Notfall-Vollbild-Override das einfachste
+Mittel, und es stellt sich nach Ablauf von selbst zurück:
+
+```json
+{ "operation": "showSentHtml",
+  "parameters": { "zoneName": "Hauptpanel", "length": "5",
+                  "html": "<iframe src=\"https://display.rosenweg4303.ch\"></iframe>" } }
+```
+
+Achtung: das trifft **eine** Zone. Das Tablet im Eingang hat drei
+(`Hauptpanel`, `R92OG Kamera`, `R9EG Kamera`) — die Kameras liefen während
+des Tests unbeirrt weiter. Wer den ganzen Schirm will, spricht alle Zonen an
+oder wechselt gleich das Layout.
+
+Zwei Eigenheiten, die beim Messen Verwirrung stiften:
+
+* Die App veröffentlicht ihre Antworten **retained**. Ein neuer Zuhörer
+  bekommt sofort die letzte alte Antwort — wer mit `-C 1` mitliest, liest
+  leicht die falsche. Über mehrere Sekunden sammeln.
+* Der MQTT-Block in den Geräteeinstellungen greift erst nach einem Neuladen
+  der App. Sie sagt das bei jedem Feld, aber nur im Hilfetext.
+
+Kontrollieren lässt sich das Ergebnis ohne Gang zum Gerät: die Weboberfläche
+liefert unter `/screenshot.jpg?displayId=0` ein Bild des laufenden Schirms.
+
+Zugänge legt die Verwaltung an: **Stationen → Anzeigegeräte**. Der Knopf
+erzeugt den MQTT-Benutzer (`SLIDESHOW/#`, schreibend) und zeigt alle Werte
+zum Abschreiben. Damit die API selbst Befehle schicken darf, hat `collector`
+seit dem 5. August zusätzlich `SLIDESHOW/REQ/#`.
 
 ## Minimalbeispiel (mosquitto / Shell)
 
