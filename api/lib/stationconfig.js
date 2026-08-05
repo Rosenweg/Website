@@ -111,7 +111,18 @@ const ROLE_DEFAULTS = {
     //
     // Gruppennamen mit Leerzeichen werden auf der Station nicht erkannt.
     apps: {
-      gruppen: {},
+      // Was auf dem Geraet vorhanden sein muss, damit eine Gruppe es bekommen
+      // kann. Diese Programme stehen NICHT auf der Positivliste — fuer alle
+      // anderen bleiben sie ausgeblendet.
+      pakete: ['gnome-terminal'],
+      // Die Technik bekommt an jeder Station ein Terminal. Fuer alle anderen
+      // ist es nicht zu sehen; wer davor sitzt, merkt nichts davon.
+      //
+      // Das passt zu station-desktop-modus, das der Technik ohnehin den
+      // vollen Desktop erlaubt — nur muss man dafuer nicht erst umschalten.
+      gruppen: {
+        technik: ['org.gnome.Terminal.desktop'],
+      },
     },
     // Ton. Der Root der Station ist fluechtig, ein gespeicherter ALSA-Zustand
     // ueberlebt also keinen Neustart — deshalb wird die Lautstaerke bei jedem
