@@ -568,7 +568,12 @@ function anzeigeZettel({ mqtt_thema, mqtt_benutzer, passwort }) {
     schritte: [
       'Am Gerät die Weboberfläche öffnen (Port 8080) und anmelden.',
       'Einstellungen → Geräteeinstellungen, dort zum Abschnitt MQTT.',
-      'Die Werte oben eintragen und speichern.',
+      'Die Werte oben eintragen.',
+      'Zum Speichern den ERSTEN „Speichern"-Knopf nehmen — den direkt unter dem '
+      + 'Abschnitt SNMP. Er gehört zu den Geräteeinstellungen und speichert die '
+      + 'MQTT-Felder mit. Der zweite, weiter unten, gehört zum HTTPS-Zertifikat '
+      + 'und speichert sie NICHT. Noch weiter unten steht „Alle Einstellungen auf '
+      + 'Werkseinstellungen zurücksetzen" — den nicht treffen.',
       'Die App neu laden — die MQTT-Felder greifen erst danach. Das sagt die App bei jedem Feld selbst dazu.',
       'Zurück in dieser Übersicht prüfen, ob das Gerät sich meldet.',
     ],
