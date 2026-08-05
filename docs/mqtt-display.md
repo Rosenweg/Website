@@ -105,7 +105,25 @@ bei den Feldnamen statt bei der Verschachtelung:
 
 Erprobt und bestätigt: `zones` (liefert die Zonennamen), `deviceInfo` (Modell,
 Android-Version, laufendes Layout, Temperatur, Lautstärke), `playlist/set`,
-`showSentHtml`.
+`playlist/clear`, `showSentHtml`.
+
+**`playlist/clear` bringt das Gerät zu seinem eigenen Zeitplan zurück.** Die
+API muss den Namen der normalen Wiedergabeliste also nicht kennen — ein
+`playlist/set` auf „Alarm" hin, ein `playlist/clear` zurück. Auf beiden
+Geräten gemessen:
+
+```text
+Fernseher   set    currentPlaylist = Alarm               alarm.url
+            clear  currentPlaylist = All files in cycle  (nach 15 s: energiefluss r9.url)
+Tablet      set    currentPlaylist = R9EG Eingang        …stream.m3u8?src=r9eg
+            clear  currentPlaylist = All files in cycle  R92OGPanel.url
+```
+
+**Gemessen wird das an `deviceInfo`, nicht an einem Bildschirmfoto.** Ein
+erster Versuch stützte sich auf ein Bild, sah dort die Anzeigeseite und schloss
+daraus, `clear` habe nicht gewirkt — die Anzeigeseite gehört auf dem Fernseher
+aber ohnehin für zehn Sekunden zur Rotation. Beide Zustände sehen zeitweise
+gleich aus; nur `currentPlaylist` und `lastDisplayedFile` sind eindeutig.
 
 `showSentHtml` zeigt eine beliebige Seite auf Zeit und braucht dafür **keine**
 Datei auf dem Gerät — für einen Notfall-Vollbild-Override das einfachste
