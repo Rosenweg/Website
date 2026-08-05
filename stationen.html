@@ -115,6 +115,43 @@
             </div>
 
             <p id="status" class="hidden text-sm"></p>
+
+            <!-- Anzeigegeräte -->
+            <div class="bg-white rounded-xl shadow-sm border mt-8">
+                <div class="p-6 border-b flex items-start justify-between gap-4">
+                    <div>
+                        <h2 class="text-lg font-semibold text-gray-800">Anzeigegeräte</h2>
+                        <p class="text-sm text-gray-500 mt-1">Tafeln mit der App <em>SlideShow</em> — Fernseher, Tablets im Eingang. Sie richten sich nicht selbst ein: was sie brauchen, tippt jemand am Gerät ab. Der Knopf legt den Zugang an und zeigt den Zettel dazu.</p>
+                    </div>
+                    <button onclick="anzeigeNeu()" class="shrink-0 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Anzeigegerät hinzufügen</button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 text-gray-600">
+                            <tr>
+                                <th class="text-left py-3 px-6">Name</th>
+                                <th class="text-left py-3 px-6">Standort</th>
+                                <th class="text-left py-3 px-6">MQTT-Thema</th>
+                                <th class="text-left py-3 px-6">Angelegt</th>
+                                <th class="text-left py-3 px-6"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="anzeigen-tabelle"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Einrichtungszettel für ein Anzeigegerät -->
+    <div id="anzeige-dialog" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[85vh] flex flex-col">
+            <div class="p-6 border-b">
+                <h3 class="text-lg font-semibold text-gray-800" id="anzeige-titel">Anzeigegerät</h3>
+                <p class="text-sm text-gray-500" id="anzeige-untertitel"></p>
+            </div>
+            <div class="flex-1 overflow-y-auto p-6 space-y-4" id="anzeige-inhalt"></div>
+            <div class="p-6 border-t flex justify-end gap-3" id="anzeige-fuss"></div>
         </div>
     </div>
 
@@ -262,6 +299,9 @@
             document.getElementById('suche').addEventListener('input', zeichne);
             document.getElementById('zeige-entfernte').addEventListener('change', zeichne);
             await ladeDaten();
+            // Getrennt und ohne await davor: eine leere oder fehlerhafte Liste
+            // der Anzeigegeräte darf die Stationsübersicht nicht aufhalten.
+            ladeAnzeigen();
         });
 
         async function api(pfad, opts = {}) {
@@ -451,6 +491,128 @@
             } else {
                 hinweis.textContent = 'Der Schlüssel kommt aus UniFi — hier ist nichts einzutippen.';
             }
+        }
+
+        // ─── Anzeigegeräte ─────────────────────────────────────────────
+        // Tafeln mit der App SlideShow. Sie haben keinen Installer, an dem sich
+        // jemand anmeldet — die Zugangsdaten trägt eine Person am Gerät ein.
+        //
+        // Deshalb ist das Ergebnis dieses Knopfes kein „fertig", sondern ein
+        // ZETTEL: alle Werte, die in die App gehören, und die Schritte dazu.
+        // Das Passwort kommt genau einmal — danach kennt die API nur noch
+        // seine Prüfsumme. Wer den Dialog schliesst, ohne es zu notieren, legt
+        // das Gerät neu an; das ist der Preis dafür, dass es nirgends im
+        // Klartext liegt.
+
+        let anzeigen = [];
+
+        async function ladeAnzeigen() {
+            const koerper = document.getElementById('anzeigen-tabelle');
+            try {
+                const d = await api('/api/stations/admin/anzeigen');
+                anzeigen = d.anzeigen || [];
+            } catch (e) {
+                koerper.innerHTML = `<tr><td colspan="5" class="py-4 px-6 text-red-600">${escape(e.message)}</td></tr>`;
+                return;
+            }
+            if (!anzeigen.length) {
+                koerper.innerHTML = '<tr><td colspan="5" class="py-6 px-6 text-gray-400">Noch kein Anzeigegerät eingetragen.</td></tr>';
+                return;
+            }
+            koerper.innerHTML = anzeigen.map(a => `
+                <tr class="border-t">
+                    <td class="py-3 px-6 font-medium text-gray-800">${escape(a.name)}</td>
+                    <td class="py-3 px-6 text-gray-600">${escape(a.standort || '—')}</td>
+                    <td class="py-3 px-6 font-mono text-xs text-gray-600">${escape(a.mqtt_thema)}</td>
+                    <td class="py-3 px-6 text-gray-500">${a.angelegt_am ? new Date(a.angelegt_am).toLocaleDateString('de-CH') : ''}</td>
+                    <td class="py-3 px-6 whitespace-nowrap">
+                        <button onclick="anzeigeEntfernen('${escape(a.id)}')" class="text-red-600 hover:text-red-800 font-medium">Entfernen</button>
+                    </td>
+                </tr>`).join('');
+        }
+
+        async function anzeigeNeu() {
+            const name = prompt('Name des Anzeigegeräts\n\nz. B. „R9 Heizungsraum" — daraus wird die Kennung und das MQTT-Thema.');
+            if (name === null) return;
+            if (!name.trim()) return;
+            const standort = prompt('Standort (darf leer bleiben)') || '';
+            try {
+                const zettel = await api('/api/stations/admin/anzeigen', {
+                    method: 'POST',
+                    body: { name: name.trim(), standort: standort.trim() },
+                });
+                zettelZeigen(zettel);
+                await ladeAnzeigen();
+            } catch (e) {
+                alert('Ging nicht: ' + e.message);
+            }
+        }
+
+        function zettelZeigen(z) {
+            document.getElementById('anzeige-titel').textContent = `Einrichten: ${z.name}`;
+            document.getElementById('anzeige-untertitel').textContent =
+                'Diese Werte am Gerät eintragen. Das Passwort steht nur hier.';
+
+            const feldZeile = (f) => `
+                <tr class="border-t">
+                    <td class="py-2 pr-4 text-gray-600 align-top">${escape(f.feld)}</td>
+                    <td class="py-2 pr-3 align-top">
+                        <span class="font-mono ${f.geheim ? 'bg-amber-50 border border-amber-200 rounded px-1' : ''}">${escape(f.wert)}</span>
+                        ${f.warum ? `<div class="text-xs text-gray-500 mt-0.5">${escape(f.warum)}</div>` : ''}
+                    </td>
+                    <td class="py-2 align-top">
+                        <button onclick="inZwischenablage(this, ${JSON.stringify(f.wert).replace(/"/g, '&quot;')})"
+                                class="text-xs text-blue-600 hover:text-blue-800">kopieren</button>
+                    </td>
+                </tr>`;
+
+            document.getElementById('anzeige-inhalt').innerHTML = `
+                <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-900">${escape(z.hinweis)}</div>
+                <div>
+                    <h4 class="font-medium text-gray-800 mb-2">Einstellungen → Geräteeinstellungen → MQTT</h4>
+                    <table class="w-full text-sm"><tbody>${z.felder.map(feldZeile).join('')}</tbody></table>
+                </div>
+                <div>
+                    <h4 class="font-medium text-gray-800 mb-2">Schritte</h4>
+                    <ol class="list-decimal ml-5 space-y-1 text-sm text-gray-700">
+                        ${z.schritte.map(s => `<li>${escape(s)}</li>`).join('')}
+                    </ol>
+                </div>
+                <details class="border-t pt-3">
+                    <summary class="cursor-pointer text-sm font-medium text-gray-700">Wie das Gerät danach gesteuert wird</summary>
+                    <div class="mt-2 text-sm text-gray-600 space-y-1">
+                        <div>Befehle: <span class="font-mono text-xs">${escape(z.steuerung.thema)}</span></div>
+                        <div>Antworten: <span class="font-mono text-xs">${escape(z.steuerung.antwort)}</span></div>
+                        <pre class="bg-gray-50 border rounded p-2 text-xs overflow-x-auto">${escape(JSON.stringify(z.steuerung.beispiel, null, 2))}</pre>
+                    </div>
+                </details>`;
+
+            document.getElementById('anzeige-fuss').innerHTML =
+                `<button onclick="document.getElementById('anzeige-dialog').classList.add('hidden')"
+                         class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Notiert — schliessen</button>`;
+            document.getElementById('anzeige-dialog').classList.remove('hidden');
+        }
+
+        async function inZwischenablage(knopf, text) {
+            try {
+                await navigator.clipboard.writeText(text);
+                const alt = knopf.textContent;
+                knopf.textContent = 'kopiert';
+                setTimeout(() => { knopf.textContent = alt; }, 1200);
+            } catch {
+                // Ohne sichere Herkunft gibt es keine Zwischenablage. Dann
+                // wenigstens markieren, damit von Hand kopiert werden kann.
+                const bereich = knopf.closest('tr')?.querySelector('.font-mono');
+                if (bereich) { const r = document.createRange(); r.selectNodeContents(bereich); getSelection().removeAllRanges(); getSelection().addRange(r); }
+            }
+        }
+
+        async function anzeigeEntfernen(id) {
+            if (!confirm(`„${id}" entfernen?\n\nDer MQTT-Zugang des Geräts wird dabei gelöscht — die Tafel kann danach keine Befehle mehr empfangen.`)) return;
+            try {
+                await api(`/api/stations/admin/anzeigen/${encodeURIComponent(id)}`, { method: 'DELETE' });
+                await ladeAnzeigen();
+            } catch (e) { alert(e.message); }
         }
 
         // ─── Programme ─────────────────────────────────────────────────

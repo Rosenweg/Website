@@ -104,6 +104,25 @@ async function ensureSchema() {
     -- faellt erst auf, wenn am Geraet ein Symbol fehlt.
     ALTER TABLE stations ADD COLUMN IF NOT EXISTS programme JSONB;
     ALTER TABLE stations ADD COLUMN IF NOT EXISTS programme_gemeldet_am TIMESTAMPTZ;
+    -- Anzeigegeraete: Android-Tafeln mit der App SlideShow (sk.mimac.slideshow).
+    -- Sie sind KEINE Stationen — kein eigenes OS, kein install.sh, kein Update
+    -- ueber uns. Gemeinsam ist nur die Verwaltung: hier steht, welches Geraet
+    -- wo haengt und unter welchem Namen es am MQTT-Broker Befehle entgegennimmt.
+    --
+    -- Das Passwort steht NICHT hier. Es lebt als sha256 in mqtt_service_users
+    -- und wird beim Anlegen ein einziges Mal angezeigt; danach ist es weg. Wer
+    -- es verliert, legt den Zugang neu an — billiger als ein Klartextpasswort
+    -- in einer zweiten Tabelle.
+    CREATE TABLE IF NOT EXISTS anzeigegeraete (
+      id            TEXT PRIMARY KEY,
+      name          TEXT NOT NULL,
+      standort      TEXT,
+      notiz         TEXT,
+      mqtt_thema    TEXT NOT NULL,
+      mqtt_benutzer TEXT NOT NULL,
+      angelegt_von  TEXT,
+      angelegt_am   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS station_setup_sessions (
       token_hash   TEXT PRIMARY KEY,
       username     TEXT NOT NULL,
@@ -514,6 +533,114 @@ router.patch('/admin/:id', authMiddleware, nurTechnik, a(async (req, res) => {
 }));
 
 // POST /api/stations/admin/:id/block  { grund }
+// ─── Anzeigegeräte (SlideShow auf Android) ──────────────────────────
+//
+// Diese Tafeln richten sich nicht selbst ein — sie haben keinen Installer, an
+// dem sich jemand anmeldet. Was sie brauchen, tippt eine Person am Gerät ab:
+// Adresse, Benutzer und Passwort des MQTT-Brokers.
+//
+// Genau dafür ist das hier: einmal drücken, und die Verwaltung legt den Zugang
+// an und zeigt den vollständigen Zettel zum Abschreiben. Das Passwort steht
+// nur in DIESER Antwort — danach existiert nur noch sein sha256.
+//
+// Das WLAN steht bewusst nicht auf dem Zettel: die Geräte hängen längst im
+// Netz, sonst käme man gar nicht an ihre Oberfläche.
+
+const ANZEIGE_TOPIC_PREFIX = 'SLIDESHOW';
+
+/** Die Felder der App, in ihrer eigenen Beschriftung — und die Schritte dazu. */
+function anzeigeZettel({ mqtt_thema, mqtt_benutzer, passwort }) {
+  return {
+    felder: [
+      { feld: 'MQTT-Serveradresse', wert: process.env.MQTT_HOST_INTERN || '100.64.2.51' },
+      { feld: 'MQTT-Benutzername', wert: mqtt_benutzer },
+      { feld: 'MQTT-Passwort', wert: passwort, geheim: true },
+      { feld: 'TLS für MQTT erforderlich', wert: 'aus',
+        warum: 'Der Broker hört auf 1883 unverschlüsselt; 8883 ist im Haus zu.' },
+      { feld: 'Verwenden Sie Websockets für MQTT', wert: 'aus',
+        warum: 'Websockets (9001) braucht nur der Browser, die App nicht.' },
+      { feld: 'MQTT topic prefix', wert: ANZEIGE_TOPIC_PREFIX },
+      { feld: 'Name des MQTT-Themas', wert: mqtt_thema,
+        warum: 'Ohne Eintrag nimmt die App die MAC-Adresse — die liest sich schlecht.' },
+      { feld: 'Melden Sie Daten über MQTT', wert: 'an',
+        warum: 'Damit hier sichtbar wird, ob das Gerät wirklich hängt.' },
+    ],
+    schritte: [
+      'Am Gerät die Weboberfläche öffnen (Port 8080) und anmelden.',
+      'Einstellungen → Geräteeinstellungen, dort zum Abschnitt MQTT.',
+      'Die Werte oben eintragen und speichern.',
+      'Die App neu laden — die MQTT-Felder greifen erst danach. Das sagt die App bei jedem Feld selbst dazu.',
+      'Zurück in dieser Übersicht prüfen, ob das Gerät sich meldet.',
+    ],
+    hinweis: 'Das Passwort steht nur hier. Es wird nirgends gespeichert — nur seine Prüfsumme. '
+           + 'Geht es verloren, legen Sie das Gerät neu an.',
+    steuerung: {
+      thema: `${ANZEIGE_TOPIC_PREFIX}/REQ/${mqtt_thema}/API`,
+      antwort: `${ANZEIGE_TOPIC_PREFIX}/RESP/${mqtt_thema}/API`,
+      beispiel: { operation: 'playlist/set', zoneName: 'Whole screen', playlist: 'Alarm' },
+    },
+  };
+}
+
+// GET /api/stations/admin/anzeigen
+router.get('/admin/anzeigen', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const r = await pool.query(
+    `SELECT id, name, standort, notiz, mqtt_thema, mqtt_benutzer, angelegt_von, angelegt_am
+       FROM anzeigegeraete ORDER BY name`);
+  res.json({ anzeigen: r.rows, topic_prefix: ANZEIGE_TOPIC_PREFIX });
+}));
+
+// POST /api/stations/admin/anzeigen  { name, standort?, notiz? }
+router.post('/admin/anzeigen', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const name = String(req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Name fehlt' });
+
+  // Aus dem Namen eine Kennung: Kleinbuchstaben, Bindestriche, sonst nichts.
+  // Sie wird zum MQTT-Thema — und das taucht in Topics auf, wo Leerzeichen und
+  // Umlaute nur Ärger machen.
+  const id = name.toLowerCase()
+    .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+  if (!id) return res.status(400).json({ error: 'Aus dem Namen lässt sich keine Kennung bilden' });
+
+  const vorhanden = await pool.query('SELECT 1 FROM anzeigegeraete WHERE id = $1', [id]);
+  if (vorhanden.rows.length) return res.status(409).json({ error: `„${id}" gibt es schon` });
+
+  const mqtt_benutzer = `slideshow-${id}`.slice(0, 64);
+  const passwort = 'svc_' + crypto.randomBytes(18).toString('base64url');
+  const hash = sha256(passwort);
+
+  // Der Zugang darf genau seinen eigenen Zweig — Befehle lesen, Antworten
+  // schreiben. 'display/#' braucht er NICHT: das ist ohnehin für jeden
+  // angemeldeten Client lesbar (Sonderregel im aclcheck).
+  await pool.query(
+    `INSERT INTO mqtt_service_users (username, password_hash, can_write, topic_filter, description)
+     VALUES ($1,$2,true,$3,$4)
+     ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash,
+       can_write = EXCLUDED.can_write, topic_filter = EXCLUDED.topic_filter`,
+    [mqtt_benutzer, hash, `${ANZEIGE_TOPIC_PREFIX}/#`, `Anzeigegerät ${name}`]);
+
+  await pool.query(
+    `INSERT INTO anzeigegeraete (id, name, standort, notiz, mqtt_thema, mqtt_benutzer, angelegt_von)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [id, name, String(req.body?.standort || '').slice(0, 200) || null,
+     String(req.body?.notiz || '').slice(0, 500) || null, id, mqtt_benutzer,
+     req.user?.email || req.user?.name || null]);
+
+  res.json({ id, name, ...anzeigeZettel({ mqtt_thema: id, mqtt_benutzer, passwort }) });
+}));
+
+// DELETE /api/stations/admin/anzeigen/:id — Gerät und sein MQTT-Zugang.
+router.delete('/admin/anzeigen/:id', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const r = await pool.query('DELETE FROM anzeigegeraete WHERE id = $1 RETURNING mqtt_benutzer', [req.params.id]);
+  if (!r.rows.length) return res.status(404).json({ error: 'Nicht gefunden' });
+  await pool.query('DELETE FROM mqtt_service_users WHERE username = $1', [r.rows[0].mqtt_benutzer]);
+  res.json({ ok: true });
+}));
+
 router.post('/admin/:id/block', authMiddleware, nurTechnik, a(async (req, res) => {
   await ensureSchema();
   const grund = (req.body?.grund || '').trim() || null;
