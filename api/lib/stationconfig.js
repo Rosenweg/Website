@@ -94,6 +94,25 @@ const ROLE_DEFAULTS = {
       url: 'https://display.rosenweg4303.ch',
       nach_sekunden: 120,
     },
+    // Programme. Die Positivliste selbst (apps.lokal, apps.schreibtisch,
+    // apps.favoriten) steht bewusst NICHT hier, sondern in der Station:
+    // roles/desktop/parts/60-programme.sh kennt ihre Vorgabe selbst, und
+    // zweimal gepflegt liefen die beiden Listen frueher oder spaeter
+    // auseinander. Ueber die overrides einer Station sind sie trotzdem
+    // setzbar — sie ueberschreiben dann die Vorgabe des Geraets.
+    //
+    // apps.gruppen ist das, was es nur hier gibt: Programme, die daran
+    // haengen, WER angemeldet ist. Schluessel ist der Name einer
+    // AD-Gruppe, Wert die Liste der Programmkennungen. Die Eintraege
+    // bleiben auf dem Geraet ausgeblendet und werden erst in der Sitzung
+    // eines Mitglieds sichtbar (Station: files/programme-fuer-gruppen.sh).
+    //
+    //   apps: { gruppen: { technik: ['gnome-terminal.desktop'] } }
+    //
+    // Gruppennamen mit Leerzeichen werden auf der Station nicht erkannt.
+    apps: {
+      gruppen: {},
+    },
     look: {
       gtk_theme: 'Mint-Y-Blue',
       icon_theme: 'Mint-Y',
