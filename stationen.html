@@ -468,13 +468,20 @@
             }
 
             try {
+                // Das OBJEKT übergeben, nicht die Zeichenkette: apiFetch setzt
+                // 'Content-Type: application/json' nur dann und serialisiert
+                // selbst. Mit einer fertigen Zeichenkette fehlt der Kopf,
+                // express parst nichts, und der Endpunkt sieht einen leeren
+                // Rumpf — hier kam dann „Nichts zu ändern", obwohl das
+                // Formular voll war. Am 5. August beim Umstellen auf VLAN 139
+                // genau so passiert.
                 await api(`/api/stations/admin/${encodeURIComponent(cfgStation)}`, {
                     method: 'PATCH',
-                    body: JSON.stringify({
+                    body: {
                         standort: document.getElementById('cfg-standort').value,
                         notiz: document.getElementById('cfg-notiz').value,
                         overrides,
-                    }),
+                    },
                 });
                 melden('Gespeichert. Die Station übernimmt es beim nächsten Update.', true);
                 await ladeDaten();
@@ -600,7 +607,10 @@
                 'Die Station bekommt keine Konfiguration mehr und lässt sich nicht weiter einrichten. Rückgängig machbar.',
                 'Sperren', 'bg-red-600 hover:bg-red-700',
                 async (grund) => tuUnd(`/api/stations/admin/${encodeURIComponent(id)}/block`,
-                    { method: 'POST', body: JSON.stringify({ grund }) }, `„${id}" gesperrt.`),
+                    // Objekt, nicht Zeichenkette — siehe cfgSpeichern. Bisher kam
+                    // der Grund gar nicht an: der Endpunkt las einen leeren
+                    // Rumpf und trug 'null' ein, ohne dass jemand etwas merkte.
+                    { method: 'POST', body: { grund } }, `„${id}" gesperrt.`),
                 true);
         }
 
