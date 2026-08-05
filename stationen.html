@@ -171,6 +171,35 @@
                     </div>
                 </div>
 
+                <div class="border-t pt-4" id="cfg-prog-block">
+                    <h4 class="font-medium text-gray-800">Programme</h4>
+                    <p class="text-sm text-gray-500 mb-3">Was im Menü erscheint. Was nicht angehakt ist, wird ausgeblendet — die Pakete bleiben installiert, sie sind nur nicht zu sehen.</p>
+                    <p id="cfg-prog-hinweis" class="text-sm text-gray-500"></p>
+
+                    <div id="cfg-prog-bereich" class="hidden space-y-4 mt-3">
+                        <div>
+                            <label class="flex items-center gap-2 text-sm font-medium text-gray-700">
+                                <input type="checkbox" id="cfg-prog-eigen" onchange="cfgProgUmschalten()">
+                                <span>Eigene Liste für dieses Gerät</span>
+                            </label>
+                            <p class="text-xs text-gray-500 ml-6">Ohne Haken gilt die Liste, die die Station selbst mitbringt.</p>
+                            <div id="cfg-prog-geraet" class="hidden mt-2">
+                                <input type="search" id="cfg-prog-suche" oninput="cfgProgFilter()" placeholder="Programm suchen…" class="w-full border rounded-lg px-3 py-1.5 text-sm">
+                                <div id="cfg-prog-liste" class="mt-2 max-h-48 overflow-y-auto border rounded-lg p-2 space-y-1"></div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-sm font-medium text-gray-700">Zusätzlich je Benutzergruppe</span>
+                                <button type="button" onclick="cfgGruppeHinzu()" class="text-sm text-blue-600 hover:text-blue-800">Gruppe hinzufügen</button>
+                            </div>
+                            <p class="text-xs text-gray-500">Diese Programme bleiben für alle ausgeblendet und erscheinen nur, solange jemand aus der Gruppe angemeldet ist.</p>
+                            <div id="cfg-prog-gruppen" class="mt-2 space-y-2"></div>
+                        </div>
+                    </div>
+                </div>
+
                 <details class="border-t pt-4">
                     <summary class="cursor-pointer text-sm font-medium text-gray-700">Weitere Einstellungen (JSON)</summary>
                     <p class="text-sm text-gray-500 my-2">Der vollständige Stand dieser Station. Wer hier etwas ändert, überschreibt die Felder oben.</p>
@@ -401,6 +430,7 @@
             document.getElementById('cfg-wlan-ssid').value = ov.network?.wifi?.ssid || '';
             document.getElementById('cfg-wlan-psk').value = '';
             cfgWlanUmschalten();
+            cfgProgAufbauen(s, ov);
 
             document.getElementById('cfg-dialog').classList.remove('hidden');
         }
@@ -421,6 +451,160 @@
             } else {
                 hinweis.textContent = 'Der Schlüssel kommt aus UniFi — hier ist nichts einzutippen.';
             }
+        }
+
+        // ─── Programme ─────────────────────────────────────────────────
+        // Die Auswahl kommt von der Station selbst: sie meldet bei jedem
+        // Einrichtungslauf, welche Programmeinträge auf ihr vorhanden sind.
+        // Ohne diese Meldung müsste hier jemand Kennungen wie
+        // 'org.gnome.Evince.desktop' abtippen, und ein Tippfehler fiele erst
+        // auf, wenn am Gerät ein Symbol fehlt.
+
+        let cfgProgramme = [];   // [{id, name}] — was die Station gemeldet hat
+        let cfgGruppen = [];     // [{name, ids}] — Arbeitsstand des Formulars
+        let cfgGruppenAlt = [];  // Gruppennamen, wie sie beim Öffnen dastanden
+        let cfgRolle = 'desktop';
+
+        function cfgProgAufbauen(s, ov) {
+            cfgRolle = s.role || 'desktop';
+            cfgProgramme = Array.isArray(s.programme) ? s.programme : [];
+
+            const block = document.getElementById('cfg-prog-block');
+            const hinweis = document.getElementById('cfg-prog-hinweis');
+            const bereich = document.getElementById('cfg-prog-bereich');
+
+            // Anzeigestationen haben kein Menü, in dem sich etwas auswählen
+            // liesse — dort wäre der ganze Abschnitt eine Falle.
+            block.classList.toggle('hidden', cfgRolle !== 'desktop');
+            if (cfgRolle !== 'desktop') return;
+
+            const apps = ov.roles?.[cfgRolle]?.apps || {};
+            cfgGruppen = Object.entries(apps.gruppen || {})
+                .map(([name, ids]) => ({ name, ids: Array.isArray(ids) ? ids : [] }));
+            // Merken, was beim Öffnen dastand. Beim Speichern führt die API die
+            // Zweige ZUSAMMEN — eine entfernte Gruppe verschwände sonst nicht,
+            // sie stünde einfach weiter da. Gelöscht wird nur, was ausdrücklich
+            // als null geschickt wird.
+            cfgGruppenAlt = Object.keys(apps.gruppen || {});
+
+            if (!cfgProgramme.length) {
+                hinweis.textContent = 'Diese Station hat noch nicht gemeldet, welche Programme auf ihr vorhanden sind. Das holt sie beim nächsten Einrichtungslauf nach — danach lässt sich hier auswählen.';
+                bereich.classList.add('hidden');
+                return;
+            }
+
+            const am = s.programme_gemeldet_am
+                ? ' — gemeldet am ' + new Date(s.programme_gemeldet_am).toLocaleDateString('de-CH')
+                : '';
+            hinweis.textContent = `${cfgProgramme.length} Programme auf dem Gerät${am}.`;
+            bereich.classList.remove('hidden');
+
+            document.getElementById('cfg-prog-eigen').checked = Array.isArray(apps.lokal);
+            document.getElementById('cfg-prog-suche').value = '';
+            document.getElementById('cfg-prog-liste').innerHTML =
+                cfgProgKaestchen(Array.isArray(apps.lokal) ? apps.lokal : []);
+            cfgGruppenBauen();
+            cfgProgUmschalten();
+        }
+
+        // Ausgewählte Einträge, die die Station NICHT gemeldet hat, kommen
+        // trotzdem in die Liste — sonst verschwänden sie beim nächsten
+        // Speichern still. Genau das wäre der Fall, wenn jemand ein Programm
+        // deinstalliert und die Auswahl danach einmal anfasst.
+        function cfgProgKaestchen(ausgewaehlt) {
+            const gewaehlt = new Set(ausgewaehlt || []);
+            const bekannt = new Set(cfgProgramme.map(p => p.id));
+            const alle = cfgProgramme.concat(
+                [...gewaehlt].filter(id => !bekannt.has(id)).map(id => ({ id, name: id, fehlt: true })));
+
+            return alle.map(p => `
+                <label class="flex items-center gap-2 text-sm py-0.5" data-suche="${escape((p.name + ' ' + p.id).toLowerCase())}">
+                    <input type="checkbox" value="${escape(p.id)}"${gewaehlt.has(p.id) ? ' checked' : ''}>
+                    <span class="truncate">${escape(p.name)}</span>
+                    ${p.fehlt
+                        ? '<span class="text-xs text-amber-600 whitespace-nowrap">nicht auf dem Gerät</span>'
+                        : `<span class="text-xs text-gray-400 truncate">${escape(p.id)}</span>`}
+                </label>`).join('');
+        }
+
+        function cfgProgUmschalten() {
+            const eigen = document.getElementById('cfg-prog-eigen').checked;
+            document.getElementById('cfg-prog-geraet').classList.toggle('hidden', !eigen);
+        }
+
+        function cfgProgFilter() {
+            const suche = document.getElementById('cfg-prog-suche').value.trim().toLowerCase();
+            document.querySelectorAll('#cfg-prog-liste label').forEach(el => {
+                el.classList.toggle('hidden', !!suche && !el.dataset.suche.includes(suche));
+            });
+        }
+
+        function cfgGruppenBauen() {
+            const wrap = document.getElementById('cfg-prog-gruppen');
+            if (!cfgGruppen.length) {
+                wrap.innerHTML = '<p class="text-xs text-gray-400">Keine Gruppe eingetragen.</p>';
+                return;
+            }
+            wrap.innerHTML = cfgGruppen.map((g, i) => `
+                <details class="border rounded-lg p-2" data-gruppe="${i}">
+                    <summary class="cursor-pointer text-sm">
+                        <span class="font-medium">${escape(g.name || '(ohne Namen)')}</span>
+                        <span class="text-xs text-gray-500 ml-2">${g.ids.length} Programme</span>
+                    </summary>
+                    <div class="mt-2 space-y-2">
+                        <label class="block text-sm">Gruppe im AD
+                            <input type="text" value="${escape(g.name)}" oninput="cfgGruppeName(${i}, this.value)"
+                                   class="mt-1 w-full border rounded-lg px-2 py-1 text-sm" placeholder="z. B. technik">
+                        </label>
+                        <div class="max-h-40 overflow-y-auto border rounded-lg p-2">${cfgProgKaestchen(g.ids)}</div>
+                        <button type="button" onclick="cfgGruppeWeg(${i})" class="text-xs text-red-600 hover:text-red-800">Gruppe entfernen</button>
+                    </div>
+                </details>`).join('');
+        }
+
+        // Beim Tippen NICHT neu zeichnen — sonst verlöre das Feld nach jedem
+        // Buchstaben den Fokus. Nur der Stand wird nachgeführt.
+        function cfgGruppeName(i, wert) {
+            if (cfgGruppen[i]) cfgGruppen[i].name = wert;
+        }
+
+        function cfgGruppeHinzu() {
+            cfgProgSammelnInStand();
+            cfgGruppen.push({ name: '', ids: [] });
+            cfgGruppenBauen();
+            const letzte = document.querySelector('#cfg-prog-gruppen details:last-of-type');
+            if (letzte) { letzte.open = true; letzte.querySelector('input[type=text]')?.focus(); }
+        }
+
+        function cfgGruppeWeg(i) {
+            cfgProgSammelnInStand();
+            cfgGruppen.splice(i, 1);
+            cfgGruppenBauen();
+        }
+
+        // Vor jedem Neuzeichnen die Haken aus dem DOM in den Stand holen —
+        // sonst wären sie weg, sobald jemand eine Gruppe hinzufügt.
+        function cfgProgSammelnInStand() {
+            document.querySelectorAll('#cfg-prog-gruppen [data-gruppe]').forEach(el => {
+                const i = Number(el.dataset.gruppe);
+                if (!cfgGruppen[i]) return;
+                cfgGruppen[i].ids = [...el.querySelectorAll('input[type=checkbox]:checked')].map(x => x.value);
+            });
+        }
+
+        function cfgProgSammeln() {
+            cfgProgSammelnInStand();
+            const eigen = document.getElementById('cfg-prog-eigen').checked;
+            const lokal = eigen
+                ? [...document.querySelectorAll('#cfg-prog-liste input:checked')].map(x => x.value)
+                : null;
+
+            const gruppen = {};
+            for (const g of cfgGruppen) {
+                const name = (g.name || '').trim();
+                if (name) gruppen[name] = g.ids;
+            }
+            return { lokal, gruppen };
         }
 
         function cfgSchliessen() {
@@ -465,6 +649,30 @@
                 overrides.network = { wifi: { netz: netzWahl, ssid: null, password: null } };
             } else {
                 overrides.network = null;
+            }
+
+            // Programme. null heisst „weg damit" — die API führt zusammen, ein
+            // weggelassener Schlüssel bliebe also stehen.
+            if (cfgRolle === 'desktop' && cfgProgramme.length) {
+                const { lokal, gruppen } = cfgProgSammeln();
+
+                let gruppenFeld = null;
+                if (Object.keys(gruppen).length) {
+                    gruppenFeld = { ...gruppen };
+                    // Was beim Öffnen dastand und jetzt fehlt, muss ausdrücklich
+                    // gelöscht werden.
+                    for (const alt of cfgGruppenAlt) {
+                        if (!(alt in gruppenFeld)) gruppenFeld[alt] = null;
+                    }
+                }
+
+                overrides.roles = { ...(overrides.roles || {}) };
+                overrides.roles[cfgRolle] = { ...(overrides.roles[cfgRolle] || {}) };
+                overrides.roles[cfgRolle].apps = {
+                    ...(overrides.roles[cfgRolle].apps || {}),
+                    lokal,
+                    gruppen: gruppenFeld,
+                };
             }
 
             try {

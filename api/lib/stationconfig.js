@@ -113,6 +113,14 @@ const ROLE_DEFAULTS = {
     apps: {
       gruppen: {},
     },
+    // Ton. Der Root der Station ist fluechtig, ein gespeicherter ALSA-Zustand
+    // ueberlebt also keinen Neustart — deshalb wird die Lautstaerke bei jedem
+    // Start gesetzt statt gemerkt. 'enabled: false' laesst die Station stumm,
+    // etwa im Treppenhaus.
+    ton: {
+      enabled: true,
+      startlautstaerke: 65,
+    },
     look: {
       gtk_theme: 'Mint-Y-Blue',
       icon_theme: 'Mint-Y',

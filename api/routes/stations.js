@@ -97,6 +97,13 @@ async function ensureSchema() {
     -- man ihr nichts schicken — sie fragt alle paar Minuten selbst nach.
     ALTER TABLE stations ADD COLUMN IF NOT EXISTS update_angefordert TIMESTAMPTZ;
     ALTER TABLE stations ADD COLUMN IF NOT EXISTS update_angefordert_von TEXT;
+    -- Welche Programme auf dem Geraet ueberhaupt vorhanden sind. Die Station
+    -- meldet das bei jedem Einrichtungslauf; die Verwaltung baut daraus die
+    -- Auswahl fuer die Programmliste. Ohne diese Meldung muesste dort jemand
+    -- Kennungen wie 'org.gnome.Evince.desktop' abtippen — und ein Tippfehler
+    -- faellt erst auf, wenn am Geraet ein Symbol fehlt.
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS programme JSONB;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS programme_gemeldet_am TIMESTAMPTZ;
     CREATE TABLE IF NOT EXISTS station_setup_sessions (
       token_hash   TEXT PRIMARY KEY,
       username     TEXT NOT NULL,
@@ -328,7 +335,8 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
     SELECT id, role, hostname, standort, notiz, status, sperr_grund, gesperrt_von,
            gesperrt_am, hardware, registered_by, registered_at,
            last_seen_at, last_seen_ip, last_state, revoked_at,
-           update_angefordert, update_angefordert_von, overrides
+           update_angefordert, update_angefordert_von, overrides,
+           programme, programme_gemeldet_am
       FROM stations
      ORDER BY (revoked_at IS NOT NULL), registered_at DESC`);
 
@@ -693,6 +701,34 @@ router.post('/register', setupSession, a(async (req, res) => {
 // Stationen nicht hinterherhinken, wenn die Website eine Seite dazubekommt.
 router.get('/:id/apps', stationAuth, a(async (req, res) => {
   res.json({ apps: stationApps() });
+}));
+
+// POST /api/stations/:id/programme  { programme: [{ id, name }, …] }
+//
+// Die Station meldet, welche Programmeinträge auf ihr überhaupt vorhanden
+// sind. Nur so kann die Verwaltung eine Auswahl anbieten statt eines
+// Textfelds — und nur so sieht man dort, dass ein Eintrag aus der Liste gar
+// nicht installiert ist.
+//
+// Gemeldet wird bei jedem Einrichtungslauf, also selten. Die Liste ersetzt
+// die vorige vollständig: ein deinstalliertes Programm soll verschwinden.
+router.post('/:id/programme', stationAuth, a(async (req, res) => {
+  const roh = Array.isArray(req.body?.programme) ? req.body.programme : null;
+  if (!roh) return res.status(400).json({ error: 'programme fehlt oder ist keine Liste' });
+
+  // Eine Station mit sehr vielen Paketen soll die Tabelle nicht sprengen, und
+  // ein Name ist ein Name — keine Romane.
+  const programme = roh
+    .filter((p) => p && typeof p.id === 'string' && /^[\w.+-]+\.desktop$/.test(p.id))
+    .slice(0, 600)
+    .map((p) => ({ id: p.id, name: String(p.name || p.id).slice(0, 120) }))
+    .sort((x, y) => x.name.localeCompare(y.name, 'de'));
+
+  await pool.query(
+    'UPDATE stations SET programme = $2, programme_gemeldet_am = NOW() WHERE id = $1',
+    [req.station.id, JSON.stringify(programme)],
+  );
+  res.json({ ok: true, anzahl: programme.length });
 }));
 
 // GET /api/stations/:id/os?kanal=main — was ist das Neueste?
