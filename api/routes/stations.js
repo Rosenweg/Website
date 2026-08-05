@@ -41,7 +41,7 @@ const { authMiddleware } = require('../middleware/auth');
 const { isTechnik, isPraesident } = require('../lib/groups');
 const { STATION_TYPES, buildConfig, missingSecrets, hausWlan } = require('../lib/stationconfig');
 const { wlanAufloesen, netznamen } = require('../lib/stationwlan');
-const { stationApps } = require('../lib/stationapps');
+const { stationApps, gruppenJeApp } = require('../lib/stationapps');
 const { telefonbuch } = require('../lib/telefonbuch');
 const stationos = require('../lib/stationos');
 
@@ -699,8 +699,11 @@ router.post('/register', setupSession, a(async (req, res) => {
 //
 // Die Rosenweg-Seiten als Programmliste. Abgeleitet aus js/nav.js, damit die
 // Stationen nicht hinterherhinken, wenn die Website eine Seite dazubekommt.
+// Je Eintrag steht dabei, WER ihn sehen darf. Die Station blendet danach ein,
+// was zur Gruppenzugehörigkeit der angemeldeten Person passt — bisher zeigte
+// sie jeder Person alles und überliess die Prüfung der Seite nach dem Klick.
 router.get('/:id/apps', stationAuth, a(async (req, res) => {
-  res.json({ apps: stationApps() });
+  res.json({ apps: await gruppenJeApp(pool) });
 }));
 
 // POST /api/stations/:id/programme  { programme: [{ id, name }, …] }

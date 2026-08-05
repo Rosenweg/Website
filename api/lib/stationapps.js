@@ -115,9 +115,17 @@ function stationApps() {
         url: `${SITE_URL}/${href.replace(/^\/+/, '')}`,
         gruppe: gruppe.title || 'Rosenweg',
         icon: gruppe.icon || '',
-        // Wer die Seite sehen darf — die Station zeigt sie allen, die
-        // Berechtigung prüft die Seite selbst nach der Anmeldung.
+        // Wer die Seite sehen darf. Die beiden Angaben in nav.js bedeuten
+        // Verschiedenes, deshalb steht dabei, WELCHE es war:
+        //
+        //   permAny: 'a,b,c'  -> Gruppen, auch wenn es nur eine ist
+        //   perm:    'seite'  -> ein benanntes Recht aus der Rechtetabelle
+        //
+        // Ohne diese Unterscheidung hielte 'permAny: wohnungsverwaltung' —
+        // eine einzelne Gruppe ohne Komma — für ein benanntes Recht, fände
+        // dazu nichts, und die Gruppe wäre still verloren.
         rechte: eintrag.perm || eintrag.permAny || null,
+        rechte_art: eintrag.perm ? 'seite' : (eintrag.permAny ? 'gruppen' : null),
       });
     }
   }
@@ -129,4 +137,71 @@ function stationApps() {
   return apps;
 }
 
-module.exports = { stationApps, SITE_URL };
+/**
+ * Zu jeder Seite die Gruppen, die sie sehen duerfen.
+ *
+ * Auf der Station entscheidet die Gruppenzugehoerigkeit, was im Menue
+ * erscheint — dieselbe Mechanik wie bei apps.gruppen. Dafuer muss die Frage
+ * umgedreht werden: die Website fragt „was darf dieser Benutzer", die Station
+ * braucht „wer darf diese Seite".
+ *
+ * Zwei Sorten Angabe stehen in nav.js:
+ *
+ *   permAny: 'ausschuss,technik,praesident'   -> die Gruppen direkt
+ *   perm:    'email-verteiler'                -> ein benanntes Recht, das in
+ *                                                der Tabelle 'permissions' an
+ *                                                Gruppen haengt
+ *
+ * Technik und Praesident duerfen laut getUserPermissions() alles — sie stehen
+ * deshalb ueberall dabei, auch wenn sie in der Tabelle nicht vorkommen.
+ *
+ * Was KEINE Angabe hat, ist fuer alle da und bekommt eine leere Liste.
+ *
+ * Achtung, bewusste Ungenauigkeit: die Sonderregel, nach der ein
+ * Ausschuss-Mitglied 'bewohner-verwaltung' fuer die EIGENE STWEG bekommt,
+ * laesst sich nicht auf „diese Gruppe darf" abbilden. Solche Seiten erscheinen
+ * auf der Station also fuer alle Ausschuss-Gruppen; die Seite selbst prueft
+ * danach weiterhin genau.
+ */
+const IMMER_ERLAUBT = ['technik', 'praesident', 'präsident'];
+
+async function gruppenJeApp(pool) {
+  const apps = stationApps();
+  const rechteSeiten = [...new Set(
+    apps.filter((a) => a.rechte_art === 'seite' && a.rechte).map((a) => String(a.rechte)),
+  )];
+
+  // Eine Abfrage fuer alle benannten Rechte statt einer je Seite.
+  const nachSeite = {};
+  if (rechteSeiten.length && pool) {
+    try {
+      const r = await pool.query(
+        'SELECT page, LOWER(group_name) AS gruppe FROM permissions WHERE page = ANY($1)',
+        [rechteSeiten],
+      );
+      for (const zeile of r.rows) {
+        (nachSeite[zeile.page] ||= []).push(zeile.gruppe);
+      }
+    } catch (e) {
+      // Lieber alle Seiten fuer alle sichtbar als eine Station ohne Menue.
+      console.error('[stationapps] Rechte nicht lesbar:', e.message);
+      return apps.map((a) => ({ ...a, gruppen: [] }));
+    }
+  }
+
+  return apps.map((a) => {
+    const roh = a.rechte ? String(a.rechte) : '';
+    if (!roh || !a.rechte_art) return { ...a, gruppen: [] };
+
+    const gruppen = a.rechte_art === 'gruppen'
+      ? roh.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+      : (nachSeite[roh] || []);
+
+    // Eine Seite mit benanntem Recht, das keiner Gruppe zugeordnet ist, waere
+    // sonst plötzlich fuer alle sichtbar. Dann lieber nur fuer die, die
+    // ohnehin alles duerfen.
+    return { ...a, gruppen: [...new Set([...gruppen, ...IMMER_ERLAUBT])] };
+  });
+}
+
+module.exports = { stationApps, gruppenJeApp, SITE_URL };
