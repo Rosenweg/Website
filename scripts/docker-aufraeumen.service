@@ -1,0 +1,9 @@
+[Unit]
+Description=Namenlose Docker-Images wegräumen
+Documentation=file:/usr/local/sbin/docker-images-aufraeumen.sh
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/docker-images-aufraeumen.sh
+Nice=10
+IOSchedulingClass=idle

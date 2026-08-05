@@ -1,0 +1,13 @@
+[Unit]
+Description=Namenlose Docker-Images wöchentlich wegräumen
+
+[Timer]
+# Sonntagnacht, wenn niemand arbeitet. Persistent=true holt den Lauf nach,
+# falls der Container zu der Zeit stand — sonst fiele genau der Lauf aus, den
+# man nach einer längeren Störung am nötigsten hätte.
+OnCalendar=Sun *-*-* 04:15:00
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
