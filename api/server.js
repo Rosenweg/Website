@@ -15053,9 +15053,18 @@ function notfallAktiv(d) {
 // Bei einem Notfall schalten die Tafeln auf ihre Alarm-Wiedergabeliste, bei der
 // Entwarnung zurueck auf den Normallauf.
 //
+// Die Liste heisst auf jedem Geraet "Alarm" — eine Vereinbarung, die auf dem
+// Einrichtungszettel steht. Damit braucht die API kein Feld je Geraet.
+//
+// "playlistName" nimmt den Namen, "playlist" verlangt eine Zahl; die Hersteller-
+// doku nennt nur die zweite Form. Am Geraet gemessen: mit einem Namen in
+// "playlist" antwortet die App NumberFormatException, "playlistName" quittiert
+// mit success. Ohne zoneName nimmt sie die Hauptzone des Layouts.
+//
 // Nur beim Wechsel: display/emergency ist retained und kommt auch beim
 // Verbinden noch einmal — ohne diese Sperre schickte jeder Neustart der API
 // den Tafeln erneut einen Alarm.
+const ALARM_LISTE = 'Alarm';
 let _alarmStand = null;
 
 async function tafelnAlarmSchalten(aktiv) {
@@ -15063,17 +15072,11 @@ async function tafelnAlarmSchalten(aktiv) {
   _alarmStand = aktiv;
   const c = apiMqttPublishClient();
   if (!c) return;
-  // Ohne Nummer wird nicht geschaltet — die Tafel wuesste nicht, wohin.
-  const r = await pool.query(
-    'SELECT id, alarm_playlist FROM anzeigegeraete WHERE alarm_playlist IS NOT NULL');
-  for (const g of r.rows) {
-    // Ohne zoneName nimmt die App die Hauptzone des Layouts. Das erspart uns
-    // ein weiteres Feld je Geraet, das ohnehin fast immer gleich hiesse.
-    const befehl = aktiv
-      ? { operation: 'playlist/set', parameters: { playlist: Number(g.alarm_playlist) } }
-      : { operation: 'playlist/clear' };
-    c.publish(`SLIDESHOW/REQ/${g.id}/API`, JSON.stringify(befehl));
-  }
+  const r = await pool.query('SELECT id FROM anzeigegeraete');
+  const befehl = JSON.stringify(aktiv
+    ? { operation: 'playlist/set', parameters: { playlistName: ALARM_LISTE } }
+    : { operation: 'playlist/clear' });
+  for (const g of r.rows) c.publish(`SLIDESHOW/REQ/${g.id}/API`, befehl);
   if (r.rows.length) console.log(`[tafeln] Alarm ${aktiv ? 'an' : 'aus'} an ${r.rows.length} Gerät(e)`);
 }
 

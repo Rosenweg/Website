@@ -100,12 +100,57 @@ bei den Feldnamen statt bei der Verschachtelung:
 
 ```json
 { "operation": "playlist/set",
-  "parameters": { "zoneName": "Hauptpanel", "playlistName": "Alarm" } }
+  "parameters": { "playlistName": "Alarm" } }
 ```
+
+`zoneName` darf fehlen — dann nimmt die App die Hauptzone des Layouts. Das
+erspart ein weiteres Feld je Gerät, das ohnehin fast immer gleich hiesse.
+
+**Die Wiedergabeliste heisst `playlistName`, nicht `playlist`.** Die Hersteller-
+doku kennt nur `{"playlist": 1}` — eine Zahl. Beide Formen gibt es, und mit
+einem Namen im falschen Feld antwortet die App:
+
+```json
+{"command":"playlist/set","errorCode":"INTERNAL_SERVER_ERROR",
+ "errorMessage":"java.lang.NumberFormatException: For input string: \"Alarm\"",
+ "success":false}
+```
+
+Wir nehmen den Namen: die Liste heisst auf **jedem** Gerät `Alarm`, so steht es
+auf dem Einrichtungszettel. Damit braucht die API kein Feld je Gerät, und
+niemand muss am Gerät eine Nummer vergeben — die Spalte „Nummer" der
+Wiedergabelisten ist auf allen Geräten leer.
 
 Erprobt und bestätigt: `zones` (liefert die Zonennamen), `deviceInfo` (Modell,
 Android-Version, laufendes Layout, Temperatur, Lautstärke), `playlist/set`,
-`playlist/clear`, `showSentHtml`.
+`playlist/clear`, `showSentHtml`, `synchronize`.
+
+### `synchronize` — die Adresse aufs Gerät bringen
+
+Damit legt die API die Anzeigeadresse selbst auf die Tafel, statt sie jemanden
+abtippen zu lassen. Sie steckt in einem ZIP, das das Gerät sich holt:
+
+```json
+{ "operation": "synchronize",
+  "parameters": { "url": "http://100.64.2.52:3000/api/display/geraetedatei/<id>.zip",
+                  "method": "GET", "target": "file.zip", "clearFolder": false } }
+```
+
+Drei Dinge, die einen Vormittag gekostet haben:
+
+* **`method` und `target` sind nicht optional.** Ohne sie meldet das Gerät 404,
+  auch wenn die Adresse stimmt und ein `curl` vom selben Netz 200 liefert. Der
+  Fehler sieht nach einem Serverproblem aus und ist keines.
+* **`target` ist der Name der geladenen ZIP, nicht ihr Ziel.** Wohin entpackt
+  wird, entscheidet allein die Struktur *im* Archiv. `"target": "rosenweg/file.zip"`
+  quittiert die App mit `success`, die Datei landet trotzdem nicht dort.
+* **Eine ersetzte Datei, keine zusätzliche.** Der Normaldurchlauf spielt jede
+  Datei des Ordners einmal. Eine zweite Datei mit derselben Adresse heisst: die
+  Anzeigeseite läuft zweimal pro Runde.
+
+Alles von uns liegt im Ordner `rosenweg` — auf den Tafeln läuft auch Fremdes,
+und dessen Dateien fasst niemand an. Das Archiv enthält genau
+`rosenweg/alarm.url`; die Alarm-Wiedergabeliste spielt diesen Ordner.
 
 **`playlist/clear` bringt das Gerät zu seinem eigenen Zeitplan zurück.** Die
 API muss den Namen der normalen Wiedergabeliste also nicht kennen — ein
