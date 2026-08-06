@@ -33,10 +33,21 @@
     .announce .body { flex: 1 1 auto; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; font-weight: 600; line-height: 1.12; text-shadow: 0 3px 18px rgba(0,0,0,.4); word-break: break-word; overflow-wrap: anywhere; }
 
     /* ===== Aushang (PDF) =====
-       Der Rahmen bekommt fast die ganze Fläche; weiss hinterlegt, weil ein
-       PDF fast immer weissen Grund hat und sonst ein grauer Rand entstünde. */
+       Ein A4-Hochformat auf einem Querformat-Schirm laesst links und rechts
+       zwangslaeufig Rand. Statt ihn grau zu lassen, traegt die Kopfzeile dort
+       Marke und Uhr — dieselben Angaben wie im Ruhebild, nur schmal.
+       Der Rahmen selbst ist weiss, weil ein PDF fast immer weissen Grund hat
+       und sonst ein grauer Saum entstuende. */
+    .announce-pdf { padding: 2vmin 2vmin 1.5vmin; }
+    .pdf-kopf { width: 100%; display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5vh; }
+    .pdf-kopf .marke { display: flex; align-items: center; gap: .8vw; opacity: .92; }
+    .pdf-kopf .marke img { height: clamp(22px, 3.6vh, 46px); }
+    .pdf-kopf .marke .tt { font-weight: 700; font-size: clamp(.9rem, 1.9vw, 1.6rem); line-height: 1.1; }
+    .pdf-kopf .marke .ss { font-size: clamp(.6rem, 1vw, .9rem); opacity: .65; }
+    .pdf-kopf .uhr { font-size: clamp(1.2rem, 3vw, 2.6rem); font-weight: 300; font-variant-numeric: tabular-nums; opacity: .9; }
+    .pdf-kopf .uhr .dat { display: block; font-size: .38em; opacity: .6; text-align: right; letter-spacing: .04em; }
     .pdf { flex: 1 1 auto; width: 100%; min-height: 0; border: 0; border-radius: 1vmin; background: #fff; }
-    .pdf-titel { font-size: clamp(.9rem, 2.2vw, 1.8rem); font-weight: 600; margin-bottom: 2vh; opacity: .85; }
+    .pdf-titel { font-size: clamp(.85rem, 1.9vw, 1.5rem); font-weight: 600; margin-bottom: 1vh; opacity: .85; }
     .emergency-scr .pdf-titel { color: #fff; }
 
     /* ===== Notfall (Vollbild rot) ===== */
@@ -203,7 +214,14 @@
     // sonst steht auf einer Anzeige im Treppenhaus ein Druckknopf. Die kleine
     // Seitenzahl in der Ecke bleibt trotzdem — die lässt sich nicht abschalten.
     const inner = pdf
-      ? `${text ? `<div class="pdf-titel">${esc(text)}</div>` : ''}
+      ? `<div class="pdf-kopf">
+           <div class="marke">
+             <img src="/logo-rosenweg.png" alt="" onerror="this.style.display='none'">
+             <div><div class="tt">Rosenweg</div><div class="ss">Kaiseraugst</div></div>
+           </div>
+           <div class="uhr" id="pdf-uhr"></div>
+         </div>
+         ${text ? `<div class="pdf-titel">${esc(text)}</div>` : ''}
          <iframe class="pdf" src="${esc(pdf)}#toolbar=0&navpanes=0&scrollbar=0&view=Fit"
                  title="Aushang"></iframe>`
       : `<div class="body"><span class="fit" id="fittext">${esc(text)}</span></div>`;
@@ -219,8 +237,8 @@
     } else {
       document.body.classList.remove('emergency');
       $('screen').innerHTML =
-        `<div class="announce">
-           <div class="kick">Ankündigung</div>
+        `<div class="announce${pdf ? ' announce-pdf' : ''}">
+           ${pdf ? '' : '<div class="kick">Ankündigung</div>'}
            ${inner}
          </div>`;
     }
@@ -228,6 +246,18 @@
     // ziehen — und der Aufruf würde über ein Element stolpern, das gar nicht
     // da ist.
     if (!pdf) fitText();
+  }
+
+  // Die Uhr in der Kopfzeile eines Aushangs. Getrennt vom Ruhebild, weil dort
+  // die ganze Seite neu gezeichnet wird — hier soll nur die Zeit weiterlaufen,
+  // sonst lädt das eingebettete PDF jede Sekunde neu.
+  function pdfUhr() {
+    const el = $('pdf-uhr');
+    if (!el) return;
+    const n = new Date();
+    const p = (x) => String(x).padStart(2, '0');
+    el.innerHTML = `${p(n.getHours())}:${p(n.getMinutes())}`
+      + `<span class="dat">${WD[n.getDay()]}, ${n.getDate()}. ${MO[n.getMonth()]}</span>`;
   }
 
   const WD = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
@@ -354,7 +384,11 @@
     // Bei Größenänderung/Orientierung Text neu einpassen (immer komplett, max. Größe).
     window.addEventListener('resize', () => { if (activeChannel()) fitText(); });
     // Uhr-Tick + Alter aktualisieren
-    setInterval(() => { if (shown.kind === 'idle') renderIdle(); updateAge(); }, 1000);
+    setInterval(() => {
+      if (shown.kind === 'idle') renderIdle();
+      pdfUhr();          // die Uhr in der Kopfzeile eines Aushangs
+      updateAge();
+    }, 1000);
     // Frische-Indikator regelmäßig prüfen (auch ohne neue Nachrichten -> stale erkennen)
     setInterval(refreshStat, 5000);
   });
