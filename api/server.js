@@ -41,6 +41,7 @@ app.use(cors({
 // pool, energyPool, auditCtx -> lib/db.js. Frueh geladen, pool.query wird dort
 // fuer Audit gewrappt. initDB() bleibt unten im Bootstrap und nutzt diesen pool.
 const { pool, energyPool, auditCtx } = require('./lib/db');
+const { haeuserAusAuswahl } = require('./lib/haeuser');
 
 // Mail (transporter, loggedSendMail, isAllowlistedSender, generateOTP, EMAIL_ALLOWLIST,
 // MAIL_FROM, SMTP2GO_*) -> lib/mail.js
@@ -14834,13 +14835,13 @@ async function ankuendigungenVeroeffentlichen() {
   const c = apiMqttPublishClient();
   if (!c) return;
   const r = await pool.query(
-    `SELECT id, text, pdf, scroll, stwegs, von, erstellt
+    `SELECT id, text, pdf, scroll, haeuser, von, erstellt
        FROM display_ankuendigungen
       WHERE aktiv AND (bis IS NULL OR bis > NOW())
       ORDER BY erstellt`);
   const liste = r.rows.map((z) => ({
     id: Number(z.id), text: z.text || '', pdf: z.pdf || '', scroll: !!z.scroll,
-    stwegs: z.stwegs || [], by: z.von || '', ts: new Date(z.erstellt).getTime(),
+    haeuser: z.haeuser || [], by: z.von || '', ts: new Date(z.erstellt).getTime(),
   }));
   c.publish('display/announcements', JSON.stringify(liste), { qos: 1, retain: true });
 
@@ -14856,28 +14857,26 @@ async function ankuendigungenVeroeffentlichen() {
 app.get('/api/display/ankuendigungen', authMiddleware, requireMqttTechnik, async (req, res) => {
   try {
     const r = await pool.query(
-      `SELECT id, text, pdf, scroll, stwegs, aktiv, von, erstellt, bis
+      `SELECT id, text, pdf, scroll, haeuser, aktiv, von, erstellt, bis
          FROM display_ankuendigungen ORDER BY aktiv DESC, erstellt DESC LIMIT 100`);
     res.json({ ankuendigungen: r.rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST /api/display/ankuendigungen  { text, pdf, scroll, stwegs, bis }
+// POST /api/display/ankuendigungen  { text, pdf, scroll, stwegs, haeuser, bis }
 app.post('/api/display/ankuendigungen', authMiddleware, requireMqttTechnik, async (req, res) => {
   try {
     const text = String(req.body?.text || '').slice(0, 2000);
     const pdfRoh = String(req.body?.pdf || '');
     const pdf = /^\/api\/display\/pdf\/[\w.%\- ]+\.pdf$/i.test(pdfRoh) ? pdfRoh : '';
     if (!text.trim() && !pdf) return res.status(400).json({ error: 'Text oder PDF nötig' });
-    // Nur die Häuser, die es gibt. Leer heisst: alle.
-    const stwegs = Array.isArray(req.body?.stwegs)
-      ? [...new Set(req.body.stwegs.map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 8))]
-      : [];
+    // Beide Achsen der Bedienung zu einer Hausliste. Leer heisst: alle.
+    const haeuser = haeuserAusAuswahl({ stwegs: req.body?.stwegs, haeuser: req.body?.haeuser });
     const bis = req.body?.bis ? new Date(req.body.bis) : null;
     const r = await pool.query(
-      `INSERT INTO display_ankuendigungen (text, pdf, scroll, stwegs, von, bis)
+      `INSERT INTO display_ankuendigungen (text, pdf, scroll, haeuser, von, bis)
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-      [text, pdf, !!req.body?.scroll, stwegs,
+      [text, pdf, !!req.body?.scroll, haeuser,
        req.user?.name || req.user?.email || 'admin',
        bis && !isNaN(bis) ? bis : null]);
     const liste = await ankuendigungenVeroeffentlichen();
@@ -15016,12 +15015,19 @@ pool.query(`CREATE TABLE IF NOT EXISTS display_ankuendigungen (
   text       TEXT NOT NULL DEFAULT '',
   pdf        TEXT NOT NULL DEFAULT '',
   scroll     BOOLEAN NOT NULL DEFAULT false,
-  stwegs     INTEGER[] NOT NULL DEFAULT '{}',
+  haeuser    INTEGER[] NOT NULL DEFAULT '{}',
   aktiv      BOOLEAN NOT NULL DEFAULT true,
   von        TEXT,
   erstellt   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   bis        TIMESTAMPTZ
-)`).catch(e => console.error('[display] Tabelle:', e.message));
+)`).then(() => pool.query(`
+  -- Die erste Fassung hiess 'stwegs'. Umbenannt, sobald klar war, dass die
+  -- Hausnummer das Genauere ist: aus ihr folgt das STWEG, umgekehrt nicht.
+  -- Zum Zeitpunkt der Umstellung war die Tabelle leer, deshalb genuegt das
+  -- Anlegen der neuen Spalte — es geht nichts verloren.
+  ALTER TABLE display_ankuendigungen ADD COLUMN IF NOT EXISTS haeuser INTEGER[] NOT NULL DEFAULT '{}';
+  ALTER TABLE display_ankuendigungen DROP COLUMN IF EXISTS stwegs;
+`)).catch(e => console.error('[display] Tabelle:', e.message));
 
 // ─── Optionale Module pro STWEG ─────────────────────────────────────
 pool.query(`CREATE TABLE IF NOT EXISTS stweg_modules (

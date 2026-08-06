@@ -89,12 +89,13 @@
 
   // ===== Zustand =====
   // In welchem Haus hängt diese Anzeige? Kommt aus der Adresse:
-  //   display.rosenweg4303.ch?stweg=3
-  // Ohne Angabe zeigt sie alles — so verhalten sich die Tafeln, die es schon
-  // gab, unverändert weiter.
-  const MEIN_STWEG = (() => {
-    const n = parseInt(new URLSearchParams(location.search).get('stweg'), 10);
-    return Number.isInteger(n) && n >= 1 && n <= 8 ? n : null;
+  //   display.rosenweg4303.ch?haus=14
+  // Die API hängt das selbst an, aus dem Haus der Station beziehungsweise des
+  // Anzeigegeräts. Ohne Angabe zeigt die Seite alles — so verhalten sich
+  // Tafeln, die es schon gab, unverändert weiter.
+  const MEIN_HAUS = (() => {
+    const n = parseInt(new URLSearchParams(location.search).get('haus'), 10);
+    return Number.isInteger(n) && n > 0 ? n : null;
   })();
 
   const state = {
@@ -116,12 +117,12 @@
   const hatInhalt = (d) => !!(d && d.active && ((d.text || '').trim() || (d.pdf || '').trim()));
 
   // Was diese Anzeige zeigen darf: alles ohne Hausangabe, plus was für ihr
-  // eigenes Haus bestimmt ist. Eine Anzeige ohne ?stweg zeigt alles.
+  // eigenes Haus bestimmt ist. Eine Anzeige ohne ?haus zeigt alles.
   function meineAnkuendigungen() {
     return (state.announcements || []).filter(a =>
       (a.text || '').trim() || (a.pdf || '').trim()
     ).filter(a =>
-      !MEIN_STWEG || !a.stwegs || !a.stwegs.length || a.stwegs.includes(MEIN_STWEG)
+      !MEIN_HAUS || !a.haeuser || !a.haeuser.length || a.haeuser.includes(MEIN_HAUS)
     );
   }
 

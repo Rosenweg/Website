@@ -144,8 +144,17 @@
                     </div>
                     <div>
                         <span class="block text-sm font-medium text-gray-700">Betrifft</span>
-                        <p class="text-xs text-gray-500 mb-1">Nichts angehakt heisst: alle Anzeigen. Sonst nur die, die im gewählten Haus hängen.</p>
-                        <div id="ank-stwegs" class="flex flex-wrap gap-x-4 gap-y-1"></div>
+                        <p class="text-xs text-gray-500 mb-1">Nichts angehakt heisst: alle Anzeigen. Ein STWEG hakt seine Häuser mit an; einzelne Häuser lassen sich zusätzlich wählen.</p>
+                        <div class="space-y-2">
+                            <div>
+                                <span class="block text-xs uppercase tracking-wide text-gray-400 mb-0.5">STWEG</span>
+                                <div id="ank-stwegs" class="flex flex-wrap gap-x-4 gap-y-1"></div>
+                            </div>
+                            <div>
+                                <span class="block text-xs uppercase tracking-wide text-gray-400 mb-0.5">Häuser</span>
+                                <div id="ank-haeuser" class="flex flex-wrap gap-x-4 gap-y-1"></div>
+                            </div>
+                        </div>
                     </div>
                     <label class="flex items-center gap-2 text-sm text-gray-600">
                         <input id="disp-lauf" type="checkbox"> Laufschrift (scrollen)
@@ -238,6 +247,9 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <label class="block"><span class="text-sm font-medium text-gray-700">Standort</span>
                         <input id="cfg-standort" type="text" class="mt-1 w-full border rounded-lg px-3 py-2" placeholder="z. B. Eingang Rosenweg 9"></label>
+                    <label class="block"><span class="text-sm font-medium text-gray-700">Haus</span>
+                        <select id="cfg-haus" class="mt-1 w-full border rounded-lg px-3 py-2"></select>
+                        <span class="text-xs text-gray-500">Bestimmt, welche Ankündigungen diese Station zeigt.</span></label>
                     <label class="block"><span class="text-sm font-medium text-gray-700">Kanal</span>
                         <select id="cfg-kanal" class="mt-1 w-full border rounded-lg px-3 py-2">
                             <option value="">Hausvorgabe (main)</option>
@@ -506,6 +518,10 @@
             document.getElementById('cfg-standort').value = s.standort || '';
             document.getElementById('cfg-notiz').value = s.notiz || '';
             document.getElementById('cfg-kanal').value = ov.updates?.channel || '';
+            const hausWahl = document.getElementById('cfg-haus');
+            hausWahl.innerHTML = '<option value="">— kein bestimmtes Haus —</option>'
+                + HAEUSER.map(n => `<option value="${n}">Rosenweg ${n}</option>`).join('');
+            hausWahl.value = s.haus ? String(s.haus) : '';
             document.getElementById('cfg-json').value = JSON.stringify(ov, null, 2);
             document.getElementById('cfg-meldung').textContent = '';
 
@@ -560,17 +576,35 @@
         // Der Notfall bleibt der alte Einzelkanal — im Alarmfall zählt
         // Einfachheit, nicht Auswahl.
 
-        // Die Häuser, wie sie api/lib/groups.js führt. 8 ist die MEG.
-        const STWEGS = [
-            [1, 'STWEG 1'], [2, 'STWEG 2'], [3, 'STWEG 3 · R9'], [4, 'STWEG 4'],
-            [5, 'STWEG 5'], [6, 'STWEG 6 · R1'], [7, 'STWEG 7'], [8, 'MEG'],
-        ];
+        // Dieselbe Zuordnung wie api/lib/haeuser.js. Sie steht hier ein zweites
+        // Mal, damit ein Haken auf ein STWEG sofort seine Häuser mitmarkiert —
+        // ohne Rückfrage bei der API. Massgeblich bleibt die Seite der API: sie
+        // löst die Auswahl beim Speichern noch einmal selbst auf.
+        const STWEG_HAEUSER = {
+            1: [17, 18], 2: [13, 14, 16], 3: [9], 4: [10, 12],
+            5: [5, 6, 8], 6: [1], 7: [2, 4], 8: [],
+        };
+        const HAEUSER = [1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, 16, 17, 18];
 
         function ankStwegsZeichnen() {
-            document.getElementById('ank-stwegs').innerHTML = STWEGS.map(([nr, name]) =>
+            document.getElementById('ank-stwegs').innerHTML = Object.entries(STWEG_HAEUSER).map(([nr, hs]) =>
                 `<label class="flex items-center gap-1.5 text-sm text-gray-700">
-                    <input type="checkbox" class="ank-stweg" value="${nr}"> ${escape(name)}
+                    <input type="checkbox" class="ank-stweg" value="${nr}" onchange="ankStwegGewaehlt(this)">
+                    STWEG ${nr}${hs.length ? `<span class="text-xs text-gray-400">(${hs.join(', ')})</span>` : '<span class="text-xs text-gray-400">MEG</span>'}
                  </label>`).join('');
+            document.getElementById('ank-haeuser').innerHTML = HAEUSER.map(n =>
+                `<label class="flex items-center gap-1.5 text-sm text-gray-700">
+                    <input type="checkbox" class="ank-haus" value="${n}"> Nr. ${n}
+                 </label>`).join('');
+        }
+
+        // Ein STWEG hakt seine Häuser mit an beziehungsweise wieder ab. Gesendet
+        // werden am Ende beide Listen; die API führt sie zusammen.
+        function ankStwegGewaehlt(el) {
+            for (const n of STWEG_HAEUSER[el.value] || []) {
+                const k = document.querySelector(`.ank-haus[value="${n}"]`);
+                if (k) k.checked = el.checked;
+            }
         }
 
         function ankAlter(ts) {
@@ -594,8 +628,8 @@
                 return;
             }
             el.innerHTML = laufend.map(a => {
-                const wo = (a.stwegs && a.stwegs.length)
-                    ? a.stwegs.map(n => (STWEGS.find(s => s[0] === n) || [n, 'STWEG ' + n])[1]).join(', ')
+                const wo = (a.haeuser && a.haeuser.length)
+                    ? 'Rosenweg ' + a.haeuser.join(', ')
                     : 'alle Anzeigen';
                 const was = (a.text || '').trim()
                     ? escape(a.text.slice(0, 160))
@@ -622,14 +656,15 @@
             const text = document.getElementById('ank-text').value;
             if (!text.trim() && !dispPdfUrl) return melden('Text oder PDF nötig.', false);
             const stwegs = [...document.querySelectorAll('.ank-stweg:checked')].map(i => Number(i.value));
+            const haeuser = [...document.querySelectorAll('.ank-haus:checked')].map(i => Number(i.value));
             melden('sende…', true);
             try {
                 await api('/api/display/ankuendigungen', {
                     method: 'POST',
-                    body: { text, pdf: dispPdfUrl, stwegs, scroll: document.getElementById('disp-lauf').checked },
+                    body: { text, pdf: dispPdfUrl, stwegs, haeuser, scroll: document.getElementById('disp-lauf').checked },
                 });
                 document.getElementById('ank-text').value = '';
-                document.querySelectorAll('.ank-stweg:checked').forEach(i => { i.checked = false; });
+                document.querySelectorAll('.ank-stweg:checked, .ank-haus:checked').forEach(i => { i.checked = false; });
                 dispPdfEntfernen();
                 melden('Gesendet.', true);
                 await ladeAnkuendigungen();
@@ -756,7 +791,7 @@
             koerper.innerHTML = anzeigen.map(a => `
                 <tr class="border-t">
                     <td class="py-3 px-6 font-medium text-gray-800">${escape(a.name)}</td>
-                    <td class="py-3 px-6 text-gray-600">${escape(a.standort || '—')}</td>
+                    <td class="py-3 px-6 text-gray-600">${escape(a.standort || '—')}${a.haus ? ` <span class="text-xs text-gray-400">(Rosenweg ${a.haus})</span>` : ''}</td>
                     <td class="py-3 px-6 font-mono text-xs text-gray-600">${escape(a.mqtt_thema)}</td>
                     <td class="py-3 px-6 text-gray-500">${a.angelegt_am ? new Date(a.angelegt_am).toLocaleDateString('de-CH') : ''}</td>
                     <td class="py-3 px-6 whitespace-nowrap">
@@ -770,10 +805,12 @@
             if (name === null) return;
             if (!name.trim()) return;
             const standort = prompt('Standort (darf leer bleiben)') || '';
+            const haus = prompt('Hausnummer\n\nBestimmt, welche Ankündigungen das Gerät zeigt.\nMöglich: ' + HAEUSER.join(', ') + '\nLeer lassen: zeigt alle.') || '';
+            if (haus.trim() && !HAEUSER.includes(Number(haus))) return alert('Unbekannte Hausnummer: ' + haus);
             try {
                 const zettel = await api('/api/stations/admin/anzeigen', {
                     method: 'POST',
-                    body: { name: name.trim(), standort: standort.trim() },
+                    body: { name: name.trim(), standort: standort.trim(), haus: haus.trim() ? Number(haus) : null },
                 });
                 zettelZeigen(zettel);
                 await ladeAnzeigen();
@@ -805,6 +842,11 @@
                 <div>
                     <h4 class="font-medium text-gray-800 mb-2">Einstellungen → Geräteeinstellungen → MQTT</h4>
                     <table class="w-full text-sm"><tbody>${z.felder.map(feldZeile).join('')}</tbody></table>
+                </div>
+                <div>
+                    <h4 class="font-medium text-gray-800 mb-2">Anzuzeigende Adresse</h4>
+                    <p class="text-sm text-gray-600 mb-1">${escape(z.hinweisAdresse || '')}</p>
+                    <table class="w-full text-sm"><tbody>${feldZeile({ feld: 'Adresse', wert: z.anzeigeAdresse })}</tbody></table>
                 </div>
                 <div>
                     <h4 class="font-medium text-gray-800 mb-2">Schritte</h4>
@@ -1084,6 +1126,7 @@
                     body: {
                         standort: document.getElementById('cfg-standort').value,
                         notiz: document.getElementById('cfg-notiz').value,
+                        haus: document.getElementById('cfg-haus').value || null,
                         overrides,
                     },
                 });
