@@ -139,6 +139,14 @@ async function ensureSchema() {
     -- auf jedem Geraet "Alarm" heisst und "playlistName" den Namen nimmt. Nie
     -- befuellt, darum weg statt ungenutzt stehen zu lassen.
     ALTER TABLE anzeigegeraete DROP COLUMN IF EXISTS alarm_playlist;
+    -- In welcher Zone des Bildschirmlayouts der Alarm laufen soll.
+    --
+    -- Der Name der Wiedergabeliste ist ueberall gleich ("Alarm"), die Zone
+    -- nicht: der Fernseher hat nur eine, das Tablet im Eingang drei
+    -- (Hauptpanel, R92OG Kamera, R9EG Kamera). Ohne Angabe nimmt die App die
+    -- Hauptzone ihres Layouts — beim Tablet ist das nicht die richtige, der
+    -- Befehl verpuffte wirkungslos. Leer heisst: ohne Zonenangabe senden.
+    ALTER TABLE anzeigegeraete ADD COLUMN IF NOT EXISTS alarm_zone TEXT;
     CREATE TABLE IF NOT EXISTS station_setup_sessions (
       token_hash   TEXT PRIMARY KEY,
       username     TEXT NOT NULL,
@@ -636,7 +644,8 @@ function anzeigeZettel({ mqtt_thema, mqtt_benutzer, passwort, haus }) {
 router.get('/admin/anzeigen', authMiddleware, nurTechnik, a(async (req, res) => {
   await ensureSchema();
   const r = await pool.query(
-    `SELECT id, name, standort, notiz, mqtt_thema, mqtt_benutzer, haus, angelegt_von, angelegt_am
+    `SELECT id, name, standort, notiz, mqtt_thema, mqtt_benutzer, haus, alarm_zone,
+            angelegt_von, angelegt_am
        FROM anzeigegeraete ORDER BY name`);
   res.json({ anzeigen: r.rows, topic_prefix: ANZEIGE_TOPIC_PREFIX });
 }));
@@ -710,6 +719,9 @@ router.patch('/admin/anzeigen/:id', authMiddleware, nurTechnik, a(async (req, re
   if (req.body?.haus !== undefined) {
     hausNeu = HAEUSER.includes(Number(req.body.haus)) ? Number(req.body.haus) : null;
     setze('haus', hausNeu);
+  }
+  if (req.body?.alarm_zone !== undefined) {
+    setze('alarm_zone', String(req.body.alarm_zone || '').trim().slice(0, 80) || null);
   }
   if (!felder.length) return res.status(400).json({ error: 'Nichts zu ändern' });
 
