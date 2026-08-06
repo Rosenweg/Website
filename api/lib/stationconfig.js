@@ -4,6 +4,8 @@
 // Vorlagen stehen hier im Klartext; alles Geheime (AD-Beitrittskonto,
 // MQTT-Zugang, root-Hash, SSH-Keys) kommt aus der Umgebung der API und
 // landet damit weder in einem Repo noch auf einem Installationsmedium.
+const { HAEUSER, stwegVonHaus } = require('./haeuser');
+
 const STATION_TYPES = [
   {
     id: 'desktop',
@@ -348,7 +350,29 @@ function buildConfig(station) {
     },
     roles: { [role]: ROLE_DEFAULTS[role] || {} },
   });
-  return merge(cfg, station.overrides || {});
+  const fertig = merge(cfg, station.overrides || {});
+
+  // Die Anzeigeadresse bekommt das Haus mit, in dem die Station steht. Ohne
+  // das zeigt jede Anzeige jede Ankuendigung — die Auswahl in der Verwaltung
+  // waere da, haette aber keine Wirkung.
+  //
+  // Angehaengt wird hier und nicht von Hand in den overrides: sonst muesste
+  // jemand die Adresse abtippen, und ein Tippfehler faellt erst auf, wenn im
+  // Treppenhaus die falsche Meldung steht.
+  const haus = Number(station.haus);
+  if (HAEUSER.includes(haus)) {
+    const mitHaus = (url) => {
+      if (!url || typeof url !== 'string') return url;
+      if (/[?&]haus=/.test(url)) return url;           // schon gesetzt: nicht anfassen
+      return url + (url.includes('?') ? '&' : '?') + 'haus=' + haus;
+    };
+    if (fertig.roles?.display?.url) fertig.roles.display.url = mitHaus(fertig.roles.display.url);
+    if (fertig.roles?.desktop?.leerlauf_anzeige?.url) {
+      fertig.roles.desktop.leerlauf_anzeige.url = mitHaus(fertig.roles.desktop.leerlauf_anzeige.url);
+    }
+    fertig.station = { ...(fertig.station || {}), haus, stweg: stwegVonHaus(haus) };
+  }
+  return fertig;
 }
 
 /**

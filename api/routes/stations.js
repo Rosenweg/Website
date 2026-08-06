@@ -40,6 +40,7 @@ const { authenticateAD } = require('../lib/adauth');
 const { authMiddleware } = require('../middleware/auth');
 const { isTechnik, isPraesident } = require('../lib/groups');
 const { STATION_TYPES, buildConfig, missingSecrets, hausWlan } = require('../lib/stationconfig');
+const { HAEUSER } = require('../lib/haeuser');
 const { wlanAufloesen, netznamen } = require('../lib/stationwlan');
 const { stationApps, gruppenJeApp } = require('../lib/stationapps');
 const { telefonbuch } = require('../lib/telefonbuch');
@@ -97,6 +98,14 @@ async function ensureSchema() {
     -- man ihr nichts schicken — sie fragt alle paar Minuten selbst nach.
     ALTER TABLE stations ADD COLUMN IF NOT EXISTS update_angefordert TIMESTAMPTZ;
     ALTER TABLE stations ADD COLUMN IF NOT EXISTS update_angefordert_von TEXT;
+    -- In welchem Haus steht die Station? Bestimmt, welche Ankuendigungen sie
+    -- zeigt: die ohne Hausangabe plus die fuer genau dieses Haus. Ohne
+    -- Eintrag zeigt sie alles.
+    --
+    -- Die Hausnummer und nicht das STWEG: aus ihr laesst sich das STWEG
+    -- ableiten (api/lib/haeuser.js), umgekehrt nicht — ein STWEG umfasst bis
+    -- zu drei Haeuser.
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS haus INTEGER;
     -- Welche Programme auf dem Geraet ueberhaupt vorhanden sind. Die Station
     -- meldet das bei jedem Einrichtungslauf; die Verwaltung baut daraus die
     -- Auswahl fuer die Programmliste. Ohne diese Meldung muesste dort jemand
@@ -120,9 +129,11 @@ async function ensureSchema() {
       notiz         TEXT,
       mqtt_thema    TEXT NOT NULL,
       mqtt_benutzer TEXT NOT NULL,
+      haus          INTEGER,
       angelegt_von  TEXT,
       angelegt_am   TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE anzeigegeraete ADD COLUMN IF NOT EXISTS haus INTEGER;
     CREATE TABLE IF NOT EXISTS station_setup_sessions (
       token_hash   TEXT PRIMARY KEY,
       username     TEXT NOT NULL,
@@ -355,7 +366,7 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
            gesperrt_am, hardware, registered_by, registered_at,
            last_seen_at, last_seen_ip, last_state, revoked_at,
            update_angefordert, update_angefordert_von, overrides,
-           programme, programme_gemeldet_am
+           programme, programme_gemeldet_am, haus
       FROM stations
      ORDER BY (revoked_at IS NOT NULL), registered_at DESC`);
 
@@ -498,6 +509,16 @@ router.patch('/admin/:id', authMiddleware, nurTechnik, a(async (req, res) => {
   const werte = [req.params.id];
   const geaendert = [];
 
+  // Das Haus bestimmt, welche Ankündigungen die Station zeigt.
+  if ('haus' in (req.body || {})) {
+    const haus = req.body.haus === null || req.body.haus === '' ? null
+      : (HAEUSER.includes(Number(req.body.haus)) ? Number(req.body.haus) : undefined);
+    if (haus === undefined) return res.status(400).json({ error: 'Unbekannte Hausnummer' });
+    werte.push(haus);
+    felder.push(`haus = $${werte.length}`);
+    geaendert.push('haus');
+  }
+
   for (const feld of ['standort', 'notiz']) {
     if (req.body?.[feld] === undefined) continue;
     const wert = String(req.body[feld] || '').trim().slice(0, 500) || null;
@@ -549,7 +570,13 @@ router.patch('/admin/:id', authMiddleware, nurTechnik, a(async (req, res) => {
 const ANZEIGE_TOPIC_PREFIX = 'SLIDESHOW';
 
 /** Die Felder der App, in ihrer eigenen Beschriftung — und die Schritte dazu. */
-function anzeigeZettel({ mqtt_thema, mqtt_benutzer, passwort }) {
+function anzeigeZettel({ mqtt_thema, mqtt_benutzer, passwort, haus }) {
+  // Die Adresse, die in die .url-Datei des Geräts gehört. Mit Hausnummer,
+  // damit es nur die Ankündigungen zeigt, die es betreffen — von Hand
+  // abgetippt wäre genau das die Stelle für einen Tippfehler, der erst im
+  // Treppenhaus auffällt.
+  const anzeigeAdresse = 'https://display.rosenweg4303.ch'
+    + (Number.isInteger(Number(haus)) && Number(haus) > 0 ? `?haus=${Number(haus)}` : '');
   return {
     felder: [
       { feld: 'MQTT-Serveradresse', wert: process.env.MQTT_HOST_INTERN || '100.64.2.51' },
@@ -565,6 +592,7 @@ function anzeigeZettel({ mqtt_thema, mqtt_benutzer, passwort }) {
       { feld: 'Melden Sie Daten über MQTT', wert: 'an',
         warum: 'Damit hier sichtbar wird, ob das Gerät wirklich hängt.' },
     ],
+    anzeigeAdresse,
     schritte: [
       'Am Gerät die Weboberfläche öffnen (Port 8080) und anmelden.',
       'Einstellungen → Geräteeinstellungen, dort zum Abschnitt MQTT.',
@@ -577,6 +605,7 @@ function anzeigeZettel({ mqtt_thema, mqtt_benutzer, passwort }) {
       'Die App neu laden — die MQTT-Felder greifen erst danach. Das sagt die App bei jedem Feld selbst dazu.',
       'Zurück in dieser Übersicht prüfen, ob das Gerät sich meldet.',
     ],
+    hinweisAdresse: 'Diese Adresse gehört in die .url-Datei, die das Gerät anzeigt.',
     hinweis: 'Das Passwort steht nur hier. Es wird nirgends gespeichert — nur seine Prüfsumme. '
            + 'Geht es verloren, legen Sie das Gerät neu an.',
     steuerung: {
@@ -591,7 +620,7 @@ function anzeigeZettel({ mqtt_thema, mqtt_benutzer, passwort }) {
 router.get('/admin/anzeigen', authMiddleware, nurTechnik, a(async (req, res) => {
   await ensureSchema();
   const r = await pool.query(
-    `SELECT id, name, standort, notiz, mqtt_thema, mqtt_benutzer, angelegt_von, angelegt_am
+    `SELECT id, name, standort, notiz, mqtt_thema, mqtt_benutzer, haus, angelegt_von, angelegt_am
        FROM anzeigegeraete ORDER BY name`);
   res.json({ anzeigen: r.rows, topic_prefix: ANZEIGE_TOPIC_PREFIX });
 }));
@@ -627,14 +656,15 @@ router.post('/admin/anzeigen', authMiddleware, nurTechnik, a(async (req, res) =>
        can_write = EXCLUDED.can_write, topic_filter = EXCLUDED.topic_filter`,
     [mqtt_benutzer, hash, `${ANZEIGE_TOPIC_PREFIX}/#`, `Anzeigegerät ${name}`]);
 
+  const haus = HAEUSER.includes(Number(req.body?.haus)) ? Number(req.body.haus) : null;
   await pool.query(
-    `INSERT INTO anzeigegeraete (id, name, standort, notiz, mqtt_thema, mqtt_benutzer, angelegt_von)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    `INSERT INTO anzeigegeraete (id, name, standort, notiz, mqtt_thema, mqtt_benutzer, haus, angelegt_von)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
     [id, name, String(req.body?.standort || '').slice(0, 200) || null,
-     String(req.body?.notiz || '').slice(0, 500) || null, id, mqtt_benutzer,
+     String(req.body?.notiz || '').slice(0, 500) || null, id, mqtt_benutzer, haus,
      req.user?.email || req.user?.name || null]);
 
-  res.json({ id, name, ...anzeigeZettel({ mqtt_thema: id, mqtt_benutzer, passwort }) });
+  res.json({ id, name, haus, ...anzeigeZettel({ mqtt_thema: id, mqtt_benutzer, passwort, haus }) });
 }));
 
 // DELETE /api/stations/admin/anzeigen/:id — Gerät und sein MQTT-Zugang.
@@ -765,6 +795,9 @@ function slug(s) {
 // POST /api/stations/register  { type, standort, id?, hostname?, notiz?, hardware? }
 router.post('/register', setupSession, a(async (req, res) => {
   const { type, standort, notiz, hardware } = req.body || {};
+  // Die Hausnummer kommt aus dem Einrichtungsdialog. Ohne sie zeigt die
+  // Station später jede Ankündigung — deshalb fragt der Installer danach.
+  const haus = HAEUSER.includes(Number(req.body?.haus)) ? Number(req.body.haus) : null;
   if (!STATION_TYPES.some((t) => t.id === type)) {
     return res.status(400).json({ error: `Unbekannter Typ '${type}'` });
   }
@@ -800,12 +833,12 @@ router.post('/register', setupSession, a(async (req, res) => {
   // werden können. Das WHERE ist der Riegel davor, eine *aktive* Station zu
   // überschreiben — die hat die Dublettenprüfung oben schon abgefangen.
   const eingefuegt = await pool.query(
-    `INSERT INTO stations (id, role, hostname, standort, notiz, token_hash, hardware,
+    `INSERT INTO stations (id, role, hostname, standort, notiz, haus, token_hash, hardware,
                            registered_by, last_seen_ip)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
      ON CONFLICT (id) DO UPDATE SET
        role = EXCLUDED.role, hostname = EXCLUDED.hostname,
-       standort = EXCLUDED.standort, notiz = EXCLUDED.notiz,
+       standort = EXCLUDED.standort, notiz = EXCLUDED.notiz, haus = EXCLUDED.haus,
        token_hash = EXCLUDED.token_hash, hardware = EXCLUDED.hardware,
        registered_by = EXCLUDED.registered_by, last_seen_ip = EXCLUDED.last_seen_ip,
        registered_at = NOW(), revoked_at = NULL, status = 'aktiv',
@@ -813,7 +846,7 @@ router.post('/register', setupSession, a(async (req, res) => {
        last_seen_at = NULL, last_state = NULL
      WHERE stations.revoked_at IS NOT NULL
      RETURNING id`,
-    [row.id, row.role, row.hostname, row.standort, row.notiz, sha256(token),
+    [row.id, row.role, row.hostname, row.standort, row.notiz, row.haus, sha256(token),
       JSON.stringify(hardware || {}), req.setupUser.username, clientIp(req)],
   );
   if (!eingefuegt.rows.length) {
