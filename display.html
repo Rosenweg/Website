@@ -27,28 +27,70 @@
     .clock-t .sec { font-size: .42em; font-weight: 300; opacity: .55; vertical-align: baseline; margin-left: .12em; }
     .clock-d { font-size: clamp(1.1rem, 3.2vw, 3rem); font-weight: 300; opacity: .78; margin-top: 2.5vh; text-transform: capitalize; }
 
-    /* ===== Ankündigung ===== */
-    .announce { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 6vmin 5vmin; }
-    .announce .kick { font-size: clamp(1rem, 2.6vw, 2rem); font-weight: 600; letter-spacing: .18em; text-transform: uppercase; color: #38bdf8; margin-bottom: 4vh; }
-    .announce .body { flex: 1 1 auto; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; font-weight: 600; line-height: 1.12; text-shadow: 0 3px 18px rgba(0,0,0,.4); word-break: break-word; overflow-wrap: anywhere; }
+    /* ===== Aushang als A4-Blatt =====
+       Jede Ankuendigung sieht aus wie das, was sie ist: ein Blatt am
+       Anschlag. Getippt oder als PDF hochgeladen macht keinen Unterschied
+       mehr — beides ist ein weisses A4 im Hochformat, in denselben Farben
+       wie die Word-Vorlage (siehe documents/vorlagen/gestaltungsrichtlinie.md).
 
-    /* ===== Aushang (PDF) =====
-       Ein A4-Hochformat auf einem Querformat-Schirm laesst links und rechts
-       zwangslaeufig Rand. Statt ihn grau zu lassen, traegt die Kopfzeile dort
-       Marke und Uhr — dieselben Angaben wie im Ruhebild, nur schmal.
-       Der Rahmen selbst ist weiss, weil ein PDF fast immer weissen Grund hat
-       und sonst ein grauer Saum entstuende. */
-    .announce-pdf { padding: 2vmin 2vmin 1.5vmin; }
-    .pdf-kopf { width: 100%; display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5vh; }
-    .pdf-kopf .marke { display: flex; align-items: center; gap: .8vw; opacity: .92; }
-    .pdf-kopf .marke img { height: clamp(22px, 3.6vh, 46px); }
-    .pdf-kopf .marke .tt { font-weight: 700; font-size: clamp(.9rem, 1.9vw, 1.6rem); line-height: 1.1; }
-    .pdf-kopf .marke .ss { font-size: clamp(.6rem, 1vw, .9rem); opacity: .65; }
-    .pdf-kopf .uhr { font-size: clamp(1.2rem, 3vw, 2.6rem); font-weight: 300; font-variant-numeric: tabular-nums; opacity: .9; }
-    .pdf-kopf .uhr .dat { display: block; font-size: .38em; opacity: .6; text-align: right; letter-spacing: .04em; }
-    .pdf { flex: 1 1 auto; width: 100%; min-height: 0; border: 0; border-radius: 1vmin; background: #fff; }
-    .pdf-titel { font-size: clamp(.85rem, 1.9vw, 1.5rem); font-weight: 600; margin-bottom: 1vh; opacity: .85; }
-    .emergency-scr .pdf-titel { color: #fff; }
+       Auf einem breiten Schirm stehen zwei nebeneinander. Ein A4 ist 1:V2;
+       bei 27 Zoll im Querformat bleibt neben einem Blatt so viel Rand, dass
+       ein zweites bequem danebenpasst. Wie viele es werden, rechnet das JS
+       aus — hier steht nur, wie eines aussieht. */
+    .blaetter { width: 100%; height: 100%; display: flex; flex-direction: column; padding: 1.5vmin 2.5vmin 2.5vmin; }
+    .blaetter .kopfzeile { flex: 0 0 auto; display: flex; justify-content: flex-end; margin-bottom: 1vh; }
+    .blaetter .reihe { flex: 1 1 auto; min-height: 0; display: flex; align-items: stretch;
+                       justify-content: center; gap: 2.5vmin; }
+    /* Die Ueberschrift sitzt AUF dem Blatt, nicht darueber. Frei darueber
+       gestellt bestimmt sie die Spaltenbreite — ein langer Titel schob das
+       Blatt daneben aus dem Bild. Auf dem Papier stoert sie niemanden und
+       sieht aus wie das, was sie ist: die Zeile ueber dem Aushang. */
+    .blatt-titel { flex: 0 0 auto; color: #CC0000; font-weight: 700; text-align: center;
+                   padding: .7em 1em; border-bottom: 1px solid #DDDDDD; background: #fff;
+                   font-size: clamp(.6rem, 1.9vh, 1.3rem);
+                   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* flex:0 0 auto und stretch: die Hoehe gibt die Zeile vor, die Breite folgt
+       aus 210:297. Darf das Blatt wachsen, bestimmt der Flex-Algorithmus die
+       Breite und ueberfaehrt das Seitenverhaeltnis — aus A4 wurde ein fast
+       quadratischer Kasten. Und mit height:100% statt stretch bleibt es klein:
+       die Prozentangabe findet keine feste Bezugshoehe und faellt auf den
+       Inhalt zurueck (im Test 314x443 statt 687x970). */
+    .blatt { flex: 0 0 auto; aspect-ratio: 210 / 297; background: #fff; color: #333;
+             border-radius: .8vmin; box-shadow: 0 1.2vmin 3.5vmin rgba(0,0,0,.5);
+             overflow: hidden; display: flex; flex-direction: column; }
+
+    /* Getippter Text bekommt den Briefkopf der Vorlage — sonst waere es
+       ein weisses Rechteck mit Schrift darin und nicht wiedererkennbar. */
+    .blatt-text { padding: 5% 7%; }
+    .briefkopf { display: flex; align-items: center; gap: .8em; flex: 0 0 auto;
+                 padding-bottom: .6em; border-bottom: 1px solid #DDDDDD; margin-bottom: 1em;
+                 font-size: clamp(.6rem, 2.1vh, 1.5rem); }
+    .briefkopf img { height: 2.4em; }
+    .briefkopf .wm { color: #CC0000; font-weight: 700; font-size: 1.15em; line-height: 1.1; }
+    .briefkopf .ort { color: #595959; font-size: .72em; }
+    /* KEIN Umbruch mitten im Wort. Das ist nicht nur haesslich, es hebelt auch
+       die Groessensuche aus: darf die Schrift jedes Wort zerschneiden, passt
+       jede Groesse irgendwie, und der Text wird zu gross. Ohne die Erlaubnis
+       begrenzt das laengste Wort die Groesse — genau richtig.
+       Silbentrennung darf der Browser, wenn er sie beherrscht (lang="de"). */
+    .blatt-text .body { flex: 1 1 auto; min-height: 0; width: 100%; display: flex;
+                        align-items: center; justify-content: center; overflow: hidden;
+                        text-align: center; font-weight: 600; line-height: 1.2;
+                        overflow-wrap: normal; word-break: normal; hyphens: auto; }
+
+    /* Ein PDF IST das Blatt: gleiche Seitenverhaeltnisse, also fuellt es die
+       Flaeche randlos. 'view=Fit' zeigt die ganze Seite; mit 'FitH' ragte ein
+       A4 unten heraus, und vom Aushang war nur der Briefkopf zu sehen.
+       'toolbar=0&navpanes=0' nimmt dem Betrachter seine Leisten — auf einer
+       Tafel im Treppenhaus braucht niemand einen Druckknopf. */
+    .blatt-pdf { padding: 0; }
+    .blatt-pdf iframe { width: 100%; height: 100%; border: 0; background: #fff; }
+
+    /* Uhr des Schirms, oben rechts. Die Marke traegt das Blatt selbst, sonst
+       stuende das Wappen zweimal im Bild. */
+    #uhr { text-align: right; font-weight: 300; font-variant-numeric: tabular-nums;
+           color: rgba(248,250,252,.92); font-size: clamp(1rem, 3.2vh, 2.2rem); line-height: 1.1; }
+    #uhr .dat { display: block; font-size: .42em; opacity: .6; letter-spacing: .04em; }
 
     /* ===== Notfall (Vollbild rot) ===== */
     body.emergency { background: #000; }
@@ -59,20 +101,16 @@
     .emergency-scr .sym { font-size: clamp(4rem, 13vw, 13rem); line-height: 1; margin-bottom: 3vh; filter: drop-shadow(0 4px 12px rgba(0,0,0,.35)); }
     .emergency-scr .kick { font-size: clamp(1.2rem, 3.4vw, 3rem); font-weight: 800; letter-spacing: .16em; text-transform: uppercase; margin-bottom: 4vh; text-shadow: 0 2px 10px rgba(0,0,0,.4); }
     .emergency-scr .body { flex: 1 1 auto; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; font-weight: 800; line-height: 1.1; text-shadow: 0 3px 16px rgba(0,0,0,.5); word-break: break-word; overflow-wrap: anywhere; }
-    .body .fit { display: block; max-width: 100%; }
+    /* inline-block und KEIN max-width: nur so meldet getBoundingClientRect die
+       wirkliche Breite des Satzes. Als Block mit max-width:100% ragte ein zu
+       langes Wort unsichtbar hinaus, die Suche hielt die Groesse fuer passend,
+       und vom Wort fehlte am Ende die Haelfte. */
+    .body .fit { display: inline-block; }
 
-    /* Text-Skalierung nach Länge (JS setzt Klasse) */
-    .txt-xl  { font-size: clamp(3rem, 12vw, 13rem); }
-    .txt-lg  { font-size: clamp(2.4rem, 8.5vw, 9rem); }
-    .txt-md  { font-size: clamp(2rem, 6vw, 6rem); }
-    .txt-sm  { font-size: clamp(1.6rem, 4vw, 4.2rem); }
-
-    /* ===== Laufschrift ===== */
-    .marquee { width: 100%; overflow: hidden; white-space: nowrap; }
-    .marquee .run { display: inline-block; padding-left: 100%; font-weight: 700; line-height: 1.1; will-change: transform; animation: scroll var(--dur, 22s) linear infinite; }
-    @keyframes scroll { from { transform: translateX(0); } to { transform: translateX(-100%); } }
-    .mq-xl { font-size: clamp(3rem, 13vw, 15rem); }
-    .mq-lg { font-size: clamp(2.6rem, 10vw, 11rem); }
+    /* Der Text wird per Binaersuche auf die Flaeche gezogen (fitText),
+       deshalb braucht es weder Groessenklassen noch Laufschrift. Laufschrift
+       gab es frueher fuer lange Meldungen — sie zwingt zum Warten, bis der
+       Anfang wiederkommt, und auf einem Blatt gibt es sie ohnehin nicht. */
 
     /* ===== Verbindungs-/Frische-Indikator (dezent, Ecke) ===== */
     #stat { position: fixed; bottom: 1.6vmin; right: 1.8vmin; display: flex; align-items: center; gap: .6vmin;
@@ -142,122 +180,164 @@
   // wenn zwischendurch eine Meldung dazukommt oder verschwindet.
   const ROTATION_MS = 15000;
   let blaetterIndex = 0;
+  let zuletztGezeigt = 1;
   setInterval(() => {
-    // Nur weiterblättern, wenn es überhaupt etwas zu blättern gibt — sonst
-    // liefe der Zähler bei einer einzigen Meldung sinnlos hoch und die
-    // Signatur unten würde bei gleichem Inhalt ohnehin nichts tun.
-    if (meineAnkuendigungen().length > 1) { blaetterIndex++; render(); }
+    // Um so viele weiterblättern, wie gerade nebeneinander stehen — sonst
+    // käme auf einem breiten Schirm jede Meldung zweimal vorbei, einmal
+    // links und einmal rechts.
+    if (meineAnkuendigungen().length > zuletztGezeigt) {
+      blaetterIndex += zuletztGezeigt;
+      render();
+    }
   }, ROTATION_MS);
+
+  // Wie viele A4-Blätter nebeneinander passen.
+  //
+  // Ein A4 ist 1:√2. Bei 1920×1080 ist ein Blatt rund 720 px breit, zwei also
+  // 1440 plus Abstand — das geht bequem. Auf einem hochkant hängenden Tablet
+  // passt genau eines. Gerechnet statt geraten, damit es auf jedem Gerät
+  // stimmt, das noch dazukommt.
+  function blaetterProSchirm() {
+    const hoehe = window.innerHeight * 0.95;
+    const breite = hoehe * (210 / 297);
+    const abstand = window.innerWidth * 0.025;
+    return (breite * 2 + abstand) <= window.innerWidth * 0.97 ? 2 : 1;
+  }
 
   function activeChannel() {
     if (hatInhalt(state.emergency)) return { kind: 'emergency', d: state.emergency };
     const liste = meineAnkuendigungen();
     if (liste.length) {
-      const a = liste[blaetterIndex % liste.length];
-      return { kind: 'announce', d: { ...a, active: true }, pos: (blaetterIndex % liste.length) + 1, von: liste.length };
+      const n = Math.min(blaetterProSchirm(), liste.length);
+      zuletztGezeigt = n;
+      const start = ((blaetterIndex % liste.length) + liste.length) % liste.length;
+      const auswahl = Array.from({ length: n }, (_, i) => liste[(start + i) % liste.length]);
+      return { kind: 'announce', liste: auswahl, von: liste.length };
     }
     // Rückfall auf den alten Einzelkanal — für den Fall, dass die Liste (noch)
     // nicht veröffentlicht ist, etwa direkt nach einem Update der API.
-    if (hatInhalt(state.announcement)) return { kind: 'announce', d: state.announcement };
+    if (hatInhalt(state.announcement)) {
+      zuletztGezeigt = 1;
+      return { kind: 'announce', liste: [state.announcement], von: 1 };
+    }
     return null;
-  }
-
-  // Textlängen-abhängige Größenklasse
-  function sizeClass(text, scroll, kind) {
-    if (scroll) return kind === 'emergency' ? 'mq-lg' : 'mq-xl';
-    const n = (text || '').length;
-    if (n <= 24)  return 'txt-xl';
-    if (n <= 60)  return 'txt-lg';
-    if (n <= 140) return 'txt-md';
-    return 'txt-sm';
-  }
-
-  // Marquee-Dauer proportional zur Textlänge (gleichmäßiges, lesbares Tempo)
-  function marqueeDur(text) {
-    const n = (text || '').length;
-    return Math.max(14, Math.min(70, Math.round(n * 0.42 + 12))) + 's';
   }
 
   // Text so gross wie moeglich, aber IMMER komplett sichtbar: groesste Schriftgroesse
   // per Binaersuche finden, bei der der ganze Text in den verfuegbaren Bereich passt.
   // KEINE Laufschrift mehr (scroll-Flag wird ignoriert).
   function fitText() {
-    const box = document.querySelector('#screen .body');
-    const span = document.getElementById('fittext');
-    if (!box || !span) return;
-    const availW = box.clientWidth, availH = box.clientHeight;
-    if (availW < 2 || availH < 2) return;
-    let lo = 12, hi = availH;   // eine Textzeile kann nicht groesser als die Hoehe werden
-    for (let i = 0; i < 24; i++) {
-      const mid = (lo + hi) / 2;
-      span.style.fontSize = mid + 'px';
-      if (span.scrollWidth <= availW && span.scrollHeight <= availH) lo = mid; else hi = mid;
-    }
-    span.style.fontSize = Math.floor(lo) + 'px';
+    // Jedes Blatt fuer sich: zwei nebeneinander haben unterschiedlich viel
+    // Text, und eine gemeinsame Groesse waere fuer das eine zu klein und fuer
+    // das andere zu gross.
+    //
+    // Gemessen wird der KASTEN, nicht der Satz. Der Satz ist ein Flex-Kind und
+    // schrumpft auf die Zeilenbreite — er kann also gar nicht ueberlaufen, und
+    // seine Masse sagen nichts darueber, ob der Text noch passt. Der Kasten
+    // dagegen hat overflow:hidden, und dort melden scrollWidth/scrollHeight
+    // verlaesslich, wie viel Platz der Inhalt wirklich braucht.
+    document.querySelectorAll('#screen .fit').forEach((span) => {
+      const box = span.parentElement;
+      const availW = box.clientWidth, availH = box.clientHeight;
+      if (availW < 2 || availH < 2) return;
+      let lo = 8, hi = availH;
+      for (let i = 0; i < 24; i++) {
+        const mid = (lo + hi) / 2;
+        span.style.fontSize = mid + 'px';
+        if (box.scrollWidth <= availW && box.scrollHeight <= availH) lo = mid; else hi = mid;
+      }
+      span.style.fontSize = Math.floor(lo) + 'px';
+    });
   }
 
-  function renderChannel(kind, d) {
+  // Ein einzelnes Blatt.
+  //
+  // Getippt oder hochgeladen sieht gleich aus, weil beides dasselbe ist: ein
+  // Aushang im A4-Hochformat. Beim PDF IST die Seite das Blatt — gleiches
+  // Seitenverhaeltnis, also randlos und ohne Verzerrung. Auf der Tafel direkt
+  // abgespielt zieht SlideShow eine A4-Seite auf 16:9 breit; darum laeuft ein
+  // Aushang ueber diese Seite und nicht als Datei im Geraeteordner.
+  function blattHtml(a) {
+    const text = (a.text || '').trim();
+    const pdf = (a.pdf || '').trim();
+    if (pdf) {
+      return `<div class="blatt blatt-pdf">
+                ${text ? `<div class="blatt-titel">${esc(text)}</div>` : ''}
+                <iframe src="${esc(pdf)}#toolbar=0&navpanes=0&scrollbar=0&view=Fit"
+                        title="Aushang" scrolling="no"></iframe>
+              </div>`;
+    }
+    return `<div class="blatt blatt-text">
+              <div class="briefkopf">
+                <img src="/logo-rosenweg.png" alt="" onload="fitText()" onerror="this.style.display='none'; fitText();">
+                <div>
+                  <div class="wm">Rosenweg Kaiseraugst</div>
+                  <div class="ort">Stockwerkeigentümergemeinschaft</div>
+                </div>
+              </div>
+              <div class="body"><span class="fit">${esc(text)}</span></div>
+            </div>`;
+  }
+
+  function renderAushaenge(liste) {
+    document.body.classList.remove('emergency');
+    $('screen').innerHTML =
+      `<div class="blaetter">
+         <div class="kopfzeile"><div id="uhr"></div></div>
+         <div class="reihe">${liste.map(blattHtml).join('')}</div>
+       </div>`;
+    schirmUhr();
+    // Erst die Blaetter bemassen, dann den Text einpassen — in dieser
+    // Reihenfolge, sonst misst fitText einen Kasten, den es noch nicht gibt.
+    // Mehrfach, weil das Wappen im Briefkopf asynchron nachlaedt und die
+    // Hoehe des Textbereichs danach eine andere ist.
+    const einpassen = () => { blaetterBemassen(); fitText(); };
+    einpassen();
+    requestAnimationFrame(() => requestAnimationFrame(einpassen));
+    setTimeout(einpassen, 400);
+  }
+
+  // Breite und Hoehe jedes Blattes ausrechnen und setzen.
+  //
+  // Allein mit CSS ging es nicht: mit 'align-items: stretch' gibt die Zeile die
+  // Hoehe vor und die Breite folgt aus 210:297 — auf einem hochkant haengenden
+  // Tablet wurde das Blatt dadurch breiter als der Schirm und der Text lief
+  // links und rechts hinaus. Mit 'height: 100%' wiederum findet die Prozent-
+  // angabe keine feste Bezugshoehe und faellt auf den Inhalt zurueck. Also
+  // gerechnet: erst an der Hoehe versuchen, und wenn es dann zu breit wird,
+  // an der Breite.
+  function blaetterBemassen() {
+    const reihe = document.querySelector('#screen .reihe');
+    if (!reihe) return;
+    const blaetter = reihe.querySelectorAll('.blatt');
+    if (!blaetter.length) return;
+    const n = blaetter.length;
+    const abstand = window.innerWidth * 0.025;
+    const platzB = reihe.clientWidth - abstand * (n - 1);
+    const platzH = reihe.clientHeight;
+
+    let h = platzH;
+    let b = h * (210 / 297);
+    if (b * n > platzB) { b = platzB / n; h = b * (297 / 210); }
+    blaetter.forEach((el) => { el.style.width = Math.floor(b) + 'px'; el.style.height = Math.floor(h) + 'px'; });
+  }
+
+  // Der Notfall bleibt, was er war: der ganze Schirm, rot, ohne Blatt. Ein
+  // Aushang will gelesen werden, ein Alarm will gesehen werden.
+  function renderNotfall(d) {
     const text = (d.text || '').trim();
     const pdf = (d.pdf || '').trim();
-
-    // Ein PDF bekommt den Platz, den ein Aushang braucht: fast den ganzen
-    // Schirm. Ein Text daneben ist die Überschrift, nicht der Inhalt — deshalb
-    // steht er klein darüber und nicht in der grossen Schrift, die sich sonst
-    // auf die Fläche zieht.
-    //
-    // 'view=Fit' zeigt die GANZE Seite, nicht nur die Breite. Mit 'FitH' füllt
-    // ein A4-Hochformat die Breite und ragt unten aus dem Bild — am 6. August
-    // auf dem Fernseher gesehen: von der Einladung war nur der Briefkopf da.
-    // Lieber schmale Ränder links und rechts als ein abgeschnittener Aushang.
-    //
-    // 'toolbar=0&navpanes=0' nimmt dem eingebauten Betrachter seine Leisten;
-    // sonst steht auf einer Anzeige im Treppenhaus ein Druckknopf. Die kleine
-    // Seitenzahl in der Ecke bleibt trotzdem — die lässt sich nicht abschalten.
-    const inner = pdf
-      ? `<div class="pdf-kopf">
-           <div class="marke">
-             <img src="/logo-rosenweg.png" alt="" onerror="this.style.display='none'">
-             <div><div class="tt">Rosenweg</div><div class="ss">Kaiseraugst</div></div>
-           </div>
-           <div class="uhr" id="pdf-uhr"></div>
-         </div>
-         ${text ? `<div class="pdf-titel">${esc(text)}</div>` : ''}
-         <iframe class="pdf" src="${esc(pdf)}#toolbar=0&navpanes=0&scrollbar=0&view=Fit"
-                 title="Aushang"></iframe>`
-      : `<div class="body"><span class="fit" id="fittext">${esc(text)}</span></div>`;
-
-    if (kind === 'emergency') {
-      document.body.classList.add('emergency');
-      $('screen').innerHTML =
-        `<div class="emergency-scr">
-           <div class="sym">🚨</div>
-           <div class="kick">Notfall · Achtung</div>
-           ${inner}
-         </div>`;
-    } else {
-      document.body.classList.remove('emergency');
-      $('screen').innerHTML =
-        `<div class="announce${pdf ? ' announce-pdf' : ''}">
-           ${pdf ? '' : '<div class="kick">Ankündigung</div>'}
-           ${inner}
-         </div>`;
-    }
-    // fitText zieht Text auf die Fläche. Bei einem PDF gibt es nichts zu
-    // ziehen — und der Aufruf würde über ein Element stolpern, das gar nicht
-    // da ist.
+    document.body.classList.add('emergency');
+    $('screen').innerHTML =
+      `<div class="emergency-scr">
+         <div class="sym">🚨</div>
+         <div class="kick">Notfall · Achtung</div>
+         ${pdf
+           ? `${text ? `<div class="pdf-titel">${esc(text)}</div>` : ''}
+              <iframe class="pdf" src="${esc(pdf)}#toolbar=0&navpanes=0&scrollbar=0&view=Fit" title="Notfall"></iframe>`
+           : `<div class="body"><span class="fit">${esc(text)}</span></div>`}
+       </div>`;
     if (!pdf) fitText();
-  }
-
-  // Die Uhr in der Kopfzeile eines Aushangs. Getrennt vom Ruhebild, weil dort
-  // die ganze Seite neu gezeichnet wird — hier soll nur die Zeit weiterlaufen,
-  // sonst lädt das eingebettete PDF jede Sekunde neu.
-  function pdfUhr() {
-    const el = $('pdf-uhr');
-    if (!el) return;
-    const n = new Date();
-    const p = (x) => String(x).padStart(2, '0');
-    el.innerHTML = `${p(n.getHours())}:${p(n.getMinutes())}`
-      + `<span class="dat">${WD[n.getDay()]}, ${n.getDate()}. ${MO[n.getMonth()]}</span>`;
   }
 
   const WD = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
@@ -280,25 +360,65 @@
        </div>`;
   }
 
-  // Aktueller Bildschirmzustand, um unnötiges Neu-Rendern (v.a. Marquee-Neustart) zu vermeiden.
+  // Aktueller Bildschirmzustand. Nur neu zeichnen, wenn sich wirklich etwas
+  // geaendert hat — ein Neuzeichnen laedt jedes eingebettete PDF neu, und das
+  // sieht man als Flackern.
   let shown = { kind: null, sig: null };
   function render() {
     const ch = activeChannel();
     if (!ch) {
       state.lastTs = 0;
-      if (shown.kind !== 'idle') { shown = { kind: 'idle', sig: null }; renderIdle(); }
-      else if (shown.kind === 'idle') renderIdle(); // Uhr tickt
+      document.body.classList.add('idle-an');
+      if (shown.kind !== 'idle') shown = { kind: 'idle', sig: null };
+      renderIdle();                       // die Uhr tickt weiter
       updateAge();
       return;
     }
-    const d = ch.d;
-    const sig = JSON.stringify([ch.kind, d.text, d.pdf || '', !!d.scroll]);
-    if (shown.kind !== ch.kind || shown.sig !== sig) {
-      shown = { kind: ch.kind, sig };
-      renderChannel(ch.kind, d);
+    document.body.classList.remove('idle-an');
+
+    if (ch.kind === 'emergency') {
+      const d = ch.d;
+      const sig = JSON.stringify(['emergency', d.text || '', d.pdf || '']);
+      if (shown.kind !== 'emergency' || shown.sig !== sig) {
+        shown = { kind: 'emergency', sig };
+        renderNotfall(d);
+      }
+      state.lastTs = Number(d.ts) || 0;
+      updateAge();
+      return;
     }
-    state.lastTs = Number(d.ts) || 0;
+
+    const sig = JSON.stringify(ch.liste.map(a => [a.text || '', a.pdf || '']));
+    if (shown.kind !== 'announce' || shown.sig !== sig) {
+      shown = { kind: 'announce', sig };
+      renderAushaenge(ch.liste);
+    }
+    state.lastTs = Math.max(0, ...ch.liste.map(a => Number(a.ts) || 0));
     updateAge();
+  }
+
+  // Dreht jemand den Schirm oder aendert sich die Aufloesung, passen ploetzlich
+  // zwei Blaetter statt einem — oder umgekehrt. Neu rechnen und neu setzen.
+  let umbauTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(umbauTimer);
+    umbauTimer = setTimeout(() => {
+      shown = { kind: null, sig: null };
+      render();
+      blaetterBemassen();
+      fitText();
+    }, 250);
+  });
+
+  // Die Uhr des Schirms. Getrennt vom Zeichnen, damit sie sekuendlich laufen
+  // kann, ohne die Blaetter anzufassen — sonst laedt jedes PDF im Takt neu.
+  function schirmUhr() {
+    const el = $('uhr');
+    if (!el) return;
+    const n = new Date();
+    const p = (x) => String(x).padStart(2, '0');
+    el.innerHTML = `${p(n.getHours())}:${p(n.getMinutes())}`
+      + `<span class="dat">${WD[n.getDay()]}, ${n.getDate()}. ${MO[n.getMonth()]}</span>`;
   }
 
   function updateAge() {
@@ -341,7 +461,10 @@
       return;
     }
     if (t === 'display/announcements') {
-      try { state.announcements = JSON.parse(p.toString()) || []; } catch { state.announcements = []; }
+      // raw und nicht p: den Parameter gibt es nicht, der Zugriff warf, der
+      // catch schluckte es, und die Liste war IMMER leer. Sichtbar war davon
+      // nichts — die Anzeige fiel stumm auf den alten Einzelkanal zurueck.
+      try { state.announcements = JSON.parse(raw) || []; } catch { state.announcements = []; }
       render();
       return;
     }
@@ -380,13 +503,14 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     render();
+    schirmUhr();
     connect();
-    // Bei Größenänderung/Orientierung Text neu einpassen (immer komplett, max. Größe).
-    window.addEventListener('resize', () => { if (activeChannel()) fitText(); });
-    // Uhr-Tick + Alter aktualisieren
+    // Uhr-Tick + Alter aktualisieren. Die Blätter bleiben dabei unberührt —
+    // ein Neuzeichnen würde jedes eingebettete PDF im Sekundentakt neu laden.
+    // (Auf Größenänderungen hört ein eigener Zuhörer weiter oben.)
     setInterval(() => {
       if (shown.kind === 'idle') renderIdle();
-      pdfUhr();          // die Uhr in der Kopfzeile eines Aushangs
+      schirmUhr();
       updateAge();
     }, 1000);
     // Frische-Indikator regelmäßig prüfen (auch ohne neue Nachrichten -> stale erkennen)
