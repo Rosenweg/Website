@@ -14818,6 +14818,90 @@ app.get('/api/display/pdf/:name', async (req, res) => {
   } catch { res.status(404).end(); }
 });
 
+// ─── Mehrere Ankündigungen, je Haus ──────────────────────────────────────
+//
+// Veröffentlicht wird zweimal:
+//
+//   display/announcements  die vollständige Liste (JSON-Array) — die
+//                          Anzeigeseite blättert durch und filtert nach dem
+//                          STWEG, in dem sie hängt
+//   display/announcement   die erste aktive, wie bisher — damit ältere
+//                          Abnehmer (ESP32, LED-Tafeln) weiterlaufen, die
+//                          von einer Liste nichts wissen
+//
+// Beide retained: eine Anzeige, die neu startet, hat sofort den Stand.
+async function ankuendigungenVeroeffentlichen() {
+  const c = apiMqttPublishClient();
+  if (!c) return;
+  const r = await pool.query(
+    `SELECT id, text, pdf, scroll, stwegs, von, erstellt
+       FROM display_ankuendigungen
+      WHERE aktiv AND (bis IS NULL OR bis > NOW())
+      ORDER BY erstellt`);
+  const liste = r.rows.map((z) => ({
+    id: Number(z.id), text: z.text || '', pdf: z.pdf || '', scroll: !!z.scroll,
+    stwegs: z.stwegs || [], by: z.von || '', ts: new Date(z.erstellt).getTime(),
+  }));
+  c.publish('display/announcements', JSON.stringify(liste), { qos: 1, retain: true });
+
+  // Der alte Kanal: die erste aktive, sonst leer.
+  const erste = liste[0];
+  c.publish(DISPLAY_CHANNELS.announcement, JSON.stringify(
+    erste ? { ...erste, active: true } : { text: '', active: false, ts: Date.now() },
+  ), { qos: 1, retain: true });
+  return liste;
+}
+
+// GET /api/display/ankuendigungen — auch die abgelaufenen, für die Verwaltung.
+app.get('/api/display/ankuendigungen', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT id, text, pdf, scroll, stwegs, aktiv, von, erstellt, bis
+         FROM display_ankuendigungen ORDER BY aktiv DESC, erstellt DESC LIMIT 100`);
+    res.json({ ankuendigungen: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/display/ankuendigungen  { text, pdf, scroll, stwegs, bis }
+app.post('/api/display/ankuendigungen', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    const text = String(req.body?.text || '').slice(0, 2000);
+    const pdfRoh = String(req.body?.pdf || '');
+    const pdf = /^\/api\/display\/pdf\/[\w.%\- ]+\.pdf$/i.test(pdfRoh) ? pdfRoh : '';
+    if (!text.trim() && !pdf) return res.status(400).json({ error: 'Text oder PDF nötig' });
+    // Nur die Häuser, die es gibt. Leer heisst: alle.
+    const stwegs = Array.isArray(req.body?.stwegs)
+      ? [...new Set(req.body.stwegs.map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 8))]
+      : [];
+    const bis = req.body?.bis ? new Date(req.body.bis) : null;
+    const r = await pool.query(
+      `INSERT INTO display_ankuendigungen (text, pdf, scroll, stwegs, von, bis)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+      [text, pdf, !!req.body?.scroll, stwegs,
+       req.user?.name || req.user?.email || 'admin',
+       bis && !isNaN(bis) ? bis : null]);
+    const liste = await ankuendigungenVeroeffentlichen();
+    res.json({ ok: true, id: Number(r.rows[0].id), aktiv: liste.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// DELETE /api/display/ankuendigungen/:id
+app.delete('/api/display/ankuendigungen/:id', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    const r = await pool.query('DELETE FROM display_ankuendigungen WHERE id = $1 RETURNING pdf', [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Nicht gefunden' });
+    // Die hochgeladene Datei mitnehmen — sonst füllt sich der Ablageort mit
+    // Aushängen, die niemand mehr sehen kann.
+    const pdf = r.rows[0].pdf || '';
+    const name = pdf.startsWith('/api/display/pdf/') ? decodeURIComponent(pdf.split('/').pop()) : '';
+    if (/^[\w.\- ]+\.pdf$/i.test(name)) {
+      await fs.unlink(pathModule.join(ANZEIGE_PDF_DIR, name)).catch(() => {});
+    }
+    await ankuendigungenVeroeffentlichen();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/display/announce', authMiddleware, requireMqttTechnik, async (req, res) => {
   try {
     const topic = DISPLAY_CHANNELS[String(req.body?.channel || 'announcement')];
@@ -14916,6 +15000,28 @@ app.get('/api/nav/audience-map', async (req, res) => {  // public: nur Seite->Ka
     res.json(map);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
+// ─── Ankündigungen für die Anzeigen ─────────────────────────────────
+//
+// Bis zum 6. August gab es genau EINE Ankündigung: sie lag retained auf
+// display/announcement und wurde von der nächsten überschrieben. Für mehrere
+// gleichzeitig — und dafür, dass eine nur bestimmte Häuser betrifft — braucht
+// es eine Tabelle. MQTT bleibt der Verteilweg, die Wahrheit steht hier.
+//
+// stwegs: leer = alle. Sonst die Nummern aus api/lib/groups.js (1–7, 8 = MEG).
+// Der Notfall bleibt bewusst draussen: einer, sofort, ohne Umweg über eine
+// Liste. Was im Alarmfall zählt, ist Einfachheit.
+pool.query(`CREATE TABLE IF NOT EXISTS display_ankuendigungen (
+  id         BIGSERIAL PRIMARY KEY,
+  text       TEXT NOT NULL DEFAULT '',
+  pdf        TEXT NOT NULL DEFAULT '',
+  scroll     BOOLEAN NOT NULL DEFAULT false,
+  stwegs     INTEGER[] NOT NULL DEFAULT '{}',
+  aktiv      BOOLEAN NOT NULL DEFAULT true,
+  von        TEXT,
+  erstellt   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  bis        TIMESTAMPTZ
+)`).catch(e => console.error('[display] Tabelle:', e.message));
 
 // ─── Optionale Module pro STWEG ─────────────────────────────────────
 pool.query(`CREATE TABLE IF NOT EXISTS stweg_modules (

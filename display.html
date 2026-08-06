@@ -88,8 +88,18 @@
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 
   // ===== Zustand =====
+  // In welchem Haus hängt diese Anzeige? Kommt aus der Adresse:
+  //   display.rosenweg4303.ch?stweg=3
+  // Ohne Angabe zeigt sie alles — so verhalten sich die Tafeln, die es schon
+  // gab, unverändert weiter.
+  const MEIN_STWEG = (() => {
+    const n = parseInt(new URLSearchParams(location.search).get('stweg'), 10);
+    return Number.isInteger(n) && n >= 1 && n <= 8 ? n : null;
+  })();
+
   const state = {
-    announcement: null, // { text, active, scroll, ts, by }
+    announcement: null, // { text, active, scroll, ts, by }  (alter Einzelkanal)
+    announcements: [],  // [{ id, text, pdf, scroll, stwegs, ts, by }]  (neu)
     emergency: null,
     lastHeartbeat: 0,   // ms epoch der letzten Heartbeat-Nachricht
     connOk: false,      // MQTT verbunden?
@@ -104,8 +114,38 @@
   // vorher verlangte diese Prüfung einen Text, und eine reine PDF-Ankündigung
   // wäre stumm ignoriert worden.
   const hatInhalt = (d) => !!(d && d.active && ((d.text || '').trim() || (d.pdf || '').trim()));
+
+  // Was diese Anzeige zeigen darf: alles ohne Hausangabe, plus was für ihr
+  // eigenes Haus bestimmt ist. Eine Anzeige ohne ?stweg zeigt alles.
+  function meineAnkuendigungen() {
+    return (state.announcements || []).filter(a =>
+      (a.text || '').trim() || (a.pdf || '').trim()
+    ).filter(a =>
+      !MEIN_STWEG || !a.stwegs || !a.stwegs.length || a.stwegs.includes(MEIN_STWEG)
+    );
+  }
+
+  // Durchblättern: alle ROTATION_MS eine weiter. Der Index zählt einfach hoch
+  // und wird beim Zugriff auf die Länge bezogen — so bleibt er gültig, auch
+  // wenn zwischendurch eine Meldung dazukommt oder verschwindet.
+  const ROTATION_MS = 15000;
+  let blaetterIndex = 0;
+  setInterval(() => {
+    // Nur weiterblättern, wenn es überhaupt etwas zu blättern gibt — sonst
+    // liefe der Zähler bei einer einzigen Meldung sinnlos hoch und die
+    // Signatur unten würde bei gleichem Inhalt ohnehin nichts tun.
+    if (meineAnkuendigungen().length > 1) { blaetterIndex++; render(); }
+  }, ROTATION_MS);
+
   function activeChannel() {
     if (hatInhalt(state.emergency)) return { kind: 'emergency', d: state.emergency };
+    const liste = meineAnkuendigungen();
+    if (liste.length) {
+      const a = liste[blaetterIndex % liste.length];
+      return { kind: 'announce', d: { ...a, active: true }, pos: (blaetterIndex % liste.length) + 1, von: liste.length };
+    }
+    // Rückfall auf den alten Einzelkanal — für den Fall, dass die Liste (noch)
+    // nicht veröffentlicht ist, etwa direkt nach einem Update der API.
     if (hatInhalt(state.announcement)) return { kind: 'announce', d: state.announcement };
     return null;
   }
@@ -267,6 +307,11 @@
     if (t === 'heartbeat') {
       state.lastHeartbeat = Date.now();
       refreshStat();
+      return;
+    }
+    if (t === 'display/announcements') {
+      try { state.announcements = JSON.parse(p.toString()) || []; } catch { state.announcements = []; }
+      render();
       return;
     }
     if (t === 'display/announcement' || t === 'display/emergency') {
