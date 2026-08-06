@@ -15068,8 +15068,14 @@ const ALARM_LISTE = 'Alarm';
 let _alarmStand = null;
 
 async function tafelnAlarmSchalten(aktiv) {
+  const ersterStand = _alarmStand === null;
   if (_alarmStand === aktiv) return;
   _alarmStand = aktiv;
+  // Der erste Stand nach dem Start ist keine Aenderung, sondern das, was
+  // ohnehin schon galt. Nur ein laufender Alarm wird dann noch einmal
+  // durchgesetzt — eine Entwarnung nicht, sonst raeumte jeder Neustart der
+  // API eine von Hand gesetzte Wiedergabeliste weg.
+  if (ersterStand && !aktiv) return;
   const c = apiMqttPublishClient();
   if (!c) return;
   const r = await pool.query('SELECT id FROM anzeigegeraete');
