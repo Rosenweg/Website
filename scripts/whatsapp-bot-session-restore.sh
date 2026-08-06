@@ -1,50 +1,58 @@
 #!/bin/bash
 # Restore eines WhatsApp-Bot-Session-Backups.
 #
-# Verwendung (laeuft im LXC CT 201 = 100.64.2.24):
-#   ssh root@100.64.2.24
-#   ls /mnt/rosenweg-backup/archiv/whatsapp-bot-session/  # Backup auswaehlen
-#   /opt/rosenweg-backup/whatsapp-bot-session-restore.sh wa-session-20260518-030001.tar.gz
+# Laeuft in CT 116 (whatsapp-bridge, pve3, 100.64.2.39). Frueher war das
+# CT 201 = docker-pve1 mit Docker Swarm; seit der Umstellung von Swarm auf
+# CTs heisst das Volume anders und der Bot wird per compose verwaltet, nicht
+# per "docker service scale".
 #
-# Effekt: stoppt den Bot, ersetzt das /data Volume mit dem Backup-Inhalt,
-# startet den Bot wieder. Kein Re-Pairing noetig.
+# Das Archiv holt man vorher her — der Schluessel der naechtlichen Sicherung
+# taugt dafuer nicht, der darf nur abliefern:
+#
+#   # auf dem Fileserver nachsehen, welche es gibt:
+#   ssh root@<pve2> 'pct exec 106 -- ls -la /mnt/cephfs-stage/archiv/whatsapp-bot-session/'
+#   # gewuenschtes Archiv nach CT 116 bringen:
+#   ssh root@<pve2> 'pct exec 106 -- cat /mnt/cephfs-stage/archiv/whatsapp-bot-session/<datei>' > /tmp/<datei>
+#   scp -o 'ProxyJump root@<pve1>' /tmp/<datei> root@<pve3-cluster-ip>:/tmp/
+#   ssh -J root@<pve1> root@<pve3-cluster-ip> 'pct push 116 /tmp/<datei> /tmp/<datei>'
+#
+#   # dann in CT 116:
+#   /opt/rosenweg-backup/whatsapp-bot-session-restore.sh /tmp/<datei>
+#
+# Effekt: stoppt den Bot, ersetzt den Inhalt des Volumes, startet ihn wieder.
+# Kein erneutes Pairing am Telefon noetig.
 
 set -euo pipefail
 
-BACKUP_NAME=${1:?'Usage: restore.sh <backup-filename>'}
-VOL_PATH=/var/lib/docker/volumes/rosenweg_whatsapp-data/_data
-MOUNT=/mnt/rosenweg-backup
-BACKUP_SUBDIR=archiv/whatsapp-bot-session
-BACKUP_FILE="$MOUNT/$BACKUP_SUBDIR/$BACKUP_NAME"
+BACKUP_FILE=${1:?'Aufruf: whatsapp-bot-session-restore.sh <pfad-zum-archiv>'}
+VOL_PATH=/var/lib/docker/volumes/whatsapp-bot_whatsapp-data/_data
+COMPOSE=/opt/whatsapp-bot/compose.yml
+DIENST=whatsapp-bot
 
-mkdir -p "$MOUNT"
-# Credentials in /etc/rosenweg/cifs.cred (chmod 600), NICHT im Repo.
-mountpoint -q "$MOUNT" || mount -t cifs //100.64.2.28/api "$MOUNT" \
-  -o credentials=/etc/rosenweg/cifs.cred,vers=3.0,uid=0,gid=0
+[ -f "$BACKUP_FILE" ] || { echo "FEHLER: Archiv nicht gefunden: $BACKUP_FILE"; exit 1; }
+[ -d "$VOL_PATH" ]    || { echo "FEHLER: Volume nicht gefunden: $VOL_PATH"; exit 1; }
 
-if [ ! -f "$BACKUP_FILE" ]; then
-  echo "FEHLER: Backup-Datei nicht gefunden: $BACKUP_FILE"
-  ls -la "$MOUNT/$BACKUP_SUBDIR/" || true
-  exit 1
-fi
+# Lieber jetzt merken als nach dem Loeschen: ein beschaedigtes Archiv wuerde
+# sonst ein funktionierendes Volume gegen nichts eintauschen.
+gzip -t "$BACKUP_FILE" || { echo "FEHLER: Archiv ist beschaedigt."; exit 1; }
 
-echo "Backup: $BACKUP_FILE"
+echo "Archiv: $BACKUP_FILE ($(du -h "$BACKUP_FILE" | cut -f1))"
 echo "Ziel:   $VOL_PATH"
-read -p "Wirklich restoren? Volume wird ueberschrieben. [yes/no] " ANS
-[ "$ANS" = "yes" ] || { echo "Abgebrochen."; exit 1; }
+read -r -p "Wirklich zurueckspielen? Das Volume wird ueberschrieben. [ja/nein] " ANS
+[ "$ANS" = "ja" ] || { echo "Abgebrochen."; exit 1; }
 
-# Bot stoppen (lokal: wir sind ja schon in CT 201)
-docker service scale rosenweg_whatsapp-bot=0
+docker compose -f "$COMPOSE" stop "$DIENST"
 
-# Volume leeren + Backup einspielen
 rm -rf "${VOL_PATH:?}"/*
-rm -rf "${VOL_PATH:?}"/.[!.]*  2>/dev/null || true
+rm -rf "${VOL_PATH:?}"/.[!.]* 2>/dev/null || true
 tar -xzf "$BACKUP_FILE" -C "$VOL_PATH/"
 
-# Locks pre-emptiv entfernen (Hostname im Lock war frueher gesperrt)
-rm -f "$VOL_PATH"/session/SingletonLock "$VOL_PATH"/session/SingletonSocket "$VOL_PATH"/session/SingletonCookie 2>/dev/null || true
+# Chromium legt Sperren an, die den Hostnamen des damaligen Laufs tragen.
+# Bleiben sie liegen, startet die Sitzung nicht.
+rm -f "$VOL_PATH"/session/SingletonLock \
+      "$VOL_PATH"/session/SingletonSocket \
+      "$VOL_PATH"/session/SingletonCookie 2>/dev/null || true
 
-# Bot wieder hochfahren
-docker service scale rosenweg_whatsapp-bot=1
-echo "Restore fertig. Bot startet. Check Logs:"
-echo "  docker service logs -f rosenweg_whatsapp-bot"
+docker compose -f "$COMPOSE" start "$DIENST"
+echo "Zurueckgespielt. Der Bot startet. Mitlesen:"
+echo "  docker compose -f $COMPOSE logs -f $DIENST"
