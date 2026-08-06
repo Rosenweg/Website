@@ -153,12 +153,17 @@
     // steht er klein darüber und nicht in der grossen Schrift, die sich sonst
     // auf die Fläche zieht.
     //
-    // '#toolbar=0&navpanes=0&view=FitH' nimmt dem eingebauten PDF-Betrachter
-    // seine Leisten. Ohne das steht auf einer Anzeige im Treppenhaus eine
-    // Werkzeugleiste mit Druckknopf.
+    // 'view=Fit' zeigt die GANZE Seite, nicht nur die Breite. Mit 'FitH' füllt
+    // ein A4-Hochformat die Breite und ragt unten aus dem Bild — am 6. August
+    // auf dem Fernseher gesehen: von der Einladung war nur der Briefkopf da.
+    // Lieber schmale Ränder links und rechts als ein abgeschnittener Aushang.
+    //
+    // 'toolbar=0&navpanes=0' nimmt dem eingebauten Betrachter seine Leisten;
+    // sonst steht auf einer Anzeige im Treppenhaus ein Druckknopf. Die kleine
+    // Seitenzahl in der Ecke bleibt trotzdem — die lässt sich nicht abschalten.
     const inner = pdf
       ? `${text ? `<div class="pdf-titel">${esc(text)}</div>` : ''}
-         <iframe class="pdf" src="${esc(pdf)}#toolbar=0&navpanes=0&scrollbar=0&view=FitH"
+         <iframe class="pdf" src="${esc(pdf)}#toolbar=0&navpanes=0&scrollbar=0&view=Fit"
                  title="Aushang"></iframe>`
       : `<div class="body"><span class="fit" id="fittext">${esc(text)}</span></div>`;
 
