@@ -14461,7 +14461,20 @@ function apiMqttPublishClient() {
     clientId: 'rwapi_pub_' + crypto.randomBytes(4).toString('hex'),
   });
   _apiMqttClient.on('error', (e) => console.error('[mqtt-pub]', e.message));
-  _apiMqttClient.on('connect', () => _apiMqttClient.subscribe('display/#', { qos: 0 }));
+  _apiMqttClient.on('connect', () => {
+    _apiMqttClient.subscribe('display/#', { qos: 0 });
+    // Die Liste EINMAL beim Verbinden veröffentlichen.
+    //
+    // Ohne das entsteht das Thema erst, wenn jemand eine Ankündigung anlegt
+    // oder löscht — bis dahin gibt es display/announcements gar nicht, und
+    // jede Anzeige fällt auf den alten Einzelkanal zurück. Dort stand am
+    // 6. August noch ein Test vom Vortag, und alle Tafeln zeigten ihn brav
+    // weiter. Beim Verbinden zu senden räumt das mit auf: ist die Liste leer,
+    // wird auch der alte Kanal geleert.
+    setTimeout(() => {
+      ankuendigungenVeroeffentlichen().catch(e => console.error('[display] Erstlauf:', e.message));
+    }, 2000);
+  });
   _apiMqttClient.on('message', (topic, payload) => {
     const ch = topic === 'display/announcement' ? 'announcement' : topic === 'display/emergency' ? 'emergency' : null;
     if (!ch) return;
@@ -14471,6 +14484,15 @@ function apiMqttPublishClient() {
 }
 // Client früh verbinden, damit der RSS-Feed die retained display/*-Stände sofort kennt.
 setTimeout(() => { try { apiMqttPublishClient(); } catch (_) {} }, 3000);
+
+// Abgelaufene Ankündigungen verschwinden nicht von selbst: 'bis' wird nur beim
+// Veröffentlichen ausgewertet. Ohne diesen Takt bliebe eine Meldung mit
+// Ablaufdatum bis zur nächsten Änderung stehen — also womöglich wochenlang.
+// Fünf Minuten sind fein genug für einen Aushang und grob genug, um den Broker
+// nicht mit retained-Nachrichten zu beschäftigen.
+setInterval(() => {
+  ankuendigungenVeroeffentlichen().catch(() => {});
+}, 5 * 60 * 1000);
 
 // Alle aktiven Zaehler (fuer die Zugriffsverwaltung)
 app.get('/api/mqtt/meters', authMiddleware, requireMqttTechnik, async (req, res) => {
