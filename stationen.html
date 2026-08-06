@@ -116,6 +116,44 @@
 
             <p id="status" class="hidden text-sm"></p>
 
+            <!-- Ankündigungen & Notfall -->
+            <div class="bg-white rounded-xl shadow-sm border mt-8">
+                <div class="p-6 border-b">
+                    <h2 class="text-lg font-semibold text-gray-800">Ankündigungen &amp; Notfall</h2>
+                    <p class="text-sm text-gray-500 mt-1">Was hier steht, zeigen alle Anzeigen im Haus — Kiosk-Seiten unter <span class="font-mono text-xs">display.rosenweg4303.ch</span> ebenso wie die Tafeln unten. Ein Notfall überlagert eine Ankündigung und erscheint als rotes Vollbild.</p>
+                </div>
+                <div class="p-6 space-y-4">
+                    <div id="disp-stand" class="grid gap-3 sm:grid-cols-2">
+                        <p class="text-sm text-gray-400">lade aktuellen Stand…</p>
+                    </div>
+
+                    <div class="border-t pt-4 space-y-3">
+                        <div>
+                            <span class="block text-sm font-medium text-gray-700 mb-1">Kanal</span>
+                            <div id="disp-kanal" class="inline-flex rounded-lg border overflow-hidden text-sm">
+                                <label class="px-3 py-1.5 cursor-pointer select-none has-[:checked]:bg-blue-600 has-[:checked]:text-white">
+                                    <input type="radio" name="dispKanal" value="announcement" class="sr-only" checked> Ankündigung
+                                </label>
+                                <label class="px-3 py-1.5 cursor-pointer select-none border-l has-[:checked]:bg-red-600 has-[:checked]:text-white">
+                                    <input type="radio" name="dispKanal" value="emergency" class="sr-only"> Notfall
+                                </label>
+                            </div>
+                        </div>
+                        <label class="block"><span class="text-sm font-medium text-gray-700">Text</span>
+                            <textarea id="disp-text" rows="3" maxlength="2000" placeholder="Text für die Anzeigen…"
+                                      class="mt-1 w-full border rounded-lg px-3 py-2 text-sm"></textarea></label>
+                        <label class="flex items-center gap-2 text-sm text-gray-600">
+                            <input id="disp-lauf" type="checkbox"> Laufschrift (scrollen)
+                        </label>
+                        <div class="flex flex-wrap items-center gap-3">
+                            <button onclick="dispSenden(true)" class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Senden</button>
+                            <button onclick="dispSenden(false)" class="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50">Anzeige löschen</button>
+                            <p id="disp-meldung" class="text-sm"></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Anzeigegeräte -->
             <div class="bg-white rounded-xl shadow-sm border mt-8">
                 <div class="p-6 border-b flex items-start justify-between gap-4">
@@ -302,6 +340,7 @@
             // Getrennt und ohne await davor: eine leere oder fehlerhafte Liste
             // der Anzeigegeräte darf die Stationsübersicht nicht aufhalten.
             ladeAnzeigen();
+            ladeDispStand();
         });
 
         async function api(pfad, opts = {}) {
@@ -490,6 +529,86 @@
                 hinweis.textContent = `Es gilt „${hausWlan?.netz || 'RK-Clients'}" wie für alle Stationen.`;
             } else {
                 hinweis.textContent = 'Der Schlüssel kommt aus UniFi — hier ist nichts einzutippen.';
+            }
+        }
+
+        // ─── Ankündigungen & Notfall ───────────────────────────────────
+        // Sass bis zum 6. August in der Broker-Oberfläche und las den Stand
+        // aus deren Live-MQTT-Verbindung. Hier gibt es keine — den Stand
+        // liefert /api/display/state aus dem Zwischenspeicher der API.
+        //
+        // Beide Kanäle sind retained: eine Anzeige, die neu startet, hat den
+        // Stand sofort. 'active:false' leert den Kanal.
+
+        function dispAlter(ts) {
+            const n = Number(ts);
+            if (!isFinite(n) || n <= 0) return '';
+            const min = Math.round((Date.now() - (n < 1e12 ? n * 1000 : n)) / 60000);
+            if (min < 1) return 'gerade eben';
+            if (min < 60) return `vor ${min} min`;
+            const h = Math.round(min / 60);
+            return h < 24 ? `vor ${h} h` : `vor ${Math.round(h / 24)} Tagen`;
+        }
+
+        async function ladeDispStand() {
+            const el = document.getElementById('disp-stand');
+            let d;
+            try {
+                d = await api('/api/display/state');
+            } catch (e) {
+                el.innerHTML = `<p class="text-sm text-red-600">${escape(e.message)}</p>`;
+                return;
+            }
+            const kanaele = [
+                { s: d.announcement, titel: 'Ankündigung', farbe: 'blue' },
+                { s: d.emergency, titel: 'Notfall', farbe: 'red' },
+            ];
+            el.innerHTML = kanaele.map(k => {
+                const an = !!(k.s && k.s.active && k.s.text);
+                const rahmen = an
+                    ? (k.farbe === 'red' ? 'border-red-300 bg-red-50' : 'border-blue-200 bg-blue-50')
+                    : 'border-gray-200 bg-gray-50';
+                const kopf = k.farbe === 'red' ? 'text-red-700' : 'text-blue-700';
+                return `<div class="border rounded-lg px-3 py-2 ${rahmen}">
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="text-xs font-semibold ${kopf}">${escape(k.titel)}</span>
+                        ${an && k.s.scroll ? '<span class="text-[10px] uppercase tracking-wide text-gray-400">Laufschrift</span>' : ''}
+                    </div>
+                    ${an
+                        ? `<p class="text-sm text-gray-800 break-words">${escape(k.s.text)}</p>
+                           <p class="text-[11px] text-gray-400 mt-1">von ${escape(k.s.by || '—')}${k.s.ts ? ', ' + dispAlter(k.s.ts) : ''}</p>`
+                        : '<p class="text-sm text-gray-400">— inaktiv —</p>'}
+                </div>`;
+            }).join('');
+        }
+
+        async function dispSenden(aktiv) {
+            const melden = (text, gut) => {
+                const m = document.getElementById('disp-meldung');
+                m.textContent = text;
+                m.className = 'text-sm ' + (gut ? 'text-green-700' : 'text-red-600');
+            };
+            const kanal = document.querySelector('#disp-kanal input[name="dispKanal"]:checked')?.value || 'announcement';
+            const text = document.getElementById('disp-text').value;
+            if (aktiv && !text.trim()) return melden('Text fehlt.', false);
+
+            // Der Notfall geht auf jede Anzeige im Haus, auch ins Treppenhaus.
+            // Ein Fehlgriff auf den falschen Knopf soll das nicht auslösen.
+            if (aktiv && kanal === 'emergency'
+                && !confirm('Notfall auf ALLEN Anzeigen auslösen?\n\nDie Kiosk-Seiten schalten sofort auf rotes Vollbild.')) return;
+
+            melden(aktiv ? 'sende…' : 'lösche…', true);
+            try {
+                await api('/api/display/announce', {
+                    method: 'POST',
+                    body: aktiv ? { channel: kanal, text, scroll: document.getElementById('disp-lauf').checked, active: true }
+                                : { channel: kanal, active: false },
+                });
+                melden(aktiv ? `Gesendet an ${kanal}.` : `${kanal} geleert.`, true);
+                if (aktiv) document.getElementById('disp-text').value = '';
+                await ladeDispStand();
+            } catch (e) {
+                melden(e.message, false);
             }
         }
 

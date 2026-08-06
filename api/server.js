@@ -14749,6 +14749,19 @@ app.patch('/api/mqtt/service-users/:username', authMiddleware, requireMqttTechni
 // Payload JSON: { text, active, scroll, ts, by }. Publish via API-MQTT-Client
 // (Service-User collector braucht display/# im topic_filter).
 const DISPLAY_CHANNELS = { announcement: 'display/announcement', emergency: 'display/emergency' };
+
+// Der aktuelle Stand beider Kanäle, ohne dass der Aufrufer selbst MQTT sprechen
+// muss.
+//
+// Die Bedienkarte sass bis zum 6. August in der Broker-Oberfläche und las ihren
+// Stand aus deren Live-Verbindung. Dort gehört sie nicht hin: Ankündigungen und
+// Notfall sind eine Sache der Anzeigen, nicht der Verrohrung. In der
+// Stationsverwaltung gibt es aber keinen MQTT-Client — also gibt die API den
+// Stand heraus, den sie über ihr 'display/#'-Abo ohnehin mitführt.
+app.get('/api/display/state', authMiddleware, requireMqttTechnik, (req, res) => {
+  res.json({ announcement: displayCache.announcement, emergency: displayCache.emergency });
+});
+
 app.post('/api/display/announce', authMiddleware, requireMqttTechnik, async (req, res) => {
   try {
     const topic = DISPLAY_CHANNELS[String(req.body?.channel || 'announcement')];

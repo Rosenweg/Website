@@ -110,45 +110,15 @@
                 <p id="pubMsg" class="text-sm mt-2"></p>
             </div>
 
-            <!-- Display / Ankündigungen & Notfall -->
+            <!-- Ankündigungen & Notfall: seit dem 6. August in der
+                 Stationsverwaltung. Sie sind eine Sache der Anzeigen, nicht
+                 der Verrohrung — und dort stehen auch die Anzeigegeräte
+                 selbst. Hier bleibt nur der Verweis, damit niemand sucht. -->
             <div class="bg-white rounded-lg shadow p-5">
                 <h2 class="text-sm font-semibold text-gray-700 mb-1">Display / Ankündigungen &amp; Notfall</h2>
-                <p class="text-xs text-gray-500 mb-3">Kiosk-Displays zeigen dies live unter <span class="mono">display.rosenweg4303.ch</span>. Notfall überlagert Ankündigungen (Vollbild rot).</p>
-
-                <!-- Aktueller Stand (retained display/announcement + display/emergency) -->
-                <div id="dispCurrent" class="grid gap-2 sm:grid-cols-2 mb-4">
-                    <p class="text-xs text-gray-400">lade aktuellen Stand…</p>
-                </div>
-
-                <!-- Formular -->
-                <div class="pt-3 border-t space-y-3">
-                    <div>
-                        <label class="block text-xs text-gray-500 mb-1">Kanal</label>
-                        <div id="dispChannel" class="inline-flex rounded-lg border overflow-hidden text-sm">
-                            <label class="px-3 py-1.5 cursor-pointer select-none has-[:checked]:bg-blue-700 has-[:checked]:text-white">
-                                <input type="radio" name="dispChan" value="announcement" class="sr-only" checked> Ankündigung
-                            </label>
-                            <label class="px-3 py-1.5 cursor-pointer select-none border-l has-[:checked]:bg-red-600 has-[:checked]:text-white">
-                                <input type="radio" name="dispChan" value="emergency" class="sr-only"> Notfall
-                            </label>
-                        </div>
-                    </div>
-                    <div>
-                        <label class="block text-xs text-gray-500 mb-1">Text</label>
-                        <textarea id="dispText" rows="3" maxlength="2000" placeholder="Text für die Displays…"
-                                  class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none"></textarea>
-                    </div>
-                    <label class="flex items-center gap-1.5 text-sm text-gray-600 select-none">
-                        <input id="dispScroll" type="checkbox" class="rounded"> Laufschrift (scrollen)
-                    </label>
-                    <div class="flex flex-wrap gap-2 items-center">
-                        <button id="dispSend"
-                                class="px-4 py-2 text-sm rounded-lg bg-blue-700 text-white hover:bg-blue-800 font-medium">Senden</button>
-                        <button id="dispClear"
-                                class="px-4 py-2 text-sm rounded-lg bg-white border hover:bg-gray-50">Anzeige löschen</button>
-                        <p id="dispMsg" class="text-sm"></p>
-                    </div>
-                </div>
+                <p class="text-xs text-gray-500">Diese Bedienung steht jetzt unter
+                   <a href="/stationen.html" class="text-blue-600 hover:text-blue-800">Stationen</a> —
+                   zusammen mit den Anzeigegeräten, auf denen sie erscheint.</p>
             </div>
 
             <!-- Zähler-Zugriff -->
@@ -663,7 +633,7 @@
         const off = 'px-4 py-1.5 text-sm font-medium rounded-md text-gray-500 hover:text-gray-700';
         tl.className = isLive ? on : off;
         ta.className = (isLive ? off : on) + (userIsTechnik ? '' : ' hidden');
-        if (!isLive && userIsTechnik) { loadAdmin(); loadServiceUsers(); loadTopicRules(); renderDispCurrent(); }
+        if (!isLive && userIsTechnik) { loadAdmin(); loadServiceUsers(); loadTopicRules(); }
     }
 
     // ═══════════════════ PUBLISH / TEST (nur Technik) ═══════════════════
@@ -1171,87 +1141,9 @@
         } catch (e) { /* ignorieren */ }
     }
 
-    // ═══════════════════ DISPLAY / ANKÜNDIGUNGEN & NOTFALL (nur Technik) ═══════════════════
-    // Kanäle liegen als retained MQTT-Topics in der Live-`topics`-Map:
-    //   display/announcement , display/emergency  -> JSON {text, active, scroll, ts, by}
-    // "Aktueller Stand" liest daraus; Formular sendet via POST /api/display/announce.
-    function dispRelTime(ts) {
-        const n = Number(ts);
-        if (!isFinite(n) || n <= 0) return '';
-        const ms = n < 1e12 ? n * 1000 : n;   // s- oder ms-Epoch tolerieren
-        return 'vor ' + age(ms);
-    }
-    function dispChannelState(topic) {
-        const d = topics.get(topic);
-        if (!d) return { active: false };
-        try { return JSON.parse(d.value); } catch { return { active: false }; }
-    }
-    function renderDispCurrent() {
-        const el = document.getElementById('dispCurrent');
-        if (!el) return;
-        const chans = [
-            { key: 'display/announcement', label: 'Ankündigung', emerg: false },
-            { key: 'display/emergency', label: 'Notfall', emerg: true },
-        ];
-        el.innerHTML = chans.map(c => {
-            const s = dispChannelState(c.key);
-            const on = !!(s && s.active && s.text);
-            const box = on
-                ? (c.emerg ? 'border-red-300 bg-red-50' : 'border-blue-200 bg-blue-50')
-                : 'border-gray-200 bg-gray-50';
-            const headColor = c.emerg ? 'text-red-700' : 'text-blue-700';
-            const meta = on ? `von ${esc(s.by || '—')}${s.ts ? ', ' + dispRelTime(s.ts) : ''}` : '';
-            return `<div class="border rounded-lg px-3 py-2 ${box}">
-                <div class="flex items-center justify-between mb-1">
-                    <span class="text-xs font-semibold ${headColor}">${esc(c.label)}</span>
-                    ${on && s.scroll ? '<span class="text-[10px] uppercase tracking-wide text-gray-400">Laufschrift</span>' : ''}
-                </div>
-                ${on
-                    ? `<p class="text-sm text-gray-800 break-words">${esc(s.text)}</p>
-                       <p class="text-[11px] text-gray-400 mt-1">${meta}</p>`
-                    : '<p class="text-sm text-gray-400">— inaktiv —</p>'}
-            </div>`;
-        }).join('');
-    }
-    function dispSelectedChannel() {
-        const r = document.querySelector('#dispChannel input[name="dispChan"]:checked');
-        return r ? r.value : 'announcement';
-    }
-    function dispShow(ok, text) {
-        const m = document.getElementById('dispMsg');
-        if (!m) return;
-        m.className = 'text-sm ' + (ok ? 'text-green-600' : 'text-red-600');
-        m.textContent = text;
-    }
-    async function dispSubmit(active) {
-        const channel = dispSelectedChannel();
-        const scroll = document.getElementById('dispScroll').checked;
-        const text = document.getElementById('dispText').value;
-        if (active && !text.trim()) { dispShow(false, 'Text fehlt.'); return; }
-        const body = active ? { channel, text, scroll, active: true } : { channel, active: false };
-        const m = document.getElementById('dispMsg');
-        if (m) { m.className = 'text-sm text-gray-500'; m.textContent = active ? 'sende…' : 'lösche…'; }
-        try {
-            const r = await AuthentikAuth.apiFetch('/api/display/announce', { method: 'POST', body });
-            if (r.status === 403) { dispShow(false, 'Nur für Technik.'); return; }
-            if (!r.ok) {
-                let detail = '';
-                try { detail = (await r.json()).error || ''; } catch {}
-                dispShow(false, `Fehler (${r.status})${detail ? ': ' + detail : ''}`);
-                return;
-            }
-            dispShow(true, active ? `Gesendet an ${channel}.` : `${channel} geleert.`);
-            if (active) document.getElementById('dispText').value = '';
-            renderDispCurrent();
-        } catch (e) { dispShow(false, 'Netzwerkfehler: ' + (e.message || e)); }
-    }
-    // "Aktueller Stand" leicht mitziehen — nur wenn der Admin-Tab sichtbar ist
-    // (eigener 2s-Takt, hält den Live-render()-Pfad unangetastet).
-    setInterval(() => {
-        if (!userIsTechnik) return;
-        const admin = document.getElementById('view-admin');
-        if (admin && !admin.classList.contains('hidden')) renderDispCurrent();
-    }, 2000);
+    // Die Bedienung für Ankündigungen und Notfall ist am 6. August in die
+    // Stationsverwaltung gezogen (stationen.html). Den Stand liefert dort
+    // /api/display/state; eine eigene MQTT-Verbindung braucht sie nicht mehr.
 
     // ═══════════════════ INIT ═══════════════════
     async function init() {
@@ -1288,11 +1180,6 @@
             if (uapS) uapS.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); uapDoSearch(); } });
 
             // Display / Ankündigungen & Notfall
-            const dSend = document.getElementById('dispSend');
-            const dClear = document.getElementById('dispClear');
-            if (dSend) dSend.addEventListener('click', () => dispSubmit(true));
-            if (dClear) dClear.addEventListener('click', () => dispSubmit(false));
-            renderDispCurrent();
         }
 
         connect();
