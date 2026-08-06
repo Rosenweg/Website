@@ -142,6 +142,17 @@
                         <label class="block"><span class="text-sm font-medium text-gray-700">Text</span>
                             <textarea id="disp-text" rows="3" maxlength="2000" placeholder="Text für die Anzeigen…"
                                       class="mt-1 w-full border rounded-lg px-3 py-2 text-sm"></textarea></label>
+                        <div>
+                            <span class="block text-sm font-medium text-gray-700">Aushang (PDF)</span>
+                            <p class="text-xs text-gray-500 mb-1">Statt oder zusätzlich zum Text. Der Text steht dann als Überschrift darüber. Bis 6 MB.</p>
+                            <div class="flex flex-wrap items-center gap-3">
+                                <input id="disp-pdf" type="file" accept="application/pdf,.pdf"
+                                       onchange="dispPdfGewaehlt()" class="text-sm">
+                                <span id="disp-pdf-status" class="text-xs text-gray-500"></span>
+                                <button type="button" id="disp-pdf-weg" onclick="dispPdfEntfernen()"
+                                        class="hidden text-xs text-red-600 hover:text-red-800">entfernen</button>
+                            </div>
+                        </div>
                         <label class="flex items-center gap-2 text-sm text-gray-600">
                             <input id="disp-lauf" type="checkbox"> Laufschrift (scrollen)
                         </label>
@@ -582,6 +593,53 @@
             }).join('');
         }
 
+        // Das hochgeladene PDF, bis es mitgeschickt wird. Hochgeladen wird
+        // sofort bei der Auswahl — sonst müsste beim Senden erst eine
+        // mehrere Megabyte grosse Datei über die Leitung, und der Knopf
+        // hinge scheinbar grundlos.
+        let dispPdfUrl = '';
+
+        function dispPdfStatus(text, farbe = 'text-gray-500') {
+            const s = document.getElementById('disp-pdf-status');
+            s.textContent = text;
+            s.className = 'text-xs ' + farbe;
+            document.getElementById('disp-pdf-weg').classList.toggle('hidden', !dispPdfUrl);
+        }
+
+        function dispPdfEntfernen() {
+            dispPdfUrl = '';
+            document.getElementById('disp-pdf').value = '';
+            dispPdfStatus('');
+        }
+
+        async function dispPdfGewaehlt() {
+            const datei = document.getElementById('disp-pdf').files?.[0];
+            dispPdfUrl = '';
+            if (!datei) return dispPdfStatus('');
+            if (datei.size > 6 * 1024 * 1024) {
+                return dispPdfStatus(`zu gross (${Math.round(datei.size / 1048576)} MB, erlaubt sind 6)`, 'text-red-600');
+            }
+            dispPdfStatus('lade hoch…');
+            try {
+                // Die API nimmt base64 im JSON-Rumpf — denselben Weg gehen
+                // die Brief-Uploads schon.
+                const base64 = await new Promise((fertig, schief) => {
+                    const l = new FileReader();
+                    l.onload = () => fertig(String(l.result).split(',')[1] || '');
+                    l.onerror = () => schief(new Error('Datei nicht lesbar'));
+                    l.readAsDataURL(datei);
+                });
+                const a = await api('/api/display/pdf', {
+                    method: 'POST',
+                    body: { pdf_base64: base64, dateiname: datei.name },
+                });
+                dispPdfUrl = a.url;
+                dispPdfStatus(`bereit: ${datei.name}`, 'text-green-700');
+            } catch (e) {
+                dispPdfStatus(e.message, 'text-red-600');
+            }
+        }
+
         async function dispSenden(aktiv) {
             const melden = (text, gut) => {
                 const m = document.getElementById('disp-meldung');
@@ -590,7 +648,7 @@
             };
             const kanal = document.querySelector('#disp-kanal input[name="dispKanal"]:checked')?.value || 'announcement';
             const text = document.getElementById('disp-text').value;
-            if (aktiv && !text.trim()) return melden('Text fehlt.', false);
+            if (aktiv && !text.trim() && !dispPdfUrl) return melden('Text oder PDF nötig.', false);
 
             // Der Notfall geht auf jede Anzeige im Haus, auch ins Treppenhaus.
             // Ein Fehlgriff auf den falschen Knopf soll das nicht auslösen.
@@ -601,11 +659,12 @@
             try {
                 await api('/api/display/announce', {
                     method: 'POST',
-                    body: aktiv ? { channel: kanal, text, scroll: document.getElementById('disp-lauf').checked, active: true }
+                    body: aktiv ? { channel: kanal, text, pdf: dispPdfUrl,
+                                    scroll: document.getElementById('disp-lauf').checked, active: true }
                                 : { channel: kanal, active: false },
                 });
                 melden(aktiv ? `Gesendet an ${kanal}.` : `${kanal} geleert.`, true);
-                if (aktiv) document.getElementById('disp-text').value = '';
+                if (aktiv) { document.getElementById('disp-text').value = ''; dispPdfEntfernen(); }
                 await ladeDispStand();
             } catch (e) {
                 melden(e.message, false);
