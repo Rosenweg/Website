@@ -92,7 +92,8 @@
        'toolbar=0&navpanes=0' nimmt dem Betrachter seine Leisten — auf einer
        Tafel im Treppenhaus braucht niemand einen Druckknopf. */
     .blatt-pdf { padding: 0; }
-    .blatt-pdf iframe { width: 100%; height: 100%; border: 0; background: #fff; }
+    .blatt-pdf img { flex: 1 1 auto; min-height: 0; width: 100%; height: 100%;
+                     object-fit: contain; background: #fff; display: block; }
 
     /* Uhr des Schirms, oben rechts. Die Marke traegt das Blatt selbst, sonst
        stuende das Wappen zweimal im Bild. */
@@ -269,10 +270,19 @@
     const text = (a.text || '').trim();
     const pdf = (a.pdf || '').trim();
     if (pdf) {
+      // Als BILD, nicht als PDF. Die Tafeln laufen unter Android, und deren
+      // WebView hat keinen PDF-Betrachter: ein <iframe src="...pdf"> wird nicht
+      // eingebettet, sondern an die App weitergereicht. SlideShows eigener
+      // Betrachter uebernimmt dann den ganzen Schirm und zieht die Seite auf
+      // die Breite — am 6. August auf dem Fernseher gemessen: von Rand zu Rand
+      // weiss, ohne Kopfzeile, vom Aushang nur das obere Drittel.
+      //
+      // Die API rechnet die erste Seite in ein PNG (/api/display/pdfbild/...).
+      // Gleiches Seitenverhaeltnis wie das Papier, also randlos im Blatt.
+      const bild = pdf.replace('/api/display/pdf/', '/api/display/pdfbild/');
       return `<div class="blatt blatt-pdf">
                 ${text ? `<div class="blatt-titel">${esc(text)}</div>` : ''}
-                <iframe src="${esc(pdf)}#toolbar=0&navpanes=0&scrollbar=0&view=Fit"
-                        title="Aushang" scrolling="no"></iframe>
+                <img src="${esc(bild)}" alt="Aushang">
               </div>`;
     }
     return `<div class="blatt blatt-text">
