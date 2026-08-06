@@ -14975,15 +14975,27 @@ function zipMitEinerDatei(name, inhalt) {
   return Buffer.concat([lokal, nameBuf, daten, zentral, nameBuf, ende]);
 }
 
-// Zwei Formen, weil unklar ist, welche die App wirklich anfragt:
+// Das Archiv, das eine Anzeigetafel per MQTT-Befehl "synchronize" holt.
 //
-//   .../geraetedatei/<id>.zip          die Adresse zeigt direkt auf das Archiv
-//   .../geraetedatei/<id>/irgendwas    die Adresse ist ein Ordner und die App
-//                                      haengt ihren Dateinamen an
+// Darin liegt genau eine Datei: die Adresse der Anzeigeseite, um die
+// Hausnummer des Geraets ergaenzt. Damit muss niemand mehr an der Tafel
+// selbst herumtippen, wenn sich die Adresse aendert.
 //
-// Die Doku des Herstellers sagt "URL auf die ZIP-Datei" UND "Dateiname auf
-// file.zip setzen" — beides zugleich ergibt nur Sinn, wenn angehaengt wird.
-// Statt weiter zu raten: beide bedienen, der Dateiname wird ignoriert.
+// Sie heisst alarm.url und ersetzt damit die Datei, die auf den Tafeln
+// schon so hiess — ein neuer Name haette danebengelegen statt ersetzt.
+// Die Alarm-Playlist zeigt auf den Ordner unten.
+//
+// Alles von uns liegt im Ordner "rosenweg" — auf den Tafeln laeuft auch
+// Fremdes, und dessen Dateien fasst niemand an. Der Normaldurchlauf spielt
+// den Hauptordner, die Alarm-Playlist den Ordner rosenweg. Eine zusaetzliche
+// Datei statt einer ersetzten hiesse: die Adresse erscheint zweimal.
+//
+// Der Ordner steckt im Archiv, nicht im Befehl: gemessen am Geraet legt
+// "target" nur den Namen der heruntergeladenen ZIP fest, entpackt wird nach
+// der Struktur im Archiv. "target": "rosenweg/file.zip" quittiert die App
+// zwar mit success, die Datei landet aber trotzdem nicht dort.
+const ANZEIGE_ORDNER = 'rosenweg';
+
 async function geraetedateiSenden(req, res) {
   try {
     const r = await pool.query('SELECT haus FROM anzeigegeraete WHERE id = $1', [req.params.id]);
@@ -14993,23 +15005,14 @@ async function geraetedateiSenden(req, res) {
       + (Number.isInteger(haus) && haus > 0 ? `?haus=${haus}` : '');
     res.set('Content-Type', 'application/zip');
     res.set('Cache-Control', 'no-store');
-    res.send(zipMitEinerDatei('anzeige.url', adresse + '\n'));
+    res.send(zipMitEinerDatei(`${ANZEIGE_ORDNER}/alarm.url`, adresse + '\n'));
   } catch (e) { res.status(500).json({ error: e.message }); }
 }
 
+// Zwei Adressformen, damit die Tafel nicht auf eine davon festgelegt ist —
+// der angehaengte Dateiname wird ignoriert.
 app.get('/api/display/geraetedatei/:id/:datei', geraetedateiSenden);
-app.get('/api/display/geraetedatei/:id.zip', async (req, res) => {
-  try {
-    const r = await pool.query('SELECT haus FROM anzeigegeraete WHERE id = $1', [req.params.id]);
-    if (!r.rows.length) return res.status(404).end();
-    const haus = Number(r.rows[0].haus);
-    const adresse = 'https://display.rosenweg4303.ch'
-      + (Number.isInteger(haus) && haus > 0 ? `?haus=${haus}` : '');
-    res.set('Content-Type', 'application/zip');
-    res.set('Cache-Control', 'no-store');
-    res.send(zipMitEinerDatei('anzeige.url', adresse + '\n'));
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
+app.get('/api/display/geraetedatei/:id.zip', geraetedateiSenden);
 
 app.post('/api/display/announce', authMiddleware, requireMqttTechnik, async (req, res) => {
   try {
