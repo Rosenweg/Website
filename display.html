@@ -195,18 +195,20 @@
   // Durchblättern: alle ROTATION_MS eine weiter. Der Index zählt einfach hoch
   // und wird beim Zugriff auf die Länge bezogen — so bleibt er gültig, auch
   // wenn zwischendurch eine Meldung dazukommt oder verschwindet.
+  // Welcher Aushang gerade dran ist, leitet sich aus der UHRZEIT ab und nicht
+  // aus einem Zähler in dieser Seite.
+  //
+  // Der Grund steht im Zugriffsprotokoll: die Tafeln laden die Seite alle neun
+  // bis zehn Sekunden neu — so lange steht das .url-Element in ihrer
+  // Wiedergabeliste. Ein hochzählender Index kommt nie bis zum Wechsel, er
+  // beginnt jedes Mal wieder bei null. Am 6. August zeigte das Tablet deshalb
+  // stundenlang dieselbe Meldung, obwohl zwei aktiv waren.
+  //
+  // Aus der Uhrzeit gerechnet ist das gleichgültig: nach dem Neuladen steht
+  // dieselbe Meldung da wie vorher, und alle Tafeln im Haus zeigen zur selben
+  // Sekunde dasselbe Blatt.
   const ROTATION_MS = 15000;
-  let blaetterIndex = 0;
   let zuletztGezeigt = 1;
-  setInterval(() => {
-    // Um so viele weiterblättern, wie gerade nebeneinander stehen — sonst
-    // käme auf einem breiten Schirm jede Meldung zweimal vorbei, einmal
-    // links und einmal rechts.
-    if (meineAnkuendigungen().length > zuletztGezeigt) {
-      blaetterIndex += zuletztGezeigt;
-      render();
-    }
-  }, ROTATION_MS);
 
   // Wie viele A4-Blätter nebeneinander passen.
   //
@@ -227,7 +229,10 @@
     if (liste.length) {
       const n = Math.min(blaetterProSchirm(), liste.length);
       zuletztGezeigt = n;
-      const start = ((blaetterIndex % liste.length) + liste.length) % liste.length;
+      // Um n weiterrücken je Takt, nicht um eins — sonst käme auf einem breiten
+      // Schirm jede Meldung zweimal vorbei, einmal links und einmal rechts.
+      const takt = Math.floor(Date.now() / ROTATION_MS);
+      const start = ((takt * n) % liste.length + liste.length) % liste.length;
       const auswahl = Array.from({ length: n }, (_, i) => liste[(start + i) % liste.length]);
       return { kind: 'announce', liste: auswahl, von: liste.length };
     }
@@ -542,6 +547,10 @@
     // (Auf Größenänderungen hört ein eigener Zuhörer weiter oben.)
     setInterval(() => {
       if (shown.kind === 'idle') renderIdle();
+      // render() prüft selbst, ob sich etwas geändert hat, und zeichnet sonst
+      // nicht neu — der Sekundentakt kostet also nichts und lässt den Wechsel
+      // pünktlich zum nächsten Zeitfenster passieren.
+      render();
       schirmUhr();
       updateAge();
     }, 1000);
