@@ -104,7 +104,11 @@ const ROLE_DEFAULTS = {
     leerlauf_anzeige: {
       enabled: true,
       url: 'https://display.rosenweg4303.ch',
-      nach_sekunden: 120,
+      // Eine Minute (Entscheid vom 6. August 2026, vorher zwei). Der Schirm
+      // wird ohnehin nie mehr schwarz — es geht also nicht darum, etwas zu
+      // sparen, sondern darum, wie schnell aus einem verlassenen Arbeitsplatz
+      // wieder eine Aushangtafel wird.
+      nach_sekunden: 60,
     },
     // Programme. Die Positivliste selbst (apps.lokal, apps.schreibtisch,
     // apps.favoriten) steht bewusst NICHT hier, sondern in der Station:
