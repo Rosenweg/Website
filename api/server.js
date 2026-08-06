@@ -15009,6 +15009,36 @@ async function geraetedateiSenden(req, res) {
   } catch (e) { res.status(500).json({ error: e.message }); }
 }
 
+// Eine Tafel anstossen, ihre Datei neu zu holen.
+//
+// Ohne das muesste nach jeder Aenderung des Hauses jemand von Hand
+// synchronisieren — der Handgriff, den man vergisst, und dann zeigt eine
+// Tafel monatelang die Ankuendigungen des falschen Hauses.
+//
+// Die Tafeln haengen in einem eigenen VLAN und erreichen die API direkt;
+// der Weg ueber die oeffentliche Adresse waere ein Umweg und wuerde das
+// Archiv jedes Geraets nach aussen stellen.
+const ANZEIGE_SYNC_BASIS = process.env.ANZEIGE_SYNC_BASIS || 'http://100.64.2.52:3000';
+
+function tafelSynchronisieren(id) {
+  const c = apiMqttPublishClient();
+  if (!c) return false;
+  c.publish(`SLIDESHOW/REQ/${id}/API`, JSON.stringify({
+    operation: 'synchronize',
+    parameters: {
+      // method und target sind nicht optional: ohne sie antwortet die App
+      // mit 404, auch wenn die Adresse stimmt. target ist der Name der
+      // geladenen ZIP, nicht ihr Ziel — der Ordner steckt im Archiv.
+      url: `${ANZEIGE_SYNC_BASIS}/api/display/geraetedatei/${encodeURIComponent(id)}.zip`,
+      method: 'GET',
+      target: 'file.zip',
+      clearFolder: false,
+    },
+  }));
+  return true;
+}
+app.locals.tafelSynchronisieren = tafelSynchronisieren;
+
 // Zwei Adressformen, damit die Tafel nicht auf eine davon festgelegt ist —
 // der angehaengte Dateiname wird ignoriert.
 app.get('/api/display/geraetedatei/:id/:datei', geraetedateiSenden);
