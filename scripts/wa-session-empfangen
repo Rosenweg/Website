@@ -1,0 +1,44 @@
+#!/bin/bash
+# Nimmt EIN Archiv der WhatsApp-Sitzung entgegen und legt es ab.
+#
+# Laeuft auf CT 106 (fileserver) als erzwungener Befehl hinter dem Schluessel
+# des Bot-Containers (CT 116). Der Client kann nichts anderes ausloesen: was
+# er als Kommando schickt, wird verworfen, gelesen wird nur sein stdin.
+#
+# Absicht dahinter: fuer eine naechtliche Sicherung braucht niemand eine
+# Root-Shell auf dem Fileserver. Frueher lief der Weg ueber CIFS mit dem
+# Passwort von api-svc im Dateisystem des Bot-Containers.
+#
+# Zeitstempel und Aufbewahrung entscheidet diese Seite — der Client bestimmt
+# weder Dateinamen noch Ablageort.
+
+set -euo pipefail
+
+ZIEL=/mnt/cephfs-stage/archiv/whatsapp-bot-session
+TAGE=14
+LOG=/var/log/wa-session-empfangen.log
+
+install -d -m 2775 -g rosenweg "$ZIEL"
+DATEI="$ZIEL/wa-session-$(date +%Y%m%d-%H%M%S).tar.gz"
+
+# Erst daneben schreiben, dann umbenennen: ein abgebrochener Transfer soll
+# kein halbes Archiv hinterlassen, das wie eine gueltige Sicherung aussieht.
+TMP="$DATEI.teil"
+cat > "$TMP"
+if ! gzip -t "$TMP" 2>/dev/null; then
+  rm -f "$TMP"
+  echo "[$(date +%FT%T)] FEHLER: kein gueltiges gzip empfangen" >> "$LOG"
+  echo "FEHLER: kein gueltiges gzip empfangen" >&2
+  exit 1
+fi
+mv "$TMP" "$DATEI"
+chgrp rosenweg "$DATEI" 2>/dev/null || true
+chmod 664 "$DATEI"
+
+find "$ZIEL" -name 'wa-session-*.tar.gz' -mtime +$TAGE -delete 2>/dev/null || true
+find "$ZIEL" -name 'wa-session-*.tar.gz.teil' -mtime +1 -delete 2>/dev/null || true
+
+BEHALTEN=$(find "$ZIEL" -name 'wa-session-*.tar.gz' | wc -l)
+GROESSE=$(du -h "$DATEI" | cut -f1)
+echo "[$(date +%FT%T)] OK $(basename "$DATEI") $GROESSE, $BEHALTEN Sicherungen behalten" >> "$LOG"
+echo "OK $(basename "$DATEI") $GROESSE, $BEHALTEN behalten"
