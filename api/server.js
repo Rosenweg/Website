@@ -15142,7 +15142,29 @@ function notfallAktiv(d) {
 // Verbinden noch einmal — ohne diese Sperre schickte jeder Neustart der API
 // den Tafeln erneut einen Alarm.
 const ALARM_LISTE = 'Alarm';
+const ALARM_NACHFASSEN_MS = 30000;
 let _alarmStand = null;
+let _alarmTakt = null;
+
+// Den Alarm einmal an alle Tafeln schicken.
+//
+// Die Zone kommt aus der Datenbank: der Name der Wiedergabeliste ist ueberall
+// "Alarm", die Zone nicht. Ohne Angabe nimmt die App die Hauptzone ihres
+// Layouts — beim Tablet im Eingang ist das eine Kamerazone, und der Befehl
+// verpuffte wirkungslos.
+async function tafelnAlarmSenden(aktiv) {
+  const c = apiMqttPublishClient();
+  if (!c) return 0;
+  const r = await pool.query('SELECT id, alarm_zone FROM anzeigegeraete');
+  for (const g of r.rows) {
+    const zone = (g.alarm_zone || '').trim();
+    const befehl = aktiv
+      ? { operation: 'playlist/set', parameters: { ...(zone ? { zoneName: zone } : {}), playlistName: ALARM_LISTE } }
+      : { operation: 'playlist/clear', ...(zone ? { parameters: { zoneName: zone } } : {}) };
+    c.publish(`SLIDESHOW/REQ/${g.id}/API`, JSON.stringify(befehl));
+  }
+  return r.rows.length;
+}
 
 async function tafelnAlarmSchalten(aktiv) {
   const ersterStand = _alarmStand === null;
@@ -15153,14 +15175,24 @@ async function tafelnAlarmSchalten(aktiv) {
   // durchgesetzt — eine Entwarnung nicht, sonst raeumte jeder Neustart der
   // API eine von Hand gesetzte Wiedergabeliste weg.
   if (ersterStand && !aktiv) return;
-  const c = apiMqttPublishClient();
-  if (!c) return;
-  const r = await pool.query('SELECT id FROM anzeigegeraete');
-  const befehl = JSON.stringify(aktiv
-    ? { operation: 'playlist/set', parameters: { playlistName: ALARM_LISTE } }
-    : { operation: 'playlist/clear' });
-  for (const g of r.rows) c.publish(`SLIDESHOW/REQ/${g.id}/API`, befehl);
-  if (r.rows.length) console.log(`[tafeln] Alarm ${aktiv ? 'an' : 'aus'} an ${r.rows.length} Gerät(e)`);
+
+  const anzahl = await tafelnAlarmSenden(aktiv);
+  if (anzahl) console.log(`[tafeln] Alarm ${aktiv ? 'an' : 'aus'} an ${anzahl} Gerät(e)`);
+
+  // Nachfassen, solange der Notfall laeuft.
+  //
+  // Am 6. August 2026 gemessen: das Tablet im Eingang faellt nach kurzer Zeit
+  // auf seine eigene Wiedergabeliste zurueck — vermutlich durch den Zeitplan
+  // seines Layouts. Ein Alarm, der nach einer Minute wieder verschwindet, ist
+  // keiner. Warum genau es zurueckfaellt, ist damit zweitrangig: alle 30
+  // Sekunden erneut zu senden holt es in jedem Fall zurueck.
+  clearInterval(_alarmTakt);
+  _alarmTakt = null;
+  if (aktiv) {
+    _alarmTakt = setInterval(() => {
+      tafelnAlarmSenden(true).catch(e => console.error('[tafeln] Nachfassen:', e.message));
+    }, ALARM_NACHFASSEN_MS);
+  }
 }
 
 // Zwei Adressformen, damit die Tafel nicht auf eine davon festgelegt ist —
