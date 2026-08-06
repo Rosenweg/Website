@@ -664,7 +664,62 @@ router.post('/admin/anzeigen', authMiddleware, nurTechnik, a(async (req, res) =>
      String(req.body?.notiz || '').slice(0, 500) || null, id, mqtt_benutzer, haus,
      req.user?.email || req.user?.name || null]);
 
+  // Gleich synchronisieren: das Gerät soll seine Adresse haben, sobald es
+  // angelegt ist. Läuft es noch nicht, verpufft der Befehl folgenlos — dann
+  // holt es die Datei beim nächsten Speichern oder von Hand.
+  req.app.locals.tafelSynchronisieren?.(id);
+
   res.json({ id, name, haus, ...anzeigeZettel({ mqtt_thema: id, mqtt_benutzer, passwort, haus }) });
+}));
+
+// PATCH /api/stations/admin/anzeigen/:id — Standort, Notiz, Haus ändern.
+//
+// Bis hierher liess sich ein Gerät nur anlegen und löschen. Zog eine Tafel um
+// oder war das Haus falsch getippt, blieb nur beides — mit neuem MQTT-Zugang,
+// den man an der Tafel wieder eintippen muss.
+router.patch('/admin/anzeigen/:id', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const alt = await pool.query('SELECT haus FROM anzeigegeraete WHERE id = $1', [req.params.id]);
+  if (!alt.rows.length) return res.status(404).json({ error: 'Nicht gefunden' });
+
+  const felder = [];
+  const werte = [];
+  const setze = (spalte, wert) => { werte.push(wert); felder.push(`${spalte} = $${werte.length}`); };
+
+  if (req.body?.standort !== undefined) setze('standort', String(req.body.standort || '').slice(0, 200) || null);
+  if (req.body?.notiz !== undefined) setze('notiz', String(req.body.notiz || '').slice(0, 500) || null);
+
+  // Das Haus darf auch geleert werden — ein Testgerät gehört zu keinem.
+  let hausNeu;
+  if (req.body?.haus !== undefined) {
+    hausNeu = HAEUSER.includes(Number(req.body.haus)) ? Number(req.body.haus) : null;
+    setze('haus', hausNeu);
+  }
+  if (!felder.length) return res.status(400).json({ error: 'Nichts zu ändern' });
+
+  werte.push(req.params.id);
+  const r = await pool.query(
+    `UPDATE anzeigegeraete SET ${felder.join(', ')} WHERE id = $${werte.length}
+     RETURNING id, name, standort, notiz, mqtt_thema, mqtt_benutzer, haus`, werte);
+
+  // Nur beim Haus: daran hängt der Inhalt der Datei auf der Tafel.
+  if (hausNeu !== undefined && hausNeu !== alt.rows[0].haus) {
+    req.app.locals.tafelSynchronisieren?.(req.params.id);
+  }
+  res.json(r.rows[0]);
+}));
+
+// POST /api/stations/admin/anzeigen/:id/synchronisieren — von Hand anstossen.
+//
+// Die Rückmeldung sagt nur, dass der Befehl den Broker erreicht hat. Ob die
+// Tafel ihn befolgt, weiss sie allein — sie antwortet auf ihrem eigenen Kanal.
+router.post('/admin/anzeigen/:id/synchronisieren', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const r = await pool.query('SELECT 1 FROM anzeigegeraete WHERE id = $1', [req.params.id]);
+  if (!r.rows.length) return res.status(404).json({ error: 'Nicht gefunden' });
+  const ok = req.app.locals.tafelSynchronisieren?.(req.params.id);
+  if (!ok) return res.status(503).json({ error: 'Keine Verbindung zum MQTT-Broker' });
+  res.json({ ok: true });
 }));
 
 // DELETE /api/stations/admin/anzeigen/:id — Gerät und sein MQTT-Zugang.
