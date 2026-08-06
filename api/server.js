@@ -14824,6 +14824,31 @@ app.post('/api/display/pdf', authMiddleware, requireMqttTechnik, async (req, res
     if (buf.subarray(0, 5).toString('latin1') !== '%PDF-') {
       return res.status(400).json({ error: 'Das ist keine PDF-Datei' });
     }
+    // Genau eine Seite. Von einem mehrseitigen Aushang zeigt die Tafel ohnehin
+    // nur die erste — ohne diese Pruefung faende das niemand heraus, ausser
+    // beim Vorbeigehen im Treppenhaus. Lieber hier ein klarer Satz.
+    const { execFile } = require('child_process');
+    const pruefdatei = pathModule.join('/tmp', `pruef-${Date.now()}.pdf`);
+    await fs.writeFile(pruefdatei, buf);
+    let seiten = 0;
+    try {
+      const ausgabe = await new Promise((fertig, schiefgegangen) => {
+        execFile('pdfinfo', [pruefdatei], { timeout: 15000 },
+          (err, out) => (err ? schiefgegangen(err) : fertig(out)));
+      });
+      seiten = Number((/^Pages:\s+(\d+)/m.exec(ausgabe) || [])[1] || 0);
+    } catch (e) {
+      await fs.unlink(pruefdatei).catch(() => {});
+      return res.status(400).json({ error: 'Die Datei liess sich nicht lesen — ist sie beschädigt?' });
+    }
+    await fs.unlink(pruefdatei).catch(() => {});
+    if (seiten > 1) {
+      return res.status(400).json({
+        error: `Der Aushang hat ${seiten} Seiten. Erlaubt ist genau eine — auf der Tafel `
+             + 'wäre nur die erste zu sehen. Bitte auf eine Seite kürzen.',
+      });
+    }
+
     await fs.mkdir(ANZEIGE_PDF_DIR, { recursive: true });
     const name = anzeigePdfName(req.body?.dateiname);
     await fs.writeFile(pathModule.join(ANZEIGE_PDF_DIR, name), buf);
@@ -14844,6 +14869,58 @@ app.get('/api/display/pdf/:name', async (req, res) => {
     res.set('Cache-Control', 'public, max-age=300');
     res.send(inhalt);
   } catch { res.status(404).end(); }
+});
+
+// GET /api/display/pdfbild/:name — die erste Seite als PNG. ÖFFENTLICH.
+//
+// Warum ein Bild und nicht das PDF selbst: die Anzeigetafeln laufen unter
+// Android, und deren WebView hat keinen eingebauten PDF-Betrachter. Ein
+// <iframe src="...pdf"> wird dort nicht eingebettet, sondern an die App
+// weitergereicht — SlideShows eigener Betrachter uebernimmt den ganzen Schirm
+// und zeigt die Seite auf Breite gezogen, vom Aushang nur das obere Drittel.
+// Am 6. August 2026 auf dem Fernseher im Heizungsraum gemessen: das Bild war
+// von Rand zu Rand weiss, ohne Kopfzeile, ohne Blatt.
+//
+// Als Bild passiert nichts davon. Es hat dieselben Seitenverhaeltnisse wie das
+// Papier, fuellt das A4-Blatt randlos und funktioniert auf jedem Geraet gleich.
+//
+// Nur die erste Seite: mehr sieht im Treppenhaus ohnehin niemand, und die
+// Gestaltungsrichtlinie verlangt fuer Aushaenge genau eine Seite.
+const ANZEIGE_BILD_CACHE = '/tmp/anzeige-bilder';
+
+app.get('/api/display/pdfbild/:name', async (req, res) => {
+  try {
+    const name = String(req.params.name || '').split(/[\\/]/).pop();
+    if (!/^[\w.\- ]+\.pdf$/i.test(name)) return res.status(400).end();
+    const quelle = pathModule.join(ANZEIGE_PDF_DIR, name);
+    if (!quelle.startsWith(ANZEIGE_PDF_DIR + pathModule.sep)) return res.status(400).end();
+
+    const stat = await fs.stat(quelle);
+    // Der Zeitstempel steckt im Namen: wird dieselbe Datei ersetzt, entsteht
+    // ein neues Bild statt eines alten aus dem Zwischenspeicher.
+    const marke = `${stat.size}-${Math.floor(stat.mtimeMs)}`;
+    const ziel = pathModule.join(ANZEIGE_BILD_CACHE, `${marke}-${name}.png`);
+
+    let bild = null;
+    try { bild = await fs.readFile(ziel); } catch { /* noch nicht gerechnet */ }
+    if (!bild) {
+      await fs.mkdir(ANZEIGE_BILD_CACHE, { recursive: true });
+      // -singlefile haengt die Endung selbst an, deshalb ohne '.png' uebergeben.
+      const rumpf = ziel.replace(/\.png$/, '');
+      const { execFile } = require('child_process');
+      await new Promise((fertig, schiefgegangen) => {
+        execFile('pdftoppm', ['-png', '-r', '150', '-f', '1', '-l', '1', '-singlefile', quelle, rumpf],
+          { timeout: 20000 }, (err) => (err ? schiefgegangen(err) : fertig()));
+      });
+      bild = await fs.readFile(ziel);
+    }
+    res.set('Content-Type', 'image/png');
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.send(bild);
+  } catch (e) {
+    console.error('[display] pdfbild:', e.message);
+    res.status(404).end();
+  }
 });
 
 // ─── Mehrere Ankündigungen, je Haus ──────────────────────────────────────
