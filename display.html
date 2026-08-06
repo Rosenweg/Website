@@ -103,6 +103,14 @@
 
     /* ===== Notfall (Vollbild rot) ===== */
     body.emergency { background: #000; }
+    /* Beim Umbau des Ankuendigungs-Blocks sind diese beiden Regeln verloren
+       gegangen — der Aushang im Notfall stand seither unformatiert da.
+       Bild statt PDF-Rahmen aus demselben Grund wie oben: die WebView der
+       Tafeln reicht ein PDF an die App weiter, und die uebernimmt den Schirm. */
+    .emergency-scr .pdf-titel { color: #fff; font-weight: 600; margin-bottom: 1.5vh;
+                                font-size: clamp(.9rem, 2.4vh, 1.8rem); }
+    .emergency-scr .pdf { flex: 1 1 auto; min-height: 0; max-width: 100%;
+                          object-fit: contain; border-radius: 1vmin; background: #fff; }
     .emergency-scr { position: fixed; inset: 0; background: linear-gradient(160deg, #b91c1c 0%, #dc2626 55%, #991b1b 100%); color: #fff;
       display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 5vmin;
       border: .9vmin solid #fff; box-shadow: inset 0 0 0 .35vmin #7f1d1d; animation: pulse 2.4s ease-in-out infinite; }
@@ -358,7 +366,7 @@
          <div class="kick">Notfall · Achtung</div>
          ${pdf
            ? `${text ? `<div class="pdf-titel">${esc(text)}</div>` : ''}
-              <iframe class="pdf" src="${esc(pdf)}#toolbar=0&navpanes=0&scrollbar=0&view=Fit" title="Notfall"></iframe>`
+              <img class="pdf" src="${esc(pdf.replace('/api/display/pdf/', '/api/display/pdfbild/'))}" alt="Notfall">`
            : `<div class="body"><span class="fit">${esc(text)}</span></div>`}
        </div>`;
     if (!pdf) fitText();
