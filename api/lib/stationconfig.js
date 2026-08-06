@@ -258,7 +258,20 @@ const ROLE_DEFAULTS = {
     url: 'https://display.rosenweg4303.ch',
     allowed_domains: ['display.rosenweg4303.ch'],
     reload_interval_minutes: 30,
-    screen_schedule: { on: '06:00', off: '23:00' },
+    // Kein Software-Zeitplan (Entscheid vom 6. August 2026).
+    //
+    // Die Bildschirme haengen an Netzstromschaltern und Zeitschaltuhren — die
+    // schalten sie ab, nicht die Station. Zwei Mechanismen fuer dieselbe Sache
+    // koennen sich widersprechen: trennt die Zeitschaltuhr morgens frueher als
+    // dieser Plan, steht der Schirm am Strom und bleibt trotzdem dunkel.
+    //
+    // Dazu kommt der dritte Weg in display-power.sh: schlagen wlopm und das
+    // Backlight fehl, stoppt es die Sitzung. Der Kiosk startet dann jede Nacht
+    // neu, ohne dass es jemand angeordnet haette.
+    //
+    // Leer heisst: roles/display/install.sh legt die Timer gar nicht erst an
+    // und entfernt vorhandene wieder (else-Zweig).
+    screen_schedule: { on: '', off: '' },
   },
 };
 
