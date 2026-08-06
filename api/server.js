@@ -42,6 +42,7 @@ app.use(cors({
 // fuer Audit gewrappt. initDB() bleibt unten im Bootstrap und nutzt diesen pool.
 const { pool, energyPool, auditCtx } = require('./lib/db');
 const { haeuserAusAuswahl } = require('./lib/haeuser');
+const zlibModul = require('zlib');
 
 // Mail (transporter, loggedSendMail, isAllowlistedSender, generateOTP, EMAIL_ALLOWLIST,
 // MAIL_FROM, SMTP2GO_*) -> lib/mail.js
@@ -14920,6 +14921,70 @@ app.delete('/api/display/ankuendigungen/:id', authMiddleware, requireMqttTechnik
     }
     await ankuendigungenVeroeffentlichen();
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Gerätedatei für die SlideShow-Tafeln ────────────────────────────────
+//
+// Eine Tafel zeigt eine Webseite über eine '.url'-Datei, die auf ihr liegt.
+// Damit sie nur die Ankündigungen ihres Hauses sieht, muss dort '?haus=N'
+// stehen — und Dateien schreiben kann die Weboberfläche der App nicht (der
+// Upload lehnt jede Feldbenennung ab, am 5. August durchprobiert).
+//
+// Der Weg, den die App selbst anbietet, ist 'synchronize': sie lädt eine
+// Adresse als ZIP und entpackt sie in einen Ordner. Genau das liefert dieser
+// Endpunkt — je Gerät, mit seiner eigenen Hausnummer.
+//
+// Entpackt wird in den Unterordner 'rosenweg'. Dort darf 'clearFolder' auch
+// aufräumen, ohne fremde Dateien mitzunehmen; auf dem Wurzelverzeichnis wäre
+// dieselbe Einstellung eine Falle.
+//
+// Öffentlich wie die Aushänge: darin steht eine Adresse, kein Geheimnis.
+function zipMitEinerDatei(name, inhalt) {
+  const daten = Buffer.from(inhalt, 'utf8');
+  const nameBuf = Buffer.from(name, 'utf8');
+  const crc = zlibModul.crc32(daten);
+  // Feste Zeit (1980-01-01): so ist dasselbe Gerät immer dasselbe Archiv, und
+  // ein Vergleich zeigt echte Änderungen statt der Uhrzeit des Abrufs.
+  const zeit = 0, datum = 33;
+
+  const lokal = Buffer.alloc(30);
+  lokal.writeUInt32LE(0x04034b50, 0); lokal.writeUInt16LE(20, 4);
+  lokal.writeUInt16LE(0, 6); lokal.writeUInt16LE(0, 8);          // keine Flags, gespeichert
+  lokal.writeUInt16LE(zeit, 10); lokal.writeUInt16LE(datum, 12);
+  lokal.writeUInt32LE(crc, 14);
+  lokal.writeUInt32LE(daten.length, 18); lokal.writeUInt32LE(daten.length, 22);
+  lokal.writeUInt16LE(nameBuf.length, 26); lokal.writeUInt16LE(0, 28);
+
+  const zentral = Buffer.alloc(46);
+  zentral.writeUInt32LE(0x02014b50, 0); zentral.writeUInt16LE(20, 4); zentral.writeUInt16LE(20, 6);
+  zentral.writeUInt16LE(0, 8); zentral.writeUInt16LE(0, 10);
+  zentral.writeUInt16LE(zeit, 12); zentral.writeUInt16LE(datum, 14);
+  zentral.writeUInt32LE(crc, 16);
+  zentral.writeUInt32LE(daten.length, 20); zentral.writeUInt32LE(daten.length, 24);
+  zentral.writeUInt16LE(nameBuf.length, 28);
+  zentral.writeUInt32LE(0, 42);                                   // Versatz des lokalen Kopfes
+
+  const zentralGesamt = lokal.length + nameBuf.length + daten.length;
+  const ende = Buffer.alloc(22);
+  ende.writeUInt32LE(0x06054b50, 0);
+  ende.writeUInt16LE(1, 8); ende.writeUInt16LE(1, 10);
+  ende.writeUInt32LE(zentral.length + nameBuf.length, 12);
+  ende.writeUInt32LE(zentralGesamt, 16);
+
+  return Buffer.concat([lokal, nameBuf, daten, zentral, nameBuf, ende]);
+}
+
+app.get('/api/display/geraetedatei/:id.zip', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT haus FROM anzeigegeraete WHERE id = $1', [req.params.id]);
+    if (!r.rows.length) return res.status(404).end();
+    const haus = Number(r.rows[0].haus);
+    const adresse = 'https://display.rosenweg4303.ch'
+      + (Number.isInteger(haus) && haus > 0 ? `?haus=${haus}` : '');
+    res.set('Content-Type', 'application/zip');
+    res.set('Cache-Control', 'no-store');
+    res.send(zipMitEinerDatei('anzeige.url', adresse + '\n'));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
