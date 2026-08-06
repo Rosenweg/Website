@@ -170,3 +170,61 @@ mosquitto_pub -h 100.64.2.51 -p 1883 -u display-public -P '<pw>' -r \
 ```
 (Schreiben erfordert einen Client mit Schreibrecht auf `display/#`; `display-public`
 ist read-only — für Tests einen Technik-Account/Service-User nehmen.)
+
+## Andere Anzeigetechnik: Samsung Tizen (E-Paper und Signage)
+
+5./6. August recherchiert, nichts davon gebaut — der Stand für den Tag, an dem
+so ein Gerät angeschafft wird.
+
+Anlass war der **Samsung EM32DX**: 32" Farb-E-Paper, QHD, Tizen 8.0, bis zu 200
+Tage Akku, 0 W bei stehendem Bild. Kein Android — die App SlideShow und damit
+alles unter „SlideShow-Geräte über MQTT steuern" fällt dort weg.
+
+**Was gegen E-Paper spricht und was nicht.** Der langsame Bildaufbau ist für
+uns kein Hindernis: alarmiert wird ohnehin akustisch (Gas- und Rauchmelder),
+der Bildschirm erklärt nur. Es bleibt, dass E-Paper **kein Hintergrundlicht**
+hat — in einem dunklen Technikraum ist nichts zu sehen. Der Aufstellort
+entscheidet, nicht die Technik.
+
+**Wie Inhalte darauf kommen, ohne fremde Cloud.** Drei Wege:
+
+* Samsung-E-Paper-App auf dem Telefon — von Hand, kein Alarm möglich.
+* Samsung VXT — Cloud, keine Installation im Haus vorgesehen. MagicINFO
+  On-Premise läuft aus (Lizenzverkauf bis 31.12.2026, Support bis 2029).
+* **Custom App über TEP** (Tizen Enterprise Platform) — der einzige Weg, der
+  zu unserer Bauweise passt.
+
+**TEP im Einzelnen.** Eine App ist eine Tizen-**Webanwendung** (HTML, CSS, JS)
+— unsere `display.html` mit ihrer eigenen MQTT-Verbindung wäre bereits der
+Kern. Gebaut und signiert mit Tizen Studio:
+
+```bash
+tizen package -t wgt -s "CERT-PROFIL" -- /pfad/zur/app
+```
+
+Verteilt wird im Betrieb über **unseren eigenen Webserver**: `.wgt` plus
+`sssp_config.xml` ablegen, am Gerät die Basisadresse eintragen. Alternativ per
+USB (`SSSP/`-Ordner). Einmalig am Gerät „Permit to install apps". Für mehrere
+Geräte gibt es den Tizen Business Manager (`tbm.tizenenterprise.com`):
+Organisationskonto, Geräte per Seriennummer, Profil zuweisen — die Geräte
+holen sich die App dann selbst. Nur für Tizen 6.5 und neuer.
+
+**Das Zertifikat war der befürchtete Engpass — ist aber keiner.** Die
+Partner-Ebene lässt sich mit einem kostenlosen Samsung-Konto selbst erzeugen;
+Samsungs eigene Doku sagt „no limitation to request and get the distributor
+certificate with this level". Die Partnerregistrierung braucht es erst für die
+Verteilung **über den Store**, und daran gehen wir vorbei. Ein *öffentliches*
+Zertifikat wird dagegen abgelehnt („invalid certificate chain").
+
+**Was offen bleibt**, bevor jemand kauft:
+
+* Ob das E-Paper-Modell Custom Apps genauso annimmt wie normale Signage — alle
+  gefundenen Anleitungen beziehen sich auf LCD-Geräte (OH46DX).
+* Wie eine Webseite auf E-Paper ihre Neuzeichnung auslöst. „Die Seite
+  aktualisiert sich selbst" ist dort nicht selbstverständlich.
+* `sdb`-Shell ist auf Signage gesperrt — Fehlersuche wird mühsam.
+
+**Einordnung:** für ein einzelnes Gerät steht der Aufwand kaum dafür. Sollen
+mittelfristig mehrere Anzeigen ins Haus, sieht die Rechnung anders aus — dann
+liegt am Ende eine Webanwendung auf unserem Server, die wir selbst ausliefern,
+und kein fremder Dienst dazwischen.
