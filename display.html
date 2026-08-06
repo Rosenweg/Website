@@ -32,6 +32,13 @@
     .announce .kick { font-size: clamp(1rem, 2.6vw, 2rem); font-weight: 600; letter-spacing: .18em; text-transform: uppercase; color: #38bdf8; margin-bottom: 4vh; }
     .announce .body { flex: 1 1 auto; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; font-weight: 600; line-height: 1.12; text-shadow: 0 3px 18px rgba(0,0,0,.4); word-break: break-word; overflow-wrap: anywhere; }
 
+    /* ===== Aushang (PDF) =====
+       Der Rahmen bekommt fast die ganze Fläche; weiss hinterlegt, weil ein
+       PDF fast immer weissen Grund hat und sonst ein grauer Rand entstünde. */
+    .pdf { flex: 1 1 auto; width: 100%; min-height: 0; border: 0; border-radius: 1vmin; background: #fff; }
+    .pdf-titel { font-size: clamp(.9rem, 2.2vw, 1.8rem); font-weight: 600; margin-bottom: 2vh; opacity: .85; }
+    .emergency-scr .pdf-titel { color: #fff; }
+
     /* ===== Notfall (Vollbild rot) ===== */
     body.emergency { background: #000; }
     .emergency-scr { position: fixed; inset: 0; background: linear-gradient(160deg, #b91c1c 0%, #dc2626 55%, #991b1b 100%); color: #fff;
@@ -92,9 +99,14 @@
   };
 
   // Sichtbarer Kanal: emergency hat Vorrang vor announcement.
+  //
+  // Inhalt ist ein Text ODER ein PDF. Ein Aushang braucht keine Unterschrift —
+  // vorher verlangte diese Prüfung einen Text, und eine reine PDF-Ankündigung
+  // wäre stumm ignoriert worden.
+  const hatInhalt = (d) => !!(d && d.active && ((d.text || '').trim() || (d.pdf || '').trim()));
   function activeChannel() {
-    if (state.emergency && state.emergency.active && (state.emergency.text || '').trim()) return { kind: 'emergency', d: state.emergency };
-    if (state.announcement && state.announcement.active && (state.announcement.text || '').trim()) return { kind: 'announce', d: state.announcement };
+    if (hatInhalt(state.emergency)) return { kind: 'emergency', d: state.emergency };
+    if (hatInhalt(state.announcement)) return { kind: 'announce', d: state.announcement };
     return null;
   }
 
@@ -134,7 +146,21 @@
 
   function renderChannel(kind, d) {
     const text = (d.text || '').trim();
-    const inner = `<div class="body"><span class="fit" id="fittext">${esc(text)}</span></div>`;
+    const pdf = (d.pdf || '').trim();
+
+    // Ein PDF bekommt den Platz, den ein Aushang braucht: fast den ganzen
+    // Schirm. Ein Text daneben ist die Überschrift, nicht der Inhalt — deshalb
+    // steht er klein darüber und nicht in der grossen Schrift, die sich sonst
+    // auf die Fläche zieht.
+    //
+    // '#toolbar=0&navpanes=0&view=FitH' nimmt dem eingebauten PDF-Betrachter
+    // seine Leisten. Ohne das steht auf einer Anzeige im Treppenhaus eine
+    // Werkzeugleiste mit Druckknopf.
+    const inner = pdf
+      ? `${text ? `<div class="pdf-titel">${esc(text)}</div>` : ''}
+         <iframe class="pdf" src="${esc(pdf)}#toolbar=0&navpanes=0&scrollbar=0&view=FitH"
+                 title="Aushang"></iframe>`
+      : `<div class="body"><span class="fit" id="fittext">${esc(text)}</span></div>`;
 
     if (kind === 'emergency') {
       document.body.classList.add('emergency');
@@ -152,7 +178,10 @@
            ${inner}
          </div>`;
     }
-    fitText();
+    // fitText zieht Text auf die Fläche. Bei einem PDF gibt es nichts zu
+    // ziehen — und der Aufruf würde über ein Element stolpern, das gar nicht
+    // da ist.
+    if (!pdf) fitText();
   }
 
   const WD = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
@@ -187,7 +216,7 @@
       return;
     }
     const d = ch.d;
-    const sig = JSON.stringify([ch.kind, d.text, !!d.scroll]);
+    const sig = JSON.stringify([ch.kind, d.text, d.pdf || '', !!d.scroll]);
     if (shown.kind !== ch.kind || shown.sig !== sig) {
       shown = { kind: ch.kind, sig };
       renderChannel(ch.kind, d);

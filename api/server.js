@@ -14762,15 +14762,77 @@ app.get('/api/display/state', authMiddleware, requireMqttTechnik, (req, res) => 
   res.json({ announcement: displayCache.announcement, emergency: displayCache.emergency });
 });
 
+// ─── PDFs für Ankündigungen ──────────────────────────────────────────────
+//
+// Die Dokumentenablage unter /api/documents liegt hinter authMiddleware — die
+// Anzeigen sind aber NICHT angemeldet. display.html hat nur den öffentlichen
+// Nur-Lese-Zugang zu MQTT, sonst nichts. Ein PDF von dort könnte kein
+// Bildschirm laden.
+//
+// Deshalb ein eigener, offener Ablageort. Das ist keine Lücke: was hier
+// hineinkommt, hängt eine Minute später im Treppenhaus. Genau darum ist auch
+// der RSS-Feed für Ankündigungen ausdrücklich öffentlich.
+const ANZEIGE_PDF_DIR = pathModule.join(DOCS_PATH, 'anzeigen');
+
+/** Aus einem Dateinamen einen ungefährlichen machen: keine Pfade, nur .pdf. */
+function anzeigePdfName(roh) {
+  const basis = String(roh || 'ankuendigung.pdf').split(/[\\/]/).pop();
+  const ohneEndung = basis.replace(/\.pdf$/i, '').replace(/[^\w.\- ]+/g, '_').slice(0, 60).trim();
+  return `${Date.now()}-${ohneEndung || 'ankuendigung'}.pdf`;
+}
+
+// POST /api/display/pdf  { pdf_base64, dateiname }
+app.post('/api/display/pdf', authMiddleware, requireMqttTechnik, async (req, res) => {
+  try {
+    const b64 = String(req.body?.pdf_base64 || '');
+    if (!b64) return res.status(400).json({ error: 'pdf_base64 fehlt' });
+    const buf = Buffer.from(b64, 'base64');
+    // 6 MB, nicht 8: der Rumpf kommt als base64 und ist damit ein Drittel
+    // grösser, und express.json() lässt global nur 10 MB durch. Bei 8 MB
+    // Nutzlast schlüge der Rumpf-Parser zu, bevor diese Zeile je liefe — der
+    // Fehler käme also als nichtssagendes 413 statt als klarer Satz.
+    if (buf.length > 6 * 1024 * 1024) return res.status(400).json({ error: 'PDF zu gross (max 6 MB)' });
+    // Wirklich ein PDF? Der Dateiname allein sagt nichts.
+    if (buf.subarray(0, 5).toString('latin1') !== '%PDF-') {
+      return res.status(400).json({ error: 'Das ist keine PDF-Datei' });
+    }
+    await fs.mkdir(ANZEIGE_PDF_DIR, { recursive: true });
+    const name = anzeigePdfName(req.body?.dateiname);
+    await fs.writeFile(pathModule.join(ANZEIGE_PDF_DIR, name), buf);
+    res.json({ ok: true, name, url: `/api/display/pdf/${encodeURIComponent(name)}` });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/display/pdf/:name — ÖFFENTLICH, damit die Anzeigen es holen können.
+app.get('/api/display/pdf/:name', async (req, res) => {
+  try {
+    // Nur Dateien aus genau diesem Ordner, nur .pdf, kein Ausbruch nach oben.
+    const name = String(req.params.name || '').split(/[\\/]/).pop();
+    if (!/^[\w.\- ]+\.pdf$/i.test(name)) return res.status(400).end();
+    const datei = pathModule.join(ANZEIGE_PDF_DIR, name);
+    if (!datei.startsWith(ANZEIGE_PDF_DIR + pathModule.sep)) return res.status(400).end();
+    const inhalt = await fs.readFile(datei);
+    res.set('Content-Type', 'application/pdf');
+    res.set('Cache-Control', 'public, max-age=300');
+    res.send(inhalt);
+  } catch { res.status(404).end(); }
+});
+
 app.post('/api/display/announce', authMiddleware, requireMqttTechnik, async (req, res) => {
   try {
     const topic = DISPLAY_CHANNELS[String(req.body?.channel || 'announcement')];
     if (!topic) return res.status(400).json({ error: 'channel: announcement | emergency' });
     const active = req.body?.active !== false;
     const text = String(req.body?.text || '').slice(0, 2000);
-    if (active && !text.trim()) return res.status(400).json({ error: 'Text fehlt' });
+    // Nur ein Verweis auf unseren eigenen Ablageort — keine fremden Adressen
+    // auf die Bildschirme im Haus.
+    const pdfRoh = String(req.body?.pdf || '');
+    const pdf = /^\/api\/display\/pdf\/[\w.%\- ]+\.pdf$/i.test(pdfRoh) ? pdfRoh : '';
+    // Ein PDF allein genügt: eine Ankündigung kann aus einem Aushang bestehen
+    // und braucht dann keinen Text daneben.
+    if (active && !text.trim() && !pdf) return res.status(400).json({ error: 'Text oder PDF nötig' });
     const payload = JSON.stringify({
-      text, active, scroll: !!req.body?.scroll,
+      text, pdf, active, scroll: !!req.body?.scroll,
       ts: Date.now(), by: req.user?.name || req.user?.email || 'admin',
     });
     const c = apiMqttPublishClient();
