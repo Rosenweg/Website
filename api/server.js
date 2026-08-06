@@ -14480,6 +14480,10 @@ function apiMqttPublishClient() {
     const ch = topic === 'display/announcement' ? 'announcement' : topic === 'display/emergency' ? 'emergency' : null;
     if (!ch) return;
     try { displayCache[ch] = JSON.parse(payload.toString('utf8')); } catch { displayCache[ch] = null; }
+    if (ch === 'emergency') {
+      tafelnAlarmSchalten(notfallAktiv(displayCache.emergency))
+        .catch(e => console.error('[tafeln] Alarm:', e.message));
+    }
   });
   return _apiMqttClient;
 }
@@ -15038,6 +15042,40 @@ function tafelSynchronisieren(id) {
   return true;
 }
 app.locals.tafelSynchronisieren = tafelSynchronisieren;
+
+// Dieselbe Regel wie auf der Anzeigeseite: ein Notfall gilt, wenn er aktiv ist
+// UND etwas zu zeigen hat. Ohne die zweite Haelfte wuerde eine leergeraeumte
+// Meldung die Tafeln in den Alarm schicken.
+function notfallAktiv(d) {
+  return !!(d && d.active && ((d.text || '').trim() || (d.pdf || '').trim()));
+}
+
+// Bei einem Notfall schalten die Tafeln auf ihre Alarm-Wiedergabeliste, bei der
+// Entwarnung zurueck auf den Normallauf.
+//
+// Nur beim Wechsel: display/emergency ist retained und kommt auch beim
+// Verbinden noch einmal — ohne diese Sperre schickte jeder Neustart der API
+// den Tafeln erneut einen Alarm.
+let _alarmStand = null;
+
+async function tafelnAlarmSchalten(aktiv) {
+  if (_alarmStand === aktiv) return;
+  _alarmStand = aktiv;
+  const c = apiMqttPublishClient();
+  if (!c) return;
+  // Ohne Nummer wird nicht geschaltet — die Tafel wuesste nicht, wohin.
+  const r = await pool.query(
+    'SELECT id, alarm_playlist FROM anzeigegeraete WHERE alarm_playlist IS NOT NULL');
+  for (const g of r.rows) {
+    // Ohne zoneName nimmt die App die Hauptzone des Layouts. Das erspart uns
+    // ein weiteres Feld je Geraet, das ohnehin fast immer gleich hiesse.
+    const befehl = aktiv
+      ? { operation: 'playlist/set', parameters: { playlist: Number(g.alarm_playlist) } }
+      : { operation: 'playlist/clear' };
+    c.publish(`SLIDESHOW/REQ/${g.id}/API`, JSON.stringify(befehl));
+  }
+  if (r.rows.length) console.log(`[tafeln] Alarm ${aktiv ? 'an' : 'aus'} an ${r.rows.length} Gerät(e)`);
+}
 
 // Zwei Adressformen, damit die Tafel nicht auf eine davon festgelegt ist —
 // der angehaengte Dateiname wird ignoriert.

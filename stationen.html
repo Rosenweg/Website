@@ -196,6 +196,7 @@
                                 <th class="text-left py-3 px-6">Name</th>
                                 <th class="text-left py-3 px-6">Standort</th>
                                 <th class="text-left py-3 px-6">Haus</th>
+                                <th class="text-left py-3 px-6">Alarm-Liste</th>
                                 <th class="text-left py-3 px-6">MQTT-Thema</th>
                                 <th class="text-left py-3 px-6">Angelegt</th>
                                 <th class="text-left py-3 px-6"></th>
@@ -782,11 +783,11 @@
                 const d = await api('/api/stations/admin/anzeigen');
                 anzeigen = d.anzeigen || [];
             } catch (e) {
-                koerper.innerHTML = `<tr><td colspan="6" class="py-4 px-6 text-red-600">${escape(e.message)}</td></tr>`;
+                koerper.innerHTML = `<tr><td colspan="7" class="py-4 px-6 text-red-600">${escape(e.message)}</td></tr>`;
                 return;
             }
             if (!anzeigen.length) {
-                koerper.innerHTML = '<tr><td colspan="6" class="py-6 px-6 text-gray-400">Noch kein Anzeigegerät eingetragen.</td></tr>';
+                koerper.innerHTML = '<tr><td colspan="7" class="py-6 px-6 text-gray-400">Noch kein Anzeigegerät eingetragen.</td></tr>';
                 return;
             }
             koerper.innerHTML = anzeigen.map(a => `
@@ -799,6 +800,11 @@
                             <option value=""${a.haus ? '' : ' selected'}>alle</option>
                             ${HAEUSER.map(h => `<option value="${h}"${Number(a.haus) === h ? ' selected' : ''}>Rosenweg ${h}</option>`).join('')}
                         </select>
+                    </td>
+                    <td class="py-3 px-6">
+                        <input type="number" min="0" value="${a.alarm_playlist ?? ''}" placeholder="—"
+                               onchange="anzeigeAlarmlisteSetzen('${escape(a.id)}', this.value)"
+                               class="border rounded px-2 py-1 text-sm w-20">
                     </td>
                     <td class="py-3 px-6 font-mono text-xs text-gray-600">${escape(a.mqtt_thema)}</td>
                     <td class="py-3 px-6 text-gray-500">${a.angelegt_am ? new Date(a.angelegt_am).toLocaleDateString('de-CH') : ''}</td>
@@ -817,6 +823,23 @@
                 await api(`/api/stations/admin/anzeigen/${encodeURIComponent(id)}`, {
                     method: 'PATCH',
                     body: { haus: wert ? Number(wert) : null },
+                });
+                await ladeAnzeigen();
+            } catch (e) {
+                alert('Ging nicht: ' + e.message);
+                await ladeAnzeigen();
+            }
+        }
+
+        // Bei einem Notfall schaltet die Tafel auf diese Wiedergabeliste. Die
+        // App will dort zwingend eine Zahl — die Nummer vergibt man am Gerät
+        // selbst, in der Spalte „Nummer" der Wiedergabelisten. Leer heisst:
+        // dieses Gerät bleibt bei einem Notfall in Ruhe.
+        async function anzeigeAlarmlisteSetzen(id, wert) {
+            try {
+                await api(`/api/stations/admin/anzeigen/${encodeURIComponent(id)}`, {
+                    method: 'PATCH',
+                    body: { alarm_playlist: wert === '' ? null : Number(wert) },
                 });
                 await ladeAnzeigen();
             } catch (e) {
