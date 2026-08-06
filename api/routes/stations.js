@@ -134,11 +134,11 @@ async function ensureSchema() {
       angelegt_am   TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     ALTER TABLE anzeigegeraete ADD COLUMN IF NOT EXISTS haus INTEGER;
-    -- Nummer der Wiedergabeliste, auf die bei einem Notfall umgeschaltet wird.
-    -- Die App will an dieser Stelle zwingend eine Zahl — ein Name quittiert sie
-    -- mit NumberFormatException. Die Nummer vergibt man am Geraet selbst, in
-    -- der Spalte "Nummer" der Wiedergabelisten; leer heisst: nicht umschalten.
-    ALTER TABLE anzeigegeraete ADD COLUMN IF NOT EXISTS alarm_playlist INTEGER;
+    -- alarm_playlist gab es einen Vormittag lang: die Nummer der Liste, auf die
+    -- bei einem Notfall umgeschaltet wird. Sie ist ueberfluessig, seit die Liste
+    -- auf jedem Geraet "Alarm" heisst und "playlistName" den Namen nimmt. Nie
+    -- befuellt, darum weg statt ungenutzt stehen zu lassen.
+    ALTER TABLE anzeigegeraete DROP COLUMN IF EXISTS alarm_playlist;
     CREATE TABLE IF NOT EXISTS station_setup_sessions (
       token_hash   TEXT PRIMARY KEY,
       username     TEXT NOT NULL,
@@ -608,15 +608,26 @@ function anzeigeZettel({ mqtt_thema, mqtt_benutzer, passwort, haus }) {
       + 'und speichert sie NICHT. Noch weiter unten steht „Alle Einstellungen auf '
       + 'Werkseinstellungen zurücksetzen" — den nicht treffen.',
       'Die App neu laden — die MQTT-Felder greifen erst danach. Das sagt die App bei jedem Feld selbst dazu.',
-      'Zurück in dieser Übersicht prüfen, ob das Gerät sich meldet.',
+      'Im Datei-Manager einen Ordner „rosenweg" anlegen. Alles von uns liegt '
+      + 'darin — auf den Tafeln läuft auch Fremdes, und dessen Dateien fasst niemand an.',
+      'Unter Wiedergabelisten eine Liste anlegen, die den Ordner „rosenweg" spielt. '
+      + 'Sie muss „Alarm" heissen — genau so, auf jedem Gerät. Bei einem Notfall '
+      + 'schaltet die API jede Tafel auf diese Liste, und sie findet sie am Namen. '
+      + 'Eine Nummer braucht die Liste nicht.',
+      'Zurück in dieser Übersicht prüfen, ob das Gerät sich meldet, und „Datei senden" '
+      + 'drücken — dann legt die API die Adresse als rosenweg/alarm.url auf das Gerät.',
     ],
-    hinweisAdresse: 'Diese Adresse gehört in die .url-Datei, die das Gerät anzeigt.',
+    hinweisAdresse: 'Diese Adresse legt die API selbst als rosenweg/alarm.url auf das Gerät — '
+                  + 'abtippen muss sie niemand. Ändert sich das Haus, geht sie neu raus.',
     hinweis: 'Das Passwort steht nur hier. Es wird nirgends gespeichert — nur seine Prüfsumme. '
            + 'Geht es verloren, legen Sie das Gerät neu an.',
     steuerung: {
       thema: `${ANZEIGE_TOPIC_PREFIX}/REQ/${mqtt_thema}/API`,
       antwort: `${ANZEIGE_TOPIC_PREFIX}/RESP/${mqtt_thema}/API`,
-      beispiel: { operation: 'playlist/set', zoneName: 'Whole screen', playlist: 'Alarm' },
+      // Am Gerät gemessen: die Parameter gehören in ein eigenes Objekt, und
+      // playlist ist die Nummer der Liste. Mit dem Namen antwortet die App
+      // NumberFormatException. Ohne zoneName nimmt sie die Hauptzone.
+      beispiel: { operation: 'playlist/set', parameters: { playlistName: 'Alarm' } },
     },
   };
 }
@@ -625,8 +636,7 @@ function anzeigeZettel({ mqtt_thema, mqtt_benutzer, passwort, haus }) {
 router.get('/admin/anzeigen', authMiddleware, nurTechnik, a(async (req, res) => {
   await ensureSchema();
   const r = await pool.query(
-    `SELECT id, name, standort, notiz, mqtt_thema, mqtt_benutzer, haus, alarm_playlist,
-            angelegt_von, angelegt_am
+    `SELECT id, name, standort, notiz, mqtt_thema, mqtt_benutzer, haus, angelegt_von, angelegt_am
        FROM anzeigegeraete ORDER BY name`);
   res.json({ anzeigen: r.rows, topic_prefix: ANZEIGE_TOPIC_PREFIX });
 }));
@@ -700,13 +710,6 @@ router.patch('/admin/anzeigen/:id', authMiddleware, nurTechnik, a(async (req, re
   if (req.body?.haus !== undefined) {
     hausNeu = HAEUSER.includes(Number(req.body.haus)) ? Number(req.body.haus) : null;
     setze('haus', hausNeu);
-  }
-
-  // Nummer der Alarm-Wiedergabeliste. Leer heisst: dieses Gerät schaltet nicht
-  // um — etwa ein Testgerät, das bei einem Notfall in Ruhe bleiben soll.
-  if (req.body?.alarm_playlist !== undefined) {
-    const n = parseInt(req.body.alarm_playlist, 10);
-    setze('alarm_playlist', Number.isInteger(n) && n >= 0 ? n : null);
   }
   if (!felder.length) return res.status(400).json({ error: 'Nichts zu ändern' });
 
