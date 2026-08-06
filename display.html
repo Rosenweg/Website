@@ -38,7 +38,15 @@
        ein zweites bequem danebenpasst. Wie viele es werden, rechnet das JS
        aus — hier steht nur, wie eines aussieht. */
     .blaetter { width: 100%; height: 100%; display: flex; flex-direction: column; padding: 1.5vmin 2.5vmin 2.5vmin; }
-    .blaetter .kopfzeile { flex: 0 0 auto; display: flex; justify-content: flex-end; margin-bottom: 1vh; }
+    /* Kopfzeile des Schirms: Wappen links, Uhr rechts. Bei einem PDF traegt das
+       Blatt keinen Briefkopf — ohne diese Zeile stuende ein fremder Aushang
+       ohne jeden Hinweis darauf da, wer ihn aushaengt. */
+    .blaetter .kopfzeile { flex: 0 0 auto; display: flex; align-items: center;
+                           justify-content: space-between; margin-bottom: 1vh; }
+    .blaetter .marke { display: flex; align-items: center; gap: .7vw; opacity: .92; }
+    .blaetter .marke img { height: clamp(24px, 4.4vh, 60px); }
+    .blaetter .marke .tt { font-weight: 700; font-size: clamp(.95rem, 2.6vh, 1.9rem); line-height: 1.1; }
+    .blaetter .marke .ss { font-size: clamp(.6rem, 1.3vh, .95rem); opacity: .65; }
     .blaetter .reihe { flex: 1 1 auto; min-height: 0; display: flex; align-items: stretch;
                        justify-content: center; gap: 2.5vmin; }
     /* Die Ueberschrift sitzt AUF dem Blatt, nicht darueber. Frei darueber
@@ -283,7 +291,13 @@
     document.body.classList.remove('emergency');
     $('screen').innerHTML =
       `<div class="blaetter">
-         <div class="kopfzeile"><div id="uhr"></div></div>
+         <div class="kopfzeile">
+           <div class="marke">
+             <img src="/logo-rosenweg.png" alt="" onerror="this.style.display='none'">
+             <div><div class="tt">Rosenweg</div><div class="ss">Kaiseraugst</div></div>
+           </div>
+           <div id="uhr"></div>
+         </div>
          <div class="reihe">${liste.map(blattHtml).join('')}</div>
        </div>`;
     schirmUhr();
