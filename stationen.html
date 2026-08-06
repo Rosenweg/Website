@@ -120,47 +120,53 @@
             <div class="bg-white rounded-xl shadow-sm border mt-8">
                 <div class="p-6 border-b">
                     <h2 class="text-lg font-semibold text-gray-800">Ankündigungen &amp; Notfall</h2>
-                    <p class="text-sm text-gray-500 mt-1">Was hier steht, zeigen alle Anzeigen im Haus — Kiosk-Seiten unter <span class="font-mono text-xs">display.rosenweg4303.ch</span> ebenso wie die Tafeln unten. Ein Notfall überlagert eine Ankündigung und erscheint als rotes Vollbild.</p>
+                    <p class="text-sm text-gray-500 mt-1">Was hier steht, zeigen alle Anzeigen im Haus — Kiosk-Seiten unter <span class="font-mono text-xs">display.rosenweg4303.ch</span> ebenso wie die Tafeln unten. Mehrere Ankündigungen wechseln sich ab; ein Notfall überlagert alles als rotes Vollbild.</p>
                 </div>
-                <div class="p-6 space-y-4">
-                    <div id="disp-stand" class="grid gap-3 sm:grid-cols-2">
-                        <p class="text-sm text-gray-400">lade aktuellen Stand…</p>
-                    </div>
 
-                    <div class="border-t pt-4 space-y-3">
-                        <div>
-                            <span class="block text-sm font-medium text-gray-700 mb-1">Kanal</span>
-                            <div id="disp-kanal" class="inline-flex rounded-lg border overflow-hidden text-sm">
-                                <label class="px-3 py-1.5 cursor-pointer select-none has-[:checked]:bg-blue-600 has-[:checked]:text-white">
-                                    <input type="radio" name="dispKanal" value="announcement" class="sr-only" checked> Ankündigung
-                                </label>
-                                <label class="px-3 py-1.5 cursor-pointer select-none border-l has-[:checked]:bg-red-600 has-[:checked]:text-white">
-                                    <input type="radio" name="dispKanal" value="emergency" class="sr-only"> Notfall
-                                </label>
-                            </div>
-                        </div>
-                        <label class="block"><span class="text-sm font-medium text-gray-700">Text</span>
-                            <textarea id="disp-text" rows="3" maxlength="2000" placeholder="Text für die Anzeigen…"
-                                      class="mt-1 w-full border rounded-lg px-3 py-2 text-sm"></textarea></label>
-                        <div>
-                            <span class="block text-sm font-medium text-gray-700">Aushang (PDF)</span>
-                            <p class="text-xs text-gray-500 mb-1">Statt oder zusätzlich zum Text. Der Text steht dann als Überschrift darüber. Bis 6 MB.</p>
-                            <div class="flex flex-wrap items-center gap-3">
-                                <input id="disp-pdf" type="file" accept="application/pdf,.pdf"
-                                       onchange="dispPdfGewaehlt()" class="text-sm">
-                                <span id="disp-pdf-status" class="text-xs text-gray-500"></span>
-                                <button type="button" id="disp-pdf-weg" onclick="dispPdfEntfernen()"
-                                        class="hidden text-xs text-red-600 hover:text-red-800">entfernen</button>
-                            </div>
-                        </div>
-                        <label class="flex items-center gap-2 text-sm text-gray-600">
-                            <input id="disp-lauf" type="checkbox"> Laufschrift (scrollen)
-                        </label>
+                <div class="p-6 border-b">
+                    <h3 class="font-medium text-gray-800 mb-3">Laufende Ankündigungen</h3>
+                    <div id="ank-liste" class="space-y-2"><p class="text-sm text-gray-400">lade…</p></div>
+                </div>
+
+                <div class="p-6 space-y-3 border-b">
+                    <h3 class="font-medium text-gray-800">Neue Ankündigung</h3>
+                    <label class="block"><span class="text-sm font-medium text-gray-700">Text</span>
+                        <textarea id="ank-text" rows="2" maxlength="2000" placeholder="Text für die Anzeigen…"
+                                  class="mt-1 w-full border rounded-lg px-3 py-2 text-sm"></textarea></label>
+                    <div>
+                        <span class="block text-sm font-medium text-gray-700">Aushang (PDF)</span>
+                        <p class="text-xs text-gray-500 mb-1">Statt oder zusätzlich zum Text. Der Text steht dann als Überschrift darüber. Bis 6 MB.</p>
                         <div class="flex flex-wrap items-center gap-3">
-                            <button onclick="dispSenden(true)" class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Senden</button>
-                            <button onclick="dispSenden(false)" class="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50">Anzeige löschen</button>
-                            <p id="disp-meldung" class="text-sm"></p>
+                            <input id="disp-pdf" type="file" accept="application/pdf,.pdf" onchange="dispPdfGewaehlt()" class="text-sm">
+                            <span id="disp-pdf-status" class="text-xs text-gray-500"></span>
+                            <button type="button" id="disp-pdf-weg" onclick="dispPdfEntfernen()" class="hidden text-xs text-red-600 hover:text-red-800">entfernen</button>
                         </div>
+                    </div>
+                    <div>
+                        <span class="block text-sm font-medium text-gray-700">Betrifft</span>
+                        <p class="text-xs text-gray-500 mb-1">Nichts angehakt heisst: alle Anzeigen. Sonst nur die, die im gewählten Haus hängen.</p>
+                        <div id="ank-stwegs" class="flex flex-wrap gap-x-4 gap-y-1"></div>
+                    </div>
+                    <label class="flex items-center gap-2 text-sm text-gray-600">
+                        <input id="disp-lauf" type="checkbox"> Laufschrift (scrollen)
+                    </label>
+                    <div class="flex flex-wrap items-center gap-3">
+                        <button onclick="ankAnlegen()" class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">Ankündigung senden</button>
+                        <p id="ank-meldung" class="text-sm"></p>
+                    </div>
+                </div>
+
+                <div class="p-6 space-y-3">
+                    <h3 class="font-medium text-red-700">Notfall</h3>
+                    <p class="text-sm text-gray-500">Überlagert sofort jede Ankündigung, auf allen Anzeigen — ohne Auswahl nach Haus.</p>
+                    <div id="disp-stand" class="grid gap-3 sm:grid-cols-2"></div>
+                    <label class="block"><span class="text-sm font-medium text-gray-700">Text</span>
+                        <textarea id="disp-text" rows="2" maxlength="2000" placeholder="Was ist los, was ist zu tun…"
+                                  class="mt-1 w-full border rounded-lg px-3 py-2 text-sm"></textarea></label>
+                    <div class="flex flex-wrap items-center gap-3">
+                        <button onclick="dispNotfall(true)" class="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700">Notfall auslösen</button>
+                        <button onclick="dispNotfall(false)" class="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50">Notfall aufheben</button>
+                        <p id="disp-meldung" class="text-sm"></p>
                     </div>
                 </div>
             </div>
@@ -352,6 +358,8 @@
             // der Anzeigegeräte darf die Stationsübersicht nicht aufhalten.
             ladeAnzeigen();
             ladeDispStand();
+            ankStwegsZeichnen();
+            ladeAnkuendigungen();
         });
 
         async function api(pfad, opts = {}) {
@@ -545,52 +553,95 @@
 
         // ─── Ankündigungen & Notfall ───────────────────────────────────
         // Sass bis zum 6. August in der Broker-Oberfläche und las den Stand
-        // aus deren Live-MQTT-Verbindung. Hier gibt es keine — den Stand
-        // liefert /api/display/state aus dem Zwischenspeicher der API.
+        // aus deren Live-MQTT-Verbindung. Hier gibt es keine.
         //
-        // Beide Kanäle sind retained: eine Anzeige, die neu startet, hat den
-        // Stand sofort. 'active:false' leert den Kanal.
+        // Ankündigungen sind seither eine LISTE in der Datenbank: mehrere
+        // gleichzeitig, je Haus wählbar, und die Anzeigen blättern durch.
+        // Der Notfall bleibt der alte Einzelkanal — im Alarmfall zählt
+        // Einfachheit, nicht Auswahl.
 
-        function dispAlter(ts) {
-            const n = Number(ts);
-            if (!isFinite(n) || n <= 0) return '';
-            const min = Math.round((Date.now() - (n < 1e12 ? n * 1000 : n)) / 60000);
+        // Die Häuser, wie sie api/lib/groups.js führt. 8 ist die MEG.
+        const STWEGS = [
+            [1, 'STWEG 1'], [2, 'STWEG 2'], [3, 'STWEG 3 · R9'], [4, 'STWEG 4'],
+            [5, 'STWEG 5'], [6, 'STWEG 6 · R1'], [7, 'STWEG 7'], [8, 'MEG'],
+        ];
+
+        function ankStwegsZeichnen() {
+            document.getElementById('ank-stwegs').innerHTML = STWEGS.map(([nr, name]) =>
+                `<label class="flex items-center gap-1.5 text-sm text-gray-700">
+                    <input type="checkbox" class="ank-stweg" value="${nr}"> ${escape(name)}
+                 </label>`).join('');
+        }
+
+        function ankAlter(ts) {
+            const ms = Date.now() - new Date(ts).getTime();
+            const min = Math.round(ms / 60000);
             if (min < 1) return 'gerade eben';
             if (min < 60) return `vor ${min} min`;
             const h = Math.round(min / 60);
             return h < 24 ? `vor ${h} h` : `vor ${Math.round(h / 24)} Tagen`;
         }
 
-        async function ladeDispStand() {
-            const el = document.getElementById('disp-stand');
+        async function ladeAnkuendigungen() {
+            const el = document.getElementById('ank-liste');
             let d;
-            try {
-                d = await api('/api/display/state');
-            } catch (e) {
-                el.innerHTML = `<p class="text-sm text-red-600">${escape(e.message)}</p>`;
+            try { d = await api('/api/display/ankuendigungen'); }
+            catch (e) { el.innerHTML = `<p class="text-sm text-red-600">${escape(e.message)}</p>`; return; }
+
+            const laufend = (d.ankuendigungen || []).filter(a => a.aktiv);
+            if (!laufend.length) {
+                el.innerHTML = '<p class="text-sm text-gray-400">Keine laufende Ankündigung.</p>';
                 return;
             }
-            const kanaele = [
-                { s: d.announcement, titel: 'Ankündigung', farbe: 'blue' },
-                { s: d.emergency, titel: 'Notfall', farbe: 'red' },
-            ];
-            el.innerHTML = kanaele.map(k => {
-                const an = !!(k.s && k.s.active && k.s.text);
-                const rahmen = an
-                    ? (k.farbe === 'red' ? 'border-red-300 bg-red-50' : 'border-blue-200 bg-blue-50')
-                    : 'border-gray-200 bg-gray-50';
-                const kopf = k.farbe === 'red' ? 'text-red-700' : 'text-blue-700';
-                return `<div class="border rounded-lg px-3 py-2 ${rahmen}">
-                    <div class="flex items-center justify-between mb-1">
-                        <span class="text-xs font-semibold ${kopf}">${escape(k.titel)}</span>
-                        ${an && k.s.scroll ? '<span class="text-[10px] uppercase tracking-wide text-gray-400">Laufschrift</span>' : ''}
+            el.innerHTML = laufend.map(a => {
+                const wo = (a.stwegs && a.stwegs.length)
+                    ? a.stwegs.map(n => (STWEGS.find(s => s[0] === n) || [n, 'STWEG ' + n])[1]).join(', ')
+                    : 'alle Anzeigen';
+                const was = (a.text || '').trim()
+                    ? escape(a.text.slice(0, 160))
+                    : '<span class="italic text-gray-500">nur Aushang</span>';
+                return `<div class="border rounded-lg px-3 py-2 flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <p class="text-sm text-gray-800 break-words">${was}</p>
+                        <p class="text-xs text-gray-500 mt-0.5">
+                            ${escape(wo)} · von ${escape(a.von || '—')} · ${escape(ankAlter(a.erstellt))}
+                            ${a.pdf ? ` · <a href="${escape(a.pdf)}" target="_blank" class="text-blue-600 hover:text-blue-800">Aushang ansehen</a>` : ''}
+                        </p>
                     </div>
-                    ${an
-                        ? `<p class="text-sm text-gray-800 break-words">${escape(k.s.text)}</p>
-                           <p class="text-[11px] text-gray-400 mt-1">von ${escape(k.s.by || '—')}${k.s.ts ? ', ' + dispAlter(k.s.ts) : ''}</p>`
-                        : '<p class="text-sm text-gray-400">— inaktiv —</p>'}
+                    <button onclick="ankEntfernen(${a.id})" class="shrink-0 text-sm text-red-600 hover:text-red-800">entfernen</button>
                 </div>`;
             }).join('');
+        }
+
+        async function ankAnlegen() {
+            const melden = (t, gut) => {
+                const m = document.getElementById('ank-meldung');
+                m.textContent = t;
+                m.className = 'text-sm ' + (gut ? 'text-green-700' : 'text-red-600');
+            };
+            const text = document.getElementById('ank-text').value;
+            if (!text.trim() && !dispPdfUrl) return melden('Text oder PDF nötig.', false);
+            const stwegs = [...document.querySelectorAll('.ank-stweg:checked')].map(i => Number(i.value));
+            melden('sende…', true);
+            try {
+                await api('/api/display/ankuendigungen', {
+                    method: 'POST',
+                    body: { text, pdf: dispPdfUrl, stwegs, scroll: document.getElementById('disp-lauf').checked },
+                });
+                document.getElementById('ank-text').value = '';
+                document.querySelectorAll('.ank-stweg:checked').forEach(i => { i.checked = false; });
+                dispPdfEntfernen();
+                melden('Gesendet.', true);
+                await ladeAnkuendigungen();
+            } catch (e) { melden(e.message, false); }
+        }
+
+        async function ankEntfernen(id) {
+            if (!confirm('Ankündigung entfernen?\n\nSie verschwindet sofort von allen Anzeigen; ein zugehöriger Aushang wird mitgelöscht.')) return;
+            try {
+                await api(`/api/display/ankuendigungen/${id}`, { method: 'DELETE' });
+                await ladeAnkuendigungen();
+            } catch (e) { alert(e.message); }
         }
 
         // Das hochgeladene PDF, bis es mitgeschickt wird. Hochgeladen wird
@@ -621,8 +672,6 @@
             }
             dispPdfStatus('lade hoch…');
             try {
-                // Die API nimmt base64 im JSON-Rumpf — denselben Weg gehen
-                // die Brief-Uploads schon.
                 const base64 = await new Promise((fertig, schief) => {
                     const l = new FileReader();
                     l.onload = () => fertig(String(l.result).split(',')[1] || '');
@@ -635,40 +684,47 @@
                 });
                 dispPdfUrl = a.url;
                 dispPdfStatus(`bereit: ${datei.name}`, 'text-green-700');
-            } catch (e) {
-                dispPdfStatus(e.message, 'text-red-600');
-            }
+            } catch (e) { dispPdfStatus(e.message, 'text-red-600'); }
         }
 
-        async function dispSenden(aktiv) {
-            const melden = (text, gut) => {
+        // ─── Notfall ───────────────────────────────────────────────────
+        async function ladeDispStand() {
+            const el = document.getElementById('disp-stand');
+            let d;
+            try { d = await api('/api/display/state'); }
+            catch (e) { el.innerHTML = `<p class="text-sm text-red-600">${escape(e.message)}</p>`; return; }
+            const s = d.emergency;
+            const an = !!(s && s.active && s.text);
+            el.innerHTML = `<div class="border rounded-lg px-3 py-2 ${an ? 'border-red-300 bg-red-50' : 'border-gray-200 bg-gray-50'}">
+                <div class="text-xs font-semibold ${an ? 'text-red-700' : 'text-gray-500'} mb-1">Notfall</div>
+                ${an
+                    ? `<p class="text-sm text-gray-800 break-words">${escape(s.text)}</p>
+                       <p class="text-[11px] text-gray-400 mt-1">von ${escape(s.by || '—')}</p>`
+                    : '<p class="text-sm text-gray-400">— inaktiv —</p>'}
+            </div>`;
+        }
+
+        async function dispNotfall(aktiv) {
+            const melden = (t, gut) => {
                 const m = document.getElementById('disp-meldung');
-                m.textContent = text;
+                m.textContent = t;
                 m.className = 'text-sm ' + (gut ? 'text-green-700' : 'text-red-600');
             };
-            const kanal = document.querySelector('#disp-kanal input[name="dispKanal"]:checked')?.value || 'announcement';
             const text = document.getElementById('disp-text').value;
-            if (aktiv && !text.trim() && !dispPdfUrl) return melden('Text oder PDF nötig.', false);
-
+            if (aktiv && !text.trim()) return melden('Text fehlt.', false);
             // Der Notfall geht auf jede Anzeige im Haus, auch ins Treppenhaus.
             // Ein Fehlgriff auf den falschen Knopf soll das nicht auslösen.
-            if (aktiv && kanal === 'emergency'
-                && !confirm('Notfall auf ALLEN Anzeigen auslösen?\n\nDie Kiosk-Seiten schalten sofort auf rotes Vollbild.')) return;
-
-            melden(aktiv ? 'sende…' : 'lösche…', true);
+            if (aktiv && !confirm('Notfall auf ALLEN Anzeigen auslösen?\n\nDie Kiosk-Seiten schalten sofort auf rotes Vollbild.')) return;
+            melden(aktiv ? 'sende…' : 'hebe auf…', true);
             try {
                 await api('/api/display/announce', {
                     method: 'POST',
-                    body: aktiv ? { channel: kanal, text, pdf: dispPdfUrl,
-                                    scroll: document.getElementById('disp-lauf').checked, active: true }
-                                : { channel: kanal, active: false },
+                    body: aktiv ? { channel: 'emergency', text, active: true } : { channel: 'emergency', active: false },
                 });
-                melden(aktiv ? `Gesendet an ${kanal}.` : `${kanal} geleert.`, true);
-                if (aktiv) { document.getElementById('disp-text').value = ''; dispPdfEntfernen(); }
+                if (aktiv) document.getElementById('disp-text').value = '';
+                melden(aktiv ? 'Notfall ist aktiv.' : 'Notfall aufgehoben.', true);
                 await ladeDispStand();
-            } catch (e) {
-                melden(e.message, false);
-            }
+            } catch (e) { melden(e.message, false); }
         }
 
         // ─── Anzeigegeräte ─────────────────────────────────────────────
