@@ -87,12 +87,22 @@ const ROLE_DEFAULTS = {
     // Update-Neustart traefe sie offen an. 0 schaltet es ab.
     session_idle_logout_seconds: 86400,
     // Leerlaufanzeige: dieselbe Seite wie auf den Anzeigestationen als
-    // Bildschirmschoner. Standardmässig aus — im Sitzungszimmer oder im
-    // Eingang sinnvoll, im Büro der Verwaltung eher störend. Sie ersetzt die
-    // Sperre nicht, sondern kommt davor; deshalb muss nach_sekunden kleiner
-    // sein als screen_lock_seconds, sonst zieht die Station sie selbst vor.
+    // Bildschirmschoner.
+    //
+    // Standardmässig AN (Entscheid vom 6. August 2026). Vorher war sie aus,
+    // mit dem Gedanken, sie könnte im Büro stören — in der Praxis stand
+    // dadurch überall ein schwarzer Schirm, auch am Anmeldebildschirm, wo eine
+    // Aushangtafel gerade recht ist. Wer sie an einem Platz nicht will,
+    // schaltet sie dort ab; das ist der seltenere Fall.
+    //
+    // Der Dienst läuft als Systemdienst und nicht in der Sitzung, damit er
+    // auch am Anmeldebildschirm greift — also die meiste Zeit.
+    //
+    // Sie ersetzt die Sperre nicht, sondern kommt davor; deshalb muss
+    // nach_sekunden kleiner sein als screen_lock_seconds (300), sonst zieht
+    // die Station die Sperre vor und die Anzeige käme nie.
     leerlauf_anzeige: {
-      enabled: false,
+      enabled: true,
       url: 'https://display.rosenweg4303.ch',
       nach_sekunden: 120,
     },
