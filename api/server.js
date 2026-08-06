@@ -14975,6 +14975,29 @@ function zipMitEinerDatei(name, inhalt) {
   return Buffer.concat([lokal, nameBuf, daten, zentral, nameBuf, ende]);
 }
 
+// Zwei Formen, weil unklar ist, welche die App wirklich anfragt:
+//
+//   .../geraetedatei/<id>.zip          die Adresse zeigt direkt auf das Archiv
+//   .../geraetedatei/<id>/irgendwas    die Adresse ist ein Ordner und die App
+//                                      haengt ihren Dateinamen an
+//
+// Die Doku des Herstellers sagt "URL auf die ZIP-Datei" UND "Dateiname auf
+// file.zip setzen" — beides zugleich ergibt nur Sinn, wenn angehaengt wird.
+// Statt weiter zu raten: beide bedienen, der Dateiname wird ignoriert.
+async function geraetedateiSenden(req, res) {
+  try {
+    const r = await pool.query('SELECT haus FROM anzeigegeraete WHERE id = $1', [req.params.id]);
+    if (!r.rows.length) return res.status(404).end();
+    const haus = Number(r.rows[0].haus);
+    const adresse = 'https://display.rosenweg4303.ch'
+      + (Number.isInteger(haus) && haus > 0 ? `?haus=${haus}` : '');
+    res.set('Content-Type', 'application/zip');
+    res.set('Cache-Control', 'no-store');
+    res.send(zipMitEinerDatei('anzeige.url', adresse + '\n'));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}
+
+app.get('/api/display/geraetedatei/:id/:datei', geraetedateiSenden);
 app.get('/api/display/geraetedatei/:id.zip', async (req, res) => {
   try {
     const r = await pool.query('SELECT haus FROM anzeigegeraete WHERE id = $1', [req.params.id]);
