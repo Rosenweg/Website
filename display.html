@@ -391,6 +391,48 @@
     }, 1000);
     // Frische-Indikator regelmäßig prüfen (auch ohne neue Nachrichten -> stale erkennen)
     setInterval(refreshStat, 5000);
+
+    // ===== Sich selbst auf den neuen Stand bringen =====
+    //
+    // Ein Kiosk lädt einmal und behält die Seite. Eine Änderung an dieser
+    // Datei erreicht ihn dadurch erst beim nächsten Neustart — am 6. August
+    // zeigte display-test deshalb noch die Fassung von vorgestern, und der
+    // Grund war lange nicht zu sehen.
+    //
+    // Stationen laden zwar alle 30 Minuten neu (station-display-reload), die
+    // SlideShow-Tafeln aber nie. Deshalb prüft die Seite selbst: sie holt sich
+    // alle fünf Minuten und vergleicht ihre eigene Länge und eine einfache
+    // Prüfsumme mit dem Stand beim Laden. Weicht etwas ab, lädt sie neu.
+    //
+    // Kein Versionsstempel, weil den niemand pflegen müsste, der ihn dann
+    // vergisst — die Datei selbst ist die Wahrheit.
+    (() => {
+      const pruefsumme = (s) => {
+        let x = 0;
+        for (let i = 0; i < s.length; i++) x = (x * 31 + s.charCodeAt(i)) | 0;
+        return `${s.length}:${x}`;
+      };
+      let stand = null;
+
+      async function nachsehen() {
+        try {
+          const a = await fetch(location.pathname + '?_=' + Date.now(), { cache: 'no-store' });
+          if (!a.ok) return;
+          const jetzt = pruefsumme(await a.text());
+          if (stand === null) { stand = jetzt; return; }
+          if (jetzt === stand) return;
+
+          // Während eines Notfalls nicht neu laden: das kostet eine Sekunde
+          // schwarzen Bildschirm, und genau dann schaut jemand hin. Der neue
+          // Stand kommt nach der Entwarnung.
+          if (state.emergency && state.emergency.active) return;
+          location.reload();
+        } catch { /* Netz weg — beim nächsten Mal wieder */ }
+      }
+
+      nachsehen();
+      setInterval(nachsehen, 5 * 60 * 1000);
+    })();
   });
   </script>
 </body>
