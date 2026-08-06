@@ -9627,7 +9627,13 @@ app.use('/api/grundbuch', require('./routes/grundbuch'));
 // Bewusst ohne authMiddleware: der Installer läuft auf einem Gerät ohne
 // Browser und ohne Identität und meldet sich mit Benutzer + Passwort gegen
 // das AD an. Siehe os-stationen/docs/installer.md.
-app.use('/api/stations', require('./routes/stations'));
+const stationsRouter = require('./routes/stations');
+app.use('/api/stations', stationsRouter);
+// Das Schema gleich beim Start anlegen, nicht erst beim ersten Aufruf einer
+// Stationen-Route. Der Notfall-Zweig weiter unten fragt anzeigegeraete ab und
+// kam ihm sonst zuvor — mit dem Ergebnis, dass ein echter Alarm auf keiner
+// Tafel landete.
+stationsRouter.ensureSchema().catch(e => console.error('[stationen] Schema:', e.message));
 
 // ═══════════════════════════════════════════════════════════════════
 // DOCUMENTS (local fileserver, NFS-mounted or local path)
@@ -15155,6 +15161,10 @@ let _alarmTakt = null;
 async function tafelnAlarmSenden(aktiv) {
   const c = apiMqttPublishClient();
   if (!c) return 0;
+  // Erst das Schema, dann die Abfrage. Der MQTT-Client verbindet sich drei
+  // Sekunden nach dem Start und bekommt den retained Notfall sofort — ohne
+  // dieses Warten waere es ein Wettlauf, und der Alarm verlöre ihn.
+  await stationsRouter.ensureSchema();
   const r = await pool.query('SELECT id, alarm_zone FROM anzeigegeraete');
   for (const g of r.rows) {
     const zone = (g.alarm_zone || '').trim();

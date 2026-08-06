@@ -1148,4 +1148,12 @@ router.use((err, req, res, next) => {
   res.status(500).json({ error: 'Unerwarteter Fehler in der Stationsverwaltung' });
 });
 
+// Das Schema wird auch ausserhalb dieses Routers gebraucht: server.js fragt
+// beim Notfall die Tabelle anzeigegeraete ab. Lief bis dahin keine
+// Stationen-Route, gab es die Spalte alarm_zone noch nicht — am 6. August 2026
+// stand deshalb ein echter Notfall auf keiner Tafel, und im Log stand nur
+// 'column "alarm_zone" does not exist'. Deshalb hier herausgereicht, damit
+// server.js es beim Start einmal anstossen kann.
+router.ensureSchema = ensureSchema;
+
 module.exports = router;
