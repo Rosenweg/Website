@@ -17,6 +17,13 @@ Obsidian Vault mit der technischen Dokumentation der Rosenweg-Kooperation.
 - [Email](email.md) — IMAP, SMTP2GO, Verteiler, DMARC
 - [Energie](energie.md) — Stromzähler, Collector, Tarife
 
+### Telefonie
+- [Übersicht](telefonie.md) — alle Telefonie-Systeme, Rufnummern, wer darf was
+- [Telefonanlage](telefonanlage-anleitung.md) — PBX-Admin, Ring-Group, Konferenz, Voicemail-KI
+- [SIP-Telefone](sip-telefone-anleitung.md) — interne Telefone und Softphones einrichten
+- [WhatsApp](whatsapp-anleitung.md) — Bot-Befehle, Gateway, Broadcast, Pairing
+- [Telefonbuch](telefonbuch-anleitung.md) — Verzeichnis und Kontakte-Sync
+
 ### Pläne
 - [Proxmox Mail Gateway](plans/proxmox-mail-gateway.md) — PMG + Mailcow Setup
 - [FPÜV Verbindungsnachweis](plans/fpuev-verbindungsnachweis.md) — Syslog + Polling
