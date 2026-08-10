@@ -479,6 +479,11 @@
                             ? `<button onclick="entsperren('${escape(s.id)}')" class="text-green-700 hover:text-green-900 font-medium">Entsperren</button>`
                             : `<button onclick="sperren('${escape(s.id)}')" class="text-red-600 hover:text-red-800 font-medium">Sperren</button>`
                     ) +
+                    ` <span class="text-gray-300 mx-1">|</span>` + (
+                        s.zuruecksetzen_angefordert
+                            ? `<button onclick="zuruecksetzenAbbrechen('${escape(s.id)}')" class="text-yellow-700 hover:text-yellow-900 font-medium">Zurücksetzen abbrechen</button>`
+                            : `<button onclick="zuruecksetzen('${escape(s.id)}')" class="text-orange-600 hover:text-orange-800 font-medium">Zurücksetzen</button>`
+                    ) +
                     ` <span class="text-gray-300 mx-1">|</span>
                       <button onclick="entfernen('${escape(s.id)}')" class="text-gray-500 hover:text-gray-700">Entfernen</button>`);
 
@@ -1327,6 +1332,30 @@
                 async () => tuUnd(`/api/stations/admin/${encodeURIComponent(id)}/unblock`,
                     { method: 'POST' }, `„${id}" entsperrt.`),
                 false);
+        }
+
+        // Zurücksetzen löscht die Identität eines Arbeitsplatzes. Deshalb keine
+        // Ja/Nein-Frage, sondern den Namen abtippen: ein Fehlklick in der
+        // falschen Zeile soll nicht genügen.
+        function zuruecksetzen(id) {
+            const eingabe = prompt(
+                `Station „${id}" in den Einrichtungszustand zurücksetzen?\n\n`
+                + 'Die Station löscht ihre Identität und startet neu. Danach muss sie '
+                + 'jemand vor Ort neu zuordnen — das geht nicht aus der Ferne.\n\n'
+                + `Zum Bestätigen den Namen eintippen: ${id}`);
+            if (eingabe === null) return;
+            if (eingabe.trim() !== id) {
+                alert('Der Name stimmt nicht überein — nichts geändert.');
+                return;
+            }
+            tuUnd(`/api/stations/admin/${encodeURIComponent(id)}/zuruecksetzen`,
+                { method: 'POST' },
+                `„${id}" setzt sich beim nächsten Lebenszeichen zurück (dauert bis zu fünf Minuten).`);
+        }
+
+        function zuruecksetzenAbbrechen(id) {
+            tuUnd(`/api/stations/admin/${encodeURIComponent(id)}/zuruecksetzen`,
+                { method: 'DELETE' }, `Zurücksetzen von „${id}" abgebrochen.`);
         }
 
         function entfernen(id) {
