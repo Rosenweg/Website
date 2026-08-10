@@ -14915,7 +14915,19 @@ app.get('/api/display/pdfbild/:name', async (req, res) => {
       const rumpf = ziel.replace(/\.png$/, '');
       const { execFile } = require('child_process');
       await new Promise((fertig, schiefgegangen) => {
-        execFile('pdftoppm', ['-png', '-r', '150', '-f', '1', '-l', '1', '-singlefile', quelle, rumpf],
+        // 600 dpi: A4 wird damit 4966x7016 (34,8 Megapunkte, rund 940 KB,
+        // zwei Sekunden Rechenzeit, danach zwischengespeichert).
+        //
+        // Gemessen am Kantenkontrast nach dem Verkleinern auf die tatsaechliche
+        // Anzeigegroesse bringt das gegenueber 150 dpi nur zwei Prozent — am
+        // Bildschirm beurteilt sieht es anders aus, und der Bildschirm hat
+        // recht. Die Reserve kostet wenig.
+        //
+        // Die Grenze liegt nicht bei der Datei, sondern beim Entpacken: 34,8
+        // Megapunkte sind im Browser rund 140 MB Arbeitsspeicher. Auf den
+        // Android-Tafeln ist das viel; wird das Bild dort leer, ist das der
+        // Grund und 400 dpi (15,5 MP) waeren der Rueckzug.
+        execFile('pdftoppm', ['-png', '-r', '600', '-f', '1', '-l', '1', '-singlefile', quelle, rumpf],
           { timeout: 20000 }, (err) => (err ? schiefgegangen(err) : fertig()));
       });
       bild = await fs.readFile(ziel);
