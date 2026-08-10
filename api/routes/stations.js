@@ -966,6 +966,14 @@ router.post('/register', setupSession, a(async (req, res) => {
        registered_by = EXCLUDED.registered_by, last_seen_ip = EXCLUDED.last_seen_ip,
        registered_at = NOW(), revoked_at = NULL, status = 'aktiv',
        sperr_grund = NULL, gesperrt_von = NULL, gesperrt_am = NULL,
+       -- Offene Auftraege verfallen mit der alten Identitaet.
+       --
+       -- Am 11. August 2026 fehlte das: eine Station wurde zurueckgesetzt, neu
+       -- eingerichtet — und vier Minuten spaeter sah der Agent dieselbe
+       -- Aufforderung von vorher und setzte sie erneut zurueck. Die Arbeit an
+       -- der Konsole war umsonst.
+       zuruecksetzen_angefordert = NULL, zuruecksetzen_angefordert_von = NULL,
+       update_angefordert = NULL, update_angefordert_von = NULL,
        last_seen_at = NULL, last_state = NULL
      WHERE stations.revoked_at IS NOT NULL
      RETURNING id`,
@@ -1184,7 +1192,10 @@ router.post('/:id/logs', stationAuth, a(async (req, res) => {
 
 // DELETE /api/stations/:id — die Station meldet sich selbst ab.
 router.delete('/:id', stationAuth, a(async (req, res) => {
-  await pool.query('UPDATE stations SET revoked_at = NOW(), status = $2 WHERE id = $1',
+  await pool.query(
+    `UPDATE stations SET revoked_at = NOW(), status = $2,
+            zuruecksetzen_angefordert = NULL, zuruecksetzen_angefordert_von = NULL
+      WHERE id = $1`,
     [req.station.id, 'abgemeldet']);
   await ereignis(req.station.id, 'abgemeldet', null, 'von der Station selbst');
   console.log(`[stations] '${req.station.id}' hat sich abgemeldet`);
