@@ -98,6 +98,15 @@ async function ensureSchema() {
     -- man ihr nichts schicken — sie fragt alle paar Minuten selbst nach.
     ALTER TABLE stations ADD COLUMN IF NOT EXISTS update_angefordert TIMESTAMPTZ;
     ALTER TABLE stations ADD COLUMN IF NOT EXISTS update_angefordert_von TEXT;
+    -- Aufforderung aus der Verwaltung: "loesche deine Identitaet und geh in den
+    -- Einrichtungszustand". Wie beim Update holt die Station sie im
+    -- Lebenszeichen ab; ein Zuruecksetzen von aussen gibt es nicht.
+    --
+    -- Das Token wird dabei NICHT vorher entwertet — sonst antwortete die API
+    -- dieser Station mit 401 und die Aufforderung erreichte sie nie. Entwertet
+    -- wird erst, wenn die Station sich selbst abmeldet.
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS zuruecksetzen_angefordert TIMESTAMPTZ;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS zuruecksetzen_angefordert_von TEXT;
     -- In welchem Haus steht die Station? Bestimmt, welche Ankuendigungen sie
     -- zeigt: die ohne Hausangabe plus die fuer genau dieses Haus. Ohne
     -- Eintrag zeigt sie alles.
@@ -376,6 +385,7 @@ router.get('/admin/list', authMiddleware, nurTechnik, a(async (req, res) => {
   await ensureSchema();
   const r = await pool.query(`
     SELECT id, role, hostname, standort, notiz, status, sperr_grund, gesperrt_von,
+           zuruecksetzen_angefordert,
            gesperrt_am, hardware, registered_by, registered_at,
            last_seen_at, last_seen_ip, last_state, revoked_at,
            update_angefordert, update_angefordert_von, overrides,
@@ -790,6 +800,36 @@ router.post('/admin/:id/unblock', authMiddleware, nurTechnik, a(async (req, res)
 
 // DELETE /api/stations/admin/:id — endgültig entfernen. Das Token der Station
 // ist danach wertlos; das Gerät fällt beim nächsten Lauf auf.
+// POST /api/stations/admin/:id/zuruecksetzen — in den Einrichtungszustand.
+//
+// Anders als 'entfernen': dort wird nur revoked_at gesetzt, und das Geraet
+// laeuft unveraendert weiter, weil es davon nie erfaehrt. Hier holt die Station
+// die Aufforderung im Lebenszeichen ab, loescht ihre Identitaet und startet in
+// den Einrichtungszustand — danach meldet sie sich selbst ab, und erst dadurch
+// wird das Token entwertet.
+router.post('/admin/:id/zuruecksetzen', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  const wer = req.user?.email || req.user?.name || 'unbekannt';
+  const r = await pool.query(
+    `UPDATE stations SET zuruecksetzen_angefordert = NOW(), zuruecksetzen_angefordert_von = $2
+      WHERE id = $1 AND revoked_at IS NULL RETURNING id`,
+    [req.params.id, wer],
+  );
+  if (!r.rows.length) return res.status(404).json({ error: 'Station nicht gefunden' });
+  await ereignis(req.params.id, 'zuruecksetzen-angefordert', wer,
+    'Station soll ihre Identität löschen und in den Einrichtungszustand starten');
+  res.json({ ok: true });
+}));
+
+// DELETE /api/stations/admin/:id/zuruecksetzen — Aufforderung zurueckziehen.
+router.delete('/admin/:id/zuruecksetzen', authMiddleware, nurTechnik, a(async (req, res) => {
+  await ensureSchema();
+  await pool.query(
+    `UPDATE stations SET zuruecksetzen_angefordert = NULL, zuruecksetzen_angefordert_von = NULL
+      WHERE id = $1`, [req.params.id]);
+  res.json({ ok: true });
+}));
+
 router.delete('/admin/:id', authMiddleware, nurTechnik, a(async (req, res) => {
   await ensureSchema();
   const wer = req.user?.email || req.user?.name || 'unbekannt';
@@ -1053,7 +1093,19 @@ router.post('/:id/seen', stationAuth, a(async (req, res) => {
     }
   }
 
-  res.json({ ok: true, gesperrt: req.station.status === 'gesperrt', update });
+  // Der Grund reist mit: die Station schreibt ihn in /etc/nologin, und wer
+  // vor dem gesperrten Geraet steht, liest ihn dort statt nur "gesperrt".
+  // Zuruecksetzen wird NICHT hier zurueckgesetzt, anders als beim Update.
+  // Die Aufforderung bleibt stehen, bis die Station sich selbst abmeldet —
+  // sonst waere sie nach dem ersten Lebenszeichen weg, und ein Neustart
+  // mitten im Vorgang liesse die Station im alten Zustand zurueck.
+  res.json({
+    ok: true,
+    gesperrt: req.station.status === 'gesperrt',
+    sperr_grund: req.station.status === 'gesperrt' ? (req.station.sperr_grund || null) : null,
+    zuruecksetzen: !!req.station.zuruecksetzen_angefordert,
+    update,
+  });
 }));
 
 // POST /api/stations/:id/logs  { teile: { journal: "…", failed_units: "…", … } }
