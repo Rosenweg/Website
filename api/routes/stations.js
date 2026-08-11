@@ -93,6 +93,10 @@ async function ensureSchema() {
     ALTER TABLE stations ADD COLUMN IF NOT EXISTS gesperrt_von TEXT;
     ALTER TABLE stations ADD COLUMN IF NOT EXISTS gesperrt_am  TIMESTAMPTZ;
     ALTER TABLE stations ADD COLUMN IF NOT EXISTS last_seen_ip TEXT;
+    -- Verschlüsselte Datenpartition: die Generation geht in die Ableitung des
+    -- Schlüssels ein. Hochzählen und neu anlegen heisst neu verschlüsseln.
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS persist_key_gen INT NOT NULL DEFAULT 1;
+    ALTER TABLE stations ADD COLUMN IF NOT EXISTS persist_key_zuletzt TIMESTAMPTZ;
     -- Aufforderung aus der Verwaltung: "aktualisiere dich beim naechsten
     -- Lebenszeichen". Eine Station ist von aussen nicht erreichbar, also kann
     -- man ihr nichts schicken — sie fragt alle paar Minuten selbst nach.
@@ -1122,6 +1126,118 @@ router.get('/:id/config', stationAuth, a(async (req, res) => {
   const cfg = buildConfig(req.station);
   cfg.network = { ...(cfg.network || {}), wifi: await wlanAufloesen(cfg.network?.wifi) };
   res.json(cfg);
+}));
+
+// GET /api/stations/:id/persist-key
+//
+// Der Schlüssel für die verschlüsselte Datenpartition. Auf der Station liegt
+// er nirgends — sie holt ihn bei jedem Start hier ab und reicht ihn direkt an
+// cryptsetup weiter.
+//
+// Damit hängt der Zugriff auf die Daten an drei Bedingungen, die alle
+// hier entschieden werden und nicht am Gerät:
+//
+//   1. Ein gültiges Stationstoken. Das liegt zwar auf dem unverschlüsselten
+//      Root und ist mit der Platte in der Hand lesbar — deshalb allein
+//      genügt es nicht.
+//   2. Die Station ist nicht gesperrt. stationAuth weist Gesperrte ab (nur
+//      das Lebenszeichen darf durch). Wer ein Gerät als verschwunden meldet
+//      und sperrt, macht damit die Daten unlesbar.
+//   3. Die Anfrage kommt aus dem Hausnetz. Ein Gerät, das jemand mitnimmt,
+//      bekommt seinen Schlüssel anderswo nicht — auch dann nicht, wenn der
+//      Diebstahl noch niemandem aufgefallen ist.
+//
+// Der Schlüssel selbst steht in keiner Tabelle: er wird aus einem Geheimnis
+// des Servers und der Kennung abgeleitet. Zu sichern ist damit genau eine
+// Zeichenkette (STATION_PERSIST_SECRET) statt einer Schlüsselsammlung. Geht
+// sie verloren, sind die Datenpartitionen aller Stationen verloren — was
+// Protokolle und Zwischenspeicher kostet, keine Nutzdaten: die Homes liegen
+// auf dem Dateiserver.
+//
+// persist_key_gen macht eine Neuverschlüsselung einzelner Stationen möglich:
+// hochzählen, Partition neu anlegen, fertig.
+const INTERN_NETZE = (process.env.STATION_INTERN_NETZE
+  || '2a02:16a:1400::/48,100.64.0.0/10,10.0.0.0/8,192.168.0.0/16,172.16.0.0/12,::1,127.0.0.0/8')
+  .split(',').map((s) => s.trim()).filter(Boolean);
+
+function ipInNetz(ip, netz) {
+  const [basis, bitsText] = netz.split('/');
+  const bits = bitsText === undefined ? null : Number(bitsText);
+  const a = ipBytes(ip);
+  const b = ipBytes(basis);
+  if (!a || !b || a.length !== b.length) return false;
+  const praefix = bits === null ? a.length * 8 : bits;
+  let rest = praefix;
+  for (let i = 0; i < a.length && rest > 0; i += 1) {
+    const nimm = Math.min(8, rest);
+    const maske = (0xff << (8 - nimm)) & 0xff;
+    if ((a[i] & maske) !== (b[i] & maske)) return false;
+    rest -= nimm;
+  }
+  return true;
+}
+
+// Beide Familien auf 16 Byte bringen: eine IPv4 kommt hinter dem Traefik
+// gelegentlich als ::ffff:1.2.3.4 an, und dann muss sie mit einem IPv4-Netz
+// vergleichbar bleiben.
+function ipBytes(ip) {
+  if (!ip) return null;
+  let text = String(ip).trim().replace(/^\[|\]$/g, '');
+  if (text.startsWith('::ffff:') && text.includes('.')) text = text.slice(7);
+  if (text.includes('.') && !text.includes(':')) {
+    const teile = text.split('.').map(Number);
+    if (teile.length !== 4 || teile.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return null;
+    return Uint8Array.from(teile);
+  }
+  const zone = text.indexOf('%');
+  if (zone >= 0) text = text.slice(0, zone);
+  const doppelt = text.split('::');
+  if (doppelt.length > 2) return null;
+  const links = doppelt[0] ? doppelt[0].split(':') : [];
+  const rechts = doppelt.length === 2 && doppelt[1] ? doppelt[1].split(':') : [];
+  const fehlend = 8 - links.length - rechts.length;
+  if (doppelt.length === 1 && links.length !== 8) return null;
+  if (doppelt.length === 2 && fehlend < 0) return null;
+  const gruppen = doppelt.length === 2
+    ? [...links, ...Array(fehlend).fill('0'), ...rechts]
+    : links;
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < 8; i += 1) {
+    const wert = parseInt(gruppen[i] || '0', 16);
+    if (Number.isNaN(wert) || wert < 0 || wert > 0xffff) return null;
+    bytes[i * 2] = wert >> 8;
+    bytes[i * 2 + 1] = wert & 0xff;
+  }
+  return bytes;
+}
+
+function istHausnetz(ip) {
+  return INTERN_NETZE.some((netz) => ipInNetz(ip, netz));
+}
+
+router.get('/:id/persist-key', stationAuth, a(async (req, res) => {
+  const geheimnis = process.env.STATION_PERSIST_SECRET || '';
+  if (!geheimnis) {
+    console.error('[stations] STATION_PERSIST_SECRET fehlt — kein Schlüssel für /persist möglich.');
+    return res.status(503).json({ error: 'Schlüsselableitung nicht konfiguriert' });
+  }
+
+  const ip = clientIp(req);
+  if (!istHausnetz(ip)) {
+    console.warn(`[stations] Schlüssel für '${req.station.id}' abgelehnt — ${ip} ist nicht im Hausnetz.`);
+    await ereignis(req.station.id, 'schluessel-abgelehnt', null, `Anfrage von ${ip}`);
+    return res.status(403).json({ error: 'Schlüssel wird nur im Hausnetz herausgegeben' });
+  }
+
+  const gen = Number(req.station.persist_key_gen || 1);
+  const schluessel = crypto.createHmac('sha256', geheimnis)
+    .update(`${req.station.id}:${gen}`).digest('hex');
+
+  await pool.query(
+    'UPDATE stations SET persist_key_zuletzt = NOW(), last_seen_ip = $2 WHERE id = $1',
+    [req.station.id, ip],
+  );
+  res.json({ schluessel, gen });
 }));
 
 // POST /api/stations/:id/seen  { state }
