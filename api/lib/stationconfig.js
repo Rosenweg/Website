@@ -17,6 +17,18 @@ const STATION_TYPES = [
     label: 'Anzeige',
     description: 'Digital Signage, kein Login, 24/7.',
   },
+  // Ein Laptop ist ein Arbeitsplatz, der das Haus verlässt — und das ändert
+  // drei Dinge, die beim Aufstellen entschieden sein müssen. Deshalb eine
+  // eigene Art und kein Häkchen, das jemand vergisst: der Einrichtungsdialog
+  // fragt danach.
+  //
+  // Wer einen Laptop als Arbeitsplatz einrichtet, stünde ausser Haus ohne
+  // seine Daten da — und niemand wüsste, warum.
+  {
+    id: 'laptop',
+    label: 'Laptop',
+    description: 'Arbeitsplatz zum Mitnehmen — mit Tunnel, Verschlüsselung und Passphrase.',
+  },
 ];
 
 const DEFAULTS = {
@@ -45,9 +57,22 @@ const DEFAULTS = {
   //   auf dem Server, der Zwischenspeicher entsteht bei der nächsten
   //   Anmeldung neu); /var/lib/station wird gerettet. Deshalb steht der Wert
   //   je Station und nicht pauschal auf true.
+  //
+  // mobil: hebt die Ortsprüfung beim Schlüssel auf. Nur für Geräte, die das
+  //   Haus verlassen dürfen — bei allen anderen ist "kommt von auswärts" ein
+  //   Alarmzeichen und keine Betriebsart.
+  //
+  // max_stille_tage: hat sich eine Station so lange nicht gemeldet, gibt die
+  //   Verwaltung den Schlüssel nicht mehr ohne Weiteres heraus. Damit kann ein
+  //   Dieb nicht einfach abwarten, bis niemand mehr an das Gerät denkt. Eine
+  //   Station, die nur aus war (Ferien, Reparatur), meldet sich beim nächsten
+  //   Lauf und ist danach wieder normal — bei einem Laptop kostet es einmal
+  //   die Passphrase.
   sicherheit: {
     swap_verschluesseln: true,
     persist_verschluesseln: false,
+    mobil: false,
+    max_stille_tage: 14,
   },
   domain: {
     enabled: true,
@@ -302,6 +327,21 @@ const ROLE_DEFAULTS = {
   },
 };
 
+// Ein Laptop ist ein Arbeitsplatz — dieselben Vorgaben, plus das, was ihn
+// mobil macht. Kein zweiter Satz Werte, der auseinanderlaufen könnte.
+ROLE_DEFAULTS.laptop = {
+  ...ROLE_DEFAULTS.desktop,
+  // Der Tunnel steht immer: er ist die Lebensader, über die der Laptop auch
+  // von auswärts als Hausgerät hereinkommt und seinen Schlüssel bekommt.
+  // Der zweite in VLAN 9 ist Werkzeug und wird von Hand eingeschaltet — zwei
+  // gleichzeitige Standardrouten wären ohnehin Ärger.
+  tunnel: {
+    enabled: true,
+    wohnung_autoconnect: true,
+    vlan9_fuer_technik: true,
+  },
+};
+
 // Was je Rolle von den Vorgaben abweicht.
 const ROLE_OVERRIDES = {
   // Eine Anzeige hat keinen Anmeldebildschirm — sie braucht die Domäne
@@ -309,6 +349,22 @@ const ROLE_OVERRIDES = {
   // Gegenwert, und er würde die Einrichtung abbrechen, wenn der DC gerade
   // nicht erreichbar ist.
   display: { domain: { enabled: false } },
+  // Beim Laptop ist die Verschlüsselung der Datenpartition von Anfang an an.
+  //
+  // Bei einem Arbeitsplatz steht sie auf false, weil die Umstellung eine
+  // bestehende Partition neu anlegt. Ein frisch eingerichteter Laptop hat dort
+  // nichts zu verlieren — und er ist das Gerät, das am ehesten wegkommt.
+  //
+  // 'mobil' hebt die Ortsprüfung beim Schlüssel auf: ein Laptop kommt über
+  // seinen Tunnel herein, und ein Gerät, das nachweislich unterwegs sein darf,
+  // an dieser Stelle abzuweisen hiesse, ihm die Daten zu sperren statt sie zu
+  // schützen. Was bleibt, sind Sperre, Passphrase und die Frist ohne Kontakt.
+  laptop: {
+    sicherheit: {
+      mobil: true,
+      persist_verschluesseln: true,
+    },
+  },
 };
 
 // Tiefes Zusammenführen: spätere Objekte gewinnen, Arrays werden ersetzt.
