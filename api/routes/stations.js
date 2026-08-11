@@ -1222,11 +1222,56 @@ router.get('/:id/persist-key', stationAuth, a(async (req, res) => {
     return res.status(503).json({ error: 'Schlüsselableitung nicht konfiguriert' });
   }
 
+  // Was für diese Station gilt, steht in ihrer Config — eine Stationsart
+  // 'laptop' bringt 'mobil: true' mit.
+  const cfgStation = buildConfig(req.station);
+  const mobil = cfgStation.sicherheit?.mobil === true;
+  const maxStille = Number(cfgStation.sicherheit?.max_stille_tage ?? 14);
+
   const ip = clientIp(req);
-  if (!istHausnetz(ip)) {
+
+  // Ortsprüfung — aber nicht für Geräte, die das Haus verlassen dürfen.
+  //
+  // Bei einer ortsgebundenen Station ist "meldet sich von auswärts" ein
+  // Alarmzeichen: sie steht im Treppenhaus und hat dort zu bleiben. Bei einem
+  // Laptop wäre dieselbe Regel keine Sicherung, sondern eine Sperre — und sie
+  // täuschte obendrein Schutz vor, denn der Tunnelschlüssel liegt auf dem
+  // unverschlüsselten Root. Wer das Gerät hat, käme damit ohnehin als
+  // Hausgerät herein. Für mobile Geräte tragen deshalb Sperre, Passphrase und
+  // die Frist unten — nicht der Ort.
+  if (!mobil && !istHausnetz(ip)) {
     console.warn(`[stations] Schlüssel für '${req.station.id}' abgelehnt — ${ip} ist nicht im Hausnetz.`);
     await ereignis(req.station.id, 'schluessel-abgelehnt', null, `Anfrage von ${ip}`);
     return res.status(403).json({ error: 'Schlüssel wird nur im Hausnetz herausgegeben' });
+  }
+
+  // Frist ohne Kontakt.
+  //
+  // Ein Dieb, der ein Gerät liegen lässt, bis niemand mehr daran denkt, soll
+  // es danach nicht einfach anschliessen können. Das Lebenszeichen ist das
+  // Mass: es läuft alle fünf Minuten und braucht kein Zutun.
+  //
+  // Für eine Station, die nur aus war, kostet das nichts — sie meldet sich
+  // beim Hochfahren, und der Entsperrdienst versucht es ohnehin jede Minute
+  // erneut. Bei einem Laptop ohne Verbindung tritt stattdessen die Passphrase
+  // an die Stelle des Schlüssels.
+  // Ersatzweise die Registrierung: eine frisch eingerichtete Station hat noch
+  // kein Lebenszeichen gesendet — das erste kommt erst NACH install.sh, und
+  // genau dort fragt sie zum ersten Mal nach ihrem Schlüssel. Ohne diesen
+  // Rückfall bliebe die Frist an der eigenen Einrichtung hängen.
+  const letzterKontakt = req.station.last_seen_at || req.station.registered_at;
+  const stille = letzterKontakt
+    ? (Date.now() - new Date(letzterKontakt).getTime()) / 86400000
+    : 0;
+  if (maxStille > 0 && stille > maxStille) {
+    const tage = Number.isFinite(stille) ? Math.floor(stille) : null;
+    console.warn(`[stations] Schlüssel für '${req.station.id}' abgelehnt — ${tage ?? 'nie'} Tage ohne Lebenszeichen.`);
+    await ereignis(req.station.id, 'schluessel-abgelehnt', null,
+      `${tage ?? 'nie'} Tage ohne Lebenszeichen (Grenze ${maxStille})`);
+    return res.status(403).json({
+      error: `Diese Station hat sich ${tage ?? 'noch nie'} Tage nicht gemeldet —`
+        + ' der Schlüssel wird erst nach einem Lebenszeichen wieder herausgegeben',
+    });
   }
 
   const gen = Number(req.station.persist_key_gen || 1);
