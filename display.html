@@ -139,6 +139,19 @@
     #stat .lbl { opacity: .8; }
     body.emergency #stat { color: rgba(255,255,255,.7); }
 
+    /* Hinweis auf eine gesperrte Station — dezent, unten links.
+       Die Leerlaufanzeige haengt '?gesperrt=1' an, wenn die Station ausser
+       Dienst ist. Wer davorsteht, soll sehen, dass das Absicht ist und nicht
+       ein Fehler; laut werden muss es dafuer nicht. */
+    #sperrhinweis { position: fixed; bottom: 1.4vmin; left: 50%; transform: translateX(-50%);
+                    z-index: 20; display: none; align-items: center; gap: .6em;
+                    padding: .35em .9em; border-radius: 999px;
+                    background: rgba(204,0,0,.14); border: 1px solid rgba(204,0,0,.45);
+                    color: rgba(255,214,214,.92); font-size: clamp(.62rem, 1.1vh, .95rem);
+                    letter-spacing: .02em; }
+    #sperrhinweis .punkt { width: .55em; height: .55em; border-radius: 50%; background: #CC0000; }
+    body.gesperrt #sperrhinweis { display: flex; }
+
     /* Aktualisiert-vor Zeitstempel */
     #age { position: fixed; bottom: 1.6vmin; left: 1.8vmin; font-size: clamp(.62rem, 1vw, .9rem); color: rgba(255,255,255,.4); z-index: 20; letter-spacing: .02em; }
     body.emergency #age { color: rgba(255,255,255,.6); }
@@ -146,6 +159,7 @@
 </head>
 <body>
   <div id="screen"></div>
+  <div id="sperrhinweis"><span class="punkt"></span><span>Station gesperrt — ausser Dienst</span></div>
   <div id="age"></div>
   <div id="stat" class="off"><span class="dot"></span><span class="lbl" id="stat-t">…</span></div>
 
@@ -159,6 +173,13 @@
   // Die API hängt das selbst an, aus dem Haus der Station beziehungsweise des
   // Anzeigegeräts. Ohne Angabe zeigt die Seite alles — so verhalten sich
   // Tafeln, die es schon gab, unverändert weiter.
+  // Gesperrte Station: die Leerlaufanzeige haengt '?gesperrt=1' an. Nur ein
+  // Hinweis in der Ecke — die Ankuendigungen laufen weiter, das Geraet tut ja
+  // noch etwas Nuetzliches.
+  if (new URLSearchParams(location.search).get('gesperrt') === '1') {
+    document.body.classList.add('gesperrt');
+  }
+
   const MEIN_HAUS = (() => {
     const n = parseInt(new URLSearchParams(location.search).get('haus'), 10);
     return Number.isInteger(n) && n > 0 ? n : null;
