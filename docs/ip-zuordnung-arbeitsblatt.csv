@@ -1,0 +1,113 @@
+objekt_id;stweg;bisher;haus;stockwerk_neu;nr_neu;bezeichnung_neu;stockwerk_alt;typ;haeuser_im_stweg;zu_klaeren
+1;2;13.EG.1;13;EG;1;13.EG.1;Erdgeschoss;Wohnung;13/14/16;
+2;2;13.EG.2;13;EG;2;13.EG.2;Erdgeschoss;Wohnung;13/14/16;
+3;2;13.EG.3;13;EG;3;13.EG.3;Erdgeschoss;Wohnung;13/14/16;
+4;2;13.1OG.1;13;1OG;1;13.1OG.1;1. Obergeschoss;Wohnung;13/14/16;
+5;2;1305;13;1OG;;;1. Obergeschoss;Wohnung;13/14/16;Nummer
+6;2;13.1OG.3;13;1OG;3;13.1OG.3;1. Obergeschoss;Wohnung;13/14/16;
+7;2;13.2OG.1;13;2OG;1;13.2OG.1;2. Obergeschoss;Wohnung;13/14/16;
+8;2;13.2OG.2;13;2OG;2;13.2OG.2;2. Obergeschoss;Wohnung;13/14/16;
+9;2;13.2OG.3;13;2OG;3;13.2OG.3;2. Obergeschoss;Wohnung;13/14/16;
+10;2;14.EG.1;14;EG;1;14.EG.1;Erdgeschoss;Wohnung;13/14/16;
+11;2;1402;14;EG;;;Erdgeschoss;Wohnung;13/14/16;Nummer
+12;2;1403;14;EG;;;Erdgeschoss;Wohnung;13/14/16;Nummer
+13;2;1404;14;1OG;;;1. Obergeschoss;Wohnung;13/14/16;Nummer
+14;2;1405;14;1OG;;;1. Obergeschoss;Wohnung;13/14/16;Nummer
+15;2;1406;14;2OG;;;2. Obergeschoss;Wohnung;13/14/16;Nummer
+16;2;1407;14;2OG;;;2. Obergeschoss;Wohnung;13/14/16;Nummer
+17;2;1601;16;EG;;;Erdgeschoss;Wohnung;13/14/16;Nummer
+18;2;1602;16;EG;;;Erdgeschoss;Wohnung;13/14/16;Nummer
+19;2;1603;16;1OG;;;1. Obergeschoss;Wohnung;13/14/16;Nummer
+20;2;16.1OG.2;16;1OG;2;16.1OG.2;1. Obergeschoss;Wohnung;13/14/16;
+21;2;1605;16;2OG;;;2. Obergeschoss;Wohnung;13/14/16;Nummer
+22;2;1606;16;2OG;;;2. Obergeschoss;Wohnung;13/14/16;Nummer
+23;4;10.1;10;;;;;Wohnung;10/12;Stockwerk, Nummer
+24;4;10.2OG.2;10;2OG;2;10.2OG.2;2. Obergeschoss;Wohnung;10/12;
+25;4;10.3;10;;;;;Wohnung;10/12;Stockwerk, Nummer
+26;4;10.4;10;;;;;Wohnung;10/12;Stockwerk, Nummer
+27;4;10.5;10;;;;;Wohnung;10/12;Stockwerk, Nummer
+28;4;10.6;10;;;;;Wohnung;10/12;Stockwerk, Nummer
+29;4;12.2OG.1;12;2OG;1;12.2OG.1;2. Obergeschoss;Wohnung;10/12;
+30;4;12.2;12;;;;;Wohnung;10/12;Stockwerk, Nummer
+31;4;12.3;12;;;;;Wohnung;10/12;Stockwerk, Nummer
+32;4;12.4;12;;;;;Wohnung;10/12;Stockwerk, Nummer
+33;4;12.5;12;;;;;Wohnung;10/12;Stockwerk, Nummer
+34;4;12.6;12;;;;;Wohnung;10/12;Stockwerk, Nummer
+36;1;18.EG.2;18;EG;2;18.EG.2;Erdgeschoss;Wohnung;17/18;
+37;1;RW17-01;17;;;;;Wohnung;17/18;Stockwerk, Nummer
+38;1;RW17-02;17;;;;;Wohnung;17/18;Stockwerk, Nummer
+39;1;RW17-03;17;;;;;Wohnung;17/18;Stockwerk, Nummer
+40;1;RW17-04;17;;;;;Wohnung;17/18;Stockwerk, Nummer
+41;1;18.1OG.2;18;1OG;2;18.1OG.2;1. Obergeschoss;Wohnung;17/18;
+42;1;18.1OG.1;18;1OG;1;18.1OG.1;1. Obergeschoss;Wohnung;17/18;
+43;1;RW17-05;17;;;;;Wohnung;17/18;Stockwerk, Nummer
+44;1;18.2OG.2;18;2OG;2;18.2OG.2;2. Obergeschoss;Wohnung;17/18;
+45;1;RW17-06;17;;;;;Wohnung;17/18;Stockwerk, Nummer
+46;1;RW17-07 rechts 0.3;17;EG;;;Erdgeschoss;Wohnung;17/18;Nummer
+47;1;18.1OG.3;18;1OG;3;18.1OG.3;1. Obergeschoss;Wohnung;17/18;
+48;1;RW17-08;17;;;;;Wohnung;17/18;Stockwerk, Nummer
+49;1;RW17-09;17;;;;;Wohnung;17/18;Stockwerk, Nummer
+50;1;18.2OG.1;18;2OG;1;18.2OG.1;2. Obergeschoss;Wohnung;17/18;
+52;3;9.EG.2;9;EG;2;9.EG.2;Erdgeschoss;Wohnung;9;
+53;3;9.2OG.2;9;2OG;2;9.2OG.2;2. Obergeschoss;Wohnung;9;
+54;3;9.EG.1;9;EG;1;9.EG.1;Erdgeschoss;Wohnung;9;
+55;3;9.1OG.3;9;1OG;3;9.1OG.3;1. Obergeschoss;Wohnung;9;
+56;3;9.EG.3;9;EG;3;9.EG.3;Erdgeschoss;Wohnung;9;
+57;3;9.2OG.3;9;2OG;3;9.2OG.3;2. Obergeschoss;Wohnung;9;
+58;3;Hobbyraum;;UG;;;Untergeschoss;Hobbyraum;9;Haus, Nummer
+59;3;9.1OG.2;9;1OG;2;9.1OG.2;1. Obergeschoss;Wohnung;9;
+60;3;9.1OG.1;9;1OG;1;9.1OG.1;1. Obergeschoss;Wohnung;9;
+61;5;RW5-01;5;;;;;Wohnung;5/6/8;Stockwerk, Nummer
+62;5;6.EG.1;6;;1;;;Wohnung;5/6/8;Stockwerk
+63;5;RW5-02;5;;;;;Wohnung;5/6/8;Stockwerk, Nummer
+64;5;6.EG.2;6;EG;2;6.EG.2;Erdgeschoss;Wohnung;5/6/8;
+65;5;RW8-01;8;;;;;Wohnung;5/6/8;Stockwerk, Nummer
+66;5;RW6-03;6;;;;;Wohnung;5/6/8;Stockwerk, Nummer
+67;5;8.EG.2;8;EG;2;8.EG.2;Erdgeschoss;Wohnung;5/6/8;
+68;5;RW6-04;6;;;;;Wohnung;5/6/8;Stockwerk, Nummer
+69;5;RW5-03;5;;;;;Wohnung;5/6/8;Stockwerk, Nummer
+70;5;RW5-04;5;;;;;Wohnung;5/6/8;Stockwerk, Nummer
+71;5;RW5-05;5;;;;;Wohnung;5/6/8;Stockwerk, Nummer
+73;5;RW8-03;8;1OG;;;1. Obergeschoss;Wohnung;5/6/8;Nummer
+74;5;RW6-06;6;2OG;;;2. Obergeschoss;Wohnung;5/6/8;Nummer
+75;5;RW8-04;8;;;;;Wohnung;5/6/8;Stockwerk, Nummer
+76;5;RW8-05;8;1OG;;;1. Obergeschoss;Wohnung;5/6/8;Nummer
+77;5;RW8-06;8;2OG;;;2. OG rechts;Wohnung;5/6/8;Nummer
+78;5;RW5-06;5;;;;;Wohnung;5/6/8;Stockwerk, Nummer
+79;5;RW5-07;5;;;;;Wohnung;5/6/8;Stockwerk, Nummer
+80;5;RW6-07;6;;;;;Wohnung;5/6/8;Stockwerk, Nummer
+81;5;5.2OG.3;5;2OG;3;5.2OG.3;2. Obergeschoss;Wohnung;5/6/8;
+82;5;RW5-09;5;;;;;Wohnung;5/6/8;Stockwerk, Nummer
+83;5;RW8-07;8;;;;;Wohnung;5/6/8;Stockwerk, Nummer
+84;6;RW1-01;1;UG;;;Untergeschoss;Hobbyraum;1;Nummer
+85;6;RW1-02;1;;;;;Wohnung;1;Stockwerk, Nummer
+86;6;RW1-03;1;1OG;;;1. Obergeschoss;Wohnung;1;Nummer
+87;6;RW1-04;1;;;;;Wohnung;1;Stockwerk, Nummer
+88;6;RW1-05;1;;;;;Wohnung;1;Stockwerk, Nummer
+89;6;RW1-06;1;;;;;Wohnung;1;Stockwerk, Nummer
+90;6;RW1-07;1;;;;;Wohnung;1;Stockwerk, Nummer
+91;6;RW1-08;1;;;;;Wohnung;1;Stockwerk, Nummer
+92;6;RW1-09;1;;;;;Wohnung;1;Stockwerk, Nummer
+93;7;RW2-01;2;;;;;Wohnung;2/4;Stockwerk, Nummer
+94;7;RW2-02;2;;;;;Wohnung;2/4;Stockwerk, Nummer
+95;7;RW2-03;2;;;;;Wohnung;2/4;Stockwerk, Nummer
+96;7;RW4-01;4;;;;;Wohnung;2/4;Stockwerk, Nummer
+97;7;RW4-02;4;1OG;;;1. Obergeschoss;Wohnung;2/4;Nummer
+98;7;RW4-03;4;;;;;Wohnung;2/4;Stockwerk, Nummer
+99;7;RW4-Hobbyraum;4;UG;;;Untergeschoss;Hobbyraum;2/4;Nummer
+100;7;RW4-04;4;EG;;;Erdgeschoss;Wohnung;2/4;Nummer
+101;7;RW2-05;2;;;;;Wohnung;2/4;Stockwerk, Nummer
+102;7;RW2-Hobbyraum-Oes;2;UG;;;Untergeschoss;Hobbyraum;2/4;Nummer
+103;7;RW4-05;4;;;;;Wohnung;2/4;Stockwerk, Nummer
+104;7;RW2-07;2;EG;;;Parterre links;Wohnung;2/4;Nummer
+105;7;RW4-06;4;;;;;Wohnung;2/4;Stockwerk, Nummer
+106;7;RW2-08;2;;;;;Wohnung;2/4;Stockwerk, Nummer
+215;4;Hobbyraum rechts;;;;;;Hobbyraum;10/12;Haus, Stockwerk, Nummer
+216;4;Hobbyraum Links;;;;;;Hobbyraum;10/12;Haus, Stockwerk, Nummer
+217;4;Hobbyraum;;;;;;Hobbyraum;10/12;Haus, Stockwerk, Nummer
+218;5;RW6-Hobbyraum;6;;;;;Hobbyraum;5/6/8;Stockwerk, Nummer
+219;2;13.Hobbyraum;13;UG;;;Untergeschoss;Hobbyraum;13/14/16;Nummer
+220;1;18.EG.1;18;EG;1;18.EG.1;Erdgeschoss;Wohnung;17/18;
+223;1;RW17-Mansarde;17;1OG;;;1. Obergeschoss;Wohnung;17/18;Nummer
+227;7;RW2-Hobbyraum-Marx;2;UG;;;Untergeschoss;Hobbyraum;2/4;Nummer
+228;3;9.2OG.1;9;1OG;1;9.1OG.1;1. Obergeschoss;Wohnung;9;
