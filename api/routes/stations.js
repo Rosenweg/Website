@@ -163,6 +163,10 @@ async function ensureSchema() {
       created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       expires_at   TIMESTAMPTZ NOT NULL
     );
+    -- Die Gruppen der Person, die den Einrichtungsdialog bedient. Gebraucht,
+    -- damit eine gesperrte Station nur von technik neu zugeordnet werden kann
+    -- (siehe /register). Ohne die Spalte stand in der Sitzung nur der Name.
+    ALTER TABLE station_setup_sessions ADD COLUMN IF NOT EXISTS groups_json TEXT;
     CREATE TABLE IF NOT EXISTS station_app_sessions (
       token_hash   TEXT PRIMARY KEY,
       username     TEXT NOT NULL,
@@ -318,9 +322,10 @@ router.post('/login', a(async (req, res) => {
   await ensureSchema();
   const token = newToken(SETUP_PREFIX);
   await pool.query(
-    `INSERT INTO station_setup_sessions (token_hash, username, display_name, expires_at)
-     VALUES ($1, $2, $3, NOW() + ($4 || ' minutes')::interval)`,
-    [sha256(token), user.username, user.displayName, String(SETUP_TTL_MINUTES)],
+    `INSERT INTO station_setup_sessions (token_hash, username, display_name, groups_json, expires_at)
+     VALUES ($1, $2, $3, $4, NOW() + ($5 || ' minutes')::interval)`,
+    [sha256(token), user.username, user.displayName,
+      JSON.stringify(user.groups || []), String(SETUP_TTL_MINUTES)],
   );
   res.json({
     token,
@@ -938,6 +943,58 @@ router.post('/register', setupSession, a(async (req, res) => {
     return res.status(409).json({
       error: `Station '${id}' gibt es schon — anderen Standort oder eigene Kennung wählen`,
     });
+  }
+
+  // ─── Gesperrte Hardware ───────────────────────────────────────────
+  //
+  // Eine Sperre, die man mit einem Einrichtungslauf abschütteln kann, ist
+  // keine. Dieselbe Kennung fängt die Dublettenprüfung oben ab — aber wer
+  // state.json löscht und die Station unter NEUEM Namen einrichtet, bekam
+  // bisher ein frisches, voll eingerichtetes Gerät mit gültigem Token,
+  // während der gesperrte Eintrag unberührt danebenstand.
+  //
+  // Wiedererkannt wird deshalb die Maschine, nicht der Name: Seriennummer
+  // aus dem DMI und die MAC-Adressen. Beide schickt der Einrichtungsdialog
+  // ohnehin schon fürs Inventar mit.
+  //
+  // Aufheben darf das die Gruppe technik — dieselbe, die auch sperrt. Damit
+  // bleibt der reguläre Weg offen (erst entsperren oder gleich hier neu
+  // zuordnen), und für alle anderen ist Schluss. Wer die Platte tauscht,
+  // umgeht das; dagegen hilft Verschlüsselung, nicht diese Prüfung.
+  const hw = hardware && typeof hardware === 'object' ? hardware : {};
+  const seriennummer = String(hw.seriennummer || '').trim();
+  const macs = Object.values(hw.macs || {})
+    .map((m) => String(m || '').trim().toLowerCase())
+    .filter((m) => m && m !== '00:00:00:00:00:00');
+
+  if (seriennummer || macs.length) {
+    const gesperrt = await pool.query(
+      `SELECT id, sperr_grund, gesperrt_am FROM stations
+        WHERE status = 'gesperrt'
+          AND ( ($1 <> '' AND lower(hardware->>'seriennummer') = lower($1))
+             OR EXISTS (SELECT 1
+                          FROM jsonb_each_text(COALESCE(hardware->'macs', '{}'::jsonb)) AS m
+                         WHERE lower(m.value) = ANY($2::text[])) )
+        LIMIT 1`,
+      [seriennummer, macs],
+    );
+    if (gesperrt.rows.length) {
+      let gruppen = [];
+      try { gruppen = JSON.parse(req.setupUser?.groups_json || '[]'); } catch { gruppen = []; }
+      if (!isTechnik(gruppen) && !isPraesident(gruppen)) {
+        const alt = gesperrt.rows[0];
+        console.warn(`[stations] Neuzuordnung abgelehnt: Hardware gehört zur gesperrten Station '${alt.id}'`
+          + ` (Versuch als '${id}' von ${req.setupUser?.username || 'unbekannt'})`);
+        await ereignis(alt.id, 'neuzuordnung-abgelehnt',
+          req.setupUser?.username || 'unbekannt',
+          `Versuch, dieselbe Hardware als '${id}' einzurichten`);
+        return res.status(403).json({
+          error: `Dieses Gerät ist gesperrt (als '${alt.id}')`
+            + `${alt.sperr_grund ? `: ${alt.sperr_grund}` : '.'}`
+            + ' Nur die Gruppe technik kann es neu zuordnen.',
+        });
+      }
+    }
   }
 
   const token = newToken(STATION_PREFIX);
