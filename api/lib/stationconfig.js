@@ -26,6 +26,29 @@ const DEFAULTS = {
     keymap: 'ch',
     volatile_root: { enabled: true, persist_label: 'STATIONPERSIST' },
   },
+  // Was auf der Platte einer Station liegen bleibt, wenn jemand sie mitnimmt.
+  //
+  // swap_verschluesseln: der Auslagerungsspeicher, mit einem Zufallsschlüssel
+  //   je Start. Nichts zu verwalten — sein Inhalt ist nach dem Ausschalten
+  //   ohnehin wertlos. Umso wichtiger, weil der flüchtige Root laut
+  //   overlayroot 'tmpfs:swap=1' genau dorthin auslagern darf.
+  //
+  // persist_verschluesseln: die Datenpartition mit /var/log, /var/lib/station
+  //   und vor allem dem sssd-Zwischenspeicher — dort liegen die
+  //   Anmeldedaten aller, die je an dem Gerät standen. Der Schlüssel liegt
+  //   nicht auf der Station: sie holt ihn bei jedem Start bei der Verwaltung,
+  //   und die gibt ihn nur heraus, wenn die Station nicht gesperrt ist und
+  //   die Anfrage aus dem Hausnetz kommt.
+  //
+  //   Die Umstellung legt die Partition neu an. /var/log und der
+  //   sssd-Zwischenspeicher gehen dabei verloren (Protokolle liegen ohnehin
+  //   auf dem Server, der Zwischenspeicher entsteht bei der nächsten
+  //   Anmeldung neu); /var/lib/station wird gerettet. Deshalb steht der Wert
+  //   je Station und nicht pauschal auf true.
+  sicherheit: {
+    swap_verschluesseln: true,
+    persist_verschluesseln: false,
+  },
   domain: {
     enabled: true,
     realm: 'AD.ROSENWEG4303.CH',
