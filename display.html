@@ -139,11 +139,16 @@
     #stat .lbl { opacity: .8; }
     body.emergency #stat { color: rgba(255,255,255,.7); }
 
-    /* Hinweis auf eine gesperrte Station — dezent, unten links.
+    /* Hinweis auf eine gesperrte Station — dezent, ueber der Live-Anzeige.
        Die Leerlaufanzeige haengt '?gesperrt=1' an, wenn die Station ausser
        Dienst ist. Wer davorsteht, soll sehen, dass das Absicht ist und nicht
-       ein Fehler; laut werden muss es dafuer nicht. */
-    #sperrhinweis { position: fixed; bottom: 1.4vmin; left: 50%; transform: translateX(-50%);
+       ein Fehler; laut werden muss es dafuer nicht.
+
+       Unten mittig sass er zwischen den Blaettern, ueberlappte das untere
+       Blattende und wurde vom Bildschirmrand angeschnitten — am 11. August
+       2026 auf desktop-test nachgemessen. Rechts gestapelt stoert er nichts
+       und bleibt vollstaendig sichtbar. */
+    #sperrhinweis { position: fixed; bottom: calc(1.6vmin + 2.4em); right: 1.8vmin;
                     z-index: 20; display: none; align-items: center; gap: .6em;
                     padding: .35em .9em; border-radius: 999px;
                     background: rgba(204,0,0,.14); border: 1px solid rgba(204,0,0,.45);
