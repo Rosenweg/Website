@@ -61,35 +61,27 @@ Adresse: derselbe Faktor `n` in jeder Formel.
 | `.120`–`.129` | Einheit 12 |
 | `.130`–`.139` | Einheit 13 |
 | `.140`–`.149` | Einheit 14 |
-| `.150`–`.254` | DHCP: Gäste, Handwerker, alles Flüchtige |
+| `.150`–`.199` | frei — Reserve für Einheiten 15+ oder weitere Infrastruktur |
+| `.200`–`.254` | DHCP: Gäste, Handwerker, alles Flüchtige |
 
-## Voraussetzung: DHCP vereinheitlichen
+## DHCP: erledigt am 11. August 2026
 
-Heute beginnt der DHCP-Bereich in drei verschiedenen Mustern. In sieben
-Häusern bei `.6` — dort ist für feste Blöcke kein Platz.
+Stefan hat die Bereiche in UniFi umgestellt — auf `.200` statt der
+vorgeschlagenen `.150`. Das ist die bessere Wahl: die vierzehn Blöcke enden
+bei `.149`, und `.150`–`.199` bleibt als Reserve.
 
-| Haus | heute | künftig | Änderung |
-|---|---|---|---|
-| RK | `.6–.254` | `.150–.254` | **Anfang verschieben, Leases erneuern** |
-| RW1 | `.6–.254` | `.150–.254` | **Anfang verschieben, Leases erneuern** |
-| RW2 | `.200–.254` | `.150–.254` | Bereich verkleinern |
-| RW4 | `.6–.254` | `.150–.254` | **Anfang verschieben, Leases erneuern** |
-| RW5 | `.6–.254` | `.150–.254` | **Anfang verschieben, Leases erneuern** |
-| RW6 | `.6–.254` | `.150–.254` | **Anfang verschieben, Leases erneuern** |
-| RW8 | `.6–.254` | `.150–.254` | **Anfang verschieben, Leases erneuern** |
-| RW9 | `.200–.254` | `.150–.254` | Bereich verkleinern |
-| RW10 | `.6–.254` | `.150–.254` | **Anfang verschieben, Leases erneuern** |
-| RW12 | `.100–.254` | `.150–.254` | Anfang verschieben |
-| RW13 | `.200–.254` | `.150–.254` | Bereich verkleinern |
-| RW14 | `.100–.254` | `.150–.254` | Anfang verschieben |
-| RW16 | `.100–.254` | `.150–.254` | Anfang verschieben |
-| RW17 | `.100–.254` | `.150–.254` | Anfang verschieben |
-| RW18 | `.100–.254` | `.150–.254` | Anfang verschieben |
+| Haus-VLANs | DHCP |
+|---|---|
+| 14 von 15 | `.200`–`.254` |
+| RK (VLAN 9) | **noch `.6`–`.254`** |
 
-Die sieben Häuser mit `.6` sind die eigentliche Arbeit: dort haben Geräte
-heute Adressen im künftigen Blockbereich und bekommen beim nächsten
-Lease-Wechsel eine neue. Für Geräte mit fester Adresse ist das ein Umzug,
-für alle anderen unbemerkt.
+RK steht noch aus. Solange dort ab `.6` vergeben wird, sind die Blöcke in
+diesem einen Netz nicht frei — `desktop-test` etwa hält `100.64.9.128`, was
+in den Block von Einheit 12 fiele.
+
+Die sieben festen Reservierungen aus dem Blockbereich brauchen weiterhin eine
+neue Adresse; sie sind oben aufgeführt. Drei davon sind Einheiten-Router, die
+unter der neuen Systematik ohnehin die erste Adresse ihres Blocks bekommen.
 
 ## Ausgerechnet: Haus 13, Einheit 3
 
