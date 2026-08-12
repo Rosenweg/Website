@@ -19378,10 +19378,23 @@ app.post('/api/stations/:id/tunnel', stationsRouter.appSession, async (req, res)
     }
 
     // Was angelegt wird: die Wohnung immer, VLAN 9 nur für technik.
+    // Zwei Namen, zwei Aufgaben.
+    //
+    // 'name' geht an wg-control und muss eindeutig sein — sonst kollidieren
+    // zwei Menschen auf demselben Geraet oder dieselbe Person auf zwei
+    // Geraeten. 'anzeige' steht im NetworkManager und wird von Menschen
+    // gelesen; dort ist 'Rosenweg-VPN' unendlich viel brauchbarer als
+    // 'laptop-test-stefanrosenweg'.
+    //
+    // Dass die Anzeige nicht eindeutig ist, geht in Ordnung: die Station
+    // loescht die Verbindungen einer Person beim Abmelden wieder, es ist also
+    // immer nur ein Satz da.
     const kurz = email.split('@')[0].replace(/[^a-z0-9._-]/gi, '').slice(0, 32);
-    const gewuenscht = [{ vlan: wohnungsVlan, name: `${stationId}-${kurz}`, autoconnect: true }];
+    const gewuenscht = [{ vlan: wohnungsVlan, name: `${stationId}-${kurz}`,
+                          anzeige: 'Rosenweg-VPN', autoconnect: true }];
     if (isTechnik(gruppen) || isPraesident(gruppen)) {
-      gewuenscht.push({ vlan: 9, name: `${stationId}-${kurz}-vlan9`, autoconnect: false });
+      gewuenscht.push({ vlan: 9, name: `${stationId}-${kurz}-vlan9`,
+                        anzeige: 'Technik-VPN', autoconnect: false });
     }
 
     const tunnel = [];
@@ -19419,7 +19432,10 @@ app.post('/api/stations/:id/tunnel', stationsRouter.appSession, async (req, res)
           `Station ${stationId}, VLAN ${wunsch.vlan}`, wunsch.name],
       );
       tunnel.push({
-        name: wunsch.name,
+        // Was die Station in den NetworkManager schreibt: der lesbare Name.
+        name: wunsch.anzeige,
+        // Wie der Peer bei wg-control heisst — fuer das Zurueckziehen.
+        peer: wunsch.name,
         vlan: wunsch.vlan,
         autoconnect: wunsch.autoconnect,
         adresse: peer.assigned_ip,
