@@ -17,6 +17,13 @@ Den Unterschied macht ein optionales `allowed_ips` im Rumpf von
 `POST /peers`. Wer es weglässt, bekommt wie eh und je den vollen Tunnel — der
 ISP-Weg übergibt es nicht und bleibt damit unverändert.
 
+**Das Tunnelnetz gehört immer dazu.** Wer `allowed_ips` setzt, bekommt
+`192.168.2.0/24` automatisch angehängt. `AllowedIPs` ist bei WireGuard nicht
+nur eine Route, sondern auch der Filter für erlaubte Absender: fehlt das
+Tunnelnetz, verwirft der Client jede Antwort des Servers und erreicht dessen
+Adresse `192.168.2.1` gar nicht. Der Tunnel steht dann, der Zähler bleibt bei
+null empfangen — am 12. August 2026 genau so aufgetreten.
+
 Warum ein Laptop nur das Hausnetz bekommt: er soll ausser Haus sein Internet
 direkt behalten. Alles durch den Tunnel zu schicken wäre langsamer, fiele bei
 jedem Unterbruch ganz aus, und niemand hat darum gebeten.
