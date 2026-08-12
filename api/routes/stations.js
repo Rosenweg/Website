@@ -175,6 +175,10 @@ async function ensureSchema() {
     -- Objektverwaltung ihre Wohnung — und damit das VLAN, in dem der
     -- WireGuard-Tunnel eines Laptops liegen muss.
     ALTER TABLE station_setup_sessions ADD COLUMN IF NOT EXISTS email TEXT;
+    -- Dieselbe Angabe in der App-Sitzung: der Tunnel eines Laptops gehoert der
+    -- angemeldeten Person, und ueber ihre Mailadresse findet die
+    -- Objektverwaltung die Wohnung und damit das VLAN.
+    ALTER TABLE station_app_sessions ADD COLUMN IF NOT EXISTS email TEXT;
     CREATE TABLE IF NOT EXISTS station_app_sessions (
       token_hash   TEXT PRIMARY KEY,
       username     TEXT NOT NULL,
@@ -895,10 +899,10 @@ router.post('/app-login', a(async (req, res) => {
   await ensureSchema();
   const token = newToken(APP_PREFIX);
   await pool.query(
-    `INSERT INTO station_app_sessions (token_hash, username, display_name, groups_json, station_id, expires_at)
-     VALUES ($1,$2,$3,$4,$5, NOW() + ($6 || ' days')::interval)`,
+    `INSERT INTO station_app_sessions (token_hash, username, display_name, groups_json, email, station_id, expires_at)
+     VALUES ($1,$2,$3,$4,$5,$6, NOW() + ($7 || ' days')::interval)`,
     [sha256(token), user.username, user.displayName, JSON.stringify(user.groups || []),
-      station_id || null, String(APP_TTL_TAGE)],
+      user.email || null, station_id || null, String(APP_TTL_TAGE)],
   );
   res.json({
     token,
@@ -1443,5 +1447,6 @@ router.ensureSchema = ensureSchema;
 // server.js haengt die Tunnel-Route daneben — dort liegen wgControl und die
 // Wohnungssuche. Die Pruefung des Einrichtungstokens gehoert aber hierher.
 router.setupSession = setupSession;
+router.appSession = appSession;
 
 module.exports = router;
