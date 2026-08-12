@@ -85,6 +85,16 @@ const DEFAULTS = {
     // Der Wert speist krb5.conf (kdc, admin_server), dort ist ein Name ebenso
     // richtig.
     controller: 'dc1.ad.rosenweg4303.ch',
+    // ALLE Controller, nicht nur einer. Steht in [realms] ein 'kdc =', fragt
+    // MIT-Kerberos gar nicht mehr im DNS nach — 'dns_lookup_kdc = true' greift
+    // nur, wenn der Realm KEINEN Eintrag hat. Die SRV-Eintraege, die brav
+    // beide nennen, werden also nie gelesen.
+    //
+    // Am 12. August 2026 gemessen: dc1 angehalten, und die Anmeldung auf einem
+    // Mitglied meldete "Cannot contact any KDC" — obwohl dc2 lief, antwortete
+    // und im DNS stand. Ein zweiter Controller nuetzt nichts, wenn ihn niemand
+    // kennt. Kommt ein dritter dazu, gehoert er hierher.
+    controllers: ['dc1.ad.rosenweg4303.ch', 'dc2.ad.rosenweg4303.ch'],
     // Rechner, die zum Haus gehören, aber nicht unter der AD-Domäne stehen.
     // Zwei Dinge lesen diese Liste: die krb5.conf (sonst sucht Kerberos für
     // authentik.rosenweg4303.ch einen Realm ROSENWEG4303.CH, den es nicht
