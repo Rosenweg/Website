@@ -19342,14 +19342,24 @@ app.get('/api/isp/vpn-accounts/options', authMiddleware, async (req, res) => {
 // der ISP-Verwaltung sichtbar sind und dort zurückgezogen werden können. Das
 // Zurückziehen ist der zweite Notausschalter neben dem Sperren: ohne Tunnel
 // kommt ein verschwundener Laptop nicht mehr als Hausgerät herein.
-app.post('/api/stations/:id/tunnel', stationsRouter.setupSession, async (req, res) => {
+// Der Tunnel gehoert der ANGEMELDETEN Person, nicht dem Geraet und nicht dem,
+// der es aufgestellt hat.
+//
+// Bis zum 12. August 2026 hing das hier an der Einrichtungssitzung — der
+// Laptop bekam das VLAN dessen, der davorstand. Falsch an zwei Stellen: am
+// Zeitpunkt und am Traeger. Ein Laptop, den sich zwei teilen, braucht zwei
+// Tunnel, und jeder gilt, wenn der Betreffende angemeldet ist.
+//
+// Deshalb die App-Sitzung: sie kennt die Person. Der Stationstoken gehoert dem
+// Geraet und kennt keine.
+app.post('/api/stations/:id/tunnel', stationsRouter.appSession, async (req, res) => {
   try {
     if (!WG_CONTROL_TOKEN) return res.status(503).json({ error: 'wg-control nicht konfiguriert (WG_CONTROL_TOKEN fehlt)' });
 
     const stationId = String(req.params.id || '').trim();
     if (!stationId) return res.status(400).json({ error: 'Stationskennung fehlt' });
 
-    const email = (req.setupUser?.email || '').toLowerCase();
+    const email = (req.appUser?.email || '').toLowerCase();
     if (!email) {
       return res.status(400).json({
         error: 'Zu diesem Konto ist keine Mailadresse hinterlegt — ohne sie ist die Wohnung nicht zu finden',
@@ -19357,7 +19367,7 @@ app.post('/api/stations/:id/tunnel', stationsRouter.setupSession, async (req, re
     }
 
     let gruppen = [];
-    try { gruppen = JSON.parse(req.setupUser?.groups_json || '[]'); } catch { gruppen = []; }
+    try { gruppen = JSON.parse(req.appUser?.groups_json || '[]'); } catch { gruppen = []; }
 
     const optionen = await getUserVlanOptions(email);
     const wohnungsVlan = optionen[0]?.vlan || null;
@@ -19368,9 +19378,10 @@ app.post('/api/stations/:id/tunnel', stationsRouter.setupSession, async (req, re
     }
 
     // Was angelegt wird: die Wohnung immer, VLAN 9 nur für technik.
-    const gewuenscht = [{ vlan: wohnungsVlan, name: `station-${stationId}`, autoconnect: true }];
+    const kurz = email.split('@')[0].replace(/[^a-z0-9._-]/gi, '').slice(0, 32);
+    const gewuenscht = [{ vlan: wohnungsVlan, name: `${stationId}-${kurz}`, autoconnect: true }];
     if (isTechnik(gruppen) || isPraesident(gruppen)) {
-      gewuenscht.push({ vlan: 9, name: `station-${stationId}-vlan9`, autoconnect: false });
+      gewuenscht.push({ vlan: 9, name: `${stationId}-${kurz}-vlan9`, autoconnect: false });
     }
 
     const tunnel = [];
