@@ -19385,8 +19385,19 @@ app.post('/api/stations/:id/tunnel', stationsRouter.setupSession, async (req, re
         await pool.query('UPDATE isp_vpn_accounts SET active = false WHERE id = $1', [row.id]);
       }
 
+      // Nur das Hausnetz durch den Tunnel, kein Standardweg.
+      //
+      // Ein Laptop ausser Haus soll sein Internet weiter direkt haben — alles
+      // durch den Tunnel zu schicken waere langsamer, faellt bei jedem
+      // Unterbruch des Tunnels ganz aus, und niemand hat darum gebeten.
+      // 100.64.0.0/16 deckt alle Hausnetze (100.64.<VLAN>.0/24).
+      //
+      // wg-control setzt ohne diese Angabe weiterhin 0.0.0.0/0, ::/0 — der
+      // ISP-Weg (POST /api/isp/vpn-accounts) uebergibt sie nicht und bleibt
+      // damit unveraendert. Am 12. August 2026 an beiden Wegen gemessen.
       const antwort = await wgControl('POST', '/peers', {
         name: wunsch.name, email, vlan: wunsch.vlan,
+        allowed_ips: '100.64.0.0/16',
       });
       const peer = await antwort.json();
       await pool.query(
