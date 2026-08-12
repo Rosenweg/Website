@@ -171,6 +171,10 @@ async function ensureSchema() {
     -- damit eine gesperrte Station nur von technik neu zugeordnet werden kann
     -- (siehe /register). Ohne die Spalte stand in der Sitzung nur der Name.
     ALTER TABLE station_setup_sessions ADD COLUMN IF NOT EXISTS groups_json TEXT;
+    -- Die Mailadresse der anmeldenden Person. Ueber sie findet die
+    -- Objektverwaltung ihre Wohnung — und damit das VLAN, in dem der
+    -- WireGuard-Tunnel eines Laptops liegen muss.
+    ALTER TABLE station_setup_sessions ADD COLUMN IF NOT EXISTS email TEXT;
     CREATE TABLE IF NOT EXISTS station_app_sessions (
       token_hash   TEXT PRIMARY KEY,
       username     TEXT NOT NULL,
@@ -326,10 +330,10 @@ router.post('/login', a(async (req, res) => {
   await ensureSchema();
   const token = newToken(SETUP_PREFIX);
   await pool.query(
-    `INSERT INTO station_setup_sessions (token_hash, username, display_name, groups_json, expires_at)
-     VALUES ($1, $2, $3, $4, NOW() + ($5 || ' minutes')::interval)`,
+    `INSERT INTO station_setup_sessions (token_hash, username, display_name, groups_json, email, expires_at)
+     VALUES ($1, $2, $3, $4, $5, NOW() + ($6 || ' minutes')::interval)`,
     [sha256(token), user.username, user.displayName,
-      JSON.stringify(user.groups || []), String(SETUP_TTL_MINUTES)],
+      JSON.stringify(user.groups || []), user.email || null, String(SETUP_TTL_MINUTES)],
   );
   res.json({
     token,
@@ -1436,5 +1440,8 @@ router.use((err, req, res, next) => {
 // 'column "alarm_zone" does not exist'. Deshalb hier herausgereicht, damit
 // server.js es beim Start einmal anstossen kann.
 router.ensureSchema = ensureSchema;
+// server.js haengt die Tunnel-Route daneben — dort liegen wgControl und die
+// Wohnungssuche. Die Pruefung des Einrichtungstokens gehoert aber hierher.
+router.setupSession = setupSession;
 
 module.exports = router;
