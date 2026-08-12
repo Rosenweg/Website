@@ -1,0 +1,19 @@
+[Unit]
+Description=wg-control HTTP API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/wg-control/env
+WorkingDirectory=/opt/wg-control
+ExecStart=/usr/bin/node /opt/wg-control/server.js
+Restart=on-failure
+RestartSec=3
+# Capabilities: WireGuard + nftables + ip rule management
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_OVERRIDE
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
