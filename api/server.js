@@ -19420,12 +19420,25 @@ app.post('/api/stations/:id/tunnel', stationsRouter.appSession, async (req, res)
     // loescht die Verbindungen einer Person beim Abmelden wieder, es ist also
     // immer nur ein Satz da.
     const kurz = email.split('@')[0].replace(/[^a-z0-9._-]/gi, '').slice(0, 32);
-    const gewuenscht = [{ vlan: wohnungsVlan, name: `${stationId}-${kurz}`,
+    const gewuenscht = [{ zweck: 'wohnung', vlan: wohnungsVlan, name: `${stationId}-${kurz}`,
                           anzeige: 'Rosenweg-VPN', autoconnect: true }];
     if (isTechnik(gruppen) || isPraesident(gruppen)) {
-      gewuenscht.push({ vlan: 9, name: `${stationId}-${kurz}-vlan9`,
+      gewuenscht.push({ zweck: 'technik', vlan: 9, name: `${stationId}-${kurz}-vlan9`,
                         anzeige: 'Technik-VPN', autoconnect: false });
     }
+
+    // Die Station bringt ihre oeffentlichen Schluessel selbst mit, je Zweck
+    // einen. Dann erzeugt wg-control keinen privaten und kennt ihn nie.
+    //
+    // Warum je ZWECK und nicht je Tunnel: welche Tunnel jemand bekommt,
+    // entscheidet sich erst hier — an der Wohnung und an der Gruppe. Die
+    // Station kann also nicht wissen, wie viele sie braucht, und legt
+    // stattdessen fuer jeden moeglichen Zweck einen bereit. Was nicht
+    // gebraucht wird, verfaellt auf dem Geraet.
+    //
+    // Ohne diese Angabe bleibt alles wie bisher: wg-control erzeugt das Paar
+    // selbst. Der ISP-Weg schickt nichts mit und ist davon nicht beruehrt.
+    const schluessel = (req.body && typeof req.body.schluessel === 'object' && req.body.schluessel) || {};
 
     const tunnel = [];
     for (const wunsch of gewuenscht) {
@@ -19452,6 +19465,7 @@ app.post('/api/stations/:id/tunnel', stationsRouter.appSession, async (req, res)
       const antwort = await wgControl('POST', '/peers', {
         name: wunsch.name, email, vlan: wunsch.vlan,
         allowed_ips: '100.64.0.0/16',
+        ...(schluessel[wunsch.zweck] ? { public_key: String(schluessel[wunsch.zweck]) } : {}),
       });
       const peer = await antwort.json();
       await pool.query(
@@ -19466,6 +19480,9 @@ app.post('/api/stations/:id/tunnel', stationsRouter.appSession, async (req, res)
         name: wunsch.anzeige,
         // Wie der Peer bei wg-control heisst — fuer das Zurueckziehen.
         peer: wunsch.name,
+        // Zu welchem der mitgeschickten Schluessel die Konfiguration passt.
+        // Ohne das koennte die Station den privaten Teil nicht zuordnen.
+        zweck: wunsch.zweck,
         vlan: wunsch.vlan,
         autoconnect: wunsch.autoconnect,
         adresse: peer.assigned_ip,
@@ -19477,6 +19494,63 @@ app.post('/api/stations/:id/tunnel', stationsRouter.appSession, async (req, res)
     res.json({ tunnel });
   } catch (err) {
     console.error('[stations-tunnel]', err.message);
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// ─── Tunnel zurückziehen, wenn sich jemand abmeldet ──────────────────
+//
+// Der Tunnel gehört der Person. Also geht er, wenn sie geht — und zwar an
+// BEIDEN Enden. Auf dem Laptop löscht das der Abmeldehaken; hier verschwindet
+// der Peer.
+//
+// Warum das nötig ist, obwohl der private Schlüssel neuerdings auf dem Gerät
+// bleibt: ein Zugang, der niemandem mehr gehört, soll auch nicht bestehen. Er
+// belegt eine Adresse aus dem Vorrat, taucht in jeder Übersicht auf und lädt
+// dazu ein, ihn irgendwann wiederzuverwenden.
+//
+// Beglaubigt wird das mit dem STATIONSTOKEN, nicht mit einer App-Sitzung. Beim
+// Abmelden ist niemand mehr da, den man nach einem Passwort fragen könnte. Ein
+// Gerät darf abräumen, was es selbst bekommen hat — und nur das: jeder Name
+// muss mit der eigenen Stationskennung beginnen, sonst wird er abgelehnt.
+app.delete('/api/stations/:id/tunnel', stationsRouter.stationAuth, async (req, res) => {
+  try {
+    if (!WG_CONTROL_TOKEN) return res.status(503).json({ error: 'wg-control nicht konfiguriert' });
+
+    const stationId = String(req.params.id || '').trim();
+    if (!stationId) return res.status(400).json({ error: 'Stationskennung fehlt' });
+
+    const namen = Array.isArray(req.body?.peers) ? req.body.peers.map(String) : [];
+    if (!namen.length) return res.json({ entfernt: [], abgelehnt: [] });
+
+    const entfernt = [];
+    const abgelehnt = [];
+
+    for (const name of namen) {
+      // Die Station darf nur ihre eigenen zurückziehen. Ohne diese Prüfung
+      // könnte ein Gerät mit gültigem Token die Zugänge aller anderen löschen.
+      if (name !== stationId && !name.startsWith(`${stationId}-`)) {
+        abgelehnt.push(name);
+        continue;
+      }
+      const treffer = await pool.query(
+        'SELECT id, username FROM isp_vpn_accounts WHERE bezeichnung = $1 AND active = true',
+        [name],
+      );
+      for (const row of treffer.rows) {
+        await wgControl('DELETE', `/peers/${row.username}`).catch(() => {});
+        await pool.query('UPDATE isp_vpn_accounts SET active = false WHERE id = $1', [row.id]);
+        entfernt.push(name);
+      }
+    }
+
+    if (abgelehnt.length) {
+      console.warn(`[stations-tunnel] '${stationId}' wollte fremde Peers löschen: ${abgelehnt.join(', ')}`);
+    }
+    console.log(`[stations] Tunnel zurückgezogen für '${stationId}': ${entfernt.join(', ') || 'nichts'}`);
+    res.json({ entfernt, abgelehnt });
+  } catch (err) {
+    console.error('[stations-tunnel-delete]', err.message);
     res.status(err.status || 500).json({ error: err.message });
   }
 });
