@@ -198,6 +198,24 @@ function peerWithStatus(p, dump) {
 
 // ----------------------------------- Client-Config --------------------------
 
+function allowedFuerClient(peer) {
+  // Ohne Angabe wie bisher: alles durch den Tunnel.
+  if (!peer.allowed_ips) return '0.0.0.0/0, ::/0';
+
+  // Mit Angabe MUSS das Tunnelnetz selbst dabei sein.
+  //
+  // AllowedIPs ist bei WireGuard nicht nur eine Route, sondern auch der
+  // Filter fuer erlaubte Absender: was der Client von einer Adresse ausserhalb
+  // dieser Liste bekommt, verwirft er. Ohne 192.168.2.0/24 erreicht er den
+  // Server unter seiner Tunneladresse nicht und verwirft dessen Antworten —
+  // der Tunnel steht, der Zaehler bleibt bei 0 empfangen.
+  //
+  // Am 12. August 2026 genau so aufgetreten, mit AllowedIPs = 100.64.0.0/16.
+  const teile = peer.allowed_ips.split(',').map((s) => s.trim()).filter(Boolean);
+  if (!teile.includes(WG_SUBNET_CIDR)) teile.push(WG_SUBNET_CIDR);
+  return teile.join(', ');
+}
+
 function renderClientConf(peer) {
   return [
     '[Interface]',
@@ -208,7 +226,7 @@ function renderClientConf(peer) {
     '[Peer]',
     `PublicKey = ${state.server_public_key}`,
     peer.preshared_key ? `PresharedKey = ${peer.preshared_key}` : '',
-    `AllowedIPs = ${peer.allowed_ips || '0.0.0.0/0, ::/0'}`,
+    `AllowedIPs = ${allowedFuerClient(peer)}`,
     `Endpoint = ${WG_ENDPOINT_HOST}:${WG_LISTEN_PORT}`,
     'PersistentKeepalive = 25',
     '',
