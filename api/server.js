@@ -56,12 +56,42 @@ const { mountDoodle } = require('./lib/doodle');
 const gotenbergSemaphore = createSemaphore(parseInt(process.env.GOTENBERG_MAX_CONCURRENT || '3'));
 
 // ─── Health ─────────────────────────────────────────────────────────
+//
+// Die Dokumentenablage wird MITGEPRUEFT, macht den Dienst aber nicht ungesund.
+//
+// Am 12. August 2026 war /documents nach dem CephFS-Umbau leer: CT128 hatte
+// seinen Einhaengepunkt verloren. Die API lief einwandfrei weiter, der
+// Healthcheck meldete 'healthy', und niemand erfuhr etwas — bis im Treppenhaus
+// an der Anzeigetafel ein Aushang mit kaputtem Bild stand. Der gesamte
+// Dokumentenbereich (Aushaenge, Briefe, Dateiliste) war seit dem Umbau tot,
+// und dieses eine Bild war der einzige Hinweis darauf.
+//
+// Warum nur eine Meldung und kein 503: der Docker-Healthcheck haengt hier
+// dran. Ein 503 fuehrte den Container als ungesund und im schlimmsten Fall in
+// eine Neustartschleife — wegen eines Verzeichnisses, ohne das Anmeldung,
+// Energie und Stationen tadellos weiterarbeiten. Sichtbar muss es sein, nicht
+// toedlich.
+//
+// DOCS_PATH steht weiter unten (const, also hier noch nicht benutzbar) —
+// deshalb die Umgebungsvariable direkt, mit derselben Vorgabe.
+const HEALTH_DOCS_PATH = process.env.DOCS_PATH || '/documents';
+
 app.get('/api/health', async (req, res) => {
+  let dokumente = 'ok';
+  try {
+    if ((await fs.readdir(HEALTH_DOCS_PATH)).length === 0) dokumente = 'leer';
+  } catch (e) {
+    dokumente = 'nicht erreichbar';
+  }
+  if (dokumente !== 'ok') {
+    console.error(`[health] Dokumentenablage ${HEALTH_DOCS_PATH}: ${dokumente}`
+      + ' — Einhaengepunkt pruefen: pct config 128 | grep ^mp');
+  }
   try {
     await pool.query('SELECT 1');
-    res.json({ status: 'ok', db: 'connected' });
+    res.json({ status: 'ok', db: 'connected', dokumente });
   } catch (err) {
-    res.status(503).json({ status: 'error', db: 'disconnected' });
+    res.status(503).json({ status: 'error', db: 'disconnected', dokumente });
   }
 });
 
