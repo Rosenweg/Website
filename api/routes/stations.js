@@ -1448,5 +1448,11 @@ router.ensureSchema = ensureSchema;
 // Wohnungssuche. Die Pruefung des Einrichtungstokens gehoert aber hierher.
 router.setupSession = setupSession;
 router.appSession = appSession;
+// Der Stationstoken gehoert dem GERAET. Er reicht nicht, um einen Tunnel
+// anzulegen — dafuer braucht es die Person und ihre Wohnung —, wohl aber, um
+// die eigenen Peers beim Abmelden zurueckzuziehen. Da ist niemand mehr
+// angemeldet, den man fragen koennte, und ein Geraet darf abraeumen, was es
+// selbst bekommen hat.
+router.stationAuth = stationAuth;
 
 module.exports = router;

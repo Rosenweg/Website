@@ -60,17 +60,28 @@ if (!TOKEN) {
 
 // ----------------------------------- State ----------------------------------
 
+// 0600 — nicht die Vorgabe.
+//
+// In dieser Datei stehen PRIVATE Schluessel: der des Servers und, solange die
+// Gegenstelle keinen eigenen mitbringt, einer je Zugang. Wer sie liest, ist im
+// Hausnetz, ohne irgendetwas brechen zu muessen.
+//
+// writeFileSync legt ohne Angabe mit 0666 & ~umask an, also 0644. Am
+// 12. August 2026 nachgesehen, und genau so lag sie da — fuenf private
+// Schluessel, fuer jeden Prozess im Container lesbar.
+const NUR_ROOT = { mode: 0o600 };
+
 function loadState() {
   if (!existsSync(STATE_PATH)) {
-    mkdirSync('/var/lib/wg-control', { recursive: true });
+    mkdirSync('/var/lib/wg-control', { recursive: true, mode: 0o700 });
     const init = { server_private_key: null, server_public_key: null, peers: [] };
-    writeFileSync(STATE_PATH, JSON.stringify(init, null, 2));
+    writeFileSync(STATE_PATH, JSON.stringify(init, null, 2), NUR_ROOT);
     return init;
   }
   return JSON.parse(readFileSync(STATE_PATH, 'utf8'));
 }
 function saveState(state) {
-  writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
+  writeFileSync(STATE_PATH, JSON.stringify(state, null, 2), NUR_ROOT);
 }
 let state = loadState();
 
@@ -216,10 +227,17 @@ function allowedFuerClient(peer) {
   return teile.join(', ');
 }
 
+// Platzhalter fuer Zugaenge, deren Schluessel auf dem GERAET entstanden ist.
+//
+// Dann kennt der Server den privaten Teil nicht — das ist der ganze Zweck —
+// und kann ihn hier auch nicht einsetzen. Die Gegenstelle ersetzt ihn selbst
+// und prueft, dass danach kein Platzhalter mehr dasteht.
+export const PRIVATKEY_PLATZHALTER = '%PRIVATKEY%';
+
 function renderClientConf(peer) {
   return [
     '[Interface]',
-    `PrivateKey = ${peer.private_key}`,
+    `PrivateKey = ${peer.private_key || PRIVATKEY_PLATZHALTER}`,
     `Address = ${peer.assigned_ip}/32`,
     `DNS = ${CLIENT_DNS}`,
     '',
@@ -302,15 +320,22 @@ const server = createServer(async (req, res) => {
       return send(res, 200, peerWithStatus(p));
     }
 
+    // Nachtraeglich gibt es eine Konfiguration nur, wenn der Server den
+    // privaten Schluessel ueberhaupt hat. Wo das Geraet ihn selbst erzeugt hat,
+    // waere das Ergebnis eine Datei mit einem Platzhalter darin — also nichts,
+    // was jemand gebrauchen kann. Lieber ein klarer Fehler als ein Download,
+    // der stumm nicht funktioniert.
     if ((m = routeMatch(req, 'GET', '/peers/:id/config'))) {
       const p = state.peers.find(x => x.id === m[0]);
       if (!p) return send(res, 404, { error: 'not found' });
+      if (!p.private_key) return send(res, 409, { error: 'Schluessel liegt auf dem Geraet — hier gibt es keine Konfiguration' });
       return send(res, 200, renderClientConf(p), 'text/plain; charset=utf-8');
     }
 
     if ((m = routeMatch(req, 'GET', '/peers/:id/qr'))) {
       const p = state.peers.find(x => x.id === m[0]);
       if (!p) return send(res, 404, { error: 'not found' });
+      if (!p.private_key) return send(res, 409, { error: 'Schluessel liegt auf dem Geraet — hier gibt es keinen QR-Code' });
       const png = execFileSync('qrencode', ['-t', 'PNG', '-o', '-', '-s', '6'], {
         input: renderClientConf(p), maxBuffer: 4 * 1024 * 1024,
       });
@@ -319,18 +344,45 @@ const server = createServer(async (req, res) => {
 
     if (req.method === 'POST' && req.url === '/peers') {
       const body = JSON.parse((await readBody(req)) || '{}');
-      const { name, email, vlan, allowed_ips } = body;
+      const { name, email, vlan, allowed_ips, public_key } = body;
       if (!name) return send(res, 400, { error: 'name required' });
       if (!VLAN_TO_IFACE[vlan]) return send(res, 400, { error: `unknown vlan ${vlan}` });
 
-      const priv = wgGenKey();
+      // Bringt die Gegenstelle ihren eigenen oeffentlichen Schluessel mit,
+      // erzeugt der Server KEINEN privaten. Das ist die Art, wie WireGuard
+      // gedacht ist: ein privater Schluessel verlaesst nie das Geraet, auf dem
+      // er entstanden ist.
+      //
+      // Bis zum 12. August 2026 lief hier immer 'wg genkey', und der private
+      // Schluessel lag danach dauerhaft in state.json — fuenf Stueck, Modus
+      // 0644. Ein Laptop, der seinen Zugang beim Abmelden loescht, entfernte
+      // damit nur die Kopie; das Original blieb liegen.
+      //
+      // Der ISP-Weg schickt keinen Schluessel mit und bekommt darum weiterhin
+      // ein fertiges Paket mit Konfiguration und QR-Code — dort sitzt ein
+      // Mensch vor einem Telefon und kann nichts erzeugen.
+      let priv = null;
+      let pub;
+      if (public_key) {
+        pub = String(public_key).trim();
+        if (!/^[A-Za-z0-9+/]{42}[A-Za-z0-9+/=]{2}$/.test(pub)) {
+          return send(res, 400, { error: 'public_key ist kein WireGuard-Schluessel' });
+        }
+        if (state.peers.some((p) => p.public_key === pub)) {
+          return send(res, 409, { error: 'public_key schon vergeben' });
+        }
+      } else {
+        priv = wgGenKey();
+        pub = wgPubKey(priv);
+      }
+
       const peer = {
         id: randomUUID(),
         name: String(name).slice(0, 80),
         email: email ? String(email).toLowerCase() : null,
         vlan: parseInt(vlan, 10),
         assigned_ip: nextFreeIp(),
-        public_key: wgPubKey(priv),
+        public_key: pub,
         private_key: priv,
         preshared_key: wgPresharedKey(),
         // Welche Ziele durch den Tunnel gehen. Ohne Angabe wie bisher alles.
