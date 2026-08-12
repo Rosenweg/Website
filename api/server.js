@@ -19322,6 +19322,97 @@ app.get('/api/isp/vpn-accounts/options', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ─── Tunnel für eine Laptop-Station ──────────────────────────────────
+//
+// Ein Laptop ist die einzige Stationsart, die das Haus verlässt. Damit er
+// unterwegs an seine verschlüsselte Datenpartition kommt, braucht er einen
+// Tunnel, über den er als Hausgerät hereinkommt — sonst stünde er ausser Haus
+// vor verschlossenen Daten.
+//
+// Angelegt wird er WÄHREND der Einrichtung, mit dem Einrichtungstoken der
+// Person, die den Laptop aufstellt. Deren Wohnung bestimmt das VLAN: der
+// Tunnel gehört dorthin, wo das Gerät hingehört.
+//
+// Technik bekommt einen zweiten in VLAN 9. Der steht NICHT automatisch —
+// zwei gleichzeitige Standardrouten wären Ärger, und der Verwaltungstunnel
+// ist Werkzeug, nicht Lebensader. Im NetworkManager liegt er deshalb mit
+// autoconnect=no und wird bei Bedarf umgeschaltet.
+//
+// Die Peers landen in isp_vpn_accounts wie alle anderen auch — damit sie in
+// der ISP-Verwaltung sichtbar sind und dort zurückgezogen werden können. Das
+// Zurückziehen ist der zweite Notausschalter neben dem Sperren: ohne Tunnel
+// kommt ein verschwundener Laptop nicht mehr als Hausgerät herein.
+app.post('/api/stations/:id/tunnel', stationsRouter.setupSession, async (req, res) => {
+  try {
+    if (!WG_CONTROL_TOKEN) return res.status(503).json({ error: 'wg-control nicht konfiguriert (WG_CONTROL_TOKEN fehlt)' });
+
+    const stationId = String(req.params.id || '').trim();
+    if (!stationId) return res.status(400).json({ error: 'Stationskennung fehlt' });
+
+    const email = (req.setupUser?.email || '').toLowerCase();
+    if (!email) {
+      return res.status(400).json({
+        error: 'Zu diesem Konto ist keine Mailadresse hinterlegt — ohne sie ist die Wohnung nicht zu finden',
+      });
+    }
+
+    let gruppen = [];
+    try { gruppen = JSON.parse(req.setupUser?.groups_json || '[]'); } catch { gruppen = []; }
+
+    const optionen = await getUserVlanOptions(email);
+    const wohnungsVlan = optionen[0]?.vlan || null;
+    if (!wohnungsVlan) {
+      return res.status(400).json({
+        error: 'Keine Wohnung in der Objektverwaltung — das VLAN für den Tunnel ist nicht ermittelbar',
+      });
+    }
+
+    // Was angelegt wird: die Wohnung immer, VLAN 9 nur für technik.
+    const gewuenscht = [{ vlan: wohnungsVlan, name: `station-${stationId}`, autoconnect: true }];
+    if (isTechnik(gruppen) || isPraesident(gruppen)) {
+      gewuenscht.push({ vlan: 9, name: `station-${stationId}-vlan9`, autoconnect: false });
+    }
+
+    const tunnel = [];
+    for (const wunsch of gewuenscht) {
+      // Ein zweiter Einrichtungslauf soll keine Peer-Leichen hinterlassen.
+      const alt = await pool.query(
+        'SELECT id, username FROM isp_vpn_accounts WHERE bezeichnung = $1 AND active = true',
+        [wunsch.name],
+      );
+      for (const row of alt.rows) {
+        await wgControl('DELETE', `/peers/${row.username}`).catch(() => {});
+        await pool.query('UPDATE isp_vpn_accounts SET active = false WHERE id = $1', [row.id]);
+      }
+
+      const antwort = await wgControl('POST', '/peers', {
+        name: wunsch.name, email, vlan: wunsch.vlan,
+      });
+      const peer = await antwort.json();
+      await pool.query(
+        `INSERT INTO isp_vpn_accounts (user_email, backend, username, public_key, assigned_ip,
+                                       config_path, active, notizen, bezeichnung)
+         VALUES ($1, 'wireguard', $2, $3, $4, $5, true, $6, $7)`,
+        [email, peer.id, peer.public_key, peer.assigned_ip, `wg-control/${peer.id}`,
+          `Station ${stationId}, VLAN ${wunsch.vlan}`, wunsch.name],
+      );
+      tunnel.push({
+        name: wunsch.name,
+        vlan: wunsch.vlan,
+        autoconnect: wunsch.autoconnect,
+        adresse: peer.assigned_ip,
+        config: peer.config,
+      });
+    }
+
+    console.log(`[stations] Tunnel für '${stationId}': ${tunnel.map(t => `VLAN ${t.vlan}`).join(', ')}`);
+    res.json({ tunnel });
+  } catch (err) {
+    console.error('[stations-tunnel]', err.message);
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
 app.post('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
   try {
     if (!WG_CONTROL_TOKEN) return res.status(503).json({ error: 'wg-control nicht konfiguriert (WG_CONTROL_TOKEN fehlt)' });
