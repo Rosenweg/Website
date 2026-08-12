@@ -208,10 +208,29 @@ const ROLE_DEFAULTS = {
     // Kerberos kennt Dienste nur unter ihrem Namen. Mit '100.64.2.28' quittierte
     // der KDC jede Anfrage mit KRB5KDC_ERR_S_PRINCIPAL_UNKNOWN — pam_mount
     // scheiterte beim Anmelden, und dokumente/scans blieben leere Ordner.
-    // server_ip ist nur die Rueckfallebene, solange der DNS-Eintrag fehlt.
+    //
+    // 'files', nicht 'fileserver': der Clustername zeigt auf 100.64.2.29, die
+    // keepalived zwischen CT 106 und CT 206 schwenkt, sobald smbd auf dem
+    // aktiven Server ausfaellt. 'fileserver' zeigte fest auf CT 106 — faellt der
+    // aus, half die ganze Redundanz niemandem, weil niemand sie benutzte.
+    //
+    // Damit das mit Kerberos traegt, brauchte es mehr als einen DNS-Eintrag:
+    // beide Server muessen Tickets fuer denselben Dienstnamen entschluesseln
+    // koennen. Dafuer gibt es das eigene AD-Konto FILES$ mit den SPNs cifs/ und
+    // HOST/files.ad.rosenweg4303.ch, dessen Schluessel auf beiden Servern in
+    // /etc/krb5.keytab liegt ('kerberos method = dedicated keytab'; die Datei
+    // muss auch die eigenen Maschinenschluessel enthalten, 'net ads keytab
+    // create'). Wichtig: das Konto braucht dNSHostName und
+    // msDS-SupportedEncryptionTypes=24, sonst gibt AD nur einen
+    // arcfour-Schluessel heraus — und den lehnen heutige Kerberos-Bibliotheken
+    // ab. Am 12. August 2026 genau daran gescheitert: NT_STATUS_LOGON_FAILURE,
+    // ohne eine einzige Zeile im Protokoll des Servers.
+    //
+    // server_ip ist nur die Rueckfallebene, solange der DNS-Eintrag fehlt —
+    // hier die virtuelle Adresse, denn die aendert sich beim Schwenk nicht.
     home: {
-      server: 'fileserver.ad.rosenweg4303.ch',
-      server_ip: '100.64.2.28',
+      server: 'files.ad.rosenweg4303.ch',
+      server_ip: '100.64.2.29',
       // 'home', nicht 'homes': so heisst die Freigabe auf dem Fileserver
       // (/mnt/cephfs-userdata/home, darunter je ein Ordner pro Benutzer). Mit
       // 'homes' zeigte die Einhaengung ins Leere und das Home blieb lokal.
