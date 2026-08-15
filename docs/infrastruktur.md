@@ -135,6 +135,17 @@ rosenweg_rosenweg-documents
   - User: `scanner`, Passwort: `****** (siehe .env)`
   - Chroot: `/srv/documents`, Scanner wechselt nach `scans/`
 - **Disk**: 50GB, 5% belegt
+- **Clustername**: `files.ad.rosenweg4303.ch` → `100.64.2.29` und
+  `2a02:16a:1400:9::29`, von keepalived zwischen CT 106 (MASTER) und CT 206
+  (BACKUP) geschwenkt. Die Stationen hängen dort ein, nicht am einzelnen
+  Server.
+
+  > **Die IPv6-Instanz braucht einen Riegel.** Sie ging am 12. August 2026
+  > beim Start in FAULT und kam nie zurück — `unicast_src_ip` ist die
+  > SLAAC-Adresse, und keepalived war schneller als die Router-Ankündigung.
+  > Drei Tage lang trug niemand die `::29`; weil `getaddrinfo` IPv6 bevorzugt,
+  > kostete das **jede Anmeldung im Haus dreissig Sekunden**. Datei und
+  > Herleitung: [`fileserver-lxc/`](../fileserver-lxc/README.md).
 
 ## Authentik (SSO)
 
