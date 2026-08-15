@@ -9665,6 +9665,117 @@ app.use('/api/stations', stationsRouter);
 // Tafel landete.
 stationsRouter.ensureSchema().catch(e => console.error('[stationen] Schema:', e.message));
 
+// ── Desktop-Stil an den Stationen ──────────────────────────────────
+// Der Desktop einer Station erinnert an Windows: Leiste unten, Menü links,
+// Fensterknöpfe rechts. Die meisten kennen das von der Arbeit, deshalb bleibt
+// es die Vorgabe. Wer täglich an einem Mac sitzt, greift dort ständig ins
+// Leere — also darf jede Person für sich wählen, und zwar für alle Stationen
+// zugleich, nicht je Gerät. Hintergrund: os-stationen/docs/desktop-stil.md.
+//
+// Die Namen meinen die ANORDNUNG, nicht das Theme: hinter 'windows' steckt
+// weiterhin Mint-Y von Linux Mint. 'mint' hiess der Wert bis August 2026 und
+// wird beim Speichern übersetzt, damit ein alter Eintrag nicht stumm auf die
+// Vorgabe zurückfällt.
+const DESKTOP_STILE = ['windows', 'mac'];
+
+function desktopStilNormieren(wert) {
+  const s = String(wert ?? '').trim().toLowerCase();
+  if (s === 'mint') return 'windows';
+  return DESKTOP_STILE.includes(s) ? s : null;
+}
+
+// GET /api/me/einstellungen — was die angemeldete Person eingestellt hat
+app.get('/api/me/einstellungen', authMiddleware, async (req, res) => {
+  try {
+    const r = await pool.query('SELECT einstellungen FROM users WHERE id = $1', [req.user.id]);
+    const stil = desktopStilNormieren(r.rows[0]?.einstellungen?.desktop?.stil);
+    res.json({ desktop: stil ? { stil } : {} });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /api/me/einstellungen  { desktop: { stil: 'windows'|'mac'|null } }
+//
+// 'null' (oder ein fehlender Wert) heisst ausdrücklich „wie die Station" und
+// ist etwas anderes als 'windows': die Person hat dann nichts gewählt, und was
+// sie sieht, entscheidet die Vorgabe des Geräts. Deshalb wird der Schlüssel
+// entfernt statt auf die Vorgabe gesetzt.
+//
+// Zusammengeführt, nicht ersetzt — sonst räumte das erste Formular, das nur
+// den Desktop kennt, jede später hinzukommende Einstellung mit weg.
+app.put('/api/me/einstellungen', authMiddleware, async (req, res) => {
+  try {
+    if (!Object.prototype.hasOwnProperty.call(req.body || {}, 'desktop')) {
+      return res.status(400).json({ error: 'Feld "desktop" fehlt' });
+    }
+    const roh = req.body.desktop?.stil;
+    const stil = (roh === null || roh === undefined || roh === '') ? null : desktopStilNormieren(roh);
+    if (roh !== null && roh !== undefined && roh !== '' && stil === null) {
+      return res.status(400).json({ error: `Unbekannter Desktop-Stil (erlaubt: ${DESKTOP_STILE.join(', ')})` });
+    }
+
+    const r = await pool.query('SELECT einstellungen FROM users WHERE id = $1', [req.user.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Konto nicht gefunden' });
+
+    const neu = { ...(r.rows[0].einstellungen || {}) };
+    const desktop = { ...(neu.desktop || {}) };
+    if (stil) desktop.stil = stil; else delete desktop.stil;
+    if (Object.keys(desktop).length) neu.desktop = desktop; else delete neu.desktop;
+
+    await pool.query('UPDATE users SET einstellungen = $1::jsonb, updated_at = NOW() WHERE id = $2',
+      [JSON.stringify(neu), req.user.id]);
+
+    // Die Station holt den Wunsch beim Anmelden, nicht laufend. Wer gerade
+    // angemeldet ist, sieht ihn erst bei der nächsten Anmeldung — das gehört
+    // in die Antwort, damit die Oberfläche es sagen kann.
+    res.json({ desktop: stil ? { stil } : {}, hinweis: 'Gilt ab der nächsten Anmeldung an einer Station.' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/benutzer/:login/einstellungen — was die Person für sich gewählt hat
+//
+// Gefragt wird von der Station, nicht vom Browser: lightdm ruft vor dem
+// Sitzungsstart 'desktop-stil-holen.sh' als root, und das legt die Antwort
+// dort ab, wo die Sitzung sie lesen darf. Deshalb der Stationstoken und nicht
+// die Anmeldung der Person — in ihrer Sitzung gibt es kein Geheimnis, mit dem
+// sich hier fragen liesse, und das soll auch so bleiben.
+//
+// ':login' ist der AD-Anmeldename (sAMAccountName), URL-kodiert. Er landet
+// beim Anmelden in users.username; verglichen wird ohne Rücksicht auf
+// Gross- und Kleinschreibung, weil Windows-Anmeldenamen das auch nicht tun.
+//
+// ABSICHTLICH nur der Desktop-Zweig: mit einem Stationstoken lässt sich jeder
+// Anmeldename abfragen, nicht nur der der gerade angemeldeten Person. Solange
+// dabei nichts herauskommt als 'windows' oder 'mac', ist das harmlos. Käme
+// später mehr in 'einstellungen', dürfte es hier nicht mit hinausfallen —
+// deshalb wird der Wert einzeln herausgegriffen und nicht die Spalte gereicht.
+//
+// Antworten (Kontrakt mit os-stationen/roles/desktop/files/desktop-stil-holen.sh):
+//   200 {"desktop":{"stil":"mac"}}   Wunsch der Person
+//   200 {"desktop":{}}               nichts gewählt -> Vorgabe der Station
+//   404                              Anmeldename unbekannt -> Vorgabe der Station
+app.get('/api/benutzer/:login/einstellungen', stationsRouter.stationAuth, async (req, res) => {
+  try {
+    const login = String(req.params.login || '').trim();
+    if (!login) return res.status(400).json({ error: 'Anmeldename fehlt' });
+
+    const r = await pool.query(
+      'SELECT einstellungen FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1',
+      [login],
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Unbekannter Anmeldename' });
+
+    const stil = r.rows[0].einstellungen?.desktop?.stil;
+    // Was hier nicht als gültiger Stil erkannt wird, wird weggelassen statt
+    // weitergereicht: die Station fiele sonst auf ihren '*'-Zweig und damit
+    // ohnehin auf die Vorgabe — nur eben nach einer Antwort, die so aussah,
+    // als hätte jemand etwas gewählt.
+    return res.json({ desktop: DESKTOP_STILE.includes(stil) ? { stil } : {} });
+  } catch (e) {
+    console.error('[einstellungen] Abfrage:', e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════════
 // DOCUMENTS (local fileserver, NFS-mounted or local path)
 // ═══════════════════════════════════════════════════════════════════
@@ -23734,6 +23845,14 @@ async function initDB() {
       );
 
       ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(255);
+
+      -- Persönliche Einstellungen, die kein eigenes Formular im Haus haben.
+      -- Bisher genau eine: der Desktop-Stil an den Stationen ('windows' oder
+      -- 'mac'), abgeholt von os-stationen beim Anmelden. Als JSONB, damit die
+      -- nächste Einstellung keine Wanderung durch die Tabelle braucht.
+      -- Leeres Objekt heisst: nichts gewählt, es gilt die Vorgabe der Station.
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS einstellungen JSONB NOT NULL DEFAULT '{}'::jsonb;
+      CREATE INDEX IF NOT EXISTS idx_users_username_lower ON users (LOWER(username));
 
       CREATE TABLE IF NOT EXISTS otp_codes (
         id SERIAL PRIMARY KEY,

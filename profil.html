@@ -87,6 +87,44 @@
         </div>
 
 
+        <!-- Desktop an den Stationen -->
+        <div id="desktop-stil-card" class="hidden bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-1 flex items-center gap-2">
+                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                Desktop an den Stationen
+            </h2>
+            <p class="text-sm text-gray-500 mb-4">
+                Wie der Bildschirm aufgeteilt ist, wenn du dich an einem Gerät im Haus anmeldest.
+                Die Wahl gilt an <strong>allen</strong> Stationen und nur für dich.
+            </p>
+
+            <div id="desktop-stil-message" class="hidden mb-4 p-3 rounded-lg text-sm font-medium"></div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <label class="desktop-stil-option cursor-pointer border-2 border-gray-200 rounded-lg p-4 hover:border-blue-400 transition block">
+                    <input type="radio" name="desktop-stil" value="" class="sr-only">
+                    <span class="block font-medium text-gray-800">Wie die Station</span>
+                    <span class="block text-xs text-gray-500 mt-1">Was das Gerät vorgibt — heute die Windows-Anordnung.</span>
+                </label>
+                <label class="desktop-stil-option cursor-pointer border-2 border-gray-200 rounded-lg p-4 hover:border-blue-400 transition block">
+                    <input type="radio" name="desktop-stil" value="windows" class="sr-only">
+                    <span class="block font-medium text-gray-800">Windows-Anordnung</span>
+                    <span class="block text-xs text-gray-500 mt-1">Eine Leiste unten, Menü links unten, Fensterknöpfe rechts.</span>
+                </label>
+                <label class="desktop-stil-option cursor-pointer border-2 border-gray-200 rounded-lg p-4 hover:border-blue-400 transition block">
+                    <input type="radio" name="desktop-stil" value="mac" class="sr-only">
+                    <span class="block font-medium text-gray-800">Mac-Anordnung</span>
+                    <span class="block text-xs text-gray-500 mt-1">Menüleiste oben, Dock unten, Fensterknöpfe links.</span>
+                </label>
+            </div>
+
+            <p class="text-xs text-gray-400 mt-3">
+                Gilt ab der nächsten Anmeldung — ein laufender Desktop wird nicht umgestellt.
+                Gemeint ist die Aufteilung des Linux-Desktops, nicht das Betriebssystem:
+                ein echtes Windows wählt man beim Start des Geräts.
+            </p>
+        </div>
+
         <!-- Persönliche Daten -->
         <div class="bg-white rounded-lg shadow-md p-6">
             <h2 class="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
@@ -404,6 +442,54 @@
 
             // Personen-Daten laden (Zusatznummern + Aliasse)
             await loadPersonData();
+
+            // Desktop-Stil an den Stationen
+            await loadDesktopStil();
+        }
+
+        // ─── Desktop-Stil an den Stationen ────────────────────────────────
+        // Die Station fragt beim Anmelden nach dem AD-Anmeldenamen. Wer keinen
+        // hat, kann sich an keiner Station anmelden — dann bleibt die Karte
+        // verborgen, statt eine Einstellung anzubieten, die nie wirkt.
+        async function loadDesktopStil() {
+            if (!currentUser?.username) return;
+            const card = document.getElementById('desktop-stil-card');
+            try {
+                const r = await AuthentikAuth.apiFetch('/api/me/einstellungen');
+                if (!r.ok) return;
+                const data = await r.json();
+                setzeDesktopStil(data.desktop?.stil || '');
+                card.classList.remove('hidden');
+            } catch { /* Ohne Antwort bleibt die Karte weg. */ }
+        }
+
+        function setzeDesktopStil(stil) {
+            document.querySelectorAll('input[name="desktop-stil"]').forEach(input => {
+                input.checked = input.value === stil;
+                input.closest('.desktop-stil-option').classList.toggle('border-blue-500', input.checked);
+                input.closest('.desktop-stil-option').classList.toggle('bg-blue-50', input.checked);
+                input.closest('.desktop-stil-option').classList.toggle('border-gray-200', !input.checked);
+            });
+        }
+
+        async function speichereDesktopStil(stil) {
+            const msg = document.getElementById('desktop-stil-message');
+            const zeige = (text, ok) => {
+                msg.textContent = text;
+                msg.className = `mb-4 p-3 rounded-lg text-sm font-medium ${ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`;
+                msg.classList.remove('hidden');
+            };
+            try {
+                const r = await AuthentikAuth.apiFetch('/api/me/einstellungen', {
+                    method: 'PUT', body: { desktop: { stil: stil || null } },
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) return zeige(data.error || 'Konnte nicht gespeichert werden.', false);
+                setzeDesktopStil(data.desktop?.stil || '');
+                zeige(data.hinweis || 'Gespeichert.', true);
+            } catch (e) {
+                zeige('Konnte nicht gespeichert werden: ' + e.message, false);
+            }
         }
 
         // ─── Multi-Nummern + Multi-Emails Verwaltung ──────────────────────
@@ -1173,6 +1259,12 @@
                 else setTimeout(tryLoad, 500);
             };
             tryLoad();
+
+            // Kein Speichern-Knopf: eine einzelne Wahl, die sofort gilt. Ein
+            // Formular drumherum liesse offen, ob sie schon zählt.
+            document.querySelectorAll('input[name="desktop-stil"]').forEach(input => {
+                input.addEventListener('change', () => speichereDesktopStil(input.value));
+            });
         });
     </script>
 </body>
