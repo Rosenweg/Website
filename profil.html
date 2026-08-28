@@ -125,6 +125,61 @@
             </p>
         </div>
 
+        <!-- SSH-Zugang -->
+        <div id="ssh-card" class="hidden bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-1 flex items-center gap-2">
+                🔐 SSH-Zugang
+            </h2>
+            <p class="text-sm text-gray-500 mb-4">
+                Öffentliche Schlüssel für die Anmeldung an den Hosts im Haus. Hinterlege sie von Hand,
+                lass sie aus einem GitHub-Konto holen — oder beides, die Listen ergänzen sich.
+                Wohin du damit kommst, entscheidet die Zugriffsmatrix.
+            </p>
+
+            <div id="ssh-message" class="hidden mb-4 p-3 rounded-lg text-sm font-medium"></div>
+
+            <h3 class="text-sm font-semibold text-gray-700 mb-2">Deine Schlüssel</h3>
+            <div id="ssh-liste" class="space-y-2"></div>
+            <div id="ssh-leer" class="hidden text-gray-400 italic text-sm text-center py-5 border border-dashed rounded">
+                Noch kein Schlüssel hinterlegt.
+            </div>
+
+            <details class="mt-3">
+                <summary class="text-sm text-blue-600 cursor-pointer hover:underline">+ Schlüssel von Hand hinterlegen</summary>
+                <div class="mt-3 space-y-2">
+                    <textarea id="ssh-neu" rows="3" placeholder="ssh-ed25519 AAAAC3Nza… name@gerät"
+                              class="w-full border rounded px-3 py-2 font-mono text-xs"></textarea>
+                    <div class="flex gap-2">
+                        <input id="ssh-neu-label" type="text" placeholder="Bezeichnung, z.B. MacBook"
+                               class="flex-1 border rounded px-3 py-2 text-sm">
+                        <button onclick="sshSchluesselHinzufuegen()"
+                                class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">Hinterlegen</button>
+                    </div>
+                    <p class="text-xs text-gray-500">
+                        Der <strong>öffentliche</strong> Schlüssel — der Inhalt von <code>~/.ssh/id_ed25519.pub</code>.
+                        Der private bleibt auf deinem Gerät.
+                    </p>
+                </div>
+            </details>
+
+            <h3 class="text-sm font-semibold text-gray-700 mt-6 mb-2">GitHub-Konto</h3>
+            <div class="flex gap-2 items-center">
+                <input id="ssh-github" type="text" placeholder="GitHub-Benutzername"
+                       class="flex-1 border rounded px-3 py-2 text-sm">
+                <button onclick="sshGithubSpeichern()"
+                        class="bg-gray-700 text-white px-4 py-2 rounded hover:bg-gray-800 text-sm">Übernehmen</button>
+                <button onclick="sshGithubAbgleichen()" id="ssh-github-sync"
+                        class="hidden bg-gray-100 text-gray-700 px-3 py-2 rounded hover:bg-gray-200 text-sm" title="Jetzt neu holen">⟳</button>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">
+                Wir holen die öffentlichen Schlüssel dieses Kontos stündlich und legen sie hier ab.
+                Leeren und übernehmen entfernt sie wieder. Von Hand hinterlegte Schlüssel bleiben davon unberührt.
+            </p>
+
+            <h3 class="text-sm font-semibold text-gray-700 mt-6 mb-2">Wo du damit hinkommst</h3>
+            <div id="ssh-hosts" class="text-sm"></div>
+        </div>
+
         <!-- Persönliche Daten -->
         <div class="bg-white rounded-lg shadow-md p-6">
             <h2 class="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
@@ -445,6 +500,9 @@
 
             // Desktop-Stil an den Stationen
             await loadDesktopStil();
+
+            // SSH-Zugang
+            await loadSshZugang();
         }
 
         // ─── Desktop-Stil an den Stationen ────────────────────────────────
@@ -490,6 +548,133 @@
             } catch (e) {
                 zeige('Konnte nicht gespeichert werden: ' + e.message, false);
             }
+        }
+
+        // Der Kommentar eines Schlüssels ist Fremdtext — bei GitHub-Schlüsseln
+        // stammt er aus einem fremden Konto. Er geht hier durch innerHTML,
+        // also wird er entschärft, bevor er in die Seite kommt.
+        function escapeHtml(wert) {
+            return String(wert ?? '').replace(/[&<>"']/g, z => (
+                { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[z]
+            ));
+        }
+
+        // ─── SSH-Zugang ───────────────────────────────────────────────────
+        // Ohne Anmeldenamen lässt sich niemand einem Systembenutzer zuordnen —
+        // dann bleibt die Karte weg, wie beim Desktop-Stil.
+        async function loadSshZugang() {
+            if (!currentUser?.username) return;
+            try {
+                const r = await AuthentikAuth.apiFetch('/api/ssh/me');
+                if (!r.ok) return;
+                sshZeichnen(await r.json());
+                document.getElementById('ssh-card').classList.remove('hidden');
+            } catch { /* Ohne Antwort bleibt die Karte weg. */ }
+        }
+
+        function sshMeldung(text, ok) {
+            const m = document.getElementById('ssh-message');
+            m.textContent = text;
+            m.className = `mb-4 p-3 rounded-lg text-sm font-medium ${ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`;
+            m.classList.remove('hidden');
+        }
+
+        function sshZeichnen(d) {
+            const liste = document.getElementById('ssh-liste');
+            const leer = document.getElementById('ssh-leer');
+            const keys = d.schluessel || [];
+            leer.classList.toggle('hidden', keys.length > 0);
+            liste.innerHTML = keys.map(k => {
+                const quelle = k.quelle === 'github'
+                    ? '<span class="text-xs bg-gray-800 text-white px-2 py-0.5 rounded">GitHub</span>'
+                    : '<span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">von Hand</span>';
+                const gesehen = k.zuletzt_gesehen
+                    ? `zuletzt benutzt ${new Date(k.zuletzt_gesehen).toLocaleDateString('de-CH')}`
+                    : 'noch nie benutzt';
+                return `<div class="border rounded p-3 flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            ${quelle}
+                            <span class="font-medium text-sm">${escapeHtml(k.label || k.kommentar || k.typ)}</span>
+                        </div>
+                        <div class="text-xs text-gray-500 font-mono truncate mt-1">${escapeHtml(k.fingerprint)}</div>
+                        <div class="text-xs text-gray-400 mt-0.5">${escapeHtml(k.typ)} · ${gesehen}</div>
+                    </div>
+                    <button onclick="sshSchluesselEntfernen(${k.id})"
+                            class="text-red-600 hover:text-red-800 text-sm shrink-0">Entfernen</button>
+                </div>`;
+            }).join('');
+
+            document.getElementById('ssh-github').value = d.github_benutzer || '';
+            document.getElementById('ssh-github-sync').classList.toggle('hidden', !d.github_benutzer);
+
+            const hosts = d.hosts || [];
+            const ziel = document.getElementById('ssh-hosts');
+            if (!keys.length) {
+                ziel.innerHTML = '<p class="text-gray-500">Erst mit einem hinterlegten Schlüssel wird daraus ein Zugang.</p>';
+            } else if (!hosts.length) {
+                ziel.innerHTML = '<p class="text-gray-500">Für dich ist zurzeit kein Host freigegeben. Das regelt die Technik über die Zugriffsmatrix.</p>';
+            } else {
+                ziel.innerHTML = '<div class="flex flex-wrap gap-2">' + hosts.map(h =>
+                    `<span class="border rounded px-2 py-1 text-xs">
+                        <span class="font-mono">${escapeHtml(h.hostname)}</span>
+                        ${h.sudo ? '<span class="ml-1 text-amber-700 font-semibold">sudo</span>' : ''}
+                     </span>`).join('') + '</div>';
+            }
+        }
+
+        async function sshSchluesselHinzufuegen() {
+            const feld = document.getElementById('ssh-neu');
+            const label = document.getElementById('ssh-neu-label');
+            if (!feld.value.trim()) return sshMeldung('Bitte einen Schlüssel einfügen.', false);
+            try {
+                const r = await AuthentikAuth.apiFetch('/api/ssh/me/schluessel', {
+                    method: 'POST', body: { pubkey: feld.value.trim(), label: label.value.trim() || null },
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) return sshMeldung(data.error || 'Konnte nicht hinterlegt werden.', false);
+                feld.value = ''; label.value = '';
+                sshMeldung('Schlüssel hinterlegt.', true);
+                await loadSshZugang();
+            } catch (e) { sshMeldung('Konnte nicht hinterlegt werden: ' + e.message, false); }
+        }
+
+        async function sshSchluesselEntfernen(id) {
+            if (!confirm('Diesen Schlüssel entfernen? Anmeldungen damit sind sofort nicht mehr möglich.')) return;
+            try {
+                const r = await AuthentikAuth.apiFetch(`/api/ssh/me/schluessel/${id}`, { method: 'DELETE' });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) return sshMeldung(data.error || 'Konnte nicht entfernt werden.', false);
+                sshMeldung(data.wiederkehrend
+                    ? 'Entfernt — dieser Schlüssel stammt aus GitHub und kehrt beim nächsten Abgleich zurück. Dauerhaft: dort entfernen oder das Konto hier lösen.'
+                    : 'Schlüssel entfernt.', true);
+                await loadSshZugang();
+            } catch (e) { sshMeldung('Konnte nicht entfernt werden: ' + e.message, false); }
+        }
+
+        async function sshGithubSpeichern() {
+            const wert = document.getElementById('ssh-github').value.trim();
+            try {
+                const r = await AuthentikAuth.apiFetch('/api/ssh/me/github', {
+                    method: 'PUT', body: { benutzer: wert || null },
+                });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) return sshMeldung(data.error || 'Konnte nicht gespeichert werden.', false);
+                sshMeldung(wert
+                    ? `${data.gefunden ?? 0} Schlüssel bei GitHub gefunden, ${data.uebernommen ?? 0} neu übernommen.`
+                    : 'GitHub-Konto gelöst, die von dort geholten Schlüssel sind entfernt.', true);
+                await loadSshZugang();
+            } catch (e) { sshMeldung('Konnte nicht gespeichert werden: ' + e.message, false); }
+        }
+
+        async function sshGithubAbgleichen() {
+            try {
+                const r = await AuthentikAuth.apiFetch('/api/ssh/me/github/abgleich', { method: 'POST' });
+                const data = await r.json().catch(() => ({}));
+                if (!r.ok) return sshMeldung(data.error || 'Abgleich fehlgeschlagen.', false);
+                sshMeldung(`${data.gefunden ?? 0} Schlüssel bei GitHub, ${data.uebernommen ?? 0} neu, ${data.entfernt ?? 0} entfallen.`, true);
+                await loadSshZugang();
+            } catch (e) { sshMeldung('Abgleich fehlgeschlagen: ' + e.message, false); }
         }
 
         // ─── Multi-Nummern + Multi-Emails Verwaltung ──────────────────────
