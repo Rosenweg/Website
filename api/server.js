@@ -9650,6 +9650,12 @@ app.put('/api/admin/groups/:pk/remove_user', authMiddleware, requirePermission('
 // ═══════════════════════════════════════════════════════════════════
 app.use('/api/email-archive', require('./routes/email-archive'));
 
+// ─── SSH-Zugang: Profil-Schluessel, Hosts, Zugriffsmatrix ───────────
+// Den periodischen GitHub-Abgleich startet startSshGithubAbgleich()
+// unten, nach initDB() — vorher gibt es die Tabellen noch nicht.
+const sshZugang = require('./routes/ssh-zugang');
+app.use('/api/ssh', sshZugang);
+
 // GRUNDBUCH-CROWDSOURCING -> routes/grundbuch.js (Router-Split, PoC-Domäne)
 app.use('/api/grundbuch', require('./routes/grundbuch'));
 
@@ -23854,6 +23860,85 @@ async function initDB() {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS einstellungen JSONB NOT NULL DEFAULT '{}'::jsonb;
       CREATE INDEX IF NOT EXISTS idx_users_username_lower ON users (LOWER(username));
 
+      -- ─── SSH-Zugang: Schluessel, Hosts, Zugriffsmatrix ─────────────────
+      -- Zwei Quellen nebeneinander: von Hand hinterlegte Schluessel und
+      -- die eines GitHub-Kontos. Sie ergaenzen sich, die wirksame Liste
+      -- ist die Vereinigung. GitHub wird periodisch abgeholt und hier
+      -- zwischengespeichert — nie im Anmeldepfad live abgefragt, sonst
+      -- haengt github.com zwischen einer Person und ihrer Shell.
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS github_benutzer VARCHAR(39);
+
+      CREATE TABLE IF NOT EXISTS ssh_schluessel (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        quelle VARCHAR(10) NOT NULL DEFAULT 'manuell',
+        typ VARCHAR(50) NOT NULL,
+        blob_b64 TEXT NOT NULL,
+        kommentar VARCHAR(200),
+        fingerprint VARCHAR(60) NOT NULL,
+        label VARCHAR(100),
+        erstellt_am TIMESTAMP DEFAULT NOW(),
+        zuletzt_gesehen TIMESTAMP,
+        UNIQUE (user_id, fingerprint)
+      );
+      CREATE INDEX IF NOT EXISTS idx_ssh_schluessel_user ON ssh_schluessel(user_id);
+      DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM pg_proc WHERE proname='audit_trigger_fn')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_name='ssh_schluessel_audit') THEN
+          EXECUTE 'CREATE TRIGGER ssh_schluessel_audit AFTER INSERT OR UPDATE OR DELETE ON ssh_schluessel FOR EACH ROW EXECUTE FUNCTION audit_trigger_fn()';
+        END IF;
+      END $$;
+
+      -- Die Hostliste pflegt sich selbst: Wer Schluessel abholt, traegt
+      -- sich dabei ein. Eine von Hand gefuehrte Liste waere binnen eines
+      -- Monats falsch — diese ist per Definition der Wirklichkeit gleich.
+      CREATE TABLE IF NOT EXISTS ssh_hosts (
+        id SERIAL PRIMARY KEY,
+        hostname VARCHAR(120) UNIQUE NOT NULL,
+        adresse VARCHAR(60),
+        erst_gesehen TIMESTAMP DEFAULT NOW(),
+        zuletzt_gesehen TIMESTAMP DEFAULT NOW(),
+        abfragen INTEGER DEFAULT 0,
+        aktiv BOOLEAN DEFAULT true,
+        notiz TEXT
+      );
+
+      -- host_id NULL heisst: gilt fuer alle Hosts. Die spezifischere
+      -- Regel gewinnt (Host vor global, Benutzer vor Gruppe), damit sich
+      -- ein einzelner Host ausnehmen laesst, ohne die Grundregel zu
+      -- zerlegen. ssh=false ist ein ausdruecklicher Entzug.
+      CREATE TABLE IF NOT EXISTS ssh_zugriff (
+        id SERIAL PRIMARY KEY,
+        host_id INTEGER REFERENCES ssh_hosts(id) ON DELETE CASCADE,
+        subjekt_typ VARCHAR(10) NOT NULL,
+        subjekt VARCHAR(120) NOT NULL,
+        ssh BOOLEAN NOT NULL DEFAULT true,
+        sudo BOOLEAN NOT NULL DEFAULT false,
+        notiz TEXT,
+        erstellt_am TIMESTAMP DEFAULT NOW()
+      );
+      -- Zwei Teil-Indizes statt eines UNIQUE: In Postgres sind NULLs
+      -- voneinander verschieden, ein UNIQUE ueber host_id liesse die
+      -- globale Regel also beliebig oft zu.
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_ssh_zugriff_global
+        ON ssh_zugriff (subjekt_typ, LOWER(subjekt)) WHERE host_id IS NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_ssh_zugriff_host
+        ON ssh_zugriff (host_id, subjekt_typ, LOWER(subjekt)) WHERE host_id IS NOT NULL;
+      DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM pg_proc WHERE proname='audit_trigger_fn')
+           AND NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_name='ssh_zugriff_audit') THEN
+          EXECUTE 'CREATE TRIGGER ssh_zugriff_audit AFTER INSERT OR UPDATE OR DELETE ON ssh_zugriff FOR EACH ROW EXECUTE FUNCTION audit_trigger_fn()';
+        END IF;
+      END $$;
+
+      -- Grundregel: Technik und Praesident kommen ueberall hin, mit sudo.
+      -- Nur einmal gesetzt — wer sie spaeter aendert oder loescht, dem
+      -- schreibt sie der Start nicht wieder hin.
+      INSERT INTO ssh_zugriff (host_id, subjekt_typ, subjekt, ssh, sudo, notiz)
+      SELECT NULL, 'gruppe', g, true, true, 'Grundregel beim Einrichten'
+        FROM (VALUES ('technik'), ('praesident')) AS v(g)
+       WHERE NOT EXISTS (SELECT 1 FROM ssh_zugriff WHERE host_id IS NULL AND subjekt_typ='gruppe' AND LOWER(subjekt)=v.g);
+
       CREATE TABLE IF NOT EXISTS otp_codes (
         id SERIAL PRIMARY KEY,
         email VARCHAR(255) NOT NULL,
@@ -26365,6 +26450,16 @@ app.get('/api/connections/stats', authMiddleware, adminOnly, async (req, res) =>
 let server;
 const activeIntervals = [];
 
+// GitHub-Schluessel stuendlich abholen und bei uns ablegen. Bewusst
+// nicht im Anmeldepfad abfragen: Sonst haengt github.com zwischen einer
+// Person und ihrer Shell, und ein Ausfall dort sperrt uns aus.
+function startSshGithubAbgleich() {
+  const lauf = () => sshZugang.githubAbgleichAlle()
+    .catch(e => console.warn('[ssh] GitHub-Abgleich:', e.message));
+  activeIntervals.push(setInterval(lauf, 60 * 60 * 1000));
+  setTimeout(lauf, 90 * 1000);
+}
+
 // Alarmpanel (STWEG3 Gas/Rauch): Tabellen + /api/alarmpanel/* + Shelly-Polling +
 // Alarm-Eskalation. Verwalten = Technik/Präsident; Bewohner-Broadcast (Rauch)
 // über den getesteten resolveBroadcastRecipients('stweg:3').
@@ -26381,6 +26476,8 @@ initDB()
       startImapPoll();
       // Start connection logging (FPÜV)
       startConnectionPolling();
+      // SSH: GitHub-Schluessel periodisch abgleichen
+      startSshGithubAbgleich();
       // Cleanup expired sessions every hour
       activeIntervals.push(setInterval(cleanupExpiredSessions, 60 * 60 * 1000));
       setTimeout(cleanupExpiredSessions, 30 * 1000); // first cleanup after 30s

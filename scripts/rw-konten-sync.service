@@ -1,0 +1,12 @@
+[Unit]
+Description=Unix-Konten und sudo aus der Rosenweg-Zugriffsmatrix nachführen
+Documentation=file:/usr/local/bin/rw-konten-sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/rw-konten-sync
+# Ein Fehlschlag ist kein Notfall: Erreicht das Skript die API nicht,
+# lässt es alles unverändert, und der nächste Lauf holt den Stand nach.
+Nice=10

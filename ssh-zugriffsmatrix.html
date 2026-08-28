@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSH-Zugriffsmatrix — Rosenweg</title>
+    <link rel="icon" href="/logo-rosenweg.png" type="image/png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/js/authentik-auth.js?v=2"></script>
+</head>
+<body class="bg-gray-50">
+<div class="max-w-6xl mx-auto p-6">
+
+    <div class="mb-6">
+        <a href="/" class="text-sm text-blue-600 hover:underline">← Übersicht</a>
+        <h1 class="text-2xl font-bold text-gray-800 mt-2">SSH-Zugriffsmatrix</h1>
+        <p class="text-sm text-gray-500">
+            Wer kommt mit seinem Schlüssel aus dem Profil auf welchen Host — und wo mit passwortlosem sudo.
+            Die Hostliste pflegt sich selbst: Jeder Host trägt sich ein, wenn er Schlüssel abholt.
+        </p>
+    </div>
+
+    <div id="loading" class="text-gray-500 py-12 text-center">Lade …</div>
+
+    <div id="gate" class="hidden bg-white rounded-lg shadow p-8 text-center">
+        <h2 class="text-lg font-semibold mb-2">🔒 Zugriff</h2>
+        <p id="gate-msg" class="text-sm text-gray-500 mb-4">Diese Seite ist nur für Technik und Präsident.</p>
+        <div id="sso-login-container"></div>
+    </div>
+
+    <div id="content" class="hidden space-y-6">
+
+        <div id="meldung" class="hidden p-3 rounded-lg text-sm font-medium"></div>
+
+        <!-- Wirkung -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-1">Wirkung</h2>
+            <p class="text-sm text-gray-500 mb-4">
+                Was sich aus allen Regeln zusammen ergibt. Aufgeführt sind nur Personen mit hinterlegtem
+                Schlüssel — ohne Schlüssel bleibt jede Regel folgenlos.
+            </p>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm border-collapse" id="wirkung-tabelle"></table>
+            </div>
+        </div>
+
+        <!-- Regeln -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-1">Regeln</h2>
+            <p class="text-sm text-gray-500 mb-4">
+                Die spezifischere Regel gewinnt: Benutzer schlägt Gruppe, ein einzelner Host schlägt
+                „alle Hosts“. So lässt sich ein Host ausnehmen, ohne die Grundregel anzufassen.
+            </p>
+            <div id="regeln" class="space-y-2 mb-4"></div>
+
+            <details class="border-t pt-4">
+                <summary class="text-sm text-blue-600 cursor-pointer hover:underline">+ Regel anlegen oder ändern</summary>
+                <div class="mt-3 grid grid-cols-1 sm:grid-cols-5 gap-2 items-end">
+                    <label class="text-xs text-gray-600">Gilt für
+                        <select id="r-host" class="w-full border rounded px-2 py-2 text-sm mt-1"></select>
+                    </label>
+                    <label class="text-xs text-gray-600">Art
+                        <select id="r-typ" class="w-full border rounded px-2 py-2 text-sm mt-1">
+                            <option value="gruppe">Gruppe</option>
+                            <option value="benutzer">Benutzer</option>
+                        </select>
+                    </label>
+                    <label class="text-xs text-gray-600">Name
+                        <input id="r-subjekt" type="text" placeholder="technik" class="w-full border rounded px-2 py-2 text-sm mt-1">
+                    </label>
+                    <label class="text-xs text-gray-600">Gewährt
+                        <select id="r-recht" class="w-full border rounded px-2 py-2 text-sm mt-1">
+                            <option value="ssh">SSH</option>
+                            <option value="sudo">SSH + passwortloses sudo</option>
+                            <option value="entzug">Entzug (ausdrücklich kein Zugang)</option>
+                        </select>
+                    </label>
+                    <button onclick="regelSpeichern()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">Speichern</button>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">
+                    Ein Entzug ist stärker als das blosse Fehlen einer Regel — er schlägt eine allgemeinere Erlaubnis.
+                </p>
+            </details>
+        </div>
+
+        <!-- Hosts -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-1">Hosts</h2>
+            <p class="text-sm text-gray-500 mb-4">
+                Selbst gemeldet. Ein Host, der lange nicht mehr gefragt hat, fällt hier auf.
+                Stillgelegt heisst: dort bekommt niemand mehr Schlüssel.
+            </p>
+            <div id="hosts" class="space-y-2"></div>
+        </div>
+
+    </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+let DATEN = { regeln: [], hosts: [], wirkung: [] };
+
+function showGate(msg) {
+    $('loading').classList.add('hidden');
+    $('content').classList.add('hidden');
+    if (msg) $('gate-msg').textContent = msg;
+    $('gate').classList.remove('hidden');
+    if (!msg) AuthentikAuth.createLoginButton('sso-login-container');
+}
+
+function meldung(text, ok) {
+    const m = $('meldung');
+    m.textContent = text;
+    m.className = `p-3 rounded-lg text-sm font-medium ${ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`;
+    m.classList.remove('hidden');
+}
+
+function zeichneWirkung() {
+    const t = $('wirkung-tabelle');
+    if (!DATEN.wirkung.length) {
+        t.innerHTML = '<tr><td class="text-gray-400 italic py-4">Noch hat niemand mit hinterlegtem Schlüssel einen Zugang.</td></tr>';
+        return;
+    }
+    const kopf = '<tr class="border-b"><th class="text-left py-2 pr-4">Person</th>' +
+        DATEN.hosts.map(h => `<th class="text-left py-2 px-2 font-mono text-xs">${esc(h.hostname)}</th>`).join('') + '</tr>';
+    const zeilen = DATEN.wirkung.map(p => {
+        const zellen = DATEN.hosts.map(h => {
+            const w = p.hosts[h.hostname];
+            const stil = w === 'sudo' ? 'text-amber-700 font-semibold'
+                       : w === 'ssh' ? 'text-green-700' : 'text-gray-300';
+            return `<td class="py-2 px-2 ${stil}">${esc(w)}</td>`;
+        }).join('');
+        return `<tr class="border-b last:border-0">
+            <td class="py-2 pr-4"><span class="font-mono text-xs">${esc(p.username)}</span>
+            <span class="text-gray-500 text-xs">${esc(p.name || '')}</span></td>${zellen}</tr>`;
+    }).join('');
+    t.innerHTML = kopf + zeilen;
+}
+
+function zeichneRegeln() {
+    $('regeln').innerHTML = DATEN.regeln.map(r => {
+        const bereich = r.hostname ? `<span class="font-mono text-xs">${esc(r.hostname)}</span>` : '<span class="text-xs text-gray-500">alle Hosts</span>';
+        const recht = !r.ssh ? '<span class="text-red-700 font-semibold text-xs">Entzug</span>'
+                    : r.sudo ? '<span class="text-amber-700 font-semibold text-xs">SSH + sudo</span>'
+                    : '<span class="text-green-700 text-xs">SSH</span>';
+        return `<div class="border rounded p-3 flex items-center justify-between gap-3 text-sm">
+            <div>
+                <span class="text-xs bg-gray-100 px-2 py-0.5 rounded">${esc(r.subjekt_typ)}</span>
+                <span class="font-medium">${esc(r.subjekt)}</span>
+                <span class="text-gray-400 mx-1">auf</span> ${bereich}
+                <span class="text-gray-400 mx-1">→</span> ${recht}
+                ${r.notiz ? `<div class="text-xs text-gray-500 mt-1">${esc(r.notiz)}</div>` : ''}
+            </div>
+            <button onclick="regelLoeschen(${r.id})" class="text-red-600 hover:text-red-800 text-sm shrink-0">Entfernen</button>
+        </div>`;
+    }).join('') || '<p class="text-gray-400 italic text-sm">Keine Regeln — damit kommt niemand irgendwohin.</p>';
+
+    $('r-host').innerHTML = '<option value="">alle Hosts</option>' +
+        DATEN.hosts.map(h => `<option value="${h.id}">${esc(h.hostname)}</option>`).join('');
+}
+
+function zeichneHosts() {
+    $('hosts').innerHTML = DATEN.hosts.map(h => {
+        const gesehen = h.zuletzt_gesehen ? new Date(h.zuletzt_gesehen).toLocaleString('de-CH') : '—';
+        return `<div class="border rounded p-3 flex items-center justify-between gap-3 text-sm">
+            <div>
+                <span class="font-mono">${esc(h.hostname)}</span>
+                ${h.aktiv === false ? '<span class="ml-2 text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded">stillgelegt</span>' : ''}
+                <div class="text-xs text-gray-500 mt-0.5">zuletzt gesehen ${esc(gesehen)} · ${h.abfragen ?? 0} Abrufe${h.adresse ? ' · ' + esc(h.adresse) : ''}</div>
+            </div>
+            <button onclick="hostUmschalten(${h.id}, ${h.aktiv === false})" class="text-blue-600 hover:text-blue-800 text-sm shrink-0">
+                ${h.aktiv === false ? 'Wieder freigeben' : 'Stilllegen'}
+            </button>
+        </div>`;
+    }).join('') || '<p class="text-gray-400 italic text-sm">Noch hat sich kein Host gemeldet. Sobald einer Schlüssel abholt, steht er hier.</p>';
+}
+
+async function laden() {
+    try {
+        const r = await AuthentikAuth.apiFetch('/api/ssh/matrix', { cache: 'no-store' });
+        if (r.status === 403) return showGate('Diese Seite ist nur für Technik und Präsident.');
+        if (!r.ok) throw new Error('Status ' + r.status);
+        const m = await r.json();
+        const h = await AuthentikAuth.apiFetch('/api/ssh/hosts', { cache: 'no-store' });
+        DATEN = { ...m, hosts: h.ok ? (await h.json()).hosts : m.hosts };
+        $('loading').classList.add('hidden');
+        $('content').classList.remove('hidden');
+        zeichneWirkung(); zeichneRegeln(); zeichneHosts();
+    } catch (e) {
+        showGate('Konnte nicht geladen werden: ' + e.message);
+    }
+}
+
+async function regelSpeichern() {
+    const recht = $('r-recht').value;
+    const koerper = {
+        host_id: $('r-host').value || null,
+        subjekt_typ: $('r-typ').value,
+        subjekt: $('r-subjekt').value.trim(),
+        ssh: recht !== 'entzug',
+        sudo: recht === 'sudo',
+    };
+    if (!koerper.subjekt) return meldung('Bitte einen Namen angeben.', false);
+    try {
+        const r = await AuthentikAuth.apiFetch('/api/ssh/matrix', { method: 'POST', body: koerper });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) return meldung(d.error || 'Konnte nicht gespeichert werden.', false);
+        $('r-subjekt').value = '';
+        meldung(d.neu ? 'Regel angelegt.' : 'Bestehende Regel geändert.', true);
+        await laden();
+    } catch (e) { meldung('Konnte nicht gespeichert werden: ' + e.message, false); }
+}
+
+async function regelLoeschen(id) {
+    if (!confirm('Regel entfernen? Wer nur über sie berechtigt war, kommt danach nicht mehr hinein.')) return;
+    try {
+        const r = await AuthentikAuth.apiFetch(`/api/ssh/matrix/${id}`, { method: 'DELETE' });
+        if (!r.ok) return meldung('Konnte nicht entfernt werden.', false);
+        meldung('Regel entfernt.', true);
+        await laden();
+    } catch (e) { meldung('Konnte nicht entfernt werden: ' + e.message, false); }
+}
+
+async function hostUmschalten(id, aktivieren) {
+    try {
+        const r = await AuthentikAuth.apiFetch(`/api/ssh/hosts/${id}`, { method: 'PATCH', body: { aktiv: aktivieren } });
+        if (!r.ok) return meldung('Konnte nicht geändert werden.', false);
+        meldung(aktivieren ? 'Host wieder freigegeben.' : 'Host stillgelegt — dort bekommt niemand mehr Schlüssel.', true);
+        await laden();
+    } catch (e) { meldung('Konnte nicht geändert werden: ' + e.message, false); }
+}
+
+AuthentikAuth.handleCallback();
+if (!AuthentikAuth.isLoggedIn()) { showGate(); } else { laden(); }
+</script>
+</body>
+</html>

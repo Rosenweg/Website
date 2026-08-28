@@ -1,0 +1,15 @@
+[Unit]
+Description=Zugriffsmatrix regelmässig in Konten und sudoers übertragen
+
+[Timer]
+# Alle 5 Minuten. SSH-Schlüssel wirken sofort, weil sshd bei jeder
+# Anmeldung frisch fragt — Konten und sudo hängen dagegen an diesem
+# Lauf. Wer neu freigegeben wird, wartet also höchstens fünf Minuten
+# auf sein Konto, und ein Entzug greift ebenso schnell.
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
