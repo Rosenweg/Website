@@ -78,16 +78,39 @@ Statische HTML-Seiten + API Server. Kein Framework, plain HTML/CSS/JS mit Tailwi
 
 ## Deployment
 
+Die Frontends liefen einmal als Swarm-Dienste aus Docker-Images. Der Betrieb
+war nicht stabil genug, darum laufen sie heute als LXC-Container mit einem
+schlichten nginx, das statische Dateien ausliefert. **Es gibt keinen
+automatischen Weg vom Push auf die Seite** — ausgerollt wird von Hand, und
+zwar dateiweise.
+
+Wichtig: Es gibt mehrere `fe-*`-Container mit **unterschiedlichem** Inhalt.
+Die Hauptseite liegt allein auf `fe-www` (CT 118, 100.64.2.41) unter
+`/var/www/rosenweg`. `fe-stweg1..7`, `fe-meg`, `fe-isp` und `fe-pwa` führen
+ihre eigenen, kleineren Bestände. Wer blind spiegelt, überschreibt Fremdes.
+
 ```bash
-# 1. Push löst GitHub Actions Build aus
-git push
+# 1. Dateien auf einen pve-Knoten legen
+scp -J stefan@10.0.10.149 profil.html hilfe.html root@100.64.2.20:/tmp/
 
-# 2. Build abwarten
-gh run watch <run-id> --exit-status
+# 2. Dort sichern, was ersetzt wird
+ssh -J stefan@10.0.10.149 root@100.64.2.20 \
+  'pct exec 118 -- sh -c "cd /var/www/rosenweg && cp -a profil.html profil.html.alt"'
 
-# 3. Website deployen
-ssh root@100.64.2.24 "docker service update --force --image ghcr.io/rosenweg/rosenweg-website:latest rosenweg_website"
+# 3. Hineinschieben und Eigentuemer richten
+ssh -J stefan@10.0.10.149 root@100.64.2.20 '
+  pct push 118 /tmp/profil.html /var/www/rosenweg/profil.html --perms 644
+  pct exec 118 -- chown www-data:www-data /var/www/rosenweg/profil.html'
 
-# 4. API deployen
-ssh root@100.64.2.24 "docker service update --force --image ghcr.io/rosenweg/rosenweg-api:latest rosenweg_api"
+# 4. Nachsehen, ob es wirklich draussen ist
+curl -sI https://www.rosenweg4303.ch/profil.html | grep -i last-modified
+```
+
+nginx braucht kein Neuladen — es liest die Dateien bei jedem Request.
+
+Die API dagegen läuft weiterhin in Docker, auf CT 128 (`core-backend`):
+
+```bash
+ssh -J stefan@10.0.10.149 root@100.64.2.20 \
+  'pct exec 128 -- sh -c "cd /opt/rosenweg-core && docker compose pull api && docker compose up -d api"'
 ```
