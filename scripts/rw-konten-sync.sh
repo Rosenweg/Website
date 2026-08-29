@@ -68,10 +68,22 @@ unser() {
 }
 
 # ── Liste holen ─────────────────────────────────────────────────────
-ANTWORT=$(curl -fsS --max-time 20 \
-  -H "X-Host-Token: $HOST_TOKEN" \
-  -H "X-Host-Name: $HOST_NAME" \
-  "$API_BASE/api/ssh/konten") || {
+# Nimmt, was der Host hat. Von 33 Containern hatten nur 11 curl — die
+# uebrigen holten stillschweigend nichts, und niemand merkte es.
+hole() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS --max-time 20 \
+         -H "X-Host-Token: $HOST_TOKEN" -H "X-Host-Name: $HOST_NAME" "$1"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -O - -T 20 \
+         --header="X-Host-Token: $HOST_TOKEN" --header="X-Host-Name: $HOST_NAME" "$1"
+  else
+    echo "rw-konten-sync: weder curl noch wget vorhanden" >&2
+    return 127
+  fi
+}
+
+ANTWORT=$(hole "$API_BASE/api/ssh/konten") || {
     echo "rw-konten-sync: API nicht erreichbar — es wird nichts geaendert" >&2; exit 0; }
 
 # Zu Zeilen "login|sudo|name". Die API filtert bereits, aber was hier

@@ -44,10 +44,25 @@ CACHE="$CACHE_DIR/$LOGIN.keys"
 # Status 200 heisst "diese Person darf hier nicht mehr" — der Cache muss
 # dann weg, sonst greift ein Entzug nie. Nur wenn curl selbst scheitert
 # (kein Netz, API tot, 5xx), gilt der letzte bekannte Stand.
-if ANTWORT=$(curl -fsS --max-time "${TIMEOUT:-3}" \
-       -H "X-Host-Token: $HOST_TOKEN" \
-       -H "X-Host-Name: $HOST_NAME" \
-       "$API_BASE/api/ssh/authorized-keys/$LOGIN" 2>/dev/null); then
+# Nicht jeder Container hat curl. Von 33 hatten es 11 — die uebrigen
+# holten stillschweigend gar nichts, und die Aufnahme sah trotzdem
+# erfolgreich aus. Also wird genommen, was da ist. Beide liefern 0 bei
+# HTTP 200 und einen Fehler bei 4xx/5xx oder ausgefallenem Netz; die
+# Unterscheidung "kein Zugang" gegen "nicht erreichbar" bleibt damit
+# erhalten, und daran haengt, ob der Zwischenspeicher gilt.
+hole() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS --max-time "${TIMEOUT:-3}" \
+         -H "X-Host-Token: $HOST_TOKEN" -H "X-Host-Name: $HOST_NAME" "$1" 2>/dev/null
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -O - -T "${TIMEOUT:-3}" \
+         --header="X-Host-Token: $HOST_TOKEN" --header="X-Host-Name: $HOST_NAME" "$1" 2>/dev/null
+  else
+    return 127
+  fi
+}
+
+if ANTWORT=$(hole "$API_BASE/api/ssh/authorized-keys/$LOGIN"); then
   printf '%s' "$ANTWORT"
   if [ -d "$CACHE_DIR" ] && [ -w "$CACHE_DIR" ]; then
     if [ -n "$ANTWORT" ]; then
