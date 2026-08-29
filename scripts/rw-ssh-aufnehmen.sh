@@ -67,9 +67,13 @@ KONF=${RW_SSH_KONF:-/etc/rosenweg-ssh.conf}
 [ -n "$API_BASE" ] && [ -n "$HOST_TOKEN" ] || exit 0
 
 LOGIN="${1:-}"
-# Eng gefasst: Der Wert geht in einen Pfad und in eine URL.
+# Eng gefasst: Der Wert geht in einen Pfad und in eine URL. Punkte sind
+# erlaubt, weil die Anmeldenamen aus dem Verzeichnis so aussehen
+# (stefan.mueller) — aber '.' und '..' allein waeren Verzeichnisnamen
+# und muessen ausdruecklich raus, bevor sie in einen Pfad geraten.
 case "$LOGIN" in
-  '' | *[!a-z0-9_-]* ) exit 0 ;;
+  '' | . | .. ) exit 0 ;;
+  *[!a-z0-9._-]* ) exit 0 ;;
 esac
 
 CACHE_DIR=${CACHE_DIR:-/var/cache/rosenweg-ssh}
