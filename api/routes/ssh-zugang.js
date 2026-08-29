@@ -73,7 +73,7 @@ async function hostRegistrieren(hostname, adresse) {
        SET zuletzt_gesehen = NOW(),
            abfragen = ssh_hosts.abfragen + 1,
            adresse = COALESCE(EXCLUDED.adresse, ssh_hosts.adresse)
-     RETURNING id, hostname, aktiv`,
+     RETURNING id, hostname, aktiv, sitzungsgebunden`,
     [hostname, adresse || null]);
   return r.rows[0];
 }
@@ -116,6 +116,21 @@ async function zugriffErmitteln(login, host) {
   const regel = r.rows[0];
   if (!regel) return { erlaubt: false, grund: 'Keine Regel trifft zu', user };
   if (!regel.ssh) return { erlaubt: false, grund: 'Zugang ausdrücklich entzogen', user, regel };
+
+  // Auf einer Station gilt die Regel nur, solange die Person dort auch
+  // angemeldet ist. Technik ist oben schon durch — sonst waere eine
+  // Station ohne Sitzung fuer niemanden mehr erreichbar.
+  if (host && host.sitzungsgebunden) {
+    const sitz = await pool.query(
+      `SELECT 1 FROM ssh_sitzung
+        WHERE host = $1 AND login = LOWER($2)
+          AND zuletzt_gesehen > NOW() - ($3 || ' hours')::interval`,
+      [host.hostname, user.username || '', String(SITZUNG_FRIST_STUNDEN)]);
+    if (!sitz.rows.length) {
+      return { erlaubt: false, grund: 'Station: keine laufende Sitzung dieser Person', user, regel };
+    }
+  }
+
   return { erlaubt: true, sudo: !!regel.sudo, user, regel };
 }
 
@@ -322,6 +337,70 @@ router.get('/konten', requireHostToken, async (req, res) => {
       if (z.erlaubt) konten.push({ login, name: row.name || login, sudo: !!z.sudo });
     }
     res.json({ host: hostname, konten });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// 2a. Sitzungsgebundener Zugang — Stationen und Laptops
+//
+// Ein Server steht dauerhaft; eine Station gehoert waehrend einer
+// Sitzung einem Menschen. Dort soll der Zugang mit der Anmeldung
+// entstehen und mit der Abmeldung vergehen. Die Matrix bleibt gueltig,
+// bekommt aber eine zweite Bedingung: Wer nicht angemeldet ist, kommt
+// nicht hinein — auch mit gueltigem Schluessel nicht.
+//
+// Technik bleibt davon ausgenommen. Eine Station, an der niemand sitzt,
+// waere sonst fuer niemanden erreichbar, und ausgerechnet dann braucht
+// man sie am ehesten.
+// ════════════════════════════════════════════════════════════════════
+
+// Eine Sitzung, von der wir zu lange nichts gehoert haben, gilt als
+// beendet. Ein abgestuerztes Geraet meldet sich nie ab — ohne diese
+// Frist bliebe sein Zugang fuer immer offen.
+const SITZUNG_FRIST_STUNDEN = 16;
+
+// POST /api/ssh/sitzung  { login }  — Anmeldung an einer Station
+router.post('/sitzung', requireHostToken, async (req, res) => {
+  try {
+    const hostname = String(req.headers['x-host-name'] || req.query.host || '').trim();
+    const login = String(req.body?.login || '').trim().toLowerCase();
+    if (!HOSTNAME_MUSTER.test(hostname)) return res.status(400).json({ error: 'Hostname fehlt oder ist ungültig' });
+    if (!LOGIN_MUSTER.test(login)) return res.status(400).json({ error: 'Ungültiger Anmeldename' });
+
+    await hostRegistrieren(hostname, req.headers['x-host-adresse'] || null);
+    // Wer Sitzungen meldet, ist eine Station. Das muss niemand von Hand
+    // eintragen — der erste Anmeldevorgang sagt es.
+    await pool.query(`UPDATE ssh_hosts SET sitzungsgebunden = true WHERE hostname = $1`, [hostname]);
+
+    await pool.query(
+      `INSERT INTO ssh_sitzung (host, login) VALUES ($1, $2)
+       ON CONFLICT (host, login) DO UPDATE SET zuletzt_gesehen = NOW()`,
+      [hostname, login]);
+    res.json({ ok: true, host: hostname, login });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /api/ssh/sitzung  { login }  — Abmeldung
+router.delete('/sitzung', requireHostToken, async (req, res) => {
+  try {
+    const hostname = String(req.headers['x-host-name'] || req.query.host || '').trim();
+    const login = String(req.body?.login || req.query.login || '').trim().toLowerCase();
+    if (!HOSTNAME_MUSTER.test(hostname)) return res.status(400).json({ error: 'Hostname fehlt oder ist ungültig' });
+    const r = login
+      ? await pool.query(`DELETE FROM ssh_sitzung WHERE host = $1 AND login = $2`, [hostname, login])
+      : await pool.query(`DELETE FROM ssh_sitzung WHERE host = $1`, [hostname]);
+    res.json({ ok: true, beendet: r.rowCount });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/ssh/sitzungen — wer sitzt gerade wo (Technik)
+router.get('/sitzungen', authMiddleware, requireTechnik, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT host, login, angemeldet_seit, zuletzt_gesehen,
+              (zuletzt_gesehen < NOW() - ($1 || ' hours')::interval) AS veraltet
+         FROM ssh_sitzung ORDER BY host, login`, [String(SITZUNG_FRIST_STUNDEN)]);
+    res.json({ sitzungen: r.rows, frist_stunden: SITZUNG_FRIST_STUNDEN });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

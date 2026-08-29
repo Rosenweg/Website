@@ -23931,6 +23931,23 @@ async function initDB() {
         END IF;
       END $$;
 
+      -- ─── Sitzungsgebundener Zugang (Stationen und Laptops) ───────────
+      -- Ein Server ist dauerhaft da; eine Station gehoert waehrend einer
+      -- Sitzung einem Menschen. Darum gilt dort nicht die Matrix allein,
+      -- sondern zusaetzlich: Zugang nur, solange die Person angemeldet
+      -- ist. Meldet sie sich ab, ist der Schluessel dort wertlos.
+      ALTER TABLE ssh_hosts ADD COLUMN IF NOT EXISTS sitzungsgebunden BOOLEAN DEFAULT false;
+
+      CREATE TABLE IF NOT EXISTS ssh_sitzung (
+        id SERIAL PRIMARY KEY,
+        host VARCHAR(120) NOT NULL,
+        login VARCHAR(64) NOT NULL,
+        angemeldet_seit TIMESTAMP DEFAULT NOW(),
+        zuletzt_gesehen TIMESTAMP DEFAULT NOW(),
+        UNIQUE (host, login)
+      );
+      CREATE INDEX IF NOT EXISTS idx_ssh_sitzung_host ON ssh_sitzung(host);
+
       -- ─── Dienstwacht ──────────────────────────────────────────────────
       -- Proxmox sagt nur, ob ein Container laeuft. Am 29.08.2026 standen
       -- drei Ausfaelle zwischen vier und siebzehn Tagen unbemerkt, und
