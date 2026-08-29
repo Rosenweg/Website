@@ -151,15 +151,7 @@ const RosenwegNav = {
     // Satelliten-Subdomains (z.B. mqtt.rosenweg4303.ch) setzen window.__NAV_BASE__,
     // damit Logo + Home + Menü auf die Hauptseite (www) zeigen statt relativ auf den
     // eigenen Host. Der site-config-/Auth-Pfad bleibt relativ (same-origin, kein CORS).
-    // Auf Hosts, die den Hauptbestand nicht fuehren, zeigen relative Links
-    // ins Leere. isp.rosenweg4303.ch hat seinen eigenen, kleinen Bestand;
-    // vollmachten.html, profil.html und die uebrigen liegen dort nicht. Am
-    // 29.08.2026 gemessen: alle 404, waehrend die Leiste sie brav anbot.
-    // Nur die Links wandern nach www — basePath bleibt lokal, denn daran
-    // haengt die Anmeldung, und die gehoert auf den Host, auf dem man ist.
-    const linkBase = (typeof window !== 'undefined' && window.__NAV_BASE__)
-      || this._fremderHostBase()
-      || basePath;
+    const linkBase = (typeof window !== 'undefined' && window.__NAV_BASE__) || basePath;
 
     this._injectMobileAssets(linkBase);
     await this._loadConfig(basePath);
@@ -269,18 +261,6 @@ const RosenwegNav = {
     } catch (e) {
       this._config = { stwegen: [] };
     }
-  },
-
-  // Wenn der Hauptbestand woanders liegt: die absolute Adresse dorthin,
-  // sonst null. Die STWEG-Seiten sind ausgenommen — sie fuehren ihre
-  // eigenen Seiten unter pages/ und sollen relativ bleiben.
-  HAUPTSEITE: 'https://www.rosenweg4303.ch/',
-  _fremderHostBase() {
-    const h = (typeof window !== 'undefined' && window.location.hostname) || '';
-    if (!h || this._isStwegSite()) return null;
-    if (/^(www\.)?rosenweg4303\.ch$/.test(h)) return null;
-    if (/^(admin|ausschuss)\.rosenweg4303\.ch$/.test(h)) return null;
-    return /\.rosenweg4303\.ch$/.test(h) ? this.HAUPTSEITE : null;
   },
 
   _detectBasePath() {
