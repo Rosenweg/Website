@@ -117,18 +117,19 @@ async function zugriffErmitteln(login, host) {
   if (!regel) return { erlaubt: false, grund: 'Keine Regel trifft zu', user };
   if (!regel.ssh) return { erlaubt: false, grund: 'Zugang ausdrücklich entzogen', user, regel };
 
-  // Auf einer Station gilt die Regel nur, solange die Person dort auch
-  // angemeldet ist. Technik ist oben schon durch — sonst waere eine
-  // Station ohne Sitzung fuer niemanden mehr erreichbar.
+  // Auf eine Station kommt nur die Technik. Punkt. Sie ist oben bereits
+  // durch, hier endet also alles andere — auch wenn die Matrix es
+  // erlaubte und die Person gerade davorsitzt.
+  //
+  // Der Gedanke dahinter: Eine Station ist der Arbeitsplatz eines
+  // Menschen, kein Dienst. Wer sich dort anmeldet, will arbeiten und
+  // nicht damit rechnen, dass ihm jemand ueber die Schulter schaut.
+  // Fernzugriff darauf ist Wartung, und Wartung ist Technik.
+  //
+  // Die Gegenrichtung bleibt davon unberuehrt: Von der Station aus kommt
+  // man mit dem Sitzungsschluessel ueberall hin, wo die Matrix es sagt.
   if (host && host.sitzungsgebunden) {
-    const sitz = await pool.query(
-      `SELECT 1 FROM ssh_sitzung
-        WHERE host = $1 AND login = LOWER($2)
-          AND zuletzt_gesehen > NOW() - ($3 || ' hours')::interval`,
-      [host.hostname, user.username || '', String(SITZUNG_FRIST_STUNDEN)]);
-    if (!sitz.rows.length) {
-      return { erlaubt: false, grund: 'Station: keine laufende Sitzung dieser Person', user, regel };
-    }
+    return { erlaubt: false, grund: 'Station: Zugriff nur für die Technik', user, regel };
   }
 
   return { erlaubt: true, sudo: !!regel.sudo, user, regel };
