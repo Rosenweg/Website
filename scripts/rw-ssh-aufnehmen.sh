@@ -497,10 +497,15 @@ einrichten_hier() {
   if [ "$PROBE" = 0 ]; then
     mkdir -p /run/sshd
     if sshd -t 2>/dev/null; then
-      timeout 20 systemctl reload ssh 2>/dev/null \
-        || timeout 20 systemctl reload sshd 2>/dev/null \
-        || sage "sshd: Neuladen abgebrochen, Konfiguration liegt bereit"
-      sage "sshd: geprueft und neu geladen"
+      if systemctl is-active --quiet ssh.service 2>/dev/null; then
+        timeout 20 systemctl reload ssh 2>/dev/null || sage "sshd: Neuladen abgebrochen, Konfiguration liegt bereit"
+        sage "sshd: geprueft und neu geladen"
+      elif systemctl is-active --quiet sshd.service 2>/dev/null; then
+        timeout 20 systemctl reload sshd 2>/dev/null || sage "sshd: Neuladen abgebrochen, Konfiguration liegt bereit"
+        sage "sshd: geprueft und neu geladen"
+      else
+        sage "sshd laeuft nicht als Dienst (socket-aktiviert) — kein Neuladen noetig"
+      fi
     else
       echo "  ACHTUNG: sshd -t meldet einen Fehler — nicht neu geladen." >&2
       sshd -t || true
@@ -617,9 +622,18 @@ if sshd -t 2>/dev/null; then
   # weitere Versuch dahinter an — der ganze Lauf stand. Kommt das Neuladen
   # nicht zurueck, liegt die Konfiguration trotzdem richtig und greift
   # beim naechsten Start von sshd.
-  timeout 20 systemctl reload ssh 2>/dev/null \
-    || timeout 20 systemctl reload sshd 2>/dev/null \
-    || echo "  Hinweis: sshd-Neuladen abgebrochen, Konfiguration liegt bereit"
+  # Nur neu laden, was auch laeuft. Ist sshd socket-aktiviert, ist die
+  # Unit inaktiv — ein reload darauf scheitert und hinterlaesst sie im
+  # Fehlerzustand. Genau so habe ich am 29.08.2026 auf 31 Containern ein
+  # "failed" erzeugt, das niemandem etwas tat ausser Laerm in der Wacht.
+  # Noetig ist es dort ohnehin nicht: Bei Socket-Aktivierung startet
+  # sshd je Verbindung neu und liest die Konfiguration dabei frisch.
+  if systemctl is-active --quiet ssh.service 2>/dev/null; then
+    timeout 20 systemctl reload ssh 2>/dev/null || echo "  Hinweis: Neuladen abgebrochen, Konfiguration liegt bereit"
+  elif systemctl is-active --quiet sshd.service 2>/dev/null; then
+    timeout 20 systemctl reload sshd 2>/dev/null || echo "  Hinweis: Neuladen abgebrochen, Konfiguration liegt bereit"
+  else
+    echo "  sshd laeuft nicht als Dienst (socket-aktiviert) — kein Neuladen noetig"
 else
   echo "  ACHTUNG in CT $id: sshd -t meldet einen Fehler — nicht neu geladen." >&2
   exit 1

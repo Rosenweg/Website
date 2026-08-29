@@ -41,6 +41,21 @@ BERICHT=$(mktemp /tmp/rw-wacht.XXXXXX)
 trap 'rm -f "$BERICHT"' EXIT
 : > "$BERICHT"
 
+# Units, die in einem LXC praktisch immer scheitern, weil der Container
+# den Kernel nicht anfassen darf. Sie zu melden hiesse, die Wacht mit
+# Rauschen zu fuellen — beim ersten Lauf waren 32 von 74 Befunden von
+# dieser Sorte, und eine Meldung, in der man suchen muss, liest bald
+# niemand mehr. Das ist keine Bequemlichkeit, sondern die Bedingung
+# dafuer, dass die uebrigen Befunde auffallen.
+IGNORIEREN="tmp.mount run-lock.mount dev-mqueue.mount dev-hugepages.mount
+sys-kernel-config.mount sys-kernel-debug.mount sys-kernel-tracing.mount
+systemd-journald-audit.socket proc-sys-fs-binfmt_misc.mount"
+
+uninteressant() {
+  case " $(echo $IGNORIEREN) " in *" $1 "*) return 0 ;; esac
+  return 1
+}
+
 # Sammelt Befunde eines Systems. $1 = Anzeigename, $2 = Praefix fuer den
 # Aufruf (leer = hier, sonst "pct exec <id> --").
 sammeln() {
@@ -51,6 +66,7 @@ sammeln() {
   ausgabe=$("$@" systemctl list-units --state=failed --no-legend --plain 2>/dev/null | awk '{print $1}' || true)
   while IFS= read -r unit; do
     [ -n "$unit" ] || continue
+    uninteressant "$unit" && continue
     printf '%s\t%s\t%s\n' "$name" "$unit" "failed" >> "$BERICHT"
   done <<< "$ausgabe"
 
@@ -59,6 +75,7 @@ sammeln() {
   ausgabe=$("$@" systemctl list-units --state=activating --no-legend --plain 2>/dev/null | awk '{print $1}' || true)
   while IFS= read -r unit; do
     [ -n "$unit" ] || continue
+    uninteressant "$unit" && continue
     local seit jetzt alter
     seit=$("$@" systemctl show "$unit" -p InactiveExitTimestampMonotonic --value 2>/dev/null || echo 0)
     jetzt=$("$@" sh -c 'cut -d" " -f1 /proc/uptime' 2>/dev/null || echo 0)
