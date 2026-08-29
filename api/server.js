@@ -23931,6 +23931,24 @@ async function initDB() {
         END IF;
       END $$;
 
+      -- ─── Dienstwacht ──────────────────────────────────────────────────
+      -- Proxmox sagt nur, ob ein Container laeuft. Am 29.08.2026 standen
+      -- drei Ausfaelle zwischen vier und siebzehn Tagen unbemerkt, und
+      -- alle drei Container liefen dabei tadellos — kaputt war der
+      -- Dienst darin. Hier steht, was gerade im Argen liegt.
+      CREATE TABLE IF NOT EXISTS dienst_wacht (
+        id SERIAL PRIMARY KEY,
+        host VARCHAR(120) NOT NULL,
+        knoten VARCHAR(120),
+        ebene VARCHAR(10) NOT NULL DEFAULT 'container',
+        unit VARCHAR(160) NOT NULL,
+        zustand VARCHAR(20) NOT NULL,
+        seit TIMESTAMP DEFAULT NOW(),
+        zuletzt_gesehen TIMESTAMP DEFAULT NOW(),
+        UNIQUE (host, unit)
+      );
+      CREATE INDEX IF NOT EXISTS idx_dienst_wacht_knoten ON dienst_wacht(knoten);
+
       -- Grundregel fuer den Praesidenten. Die Technik steht NICHT hier:
       -- Sie ist im Router fest verdrahtet, damit sie sich ueber die
       -- Oberflaeche nicht versehentlich selbst aussperren kann.

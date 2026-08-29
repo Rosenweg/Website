@@ -24,6 +24,7 @@ const { pool } = require('../lib/db');
 const { authMiddleware, requireUserLogin } = require('../middleware/auth');
 const { isTechnik, isPraesident } = require('../lib/groups');
 const { schluesselPruefen, alsZeile, githubSchluessel, GITHUB_BENUTZER } = require('../lib/sshkeys');
+const { queueWhatsappMessage, resolveTechnikWhatsappGroupId } = require('../lib/whatsapp');
 
 const router = express.Router();
 
@@ -321,6 +322,96 @@ router.get('/konten', requireHostToken, async (req, res) => {
       if (z.erlaubt) konten.push({ login, name: row.name || login, sudo: !!z.sudo });
     }
     res.json({ host: hostname, konten });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ════════════════════════════════════════════════════════════════════
+// 2b. Dienstwacht
+//
+// Proxmox weiss nur, ob ein Container laeuft. Das genuegt nicht: Am
+// 29. August 2026 standen drei Ausfaelle zwischen vier und siebzehn
+// Tagen unbemerkt — leere VLAN-Tabellen im VPN, ein haengendes
+// networking.service, ein toter Domaenencontroller. Alle drei Container
+// liefen die ganze Zeit tadellos. Kaputt war der Dienst darin.
+//
+// Also meldet jeder Knoten, was bei ihm und in seinen Containern
+// fehlgeschlagen ist oder seit Ewigkeiten "activating" sagt.
+// ════════════════════════════════════════════════════════════════════
+
+// POST /api/ssh/dienste  { knoten, befunde: [{host, ebene, unit, zustand}] }
+// Der Bericht ist vollstaendig: Was nicht drinsteht, gilt als behoben.
+router.post('/dienste', requireHostToken, async (req, res) => {
+  try {
+    const knoten = String(req.body?.knoten || '').trim();
+    if (!HOSTNAME_MUSTER.test(knoten)) return res.status(400).json({ error: 'knoten fehlt oder ist ungültig' });
+    const befunde = Array.isArray(req.body?.befunde) ? req.body.befunde.slice(0, 2000) : [];
+
+    const gesehen = [];
+    let neuGemeldet = 0;
+    for (const b of befunde) {
+      const host = String(b.host || '').slice(0, 120);
+      const unit = String(b.unit || '').slice(0, 160);
+      const zustand = b.zustand === 'activating' ? 'activating' : 'failed';
+      const ebene = b.ebene === 'knoten' ? 'knoten' : 'container';
+      if (!host || !unit) continue;
+      gesehen.push(`${host}|${unit}`);
+      const r = await pool.query(
+        `INSERT INTO dienst_wacht (host, knoten, ebene, unit, zustand, seit, zuletzt_gesehen)
+         VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+         ON CONFLICT (host, unit) DO UPDATE
+           SET zustand = EXCLUDED.zustand, zuletzt_gesehen = NOW(), knoten = EXCLUDED.knoten
+         RETURNING (xmax = 0) AS ist_neu`,
+        [host, knoten, ebene, unit, zustand]);
+      if (r.rows[0]?.ist_neu) neuGemeldet++;
+    }
+
+    // Was dieser Knoten nicht mehr meldet, ist behoben. Nur seine
+    // eigenen Zeilen anfassen — die anderen Knoten melden fuer sich.
+    const weg = await pool.query(
+      `DELETE FROM dienst_wacht
+        WHERE knoten = $1 AND NOT (host || '|' || unit = ANY($2::text[]))`,
+      [knoten, gesehen]);
+
+    // Neue Befunde melden. Eine Wacht, die niemanden weckt, ist keine —
+    // genau daran sind die drei Ausfaelle vom 29. August vorbeigelaufen.
+    // Nur Neues, sonst wird die Meldung zur Tapete und niemand liest sie.
+    if (neuGemeldet > 0) {
+      try {
+        const frisch = await pool.query(
+          `SELECT host, unit, zustand FROM dienst_wacht
+            WHERE knoten = $1 AND seit > NOW() - INTERVAL '5 minutes'
+            ORDER BY host, unit LIMIT 12`, [knoten]);
+        if (frisch.rows.length) {
+          const zeilen = frisch.rows.map(f => `• ${f.host}: ${f.unit} (${f.zustand})`).join('\n');
+          const gid = await resolveTechnikWhatsappGroupId();
+          if (gid) await queueWhatsappMessage({
+            chatId: gid,
+            body: `Dienstwacht ${knoten}: ${neuGemeldet} neue Befunde\n${zeilen}`,
+            sourceType: 'dienst-wacht',
+          });
+        }
+      } catch (e) { console.warn('[dienstwacht] Meldung fehlgeschlagen:', e.message); }
+    }
+
+    res.json({ aufgenommen: gesehen.length, neu: neuGemeldet, behoben: weg.rowCount });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/ssh/dienste — was gerade im Argen liegt (Technik)
+router.get('/dienste', authMiddleware, requireTechnik, async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT host, knoten, ebene, unit, zustand, seit, zuletzt_gesehen,
+              EXTRACT(EPOCH FROM (NOW() - seit))::bigint AS sekunden
+         FROM dienst_wacht
+        ORDER BY seit, host, unit`);
+    // Knoten, die sich laenger nicht gemeldet haben, sind selbst ein
+    // Befund — eine stille Wacht ist keine.
+    const stumm = await pool.query(
+      `SELECT DISTINCT knoten, MAX(zuletzt_gesehen) AS zuletzt
+         FROM dienst_wacht GROUP BY knoten
+        HAVING MAX(zuletzt_gesehen) < NOW() - INTERVAL '30 minutes'`);
+    res.json({ befunde: r.rows, stumme_knoten: stumm.rows });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
