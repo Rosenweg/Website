@@ -445,6 +445,11 @@ const RosenwegNav = {
           </div>
 
           <!-- Bewohner-Dropdown (Info + Service für alle / Bewohner / Eigentümer) -->
+          <!-- WLAN und TV liegen NUR auf dem ISP-Frontend: Das Haupt-Dockerfile
+               entfernt wlan.html und tv.html aus diesem Image. Relative Links
+               darauf antworten hier mit 404 — am 29.08.2026 so vorgefunden.
+               Darum absolut. Dasselbe gilt fuer isp*.html, netzwerk.html,
+               verbindungen.html und dmarc.html, die schon absolut verlinkt sind. -->
           <div class="relative nav-dropdown">
             <button class="${a('bewohner')} px-3 py-2 text-sm transition flex items-center gap-1">
               Bewohner
@@ -452,8 +457,8 @@ const RosenwegNav = {
             </button>
             <div class="nav-dropdown-menu hidden absolute left-0 mt-1 w-56 bg-white rounded-lg shadow-lg border py-1 z-50">
               <a href="${base}telefonbuch.html" class="${dropA('telefonbuch')} block px-4 py-2 text-sm">📇 Telefonbuch</a>
-              <a href="${base}wlan.html" class="${dropA('wlan')} block px-4 py-2 text-sm">📶 WLAN-Zugang</a>
-              <a href="${base}tv.html" class="${dropA('tv')} block px-4 py-2 text-sm">📺 TV / Fernsehen</a>
+              <a href="https://isp.rosenweg4303.ch/wlan.html" class="${dropA('wlan')} block px-4 py-2 text-sm">📶 WLAN-Zugang</a>
+              <a href="https://isp.rosenweg4303.ch/tv.html" class="${dropA('tv')} block px-4 py-2 text-sm">📺 TV / Fernsehen</a>
               <a href="https://pwa.rosenweg4303.ch/reparatur/" class="block px-4 py-2 text-sm text-gray-600 hover:bg-gray-50">🔧 Schaden melden ↗</a>
               <a href="${base}vollmachten.html" data-perm-any="eigentuemer,ausschuss,technik,praesident,verwaltung,bewohner" class="${dropA('vollmachten')} block px-4 py-2 text-sm">📝 Vollmachten</a>
               <a href="${base}projekte.html" data-perm-any="eigentuemer" class="${dropA('projekte')} block px-4 py-2 text-sm">🏗 Projekte</a>
@@ -511,8 +516,8 @@ const RosenwegNav = {
 
         <div class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase">Bewohner</div>
         <a href="${base}telefonbuch.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📇 Telefonbuch</a>
-        <a href="${base}wlan.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📶 WLAN-Zugang</a>
-        <a href="${base}tv.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📺 TV / Fernsehen</a>
+        <a href="https://isp.rosenweg4303.ch/wlan.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📶 WLAN-Zugang</a>
+        <a href="https://isp.rosenweg4303.ch/tv.html" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📺 TV / Fernsehen</a>
         <a href="https://pwa.rosenweg4303.ch/reparatur/" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🔧 Schaden melden ↗</a>
         <a href="${base}vollmachten.html" data-perm-any="eigentuemer,ausschuss,technik,praesident,verwaltung,bewohner" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">📝 Vollmachten</a>
         <a href="${base}projekte.html" data-perm-any="eigentuemer" class="block px-3 py-2 text-gray-700 hover:bg-gray-100 rounded text-sm">🏗 Projekte</a>
