@@ -53,16 +53,6 @@ const VLAN_TO_IFACE = {
 };
 const ALL_VLANS = Object.keys(VLAN_TO_IFACE).map(Number);
 
-// Die Schnittstelle ins Servernetz (100.64.2.0/24). Kein Benutzernetz,
-// darum steht sie nicht in VLAN_TO_IFACE — gemasqueradet werden muss
-// sie trotzdem, sonst kommt aus dem Tunnel niemand an die Server.
-const SERVER_IFACE = process.env.WG_SERVER_IFACE || 'eth0';
-
-// Alles, was zum Haus gehoert — Servernetz wie Benutzernetze. Verkehr
-// dorthin nimmt die Haupttabelle, damit ihn die Default-Route eines
-// Heim-VLANs nicht auf einen Umweg zwingt.
-const INTERNAL_CIDR = process.env.WG_INTERNAL_CIDR || '100.64.0.0/16';
-
 if (!TOKEN) {
   console.error('FATAL: WG_CONTROL_TOKEN not set');
   process.exit(1);
@@ -166,15 +156,13 @@ function ensureMasqueradeRules() {
     const iface = VLAN_TO_IFACE[vlan];
     sh(`nft add rule inet wg-control postrouting oifname "${iface}" ip saddr ${WG_SUBNET_CIDR} masquerade`);
   }
-  // Das Servernetz 100.64.2.0/24 haengt an eth0 und steht in keiner
-  // VLAN-Tabelle — es ist keines der Benutzernetze, sondern der Ort, wo
-  // pve, die API, die Container liegen. Ohne eigene Regel verlaesst ein
-  // Paket aus dem Tunnel den Gateway mit Absender 192.168.2.x, der
-  // Server antwortet an sein Standard-Gateway 100.64.2.1, und das kennt
-  // dieses Netz nicht. Die Antwort verfaellt. Der Tunnel steht dann,
-  // die Benutzernetze sind erreichbar, und ausgerechnet die Server
-  // nicht — genau so am 29. August 2026 aufgetreten.
-  sh(`nft add rule inet wg-control postrouting oifname "${SERVER_IFACE}" ip saddr ${WG_SUBNET_CIDR} masquerade`);
+  // Bewusst KEINE Regel fuer eth0, das Servernetz. Wer aus dem Tunnel
+  // an die Server will, geht ueber den Router seines Heim-VLANs — dort
+  // entscheidet dessen Firewall darueber. Eine Masquerade auf eth0
+  // waere die Abkuerzung daran vorbei und macht den Tunnel zu einer
+  // Tuer an der Hausordnung vorbei. Am 29. August 2026 einmal so
+  // eingebaut und wieder entfernt: Es sah aus wie die Behebung eines
+  // Routing-Fehlers, war aber das Aufreissen einer Sicherheitsgrenze.
 }
 // In einem LXC sagt network-online.target wenig: Die fuenfzehn
 // veth-Schnittstellen bekommen ihre Adressen erst nach dem Dienststart,
@@ -213,27 +201,14 @@ function clearAllPeerRules() {
     if (m) { try { sh(`ip rule del from ${m[1]} table ${m[2]}`); } catch {} }
   }
 }
-// Zwei Regeln je Peer, und ihre Reihenfolge ist der ganze Witz.
-//
-// Was ins Haus geht — 100.64.0.0/16, also Server wie Benutzernetze —
-// nimmt die Haupttabelle. Dort stehen die verbundenen Netze, jedes an
-// seiner Schnittstelle. Alles andere, praktisch das Internet, geht
-// ueber die Tabelle des Heim-VLANs hinaus, so wie es gedacht war.
-//
-// Ohne die erste Regel schluckt die Default-Route des VLANs auch den
-// Verkehr zu den Servern: Tabelle 99 kennt nur "default via
-// 100.64.99.1", und damit ginge eine Verbindung nach 100.64.2.20 den
-// Umweg ueber RW9 statt geradeaus ueber eth0.
-const PEER_PRIO_INTERN = 32000;
-const PEER_PRIO_VLAN   = 32100;
-function addPeerRule(peer) {
-  sh(`ip rule add from ${peer.assigned_ip} to ${INTERNAL_CIDR} table main priority ${PEER_PRIO_INTERN}`);
-  sh(`ip rule add from ${peer.assigned_ip} table ${peer.vlan} priority ${PEER_PRIO_VLAN}`);
-}
-function delPeerRule(peer) {
-  try { sh(`ip rule del from ${peer.assigned_ip} to ${INTERNAL_CIDR} table main priority ${PEER_PRIO_INTERN}`); } catch {}
-  try { sh(`ip rule del from ${peer.assigned_ip} table ${peer.vlan} priority ${PEER_PRIO_VLAN}`); } catch {}
-}
+// Eine Regel je Peer: Sein ganzer Verkehr nimmt die Tabelle seines
+// Heim-VLANs und verlaesst den Gateway ueber dessen Router. Das gilt
+// ausdruecklich auch fuer den Weg zu den Servern — nicht als Umweg,
+// sondern damit die Firewall des VLANs darueber entscheidet. Ein Peer
+// soll behandelt werden wie ein Geraet in seiner Wohnung, sonst waere
+// der Tunnel eine Tuer an der Hausordnung vorbei.
+function addPeerRule(peer)  { sh(`ip rule add from ${peer.assigned_ip} table ${peer.vlan}`); }
+function delPeerRule(peer)  { try { sh(`ip rule del from ${peer.assigned_ip} table ${peer.vlan}`); } catch {} }
 
 // ----------------------------------- Live-Status ----------------------------
 
