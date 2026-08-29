@@ -19566,7 +19566,14 @@ app.post('/api/stations/:id/tunnel', stationsRouter.appSession, async (req, res)
       );
       for (const row of alt.rows) {
         await wgControl('DELETE', `/peers/${row.username}`).catch(() => {});
-        await pool.query('UPDATE isp_vpn_accounts SET active = false WHERE id = $1', [row.id]);
+        // Loeschen, nicht auf inaktiv setzen: In dieser Spalte treffen sonst
+        // zwei Bedeutungen aufeinander. Auf dem ISP-Weg heisst active=false
+        // "beantragt, noch nicht freigeschaltet"; hier hiesse es "war mal da,
+        // ist weg". Das NOC zaehlt die Spalte als "VPN pending" und zeigte
+        // darum neun offene Antraege an, die Grabsteine abgeraeumter
+        // Laptop-Tunnel waren. Der Peer bei wg-control ist eben geloescht
+        // worden — die Zeile beschreibt einen Zugang, den es nicht mehr gibt.
+        await pool.query('DELETE FROM isp_vpn_accounts WHERE id = $1', [row.id]);
       }
 
       // Nur das Hausnetz durch den Tunnel, kein Standardweg.
@@ -19656,7 +19663,14 @@ app.delete('/api/stations/:id/tunnel', stationsRouter.stationAuth, async (req, r
       );
       for (const row of treffer.rows) {
         await wgControl('DELETE', `/peers/${row.username}`).catch(() => {});
-        await pool.query('UPDATE isp_vpn_accounts SET active = false WHERE id = $1', [row.id]);
+        // Loeschen, nicht auf inaktiv setzen: In dieser Spalte treffen sonst
+        // zwei Bedeutungen aufeinander. Auf dem ISP-Weg heisst active=false
+        // "beantragt, noch nicht freigeschaltet"; hier hiesse es "war mal da,
+        // ist weg". Das NOC zaehlt die Spalte als "VPN pending" und zeigte
+        // darum neun offene Antraege an, die Grabsteine abgeraeumter
+        // Laptop-Tunnel waren. Der Peer bei wg-control ist eben geloescht
+        // worden — die Zeile beschreibt einen Zugang, den es nicht mehr gibt.
+        await pool.query('DELETE FROM isp_vpn_accounts WHERE id = $1', [row.id]);
         entfernt.push(name);
       }
     }
