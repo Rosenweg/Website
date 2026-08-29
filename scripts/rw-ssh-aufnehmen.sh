@@ -441,7 +441,16 @@ einrichten_ct() {
   pct push "$id" "$ABLAGE/rw-konten-sync.service"   /etc/systemd/system/rw-konten-sync.service --perms 644
   pct push "$id" "$ABLAGE/rw-konten-sync.timer"     /etc/systemd/system/rw-konten-sync.timer   --perms 644
 
-  pct exec "$id" -- bash -s <<CTEOF
+  # Das Einrichtungsskript wird als Datei hineingelegt und dort
+  # ausgefuehrt. Frueher stand es hier als Here-Dokument an
+  # `pct exec -- bash -s`, und das haengt: lxc-attach schliesst die
+  # Eingabe nicht, die Shell im Container wartet ewig auf mehr Zeilen,
+  # und der ganze Lauf steht still. Am 29. August 2026 so erlebt —
+  # neunundzwanzig Minuten am allerersten Container, ohne ein Zeichen.
+  # Das timeout ist der zweite Riegel: Ein einzelner stoerrischer
+  # Container darf die anderen dreissig nicht aufhalten.
+  cat > "$ABLAGE/ct-setup.sh" <<CTEOF
+#!/bin/bash
 set -e
 printf '%s\n' 'API_BASE=$API_BASE' 'HOST_TOKEN=$HOST_TOKEN' 'HOST_NAME=$name' > /etc/rosenweg-ssh.conf
 chmod 0640 /etc/rosenweg-ssh.conf
@@ -469,7 +478,15 @@ if [ -d /run/systemd/system ]; then
   systemctl start rw-konten-sync.service || true
 fi
 CTEOF
-  sage "   fertig"
+
+  pct push "$id" "$ABLAGE/ct-setup.sh" /tmp/rw-setup.sh --perms 700
+  if timeout 120 pct exec "$id" -- bash /tmp/rw-setup.sh; then
+    sage "   fertig"
+  else
+    echo "  CT $id: Einrichtung fehlgeschlagen oder abgelaufen" >&2
+  fi
+  # Der Token steht in dieser Datei — sie darf nicht liegen bleiben.
+  pct exec "$id" -- rm -f /tmp/rw-setup.sh 2>/dev/null || true
 }
 
 # ── Ablauf ──────────────────────────────────────────────────────────
