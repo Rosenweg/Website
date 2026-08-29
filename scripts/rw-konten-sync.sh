@@ -184,7 +184,29 @@ fi
 # der Konten als fehlgeschlagen erscheinen. Auf den Frontend-Containern
 # traf das jeden einzelnen.
 if ! command -v visudo >/dev/null 2>&1; then
-  echo "rw-konten-sync: kein sudo auf diesem Host — sudoers uebersprungen"
+  # Fehlt sudo, weil es hier niemand haben soll, ist nichts zu tun.
+  # Gewaehrt die Matrix aber jemandem sudo auf diesem Host, dann waere
+  # Schweigen der dritte Fall derselben Sorte: eine Berechtigung, die im
+  # Datensatz steht und nirgends wirkt. Also nachinstallieren — aber nur
+  # dann, sonst legten wir auf jedem Frontend einen Rechteweg an, den
+  # niemand braucht.
+  if printf '%s' "$SOLL" | grep -q '|ja|'; then
+    echo "rw-konten-sync: sudo ist vorgesehen, aber nicht installiert — wird nachgeholt"
+    if command -v apt-get >/dev/null 2>&1; then
+      DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo >/dev/null 2>&1 || true
+    elif command -v apk >/dev/null 2>&1; then apk add --no-cache sudo >/dev/null 2>&1 || true
+    elif command -v dnf >/dev/null 2>&1; then dnf install -y -q sudo >/dev/null 2>&1 || true
+    elif command -v yum >/dev/null 2>&1; then yum install -y -q sudo >/dev/null 2>&1 || true
+    fi
+  fi
+fi
+if ! command -v visudo >/dev/null 2>&1; then
+  if printf '%s' "$SOLL" | grep -q '|ja|'; then
+    echo "rw-konten-sync: ACHTUNG — sudo laut Matrix vorgesehen, liess sich aber nicht installieren" >&2
+  else
+    echo "rw-konten-sync: kein sudo auf diesem Host, auch keines vorgesehen — uebersprungen"
+  fi
   echo "rw-konten-sync: fertig — $angelegt angelegt, $gesperrt gesperrt, $geloescht geloescht"
   exit 0
 fi
