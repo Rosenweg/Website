@@ -83,10 +83,25 @@ CACHE="$CACHE_DIR/$LOGIN.keys"
 # Status 200 heisst "diese Person darf hier nicht mehr" — der Cache muss
 # dann weg, sonst greift ein Entzug nie. Nur wenn curl selbst scheitert
 # (kein Netz, API tot, 5xx), gilt der letzte bekannte Stand.
-if ANTWORT=$(curl -fsS --max-time "${TIMEOUT:-3}" \
-       -H "X-Host-Token: $HOST_TOKEN" \
-       -H "X-Host-Name: $HOST_NAME" \
-       "$API_BASE/api/ssh/authorized-keys/$LOGIN" 2>/dev/null); then
+# Nicht jeder Container hat curl. Von 33 hatten es 11 — die uebrigen
+# holten stillschweigend gar nichts, und die Aufnahme sah trotzdem
+# erfolgreich aus. Also wird genommen, was da ist. Beide liefern 0 bei
+# HTTP 200 und einen Fehler bei 4xx/5xx oder ausgefallenem Netz; die
+# Unterscheidung "kein Zugang" gegen "nicht erreichbar" bleibt damit
+# erhalten, und daran haengt, ob der Zwischenspeicher gilt.
+hole() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS --max-time "${TIMEOUT:-3}" \
+         -H "X-Host-Token: $HOST_TOKEN" -H "X-Host-Name: $HOST_NAME" "$1" 2>/dev/null
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -O - -T "${TIMEOUT:-3}" \
+         --header="X-Host-Token: $HOST_TOKEN" --header="X-Host-Name: $HOST_NAME" "$1" 2>/dev/null
+  else
+    return 127
+  fi
+}
+
+if ANTWORT=$(hole "$API_BASE/api/ssh/authorized-keys/$LOGIN"); then
   printf '%s' "$ANTWORT"
   if [ -d "$CACHE_DIR" ] && [ -w "$CACHE_DIR" ]; then
     if [ -n "$ANTWORT" ]; then
@@ -185,10 +200,22 @@ unser() {
 }
 
 # ── Liste holen ─────────────────────────────────────────────────────
-ANTWORT=$(curl -fsS --max-time 20 \
-  -H "X-Host-Token: $HOST_TOKEN" \
-  -H "X-Host-Name: $HOST_NAME" \
-  "$API_BASE/api/ssh/konten") || {
+# Nimmt, was der Host hat. Von 33 Containern hatten nur 11 curl — die
+# uebrigen holten stillschweigend nichts, und niemand merkte es.
+hole() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS --max-time 20 \
+         -H "X-Host-Token: $HOST_TOKEN" -H "X-Host-Name: $HOST_NAME" "$1"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -O - -T 20 \
+         --header="X-Host-Token: $HOST_TOKEN" --header="X-Host-Name: $HOST_NAME" "$1"
+  else
+    echo "rw-konten-sync: weder curl noch wget vorhanden" >&2
+    return 127
+  fi
+}
+
+ANTWORT=$(hole "$API_BASE/api/ssh/konten") || {
     echo "rw-konten-sync: API nicht erreichbar — es wird nichts geaendert" >&2; exit 0; }
 
 # Zu Zeilen "login|sudo|name". Die API filtert bereits, aber was hier
@@ -451,7 +478,8 @@ einrichten_ct() {
   # und der ganze Lauf steht still. Am 29. August 2026 so erlebt —
   # neunundzwanzig Minuten am allerersten Container, ohne ein Zeichen.
   # Das timeout ist der zweite Riegel: Ein einzelner stoerrischer
-  # Container darf die anderen dreissig nicht aufhalten.
+  # Container darf die anderen dreissig nicht aufhalten. Fuenf Minuten,
+  # weil eine Paketinstallation ueber apt laenger braucht als zwei.
   cat > "$ABLAGE/ct-setup.sh" <<CTEOF
 #!/bin/bash
 set -e
@@ -468,6 +496,28 @@ else
 fi
 if ! grep -q 'rw-authorized-keys' "\$ziel" 2>/dev/null; then
   printf '%s\n' '' '# Rosenweg: Schluessel kommen aus dem Profil' 'AuthorizedKeysCommand /usr/local/bin/rw-authorized-keys %u' 'AuthorizedKeysCommandUser rw-keys' >> "\$ziel"
+fi
+# Ohne curl oder wget holt dieser Host nie einen Schluessel. Die
+# Aufnahme sieht dann erfolgreich aus und ist es nicht — genau so bei
+# 22 von 33 Containern geschehen, ohne dass es jemandem auffiel. Also
+# wird nachinstalliert statt nur gewarnt.
+if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+  echo "  weder curl noch wget — wird nachinstalliert"
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl >/dev/null 2>&1 || true
+  elif command -v apk >/dev/null 2>&1; then
+    apk add --no-cache curl >/dev/null 2>&1 || true
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y -q curl >/dev/null 2>&1 || true
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y -q curl >/dev/null 2>&1 || true
+  fi
+  if command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1; then
+    echo "  curl nachinstalliert"
+  else
+    echo "  ACHTUNG: Nachinstallation fehlgeschlagen — dieser Host kann keine Schluessel holen" >&2
+  fi
 fi
 # sshd -t braucht /run/sshd, auch wenn es nur pruefen soll. In einem
 # Container, in dem sshd nie lief, fehlt das Verzeichnis — der Test
@@ -495,7 +545,7 @@ fi
 CTEOF
 
   pct push "$id" "$ABLAGE/ct-setup.sh" /tmp/rw-setup.sh --perms 700
-  if timeout 120 pct exec "$id" -- bash /tmp/rw-setup.sh; then
+  if timeout 300 pct exec "$id" -- bash /tmp/rw-setup.sh; then
     sage "   fertig"
   else
     echo "  CT $id: Einrichtung fehlgeschlagen oder abgelaufen" >&2

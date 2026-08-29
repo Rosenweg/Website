@@ -162,7 +162,8 @@ einrichten_ct() {
   # und der ganze Lauf steht still. Am 29. August 2026 so erlebt —
   # neunundzwanzig Minuten am allerersten Container, ohne ein Zeichen.
   # Das timeout ist der zweite Riegel: Ein einzelner stoerrischer
-  # Container darf die anderen dreissig nicht aufhalten.
+  # Container darf die anderen dreissig nicht aufhalten. Fuenf Minuten,
+  # weil eine Paketinstallation ueber apt laenger braucht als zwei.
   cat > "$ABLAGE/ct-setup.sh" <<CTEOF
 #!/bin/bash
 set -e
@@ -179,6 +180,28 @@ else
 fi
 if ! grep -q 'rw-authorized-keys' "\$ziel" 2>/dev/null; then
   printf '%s\n' '' '# Rosenweg: Schluessel kommen aus dem Profil' 'AuthorizedKeysCommand /usr/local/bin/rw-authorized-keys %u' 'AuthorizedKeysCommandUser rw-keys' >> "\$ziel"
+fi
+# Ohne curl oder wget holt dieser Host nie einen Schluessel. Die
+# Aufnahme sieht dann erfolgreich aus und ist es nicht — genau so bei
+# 22 von 33 Containern geschehen, ohne dass es jemandem auffiel. Also
+# wird nachinstalliert statt nur gewarnt.
+if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+  echo "  weder curl noch wget — wird nachinstalliert"
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl >/dev/null 2>&1 || true
+  elif command -v apk >/dev/null 2>&1; then
+    apk add --no-cache curl >/dev/null 2>&1 || true
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y -q curl >/dev/null 2>&1 || true
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y -q curl >/dev/null 2>&1 || true
+  fi
+  if command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1; then
+    echo "  curl nachinstalliert"
+  else
+    echo "  ACHTUNG: Nachinstallation fehlgeschlagen — dieser Host kann keine Schluessel holen" >&2
+  fi
 fi
 # sshd -t braucht /run/sshd, auch wenn es nur pruefen soll. In einem
 # Container, in dem sshd nie lief, fehlt das Verzeichnis — der Test
@@ -206,7 +229,7 @@ fi
 CTEOF
 
   pct push "$id" "$ABLAGE/ct-setup.sh" /tmp/rw-setup.sh --perms 700
-  if timeout 120 pct exec "$id" -- bash /tmp/rw-setup.sh; then
+  if timeout 300 pct exec "$id" -- bash /tmp/rw-setup.sh; then
     sage "   fertig"
   else
     echo "  CT $id: Einrichtung fehlgeschlagen oder abgelaufen" >&2
