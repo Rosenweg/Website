@@ -53,6 +53,11 @@ const VLAN_TO_IFACE = {
 };
 const ALL_VLANS = Object.keys(VLAN_TO_IFACE).map(Number);
 
+// Die Schnittstelle ins Servernetz (100.64.2.0/24). Kein Benutzernetz,
+// darum steht sie nicht in VLAN_TO_IFACE — gemasqueradet werden muss
+// sie trotzdem, sonst kommt aus dem Tunnel niemand an die Server.
+const SERVER_IFACE = process.env.WG_SERVER_IFACE || 'eth0';
+
 if (!TOKEN) {
   console.error('FATAL: WG_CONTROL_TOKEN not set');
   process.exit(1);
@@ -156,6 +161,15 @@ function ensureMasqueradeRules() {
     const iface = VLAN_TO_IFACE[vlan];
     sh(`nft add rule inet wg-control postrouting oifname "${iface}" ip saddr ${WG_SUBNET_CIDR} masquerade`);
   }
+  // Das Servernetz 100.64.2.0/24 haengt an eth0 und steht in keiner
+  // VLAN-Tabelle — es ist keines der Benutzernetze, sondern der Ort, wo
+  // pve, die API, die Container liegen. Ohne eigene Regel verlaesst ein
+  // Paket aus dem Tunnel den Gateway mit Absender 192.168.2.x, der
+  // Server antwortet an sein Standard-Gateway 100.64.2.1, und das kennt
+  // dieses Netz nicht. Die Antwort verfaellt. Der Tunnel steht dann,
+  // die Benutzernetze sind erreichbar, und ausgerechnet die Server
+  // nicht — genau so am 29. August 2026 aufgetreten.
+  sh(`nft add rule inet wg-control postrouting oifname "${SERVER_IFACE}" ip saddr ${WG_SUBNET_CIDR} masquerade`);
 }
 function ensureVlanRoutingTables() {
   for (const vlan of ALL_VLANS) {
