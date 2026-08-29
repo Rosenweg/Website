@@ -124,6 +124,25 @@ einrichten_hier() {
     fi
   fi
 
+  if [ "$PROBE" = 0 ]; then
+  # sudo gehoert dazu: Technik hat laut Matrix auf JEDEM Host
+  # passwortloses sudo — das ist fest verdrahtet, nicht verhandelbar.
+  # Fehlt das Programm, ist diese Berechtigung eine Behauptung ohne
+  # Wirkung, derselbe stille Fehler wie zuvor bei curl. Also mitbringen.
+  if ! command -v visudo >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1; then
+      DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo >/dev/null 2>&1 || true
+    elif command -v apk >/dev/null 2>&1; then apk add --no-cache sudo >/dev/null 2>&1 || true
+    elif command -v dnf >/dev/null 2>&1; then dnf install -y -q sudo >/dev/null 2>&1 || true
+    elif command -v yum >/dev/null 2>&1; then yum install -y -q sudo >/dev/null 2>&1 || true
+    fi
+    command -v visudo >/dev/null 2>&1 \
+      && echo "  sudo nachinstalliert" \
+      || echo "  ACHTUNG: sudo liess sich nicht installieren — passwortloses sudo bleibt hier wirkungslos" >&2
+  fi
+  fi
+
   # Erst pruefen, dann neu laden. Eine kaputte sshd-Konfiguration sperrt
   # aus, und zwar genau den, der sie reparieren muesste.
   if [ "$PROBE" = 0 ]; then
@@ -221,6 +240,22 @@ if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
   else
     echo "  ACHTUNG: Nachinstallation fehlgeschlagen — dieser Host kann keine Schluessel holen" >&2
   fi
+fi
+# sudo gehoert dazu: Technik hat laut Matrix auf JEDEM Host
+# passwortloses sudo — das ist fest verdrahtet, nicht verhandelbar.
+# Fehlt das Programm, ist diese Berechtigung eine Behauptung ohne
+# Wirkung, derselbe stille Fehler wie zuvor bei curl. Also mitbringen.
+if ! command -v visudo >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo >/dev/null 2>&1 || true
+  elif command -v apk >/dev/null 2>&1; then apk add --no-cache sudo >/dev/null 2>&1 || true
+  elif command -v dnf >/dev/null 2>&1; then dnf install -y -q sudo >/dev/null 2>&1 || true
+  elif command -v yum >/dev/null 2>&1; then yum install -y -q sudo >/dev/null 2>&1 || true
+  fi
+  command -v visudo >/dev/null 2>&1 \
+    && echo "  sudo nachinstalliert" \
+    || echo "  ACHTUNG: sudo liess sich nicht installieren — passwortloses sudo bleibt hier wirkungslos" >&2
 fi
 # sshd -t braucht /run/sshd, auch wenn es nur pruefen soll. In einem
 # Container, in dem sshd nie lief, fehlt das Verzeichnis — der Test
