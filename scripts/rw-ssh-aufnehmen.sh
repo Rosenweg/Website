@@ -352,8 +352,16 @@ chmod 0755 "$ABLAGE/rw-authorized-keys" "$ABLAGE/rw-konten-sync"
 einrichten_hier() {
   local name="$1"
 
-  tun "printf '%s\n' 'API_BASE=$API_BASE' 'HOST_TOKEN=$HOST_TOKEN' 'HOST_NAME=$name' > /etc/rosenweg-ssh.conf"
-  tun "chmod 0640 /etc/rosenweg-ssh.conf"
+  # Nicht ueber tun(): Das druckt im Probelauf den ganzen Befehl, und
+  # der enthaelt das Token. Ein Trockenlauf soll zeigen, was geschieht,
+  # ohne dabei das Geheimnis auf den Bildschirm und ins Protokoll zu
+  # legen — dort steht es dann laenger, als irgendwem lieb ist.
+  if [ "$PROBE" = 1 ]; then
+    sage "[Probelauf] /etc/rosenweg-ssh.conf schreiben (API_BASE=$API_BASE, HOST_NAME=$name, HOST_TOKEN verdeckt)"
+  else
+    printf '%s\n' "API_BASE=$API_BASE" "HOST_TOKEN=$HOST_TOKEN" "HOST_NAME=$name" > /etc/rosenweg-ssh.conf
+    chmod 0640 /etc/rosenweg-ssh.conf
+  fi
 
   # Eigener Benutzer fuer die Schluesselabfrage — nicht nobody, denn in
   # der Konfigurationsdatei liegt das Token.
