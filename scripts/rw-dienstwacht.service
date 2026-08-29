@@ -1,0 +1,15 @@
+[Unit]
+Description=Dienstwacht — klemmende Dienste in Knoten und Containern melden
+Documentation=file:/usr/local/bin/rw-dienstwacht
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/rw-dienstwacht
+# Die Wacht darf den Knoten nicht belasten; sie schaut nur nach.
+Nice=15
+IOSchedulingClass=idle
+# Wenn sie selbst hängt, ist sie wertlos — dann lieber abbrechen und
+# beim nächsten Lauf erneut versuchen.
+TimeoutStartSec=15min
