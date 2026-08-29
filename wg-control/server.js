@@ -58,6 +58,11 @@ const ALL_VLANS = Object.keys(VLAN_TO_IFACE).map(Number);
 // sie trotzdem, sonst kommt aus dem Tunnel niemand an die Server.
 const SERVER_IFACE = process.env.WG_SERVER_IFACE || 'eth0';
 
+// Alles, was zum Haus gehoert — Servernetz wie Benutzernetze. Verkehr
+// dorthin nimmt die Haupttabelle, damit ihn die Default-Route eines
+// Heim-VLANs nicht auf einen Umweg zwingt.
+const INTERNAL_CIDR = process.env.WG_INTERNAL_CIDR || '100.64.0.0/16';
+
 if (!TOKEN) {
   console.error('FATAL: WG_CONTROL_TOKEN not set');
   process.exit(1);
@@ -171,22 +176,64 @@ function ensureMasqueradeRules() {
   // nicht — genau so am 29. August 2026 aufgetreten.
   sh(`nft add rule inet wg-control postrouting oifname "${SERVER_IFACE}" ip saddr ${WG_SUBNET_CIDR} masquerade`);
 }
-function ensureVlanRoutingTables() {
+// In einem LXC sagt network-online.target wenig: Die fuenfzehn
+// veth-Schnittstellen bekommen ihre Adressen erst nach dem Dienststart,
+// und ein einmaliger Versuch scheitert lautlos mit "Nexthop has invalid
+// gateway". Am 25. August 2026 standen 104 solcher Fehler im Protokoll —
+// die Tabellen blieben leer, und damit war jede VLAN-Zuordnung
+// wirkungslos, ohne dass es je jemandem auffiel. Also wird nachgefasst,
+// bis es sitzt.
+const VLAN_TABELLEN_VERSUCHE = 12;
+const VLAN_TABELLEN_ABSTAND_MS = 5000;
+function ensureVlanRoutingTables(versuch = 1) {
+  const fehlend = [];
   for (const vlan of ALL_VLANS) {
     try { sh(`ip route flush table ${vlan} 2>/dev/null`); } catch {}
     try { sh(`ip route replace default via 100.64.${vlan}.1 dev ${VLAN_TO_IFACE[vlan]} table ${vlan}`); }
-    catch (e) { console.warn(`[wg-control] route add table ${vlan} failed:`, e.message); }
+    catch (e) {
+      fehlend.push(vlan);
+      if (versuch === VLAN_TABELLEN_VERSUCHE) console.warn(`[wg-control] route add table ${vlan} endgueltig fehlgeschlagen:`, e.message);
+    }
+  }
+  if (fehlend.length && versuch < VLAN_TABELLEN_VERSUCHE) {
+    setTimeout(() => ensureVlanRoutingTables(versuch + 1), VLAN_TABELLEN_ABSTAND_MS);
+  } else if (fehlend.length === 0 && versuch > 1) {
+    console.log(`[wg-control] VLAN-Tabellen stehen nach ${versuch} Versuchen`);
   }
 }
 function clearAllPeerRules() {
   const out = sh('ip rule list');
   for (const line of out.split('\n')) {
+    // Beide Formen: die Regel ins Hausnetz (lookup main) und die ins
+    // VLAN. Faengt man nur die zweite, bleibt bei jedem Neustart eine
+    // Karteileiche liegen, und die Liste waechst still vor sich hin.
+    const intern = line.match(/^\d+:\s+from\s+(192\.168\.2\.\d+)\s+to\s+(\S+)\s+lookup\s+main/);
+    if (intern) { try { sh(`ip rule del from ${intern[1]} to ${intern[2]} table main`); } catch {} continue; }
     const m = line.match(/^\d+:\s+from\s+(192\.168\.2\.\d+)\s+lookup\s+(\d+)/);
     if (m) { try { sh(`ip rule del from ${m[1]} table ${m[2]}`); } catch {} }
   }
 }
-function addPeerRule(peer)  { sh(`ip rule add from ${peer.assigned_ip} table ${peer.vlan}`); }
-function delPeerRule(peer)  { try { sh(`ip rule del from ${peer.assigned_ip} table ${peer.vlan}`); } catch {} }
+// Zwei Regeln je Peer, und ihre Reihenfolge ist der ganze Witz.
+//
+// Was ins Haus geht — 100.64.0.0/16, also Server wie Benutzernetze —
+// nimmt die Haupttabelle. Dort stehen die verbundenen Netze, jedes an
+// seiner Schnittstelle. Alles andere, praktisch das Internet, geht
+// ueber die Tabelle des Heim-VLANs hinaus, so wie es gedacht war.
+//
+// Ohne die erste Regel schluckt die Default-Route des VLANs auch den
+// Verkehr zu den Servern: Tabelle 99 kennt nur "default via
+// 100.64.99.1", und damit ginge eine Verbindung nach 100.64.2.20 den
+// Umweg ueber RW9 statt geradeaus ueber eth0.
+const PEER_PRIO_INTERN = 32000;
+const PEER_PRIO_VLAN   = 32100;
+function addPeerRule(peer) {
+  sh(`ip rule add from ${peer.assigned_ip} to ${INTERNAL_CIDR} table main priority ${PEER_PRIO_INTERN}`);
+  sh(`ip rule add from ${peer.assigned_ip} table ${peer.vlan} priority ${PEER_PRIO_VLAN}`);
+}
+function delPeerRule(peer) {
+  try { sh(`ip rule del from ${peer.assigned_ip} to ${INTERNAL_CIDR} table main priority ${PEER_PRIO_INTERN}`); } catch {}
+  try { sh(`ip rule del from ${peer.assigned_ip} table ${peer.vlan} priority ${PEER_PRIO_VLAN}`); } catch {}
+}
 
 // ----------------------------------- Live-Status ----------------------------
 
