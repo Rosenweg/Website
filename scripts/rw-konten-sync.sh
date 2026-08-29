@@ -178,6 +178,17 @@ if [ "$KONTEN_LOESCHEN" = "ja" ]; then
 fi
 
 # ── 4. sudoers schreiben ────────────────────────────────────────────
+# Ohne sudo gibt es kein passwortloses sudo einzurichten — dann ist hier
+# nichts zu tun, und das ist kein Fehler. Frueher brach das Skript an
+# dieser Stelle ab, weil visudo fehlte, und liess damit auch das Anlegen
+# der Konten als fehlgeschlagen erscheinen. Auf den Frontend-Containern
+# traf das jeden einzelnen.
+if ! command -v visudo >/dev/null 2>&1; then
+  echo "rw-konten-sync: kein sudo auf diesem Host — sudoers uebersprungen"
+  echo "rw-konten-sync: fertig — $angelegt angelegt, $gesperrt gesperrt, $geloescht geloescht"
+  exit 0
+fi
+
 TMP=$(mktemp /tmp/rw-sudo.XXXXXX)
 trap 'rm -f "$TMP"' EXIT
 {
