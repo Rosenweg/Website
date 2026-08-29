@@ -397,8 +397,11 @@ einrichten_hier() {
   # Erst pruefen, dann neu laden. Eine kaputte sshd-Konfiguration sperrt
   # aus, und zwar genau den, der sie reparieren muesste.
   if [ "$PROBE" = 0 ]; then
+    mkdir -p /run/sshd
     if sshd -t 2>/dev/null; then
-      systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+      timeout 20 systemctl reload ssh 2>/dev/null \
+        || timeout 20 systemctl reload sshd 2>/dev/null \
+        || sage "sshd: Neuladen abgebrochen, Konfiguration liegt bereit"
       sage "sshd: geprueft und neu geladen"
     else
       echo "  ACHTUNG: sshd -t meldet einen Fehler — nicht neu geladen." >&2
@@ -466,8 +469,20 @@ fi
 if ! grep -q 'rw-authorized-keys' "\$ziel" 2>/dev/null; then
   printf '%s\n' '' '# Rosenweg: Schluessel kommen aus dem Profil' 'AuthorizedKeysCommand /usr/local/bin/rw-authorized-keys %u' 'AuthorizedKeysCommandUser rw-keys' >> "\$ziel"
 fi
+# sshd -t braucht /run/sshd, auch wenn es nur pruefen soll. In einem
+# Container, in dem sshd nie lief, fehlt das Verzeichnis — der Test
+# scheitert dann an "Missing privilege separation directory" und sagt
+# ueber die Konfiguration gar nichts aus. Also vorher anlegen.
+mkdir -p /run/sshd
 if sshd -t 2>/dev/null; then
-  systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+  # Mit Zeitgrenze. In CT 100 hing `systemctl reload ssh` mehr als eine
+  # halbe Stunde, und weil systemd Auftraege aufreiht, stellte sich jeder
+  # weitere Versuch dahinter an — der ganze Lauf stand. Kommt das Neuladen
+  # nicht zurueck, liegt die Konfiguration trotzdem richtig und greift
+  # beim naechsten Start von sshd.
+  timeout 20 systemctl reload ssh 2>/dev/null \
+    || timeout 20 systemctl reload sshd 2>/dev/null \
+    || echo "  Hinweis: sshd-Neuladen abgebrochen, Konfiguration liegt bereit"
 else
   echo "  ACHTUNG in CT $id: sshd -t meldet einen Fehler — nicht neu geladen." >&2
   exit 1
