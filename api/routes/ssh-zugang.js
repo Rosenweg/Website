@@ -89,6 +89,17 @@ async function zugriffErmitteln(login, host) {
   if (host && host.aktiv === false) return { erlaubt: false, grund: 'Host stillgelegt', user };
 
   const gruppen = gruppenVonUser(user);
+
+  // Technik ist fest verdrahtet und kommt ueberall hin, mit sudo. Das
+  // steht bewusst hier im Code und nicht als Regel in der Matrix: Eine
+  // Regel laesst sich ueber die Oberflaeche loeschen, und wer die
+  // Technik aus der Matrix wirft, sperrt genau die Leute aus, die den
+  // Fehler wieder beheben muessten. Ein Entzug greift fuer sie nicht —
+  // das ist der Sinn der Sache, nicht ein Versehen.
+  if (isTechnik(gruppen)) {
+    return { erlaubt: true, sudo: true, user, regel: { fest: true, subjekt_typ: 'gruppe', subjekt: 'technik', ssh: true, sudo: true } };
+  }
+
   const r = await pool.query(
     `SELECT ssh, sudo, subjekt_typ, subjekt, host_id,
             (CASE WHEN subjekt_typ = 'benutzer' THEN 2 ELSE 0 END)
@@ -368,7 +379,14 @@ router.get('/matrix', authMiddleware, requireTechnik, async (req, res) => {
       }
       wirkung.push(zeile);
     }
-    res.json({ regeln: regeln.rows, hosts: hosts.rows, wirkung });
+    // Die feste Regel steht nicht in der Tabelle, gehoert aber ins Bild —
+    // sonst sieht die Oberflaeche eine Matrix, die nicht die ganze
+    // Wahrheit ist.
+    const fest = [{
+      subjekt_typ: 'gruppe', subjekt: 'technik', ssh: true, sudo: true,
+      notiz: 'Fest im Code verdrahtet — gilt auf allen Hosts und lässt sich hier nicht entziehen.',
+    }];
+    res.json({ regeln: regeln.rows, fest, hosts: hosts.rows, wirkung });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

@@ -23931,13 +23931,14 @@ async function initDB() {
         END IF;
       END $$;
 
-      -- Grundregel: Technik und Praesident kommen ueberall hin, mit sudo.
+      -- Grundregel fuer den Praesidenten. Die Technik steht NICHT hier:
+      -- Sie ist im Router fest verdrahtet, damit sie sich ueber die
+      -- Oberflaeche nicht versehentlich selbst aussperren kann.
       -- Nur einmal gesetzt — wer sie spaeter aendert oder loescht, dem
       -- schreibt sie der Start nicht wieder hin.
       INSERT INTO ssh_zugriff (host_id, subjekt_typ, subjekt, ssh, sudo, notiz)
-      SELECT NULL, 'gruppe', g, true, true, 'Grundregel beim Einrichten'
-        FROM (VALUES ('technik'), ('praesident')) AS v(g)
-       WHERE NOT EXISTS (SELECT 1 FROM ssh_zugriff WHERE host_id IS NULL AND subjekt_typ='gruppe' AND LOWER(subjekt)=v.g);
+      SELECT NULL, 'gruppe', 'praesident', true, true, 'Grundregel beim Einrichten'
+       WHERE NOT EXISTS (SELECT 1 FROM ssh_zugriff WHERE host_id IS NULL AND subjekt_typ='gruppe' AND LOWER(subjekt)='praesident');
 
       CREATE TABLE IF NOT EXISTS otp_codes (
         id SERIAL PRIMARY KEY,
