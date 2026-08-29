@@ -23882,6 +23882,9 @@ async function initDB() {
         UNIQUE (user_id, fingerprint)
       );
       CREATE INDEX IF NOT EXISTS idx_ssh_schluessel_user ON ssh_schluessel(user_id);
+      -- Woher ein Sitzungsschluessel stammt. Nur fuer quelle='sitzung'
+      -- gesetzt; daran haengt, welchen Schluessel eine Abmeldung wegraeumt.
+      ALTER TABLE ssh_schluessel ADD COLUMN IF NOT EXISTS sitzung_host VARCHAR(120);
       DO $$ BEGIN
         IF EXISTS (SELECT 1 FROM pg_proc WHERE proname='audit_trigger_fn')
            AND NOT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_name='ssh_schluessel_audit') THEN

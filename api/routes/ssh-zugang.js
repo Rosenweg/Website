@@ -134,10 +134,25 @@ async function zugriffErmitteln(login, host) {
   return { erlaubt: true, sudo: !!regel.sudo, user, regel };
 }
 
+// Ein Sitzungsschluessel gilt nur, solange die Sitzung laeuft, die ihn
+// hervorgebracht hat. Das steht hier und nicht bloss im Abmeldepfad:
+// Eine abgestuerzte Station meldet sich nie ab, und ihr Schluessel waere
+// sonst der einzige im System, den niemand je zurueckzieht — genau das
+// Gegenteil dessen, wofuer er gemacht ist.
 async function schluesselVonUser(userId) {
   const r = await pool.query(
-    `SELECT id, quelle, typ, blob_b64, kommentar, fingerprint, label, erstellt_am, zuletzt_gesehen
-       FROM ssh_schluessel WHERE user_id = $1 ORDER BY quelle, erstellt_am`, [userId]);
+    `SELECT s.id, s.quelle, s.typ, s.blob_b64, s.kommentar, s.fingerprint,
+            s.label, s.erstellt_am, s.zuletzt_gesehen, s.sitzung_host
+       FROM ssh_schluessel s
+       JOIN users u ON u.id = s.user_id
+      WHERE s.user_id = $1
+        AND ( s.quelle <> 'sitzung'
+              OR EXISTS (SELECT 1 FROM ssh_sitzung z
+                          WHERE z.host = s.sitzung_host
+                            AND z.login = LOWER(u.username)
+                            AND z.zuletzt_gesehen > NOW() - ($2 || ' hours')::interval) )
+      ORDER BY s.quelle, s.erstellt_am`,
+    [userId, String(SITZUNG_FRIST_STUNDEN)]);
   return r.rows;
 }
 
@@ -376,7 +391,31 @@ router.post('/sitzung', requireHostToken, async (req, res) => {
       `INSERT INTO ssh_sitzung (host, login) VALUES ($1, $2)
        ON CONFLICT (host, login) DO UPDATE SET zuletzt_gesehen = NOW()`,
       [hostname, login]);
-    res.json({ ok: true, host: hostname, login });
+
+    // Die Station erzeugt beim Anmelden ein frisches Schluesselpaar und
+    // reicht hier den oeffentlichen Teil ein. Damit kommt die Person von
+    // dieser Station aus ueberall hin, wo die Matrix sie vorsieht — ohne
+    // ihren persoenlichen privaten Schluessel auf ein geteiltes Geraet
+    // legen zu muessen. Beim Abmelden verschwindet er wieder, hier wie
+    // dort. Was die Sitzung nicht ueberlebt, kann auch niemand finden.
+    let schluessel = null;
+    if (req.body?.pubkey) {
+      let k;
+      try { k = schluesselPruefen(req.body.pubkey); }
+      catch (e) { return res.status(400).json({ error: e.message }); }
+      const u = await pool.query(
+        `SELECT id FROM users WHERE LOWER(username) = LOWER($1) AND active = true`, [login]);
+      if (!u.rows.length) return res.status(404).json({ error: 'Unbekannter Anmeldename' });
+      await pool.query(
+        `INSERT INTO ssh_schluessel (user_id, quelle, typ, blob_b64, kommentar, fingerprint, label, sitzung_host)
+         VALUES ($1, 'sitzung', $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (user_id, fingerprint) DO UPDATE SET zuletzt_gesehen = NOW()`,
+        [u.rows[0].id, k.typ, k.blobB64, k.kommentar || null, k.fingerprint,
+         `Sitzung auf ${hostname}`.slice(0, 100), hostname]);
+      schluessel = k.fingerprint;
+    }
+
+    res.json({ ok: true, host: hostname, login, schluessel });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -389,7 +428,19 @@ router.delete('/sitzung', requireHostToken, async (req, res) => {
     const r = login
       ? await pool.query(`DELETE FROM ssh_sitzung WHERE host = $1 AND login = $2`, [hostname, login])
       : await pool.query(`DELETE FROM ssh_sitzung WHERE host = $1`, [hostname]);
-    res.json({ ok: true, beendet: r.rowCount });
+
+    // Der Sitzungsschluessel geht mit. Bliebe er stehen, waere er das
+    // Gegenteil dessen, wofuer er gemacht ist: ein Zugang, den niemand
+    // mehr im Blick hat, weil die Sitzung laengst vorbei ist.
+    const k = login
+      ? await pool.query(
+          `DELETE FROM ssh_schluessel s USING users u
+            WHERE s.user_id = u.id AND s.quelle = 'sitzung'
+              AND s.sitzung_host = $1 AND LOWER(u.username) = $2`, [hostname, login])
+      : await pool.query(
+          `DELETE FROM ssh_schluessel WHERE quelle = 'sitzung' AND sitzung_host = $1`, [hostname]);
+
+    res.json({ ok: true, beendet: r.rowCount, schluessel_entfernt: k.rowCount });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
