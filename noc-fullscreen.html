@@ -105,6 +105,7 @@
     Wallboard · refresh 5s · powered by isp.rosenweg4303.ch
   </footer>
 
+  <script src="/js/authentik-auth.js?v=2"></script>
   <script>
     const params = new URLSearchParams(location.search);
     // Token via Header senden statt URL-Query — sonst landet er in nginx
@@ -151,10 +152,18 @@
       if (typeof document !== 'undefined' && document.hidden) return;
       loadInFlight = true;
       try {
-        const headers = TOKEN ? { 'X-Noc-Token': TOKEN } : {};
+        // Zwei Wege zu denselben Zahlen. Mit Token laeuft die Seite als
+        // Wandbildschirm ohne Anmeldung — dafuer ist sie gebaut. Ohne
+        // Token, aber angemeldet, nimmt sie die geschuetzten Endpunkte;
+        // sonst waere ein Menueeintrag sinnlos, weil er nur Striche
+        // zeigte und niemand wuesste, warum.
+        const angemeldet = !TOKEN && window.AuthentikAuth?.isLoggedIn?.();
+        const holen = angemeldet
+          ? (pfad) => AuthentikAuth.apiFetch(pfad.replace('/public/', '/'))
+          : (pfad) => fetch(pfad, { headers: TOKEN ? { 'X-Noc-Token': TOKEN } : {} });
         const [dr, ur] = await Promise.all([
-          fetch('/api/isp/noc/public/dashboard', { headers }),
-          fetch('/api/isp/noc/public/unifi',     { headers }),
+          holen('/api/isp/noc/public/dashboard'),
+          holen('/api/isp/noc/public/unifi'),
         ]);
         if (!dr.ok || !ur.ok) {
           document.getElementById('noc-err').classList.remove('hidden');
