@@ -421,6 +421,25 @@ einrichten_hier() {
     sage "sshd: Eintrag in $ziel ergaenzt"
   fi
 
+  # Auch der Knoten braucht ein Werkzeug, um die API zu fragen. Auf
+  # einem pve ist curl praktisch immer da — aber "praktisch immer" ist
+  # der Grund, warum es bei 22 Containern niemandem auffiel.
+  if [ "$PROBE" = 0 ] && ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+    sage "weder curl noch wget — wird nachinstalliert"
+    if command -v apt-get >/dev/null 2>&1; then
+      DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl >/dev/null 2>&1 || true
+    elif command -v apk >/dev/null 2>&1; then apk add --no-cache curl >/dev/null 2>&1 || true
+    elif command -v dnf >/dev/null 2>&1; then dnf install -y -q curl >/dev/null 2>&1 || true
+    elif command -v yum >/dev/null 2>&1; then yum install -y -q curl >/dev/null 2>&1 || true
+    fi
+    if command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1; then
+      sage "curl nachinstalliert"
+    else
+      echo "  ACHTUNG: weder curl noch wget — dieser Knoten kann keine Schluessel holen" >&2
+    fi
+  fi
+
   # Erst pruefen, dann neu laden. Eine kaputte sshd-Konfiguration sperrt
   # aus, und zwar genau den, der sie reparieren muesste.
   if [ "$PROBE" = 0 ]; then
