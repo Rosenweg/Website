@@ -18366,7 +18366,9 @@ app.get('/api/isp/status-summary', async (req, res) => {
     const [www, isp] = await Promise.all([health('100.64.2.41'), health('100.64.2.42')]);
     const out = {
       mail: up(240) && up(230),         // mailcow (CT240) + PMG (CT230)
-      web: up(114) && up(104) && www,   // Authentik + Nextcloud + www-LXC
+      // Nicht nur "Container laeuft": Nextcloud wird gefragt, ob es
+      // benutzbar ist. Genau daran ging der Ausfall vom September vorbei.
+      web: up(114) && up(104) && www && (await nextcloudZustand()).ok,
       internet: up(245) && isp,         // Edge (CT245) + isp-LXC
       ts: Date.now(),
     };
@@ -18378,6 +18380,27 @@ app.get('/api/isp/noc/public/unifi', async (req, res) => {
   if (!checkNocToken(req, res)) return;
   return nocUnifiHandler(req, res);
 });
+
+// Ob ein Container laeuft, sagt wenig. Am 1. September 2026 stand
+// Nextcloud wochenlang im Wartungsmodus — CT 104 lief die ganze Zeit,
+// das NOC zeigte "web: gruen", und unbenutzbar war es trotzdem. Darum
+// hier die Frage, die zaehlt: Antwortet der Dienst, und ist er brauchbar?
+const NEXTCLOUD_URL = process.env.NEXTCLOUD_URL || 'http://100.64.2.36';
+async function nextcloudZustand() {
+  try {
+    const r = await fetch(`${NEXTCLOUD_URL}/status.php`, { signal: AbortSignal.timeout(4000) });
+    if (!r.ok) return { erreichbar: false, ok: false, grund: `HTTP ${r.status}` };
+    const d = await r.json();
+    const ok = d.installed === true && d.maintenance === false && d.needsDbUpgrade === false;
+    return {
+      erreichbar: true, ok,
+      version: d.versionstring || null,
+      maintenance: d.maintenance === true,
+      needsDbUpgrade: d.needsDbUpgrade === true,
+      grund: ok ? null : (d.maintenance ? 'Wartungsmodus' : d.needsDbUpgrade ? 'Datenbank-Migration offen' : 'nicht installiert'),
+    };
+  } catch (e) { return { erreichbar: false, ok: false, grund: e.message }; }
+}
 
 async function nocDashboardHandler(req, res) {
   try {
@@ -18392,6 +18415,15 @@ async function nocDashboardHandler(req, res) {
     // Quota-Schwelle (SMTP2GO Free-Tier = 1000)
     const QUOTA = 1000;
     const quotaPct = QUOTA > 0 ? Math.min(999, Math.round(monthlyTotal / QUOTA * 100)) : 0;
+
+    // Was die Dienstwacht offen hat — die Zahl gehoert neben die anderen,
+    // sonst schaut niemand hin. Ein leeres Feld ist die gute Nachricht.
+    let befunde = 0;
+    try {
+      const b = await pool.query('SELECT count(*)::int AS n FROM dienst_wacht');
+      befunde = b.rows[0]?.n || 0;
+    } catch {}
+    const nc = await nextcloudZustand();
 
     // Aktive Mail-Relays + Smarthost-Anzahl
     const relays = await pool.query(
@@ -18459,7 +18491,9 @@ async function nocDashboardHandler(req, res) {
         vpn_pending: vpnPending,
         vpn_connected: vpnConnected,
         subscribers_active: subsActive,
+        dienst_befunde: befunde,
       },
+      nextcloud: nc,
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }

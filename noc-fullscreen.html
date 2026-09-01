@@ -81,6 +81,8 @@
         <div><div class="text-[10px] uppercase text-slate-500">VPN pending</div><div id="d-vpn-pen" class="noc-mid text-amber-300">—</div></div>
         <div><div class="text-[10px] uppercase text-slate-500">Mailbox pending</div><div id="d-mb" class="noc-mid text-amber-300">—</div></div>
         <div><div class="text-[10px] uppercase text-slate-500">VLAN pending</div><div id="d-vlan" class="noc-mid text-amber-300">—</div></div>
+        <div><div class="text-[10px] uppercase text-slate-500">Dienstbefunde</div><div id="d-wacht" class="noc-mid text-amber-300">—</div></div>
+        <div><div class="text-[10px] uppercase text-slate-500">Nextcloud</div><div id="d-nc" class="noc-mid">—</div></div>
       </div>
     </div>
   </div>
@@ -207,6 +209,17 @@
         document.getElementById('d-vpn-pen').textContent = d.counts?.vpn_pending ?? '0';
         document.getElementById('d-mb').textContent = d.pending?.mailbox_requests ?? '0';
         document.getElementById('d-vlan').textContent = d.pending?.vlan_requests ?? '0';
+        // Die Dienstwacht: leer ist die gute Nachricht, darum bleibt sie
+        // unauffaellig und faerbt sich erst, wenn etwas offen ist.
+        const wacht = d.counts?.dienst_befunde ?? 0;
+        const wEl = document.getElementById('d-wacht');
+        wEl.textContent = wacht;
+        wEl.className = 'noc-mid ' + (wacht > 0 ? 'text-amber-300' : 'text-slate-400');
+        // Nextcloud sagt selbst, ob es brauchbar ist — nicht der Container.
+        const nc = d.nextcloud || {};
+        const ncEl = document.getElementById('d-nc');
+        ncEl.textContent = nc.ok ? (nc.version || 'ok') : (nc.grund || 'nicht erreichbar');
+        ncEl.className = 'noc-mid ' + (nc.ok ? 'text-emerald-300' : 'text-red-400');
 
         // Subsystems (inkl. Router-Einzeldots)
         const sw = document.getElementById('subs');
