@@ -31,7 +31,6 @@ if [ -n "$CUR" ]; then
   fi
 fi
 
-[ "$RELOAD" = "1" ] && { systemctl reload postfix 2>/dev/null || true; }
 
 # ── (3) Interne Ziele duerfen nicht ins Internet ausweichen ─────────────
 #
@@ -69,6 +68,13 @@ if grep -q "smtp:\[100\.64\.2\." /etc/pmg/transport 2>/dev/null; then
   logger -t pmg-restore-relay "interne Transporte auf 'intern' umgestellt (kein Ausweichrelay)"
   RELOAD=1
 fi
+
+# Neuladen ZULETZT. Am 1. September 2026 stand diese Zeile in der Mitte,
+# und der danach ergaenzte Transport 'intern' wurde nie eingelesen: Postfix
+# antwortete "mail transport unavailable" und stellte alle internen Mails
+# zurueck. Kein Verlust, aber Stillstand — und schwer zu sehen, weil die
+# Konfiguration auf der Platte richtig aussah.
+[ "$RELOAD" = "1" ] && { systemctl reload postfix 2>/dev/null || true; }
 
 # Ohne das endet das Skript mit dem Rueckgabewert des letzten Tests. Ist
 # nichts zu tun — der Normalfall —, ist der falsch, und systemd liest den
