@@ -29,7 +29,13 @@ import db
 import voicemail
 
 PBX_SHARED_SECRET = os.environ.get("PBX_SHARED_SECRET", "")
-MAIN_API_BASE = os.environ.get("MAIN_API_BASE", "http://100.64.2.27:3000").rstrip("/")
+# Die Adresse der Hauptanwendung. Sie stand bis zum 4. September 2026 auf
+# 100.64.2.27 — dem Eingang des Swarms, den es seit der Entschwarmung nicht
+# mehr gibt. Die PBX lief seither ins Leere: keine Anrufernamen, keine
+# Benachrichtigungen, und seit dem 9. Juni keine einzige abgelegte
+# Sprachnachricht. Aufgefallen ist es erst, als jemand nach der Aufzeichnung
+# eines Anrufs fragte.
+MAIN_API_BASE = os.environ.get("MAIN_API_BASE", "http://100.64.2.52:3000").rstrip("/")
 PUBLIC_HOST = os.environ.get("PBX_PUBLIC_HOST", "pbx.rosenweg4303.ch")
 PHONES_CONF = os.environ.get("ASTERISK_PHONES_CONF", "/etc/asterisk/pjsip_phones.conf")
 WEB_DIR = os.environ.get("PBX_WEB_DIR", os.path.join(os.path.dirname(__file__), "..", "web"))

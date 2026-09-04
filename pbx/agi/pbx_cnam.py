@@ -34,7 +34,7 @@ def _load_env_file(path='/etc/default/asterisk-env'):
 
 _envfile = _load_env_file()
 # CNAM braucht die personen-DB -> Haupt-API (nicht die lokale PBX-API).
-MAIN_API   = os.environ.get('MAIN_API_BASE')     or _envfile.get('MAIN_API_BASE', 'http://100.64.2.27:3000')
+MAIN_API   = os.environ.get('MAIN_API_BASE')     or _envfile.get('MAIN_API_BASE', 'http://100.64.2.52:3000')
 PBX_SECRET = os.environ.get('PBX_SHARED_SECRET') or _envfile.get('PBX_SHARED_SECRET', '')
 
 
