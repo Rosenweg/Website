@@ -90,39 +90,36 @@ Die Hauptseite liegt allein auf `fe-www` (CT 118, 100.64.2.41) unter
 ihre eigenen, kleineren Bestände. Wer blind spiegelt, überschreibt Fremdes.
 
 ```bash
-# 1. Dateien auf einen pve-Knoten legen
-scp -J stefan@10.0.10.149 profil.html hilfe.html root@100.64.2.20:/tmp/
-
-# 2. Dort sichern, was ersetzt wird
-ssh -J stefan@10.0.10.149 root@100.64.2.20 \
-  'pct exec 118 -- sh -c "cd /var/www/rosenweg && cp -a profil.html profil.html.alt"'
-
-# 3. Hineinschieben und Eigentuemer richten
-ssh -J stefan@10.0.10.149 root@100.64.2.20 '
-  pct push 118 /tmp/profil.html /var/www/rosenweg/profil.html --perms 644
-  pct exec 118 -- chown www-data:www-data /var/www/rosenweg/profil.html'
-
-# 4. Nachsehen, ob es wirklich draussen ist
-curl -sI https://www.rosenweg4303.ch/profil.html | grep -i last-modified
+scripts/rw-web-ausrollen.sh --pruefen profil.html js/nav.js   # nur vergleichen
+scripts/rw-web-ausrollen.sh profil.html js/nav.js             # ausrollen
 ```
+
+Das Skript fragt den Cluster nach allen laufenden `fe-*`-Containern und legt
+jede Datei dorthin, wo sie schon liegt — was ein Container hat, bekommt er
+aktuell; was er nicht hat, bekommt er nicht (ausser mit `--neu`). Vor dem
+Überschreiben entsteht eine `.alt`-Kopie, danach wird die Prüfsumme
+verglichen. Einzige eingebaute Ausnahme: fe-isp bekommt `js/nav-isp.js` als
+`js/nav.js` und nie das allgemeine `js/nav.js`.
+
+Dahinter stehen zwei Vorfälle vom 5. September 2026:
+
+- **`noc-fullscreen.html` liegt zweimal** — auf fe-www (`www.…/noc-fullscreen.html`)
+  und auf fe-isp, das `noc.rosenweg4303.ch` bedient und `/` darauf umschreibt.
+  Wer nur fe-www beliefert, ändert das Wandbild nicht; dort lag der Stand vom
+  15. August, drei Kachel-Generationen alt. Jetzt beide über das Skript.
+- **Auf fe-www lag seit dem 15. August der ganze Repo-Baum** öffentlich:
+  `docs/` mit IP-Zuordnung und Zonendateien, `JOURNAL.md`, Compose-Dateien,
+  Skripte, UniFi-Exporte, eine Präsenzliste als Excel. Verschoben nach
+  `/root/webroot-aussortiert-20260905/` auf CT 118, und nginx liefert
+  seither `*.md|py|sh|yml|service|timer|sql|env|zone|csv|xlsx|conf|bak|alt|vor-*`
+  und alles mit führendem Punkt grundsätzlich nicht mehr aus
+  (`/etc/nginx/sites-enabled/rosenweg.conf`, Sicherung `.vor-sperre-20260905`).
+  Das Zugriffsprotokoll reichte nur bis zum selben Tag zurück; ob vorher
+  jemand zugegriffen hat, ist nicht belegbar.
 
 nginx braucht kein Neuladen — es liest die Dateien bei jedem Request.
 
-**Das NOC-Wandbild ist ein Sonderfall.** `noc.rosenweg4303.ch` wird nicht von
-fe-www bedient, sondern von **fe-isp (CT 119 auf pve2, 100.64.2.42)** — der
-nginx-Block dort schreibt `/` auf `/noc-fullscreen.html` um. Wer die Datei
-nur nach fe-www schiebt, ändert die Seite unter `www.…/noc-fullscreen.html`,
-aber nicht das Wandbild. Genau das ist am 5.9.2026 passiert: Auf CT 119 lag
-noch der Stand vom 15. August, drei Kachel-Generationen alt.
-
-```bash
-scp -J stefan@10.0.10.149 noc-fullscreen.html root@100.64.2.21:/tmp/
-ssh -J stefan@10.0.10.149 root@100.64.2.21 '
-  pct exec 119 -- sh -c "cd /var/www/rosenweg && cp -a noc-fullscreen.html noc-fullscreen.html.alt"
-  pct push 119 /tmp/noc-fullscreen.html /var/www/rosenweg/noc-fullscreen.html --perms 644
-  pct exec 119 -- chown www-data:www-data /var/www/rosenweg/noc-fullscreen.html'
-curl -s https://noc.rosenweg4303.ch/ | grep -c 'id="d-relay"'   # 1 = angekommen
-```
+**Das NOC-Wandbild** ist der Grund für das Skript — siehe oben; von Hand nur noch im Notfall.
 
 Die API dagegen läuft weiterhin in Docker, auf CT 128 (`core-backend`):
 
