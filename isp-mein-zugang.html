@@ -24,6 +24,16 @@
         <p class="text-sm text-gray-600">VPN-Konten, eigene Netzwerk-Anträge und Reverse-Proxy-Routen.</p>
       </div>
 
+      <!-- Mein Anschluss: der Zustand, den auch das NOC sieht, auf die eigenen
+           Anschluesse verengt (/api/isp/subscribers/me). -->
+      <section id="anschluss-box" class="bg-white rounded-lg shadow p-5 hidden">
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <h2 class="text-lg font-semibold">🔌 Mein Anschluss</h2>
+          <button onclick="ladeAnschluss()" class="text-xs text-blue-600 hover:underline">aktualisieren</button>
+        </div>
+        <div id="anschluss-liste" class="space-y-3"></div>
+      </section>
+
       <!-- VPN-Konten -->
       <section class="bg-white rounded-lg shadow p-5">
         <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -94,10 +104,52 @@
     if (!u) return;
     document.getElementById('auth-gate').classList.add('hidden');
     document.getElementById('content').classList.remove('hidden');
-    loadVpn(); loadVlan(); loadRp(); loadRelays(); loadMailboxes();
+    ladeAnschluss(); loadVpn(); loadVlan(); loadRp(); loadRelays(); loadMailboxes();
   });
 
   // VPN
+  // Zeigt den eigenen Anschluss mit dem Zustand, den auch das NOC bewertet.
+  // Wer keinen hat, sieht den Abschnitt gar nicht — ein leerer Kasten mit
+  // "keine Daten" ist keine Auskunft.
+  async function ladeAnschluss() {
+    const box = document.getElementById('anschluss-box');
+    const liste = document.getElementById('anschluss-liste');
+    if (!box || !liste) return;
+    let subs = [];
+    try {
+      const r = await AuthentikAuth.apiFetch('/api/isp/subscribers/me');
+      if (!r.ok) return;
+      subs = (await r.json()).subscribers || [];
+    } catch { return; }
+    if (subs.length === 0) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    const farbe = { aktiv: ['bg-emerald-50 border-emerald-300', 'bg-emerald-500', 'In Betrieb'],
+                    provisioniert: ['bg-amber-50 border-amber-300', 'bg-amber-500', 'Eingerichtet, noch nicht in Betrieb'],
+                    fehler: ['bg-rose-50 border-rose-300', 'bg-rose-500', 'Stimmt etwas nicht'] };
+    liste.innerHTML = subs.map(a => {
+      const [rahmen, punkt, text] = farbe[a.zustand] || farbe.provisioniert;
+      const zeilen = [
+        a.typ ? ['Art', a.typ] : null,
+        a.vlan ? ['Netz', 'VLAN ' + a.vlan] : null,
+        (a.down_mbps || a.up_mbps) ? ['Bandbreite', `${a.down_mbps || '?'} ↓ / ${a.up_mbps || '?'} ↑ Mbit/s`] : null,
+        a.reserviert_ip ? ['Feste Adresse', a.reserviert_ip] : null,
+        a.switch ? ['Anschlusspunkt', a.switch + (a.port ? ' · Port ' + a.port : '')] : null,
+      ].filter(Boolean);
+      return `<div class="border rounded-lg p-4 ${rahmen}">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="w-2.5 h-2.5 rounded-full ${punkt}"></span>
+          <span class="font-semibold text-gray-900">${esc(a.label)}</span>
+          ${a.stweg ? `<span class="text-xs text-gray-500">STWEG ${esc(a.stweg)}</span>` : ''}
+          <span class="ml-auto text-sm text-gray-700">${text}</span>
+        </div>
+        <dl class="grid grid-cols-[9rem_1fr] gap-x-3 gap-y-1 text-sm text-gray-700">
+          ${zeilen.map(([k, v]) => `<dt class="text-gray-500">${esc(k)}</dt><dd class="font-mono">${esc(v)}</dd>`).join('')}
+        </dl>
+        <p class="text-xs text-gray-500 mt-2">${esc(a.grund || '')}</p>
+      </div>`;
+    }).join('');
+  }
+
   async function loadVpn() {
     const r = await AuthentikAuth.apiFetch('/api/isp/vpn-accounts');
     if (!r.ok) return;

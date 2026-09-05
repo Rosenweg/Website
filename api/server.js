@@ -18531,6 +18531,108 @@ async function nocDashboardHandler(req, res) {
 }
 app.get('/api/isp/noc/dashboard', authMiddleware, requireTechnikOrPraesident, nocDashboardHandler);
 
+// ── Anschluesse: was reserviert ist, trifft auf das, was wirklich da ist ──
+// Jeder Anschluss traegt seine Reservierung selbst: fixed_ip und mac_dot1x in
+// isp_subscribers. (isp_fixed_ips ist eine andere Sache — Service- und
+// Wohnungs-IPs.) Drei Zustaende:
+//
+//   aktiv         das reservierte Geraet ist da, unter seiner Adresse
+//   provisioniert eingetragen, aber nichts zu sehen — oder gesehen und noch
+//                 ohne Adresse, was direkt nach einer VLAN-Umstellung vorkommt,
+//                 solange die alte Lease laeuft
+//   fehler        ein Widerspruch: fremde MAC auf der reservierten Adresse,
+//                 oder die reservierte MAC unter einer anderen Adresse
+//
+// Ohne hinterlegte MAC gibt es keinen Widerspruch und darum nie 'fehler';
+// mac_hinterlegt macht diese Luecke sichtbar, statt sie durchgehen zu lassen.
+async function anschlussZeilen(nurWohnungen) {
+  const r = await pool.query(
+    `SELECT s.id, s.status, s.vlan, s.switch_name, s.switch_port, s.anschluss_typ,
+            s.bandbreite_down_mbps, s.bandbreite_up_mbps, s.wohnung_id,
+            HOST(s.fixed_ip) AS fixed_ip, LOWER(s.mac_dot1x) AS mac,
+            w.bezeichnung AS wohnung, w.stweg
+       FROM isp_subscribers s LEFT JOIN wohnungen w ON w.id = s.wohnung_id
+      ${Array.isArray(nurWohnungen) ? 'WHERE s.wohnung_id = ANY($1::int[])' : ''}
+      ORDER BY s.id`,
+    Array.isArray(nurWohnungen) ? [nurWohnungen] : []);
+  return r.rows;
+}
+
+function bewerteAnschluesse(subs, sicht) {
+  const clients = (sicht && sicht.clients) || [];
+  const devices = (sicht && sicht.devices) || [];
+  const switchName = new Map();
+  for (const dev of devices) if (dev.mac) switchName.set(String(dev.mac).toLowerCase(), String(dev.name || dev.mac));
+  const vonMac = new Map(), vonIp = new Map();
+  for (const cl of clients) {
+    if (cl.mac) vonMac.set(String(cl.mac).toLowerCase(), cl);
+    if (cl.ip) vonIp.set(String(cl.ip), cl);
+  }
+  const wo = (cl) => [cl.hostname || cl.name, cl.network, cl.vlan ? 'VLAN ' + cl.vlan : null].filter(Boolean).join(', ');
+
+  return subs.map(sub => {
+    const mac = sub.mac ? String(sub.mac).toLowerCase() : null;
+    const amPort = clients.filter(cl => {
+      if (sub.vlan && Number(cl.vlan) === Number(sub.vlan)) return true;
+      if (sub.switch_port && sub.switch_name && String(cl.sw_port) === String(sub.switch_port)) {
+        const n = switchName.get(String(cl.sw_mac || '').toLowerCase()) || '';
+        if (n && n.toLowerCase() === String(sub.switch_name).toLowerCase()) return true;
+      }
+      return false;
+    });
+    const meins = mac ? vonMac.get(mac) : null;
+    const aufIp = sub.fixed_ip ? vonIp.get(String(sub.fixed_ip)) : null;
+    let zustand, grund;
+    if (!mac) {
+      zustand = amPort.length ? 'aktiv' : 'provisioniert';
+      grund = (amPort.length ? amPort.length + ' Gerät(e) im VLAN' : 'kein Gerät gesehen') + ', keine MAC hinterlegt';
+    } else if (aufIp && String(aufIp.mac || '').toLowerCase() !== mac) {
+      zustand = 'fehler';
+      grund = `fremde MAC auf ${sub.fixed_ip}: ${aufIp.mac}${aufIp.hostname ? ' (' + aufIp.hostname + ')' : ''} statt ${mac}`;
+    } else if (meins && !meins.ip) {
+      zustand = 'provisioniert';
+      grund = `Gerät gesehen (${wo(meins)}), aber noch ohne Adresse`
+        + (sub.fixed_ip ? `; erwartet ${sub.fixed_ip} — solange die alte Lease läuft, bleibt das so` : '');
+    } else if (meins && sub.fixed_ip && meins.ip && String(meins.ip) !== String(sub.fixed_ip)) {
+      zustand = 'fehler';
+      const fremdesNetz = sub.vlan && meins.vlan && Number(meins.vlan) !== Number(sub.vlan);
+      grund = `reservierte MAC läuft unter ${meins.ip} statt ${sub.fixed_ip} (${wo(meins)})`
+        + (fremdesNetz ? ` — falsches Netz, erwartet VLAN ${sub.vlan}` : '');
+    } else if (meins) {
+      zustand = 'aktiv';
+      grund = `Gerät da${meins.ip ? ' unter ' + meins.ip : ''}${meins.hostname ? ' (' + meins.hostname + ')' : ''}`;
+    } else {
+      zustand = 'provisioniert';
+      grund = amPort.length ? `reserviertes Gerät fehlt, ${amPort.length} andere(s) im VLAN` : 'kein Gerät gesehen';
+    }
+    return {
+      id: sub.id,
+      label: sub.wohnung || sub.switch_name || ('VLAN ' + (sub.vlan ?? '?')),
+      stweg: sub.stweg, status: sub.status, vlan: sub.vlan, typ: sub.anschluss_typ,
+      switch: sub.switch_name, port: sub.switch_port,
+      down_mbps: sub.bandbreite_down_mbps, up_mbps: sub.bandbreite_up_mbps,
+      reserviert_ip: sub.fixed_ip, mac_hinterlegt: !!mac,
+      clients: amPort.length, zustand, grund,
+    };
+  });
+}
+
+// Kurz gecachte UniFi-Sicht, damit die Bewohnerseite die UDM nicht bei jedem
+// Aufruf erneut befragt — das NOC bringt seine eigene Sicht ohnehin mit.
+const unifiSichtCache = { at: 0, data: { clients: [], devices: [] } };
+async function unifiSicht() {
+  if (Date.now() - unifiSichtCache.at < 20000) return unifiSichtCache.data;
+  try {
+    const [c, d] = await Promise.all([
+      unifiGet('stat/sta'),
+      unifiGet('stat/device-basic').catch(() => unifiGet('stat/device')),
+    ]);
+    unifiSichtCache.data = { clients: c.data || [], devices: d.data || [] };
+  } catch (e) { console.warn('[isp] unifiSicht:', e.message); }
+  unifiSichtCache.at = Date.now();
+  return unifiSichtCache.data;
+}
+
 // UniFi-Metriken für NOC-Cockpit (Geräte, Clients, WAN, WLANs, Top-APs)
 async function unifiGet(path, timeoutMs = 4000) {
   const r = await fetch(`${UNIFI_HOST}/proxy/network/api/s/default/${path}`, {
@@ -18649,87 +18751,9 @@ async function nocUnifiHandler(req, res) {
       }
     } catch {}
 
-    // ── Anschluesse: was reserviert ist, trifft auf das, was wirklich da ist ──
-    // Jeder Anschluss traegt seine Reservierung selbst: fixed_ip und mac_dot1x
-    // in isp_subscribers. (isp_fixed_ips ist eine andere Sache — Service- und
-    // Wohnungs-IPs — und heute leer.)
-    //
-    //   aktiv (gruen)         das reservierte Geraet ist da, unter seiner IP
-    //   provisioniert (gelb)  eingetragen, aber nichts zu sehen
-    //   fehler (rot)          ein Widerspruch:
-    //                           – an der reservierten IP haengt eine fremde MAC
-    //                           – oder die reservierte MAC laeuft unter fremder IP
-    //
-    // Ohne hinterlegte MAC gibt es keinen Widerspruch und darum nie rot; die
-    // Kachel nennt dann die Zahl "ohne MAC-Bindung", damit die Luecke sichtbar
-    // bleibt, statt als in Ordnung durchzugehen.
+    // Anschluesse bewerten — dieselbe Funktion bedient die Bewohnerseite.
     try {
-      const subs = (await pool.query(
-        `SELECT s.id, s.status, s.vlan, s.switch_name, s.switch_port, s.anschluss_typ,
-                s.wohnung_id, HOST(s.fixed_ip) AS fixed_ip, LOWER(s.mac_dot1x) AS mac,
-                w.bezeichnung AS wohnung
-           FROM isp_subscribers s LEFT JOIN wohnungen w ON w.id = s.wohnung_id
-          ORDER BY s.id`)).rows;
-      const switchName = new Map();
-      for (const dev of alleGeraete) if (dev.mac) switchName.set(String(dev.mac).toLowerCase(), String(dev.name || dev.mac));
-      const vonMac = new Map(), vonIp = new Map();
-      for (const cl of alleClients) {
-        if (cl.mac) vonMac.set(String(cl.mac).toLowerCase(), cl);
-        if (cl.ip) vonIp.set(String(cl.ip), cl);
-      }
-
-      out.anschluesse = subs.map(sub => {
-        const amPort = alleClients.filter(cl => {
-          if (sub.vlan && Number(cl.vlan) === Number(sub.vlan)) return true;
-          if (sub.switch_port && sub.switch_name && String(cl.sw_port) === String(sub.switch_port)) {
-            const n = switchName.get(String(cl.sw_mac || '').toLowerCase()) || '';
-            if (n && n.toLowerCase() === String(sub.switch_name).toLowerCase()) return true;
-          }
-          return false;
-        });
-        const meins   = sub.mac ? vonMac.get(sub.mac) : null;          // Geraet mit der reservierten MAC
-        const aufIp   = sub.fixed_ip ? vonIp.get(sub.fixed_ip) : null; // was unter der reservierten IP laeuft
-        // Jedes Geraet mit hinterlegter MAC gehoert an seine reservierte Adresse.
-        // Steht es woanders, ist das ein Befund — auch und gerade dann, wenn es
-        // in einem fremden Netz auftaucht: ein Client-Anschluss im Transportnetz
-        // ist kein Uplink, sondern ein Geraet am falschen Platz.
-        const wo = (cl) => [cl.hostname || cl.name, cl.network, cl.vlan ? 'VLAN ' + cl.vlan : null].filter(Boolean).join(', ');
-        let zustand, grund;
-        if (!sub.mac) {
-          zustand = amPort.length ? 'aktiv' : 'provisioniert';
-          grund = (amPort.length ? amPort.length + ' Gerät(e) im VLAN' : 'kein Gerät gesehen') + ', keine MAC hinterlegt';
-        } else if (aufIp && String(aufIp.mac || '').toLowerCase() !== sub.mac) {
-          // Der eindeutige Fall: auf der reservierten Adresse sitzt jemand anderes.
-          zustand = 'fehler';
-          grund = `fremde MAC auf ${sub.fixed_ip}: ${aufIp.mac}${aufIp.hostname ? ' (' + aufIp.hostname + ')' : ''} statt ${sub.mac}`;
-        } else if (meins && !meins.ip) {
-          // Kommt direkt nach einer VLAN-Umstellung vor: das Geraet steht im
-          // richtigen Netz, hat seine Adresse aber noch nicht geholt. Gruen
-          // waere gelogen — es benutzt seine Reservierung ja noch nicht.
-          zustand = 'provisioniert';
-          grund = `Gerät gesehen (${wo(meins)}), aber noch ohne Adresse`
-            + (sub.fixed_ip ? `; erwartet ${sub.fixed_ip}` : '');
-        } else if (meins && sub.fixed_ip && meins.ip && String(meins.ip) !== sub.fixed_ip) {
-          zustand = 'fehler';
-          const fremdesNetz = sub.vlan && meins.vlan && Number(meins.vlan) !== Number(sub.vlan);
-          grund = `reservierte MAC läuft unter ${meins.ip} statt ${sub.fixed_ip} (${wo(meins)})`
-            + (fremdesNetz ? ` — falsches Netz, erwartet VLAN ${sub.vlan}` : '');
-        } else if (meins) {
-          zustand = 'aktiv';
-          grund = `Gerät da${meins.ip ? ' unter ' + meins.ip : ''}${meins.hostname ? ' (' + meins.hostname + ')' : ''}`;
-        } else {
-          zustand = 'provisioniert';
-          grund = amPort.length ? `reserviertes Gerät fehlt, ${amPort.length} andere(s) im VLAN` : 'kein Gerät gesehen';
-        }
-        return {
-          id: sub.id,
-          label: sub.wohnung || sub.switch_name || ('VLAN ' + (sub.vlan ?? '?')),
-          status: sub.status, vlan: sub.vlan, typ: sub.anschluss_typ,
-          switch: sub.switch_name, port: sub.switch_port,
-          reserviert_ip: sub.fixed_ip, mac_hinterlegt: !!sub.mac,
-          clients: amPort.length, zustand, grund,
-        };
-      });
+      out.anschluesse = bewerteAnschluesse(await anschlussZeilen(), { clients: alleClients, devices: alleGeraete });
     } catch (e) { console.warn('[noc] anschluesse:', e.message); }
 
     // WLANs
@@ -19342,24 +19366,23 @@ app.get('/api/isp/subscribers', authMiddleware, async (req, res) => {
 app.get('/api/isp/subscribers/me', authMiddleware, async (req, res) => {
   try {
     const email = (req.user.email || '').toLowerCase();
-    const r = await pool.query(
-      `SELECT s.*, w.bezeichnung AS wohnung_bezeichnung, w.stweg
-         FROM isp_subscribers s
-         JOIN wohnungen w ON w.id = s.wohnung_id
-        WHERE w.id IN (
-          SELECT DISTINCT k.wohnung_id FROM wohnungen_kontakte k
-            JOIN personen p ON p.id = k.person_id
-           WHERE k.archiviert_am IS NULL
-             AND ( LOWER(p.email) = $1
-                   OR EXISTS (
-                     SELECT 1 FROM jsonb_array_elements_text(COALESCE(p.emails, '[]'::jsonb)) e
-                      WHERE LOWER(e) = $1
-                   ) )
-        )
-        ORDER BY w.stweg, w.bezeichnung`,
-      [email],
-    );
-    res.json({ subscribers: r.rows });
+    // Welche Wohnungen gehoeren zu dieser Person? Kontakt an der Wohnung,
+    // ueber die Hauptadresse oder eine der hinterlegten Zweitadressen.
+    const w = await pool.query(
+      `SELECT DISTINCT k.wohnung_id
+         FROM wohnungen_kontakte k JOIN personen p ON p.id = k.person_id
+        WHERE k.archiviert_am IS NULL
+          AND ( LOWER(p.email) = $1
+                OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(p.emails, '[]'::jsonb)) e
+                            WHERE LOWER(e) = $1) )`,
+      [email]);
+    const ids = w.rows.map(r => r.wohnung_id).filter(Boolean);
+    if (ids.length === 0) return res.json({ subscribers: [] });
+    // Derselbe Zustand wie im NOC — nur auf die eigenen Anschluesse verengt.
+    // Ohne UniFi bleibt der Zustand leer, die Stammdaten kommen trotzdem.
+    const zeilen = await anschlussZeilen(ids);
+    const sicht = await unifiSicht();
+    res.json({ subscribers: bewerteAnschluesse(zeilen, sicht) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
