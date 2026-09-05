@@ -15,6 +15,8 @@ COPY api/middleware/ ./middleware/
 COPY api/routes/ ./routes/
 # MCP-Server fuer Agenten (mcp.rosenweg4303.ch), siehe docs/mcp.md
 COPY api/mcp/ ./mcp/
+# Dokumentation als MCP-Ressourcen (api/mcp/erweiterungen.js)
+COPY docs/*.md ./docs/
 COPY api/scripts/ ./scripts/
 # site-config.json wird vom Auto-Seed gelesen (legacy Verwaltung -> DB)
 COPY site-config.json ./

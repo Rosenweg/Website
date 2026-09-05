@@ -91,9 +91,42 @@ vorne, damit der Agent es sieht, bevor er ruft.
 | `telefonbuch` | telefonbuch:read | liest |
 | `suche` | ki-search:write | liest (POST) |
 
-Phase 2 bringt die Werkzeuge für Ausschuss, Verwaltung und Technik, dazu
-`docs/` als Ressourcen und vorbereitete Abläufe als Prompts. Der Ops-MCP
-für die Infrastruktur ist ein eigener Server in einem eigenen Repo.
+## Werkzeuge (Phase 2 — nach Rolle)
+
+Liegen in `api/mcp/werkzeuge-verwaltung.js`. Die Rolle entscheidet nur, ob
+das Werkzeug in der Liste erscheint (`rolleErlaubt` in `index.js`); die
+Rechte prüfen die Handler der API.
+
+| Rolle | Werkzeuge |
+|---|---|
+| Eigentümer | `projekte`, `projekt_kommentieren` (frei), `grundbuch_anteile`, `einstellplaetze` |
+| Ausschuss · Präsidium · Verwaltung | `wohnungen`, `personen_suchen`, `personen_aendern` (frei), `verwaltungen`, `reklamationen_liste`, `reklamation_bearbeiten` (frei), `handwerker`, `handwerker_auftrag` (frei), `auslagen`, `auslage_erfassen` (frei), `zev_verwalten`, `zev_abgleich` (frei), `zev_zuordnen` (frei), `mail_ausgangskorb`, `mail_freigeben` (bestätigt), `mail_verlauf`, `mail_archiv`, `verteiler`, `verteiler_senden` (bestätigt), `mail_schreiben` (bestätigt), `mail_vorlagen`, `briefe`, `wasch_abrechnung`, `wasch_abrechnung_starten` (bestätigt), `zutritt_admin`, `zutritt_tuer_oeffnen_admin` (bestätigt), `benutzer`, `benutzer_gruppe` (bestätigt), `stweg_termin` (frei), `whatsapp_status`, `whatsapp_senden` (bestätigt), `telefonanlage`, `pbx_testanruf` (bestätigt), `isp_antraege`, `isp_antrag_entscheiden` (bestätigt), `stoerung_anlegen` (bestätigt), `rechte` |
+| Technik | `noc`, `dienstwacht`, `ssh_matrix`, `stationen`, `pve_meldungen` (frei), `whatsapp_kopplung`, `zaehler_technik`, `proxmox`, `loeschungen`, `anzeige`, `anzeige_ankuendigen` (bestätigt) |
+
+Ausschuss-Rolle heisst: Technik, Präsidium, Ausschuss irgendeiner STWEG oder
+Gruppe `verwaltung`. Eigentümer-Rolle: Gruppe `eigentuemer` oder `*-eigentuemer`,
+oder alles darüber.
+
+## Ressourcen und Prompts
+
+`api/mcp/erweiterungen.js`. Die Dateien aus `docs/*.md` sind Ressourcen unter
+`rosenweg://docs/<name>` — Betriebsinterna (`NUR_TECHNIK`) sehen nur Technik
+und Präsidium. Das Dockerfile kopiert `docs/*.md` ins Image.
+
+Fünf Prompts: `reklamation_melden`, `adresse_aendern`, `waschkueche_reservieren`,
+`vpn_einrichten`, `vollmacht_versammlung` — je ein Ablauf mit den richtigen
+Rückfragen, bevor ein Werkzeug gerufen wird.
+
+## Aufruf-Protokoll
+
+Jeder Werkzeugaufruf steht in `mcp_aufrufe` (wer, Token, Werkzeug, ok,
+Dauer, Fehler, Argumente gekürzt auf 300 Zeichen je Wert).
+`GET /api/mcp/aufrufe?limit=100` liefert die letzten Einträge — Technik und
+Präsidium. Die API-Aufrufe selbst laufen zusätzlich durch den Audit-Kontext
+(`pat:<id>`).
+
+Der Ops-MCP für die Infrastruktur ist ein eigener Server in einem eigenen
+Repo (Phase 3).
 
 ## Neues Werkzeug hinzufügen
 
