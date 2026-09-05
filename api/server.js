@@ -18698,7 +18698,9 @@ async function nocUnifiHandler(req, res) {
           grund = `fremde MAC auf ${sub.fixed_ip}: ${aufIp.mac}${aufIp.hostname ? ' (' + aufIp.hostname + ')' : ''} statt ${sub.mac}`;
         } else if (meins && sub.fixed_ip && meins.ip && String(meins.ip) !== sub.fixed_ip) {
           zustand = 'fehler';
-          grund = `reservierte MAC läuft unter ${meins.ip} statt ${sub.fixed_ip}`;
+          const wo = [meins.hostname || meins.name, meins.network, meins.vlan ? 'VLAN ' + meins.vlan : null]
+            .filter(Boolean).join(', ');
+          grund = `reservierte MAC läuft unter ${meins.ip} statt ${sub.fixed_ip}${wo ? ' (' + wo + ')' : ''}`;
         } else if (meins) {
           zustand = 'aktiv';
           grund = `Gerät da${meins.ip ? ' unter ' + meins.ip : ''}${meins.hostname ? ' (' + meins.hostname + ')' : ''}`;
