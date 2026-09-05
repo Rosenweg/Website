@@ -184,7 +184,7 @@
 
       <div class="noc-tile noc-breit">
         <div class="noc-label">Subsystems</div>
-        <div data-el="subs" class="flex flex-wrap gap-1.5 mt-1"><span class="text-xs text-slate-500 font-mono">lade…</span></div>
+        <div data-el="subsysteme" class="flex flex-wrap gap-1.5 mt-1"><span class="text-xs text-slate-500 font-mono">lade…</span></div>
       </div>
     </div>`;
 
@@ -407,8 +407,8 @@
         el('anschluss-liste').innerHTML = liste.map((a) => punkt(
           a.zustand === 'aktiv' ? true : a.zustand === 'fehler' ? false : 'warn',
           a.label,
-          [a.typ, a.vlan ? 'VLAN ' + a.vlan : null, a.switch, a.port ? 'Port ' + a.port : null, a.grund]
-            .filter(Boolean).join(' · '))).join('');
+          [a.typ, a.vlan ? 'VLAN ' + a.vlan : null, a.reserviert_ip, a.switch,
+           a.port ? 'Port ' + a.port : null, a.grund].filter(Boolean).join(' · '))).join('');
         const ohneMac = liste.filter((a) => !a.mac_hinterlegt).length;
         setz('anschluss-mac', ' · ' + aktiv + ' von ' + liste.length + ' aktiv'
           + (kaputt ? ' · ' + kaputt + ' fehlerhaft' : '')
@@ -423,7 +423,7 @@
         for (const r of (u.routers || [])) d.push(punkt(!!r.ok, r.label, 'CT ' + r.lxc_id + ' · VLAN ' + r.client_vlan));
         for (const f of (u.frontends || [])) d.push(punkt(!!f.ok, f.label, 'Frontend-Container ' + f.svc));
         for (const l of (u.lxcs || [])) d.push(punkt(!!l.ok, l.label, 'LXC ' + l.vmid + ' · ' + l.status));
-        el('subs').innerHTML = d.join('') || '<span class="text-xs text-slate-500 font-mono">keine Daten</span>';
+        el('subsysteme').innerHTML = d.join('') || '<span class="text-xs text-slate-500 font-mono">keine Daten</span>';
       }, 'subsystems');
     }
 
