@@ -119,6 +119,47 @@ Dahinter stehen zwei Vorfälle vom 5. September 2026:
 
 nginx braucht kein Neuladen — es liest die Dateien bei jedem Request.
 
+## Zwischenspeicher — warum zwei gleiche Dateien verschieden aussehen
+
+Am 5.9.2026 lieferten `www` und `noc` byteweise dieselbe `noc-fullscreen.html`
+aus, und das Wandbild zeigte trotzdem den alten Stand. Der Grund stand in den
+Kopfzeilen: Der **noc-Serverblock auf fe-isp hatte als einziger keine
+Cache-Regel für HTML** — Browser und Cloudflare durften die Seite beliebig
+lange behalten. Behoben mit `location ~* \.(html|json)$` samt
+`CDN-Cache-Control: no-store` im noc-Block, plus einmaligem Leeren des
+Cloudflare-Zwischenspeichers über die API.
+
+Prüfen lässt sich das in einer Zeile:
+
+```bash
+curl -sI https://noc.rosenweg4303.ch/ | grep -i cache-control   # muss no-cache zeigen
+```
+
+### Der Block gehört *nicht* nach oben in die stweg-Konfiguration
+
+Ein Versuch, dieselbe Regel auch bei `fe-stweg1..7` und `fe-meg` einzufügen,
+hat acht Frontends lahmgelegt und musste zurückgenommen werden. Zwei Gründe:
+
+1. **Die Regel war dort längst vorhanden** — als `location ~* \.html$` mit
+   `try_files /$site$uri @www_fallback`. Diese Container bedienen mehrere
+   STWEG unter einer Konfiguration; der Host wählt über `$site` das
+   Unterverzeichnis.
+2. **Eine zusätzliche Regex-Location ohne `try_files` gewinnt**, weil nginx
+   Regex-Locations in Reihenfolge ihrer Definition prüft. Alle `.html`-Adressen
+   wurden dadurch aus dem Wurzelverzeichnis statt aus `/$site/` bedient — 404.
+
+Offen bleibt dort nur die nackte Adresse `/`: Sie wird von
+`location = / { try_files /$site/index.html =404; }` bedient, und dieser Block
+setzt keine Kopfzeile. Wer das ändern will, ergänzt **genau dort** ein
+`add_header`, nicht eine neue Location weiter oben.
+
+### Sicherungen von nginx-Konfigurationen
+
+`/etc/nginx/sites-enabled/rosenweg.conf` ist ein **Symlink** nach
+`sites-available/`. `cp -a` darauf kopiert nur den Symlink — die vermeintliche
+Sicherung zeigt auf dieselbe Datei, und ein Zurückspielen tut nichts. Immer
+`cp -L` verwenden und in `sites-available/` ablegen.
+
 **Das NOC-Wandbild** ist der Grund für das Skript — siehe oben; von Hand nur noch im Notfall.
 
 Die API dagegen läuft weiterhin in Docker, auf CT 128 (`core-backend`):
