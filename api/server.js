@@ -18702,6 +18702,13 @@ async function nocUnifiHandler(req, res) {
           // Der eindeutige Fall: auf der reservierten Adresse sitzt jemand anderes.
           zustand = 'fehler';
           grund = `fremde MAC auf ${sub.fixed_ip}: ${aufIp.mac}${aufIp.hostname ? ' (' + aufIp.hostname + ')' : ''} statt ${sub.mac}`;
+        } else if (meins && !meins.ip) {
+          // Kommt direkt nach einer VLAN-Umstellung vor: das Geraet steht im
+          // richtigen Netz, hat seine Adresse aber noch nicht geholt. Gruen
+          // waere gelogen — es benutzt seine Reservierung ja noch nicht.
+          zustand = 'provisioniert';
+          grund = `Gerät gesehen (${wo(meins)}), aber noch ohne Adresse`
+            + (sub.fixed_ip ? `; erwartet ${sub.fixed_ip}` : '');
         } else if (meins && sub.fixed_ip && meins.ip && String(meins.ip) !== sub.fixed_ip) {
           zustand = 'fehler';
           const fremdesNetz = sub.vlan && meins.vlan && Number(meins.vlan) !== Number(sub.vlan);
