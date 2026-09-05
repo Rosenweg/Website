@@ -7,6 +7,16 @@ const { pool, auditCtx } = require('../lib/db');
 const { AUTHENTIK_CLIENT_ID } = require('../lib/config');
 const { validateAuthentikToken, resolveAncestorGroups, ACCESS_LEVELS } = require('../lib/auth');
 
+// Pfade, die einen Ausweis erzeugen oder ändern — für Zugangstoken tabu.
+// Relativ zu /api/, Präfix-Vergleich auf Segmentgrenze.
+const PAT_GESPERRT = [
+  'me/tokens',            // weitere Token
+  'me/passkeys',          // Passkeys
+  'change-password',      // Passwort
+  'auth',                 // OAuth-Fluss, Profil-Login
+  'mqtt/my-app-passwords',// MQTT-Zugangsdaten
+];
+
 async function authMiddleware(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '');
   if (!token) return res.status(401).json({ error: 'Nicht authentifiziert' });
@@ -35,12 +45,30 @@ async function authMiddleware(req, res, next) {
       };
       req.user.isAdmin = req.user.role === 'admin' || req.user.groups.some(g => g.toLowerCase() === 'technik');
       req.pat = { id: row.id, name: row.name, scopes: row.scopes };
-      // Scope-Check: wenn token.scopes gesetzt, prüfen ob aktueller Endpoint erlaubt
+      // Innerhalb eines Routers (/api/ssh, /api/stations …) ist req.path nur der
+      // Rest hinter dem Mount — der Scope-Check würde dort das falsche Segment
+      // lesen. baseUrl + path ergibt in beiden Fällen den vollen Pfad.
+      const vollerPfad = ((req.baseUrl || '') + req.path).replace(/^\/api\//, '');
+      // Ein Token darf nie erzeugen, womit man sich anmeldet. Sonst legt sich
+      // ein geleakter Token einen unbefristeten Nachfolger an. Zugang erteilt
+      // ein Mensch im Profil — und widerruft ihn dort. SSH-Schlüssel sind
+      // bewusst nicht dabei: Ein Agent, der sich seinen Shell-Zugang selbst
+      // einrichtet, ist ein gewollter Anwendungsfall (Entscheid 5.9.2026).
+      if (PAT_GESPERRT.some(pfx => vollerPfad === pfx || vollerPfad.startsWith(pfx + '/'))) {
+        return res.status(403).json({ error: 'Mit einem Zugangstoken nicht erlaubt — nur angemeldet im Profil' });
+      }
+      // Scope-Check: wenn token.scopes gesetzt, prüfen ob aktueller Endpoint erlaubt.
+      // Grammatik: "*", "all:read|write", "segment:*", "segment:read|write" — und
+      // feiner "segment/unter:…" (z. B. "isp/vpn-accounts:read"), damit ein Token
+      // nicht gleich alle 79 ISP-Endpunkte bekommt, wenn er nur sein VPN-Profil will.
       if (Array.isArray(row.scopes) && row.scopes.length > 0) {
         const need = req.method === 'GET' ? 'read' : 'write';
-        const path = req.path.replace(/\/api\//, '').split('/')[0] || 'root';
-        const allowed = row.scopes.some(s => s === '*' || s === path + ':*' || s === path + ':' + need || s === 'all:' + need);
-        if (!allowed) return res.status(403).json({ error: `PAT-Scope fehlt: ${path}:${need}` });
+        const teile = vollerPfad.split('/').filter(Boolean);
+        const segment = teile[0] || 'root';
+        const unter = teile.length > 1 ? segment + '/' + teile[1] : null;
+        const passt = (s, name) => s === name + ':*' || s === name + ':' + need;
+        const allowed = row.scopes.some(s => s === '*' || s === 'all:' + need || passt(s, segment) || (unter && passt(s, unter)));
+        if (!allowed) return res.status(403).json({ error: `PAT-Scope fehlt: ${segment}:${need}` });
       }
       // last_used async (kein await damit Antwort nicht blockiert)
       const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || req.socket.remoteAddress;
