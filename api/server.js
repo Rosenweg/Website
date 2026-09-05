@@ -18689,12 +18689,10 @@ async function nocUnifiHandler(req, res) {
         });
         const meins   = sub.mac ? vonMac.get(sub.mac) : null;          // Geraet mit der reservierten MAC
         const aufIp   = sub.fixed_ip ? vonIp.get(sub.fixed_ip) : null; // was unter der reservierten IP laeuft
-        // Haengt das Geraet im Client-VLAN dieses Anschlusses? Wo ein eigener
-        // Client-Router steht, ist die hinterlegte MAC dessen Uplink — der liegt
-        // im Transportnetz, nicht im Client-VLAN, und die reservierte IP liegt
-        // dahinter. Ein Router mit zwei Seiten ist kein Widerspruch; nur ein
-        // Vergleich INNERHALB desselben VLAN taugt als Fehlerbeweis.
-        const imVlan = (cl) => !sub.vlan || Number(cl.vlan) === Number(sub.vlan);
+        // Jedes Geraet mit hinterlegter MAC gehoert an seine reservierte Adresse.
+        // Steht es woanders, ist das ein Befund — auch und gerade dann, wenn es
+        // in einem fremden Netz auftaucht: ein Client-Anschluss im Transportnetz
+        // ist kein Uplink, sondern ein Geraet am falschen Platz.
         const wo = (cl) => [cl.hostname || cl.name, cl.network, cl.vlan ? 'VLAN ' + cl.vlan : null].filter(Boolean).join(', ');
         let zustand, grund;
         if (!sub.mac) {
@@ -18704,13 +18702,11 @@ async function nocUnifiHandler(req, res) {
           // Der eindeutige Fall: auf der reservierten Adresse sitzt jemand anderes.
           zustand = 'fehler';
           grund = `fremde MAC auf ${sub.fixed_ip}: ${aufIp.mac}${aufIp.hostname ? ' (' + aufIp.hostname + ')' : ''} statt ${sub.mac}`;
-        } else if (meins && imVlan(meins) && sub.fixed_ip && meins.ip && String(meins.ip) !== sub.fixed_ip) {
+        } else if (meins && sub.fixed_ip && meins.ip && String(meins.ip) !== sub.fixed_ip) {
           zustand = 'fehler';
-          grund = `reservierte MAC läuft im eigenen VLAN unter ${meins.ip} statt ${sub.fixed_ip} (${wo(meins)})`;
-        } else if (meins && !imVlan(meins)) {
-          zustand = 'aktiv';
-          grund = `Uplink gesehen unter ${meins.ip || '?'} (${wo(meins)})`
-            + (sub.fixed_ip ? `; ${sub.fixed_ip} liegt dahinter im VLAN ${sub.vlan}` : '');
+          const fremdesNetz = sub.vlan && meins.vlan && Number(meins.vlan) !== Number(sub.vlan);
+          grund = `reservierte MAC läuft unter ${meins.ip} statt ${sub.fixed_ip} (${wo(meins)})`
+            + (fremdesNetz ? ` — falsches Netz, erwartet VLAN ${sub.vlan}` : '');
         } else if (meins) {
           zustand = 'aktiv';
           grund = `Gerät da${meins.ip ? ' unter ' + meins.ip : ''}${meins.hostname ? ' (' + meins.hostname + ')' : ''}`;
