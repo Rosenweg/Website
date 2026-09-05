@@ -94,7 +94,9 @@ def relay_status():
                 for f in files:
                     n += 1
                     try:
-                        m = os.stat(os.path.join(root, f)).st_mtime
+                        # ctime, nicht mtime: Postfix setzt die mtime aufgeschobener
+                        # Dateien auf den naechsten Zustellversuch — in die Zukunft.
+                        m = os.stat(os.path.join(root, f)).st_ctime
                         aelt = m if aelt is None or m < aelt else aelt
                     except OSError:
                         pass
@@ -103,9 +105,11 @@ def relay_status():
         st.update({'deferred': d, 'active': a + i, 'queue_total': d + a + i})
         aeltester = min([x for x in (d_alt, a_alt, i_alt) if x is not None], default=None)
         st['oldest_s'] = int(datetime.now(timezone.utc).timestamp() - aeltester) if aeltester else 0
+        # -g sucht nur in MESSAGE; der Bezeichner "postfix/smtp[" steht davor.
+        # Also grob per -g auf status=sent und den Rest hier filtern.
         out = subprocess.run(['journalctl', '--since', '-2days', '--no-pager', '-o', 'short-iso',
-                              '-g', 'postfix/smtp\\[.*status=sent'], capture_output=True, text=True, check=False).stdout
-        letzte = [l[:24] for l in out.splitlines() if l[:4].isdigit()]
+                              '-g', 'status=sent'], capture_output=True, text=True, check=False).stdout
+        letzte = [l[:24] for l in out.splitlines() if l[:4].isdigit() and 'postfix/smtp[' in l]
         st['last_sent_at'] = letzte[-1] if letzte else None
     except Exception as e:  # noqa: BLE001
         st['fehler'] = str(e)[:200]
