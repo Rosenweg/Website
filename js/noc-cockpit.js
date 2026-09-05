@@ -32,6 +32,7 @@
     .noc-label { font-family: ui-monospace, SFMono-Regular, monospace; font-size: .65rem; letter-spacing: .08em; text-transform: uppercase; color: #94a3b8; margin-bottom: .25rem; }
     .noc-big { font-size: 1.85rem; font-weight: 700; color: #f1f5f9; font-variant-numeric: tabular-nums; line-height: 1.1; }
     .noc-mid { font-size: 1.15rem; font-weight: 600; color: #f1f5f9; font-variant-numeric: tabular-nums; line-height: 1.15; }
+    .noc-wert { margin-left: auto; font-family: ui-monospace, monospace; font-size: .72rem; color: #f1f5f9; font-variant-numeric: tabular-nums; }
     .noc-svc { display: flex; align-items: center; gap: .5rem; background: rgba(15,23,42,0.5); border: 1px solid #334155; padding: .4rem .6rem; border-radius: .5rem; }
     .noc-led { width: .55rem; height: .55rem; border-radius: 50%; background: #94a3b8; box-shadow: 0 0 6px rgba(148,163,184,0.5); display: inline-block; flex-shrink: 0; }
     .led-green { background: #34d399; box-shadow: 0 0 8px #34d399; animation: noc-pulse 2s infinite; }
@@ -72,11 +73,14 @@
       </div>
     </div>
     <div data-el="fehler" class="noc-fehler" hidden></div>
-    <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-4" data-el="dienste">
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-4" data-el="dienste">
       ${['pmg:PMG', 'mailcow:Mailcow', 'smtp2go:SMTP2GO', 'quarantine:Quarantine', 'webmail:Webmail'].map((s) => {
         const [k, l] = s.split(':');
         return `<div class="noc-svc" data-svc="${k}"><span class="noc-led led-amber"></span><span class="text-xs text-slate-300">${l}</span></div>`;
       }).join('')}
+      ${[['wacht', 'Dienstwacht'], ['nextcloud', 'Nextcloud'], ['q-relay', 'Relay-Queue'], ['q-pmg', 'PMG-Queue']].map(([k, l]) =>
+        `<div class="noc-svc" data-svc="${k}"><span class="noc-led led-amber"></span><span class="text-xs text-slate-300">${l}</span>` +
+        `<span class="noc-wert" data-el="${k}">—</span></div>`).join('')}
     </div>`;
 
   const MAIL = `
@@ -102,10 +106,14 @@
         <div class="noc-leise"><span data-el="relays-managed">0</span> managed · <span data-el="relays-smart">0</span> smarthost</div>
       </div>
 
-      <div class="noc-tile">
+      <div class="noc-tile noc-breit">
         <div class="noc-label">Anschlüsse</div>
-        <div class="noc-big" data-el="subs">—</div>
-        <div class="noc-leise">VPN: <span data-el="vpn">0</span> aktiv · <span data-el="vpn-conn" class="text-emerald-300">0</span> verbunden · <span data-el="vpn-pen" class="text-amber-300">0</span> pending</div>
+        <div class="flex items-baseline gap-4">
+          <div><span class="noc-big" data-el="subs">—</span><div class="noc-leise" style="margin-top:0">Client-Anschlüsse</div></div>
+          <div><span class="noc-big text-cyan-300" data-el="vpn">—</span><div class="noc-leise" style="margin-top:0">VPN aktiv</div></div>
+        </div>
+        <div data-el="anschluss-liste" class="flex flex-wrap gap-1.5 mt-2"></div>
+        <div class="noc-leise"><span data-el="vpn-conn" class="text-emerald-300">0</span> VPN verbunden · <span data-el="vpn-pen" class="text-amber-300">0</span> pending<span data-el="anschluss-mac"></span></div>
       </div>
 
       <div class="noc-tile noc-breit">
@@ -127,30 +135,6 @@
         </div>
       </div>
 
-      <!-- Aus dem Wandbild uebernommen: Betriebszustand statt nur Zahlen -->
-      <div class="noc-tile">
-        <div class="noc-label">Dienstbefunde</div>
-        <div class="noc-big" data-el="wacht">—</div>
-        <div class="noc-leise">offene Meldungen der Dienstwacht</div>
-      </div>
-
-      <div class="noc-tile">
-        <div class="noc-label">Nextcloud</div>
-        <div class="noc-mid" data-el="nextcloud">—</div>
-        <div class="noc-leise" data-el="nextcloud-grund">—</div>
-      </div>
-
-      <div class="noc-tile">
-        <div class="noc-label">Relay Warteschlange</div>
-        <div class="noc-mid" data-el="q-relay">—</div>
-        <div class="noc-leise" data-el="q-relay-meta">—</div>
-      </div>
-
-      <div class="noc-tile">
-        <div class="noc-label">PMG Warteschlange</div>
-        <div class="noc-mid" data-el="q-pmg">—</div>
-        <div class="noc-leise" data-el="q-pmg-meta">—</div>
-      </div>
     </div>`;
 
   const UNIFI = `
@@ -191,12 +175,6 @@
         <div class="noc-label">WLANs</div>
         <div class="flex items-baseline gap-2"><span class="noc-big" data-el="wlan-on">—</span><span class="text-xs text-slate-400">/ <span data-el="wlan-total">0</span> total</span></div>
         <div class="noc-leise">aktiv broadcast</div>
-      </div>
-
-      <div class="noc-tile">
-        <div class="noc-label">SMTP2GO Zyklus</div>
-        <div class="noc-mid" data-el="s2g">—</div>
-        <div class="noc-leise" data-el="s2g-meta">—</div>
       </div>
 
       <div class="noc-tile noc-breit">
@@ -256,6 +234,17 @@
     ziel.innerHTML = `<div class="noc-inner">${KOPF(modus)}${MAIL}${UNIFI}</div>`;
     const el = (n) => ziel.querySelector(`[data-el="${n}"]`);
     const setz = (n, wert, klasse) => { const e = el(n); if (!e) return; e.textContent = wert; if (klasse) e.className = klasse; };
+    // Eine Kachel in der Dienste-Leiste: Lampe, Wert, Erklaerung beim Draufzeigen.
+    // true = gruen, 'warn' = gelb, false = rot.
+    const dienst = (n, zustand, wert, titel) => {
+      const kachel = ziel.querySelector(`[data-svc="${n}"]`);
+      if (!kachel) return;
+      const lampe = kachel.querySelector('.noc-led');
+      if (lampe) lampe.className = 'noc-led ' + (zustand === 'warn' ? 'led-amber' : zustand ? 'led-green' : 'led-red');
+      const w = el(n);
+      if (w) w.textContent = wert;
+      if (titel) kachel.title = titel;
+    };
     el('takt').textContent = 'Auto-Refresh ' + Math.round(intervallMs / 1000) + 's';
 
     const rxVerlauf = [], txVerlauf = [], MAX = 360;
@@ -300,10 +289,8 @@
         bar.style.background = (out.quota_pct || 0) >= 100 ? '#f43f5e' : (out.quota_pct || 0) >= 80 ? '#f59e0b' : '#10b981';
         setz('out-pct', out.quota_pct || 0);
         setz('out-state', (out.quota_pct || 0) >= 100 ? 'ÜBER LIMIT' : (out.quota_pct || 0) >= 80 ? 'WARN' : 'OK');
-        setz('out-quelle', out.quelle === 'smtp2go' ? 'Zahl von SMTP2GO' : 'SMTP2GO nicht erreichbar — eigene Zählung');
-        setz('s2g', (out.monthly_total ?? '—') + ' / ' + (out.quota_limit ?? '—'),
-          'noc-mid ' + ((out.quota_pct || 0) >= 80 ? 'text-rose-400' : (out.quota_pct || 0) >= 50 ? 'text-amber-300' : 'text-slate-100'));
-        setz('s2g-meta', out.zyklus ? String(out.zyklus.von || '').slice(0, 10) + ' bis ' + String(out.zyklus.bis || '').slice(0, 10) : 'kein Zyklus gemeldet');
+        setz('out-quelle', (out.quelle === 'smtp2go' ? 'laut SMTP2GO' : 'SMTP2GO nicht erreichbar — eigene Zählung')
+          + (out.zyklus ? ' · Zyklus ' + String(out.zyklus.von || '').slice(0, 10) + ' bis ' + String(out.zyklus.bis || '').slice(0, 10) : ''));
       }, 'outbound');
 
       sicher(() => {
@@ -315,7 +302,7 @@
 
       sicher(() => {
         const c = d.counts || {}, p = d.pending || {};
-        setz('subs', c.subscribers_active ?? '0');
+        setz('subs', c.subscribers_active ?? '0');   // wird von malUnifi ueberschrieben, sobald die Liste da ist
         setz('vpn', c.vpn_active ?? '0');
         setz('vpn-conn', c.vpn_connected ?? '0');
         setz('vpn-pen', c.vpn_pending ?? '0');
@@ -323,23 +310,21 @@
         setz('pending-mb', p.mailbox_requests || 0);
         setz('pending-vlan', p.vlan_requests || 0);
         const w = c.dienst_befunde ?? 0;
-        setz('wacht', w, 'noc-big ' + (w > 0 ? 'text-amber-300' : 'text-slate-400'));
+        dienst('wacht', w === 0 ? true : 'warn', w, w === 0 ? 'keine offenen Meldungen' : w + ' offene Meldungen der Dienstwacht');
       }, 'zahlen');
 
       sicher(() => {
         const nc = d.nextcloud || {};
-        setz('nextcloud', nc.ok ? (nc.version || 'ok') : 'nicht erreichbar', 'noc-mid ' + (nc.ok ? 'text-emerald-300' : 'text-rose-400'));
-        setz('nextcloud-grund', nc.ok ? 'erreichbar' : (nc.grund || '—'));
+        dienst('nextcloud', !!nc.ok, nc.ok ? (nc.version || 'ok') : 'weg', nc.ok ? 'erreichbar, Version ' + (nc.version || '?') : (nc.grund || 'nicht erreichbar'));
       }, 'nextcloud');
 
       sicher(() => {
         for (const [n, host] of [['q-relay', 'smtp-relay'], ['q-pmg', 'pmg']]) {
           const st = (d.relay_status || []).find((r) => r.host === host);
-          if (!st) { setz(n, '—', 'noc-mid text-slate-500'); setz(n + '-meta', 'keine Meldung'); continue; }
+          if (!st) { dienst(n, false, '—', 'keine Meldung'); continue; }
           const stumm = st.alter_s > 900, q = st.queue_total || 0;
-          setz(n, stumm ? 'stumm' : String(q), 'noc-mid ' + (stumm ? 'text-rose-400' : q > 0 ? 'text-amber-300' : 'text-emerald-300'));
-          setz(n + '-meta', (st.deferred ? st.deferred + ' aufgeschoben · ' : '')
-            + 'Meldung vor ' + Math.round(st.alter_s / 60) + ' min'
+          dienst(n, stumm ? false : q > 0 ? 'warn' : true, stumm ? 'stumm' : String(q),
+            (st.deferred ? st.deferred + ' aufgeschoben · ' : '') + 'Meldung vor ' + Math.round(st.alter_s / 60) + ' min'
             + (st.oldest_s ? ' · ältester ' + Math.round(st.oldest_s / 3600) + ' h' : ''));
         }
       }, 'warteschlangen');
@@ -410,6 +395,26 @@
           : aps.map((a) => balken(a.name, (a.num_sta || 0) + ' Cli', (a.num_sta || 0) / max * 100, a.name + (a.model ? ' (' + a.model + ')' : ''))).join('');
       }, 'top_aps');
 
+      // Anschluesse: gruen = provisioniert und ein Geraet gesehen, gelb = nur
+      // provisioniert, rot = Widerspruch (heute nur eine abweichende MAC).
+      // Ohne hinterlegte MAC kann es kein Rot geben — das sagt die Zeile darunter.
+      sicher(() => {
+        const liste = u.anschluesse || [];
+        if (!liste.length) return;
+        const aktiv = liste.filter((a) => a.zustand === 'aktiv').length;
+        const kaputt = liste.filter((a) => a.zustand === 'fehler').length;
+        setz('subs', liste.length);
+        el('anschluss-liste').innerHTML = liste.map((a) => punkt(
+          a.zustand === 'aktiv' ? true : a.zustand === 'fehler' ? false : 'warn',
+          a.label,
+          [a.typ, a.vlan ? 'VLAN ' + a.vlan : null, a.switch, a.port ? 'Port ' + a.port : null, a.grund]
+            .filter(Boolean).join(' · '))).join('');
+        const ohneMac = liste.filter((a) => !a.mac_hinterlegt).length;
+        setz('anschluss-mac', ' · ' + aktiv + ' von ' + liste.length + ' aktiv'
+          + (kaputt ? ' · ' + kaputt + ' fehlerhaft' : '')
+          + (ohneMac ? ' · ' + ohneMac + ' ohne MAC-Bindung' : ''));
+      }, 'anschluesse');
+
       // Subsystems: Gesundheit, Router, Frontends und LXC — die letzten drei
       // kannte bisher nur das Wandbild, obwohl sie im Cockpit genauso fehlten.
       sicher(() => {
@@ -434,7 +439,8 @@
       };
       setLed('pmg', s.mail); setLed('mailcow', s.mail); setLed('webmail', s.mail);
       setLed('quarantine', s.mail); setLed('smtp2go', true);
-      const alle = Array.from(ziel.querySelectorAll('[data-el="dienste"] .noc-led'));
+      const mail = ['pmg', 'mailcow', 'smtp2go', 'quarantine', 'webmail'];
+      const alle = mail.map((k) => ziel.querySelector(`[data-svc="${k}"] .noc-led`)).filter(Boolean);
       const gut = alle.every((l) => l.classList.contains('led-green'));
       const schlecht = alle.some((l) => l.classList.contains('led-red'));
       el('led-overall').className = 'noc-led ' + (gut ? 'led-green' : schlecht ? 'led-red' : 'led-amber');
