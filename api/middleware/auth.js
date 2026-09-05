@@ -10,9 +10,9 @@ const { validateAuthentikToken, resolveAncestorGroups, ACCESS_LEVELS } = require
 // Pfade, die einen Ausweis erzeugen oder ändern — für Zugangstoken tabu.
 // Relativ zu /api/, Präfix-Vergleich auf Segmentgrenze.
 const PAT_GESPERRT = [
+  'change-password',      // Passwort — das eigentliche Loch, siehe unten
   'me/tokens',            // weitere Token
   'me/passkeys',          // Passkeys
-  'change-password',      // Passwort
   'auth',                 // OAuth-Fluss, Profil-Login
   'mqtt/my-app-passwords',// MQTT-Zugangsdaten
 ];
@@ -49,11 +49,14 @@ async function authMiddleware(req, res, next) {
       // Rest hinter dem Mount — der Scope-Check würde dort das falsche Segment
       // lesen. baseUrl + path ergibt in beiden Fällen den vollen Pfad.
       const vollerPfad = ((req.baseUrl || '') + req.path).replace(/^\/api\//, '');
-      // Ein Token darf nie erzeugen, womit man sich anmeldet. Sonst legt sich
-      // ein geleakter Token einen unbefristeten Nachfolger an. Zugang erteilt
-      // ein Mensch im Profil — und widerruft ihn dort. SSH-Schlüssel sind
-      // bewusst nicht dabei: Ein Agent, der sich seinen Shell-Zugang selbst
-      // einrichtet, ist ein gewollter Anwendungsfall (Entscheid 5.9.2026).
+      // Ein Token darf nie ändern, womit man sich anmeldet. Token, Passkeys
+      // und MQTT-Zugangsdaten schützt requireUserLogin an der Route schon;
+      // /change-password hatte diese Sperre nicht und verlangt das alte
+      // Passwort nicht — ein geleakter Token hätte das Konto übernehmen
+      // können. Die Liste hier gilt zentral, unabhängig davon, ob jemand an
+      // der Route daran denkt. SSH-Schlüssel bewusst nicht: requireUserLogin
+      // sperrt sie ohnehin, und ein Agent, der sich seinen Shell-Zugang selbst
+      // einrichtet, wäre ein gewollter Anwendungsfall (Entscheid 5.9.2026).
       if (PAT_GESPERRT.some(pfx => vollerPfad === pfx || vollerPfad.startsWith(pfx + '/'))) {
         return res.status(403).json({ error: 'Mit einem Zugangstoken nicht erlaubt — nur angemeldet im Profil' });
       }
