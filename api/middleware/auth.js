@@ -78,7 +78,10 @@ async function authMiddleware(req, res, next) {
       // Grammatik: "*", "all:read|write", "segment:*", "segment:read|write" — und
       // feiner "segment/unter:…" (z. B. "isp/vpn-accounts:read"), damit ein Token
       // nicht gleich alle 79 ISP-Endpunkte bekommt, wenn er nur sein VPN-Profil will.
-      if (!scopeErlaubt(row.scopes, vollerPfad, req.method)) {
+      // Der MCP-Transport (/mcp) liegt nicht unter /api/ und ist kein
+      // Bereich, den ein Scope benennt. Die Scopes greifen dort an den
+      // Loopback-Aufrufen der Werkzeuge — die Route sagt das mit req.scopeAmZiel.
+      if (!req.scopeAmZiel && !scopeErlaubt(row.scopes, vollerPfad, req.method)) {
         const segment = vollerPfad.split('/').filter(Boolean)[0] || 'root';
         return res.status(403).json({ error: `PAT-Scope fehlt: ${segment}:${req.method === 'GET' ? 'read' : 'write'}` });
       }

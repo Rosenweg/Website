@@ -323,7 +323,10 @@ function mountMcp(app) {
     });
   });
 
-  app.post('/mcp', authMiddleware, async (req, res) => {
+  // Scopes prüft nicht der Transport, sondern jeder Loopback-Aufruf eines
+  // Werkzeugs — sonst käme ein Token mit wasch:* nie bis zur Waschküche.
+  const scopeAmZiel = (req, _res, next) => { req.scopeAmZiel = true; next(); };
+  app.post('/mcp', scopeAmZiel, authMiddleware, async (req, res) => {
     const server = baueServer(req);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on('close', () => { transport.close(); server.close(); });
