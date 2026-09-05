@@ -348,6 +348,20 @@
             </details>
         </div>
 
+        <!-- Agent verbinden (MCP) -->
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-lg font-semibold text-gray-800 mb-2 flex items-center gap-2">
+                🧰 Agent verbinden
+            </h2>
+            <p class="text-sm text-gray-500 mb-4">Claude und andere Assistenten können das Portal über <span class="font-mono">mcp.rosenweg4303.ch</span> bedienen — mit deinem Token, in deinen Rechten. Freie Werkzeuge (Waschküche, Schadensmeldung, Adressmutation) laufen sofort; alles, was sendet, öffnet oder löscht, fragt zuerst.</p>
+            <p class="text-xs text-gray-500 mb-1">Claude Code:</p>
+            <pre class="text-xs bg-gray-50 border rounded p-3 overflow-x-auto"><code>claude mcp add rosenweg --transport http https://mcp.rosenweg4303.ch --header "Authorization: Bearer <span id="mcp-snippet-token">rw_pat_…</span>"</code></pre>
+            <p class="text-xs text-gray-500 mt-3 mb-1">Claude Desktop / andere Clients (<span class="font-mono">mcpServers</span>):</p>
+            <pre class="text-xs bg-gray-50 border rounded p-3 overflow-x-auto"><code>{ "rosenweg": { "type": "http", "url": "https://mcp.rosenweg4303.ch",
+               "headers": { "Authorization": "Bearer <span id="mcp-snippet-token2">rw_pat_…</span>" } } }</code></pre>
+            <p class="text-xs text-gray-500 mt-3">Erstellst du oben einen Token, erscheint er hier eingesetzt — nur solange die Seite offen ist. Welche Werkzeuge ein Token sieht, bestimmen seine Scopes; ohne Scopes sieht er alle, die dir zustehen.</p>
+        </div>
+
     </div>
 
     <!-- PAT Create Modal -->
@@ -386,6 +400,15 @@
                         <label class="flex items-center gap-2"><input type="checkbox" value="handwerker:read"> handwerker:read</label>
                         <label class="flex items-center gap-2"><input type="checkbox" value="documents:read"> documents:read</label>
                         <label class="flex items-center gap-2"><input type="checkbox" value="me:read"> me:read (immer empfohlen)</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="me:write"> me:write (Telefon, Adressmutation)</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="dashboard:read"> dashboard:read (Übersicht)</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="wasch:read"> wasch:read</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="wasch:write"> wasch:write (reservieren)</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="zähler:read"> zähler:read</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="zev:read"> zev:read (Rechnungen)</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="telefonbuch:read"> telefonbuch:read</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="ki-search:write"> ki-search:write (Suche)</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" value="isp/vpn-accounts:read"> isp/vpn-accounts:read (nur mein VPN)</label>
                     </div>
                     <p class="text-xs text-gray-500 mt-1">Server lehnt Endpoints ohne passenden Scope mit 403 ab.</p>
                 </div>
@@ -1406,6 +1429,7 @@
                 closePatModal();
                 // Plain-Token ins Banner einsetzen
                 document.getElementById('pat-new-plain').value = d.token;
+                for (const id of ['mcp-snippet-token', 'mcp-snippet-token2']) { const el = document.getElementById(id); if (el) el.textContent = d.token; }
                 document.getElementById('pat-new-banner').classList.remove('hidden');
                 document.getElementById('pat-new-banner').scrollIntoView({ behavior: 'smooth' });
                 await loadPats();
