@@ -83,6 +83,9 @@
         <div><div class="text-[10px] uppercase text-slate-500">VLAN pending</div><div id="d-vlan" class="noc-mid text-amber-300">—</div></div>
         <div><div class="text-[10px] uppercase text-slate-500">Dienstbefunde</div><div id="d-wacht" class="noc-mid text-amber-300">—</div></div>
         <div><div class="text-[10px] uppercase text-slate-500">Nextcloud</div><div id="d-nc" class="noc-mid">—</div></div>
+        <div><div class="text-[10px] uppercase text-slate-500">SMTP2GO Zyklus</div><div id="d-s2g" class="noc-mid text-slate-100">—</div></div>
+        <div><div class="text-[10px] uppercase text-slate-500">Relay Warteschlange</div><div id="d-relay" class="noc-mid">—</div></div>
+        <div><div class="text-[10px] uppercase text-slate-500">PMG Warteschlange</div><div id="d-pmg" class="noc-mid">—</div></div>
       </div>
     </div>
   </div>
@@ -217,6 +220,22 @@
         wEl.className = 'noc-mid ' + (wacht > 0 ? 'text-amber-300' : 'text-slate-400');
         // Nextcloud sagt selbst, ob es brauchbar ist — nicht der Container.
         const nc = d.nextcloud || {};
+        // SMTP2GO: was der Anbieter selbst zaehlt; die Tabelle ist nur Aufschluesselung.
+        const o = d.outbound || {};
+        const s2g = document.getElementById('d-s2g');
+        s2g.textContent = (o.monthly_total ?? '—') + ' / ' + (o.quota_limit ?? '—');
+        s2g.className = 'noc-mid ' + ((o.quota_pct || 0) >= 80 ? 'text-red-400' : (o.quota_pct || 0) >= 50 ? 'text-amber-300' : 'text-slate-100');
+        s2g.title = o.quelle === 'smtp2go' ? 'laut SMTP2GO' : 'SMTP2GO nicht erreichbar — Zahl aus der eigenen Tabelle';
+        // Warteschlangen der Mailhosts: gruen leer, amber gefuellt, rot wenn die Meldung ausbleibt (>15 min)
+        for (const [id, host] of [['d-relay', 'smtp-relay'], ['d-pmg', 'pmg']]) {
+          const el = document.getElementById(id);
+          const st = (d.relay_status || []).find(r => r.host === host);
+          if (!st) { el.textContent = '—'; el.className = 'noc-mid text-slate-500'; el.title = 'keine Meldung'; continue; }
+          const alt = st.alter_s > 900, q = st.queue_total || 0;
+          el.textContent = alt ? 'stumm' : String(q) + (st.deferred ? ' (' + st.deferred + ' aufgeschoben)' : '');
+          el.className = 'noc-mid ' + (alt ? 'text-red-400' : q > 0 ? 'text-amber-300' : 'text-emerald-300');
+          el.title = 'Meldung vor ' + Math.round(st.alter_s / 60) + ' min' + (st.oldest_s ? ', aeltester Eintrag ' + Math.round(st.oldest_s / 3600) + ' h' : '') + (st.last_sent_at ? ', letzte Zustellung ' + st.last_sent_at : '');
+        }
         const ncEl = document.getElementById('d-nc');
         ncEl.textContent = nc.ok ? (nc.version || 'ok') : (nc.grund || 'nicht erreichbar');
         ncEl.className = 'noc-mid ' + (nc.ok ? 'text-emerald-300' : 'text-red-400');

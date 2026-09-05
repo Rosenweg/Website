@@ -18404,18 +18404,43 @@ async function nextcloudZustand() {
   } catch (e) { return { erreichbar: false, ok: false, grund: e.message }; }
 }
 
+// Was SMTP2GO selbst ueber den laufenden Zyklus sagt — mit kurzem Cache,
+// damit der Wandbildschirm die API nicht alle paar Sekunden fragt. Die eigene
+// Tabelle isp_outbound_usage ist nur die Aufschluesselung nach Absenderdomaene;
+// sie zaehlte bis 5.9.2026 auch Sendungen ueber den eigenen Relay mit und stand
+// bei 199, waehrend SMTP2GO 1 meldete. Bei Abweichung gilt SMTP2GO.
+const smtp2goZyklusCache = { at: 0, data: null };
+async function smtp2goZyklus() {
+  if (!SMTP2GO_API_KEY) return null;
+  if (Date.now() - smtp2goZyklusCache.at < 5 * 60_000) return smtp2goZyklusCache.data;
+  try {
+    const r = await fetch(`${SMTP2GO_API_URL}/stats/email_summary`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: SMTP2GO_API_KEY }), signal: AbortSignal.timeout(8000),
+    });
+    const d = (await r.json()).data || {};
+    smtp2goZyklusCache.data = { used: d.cycle_used || 0, max: d.cycle_max || 0, cycle_start: d.cycle_start, cycle_end: d.cycle_end };
+  } catch (e) {
+    console.warn('[noc] SMTP2GO-Zyklus nicht abrufbar:', e.message);
+    smtp2goZyklusCache.data = null;
+  }
+  smtp2goZyklusCache.at = Date.now();
+  return smtp2goZyklusCache.data;
+}
+
 async function nocDashboardHandler(req, res) {
   try {
     const ym = new Date().toISOString().slice(0, 7);
-    // Outbound Monatstotal + Top-Sender
-    const out = await pool.query(
-      `SELECT sender_domain, count FROM isp_outbound_usage
-        WHERE year_month=$1 ORDER BY count DESC`, [ym]);
-    const monthlyTotal = out.rows.reduce((a, r) => a + r.count, 0);
+    // Outbound: Aufschluesselung aus der eigenen Tabelle, Gesamtzahl von SMTP2GO
+    const [out, zyklus, relayZustand] = await Promise.all([
+      pool.query(`SELECT sender_domain, count FROM isp_outbound_usage WHERE year_month=$1 ORDER BY count DESC`, [ym]),
+      smtp2goZyklus(),
+      pool.query('SELECT host, zeit, queue_total, deferred, active, oldest_s, last_sent_at FROM mail_relay_status ORDER BY host').catch(() => ({ rows: [] })),
+    ]);
+    const tabelleTotal = out.rows.reduce((a, r) => a + r.count, 0);
     const topSenders = out.rows.slice(0, 5);
-
-    // Quota-Schwelle (SMTP2GO Free-Tier = 1000)
-    const QUOTA = 1000;
+    const QUOTA = (zyklus && zyklus.max) || 1000;
+    const monthlyTotal = zyklus ? zyklus.used : tabelleTotal;
     const quotaPct = QUOTA > 0 ? Math.min(999, Math.round(monthlyTotal / QUOTA * 100)) : 0;
 
     // Was die Dienstwacht offen hat — die Zahl gehoert neben die anderen,
@@ -18485,7 +18510,12 @@ async function nocDashboardHandler(req, res) {
         quota_limit: QUOTA,
         quota_pct: quotaPct,
         top_senders: topSenders,
+        quelle: zyklus ? 'smtp2go' : 'tabelle',
+        tabelle_total: tabelleTotal,
+        zyklus: zyklus ? { von: zyklus.cycle_start, bis: zyklus.cycle_end } : null,
       },
+      // Warteschlangen der Mailhosts, gemeldet vom Usage-Tracker (PMG, Relay-VPS)
+      relay_status: relayZustand.rows.map(r => ({ ...r, alter_s: Math.round((Date.now() - new Date(r.zeit).getTime()) / 1000) })),
       relays: relayStats,
       pending: { mailbox_requests: pending, vlan_requests: pendingVlan },
       counts: {
@@ -22697,6 +22727,27 @@ function quotaThresholdsCrossed(prevTotal, newTotal) {
   for (let t = SMTP2GO_FREE_LIMIT + 500; t <= 50000; t += 500) beyond.push(t);
   return [...fixed, ...beyond].filter(t => prevTotal < t && newTotal >= t);
 }
+
+// Zustand der Mail-Warteschlange eines Hosts — der Usage-Tracker meldet ihn
+// bei jedem Lauf mit. Ein Host, dessen Meldung ausbleibt, faellt im NOC durch
+// das Alter der letzten Meldung auf.
+app.post('/api/isp/relay-status/ingest', requireTrackerSecret, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const host = String(b.host || '').trim().toLowerCase().slice(0, 80);
+    if (!host) return res.status(400).json({ error: 'host fehlt' });
+    const n = (v) => (Number.isFinite(parseInt(v, 10)) ? parseInt(v, 10) : null);
+    await pool.query(`CREATE TABLE IF NOT EXISTS mail_relay_status (
+      host TEXT PRIMARY KEY, zeit TIMESTAMPTZ NOT NULL DEFAULT NOW(), queue_total INTEGER, deferred INTEGER,
+      active INTEGER, oldest_s INTEGER, last_sent_at TIMESTAMPTZ, roh JSONB)`);
+    await pool.query(`INSERT INTO mail_relay_status (host, zeit, queue_total, deferred, active, oldest_s, last_sent_at, roh)
+      VALUES ($1, NOW(), $2, $3, $4, $5, $6, $7)
+      ON CONFLICT (host) DO UPDATE SET zeit = NOW(), queue_total = EXCLUDED.queue_total, deferred = EXCLUDED.deferred,
+        active = EXCLUDED.active, oldest_s = EXCLUDED.oldest_s, last_sent_at = EXCLUDED.last_sent_at, roh = EXCLUDED.roh`,
+      [host, n(b.queue_total), n(b.deferred), n(b.active), n(b.oldest_s), b.last_sent_at || null, JSON.stringify(b)]);
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 app.post('/api/isp/outbound-usage/ingest', requireTrackerSecret, async (req, res) => {
   try {
