@@ -19363,6 +19363,63 @@ app.get('/api/isp/subscribers', authMiddleware, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Die MAC des eigenen Anschlusses selbst hinterlegen — beim Routerwechsel
+// ist das die Aenderung, die sonst jedes Mal ueber die Technik laufen muesste.
+// Setzen und Aendern darf, wer an der Wohnung haengt; LEEREN nur der ISP-Admin,
+// denn eine leere MAC hebt die Port-Bindung auf und macht aus einem
+// kontrollierten Anschluss einen offenen Port.
+const MAC_MUSTER = /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/;
+function macNormalisieren(roh) {
+  const nur = String(roh || '').toLowerCase().replace(/[^0-9a-f]/g, '');
+  if (nur.length !== 12) return null;
+  return nur.match(/.{2}/g).join(':');
+}
+app.put('/api/isp/subscribers/me/:id/mac', authMiddleware, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige ID' });
+    const email = (req.user.email || '').toLowerCase();
+    const gruppen = (req.user.groups || []).map(g => String(g).toLowerCase());
+    const admin = isTechnik(gruppen) || isPraesident(gruppen);
+
+    // Gehoert der Anschluss dieser Person? (Admins duerfen ohnehin.)
+    const eig = await pool.query(
+      `SELECT s.* FROM isp_subscribers s
+        WHERE s.id = $1 AND ($3::boolean OR s.wohnung_id IN (
+          SELECT k.wohnung_id FROM wohnungen_kontakte k JOIN personen p ON p.id = k.person_id
+           WHERE k.archiviert_am IS NULL
+             AND ( LOWER(p.email) = $2
+                   OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(p.emails, '[]'::jsonb)) e
+                               WHERE LOWER(e) = $2) )))`,
+      [id, email, admin]);
+    if (eig.rows.length === 0) return res.status(403).json({ error: 'Das ist nicht dein Anschluss' });
+    const alt = eig.rows[0];
+
+    const roh = req.body?.mac;
+    const leeren = roh === null || String(roh ?? '').trim() === '';
+    if (leeren && !admin) {
+      return res.status(403).json({ error: 'Leeren darf nur die Technik — eine leere MAC hebt die Port-Bindung auf. Trage die neue MAC ein oder melde dich bei der Technik.' });
+    }
+    const mac = leeren ? null : macNormalisieren(roh);
+    if (!leeren && (!mac || !MAC_MUSTER.test(mac))) {
+      return res.status(400).json({ error: 'Keine gültige MAC-Adresse (erwartet 12 Hex-Zeichen, z. B. 94:2a:6f:1c:3b:af)' });
+    }
+    // Dieselbe MAC darf nicht an zwei Anschluessen haengen — sonst streiten
+    // sich zwei Ports um dasselbe Geraet.
+    if (mac) {
+      const doppelt = await pool.query('SELECT id FROM isp_subscribers WHERE LOWER(mac_dot1x) = $1 AND id <> $2', [mac, id]);
+      if (doppelt.rows.length) return res.status(409).json({ error: 'Diese MAC ist bereits einem anderen Anschluss zugeordnet' });
+    }
+
+    const r = await pool.query(
+      'UPDATE isp_subscribers SET mac_dot1x = $1, updated_at = NOW() WHERE id = $2 RETURNING *', [mac, id]);
+    // UniFi nachziehen: Port-Bindung und DHCP-Reservierung folgen der MAC.
+    const sync = await syncSubscriberToUnifi(alt, r.rows[0]);
+    console.log(`[isp] MAC an Anschluss ${id} ${mac ? 'gesetzt' : 'geleert'} durch ${email}${admin ? ' (Admin)' : ''}`);
+    res.json({ ok: true, mac, unifi_sync: sync });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/isp/subscribers/me', authMiddleware, async (req, res) => {
   try {
     const email = (req.user.email || '').toLowerCase();
@@ -19382,7 +19439,11 @@ app.get('/api/isp/subscribers/me', authMiddleware, async (req, res) => {
     // Ohne UniFi bleibt der Zustand leer, die Stammdaten kommen trotzdem.
     const zeilen = await anschlussZeilen(ids);
     const sicht = await unifiSicht();
-    res.json({ subscribers: bewerteAnschluesse(zeilen, sicht) });
+    // Die eigene Geraete-MAC gehoert hier dazu — man soll sehen, was
+    // hinterlegt ist, bevor man sie aendert. Im NOC-Endpunkt steht sie
+    // bewusst NICHT: der ist oeffentlich, und das Wandbild haengt im Haus.
+    const macs = new Map(zeilen.map(z => [z.id, z.mac]));
+    res.json({ subscribers: bewerteAnschluesse(zeilen, sicht).map(a => ({ ...a, mac: macs.get(a.id) || null })) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
