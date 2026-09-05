@@ -140,6 +140,43 @@ Neue Kachel? Nur in `js/noc-cockpit.js` — dann mit
 `scripts/rw-web-ausrollen.sh js/noc-cockpit.js` ausrollen, und beide Seiten
 haben sie.
 
+### Anschlüsse: die drei Zustände
+
+Die Kachel «Anschlüsse» zeigt je Anschluss einen Punkt. Bewertet wird in
+`api/server.js` (`bewerteAnschluesse`), und dieselbe Funktion bedient die
+Bewohnerseite `isp-mein-zugang.html` über `/api/isp/subscribers/me` — im NOC
+alle Anschlüsse, dort nur die eigenen.
+
+| Punkt | Bedeutung |
+|---|---|
+| grün | das reservierte Gerät ist da, unter seiner Adresse |
+| gelb | eingetragen, aber nichts zu sehen — oder gesehen und noch ohne Adresse |
+| rot | fremde MAC auf der reservierten Adresse, oder die reservierte MAC unter einer anderen |
+
+Die Reservierung steht am Anschluss selbst: `isp_subscribers.fixed_ip` und
+`mac_dot1x`. **Nicht** in `isp_fixed_ips` — das sind Service- und Wohnungs-IPs
+und heute leer. Ohne hinterlegte MAC gibt es keinen Widerspruch und darum nie
+rot; die Kachel nennt dann «ohne MAC-Bindung», damit die Lücke sichtbar bleibt.
+
+Am 5.9.2026 hat die Kachel ihren ersten echten Fall gefunden und dabei die
+ganze Kette durchlaufen — rot, gelb, grün:
+
+1. **rot** — die reservierte MAC lief unter `100.64.0.59` statt `100.64.89.30`.
+   Ursache: Im Anschluss-Datensatz fehlte der Switch-Port, deshalb blieb Port 2
+   des SFP+-Switch1 ein Trunk mit dem Inter-Building Network als untagged
+   Netz. Der Client-Router landete dort, und die UniFi-Reservierung (die am
+   Netz RW8-Clients hängt) konnte nie greifen.
+2. **gelb** — nach dem Nachtragen des Ports im ISP-Admin provisionierte UniFi
+   den Port sofort auf VLAN 89. Das Gerät stand im richtigen Netz, hatte aber
+   noch keine Adresse: Die alte Lease lief weiter.
+3. **grün** — Lease abgelaufen, Reservierung gezogen, `100.64.89.30`.
+
+Zwei Lehren stecken darin. Der Zwischenzustand «gesehen, aber ohne Adresse»
+muss gelb sein, nicht grün — ohne Adresse benutzt das Gerät seine Reservierung
+ja nicht. Und ein Gerät in einem fremden Netz ist ein Befund, kein Uplink: Ein
+Zwischenstand, in dem ich das als Router-Uplink abgetan hatte, hat den echten
+Fehler weggeräumt und musste zurückgenommen werden.
+
 Den Weg zu den Zahlen wählt das Modul selbst: `?token=…` → öffentliche
 Endpunkte mit `X-Noc-Token` (der Token wandert sofort aus der Adresszeile),
 angemeldet → geschützte Endpunkte, sonst öffentlich ohne Ausweis. Ebenso im
