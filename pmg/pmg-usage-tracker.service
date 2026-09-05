@@ -1,0 +1,7 @@
+[Unit]
+Description=PMG Outbound Usage Tracker — parse postfix logs, send delta to API
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pmg-usage-tracker.py

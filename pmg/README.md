@@ -114,3 +114,28 @@ printf 'Subject: Zustellprobe\nFrom: root@pve1.rosenweg4303.ch\nTo: technik@rose
 Im Postfix-Protokoll von Mailcow muss `client=unknown[100.64.2.31]` mit einer
 Warteschlangennummer erscheinen und die Nachricht in alle Weiterleitungen
 auffächern — nicht `554`.
+
+## pmg-usage-tracker — was SMTP2GO wirklich kostet
+
+`pmg-usage-tracker.py` (Timer alle 5 Minuten, Konfiguration in
+`/etc/default/pmg-usage-tracker`, Zustand in `/var/lib/pmg-usage-tracker/`)
+zählt Sendungen je Absenderdomäne und Monat und meldet die Deltas an
+`POST /api/isp/outbound-usage/ingest`. Die NOC-Kachel «SMTP2GO» speist sich
+daraus.
+
+**Der Fehler bis 5.9.2026:** Gezählt wurde jeder `postfix/smtp`-Send — also
+auch alles, was über den eigenen Relay-VPS oder an Mailcow ging. Im September
+stand der Zähler bei 199, während SMTP2GO selbst 1 meldete. Seit 1.1 zählt der
+Ausdruck nur Zeilen mit `relay=…smtp2go…`, denn nur die kosten Kontingent.
+
+Das Skript läuft auf **jedem** Host, der SMTP2GO als Ausweichziel hat — PMG
+und seit 5.9.2026 auch der Relay-VPS (dort noch ohne SMTP2GO-Fallback; kommt
+der, stimmt die Zählung vom ersten Tag an). Gleiche Konfigurationsdatei,
+gleiches Geheimnis. Die NOC-Kachel zeigt zusätzlich die Zahl, die SMTP2GO
+selbst nennt (`/api/email/quota`); weichen beide ab, zählt SMTP2GO.
+
+```bash
+# Ausrollen (Beispiel PMG; Relay analog per ssh)
+scp pmg-usage-tracker.py root@100.64.2.21:/tmp/
+ssh root@100.64.2.21 'pct push 230 /tmp/pmg-usage-tracker.py /usr/local/sbin/pmg-usage-tracker.py --perms 755'
+```
