@@ -148,10 +148,12 @@ hat acht Frontends lahmgelegt und musste zurückgenommen werden. Zwei Gründe:
    Regex-Locations in Reihenfolge ihrer Definition prüft. Alle `.html`-Adressen
    wurden dadurch aus dem Wurzelverzeichnis statt aus `/$site/` bedient — 404.
 
-Offen bleibt dort nur die nackte Adresse `/`: Sie wird von
-`location = / { try_files /$site/index.html =404; }` bedient, und dieser Block
-setzt keine Kopfzeile. Wer das ändern will, ergänzt **genau dort** ein
-`add_header`, nicht eine neue Location weiter oben.
+Die nackte Adresse `/` wird von `location = / { try_files /$site/index.html
+=404; }` bedient und setzte als einzige keine Kopfzeile. Das `add_header` steht
+seit dem 5.9.2026 **genau dort — innerhalb des bestehenden Blocks**, nicht als
+neue Location davor; `add_header` ändert kein Routing, eine Location schon.
+Damit schicken alle zwölf Frontends für `/` und für `*.html` dieselbe
+Kopfzeile.
 
 ### Sicherungen von nginx-Konfigurationen
 
