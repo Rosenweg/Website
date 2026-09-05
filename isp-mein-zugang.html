@@ -135,6 +135,13 @@
         a.reserviert_ip ? ['Feste Adresse', a.reserviert_ip] : null,
         a.switch ? ['Anschlusspunkt', a.switch + (a.port ? ' · Port ' + a.port : '')] : null,
       ].filter(Boolean);
+      // Die MAC des eigenen Geraets darf jeder selbst pflegen — beim
+      // Routerwechsel ist genau das die Aenderung. Leeren kann nur die
+      // Technik; darum steht hier kein Loeschen-Knopf.
+      const macZeile = `<dt class="text-gray-500">Geräte-MAC</dt><dd class="font-mono flex items-center gap-2 flex-wrap">
+          <span>${a.mac_hinterlegt ? esc(a.mac || '') || 'hinterlegt' : '<span class="text-amber-700">noch keine</span>'}</span>
+          <button onclick="macAendern(${a.id}, ${JSON.stringify(a.label)})" class="text-xs text-blue-600 hover:underline">${a.mac_hinterlegt ? 'ändern' : 'eintragen'}</button>
+        </dd>`;
       return `<div class="border rounded-lg p-4 ${rahmen}">
         <div class="flex items-center gap-2 mb-2">
           <span class="w-2.5 h-2.5 rounded-full ${punkt}"></span>
@@ -144,10 +151,29 @@
         </div>
         <dl class="grid grid-cols-[9rem_1fr] gap-x-3 gap-y-1 text-sm text-gray-700">
           ${zeilen.map(([k, v]) => `<dt class="text-gray-500">${esc(k)}</dt><dd class="font-mono">${esc(v)}</dd>`).join('')}
+          ${macZeile}
         </dl>
         <p class="text-xs text-gray-500 mt-2">${esc(a.grund || '')}</p>
       </div>`;
     }).join('');
+  }
+
+  // Neue MAC hinterlegen. Leeren geht hier bewusst nicht: eine leere MAC
+  // hebt die Port-Bindung auf, das bleibt bei der Technik.
+  async function macAendern(id, label) {
+    const eingabe = prompt(`Neue Geräte-MAC für ${label}\n\nDie MAC steht meist auf der Rückseite des Routers (12 Zeichen, z. B. 94:2a:6f:1c:3b:af).\nNach dem Speichern kann es ein paar Minuten dauern, bis die alte Adresse abgelaufen ist.`, '');
+    if (eingabe === null) return;
+    if (!eingabe.trim()) { alert('Leeren kann nur die Technik — bitte die neue MAC eintragen oder bei der Technik melden.'); return; }
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/isp/subscribers/me/${id}/mac`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mac: eingabe.trim() }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { alert(d.error || `Fehler (HTTP ${r.status})`); return; }
+      alert(`MAC gespeichert: ${d.mac}\n\nDer Port wird in UniFi nachgezogen. Bis das Gerät seine feste Adresse zieht, kann die alte Lease noch laufen.`);
+      ladeAnschluss();
+    } catch (e) { alert('Fehler: ' + e.message); }
   }
 
   async function loadVpn() {
