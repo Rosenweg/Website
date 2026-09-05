@@ -5,6 +5,8 @@
 .env.*
 *.md
 docs/
+# … ausser der Dokumentation: sie wird als MCP-Ressourcen ins API-Image kopiert (api/mcp/erweiterungen.js)
+!docs/*.md
 node_modules/
 api/node_modules/
 energy-collector/node_modules/
