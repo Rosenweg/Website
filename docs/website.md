@@ -108,6 +108,22 @@ curl -sI https://www.rosenweg4303.ch/profil.html | grep -i last-modified
 
 nginx braucht kein Neuladen — es liest die Dateien bei jedem Request.
 
+**Das NOC-Wandbild ist ein Sonderfall.** `noc.rosenweg4303.ch` wird nicht von
+fe-www bedient, sondern von **fe-isp (CT 119 auf pve2, 100.64.2.42)** — der
+nginx-Block dort schreibt `/` auf `/noc-fullscreen.html` um. Wer die Datei
+nur nach fe-www schiebt, ändert die Seite unter `www.…/noc-fullscreen.html`,
+aber nicht das Wandbild. Genau das ist am 5.9.2026 passiert: Auf CT 119 lag
+noch der Stand vom 15. August, drei Kachel-Generationen alt.
+
+```bash
+scp -J stefan@10.0.10.149 noc-fullscreen.html root@100.64.2.21:/tmp/
+ssh -J stefan@10.0.10.149 root@100.64.2.21 '
+  pct exec 119 -- sh -c "cd /var/www/rosenweg && cp -a noc-fullscreen.html noc-fullscreen.html.alt"
+  pct push 119 /tmp/noc-fullscreen.html /var/www/rosenweg/noc-fullscreen.html --perms 644
+  pct exec 119 -- chown www-data:www-data /var/www/rosenweg/noc-fullscreen.html'
+curl -s https://noc.rosenweg4303.ch/ | grep -c 'id="d-relay"'   # 1 = angekommen
+```
+
 Die API dagegen läuft weiterhin in Docker, auf CT 128 (`core-backend`):
 
 ```bash
