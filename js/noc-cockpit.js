@@ -135,6 +135,13 @@
         </div>
       </div>
 
+      <!-- Steht unter Top Sender: dort bleiben im Vierer-Raster zwei Spalten
+           frei, weil Pending und Pfade nur je eine belegen. -->
+      <div class="noc-tile noc-breit">
+        <div class="noc-label">Subsystems</div>
+        <div data-el="subsysteme" class="flex flex-wrap gap-1.5 mt-1"><span class="text-xs text-slate-500 font-mono">lade…</span></div>
+      </div>
+
     </div>`;
 
   const UNIFI = `
@@ -180,11 +187,6 @@
       <div class="noc-tile noc-breit">
         <div class="noc-label flex justify-between"><span>Top APs (nach Clients)</span><span class="text-[10px] text-slate-400" data-el="aps-meta">—</span></div>
         <div data-el="aps-list" class="space-y-1 mt-1"><div class="text-xs text-slate-500 font-mono">lade…</div></div>
-      </div>
-
-      <div class="noc-tile noc-breit">
-        <div class="noc-label">Subsystems</div>
-        <div data-el="subsysteme" class="flex flex-wrap gap-1.5 mt-1"><span class="text-xs text-slate-500 font-mono">lade…</span></div>
       </div>
     </div>`;
 
