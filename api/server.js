@@ -18689,18 +18689,28 @@ async function nocUnifiHandler(req, res) {
         });
         const meins   = sub.mac ? vonMac.get(sub.mac) : null;          // Geraet mit der reservierten MAC
         const aufIp   = sub.fixed_ip ? vonIp.get(sub.fixed_ip) : null; // was unter der reservierten IP laeuft
+        // Haengt das Geraet im Client-VLAN dieses Anschlusses? Wo ein eigener
+        // Client-Router steht, ist die hinterlegte MAC dessen Uplink — der liegt
+        // im Transportnetz, nicht im Client-VLAN, und die reservierte IP liegt
+        // dahinter. Ein Router mit zwei Seiten ist kein Widerspruch; nur ein
+        // Vergleich INNERHALB desselben VLAN taugt als Fehlerbeweis.
+        const imVlan = (cl) => !sub.vlan || Number(cl.vlan) === Number(sub.vlan);
+        const wo = (cl) => [cl.hostname || cl.name, cl.network, cl.vlan ? 'VLAN ' + cl.vlan : null].filter(Boolean).join(', ');
         let zustand, grund;
         if (!sub.mac) {
           zustand = amPort.length ? 'aktiv' : 'provisioniert';
           grund = (amPort.length ? amPort.length + ' Gerät(e) im VLAN' : 'kein Gerät gesehen') + ', keine MAC hinterlegt';
         } else if (aufIp && String(aufIp.mac || '').toLowerCase() !== sub.mac) {
+          // Der eindeutige Fall: auf der reservierten Adresse sitzt jemand anderes.
           zustand = 'fehler';
           grund = `fremde MAC auf ${sub.fixed_ip}: ${aufIp.mac}${aufIp.hostname ? ' (' + aufIp.hostname + ')' : ''} statt ${sub.mac}`;
-        } else if (meins && sub.fixed_ip && meins.ip && String(meins.ip) !== sub.fixed_ip) {
+        } else if (meins && imVlan(meins) && sub.fixed_ip && meins.ip && String(meins.ip) !== sub.fixed_ip) {
           zustand = 'fehler';
-          const wo = [meins.hostname || meins.name, meins.network, meins.vlan ? 'VLAN ' + meins.vlan : null]
-            .filter(Boolean).join(', ');
-          grund = `reservierte MAC läuft unter ${meins.ip} statt ${sub.fixed_ip}${wo ? ' (' + wo + ')' : ''}`;
+          grund = `reservierte MAC läuft im eigenen VLAN unter ${meins.ip} statt ${sub.fixed_ip} (${wo(meins)})`;
+        } else if (meins && !imVlan(meins)) {
+          zustand = 'aktiv';
+          grund = `Uplink gesehen unter ${meins.ip || '?'} (${wo(meins)})`
+            + (sub.fixed_ip ? `; ${sub.fixed_ip} liegt dahinter im VLAN ${sub.vlan}` : '');
         } else if (meins) {
           zustand = 'aktiv';
           grund = `Gerät da${meins.ip ? ' unter ' + meins.ip : ''}${meins.hostname ? ' (' + meins.hostname + ')' : ''}`;
