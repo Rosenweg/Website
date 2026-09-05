@@ -7,7 +7,7 @@
 #   DATEI      Pfad relativ zum Repo, z. B. noc-fullscreen.html oder js/nav.js
 #   --pruefen  nur vergleichen und berichten, nichts schreiben
 #   --neu      eine Datei auch dorthin legen, wo sie noch fehlt
-#              (ohne --neu bekommt eine neue Datei nur fe-www)
+#              (ohne --neu wird kein Bestand erweitert — auch fe-www nicht)
 #
 # Umgebung:  RW_JUMP  Sprunghost      (Standard stefan@10.0.10.149)
 #            RW_NODE  ein Cluster-Knoten (Standard root@100.64.2.20)
@@ -108,7 +108,9 @@ for f in "${DATEIEN[@]}"; do
     z=$(zielpfad "$name" "$f"); [ -n "$z" ] || continue
     fern=$(printf '%s\n' "$IST" | awk -F'|' -v n="$name" -v p="$f" '$1==n && $2==p {print $4}' | tr -d '[:space:]')
     if [ -z "$fern" ]; then
-      if [ "$NEU" = 1 ] || [ "$name" = "fe-www" ]; then vorher="fehlt"; else continue; fi
+      # Fehlende Dateien nur mit --neu anlegen. Die fruehere Ausnahme fuer
+      # fe-www hat isp-admin.html dorthin gelegt, wo sie nie war (5.9.2026).
+      if [ "$NEU" = 1 ]; then vorher="fehlt"; else continue; fi
     elif [ "$fern" = "$lokal" ]; then
       printf '%-24s %-12s %-10s %s\n' "$f" "$name" "gleich" "—"; continue
     else vorher="anders"; fi
