@@ -23,11 +23,15 @@ const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const { z } = require('zod');
 const { authMiddleware, scopeErlaubt } = require('../middleware/auth');
+const { pool } = require('../lib/db');
+const { isTechnik, isPraesident, isAusschussForAny } = require('../lib/groups');
+const { WERKZEUGE_VERWALTUNG } = require('./werkzeuge-verwaltung');
+const { registriereRessourcen, registrierePrompts, docsListe, PROMPTS } = require('./erweiterungen');
 
 const PORT = process.env.PORT || 3000;
 const LOOPBACK = `http://127.0.0.1:${PORT}`;
 const MCP_HOST = (process.env.MCP_HOST || 'mcp.rosenweg4303.ch').toLowerCase();
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 const MAX_TEXT = 60_000;
 
 const ANLEITUNG = `Rosenweg-Portal (Siedlung Rosenweg, 4303 Kaiseraugst). Du handelst im Namen der angemeldeten Person, mit ihren Rechten.
@@ -268,6 +272,41 @@ const WERKZEUGE = [
   },
 ];
 
+// ── Rollen ──────────────────────────────────────────────────────────────
+// Entscheidet nur, ob ein Werkzeug in der Liste erscheint. Die Rechte selbst
+// prüfen die Handler der API — wie im Portal.
+function rolleErlaubt(rolle, gruppen) {
+  if (!rolle) return true;
+  const g = (gruppen || []).map(x => String(x).toLowerCase());
+  const technik = isTechnik(g), praesident = isPraesident(g);
+  const ausschuss = technik || praesident || isAusschussForAny(g) || g.includes('verwaltung');
+  const eigentuemer = ausschuss || g.some(x => x === 'eigentuemer' || x.endsWith('-eigentuemer'));
+  return rolle === 'technik' ? technik : rolle === 'ausschuss' ? ausschuss : rolle === 'eigentuemer' ? eigentuemer : true;
+}
+
+// ── Aufruf-Protokoll ────────────────────────────────────────────────────
+// Jeder Werkzeugaufruf landet in mcp_aufrufe: wer, was, ob es gelang, wie
+// lange. Argumente gekürzt, damit kein Foto in der Tabelle liegt.
+async function protokollAnlegen() {
+  await pool.query(`CREATE TABLE IF NOT EXISTS mcp_aufrufe (
+    id BIGSERIAL PRIMARY KEY, zeit TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    user_email TEXT, pat_id INTEGER, werkzeug TEXT NOT NULL, ok BOOLEAN NOT NULL,
+    dauer_ms INTEGER, fehler TEXT, argumente JSONB)`);
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_mcp_aufrufe_zeit ON mcp_aufrufe(zeit DESC)');
+}
+function argumenteKurz(args) {
+  const out = {};
+  for (const [k, v] of Object.entries(args || {})) out[k] = typeof v === 'string' && v.length > 300 ? v.slice(0, 300) + `…(${v.length})` : v;
+  return out;
+}
+function protokolliere(req, werkzeug, ok, ms, fehlerText, args) {
+  pool.query('INSERT INTO mcp_aufrufe (user_email, pat_id, werkzeug, ok, dauer_ms, fehler, argumente) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+    [req.user?.email || null, req.pat?.id || null, werkzeug, ok, ms, fehlerText ? String(fehlerText).slice(0, 500) : null, JSON.stringify(argumenteKurz(args))])
+    .catch(e => console.error('[MCP] Protokoll:', e.message));
+}
+
+const ALLE_WERKZEUGE = [...WERKZEUGE, ...WERKZEUGE_VERWALTUNG];
+
 // ── Server je Anfrage ───────────────────────────────────────────────────
 function baueServer(req) {
   const server = new McpServer({ name: 'rosenweg-portal', version: VERSION }, { instructions: ANLEITUNG });
@@ -276,8 +315,11 @@ function baueServer(req) {
   const wer = req.user?.email || 'unbekannt';
   const api = (method, pfad, opts) => apiAufruf(auth, method, pfad, opts);
 
-  for (const w of WERKZEUGE) {
+  const gruppen = req.user?.groups || [];
+  const technik = isTechnik(gruppen.map(x => String(x).toLowerCase())) || isPraesident(gruppen.map(x => String(x).toLowerCase()));
+  for (const w of ALLE_WERKZEUGE) {
     if (!scopeErlaubt(scopes, w.pfad, w.methode)) continue;
+    if (!rolleErlaubt(w.rolle, gruppen)) continue;
     server.registerTool(
       w.name,
       {
@@ -290,19 +332,28 @@ function baueServer(req) {
         const t0 = Date.now();
         try {
           const r = await w.lauf(api, args || {});
-          console.log(`[MCP] ${wer} ${w.name} ok ${Date.now() - t0}ms`);
+          const ms = Date.now() - t0;
+          const gelungen = !(r && r.isError);
+          console.log(`[MCP] ${wer} ${w.name} ${gelungen ? 'ok' : 'fehler'} ${ms}ms`);
+          protokolliere(req, w.name, gelungen, ms, gelungen ? null : r.content?.[0]?.text, args);
           return r && r.content ? r : ok(r);
         } catch (e) {
+          const ms = Date.now() - t0;
           console.log(`[MCP] ${wer} ${w.name} fehler ${e.status || ''} ${e.message}`);
+          protokolliere(req, w.name, false, ms, e.message, args);
           return fehler(`${w.name}: ${e.message}`);
         }
       },
     );
   }
+  registriereRessourcen(server, technik);
+  registrierePrompts(server);
   return server;
 }
 
 function mountMcp(app) {
+  protokollAnlegen().catch(e => console.error('[MCP] Protokoll-Tabelle:', e.message));
+
   // mcp.rosenweg4303.ch antwortet an der Wurzel — der Reverse-Proxy leitet
   // den Host unverändert an die API weiter, und ein MCP-Client soll nicht
   // wissen müssen, dass der Pfad intern /mcp heisst.
@@ -318,7 +369,8 @@ function mountMcp(app) {
     res.json({
       name: 'rosenweg-portal', version: VERSION, transport: 'streamable-http',
       auth: 'Authorization: Bearer rw_pat_… (Token aus dem Profil auf www.rosenweg4303.ch)',
-      werkzeuge: WERKZEUGE.map(w => `${w.name} (${w.frei ? 'frei' : 'bestätigt'}, Scope ${w.pfad}:${w.methode === 'GET' ? 'read' : 'write'})`),
+      werkzeuge: ALLE_WERKZEUGE.map(w => `${w.name} (${w.rolle || 'alle'}, ${w.frei ? 'frei' : 'bestätigt'}, Scope ${w.pfad}:${w.methode === 'GET' ? 'read' : 'write'})`),
+      ressourcen: docsListe(false).map(d => d.uri), prompts: PROMPTS.map(p => p.name),
       anleitung: 'claude mcp add rosenweg --transport http https://' + MCP_HOST + ' --header "Authorization: Bearer rw_pat_…"',
     });
   });
@@ -342,7 +394,18 @@ function mountMcp(app) {
   // Zustandslos: keine Sitzungen, also nichts zu beenden.
   app.delete('/mcp', (_req, res) => res.status(405).json({ error: 'Zustandslos — keine Sitzung' }));
 
-  console.log(`[MCP] Portal-MCP bereit: ${WERKZEUGE.length} Werkzeuge, Host ${MCP_HOST}`);
+  // Das Aufruf-Protokoll, für Technik und Präsidium.
+  app.get('/api/mcp/aufrufe', authMiddleware, async (req, res) => {
+    const g = (req.user?.groups || []).map(x => String(x).toLowerCase());
+    if (!isTechnik(g) && !isPraesident(g)) return res.status(403).json({ error: 'Nur Technik oder Präsidium' });
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 1000);
+    try {
+      const r = await pool.query('SELECT id, zeit, user_email, pat_id, werkzeug, ok, dauer_ms, fehler, argumente FROM mcp_aufrufe ORDER BY zeit DESC LIMIT $1', [limit]);
+      res.json({ aufrufe: r.rows });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  console.log(`[MCP] Portal-MCP bereit: ${ALLE_WERKZEUGE.length} Werkzeuge, ${PROMPTS.length} Prompts, Host ${MCP_HOST}`);
 }
 
-module.exports = { mountMcp, WERKZEUGE };
+module.exports = { mountMcp, WERKZEUGE, ALLE_WERKZEUGE };
