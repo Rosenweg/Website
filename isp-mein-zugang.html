@@ -130,11 +130,31 @@
       const [rahmen, punkt, text] = farbe[a.zustand] || farbe.provisioniert;
       const zeilen = [
         a.typ ? ['Art', a.typ] : null,
-        a.vlan ? ['Netz', 'VLAN ' + a.vlan] : null,
+        a.vlan ? ['Netz', (a.netz_name ? a.netz_name + ' · ' : '') + 'VLAN ' + a.vlan] : null,
         (a.down_mbps || a.up_mbps) ? ['Bandbreite', `${a.down_mbps || '?'} ↓ / ${a.up_mbps || '?'} ↑ Mbit/s`] : null,
-        a.reserviert_ip ? ['Feste Adresse', a.reserviert_ip] : null,
         a.switch ? ['Anschlusspunkt', a.switch + (a.port ? ' · Port ' + a.port : '')] : null,
       ].filter(Boolean);
+      // Zugewiesene Adresse mit den Angaben fuers Einrichten von Hand dahinter.
+      // <details> statt eigenem Umschalter: das kann der Browser selbst.
+      const st = a.statisch;
+      const adresse = a.reserviert_ip ? `<dt class="text-gray-500">Zugewiesene Adresse</dt>
+        <dd class="font-mono flex items-center gap-2 flex-wrap">
+          <span>${esc(a.reserviert_ip)}</span>
+          ${st ? `<details class="inline">
+            <summary class="cursor-pointer list-none inline-flex items-center justify-center w-4 h-4 rounded-full border border-gray-400 text-gray-500 text-[10px] font-sans" title="Angaben für eine feste Einrichtung">i</summary>
+            <div class="mt-2 p-3 bg-gray-50 border rounded text-xs font-sans not-italic">
+              <p class="text-gray-600 mb-2">Wer sein Gerät von Hand einrichtet statt per DHCP, trägt das hier ein:</p>
+              <dl class="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1 font-mono">
+                <dt class="text-gray-500 font-sans">IP-Adresse</dt><dd>${esc(st.ip || a.reserviert_ip)}</dd>
+                <dt class="text-gray-500 font-sans">Subnetzmaske</dt><dd>${esc(st.maske || '')}${st.praefix ? ` (/${st.praefix})` : ''}</dd>
+                <dt class="text-gray-500 font-sans">Gateway</dt><dd>${esc(st.gateway || '')}</dd>
+                <dt class="text-gray-500 font-sans">DNS</dt><dd>${esc((st.dns || []).join(', '))}</dd>
+                ${st.domain ? `<dt class="text-gray-500 font-sans">Domäne</dt><dd>${esc(st.domain)}</dd>` : ''}
+              </dl>
+              <p class="text-gray-500 mt-2 font-sans">Per DHCP bekommst du dieselbe Adresse automatisch — von Hand ist nur nötig, wenn das Gerät kein DHCP kann.</p>
+            </div>
+          </details>` : ''}
+        </dd>` : '';
       // Die MAC des eigenen Geraets darf jeder selbst pflegen — beim
       // Routerwechsel ist genau das die Aenderung. Leeren kann nur die
       // Technik; darum steht hier kein Loeschen-Knopf.
@@ -151,6 +171,7 @@
         </div>
         <dl class="grid grid-cols-[9rem_1fr] gap-x-3 gap-y-1 text-sm text-gray-700">
           ${zeilen.map(([k, v]) => `<dt class="text-gray-500">${esc(k)}</dt><dd class="font-mono">${esc(v)}</dd>`).join('')}
+          ${adresse}
           ${macZeile}
         </dl>
         <p class="text-xs text-gray-500 mt-2">${esc(a.grund || '')}</p>

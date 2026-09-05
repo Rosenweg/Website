@@ -18558,9 +18558,21 @@ async function anschlussZeilen(nurWohnungen) {
   return r.rows;
 }
 
-function bewerteAnschluesse(subs, sicht) {
+// maske(24) -> '255.255.255.0'
+function maskeAusPraefix(p) {
+  if (!Number.isFinite(p) || p < 0 || p > 32) return null;
+  const b = [0, 0, 0, 0];
+  for (let i = 0; i < p; i++) b[Math.floor(i / 8)] |= 1 << (7 - (i % 8));
+  return b.join('.');
+}
+
+// opt.statisch: nur fuer die eigene Sicht — Gateway, Maske und DNS sind
+// Angaben, die man zum Einrichten braucht, nicht fuers Wandbild.
+function bewerteAnschluesse(subs, sicht, opt) {
   const clients = (sicht && sicht.clients) || [];
   const devices = (sicht && sicht.devices) || [];
+  const netzeNachVlan = new Map();
+  for (const n of ((sicht && sicht.networks) || [])) if (n.vlan) netzeNachVlan.set(Number(n.vlan), n);
   const switchName = new Map();
   for (const dev of devices) if (dev.mac) switchName.set(String(dev.mac).toLowerCase(), String(dev.name || dev.mac));
   const vonMac = new Map(), vonIp = new Map();
@@ -18580,6 +18592,21 @@ function bewerteAnschluesse(subs, sicht) {
       }
       return false;
     });
+    const netz = sub.vlan ? netzeNachVlan.get(Number(sub.vlan)) : null;
+    // Was man braucht, um das Geraet von Hand einzurichten. Ohne eigenen
+    // DNS im Netz verteilt UniFi den Gateway — dann steht der hier auch.
+    let statischeAngaben = null;
+    if (netz && netz.ip_subnet) {
+      const [gw, pr] = String(netz.ip_subnet).split('/');
+      const dns = netz.dhcpd_dns_enabled
+        ? [netz.dhcpd_dns_1, netz.dhcpd_dns_2, netz.dhcpd_dns_3, netz.dhcpd_dns_4].filter(Boolean)
+        : [gw];
+      statischeAngaben = {
+        ip: sub.fixed_ip || null, praefix: parseInt(pr, 10) || null,
+        maske: maskeAusPraefix(parseInt(pr, 10)), gateway: gw, dns,
+        domain: netz.domain_name || null, netz: netz.name,
+      };
+    }
     const meins = mac ? vonMac.get(mac) : null;
     const aufIp = sub.fixed_ip ? vonIp.get(String(sub.fixed_ip)) : null;
     let zustand, grund;
@@ -18612,9 +18639,21 @@ function bewerteAnschluesse(subs, sicht) {
       switch: sub.switch_name, port: sub.switch_port,
       down_mbps: sub.bandbreite_down_mbps, up_mbps: sub.bandbreite_up_mbps,
       reserviert_ip: sub.fixed_ip, mac_hinterlegt: !!mac,
+      netz_name: netz ? netz.name : null,
       clients: amPort.length, zustand, grund,
+      ...(opt && opt.statisch ? { statisch: statischeAngaben } : {}),
     };
   });
+}
+
+// Die Netze aendern sich selten; fuenf Minuten Cache genuegen.
+const unifiNetzeCache = { at: 0, data: [] };
+async function unifiNetze() {
+  if (Date.now() - unifiNetzeCache.at < 300000) return unifiNetzeCache.data;
+  try { unifiNetzeCache.data = (await unifiGet('rest/networkconf')).data || []; }
+  catch (e) { console.warn('[isp] unifiNetze:', e.message); }
+  unifiNetzeCache.at = Date.now();
+  return unifiNetzeCache.data;
 }
 
 // Kurz gecachte UniFi-Sicht, damit die Bewohnerseite die UDM nicht bei jedem
@@ -18623,11 +18662,12 @@ const unifiSichtCache = { at: 0, data: { clients: [], devices: [] } };
 async function unifiSicht() {
   if (Date.now() - unifiSichtCache.at < 20000) return unifiSichtCache.data;
   try {
-    const [c, d] = await Promise.all([
+    const [c, d, n] = await Promise.all([
       unifiGet('stat/sta'),
       unifiGet('stat/device-basic').catch(() => unifiGet('stat/device')),
+      unifiNetze(),
     ]);
-    unifiSichtCache.data = { clients: c.data || [], devices: d.data || [] };
+    unifiSichtCache.data = { clients: c.data || [], devices: d.data || [], networks: n };
   } catch (e) { console.warn('[isp] unifiSicht:', e.message); }
   unifiSichtCache.at = Date.now();
   return unifiSichtCache.data;
@@ -18753,7 +18793,8 @@ async function nocUnifiHandler(req, res) {
 
     // Anschluesse bewerten — dieselbe Funktion bedient die Bewohnerseite.
     try {
-      out.anschluesse = bewerteAnschluesse(await anschlussZeilen(), { clients: alleClients, devices: alleGeraete });
+      out.anschluesse = bewerteAnschluesse(await anschlussZeilen(),
+        { clients: alleClients, devices: alleGeraete, networks: await unifiNetze() });
     } catch (e) { console.warn('[noc] anschluesse:', e.message); }
 
     // WLANs
@@ -19443,7 +19484,8 @@ app.get('/api/isp/subscribers/me', authMiddleware, async (req, res) => {
     // hinterlegt ist, bevor man sie aendert. Im NOC-Endpunkt steht sie
     // bewusst NICHT: der ist oeffentlich, und das Wandbild haengt im Haus.
     const macs = new Map(zeilen.map(z => [z.id, z.mac]));
-    res.json({ subscribers: bewerteAnschluesse(zeilen, sicht).map(a => ({ ...a, mac: macs.get(a.id) || null })) });
+    res.json({ subscribers: bewerteAnschluesse(zeilen, sicht, { statisch: true })
+      .map(a => ({ ...a, mac: macs.get(a.id) || null })) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
