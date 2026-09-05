@@ -119,6 +119,33 @@ Dahinter stehen zwei Vorfälle vom 5. September 2026:
 
 nginx braucht kein Neuladen — es liest die Dateien bei jedem Request.
 
+## Das Lagebild: eine Datei, zwei Orte
+
+`js/noc-cockpit.js` rendert das NOC. Beide Seiten binden dasselbe Modul ein
+und übergeben nur den Modus:
+
+| Seite | Aufruf | Takt |
+|---|---|---|
+| `noc-fullscreen.html` (Wandbild, fe-www + fe-isp) | `modus: 'wandbild'` | 5 s |
+| `isp-admin.html` (Cockpit oben auf der Seite) | `modus: 'eingebettet'` | 30 s |
+
+Bis zum 5.9.2026 waren es **zwei getrennte Umsetzungen** desselben
+Monitorings, die auseinanderliefen: Das Cockpit hatte Dienst-Ampeln,
+Kontingent-Balken, Top-Sender und die Mail-Pfade; das Wandbild hatte
+Dienstwacht, Nextcloud, die beiden Mail-Warteschlangen und den WAN-Durchsatz
+mit Verlaufsgrafik. Jede Ergänzung landete nur in einer der beiden. Das Modul
+ist die Vereinigung.
+
+Neue Kachel? Nur in `js/noc-cockpit.js` — dann mit
+`scripts/rw-web-ausrollen.sh js/noc-cockpit.js` ausrollen, und beide Seiten
+haben sie.
+
+Den Weg zu den Zahlen wählt das Modul selbst: `?token=…` → öffentliche
+Endpunkte mit `X-Noc-Token` (der Token wandert sofort aus der Adresszeile),
+angemeldet → geschützte Endpunkte, sonst öffentlich ohne Ausweis. Ebenso im
+Modul: Überlappungsschutz, Pause bei verstecktem Tab, und ein `sicher()`, das
+eine kaputte Kachel nicht die ganze Seite kosten lässt.
+
 ## Zwischenspeicher — warum zwei gleiche Dateien verschieden aussehen
 
 Am 5.9.2026 lieferten `www` und `noc` byteweise dieselbe `noc-fullscreen.html`
