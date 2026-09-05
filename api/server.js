@@ -9655,6 +9655,8 @@ app.use('/api/email-archive', require('./routes/email-archive'));
 // unten, nach initDB() — vorher gibt es die Tabellen noch nicht.
 const sshZugang = require('./routes/ssh-zugang');
 app.use('/api/ssh', sshZugang);
+// MCP für Agenten — dünne Schicht über dieser API, siehe api/mcp/index.js
+require('./mcp').mountMcp(app);
 
 // GRUNDBUCH-CROWDSOURCING -> routes/grundbuch.js (Router-Split, PoC-Domäne)
 app.use('/api/grundbuch', require('./routes/grundbuch'));

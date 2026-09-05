@@ -17,6 +17,20 @@ const PAT_GESPERRT = [
   'mqtt/my-app-passwords',// MQTT-Zugangsdaten
 ];
 
+// Scope-Grammatik. Ein Token ohne Scopes hat alle Rechte der Person.
+// pfad ist relativ zu /api/ ("wasch/reservations"); GET zählt als read,
+// alles andere als write. Wird auch vom MCP-Server benutzt, um die
+// Werkzeugliste je Token zu filtern — dieselbe Regel an beiden Stellen.
+function scopeErlaubt(scopes, pfad, method) {
+  if (!Array.isArray(scopes) || scopes.length === 0) return true;
+  const need = method === 'GET' ? 'read' : 'write';
+  const teile = String(pfad || '').split('/').filter(Boolean);
+  const segment = teile[0] || 'root';
+  const unter = teile.length > 1 ? segment + '/' + teile[1] : null;
+  const passt = (s, name) => s === name + ':*' || s === name + ':' + need;
+  return scopes.some(s => s === '*' || s === 'all:' + need || passt(s, segment) || (unter && passt(s, unter)));
+}
+
 async function authMiddleware(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '');
   if (!token) return res.status(401).json({ error: 'Nicht authentifiziert' });
@@ -64,14 +78,9 @@ async function authMiddleware(req, res, next) {
       // Grammatik: "*", "all:read|write", "segment:*", "segment:read|write" — und
       // feiner "segment/unter:…" (z. B. "isp/vpn-accounts:read"), damit ein Token
       // nicht gleich alle 79 ISP-Endpunkte bekommt, wenn er nur sein VPN-Profil will.
-      if (Array.isArray(row.scopes) && row.scopes.length > 0) {
-        const need = req.method === 'GET' ? 'read' : 'write';
-        const teile = vollerPfad.split('/').filter(Boolean);
-        const segment = teile[0] || 'root';
-        const unter = teile.length > 1 ? segment + '/' + teile[1] : null;
-        const passt = (s, name) => s === name + ':*' || s === name + ':' + need;
-        const allowed = row.scopes.some(s => s === '*' || s === 'all:' + need || passt(s, segment) || (unter && passt(s, unter)));
-        if (!allowed) return res.status(403).json({ error: `PAT-Scope fehlt: ${segment}:${need}` });
+      if (!scopeErlaubt(row.scopes, vollerPfad, req.method)) {
+        const segment = vollerPfad.split('/').filter(Boolean)[0] || 'root';
+        return res.status(403).json({ error: `PAT-Scope fehlt: ${segment}:${req.method === 'GET' ? 'read' : 'write'}` });
       }
       // last_used async (kein await damit Antwort nicht blockiert)
       const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || req.socket.remoteAddress;
@@ -153,4 +162,4 @@ function requireUserLogin(req, res, next) {
   next();
 }
 
-module.exports = { authMiddleware, adminOnly, requirePermission, requireUserLogin };
+module.exports = { authMiddleware, adminOnly, requirePermission, requireUserLogin, scopeErlaubt };
