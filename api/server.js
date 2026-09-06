@@ -18293,14 +18293,36 @@ function ispResolveTarget() {
 }
 
 // DNS-Check: prüft ob hostname's A/AAAA/CNAME auf uns zeigt
+// Die Frage lautet: Was sieht die Welt? Darum ein oeffentlicher Resolver und
+// nicht der des Containers. Unser internes DNS ist geteilt — kooperation.
+// zeigt drinnen auf 100.64.2.40, draussen auf 37.17.232.133. Mit dem internen
+// Resolver galt isp.rosenweg4303.ch als "zeigt nicht auf uns", obwohl es von
+// aussen tadellos aufloest. Faellt der oeffentliche Resolver aus, nehmen wir
+// den des Systems und vermerken das.
+async function ispDnsResolver() {
+  const { Resolver } = await import('node:dns/promises');
+  const r = new Resolver();
+  try { r.setServers(['1.1.1.1', '8.8.8.8']); } catch { /* dann eben der System-Resolver */ }
+  return r;
+}
+
 async function ispCheckDns(hostname) {
   const target = ispResolveTarget();
-  const dns = (await import('node:dns/promises')).default;
+  const dns = await ispDnsResolver();
   const out = { hostname, target, a: null, aaaa: null, cname: null, matches: false, error: null,
-                trifft_ueber: null, apex: false, empfehlung: null };
+                trifft_ueber: null, apex: false, empfehlung: null, resolver: 'oeffentlich' };
   try { out.a = await dns.resolve4(hostname).catch(() => null); } catch {}
   try { out.aaaa = await dns.resolve6(hostname).catch(() => null); } catch {}
   try { out.cname = await dns.resolveCname(hostname).catch(() => null); } catch {}
+  // Nichts gefunden? Vielleicht ist der oeffentliche Resolver nicht
+  // erreichbar — dann lieber der System-Resolver als gar keine Auskunft.
+  if (!out.a && !out.aaaa && !out.cname) {
+    const sys = (await import('node:dns/promises')).default;
+    out.a = await sys.resolve4(hostname).catch(() => null);
+    out.aaaa = await sys.resolve6(hostname).catch(() => null);
+    out.cname = await sys.resolveCname(hostname).catch(() => null);
+    if (out.a || out.aaaa || out.cname) out.resolver = 'system (öffentlicher nicht erreichbar)';
+  }
   // Ein CNAME auf die Zonenwurzel ist nicht erlaubt — dort bleibt nur A/AAAA.
   out.apex = String(hostname).split('.').filter(Boolean).length <= 2;
 
