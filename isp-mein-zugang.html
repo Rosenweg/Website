@@ -108,6 +108,11 @@
   });
 
   // VPN
+  // Zuletzt geladene eigene Anschluesse — macAendern bekommt nur die ID
+  // uebergeben und liest den Rest hier nach. Werte mit Anfuehrungszeichen in
+  // einem onclick-Attribut beenden es sonst vorzeitig.
+  let meineAnschluesse = [];
+
   // Zeigt den eigenen Anschluss mit dem Zustand, den auch das NOC bewertet.
   // Wer keinen hat, sieht den Abschnitt gar nicht — ein leerer Kasten mit
   // "keine Daten" ist keine Auskunft.
@@ -121,6 +126,7 @@
       if (!r.ok) return;
       subs = (await r.json()).subscribers || [];
     } catch { return; }
+    meineAnschluesse = subs;
     if (subs.length === 0) { box.classList.add('hidden'); return; }
     box.classList.remove('hidden');
     const farbe = { aktiv: ['bg-emerald-50 border-emerald-300', 'bg-emerald-500', 'In Betrieb'],
@@ -160,7 +166,7 @@
       // Technik; darum steht hier kein Loeschen-Knopf.
       const macZeile = `<dt class="text-gray-500">Geräte-MAC</dt><dd class="font-mono flex items-center gap-2 flex-wrap">
           <span>${a.mac_hinterlegt ? esc(a.mac || '') || 'hinterlegt' : '<span class="text-amber-700">noch keine</span>'}</span>
-          <button onclick="macAendern(${a.id}, ${JSON.stringify(a.label)})" class="text-xs text-blue-600 hover:underline">${a.mac_hinterlegt ? 'ändern' : 'eintragen'}</button>
+          <button onclick="macAendern(${a.id})" class="text-xs text-blue-600 hover:underline">${a.mac_hinterlegt ? 'ändern' : 'eintragen'}</button>
         </dd>`;
       return `<div class="border rounded-lg p-4 ${rahmen}">
         <div class="flex items-center gap-2 mb-2">
@@ -181,8 +187,10 @@
 
   // Neue MAC hinterlegen. Leeren geht hier bewusst nicht: eine leere MAC
   // hebt die Port-Bindung auf, das bleibt bei der Technik.
-  async function macAendern(id, label) {
-    const eingabe = prompt(`Neue Geräte-MAC für ${label}\n\nDie MAC steht meist auf der Rückseite des Routers (12 Zeichen, z. B. 94:2a:6f:1c:3b:af).\nNach dem Speichern kann es ein paar Minuten dauern, bis die alte Adresse abgelaufen ist.`, '');
+  async function macAendern(id) {
+    const a = meineAnschluesse.find(x => x.id === id);
+    if (!a) return;
+    const eingabe = prompt(`Neue Geräte-MAC für ${a.label}\n\nDie MAC steht meist auf der Rückseite des Routers (12 Zeichen, z. B. 94:2a:6f:1c:3b:af).\nNach dem Speichern kann es ein paar Minuten dauern, bis die alte Adresse abgelaufen ist.`, a.mac || '');
     if (eingabe === null) return;
     if (!eingabe.trim()) { alert('Leeren kann nur die Technik — bitte die neue MAC eintragen oder bei der Technik melden.'); return; }
     try {
