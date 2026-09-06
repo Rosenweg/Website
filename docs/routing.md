@@ -56,3 +56,46 @@ Gilt für stweg/website/isp-nginx (`nginx.stweg.conf`, `nginx.conf`, `nginx.isp.
 
 ## Entfernt
 - **NetBox** (`netbox.rosenweg4303.ch`) — Stack am 2026-06-19 entfernt (Crash-Loop → Ceph-Stall). Kachel in `netzwerk.html` + DNS + PVE-Token `netbox@pam!collector` noch aufzuräumen.
+
+## DNS für Web-Routing: CNAME statt IP
+
+Wer eine Reverse-Proxy-Route oder eine Weiterleitung anlegt, muss seinen
+Namen auf uns zeigen lassen. Empfohlen wird ein **CNAME auf
+`public.rosenweg4303.ch`** — und zwar mit Grund: Unsere öffentliche Adresse
+ist dynamisch. Ein CNAME folgt ihr von selbst; wer die IP fest einträgt, hat
+sie mehrfach in seiner Zone stehen und muss bei jedem Wechsel jeden Eintrag
+einzeln nachziehen.
+
+`public.rosenweg4303.ch` trägt in Cloudflare den Kommentar «Public IP for own
+reverse proxy / PMG MX» und ist der Name, den auch der DynDNS-Endpunkt
+(`/api/cf-ddns?hostname=public`) nachführt. Der ältere
+`kooperation.rosenweg4303.ch` zeigt aufs selbe Ziel und bleibt gültig.
+
+`ispCheckDns` unterscheidet vier Fälle und sagt jeweils, was zu tun ist:
+
+| `trifft_ueber` | Bedeutung |
+|---|---|
+| `cname` | CNAME auf `public.…` — das Ideal |
+| `cname_indirekt` | CNAME auf einen anderen unserer Namen (z. B. `kooperation.…`). In Ordnung, Umhängen optional |
+| `a` / `aaaa` | Zeigt korrekt, aber über einen festen Eintrag — hier wird der CNAME empfohlen |
+| `null` | Zeigt nicht auf uns |
+
+An der **Zonenwurzel** ist kein CNAME erlaubt; dort nennt die Prüfung die
+aktuelle Adresse zum Eintragen und sagt, dass sie von Hand nachgezogen
+werden muss.
+
+### Zwei Fallen, in die die Prüfung selbst getappt ist (6.9.2026)
+
+**Sie kannte unsere eigene Adresse nicht.** `ROSENWEG_PUBLIC_IPV4/_IPV6` sind
+nicht gesetzt, also konnte sie nur einen CNAME auf exakt `public.…`
+erkennen — jeder A-Record und jeder CNAME auf einen anderen unserer Namen
+galt als «zeigt nicht auf uns». Sie löst die Adresse jetzt aus
+`cname_target` auf; eine zweite Stelle mit derselben IP braucht es nicht,
+dasselbe Argument wie für den CNAME der Nutzer.
+
+**Sie fragte den falschen Resolver.** Das interne DNS ist geteilt:
+`kooperation.rosenweg4303.ch` zeigt drinnen auf `100.64.2.40`, draussen auf
+`37.17.232.133`. Im Container gefragt, galt `isp.rosenweg4303.ch` als
+fehlerhaft. Die Prüfung fragt jetzt `1.1.1.1`/`8.8.8.8` — die Frage lautet ja,
+was die Welt sieht — mit Rückfall auf den System-Resolver, der im Ergebnis
+vermerkt wird.
