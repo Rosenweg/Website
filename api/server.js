@@ -25970,9 +25970,11 @@ async function initDB() {
         -- sie angelegt hat — dieselbe Falle wie beim Amtspostfach des
         -- Praesidenten. Wer in der Gruppe ist, darf den Eintrag sehen und
         -- aendern; wechselt die Zustaendigkeit, wandert er mit der Gruppe.
-        -- (Kein eigener DO-Block: wir stehen bereits in einem, und ein
-        -- verschachteltes $$ beendet das aeussere — genau das hat die API am
-        -- 6.9.2026 in den Neustartkreis geschickt.)
+        -- Kein eigener DO-Block: Wir stehen bereits in einem, und ein
+        -- verschachteltes Dollar-Anfuehrungspaar beendet das aeussere. Auch
+        -- in einem SQL-Kommentar, denn innerhalb eines dollar-quotierten
+        -- Blocks ist alles nur Text. Beides hat die API am 6.9.2026
+        -- nacheinander in den Neustartkreis geschickt.
         ALTER TABLE isp_reverse_proxy_routes ADD COLUMN IF NOT EXISTS owner_group VARCHAR(40);
         ALTER TABLE isp_redirects            ADD COLUMN IF NOT EXISTS owner_group VARCHAR(40);
         ALTER TABLE isp_mail_relays          ADD COLUMN IF NOT EXISTS owner_group VARCHAR(40);
