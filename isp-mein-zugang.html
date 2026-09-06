@@ -660,7 +660,7 @@
     try {
       const r = await AuthentikAuth.apiFetch('/api/isp/reverse-proxy/' + id + '/recheck-dns', { method: 'POST' });
       const d = await r.json();
-      dnsDialog(d);
+      dnsDialog({ ...d, rp_id: id });
       await loadRp();
     } catch (e) { alert('Fehler: ' + e.message); }
   }
@@ -668,6 +668,24 @@
   // eine Empfehlung und ein Wert zum Abschreiben — dafuer ist ein Kasten mit
   // Struktur da, kein Systemhinweis. Die Empfehlung kommt vom Server, damit
   // sie an einer Stelle steht und nicht in jeder Seite neu formuliert wird.
+  // Setzt den CNAME in unserer Zone und prueft gleich nach. Fremde
+  // bestehende Eintraege ruehrt der Server nicht an — dann sagt er warum.
+  async function dnsEinrichten(id) {
+    const knopf = document.getElementById('dns-setzen');
+    if (knopf) { knopf.disabled = true; knopf.textContent = 'Richte ein…'; }
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/isp/reverse-proxy/${id}/dns-einrichten`, { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      document.querySelector('.fixed.inset-0')?.remove();
+      if (d.check) dnsDialog({ ...d.check, rp_id: id, meldung: d.grund, geklappt: d.ok });
+      else alert(d.grund || d.error || 'Unbekannter Fehler');
+      await loadRp();
+    } catch (e) {
+      if (knopf) { knopf.disabled = false; knopf.textContent = 'DNS jetzt einrichten'; }
+      alert('Fehler: ' + e.message);
+    }
+  }
+
   function dnsDialog(d) {
     const zustand = !d.matches
       ? ['Zeigt noch nicht auf uns', 'bg-amber-50 border-amber-300', 'bg-amber-500']
@@ -686,6 +704,7 @@
             <span class="w-2.5 h-2.5 rounded-full ${zustand[2]}"></span>
             <span class="font-semibold text-gray-900">${zustand[0]}</span>
           </div>
+          ${d.meldung ? `<p class="text-sm ${d.geklappt ? 'text-emerald-800' : 'text-rose-800'} mt-2">${esc(d.meldung)}</p>` : ''}
           ${d.empfehlung ? `<p class="text-sm text-gray-700 mt-2">${esc(d.empfehlung)}</p>` : ''}
         </div>
         <p class="text-xs text-gray-500 mb-1">Was im DNS steht:</p>
@@ -699,8 +718,10 @@
           ${(ziel.aufgeloest_ipv4 || []).length ? `<dt class="text-gray-500">A</dt><dd class="font-mono">${esc((ziel.aufgeloest_ipv4 || []).join(', '))}</dd>` : ''}
           ${(ziel.aufgeloest_ipv6 || []).length ? `<dt class="text-gray-500">AAAA</dt><dd class="font-mono">${esc((ziel.aufgeloest_ipv6 || []).join(', '))}</dd>` : ''}
         </dl>
+        ${d.cf_records && d.cf_records.length ? `<p class="text-xs text-gray-500 mt-3">In unserer Zone <span class="font-mono">${esc(d.eigene_zone || '')}</span> steht: ${esc(d.cf_records.map(r => r.type + ' ' + r.content + (r.proxied ? ' (proxied)' : '')).join(', '))}</p>` : ''}
         <p class="text-xs text-gray-500 mt-3">Nach einer Änderung dauert es je nach Anbieter einige Minuten. Das System prüft ohnehin alle fünf Minuten selbst nach.</p>
-        <div class="flex justify-end mt-4">
+        <div class="flex justify-end gap-2 mt-4">
+          ${(!d.matches && d.eigene_zone && !d.apex && d.rp_id) ? `<button id="dns-setzen" onclick="dnsEinrichten(${d.rp_id})" class="px-3 py-1.5 bg-indigo-600 text-white rounded text-sm">DNS jetzt einrichten</button>` : ''}
           <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Schliessen</button>
         </div>
       </div></div>`;

@@ -18293,6 +18293,78 @@ function ispResolveTarget() {
 }
 
 // DNS-Check: prüft ob hostname's A/AAAA/CNAME auf uns zeigt
+// ── Cloudflare: unsere eigenen Zonen ────────────────────────────────────
+// Zeigt ein Web-Routing auf einen Namen in einer Zone, die uns gehoert, dann
+// muss ihn niemand von Hand eintragen — wir koennen ihn selbst setzen. Und
+// wir koennen ihn zuverlaessig PRUEFEN: Bei proxied Eintraegen verbirgt
+// Cloudflare den CNAME und liefert eigene Adressen, wodurch jede Pruefung
+// ueber oeffentliches DNS "zeigt nicht auf uns" meldet, obwohl alles laeuft
+// (gemessen an noc./mcp./chat. am 6.9.2026).
+const cfZonenCache = { at: 0, data: [] };
+async function ispCfZonen() {
+  const tok = process.env.CLOUDFLARE_API_TOKEN;
+  if (!tok) return [];
+  if (Date.now() - cfZonenCache.at < 300000 && cfZonenCache.data.length) return cfZonenCache.data;
+  try {
+    const r = await fetch('https://api.cloudflare.com/client/v4/zones?per_page=50', {
+      headers: { Authorization: 'Bearer ' + tok }, signal: AbortSignal.timeout(8000),
+    });
+    const d = await r.json();
+    cfZonenCache.data = (d.result || []).map(z => ({ id: z.id, name: String(z.name).toLowerCase() }));
+    cfZonenCache.at = Date.now();
+  } catch (e) { console.warn('[isp] Cloudflare-Zonen:', e.message); }
+  return cfZonenCache.data;
+}
+async function ispCfZoneFuer(hostname) {
+  const h = String(hostname || '').toLowerCase().replace(/\.$/, '');
+  const zonen = await ispCfZonen();
+  // Laengste passende Zone gewinnt (rosenweg9.ch vor .ch)
+  return zonen.filter(z => h === z.name || h.endsWith('.' + z.name))
+              .sort((a, b) => b.name.length - a.name.length)[0] || null;
+}
+async function ispCfRecords(zoneId, name) {
+  const tok = process.env.CLOUDFLARE_API_TOKEN;
+  const r = await fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records?name=${encodeURIComponent(name)}`, {
+    headers: { Authorization: 'Bearer ' + tok }, signal: AbortSignal.timeout(8000),
+  });
+  const d = await r.json();
+  return d.result || [];
+}
+// Setzt den CNAME, wenn noch keiner da ist. Einen fremden Eintrag ruehren wir
+// NICHT an — er koennte zu einem Dienst gehoeren, von dem wir nichts wissen.
+// proxied=false mit Absicht: Bei proxied terminiert Cloudflare TLS, und unser
+// Traefik holt sein Let's-Encrypt-Zertifikat ueber genau diesen Namen.
+async function ispCfCnameSetzen(hostname) {
+  const ziel = ispResolveTarget().cname_target;
+  const zone = await ispCfZoneFuer(hostname);
+  if (!zone) return { ok: false, grund: 'Nicht in einer Zone, die wir verwalten' };
+  const name = String(hostname).toLowerCase().replace(/\.$/, '');
+  if (name === zone.name) return { ok: false, grund: 'An der Zonenwurzel ist kein CNAME erlaubt' };
+  try {
+    const vorhanden = await ispCfRecords(zone.id, name);
+    if (vorhanden.length) {
+      const eigen = vorhanden.some(r =>
+        (r.type === 'CNAME' && String(r.content).toLowerCase().replace(/\.$/, '') === ziel.toLowerCase()));
+      return eigen
+        ? { ok: true, unveraendert: true, grund: 'Zeigt bereits auf ' + ziel, records: vorhanden.map(r => `${r.type} ${r.content}`) }
+        : { ok: false, grund: 'Es gibt bereits einen Eintrag — den fassen wir nicht an',
+            records: vorhanden.map(r => `${r.type} ${r.content}${r.proxied ? ' (proxied)' : ''}`) };
+    }
+    const tok = process.env.CLOUDFLARE_API_TOKEN;
+    const r = await fetch(`https://api.cloudflare.com/client/v4/zones/${zone.id}/dns_records`, {
+      method: 'POST', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'CNAME', name, content: ziel, ttl: 1, proxied: false,
+                             comment: 'Web-Routing, automatisch gesetzt' }),
+      signal: AbortSignal.timeout(10000),
+    });
+    const d = await r.json();
+    if (!d.success) return { ok: false, grund: (d.errors || []).map(e => e.message).join('; ') || 'Cloudflare lehnte ab' };
+    return { ok: true, angelegt: true, grund: `CNAME ${name} → ${ziel} angelegt` };
+  } catch (e) {
+    return { ok: false, grund: e.message };
+  }
+}
+
 // Die Frage lautet: Was sieht die Welt? Darum ein oeffentlicher Resolver und
 // nicht der des Containers. Unser internes DNS ist geteilt — kooperation.
 // zeigt drinnen auf 100.64.2.40, draussen auf 37.17.232.133. Mit dem internen
@@ -18345,10 +18417,28 @@ async function ispCheckDns(hostname) {
   // resolve4 folgt der Kette, resolveCname nicht — ohne diese Unterscheidung
   // haetten wir solche Eintraege faelschlich als feste A-Eintraege gescholten.
   const hatCname = Array.isArray(out.cname) && out.cname.length > 0;
-  out.matches = perCname || perA || perAaaa;
+  // Eigene Zone: Cloudflare direkt fragen. Bei proxied Eintraegen sieht man
+  // von aussen nur Cloudflares Adressen — der Eintrag ist trotzdem richtig.
+  const zone = await ispCfZoneFuer(hostname).catch(() => null);
+  let perCf = false;
+  if (zone) {
+    out.eigene_zone = zone.name;
+    try {
+      const recs = await ispCfRecords(zone.id, String(hostname).toLowerCase());
+      out.cf_records = recs.map(r => ({ type: r.type, content: r.content, proxied: !!r.proxied }));
+      perCf = recs.some(r =>
+        (r.type === 'CNAME' && [target.cname_target.toLowerCase(), 'kooperation.rosenweg4303.ch']
+            .includes(String(r.content).toLowerCase().replace(/\.$/, '')))
+        || (r.type === 'A' && zielV4.includes(String(r.content)))
+        || (r.type === 'AAAA' && zielV6.includes(String(r.content))));
+      out.proxied = recs.some(r => r.proxied);
+    } catch (e) { /* dann bleibt es beim oeffentlichen Bild */ }
+  }
+  out.matches = perCname || perA || perAaaa || perCf;
   out.trifft_ueber = perCname ? 'cname'
     : (hatCname && (perA || perAaaa)) ? 'cname_indirekt'
-    : perA ? 'a' : perAaaa ? 'aaaa' : null;
+    : perA ? 'a' : perAaaa ? 'aaaa'
+    : perCf ? 'cloudflare' : null;
   out.cname_ziel = hatCname ? String(out.cname[0]).toLowerCase().replace(/\.$/, '') : null;
 
   // Der Rat ist immer derselbe und hat einen handfesten Grund: Unsere
@@ -18359,11 +18449,17 @@ async function ispCheckDns(hostname) {
   if (!out.matches) {
     out.empfehlung = out.apex
       ? `An der Zonenwurzel ist kein CNAME erlaubt — trag dort A ${(out.target.aufgeloest_ipv4[0] || '?')}${out.target.aufgeloest_ipv6[0] ? ' und AAAA ' + out.target.aufgeloest_ipv6[0] : ''} ein. Für Unterdomänen ist ein CNAME auf ${target.cname_target} besser, der folgt einem Adresswechsel von selbst.`
-      : `Empfohlen: ein CNAME auf ${target.cname_target}. Der folgt einem Adresswechsel von selbst; feste A-/AAAA-Einträge musst du bei jedem Wechsel einzeln nachziehen.`;
+      : (out.eigene_zone
+          ? `Der Name liegt in unserer Zone ${out.eigene_zone} — wir können den CNAME auf ${target.cname_target} für dich setzen.`
+          : `Empfohlen: ein CNAME auf ${target.cname_target}. Der folgt einem Adresswechsel von selbst; feste A-/AAAA-Einträge musst du bei jedem Wechsel einzeln nachziehen.`);
   } else if (out.trifft_ueber === 'cname_indirekt') {
     out.empfehlung = `In Ordnung: Der CNAME zeigt auf ${out.cname_ziel} und von dort auf uns — bei einem Adresswechsel folgt er mit. Wenn du magst, kannst du ihn auf ${target.cname_target} umhängen; nötig ist es nicht.`;
   } else if ((out.trifft_ueber === 'a' || out.trifft_ueber === 'aaaa') && !out.apex) {
     out.empfehlung = `Zeigt korrekt, aber über einen festen ${out.trifft_ueber === 'a' ? 'A' : 'AAAA'}-Eintrag. Ein CNAME auf ${target.cname_target} wäre haltbarer: Ändert sich unsere öffentliche Adresse, folgt er von selbst — sonst musst du jeden Eintrag einzeln nachziehen.`;
+  } else if (out.trifft_ueber === 'cloudflare') {
+    out.empfehlung = out.proxied
+      ? `In Ordnung. Der Eintrag steht in unserer Zone und läuft über Cloudflares Proxy — von aussen sieht man darum Cloudflares Adressen statt unserer.`
+      : `In Ordnung. Der Eintrag steht in unserer Zone.`;
   } else if (out.apex && out.matches) {
     out.empfehlung = `In Ordnung. An der Zonenwurzel geht es nicht anders — ändert sich unsere Adresse, muss dieser Eintrag von Hand nachgezogen werden.`;
   }
@@ -19239,6 +19335,37 @@ app.post('/api/isp/redirects/:id/recheck-dns', authMiddleware, async (req, res) 
     res.json({ ...check, updated: upd });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// DNS selbst einrichten — nur fuer Namen in unseren eigenen Zonen. Owner
+// oder Admin; ein fremder bestehender Eintrag wird nicht ueberschrieben.
+async function ispDnsEinrichten(req, res, tabelle, spalte) {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const e = await pool.query(`SELECT * FROM ${tabelle} WHERE id = $1`, [id]);
+    if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    const v = e.rows[0];
+    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    if (!isOwner && !ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Owner oder Admin' });
+    const host = v[spalte];
+    const gesetzt = await ispCfCnameSetzen(host);
+    console.log(`[isp] DNS einrichten ${host} durch ${req.user.email}: ${gesetzt.ok ? 'ok' : 'abgelehnt'} — ${gesetzt.grund}`);
+    // Direkt nachpruefen: Cloudflare ist sofort wirksam, oeffentliches DNS
+    // braucht je nach Zwischenspeicher etwas laenger.
+    const check = await ispCheckDns(host).catch(() => null);
+    if (check && check.matches) {
+      await pool.query(
+        `UPDATE ${tabelle} SET approval_status = CASE WHEN approval_status = 'pending_dns' THEN 'approved' ELSE approval_status END,
+           dns_verified_at = NOW(), last_dns_check_at = NOW(),
+           active = CASE WHEN approval_status IN ('approved','pending_dns') THEN true ELSE active END
+         WHERE id = $1`, [id]).catch(() => {});
+    }
+    res.json({ ...gesetzt, check });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+app.post('/api/isp/reverse-proxy/:id/dns-einrichten', authMiddleware, (req, res) =>
+  ispDnsEinrichten(req, res, 'isp_reverse_proxy_routes', 'hostname'));
+app.post('/api/isp/redirects/:id/dns-einrichten', authMiddleware, (req, res) =>
+  ispDnsEinrichten(req, res, 'isp_redirects', 'source_host'));
 
 app.post('/api/isp/reverse-proxy/:id/recheck-dns', authMiddleware, async (req, res) => {
   try {
