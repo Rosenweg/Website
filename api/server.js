@@ -22726,13 +22726,15 @@ app.get('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
     const email = (req.user.email || '').toLowerCase();
     const r = admin
       ? await pool.query(
-          `SELECT mr.*, r.domain, r.mailcow_managed
+          `SELECT mr.*, r.domain, r.mailcow_managed,
+                  r.imap_sni_hostname, r.imap_port, r.smtps_sni_hostname, r.smtps_port, r.sni_alias
              FROM mailbox_requests mr
              LEFT JOIN isp_mail_relays r ON r.id = mr.relay_id
             ORDER BY CASE mr.status WHEN 'pending' THEN 0 ELSE 1 END, mr.created_at DESC`,
         )
       : await pool.query(
-          `SELECT mr.*, r.domain, r.mailcow_managed
+          `SELECT mr.*, r.domain, r.mailcow_managed,
+                  r.imap_sni_hostname, r.imap_port, r.smtps_sni_hostname, r.smtps_port, r.sni_alias
              FROM mailbox_requests mr
              LEFT JOIN isp_mail_relays r ON r.id = mr.relay_id
             WHERE LOWER(mr.antragsteller_email) = $1
