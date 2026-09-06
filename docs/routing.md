@@ -99,3 +99,32 @@ dasselbe Argument wie für den CNAME der Nutzer.
 fehlerhaft. Die Prüfung fragt jetzt `1.1.1.1`/`8.8.8.8` — die Frage lautet ja,
 was die Welt sieht — mit Rückfall auf den System-Resolver, der im Ergebnis
 vermerkt wird.
+
+### Namen in unseren eigenen Zonen: automatisch
+
+Die Anwendung hat Cloudflare-Zugang und verwaltet die Zonen
+`rosenweg4303.ch` und `rosenweg9.ch`. Liegt der Hostname einer Route dort,
+muss ihn niemand von Hand eintragen — im DNS-Dialog erscheint **«DNS jetzt
+einrichten»**, und der Server legt den CNAME auf `public.rosenweg4303.ch`
+an, prüft sofort nach und schaltet die Route frei.
+
+Zwei Grenzen mit Absicht:
+
+- **Ein vorhandener Eintrag wird nie überschrieben.** Er könnte zu einem
+  Dienst gehören, von dem die Route nichts weiss. Der Server meldet
+  stattdessen, was dort steht (`Es gibt bereits einen Eintrag — den fassen
+  wir nicht an`).
+- **`proxied = false`.** Traefik holt sein Let's-Encrypt-Zertifikat über
+  genau diesen Namen; hinter Cloudflares Proxy terminiert Cloudflare TLS.
+
+### Proxied-Einträge waren ein blinder Fleck
+
+Bei `proxied = true` verbirgt Cloudflare den CNAME und antwortet mit eigenen
+Adressen. Eine Prüfung über öffentliches DNS sieht dann weder unseren
+Zielnamen noch unsere IP. Am 6.9.2026 galten `noc.`, `mcp.` und `chat.`
+darum als «zeigt nicht auf uns», obwohl alle drei tadellos laufen.
+
+Für Namen in unseren Zonen fragt `ispCheckDns` jetzt **Cloudflare direkt**
+(`trifft_ueber = 'cloudflare'`, dazu `proxied`), statt aus dem öffentlichen
+DNS zu raten. Für fremde Domains bleibt es beim öffentlichen Resolver — dort
+ist das die einzige Wahrheit, die zählt.
