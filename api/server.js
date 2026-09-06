@@ -18997,9 +18997,24 @@ async function buildTraefikDynamicConfig() {
   const mrs = await pool.query(
     `SELECT * FROM isp_mail_relays
       WHERE active = true
-        AND (imap_sni_hostname IS NOT NULL OR smtps_sni_hostname IS NOT NULL)
+        AND (imap_sni_hostname IS NOT NULL OR smtps_sni_hostname IS NOT NULL OR sni_alias IS NOT NULL)
       ORDER BY id`).catch(() => ({ rows: [] }));
   for (const m of mrs.rows) {
+    // Aliasname (z. B. mail.<domain>): IMAPS und Submission beide auf Mailcow,
+    // dessen Zertifikat den Namen abdeckt. Siehe Kommentar bei sni_alias.
+    if (m.sni_alias && m.imap_host) {
+      for (const [ep, port] of [['imaps', m.imap_port || 993], ['smtps', 465]]) {
+        const id = safeId(`${ep}-alias-${m.id}-${m.sni_alias}`);
+        const svc = id + '-svc';
+        cfg.tcp.routers[id] = {
+          rule: `HostSNI(\`${m.sni_alias}\`)`,
+          entryPoints: [ep],
+          service: svc,
+          tls: { passthrough: true },
+        };
+        cfg.tcp.services[svc] = { loadBalancer: { servers: [{ address: `${m.imap_host}:${port}` }] } };
+      }
+    }
     if (m.imap_sni_hostname && m.imap_host) {
       const id = safeId(`imaps-${m.id}-${m.imap_sni_hostname}`);
       const svc = id + '-svc';
@@ -25825,6 +25840,15 @@ async function initDB() {
       ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS imap_host VARCHAR(255);
       ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS imap_port INTEGER DEFAULT 993;
       ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS smtps_sni_hostname VARCHAR(255);
+      -- Zusaetzlicher Name, unter dem dasselbe Postfach erreichbar sein soll —
+      -- typisch mail.<domain>, weil Leute den in ihr Mailprogramm tippen.
+      -- Wichtig: Der Name MUSS im Zertifikat von Mailcow stehen, sonst bekommt
+      -- der Client eine Namensabweichung. Darum kein automatisches Ableiten:
+      -- mail.rosenweg4303.ch steht dort, mail.rosenweg9.ch nicht.
+      -- Beide Alias-Router zeigen auf Mailcow (imap_host), auch der fuer 465 —
+      -- PMGs Zertifikat kennt diese Namen nicht. Ausgehend aendert das nichts:
+      -- Mailcow reicht ohnehin ueber PMG hinaus.
+      ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS sni_alias VARCHAR(255);
       ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS smtps_host VARCHAR(255);
       ALTER TABLE isp_mail_relays ADD COLUMN IF NOT EXISTS smtps_port INTEGER DEFAULT 465;
       -- mailcow_managed=true: Rosenweg betreibt die Mailcow-Instanz für diese Domain,
