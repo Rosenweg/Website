@@ -18296,13 +18296,45 @@ function ispResolveTarget() {
 async function ispCheckDns(hostname) {
   const target = ispResolveTarget();
   const dns = (await import('node:dns/promises')).default;
-  const out = { hostname, target, a: null, aaaa: null, cname: null, matches: false, error: null };
+  const out = { hostname, target, a: null, aaaa: null, cname: null, matches: false, error: null,
+                trifft_ueber: null, apex: false, empfehlung: null };
   try { out.a = await dns.resolve4(hostname).catch(() => null); } catch {}
   try { out.aaaa = await dns.resolve6(hostname).catch(() => null); } catch {}
   try { out.cname = await dns.resolveCname(hostname).catch(() => null); } catch {}
-  if (target.public_ipv4 && Array.isArray(out.a) && out.a.includes(target.public_ipv4)) out.matches = true;
-  if (target.public_ipv6 && Array.isArray(out.aaaa) && out.aaaa.includes(target.public_ipv6)) out.matches = true;
-  if (Array.isArray(out.cname) && out.cname.some(c => c.toLowerCase().replace(/\.$/, '') === target.cname_target.toLowerCase())) out.matches = true;
+  // Ein CNAME auf die Zonenwurzel ist nicht erlaubt — dort bleibt nur A/AAAA.
+  out.apex = String(hostname).split('.').filter(Boolean).length <= 2;
+
+  const perCname = Array.isArray(out.cname)
+    && out.cname.some(c => c.toLowerCase().replace(/\.$/, '') === target.cname_target.toLowerCase());
+  const perA = !!(target.public_ipv4 && Array.isArray(out.a) && out.a.includes(target.public_ipv4));
+  const perAaaa = !!(target.public_ipv6 && Array.isArray(out.aaaa) && out.aaaa.includes(target.public_ipv6));
+  // Ein CNAME auf einen ANDEREN unserer Namen (historisch kooperation.
+  // statt public.) loest ueber die Kette trotzdem auf unsere Adresse auf.
+  // resolve4 folgt der Kette, resolveCname nicht — ohne diese Unterscheidung
+  // haetten wir solche Eintraege faelschlich als feste A-Eintraege gescholten.
+  const hatCname = Array.isArray(out.cname) && out.cname.length > 0;
+  out.matches = perCname || perA || perAaaa;
+  out.trifft_ueber = perCname ? 'cname'
+    : (hatCname && (perA || perAaaa)) ? 'cname_indirekt'
+    : perA ? 'a' : perAaaa ? 'aaaa' : null;
+  out.cname_ziel = hatCname ? String(out.cname[0]).toLowerCase().replace(/\.$/, '') : null;
+
+  // Der Rat ist immer derselbe und hat einen handfesten Grund: Unsere
+  // oeffentliche Adresse ist dynamisch und wird per DynDNS auf
+  // cname_target nachgefuehrt. Wer sie als festen A-/AAAA-Eintrag
+  // hinterlegt, muss bei jedem Wechsel jeden Eintrag einzeln nachziehen —
+  // mit einem CNAME passiert das von selbst.
+  if (!out.matches) {
+    out.empfehlung = out.apex
+      ? `An der Zonenwurzel ist kein CNAME erlaubt — trag dort A ${target.public_ipv4 || '?'}${target.public_ipv6 ? ' und AAAA ' + target.public_ipv6 : ''} ein. Für Unterdomänen ist ein CNAME auf ${target.cname_target} besser.`
+      : `Empfohlen: ein CNAME auf ${target.cname_target}. Der folgt einem Adresswechsel von selbst; feste A-/AAAA-Einträge musst du bei jedem Wechsel einzeln nachziehen.`;
+  } else if (out.trifft_ueber === 'cname_indirekt') {
+    out.empfehlung = `In Ordnung: Der CNAME zeigt auf ${out.cname_ziel} und von dort auf uns — bei einem Adresswechsel folgt er mit. Wenn du magst, kannst du ihn auf ${target.cname_target} umhängen; nötig ist es nicht.`;
+  } else if ((out.trifft_ueber === 'a' || out.trifft_ueber === 'aaaa') && !out.apex) {
+    out.empfehlung = `Zeigt korrekt, aber über einen festen ${out.trifft_ueber === 'a' ? 'A' : 'AAAA'}-Eintrag. Ein CNAME auf ${target.cname_target} wäre haltbarer: Ändert sich unsere öffentliche Adresse, folgt er von selbst — sonst musst du jeden Eintrag einzeln nachziehen.`;
+  } else if (out.apex && out.matches) {
+    out.empfehlung = `In Ordnung. An der Zonenwurzel geht es nicht anders — ändert sich unsere Adresse, muss dieser Eintrag von Hand nachgezogen werden.`;
+  }
   return out;
 }
 
