@@ -18275,6 +18275,20 @@ async function userOwnsWohnung(email, wohnungId) {
 // Hostnames die wie Rosenweg-Eigene aussehen brauchen Admin-Prüfung,
 // damit niemand z.B. 'rosenweg4303.com' oder 'r12.rosenweg.ch' anlegt
 // und damit Bewohner faked.
+// Darf diese Person den Eintrag sehen und aendern? Entweder gehoert er ihr
+// persoenlich, oder er gehoert einer Gruppe, in der sie ist. Admins ohnehin.
+function meineGruppen(req) {
+  return (req.user?.groups || []).map(g => String(g).toLowerCase());
+}
+function ispIstBesitzer(req, row) {
+  if (!row) return false;
+  const email = (req.user?.email || '').toLowerCase();
+  if ((row.owner_email || '').toLowerCase() === email && email) return true;
+  const g = (row.owner_group || '').toLowerCase();
+  if (!g) return false;
+  return (req.user?.groups || []).some(x => String(x).toLowerCase() === g);
+}
+
 function hostNeedsAdminApproval(hostname) {
   const h = (hostname || '').toLowerCase();
   if (h.includes('rosenweg')) return 'enthaelt "rosenweg"';
@@ -19329,7 +19343,7 @@ app.post('/api/isp/redirects/:id/recheck-dns', authMiddleware, async (req, res) 
     const e = await pool.query('SELECT * FROM isp_redirects WHERE id = $1', [id]);
     if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = e.rows[0];
-    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    const isOwner = ispIstBesitzer(req, v);
     if (!isOwner && !ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     const check = await ispCheckDns(v.source_host);
     const upd = check.matches
@@ -19353,7 +19367,7 @@ async function ispDnsEinrichten(req, res, tabelle, spalte) {
     const e = await pool.query(`SELECT * FROM ${tabelle} WHERE id = $1`, [id]);
     if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = e.rows[0];
-    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    const isOwner = ispIstBesitzer(req, v);
     if (!isOwner && !ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     const host = v[spalte];
     const gesetzt = await ispCfCnameSetzen(host, req.body?.proxied === true);
@@ -19382,7 +19396,7 @@ app.post('/api/isp/reverse-proxy/:id/recheck-dns', authMiddleware, async (req, r
     const e = await pool.query('SELECT * FROM isp_reverse_proxy_routes WHERE id = $1', [id]);
     if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = e.rows[0];
-    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    const isOwner = ispIstBesitzer(req, v);
     if (!isOwner && !ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     const check = await ispCheckDns(v.hostname);
     const upd = check.matches
@@ -22213,7 +22227,9 @@ app.get('/api/isp/reverse-proxy', authMiddleware, async (req, res) => {
                            ORDER BY r.active DESC, r.hostname`)
       : await pool.query(`SELECT r.*, w.bezeichnung AS wohnung_bezeichnung, w.stweg FROM isp_reverse_proxy_routes r
                            LEFT JOIN wohnungen w ON w.id = r.wohnung_id
-                           WHERE LOWER(r.owner_email) = $1 OR r.public = true ORDER BY r.active DESC, r.hostname`, [email]);
+                           WHERE LOWER(r.owner_email) = $1 OR r.public = true
+                                 OR LOWER(COALESCE(r.owner_group,'')) = ANY($2::text[])
+                           ORDER BY r.active DESC, r.hostname`, [email, meineGruppen(req)]);
     res.json({ routes: r.rows, is_admin: admin });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -22221,6 +22237,14 @@ app.get('/api/isp/reverse-proxy', authMiddleware, async (req, res) => {
 app.post('/api/isp/reverse-proxy', authMiddleware, async (req, res) => {
   try {
     const b = req.body || {};
+    // Gehoert der Eintrag mir oder einer Gruppe? Eine Gruppe darf nur waehlen,
+    // wer selbst darin ist — sonst koennte man Eintraege bei fremden Gruppen
+    // ablegen. Admins duerfen jede.
+    const wunschGruppe = String(req.body?.owner_group || '').trim().toLowerCase() || null;
+    if (wunschGruppe && !ispIsAdmin(req) && !meineGruppen(req).includes(wunschGruppe)) {
+      return res.status(403).json({ error: `Du bist nicht in der Gruppe ${wunschGruppe}` });
+    }
+
     if (!b.hostname || !b.backend_url) return res.status(400).json({ error: 'hostname + backend_url Pflicht' });
     // User darf eigene Routen anlegen, Admin alles
     const owner = b.owner_email || req.user.email;
@@ -22235,12 +22259,12 @@ app.post('/api/isp/reverse-proxy', authMiddleware, async (req, res) => {
           dns_verified_at: null, last_dns_check_at: null }
       : await ispDecideApproval(b.hostname);
     const r = await pool.query(
-      `INSERT INTO isp_reverse_proxy_routes (hostname, backend_url, owner_email, wohnung_id, ssl, ssl_method,
+      `INSERT INTO isp_reverse_proxy_routes (hostname, backend_url, owner_email, owner_group, wohnung_id, ssl, ssl_method,
                                               public, auth_required, rate_limit_per_min, active, notizen,
                                               approval_status, approval_reason, dns_verified_at, last_dns_check_at,
                                               protocol, entry_point, cert_resolver, strip_prefix, preserve_host,
                                               read_timeout_s, pass_through_tls)
-       VALUES ($1,$2,$3,$4,COALESCE($5,true),$6,COALESCE($7,false),COALESCE($8,false),$9,$10,$11,$12,$13,$14,$15,
+       VALUES ($1,$2,$3,$23,$4,COALESCE($5,true),$6,COALESCE($7,false),COALESCE($8,false),$9,$10,$11,$12,$13,$14,$15,
                COALESCE($16,'http'),$17,COALESCE($18,'cf'),$19,COALESCE($20,true),COALESCE($21,0),COALESCE($22,false))
        RETURNING *`,
       [b.hostname.toLowerCase(), b.backend_url, owner, b.wohnung_id || null,
@@ -22248,7 +22272,8 @@ app.post('/api/isp/reverse-proxy', authMiddleware, async (req, res) => {
        b.rate_limit_per_min || null, decision.active, b.notizen || null,
        decision.approval_status, decision.approval_reason, decision.dns_verified_at || null, decision.last_dns_check_at || null,
        b.protocol || null, b.entry_point || null, b.cert_resolver || null,
-       b.strip_prefix || null, b.preserve_host, b.read_timeout_s || null, b.pass_through_tls],
+       b.strip_prefix || null, b.preserve_host, b.read_timeout_s || null, b.pass_through_tls,
+       wunschGruppe],
     );
     res.json({ ...r.rows[0], dns_info: ispResolveTarget() });
   } catch (err) {
@@ -22264,7 +22289,7 @@ app.put('/api/isp/reverse-proxy/:id', authMiddleware, async (req, res) => {
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = existing.rows[0];
     const admin = ispIsAdmin(req);
-    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    const isOwner = ispIstBesitzer(req, v);
     if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     const b = req.body || {};
     const updates = []; const params = [];
@@ -22272,7 +22297,7 @@ app.put('/api/isp/reverse-proxy/:id', authMiddleware, async (req, res) => {
     const userFields = ['backend_url','ssl','auth_required','rate_limit_per_min','active','notizen',
                         'protocol','entry_point','cert_resolver','strip_prefix','preserve_host',
                         'read_timeout_s','pass_through_tls'];
-    const adminFields = ['hostname','owner_email','wohnung_id','ssl_method','public',
+    const adminFields = ['hostname','owner_email','owner_group','wohnung_id','ssl_method','public',
                          'approval_status','approval_reason'];
     const allowed = admin ? [...userFields, ...adminFields] : userFields;
     for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
@@ -22291,7 +22316,7 @@ app.delete('/api/isp/reverse-proxy/:id', authMiddleware, async (req, res) => {
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = existing.rows[0];
     const admin = ispIsAdmin(req);
-    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    const isOwner = ispIstBesitzer(req, v);
     if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     await pool.query('DELETE FROM isp_reverse_proxy_routes WHERE id = $1', [id]);
     res.json({ ok: true });
@@ -22309,8 +22334,9 @@ app.get('/api/isp/redirects', authMiddleware, async (req, res) => {
                            ORDER BY r.active DESC, r.source_host, r.source_path`)
       : await pool.query(`SELECT r.*, w.bezeichnung AS wohnung_bezeichnung, w.stweg FROM isp_redirects r
                            LEFT JOIN wohnungen w ON w.id = r.wohnung_id
-                           WHERE LOWER(r.owner_email) = $1
-                           ORDER BY r.active DESC, r.source_host`, [email]);
+                           WHERE (LOWER(r.owner_email) = $1
+                                  OR LOWER(COALESCE(r.owner_group,'')) = ANY($2::text[]))
+                           ORDER BY r.active DESC, r.source_host`, [email, meineGruppen(req)]);
     res.json({ redirects: r.rows, is_admin: admin });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -22349,7 +22375,7 @@ app.put('/api/isp/redirects/:id', authMiddleware, async (req, res) => {
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = existing.rows[0];
     const admin = ispIsAdmin(req);
-    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    const isOwner = ispIstBesitzer(req, v);
     if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     const b = req.body || {};
     const updates = []; const params = [];
@@ -22371,7 +22397,7 @@ app.delete('/api/isp/redirects/:id', authMiddleware, async (req, res) => {
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = existing.rows[0];
     const admin = ispIsAdmin(req);
-    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    const isOwner = ispIstBesitzer(req, v);
     if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     await pool.query('DELETE FROM isp_redirects WHERE id = $1', [id]);
     res.json({ ok: true });
@@ -23109,7 +23135,7 @@ app.put('/api/isp/mail-relays/:id', authMiddleware, async (req, res) => {
     if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = e.rows[0];
     const admin = ispIsAdmin(req);
-    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    const isOwner = ispIstBesitzer(req, v);
     if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     const b = req.body || {};
     const updates = []; const params = [];
@@ -23136,7 +23162,7 @@ app.delete('/api/isp/mail-relays/:id', authMiddleware, async (req, res) => {
     if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = e.rows[0];
     const admin = ispIsAdmin(req);
-    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    const isOwner = ispIstBesitzer(req, v);
     if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     await pool.query('DELETE FROM isp_mail_relays WHERE id = $1', [id]);
     res.json({ ok: true });
@@ -23318,7 +23344,7 @@ app.post('/api/isp/mail-relays/:id/smarthost/recheck', authMiddleware, async (re
     const e = await pool.query('SELECT * FROM isp_mail_relays WHERE id = $1', [id]);
     if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = e.rows[0];
-    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    const isOwner = ispIstBesitzer(req, v);
     if (!isOwner && !ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     if (!v.outbound_via_smarthost) return res.status(400).json({ error: 'Smarthost ist für diese Domain nicht aktiviert' });
     let status;
@@ -23340,7 +23366,7 @@ app.post('/api/isp/mail-relays/:id/recheck-dns', authMiddleware, async (req, res
     const e = await pool.query('SELECT * FROM isp_mail_relays WHERE id = $1', [id]);
     if (e.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = e.rows[0];
-    const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
+    const isOwner = ispIstBesitzer(req, v);
     if (!isOwner && !ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     // Bei Mail-Relays prüfen wir MX statt A/AAAA
     const dns = (await import('node:dns/promises')).default;
@@ -25939,6 +25965,17 @@ async function initDB() {
           ADD COLUMN IF NOT EXISTS dns_verified_at TIMESTAMPTZ,
           ADD COLUMN IF NOT EXISTS approval_reason TEXT,
           ADD COLUMN IF NOT EXISTS last_dns_check_at TIMESTAMPTZ;
+
+      -- Ein Eintrag kann einer Gruppe gehoeren statt einer Person. Betriebs-
+      -- namen wie noc. oder mail. haengen sonst an der Adresse dessen, der sie
+      -- angelegt hat — dieselbe Falle wie beim Amtspostfach des Praesidenten.
+      -- Wer in der Gruppe ist, darf den Eintrag sehen und aendern; wechselt die
+      -- Zustaendigkeit, wandert sie mit der Gruppe und nicht mit einer Person.
+      DO $$ BEGIN
+        ALTER TABLE isp_reverse_proxy_routes ADD COLUMN IF NOT EXISTS owner_group VARCHAR(40);
+        ALTER TABLE isp_redirects            ADD COLUMN IF NOT EXISTS owner_group VARCHAR(40);
+        ALTER TABLE isp_mail_relays          ADD COLUMN IF NOT EXISTS owner_group VARCHAR(40);
+      EXCEPTION WHEN OTHERS THEN NULL; END $$;
       EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
       -- Adress-Umleitungen (HTTP 301/302). Source-Host -> Target-URL.
