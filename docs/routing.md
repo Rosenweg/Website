@@ -114,8 +114,15 @@ Zwei Grenzen mit Absicht:
   Dienst gehören, von dem die Route nichts weiss. Der Server meldet
   stattdessen, was dort steht (`Es gibt bereits einen Eintrag — den fassen
   wir nicht an`).
-- **`proxied = false`.** Traefik holt sein Let's-Encrypt-Zertifikat über
-  genau diesen Namen; hinter Cloudflares Proxy terminiert Cloudflare TLS.
+- **`proxied = false` als Vorgabe**, aber frei wählbar. Auf die Zertifikate
+  hat das keinen Einfluss: Traefik holt sie per DNS-Challenge über Cloudflare
+  (`certificatesResolvers.cf.acme.dnsChallenge`), nicht über den Namen selbst
+  — `mcp.` und `noc.` laufen proxied und haben gültige Zertifikate. Der
+  Unterschied liegt woanders: proxied verbirgt unsere Adresse und bringt
+  Cloudflares Schutz mit, begrenzt aber Uploads und puffert lange
+  Verbindungen; ohne Proxy geht es direkt an unseren Edge, ohne Grössen- oder
+  Protokollgrenzen, dafür ist die Adresse sichtbar. Für beliebige
+  Nutzerdienste ist «ohne» die überraschungsärmere Vorgabe.
 
 ### Proxied-Einträge waren ein blinder Fleck
 
