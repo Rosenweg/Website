@@ -755,6 +755,15 @@
             <p class="text-xs text-gray-500 mt-0.5">Die Adresse die der User in den Browser tippt. Wenn die Subdomain "rosenweg" oder "r&lt;Nr&gt;." enthaelt geht's in Admin-Prüfung.</p>
           </div>
           <div>
+            <label class="block text-xs font-medium text-gray-700">Gehört</label>
+            <select id="r-owner" class="w-full border rounded px-2 py-1">
+              <option value="">mir persönlich</option>
+              ${((window.AuthentikAuth?.getUser?.() || {}).groups || []).filter(g => ['technik','ausschuss','praesident','präsident'].includes(String(g).toLowerCase()))
+                .map(g => `<option value="${esc(String(g).toLowerCase())}">der Gruppe ${esc(g)}</option>`).join('')}
+            </select>
+            <p class="text-xs text-gray-500 mt-0.5">Ein Betriebsname gehört besser der Gruppe: Wechselt die Zuständigkeit, wandert der Eintrag mit — statt an einer Person zu hängen, die ihn einmal angelegt hat.</p>
+          </div>
+          <div>
             <label class="block text-xs font-medium text-gray-700">Backend-URL *</label>
             <input id="r-be" placeholder="http://10.0.50.5:8080" class="w-full border rounded px-2 py-1">
             <p class="text-xs text-gray-500 mt-0.5">Wohin der Verkehr geht. Intern (z.B. http://10.x.x.x:port) oder extern (https://...). Muss vom Edge-Traefik erreichbar sein.</p>
@@ -781,6 +790,7 @@
   }
   async function saveRp() {
     const body = {
+      owner_group: document.getElementById('r-owner')?.value || null,
       hostname: document.getElementById('r-host').value.trim(),
       backend_url: document.getElementById('r-be').value.trim(),
       public: document.getElementById('r-public').checked,
