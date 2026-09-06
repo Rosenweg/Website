@@ -660,11 +660,53 @@
     try {
       const r = await AuthentikAuth.apiFetch('/api/isp/reverse-proxy/' + id + '/recheck-dns', { method: 'POST' });
       const d = await r.json();
-      if (d.matches) alert('✓ DNS verifiziert — Route ist jetzt aktiv.');
-      else alert('⚠ DNS zeigt noch nicht auf uns.\n\nA: ' + JSON.stringify(d.a) + '\nAAAA: ' + JSON.stringify(d.aaaa) + '\nCNAME: ' + JSON.stringify(d.cname) + '\n\nErwartet: ' + JSON.stringify(d.target));
+      dnsDialog(d);
       await loadRp();
     } catch (e) { alert('Fehler: ' + e.message); }
   }
+  // Das Pruefergebnis als Dialog statt als alert(): Es sind mehrere Zeilen,
+  // eine Empfehlung und ein Wert zum Abschreiben — dafuer ist ein Kasten mit
+  // Struktur da, kein Systemhinweis. Die Empfehlung kommt vom Server, damit
+  // sie an einer Stelle steht und nicht in jeder Seite neu formuliert wird.
+  function dnsDialog(d) {
+    const zustand = !d.matches
+      ? ['Zeigt noch nicht auf uns', 'bg-amber-50 border-amber-300', 'bg-amber-500']
+      : d.trifft_ueber === 'a' || d.trifft_ueber === 'aaaa'
+        ? ['Zeigt auf uns — über einen festen Eintrag', 'bg-emerald-50 border-emerald-300', 'bg-amber-500']
+        : ['Zeigt auf uns', 'bg-emerald-50 border-emerald-300', 'bg-emerald-500'];
+    const zeile = (k, v) => v && v.length
+      ? `<dt class="text-gray-500">${k}</dt><dd class="font-mono break-all">${esc(Array.isArray(v) ? v.join(', ') : v)}</dd>` : '';
+    const ziel = d.target || {};
+    const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onclick="this.remove()">
+      <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-lg w-full p-5 max-h-[90vh] overflow-y-auto">
+        <h2 class="font-bold mb-1">DNS-Prüfung</h2>
+        <p class="text-xs text-gray-500 mb-3 font-mono">${esc(d.hostname || '')}</p>
+        <div class="border rounded-lg p-3 mb-3 ${zustand[1]}">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full ${zustand[2]}"></span>
+            <span class="font-semibold text-gray-900">${zustand[0]}</span>
+          </div>
+          ${d.empfehlung ? `<p class="text-sm text-gray-700 mt-2">${esc(d.empfehlung)}</p>` : ''}
+        </div>
+        <p class="text-xs text-gray-500 mb-1">Was im DNS steht:</p>
+        <dl class="grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-1 text-sm mb-3">
+          ${zeile('CNAME', d.cname) || zeile('A', d.a) ? '' : '<dt class="text-gray-500">—</dt><dd class="text-gray-500">kein Eintrag gefunden</dd>'}
+          ${zeile('CNAME', d.cname)}${zeile('A', d.a)}${zeile('AAAA', d.aaaa)}
+        </dl>
+        <p class="text-xs text-gray-500 mb-1">Was wir erwarten:</p>
+        <dl class="grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-1 text-sm">
+          ${ziel.cname_target ? `<dt class="text-gray-500">CNAME</dt><dd class="font-mono">${esc(ziel.cname_target)} <span class="text-emerald-700 font-sans text-xs">empfohlen</span></dd>` : ''}
+          ${ziel.public_ipv4 ? `<dt class="text-gray-500">A</dt><dd class="font-mono">${esc(ziel.public_ipv4)}</dd>` : ''}
+          ${ziel.public_ipv6 ? `<dt class="text-gray-500">AAAA</dt><dd class="font-mono">${esc(ziel.public_ipv6)}</dd>` : ''}
+        </dl>
+        <p class="text-xs text-gray-500 mt-3">Nach einer Änderung dauert es je nach Anbieter einige Minuten. Das System prüft ohnehin alle fünf Minuten selbst nach.</p>
+        <div class="flex justify-end mt-4">
+          <button onclick="this.closest('.fixed').remove()" class="px-3 py-1.5 bg-gray-100 rounded text-sm">Schliessen</button>
+        </div>
+      </div></div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+  }
+
   async function openRpModal() {
     // DNS-Info holen
     let dnsInfo = {};
@@ -673,10 +715,16 @@
       <div onclick="event.stopPropagation()" class="bg-white rounded-lg shadow-xl max-w-md w-full p-5 max-h-[90vh] overflow-y-auto">
         <h2 class="font-bold mb-3">Reverse-Proxy-Route</h2>
         <div class="bg-blue-50 border border-blue-200 rounded p-3 mb-3 text-xs space-y-1">
-          <p class="font-semibold text-blue-900">📋 DNS-Konfig bei deinem Provider:</p>
-          ${dnsInfo.public_ipv4 ? `<p><strong>A:</strong> <code class="bg-white px-1 rounded">${dnsInfo.public_ipv4}</code></p>` : ''}
-          ${dnsInfo.public_ipv6 ? `<p><strong>AAAA:</strong> <code class="bg-white px-1 rounded">${dnsInfo.public_ipv6}</code></p>` : ''}
-          ${dnsInfo.cname_target ? `<p><strong>CNAME (Alternative):</strong> <code class="bg-white px-1 rounded">${dnsInfo.cname_target}</code></p>` : ''}
+          <p class="font-semibold text-blue-900">📋 DNS-Eintrag bei deinem Provider:</p>
+          ${dnsInfo.cname_target ? `<p><strong>Empfohlen — CNAME auf</strong> <code class="bg-white px-1 rounded">${dnsInfo.cname_target}</code></p>
+          <p class="text-blue-700">Unsere öffentliche Adresse ist dynamisch. Ein CNAME folgt ihr von selbst; feste Einträge musst du bei jedem Wechsel einzeln nachziehen.</p>` : ''}
+          <details class="pt-1"><summary class="cursor-pointer text-blue-800">Nur wenn kein CNAME möglich ist (z. B. Zonenwurzel)</summary>
+            <div class="pt-1 space-y-0.5">
+              ${dnsInfo.public_ipv4 ? `<p><strong>A:</strong> <code class="bg-white px-1 rounded">${dnsInfo.public_ipv4}</code></p>` : ''}
+              ${dnsInfo.public_ipv6 ? `<p><strong>AAAA:</strong> <code class="bg-white px-1 rounded">${dnsInfo.public_ipv6}</code></p>` : ''}
+              <p class="text-blue-700">Diese Adressen können sich ändern — dann trägt sie niemand automatisch nach.</p>
+            </div>
+          </details>
           <p class="text-blue-700 pt-1">Sobald DNS gesetzt ist, prüft das System automatisch alle 5 Min. Bei Sub-Domains die "rosenweg"/"r&lt;Nummer&gt;." enthalten ist Admin-Prüfung Pflicht.</p>
         </div>
         <div class="space-y-3 text-sm">
