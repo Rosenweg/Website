@@ -19445,6 +19445,18 @@ app.put('/api/isp/subscribers/me/:id/mac', authMiddleware, async (req, res) => {
     if (!leeren && (!mac || !MAC_MUSTER.test(mac))) {
       return res.status(400).json({ error: 'Keine gültige MAC-Adresse (erwartet 12 Hex-Zeichen, z. B. 94:2a:6f:1c:3b:af)' });
     }
+    // Dieselben Pruefungen wie im Dialog — dort sind sie Bequemlichkeit,
+    // hier sind sie die Regel. Ein gesetztes unterstes Bit im ersten Byte
+    // ist eine Multicast-Adresse; die kann kein Geraet als eigene haben.
+    if (mac) {
+      const roh12 = mac.replace(/:/g, '');
+      if (roh12 === '000000000000' || roh12 === 'ffffffffffff') {
+        return res.status(400).json({ error: 'Das ist keine Geräte-Adresse' });
+      }
+      if (parseInt(roh12.slice(0, 2), 16) & 1) {
+        return res.status(400).json({ error: 'Erstes Zeichenpaar ist ungerade — das ist eine Multicast-Adresse, keine Geräte-MAC' });
+      }
+    }
     // Dieselbe MAC darf nicht an zwei Anschluessen haengen — sonst streiten
     // sich zwei Ports um dasselbe Geraet.
     if (mac) {
