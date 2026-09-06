@@ -18304,10 +18304,20 @@ async function ispCheckDns(hostname) {
   // Ein CNAME auf die Zonenwurzel ist nicht erlaubt — dort bleibt nur A/AAAA.
   out.apex = String(hostname).split('.').filter(Boolean).length <= 2;
 
+  // Unsere eigene Adresse: wenn fest konfiguriert, die — sonst aufgeloest aus
+  // dem Zielnamen, der ohnehin nachgefuehrt wird. Ohne das war die Pruefung
+  // blind: ROSENWEG_PUBLIC_IPV4/IPV6 sind nicht gesetzt, und dann konnte sie
+  // nur einen CNAME auf exakt cname_target erkennen — jeder Eintrag mit
+  // A-Record oder mit CNAME auf einen anderen unserer Namen galt als "zeigt
+  // nicht auf uns", obwohl er es tat.
+  const zielV4 = target.public_ipv4 ? [target.public_ipv4] : (await dns.resolve4(target.cname_target).catch(() => []) || []);
+  const zielV6 = target.public_ipv6 ? [target.public_ipv6] : (await dns.resolve6(target.cname_target).catch(() => []) || []);
+  out.target = { ...target, aufgeloest_ipv4: zielV4, aufgeloest_ipv6: zielV6 };
+
   const perCname = Array.isArray(out.cname)
     && out.cname.some(c => c.toLowerCase().replace(/\.$/, '') === target.cname_target.toLowerCase());
-  const perA = !!(target.public_ipv4 && Array.isArray(out.a) && out.a.includes(target.public_ipv4));
-  const perAaaa = !!(target.public_ipv6 && Array.isArray(out.aaaa) && out.aaaa.includes(target.public_ipv6));
+  const perA = !!(zielV4.length && Array.isArray(out.a) && out.a.some(ip => zielV4.includes(ip)));
+  const perAaaa = !!(zielV6.length && Array.isArray(out.aaaa) && out.aaaa.some(ip => zielV6.includes(ip)));
   // Ein CNAME auf einen ANDEREN unserer Namen (historisch kooperation.
   // statt public.) loest ueber die Kette trotzdem auf unsere Adresse auf.
   // resolve4 folgt der Kette, resolveCname nicht — ohne diese Unterscheidung
@@ -18326,7 +18336,7 @@ async function ispCheckDns(hostname) {
   // mit einem CNAME passiert das von selbst.
   if (!out.matches) {
     out.empfehlung = out.apex
-      ? `An der Zonenwurzel ist kein CNAME erlaubt — trag dort A ${target.public_ipv4 || '?'}${target.public_ipv6 ? ' und AAAA ' + target.public_ipv6 : ''} ein. Für Unterdomänen ist ein CNAME auf ${target.cname_target} besser.`
+      ? `An der Zonenwurzel ist kein CNAME erlaubt — trag dort A ${(out.target.aufgeloest_ipv4[0] || '?')}${out.target.aufgeloest_ipv6[0] ? ' und AAAA ' + out.target.aufgeloest_ipv6[0] : ''} ein. Für Unterdomänen ist ein CNAME auf ${target.cname_target} besser, der folgt einem Adresswechsel von selbst.`
       : `Empfohlen: ein CNAME auf ${target.cname_target}. Der folgt einem Adresswechsel von selbst; feste A-/AAAA-Einträge musst du bei jedem Wechsel einzeln nachziehen.`;
   } else if (out.trifft_ueber === 'cname_indirekt') {
     out.empfehlung = `In Ordnung: Der CNAME zeigt auf ${out.cname_ziel} und von dort auf uns — bei einem Adresswechsel folgt er mit. Wenn du magst, kannst du ihn auf ${target.cname_target} umhängen; nötig ist es nicht.`;
