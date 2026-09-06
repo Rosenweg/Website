@@ -25965,17 +25965,17 @@ async function initDB() {
           ADD COLUMN IF NOT EXISTS dns_verified_at TIMESTAMPTZ,
           ADD COLUMN IF NOT EXISTS approval_reason TEXT,
           ADD COLUMN IF NOT EXISTS last_dns_check_at TIMESTAMPTZ;
-
-      -- Ein Eintrag kann einer Gruppe gehoeren statt einer Person. Betriebs-
-      -- namen wie noc. oder mail. haengen sonst an der Adresse dessen, der sie
-      -- angelegt hat — dieselbe Falle wie beim Amtspostfach des Praesidenten.
-      -- Wer in der Gruppe ist, darf den Eintrag sehen und aendern; wechselt die
-      -- Zustaendigkeit, wandert sie mit der Gruppe und nicht mit einer Person.
-      DO $$ BEGIN
+        -- Ein Eintrag kann einer Gruppe gehoeren statt einer Person. Betriebs-
+        -- namen wie noc. oder mail. haengen sonst an der Adresse dessen, der
+        -- sie angelegt hat — dieselbe Falle wie beim Amtspostfach des
+        -- Praesidenten. Wer in der Gruppe ist, darf den Eintrag sehen und
+        -- aendern; wechselt die Zustaendigkeit, wandert er mit der Gruppe.
+        -- (Kein eigener DO-Block: wir stehen bereits in einem, und ein
+        -- verschachteltes $$ beendet das aeussere — genau das hat die API am
+        -- 6.9.2026 in den Neustartkreis geschickt.)
         ALTER TABLE isp_reverse_proxy_routes ADD COLUMN IF NOT EXISTS owner_group VARCHAR(40);
         ALTER TABLE isp_redirects            ADD COLUMN IF NOT EXISTS owner_group VARCHAR(40);
         ALTER TABLE isp_mail_relays          ADD COLUMN IF NOT EXISTS owner_group VARCHAR(40);
-      EXCEPTION WHEN OTHERS THEN NULL; END $$;
       EXCEPTION WHEN OTHERS THEN NULL; END $$;
 
       -- Adress-Umleitungen (HTTP 301/302). Source-Host -> Target-URL.
