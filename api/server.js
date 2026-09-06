@@ -18332,9 +18332,17 @@ async function ispCfRecords(zoneId, name) {
 }
 // Setzt den CNAME, wenn noch keiner da ist. Einen fremden Eintrag ruehren wir
 // NICHT an — er koennte zu einem Dienst gehoeren, von dem wir nichts wissen.
-// proxied=false mit Absicht: Bei proxied terminiert Cloudflare TLS, und unser
-// Traefik holt sein Let's-Encrypt-Zertifikat ueber genau diesen Namen.
-async function ispCfCnameSetzen(hostname) {
+//
+// proxied: Vorgabe false, aber frei waehlbar. Auf die Zertifikate hat es
+// keinen Einfluss — Traefik holt sie per DNS-Challenge ueber Cloudflare, nicht
+// ueber den Namen selbst; mcp. und noc. laufen proxied und haben gueltige
+// Zertifikate. Der Unterschied liegt woanders:
+//   proxied=true   verbirgt unsere Adresse und bringt Cloudflares Schutz mit,
+//                  begrenzt aber Uploads und puffert lange Verbindungen.
+//   proxied=false  direkt an unseren Edge: keine Groessen- oder
+//                  Protokollgrenzen, dafuer ist die Adresse sichtbar.
+// Fuer beliebige Nutzerdienste ist false die ueberraschungsaermere Vorgabe.
+async function ispCfCnameSetzen(hostname, proxied = false) {
   const ziel = ispResolveTarget().cname_target;
   const zone = await ispCfZoneFuer(hostname);
   if (!zone) return { ok: false, grund: 'Nicht in einer Zone, die wir verwalten' };
@@ -18353,13 +18361,14 @@ async function ispCfCnameSetzen(hostname) {
     const tok = process.env.CLOUDFLARE_API_TOKEN;
     const r = await fetch(`https://api.cloudflare.com/client/v4/zones/${zone.id}/dns_records`, {
       method: 'POST', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'CNAME', name, content: ziel, ttl: 1, proxied: false,
+      body: JSON.stringify({ type: 'CNAME', name, content: ziel, ttl: 1, proxied: !!proxied,
                              comment: 'Web-Routing, automatisch gesetzt' }),
       signal: AbortSignal.timeout(10000),
     });
     const d = await r.json();
     if (!d.success) return { ok: false, grund: (d.errors || []).map(e => e.message).join('; ') || 'Cloudflare lehnte ab' };
-    return { ok: true, angelegt: true, grund: `CNAME ${name} → ${ziel} angelegt` };
+    return { ok: true, angelegt: true, proxied: !!proxied,
+             grund: `CNAME ${name} → ${ziel} angelegt${proxied ? ', über Cloudflares Proxy' : ''}` };
   } catch (e) {
     return { ok: false, grund: e.message };
   }
@@ -19347,7 +19356,7 @@ async function ispDnsEinrichten(req, res, tabelle, spalte) {
     const isOwner = (v.owner_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
     if (!isOwner && !ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     const host = v[spalte];
-    const gesetzt = await ispCfCnameSetzen(host);
+    const gesetzt = await ispCfCnameSetzen(host, req.body?.proxied === true);
     console.log(`[isp] DNS einrichten ${host} durch ${req.user.email}: ${gesetzt.ok ? 'ok' : 'abgelehnt'} — ${gesetzt.grund}`);
     // Direkt nachpruefen: Cloudflare ist sofort wirksam, oeffentliches DNS
     // braucht je nach Zwischenspeicher etwas laenger.
