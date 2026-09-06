@@ -96,3 +96,42 @@ Der API Server pollt Gmail alle 60 Sekunden und verarbeitet:
 ## Geplant: Proxmox Mail Gateway + Mailcow
 
 Siehe [plans/proxmox-mail-gateway.md](plans/proxmox-mail-gateway.md)
+
+## Von aussen ins Postfach — welche Namen funktionieren
+
+Die Ports 993 (IMAPS), 465 (SMTPS) und 587 (Submission) sind am Edge offen,
+143 und 110 bewusst gefiltert. Welcher Name dort ankommt, entscheidet ein
+TCP-SNI-Router in Traefik; ohne passenden Router liefert Traefik sein
+Notfallzertifikat und jedes Mailprogramm bricht ab.
+
+| Name | 993 | 465 | Ziel |
+|---|---|---|---|
+| `imap.rosenweg4303.ch` | ✓ | — | Mailcow 100.64.2.33 |
+| `smtp.rosenweg4303.ch` | — | ✓ | PMG 100.64.2.31 |
+| `mail.rosenweg4303.ch` | ✓ | ✓ | Mailcow (seit 6.9.2026) |
+
+Die Autokonfiguration (`autoconfig.rosenweg4303.ch`) nennt `imap.` und
+`smtp.` — diese beiden waren immer in Ordnung. `mail.rosenweg4303.ch` hatte
+bis zum 6.9.2026 **keinen** Router auf 993/465 und antwortete mit
+`TRAEFIK DEFAULT CERT`; wer den naheliegenden Namen von Hand eintrug, kam
+nicht hinein.
+
+Behoben über die Spalte `isp_mail_relays.sni_alias`. Beide Alias-Router
+zeigen auf **Mailcow**, auch der für 465 — PMGs Zertifikat kennt den Namen
+nicht, Mailcows schon. Ausgehend ändert das nichts, weil Mailcow ohnehin
+über PMG hinausreicht. Der Alias wird **nicht** automatisch aus
+`mail.<domain>` abgeleitet: Der Name muss im Zertifikat stehen, und das gilt
+für `mail.rosenweg4303.ch`, nicht für `mail.rosenweg9.ch`.
+
+**Messen, nicht vermuten.** Das interne DNS ist geteilt
+(`mail.rosenweg4303.ch` → intern `100.64.2.33`, öffentlich `37.17.232.133`).
+Ein Test aus dem Rosenweg-Netz oder vom Mac über den Tunnel sagt darum
+nichts über die Erreichbarkeit von aussen. Ehrlich misst man vom Relay-VPS:
+
+```bash
+ssh -J stefan@10.0.10.149 stefan.mueller@46.224.229.122 \
+  'openssl s_client -connect mail.rosenweg4303.ch:993 \
+     -servername mail.rosenweg4303.ch -verify_hostname mail.rosenweg4303.ch \
+     </dev/null 2>&1 | grep "Verify return code"'
+# erwartet: Verify return code: 0 (ok)
+```
