@@ -135,3 +135,45 @@ Für Namen in unseren Zonen fragt `ispCheckDns` jetzt **Cloudflare direkt**
 (`trifft_ueber = 'cloudflare'`, dazu `proxied`), statt aus dem öffentlichen
 DNS zu raten. Für fremde Domains bleibt es beim öffentlichen Resolver — dort
 ist das die einzige Wahrheit, die zählt.
+
+## Wem ein Eintrag gehört
+
+Reverse-Proxy-Routen, Weiterleitungen und Mail-Relays haben neben
+`owner_email` eine Spalte **`owner_group`**. Ist sie gesetzt, gehört der
+Eintrag der Gruppe: Wer darin ist, sieht und ändert ihn, und beim Wechsel der
+Zuständigkeit wandert er mit — statt an der Adresse dessen zu hängen, der ihn
+einmal angelegt hat. Beim Anlegen wählt man im Dialog «mir persönlich» oder
+eine Gruppe, in der man selbst ist; eine fremde Gruppe lehnt der Server ab.
+
+Aufgeräumt am 6.9.2026. Vorher standen vier Konventionen nebeneinander:
+
+| vorher | nachher |
+|---|---|
+| Platzhalter `owner_email = 'system'` (19) | `owner_group = 'technik'` |
+| `owner_email = 'technik@rosenweg4303.ch'` (1) | `owner_group = 'technik'` |
+| ohne Besitzer (9: `mcp.`, `meg.`, `stweg1–7`) | `owner_group = 'technik'` |
+| persönlich auf `stefan+rosenweg@juroct.ch` (2) | `whatsapp.` → technik, `test.` bleibt persönlich |
+| Mail-Relays auf `stefan.mueller.1694@gmail.com` (2) | alle drei `owner_group = 'technik'` |
+
+Der letzte Punkt war der unangenehmste: Zwei Mail-Relays der Siedlung hingen
+an einer privaten Gmail-Adresse.
+
+### Falle beim Erweitern des Schemas
+
+Die Spalten kamen über `ALTER TABLE … ADD COLUMN IF NOT EXISTS` **innerhalb**
+eines bestehenden `DO`-Blocks. Ein eigener verschachtelter `DO`-Block geht
+nicht: Das innere Dollar-Anführungspaar beendet das äussere, und die
+Schema-Initialisierung scheitert — die API startet dann gar nicht mehr. Das
+gilt auch für ein Dollar-Paar in einem `--`-Kommentar, denn innerhalb eines
+dollar-quotierten Blocks ist alles nur Text. Beides ist an diesem Tag
+nacheinander passiert.
+
+Wiederherstellung im Ernstfall, ohne auf einen neuen Build zu warten — jeder
+Commit liegt in der Registry unter seiner SHA:
+
+```bash
+pct exec 128 -- bash -c 'cd /opt/rosenweg-core
+  docker pull ghcr.io/rosenweg/rosenweg-api:<letzte-gute-sha>
+  docker tag ghcr.io/rosenweg/rosenweg-api:<sha> ghcr.io/rosenweg/rosenweg-api:latest
+  docker compose up -d api'
+```
