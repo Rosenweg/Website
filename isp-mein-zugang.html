@@ -1071,6 +1071,33 @@
              <div class="text-emerald-700 mt-1">Login: <span class="font-mono">${esc(m.local_part)}@${esc(m.domain)}</span> · Webmail: <a href="https://webmail.rosenweg9.ch" target="_blank" class="underline">webmail.rosenweg9.ch</a></div>
              <button onclick="clearMailboxPw(${m.id})" class="mt-1 text-xs text-emerald-800 underline">Hab ich notiert — verbergen</button>
            </div>` : '';
+      // Einrichtung im Mailprogramm — mit den echten Werten des Relays, nicht
+      // fest verdrahtet. Die meisten Programme finden sie ueber autoconfig von
+      // selbst; die Tabelle ist fuer die, die es von Hand eintragen.
+      const adresse = `${m.local_part}@${m.domain}`;
+      const imapHost = m.imap_sni_hostname || ('imap.' + m.domain);
+      const smtpHost = m.smtps_sni_hostname || ('smtp.' + m.domain);
+      const imapPort = m.imap_port || 993, smtpPort = m.smtps_port || 465;
+      const einrichtung = m.status !== 'approved' ? '' : `
+        <details class="mt-2">
+          <summary class="cursor-pointer text-xs text-blue-700">Einrichtung im Mailprogramm</summary>
+          <div class="mt-2 p-3 bg-white border rounded text-xs space-y-2">
+            <p class="text-gray-700"><strong>Der einfache Weg:</strong> In Thunderbird, Apple Mail oder Outlook nur Name, Adresse
+              <span class="font-mono">${esc(adresse)}</span> und Passwort eingeben — die Einstellungen holt sich das Programm selbst.
+              Ganz ohne Einrichtung geht es im <a href="https://webmail.rosenweg4303.ch" target="_blank" rel="noopener" class="text-blue-600 underline">Webmail</a>.</p>
+            <p class="text-gray-500">Findet das Programm nichts, trägt man das hier von Hand ein:</p>
+            <dl class="grid grid-cols-[7.5rem_1fr] gap-x-3 gap-y-1">
+              <dt class="text-gray-500">Benutzername</dt><dd class="font-mono">${esc(adresse)}</dd>
+              <dt class="text-gray-500">Posteingang</dt><dd class="font-mono">${esc(imapHost)} · Port ${esc(imapPort)} · SSL/TLS</dd>
+              <dt class="text-gray-500">Postausgang</dt><dd class="font-mono">${esc(smtpHost)} · Port ${esc(smtpPort)} · SSL/TLS</dd>
+              <dt class="text-gray-500">Anmeldung</dt><dd>Passwort — für Eingang und Ausgang dasselbe</dd>
+            </dl>
+            <p class="text-gray-500">Am Telefon: iPhone unter <em>Einstellungen → Apps → Mail → Accounts → Hinzufügen → Andere</em>,
+              Android in der Mail-App unter <em>Konto hinzufügen → Sonstige</em>. Beide fragen dieselben vier Angaben.</p>
+            <p class="text-gray-500">Von unterwegs geht nur die verschlüsselte Variante (Port ${esc(imapPort)} und ${esc(smtpPort)}) —
+              die unverschlüsselten Ports sind von aussen bewusst gesperrt.</p>
+          </div>
+        </details>`;
       return `
       <div class="border rounded p-3 bg-gray-50">
         <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
@@ -1087,6 +1114,7 @@
         </div>
         <div class="text-xs text-gray-600">Quota: ${m.quota_mb || 1024} MB${m.approval_reason ? ` · ${esc(m.approval_reason)}` : ''}</div>
         ${pwBlock}
+        ${einrichtung}
       </div>`;
     }).join('');
   }
