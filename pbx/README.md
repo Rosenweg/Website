@@ -202,18 +202,45 @@ ist danach wertlos.
 
 ### Zentrales Telefonbuch (CardDAV)
 
-`contacts-sync` haelt in Nextcloud bereits das komplette Verzeichnis unter
-`addressbooks/users/kontakte/rosenweg/`. Linphone kann das als *Remote Contact
-Directory* direkt abfragen — kein DAVx5, keine Systemkontakte noetig. Setzt man
-`PBX_CARDDAV_URL` (+ `_USER`/`_PASS`), wandert der Abschnitt mit in die XML.
+`contacts-sync` haelt in Nextcloud das komplette Verzeichnis unter
+`addressbooks/users/kontakte/rosenweg/` (Stand 2026-09-09: 171 Eintraege).
+Linphone fragt das als *Remote Contact Directory* direkt ab — kein DAVx5, keine
+Systemkontakte. Der Abschnitt wandert automatisch in jede Provisioning-XML.
 
-**Noch nicht scharf, absichtlich.** Die beiden Linphone-Quellen widersprechen
-sich beim Sektionsnamen: das Feature-Wiki nennt `carddav_0`, die
-SDK-Snapshot-Doku `remote_contact_directory_0` und ist als „under construction"
-markiert. Statt zu raten: an einem Geraet einmal von Hand einrichten,
-`linphonerc` auslesen, den echten Namen in `PBX_CARDDAV_SECTION` eintragen.
-Und wissen, dass Linphone Remote-Kontakte nur ueber das **Suchfeld** anzeigt,
-nicht als Liste im Kontakte-Tab.
+Konfiguriert in `/etc/default/pbx-api`:
+
+```
+PBX_CARDDAV_URL=https://nextcloud.rosenweg4303.ch/remote.php/dav/addressbooks/users/kontakte/rosenweg/
+PBX_CARDDAV_USER=kontakte
+PBX_CARDDAV_PASS=<occ user:add-app-password kontakte>
+PBX_CARDDAV_REALM="Nextcloud des Rosenweg Kaiseraugst"
+```
+
+**Warum genau diese Schluessel.** Feature-Wiki und SDK-Doku widersprechen sich,
+also entscheidet der Quellcode: `Core::reloadRemoteContactDirectories()` sucht
+Sektionen mit Praefix **`carddav_`**, und `CardDavParams::readFromConfigFile()`
+liest `server_url`, `results_limit`, `min_characters`, `timeout`,
+`fields_for_user_input`, `fields_for_domain`, `use_exact_match_policy` — mehr
+nicht. `enabled`, `type` und `uri` gibt es dort **nicht**.
+
+**Warum ein zweiter auth_info-Block.** Der CardDAV-Client ruft nie
+`setAuthInfo()`; beim 401 sucht liblinphone eine passende `LinphoneAuthInfo`
+ueber **Realm und Host**. Darum `auth_info_1` mit `realm` = dem Realm aus dem
+`WWW-Authenticate`-Header und `domain` = dem Nextcloud-Host.
+
+**Der Hostname ist nicht beliebig.** `contacts-sync` spricht intern per HTTP mit
+`Host: nextcloud.rosenweg9.ch` — dieser Name hat am Edge **keinen Traefik-Router**
+und liefert nach aussen das TRAEFIK-DEFAULT-CERT. Fuer die Telefone gilt darum
+`nextcloud.rosenweg4303.ch`, der ein gueltiges Zertifikat hat.
+
+**Sichtbarkeit.** Linphone zeigt Remote-Kontakte nur als Treffer im **Suchfeld**,
+nicht als Liste im Kontakte-Tab. Ab dem dritten getippten Zeichen (`min_characters`).
+
+**Berechtigung.** Das App-Passwort gehoert dem Konto `kontakte` und kann damit
+auch schreiben — Nextcloud kann App-Passwoerter nicht auf lesend einschraenken.
+Fuer eigene, dedizierte Geraete vertretbar; es haengt unter dem Namen
+„SIP-Telefone (Linphone)" in den Nextcloud-Sicherheitseinstellungen und ist dort
+mit einem Klick widerrufbar.
 
 ## Anpassung
 

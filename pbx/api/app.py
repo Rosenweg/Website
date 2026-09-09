@@ -52,13 +52,15 @@ PROV_TRANSPORT = os.environ.get("PBX_SIP_TRANSPORT", "tcp")  # tcp haelt die Reg
 PROV_EXPIRES = os.environ.get("PBX_SIP_REG_EXPIRES", "120")
 PROV_TTL_MIN = int(os.environ.get("PBX_PROV_TTL_MIN", "15"))
 # CardDAV-Verzeichnis (zentrales Telefonbuch). Leer = nicht mitprovisionieren.
-# Der Sektionsname ist bewusst konfigurierbar: das Linphone-Feature-Wiki nennt
-# "carddav_0", die SDK-Snapshot-Doku "remote_contact_directory_0" und ist als
-# "under construction" markiert. Am Testgeraet verifizieren, dann setzen.
+# Sektion und Schluessel stammen aus liblinphone selbst (core.cpp sucht Sektionen
+# mit Praefix "carddav_", carddav-params.cpp liest die Schluessel) — nicht aus der
+# Doku, die sich hier widerspricht.
 PROV_CARDDAV_URL = os.environ.get("PBX_CARDDAV_URL", "")
-PROV_CARDDAV_SECTION = os.environ.get("PBX_CARDDAV_SECTION", "carddav_0")
 PROV_CARDDAV_USER = os.environ.get("PBX_CARDDAV_USER", "")
 PROV_CARDDAV_PASS = os.environ.get("PBX_CARDDAV_PASS", "")
+# Der HTTP-Basic-Realm, den der Server im 401 schickt. liblinphone sucht die
+# AuthInfo ueber Realm + Domain, nicht ueber die URL.
+PROV_CARDDAV_REALM = os.environ.get("PBX_CARDDAV_REALM", "")
 
 app = Flask(__name__)
 
@@ -615,17 +617,28 @@ def _prov_xml(ext, name, secret):
         ("video", [("automatically_initiate", "0"), ("automatically_accept", "0")]),
     ]
     if PROV_CARDDAV_URL:
-        eintraege = [
-            ("enabled", "1"),
+        # Schluesselnamen wie in CardDavParams::readFromConfigFile().
+        abschnitte.append(("carddav_0", [
             ("server_url", PROV_CARDDAV_URL),
-            ("uri", PROV_CARDDAV_URL),
-            ("type", "carddav"),
+            ("results_limit", "0"),
             ("min_characters", "3"),
             ("timeout", "10"),
-        ]
+            ("fields_for_user_input", "FN,N,ORG,IMPP"),
+            ("use_exact_match_policy", "0"),
+        ]))
         if PROV_CARDDAV_USER:
-            eintraege += [("username", PROV_CARDDAV_USER), ("password", PROV_CARDDAV_PASS)]
-        abschnitte.append((PROV_CARDDAV_SECTION, eintraege))
+            # Zweiter auth_info-Block: die CardDAV-Anfrage traegt keine eigenen
+            # Zugangsdaten, liblinphone sucht beim 401 eine passende AuthInfo
+            # ueber Realm und Host.
+            wirt = PROV_CARDDAV_URL.split("://", 1)[-1].split("/", 1)[0].split(":")[0]
+            eintraege = [
+                ("username", PROV_CARDDAV_USER),
+                ("passwd", PROV_CARDDAV_PASS),
+                ("domain", wirt),
+            ]
+            if PROV_CARDDAV_REALM:
+                eintraege.append(("realm", PROV_CARDDAV_REALM))
+            abschnitte.append(("auth_info_1", eintraege))
 
     teile = ['<?xml version="1.0" encoding="UTF-8"?>',
              '<config xmlns="http://www.linphone.org/xsds/lpconfig.xsd">']
