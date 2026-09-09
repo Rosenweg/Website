@@ -10,6 +10,9 @@ Tabellen:
                     die API /etc/asterisk/pjsip_phones.conf (+ pjsip reload).
   config          — Geschaeftszeiten + Ring-Timeout.
   calls           — Anruf-/Voicemail-Log.
+  prov_tokens     — kurzlebige Einmal-Tokens fuer die Linphone-Provisionierung
+                    (der QR-Code zeigt auf /prov/<token>, die XML enthaelt das
+                    SIP-Passwort — darum einmalig und mit Verfallszeit).
 """
 import os
 import sqlite3
@@ -69,8 +72,18 @@ CREATE TABLE IF NOT EXISTS calls (
     voicemail_summary    TEXT,
     meta_json            TEXT DEFAULT '{}'
 );
+CREATE TABLE IF NOT EXISTS prov_tokens (
+    token        TEXT PRIMARY KEY,
+    ext          TEXT NOT NULL,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at   TEXT NOT NULL,
+    used_at      TEXT,                     -- gesetzt beim ersten Abruf: Einmal-Token
+    created_by   TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_calls_started ON calls(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ring_enabled ON ring_members(enabled);
+CREATE INDEX IF NOT EXISTS idx_prov_ext ON prov_tokens(ext);
 """
 
 DEFAULT_CONFIG = {

@@ -37,6 +37,13 @@
   .gate { max-width:460px; margin:4rem auto; text-align:center; background:#fff; padding:2rem; border-radius:14px; box-shadow:0 6px 24px rgba(0,0,0,.1); }
   .note { background:#fffbeb; border:1px solid #fde68a; color:#92400e; border-radius:8px; padding:.6rem .8rem; font-size:.82rem; margin-top:.6rem; }
   .err { background:#fef2f2; color:#b91c1c; border-radius:8px; padding:.5rem .8rem; font-size:.84rem; margin-bottom:.8rem; display:none; }
+  .ovl { position:fixed; inset:0; background:rgba(15,23,42,.55); display:flex; align-items:center; justify-content:center; z-index:50; padding:1rem; }
+  .ovl .box { background:#fff; border-radius:16px; padding:1.4rem 1.5rem; max-width:420px; width:100%; text-align:center; box-shadow:0 12px 40px rgba(0,0,0,.25); }
+  .ovl .box h3 { font-size:1rem; margin-bottom:.2rem; }
+  .ovl .box .qr { margin:1rem auto; width:230px; height:230px; display:flex; align-items:center; justify-content:center; }
+  .ovl .box .qr svg { width:100%; height:100%; }
+  .ovl .box .lnk { font-family:ui-monospace,monospace; font-size:.72rem; color:#6b7280; word-break:break-all; background:#f8fafc; border-radius:8px; padding:.5rem; }
+  .ovl .box .steps { text-align:left; font-size:.82rem; color:#4b5563; margin:.9rem 0; line-height:1.5; }
 </style>
 </head>
 <body>
@@ -124,6 +131,23 @@
   </div>
 </div>
 
+<div id="qrovl" class="ovl" style="display:none" onclick="if(event.target===this)qrZu()">
+  <div class="box">
+    <h3 id="qr_titel">Linphone einrichten</h3>
+    <div class="muted" id="qr_frist" style="font-size:.78rem"></div>
+    <div class="qr" id="qr_bild"></div>
+    <div class="steps">
+      <b>Am Telefon:</b> Linphone öffnen → Assistent →
+      „Fetch Remote Configuration" → QR-Code scannen.
+      Danach ist Konto, Transport und Rufnummer gesetzt — nichts abzutippen.
+    </div>
+    <div class="lnk" id="qr_url"></div>
+    <div class="note" style="text-align:left">Der Link enthält das SIP-Passwort und
+      gilt <b>nur einmal</b>. Wird er nicht benutzt, verfällt er von selbst.</div>
+    <div style="margin-top:1rem"><button class="sec" onclick="qrZu()">Schliessen</button></div>
+  </div>
+</div>
+
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -197,6 +221,7 @@ async function loadExts(){
     <td>${x.registered?'<span class="pill ok">● registriert</span>':'<span class="muted">nicht angemeldet</span>'}</td>
     <td>${x.enabled?'<span class="pill ok">aktiv</span>':'<span class="muted">aus</span>'}</td>
     <td>${inRing.has(String(x.ext))?'<span class="pill ok">in Ring-Group</span>':`<button class="sec" onclick="addSipToRing('${esc(x.ext)}')">+ Ring-Group</button>`}
+        <button class="sec" onclick="qrZeigen('${esc(x.ext)}')" title="QR-Code für Linphone">📱 QR</button>
         <button class="danger" onclick="delExt('${esc(x.ext)}')">Löschen</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Keine SIP-Telefone.</td></tr>';
 }
 async function addSipToRing(ext){
@@ -212,6 +237,26 @@ async function addExt(){
   if(!r.ok){ showErr((await r.json()).error||'Fehler'); return; }
   $('e_ext').value=$('e_name').value=$('e_secret').value=''; loadExts();
 }
+let qrTakt = null;
+async function qrZeigen(ext){
+  const r = await api('/api/pbx/sip-extensions/'+encodeURIComponent(ext)+'/provisioning',{method:'POST'});
+  if(!r.ok){ showErr((await r.json()).error||'Fehler'); return; }
+  const d = await r.json();
+  $('qr_titel').textContent = 'Linphone einrichten — '+d.name+' ('+d.ext+')';
+  $('qr_bild').innerHTML = d.qr_svg;   // vom Server erzeugtes SVG, kein Fremd-Skript
+  $('qr_url').textContent = d.url;
+  $('qrovl').style.display='flex';
+  const bis = new Date(d.expires_at).getTime();
+  const tick = ()=>{
+    const s = Math.round((bis - Date.now())/1000);
+    $('qr_frist').textContent = s>0 ? 'gültig noch '+Math.floor(s/60)+':'+String(s%60).padStart(2,'0')+' Minuten'
+                                    : 'abgelaufen — Fenster schliessen und neu erzeugen';
+  };
+  tick(); clearInterval(qrTakt); qrTakt = setInterval(tick, 1000);
+}
+function qrZu(){ clearInterval(qrTakt); qrTakt=null; $('qrovl').style.display='none'; $('qr_bild').innerHTML=''; }
+document.addEventListener('keydown', e=>{ if(e.key==='Escape' && $('qrovl').style.display==='flex') qrZu(); });
+
 async function delExt(ext){ if(!confirm('SIP-Telefon '+ext+' löschen?'))return; await api('/api/pbx/sip-extensions/'+encodeURIComponent(ext),{method:'DELETE'}); loadExts(); }
 
 async function loadCalls(){
