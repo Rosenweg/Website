@@ -177,6 +177,44 @@ Scanner an (`Dropping N bytes packet from UDP …` im Log). Wenn Telefone auch v
 unterwegs registrieren sollen, waere der richtige Schritt: `tcp/5061` freigeben
 und `udp/5060` auf die peoplefone-IPs (95.128.80.3/.5/.7) einschraenken.
 
+## Linphone-Provisionierung (QR bei den Nebenstellen)
+
+Im pbx-Admin-UI hat jede Nebenstelle einen Knopf **📱 QR**. Dahinter:
+
+1. `POST /api/pbx/sip-extensions/<ext>/provisioning` (Technik/Praesident) legt ein
+   **Einmal-Token** mit 15 Minuten Frist an und liefert ein serverseitig
+   gerendertes SVG (`segno`) — kein Fremd-Skript im UI.
+2. Der QR enthaelt nur `https://pbx.rosenweg4303.ch/prov/<token>`.
+3. Am Telefon: Linphone → Assistent → **„Fetch Remote Configuration"** → scannen.
+4. `GET /prov/<token>` liefert die linphonerc-XML und **verbrennt das Token**.
+   Unbekannt, abgelaufen und verbraucht geben dieselbe 404 — der Zustand eines
+   Links soll sich nicht abfragen lassen.
+
+Die XML setzt Konto, `transport=tcp`, `reg_expires=120` und schaltet Video ab.
+Steuerung ueber `/etc/default/pbx-api` (`PBX_SIP_HOST`, `PBX_SIP_TRANSPORT`,
+`PBX_SIP_REG_EXPIRES`, `PBX_PROV_TTL_MIN`); die Vorgaben im Code passen bereits
+zur Anlage, es muss nichts gesetzt werden.
+
+**Warum Einmal-Token.** In der XML steht das SIP-Passwort im Klartext — anders
+geht Provisionierung nicht. Also ist die URL selbst das Geheimnis, und sie darf
+nur einen einzigen Abruf ueberleben. Ein ausgedruckter oder weitergeleiteter QR
+ist danach wertlos.
+
+### Zentrales Telefonbuch (CardDAV)
+
+`contacts-sync` haelt in Nextcloud bereits das komplette Verzeichnis unter
+`addressbooks/users/kontakte/rosenweg/`. Linphone kann das als *Remote Contact
+Directory* direkt abfragen — kein DAVx5, keine Systemkontakte noetig. Setzt man
+`PBX_CARDDAV_URL` (+ `_USER`/`_PASS`), wandert der Abschnitt mit in die XML.
+
+**Noch nicht scharf, absichtlich.** Die beiden Linphone-Quellen widersprechen
+sich beim Sektionsnamen: das Feature-Wiki nennt `carddav_0`, die
+SDK-Snapshot-Doku `remote_contact_directory_0` und ist als „under construction"
+markiert. Statt zu raten: an einem Geraet einmal von Hand einrichten,
+`linphonerc` auslesen, den echten Namen in `PBX_CARDDAV_SECTION` eintragen.
+Und wissen, dass Linphone Remote-Kontakte nur ueber das **Suchfeld** anzeigt,
+nicht als Liste im Kontakte-Tab.
+
 ## Anpassung
 
 | Was | Wo |

@@ -18,11 +18,13 @@ SIP-Telefone (LAN/VPN): aus der sip_extensions-Tabelle generiert die API
 import json
 import os
 import secrets as pysecrets
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from xml.sax.saxutils import escape as xesc
 from zoneinfo import ZoneInfo
 
 import requests
-from flask import Flask, jsonify, request, send_from_directory
+import segno
+from flask import Flask, Response, jsonify, request, send_from_directory
 
 import ami
 import db
@@ -40,6 +42,23 @@ PUBLIC_HOST = os.environ.get("PBX_PUBLIC_HOST", "pbx.rosenweg4303.ch")
 PHONES_CONF = os.environ.get("ASTERISK_PHONES_CONF", "/etc/asterisk/pjsip_phones.conf")
 WEB_DIR = os.environ.get("PBX_WEB_DIR", os.path.join(os.path.dirname(__file__), "..", "web"))
 PORT = int(os.environ.get("PBX_API_PORT", "8095"))
+
+# ─── Linphone-Provisionierung ───────────────────────────────────────────────
+# Der QR-Code am Telefon enthaelt nur eine URL; Linphone laedt darueber eine
+# linphonerc-XML (Assistent -> "Fetch Remote Configuration"). Weil in dieser
+# XML das SIP-Passwort steht, ist die URL ein Einmal-Token mit kurzer Frist.
+PROV_SIP_HOST = os.environ.get("PBX_SIP_HOST", "sip.rosenweg4303.ch")
+PROV_TRANSPORT = os.environ.get("PBX_SIP_TRANSPORT", "tcp")  # tcp haelt die Registrierung im Doze
+PROV_EXPIRES = os.environ.get("PBX_SIP_REG_EXPIRES", "120")
+PROV_TTL_MIN = int(os.environ.get("PBX_PROV_TTL_MIN", "15"))
+# CardDAV-Verzeichnis (zentrales Telefonbuch). Leer = nicht mitprovisionieren.
+# Der Sektionsname ist bewusst konfigurierbar: das Linphone-Feature-Wiki nennt
+# "carddav_0", die SDK-Snapshot-Doku "remote_contact_directory_0" und ist als
+# "under construction" markiert. Am Testgeraet verifizieren, dann setzen.
+PROV_CARDDAV_URL = os.environ.get("PBX_CARDDAV_URL", "")
+PROV_CARDDAV_SECTION = os.environ.get("PBX_CARDDAV_SECTION", "carddav_0")
+PROV_CARDDAV_USER = os.environ.get("PBX_CARDDAV_USER", "")
+PROV_CARDDAV_PASS = os.environ.get("PBX_CARDDAV_PASS", "")
 
 app = Flask(__name__)
 
@@ -567,6 +586,116 @@ def sip_ext_delete(ext):
         return jsonify({"ok": True})
     finally:
         conn.close()
+
+
+# ─── Linphone-Provisionierung: QR-Code + XML ────────────────────────────────
+def _prov_xml(ext, name, secret):
+    """linphonerc im XML-Format, wie Linphone es per Remote Provisioning laedt."""
+    host = PROV_SIP_HOST
+    ident = f'"{name}" <sip:{ext}@{host}>'
+    abschnitte = [
+        ("sip", [
+            ("default_proxy", "0"),
+            ("guess_hostname", "1"),
+        ]),
+        ("proxy_0", [
+            ("reg_proxy", f"<sip:{host};transport={PROV_TRANSPORT}>"),
+            ("reg_identity", ident),
+            ("reg_expires", PROV_EXPIRES),
+            ("reg_sendregister", "1"),
+            ("publish", "0"),
+        ]),
+        ("auth_info_0", [
+            ("username", str(ext)),
+            ("passwd", secret),
+            ("domain", host),
+        ]),
+        # Video aus: die Geraete sind Sprachtelefone, und ein nicht ausgehandelter
+        # Video-Stream kostet nur Aushandlungszeit beim Rufaufbau.
+        ("video", [("automatically_initiate", "0"), ("automatically_accept", "0")]),
+    ]
+    if PROV_CARDDAV_URL:
+        eintraege = [
+            ("enabled", "1"),
+            ("server_url", PROV_CARDDAV_URL),
+            ("uri", PROV_CARDDAV_URL),
+            ("type", "carddav"),
+            ("min_characters", "3"),
+            ("timeout", "10"),
+        ]
+        if PROV_CARDDAV_USER:
+            eintraege += [("username", PROV_CARDDAV_USER), ("password", PROV_CARDDAV_PASS)]
+        abschnitte.append((PROV_CARDDAV_SECTION, eintraege))
+
+    teile = ['<?xml version="1.0" encoding="UTF-8"?>',
+             '<config xmlns="http://www.linphone.org/xsds/lpconfig.xsd">']
+    for sec, eintraege in abschnitte:
+        teile.append(f'  <section name="{xesc(sec)}">')
+        for k, v in eintraege:
+            teile.append(f'    <entry name="{xesc(k)}" overwrite="true">{xesc(str(v))}</entry>')
+        teile.append("  </section>")
+    teile.append("</config>")
+    return "\n".join(teile) + "\n"
+
+
+@app.post("/api/pbx/sip-extensions/<ext>/provisioning")
+def prov_create(ext):
+    """Erzeugt einen Einmal-Link + QR-Code fuer die Linphone-Einrichtung."""
+    user, deny = require_admin()
+    if deny:
+        return deny
+    conn = db.connect()
+    try:
+        row = conn.execute("SELECT ext, name FROM sip_extensions WHERE ext = ?", (ext,)).fetchone()
+        if not row:
+            return jsonify({"error": "Nebenstelle unbekannt"}), 404
+        token = pysecrets.token_urlsafe(24)
+        gueltig_bis = datetime.now(timezone.utc) + timedelta(minutes=PROV_TTL_MIN)
+        conn.execute(
+            "INSERT INTO prov_tokens (token, ext, expires_at, created_by) VALUES (?,?,?,?)",
+            (token, ext, gueltig_bis.isoformat(timespec="seconds"), actor(user)),
+        )
+        # Abgelaufene und schon benutzte Tokens derselben Nebenstelle raeumen wir
+        # gleich mit weg — ein alter QR-Ausdruck soll nicht doch noch ziehen.
+        conn.execute(
+            "DELETE FROM prov_tokens WHERE ext = ? AND token != ? "
+            "AND (used_at IS NOT NULL OR expires_at < ?)",
+            (ext, token, datetime.now(timezone.utc).isoformat(timespec="seconds")),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    url = f"https://{PUBLIC_HOST}/prov/{token}"
+    qr = segno.make(url, error="m").svg_inline(scale=5, dark="#1f2937")
+    return jsonify({
+        "ext": ext, "name": row["name"], "url": url, "qr_svg": qr,
+        "expires_at": gueltig_bis.isoformat(timespec="seconds"),
+        "ttl_minutes": PROV_TTL_MIN,
+        "carddav": bool(PROV_CARDDAV_URL),
+    })
+
+
+@app.get("/prov/<token>")
+def prov_fetch(token):
+    """Wird vom Telefon geholt — ohne Anmeldung, dafuer einmalig und befristet."""
+    conn = db.connect()
+    try:
+        row = conn.execute(
+            "SELECT p.token, p.ext, p.expires_at, p.used_at, e.name, e.secret, e.enabled "
+            "FROM prov_tokens p LEFT JOIN sip_extensions e ON e.ext = p.ext "
+            "WHERE p.token = ?", (token,)
+        ).fetchone()
+        jetzt = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        if not row or row["used_at"] or row["expires_at"] < jetzt or row["secret"] is None:
+            # Bewusst dieselbe Antwort fuer unbekannt/abgelaufen/verbraucht.
+            return jsonify({"error": "Link ungueltig oder abgelaufen"}), 404
+        conn.execute("UPDATE prov_tokens SET used_at = ? WHERE token = ?", (jetzt, token))
+        conn.commit()
+        xml = _prov_xml(row["ext"], row["name"], row["secret"])
+    finally:
+        conn.close()
+    return Response(xml, mimetype="application/xml",
+                    headers={"Cache-Control": "no-store"})
 
 
 # ─── Web-UI + Reverse-Proxy fuer den Login-Flow ─────────────────────────────
