@@ -233,8 +233,26 @@ ueber **Realm und Host**. Darum `auth_info_1` mit `realm` = dem Realm aus dem
 und liefert nach aussen das TRAEFIK-DEFAULT-CERT. Fuer die Telefone gilt darum
 `nextcloud.rosenweg4303.ch`, der ein gueltiges Zertifikat hat.
 
-**Sichtbarkeit.** Linphone zeigt Remote-Kontakte nur als Treffer im **Suchfeld**,
-nicht als Liste im Kontakte-Tab. Ab dem dritten getippten Zeichen (`min_characters`).
+**Es gibt zwei CardDAV-Funktionen, und nur eine ist provisionierbar.**
+
+| | `[carddav_0]` (provisioniert) | CardDAV-Adressbuch in den App-Einstellungen |
+|---|---|---|
+| liblinphone-Begriff | RemoteContactDirectory | FriendList vom Typ CardDAV |
+| gespeichert in | `linphonerc` | `friends.db` (SQLite) |
+| per QR lieferbar | **ja** | **nein** |
+| Anzeige | Treffer beim Suchen ab 3 Zeichen | vollstaendige Liste, offline verfuegbar |
+
+Das erklaert den Eindruck „Linphone hat CardDAV nicht eingerichtet": unter
+Einstellungen → Kontakte listet die App ihre **FriendLists** auf, und dort steht
+nichts, weil `carddav_0` eine andere Sache ist. Ob die Provisionierung
+funktioniert hat, sieht man nur, indem man im Kontakte-Tab **drei Zeichen
+tippt** — dann fragt `MagicSearch.Source.RemoteCardDAV` den Server ab
+(`ContactsListViewModel.kt`), und im Apache-Log von CT 104 taucht ein REPORT auf.
+
+Die FriendList laesst sich nicht mitliefern, weil sie nie in die Konfigurations-
+datei geschrieben wird (`friend-list.cpp` kennt kein `writeToConfigFile`). Darum
+zeigt das QR-Fenster die fuenf Werte zum Kopieren an — einmal pro Geraet unter
+Einstellungen → Kontakte → *CardDAV-Adressbuch hinzufuegen* eintragen.
 
 **Berechtigung.** Das App-Passwort gehoert dem Konto `kontakte` und kann damit
 auch schreiben — Nextcloud kann App-Passwoerter nicht auf lesend einschraenken.
