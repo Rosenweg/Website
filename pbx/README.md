@@ -140,6 +140,43 @@ Test:
 - **Sonst:** Voicemail-Greeting → Aufnahme → Mail mit Transkript an Technik
 - **Manuell:** `console dial pjsip/+41765199970@peoplefone`
 
+## SIP-Transporte (Stand 2026-09-09)
+
+Asterisk lauscht auf drei Transporten:
+
+| Transport | Bind | Von aussen erreichbar | Wofuer |
+|---|---|---|---|
+| `transport-udp` | `0.0.0.0:5060` | **ja** (UDM-Forward udp/5060) | peoplefone-Trunk |
+| `transport-tcp` | `0.0.0.0:5060` | nein | WLAN-Telefone im LAN/VPN |
+| `transport-tls` | `0.0.0.0:5061` | nein | WLAN-Telefone, verschluesselt |
+
+**Warum TCP/TLS.** Ein WLAN-Smartphone verliert seine UDP-/NAT-Bindung, sobald es
+in Doze geht — die Registrierung sieht aus Asterisks Sicht noch gueltig aus, aber
+das eingehende INVITE kommt nicht mehr an. Eine offene TCP-Verbindung ueberlebt
+das. Deshalb bei Softphones (Linphone) **TCP** statt UDP waehlen, plus Ausnahme
+von der Akku-Optimierung und ein kurzes Register-Expiry (60-180 s).
+
+Die Endpoints in `pjsip_phones.conf` setzen **kein** `transport=` — Asterisk
+antwortet auf dem Transport, ueber den sich das Telefon registriert hat. Es muss
+also nichts pro Nebenstelle umgestellt werden.
+
+**Zertifikat.** Let's Encrypt fuer `sip.rosenweg4303.ch`, per certbot mit
+DNS-01 ueber Cloudflare direkt in CT 220 (`/root/.cloudflare.ini`, Token aus
+CT 245 kopiert). Der Deploy-Hook
+`/etc/letsencrypt/renewal-hooks/deploy/asterisk.sh` kopiert das erneuerte
+Zertifikat nach `/etc/asterisk/keys/sip.{crt,key}` — noetig, weil
+`/etc/letsencrypt/archive` `0700 root` ist und Asterisk als `asterisk` laeuft —
+und macht `module reload res_pjsip`. Renewal uebernimmt `certbot.timer`.
+
+`sip.rosenweg4303.ch` existiert **nur im internen Split-Horizon** (UniFi
+static-dns → `100.64.2.55`), nicht in der oeffentlichen Zone. DNS-01 braucht
+keinen A-Record, also bleibt die interne IP privat.
+
+**Offen:** von aussen ist nur `udp/5060` freigegeben, und dort klopfen laufend
+Scanner an (`Dropping N bytes packet from UDP …` im Log). Wenn Telefone auch von
+unterwegs registrieren sollen, waere der richtige Schritt: `tcp/5061` freigeben
+und `udp/5060` auf die peoplefone-IPs (95.128.80.3/.5/.7) einschraenken.
+
 ## Anpassung
 
 | Was | Wo |
