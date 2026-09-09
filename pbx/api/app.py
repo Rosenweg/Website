@@ -61,6 +61,7 @@ PROV_CARDDAV_PASS = os.environ.get("PBX_CARDDAV_PASS", "")
 # Der HTTP-Basic-Realm, den der Server im 401 schickt. liblinphone sucht die
 # AuthInfo ueber Realm + Domain, nicht ueber die URL.
 PROV_CARDDAV_REALM = os.environ.get("PBX_CARDDAV_REALM", "")
+PROV_CARDDAV_NAME = os.environ.get("PBX_CARDDAV_NAME", "Rosenweg")
 
 app = Flask(__name__)
 
@@ -684,7 +685,16 @@ def prov_create(ext):
         "ext": ext, "name": row["name"], "url": url, "qr_svg": qr,
         "expires_at": gueltig_bis.isoformat(timespec="seconds"),
         "ttl_minutes": PROV_TTL_MIN,
-        "carddav": bool(PROV_CARDDAV_URL),
+        # Fuer das synchronisierte Adressbuch der App: das ist eine FriendList,
+        # und die lebt in friends.db, nicht in der linphonerc — sie laesst sich
+        # darum NICHT provisionieren. Wir liefern die Werte zum Abtippen mit.
+        "carddav": {
+            "name": PROV_CARDDAV_NAME,
+            "url": PROV_CARDDAV_URL,
+            "user": PROV_CARDDAV_USER,
+            "pass": PROV_CARDDAV_PASS,
+            "realm": PROV_CARDDAV_REALM,
+        } if PROV_CARDDAV_URL else None,
     })
 
 

@@ -44,6 +44,12 @@
   .ovl .box .qr svg { width:100%; height:100%; }
   .ovl .box .lnk { font-family:ui-monospace,monospace; font-size:.72rem; color:#6b7280; word-break:break-all; background:#f8fafc; border-radius:8px; padding:.5rem; }
   .ovl .box .steps { text-align:left; font-size:.82rem; color:#4b5563; margin:.9rem 0; line-height:1.5; }
+  .ovl .box details { text-align:left; margin-top:.8rem; border-top:1px solid #f1f5f9; padding-top:.7rem; }
+  .ovl .box summary { cursor:pointer; font-size:.84rem; font-weight:600; color:#374151; }
+  .cd { display:grid; grid-template-columns:auto 1fr auto; gap:.35rem .5rem; align-items:center; margin-top:.6rem; font-size:.78rem; }
+  .cd b { color:#6b7280; font-weight:600; white-space:nowrap; }
+  .cd span { font-family:ui-monospace,monospace; word-break:break-all; background:#f8fafc; border-radius:6px; padding:.25rem .4rem; }
+  .cd button { padding:.2rem .5rem; font-size:.72rem; }
 </style>
 </head>
 <body>
@@ -142,6 +148,16 @@
       Danach ist Konto, Transport und Rufnummer gesetzt — nichts abzutippen.
     </div>
     <div class="lnk" id="qr_url"></div>
+    <details id="qr_cd" style="display:none">
+      <summary>📇 Telefonbuch — einmalig in der App eintragen</summary>
+      <div class="steps" style="margin:.5rem 0 0">
+        Das <b>synchronisierte</b> Adressbuch ist in Linphone eine „FriendList" und
+        liegt in der App-Datenbank, nicht in der Konfigurationsdatei — es lässt sich
+        deshalb nicht per QR mitliefern. Einmal pro Gerät:
+        Einstellungen → Kontakte → <i>CardDAV-Adressbuch hinzufügen</i>.
+      </div>
+      <div class="cd" id="qr_cd_felder"></div>
+    </details>
     <div class="note" style="text-align:left">Der Link enthält das SIP-Passwort und
       gilt <b>nur einmal</b>. Wird er nicht benutzt, verfällt er von selbst.</div>
     <div style="margin-top:1rem"><button class="sec" onclick="qrZu()">Schliessen</button></div>
@@ -245,6 +261,15 @@ async function qrZeigen(ext){
   $('qr_titel').textContent = 'Linphone einrichten — '+d.name+' ('+d.ext+')';
   $('qr_bild').innerHTML = d.qr_svg;   // vom Server erzeugtes SVG, kein Fremd-Skript
   $('qr_url').textContent = d.url;
+  const cd = d.carddav;
+  $('qr_cd').style.display = cd ? 'block' : 'none';
+  if(cd){
+    const felder = [['Anzeigename',cd.name],['Server-URL',cd.url],['Benutzername',cd.user],
+                    ['Passwort',cd.pass],['Auth-Bereich',cd.realm]];
+    $('qr_cd_felder').innerHTML = felder.map(([k,v],i)=>
+      `<b>${esc(k)}</b><span id="cdv${i}">${esc(v)}</span>`+
+      `<button class="sec" onclick="kopieren('cdv${i}',this)">kopieren</button>`).join('');
+  }
   $('qrovl').style.display='flex';
   const bis = new Date(d.expires_at).getTime();
   const tick = ()=>{
@@ -253,6 +278,11 @@ async function qrZeigen(ext){
                                     : 'abgelaufen — Fenster schliessen und neu erzeugen';
   };
   tick(); clearInterval(qrTakt); qrTakt = setInterval(tick, 1000);
+}
+async function kopieren(id, btn){
+  try { await navigator.clipboard.writeText($(id).textContent); const alt=btn.textContent;
+        btn.textContent='kopiert'; setTimeout(()=>btn.textContent=alt,1200); }
+  catch(e){ showErr('Zwischenablage nicht verfügbar — Wert von Hand markieren'); }
 }
 function qrZu(){ clearInterval(qrTakt); qrTakt=null; $('qrovl').style.display='none'; $('qr_bild').innerHTML=''; }
 document.addEventListener('keydown', e=>{ if(e.key==='Escape' && $('qrovl').style.display==='flex') qrZu(); });
