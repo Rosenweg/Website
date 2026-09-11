@@ -234,3 +234,37 @@ Die API dagegen läuft weiterhin in Docker, auf CT 128 (`core-backend`):
 ssh -J stefan@10.0.10.149 root@100.64.2.20 \
   'pct exec 128 -- sh -c "cd /opt/rosenweg-core && docker compose pull api && docker compose up -d api"'
 ```
+
+## Wenn die Dienstwacht viel meldet
+
+Am 11.09.2026 kamen 11 Meldungen an einem Tag statt der ueblichen 1. Die
+Vermutung lag nahe, die Anlage sei instabil. Sie war es nicht: **10 der
+Meldungen kamen von einem einzigen Dienst**, und alle vier Befunde auf
+CT 245 hatten dieselbe Ursache — die Wurzel war zu 100% voll.
+
+Daraus zwei Lehren fuer die Auswertung:
+
+**Erstens: zaehlen, nicht lesen.** Welcher Dienst wie oft gemeldet hat,
+steht in einer Zeile:
+
+```sql
+SELECT body, count(*) FROM whatsapp_messages
+ WHERE body LIKE 'Dienstwacht%' AND created_at > now() - interval '2 days'
+ GROUP BY 1 ORDER BY 2 DESC;
+```
+
+Ein Dienst, der im Minutentakt scheitert und wieder startet, erzeugt bei
+jedem Durchlauf einen *neuen* Befund — die Wacht meldet ihn darum immer
+wieder. Das sieht nach vielen Problemen aus und ist eines.
+
+**Zweitens: `logrotate` und `man-db` sind keine Nebensache.** Beide
+scheitern fast nur aus einem Grund — kein Platz. Sie gehoeren deshalb
+ausdruecklich **nicht** in die Ignorierliste von `rw-dienstwacht.sh`:
+sie waren am 11.09. die einzigen Vorboten, dass dem Edge-Router und der
+PBX der Platz ausging. Was dort ignoriert werden darf, sind nur Units,
+die in einem LXC *niemals* gelingen koennen (Kernel-Mounts, Netzwerk-
+Units). Alles andere ist ein Symptom.
+
+Aufraeumen und deckeln: [`rw-platz-machen.sh`](../scripts/rw-platz-machen.sh).
+Es loescht nichts — es komprimiert, deckelt das Journal und legt Regeln
+fuer Logdateien an, die von keiner erfasst werden.
