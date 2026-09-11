@@ -268,3 +268,34 @@ Units). Alles andere ist ein Symptom.
 Aufraeumen und deckeln: [`rw-platz-machen.sh`](../scripts/rw-platz-machen.sh).
 Es loescht nichts — es komprimiert, deckelt das Journal und legt Regeln
 fuer Logdateien an, die von keiner erfasst werden.
+
+### `226/NAMESPACE` — logrotate lief gar nicht
+
+Auf CT 111 (cups-server) scheiterten `logrotate` und `man-db` nicht an
+Platz, sondern an fehlenden Rechten:
+
+```
+logrotate.service: Failed at step NAMESPACE spawning /usr/sbin/logrotate:
+Permission denied
+logrotate.service: Main process exited, code=exited, status=226/NAMESPACE
+```
+
+Die Units bringen Sandbox-Direktiven mit (`PrivateTmp`, `ProtectSystem`,
+`ProtectControlGroups`, `ProtectHostname`, `RestrictNamespaces` …), die
+einen Mount- bzw. UTS-Namespace brauchen. Ohne `nesting=1` darf der
+Container das nicht. Ergebnis: **logrotate lief dort seit dem 10.09.2026
+ueberhaupt nicht mehr** — CT 111 waere der naechste volle Container
+geworden.
+
+Zwei Wege:
+
+- **Struktureller Fix:** `pct set <id> --features nesting=1` + Neustart
+  des Containers. Loest die ganze Klasse, kostet aber Ausfallzeit.
+- **Ohne Neustart:** Drop-in unter
+  `/etc/systemd/system/<unit>.service.d/lxc.conf`, das alle
+  namespace-bildenden Direktiven auf `no` setzt. In einem LXC verliert man
+  dadurch wenig — logrotate laeuft ohnehin als root. So auf CT 111 gemacht.
+
+Einzeln nachziehen fuehrt ins Leere: es sind mehr als ein Dutzend
+Direktiven, und jede nicht abgeschaltete laesst den Start weiter
+scheitern. Alle auf einmal, oder `nesting=1`.
