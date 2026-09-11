@@ -66,11 +66,20 @@ done < <(find /var/log -type f -size +10M \
 # Was gross ist und dort NICHT vorkommt, waechst unbegrenzt — genau das
 # war der Fall bei Traefik.
 if command -v logrotate >/dev/null 2>&1; then
-  ERFASST=$(logrotate -d /etc/logrotate.conf 2>/dev/null | sed -n 's/^considering log //p')
+  # 2>&1, NICHT 2>/dev/null: logrotate schreibt seine Debug-Ausgabe
+  # vollstaendig auf stderr. Mit 2>/dev/null blieb die Liste leer, jede
+  # grosse Datei galt als unerfasst — und die angelegte Regel kollidierte
+  # mit der bestehenden ("duplicate log entry"), womit logrotate die Datei
+  # komplett uebersprang. Aus einer Aufraeumhilfe wurde so ein Ausfall.
+  ERFASST=$(logrotate -d /etc/logrotate.conf 2>&1 | sed -n 's/^considering log //p')
+  if [ -z "$ERFASST" ]; then
+    echo "   OFFEN: logrotate -d liefert nichts — Regelanlage uebersprungen"
+    ERFASST=$'\x01'   # unmoeglicher Pfad: nichts gilt als unerfasst
+  fi
   while IFS= read -r f; do
     [ -n "$f" ] || continue
     case $'\n'"$ERFASST"$'\n' in *$'\n'"$f"$'\n'*) continue ;; esac
-    name="rw-$(basename "$f" .log | tr -c 'A-Za-z0-9_-' '-')"
+    name="rw-$(printf '%s' "$(basename "$f" .log)" | tr -c 'A-Za-z0-9_-' '-')"
     [ -f "/etc/logrotate.d/$name" ] && continue
     if [ "$NUR_ZEIGEN" = 0 ]; then
       # copytruncate, weil der schreibende Dienst den Dateideskriptor haelt:
