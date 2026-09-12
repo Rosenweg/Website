@@ -172,10 +172,23 @@ und macht `module reload res_pjsip`. Renewal uebernimmt `certbot.timer`.
 static-dns → `100.64.2.55`), nicht in der oeffentlichen Zone. DNS-01 braucht
 keinen A-Record, also bleibt die interne IP privat.
 
-**Offen:** von aussen ist nur `udp/5060` freigegeben, und dort klopfen laufend
-Scanner an (`Dropping N bytes packet from UDP …` im Log). Wenn Telefone auch von
-unterwegs registrieren sollen, waere der richtige Schritt: `tcp/5061` freigeben
-und `udp/5060` auf die peoplefone-IPs (95.128.80.3/.5/.7) einschraenken.
+**Seit 12.09.2026 eingeschraenkt.** Die Portweiterleitung `udp/5060` stand auf
+`src: any`. Die Scanner, die dort anklopften, liessen die Asterisk- und
+fail2ban-Logs auf 4.4 GB wachsen, bis die Wurzel des Containers voll war. Die
+Regel heisst jetzt `Asterisk-SIP peoplefone (udp/5060)` und hat
+`src = 95.128.80.0/25`, `src_limiting_enabled = true`.
+
+Warum genau dieses Netz: RIPE fuehrt `95.128.80.0 - 95.128.80.127` als
+`netname: PEOPLEFONE`. Und vor allem — **Asterisk akzeptiert ueber
+`pjsip identify` ohnehin nur 95.128.80.3/.5/.7**. Die Firewall-Regel ist damit
+*weiter* als die Pruefung, die auf der Anwendungsebene schon greift: sie kann
+keinen Anruf verhindern, der vorher durchkam. Ein /25 statt drei /32 gewaehlt,
+damit ein zusaetzlicher peoplefone-Server nicht stillschweigend ausgesperrt wird.
+
+Nach der Aenderung: Trunk weiter `Registered`, Gegenstelle `Avail` mit 2.9 ms.
+
+**Noch offen:** `tcp/5061` ist von aussen nicht freigegeben. Telefone koennen
+sich daher nur im WLAN/VPN registrieren, nicht von unterwegs.
 
 ## Linphone-Provisionierung (QR bei den Nebenstellen)
 
