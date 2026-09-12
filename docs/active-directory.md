@@ -137,3 +137,50 @@ Anleitung als PDF auf dem Fileserver: `/srv/documents/allgemein/anleitungen/wind
 - UDM Conditional Forward: `ad.rosenweg4303.ch` → `100.64.2.30`
 - Alle Docker-CTs und CT 106 nutzen Gateway `100.64.2.1` als DNS
 - DC ist autoritativ für `ad.rosenweg4303.ch`
+
+## Der Start-Rennfall mit IPv6 (12.09.2026)
+
+dc2 (CT 136) stand vom **09.09. bis 12.09.2026 still** — drei Tage, ohne dass
+es jemandem auffiel. Der Dienst war nicht defekt:
+
+```
+kdc_add_socket: Failed to bind to 2a02:16a:1400:9:be24:11ff:fe72:5f6:88 UDP
+                — NT_STATUS_ADDRESS_NOT_ASSOCIATED
+task_server_terminate: [kdc failed to setup interfaces]
+```
+
+Samba bindet beim Start an **alle** Adressen des Systems. Die globale IPv6
+kommt hier per Router Advertisement (`dynamic`, `valid_lft` ~1h) und ist ein
+bis zwei Sekunden nach `network-online.target` noch nicht vergeben. Samba
+bricht dann ab — und die mitgelieferte Unit hat **`Restart=no`**. Ein Rennen
+von zwei Sekunden wird so zu einem Ausfall ohne Ende.
+
+Behoben mit einem Drop-in unter
+`/etc/systemd/system/samba-ad-dc.service.d/ipv6-rennen.conf`:
+
+```ini
+[Unit]
+StartLimitIntervalSec=600
+StartLimitBurst=20
+
+[Service]
+ExecStartPre=/usr/local/sbin/warte-ipv6.sh
+Restart=on-failure
+RestartSec=15
+```
+
+`warte-ipv6.sh` wartet bis zu 60 s auf eine globale IPv6 und gibt dann
+**trotzdem** frei — ohne IPv6 soll Samba wenigstens ueber IPv4 starten. Ein
+harter Abbruch waere die schlechtere Wahl: er wuerde aus einem
+IPv6-Problem einen Totalausfall machen.
+
+**dc1 hat dasselbe Drop-in bekommen, obwohl er lief.** Er hat exakt dieselbe
+Konfiguration und war nur zufaellig auf der richtigen Seite des Rennens.
+Fallen beide Controller gleichzeitig, ist die Domaene weg — das ist kein
+Zustand, den man dem Zufall ueberlaesst.
+
+Nach dem Start hat sich die Replikation von selbst aufgeholt
+(`samba-tool drs showrepl`: alle Partitionen erfolgreich, 0 consecutive
+failures). Ein AD haelt drei Tage Trennung problemlos aus; die Tombstone-
+Lifetime liegt bei 180 Tagen.
+
