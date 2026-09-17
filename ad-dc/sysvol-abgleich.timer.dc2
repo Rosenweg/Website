@@ -1,0 +1,10 @@
+[Unit]
+Description=sysvol abgleichen (dc2: um fuenf Minuten versetzt zu dc1)
+
+[Timer]
+OnCalendar=*:5/10
+Persistent=true
+RandomizedDelaySec=0
+
+[Install]
+WantedBy=timers.target

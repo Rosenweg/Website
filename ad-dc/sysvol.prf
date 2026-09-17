@@ -1,0 +1,50 @@
+# ============================================================================
+# unison-Profil fuer den sysvol-Abgleich zwischen dc1 und dc2
+# ============================================================================
+# BEIDE Wurzelpfade kommen vom Skript, nicht von hier: welcher die Gegenseite
+# ist, haengt davon ab, auf welchem Controller der Lauf startet. Stuende hier
+# ein "root", waeren es in Summe drei, und unison bricht ab.
+
+# Rechte NICHT abgleichen. Die Zugriffsrechte im sysvol gehoeren Samba; sie
+# werden nach jedem Lauf aus dem AD neu gesetzt ("samba-tool ntacl
+# sysvolreset"). Wuerde unison sie mitschleppen, kaempften zwei Instanzen um
+# dieselben Bits.
+perms = 0
+
+# Die POSIX-ACLs des sysvol stecken in erweiterten Attributen, und unison
+# uebertraegt die nicht. Das Wiki-Rezept laesst darum rsync -XA das Kopieren
+# machen (copyprog). Ab unison 2.53 ist dieser Weg abgekuendigt — copyquoterem
+# gibt es gar nicht mehr, der Rest warnt bei jedem Lauf.
+#
+# Wir brauchen ihn auch nicht: "samba-tool ntacl sysvolreset" setzt die
+# Rechte nach jedem Lauf ohnehin aus dem AD neu, und das AD repliziert von
+# selbst. Die uebertragenen Attribute waeren Sekunden spaeter ueberschrieben.
+# Statt eine abgekuendigte Kruecke zu pflegen, verlassen wir uns auf die
+# Quelle, die sowieso die Wahrheit haelt.
+
+# Ohne Rueckfragen, es laeuft unbeaufsichtigt.
+batch = true
+
+# Konflikte nach Zeitstempel aufloesen: der juengere Stand gewinnt. Genau das
+# ist der Punkt der Zweiwege-Loesung — nach einem Rollenwechsel auf dc2 ist
+# dessen Stand der juengere und setzt sich durch, ohne dass jemand die
+# Richtung von Hand umdreht.
+times = true
+prefer = newer
+
+# Vor dem Ueberschreiben eine Kopie behalten. Ein falsch aufgeloester Konflikt
+# soll eine Gruppenrichtlinie nicht spurlos verschlucken.
+backup = Name *
+backuplocation = central
+backupdir = /var/lib/samba/sysvol-abgleich-sicherung
+maxbackups = 3
+
+# Grosse Loeschungen NICHT stillschweigend uebertragen. Ist ein Controller
+# halb aufgesetzt oder sein sysvol beschaedigt, bricht unison lieber ab, statt
+# die Richtlinien auf der Gegenseite mitzureissen. Das ist die Schutzplanke
+# gegen den Fall, den der Zweiwege-Abgleich sonst erst ermoeglicht.
+confirmbigdel = true
+
+# Zustandsloses Rauschen, das nicht repliziert werden muss.
+ignore = Name .unison.*
+ignore = Name *.tmp
