@@ -1,0 +1,10 @@
+[Unit]
+Description=sysvol abgleichen (dc1: zur vollen und halben Zehnerminute)
+
+[Timer]
+OnCalendar=*:0/10
+Persistent=true
+RandomizedDelaySec=0
+
+[Install]
+WantedBy=timers.target

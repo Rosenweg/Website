@@ -1,0 +1,9 @@
+[Unit]
+Description=Gruppenrichtlinien (sysvol) mit dem anderen Domaenencontroller abgleichen
+After=samba-ad-dc.service network-online.target
+Wants=samba-ad-dc.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/sysvol-abgleich
+TimeoutStartSec=15min
