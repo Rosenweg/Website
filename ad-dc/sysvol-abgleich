@@ -39,6 +39,50 @@ case "$(hostname -s)" in
          exit 1 ;;
 esac
 
+# ---------------------------------------------------------------------------
+# Was ein Fehler ist — und was nicht
+# ---------------------------------------------------------------------------
+# Ein Controller, der gerade neu startet oder per HA auf einen anderen Knoten
+# umzieht, ist fuer ein paar Sekunden weg. Das ist Normalbetrieb. Faellt ein
+# Lauf deshalb aus, holt der naechste es zehn Minuten spaeter nach; als Fehler
+# zu melden ist das nicht. Am 18.09.2026 zog dc1 achtmal um — jede dieser
+# Meldungen waere Laerm gewesen.
+#
+# Umgekehrt darf ein ANHALTENDES Problem nicht still bleiben. Die erste
+# Fassung uebersprang eine unerreichbare Gegenseite kommentarlos — lag dc2
+# wieder drei Tage still wie im September, haette der Abgleich das nie
+# gemeldet.
+#
+# Darum zaehlen wir Laeufe ohne Erfolg in Folge. Erst ab dem dritten (also
+# nach rund 30 Minuten) endet der Dienst mit Fehler und die Dienstwacht
+# meldet ihn. Ein Umzug dauert unter einer Minute und verpasst hoechstens
+# einen Lauf.
+ZAEHLER_DATEI="/var/lib/sysvol-abgleich/ohne-erfolg"
+SCHWELLE=3
+
+erfolg() {
+    rm -f "$ZAEHLER_DATEI"
+    exit 0
+}
+
+ohne_erfolg() {   # $1 = Grund
+    local n
+    n=$(( $(cat "$ZAEHLER_DATEI" 2>/dev/null || echo 0) + 1 ))
+    echo "$n" > "$ZAEHLER_DATEI"
+    if [ "$n" -ge "$SCHWELLE" ]; then
+        echo "sysvol-abgleich: $1 — seit $n Laeufen kein Abgleich mehr." >&2
+        exit 1
+    fi
+    echo "sysvol-abgleich: $1 — Lauf $n/$SCHWELLE ohne Erfolg, naechster Versuch in 10 Minuten."
+    exit 0
+}
+
+gegenseite_da() {
+    ssh -o BatchMode=yes -o ConnectTimeout=10 \
+        -o StrictHostKeyChecking=accept-new \
+        "root@$GEGEN.$DOMAENE" true 2>/dev/null
+}
+
 # Nur ein Lauf gleichzeitig. Die Timer der beiden Controller sind um fuenf
 # Minuten versetzt, aber ein langsamer Lauf darf sich nicht mit dem naechsten
 # ueberholen.
@@ -48,33 +92,37 @@ if ! flock -n 9; then
     exit 0
 fi
 
-# Erreichbarkeit zuerst pruefen. Ist die Gegenseite weg, ist das kein Fehler,
-# sondern der Normalfall waehrend eines Neustarts — unison wuerde sonst mit
-# einem unverstaendlichen Fehler abbrechen und den Timer als "failed" markieren.
-if ! ssh -o BatchMode=yes -o ConnectTimeout=10 \
-         -o StrictHostKeyChecking=accept-new \
-         "root@$GEGEN.$DOMAENE" true 2>/dev/null; then
-    echo "sysvol-abgleich: $GEGEN nicht erreichbar, uebersprungen."
-    exit 0
-fi
+# Wird ein Lauf hart abgebrochen — etwa weil der Container mitten im Abgleich
+# umzieht —, bleiben unisons Sperrdateien liegen und blockieren jeden
+# folgenden Lauf. Wir halten die flock oben, also laeuft hier sicher kein
+# anderes unison; eine Sperre aelter als 30 Minuten ist verwaist (ein Lauf
+# dauert Sekunden).
+find /root/.unison -maxdepth 1 -name 'lk*' -mmin +30 -delete 2>/dev/null
+
+gegenseite_da || ohne_erfolg "$GEGEN nicht erreichbar"
 
 unison sysvol \
     "$PFAD" "ssh://root@$GEGEN.$DOMAENE/$PFAD" \
     -logfile /var/log/sysvol-abgleich.log
 RC=$?
 
-# 0 = nichts zu tun oder alles uebertragen, 1 = uebersprungene Dateien
-# (Konflikt, den "prefer = newer" nicht aufloesen konnte). Beides ist kein
-# Grund, den Dienst als gescheitert zu melden — aber sichtbar soll es sein.
+# 0 = nichts zu tun oder alles uebertragen, 1 = einzelne Dateien
+# uebersprungen (Konflikt, den "prefer = newer" nicht aufloesen konnte).
+if [ "$RC" -ge 2 ]; then
+    # Ist die Gegenseite waehrend des Laufs verschwunden, war es ein Umzug
+    # oder Neustart, kein Defekt.
+    if gegenseite_da; then
+        ohne_erfolg "unison beendet mit $RC"
+    else
+        ohne_erfolg "$GEGEN waehrend des Laufs weggefallen (Neustart/Umzug?)"
+    fi
+fi
 if [ "$RC" -eq 1 ]; then
     echo "sysvol-abgleich: einzelne Dateien uebersprungen, siehe /var/log/sysvol-abgleich.log" >&2
-elif [ "$RC" -gt 1 ]; then
-    echo "sysvol-abgleich: unison beendet mit $RC" >&2
-    exit "$RC"
 fi
 
 # Die Rechte im Verzeichnis nachziehen. unison bringt die Dateien, die
 # Zuordnung zu den AD-Gruppen macht Samba selbst.
 samba-tool ntacl sysvolreset 2>&1 | tail -2
 
-exit 0
+erfolg

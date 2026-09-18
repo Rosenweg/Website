@@ -11,5 +11,7 @@ Type=oneshot
 # erst der Timer lief 86 Mal hintereinander ins Leere.
 Environment=HOME=/root
 Environment=UNISON=/root/.unison
+# Hier liegt der Zaehler der Laeufe ohne Erfolg (siehe Skript).
+StateDirectory=sysvol-abgleich
 ExecStart=/usr/local/bin/sysvol-abgleich
 TimeoutStartSec=15min

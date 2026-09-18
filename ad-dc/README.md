@@ -35,6 +35,8 @@ liegt einer, holt der andere nach, sobald er zurueck ist.
 | `sysvol-abgleich.service` | `/etc/systemd/system/` |
 | `sysvol-abgleich.timer.dc1` | auf dc1 als `sysvol-abgleich.timer` |
 | `sysvol-abgleich.timer.dc2` | auf dc2 als `sysvol-abgleich.timer` |
+| `warte-ipv6.sh` | `/usr/local/sbin/warte-ipv6.sh` |
+| `samba-ad-dc.service.d/*.conf` | `/etc/systemd/system/samba-ad-dc.service.d/` |
 
 Die Timer sind **versetzt** (dc1 `*:0/10`, dc2 `*:5/10`). Liefen sie
 gleichzeitig, blockierten sich zwei Laeufe auf demselben Verzeichnis.
@@ -73,6 +75,56 @@ Vorher war der erste Fall unmoeglich.
   falsch aufgeloester Konflikt soll keine Richtlinie spurlos verschlucken.
 - Das Skript bricht **nicht** ab, wenn die Gegenseite nicht erreichbar ist.
   Waehrend eines Neustarts ist das der Normalfall und kein Fehler.
+
+## Neustart und Umzug sind kein Fehler (18.09.2026)
+
+Ein Controller, der neu startet oder per HA den Knoten wechselt, ist ein
+normaler Betriebszustand. Am 18.09.2026 zog dc1 achtmal um, und jedes Mal
+entstanden Fehlermeldungen — drei Ursachen, alle behoben:
+
+**1. unison ohne HOME.** systemd setzt kein `HOME`, unison findet sein Profil
+dann nicht. Jeder Timer-Lauf scheiterte (86 Mal). `Environment=HOME=/root`
+in der Unit. Meine Tests liefen per `pct exec`, wo HOME gesetzt ist — darum
+jetzt immer ueber `systemctl start` pruefen, genau wie der Timer startet.
+
+**2. samba meldet jeden Stopp als Fehler.** samba beendet sich auf SIGTERM
+mit Status 127; die Debian-Unit kennt das nicht als Erfolg. Jeder Umzug
+erzeugte `Failed with result 'exit-code'`.
+`samba-ad-dc.service.d/sauberer-stopp.conf`: `SuccessExitStatus=127`.
+
+**3. Warten auf IPv6 wartete zu kurz.** Die erste Fassung von
+`warte-ipv6.sh` pruefte nur, ob eine globale Adresse *sichtbar* ist. Beim
+Boot um 10:42 war sie das — aber noch *tentative* (Duplikatpruefung), und an
+eine tentative Adresse laesst sich nicht binden. Jetzt
+`ip -6 addr show scope global -tentative -dadfailed`.
+
+Nachgewiesen: dc2 ist neu gestartet und von pve3 auf pve1 umgezogen, mit
+`Deactivated successfully` beim Stopp, null Fehlerzeilen beim Start und
+`NRestarts=0`.
+
+### Abgleich: einzelne Aussetzer ja, anhaltender Ausfall nein
+
+Der Abgleich unterscheidet jetzt zwischen beidem. Ist die Gegenseite weg —
+vor oder waehrend des Laufs —, zaehlt das als Lauf ohne Erfolg und wird nur
+protokolliert. Erst ab dem **dritten Lauf in Folge** (rund 30 Minuten) endet
+der Dienst mit Fehler, und die Dienstwacht meldet ihn. Ein Umzug dauert unter
+einer Minute und verpasst hoechstens einen Lauf.
+
+Das korrigiert auch den umgekehrten Fehler der ersten Fassung: eine dauerhaft
+unerreichbare Gegenseite wurde dort kommentarlos uebersprungen. Laege dc2
+wieder drei Tage still wie im September, haette der Abgleich das nie
+gemeldet.
+
+Verwaiste unison-Sperren (`~/.unison/lk*`) von hart abgebrochenen Laeufen
+raeumt das Skript beim Start weg, wenn sie aelter als 30 Minuten sind.
+
+### Falle: `pct shutdown` auf HA-verwalteten Containern
+
+`pct shutdown 136` schaltet dc2 nicht einfach ab, sondern setzt den
+**HA-Sollzustand auf `stopped`** — HA laesst ihn dann dauerhaft aus. Beim
+Testen am 18.09.2026 passiert und sofort mit
+`ha-manager set ct:136 --state started` zurueckgenommen. Fuer einen
+Neustart `pct reboot` verwenden oder direkt ueber `ha-manager`.
 
 ## Der alte Weg
 
