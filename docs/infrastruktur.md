@@ -250,3 +250,23 @@ Alle 2 Minuten auf allen 3 Docker-Nodes:
 Alle 5 Minuten auf allen 3 Docker-Nodes:
 - Setzt `net.ipv4.ip_forward=1` in Docker lb-Namespaces
 - Verhindert Overlay-Netzwerk-Ausfälle nach Service-Neustarts
+
+## HA-Umverteilung: Schwelle 40 % statt 20 % (18.09.2026)
+
+`/etc/pve/datacenter.cfg`:
+`crs: ha=dynamic,ha-auto-rebalance=1,ha-auto-rebalance-threshold=40,ha-rebalance-on-start=1`
+
+Mit 20 % pendelten am 18.09.2026 ab 03:19 zwei Gaeste stuendlich zwischen
+pve1 und pve2: dc1 (CT 108) 8 Mal, station-test (VM 117) 13 Mal. Der Cluster
+war dabei fast leer (CPU 5–13 %, RAM 20–31 %) — die "Unwucht" war Rauschen,
+und jede Korrektur kippte sie in die Gegenrichtung.
+
+Fuer einen Container ist das nicht harmlos: **LXC laesst sich nicht live
+verschieben, jeder Umzug ist Herunterfahren und Neustart.** dc1 wurde also
+stuendlich neu gestartet. Dass es nur zwischen pve1 und pve2 pendelte, liegt
+an der Regel `dc-getrennt` — dc2 steht auf pve3, dorthin darf dc1 nicht.
+
+Abgestellt per `pvesh set /cluster/options --crs …`. Kommt das Pendeln
+trotz 40 % wieder, ist der naechste Schritt `ha-auto-rebalance=0`:
+beim Knotenausfall verteilt `ha=dynamic` weiterhin lastabhaengig, nur im
+Normalbetrieb wird dann nichts mehr verschoben.
