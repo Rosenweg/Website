@@ -5,5 +5,11 @@ Wants=samba-ad-dc.service
 
 [Service]
 Type=oneshot
+# systemd setzt kein HOME. unison sucht sein Profil aber in $HOME/.unison und
+# bricht ohne HOME sofort ab ("Environment variable HOME not found"). Von Hand
+# per pct exec gestartet fiel das nicht auf, weil dort HOME gesetzt ist —
+# erst der Timer lief 86 Mal hintereinander ins Leere.
+Environment=HOME=/root
+Environment=UNISON=/root/.unison
 ExecStart=/usr/local/bin/sysvol-abgleich
 TimeoutStartSec=15min
