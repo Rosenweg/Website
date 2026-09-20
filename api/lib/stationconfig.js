@@ -154,11 +154,18 @@ const ROLE_DEFAULTS = {
     // dconf gesperrt, und ein Aufsatz darueber waere genau das, was am
     // Sperrbildschirm vermieden wird.
     //
-    // Standardmaessig AUS. Auf Anzeigestationen gehoert es nicht hin: kein
-    // Login, 24/7 sichtbar, und die Schirme haengen an oeffentlich
-    // einsehbaren Stellen.
+    // Standardmaessig AN auf Arbeitsplaetzen und Laptops (der Laptop erbt
+    // diese Vorgaben weiter unten). Wer an einer Station davorsitzt, soll
+    // ohne Nachfrage sehen, an welchem Geraet er sitzt und wohin er eine
+    // Stoerung meldet — das ist der haeufigere Fall; wer es an einem Platz
+    // nicht will, schaltet es dort ab.
+    //
+    // Auf Anzeigestationen gibt es das nicht: sie sind eine eigene Rolle
+    // (roles/display), und die Komponente liegt unter roles/desktop. Sie
+    // laeuft dort also gar nicht erst — kein Login, 24/7 sichtbar, und die
+    // Schirme haengen an oeffentlich einsehbaren Stellen.
     schreibtisch_info: {
-      enabled: false,
+      enabled: true,
       titel: 'Rosenweg Technik',
       kontakt: '061 551 01 52',
       intervall_minuten: 5,
