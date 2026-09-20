@@ -149,6 +149,20 @@ const ROLE_DEFAULTS = {
     // Sie ersetzt die Sperre nicht, sondern kommt davor; deshalb muss
     // nach_sekunden kleiner sein als screen_lock_seconds (300), sonst zieht
     // die Station die Sperre vor und die Anzeige käme nie.
+    // Stationsangaben im Hintergrundbild, oben rechts — wie BGInfo unter
+    // Windows. Kein Fenster, sondern Text IM Bild: der Hintergrund ist per
+    // dconf gesperrt, und ein Aufsatz darueber waere genau das, was am
+    // Sperrbildschirm vermieden wird.
+    //
+    // Standardmaessig AUS. Auf Anzeigestationen gehoert es nicht hin: kein
+    // Login, 24/7 sichtbar, und die Schirme haengen an oeffentlich
+    // einsehbaren Stellen.
+    schreibtisch_info: {
+      enabled: false,
+      titel: 'Rosenweg Technik',
+      kontakt: '061 551 01 52',
+      intervall_minuten: 5,
+    },
     leerlauf_anzeige: {
       enabled: true,
       url: 'https://display.rosenweg4303.ch',
