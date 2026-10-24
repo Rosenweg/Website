@@ -17064,9 +17064,20 @@ app.post('/api/whatsapp/backfill', requireWhatsappSecret, async (req, res) => {
 });
 
 // Outbox-Poll: Bot-Service holt anstehende Nachrichten
+// Was laenger als WA_OUTBOX_MAX_AGE_H (Standard 6 h) wartet, wird verworfen statt nachgeholt:
+// Nach dem Bot-Ausfall 21.9.–24.10.2026 hat die Neukopplung 50 veraltete Alarme auf einmal
+// in die Technik-Gruppe gespuelt.
+const WA_OUTBOX_MAX_AGE_H = Number(process.env.WA_OUTBOX_MAX_AGE_H) || 6;
 app.get('/api/whatsapp/outbox-poll', requireWhatsappSecret, async (req, res) => {
   try {
     const limit = Math.min(50, parseInt(req.query.limit, 10) || 20);
+    const alt = await pool.query(
+      `UPDATE whatsapp_messages
+          SET status = 'failed', error_message = 'verworfen: wartete laenger als ' || $1::int || ' h auf den Bot'
+        WHERE direction = 'outbound' AND status = 'queued' AND created_at < NOW() - make_interval(hours => $1::int)`,
+      [WA_OUTBOX_MAX_AGE_H],
+    );
+    if (alt.rowCount) console.warn(`[wa-outbox] ${alt.rowCount} veraltete Nachricht(en) verworfen (> ${WA_OUTBOX_MAX_AGE_H} h)`);
     const r = await pool.query(
       `UPDATE whatsapp_messages SET status = 'sent', sent_at = NOW()
         WHERE id IN (
