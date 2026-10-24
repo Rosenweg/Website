@@ -191,6 +191,12 @@
         <p class="sub">Scanne den QR-Code mit WhatsApp (Verknüpfte Geräte), um den Bot mit dem WhatsApp-Konto zu verbinden.</p>
         <div id="pairBody"><div class="loading">Lade QR…</div></div>
       </div>
+      <div class="card">
+        <h2>Profilbild</h2>
+        <p class="sub">Bild für das WhatsApp-Konto des Bots (JPEG oder PNG, möglichst quadratisch). Gilt sofort in allen Gruppen.</p>
+        <input type="file" id="ppFile" accept="image/jpeg,image/png">
+        <div class="actions"><button class="btn" id="ppBtn">Profilbild setzen</button></div>
+      </div>
     </section>
 
     <!-- Weiterleitungen -->
@@ -576,6 +582,23 @@
       .catch(apiErr).then(function(){ btn.disabled=false; });
   }
 
+  // ── Profilbild ─────────────────────────────────────────────────────────
+  function setProfilePic(){
+    var f = document.getElementById('ppFile').files[0];
+    if (!f){ toast('Bild wählen','err'); return; }
+    if (!/^image\/(jpeg|png)$/.test(f.type)){ toast('Nur JPEG oder PNG','err'); return; }
+    var btn = document.getElementById('ppBtn'); btn.disabled=true;
+    var rd = new FileReader();
+    rd.onload = function(){
+      var b64 = String(rd.result).split(',')[1];
+      api('POST','/gateway/ui/profile-picture',{ mimetype:f.type, data_base64:b64 })
+        .then(function(){ toast('Profilbild gesetzt','ok'); document.getElementById('ppFile').value=''; })
+        .catch(apiErr).then(function(){ btn.disabled=false; });
+    };
+    rd.onerror = function(){ toast('Datei nicht lesbar','err'); btn.disabled=false; };
+    rd.readAsDataURL(f);
+  }
+
   // ── Broadcast (Massennachricht an Bewohner, via Haupt-API /api-Proxy) ────
   function bcTargetVal(){ return document.getElementById('bcTarget').value; }
   function bcCount(){
@@ -764,6 +787,7 @@
     document.getElementById('fwdKind').onchange = syncFwdInputs;
     document.getElementById('fwdAdd').onclick = addForward;
     document.getElementById('sendBtn').onclick = doSend;
+    document.getElementById('ppBtn').onclick = setProfilePic;
     document.getElementById('bcCountBtn').onclick = bcCount;
     document.getElementById('bcSendBtn').onclick = bcSend;
     document.getElementById('msgReload').onclick = loadMessages;

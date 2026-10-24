@@ -362,6 +362,21 @@ function startGateway(botCore) {
   });
 
   // ── Web-UI-Endpoints ─────────────────────────────────────────────────────
+  // ── Profilbild des Bot-Kontos (per API-Key oder Web-UI) ──────────────────
+  async function profilePicture(req, res) {
+    const { data_base64, mimetype = 'image/jpeg' } = req.body || {};
+    if (!data_base64) return res.status(400).json({ error: 'data_base64 fehlt' });
+    if (!/^image\/(jpeg|png)$/.test(mimetype)) return res.status(400).json({ error: 'Nur JPEG oder PNG' });
+    if (!botCore.isReady()) return res.status(503).json({ error: 'WhatsApp nicht bereit' });
+    try {
+      await botCore.setProfilePicture(mimetype, data_base64);
+      console.log(`[Gateway] Profilbild gesetzt von ${req.uiUser?.email || req.apiKey?.name}`);
+      res.json({ ok: true });
+    } catch (err) { res.status(422).json({ error: err.message }); }
+  }
+  app.post('/gateway/profile-picture', jsonBody, keyAuth, profilePicture);
+  app.post('/gateway/ui/profile-picture', jsonBody, uiAuth, profilePicture);
+
   app.get('/gateway/ui/whoami', uiAuth, (req, res) => res.json({ email: req.uiUser.email, name: req.uiUser.name }));
 
   app.post('/gateway/ui/send', jsonBody, uiAuth, async (req, res) => {
