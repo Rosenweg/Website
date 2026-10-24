@@ -289,6 +289,12 @@ async function waitForAck(msg, minAck = 1, timeoutMs = 8000) {
 // dem Standalone-Gateway (gateway.js: keyed JSON-API, SMTP-in, Web-UI).
 // Gibt die _serialized WhatsApp-Message-ID zurueck (fuer Tracking/Loeschen).
 // attachments: [{ mimetype, data_base64|content_base64, filename, caption }]
+// Profilbild des Bot-Kontos setzen (gilt fuer alle Chats; WhatsApp schneidet rund zu).
+async function setProfilePicture(mimetype, dataB64) {
+  const ok = await client.setProfilePicture(new MessageMedia(mimetype, dataB64, 'profilbild'));
+  if (!ok) throw new Error('WhatsApp hat das Profilbild nicht uebernommen');
+}
+
 async function sendViaClient(chatId, body, attachments = []) {
   // Bei Gruppen: chat erst laden — client.sendMessage schlaegt sonst gerne
   // ohne Fehler "sent" zurueck ohne tatsaechliche Zustellung.
@@ -600,6 +606,7 @@ try {
     revokeByMsgId,
     findGroupByName,
     getGroups,
+    setProfilePicture,
   });
 } catch (e) {
   console.error('[Gateway] Start fehlgeschlagen (Bot laeuft weiter ohne Gateway):', e.stack || e.message);
