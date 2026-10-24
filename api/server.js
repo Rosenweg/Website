@@ -17167,6 +17167,12 @@ app.post('/api/whatsapp/delete-status', requireWhatsappSecret, async (req, res) 
 // Bot-Heartbeat: in-memory, alarmiert Admins wenn stale (>5min).
 let waBotHeartbeat = null; // { is_ready, ready_at, phone, pid, uptime_seconds, received_at }
 let waBotStaleAlertSent = false; // verhindert Alert-Spam
+// Bot lebt, ist aber nicht mit WhatsApp verbunden (Kopplung verloren). So lief es
+// 21.9.–24.10.2026 unbemerkt: Heartbeats kamen, nur is_ready war false.
+let waBotNotReadySince = null;
+let waBotNotReadyAlertAt = null; // letzter Alarm; wiederholt alle WA_NOT_READY_REMIND_MS
+const WA_NOT_READY_ALERT_MS = 15 * 60 * 1000;
+const WA_NOT_READY_REMIND_MS = 24 * 60 * 60 * 1000;
 app.post('/api/whatsapp/heartbeat', requireWhatsappSecret, (req, res) => {
   const wasStale = waBotStaleAlertSent;            // war zuvor ein Stale-Alarm raus?
   const prevHb = waBotHeartbeat?.received_at;       // letzter Heartbeat vor der Lücke
@@ -17181,10 +17187,60 @@ app.post('/api/whatsapp/heartbeat', requireWhatsappSecret, (req, res) => {
     const downMin = prevHb ? Math.round((Date.now() - new Date(prevHb).getTime()) / 60000) : null;
     sendBotRecovery(downMin).catch(() => {});
   }
+  if (req.body?.is_ready) {
+    if (waBotNotReadyAlertAt) {
+      const downMin = Math.round((Date.now() - waBotNotReadySince.getTime()) / 60000);
+      sendBotRecovery(downMin).catch(() => {});
+    }
+    waBotNotReadySince = null; waBotNotReadyAlertAt = null;
+  } else if (!waBotNotReadySince) {
+    waBotNotReadySince = new Date();
+  }
 });
 
+async function botAdminEmails() {
+  const r = await pool.query(
+    `SELECT DISTINCT email FROM users
+      WHERE active = true AND email IS NOT NULL
+        AND (groups_json::jsonb ? 'technik' OR groups_json::jsonb ? 'Präsident')`,
+  );
+  return r.rows.map(x => x.email).filter(Boolean);
+}
+
+// Kopplung verloren: nur per Mail — über WhatsApp kommt die Warnung ja gerade nicht an.
+async function checkBotNotReady() {
+  if (!waBotNotReadySince) return;
+  const age = Date.now() - waBotNotReadySince.getTime();
+  if (age < WA_NOT_READY_ALERT_MS) return;
+  if (waBotNotReadyAlertAt && Date.now() - waBotNotReadyAlertAt.getTime() < WA_NOT_READY_REMIND_MS) return;
+  const erneut = !!waBotNotReadyAlertAt;
+  waBotNotReadyAlertAt = new Date();
+  const ageMin = Math.round(age / 60000);
+  const dauer = ageMin >= 120 ? `${Math.round(ageMin / 60)} Stunden` : `${ageMin} Minuten`;
+  console.warn(`[WA-Watchdog] Bot nicht mit WhatsApp verbunden seit ${ageMin}min — Alarm per Mail.`);
+  try {
+    const adminEmails = await botAdminEmails();
+    if (adminEmails.length === 0) return;
+    await loggedSendMail({
+      from: MAIL_FROM,
+      to: adminEmails.join(', '),
+      subject: `⚠ WhatsApp-Bot nicht verbunden${erneut ? ' (Erinnerung)' : ''} — neu koppeln`,
+      text: `Der WhatsApp-Bot läuft, ist aber seit ${dauer} nicht mit WhatsApp verbunden.\n`
+        + `Solange gehen keine WhatsApp-Nachrichten raus (Alarme, Verteiler-Weiterleitungen).\n\n`
+        + `Seit: ${waBotNotReadySince.toLocaleString('de-CH', { timeZone: 'Europe/Zurich' })}\n`
+        + `Telefon: ${waBotHeartbeat?.phone || '(unbekannt)'}\n\n`
+        + `Neu koppeln: https://whatsapp.rosenweg4303.ch → Kopplung, QR-Code mit dem Bot-Telefon scannen\n`
+        + `(WhatsApp → Verknüpfte Geräte → Gerät hinzufügen).\n\n`
+        + `Diese Erinnerung kommt täglich, bis der Bot wieder verbunden ist.`,
+    }, 'whatsapp-bot-not-ready');
+  } catch (err) {
+    console.warn('[WA-Watchdog] Kopplungs-Alarm konnte nicht gesendet werden:', err.message);
+  }
+}
+
 // Stale-Detector: wenn der letzte Heartbeat > 5min her ist, einmal Alarm
-// an Technik/Präsident senden (direkt-Email + WA falls Opt-In).
+// an Technik/Präsident senden — nur per Mail: Ein WhatsApp-Alarm über den toten
+// Bot bleibt in der Outbox liegen und kam bisher erst nach der Reparatur an.
 async function checkBotHeartbeat() {
   const STALE_MS = 5 * 60 * 1000;
   const lastHb = waBotHeartbeat?.received_at;
@@ -17195,13 +17251,7 @@ async function checkBotHeartbeat() {
   const ageMin = Math.round(age / 60000);
   console.warn(`[WA-Watchdog] Bot stale seit ${ageMin}min — Alarm.`);
   try {
-    // Technik + Präsident-Emails sammeln
-    const r = await pool.query(
-      `SELECT DISTINCT email FROM users
-        WHERE active = true AND email IS NOT NULL
-          AND (groups_json::jsonb ? 'technik' OR groups_json::jsonb ? 'Präsident')`,
-    );
-    const adminEmails = r.rows.map(x => x.email).filter(Boolean);
+    const adminEmails = await botAdminEmails();
     if (adminEmails.length === 0) return;
     const lastReady = waBotHeartbeat?.is_ready ? 'ready' : 'nicht ready';
     const phone = waBotHeartbeat?.phone || '(unbekannt)';
@@ -17213,15 +17263,10 @@ async function checkBotHeartbeat() {
         + `Letzte Meldung: ${new Date(lastHb).toLocaleString('de-CH')}\n`
         + `Letzter Status: ${lastReady}\n`
         + `Telefon: ${phone}\n\n`
-        + `Prüfen: docker service ps rosenweg_whatsapp-bot\n`
-        + `Logs:    docker service logs rosenweg_whatsapp-bot --tail 50\n`
+        + `Prüfen: pct exec 116 -- docker ps --filter name=whatsapp-bot\n`
+        + `Logs:    pct exec 116 -- docker logs --tail 50 whatsapp-bot\n`
         + `Admin-UI: https://whatsapp.rosenweg4303.ch`,
     }, 'whatsapp-bot-stale').catch(() => {});
-    pushWhatsappBroadcast({
-      emails: adminEmails,
-      sourceType: 'bot-watchdog',
-      body: `⚠ *WhatsApp-Bot stale*\nKein Heartbeat seit ${ageMin}min.\nDocker-Logs prüfen.`,
-    }).catch(() => {});
   } catch (err) {
     console.warn('[WA-Watchdog] Alarm konnte nicht gesendet werden:', err.message);
   }
@@ -17230,12 +17275,7 @@ async function checkBotHeartbeat() {
 async function sendBotRecovery(downMin) {
   console.log(`[WA-Watchdog] Bot wieder erreichbar${downMin != null ? ` (Ausfall ~${downMin}min)` : ''} — Entwarnung.`);
   try {
-    const r = await pool.query(
-      `SELECT DISTINCT email FROM users
-        WHERE active = true AND email IS NOT NULL
-          AND (groups_json::jsonb ? 'technik' OR groups_json::jsonb ? 'Präsident')`,
-    );
-    const adminEmails = r.rows.map(x => x.email).filter(Boolean);
+    const adminEmails = await botAdminEmails();
     if (adminEmails.length === 0) return;
     const phone = waBotHeartbeat?.phone || '(unbekannt)';
     await loggedSendMail({
@@ -17259,6 +17299,7 @@ async function sendBotRecovery(downMin) {
 }
 
 setInterval(checkBotHeartbeat, 60_000); // jede Minute prüfen
+setInterval(checkBotNotReady, 60_000);
 
 // ── Modbus-Zähler-Watchdog ─────────────────────────────────────────────────
 // Meldet unerreichbare Modbus-Zähler an Technik (WhatsApp + Mail) inkl.
