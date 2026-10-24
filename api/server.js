@@ -3594,7 +3594,13 @@ async function resolveVerwaltungsGroup(spec) {
   const emails = new Set();
   const druckerCandidates = [];
   try {
-    if (rolle === 'bewohner') {
+    if (rolle === 'objektverwaltung') {
+      // Die beauftragte Verwaltung (aktiv, im Vertragszeitraum): Firmenadresse + Standard-CC-
+      // Kontakte. Wechselt die Verwaltung, folgt der Verteiler beim naechsten Sync von selbst.
+      // Der Ausschuss-Ersatz von findVerwaltungForStweg (id=null) zaehlt hier nicht.
+      const v = await findVerwaltungForStweg(stwegFilter);
+      if (v && v.id) [...v.mailTo, ...v.mailCc].forEach(e => emails.add(String(e).toLowerCase()));
+    } else if (rolle === 'bewohner') {
       // Per-wohnung: pick the role that actually lives there (bewohnt_von)
       const q = await pool.query(`
         SELECT wk.email FROM wohnungen w
