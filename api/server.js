@@ -3587,9 +3587,11 @@ async function resolveVerwaltungsGroup(spec) {
   const rolle = parts[0];
   let stwegFilter = null;
   let includeDrucker = false;
+  let alleKontakte = false;
   for (const opt of parts.slice(1)) {
     if (opt.startsWith('stweg=')) stwegFilter = parseInt(opt.slice(6));
     else if (opt === 'include_drucker') includeDrucker = true;
+    else if (opt === 'alle_kontakte') alleKontakte = true;
   }
   const emails = new Set();
   const druckerCandidates = [];
@@ -3598,8 +3600,16 @@ async function resolveVerwaltungsGroup(spec) {
       // Die beauftragte Verwaltung (aktiv, im Vertragszeitraum): Firmenadresse + Standard-CC-
       // Kontakte. Wechselt die Verwaltung, folgt der Verteiler beim naechsten Sync von selbst.
       // Der Ausschuss-Ersatz von findVerwaltungForStweg (id=null) zaehlt hier nicht.
+      // Mit :alle_kontakte alle Mitarbeitenden mit E-Mail, nicht nur die Standard-CC-Kontakte.
       const v = await findVerwaltungForStweg(stwegFilter);
-      if (v && v.id) [...v.mailTo, ...v.mailCc].forEach(e => emails.add(String(e).toLowerCase()));
+      if (v && v.id) {
+        [...v.mailTo, ...v.mailCc].forEach(e => emails.add(String(e).toLowerCase()));
+        if (alleKontakte) {
+          const k = await pool.query(
+            `SELECT email FROM verwaltungs_kontakte WHERE verwaltung_id = $1 AND email IS NOT NULL AND email <> ''`, [v.id]);
+          k.rows.forEach(r => emails.add(r.email.trim().toLowerCase()));
+        }
+      }
     } else if (rolle === 'bewohner') {
       // Per-wohnung: pick the role that actually lives there (bewohnt_von)
       const q = await pool.query(`
