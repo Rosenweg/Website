@@ -67,6 +67,9 @@ zielpfad() {  # $1 Containername, $2 Repo-Pfad
     fe-isp\|js/nav.js)     echo "" ;;
     fe-isp\|js/nav-isp.js) echo "js/nav.js" ;;
     *\|js/nav-isp.js)      echo "" ;;
+    # fe-pwa: pwa/ ist dort die Docroot (frontends-lxc/deploy.sh, assemble_pwa)
+    fe-pwa\|pwa/*)         echo "${2#pwa/}" ;;
+    *\|pwa/*)              echo "" ;;
     *)                     echo "$2" ;;
   esac
 }
