@@ -89,6 +89,7 @@
     }
     const fmtDate = s => { if (!s) return ''; try { return new Date(s).toLocaleString('de-CH', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return s; } };
     const fmtDay = s => { if (!s) return ''; try { return new Date(s).toLocaleDateString('de-CH', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }); } catch { return s; } };
+    const fristAbgelaufen = d => !!d && new Date(d) < new Date();
     const escapeHtml = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
     // ── E-Mail-Code-Login ───────────────────────────────────────────────────
@@ -179,7 +180,7 @@
             ${p.ort ? '<span>📍 ' + escapeHtml(p.ort) + '</span>' : ''}
             <span>📋 ${p.options_count} Termine</span>
             <span>👥 ${p.voters_count} Stimmen</span>
-            ${p.deadline && !closed ? '<span>⏰ bis ' + fmtDay(p.deadline) + '</span>' : ''}
+            ${p.deadline && !closed ? '<span' + (fristAbgelaufen(p.deadline) ? ' class="text-red-600">⏰ Frist abgelaufen' : '>⏰ bis ' + fmtDay(p.deadline)) + '</span>' : ''}
             ${termin}
             ${voted}
           </div>
@@ -236,14 +237,22 @@
 
     // ── Öffentliche Abstimm-Ansicht (ohne Login, nur Name) ──────────────────
     let PUB = null, PUBVOTE = {};
+    function publicVoterId() {
+      let v = null; try { v = localStorage.getItem('doodlePublicVoter'); } catch (e) {}
+      if (!/^[a-f0-9]{32}$/.test(v || '')) {
+        v = [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
+        try { localStorage.setItem('doodlePublicVoter', v); } catch (e) {}
+      }
+      return v;
+    }
     async function renderPublic(id, t) {
       ['login-box', 'toolbar', 'list', 'create'].forEach(x => $(x).classList.add('hidden'));
       $('detail').classList.remove('hidden'); $('authbar').innerHTML = '';
-      const r = await fetch('/api/doodle/public/' + encodeURIComponent(id) + '?t=' + encodeURIComponent(t));
+      const r = await fetch('/api/doodle/public/' + encodeURIComponent(id) + '?t=' + encodeURIComponent(t), { headers: { 'X-Doodle-Voter': publicVoterId() } });
       if (!r.ok) { $('detail').innerHTML = '<div class="bg-white rounded-xl shadow p-6 text-center text-red-600">Link ungültig oder deaktiviert.</div>'; return; }
       const d = await r.json();
       PUB = { id, t, poll: d.poll, options: d.options, votes: d.votes, name: localStorage.getItem('doodlePublicName') || '' };
-      PUBVOTE = {};
+      PUBVOTE = Object.assign({}, d.mine || {});
       renderPublicView();
     }
     function pubVote(optId, wert, btn) {
@@ -253,18 +262,19 @@
       if (PUBVOTE[optId]) btn.classList.add('sel-' + PUBVOTE[optId]);
     }
     function renderPublicView() {
-      const p = PUB.poll, opts = PUB.options, votes = PUB.votes, closed = p.status !== 'offen';
+      const p = PUB.poll, opts = PUB.options, votes = PUB.votes, closed = p.status !== 'offen' || fristAbgelaufen(p.deadline);
       const cnt = {}; opts.forEach(o => cnt[o.id] = { ja: 0, vielleicht: 0, nein: 0 });
       votes.forEach(v => { if (cnt[v.option_id]) cnt[v.option_id][v.wert]++; });
       const maxJa = Math.max(0, ...opts.map(o => cnt[o.id].ja));
-      const voters = [...new Set(votes.map(v => v.voter_name))];
-      const voteOf = {}; votes.forEach(v => { voteOf[v.voter_name + '|' + v.option_id] = v.wert; });
+      const voters = [...new Set(votes.map(v => v.voter))];
+      const voterName = {}; votes.forEach(v => { voterName[v.voter] = v.voter_name; });
+      const voteOf = {}; votes.forEach(v => { voteOf[v.voter + '|' + v.option_id] = v.wert; });
       const sym = { ja: '<span class="text-green-600">✓</span>', vielleicht: '<span class="text-amber-500">?</span>', nein: '<span class="text-red-500">✗</span>' };
       $('detail').innerHTML = `<div class="bg-white rounded-xl shadow p-5">
         <h2 class="text-xl font-bold">${escapeHtml(p.titel)}</h2>
         ${p.ort ? '<p class="text-slate-500 mt-1">📍 ' + escapeHtml(p.ort) + '</p>' : ''}
         ${p.beschreibung ? '<p class="mt-2 whitespace-pre-line">' + escapeHtml(p.beschreibung) + '</p>' : ''}
-        ${closed ? '<div class="mt-3 bg-slate-100 rounded-lg p-3 text-sm">Diese Umfrage ist geschlossen.</div>' : `
+        ${closed ? '<div class="mt-3 bg-slate-100 rounded-lg p-3 text-sm">' + (p.status !== 'offen' ? 'Diese Umfrage ist geschlossen.' : 'Die Abstimm-Frist ist abgelaufen.') + '</div>' : `
           <h3 class="font-semibold mt-4 mb-1">Dein Name</h3>
           <input id="pub-name" value="${escapeHtml(PUB.name || '')}" placeholder="Vor- und Nachname" class="border rounded-lg px-3 py-2 w-full mb-3">
           <h3 class="font-semibold mb-2">Deine Verfügbarkeit</h3>
@@ -284,7 +294,7 @@
         ${voters.length ? `<h3 class="font-semibold mt-6 mb-2">Übersicht (${voters.length})</h3>
           <div class="overflow-x-auto"><table class="text-sm border-collapse">
             <tr><th class="text-left p-1"></th>${opts.map(o => '<th class="p-1 text-center">' + escapeHtml((o.label || '').slice(0, 16)) + '</th>').join('')}</tr>
-            ${voters.map(vn => `<tr class="border-t"><td class="p-1 pr-3 whitespace-nowrap">${escapeHtml(vn)}</td>${opts.map(o => `<td class="p-1 text-center">${sym[voteOf[vn + '|' + o.id]] || '·'}</td>`).join('')}</tr>`).join('')}
+            ${voters.map(vk => `<tr class="border-t"><td class="p-1 pr-3 whitespace-nowrap">${escapeHtml(voterName[vk])}</td>${opts.map(o => `<td class="p-1 text-center">${sym[voteOf[vk + '|' + o.id]] || '·'}</td>`).join('')}</tr>`).join('')}
           </table></div>` : ''}
       </div>`;
     }
@@ -292,7 +302,7 @@
       const name = $('pub-name').value.trim();
       if (!name) { $('pub-msg').className = 'ml-3 text-sm text-red-600'; $('pub-msg').textContent = 'Bitte Namen angeben'; return; }
       localStorage.setItem('doodlePublicName', name);
-      const r = await fetch('/api/doodle/public/' + encodeURIComponent(PUB.id) + '/vote?t=' + encodeURIComponent(PUB.t), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, votes: PUBVOTE }) });
+      const r = await fetch('/api/doodle/public/' + encodeURIComponent(PUB.id) + '/vote?t=' + encodeURIComponent(PUB.t), { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Doodle-Voter': publicVoterId() }, body: JSON.stringify({ name, votes: PUBVOTE }) });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { $('pub-msg').className = 'ml-3 text-sm text-red-600'; $('pub-msg').textContent = d.error || 'Fehler'; return; }
       renderPublic(PUB.id, PUB.t);
@@ -307,7 +317,7 @@
       renderDetail();
     }
     function setVote(optId, wert) {
-      if (CUR.poll.status !== 'offen') return;
+      if (CUR.poll.status !== 'offen' || fristAbgelaufen(CUR.poll.deadline)) return;
       MYVOTES[optId] = (MYVOTES[optId] === wert) ? undefined : wert;
       if (MYVOTES[optId] === undefined) delete MYVOTES[optId];
       renderDetail(true);
@@ -323,6 +333,8 @@
       const maxJa = Math.max(0, ...opts.map(o => cnt[o.id].ja));
       const finalId = p.final_option_id;
       const closed = p.status !== 'offen';
+      const expired = !closed && fristAbgelaufen(p.deadline);
+      const voting = !closed && !expired;
       // Wähler-Liste (Matrix)
       const voters = [...new Set(votes.map(v => (v.voter_email || '').toLowerCase()))];
       const voterName = {}; votes.forEach(v => { voterName[(v.voter_email || '').toLowerCase()] = v.voter_name || v.voter_email; });
@@ -341,11 +353,11 @@
           ${p.ort ? '<p class="text-slate-500 mt-1">📍 ' + escapeHtml(p.ort) + '</p>' : ''}
           ${zBadges(p) ? '<div class="mt-2 flex flex-wrap gap-1">' + zBadges(p) + '</div>' : ''}
           ${p.beschreibung ? '<p class="mt-2 whitespace-pre-line">' + escapeHtml(p.beschreibung) + '</p>' : ''}
-          ${p.deadline && !closed ? '<p class="text-sm text-slate-400 mt-1">⏰ Frist: ' + fmtDate(p.deadline) + '</p>' : ''}
+          ${p.deadline && !closed ? '<p class="text-sm ' + (expired ? 'text-red-600' : 'text-slate-400') + ' mt-1">⏰ Frist: ' + fmtDate(p.deadline) + (expired ? ' — abgelaufen, keine Stimmabgabe mehr' : '') + '</p>' : ''}
           ${closed && finalId ? (() => { const fo = opts.find(o => o.id === finalId) || {}; return '<div class="mt-3 bg-green-50 border border-green-200 rounded-lg p-3">✅ <b>Termin steht fest:</b> ' + escapeHtml(fo.label || '') + (fo.starts_at ? ' — <b>' + fmtDate(fo.starts_at) + '</b>' : '') + '</div>'; })() : ''}
 
-          <h3 class="font-semibold mt-5 mb-2">${closed ? 'Ergebnis' : 'Deine Stimme'}</h3>
-          ${needName ? '<input id="voter-name" placeholder="Dein Name" class="border rounded-lg px-3 py-2 mb-3 w-full max-w-xs">' : ''}
+          <h3 class="font-semibold mt-5 mb-2">${voting ? 'Deine Stimme' : 'Ergebnis'}</h3>
+          ${needName && voting ? '<input id="voter-name" placeholder="Dein Name" class="border rounded-lg px-3 py-2 mb-3 w-full max-w-xs">' : ''}
           <div class="space-y-2">
             ${opts.map(o => {
               const c = cnt[o.id]; const best = c.ja === maxJa && maxJa > 0;
@@ -357,35 +369,35 @@
                     ${o.starts_at ? '<div class="text-sm text-slate-500">' + fmtDate(o.starts_at) + '</div>' : ''}
                     <div class="text-xs text-slate-500 mt-0.5">✓ ${c.ja} · ? ${c.vielleicht} · ✗ ${c.nein}</div>
                   </div>
-                  ${!closed ? `<div class="flex gap-1">
-                    <button class="vbtn ${mine === 'ja' ? 'sel-ja' : ''}" onclick="setVote(${o.id},'ja')">Ja</button>
-                    <button class="vbtn ${mine === 'vielleicht' ? 'sel-vielleicht' : ''}" onclick="setVote(${o.id},'vielleicht')">Vielleicht</button>
-                    <button class="vbtn ${mine === 'nein' ? 'sel-nein' : ''}" onclick="setVote(${o.id},'nein')">Nein</button>
-                  </div>` : (CUR.me.canManage ? `<button onclick="setFinal(${o.id})" class="text-sm text-teal-700 underline">als Termin wählen</button>` : '')}
+                  ${voting ? `<div class="flex gap-1">
+                    <button class="vbtn ${mine === 'ja' ? 'sel-ja' : ''}" onclick="setVote('${o.id}','ja')">Ja</button>
+                    <button class="vbtn ${mine === 'vielleicht' ? 'sel-vielleicht' : ''}" onclick="setVote('${o.id}','vielleicht')">Vielleicht</button>
+                    <button class="vbtn ${mine === 'nein' ? 'sel-nein' : ''}" onclick="setVote('${o.id}','nein')">Nein</button>
+                  </div>` : (closed && CUR.me.canManage ? `<button onclick="setFinal(${o.id})" class="text-sm text-teal-700 underline">als Termin wählen</button>` : '')}
                 </div>
               </div>`;
             }).join('')}
           </div>
 
-          ${(!closed && p.allow_add_options) ? `<div class="mt-3">
+          ${(voting && p.allow_add_options) ? `<div class="mt-3">
             <input id="add-opt" placeholder="Eigenen Terminvorschlag hinzufügen" class="border rounded-lg px-3 py-2 w-full max-w-md">
             <button onclick="addOption()" class="ml-1 text-sm text-teal-700 underline">+ hinzufügen</button>
           </div>` : ''}
 
-          ${!closed ? `<button onclick="saveVote()" class="mt-4 bg-teal-700 hover:bg-teal-800 text-white rounded-lg px-5 py-2 font-semibold">Stimme speichern</button>
+          ${voting ? `<button onclick="saveVote()" class="mt-4 bg-teal-700 hover:bg-teal-800 text-white rounded-lg px-5 py-2 font-semibold">Stimme speichern</button>
             <span id="vote-msg" class="ml-3 text-sm"></span>` : ''}
 
           ${voters.length ? `<h3 class="font-semibold mt-6 mb-2">Übersicht (${voters.length})</h3>
             <div class="overflow-x-auto"><table class="text-sm border-collapse">
               <tr><th class="text-left p-1"></th>${opts.map(o => '<th class="p-1 text-center">' + escapeHtml((o.label || '').slice(0, 16)) + '</th>').join('')}</tr>
-              ${voters.map(ve => `<tr class="border-t"><td class="p-1 pr-3 whitespace-nowrap">${escapeHtml(voterName[ve])}${CUR.me.canManage ? ` <button onclick="removeVoter('${ve}')" class="text-red-300" title="Teilnehmer entfernen">✕</button>` : ''}</td>${opts.map(o => `<td class="p-1 text-center">${sym[voteOf[ve + '|' + o.id]] || '·'}</td>`).join('')}</tr>`).join('')}
+              ${voters.map(ve => `<tr class="border-t"><td class="p-1 pr-3 whitespace-nowrap">${escapeHtml(voterName[ve])}${CUR.me.canManage ? ` <button onclick="removeVoter(this.dataset.v)" data-v="${escapeHtml(ve)}" class="text-red-300" title="Teilnehmer entfernen">✕</button>` : ''}</td>${opts.map(o => `<td class="p-1 text-center">${sym[voteOf[ve + '|' + o.id]] || '·'}</td>`).join('')}</tr>`).join('')}
             </table></div>` : ''}
 
           ${CUR.me.canManage ? `<div class="mt-6 pt-4 border-t space-y-5">
             <div>
               <h3 class="font-semibold mb-2">📧 Externe einladen</h3>
               <div class="space-y-1 mb-2">
-                ${(CUR.invites || []).map(i => `<div class="flex items-center gap-2 text-sm"><span>${escapeHtml(i.email)}${i.name ? ' (' + escapeHtml(i.name) + ')' : ''}</span><button onclick="removeInvite('${i.email}')" class="text-red-400" title="Einladung entfernen">✕</button></div>`).join('') || '<p class="text-sm text-slate-400">Noch niemand eingeladen.</p>'}
+                ${(CUR.invites || []).map(i => `<div class="flex items-center gap-2 text-sm"><span>${escapeHtml(i.email)}${i.name ? ' (' + escapeHtml(i.name) + ')' : ''}</span><button onclick="removeInvite(this.dataset.v)" data-v="${escapeHtml(i.email)}" class="text-red-400" title="Einladung entfernen">✕</button></div>`).join('') || '<p class="text-sm text-slate-400">Noch niemand eingeladen.</p>'}
               </div>
               <div class="flex flex-wrap gap-2">
                 <input id="inv-email" type="email" placeholder="name@example.ch" class="flex-1 min-w-[150px] border rounded-lg px-3 py-2 text-sm">
@@ -433,7 +445,7 @@
     async function saveVote() {
       const votes = {}; Object.entries(MYVOTES).forEach(([k, v]) => { if (!String(k).startsWith('new')) votes[k] = v; });
       const body = { votes };
-      if (_pendingNewOpts.length) body.new_options = _pendingNewOpts;
+      if (_pendingNewOpts.length) { body.new_options = _pendingNewOpts; body.new_option_votes = _pendingNewOpts.map((_, i) => MYVOTES['new' + (i + 1)] || null); }
       const nameEl = $('voter-name'); if (nameEl && nameEl.value.trim()) body.name = nameEl.value.trim();
       const r = await dFetch('/api/doodle/polls/' + CUR.poll.id + '/vote', { method: 'POST', body });
       const d = await r.json().catch(() => ({}));
@@ -514,7 +526,7 @@
       const options = [...document.querySelectorAll('#c-options > div')].map(d => {
         const dt = d.querySelector('.c-opt-dt').value;
         const note = d.querySelector('.c-opt-label').value.trim();
-        if (dt) return { label: fmtDate(dt) + (note ? ' · ' + note : ''), starts_at: dt };
+        if (dt) return { label: fmtDate(dt) + (note ? ' · ' + note : ''), starts_at: new Date(dt).toISOString() };
         if (note) return { label: note, starts_at: null };
         return null;
       }).filter(Boolean);

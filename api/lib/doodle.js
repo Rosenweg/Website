@@ -78,8 +78,50 @@ async function initSchema() {
     ALTER TABLE doodle_polls ADD COLUMN IF NOT EXISTS project_slug VARCHAR(120);
     ALTER TABLE doodle_polls ADD COLUMN IF NOT EXISTS gremium VARCHAR(120);
     ALTER TABLE doodle_polls ADD COLUMN IF NOT EXISTS public_token VARCHAR(40);
+    ALTER TABLE doodle_options ADD COLUMN IF NOT EXISTS tz_ok BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE doodle_options ALTER COLUMN tz_ok SET DEFAULT true;
   `);
+  // Altlast bis Okt. 2026: der Browser schickte "2026-11-05T19:00" ohne Zone, der
+  // Server (UTC) speicherte daraus 19:00 UTC. Verschoben wird nur, wo das Label
+  // die UTC-Uhrzeit zeigt und nicht die Zürcher — dann ist der Fehler belegt.
+  await pool.query(`
+    UPDATE doodle_options
+       SET starts_at = (starts_at AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Zurich'
+     WHERE tz_ok = false AND starts_at IS NOT NULL
+       AND label LIKE '%' || to_char(starts_at AT TIME ZONE 'UTC', 'HH24:MI') || '%'
+       AND label NOT LIKE '%' || to_char(starts_at AT TIME ZONE 'Europe/Zurich', 'HH24:MI') || '%'`);
+  await pool.query('UPDATE doodle_options SET tz_ok = true WHERE tz_ok = false');
+  // Fristen wurden als Mitternacht UTC gespeichert -> Ende des Tages in Zürich
+  await pool.query(`
+    UPDATE doodle_polls
+       SET deadline = (((deadline AT TIME ZONE 'UTC')::date + TIME '23:59:59') AT TIME ZONE 'Europe/Zurich')
+     WHERE deadline IS NOT NULL AND deadline = date_trunc('day', deadline AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'`);
 }
+
+// Zeitangabe ohne Zone ("2026-11-05T19:00", "2026-11-05") gilt als Zürcher Ortszeit;
+// mit Zone (ISO mit Z/+01:00) wird sie unverändert übernommen.
+function zurichOffsetMs(utcMs) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Zurich', hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(utcMs)).map(x => [x.type, x.value]));
+  return Date.UTC(+p.year, p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - utcMs;
+}
+function parseZurich(s, endOfDay) {
+  if (!s) return null;
+  const str = String(s).trim();
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (!m) { const d = new Date(str); return isNaN(d) ? null : d; }
+  const wall = m[4] != null
+    ? Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0))
+    : Date.UTC(+m[1], m[2] - 1, +m[3], endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0);
+  let t = wall - zurichOffsetMs(wall);
+  t = wall - zurichOffsetMs(t); // Sommerzeit-Wechsel
+  return new Date(t);
+}
+const deadlinePassed = (deadline) => !!deadline && new Date(deadline) < new Date();
+// Pseudo-Absender (telefonisch erfasst / öffentlicher Link) bekommen keine Mail
+const isRealEmail = (e) => /^[^\s@:]+@[^\s@]+\.[^\s@]+$/.test(String(e || ''));
 
 // ── Actor-Auflösung: Mitglied (sessions) ODER externer Code-Voter (doodle_sessions)
 async function resolveActor(req) {
@@ -146,6 +188,14 @@ function rateLimited(email) {
   arr.push(now); codeRate.set(email, arr);
   return false;
 }
+// Fehlversuche beim Code-Prüfen: max. 5 pro E-Mail in 10 Minuten (wie /api/otp/verify)
+const verifyFails = new Map(); // email -> [timestamps]
+const verifyBlocked = (email) => (verifyFails.get(email) || []).filter(t => Date.now() - t < 600000).length >= 5;
+function verifyFailed(email) {
+  const arr = (verifyFails.get(email) || []).filter(t => Date.now() - t < 600000);
+  arr.push(Date.now()); verifyFails.set(email, arr);
+  return arr.length >= 5;
+}
 
 function mountDoodle({ app }) {
   initSchema()
@@ -183,6 +233,7 @@ function mountDoodle({ app }) {
       const email = normEmail(req.body?.email);
       const code = String(req.body?.code || '').trim();
       if (!validEmail(email) || !code) return res.status(400).json({ error: 'E-Mail und Code erforderlich' });
+      if (verifyBlocked(email)) return res.status(429).json({ error: 'Zu viele Fehlversuche — bitte in 10 Minuten einen neuen Code anfordern.' });
       const vr = await pool.query(
         'SELECT id, code, expires_at FROM otp_codes WHERE email = $1 AND used = false ORDER BY created_at DESC LIMIT 1', [email]);
       const row = vr.rows[0];
@@ -192,7 +243,12 @@ function mountDoodle({ app }) {
         return res.status(400).json({ error: 'Code ist abgelaufen.' });
       }
       const a = Buffer.from(row.code), b = Buffer.from(code);
-      if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return res.status(400).json({ error: 'Ungültiger Code' });
+      if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+        // Nach dem 5. Fehlversuch ist auch der Code verbraucht
+        if (verifyFailed(email)) await pool.query('UPDATE otp_codes SET used = true WHERE id = $1', [row.id]);
+        return res.status(400).json({ error: 'Ungültiger Code' });
+      }
+      verifyFails.delete(email);
       await pool.query('UPDATE otp_codes SET used = true WHERE id = $1', [row.id]);
       let name = await emailAllowed(email); if (name === undefined) name = null;
       const token = crypto.randomBytes(32).toString('hex');
@@ -274,7 +330,7 @@ function mountDoodle({ app }) {
         .filter(i => validEmail(i.email)) : [];
       const beschreibung = b.beschreibung ? String(b.beschreibung).trim().slice(0, 4000) : null;
       const ort = b.ort ? String(b.ort).trim().slice(0, 255) : null;
-      const deadline = b.deadline ? new Date(b.deadline) : null;
+      const deadline = parseZurich(b.deadline, true);
       const allowAdd = !!b.allow_add_options;
       const stweg = Number.isFinite(parseInt(b.stweg, 10)) ? parseInt(b.stweg, 10) : null;
       const projectSlug = b.project_slug ? String(b.project_slug).trim().slice(0, 120) : null;
@@ -284,13 +340,12 @@ function mountDoodle({ app }) {
       const pr = await client.query(
         `INSERT INTO doodle_polls (creator_email, creator_name, titel, beschreibung, ort, allow_add_options, deadline, stweg, project_slug, gremium)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-        [req.actor.email, req.actor.name, titel, beschreibung, ort, allowAdd, deadline && !isNaN(deadline) ? deadline : null, stweg, projectSlug, gremium]);
+        [req.actor.email, req.actor.name, titel, beschreibung, ort, allowAdd, deadline, stweg, projectSlug, gremium]);
       const pollId = pr.rows[0].id;
       for (let i = 0; i < options.length; i++) {
         const o = options[i];
-        const sa = o.starts_at ? new Date(o.starts_at) : null;
-        await client.query('INSERT INTO doodle_options (poll_id, label, starts_at, sort_order) VALUES ($1,$2,$3,$4)',
-          [pollId, o.label, sa && !isNaN(sa) ? sa : null, i]);
+        await client.query('INSERT INTO doodle_options (poll_id, label, starts_at, sort_order, tz_ok) VALUES ($1,$2,$3,$4,true)',
+          [pollId, o.label, parseZurich(o.starts_at), i]);
       }
       for (const inv of invites) {
         await client.query('INSERT INTO doodle_invites (poll_id, email, name) VALUES ($1,$2,$3) ON CONFLICT (poll_id, email) DO NOTHING',
@@ -333,6 +388,10 @@ function mountDoodle({ app }) {
       const opts = await pool.query('SELECT id, label, starts_at, sort_order, added_by FROM doodle_options WHERE poll_id = $1 ORDER BY sort_order, id', [id]);
       const votes = await pool.query('SELECT option_id, voter_email, voter_name, wert FROM doodle_votes WHERE poll_id = $1', [id]);
       const canManage = req.actor.isMember && (req.actor.isAdmin || normEmail(poll.creator_email) === req.actor.email);
+      // Browser-Kennungen öffentlicher Stimmen sind Geheimnisse — nur Verwaltende sehen sie
+      if (!canManage) votes.rows.forEach(v => {
+        if (/^public:[a-f0-9]{32}$/.test(v.voter_email)) v.voter_email = 'public:' + crypto.createHash('sha256').update(v.voter_email).digest('hex').slice(0, 12);
+      });
       const out = {
         poll: {
           id: poll.id, titel: poll.titel, beschreibung: poll.beschreibung, ort: poll.ort,
@@ -360,16 +419,20 @@ function mountDoodle({ app }) {
       const id = parseInt(req.params.id, 10);
       if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige ID' });
       if (!(await canAccessPoll(req.actor, id))) return res.status(403).json({ error: 'Kein Zugriff' });
-      const pr = await pool.query('SELECT id, status, allow_add_options FROM doodle_polls WHERE id = $1', [id]);
+      const pr = await pool.query('SELECT id, status, allow_add_options, deadline FROM doodle_polls WHERE id = $1', [id]);
       const poll = pr.rows[0];
       if (!poll) return res.status(404).json({ error: 'Nicht gefunden' });
       if (poll.status !== 'offen') return res.status(409).json({ error: 'Diese Umfrage ist geschlossen' });
+      if (deadlinePassed(poll.deadline)) return res.status(409).json({ error: 'Die Abstimm-Frist ist abgelaufen' });
 
       const b = req.body || {};
       const voterName = (b.name ? String(b.name).trim().slice(0, 255) : null) || req.actor.name || null;
-      const votes = b.votes && typeof b.votes === 'object' ? b.votes : {};
+      const votes = b.votes && typeof b.votes === 'object' ? { ...b.votes } : {};
+      // new_option_votes[i] gehört zu new_options[i] (die IDs entstehen erst hier)
+      const newOptVotes = Array.isArray(b.new_option_votes) ? b.new_option_votes : [];
       const newOptions = (poll.allow_add_options && Array.isArray(b.new_options))
-        ? b.new_options.map(l => String(l || '').trim().slice(0, 255)).filter(Boolean).slice(0, 20) : [];
+        ? b.new_options.map((l, i) => ({ label: String(l || '').trim().slice(0, 255), wert: newOptVotes[i] }))
+          .filter(o => o.label).slice(0, 20) : [];
 
       await client.query('BEGIN');
       // neue Optionen anlegen
@@ -377,10 +440,11 @@ function mountDoodle({ app }) {
       if (newOptions.length) {
         const mx = await client.query('SELECT COALESCE(MAX(sort_order), -1) AS m FROM doodle_options WHERE poll_id = $1', [id]);
         let so = (mx.rows[0].m | 0) + 1;
-        for (const label of newOptions) {
+        for (const o of newOptions) {
           const r = await client.query('INSERT INTO doodle_options (poll_id, label, sort_order, added_by) VALUES ($1,$2,$3,$4) RETURNING id',
-            [id, label, so++, req.actor.email]);
+            [id, o.label, so++, req.actor.email]);
           newIds.push(r.rows[0].id);
+          if (o.wert) votes[r.rows[0].id] = o.wert;
         }
       }
       // gültige Options-IDs dieser Umfrage
@@ -416,11 +480,12 @@ function mountDoodle({ app }) {
         return res.status(403).json({ error: 'Nur Ersteller:in oder Admin' });
       const b = req.body || {};
       const sets = [], params = [];
-      if (b.status && ['offen', 'geschlossen'].includes(b.status)) { params.push(b.status); sets.push(`status = $${params.length}`); }
+      let newStatus = poll.status, newFinal = poll.final_option_id;
+      if (b.status && ['offen', 'geschlossen'].includes(b.status)) { newStatus = b.status; params.push(b.status); sets.push(`status = $${params.length}`); }
       if ('final_option_id' in b) {
         let fid = b.final_option_id == null ? null : parseInt(b.final_option_id, 10);
         if (fid != null) { const ck = await pool.query('SELECT 1 FROM doodle_options WHERE id = $1 AND poll_id = $2', [fid, id]); if (!ck.rows[0]) fid = null; }
-        params.push(fid); sets.push(`final_option_id = $${params.length}`);
+        newFinal = fid; params.push(fid); sets.push(`final_option_id = $${params.length}`);
       }
       if (typeof b.titel === 'string' && b.titel.trim()) { params.push(b.titel.trim().slice(0, 255)); sets.push(`titel = $${params.length}`); }
       if ('public' in b) {
@@ -431,17 +496,19 @@ function mountDoodle({ app }) {
       params.push(id);
       await pool.query(`UPDATE doodle_polls SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${params.length}`, params);
 
-      // Bei Schliessen mit finalem Termin: Teilnehmer informieren
-      if (b.status === 'geschlossen' && b.final_option_id) {
-        const fo = await pool.query('SELECT label, starts_at FROM doodle_options WHERE id = $1', [parseInt(b.final_option_id, 10)]);
+      // Termin neu festgelegt (beim Schliessen oder nachträglich): Teilnehmer informieren
+      const terminNeu = newStatus === 'geschlossen' && newFinal != null
+        && (poll.status !== 'geschlossen' || newFinal !== poll.final_option_id);
+      if (terminNeu) {
+        const fo = await pool.query('SELECT label, starts_at FROM doodle_options WHERE id = $1 AND poll_id = $2', [newFinal, id]);
         const label = fo.rows[0]?.label;
         if (label) {
           const rec = await pool.query(
-            `SELECT DISTINCT email FROM (
+            `SELECT DISTINCT LOWER(email) AS email FROM (
                SELECT voter_email AS email FROM doodle_votes WHERE poll_id = $1
                UNION SELECT email FROM doodle_invites WHERE poll_id = $1
              ) t WHERE email IS NOT NULL`, [id]);
-          for (const r of rec.rows) {
+          for (const r of rec.rows.filter(x => isRealEmail(x.email))) {
             loggedSendMail({
               from: MAIL_FROM, to: r.email,
               subject: `Termin steht fest: ${poll.titel}`,
@@ -521,9 +588,9 @@ function mountDoodle({ app }) {
     try {
       const id = parseInt(req.params.id, 10);
       const { err } = await ownerCheck(req, id);
-      if (err) { client.release(); return res.status(err).json({ error: 'Kein Zugriff' }); }
+      if (err) { return res.status(err).json({ error: 'Kein Zugriff' }); }
       const name = String(req.body?.name || '').trim().slice(0, 255);
-      if (!name) { client.release(); return res.status(400).json({ error: 'Name erforderlich' }); }
+      if (!name) { return res.status(400).json({ error: 'Name erforderlich' }); }
       const votes = req.body?.votes && typeof req.body.votes === 'object' ? req.body.votes : {};
       const key = 'hand:' + name.toLowerCase().replace(/\s+/g, '_');
       const valid = new Set((await pool.query('SELECT id FROM doodle_options WHERE poll_id = $1', [id])).rows.map(r => r.id));
@@ -552,6 +619,12 @@ function mountDoodle({ app }) {
   });
 
   // ── Öffentlicher Link (ohne Login, nur Name) — per public_token ──────────
+  // Jeder Browser schickt eine zufällige Kennung (X-Doodle-Voter); daran hängen
+  // seine Stimmen, nicht am Namen — sonst überschreibt ein gleicher Name fremde Stimmen.
+  const publicVoterKey = (req) => {
+    const v = String(req.headers['x-doodle-voter'] || '');
+    return /^[a-f0-9]{32}$/.test(v) ? 'public:' + v : null;
+  };
   app.get('/api/doodle/public/:id', async (req, res) => {
     try {
       const id = parseInt(req.params.id, 10);
@@ -560,10 +633,17 @@ function mountDoodle({ app }) {
       const poll = pr.rows[0];
       if (!poll || !poll.public_token || poll.public_token !== t) return res.status(404).json({ error: 'Link ungültig oder deaktiviert' });
       const opts = await pool.query('SELECT id, label, starts_at, sort_order FROM doodle_options WHERE poll_id = $1 ORDER BY sort_order, id', [id]);
-      const votes = await pool.query('SELECT option_id, voter_name, wert FROM doodle_votes WHERE poll_id = $1', [id]);
+      const votes = await pool.query('SELECT option_id, voter_email, voter_name, wert FROM doodle_votes WHERE poll_id = $1', [id]);
+      const me = publicVoterKey(req);
+      const mine = {};
+      // voter: Zeilenschlüssel ohne E-Mail-Adressen (die bleiben intern)
+      const keys = [...new Set(votes.rows.map(v => v.voter_email))];
+      votes.rows.forEach(v => { if (me && v.voter_email === me) mine[v.option_id] = v.wert; });
       res.json({
         poll: { id: poll.id, titel: poll.titel, beschreibung: poll.beschreibung, ort: poll.ort, status: poll.status, final_option_id: poll.final_option_id, deadline: poll.deadline, allow_add_options: poll.allow_add_options },
-        options: opts.rows, votes: votes.rows,
+        options: opts.rows,
+        votes: votes.rows.map(v => ({ option_id: v.option_id, voter: keys.indexOf(v.voter_email), voter_name: v.voter_name, wert: v.wert })),
+        mine,
       });
     } catch (e) { console.error('[doodle] public-get', e); res.status(500).json({ error: 'Fehler' }); }
   });
@@ -574,19 +654,21 @@ function mountDoodle({ app }) {
     try {
       const id = parseInt(req.params.id, 10);
       const t = String(req.query.t || '');
-      const pr = await pool.query('SELECT status, public_token, allow_add_options FROM doodle_polls WHERE id = $1', [id]);
+      const pr = await pool.query('SELECT status, public_token, allow_add_options, deadline FROM doodle_polls WHERE id = $1', [id]);
       const poll = pr.rows[0];
-      if (!poll || !poll.public_token || poll.public_token !== t) { client.release(); return res.status(404).json({ error: 'Link ungültig' }); }
-      if (poll.status !== 'offen') { client.release(); return res.status(409).json({ error: 'Diese Umfrage ist geschlossen' }); }
+      if (!poll || !poll.public_token || poll.public_token !== t) { return res.status(404).json({ error: 'Link ungültig' }); }
+      if (poll.status !== 'offen') { return res.status(409).json({ error: 'Diese Umfrage ist geschlossen' }); }
+      if (deadlinePassed(poll.deadline)) { return res.status(409).json({ error: 'Die Abstimm-Frist ist abgelaufen' }); }
       const name = String(req.body?.name || '').trim().slice(0, 120);
-      if (!name) { client.release(); return res.status(400).json({ error: 'Bitte Namen angeben' }); }
+      if (!name) { return res.status(400).json({ error: 'Bitte Namen angeben' }); }
+      const key = publicVoterKey(req);
+      if (!key) { return res.status(400).json({ error: 'Bitte Seite neu laden' }); }
       const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '');
       const now = Date.now(); const arr = (pubRate.get(ip) || []).filter(x => now - x < 60000);
-      if (arr.length >= 30) { client.release(); return res.status(429).json({ error: 'Zu viele Anfragen — kurz warten.' }); }
+      if (arr.length >= 30) { return res.status(429).json({ error: 'Zu viele Anfragen — kurz warten.' }); }
       arr.push(now); pubRate.set(ip, arr);
       const votes = req.body?.votes && typeof req.body.votes === 'object' ? req.body.votes : {};
       const newOptions = (poll.allow_add_options && Array.isArray(req.body?.new_options)) ? req.body.new_options.map(l => String(l || '').trim().slice(0, 255)).filter(Boolean).slice(0, 10) : [];
-      const key = 'public:' + name.toLowerCase().replace(/\s+/g, '_');
       await client.query('BEGIN');
       if (newOptions.length) {
         const mx = await client.query('SELECT COALESCE(MAX(sort_order), -1) AS m FROM doodle_options WHERE poll_id = $1', [id]);
