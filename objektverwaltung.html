@@ -869,6 +869,10 @@
                             <span class="whitespace-nowrap">Gültig ab</span>
                             <input type="date" value="${esc(gueltigAbVal)}" class="flex-1 px-2 py-1 border rounded text-xs kontakt-gültig-ab" />
                         </label>
+                        <label class="col-span-2 flex items-center gap-2 text-xs text-gray-600 cursor-pointer" title="Am Gültig-ab-Datum werden die bisherigen Kontakte mit derselben Rolle archiviert (Wechsel). Ohne Haken bleiben sie — z.B. bei Miteigentümern.">
+                            <input type="checkbox" class="kontakt-ersetzt rounded text-blue-600" ${kontakt.ersetzt_vorgaenger ? 'checked' : ''} />
+                            <span>Ersetzt ab diesem Datum die bisherigen Kontakte dieser Rolle (Wechsel)</span>
+                        </label>
                         <label class="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
                             <input type="checkbox" class="kontakt-authentik rounded text-blue-600" ${kontakt.authentik_zugang === true ? 'checked' : ''} ${kontakt.authentik_zugang === undefined ? 'data-default-by-rolle="1"' : ''} />
                             <span>Authentik-Zugang</span>
@@ -971,7 +975,8 @@
                     authentik_zugang = authentikEl?.checked ? true : false;
                 }
                 if (name || email) {
-                    const k = { rolle, name: name || null, email: email || null, telefon: telefon || null, adresse: adresse || null, authentik_zugang, gueltig_ab: gueltig_ab || null };
+                    const ersetzt_vorgaenger = !!(gueltig_ab && card.querySelector('.kontakt-ersetzt')?.checked);
+                    const k = { rolle, name: name || null, email: email || null, telefon: telefon || null, adresse: adresse || null, authentik_zugang, gueltig_ab: gueltig_ab || null, ersetzt_vorgaenger };
                     if (id && Number.isFinite(id)) k.id = id;
                     kontakte.push(k);
                 }
