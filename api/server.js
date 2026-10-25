@@ -6145,9 +6145,10 @@ async function ispRecheckPendingDns() {
       try {
         const check = await ispCheckDns(r.hostname);
         if (check.matches) {
-          await pool.query(`UPDATE isp_reverse_proxy_routes SET approval_status='approved', dns_verified_at=NOW(),
-                             last_dns_check_at=NOW(), active=true, approval_reason='DNS verifiziert (auto-Re-Check)' WHERE id=$1`, [r.id]);
-          console.log('[isp-dns] Reverse-Proxy ' + r.id + ' (' + r.hostname + ') → approved');
+          // Reverse-Proxy: DNS ok reicht nicht — das Backend sieht ein Admin an.
+          await pool.query(`UPDATE isp_reverse_proxy_routes SET approval_status='pending_admin', dns_verified_at=NOW(),
+                             last_dns_check_at=NOW(), approval_reason='DNS ok — Backend wartet auf Admin-Freigabe' WHERE id=$1`, [r.id]);
+          console.log('[isp-dns] Reverse-Proxy ' + r.id + ' (' + r.hostname + ') → DNS ok, wartet auf Admin');
         } else {
           await pool.query(`UPDATE isp_reverse_proxy_routes SET last_dns_check_at=NOW() WHERE id=$1`, [r.id]);
         }
@@ -18357,6 +18358,18 @@ function ispIstBesitzer(req, row) {
   return (req.user?.groups || []).some(x => String(x).toLowerCase() === g);
 }
 
+// Hostnamen/Pfade landen woertlich in Traefik-Regeln (Host(`...`)) — nur sauberes
+// DNS-Format zulassen, sonst liesse sich die Regel per Backtick erweitern.
+function ispHostGueltig(h) {
+  return /^(\*\.)?(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(String(h || ''));
+}
+function ispPfadGueltig(p) {
+  return /^\/[A-Za-z0-9._~\-\/]*$/.test(String(p || '/'));
+}
+function ispZielUrlGueltig(u) {
+  try { const x = new URL(String(u)); return x.protocol === 'https:' || x.protocol === 'http:'; } catch { return false; }
+}
+
 function hostNeedsAdminApproval(hostname) {
   const h = (hostname || '').toLowerCase();
   if (h.includes('rosenweg')) return 'enthaelt "rosenweg"';
@@ -19153,8 +19166,10 @@ async function buildTraefikDynamicConfig() {
   const rps = await pool.query(
     `SELECT * FROM isp_reverse_proxy_routes
       WHERE active = true AND COALESCE(protocol,'http') = 'http'
+        AND COALESCE(approval_status,'approved') = 'approved'
       ORDER BY id`).catch(() => ({ rows: [] }));
   for (const r of rps.rows) {
+    if (!ispHostGueltig(r.hostname) || (r.strip_prefix && !ispPfadGueltig(r.strip_prefix))) { console.warn('[traefik] Route übersprungen, ungültiger Host/Pfad:', r.id); continue; }
     const id = safeId(`rp-${r.id}-${r.hostname}`);
     const svc = id + '-svc';
     cfg.http.routers[id] = {
@@ -19189,6 +19204,7 @@ async function buildTraefikDynamicConfig() {
       WHERE active = true AND COALESCE(approval_status,'approved') = 'approved'
       ORDER BY id`).catch(() => ({ rows: [] }));
   for (const r of redirs.rows) {
+    if (!ispHostGueltig(r.source_host) || !ispPfadGueltig(r.source_path || '/')) { console.warn('[traefik] Redirect übersprungen, ungültiger Host/Pfad:', r.id); continue; }
     const id = safeId(`redir-${r.id}-${r.source_host}`);
     const mw = id + '-mw';
     const path = r.source_path || '/';
@@ -19222,8 +19238,10 @@ async function buildTraefikDynamicConfig() {
   const rpsTcp = await pool.query(
     `SELECT * FROM isp_reverse_proxy_routes
       WHERE active = true AND protocol IN ('tcp_sni','tcp_raw')
+        AND COALESCE(approval_status,'approved') = 'approved'
       ORDER BY id`).catch(() => ({ rows: [] }));
   for (const r of rpsTcp.rows) {
+    if (!ispHostGueltig(r.hostname)) { console.warn('[traefik] TCP-Route übersprungen, ungültiger Host:', r.id); continue; }
     const id = safeId(`rp-${r.id}-${r.hostname}`);
     const svc = id + '-svc';
     // backend_url: erwarteter Form "host:port" (kein scheme); fallback http://
@@ -19414,8 +19432,10 @@ app.post('/api/isp/redirects/:id/recheck-dns', authMiddleware, async (req, res) 
     const isOwner = ispIstBesitzer(req, v);
     if (!isOwner && !ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     const check = await ispCheckDns(v.source_host);
-    const upd = check.matches
+    // Freigeben nur aus 'pending_dns' — 'pending_admin' (z.B. *rosenweg*-Namen) bleibt beim Admin.
+    const upd = check.matches && v.approval_status === 'pending_dns'
       ? { approval_status: 'approved', dns_verified_at: new Date(), last_dns_check_at: new Date(), active: true, approval_reason: 'DNS verifiziert' }
+      : check.matches ? { dns_verified_at: new Date(), last_dns_check_at: new Date() }
       : { last_dns_check_at: new Date() };
     await pool.query(
       `UPDATE isp_redirects SET approval_status = COALESCE($1, approval_status),
@@ -19444,11 +19464,13 @@ async function ispDnsEinrichten(req, res, tabelle, spalte) {
     // braucht je nach Zwischenspeicher etwas laenger.
     const check = await ispCheckDns(host).catch(() => null);
     if (check && check.matches) {
+      // Reverse-Proxy von Nicht-Admins: nach DNS noch Admin-Freigabe (Backend), siehe POST.
+      const ziel = (tabelle === 'isp_reverse_proxy_routes' && !ispIsAdmin(req)) ? 'pending_admin' : 'approved';
       await pool.query(
-        `UPDATE ${tabelle} SET approval_status = CASE WHEN approval_status = 'pending_dns' THEN 'approved' ELSE approval_status END,
+        `UPDATE ${tabelle} SET approval_status = CASE WHEN approval_status = 'pending_dns' THEN $2 ELSE approval_status END,
            dns_verified_at = NOW(), last_dns_check_at = NOW(),
-           active = CASE WHEN approval_status IN ('approved','pending_dns') THEN true ELSE active END
-         WHERE id = $1`, [id]).catch(() => {});
+           active = CASE WHEN approval_status = 'approved' OR (approval_status = 'pending_dns' AND $2 = 'approved') THEN true ELSE active END
+         WHERE id = $1`, [id, ziel]).catch(() => {});
     }
     res.json({ ...gesetzt, check });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -19467,8 +19489,12 @@ app.post('/api/isp/reverse-proxy/:id/recheck-dns', authMiddleware, async (req, r
     const isOwner = ispIstBesitzer(req, v);
     if (!isOwner && !ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     const check = await ispCheckDns(v.hostname);
-    const upd = check.matches
-      ? { approval_status: 'approved', dns_verified_at: new Date(), last_dns_check_at: new Date(), active: true, approval_reason: 'DNS verifiziert' }
+    // Aus 'pending_dns' wird bei Nicht-Admins 'pending_admin' (Backend-Pruefung), nie direkt 'approved'.
+    const upd = check.matches && v.approval_status === 'pending_dns'
+      ? (ispIsAdmin(req)
+        ? { approval_status: 'approved', dns_verified_at: new Date(), last_dns_check_at: new Date(), active: true, approval_reason: 'DNS verifiziert' }
+        : { approval_status: 'pending_admin', dns_verified_at: new Date(), last_dns_check_at: new Date(), approval_reason: 'DNS ok — Backend wartet auf Admin-Freigabe' })
+      : check.matches ? { dns_verified_at: new Date(), last_dns_check_at: new Date() }
       : { last_dns_check_at: new Date() };
     await pool.query(
       `UPDATE isp_reverse_proxy_routes SET approval_status = COALESCE($1, approval_status),
@@ -22314,6 +22340,8 @@ app.post('/api/isp/reverse-proxy', authMiddleware, async (req, res) => {
     }
 
     if (!b.hostname || !b.backend_url) return res.status(400).json({ error: 'hostname + backend_url Pflicht' });
+    if (!ispHostGueltig(String(b.hostname).toLowerCase())) return res.status(400).json({ error: 'Ungültiger Hostname' });
+    if (b.strip_prefix && !ispPfadGueltig(b.strip_prefix)) return res.status(400).json({ error: 'Ungültiger Pfad-Präfix' });
     // User darf eigene Routen anlegen, Admin alles
     const owner = b.owner_email || req.user.email;
     if (!ispIsAdmin(req) && (owner || '').toLowerCase() !== (req.user.email || '').toLowerCase()) {
@@ -22321,11 +22349,17 @@ app.post('/api/isp/reverse-proxy', authMiddleware, async (req, res) => {
     }
     // Auto-Approval: Admin-Erstellung aus dem Admin-Tab umgeht die
     // Approval-Prüfung automatisch (Admin können nicht durch ihre eigene
-    // Logik blockiert sein). Sonst greift die normale DNS-Prüfung.
-    const decision = ispIsAdmin(req)
+    // Logik blockiert sein). Sonst greift die normale DNS-Prüfung — und das
+    // Backend sieht immer ein Admin an: backend_url kann jedes interne System
+    // sein (AD-Passwort-API, Proxmox, DB), das die Route sonst ins Internet stellt.
+    let decision = ispIsAdmin(req)
       ? { approval_status: 'approved', approval_reason: 'Admin-erstellt', active: true,
           dns_verified_at: null, last_dns_check_at: null }
       : await ispDecideApproval(b.hostname);
+    if (!ispIsAdmin(req) && decision.approval_status === 'approved') {
+      decision = { ...decision, approval_status: 'pending_admin', active: false,
+                   approval_reason: 'DNS ok — Backend wartet auf Admin-Freigabe' };
+    }
     const r = await pool.query(
       `INSERT INTO isp_reverse_proxy_routes (hostname, backend_url, owner_email, owner_group, wohnung_id, ssl, ssl_method,
                                               public, auth_required, rate_limit_per_min, active, notizen,
@@ -22368,6 +22402,21 @@ app.put('/api/isp/reverse-proxy/:id', authMiddleware, async (req, res) => {
     const adminFields = ['hostname','owner_email','owner_group','wohnung_id','ssl_method','public',
                          'approval_status','approval_reason'];
     const allowed = admin ? [...userFields, ...adminFields] : userFields;
+    if (b.hostname !== undefined && admin && !ispHostGueltig(String(b.hostname).toLowerCase())) return res.status(400).json({ error: 'Ungültiger Hostname' });
+    if (b.strip_prefix && !ispPfadGueltig(b.strip_prefix)) return res.status(400).json({ error: 'Ungültiger Pfad-Präfix' });
+    if (!admin) {
+      // Ziel geaendert -> wieder Admin-Freigabe; einschalten nur, was freigegeben ist.
+      const zielNeu = ['backend_url', 'protocol', 'entry_point', 'pass_through_tls']
+        .some(c => b[c] !== undefined && String(b[c] ?? '') !== String(v[c] ?? ''));
+      if (zielNeu) {
+        push('approval_status', 'pending_admin');
+        push('approval_reason', 'Ziel geändert — wartet auf Admin-Freigabe');
+        push('active', false);
+        delete b.active;
+      } else if (b.active === true && v.approval_status !== 'approved') {
+        return res.status(403).json({ error: 'Route ist noch nicht freigegeben' });
+      }
+    }
     for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
     if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
     push('updated_at', new Date());
@@ -22413,6 +22462,9 @@ app.post('/api/isp/redirects', authMiddleware, async (req, res) => {
   try {
     const b = req.body || {};
     if (!b.source_host || !b.target_url) return res.status(400).json({ error: 'source_host + target_url Pflicht' });
+    if (!ispHostGueltig(String(b.source_host).toLowerCase())) return res.status(400).json({ error: 'Ungültiger Hostname' });
+    if (!ispPfadGueltig(b.source_path || '/')) return res.status(400).json({ error: 'Ungültiger Pfad' });
+    if (!ispZielUrlGueltig(b.target_url)) return res.status(400).json({ error: 'Ziel muss eine http(s)-URL sein' });
     const owner = b.owner_email || req.user.email;
     if (!ispIsAdmin(req) && (owner || '').toLowerCase() !== (req.user.email || '').toLowerCase()) {
       return res.status(403).json({ error: 'Du kannst nur eigene Redirects anlegen' });
@@ -22448,7 +22500,31 @@ app.put('/api/isp/redirects/:id', authMiddleware, async (req, res) => {
     const b = req.body || {};
     const updates = []; const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
-    const allowed = ['source_host','source_path','target_url','http_code','preserve_path','active','notizen','owner_email','wohnung_id'];
+    // Besitz wechselt nur ein Admin. Ein neuer source_host durchlaeuft die Freigabe
+    // erneut — sonst wurde eine fuer die eigene Domain freigegebene Weiterleitung
+    // per PUT auf authentik.rosenweg4303.ch umgebogen (Prioritaet 100 am Edge).
+    const allowed = admin
+      ? ['source_host','source_path','target_url','http_code','preserve_path','active','notizen','owner_email','wohnung_id']
+      : ['source_host','source_path','target_url','http_code','preserve_path','active','notizen'];
+    if (b.source_host !== undefined) {
+      b.source_host = String(b.source_host).toLowerCase();
+      if (!ispHostGueltig(b.source_host)) return res.status(400).json({ error: 'Ungültiger Hostname' });
+    }
+    if (b.source_path !== undefined && !ispPfadGueltig(b.source_path)) return res.status(400).json({ error: 'Ungültiger Pfad' });
+    if (b.target_url !== undefined && !ispZielUrlGueltig(b.target_url)) return res.status(400).json({ error: 'Ziel muss eine http(s)-URL sein' });
+    if (!admin) {
+      if (b.source_host !== undefined && b.source_host !== (v.source_host || '').toLowerCase()) {
+        const d = await ispDecideApproval(b.source_host);
+        push('approval_status', d.approval_status);
+        push('approval_reason', d.approval_reason);
+        push('dns_verified_at', d.dns_verified_at || null);
+        push('last_dns_check_at', d.last_dns_check_at || null);
+        push('active', d.active);
+        delete b.active;
+      } else if (b.active === true && (v.approval_status || 'approved') !== 'approved') {
+        return res.status(403).json({ error: 'Weiterleitung ist noch nicht freigegeben' });
+      }
+    }
     for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
     if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
     push('updated_at', new Date());
@@ -24227,24 +24303,31 @@ app.post('/api/vollmachten/:id/sign-digital', authMiddleware, async (req, res) =
   } catch (err) { console.error('[vollmachten] sign:', err); res.status(500).json({ error: err.message }); }
 });
 
-// Aktivieren mit Papier-Signatur (Status setzen; Upload des Scans separat über Documents)
+// Signierte Papier-PDF einer Vollmacht: nur Dateien unter Vollmachten/ (sonst null).
+// Frueher kam papier_pdf_path aus dem Request-Body -> '../proc/self/environ' las Secrets.
+function vollmachtPdfPfad(rel) {
+  if (!rel) return null;
+  const base = pathModule.resolve(DOCS_PATH, 'Vollmachten');
+  const full = pathModule.resolve(DOCS_PATH, String(rel));
+  return full.startsWith(base + pathModule.sep) ? full : null;
+}
+
+// Aktivieren mit Papier-Signatur ohne Upload (z.B. Original liegt bei der Verwaltung).
+// Nur Admins: Vollmachtgeber aktivieren ueber upload-signed mit der unterschriebenen PDF.
 app.post('/api/vollmachten/:id/activate-paper', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const { papier_pdf_path } = req.body || {};
     const existing = await pool.query('SELECT * FROM vollmachten WHERE id = $1', [id]);
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = existing.rows[0];
     const groups = req.user.groups || [];
     const isAdmin = isTechnik(groups) || isPraesident(groups) || groups.some(g => g.toLowerCase() === 'verwaltung');
-    if (!isAdmin && !(await vmIsUserVollmachtgeber(id, req.user.email, v.vollmachtgeber_email))) {
-      return res.status(403).json({ error: 'Nur Vollmachtgeber oder Admin' });
-    }
+    if (!isAdmin) return res.status(403).json({ error: 'Nur Admin — Vollmachtgeber laden die unterschriebene PDF hoch' });
     if (v.status !== 'entwurf') return res.status(400).json({ error: 'Nur Entwuerfe können aktiviert werden' });
     const r = await pool.query(
       `UPDATE vollmachten SET status='aktiv', signatur_typ='papier',
-         papier_pdf_path=$1, updated_at=NOW() WHERE id=$2 RETURNING *`,
-      [papier_pdf_path || null, id],
+         updated_at=NOW() WHERE id=$1 RETURNING *`,
+      [id],
     );
     res.json(r.rows[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -24310,7 +24393,8 @@ app.post('/api/vollmachten/:id/verify-ai', authMiddleware, async (req, res) => {
     if (!apiKey) return res.status(500).json({ error: 'OPENROUTER_API_KEY nicht konfiguriert' });
 
     // PDF laden + an Gotenberg für PDF→PNG-Konversion senden (Vision-Check)
-    const fullPath = pathModule.join(DOCS_PATH, v.papier_pdf_path);
+    const fullPath = vollmachtPdfPfad(v.papier_pdf_path);
+    if (!fullPath) return res.status(400).json({ error: 'Ungültiger PDF-Pfad' });
     const pdfBuf = await fs.readFile(fullPath);
 
     // Gotenberg: /forms/libreoffice/convert kann Office-Dateien zu PDF, für
@@ -24429,8 +24513,9 @@ app.get('/api/vollmachten/:id/pdf', authMiddleware, async (req, res) => {
     if (!isGlobalAdmin && !isAusschussForStweg && !involved) return res.status(403).json({ error: 'Kein Zugriff' });
     // Wenn signierte Papier-Version hochgeladen wurde und nicht explizit
     // ?template=1 angefordert ist, die hochgeladene ausliefern.
-    if (v.papier_pdf_path && !req.query.template) {
-      const fullPath = pathModule.join(DOCS_PATH, v.papier_pdf_path);
+    const papierPfad = vollmachtPdfPfad(v.papier_pdf_path);
+    if (papierPfad && !req.query.template) {
+      const fullPath = papierPfad;
       try {
         const fileBuf = await fs.readFile(fullPath);
         res.setHeader('Content-Type', 'application/pdf');

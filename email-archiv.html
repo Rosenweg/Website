@@ -357,16 +357,22 @@
             document.getElementById('detail-to').textContent = email.to_addresses || '-';
             document.getElementById('detail-date').textContent = formatDate(email.email_date);
 
-            // Body - sanitize HTML (strip scripts, event handlers, iframes)
+            // Body: HTML fremder Absender nur im Sandbox-iframe — darin laeuft kein Skript,
+            // egal was in der Mail steht (der fruehere Regex-Filter liess z.B.
+            // <img src=x/onerror=...> durch). allow-same-origin ohne allow-scripts erlaubt
+            // nur, die Hoehe von aussen zu lesen.
             const bodyDiv = document.getElementById('detail-body');
             if (email.html_body) {
-                const sanitized = email.html_body
-                    .replace(/<script[\s\S]*?<\/script>/gi, '')
-                    .replace(/<iframe[\s\S]*?<\/iframe>/gi, '')
-                    .replace(/\son\w+\s*=\s*["'][^"']*["']/gi, '')
-                    .replace(/\son\w+\s*=\s*[^\s>]*/gi, '')
-                    .replace(/javascript\s*:/gi, '');
-                bodyDiv.innerHTML = sanitized;
+                bodyDiv.innerHTML = '';
+                const frame = document.createElement('iframe');
+                frame.setAttribute('sandbox', 'allow-same-origin allow-popups allow-popups-to-escape-sandbox');
+                frame.setAttribute('referrerpolicy', 'no-referrer');
+                frame.style.cssText = 'width:100%;border:0;min-height:100px;';
+                frame.srcdoc = '<!doctype html><meta charset="utf-8"><base target="_blank">'
+                    + '<style>body{font-family:system-ui,sans-serif;font-size:14px;margin:0;word-wrap:break-word}img{max-width:100%;height:auto}</style>'
+                    + email.html_body;
+                frame.onload = () => { try { frame.style.height = (frame.contentDocument.documentElement.scrollHeight + 8) + 'px'; } catch (e) {} };
+                bodyDiv.appendChild(frame);
             } else {
                 bodyDiv.innerHTML = `<pre style="font-family:inherit;white-space:pre-wrap;margin:0;">${esc(email.text_body || '')}</pre>`;
             }
@@ -379,7 +385,7 @@
                 attDiv.classList.remove('hidden');
                 attList.innerHTML = attachments.map(a => {
                     const sizeKB = Math.round((a.size || 0) / 1024);
-                    return `<a href="#" onclick="downloadAttachment(${id}, '${a.stored_name.replace(/'/g, "\\'")}', '${a.filename.replace(/'/g, "\\'")}'); return false;"
+                    return `<a href="#" data-stored="${esc(a.stored_name)}" data-name="${esc(a.filename)}" onclick="downloadAttachment(${Number(id)}, this.dataset.stored, this.dataset.name); return false;"
                         class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border rounded-lg text-sm hover:bg-blue-50 transition cursor-pointer">
                         <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                         ${esc(a.filename)} <span class="text-gray-400">(${sizeKB} KB)</span>
