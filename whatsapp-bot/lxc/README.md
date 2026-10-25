@@ -32,7 +32,7 @@ cd /opt/whatsapp-bot && docker compose pull && docker compose up -d
   `GATEWAY_SEND_URL=http://100.64.2.39:8090/gateway/send`,
   `GATEWAY_GROUPS_URL=http://100.64.2.39:8080/groups`
   (Code: `api/lib/whatsapp.js` + `api/server.js` env-fähig, Default = alter Overlay-Name).
-- **Gateway → api**: `API_BASE=http://100.64.2.27:3000` (Swarm-VIP, api host-published).
+- **Gateway → api**: `API_BASE=http://100.64.2.52:3000` (core-backend CT 128; vorher Swarm-VIP .27).
 - **pbx-Voicemail**: nutzt Public-URL `https://whatsapp.rosenweg4303.ch/gateway/send` → unverändert.
 
 ## Rollback

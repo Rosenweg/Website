@@ -119,10 +119,13 @@ fi
 git merge --ff-only origin/main >> $LOG 2>&1
 
 # Das Sicherheitsnetz fuer den anderen Fall (eigene Commits liegen an, ein
-# Rebase steht noch aus): was origin/main kennt und hier fehlt, zurueckholen,
-# BEVOR add -A daraus eine Loeschung macht.
+# Rebase steht noch aus): was auf GitHub NEU ist (in origin/main, aber nicht in
+# HEAD) und hier fehlt, zurueckholen, BEVOR add -A daraus eine Loeschung macht.
+# Nur Neues: Bis 25.10.2026 wurde alles zurueckgeholt, was origin/main kannte —
+# auch, was auf der Freigabe absichtlich geloescht oder umbenannt worden war.
+# Loeschen war so unmoeglich, Umbenennen erzeugte Dubletten.
 FEHLEND=$(mktemp)
-git ls-tree -r origin/main --name-only -z | while IFS= read -r -d "" f; do
+git diff -z --name-only --diff-filter=A HEAD origin/main | while IFS= read -r -d "" f; do
   [ -e "$f" ] || printf "%s\0" "$f"
 done > "$FEHLEND"
 if [ -s "$FEHLEND" ]; then

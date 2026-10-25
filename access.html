@@ -65,6 +65,9 @@
     // ─────────────────────────── Helpers ───────────────────────────
     const $ = (s, r=document) => r.querySelector(s);
     const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    // Wert als JS-Argument in ein HTML-Attribut: erst JSON, dann esc. Nur esc reicht in
+    // onclick='…' nicht — der Browser macht aus &#39; wieder ' (D'Amico brach den Knopf).
+    const jsArg = (s) => esc(JSON.stringify(String(s ?? '')));
     const CH_CANTONS = ['AG','AI','AR','BE','BL','BS','FR','GE','GL','GR','JU','LU','NE','NW','OW','SG','SH','SO','SZ','TG','TI','UR','VD','VS','ZG','ZH'];
     function plateHtml(s) {
         const str = String(s || '').toUpperCase().trim();
@@ -124,8 +127,8 @@
                         <span class="text-gray-500 text-xs">${pos}</span>
                     </div>
                     <div class="flex gap-2 mt-3">
-                        <button onclick="unlockDoor('${esc(d.id)}', this)" class="flex-1 bg-red-700 hover:bg-red-800 text-white text-sm font-medium rounded-lg py-2">🔓 Öffnen</button>
-                        <button onclick="doorGrants('${esc(d.id)}','${esc((d.name || d.full_name || '').replace(/'/g, ''))}')" class="px-3 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm" title="Berechtigte Gruppen">👥</button>
+                        <button onclick="unlockDoor(${jsArg(d.id)}, this)" class="flex-1 bg-red-700 hover:bg-red-800 text-white text-sm font-medium rounded-lg py-2">🔓 Öffnen</button>
+                        <button onclick="doorGrants(${jsArg(d.id)},${jsArg(d.name || d.full_name || '')})" class="px-3 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm" title="Berechtigte Gruppen">👥</button>
                     </div>
                 </div>`;
             }).join('') + '</div><div id="door-groups-mgmt" class="mt-6"></div><div id="door-policies" class="mt-6"></div>';
@@ -338,8 +341,8 @@
                 <td class="px-3 py-2">${pin}</td>
                 <td class="px-3 py-2 text-gray-500">${nfc ? nfc + ' 🪪' : '—'}</td>
                 <td class="px-3 py-2 text-right whitespace-nowrap">
-                    <button onclick='editUser(${JSON.stringify(u).replace(/'/g, "&#39;")})' class="text-blue-600 hover:underline text-xs">Bearbeiten</button>
-                    <button onclick="delUser('${esc(u.id)}','${name.replace(/'/g,"")}')" class="text-red-600 hover:underline text-xs ml-2">Löschen</button>
+                    <button onclick="editUser(${esc(JSON.stringify(u))})" class="text-blue-600 hover:underline text-xs">Bearbeiten</button>
+                    <button onclick="delUser(${jsArg(u.id)},${jsArg(u.full_name || `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.username || u.id)})" class="text-red-600 hover:underline text-xs ml-2">Löschen</button>
                 </td></tr>`;
         }).join('');
         $('#user-body').innerHTML = `<div class="bg-white rounded-xl border overflow-x-auto"><table class="w-full text-sm">
@@ -406,7 +409,7 @@
             const tok = c.token || c.id || c.card_id || '';
             const lbl = 'NFC-Karte ····' + String(c.id || tok).slice(-4);
             return `<div class="flex items-center justify-between py-0.5"><span>🪪 ${esc(lbl)}</span>
-                <button onclick="nfcRemove('${esc(u.id)}','${esc(tok)}', this)" class="text-red-600 hover:underline text-xs">entfernen</button></div>`;
+                <button onclick="nfcRemove(${jsArg(u.id)},${jsArg(tok)}, this)" class="text-red-600 hover:underline text-xs">entfernen</button></div>`;
         }).join('');
     }
     async function nfcRemove(userId, token, btn) {
@@ -474,7 +477,7 @@
             const curIds = new Set((cur.policies || []).map(p => p.id));
             if (!allPolicies.length) { el.innerHTML = '<span class="text-gray-400">Keine Policies definiert</span>'; return; }
             el.innerHTML = allPolicies.map(p => `<label class="flex items-center gap-2">
-                <input type="checkbox" data-pid="${esc(p.id)}" ${curIds.has(p.id) ? 'checked' : ''} onchange="saveUserPolicies('${esc(u.id)}', this)">
+                <input type="checkbox" data-pid="${esc(p.id)}" ${curIds.has(p.id) ? 'checked' : ''} onchange="saveUserPolicies(${jsArg(u.id)}, this)">
                 <span>${esc(p.name)}</span></label>`).join('');
         } catch (e) { el.innerHTML = `<span class="text-red-600">${esc(e.message)}</span>`; }
     }

@@ -312,9 +312,29 @@ function nurTechnik(req, res, next) {
 // Bewusst ohne Gruppenprüfung: eine Station aufsetzen darf jeder mit einem
 // gültigen Rosenweg-Konto. Wer es war, steht in registered_by, und jede neue
 // Station taucht sofort in der Verwaltung auf.
+// Fehlversuche beim AD-Passwort-Login (Stationen + App): ohne Grenze liessen sich
+// Passwoerter beliebig oft durchprobieren, auch fuer Technik-Konten.
+const AD_FEHL_FENSTER_MS = 15 * 60 * 1000;
+// Nur pro Benutzername: hinter dem Proxy ist req.ip fuer alle gleich (kein trust proxy),
+// eine IP-Grenze wuerde nach ein paar Tippfehlern im ganzen Haus alle aussperren.
+const adFehlversuche = new Map(); // 'u:<name>' -> [zeitpunkte]
+function adGesperrt(req, username) {
+  const jetzt = Date.now();
+  return (adFehlversuche.get('u:' + String(username).toLowerCase()) || []).filter(t => jetzt - t < AD_FEHL_FENSTER_MS).length >= 10;
+}
+function adFehlversuch(req, username) {
+  const jetzt = Date.now(), k = 'u:' + String(username).toLowerCase();
+  adFehlversuche.set(k, [...(adFehlversuche.get(k) || []).filter(t => jetzt - t < AD_FEHL_FENSTER_MS), jetzt]);
+}
+setInterval(() => {
+  const jetzt = Date.now();
+  for (const [k, v] of adFehlversuche) if (!v.some(t => jetzt - t < AD_FEHL_FENSTER_MS)) adFehlversuche.delete(k);
+}, 10 * 60 * 1000).unref();
+
 router.post('/login', a(async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'Benutzer und Passwort nötig' });
+  if (adGesperrt(req, username)) return res.status(429).json({ error: 'Zu viele Fehlversuche — bitte in 15 Minuten erneut versuchen' });
 
   let user;
   try {
@@ -323,7 +343,8 @@ router.post('/login', a(async (req, res) => {
     console.error('[stations] AD nicht erreichbar:', e.message);
     return res.status(503).json({ error: 'Verzeichnisdienst nicht erreichbar' });
   }
-  if (!user) return res.status(401).json({ error: 'Benutzer oder Passwort stimmt nicht' });
+  if (!user) { adFehlversuch(req, username); return res.status(401).json({ error: 'Benutzer oder Passwort stimmt nicht' }); }
+  adFehlversuche.delete('u:' + String(username).toLowerCase());
 
   const fehlt = missingSecrets();
   if (fehlt.length) {
@@ -886,6 +907,7 @@ async function appSession(req, res, next) {
 router.post('/app-login', a(async (req, res) => {
   const { username, password, station_id } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'Benutzer und Passwort nötig' });
+  if (adGesperrt(req, username)) return res.status(429).json({ error: 'Zu viele Fehlversuche — bitte in 15 Minuten erneut versuchen' });
 
   let user;
   try {
@@ -894,7 +916,8 @@ router.post('/app-login', a(async (req, res) => {
     console.error('[stations] AD nicht erreichbar:', e.message);
     return res.status(503).json({ error: 'Verzeichnisdienst nicht erreichbar' });
   }
-  if (!user) return res.status(401).json({ error: 'Benutzer oder Passwort stimmt nicht' });
+  if (!user) { adFehlversuch(req, username); return res.status(401).json({ error: 'Benutzer oder Passwort stimmt nicht' }); }
+  adFehlversuche.delete('u:' + String(username).toLowerCase());
 
   await ensureSchema();
   const token = newToken(APP_PREFIX);
