@@ -3,6 +3,10 @@
  * Loads documents from /api/documents, displays them grouped by folder.
  * Admins can upload and delete files.
  */
+// Wert als JS-Argument in ein HTML-Attribut (onclick="f(${jsArg(x)})"): erst JSON, dann
+// HTML-escapen. Das ueberlebt ' " & und Entities (&#39; wird im Attribut sonst zu ').
+const jsArg = s => JSON.stringify(String(s ?? '')).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 const RosenwegDocs = {
   container: null,
   docs: [],
@@ -160,7 +164,7 @@ const RosenwegDocs = {
       if (subNode._root.length === 0 && Object.keys(subNode._subs).length === 0) {
         html += `<p class="text-sm text-gray-400 italic px-2 py-1">Noch keine Dateien</p>`;
         if (this._canWritePath(topFolder + '/x')) {
-          html += `<button onclick="RosenwegDocs.showUploadDialog('${subPath}')" class="text-sm text-blue-600 hover:text-blue-800 px-2 py-1 flex items-center gap-1">
+          html += `<button onclick="RosenwegDocs.showUploadDialog(${jsArg(subPath)})" class="text-sm text-blue-600 hover:text-blue-800 px-2 py-1 flex items-center gap-1">
             <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
             Dokument hochladen</button>`;
         }
@@ -240,12 +244,12 @@ const RosenwegDocs = {
     const size = this.formatSize(doc.size);
     const extBadge = ext.toUpperCase();
     const viewable = this._isViewable(ext);
-    const jsPath = doc.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-    const jsFileName = fileName.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-    const jsUrl = (doc.url || `/api/documents/${doc.path}`).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    const jsPath = jsArg(doc.path);
+    const jsFileName = jsArg(fileName);
+    const jsUrl = jsArg(doc.url || `/api/documents/${doc.path}`);
     const clickAction = viewable
-      ? `RosenwegDocs.viewFile('${jsPath}', '${jsFileName}', '${ext}')`
-      : `RosenwegDocs.downloadFile('${jsUrl}', '${jsFileName}')`;
+      ? `RosenwegDocs.viewFile(${jsPath}, ${jsFileName}, ${jsArg(ext)})`
+      : `RosenwegDocs.downloadFile(${jsUrl}, ${jsFileName})`;
     return `
       <div class="flex items-center justify-between bg-gray-50 rounded-lg px-4 py-3 hover:bg-gray-100 transition group">
         <a href="#" onclick="${clickAction}; return false;" class="flex items-center gap-3 flex-1 min-w-0 cursor-pointer">
@@ -256,28 +260,28 @@ const RosenwegDocs = {
           ${viewable ? '<span class="text-xs text-blue-500 flex-shrink-0"><svg class="h-3.5 w-3.5 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg></span>' : ''}
         </a>
         <div class="flex items-center gap-2 ml-2">
-          <a href="#" onclick="RosenwegDocs.downloadFile('${jsUrl}', '${jsFileName}'); return false;" class="text-blue-600 hover:text-blue-800 p-1" title="Herunterladen">
+          <a href="#" onclick="RosenwegDocs.downloadFile(${jsUrl}, ${jsFileName}); return false;" class="text-blue-600 hover:text-blue-800 p-1" title="Herunterladen">
             <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
             </svg>
           </a>
           ${this._canWritePath(doc.path) ? `
-          <button onclick="RosenwegDocs.showRenameDialog('${jsPath}')" class="text-gray-500 hover:text-gray-700 p-1 opacity-0 group-hover:opacity-100 transition" title="Umbenennen">
+          <button onclick="RosenwegDocs.showRenameDialog(${jsPath})" class="text-gray-500 hover:text-gray-700 p-1 opacity-0 group-hover:opacity-100 transition" title="Umbenennen">
             <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
             </svg>
           </button>
-          <button onclick="RosenwegDocs.showMoveDialog('${jsPath}')" class="text-indigo-600 hover:text-indigo-800 p-1 opacity-0 group-hover:opacity-100 transition" title="Verschieben">
+          <button onclick="RosenwegDocs.showMoveDialog(${jsPath})" class="text-indigo-600 hover:text-indigo-800 p-1 opacity-0 group-hover:opacity-100 transition" title="Verschieben">
             <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
             </svg>
           </button>
-          <button onclick="RosenwegDocs.showReplaceDialog('${jsPath}')" class="text-yellow-600 hover:text-yellow-800 p-1 opacity-0 group-hover:opacity-100 transition" title="Ersetzen">
+          <button onclick="RosenwegDocs.showReplaceDialog(${jsPath})" class="text-yellow-600 hover:text-yellow-800 p-1 opacity-0 group-hover:opacity-100 transition" title="Ersetzen">
             <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
             </svg>
           </button>
-          <button onclick="RosenwegDocs.confirmDelete('${jsPath}')" class="text-red-500 hover:text-red-700 p-1 opacity-0 group-hover:opacity-100 transition" title="Löschen">
+          <button onclick="RosenwegDocs.confirmDelete(${jsPath})" class="text-red-500 hover:text-red-700 p-1 opacity-0 group-hover:opacity-100 transition" title="Löschen">
             <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
             </svg>
@@ -320,7 +324,7 @@ const RosenwegDocs = {
         <div class="mb-6">
           <h3 class="text-lg font-semibold text-gray-700 mb-3 border-b pb-2 flex items-center justify-between">
             ${label}
-            ${this._canWritePath(folder + '/x') ? `<button onclick="RosenwegDocs.showCreateFolderDialog('${folder}')" class="text-sm font-normal text-blue-600 hover:text-blue-800 flex items-center gap-1" title="Unterordner erstellen">
+            ${this._canWritePath(folder + '/x') ? `<button onclick="RosenwegDocs.showCreateFolderDialog(${jsArg(folder)})" class="text-sm font-normal text-blue-600 hover:text-blue-800 flex items-center gap-1" title="Unterordner erstellen">
               <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
               Ordner
             </button>` : ''}
@@ -469,7 +473,7 @@ const RosenwegDocs = {
           <div id="upload-error" class="text-sm text-red-600 hidden"></div>
           <div class="flex justify-end gap-3 pt-2">
             <button onclick="RosenwegDocs.closeModal()" class="px-4 py-2 text-gray-600 hover:text-gray-800">Abbrechen</button>
-            <button onclick="RosenwegDocs.doCreateFolder('${parentFolder}')" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">Erstellen</button>
+            <button onclick="RosenwegDocs.doCreateFolder(${jsArg(parentFolder)})" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">Erstellen</button>
           </div>
         </div>
       </div>`;
@@ -805,8 +809,8 @@ const RosenwegDocs = {
   async viewFile(path, fileName, ext) {
     const downloadUrl = `/api/documents/${path}`;
     const safeFileName = this._escapeHtml(fileName);
-    const jsDownloadUrl = downloadUrl.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-    const jsFileName = fileName.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    const jsDownloadUrl = jsArg(downloadUrl);
+    const jsFileName = jsArg(fileName);
     const isOffice = this.OFFICE_EXTS.has(ext);
     const modal = document.createElement('div');
     modal.id = 'docs-viewer-modal';
@@ -818,7 +822,7 @@ const RosenwegDocs = {
           ${isOffice ? '<span class="text-xs bg-blue-600 px-2 py-0.5 rounded">PDF-Vorschau</span>' : ''}
         </div>
         <div class="flex items-center gap-2 ml-4 flex-shrink-0">
-          <button onclick="RosenwegDocs.downloadFile('${jsDownloadUrl}', '${jsFileName}'); return false;" class="text-gray-300 hover:text-white p-1.5 rounded hover:bg-gray-700 transition" title="Original herunterladen">
+          <button onclick="RosenwegDocs.downloadFile(${jsDownloadUrl}, ${jsFileName}); return false;" class="text-gray-300 hover:text-white p-1.5 rounded hover:bg-gray-700 transition" title="Original herunterladen">
             <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
             </svg>
@@ -881,7 +885,7 @@ const RosenwegDocs = {
       contentArea.innerHTML = `
         <div class="text-center">
           <p class="text-red-400 mb-4">Fehler: ${this._escapeHtml(err.message)}</p>
-          <button onclick="RosenwegDocs.downloadFile('${jsDownloadUrl}', '${jsFileName}'); RosenwegDocs.closeViewer();"
+          <button onclick="RosenwegDocs.downloadFile(${jsDownloadUrl}, ${jsFileName}); RosenwegDocs.closeViewer();"
             class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
             Stattdessen herunterladen
           </button>

@@ -37,24 +37,21 @@ trap 'rm -rf "$build"' EXIT
 cd "$REPO"
 
 assemble_website() {
-  # Entspricht Dockerfile (COPY . + curated rm). Denylist statt Allowlist:
-  # alles servieren AUSSER Backend/Deploy/Frontend-Fremdcontent.
+  # Positivliste: nur Web-Inhalt. Die fruehere Sperrliste veraltete mit jedem neuen
+  # Repo-Ordner (docs/, JOURNAL.md, mailcow/, backend-lxc/ … waeren oeffentlich
+  # geworden — wie am 5.9.2026). Stand fe-www 25.10.2026: css/ img/ js/ und im
+  # Wurzelverzeichnis HTML, PNG, PDF, Manifeste, Service-Worker, drei JSON.
+  # rsync: die erste passende Regel gewinnt — Ausschluesse daher zuerst.
   rsync -a \
-    --exclude='.git' --exclude='.github' --exclude='.claude' --exclude='.trunk' \
-    --exclude='api' --exclude='energy-collector' --exclude='syslog-collector' \
-    --exclude='shelly-emulator' --exclude='whatsapp-bot' --exclude='wiki' \
-    --exclude='scripts' --exclude='edge-traefik' --exclude='authentik-ct' \
-    --exclude='frontends-lxc' --exclude='pbx' --exclude='door-signs/README.md' \
-    --exclude='pwa' \
-    --exclude='stweg1' --exclude='stweg2' --exclude='stweg3' --exclude='stweg4' \
-    --exclude='stweg5' --exclude='stweg6' --exclude='stweg7' --exclude='meg' \
-    --exclude='Dockerfile*' --exclude='docker-stack.yml' --exclude='deploy-stack.sh' \
-    --exclude='.env' --exclude='.env.example' --exclude='.gitignore' \
-    --exclude='README.md' --exclude='nginx*.conf' \
-    --exclude='isp.html' --exclude='isp-admin.html' --exclude='isp-mein-zugang.html' \
-    --exclude='wlan.html' --exclude='tv.html' --exclude='netzwerk.html' \
-    --exclude='verbindungen.html' --exclude='dmarc.html' \
-    --exclude='pbx-admin.html' --exclude='js/nav-isp.js' \
+    --exclude='/isp.html' --exclude='/isp-admin.html' --exclude='/isp-mein-zugang.html' \
+    --exclude='/wlan.html' --exclude='/tv.html' --exclude='/netzwerk.html' \
+    --exclude='/verbindungen.html' --exclude='/dmarc.html' --exclude='/pbx-admin.html' \
+    --exclude='/js/nav-isp.js' \
+    --include='/css/***' --include='/img/***' --include='/js/***' \
+    --include='/*.html' --include='/*.png' --include='/*.pdf' --include='/*.webmanifest' \
+    --include='/*-sw.js' --include='/CNAME' \
+    --include='/site-config.json' --include='/zaehler-config.json' --include='/access-manifest.json' \
+    --exclude='*' \
     ./ "$build/"
 }
 
@@ -97,7 +94,8 @@ case "$TYPE" in
 esac
 
 mkdir -p "$WEBROOT"
-rsync -a --delete "$build/" "$WEBROOT/"
+# .alt = Sicherungen von scripts/rw-web-ausrollen.sh — nicht mitloeschen
+rsync -a --delete --filter='P *.alt' "$build/" "$WEBROOT/"
 chown -R www-data:www-data "$WEBROOT"
 
 # 4) Config testen + reload
