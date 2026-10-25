@@ -6246,22 +6246,28 @@ async function checkStaleDruckerTags() {
   try {
     // Kandidaten + echte Email pro Name aufschlüsseln
     const result = await pool.query(`
+      -- Zuordnung ueber dieselbe Person (person_id), nicht ueber den Namen: ein
+      -- Namensvetter in einer anderen Wohnung bekam sonst die Post des anderen.
+      -- Nur aktive Kontakte, und nur wenn die Person genau eine echte Adresse hat.
       WITH drucker AS (
-        SELECT wk.id, wk.name, wk.email, w.stweg, w.bezeichnung, w.typ
+        SELECT wk.id, wk.name, wk.email, wk.person_id, w.stweg, w.bezeichnung, w.typ
         FROM wohnungen_kontakte wk JOIN wohnungen w ON w.id = wk.wohnung_id
-        WHERE wk.email LIKE 'druckerr9+%' OR wk.email LIKE 'druckerr13+%'
+        WHERE (wk.email LIKE 'druckerr9+%' OR wk.email LIKE 'druckerr13+%')
+          AND wk.archiviert_am IS NULL AND wk.person_id IS NOT NULL
       ),
-      real_email_for_name AS (
-        SELECT name, MIN(email) AS real_email
+      real_email_for_person AS (
+        SELECT person_id, MIN(LOWER(email)) AS real_email
         FROM wohnungen_kontakte
-        WHERE email IS NOT NULL AND email <> ''
+        WHERE person_id IS NOT NULL AND archiviert_am IS NULL
+          AND email IS NOT NULL AND email <> ''
           AND email NOT LIKE 'druckerr9+%' AND email NOT LIKE 'druckerr13+%'
-        GROUP BY name
+        GROUP BY person_id
+        HAVING COUNT(DISTINCT LOWER(email)) = 1
       )
       SELECT d.id, d.name, d.email AS drucker_tag, r.real_email,
              d.stweg, d.bezeichnung, d.typ
       FROM drucker d
-      JOIN real_email_for_name r ON r.name = d.name
+      JOIN real_email_for_person r ON r.person_id = d.person_id
       ORDER BY d.stweg, d.bezeichnung
     `);
     if (result.rows.length === 0) {
@@ -6624,6 +6630,10 @@ async function syncContactsToNextcloud() {
              json_agg(json_build_object('stweg', w.stweg, 'bezeichnung', w.bezeichnung, 'rolle', k.rolle)) AS wohnungen
       FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id
       WHERE k.name IS NOT NULL AND TRIM(k.name) <> ''
+        -- nur aktuelle Bewohner: Ausgezogene/Verkaeufer blieben sonst samt Telefon im
+        -- geteilten Buch (das Loeschen verwaister Eintraege griff nie), Kuenftige erschienen vorab
+        AND k.archiviert_am IS NULL
+        AND (k.gueltig_ab IS NULL OR k.gueltig_ab <= CURRENT_DATE)
       GROUP BY k.name, k.email, k.telefon
     `);
 
@@ -7960,7 +7970,7 @@ async function buildUnterschriftenlisteHTML(stweg, opts, replaySnapshot = null) 
 
 // GET /api/unterschriftenliste/:stweg/haeuser — Liste aller in dieser STWEG belegten Hausnummern,
 // damit das UI Auswahl-Optionen zeigen kann (z.B. "Nur RW17", "Nur RW18", "RW17+18").
-app.get('/api/unterschriftenliste/:stweg/haeuser', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
+app.get('/api/unterschriftenliste/:stweg/haeuser', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
   try {
     const stweg = parseStweg(req.params.stweg);
     if (!stweg) return res.status(400).json({ error: 'Ungültige STWEG' });
@@ -8183,7 +8193,7 @@ app.get('/api/unterschriftenliste/history', authMiddleware, requirePermission('w
   }
 });
 
-app.get('/api/unterschriftenliste/:stweg.pdf', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
+app.get('/api/unterschriftenliste/:stweg.pdf', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
   try {
     const stweg = parseStweg(req.params.stweg);
     if (!stweg) return res.status(400).json({ error: 'Ungültige STWEG' });
@@ -8650,12 +8660,20 @@ app.get('/api/verteiler/mailcow-gate', requireTrackerSecret, async (req, res) =>
     const gated_aliases = rows
       .map(r => String(r.email_address || '').toLowerCase())
       .filter(a => a.endsWith(`@${VERTEILER_DOMAIN}`));
+    // Ohne Mailcow-Domains keine Teilliste ausliefern: das Gate-Skript uebernimmt die
+    // Liste ungeprueft, und rspamd wiese dann interne Absender (noreply@, technik@ …) ab.
+    // Bei Fehler 503 -> das Skript bricht ab und behaelt die bisherige Liste.
     let mailcowDomains = [];
     try {
       const d = await mailcowApi('GET', '/get/domain/all');
       mailcowDomains = (Array.isArray(d) ? d : [])
         .map(x => String(x.domain_name || x.domain || '').toLowerCase()).filter(Boolean);
-    } catch (e) { console.warn('[mailcow-gate] domain/all:', e.message); }
+    } catch (e) {
+      console.warn('[mailcow-gate] domain/all:', e.message);
+      return res.status(503).json({ error: 'Mailcow-Domains nicht abrufbar' });
+    }
+    if (!mailcowDomains.length) return res.status(503).json({ error: 'Mailcow lieferte keine Domains' });
+    mailcowDomains.push(VERTEILER_DOMAIN.toLowerCase());
     const vq = await pool.query(
       `SELECT DISTINCT LOWER(SPLIT_PART(addr, '@', 2)) AS domain FROM (
          SELECT v.email AS addr FROM verwaltungen v
@@ -17293,6 +17311,7 @@ async function checkBotNotReady() {
   if (age < WA_NOT_READY_ALERT_MS) return;
   if (waBotNotReadyAlertAt && Date.now() - waBotNotReadyAlertAt.getTime() < WA_NOT_READY_REMIND_MS) return;
   const erneut = !!waBotNotReadyAlertAt;
+  const vorher = waBotNotReadyAlertAt;
   waBotNotReadyAlertAt = new Date();
   const ageMin = Math.round(age / 60000);
   const dauer = ageMin >= 120 ? `${Math.round(ageMin / 60)} Stunden` : `${ageMin} Minuten`;
@@ -17313,6 +17332,7 @@ async function checkBotNotReady() {
         + `Diese Erinnerung kommt täglich, bis der Bot wieder verbunden ist.`,
     }, 'whatsapp-bot-not-ready');
   } catch (err) {
+    waBotNotReadyAlertAt = vorher; // nicht als verschickt werten -> naechste Minute erneut
     console.warn('[WA-Watchdog] Kopplungs-Alarm konnte nicht gesendet werden:', err.message);
   }
 }
@@ -17320,10 +17340,12 @@ async function checkBotNotReady() {
 // Stale-Detector: wenn der letzte Heartbeat > 5min her ist, einmal Alarm
 // an Technik/Präsident senden — nur per Mail: Ein WhatsApp-Alarm über den toten
 // Bot bleibt in der Outbox liegen und kam bisher erst nach der Reparatur an.
+// Bezug ohne jeden Heartbeat seit API-Start: der Start selbst. Frueher kehrte die
+// Pruefung dann fuer immer zurueck — war der Bot beim Deploy schon tot, kam nie ein Alarm.
+const WA_WATCHDOG_START = new Date();
 async function checkBotHeartbeat() {
   const STALE_MS = 5 * 60 * 1000;
-  const lastHb = waBotHeartbeat?.received_at;
-  if (!lastHb) return; // noch nie ein Heartbeat → Bot startet vielleicht gerade
+  const lastHb = waBotHeartbeat?.received_at || WA_WATCHDOG_START;
   const age = Date.now() - new Date(lastHb).getTime();
   if (age < STALE_MS || waBotStaleAlertSent) return;
   waBotStaleAlertSent = true;
@@ -17345,8 +17367,9 @@ async function checkBotHeartbeat() {
         + `Prüfen: pct exec 116 -- docker ps --filter name=whatsapp-bot\n`
         + `Logs:    pct exec 116 -- docker logs --tail 50 whatsapp-bot\n`
         + `Admin-UI: https://whatsapp.rosenweg4303.ch`,
-    }, 'whatsapp-bot-stale').catch(() => {});
+    }, 'whatsapp-bot-stale');
   } catch (err) {
+    waBotStaleAlertSent = false; // Versand gescheitert -> naechste Minute erneut
     console.warn('[WA-Watchdog] Alarm konnte nicht gesendet werden:', err.message);
   }
 }
@@ -24770,6 +24793,13 @@ async function initDB() {
         UNIQUE (host, unit)
       );
       CREATE INDEX IF NOT EXISTS idx_dienst_wacht_knoten ON dienst_wacht(knoten);
+      -- Letzter Bericht je Knoten. dienst_wacht allein kennt nur Befunde: ein gesunder
+      -- Knoten hat dort keine Zeile und konnte deshalb nie als verstummt auffallen.
+      CREATE TABLE IF NOT EXISTS dienst_wacht_knoten (
+        knoten VARCHAR(120) PRIMARY KEY,
+        zuletzt TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        stumm_gemeldet_am TIMESTAMPTZ
+      );
 
       -- Grundregel fuer den Praesidenten. Die Technik steht NICHT hier:
       -- Sie ist im Router fest verdrahtet, damit sie sich ueber die

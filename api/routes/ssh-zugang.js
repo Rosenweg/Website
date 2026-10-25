@@ -476,6 +476,9 @@ router.post('/dienste', requireHostToken, async (req, res) => {
     const knoten = String(req.body?.knoten || '').trim();
     if (!HOSTNAME_MUSTER.test(knoten)) return res.status(400).json({ error: 'knoten fehlt oder ist ungültig' });
     const befunde = Array.isArray(req.body?.befunde) ? req.body.befunde.slice(0, 2000) : [];
+    await pool.query(
+      `INSERT INTO dienst_wacht_knoten (knoten, zuletzt) VALUES ($1, NOW())
+       ON CONFLICT (knoten) DO UPDATE SET zuletzt = NOW(), stumm_gemeldet_am = NULL`, [knoten]);
 
     const gesehen = [];
     let neuGemeldet = 0;
@@ -539,12 +542,33 @@ router.get('/dienste', authMiddleware, requireTechnik, async (req, res) => {
     // Knoten, die sich laenger nicht gemeldet haben, sind selbst ein
     // Befund — eine stille Wacht ist keine.
     const stumm = await pool.query(
-      `SELECT DISTINCT knoten, MAX(zuletzt_gesehen) AS zuletzt
-         FROM dienst_wacht GROUP BY knoten
-        HAVING MAX(zuletzt_gesehen) < NOW() - INTERVAL '30 minutes'`);
+      `SELECT knoten, zuletzt FROM dienst_wacht_knoten
+        WHERE zuletzt < NOW() - INTERVAL '30 minutes' ORDER BY knoten`);
     res.json({ befunde: r.rows, stumme_knoten: stumm.rows });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
+// Verstummte Knoten aktiv melden — einmal je Ausfall, per Mail (kommt auch an,
+// wenn WhatsApp gerade das Kaputte ist) und WhatsApp.
+async function stummeKnotenMelden() {
+  try {
+    const r = await pool.query(
+      `UPDATE dienst_wacht_knoten SET stumm_gemeldet_am = NOW()
+        WHERE zuletzt < NOW() - INTERVAL '45 minutes' AND stumm_gemeldet_am IS NULL
+        RETURNING knoten, zuletzt`);
+    if (!r.rows.length) return;
+    const zeilen = r.rows.map(k => `• ${k.knoten}: letzter Bericht ${new Date(k.zuletzt).toLocaleString('de-CH', { timeZone: 'Europe/Zurich' })}`).join('\n');
+    const text = `Dienstwacht: ${r.rows.length} Knoten melden sich nicht mehr\n${zeilen}\n\nTimer rw-dienstwacht.timer, HOST_TOKEN und API_BASE auf dem Knoten prüfen.`;
+    console.warn('[dienstwacht] ' + text.split('\n')[0]);
+    const { loggedSendMail, MAIL_FROM } = require('../lib/mail');
+    const empf = (await pool.query(
+      `SELECT DISTINCT email FROM users WHERE active = true AND email IS NOT NULL AND groups_json::jsonb ? 'technik'`)).rows.map(x => x.email);
+    if (empf.length) await loggedSendMail({ from: MAIL_FROM, to: empf.join(', '), subject: '⚠ Dienstwacht: Knoten verstummt', text }, 'dienst-wacht-stumm').catch(e => console.warn('[dienstwacht] Mail:', e.message));
+    const gid = await resolveTechnikWhatsappGroupId();
+    if (gid) await queueWhatsappMessage({ chatId: gid, body: text, sourceType: 'dienst-wacht' }).catch(() => {});
+  } catch (e) { console.warn('[dienstwacht] stumm-Pruefung:', e.message); }
+}
+setInterval(stummeKnotenMelden, 10 * 60 * 1000).unref();
 
 // ════════════════════════════════════════════════════════════════════
 // 3. Zugriffsmatrix (Technik/Praesident)

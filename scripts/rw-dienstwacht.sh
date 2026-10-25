@@ -76,12 +76,15 @@ sammeln() {
   while IFS= read -r unit; do
     [ -n "$unit" ] || continue
     uninteressant "$unit" && continue
-    local seit jetzt alter
-    seit=$("$@" systemctl show "$unit" -p InactiveExitTimestampMonotonic --value 2>/dev/null || echo 0)
-    jetzt=$("$@" sh -c 'cut -d" " -f1 /proc/uptime' 2>/dev/null || echo 0)
-    # Monotonic in Sekunden gegen die Laufzeit des Systems rechnen.
-    alter=$(awk -v s="${seit:-0}" -v j="${jetzt:-0}" 'BEGIN{ printf "%d", j - (s/1000000) }' 2>/dev/null || echo 0)
-    if [ "${alter:-0}" -ge "$ACTIVATING_GRENZE_S" ] 2>/dev/null; then
+    local seit_txt seit alter
+    # Wanduhr statt Monotonic: im LXC liefert /proc/uptime (lxcfs) die Laufzeit
+    # des Containers, InactiveExitTimestampMonotonic aber die des Hosts — das
+    # Alter wurde negativ, und haengende Container-Dienste fielen nie auf.
+    seit_txt=$("$@" systemctl show "$unit" -p InactiveExitTimestamp --value 2>/dev/null || true)
+    # Leer/"n/a" abfangen: GNU date -d "" liefert sonst Mitternacht heute.
+    case "$seit_txt" in ''|n/a) seit=0 ;; *) seit=$(date -d "$seit_txt" +%s 2>/dev/null || echo 0) ;; esac
+    alter=$(( $(date +%s) - ${seit:-0} ))
+    if [ "${seit:-0}" -gt 0 ] && [ "$alter" -ge "$ACTIVATING_GRENZE_S" ]; then
       printf '%s\t%s\t%s\n' "$name" "$unit" "activating" >> "$BERICHT"
     fi
   done <<< "$ausgabe"
@@ -94,8 +97,13 @@ sammeln "$HOST_NAME" env
 if command -v pct >/dev/null 2>&1; then
   while read -r id ctname; do
     [ -n "$id" ] || continue
-    # Ohne systemd gibt es nichts zu holen — kein Befund, kein Fehler.
-    if ! timeout "$CT_TIMEOUT_S" pct exec "$id" -- test -d /run/systemd/system 2>/dev/null; then
+    # Ohne systemd (Exit 1) gibt es nichts zu holen — kein Befund. Haengt der
+    # Container (Timeout 124) oder scheitert pct exec, ist genau das der Befund.
+    rc=0; timeout "$CT_TIMEOUT_S" pct exec "$id" -- test -d /run/systemd/system 2>/dev/null || rc=$?
+    if [ "$rc" -eq 1 ]; then
+      continue
+    elif [ "$rc" -ne 0 ]; then
+      printf '%s\t%s\t%s\n' "ct$id-${ctname:-unbenannt}" "container-antwortet-nicht" "failed" >> "$BERICHT"
       continue
     fi
     sammeln "ct$id-${ctname:-unbenannt}" timeout "$CT_TIMEOUT_S" pct exec "$id" --

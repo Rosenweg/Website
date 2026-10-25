@@ -7,8 +7,8 @@ services:
     container_name: whatsapp-bot
     restart: unless-stopped
     environment:
-      API_BASE: http://100.64.2.27:3000        # Swarm-VIP (api host-published :3000)
-      MAIN_API_BASE: http://100.64.2.27:3000
+      API_BASE: http://100.64.2.52:3000        # core-backend CT 128 (seit Entschwarmung; .27 war die Swarm-VIP)
+      MAIN_API_BASE: http://100.64.2.52:3000
       WHATSAPP_SHARED_SECRET: "${WHATSAPP_SHARED_SECRET}"
       WA_POLL_MS: "15000"
       WA_HEARTBEAT_MS: "30000"
@@ -20,6 +20,7 @@ services:
       GW_NOTIFY_RELAY_HOST: "100.64.2.31"        # PMG -> SMTP2GO
       GW_NOTIFY_RELAY_PORT: "25"
       GW_NOTIFY_FROM: whatsapp-gateway@whatsapp.rosenweg4303.ch
+      WA_ARCHIVE_ALL_GROUPS: archiv@rosenweg4303.ch
     ports:
       - "8080:8080"   # health + /groups (api -> hier via GATEWAY_GROUPS_URL)
       - "8090:8090"   # Gateway-HTTP/UI + /gateway/send (Traefik-Route id=25 + pbx)
