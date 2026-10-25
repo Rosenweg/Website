@@ -5583,15 +5583,16 @@ async function saveKontakte(client, wohnungId, kontakte, stweg) {
             SET rolle = $1, name = $2, email = $3, telefon = $4, adresse = $5,
                 sort_order = $6, authentik_zugang = $7,
                 gueltig_ab = COALESCE($8, gueltig_ab),
-                person_id = COALESCE($10, person_id)
+                person_id = COALESCE($10, person_id),
+                ersetzt_vorgaenger = $11
           WHERE id = $9`,
-        [rolle, k.name || null, email, normalizePhone(k.telefon), k.adresse || null, i, authentikZugang, gueltigAb, k.id, personId]
+        [rolle, k.name || null, email, normalizePhone(k.telefon), k.adresse || null, i, authentikZugang, gueltigAb, k.id, personId, !!(k.ersetzt_vorgaenger && gueltigAb)]
       );
     } else {
       await client.query(
-        `INSERT INTO wohnungen_kontakte (wohnung_id, rolle, name, email, telefon, adresse, sort_order, authentik_zugang, gueltig_ab, person_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [wohnungId, rolle, k.name || null, email, normalizePhone(k.telefon), k.adresse || null, i, authentikZugang, gueltigAb, personId]
+        `INSERT INTO wohnungen_kontakte (wohnung_id, rolle, name, email, telefon, adresse, sort_order, authentik_zugang, gueltig_ab, person_id, ersetzt_vorgaenger)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [wohnungId, rolle, k.name || null, email, normalizePhone(k.telefon), k.adresse || null, i, authentikZugang, gueltigAb, personId, !!(k.ersetzt_vorgaenger && gueltigAb)]
       );
     }
     if (email) cancelPendingDeletion(email).catch(() => {});
@@ -6381,10 +6382,14 @@ setInterval(sendPickupReminder, 24 * 60 * 60 * 1000);
 setTimeout(sendPickupReminder, 10 * 60 * 1000); // initial run nach 10min
 
 // ─── Auto-Archive: Vorgemerkte Eintraege werden heute aktiv ────────
-// Wenn ein neuer Kontakt mit gueltig_ab=heute aktiv wird und ein anderer aktiver
-// Kontakt mit derselben Rolle auf derselben Wohnung existiert (gueltig_ab < neuer.gueltig_ab),
-// wird der Vorgaenger archiviert. Authentik-Zugang bleibt unveraendert (wird beim Anlegen
-// schon vergeben und bei Archivierung über trackRemovedKontakte verzoegert deaktiviert).
+// Wenn ein neuer Kontakt mit gueltig_ab=heute aktiv wird, ausdruecklich als Ersatz
+// markiert ist (ersetzt_vorgaenger) und ein anderer aktiver Kontakt mit derselben Rolle
+// auf derselben Wohnung existiert (gueltig_ab < neuer.gueltig_ab), wird der Vorgaenger
+// archiviert. Ohne Markierung nichts: frueher fiel so jede zweite Eigentuemerin mit Datum
+// ueber den ersten Eigentuemer her. Die Markierung gilt einmal und wird danach geloescht,
+// sonst wuerde ein spaeter ergaenzter Miteigentuemer gleich wieder archiviert.
+// Authentik-Zugang bleibt unveraendert (wird beim Anlegen schon vergeben und bei
+// Archivierung über trackRemovedKontakte verzoegert deaktiviert).
 async function autoArchiveSupersededKontakte() {
   try {
     // Kontakte, die heute (oder früher) effektiv geworden sind und noch keinen
@@ -6394,6 +6399,7 @@ async function autoArchiveSupersededKontakte() {
         SELECT id, wohnung_id, rolle, gueltig_ab
           FROM wohnungen_kontakte
          WHERE archiviert_am IS NULL
+           AND ersetzt_vorgaenger
            AND gueltig_ab IS NOT NULL
            AND gueltig_ab <= CURRENT_DATE
       )
@@ -6411,6 +6417,8 @@ async function autoArchiveSupersededKontakte() {
     if (r.rowCount > 0) {
       console.log(`[KontakteCron] ${r.rowCount} Vorgaenger archiviert (durch vorgemerkte Eintraege superseded)`);
     }
+    await pool.query(`UPDATE wohnungen_kontakte SET ersetzt_vorgaenger = false
+                       WHERE ersetzt_vorgaenger AND gueltig_ab <= CURRENT_DATE`);
     // ZEV: nach dem Auto-Archive (sauberer Bewohner-Stand) Aliase syncen + Wechsel melden.
     await processZevDaily();
   } catch (err) {
@@ -25053,6 +25061,9 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_wohnungen_kontakte_wohnung ON wohnungen_kontakte(wohnung_id);
       ALTER TABLE wohnungen_kontakte ADD COLUMN IF NOT EXISTS gueltig_ab DATE;
+      -- Loest dieser Kontakt ab gueltig_ab die bisherigen gleicher Rolle ab? Nur dann
+      -- archiviert der Nacht-Job sie — Miteigentuemer/Mitbewohner bleiben unberuehrt.
+      ALTER TABLE wohnungen_kontakte ADD COLUMN IF NOT EXISTS ersetzt_vorgaenger BOOLEAN NOT NULL DEFAULT false;
       ALTER TABLE wohnungen_kontakte ADD COLUMN IF NOT EXISTS archiviert_am DATE;
     `);
 
