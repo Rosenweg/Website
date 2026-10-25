@@ -468,7 +468,8 @@ app.get('/api/auth/callback', async (req, res) => {
     const userResult = await pool.query(
       `INSERT INTO users (email, name, role, groups_json, username)
        VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, groups_json = EXCLUDED.groups_json, username = EXCLUDED.username
+       ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, groups_json = EXCLUDED.groups_json, username = EXCLUDED.username,
+                                         name_selbst_geaendert_am = NULL
        RETURNING id, email, name, wohnung, stweg, role, groups_json, username`,
       [email, name, isAdmin ? 'admin' : 'bewohner', JSON.stringify(groups), username]
     );
@@ -943,11 +944,22 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
   }
 });
 
+// Name als Ausweis fuer "Meine Wohnung": Viele Kontakte haben eine abweichende oder
+// Platzhalter-E-Mail, darum zaehlt auch der Name — aber nur, solange die Person ihn
+// nicht selbst geaendert hat (sonst traegt man den Namen eines fremden Eigentuemers ein).
+async function wohnungsAbgleichName(req) {
+  const id = req.user?.user_id || req.user?.id;
+  if (!id) return req.user?.name || '';
+  const r = await pool.query('SELECT name, name_selbst_geaendert_am FROM users WHERE id = $1', [id]).catch(() => ({ rows: [] }));
+  if (r.rows[0]?.name_selbst_geaendert_am) return '';
+  return req.user?.name || '';
+}
+
 // GET /api/me/wohnungen — finds apartments where the logged-in user is a contact
 app.get('/api/me/wohnungen', authMiddleware, async (req, res) => {
   try {
     const email = (req.user.email || '').toLowerCase();
-    const name = req.user.name || '';
+    const name = await wohnungsAbgleichName(req);
     if (!email && !name) return res.json({ wohnungen: [] });
 
     // Match by email (case-insensitive) OR by exact name
@@ -957,7 +969,7 @@ app.get('/api/me/wohnungen', authMiddleware, async (req, res) => {
               w.typ, w.besonderheiten, w.bewohnt_von, w.stweg, w.notizen,
               w.waschkueche_berechtigt, w.wertquote_zaehler, w.wertquote_nenner
        FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id
-       WHERE LOWER(k.email) = $1 OR LOWER(k.name) = LOWER($2)
+       WHERE ($1 <> '' AND LOWER(k.email) = $1) OR ($2 <> '' AND LOWER(k.name) = LOWER($2))
        ORDER BY w.stweg, w.bezeichnung`,
       [email, name]
     );
@@ -975,10 +987,10 @@ app.get('/api/me/wohnungen', authMiddleware, async (req, res) => {
 app.put('/api/me/kontakt/:id', authMiddleware, async (req, res) => {
   try {
     const email = (req.user.email || '').toLowerCase();
-    const name = req.user.name || '';
+    const name = await wohnungsAbgleichName(req);
     const own = await pool.query(
       `SELECT id, name, email, person_id, wohnung_id FROM wohnungen_kontakte
-        WHERE id = $1 AND (LOWER(email) = $2 OR LOWER(name) = LOWER($3))`,
+        WHERE id = $1 AND archiviert_am IS NULL AND (($2 <> '' AND LOWER(email) = $2) OR ($3 <> '' AND LOWER(name) = LOWER($3)))`,
       [req.params.id, email, name]
     );
     if (own.rows.length === 0) return res.status(403).json({ error: 'Du kannst nur deine eigenen Kontaktdaten bearbeiten' });
@@ -1047,10 +1059,10 @@ app.put('/api/me/kontakt/:id', authMiddleware, async (req, res) => {
 app.get('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
   try {
     const email = (req.user.email || '').toLowerCase();
-    const name = req.user.name || '';
+    const name = await wohnungsAbgleichName(req);
     const own = await pool.query(
       `SELECT w.* FROM wohnungen w JOIN wohnungen_kontakte k ON k.wohnung_id = w.id
-       WHERE w.id = $1 AND (LOWER(k.email) = $2 OR LOWER(k.name) = LOWER($3)) LIMIT 1`,
+       WHERE w.id = $1 AND k.archiviert_am IS NULL AND (($2 <> '' AND LOWER(k.email) = $2) OR ($3 <> '' AND LOWER(k.name) = LOWER($3))) LIMIT 1`,
       [req.params.id, email, name]
     );
     if (own.rows.length === 0) return res.status(403).json({ error: 'Du kannst nur deine eigenen Wohnungen sehen' });
@@ -1069,15 +1081,24 @@ app.put('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
   const client = await pool.connect();
   try {
     const email = (req.user.email || '').toLowerCase();
-    const name = req.user.name || '';
+    const name = await wohnungsAbgleichName(req);
+    // Ganze Wohnung (Wertquote, Kontaktliste) aendern nur Eigentuemer/Verwalter —
+    // Mieter pflegen ihre eigenen Daten ueber /api/me/kontakt.
     const own = await client.query(
       `SELECT w.id, w.stweg FROM wohnungen w JOIN wohnungen_kontakte k ON k.wohnung_id = w.id
-       WHERE w.id = $1 AND (LOWER(k.email) = $2 OR LOWER(k.name) = LOWER($3)) LIMIT 1`,
+       WHERE w.id = $1 AND k.archiviert_am IS NULL AND k.rolle IN ('eigentuemer','verwalter')
+         AND (($2 <> '' AND LOWER(k.email) = $2) OR ($3 <> '' AND LOWER(k.name) = LOWER($3))) LIMIT 1`,
       [req.params.id, email, name]
     );
-    if (own.rows.length === 0) return res.status(403).json({ error: 'Du kannst nur deine eigenen Wohnungen bearbeiten' });
+    if (own.rows.length === 0) return res.status(403).json({ error: 'Nur Eigentümer oder Verwalter dieser Wohnung können sie bearbeiten' });
     const stweg = own.rows[0].stweg;
     const b = req.body;
+    // person_id nie aus der Anfrage: bestehende Kontakte behalten ihre Verknuepfung,
+    // neue bekommt saveKontakte per find/create (vorher liess sich eine fremde Person anhaengen).
+    const bisher = new Map((await client.query('SELECT id, person_id FROM wohnungen_kontakte WHERE wohnung_id = $1', [req.params.id])).rows.map(r => [r.id, r.person_id]));
+    for (const k of (Array.isArray(b.kontakte) ? b.kontakte : [])) {
+      if (k.id && bisher.has(Number(k.id))) k.person_id = bisher.get(Number(k.id)); else delete k.person_id;
+    }
     await client.query('BEGIN');
     const result = await client.query(
       `UPDATE wohnungen SET bezeichnung=COALESCE($1,bezeichnung), stockwerk=$2, zimmer=$3, flaeche_m2=$4,
@@ -1171,7 +1192,8 @@ app.put('/api/auth/profile', authMiddleware, async (req, res) => {
   try {
     const result = await pool.query(
       `UPDATE users SET name = COALESCE($1, name), wohnung = $2, stweg = $3,
-       phone = $4, strasse = $5, plz = $6, ort = $7, updated_at = NOW()
+       phone = $4, strasse = $5, plz = $6, ort = $7, updated_at = NOW(),
+       name_selbst_geaendert_am = CASE WHEN $1 IS NOT NULL AND $1 IS DISTINCT FROM name THEN NOW() ELSE name_selbst_geaendert_am END
        WHERE id = $8
        RETURNING id, email, name, wohnung, stweg, role, phone, strasse, plz, ort`,
       [name, wohnung || null, stweg || null, phone || null, strasse || null, plz || null, ort || null, userId]
@@ -1320,7 +1342,9 @@ app.post('/api/me/mutation', authMiddleware, async (req, res) => {
       if (oldV !== newV) changes.push(`${labels[k]}: "${oldV || '–'}" → "${newV || '–'}"`);
     }
     await pool.query(
-      'UPDATE users SET name=$1, phone=$2, strasse=$3, plz=$4, ort=$5, updated_at=NOW() WHERE id=$6',
+      `UPDATE users SET name=$1, phone=$2, strasse=$3, plz=$4, ort=$5, updated_at=NOW(),
+         name_selbst_geaendert_am = CASE WHEN $1 IS DISTINCT FROM name THEN NOW() ELSE name_selbst_geaendert_am END
+       WHERE id=$6`,
       [f.name, f.phone, f.strasse, f.plz, f.ort, id]);
     if (changes.length) {
       const wohnLabel = cur.wohnung ? ` (Whg ${cur.wohnung})` : '';
@@ -3541,6 +3565,45 @@ async function fetchAuthentikGroupsUsers(force = false) {
   return _authGUInflight;
 }
 
+// Gruppen/Rolle/Aktiv aus Authentik nach users nachziehen. groups_json schrieb bisher
+// nur der OAuth-Callback; Sessions (30 Tage gleitend), PATs und /api/ssh lesen es —
+// wer aus 'technik' flog, behielt Admin-Rechte und sudo, bis er sich neu anmeldete.
+// Konten, die es in Authentik nicht gibt (nur E-Mail-Code), bleiben unberuehrt.
+async function syncAuthentikUserRechte() {
+  try {
+    const liste = [];
+    let page = 1;
+    for (; page <= 20; page++) {
+      const d = await authentikAPI('GET', `/core/users/?page_size=500&page=${page}`);
+      liste.push(...(d.results || []));
+      if (!d.pagination?.next) break;
+    }
+    if (page > 20 || liste.length === 0) return; // unvollstaendig/leer -> nichts entziehen
+    const lokal = new Map((await pool.query('SELECT id, LOWER(email) AS email, role, groups_json, active FROM users')).rows.map(r => [r.email, r]));
+    let geaendert = 0;
+    for (const au of liste) {
+      const u = lokal.get(String(au.email || '').toLowerCase());
+      if (!u) continue;
+      const gruppen = (au.groups_obj || []).map(g => g.name).filter(Boolean);
+      const istAdmin = gruppen.some(g => ['technik', 'präsident', 'praesident'].includes(g.toLowerCase()));
+      let alt = []; try { alt = JSON.parse(u.groups_json || '[]'); } catch {}
+      const gleich = alt.length === gruppen.length && [...alt].sort().join('\n') === [...gruppen].sort().join('\n');
+      // 'admin' haengt an technik/praesident; andere lokale Rollen (eigentuemer, verwalter …) bleiben
+      const rolle = istAdmin ? 'admin' : (u.role === 'admin' ? 'bewohner' : u.role);
+      const aktiv = au.is_active !== false;
+      if (gleich && u.role === rolle && u.active === aktiv) continue;
+      await pool.query('UPDATE users SET groups_json = $2, role = $3, active = $4, updated_at = NOW() WHERE id = $1',
+        [u.id, JSON.stringify(gruppen), rolle, aktiv]);
+      geaendert++;
+      const weg = alt.filter(g => !gruppen.includes(g));
+      if (weg.length || u.active !== aktiv) console.log(`[authentik-sync] ${u.email}: ${!aktiv ? 'deaktiviert, ' : ''}${weg.length ? 'entzogen: ' + weg.join(',') : ''}`);
+    }
+    if (geaendert) console.log(`[authentik-sync] ${geaendert} Konto/Konten aktualisiert`);
+  } catch (e) { console.warn('[authentik-sync]', e.message); }
+}
+setTimeout(syncAuthentikUserRechte, 2 * 60 * 1000);
+setInterval(syncAuthentikUserRechte, 10 * 60 * 1000);
+
 // Pure: loest Gruppe (inkl. Untergruppen-Hierarchie) gegen vorgeladene Listen auf.
 function resolveGroupEmailsFromData(groupName, allGroups, allUsers) {
   const target = allGroups.find(g => g.name.toLowerCase() === groupName.toLowerCase());
@@ -4388,8 +4451,9 @@ async function pollGmailForVerteiler() {
             }
 
             // Extract recipient tag (e.g. druckerr9+ingrid.limbach@domain → ingrid.limbach)
-            const tagMatch = verteilerAddress.match(/^drucker(?:r9|r13)\+([^@]+)@/i) ||
-                             plusMatch?.[1]?.match(/^drucker(?:r9|r13)\+(.+)/i);
+            // Ohne +Tag (druckerr9@…) kein Empfaenger -> unten 'allgemein'. Hier stand bis
+            // 25.10.2026 ein Rueckgriff auf eine nie deklarierte Variable (ReferenceError).
+            const tagMatch = verteilerAddress.match(/^drucker(?:r9|r13)\+([^@]+)@/i);
             const recipientTag = tagMatch ? tagMatch[1].replace(/\./g, ' ') : null;
 
             // Look up recipient: zuerst über die echte Drucker-Tag-Email in
@@ -10876,6 +10940,12 @@ app.post('/api/projects/:slug/attachments', authMiddleware, requireAusschussOrTe
     const { target_type, target_id, doc_path } = req.body;
     if (!['timeline', 'kandidaten'].includes(target_type)) return res.status(400).json({ error: 'Ungültiger Typ' });
     if (!target_id || !doc_path) return res.status(400).json({ error: 'target_id und doc_path erforderlich' });
+    // Verknuepfen nur, was man selbst lesen darf — ein oeffentliches Projekt liefert
+    // seine Anhaenge ohne Login aus (vorher: fremde STWEG-Dokumente veroeffentlichbar).
+    const dp = String(doc_path);
+    if (dp.includes('..') || dp.startsWith('/') || dp.includes('\0') || !isDocPathAllowed(dp, req.user.groups || [])) {
+      return res.status(403).json({ error: 'Kein Zugriff auf dieses Dokument' });
+    }
     const { rows: [row] } = await pool.query(
       `INSERT INTO project_attachments (project_slug, target_type, target_id, doc_path)
        VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING *`,
@@ -24587,6 +24657,9 @@ async function initDB() {
       -- nächste Einstellung keine Wanderung durch die Tabelle braucht.
       -- Leeres Objekt heisst: nichts gewählt, es gilt die Vorgabe der Station.
       ALTER TABLE users ADD COLUMN IF NOT EXISTS einstellungen JSONB NOT NULL DEFAULT '{}'::jsonb;
+      -- Hat die Person ihren Namen selbst geaendert? Dann gilt der Name nicht mehr als
+      -- Ausweis fuer "Meine Wohnung" (sonst: Name eines fremden Eigentuemers eintragen).
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS name_selbst_geaendert_am TIMESTAMPTZ;
       CREATE INDEX IF NOT EXISTS idx_users_username_lower ON users (LOWER(username));
 
       -- ─── SSH-Zugang: Schluessel, Hosts, Zugriffsmatrix ─────────────────

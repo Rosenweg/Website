@@ -46,6 +46,7 @@ async function authMiddleware(req, res, next) {
            LEFT JOIN users u ON LOWER(u.email) = LOWER(t.user_email)
           WHERE t.token_hash = $1 AND t.revoked_at IS NULL
             AND (t.expires_at IS NULL OR t.expires_at > NOW())
+            AND COALESCE(u.active, true)
           LIMIT 1`,
         [hash],
       );
@@ -95,7 +96,7 @@ async function authMiddleware(req, res, next) {
     const result = await pool.query(
       `SELECT s.user_id, s.expires_at, u.name, u.email, u.role, u.wohnung, u.stweg, u.groups_json
        FROM sessions s JOIN users u ON u.id = s.user_id
-       WHERE s.token = $1 AND s.expires_at > NOW()`,
+       WHERE s.token = $1 AND s.expires_at > NOW() AND u.active IS NOT FALSE`,
       [token]
     );
     if (result.rows.length > 0) {

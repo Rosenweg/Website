@@ -81,7 +81,7 @@
         const projects = await resp.json();
         const tabs = document.getElementById('project-tabs');
         tabs.innerHTML = projects.map((p, i) => `
-            <button onclick="loadProject('${p.slug}')" id="tab-${p.slug}"
+            <button onclick="loadProject(${jsArg(p.slug)})" id="tab-${p.slug}"
                 class="whitespace-nowrap py-3 px-1 border-b-2 text-sm font-medium transition ${i === 0 ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-500 hover:text-gray-700'}">
                 ${esc(p.title)}
             </button>`).join('');
@@ -559,8 +559,8 @@
             const name = f.path.split('/').pop();
             const size = f.size ? ` <span class="text-gray-400">(${formatSize(f.size)})</span>` : '';
             return `<div class="flex items-center justify-between py-2 border-b last:border-0">
-                <a href="${f.url}" target="_blank" class="text-emerald-700 hover:underline flex-1 truncate">${esc(name)}${size}</a>
-                ${canEdit ? `<button onclick="deleteDoc('${f.path.replace(/'/g, "\\'")}')" class="text-red-300 hover:text-red-500 ml-2 text-xs" title="Löschen">&times;</button>` : ''}
+                <a href="${esc(f.url)}" target="_blank" class="text-emerald-700 hover:underline flex-1 truncate">${esc(name)}${size}</a>
+                ${canEdit ? `<button onclick="deleteDoc(${jsArg(f.path)})" class="text-red-300 hover:text-red-500 ml-2 text-xs" title="Löschen">&times;</button>` : ''}
             </div>`;
         }).join('');
     }
@@ -571,8 +571,8 @@
         const directHtml = directFiles.map(f => {
             const name = f.path.split('/').pop();
             return `<span class="inline-flex items-center gap-1 bg-gray-50 rounded px-1.5 py-0.5">
-                <a href="${f.url}" target="_blank" class="text-emerald-600 hover:underline">${esc(name)}</a>
-                ${canEdit ? `<button onclick="deleteDoc('${f.path.replace(/'/g, "\\'")}')" class="text-red-300 hover:text-red-500">&times;</button>` : ''}
+                <a href="${esc(f.url)}" target="_blank" class="text-emerald-600 hover:underline">${esc(name)}</a>
+                ${canEdit ? `<button onclick="deleteDoc(${jsArg(f.path)})" class="text-red-300 hover:text-red-500">&times;</button>` : ''}
             </span>`;
         }).join(' ');
 
@@ -590,9 +590,9 @@
 
         const buttons = canEdit ? `
             <label class="text-gray-400 hover:text-emerald-600 cursor-pointer" title="Neue Datei hochladen">
-                &#128206;<input type="file" class="hidden" multiple onchange="uploadToFolder('${folder}', this.files)">
+                &#128206;<input type="file" class="hidden" multiple onchange="uploadToFolder(${jsArg(folder)}, this.files)">
             </label>
-            <button onclick="showLinkPicker('${type}', ${id})" class="text-gray-400 hover:text-blue-600" title="Bestehendes Dokument verknüpfen">&#128279;</button>
+            <button onclick="showLinkPicker(${jsArg(type)}, ${id})" class="text-gray-400 hover:text-blue-600" title="Bestehendes Dokument verknüpfen">&#128279;</button>
         ` : '';
 
         if (!directFiles.length && !linked.length && !canEdit) return '';
@@ -652,7 +652,7 @@
             <div class="space-y-2">
                 ${available.map(f => {
                     const name = f.path.split('/').pop();
-                    return `<button onclick="linkDoc('${type}', ${id}, '${f.path.replace(/'/g, "\\'")}')"
+                    return `<button onclick="linkDoc(${jsArg(type)}, ${id}, ${jsArg(f.path)})"
                         class="w-full text-left px-3 py-2 rounded-lg hover:bg-emerald-50 text-sm text-gray-700 border hover:border-emerald-300 transition">
                         ${esc(name)}
                     </button>`;
@@ -686,7 +686,10 @@
         return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
     }
 
-    function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+    // Vollstaendig escapen — der fruehere textContent/innerHTML-Trick liess " und ' durch (unsicher in Attributen)
+    function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+    // Wert als JS-Argument in ein HTML-Attribut: erst JSON, dann HTML-escapen
+    const jsArg = s => esc(JSON.stringify(String(s ?? '')));
 
     init();
     </script>

@@ -195,8 +195,18 @@ Wenn ein Feld nicht eindeutig erkennbar ist, setze null bzw. leeres Array. Korri
 router.post('/anteile/:parzelle/:sub_id', authMiddleware, async (req, res) => {
   try {
     const p = parseInt(req.params.parzelle), s = parseInt(req.params.sub_id);
+    if (!Number.isFinite(p) || !Number.isFinite(s)) return res.status(400).json({ error: 'Ungültige Parzelle' });
     const me = req.user?.email || req.user?.name || 'unknown';
     const b = req.body || {};
+    // Speichern darf, wer den Anteil reserviert hat oder ihn selbst erfasst hat (Korrektur
+    // vor der Freigabe); Ausschuss/Technik immer. Vorher konnte jedes Konto auch
+    // freigegebene Anteile ueberschreiben (Status sprang auf 'erfasst' zurueck).
+    const cur = (await pool.query('SELECT status, reserviert_von, erfasst_von, anteil_z FROM grundbuch_anteile WHERE parzelle=$1 AND sub_id=$2', [p, s])).rows[0];
+    if (!cur) return res.status(404).json({ error: 'Anteil nicht gefunden' });
+    const darf = isAusschussOrTechnik(req)
+      || (cur.status === 'reserviert' && cur.reserviert_von === me)
+      || (cur.status === 'erfasst' && cur.erfasst_von === me);
+    if (!darf) return res.status(403).json({ error: cur.status === 'freigegeben' ? 'Bereits freigegeben — nur Ausschuss/Technik' : 'Bitte zuerst reservieren' });
     let bildPath = null;
     if (b.bild_base64 && b.bild_filename) {
       const ext = (b.bild_filename.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -205,7 +215,8 @@ router.post('/anteile/:parzelle/:sub_id', authMiddleware, async (req, res) => {
       if (buf.length > 10 * 1024 * 1024) return res.status(400).json({ error: 'Datei zu gross (>10MB)' });
       const dir = pathModule.join(DOCS_PATH, GRUNDBUCH_BILDER_DIR);
       try { await fs.mkdir(dir, { recursive: true }); } catch {}
-      const az = b.anteil_z || (await pool.query('SELECT anteil_z FROM grundbuch_anteile WHERE parzelle=$1 AND sub_id=$2', [p, s])).rows[0]?.anteil_z;
+      // Nur Ziffern in den Dateinamen ('../' aus dem Body schrieb sonst in fremde Ordner)
+      const az = parseInt(b.anteil_z, 10) || parseInt(cur.anteil_z, 10) || null;
       const filename = `grundbuch_p${p}-${s}_${az || 'x'}-1000.${ext}`;
       const fullPath = pathModule.join(dir, filename);
       await fs.writeFile(fullPath, buf);
