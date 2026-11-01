@@ -39,6 +39,11 @@ const NOTIFY_FROM       = process.env.GW_NOTIFY_FROM || 'whatsapp-gateway@rosenw
 // routet die Domain auf den SMTP-in (separater Infra-Schritt), schliesst sich der
 // Kreis (local-part = Nummer -> resolveTarget -> WhatsApp). Default: NOTIFY_FROM-Domain.
 const REPLY_DOMAIN      = process.env.GW_REPLY_DOMAIN || (NOTIFY_FROM.split('@')[1] || 'rosenweg4303.ch');
+// Status-Rueckmeldungen nur an Absender dieser Domains (inkl. Subdomains). Externe
+// Absender kommen meist ueber eine Verteiler-Bridge und halten die Bestaetigung
+// fuer eine Fehlermeldung (Fall ausschuss-verwaltung@, 30.10.2026). Komma-Liste.
+const NOTIFY_DOMAINS    = (process.env.GW_NOTIFY_DOMAINS || 'rosenweg4303.ch')
+  .split(',').map(d => d.trim().toLowerCase().replace(/^@/, '')).filter(Boolean);
 // WA->Mail-Weiterleitung global an/aus (Default an, sobald ein Relay gesetzt ist).
 const WA_TO_MAIL        = process.env.GW_WA_TO_MAIL !== '0';
 // Catch-all-Archiv: ALLE eingehenden GRUPPEN-Nachrichten werden (zusaetzlich zu den
@@ -248,6 +253,8 @@ function startGateway(botCore) {
     if (ack >= 3) q.ackRead.run(nowIso(), nowIso(), msgId);
     const row = q.msgByWaId.get(msgId);
     if (!row || row.source !== 'smtp-email' || !notifyTx) return;
+    const senderDomain = String(row.sender || '').toLowerCase().split('@')[1] || '';
+    if (!NOTIFY_DOMAINS.some(d => senderDomain === d || senderDomain.endsWith('.' + d))) return;
     const wantDelivered = ack >= 2 && row.delivered_at && !row.notified_delivered;
     const wantRead      = ack >= 3 && row.read_at && !row.notified_read;
     if (!wantDelivered && !wantRead) return;
