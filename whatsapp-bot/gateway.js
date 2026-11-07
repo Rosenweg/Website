@@ -51,6 +51,13 @@ const WA_TO_MAIL        = process.env.GW_WA_TO_MAIL !== '0';
 // ohne Pflege ab. Leer = aus. Z.B. archiv@rosenweg4303.ch.
 const ARCHIVE_ALL_GROUPS = (process.env.WA_ARCHIVE_ALL_GROUPS || '').trim().toLowerCase();
 
+// Schleifenschutz: Jede Mail, die der Gateway selbst verschickt (WA->Mail,
+// Status-Rueckmeldung), traegt diesen Header. Kommt sie ueber einen Verteiler mit
+// Bruecken-Adresse (…@whatsapp.rosenweg4303.ch) wieder am SMTP-in an, wird sie
+// verworfen statt nochmals nach WhatsApp geschickt.
+const LOOP_HEADER = 'x-rosenweg-wa-gateway';
+const OWN_MAIL_HEADERS = { 'X-Rosenweg-WA-Gateway': '1', 'Auto-Submitted': 'auto-generated' };
+
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const nowIso = () => new Date().toISOString();
 
@@ -264,6 +271,7 @@ function startGateway(botCore) {
     notifyTx.sendMail({
       from: NOTIFY_FROM,
       to: row.sender,
+      headers: OWN_MAIL_HEADERS,
       subject: `WhatsApp ${stage}: ${row.subject || row.target}`,
       text: `Deine WhatsApp-Nachricht an ${row.target} wurde ${stage}.\n\nZeit: ${ts}\n${row.subject ? 'Betreff: ' + row.subject + '\n' : ''}\n— Rosenweg WhatsApp-Gateway`,
     }).then(() => {
@@ -558,6 +566,14 @@ function startGateway(botCore) {
         const rcpts = (session.envelope.rcptTo || []).map(r => r.address).filter(Boolean);
         if (rcpts.length === 0) { const e = new Error('Kein Empfaenger'); e.responseCode = 550; return cb(e); }
         const from = (session.envelope.mailFrom && session.envelope.mailFrom.address) || parsed.from?.text || 'unknown';
+        // Eigene Mail (WA->Mail-Weiterleitung / Status) kommt ueber einen Verteiler
+        // zurueck -> annehmen (kein Bounce, der wieder kreisen koennte) und verwerfen.
+        const ownFrom = NOTIFY_FROM.toLowerCase();
+        const headerFroms = (parsed.from?.value || []).map(v => String(v.address || '').toLowerCase());
+        if (parsed.headers?.has(LOOP_HEADER) || String(from).toLowerCase() === ownFrom || headerFroms.includes(ownFrom)) {
+          console.warn(`[Gateway-SMTP] Schleife verworfen: eigene Mail zurueck (${from} -> ${rcpts.join(',')}, "${parsed.subject || ''}")`);
+          return cb(null, 'OK (Schleife verworfen)');
+        }
         const subject = parsed.subject || null;
         const body = parsed.text || (parsed.html ? String(parsed.html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : '');
         const attachments = (parsed.attachments || []).map(a => ({
@@ -599,6 +615,7 @@ function startGateway(botCore) {
     notifyTx.sendMail({
       from: NOTIFY_FROM, to,
       replyTo: replyToNum ? `${replyToNum}@${REPLY_DOMAIN}` : NOTIFY_FROM,
+      headers: OWN_MAIL_HEADERS,
       subject,
       text: `${body || '(kein Text)'}${attNoteOf(atts)}\n\n— weitergeleitet vom Rosenweg WhatsApp-Gateway`,
     }).catch(e => console.warn('[Gateway] WA->Mail fehlgeschlagen:', e.message));
