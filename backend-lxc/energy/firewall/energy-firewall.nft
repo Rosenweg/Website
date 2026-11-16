@@ -1,0 +1,55 @@
+#!/usr/sbin/nft -f
+# Zugriffsschutz fuer die Ports des Energy-Stacks auf CT129 (100.64.2.53).
+#
+#   3001 (energy-collector API) nur fuer Backend (CT128, .52) und die
+#        Frontend-LXCs (.41-.50 website/isp/stweg/meg, .54 pwa), die
+#        /api/energy/ per nginx zum Collector durchreichen.
+#   5432 (energy-db)            nur fuer das Backend (CT128, .52).
+#
+# Gilt nur fuer Verkehr, der ueber eth0 hereinkommt — Docker-intern (Bridge)
+# und lokal (lo) bleibt unberuehrt. Docker leitet IPv4 per DNAT weiter (Hook
+# forward), IPv6 per docker-proxy (Hook input); beide Hooks werden gefiltert.
+# IPv6 bleibt an, nur eben auf dieselben Hosts begrenzt.
+#
+# Hintergrund: 16.11.2026 wurden ueber die offene Collector-API Schein-Zaehler
+# angelegt (SSRF). Installation: siehe backend-lxc/README.md.
+
+table inet rw_energy_fw
+delete table inet rw_energy_fw
+
+table inet rw_energy_fw {
+	set api_clients4 {
+		type ipv4_addr; flags interval
+		elements = { 100.64.2.52, 100.64.2.41-100.64.2.50, 100.64.2.54 }
+	}
+	set api_clients6 {
+		type ipv6_addr
+		elements = { 2a02:16a:1400:9:be24:11ff:fe91:920d }
+	}
+	set db_clients4 {
+		type ipv4_addr
+		elements = { 100.64.2.52 }
+	}
+	set db_clients6 {
+		type ipv6_addr
+		elements = { 2a02:16a:1400:9:be24:11ff:fe91:920d }
+	}
+
+	chain guard {
+		tcp dport 3001 ip saddr @api_clients4 return
+		tcp dport 3001 ip6 saddr @api_clients6 return
+		tcp dport 5432 ip saddr @db_clients4 return
+		tcp dport 5432 ip6 saddr @db_clients6 return
+		tcp dport { 3001, 5432 } counter reject with tcp reset
+	}
+
+	# Vor Dockers eigenen Ketten (priority filter = 0).
+	chain fwd_in {
+		type filter hook forward priority filter - 10; policy accept;
+		iifname "eth0" ct state new tcp dport { 3001, 5432 } jump guard
+	}
+	chain host_in {
+		type filter hook input priority filter - 10; policy accept;
+		iifname "eth0" ct state new tcp dport { 3001, 5432 } jump guard
+	}
+}

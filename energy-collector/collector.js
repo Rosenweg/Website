@@ -3,6 +3,8 @@ const { Pool } = require('pg');
 const express = require('express');
 const cors = require('cors');
 const mqtt = require('mqtt');
+const crypto = require('crypto');
+const { createMeterTargetValidator, resolveAll, httpHost } = require('./meter-target');
 
 // ─── Configuration ──────────────────────────────────────────────────
 // METERS env var is only used for initial DB seeding (first start)
@@ -28,6 +30,19 @@ const pool = new Pool({
   statement_timeout: 30000,
 });
 pool.on('error', (err) => console.error('[DB] Idle client error:', err.message));
+
+// ─── Erlaubte Zaehler-Ziele (SSRF-Schutz, siehe meter-target.js) ────
+// METER_NETWORKS: CIDR-Liste der Zaehlernetze (Default: Rosenweg-9-Zaehlernetz).
+// MODBUS_ALLOWED_PORTS: erlaubte Modbus-TCP-Ports. FORBIDDEN_HOSTS: zusaetzlich
+// gesperrte IPs (Host des Collectors, Backend, ...). Der DB-Host wird automatisch
+// gesperrt.
+const meterTargets = createMeterTargetValidator({
+  meterNetworks: process.env.METER_NETWORKS || '100.64.90.0/24',
+  modbusPorts: process.env.MODBUS_ALLOWED_PORTS || '502',
+  blockedHosts: (process.env.FORBIDDEN_HOSTS || '').split(',').map(s => s.trim()).filter(Boolean),
+});
+resolveAll(process.env.DB_HOST || 'energy-db').then(ips => ips.forEach(ip => meterTargets.addBlockedHost(ip)));
+console.log(`[meter-targets] Zaehlernetze: ${meterTargets.networks.join(', ')}; Modbus-Ports: ${meterTargets.modbusPorts.join(', ')}`);
 
 // ─── MQTT-Publish (Zaehlerdaten fuer andere Regelsysteme) ───────────
 // Jeder Poll wird zusaetzlich zur DB nach MQTT publiziert (retained), damit
@@ -396,8 +411,7 @@ async function initDB() {
 
 // ─── Shelly HTTP Reader ─────────────────────────────────────────────
 async function readShelly(meter) {
-  const url = `http://${meter.host}/rpc/Switch.GetStatus?id=0`;
-  const urlMeter = `http://${meter.host}/rpc/Shelly.GetStatus`;
+  const urlMeter = `http://${httpHost(meter.host)}/rpc/Shelly.GetStatus`;
 
   let data = {
     power_w: 0, power_l1_w: 0, power_l2_w: 0, power_l3_w: 0,
@@ -448,7 +462,7 @@ async function readShelly(meter) {
   } catch (gen2Err) {
     // Try Gen1 API (Shelly 1PM, Shelly Plug S, etc.)
     try {
-      const res = await fetch(`http://${meter.host}/status`, { signal: AbortSignal.timeout(3000) });
+      const res = await fetch(`http://${httpHost(meter.host)}/status`, { signal: AbortSignal.timeout(3000) });
       const status = await res.json();
       if (status.meters && status.meters[0]) {
         data.power_w = status.meters[0].power || 0;
@@ -506,7 +520,7 @@ function smartFoxFetch(url, timeout = 10000) {
 }
 
 async function readSmartFox(meter) {
-  const url = `http://${meter.host}/values.xml`;
+  const url = `http://${httpHost(meter.host)}/values.xml`;
 
   let data = {
     power_w: 0, power_l1_w: 0, power_l2_w: 0, power_l3_w: 0,
@@ -613,7 +627,22 @@ async function getModbusClient(meter) {
 // Store latest reading per meter for live API
 const latestReadings = new Map();
 
+// Zaehler mit unzulaessigem Ziel werden nie gepollt (Schutz auch gegen direkt
+// in die DB geschriebene Eintraege). Warnung nur einmal pro Zaehler/Ziel.
+const rejectedTargets = new Map();
+function targetAllowed(meter) {
+  const err = meterTargets.validate(meter);
+  if (!err) { rejectedTargets.delete(meter.id); return true; }
+  const key = `${meter.type}|${meter.host}|${meter.port}`;
+  if (rejectedTargets.get(meter.id) !== key) {
+    rejectedTargets.set(meter.id, key);
+    console.error(`[meter-targets] Zaehler ${meter.id} wird NICHT gepollt: ${err}`);
+  }
+  return false;
+}
+
 async function pollMeter(meter) {
+  if (!targetAllowed(meter)) return;
   try {
     let data;
     if (meter.type === 'shelly') {
@@ -753,13 +782,45 @@ const app = express();
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://www.rosenweg4303.ch';
 app.use(cors({ origin: CORS_ORIGIN.split(',') }));
 
-// Admin auth middleware for write operations (Bearer token from main API)
+// Admin-Auth fuer schreibende Endpunkte (Bearer-Token, nur das Backend kennt ihn).
+// Fail closed: ohne ADMIN_API_KEY sind alle Admin-Endpunkte gesperrt (503).
+// Jeder Admin-Aufruf wird protokolliert (Methode, Pfad, Quell-IP, Ergebnis) —
+// nie der Token selbst.
 const ADMIN_API_KEY = process.env.ADMIN_API_KEY || '';
+const ADMIN_KEY_DIGEST = ADMIN_API_KEY ? crypto.createHash('sha256').update(ADMIN_API_KEY).digest() : null;
+if (!ADMIN_API_KEY) {
+  console.error('[admin] FEHLER: ADMIN_API_KEY ist nicht gesetzt — alle Admin-Endpunkte antworten mit 503.');
+} else if (ADMIN_API_KEY.length < 32) {
+  console.error('[admin] WARNUNG: ADMIN_API_KEY ist kuerzer als 32 Zeichen.');
+}
+
+function adminTokenOk(header) {
+  if (!ADMIN_KEY_DIGEST || typeof header !== 'string') return false;
+  const m = header.match(/^Bearer\s+(.+)$/i);
+  if (!m) return false;
+  // Hash auf feste Laenge, dann zeitkonstant vergleichen.
+  const given = crypto.createHash('sha256').update(m[1].trim()).digest();
+  return crypto.timingSafeEqual(given, ADMIN_KEY_DIGEST);
+}
+
 function adminAuth(req, res, next) {
-  if (!ADMIN_API_KEY) return next(); // skip if not configured (backwards compat)
-  const auth = req.headers.authorization;
-  if (auth === `Bearer ${ADMIN_API_KEY}`) return next();
-  res.status(401).json({ error: 'Unauthorized' });
+  const src = req.socket?.remoteAddress || '-';
+  const fwd = req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || '';
+  let outcome;
+  res.on('finish', () => {
+    console.log(`[admin] ${new Date().toISOString()} ${req.method} ${req.originalUrl} src=${src}` +
+      `${fwd ? ` fwd=${String(fwd).slice(0, 100)}` : ''} auth=${outcome} status=${res.statusCode}`);
+  });
+  if (!ADMIN_API_KEY) {
+    outcome = 'unconfigured';
+    return res.status(503).json({ error: 'Admin-API nicht konfiguriert' });
+  }
+  if (!adminTokenOk(req.headers.authorization)) {
+    outcome = req.headers.authorization ? 'invalid' : 'missing';
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  outcome = 'ok';
+  next();
 }
 
 // Health check
@@ -1252,6 +1313,8 @@ app.use(express.json());
 app.post('/api/energy/meters', adminAuth, async (req, res) => {
   const { id, name, type, host, port, unit_id, shelly_type, location, category, group_id, parent_id } = req.body;
   if (!id || !name || !host) return res.status(400).json({ error: 'id, name, host required' });
+  const targetErr = meterTargets.validate({ type: type || 'modbus', host, port: port || 502 });
+  if (targetErr) return res.status(400).json({ error: targetErr });
   try {
     const result = await pool.query(
       `INSERT INTO meters (id, name, type, host, port, unit_id, shelly_type, location, category, group_id, parent_id)
@@ -1269,6 +1332,16 @@ app.post('/api/energy/meters', adminAuth, async (req, res) => {
 app.put('/api/energy/meters/:id', adminAuth, async (req, res) => {
   const { name, type, host, port, unit_id, shelly_type, location, active, category, group_id } = req.body;
   try {
+    // Ziel nach dem Zusammenfuehren mit dem bestehenden Eintrag pruefen.
+    const cur = await pool.query('SELECT type, host, port FROM meters WHERE id = $1', [req.params.id]);
+    if (cur.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const merged = {
+      type: type ?? cur.rows[0].type,
+      host: host ?? cur.rows[0].host,
+      port: port ?? cur.rows[0].port,
+    };
+    const targetErr = meterTargets.validate(merged);
+    if (targetErr) return res.status(400).json({ error: targetErr });
     const result = await pool.query(
       `UPDATE meters SET name=COALESCE($2,name), type=COALESCE($3,type), host=COALESCE($4,host),
        port=COALESCE($5,port), unit_id=COALESCE($6,unit_id), shelly_type=$7, location=$8,
@@ -1300,6 +1373,8 @@ app.post('/api/energy/meters/:id/test', adminAuth, async (req, res) => {
     const result = await pool.query('SELECT * FROM meters WHERE id = $1', [req.params.id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
     const meter = result.rows[0];
+    const targetErr = meterTargets.validate(meter);
+    if (targetErr) return res.status(400).json({ success: false, error: targetErr });
 
     if (meter.type === 'shelly') {
       const data = await readShelly(meter);
@@ -1309,11 +1384,17 @@ app.post('/api/energy/meters/:id/test', adminAuth, async (req, res) => {
       res.json({ success: true, data });
     } else {
       const client = new ModbusRTU();
-      await client.connectTCP(meter.host, { port: meter.port });
-      client.setTimeout(3000);
-      const data = await readMeter(client, meter);
-      client.close();
-      res.json({ success: true, data });
+      try {
+        await Promise.race([
+          client.connectTCP(meter.host, { port: meter.port }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('connect timeout')), 4000)),
+        ]);
+        client.setTimeout(3000);
+        const data = await readMeter(client, meter);
+        res.json({ success: true, data });
+      } finally {
+        try { client.close(); } catch (_) {}
+      }
     }
   } catch (err) {
     res.json({ success: false, error: err.message });
