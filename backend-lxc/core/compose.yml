@@ -16,6 +16,7 @@ services:
     image: ghcr.io/rosenweg/rosenweg-api:latest
     env_file: .env
     environment:
+      TECHNIK_WA_GROUP_ID: 120363407257445046@g.us
       DB_HOST: postgres
       DB_PORT: "5432"
       DB_NAME: rosenweg
@@ -33,6 +34,9 @@ services:
       ENERGY_DB_NAME: energy
       ENERGY_DB_USER: energy
       ENERGY_COLLECTOR_URL: "http://100.64.2.53:3001"
+      # ENERGY_ADMIN_API_KEY (Admin-Token fuer den Collector) kommt aus .env
+      UDPXY_BASE: "http://100.64.9.24:4022"
+      UDPXY_HOST: "http://100.64.9.24:4022"
       PVE_API_URL: "https://100.64.2.20:8006"
       DOCS_PATH: /documents
       WG_CONTROL_URL: "http://100.64.2.34:3001"

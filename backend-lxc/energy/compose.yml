@@ -28,6 +28,15 @@ services:
       MQTT_USER: collector
       MQTT_PASS: ${MQTT_ENERGY_PASS}
       MQTT_PREFIX: energy
+      # Admin-Endpunkte (Zaehler/Tarife/Zuordnungen schreiben): Bearer-Token, den
+      # nur das Backend kennt. Fehlt er, sind sie gesperrt (fail closed).
+      # Wert steht in /opt/rosenweg-energy/.env (ENERGY_ADMIN_API_KEY), gleicher
+      # Wert in /opt/rosenweg-core/.env auf CT128.
+      ADMIN_API_KEY: ${ENERGY_ADMIN_API_KEY}
+      # SSRF-Schutz: Zaehler duerfen nur im Zaehlernetz liegen, Modbus nur auf 502.
+      METER_NETWORKS: "100.64.90.0/24"
+      MODBUS_ALLOWED_PORTS: "502"
+      FORBIDDEN_HOSTS: "100.64.2.53,100.64.2.52"
     ports: ["3001:3001"]
     depends_on:
       energy-db: {condition: service_healthy}

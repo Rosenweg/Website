@@ -1,0 +1,16 @@
+[Unit]
+Description=Rosenweg Energy-Stack: Zugriff auf 3001/5432 begrenzen (nftables)
+# nach nftables.service (das macht "flush ruleset"), vor Docker
+After=nftables.service
+Before=docker.service network-online.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/rosenweg/energy-firewall.nft
+ExecReload=/usr/sbin/nft -f /etc/rosenweg/energy-firewall.nft
+ExecStop=/usr/sbin/nft delete table inet rw_energy_fw
+
+[Install]
+WantedBy=multi-user.target
