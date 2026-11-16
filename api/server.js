@@ -14385,6 +14385,51 @@ function requireTechnikOrPraesident(req, res, next) {
 // Rosenweg-9-Eigentuemer (= stweg3-eigentuemer).
 const ENERGY_COLLECTOR_URL = process.env.ENERGY_COLLECTOR_URL || 'http://energy-collector:3001';
 
+// ─── Energie-Admin-Proxy ────────────────────────────────────────────
+// Schreibende Collector-Endpunkte (Zaehler, Tarife, Zuordnungen) sind am
+// Collector per Bearer-Token geschuetzt (ADMIN_API_KEY, fail closed). Die
+// Konfigurationsseite (energie-config.html) ruft sie deshalb hier auf: Login +
+// Recht energie-config/write, dann leitet das Backend mit dem Token weiter.
+// Token kommt aus .env (ENERGY_ADMIN_API_KEY), nie ins Log.
+const ENERGY_ADMIN_API_KEY = process.env.ENERGY_ADMIN_API_KEY || '';
+if (!ENERGY_ADMIN_API_KEY) console.error('[energie-admin] ENERGY_ADMIN_API_KEY fehlt — Energie-Konfiguration nicht moeglich');
+const ENERGY_ADMIN_ROUTES = [
+  ['POST', /^\/meters$/],
+  ['PUT', /^\/meters\/[^/]+$/],
+  ['DELETE', /^\/meters\/[^/]+$/],
+  ['POST', /^\/meters\/[^/]+\/test$/],
+  ['POST', /^\/tariffs$/],
+  ['PUT', /^\/tariffs\/[^/]+$/],
+  ['DELETE', /^\/tariffs\/[^/]+$/],
+  ['POST', /^\/meters\/[^/]+\/(users|groups)$/],
+  ['DELETE', /^\/meters\/[^/]+\/(users|groups)\/[^/]+$/],
+];
+function energyAdminHeaders(extra = {}) {
+  return { ...extra, Authorization: `Bearer ${ENERGY_ADMIN_API_KEY}` };
+}
+app.use('/api/energie-admin', authMiddleware, requirePermission('energie-config', 'write'), async (req, res) => {
+  const path = req.path;
+  if (!ENERGY_ADMIN_ROUTES.some(([m, re]) => m === req.method && re.test(path))) {
+    return res.status(404).json({ error: 'Unbekannter Energie-Admin-Endpunkt' });
+  }
+  if (!ENERGY_ADMIN_API_KEY) return res.status(503).json({ error: 'Energie-Admin nicht konfiguriert' });
+  try {
+    const hasBody = req.method === 'POST' || req.method === 'PUT';
+    const upstream = await fetch(`${ENERGY_COLLECTOR_URL}/api/energy${path}`, {
+      method: req.method,
+      headers: energyAdminHeaders(hasBody ? { 'Content-Type': 'application/json' } : {}),
+      body: hasBody ? JSON.stringify(req.body || {}) : undefined,
+      signal: AbortSignal.timeout(20000),
+    });
+    console.log(`[energie-admin] ${req.user?.email || req.user?.username || '-'} ${req.method} ${path} -> ${upstream.status}`);
+    const text = await upstream.text();
+    res.status(upstream.status).type(upstream.headers.get('content-type') || 'application/json').send(text);
+  } catch (err) {
+    console.error('[energie-admin]', req.method, path, err.message);
+    res.status(502).json({ error: 'Energy-Collector nicht erreichbar' });
+  }
+});
+
 // ─── MQTT-Auth (mosquitto-go-auth HTTP-Backend) ─────────────────────
 // Zweistufig: technische Write-User (collector) laufen ueber den files-Backend
 // des Brokers (existieren nur in Mosquitto). Menschen bekommen hier ein

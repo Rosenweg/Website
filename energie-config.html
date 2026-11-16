@@ -215,6 +215,19 @@
 
     <script>
     const API = '/api/energy';
+    // Schreibende Aufrufe laufen ueber das Backend (Login + Recht energie-config,
+    // das Backend haengt den Admin-Token des Collectors an). Direkt am Collector
+    // sind sie ohne Token gesperrt.
+    const ADMIN_API = '/api/energie-admin';
+    async function adminFetch(path, { method = 'POST', body } = {}) {
+        const res = await AuthentikAuth.apiFetch(`${ADMIN_API}${path}`, { method, body });
+        if (!res.ok) {
+            let msg = `HTTP ${res.status}`;
+            try { const j = await res.clone().json(); if (j.error) msg = j.error; } catch (_) {}
+            alert(`Fehler: ${msg}`);
+        }
+        return res;
+    }
 
     // ─── Tab Navigation ─────────────────────────────────────────────
     function showTab(tab) {
@@ -306,9 +319,10 @@
         };
         if (!data.id || !data.name || !data.host) return alert('ID, Name und IP sind Pflichtfelder');
 
-        const url = editingMeterId ? `${API}/meters/${editingMeterId}` : `${API}/meters`;
+        const path = editingMeterId ? `/meters/${encodeURIComponent(editingMeterId)}` : '/meters';
         const method = editingMeterId ? 'PUT' : 'POST';
-        await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+        const res = await adminFetch(path, { method, body: data });
+        if (!res.ok) return false;
         hideMeterForm();
         loadMeters();
     }
@@ -316,7 +330,7 @@
     async function testMeter() {
         const id = document.getElementById('m-id').value.trim() || 'temp-test';
         // Save first if new, then test
-        if (!editingMeterId) await saveMeter();
+        if (!editingMeterId && (await saveMeter()) === false) return;
         const testId = editingMeterId || id;
 
         const resultEl = document.getElementById('meter-test-result');
@@ -325,7 +339,7 @@
         resultEl.classList.add('bg-gray-50', 'text-gray-600');
 
         try {
-            const res = await fetch(`${API}/meters/${testId}/test`, { method: 'POST' });
+            const res = await AuthentikAuth.apiFetch(`${ADMIN_API}/meters/${encodeURIComponent(testId)}/test`, { method: 'POST' });
             const data = await res.json();
             resultEl.classList.remove('bg-gray-50', 'text-gray-600');
             if (data.success) {
@@ -344,16 +358,12 @@
 
     async function deleteMeter(id) {
         if (!confirm(`Zähler "${id}" und alle Messdaten wirklich löschen?`)) return;
-        await fetch(`${API}/meters/${id}`, { method: 'DELETE' });
+        await adminFetch(`/meters/${encodeURIComponent(id)}`, { method: 'DELETE' });
         loadMeters();
     }
 
     async function toggleMeter(id, active) {
-        await fetch(`${API}/meters/${id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ active: !active })
-        });
+        await adminFetch(`/meters/${encodeURIComponent(id)}`, { method: 'PUT', body: { active: !active } });
         loadMeters();
     }
 
@@ -428,16 +438,17 @@
         };
         if (!data.name || isNaN(data.price_per_kwh)) return alert('Name und Preis sind Pflichtfelder');
 
-        const url = id ? `${API}/tariffs/${id}` : `${API}/tariffs`;
+        const path = id ? `/tariffs/${encodeURIComponent(id)}` : '/tariffs';
         const method = id ? 'PUT' : 'POST';
-        await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+        const res = await adminFetch(path, { method, body: data });
+        if (!res.ok) return;
         hideTariffForm();
         loadTariffs();
     }
 
     async function deleteTariff(id) {
         if (!confirm('Tarif wirklich löschen?')) return;
-        await fetch(`${API}/tariffs/${id}`, { method: 'DELETE' });
+        await adminFetch(`/tariffs/${encodeURIComponent(id)}`, { method: 'DELETE' });
         loadTariffs();
     }
 
@@ -522,17 +533,13 @@
         const groupName = document.getElementById('g-group').value;
         if (!meterId || !groupName) return alert('Bitte Zähler und Gruppe auswählen');
 
-        await fetch(`${API}/meters/${meterId}/groups`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ group_name: groupName })
-        });
+        await adminFetch(`/meters/${encodeURIComponent(meterId)}/groups`, { method: 'POST', body: { group_name: groupName } });
         document.getElementById('g-group').value = '';
         loadAllAssignments();
     }
 
     async function removeGroup(meterId, groupName) {
-        await fetch(`${API}/meters/${meterId}/groups/${encodeURIComponent(groupName)}`, { method: 'DELETE' });
+        await adminFetch(`/meters/${encodeURIComponent(meterId)}/groups/${encodeURIComponent(groupName)}`, { method: 'DELETE' });
         loadAllAssignments();
     }
 
@@ -583,11 +590,7 @@
         const name = document.getElementById('u-name').value.trim();
         if (!meterId || !email) return alert('Bitte Zähler und Benutzer auswählen');
 
-        await fetch(`${API}/meters/${meterId}/users`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_email: email, user_name: name, role: 'viewer' })
-        });
+        await adminFetch(`/meters/${encodeURIComponent(meterId)}/users`, { method: 'POST', body: { user_email: email, user_name: name, role: 'viewer' } });
         document.getElementById('u-search').value = '';
         document.getElementById('u-email').value = '';
         document.getElementById('u-name').value = '';
@@ -595,7 +598,7 @@
     }
 
     async function removeUser(meterId, email) {
-        await fetch(`${API}/meters/${meterId}/users/${encodeURIComponent(email)}`, { method: 'DELETE' });
+        await adminFetch(`/meters/${encodeURIComponent(meterId)}/users/${encodeURIComponent(email)}`, { method: 'DELETE' });
         loadAllAssignments();
     }
 

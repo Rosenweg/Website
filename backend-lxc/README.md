@@ -38,4 +38,32 @@ api/energy/support aus dem Swarm in dedizierte LXCs (vgl. `docs/deswarm-plan.md`
 - **energy/** → CT129 (.53, unprivileged) `/opt/rosenweg-energy/`: energy-db (Port 5432
   published fuer api-energyPool) + energy-collector. NUR EIN Collector pollen lassen!
 
+  **Zugriff begrenzt (seit 16.11.2026):** Am 16.11.2026 wurden ueber die offene
+  Collector-API Schein-Zaehler angelegt, die der Collector dann gepollt hat
+  (SSRF: 100.64.2.1:22, die eigene DB, beliebige HTTP-Ziele). Seitdem:
+
+  - Admin-Endpunkte (`POST/PUT/DELETE` auf Zaehler, Tarife, Zuordnungen,
+    `/meters/:id/test`) verlangen `Authorization: Bearer <ADMIN_API_KEY>`;
+    ohne gesetzten Key antworten sie 503 (fail closed). Jeder Aufruf steht im
+    Collector-Log (`[admin] ... src=... auth=... status=...`).
+    Der Key steht als `ENERGY_ADMIN_API_KEY` in `/opt/rosenweg-energy/.env`
+    **und** gleichlautend in `/opt/rosenweg-core/.env` (CT128). Die Seite
+    `energie-config.html` schreibt ueber den Backend-Proxy
+    `/api/energie-admin/*` (Login + Recht `energie-config`/write).
+  - Zaehler-Ziele werden geprueft (`energy-collector/meter-target.js`): nur
+    IP-Adressen in `METER_NETWORKS`, Modbus nur auf `MODBUS_ALLOWED_PORTS`,
+    nie Loopback/Link-Local/Collector/DB. Auch beim Pollen.
+  - nftables (`energy/firewall/`): 3001 nur fuer CT128 und die Frontend-LXCs
+    (.41-.50, .54), 5432 nur fuer CT128; IPv4 und IPv6. Installation:
+
+    ```
+    install -D -m644 energy/firewall/energy-firewall.nft /etc/rosenweg/energy-firewall.nft
+    install -m644 energy/firewall/rw-energy-firewall.service /etc/systemd/system/
+    systemctl daemon-reload && systemctl enable --now rw-energy-firewall
+    # nach Aenderung der Datei: systemctl reload rw-energy-firewall
+    ```
+
+    Kommt ein neuer Client dazu (neuer Frontend-LXC, Backend-IP/IPv6 aendert
+    sich), muss er in die Sets der .nft-Datei.
+
 Deploy pro LXC: `docker compose pull && docker compose up -d`.
