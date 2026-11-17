@@ -19,23 +19,69 @@ const { zevAliasAddress, zevGotoTargets } = require('./lib/zev');
 const app = express();
 
 // Raw body parser for email inbound and document uploads (must be before json parser)
-app.use('/api/email/inbound', express.raw({ type: '*/*', limit: '25mb' }));
-app.use('/api/documents', express.raw({ type: 'application/octet-stream', limit: '500mb' }));
-app.use('/api/scan-upload', express.raw({ type: 'application/octet-stream', limit: '500mb' }));
-app.use('/api/vollmachten/:id/upload-signed', express.raw({ type: 'application/pdf', limit: '20mb' }));
+// Grosse Koerper erst einlesen, wenn der Ausweis stimmt — sonst kann jeder anonym
+// bis zu 500 MB in den Speicher schieben. Die Pruefer sind Funktionen weiter unten
+// (zur Anfragezeit laengst definiert), deshalb hier nur Verweise in Pfeilfunktionen.
+const ausweisVorBody = (typ, pruefen) => (req, res, next) => (req.is(typ) ? pruefen(req, res, next) : next());
+const geheimVorBody = (header, geheimnis) => (req, res, next) =>
+  (geheimnisGleich(req.headers[header], geheimnis()) ? next() : res.status(401).json({ error: 'Unauthorized' }));
+app.use('/api/email/inbound', geheimVorBody('x-email-secret', () => EMAIL_INBOUND_SECRET), express.raw({ type: '*/*', limit: '25mb' }));
+app.use('/api/documents', ausweisVorBody('application/octet-stream', (req, res, next) => authMiddleware(req, res, next)), express.raw({ type: 'application/octet-stream', limit: '500mb' }));
+app.use('/api/scan-upload', ausweisVorBody('application/octet-stream', geheimVorBody('x-api-key', () => SCAN_API_KEY)), express.raw({ type: 'application/octet-stream', limit: '500mb' }));
+app.use('/api/vollmachten/:id/upload-signed', ausweisVorBody('application/pdf', (req, res, next) => authMiddleware(req, res, next)), express.raw({ type: 'application/pdf', limit: '20mb' }));
 // PBX-Voicemail-Upload: Asterisk-AGI laedt das WAV als Raw-Body hoch
-app.use('/api/pbx/voicemail', express.raw({ type: 'audio/wav', limit: '50mb' }));
+app.use('/api/pbx/voicemail', ausweisVorBody('audio/wav', (req, res, next) => requirePbxSecret(req, res, next)), express.raw({ type: 'audio/wav', limit: '50mb' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(cors({
   origin: (origin, cb) => {
     // Allow requests with no origin (mobile apps, curl, server-to-server)
     if (!origin) return cb(null, true);
     const allowed = [SITE_URL, 'https://rosenweg4303.ch', 'https://www.rosenweg4303.ch', 'https://tv.rosenweg4303.ch'];
-    if (allowed.includes(origin) || origin.endsWith('.rosenweg4303.ch')) return cb(null, true);
+    if (allowed.includes(origin)) return cb(null, true);
+    // Unterdomains nur ueber https (eine http-Seite liesse sich unterwegs einschleusen)
+    try {
+      const u = new URL(origin);
+      if (u.protocol === 'https:' && u.hostname.endsWith('.rosenweg4303.ch') && !u.port) return cb(null, true);
+    } catch {}
     cb(new Error('CORS not allowed'));
   },
   credentials: true,
 }));
+// Fehler der Parser/CORS oben sauber beantworten: ohne eigenen Handler zeigt Express
+// (NODE_ENV nicht 'production') den Stacktrace im Browser.
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  if (err?.message === 'CORS not allowed') return res.status(403).json({ error: 'Herkunft nicht erlaubt' });
+  const status = Number.isInteger(err?.status) && err.status >= 400 && err.status < 500 ? err.status : 500;
+  if (status === 500) console.error('[parser]', err?.message);
+  res.status(status).json({ error: status === 413 ? 'Anfrage zu gross' : status === 500 ? 'Interner Fehler' : 'Ungültige Anfrage' });
+});
+
+// Async-Routen: eine abgelehnte Promise (z. B. Nicht-String im Body vor dem try)
+// liess die Anfrage bisher ewig haengen. Alle Handler, die hier registriert werden,
+// fangen das jetzt ab und antworten mit 500. Unter-Apps/Router bleiben unberuehrt.
+for (const methode of ['get', 'post', 'put', 'delete', 'patch', 'use']) {
+  const original = app[methode].bind(app);
+  const umhuellen = (fn) => {
+    if (Array.isArray(fn)) return fn.map(umhuellen);
+    if (typeof fn !== 'function' || fn.length > 3 || fn.handle || fn.set) return fn;
+    return function asyncSicher(req, res, next) {
+      const r = fn.call(this, req, res, next);
+      if (r && typeof r.catch === 'function') {
+        r.catch((err) => {
+          console.error(`[route] ${req.method} ${req.originalUrl?.split('?')[0]}:`, err?.stack || err);
+          if (!res.headersSent) res.status(500).json({ error: 'Interner Fehler' });
+        });
+      }
+      return r;
+    };
+  };
+  app[methode] = function (...args) {
+    // app.get('setting') ist der Einstellungs-Getter, nicht eine Route
+    if (methode === 'get' && args.length === 1) return original(...args);
+    return original(...args.map(umhuellen));
+  };
+}
 
 // ─── Database ───────────────────────────────────────────────────────
 // pool, energyPool, auditCtx -> lib/db.js. Frueh geladen, pool.query wird dort
@@ -227,7 +273,10 @@ setInterval(() => {
 // OAUTH_ALLOWED_HOSTS, oauthRedirectUri -> lib/config.js
 
 app.get('/api/auth/login', (req, res) => {
-  const { redirect } = req.query;
+  const { redirect: redirectRoh } = req.query;
+  // Map begrenzen: sonst fuellt eine Flut von Login-Starts den Speicher.
+  if (oauthStates.size >= 20000) return res.status(429).send('Zu viele Anmeldeversuche. Bitte in einigen Minuten erneut versuchen.');
+  const redirect = typeof redirectRoh === 'string' ? redirectRoh : '';
   const state = crypto.randomBytes(16).toString('hex');
   const redirectUri = oauthRedirectUri(req);
 
@@ -244,6 +293,8 @@ app.get('/api/auth/login', (req, res) => {
     scope: 'openid profile email',
     state,
   });
+  // reauth=1: Authentik soll erneut nach dem Ausweis fragen (fuer Passwortwechsel)
+  if (req.query.reauth === '1') params.set('prompt', 'login');
   res.redirect(`${AUTHENTIK_EXTERNAL_URL}/application/o/authorize/?${params}`);
 });
 
@@ -310,7 +361,7 @@ app.get('/api/auth/callback', async (req, res) => {
   if (!code) return res.status(400).send('Kein Authorization Code erhalten');
 
   // Validate CSRF state
-  const storedState = oauthStates.get(state);
+  const storedState = typeof state === 'string' ? oauthStates.get(state) : undefined;
   if (!storedState) return res.status(400).send('Ungültiger oder abgelaufener State-Parameter (CSRF-Schutz)');
   oauthStates.delete(state);
 
@@ -666,8 +717,10 @@ app.get('/api/me', authMiddleware, async (req, res) => {
 // Berechtigungs-Filter: nur was der User auch sonst sehen darf.
 app.post('/api/ki-search', authMiddleware, async (req, res) => {
   try {
-    const q = String(req.body?.q || req.query.q || '').trim();
+    const q = String(req.body?.q || req.query.q || '').trim().slice(0, 200);
     if (q.length < 2) return res.json({ q, hits: [], answer: 'Suchbegriff zu kurz.' });
+    // Jede Suche kostet einen LLM-Aufruf -> pro Konto begrenzen.
+    if (!rateLimitGuard('ki-search', req.user.email || req.user.id, 30, 60 * 1000).ok) return res.status(429).json({ error: 'Zu viele Suchen. Bitte kurz warten.' });
     const groups = req.user.groups || [];
     const isAdmin = isTechnik(groups) || isPraesident(groups) || groups.some(g => g.toLowerCase() === 'verwaltung') || req.user.isAdmin;
     const userEmail = (req.user.email || '').toLowerCase();
@@ -696,16 +749,22 @@ app.post('/api/ki-search', authMiddleware, async (req, res) => {
                               ${ausschussStwegs.length > 0 ? `OR v.stweg = ANY($3::int[])` : ''})
                        ORDER BY v.created_at DESC LIMIT 5`,
                      ausschussStwegs.length > 0 ? [like, userEmail, ausschussStwegs] : [like, userEmail]),
-      // Reklamationen
-      isAdmin || ausschussStwegs.length > 0
+      // Reklamationen (Ausschuss nur der eigenen STWEGs)
+      isAdmin
         ? pool.query('SELECT r.id, r.beschreibung, r.status, r.stweg, p.name AS person_name FROM reklamationen r LEFT JOIN personen p ON p.id = r.person_id WHERE de_norm(r.beschreibung) LIKE de_norm($1) ORDER BY r.created_at DESC LIMIT 5', [like])
+        : ausschussStwegs.length > 0
+        ? pool.query('SELECT r.id, r.beschreibung, r.status, r.stweg, p.name AS person_name FROM reklamationen r LEFT JOIN personen p ON p.id = r.person_id WHERE de_norm(r.beschreibung) LIKE de_norm($1) AND (r.stweg = ANY($3::int[]) OR LOWER(p.email) = LOWER($2)) ORDER BY r.created_at DESC LIMIT 5', [like, userEmail, ausschussStwegs])
         : pool.query('SELECT r.id, r.beschreibung, r.status, r.stweg FROM reklamationen r JOIN personen p ON p.id = r.person_id WHERE de_norm(r.beschreibung) LIKE de_norm($1) AND LOWER(p.email) = LOWER($2) ORDER BY r.created_at DESC LIMIT 5', [like, userEmail]),
-      // Email-Archiv
-      pool.query('SELECT id, subject, from_email, to_addresses, created_at FROM email_log WHERE de_norm(COALESCE(subject,\'\')) LIKE de_norm($1) OR de_norm(COALESCE(from_email,\'\')) LIKE de_norm($1) ORDER BY created_at DESC LIMIT 5', [like]).catch(() => ({ rows: [] })),
+      // Email-Archiv: enthaelt Mails aller STWEGs -> nur Technik/Praesident/Verwaltung
+      isAdmin
+        ? pool.query('SELECT id, subject, from_email, to_addresses, created_at FROM email_log WHERE de_norm(COALESCE(subject,\'\')) LIKE de_norm($1) OR de_norm(COALESCE(from_email,\'\')) LIKE de_norm($1) ORDER BY created_at DESC LIMIT 5', [like]).catch(() => ({ rows: [] }))
+        : { rows: [] },
       // Verwaltungen
       pool.query('SELECT id, firma_name, stweg, telefon, email FROM verwaltungen WHERE aktiv = true AND (de_norm(firma_name) LIKE de_norm($1) OR de_norm(COALESCE(email,\'\')) LIKE de_norm($1)) LIMIT 3', [like]).catch(() => ({ rows: [] })),
-      // Wohnungen
-      pool.query('SELECT id, bezeichnung, stweg, eigentuemer_name, mieter_name FROM wohnungen WHERE de_norm(bezeichnung) LIKE de_norm($1) OR de_norm(COALESCE(eigentuemer_name,\'\')) LIKE de_norm($1) OR de_norm(COALESCE(mieter_name,\'\')) LIKE de_norm($1) LIMIT 5', [like]).catch(() => ({ rows: [] })),
+      // Wohnungen (Namen von Eigentuemern/Mietern): Admin alle, Ausschuss nur eigene STWEGs
+      isAdmin || ausschussStwegs.length > 0
+        ? pool.query('SELECT id, bezeichnung, stweg, eigentuemer_name, mieter_name FROM wohnungen WHERE (de_norm(bezeichnung) LIKE de_norm($1) OR de_norm(COALESCE(eigentuemer_name,\'\')) LIKE de_norm($1) OR de_norm(COALESCE(mieter_name,\'\')) LIKE de_norm($1))' + (isAdmin ? '' : ' AND stweg = ANY($2::int[])') + ' LIMIT 5', isAdmin ? [like] : [like, ausschussStwegs]).catch(() => ({ rows: [] }))
+        : { rows: [] },
       // Projekte
       pool.query('SELECT slug, titel, status FROM projects WHERE de_norm(titel) LIKE de_norm($1) OR de_norm(COALESCE(beschreibung,\'\')) LIKE de_norm($1) LIMIT 3', [like]).catch(() => ({ rows: [] })),
     ]);
@@ -766,7 +825,7 @@ Antworte als JSON:
       }
     } catch (e) { console.warn('[ki-search] LLM fail:', e.message); }
     res.json({ q, hits: hits.slice(0, 8), answer: `${hits.length} Treffer für „${q}".`, total: hits.length });
-  } catch (err) { console.error('[ki-search] error:', err); res.status(500).json({ error: err.message }); }
+  } catch (err) { console.error('[ki-search] error:', err); res.status(500).json({ error: fehlerFuerClient(err, 'Suche fehlgeschlagen') }); }
 });
 
 // ─── Permission API ─────────────────────────────────────────────────
@@ -900,6 +959,15 @@ async function wohnungsAbgleichName(req) {
   return req.user?.name || '';
 }
 
+// SQL-Bedingung "Kontakt passt per Name". Der Name ist kein sicherer Ausweis (in
+// Authentik u. U. selbst aenderbar) -> Namensgleichheit zaehlt nur fuer Kontakte
+// ohne E-Mail oder mit einer E-Mail, die zu keinem Konto gehoert. Kontakte einer
+// Person mit eigenem Konto lassen sich so nicht per Namensgleichheit uebernehmen.
+function kontaktNameTreffer(alias, param) {
+  return `(${param} <> '' AND LOWER(${alias}name) = LOWER(${param})
+    AND (COALESCE(${alias}email, '') = '' OR NOT EXISTS (SELECT 1 FROM users ux WHERE LOWER(ux.email) = LOWER(${alias}email))))`;
+}
+
 // GET /api/me/wohnungen — finds apartments where the logged-in user is a contact
 app.get('/api/me/wohnungen', authMiddleware, async (req, res) => {
   try {
@@ -914,7 +982,7 @@ app.get('/api/me/wohnungen', authMiddleware, async (req, res) => {
               w.typ, w.besonderheiten, w.bewohnt_von, w.stweg, w.notizen,
               w.waschkueche_berechtigt, w.wertquote_zaehler, w.wertquote_nenner
        FROM wohnungen_kontakte k JOIN wohnungen w ON k.wohnung_id = w.id
-       WHERE ($1 <> '' AND LOWER(k.email) = $1) OR ($2 <> '' AND LOWER(k.name) = LOWER($2))
+       WHERE ($1 <> '' AND LOWER(k.email) = $1) OR ${kontaktNameTreffer('k.', '$2')}
        ORDER BY w.stweg, w.bezeichnung`,
       [email, name]
     );
@@ -929,13 +997,27 @@ app.get('/api/me/wohnungen', authMiddleware, async (req, res) => {
 // Wenn der Kontakt eine person_id hat, wird die Person aktualisiert → Trigger
 // propagiert auf alle Wohnungen der Person. Dadurch ist die Änderung "sticky"
 // für den User: er sieht sie ueberall.
+// Einfache Formatpruefung fuer selbst gepflegte E-Mail-Adressen: die Werte landen
+// in Frontends (u. a. Inline-Handler) und in Mail-Empfaengerlisten.
+function emailFormatOk(v) {
+  return typeof v === 'string' && v.length <= 254 && /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(v);
+}
+
 app.put('/api/me/kontakt/:id', authMiddleware, async (req, res) => {
   try {
+    {
+      const b = req.body || {};
+      if (b.email !== undefined && b.email !== null && b.email !== '' && !emailFormatOk(b.email)) return res.status(400).json({ error: 'Ungültige E-Mail-Adresse' });
+      for (const f of ['telefon', 'adresse']) {
+        // Adresse darf mehrzeilig sein, sonst keine Steuerzeichen und keine spitzen Klammern
+        if (b[f] !== undefined && b[f] !== null && (typeof b[f] !== 'string' || b[f].length > 300 || /[\u0000-\u0009\u000B\u000C\u000E-\u001F\u007F<>]/.test(b[f]) || (f === 'telefon' && /[\r\n]/.test(b[f])))) return res.status(400).json({ error: `Ungültiger Wert: ${f}` });
+      }
+    }
     const email = (req.user.email || '').toLowerCase();
     const name = await wohnungsAbgleichName(req);
     const own = await pool.query(
-      `SELECT id, name, email, person_id, wohnung_id FROM wohnungen_kontakte
-        WHERE id = $1 AND archiviert_am IS NULL AND (($2 <> '' AND LOWER(email) = $2) OR ($3 <> '' AND LOWER(name) = LOWER($3)))`,
+      `SELECT wk.id, wk.name, wk.email, wk.person_id, wk.wohnung_id FROM wohnungen_kontakte wk
+        WHERE wk.id = $1 AND wk.archiviert_am IS NULL AND (($2 <> '' AND LOWER(wk.email) = $2) OR ${kontaktNameTreffer('wk.', '$3')})`,
       [req.params.id, email, name]
     );
     if (own.rows.length === 0) return res.status(403).json({ error: 'Du kannst nur deine eigenen Kontaktdaten bearbeiten' });
@@ -1007,7 +1089,7 @@ app.get('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
     const name = await wohnungsAbgleichName(req);
     const own = await pool.query(
       `SELECT w.* FROM wohnungen w JOIN wohnungen_kontakte k ON k.wohnung_id = w.id
-       WHERE w.id = $1 AND k.archiviert_am IS NULL AND (($2 <> '' AND LOWER(k.email) = $2) OR ($3 <> '' AND LOWER(k.name) = LOWER($3))) LIMIT 1`,
+       WHERE w.id = $1 AND k.archiviert_am IS NULL AND (($2 <> '' AND LOWER(k.email) = $2) OR ${kontaktNameTreffer('k.', '$3')}) LIMIT 1`,
       [req.params.id, email, name]
     );
     if (own.rows.length === 0) return res.status(403).json({ error: 'Du kannst nur deine eigenen Wohnungen sehen' });
@@ -1030,18 +1112,35 @@ app.put('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
     // Ganze Wohnung (Wertquote, Kontaktliste) aendern nur Eigentuemer/Verwalter —
     // Mieter pflegen ihre eigenen Daten ueber /api/me/kontakt.
     const own = await client.query(
-      `SELECT w.id, w.stweg FROM wohnungen w JOIN wohnungen_kontakte k ON k.wohnung_id = w.id
+      `SELECT w.id, w.stweg, w.typ, w.bezeichnung FROM wohnungen w JOIN wohnungen_kontakte k ON k.wohnung_id = w.id
        WHERE w.id = $1 AND k.archiviert_am IS NULL AND k.rolle IN ('eigentuemer','verwalter')
-         AND (($2 <> '' AND LOWER(k.email) = $2) OR ($3 <> '' AND LOWER(k.name) = LOWER($3))) LIMIT 1`,
+         AND (($2 <> '' AND LOWER(k.email) = $2) OR ${kontaktNameTreffer('k.', '$3')}) LIMIT 1`,
       [req.params.id, email, name]
     );
     if (own.rows.length === 0) return res.status(403).json({ error: 'Nur Eigentümer oder Verwalter dieser Wohnung können sie bearbeiten' });
     const stweg = own.rows[0].stweg;
-    const b = req.body;
+    const b = req.body || {};
+    // typ/bezeichnung/Kontakte erscheinen in Objektverwaltung und STWEG-Seiten ->
+    // typ nur aus der bekannten Liste (oder unveraendert), Texte ohne HTML-Zeichen.
+    const WOHNUNG_TYPEN = ['Wohnung', 'Hobbyraum', 'Tiefgarage-Platz', 'Parkplatz'];
+    if (b.typ != null && b.typ !== '' && b.typ !== own.rows[0].typ && !WOHNUNG_TYPEN.includes(b.typ)) return res.status(400).json({ error: 'Ungültiger Typ' });
+    if (b.bezeichnung != null && b.bezeichnung !== own.rows[0].bezeichnung
+        && (typeof b.bezeichnung !== 'string' || b.bezeichnung.length > 100 || /[<>"'&]/.test(b.bezeichnung) || hatSteuerzeichen(b.bezeichnung))) {
+      return res.status(400).json({ error: 'Bezeichnung enthält unzulässige Zeichen' });
+    }
     // person_id nie aus der Anfrage: bestehende Kontakte behalten ihre Verknuepfung,
     // neue bekommt saveKontakte per find/create (vorher liess sich eine fremde Person anhaengen).
-    const bisher = new Map((await client.query('SELECT id, person_id FROM wohnungen_kontakte WHERE wohnung_id = $1', [req.params.id])).rows.map(r => [r.id, r.person_id]));
+    const bisherZeilen = (await client.query('SELECT id, person_id, name, email, telefon, adresse, rolle FROM wohnungen_kontakte WHERE wohnung_id = $1', [req.params.id])).rows;
+    const bisher = new Map(bisherZeilen.map(r => [r.id, r.person_id]));
+    const bisherWerte = new Map(bisherZeilen.map(r => [r.id, r]));
     for (const k of (Array.isArray(b.kontakte) ? b.kontakte : [])) {
+      if (!k || typeof k !== 'object') return res.status(400).json({ error: 'Ungültiger Kontakt' });
+      // Unveraenderte Altwerte nicht neu pruefen, sonst blockiert ein alter Eintrag das Speichern
+      const alt = bisherWerte.get(Number(k.id)) || {};
+      if (k.email != null && k.email !== '' && k.email !== alt.email && !emailFormatOk(k.email)) return res.status(400).json({ error: 'Ungültige E-Mail-Adresse bei einem Kontakt' });
+      for (const f of ['name', 'telefon', 'adresse', 'rolle']) {
+        if (k[f] != null && k[f] !== alt[f] && (typeof k[f] !== 'string' || k[f].length > 300 || /[<>]/.test(k[f]) || hatSteuerzeichen(k[f]))) return res.status(400).json({ error: `Ungültiger Wert bei einem Kontakt: ${f}` });
+      }
       if (k.id && bisher.has(Number(k.id))) k.person_id = bisher.get(Number(k.id)); else delete k.person_id;
     }
     await client.query('BEGIN');
@@ -1070,19 +1169,44 @@ app.put('/api/me/wohnung/:id', authMiddleware, async (req, res) => {
 });
 
 // Change password (sets in both Authentik and AD)
+// Kein Fallback-Geheimnis im Code: ohne AD_PASSWORD_API_SECRET wird das AD nicht
+// mitgesetzt (Authentik schon), die Admin-Funktionen melden es.
 const AD_PASSWORD_API_URL = process.env.AD_PASSWORD_API_URL || 'http://100.64.2.30:8446/';
-const AD_PASSWORD_API_SECRET = process.env.AD_PASSWORD_API_SECRET || 'RwAdPwApi2026!';
+const AD_PASSWORD_API_SECRET = process.env.AD_PASSWORD_API_SECRET || '';
+if (!AD_PASSWORD_API_SECRET) console.warn('[ad-password] AD_PASSWORD_API_SECRET fehlt — Passwoerter werden nicht ins AD uebernommen');
 
+// Passwortwechsel nur aus einer frischen Browser-Anmeldung ueber Authentik: ein
+// gestohlenes Sitzungstoken (oder eine OTP-Sitzung) allein reicht nicht, um das
+// Konto zu uebernehmen. Das alte Passwort laesst sich nicht verlangen — viele Konten
+// melden sich per Passkey/Einladung an und kennen keins.
+const PASSWORT_FRISCH_MS = 15 * 60 * 1000;
 app.post('/api/change-password', authMiddleware, async (req, res) => {
-  const { new_password } = req.body;
-  if (!new_password) {
+  const new_password = req.body?.new_password;
+  if (!new_password || typeof new_password !== 'string') {
     return res.status(400).json({ error: 'Neues Passwort erforderlich' });
   }
   if (new_password.length < 8) {
     return res.status(400).json({ error: 'Neues Passwort muss mindestens 8 Zeichen haben' });
   }
+  if (new_password.length > 256) {
+    return res.status(400).json({ error: 'Neues Passwort ist zu lang' });
+  }
+  const userId = req.user.user_id || req.user.id;
+  if (!rateLimitGuard('change-password', userId || req.user.email, 5, 60 * 60 * 1000).ok) {
+    return res.status(429).json({ error: 'Zu viele Versuche. Bitte später erneut versuchen.' });
+  }
+  const sitzungsToken = (req.headers.authorization || '').replace(/^Bearer /, '');
+  let sitzung;
+  try {
+    sitzung = (await pool.query(
+      'SELECT created_at, id_token FROM sessions WHERE token = $1 AND user_id = $2', [sitzungsToken, userId])).rows[0];
+  } catch (err) {
+    return res.status(500).json({ error: fehlerFuerClient(err, 'Fehler') });
+  }
+  if (!sitzung || !sitzung.id_token || Date.now() - new Date(sitzung.created_at).getTime() > PASSWORT_FRISCH_MS) {
+    return res.status(403).json({ error: 'Bitte zur Bestätigung neu anmelden und das Passwort danach innert 15 Minuten ändern.', reauth: true });
+  }
 
-  // User is already authenticated via authMiddleware — no need to verify old password
   const email = req.user.email;
   console.log(`[change-password] Request from user: ${email}`);
 
@@ -1105,7 +1229,19 @@ app.post('/api/change-password', authMiddleware, async (req, res) => {
     return res.status(500).json({ error: 'Passwort konnte in Authentik nicht geändert werden' });
   }
 
+  // Alle anderen Sitzungen des Kontos beenden (wer das alte Passwort/Token hatte, ist draussen)
+  try {
+    const weg = await pool.query('DELETE FROM sessions WHERE user_id = $1 AND token <> $2 RETURNING token', [userId, sitzungsToken]);
+    for (const r of weg.rows) tokenCache.delete(r.token);
+  } catch (err) {
+    console.error('[change-password] Sitzungen beenden fehlgeschlagen:', err.message);
+  }
+
   // Step 2: Set new password in AD
+  if (!AD_PASSWORD_API_SECRET) {
+    console.error('[change-password] AD_PASSWORD_API_SECRET fehlt — AD-Passwort nicht gesetzt');
+    return res.json({ status: 'ok', message: 'Passwort wurde geändert (Windows-Anmeldung wird nicht mitgeführt)' });
+  }
   try {
     const adResp = await fetch(AD_PASSWORD_API_URL, {
       method: 'POST',
@@ -1133,8 +1269,27 @@ app.post('/api/change-password', authMiddleware, async (req, res) => {
 // Update own profile
 app.put('/api/auth/profile', authMiddleware, async (req, res) => {
   const userId = req.user.user_id || req.user.id;
-  const { name, wohnung, stweg, phone, strasse, plz, ort } = req.body;
+  const { name, wohnung, phone, strasse, plz, ort } = req.body || {};
+  let { stweg } = req.body || {};
+  // Name/Wohnung erscheinen in Admin-Seiten (Waschkueche u. a.) -> keine HTML-/Steuerzeichen.
+  const textOk = (v, max, verbot) => v == null || v === '' || (typeof v === 'string' && v.length <= max && !hatSteuerzeichen(v) && !verbot.test(v));
+  if (!textOk(name, 200, /[<>]/)) return res.status(400).json({ error: 'Name enthält unzulässige Zeichen' });
+  if (!textOk(wohnung, 100, /[<>"'&]/)) return res.status(400).json({ error: 'Wohnung enthält unzulässige Zeichen' });
+  for (const [f, v] of Object.entries({ phone, strasse, plz, ort })) {
+    if (!textOk(v, 200, /[<>]/)) return res.status(400).json({ error: `Ungültiger Wert: ${f}` });
+  }
   try {
+    // STWEG nur eine, der die Person per Gruppe angehoert (oder unveraendert/leer);
+    // sie steuert u. a., an welche Verwaltung Selbstmutationen gemeldet werden.
+    if (stweg != null && stweg !== '') {
+      const nr = parseStweg(stweg);
+      const cur = (await pool.query('SELECT stweg FROM users WHERE id = $1', [userId])).rows[0];
+      if (!nr) return res.status(400).json({ error: 'Ungültige STWEG' });
+      if (String(cur?.stweg ?? '') !== String(nr) && !req.user.isAdmin && !getUserStwegs(req.user.groups || []).has(nr)) {
+        return res.status(403).json({ error: 'Diese STWEG passt nicht zu deinen Gruppen' });
+      }
+      stweg = nr;
+    }
     const result = await pool.query(
       `UPDATE users SET name = COALESCE($1, name), wohnung = $2, stweg = $3,
        phone = $4, strasse = $5, plz = $6, ort = $7, updated_at = NOW(),
@@ -1280,6 +1435,8 @@ app.post('/api/me/mutation', authMiddleware, async (req, res) => {
       ort: b.ort != null ? (String(b.ort).trim().slice(0, 120) || null) : cur.ort,
     };
     if (!f.name) return res.status(400).json({ error: 'Name erforderlich' });
+    // Gleiche Regel wie /api/auth/profile: keine HTML-/Steuerzeichen (Anzeige in Admin-Seiten)
+    if (Object.values(f).some(v => v != null && (/[<>]/.test(v) || hatSteuerzeichen(v)))) return res.status(400).json({ error: 'Unzulässige Zeichen' });
     const labels = { name: 'Name', phone: 'Telefon', strasse: 'Strasse', plz: 'PLZ', ort: 'Ort' };
     const changes = [];
     for (const k of Object.keys(labels)) {
@@ -1399,13 +1556,16 @@ app.get('/api/wifi', authMiddleware, async (req, res) => {
       }
     } catch {}
 
-    // Fallback: extract from strasse field
+    // Fallback: extract from strasse field. Die Strasse pflegt jede Person selbst ->
+    // nur Haeuser einer STWEG zulassen, der sie per Authentik-Gruppe angehoert.
     if (hausNummern.size === 0) {
       const userId = req.user.user_id || req.user.id;
       const userRow = await pool.query('SELECT strasse FROM users WHERE id = $1', [userId]);
       const strasse = userRow.rows[0]?.strasse || '';
       const hausMatch = strasse.match(/rosenweg\s+(\d+)/i);
-      if (hausMatch) hausNummern.add(parseInt(hausMatch[1]));
+      const STWEG_HAEUSER = { 1: [17, 18], 2: [13, 14, 16], 3: [9], 4: [10, 12], 5: [5, 6, 8], 6: [1], 7: [2, 4] };
+      const erlaubt = new Set([...getUserStwegs(groups)].flatMap(nr => STWEG_HAEUSER[nr] || []));
+      if (hausMatch && erlaubt.has(parseInt(hausMatch[1]))) hausNummern.add(parseInt(hausMatch[1]));
     }
 
     // Find PPSKs for all user's houses (still nur falls vorhanden — nicht jedes
@@ -1628,7 +1788,7 @@ app.get('/api/tv/playlist.m3u', async (req, res) => {
     res.set('Cache-Control', 'public, max-age=1800');
     res.send(body);
   } catch (e) {
-    res.status(502).json({ error: e.message });
+    res.status(502).json({ error: fehlerFuerClient(e, 'Senderliste nicht verfügbar') });
   }
 });
 
@@ -1725,12 +1885,32 @@ function createTv7StreamerToken(userId) {
 // Stream-Endpoint: Browser holt sich hier den MPEG-TS via API,
 // API proxyt durch zum tv7-streamer im LXC. Doppel-Hop ist akzeptabel
 // (~12 Mbps pro Zuschauer), spart aber CORS/DNS-Komplexitaet im Browser.
+// Ohne Authorization-Header nur mit dem kurzlebigen Stream-Token aus
+// /api/tv/stream-url (?token=): ein Sitzungstoken in der URL landet in Logs,
+// Verlauf und Referer und gaebe dort vollen Kontozugriff.
+function verifyTv7StreamerToken(token) {
+  if (!TV7_HMAC_SECRET || typeof token !== 'string') return null;
+  const [payload, sig] = token.split('.');
+  if (!payload || !sig) return null;
+  const soll = crypto.createHmac('sha256', TV7_HMAC_SECRET).update(payload).digest('hex').slice(0, 16);
+  if (!geheimnisGleich(sig, soll)) return null;
+  try {
+    const p = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    return p && p.exp > Math.floor(Date.now() / 1000) ? p : null;
+  } catch { return null; }
+}
 app.get('/api/tv/stream/:channelId', (req, res, next) => {
   if (!req.headers.authorization && req.query.token) {
-    req.headers.authorization = `Bearer ${req.query.token}`;
+    const p = verifyTv7StreamerToken(String(req.query.token));
+    if (!p) return res.status(401).json({ error: 'Stream-Token ungültig oder abgelaufen' });
+    req.user = { id: p.user, user_id: p.user };
+    return next('route');
   }
   next();
-}, authMiddleware, async (req, res) => {
+}, authMiddleware, tvStreamHandler);
+app.get('/api/tv/stream/:channelId', tvStreamHandler);
+async function tvStreamHandler(req, res) {
+  if (!req.user) return res.status(401).json({ error: 'Nicht angemeldet' });
   const id = req.params.channelId;
   if (!/^[a-f0-9-]+$/i.test(id)) return res.status(400).json({ error: 'Invalid channel id' });
   if (!TV7_HMAC_SECRET) return res.status(500).json({ error: 'TV7 streamer secret nicht konfiguriert' });
@@ -1772,7 +1952,7 @@ app.get('/api/tv/stream/:channelId', (req, res, next) => {
     }
   }
   try { res.end(); } catch {}
-});
+}
 
 // ─── TV7 Extern (udpxy-Playlist fuer Ferien/Reisen, token-geschuetzt) ─────────
 // udpxy relayt den Multicast als HTTP (alle 242 Sender, kein Transcode). Die nginx
@@ -1887,36 +2067,55 @@ app.get('/api/tv/extern/stream', async (req, res) => {
 });
 
 // ─── Print Job Pickup Confirmation ───────────────────────────────────
+// Oeffentlich (Link im Ausdruck): nur die fuer die Abholseite noetigen Felder,
+// keine Absender-Adresse und kein Token.
+const PICKUP_FELDER = 'printer, recipient_name, recipient_address, recipient_wohnung, subject, documents, status, picked_up_at, picked_up_by, created_at';
 app.get('/api/pickup/:token', async (req, res) => {
   try {
-    const job = await pool.query('SELECT * FROM print_jobs WHERE token = $1', [req.params.token]);
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(req.params.token)) return res.status(404).json({ error: 'Druckauftrag nicht gefunden' });
+    const job = await pool.query(`SELECT ${PICKUP_FELDER} FROM print_jobs WHERE token = $1`, [req.params.token]);
     if (job.rows.length === 0) return res.status(404).json({ error: 'Druckauftrag nicht gefunden' });
     res.json(job.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: fehlerFuerClient(err, 'Fehler') });
   }
 });
 
 app.post('/api/pickup/:token', async (req, res) => {
   try {
-    const job = await pool.query('SELECT * FROM print_jobs WHERE token = $1', [req.params.token]);
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(req.params.token)) return res.status(404).json({ error: 'Druckauftrag nicht gefunden' });
+    const job = await pool.query(`SELECT ${PICKUP_FELDER} FROM print_jobs WHERE token = $1`, [req.params.token]);
     if (job.rows.length === 0) return res.status(404).json({ error: 'Druckauftrag nicht gefunden' });
     if (job.rows[0].status === 'picked_up') return res.json({ ...job.rows[0], message: 'Bereits abgeholt' });
+    const nameRoh = typeof req.body?.name === 'string' ? req.body.name.replace(/[\u0000-\u001F\u007F<>]/g, '').trim().slice(0, 100) : '';
     const updated = await pool.query(
-      "UPDATE print_jobs SET status = 'picked_up', picked_up_at = NOW(), picked_up_by = $1 WHERE token = $2 RETURNING *",
-      [req.body?.name || 'Empfänger', req.params.token]
+      `UPDATE print_jobs SET status = 'picked_up', picked_up_at = NOW(), picked_up_by = $1 WHERE token = $2 RETURNING ${PICKUP_FELDER}`,
+      [nameRoh || 'Empfänger', req.params.token]
     );
     res.json({ ...updated.rows[0], message: 'Abholung bestätigt' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: fehlerFuerClient(err, 'Fehler') });
   }
 });
 
 // Upload avatar (base64) and sync to Authentik
 app.put('/api/auth/avatar', authMiddleware, async (req, res) => {
   const userId = req.user.user_id || req.user.id;
-  const { avatar } = req.body; // base64 data URL e.g. "data:image/png;base64,..."
+  const { avatar } = req.body || {}; // base64 data URL e.g. "data:image/png;base64,..."
   if (!avatar) return res.status(400).json({ error: 'Kein Avatar-Bild' });
+  // Nur eingebettete Rasterbilder: eine URL wuerde von scripts/sync-avatars-to-ad.py
+  // (mit Authentik-Token) abgerufen, SVG/HTML waere aktiver Inhalt. Profil schickt
+  // ein 200x200-JPEG (~30 KB) -> 512 KB reichen reichlich.
+  const avatarTreffer = typeof avatar === 'string' && avatar.length <= 512 * 1024
+    && avatar.match(/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/);
+  if (!avatarTreffer) return res.status(400).json({ error: 'Avatar muss ein PNG-, JPEG- oder WebP-Bild (max. 512 KB) sein' });
+  {
+    const kopf = Buffer.from(avatarTreffer[2].slice(0, 24), 'base64');
+    const passt = { png: kopf.slice(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47])),
+      jpeg: kopf[0] === 0xff && kopf[1] === 0xd8,
+      webp: kopf.slice(0, 4).toString('latin1') === 'RIFF' && kopf.slice(8, 12).toString('latin1') === 'WEBP' }[avatarTreffer[1]];
+    if (!passt) return res.status(400).json({ error: 'Bildinhalt passt nicht zum Typ' });
+  }
 
   try {
     // Store in DB
@@ -2123,6 +2322,9 @@ app.post('/api/wasch/reservations', authMiddleware, async (req, res) => {
 
   const startDt = new Date(start_time);
   const endDt = new Date(end_time);
+  if (typeof start_time !== 'string' || typeof end_time !== 'string' || isNaN(startDt) || isNaN(endDt)) {
+    return res.status(400).json({ error: 'Ungültige Zeitangabe' });
+  }
   if (endDt <= startDt) return res.status(400).json({ error: 'end_time muss nach start_time liegen' });
 
   // Duration in minutes
@@ -2130,20 +2332,51 @@ app.post('/api/wasch/reservations', authMiddleware, async (req, res) => {
   if (durationMin < 30) return res.status(400).json({ error: 'Mindestdauer: 30 Minuten' });
   if (durationMin > 720) return res.status(400).json({ error: 'Maximaldauer: 12 Stunden' });
 
+  // Eine Reservation oeffnet die Waschkuechen-Tuer (manageDoorAccess) -> nur fuer
+  // Angehoerige der STWEG des Raums, nicht rueckwirkend, nicht beliebig weit voraus.
+  const roomNr = parseInt(room_id, 10);
+  if (!Number.isInteger(roomNr) || roomNr <= 0) return res.status(400).json({ error: 'Ungültiger Raum' });
+  const istAdmin = !!req.user.isAdmin;
+  if (!istAdmin) {
+    if (startDt.getTime() < Date.now() - 10 * 60 * 1000) return res.status(400).json({ error: 'Reservationen in der Vergangenheit sind nicht möglich' });
+    if (startDt.getTime() > Date.now() + 90 * 86400000) return res.status(400).json({ error: 'Höchstens 90 Tage im Voraus' });
+  }
+  let untilDt = null;
+  if (recurring && recurring_until) {
+    untilDt = new Date(recurring_until);
+    if (isNaN(untilDt)) return res.status(400).json({ error: 'Ungültiges Enddatum der Serie' });
+    if (!istAdmin && untilDt.getTime() > Date.now() + 366 * 86400000) return res.status(400).json({ error: 'Serien höchstens ein Jahr im Voraus' });
+  }
+  try {
+    const raum = (await pool.query('SELECT stweg, active FROM wasch_rooms WHERE id = $1', [roomNr])).rows[0];
+    if (!raum || raum.active === false) return res.status(404).json({ error: 'Raum nicht gefunden' });
+    if (!istAdmin) {
+      const meine = getUserStwegs(req.user.groups || []);
+      if (raum.stweg ? !meine.has(Number(raum.stweg)) : meine.size === 0) {
+        return res.status(403).json({ error: 'Keine Berechtigung für diese Waschküche' });
+      }
+      const offen = await pool.query('SELECT COUNT(*)::int AS n FROM wasch_reservations WHERE user_id = $1 AND cancelled = false AND end_time >= NOW()', [req.user.user_id]);
+      if (offen.rows[0].n >= 120) return res.status(429).json({ error: 'Zu viele offene Reservationen' });
+    }
+  } catch (err) {
+    return res.status(500).json({ error: fehlerFuerClient(err, 'Fehler beim Erstellen der Reservierung') });
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     // Lock on room_id to prevent concurrent overlapping reservations
-    await client.query('SELECT pg_advisory_xact_lock($1)', [room_id]);
+    await client.query('SELECT pg_advisory_xact_lock($1)', [roomNr]);
 
     if (recurring && recurring_until) {
       // Generate weekly recurring reservations (same weekday, same time)
       const created = [];
-      const until = new Date(recurring_until);
+      const until = untilDt;
       let curStart = new Date(startDt);
       let curEnd = new Date(endDt);
 
-      while (curStart <= until) {
+      let runden = 0;
+      while (curStart <= until && runden++ < 60) { // hoechstens 60 Wochen pro Serie
         // Check overlap with existing reservations
         const conflict = await client.query(
           `SELECT id FROM wasch_reservations
@@ -2394,9 +2627,18 @@ app.get('/api/wasch/admin/billing', authMiddleware, adminOnly, async (req, res) 
 });
 
 // Waschküche settings
+// Nur bekannte, unkritische Schluessel ausliefern: in wasch_settings lagen frueher
+// auch unifi_access_host/_token (heute access_settings) — die gehen niemanden an.
+const WASCH_SETTINGS_OEFFENTLICH = ['cost_per_kwh', 'auto_billing', 'billing_day', 'reservation_max_days', 'reservation_max_per_user', 'min_duration_minutes', 'max_duration_minutes'];
+// Altzeilen entfernen, sobald access_settings sie uebernommen hat (Migration in initDB).
+setTimeout(() => {
+  pool.query(`DELETE FROM wasch_settings WHERE key LIKE 'unifi_access_%' AND EXISTS (SELECT 1 FROM access_settings)`)
+    .then(r => { if (r.rowCount) console.log(`[wasch] ${r.rowCount} alte unifi_access_*-Zeilen entfernt`); })
+    .catch(e => console.warn('[wasch] Altzeilen:', e.message));
+}, 30000);
 app.get('/api/wasch/settings', authMiddleware, async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM wasch_settings ORDER BY key');
+    const result = await pool.query('SELECT key, value FROM wasch_settings WHERE key = ANY($1) ORDER BY key', [WASCH_SETTINGS_OEFFENTLICH]);
     const settings = {};
     result.rows.forEach(r => { settings[r.key] = r.value; });
     res.json(settings);
@@ -3293,38 +3535,105 @@ app.get('/api/access/me/doors', authMiddleware, async (req, res) => {
     id: d.unique_id || d.id, name: d.name || d.full_name,
     lock_state: d.door_lock_relay_status, position: d.door_position_status, online: d.is_bind_hub })) });
 });
+// Jede Selbstbedienungs-Oeffnung protokollieren: UniFi sieht nur das API-Token,
+// nicht wer geoeffnet hat.
+let tuerProtokollBereit = null;
+async function tuerOeffnungProtokollieren(req, doorId, erfolg) {
+  try {
+    if (!tuerProtokollBereit) {
+      tuerProtokollBereit = pool.query(`CREATE TABLE IF NOT EXISTS access_tueroeffnungen (
+        id SERIAL PRIMARY KEY, user_email TEXT, door_id TEXT, erfolg BOOLEAN,
+        ip TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`);
+    }
+    await tuerProtokollBereit;
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || null;
+    await pool.query('INSERT INTO access_tueroeffnungen (user_email, door_id, erfolg, ip) VALUES ($1,$2,$3,$4)',
+      [(req.user?.email || '').toLowerCase() || null, String(doorId).slice(0, 100), !!erfolg, ip]);
+  } catch (e) {
+    tuerProtokollBereit = null;
+    console.error('[access] Tueroeffnung nicht protokolliert:', e.message);
+  }
+  console.log(`[access] Tueroeffnung ${erfolg ? 'ok' : 'fehlgeschlagen'}: ${req.user?.email} -> ${doorId}`);
+}
 app.post('/api/access/me/doors/:id/unlock', authMiddleware, async (req, res) => {
+  // Begrenzen: wiederholtes Oeffnen per Skript (Tuer dauerhaft offen halten) verhindern
+  if (!rateLimitGuard('door-unlock', (req.user?.email || '').toLowerCase(), 10, 10 * 60 * 1000).ok) {
+    return res.status(429).json({ error: 'Zu viele Öffnungen. Bitte kurz warten.' });
+  }
   const allowed = await meAllowedDoorIds(req.user?.email);
   if (!allowed.has(req.params.id)) return res.status(403).json({ error: 'Keine Berechtigung für diese Tür' });
   const r = await unifiAccessRaw('PUT', `/doors/${encodeURIComponent(req.params.id)}/unlock`, {});
+  await tuerOeffnungProtokollieren(req, req.params.id, r.status !== 0 && accessOk(r));
   if (r.status === 0) return res.status(502).json({ error: 'Access nicht erreichbar' });
   if (accessOk(r)) return res.json({ success: true, message: 'Tür geöffnet' });
   res.status(r.status).json({ error: r.body?.msg || 'Öffnen fehlgeschlagen' });
 });
+
+// NFC-Anlernsitzungen gehoeren dem, der sie gestartet hat: nur er darf sie abfragen,
+// abbrechen und die dabei gelesene Karte sich zuweisen. Vorher konnte jede angemeldete
+// Person fremde Sitzungen lesen und eine beliebige Karten-Token-ID an sich binden.
+const nfcSitzungen = new Map(); // session_id -> { email, created, tokens:Set }
+const NFC_SITZUNG_MS = 10 * 60 * 1000;
+function nfcSitzungenAufraeumen() {
+  const jetzt = Date.now();
+  for (const [k, v] of nfcSitzungen) if (jetzt - v.created > NFC_SITZUNG_MS) nfcSitzungen.delete(k);
+}
+function eigeneNfcSitzung(req) {
+  nfcSitzungenAufraeumen();
+  const e = nfcSitzungen.get(String(req.params.id));
+  return e && e.email === (req.user?.email || '').toLowerCase() ? e : null;
+}
 app.post('/api/access/me/nfc/session', authMiddleware, async (req, res) => {
+  const email = (req.user?.email || '').toLowerCase();
+  if (!rateLimitGuard('nfc-session', email, 10, 10 * 60 * 1000).ok) return res.status(429).json({ error: 'Zu viele Versuche. Bitte kurz warten.' });
+  nfcSitzungenAufraeumen();
+  if (nfcSitzungen.size > 1000) return res.status(429).json({ error: 'Zu viele offene Sitzungen' });
   const u = await unifiUserByEmail(req.user?.email);
   if (!u) return res.status(404).json({ error: 'Kein UniFi-Benutzer zu deiner E-Mail — bitte Technik kontaktieren' });
-  const device_id = req.body?.device_id || await accessEnrollDevice();
+  let device_id = req.body?.device_id;
+  if (device_id) {
+    // Nur echte Anlern-Leser (gleiche Liste wie /api/access/me/devices)
+    const leser = await accessReaders();
+    if (!leser.some(d => String(d.id) === String(device_id))) return res.status(400).json({ error: 'Unbekanntes Lesegerät' });
+  } else {
+    device_id = await accessEnrollDevice();
+  }
   if (!device_id) return res.status(400).json({ error: 'Kein Lesegerät gefunden' });
   const r = await unifiAccessRaw('POST', '/credentials/nfc_cards/sessions', { device_id });
   if (r.status === 0) return res.status(502).json({ error: 'Access nicht erreichbar' });
   if (!accessOk(r)) return res.status(r.status).json({ error: r.body?.msg || 'Session fehlgeschlagen' });
-  res.json({ session_id: r.body?.data?.session_id || r.body?.data?.id });
+  const session_id = r.body?.data?.session_id || r.body?.data?.id;
+  if (session_id) nfcSitzungen.set(String(session_id), { email, created: Date.now(), tokens: new Set() });
+  res.json({ session_id });
 });
 app.get('/api/access/me/nfc/session/:id', authMiddleware, async (req, res) => {
+  const eigene = eigeneNfcSitzung(req);
+  if (!eigene) return res.status(404).json({ error: 'Sitzung nicht gefunden' });
   const r = await unifiAccessRaw('GET', `/credentials/nfc_cards/sessions/${encodeURIComponent(req.params.id)}`);
-  res.json({ data: r.body?.data ?? null, code: r.body?.code });
+  const d = r.body?.data ?? null;
+  // Gelesene Karte merken: nur sie darf danach per /me/nfc/assign zugewiesen werden
+  if (d && typeof d === 'object') {
+    const t = d.token || d.card_id || d.card?.token || d.nfc_card?.token || (Array.isArray(d.cards) && d.cards[0]?.token);
+    if (t) eigene.tokens.add(String(t));
+  }
+  res.json({ data: d, code: r.body?.code });
 });
 app.delete('/api/access/me/nfc/session/:id', authMiddleware, async (req, res) => {
+  if (!eigeneNfcSitzung(req)) return res.status(404).json({ error: 'Sitzung nicht gefunden' });
   await unifiAccessRaw('DELETE', `/credentials/nfc_cards/sessions/${encodeURIComponent(req.params.id)}`);
   res.json({ success: true });
 });
 app.post('/api/access/me/nfc/assign', authMiddleware, async (req, res) => {
   const u = await unifiUserByEmail(req.user?.email);
   if (!u) return res.status(404).json({ error: 'Kein UniFi-Benutzer gefunden' });
-  const token = req.body?.token; if (!token) return res.status(400).json({ error: 'Token fehlt' });
+  const token = req.body?.token; if (!token || typeof token !== 'string') return res.status(400).json({ error: 'Token fehlt' });
+  nfcSitzungenAufraeumen();
+  const email = (req.user?.email || '').toLowerCase();
+  let gelesen = null;
+  for (const [k, v] of nfcSitzungen) if (v.email === email && v.tokens.has(token)) { gelesen = k; break; }
+  if (!gelesen) return res.status(403).json({ error: 'Diese Karte wurde nicht in deiner Anlernsitzung gelesen' });
   const r = await unifiAccessRaw('PUT', `/users/${encodeURIComponent(u.id)}/nfc_cards`, { token });
-  if (accessOk(r)) return res.json({ success: true });
+  if (accessOk(r)) { nfcSitzungen.delete(gelesen); return res.json({ success: true }); }
   res.status(r.status === 0 ? 502 : r.status).json({ error: r.body?.msg || 'Zuweisen fehlgeschlagen' });
 });
 app.delete('/api/access/me/nfc/:token', authMiddleware, async (req, res) => {
@@ -3432,6 +3741,8 @@ app.put('/api/access/settings', authMiddleware, adminOnly, async (req, res) => {
 app.get('/api/kontakte/:stweg', authMiddleware, async (req, res) => {
   const stweg = parseStweg(req.params.stweg);
   if (!stweg) return res.status(400).json({ error: 'Ungültige STWEG-Nummer' });
+  // Nur die eigene STWEG (Gruppenzugehoerigkeit) oder Admin
+  if (!req.user.isAdmin && !getUserStwegs(req.user.groups || []).has(stweg)) return res.status(403).json({ error: 'Keine Berechtigung für diese STWEG' });
   try {
     const result = await pool.query(
       `SELECT * FROM kontakte WHERE stweg = $1 ORDER BY sort_order, name`,
@@ -3795,10 +4106,13 @@ app.post('/api/zähler/benutzer', authMiddleware, adminOnly, async (req, res) =>
   }
 });
 
-app.post('/api/zähler/daten', authMiddleware, async (req, res) => {
+// Schreiben/Lesen nur mit Zaehler-Recht (vorher reichte jede Anmeldung, um fremde
+// Verbrauchsdaten zu lesen oder Messwerte zu faelschen).
+app.post('/api/zähler/daten', authMiddleware, requirePermission('zähler', 'write'), async (req, res) => {
   // Receives meter data from ioBroker/webhook
-  const { zaehler_id, wert, timestamp } = req.body;
+  const { zaehler_id, wert, timestamp } = req.body || {};
   if (!zaehler_id || wert == null) return res.status(400).json({ error: 'zaehler_id und wert erforderlich' });
+  if (!Number.isFinite(Number(wert)) || String(zaehler_id).length > 100) return res.status(400).json({ error: 'Ungültige Werte' });
   try {
     await pool.query(
       `INSERT INTO zaehler_daten (zaehler_id, wert, timestamp)
@@ -3811,7 +4125,7 @@ app.post('/api/zähler/daten', authMiddleware, async (req, res) => {
   }
 });
 
-app.get('/api/zähler/daten/:zaehler_id', authMiddleware, async (req, res) => {
+app.get('/api/zähler/daten/:zaehler_id', authMiddleware, requirePermission('zähler', 'read'), async (req, res) => {
   const { von, bis } = req.query;
   try {
     const result = await pool.query(
@@ -4155,16 +4469,15 @@ async function sendDeliveryReport(logId, senderEmail, verteilerName, originalSub
 
 // HTTP endpoint (kept for direct API testing)
 app.post('/api/email/inbound', async (req, res) => {
-  const secret = req.headers['x-email-secret'] || req.query.secret;
-  if (!EMAIL_INBOUND_SECRET || secret !== EMAIL_INBOUND_SECRET) {
+  // Nur per Header (ein ?secret= landet in Proxy-/Zugriffslogs), Vergleich in konstanter Zeit
+  if (!geheimnisGleich(req.headers['x-email-secret'], EMAIL_INBOUND_SECRET)) {
     return res.status(403).json({ error: 'Unauthorized' });
   }
   try {
     const result = await processInboundEmail(req.body);
     res.json(result);
   } catch (err) {
-    console.error('Email inbound error:', err);
-    res.status(500).json({ error: `Email-Verarbeitung fehlgeschlagen: ${err.message}` });
+    res.status(500).json({ error: fehlerFuerClient(err, 'Email-Verarbeitung fehlgeschlagen') });
   }
 });
 
@@ -4341,13 +4654,34 @@ async function pollGmailForVerteiler() {
             const printerBase = verteilerAddress.split('+')[0].split('@')[0];
             const printer = printerBase === 'druckerr9' ? 'DruckerR9' : 'DruckerR13';
             const PRINT_API = process.env.PRINT_API_URL || 'http://100.64.2.32:8080';
-            const PRINT_TOKEN = process.env.PRINT_API_SECRET || 'RwPrintApi2026';
+            // Kein Fallback-Geheimnis im Code: ohne PRINT_API_SECRET wird nicht gedruckt.
+            const PRINT_TOKEN = process.env.PRINT_API_SECRET || '';
+            if (!PRINT_TOKEN) {
+              console.error(`[Print] PRINT_API_SECRET fehlt — Druckauftrag an ${verteilerAddress} nicht verarbeitet (UID ${uid})`);
+              await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
+              continue;
+            }
 
             // Whitelist check: only known users may print (strip +tags from email)
             // Unfold MIME-folded From header (continuation lines start with WSP) before extraction.
             const headersUnfolded = headers.replace(/\r?\n[ \t]+/g, ' ');
-            const senderEmailRaw = headersUnfolded.match(/^From:\s*.*?([a-z0-9._+-]+@[a-z0-9.-]+)/im)?.[1]?.toLowerCase();
+            // Adresse aus <...> nehmen, nicht die erste Adresse im (frei waehlbaren)
+            // Anzeigenamen: 'From: "chef@rosenweg4303.ch" <x@boese.example>' ergab sonst chef@.
+            const fromZeile = (headersUnfolded.match(/^From:[ \t]*([^\r\n]*)/im) || [])[1] || '';
+            const spitz = [...fromZeile.matchAll(/<([^<>\s]+@[^<>\s]+)>/g)].pop();
+            const senderEmailRaw = (spitz ? spitz[1] : (fromZeile.trim().match(/^([a-z0-9._+-]+@[a-z0-9.-]+)$/i) || [])[1])?.toLowerCase();
             const senderEmail = senderEmailRaw?.replace(/\+[^@]*/, ''); // strip +tag
+
+            // Gefaelschte Absender: nichts aus dem Spam-Ordner drucken und nichts, was
+            // unser Mailserver als SPF/DMARC-Fehlschlag oder Spam markiert hat.
+            const ausSpamOrdner = /junk|spam/i.test(MAILBOX);
+            const authFehler = /^Authentication-Results:[^\r\n]*(?:\r?\n[ \t][^\r\n]*)*\bdmarc=fail\b/im.test(headers)
+              || /^X-Spam-Flag:\s*YES/im.test(headers) || /^X-Spam:\s*Yes/im.test(headers);
+            if (ausSpamOrdner || authFehler) {
+              console.log(`[Print] Rejected (spam=${ausSpamOrdner} authFehler=${authFehler}) from=${senderEmailRaw} to=${verteilerAddress}`);
+              await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
+              continue;
+            }
 
             // System-Mail-Guard: noreply@…, Auto-Submitted-Header oder explizites
             // X-Rosenweg-No-Print blockieren Print-Loop (z.B. Konto-Loesch-Reminder
@@ -4993,7 +5327,12 @@ async function pollArchivMailbox() {
     host: IMAP_HOST, port: IMAP_PORT, secure: true,
     auth: { user: ARCHIV_IMAP_USER, pass: ARCHIV_IMAP_PASS }, logger: false,
     socketTimeout: 30000, greetingTimeout: 15000, connectionTimeout: 30000,
-    tls: { rejectUnauthorized: false },
+    // Zertifikat pruefen wie der Haupt- und ZEV-Poller (sonst liest ein Mann in der
+    // Mitte das archiv@-Passwort mit). Notausgang nur explizit per IMAP_TLS_INSECURE=1.
+    tls: {
+      rejectUnauthorized: !(process.env.IMAP_TLS_INSECURE === '1' || process.env.ZEV_IMAP_TLS_INSECURE === '1'),
+      ...((process.env.IMAP_SERVERNAME || process.env.ZEV_IMAP_SERVERNAME) ? { servername: process.env.IMAP_SERVERNAME || process.env.ZEV_IMAP_SERVERNAME } : {}),
+    },
   });
   try {
     await client.connect();
@@ -5177,6 +5516,9 @@ async function recordZevRemail(id, res) {
   ).catch((e) => console.warn('[ZEV] recordZevRemail', e.message));
 }
 
+// Erlaubte Absender der ZEV-Rechnungen: Adressen oder '@domain', kommagetrennt.
+const ZEV_ABSENDER = (process.env.ZEV_ABSENDER || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+if (!ZEV_ABSENDER.length) console.warn('[ZEV] ZEV_ABSENDER nicht gesetzt — Rechnungs-Absender wird nur per DMARC/Spam-Befund geprueft');
 let zevPolling = false;
 async function pollZevArchive() {
   if (!SMARTME_IMAP_PASS || zevPolling) return;
@@ -5225,6 +5567,21 @@ async function pollZevArchive() {
           if (hdrTo) recips.push(...hdrTo.split(/[<>,\s]+/).filter(Boolean));
           let match = null;
           for (const r of recips) { if (aliasMap[r]) { match = aliasMap[r]; break; } }
+          // Absender pruefen: die Alias-Adressen kann jeder anschreiben. Eine Mail von
+          // fremdem Absender (ZEV_ABSENDER) oder mit DMARC-/Spam-Befund wird archiviert,
+          // aber keiner Wohnung zugeordnet (kein Re-Mail an Bewohner) -> Technik prueft.
+          if (match) {
+            const abs = String(parsed.from?.value?.[0]?.address || '').toLowerCase();
+            const hdrRoh = String(msg.source.slice(0, 64 * 1024));
+            const authFehler = /^Authentication-Results:[^\r\n]*(?:\r?\n[ \t][^\r\n]*)*\bdmarc=fail\b/im.test(hdrRoh)
+              || /^X-Spam-Flag:\s*YES/im.test(hdrRoh);
+            const erlaubt = ZEV_ABSENDER.length === 0
+              || ZEV_ABSENDER.some(e => (e.startsWith('@') ? abs.endsWith(e) : abs === e));
+            if (authFehler || !erlaubt) {
+              console.warn(`[ZEV-Archiv] Absender ${abs || '?'} nicht vertrauenswuerdig (authFehler=${authFehler}) -> unzugeordnet`);
+              match = null;
+            }
+          }
           // B3: Zuordnung. allgemein = Allgemeinzaehler (kein Bewohner), unzugeordnet = kein Alias-Match.
           const zuordnung = match ? (match.typ === 'allgemein' ? 'allgemein' : 'wohnung') : 'unzugeordnet';
           const zevRecip = recips.find(r => /^zev[._]/.test(r)) || null;
@@ -9429,8 +9786,8 @@ app.get('/api/public/technik', async (req, res) => {
 // GOOGLE CALENDAR (ICS → JSON Proxy)
 // ═══════════════════════════════════════════════════════════════════
 
-const GOOGLE_CALENDAR_ICS_URL = process.env.GOOGLE_CALENDAR_ICS_URL ||
-  'https://calendar.google.com/calendar/ical/rosenweg4303%40gmail.com/private-21cb7a217f2b19dc884e2baf38762fb0/basic.ics';
+// Die private ICS-Adresse enthaelt ein Geheimnis -> nur aus der Umgebung (kein Fallback).
+const GOOGLE_CALENDAR_ICS_URL = process.env.GOOGLE_CALENDAR_ICS_URL || '';
 
 // Simple ICS parser - extracts VEVENT blocks
 function parseICS(icsText) {
@@ -9494,6 +9851,7 @@ function parseICSDate(value) {
 let calendarCache = { data: null, fetchedAt: 0 };
 
 app.get('/api/calendar', async (req, res) => {
+  if (!GOOGLE_CALENDAR_ICS_URL) return res.status(503).json({ error: 'Kalender nicht konfiguriert' });
   try {
     const now = Date.now();
     if (!calendarCache.data || now - calendarCache.fetchedAt > 5 * 60 * 1000) {

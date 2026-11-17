@@ -934,6 +934,19 @@
                     msg.className = 'mb-4 p-3 rounded-lg text-sm font-medium bg-green-100 text-green-700';
                     document.getElementById('pw-new').value = '';
                     document.getElementById('pw-confirm').value = '';
+                } else if (resp.status === 403 && data.reauth) {
+                    // Passwortwechsel verlangt eine frische Anmeldung (Schutz bei gestohlener Sitzung)
+                    msg.textContent = (data.error || 'Bitte neu anmelden.') + ' ';
+                    const a = document.createElement('a');
+                    a.href = '/api/auth/login?reauth=1&redirect=' + encodeURIComponent('/profil.html');
+                    a.textContent = 'Jetzt neu anmelden';
+                    a.className = 'underline font-semibold';
+                    msg.appendChild(a);
+                    msg.className = 'mb-4 p-3 rounded-lg text-sm font-medium bg-yellow-100 text-yellow-800';
+                    msg.classList.remove('hidden');
+                    btn.disabled = false;
+                    btn.textContent = 'Passwort ändern';
+                    return;
                 } else {
                     msg.textContent = data.error || 'Fehler beim Ändern des Passworts.';
                     msg.className = 'mb-4 p-3 rounded-lg text-sm font-medium bg-red-100 text-red-700';
