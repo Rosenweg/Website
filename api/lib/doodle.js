@@ -133,7 +133,7 @@ async function resolveActor(req) {
   const s = await pool.query(
     `SELECT u.email, u.name, u.role, u.groups_json
        FROM sessions s JOIN users u ON u.id = s.user_id
-      WHERE s.token = $1 AND s.expires_at > NOW()`, [token]);
+      WHERE s.token = $1 AND s.expires_at > NOW() AND u.active IS NOT FALSE`, [token]); // deaktivierte Konten wie in authMiddleware
   if (s.rows[0]) {
     let groups = []; try { groups = JSON.parse(s.rows[0].groups_json || '[]'); } catch { /* */ }
     return {
@@ -184,6 +184,22 @@ async function canAccessPoll(actor, pollId) {
 }
 
 // Codes: lib/otp.js (Zähler in der DB, 8 Stellen, an den Zweck 'doodle' gebunden).
+// Einladungsmails gehen ueber den eigenen Mailserver an beliebige Adressen: je Umfrage
+// und je Konto und Tag begrenzen (sonst Massenversand/Phishing ueber MAIL_FROM).
+const EINLADUNGEN_JE_UMFRAGE = 50;
+const EINLADUNGEN_JE_TAG = 100;
+const einladungenHeute = new Map(); // email -> [timestamps]
+function einladungenErlaubt(email, anzahl) {
+  const key = String(email || '').toLowerCase();
+  const now = Date.now();
+  const arr = (einladungenHeute.get(key) || []).filter(t => now - t < 24 * 60 * 60 * 1000);
+  if (arr.length + anzahl > EINLADUNGEN_JE_TAG) { einladungenHeute.set(key, arr); return false; }
+  for (let i = 0; i < anzahl; i++) arr.push(now);
+  einladungenHeute.set(key, arr);
+  if (einladungenHeute.size > 5000) einladungenHeute.delete(einladungenHeute.keys().next().value);
+  return true;
+}
+
 function mountDoodle({ app }) {
   initSchema()
     .then(() => console.log('[doodle] Sitzungs-Doodle aktiv'))
@@ -306,6 +322,9 @@ function mountDoodle({ app }) {
       const invites = Array.isArray(b.invites) ? b.invites
         .map(i => (typeof i === 'string' ? { email: normEmail(i), name: null } : { email: normEmail(i.email), name: i.name || null }))
         .filter(i => validEmail(i.email)) : [];
+      // Einladungen versenden Mails ueber den eigenen Server -> begrenzen.
+      if (invites.length > EINLADUNGEN_JE_UMFRAGE) return res.status(400).json({ error: `Höchstens ${EINLADUNGEN_JE_UMFRAGE} Einladungen je Umfrage` });
+      if (!einladungenErlaubt(req.actor.email, invites.length)) return res.status(429).json({ error: 'Zu viele Einladungen heute — bitte morgen weiter.' });
       const beschreibung = b.beschreibung ? String(b.beschreibung).trim().slice(0, 4000) : null;
       const ort = b.ort ? String(b.ort).trim().slice(0, 255) : null;
       const deadline = parseZurich(b.deadline, true);
@@ -539,6 +558,9 @@ function mountDoodle({ app }) {
       const email = normEmail(req.body?.email);
       if (!validEmail(email)) return res.status(400).json({ error: 'Ungültige E-Mail' });
       const name = req.body?.name ? String(req.body.name).trim().slice(0, 255) : null;
+      const anz = await pool.query('SELECT COUNT(*)::int AS n FROM doodle_invites WHERE poll_id = $1', [id]);
+      if ((anz.rows[0]?.n || 0) >= EINLADUNGEN_JE_UMFRAGE) return res.status(400).json({ error: `Höchstens ${EINLADUNGEN_JE_UMFRAGE} Einladungen je Umfrage` });
+      if (!einladungenErlaubt(req.actor.email, 1)) return res.status(429).json({ error: 'Zu viele Einladungen heute — bitte morgen weiter.' });
       await pool.query('INSERT INTO doodle_invites (poll_id, email, name) VALUES ($1,$2,$3) ON CONFLICT (poll_id, email) DO UPDATE SET name = COALESCE(EXCLUDED.name, doodle_invites.name)', [id, email, name]);
       loggedSendMail({
         from: MAIL_FROM, to: email,

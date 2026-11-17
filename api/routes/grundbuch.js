@@ -326,7 +326,10 @@ router.get('/anteile/:parzelle/:sub_id/bild', authMiddleware, async (req, res) =
     const types = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', pdf: 'application/pdf' };
     res.setHeader('Content-Type', types[ext] || 'application/octet-stream');
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    fsSync.createReadStream(fullPath).pipe(res);
+    // Fehlt die Datei, darf der Stream-Fehler den Prozess nicht beenden.
+    const strom = fsSync.createReadStream(fullPath);
+    strom.on('error', () => { if (!res.headersSent) res.status(404).end(); else res.destroy(); });
+    strom.pipe(res);
   } catch (err) { res.status(500).json({ error: 'Fehler' }); }
 });
 
