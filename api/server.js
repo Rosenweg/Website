@@ -19012,7 +19012,7 @@ app.get('/api/reklamationen', authMiddleware, requirePermission('reklamationen',
       params,
     );
     res.json({ reklamationen: r.rows });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err, 'Reklamationen konnten nicht geladen werden') }); }
 });
 
 // Auto-Zuweisungs-Regeln (pro Kategorie ein Standard-Verantwortlicher) — lesen.
@@ -19038,22 +19038,15 @@ app.put('/api/reklamationen/auto-assign', authMiddleware, requirePermission('rek
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    // Die Oberflaeche schickt immer ALLE Regeln zurueck; fremde STWEGs werden
-    // darum nicht abgelehnt, solange sie unveraendert sind.
-    const bisher = new Map((await client.query('SELECT kategorie, stweg, zugewiesen_an, handwerker_id FROM reklamation_auto_assign')).rows
-      .map(x => [`${x.kategorie}|${x.stweg}`, x]));
     for (const ru of rules) {
       const kat = String(ru.kategorie || '').slice(0, 60); if (!kat) continue;
       const st = Number.isFinite(parseInt(ru.stweg, 10)) ? parseInt(ru.stweg, 10) : 0;
       const za = ru.zugewiesen_an ? String(ru.zugewiesen_an).slice(0, 200) : null;
       const hw = Number.isFinite(parseInt(ru.handwerker_id, 10)) ? parseInt(ru.handwerker_id, 10) : null;
-      if (!reklStwegSchreibbar(req.user.groups, st)) {
-        const alt = bisher.get(`${kat}|${st}`);
-        const unveraendert = alt ? (alt.zugewiesen_an || null) === za && (alt.handwerker_id ?? null) === hw : (!za && !hw);
-        if (unveraendert) continue;
-        await client.query('ROLLBACK');
-        return res.status(403).json({ error: st ? `Keine Berechtigung für Regeln der STWEG ${st}` : 'Regeln für alle STWEGs darf nur die Technik ändern' });
-      }
+      // Fremde STWEG: immer still ueberspringen. Die Oberflaeche schickt alle
+      // Regeln mit; ein nicht auswaehlbarer Wert (Select faellt auf "") darf
+      // das Speichern der eigenen Regeln nicht mit 403 blockieren.
+      if (!reklStwegSchreibbar(req.user.groups, st)) continue;
       if (!za && !hw) { await client.query('DELETE FROM reklamation_auto_assign WHERE kategorie = $1 AND stweg = $2', [kat, st]); continue; }
       await client.query(
         `INSERT INTO reklamation_auto_assign (kategorie, stweg, zugewiesen_an, handwerker_id, updated_at)
@@ -19186,7 +19179,7 @@ app.put('/api/reklamationen/:id', authMiddleware, requirePermission('reklamation
     const out = await updateReklamation(parseInt(req.params.id, 10), req.body || {}, who);
     if (out.error) return res.status(out.status || 500).json({ error: out.error });
     res.json(out.reklamation);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err, 'Reklamation konnte nicht gespeichert werden') }); }
 });
 
 // ─── PWA Reparatur-Melder: Bewohner meldet einen Schaden -> reklamationen (Kanal 'web') ──
@@ -19802,15 +19795,21 @@ app.post('/api/push/subscribe', authMiddleware, async (req, res) => {
       userAgent: (req.headers['user-agent'] || '').slice(0, 200),
     });
     res.json({ ok: true });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(400).json({ error: pushFehlerText(e) }); }
 });
+// Nur die eigenen Pruefmeldungen aus lib/webpush.js weitergeben; DB-/sonstige
+// Fehlertexte (Interna) bleiben im Log.
+const PUSH_FEHLER_OK = new Set(['Ungueltige Subscription', 'Push-Dienst nicht erlaubt', 'Subscription gehoert einem anderen Konto']);
+function pushFehlerText(e) {
+  return PUSH_FEHLER_OK.has(e && e.message) ? e.message : fehlerFuerClient(e, 'Push-Anmeldung fehlgeschlagen');
+}
 app.post('/api/push/unsubscribe', authMiddleware, async (req, res) => {
   try {
     const ep = (req.body?.subscription || req.body)?.endpoint || req.body?.endpoint;
     // Nur eigene Subscriptions abmelden.
     await webpushLib.removeSubscription(typeof ep === 'string' ? ep : null, req.user.email || '');
     res.json({ ok: true });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(400).json({ error: pushFehlerText(e) }); }
 });
 app.post('/api/push/test', authMiddleware, async (req, res) => {
   // Jeder Aufruf loest ausgehende Requests an alle Geraete aus -> begrenzen.
@@ -19966,11 +19965,16 @@ async function ispCfCnameSetzen(hostname, proxied = false) {
       signal: AbortSignal.timeout(10000),
     });
     const d = await r.json();
-    if (!d.success) return { ok: false, grund: (d.errors || []).map(e => e.message).join('; ') || 'Cloudflare lehnte ab' };
+    // Cloudflare-Fehlertext nur ins Log; der Grund geht an Nicht-Admins zurueck.
+    if (!d.success) {
+      console.warn(`[isp] Cloudflare CNAME ${name}:`, (d.errors || []).map(e => e.message).join('; '));
+      return { ok: false, grund: 'Cloudflare lehnte den Eintrag ab' };
+    }
     return { ok: true, angelegt: true, proxied: !!proxied,
              grund: `CNAME ${name} → ${ziel} angelegt${proxied ? ', über Cloudflares Proxy' : ''}` };
   } catch (e) {
-    return { ok: false, grund: e.message };
+    console.warn(`[isp] Cloudflare CNAME ${name}:`, e.message);
+    return { ok: false, grund: 'Cloudflare nicht erreichbar' };
   }
 }
 
@@ -20088,6 +20092,12 @@ async function ispCheckDns(hostname) {
 async function ispHostKonflikt(hostname, { ownerEmail = null, ausser = null } = {}) {
   const h = String(hostname || '').toLowerCase().replace(/\.$/, '').replace(/^\*\./, '');
   if (!h) return null;
+  // S4-3-2: Namen in einer unserer Cloudflare-Zonen gehoeren uns, auch ohne
+  // "rosenweg" im Namen. Dort zeigt vieles schon auf uns (oder wir setzen es
+  // selbst) — DNS beweist also nichts, ein Admin entscheidet. Greift ueber
+  // ispDecideApproval und alle Re-Checks (Hintergrund + recheck-dns).
+  const cfZone = await ispCfZoneFuer(h).catch(() => null);
+  if (cfZone) return `Name liegt in unserer Zone ${cfZone.name} — ein Admin muss freigeben`;
   const reg = h.split('.').slice(-2).join('.');
   let r;
   try {
@@ -21087,7 +21097,7 @@ async function ispDnsEinrichten(req, res, tabelle, spalte) {
          WHERE id = $1`, [id, ziel]).catch(() => {});
     }
     res.json({ ...gesetzt, check });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err, 'DNS-Eintrag konnte nicht gesetzt werden') }); }
 }
 app.post('/api/isp/reverse-proxy/:id/dns-einrichten', authMiddleware, (req, res) =>
   ispDnsEinrichten(req, res, 'isp_reverse_proxy_routes', 'hostname'));
@@ -21681,7 +21691,7 @@ app.get('/api/isp/vpn-accounts', authMiddleware, async (req, res) => {
       } catch {}
     }
     res.json({ vpn_accounts: rows, is_admin: admin });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err, 'VPN-Zugänge konnten nicht geladen werden') }); }
 });
 
 // Liefert die moeglichen VLAN-Optionen für den User (sortiert nach Wohnung→Hobbyraum→Parkplatz)
@@ -21693,7 +21703,7 @@ app.get('/api/isp/vpn-accounts/options', authMiddleware, async (req, res) => {
     }
     const options = await getUserVlanOptions(target);
     res.json({ options, default: options[0]?.vlan || null });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err, 'VLAN-Optionen konnten nicht geladen werden') }); }
 });
 
 // ─── Tunnel für eine Laptop-Station ──────────────────────────────────
@@ -21872,7 +21882,8 @@ app.post('/api/stations/:id/tunnel', stationsRouter.appSession, async (req, res)
     res.json({ tunnel });
   } catch (err) {
     console.error('[stations-tunnel]', err.message);
-    res.status(err.status || 500).json({ error: err.message });
+    // Fehlertext von wg-control/DB nicht an die Station weiterreichen (steht im Log).
+    res.status(err.status || 500).json({ error: 'Tunnel konnte nicht eingerichtet werden' });
   }
 });
 
@@ -24147,9 +24158,13 @@ app.put('/api/isp/reverse-proxy/:id', authMiddleware, async (req, res) => {
       // Ziel geaendert -> wieder Admin-Freigabe; einschalten nur, was freigegeben ist.
       const zielNeu = ['backend_url', 'protocol', 'entry_point', 'pass_through_tls']
         .some(c => b[c] !== undefined && String(b[c] ?? '') !== String(v[c] ?? ''));
-      if (zielNeu) {
+      // S5-3-2: Login-Pflicht abschalten stellt das Backend offen ins Netz —
+      // braucht dieselbe Neu-Freigabe wie ein Zielwechsel.
+      const authAus = v.auth_required === true && b.auth_required !== undefined
+        && ![true, 'true', 1, '1'].includes(b.auth_required);
+      if (zielNeu || authAus) {
         push('approval_status', 'pending_admin');
-        push('approval_reason', 'Ziel geändert — wartet auf Admin-Freigabe');
+        push('approval_reason', zielNeu ? 'Ziel geändert — wartet auf Admin-Freigabe' : 'Login-Pflicht abgeschaltet — wartet auf Admin-Freigabe');
         push('active', false);
         delete b.active;
       } else if (b.active === true && v.approval_status !== 'approved') {
@@ -24699,9 +24714,13 @@ app.post('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
     // Zaehlung und Anlage pro Antragsteller serialisieren — sonst umgehen
     // parallele Antraege MAILBOX_AUTO_MAX (Zaehlung vor dem INSERT).
     const sperrSchluessel = 'mailbox-antrag:' + (req.user.email || '').toLowerCase();
+    // R3-S5c: nur versuchen statt warten — wartende Antraege hielten sonst je
+    // eine Pool-Verbindung fest (Pool-Erschoepfung durch parallele Antraege).
     const sperre = await pool.connect();
+    let gesperrt = false, sperreKaputt = false;
     try {
-      await sperre.query('SELECT pg_advisory_lock(hashtext($1))', [sperrSchluessel]);
+      gesperrt = (await sperre.query('SELECT pg_try_advisory_lock(hashtext($1)) AS ok', [sperrSchluessel])).rows[0].ok === true;
+      if (!gesperrt) return res.status(429).json({ error: 'Ein anderer Antrag von dir läuft noch — bitte gleich erneut versuchen' });
       // Rollen-Adressen (postmaster@, abuse@, technik@ ...) und mehr als
       // MAILBOX_AUTO_MAX Postfaecher pro Person nie automatisch anlegen — sonst
       // holt sich jeder Berechtigte Adressen, an die Passwort-Resets, DMARC-
@@ -24719,6 +24738,16 @@ app.post('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
         // Auto-Approve: PW generieren, in Mailcow anlegen, in DB mit
         // status=approved + initial_password speichern.
         const password = generateMailboxPassword();
+        // S5-3-3: zuerst die Zeile reservieren (UNIQUE relay_id+local_part ->
+        // 409 bei Dublette), erst dann Mailcow; scheitert Mailcow, Zeile weg.
+        const res0 = await pool.query(
+          `INSERT INTO mailbox_requests
+             (relay_id, antragsteller_email, assigned_user_email, local_part, full_name, quota_mb,
+              status, auto_approved, approved_by, initial_password)
+           VALUES ($1,$2,$2,$3,$4,1024,'provisioning',true,'auto',$5) RETURNING id`,
+          [b.relay_id, req.user.email, lp, b.full_name || null, password],
+        );
+        const neuId = res0.rows[0].id;
         try {
           await provisionMailcowMailbox({
             local_part: lp,
@@ -24728,14 +24757,14 @@ app.post('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
             password,
           });
         } catch (mcErr) {
+          await pool.query(`DELETE FROM mailbox_requests WHERE id = $1 AND status = 'provisioning'`, [neuId])
+            .catch(e => console.error('[mailbox-antrag] Reservierung nicht entfernt:', neuId, e.message));
           return res.status(502).json({ error: fehlerFuerClient(mcErr, 'Mailcow-Provisionierung fehlgeschlagen') });
         }
         const ins = await pool.query(
-          `INSERT INTO mailbox_requests
-             (relay_id, antragsteller_email, assigned_user_email, local_part, full_name, quota_mb,
-              status, auto_approved, approved_by, approved_at, mailcow_synced_at, initial_password)
-           VALUES ($1,$2,$2,$3,$4,1024,'approved',true,'auto',NOW(),NOW(),$5) RETURNING *`,
-          [b.relay_id, req.user.email, lp, b.full_name || null, password],
+          `UPDATE mailbox_requests SET status = 'approved', approved_at = NOW(), mailcow_synced_at = NOW()
+            WHERE id = $1 RETURNING *`,
+          [neuId],
         );
         notifyTechnikMailbox(
           `📬 *Mailbox auto-erstellt*\n${username}\nfuer ${req.user.email}${b.full_name ? ` (${b.full_name})` : ''}`,
@@ -24763,8 +24792,10 @@ app.post('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
       );
       res.json(ins.rows[0]);
     } finally {
-      await sperre.query('SELECT pg_advisory_unlock(hashtext($1))', [sperrSchluessel]).catch(() => {});
-      sperre.release();
+      // Freigabe gescheitert -> Verbindung verwerfen, damit die Sitzungssperre
+      // nicht mit der Verbindung im Pool weiterlebt.
+      if (gesperrt) await sperre.query('SELECT pg_advisory_unlock(hashtext($1))', [sperrSchluessel]).catch(() => { sperreKaputt = true; });
+      sperre.release(sperreKaputt);
     }
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Diese Mailbox existiert bereits oder ist beantragt' });
@@ -26144,6 +26175,8 @@ app.post('/api/vollmachten', authMiddleware, async (req, res) => {
     if (!['generell','spezifisch','auskunft'].includes(b.art)) {
       return res.status(400).json({ error: 'Ungueltige art' });
     }
+    const vgFehler = vmGeberListeFehler(b.vollmachtgeber);
+    if (vgFehler) return res.status(400).json({ error: vgFehler });
     if (!vmDarfFuerAndere(req.user.groups || [])) {
       const o = await vmObjektPruefen(req, b.wohnung_id, b.stweg);
       if (o.fehler) return res.status(403).json({ error: o.fehler });
@@ -26187,6 +26220,17 @@ app.post('/api/vollmachten', authMiddleware, async (req, res) => {
   } catch (err) { console.error('[vollmachten] create:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
+// R3-S5b: Eine mitgeschickte Vollmachtgeber-Liste darf nicht leer sein und
+// jede Zeile braucht einen Namen — ohne Geber-Zeilen galt die Vollmacht sonst
+// als "von allen signiert". (E-Mail bleibt freiwillig: Geber ohne E-Mail
+// zeichnen auf Papier, aktiviert durch einen Admin.)
+function vmGeberListeFehler(liste) {
+  if (liste === undefined || liste === null) return null;
+  if (!Array.isArray(liste) || liste.length === 0) return 'Mindestens ein Vollmachtgeber ist nötig';
+  if (liste.some(g => !g || typeof g !== 'object' || !String(g.name || '').trim())) return 'Jeder Vollmachtgeber braucht einen Namen';
+  return null;
+}
+
 // Vollmacht bearbeiten (nur Entwurf)
 app.put('/api/vollmachten/:id', authMiddleware, async (req, res) => {
   try {
@@ -26208,6 +26252,8 @@ app.put('/api/vollmachten/:id', authMiddleware, async (req, res) => {
     if (signiert.rows.length > 0) {
       return res.status(409).json({ error: 'Bereits teilweise signiert — Änderungen nicht mehr möglich. Entwurf löschen und neu erfassen.' });
     }
+    const vgFehler = vmGeberListeFehler(b.vollmachtgeber);
+    if (vgFehler) return res.status(400).json({ error: vgFehler });
     if (!vmDarfFuerAndere(groups)) {
       if (b.wohnung_id !== undefined || b.stweg !== undefined) {
         const o = await vmObjektPruefen(req,
@@ -26391,10 +26437,26 @@ app.post('/api/vollmachten/:id/upload-signed', authMiddleware, async (req, res) 
     if (!req.body.slice(0, 5).toString().startsWith('%PDF-')) {
       return res.status(400).json({ error: 'Datei ist kein PDF (Magic-Bytes fehlen)' });
     }
-    // Pfad: /documents/Vollmachten/<doc_hash>-signed.pdf
+    // Pfad: /documents/Vollmachten/<doc_hash>-signed.pdf (Admin, ganze Vollmacht)
+    // bzw. <doc_hash>-signed-vg<Zeile>.pdf (Upload eines einzelnen Gebers).
     const dir = pathModule.join(DOCS_PATH, 'Vollmachten');
+    const basis = v.doc_hash || ('id-' + v.id);
+    // S5-3-1: Ein Geber zeichnet nur seine eigene Zeile, und seine Datei gehoert
+    // nur zu dieser Zeile. Frueher setzte sein Upload vollmachten.papier_pdf_path
+    // — nach der Digital-Signatur der anderen lieferte /pdf dann SEINE Datei als
+    // "die" unterschriebene Vollmacht aus. Ersetzen der eigenen Papier-Datei
+    // bleibt moeglich, eine eigene Digital-Signatur wird nicht ueberschrieben.
+    let eigeneZeilen = [];
+    if (!isAdmin) {
+      eigeneZeilen = (await pool.query(
+        `SELECT id FROM vollmachten_vollmachtgeber
+          WHERE vollmacht_id=$1 AND LOWER(email) = $2 AND (signed_at IS NULL OR signatur_typ = 'papier')
+          ORDER BY sort_order, id`,
+        [id, (req.user.email || '').toLowerCase()])).rows;
+      if (eigeneZeilen.length === 0) return res.status(409).json({ error: 'Du hast bereits digital signiert' });
+    }
     await fs.mkdir(dir, { recursive: true });
-    const fileName = (v.doc_hash || ('id-' + v.id)) + '-signed.pdf';
+    const fileName = isAdmin ? basis + '-signed.pdf' : `${basis}-signed-vg${eigeneZeilen[0].id}.pdf`;
     const fullPath = pathModule.join(dir, fileName);
     await fs.writeFile(fullPath, req.body);
     const relPath = 'Vollmachten/' + fileName;
@@ -26410,23 +26472,33 @@ app.post('/api/vollmachten/:id/upload-signed', authMiddleware, async (req, res) 
       );
     } else {
       await pool.query(
-        `UPDATE vollmachten_vollmachtgeber SET signatur_typ='papier', signed_at=NOW()
-          WHERE vollmacht_id=$1 AND signed_at IS NULL AND LOWER(email) = $2`,
-        [id, (req.user.email || '').toLowerCase()],
+        `UPDATE vollmachten_vollmachtgeber SET signatur_typ='papier', signed_at=COALESCE(signed_at, NOW()), papier_pdf_path=$2
+          WHERE id = ANY($1::int[])`,
+        [eigeneZeilen.map(z => z.id), relPath],
       );
     }
     const counts = await pool.query(
-      `SELECT COUNT(*)::int AS total, COUNT(signed_at)::int AS signed
+      `SELECT COUNT(*)::int AS total, COUNT(signed_at)::int AS signed,
+              COUNT(*) FILTER (WHERE signatur_typ = 'papier')::int AS papier
          FROM vollmachten_vollmachtgeber WHERE vollmacht_id = $1`, [id]);
-    const alleSigniert = counts.rows[0].total === 0 || counts.rows[0].total === counts.rows[0].signed;
+    // R3-S5b: ohne Geber-Zeilen gilt nichts als signiert.
+    const alleSigniert = counts.rows[0].total > 0 && counts.rows[0].total === counts.rows[0].signed;
     // Status auf aktiv falls noch entwurf und alle unterschrieben haben
     const newStatus = v.status === 'entwurf' && (isAdmin || alleSigniert) ? 'aktiv' : v.status;
-    await pool.query(
-      `UPDATE vollmachten SET papier_pdf_path = $1, signatur_typ = 'papier',
-         status = $2, updated_at = NOW() WHERE id = $3`,
-      [relPath, newStatus, id],
-    );
-    res.json({ ok: true, papier_pdf_path: relPath, status: newStatus, size_bytes: req.body.length,
+    // Die Vollmacht als Ganzes ist nur papier-signiert, wenn ein Admin die PDF
+    // hochlaedt oder ALLE Geber auf Papier gezeichnet haben. Gemischt (Papier +
+    // digital) bleibt papier_pdf_path leer -> /pdf liefert die Vorlage mit Signaturen.
+    const ganzPapier = isAdmin || (alleSigniert && counts.rows[0].papier === counts.rows[0].total);
+    if (ganzPapier) {
+      await pool.query(
+        `UPDATE vollmachten SET papier_pdf_path = $1, signatur_typ = 'papier',
+           status = $2, updated_at = NOW() WHERE id = $3`,
+        [relPath, newStatus, id],
+      );
+    } else {
+      await pool.query(`UPDATE vollmachten SET status = $1, updated_at = NOW() WHERE id = $2`, [newStatus, id]);
+    }
+    res.json({ ok: true, papier_pdf_path: ganzPapier ? relPath : null, eigene_pdf: relPath, status: newStatus, size_bytes: req.body.length,
                signatures_remaining: Math.max(0, counts.rows[0].total - counts.rows[0].signed) });
   } catch (err) { console.error('[vollmachten] upload:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
@@ -26452,12 +26524,21 @@ app.post('/api/vollmachten/:id/verify-ai', authMiddleware, async (req, res) => {
     if (!isGlobalAdmin && !isAusschussForStweg && !isGeber) return res.status(403).json({ error: 'Kein Zugriff' });
     const rl = rateLimitGuard('vm-verify-ai', (req.user.email || '').toLowerCase(), 10, 60 * 60 * 1000);
     if (!rl.ok) return res.status(429).json({ error: `Zu viele KI-Prüfungen — bitte in ${rl.retryAfter}s erneut` });
-    if (!v.papier_pdf_path) return res.status(400).json({ error: 'Keine signierte PDF hochgeladen' });
+    // Ohne Gesamt-PDF (S5-3-1: Einzel-Upload eines Gebers): die eigene Datei;
+    // Admin/Ausschuss die zuletzt hochgeladene eines Gebers.
+    let pdfRel = v.papier_pdf_path;
+    if (!pdfRel) {
+      const mitDatei = (v.vollmachtgeber_liste || []).filter(g => g.papier_pdf_path);
+      const eigen = mitDatei.find(g => (g.email || '').toLowerCase() === (req.user.email || '').toLowerCase());
+      const neueste = mitDatei.sort((a, b) => String(b.signed_at || '').localeCompare(String(a.signed_at || '')))[0];
+      pdfRel = eigen ? eigen.papier_pdf_path : ((isGlobalAdmin || isAusschussForStweg) && neueste ? neueste.papier_pdf_path : null);
+    }
+    if (!pdfRel) return res.status(400).json({ error: 'Keine signierte PDF hochgeladen' });
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) return res.status(503).json({ error: 'KI-Prüfung nicht konfiguriert' });
 
     // PDF laden + an Gotenberg für PDF→PNG-Konversion senden (Vision-Check)
-    const fullPath = vollmachtPdfPfad(v.papier_pdf_path);
+    const fullPath = vollmachtPdfPfad(pdfRel);
     if (!fullPath) return res.status(400).json({ error: 'Ungültiger PDF-Pfad' });
     const pdfBuf = await fs.readFile(fullPath);
 
@@ -26589,6 +26670,20 @@ app.get('/api/vollmachten/:id/pdf', authMiddleware, async (req, res) => {
     const involved = await vmIsUserVollmachtgeber(id, req.user.email, v.vollmachtgeber_email)
                   || (v.bevollmaechtigter_email || '').toLowerCase() === userEmail;
     if (!isGlobalAdmin && !isAusschussForStweg && !involved) return res.status(403).json({ error: 'Kein Zugriff' });
+    // S5-3-1: ?geber=<Zeilen-ID> liefert den Papier-Upload eines einzelnen
+    // Gebers — fuer Admin/Ausschuss und den Geber selbst.
+    if (req.query.geber !== undefined) {
+      const g = (v.vollmachtgeber_liste || []).find(x => Number(x.id) === parseInt(req.query.geber, 10));
+      const darf = g && (isGlobalAdmin || isAusschussForStweg || (g.email || '').toLowerCase() === userEmail);
+      const gPfad = darf ? vollmachtPdfPfad(g.papier_pdf_path) : null;
+      if (!gPfad) return res.status(404).json({ error: 'Keine Datei für diesen Vollmachtgeber' });
+      try {
+        const gBuf = await fs.readFile(gPfad);
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="vollmacht-${v.doc_hash || id}-signed-vg${g.id}.pdf"`);
+        return res.send(gBuf);
+      } catch (e) { return res.status(404).json({ error: 'Datei nicht lesbar' }); }
+    }
     // Wenn signierte Papier-Version hochgeladen wurde und nicht explizit
     // ?template=1 angefordert ist, die hochgeladene ausliefern.
     const papierPfad = vollmachtPdfPfad(v.papier_pdf_path);
@@ -27950,6 +28045,8 @@ async function initDB() {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         CONSTRAINT vmvg_sig_chk CHECK (signatur_typ IS NULL OR signatur_typ IN ('digital','papier'))
       );
+      -- S5-3-1: Papier-Upload eines einzelnen Gebers gehoert zu seiner Zeile.
+      ALTER TABLE vollmachten_vollmachtgeber ADD COLUMN IF NOT EXISTS papier_pdf_path TEXT;
       CREATE INDEX IF NOT EXISTS idx_vmvg_vollmacht ON vollmachten_vollmachtgeber(vollmacht_id);
       CREATE INDEX IF NOT EXISTS idx_vmvg_email ON vollmachten_vollmachtgeber(LOWER(email));
 
