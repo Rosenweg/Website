@@ -14473,10 +14473,10 @@ app.post('/api/mail-compose', authMiddleware, requirePermission('mail-compose', 
     let mailCc = b.mail_cc;
     let mailReplyTo = b.mail_reply_to;
     // Freigabe-Pflicht bestimmt der Server, nie der Client (requires_approval im Body
-    // wird ignoriert): Direktversand nur fuer Technik/Praesident oder an einen
-    // Stammempfaenger mit Direktversand, dessen Adressen nicht veraendert wurden.
-    const userGroups = req.user.groups || [];
-    let requiresApproval = !(isTechnik(userGroups) || isPraesident(userGroups));
+    // wird ignoriert): Direktversand nur an einen Stammempfaenger mit Direktversand,
+    // dessen Adressen nicht veraendert wurden — auch fuer Technik/Praesident, damit
+    // freie Mails immer durchs Vier-Augen-Prinzip (Outbox) gehen.
+    let requiresApproval = true;
     let sourceType = 'ad-hoc';
     let sourceId = null;
     let firma = null;
@@ -14503,7 +14503,9 @@ app.post('/api/mail-compose', authMiddleware, requirePermission('mail-compose', 
         const erlaubt = new Set(adrListe([e.email, ...(e.default_cc || '').split(','),
           ...(e.kontakte || []).map(k => k && k.email)].filter(Boolean)));
         const adressenOk = [...adrListe(mailTo), ...adrListe(mailCc)].every(a => erlaubt.has(a));
-        const replyOk = adrListe(mailReplyTo).every(a => a === String(e.default_reply_to || '').trim().toLowerCase());
+        // default_reply_to kann mehrere Adressen enthalten -> als Menge vergleichen
+        const erlaubtReply = new Set(adrListe(e.default_reply_to));
+        const replyOk = adrListe(mailReplyTo).every(a => erlaubtReply.has(a));
         if (adressenOk && replyOk) requiresApproval = false;
       }
     }
@@ -15343,7 +15345,10 @@ async function mqttUserByUsername(username) {
 app.post('/api/mqtt/token', authMiddleware, async (req, res) => {
   try {
     const groups = req.user.groups || [];
-    const isTech = !!req.user.isAdmin || isTechnik(groups);
+    // Gleiche Regel wie der Broker (mqttUserByUsername) und der Passwort-Login:
+    // nur Gruppen zaehlen, nicht role=admin — sonst zeigt das Token Superuser an,
+    // die der Broker dann verweigert.
+    const isTech = isTechnik(groups) || isPraesident(groups);
     const email = String(req.user.email).toLowerCase();
     // Eindeutiger Username je Token: die ACL-Pruefung kennt nur den Usernamen. Der
     // aus der E-Mail abgeleitete Name kollidierte (a+b@ und a_b@ -> a_b@) bzw. konnte
@@ -17320,7 +17325,7 @@ app.post('/api/pbx/call-notify', requirePbxSecret, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('[pbx-call-notify] error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: fehlerFuerClient(err, 'Benachrichtigung fehlgeschlagen') });
   }
 });
 
@@ -17336,6 +17341,13 @@ app.post('/api/pbx/voicemail-reklamation', requirePbxSecret, async (req, res) =>
     const analysis = req.body?.analysis || {};
     if (!analysis.is_defekt || !analysis.defekt_beschreibung) {
       return res.json({ ok: true, reklamation_id: null, reason: 'kein Defekt erkannt' });
+    }
+    // Caller-ID ist faelschbar: gleiche Grenze wie /api/pbx/voicemail — je Nummer
+    // 3 und insgesamt 20 Auto-Reklamationen pro Tag (gemeinsame Zaehler).
+    if (!rateLimitGuard('pbx-auto-rekl', callerId, 3, 24 * 60 * 60 * 1000).ok
+        || !rateLimitGuard('pbx-auto-rekl-gesamt', 'alle', 20, 24 * 60 * 60 * 1000).ok) {
+      console.warn(`[pbx-voicemail-reklamation] Limit erreicht (caller=${callerId}) — keine Reklamation`);
+      return res.json({ ok: true, reklamation_id: null, reason: 'Limit erreicht' });
     }
     const normCaller = normalizePhone(callerId);
     let personId = null;
@@ -17359,7 +17371,7 @@ app.post('/api/pbx/voicemail-reklamation', requirePbxSecret, async (req, res) =>
     res.json({ ok: true, reklamation_id: reklamationId, person_id: personId });
   } catch (err) {
     console.error('[pbx-voicemail-reklamation] error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: fehlerFuerClient(err, 'Reklamation fehlgeschlagen') });
   }
 });
 

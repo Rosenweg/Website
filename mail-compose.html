@@ -138,7 +138,7 @@
     document.getElementById('f-reply').value = e.default_reply_to || '';
     document.getElementById('approval-info').innerHTML = e.requires_approval !== false
       ? 'Die Mail wird in die <strong>Outbox</strong> gestellt und braucht Freigabe (Technik / Präsident) vor dem Versand.'
-      : '✓ Dieser Empfänger ist als <strong>Direktversand</strong> konfiguriert — die Mail geht ohne Freigabe sofort raus.';
+      : '✓ Dieser Empfänger ist als <strong>Direktversand</strong> konfiguriert — die Mail geht ohne Freigabe sofort raus, solange An/CC/Antwort-an nur Adressen aus den Stammdaten enthalten. Sonst geht sie in die <strong>Outbox</strong> zur Freigabe.';
   }
 
   function onFiles(e) {
