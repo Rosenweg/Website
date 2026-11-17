@@ -482,8 +482,8 @@
     // ─── Erlaubte Zähler-Topics (Nicht-Technik) ───────────────────────
     async function meterTopicsFor(user) {
         try {
-            // E-Mail und Gruppen nimmt der Server aus der Anmeldung (user bleibt fuer die Signatur).
-            const resp = await AuthentikAuth.apiFetch('/api/energy/meine-zaehler?gemeinschaft=1');
+            // Backend nimmt E-Mail und Gruppen aus der Sitzung (user bleibt fuer die Signatur).
+            const resp = await AuthentikAuth.apiFetch('/api/energie/meine-zaehler?gemeinschaft=1');
             const meters = await resp.json();
             if (!Array.isArray(meters)) return [];
             // nur erstes '-' -> '/'  (energy/<haus>/<bereich>/#)

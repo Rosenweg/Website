@@ -783,7 +783,7 @@ const app = express();
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://www.rosenweg4303.ch';
 app.use(cors({ origin: CORS_ORIGIN.split(',') }));
 
-// Admin-Auth fuer schreibende Endpunkte (Bearer-Token, nur das Backend kennt ihn).
+// Admin-Auth fuer schreibende und personenbezogene Endpunkte (Bearer-Token, nur das Backend kennt ihn).
 // Fail closed: ohne ADMIN_API_KEY sind alle Admin-Endpunkte gesperrt (503).
 // Jeder Admin-Aufruf wird protokolliert (Methode, Pfad, Quell-IP, Ergebnis) —
 // nie der Token selbst.
@@ -809,7 +809,11 @@ function adminAuth(req, res, next) {
   const fwd = req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || '';
   let outcome;
   res.on('finish', () => {
-    console.log(`[admin] ${new Date().toISOString()} ${req.method} ${req.originalUrl} src=${src}` +
+    // Erfolgreiche Lese-Aufrufe (Backend fragt bei jedem MQTT-ACL-Check) nicht
+    // protokollieren; E-Mail-Adressen im Pfad nie ins Log.
+    if (req.method === 'GET' && outcome === 'ok') return;
+    const url = String(req.originalUrl || '').replace(/[^/?&=]+(?:@|%40)[^/?&=]+/gi, '<mail>');
+    console.log(`[admin] ${new Date().toISOString()} ${req.method} ${url} src=${src}` +
       `${fwd ? ` fwd=${String(fwd).slice(0, 100)}` : ''} auth=${outcome} status=${res.statusCode}`);
   });
   if (!ADMIN_API_KEY) {
@@ -1510,7 +1514,11 @@ app.delete('/api/energy/tariffs/:id', adminAuth, async (req, res) => {
 });
 
 // --- User-Meter Assignment ---
-app.get('/api/energy/meters/:meterId/users', async (req, res) => {
+// Lesen ist wie Schreiben nur mit Admin-Token: die Liste enthaelt E-Mail-Adressen
+// und Namen der Bewohner, /api/energy/ ist per nginx oeffentlich. Am 16./17.11.2026
+// wurden darueber Adressen abgegriffen und danach fuer Code-Raten benutzt.
+// energie-config.html liest ueber den Backend-Proxy /api/energie-admin.
+app.get('/api/energy/meters/:meterId/users', adminAuth, async (req, res) => {
   try {
     const result = await pool.query(
       'SELECT * FROM meter_users WHERE meter_id = $1 ORDER BY user_name',
@@ -1594,7 +1602,10 @@ app.delete('/api/energy/meters/:meterId/groups/:groupName', adminAuth, async (re
 });
 
 // Get meters for a specific user (by email OR group membership)
-app.get('/api/energy/user/:email/meters', async (req, res) => {
+// Nur mit Admin-Token: sonst verraet die Antwort zu jeder Adresse die Wohnung
+// (und ?groups= liesse sich frei behaupten). Browser fragen ueber das Backend
+// (/api/energie/meine-zaehler), das E-Mail und Gruppen aus der Sitzung nimmt.
+app.get('/api/energy/user/:email/meters', adminAuth, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT DISTINCT m.*, COALESCE(mu.role, 'viewer') as role FROM meters m

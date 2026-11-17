@@ -15143,13 +15143,16 @@ const ENERGY_ADMIN_ROUTES = [
   ['POST', /^\/tariffs$/],
   ['PUT', /^\/tariffs\/[^/]+$/],
   ['DELETE', /^\/tariffs\/[^/]+$/],
+  ['GET', /^\/meters\/[^/]+\/users$/],          // Zuordnungsliste (E-Mails) — nur hier, nicht oeffentlich
   ['POST', /^\/meters\/[^/]+\/(users|groups)$/],
   ['DELETE', /^\/meters\/[^/]+\/(users|groups)\/[^/]+$/],
 ];
 function energyAdminHeaders(extra = {}) {
   return { ...extra, Authorization: `Bearer ${ENERGY_ADMIN_API_KEY}` };
 }
-app.use('/api/energie-admin', authMiddleware, requirePermission('energie-config', 'write'), async (req, res) => {
+// Lesen (GET) braucht energie-config/read, alles andere /write.
+const energyAdminRecht = (req, res, next) => requirePermission('energie-config', req.method === 'GET' ? 'read' : 'write')(req, res, next);
+app.use('/api/energie-admin', authMiddleware, energyAdminRecht, async (req, res) => {
   const path = req.path;
   if (!ENERGY_ADMIN_ROUTES.some(([m, re]) => m === req.method && re.test(path))) {
     return res.status(404).json({ error: 'Unbekannter Energie-Admin-Endpunkt' });
@@ -15163,11 +15166,35 @@ app.use('/api/energie-admin', authMiddleware, requirePermission('energie-config'
       body: hasBody ? JSON.stringify(req.body || {}) : undefined,
       signal: AbortSignal.timeout(20000),
     });
-    console.log(`[energie-admin] ${req.user?.email || req.user?.username || '-'} ${req.method} ${path} -> ${upstream.status}`);
+    if (req.method !== 'GET') console.log(`[energie-admin] ${req.user?.email || req.user?.username || '-'} ${req.method} ${path} -> ${upstream.status}`);
     const text = await upstream.text();
     res.status(upstream.status).type(upstream.headers.get('content-type') || 'application/json').send(text);
   } catch (err) {
     console.error('[energie-admin]', req.method, path, err.message);
+    res.status(502).json({ error: 'Energy-Collector nicht erreichbar' });
+  }
+});
+
+// Zaehler der angemeldeten Person (zaehler-PWA, Profil, MQTT-Seite). Frueher fragten
+// die Browser den Collector direkt (/api/energy/user/:email/meters?groups=…) —
+// oeffentlich, mit frei waehlbarer Adresse und frei behaupteten Gruppen. Jetzt
+// kommen E-Mail und Gruppen aus der Sitzung. ?gemeinschaft=1 schliesst die ueber
+// Gruppen zugeordneten Zaehler ein (sonst nur persoenlich zugeordnete).
+async function collectorZaehlerFuer(email, groups) {
+  const url = `${ENERGY_COLLECTOR_URL}/api/energy/user/${encodeURIComponent(email)}/meters?groups=${encodeURIComponent((groups || []).join(','))}`;
+  const r = await fetch(url, { headers: energyAdminHeaders(), signal: AbortSignal.timeout(5000) });
+  if (!r.ok) throw new Error(`Collector ${r.status}`);
+  const meters = await r.json();
+  return Array.isArray(meters) ? meters : [];
+}
+app.get('/api/energie/meine-zaehler', authMiddleware, async (req, res) => {
+  try {
+    const email = String(req.user?.email || '').toLowerCase();
+    if (!email) return res.json([]);
+    const groups = req.query.gemeinschaft === '1' ? (req.user.groups || []) : [];
+    res.json(await collectorZaehlerFuer(email, groups));
+  } catch (err) {
+    console.error('[energie/meine-zaehler]', err.message);
     res.status(502).json({ error: 'Energy-Collector nicht erreichbar' });
   }
 });
@@ -15503,11 +15530,9 @@ app.post('/api/mqtt/aclcheck', mqttBrokerGuard, async (req, res) => {
     const m = /^energy\/([^/]+)\/([^/]+)/.exec(String(topic || ''));
     if (!m) return res.status(403).end();
     const meterId = `${m[1]}-${m[2]}`;
-    const url = `${ENERGY_COLLECTOR_URL}/api/energy/user/${encodeURIComponent(u.email)}/meters?groups=${encodeURIComponent(groups.join(','))}`;
-    const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
-    if (!resp.ok) return res.status(403).end();
-    const meters = await resp.json();
-    const allowed = Array.isArray(meters) && meters.some(x => x.id === meterId);
+    let meters;
+    try { meters = await collectorZaehlerFuer(u.email, groups); } catch { return res.status(403).end(); }
+    const allowed = meters.some(x => x.id === meterId);
     return res.status(allowed ? 200 : 403).end();
   } catch (err) { console.error('[mqtt] aclcheck:', err.message); return res.status(500).end(); }
 });
@@ -15729,11 +15754,7 @@ async function mqttTopicsForUser(email, groups) {
   const gl = (groups || []).map(g => String(g).toLowerCase());
   if (gl.includes('technik') || gl.includes('praesident') || gl.includes('präsident')) return ['energy/#'];
   try {
-    const url = `${ENERGY_COLLECTOR_URL}/api/energy/user/${encodeURIComponent(email)}/meters?groups=${encodeURIComponent((groups || []).join(','))}`;
-    const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
-    if (!r.ok) return [];
-    const meters = await r.json();
-    if (!Array.isArray(meters)) return [];
+    const meters = await collectorZaehlerFuer(email, groups);
     return meters.map(m => {
       const id = String(m.id || ''); const i = id.indexOf('-');
       return i > 0 ? `energy/${id.slice(0, i)}/${id.slice(i + 1)}/#` : `energy/${id}/#`;
