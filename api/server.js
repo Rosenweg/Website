@@ -18589,17 +18589,37 @@ app.get('/api/reklamationen/auto-assign', authMiddleware, requirePermission('rek
     res.json({ rules: r.rows });
   } catch (e) { console.error('[rekl-auto-assign-get]', e); res.status(500).json({ error: 'Fehler' }); }
 });
+// STWEG-Trennung fuer Reklamations-Stammdaten (Auto-Zuweisung, Melde-Orte):
+// Technik/Praesident alles; sonst nur STWEGs, in deren Ausschuss man sitzt.
+// stweg 0/NULL gilt fuer alle STWEGs -> nur Technik/Praesident.
+function reklStwegSchreibbar(groups, stweg) {
+  const g = groups || [];
+  if (isTechnik(g) || isPraesident(g)) return true;
+  const n = parseInt(stweg, 10);
+  return Number.isFinite(n) && n > 0 && getAusschussStwegs(g).has(n);
+}
 // Regeln komplett setzen (Upsert pro Kategorie; leeres Ziel = Regel loeschen).
 app.put('/api/reklamationen/auto-assign', authMiddleware, requirePermission('reklamationen', 'write'), async (req, res) => {
   const rules = Array.isArray(req.body?.rules) ? req.body.rules : [];
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // Die Oberflaeche schickt immer ALLE Regeln zurueck; fremde STWEGs werden
+    // darum nicht abgelehnt, solange sie unveraendert sind.
+    const bisher = new Map((await client.query('SELECT kategorie, stweg, zugewiesen_an, handwerker_id FROM reklamation_auto_assign')).rows
+      .map(x => [`${x.kategorie}|${x.stweg}`, x]));
     for (const ru of rules) {
       const kat = String(ru.kategorie || '').slice(0, 60); if (!kat) continue;
       const st = Number.isFinite(parseInt(ru.stweg, 10)) ? parseInt(ru.stweg, 10) : 0;
       const za = ru.zugewiesen_an ? String(ru.zugewiesen_an).slice(0, 200) : null;
       const hw = Number.isFinite(parseInt(ru.handwerker_id, 10)) ? parseInt(ru.handwerker_id, 10) : null;
+      if (!reklStwegSchreibbar(req.user.groups, st)) {
+        const alt = bisher.get(`${kat}|${st}`);
+        const unveraendert = alt ? (alt.zugewiesen_an || null) === za && (alt.handwerker_id ?? null) === hw : (!za && !hw);
+        if (unveraendert) continue;
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: st ? `Keine Berechtigung für Regeln der STWEG ${st}` : 'Regeln für alle STWEGs darf nur die Technik ändern' });
+      }
       if (!za && !hw) { await client.query('DELETE FROM reklamation_auto_assign WHERE kategorie = $1 AND stweg = $2', [kat, st]); continue; }
       await client.query(
         `INSERT INTO reklamation_auto_assign (kategorie, stweg, zugewiesen_an, handwerker_id, updated_at)
@@ -18881,6 +18901,7 @@ app.post('/api/reklamation-orte', authMiddleware, requirePermission('reklamation
     const name = String(b.name || '').trim().slice(0, 200);
     if (!name) return res.status(400).json({ error: 'Name erforderlich' });
     const stweg = Number.isFinite(parseInt(b.stweg, 10)) ? parseInt(b.stweg, 10) : null;
+    if (!reklStwegSchreibbar(req.user.groups, stweg)) return res.status(403).json({ error: 'Keine Berechtigung für diese STWEG' });
     const kategorie = VALID_KAT.includes(b.kategorie) ? b.kategorie : null;
     // Eindeutigen Code erzeugen (sehr unwahrscheinliche Kollision -> wenige Retries).
     let code = null;
@@ -18902,10 +18923,18 @@ app.put('/api/reklamation-orte/:id', authMiddleware, requirePermission('reklamat
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
     const b = req.body || {};
+    // Bestehender Ort UND neue STWEG muessen zur eigenen Berechtigung passen.
+    const vorher = await pool.query('SELECT stweg FROM reklamation_orte WHERE id = $1', [id]);
+    if (vorher.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    if (!reklStwegSchreibbar(req.user.groups, vorher.rows[0].stweg)) return res.status(403).json({ error: 'Keine Berechtigung für diesen Ort' });
     const updates = []; const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
     if (b.name !== undefined) { const n = String(b.name || '').trim().slice(0, 200); if (!n) return res.status(400).json({ error: 'Name erforderlich' }); push('name', n); }
-    if (b.stweg !== undefined) push('stweg', Number.isFinite(parseInt(b.stweg, 10)) ? parseInt(b.stweg, 10) : null);
+    if (b.stweg !== undefined) {
+      const neu = Number.isFinite(parseInt(b.stweg, 10)) ? parseInt(b.stweg, 10) : null;
+      if (!reklStwegSchreibbar(req.user.groups, neu)) return res.status(403).json({ error: 'Keine Berechtigung für diese STWEG' });
+      push('stweg', neu);
+    }
     if (b.kategorie !== undefined) push('kategorie', VALID_KAT.includes(b.kategorie) ? b.kategorie : null);
     if (b.aktiv !== undefined) push('aktiv', !!b.aktiv);
     if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
@@ -18922,6 +18951,9 @@ app.delete('/api/reklamation-orte/:id', authMiddleware, requirePermission('rekla
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
+    const vorher = await pool.query('SELECT stweg FROM reklamation_orte WHERE id = $1', [id]);
+    if (vorher.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
+    if (!reklStwegSchreibbar(req.user.groups, vorher.rows[0].stweg)) return res.status(403).json({ error: 'Keine Berechtigung für diesen Ort' });
     const r = await pool.query('DELETE FROM reklamation_orte WHERE id = $1 RETURNING id', [id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     res.json({ ok: true });
@@ -19178,6 +19210,22 @@ async function technikBotResolve(reklId, apply) {
     // Zeitpunkt nur uebernehmen, wenn gueltig und nicht in der Zukunft.
     const zt = v.zeitpunkt_iso ? new Date(v.zeitpunkt_iso) : null;
     v.zeitpunkt_iso = (zt && !isNaN(zt) && zt <= new Date()) ? zt.toISOString() : null;
+    // Wer und wann kommen aus der Beleg-Chatzeile selbst, nicht aus der LLM-Antwort
+    // (sonst koennte das Modell die Arbeit beliebigen Namen zuschreiben). Der
+    // namentlich zugeschriebene Arbeitsschritt wird nur uebernommen, wenn genau
+    // eine Person die Zeile schrieb und sie diese Reklamation (#id) nennt.
+    const belegZeilen = msgs.filter(m => normWs(m.body).includes(beleg));
+    const belegWer = [...new Set(belegZeilen.map(m => String(m.wer || '')))];
+    const idRe = new RegExp(`#\\s*${r.id}(?!\\d)`);
+    const zeileNenntId = belegWer.length === 1 && belegZeilen.some(m => idRe.test(String(m.body || '')));
+    if (zeileNenntId) {
+      v.ausgefuehrt_von = belegWer[0] || null;
+      v.zeitpunkt_iso = new Date(belegZeilen[0].created_at).toISOString();
+    } else {
+      v.arbeitsschritt = null;
+      out.hinweis = 'Arbeitsschritt nicht uebernommen: Beleg-Chatzeile nennt #' + r.id + ' nicht eindeutig';
+    }
+    out.ausgefuehrt_von = v.ausgefuehrt_von;
     if (v.arbeitsschritt) {
       await pool.query(
         'INSERT INTO reklamation_events (reklamation_id, who, event, created_at) VALUES ($1,$2,$3,COALESCE($4::timestamptz, NOW()))',
@@ -19597,17 +19645,29 @@ async function ispCheckDns(hostname) {
 // einem anderen Eintrag, entscheidet ein Admin. ownerEmail: Eintraege derselben
 // Person zaehlen nicht als Konflikt; ohne ownerEmail zaehlt jeder Eintrag.
 // ausser: { tabelle, id } — den gerade geprueften Eintrag selbst ausnehmen.
+// Auch Geschwister unter derselben registrierbaren Domain (letzte zwei Labels;
+// fuer .co.uk u.ae. eine bewusst grobe Naeherung) zaehlen: wer fremde
+// a.example.ch betreibt, soll b.example.ch nicht ohne Admin bekommen.
+// DB-Fehler -> fail-closed (Konflikt), sonst ginge alles ungeprueft durch.
 async function ispHostKonflikt(hostname, { ownerEmail = null, ausser = null } = {}) {
   const h = String(hostname || '').toLowerCase().replace(/\.$/, '').replace(/^\*\./, '');
   if (!h) return null;
-  const r = await pool.query(
-    `SELECT t, id, LOWER(h) AS h, LOWER(COALESCE(owner_email, '')) AS owner FROM (
-       SELECT 'isp_redirects' AS t, id, source_host AS h, owner_email FROM isp_redirects
-       UNION ALL SELECT 'isp_reverse_proxy_routes', id, hostname, owner_email FROM isp_reverse_proxy_routes
-       UNION ALL SELECT 'isp_mail_relays', id, domain, owner_email FROM isp_mail_relays
-     ) x
-     WHERE LOWER(h) = $1 OR $1 LIKE '%.' || LOWER(REPLACE(h, '*.', '')) OR LOWER(h) LIKE '%.' || $1`,
-    [h]).catch(() => ({ rows: [] }));
+  const reg = h.split('.').slice(-2).join('.');
+  let r;
+  try {
+    r = await pool.query(
+      `SELECT t, id, LOWER(h) AS h, LOWER(COALESCE(owner_email, '')) AS owner FROM (
+         SELECT 'isp_redirects' AS t, id, source_host AS h, owner_email FROM isp_redirects
+         UNION ALL SELECT 'isp_reverse_proxy_routes', id, hostname, owner_email FROM isp_reverse_proxy_routes
+         UNION ALL SELECT 'isp_mail_relays', id, domain, owner_email FROM isp_mail_relays
+       ) x
+       WHERE LOWER(h) = $1 OR $1 LIKE '%.' || LOWER(REPLACE(h, '*.', '')) OR LOWER(h) LIKE '%.' || $1
+          OR LOWER(REPLACE(h, '*.', '')) = $2 OR LOWER(h) LIKE '%.' || $2`,
+      [h, reg]);
+  } catch (err) {
+    console.error('[isp] Ueberschneidungs-Pruefung fehlgeschlagen:', err.message);
+    return 'Überschneidungs-Prüfung nicht möglich — ein Admin muss entscheiden';
+  }
   const own = String(ownerEmail || '').toLowerCase();
   const fremd = r.rows.find(x => !(ausser && x.t === ausser.tabelle && Number(x.id) === Number(ausser.id))
     && !(own && x.owner === own));
@@ -20549,7 +20609,7 @@ app.post('/api/isp/redirects/:id/recheck-dns', authMiddleware, async (req, res) 
       [upd.approval_status, upd.dns_verified_at, upd.last_dns_check_at, upd.active, upd.approval_reason, id],
     );
     res.json({ ...check, updated: upd });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err, 'DNS-Prüfung fehlgeschlagen') }); }
 });
 
 // DNS selbst einrichten — nur fuer Namen in unseren eigenen Zonen. Owner
@@ -20621,7 +20681,7 @@ app.post('/api/isp/reverse-proxy/:id/recheck-dns', authMiddleware, async (req, r
       [upd.approval_status, upd.dns_verified_at, upd.last_dns_check_at, upd.active, upd.approval_reason, id],
     );
     res.json({ ...check, updated: upd });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err, 'DNS-Prüfung fehlgeschlagen') }); }
 });
 
 // Liefert UniFi-Switches mit Ports + alle VLAN-Netze fuer Admin-Dropdowns
@@ -21239,6 +21299,11 @@ app.post('/api/stations/:id/tunnel', stationsRouter.appSession, async (req, res)
     // Gleiches Format wie bei der Registrierung (routes/stations.js); der Name geht
     // in die wg0.conf von wg-control — Zeilenumbrueche wuerden dort Zeilen einschleusen.
     if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(stationId)) return res.status(400).json({ error: 'Ungültige Stationskennung' });
+    // Nur fuer registrierte, nicht gesperrte/zurueckgezogene Stationen — sonst
+    // liessen sich unter Fantasie-Kennungen beliebig Peers anlegen.
+    const station = await pool.query(
+      "SELECT 1 FROM stations WHERE id = $1 AND revoked_at IS NULL AND status = 'aktiv'", [stationId]);
+    if (!station.rowCount) return res.status(404).json({ error: 'Station unbekannt oder gesperrt' });
 
     const email = (req.appUser?.email || '').toLowerCase();
     if (!email) {
@@ -21280,11 +21345,16 @@ app.post('/api/stations/:id/tunnel', stationsRouter.appSession, async (req, res)
     // Dass die Anzeige nicht eindeutig ist, geht in Ordnung: die Station
     // loescht die Verbindungen einer Person beim Abmelden wieder, es ist also
     // immer nur ein Satz da.
+    // Der lokale Teil allein ist nicht eindeutig (stefan@a.ch / stefan@b.ch);
+    // darum haengt ein kurzer Hash der ganzen Adresse dran.
     const kurz = email.split('@')[0].replace(/[^a-z0-9._-]/gi, '').slice(0, 32);
-    const gewuenscht = [{ zweck: 'wohnung', vlan: wohnungsVlan, name: `${stationId}-${kurz}`,
+    const adrHash = crypto.createHash('sha256').update(email).digest('hex').slice(0, 8);
+    const basis = `${stationId}-${kurz.slice(0, 16)}-${adrHash}`;
+    // altName: Namensschema vor dem Hash — nur zum Abraeumen eigener Altbestaende.
+    const gewuenscht = [{ zweck: 'wohnung', vlan: wohnungsVlan, name: basis, altName: `${stationId}-${kurz}`,
                           anzeige: 'Rosenweg-VPN', autoconnect: true }];
     if (isTechnik(gruppen) || isPraesident(gruppen)) {
-      gewuenscht.push({ zweck: 'technik', vlan: 9, name: `${stationId}-${kurz}-vlan9`,
+      gewuenscht.push({ zweck: 'technik', vlan: 9, name: `${basis}-vlan9`, altName: `${stationId}-${kurz}-vlan9`,
                         anzeige: 'Technik-VPN', autoconnect: false });
     }
 
@@ -21305,10 +21375,12 @@ app.post('/api/stations/:id/tunnel', stationsRouter.appSession, async (req, res)
     for (const wunsch of gewuenscht) {
       // D-3: nur unbedenkliche Zeichen in den wg-control-Namen.
       if (!/^[\w .@-]{1,80}$/.test(wunsch.name)) return res.status(400).json({ error: 'Ungültiger Tunnelname' });
-      // Ein zweiter Einrichtungslauf soll keine Peer-Leichen hinterlassen.
+      // Ein zweiter Einrichtungslauf soll keine Peer-Leichen hinterlassen —
+      // aber nur EIGENE abraeumen (gleicher Name eines anderen Kontos bleibt).
       const alt = await pool.query(
-        'SELECT id, username FROM isp_vpn_accounts WHERE bezeichnung = $1 AND active = true',
-        [wunsch.name],
+        `SELECT id, username FROM isp_vpn_accounts
+          WHERE bezeichnung IN ($1, $2) AND active = true AND LOWER(user_email) = $3 AND notizen LIKE $4 || ', VLAN %'`,
+        [wunsch.name, wunsch.altName, email, `Station ${stationId}`],
       );
       for (const row of alt.rows) {
         await wgControl('DELETE', `/peers/${row.username}`).catch(() => {});
