@@ -4466,7 +4466,7 @@ app.post('/api/verteiler/send', authMiddleware, adminOnly, async (req, res) => {
 // ENERGIE/ZÄHLER (replaces n8n zähler webhooks)
 // ═══════════════════════════════════════════════════════════════════
 
-app.post('/api/zähler/benutzer', authMiddleware, adminOnly, async (req, res) => {
+app.post(encodeURI('/api/zähler/benutzer'), authMiddleware, adminOnly, async (req, res) => {
   const { email, name, wohnung, stweg, zugriff } = req.body;
   try {
     const result = await pool.query(
@@ -4484,7 +4484,7 @@ app.post('/api/zähler/benutzer', authMiddleware, adminOnly, async (req, res) =>
 
 // Schreiben/Lesen nur mit Zaehler-Recht (vorher reichte jede Anmeldung, um fremde
 // Verbrauchsdaten zu lesen oder Messwerte zu faelschen).
-app.post('/api/zähler/daten', authMiddleware, requirePermission('zähler', 'write'), async (req, res) => {
+app.post(encodeURI('/api/zähler/daten'), authMiddleware, requirePermission('zähler', 'write'), async (req, res) => {
   // Receives meter data from ioBroker/webhook
   const { zaehler_id, wert, timestamp } = req.body || {};
   if (!zaehler_id || wert == null) return res.status(400).json({ error: 'zaehler_id und wert erforderlich' });
@@ -4501,7 +4501,7 @@ app.post('/api/zähler/daten', authMiddleware, requirePermission('zähler', 'wri
   }
 });
 
-app.get('/api/zähler/daten/:zaehler_id', authMiddleware, requirePermission('zähler', 'read'), async (req, res) => {
+app.get(encodeURI('/api/zähler/daten/:zaehler_id'), authMiddleware, requirePermission('zähler', 'read'), async (req, res) => {
   const { von, bis } = req.query;
   try {
     const result = await pool.query(
@@ -9139,7 +9139,7 @@ function ulStwegErlaubt(groups, stweg) {
 }
 
 // GET /api/unterschriftenliste/:hash/rueckläufe — Liste aller Briefe + Rücklauf-Status
-app.get('/api/unterschriftenliste/:hash/rueckläufe', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
+app.get(encodeURI('/api/unterschriftenliste/:hash/rueckläufe'), authMiddleware, requirePermission('wohnungsverwaltung', 'read'), async (req, res) => {
   try {
     const hash = req.params.hash.toUpperCase();
     const snap = await pool.query(
@@ -9171,7 +9171,7 @@ app.get('/api/unterschriftenliste/:hash/rueckläufe', authMiddleware, requirePer
 });
 
 // PUT /api/unterschriftenliste/:hash/rueckläufe/:idx — Rücklauf-Eintrag aktualisieren
-app.put('/api/unterschriftenliste/:hash/rueckläufe/:idx', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), async (req, res) => {
+app.put(encodeURI('/api/unterschriftenliste/:hash/rueckläufe/:idx'), authMiddleware, requirePermission('wohnungsverwaltung', 'write'), async (req, res) => {
   try {
     const hash = req.params.hash.toUpperCase();
     const idx = parseInt(req.params.idx);
@@ -12655,7 +12655,7 @@ function sanitizeVertrag(b) {
   };
 }
 
-app.get('/api/handwerker/:id/verträge', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
+app.get(encodeURI('/api/handwerker/:id/verträge'), authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige Handwerker-ID' });
@@ -12670,7 +12670,7 @@ app.get('/api/handwerker/:id/verträge', authMiddleware, requirePermission('hand
   }
 });
 
-app.post('/api/handwerker/:id/verträge', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.post(encodeURI('/api/handwerker/:id/verträge'), authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungültige Handwerker-ID' });
@@ -12695,7 +12695,7 @@ app.post('/api/handwerker/:id/verträge', authMiddleware, requirePermission('han
   }
 });
 
-app.put('/api/handwerker/:id/verträge/:vid', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.put(encodeURI('/api/handwerker/:id/verträge/:vid'), authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const vid = parseInt(req.params.vid, 10);
@@ -12720,7 +12720,7 @@ app.put('/api/handwerker/:id/verträge/:vid', authMiddleware, requirePermission(
   }
 });
 
-app.delete('/api/handwerker/:id/verträge/:vid', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.delete(encodeURI('/api/handwerker/:id/verträge/:vid'), authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const vid = parseInt(req.params.vid, 10);
@@ -12738,7 +12738,7 @@ app.delete('/api/handwerker/:id/verträge/:vid', authMiddleware, requirePermissi
 });
 
 // Anstehende Wartungen über alle Handwerker
-app.get('/api/handwerker-verträge/anstehend', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
+app.get(encodeURI('/api/handwerker-verträge/anstehend'), authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
     const days = Math.min(365, Math.max(7, parseInt(req.query.days, 10) || 90));
     const result = await pool.query(
@@ -12759,7 +12759,7 @@ app.get('/api/handwerker-verträge/anstehend', authMiddleware, requirePermission
   }
 });
 
-app.get('/api/handwerker/:id/aufträge', authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
+app.get(encodeURI('/api/handwerker/:id/aufträge'), authMiddleware, requirePermission('handwerker', 'read'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: 'Ungültige Handwerker-ID' });
@@ -12789,7 +12789,7 @@ function sanitizeAuftrag(b) {
   };
 }
 
-app.post('/api/handwerker/:id/aufträge', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.post(encodeURI('/api/handwerker/:id/aufträge'), authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
@@ -12816,7 +12816,7 @@ app.post('/api/handwerker/:id/aufträge', authMiddleware, requirePermission('han
   }
 });
 
-app.put('/api/handwerker/:id/aufträge/:aid', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.put(encodeURI('/api/handwerker/:id/aufträge/:aid'), authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
@@ -12851,7 +12851,7 @@ app.put('/api/handwerker/:id/aufträge/:aid', authMiddleware, requirePermission(
   }
 });
 
-app.delete('/api/handwerker/:id/aufträge/:aid', authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
+app.delete(encodeURI('/api/handwerker/:id/aufträge/:aid'), authMiddleware, requirePermission('handwerker', 'write'), async (req, res) => {
   const client = await pool.connect();
   try {
     const id = parseInt(req.params.id, 10);
@@ -14795,7 +14795,7 @@ async function findEmpfaenger(kategorie, stweg) {
 }
 
 // CRUD-API
-app.get('/api/mail-empfänger', authMiddleware, requirePermission('mail-empfänger', 'read'), async (req, res) => {
+app.get(encodeURI('/api/mail-empfänger'), authMiddleware, requirePermission('mail-empfänger', 'read'), async (req, res) => {
   try {
     const kategorie = String(req.query.kategorie || '').trim();
     const stwegFilter = parseInt(req.query.stweg, 10);
@@ -14811,7 +14811,7 @@ app.get('/api/mail-empfänger', authMiddleware, requirePermission('mail-empfäng
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
-app.post('/api/mail-empfänger', authMiddleware, requirePermission('mail-empfänger', 'write'), async (req, res) => {
+app.post(encodeURI('/api/mail-empfänger'), authMiddleware, requirePermission('mail-empfänger', 'write'), async (req, res) => {
   try {
     const b = req.body || {};
     if (!b.kategorie || !EMPFAENGER_KATEGORIEN.includes(b.kategorie)) {
@@ -14836,7 +14836,7 @@ app.post('/api/mail-empfänger', authMiddleware, requirePermission('mail-empfän
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
-app.put('/api/mail-empfänger/:id', authMiddleware, requirePermission('mail-empfänger', 'write'), async (req, res) => {
+app.put(encodeURI('/api/mail-empfänger/:id'), authMiddleware, requirePermission('mail-empfänger', 'write'), async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Ungueltige ID' });
@@ -14866,7 +14866,7 @@ app.put('/api/mail-empfänger/:id', authMiddleware, requirePermission('mail-empf
   } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
-app.delete('/api/mail-empfänger/:id', authMiddleware, requirePermission('mail-empfänger', 'write'), async (req, res) => {
+app.delete(encodeURI('/api/mail-empfänger/:id'), authMiddleware, requirePermission('mail-empfänger', 'write'), async (req, res) => {
   try {
     await pool.query('DELETE FROM mail_empfaenger WHERE id = $1', [parseInt(req.params.id, 10)]);
     res.json({ success: true });
