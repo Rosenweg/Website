@@ -36,7 +36,8 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
+      // Nur eigene alte Versionen loeschen: alle Apps teilen sich den Cache-Speicher der Origin.
+      Promise.all(keys.filter((k) => k.startsWith('rosenweg-arbeit-') && k !== CACHE).map((k) => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
