@@ -58,6 +58,8 @@
             <script>
             (function() {
                 const STWEG_NR = 3;
+                // Eigene Escape-Funktion: globales esc() wird erst in spaeteren Skriptbloecken definiert
+                const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
                 const icons = {
                     Wohnung: { color: 'blue', svg: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>' },
                     Hobbyraum: { color: 'orange', svg: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>' },
@@ -74,15 +76,16 @@
                         const cards = [];
                         // Typ-Karten
                         for (const [typ, anzahl] of Object.entries(data.typen || {})) {
-                            const ic = icons[typ] || icons.Wohnung;
+                            const ic = (Object.prototype.hasOwnProperty.call(icons, typ) && icons[typ]) || icons.Wohnung;
                             cards.push(
                                 '<div class="bg-gradient-to-br from-' + ic.color + '-50 to-' + ic.color + '-100 p-6 rounded-lg border-2 border-' + ic.color + '-200">' +
                                     '<div class="flex items-center mb-3">' +
                                         '<svg class="h-10 w-10 text-' + ic.color + '-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">' + ic.svg + '</svg>' +
-                                        '<div><div class="text-3xl font-bold text-' + ic.color + '-600">' + anzahl + '</div>' +
-                                        '<div class="text-sm text-gray-600">' + typ + (anzahl !== 1 ? (typ === 'Wohnung' ? 'en' : '') : '') + '</div></div>' +
+                                        // typ stammt aus Wohnungsdaten (vom Bewohner setzbar) -> escapen
+                                        '<div><div class="text-3xl font-bold text-' + ic.color + '-600">' + esc(anzahl) + '</div>' +
+                                        '<div class="text-sm text-gray-600">' + esc(typ) + (anzahl !== 1 ? (typ === 'Wohnung' ? 'en' : '') : '') + '</div></div>' +
                                     '</div>' +
-                                    (typ === 'Wohnung' && data.belegung ? '<p class="text-sm text-gray-700">' + data.belegung.selbstbewohnt + ' Eigentuemer &bull; ' + data.belegung.vermietet + ' Vermietet' + (parseInt(data.belegung.leer) > 0 ? ' &bull; ' + data.belegung.leer + ' Leer' : '') + '</p>' : '') +
+                                    (typ === 'Wohnung' && data.belegung ? '<p class="text-sm text-gray-700">' + esc(data.belegung.selbstbewohnt) + ' Eigentuemer &bull; ' + esc(data.belegung.vermietet) + ' Vermietet' + (parseInt(data.belegung.leer) > 0 ? ' &bull; ' + esc(data.belegung.leer) + ' Leer' : '') + '</p>' : '') +
                                 '</div>'
                             );
                         }
@@ -200,7 +203,7 @@
     <script>
     (function() {
         const STWEG_NR = 3;
-        function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+        function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
         // Public endpoint: apartment data without personal info
         fetch('/api/stweg/' + STWEG_NR + '/wohnungen')
@@ -285,7 +288,7 @@
 
     <script>
     (function() {
-        function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+        function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
         const icons = {
             'ausschuss': { emoji: '&#128188;', color: 'blue', desc: 'Ausschuss-Mitglieder' },
@@ -424,7 +427,7 @@
         let accessDoors = [];
         let isAdmin = false;
 
-        function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+        function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
         async function loadWaschRooms() {
             const user = AuthentikAuth.getUser();
@@ -585,7 +588,7 @@
 
     <script>
     (function() {
-        function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+        function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
         const token = AuthentikAuth.getToken();
 
         // Kalender (STWEG + Kooperation merged)
@@ -684,7 +687,7 @@
                 const box = document.getElementById('latest-protokoll');
                 if (!box) return;
                 if (!token) { box.innerHTML = ''; return; }
-                const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+                const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
                 const dateOf = f => { const m = f.path.match(/(\d{4})[.\-](\d{2})[.\-](\d{2})/); if (!m) return null; const t = new Date(m[1]+'-'+m[2]+'-'+m[3]).getTime(); return isNaN(t) ? null : t; };
                 fetch('/api/documents', { headers: { Authorization: 'Bearer ' + token } })
                     .then(r => r.json())
@@ -726,7 +729,7 @@
     (function() {
         const token = AuthentikAuth.getToken();
         if (!token) { document.getElementById('docs-widget').innerHTML = ''; return; }
-        function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+        function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
         const fileIcons = {
             pdf: '&#128196;', docx: '&#128195;', doc: '&#128195;', xlsx: '&#128202;', xls: '&#128202;',

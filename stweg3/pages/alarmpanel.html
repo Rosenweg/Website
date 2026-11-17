@@ -143,7 +143,7 @@
 
     <script>
         const $ = id => document.getElementById(id);
-        const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
         let canManage = false, editId = null;
 
         function relTime(ts) {
@@ -155,7 +155,18 @@
         const typeIcon = t => t === 'smoke' ? '🔥' : '⛽';
         const statusLabel = s => ({ ok:'OK', alarm:'ALARM', offline:'Offline', unknown:'Wartet…' }[s] || 'Wartet…');
 
-        function sensorCard(s) {
+        // Knoepfe der Karten: Sensor per Index aus data-Attribut statt Name/JSON im onclick (XSS)
+        let angezeigteSensoren = [];
+        document.addEventListener('click', (e) => {
+            const b = e.target.closest('button[data-sensor-aktion]');
+            if (!b) return;
+            const s = angezeigteSensoren[Number(b.dataset.i)];
+            if (!s) return;
+            if (b.dataset.sensorAktion === 'test') testSensor(s.id, s.name);
+            else if (b.dataset.sensorAktion === 'edit') editSensor(s);
+            else if (b.dataset.sensorAktion === 'del') delSensor(s.id, s.name);
+        });
+        function sensorCard(s, i) {
             const eff = s.in_alarm ? 'alarm' : (['ok','offline'].includes(s.status) ? s.status : 'unknown');
             const cls = eff;
             let kv = `<dt>Typ</dt><dd>${s.device_type === 'smoke' ? 'Rauchmelder' : 'Gaswarner'}</dd>
@@ -163,15 +174,15 @@
             if (s.conn !== 'webhook') kv += `<dt>Host</dt><dd style="font-family:ui-monospace,monospace">${esc(s.host || '–')}</dd>`;
             kv += `<dt>Messwert</dt><dd>${esc(s.last_value || '–')}</dd>`;
             if (s.battery_percent != null) kv += `<dt>Batterie</dt><dd style="color:${s.battery_low?'#b91c1c':'inherit'}">${Math.round(s.battery_percent)}%${s.battery_low?' ⚠️':''}</dd>`;
-            if (s.gas_threshold_ppm != null) kv += `<dt>Schwelle</dt><dd>${s.gas_threshold_ppm} ppm</dd>`;
+            if (s.gas_threshold_ppm != null) kv += `<dt>Schwelle</dt><dd>${esc(s.gas_threshold_ppm)} ppm</dd>`;
             kv += `<dt>Letzter Alarm</dt><dd>${s.last_alarm_at ? relTime(s.last_alarm_at)+' her' : '<span class="muted">–</span>'}</dd>
                    <dt>Geprüft</dt><dd>${s.last_ok_at ? relTime(s.last_ok_at)+' her' : '<span class="muted">nie</span>'}</dd>`;
             let actions = '';
             if (canManage) actions = `<div class="cactions">
-                <button class="btn test" onclick="testSensor(${s.id},'${esc(s.name)}')">🧪 Test</button>
+                <button class="btn test" data-sensor-aktion="test" data-i="${i}">🧪 Test</button>
                 ${s.has_webhook ? `<button class="btn edit" onclick="showWebhook(${s.id})">🔗 Webhook</button>` : ''}
-                <button class="btn edit" onclick='editSensor(${JSON.stringify(s).replace(/'/g,"&#39;")})'>Bearbeiten</button>
-                <button class="btn del" onclick="delSensor(${s.id},'${esc(s.name)}')">Entfernen</button></div>`;
+                <button class="btn edit" data-sensor-aktion="edit" data-i="${i}">Bearbeiten</button>
+                <button class="btn del" data-sensor-aktion="del" data-i="${i}">Entfernen</button></div>`;
             return `<div class="card ${cls}">
                 <div class="chead"><div><div class="cname">${typeIcon(s.device_type)} ${esc(s.name)}</div>${s.location?`<div class="cloc">${esc(s.location)}</div>`:''}</div>
                 <span class="status ${cls}"><span class="sdot"></span>${statusLabel(eff)}</span></div>
@@ -200,6 +211,7 @@
                 else { $('alarmbar').style.display = 'none'; $('okbar').style.display = 'block';
                     const u = sm.unknown || 0;
                     $('okbar').textContent = sensors.length ? ('✅ Keine Alarme' + (u ? ` · ${u} wartet auf erste Meldung` : '')) : 'Noch keine Geräte aufgeschaltet.'; }
+                angezeigteSensoren = sensors;
                 $('grid').innerHTML = sensors.map(sensorCard).join('');
                 $('updated').textContent = 'Aktualisiert: ' + new Date().toLocaleTimeString('de-CH') + ' · Polling ' + Math.round((data.poll_ms||30000)/1000) + 's';
                 loadLog();
