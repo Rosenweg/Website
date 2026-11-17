@@ -10,7 +10,7 @@ const pathModule = require('path');
 const sanitizeHtml = require('sanitize-html');
 
 // ─── Ausgelagerte Module (inkrementeller Router-Split) ───────────────
-const { escapeHtml, createSemaphore, normalizePhone, safeId } = require('./lib/utils');
+const { escapeHtml, createSemaphore, normalizePhone, safeId, geheimnisGleich, fehlerFuerClient, hatSteuerzeichen } = require('./lib/utils');
 
 // STWEG-Gruppen-Mapping + pure Klassifizierer -> lib/groups.js
 const { STWEG_GROUPS, parseStweg, getUserStwegs, stwegFolderName, folderStwegNr, isTechnik, isPraesident, getAusschussStwegs, isAusschussForAny, canSeeVerwaltungKontakte } = require('./lib/groups');
