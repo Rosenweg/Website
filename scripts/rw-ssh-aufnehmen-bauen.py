@@ -175,8 +175,9 @@ einrichten_hier() {
   fi
 
   if [ "$PROBE" = 0 ]; then
-    if curl -fsS --max-time 10 -H "X-Host-Token: $HOST_TOKEN" -H "X-Host-Name: $name" \
-         "$API_BASE/api/ssh/konten" >/dev/null 2>&1; then
+    # Token ueber stdin (-H @-): als Argument stuende er in der Prozessliste.
+    if printf 'X-Host-Token: %s\nX-Host-Name: %s\n' "$HOST_TOKEN" "$name" | \
+         curl -fsS --max-time 10 -H @- "$API_BASE/api/ssh/konten" >/dev/null 2>&1; then
       sage "API erreichbar — $name ist aufgenommen"
     else
       echo "  ACHTUNG: $name erreicht die API nicht ($API_BASE). Netz oder Token pruefen." >&2
@@ -285,6 +286,7 @@ if sshd -t 2>/dev/null; then
     timeout 20 systemctl reload sshd 2>/dev/null || echo "  Hinweis: Neuladen abgebrochen, Konfiguration liegt bereit"
   else
     echo "  sshd laeuft nicht als Dienst (socket-aktiviert) — kein Neuladen noetig"
+  fi
 else
   echo "  ACHTUNG in CT $id: sshd -t meldet einen Fehler — nicht neu geladen." >&2
   exit 1
