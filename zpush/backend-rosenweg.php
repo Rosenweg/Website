@@ -14,23 +14,39 @@ class BackendRosenweg extends BackendVCardDir {
         if (!is_dir($dir)) @mkdir($dir, 0700, true);
         return $dir . '/' . hash('sha256', strtolower($username));
     }
-    private function fehlversuche($username) {
+    // Zaehler atomar (R2-Da): Lesen+Hochzaehlen unter einer flock, VOR dem
+    // Bind. Sonst laufen parallele Requests alle am Stand n<5 vorbei und die
+    // Sperre greift erst nach beliebig vielen gleichzeitigen Versuchen.
+    // Rueckgabe false = gesperrt; Erfolg setzt die Datei danach zurueck.
+    private function versuchReservieren($username) {
         $f = $this->sperrDatei($username);
-        $d = @json_decode(@file_get_contents($f), true);
-        if (!is_array($d) || !isset($d['seit'], $d['n']) || time() - $d['seit'] > self::SPERRE_FENSTER) return array('seit' => time(), 'n' => 0);
-        return $d;
-    }
-    private function fehlversuchMerken($username) {
-        $d = $this->fehlversuche($username);
-        $d['n']++;
-        @file_put_contents($this->sperrDatei($username), json_encode($d), LOCK_EX);
+        $h = @fopen($f, 'c+');
+        if (!$h) {
+            // Ablage nicht beschreibbar: wie bisher durchlassen, aber laut melden.
+            ZLog::Write(LOGLEVEL_ERROR, "BackendRosenweg: Sperrdatei nicht beschreibbar");
+            return true;
+        }
+        flock($h, LOCK_EX);
+        $d = @json_decode(stream_get_contents($h), true);
+        if (!is_array($d) || !isset($d['seit'], $d['n']) || time() - $d['seit'] > self::SPERRE_FENSTER) $d = array('seit' => time(), 'n' => 0);
+        $frei = $d['n'] < self::SPERRE_MAX;
+        if ($frei) {
+            $d['n']++;
+            ftruncate($h, 0);
+            rewind($h);
+            fwrite($h, json_encode($d));
+            fflush($h);
+        }
+        flock($h, LOCK_UN);
+        fclose($h);
+        return $frei;
     }
 
     public function Logon($username, $domain, $password) {
         if (!$username || !$password) { ZLog::Write(LOGLEVEL_WARN, "BackendRosenweg: empty creds"); return false; }
         // Nur plausible Benutzernamen (Authentik-Username): keine Steuerzeichen, kurz.
         if (strlen($username) > 64 || preg_match('/[\x00-\x1f\x7f]/', $username)) { ZLog::Write(LOGLEVEL_WARN, "BackendRosenweg: ungueltiger Benutzername"); return false; }
-        if ($this->fehlversuche($username)['n'] >= self::SPERRE_MAX) {
+        if (!$this->versuchReservieren($username)) {
             ZLog::Write(LOGLEVEL_WARN, "BackendRosenweg: gesperrt (zu viele Fehlversuche) ".$username);
             return false;
         }
@@ -47,7 +63,7 @@ class BackendRosenweg extends BackendVCardDir {
         $ok = @ldap_bind($conn, $dn, $password);
         @ldap_unbind($conn);
         if (!$ok) {
-            $this->fehlversuchMerken($username);
+            // Versuch wurde schon vor dem Bind gezaehlt.
             ZLog::Write(LOGLEVEL_WARN, "BackendRosenweg: LDAP bind failed for ".$username);
             return false;
         }
