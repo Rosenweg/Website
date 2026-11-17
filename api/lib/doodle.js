@@ -11,7 +11,7 @@
 const crypto = require('crypto');
 const { pool } = require('./db');
 const { loggedSendMail, MAIL_FROM } = require('./mail');
-const { otpAusstellen, otpPruefen, ausstellenErlaubt, OTP_FEHLER } = require('./otp');
+const { otpAusstellen, otpPruefen, ausstellenErlaubt, globalErlaubt, OTP_FEHLER } = require('./otp');
 
 const SITE_URL = process.env.SITE_URL || 'https://www.rosenweg4303.ch';
 const pollUrl = (id) => `${SITE_URL}/sitzungs-doodle.html` + (id ? `?poll=${id}` : '');
@@ -189,13 +189,17 @@ function mountDoodle({ app }) {
 
   // ── E-Mail-Code anfordern ────────────────────────────────────────────────
   app.post('/api/doodle/code', async (req, res) => {
+    const email = normEmail(req.body?.email);
+    if (!validEmail(email)) return res.status(400).json({ error: 'Ungültige E-Mail' });
+    if (!globalErlaubt('doodle')) return res.status(429).json({ error: 'Zu viele Anfragen — bitte in 10 Minuten erneut.' });
+    // Immer dieselbe Antwort, und zwar SOFORT: Prüfung, Code und Mailversand laufen
+    // danach im Hintergrund — weder Inhalt noch Laufzeit noch ein SMTP-Fehler verraten,
+    // ob die Adresse eingeladen ist. Das Limit je Adresse zählt nur bekannte Adressen.
+    res.json({ ok: true });
     try {
-      const email = normEmail(req.body?.email);
-      if (!validEmail(email)) return res.status(400).json({ error: 'Ungültige E-Mail' });
-      if (!ausstellenErlaubt(email, 'doodle')) return res.status(429).json({ error: 'Zu viele Anfragen — bitte in 10 Minuten erneut.' });
-      // Immer dieselbe Antwort: sie verrät nicht, ob die Adresse eingeladen ist.
       const name = await emailAllowed(email);
-      if (name === undefined) return res.json({ ok: true });
+      if (name === undefined) return;
+      if (!ausstellenErlaubt(email, 'doodle')) { console.warn('[doodle] code: Limit je Adresse erreicht'); return; }
       const code = await otpAusstellen(email, 'doodle');
       await loggedSendMail({
         from: MAIL_FROM, to: email,
@@ -206,8 +210,7 @@ function mountDoodle({ app }) {
           <p style="color:#666">Gültig für 10 Minuten. Falls Sie das nicht angefordert haben, ignorieren Sie diese E-Mail.</p>
         </div>`,
       }, 'doodle-code');
-      res.json({ ok: true });
-    } catch (e) { console.error('[doodle] code', e); res.status(500).json({ error: 'Fehler beim Versand' }); }
+    } catch (e) { console.error('[doodle] code', e); }
   });
 
   // ── Code verifizieren -> doodle_session-Token ────────────────────────────
