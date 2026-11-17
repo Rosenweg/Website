@@ -59,7 +59,7 @@
   </main>
 
   <script>
-  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
   const fmtDt = s => s ? new Date(s).toLocaleString('de-CH', { dateStyle: 'short', timeStyle: 'short' }) : '—';
 
   document.addEventListener('DOMContentLoaded', async () => {
@@ -94,12 +94,12 @@
         return `<tr class="hover:bg-gray-50">
           <td class="px-3 py-2 font-medium">${esc(d.name || '?')}</td>
           <td class="px-3 py-2 font-mono text-xs">${esc(d.email)}</td>
-          <td class="px-3 py-2">${d.stweg ? 'STWEG ' + d.stweg : '—'}</td>
-          <td class="px-3 py-2 text-xs"><div>${fmtDt(d.scheduled_at)}</div><div class="${daysCls}">in ${days} Tagen</div></td>
+          <td class="px-3 py-2">${d.stweg ? 'STWEG ' + esc(d.stweg) : '—'}</td>
+          <td class="px-3 py-2 text-xs"><div>${fmtDt(d.scheduled_at)}</div><div class="${daysCls}">in ${esc(days)} Tagen</div></td>
           <td class="px-3 py-2">${status}</td>
           <td class="px-3 py-2">${stillIn}</td>
           <td class="px-3 py-2 text-right whitespace-nowrap">
-            <select onchange="handleAction(this, ${d.id}, '${esc(d.email)}')" class="text-xs border rounded px-2 py-1 bg-white">
+            <select data-id="${esc(d.id)}" data-email="${esc(d.email)}" class="text-xs border rounded px-2 py-1 bg-white">
               <option value="">⋯ Aktion</option>
               <option value="chain">📨 Mail-Chain anzeigen</option>
               ${!d.cancelled ? '<option value="cancel">✕ Loeschung cancellen</option>' : ''}
@@ -109,6 +109,9 @@
           </td>
         </tr>`;
       }).join('');
+      // E-Mail nicht in Inline-Handler-String (esc schuetzt dort nicht vor ' im JS): data-Attribute + Listener
+      tbody.querySelectorAll('select[data-id]').forEach(sel =>
+        sel.addEventListener('change', () => handleAction(sel, Number(sel.dataset.id), sel.dataset.email)));
     } catch (e) {
       document.getElementById('tbody').innerHTML = `<tr><td colspan="7" class="text-red-600 py-3">Fehler: ${esc(e.message)}</td></tr>`;
     }
@@ -165,9 +168,9 @@
             <div class="p-4 space-y-2 text-sm">
               ${chain.map(c => `
                 <div class="border-l-4 ${c.parent_message_id ? 'border-amber-300 bg-amber-50' : 'border-blue-300 bg-blue-50'} pl-3 py-2 rounded-r">
-                  <div class="text-xs text-gray-500">${fmtDt(c.created_at)} · <span class="font-mono">${esc(c.trigger || '')}</span> · ${c.status}</div>
+                  <div class="text-xs text-gray-500">${fmtDt(c.created_at)} · <span class="font-mono">${esc(c.trigger || '')}</span> · ${esc(c.status)}</div>
                   <div class="font-medium">${esc(c.subject || '(kein Subject)')}</div>
-                  <div class="text-xs text-gray-600">von <span class="font-mono">${esc(c.from_email || '')}</span> → <span class="font-mono">${esc(c.to_addresses || '')}</span> (${c.recipients_count || 0})</div>
+                  <div class="text-xs text-gray-600">von <span class="font-mono">${esc(c.from_email || '')}</span> → <span class="font-mono">${esc(c.to_addresses || '')}</span> (${esc(c.recipients_count || 0)})</div>
                   ${c.parent_source ? `<div class="text-xs text-amber-700 italic">↑ ausgeloest durch: ${esc(c.parent_source)}</div>` : ''}
                 </div>
               `).join('')}

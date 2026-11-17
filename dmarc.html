@@ -74,7 +74,8 @@
     </main>
 
     <script>
-        function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+        // Auch Anfuehrungszeichen maskieren: Werte stammen aus fremden Report-Anhaengen
+        function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
         (async () => {
         // Init parsed OAuth-Callback-Hash → Token in localStorage.
@@ -138,9 +139,9 @@
                                         ].join('<br>');
                                         return '<tr>' +
                                             '<td class="px-4 py-2 font-mono text-xs">' + esc(rec.sourceIp) + '</td>' +
-                                            '<td class="px-4 py-2 text-center">' + rec.count + '</td>' +
-                                            '<td class="px-4 py-2 text-center"><span class="px-2 py-0.5 rounded text-xs font-medium ' + (dkimOk ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700') + '">' + rec.dkim + '</span></td>' +
-                                            '<td class="px-4 py-2 text-center"><span class="px-2 py-0.5 rounded text-xs font-medium ' + (spfOk ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700') + '">' + rec.spf + '</span></td>' +
+                                            '<td class="px-4 py-2 text-center">' + esc(rec.count) + '</td>' +
+                                            '<td class="px-4 py-2 text-center"><span class="px-2 py-0.5 rounded text-xs font-medium ' + (dkimOk ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700') + '">' + esc(rec.dkim) + '</span></td>' +
+                                            '<td class="px-4 py-2 text-center"><span class="px-2 py-0.5 rounded text-xs font-medium ' + (spfOk ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700') + '">' + esc(rec.spf) + '</span></td>' +
                                             '<td class="px-4 py-2 text-center text-xs">' + esc(rec.disposition) + '</td>' +
                                             '<td class="px-4 py-2 text-xs text-gray-500">' + details + '</td>' +
                                             '</tr>';
