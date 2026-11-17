@@ -34,6 +34,9 @@ FLUSH_INTERVAL = int(os.environ.get('FLUSH_INTERVAL', '10'))  # seconds
 ALLOWED_SOURCES = [x.strip().lower() for x in os.environ.get('SYSLOG_ALLOWED_SOURCES', '').split(',') if x.strip()]
 MAX_TCP_CLIENTS = int(os.environ.get('SYSLOG_MAX_TCP_CLIENTS', '20'))
 MAX_LINE_BYTES = 65536  # TCP-Zeile ohne Zeilenende -> Verbindung schliessen statt endlos puffern
+# Untaetige TCP-Verbindung schliessen (R2-Db): sonst belegen 20 stille Verbindungen
+# alle Slots dauerhaft. Echte Sender verbinden sich bei Bedarf neu.
+TCP_IDLE_TIMEOUT = float(os.environ.get('SYSLOG_TCP_IDLE_TIMEOUT', '60'))
 
 
 def source_allowed(ip):
@@ -328,12 +331,14 @@ def handle_tcp_client(conn, addr, stats):
     """Handle a TCP connection (one or more newline-delimited messages)."""
     buf = b''
     conn.settimeout(5.0)
+    letzte_daten = time.monotonic()
     try:
         while running:
             try:
                 chunk = conn.recv(65535)
                 if not chunk:
                     break
+                letzte_daten = time.monotonic()
                 buf += chunk
                 if b'\n' not in buf and len(buf) > MAX_LINE_BYTES:
                     print(f'[Syslog] TCP {addr[0]}: Zeile zu lang, Verbindung geschlossen', flush=True)
@@ -351,6 +356,8 @@ def handle_tcp_client(conn, addr, stats):
                         else:
                             stats['skipped'] += 1
             except socket.timeout:
+                if time.monotonic() - letzte_daten > TCP_IDLE_TIMEOUT:
+                    break
                 continue
     except Exception as e:
         if running:
