@@ -56,7 +56,7 @@ HTTP-Service auf Port 8446, setzt AD-Passwörter.
 
 ```
 POST http://100.64.2.30:8446/
-Authorization: Bearer RwAdPwApi2026!
+Authorization: Bearer <AD_PASSWORD_API_SECRET>
 Content-Type: application/json
 {"username": "stefan.mueller", "password": "neuesPasswort"}
 ```

@@ -29,7 +29,12 @@ const MAILCOW_SMTP_SERVERNAME = process.env.ZEV_IMAP_SERVERNAME || process.env.I
 const mailcowTransporter = (ZEV_SMTP_PASS && MAILCOW_SMTP_HOST) ? nodemailer.createTransport({
   host: MAILCOW_SMTP_HOST, port: 587, secure: false, requireTLS: true,
   auth: { user: ZEV_SMTP_USER, pass: ZEV_SMTP_PASS },
-  tls: MAILCOW_SMTP_SERVERNAME ? { servername: MAILCOW_SMTP_SERVERNAME } : { rejectUnauthorized: false },
+  // Zertifikat immer pruefen (sonst kann ein Mann in der Mitte das zev@-Passwort lesen);
+  // Notausgang nur explizit wie beim ZEV-Poller (ZEV_IMAP_TLS_INSECURE=1).
+  tls: {
+    rejectUnauthorized: !(process.env.ZEV_IMAP_TLS_INSECURE === '1' || process.env.ZEV_IMAP_TLS_INSECURE === 'true'),
+    ...(MAILCOW_SMTP_SERVERNAME ? { servername: MAILCOW_SMTP_SERVERNAME } : {}),
+  },
 }) : null;
 // Transport-Auswahl nach Absender-Domain: rosenweg9.ch -> Mailcow/Relay, sonst SMTP2GO.
 function pickTransporter(fromEmail) {
