@@ -9495,7 +9495,9 @@ async function adminKontaktePersonenAbgleichen(client, wohnungId, bisher, stweg)
     const alt = bisher.get(n.id);
     // Neu angelegt oder neu verknuepft: Werte stammen aus der Anlage, nichts weiterzugeben
     if (!alt || !n.person_id || n.person_id !== alt.person_id) continue;
-    const identGleich = n.name === alt.name && String(n.email || '').toLowerCase() === String(alt.email || '').toLowerCase();
+    const nameGleich = String(n.name || '').trim() === String(alt.name || '').trim();
+    const emailGleich = String(n.email || '').trim().toLowerCase() === String(alt.email || '').trim().toLowerCase();
+    const identGleich = nameGleich && emailGleich;
     if (identGleich && n.email === alt.email && n.telefon === alt.telefon && n.adresse === alt.adresse) continue;
     const schutz = (await client.query(
       `SELECT EXISTS (SELECT 1 FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id
@@ -9503,9 +9505,25 @@ async function adminKontaktePersonenAbgleichen(client, wohnungId, bisher, stweg)
               EXISTS (SELECT 1 FROM users u JOIN personen p ON p.id = $1
                        WHERE u.active = true AND u.email <> '' AND LOWER(u.email) IN (LOWER(COALESCE(p.email, '')), LOWER(COALESCE($3, '')))) AS konto`,
       [n.person_id, stweg, alt.email])).rows[0] || {};
+    if ((schutz.fremd_stweg || schutz.konto) && !emailGleich && n.email) {
+      const fremd = await client.query('SELECT 1 FROM users WHERE active = true AND LOWER(email) = LOWER($1) LIMIT 1', [n.email]);
+      if (fremd.rows.length) { const e = new Error('Diese E-Mail-Adresse gehört zu einem bestehenden Konto. Bitte Technik kontaktieren.'); e.status = 409; throw e; }
+      // Andere Person an dieser Stelle (z. B. Mieterwechsel): neue/passende Person verknuepfen
+      const neuId = await findOrCreatePerson(client, n.name, n.email, n.telefon, n.adresse);
+      if (neuId && neuId !== n.person_id) {
+        const neuSchutz = await client.query(
+          `SELECT EXISTS (SELECT 1 FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id
+                           WHERE k.person_id = $1 AND w.stweg <> $2 AND k.archiviert_am IS NULL) AS fremd`, [neuId, stweg]);
+        await client.query('UPDATE wohnungen_kontakte SET person_id = $1 WHERE id = $2',
+          [neuSchutz.rows[0]?.fremd ? null : neuId, n.id]);
+      } else {
+        await client.query('UPDATE wohnungen_kontakte SET person_id = NULL WHERE id = $1', [n.id]);
+      }
+      continue;
+    }
     if (schutz.fremd_stweg || schutz.konto) {
       if (!identGleich) {
-        const e = new Error(`Name und E-Mail von «${String(alt.name || alt.email || '').slice(0, 80)}» gehören zu einer Person mit eigenem Konto oder Wohnungen in einer anderen STWEG. Diese Angaben ändert die Person selbst im Profil oder die Technik.`);
+        const e = new Error(`Der Name von «${String(alt.name || alt.email || '').slice(0, 80)}» gehört zu einer Person mit eigenem Konto oder Wohnungen in einer anderen STWEG und wird von ihr selbst (Profil) oder der Technik geändert. Für einen Wechsel der Person bitte eine neue Kontaktkarte anlegen.`);
         e.status = 409; throw e;
       }
       continue; // Telefon/Adresse nur an diesem Kontakt, nicht an der gemeinsamen Person
@@ -10999,8 +11017,23 @@ async function gruppenAenderungErlaubt(req, res) {
   const callerGroups = req.user?.groups || [];
   if (isTechnik(callerGroups) || isPraesident(callerGroups)) return { userPk };
   const gruppe = await authentikAPI('GET', `/core/groups/${req.params.pk}/`);
-  if (!vergebbareGruppen(callerGroups).has(String(gruppe?.name || '').toLowerCase())) {
+  const erlaubt = vergebbareGruppen(callerGroups);
+  if (!erlaubt.has(String(gruppe?.name || '').toLowerCase())) {
     res.status(403).json({ error: 'Nur Bewohner-/Eigentümer-Gruppen der eigenen STWEG änderbar' });
+    return null;
+  }
+  // Auch das Zielkonto pruefen: nur Konten, die ausschliesslich Bewohner-/Eigentuemer-
+  // Gruppen haben oder schon in einer Gruppe der eigenen STWEG sind. Sonst holt sich ein
+  // Ausschuss fremde Konten (z. B. Ausschuss einer anderen STWEG) in die eigene Gruppe
+  // und darf sie danach bearbeiten (PUT /api/admin/users/:pk).
+  const ziel = await authentikAPI('GET', `/core/users/${userPk}/`).catch(() => null);
+  if (!ziel) { res.status(404).json({ error: 'Benutzer nicht gefunden' }); return null; }
+  const zielGruppen = (ziel.groups_obj || []).map(g => String(g.name || '').toLowerCase());
+  const nurBewohner = zielGruppen.every(n => /-(bewohner|eigentuemer)$/.test(n));
+  const schonEigen = zielGruppen.some(n => erlaubt.has(n));
+  if (ziel.is_superuser || !(nurBewohner || schonEigen)
+      || zielGruppen.some(n => /technik|praesident|präsident|ausschuss|verwaltung|admin/.test(n))) {
+    res.status(403).json({ error: 'Dieses Konto kann nur die Technik einer Gruppe zuordnen' });
     return null;
   }
   return { userPk };
