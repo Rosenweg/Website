@@ -632,14 +632,14 @@
         const groupChips = (Array.isArray(groups) ? groups : []).map(g => `
             <span class="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-xs px-2 py-1 rounded-full">
                 ${esc(g.group_name)}
-                <button onclick="removeGroup('${esc(id)}', this.dataset.g)" data-g="${esc(g.group_name)}"
+                <button data-act="rm-group" data-g="${esc(g.group_name)}"
                         class="text-blue-400 hover:text-blue-700" title="entfernen">&times;</button>
             </span>`).join('') || '<span class="text-xs text-gray-400">keine</span>';
 
         const userChips = (Array.isArray(users) ? users : []).map(u => `
             <span class="inline-flex items-center gap-1 bg-gray-100 text-gray-700 text-xs px-2 py-1 rounded-full">
                 ${esc(u.user_email)}${u.role ? ` <span class="text-gray-400">(${esc(u.role)})</span>` : ''}
-                <button onclick="removeUser('${esc(id)}', this.dataset.u)" data-u="${esc(u.user_email)}"
+                <button data-act="rm-user" data-u="${esc(u.user_email)}"
                         class="text-gray-400 hover:text-gray-700" title="entfernen">&times;</button>
             </span>`).join('') || '<span class="text-xs text-gray-400">keine</span>';
 
@@ -650,7 +650,7 @@
                 <div class="flex gap-2">
                     <input list="knownGroups" placeholder="Gruppe…" data-addgroup="${esc(id)}"
                            class="flex-1 px-2.5 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none">
-                    <button onclick="addGroup('${esc(id)}')"
+                    <button data-act="add-group"
                             class="px-3 py-1.5 text-sm rounded-lg bg-blue-700 text-white hover:bg-blue-800">+</button>
                 </div>
             </div>
@@ -664,12 +664,20 @@
                            class="flex-1 min-w-[120px] px-2.5 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none">
                     <input type="text" placeholder="Rolle (optional)" data-adduser-role="${esc(id)}"
                            class="w-28 px-2.5 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none">
-                    <button onclick="addUser('${esc(id)}')"
+                    <button data-act="add-user"
                             class="px-3 py-1.5 text-sm rounded-lg bg-gray-700 text-white hover:bg-gray-800">+</button>
                 </div>
             </div>
             <p class="text-sm hidden" data-msg="${esc(id)}"></p>
         `;
+        // Keine Daten in Inline-Handlern: Zaehler-ID kommt aus der Closure, Namen aus data-Attributen
+        body.querySelectorAll('button[data-act]').forEach(b => b.addEventListener('click', () => {
+            const act = b.dataset.act;
+            if (act === 'rm-group') removeGroup(id, b.dataset.g);
+            else if (act === 'rm-user') removeUser(id, b.dataset.u);
+            else if (act === 'add-group') addGroup(id);
+            else if (act === 'add-user') addUser(id);
+        }));
     }
 
     function adminMsg(id, ok, text) {
@@ -753,8 +761,10 @@
                     <span class="text-xs px-2 py-0.5 rounded-full ${u.can_write ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}">${u.can_write ? 'Lesen + Schreiben' : 'nur Lesen'}</span>
                     <span class="mono text-xs text-gray-500">${esc(u.topic_filter)}</span>
                     ${u.description ? `<span class="text-xs text-gray-400 truncate max-w-[180px]">${esc(u.description)}</span>` : ''}
-                    <button onclick="deleteServiceUser('${esc(u.username)}')" class="ml-auto text-xs text-red-500 hover:text-red-700">löschen</button>
+                    <button data-svc-del="${esc(u.username)}" class="ml-auto text-xs text-red-500 hover:text-red-700">löschen</button>
                 </div>`).join('');
+            el.querySelectorAll('button[data-svc-del]').forEach(b =>
+                b.addEventListener('click', () => deleteServiceUser(b.dataset.svcDel)));
         } catch (e) { el.innerHTML = `<p class="text-sm text-red-600">${esc(e.message)}</p>`; }
     }
 

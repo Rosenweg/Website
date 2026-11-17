@@ -94,9 +94,11 @@
               <span class="min-w-0 flex-1"><span class="block font-semibold truncate">${esc(d.name)}</span>
               <span class="inline-block text-xs px-2 py-0.5 rounded-full ${s.cls} mt-0.5">${s.badge}</span>${off ? '<span class="text-xs text-slate-400 ml-1">offline</span>' : ''}</span>
             </div>
-            <button onclick="openDoor('${esc(d.id)}',this)" class="mt-3 w-full bg-red-700 active:bg-red-800 text-white font-medium rounded-xl py-2.5">🔓 Öffnen</button>
+            <button data-door="${esc(d.id)}" class="mt-3 w-full bg-red-700 active:bg-red-800 text-white font-medium rounded-xl py-2.5">🔓 Öffnen</button>
           </div>`;
         }).join('');
+        // Daten nicht in Inline-Handler-Strings (esc schuetzt dort nicht vor ' im JS)
+        el.querySelectorAll('button[data-door]').forEach(b => b.addEventListener('click', () => openDoor(b.dataset.door, b)));
       } catch (e) { if (!silent) el.innerHTML = `<div class="text-red-600 text-sm">${esc(e.message)}</div>`; }
     }
     async function openDoor(id, btn) {
@@ -118,9 +120,10 @@
         }
         banner.classList.add('hidden');
         const cards = (me.cards || []).map(c => `<div class="flex items-center justify-between bg-white rounded-2xl border px-4 py-3 mb-2">
-          <span>🪪 ${esc(c.label)}</span><button onclick="rmCard('${esc(c.token)}')" class="text-red-600 text-xs">entfernen</button></div>`).join('');
+          <span>🪪 ${esc(c.label)}</span><button data-card="${esc(c.token)}" class="text-red-600 text-xs">entfernen</button></div>`).join('');
         el.innerHTML = (cards || '<div class="text-slate-400 text-sm mb-2">Noch keine Karte hinterlegt.</div>') +
           '<button onclick="enroll()" class="w-full bg-red-700 active:bg-red-800 text-white font-medium rounded-2xl py-3">🪪 Karte anlernen</button>';
+        el.querySelectorAll('button[data-card]').forEach(b => b.addEventListener('click', () => rmCard(b.dataset.card)));
       } catch (e) { el.innerHTML = `<div class="text-red-600 text-sm">${esc(e.message)}</div>`; }
     }
     async function rmCard(token) {
@@ -175,11 +178,12 @@
       try {
         const { plates } = await api('/me/plates');
         const items = (plates || []).map(p => `<div class="flex items-center justify-between bg-white rounded-2xl border px-4 py-3 mb-2">
-          ${plateHtml(p.plate)}<button onclick="rmPlate('${esc(String(p.id))}')" class="text-red-600 text-xs">entfernen</button></div>`).join('');
+          ${plateHtml(p.plate)}<button data-plate="${esc(String(p.id))}" class="text-red-600 text-xs">entfernen</button></div>`).join('');
         el.innerHTML = (items || '<div class="text-slate-400 text-sm mb-2">Noch kein Kennzeichen hinterlegt.</div>') +
           `<div class="flex gap-2"><input id="plate-in" placeholder="z.B. AG 12345 oder B-MW 1234" maxlength="16" class="flex-1 border rounded-xl px-3 py-2.5 text-sm uppercase">
           <button onclick="addPlate()" class="bg-red-700 active:bg-red-800 text-white font-medium rounded-xl px-5 text-lg">+</button></div>
           <p class="text-[11px] text-slate-400 mt-2">Vorregistrierung — wird aktiv, sobald das Tiefgaragentor mit Kennzeichenerkennung eingerichtet ist.</p>`;
+        el.querySelectorAll('button[data-plate]').forEach(b => b.addEventListener('click', () => rmPlate(b.dataset.plate)));
       } catch (e) { el.innerHTML = `<div class="text-red-600 text-sm">${esc(e.message)}</div>`; }
     }
     async function addPlate() {

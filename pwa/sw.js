@@ -16,7 +16,7 @@
  *  - Sonstige GETs: stale-while-revalidate.
  */
 
-const CACHE = 'rosenweg-launcher-v3';
+const CACHE = 'rosenweg-launcher-v4';
 
 // Launcher-App-Shell — nur das, was fuer den Offline-Start des Hubs noetig ist.
 const SHELL = [
@@ -68,8 +68,11 @@ self.addEventListener('fetch', (event) => {
       fetch(req)
         .then((resp) => {
           // frische Launcher-Antwort fuer spaeter ablegen
-          const copy = resp.clone();
-          caches.open(CACHE).then((c) => c.put('/index.html', copy)).catch(() => {});
+          // nur echte eigene Seiten ablegen: keine Fehler-/Login-/Fremdantworten als Offline-Seite
+          if (resp && resp.ok && resp.type === 'basic') {
+            const copy = resp.clone();
+            caches.open(CACHE).then((c) => c.put('/index.html', copy)).catch(() => {});
+          }
           return resp;
         })
         .catch(() =>

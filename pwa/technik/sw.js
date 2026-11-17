@@ -10,7 +10,7 @@
  *  - Web-Push: push + notificationclick (Status-/Alert-Benachrichtigungen).
  */
 
-const CACHE = 'rosenweg-technik-v7';
+const CACHE = 'rosenweg-technik-v8';
 
 // App-Shell — alles was fuer den Offline-Start noetig ist.
 const SHELL = [
@@ -59,8 +59,11 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(req)
         .then((resp) => {
-          const copy = resp.clone();
-          caches.open(CACHE).then((c) => c.put('/technik/index.html', copy)).catch(() => {});
+          // nur echte eigene Seiten ablegen: keine Fehler-/Login-/Fremdantworten als Offline-Seite
+          if (resp && resp.ok && resp.type === 'basic') {
+            const copy = resp.clone();
+            caches.open(CACHE).then((c) => c.put('/technik/index.html', copy)).catch(() => {});
+          }
           return resp;
         })
         .catch(() =>

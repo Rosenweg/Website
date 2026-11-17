@@ -10,7 +10,7 @@
  *  - Sonstige GETs (Assets, CDN): stale-while-revalidate.
  */
 
-const CACHE = 'rosenweg-reparatur-v9';
+const CACHE = 'rosenweg-reparatur-v10';
 
 // App-Shell — alles was fuer den Offline-Start noetig ist.
 const SHELL = [
@@ -61,8 +61,11 @@ self.addEventListener('fetch', (event) => {
       fetch(req)
         .then((resp) => {
           // frische Navigationsantwort fuer spaeter ablegen
-          const copy = resp.clone();
-          caches.open(CACHE).then((c) => c.put('/reparatur/index.html', copy)).catch(() => {});
+          // nur echte eigene Seiten ablegen: keine Fehler-/Login-/Fremdantworten als Offline-Seite
+          if (resp && resp.ok && resp.type === 'basic') {
+            const copy = resp.clone();
+            caches.open(CACHE).then((c) => c.put('/reparatur/index.html', copy)).catch(() => {});
+          }
           return resp;
         })
         .catch(() =>
