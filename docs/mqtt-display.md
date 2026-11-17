@@ -8,17 +8,22 @@ Web-Kiosk-Referenz: **display.rosenweg4303.ch** (`display.html`).
 
 | Topic | Zweck |
 |-------|-------|
-| `display/announcement` | Normale Ankündigung (Banner / Laufschrift) |
-| `display/emergency`    | Notfall — hat **Vorrang**, Vollbild rot |
+| `display/announcements` | **Liste** aller laufenden Ankündigungen (JSON-Array), je mit Häuser-Filter |
+| `display/announcement` | die **erste** laufende Ankündigung als Einzelwert – für ältere Abnehmer (ESP32, LED-Tafeln), die keine Liste kennen |
+| `display/emergency`    | Notfall — hat **Vorrang**, Vollbild rot, ohne Häuser-Filter |
 
-Beide sind **retained**: ein Display, das sich (neu) verbindet, bekommt sofort den
-aktuellen Stand. `active:false` löscht den jeweiligen Kanal.
+Alle drei sind **retained**: ein Display, das sich (neu) verbindet, bekommt sofort den
+aktuellen Stand. Die API veröffentlicht `display/announcements` und
+`display/announcement` beim eigenen Verbindungsaufbau, bei jeder Änderung und alle
+fünf Minuten neu (damit Ankündigungen mit Ablaufdatum verschwinden). Ist die Liste
+leer, wird auch `display/announcement` mit `active:false` geleert.
 
-### Payload (JSON, UTF-8)
+### Payload Einzelkanal (`display/announcement`, `display/emergency`)
 
 ```json
 {
   "text": "Text der angezeigt wird",
+  "pdf": "/api/display/pdf/aushang.pdf",
   "active": true,
   "scroll": false,
   "ts": 1785269863000,
@@ -27,22 +32,41 @@ aktuellen Stand. `active:false` löscht den jeweiligen Kanal.
 ```
 
 - **text** — anzuzeigender Text (max. 2000 Zeichen).
+- **pdf** — optional: Aushang als PDF; nur Verweise auf den eigenen Ablageort
+  `/api/display/pdf/<name>.pdf` werden angenommen. Ein PDF ohne Text genügt.
+  Als Bild liefert die API die erste Seite unter `/api/display/pdfbild/<name>`.
 - **active** — `false` ⇒ Kanal leeren / nichts anzeigen.
 - **scroll** — `true` ⇒ als horizontale Laufschrift, sonst statisch.
 - **ts** — ms-Epoch der Publikation (für „aktualisiert vor …").
 - **by** — Absender (informativ).
 
-Anzeige-Logik: ist `display/emergency` aktiv, hat es Vorrang vor
-`display/announcement`. Sonst Announcement zeigen, sonst Ruhezustand.
+### Payload Liste (`display/announcements`)
+
+```json
+[ { "id": 12, "text": "Treppenhausreinigung", "pdf": "", "scroll": true,
+    "haeuser": [13, 14, 16], "by": "Technik", "ts": 1785269863000 } ]
+```
+
+`haeuser` leer heisst: alle Häuser. Die Kiosk-Seite filtert nach ihrem Haus aus der
+Adresse, z. B. `display.rosenweg4303.ch?haus=14`; ohne `?haus` zeigt sie alles.
+Mehrere Ankündigungen wechseln sich ab.
+
+Anzeige-Logik: ist `display/emergency` aktiv, hat es Vorrang vor allen
+Ankündigungen. Sonst die passenden Ankündigungen zeigen, sonst Ruhezustand.
 
 ## Zugriff (Auth)
 
 - **Lesen:** `display/#` ist für **jeden authentifizierten** Broker-Client freigegeben
   (aclcheck-Sonderregel, wie `heartbeat`). Für unbeaufsichtigte Displays gibt es den
   read-only Service-User **`display-public`** (nur `display/#` lesen) — analog zu
-  `wetter-public`. Passwort im Kiosk-Code eingebettet.
-- **Schreiben:** nur Technik/Präsident über `POST /api/display/announce` bzw. der
-  Messenger-Backend (Notfall-Spiegelung). Normale Clients dürfen nicht schreiben.
+  `wetter-public`. Sein Passwort steht im Kiosk-Code `display.html` und damit im
+  öffentlichen Repository; das ist bewusst so, er kann nur lesen.
+- **Schreiben:** nur über die API (`/api/display/*`, Recht: Gruppe **`technik`**
+  oder `role=admin` – die Gruppe `Präsident` allein genügt hier nicht) bzw. über das
+  Messenger-Backend (Notfall-Spiegelung). Die API schreibt mit dem Broker-User
+  `collector` (`MQTT_URL`, `MQTT_USER`, `MQTT_PASS` in der API-Umgebung; fehlt
+  `MQTT_URL`, antworten die Schreib-Routen mit 503 „MQTT nicht konfiguriert“).
+  Normale Clients dürfen nicht schreiben.
 
 ## Verbinden
 
@@ -57,15 +81,35 @@ Frische-Indikator: `{source,ts,epoch}`, ~alle 10 s).
 
 ## Steuern
 
-- **Web/Admin:** mqtt.rosenweg4303.ch → Tab *Zugriffsverwaltung* → Karte
-  „Display / Ankündigungen & Notfall" (Text, Kanal, Laufschrift, senden/löschen).
-- **API:** `POST /api/display/announce` `{ channel: "announcement"|"emergency",
-  text, scroll, active }` (Bearer-Token, Technik).
+- **Web:** `stationen.html` → Karte **„Ankündigungen & Notfall“** (seit dem 6. August;
+  `mqtt.html` verweist nur noch dorthin). Nur für die Gruppe `technik`.
+  - **Neue Ankündigung:** Text (bis 2000 Zeichen) und/oder **Aushang (PDF)** bis 6 MB,
+    unter **Betrifft** STWEGs und/oder einzelne Häuser (nichts angehakt = alle
+    Anzeigen), Laufschrift ja/nein → **„Ankündigung senden“**.
+  - **Laufende Ankündigungen:** Liste mit Entfernen („Ankündigung entfernen? Sie
+    verschwindet sofort von allen Anzeigen; ein zugehöriger Aushang wird
+    mitgelöscht.“).
+  - **Notfall:** Text → **„Notfall auslösen“** (Rückfrage „Notfall auf ALLEN Anzeigen
+    auslösen?“) bzw. **„Notfall aufheben“**. Ein Notfall schaltet zusätzlich die
+    SlideShow-Tafeln auf die Wiedergabeliste „Alarm“ (siehe unten).
+- **API** (Anmeldung, Gruppe `technik`):
+  - `GET /api/display/ankuendigungen`, `POST /api/display/ankuendigungen`
+    `{ text, pdf, scroll, stwegs, haeuser, bis }`, `DELETE /api/display/ankuendigungen/:id`
+  - `POST /api/display/pdf` (Aushang hochladen), `GET /api/display/state` (aktueller
+    Stand beider Einzelkanäle)
+  - `POST /api/display/announce` `{ channel: "announcement"|"emergency", text, pdf,
+    scroll, active }` – schreibt direkt einen Einzelkanal. Für Ankündigungen die
+    Listen-Routen nehmen; `announce` auf `announcement` wird bei der nächsten
+    Veröffentlichung der Liste (spätestens nach fünf Minuten) überschrieben.
 - **Automatisch (Chat):** Nachrichten in der Messenger-Gruppe **„Notfall/Krise"**
   (`bcast/notfall`) werden vom message-store automatisch auf `display/emergency`
   gespiegelt → erscheinen sofort auf allen Displays. **Beenden direkt im Chat:**
   eine Nachricht **„Stop"** (oder „Entwarnung"/„Ende"/„Vorbei"/„Aufgehoben"/„Alles ok")
-  hebt den Notfall auf (`active:false`). Alternativ „Anzeige löschen" in der Admin-Karte.
+  hebt den Notfall auf (`active:false`). Alternativ „Notfall aufheben“ in
+  `stationen.html`.
+- **Automatisch (Sensoren):** `POST /api/alarm` mit Kopfzeile `X-Alarm-Secret`
+  (`ALARM_SECRET`) postet in die Gruppe „Notfall/Krise“; `active:false` ist die
+  Entwarnung. Aufrufer ist ioBroker (Gas-/Rauchmelder).
 
 ## Digital-Signage-Ticker (SlideShow-App)
 
@@ -78,8 +122,9 @@ http://100.64.2.52:3000/api/display/rss              (intern direkt, ohne Edge)
 ```
 
 In der App eine **Ticker-Zone** (RSS) auf diese URL richten → scrollt die aktuelle
-Ankündigung. Ist nichts aktiv, ist der Feed leer (Ticker zeigt nichts). Feed ist
-public (kein Login). `ttl=1` → App fragt häufig neu.
+Ankündigung. Der Feed kennt nur die Einzelkanäle, also nur die **erste** laufende
+Ankündigung (ohne Häuser-Filter, ohne PDF). Ist nichts aktiv, ist der Feed leer
+(Ticker zeigt nichts). Feed ist public (kein Login). `ttl=1` → App fragt häufig neu.
 
 ### SlideShow-Geräte über MQTT steuern
 
@@ -196,9 +241,10 @@ Zwei Eigenheiten, die beim Messen Verwirrung stiften:
 Kontrollieren lässt sich das Ergebnis ohne Gang zum Gerät: die Weboberfläche
 liefert unter `/screenshot.jpg?displayId=0` ein Bild des laufenden Schirms.
 
-Zugänge legt die Verwaltung an: **Stationen → Anzeigegeräte**. Der Knopf
-erzeugt den MQTT-Benutzer (`SLIDESHOW/#`, schreibend) und zeigt alle Werte
-zum Abschreiben. Damit die API selbst Befehle schicken darf, hat `collector`
+Zugänge legt die Technik an: **Stationen → Anzeigegeräte → „Anzeigegerät
+hinzufügen“** (Technik/Präsident). Der Knopf erzeugt den MQTT-Benutzer
+(`SLIDESHOW/#`, schreibend) und zeigt alle Werte zum Abschreiben. „Entfernen“ löscht
+den MQTT-Zugang des Geräts mit. Damit die API selbst Befehle schicken darf, hat `collector`
 seit dem 5. August zusätzlich `SLIDESHOW/REQ/#`.
 
 ## Minimalbeispiel (mosquitto / Shell)
