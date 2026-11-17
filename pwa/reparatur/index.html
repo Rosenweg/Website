@@ -660,12 +660,16 @@
     if (_flushing || !navigator.onLine) return;
     _flushing = true;
     try {
-      const items = await queueAll();
+      if (!currentUser) return;
+      // Nur eigene Meldungen senden; 401 (Sitzung abgelaufen) und 5xx behalten den Eintrag.
+      const items = (await queueAll()).filter(it => !it.owner || it.owner === ownerKey(currentUser));
       for (const item of items) {
         try {
           const res = await postReklamation(item.payload);
           if (res.ok) {
             await queueDelete(item.localId);
+          } else if (res.status === 401 || res.status >= 500) {
+            break;
           } else if (res.clientError) {
             // dauerhafter Fehler (4xx/429) → nicht endlos behalten, entfernen
             await queueDelete(item.localId);
@@ -1083,6 +1087,37 @@
     }
   }
 
+  // Neuen Code an dieselbe Adresse senden, ohne das ausgefuellte Formular zu verlieren.
+  function neuenCodeKnopf() {
+    const el = $('pubFormMsg');
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'block mt-2 w-full bg-white border border-red-300 text-red-700 font-semibold rounded-lg py-2 active:bg-red-50';
+    b.textContent = 'Neuen Code anfordern';
+    b.addEventListener('click', async () => {
+      if (!pubEmail) { gateStep('code1'); return; }
+      b.disabled = true;
+      try {
+        const r = await fetch('/api/reklamationen/code', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: pubEmail }),
+        });
+        if (r.ok) {
+          $('pubCode').value = '';
+          showGateMsg('pubFormMsg', 'Neuer Code ist unterwegs (gültig 10 Min). Bitte unten eingeben.', 'ok');
+        } else {
+          let msg = r.status === 429 ? 'Zu viele Anfragen, bitte später erneut versuchen.' : 'Fehler (HTTP ' + r.status + ').';
+          try { const j = await r.json(); if (j && j.error) msg = j.error; } catch {}
+          showGateMsg('pubFormMsg', msg, 'warn');
+        }
+      } catch (e) {
+        showGateMsg('pubFormMsg', 'Netzwerkfehler — bitte erneut versuchen.', 'err');
+        neuenCodeKnopf();
+      }
+    });
+    el.appendChild(b);
+  }
+
   // Schritt 2 — oeffentlich melden (PLAIN fetch, keine Offline-Queue).
   async function onPubSubmit(ev) {
     ev.preventDefault();
@@ -1116,17 +1151,17 @@
           ? `Deine Meldung #${id} ist eingegangen, die Technik kümmert sich darum.`
           : 'Deine Meldung ist eingegangen, die Technik kümmert sich darum.';
         gateStep('success');
-      } else if (r.status === 429) {
-        showGateMsg('pubFormMsg', 'Zu viele Anfragen, bitte später erneut versuchen.', 'warn');
       } else {
-        // 400: Fehlertext aus error. Bei Code-Problemen Weg zurück zu Schritt 1 anbieten.
-        let msg = 'Fehler (HTTP ' + r.status + ').';
+        // 400/429: Fehlertext aus error. 429 heisst auch "Code nach zu vielen
+        // Fehlversuchen gesperrt" — dann hilft nur ein neuer Code, nicht Warten.
+        let msg = r.status === 429 ? 'Zu viele Anfragen, bitte später erneut versuchen.' : 'Fehler (HTTP ' + r.status + ').';
         try { const j = await r.json(); if (j && j.error) msg = j.error; } catch {}
         const codeProblem = /code/i.test(msg);
         if (codeProblem) {
-          showGateMsg('pubFormMsg', msg + ' Bitte neuen Code anfordern.', 'err');
-        } else {
           showGateMsg('pubFormMsg', msg, 'err');
+          neuenCodeKnopf();
+        } else {
+          showGateMsg('pubFormMsg', msg, r.status === 429 ? 'warn' : 'err');
         }
       }
     } catch (e) {
@@ -1244,17 +1279,15 @@
 
     // Gate selbst steuern: KEIN Zwangslogin. Eingeloggt → voller App-Flow,
     // sonst → Auswahl-Gate (Konto-Login ODER E-Mail-Code).
-    // Abmelden verwirft die Offline-Queue (logout() leitet sofort weiter, daher zusaetzlich beim Start)
-    const _logout = AuthentikAuth.logout.bind(AuthentikAuth);
-    AuthentikAuth.logout = function (redirectTo) { queueClear().catch(() => {}); return _logout(redirectTo); };
+    // Kein Loeschen bei logout(): authentik-auth.js meldet auch bei abgelaufenem
+    // Token oder Serverfehlern ab — die Offline-Queue ginge sonst verloren.
+    // Fremde Meldungen verwirft queuePurgeForeign nach dem Login (Besitzerpruefung).
 
     currentUser = await AuthentikAuth.init({
       requireAuth: false,
       onLogout: () => showGate('choice'),
     });
     if (!currentUser) {
-      // Kein Token mehr = abgemeldet → Queue weg. Mit Token (nur offline) bleibt sie fuer spaeter.
-      if (!AuthentikAuth.getToken()) await queueClear().catch(() => {});
       showGate('choice'); return;
     }
     await queuePurgeForeign(ownerKey(currentUser)).catch(() => {});
