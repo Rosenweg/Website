@@ -27,7 +27,7 @@ API Server
 
 ### Gmail
 - **Konto**: `rosenweg4303@gmail.com`
-- **App-Passwort**: `***ENTFERNT***`
+- **App-Passwort**: `<im Passwortmanager>`
 - **IMAP**: `imap.gmail.com:993` (TLS)
 
 ### IMAP-Polling (API Server)
@@ -55,9 +55,9 @@ Der API Server pollt Gmail alle 60 Sekunden und verarbeitet:
 - **Host**: `mail-eu.smtp2go.com`
 - **Port**: 2525 (STARTTLS)
 - **User**: `rk-website`
-- **Passwort**: `***ENTFERNT***`
+- **Passwort**: `<im Passwortmanager>`
 - **From**: `noreply@rosenweg4303.ch`
-- **API Key**: `***ENTFERNT***`
+- **API Key**: `<im Passwortmanager>`
 
 ### Verwendung
 - Verteiler-Weiterleitung (API)
