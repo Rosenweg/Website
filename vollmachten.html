@@ -469,7 +469,8 @@
             <button onclick="openPdf(${v.id})" class="text-xs bg-blue-100 text-blue-700 rounded px-3 py-1.5 hover:bg-blue-200">📄 PDF</button>
             ${canEdit ? `<button onclick="editVollmacht(${v.id})" class="text-xs bg-gray-100 text-gray-700 rounded px-3 py-1.5 hover:bg-gray-200">✎ Bearbeiten</button>` : ''}
             ${canSign ? `<button onclick="signDigital(${v.id})" class="text-xs bg-green-600 text-white rounded px-3 py-1.5 hover:bg-green-700">✓ Digital signieren</button>` : ''}
-            ${canSign || canAdminUpload ? `<button onclick="triggerUpload(${v.id})" class="text-xs bg-amber-600 text-white rounded px-3 py-1.5 hover:bg-amber-700">📤 Signierte PDF hochladen</button>` : ''}
+            ${canSign ? `<button onclick="triggerUpload(${v.id})" class="text-xs bg-amber-600 text-white rounded px-3 py-1.5 hover:bg-amber-700">📤 Signierte PDF hochladen</button>` : ''}
+            ${canAdminUpload ? `<button onclick="triggerUpload(${v.id}, true)" class="text-xs bg-amber-700 text-white rounded px-3 py-1.5 hover:bg-amber-800" title="Admin: PDF mit den Unterschriften aller Geber hochladen">📤 PDF aller Geber hochladen (Admin)</button>` : ''}
             ${canActivatePaper ? `<button onclick="activatePaper(${v.id})" class="text-xs bg-amber-100 text-amber-800 rounded px-3 py-1.5 hover:bg-amber-200">📄 Papier aktivieren</button>` : ''}
             ${v.papier_pdf_path ? `<button onclick="verifyAi(${v.id})" class="text-xs bg-purple-600 text-white rounded px-3 py-1.5 hover:bg-purple-700">🤖 KI-Prüfung</button>` : ''}
             ${canRevoke ? `<button onclick="revoke(${v.id})" class="text-xs bg-red-600 text-white rounded px-3 py-1.5 hover:bg-red-700">Widerrufen</button>` : ''}
@@ -857,7 +858,7 @@
     } catch (e) { alert('Fehler: ' + e.message); }
   }
 
-  function triggerUpload(id) {
+  function triggerUpload(id, alsAdmin) {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'application/pdf,.pdf';
@@ -866,7 +867,7 @@
       if (!file) return;
       if (file.size > 20 * 1024 * 1024) { alert('Datei zu gross (max 20 MB)'); return; }
       try {
-        const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}/upload-signed`, {
+        const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}/upload-signed${alsAdmin ? '?als=admin' : ''}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/pdf' },
           body: file,
