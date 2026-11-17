@@ -303,6 +303,8 @@ function gate(){ $('content').style.display='none'; $('gate').style.display='blo
 async function start(){
   // Token aus dem #auth=-Fragment nach dem Authentik-Redirect in localStorage schreiben.
   AuthentikAuth.handleCallback();
+  // Nach dem Callback ist der Nutzer erst bekannt, wenn /api/auth/me geantwortet hat
+  if (AuthentikAuth.ready) await AuthentikAuth.ready;
   if(!AuthentikAuth.isLoggedIn()){ gate(); return; }
   const u = AuthentikAuth.getUser();
   $('who').textContent = u?.name || u?.email || '';

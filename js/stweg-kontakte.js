@@ -223,8 +223,10 @@ const STWEGKontakte = (function() {
                 showLoginState(stwegNr);
             }
         }
-        // nav.js init is async, wait a tick for it to complete
-        setTimeout(checkAuth, 500);
+        // nav.js init ist async: auf die Anmeldepruefung warten (ready), statt
+        // auf einen Zeitgeber, der nach dem Callback zu frueh feuern kann
+        if (typeof AuthentikAuth !== 'undefined' && AuthentikAuth.ready) AuthentikAuth.ready.then(checkAuth);
+        else setTimeout(checkAuth, 500);
     }
 
     return { init: init };
