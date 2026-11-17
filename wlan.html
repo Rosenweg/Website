@@ -78,17 +78,20 @@
             return s.replace(/[\\;,":\s]/g, c => '\\' + c);
         }
 
+        // Werte stammen u.a. aus dem frei waehlbaren Netzwerknamen des Bewohners -> immer maskieren (auch fuer Attribute)
+        function esc(v) { return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
         function createWifiCard(w) {
             const div = document.createElement('div');
             div.className = 'bg-white rounded-xl shadow-sm border p-6';
             const isUserVlan = !!w.isUserVlan;
             const title = isUserVlan
-                ? `${w.network || ('VLAN ' + w.vlan)}`
-                : `Rosenweg ${w.hausNr}`;
+                ? `${esc(w.network || ('VLAN ' + w.vlan))}`
+                : `Rosenweg ${esc(w.hausNr)}`;
             const subtitle = isUserVlan
                 ? (w.rolle === 'antragsteller'
                     ? 'Dein eigenes Netzwerk — du bist Antragsteller'
-                    : `Mitnutzer-Zugang (Antragsteller: ${w.ownerEmail || '?'})`)
+                    : `Mitnutzer-Zugang (Antragsteller: ${esc(w.ownerEmail || '?')})`)
                 : 'WLAN-Zugang für dein Gebäude';
             const banner = isUserVlan
                 ? `<div class="mb-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded p-2 text-xs">
@@ -111,22 +114,22 @@
                     <div class="flex justify-between items-center">
                         <span class="text-sm text-gray-600">Passwort</span>
                         <div class="flex items-center gap-2">
-                            <span class="font-mono font-semibold text-gray-900">${w.password}</span>
-                            <button class="copy-btn text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded transition" data-pw="${w.password}">Kopieren</button>
+                            <span class="font-mono font-semibold text-gray-900">${esc(w.password)}</span>
+                            <button class="copy-btn text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded transition" data-pw="${esc(w.password)}">Kopieren</button>
                         </div>
                     </div>
                     <div class="flex justify-between items-center">
                         <span class="text-sm text-gray-600">Netzwerk</span>
-                        <span class="text-sm text-gray-700">${w.network}</span>
+                        <span class="text-sm text-gray-700">${esc(w.network)}</span>
                     </div>
                     <div class="flex justify-between items-center">
                         <span class="text-sm text-gray-600">VLAN</span>
-                        <span class="text-sm text-gray-700">${w.vlan}</span>
+                        <span class="text-sm text-gray-700">${esc(w.vlan)}</span>
                     </div>
                 </div>
                 <div class="text-center">
                     <p class="text-sm text-gray-500 mb-3">QR-Code scannen zum Verbinden</p>
-                    <canvas class="qr-wifi mx-auto" data-ssid="Rosenweg" data-pw="${w.password}"></canvas>
+                    <canvas class="qr-wifi mx-auto" data-ssid="Rosenweg" data-pw="${esc(w.password)}"></canvas>
                 </div>
             `;
             return div;
@@ -170,9 +173,9 @@
                         .sort((a, b) => (a.network || '').localeCompare(b.network || ''))
                         .map(p => `
                             <tr class="border-b hover:bg-gray-50">
-                                <td class="py-2 px-2 font-medium">${p.network || '?'}</td>
-                                <td class="py-2 px-2">${p.vlan || '—'}</td>
-                                <td class="py-2 px-2 font-mono text-xs">${p.password}</td>
+                                <td class="py-2 px-2 font-medium">${esc(p.network || '?')}</td>
+                                <td class="py-2 px-2">${esc(p.vlan || '—')}</td>
+                                <td class="py-2 px-2 font-mono text-xs">${esc(p.password)}</td>
                             </tr>
                         `).join('');
                 }

@@ -185,9 +185,17 @@
 
             document.getElementById('btn-export').addEventListener('click', () => {
                 if (!lastResults.length) return;
+                // Felder quoten und Formel-Anfaenge (= + - @ Tab CR) entschaerfen:
+                // Hostnamen kommen von den Geraeten selbst und wuerden sonst in Excel als Formel laufen
+                const csvField = v => {
+                    let t = String(v ?? '');
+                    if (/^[=+\-@\t\r]/.test(t)) t = "'" + t;
+                    return '"' + t.replace(/"/g, '""') + '"';
+                };
                 const header = 'Zeitpunkt;Event;MAC;IP;Hostname;Netzwerk;VLAN;AP;Kabel\n';
                 const rows = lastResults.map(e =>
-                    `${e.timestamp};${e.event_type};${e.mac};${e.ip || ''};${e.hostname || ''};${e.network_name || ''};${e.vlan || ''};${e.ap_name || ''};${e.is_wired ? 'Ja' : 'Nein'}`
+                    [e.timestamp, e.event_type, e.mac, e.ip || '', e.hostname || '', e.network_name || '', e.vlan || '', e.ap_name || '', e.is_wired ? 'Ja' : 'Nein']
+                        .map(csvField).join(';')
                 ).join('\n');
                 const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8' });
                 const a = document.createElement('a');
