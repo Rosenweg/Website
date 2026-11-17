@@ -884,6 +884,8 @@
     const payload = {
       status: action,
       bemerkung_ausschuss: document.getElementById('r-bemerkung').value.trim() || null,
+      // Server lehnt ab (409), wenn die Auslage seit dem Laden geaendert wurde
+      expected_updated_at: (STATE.auslagen.find(x => x.id === REVIEW_ID) || {}).updated_at || undefined,
     };
     if (action === 'ausbezahlt') payload.ausbezahlt_am = document.getElementById('r-paid-date').value;
     try {
