@@ -78,6 +78,8 @@ async function saveSubscription(sub, { userEmail = null, personId = null, userAg
   }
   // Fremde Subscription nicht uebernehmen: ein bestehender endpoint wird nur fuer
   // denselben Benutzer aktualisiert (sonst liefe dessen Push zum Angreifer-Konto).
+  // Ausnahme: gleiche p256dh+auth = dasselbe Geraet (Kontowechsel im selben
+  // Browser); diese Schluessel kennt nur der Browser, nicht ein Dritter.
   const r = await pool.query(
     `INSERT INTO push_subscriptions (user_email, person_id, endpoint, p256dh, auth, user_agent, last_ok_at)
      VALUES ($1,$2,$3,$4,$5,$6,NOW())
@@ -85,7 +87,8 @@ async function saveSubscription(sub, { userEmail = null, personId = null, userAg
        user_email = EXCLUDED.user_email, person_id = EXCLUDED.person_id,
        p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth,
        user_agent = EXCLUDED.user_agent, last_ok_at = NOW()
-     WHERE LOWER(COALESCE(push_subscriptions.user_email, '')) = LOWER(COALESCE(EXCLUDED.user_email, ''))`,
+     WHERE LOWER(COALESCE(push_subscriptions.user_email, '')) = LOWER(COALESCE(EXCLUDED.user_email, ''))
+        OR (push_subscriptions.p256dh = EXCLUDED.p256dh AND push_subscriptions.auth = EXCLUDED.auth)`,
     [userEmail ? userEmail.toLowerCase() : null, personId, sub.endpoint, sub.keys.p256dh, sub.keys.auth, userAgent]);
   if (r.rowCount === 0) throw new Error('Subscription gehoert einem anderen Konto');
 }
