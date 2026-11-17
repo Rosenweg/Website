@@ -15172,6 +15172,10 @@ app.use('/api/energie-admin', authMiddleware, requirePermission('energie-config'
   }
 });
 
+// Energie lesen (D-1): Anmeldung + nur zugeordnete Zaehler; nginx schickt hierher alles
+// ausser den bewusst offenen Geraete-/Anzeige-Routen.
+app.use('/api/energy', require('./routes/energie-lesen'));
+
 // ─── MQTT-Auth (mosquitto-go-auth HTTP-Backend) ─────────────────────
 // Zweistufig: technische Write-User (collector) laufen ueber den files-Backend
 // des Brokers (existieren nur in Mosquitto). Menschen bekommen hier ein
