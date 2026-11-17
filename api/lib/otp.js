@@ -89,8 +89,19 @@ setInterval(() => {
     if (rest.length) jeIp.set(k, rest); else jeIp.delete(k);
   }
 }, 5 * 60 * 1000).unref();
+// IPv6: ein Anschluss bekommt meist ein ganzes /64 – je Adresse zu zaehlen liesse
+// einen Angreifer beliebig viele Adressen durchwechseln. Darum je /64 zaehlen.
+function ipSchluessel(ip) {
+  const a = String(ip || '').replace(/^::ffff:/i, '');
+  if (!a.includes(':')) return a;
+  const teile = a.split('%')[0].split('::');
+  const vorn = teile[0] ? teile[0].split(':') : [];
+  const hinten = teile.length > 1 && teile[1] ? teile[1].split(':') : [];
+  const voll = teile.length > 1 ? [...vorn, ...Array(Math.max(0, 8 - vorn.length - hinten.length)).fill('0'), ...hinten] : vorn;
+  return voll.slice(0, 4).map(x => (x || '0').toLowerCase().replace(/^0+(?=.)/, '')).join(':') + '::/64';
+}
 function ipErlaubt(req) {
-  const ip = clientIp(req);
+  const ip = ipSchluessel(clientIp(req));
   const now = Date.now();
   const arr = (jeIp.get(ip) || []).filter(t => now - t < GUELTIG_MS);
   if (arr.length >= IP_MAX) { jeIp.set(ip, arr); return false; }
