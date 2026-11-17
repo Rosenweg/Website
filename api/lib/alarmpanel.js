@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const { pool } = require('./db');
 const { queueWhatsappMessage, resolveTechnikWhatsappGroupId } = require('./whatsapp');
 const { loggedSendMail } = require('./mail');
+const { fehlerFuerClient } = require('./utils');
 
 const WEBHOOK_BASE = process.env.ALARM_WEBHOOK_BASE || 'https://www.rosenweg4303.ch';
 const webhookUrl = (t, ev) => `${WEBHOOK_BASE}/api/alarmpanel/webhook?token=${t}&event=${ev || 'alarm'}`;
@@ -211,7 +212,7 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
         return a;
       }, { ok: 0, alarm: 0, offline: 0, unknown: 0 });
       res.json({ sensors: rows, summary: agg, poll_ms: POLL_MS });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
   });
 
   // Aufschalten — conn='poll' (netzbetrieben, host nötig, optional auth) oder
@@ -236,7 +237,7 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
          conn === 'poll' && b.auth_pass ? String(b.auth_pass) : null,
          token, device_type === 'gas' ? (parseInt(b.gas_threshold_ppm, 10) || null) : null, req.user?.email || null]);
       res.json({ ok: true, id: rows[0].id, webhook_url: token ? webhookUrl(token) : null, webhook_clear_url: token ? webhookUrl(token, 'clear') : null });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
   });
 
   // Manager: Webhook-URLs eines Geräts (zum Eintragen in die Shelly-Action)
@@ -246,7 +247,7 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
       const t = rows[0]?.webhook_token;
       if (!t) return res.status(404).json({ error: 'kein Webhook-Gerät' });
       res.json({ alarm_url: webhookUrl(t, 'alarm'), clear_url: webhookUrl(t, 'clear') });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
   });
 
   // Webhook fuer Batterie-Geräte (Shelly Action). Auth = Token, KEIN Authentik.
@@ -268,7 +269,7 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
         if (!was) await escalate(s, { value: 'Alarm (Push)' }, false);
       }
       res.json({ ok: true });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
   });
 
   app.put('/api/alarmpanel/sensors/:id', authMiddleware, requireManage, async (req, res) => {
@@ -285,12 +286,12 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
          typeof b.active === 'boolean' ? b.active : null, parseInt(req.params.id, 10),
          b.auth_user ?? null, (b.auth_pass !== undefined && b.auth_pass !== '') ? b.auth_pass : null]);
       res.json({ ok: true });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
   });
 
   app.delete('/api/alarmpanel/sensors/:id', authMiddleware, requireManage, async (req, res) => {
     try { await pool.query(`DELETE FROM alarm_sensors WHERE id=$1`, [parseInt(req.params.id, 10)]); res.json({ ok: true }); }
-    catch (e) { res.status(500).json({ error: e.message }); }
+    catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
   });
 
   // Alarm-Historie
@@ -298,7 +299,7 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
     try {
       const { rows } = await pool.query(`SELECT id,sensor_name,device_type,event,detail,notified,created_at FROM alarm_events ORDER BY id DESC LIMIT 100`);
       res.json({ events: rows });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
   });
 
   // Test-Alarm (nur Technik-Benachrichtigung, NICHT an Bewohner)
@@ -308,7 +309,7 @@ function mountAlarmpanel({ app, authMiddleware, requireManage, resolveBroadcastR
       if (!rows[0]) return res.status(404).json({ error: 'Sensor nicht gefunden' });
       const notified = await escalate(rows[0], { value: 'TEST-Auslösung' }, true);
       res.json({ ok: true, notified });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { res.status(500).json({ error: fehlerFuerClient(e) }); }
   });
 }
 

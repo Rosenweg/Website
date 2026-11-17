@@ -319,13 +319,24 @@ const AuthentikAuth = {
   /** Make authenticated API call */
   async apiFetch(url, options = {}) {
     const token = this.getToken();
-    const headers = { ...options.headers };
-    if (token) headers.Authorization = `Bearer ${token}`;
-    if (options.body && typeof options.body === 'object' && !(options.body instanceof FormData) && !(options.body instanceof ArrayBuffer) && !(options.body instanceof Uint8Array)) {
-      headers['Content-Type'] = 'application/json';
-      options.body = JSON.stringify(options.body);
+    // Headers-Objekt statt Spread: nimmt auch Headers-Instanzen/Paarlisten an
+    // und prueft Content-Type ohne Gross/Klein.
+    const headers = new Headers(options.headers || {});
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    let body = options.body;
+    // Nur reine Objekte/Arrays werden JSON. Blob/File, FormData, ArrayBuffer,
+    // Typed Arrays, URLSearchParams, ReadableStream und Strings gehen
+    // unveraendert raus (sonst wird z.B. ein PDF-Upload zu "{}").
+    const istReinesObjekt = body !== null && typeof body === 'object'
+      && (Array.isArray(body) || Object.prototype.toString.call(body) === '[object Object]');
+    if (istReinesObjekt) {
+      body = JSON.stringify(body);
+      // Einen vom Aufrufer gesetzten Content-Type nie ueberschreiben.
+      if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
     }
-    const resp = await fetch(url, { ...options, headers });
+    const fetchOpts = { ...options, headers };
+    if (body !== undefined) fetchOpts.body = body;
+    const resp = await fetch(url, fetchOpts);
     // Session abgelaufen kann sich auf zwei Arten zeigen:
     //   a) API antwortet direkt mit 401 (sauberer Fall)
     //   b) fetch() folgt einem 302 zur Authentik-Login-Seite → resp.url
