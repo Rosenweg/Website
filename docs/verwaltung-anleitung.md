@@ -1,148 +1,141 @@
-# Verwaltung - Anleitung Wohnungen anpassen
+# Objektverwaltung – Felder und Knöpfe
+
+Stand: 17.11.2026. Diese Seite beschreibt die Oberfläche der **Objektverwaltung**
+(`objektverwaltung.html`, Menü „Verwaltung“): Reiter, Felder, Knöpfe und wer sie
+sieht. Die Abläufe (Mieterwechsel, Konto anlegen, Löschung nach Auszug …) stehen
+Schritt für Schritt in [anleitung-ausschuss.md](anleitung-ausschuss.md); Vorgänge nur
+für Technik/Präsident in [anleitung-technik.md](anleitung-technik.md).
+
+Hinweis: Früher hiess diese Seite `verwaltung.html`. Unter `verwaltung.html` steht
+heute die öffentliche Seite **Hausverwaltung** mit den Kontaktdaten der
+Liegenschaftsverwaltungen (Kontaktpersonen nur nach Anmeldung).
 
 ## Zugriff
 
-Die Verwaltung ist erreichbar unter **rosenweg.net/verwaltung.html** (oder "Verwaltung" im Navigations-Menu).
+Die Seite verlangt eine Anmeldung. Welche Reiter erscheinen, hängt an den
+Seitenrechten (`rechteverwaltung.html`):
 
-### Berechtigungen
+| Reiter | sichtbar mit | schreiben |
+|---|---|---|
+| Wohnungen | Recht „Wohnungsverwaltung“ ≥ read; nur STWEGs, in denen das Konto eine Gruppe hat (Technik/Präsident: alle) | Recht „Wohnungsverwaltung“ = write **und** Ausschuss dieser STWEG, Verwaltung mit Gruppe dieser STWEG, Technik, Präsident |
+| Eigentümer & Verwalter | wie Wohnungen | nur lesen |
+| Unterschriftenlisten | wie Wohnungen | PDF erzeugen wie „schreiben“ bei Wohnungen |
+| Bewohner | Recht „Bewohner-Verwaltung“ oder „Verwaltung“ ≥ read; Liste nur für Ausschuss, Technik, Präsident | anlegen: Ausschuss mit Recht „Bewohner-Verwaltung“ = write; ändern, löschen: Technik/Präsident |
+| Gruppen | Recht „Bewohner-Verwaltung“ = write | Technik/Präsident |
 
-| Rolle | Zugriff |
-|-------|---------|
-| **Technik** | Alle STWEGs, alle Tabs (Wohnungen, Bewohner, Gruppen) |
-| **Ausschuss** | Nur eigene STWEG, Tabs Wohnungen und Bewohner |
-| **Eigentümer** | Kein Zugriff auf die Verwaltung |
+Standardmässig haben alle Ausschuss-Gruppen „Wohnungsverwaltung“ = write.
+Eigentümer und Bewohner ohne diese Rechte sehen „Keine Berechtigung“.
 
----
-
-## Tab: Wohnungen
-
+Skizzen (ältere Fassung, ohne die Reiter „Eigentümer & Verwalter“ und
+„Unterschriftenlisten“ und ohne Wertquote und „Gültig ab“):
 ![Wohnungen Übersicht](images/verwaltung-uebersicht.svg)
 
-### STWEG auswählen
+---
 
-Oben werden die verfügbaren STWEGs als Buttons angezeigt. Klicke auf eine STWEG-Nummer um deren Wohnungen zu laden. Die Statistik-Leiste zeigt Gesamtzahl, Selbstbewohnt, Vermietet und Leer.
+## Reiter „Wohnungen“
 
-### Wohnung suchen
+Oben die STWEG-Knöpfe, darunter die Statistik (Einheiten, Selbstbewohnt, Vermietet,
+Leer; die Beschriftung wechselt auf „Parkplätze“, „Hobbyräume“ oder „Einheiten“, wenn
+die STWEG nur bzw. auch solche hat).
 
-Nutze das Suchfeld oben links. Es durchsucht Bezeichnung, Eigentümer-Name und Stockwerk.
+Werkzeugleiste:
 
-### Neue Wohnung anlegen
+| Knopf | Wirkung | sichtbar |
+|---|---|---|
+| Suchen… | filtert nach Bezeichnung, Stockwerk, Name und E-Mail der Kontakte | immer |
+| Excel / CSV | Export der Wohnungen der gewählten STWEG | immer |
+| Import | las `stwegN/data/kontakte.json`; diese Dateien gibt es seit dem 17.11.2026 nicht mehr, der Knopf meldet „kontakte.json nicht gefunden unter …“ | mit Schreibrecht |
+| Neue Wohnung | öffnet das leere Wohnungsfenster | mit Schreibrecht |
 
-1. Klicke **"Neue Wohnung"** (blauer Button oben rechts)
-2. Fülle die Felder aus (siehe Modal unten)
-3. Klicke **"Speichern"**
+Ein Klick auf eine Wohnung (oder den Stift) öffnet das Wohnungsfenster.
 
-### Wohnung bearbeiten
+### Wohnungsfenster
 
-1. Klicke auf eine Wohnung in der Liste (oder das Stift-Symbol)
-2. Ändere die gewünschten Felder
-3. Klicke **"Speichern"**
-
-### Wohnung löschen
-
-1. Öffne die Wohnung zum Bearbeiten
-2. Klicke unten links auf **"Löschen"** (rot)
-3. Bestätige die Löschung
-
-### Wohnungs-Modal (Bearbeiten / Neu)
-
-![Wohnung bearbeiten Modal](images/verwaltung-wohnung-modal.svg)
-
-**Felder im Detail:**
+![Wohnung bearbeiten](images/verwaltung-wohnung-modal.svg)
 
 | Feld | Beschreibung | Beispiel |
-|------|-------------|----------|
-| **Bezeichnung** * | Eindeutige Kennung der Wohnung | `EG.1`, `1.OG.2`, `TG.3` |
-| **Stockwerk** | Auswahl von Untergeschoss bis Dachgeschoss | Erdgeschoss |
-| **Zimmer** | Anzahl Zimmer | `3.5` |
-| **Fläche m²** | Wohnfläche in Quadratmetern | `78` |
-| **Typ** | Art der Einheit | Wohnung, Hobbyraum, Tiefgarage-Platz, Parkplatz |
-| **Besonderheiten** | Freitext für Extras | Garten, Balkon, Waschturm |
-| **Bewohnung** | Aktueller Status | Selbstbewohnt, Vermietet, Leer |
-| **Notizen** | Zusätzliche Informationen | Parkplatz Nr. 5 gehört dazu |
+|---|---|---|
+| Bezeichnung * | eindeutig je STWEG | `EG.1`, `1.OG.2`, `TG.3` |
+| Stockwerk | Untergeschoss … Dachgeschoss, Sonstiges | Erdgeschoss |
+| Zimmer | Text | `3.5` |
+| Fläche m² | Zahl | `78` |
+| Typ | Wohnung, Hobbyraum, Tiefgarage-Platz, Parkplatz | Wohnung |
+| Wertquote Zähler / Nenner | ganze Zahlen; Anzeige als `118/1000 ‰` | 118 / 1000 |
+| Besonderheiten | Freitext | Garten, Balkon |
+| Bewohnung | Selbstbewohnt, Vermietet, Leer | Vermietet |
+| Kontakte | Kontaktkarten, siehe unten | |
+| Notizen | Freitext, intern | Parkplatz Nr. 5 gehört dazu |
 
-### Kontakte einer Wohnung
+Knöpfe unten: **Löschen** (rot, nur bei bestehender Wohnung; löscht die Einheit
+endgültig), **Historie** (archivierte Kontakte mit Gültig ab und Archivierungsdatum;
+nur Ausschuss, Verwaltung, Technik, Präsident), **Abbrechen**, **Speichern**.
 
-Jede Wohnung kann mehrere Kontakte haben (Eigentümer, Mieter, Verwalter).
+### Kontaktkarte
 
-**Kontakt hinzufügen:**
-1. Im Wohnungs-Modal klicke **"+ Kontakt hinzufügen"**
-2. Fülle aus:
-   - **Rolle**: Eigentümer, Mieter oder Verwalter
-   - **Name**: Vor- und Nachname
-   - **Telefon**: Telefonnummer
-   - **E-Mail**: E-Mail-Adresse
-3. Pro Wohnung können mehrere Kontakte erfasst werden (z.B. zwei Eigentümer, oder Eigentümer + Verwalter)
+| Element | Bedeutung |
+|---|---|
+| Rolle | Eigentümer (grün), Mieter (blau), Verwalter (violett), Bewohner (türkis), Sonstige (grau) |
+| Name, E-Mail, Telefon | Telefon wird beim Verlassen des Feldes formatiert (`+41 79 123 45 67`) |
+| Adresse | Vorschläge aus dem amtlichen Adressverzeichnis (geo.admin.ch) ab 3 Zeichen |
+| Gültig ab | Datum; in der Zukunft → Karte blass, Hinweis „vorgemerkt ab …“ |
+| Ersetzt ab diesem Datum die bisherigen Kontakte dieser Rolle (Wechsel) | am Stichtag archiviert ein Tageslauf die älteren Kontakte derselben Rolle |
+| Authentik-Zugang | Konto anlegen bzw. in die STWEG-Gruppe aufnehmen; Voreinstellung an für Eigentümer/Verwalter, aus für Mieter/Bewohner |
+| × | Karte entfernen; nach „Speichern“ wird der Kontakt archiviert |
 
-> **Hinweis zur Rolle "Verwalter":** Diese Rolle ist nicht nur für professionelle Hausverwaltungen gedacht. Sie wird auch für Familienangehörige verwendet, die als Ansprechperson für ältere Eigentümer eingetragen werden (z.B. Kinder, die sich um die Angelegenheiten der Eltern kümmern).
-
-**Kontakt entfernen:**
-- Klicke das **"×"** neben dem Kontakt
-
-### Daten exportieren
-
-- **Excel**: Klicke "Excel" in der Toolbar - exportiert alle Wohnungen der gewählten STWEG als .xlsx
-- **CSV**: Klicke "CSV" - exportiert als kommaseparierte Datei
-
-### Daten importieren
-
-Der "Import"-Button importiert Daten aus der bestehenden `kontakte.json` Datei der jeweiligen STWEG. Dies ist nützlich für die Erstbefüllung.
+Eine Karte ohne Name und ohne E-Mail wird beim Speichern ignoriert. Was beim Speichern
+im Hintergrund geschieht (Konto, Gruppen, Ersatzadresse `druckerr9+…`,
+Vollmacht-Entwurf für Verwalter, Löschvormerkung, Schutz gemeinsamer Personen), steht
+in [anleitung-ausschuss.md](anleitung-ausschuss.md), Abschnitte 1.3 bis 1.5 und 4.
 
 ---
 
-## Tab: Bewohner
+## Reiter „Eigentümer & Verwalter“
 
-![Bewohner Übersicht](images/verwaltung-bewohner.svg)
+Tabelle Name, Rolle, Kontakt, Wohnungen, Parkplätze, Sonstige, Σ Wertquoten. Filter:
+Suche (Name/E-Mail), STWEG, Rolle (Eigentümer + Verwalter / nur Eigentümer / nur
+Verwalter). Export CSV und Excel.
 
-Zeigt alle registrierten Benutzer (Authentik-Accounts) der gewählten STWEG.
+## Reiter „Unterschriftenlisten“
 
-### Neuen Bewohner anlegen
+Formular **„Unterschriftenliste generieren“**: STWEG, Haus-Auswahl, Datum, Anlass-Titel,
+Zweck / Beschreibung, Rücksendung bis, Rücksendung an, Zeichnungsberechtigte
+(**„+ Person“**), Kollektiv-Text. Knöpfe **Vorschau** und **PDF herunterladen**.
+Rechts die Vorschau mit **Aktualisieren**. Darunter **„Bisher generierte
+Unterschriftenlisten“** mit Links Ansehen / PDF / Verify. Rückläufe werden auf der
+separaten Seite `unterschriftenliste-rueckläufe.html` erfasst
+([anleitung-ausschuss.md](anleitung-ausschuss.md), Abschnitt 9).
 
-1. Klicke **"Neuer Bewohner"** (blauer Button oben rechts)
-2. Fülle aus:
-   - **Name** (Pflicht)
-   - **E-Mail** (Pflicht) - damit meldet sich der Bewohner an
-   - **Rolle**: Eigentümer oder Mieter
-3. Klicke **"Speichern"**
-4. Der Bewohner erhält automatisch einen Authentik-Account und wird den passenden Gruppen zugewiesen
+## Reiter „Bewohner“
 
-### Bewohner bearbeiten
+Kontokarten mit Name, E-Mail und Abzeichen (Ausschuss, Eigentümer, Mieter); für
+Technik/Präsident zusätzlich alle Gruppennamen. Knöpfe:
 
-1. Klicke auf einen Bewohner in der Liste (Stift-Symbol)
-2. Ändere Name, E-Mail oder Rolle
-3. Klicke **"Speichern"**
+| Knopf | Wirkung | wer |
+|---|---|---|
+| Neuer Bewohner | Konto anlegen: Name *, E-Mail *, Gruppen; Benutzername wird als `vorname.nachname` gebildet, kein Passwort | Ausschuss (nur Bewohner-/Eigentümer-Gruppen der eigenen STWEG), Technik, Präsident |
+| Stift | Name, E-Mail, Gruppen ändern | wirksam nur für Technik/Präsident (der Ausschuss bekommt „Gruppen können nur von Technik geändert werden“) |
+| Papierkorb | Konto in Authentik löschen (Bestätigungstext sagt „deaktiviert“) | nur Technik/Präsident; beim Ausschuss passiert nichts |
+
+Das Feld „Rolle“ (Eigentümer/Mieter) im Formular wird nicht ausgewertet; massgebend
+sind die angehakten Gruppen.
+
+## Reiter „Gruppen“
+
+Baum aller sichtbaren Gruppen mit Elterngruppe und Mitgliederzahl. Klick auf eine
+Gruppe: Mitglieder mit **Entfernen**, darunter **„Benutzer hinzufügen“**. Änderungen
+wirken nur für Technik/Präsident. **„Neue Gruppe“** (sichtbar für Technik, Präsident und Verwaltung)
+funktioniert zurzeit nicht, siehe [anleitung-technik.md](anleitung-technik.md),
+Abschnitt 1.2.
 
 ---
 
-## Tab: Gruppen
+## Typische Aufgaben – Verweise
 
-Nur für **Technik** sichtbar. Zeigt alle Authentik-Gruppen und deren Mitglieder. Hier können:
-- Neue Gruppen erstellt werden
-- Mitglieder zu Gruppen hinzugefügt/entfernt werden
-
----
-
-## Typische Aufgaben
-
-### Eigentümerwechsel
-
-1. Öffne die betroffene Wohnung
-2. Ändere den bestehenden Kontakt oder entferne ihn und füge den neuen Eigentümer hinzu
-3. Speichern
-4. Im Tab "Bewohner": Alten Bewohner deaktivieren, neuen anlegen
-
-### Wohnung wird vermietet
-
-1. Öffne die Wohnung
-2. Ändere Status auf **"Vermietet"**
-3. Füge einen neuen Kontakt mit Rolle **"Mieter"** hinzu
-4. Speichern
-5. Optional: Im Tab "Bewohner" den Mieter als neuen Benutzer anlegen
-
-### Tiefgarage-Plätze / Hobbyräume erfassen
-
-1. Klicke "Neue Wohnung"
-2. Bei **Typ** wähle "Tiefgarage-Platz", "Parkplatz" oder "Hobbyraum"
-3. Bei **Bezeichnung** z.B. `TG.5` oder `HR.2`
-4. Eigentümer als Kontakt hinzufügen
-5. Speichern
+| Aufgabe | Anleitung |
+|---|---|
+| Mieterwechsel, Eigentümerwechsel | [anleitung-ausschuss.md](anleitung-ausschuss.md), 1.5 und 1.6 |
+| Wohnung wird vermietet | Bewohnung auf „Vermietet“, Mieter-Karte anlegen, optional Authentik-Zugang anhaken |
+| Tiefgaragenplatz, Hobbyraum erfassen | „Neue Wohnung“, Typ „Tiefgarage-Platz“, „Parkplatz“ oder „Hobbyraum“, Bezeichnung z. B. `TG.5` oder `HR.2`, Eigentümer-Karte |
+| Konto anlegen | [anleitung-ausschuss.md](anleitung-ausschuss.md), 3 |
+| Konto nach Auszug löschen | [anleitung-ausschuss.md](anleitung-ausschuss.md), 4; sofort: [anleitung-technik.md](anleitung-technik.md), 2 |
+| Gruppen vergeben | [anleitung-technik.md](anleitung-technik.md), 1 |

@@ -80,8 +80,10 @@ diesem einen Netz nicht frei — `desktop-test` etwa hält `100.64.9.128`, was
 in den Block von Einheit 12 fiele.
 
 Die sieben festen Reservierungen aus dem Blockbereich brauchen weiterhin eine
-neue Adresse; sie sind oben aufgeführt. Drei davon sind Einheiten-Router, die
-unter der neuen Systematik ohnehin die erste Adresse ihres Blocks bekommen.
+neue Adresse. Welche es sind, steht in diesem Dokument nicht (die frühere Liste
+fehlt); die festen Reservierungen sind in UniFi zu prüfen. Drei davon sind
+Einheiten-Router, die unter der neuen Systematik ohnehin die erste Adresse ihres
+Blocks bekommen.
 
 ## Ausgerechnet: Haus 13, Einheit 3
 
@@ -224,7 +226,8 @@ Ebenso offen: die vier Hobbyräume ohne Hauszuordnung (Objekt-IDs 58, 215, 216,
 
 ## Reihenfolge der Umsetzung
 
-1. DHCP-Bereiche in UniFi auf `.150–.254` (Liste oben) — geht unabhängig von
-   allem anderen und ist Voraussetzung für die Blöcke.
+1. DHCP-Bereiche in UniFi auf `.200–.254` — am 11. August 2026 für 14 von 15
+   Haus-VLANs erledigt (siehe „DHCP: erledigt am 11. August 2026“); offen ist nur
+   RK (VLAN 9). Voraussetzung für die Blöcke.
 2. Einheiten umbenennen und `haus` + `einheit_nr` als feste Felder einführen.
 3. IP-Zuordnung darauf aufsetzen: berechnete Vorgabe, gespeicherte Ausnahme.

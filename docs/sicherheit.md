@@ -107,7 +107,9 @@ Einheitentests für Einmal-Codes, Login-Ablauf und Personen-Abgleich.
 - **Verwaltung:** wie Ausschuss, gebunden an die STWEG-Gruppen, in denen sie steht.
 - **Technik / Präsident:** volle Rechte. Bestimmte Vorgänge (Gruppen vergeben,
   Konten löschen, Personen mit eigenem Konto ändern, Zonen-Freigaben) sind nur hier
-  möglich.
+  möglich. Ausnahme: MQTT-Verwaltung (inkl. App-Passwörter für andere) und die
+  Anzeigen-Bedienung (Ankündigungen, Notfall) verlangen die Gruppe `technik` (oder
+  `role=admin`); `Präsident` allein genügt dort nicht.
 - **Interne Dienste:** sprechen sich nur mit eigenen Geheimnissen an; keine
   IP-Vertrauensstellung ausser wo ausdrücklich dokumentiert (`INTERN_LESER`).
 
@@ -250,8 +252,9 @@ STWEG-Hosts und alle `.json` ausser `site-config.json`, `zaehler-config.json`,
 - Beide Traefik-Generatoren übernehmen nur `approval_status='approved'` und prüfen
   Hostnamen, SNI und Ports erneut. Ändert ein Nicht-Admin Ziel, Port, SNI oder
   schaltet die Anmeldung ab → zurück auf „wartet auf Admin“.
-- Freigeben in `isp-admin.html`: Knöpfe „Genehmigen“ bei Mail-Relays und
-  Weiterleitungen.
+- Freigeben in `isp-admin.html`: Knöpfe „Genehmigen“ bei Mail-Relays (Reiter
+  „Mailserver/PMG“) sowie bei Reverse-Proxy-Routen und Weiterleitungen (Reiter
+  „Routing“).
 - NOC ohne Token: gekürzte Sicht (ohne MAC/Hostnamen, IPs, WAN-IP, LXC-Liste);
   Token nur per Header `X-Noc-Token` bzw. `#token=` in der Wandbild-URL.
 - Heizung (`heizung.rosenweg9.ch`, `heizung.rosenweg4303.ch`): alle Router hinter
