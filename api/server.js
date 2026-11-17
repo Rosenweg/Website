@@ -308,16 +308,63 @@ function oauthStatePruefen(state) {
 
 // OAUTH_ALLOWED_HOSTS, oauthRedirectUri -> lib/config.js
 
+// Browser-Bindung des OAuth-Flusses (R3-Fa): ohne sie koennte ein Angreifer seinen
+// eigenen code/state im Browser des Opfers einloesen lassen (Login-CSRF, Opfer
+// arbeitet unbemerkt im Angreiferkonto). Der Login setzt ein Zufallscookie, dessen
+// Wert im signierten State steht; der Callback verlangt beides passend.
+// Path=/api/auth/callback: das Cookie geht nur an den Callback, sonst nirgends hin.
+const OAUTH_BIND_COOKIE = 'rw_oauth_bind';
+const OAUTH_BIND_RE = /^[A-Za-z0-9_-]{32}$/;
+function oauthBindWerte(req) {
+  const werte = [];
+  for (const teil of String(req.headers.cookie || '').split(';')) {
+    const i = teil.indexOf('=');
+    if (i < 0 || teil.slice(0, i).trim() !== OAUTH_BIND_COOKIE) continue;
+    const w = teil.slice(i + 1).trim();
+    if (OAUTH_BIND_RE.test(w)) werte.push(w);
+  }
+  return werte;
+}
+function oauthBindPasst(req, b) {
+  if (typeof b !== 'string' || !OAUTH_BIND_RE.test(b)) return false;
+  const soll = Buffer.from(b);
+  // Mehrere gleichnamige Cookies moeglich (z. B. Rest eines alten Logins) -> eines muss passen
+  return oauthBindWerte(req).some(w => { const ist = Buffer.from(w); return ist.length === soll.length && crypto.timingSafeEqual(ist, soll); });
+}
+function oauthBindCookie(wert, maxAge) {
+  return `${OAUTH_BIND_COOKIE}=${wert}; HttpOnly; Secure; SameSite=Lax; Path=/api/auth/callback; Max-Age=${maxAge}`;
+}
+
 app.get('/api/auth/login', (req, res) => {
   const { redirect: redirectRoh } = req.query;
   const redirect = typeof redirectRoh === 'string' && redirectRoh.length <= 1000 ? redirectRoh : '';
   const redirectUri = oauthRedirectUri(req);
 
+  // Das Bind-Cookie gilt nur fuer den Host, auf dem der Browser jetzt ist. Kommt der
+  // Login ueber einen Host, der nicht in OAUTH_ALLOWED_HOSTS steht, laeuft der
+  // Callback ueber SITE_URL -> einmal dorthin umleiten, damit Cookie und Callback
+  // auf demselben Host liegen. hb=1 verhindert eine Umleitungsschleife, falls ein
+  // Proxy den Host nicht weiterreicht.
+  const loginHost = req.headers['x-forwarded-host'] || req.headers.host || '';
+  let callbackHost = '', callbackOrigin = '';
+  try { const u = new URL(redirectUri); callbackHost = u.host; callbackOrigin = u.origin; } catch {}
+  if (callbackHost && loginHost !== callbackHost && req.query.hb !== '1') {
+    const q = new URLSearchParams();
+    if (redirect) q.set('redirect', redirect);
+    if (req.query.reauth === '1') q.set('reauth', '1');
+    q.set('hb', '1');
+    return res.redirect(`${callbackOrigin}/api/auth/login?${q}`);
+  }
+
   // Sanitize redirect: only allow relative paths to prevent open redirect
   const safeRedirect = (redirect && redirect.startsWith('/') && !redirect.startsWith('//')) ? redirect : '/';
+  // Vorhandenes Bind-Cookie weiterverwenden: so stoeren sich zwei gleichzeitig
+  // gestartete Logins (zwei Tabs) nicht gegenseitig.
+  const bind = oauthBindWerte(req)[0] || crypto.randomBytes(24).toString('base64url');
+  res.append('Set-Cookie', oauthBindCookie(bind, 600));
   // State signiert fuer die CSRF-Pruefung im Callback (inkl. redirect_uri damit
   // der Callback auf demselben Host kommt wie der Login-Start)
-  const state = oauthStateErzeugen({ redirect: safeRedirect, redirect_uri: redirectUri });
+  const state = oauthStateErzeugen({ redirect: safeRedirect, redirect_uri: redirectUri, b: bind });
 
   const params = new URLSearchParams({
     response_type: 'code',
@@ -398,6 +445,18 @@ app.get('/api/auth/callback', async (req, res) => {
   // Validate CSRF state
   const storedState = oauthStatePruefen(state);
   if (!storedState) return res.status(400).send('Ungültiger oder abgelaufener State-Parameter (CSRF-Schutz)');
+  // Browser-Bindung (R3-Fa): Login muss in DIESEM Browser gestartet worden sein.
+  // Kein automatischer Neustart (sonst Endlos-Login), sondern eine Seite mit Link.
+  const bindOk = oauthBindPasst(req, storedState.b);
+  res.append('Set-Cookie', oauthBindCookie('', 0));
+  if (!bindOk) {
+    console.warn('[oauth] Callback ohne passendes Bind-Cookie abgewiesen');
+    return res.status(400).type('html').send('<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Anmeldung abgebrochen</title></head>'
+      + '<body style="font-family:sans-serif;max-width:32rem;margin:3rem auto;padding:0 1rem">'
+      + '<h1>Anmeldung abgebrochen</h1><p>Die Anmeldung wurde nicht in diesem Browser gestartet oder hat zu lange gedauert. '
+      + 'Aus Sicherheitsgründen wurde sie nicht abgeschlossen.</p><p>Bitte melden Sie sich erneut an.</p>'
+      + '<p><a href="/">Zur Startseite</a></p></body></html>');
+  }
 
   // Sanitize redirect path: must be a relative path starting with /, prevent open redirect
   let redirectPath = storedState.redirect || '/';
@@ -483,13 +542,16 @@ app.get('/api/auth/callback', async (req, res) => {
       return res.status(403).send('Anmeldung abgelehnt: Diese E-Mail gehört zu einem anderen Konto. Bitte Technik kontaktieren.');
     }
 
-    // Create/update user in DB
+    // Create/update user in DB. active = true: Authentik hat das Konto eben
+    // angemeldet; eine nach Kontoloeschung deaktivierte Zeile (S2-3-2) wird so fuer
+    // ein neu angelegtes Konto mit derselben E-Mail wieder nutzbar.
     const userResult = await pool.query(
       `INSERT INTO users (email, name, role, groups_json, username, authentik_sub)
        VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''))
        ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, groups_json = EXCLUDED.groups_json, username = EXCLUDED.username,
                                          name_selbst_geaendert_am = NULL,
-                                         authentik_sub = COALESCE(users.authentik_sub, EXCLUDED.authentik_sub)
+                                         authentik_sub = COALESCE(users.authentik_sub, EXCLUDED.authentik_sub),
+                                         active = true
        WHERE users.authentik_sub IS NULL OR users.authentik_sub = EXCLUDED.authentik_sub
        RETURNING id, email, name, wohnung, stweg, role, groups_json, username`,
       [email, name, isAdmin ? 'admin' : 'bewohner', JSON.stringify(groups), username, sub]
@@ -4123,11 +4185,25 @@ async function syncAuthentikUserRechte() {
       if (!d.pagination?.next) break;
     }
     if (page > 20 || liste.length === 0) return; // unvollstaendig/leer -> nichts entziehen
-    const lokal = new Map((await pool.query('SELECT id, LOWER(email) AS email, role, groups_json, active FROM users')).rows.map(r => [r.email, r]));
+    if (!usersSubSpalte) usersSubSpalte = pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS authentik_sub TEXT').catch(e => { usersSubSpalte = null; throw e; });
+    await usersSubSpalte;
+    const lokal = new Map((await pool.query('SELECT id, LOWER(email) AS email, role, groups_json, active, authentik_sub FROM users')).rows.map(r => [r.email, r]));
+    // Mehrere Authentik-Konten mit derselben E-Mail (R3-S2b): nicht das zuletzt
+    // gelistete Konto die Rechte der users-Zeile bestimmen lassen. Nur das an die
+    // Zeile gebundene Konto (uid == authentik_sub) zaehlt; sonst nichts aendern.
+    const proEmail = new Map();
+    for (const au of liste) {
+      const e = String(au.email || '').toLowerCase();
+      if (e) proEmail.set(e, (proEmail.get(e) || 0) + 1);
+    }
     let geaendert = 0;
     for (const au of liste) {
       const u = lokal.get(String(au.email || '').toLowerCase());
       if (!u) continue;
+      if (proEmail.get(u.email) > 1 && !(u.authentik_sub && au.uid && au.uid === u.authentik_sub)) {
+        if (!syncDoppelGemeldet.has(u.email)) { syncDoppelGemeldet.add(u.email); console.warn(`[authentik-sync] ${u.email}: mehrere Authentik-Konten mit dieser E-Mail – Konto ${au.pk} nicht uebernommen`); }
+        continue;
+      }
       const gruppen = (au.groups_obj || []).map(g => g.name).filter(Boolean);
       const istAdmin = gruppen.some(g => ['technik', 'präsident', 'praesident'].includes(g.toLowerCase()));
       let alt = []; try { alt = JSON.parse(u.groups_json || '[]'); } catch {}
@@ -4142,9 +4218,21 @@ async function syncAuthentikUserRechte() {
       const weg = alt.filter(g => !gruppen.includes(g));
       if (weg.length || u.active !== aktiv) console.log(`[authentik-sync] ${u.email}: ${!aktiv ? 'deaktiviert, ' : ''}${weg.length ? 'entzogen: ' + weg.join(',') : ''}`);
     }
+    // Direkt in Authentik geloeschte Konten (S2-3-2): Zeilen, die an ein Authentik-
+    // Konto gebunden waren (authentik_sub gesetzt), dessen E-Mail es nicht mehr
+    // gibt, deaktivieren -> Sitzungen und PATs greifen nicht mehr. Reine E-Mail-
+    // Code-Konten haben kein authentik_sub und bleiben unberuehrt.
+    for (const u of lokal.values()) {
+      if (!u.authentik_sub || u.active === false || proEmail.has(u.email)) continue;
+      await pool.query('UPDATE users SET active = false, updated_at = NOW() WHERE id = $1', [u.id]);
+      await pool.query('DELETE FROM sessions WHERE user_id = $1', [u.id]);
+      console.log(`[authentik-sync] ${u.email}: Authentik-Konto nicht mehr vorhanden, deaktiviert`);
+      geaendert++;
+    }
     if (geaendert) console.log(`[authentik-sync] ${geaendert} Konto/Konten aktualisiert`);
   } catch (e) { console.warn('[authentik-sync]', e.message); }
 }
+const syncDoppelGemeldet = new Set(); // Doppelkonten nur einmal je Prozess melden
 setTimeout(syncAuthentikUserRechte, 2 * 60 * 1000);
 setInterval(syncAuthentikUserRechte, 10 * 60 * 1000);
 
@@ -5774,8 +5862,9 @@ async function buildZevAliasMap() {
         // Name): nicht still ueberschreiben, sondern als Kollision markieren –
         // keine automatische Zuordnung, kein Sync (sonst Rechnung an fremde STWEG).
         const vorh = map[r.alias_address.toLowerCase()];
-        // Ausgezogene (departed) einer anderen STWEG verdraengt der aktuelle Bewohner wie bisher.
-        if (vorh && vorh.stweg !== cfg.stweg && !vorh.departed) { vorh.kollision = true; continue; }
+        // Auch Ausgezogene (departed) einer anderen STWEG zaehlen (R3-S2c): sonst
+        // ginge deren Schlussabrechnung still an den neuen Bewohner der fremden STWEG.
+        if (vorh && vorh.stweg !== cfg.stweg) { vorh.kollision = true; continue; }
         map[r.alias_address.toLowerCase()] = { wohnung_id: r.wohnung_id, stweg: cfg.stweg, alias_address: r.alias_address, bewohner_email: r.bewohner_email, bewohner_name: r.bewohner_name, typ: r.typ === 'allgemein' ? 'allgemein' : 'wohnung' };
       }
       // Kuerzlich ausgezogene Bewohner (archiviert < 6 Monate): Alias 6 Monate aktiv
@@ -5789,7 +5878,10 @@ async function buildZevAliasMap() {
         [cfg.stweg]);
       for (const k of recent.rows) {
         const a = zevAliasAddress(k.name, cfg.alias_prefix, cfg.alias_domain);
-        if (a && !map[a.toLowerCase()]) {
+        const vorhA = a && map[a.toLowerCase()];
+        // Alias schon von einer anderen STWEG belegt -> Kollision statt still verwerfen (R3-S2c)
+        if (vorhA && vorhA.stweg !== cfg.stweg) vorhA.kollision = true;
+        if (a && !vorhA) {
           map[a.toLowerCase()] = { wohnung_id: k.wohnung_id, stweg: cfg.stweg, alias_address: a, bewohner_email: k.email, bewohner_name: k.name, departed: true, typ: 'wohnung' };
         }
       }
@@ -6539,6 +6631,10 @@ function kontoAutoLoeschbar(authentikUser, stweg) {
   if (!eigen) return false;
   const erlaubt = new Set([eigen.bewohner, eigen.eigentuemer].filter(Boolean).map(x => x.toLowerCase()));
   if (!namen.some(n => erlaubt.has(n))) return false;
+  // Positivliste (R3-S2a): nur Konten, die AUSSCHLIESSLICH in Bewohner-/Eigentuemer-
+  // Gruppen dieser STWEG sind. Eine Sperrliste verpasst neue Gruppen (z. B. Zutritt,
+  // Dienstleister) und loescht dann Konten mit weiteren Aufgaben.
+  if (namen.some(n => !erlaubt.has(n))) return false;
   if (isTechnik(namen) || isPraesident(namen)) return false;
   if (namen.some(n => n.includes('ausschuss') || n === 'verwaltung' || n === 'admin' || n.includes('admins'))) return false;
   for (const [nr, m] of Object.entries(STWEG_GROUPS)) {
@@ -6688,6 +6784,32 @@ async function cancelPendingDeletion(email) {
 }
 
 // Periodic job: process pending Authentik deletions (reminders + deletions)
+// Nach dem Loeschen eines Authentik-Kontos (R3-S2d, S2-3-2): Bindung an das alte
+// Konto loesen (sonst wird ein neu angelegtes Konto mit derselben E-Mail beim Login
+// abgewiesen) und alle Zugaenge der Zeile beenden – Sitzungen (30 Tage gleitend) und
+// PATs galten sonst weiter. Gibt es noch ein anderes Authentik-Konto mit dieser
+// E-Mail, bleibt die Zeile aktiv (dessen naechster Login bindet sie neu).
+async function lokalesKontoNachLoeschung(email) {
+  const e = String(email || '').toLowerCase().trim();
+  if (!e) return;
+  try {
+    if (!usersSubSpalte) usersSubSpalte = pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS authentik_sub TEXT').catch(x => { usersSubSpalte = null; throw x; });
+    await usersSubSpalte;
+    let nochKonto = false;
+    try { nochKonto = !!(await authentikKontoPerEmail(e)); } catch {}
+    const r = await pool.query(
+      `UPDATE users SET authentik_sub = NULL, active = CASE WHEN $2 THEN active ELSE false END, updated_at = NOW()
+        WHERE LOWER(email) = $1 RETURNING id`, [e, nochKonto]);
+    const ids = r.rows.map(x => x.id);
+    if (ids.length) await pool.query('DELETE FROM sessions WHERE user_id = ANY($1::int[])', [ids]);
+    await pool.query('UPDATE api_tokens SET revoked_at = NOW() WHERE LOWER(user_email) = $1 AND revoked_at IS NULL', [e]);
+    for (const [t, v] of tokenCache) { if (String(v.user?.email || '').toLowerCase() === e) tokenCache.delete(t); }
+    console.log(`[Authentik] Lokales Konto ${e} nach Loeschung: ${ids.length} Zeile(n)${nochKonto ? '' : ' deaktiviert'}, Sitzungen/PATs beendet`);
+  } catch (err) {
+    console.error(`[Authentik] Lokales Konto ${e} nach Loeschung nicht bereinigt:`, err.message);
+  }
+}
+
 async function processAuthentiKDeletions() {
   if (!AUTHENTIK_API_TOKEN) return;
   try {
@@ -6756,6 +6878,7 @@ async function processAuthentiKDeletions() {
           // Hard delete per DSG/DSGVO requirements
           await authentikAPI('DELETE', `/core/users/${user.pk}/`);
           console.log(`[Authentik] Deleted user ${row.email} (pk: ${user.pk})`);
+          await lokalesKontoNachLoeschung(row.email);
         }
         await pool.query('DELETE FROM authentik_pending_deletions WHERE id = $1', [row.id]);
       } catch (err) {
@@ -8155,8 +8278,13 @@ app.post('/api/zev/rechnung/:id/zuordnen', authMiddleware, requirePermission('wo
     const alle = isTechnik(g) || isPraesident(g);
     if (!alle) {
       const eigene = getAusschussStwegs(g);
-      const alt = await pool.query('SELECT stweg FROM zev_rechnungen WHERE id = $1', [id]);
+      const alt = await pool.query('SELECT stweg, zuordnung FROM zev_rechnungen WHERE id = $1', [id]);
       if (!alt.rows.length) return res.status(404).json({ error: 'Rechnung nicht gefunden' });
+      // S2-3-3: Ausschuss ordnet nur unzugeordnete Rechnungen zu – bereits zugeordnete
+      // (auch automatisch) nicht auf eine andere Wohnung/einen anderen Empfaenger umhaengen.
+      if ((alt.rows[0].zuordnung || 'unzugeordnet') !== 'unzugeordnet') {
+        return res.status(409).json({ error: 'Rechnung ist bereits zugeordnet. Umhängen nur durch Technik.' });
+      }
       // Rechnung ohne STWEG (Alias unbekannt) nur Technik/Praesident – sonst
       // koennte jeder Ausschuss fremde Rechnungen in die eigene STWEG ziehen.
       if (!eigene.has(stweg) || alt.rows[0].stweg == null || !eigene.has(alt.rows[0].stweg)) {
@@ -8183,8 +8311,9 @@ app.post('/api/zev/rechnung/:id/zuordnen', authMiddleware, requirePermission('wo
     }
     const upd = await pool.query(
       `UPDATE zev_rechnungen SET wohnung_id=$2, stweg=$3, bewohner_email=$4, bewohner_name=$5, zuordnung='wohnung' WHERE id=$1
+          AND ($6::boolean OR COALESCE(zuordnung, 'unzugeordnet') = 'unzugeordnet')
        RETURNING id, stweg, bewohner_email, bewohner_name, zeitraum_von, zeitraum_bis, betrag_chf, pdf_filename, pdf_data`,
-      [id, wohnungId, stweg, bewEmail, bewName]);
+      [id, wohnungId, stweg, bewEmail, bewName, alle]);
     if (!upd.rows.length) return res.status(404).json({ error: 'Rechnung nicht gefunden' });
     if (b.remail === true && upd.rows[0].bewohner_email) {
       const r2 = await sendZevRemail(upd.rows[0]);
@@ -9308,6 +9437,69 @@ app.post('/api/wohnungen/:stweg/:id/kontakte/:kid/archive', authMiddleware, requ
   }
 });
 
+// S2-3-1: personen-Stammdaten beim Speichern ueber die Wohnungsverwaltung schuetzen.
+// Wer wohnungsverwaltung:write hat (Verwaltung, Ausschuss), konnte per person_id im
+// Body einen Kontakt an eine beliebige Person haengen; der Trigger
+// kontakte_propagate_to_person schrieb dann Name/E-Mail/Telefon/Adresse in diese
+// fremde Person (auch fremder STWEGs bzw. mit eigenem Konto = Identitaet uebernehmen).
+// Technik/Praesident bleiben beim bisherigen Verhalten.
+function wohnungsAdminPrivilegiert(req) {
+  const g = req.user?.groups || [];
+  return isTechnik(g) || isPraesident(g);
+}
+// Vor saveKontakte: person_id nur die bisherige des Kontakts (neue Kontakte -> find/create),
+// Trigger fuer diese Transaktion stumm schalten. Liefert die Vorher-Werte (oder null).
+async function adminKontaktePersonenVorbereiten(client, req, wohnungId, kontakte) {
+  if (wohnungsAdminPrivilegiert(req)) return null;
+  const zeilen = wohnungId
+    ? (await client.query('SELECT id, person_id, name, email, telefon, adresse FROM wohnungen_kontakte WHERE wohnung_id = $1 AND archiviert_am IS NULL', [wohnungId])).rows
+    : [];
+  const bisher = new Map(zeilen.map(r => [r.id, r]));
+  for (const k of (Array.isArray(kontakte) ? kontakte : [])) {
+    if (!k || typeof k !== 'object') continue;
+    const alt = k.id != null ? bisher.get(Number(k.id)) : null;
+    if (alt) k.person_id = alt.person_id; else delete k.person_id;
+  }
+  await client.query("SELECT set_config('rosenweg.person_sync', 'on', true)");
+  return bisher;
+}
+// Nach saveKontakte: erlaubte Weitergabe an personen von Hand (wie der Trigger), aber
+// nicht in Personen mit eigenem Konto oder mit Wohnungen anderer STWEGs: Name/E-Mail
+// -> 409; Telefon/Adresse bleiben dann nur am Kontakt dieser Wohnung.
+async function adminKontaktePersonenAbgleichen(client, wohnungId, bisher, stweg) {
+  if (!bisher) return;
+  const nachher = (await client.query('SELECT id, person_id, name, email, telefon, adresse FROM wohnungen_kontakte WHERE wohnung_id = $1 AND archiviert_am IS NULL', [wohnungId])).rows;
+  for (const n of nachher) {
+    const alt = bisher.get(n.id);
+    // Neu angelegt oder neu verknuepft: Werte stammen aus der Anlage, nichts weiterzugeben
+    if (!alt || !n.person_id || n.person_id !== alt.person_id) continue;
+    const identGleich = n.name === alt.name && String(n.email || '').toLowerCase() === String(alt.email || '').toLowerCase();
+    if (identGleich && n.email === alt.email && n.telefon === alt.telefon && n.adresse === alt.adresse) continue;
+    const schutz = (await client.query(
+      `SELECT EXISTS (SELECT 1 FROM wohnungen_kontakte k JOIN wohnungen w ON w.id = k.wohnung_id
+                       WHERE k.person_id = $1 AND w.stweg <> $2 AND k.archiviert_am IS NULL) AS fremd_stweg,
+              EXISTS (SELECT 1 FROM users u JOIN personen p ON p.id = $1
+                       WHERE u.active = true AND u.email <> '' AND LOWER(u.email) IN (LOWER(COALESCE(p.email, '')), LOWER(COALESCE($3, '')))) AS konto`,
+      [n.person_id, stweg, alt.email])).rows[0] || {};
+    if (schutz.fremd_stweg || schutz.konto) {
+      if (!identGleich) {
+        const e = new Error(`Name und E-Mail von «${String(alt.name || alt.email || '').slice(0, 80)}» gehören zu einer Person mit eigenem Konto oder Wohnungen in einer anderen STWEG. Diese Angaben ändert die Person selbst im Profil oder die Technik.`);
+        e.status = 409; throw e;
+      }
+      continue; // Telefon/Adresse nur an diesem Kontakt, nicht an der gemeinsamen Person
+    }
+    // Eine Adresse, die zu einem fremden Konto gehoert, nicht in eine Person schreiben
+    if (n.email && String(n.email).toLowerCase() !== String(alt.email || '').toLowerCase()) {
+      const fremd = await client.query('SELECT 1 FROM users WHERE active = true AND LOWER(email) = LOWER($1) LIMIT 1', [n.email]);
+      if (fremd.rows.length) { const e = new Error('Diese E-Mail-Adresse gehört zu einem bestehenden Konto. Bitte Technik kontaktieren.'); e.status = 409; throw e; }
+    }
+    // Wie der Trigger kontakte_propagate_to_person (der hier wegen person_sync schweigt)
+    await client.query(
+      'UPDATE personen SET name = COALESCE($1, name), email = $2, telefon = $3, adresse = $4, updated_at = NOW() WHERE id = $5',
+      [n.name, n.email, n.telefon, n.adresse, n.person_id]);
+  }
+}
+
 // POST /api/wohnungen/:stweg - Create apartment
 app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, async (req, res) => {
   const client = await pool.connect();
@@ -9324,6 +9516,7 @@ app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsver
        b.bewohnt_von || 'eigentuemer', b.waschkueche_berechtigt !== false, b.notizen,
        b.wertquote_zaehler || null, b.wertquote_nenner || null]
     );
+    await adminKontaktePersonenVorbereiten(client, req, null, b.kontakte); // S2-3-1: keine person_id aus dem Body
     await saveKontakte(client, result.rows[0].id, b.kontakte, stweg);
     await client.query('COMMIT');
     const wohnung = await loadWohnungMitKontakte(result.rows[0].id);
@@ -9370,7 +9563,9 @@ app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Wohnung nicht gefunden' });
     }
+    const personenBisher = await adminKontaktePersonenVorbereiten(client, req, result.rows[0].id, b.kontakte); // S2-3-1
     await saveKontakte(client, result.rows[0].id, b.kontakte, stweg);
+    await adminKontaktePersonenAbgleichen(client, result.rows[0].id, personenBisher, stweg);
     // Clear flat fields when kontakte are saved (migration from old format)
     if (b.kontakte && b.kontakte.length > 0) {
       await client.query(
@@ -9395,7 +9590,7 @@ app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
     }
   } catch (err) {
     await client.query('ROLLBACK');
-    if (err.status === 400) return res.status(400).json({ error: err.message });
+    if (err.status === 400 || err.status === 409) return res.status(err.status).json({ error: err.message });
     if (err.code === '23505') return res.status(409).json({ error: 'Wohnung mit dieser Bezeichnung existiert bereits' });
     console.error('Wohnung update error:', err);
     res.status(500).json({ error: 'Fehler beim Aktualisieren der Wohnung' });
@@ -10730,7 +10925,12 @@ app.delete('/api/admin/users/:pk', authMiddleware, requirePermission('bewohner-v
   const pk = parseInt(req.params.pk, 10);
   if (!/^\d+$/.test(String(req.params.pk)) || !Number.isFinite(pk) || pk < 1) return res.status(400).json({ error: 'Ungültige User-ID' });
   try {
+    // E-Mail vorher holen: nach dem Loeschen lokale Zeile, Sitzungen und PATs
+    // nachziehen (R3-S2d, S2-3-2).
+    let email = '';
+    try { email = String((await authentikAPI('GET', `/core/users/${pk}/`)).email || ''); } catch {}
     await authentikAPI('DELETE', `/core/users/${pk}/`);
+    if (email) await lokalesKontoNachLoeschung(email);
     res.json({ success: true });
   } catch (err) {
     console.error('Admin delete user error:', err.message);

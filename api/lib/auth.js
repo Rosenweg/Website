@@ -44,6 +44,7 @@ setInterval(() => {
   for (const [k, v] of tokenCache) { if (now - v.time > TOKEN_CACHE_TTL) tokenCache.delete(k); }
 }, 5 * 60 * 1000);
 
+let usersSubSpalte = null; // einmalig: ALTER TABLE users ADD COLUMN authentik_sub
 async function validateAuthentikToken(token) {
   const cached = tokenCache.get(token);
   if (cached && Date.now() - cached.time < TOKEN_CACHE_TTL) return cached.user;
@@ -66,15 +67,32 @@ async function validateAuthentikToken(token) {
     // Map Authentik user to our user format, create/update in DB
     const email = data.email || data.sub;
     const name = data.name || data.preferred_username || email;
+    const role = (data.groups?.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; })) ? 'admin' : 'bewohner';
 
+    // users-Zeile an das Authentik-Konto (sub) binden wie beim Browser-Login
+    // (R3-S2b): ein zweites Konto mit derselben E-Mail darf die Zeile (Rechte,
+    // Daten) des ersten nicht uebernehmen. role wird hier nicht geschrieben
+    // (das macht der Browser-Login), nur fuer diese Anfrage aus den Gruppen gesetzt.
+    const sub = String(data.sub || '');
+    if (!usersSubSpalte) usersSubSpalte = pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS authentik_sub TEXT').catch(e => { usersSubSpalte = null; throw e; });
+    await usersSubSpalte;
     const result = await pool.query(
-      `INSERT INTO users (email, name, role)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role
+      `INSERT INTO users (email, name, role, authentik_sub)
+       VALUES ($1, $2, $3, NULLIF($4, ''))
+       ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name,
+                                         authentik_sub = COALESCE(users.authentik_sub, EXCLUDED.authentik_sub)
+       WHERE users.authentik_sub IS NULL OR users.authentik_sub = EXCLUDED.authentik_sub
        RETURNING id, email, name, wohnung, stweg, role`,
-      [email.toLowerCase(), name, (data.groups?.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; })) ? 'admin' : 'bewohner']
+      [email.toLowerCase(), name, role, sub]
     );
+    // Kein RETURNING = Zeile gehoert zu einem anderen Konto (oder Token ohne sub
+    // trifft eine gebundene Zeile) -> nicht anmelden.
+    if (!result.rows.length) {
+      console.warn(`[auth] Bearer-Token abgewiesen: users-Zeile ${email.toLowerCase()} gehoert zu anderem Authentik-Konto`);
+      return null;
+    }
     const user = result.rows[0];
+    user.role = role;
     user.isAdmin = user.role === 'admin';
     user.user_id = user.id;
     user.auth_source = 'authentik';
