@@ -57,15 +57,47 @@ function ausstellenErlaubt(email, zweck) {
   return true;
 }
 
-// Globales Limit je Zweck (alle Adressen zusammen): bremst Massen-Anfragen, bevor
-// überhaupt nachgeschaut wird, ob es die Adresse gibt — verrät also nichts über sie.
-const GLOBAL_MAX = Math.max(10, parseInt(process.env.OTP_GLOBAL_MAX_10MIN || '100', 10) || 100);
+// Globales Limit je Zweck (alle Adressen zusammen): deckelt den Mailversand bei
+// Massen-Anfragen. Nur NACH der Personen-Prüfung aufrufen, im Hintergrund und still
+// (S4-3-1): zählten auch anonyme Anfragen mit, sperrten erfundene Adressen alle
+// Bewohner aus. Gilt für alle drei Zwecke gleich, einstellbar per OTP_GLOBAL_MAX_10MIN.
+const GLOBAL_MAX = Math.max(10, parseInt(process.env.OTP_GLOBAL_MAX_10MIN || '1000', 10) || 1000);
 const globalZaehler = new Map(); // zweck -> [timestamps]
 function globalErlaubt(zweck) {
   const now = Date.now();
   const arr = (globalZaehler.get(zweck) || []).filter(t => now - t < GUELTIG_MS);
   if (arr.length >= GLOBAL_MAX) { globalZaehler.set(zweck, arr); return false; }
   arr.push(now); globalZaehler.set(zweck, arr);
+  return true;
+}
+
+// Client-IP wie nginx (upstreams.conf, $rw_client_ip): Traefik setzt X-Forwarded-For
+// selbst, darum gilt der erste Eintrag; ohne Header req.ip bzw. die Socket-Adresse.
+function clientIp(req) {
+  const xff = String(req.headers?.['x-forwarded-for'] || '').split(',')[0].trim();
+  return (xff || req.ip || req.socket?.remoteAddress || 'unbekannt').slice(0, 64);
+}
+
+// Limit je Client-IP VOR der Antwort (alle drei Code-Routen zusammen, 20 in 10 Min.):
+// trifft nur den, der flutet — nicht die Bewohner an anderen Anschlüssen.
+const IP_MAX = 20;
+const jeIp = new Map(); // ip -> [timestamps]
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, arr] of jeIp) {
+    const rest = arr.filter(t => now - t < GUELTIG_MS);
+    if (rest.length) jeIp.set(k, rest); else jeIp.delete(k);
+  }
+}, 5 * 60 * 1000).unref();
+function ipErlaubt(req) {
+  const ip = clientIp(req);
+  const now = Date.now();
+  const arr = (jeIp.get(ip) || []).filter(t => now - t < GUELTIG_MS);
+  if (arr.length >= IP_MAX) { jeIp.set(ip, arr); return false; }
+  // Speicher deckeln: ältesten Eintrag verdrängen statt alle abzulehnen.
+  if (!jeIp.has(ip) && jeIp.size >= 50000) jeIp.delete(jeIp.keys().next().value);
+  jeIp.delete(ip);
+  arr.push(now); jeIp.set(ip, arr);
   return true;
 }
 
@@ -122,4 +154,4 @@ const OTP_SCHEMA_SQL = `
   ALTER TABLE otp_codes ALTER COLUMN code TYPE VARCHAR(12);
 `;
 
-module.exports = { otpAusstellen, otpPruefen, ausstellenErlaubt, globalErlaubt, normEmail, OTP_FEHLER, OTP_SCHEMA_SQL, MAX_VERSUCHE };
+module.exports = { otpAusstellen, otpPruefen, ausstellenErlaubt, globalErlaubt, ipErlaubt, clientIp, normEmail, OTP_FEHLER, OTP_SCHEMA_SQL, MAX_VERSUCHE };

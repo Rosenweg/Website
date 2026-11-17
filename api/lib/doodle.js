@@ -11,7 +11,7 @@
 const crypto = require('crypto');
 const { pool } = require('./db');
 const { loggedSendMail, MAIL_FROM } = require('./mail');
-const { otpAusstellen, otpPruefen, ausstellenErlaubt, globalErlaubt, OTP_FEHLER } = require('./otp');
+const { otpAusstellen, otpPruefen, ausstellenErlaubt, globalErlaubt, ipErlaubt, OTP_FEHLER } = require('./otp');
 
 const SITE_URL = process.env.SITE_URL || 'https://www.rosenweg4303.ch';
 const pollUrl = (id) => `${SITE_URL}/sitzungs-doodle.html` + (id ? `?poll=${id}` : '');
@@ -193,7 +193,8 @@ function mountDoodle({ app }) {
   app.post('/api/doodle/code', async (req, res) => {
     const email = normEmail(req.body?.email);
     if (!validEmail(email)) return res.status(400).json({ error: 'Ungültige E-Mail' });
-    if (!globalErlaubt('doodle')) return res.status(429).json({ error: 'Zu viele Anfragen — bitte in 10 Minuten erneut.' });
+    // Vor der Antwort nur das Limit je Client-IP; global erst nach der Prüfung (S4-3-1).
+    if (!ipErlaubt(req)) return res.status(429).json({ error: 'Zu viele Anfragen — bitte in 10 Minuten erneut.' });
     // Immer dieselbe Antwort, und zwar SOFORT: Prüfung, Code und Mailversand laufen
     // danach im Hintergrund — weder Inhalt noch Laufzeit noch ein SMTP-Fehler verraten,
     // ob die Adresse eingeladen ist. Das Limit je Adresse zählt nur bekannte Adressen.
@@ -201,6 +202,7 @@ function mountDoodle({ app }) {
     try {
       const name = await emailAllowed(email);
       if (name === undefined) return;
+      if (!globalErlaubt('doodle')) { console.warn('[doodle] code: globales Limit erreicht, Code verworfen'); return; }
       if (!ausstellenErlaubt(email, 'doodle')) { console.warn('[doodle] code: Limit je Adresse erreicht'); return; }
       const code = await otpAusstellen(email, 'doodle');
       await loggedSendMail({

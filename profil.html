@@ -1228,7 +1228,8 @@
             const rolleOptions = ROLLEN.map(r => `<option value="${r.value}" ${kontakt.rolle === r.value ? 'selected' : ''}>${r.label}</option>`).join('');
             const rolleInfo = ROLLEN.find(r => r.value === (kontakt.rolle || 'eigentuemer')) || ROLLEN[0];
             const colorMap = { green: 'border-green-300 bg-green-50', blue: 'border-blue-300 bg-blue-50', purple: 'border-purple-300 bg-purple-50', teal: 'border-teal-300 bg-teal-50', gray: 'border-gray-300 bg-gray-50' };
-            return `<div id="${id}" class="border rounded-lg p-3 ${colorMap[rolleInfo.color]||colorMap.gray} kontakt-card">
+            // data-kontakt-id: beim Speichern mitsenden, sonst gilt der Kontakt als neu und verliert seine Verknuepfung (R3-S1d)
+            return `<div id="${id}" data-kontakt-id="${Number.isInteger(kontakt.id) ? kontakt.id : ''}" class="border rounded-lg p-3 ${colorMap[rolleInfo.color]||colorMap.gray} kontakt-card">
                 <div class="flex items-center justify-between mb-2">
                     <select onchange="updateKontaktColor(this)" class="text-sm font-medium border rounded px-2 py-1 bg-white kontakt-rolle">${rolleOptions}</select>
                     <button type="button" onclick="removeKontakt('${id}')" class="text-red-400 hover:text-red-600 p-1" title="Entfernen">
@@ -1283,7 +1284,12 @@
                 } else {
                     authentik_zugang = authentikEl?.checked ? true : false;
                 }
-                if (name || email) kontakte.push({ rolle, name: name||null, email: email||null, telefon: telefon||null, adresse: adresse||null, authentik_zugang });
+                if (name || email) {
+                    const k = { rolle, name: name||null, email: email||null, telefon: telefon||null, adresse: adresse||null, authentik_zugang };
+                    const id = parseInt(card.dataset.kontaktId, 10);
+                    if (Number.isFinite(id)) k.id = id;
+                    kontakte.push(k);
+                }
             });
             return kontakte;
         }
