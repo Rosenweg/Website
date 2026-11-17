@@ -539,7 +539,7 @@
             <label class="flex items-center gap-2 text-sm"><input id="vl-wlan" type="checkbox" class="rounded"> WLAN-Passwort für dieses Netz</label>
             <p class="text-xs text-gray-500 mt-0.5 ml-6">An: ein PPSK wird im 'Rosenweg'-WLAN angelegt, Geräte die's tippen landen in deinem Netz. Aus: nur Kabel/Switch-Port.</p>
           </div>
-          <div><label class="block text-xs font-medium text-gray-700">Wunsch-Name</label><input id="vl-name" placeholder="z.B. Smart-Home" class="w-full border rounded px-2 py-1"></div>
+          <div><label class="block text-xs font-medium text-gray-700">Wunsch-Name</label><input id="vl-name" placeholder="z.B. Smart-Home" maxlength="32" pattern="[A-Za-z0-9 ._\\-]{1,32}" class="w-full border rounded px-2 py-1"><p class="text-xs text-gray-500 mt-0.5">Max. 32 Zeichen: Buchstaben (ohne Umlaute), Ziffern, Leerzeichen und . _ -</p></div>
           <div><label class="block text-xs font-medium text-gray-700">Zweck *</label><textarea id="vl-zweck" rows="2" placeholder="Wofür wird das Netz gebraucht?" class="w-full border rounded px-2 py-1"></textarea></div>
           <div class="grid grid-cols-2 gap-2">
             <div><label class="block text-xs font-medium text-gray-700">Groesse</label><select id="vl-grosse" class="w-full border rounded px-2 py-1">
@@ -575,7 +575,7 @@
       : [];
     const body = {
       wohnung_id: wohnungEl ? parseInt(wohnungEl.value, 10) || null : null,
-      gewuenschter_name: get('vl-name').value || null,
+      gewuenschter_name: get('vl-name').value.trim() || null,
       zweck: get('vl-zweck').value.trim(),
       gewuenschte_groesse: get('vl-grosse').value || null,
       geraete_anzahl: parseInt(get('vl-anz').value, 10) || null,
@@ -586,6 +586,10 @@
       mitnutzer_emails: mitnutzer,
     };
     if (!body.zweck) { alert('Zweck Pflicht.'); return; }
+    // Gleiche Regel wie der Server (VLAN_NAME_RE) — sonst kommt nur ein 400 zurueck.
+    if (body.gewuenschter_name && !/^[A-Za-z0-9 ._-]{1,32}$/.test(body.gewuenschter_name)) {
+      alert('Wunsch-Name: max. 32 Zeichen, nur Buchstaben (ohne Umlaute), Ziffern, Leerzeichen und . _ -'); return;
+    }
     try {
       const r = await AuthentikAuth.apiFetch('/api/isp/vlan-requests', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
       if (!r.ok) throw new Error(await r.text());

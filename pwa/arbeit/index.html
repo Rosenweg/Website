@@ -700,11 +700,13 @@
     if (FLUSHING || !navigator.onLine) return;
     FLUSHING = true;
     try {
-      const all = await idbAll();
+      if (!currentUser) return;
+      // Nur eigene Eintraege senden; 401 (Sitzung abgelaufen) behaelt den Eintrag fuer nach dem Login.
+      const all = (await idbAll()).filter(rec => !rec.owner || rec.owner === ownerKey(currentUser));
       for (const rec of all) {
         try { await sendCreateOp(rec); await idbDel(rec.id); }
         catch (e) {
-          if (e.httpStatus && e.httpStatus >= 400 && e.httpStatus < 500) { console.warn('[queue] verwerfe unsendbaren Eintrag', rec.id, e.message); await idbDel(rec.id); }
+          if (e.httpStatus && e.httpStatus >= 400 && e.httpStatus < 500 && e.httpStatus !== 401) { console.warn('[queue] verwerfe unsendbaren Eintrag', rec.id, e.message); await idbDel(rec.id); }
           else break; // Netzwerk/Server → später erneut
         }
       }
@@ -1280,9 +1282,9 @@
       navigator.serviceWorker.register('/arbeit/sw.js', { scope: '/arbeit/' }).catch(() => {});
     }
 
-    // Abmelden verwirft IBAN und Offline-Queue (logout() leitet sofort weiter, daher zusaetzlich beim Start)
-    const _logout = AuthentikAuth.logout.bind(AuthentikAuth);
-    AuthentikAuth.logout = function (redirectTo) { lokaleDatenLoeschen(); return _logout(redirectTo); };
+    // Kein Loeschen bei logout(): authentik-auth.js meldet auch bei abgelaufenem
+    // Token oder Serverfehlern ab — die Offline-Queue ginge sonst verloren.
+    // Fremde Daten verwirft idbPurgeForeign/ibanLaden nach dem Login (Besitzerpruefung).
 
     // Login zwingend
     currentUser = await AuthentikAuth.init({
@@ -1290,8 +1292,6 @@
       onLogout: () => { /* init() leitet automatisch zum Login um */ },
     });
     if (!currentUser) {
-      // Kein Token mehr = abgemeldet → lokale Daten weg. Mit Token (nur offline) bleiben sie.
-      if (!AuthentikAuth.getToken()) await lokaleDatenLoeschen();
       return; // Redirect zum Login laeuft
     }
     await idbPurgeForeign(ownerKey(currentUser)).catch(() => {});

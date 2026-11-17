@@ -1236,10 +1236,15 @@
             <span class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded ml-2">${esc(r.http_code)}</span>
             ${r.preserve_path ? '<span class="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded ml-1">preserve-path</span>' : ''}
             ${!r.active ? '<span class="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded ml-1">inaktiv</span>' : ''}
+            ${r.approval_status && r.approval_status !== 'approved' ? `<span class="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded ml-1">${r.approval_status === 'pending_admin' ? 'Admin-Prüfung' : r.approval_status === 'pending_dns' ? 'DNS prüft' : esc(r.approval_status)}</span>` : ''}
           </div>
-          <button onclick="delRedir(${r.id})" class="text-xs text-red-600 hover:underline">Löschen</button>
+          <div class="flex gap-2">
+            ${r.approval_status && r.approval_status !== 'approved' ? `<button onclick="approveRedir(${r.id})" class="text-xs bg-emerald-600 text-white px-2 py-1 rounded">Genehmigen</button>` : ''}
+            <button onclick="delRedir(${r.id})" class="text-xs text-red-600 hover:underline">Löschen</button>
+          </div>
         </div>
         <div class="text-xs text-gray-500">${esc(r.owner_email || 'system')}${r.wohnung_bezeichnung ? ' · ' + esc(r.wohnung_bezeichnung) : ''}</div>
+        ${r.approval_reason && r.approval_status !== 'approved' ? `<div class="text-xs text-gray-500 italic mt-1">${esc(r.approval_reason)}</div>` : ''}
       </div>`).join('');
     const rpRows = rpRoutes.map(r => {
       const protoBadge = {
@@ -1460,7 +1465,22 @@
   async function delRedir(id) {
     if (!confirm('Umleitung löschen?')) return;
     await AuthentikAuth.apiFetch('/api/isp/redirects/' + id, { method: 'DELETE' });
-    await loadRedir();
+    // Umleitungen stehen in der Reverse-Proxy-Liste (#rp-list); #redir-list gibt es nicht.
+    await loadRp();
+  }
+  async function approveRedir(id) {
+    if (!confirm('Umleitung genehmigen und aktiv schalten?')) return;
+    const r = await AuthentikAuth.apiFetch('/api/isp/redirects/' + id, {
+      method: 'PUT', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ approval_status: 'approved', active: true }),
+    });
+    if (!r.ok) { alert('Fehler: ' + await r.text()); return; }
+    // Traefik nimmt nur approval_status='approved' — pruefen, ob der Server das Feld uebernommen hat.
+    const neu = await r.json().catch(() => ({}));
+    if (neu.approval_status && neu.approval_status !== 'approved') {
+      alert('Hinweis: Server hat die Freigabe nicht übernommen (Status: ' + neu.approval_status + ').');
+    }
+    await loadRp();
   }
 
   // === VPN-Konten ===
@@ -1702,6 +1722,7 @@
           </div>
           <div class="flex gap-1">
             ${m.approval_status === 'pending_dns' ? `<button onclick="recheckRelay(${m.id})" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200">MX prüfen</button>` : ''}
+            ${m.approval_status && m.approval_status !== 'approved' ? `<button onclick="approveRelay(${m.id})" class="text-xs bg-emerald-600 text-white px-2 py-1 rounded">Genehmigen</button>` : ''}
             <button onclick="openRelayModal(${m.id})" class="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded hover:bg-gray-200">Bearbeiten</button>
             <button onclick="delRelay(${m.id})" class="text-xs text-red-600 hover:underline px-2">Löschen</button>
           </div>
@@ -1840,6 +1861,20 @@
       else alert('⚠ MX zeigt nicht auf PMG.\n\nMX: ' + JSON.stringify(d.mx) + '\nErwartet: ' + d.target);
       await loadRelays();
     } catch (e) { alert('Fehler: ' + e.message); }
+  }
+  async function approveRelay(id) {
+    const m = mailRelays.find(x => x.id === id) || {};
+    // Ziel steht im Text, damit der Admin weiss, wohin PMG/Traefik danach verbinden.
+    const ziele = [`${m.target_host}:${m.target_port || 25}`];
+    if (m.imap_host) ziele.push(`IMAPS ${m.imap_host}:${m.imap_port || 993}`);
+    if (m.smtps_host) ziele.push(`SMTPS ${m.smtps_host}:${m.smtps_port || 465}`);
+    if (!confirm(`Mail-Relay ${m.domain || id} genehmigen und aktiv schalten?\n\nZiel: ${ziele.join(', ')}`)) return;
+    const r = await AuthentikAuth.apiFetch('/api/isp/mail-relays/' + id, {
+      method: 'PUT', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ approval_status: 'approved', active: true }),
+    });
+    if (!r.ok) { alert('Fehler: ' + await r.text()); return; }
+    await loadRelays();
   }
   async function delRelay(id) {
     if (!confirm('Mail-Relay löschen?')) return;

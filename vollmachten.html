@@ -234,6 +234,10 @@
   let isAdmin = false;
   let currentTab = 'meine';
   let myEmail = '';
+  // Gruppen nur fuer die Anzeige der Admin-Knoepfe; der Server prueft selbst
+  // (activate-paper: Technik/Praesident/Verwaltung, upload-signed: Technik/Praesident).
+  let myGroups = [];
+  const hatGruppe = (...namen) => myGroups.some(g => namen.includes(g));
   let verwaltungenCache = [];
   let myWohnungen = [];
   let templates = [];
@@ -243,6 +247,7 @@
     const u = await AuthentikAuth.init({ requireAuth: true });
     if (!u) return;
     myEmail = (u.email || '').toLowerCase();
+    myGroups = (u.groups || []).map(g => String(g).toLowerCase());
     document.getElementById('auth-gate').classList.add('hidden');
     document.getElementById('content').classList.remove('hidden');
     // Tab-Handler
@@ -427,7 +432,14 @@
     }
     empty.classList.add('hidden');
     wrap.innerHTML = list.map(v => {
-      const canSign = v.status === 'entwurf' && (v.vollmachtgeber_email || '').toLowerCase() === myEmail;
+      // Jede/r Miteigentuemer/in signiert die eigene, noch offene Zeile der Vollmachtgeber-Liste
+      // (nicht nur die/der erste). Ohne Liste wie bisher die Primaer-Adresse.
+      const vgListe = Array.isArray(v.vollmachtgeber_liste) ? v.vollmachtgeber_liste : [];
+      const canSign = v.status === 'entwurf' && (vgListe.length
+        ? vgListe.some(g => (g.email || '').toLowerCase() === myEmail && !g.signed_at)
+        : (v.vollmachtgeber_email || '').toLowerCase() === myEmail);
+      const canAdminUpload = v.status === 'entwurf' && !canSign && hatGruppe('technik', 'präsident', 'praesident');
+      const canActivatePaper = v.status === 'entwurf' && hatGruppe('technik', 'präsident', 'praesident', 'verwaltung');
       const canEdit = v.status === 'entwurf';
       const canRevoke = v.status === 'aktiv' && ((v.vollmachtgeber_email || '').toLowerCase() === myEmail || isAdmin);
       return `<div class="bg-white border rounded-lg p-4 hover:shadow-md transition">
@@ -450,13 +462,15 @@
               ${v.wohnung_bezeichnung ? `<span>🏠 ${esc(v.wohnung_bezeichnung)}</span>` : (v.stweg ? `<span>🏠 STWEG ${v.stweg}</span>` : '')}
               ${v.signatur_typ === 'digital' ? `<span>✍ Digital signiert ${fmtDt(v.digital_signed_at)}</span>` : ''}
               ${v.signatur_typ === 'papier' ? `<span>📄 Papier-Signatur</span>` : ''}
+              ${v.status === 'entwurf' && Number(v.vg_total) > 1 ? `<span>✍ ${Number(v.vg_signed) || 0}/${Number(v.vg_total)} signiert</span>` : ''}
             </div>
           </div>
           <div class="flex flex-wrap gap-2 shrink-0">
             <button onclick="openPdf(${v.id})" class="text-xs bg-blue-100 text-blue-700 rounded px-3 py-1.5 hover:bg-blue-200">📄 PDF</button>
             ${canEdit ? `<button onclick="editVollmacht(${v.id})" class="text-xs bg-gray-100 text-gray-700 rounded px-3 py-1.5 hover:bg-gray-200">✎ Bearbeiten</button>` : ''}
             ${canSign ? `<button onclick="signDigital(${v.id})" class="text-xs bg-green-600 text-white rounded px-3 py-1.5 hover:bg-green-700">✓ Digital signieren</button>` : ''}
-            ${canSign ? `<button onclick="triggerUpload(${v.id})" class="text-xs bg-amber-600 text-white rounded px-3 py-1.5 hover:bg-amber-700">📤 Signierte PDF hochladen</button>` : ''}
+            ${canSign || canAdminUpload ? `<button onclick="triggerUpload(${v.id})" class="text-xs bg-amber-600 text-white rounded px-3 py-1.5 hover:bg-amber-700">📤 Signierte PDF hochladen</button>` : ''}
+            ${canActivatePaper ? `<button onclick="activatePaper(${v.id})" class="text-xs bg-amber-100 text-amber-800 rounded px-3 py-1.5 hover:bg-amber-200">📄 Papier aktivieren</button>` : ''}
             ${v.papier_pdf_path ? `<button onclick="verifyAi(${v.id})" class="text-xs bg-purple-600 text-white rounded px-3 py-1.5 hover:bg-purple-700">🤖 KI-Prüfung</button>` : ''}
             ${canRevoke ? `<button onclick="revoke(${v.id})" class="text-xs bg-red-600 text-white rounded px-3 py-1.5 hover:bg-red-700">Widerrufen</button>` : ''}
             ${canEdit ? `<button onclick="deleteEntry(${v.id})" class="text-xs text-red-600 hover:underline">Löschen</button>` : ''}
@@ -828,6 +842,16 @@
     if (!confirm('Vollmacht digital signieren?\n\nDies entspricht einer einfachen elektronischen Signatur (ZertES Art.2). Login-Zeit, IP-Adresse und Identitaet werden im Dokument festgehalten.\n\nNach Signatur ist die Vollmacht AKTIV und nicht mehr editierbar — nur Widerruf möglich.')) return;
     try {
       const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}/sign-digital`, { method: 'POST' });
+      if (!r.ok) throw new Error(await r.text());
+      await load();
+    } catch (e) { alert('Fehler: ' + e.message); }
+  }
+
+  // Admin: Vollmacht mit Papier-Signatur aktivieren, wenn das Original z.B. bei der Verwaltung liegt.
+  async function activatePaper(id) {
+    if (!confirm('Vollmacht als papier-signiert AKTIVIEREN (ohne Upload)?\n\nNur wenn das unterschriebene Original aller Vollmachtgeber vorliegt.')) return;
+    try {
+      const r = await AuthentikAuth.apiFetch(`/api/vollmachten/${id}/activate-paper`, { method: 'POST' });
       if (!r.ok) throw new Error(await r.text());
       await load();
     } catch (e) { alert('Fehler: ' + e.message); }
