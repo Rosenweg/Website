@@ -10,7 +10,8 @@
 // ─────────────────────────────────────────────────────────────────────────
 const crypto = require('crypto');
 const { pool } = require('./db');
-const { loggedSendMail, generateOTP, MAIL_FROM } = require('./mail');
+const { loggedSendMail, MAIL_FROM } = require('./mail');
+const { otpAusstellen, otpPruefen, ausstellenErlaubt, OTP_FEHLER } = require('./otp');
 
 const SITE_URL = process.env.SITE_URL || 'https://www.rosenweg4303.ch';
 const pollUrl = (id) => `${SITE_URL}/sitzungs-doodle.html` + (id ? `?poll=${id}` : '');
@@ -180,23 +181,7 @@ async function canAccessPoll(actor, pollId) {
   return r.rows.length > 0;
 }
 
-const codeRate = new Map(); // email -> [timestamps]
-function rateLimited(email) {
-  const now = Date.now();
-  const arr = (codeRate.get(email) || []).filter(t => now - t < 600000);
-  if (arr.length >= 3) return true;
-  arr.push(now); codeRate.set(email, arr);
-  return false;
-}
-// Fehlversuche beim Code-Prüfen: max. 5 pro E-Mail in 10 Minuten (wie /api/otp/verify)
-const verifyFails = new Map(); // email -> [timestamps]
-const verifyBlocked = (email) => (verifyFails.get(email) || []).filter(t => Date.now() - t < 600000).length >= 5;
-function verifyFailed(email) {
-  const arr = (verifyFails.get(email) || []).filter(t => Date.now() - t < 600000);
-  arr.push(Date.now()); verifyFails.set(email, arr);
-  return arr.length >= 5;
-}
-
+// Codes: lib/otp.js (Zähler in der DB, 8 Stellen, an den Zweck 'doodle' gebunden).
 function mountDoodle({ app }) {
   initSchema()
     .then(() => console.log('[doodle] Sitzungs-Doodle aktiv'))
@@ -207,13 +192,11 @@ function mountDoodle({ app }) {
     try {
       const email = normEmail(req.body?.email);
       if (!validEmail(email)) return res.status(400).json({ error: 'Ungültige E-Mail' });
-      if (rateLimited(email)) return res.status(429).json({ error: 'Zu viele Anfragen — bitte in 10 Minuten erneut.' });
+      if (!ausstellenErlaubt(email, 'doodle')) return res.status(429).json({ error: 'Zu viele Anfragen — bitte in 10 Minuten erneut.' });
+      // Immer dieselbe Antwort: sie verrät nicht, ob die Adresse eingeladen ist.
       const name = await emailAllowed(email);
-      if (name === undefined) return res.status(403).json({ error: 'Diese E-Mail ist (noch) zu keiner Umfrage eingeladen.' });
-      const code = generateOTP();
-      await pool.query('UPDATE otp_codes SET used = true WHERE email = $1 AND used = false', [email]);
-      await pool.query('INSERT INTO otp_codes (email, code, expires_at) VALUES ($1,$2,$3)',
-        [email, code, new Date(Date.now() + 10 * 60 * 1000)]);
+      if (name === undefined) return res.json({ ok: true });
+      const code = await otpAusstellen(email, 'doodle');
       await loggedSendMail({
         from: MAIL_FROM, to: email,
         subject: 'Ihr Code für die Terminumfrage – Rosenweg',
@@ -233,23 +216,8 @@ function mountDoodle({ app }) {
       const email = normEmail(req.body?.email);
       const code = String(req.body?.code || '').trim();
       if (!validEmail(email) || !code) return res.status(400).json({ error: 'E-Mail und Code erforderlich' });
-      if (verifyBlocked(email)) return res.status(429).json({ error: 'Zu viele Fehlversuche — bitte in 10 Minuten einen neuen Code anfordern.' });
-      const vr = await pool.query(
-        'SELECT id, code, expires_at FROM otp_codes WHERE email = $1 AND used = false ORDER BY created_at DESC LIMIT 1', [email]);
-      const row = vr.rows[0];
-      if (!row) return res.status(400).json({ error: 'Kein Code gefunden — bitte neu anfordern.' });
-      if (new Date() > new Date(row.expires_at)) {
-        await pool.query('UPDATE otp_codes SET used = true WHERE id = $1', [row.id]);
-        return res.status(400).json({ error: 'Code ist abgelaufen.' });
-      }
-      const a = Buffer.from(row.code), b = Buffer.from(code);
-      if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-        // Nach dem 5. Fehlversuch ist auch der Code verbraucht
-        if (verifyFailed(email)) await pool.query('UPDATE otp_codes SET used = true WHERE id = $1', [row.id]);
-        return res.status(400).json({ error: 'Ungültiger Code' });
-      }
-      verifyFails.delete(email);
-      await pool.query('UPDATE otp_codes SET used = true WHERE id = $1', [row.id]);
+      const pruefung = await otpPruefen(email, code, 'doodle');
+      if (!pruefung.ok) return res.status(pruefung.grund === 'gesperrt' ? 429 : 400).json({ error: OTP_FEHLER[pruefung.grund] });
       let name = await emailAllowed(email); if (name === undefined) name = null;
       const token = crypto.randomBytes(32).toString('hex');
       await pool.query('INSERT INTO doodle_sessions (token, email, name, expires_at) VALUES ($1,$2,$3,$4)',

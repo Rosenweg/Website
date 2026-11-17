@@ -49,6 +49,7 @@ const zlibModul = require('zlib');
 const { transporter, MAIL_FROM, SMTP2GO_API_KEY, SMTP2GO_API_URL, EMAIL_ALLOWLIST, generateOTP, loggedSendMail, isAllowlistedSender } = require('./lib/mail');
 // WhatsApp-Queue + Technik-Gruppen-Resolver -> lib/whatsapp.js
 const { queueWhatsappMessage, resolveTechnikWhatsappGroupId } = require('./lib/whatsapp');
+const { otpAusstellen, otpPruefen, ausstellenErlaubt, normEmail, OTP_FEHLER, OTP_SCHEMA_SQL } = require('./lib/otp');
 const { mountAlarmpanel } = require('./lib/alarmpanel');
 const { mountDoodle } = require('./lib/doodle');
 
@@ -99,15 +100,6 @@ app.get('/api/health', async (req, res) => {
 // OTP ENDPOINTS (replaces n8n stweg3-otp, send-otp, verify-otp)
 // ═══════════════════════════════════════════════════════════════════
 
-// Rate limiting for OTP endpoints
-const otpRateLimit = new Map();
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, val] of otpRateLimit) {
-    if (now - val.first > 10 * 60 * 1000) otpRateLimit.delete(key);
-  }
-}, 60 * 1000);
-
 // Generischer Rate-Limit-Helper für beliebige Endpoints.
 // Verwendung: rateLimitGuard(name, key, maxCount, windowMs) → {ok:true|false, retryAfter?}
 const rateLimitBuckets = new Map();
@@ -133,53 +125,26 @@ function rateLimitGuard(name, key, maxCount, windowMs) {
   return { ok: true };
 }
 
+// OTP-Login per E-Mail. Standardmässig AUS: kein Frontend nutzt ihn, er gäbe aber eine
+// volle Sitzung am Authentik-Login (und dessen zweitem Faktor) vorbei. Wer ihn braucht,
+// setzt OTP_LOGIN_ENABLED=1. Codes: lib/otp.js (Zähler in der DB, 8 Stellen, zweckgebunden).
+const OTP_LOGIN_ENABLED = process.env.OTP_LOGIN_ENABLED === '1';
 app.post('/api/otp/send', async (req, res) => {
-  const { email } = req.body;
+  if (!OTP_LOGIN_ENABLED) return res.status(404).json({ error: 'OTP-Login ist abgeschaltet. Bitte normal anmelden.' });
+  const email = normEmail(req.body?.email);
   if (!email) return res.status(400).json({ error: 'E-Mail erforderlich' });
-
-  // Rate limit: max 3 OTP requests per email per 10 minutes
-  const rateLimitKey = email.toLowerCase().trim();
-  const now = Date.now();
-  const entry = otpRateLimit.get(rateLimitKey);
-  if (entry && now - entry.first < 10 * 60 * 1000 && entry.count >= 3) {
-    return res.status(429).json({ error: 'Zu viele Anfragen. Bitte warten Sie einige Minuten.' });
-  }
-  if (entry && now - entry.first < 10 * 60 * 1000) {
-    entry.count++;
-  } else {
-    otpRateLimit.set(rateLimitKey, { first: now, count: 1 });
-  }
-
+  // Antwort ist immer dieselbe — sie verrät nicht, ob es die Adresse gibt.
+  const antwort = { success: true, message: 'Falls die Adresse berechtigt ist, wurde ein Code per E-Mail gesendet.' };
+  if (!ausstellenErlaubt(email, 'login')) return res.status(429).json({ error: 'Zu viele Anfragen. Bitte warten Sie einige Minuten.' });
   try {
-    // Check if email is authorized
     const userResult = await pool.query(
-      'SELECT id, name, email, role FROM users WHERE email = $1 AND active = true',
-      [email.toLowerCase().trim()]
-    );
-    if (userResult.rows.length === 0) {
-      return res.status(403).json({ error: 'E-Mail-Adresse nicht berechtigt' });
-    }
-
+      'SELECT id, name, email, role FROM users WHERE LOWER(email) = $1 AND active = true', [email]);
+    if (userResult.rows.length === 0) return res.json(antwort);
     const user = userResult.rows[0];
-    const code = generateOTP();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min
-
-    // Invalidate old OTPs
-    await pool.query(
-      'UPDATE otp_codes SET used = true WHERE email = $1 AND used = false',
-      [email.toLowerCase().trim()]
-    );
-
-    // Store new OTP
-    await pool.query(
-      'INSERT INTO otp_codes (email, code, expires_at) VALUES ($1, $2, $3)',
-      [email.toLowerCase().trim(), code, expiresAt]
-    );
-
-    // Send email
+    const code = await otpAusstellen(email, 'login');
     await loggedSendMail({
       from: MAIL_FROM,
-      to: email,
+      to: user.email,
       subject: 'Ihr Anmeldecode - Rosenweg',
       html: `
         <div style="font-family: sans-serif; max-width: 400px; margin: 0 auto; padding: 20px;">
@@ -187,74 +152,29 @@ app.post('/api/otp/send', async (req, res) => {
           <p>Hallo ${escapeHtml(user.name)},</p>
           <p>Ihr Anmeldecode lautet:</p>
           <div style="background: #f0f9ff; border: 2px solid #3b82f6; border-radius: 8px; padding: 20px; text-align: center; margin: 20px 0;">
-            <span style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #1e40af;">${code}</span>
+            <span style="font-size: 30px; font-weight: bold; letter-spacing: 6px; color: #1e40af;">${code}</span>
           </div>
-          <p style="color: #6b7280; font-size: 14px;">Der Code ist 10 Minuten gültig.</p>
+          <p style="color: #6b7280; font-size: 14px;">Der Code ist 10 Minuten gültig. Falls Sie ihn nicht angefordert haben, ignorieren Sie diese E-Mail.</p>
         </div>
       `,
     }, 'otp-login');
-
-    res.json({ success: true, message: 'OTP wurde per E-Mail gesendet' });
+    res.json(antwort);
   } catch (err) {
     console.error('OTP send error:', err);
     res.status(500).json({ error: 'Fehler beim Senden des OTP-Codes' });
   }
 });
 
-// Rate limiting for OTP verification
-const otpVerifyRateLimit = new Map();
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, val] of otpVerifyRateLimit) {
-    if (now - val.first > 10 * 60 * 1000) otpVerifyRateLimit.delete(key);
-  }
-}, 60 * 1000);
-
 app.post('/api/otp/verify', async (req, res) => {
-  const { email, code } = req.body;
-  if (!email || !code) return res.status(400).json({ error: 'E-Mail und Code erforderlich' });
-
-  // Rate limit: max 5 verify attempts per email per 10 minutes
-  const verifyKey = email.toLowerCase().trim();
-  const now = Date.now();
-  const entry = otpVerifyRateLimit.get(verifyKey);
-  if (entry && now - entry.first < 10 * 60 * 1000 && entry.count >= 5) {
-    return res.status(429).json({ error: 'Zu viele Fehlversuche. Bitte warten Sie einige Minuten.' });
-  }
-  if (entry && now - entry.first < 10 * 60 * 1000) {
-    entry.count++;
-  } else {
-    otpVerifyRateLimit.set(verifyKey, { first: now, count: 1 });
-  }
-
+  if (!OTP_LOGIN_ENABLED) return res.status(404).json({ error: 'OTP-Login ist abgeschaltet. Bitte normal anmelden.' });
   try {
+    const email = normEmail(req.body?.email);
+    const pruefung = await otpPruefen(email, req.body?.code, 'login');
+    if (!pruefung.ok) return res.status(pruefung.grund === 'gesperrt' ? 429 : 400).json({ error: OTP_FEHLER[pruefung.grund] });
     const result = await pool.query(
-      `SELECT o.id, o.code, o.expires_at, u.id as user_id, u.name, u.email, u.role, u.wohnung, u.stweg
-       FROM otp_codes o
-       JOIN users u ON u.email = o.email
-       WHERE o.email = $1 AND o.used = false
-       ORDER BY o.created_at DESC LIMIT 1`,
-      [email.toLowerCase().trim()]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(400).json({ error: 'Kein OTP gefunden. Bitte fordern Sie einen neuen Code an.' });
-    }
-
+      'SELECT id AS user_id, name, email, role, wohnung, stweg FROM users WHERE LOWER(email) = $1 AND active = true LIMIT 1', [email]);
+    if (result.rows.length === 0) return res.status(400).json({ error: OTP_FEHLER.kein });
     const row = result.rows[0];
-
-    if (new Date() > new Date(row.expires_at)) {
-      await pool.query('UPDATE otp_codes SET used = true WHERE id = $1', [row.id]);
-      return res.status(400).json({ error: 'OTP-Code ist abgelaufen.' });
-    }
-
-    const codeA = Buffer.from(row.code); const codeB = Buffer.from(code.trim());
-    if (codeA.length !== codeB.length || !crypto.timingSafeEqual(codeA, codeB)) {
-      return res.status(400).json({ error: 'Ungültiger OTP-Code' });
-    }
-
-    // Mark as used
-    await pool.query('UPDATE otp_codes SET used = true WHERE id = $1', [row.id]);
 
     // Create session token
     const token = crypto.randomBytes(32).toString('hex');
@@ -18097,7 +18017,44 @@ app.get('/api/reklamationen/uebersicht', authMiddleware, async (req, res) => {
     res.json({ reklamationen: r.rows, stwegs });
   } catch (e) { console.error('[reklamationen-uebersicht]', e); res.status(500).json({ error: 'Fehler' }); }
 });
-const reklaWebRate = new Map(); // key -> [timestamps]
+// Foto einer Reparatur-Meldung ablegen. Der Dateityp kommt aus dem INHALT (Magic-Bytes),
+// nie aus der Angabe des Absenders: am 17.11.2026 wurde so eine .svg-Datei abgelegt, die
+// beim Ausliefern als Bild mit Skript gegolten hätte. Erlaubt: JPEG, PNG, WebP, HEIC.
+function bildTypAusInhalt(buf) {
+  if (!buf || buf.length < 12) return null;
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return 'jpg';
+  if (buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))) return 'png';
+  if (buf.toString('latin1', 0, 4) === 'RIFF' && buf.toString('latin1', 8, 12) === 'WEBP') return 'webp';
+  if (buf.toString('latin1', 4, 8) === 'ftyp' && /^(heic|heix|hevc|mif1|msf1|heif)$/.test(buf.toString('latin1', 8, 12))) return 'heic';
+  return null;
+}
+const reklaStweg = (v) => { const n = parseInt(v, 10); return Number.isInteger(n) && n >= 1 && n <= 8 ? n : null; };
+async function speichereReklamationsFoto(fotoBase64, stweg) {
+  if (!fotoBase64 || typeof fotoBase64 !== 'string') return null;
+  try {
+    const m = fotoBase64.match(/^data:image\/[\w.+-]+;base64,(.+)$/s);
+    const buf = Buffer.from(m ? m[1] : fotoBase64, 'base64');
+    if (buf.length === 0 || buf.length > 8 * 1024 * 1024) return null;
+    const ext = bildTypAusInhalt(buf);
+    if (!ext) return null;
+    const folder = stweg ? ('stweg' + stweg) : 'allgemein';
+    const dir = pathModule.join(DOCS_PATH, folder, 'reklamationen');
+    await fs.mkdir(dir, { recursive: true });
+    const fname = `rekl-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+    await fs.writeFile(pathModule.join(dir, fname), buf);
+    return pathModule.join(folder, 'reklamationen', fname);
+  } catch (e) { console.error('[reklamation-foto]', e.message); return null; }
+}
+// Ausliefern: nur bekannte Bild-Endungen, nie vom Browser umdeuten lassen. Altbestand
+// mit anderer Endung (z. B. .svg) wird nicht mehr ausgeliefert.
+function sendeReklamationsFoto(res, relPfad) {
+  const full = pathModule.resolve(DOCS_PATH, relPfad);
+  if (!full.startsWith(pathModule.resolve(DOCS_PATH) + pathModule.sep)) return res.status(400).end();
+  if (!/\.(jpe?g|png|webp|heic)$/i.test(full)) return res.status(415).json({ error: 'Dateityp nicht erlaubt' });
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+  res.sendFile(full, (err) => { if (err && !res.headersSent) res.status(404).end(); });
+}
 app.post('/api/reklamationen', authMiddleware, async (req, res) => {
   try {
     const email = String(req.user?.email || '').toLowerCase();
@@ -18105,31 +18062,13 @@ app.post('/api/reklamationen', authMiddleware, async (req, res) => {
     const beschreibung = String(b.beschreibung || '').trim().slice(0, 4000);
     if (!beschreibung) return res.status(400).json({ error: 'Beschreibung erforderlich' });
     const kategorie = ['aufzug', 'heizung', 'wasser', 'tuer', 'reinigung', 'licht', 'strom', 'netzwerk', 'salz', 'sonstige'].includes(b.kategorie) ? b.kategorie : 'sonstige';
-    const stweg = Number.isFinite(parseInt(b.stweg, 10)) ? parseInt(b.stweg, 10) : null;
+    const stweg = reklaStweg(b.stweg);
     const pr = await pool.query('SELECT id FROM personen WHERE LOWER(email) = $1 LIMIT 1', [email]);
     const personId = pr.rows[0]?.id || null;
     // Rate-Limit: max 5 Meldungen / 10 Min pro Person
-    const key = personId || email; const now = Date.now();
-    const arr = (reklaWebRate.get(key) || []).filter(t => now - t < 600000);
-    if (arr.length >= 5) return res.status(429).json({ error: 'Zu viele Meldungen — bitte später erneut.' });
-    arr.push(now); reklaWebRate.set(key, arr);
+    if (!rateLimitGuard('rekl-web', String(personId || email), 5, 600000).ok) return res.status(429).json({ error: 'Zu viele Meldungen — bitte später erneut.' });
     // Optionales Foto -> DOCS-Volume
-    let bildPfad = null;
-    if (b.foto_base64) {
-      try {
-        const m = String(b.foto_base64).match(/^data:image\/(\w+);base64,(.+)$/s);
-        const ext = (m ? m[1] : 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 4) || 'jpg';
-        const buf = Buffer.from(m ? m[2] : b.foto_base64, 'base64');
-        if (buf.length > 0 && buf.length <= 8 * 1024 * 1024) {
-          const folder = stweg ? ('stweg' + stweg) : 'allgemein';
-          const dir = pathModule.join(DOCS_PATH, folder, 'reklamationen');
-          await fs.mkdir(dir, { recursive: true });
-          const fname = `rekl-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
-          await fs.writeFile(pathModule.join(dir, fname), buf);
-          bildPfad = pathModule.join(folder, 'reklamationen', fname);
-        }
-      } catch (e) { console.error('[reklamation-foto]', e.message); }
-    }
+    const bildPfad = await speichereReklamationsFoto(b.foto_base64, stweg);
     const standort = b.standort ? String(b.standort).trim().slice(0, 200) : null;
     const r = await pool.query(
       `INSERT INTO reklamationen (person_id, stweg, kategorie, beschreibung, bild_pfad, standort, eingang_kanal, status)
@@ -18192,9 +18131,7 @@ app.get('/api/reklamationen/meine/:id/foto', authMiddleware, async (req, res) =>
       [id, email]);
     const p = r.rows[0]?.bild_pfad;
     if (!p) return res.status(404).json({ error: 'Kein Foto / nicht deine Meldung' });
-    const full = pathModule.join(DOCS_PATH, p);
-    if (!full.startsWith(pathModule.resolve(DOCS_PATH) + '/')) return res.status(400).end();
-    res.sendFile(full, (err) => { if (err && !res.headersSent) res.status(404).end(); });
+    return sendeReklamationsFoto(res, p);
   } catch (e) { console.error('[reklamation-meine-foto]', e); if (!res.headersSent) res.status(500).end(); }
 });
 // Owner-Zugriff: Verlauf/Arbeitsschritte der EIGENEN Meldung (interne Notizen/Benachrichtigungen gefiltert).
@@ -18339,30 +18276,25 @@ app.get('/api/reklamationen/:id/foto', authMiddleware, requirePermission('reklam
     const r = await pool.query('SELECT bild_pfad FROM reklamationen WHERE id = $1', [id]);
     const p = r.rows[0]?.bild_pfad;
     if (!p) return res.status(404).json({ error: 'Kein Foto vorhanden' });
-    const full = pathModule.join(DOCS_PATH, p);
-    if (!full.startsWith(pathModule.resolve(DOCS_PATH) + '/')) return res.status(400).end();
-    res.sendFile(full, (err) => { if (err && !res.headersSent) res.status(404).end(); });
+    return sendeReklamationsFoto(res, p);
   } catch (e) { console.error('[reklamation-foto]', e); if (!res.headersSent) res.status(500).end(); }
 });
 
 // ─── Reparatur-Melder OHNE Login: per E-Mail-Code (OTP) fuer bekannte Bewohner ───
 // Schritt 1: Code anfordern (autorisiert gegen personen/users, Anti-Spam).
-const reklaCodeRate = new Map(); // email -> {first,count}
 app.post('/api/reklamationen/code', async (req, res) => {
   try {
-    const email = String(req.body?.email || '').toLowerCase().trim();
+    const email = normEmail(req.body?.email);
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Gültige E-Mail erforderlich' });
-    const now = Date.now(); const e = reklaCodeRate.get(email);
-    if (e && now - e.first < 600000 && e.count >= 3) return res.status(429).json({ error: 'Zu viele Anfragen. Bitte später erneut.' });
-    if (e && now - e.first < 600000) e.count++; else reklaCodeRate.set(email, { first: now, count: 1 });
+    if (!ausstellenErlaubt(email, 'reklamation')) return res.status(429).json({ error: 'Zu viele Anfragen. Bitte später erneut.' });
+    // Immer dieselbe Antwort: sie verrät nicht, ob die Adresse im Bewohner-Verzeichnis steht.
+    const antwort = { ok: true, hinweis: 'Falls die Adresse im Verzeichnis steht, ist der Code unterwegs.' };
     // Autorisierung: E-Mail muss im Bewohner-Verzeichnis (personen) oder als aktiver user bekannt sein.
     const pr = await pool.query('SELECT name FROM personen WHERE LOWER(email) = $1 LIMIT 1', [email]);
     let name = pr.rows[0]?.name;
-    if (!name) { const ur = await pool.query('SELECT name FROM users WHERE email = $1 AND active = true LIMIT 1', [email]); name = ur.rows[0]?.name; }
-    if (!name) return res.status(403).json({ error: 'E-Mail nicht im Verzeichnis. Bitte mit Konto anmelden oder die Verwaltung kontaktieren.' });
-    const code = generateOTP();
-    await pool.query('UPDATE otp_codes SET used = true WHERE email = $1 AND used = false', [email]);
-    await pool.query('INSERT INTO otp_codes (email, code, expires_at) VALUES ($1, $2, $3)', [email, code, new Date(Date.now() + 10 * 60 * 1000)]);
+    if (!name) { const ur = await pool.query('SELECT name FROM users WHERE LOWER(email) = $1 AND active = true LIMIT 1', [email]); name = ur.rows[0]?.name; }
+    if (!name) return res.json(antwort);
+    const code = await otpAusstellen(email, 'reklamation');
     await loggedSendMail({
       from: MAIL_FROM, to: email,
       subject: 'Ihr Code zur Reparatur-Meldung – Rosenweg',
@@ -18371,12 +18303,12 @@ app.post('/api/reklamationen/code', async (req, res) => {
         <p>Hallo ${escapeHtml(name)},</p>
         <p>Ihr Bestätigungscode:</p>
         <div style="background:#f0f9ff;border:2px solid #3b82f6;border-radius:8px;padding:20px;text-align:center;margin:20px 0;">
-          <span style="font-size:32px;font-weight:bold;letter-spacing:8px;color:#1e40af;">${code}</span>
+          <span style="font-size:30px;font-weight:bold;letter-spacing:6px;color:#1e40af;">${code}</span>
         </div>
-        <p style="color:#6b7280;font-size:14px;">10 Minuten gültig. Code in der Reparatur-App eingeben.</p>
+        <p style="color:#6b7280;font-size:14px;">10 Minuten gültig. Code in der Reparatur-App eingeben. Falls Sie ihn nicht angefordert haben, ignorieren Sie diese E-Mail.</p>
       </div>`,
     }, 'reklamation-code');
-    res.json({ ok: true });
+    res.json(antwort);
   } catch (e) { console.error('[reklamation-code]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 
@@ -18384,38 +18316,19 @@ app.post('/api/reklamationen/code', async (req, res) => {
 app.post('/api/reklamationen/oeffentlich', async (req, res) => {
   try {
     const b = req.body || {};
-    const email = String(b.email || '').toLowerCase().trim();
-    const code = String(b.code || '').trim();
-    if (!email || !code) return res.status(400).json({ error: 'E-Mail und Code erforderlich' });
-    const vr = await pool.query('SELECT id, code, expires_at FROM otp_codes WHERE email = $1 AND used = false ORDER BY created_at DESC LIMIT 1', [email]);
-    const row = vr.rows[0];
-    if (!row) return res.status(400).json({ error: 'Kein Code gefunden. Bitte neuen anfordern.' });
-    if (new Date() > new Date(row.expires_at)) { await pool.query('UPDATE otp_codes SET used = true WHERE id = $1', [row.id]); return res.status(400).json({ error: 'Code abgelaufen.' }); }
-    const cA = Buffer.from(row.code), cB = Buffer.from(code);
-    if (cA.length !== cB.length || !crypto.timingSafeEqual(cA, cB)) return res.status(400).json({ error: 'Ungültiger Code' });
-    await pool.query('UPDATE otp_codes SET used = true WHERE id = $1', [row.id]);
-    const beschreibung = String(b.beschreibung || '').trim().slice(0, 4000);
+    const email = normEmail(b.email);
+    if (!email || !b.code) return res.status(400).json({ error: 'E-Mail und Code erforderlich' });
+    // Erst die Eingabe prüfen, dann den Code verbrauchen — sonst ist er bei einem Tippfehler weg.
+    // Steuerzeichen (u. a. NUL) raus: Postgres lehnt sie ab.
+    const beschreibung = String(b.beschreibung || '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').trim().slice(0, 4000);
     if (!beschreibung) return res.status(400).json({ error: 'Beschreibung erforderlich' });
+    const pruefung = await otpPruefen(email, b.code, 'reklamation');
+    if (!pruefung.ok) return res.status(pruefung.grund === 'gesperrt' ? 429 : 400).json({ error: OTP_FEHLER[pruefung.grund] });
     const kategorie = ['aufzug', 'heizung', 'wasser', 'tuer', 'reinigung', 'licht', 'strom', 'netzwerk', 'salz', 'sonstige'].includes(b.kategorie) ? b.kategorie : 'sonstige';
-    const stweg = Number.isFinite(parseInt(b.stweg, 10)) ? parseInt(b.stweg, 10) : null;
+    const stweg = reklaStweg(b.stweg);
     const pr = await pool.query('SELECT id FROM personen WHERE LOWER(email) = $1 LIMIT 1', [email]);
     const personId = pr.rows[0]?.id || null;
-    let bildPfad = null;
-    if (b.foto_base64) {
-      try {
-        const m = String(b.foto_base64).match(/^data:image\/(\w+);base64,(.+)$/s);
-        const ext = (m ? m[1] : 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 4) || 'jpg';
-        const buf = Buffer.from(m ? m[2] : b.foto_base64, 'base64');
-        if (buf.length > 0 && buf.length <= 8 * 1024 * 1024) {
-          const folder = stweg ? ('stweg' + stweg) : 'allgemein';
-          const dir = pathModule.join(DOCS_PATH, folder, 'reklamationen');
-          await fs.mkdir(dir, { recursive: true });
-          const fname = `rekl-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
-          await fs.writeFile(pathModule.join(dir, fname), buf);
-          bildPfad = pathModule.join(folder, 'reklamationen', fname);
-        }
-      } catch (e) { console.error('[reklamation-foto]', e.message); }
-    }
+    const bildPfad = await speichereReklamationsFoto(b.foto_base64, stweg);
     const standort = b.standort ? String(b.standort).trim().slice(0, 200) : null;
     const r = await pool.query(
       `INSERT INTO reklamationen (person_id, stweg, kategorie, beschreibung, bild_pfad, standort, eingang_kanal, status)
@@ -24864,6 +24777,7 @@ async function initDB() {
         created_at TIMESTAMP DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_otp_email ON otp_codes(email, used);
+      ${OTP_SCHEMA_SQL}
 
       CREATE TABLE IF NOT EXISTS sessions (
         id SERIAL PRIMARY KEY,
