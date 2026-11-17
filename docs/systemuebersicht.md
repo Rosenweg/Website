@@ -1,9 +1,12 @@
 # Rosenweg Kooperation - Systemuebersicht
 
-> Stand: 2026-08-02 | ~120 API-Endpunkte, 8 STWEGs, 50+ Seiten, 3 Datenbanken
+> Stand: 2026-08-02, Sicherheitsteile nachgeführt am 17.11.2026 | ~120 API-Endpunkte, 8 STWEGs, 50+ Seiten, 3 Datenbanken
 >
 > Die Fachkapitel stammen vom 10. April 2026 und sind seither nicht nachgemessen.
-> Nachgemessen ist der Abschnitt [Infrastruktur](#infrastruktur).
+> Nachgemessen ist der Abschnitt [Infrastruktur](#infrastruktur) (2.8.2026).
+> Sicherheitsregeln, Grenzwerte und offene Punkte nach der Prüfung vom
+> 17.11.2026: [`sicherheit.md`](sicherheit.md). Betriebsanleitungen je Dienst:
+> [`infrastruktur.md`](infrastruktur.md).
 
 ## Website & Bewohner-Portal
 
@@ -35,9 +38,10 @@
 
 | Faehigkeit | Status | Ort |
 |-----------|--------|-----|
-| Email-Verteiler (ausschuss, technik, stweg1-8 etc.) | Implementiert | `email-verteiler.html`, `/api/verteiler` |
-| IMAP-Polling (Gmail, alle 60s) | Implementiert | server.js setInterval |
+| Email-Verteiler (ausschuss, technik, stweg1-8 etc.) | Implementiert | `email-verteiler.html`, `/api/verteiler`; Verteilung durch Mailcow-Aliase |
+| IMAP-Polling (Mailcow `inbox@`, alle 60s; früher Gmail) | Implementiert | server.js setInterval, siehe `email.md` |
 | Verteiler-Weiterleitung via SMTP2GO | Implementiert | `/api/verteiler/send` (Rate-Limit: 10/10min) |
+| Mail-Composer | Implementiert | immer über die Freigabe-Outbox, 50/Std. |
 | Email-Archiv (archiv@ -> DB + Dateien) | Implementiert | `email-archiv.html`, `/api/email-archive` |
 | DMARC-Report-Parsing (ZIP/GZ -> XML) | Implementiert | `dmarc.html`, `/api/dmarc/reports` |
 | Email-Zustellberichte (Delivery Report) | Implementiert | SMTP2GO Activity API (nur intern) |
@@ -48,8 +52,9 @@
 
 | Faehigkeit | Status | Ort |
 |-----------|--------|-----|
-| Druck via Email (druckerr9@, druckerr13@) | Implementiert | IMAP-Poller -> CUPS |
-| Absender-Whitelist (DB + Authentik) | Implementiert | Exakter Email-Match |
+| Druck via Email (druckerr9@, druckerr13@) | Implementiert | IMAP-Poller -> Druck-API CT 111 (`PRINT_API_SECRET` Pflicht) |
+| Absender-Whitelist (DB + Authentik) | Implementiert | Exakter Email-Match, Adresse aus `<…>` |
+| Externe Absender nur mit DMARC-Pass | Implementiert (17.11.2026) | oberster `Authentication-Results`-Kopf, `PRINT_AR_AUTHSERV_ID`; Junk/Spam nie |
 | Deckblatt (Gotenberg HTML->PDF) | Implementiert | Empfaenger, Adresse, QR-Code |
 | Empfaenger-Tag (+name in Email) | Implementiert | z.B. druckerr9+ingrid.limbach@ |
 | Pickup-Bestaetigung (QR-Code) | Implementiert | `abholung.html`, `/api/pickup/:token` |
@@ -66,6 +71,7 @@
 | Ueberschuss-Daten (Echtzeit) | Implementiert | `/api/energy/surplus` |
 | LaMetric-Integration | Implementiert | `/api/energy/lametric` |
 | Shelly-Steuerung (Surplus-basiert) | Implementiert | `scripts/shelly-surplus-switch.js` |
+| Zugriff auf Lastprofile/Zählerdaten | nur angemeldet, nur zugeordnete Zähler (17.11.2026) | Haupt-API `api/routes/energie-lesen.js`; offen nur Geräte-Routen, `sicherheit.md` 4.6 |
 | Zaehler-Benutzer-Mapping | Implementiert | `/api/energie-admin/meters/:id/users` (Login, energie-config); eigene Zaehler: `/api/energie/meine-zaehler` |
 | Export (CSV) | Implementiert | `/api/energy/export/:meterId` |
 | Vergleich & Projektion | Implementiert | `/api/energy/compare`, `/api/energy/projection` |
@@ -123,7 +129,9 @@
 | Admin-Check (Technik/Praesident) | Implementiert | Middleware `adminOnly` |
 | STWEG-Zugriffssteuerung | Implementiert | Middleware `requireStwegAccess` |
 | CORS (nur rosenweg4303.ch) | Implementiert | Origin-Whitelist |
-| Rate-Limiting (Verteiler, OTP) | Implementiert | In-Memory Throttle |
+| Rate-Limiting | Implementiert | Einmal-Codes: Versuche in der DB am Code (5), 20/10 Min je IP, nginx `rw_otp`; weitere Grenzen `sicherheit.md` Abschnitt 5 |
+| Sicherheits-Header (nginx) | Implementiert (17.11.2026) | `frontends-lxc/nginx/sicherheit-header.conf` |
+| SSH-Zugang aus dem Profil | Implementiert | `ssh-zugang.md` |
 | HMAC-signierte TV-Proxy-Tokens | Implementiert | Kurzlebig, kein Session-Leak |
 
 ## Infrastruktur
@@ -157,13 +165,14 @@
 | 240 | mailcow | 100.64.2.33 | Mailserver |
 | 109 | tv-proxy | 100.64.9.24 | TV-Proxy |
 | 113 | vpn-wg | 100.64.2.34 | WireGuard-Gateway in alle Benutzernetze |
+| 250 | tv7-streamer | 100.64.9.23 | TV7-Streamer (Port 3000), nachgetragen 17.11.2026 |
 | 500-518 | rw*-usernetze-router | 100.64.x.250 | je ein Router pro Haus |
 
 **pve2**
 
 | CT | Name | IP | Funktion |
 |----|------|-----|----------|
-| 106 | fileserver | 100.64.2.28 | Samba/CIFS — Homes und `dokumente` |
+| 106 | fileserver | 100.64.2.28 | Samba/CIFS — Homes und `dokumente` (Dienstadresse `files.ad…` 100.64.2.29) |
 | 206 | fileserver2 | 100.64.2.27 | Replikat |
 | 108 | dc1 | 100.64.2.30 | Active Directory (`AD.ROSENWEG4303.CH`) |
 | 114 | authentik | 100.64.2.37 | SSO (Port 9443) |
@@ -175,7 +184,7 @@
 | CT | Name | IP | Funktion |
 |----|------|-----|----------|
 | 245 | edge-traefik | 100.64.2.40 | Reverse Proxy, Port 80/443 |
-| 220 | asterisk-pbx | 100.64.2.55 | Telefonanlage |
+| 220 | asterisk-pbx | 100.64.2.55 | Telefonanlage (AMI nur für 127.0.0.1 und 100.64.2.52) |
 | 111 | cups-server | 100.64.2.32 | Druckserver |
 | 230 | pmg | 100.64.2.31 | Proxmox Mail Gateway |
 | 116 | whatsapp-bridge | 100.64.2.39 | WhatsApp-Anbindung |
@@ -203,9 +212,9 @@ Sie standen im Swarm; dass sie noch laufen, ist damit nicht belegt. CT 101
 
 Die frühere Swarm-Mechanik — Shepherd für Auto-Image-Updates, der
 Service-Watchdog, der IPVS-Fix fürs Overlay-Netz, Replica-Zahlen — ist mit dem
-Swarm entfallen. `docker-stack.yml`, [`infrastruktur.md`](infrastruktur.md) und
-[`cloudflare.md`](cloudflare.md) im selben Repo beschreiben sie noch; sie sind
-nicht nachgeführt.
+Swarm entfallen. `docker-stack.yml` beschreibt sie noch;
+[`infrastruktur.md`](infrastruktur.md) ist seit dem 17.11.2026 auf den
+LXC-Stand nachgeführt, [`cloudflare.md`](cloudflare.md) nur teilweise.
 
 ## OpenClaw Dokumenten-Manager
 

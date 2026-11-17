@@ -1,12 +1,29 @@
 # Website — Rosenweg
 
+Stand: 17.11.2026. Sicherheitsregeln (Header, Sperrlisten, Drosseln, Rollen)
+stehen zentral in [`sicherheit.md`](sicherheit.md); der Betrieb der
+Frontend-Container im Detail in
+[`../frontends-lxc/README.md`](../frontends-lxc/README.md).
+
 ## Übersicht
 
-Statische HTML-Seiten + API Server. Kein Framework, plain HTML/CSS/JS mit Tailwind CSS (CDN).
+Statische HTML-Seiten plus eine Node.js-API. Kein Framework: plain
+HTML/CSS/JS, Tailwind CSS vom CDN.
 
-- **URL**: `https://www.rosenweg4303.ch`
-- **Image**: `ghcr.io/rosenweg/rosenweg-website:latest` (3 Replicas, Nginx)
-- **API Image**: `ghcr.io/rosenweg/rosenweg-api:latest` (1 Replica, Node.js)
+| Teil | Wo | Wie ausgerollt |
+|---|---|---|
+| Hauptseite `www.rosenweg4303.ch` | CT 118 `fe-www`, 100.64.2.41, nginx, Docroot `/var/www/rosenweg` | `frontends-lxc/deploy.sh` (ganzer Stand) oder `scripts/rw-web-ausrollen.sh` (einzelne Dateien) |
+| STWEG-Seiten, MEG, `rosenweg9.ch` | CT 120–127, 100.64.2.43–.50 | dito |
+| ISP und NOC (`isp.`, `noc.`) | CT 119 `fe-isp`, 100.64.2.42 | dito |
+| PWA (`pwa.`) | CT 130 `fe-pwa`, 100.64.2.54 | dito |
+| API | CT 128 `core-backend`, 100.64.2.52:3000, Docker Compose unter `/opt/rosenweg-core` | `docker compose pull api && docker compose up -d api` |
+| Energie-Collector | CT 129 `energy-stack`, 100.64.2.53:3001 | Compose unter `/opt/rosenweg-energy` |
+| TLS, Hostnamen | CT 245 `edge-traefik`, 100.64.2.40 | siehe [`../edge-traefik/README.md`](../edge-traefik/README.md) |
+
+Die Docker-Images `rosenweg-website`, `rosenweg-isp` und `rosenweg-stweg`
+werden von GitHub Actions noch gebaut, aber **nirgends mehr betrieben**. Das
+API-Image `ghcr.io/rosenweg/rosenweg-api` ist dagegen das, was auf CT 128 läuft
+(jeder Commit zusätzlich unter seiner Git-SHA als Tag).
 
 ## Seiten
 
@@ -14,92 +31,160 @@ Statische HTML-Seiten + API Server. Kein Framework, plain HTML/CSS/JS mit Tailwi
 | Seite | Pfad | Beschreibung |
 |-------|------|-------------|
 | Login | `/index.html` | Startseite, Login-Button |
+| Reparatur melden | `pwa.rosenweg4303.ch/reparatur/` (Kurzadressen `/defekt-melden`, `/reparatur` auf www leiten dorthin um) | Meldung ohne Konto mit E-Mail-Code; Grenzen siehe `sicherheit.md` Abschnitt 4.2 |
+| Echtheitsprüfung | `/echtheitspruefung.html` | 30 Prüfungen je 10 Min je Client |
 
 ### Authentifiziert (Bewohner)
 | Seite | Pfad | Beschreibung |
 |-------|------|-------------|
-| Profil | `/profil.html` | Persönliche Daten, Passwort ändern |
-| Energie-Monitor | `/energie-monitor.html` | Stromverbrauch, Tarife, Charts |
-| Zähler | `/zaehler.html` | Zähler-Konfiguration |
-| Entsorgung | `/entsorgung.html` | Abfallkalender REWAG |
+| Profil | `/profil.html` | Persönliche Daten, Passwort ändern (nur mit frischer Anmeldung, siehe unten), SSH-Schlüssel |
+| Energie-Monitor | `/energie-monitor.html` | Stromverbrauch, nur zugeordnete Zähler |
+| Zähler | `/zaehler.html` | Zähler-Übersicht |
+| Entsorgung | `/entsorgung.html` | Abfallkalender |
 | Projekte | `/projekte.html` | Laufende Projekte |
 
-### Admin (Technik-Gruppe)
-| Seite | Pfad | Beschreibung |
-|-------|------|-------------|
-| Verwaltung | `/verwaltung.html` | Benutzerverwaltung |
-| Wohnungsverwaltung | `/objektverwaltung.html` | Wohnungen zuweisen |
-| Rechteverwaltung | `/rechteverwaltung.html` | Rollen/Rechte |
-| Email-Verteiler | `/email-verteiler.html` | Verteiler-Mails anzeigen |
-| Email-Archiv | `/email-archiv.html` | Archivierte Mails |
-| Energie-Config | `/energie-config.html` | Tarife, Zähler konfigurieren |
-| IT-Netzwerk | entfernt, siehe `docs/unifi.md` | — |
-| Proxmox | `/proxmox-verwaltung.html` | PVE Status |
+### Verwaltung, Ausschuss, Technik
+| Seite | Pfad | Wer |
+|-------|------|-----|
+| Verwaltung | `/verwaltung.html` | Benutzerverwaltung; Nicht-Technik nur Bewohner-/Eigentümer-Gruppen der eigenen Ausschuss-STWEG |
+| Wohnungsverwaltung | `/objektverwaltung.html` | Ausschuss **dieser** STWEG, Verwaltung mit Gruppe dieser STWEG, Technik/Präsident |
+| Rechteverwaltung | `/rechteverwaltung.html` | Technik/Präsident |
+| Email-Verteiler | `/email-verteiler.html` | gemäss Recht |
+| Email-Archiv | `/email-archiv.html` | gemäss Recht |
+| Email-Log | `/email-log.html` | nur Technik/Präsident |
+| Energie-Config | `/energie-config.html` | Recht `energie-config` (Schreiben: `write`) |
+| Proxmox | `/proxmox-verwaltung.html` | Technik |
+
+Die genaue Rechtelogik je Bereich: `sicherheit.md` Abschnitt 4.3.
 
 ### STWEG-Seiten
 | Pfad | Beschreibung |
 |------|-------------|
-| `/stweg1/` bis `/stweg8/` | Pro-STWEG Startseite |
-| `/stweg3/pages/admin.html` | STWEG3 Admin |
-| `/stweg3/pages/waschkueche-admin.html` | Waschküche-Verwaltung |
-| `/stweg3/pages/stweg3-kontakte.html` | Kontakte |
+| `stweg1..7.rosenweg4303.ch`, `meg.rosenweg4303.ch` | je STWEG eine Startseite (Docroot-Unterordner `/stwegN/` bzw. `/meg/`) |
+| `rosenweg9.ch`, `www.rosenweg9.ch` | Eigendomain von STWEG 3 (gleicher Inhalt wie `stweg3.`) |
+| `/waschkueche.html` | nur unter den STWEG-3-Hostnamen, sonst 404 |
+
+Die früheren Ordner `stwegN/data/` (Kontaktlisten) werden nicht mehr
+ausgeliefert; `/data/` ist auf den STWEG-Hosts gesperrt.
 
 ### Spezial
 | Pfad | Beschreibung |
 |------|-------------|
 | `/door-signs/` | Türschilder (Kiosk-Modus) |
-| `/kiosk/` | Kiosk-Anzeige |
+| `kiosk/` (Repo) | Einrichtung der Kiosk-Geräte (`setup-kiosk.sh`) – kein Webinhalt |
 
 ## Shared JavaScript
 
 | Datei | Funktion |
 |-------|----------|
-| `js/authentik-auth.js` | SSO Login, Token-Management, `apiFetch()` |
-| `js/nav.js` | Navigation (alle Seiten), STWEG-Adressen |
+| `js/authentik-auth.js` | SSO-Login, Token-Verwaltung, `apiFetch()` – wird mit `?v=5` eingebunden |
+| `js/nav.js` | Navigation (alle Seiten), STWEG-Adressen; auf fe-isp ersetzt durch `js/nav-isp.js` |
 
 ### authentik-auth.js — Wichtige Methoden
 
-- `AuthentikAuth.login(redirect)` — Redirect zu Authentik
-- `AuthentikAuth.logout()` — Session löschen, Redirect zu Login
-- `AuthentikAuth.isLoggedIn()` — Prüft ob Session-Token vorhanden
-- `AuthentikAuth.getUser()` — User-Objekt aus localStorage
-- `AuthentikAuth.getToken()` — Bearer Token
-- `AuthentikAuth.apiFetch(url, options)` — Fetch mit Auth-Header, **auto-logout bei 401**
-- `AuthentikAuth.init({requireAuth, requireAdmin, onLogin, onLogout})` — Seiten-Init
+- `AuthentikAuth.login(redirect, opts)` — Weiterleitung zu Authentik über
+  `/api/auth/login`. `opts.reauth` erzwingt eine neue Passwortabfrage
+  (für den Passwortwechsel), `opts.auto` kennzeichnet einen automatischen Start
+  (Schleifensperre, siehe unten). Auch `login({ reauth: true })` ist möglich.
+- `AuthentikAuth.logout()` — Sitzung löschen, zurück zur Startseite.
+- `AuthentikAuth.isLoggedIn()`, `getUser()`, `getToken()`, `isAdmin()`,
+  `hasPermission(page, level)`.
+- `AuthentikAuth.apiFetch(url, options)` — Fetch mit Auth-Header. Reine Objekte
+  werden als JSON gesendet; `FormData`, `Blob`, Strings usw. unverändert.
+  **Abmeldung nur bei HTTP 401** oder wenn die Antwort auf die Authentik-Anmeldung
+  umgeleitet wurde – ein 5xx beendet die Sitzung nicht.
+- `AuthentikAuth.init({requireAuth, requireAdmin, onLogin, onLogout})` — Seiten-Init.
+- `AuthentikAuth.ready` (Promise) und das Event `authentik-auth-ready` auf
+  `window` melden, wenn feststeht, ob jemand angemeldet ist (Wert: Nutzer oder
+  `null`).
 
-**Wichtig**: `apiFetch()` ruft `logout()` bei HTTP 401 auf. API-Endpunkte dürfen daher 401 nur für echte Session-Ablauf-Fehler zurückgeben, nicht für Business-Logik-Fehler (z.B. falsches Passwort → 400 oder 403 verwenden).
+Regeln, die man beim Bauen von Seiten und Routen kennen muss:
+
+- **401 heisst „Sitzung ungültig"** und meldet ab. Fachliche Fehler (falsches
+  Passwort, fehlendes Recht) müssen 400 oder 403 liefern.
+- **Rücksprung nur aus eigenem Start:** Ein `#auth=`-Token in der Adresse wird nur
+  übernommen, wenn `login()` im selben Browser in den letzten 15 Minuten gestartet
+  wurde (Merker `rosenweg_login_gestartet`). Sonst wird er verworfen. Das
+  Nutzerobjekt kommt immer von `/api/auth/me`.
+- **Schleifensperre:** Höchstens 2 automatische Login-Starts in 2 Minuten je Tab;
+  danach erscheint ein Hinweis mit Knopf „Anmelden".
+- **Browser-Bindung:** Die API setzt beim Start der Anmeldung das Cookie
+  `rw_oauth_bind`. Fehlt es beim Rücksprung (anderer Browser, Cookies
+  blockiert, API dazwischen neu gestartet), zeigt die API „Anmeldung
+  abgebrochen" (HTTP 400). Dann die Anmeldung einfach neu beginnen.
+- **Passwort ändern** (`profil.html`) geht nur aus einer höchstens 15 Minuten
+  alten Authentik-Anmeldung; das Profil bietet dafür „Jetzt neu anmelden"
+  (`login({ reauth: true })`). Höchstens 5 Versuche pro Stunde; danach werden
+  alle anderen Sitzungen des Kontos beendet.
+- **Kopien:** `whatsapp-bot/public/authentik-auth.js` ist eine byte-gleiche Kopie
+  und muss bei Änderungen mitkopiert werden.
 
 ## Nginx-Konfiguration
 
-- Reverse Proxy: `/api/*` → `http://api:3000`
-- JS/CSS: `Cache-Control: no-cache` (Revalidierung bei jedem Request)
-- Bilder/Fonts: `Cache-Control: max-age=604800, immutable` (7 Tage)
-- SPA-Fallback: Nein (statische Seiten)
+Die vhosts liegen in `frontends-lxc/nginx/{website,isp,stweg,pwa}.conf`, die
+Backend-Adressen in `frontends-lxc/nginx/upstreams.conf`. Kurzfassung:
+
+| Pfad | Ziel |
+|---|---|
+| `/api/energy/{surplus,surplus-available,lametric,shelly,solar-live,tariffs,tariffs/current}` | Collector, CT 129 `100.64.2.53:3001` |
+| alle anderen `/api/energy/…` und `/api/…` | API, CT 128 `100.64.2.52:3000` |
+| `*.html`, `/` | `Cache-Control: no-cache, must-revalidate`, dazu `CDN-Cache-Control: no-store` |
+| `*.css`, `*.js` | `no-store` (Browser und Cloudflare halten nichts) |
+| Bilder/Fonts | 7 Tage, `immutable` |
+| `/api/…` | nie zwischengespeichert (`no-store`, ETag/Last-Modified entfernt) |
+
+Sicherheits-Header, Sperrregeln (`.md`, `.json`, `/data/` …) und die Drossel
+`rw_otp` für die Code-Endpunkte: siehe
+[`../frontends-lxc/README.md`](../frontends-lxc/README.md#sperr--und-schutzregeln-in-nginx)
+und `sicherheit.md` Abschnitte 4.2 und 4.5.
 
 ## Deployment
 
-Die Frontends liefen einmal als Swarm-Dienste aus Docker-Images. Der Betrieb
-war nicht stabil genug, darum laufen sie heute als LXC-Container mit einem
-schlichten nginx, das statische Dateien ausliefert. **Es gibt keinen
-automatischen Weg vom Push auf die Seite** — ausgerollt wird von Hand, und
-zwar dateiweise.
+Es gibt **keinen automatischen Weg vom Push auf die Seite.** Ausgerollt wird von
+Hand, auf zwei Arten:
 
-Wichtig: Es gibt mehrere `fe-*`-Container mit **unterschiedlichem** Inhalt.
-Die Hauptseite liegt allein auf `fe-www` (CT 118, 100.64.2.41) unter
-`/var/www/rosenweg`. `fe-stweg1..7`, `fe-meg`, `fe-isp` und `fe-pwa` führen
-ihre eigenen, kleineren Bestände. Wer blind spiegelt, überschreibt Fremdes.
+| Was | Werkzeug | Wirkung |
+|---|---|---|
+| nginx-Konfiguration geändert, Frontend komplett auf `main` bringen, neues Frontend | `frontends-lxc/deploy.sh` im Container | holt `origin/main`, installiert Konfiguration und Header-Datei, baut den Docroot aus der Positivliste neu (`rsync --delete`), `nginx -t`, Reload |
+| einzelne Seiten oder Skripte geändert | `scripts/rw-web-ausrollen.sh` vom Arbeitsplatz | legt nur die genannten Dateien dorthin, wo sie schon liegen; ändert keine Konfiguration |
+
+**Nach dem 17.11.2026 zuerst `deploy.sh` auf allen elf Frontends**, damit die
+neuen Sperrregeln, die Header-Datei und die Energie-Aufteilung aktiv sind. Läuft
+auf einem Container noch die alte Fassung des Skripts, scheitert der erste Lauf
+bei `nginx -t` (Header-Datei fehlt) – dann **ein zweites Mal starten**. Genauer
+Ablauf und Prüfbefehle:
+[`../frontends-lxc/README.md`](../frontends-lxc/README.md#ausrollen).
+
+### Einzelne Dateien mit `rw-web-ausrollen.sh`
+
+Es gibt mehrere `fe-*`-Container mit **unterschiedlichem** Inhalt. Die
+Hauptseite liegt allein auf `fe-www` (CT 118). `fe-stweg1..7`, `fe-meg`,
+`fe-isp` und `fe-pwa` führen ihre eigenen, kleineren Bestände. Wer blind
+spiegelt, überschreibt Fremdes.
 
 ```bash
 scripts/rw-web-ausrollen.sh --pruefen profil.html js/nav.js   # nur vergleichen
 scripts/rw-web-ausrollen.sh profil.html js/nav.js             # ausrollen
+scripts/rw-web-ausrollen.sh --neu neue-seite.html             # auch dorthin, wo sie fehlt
 ```
+
+Voraussetzung: SSH-Zugang über den Sprunghost (`RW_JUMP`, Standard
+`stefan@10.0.10.149`) auf einen Cluster-Knoten (`RW_NODE`, Standard
+`root@100.64.2.20`) und als root auf die Frontend-Container.
 
 Das Skript fragt den Cluster nach allen laufenden `fe-*`-Containern und legt
 jede Datei dorthin, wo sie schon liegt — was ein Container hat, bekommt er
 aktuell; was er nicht hat, bekommt er nicht (ausser mit `--neu`). Vor dem
-Überschreiben entsteht eine `.alt`-Kopie, danach wird die Prüfsumme
-verglichen. Einzige eingebaute Ausnahme: fe-isp bekommt `js/nav-isp.js` als
-`js/nav.js` und nie das allgemeine `js/nav.js`.
+Überschreiben entsteht eine `.alt`-Kopie (nginx liefert `.alt` nicht aus),
+danach wird die Prüfsumme verglichen. Die Zwischendatei auf dem Container hat
+seit dem 17.11.2026 einen Zufallsnamen (`mktemp`), damit niemand dort vorab einen
+Symlink an ihre Stelle legen kann. Eingebaute Ausnahmen: fe-isp bekommt
+`js/nav-isp.js` als `js/nav.js` und nie das allgemeine `js/nav.js`; Dateien
+unter `pwa/` gehen nur nach fe-pwa (ohne das Präfix `pwa/`).
+
+nginx braucht nach `rw-web-ausrollen.sh` kein Neuladen — es liest die Dateien
+bei jeder Anfrage. Zurück: die `.alt`-Datei wieder auf den alten Namen
+umbenennen.
 
 Dahinter stehen zwei Vorfälle vom 5. September 2026:
 
@@ -117,7 +202,13 @@ Dahinter stehen zwei Vorfälle vom 5. September 2026:
   Das Zugriffsprotokoll reichte nur bis zum selben Tag zurück; ob vorher
   jemand zugegriffen hat, ist nicht belegbar.
 
-nginx braucht kein Neuladen — es liest die Dateien bei jedem Request.
+Die damals von Hand gesetzte Sperre steht seit dem 17.11.2026 im Repo
+(`frontends-lxc/nginx/*.conf`) und wird mit `deploy.sh` auf alle Frontends
+verteilt; zusätzlich baut `deploy.sh` den Docroot nur noch aus einer
+Positivliste. Am 17.11.2026 fanden sich trotzdem noch alte Dateien aus der
+Docker-Zeit (`networks_full.json`, `devices_full.json`, `network-data.json`,
+`stweg*/data/kontakte.json`) – sie sind gelöscht, die darin enthaltenen
+Schlüssel gelten als kompromittiert (`sicherheit.md` Abschnitte 1.3 und 7.1).
 
 ## Das Lagebild: eine Datei, zwei Orte
 
@@ -228,12 +319,40 @@ Sicherung zeigt auf dieselbe Datei, und ein Zurückspielen tut nichts. Immer
 
 **Das NOC-Wandbild** ist der Grund für das Skript — siehe oben; von Hand nur noch im Notfall.
 
-Die API dagegen läuft weiterhin in Docker, auf CT 128 (`core-backend`):
+## API ausrollen (CT 128)
+
+Die API läuft in Docker Compose auf CT 128 (`core-backend`, pve1,
+100.64.2.52:3000), Umgebung aus `/opt/rosenweg-core/.env` (Werte nie im Repo;
+Liste der sicherheitsrelevanten Variablen: `sicherheit.md` Abschnitt 6):
 
 ```bash
 ssh -J stefan@10.0.10.149 root@100.64.2.20 \
   'pct exec 128 -- sh -c "cd /opt/rosenweg-core && docker compose pull api && docker compose up -d api"'
 ```
+
+Prüfen:
+
+```bash
+ssh -J stefan@10.0.10.149 root@100.64.2.20 'pct exec 128 -- sh -c "cd /opt/rosenweg-core && docker compose ps api && docker compose logs --tail 50 api"'
+curl -s https://www.rosenweg4303.ch/api/health
+```
+
+Im Log beim Start auf Warnungen über fehlende Pflichtvariablen achten (z. B.
+`AD_PASSWORD_API_SECRET fehlt`, `PRINT_API_SECRET fehlt`) – die betroffene
+Funktion ist dann abgeschaltet, nicht mit einem Standardwert aktiv.
+
+Zurück auf einen älteren Stand (jeder Commit liegt unter seiner SHA in der
+Registry):
+
+```bash
+pct exec 128 -- bash -c 'cd /opt/rosenweg-core
+  docker pull ghcr.io/rosenweg/rosenweg-api:<letzte-gute-sha>
+  docker tag ghcr.io/rosenweg/rosenweg-api:<letzte-gute-sha> ghcr.io/rosenweg/rosenweg-api:latest
+  docker compose up -d api'
+```
+
+Die vor dem Rollout vom 17.11.2026 gültige Umgebung liegt als
+`/opt/rosenweg-core/.env.vor-sicherheit-2026-11-17` daneben.
 
 ## Wenn die Dienstwacht viel meldet
 
