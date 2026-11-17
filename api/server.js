@@ -13718,6 +13718,8 @@ app.put('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'read
     const groups = req.user.groups || [];
     const isOwner = row.user_email.toLowerCase() === (req.user.email || '').toLowerCase();
     const canReview = canEditAuslageStatus(row, req.user);
+    // Fremde Entwuerfe (S3-2-3): auch keine Ausschuss-Bemerkung vor dem Einreichen.
+    if (row.status === 'entwurf' && !isOwner) return res.status(403).json({ error: 'Entwurf muss zuerst vom Ersteller eingereicht werden' });
 
     const updates = [];
     const params = [];
@@ -13884,6 +13886,10 @@ app.delete('/api/auslagen/:id', authMiddleware, requirePermission('auslagen', 'r
     const row = cur.rows[0];
     const isOwner = row.user_email.toLowerCase() === (req.user.email || '').toLowerCase();
     const canReview = canEditAuslageStatus(row, req.user);
+    // Entwurf gehoert allein dem Ersteller (S3-2-3): Pruefer duerfen ihn nicht vorab loeschen.
+    if (row.status === 'entwurf' && !isOwner) {
+      return res.status(403).json({ error: 'Entwurf kann nur der Ersteller löschen' });
+    }
     if (!canReview && !(isOwner && (row.status === 'eingereicht' || row.status === 'entwurf'))) {
       return res.status(403).json({ error: 'Löschen nur für eigene eingereichte Auslagen/Entwürfe oder Ausschuss/Technik' });
     }
@@ -14031,7 +14037,11 @@ app.post('/api/auslagen/:id/belege', authMiddleware, requirePermission('auslagen
     if (aus.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const row = aus.rows[0];
     const isOwner = row.user_email.toLowerCase() === (req.user.email || '').toLowerCase();
-    if (!(isOwner && row.status === 'eingereicht') && !canEditAuslageStatus(row, req.user)) {
+    // Entwurf: nur der Ersteller (S3-2-3); er darf dort auch Belege anhaengen (Entwurf mit mehreren Belegen).
+    if (row.status === 'entwurf' && !isOwner) {
+      return res.status(403).json({ error: 'Belege eines Entwurfs kann nur der Ersteller ändern' });
+    }
+    if (!(isOwner && (row.status === 'eingereicht' || row.status === 'entwurf')) && !canEditAuslageStatus(row, req.user)) {
       return res.status(403).json({ error: 'Belege hinzufügen nur bei eigener eingereichter Auslage oder Ausschuss' });
     }
     const { beleg_base64, beleg_filename, waehrung_original, wechselkurs_chf, kurs_quelle } = req.body || {};
@@ -14071,7 +14081,11 @@ app.delete('/api/auslagen/:id/belege/:bid', authMiddleware, requirePermission('a
     if (aus.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const row = aus.rows[0];
     const isOwner = row.user_email.toLowerCase() === (req.user.email || '').toLowerCase();
-    if (!(isOwner && row.status === 'eingereicht') && !canEditAuslageStatus(row, req.user)) {
+    // Entwurf: nur der Ersteller (S3-2-3).
+    if (row.status === 'entwurf' && !isOwner) {
+      return res.status(403).json({ error: 'Belege eines Entwurfs kann nur der Ersteller ändern' });
+    }
+    if (!(isOwner && (row.status === 'eingereicht' || row.status === 'entwurf')) && !canEditAuslageStatus(row, req.user)) {
       return res.status(403).json({ error: 'Löschen nur bei eigener eingereichter Auslage oder Ausschuss' });
     }
     const beleg = await pool.query('SELECT beleg_path FROM auslagen_belege WHERE id = $1 AND auslage_id = $2', [bid, id]);
@@ -14264,7 +14278,8 @@ app.put('/api/auslagen/:id/positionen', authMiddleware, requirePermission('ausla
     const row = aus.rows[0];
     const isOwner = row.user_email.toLowerCase() === (req.user.email || '').toLowerCase();
     const offen = row.status === 'eingereicht' || row.status === 'entwurf';
-    if (!offen || (!isOwner && !canEditAuslageStatus(row, req.user))) {
+    // Fremde Entwuerfe (S3-2-3) bleiben auch fuer Ausschuss/Technik gesperrt.
+    if (!offen || (!isOwner && (row.status === 'entwurf' || !canEditAuslageStatus(row, req.user)))) {
       await client.query('ROLLBACK');
       return res.status(403).json({ error: 'Positionen nur bei eingereichter Auslage bzw. eigenem Entwurf editierbar (nicht nach Genehmigung)' });
     }
@@ -15549,7 +15564,9 @@ app.get('/api/energie/meine-zaehler', authMiddleware, async (req, res) => {
     const email = String(req.user?.email || '').toLowerCase();
     if (!email) return res.json([]);
     const groups = req.query.gemeinschaft === '1' ? (req.user.groups || []) : [];
-    res.json(await collectorZaehlerFuer(email, groups));
+    // S3-3-2: Netzadresse/Geraetedaten nur fuer Technik (/api/energie-admin, /api/zaehler-technik).
+    const ohneTechnik = ({ host, port, unit_id, serial, shelly_type, ...rest }) => rest;
+    res.json((await collectorZaehlerFuer(email, groups)).map(ohneTechnik));
   } catch (err) {
     console.error('[energie/meine-zaehler]', err.message);
     res.status(502).json({ error: 'Energy-Collector nicht erreichbar' });
@@ -16983,11 +17000,23 @@ function requireZaehlerTechnik(req, res, next) {
   return res.status(403).json({ error: 'Nur für Technik, Verwaltung oder Rosenweg-9-Eigentümer' });
 }
 
+// Volle Technik-Sicht (IP/Port/Seriennummer, Live-Werte aller Wohnungen): Technik/
+// Praesident oder Recht energie-config:read (wie api/routes/energie-lesen.js).
+// requirePermission ist Middleware -> mit Ersatz-Antwort als Ja/Nein-Abfrage.
+function zaehlerTechnikVoll(req) {
+  if (req.user?.isAdmin) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const ersatz = { status() { return ersatz; }, json() { resolve(false); return ersatz; } };
+    requirePermission('energie-config', 'read')(req, ersatz, () => resolve(true));
+  });
+}
+
 app.get('/api/zaehler-technik', authMiddleware, requireZaehlerTechnik, async (req, res) => {
   try {
+    // Collector mit Admin-Schluessel fragen (interne Quelle, wie /api/energie-admin).
     const [metersResp, liveResp] = await Promise.all([
-      fetch(`${ENERGY_COLLECTOR_URL}/api/energy/meters`, { signal: AbortSignal.timeout(8000) }),
-      fetch(`${ENERGY_COLLECTOR_URL}/api/energy/live`, { signal: AbortSignal.timeout(8000) }),
+      fetch(`${ENERGY_COLLECTOR_URL}/api/energy/meters`, { headers: energyAdminHeaders(), signal: AbortSignal.timeout(8000) }),
+      fetch(`${ENERGY_COLLECTOR_URL}/api/energy/live`, { headers: energyAdminHeaders(), signal: AbortSignal.timeout(8000) }),
     ]);
     if (!metersResp.ok || !liveResp.ok) {
       return res.status(502).json({ error: 'Energy-Collector nicht erreichbar' });
@@ -16997,10 +17026,48 @@ app.get('/api/zaehler-technik', authMiddleware, requireZaehlerTechnik, async (re
     const now = Date.now();
     const FRESH_MS = 30000; // Poll alle 5s; >30s ohne frischen Wert = offline
 
-    const rows = meters.map((m) => {
+    // S3-3-1: Verwaltung/Eigentuemer ohne energie-config:read sehen den Status aller
+    // Zaehler, aber keine Netzadressen/Geraetedaten und Live-Werte nur von Netz/
+    // Produktion und den eigenen (persoenlich oder ueber Gruppe zugeordneten)
+    // Zaehlern — Live-Leistung fremder Wohnungen verraet Anwesenheit/Gewohnheiten.
+    const voll = await zaehlerTechnikVoll(req);
+    let eigene = new Set();
+    if (!voll) {
+      const email = String(req.user?.email || '').trim().toLowerCase();
+      const gruppen = (req.user?.groups || []).map(String).filter(g => !g.includes(','));
+      try {
+        if (email) eigene = new Set((await collectorZaehlerFuer(email, gruppen)).map(m => String(m.id)));
+      } catch (e) {
+        console.warn('[zaehler-technik] eigene Zaehler:', e.message); // fail-closed: nur Netz/Produktion
+      }
+    }
+    const liveErlaubt = (m) => voll || m.category === 'grid' || m.category === 'production' || eigene.has(String(m.id));
+
+    const rows = (Array.isArray(meters) ? meters : []).map((m) => {
       const l = live[m.id] || null;
       const ts = l?.ts || null;
       const online = ts ? (now - new Date(ts).getTime() < FRESH_MS) : false;
+      if (!voll) {
+        const zeigeLive = liveErlaubt(m);
+        return {
+          id: m.id, name: m.name, type: m.type, location: m.location, category: m.category, active: m.active,
+          host: null, port: null, unit_id: null, shelly_type: null, serial: null,
+          device_time: l?.device_time ?? null,
+          online,
+          last_seen: ts,
+          live_verborgen: !zeigeLive,
+          live: (l && zeigeLive) ? {
+            power_w: l.power_w,
+            power_l1_w: l.power_l1_w, power_l2_w: l.power_l2_w, power_l3_w: l.power_l3_w,
+            voltage_l1_v: l.voltage_l1_v, voltage_l2_v: l.voltage_l2_v, voltage_l3_v: l.voltage_l3_v,
+            current_l1_a: l.current_l1_a, current_l2_a: l.current_l2_a, current_l3_a: l.current_l3_a,
+            pf_l1: l.pf_l1, pf_l2: l.pf_l2, pf_l3: l.pf_l3, tariff: l.tariff,
+            energy_import_kwh: l.energy_import_kwh, energy_export_kwh: l.energy_export_kwh,
+            energy_import_t1_kwh: l.energy_import_t1_kwh, energy_import_t2_kwh: l.energy_import_t2_kwh,
+            energy_export_t1_kwh: l.energy_export_t1_kwh, energy_export_t2_kwh: l.energy_export_t2_kwh,
+          } : null,
+        };
+      }
       return {
         id: m.id,
         name: m.name,
@@ -17029,7 +17096,7 @@ app.get('/api/zaehler-technik', authMiddleware, requireZaehlerTechnik, async (re
       };
     });
 
-    res.json({ meters: rows, server_time: new Date().toISOString() });
+    res.json({ meters: rows, voll, server_time: new Date().toISOString() });
   } catch (err) {
     res.status(502).json({ error: fehlerFuerClient(err, 'Energy-Collector nicht erreichbar') });
   }
