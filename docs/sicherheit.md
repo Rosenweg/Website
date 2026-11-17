@@ -236,10 +236,18 @@ STWEG-Hosts und alle `.json` ausser `site-config.json`, `zaehler-config.json`,
 
 - nginx schickt nur die offenen Routen direkt zum Collector, alles andere zur API.
 - Der Collector liefert personenbezogene Lese-Routen nur an `INTERN_LESER`
-  (= Haupt-API `100.64.2.52`) oder mit Admin-Schlüssel.
-- `/api/zaehler-technik`: volle Sicht nur Technik/Präsident/Admin/
-  `energie-config:read`; Verwaltung und Eigentümer ohne IP/Port/Seriennummer und mit
-  Live-Werten nur von Netz, Produktion und eigenen Zählern.
+  (= Haupt-API `100.64.2.52`) oder mit Admin-Schlüssel. **Ausnahme vom Grundsatz
+  „fail closed“:** Ist `ENERGY_INTERN_LESER` leer, sind diese Routen am Collector
+  für jede Quelle offen (Warnung im Log). Auf CT 129 ist der Wert seit dem
+  17.11.2026 gesetzt; Prüfung auf CT 129:
+  `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3001/api/energy/meters`
+  muss `403` liefern.
+- `/api/zaehler-technik` (Seite `stweg3/pages/zaehler-technik.html`): Zugang nur
+  für die Gruppen `technik`, `verwaltung` und `stweg3-eigentuemer` (also nur
+  Rosenweg 9; ein Präsident ohne eine dieser Gruppen bekommt 403). Volle Sicht nur
+  mit Technik/Präsident/Admin/`energie-config:read`; Verwaltung und Eigentümer
+  sehen keine IP/Port/Seriennummer und Live-Werte nur von Netz, Produktion und
+  eigenen Zählern.
 
 ### 4.7 ISP, Traefik, DNS
 
@@ -394,6 +402,10 @@ ins Repo:
 13. Optional: Repo privat schalten und Historie bereinigen (`git filter-repo` + Force-Push)
 
 ### 7.2 Betrieb
+
+- Routen mit Umlaut im Pfad (Mail-Empfänger, Handwerker-Verträge/-Aufträge,
+  Unterschriftenlisten-Rückläufe, Zähler-Daten) waren schon vor dem 17.11. nie
+  erreichbar (Express vergleicht den kodierten Pfad) – Behebung in PR #24.
 
 - Zertifikat `contacts.rosenweg4303.ch` ist abgelaufen.
 - `PRINT_AR_AUTHSERV_ID` an einer echten Mail prüfen (oberster
