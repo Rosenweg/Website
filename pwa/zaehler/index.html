@@ -205,11 +205,10 @@
 
     // ── Zähler laden (eigene vs Gemeinschaft via zwei Abfragen) ─────
     async function loadMeters() {
-        const email = encodeURIComponent(USER.email);
-        const groups = (USER.groups || []).join(',');
+        // Über das Backend: E-Mail und Gruppen kommen dort aus der Sitzung.
         const [ownR, allR] = await Promise.all([
-            fetch(`${API}/user/${email}/meters`),                                   // nur persönlich (meter_users)
-            fetch(`${API}/user/${email}/meters?groups=${encodeURIComponent(groups)}`) // + Gemeinschaft (meter_groups)
+            AuthentikAuth.apiFetch('/api/energie/meine-zaehler'),                  // nur persönlich (meter_users)
+            AuthentikAuth.apiFetch('/api/energie/meine-zaehler?gemeinschaft=1')    // + Gemeinschaft (meter_groups)
         ]);
         if (!ownR.ok || !allR.ok) throw new Error('Zähler konnten nicht geladen werden');
         const own = await ownR.json();

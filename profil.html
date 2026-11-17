@@ -476,7 +476,7 @@
             // Meters - load from energy collector
             const metersEl = document.getElementById('meters-list');
             try {
-                const meterResp = await fetch(`/api/energy/user/${encodeURIComponent(currentUser.email)}/meters`);
+                const meterResp = await AuthentikAuth.apiFetch('/api/energie/meine-zaehler');
                 const meters = meterResp.ok ? await meterResp.json() : [];
                 if (meters.length === 0) {
                     metersEl.innerHTML = '<span class="text-sm text-gray-400">Keine Zähler zugewiesen</span>';
