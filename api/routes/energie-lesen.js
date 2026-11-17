@@ -24,8 +24,13 @@ function queryString(req) {
   return i >= 0 ? req.originalUrl.slice(i) : '';
 }
 
+// Der Collector verlangt fuer die Zuordnungs-Routen (/user/:email/meters,
+// /meters/:id/users) den Admin-Schluessel (#21) -> immer mitschicken; er
+// verlaesst das interne Netz nicht.
+const ADMIN_KEY = process.env.ENERGY_ADMIN_API_KEY || '';
 async function collector(pfad, timeoutMs = 20000) {
-  return fetch(`${COLLECTOR}/api/energy${pfad}`, { signal: AbortSignal.timeout(timeoutMs), redirect: 'error' });
+  const headers = ADMIN_KEY ? { Authorization: `Bearer ${ADMIN_KEY}` } : {};
+  return fetch(`${COLLECTOR}/api/energy${pfad}`, { headers, signal: AbortSignal.timeout(timeoutMs), redirect: 'error' });
 }
 
 // Antwort des Collectors durchreichen; Fehlertexte (DB-Meldungen) nicht an den Client.
@@ -46,11 +51,24 @@ function fehler(res, err, wo) {
 // ─── Offene Routen (Geraete/Anzeigen, keine Personendaten) ───────────
 // Normalerweise schickt nginx diese direkt zum Collector; hier nur, damit sie
 // auch ueber diesen Pfad funktionieren (z. B. ISP-Host ohne eigenen Block).
+// Achtung: Der Collector sieht hier die API als Quelle (intern, mit Schluessel)
+// und liefert bei surplus* die Liste "consumers" (Live-Leistung je Wohnung)
+// mit. Die darf ueber diesen anonymen Weg nie hinaus -> entfernen. Express
+// routet ohne Gross/Klein: /api/energy/Surplus landet ebenfalls hier.
 const OFFEN = ['/surplus', '/surplus-available', '/lametric', '/shelly', '/solar-live', '/tariffs', '/tariffs/current'];
+const OHNE_VERBRAUCHER = new Set(['/surplus', '/surplus-available']);
 for (const p of OFFEN) {
   router.get(p, async (req, res) => {
-    try { await durchreichen(res, await collector(p + queryString(req), 10000)); }
-    catch (err) { fehler(res, err, p); }
+    try {
+      if (!OHNE_VERBRAUCHER.has(p)) return await durchreichen(res, await collector(p + queryString(req), 10000));
+      if (String(req.query.field || '').toLowerCase() === 'consumers') return res.status(404).json({ error: 'Feld nicht verfuegbar' });
+      const r = await collector(p + queryString(req), 10000);
+      const typ = r.headers.get('content-type') || '';
+      if (!r.ok || !typ.includes('json')) return await durchreichen(res, r);
+      const daten = await r.json();
+      if (daten && typeof daten === 'object') delete daten.consumers;
+      res.status(r.status).json(daten);
+    } catch (err) { fehler(res, err, p); }
   });
 }
 
@@ -62,6 +80,7 @@ router.use(authMiddleware);
 // Middleware -> mit einer Ersatz-Antwort als Ja/Nein-Abfrage benutzen.
 function vollerZugriff(req) {
   if (req._energieVoll !== undefined) return Promise.resolve(req._energieVoll);
+  if (req.user?.isAdmin) { req._energieVoll = true; return Promise.resolve(true); }
   return new Promise((resolve) => {
     const ersatz = { status() { return ersatz; }, json() { resolve(false); return ersatz; } };
     requirePermission('energie-config', 'read')(req, ersatz, () => resolve(true));
@@ -210,8 +229,14 @@ router.get('/dashboard', async (req, res) => {
     const gruppen = await teuer('/dashboard');
     const ids = await erlaubteIds(req);
     if (!ids) return res.json(gruppen);
+    // Gruppensumme der Wohnungszaehler aus den EIGENEN Zaehlern neu rechnen —
+    // die Summe aller Wohnungen verriete (minus eigener Verbrauch) den Nachbarn.
     res.json((Array.isArray(gruppen) ? gruppen : [])
-      .map(g => ({ ...g, meters: (g.meters || []).filter(m => ids.has(String(m.id))).map(ohneTechnik) }))
+      .map(g => {
+        const meters = (g.meters || []).filter(m => ids.has(String(m.id))).map(ohneTechnik);
+        const total = meters.filter(m => m.category === 'consumer').reduce((s, m) => s + (Number(m.today_consumption_kwh) || 0), 0);
+        return { ...g, meters, total_consumption_kwh: total };
+      })
       .filter(g => g.meters.length > 0));
   } catch (err) { fehler(res, err, 'dashboard'); }
 });
