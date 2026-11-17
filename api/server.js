@@ -19325,9 +19325,12 @@ async function buildTraefikDynamicConfig() {
   const mrs = await pool.query(
     `SELECT * FROM isp_mail_relays
       WHERE active = true
+        AND COALESCE(approval_status,'approved') = 'approved'
         AND (imap_sni_hostname IS NOT NULL OR smtps_sni_hostname IS NOT NULL OR sni_alias IS NOT NULL)
       ORDER BY id`).catch(() => ({ rows: [] }));
   for (const m of mrs.rows) {
+    // Namen/Adressen landen woertlich in HostSNI-Regeln — Ungueltiges auslassen.
+    if (!mailRelayEintragGueltig(m)) { console.warn('[traefik] Mail-Relay übersprungen, ungültiger Host/Port:', m.id); continue; }
     // Aliasname (z. B. mail.<domain>): IMAPS und Submission beide auf Mailcow,
     // dessen Zertifikat den Namen abdeckt. Siehe Kommentar bei sni_alias.
     if (m.sni_alias && m.imap_host) {
@@ -19340,7 +19343,7 @@ async function buildTraefikDynamicConfig() {
           service: svc,
           tls: { passthrough: true },
         };
-        cfg.tcp.services[svc] = { loadBalancer: { servers: [{ address: `${m.imap_host}:${port}` }] } };
+        cfg.tcp.services[svc] = { loadBalancer: { servers: [{ address: mailRelayAdresse(m.imap_host, port) }] } };
       }
     }
     if (m.imap_sni_hostname && m.imap_host) {
@@ -19353,7 +19356,7 @@ async function buildTraefikDynamicConfig() {
         tls: { passthrough: true },
       };
       cfg.tcp.services[svc] = {
-        loadBalancer: { servers: [{ address: `${m.imap_host}:${m.imap_port || 993}` }] },
+        loadBalancer: { servers: [{ address: mailRelayAdresse(m.imap_host, m.imap_port || 993) }] },
       };
     }
     if (m.smtps_sni_hostname && m.smtps_host) {
@@ -19366,7 +19369,7 @@ async function buildTraefikDynamicConfig() {
         tls: { passthrough: true },
       };
       cfg.tcp.services[svc] = {
-        loadBalancer: { servers: [{ address: `${m.smtps_host}:${m.smtps_port || 465}` }] },
+        loadBalancer: { servers: [{ address: mailRelayAdresse(m.smtps_host, m.smtps_port || 465) }] },
       };
     }
   }
@@ -21967,7 +21970,7 @@ app.get('/api/isp/maintenance', authMiddleware, async (req, res) => {
             ORDER BY start_at NULLS FIRST`,
     );
     res.json({ maintenance: r.rows, can_write: admin });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // Oeffentliche Banner-Liste (keine Auth) — nur was JETZT relevant ist.
@@ -21984,7 +21987,7 @@ app.get('/api/isp/maintenance/public', async (req, res) => {
           start_at NULLS FIRST`,
     );
     res.json({ maintenance: r.rows });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 app.post('/api/isp/maintenance', authMiddleware, async (req, res) => {
@@ -22006,7 +22009,7 @@ app.post('/api/isp/maintenance', authMiddleware, async (req, res) => {
        b.auto_source || null, req.user.email || null],
     );
     res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 app.put('/api/isp/maintenance/:id', authMiddleware, async (req, res) => {
@@ -22053,7 +22056,7 @@ app.put('/api/isp/maintenance/:id', authMiddleware, async (req, res) => {
       ]).catch(e => console.warn('[maint-put] end-notify:', e.message));
     }
     res.json(updated);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 app.delete('/api/isp/maintenance/:id', authMiddleware, async (req, res) => {
@@ -22061,7 +22064,7 @@ app.delete('/api/isp/maintenance/:id', authMiddleware, async (req, res) => {
     if (!ispMaintCanWrite(req)) return res.status(403).json({ error: 'Nur Technik oder Ausschuss' });
     await pool.query('DELETE FROM isp_maintenance WHERE id = $1', [parseInt(req.params.id, 10)]);
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // Manuelles Ausloesen einer Notification (z.B. fuer Spontan-Ausfall).
@@ -22080,7 +22083,7 @@ app.post('/api/isp/maintenance/:id/notify', authMiddleware, async (req, res) => 
     const col = kind === 'pre' ? 'notify_email_pre_at' : (kind === 'start' ? 'notify_start_at' : 'notify_end_at');
     await pool.query(`UPDATE isp_maintenance SET ${col} = NOW(), updated_at = NOW() WHERE id = $1`, [id]);
     res.json({ ok: true, kind, ...result });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // ─── Cron 1: scheduled-notification-Engine ──────────────────────────
@@ -22384,7 +22387,7 @@ app.get('/api/isp/reverse-proxy', authMiddleware, async (req, res) => {
                                  OR LOWER(COALESCE(r.owner_group,'')) = ANY($2::text[])
                            ORDER BY r.active DESC, r.hostname`, [email, meineGruppen(req)]);
     res.json({ routes: r.rows, is_admin: admin });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 app.post('/api/isp/reverse-proxy', authMiddleware, async (req, res) => {
@@ -22439,7 +22442,7 @@ app.post('/api/isp/reverse-proxy', authMiddleware, async (req, res) => {
     res.json({ ...r.rows[0], dns_info: ispResolveTarget() });
   } catch (err) {
     if (String(err.message).includes('duplicate key')) return res.status(409).json({ error: 'Hostname bereits vergeben' });
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: fehlerFuerClient(err) });
   }
 });
 
@@ -22453,6 +22456,8 @@ app.put('/api/isp/reverse-proxy/:id', authMiddleware, async (req, res) => {
     const isOwner = ispIstBesitzer(req, v);
     if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     const b = req.body || {};
+    // active als echten Boolean fuehren — "true"/1 umgingen sonst die Freigabepruefung unten.
+    if (b.active !== undefined) b.active = [true, 'true', 1, '1'].includes(b.active);
     const updates = []; const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
     const userFields = ['backend_url','ssl','auth_required','rate_limit_per_min','active','notizen',
@@ -22482,7 +22487,7 @@ app.put('/api/isp/reverse-proxy/:id', authMiddleware, async (req, res) => {
     params.push(id);
     const r = await pool.query(`UPDATE isp_reverse_proxy_routes SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
     res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 app.delete('/api/isp/reverse-proxy/:id', authMiddleware, async (req, res) => {
@@ -22496,7 +22501,7 @@ app.delete('/api/isp/reverse-proxy/:id', authMiddleware, async (req, res) => {
     if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     await pool.query('DELETE FROM isp_reverse_proxy_routes WHERE id = $1', [id]);
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // === Redirects ===
@@ -22514,7 +22519,7 @@ app.get('/api/isp/redirects', authMiddleware, async (req, res) => {
                                   OR LOWER(COALESCE(r.owner_group,'')) = ANY($2::text[]))
                            ORDER BY r.active DESC, r.source_host`, [email, meineGruppen(req)]);
     res.json({ redirects: r.rows, is_admin: admin });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 app.post('/api/isp/redirects', authMiddleware, async (req, res) => {
@@ -22543,7 +22548,7 @@ app.post('/api/isp/redirects', authMiddleware, async (req, res) => {
     res.json({ ...r.rows[0], dns_info: ispResolveTarget() });
   } catch (err) {
     if (String(err.message).includes('duplicate key')) return res.status(409).json({ error: 'source_host+path bereits vergeben' });
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: fehlerFuerClient(err) });
   }
 });
 
@@ -22557,6 +22562,8 @@ app.put('/api/isp/redirects/:id', authMiddleware, async (req, res) => {
     const isOwner = ispIstBesitzer(req, v);
     if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     const b = req.body || {};
+    // active als echten Boolean fuehren — "true"/1 umgingen sonst die Freigabepruefung unten.
+    if (b.active !== undefined) b.active = [true, 'true', 1, '1'].includes(b.active);
     const updates = []; const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
     // Besitz wechselt nur ein Admin. Ein neuer source_host durchlaeuft die Freigabe
@@ -22590,7 +22597,7 @@ app.put('/api/isp/redirects/:id', authMiddleware, async (req, res) => {
     params.push(id);
     const r = await pool.query(`UPDATE isp_redirects SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
     res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 app.delete('/api/isp/redirects/:id', authMiddleware, async (req, res) => {
@@ -22604,7 +22611,7 @@ app.delete('/api/isp/redirects/:id', authMiddleware, async (req, res) => {
     if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     await pool.query('DELETE FROM isp_redirects WHERE id = $1', [id]);
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // === Traefik-Provider-Endpoint ===
@@ -22617,13 +22624,15 @@ app.get('/api/isp/traefik-config', async (req, res) => {
   // --providers.http.headers). Fail-closed: ohne korrektes Secret 403 — der
   // HTTP-Provider behaelt bei Fehler seine letzte Config.
   const expected = process.env.TRAEFIK_CONFIG_SECRET || '';
-  if (!expected || req.headers['x-traefik-secret'] !== expected) {
+  if (!geheimnisGleich(req.headers['x-traefik-secret'], expected)) {
     return res.status(403).json({ error: 'forbidden' });
   }
   try {
-    const routes = (await pool.query(`SELECT * FROM isp_reverse_proxy_routes WHERE active = true`)).rows;
-    const redirects = (await pool.query(`SELECT * FROM isp_redirects WHERE active = true`)).rows;
-    const mailRelays = (await pool.query(`SELECT * FROM isp_mail_relays WHERE active = true`)).rows;
+    // Nur Freigegebenes ausliefern (wie /api/traefik/dynamic) — active allein
+    // setzt der Besitzer teils selbst.
+    const routes = (await pool.query(`SELECT * FROM isp_reverse_proxy_routes WHERE active = true AND COALESCE(approval_status,'approved') = 'approved'`)).rows;
+    const redirects = (await pool.query(`SELECT * FROM isp_redirects WHERE active = true AND COALESCE(approval_status,'approved') = 'approved'`)).rows;
+    const mailRelays = (await pool.query(`SELECT * FROM isp_mail_relays WHERE active = true AND COALESCE(approval_status,'approved') = 'approved'`)).rows;
     const config = { http: { routers: {}, services: {}, middlewares: {} }, tcp: { routers: {}, services: {} } };
 
     // Dieser Endpoint wird vom Swarm-Traefik gepollt (HTTP-Provider).
@@ -22638,6 +22647,8 @@ app.get('/api/isp/traefik-config', async (req, res) => {
     // Reverse-Proxy-Routen
     routes.forEach((r, i) => {
       if (SWARM_VIP_RE.test(r.backend_url || '')) return;
+      // Hostname landet woertlich in Host(`...`) — Backtick-Injection verhindern.
+      if (!ispHostGueltig(r.hostname)) { console.warn('[isp-traefik] Route übersprungen, ungültiger Host:', r.id); return; }
       const id = 'rp_' + r.id;
       const middlewares = [];
       if (r.auth_required) {
@@ -22669,6 +22680,7 @@ app.get('/api/isp/traefik-config', async (req, res) => {
 
     // Redirects (HTTP code 301/302) als Middleware + Router pattern
     redirects.forEach(rd => {
+      if (!ispHostGueltig(rd.source_host) || !ispPfadGueltig(rd.source_path || '/')) { console.warn('[isp-traefik] Redirect übersprungen, ungültiger Host/Pfad:', rd.id); return; }
       const id = 'rd_' + rd.id;
       const ruleParts = [`Host(\`${rd.source_host}\`)`];
       if (rd.source_path && rd.source_path !== '/') ruleParts.push(`PathPrefix(\`${rd.source_path}\`)`);
@@ -22703,6 +22715,7 @@ app.get('/api/isp/traefik-config', async (req, res) => {
     // TCP-Router angelegt, der TLS NICHT terminiert (passthrough). Der Client
     // sieht das End-Zertifikat des Backend-Servers direkt.
     mailRelays.forEach(mr => {
+      if (!mailRelayEintragGueltig(mr)) { console.warn('[isp-traefik] Mail-Relay übersprungen, ungültiger Host/Port:', mr.id); return; }
       // IMAPS (port 993)
       if (mr.imap_host && mr.imap_sni_hostname) {
         const id = 'imaps_' + mr.id;
@@ -22714,7 +22727,7 @@ app.get('/api/isp/traefik-config', async (req, res) => {
         };
         config.tcp.services[id] = {
           loadBalancer: {
-            servers: [{ address: `${mr.imap_host}:${mr.imap_port || 993}` }],
+            servers: [{ address: mailRelayAdresse(mr.imap_host, mr.imap_port || 993) }],
           },
         };
       }
@@ -22729,7 +22742,7 @@ app.get('/api/isp/traefik-config', async (req, res) => {
         };
         config.tcp.services[id] = {
           loadBalancer: {
-            servers: [{ address: `${mr.smtps_host}:${mr.smtps_port || 465}` }],
+            servers: [{ address: mailRelayAdresse(mr.smtps_host, mr.smtps_port || 465) }],
           },
         };
       }
@@ -22781,7 +22794,7 @@ app.get('/api/isp/traefik-config', async (req, res) => {
       if (Object.keys(config[top]).length === 0) delete config[top];
     }
     res.json(config);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // ─── SMTP2GO-API Client ────────────────────────────────────────────────
@@ -22916,7 +22929,7 @@ app.get('/api/isp/mailbox-eligible-relays', authMiddleware, async (req, res) => 
     );
     const eligible = r.rows.filter(rel => ispIsAdmin(req) || isAllowedForRelay(req.user, rel));
     res.json({ relays: eligible.map(r => ({ id: r.id, domain: r.domain })) });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // GET: Liste der Anträge/Mailboxen.
@@ -22955,7 +22968,7 @@ app.get('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
       return { ...row, has_initial_password: !!row.initial_password };
     });
     res.json({ requests: rows, is_admin: admin });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // Prueft ob der User berechtigt ist Mailboxes für das Relay zu beantragen.
@@ -22972,21 +22985,48 @@ function isAllowedForRelay(user, relay) {
 // Provisionierung in Mailcow. PW wird in initial_password gespeichert,
 // damit der User es im UI sehen kann. assigned_user_email = User selbst
 // (= persoenliche Zuordnung -> Admin sieht das PW NICHT).
+// Rollen-/Systemadressen: nur ueber Antrag mit Freigabe durch die Technik.
+const MAILBOX_RESERVIERT = new Set([
+  'postmaster', 'abuse', 'hostmaster', 'webmaster', 'admin', 'administrator', 'root', 'mailer-daemon',
+  'noreply', 'no-reply', 'info', 'kontakt', 'contact', 'office', 'support', 'security', 'sysadmin',
+  'technik', 'verwaltung', 'praesident', 'president', 'ausschuss', 'vorstand', 'dmarc', 'mail', 'smtp',
+  'imap', 'autodiscover', 'autoconfig', 'www', 'ssladmin', 'ssl-admin', 'billing', 'rechnung',
+  'rechnungen', 'buchhaltung', 'hilfe', 'help', 'service', 'team', 'isp', 'noc', 'pmg', 'mailcow',
+]);
 app.post('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
   try {
     const b = req.body || {};
     if (!b.relay_id || !b.local_part) return res.status(400).json({ error: 'relay_id + local_part Pflicht' });
     const lp = String(b.local_part).toLowerCase().replace(/[^a-z0-9._-]/g, '');
     if (!lp) return res.status(400).json({ error: 'local_part ungueltig (nur a-z0-9._-)' });
-    const rel = await pool.query('SELECT id, domain, owner_email, mailcow_managed, allowed_groups FROM isp_mail_relays WHERE id = $1', [b.relay_id]);
+    if (!/^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$/.test(lp) || lp.includes('..')) {
+      return res.status(400).json({ error: 'local_part ungueltig (Anfang/Ende Buchstabe oder Ziffer, max. 64 Zeichen)' });
+    }
+    // Antraege drosseln — jeder Standardantrag legt sofort ein Postfach in Mailcow an.
+    const rl = rateLimitGuard('mailbox-antrag', (req.user.email || '').toLowerCase(), 10, 60 * 60 * 1000);
+    if (!rl.ok && !ispIsAdmin(req)) return res.status(429).json({ error: `Zu viele Anträge — bitte in ${rl.retryAfter}s erneut` });
+    const rel = await pool.query('SELECT id, domain, owner_email, mailcow_managed, allowed_groups, active FROM isp_mail_relays WHERE id = $1', [b.relay_id]);
     if (rel.rows.length === 0) return res.status(404).json({ error: 'Mail-Relay nicht gefunden' });
     if (!rel.rows[0].mailcow_managed && !ispIsAdmin(req)) {
       return res.status(400).json({ error: 'Diese Domain wird nicht von Rosenweg verwaltet — Mailbox-Provisionierung beim Domain-Owner' });
     }
+    if (!ispIsAdmin(req) && !rel.rows[0].active) {
+      return res.status(400).json({ error: 'Diese Domain ist nicht aktiv' });
+    }
     if (!ispIsAdmin(req) && !isAllowedForRelay(req.user, rel.rows[0])) {
       return res.status(403).json({ error: `Mailboxen für ${rel.rows[0].domain} sind nur für berechtigte STWEG-Mitglieder verfuegbar` });
     }
-    const standard = isStandardMailboxRequest(b);
+    // Rollen-Adressen (postmaster@, abuse@, technik@ ...) und mehr als
+    // MAILBOX_AUTO_MAX Postfaecher pro Person nie automatisch anlegen — sonst
+    // holt sich jeder Berechtigte Adressen, an die Passwort-Resets, DMARC-
+    // Berichte oder Vertrauen haengen. Solche Antraege gehen an die Technik.
+    const MAILBOX_AUTO_MAX = 3;
+    const reserviert = MAILBOX_RESERVIERT.has(lp) || /^(stweg|meg|r)\d/.test(lp);
+    const autoAnzahl = (await pool.query(
+      `SELECT COUNT(*)::int AS n FROM mailbox_requests
+        WHERE LOWER(antragsteller_email) = $1 AND auto_approved = true AND status = 'approved'`,
+      [(req.user.email || '').toLowerCase()])).rows[0].n;
+    const standard = isStandardMailboxRequest(b) && !reserviert && autoAnzahl < MAILBOX_AUTO_MAX;
     const username = `${lp}@${rel.rows[0].domain}`;
 
     if (standard) {
@@ -23038,7 +23078,7 @@ app.post('/api/isp/mailbox-requests', authMiddleware, async (req, res) => {
     res.json(ins.rows[0]);
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Diese Mailbox existiert bereits oder ist beantragt' });
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: fehlerFuerClient(err) });
   }
 });
 
@@ -23057,7 +23097,7 @@ app.get('/api/isp/user-search', authMiddleware, requireTechnikOrPraesident, asyn
       [`%${q}%`],
     );
     res.json({ users: r.rows });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // POST: Admin legt direkt eine Mailbox an, optional einem User zugeordnet.
@@ -23108,7 +23148,7 @@ app.post('/api/isp/admin-create-mailbox', authMiddleware, requireTechnikOrPraesi
     });
   } catch (err) {
     if (err.code === '23505') return res.status(409).json({ error: 'Diese Mailbox existiert bereits' });
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: fehlerFuerClient(err) });
   }
 });
 
@@ -23123,7 +23163,7 @@ app.post('/api/isp/mailbox-requests/:id/clear-password', authMiddleware, async (
     if (!isOwner && !ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     await pool.query('UPDATE mailbox_requests SET initial_password=NULL, updated_at=NOW() WHERE id=$1', [id]);
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // POST: Approve + Mailcow-Provisionierung (Admin only).
@@ -23172,7 +23212,7 @@ app.post('/api/isp/mailbox-requests/:id/approve', authMiddleware, requireTechnik
       // Shared (keinem User zugeordnet) -> Admin sieht PW. Sonst nur Hinweis.
       ...(isAssigned ? { msg: 'Initial-PW liegt für den User unter "Meine Mailboxen" bereit' } : { initial_password: password }),
     });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // POST: Reject
@@ -23191,7 +23231,7 @@ app.post('/api/isp/mailbox-requests/:id/reject', authMiddleware, requireTechnikO
       `${req.body?.reason ? `\nGrund: ${req.body.reason}` : ''}\ndurch ${req.user.email}`,
     );
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // POST: Passwort-Reset. User+Admin dürfen. Visibility wie bei Approve:
@@ -23232,7 +23272,7 @@ app.post('/api/isp/mailbox-requests/:id/reset-password', authMiddleware, async (
       ok: true,
       ...(showPw ? { new_password: password } : { msg: 'Neues PW liegt für den User unter "Meine Mailboxen" bereit' }),
     });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // DELETE: Mailbox löschen. Owner darf pending zuruecknehmen, Admin darf
@@ -23263,10 +23303,61 @@ app.delete('/api/isp/mailbox-requests/:id', authMiddleware, async (req, res) => 
       `🗑 *Mailbox geloescht*\n${mr.local_part}@${mr.domain}\nvon ${ownerEmail || '—'}\ndurch ${req.user.email}`,
     );
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // === Mail-Relays (PMG-Domains) ===
+// SNI-Namen und Backend-Adressen landen woertlich in Traefik-Regeln
+// (HostSNI(`...`)) und Server-Adressen — nur sauberes DNS-Format/IP zulassen,
+// sonst liesse sich die Regel per Backtick erweitern. Kein Wildcard-SNI.
+function mailRelayNameGueltig(h) {
+  const s = String(h || '');
+  return !s.startsWith('*.') && ispHostGueltig(s);
+}
+function mailRelayZielGueltig(h) {
+  const s = String(h || '');
+  return mailRelayNameGueltig(s.toLowerCase()) || require('net').isIP(s) !== 0;
+}
+function mailRelayPortGueltig(p) {
+  const n = Number(p);
+  return Number.isInteger(n) && n > 0 && n < 65536;
+}
+function mailRelayAdresse(host, port) {
+  return `${require('net').isIP(String(host)) === 6 ? `[${host}]` : host}:${port}`;
+}
+// Prueft alle Felder, die in die Traefik-Generatoren gehen (leer = nicht genutzt).
+function mailRelayEintragGueltig(m) {
+  for (const f of ['imap_sni_hostname', 'smtps_sni_hostname', 'sni_alias']) {
+    if (m[f] && !mailRelayNameGueltig(m[f])) return false;
+  }
+  for (const f of ['imap_host', 'smtps_host']) {
+    if (m[f] && !mailRelayZielGueltig(m[f])) return false;
+  }
+  for (const f of ['imap_port', 'smtps_port']) {
+    if (m[f] != null && !mailRelayPortGueltig(m[f])) return false;
+  }
+  return true;
+}
+// Prueft die Eingabe eines POST/PUT; liefert Fehlertext oder null.
+function mailRelayEingabeFehler(b) {
+  if (b.domain !== undefined && b.domain !== null && !mailRelayNameGueltig(String(b.domain).toLowerCase())) return 'Ungültige Domain';
+  if (b.target_host !== undefined && b.target_host !== null && b.target_host !== '' && !mailRelayZielGueltig(b.target_host)) return 'Ungültiger Ziel-Host';
+  for (const f of ['imap_sni_hostname', 'smtps_sni_hostname']) {
+    if (b[f] && !mailRelayNameGueltig(String(b[f]).toLowerCase())) return `Ungültiger Hostname (${f})`;
+  }
+  for (const f of ['imap_host', 'smtps_host']) {
+    if (b[f] && !mailRelayZielGueltig(b[f])) return `Ungültiger Host (${f})`;
+  }
+  for (const f of ['target_port', 'imap_port', 'smtps_port']) {
+    if (b[f] !== undefined && b[f] !== null && b[f] !== '' && !mailRelayPortGueltig(b[f])) return `Ungültiger Port (${f})`;
+  }
+  return null;
+}
+// Felder, die bestimmen, wohin PMG/Traefik verbinden — aendert sie ein
+// Nicht-Admin, braucht es wieder eine Admin-Freigabe.
+const MAIL_RELAY_ZIEL_FELDER = ['target_host', 'target_port', 'target_use_mx',
+  'imap_sni_hostname', 'imap_host', 'imap_port', 'smtps_sni_hostname', 'smtps_host', 'smtps_port'];
+
 app.get('/api/isp/mail-relays', authMiddleware, async (req, res) => {
   try {
     const admin = ispIsAdmin(req);
@@ -23287,21 +23378,31 @@ app.get('/api/isp/mail-relays', authMiddleware, async (req, res) => {
             WHERE LOWER(r.owner_email) = $2
             ORDER BY r.domain`, [ym, email]);
     res.json({ mail_relays: r.rows, is_admin: admin, current_month: ym });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 app.post('/api/isp/mail-relays', authMiddleware, async (req, res) => {
   try {
     const b = req.body || {};
     if (!b.domain || !b.target_host) return res.status(400).json({ error: 'domain + target_host Pflicht' });
+    if (typeof b.domain !== 'string' || typeof b.target_host !== 'string') return res.status(400).json({ error: 'Ungültige Eingabe' });
+    const eingabeFehler = mailRelayEingabeFehler(b);
+    if (eingabeFehler) return res.status(400).json({ error: eingabeFehler });
     const owner = b.owner_email || req.user.email;
     if (!ispIsAdmin(req) && (owner || '').toLowerCase() !== (req.user.email || '').toLowerCase()) {
       return res.status(403).json({ error: 'Nur eigene Domains' });
     }
     // Hostname-Check (gleiche Logik wie redirects/rp — eigene Domains brauchen Admin)
-    const decision = ispIsAdmin(req) && b.skip_approval
+    let decision = ispIsAdmin(req) && b.skip_approval
       ? { approval_status: 'approved', approval_reason: 'Admin-Bypass', active: true }
       : await ispDecideApproval(b.domain);
+    // Ziel-Host und IMAPS/SMTPS-Backends waehlt der Kunde frei (auch interne
+    // Adressen) — wie beim Reverse-Proxy sieht sie immer ein Admin an, bevor
+    // PMG/Traefik dorthin verbinden.
+    if (!ispIsAdmin(req) && decision.approval_status === 'approved') {
+      decision = { ...decision, approval_status: 'pending_admin', active: false,
+                   approval_reason: 'DNS ok — Ziel wartet auf Admin-Freigabe' };
+    }
     // mailcow_managed + allowed_groups nur für Admin (sonst könnte sich jeder
     // selbst eine "Rosenweg-verwaltete" Domain anlegen).
     const mailcowManaged = ispIsAdmin(req) ? !!b.mailcow_managed : false;
@@ -23322,14 +23423,14 @@ app.post('/api/isp/mail-relays', authMiddleware, async (req, res) => {
        decision.approval_status, decision.approval_reason,
        decision.dns_verified_at || null, decision.last_dns_check_at || null,
        decision.active, b.notizen || null,
-       b.imap_sni_hostname || null, b.imap_host || null, b.imap_port,
-       b.smtps_sni_hostname || null, b.smtps_host || null, b.smtps_port,
+       b.imap_sni_hostname ? String(b.imap_sni_hostname).toLowerCase() : null, b.imap_host || null, b.imap_port,
+       b.smtps_sni_hostname ? String(b.smtps_sni_hostname).toLowerCase() : null, b.smtps_host || null, b.smtps_port,
        mailcowManaged, allowedGroups],
     );
     res.json({ ...r.rows[0], dns_info: ispResolveTarget() });
   } catch (err) {
     if (String(err.message).includes('duplicate key')) return res.status(409).json({ error: 'Domain bereits registriert' });
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: fehlerFuerClient(err) });
   }
 });
 
@@ -23343,6 +23444,13 @@ app.put('/api/isp/mail-relays/:id', authMiddleware, async (req, res) => {
     const isOwner = ispIstBesitzer(req, v);
     if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     const b = req.body || {};
+    // active als echten Boolean fuehren — "true"/1 umgingen sonst die Freigabepruefung unten.
+    if (b.active !== undefined) b.active = [true, 'true', 1, '1'].includes(b.active);
+    for (const f of ['domain', 'imap_sni_hostname', 'smtps_sni_hostname']) {
+      if (typeof b[f] === 'string') b[f] = b[f].toLowerCase();
+    }
+    const eingabeFehler = mailRelayEingabeFehler(b);
+    if (eingabeFehler) return res.status(400).json({ error: eingabeFehler });
     const updates = []; const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
     const userFields = ['target_host','target_port','target_use_mx','dkim_selector','active','notizen',
@@ -23351,13 +23459,26 @@ app.put('/api/isp/mail-relays/:id', authMiddleware, async (req, res) => {
     const adminFields = ['domain','owner_email','wohnung_id','approval_status','approval_reason','dkim_private_key',
                          'mailcow_managed','allowed_groups'];
     const allowed = admin ? [...userFields, ...adminFields] : userFields;
+    if (!admin) {
+      // Ziel geaendert -> wieder Admin-Freigabe; einschalten nur, was freigegeben ist.
+      const zielNeu = MAIL_RELAY_ZIEL_FELDER
+        .some(c => b[c] !== undefined && String(b[c] ?? '') !== String(v[c] ?? ''));
+      if (zielNeu) {
+        push('approval_status', 'pending_admin');
+        push('approval_reason', 'Ziel geändert — wartet auf Admin-Freigabe');
+        push('active', false);
+        delete b.active;
+      } else if (b.active === true && (v.approval_status || 'approved') !== 'approved') {
+        return res.status(403).json({ error: 'Mail-Relay ist noch nicht freigegeben' });
+      }
+    }
     for (const col of allowed) if (b[col] !== undefined) push(col, b[col] === '' ? null : b[col]);
     if (updates.length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
     push('updated_at', new Date());
     params.push(id);
     const r = await pool.query(`UPDATE isp_mail_relays SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
     res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 app.delete('/api/isp/mail-relays/:id', authMiddleware, async (req, res) => {
@@ -23371,7 +23492,7 @@ app.delete('/api/isp/mail-relays/:id', authMiddleware, async (req, res) => {
     if (!admin && !isOwner) return res.status(403).json({ error: 'Nur Owner oder Admin' });
     await pool.query('DELETE FROM isp_mail_relays WHERE id = $1', [id]);
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // ─── Outbound-Usage-Tracking ───────────────────────────────────────────
@@ -23379,7 +23500,7 @@ app.delete('/api/isp/mail-relays/:id', authMiddleware, async (req, res) => {
 // und per POST hier hingeschickt. Wir aggregieren pro (sender_domain, monat).
 function requireTrackerSecret(req, res, next) {
   const expected = process.env.TRACKER_SHARED_SECRET || '';
-  if (!expected || req.headers['x-tracker-secret'] !== expected) {
+  if (!geheimnisGleich(req.headers['x-tracker-secret'], expected)) {
     return res.status(403).json({ error: 'forbidden' });
   }
   next();
@@ -23416,7 +23537,7 @@ app.post('/api/isp/relay-status/ingest', requireTrackerSecret, async (req, res) 
         active = EXCLUDED.active, oldest_s = EXCLUDED.oldest_s, last_sent_at = EXCLUDED.last_sent_at, roh = EXCLUDED.roh`,
       [host, n(b.queue_total), n(b.deferred), n(b.active), n(b.oldest_s), b.last_sent_at || null, JSON.stringify(b)]);
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 app.post('/api/isp/outbound-usage/ingest', requireTrackerSecret, async (req, res) => {
@@ -23483,7 +23604,7 @@ app.post('/api/isp/outbound-usage/ingest', requireTrackerSecret, async (req, res
     }
 
     res.json({ ok: true, processed });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // GET: Monatsverlauf für eine Sender-Domain (Owner + Admin).
@@ -23504,7 +23625,7 @@ app.get('/api/isp/outbound-usage/:domain', authMiddleware, async (req, res) => {
       [domain, months],
     );
     res.json({ domain, months: r.rows });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // ─── Outbound-Smarthost (PMG → SMTP2GO) pro Mail-Relay ─────────────────
@@ -23539,7 +23660,7 @@ app.post('/api/isp/mail-relays/:id/smarthost', authMiddleware, requireTechnikOrP
        WHERE id=$4`,
       [status.dkim_verified, status.rpath_verified, JSON.stringify(status.records), id]);
     res.json({ ok: true, outbound_via_smarthost: true, status });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // Recheck-Status via SMTP2GO. Owner + Admin dürfen.
@@ -23562,7 +23683,7 @@ app.post('/api/isp/mail-relays/:id/smarthost/recheck', authMiddleware, async (re
        WHERE id=$4`,
       [status.dkim_verified, status.rpath_verified, JSON.stringify(status.records), id]);
     res.json({ status });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 app.post('/api/isp/mail-relays/:id/recheck-dns', authMiddleware, async (req, res) => {
@@ -23578,17 +23699,26 @@ app.post('/api/isp/mail-relays/:id/recheck-dns', authMiddleware, async (req, res
     let mx = null;
     try { mx = await dns.resolveMx(v.domain).catch(() => null); } catch {}
     const target = ispResolveTarget();
-    const matches = Array.isArray(mx) && mx.some(m => m.exchange?.toLowerCase().includes(target.cname_target.toLowerCase()) || m.exchange?.toLowerCase() === 'pmg.rosenweg4303.ch');
-    const upd = matches
-      ? { approval_status: 'approved', dns_verified_at: new Date(), last_dns_check_at: new Date(), active: true, approval_reason: 'MX zeigt auf PMG' }
-      : { last_dns_check_at: new Date() };
+    // Exakter Vergleich: includes() liess z. B. public.rosenweg4303.ch.fremd.example gelten.
+    const erlaubteMx = [target.cname_target.toLowerCase(), 'pmg.rosenweg4303.ch'];
+    const matches = Array.isArray(mx) && mx.some(m => erlaubteMx.includes(String(m.exchange || '').toLowerCase().replace(/\.$/, '')));
+    // Nur ein Admin schaltet per MX-Pruefung frei. Beim Besitzer fuehrt eine
+    // passende MX nur von pending_dns zu pending_admin (Ziel-Host prueft Admin).
+    const status = v.approval_status || 'approved';
+    const upd = !matches
+      ? { last_dns_check_at: new Date() }
+      : ispIsAdmin(req)
+        ? { approval_status: 'approved', dns_verified_at: new Date(), last_dns_check_at: new Date(), active: true, approval_reason: 'MX zeigt auf PMG' }
+        : status === 'pending_dns'
+          ? { approval_status: 'pending_admin', dns_verified_at: new Date(), last_dns_check_at: new Date(), approval_reason: 'MX ok — Ziel wartet auf Admin-Freigabe' }
+          : { dns_verified_at: new Date(), last_dns_check_at: new Date() };
     await pool.query(
       `UPDATE isp_mail_relays SET approval_status=COALESCE($1,approval_status), dns_verified_at=COALESCE($2,dns_verified_at),
          last_dns_check_at=$3, active=COALESCE($4,active), approval_reason=COALESCE($5,approval_reason) WHERE id=$6`,
       [upd.approval_status, upd.dns_verified_at, upd.last_dns_check_at, upd.active, upd.approval_reason, id],
     );
     res.json({ mx, target, matches, updated: upd });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // === Mailboxes (DEPRECATED, isp_mail_relays nutzen) ===
@@ -23602,7 +23732,7 @@ app.get('/api/isp/mailboxes', authMiddleware, async (req, res) => {
                            ORDER BY m.domain, m.local_part`)
       : await pool.query('SELECT * FROM isp_mailboxes WHERE LOWER(owner_user_email) = $1 ORDER BY domain, local_part', [email]);
     res.json({ mailboxes: r.rows, is_admin: admin });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 app.post('/api/isp/mailboxes', authMiddleware, async (req, res) => {
@@ -23617,7 +23747,7 @@ app.post('/api/isp/mailboxes', authMiddleware, async (req, res) => {
        b.wohnung_id || null, Array.isArray(b.aliases) ? b.aliases : null, b.quota_mb || null, b.active],
     );
     res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 app.put('/api/isp/mailboxes/:id', authMiddleware, async (req, res) => {
@@ -23635,7 +23765,7 @@ app.put('/api/isp/mailboxes/:id', authMiddleware, async (req, res) => {
     params.push(id);
     const r = await pool.query(`UPDATE isp_mailboxes SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`, params);
     res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 app.delete('/api/isp/mailboxes/:id', authMiddleware, async (req, res) => {
@@ -23643,7 +23773,7 @@ app.delete('/api/isp/mailboxes/:id', authMiddleware, async (req, res) => {
     if (!ispIsAdmin(req)) return res.status(403).json({ error: 'Nur Technik/Präsident' });
     await pool.query('DELETE FROM isp_mailboxes WHERE id = $1', [parseInt(req.params.id, 10)]);
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // ─── Vollmachten-Templates ──────────────────────────────────────────
@@ -23657,7 +23787,7 @@ app.get('/api/vollmachten/templates', authMiddleware, async (req, res) => {
       'SELECT * FROM vollmachten_templates ORDER BY art, titel',
     );
     res.json({ templates: r.rows, can_edit: canEditTemplates(req.user.groups || []) });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 app.post('/api/vollmachten/templates', authMiddleware, async (req, res) => {
@@ -23672,7 +23802,7 @@ app.post('/api/vollmachten/templates', authMiddleware, async (req, res) => {
       [b.titel.slice(0, 200), b.beschreibung || null, b.art, b.geltungsbereich, b.gueltigkeit_default || null, req.user.email || null],
     );
     res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 app.put('/api/vollmachten/templates/:id', authMiddleware, async (req, res) => {
@@ -23699,7 +23829,7 @@ app.put('/api/vollmachten/templates/:id', authMiddleware, async (req, res) => {
     );
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 app.delete('/api/vollmachten/templates/:id', authMiddleware, async (req, res) => {
@@ -23708,7 +23838,7 @@ app.delete('/api/vollmachten/templates/:id', authMiddleware, async (req, res) =>
     const id = parseInt(req.params.id, 10);
     await pool.query('DELETE FROM vollmachten_templates WHERE id = $1', [id]);
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // ─── Vollmachten ────────────────────────────────────────────────────
@@ -24036,21 +24166,46 @@ app.get('/api/vollmachten/lookup/verwaltungen', authMiddleware, async (req, res)
         WHERE aktiv = true ORDER BY stweg NULLS FIRST, firma_name`,
     );
     res.json({ verwaltungen: r.rows });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 app.get('/api/vollmachten/lookup/personen', authMiddleware, async (req, res) => {
   try {
     const q = String(req.query.q || '').trim();
     if (q.length < 2) return res.json({ personen: [] });
+    const groups = req.user.groups || [];
+    const vollerZugriff = isTechnik(groups) || isPraesident(groups) || groups.some(g => g.toLowerCase() === 'verwaltung');
+    if (vollerZugriff) {
+      const r = await pool.query(
+        `SELECT id, name, email, telefon, mobile, adresse FROM personen
+          WHERE LOWER(name) LIKE LOWER($1) OR LOWER(email) LIKE LOWER($1)
+          ORDER BY name LIMIT 10`,
+        ['%' + q + '%'],
+      );
+      return res.json({ personen: r.rows });
+    }
+    // Alle anderen: nur Personen mit Wohnung in den eigenen STWEGs und nur
+    // Name/E-Mail (reicht fuer die Bevollmaechtigten-Auswahl). Frueher bekam
+    // jeder Angemeldete Telefon/Adresse aller Personen per Suchfeld.
+    const email = (req.user.email || '').toLowerCase();
+    const rl = rateLimitGuard('vm-personen', email, 60, 10 * 60 * 1000);
+    if (!rl.ok) return res.status(429).json({ error: `Zu viele Suchanfragen — bitte in ${rl.retryAfter}s erneut` });
+    const muster = '%' + q.replace(/[\\%_]/g, '\\$&') + '%';
     const r = await pool.query(
-      `SELECT id, name, email, telefon, mobile, adresse FROM personen
-        WHERE LOWER(name) LIKE LOWER($1) OR LOWER(email) LIKE LOWER($1)
-        ORDER BY name LIMIT 10`,
-      ['%' + q + '%'],
+      `SELECT DISTINCT p.id, p.name, p.email FROM personen p
+         JOIN wohnungen_kontakte k ON k.person_id = p.id AND k.archiviert_am IS NULL
+         JOIN wohnungen w ON w.id = k.wohnung_id
+        WHERE (LOWER(p.name) LIKE LOWER($1) OR LOWER(p.email) LIKE LOWER($1))
+          AND (w.stweg = ANY($2::int[])
+               OR w.stweg IN (SELECT w2.stweg FROM wohnungen w2
+                                JOIN wohnungen_kontakte k2 ON k2.wohnung_id = w2.id AND k2.archiviert_am IS NULL
+                                JOIN personen p2 ON p2.id = k2.person_id
+                               WHERE LOWER(p2.email) = $3))
+        ORDER BY p.name LIMIT 10`,
+      [muster, [...getUserStwegs(groups)], email],
     );
     res.json({ personen: r.rows });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 app.get('/api/vollmachten/lookup/my-wohnungen', authMiddleware, async (req, res) => {
@@ -24066,7 +24221,7 @@ app.get('/api/vollmachten/lookup/my-wohnungen', authMiddleware, async (req, res)
       [email],
     );
     res.json({ wohnungen: r.rows });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // Kontakte (Verwalter / Mieter / Miteigentuemer) aus den Wohnungen des aktuellen
@@ -24100,7 +24255,7 @@ app.get('/api/vollmachten/lookup/my-kontakte', authMiddleware, async (req, res) 
       params,
     );
     res.json({ kontakte: r.rows });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // Batch-Erfassung: für alle existierenden Verwalter-Kontakte in der
@@ -24156,7 +24311,7 @@ app.post('/api/vollmachten/bootstrap-verwalter', authMiddleware, async (req, res
       }
     } finally { client.release(); }
     res.json(results);
-  } catch (err) { console.error('[vollmachten] bootstrap:', err); res.status(500).json({ error: err.message }); }
+  } catch (err) { console.error('[vollmachten] bootstrap:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // Liste Vollmachten — Admin sieht alle, sonst nur eigene (vergeben + erhalten)
@@ -24207,8 +24362,70 @@ app.get('/api/vollmachten', authMiddleware, async (req, res) => {
       params,
     );
     res.json({ vollmachten: r.rows, is_admin: isAdmin });
-  } catch (err) { console.error('[vollmachten] list:', err); res.status(500).json({ error: err.message }); }
+  } catch (err) { console.error('[vollmachten] list:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
+
+// Technik/Praesident/Verwaltung erfassen Vollmachten auch fuer Dritte.
+function vmDarfFuerAndere(groups) {
+  return isTechnik(groups) || isPraesident(groups) || (groups || []).some(g => String(g).toLowerCase() === 'verwaltung');
+}
+
+// Wohnung/STWEG einer Vollmacht: alle anderen nur fuer eigene Wohnungen bzw.
+// STWEGs, in denen sie eine Wohnung haben — sonst liess sich eine Vollmacht
+// fuer eine fremde Wohnung erstellen und selbst signieren.
+// Liefert { fehler } oder { stweg } (bei Wohnung deren STWEG).
+async function vmObjektPruefen(req, wohnungId, stweg) {
+  const email = (req.user.email || '').toLowerCase();
+  const eigene = await pool.query(
+    `SELECT DISTINCT w.id, w.stweg FROM wohnungen w
+       JOIN wohnungen_kontakte k ON k.wohnung_id = w.id AND k.archiviert_am IS NULL
+       JOIN personen p ON p.id = k.person_id
+      WHERE LOWER(p.email) = $1`, [email]);
+  if (wohnungId) {
+    const w = eigene.rows.find(x => String(x.id) === String(wohnungId));
+    if (!w) return { fehler: 'Vollmacht nur für eigene Wohnungen möglich' };
+    return { stweg: w.stweg };
+  }
+  if (stweg) {
+    const erlaubt = new Set([...getUserStwegs(req.user.groups || []), ...eigene.rows.map(x => x.stweg)].map(Number));
+    if (!erlaubt.has(Number(stweg))) return { fehler: 'Vollmacht nur für die eigene STWEG möglich' };
+  }
+  return { stweg: stweg || null };
+}
+
+// Name eines Vollmachtgebers gegen das Konto pruefen: Wer seine eigene Zeile
+// (gleiche E-Mail) mit fremdem Namen erfasst, unterschreibt sonst digital "als"
+// jemand anderes. Passt der Name (Woerter als Teilmenge, Reihenfolge egal)
+// nicht zum Namen in personen bzw. Authentik, gilt der Kontoname.
+function vmNamenWoerter(s) {
+  return String(s || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '')
+    .split(/[^a-z0-9]+/).filter(t => t.length > 1);
+}
+function vmNamePasst(eingabe, konto) {
+  const a = vmNamenWoerter(eingabe), k = vmNamenWoerter(konto);
+  if (!a.length || !k.length) return false;
+  return a.every(t => k.includes(t)) || k.every(t => a.includes(t));
+}
+async function vmKontoNameFuer(req, eingabe) {
+  const email = (req.user.email || '').toLowerCase();
+  const p = await pool.query('SELECT name FROM personen WHERE LOWER(email) = $1 AND name IS NOT NULL LIMIT 1', [email]);
+  const kandidaten = [p.rows[0]?.name, req.user.name].filter(Boolean);
+  if (kandidaten.length === 0) return eingabe;   // nichts zum Vergleichen
+  if (kandidaten.some(n => vmNamePasst(eingabe, n))) return eingabe;
+  return kandidaten[0];
+}
+async function vmEigeneNamenAngleichen(req, b) {
+  const email = (req.user.email || '').toLowerCase();
+  if (!email) return;
+  if (b.vollmachtgeber_name && String(b.vollmachtgeber_email || '').toLowerCase() === email) {
+    b.vollmachtgeber_name = await vmKontoNameFuer(req, b.vollmachtgeber_name);
+  }
+  if (Array.isArray(b.vollmachtgeber)) {
+    for (const g of b.vollmachtgeber) {
+      if (g && g.name && String(g.email || '').toLowerCase() === email) g.name = await vmKontoNameFuer(req, g.name);
+    }
+  }
+}
 
 // Neue Vollmacht erfassen (status='entwurf')
 app.post('/api/vollmachten', authMiddleware, async (req, res) => {
@@ -24222,6 +24439,12 @@ app.post('/api/vollmachten', authMiddleware, async (req, res) => {
     }
     if (!['generell','spezifisch','auskunft'].includes(b.art)) {
       return res.status(400).json({ error: 'Ungueltige art' });
+    }
+    if (!vmDarfFuerAndere(req.user.groups || [])) {
+      const o = await vmObjektPruefen(req, b.wohnung_id, b.stweg);
+      if (o.fehler) return res.status(403).json({ error: o.fehler });
+      b.stweg = o.stweg;
+      await vmEigeneNamenAngleichen(req, b);
     }
     // Standard-Berechtigung: jeder eingeloggte User darf Vollmachten erfassen
     // (in der Regel für sich selbst als Vollmachtgeber)
@@ -24257,7 +24480,7 @@ app.post('/api/vollmachten', authMiddleware, async (req, res) => {
       );
     }
     res.json(vollmacht);
-  } catch (err) { console.error('[vollmachten] create:', err); res.status(500).json({ error: err.message }); }
+  } catch (err) { console.error('[vollmachten] create:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // Vollmacht bearbeiten (nur Entwurf)
@@ -24274,6 +24497,23 @@ app.put('/api/vollmachten/:id', authMiddleware, async (req, res) => {
                  || (v.created_by_user_email || '').toLowerCase() === (req.user.email || '').toLowerCase();
     if (!isAdmin && !isOwner) return res.status(403).json({ error: 'Nur Vollmachtgeber oder Admin' });
     if (v.status !== 'entwurf') return res.status(400).json({ error: 'Nur Entwuerfe sind editierbar (Status: ' + v.status + ')' });
+    // Hat schon jemand signiert, darf sich der Inhalt nicht mehr aendern —
+    // sonst stuende die Signatur unter einem anderen Text.
+    const signiert = await pool.query(
+      'SELECT 1 FROM vollmachten_vollmachtgeber WHERE vollmacht_id = $1 AND signed_at IS NOT NULL LIMIT 1', [id]);
+    if (signiert.rows.length > 0) {
+      return res.status(409).json({ error: 'Bereits teilweise signiert — Änderungen nicht mehr möglich. Entwurf löschen und neu erfassen.' });
+    }
+    if (!vmDarfFuerAndere(groups)) {
+      if (b.wohnung_id !== undefined || b.stweg !== undefined) {
+        const o = await vmObjektPruefen(req,
+          b.wohnung_id !== undefined ? b.wohnung_id : v.wohnung_id,
+          b.stweg !== undefined ? b.stweg : v.stweg);
+        if (o.fehler) return res.status(403).json({ error: o.fehler });
+        b.stweg = o.stweg;
+      }
+      await vmEigeneNamenAngleichen(req, b);
+    }
     const updates = []; const params = [];
     const push = (col, val) => { params.push(val); updates.push(`${col} = $${params.length}`); };
     const allowed = ['vollmachtgeber_name','vollmachtgeber_email','vollmachtgeber_adresse',
@@ -24304,12 +24544,34 @@ app.put('/api/vollmachten/:id', authMiddleware, async (req, res) => {
     }
     const final = await pool.query('SELECT * FROM vollmachten WHERE id = $1', [id]);
     res.json(final.rows[0]);
-  } catch (err) { console.error('[vollmachten] update:', err); res.status(500).json({ error: err.message }); }
+  } catch (err) { console.error('[vollmachten] update:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // Digital signieren — signiert die eigene Vollmachtgeber-Zeile (per Email-Match).
 // Status wird auf 'aktiv' gesetzt sobald ALLE Vollmachtgeber signiert haben.
 // Bei Miteigentum (z.B. Ehepaar) muss jeder einzeln einloggen und signieren.
+// IP fuer den Signatur-Nachweis: der ERSTE X-Forwarded-For-Eintrag kommt vom
+// Client selbst (frei faelschbar). Die Proxies (Edge, nginx) haengen hinten an —
+// darum die hinterste nicht-interne Adresse nehmen.
+function vmSignaturIp(req) {
+  const net = require('net');
+  const intern = (a) => {
+    const s = String(a || '').replace(/^::ffff:/i, '');
+    if (net.isIP(s) === 4) {
+      const [x, y] = s.split('.').map(Number);
+      return x === 10 || x === 127 || (x === 172 && y >= 16 && y <= 31) || (x === 192 && y === 168)
+        || (x === 100 && y >= 64 && y <= 127) || (x === 169 && y === 254);
+    }
+    if (net.isIP(s) === 6) return /^(::1$|f[cd]|fe[89ab])/i.test(s);
+    return true;  // keine IP -> nicht verwenden
+  };
+  const kette = String(req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean);
+  kette.push(req.socket?.remoteAddress || '');
+  for (let i = kette.length - 1; i >= 0; i--) {
+    if (!intern(kette[i])) return kette[i].replace(/^::ffff:/i, '');
+  }
+  return (req.socket?.remoteAddress || req.ip || '').replace(/^::ffff:/i, '') || null;
+}
 app.post('/api/vollmachten/:id/sign-digital', authMiddleware, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
@@ -24329,15 +24591,21 @@ app.post('/api/vollmachten/:id/sign-digital', authMiddleware, async (req, res) =
     if (my.rows[0].signed_at) {
       return res.status(400).json({ error: 'Du hast bereits signiert' });
     }
-    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || req.socket.remoteAddress;
+    const ip = vmSignaturIp(req);
     const ua = req.headers['user-agent'] || null;
     const sub = req.user.sub || req.user.id || null;
+    // Signiert wird unter dem Namen des Kontos, falls die Zeile einen fremden
+    // Namen traegt (Zeile kann ein anderer Vollmachtgeber erfasst haben).
+    const signName = await vmKontoNameFuer(req, my.rows[0].name);
     await pool.query(
       `UPDATE vollmachten_vollmachtgeber
-         SET signatur_typ='digital', signed_at=NOW(), signed_ip=$1, signed_user_agent=$2, signed_authentik_sub=$3
+         SET signatur_typ='digital', signed_at=NOW(), signed_ip=$1, signed_user_agent=$2, signed_authentik_sub=$3, name=$5
         WHERE id=$4`,
-      [ip, ua, sub ? String(sub) : null, my.rows[0].id],
+      [ip, ua, sub ? String(sub) : null, my.rows[0].id, signName],
     );
+    if (signName !== my.rows[0].name && (v.vollmachtgeber_email || '').toLowerCase() === userEmail) {
+      await pool.query('UPDATE vollmachten SET vollmachtgeber_name = $1 WHERE id = $2', [signName, id]);
+    }
     // Prüfen ob ALLE signiert haben → Status aktiv
     const counts = await pool.query(
       `SELECT COUNT(*) AS total, COUNT(signed_at) AS signed
@@ -24359,7 +24627,7 @@ app.post('/api/vollmachten/:id/sign-digital', authMiddleware, async (req, res) =
       all_signed: allSigned,
       signatures_remaining: Number(counts.rows[0].total) - Number(counts.rows[0].signed),
     });
-  } catch (err) { console.error('[vollmachten] sign:', err); res.status(500).json({ error: err.message }); }
+  } catch (err) { console.error('[vollmachten] sign:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // Signierte Papier-PDF einer Vollmacht: nur Dateien unter Vollmachten/ (sonst null).
@@ -24389,7 +24657,7 @@ app.post('/api/vollmachten/:id/activate-paper', authMiddleware, async (req, res)
       [id],
     );
     res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // Signierte PDF hochladen — speichert nach /documents/Vollmachten/<doc_hash>.pdf,
@@ -24405,6 +24673,11 @@ app.post('/api/vollmachten/:id/upload-signed', authMiddleware, async (req, res) 
     const isAdmin = isTechnik(groups) || isPraesident(groups);
     const isGeber = await vmIsUserVollmachtgeber(id, req.user.email, v.vollmachtgeber_email);
     if (!isAdmin && !isGeber) return res.status(403).json({ error: 'Nur Vollmachtgeber oder Admin' });
+    // Vollmachtgeber laden nur zu Entwuerfen hoch — eine aktive oder widerrufene
+    // Vollmacht bekaeme sonst nachtraeglich eine andere "unterschriebene" PDF.
+    if (!isAdmin && v.status !== 'entwurf') {
+      return res.status(400).json({ error: 'Nur zu Entwürfen kann eine unterschriebene PDF hochgeladen werden (Status: ' + v.status + ')' });
+    }
     if (!Buffer.isBuffer(req.body) || req.body.length < 100) {
       return res.status(400).json({ error: 'Keine PDF-Datei im Body (Content-Type: application/pdf)' });
     }
@@ -24418,21 +24691,37 @@ app.post('/api/vollmachten/:id/upload-signed', authMiddleware, async (req, res) 
     const fullPath = pathModule.join(dir, fileName);
     await fs.writeFile(fullPath, req.body);
     const relPath = 'Vollmachten/' + fileName;
-    // Status auf aktiv falls noch entwurf
-    const newStatus = v.status === 'entwurf' ? 'aktiv' : v.status;
+    // Admin: alle Vollmachtgeber-Zeilen gelten als papier-signiert. Ein
+    // Vollmachtgeber zeichnet nur seine eigene Zeile — die anderen Miteigentuemer
+    // signieren selbst (digital/Upload) oder ein Admin aktiviert nach Pruefung
+    // (activate-paper). Sonst aktivierte ein Geber die Vollmacht fuer alle.
+    if (isAdmin) {
+      await pool.query(
+        `UPDATE vollmachten_vollmachtgeber SET signatur_typ='papier', signed_at=NOW()
+          WHERE vollmacht_id=$1 AND signed_at IS NULL`,
+        [id],
+      );
+    } else {
+      await pool.query(
+        `UPDATE vollmachten_vollmachtgeber SET signatur_typ='papier', signed_at=NOW()
+          WHERE vollmacht_id=$1 AND signed_at IS NULL AND LOWER(email) = $2`,
+        [id, (req.user.email || '').toLowerCase()],
+      );
+    }
+    const counts = await pool.query(
+      `SELECT COUNT(*)::int AS total, COUNT(signed_at)::int AS signed
+         FROM vollmachten_vollmachtgeber WHERE vollmacht_id = $1`, [id]);
+    const alleSigniert = counts.rows[0].total === 0 || counts.rows[0].total === counts.rows[0].signed;
+    // Status auf aktiv falls noch entwurf und alle unterschrieben haben
+    const newStatus = v.status === 'entwurf' && (isAdmin || alleSigniert) ? 'aktiv' : v.status;
     await pool.query(
       `UPDATE vollmachten SET papier_pdf_path = $1, signatur_typ = 'papier',
          status = $2, updated_at = NOW() WHERE id = $3`,
       [relPath, newStatus, id],
     );
-    // Alle Vollmachtgeber-Zeilen als papier-signiert markieren
-    await pool.query(
-      `UPDATE vollmachten_vollmachtgeber SET signatur_typ='papier', signed_at=NOW()
-        WHERE vollmacht_id=$1 AND signed_at IS NULL`,
-      [id],
-    );
-    res.json({ ok: true, papier_pdf_path: relPath, status: newStatus, size_bytes: req.body.length });
-  } catch (err) { console.error('[vollmachten] upload:', err); res.status(500).json({ error: err.message }); }
+    res.json({ ok: true, papier_pdf_path: relPath, status: newStatus, size_bytes: req.body.length,
+               signatures_remaining: Math.max(0, counts.rows[0].total - counts.rows[0].signed) });
+  } catch (err) { console.error('[vollmachten] upload:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // KI-Check der signierten PDF: pruefe ob der Doc-Hash gefunden wird,
@@ -24447,9 +24736,18 @@ app.post('/api/vollmachten/:id/verify-ai', authMiddleware, async (req, res) => {
       [id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = r.rows[0];
+    // Nur wer die Vollmacht verwaltet: Vollmachtgeber, Admin, Ausschuss der STWEG.
+    // Der Aufruf schickt die PDF an einen externen KI-Dienst und kostet Geld.
+    const groups = req.user.groups || [];
+    const isGlobalAdmin = isTechnik(groups) || isPraesident(groups) || groups.some(g => g.toLowerCase() === 'verwaltung');
+    const isAusschussForStweg = v.stweg && getAusschussStwegs(groups).has(v.stweg);
+    const isGeber = await vmIsUserVollmachtgeber(id, req.user.email, v.vollmachtgeber_email);
+    if (!isGlobalAdmin && !isAusschussForStweg && !isGeber) return res.status(403).json({ error: 'Kein Zugriff' });
+    const rl = rateLimitGuard('vm-verify-ai', (req.user.email || '').toLowerCase(), 10, 60 * 60 * 1000);
+    if (!rl.ok) return res.status(429).json({ error: `Zu viele KI-Prüfungen — bitte in ${rl.retryAfter}s erneut` });
     if (!v.papier_pdf_path) return res.status(400).json({ error: 'Keine signierte PDF hochgeladen' });
     const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: 'OPENROUTER_API_KEY nicht konfiguriert' });
+    if (!apiKey) return res.status(503).json({ error: 'KI-Prüfung nicht konfiguriert' });
 
     // PDF laden + an Gotenberg für PDF→PNG-Konversion senden (Vision-Check)
     const fullPath = vollmachtPdfPfad(v.papier_pdf_path);
@@ -24514,10 +24812,22 @@ Pruefe und liefere JSON mit folgenden Feldern:
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       parsed = JSON.parse(jsonMatch ? jsonMatch[0] : content);
     } catch (e) {
-      parsed = { raw: content, parse_error: e.message };
+      return res.json({ raw: String(content).slice(0, 4000), parse_error: e.message });
     }
-    res.json(parsed);
-  } catch (err) { console.error('[vollmachten] verify-ai:', err); res.status(500).json({ error: err.message }); }
+    // KI-Ausgabe ist von der hochgeladenen PDF steuerbar (Prompt-Injection) und
+    // landet im Browser — nur erwartete Felder mit festen Typen weitergeben.
+    const textListe = (a) => (Array.isArray(a) ? a : []).slice(0, 20).map(x => String(x).slice(0, 300));
+    const n = Number(parsed?.unterschriften_indikatoren);
+    res.json({
+      hash_gefunden: parsed?.hash_gefunden === true,
+      alle_namen_gefunden: parsed?.alle_namen_gefunden === true,
+      fehlende_namen: textListe(parsed?.fehlende_namen),
+      unterschriften_indikatoren: Number.isFinite(n) ? Math.max(0, Math.min(99, Math.round(n))) : null,
+      auffaelligkeiten: textListe(parsed?.auffaelligkeiten),
+      gesamtbewertung: ['ok', 'warnung', 'problem'].includes(parsed?.gesamtbewertung) ? parsed.gesamtbewertung : 'problem',
+      kommentar: String(parsed?.kommentar ?? '').slice(0, 1000),
+    });
+  } catch (err) { console.error('[vollmachten] verify-ai:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // Widerrufen
@@ -24540,7 +24850,7 @@ app.post('/api/vollmachten/:id/revoke', authMiddleware, async (req, res) => {
       [req.user.email || null, grund || null, id],
     );
     res.json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // PDF
@@ -24588,7 +24898,7 @@ app.get('/api/vollmachten/:id/pdf', authMiddleware, async (req, res) => {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="vollmacht-${v.doc_hash || id}.pdf"`);
     res.send(pdf);
-  } catch (err) { console.error('[vollmachten] pdf:', err); res.status(500).json({ error: err.message }); }
+  } catch (err) { console.error('[vollmachten] pdf:', err); res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // Löschen (nur Entwurf)
@@ -24606,7 +24916,7 @@ app.delete('/api/vollmachten/:id', authMiddleware, async (req, res) => {
     if (v.status !== 'entwurf' && !isAdmin) return res.status(400).json({ error: 'Nur Entwuerfe können geloescht werden (Admin darf alle)' });
     await pool.query('DELETE FROM vollmachten WHERE id = $1', [id]);
     res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: fehlerFuerClient(err) }); }
 });
 
 // ─── Start ──────────────────────────────────────────────────────────
@@ -27297,7 +27607,7 @@ app.get('/api/connections/stats', authMiddleware, adminOnly, async (req, res) =>
       last24h: networks.rows,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: fehlerFuerClient(err) });
   }
 });
 

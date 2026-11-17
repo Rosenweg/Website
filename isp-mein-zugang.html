@@ -1035,7 +1035,7 @@
     try {
       const r = await AuthentikAuth.apiFetch('/api/isp/mail-relays/' + id + '/recheck-dns', { method: 'POST' });
       const d = await r.json();
-      if (d.matches) alert('✓ MX verifiziert — Relay ist jetzt aktiv.');
+      if (d.matches) alert(d.updated?.active ? '✓ MX verifiziert — Relay ist jetzt aktiv.' : '✓ MX verifiziert — wartet noch auf Freigabe durch die Technik.');
       else alert('⚠ MX zeigt nicht auf PMG.\n\nMX: ' + JSON.stringify(d.mx) + '\nErwartet: ' + d.target);
       await loadRelays();
     } catch (e) { alert('Fehler: ' + e.message); }
