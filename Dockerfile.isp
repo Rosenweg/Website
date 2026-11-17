@@ -4,6 +4,8 @@ FROM nginx:1.27-alpine
 
 RUN rm /etc/nginx/conf.d/default.conf
 COPY nginx.isp.conf /etc/nginx/conf.d/default.conf
+# Gemeinsame Sicherheits-Header (per include in nginx.isp.conf)
+COPY frontends-lxc/nginx/sicherheit-header.conf /etc/nginx/snippets/rosenweg-sicherheit.conf
 
 # Whitelist: nur ISP-Seiten + Abhaengigkeiten kopieren
 WORKDIR /usr/share/nginx/html

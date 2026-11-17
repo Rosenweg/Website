@@ -119,7 +119,10 @@ for f in "${DATEIEN[@]}"; do
     else vorher="anders"; fi
     ABWEICHEND=$((ABWEICHEND+1))
     if [ "$PRUEFEN" = 1 ]; then printf '%-24s %-12s %-10s %s\n' "$f" "$name" "$vorher" "(Pruefmodus)"; continue; fi
-    tmp="/tmp/rw-web.$$.$(basename "$f")"
+    # Zufallsname per mktemp auf dem Knoten: ein vorhersagbarer /tmp-Name (PID)
+    # liesse sich dort vorab als Symlink anlegen; root schriebe dann ins Ziel.
+    tmp=$(sshj "root@$ip" 'mktemp /tmp/rw-web.XXXXXXXX' | tr -d '[:space:]')
+    [ -n "$tmp" ] || { printf '%-24s %-12s %-10s %s\n' "$f" "$name" "$vorher" "FEHLER: mktemp"; continue; }
     scp -q -o BatchMode=yes -J "$JUMP" "$f" "root@$ip:$tmp" </dev/null || { printf '%-24s %-12s %-10s %s\n' "$f" "$name" "$vorher" "FEHLER beim Kopieren"; continue; }
     nachher=$(sshj "root@$ip" "
       pct exec $id -- sh -c 'cd $WEBROOT && [ -f $z ] && cp -a $z $z.alt; mkdir -p \$(dirname $z)' 2>/dev/null

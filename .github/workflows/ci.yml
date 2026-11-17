@@ -5,6 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Nur lesen: die Pruefung braucht keine Schreibrechte am Repo oder an Paketen.
+permissions:
+  contents: read
+
 jobs:
   syntax-check:
     runs-on: ubuntu-latest
