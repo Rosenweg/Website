@@ -1,12 +1,42 @@
 # Cloudflare — Rosenweg
 
+> Stand: 17.11.2026 nur teilweise nachgeführt. **Der Tunnel-Abschnitt und das
+> E-Mail-Routing beschreiben den Zustand vor Juni 2026** (Swarm, Gmail). Heute
+> gehen die Web-Hostnamen direkt (A/CNAME auf `public.rosenweg4303.ch`) an
+> edge-traefik (CT 245), siehe [`routing.md`](routing.md) und
+> [`../edge-traefik/README.md`](../edge-traefik/README.md). Die DNS-Tabellen
+> unten sind nicht nachgemessen; massgeblich ist die Zone im Cloudflare-Konto.
+
 ## Zone
 
-- **Domain**: `rosenweg4303.ch`
-- **Zone ID**: `0b113bed342ed868b4b42c09149ea2b5`
-- **API Token**: `<im Passwortmanager>`
+- **Domains**: `rosenweg4303.ch`, `rosenweg9.ch`
+- **Zone ID** (`rosenweg4303.ch`): `0b113bed342ed868b4b42c09149ea2b5`
+- **API-Token**: `<im Passwortmanager>`. Der frühere Token stand im öffentlichen
+  Repo und gilt als kompromittiert; er hat DNS-Kontrolle über alle Zonen und
+  damit auch über die Zertifikate. **Als Erstes rotieren** (`sicherheit.md`
+  Abschnitt 7.1, Punkt 1).
 
-## Tunnel
+### Wo der Token gebraucht wird
+
+Beim Rotieren alle Stellen nachführen, Werte nur in diese Dateien:
+
+| Wo | Datei / Variable | Wofür |
+|---|---|---|
+| API (CT 128) | `/opt/rosenweg-core/.env`: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID` | Zonenverwaltung im ISP-Bereich („DNS jetzt einrichten“), DNS-Prüfung für eigene Zonen |
+| API (CT 128) | `/opt/rosenweg-core/.env`: `CF_DDNS_TOKEN`, `CF_DDNS_ALLOWLIST` | DynDNS-Endpunkt `/api/cf-ddns` (eigenes Geheimnis) |
+| edge-traefik (CT 245) | `/etc/default/traefik`: `CF_DNS_API_TOKEN` | Let's-Encrypt-Zertifikate per DNS-01 |
+| PBX (CT 220) | `/root/.cloudflare.ini` | Zertifikat `sip.rosenweg4303.ch` |
+| Z-Push (CT 115) | certbot-Zugangsdatei | Zertifikat `contacts.rosenweg4303.ch` (zurzeit abgelaufen) |
+
+Prüfen nach der Rotation: in CT 245 `journalctl -u traefik | grep -i acme`, in
+CT 220 und CT 115 `certbot renew --dry-run`, im ISP-Bereich eine DNS-Prüfung
+für einen Namen in einer eigenen Zone.
+
+Nie automatisch freigegeben werden Mail-Relays, Reverse-Proxy-Routen und
+Weiterleitungen von Nicht-Admins, deren Name in einer unserer Zonen liegt
+(`sicherheit.md` Abschnitt 4.7).
+
+## Tunnel (veraltet, Stand vor Juni 2026)
 
 - **Tunnel ID**: `af2dc45e-2d4e-47cf-9d72-ac4ce71d96ec`
 - **Replicas**: 2 (Docker Service `cloudflared_cloudflared`)
@@ -82,7 +112,7 @@
 | _25._tcp.mail | TLSA | 3 1 1 ... | DANE TLS |
 | _acme-challenge | TXT | (2 Records) | Let's Encrypt Validierung |
 
-## Email Routing
+## Email Routing (veraltet, Stand vor Mailcow/PMG)
 
 Cloudflare empfängt Mails (MX) und leitet weiter:
 - Catch-All → `rosenweg4303@gmail.com`
