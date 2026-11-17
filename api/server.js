@@ -20485,14 +20485,15 @@ async function ispCheckDns(hostname) {
 // fuer .co.uk u.ae. eine bewusst grobe Naeherung) zaehlen: wer fremde
 // a.example.ch betreibt, soll b.example.ch nicht ohne Admin bekommen.
 // DB-Fehler -> fail-closed (Konflikt), sonst ginge alles ungeprueft durch.
-async function ispHostKonflikt(hostname, { ownerEmail = null, ausser = null } = {}) {
+async function ispHostKonflikt(hostname, { ownerEmail = null, ausser = null, ohneZone = false } = {}) {
   const h = String(hostname || '').toLowerCase().replace(/\.$/, '').replace(/^\*\./, '');
   if (!h) return null;
   // S4-3-2: Namen in einer unserer Cloudflare-Zonen gehoeren uns, auch ohne
   // "rosenweg" im Namen. Dort zeigt vieles schon auf uns (oder wir setzen es
   // selbst) — DNS beweist also nichts, ein Admin entscheidet. Greift ueber
   // ispDecideApproval und alle Re-Checks (Hintergrund + recheck-dns).
-  const cfZone = await ispCfZoneFuer(h).catch(() => null);
+  // ohneZone: der Admin hat den Eintrag schon freigegeben (dns-einrichten danach).
+  const cfZone = ohneZone ? null : await ispCfZoneFuer(h).catch(() => null);
   if (cfZone) return `Name liegt in unserer Zone ${cfZone.name} — ein Admin muss freigeben`;
   const reg = h.split('.').slice(-2).join('.');
   let r;
@@ -21475,7 +21476,9 @@ async function ispDnsEinrichten(req, res, tabelle, spalte) {
       if (v.approval_status === 'pending_admin' || v.approval_status === 'rejected') {
         return res.status(403).json({ ok: false, grund: 'Der Eintrag wartet auf die Freigabe durch einen Admin' });
       }
-      const konflikt = await ispHostKonflikt(host, { ownerEmail: v.owner_email, ausser: { tabelle, id } });
+      // Vom Admin freigegebene Eintraege: die Zone-Regel ist damit erfuellt, nur echte
+      // Ueberschneidungen mit fremden Eintraegen bleiben gesperrt.
+      const konflikt = await ispHostKonflikt(host, { ownerEmail: v.owner_email, ausser: { tabelle, id }, ohneZone: v.approval_status === 'approved' });
       if (konflikt) return res.status(409).json({ ok: false, grund: konflikt });
     }
     const gesetzt = await ispCfCnameSetzen(host, req.body?.proxied === true);
@@ -26819,9 +26822,13 @@ app.post('/api/vollmachten/:id/upload-signed', authMiddleware, async (req, res) 
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nicht gefunden' });
     const v = r.rows[0];
     const groups = req.user.groups || [];
-    const isAdmin = isTechnik(groups) || isPraesident(groups);
+    const istAdminRolle = isTechnik(groups) || isPraesident(groups);
     const isGeber = await vmIsUserVollmachtgeber(id, req.user.email, v.vollmachtgeber_email);
-    if (!isAdmin && !isGeber) return res.status(403).json({ error: 'Nur Vollmachtgeber oder Admin' });
+    if (!istAdminRolle && !isGeber) return res.status(403).json({ error: 'Nur Vollmachtgeber oder Admin' });
+    // Admin-Upload (zeichnet ALLE offenen Geber-Zeilen) nur ausdruecklich (?als=admin vom
+    // Admin-Knopf). Ist ein Technik-/Praesident-Konto selbst Geber und laedt seine eigene
+    // PDF hoch, gilt der Geber-Pfad — sonst stuende auch der Ehepartner als "signiert" da.
+    const isAdmin = istAdminRolle && (req.query.als === 'admin' || !isGeber);
     // Vollmachtgeber laden nur zu Entwuerfen hoch — eine aktive oder widerrufene
     // Vollmacht bekaeme sonst nachtraeglich eine andere "unterschriebene" PDF.
     if (!isAdmin && v.status !== 'entwurf') {
@@ -26891,6 +26898,10 @@ app.post('/api/vollmachten/:id/upload-signed', authMiddleware, async (req, res) 
            status = $2, updated_at = NOW() WHERE id = $3`,
         [relPath, newStatus, id],
       );
+    } else if (newStatus === 'aktiv') {
+      // Gemischt (Papier + digital) fertig: als 'digital' fuehren — /pdf liefert die
+      // Vorlage mit den Signaturbloecken, die Papier-Dateien haengen je Geber-Zeile.
+      await pool.query(`UPDATE vollmachten SET status = $1, signatur_typ = 'digital', updated_at = NOW() WHERE id = $2`, [newStatus, id]);
     } else {
       await pool.query(`UPDATE vollmachten SET status = $1, updated_at = NOW() WHERE id = $2`, [newStatus, id]);
     }
