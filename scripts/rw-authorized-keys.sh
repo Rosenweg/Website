@@ -70,8 +70,10 @@ fi
 # Unterscheidung "kein Zugang" gegen "nicht erreichbar" bleibt damit
 # erhalten, und daran haengt, ob der Zwischenspeicher gilt.
 #
-# curl: Der Host-Token geht ueber stdin (-H @-), nicht als Argument — sonst
-# steht er fuer jeden lokalen Benutzer in der Prozessliste (/proc/*/cmdline).
+# curl: Der Host-Token geht ueber stdin (-K -, Konfig-Zeile "header = ..."),
+# nicht als Argument — sonst steht er fuer jeden lokalen Benutzer in der
+# Prozessliste (/proc/*/cmdline). -K - statt -H @- (R3-Ie): -H @- kennt
+# curl erst ab 7.55, aeltere Container haetten den Token gar nicht gesendet.
 # Der Statuscode haengt als letzte Zeile an der Antwort: 400/404 heisst "gibt
 # es nicht / ungueltig" und ist eine endgueltige Absage — dann darf auch der
 # Zwischenspeicher nicht mehr gelten. Nur Netz-, 5xx- und Token-Fehler
@@ -80,10 +82,12 @@ fi
 # Subshell verloren geht.
 ABSAGE=0
 ANTWORT=
+# Wert fuer eine curl-Konfigzeile in "...": \ und " maskieren.
+kq() { printf '%s' "$1" | sed 's/[\\"]/\\&/g'; }
 hole() {
   if command -v curl >/dev/null 2>&1; then
-    _roh=$(printf 'X-Host-Token: %s\nX-Host-Name: %s\n' "$HOST_TOKEN" "$HOST_NAME" | \
-      curl -sS --max-time "${TIMEOUT:-3}" -H @- -w '\n%{http_code}' "$1" 2>/dev/null) || return 1
+    _roh=$(printf 'header = "X-Host-Token: %s"\nheader = "X-Host-Name: %s"\n' "$(kq "$HOST_TOKEN")" "$(kq "$HOST_NAME")" | \
+      curl -sS --max-time "${TIMEOUT:-3}" -K - -w '\n%{http_code}' "$1" 2>/dev/null) || return 1
     _code=$(printf '%s' "$_roh" | tail -n 1)
     _text=$(printf '%s' "$_roh" | sed '$d')
     case "$_code" in
@@ -94,8 +98,22 @@ hole() {
   elif command -v wget >/dev/null 2>&1; then
     # wget kennt keinen Header aus stdin; der Token steht hier kurz in der
     # Prozessliste. curl nachinstallieren behebt das.
-    ANTWORT=$(wget -q -O - -T "${TIMEOUT:-3}" \
-         --header="X-Host-Token: $HOST_TOKEN" --header="X-Host-Name: $HOST_NAME" "$1" 2>/dev/null)
+    # Statuscode aus den Serverkopfzeilen (-S, stderr) lesen (R3-Ia): wget
+    # endet bei 400/404 genauso mit Fehler wie bei 5xx — ohne Unterscheidung
+    # galt fuer ein entzogenes/geloeschtes Login weiter der Zwischenspeicher.
+    # GNU- und BusyBox-wget schreiben beide eine Zeile "HTTP/1.1 404 ...".
+    _err=$(mktemp "${TMPDIR:-/tmp}/rw-keys.XXXXXX" 2>/dev/null) || return 1
+    if ANTWORT=$(wget -q -S -O - -T "${TIMEOUT:-3}" \
+         --header="X-Host-Token: $HOST_TOKEN" --header="X-Host-Name: $HOST_NAME" "$1" 2>"$_err"); then
+      rm -f "$_err"
+      return 0
+    fi
+    _code=$(grep -oE 'HTTP/[0-9.]+ [0-9]{3}' "$_err" 2>/dev/null | tail -n 1 | grep -oE '[0-9]{3}$' || true)
+    rm -f "$_err"
+    case "$_code" in
+      400|404) ABSAGE=1 ;;
+    esac
+    return 1
   else
     return 127
   fi

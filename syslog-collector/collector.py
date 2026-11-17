@@ -36,7 +36,9 @@ MAX_TCP_CLIENTS = int(os.environ.get('SYSLOG_MAX_TCP_CLIENTS', '20'))
 MAX_LINE_BYTES = 65536  # TCP-Zeile ohne Zeilenende -> Verbindung schliessen statt endlos puffern
 # Untaetige TCP-Verbindung schliessen (R2-Db): sonst belegen 20 stille Verbindungen
 # alle Slots dauerhaft. Echte Sender verbinden sich bei Bedarf neu.
-TCP_IDLE_TIMEOUT = float(os.environ.get('SYSLOG_TCP_IDLE_TIMEOUT', '60'))
+# 600 s statt 60 s (R3-Df): ruhige Dauer-TCP-Sender (rsyslog/UniFi) sollen
+# nicht staendig getrennt werden; gegen Slot-Belegung reicht das weiterhin.
+TCP_IDLE_TIMEOUT = float(os.environ.get('SYSLOG_TCP_IDLE_TIMEOUT', '600'))
 
 
 def source_allowed(ip):
