@@ -34,7 +34,7 @@ function zevAliasAddress(name, prefix, domain) {
 // Keine Kommas/Steuerzeichen: goto ist eine Komma-Liste.
 function isValidEmail(e) {
   return typeof e === 'string' && e.length <= 254 && !/[,;\x00-\x1f\x7f]/.test(e)
-    && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim());
+    && /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/.test(e.trim());
 }
 
 // Baut die goto-Empfaengerliste (dedupliziert, lowercase): aktueller Bewohner +

@@ -16,8 +16,10 @@ const { otpAusstellen, otpPruefen, ausstellenErlaubt, globalErlaubt, OTP_FEHLER 
 const SITE_URL = process.env.SITE_URL || 'https://www.rosenweg4303.ch';
 const pollUrl = (id) => `${SITE_URL}/sitzungs-doodle.html` + (id ? `?poll=${id}` : '');
 const isAdminGroups = (groups) => (groups || []).some(g => ['technik', 'präsident', 'praesident'].includes(String(g).toLowerCase()));
-const normEmail = (e) => String(e || '').trim().toLowerCase();
-const validEmail = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+// Laenge begrenzen: E-Mail-Adressen haben hoechstens 254 Zeichen; laengere Eingaben
+// sind Angriffe und duerfen nicht in Regex/DB-Abfragen laufen.
+const normEmail = (e) => (typeof e === 'string' ? e : String(e || '')).trim().toLowerCase().slice(0, 254);
+const validEmail = (e) => /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/.test(e);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const VOTE_VALUES = ['ja', 'vielleicht', 'nein'];
 
