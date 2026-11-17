@@ -242,7 +242,17 @@ function startGateway(botCore) {
     if (q.ipAll.all().length === 0 && q.senderAll.all().length === 0) return true; // nicht konfiguriert
     if (smtpTrusted(session.remoteAddress)) return true;
     const local = String(rcptAddr || '').split('@')[0].trim().toLowerCase();
-    return !!(local && q.aliasGet.get(local));
+    if (local && q.aliasGet.get(local)) return true;
+    // Mail-Antwort auf eine WA->Mail-Weiterleitung (Reply-To nummer@REPLY_DOMAIN,
+    // R2-De): Nummer nur erlauben, wenn genau dieser Absender zuletzt per Mail an
+    // diese Nummer geschrieben hat (Bridge) und in smtp_senders steht. So bleibt
+    // das Anschreiben beliebiger Nummern aus dem Internet gesperrt (D-2).
+    if (/^\d{6,15}$/.test(local)) {
+      const absender = String(session.envelope?.mailFrom?.address || '').trim().toLowerCase();
+      const bridge = absender ? q.bridgeLookup.get(local + '@c.us') : null;
+      if (bridge && String(bridge.sender || '').trim().toLowerCase() === absender && senderInList(absender)) return true;
+    }
+    return false;
   }
 
   // ── Ziel-Aufloesung (gemeinsam fuer JSON-API + SMTP-in) ──────────────────
