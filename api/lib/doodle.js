@@ -237,6 +237,9 @@ function mountDoodle({ app }) {
     try {
       const conds = ["p.status = 'geschlossen'", 'p.final_option_id IS NOT NULL', 'o.starts_at IS NOT NULL', 'o.starts_at >= NOW()'];
       const params = [];
+      // Gaeste (nur eingeladen) sehen wie in /polls nur ihre eigenen Umfragen,
+      // sonst verriete /next Titel, Ort und Termin fremder Sitzungen.
+      if (!req.actor.isMember) { params.push(req.actor.email); conds.push(`p.id IN (SELECT poll_id FROM doodle_invites WHERE LOWER(email) = $${params.length})`); }
       if (req.query.project) { params.push(String(req.query.project)); conds.push(`p.project_slug = $${params.length}`); }
       if (req.query.stweg) { params.push(parseInt(req.query.stweg, 10)); conds.push(`p.stweg = $${params.length}`); }
       if (req.query.gremium) { params.push(String(req.query.gremium)); conds.push(`p.gremium = $${params.length}`); }
