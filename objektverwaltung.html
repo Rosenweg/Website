@@ -1782,9 +1782,17 @@
                         .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
                         .replace(/[^a-z0-9\s.-]/g, '').trim().split(/\s+/)
                         .filter(Boolean);
-                    const uname = username.length >= 2
-                        ? username[0] + '.' + username[username.length - 1]
-                        : username[0] || 'user';
+                    // Server verlangt vorname.nachname (^[a-z0-9]+(\.[a-z0-9-]+)+$)
+                    const vor = (username[0] || '').replace(/[^a-z0-9]/g, '');
+                    const nach = (username.length >= 2 ? username[username.length - 1] : '').replace(/[^a-z0-9-]/g, '').replace(/^-+|-+$/g, '');
+                    if (!vor || !nach) {
+                        errorDiv.textContent = 'Bitte Vor- und Nachname eingeben.';
+                        errorDiv.classList.remove('hidden');
+                        btn.disabled = false;
+                        btn.textContent = 'Speichern';
+                        return;
+                    }
+                    const uname = vor + '.' + nach;
                     res = await AuthentikAuth.apiFetch('/api/admin/users', {
                         method: 'POST',
                         body: { username: uname, name, email, groups },

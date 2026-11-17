@@ -356,6 +356,8 @@ app.get('/api/auth/logout', async (req, res) => {
 });
 
 // OAuth2 callback - exchanges code for token, creates session, redirects back
+// Einmalig angelegte Spalte users.authentik_sub (Bindung users-Zeile <-> Konto)
+let usersSubSpalte = null;
 app.get('/api/auth/callback', async (req, res) => {
   const { code, state } = req.query;
   if (!code) return res.status(400).send('Kein Authorization Code erhalten');
@@ -435,15 +437,33 @@ app.get('/api/auth/callback', async (req, res) => {
     const groups = userInfo.groups || [];
     const isAdmin = groups.some(g => { const gl = g.toLowerCase(); return gl === 'technik' || gl === 'präsident' || gl === 'praesident'; });
 
+    // users-Zeile an das Authentik-Konto (sub) binden: ein zweites Konto mit
+    // derselben E-Mail darf nicht die Zeile (Sitzung, Rechte, Daten) des
+    // ersten erben. Bestehende Zeilen ohne sub werden beim naechsten Login
+    // gebunden. Konto absichtlich neu angelegt -> Technik setzt
+    // users.authentik_sub auf NULL.
+    const sub = String(userInfo.sub || '');
+    if (!usersSubSpalte) usersSubSpalte = pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS authentik_sub TEXT').catch(e => { usersSubSpalte = null; throw e; });
+    await usersSubSpalte;
+    const bisher = await pool.query('SELECT authentik_sub FROM users WHERE email = $1', [email]);
+    if (bisher.rows[0]?.authentik_sub && bisher.rows[0].authentik_sub !== sub) {
+      console.warn(`[oauth] Login abgewiesen: users-Zeile ${email} gehoert zu anderem Authentik-Konto`);
+      return res.status(403).send('Anmeldung abgelehnt: Diese E-Mail gehört zu einem anderen Konto. Bitte Technik kontaktieren.');
+    }
+
     // Create/update user in DB
     const userResult = await pool.query(
-      `INSERT INTO users (email, name, role, groups_json, username)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO users (email, name, role, groups_json, username, authentik_sub)
+       VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''))
        ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, groups_json = EXCLUDED.groups_json, username = EXCLUDED.username,
-                                         name_selbst_geaendert_am = NULL
+                                         name_selbst_geaendert_am = NULL,
+                                         authentik_sub = COALESCE(users.authentik_sub, EXCLUDED.authentik_sub)
+       WHERE users.authentik_sub IS NULL OR users.authentik_sub = EXCLUDED.authentik_sub
        RETURNING id, email, name, wohnung, stweg, role, groups_json, username`,
-      [email, name, isAdmin ? 'admin' : 'bewohner', JSON.stringify(groups), username]
+      [email, name, isAdmin ? 'admin' : 'bewohner', JSON.stringify(groups), username, sub]
     );
+    // Kein RETURNING = WHERE oben griff (gleichzeitiger Login eines anderen Kontos)
+    if (!userResult.rows.length) return res.status(403).send('Anmeldung abgelehnt: Diese E-Mail gehört zu einem anderen Konto. Bitte Technik kontaktieren.');
     const user = userResult.rows[0];
 
     // Create session token. id_token mitspeichern fuer spaeteren Logout
@@ -540,8 +560,10 @@ function isDocPathAllowed(filePath, groups) {
 // Reklamationsfotos, Unterschriftenlisten-PDFs, Anzeigen): lesen/schreiben
 // ueber die Dokumenten-API nur Technik/Praesident – sonst lesbar fuer alle
 // bzw. faelschbar. Brief-Fotos (Empfaengeradressen) lesen nur Ausschuss.
+// Grundbuch-Auszuege (allgemein/grundbuch-bilder, Namen+Adressen) nur ueber
+// /api/grundbuch/.../bild mit dessen Rechtepruefung.
 // Pruefung segmentweise, case-insensitiv, leere/'.'-Segmente uebersprungen.
-const DOC_SPERR_ORDNER = new Set(['auslagen', 'anzeigen', 'reklamationen', 'unterschriftenlisten']);
+const DOC_SPERR_ORDNER = new Set(['auslagen', 'anzeigen', 'reklamationen', 'unterschriftenlisten', 'grundbuch-bilder']);
 const DOC_AUSSCHUSS_ORDNER = new Set(['fotos_von_versendeten_briefen']);
 function docSperrOrdner(filePath) {
   const seg = String(filePath).toLowerCase().split('/').filter(x => x && x !== '.');
@@ -5456,6 +5478,12 @@ async function buildZevAliasMap() {
       // Aktuelle Bewohner (eine Zeile je Wohnung) + Allgemein-Alias
       const rows = await resolveZevForStweg(cfg.stweg, cfg);
       for (const r of rows) if (r.alias_address) {
+        // Gleiche Alias-Adresse aus zwei STWEGs (gleicher Prefix/Domain + gleicher
+        // Name): nicht still ueberschreiben, sondern als Kollision markieren –
+        // keine automatische Zuordnung, kein Sync (sonst Rechnung an fremde STWEG).
+        const vorh = map[r.alias_address.toLowerCase()];
+        // Ausgezogene (departed) einer anderen STWEG verdraengt der aktuelle Bewohner wie bisher.
+        if (vorh && vorh.stweg !== cfg.stweg && !vorh.departed) { vorh.kollision = true; continue; }
         map[r.alias_address.toLowerCase()] = { wohnung_id: r.wohnung_id, stweg: cfg.stweg, alias_address: r.alias_address, bewohner_email: r.bewohner_email, bewohner_name: r.bewohner_name, typ: r.typ === 'allgemein' ? 'allgemein' : 'wohnung' };
       }
       // Kuerzlich ausgezogene Bewohner (archiviert < 6 Monate): Alias 6 Monate aktiv
@@ -5566,7 +5594,7 @@ async function pollZevArchive() {
           const hdrTo = String(parsed.headers?.get('delivered-to') || parsed.headers?.get('x-original-to') || '').toLowerCase();
           if (hdrTo) recips.push(...hdrTo.split(/[<>,\s]+/).filter(Boolean));
           let match = null;
-          for (const r of recips) { if (aliasMap[r]) { match = aliasMap[r]; break; } }
+          for (const r of recips) { if (aliasMap[r] && !aliasMap[r].kollision) { match = aliasMap[r]; break; } }
           // Absender pruefen: die Alias-Adressen kann jeder anschreiben. Eine Mail von
           // fremdem Absender (ZEV_ABSENDER) oder mit DMARC-/Spam-Befund wird archiviert,
           // aber keiner Wohnung zugeordnet (kein Re-Mail an Bewohner) -> Technik prueft.
@@ -6209,6 +6237,30 @@ async function syncKontakteToAuthentik(stweg, kontakte, bewohntVon) {
   }
 }
 
+// Darf das Authentik-Konto wegen "keiner Wohnung mehr zugeordnet" geloescht
+// werden? Nur reine Bewohner-/Eigentuemer-Konten DIESER STWEG – sonst koennte
+// jemand mit Schreibrecht auf Kontakte eine fremde Adresse (Technik, Ausschuss,
+// andere STWEG) eintragen und wieder entfernen und so deren Konto loeschen.
+function kontoAutoLoeschbar(authentikUser, stweg) {
+  const namen = (authentikUser?.groups_obj || []).map(g => String(g.name || '').toLowerCase());
+  const eigen = STWEG_GROUPS[stweg];
+  if (!eigen) return false;
+  const erlaubt = new Set([eigen.bewohner, eigen.eigentuemer].filter(Boolean).map(x => x.toLowerCase()));
+  if (!namen.some(n => erlaubt.has(n))) return false;
+  if (isTechnik(namen) || isPraesident(namen)) return false;
+  if (namen.some(n => n.includes('ausschuss') || n === 'verwaltung' || n === 'admin' || n.includes('admins'))) return false;
+  for (const [nr, m] of Object.entries(STWEG_GROUPS)) {
+    if (Number(nr) === Number(stweg)) continue;
+    if (Object.values(m).some(x => namen.includes(String(x).toLowerCase()))) return false;
+  }
+  if (authentikUser?.is_superuser) return false;
+  return true;
+}
+async function authentikKontoPerEmail(email) {
+  const usersData = await authentikAPI('GET', `/core/users/?search=${encodeURIComponent(email)}`);
+  return (usersData.results || []).find(u => u.email?.toLowerCase() === String(email).toLowerCase()) || null;
+}
+
 // Track removed kontakte for delayed Authentik user deletion
 async function trackRemovedKontakte(wohnungId, stweg, oldKontakte, newKontakte) {
   if (!AUTHENTIK_API_TOKEN) return;
@@ -6227,6 +6279,20 @@ async function trackRemovedKontakte(wohnungId, stweg, oldKontakte, newKontakte) 
       [email, wohnungId]
     );
     if (parseInt(stillExists.rows[0].cnt) > 0) continue; // Still assigned elsewhere
+
+    // Nur reine Bewohner-/Eigentuemer-Konten dieser STWEG vormerken
+    // (Pruefung beim Loeschen wird wiederholt). Fehler -> nicht vormerken.
+    try {
+      const konto = await authentikKontoPerEmail(email);
+      if (!konto) continue;
+      if (!kontoAutoLoeschbar(konto, stweg)) {
+        console.warn(`[Authentik] ${email} nicht zur Loeschung vorgemerkt: Konto hat Gruppen ausserhalb Bewohner/Eigentuemer STWEG ${stweg}`);
+        continue;
+      }
+    } catch (e) {
+      console.error(`[Authentik] Pruefung vor Loesch-Vormerkung fehlgeschlagen (${email}):`, e.message);
+      continue;
+    }
 
     // Schedule for deletion in 30 days
     await pool.query(
@@ -6385,8 +6451,15 @@ async function processAuthentiKDeletions() {
     for (const row of deletions.rows) {
       try {
         // Find user in Authentik by email
-        const usersData = await authentikAPI('GET', `/core/users/?search=${encodeURIComponent(row.email)}`);
-        const user = (usersData.results || []).find(u => u.email?.toLowerCase() === row.email.toLowerCase());
+        const user = await authentikKontoPerEmail(row.email);
+        // Gruppen koennen sich seit der Vormerkung geaendert haben: nur reine
+        // Bewohner-/Eigentuemer-Konten der vorgemerkten STWEG loeschen, sonst
+        // Vormerkung stornieren (bleibt in loeschungen.html sichtbar).
+        if (user && !kontoAutoLoeschbar(user, row.stweg)) {
+          console.warn(`[Authentik] Loeschung ${row.email} abgebrochen: Konto nicht nur Bewohner/Eigentuemer STWEG ${row.stweg}`);
+          await pool.query('UPDATE authentik_pending_deletions SET cancelled = true WHERE id = $1', [row.id]);
+          continue;
+        }
         if (user) {
           // Hard delete per DSG/DSGVO requirements
           await authentikAPI('DELETE', `/core/users/${user.pk}/`);
@@ -7379,6 +7452,9 @@ async function syncZevAliasesForStweg(stweg) {
   const cfg = await loadZevConfig(stweg);
   if (!cfg.aktiv) return { ok: false, reason: 'ZEV fuer diese STWEG nicht aktiv' };
   const rows = await resolveZevForStweg(stweg, cfg);
+  // Aliase, die auch eine andere aktive STWEG erzeugt, nicht anfassen (sonst
+  // biegt der Ausschuss von A mit einem gleichnamigen Kontakt den Alias von B um).
+  const { map: aliasMap } = await buildZevAliasMap();
   const all = await mailcowApi('GET', '/get/alias/all');
   const existingByAddr = {};
   for (const a of (Array.isArray(all) ? all : [])) existingByAddr[String(a.address || '').toLowerCase()] = a;
@@ -7389,6 +7465,11 @@ async function syncZevAliasesForStweg(stweg) {
       continue;
     }
     const addr = r.alias_address.toLowerCase();
+    const owner = aliasMap[addr];
+    if (!owner || owner.kollision || owner.stweg !== Number(stweg)) {
+      results.push({ ...r, synced: false, reason: 'Alias-Kollision mit anderer STWEG – Technik prüft' });
+      continue;
+    }
     const goto = r.goto.join(',');
     try {
       const ex = existingByAddr[addr];
@@ -7548,7 +7629,32 @@ app.get('/api/zev/config/:stweg', authMiddleware, requirePermission('wohnungsver
   catch (e) { console.error('[zev-config-get]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 
-app.put('/api/zev/config/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, async (req, res) => {
+// Schreibzugriff auf eine STWEG: requireStwegAccess laesst jede Bewohner-/
+// Eigentuemer-Mitgliedschaft zu, und wohnungsverwaltung:write gilt global –
+// zusammen konnte z. B. ein Ausschuss von STWEG 5, der in STWEG 3 wohnt, STWEG 3
+// bearbeiten. Schreiben duerfen daher nur Technik/Praesident, der Ausschuss
+// DIESER STWEG und Verwaltung, die (wie bisher) ueber eine Gruppe dieser STWEG
+// berechtigt ist.
+function stwegSchreibErlaubt(groups, stweg) {
+  groups = groups || [];
+  if (isTechnik(groups) || isPraesident(groups)) return true;
+  const nr = Number(stweg);
+  if (getAusschussStwegs(groups).has(nr)) return true;
+  const lower = groups.map(g => String(g).toLowerCase());
+  if (!lower.includes('verwaltung')) return false;
+  const m = STWEG_GROUPS[nr];
+  return !!m && Object.values(m).some(g => lower.includes(String(g).toLowerCase()));
+}
+function requireStwegWrite(req, res, next) {
+  const stweg = parseStweg(req.params.stweg);
+  if (!stweg) return res.status(400).json({ error: 'Ungültige STWEG-Nummer' });
+  if (!stwegSchreibErlaubt(req.user?.groups || [], stweg)) {
+    return res.status(403).json({ error: 'Schreiben nur für den Ausschuss dieser STWEG' });
+  }
+  next();
+}
+
+app.put('/api/zev/config/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, async (req, res) => {
   try {
     const stweg = parseInt(req.params.stweg); const b = req.body || {};
     const trim = v => (typeof v === 'string' && v.trim()) ? v.trim() : null;
@@ -7600,7 +7706,7 @@ app.get('/api/zev/wohnungen/:stweg', authMiddleware, requirePermission('wohnungs
   } catch (e) { console.error('[zev-wohnungen]', e); res.status(500).json({ error: 'Fehler' }); }
 });
 
-app.post('/api/zev/sync/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, async (req, res) => {
+app.post('/api/zev/sync/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, async (req, res) => {
   try { res.json(await syncZevAliasesForStweg(parseInt(req.params.stweg))); }
   catch (e) { console.error('[zev-sync]', e); res.status(500).json({ error: e.message }); }
 });
@@ -7759,7 +7865,9 @@ app.post('/api/zev/rechnung/:id/zuordnen', authMiddleware, requirePermission('wo
       const eigene = getAusschussStwegs(g);
       const alt = await pool.query('SELECT stweg FROM zev_rechnungen WHERE id = $1', [id]);
       if (!alt.rows.length) return res.status(404).json({ error: 'Rechnung nicht gefunden' });
-      if (!eigene.has(stweg) || (alt.rows[0].stweg != null && !eigene.has(alt.rows[0].stweg))) {
+      // Rechnung ohne STWEG (Alias unbekannt) nur Technik/Praesident – sonst
+      // koennte jeder Ausschuss fremde Rechnungen in die eigene STWEG ziehen.
+      if (!eigene.has(stweg) || alt.rows[0].stweg == null || !eigene.has(alt.rows[0].stweg)) {
         return res.status(403).json({ error: 'Kein Zugriff auf diese STWEG' });
       }
     }
@@ -8423,14 +8531,23 @@ app.get('/api/unterschriftenliste/:stweg/haeuser', authMiddleware, requirePermis
 // GET /api/unterschriftenliste/verify-json — Öffentliche JSON-API für die Echtheitsprüfungs-Webseite
 app.get('/api/unterschriftenliste/verify-json', async (req, res) => {
   try {
-    // Oeffentlich: Abrufe begrenzen (je Client und gesamt), damit niemand
-    // Hashes durchprobiert bzw. die DB mit Abfragen flutet. Client-Schluessel
-    // aus X-Forwarded-For ist faelschbar – daher zusaetzlich die Gesamtgrenze.
-    const client = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.ip || 'unbekannt';
+    // Oeffentlich: Abrufe je Client begrenzen. Client = CF-Connecting-IP (von
+    // Cloudflare gesetzt), sonst erster X-Forwarded-For-Eintrag (setzt Traefik
+    // selbst), sonst req.ip. Eine Gesamtgrenze wuerde mit einem Skript die
+    // Pruefung fuer alle sperren – darum nur Log. Durchprobieren lohnt nicht
+    // (12 Hex-Stellen = 48 Bit).
+    const net = require('net');
+    const cfIp = String(req.headers['cf-connecting-ip'] || '').trim();
+    const client = (net.isIP(cfIp) ? cfIp : '')
+      || String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.ip || 'unbekannt';
     const rlClient = rateLimitGuard('ul-verify', client, 30, 10 * 60 * 1000);
-    const rlGesamt = rateLimitGuard('ul-verify', 'gesamt', 600, 10 * 60 * 1000);
-    if (!rlClient.ok || !rlGesamt.ok) {
-      res.setHeader('Retry-After', String((!rlClient.ok ? rlClient : rlGesamt).retryAfter || 60));
+    // Ueber 600/10 min: einmal je Fenster warnen (zweiter Guard nur als Log-Sperre)
+    if (!rateLimitGuard('ul-verify', 'gesamt', 600, 10 * 60 * 1000).ok
+        && rateLimitGuard('ul-verify-log', 'gesamt', 1, 10 * 60 * 1000).ok) {
+      console.warn('[Verify-JSON] mehr als 600 Abfragen in 10 Minuten');
+    }
+    if (!rlClient.ok) {
+      res.setHeader('Retry-After', String(rlClient.retryAfter || 60));
       return res.status(429).json({ error: 'Zu viele Anfragen – bitte später erneut versuchen.', found: false });
     }
     const claimedHash = String(req.query.hash || '').toUpperCase();
@@ -8617,7 +8734,8 @@ app.put('/api/unterschriftenliste/:hash/rueckläufe/:idx', authMiddleware, requi
     const idx = parseInt(req.params.idx);
     const snap = await pool.query('SELECT stweg FROM unterschriftenliste_snapshots WHERE hash = $1', [hash]);
     if (snap.rows.length === 0) return res.status(404).json({ error: 'Snapshot nicht gefunden' });
-    if (!ulStwegErlaubt(req.user?.groups || [], snap.rows[0].stweg)) return res.status(403).json({ error: 'Kein Zugriff auf diese STWEG' });
+    // Schreiben wie requireStwegWrite (nur Ausschuss dieser STWEG / Technik)
+    if (!stwegSchreibErlaubt(req.user?.groups || [], snap.rows[0].stweg)) return res.status(403).json({ error: 'Kein Zugriff auf diese STWEG' });
     const { retourniert_am, vote, notiz } = req.body || {};
     const validVote = ['ja', 'nein', 'enthaltung', null].includes(vote) ? vote : null;
     const me = req.user?.email || req.user?.name || 'unknown';
@@ -8661,7 +8779,7 @@ app.get('/api/unterschriftenliste/history', authMiddleware, requirePermission('w
   }
 });
 
-app.get('/api/unterschriftenliste/:stweg.pdf', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, async (req, res) => {
+app.get('/api/unterschriftenliste/:stweg.pdf', authMiddleware, requirePermission('wohnungsverwaltung', 'read'), requireStwegAccess, requireStwegWrite, async (req, res) => {
   try {
     const stweg = parseStweg(req.params.stweg);
     if (!stweg) return res.status(400).json({ error: 'Ungültige STWEG' });
@@ -8871,7 +8989,7 @@ app.get('/api/wohnungen/:stweg/:id/historie', authMiddleware, requireStwegAccess
 });
 
 // POST /api/wohnungen/:stweg/:id/kontakte/:kid/archive - Einzelnen Kontakt archivieren
-app.post('/api/wohnungen/:stweg/:id/kontakte/:kid/archive', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, async (req, res) => {
+app.post('/api/wohnungen/:stweg/:id/kontakte/:kid/archive', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, async (req, res) => {
   try {
     const stweg = parseStweg(req.params.stweg);
     const wId = parseInt(req.params.id, 10);
@@ -8899,7 +9017,7 @@ app.post('/api/wohnungen/:stweg/:id/kontakte/:kid/archive', authMiddleware, requ
 });
 
 // POST /api/wohnungen/:stweg - Create apartment
-app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, async (req, res) => {
+app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, async (req, res) => {
   const client = await pool.connect();
   try {
     const stweg = parseStweg(req.params.stweg);
@@ -8934,7 +9052,7 @@ app.post('/api/wohnungen/:stweg', authMiddleware, requirePermission('wohnungsver
 });
 
 // PUT /api/wohnungen/:stweg/:id - Update apartment
-app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, async (req, res) => {
+app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, async (req, res) => {
   const client = await pool.connect();
   try {
     const stweg = parseStweg(req.params.stweg);
@@ -8995,7 +9113,7 @@ app.put('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungs
 });
 
 // DELETE /api/wohnungen/:stweg/:id - Delete apartment
-app.delete('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, async (req, res) => {
+app.delete('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, async (req, res) => {
   try {
     const stweg = parseStweg(req.params.stweg);
     const w = await pool.query('SELECT bezeichnung FROM wohnungen WHERE id = $1 AND stweg = $2', [req.params.id, stweg]);
@@ -9011,7 +9129,7 @@ app.delete('/api/wohnungen/:stweg/:id', authMiddleware, requirePermission('wohnu
 });
 
 // POST /api/wohnungen/:stweg/import - Import from kontakte.json format
-app.post('/api/wohnungen/:stweg/import', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, async (req, res) => {
+app.post('/api/wohnungen/:stweg/import', authMiddleware, requirePermission('wohnungsverwaltung', 'write'), requireStwegAccess, requireStwegWrite, async (req, res) => {
   const client = await pool.connect();
   try {
     const stweg = parseStweg(req.params.stweg);
@@ -10049,15 +10167,63 @@ function vergebbareGruppen(callerGroups) {
 // (sonst %2F-/../-Traversal mit dem Admin-Token).
 const AUTHENTIK_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Gibt es in Authentik (oder lokal in users) schon ein Konto mit diesem
+// Benutzernamen bzw. dieser E-Mail – ohne Gross/Klein? AD vergleicht
+// Benutzernamen case-insensitiv, und users/Sitzungen haengen an der E-Mail:
+// ein zweites Konto "Stefan.Mueller" bzw. mit fremder Adresse wuerde sonst
+// das bestehende AD-Passwort setzen bzw. beim Login dessen users-Zeile erben.
+async function kontoKollision(username, email) {
+  const u = String(username || '').toLowerCase();
+  const e = String(email || '').toLowerCase();
+  for (const begriff of [u, e].filter(Boolean)) {
+    const d = await authentikAPI('GET', `/core/users/?page_size=500&search=${encodeURIComponent(begriff)}`);
+    for (const x of (d.results || d || [])) {
+      if (u && String(x.username || '').toLowerCase() === u) return 'Benutzername existiert bereits';
+      if (e && String(x.email || '').toLowerCase() === e) return 'Für diese E-Mail gibt es bereits ein Konto';
+    }
+  }
+  const lokal = await pool.query(
+    'SELECT LOWER(username) = $1 AS gleicher_name FROM users WHERE ($1 <> \'\' AND LOWER(username) = $1) OR ($2 <> \'\' AND LOWER(email) = $2) LIMIT 1',
+    [u, e]);
+  if (lokal.rows.length) return lokal.rows[0].gleicher_name ? 'Benutzername existiert bereits' : 'Für diese E-Mail gibt es bereits ein Konto';
+  return null;
+}
+
 // POST /api/admin/users - Create user
 app.post('/api/admin/users', authMiddleware, requirePermission('bewohner-verwaltung', 'write'), async (req, res) => {
   try {
-    const { username, name, email, password, groups } = req.body;
+    const { username, name, email, groups } = req.body || {};
+    let { password } = req.body || {};
     const callerGroups = req.user?.groups || [];
     const isAdmin = isTechnik(callerGroups) || isPraesident(callerGroups);
     if (groups !== undefined && groups !== null && !Array.isArray(groups)) {
       return res.status(400).json({ error: 'groups muss eine Liste sein' });
     }
+    if (typeof username !== 'string' || !username || username.length > 150 || hatSteuerzeichen(username)) {
+      return res.status(400).json({ error: 'Ungültiger Benutzername' });
+    }
+    if (!isAdmin) {
+      // Nicht-Admins: kein Passwort (kein AD-Sync), strenger Benutzername
+      // (vorname.nachname), gueltige E-Mail. Das Konto setzt sein Passwort
+      // selbst ueber den Authentik-Wiederherstellungsablauf.
+      if (password !== undefined && password !== null && password !== '') {
+        return res.status(403).json({ error: 'Passwort kann nur Technik setzen' });
+      }
+      password = undefined;
+      if (!/^[a-z0-9]+(\.[a-z0-9-]+)+$/.test(username)) {
+        return res.status(400).json({ error: 'Benutzername muss die Form vorname.nachname haben (nur a-z, 0-9)' });
+      }
+      if (typeof email !== 'string' || email.length > 254 || !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(email)) {
+        return res.status(400).json({ error: 'Ungültige E-Mail' });
+      }
+      if (typeof name !== 'string' || !name.trim() || name.length > 150 || hatSteuerzeichen(name)) {
+        return res.status(400).json({ error: 'Ungültiger Name' });
+      }
+    }
+    // Fuer alle (auch Admins): kein zweites Konto, das sich nur in Gross/Klein
+    // unterscheidet – sonst traefe der AD-Sync ein bestehendes AD-Konto.
+    const kollision = await kontoKollision(username, isAdmin ? null : email);
+    if (kollision) return res.status(409).json({ error: kollision });
     let allGroupsCache = null;
     if (!isAdmin && groups && groups.length > 0) {
       const allGroupsData = await authentikAPI('GET', '/core/groups/?page_size=500');
@@ -10085,8 +10251,9 @@ app.post('/api/admin/users', authMiddleware, requirePermission('bewohner-verwalt
         await authentikAPI('POST', `/core/groups/${groupPk}/add_user/`, { pk: user.pk });
       }
     }
-    // Sync password to AD DC
-    if (password && username) {
+    // Sync password to AD DC – nur fuer das eben NEU angelegte Konto (Kollision
+    // oben ausgeschlossen) und nur durch Technik/Praesident.
+    if (isAdmin && password && username && user?.pk && AD_PASSWORD_API_SECRET) {
       try {
         await fetch(AD_PASSWORD_API_URL, {
           method: 'POST',
@@ -10862,8 +11029,10 @@ app.post('/api/documents/move', authMiddleware, canManageDocs, async (req, res) 
     const MOVE_EXTS = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'txt', 'csv', 'docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'dotx', 'zip', 'tiff', 'tif', 'bmp']);
     const extVon = (p) => { const n = String(p).split('/').pop(); return n.includes('.') ? n.split('.').pop().toLowerCase() : ''; };
     const zielExt = extVon(to);
-    if (!zielExt || (!MOVE_EXTS.has(zielExt) && zielExt !== extVon(from))) {
-      return res.status(400).json({ error: `Dateityp .${zielExt} nicht erlaubt` });
+    // Gleiche Endung (auch gleiche leere Endung) bleibt erlaubt, sonst liessen
+    // sich Dateien ohne Endung nicht mehr verschieben/umbenennen.
+    if (zielExt !== extVon(from) && !MOVE_EXTS.has(zielExt)) {
+      return res.status(400).json({ error: zielExt ? `Dateityp .${zielExt} nicht erlaubt` : 'Zieldatei braucht eine Endung' });
     }
     if (fsSync.existsSync(toPath)) return res.status(409).json({ error: 'Zieldatei existiert bereits' });
 
