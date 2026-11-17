@@ -201,7 +201,7 @@
             const pct = Math.round(((parseInt(s.erfasst) + parseInt(s.freigegeben)) / parseInt(s.total)) * 100);
             document.getElementById('progress-pct').textContent = pct + '%';
             document.getElementById('progress-bar').style.width = pct + '%';
-            const top = data.top_contributors.slice(0, 5).map(c => `${esc(c.user)} (${c.anzahl})`).join(' · ');
+            const top = data.top_contributors.slice(0, 5).map(c => `${c.user ? esc(c.user) : 'anonym'} (${c.anzahl})`).join(' · ');
             document.getElementById('contributors').textContent = top ? `Top-Beiträge: ${top}` : '';
         } catch (e) { console.error('stats', e); }
     }
@@ -267,7 +267,8 @@
             // Eigentuemer/Adressen sind Freitext aus der Erfassung -> escapen (gespeichertes XSS)
             const eig = (Array.isArray(a.eigentuemer) ? esc(a.eigentuemer.join(', ')) : '') || '<span class="text-gray-300">–</span>';
             const adr = (Array.isArray(a.wohnadressen) ? esc(a.wohnadressen.join('; ')) : '') || '<span class="text-gray-300">–</span>';
-            const erf = a.erfasst_von ? esc(a.erfasst_von) : (a.reserviert_von ? `<span class="text-blue-600">res: ${esc(a.reserviert_von)}</span>` : '');
+            // Fremde Erfasser/Reservierer liefert der Server ohne Namen (null).
+            const erf = a.erfasst_von ? esc(a.erfasst_von) : (a.reserviert_von ? `<span class="text-blue-600">res: ${esc(a.reserviert_von)}</span>` : (a.status === 'reserviert' ? '<span class="text-blue-600">reserviert</span>' : ''));
             const cta = a.status === 'offen' ? 'Erfassen' : (a.status === 'reserviert' ? (a.reserviert_von === me?.email ? 'Fortsetzen' : 'Reserviert') : 'Bearbeiten');
             const disabled = a.status === 'reserviert' && a.reserviert_von !== me?.email;
             return `<tr class="hover:bg-gray-50">
