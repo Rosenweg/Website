@@ -47,22 +47,56 @@ async function initWebPush() {
 function getPublicKey() { return vapidPublicKey; }
 function isReady() { return ready; }
 
+// Der Server schickt an den endpoint einen POST — ohne Pruefung waere das eine
+// SSRF-Quelle (interne Adressen). Darum nur https auf Port 443 zu den bekannten
+// Push-Diensten der Browser zulassen.
+const PUSH_HOSTS_EXAKT = new Set([
+  'fcm.googleapis.com', 'android.googleapis.com',                 // Chrome, Android, Opera, Samsung
+  'updates.push.services.mozilla.com', 'push.services.mozilla.com', // Firefox
+  'web.push.apple.com',                                            // Safari / iOS
+]);
+const PUSH_HOSTS_SUFFIX = ['.push.apple.com', '.notify.windows.com']; // Apple-Regionen, Edge (WNS)
+function endpointErlaubt(endpoint) {
+  if (typeof endpoint !== 'string' || endpoint.length > 1000) return false;
+  let u;
+  try { u = new URL(endpoint); } catch { return false; }
+  if (u.protocol !== 'https:' || (u.port && u.port !== '443') || u.username || u.password) return false;
+  const h = u.hostname.toLowerCase();
+  return PUSH_HOSTS_EXAKT.has(h) || PUSH_HOSTS_SUFFIX.some(s => h.endsWith(s));
+}
+const B64URL = /^[A-Za-z0-9_-]+={0,2}$/;
+
 async function saveSubscription(sub, { userEmail = null, personId = null, userAgent = null } = {}) {
   if (!sub || !sub.endpoint || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) {
     throw new Error('Ungueltige Subscription');
   }
-  await pool.query(
+  if (!endpointErlaubt(sub.endpoint)) throw new Error('Push-Dienst nicht erlaubt');
+  if (typeof sub.keys.p256dh !== 'string' || typeof sub.keys.auth !== 'string'
+      || sub.keys.p256dh.length > 200 || sub.keys.auth.length > 100
+      || !B64URL.test(sub.keys.p256dh) || !B64URL.test(sub.keys.auth)) {
+    throw new Error('Ungueltige Subscription');
+  }
+  // Fremde Subscription nicht uebernehmen: ein bestehender endpoint wird nur fuer
+  // denselben Benutzer aktualisiert (sonst liefe dessen Push zum Angreifer-Konto).
+  const r = await pool.query(
     `INSERT INTO push_subscriptions (user_email, person_id, endpoint, p256dh, auth, user_agent, last_ok_at)
      VALUES ($1,$2,$3,$4,$5,$6,NOW())
      ON CONFLICT (endpoint) DO UPDATE SET
        user_email = EXCLUDED.user_email, person_id = EXCLUDED.person_id,
        p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth,
-       user_agent = EXCLUDED.user_agent, last_ok_at = NOW()`,
+       user_agent = EXCLUDED.user_agent, last_ok_at = NOW()
+     WHERE LOWER(COALESCE(push_subscriptions.user_email, '')) = LOWER(COALESCE(EXCLUDED.user_email, ''))`,
     [userEmail ? userEmail.toLowerCase() : null, personId, sub.endpoint, sub.keys.p256dh, sub.keys.auth, userAgent]);
+  if (r.rowCount === 0) throw new Error('Subscription gehoert einem anderen Konto');
 }
 
-async function removeSubscription(endpoint) {
+// userEmail gesetzt: nur eigene Subscription loeschen (API-Aufruf durch Nutzer).
+async function removeSubscription(endpoint, userEmail) {
   if (!endpoint) return;
+  if (userEmail !== undefined) {
+    await pool.query('DELETE FROM push_subscriptions WHERE endpoint = $1 AND LOWER(user_email) = LOWER($2)', [endpoint, String(userEmail || '')]);
+    return;
+  }
   await pool.query('DELETE FROM push_subscriptions WHERE endpoint = $1', [endpoint]);
 }
 
@@ -81,8 +115,10 @@ async function sendToEmails(emails, payload) {
   });
   let sent = 0;
   await Promise.all(r.rows.map(async (row) => {
+    // Altbestand vor der Endpoint-Pruefung: nicht erlaubte Ziele nie anfragen.
+    if (!endpointErlaubt(row.endpoint)) return;
     try {
-      await webpush.sendNotification({ endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } }, body);
+      await webpush.sendNotification({ endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } }, body, { timeout: 10000 });
       sent++;
       pool.query('UPDATE push_subscriptions SET last_ok_at = NOW() WHERE endpoint = $1', [row.endpoint]).catch(() => {});
     } catch (e) {
